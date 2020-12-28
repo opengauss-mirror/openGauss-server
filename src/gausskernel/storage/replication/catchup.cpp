@@ -1,18 +1,7 @@
-/*
+/* -------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2010, PostgreSQL Global Development Group
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
  *
  * catchup.cpp
  *	 functions for data catch-up management
@@ -30,7 +19,7 @@
 #include "access/xact.h"
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
 #include "storage/proc.h"
 #include "storage/procsignal.h"
@@ -83,7 +72,6 @@ static void CatchupKill(int code, Datum arg)
     catchup_online = false;
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
 static bool WaitDummyStarts(void)
 {
     bool fullCatchup = false;
@@ -145,7 +133,6 @@ static bool WaitBcmFileList(void)
     }
     return fullCatchup;
 }
-#endif
 
 bool IsCatchupProcess(void)
 {
@@ -199,10 +186,10 @@ NON_EXEC_STATIC void CatchupMain()
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
-    knl_thread_set_name("Catchup");
+    t_thrd.proc_cxt.MyProgName = "Catchup";
 
     /* Identify myself via ps */
-    init_ps_display("Catchup process", "", "", "");
+    init_ps_display("catchup process", "", "", "");
 
     SetProcessingMode(InitProcessing);
 
@@ -247,7 +234,7 @@ NON_EXEC_STATIC void CatchupMain()
      * Create a resource owner to keep track of our resources (currently only
      * buffer pins).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Catchup");
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Catchup", MEMORY_CONTEXT_STORAGE);
 
     /*
      * Create a memory context that we will do all our work in.  We do this so
@@ -255,8 +242,8 @@ NON_EXEC_STATIC void CatchupMain()
      * avoid possible memory leaks.  Formerly this code just ran in
      * t_thrd.top_mem_cxt, but resetting that would be a really bad idea.
      */
-    catchupContext = AllocSetContextCreate(
-        t_thrd.top_mem_cxt, "Catchup", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+    catchupContext = AllocSetContextCreate(t_thrd.top_mem_cxt, "Catchup", ALLOCSET_DEFAULT_MINSIZE,
+                                           ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     (void)MemoryContextSwitchTo(catchupContext);
 
     /* report this backend in the PgBackendStatus array */
@@ -335,7 +322,6 @@ NON_EXEC_STATIC void CatchupMain()
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
 
-#ifdef ENABLE_MULTIPLE_NODES
     /*
      * When primary receive switchover, it will SIGTERM all Backend thread,
      * include catchup thread, if getBcmFileList get ERROR, it will longjump
@@ -367,7 +353,6 @@ NON_EXEC_STATIC void CatchupMain()
         }
         CommitTransactionCommand();
     }
-#endif
 
     catchupDone = true;
     catchup_online = false;

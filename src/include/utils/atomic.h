@@ -31,6 +31,7 @@
 typedef volatile uint32 pg_atomic_uint32;
 typedef volatile uint64 pg_atomic_uint64;
 
+#ifndef WIN32
 
 /*
  * @Description: Atomic increment in a 32-bit address, and return the incremented value.
@@ -112,16 +113,6 @@ static inline bool gs_compare_and_swap_64(int64* dest, int64 oldval, int64 newva
         return true;
 
     return __sync_bool_compare_and_swap(dest, oldval, newval);
-}
-
-static inline uint32 gs_compare_and_swap_u32(volatile uint32* ptr, uint32 oldval, uint32 newval)
-{
-    return (uint32)__sync_val_compare_and_swap(ptr, oldval, newval);
-}
-
-static inline uint64 gs_compare_and_swap_u64(volatile uint64* ptr, uint64 oldval, uint64 newval)
-{
-    return (uint64)__sync_val_compare_and_swap(ptr, oldval, newval);
 }
 
 /*
@@ -509,5 +500,7 @@ static inline uint128_u atomic_compare_and_swap_u128(
     return ret;
 #endif
 }
+#endif
 
 #endif /* ATOMIC_H */
+

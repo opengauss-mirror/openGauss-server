@@ -24,8 +24,8 @@ CREATE TABLE lineitem_vec
   , L_COMMENT      VARCHAR(44) NOT NULL
 )
 with (orientation = column)
- ;
-COPY lineitem_vec FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/lineitem.data' DELIMITER '|';
+distribute by hash(L_ORDERKEY);
+COPY lineitem_vec FROM '@abs_srcdir@/data/lineitem.data' DELIMITER '|';
 CREATE TABLE LINEITEM_partition
 (
     L_ORDERKEY    BIGINT NOT NULL
@@ -46,7 +46,7 @@ CREATE TABLE LINEITEM_partition
   , L_COMMENT      VARCHAR(44) NOT NULL
 )
 with (orientation = column)
- 
+distribute by hash(L_ORDERKEY)
 partition by range (L_ORDERKEY)
 (
      partition CstorePartition1 values less than (1000),
@@ -57,7 +57,7 @@ partition by range (L_ORDERKEY)
 	 partition CstorePartition6 values less than (6000),
 	 partition CstorePartition7 values less than (100000)
 );
-COPY LINEITEM_partition FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/lineitem.data' DELIMITER '|';
+COPY LINEITEM_partition FROM '@abs_srcdir@/data/lineitem.data' DELIMITER '|';
 ---- 
 --- tables used for tpch
 ----
@@ -88,7 +88,7 @@ CREATE TABLE customer (
     c_comment character varying(117) NOT NULL
 )
 with (orientation = column)
- ;
+DISTRIBUTE BY HASH (c_custkey);
 CREATE TABLE lineitem (
     l_orderkey integer NOT NULL,
     l_partkey integer NOT NULL,
@@ -108,7 +108,7 @@ CREATE TABLE lineitem (
     l_comment character varying(44) NOT NULL
 )
 with (orientation = column)
- ;
+DISTRIBUTE BY HASH (l_orderkey);
 CREATE TABLE nation (
     n_nationkey integer NOT NULL,
     n_name character(25) NOT NULL,
@@ -116,7 +116,7 @@ CREATE TABLE nation (
     n_comment character varying(152)
 )
 with (orientation = column)
- ;
+DISTRIBUTE BY REPLICATION;
 CREATE TABLE orders (
     o_orderkey integer NOT NULL,
     o_custkey integer NOT NULL,
@@ -129,7 +129,7 @@ CREATE TABLE orders (
     o_comment character varying(79) NOT NULL
 )
 with (orientation = column)
- ;
+DISTRIBUTE BY HASH (o_orderkey);
 CREATE TABLE part (
     p_partkey integer NOT NULL,
     p_name character varying(55) NOT NULL,
@@ -142,7 +142,7 @@ CREATE TABLE part (
     p_comment character varying(23) NOT NULL
 )
 with (orientation = column)
- ;
+DISTRIBUTE BY HASH (p_partkey);
 CREATE TABLE partsupp (
     ps_partkey integer NOT NULL,
     ps_suppkey integer NOT NULL,
@@ -151,14 +151,14 @@ CREATE TABLE partsupp (
     ps_comment character varying(199) NOT NULL
 )
 with (orientation = column)
- ;
+DISTRIBUTE BY HASH (ps_partkey);
 CREATE TABLE region (
     r_regionkey integer NOT NULL,
     r_name character(25) NOT NULL,
     r_comment character varying(152)
 )
 with (orientation = column)
- ;
+DISTRIBUTE BY REPLICATION;
 CREATE TABLE supplier (
     s_suppkey integer NOT NULL,
     s_name character(25) NOT NULL,
@@ -169,8 +169,8 @@ CREATE TABLE supplier (
     s_comment character varying(101) NOT NULL
 )
 with (orientation = column)
- ;
-\i @abs_srcdir@/tmp_check/datanode1/pg_copydir/tpch.data
+DISTRIBUTE BY HASH (s_suppkey);
+\i @abs_srcdir@/data/tpch.data
 COPY customer (c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment) FROM stdin;
 --
 --
@@ -218,8 +218,8 @@ Open_Dt DATE ,
 Year_Dpsit_Accum DECIMAL(18,2) ,
 Party_Class_Cd CHAR(4) 
 )with (orientation = column);
-copy dwSumData_act.C03_SEMI_CRDT_CARD_ACCT from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vec_casewhen_1.data' delimiter ',' NULL '';
-copy dwSumData_act.C03_SEMI_CRDT_CARD_ACCT from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vec_casewhen_2.data' delimiter ',' NULL '';
+copy dwSumData_act.C03_SEMI_CRDT_CARD_ACCT from '@abs_srcdir@/data/vec_casewhen_1.data' delimiter ',' NULL '';
+copy dwSumData_act.C03_SEMI_CRDT_CARD_ACCT from '@abs_srcdir@/data/vec_casewhen_2.data' delimiter ',' NULL '';
 --test for semi join
 create table ETL_JOB_DEPENDENCY
 (
@@ -231,7 +231,7 @@ create table ETL_JOB_DEPENDENCY
  enable             character varying(1) 
 ) 
 with (orientation=column) 
-  ;                                           
+Distribute By HASH(etl_job) ;                                           
                       
 create index idx_etl_dependency_job2 on etl_job_dependency(dependency_job);
   
@@ -241,7 +241,7 @@ create table ETL_JOB_PRIORITY
  etl_job     character varying(50),
  priority    numeric(5,0)  
 ) with (orientation=column)
- ;
+Distribute By HASH(etl_job);
 create table ETL_JOB
 (
  etl_system      character varying(20)         ,
@@ -272,13 +272,13 @@ create table ETL_JOB
  timetrigger     character varying(1)          ,
  jobresweight    numeric(5,0)                
 ) with (orientation=column)
- ;
-copy etl_job from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/ETL_JOB.data' delimiter '|';
-copy etl_job_dependency from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/ETL_JOB_DEPENDENCY.data' delimiter '|';
-copy etl_job_priority from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/ETL_JOB_PRIORITY.data' delimiter '|';
-copy etl_job_priority from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/ETL_JOB_PRIORITY.data' delimiter '|';
-copy etl_job_priority from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/ETL_JOB_PRIORITY.data' delimiter '|';
-copy etl_job_priority from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/ETL_JOB_PRIORITY.data' delimiter '|';
+Distribute By HASH(etl_job);
+copy etl_job from '@abs_srcdir@/data/ETL_JOB.data' delimiter '|';
+copy etl_job_dependency from '@abs_srcdir@/data/ETL_JOB_DEPENDENCY.data' delimiter '|';
+copy etl_job_priority from '@abs_srcdir@/data/ETL_JOB_PRIORITY.data' delimiter '|';
+copy etl_job_priority from '@abs_srcdir@/data/ETL_JOB_PRIORITY.data' delimiter '|';
+copy etl_job_priority from '@abs_srcdir@/data/ETL_JOB_PRIORITY.data' delimiter '|';
+copy etl_job_priority from '@abs_srcdir@/data/ETL_JOB_PRIORITY.data' delimiter '|';
 analyze etl_job_priority;
 --test explain_dna_file
 show explain_dna_file;
@@ -289,7 +289,7 @@ show explain_dna_file;
 
 set explain_dna_file = 'data';
 ERROR:  explain_dna_file should be absolute path + .csv file.
-set explain_dna_file = '@abs_srcdir@/tmp_check/datanode1/pg_copydir';
+set explain_dna_file = '@abs_srcdir@/data';
 ERROR:  explain_dna_file should be .csv file.
-set explain_dna_file = '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test.csv';
+set explain_dna_file = '@abs_srcdir@/data/test.csv';
 reset explain_dna_file;

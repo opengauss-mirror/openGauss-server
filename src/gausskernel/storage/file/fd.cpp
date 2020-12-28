@@ -39,14 +39,6 @@
  * for a long time, like relation files. It is the caller's responsibility
  * to close them, there is no automatic mechanism in fd.c for that.
  *
- * PathName(Create|Open|Delete)Temporary(File|Dir) are used to manage
- * temporary files that have names so that they can be shared between
- * backends.  Such files are automatically closed and count against the
- * temporary file limit of the backend that creates them, but unlike anonymous
- * files they are not automatically deleted.  See sharedfileset.c for a shared
- * ownership mechanism that provides automatic cleanup for shared files when
- * the last of a group of backends detaches.
- *
  * AllocateFile, AllocateDir and OpenTransientFile are wrappers around
  * fopen(3), opendir(3), and open(2), respectively. They behave like the
  * corresponding native functions, except that the handle is registered with
@@ -71,10 +63,10 @@
 #include <sys/ioctl.h>
 #include <sys/param.h>
 #ifndef WIN32
-#include <sys/mman.h>
+    #include <sys/mman.h>
 #endif
 #ifdef HAVE_SYS_RESOURCE_H
-#include <sys/resource.h> /* for getrlimit */
+    #include <sys/resource.h> /* for getrlimit */
 #endif
 #include <poll.h>
 
@@ -97,11 +89,11 @@
 #include "utils/resowner.h"
 #include "pgstat.h"
 #ifdef PGXC
-#include "pgxc/pgxc.h"
+    #include "pgxc/pgxc.h"
 #endif
 #include "libpq/ip.h"
 #include "postmaster/aiocompleter.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 
 #include <linux/falloc.h>
 
@@ -146,18 +138,17 @@
 
 #define FileIsValid(file)                                            \
     ((file) > 0 && (file) < (int)u_sess->storage_cxt.SizeVfdCache && \
-        u_sess->storage_cxt.VfdCache[file].fileName != NULL)
+     u_sess->storage_cxt.VfdCache[file].fileName != NULL)
 
 #define FileIsNotOpen(file) (u_sess->storage_cxt.VfdCache[file].fd == VFD_CLOSED)
 
 #define FileUnknownPos ((off_t)-1)
 
 /* these are the assigned bits in fdstate below: */
-#define FD_DELETE_AT_CLOSE (1 << 0)  /* T = delete when closed */
-#define FD_CLOSE_AT_EOXACT (1 << 1)  /* T = close at eoXact */
+#define FD_TEMPORARY (1 << 0)        /* T = delete when closed */
+#define FD_XACT_TEMPORARY (1 << 1)   /* T = delete at eoXact */
 #define FD_ERRTBL_LOG (1 << 2)       /* T = caching log file for error table */
 #define FD_ERRTBL_LOG_OWNER (1 << 3) /* T = owner of caching log file for error table */
-#define FD_TEMP_FILE_LIMIT (1 << 4)  /* T = respect temp_file_limit */
 
 #define RETRY_LIMIT 3 /* alloc socket retry limit */
 
@@ -187,16 +178,16 @@ typedef struct AllocateDesc {
 
 /* Number of partions the Vfd hashtable */
 #define NUM_VFD_PARTITIONS 1024
-static pthread_mutex_t g_vfdLockArray[NUM_VFD_PARTITIONS];
+static pthread_mutex_t VFDLockArray[NUM_VFD_PARTITIONS];
 
 /*
  * The VFD mapping table is partitioned to reduce contention.
  * To determine which partition lock a given tag requires, compute the tag's
- * hash code with VFDTableHashCode(), then apply VFD_MAPPING_PARTITION_LOCK().
+ * hash code with VFDTableHashCode(), then apply VFDMappingPartitionLock().
  */
-#define VFD_TABLE_HASH_PARTITION(hashcode) ((hashcode) % NUM_VFD_PARTITIONS)
-#define VFD_MAPPING_PARTITION_LOCK(hashcode) \
-    (&g_vfdLockArray[VFD_TABLE_HASH_PARTITION(hashcode)])
+#define VFDTableHashPartition(hashcode) ((hashcode) % NUM_VFD_PARTITIONS)
+#define VFDMappingPartitionLock(hashcode) \
+    (&VFDLockArray[VFDTableHashPartition(hashcode)])
 
 /* --------------------
  *
@@ -241,18 +232,14 @@ static void FreeVfd(File file);
 static int FileAccess(File file);
 static File OpenTemporaryFileInTablespace(Oid tblspcOid, bool rejectError);
 static void CleanupTempFiles(bool isProcExit);
-static void RemovePgTempFilesInDir(const char *tmpdirname, bool unlink_all);
+static void RemovePgTempFilesInDir(const char* tmpdirname);
 static void RemovePgTempRelationFiles(const char* tsdirname);
 static void RemovePgTempRelationFilesInDbspace(const char* dbspacedirname);
 static bool looks_like_temp_rel_name(const char* name);
 static void DataFileIdCloseFile(Vfd* vfdP);
 static File PathNameOpenFile_internal(FileName fileName, int fileFlags, int fileMode, bool useFileCache,
-    const RelFileNodeForkNum& fileNode, File file = FILE_INVALID);
+                                      const RelFileNodeForkNum& fileNode, File file = FILE_INVALID);
 static void ReleaseLruFiles(void);
-static void walkdir(const char *path, void (*action)(const char *fname, bool isdir, int elevel), bool process_symlinks,
-    int elevel);
-static struct dirent *ReadDirExtended(DIR *dir, const char *dirname, int elevel);
-static void unlink_if_exists_fname(const char *fname, bool isdir, int elevel);
 void AtProcExit_Files(int code, Datum arg);
 static uint32 VFDTableHashCode(const void* tagPtr);
 
@@ -265,12 +252,12 @@ void ReportAlarmInsuffDataInstFileDesc()
     AlarmItemInitialize(alarmItem, ALM_AI_InsufficientDataInstFileDesc, ALM_AS_Reported, NULL);
     // fill the alarm message
     WriteAlarmAdditionalInfo(&tempAdditionalParam,
-        g_instance.attr.attr_common.PGXCNodeName,
-        "",
-        "",
-        alarmItem,
-        ALM_AT_Fault,
-        g_instance.attr.attr_common.PGXCNodeName);
+                             g_instance.attr.attr_common.PGXCNodeName,
+                             "",
+                             "",
+                             alarmItem,
+                             ALM_AT_Fault,
+                             g_instance.attr.attr_common.PGXCNodeName);
     // report the alarm
     AlarmReporter(alarmItem, ALM_AT_Fault, &tempAdditionalParam);
 }
@@ -316,9 +303,9 @@ void InitDataFileIdCache(void)
     ctl.entrysize = sizeof(DataFileIdCacheEntry);
     ctl.hash = tag_hash;
     ctl.num_partitions = NUM_VFD_PARTITIONS;
-    t_thrd.storage_cxt.DataFileIdCache = HeapMemInitHash("Shared FileId hash by request", 256,
-                    Max(g_instance.attr.attr_common.max_files_per_process, t_thrd.storage_cxt.max_userdatafiles),
-                    &ctl, HASH_ELEM | HASH_FUNCTION | HASH_PARTITION);
+    t_thrd.storage_cxt.DataFileIdCache = HeapMemInitHash(
+                                             "Shared FileId hash by request", 256, Max(g_instance.attr.attr_common.max_files_per_process, t_thrd.storage_cxt.max_userdatafiles), &ctl,
+                                             HASH_ELEM | HASH_FUNCTION | HASH_PARTITION);
     if (!t_thrd.storage_cxt.DataFileIdCache)
         ereport(FATAL, (errmsg("could not initialize shared file id hash table")));
 }
@@ -416,10 +403,10 @@ void pg_flush_data(int fd, off_t offset, off_t nbytes)
     if (!u_sess->attr.attr_storage.enableFsync)
         return;
 
-        /*
-         * We compile all alternatives that are supported on the current platform,
-         * to find portability problems more easily.
-         */
+    /*
+     * We compile all alternatives that are supported on the current platform,
+     * to find portability problems more easily.
+     */
 #if defined(HAVE_SYNC_FILE_RANGE)
     {
         int rc;
@@ -457,7 +444,7 @@ void pg_flush_data(int fd, off_t offset, off_t nbytes)
          * We map the file (mmap()), tell the kernel to sync back the contents
          * (msync()), and then remove the mapping again (munmap()).
          *
-         * mmap() needs actual length if we want to map whole file 
+         * mmap() needs actual length if we want to map whole file
          */
         if (offset == 0 && nbytes == 0) {
             nbytes = lseek(fd, 0, SEEK_END);
@@ -472,7 +459,7 @@ void pg_flush_data(int fd, off_t offset, off_t nbytes)
          * that, just truncate the request to a page boundary.  If any extra
          * bytes don't get flushed, well, it's only a hint anyway.
          *
-         * fetch pagesize only once 
+         * fetch pagesize only once
          */
         if (pagesize == 0)
             pagesize = sysconf(_SC_PAGESIZE);
@@ -549,7 +536,8 @@ void InitFileAccess(void)
     Assert(u_sess->storage_cxt.SizeVfdCache == 0); /* call me only once */
 
     /* initialize cache header entry */
-    u_sess->storage_cxt.VfdCache = (Vfd*)MemoryContextAlloc(u_sess->top_mem_cxt, sizeof(vfd));
+    u_sess->storage_cxt.VfdCache =
+        (Vfd*)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(vfd));
 
     if (u_sess->storage_cxt.VfdCache == NULL)
         ereport(FATAL, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
@@ -689,18 +677,18 @@ void set_max_safe_fds(void)
         ReportAlarmInsuffDataInstFileDesc();
 
         ereport(FATAL,
-            (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-                errmsg("insufficient file descriptors available to start server process"),
-                errdetail("System allows %d, we need at least %d.",
-                    t_thrd.storage_cxt.max_safe_fds + NUM_RESERVED_FDS,
-                    FD_MINFREE + NUM_RESERVED_FDS)));
+                (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                 errmsg("insufficient file descriptors available to start server process"),
+                 errdetail("System allows %d, we need at least %d.",
+                           t_thrd.storage_cxt.max_safe_fds + NUM_RESERVED_FDS,
+                           FD_MINFREE + NUM_RESERVED_FDS)));
     }
     ReportResumeInsuffDataInstFileDesc();
     ereport(LOG,
-        (errmsg("max_safe_fds = %d, usable_fds = %d, already_open = %d",
-            t_thrd.storage_cxt.max_safe_fds,
-            usable_fds,
-            already_open)));
+            (errmsg("max_safe_fds = %d, usable_fds = %d, already_open = %d",
+                    t_thrd.storage_cxt.max_safe_fds,
+                    usable_fds,
+                    already_open)));
 
     /* get /proc/pid/fd  directory file handle */
 #ifdef USE_ASSERT_CHECKING
@@ -712,7 +700,7 @@ void set_max_safe_fds(void)
         g_gauss_pid_dir = AllocateDir(g_gauss_pid_dir_path);
         if (g_gauss_pid_dir == NULL) {
             ereport(ERROR,
-                (errcode_for_file_access(), errmsg("unable to open process pid directory \"%s\"", g_gauss_pid_dir_path)));
+                    (errcode_for_file_access(), errmsg("unable to open process pid directory \"%s\"", g_gauss_pid_dir_path)));
         }
     }
 #endif
@@ -756,8 +744,8 @@ static void DumpOpenFiles(DIR* dir)
         }
         if (rllen >= (int)sizeof(linkpath)) {
             ereport(ERROR,
-                (errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
-                    errmsg("symbolic link \"%s\" target is too long", tmppath)));
+                    (errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
+                     errmsg("symbolic link \"%s\" target is too long", tmppath)));
         }
         linkpath[rllen] = '\0';
 
@@ -803,10 +791,10 @@ tryAgain:
             DumpOpenFiles(g_gauss_pid_dir);
             pg_usleep(10000000L);
             ereport(PANIC,
-                (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("out of file descriptors: %m; release and retry")));
+                    (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("out of file descriptors: %m; release and retry")));
         } else {
             ereport(LOG,
-                (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("out of file descriptors: %m; release and retry")));
+                    (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("out of file descriptors: %m; release and retry")));
         }
 #else
         ereport(
@@ -1100,35 +1088,6 @@ static int FileAccess(File file)
     return 0;
 }
 
-/*
- * Called whenever a temporary file is deleted to report its size.
- */
-static void ReportTemporaryFileUsage(const char *path, off_t size)
-{
-    pgstat_report_tempfile(size);
-
-    if (u_sess->attr.attr_common.log_temp_files >= 0) {
-        if ((size / 1024) >= u_sess->attr.attr_common.log_temp_files) {
-            ereport(LOG, (errmsg("temporary file: path \"%s\", size %lu", path, (unsigned long)size)));
-        }
-    }
-}
-
-/*
- * Called to register a temporary file for automatic close.
- * ResourceOwnerEnlargeFiles(CurrentResourceOwner) must have been called
- * before the file was opened.
- */
-static void RegisterTemporaryFile(File file)
-{
-    u_sess->storage_cxt.VfdCache[file].fdstate |= FD_CLOSE_AT_EOXACT;
-
-    ResourceOwnerRememberFile(t_thrd.utils_cxt.CurrentResourceOwner, file);
-    u_sess->storage_cxt.VfdCache[file].resowner = t_thrd.utils_cxt.CurrentResourceOwner;
-
-    /* ensure cleanup happens at eoxact */
-    u_sess->storage_cxt.have_xact_temporary_files = true;
-}
 
 #ifdef NOT_USED
 /* Called when we get a shared invalidation message on some relation. */
@@ -1156,17 +1115,18 @@ File DataFileIdOpenFile(FileName fileName, const RelFileNodeForkNum& fileNode, i
      */
     if (isTempNamespace(fileNode.rnode.node.spcNode) || (InvalidBackendId != fileNode.rnode.backend)) {
         return PathNameOpenFile(fileName, fileFlags, fileMode, file);
-    } else
+    } else {
         return PathNameOpenFile_internal(fileName, fileFlags, fileMode, true, fileNode, file);
+    }
 }
 
 /* if failed to close temp file during aborting transaction, use WARNING log level;
  * otherwise, use ERROR log level.
  */
 #define LogLevelOfCloseFileFailed(_vfdP_)                                                                     \
-    ((t_thrd.xact_cxt.bInAbortTransaction && (((_vfdP_)->fdstate & (FD_DELETE_AT_CLOSE | FD_CLOSE_AT_EOXACT)) != 0)) \
-            ? WARNING                                                                                         \
-            : data_sync_elevel(ERROR))
+    ((t_thrd.xact_cxt.bInAbortTransaction && (((_vfdP_)->fdstate & (FD_TEMPORARY | FD_XACT_TEMPORARY)) != 0)) \
+    ? WARNING                                                                                         \
+    : data_sync_elevel(ERROR))
 
 /* Return 0 if no error, else errno */
 static void DataFileIdCloseFile(Vfd* vfdP)
@@ -1180,8 +1140,8 @@ static void DataFileIdCloseFile(Vfd* vfdP)
     if (!vfdP->infdCache) {
         if (close(vfdP->fd) < 0) {
             ereport(LogLevelOfCloseFileFailed(vfdP),
-                (errcode_for_file_access(),
-                    errmsg("[Local] File(%s) fd(%d) have been closed, %m", vfdP->fileName, vfdP->fd)));
+                    (errcode_for_file_access(),
+                     errmsg("[Local] File(%s) fd(%d) have been closed, %m", vfdP->fileName, vfdP->fd)));
         }
         return;
     }
@@ -1189,7 +1149,7 @@ static void DataFileIdCloseFile(Vfd* vfdP)
     // lock to prevent conflicts with other threads
     // do not use LWLock, because when thread exit t_thrd.proc = NULL
     uint32 newHash = VFDTableHashCode((void *)&vfdP->fileNode);
-    AutoMutexLock vfdLock(VFD_MAPPING_PARTITION_LOCK(newHash));
+    AutoMutexLock vfdLock(VFDMappingPartitionLock(newHash));
     vfdLock.lock();
 
     // find the opened file
@@ -1216,8 +1176,8 @@ static void DataFileIdCloseFile(Vfd* vfdP)
 
         if (close(vfdP->fd) < 0) {
             ereport(LogLevelOfCloseFileFailed(vfdP),
-                (errcode_for_file_access(),
-                    errmsg("[Global] File(%s) fd(%d) have been closed, %m", vfdP->fileName, vfdP->fd)));
+                    (errcode_for_file_access(),
+                     errmsg("[Global] File(%s) fd(%d) have been closed, %m", vfdP->fileName, vfdP->fd)));
         }
         return;
     }
@@ -1257,7 +1217,7 @@ static File PathNameOpenFile_internal(
 
     // Allocate a new VFD file if FILE_INVALID passed, or reopen it on the 'file'
     if (file == FILE_INVALID) {
-        fnamecopy = MemoryContextStrdup(u_sess->top_mem_cxt, fileName);
+        fnamecopy = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), fileName);
         if (fnamecopy == NULL)
             ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
 
@@ -1275,7 +1235,7 @@ static File PathNameOpenFile_internal(
     if (useFileCache) {
         // lock to prevent conflicts with other threads
         newHash = VFDTableHashCode((void*)&fileNode);
-        AutoMutexLock vfdLock(VFD_MAPPING_PARTITION_LOCK(newHash));
+        AutoMutexLock vfdLock(VFDMappingPartitionLock(newHash));
         vfdLock.lock();
 
         // find the opened file
@@ -1326,7 +1286,7 @@ static File PathNameOpenFile_internal(
     if (useFileCache && (entry == NULL)) {
         bool found = false;
         START_CRIT_SECTION();
-        AutoMutexLock vfdLock(VFD_MAPPING_PARTITION_LOCK(newHash));
+        AutoMutexLock vfdLock(VFDMappingPartitionLock(newHash));
         vfdLock.lock();
 
         // find place to enter
@@ -1351,64 +1311,6 @@ static File PathNameOpenFile_internal(
     vfdP->infdCache = useFileCache;
 
     return file;
-}
-
-/*
- * Create directory 'directory'.  If necessary, create 'basedir', which must
- * be the directory above it.  This is designed for creating the top-level
- * temporary directory on demand before creating a directory underneath it.
- * Do nothing if the directory already exists.
- *
- * Directories created within the top-level temporary directory should begin
- * with PG_TEMP_FILE_PREFIX, so that they can be identified as temporary and
- * deleted at startup by RemovePgTempFiles().  Further subdirectories below
- * that do not need any particular prefix.
- */
-void PathNameCreateTemporaryDir(const char *basedir, const char *directory)
-{
-    if (mkdir(directory, S_IRWXU) < 0) {
-        if (errno == EEXIST) {
-            return;
-        }
-
-        /*
-         * Failed.  Try to create basedir first in case it's missing. Tolerate
-         * EEXIST to close a race against another process following the same
-         * algorithm.
-         */
-        if (mkdir(basedir, S_IRWXU) < 0 && errno != EEXIST) {
-            ereport(ERROR,
-                (errcode_for_file_access(), errmsg("cannot create temporary directory \"%s\": %m", basedir)));
-        }
-
-        /* Try again. */
-        if (mkdir(directory, S_IRWXU) < 0 && errno != EEXIST) {
-            ereport(ERROR,
-                (errcode_for_file_access(), errmsg("cannot create temporary subdirectory \"%s\": %m", directory)));
-        }
-    }
-}
-
-/*
- * Delete a directory and everything in it, if it exists.
- */
-void PathNameDeleteTemporaryDir(const char *dirname)
-{
-    struct stat statbuf;
-
-    /* Silently ignore missing directory. */
-    if (stat(dirname, &statbuf) != 0 && errno == ENOENT) {
-        return;
-    }
-
-    /*
-     * Currently, walkdir doesn't offer a way for our passed in function to
-     * maintain state.  Perhaps it should, so that we could tell the caller
-     * whether this operation succeeded or failed.  Since this operation is
-     * used in a cleanup path, we wouldn't actually behave differently: we'll
-     * just log failures.
-     */
-    walkdir(dirname, unlink_if_exists_fname, false, LOG);
 }
 
 /*
@@ -1457,15 +1359,21 @@ File OpenTemporaryFile(bool interXact)
      */
     if (file <= 0)
         file = OpenTemporaryFileInTablespace(
-            u_sess->proc_cxt.MyDatabaseTableSpace ? u_sess->proc_cxt.MyDatabaseTableSpace : DEFAULTTABLESPACE_OID,
-            true);
+                   u_sess->proc_cxt.MyDatabaseTableSpace ? u_sess->proc_cxt.MyDatabaseTableSpace : DEFAULTTABLESPACE_OID,
+                   true);
 
-    /* Mark it for deletion at close and temporary file size limit */
-    u_sess->storage_cxt.VfdCache[file].fdstate |= FD_DELETE_AT_CLOSE | FD_TEMP_FILE_LIMIT;
+    /* Mark it for deletion at close */
+    u_sess->storage_cxt.VfdCache[file].fdstate |= FD_TEMPORARY;
 
     /* Register it with the current resource owner */
     if (!interXact) {
-        RegisterTemporaryFile(file);
+        u_sess->storage_cxt.VfdCache[file].fdstate |= FD_XACT_TEMPORARY;
+
+        ResourceOwnerRememberFile(t_thrd.utils_cxt.CurrentResourceOwner, file);
+        u_sess->storage_cxt.VfdCache[file].resowner = t_thrd.utils_cxt.CurrentResourceOwner;
+
+        /* ensure cleanup happens at eoxact */
+        u_sess->storage_cxt.have_xact_temporary_files = true;
     }
 
     return file;
@@ -1534,35 +1442,6 @@ void UnlinkCacheFile(const char* pathname)
 }
 
 /*
- * Return the path of the temp directory in a given tablespace.
- */
-void TempTablespacePath(char *tempdirpath, Size pathSize, Oid tblspcOid)
-{
-    /*
-     * Identify the tempfile directory for this tablespace.
-     *
-     * If someone tries to specify pg_global, use pg_default instead.
-     */
-    int rc;
-    if (tblspcOid == InvalidOid || tblspcOid == DEFAULTTABLESPACE_OID || tblspcOid == GLOBALTABLESPACE_OID) {
-        /* The default tablespace is {datadir}/base */
-        rc = snprintf_s(tempdirpath, pathSize, pathSize - 1, "base/%s", PG_TEMP_FILES_DIR);
-        securec_check_ss(rc, "", "");
-    } else {
-        /* All other tablespaces are accessed via symlinks */
-#ifdef PGXC
-        /* Postgres-XC tablespaces include node name in path */
-        rc = snprintf_s(tempdirpath, pathSize, pathSize - 1, "pg_tblspc/%u/%s_%s/%s", tblspcOid,
-            TABLESPACE_VERSION_DIRECTORY, g_instance.attr.attr_common.PGXCNodeName, PG_TEMP_FILES_DIR);
-#else
-        rc = snprintf_s(tempdirpath, pathSize, pathSize - 1, "pg_tblspc/%u/%s/%s", tblspcOid,
-            TABLESPACE_VERSION_DIRECTORY, PG_TEMP_FILES_DIR);
-#endif
-        securec_check_ss(rc, "", "");
-    }
-}
-
-/*
  * Open a temporary file in a specific tablespace.
  * Subroutine for OpenTemporaryFile, which see for details.
  */
@@ -1570,28 +1449,61 @@ static File OpenTemporaryFileInTablespace(Oid tblspcOid, bool rejectError)
 {
     char tempdirpath[MAXPGPATH];
     char tempfilepath[MAXPGPATH];
+    File file;
+    int rc = EOK;
 
-    TempTablespacePath(tempdirpath, MAXPGPATH, tblspcOid);
+    /*
+     * Identify the tempfile directory for this tablespace.
+     *
+     * If someone tries to specify pg_global, use pg_default instead.
+     */
+    if (tblspcOid == DEFAULTTABLESPACE_OID || tblspcOid == GLOBALTABLESPACE_OID) {
+        /* The default tablespace is {datadir}/base */
+        rc = snprintf_s(tempdirpath, sizeof(tempdirpath), sizeof(tempdirpath) - 1, "base/%s", PG_TEMP_FILES_DIR);
+        securec_check_ss(rc, "", "");
+    } else {
+        /* All other tablespaces are accessed via symlinks */
+#ifdef PGXC
+        /* Postgres-XC tablespaces include node name in path */
+        rc = snprintf_s(tempdirpath,
+                        sizeof(tempdirpath),
+                        sizeof(tempdirpath) - 1,
+                        "pg_tblspc/%u/%s_%s/%s",
+                        tblspcOid,
+                        TABLESPACE_VERSION_DIRECTORY,
+                        g_instance.attr.attr_common.PGXCNodeName,
+                        PG_TEMP_FILES_DIR);
+#else
+        rc = snprintf_s(tempdirpath,
+                        sizeof(tempdirpath),
+                        sizeof(tempdirpath) - 1,
+                        "pg_tblspc/%u/%s/%s",
+                        tblspcOid,
+                        TABLESPACE_VERSION_DIRECTORY,
+                        PG_TEMP_FILES_DIR);
+#endif
+        securec_check_ss(rc, "", "");
+    }
 
     /*
      * Generate a tempfile name that should be unique within the current
      * database instance.
      */
-    int rc = snprintf_s(tempfilepath,
-        sizeof(tempfilepath),
-        sizeof(tempfilepath) - 1,
-        "%s/%s%lu.%ld",
-        tempdirpath,
-        PG_TEMP_FILE_PREFIX,
-        t_thrd.proc_cxt.MyProcPid,
-        u_sess->storage_cxt.tempFileCounter++);
+    rc = snprintf_s(tempfilepath,
+                    sizeof(tempfilepath),
+                    sizeof(tempfilepath) - 1,
+                    "%s/%s%lu.%ld",
+                    tempdirpath,
+                    PG_TEMP_FILE_PREFIX,
+                    t_thrd.proc_cxt.MyProcPid,
+                    u_sess->storage_cxt.tempFileCounter++);
     securec_check_ss(rc, "", "");
 
     /*
      * Open the file.  Note: we don't use O_EXCL, in case there is an orphaned
      * temp file that can be reused.
      */
-    File file = PathNameOpenFile(tempfilepath, O_RDWR | O_CREAT | O_TRUNC | PG_BINARY, 0600);
+    file = PathNameOpenFile(tempfilepath, O_RDWR | O_CREAT | O_TRUNC | PG_BINARY, 0600);
     if (file <= 0) {
         /*
          * We might need to create the tablespace's tempfile directory, if no
@@ -1629,117 +1541,11 @@ void FileCloseWithThief(File file)
         vfdP->fd = VFD_CLOSED;
     }
 
-    Assert(!(vfdP->fdstate & FD_DELETE_AT_CLOSE));
+    Assert(!(vfdP->fdstate & FD_TEMPORARY));
     if (vfdP->resowner) {
         ResourceOwnerForgetFile(vfdP->resowner, file);
     }
     FreeVfd(file);
-}
-
-/*
- * Create a new file.  The directory containing it must already exist.  Files
- * created this way are subject to temp_file_limit and are automatically
- * closed at end of transaction, but are not automatically deleted on close
- * because they are intended to be shared between cooperating backends.
- *
- * If the file is inside the top-level temporary directory, its name should
- * begin with PG_TEMP_FILE_PREFIX so that it can be identified as temporary
- * and deleted at startup by RemovePgTempFiles().  Alternatively, it can be
- * inside a directory created with PathNameCreateTemporaryDir(), in which case
- * the prefix isn't needed.
- */
-File PathNameCreateTemporaryFile(char *path, bool error_on_failure)
-{
-    ResourceOwnerEnlargeFiles(t_thrd.utils_cxt.CurrentResourceOwner);
-
-    /*
-     * Open the file.  Note: we don't use O_EXCL, in case there is an orphaned
-     * temp file that can be reused.
-     */
-    File file = PathNameOpenFile(path, O_RDWR | O_CREAT | O_TRUNC | PG_BINARY, S_IRUSR | S_IWUSR);
-    if (file <= 0) {
-        if (error_on_failure) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not create temporary file \"%s\": %m", path)));
-        } else {
-            return file;
-        }
-    }
-
-    /* Mark it for temp_file_limit accounting. */
-    u_sess->storage_cxt.VfdCache[file].fdstate |= FD_TEMP_FILE_LIMIT;
-
-    /* Register it for automatic close. */
-    RegisterTemporaryFile(file);
-
-    return file;
-}
-
-/*
- * Open a file that was created with PathNameCreateTemporaryFile, possibly in
- * another backend.  Files opened this way don't count against the
- * temp_file_limit of the caller, are read-only and are automatically closed
- * at the end of the transaction but are not deleted on close.
- */
-File PathNameOpenTemporaryFile(char *path)
-{
-    ResourceOwnerEnlargeFiles(t_thrd.utils_cxt.CurrentResourceOwner);
-
-    /* We open the file read-only. */
-    File file = PathNameOpenFile(path, O_RDONLY | PG_BINARY, S_IRUSR | S_IWUSR);
-    /* If no such file, then we don't raise an error. */
-    if (file <= 0 && errno != ENOENT) {
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open temporary file \"%s\": %m", path)));
-    }
-
-    if (file > 0) {
-        /* Register it for automatic close. */
-        RegisterTemporaryFile(file);
-    }
-
-    return file;
-}
-
-/*
- * Delete a file by pathname.  Return true if the file existed, false if
- * didn't.
- */
-bool PathNameDeleteTemporaryFile(const char *path, bool error_on_failure)
-{
-    struct stat filestats;
-    int stat_errno;
-
-    /* Get the final size for pgstat reporting. */
-    if (stat(path, &filestats) != 0) {
-        stat_errno = errno;
-    } else {
-        stat_errno = 0;
-    }
-
-    /*
-     * Unlike FileClose's automatic file deletion code, we tolerate
-     * non-existence to support BufFileDeleteShared which doesn't know how
-     * many segments it has to delete until it runs out.
-     */
-    if (stat_errno == ENOENT) {
-        return false;
-    }
-
-    if (unlink(path) < 0) {
-        if (errno != ENOENT) {
-            ereport(error_on_failure ? ERROR : LOG,
-                (errcode_for_file_access(), errmsg("could not unlink temporary file \"%s\": %m", path)));
-        }
-        return false;
-    }
-
-    if (stat_errno == 0) {
-        ReportTemporaryFileUsage(path, filestats.st_size);
-    } else {
-        errno = stat_errno;
-        ereport(LOG, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", path)));
-    }
-
-    return true;
 }
 
 /*
@@ -1774,17 +1580,10 @@ void FileClose(File file)
         RESUME_INTERRUPTS();
     }
 
-    if (vfdP->fdstate & FD_TEMP_FILE_LIMIT) {
-        /* Subtract its size from current usage (do first in case of error) */
-        u_sess->storage_cxt.temporary_files_size -= vfdP->fileSize;
-        perm_space_decrease(GetUserId(), (uint64)vfdP->fileSize, SP_SPILL);
-        vfdP->fileSize = 0;
-    }
-
     /*
      * Delete the file if it was temporary, and make a log entry if wanted
      */
-    if (vfdP->fdstate & FD_DELETE_AT_CLOSE) {
+    if (vfdP->fdstate & FD_TEMPORARY) {
         struct stat filestats;
         int stat_errno;
 
@@ -1795,7 +1594,12 @@ void FileClose(File file)
          * is arranged to ensure that the worst-case consequence is failing to
          * emit log message(s), not failing to attempt the unlink.
          */
-        vfdP->fdstate &= ~FD_DELETE_AT_CLOSE;
+        vfdP->fdstate &= ~FD_TEMPORARY;
+
+        /* Subtract its size from current usage (do first in case of error) */
+        u_sess->storage_cxt.temporary_files_size -= vfdP->fileSize;
+        perm_space_decrease(GetUserId(), (uint64)vfdP->fileSize, SP_SPILL);
+        vfdP->fileSize = 0;
 
         /* first try the stat() */
         if (stat(vfdP->fileName, &filestats))
@@ -1809,7 +1613,15 @@ void FileClose(File file)
 
         /* and last report the stat results */
         if (stat_errno == 0) {
-            ReportTemporaryFileUsage(vfdP->fileName, filestats.st_size);
+            pgstat_report_tempfile((size_t)filestats.st_size);
+
+            if (u_sess->attr.attr_common.log_temp_files >= 0) {
+                if ((filestats.st_size / 1024) >= u_sess->attr.attr_common.log_temp_files)
+                    ereport(LOG,
+                            (errmsg("temporary file: path \"%s\", size %lu",
+                                    vfdP->fileName,
+                                    (unsigned long)filestats.st_size)));
+            }
         } else {
             errno = stat_errno;
             ereport(LOG, (errmsg("could not stat file \"%s\": %m", vfdP->fileName)));
@@ -1844,11 +1656,11 @@ int FilePrefetch(File file, off_t offset, int amount, uint32 wait_event_info)
     Assert(FileIsValid(file));
 
     DO_DB(ereport(LOG,
-        (errmsg("FilePrefetch: %d (%s) " INT64_FORMAT " %d",
-            file,
-            u_sess->storage_cxt.VfdCache[file].fileName,
-            (int64)offset,
-            amount))));
+                  (errmsg("FilePrefetch: %d (%s) " INT64_FORMAT " %d",
+                          file,
+                          u_sess->storage_cxt.VfdCache[file].fileName,
+                          (int64)offset,
+                          amount))));
 
     returnCode = FileAccess(file);
     if (returnCode < 0)
@@ -1872,11 +1684,11 @@ void FileWriteback(File file, off_t offset, off_t nbytes)
     Assert(FileIsValid(file));
 
     DO_DB(ereport(LOG,
-        (errmsg("FileWriteback: %d (%s) " INT64_FORMAT " " INT64_FORMAT,
-            file,
-            u_sess->storage_cxt.VfdCache[file].fileName,
-            (int64)offset,
-            (int64)nbytes))));
+                  (errmsg("FileWriteback: %d (%s) " INT64_FORMAT " " INT64_FORMAT,
+                          file,
+                          u_sess->storage_cxt.VfdCache[file].fileName,
+                          (int64)offset,
+                          (int64)nbytes))));
 
     /*
      * Caution: do not call pg_flush_data with nbytes = 0, it could trash the
@@ -1902,11 +1714,11 @@ int FilePRead(File file, char* buffer, int amount, off_t offset, uint32 wait_eve
     Assert(FileIsValid(file));
 
     DO_DB(ereport(LOG,
-        (errmsg("FilePRead: %d (%s) " INT64_FORMAT " %d",
-            file,
-            u_sess->storage_cxt.VfdCache[file].fileName,
-            (int64)u_sess->storage_cxt.VfdCache[file].seekPos,
-            amount))));
+                  (errmsg("FilePRead: %d (%s) " INT64_FORMAT " %d",
+                          file,
+                          u_sess->storage_cxt.VfdCache[file].fileName,
+                          (int64)u_sess->storage_cxt.VfdCache[file].seekPos,
+                          amount))));
 
     returnCode = FileAccess(file);
     if (returnCode < 0)
@@ -1978,15 +1790,15 @@ int FileWrite(File file, const char* buffer, int amount, off_t offset)
                 fallocate(u_sess->storage_cxt.VfdCache[file].fd, FALLOC_FL_KEEP_SIZE, offset, fast_extend_size);
             if (returnCode != 0) {
                 ereport(ERROR,
-                    (errcode_for_file_access(),
-                        errmsg("fallocate(fd=%d, amount=%d, offset=%ld),write count(%d), errno(%d), "
-                               "maybe you use adio without XFS filesystem, if you really want do this,"
-                               "please turn off GUC parameter enable_fast_allocate",
-                            u_sess->storage_cxt.VfdCache[file].fd,
-                            fast_extend_size,
-                            (int64)offset,
-                            returnCode,
-                            errno)));
+                        (errcode_for_file_access(),
+                         errmsg("fallocate(fd=%d, amount=%d, offset=%ld),write count(%d), errno(%d), "
+                                "maybe you use adio without XFS filesystem, if you really want do this,"
+                                "please turn off GUC parameter enable_fast_allocate",
+                                u_sess->storage_cxt.VfdCache[file].fd,
+                                fast_extend_size,
+                                (int64)offset,
+                                returnCode,
+                                errno)));
             }
         }
 
@@ -1994,15 +1806,15 @@ int FileWrite(File file, const char* buffer, int amount, off_t offset)
         returnCode = fallocate(u_sess->storage_cxt.VfdCache[file].fd, 0, offset, amount);
         if (returnCode != 0) {
             ereport(ERROR,
-                (errcode_for_file_access(),
-                    errmsg("fallocate(fd=%d, amount=%d, offset=%ld),write count(%d), errno(%d), "
-                           "maybe you use adio without XFS filesystem, if you really want do this,"
-                           "please turn off GUC parameter enable_fast_allocate",
-                        u_sess->storage_cxt.VfdCache[file].fd,
-                        amount,
-                        (int64)offset,
-                        returnCode,
-                        errno)));
+                    (errcode_for_file_access(),
+                     errmsg("fallocate(fd=%d, amount=%d, offset=%ld),write count(%d), errno(%d), "
+                            "maybe you use adio without XFS filesystem, if you really want do this,"
+                            "please turn off GUC parameter enable_fast_allocate",
+                            u_sess->storage_cxt.VfdCache[file].fd,
+                            amount,
+                            (int64)offset,
+                            returnCode,
+                            errno)));
         }
 
         /* assign returnCode with buffer size */
@@ -2028,11 +1840,11 @@ int FilePWrite(File file, const char* buffer, int amount, off_t offset, uint32 w
     Assert(FileIsValid(file));
 
     DO_DB(ereport(LOG,
-        (errmsg("FilePWrite: %d (%s) " INT64_FORMAT " %d",
-            file,
-            u_sess->storage_cxt.VfdCache[file].fileName,
-            (int64)u_sess->storage_cxt.VfdCache[file].seekPos,
-            amount))));
+                  (errmsg("FilePWrite: %d (%s) " INT64_FORMAT " %d",
+                          file,
+                          u_sess->storage_cxt.VfdCache[file].fileName,
+                          (int64)u_sess->storage_cxt.VfdCache[file].seekPos,
+                          amount))));
 
     returnCode = FileAccess(file);
     if (returnCode < 0)
@@ -2050,7 +1862,7 @@ int FilePWrite(File file, const char* buffer, int amount, off_t offset, uint32 w
      * message if we do that.  All current callers would just throw error
      * immediately anyway, so this is safe at present.
      */
-    if (u_sess->storage_cxt.VfdCache[file].fdstate & FD_TEMP_FILE_LIMIT) {
+    if (u_sess->storage_cxt.VfdCache[file].fdstate & FD_TEMPORARY) {
         off_t newPos = u_sess->storage_cxt.VfdCache[file].seekPos + amount;
 
         if (newPos > u_sess->storage_cxt.VfdCache[file].fileSize) {
@@ -2066,9 +1878,9 @@ int FilePWrite(File file, const char* buffer, int amount, off_t offset, uint32 w
                 newTotal += newPos - u_sess->storage_cxt.VfdCache[file].fileSize;
                 if (newTotal > (uint64)(uint32)u_sess->attr.attr_sql.temp_file_limit * (uint64)1024)
                     ereport(ERROR,
-                        (errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
-                            errmsg("temporary file size exceeds temp_file_limit (%dkB)",
-                                u_sess->attr.attr_sql.temp_file_limit)));
+                            (errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
+                             errmsg("temporary file size exceeds temp_file_limit (%dkB)",
+                                    u_sess->attr.attr_sql.temp_file_limit)));
             }
         }
     }
@@ -2088,7 +1900,7 @@ retry:
         u_sess->storage_cxt.VfdCache[file].seekPos += returnCode;
 
         /* maintain fileSize and temporary_files_size if it's a temp file */
-        if (u_sess->storage_cxt.VfdCache[file].fdstate & FD_TEMP_FILE_LIMIT) {
+        if (u_sess->storage_cxt.VfdCache[file].fdstate & FD_TEMPORARY) {
             off_t newPos = u_sess->storage_cxt.VfdCache[file].seekPos;
 
             if (newPos > u_sess->storage_cxt.VfdCache[file].fileSize) {
@@ -2142,8 +1954,8 @@ static int FileAsyncSubmitIO(io_context_t aio_context, dlistType dList, int dLis
             insufficientTimes++;
             pg_usleep(1000);
             ereport(LOG,
-                (errmsg(
-                    "insufficient resources, async submit io count(%d), times(%d) ", submitCount, insufficientTimes)));
+                    (errmsg(
+                         "insufficient resources, async submit io count(%d), times(%d) ", submitCount, insufficientTimes)));
             continue;
         }
 
@@ -2185,10 +1997,10 @@ int FileAsyncRead(AioDispatchDesc_t** dList, int32 dn)
 
         Assert(FileIsValid(file));
         DO_DB(ereport(LOG,
-            (errmsg("FileAsyncRead: fd(%d), filename(%s), seekpos(%ld)",
-                file,
-                u_sess->storage_cxt.VfdCache[file].fileName,
-                (int64)u_sess->storage_cxt.VfdCache[file].seekPos))));
+                      (errmsg("FileAsyncRead: fd(%d), filename(%s), seekpos(%ld)",
+                              file,
+                              u_sess->storage_cxt.VfdCache[file].fileName,
+                              (int64)u_sess->storage_cxt.VfdCache[file].seekPos))));
 
         // jeh FileAccess may block opening file
         returnCode = FileAccess(file);
@@ -2217,8 +2029,8 @@ int FileAsyncRead(AioDispatchDesc_t** dList, int32 dn)
     returnCode = FileAsyncSubmitIO<AioDispatchDesc_t**>(aio_context, dList, dn);
     if (returnCode != dn) {
         ereport(ERROR,
-            (errcode_for_file_access(),
-                errmsg("io_submit() async read failed %d, dispatch count(%d)", returnCode, dn)));
+                (errcode_for_file_access(),
+                 errmsg("io_submit() async read failed %d, dispatch count(%d)", returnCode, dn)));
     }
 
     return returnCode;
@@ -2240,10 +2052,10 @@ int FileAsyncWrite(AioDispatchDesc_t** dList, int32 dn)
 
         Assert(FileIsValid(file));
         DO_DB(ereport(LOG,
-            (errmsg("FileAsyncRead: fd(%d), filename(%s), seekpos(%ld)",
-                file,
-                u_sess->storage_cxt.VfdCache[file].fileName,
-                (int64)u_sess->storage_cxt.VfdCache[file].seekPos))));
+                      (errmsg("FileAsyncRead: fd(%d), filename(%s), seekpos(%ld)",
+                              file,
+                              u_sess->storage_cxt.VfdCache[file].fileName,
+                              (int64)u_sess->storage_cxt.VfdCache[file].seekPos))));
 
         if ((returnCode = FileAccess(file)) < 0) {
             // aio debug error
@@ -2281,10 +2093,10 @@ void FileAsyncCUClose(File* vfdList, int32 vfdnum)
             vfdList[i] = VFD_CLOSED;
         } else {
             ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("FileAsyncCUClose : invalid vfd(%d), SizeVfdCache(%lu)",
-                        file,
-                        u_sess->storage_cxt.SizeVfdCache)));
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("FileAsyncCUClose : invalid vfd(%d), SizeVfdCache(%lu)",
+                            file,
+                            u_sess->storage_cxt.SizeVfdCache)));
         }
     }
     return;
@@ -2306,10 +2118,10 @@ int FileAsyncCURead(AioDispatchCUDesc_t** dList, int32 dn)
         file = dList[i]->aiocb.aio_fildes;
         Assert(FileIsValid(file));
         DO_DB(ereport(LOG,
-            (errmsg("FileAsyncRead: fd(%d), filename(%s), seekpos(%ld)",
-                file,
-                u_sess->storage_cxt.VfdCache[file].fileName,
-                (int64)u_sess->storage_cxt.VfdCache[file].seekPos))));
+                      (errmsg("FileAsyncRead: fd(%d), filename(%s), seekpos(%ld)",
+                              file,
+                              u_sess->storage_cxt.VfdCache[file].fileName,
+                              (int64)u_sess->storage_cxt.VfdCache[file].seekPos))));
 
         returnCode = FileAccess(file);
         if (returnCode < 0) {
@@ -2325,8 +2137,8 @@ int FileAsyncCURead(AioDispatchCUDesc_t** dList, int32 dn)
     returnCode = FileAsyncSubmitIO<AioDispatchCUDesc_t**>(aio_context, dList, dn);
     if (returnCode != dn) {
         ereport(ERROR,
-            (errcode_for_file_access(),
-                errmsg("io_submit() async cu read failed %d, dispatch count(%d)", returnCode, dn)));
+                (errcode_for_file_access(),
+                 errmsg("io_submit() async cu read failed %d, dispatch count(%d)", returnCode, dn)));
     }
 
     return returnCode;
@@ -2350,10 +2162,10 @@ int FileAsyncCUWrite(AioDispatchCUDesc_t** dList, int32 dn)
         Assert(FileIsValid(file));
 
         DO_DB(ereport(LOG,
-            (errmsg("FileAsyncCUWrite: fd(%d), filename(%s), seekpos(%ld)",
-                file,
-                u_sess->storage_cxt.VfdCache[file].fileName,
-                (int64)u_sess->storage_cxt.VfdCache[file].seekPos))));
+                      (errmsg("FileAsyncCUWrite: fd(%d), filename(%s), seekpos(%ld)",
+                              file,
+                              u_sess->storage_cxt.VfdCache[file].fileName,
+                              (int64)u_sess->storage_cxt.VfdCache[file].seekPos))));
 
         returnCode = FileAccess(file);
         if (returnCode < 0) {
@@ -2395,15 +2207,15 @@ void FileFastExtendFile(File file, uint32 offset, uint32 size, bool keep_size)
     returnCode = fallocate(u_sess->storage_cxt.VfdCache[file].fd, mode, offset, size);
     if (returnCode != 0) {
         ereport(ERROR,
-            (errcode_for_file_access(),
-                errmsg("fallocate(fd=%d, amount=%u, offset=%u),write count(%d), errno(%d), "
-                       "maybe you use adio without XFS filesystem, if you really want do this,"
-                       "please turn off GUC parameter enable_fast_allocate",
-                    u_sess->storage_cxt.VfdCache[file].fd,
-                    size,
-                    offset,
-                    returnCode,
-                    errno)));
+                (errcode_for_file_access(),
+                 errmsg("fallocate(fd=%d, amount=%u, offset=%u),write count(%d), errno(%d), "
+                        "maybe you use adio without XFS filesystem, if you really want do this,"
+                        "please turn off GUC parameter enable_fast_allocate",
+                        u_sess->storage_cxt.VfdCache[file].fd,
+                        size,
+                        offset,
+                        returnCode,
+                        errno)));
     }
 
     return;
@@ -2431,21 +2243,6 @@ int FileSync(File file, uint32 wait_event_info)
     return returnCode;
 }
 
-off_t FileSize(File file)
-{
-    Assert(FileIsValid(file));
-
-    DO_DB(ereport(LOG, (errmsg("FileSize %d (%s)", file, u_sess->storage_cxt.VfdCache[file].fileName))));
-
-    if (FileIsNotOpen(file)) {
-        if (FileAccess(file) < 0) {
-            return (off_t)-1;
-        }
-    }
-
-    return lseek(u_sess->storage_cxt.VfdCache[file].fd, 0, SEEK_END);
-}
-
 // FileSeek
 // 		parameter *whence* only supports SEEK_END for multithreading backends.
 // 		FilePRead() and FilePWrite() have the offset parameter, so do NOT use FileSeek to
@@ -2459,12 +2256,12 @@ off_t FileSeek(File file, off_t offset, int whence)
     Assert(whence == SEEK_END && offset == 0);
 
     DO_DB(ereport(LOG,
-        (errmsg("FileSeek: %d (%s) " INT64_FORMAT " " INT64_FORMAT " %d",
-            file,
-            u_sess->storage_cxt.VfdCache[file].fileName,
-            (int64)u_sess->storage_cxt.VfdCache[file].seekPos,
-            (int64)offset,
-            whence))));
+                  (errmsg("FileSeek: %d (%s) " INT64_FORMAT " " INT64_FORMAT " %d",
+                          file,
+                          u_sess->storage_cxt.VfdCache[file].fileName,
+                          (int64)u_sess->storage_cxt.VfdCache[file].seekPos,
+                          (int64)offset,
+                          whence))));
 
     if (FileIsNotOpen(file)) {
         returnCode = FileAccess(file);
@@ -2506,7 +2303,7 @@ int FileTruncate(File file, off_t offset, uint32 wait_event_info)
 
     if (returnCode == 0 && u_sess->storage_cxt.VfdCache[file].fileSize > offset) {
         /* adjust our state for truncation of a temp file */
-        Assert(u_sess->storage_cxt.VfdCache[file].fdstate & FD_TEMP_FILE_LIMIT);
+        Assert(u_sess->storage_cxt.VfdCache[file].fdstate & FD_TEMPORARY);
         uint64 descSize = (uint64)(u_sess->storage_cxt.VfdCache[file].fileSize - offset);
         perm_space_decrease(GetUserId(), descSize, SP_SPILL);
         u_sess->storage_cxt.temporary_files_size -= descSize;
@@ -2561,7 +2358,8 @@ static bool ReserveAllocatedDesc(void)
      */
     if (u_sess->storage_cxt.allocatedDescs == NULL) {
         newMax = FD_MINFREE / 2;
-        newDescs = (AllocateDesc*)MemoryContextAlloc(u_sess->top_mem_cxt, newMax * sizeof(AllocateDesc));
+        newDescs = (AllocateDesc*)MemoryContextAlloc(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), newMax * sizeof(AllocateDesc));
         /* Out of memory already?  Treat as fatal error. */
         if (newDescs == NULL)
             ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
@@ -2612,11 +2410,11 @@ restart:
     /* Can we allocate another non-virtual FD? */
     if (!ReserveAllocatedDesc())
         ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-                errmsg("exceeded maxAllocatedDescs (%d) while trying to open file \"%s:%d\"",
-                    u_sess->storage_cxt.maxAllocatedDescs,
-                    ipaddr,
-                    port)));
+                (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                 errmsg("exceeded maxAllocatedDescs (%d) while trying to open file \"%s:%d\"",
+                        u_sess->storage_cxt.maxAllocatedDescs,
+                        ipaddr,
+                        port)));
 
     /* Close excess kernel FDs. */
     ReleaseLruFiles();
@@ -2634,7 +2432,7 @@ restart:
         rc = memcpy_s(&saddr.addr, sizeof(saddr.addr), naddr->ai_addr, naddr->ai_addrlen);
         securec_check(rc, "", "");
         saddr.salen = naddr->ai_addrlen;
-    TryAgain:
+TryAgain:
         if (sockfd < 0 && (sockfd = socket(saddr.addr.ss_family, SOCK_STREAM, 0)) < 0) {
             if (errno == EMFILE || errno == ENFILE) {
                 int save_errno = errno;
@@ -2642,18 +2440,20 @@ restart:
                 if (save_errno == ENFILE) {
                     DumpOpenFiles(g_gauss_pid_dir);
                     pg_usleep(10000000L);
+                    if (addr != NULL)
+                        pg_freeaddrinfo_all(hint.ai_family, addr);
                     ereport(PANIC,
-                        (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-                            errmsg("out of file descriptors: %m; release and retry")));
+                            (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                             errmsg("out of file descriptors: %m; release and retry")));
                 } else {
                     ereport(LOG,
-                        (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-                            errmsg("out of file descriptors: %m; release and retry")));
+                            (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                             errmsg("out of file descriptors: %m; release and retry")));
                 }
 #else
                 ereport(LOG,
-                    (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-                        errmsg("out of file descriptors: %m; release and retry")));
+                        (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                         errmsg("out of file descriptors: %m; release and retry")));
 #endif
 
                 errno = 0;
@@ -2675,7 +2475,7 @@ restart:
                 struct pollfd pollfds;
                 pollfds.fd = sockfd;
                 pollfds.events = POLLOUT | POLLWRBAND;
-            retry:
+retry:
                 t_thrd.int_cxt.ImmediateInterruptOK = true;
                 int ret = poll(&pollfds, 1, CONNECTION_TIME_OUT * 1000);
                 t_thrd.int_cxt.ImmediateInterruptOK = false;
@@ -2683,9 +2483,11 @@ restart:
                     if (errno == EINTR)
                         goto retry;
 
+                    if (addr != NULL)
+                        pg_freeaddrinfo_all(hint.ai_family, addr);
                     ereport(ERROR,
-                        (errcode(errcode_for_socket_access()),
-                            errmsg("Invalid socket fd \"%d\" for poll():%m", sockfd)));
+                            (errcode(errcode_for_socket_access()),
+                             errmsg("Invalid socket fd \"%d\" for poll():%m", sockfd)));
                 } else if (ret == 0) {
                     /* timeout or can't connect server */
                     ereport(LOG, (errmsg("connect timeout socket fd \"%d\" for poll():%m", sockfd)));
@@ -2734,13 +2536,13 @@ restart:
         securec_check(rc, "", "");
         if (getsockname(sockfd, (struct sockaddr*)&sin, &slen) == 0) {
             ereport(LOG,
-                (errmsg("open socket(fd=%d) \"%s:%d\" at allocatedDescs[%d] local \"%s:%d\"",
-                    sockfd,
-                    ipaddr,
-                    port,
-                    u_sess->storage_cxt.numAllocatedDescs,
-                    inet_ntoa(sin.sin_addr),
-                    ntohs(sin.sin_port))));
+                    (errmsg("open socket(fd=%d) \"%s:%d\" at allocatedDescs[%d] local \"%s:%d\"",
+                            sockfd,
+                            ipaddr,
+                            port,
+                            u_sess->storage_cxt.numAllocatedDescs,
+                            inet_ntoa(sin.sin_addr),
+                            ntohs(sin.sin_port))));
         }
 
         u_sess->storage_cxt.numAllocatedDescs++;
@@ -2784,10 +2586,10 @@ FILE* AllocateFile(const char* name, const char* mode)
     /* Can we allocate another non-virtual FD? */
     if (!ReserveAllocatedDesc())
         ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-                errmsg("exceeded maxAllocatedDescs (%d) while trying to open file \"%s\"",
-                    u_sess->storage_cxt.maxAllocatedDescs,
-                    name)));
+                (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                 errmsg("exceeded maxAllocatedDescs (%d) while trying to open file \"%s\"",
+                        u_sess->storage_cxt.maxAllocatedDescs,
+                        name)));
 
     /* Close excess kernel FDs. */
     ReleaseLruFiles();
@@ -2810,10 +2612,10 @@ TryAgain:
             DumpOpenFiles(g_gauss_pid_dir);
             pg_usleep(10000000L);
             ereport(PANIC,
-                (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("out of file descriptors: %m; release and retry")));
+                    (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("out of file descriptors: %m; release and retry")));
         } else {
             ereport(LOG,
-                (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("out of file descriptors: %m; release and retry")));
+                    (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("out of file descriptors: %m; release and retry")));
         }
 #else
         ereport(
@@ -2836,7 +2638,7 @@ int OpenTransientFile(FileName fileName, int fileFlags, int fileMode)
 {
     int fd;
     DO_DB(ereport(
-        LOG, (errmsg("OpenTransientFile: Allocated %d (%s)", u_sess->storage_cxt.numAllocatedDescs, fileName))));
+              LOG, (errmsg("OpenTransientFile: Allocated %d (%s)", u_sess->storage_cxt.numAllocatedDescs, fileName))));
 
     /*
      * The test against MAX_ALLOCATED_DESCS prevents us from overflowing
@@ -2847,8 +2649,8 @@ int OpenTransientFile(FileName fileName, int fileFlags, int fileMode)
     if (u_sess->storage_cxt.numAllocatedDescs >= u_sess->storage_cxt.maxAllocatedDescs ||
         u_sess->storage_cxt.numAllocatedDescs >= t_thrd.storage_cxt.max_safe_fds - 1)
         ereport(ERROR,
-            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                errmsg("exceeded MAX_ALLOCATED_DESCS while trying to open file \"%s\"", fileName)));
+                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                 errmsg("exceeded MAX_ALLOCATED_DESCS while trying to open file \"%s\"", fileName)));
 
     fd = BasicOpenFile(fileName, fileFlags, fileMode);
     if (fd >= 0) {
@@ -2990,10 +2792,10 @@ DIR* AllocateDir(const char* dirname)
     /* Can we allocate another non-virtual FD? */
     if (!ReserveAllocatedDesc())
         ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-                errmsg("exceeded maxAllocatedDescs (%d) while trying to open directory \"%s\"",
-                    u_sess->storage_cxt.maxAllocatedDescs,
-                    dirname)));
+                (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                 errmsg("exceeded maxAllocatedDescs (%d) while trying to open directory \"%s\"",
+                        u_sess->storage_cxt.maxAllocatedDescs,
+                        dirname)));
 
     /* Close excess kernel FDs. */
     ReleaseLruFiles();
@@ -3016,10 +2818,10 @@ TryAgain:
             DumpOpenFiles(g_gauss_pid_dir);
             pg_usleep(10000000L);
             ereport(PANIC,
-                (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("out of file descriptors: %m; release and retry")));
+                    (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("out of file descriptors: %m; release and retry")));
         } else {
             ereport(LOG,
-                (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("out of file descriptors: %m; release and retry")));
+                    (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("out of file descriptors: %m; release and retry")));
         }
 #else
         ereport(
@@ -3057,29 +2859,11 @@ TryAgain:
  */
 struct dirent* ReadDir(DIR* dir, const char* dirname)
 {
-    return ReadDirExtended(dir, dirname, ERROR);
-}
-
-/*
- * Alternate version of ReadDir that allows caller to specify the elevel
- * for any error report (whether it's reporting an initial failure of
- * AllocateDir or a subsequent directory read failure).
- *
- * If elevel < ERROR, returns NULL after any error.  With the normal coding
- * pattern, this will result in falling out of the loop immediately as
- * though the directory contained no (more) entries.
- */
-static struct dirent *ReadDirExtended(DIR *dir, const char *dirname, int elevel)
-{
-    struct dirent *dent = NULL;
+    struct dirent* dent = NULL;
 
     /* Give a generic message for AllocateDir failure, if caller didn't */
     if (dir == NULL) {
-        char realDir[PATH_MAX] = {0};
-        char *ret = realpath(dirname, realDir);
-        ereport(elevel, (errcode_for_file_access(),
-            errmsg("could not open directory \"%s\": %m", ret != nullptr ? realDir : dirname)));
-        return NULL;
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open directory \"%s\": %m", dirname)));
     }
 
     errno = 0;
@@ -3097,11 +2881,7 @@ static struct dirent *ReadDirExtended(DIR *dir, const char *dirname, int elevel)
 #endif
 
     if (errno) {
-        char realDir[PATH_MAX] = {0};
-        char *ret = realpath(dirname, realDir);
-        ereport(elevel, (errcode_for_file_access(),
-            errmsg("could not read directory \"%s\": %m", ret != nullptr ? realDir : dirname)));
-        return NULL;
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not read directory \"%s\": %m", dirname)));
     }
     return NULL;
 }
@@ -3220,24 +3000,6 @@ bool TempTablespacesAreSet(void)
 }
 
 /*
- * GetTempTablespaces
- *
- * Populate an array with the OIDs of the tablespaces that should be used for
- * temporary files.  Return the number that were copied into the output array.
- */
-int GetTempTablespaces(Oid *tableSpaces, int numSpaces)
-{
-    int i;
-
-    Assert(TempTablespacesAreSet());
-    for (i = 0; i < u_sess->storage_cxt.numTempTableSpaces && i < numSpaces; ++i) {
-        tableSpaces[i] = u_sess->storage_cxt.tempTableSpaces[i];
-    }
-
-    return i;
-}
-
-/*
  * GetNextTempTableSpace
  *
  * Select the next temp tablespace to use.	A result of InvalidOid means
@@ -3327,8 +3089,7 @@ static void CleanupTempFiles(bool isProcExit)
         for (i = 1; i < u_sess->storage_cxt.SizeVfdCache; i++) {
             unsigned short fdstate = u_sess->storage_cxt.VfdCache[i].fdstate;
 
-            if (((fdstate & FD_DELETE_AT_CLOSE) || (fdstate & FD_CLOSE_AT_EOXACT)) &&
-                u_sess->storage_cxt.VfdCache[i].fileName != NULL) {
+            if ((fdstate & FD_TEMPORARY) && u_sess->storage_cxt.VfdCache[i].fileName != NULL) {
                 /*
                  * If we're in the process of exiting a backend process, close
                  * all temporary files. Otherwise, only close temporary files
@@ -3338,17 +3099,18 @@ static void CleanupTempFiles(bool isProcExit)
                  */
                 if (isProcExit)
                     FileClose((File)i);
-                else if (fdstate & FD_CLOSE_AT_EOXACT) {
-                    ereport(WARNING, (errmsg("temporary file %s not closed at end-of-transaction",
-                        u_sess->storage_cxt.VfdCache[i].fileName)));
+                else if (fdstate & FD_XACT_TEMPORARY) {
+                    ereport(WARNING,
+                            (errmsg("temporary file %s not closed at end-of-transaction",
+                                    u_sess->storage_cxt.VfdCache[i].fileName)));
                     FileClose((File)i);
                 }
             } else if ((fdstate & FD_ERRTBL_LOG) && u_sess->storage_cxt.VfdCache[i].fileName != NULL) {
                 /* first unlink the physical file because FileClose() will destroy filename. */
                 if ((fdstate & FD_ERRTBL_LOG_OWNER) && unlink(u_sess->storage_cxt.VfdCache[i].fileName)) {
                     ereport(WARNING,
-                        (errmsg("[ErrorTable/Abort]Unlink cache file failed: %s",
-                            u_sess->storage_cxt.VfdCache[i].fileName)));
+                            (errmsg("[ErrorTable/Abort]Unlink cache file failed: %s",
+                                    u_sess->storage_cxt.VfdCache[i].fileName)));
                 }
                 /* close this cache file about error table and clean vfd's flag */
                 FileClose((File)i);
@@ -3388,7 +3150,7 @@ void RemovePgTempFiles(void)
      */
     rc = snprintf_s(temp_path, sizeof(temp_path), sizeof(temp_path) - 1, "base/%s", PG_TEMP_FILES_DIR);
     securec_check_ss(rc, "", "");
-    RemovePgTempFilesInDir(temp_path, false);
+    RemovePgTempFilesInDir(temp_path);
     RemovePgTempRelationFiles("base");
 
     /*
@@ -3407,50 +3169,47 @@ void RemovePgTempFiles(void)
          * subDir returned by ReadDir will be overwritten by the next invoking.
          * therefore, the result needs to be saved.
          */
-        char curSubDir[MAXPGPATH] = {0};
-        strncpy_s(curSubDir, MAXPGPATH, spc_de->d_name, strlen(spc_de->d_name));
-        securec_check_ss(rc, "", "");
 #ifdef PGXC
         /* Postgres-XC tablespaces include node name in path */
         rc = snprintf_s(temp_path,
-            sizeof(temp_path),
-            sizeof(temp_path) - 1,
-            "pg_tblspc/%s/%s_%s/%s",
-            curSubDir,
-            TABLESPACE_VERSION_DIRECTORY,
-            g_instance.attr.attr_common.PGXCNodeName,
-            PG_TEMP_FILES_DIR);
+                        sizeof(temp_path),
+                        sizeof(temp_path) - 1,
+                        "pg_tblspc/%s/%s_%s/%s",
+                        spc_de->d_name,
+                        TABLESPACE_VERSION_DIRECTORY,
+                        g_instance.attr.attr_common.PGXCNodeName,
+                        PG_TEMP_FILES_DIR);
         securec_check_ss(rc, "", "");
 #else
         rc = snprintf_s(temp_path,
-            sizeof(temp_path),
-            sizeof(temp_path) - 1,
-            "pg_tblspc/%s/%s/%s",
-            curSubDir,
-            TABLESPACE_VERSION_DIRECTORY,
-            PG_TEMP_FILES_DIR);
+                        sizeof(temp_path),
+                        sizeof(temp_path) - 1,
+                        "pg_tblspc/%s/%s/%s",
+                        spc_de->d_name,
+                        TABLESPACE_VERSION_DIRECTORY,
+                        PG_TEMP_FILES_DIR);
         securec_check_ss(rc, "", "");
 #endif
-        RemovePgTempFilesInDir(temp_path, false);
+        RemovePgTempFilesInDir(temp_path);
 
 #ifdef PGXC
         /* Postgres-XC tablespaces include node name in path */
         rc = snprintf_s(temp_path,
-            sizeof(temp_path),
-            sizeof(temp_path) - 1,
-            "pg_tblspc/%s/%s_%s",
-            curSubDir,
-            TABLESPACE_VERSION_DIRECTORY,
-            g_instance.attr.attr_common.PGXCNodeName);
+                        sizeof(temp_path),
+                        sizeof(temp_path) - 1,
+                        "pg_tblspc/%s/%s_%s",
+                        spc_de->d_name,
+                        TABLESPACE_VERSION_DIRECTORY,
+                        g_instance.attr.attr_common.PGXCNodeName);
         securec_check_ss(rc, "", "");
 #else
         rc = snprintf_s(temp_path,
-            sizeof(temp_path),
-            sizeof(temp_path) - 1,
-            "pg_tblspc/%s/%s",
-            curSubDir,
-            TABLESPACE_VERSION_DIRECTORY);
-        securec_check_ss(rc, "", "");
+                        sizeof(temp_path),
+                        sizeof(temp_path) - 1,
+                        "pg_tblspc/%s/%s",
+                        spc_de->d_name,
+                        TABLESPACE_VERSION_DIRECTORY);
+        securec_check_ss(rc, "\0", "\0");
 #endif
         RemovePgTempRelationFiles(temp_path);
     }
@@ -3462,26 +3221,12 @@ void RemovePgTempFiles(void)
      * t_thrd.proc_cxt.DataDir as well.
      */
 #ifdef EXEC_BACKEND
-    RemovePgTempFilesInDir(PG_TEMP_FILES_DIR, false);
+    RemovePgTempFilesInDir(PG_TEMP_FILES_DIR);
 #endif
 }
 
-/*
- * Process one pgsql_tmp directory for RemovePgTempFiles.
- *
- * If missing_ok is true, it's all right for the named directory to not exist.
- * Any other problem results in a LOG message.  (missing_ok should be true at
- * the top level, since pgsql_tmp directories are not created until needed.)
- *
- * At the top level, this should be called with unlink_all = false, so that
- * only files matching the temporary name prefix will be unlinked.  When
- * recursing it will be called with unlink_all = true to unlink everything
- * under a top-level temporary directory.
- *
- * (These two flags could be replaced by one, but it seems clearer to keep
- * them separate.)
- */
-static void RemovePgTempFilesInDir(const char *tmpdirname, bool unlink_all)
+/* Process one pgsql_tmp directory for RemovePgTempFiles */
+static void RemovePgTempFilesInDir(const char* tmpdirname)
 {
     DIR* temp_dir = NULL;
     struct dirent* temp_de = NULL;
@@ -3503,27 +3248,10 @@ static void RemovePgTempFilesInDir(const char *tmpdirname, bool unlink_all)
         rc = snprintf_s(rm_path, sizeof(rm_path), sizeof(rm_path) - 1, "%s/%s", tmpdirname, temp_de->d_name);
         securec_check_ss(rc, "", "");
 
-        if (unlink_all || strncmp(temp_de->d_name, PG_TEMP_FILE_PREFIX, strlen(PG_TEMP_FILE_PREFIX)) == 0) {
-            struct stat statbuf;
-
-            if (lstat(rm_path, &statbuf) < 0) {
-                ereport(LOG, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", rm_path)));
-                continue;
-            }
-
-            if (S_ISDIR(statbuf.st_mode)) {
-                /* recursively remove contents, then directory itself */
-                RemovePgTempFilesInDir(rm_path, true);
-
-                if (rmdir(rm_path) < 0) {
-                    ereport(LOG, (errcode_for_file_access(), errmsg("could not remove directory \"%s\": %m", rm_path)));
-                }
-            } else {
-                (void)unlink(rm_path); /* note we ignore any error */
-            }
-        } else {
+        if (strncmp(temp_de->d_name, PG_TEMP_FILE_PREFIX, strlen(PG_TEMP_FILE_PREFIX)) == 0)
+            (void)unlink(rm_path); /* note we ignore any error */
+        else
             ereport(LOG, (errmsg("unexpected file found in temporary-files directory: \"%s\"", rm_path)));
-        }
     }
 
     (void)FreeDir(temp_dir);
@@ -3642,76 +3370,10 @@ static bool looks_like_temp_rel_name(const char *name)
     }
 
     /* Now we should be at the end. */
-    if (name[pos] != '\0') { 
+    if (name[pos] != '\0') {
         return false;
     }
     return true;
-}
-
-/*
- * walkdir: recursively walk a directory, applying the action to each
- * regular file and directory (including the named directory itself).
- *
- * If process_symlinks is true, the action and recursion are also applied
- * to regular files and directories that are pointed to by symlinks in the
- * given directory; otherwise symlinks are ignored.  Symlinks are always
- * ignored in subdirectories, ie we intentionally don't pass down the
- * process_symlinks flag to recursive calls.
- *
- * Errors are reported at level elevel, which might be ERROR or less.
- *
- * See also walkdir in initdb.c, which is a frontend version of this logic.
- */
-static void walkdir(const char *path, void (*action)(const char *fname, bool isdir, int elevel), bool process_symlinks,
-    int elevel)
-{
-    DIR *dir;
-    struct dirent *de;
-
-    dir = AllocateDir(path);
-
-    while ((de = ReadDirExtended(dir, path, elevel)) != NULL) {
-        char subpath[MAXPGPATH * 2];
-        struct stat fst;
-        int sret;
-
-        CHECK_FOR_INTERRUPTS();
-
-        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) {
-            continue;
-        }
-
-        int rc = sprintf_s(subpath, sizeof(subpath), "%s/%s", path, de->d_name);
-        securec_check_ss(rc, "", "");
-
-        if (process_symlinks) {
-            sret = stat(subpath, &fst);
-        } else {
-            sret = lstat(subpath, &fst);
-        }
-
-        if (sret < 0) {
-            ereport(elevel, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", subpath)));
-            continue;
-        }
-
-        if (S_ISREG(fst.st_mode)) {
-            (*action)(subpath, false, elevel);
-        } else if (S_ISDIR(fst.st_mode)) {
-            walkdir(subpath, action, false, elevel);
-        }
-    }
-
-    (void)FreeDir(dir); /* we ignore any error here */
-
-    /*
-     * It's important to fsync the destination directory itself as individual
-     * file fsyncs don't guarantee that the directory entry for the file is
-     * synced.  However, skip this if AllocateDir failed; the action function
-     * might not be robust against that.
-     */
-    if (dir)
-        (*action)(path, true, elevel);
 }
 
 void RemoveErrorCacheFiles()
@@ -3812,7 +3474,7 @@ bool FdRefcntIsZero(SMgrRelation reln, ForkNumber forkNum)
     RelFileNodeForkNum fileNode = RelFileNodeForkNumFill(reln->smgr_rnode, forkNum, 0);
 
     uint32 newHash = VFDTableHashCode((void*)&fileNode);
-    AutoMutexLock vfdLock(VFD_MAPPING_PARTITION_LOCK(newHash));
+    AutoMutexLock vfdLock(VFDMappingPartitionLock(newHash));
     vfdLock.lock();
 
     entry = (DataFileIdCacheEntry*)hash_search_with_hash_value(t_thrd.storage_cxt.DataFileIdCache,
@@ -3851,17 +3513,6 @@ FileExistStatus CheckFileExists(const char* path)
     }
 }
 
-static void unlink_if_exists_fname(const char *fname, bool isdir, int elevel)
-{
-    if (isdir) {
-        if (rmdir(fname) != 0 && errno != ENOENT)
-            ereport(elevel, (errcode_for_file_access(), errmsg("could not rmdir directory \"%s\": %m", fname)));
-    } else {
-        /* Use PathNameDeleteTemporaryFile to report filesize */
-        (void)PathNameDeleteTemporaryFile(fname, false);
-    }
-}
-
 /*
  * Compute hash code of RelFileNodeForkNum.
  */
@@ -3876,7 +3527,6 @@ static uint32 VFDTableHashCode(const void* tagPtr)
 void InitializeVFDLocks(void)
 {
     for (int i = 0; i < NUM_VFD_PARTITIONS; i++) {
-        pthread_mutex_init(&g_vfdLockArray[i], NULL);
+        pthread_mutex_init(&VFDLockArray[i], NULL);
     }
 }
-

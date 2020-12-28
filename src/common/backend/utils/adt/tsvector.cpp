@@ -31,9 +31,9 @@ static int comparePos(const void* a, const void* b)
 {
     int apos = WEP_GETPOS(*(const WordEntryPos*)a);
     int bpos = WEP_GETPOS(*(const WordEntryPos*)b);
-    if (apos == bpos) {
+
+    if (apos == bpos)
         return 0;
-    }
     return (apos > bpos) ? 1 : -1;
 }
 
@@ -48,9 +48,8 @@ static int uniquePos(WordEntryPos* a, int l)
     WordEntryPos* ptr = NULL;
     WordEntryPos* res = NULL;
 
-    if (l <= 1) {
+    if (l <= 1)
         return l;
-    }
 
     qsort((void*)a, l, sizeof(WordEntryPos), comparePos);
 
@@ -87,15 +86,14 @@ static int compareentry(const void* va, const void* vb, void* arg)
 static int uniqueentry(WordEntryIN* a, int l, char* buf, int* outbuflen)
 {
     int buflen;
-    WordEntryIN *ptr = NULL;
-    WordEntryIN *res = NULL;
+    WordEntryIN *ptr = NULL, *res = NULL;
     errno_t rc;
 
     Assert(l >= 1);
 
-    if (l > 1) {
+    if (l > 1)
         qsort_arg((void*)a, l, sizeof(WordEntryIN), compareentry, (void*)buf);
-    }
+
     buflen = 0;
     res = a;
     ptr = a + 1;
@@ -190,18 +188,18 @@ Datum tsvectorin(PG_FUNCTION_ARGS)
     errno_t rc;
 
     while (gettoken_tsvector(state, &token, &toklen, &pos, &poslen, NULL)) {
-        if (toklen >= MAXSTRLEN) {
+        if (toklen >= MAXSTRLEN)
             ereport(ERROR,
                 (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
                     errmsg("word is too long (%ld bytes, max %ld bytes)", (long)toklen, (long)(MAXSTRLEN - 1))));
-        }
-        if (cur - tmpbuf > MAXSTRPOS) {
+
+        if (cur - tmpbuf > MAXSTRPOS)
             ereport(ERROR,
                 (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
                     errmsg("string is too long for tsvector (%ld bytes, max %ld bytes)",
                         (long)(cur - tmpbuf),
                         (long)MAXSTRPOS)));
-        }
+
         /*
          * Enlarge buffers if needed
          */
@@ -237,17 +235,16 @@ Datum tsvectorin(PG_FUNCTION_ARGS)
 
     close_tsvector_parser(state);
 
-    if (len > 0) {
+    if (len > 0)
         len = uniqueentry(arr, len, tmpbuf, &buflen);
-    } else {
+    else
         buflen = 0;
-    }
 
-    if (buflen > MAXSTRPOS) {
+    if (buflen > MAXSTRPOS)
         ereport(ERROR,
             (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
                 errmsg("string is too long for tsvector (%d bytes, max %d bytes)", buflen, MAXSTRPOS)));
-    }
+
     totallen = CALCDATASIZE(len, buflen);
     in = (TSVector)palloc0(totallen);
     SET_VARSIZE(in, totallen);
@@ -293,9 +290,7 @@ Datum tsvectorout(PG_FUNCTION_ARGS)
 {
     TSVector out = PG_GETARG_TSVECTOR(0);
     char* outbuf = NULL;
-    int4 i;
-    int4 lenbuf = 0;
-    int4 pp;
+    int4 i, lenbuf = 0, pp;
     WordEntry* ptr = ARRPTR(out);
     char* curbegin = NULL;
     char* curin = NULL;
@@ -311,27 +306,27 @@ Datum tsvectorout(PG_FUNCTION_ARGS)
     curout = outbuf = (char*)palloc(lenbuf);
     for (i = 0; i < out->size; i++) {
         curbegin = curin = STRPTR(out) + ptr->pos;
-        if (i != 0) {
+        if (i != 0)
             *curout++ = ' ';
-        }
         *curout++ = '\'';
         while (curin - curbegin < ptr->len) {
             int len = pg_mblen(curin);
 
-            if (t_iseq(curin, '\'')) {
+            if (t_iseq(curin, '\''))
                 *curout++ = '\'';
-            } else if (t_iseq(curin, '\\')) {
+            else if (t_iseq(curin, '\\'))
                 *curout++ = '\\';
-            }
-            while (len--) {
+
+            while (len--)
                 *curout++ = *curin++;
-            }
         }
 
         *curout++ = '\'';
         if ((pp = POSDATALEN(out, ptr)) != 0) {
+
             int rc = 0;
             WordEntryPos* wptr = NULL;
+
             *curout++ = ':';
             wptr = POSDATAPTR(out, ptr);
             while (pp) {
@@ -354,9 +349,8 @@ Datum tsvectorout(PG_FUNCTION_ARGS)
                         break;
                 }
 
-                if (pp > 1) {
+                if (pp > 1)
                     *curout++ = ',';
-                }
                 pp--;
                 wptr++;
             }
@@ -380,6 +374,7 @@ Datum tsvectorout(PG_FUNCTION_ARGS)
  *		for each position:
  *			uint16 WordEntryPos
  */
+
 Datum tsvectorsend(PG_FUNCTION_ARGS)
 {
     TSVector vec = PG_GETARG_TSVECTOR(0);
@@ -421,10 +416,9 @@ Datum tsvectorrecv(PG_FUNCTION_ARGS)
     TSVector vec;
     int i;
     int32 nentries;
-    /* number of bytes used in the variable size
-     * area after fixed size TSVector header and
-     * WordEntries */
-    int datalen;
+    int datalen; /* number of bytes used in the variable size
+                  * area after fixed size TSVector header and
+                  * WordEntries */
     Size hdrlen;
     Size len; /* allocated size of vec */
     bool needSort = false;
@@ -434,6 +428,7 @@ Datum tsvectorrecv(PG_FUNCTION_ARGS)
         (unsigned int)(nentries) > (((Size)(MaxAllocSize / 2) - (Size)DATAHDRSIZE) / sizeof(WordEntry))) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_ARGUMENT_FOR_LOG), errmsg("invalid size of tsvector")));
     }
+
     hdrlen = DATAHDRSIZE + sizeof(WordEntry) * nentries;
 
     len = hdrlen * 2; /* times two to make room for lexemes */
@@ -450,19 +445,20 @@ Datum tsvectorrecv(PG_FUNCTION_ARGS)
         npos = (uint16)pq_getmsgint(buf, sizeof(uint16));
 
         /* sanity checks */
+
         lex_len = strlen(lexeme);
-        if (lex_len > MAXSTRLEN) {
+        if (lex_len > MAXSTRLEN)
             ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("invalid tsvector: lexeme too long")));
-        }
-        if (datalen > MAXSTRPOS) {
+
+        if (datalen > MAXSTRPOS)
             ereport(ERROR,
                 (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
                     errmsg("invalid tsvector: maximum total lexeme length exceeded")));
-        }
-        if (npos > MAXNUMPOS) {
+
+        if (npos > MAXNUMPOS)
             ereport(
                 ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("unexpected number of tsvector positions")));
-        }
+
         /*
          * Looks valid. Fill the WordEntry struct, and copy lexeme.
          *
@@ -485,9 +481,9 @@ Datum tsvectorrecv(PG_FUNCTION_ARGS)
 
         datalen += lex_len;
 
-        if (i > 0 && WordEntryCMP(&vec->entries[i], &vec->entries[i - 1], STRPTR(vec)) <= 0) {
+        if (i > 0 && WordEntryCMP(&vec->entries[i], &vec->entries[i - 1], STRPTR(vec)) <= 0)
             needSort = true;
-        }
+
         /* Receive positions */
         if (npos > 0) {
             uint16 j;
@@ -509,10 +505,9 @@ Datum tsvectorrecv(PG_FUNCTION_ARGS)
             wepptr = POSDATAPTR(vec, &vec->entries[i]);
             for (j = 0; j < npos; j++) {
                 wepptr[j] = (WordEntryPos)pq_getmsgint(buf, sizeof(WordEntryPos));
-                if (j > 0 && WEP_GETPOS(wepptr[j]) <= WEP_GETPOS(wepptr[j - 1])) {
+                if (j > 0 && WEP_GETPOS(wepptr[j]) <= WEP_GETPOS(wepptr[j - 1]))
                     ereport(ERROR,
                         (errcode(ERRCODE_INVALID_ARGUMENT_FOR_LOG), errmsg("position information is misordered")));
-                }
             }
 
             datalen += (npos + 1) * sizeof(WordEntry);
@@ -521,8 +516,8 @@ Datum tsvectorrecv(PG_FUNCTION_ARGS)
 
     SET_VARSIZE(vec, hdrlen + datalen);
 
-    if (needSort) {
+    if (needSort)
         qsort_arg((void*)ARRPTR(vec), vec->size, sizeof(WordEntry), compareentry, (void*)STRPTR(vec));
-    }
+
     PG_RETURN_TSVECTOR(vec);
 }

@@ -317,7 +317,12 @@ static void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple
 
         /* print attribute type */
         appendStringInfoChar(s, '[');
-        appendStringInfoString(s, format_type_be(typid));
+        char* type_name = format_type_be(typid);
+        if (strlen(type_name) == strlen("clob") && strncmp(type_name, "clob", strlen("clob")) == 0) {
+            errno_t rc = strcpy_s(type_name, sizeof("clob"), "text");
+            securec_check_c(rc, "\0", "\0");
+        }
+        appendStringInfoString(s, type_name);
         appendStringInfoChar(s, ']');
 
         /* query output function */
@@ -409,7 +414,7 @@ static void pg_decode_change(
             Assert(false);
     }
 
-    (void)MemoryContextSwitchTo(old);
+    MemoryContextSwitchTo(old);
     MemoryContextReset(data->context);
 
     OutputPluginWrite(ctx, true);

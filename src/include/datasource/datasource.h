@@ -43,4 +43,3 @@ extern DataSource* GetDataSourceByName(const char* sourcename, bool missing_ok);
 #define EC_CIPHER_TEXT_LENGTH 1024
 
 #endif /* DATASOURCE_H */
-

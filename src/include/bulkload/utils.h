@@ -62,13 +62,11 @@ struct CmdBase {
     {
     }
 
-#ifdef GDS_SERVER
     virtual ~CmdBase(){};
-#endif
 };
 
 struct CmdData : public CmdBase {
-    char *m_data;
+    char* m_data;
     uint32 m_len;
 
     CmdData() : m_data(NULL), m_len(0)
@@ -77,19 +75,19 @@ struct CmdData : public CmdBase {
 };
 
 struct CmdBegin : public CmdBase {
-    char *m_url;
+    char* m_url;
     uint64 m_id;
     char m_format;
     char m_nodeType;
     char m_quote;
     char m_escape;
-    char *m_eol;
+    char* m_eol;
     bool m_header;
     int m_nodeNum;
-    char *m_nodeName;
+    char* m_nodeName;
     int m_fixSize;
-    char *m_prefix;
-    char *m_fileheader;
+    char* m_prefix;
+    char* m_fileheader;
 
     CmdBegin()
     {
@@ -124,7 +122,7 @@ struct CmdBegin : public CmdBase {
 
 struct CmdResponse : public CmdBase {
     int m_result;
-    char *m_reason;
+    char* m_reason;
     CmdResponse() : m_result(0), m_reason(NULL)
     {
     }
@@ -138,7 +136,7 @@ struct CmdResponse : public CmdBase {
 
 struct CmdError : public CmdBase {
     char m_level;
-    char *m_detail;
+    char* m_detail;
 
     CmdError() : m_level(0), m_detail(NULL)
     {
@@ -153,8 +151,8 @@ struct CmdError : public CmdBase {
 
 struct CmdRemoteLog : public CmdBase {
     int m_datasize;
-    char *m_data;
-    char *m_name;
+    char* m_data;
+    char* m_name;
     CmdRemoteLog() : m_datasize(0), m_data(NULL), m_name(NULL)
     {
     }
@@ -167,7 +165,7 @@ struct CmdRemoteLog : public CmdBase {
 };
 
 struct CmdFileSwitch : public CmdBase {
-    char *m_fileName;
+    char* m_fileName;
 
     CmdFileSwitch() : m_fileName(NULL)
     {
@@ -181,7 +179,7 @@ struct CmdFileSwitch : public CmdBase {
 
 struct CmdQueryResult : public CmdBase {
     int m_result;
-    const char *m_version_num;
+    const char* m_version_num;
 
     // explicit constructor
     CmdQueryResult() : m_result(0)
@@ -189,7 +187,7 @@ struct CmdQueryResult : public CmdBase {
     }
 };
 
-inline void U64ToString(uint64 in, char *out, int len)
+inline void U64ToString(uint64 in, char* out, int len)
 {
 #if __WORDSIZE == 64
     int rc = snprintf_s(out, len, len - 1, "%lu", in);
@@ -235,21 +233,48 @@ break
     if (json == NULL)                \
 return -1
 
-#define READ_JSON_INT(_field) tmp->_field = (tmpObj = cJSON_GetObjectItem(json, #_field))->valueint
-#define READ_JSON_STRING(_field) do { \
-    tmpObj = cJSON_GetObjectItem(json, #_field);                                        \
-    if (tmpObj)                                                                         \
-        tmp->_field = (char *)cJSON_strdup((const unsigned char *)tmpObj->valuestring); \
-    else                                                                                \
-        tmp->_field = NULL;                                                             \
-} while (0)
+#define READ_JSON_INT(_field)                           \
+    do {                                                \
+        tmpObj = cJSON_GetObjectItem(json, #_field);    \
+        if (tmpObj)                                     \
+            tmp->_field = tmpObj->valueint;             \
+        else                                            \
+            return -1;                                  \
+    } while (0)
 
-#define READ_JSON_BOOL(_field) tmp->_field = (tmpObj = cJSON_GetObjectItem(json, #_field))->type == cJSON_True
-#define READ_JSON_UINT64(_field) do { \
-    char *str = (tmpObj = cJSON_GetObjectItem(json, #_field))->valuestring; \
-    char *_end;                                                             \
-    tmp->_field = strtoul(str, &_end, 10);                                  \
-} while (0)
+#define READ_JSON_STRING(_field)                                                          \
+    do {                                                                                  \
+        tmpObj = cJSON_GetObjectItem(json, #_field);                                      \
+        if (tmpObj)                                                                       \
+            tmp->_field = (char*)cJSON_strdup((const unsigned char*)tmpObj->valuestring); \
+        else                                                                              \
+            tmp->_field = NULL;                                                           \
+    } while (0)
+
+#define READ_JSON_BOOL(_field)                          \
+    do {                                                \
+        tmpObj = cJSON_GetObjectItem(json, #_field);    \
+        if (tmpObj)                                     \
+            tmp->_field = tmpObj->type == cJSON_True;   \
+        else                                            \
+            return -1;                                  \
+    } while (0)
+
+#define READ_JSON_UINT64(_field)                                                \
+    do {                                                                        \
+        tmpObj = cJSON_GetObjectItem(json, #_field);                            \
+        if (tmpObj) {                                                           \
+            char* str = tmpObj->valuestring;                                    \
+            if (str) {                                                          \
+                char* _end;                                                     \
+                tmp->_field = strtoul(str, &_end, 10);                          \
+            } else {                                                            \
+                return -1;                                                      \
+            }                                                                   \
+        } else {                                                                \
+            return -1;                                                          \
+        }                                                                       \
+    } while (0)
 
 #define READ_JSON_END() \
     cJSON_Delete(json); \
@@ -265,7 +290,7 @@ typedef enum {
     LEVEL_ERROR
 } LogLevel;
 
-#define GDSCmdHeaderSize 5 /* length of Cmd header */
+#define GDSCmdHeaderSize 5 /*length of Cmd header*/
 
 typedef enum {
     FORMAT_UNKNOWN,

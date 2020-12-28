@@ -30,7 +30,8 @@
 
 #define INVALIDSEQUUID 0
 
-/* extern THR_LOCAL char *PGXCNodeName; */
+// extern THR_LOCAL char *PGXCNodeName;
+
 typedef int64 GTM_UUID;
 
 typedef struct FormData_pg_sequence {
@@ -52,6 +53,7 @@ typedef FormData_pg_sequence* Form_pg_sequence;
 /*
  * Columns of a sequence relation
  */
+
 #define SEQ_COL_NAME 1
 #define SEQ_COL_LASTVAL 2
 #define SEQ_COL_STARTVAL 3
@@ -108,7 +110,7 @@ extern Datum pg_sequence_parameters(PG_FUNCTION_ARGS);
 
 extern void DefineSequence(CreateSeqStmt* stmt);
 extern void AlterSequence(AlterSeqStmt* stmt);
-extern void PreventAlterSeqInTransaction(bool isTopLevel, const AlterSeqStmt* stmt);
+extern void PreventAlterSeqInTransaction(bool isTopLevel, AlterSeqStmt* stmt);
 extern void ResetSequence(Oid seq_relid);
 
 extern void seq_redo(XLogReaderState* rptr);
@@ -144,6 +146,7 @@ typedef struct rename_sequence_callback_arg {
     char* oldseqname;
 } rename_sequence_callback_arg;
 
+extern void delete_global_seq(Oid relid, Relation seqrel);
 /* Sequence callbacks on GTM */
 extern void register_sequence_rename_cb(const char* oldseqname, const char* newseqname);
 extern void rename_sequence_cb(GTMEvent event, void* args);
@@ -154,11 +157,10 @@ extern bool IsTempSequence(Oid relid);
 extern char* GetGlobalSeqName(Relation rel, const char* new_seqname, const char* new_schemaname);
 extern char* gen_hybirdmsg_for_CreateSeqStmt(CreateSeqStmt* stmt, const char* queryString);
 extern int64 gen_uuid(List* uuids);
-extern char* gen_hybirdmsg_for_CreateSchemaStmt(const CreateSchemaStmt* stmt, const char* queryString);
+extern char* gen_hybirdmsg_for_CreateSchemaStmt(CreateSchemaStmt* stmt, const char* queryString);
 extern void gen_uuid_for_CreateStmt(CreateStmt* stmt, List* uuids);
 extern void gen_uuid_for_CreateSchemaStmt(List* stmts, List* uuids);
 
 #endif
 
 #endif /* SEQUENCE_H */
-

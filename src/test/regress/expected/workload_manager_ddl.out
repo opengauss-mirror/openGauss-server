@@ -1,0 +1,318 @@
+--create resource pool success.
+create resource pool Test_pool_1;
+create resource pool test_pool_2 with(mem_percent=11, cpu_affinity=1);
+create resource pool TEst_pool_3 with(mem_percent=11);
+create resource pool "test_pool_4" with(cpu_affinity=1);
+create resource pool test_pool_5 with(control_group="low");
+create resource pool test_pool_6 with(control_group="mediuM");
+create resource pool test_pool_7 with(control_group="HIGH");
+create resource pool test_pool_8 with(control_group="Rush");
+select * from pg_resource_pool;
+ respool_name | mem_percent | cpu_affinity | control_group 
+--------------+-------------+--------------+---------------
+ test_pool_1  |           0 |           -1 | 
+ test_pool_2  |          11 |            1 | 
+ default_pool |          78 |           -1 | 
+ test_pool_3  |          11 |           -1 | 
+ test_pool_4  |           0 |            1 | 
+ test_pool_5  |           0 |           -1 | low
+ test_pool_6  |           0 |           -1 | medium
+ test_pool_7  |           0 |           -1 | high
+ test_pool_8  |           0 |           -1 | rush
+(9 rows)
+
+---create resource pool error.
+create resource pool test_pool_1 with(mem_percent=11, cpu_affinity=1);
+ERROR:  Resource Pool "test_pool_1": object already defined
+create resource pool test_pool_error_1 with(mem_percent=11, mem_percent=11, cpu_affinity=1);
+ERROR:  redundant options
+create resource pool test_pool_error_2 with(mem_percent=11, cpu_affinity=1, cpu_affinity=1);
+ERROR:  redundant options
+create resource pool test_pool_error_3 with(memory_percen=12);
+ERROR:  incorrect option: memory_percen
+create resource pool test_pool_error_4 with(mem_percent=101);
+ERROR:  mem_percent value is out of range
+HINT:  memory percentage range is (0 ~ 100).
+create resource pool test_pool_error_5 with(mem_percent=-1);
+ERROR:  mem_percent value is out of range
+HINT:  memory percentage range is (0 ~ 100).
+create resource pool test_pool_error_6 with(mem_percent=99);
+ERROR:  Can not change resource pool because mem_percent is not enough.
+HINT:  The insufficient memory percentage is 21
+create resource pool test_pool_error_7 with(cpu_affinity=-2);
+ERROR:  cpu_affinity value is out of range
+--?HINT:  system cpu number is .*
+create resource pool test_pool_error_8 with(cpu_affinity=0);
+ERROR:  cpu_affinity value can't be 0.
+create resource pool test_pool_error_9 with(cpu_affinity=-1);
+ERROR:  cpu_affinity value can't be -1.
+create resource pool test_pool_error_10 with(control_group="undefined");
+ERROR:  invalid control group: undefined
+create resource pool test_pool_error_12 with(control_group="rush", cpu_affinity=2);
+ERROR:  can not specify cpu affinity and control group at the same time.
+create resource pool test_pool_error_13 with(cpu_affinity=2, control_group="rush");
+ERROR:  can not specify cpu affinity and control group at the same time.
+select * from pg_resource_pool;
+ respool_name | mem_percent | cpu_affinity | control_group 
+--------------+-------------+--------------+---------------
+ test_pool_1  |           0 |           -1 | 
+ test_pool_2  |          11 |            1 | 
+ default_pool |          78 |           -1 | 
+ test_pool_3  |          11 |           -1 | 
+ test_pool_4  |           0 |            1 | 
+ test_pool_5  |           0 |           -1 | low
+ test_pool_6  |           0 |           -1 | medium
+ test_pool_7  |           0 |           -1 | high
+ test_pool_8  |           0 |           -1 | rush
+(9 rows)
+
+---alter resource pool success.
+alter resource pool test_pool_1 with(mem_percent=12, cpu_affinity=2);
+alter resource pool test_pool_2 with(mem_percent=31);
+alter resource pool test_pool_3 with(cpu_affinity=3);
+alter resource pool test_pool_5 with(control_group="high");
+select * from pg_resource_pool;
+ respool_name | mem_percent | cpu_affinity | control_group 
+--------------+-------------+--------------+---------------
+ test_pool_4  |           0 |            1 | 
+ test_pool_6  |           0 |           -1 | medium
+ test_pool_7  |           0 |           -1 | high
+ test_pool_8  |           0 |           -1 | rush
+ test_pool_1  |          12 |            2 | 
+ default_pool |          46 |           -1 | 
+ test_pool_2  |          31 |            1 | 
+ test_pool_3  |          11 |            3 | 
+ test_pool_5  |           0 |           -1 | high
+(9 rows)
+
+---alter resource pool error.
+alter resource pool none_resource_pool with(mem_percent=12, cpu_affinity=2);
+ERROR:  Resource Pool "none_resource_pool": object not defined
+alter resource pool test_pool_1;
+ERROR:  No options specified
+alter resource pool test_pool_1 with(mem_percent='1a');
+ERROR:  mem_percent requires a numeric value
+alter resource pool test_pool_1 with(cpu_affinity='1a');
+ERROR:  cpu_affinity requires a numeric value
+alter resource pool test_pool_1 with(control_group="undefined");
+ERROR:  invalid control group: undefined
+alter resource pool test_pool_4 with(control_group="rush");
+ERROR:  can not alter control group while cpu affinity is not default value.
+alter resource pool test_pool_5 with(cpu_affinity=1);
+ERROR:  can not alter cpu affinity while control group is not default value.
+alter resource pool test_pool_1 with(control_group="rush", cpu_affinity=2);
+ERROR:  can not specify cpu affinity and control group at the same time.
+alter resource pool test_pool_1 with(cpu_affinity=2, control_group="rush");
+ERROR:  can not specify cpu affinity and control group at the same time.
+select * from pg_resource_pool;
+ respool_name | mem_percent | cpu_affinity | control_group 
+--------------+-------------+--------------+---------------
+ test_pool_4  |           0 |            1 | 
+ test_pool_6  |           0 |           -1 | medium
+ test_pool_7  |           0 |           -1 | high
+ test_pool_8  |           0 |           -1 | rush
+ test_pool_1  |          12 |            2 | 
+ default_pool |          46 |           -1 | 
+ test_pool_2  |          31 |            1 | 
+ test_pool_3  |          11 |            3 | 
+ test_pool_5  |           0 |           -1 | high
+(9 rows)
+
+---drop resource pool success.
+drop resource pool test_pool_4;
+drop resource pool if exists TEst_pool_3;
+drop resource pool if exists test_pool_4;
+NOTICE:  Resource Pool "test_pool_4" does not exist, skipping
+select * from pg_resource_pool;
+ respool_name | mem_percent | cpu_affinity | control_group 
+--------------+-------------+--------------+---------------
+ test_pool_6  |           0 |           -1 | medium
+ test_pool_7  |           0 |           -1 | high
+ test_pool_8  |           0 |           -1 | rush
+ test_pool_1  |          12 |            2 | 
+ test_pool_2  |          31 |            1 | 
+ test_pool_5  |           0 |           -1 | high
+ default_pool |          57 |           -1 | 
+(7 rows)
+
+---drop resource pool error part 1.
+drop resource pool test_pool_4;
+ERROR:  Resource Pool "test_pool_4": object not defined
+select * from pg_resource_pool;
+ respool_name | mem_percent | cpu_affinity | control_group 
+--------------+-------------+--------------+---------------
+ test_pool_6  |           0 |           -1 | medium
+ test_pool_7  |           0 |           -1 | high
+ test_pool_8  |           0 |           -1 | rush
+ test_pool_1  |          12 |            2 | 
+ test_pool_2  |          31 |            1 | 
+ test_pool_5  |           0 |           -1 | high
+ default_pool |          57 |           -1 | 
+(7 rows)
+
+---create workload group success.
+create workload group test_group_1 using resource pool test_pool_1 with(act_statements=3);
+create workload group test_group_2;
+create workload group test_group_3 using resource pool test_pool_1;
+create workload group test_group_4 with(act_statements=10);
+select * from pg_workload_group;
+ workload_gpname | respool_oid | act_statements 
+-----------------+-------------+----------------
+ default_group   |          10 |             -1
+--? test_group_1    |.*|              3
+ test_group_2    |          10 |             -1
+--? test_group_3    |.*|             -1
+ test_group_4    |          10 |             10
+(5 rows)
+
+---create workload group error.
+create workload group test_group_1 using resource pool test_pool_1 with(act_statements=3);
+ERROR:  Workload Group "test_group_1": object already defined
+create workload group test_group_5 with(act_statements=10, act_statements=12);
+ERROR:  redundant options
+create workload group test_group_6 with(active_statem=11);
+ERROR:  incorrect option: active_statem
+create workload group test_group_7 using resource pool none_resource_pool;
+ERROR:  Resource Pool "none_resource_pool": object not defined
+create workload group test_group_8 with(act_statements=-1);
+ERROR:  act_statements must be positive
+select * from pg_workload_group;
+ workload_gpname | respool_oid | act_statements 
+-----------------+-------------+----------------
+ default_group   |          10 |             -1
+--? test_group_1    |.*|              3
+ test_group_2    |          10 |             -1
+--? test_group_3    |.*|             -1
+ test_group_4    |          10 |             10
+(5 rows)
+
+---alter workload group success.
+alter workload group test_group_1 using resource pool default_pool with(act_statements=4);
+alter workload group test_group_1 using resource pool test_pool_1;
+alter workload group test_group_1 with(act_statements=5);
+select * from pg_workload_group;
+ workload_gpname | respool_oid | act_statements 
+-----------------+-------------+----------------
+ default_group   |          10 |             -1
+ test_group_2    |          10 |             -1
+--? test_group_3    |.*|             -1
+ test_group_4    |          10 |             10
+--? test_group_1    |.*|              5
+(5 rows)
+
+---alter workload group error.
+alter workload group no_group using resource pool default_pool with(act_statements=4);
+ERROR:  Workload Group "no_group": object not defined
+alter workload group test_group_1;
+ERROR:  No options specified
+alter workload group test_group_1 using resource pool default_pool with(act_statements='1a');
+ERROR:  act_statements requires a numeric value
+select * from pg_workload_group;
+ workload_gpname | respool_oid | act_statements 
+-----------------+-------------+----------------
+ default_group   |          10 |             -1
+ test_group_2    |          10 |             -1
+--? test_group_3    |.*|             -1
+ test_group_4    |          10 |             10
+--? test_group_1    |.*|              5
+(5 rows)
+
+---drop workload group success.
+drop workload group test_group_3;
+drop workload group if exists test_group_3;
+NOTICE:  Workload Group "test_group_3" does not exist, skipping
+drop workload group if exists test_group_4;
+select * from pg_workload_group;
+ workload_gpname | respool_oid | act_statements 
+-----------------+-------------+----------------
+ default_group   |          10 |             -1
+ test_group_2    |          10 |             -1
+--? test_group_1    |.*|              5
+(3 rows)
+
+---drop resource pool error part 2.
+drop resource pool test_pool_1;
+ERROR:  cannot drop resource pool "test_pool_1" because other objects depend on it
+DETAIL:  workload group "test_group_1" depends on resource pool "test_pool_1"
+---drop workload group error part 1.
+drop workload group none_group;
+ERROR:  Workload Group "none_group": object not defined
+---create application success.
+create app workload group mapping test_app_1;
+create app workload group mapping test_app_2 with(workload_gpname='test_group_1');
+create app workload group mapping test_app_3 with(workload_gpname='default_group');
+select * from pg_app_workloadgroup_mapping;
+       appname       | workload_gpname 
+---------------------+-----------------
+ default_application | default_group
+ test_app_1          | default_group
+ test_app_2          | test_group_1
+ test_app_3          | default_group
+(4 rows)
+
+---create application error.
+create app workload group mapping test_app_1 with(workload_gpname='test_group_1');
+ERROR:  Application Workload Group Mapping "test_app_1": object already defined
+create app workload group mapping test_app_1 with(workload_gpname='none_group');
+ERROR:  Application Workload Group Mapping "test_app_1": object already defined
+select * from pg_app_workloadgroup_mapping;
+       appname       | workload_gpname 
+---------------------+-----------------
+ default_application | default_group
+ test_app_1          | default_group
+ test_app_2          | test_group_1
+ test_app_3          | default_group
+(4 rows)
+
+---alter application success.
+alter app workload group mapping test_app_1 with(workload_gpname='test_group_1');
+alter app workload group mapping test_app_2 with(workload_gpname='default_group');
+select * from pg_app_workloadgroup_mapping;
+       appname       | workload_gpname 
+---------------------+-----------------
+ default_application | default_group
+ test_app_3          | default_group
+ test_app_1          | test_group_1
+ test_app_2          | default_group
+(4 rows)
+
+---alter application error.
+alter app workload group mapping none_app with(workload_gpname='default_group');
+ERROR:  Application Workload Group Mapping "none_app": object not defined
+alter app workload group mapping test_app_1 with(workload_gpname=111);
+ERROR:  Workload Group "111": object not defined
+select * from pg_app_workloadgroup_mapping;
+       appname       | workload_gpname 
+---------------------+-----------------
+ default_application | default_group
+ test_app_3          | default_group
+ test_app_1          | test_group_1
+ test_app_2          | default_group
+(4 rows)
+
+---drop application success.
+drop app workload group mapping test_app_2;
+drop app workload group mapping if exists test_app_2;
+NOTICE:  Workload Group "test_app_2" does not exist, skipping
+drop app workload group mapping if exists test_app_3;
+select * from pg_app_workloadgroup_mapping;
+       appname       | workload_gpname 
+---------------------+-----------------
+ default_application | default_group
+ test_app_1          | test_group_1
+(2 rows)
+
+---drop workload group error part 2.
+drop workload group test_group_1;
+ERROR:  cannot drop workload group "test_group_1" because other objects depend on it
+DETAIL:  application "test_app_1" depends on workload group "test_group_1"
+---drop application error.
+drop app workload group mapping none_app;
+ERROR:  Workload Group "none_app": object not defined
+select * from pg_app_workloadgroup_mapping;
+       appname       | workload_gpname 
+---------------------+-----------------
+ default_application | default_group
+ test_app_1          | test_group_1
+(2 rows)
+

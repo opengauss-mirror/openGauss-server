@@ -377,7 +377,7 @@ CREATE TABLE xcrem_employee (EMPNO CHAR(6) NOT NULL, FIRSTNAME VARCHAR(12) NOT N
 create table xcrem_temptable as select * from xcrem_employee;
 create or replace function volatile_func(id int) returns int as
 $$begin return 3;end $$ language plpgsql;
-\set EXP 'explain (verbose true, costs false, nodes false)'
+\set EXP 'explain (verbose true, costs false)'
 \set SEL 'select empno, edlevel, lastname, salary, bonus from xcrem_employee order by empno'
 -- Test UPDATE
 \set stmt 'update xcrem_employee E set salary = salary + salary + 0.3 * bonus WHERE SALARY > ( SELECT AVG(SALARY) FROM xcrem_employee WHERE SUBSTRING(E.WORKDEPT,1,1) = SUBSTRING(WORKDEPT, 1,1) )'

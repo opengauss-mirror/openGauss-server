@@ -11,7 +11,7 @@ However, current tuning approaches have several limitations:
 - some reinforcement learning methods lose sight of fewer relations between state (database status) and action (knob) while tuning knobs;
 
 Thus, we want to implement a robust system X-Tuner and try to avoid the above limitations.
-X-Tuner is a component of OpenGauss, implemented with deep reinforcement
+X-Tuner is a component of openGauss, implemented with deep reinforcement
 learning and global optimization algorithm. X-Tuner is also a DB-tuner framework that you can develop your tuning method on it far from being only a tuning tool.
 
 # How to use
@@ -48,7 +48,7 @@ python3 main.py --help
     bayesian-optimization
     ptable
 
-**Suggest:** Firstly, please upgrade your pip. ```python -m pip install --upgrade pip```
+Note: Firstly, please upgrade your pip: ```python -m pip install --upgrade pip```
 
 ## Start tuning
 1. Start your database instance first;
@@ -63,10 +63,10 @@ Much important information is configured here.
 Note: There are some demo configuration JSON files in the `share` directory. 
 
 
-    usage: gs_xtuner [-h] [-f DB_CONFIG_FILE] [-x TUNER_CONFIG_FILE]
-                     [--db-name DB_NAME] [--db-user DB_USER] [--port PORT]
+    usage: gs_xtuner [-h] [--db-name DB_NAME] [--db-user DB_USER] [--port PORT]
                      [--host HOST] [--host-user HOST_USER]
-                     [--host-client-port HOST_CLIENT_PORT] [-v]
+                     [--host-ssh-port HOST_SSH_PORT] [-f DB_CONFIG_FILE]
+                     [-x TUNER_CONFIG_FILE] [-v]
                      {train,tune,recommend}
     
     X-Tuner: a self-tuning tool integrated by openGauss.
@@ -82,42 +82,46 @@ Note: There are some demo configuration JSON files in the `share` directory.
       -f DB_CONFIG_FILE, --db-config-file DB_CONFIG_FILE
                             You can pass a path of configuration file otherwise
                             you should enter database information by command
-                            arguments manually.
+                            arguments manually. Please see the template file
+                            share/client.json.template.
       -x TUNER_CONFIG_FILE, --tuner-config-file TUNER_CONFIG_FILE
                             This is the path of the core configuration file of the
                             X-Tuner. You can specify the path of the new
-                            configuration file. The default path is xtuner.conf.
-                            You can modify the configuration file to control the
-                            tuning process.
+                            configuration file. The default path is
+                            /path/to/xtuner/xtuner.conf. You can
+                            modify the configuration file to control the tuning
+                            process.
+      -v, --version         show program's version number and exit
+    
+    Database Connection Information:
       --db-name DB_NAME     The name of database where your workload running on.
-      --db-user DB_USER     Use this user to log in your database. Note that the
-                            user must have permissions.
+      --db-user DB_USER     Use this user to login your database. Note that the
+                            user must have sufficient permissions.
       --port PORT           Use this port to connect with the database.
       --host HOST           The IP address of your database installation host.
       --host-user HOST_USER
                             The login user of your database installation host.
-      --host-client-port HOST_CLIENT_PORT
+      --host-ssh-port HOST_SSH_PORT
                             The SSH port of your database installation host.
-      -v, --version         show program's version number and exit
-
+                        
 
 ### Some examples for three modes
 Switch to the tuner directory and run the following example command:
 
     cd tuner
     export PYTHONPATH='..'  # Set env variable.
-    python3 main.py train -f client.json
-    python3 main.py tune -f client.json
-    python3 main.py recommend -f client.json
+    python3 main.py train -f server.json
+    python3 main.py tune -f server.json
+    python3 main.py recommend -f server.json
 
 Install the X-Tuner and you can run the following example command anywhere:
 
-    gs_xtuner train -f client.json
+    gs_xtuner train -f server.json
     gs_xtuner train --port 6789 --db-name tpch --db-user dba --host 10.90.56.172 --host-user omm
-    gs_xtuner tune -f client.json
-    gs_xtuner recommend -f client.json
+    gs_xtuner tune -f server.json
+    gs_xtuner recommend -f server.json
 
-A template for client.json:
+A template for server.json:
 
 ```json
 {
@@ -130,7 +134,7 @@ A template for client.json:
 }
 ```
 
-p.s The detailed configurations are configured in the configuration file (the default one is xtuner.conf).
+Note: The detailed configurations are configured in the configuration file (the default one is xtuner.conf).
 
 ### Watching the log files
 1. log/opengauss_tuner.log: The log file records events that occur in runtime. You could locate bugs through it.

@@ -6,7 +6,7 @@ set current_schema=vector_setop_engine;
 --- test 5: SetOp with RunSort
 ----
 set enable_hashagg=off;
-explain (verbose, costs off, nodes off) select * from vector_setop_table_01 intersect all select * from vector_setop_table_02 order by 1, 2, 3;
+explain (verbose, costs off) select * from vector_setop_table_01 intersect all select * from vector_setop_table_02 order by 1, 2, 3;
                                                                                                                                                   QUERY PLAN                                                                                                                                                  
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Row Adapter
@@ -34,7 +34,7 @@ select * from vector_setop_table_01 intersect all select * from vector_setop_tab
         2 |        3 |     2.3 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
 (2 rows)
 
-explain (verbose, costs off, nodes off) select * from vector_setop_table_01 intersect select * from vector_setop_table_02 order by 1, 2, 3;
+explain (verbose, costs off) select * from vector_setop_table_01 intersect select * from vector_setop_table_02 order by 1, 2, 3;
                                                                                                                                                   QUERY PLAN                                                                                                                                                  
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Row Adapter
@@ -62,7 +62,7 @@ select * from vector_setop_table_01 intersect select * from vector_setop_table_0
         2 |        3 |     2.3 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
 (2 rows)
 
-explain (verbose, costs off, nodes off) select * from vector_setop_table_01 except all select * from vector_setop_table_02 order by 1, 2, 3;
+explain (verbose, costs off) select * from vector_setop_table_01 except all select * from vector_setop_table_02 order by 1, 2, 3;
                                                                                                                                                   QUERY PLAN                                                                                                                                                  
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Row Adapter
@@ -90,7 +90,7 @@ select * from vector_setop_table_01 except all select * from vector_setop_table_
         2 |        3 |     2.3 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
 (2 rows)
 
-explain (verbose, costs off, nodes off) select * from vector_setop_table_01 except select * from vector_setop_table_02 order by 1, 2, 3;
+explain (verbose, costs off) select * from vector_setop_table_01 except select * from vector_setop_table_02 order by 1, 2, 3;
                                                                                                                                                   QUERY PLAN                                                                                                                                                  
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Row Adapter
@@ -118,7 +118,7 @@ select * from vector_setop_table_01 except select * from vector_setop_table_02 o
         2 |        3 |     2.3 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
 (2 rows)
 
-explain (verbose, costs off, nodes off) select col_interval from vector_setop_table_01 intersect select col_interval from vector_setop_table_02 order by 1;
+explain (verbose, costs off) select col_interval from vector_setop_table_01 intersect select col_interval from vector_setop_table_02 order by 1;
                                        QUERY PLAN                                       
 ----------------------------------------------------------------------------------------
  Row Adapter
@@ -146,7 +146,7 @@ select col_interval from vector_setop_table_01 intersect select col_interval fro
  @ 2 days 13 hours 25 mins 56 secs
 (2 rows)
 
-explain (verbose, costs off, nodes off) select 1 from (select * from vector_setop_table_01 union all select * from vector_setop_table_01) order by 1;
+explain (verbose, costs off) select 1 from (select * from vector_setop_table_01 union all select * from vector_setop_table_01) order by 1;
                                  QUERY PLAN                                 
 ----------------------------------------------------------------------------
  Row Adapter
@@ -197,7 +197,7 @@ select * from vector_setop_table_05 intersect all select * from vector_setop_tab
 ----
 --- test 7: Test append_merge_exec_nodes of SetOp
 ----
-explain (verbose, costs off, nodes off) select * from vector_setop_table_05 where col_inta = 2 union all select * from vector_setop_table_03 where col_intb = 5 order by 1, 2, 4;
+explain (verbose, costs off) select * from vector_setop_table_05 where col_inta = 2 union all select * from vector_setop_table_03 where col_intb = 5 order by 1, 2, 4;
                                                                                                                                                QUERY PLAN                                                                                                                                               
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Row Adapter

@@ -1,0 +1,21 @@
+test: slot_getsomeattrs
+test: slot_getattr
+test: slot_getallattrs
+test: slot_attisnull
+
+test: ExecClearTuple
+test: heap_form_tuple
+test: heap_deform_tuple
+test: heap_copytuple
+test: heap_modify_tuple
+test: index_form_tuple
+
+test: ExecStoreTuple
+test: ExecFetchSlotTuple
+test: ExecCopySlotTuple
+
+
+test: hw_setop_writefile
+test: heap_form_minimal_tuple
+test: heap_free_minimal_tuple
+test: heap_copy_minimal_tuple

@@ -20,7 +20,7 @@ FROM WITH_001,offers_20050701
 WHERE WITH_001.c1 LIKE '%c_'
 GROUP BY ROLLUP(PARTY_FIRSTNAME);
 
-explain  (costs off, verbose on, nodes off)
+explain  (costs off, verbose on)
 WITH WITH_001 AS (
     SELECT CAST(associate_expns_type_cd AS varchar) c1
     FROM associate_benefit_expense
@@ -44,7 +44,7 @@ item_id varchar(40)
 );
 ;
 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 MERGE INTO position_grade t1
 USING (
 SELECT ITEM_ID c2
@@ -59,7 +59,7 @@ FROM sales_transaction_line ) t2
 ON ( t2.c2 = t1.position_grade_cd )
 WHEN NOT MATCHED THEN INSERT VALUES ( t2.c2,t2.c2 );
 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 insert into position_grade select t2.c2,t2.c2 from position_grade t1 left join (SELECT ITEM_ID c2
 FROM sales_transaction_line ) t2 ON ( t2.c2 = t1.position_grade_cd );
 

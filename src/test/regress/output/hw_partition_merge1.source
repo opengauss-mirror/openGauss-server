@@ -1,0 +1,182 @@
+-- ALTER TABLE MERGE PARTITIONS INTO PARTITION
+-- 0. Functional Test
+-- 1. Abnormal Test
+-- 2. Table has tablespace
+-- 3. Table has toast
+-- 4. Table has index
+-- 5. Table has VM and FSM
+-- 0. Functional Test
+create table test_merge_functional_test (a int, b text)
+partition by range (a)
+(
+	partition test_merge_functional_test_p1 values less than (10),
+	partition test_merge_functional_test_p2 values less than (20),
+	partition test_merge_functional_test_p3 values less than (30),
+	partition test_merge_functional_test_p4 values less than (40)
+);
+insert into test_merge_functional_test values (1, 'A'), (11 ,'B'), (21 ,'C'), (31 ,'D');
+select relname, boundaries from pg_partition where parentid in (select oid from pg_class where relname = 'test_merge_functional_test') order by 2;
+            relname            | boundaries 
+-------------------------------+------------
+ test_merge_functional_test_p1 | {10}
+ test_merge_functional_test_p2 | {20}
+ test_merge_functional_test_p3 | {30}
+ test_merge_functional_test_p4 | {40}
+ test_merge_functional_test    | 
+(5 rows)
+
+alter table test_merge_functional_test merge partitions test_merge_functional_test_p1, test_merge_functional_test_p2 into partition test_merge_functional_test_px;
+select relname, boundaries from pg_partition where parentid in (select oid from pg_class where relname = 'test_merge_functional_test') order by 2;
+            relname            | boundaries 
+-------------------------------+------------
+ test_merge_functional_test_px | {20}
+ test_merge_functional_test_p3 | {30}
+ test_merge_functional_test_p4 | {40}
+ test_merge_functional_test    | 
+(4 rows)
+
+select * from test_merge_functional_test partition (test_merge_functional_test_px) order by 1;
+ a  | b 
+----+---
+  1 | A
+ 11 | B
+(2 rows)
+
+alter table test_merge_functional_test merge partitions test_merge_functional_test_px, test_merge_functional_test_p3, test_merge_functional_test_p4 into partition test_merge_functional_test_p;
+select * from test_merge_functional_test partition (test_merge_functional_test_p) order by 1;
+ a  | b 
+----+---
+  1 | A
+ 11 | B
+ 21 | C
+ 31 | D
+(4 rows)
+
+drop table test_merge_functional_test;
+-- 1. Abnormal Test
+create table test_merge_abnormal_test (a int)
+partition by range (a)
+(
+	partition test_merge_abnormal_test_p1 values less than (10),
+	partition test_merge_abnormal_test_p2 values less than (20),
+	partition test_merge_abnormal_test_p3 values less than (30),
+	partition test_merge_abnormal_test_p4 values less than (40)
+);
+--failed
+alter table test_merge_abnormal_test merge partitions test_merge_abnormal_test_p1 into partition test_merge_abnormal_test_px;
+ERROR:  source partitions must be at least two partitions
+--failed
+alter table test_merge_abnormal_test merge partitions test_merge_abnormal_test_p2, test_merge_abnormal_test_p1 into partition test_merge_abnormal_test_px;
+ERROR:  source partitions must be continuous and in ascending order of boundary
+--failed
+alter table test_merge_abnormal_test merge partitions test_merge_abnormal_test_p1, test_merge_abnormal_test_p2 into partition test_merge_abnormal_test_p1;
+ERROR:  target partition's name "test_merge_abnormal_test_p1" already exists
+--failed
+alter table test_merge_abnormal_test merge partitions test_merge_abnormal_test_p1, test_merge_abnormal_test_p2 into partition test_merge_abnormal_test_p3;
+ERROR:  target partition's name "test_merge_abnormal_test_p3" already exists
+--success
+alter table test_merge_abnormal_test merge partitions test_merge_abnormal_test_p1, test_merge_abnormal_test_p2 into partition test_merge_abnormal_test_p2;
+drop table test_merge_abnormal_test;
+-- 2. Table has tablespace
+\! rm -fr '@testtablespace@/partition_merge_ts0'
+\! mkdir '@testtablespace@/partition_merge_ts0'
+\! rm -fr '@testtablespace@/partition_merge_ts1'
+\! mkdir '@testtablespace@/partition_merge_ts1'
+\! rm -fr '@testtablespace@/partition_merge_ts2'
+\! mkdir '@testtablespace@/partition_merge_ts2'
+create tablespace partition_merge_ts0 location '@testtablespace@/partition_merge_ts0';
+create tablespace partition_merge_ts1 location '@testtablespace@/partition_merge_ts1';
+create tablespace partition_merge_ts2 location '@testtablespace@/partition_merge_ts2';
+create table test_merge_table_tablespace (a int)
+tablespace partition_merge_ts0
+partition by range (a)
+(
+	partition test_merge_table_tablespace_p1 values less than (10) tablespace partition_merge_ts1,
+	partition test_merge_table_tablespace_p2 values less than (20) tablespace partition_merge_ts2,
+	partition test_merge_table_tablespace_p3 values less than (30),
+	partition test_merge_table_tablespace_p4 values less than (40)
+);
+select relname, boundaries, spcname from pg_partition, pg_tablespace where parentid in (select oid from pg_class where relname = 'test_merge_table_tablespace') and pg_partition.reltablespace = pg_tablespace.oid order by 2;
+            relname             | boundaries |       spcname       
+--------------------------------+------------+---------------------
+ test_merge_table_tablespace_p1 | {10}       | partition_merge_ts1
+ test_merge_table_tablespace_p2 | {20}       | partition_merge_ts2
+ test_merge_table_tablespace_p3 | {30}       | partition_merge_ts0
+ test_merge_table_tablespace_p4 | {40}       | partition_merge_ts0
+ test_merge_table_tablespace    |            | partition_merge_ts0
+(5 rows)
+
+alter table test_merge_table_tablespace merge partitions test_merge_table_tablespace_p1, test_merge_table_tablespace_p2 into partition test_merge_table_tablespace_px;
+select relname, boundaries, spcname from pg_partition, pg_tablespace where parentid in (select oid from pg_class where relname = 'test_merge_table_tablespace') and pg_partition.reltablespace = pg_tablespace.oid order by 2;
+            relname             | boundaries |       spcname       
+--------------------------------+------------+---------------------
+ test_merge_table_tablespace_px | {20}       | partition_merge_ts2
+ test_merge_table_tablespace_p3 | {30}       | partition_merge_ts0
+ test_merge_table_tablespace_p4 | {40}       | partition_merge_ts0
+ test_merge_table_tablespace    |            | partition_merge_ts0
+(4 rows)
+
+alter table test_merge_table_tablespace merge partitions test_merge_table_tablespace_px, test_merge_table_tablespace_p3 into partition test_merge_table_tablespace_px tablespace partition_merge_ts1;
+ERROR:  target partition's name "test_merge_table_tablespace_px" already exists
+select relname, boundaries, spcname from pg_partition, pg_tablespace where parentid in (select oid from pg_class where relname = 'test_merge_table_tablespace') and pg_partition.reltablespace = pg_tablespace.oid order by 2;
+            relname             | boundaries |       spcname       
+--------------------------------+------------+---------------------
+ test_merge_table_tablespace_px | {20}       | partition_merge_ts2
+ test_merge_table_tablespace_p3 | {30}       | partition_merge_ts0
+ test_merge_table_tablespace_p4 | {40}       | partition_merge_ts0
+ test_merge_table_tablespace    |            | partition_merge_ts0
+(4 rows)
+
+drop table test_merge_table_tablespace;
+--
+--
+CREATE TABLE DTS2016122106940_tbl
+(
+id int,
+info varchar(200)
+)
+distribute by hash(id)
+partition by range(id)
+(
+partition p1 values less than(100000),
+partition p2 values less than(300000),
+partition p3 values less than(maxvalue)
+);
+CREATE INDEX idx_dts2016122106940_tbl on DTS2016122106940_tbl(id) local (
+partition idx_p1,
+partition idx_p2 tablespace partition_merge_ts1,
+partition idx_p3 tablespace partition_merge_ts2
+);
+select index_name,partition_name,def_tablespace_name from dba_ind_partitions where index_name ='idx_dts2016122106940_tbl' order by partition_name;
+        index_name        | partition_name | def_tablespace_name 
+--------------------------+----------------+---------------------
+ idx_dts2016122106940_tbl | idx_p1         | DEFAULT TABLESPACE
+ idx_dts2016122106940_tbl | idx_p2         | partition_merge_ts1
+ idx_dts2016122106940_tbl | idx_p3         | partition_merge_ts2
+(3 rows)
+
+alter table DTS2016122106940_tbl merge partitions p2,p3 into partition p3;
+select index_name,partition_name,def_tablespace_name from dba_ind_partitions where index_name ='idx_dts2016122106940_tbl' order by partition_name;
+        index_name        | partition_name | def_tablespace_name 
+--------------------------+----------------+---------------------
+ idx_dts2016122106940_tbl | idx_p1         | DEFAULT TABLESPACE
+ idx_dts2016122106940_tbl | idx_p3         | partition_merge_ts2
+(2 rows)
+
+START TRANSACTION;
+alter table DTS2016122106940_tbl merge partitions p1,p3 into partition p3;
+select index_name,partition_name,def_tablespace_name from dba_ind_partitions where index_name ='idx_dts2016122106940_tbl' order by partition_name;
+        index_name        | partition_name | def_tablespace_name 
+--------------------------+----------------+---------------------
+ idx_dts2016122106940_tbl | idx_p3         | partition_merge_ts2
+(1 row)
+
+ROLLBACK;
+DROP INDEX idx_dts2016122106940_tbl;
+DROP TABLE DTS2016122106940_tbl;
+drop tablespace partition_merge_ts0;
+drop tablespace partition_merge_ts1;
+drop tablespace partition_merge_ts2;
+\! rm -fr '@testtablespace@/partition_merge_ts0'
+\! rm -fr '@testtablespace@/partition_merge_ts1'
+\! rm -fr '@testtablespace@/partition_merge_ts2'

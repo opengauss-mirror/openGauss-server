@@ -18,11 +18,17 @@
 
 #include "access/heapam.h"
 #include "access/xact.h"
+#include "catalog/gs_matview.h"
+#include "catalog/gs_matview_dependency.h"
 #include "catalog/namespace.h"
+#include "catalog/gs_column_keys.h"
+#include "catalog/gs_encrypted_columns.h"
+#include "client_logic/cache.h"
 #include "commands/defrem.h"
 #include "commands/tablecmds.h"
 #include "commands/view.h"
 #include "miscadmin.h"
+#include "gs_policy/policy_common.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "parser/analyze.h"
@@ -30,6 +36,7 @@
 #include "rewrite/rewriteDefine.h"
 #include "rewrite/rewriteManip.h"
 #include "rewrite/rewriteSupport.h"
+#include "optimizer/nodegroups.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
@@ -40,8 +47,33 @@
 #include "pgxc/execRemote.h"
 #include "tcop/utility.h"
 #endif
-
 static void checkViewTupleDesc(TupleDesc newdesc, TupleDesc olddesc);
+
+InSideView query_from_view_hook = NULL;
+
+static void setEncryptedColumnRef(ColumnDef *def, TargetEntry *tle)
+{
+    def->clientLogicColumnRef = (ClientLogicColumnRef*)palloc(sizeof(ClientLogicColumnRef));
+    HeapTuple tup = search_sys_cache_ce_col_name(tle->resorigtbl, def->colname);
+    if (!HeapTupleIsValid(tup)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_COLUMN), errmsg("client encrypted column \"%s\" does not exist", def->colname)));
+    }
+    Form_gs_encrypted_columns ce_form = (Form_gs_encrypted_columns) GETSTRUCT(tup);
+    HeapTuple setting_tup  =  SearchSysCache1(COLUMNSETTINGOID, ObjectIdGetDatum(ce_form->column_key_id));
+    if (!HeapTupleIsValid(setting_tup)) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_COLUMN),
+                errmsg("client encrypted column key %u does not exist", ce_form->column_key_id)));
+    }
+    Form_gs_column_keys setting_form = (Form_gs_column_keys) GETSTRUCT(setting_tup);
+    def->clientLogicColumnRef->column_key_name =  list_make1(makeString(NameStr(setting_form->column_key_name)));
+    ReleaseSysCache(setting_tup);
+    ReleaseSysCache(tup);
+    def->clientLogicColumnRef->orig_typname =
+            makeTypeNameFromOid(exprTypmod((Node*)tle->expr), -1);
+    def->clientLogicColumnRef->dest_typname =
+            makeTypeNameFromOid(exprType((Node*)tle->expr), exprTypmod((Node*)tle->expr));
+}
 
 /* ---------------------------------------------------------------------
  * DefineVirtualRelation
@@ -52,7 +84,7 @@ static void checkViewTupleDesc(TupleDesc newdesc, TupleDesc olddesc);
  * work harder.
  * ---------------------------------------------------------------------
  */
-static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, List* options)
+static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, List* options, ObjectType relkind)
 {
     Oid viewOid;
     LOCKMODE lockmode;
@@ -68,9 +100,24 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
         TargetEntry* tle = (TargetEntry*)lfirst(t);
 
         if (!tle->resjunk) {
-            ColumnDef *def = makeColumnDef(tle->resname, exprType((Node *)tle->expr), exprTypmod((Node *)tle->expr),
-                exprCollation((Node *)tle->expr));
+            ColumnDef* def = makeNode(ColumnDef);
 
+            def->colname = pstrdup(tle->resname);
+            def->typname = makeTypeNameFromOid(exprType((Node*)tle->expr), exprTypmod((Node*)tle->expr));
+            def->inhcount = 0;
+            def->is_local = true;
+            def->is_not_null = false;
+            def->is_from_type = false;
+            def->storage = 0;
+            def->cmprs_mode = ATT_CMPR_NOCOMPRESS; /* dont compress */
+            def->raw_default = NULL;
+            def->cooked_default = NULL;
+            def->collClause = NULL;
+            def->collOid = exprCollation((Node*)tle->expr);
+            
+            if IsClientLogicType(exprType((Node*)tle->expr)) {
+                setEncryptedColumnRef(def, tle);
+            }
             /*
              * It's possible that the column is of a collatable type but the
              * collation could not be resolved, so double-check.
@@ -83,7 +130,8 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
                             errhint("Use the COLLATE clause to set the collation explicitly.")));
             } else
                 Assert(!OidIsValid(def->collOid));
-                
+            def->constraints = NIL;
+
             attrList = lappend(attrList, def);
         }
     }
@@ -99,8 +147,9 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
      */
     lockmode = replace ? AccessExclusiveLock : NoLock;
     (void)RangeVarGetAndCheckCreationNamespace(relation, lockmode, &viewOid);
-
-    if (OidIsValid(viewOid) && replace) {
+    
+    bool flag = OidIsValid(viewOid) && replace;
+    if (flag) {
         Relation rel;
         TupleDesc descriptor;
         List* atcmds = NIL;
@@ -115,8 +164,9 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
 
         /* Relation is already locked, but we must build a relcache entry. */
         rel = relation_open(viewOid, NoLock);
-        /* Make sure it *is* a view. */
-        if (rel->rd_rel->relkind != RELKIND_VIEW)
+        /* Make sure it *is* a view or contquery. */
+        flag = rel->rd_rel->relkind != RELKIND_VIEW && rel->rd_rel->relkind != RELKIND_CONTQUERY;
+        if (flag)
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not a view", RelationGetRelationName(rel))));
 
@@ -162,6 +212,7 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
          * When we roll back upgrade by dropping view columns, we use the
          * ALTER TABLE DROP COLUMN infrastructure.
          */
+        flag = (list_length(attrList) < rel->rd_att->natts) && u_sess->attr.attr_common.IsInplaceUpgrade;
         if (list_length(attrList) > rel->rd_att->natts) {
             ListCell* c = NULL;
             int skip = rel->rd_att->natts;
@@ -176,7 +227,7 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
                 atcmd->def = (Node*)lfirst(c);
                 atcmds = lappend(atcmds, atcmd);
             }
-        } else if ((list_length(attrList) < rel->rd_att->natts) && u_sess->attr.attr_common.IsInplaceUpgrade) {
+        } else if (flag) {
             for (int dropcolno = rel->rd_att->natts - 1; dropcolno >= list_length(attrList); dropcolno--) {
                 atcmd = makeNode(AlterTableCmd);
                 atcmd->subtype = AT_DropColumn;
@@ -208,6 +259,7 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
         createStmt->inhRelations = NIL;
         createStmt->constraints = NIL;
         createStmt->options = options;
+        createStmt->options = lappend(options, defWithOids(false));
         createStmt->oncommit = ONCOMMIT_NOOP;
         createStmt->tablespacename = NULL;
         createStmt->if_not_exists = false;
@@ -217,7 +269,11 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
          * existing view, so we don't need more code to complain if "replace"
          * is false).
          */
-        relid = DefineRelation(createStmt, RELKIND_VIEW, InvalidOid);
+        if (relkind == OBJECT_CONTQUERY) {
+            relid = DefineRelation(createStmt, RELKIND_CONTQUERY, InvalidOid);
+        } else {
+            relid = DefineRelation(createStmt, RELKIND_VIEW, InvalidOid);
+        }
         Assert(relid != InvalidOid);
         return relid;
     }
@@ -341,11 +397,60 @@ static Query* UpdateRangeTableOfViewParse(Oid viewOid, Query* viewParse)
     return viewParse;
 }
 
+#ifdef ENABLE_MULTIPLE_NODES
+static void CreateMvCommand(ViewStmt* stmt, const char* queryString)
+{
+    Oid groupid = 0;
+    char* queryStringinfo = (char*)queryString;
+    char* group_name = NULL;
+
+    if (stmt->subcluster == NULL) {
+        group_name = ng_get_installation_group_name();
+    } else {
+        group_name = strVal(linitial(stmt->subcluster->members));
+    }
+
+    groupid = get_pgxc_groupoid(group_name);
+    if (!OidIsValid(groupid)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("Target node group \"%s\" doesn't exist", group_name)));
+    }
+
+    /* Force add Remotequery. */
+    RemoteQuery* step = makeNode(RemoteQuery);
+    step->combine_type = COMBINE_TYPE_NONE;
+    step->sql_statement = (char*)queryString;
+    step->exec_type = EXEC_ON_DATANODES;
+    step->is_temp = false;
+
+    step->exec_nodes = makeNode(ExecNodes);
+    step->exec_nodes->distribution.group_oid = groupid;
+
+    Oid* members = NULL;
+    int nmembers = 0;
+    nmembers = get_pgxc_groupmembers(groupid, &members);
+    step->exec_nodes->nodeList = GetNodeGroupNodeList(members, nmembers);
+    pfree_ext(members);
+
+    /* Recurse for anything else */
+    ProcessUtility((Node *)step,
+            queryStringinfo,
+            NULL,
+            false,
+            None_Receiver,
+            true,
+            NULL);
+
+    return;
+}
+#endif
+
 /*
  * DefineView
  *		Execute a CREATE VIEW command.
  */
-void DefineView(ViewStmt* stmt, const char* queryString, bool isFirstNode)
+Oid DefineView(ViewStmt* stmt, const char* queryString, bool send_remote, bool isFirstNode)
 {
     Query* viewParse = NULL;
     Oid viewOid = InvalidOid;
@@ -358,7 +463,12 @@ void DefineView(ViewStmt* stmt, const char* queryString, bool isFirstNode)
      * Since parse analysis scribbles on its input, copy the raw parse tree;
      * this ensures we don't corrupt a prepared statement, for example.
      */
-    viewParse = parse_analyze((Node*)copyObject(stmt->query), queryString, NULL, 0);
+    if (!IsA(stmt->query, Query)) {
+        viewParse = parse_analyze((Node*)copyObject(stmt->query), queryString, NULL, 0);
+    } else {
+        viewParse = (Query *)stmt->query;
+    }
+
     /*
      * The grammar should ensure that the result is a single SELECT Query.
      * However, it doesn't forbid SELECT INTO, so we have to check for that.
@@ -386,7 +496,9 @@ void DefineView(ViewStmt* stmt, const char* queryString, bool isFirstNode)
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("views must not contain data-modifying statements in WITH")));
     }
-
+#ifdef ENABLE_MULTIPLE_NODES
+    validate_streaming_engine_status((Node*) stmt);
+#endif
     /*
      * If a list of column names was given, run through and insert these into
      * the actual query tree. - thomas 2000-03-08
@@ -422,8 +534,7 @@ void DefineView(ViewStmt* stmt, const char* queryString, bool isFirstNode)
 
     if (stmt->view->relpersistence == RELPERSISTENCE_GLOBAL_TEMP) {
         ereport(ERROR,
-            (errcode(ERRCODE_SYNTAX_ERROR),
-                 errmsg("views cannot be global temp because they do not have storage")));
+            (errcode(ERRCODE_SYNTAX_ERROR), errmsg("views cannot be global temp because they do not have storage")));
     }
 
     /*
@@ -444,45 +555,40 @@ void DefineView(ViewStmt* stmt, const char* queryString, bool isFirstNode)
         ExecSetTempObjectIncluded();
 #endif
 
-    /*
-     * Create the view relation
-     *
-     * NOTE: if it already exists and replace is false, the xact will be
-     * aborted.
-     */
-    viewOid = DefineVirtualRelation(view, viewParse->targetList, stmt->replace, stmt->options);
+     if (stmt->relkind == OBJECT_MATVIEW) {
+        /* Relation Already Created */
+        (void)RangeVarGetAndCheckCreationNamespace(view, NoLock, &viewOid);
 
-    /*
-     * The relation we have just created is not visible to any other commands
-     * running with the same transaction & command id. So, increment the
-     * command id counter (but do NOT pfree any memory!!!!)
-     */
-    CommandCounterIncrement();
+#ifdef ENABLE_MULTIPLE_NODES
+        /* try to send CREATE MATERIALIZED VIEW to DNs, Only consider PGXC now. */
+        if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && !send_remote) {
+            CreateMvCommand(stmt, queryString);
+        }
+#endif
+     } else {
+        /*
+         * Create the view relation
+         *
+         * NOTE: if it already exists and replace is false, the xact will be
+         * aborted.
+         */
+        viewOid = DefineVirtualRelation(view, viewParse->targetList, stmt->replace, stmt->options, stmt->relkind);
+
+        /*
+         * The relation we have just created is not visible to any other commands
+         * running with the same transaction & command id. So, increment the
+         * command id counter (but do NOT pfree any memory!!!!)
+         */
+        CommandCounterIncrement();
+    }
+
     StoreViewQuery(viewOid, viewParse, stmt->replace);
 
-}
-
-/*
- * Use the rules system to store the query for the view.
- */
-void StoreViewQuery(Oid viewOid, Query* viewParse, bool replace)
-{
-
-    /*
-     * The range table of 'viewParse' does not contain entries for the "OLD"
-     * and "NEW" relations. So... add them!
-     */
-    viewParse = UpdateRangeTableOfViewParse(viewOid, viewParse);
-
-    /*
-     * Now create the rules associated with the view.
-     */
-    DefineViewRules(viewOid, viewParse, replace);
+    return viewOid;
 }
 
 bool IsViewTemp(ViewStmt* stmt, const char* queryString)
 {
-    bool result = false;
     Query* viewParse = NULL;
     RangeVar* view = NULL;
     view = (RangeVar*)copyObject(((ViewStmt*)stmt)->view); /* don't corrupt original command */
@@ -497,8 +603,25 @@ bool IsViewTemp(ViewStmt* stmt, const char* queryString)
         view->relpersistence = RELPERSISTENCE_TEMP;
     }
 
-    if (view->relpersistence == RELPERSISTENCE_TEMP) {
-        result = true;
-    }
-    return result;
+    if (view->relpersistence == RELPERSISTENCE_TEMP)
+        return true;
+    return false;
+}
+
+/*
+ * Use the rules system to store the query for the view.
+ */
+void
+StoreViewQuery(Oid viewOid, Query *viewParse, bool replace)
+{
+    /*
+     * The range table of 'viewParse' does not contain entries for the "OLD"
+     * and "NEW" relations. So... add them!
+     */
+    viewParse = UpdateRangeTableOfViewParse(viewOid, viewParse);
+
+    /*
+     * Now create the rules associated with the view.
+     */
+    DefineViewRules(viewOid, viewParse, replace);
 }

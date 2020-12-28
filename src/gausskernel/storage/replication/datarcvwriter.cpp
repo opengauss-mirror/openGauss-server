@@ -1,19 +1,8 @@
-/*
+/* -------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
  *
  * datarcvwriter.cpp
  *	 functions for data receive management
@@ -36,7 +25,7 @@
 #include "replication/datareceiver.h"
 #include "replication/datasender.h"
 #include "replication/walsender.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/cu.h"
 #include "storage/custorage.h"
 #include "storage/ipc.h"
@@ -53,7 +42,11 @@
 
 #define MAX_DUMMY_DATA_FILE (RELSEG_SIZE * BLCKSZ)
 
-typedef enum { NONEEXISTDATABASEDIR = 0, EXISTDATABASEDIR, DATABASEDIRCREATECANCEL } DataBaseDirState;
+typedef enum {
+    NONEEXISTDATABASEDIR = 0,
+    EXISTDATABASEDIR,
+    DATABASEDIRCREATECANCEL
+} DataBaseDirState;
 
 /* max dummy data write file (default: 1GB) */
 static int dummy_data_writer_file_fd = -1;
@@ -68,16 +61,16 @@ static void ReqShutdownHandler(SIGNAL_ARGS);
 static void SetDataRcvWriterLatch(void);
 static void EmptyDataRcvWriterLatch(void);
 
-static void DummyStandbyDoDataWrite(char* buf, uint32 nbytes);
+static void DummyStandbyDoDataWrite(char *buf, uint32 nbytes);
 
 static void DataWriterHashCreate(void);
-static bool DataWriterHashSearch(const RelFileNode& node, int attid, ForkNumber forkno, StorageEngine type,
-    HASHACTION action, Relation& reln, CUStorage*& cuStorage);
+static bool DataWriterHashSearch(const RelFileNode &node, int attid, ForkNumber forkno, StorageEngine type,
+                                 HASHACTION action, Relation &reln, CUStorage *&cuStorage);
 static void DataWriterHashRemove(bool flushdata);
 static bool DatabaseHashSearch(Oid spcoid, Oid dboid);
 static DataBaseDirState CheckDatabaseReady(Oid spcNode, Oid dbNode);
-static void DummyStandbyDataRcvWrite(char* buf, uint32 nbytes);
-static bool CanWriteBuffer(SMgrRelation smgr, ForkNumber forkNum, const char* path);
+static void DummyStandbyDataRcvWrite(char *buf, uint32 nbytes);
+static bool CanWriteBuffer(SMgrRelation smgr, ForkNumber forkNum, const char *path);
 
 /*
  * Called when the DataRcvWriterMain is ending.
@@ -96,9 +89,7 @@ void DataRcvWriterMain(void)
     MemoryContext datarcvWriterContext;
     t_thrd.xlog_cxt.InRecovery = true;
 
-    knl_thread_set_name("DataRcvWriter");
-
-    ereport(LOG, (errmsg("DataRcvWriter thread started")));
+    ereport(LOG, (errmsg("datarcvwriter thread started")));
     /*
      * Reset some signals that are accepted by postmaster but not here
      */
@@ -129,7 +120,7 @@ void DataRcvWriterMain(void)
      * Create a resource owner to keep track of our resources (currently only
      * buffer pins).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "DataReceive Writer");
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "DataReceive Writer", MEMORY_CONTEXT_STORAGE);
 
     /*
      * Create a memory context that we will do all our work in.  We do this so
@@ -137,11 +128,8 @@ void DataRcvWriterMain(void)
      * possible memory leaks.  Formerly this code just ran in
      * t_thrd.top_mem_cxt, but resetting that would be a really bad idea.
      */
-    datarcvWriterContext = AllocSetContextCreate(t_thrd.top_mem_cxt,
-        "DataReceive Writer",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    datarcvWriterContext = AllocSetContextCreate(t_thrd.top_mem_cxt, "DataReceive Writer", ALLOCSET_DEFAULT_MINSIZE,
+                                                 ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     (void)MemoryContextSwitchTo(datarcvWriterContext);
 
     /* init the dummy standby data num to write */
@@ -270,7 +258,7 @@ void DataRcvWriterMain(void)
             ;
 
         if (t_thrd.datarcvwriter_cxt.shutdownRequested) {
-            ereport(LOG, (errmsg("DataRcvWriter thread shut down")));
+            ereport(LOG, (errmsg("datarcvwriter thread shut down")));
             /*
              * From here on, elog(ERROR) should end with exit(1), not send
              * control back to the sigsetjmp block above
@@ -282,7 +270,7 @@ void DataRcvWriterMain(void)
 
         rc = WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, (long)1000 /* ms */);
         if (rc & WL_POSTMASTER_DEATH) {
-            ereport(LOG, (errmsg("DataRcvWriter thread shut down with exit code 1")));
+            ereport(LOG, (errmsg("datarcvwriter thread shut down with exit code 1")));
             gs_thread_exit(1);
         }
     }
@@ -342,7 +330,7 @@ static void ReqShutdownHandler(SIGNAL_ARGS)
 void SetDataRcvWriterPID(ThreadId tid)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
     SpinLockAcquire(&datarcv->mutex);
     datarcv->writerPid = tid;
     SpinLockRelease(&datarcv->mutex);
@@ -351,7 +339,7 @@ void SetDataRcvWriterPID(ThreadId tid)
 static void SetDataRcvWriterLatch(void)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
     SpinLockAcquire(&datarcv->mutex);
     datarcv->datarcvWriterLatch = &t_thrd.proc->procLatch;
     datarcv->writerPid = t_thrd.proc_cxt.MyProcPid;
@@ -361,7 +349,7 @@ static void SetDataRcvWriterLatch(void)
 static void EmptyDataRcvWriterLatch(void)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
     SpinLockAcquire(&datarcv->mutex);
     datarcv->datarcvWriterLatch = NULL;
     datarcv->writerPid = 0;
@@ -371,7 +359,7 @@ static void EmptyDataRcvWriterLatch(void)
 bool DataRcvWriterInProgress(void)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
 
     SpinLockAcquire(&datarcv->mutex);
     if (datarcv->writerPid == 0) {
@@ -385,15 +373,15 @@ bool DataRcvWriterInProgress(void)
 /*
  * Write data to disk of DummyStandby.
  */
-static void DummyStandbyDoDataWrite(char* buf, uint32 nbytes)
+static void DummyStandbyDoDataWrite(char *buf, uint32 nbytes)
 {
     uint32 sum = 0;
     uint32 currentlen = 0;
-    char* caculatebuf = buf;
+    char *caculatebuf = buf;
     dummy_data_writer_use_file = true;
     errno_t rc = 0;
     while (nbytes > 0) {
-        rc = memcpy_s((void*)&currentlen, sizeof(uint32), caculatebuf, sizeof(uint32));
+        rc = memcpy_s((void *)&currentlen, sizeof(uint32), caculatebuf, sizeof(uint32));
         securec_check(rc, "", "");
         if ((sum + currentlen) > (uint32)g_instance.attr.attr_storage.MaxSendSize * 1024) {
             DummyStandbyDataRcvWrite(buf, (uint32)sum);
@@ -417,9 +405,9 @@ static void DummyStandbyDoDataWrite(char* buf, uint32 nbytes)
  *     disk by walrcvwriter, for 'd'message. In this case, we have skip the new-format
  *     data when call DoDataWrite
  */
-uint32 DoDataWrite(char* buf, uint32 nbytes)
+uint32 DoDataWrite(char *buf, uint32 nbytes)
 {
-#define InvalidRelFileNode ((RelFileNode){0, 0, 0, -1})
+#define InvalidRelFileNode ((RelFileNode){ 0, 0, 0, -1 })
 
     RelFileNode curnode = InvalidRelFileNode;
     RelFileNode prevnode = InvalidRelFileNode;
@@ -427,12 +415,12 @@ uint32 DoDataWrite(char* buf, uint32 nbytes)
     int prevattid = -1;
 
     DataElementHeaderData datahdr;
-    DataQueuePtr lastqueueoffset = {0, 0};
+    DataQueuePtr lastqueueoffset = { 0, 0 };
     /* buf unit */
     uint32 currentlen = 0;
     int headerlen = sizeof(DataElementHeaderData);
     Relation reln = NULL;
-    CUStorage* cuStorage = NULL;
+    CUStorage *cuStorage = NULL;
     errno_t errorno = EOK;
 
 #ifdef DATA_DEBUG
@@ -448,7 +436,7 @@ uint32 DoDataWrite(char* buf, uint32 nbytes)
         }
 
         /* parse data element header, and skip the header to parse payload below */
-        errorno = memcpy_s((void*)&datahdr, headerlen, buf, headerlen);
+        errorno = memcpy_s((void *)&datahdr, headerlen, buf, headerlen);
         securec_check(errorno, "", "");
         RelFileNodeCopy(curnode, datahdr.rnode, GETBUCKETID(datahdr.attid));
         curattid = (int)GETATTID((uint32)datahdr.attid);
@@ -458,26 +446,16 @@ uint32 DoDataWrite(char* buf, uint32 nbytes)
             Assert(currentlen == (sizeof(uint32) + (uint32)headerlen + datahdr.data_size));
             /* for release version, if data is invalid, longjmp */
             if (currentlen != (sizeof(uint32) + (uint32)headerlen + datahdr.data_size)) {
-                ereport(PANIC,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("corrupt wal data write len %u bytes, "
-                               "the expected write data_size %u",
-                            currentlen,
-                            datahdr.data_size)));
+                ereport(PANIC, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("corrupt wal data write len %u bytes, "
+                                                                               "the expected write data_size %u",
+                                                                               currentlen, datahdr.data_size)));
             }
         }
-        ereport(DEBUG5,
-            (errmsg("DoDataWrite write page: rnode[%u,%u,%u], blocknum[%u], "
-                    "pageoffset[%lu], size[%u], queueoffset[%u/%u], attid[%d]",
-                datahdr.rnode.spcNode,
-                datahdr.rnode.dbNode,
-                datahdr.rnode.relNode,
-                datahdr.blocknum,
-                datahdr.offset,
-                datahdr.data_size,
-                datahdr.queue_offset.queueid,
-                datahdr.queue_offset.queueoff,
-                (int)GETATTID((uint32)datahdr.attid))));
+        ereport(DEBUG5, (errmsg("DoDataWrite write page: rnode[%u,%u,%u], blocknum[%u], "
+                                "pageoffset[%lu], size[%u], queueoffset[%u/%u], attid[%d]",
+                                datahdr.rnode.spcNode, datahdr.rnode.dbNode, datahdr.rnode.relNode, datahdr.blocknum,
+                                datahdr.offset, datahdr.data_size, datahdr.queue_offset.queueid,
+                                datahdr.queue_offset.queueoff, (int)GETATTID((uint32)datahdr.attid))));
 
 #ifdef DATA_DEBUG
         INIT_CRC32(crc);
@@ -485,37 +463,25 @@ uint32 DoDataWrite(char* buf, uint32 nbytes)
         FIN_CRC32(crc);
 
         if (!EQ_CRC32(datahdr.data_crc, crc)) {
-            ereport(PANIC,
-                (errmsg("writing incorrect data page checksum at: "
-                        "rnode[%u,%u,%u], blocknum[%u], "
-                        "pageoffset[%u], size[%u], queueoffset[%u/%u]",
-                    datahdr.rnode.spcNode,
-                    datahdr.rnode.dbNode,
-                    datahdr.rnode.relNode,
-                    datahdr.blocknum,
-                    datahdr.offset,
-                    datahdr.data_size,
-                    datahdr.queue_offset.queueid,
-                    datahdr.queue_offset.queueoff)));
+            ereport(PANIC, (errmsg("writing incorrect data page checksum at: "
+                                   "rnode[%u,%u,%u], blocknum[%u], "
+                                   "pageoffset[%u], size[%u], queueoffset[%u/%u]",
+                                   datahdr.rnode.spcNode, datahdr.rnode.dbNode, datahdr.rnode.relNode, datahdr.blocknum,
+                                   datahdr.offset, datahdr.data_size, datahdr.queue_offset.queueid,
+                                   datahdr.queue_offset.queueoff)));
         }
 #endif
         /* when enable_mix_replication is on, the ROW_STORE type is not supported now! */
         if (g_instance.attr.attr_storage.enable_mix_replication && ROW_STORE == datahdr.type) {
             Assert(false);
-            ereport(PANIC,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("The Row Store Heap Log SHOULD NOT BE synchronized in the WAL Streaming. "
-                           "Tracking the data header info: "
-                           "rnode[%u/%u/%u] blocknum[%u] pageoffset[%lu] "
-                           "size[%u] queueoffset[%u/%u].",
-                        datahdr.rnode.spcNode,
-                        datahdr.rnode.dbNode,
-                        datahdr.rnode.relNode,
-                        datahdr.blocknum,
-                        datahdr.offset,
-                        datahdr.data_size,
-                        datahdr.queue_offset.queueid,
-                        datahdr.queue_offset.queueoff)));
+            ereport(PANIC, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("The Row Store Heap Log SHOULD NOT BE synchronized in the WAL Streaming. "
+                                   "Tracking the data header info: "
+                                   "rnode[%u/%u/%u] blocknum[%u] pageoffset[%lu] "
+                                   "size[%u] queueoffset[%u/%u].",
+                                   datahdr.rnode.spcNode, datahdr.rnode.dbNode, datahdr.rnode.relNode, datahdr.blocknum,
+                                   datahdr.offset, datahdr.data_size, datahdr.queue_offset.queueid,
+                                   datahdr.queue_offset.queueoff)));
             return nbytes;
         }
 
@@ -540,9 +506,8 @@ uint32 DoDataWrite(char* buf, uint32 nbytes)
                         if (!g_instance.attr.attr_storage.enable_mix_replication) {
                             WakeupDataRecovery();
                         } else {
-                            ereport(ERROR,
-                                (errmsg("Failed to write the wal data: the database path %s doesn't exist.",
-                                    GetDatabasePath(curnode.dbNode, curnode.spcNode))));
+                            ereport(ERROR, (errmsg("Failed to write the wal data: the database path %s doesn't exist.",
+                                                   GetDatabasePath(curnode.dbNode, curnode.spcNode))));
                         }
                         break;
                     } else if (databaseDirState == NONEEXISTDATABASEDIR) {
@@ -642,51 +607,36 @@ uint32 DoDataWrite(char* buf, uint32 nbytes)
                 if (CheckFileExists(path) == FILE_EXIST) {
                     goto retry;
                 }
-                ereport(WARNING,
-                    (errmsg("HA-DoDataWrite: No File Write(file not exists), rnode %u/%u/%u, blockno %u ",
-                        curnode.spcNode,
-                        curnode.dbNode,
-                        curnode.relNode,
-                        datahdr.blocknum)));
+                ereport(WARNING, (errmsg("HA-DoDataWrite: No File Write(file not exists), rnode %u/%u/%u, blockno %u ",
+                                         curnode.spcNode, curnode.dbNode, curnode.relNode, datahdr.blocknum)));
             }
 #ifdef ENABLE_MULTIPLE_NODES
             UnlockRelFileNode(curnode, AccessShareLock);
 #endif
-
             pfree_ext(path);
 
             if (u_sess->attr.attr_storage.HaModuleDebug) {
-                ereport(LOG,
-                    (errmsg("HA-DoDataWrite: rnode %u/%u/%u, blockno %u ",
-                        curnode.spcNode,
-                        curnode.dbNode,
-                        curnode.relNode,
-                        datahdr.blocknum)));
+                ereport(LOG, (errmsg("HA-DoDataWrite: rnode %u/%u/%u, blockno %u ", curnode.spcNode, curnode.dbNode,
+                                     curnode.relNode, datahdr.blocknum)));
             }
         } else if (COLUMN_STORE == datahdr.type) {
             Assert(cuStorage->m_cnode.m_attid == GETATTID(datahdr.attid));
             if (u_sess->attr.attr_storage.HaModuleDebug) {
-                check_cu_block(buf, datahdr.data_size);
-                ereport(LOG,
-                    (errmsg("HA-DoDataWrite: rnode %u/%u/%u, col %u, "
-                            "blockno %lu, cuUnitCount %u",
-                        datahdr.rnode.spcNode,
-                        datahdr.rnode.dbNode,
-                        datahdr.rnode.relNode,
-                        GETATTID((uint)datahdr.attid),
-                        datahdr.offset / ALIGNOF_CUSIZE,
-                        datahdr.data_size / ALIGNOF_CUSIZE)));
+                int align_size = CUAlignUtils::GetCuAlignSizeColumnId(datahdr.attid);
+                check_cu_block(buf, datahdr.data_size, align_size);
+                ereport(LOG, (errmsg("HA-DoDataWrite: rnode %u/%u/%u, col %u, "
+                                     "blockno %lu, cuUnitCount %u",
+                                     datahdr.rnode.spcNode, datahdr.rnode.dbNode, datahdr.rnode.relNode,
+                                     GETATTID((uint)datahdr.attid), datahdr.offset / align_size,
+                                     datahdr.data_size / align_size)));
             }
 #ifdef ENABLE_MULTIPLE_NODES
             LockRelFileNode(curnode, AccessShareLock);
 #endif
-
             /* direct write the data file when column store */
             cuStorage->SaveCU(buf, datahdr.offset, datahdr.data_size, false);
 
-#ifdef ENABLE_MULTIPLE_NODES
             UnlockRelFileNode(curnode, AccessShareLock);
-#endif
         }
 
         buf += datahdr.data_size;
@@ -696,16 +646,12 @@ uint32 DoDataWrite(char* buf, uint32 nbytes)
             lastqueueoffset = datahdr.queue_offset;
 
             /* Use volatile pointer to prevent code rearrangement */
-            volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+            volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
 
-            ereport(DEBUG5,
-                (errmsg("recwriter: receive: %u/%u, local: %u/%u, offset %u/%u",
-                    datarcv->receivePosition.queueid,
-                    datarcv->receivePosition.queueoff,
-                    datarcv->localWritePosition.queueid,
-                    datarcv->localWritePosition.queueoff,
-                    datahdr.queue_offset.queueid,
-                    datahdr.queue_offset.queueoff)));
+            ereport(DEBUG5, (errmsg("recwriter: receive: %u/%u, local: %u/%u, offset %u/%u",
+                                    datarcv->receivePosition.queueid, datarcv->receivePosition.queueoff,
+                                    datarcv->localWritePosition.queueid, datarcv->localWritePosition.queueoff,
+                                    datahdr.queue_offset.queueid, datahdr.queue_offset.queueoff)));
 
             WakeupDataRecovery();
         } else
@@ -717,7 +663,7 @@ uint32 DoDataWrite(char* buf, uint32 nbytes)
 
     /* Update shared-memory status when datareceiver is started */
     if (!g_instance.attr.attr_storage.enable_mix_replication) {
-        volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+        volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
 
         SpinLockAcquire(&datarcv->mutex);
         datarcv->receivePosition.queueid = lastqueueoffset.queueid;
@@ -734,8 +680,8 @@ uint32 DoDataWrite(char* buf, uint32 nbytes)
 int DataRcvWrite(void)
 {
     /* Use volatile pointer to prevent code rearrangement */
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
-    char* writeBuf = NULL;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    char *writeBuf = NULL;
     uint32 nbytes = 0;
     uint32 remainbytes = 0;
     DataQueuePtr curstartpos;
@@ -750,12 +696,8 @@ int DataRcvWrite(void)
     curstartpos.queueoff = datarcv->localWritePosition.queueoff;
     SpinLockRelease(&datarcv->mutex);
 
-    nbytes = GetFromDataQueue(writeBuf,
-        g_instance.attr.attr_storage.DataQueueBufSize * 1024,
-        curstartpos,
-        curendpos,
-        true,
-        t_thrd.dataqueue_cxt.DataWriterQueue);
+    nbytes = GetFromDataQueue(writeBuf, g_instance.attr.attr_storage.DataQueueBufSize * 1024, curstartpos, curendpos,
+                              true, t_thrd.dataqueue_cxt.DataWriterQueue);
     if (nbytes == 0) {
         LWLockRelease(RcvWriteLock);
         END_CRIT_SECTION();
@@ -779,7 +721,7 @@ int DataRcvWrite(void)
     DQByteAdvance(datarcv->localWritePosition, nbytes);
     SpinLockRelease(&datarcv->mutex);
 
-    PopFromDataQueue(((DataRcvData*)datarcv)->localWritePosition, t_thrd.dataqueue_cxt.DataWriterQueue);
+    PopFromDataQueue(((DataRcvData *)datarcv)->localWritePosition, t_thrd.dataqueue_cxt.DataWriterQueue);
 
     LWLockRelease(RcvWriteLock);
     END_CRIT_SECTION();
@@ -798,17 +740,17 @@ static void DataWriterHashCreate(void)
         ctl.keysize = sizeof(data_writer_rel_key);
         ctl.entrysize = sizeof(data_writer_rel);
         ctl.hash = tag_hash;
-        t_thrd.datarcvwriter_cxt.data_writer_rel_tab =
-            hash_create("data writer rel table", 100, &ctl, HASH_ELEM | HASH_FUNCTION);
+        t_thrd.datarcvwriter_cxt.data_writer_rel_tab = hash_create("data writer rel table", 100, &ctl,
+                                                                   HASH_ELEM | HASH_FUNCTION);
     } else
         return;
 }
 
-static bool DataWriterHashSearch(const RelFileNode& node, int attid, ForkNumber forkno, StorageEngine type,
-    HASHACTION action, Relation& reln, CUStorage*& cuStorage)
+static bool DataWriterHashSearch(const RelFileNode &node, int attid, ForkNumber forkno, StorageEngine type,
+                                 HASHACTION action, Relation &reln, CUStorage *&cuStorage)
 {
     data_writer_rel_key key;
-    data_writer_rel* hentry = NULL;
+    data_writer_rel *hentry = NULL;
     bool found = false;
     errno_t rc = 0;
 
@@ -823,7 +765,7 @@ static bool DataWriterHashSearch(const RelFileNode& node, int attid, ForkNumber 
         DataWriterHashCreate();
     }
 
-    hentry = (data_writer_rel*)hash_search(t_thrd.datarcvwriter_cxt.data_writer_rel_tab, (void*)&key, action, &found);
+    hentry = (data_writer_rel *)hash_search(t_thrd.datarcvwriter_cxt.data_writer_rel_tab, (void *)&key, action, &found);
 
     if (action == HASH_FIND) {
         /* if the action is find, we will get the fd  */
@@ -836,8 +778,10 @@ static bool DataWriterHashSearch(const RelFileNode& node, int attid, ForkNumber 
     if (action == HASH_ENTER) {
         /* if the action is enter, we will insert the fd  */
         Assert(!found);
-        hentry->reln = reln;
-        hentry->cuStorage = cuStorage;
+        if (!found) {
+            hentry->reln = reln;
+            hentry->cuStorage = cuStorage;
+        }
     }
 
     return found;
@@ -846,14 +790,14 @@ static bool DataWriterHashSearch(const RelFileNode& node, int attid, ForkNumber 
 static bool DatabaseHashSearch(Oid spcoid, Oid dboid)
 {
     HASH_SEQ_STATUS status;
-    data_writer_rel* hentry = NULL;
+    data_writer_rel *hentry = NULL;
 
     if (t_thrd.datarcvwriter_cxt.data_writer_rel_tab == NULL)
         return false; /* nothing to do */
 
     hash_seq_init(&status, t_thrd.datarcvwriter_cxt.data_writer_rel_tab);
 
-    while ((hentry = (data_writer_rel*)hash_seq_search(&status)) != NULL) {
+    while ((hentry = (data_writer_rel *)hash_seq_search(&status)) != NULL) {
         if (hentry->key.node.spcNode == spcoid && hentry->key.node.dbNode == dboid) {
             hash_seq_term(&status);
             return true;
@@ -874,9 +818,9 @@ static void DataWriterHashRemove(bool flushdata)
 #define ERRORDATA_FLUSH_NUM 5
 
     HASH_SEQ_STATUS status;
-    data_writer_rel* hentry = NULL;
+    data_writer_rel *hentry = NULL;
     Relation reln;
-    CUStorage* cuStorage = NULL;
+    CUStorage *cuStorage = NULL;
 
     if (t_thrd.datarcvwriter_cxt.data_writer_rel_tab == NULL)
         return;
@@ -889,7 +833,7 @@ static void DataWriterHashRemove(bool flushdata)
         ereport(PANIC, (errmsg_internal("ERRORDATA_FLUSH_NUM exceeded")));
 
     hash_seq_init(&status, t_thrd.datarcvwriter_cxt.data_writer_rel_tab);
-    while ((hentry = (data_writer_rel*)hash_seq_search(&status)) != NULL) {
+    while ((hentry = (data_writer_rel *)hash_seq_search(&status)) != NULL) {
         if (hentry->key.type == ROW_STORE && !g_instance.attr.attr_storage.enable_mix_replication) {
             reln = hentry->reln;
 
@@ -898,17 +842,13 @@ static void DataWriterHashRemove(bool flushdata)
 #ifdef ENABLE_MULTIPLE_NODES
                 LockRelFileNode(reln->rd_node, AccessExclusiveLock);
 #endif
-
                 /* do not sync the file if it not exists any more */
                 if (smgrexists(reln->rd_smgr, MAIN_FORKNUM) && CheckFileExists(path) == FILE_EXIST) {
                     FlushRelationBuffers(reln);
                     smgrimmedsync(reln->rd_smgr, MAIN_FORKNUM);
                 } else {
-                    ereport(WARNING,
-                        (errmsg("HA-DataWriterHashRemove: No File SYNC, rnode %u/%u/%u dose not exists",
-                            reln->rd_node.spcNode,
-                            reln->rd_node.dbNode,
-                            reln->rd_node.relNode)));
+                    ereport(WARNING, (errmsg("HA-DataWriterHashRemove: No File SYNC, rnode %u/%u/%u dose not exists",
+                                             reln->rd_node.spcNode, reln->rd_node.dbNode, reln->rd_node.relNode)));
                 }
 #ifdef ENABLE_MULTIPLE_NODES
                 UnlockRelFileNode(reln->rd_node, AccessExclusiveLock);
@@ -936,16 +876,13 @@ static void DataWriterHashRemove(bool flushdata)
 #endif
                     if (u_sess->attr.attr_storage.HaModuleDebug)
                         ereport(LOG,
-                            (errmsg("HA-DataWriterHashRemove: rnode %u/%u/%u, col %d",
-                                hentry->key.node.spcNode,
-                                hentry->key.node.dbNode,
-                                hentry->key.node.relNode,
-                                hentry->key.attid)));
+                                (errmsg("HA-DataWriterHashRemove: rnode %u/%u/%u, col %d", hentry->key.node.spcNode,
+                                        hentry->key.node.dbNode, hentry->key.node.relNode, hentry->key.attid)));
                 }
                 DELETE_EX(cuStorage);
             }
         }
-        hash_search(t_thrd.datarcvwriter_cxt.data_writer_rel_tab, (void*)&hentry->key, HASH_REMOVE, NULL);
+        hash_search(t_thrd.datarcvwriter_cxt.data_writer_rel_tab, (void *)&hentry->key, HASH_REMOVE, NULL);
     }
 
     /* Reset flush page error num after flush page successfully */
@@ -960,7 +897,7 @@ static void DataWriterHashRemove(bool flushdata)
  */
 static DataBaseDirState CheckDatabaseReady(Oid spcNode, Oid dbNode)
 {
-    char* dbpath = NULL;
+    char *dbpath = NULL;
     struct stat st;
     int nRet = 0;
     DataBaseDirState dbDirState = NONEEXISTDATABASEDIR;
@@ -993,29 +930,29 @@ retry:
             securec_check_ss(nRet, "", "");
 
             rllen = readlink(tbpath, linkpath, sizeof(linkpath));
-            if (rllen < 0) {
-                if (errno == EINVAL || errno == ENOTDIR) {
-                    pfree(dbpath);
-                    dbpath = NULL;
-                    ereport(PANIC, (errmsg("could not read symbolic link \"%s\": %m", tbpath)));
-                } else if (errno == ENOENT) {
-                    ereport(DEBUG3, (errmsg("sleep a while waiting for tablespace \"%s\" ready", tbpath)));
-                    goto invalid_handle;
-                } else {
-                    pfree(dbpath);
-                    dbpath = NULL;
-                    ereport(ERROR, (errcode_for_file_access(), errmsg("invalid tablespace link %s: %m", tbpath)));
-                }
+            bool b_einval = rllen < 0 && (errno == EINVAL || errno == ENOTDIR);
+            bool b_enoent = rllen < 0 && errno == ENOENT;
+            if (b_einval) {
+                pfree(dbpath);
+                dbpath = NULL;
+                ereport(PANIC, (errmsg("could not read symbolic link \"%s\": %m", tbpath)));
+            } else if (b_enoent) {
+                ereport(DEBUG3, (errmsg("sleep a while waiting for tablespace \"%s\" ready", tbpath)));
+                goto invalid_handle;
+            } else if (rllen < 0) {
+                pfree(dbpath);
+                dbpath = NULL;
+                ereport(ERROR, (errcode_for_file_access(), errmsg("invalid tablespace link %s: %m", tbpath)));
             } else if (rllen >= (int)sizeof(linkpath)) {
                 pfree(dbpath);
                 dbpath = NULL;
-                ereport(ERROR,
-                    (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("symbolic link \"%s\" target is too long", tbpath)));
+                ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                                errmsg("symbolic link \"%s\" target is too long", tbpath)));
             } else {
                 linkpath[rllen] = '\0';
                 if (stat(linkpath, &st) < 0 || !S_ISDIR(st.st_mode))
-                    ereport(PANIC,
-                        (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("invalid tablespace directory %s: %m", tbpath)));
+                    ereport(PANIC, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                                    errmsg("invalid tablespace directory %s: %m", tbpath)));
                 goto invalid_handle;
             }
 #else
@@ -1027,23 +964,21 @@ retry:
             pfree(dbpath);
             dbpath = NULL;
             ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("tablespaces are not supported on this platform")));
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("tablespaces are not supported on this platform")));
 #endif
         } else {
             pfree(dbpath);
             dbpath = NULL;
-            ereport(ERROR,
-                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                    errmsg("\"database %u/%u\" invalid directory : %m", spcNode, dbNode)));
+            ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                            errmsg("\"database %u/%u\" invalid directory : %m", spcNode, dbNode)));
         }
     } else {
         pfree(dbpath);
         dbpath = NULL;
         /* Is it not a directory? */
         if (!S_ISDIR(st.st_mode))
-            ereport(ERROR,
-                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                    errmsg("\"database %u/%u\" exists but is not a directory", spcNode, dbNode)));
+            ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                            errmsg("\"database %u/%u\" exists but is not a directory", spcNode, dbNode)));
         dbDirState = EXISTDATABASEDIR;
         return dbDirState;
     }
@@ -1051,11 +986,9 @@ retry:
 invalid_handle:
     if ((t_thrd.int_cxt.ProcDiePending || t_thrd.proc_cxt.proc_exit_inprogress) &&
         !t_thrd.datarcvwriter_cxt.AmDataReceiverForDummyStandby) {
-        ereport(WARNING,
-            (errcode(ERRCODE_ADMIN_SHUTDOWN),
-                errmsg("canceling the wait for database directory \"%s\" "
-                       "being created in recovery",
-                    dbpath)));
+        ereport(WARNING, (errcode(ERRCODE_ADMIN_SHUTDOWN), errmsg("canceling the wait for database directory \"%s\" "
+                                                                  "being created in recovery",
+                                                                  dbpath)));
         pfree(dbpath);
         dbpath = NULL;
         dbDirState = DATABASEDIRCREATECANCEL;
@@ -1066,18 +999,18 @@ invalid_handle:
     goto retry;
 }
 
-static void DummyStandbyDataRcvWrite(char* buf, uint32 nbytes)
+static void DummyStandbyDataRcvWrite(char *buf, uint32 nbytes)
 {
     ssize_t byteswritten;
     char path[MAXPGPATH] = {0};
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
 
     /* buf unit */
     DataElementHeaderData dataehdr;
     uint32 currentlen = 0;
     int headerlen = sizeof(DataElementHeaderData);
     uint32 caculatebytes = nbytes;
-    char* caculatebuf = buf;
+    char *caculatebuf = buf;
     int nRet = 0;
 
     /*
@@ -1102,29 +1035,24 @@ static void DummyStandbyDataRcvWrite(char* buf, uint32 nbytes)
     /* open the file */
     if (dummy_data_writer_file_fd < 0) {
         /* get the file path */
-        nRet = snprintf_s(path,
-            sizeof(path),
-            MAXPGPATH - 1,
-            "base/dummy_standby/%u",
-            t_thrd.datarcvwriter_cxt.dummy_data_writer_file_num);
+        nRet = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "base/dummy_standby/%u",
+                          t_thrd.datarcvwriter_cxt.dummy_data_writer_file_num);
         securec_check_ss_c(nRet, "", "");
 
         dummy_data_writer_file_fd = open(path, O_RDWR | O_CREAT | PG_BINARY, S_IRUSR | S_IWUSR);
         if (dummy_data_writer_file_fd < 0)
-            ereport(PANIC,
-                (errcode_for_file_access(),
-                    errmsg("could not create data file \"%s\", dummy_data_writer_file_fd=%d: %m",
-                        path,
-                        dummy_data_writer_file_fd)));
+            ereport(PANIC, (errcode_for_file_access(),
+                            errmsg("could not create data file \"%s\", dummy_data_writer_file_fd=%d: %m", path,
+                                   dummy_data_writer_file_fd)));
     }
 
     while (caculatebytes > 0) {
         errno_t rc = 0;
-        rc = memcpy_s((void*)&currentlen, sizeof(uint32), caculatebuf, sizeof(uint32));
+        rc = memcpy_s((void *)&currentlen, sizeof(uint32), caculatebuf, sizeof(uint32));
         securec_check(rc, "", "");
         caculatebuf += sizeof(uint32);
 
-        rc = memcpy_s((void*)&dataehdr, headerlen, caculatebuf, headerlen);
+        rc = memcpy_s((void *)&dataehdr, headerlen, caculatebuf, headerlen);
         securec_check(rc, "", "");
         caculatebuf += headerlen;
         caculatebuf += dataehdr.data_size;
@@ -1140,7 +1068,7 @@ static void DummyStandbyDataRcvWrite(char* buf, uint32 nbytes)
             errno = ENOSPC;
         }
         ereport(PANIC, (errcode_for_file_access(),
-            errmsg("could not write to data file %s buffer len %u, length %u: %m", path, nbytes, nbytes)));
+                        errmsg("could not write to data file %s buffer len %u, length %u: %m", path, nbytes, nbytes)));
     }
 
     errno = 0;
@@ -1149,36 +1077,26 @@ static void DummyStandbyDataRcvWrite(char* buf, uint32 nbytes)
         /* if write didn't set errno, assume no disk space */
         if (errno == 0)
             errno = ENOSPC;
-        ereport(PANIC,
-            (errcode_for_file_access(),
-                errmsg("could not write to data file %s "
-                       "at offset %u, length %u: %m",
-                    path,
-                    (uint32)dummy_data_writer_file_offset,
-                    nbytes)));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not write to data file %s "
+                                                          "at offset %u, length %u: %m",
+                                                          path, (uint32)dummy_data_writer_file_offset, nbytes)));
     }
 
     dummy_data_writer_file_offset = dummy_data_writer_file_offset + nbytes + sizeof(nbytes);
 
     if (u_sess->attr.attr_storage.HaModuleDebug) {
         ereport(LOG,
-            (errmsg("HA-DummyStandbyDataRcvWrite: fileno %u, nbytes %u, queueoffset %u/%u,"
-                    " dummy_data_writer_file_offset %u, dummy_data_writer_file_fd %d",
-                t_thrd.datarcvwriter_cxt.dummy_data_writer_file_num,
-                nbytes,
-                dataehdr.queue_offset.queueid,
-                dataehdr.queue_offset.queueoff,
-                dummy_data_writer_file_offset,
-                dummy_data_writer_file_fd)));
+                (errmsg("HA-DummyStandbyDataRcvWrite: fileno %u, nbytes %u, queueoffset %u/%u,"
+                        " dummy_data_writer_file_offset %u, dummy_data_writer_file_fd %d",
+                        t_thrd.datarcvwriter_cxt.dummy_data_writer_file_num, nbytes, dataehdr.queue_offset.queueid,
+                        dataehdr.queue_offset.queueoff, dummy_data_writer_file_offset, dummy_data_writer_file_fd)));
     }
 
     /* use fdatasync to make sure the received data to flush the disk */
     if (pg_fdatasync(dummy_data_writer_file_fd) != 0)
-        ereport(PANIC,
-            (errcode_for_file_access(),
-                errmsg("could not fdatasync data file num %u, fd %d: %m",
-                    t_thrd.datarcvwriter_cxt.dummy_data_writer_file_num,
-                    dummy_data_writer_file_fd)));
+        ereport(PANIC, (errcode_for_file_access(),
+                        errmsg("could not fdatasync data file num %u, fd %d: %m",
+                               t_thrd.datarcvwriter_cxt.dummy_data_writer_file_num, dummy_data_writer_file_fd)));
 
     /* Update shared-memory status */
     SpinLockAcquire(&datarcv->mutex);
@@ -1199,11 +1117,11 @@ extern void CloseDataFile(void)
 
 void InitDummyDataNum(void)
 {
-    DIR* dir = NULL;
-    struct dirent* de = NULL;
+    DIR *dir = NULL;
+    struct dirent *de = NULL;
     int max_num_file = 0;
     int min_num_file = 0;
-    char* dirpath = DUMMY_STANDBY_DATADIR;
+    char *dirpath = DUMMY_STANDBY_DATADIR;
 
     /* open the dir of base/dummy_standby */
     errno = 0;
@@ -1242,11 +1160,8 @@ void InitDummyDataNum(void)
         /* search the max num file */
         max_num_file = Max(atoi(de->d_name), max_num_file);
         min_num_file = Min(atoi(de->d_name), min_num_file);
-        ereport(DEBUG5,
-            (errmsg("InitDummyDataNum de->d_name=%s;   max_num_path=%d; min_num_file=%d.",
-                de->d_name,
-                max_num_file,
-                min_num_file)));
+        ereport(DEBUG5, (errmsg("InitDummyDataNum de->d_name=%s;   max_num_path=%d; min_num_file=%d.", de->d_name,
+                                max_num_file, min_num_file)));
     }
 
     t_thrd.datarcvwriter_cxt.dummy_data_writer_file_num = max_num_file;
@@ -1255,7 +1170,7 @@ void InitDummyDataNum(void)
 }
 
 /* check whether the data writer thread can write data through shared buffer. */
-static bool CanWriteBuffer(SMgrRelation smgr, ForkNumber forkNum, const char* path)
+static bool CanWriteBuffer(SMgrRelation smgr, ForkNumber forkNum, const char *path)
 {
     if (CheckFileExists(path) == FILE_EXIST) {
         return true;

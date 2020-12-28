@@ -43,4 +43,3 @@ enum EC_Status { EC_STATUS_INIT = 0, EC_STATUS_CONNECTED, EC_STATUS_EXECUTED, EC
 #define EC_LIBODBC_TYPE_TWO 2 /* libodbc.so.2 */
 
 #endif /* CONNECTOR_H */
-

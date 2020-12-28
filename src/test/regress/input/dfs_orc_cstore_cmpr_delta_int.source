@@ -1,0 +1,45 @@
+set enable_global_stats = true;
+set enable_vector_engine=on;
+-- problem:
+-- basic delta compression test, without RLE compression
+CREATE TABLE colcmpr_delta_int00
+(
+	RS_ID int,
+	R0_ID int NOT NULL,
+	R1_ID int NOT NULL,
+	R2_ID int NOT NULL,
+	R3_ID int NOT NULL,
+	R4_ID int NOT NULL,
+	R5_ID int NOT NULL,
+	R6_ID int NOT NULL,
+	R7_ID int NOT NULL,
+	R8_ID int NOT NULL,
+	R9_ID int NOT NULL
+)  with (orientation = orc) tablespace hdfs_ts  DISTRIBUTE BY hash(RS_ID);
+
+COPY colcmpr_delta_int00 FROM '@abs_srcdir@/data/colcmpr_delta_int00.data';
+SELECT * FROM colcmpr_delta_int00;
+DROP TABLE colcmpr_delta_int00;
+-- problem:
+-- test delta && rle compression methods
+-- 1. all values in CU are the same;
+-- 2. size of the max delta value is 1/2/3/4 bytes;
+-- 3. rle test for down/up limits and bound;
+CREATE TABLE colcmpr_delta_int01
+(
+	RS_ID int,
+	R0_ID int NOT NULL,
+	R1_ID int NOT NULL,
+	R2_ID int NOT NULL,
+	R3_ID int NOT NULL,
+	R4_ID int NOT NULL,
+	R5_ID int NOT NULL,
+	R6_ID int NOT NULL,
+	R7_ID int NOT NULL,
+	R8_ID int NOT NULL,
+	R9_ID int NOT NULL
+)  with (orientation = orc) tablespace hdfs_ts  DISTRIBUTE BY hash(RS_ID);
+
+COPY colcmpr_delta_int01 FROM '@abs_srcdir@/data/colcmpr_delta_int01.data';
+SELECT * FROM colcmpr_delta_int01;
+DROP TABLE colcmpr_delta_int01;

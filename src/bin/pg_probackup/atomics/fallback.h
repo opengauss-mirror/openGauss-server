@@ -69,18 +69,18 @@ extern void pg_extern_compiler_barrier(void);
 
 typedef struct pg_atomic_flag
 {
-	/*
-	 * To avoid circular includes we can't use s_lock as a type here. Instead
-	 * just reserve enough space for all spinlock types. Some platforms would
-	 * be content with just one byte instead of 4, but that's not too much
-	 * waste.
-	 */
+    /*
+     * To avoid circular includes we can't use s_lock as a type here. Instead
+     * just reserve enough space for all spinlock types. Some platforms would
+     * be content with just one byte instead of 4, but that's not too much
+     * waste.
+     */
 #if defined(__hppa) || defined(__hppa__)	/* HP PA-RISC, GCC and HP compilers */
-	int			sema[4];
+    int     sema[4];
 #else
-	int			sema;
+    int     sema;
 #endif
-	volatile bool value;
+    volatile bool value;
 } pg_atomic_flag;
 
 #endif /* PG_HAVE_ATOMIC_FLAG_SUPPORT */
@@ -93,11 +93,11 @@ typedef struct pg_atomic_flag
 typedef struct pg_atomic_uint32_local
 {
 #if defined(__hppa) || defined(__hppa__)	
-	int			sema[4];
+    int     sema[4];
 #else
-	int			sema;
+    int     sema;
 #endif
-	volatile uint32 value;
+    volatile uint32 value;
 } pg_atomic_uint32_local;
 
 #endif /* PG_HAVE_ATOMIC_U32_SUPPORT */
@@ -109,13 +109,13 @@ typedef struct pg_atomic_uint32_local
 #define PG_HAVE_ATOMIC_U64_SUPPORT
 typedef struct pg_atomic_uint64_local
 {
-	/* Check pg_atomic_flag's definition above for an explanation */
+    /* Check pg_atomic_flag's definition above for an explanation */
 #if defined(__hppa) || defined(__hppa__)	/* HP PA-RISC, GCC and HP compilers */
-	int			sema[4];
+    int     sema[4];
 #else
-	int			sema;
+    int     sema;
 #endif
-	volatile uint64 value;
+    volatile uint64 value;
 } pg_atomic_uint64_local;
 
 #endif /* PG_HAVE_ATOMIC_U64_SUPPORT */
@@ -146,7 +146,7 @@ extern void pg_atomic_write_u32_impl(volatile pg_atomic_uint32_local *ptr, uint3
 
 #define PG_HAVE_ATOMIC_COMPARE_EXCHANGE_U32
 extern bool pg_atomic_compare_exchange_u32_impl(volatile pg_atomic_uint32_local *ptr,
-												uint32 *expected, uint32 newval);
+                                                                                    uint32 *expected, uint32 newval);
 
 #define PG_HAVE_ATOMIC_FETCH_ADD_U32
 extern uint32 pg_atomic_fetch_add_u32_impl(volatile pg_atomic_uint32_local *ptr, int32 add_);
@@ -161,7 +161,7 @@ extern void pg_atomic_init_u64_impl(volatile pg_atomic_uint64_local *ptr, uint64
 
 #define PG_HAVE_ATOMIC_COMPARE_EXCHANGE_U64
 extern bool pg_atomic_compare_exchange_u64_impl(volatile pg_atomic_uint64_local *ptr,
-												uint64 *expected, uint64 newval);
+                                                                                uint64 *expected, uint64 newval);
 
 #define PG_HAVE_ATOMIC_FETCH_ADD_U64
 extern uint64 pg_atomic_fetch_add_u64_impl(volatile pg_atomic_uint64_local *ptr, int64 add_);

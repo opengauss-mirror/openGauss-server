@@ -3,6 +3,7 @@
  * gtm_seq.h
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2009, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
@@ -14,9 +15,9 @@
 #ifndef GTM_SEQ_H
 #define GTM_SEQ_H
 
-#include "gtm/stringinfo.h"
+#include "gtm/utils/stringinfo.h"
 #include "gtm/gtm_lock.h"
-#include "gtm/libpq-be.h"
+#include "gtm/utils/libpq-be.h"
 #include "gtm/gtm_list.h"
 #include "gtm/gtm_msg.h"
 
@@ -77,9 +78,9 @@ typedef struct {
 } GTM_SeqMsgData;
 
 typedef struct GTM_ThreadSeqInfo {
-    GTM_SeqInfo *seqinfo;
+    GTM_SeqInfo* seqinfo;
     GTM_Sequence range;
-    GTM_Sequence *rangemax;
+    GTM_Sequence* rangemax;
     bool backup;
     GTM_Sequence seq_value;
 } GTM_ThreadSeqInfo;
@@ -104,11 +105,11 @@ typedef struct GTM_ThreadSeqInfo {
 /* SEQUENCE Management */
 void GTM_InitSeqManager(void);
 int GTM_SeqOpen(GTM_UUID seq_uuid, GTM_Sequence increment_by, GTM_Sequence minval, GTM_Sequence maxval,
-                GTM_Sequence startval, bool cycle, GTM_DBName seq_dbName, bool is_backup);
-int GTM_SeqAlter(GTM_SeqMsgData *msg);
+    GTM_Sequence startval, bool cycle, GTM_DBName seq_dbName, bool is_backup);
+int GTM_SeqAlter(GTM_SeqMsgData* msg);
 int GTM_SeqClose(GTM_UUID seq_uuid, GTM_DBName seq_dbName);
 int GTM_SeqDBRename(GTM_DBName dbName, GTM_DBName newdbName);
-GTM_Sequence GTM_SeqGetNext(GTM_SeqMsgData *msg, GTM_Sequence *rangemax);
+GTM_Sequence GTM_SeqGetNext(GTM_SeqMsgData* msg, GTM_Sequence* rangemax);
 int GTM_SeqSetVal(GTM_UUID seq_uuid, GTM_Sequence nextval, GTM_Sequence range, bool iscalled);
 int GTM_SeqReset(GTM_UUID seq_uuid);
 void GTM_SyncSequence(GTM_MessageType mtype, GTM_UUID seq_uuid, GTM_SeqInfo *thisSeq, GTM_DBName dbName = NULL,
@@ -118,46 +119,46 @@ bool GTM_SyncSequenceToStandby(GTM_MessageType mtype, GTM_UUID seq_uuid, GTM_Seq
 
 void GTM_SyncUUID(GTM_UUID seq_uuid);
 void GTM_GetSyncUUIDFromEtcd();
-bool GTM_GetUUIDFromEtcd(GTM_UUID &seq_uuid, bool force);
+bool GTM_GetUUIDFromEtcd(GTM_UUID& seq_uuid, bool force);
 bool GTM_SyncUUIDToStandby(GTM_UUID seq_uuid);
 
-void ProcessSequenceGetUUIDCommand(Port *myport, StringInfo message, bool is_backup);
-void ProcessSequenceInitCommand(Port *myport, StringInfo message, bool is_backup);
-void ProcessSequenceGetNextCommand(Port *myport, StringInfo message, bool is_backup);
-void ProcessSequenceSetValCommand(Port *myport, StringInfo message, bool is_backup);
-void ProcessSequenceResetCommand(Port *myport, StringInfo message, bool is_backup);
-void ProcessSequenceCloseCommand(Port *myport, StringInfo message, bool is_backup);
-void ProcessSequenceDBRenameCommand(Port *myport, StringInfo message, bool is_backup);
-void ProcessSequenceAlterCommand(Port *myport, StringInfo message, bool is_backup);
+void ProcessSequenceGetUUIDCommand(Port* myport, StringInfo message, bool is_backup);
+void ProcessSequenceInitCommand(Port* myport, StringInfo message, bool is_backup);
+void ProcessSequenceGetNextCommand(Port* myport, StringInfo message, bool is_backup);
+void ProcessSequenceSetValCommand(Port* myport, StringInfo message, bool is_backup);
+void ProcessSequenceResetCommand(Port* myport, StringInfo message, bool is_backup);
+void ProcessSequenceCloseCommand(Port* myport, StringInfo message, bool is_backup);
+void ProcessSequenceDBRenameCommand(Port* myport, StringInfo message, bool is_backup);
+void ProcessSequenceAlterCommand(Port* myport, StringInfo message, bool is_backup);
 
-void ProcessSequenceListCommand(Port *myport, StringInfo message);
-void ProcessBkupGTMSequenceFileUUIDCommand(Port *myport, StringInfo message);
-void ProcessGetNextSeqUUIDTransactionCommand(Port *myport, StringInfo message);
+void ProcessSequenceListCommand(Port* myport, StringInfo message);
+void ProcessBkupGTMSequenceFileUUIDCommand(Port* myport, StringInfo message);
+void ProcessGetNextSeqUUIDTransactionCommand(Port* myport, StringInfo message);
 
-void GTM_SaveSeqInfo(FILE *ctlf);
-void GTM_RestoreSeqUUIDInfo(FILE *ctlf);
+void GTM_SaveSeqInfo(FILE* ctlf);
+void GTM_RestoreSeqUUIDInfo(FILE* ctlf);
 int GTM_SeqRestore(GTM_SequenceKey seqkey, GTM_Sequence increment_by, GTM_Sequence minval, GTM_Sequence maxval,
-                   GTM_Sequence startval, GTM_Sequence curval, int32 state, bool cycle, bool called);
+    GTM_Sequence startval, GTM_Sequence curval, int32 state, bool cycle, bool called);
 int GTM_SeqUUIDRestore(GTM_UUID seq_uuid, GTM_Sequence increment_by, GTM_Sequence minval, GTM_Sequence maxval,
                        GTM_Sequence startval, GTM_Sequence curval, GTM_Sequence range, int32 state, bool cycle,
                        bool called, GTM_DBName seq_dbName);
 
-void GTM_RestoreUUIDInfo(FILE *seqf, GTM_UUID seq_uuid);
+void GTM_RestoreUUIDInfo(FILE* seqf, GTM_UUID seq_uuid);
 void SetNextGlobalUUID(GTM_UUID seq_uuid);
 bool GlobalUUIDIsValid(GTM_UUID seq_uuid);
 bool GTM_NeedUUIDRestoreUpdate(void);
 
 bool GTM_NeedSeqRestoreUpdate(GTM_UUID seq_uuid);
-void GTM_WriteRestorePointSeq(FILE *ctlf, GTM_UUID *seqId, bool all_seq_restore);
+void GTM_WriteRestorePointSeq(FILE* ctlf, GTM_UUID* seqId, bool all_seq_restore);
 
 void RemoveGTMSeqs(void);
 
-void GTM_WriteRestorePointUUID(FILE *file, bool uuid_restore);
+void GTM_WriteRestorePointUUID(FILE* file, bool uuid_restore);
 
-void GTM_SaveUUIDInfo(FILE *file);
+void GTM_SaveUUIDInfo(FILE* file);
 GTM_UUID ReadNewGlobalUUId();
 
-bool GTM_SetSeqToEtcd(GTM_MessageType mtype, GTM_SeqInfo *thisSeq, bool isBackup, GTM_UUID seq_uuid);
+bool GTM_SetSeqToEtcd(GTM_MessageType mtype, GTM_SeqInfo* thisSeq, bool isBackup, GTM_UUID seq_uuid);
 extern void release_group_seq_lock();
 void handleGetSeqException();
 

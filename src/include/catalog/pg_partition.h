@@ -71,7 +71,9 @@ CATALOG(pg_partition,9016) BKI_ROWTYPE_OID(3790) BKI_SCHEMA_MACRO
 #define GetPartitionStrategyNameByType(s)\
 (\
     (s == 'r') ? "RANGE-PARTITION" : \
-        (s== 'i') ? "INTERVAL-PARTITION" : \
+        (s == 'i') ? "INTERVAL-PARTITION" : \
+            (s == 'l') ? "LIST-PARTITION" : \
+            (s == 'h') ? "HASH-PARTITION" : \
             (s == 'v') ? "VALUE-PARTITION" : "INVALID"\
 )\
 
@@ -80,6 +82,8 @@ typedef FormData_pg_partition *Form_pg_partition;
 #define PART_STRATEGY_RANGE              'r'
 #define PART_STRATEGY_INTERVAL           'i'
 #define PART_STRATEGY_VALUE              'v'
+#define PART_STRATEGY_LIST               'l'
+#define PART_STRATEGY_HASH               'h'
 #define PART_STRATEGY_INVALID            'n'
 
 #define PART_OBJ_TYPE_PARTED_TABLE       'r'

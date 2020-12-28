@@ -24,6 +24,8 @@
 #include "postgres.h"
 #include "optimizer/bucketinfo.h"
 #include "nodes/bitmapset.h"
+#include "knl/knl_thread.h"
+#include "pgxc/groupmgr.h"
 
 /*
  * @Description: check if the user specified the right bucketids
@@ -39,7 +41,9 @@ bool hasValidBuckets(RangeVar* r)
     /* check for valid range of bucket ids */
     ListCell* lc = NULL;
     Bitmapset* bms = NULL;
-
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     foreach (lc, r->buckets) {
         uint2 v = (uint2)intVal(lfirst(lc));
         if (v >= BUCKETDATALEN) {
@@ -116,6 +120,10 @@ List* RangeVarGetBucketList(RangeVar* rangeVar)
  */
 static StringInfo bucketInfoToDotString(BucketInfo* bucket_info)
 {
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
+
     StringInfo str = makeStringInfo();
     int* dot = (int*)palloc0(sizeof(int) * BUCKETDATALEN);
     int* arr = (int*)palloc0(sizeof(int) * BUCKETDATALEN);
@@ -182,6 +190,10 @@ static StringInfo bucketInfoToDotString(BucketInfo* bucket_info)
  */
 static StringInfo bucketInfoToNotString(BucketInfo* bucket_info)
 {
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
+
     StringInfo str = makeStringInfo();
     int* arr = (int*)palloc0(sizeof(int) * BUCKETDATALEN);
     int len = 0;
@@ -250,6 +262,9 @@ static StringInfo bucketInfoToNotString(BucketInfo* bucket_info)
  */
 char* bucketInfoToString(BucketInfo* bucket_info)
 {
+    if (bucket_info == NULL) {
+        return "bucket_info is null";
+    }
     if (bucket_info->buckets == NIL) {
         return "all";
     } else {
@@ -263,4 +278,3 @@ char* bucketInfoToString(BucketInfo* bucket_info)
         }
     }
 }
-

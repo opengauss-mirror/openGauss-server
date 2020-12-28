@@ -19,15 +19,10 @@ include $(top_builddir)/src/Makefile.global
 include $(top_srcdir)/contrib/contrib-global.mk
 
 
-override CPPFLAGS := -DFRONTEND $(CPPFLAGS) -I$(LZ4_INCLUDE_PATH)
-CFLAGS += -Wl,-z,relro,-z,now
-
-LDFLAGS += -L$(LZ4_LIB_PATH)
-LIBS += -llz4
+override CPPFLAGS := -DFRONTEND $(CPPFLAGS)
 
 xlogreader.cpp: % : $(top_srcdir)/src/gausskernel/storage/access/transam/%
 	rm -f $@ && $(LN_S) $< .
-
 xlogreader_common.cpp: % : $(top_srcdir)/src/gausskernel/storage/access/redo/%
 	rm -f $@ && $(LN_S) $< .
 $(RMGRDESCSOURCES): % : $(top_srcdir)/src/gausskernel/storage/access/rmgrdesc/%

@@ -82,7 +82,7 @@ static void newLexeme(DictThesaurus* d, char* b, char* e, uint32 idsubst, uint16
 
     ptr->lexeme = (char*)palloc(e - b + 1);
 
-    errorno = memcpy_s(ptr->lexeme, e - b + 1, b, e - b);
+    errorno = memcpy_s(ptr->lexeme, e - b, b, e - b);
     securec_check(errorno, "\0", "\0");
     ptr->lexeme[e - b] = '\0';
 
@@ -608,8 +608,10 @@ Datum thesaurus_init(PG_FUNCTION_ARGS)
         d = (DictThesaurus*)palloc0(sizeof(DictThesaurus));
         thesaurusRead(absfname, d);
 
-        d->subdictOid = get_ts_dict_oid(stringToQualifiedNameList(subdictname), false);
+        List* result = stringToQualifiedNameList(subdictname);
+        d->subdictOid = get_ts_dict_oid(result, false);
         d->subdict = lookup_ts_dictionary_cache(d->subdictOid);
+        list_free(result);
 
         compileTheLexeme(d);
         compileTheSubstitute(d);

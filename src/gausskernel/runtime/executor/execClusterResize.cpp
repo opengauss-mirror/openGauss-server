@@ -15,6 +15,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/tableam.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
 #include "catalog/namespace.h"
@@ -36,7 +37,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 #include "storage/lmgr.h"
 
@@ -46,20 +47,15 @@
  * ---------------------------------------------------------------------------------
  */
 /* delete delta table definition */
-#define Natts_pg_delete_delta 5
+#define Natts_pg_delete_delta 3
 
-#define Anum_pg_delete_delta_xcnodeid 1
-#define Anum_pg_delete_delta_dntableoid 2
-#define Anum_pg_delete_delta_tablebucketid 3
-#define Anum_pg_delete_delta_block_number 4
-#define Anum_pg_delete_delta_block_offset 5
+#define Anum_pg_delete_delta_xcnodeid_and_dntableoid 1
+#define Anum_pg_delete_delta_tablebucketid_and_ctid 2
 
 #define RANGE_SCAN_IN_REDIS "tidge+tid+pg_get_redis_rel_start_ctid+tidle+tid+pg_get_redis_rel_end_ctid+"
 
-static inline void RelationGetNewTableName(Relation rel, char* newtable_name);
-
 static Node* eval_dnstable_func_mutator(
-    Relation rel, Node* node, StringInfo qual_str, bool* isRangeScanInRedis, bool isRoot);
+    Relation rel, Node* node, StringInfo qual_str, RangeScanInRedis *rangeScanInRedis, bool isRoot);
 
 static inline bool redis_tupleid_retrive_function(const char* funcname, Oid rettype, const Oid* argstype, int nargs);
 
@@ -67,9 +63,10 @@ static inline bool redis_blocknum_retrive_function(const char* funcname, Oid ret
 
 static inline bool redis_offset_retrive_function(const char* funcname, Oid rettype, const Oid* argstype, int nargs);
 
-#define REDIS_TUPLEID_RETRIVE_FUNCSIG(rettype, argstype, nargs)            \
-    ((((nargs) == 1 && (rettype) == TIDOID && (argstype)[0] == TEXTOID) || \
-        ((nargs) == 2 && (rettype) == TIDOID && (argstype)[0] == TEXTOID && (argstype)[1] == NAMEOID)))
+#define REDIS_TUPLEID_RETRIVE_FUNCSIG(rettype, argstype, nargs)                                     \
+    (((nargs) == 1 && (rettype) == TIDOID && (argstype)[0] == TEXTOID) ||                           \
+    ((nargs) == 4 && (rettype) == TIDOID && (argstype)[0] == TEXTOID && (argstype)[1] == NAMEOID && \
+    (argstype)[2] == INT4OID && (argstype)[3] == INT4OID))
 
 static inline bool redis_tupleid_retrive_function(const char* funcname, Oid rettype, const Oid* argstype, int nargs)
 
@@ -109,6 +106,18 @@ static inline bool redis_blocknum_retrive_function(const char* funcname, Oid ret
     return false;
 }
 
+static inline bool redis_ctid_retrive_function(const char* funcname, Oid rettype, const Oid* argstype, int nargs)
+
+{
+    if (pg_strcasecmp(funcname, "pg_tupleid_get_ctid_to_bigint") == 0 &&
+        (nargs == 1 && rettype == INT8OID && argstype[0] == TIDOID)) {
+        return true;
+    }
+
+    return false;
+}
+
+
 /*
  * - Brief: Record the given tuple's tupleid into pg_delete_delta table
  * - Parameter:
@@ -130,18 +139,18 @@ void RecordDeletedTuple(Oid relid, int2 bucketid, const ItemPointer tupleid, con
         nulls[i] = false;
         values[i] = (Datum)0;
     }
-
-    values[Anum_pg_delete_delta_xcnodeid - 1] = UInt32GetDatum(u_sess->pgxc_cxt.PGXCNodeIdentifier);
-    values[Anum_pg_delete_delta_dntableoid - 1] = UInt32GetDatum(relid);
-    values[Anum_pg_delete_delta_tablebucketid - 1] = Int16GetDatum(bucketid);
-    values[Anum_pg_delete_delta_block_number - 1] = UInt32GetDatum(ItemPointerGetBlockNumber(tupleid));
-    values[Anum_pg_delete_delta_block_offset - 1] = UInt16GetDatum(ItemPointerGetOffsetNumber(tupleid));
-
+    values[Anum_pg_delete_delta_xcnodeid_and_dntableoid - 1] = 
+        UInt64GetDatum(((uint64)u_sess->pgxc_cxt.PGXCNodeIdentifier << 32) | relid);
+    values[Anum_pg_delete_delta_tablebucketid_and_ctid - 1] =
+        UInt64GetDatum(((uint64)ItemPointerGetBlockNumber(tupleid) << 16) | ItemPointerGetOffsetNumber(tupleid));
+    if (bucketid != InvalidBktId) {
+        values[Anum_pg_delete_delta_tablebucketid_and_ctid - 1] |= ((uint64)bucketid << 48);
+    }
     /* Record delta */
     tup = heap_form_tuple(RelationGetDescr(deldelta_rel), values, nulls);
     (void)simple_heap_insert(deldelta_rel, tup);
 
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 }
 
 /*
@@ -278,7 +287,7 @@ bool RelationIsDeleteDeltaTable(char* delete_delta_name)
 bool ClusterResizingInProgress()
 {
     Relation pgxc_group_rel = NULL;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tup = NULL;
     Datum datum;
     bool isNull = false;
@@ -290,8 +299,8 @@ bool ClusterResizingInProgress()
         ereport(PANIC, (errcode(ERRCODE_RELATION_OPEN_ERROR), errmsg("can not open pgxc_group")));
     }
 
-    scan = heap_beginscan(pgxc_group_rel, SnapshotNow, 0, NULL);
-    while ((tup = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(pgxc_group_rel, SnapshotNow, 0, NULL);
+    while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         datum = heap_getattr(tup, Anum_pgxc_group_in_redistribution, RelationGetDescr(pgxc_group_rel), &isNull);
 
         if ('y' == DatumGetChar(datum)) {
@@ -300,7 +309,7 @@ bool ClusterResizingInProgress()
         }
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(pgxc_group_rel, AccessShareLock);
 
     return result;
@@ -479,6 +488,27 @@ void BlockUnsupportedDDL(const Node* parsetree)
         case T_RenameStmt: {
             RenameStmt* stmt = (RenameStmt*)parsetree;
 
+            switch (stmt->renameType) {
+                case OBJECT_SCHEMA: {
+                    Oid nsOid = get_namespace_oid(stmt->subname, true);
+                    TRANSFER_DISABLE_DDL(nsOid);
+                    break;
+                }
+                case OBJECT_TABLE: {
+                    if (stmt->relation != NULL) {
+                        Oid relOid = RangeVarGetRelid(stmt->relation, AccessShareLock, true);
+                        if (OidIsValid(relOid)) {
+                            Oid nsOid = GetNamespaceIdbyRelId(relOid);
+                            UnlockRelationOid(relOid, AccessShareLock);
+                            TRANSFER_DISABLE_DDL(nsOid);
+                        }
+                    }
+                    break;
+                }
+                default:
+                    break;
+            }
+
             if (stmt->relation && CheckRangeVarInRedistribution(stmt->relation))
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -490,6 +520,22 @@ void BlockUnsupportedDDL(const Node* parsetree)
         /* Block ALTER set schema while table in cluster resizing */
         case T_AlterObjectSchemaStmt: {
             AlterObjectSchemaStmt* stmt = (AlterObjectSchemaStmt*)parsetree;
+
+            /* disable alter table set schema when transfer */
+            if (stmt->relation != NULL) {
+                Oid relOid = RangeVarGetRelid(stmt->relation, AccessShareLock, true);
+                if (OidIsValid(relOid)) {
+                    Oid nsOid = GetNamespaceIdbyRelId(relOid);
+                    UnlockRelationOid(relOid, AccessShareLock);
+                    TRANSFER_DISABLE_DDL(nsOid);
+
+                    if (stmt->newschema) {
+                        nsOid = get_namespace_oid(stmt->newschema, true);
+                        TRANSFER_DISABLE_DDL(nsOid);
+                    }
+                }
+            }
+
             if (stmt->relation && CheckRangeVarInRedistribution(stmt->relation))
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -567,6 +613,12 @@ void BlockUnsupportedDDL(const Node* parsetree)
                         if (stmt->relation) {
                             relid = RangeVarGetRelid(stmt->relation, lockmode_getrelid, true);
                             if (OidIsValid(relid)) {
+                                /* disable alter table truncate partition during transfer */
+                                if (CheckRangeVarInRedistribution(stmt->relation)) {
+                                    Oid nsOid = GetNamespaceIdbyRelId(relid);
+                                    TRANSFER_DISABLE_DDL(nsOid);
+                                }
+
                                 rel = relation_open(relid, NoLock);
                                 if (RelationInClusterResizingReadOnly(rel)) {
                                     ereport(ERROR,
@@ -727,6 +779,16 @@ void BlockUnsupportedDDL(const Node* parsetree)
 
             foreach (cell, stmt->relations) {
                 RangeVar* rv = (RangeVar*)lfirst(cell);
+
+                if (CheckRangeVarInRedistribution(rv)) {
+                    Oid relOid = RangeVarGetRelid(rv, lockmode_getrelid, true);
+                    if (OidIsValid(relOid)) {
+                        Oid nsOid = GetNamespaceIdbyRelId(relOid);
+                        UnlockRelationOid(relOid, lockmode_getrelid);
+                        TRANSFER_DISABLE_DDL(nsOid);
+                    }
+                }
+
                 rel = heap_openrv(rv, lockmode_openrel);
 
                 if (RelationInClusterResizingReadOnly(rel)) {
@@ -738,6 +800,48 @@ void BlockUnsupportedDDL(const Node* parsetree)
                                 RelationGetRelationName(rel))));
                 }
                 relation_close(rel, lockmode_openrel);
+            }
+        } break;
+
+        case T_DropStmt: {
+            DropStmt* stmt = (DropStmt*)parsetree;
+            switch (stmt->removeType) {
+                case OBJECT_TABLE: {
+                    /* disable drop table when transfer */
+                    ListCell* cell = NULL;
+                    foreach (cell, stmt->objects) {
+                        RangeVar* rel = makeRangeVarFromNameList((List*)lfirst(cell));
+                        Oid relOid = RangeVarGetRelid(rel, AccessShareLock, true);
+                        if (OidIsValid(relOid)) {
+                            Oid nsOid = GetNamespaceIdbyRelId(relOid);
+                            UnlockRelationOid(relOid, AccessShareLock);
+                            TRANSFER_DISABLE_DDL(nsOid);
+                        }
+                    }
+                    break;
+                }
+                case OBJECT_SCHEMA: {
+                    /* disable drop schema when transfer */
+                    ListCell* cell = NULL;
+                    foreach (cell, stmt->objects) {
+                        List* objname = (List*)lfirst(cell);
+                        char* name = NameListToString(objname);
+                        Oid nsOid = get_namespace_oid(name, true);
+                        TRANSFER_DISABLE_DDL(nsOid);
+                    }
+                    break;
+                }
+                default:
+                    break;
+           }
+        } break;
+
+        case T_CreateStmt: {
+            /* disable create table when transfer */
+            CreateStmt* stmt = (CreateStmt*)parsetree;
+            if (stmt->relation != NULL) {
+                Oid nsOid = RangeVarGetCreationNamespace(stmt->relation);
+                TRANSFER_DISABLE_DDL(nsOid);
             }
         } break;
 
@@ -793,6 +897,8 @@ bool redis_func_shippable(Oid funcid)
         result = true;
     } else if (redis_blocknum_retrive_function(func_name, rettype, argstype, nargs)) {
         result = true;
+    } else if (redis_ctid_retrive_function(func_name, rettype, argstype, nargs)) {
+        result = true;
     }
 
     /* pfree */
@@ -846,7 +952,7 @@ bool redis_func_dnstable(Oid funcid)
  * - Return:
  *      @new_quals: quals which func call be replaced by a const
  */
-List* eval_ctid_funcs(Relation rel, List* original_quals, bool* isRangeScanInRedis)
+List* eval_ctid_funcs(Relation rel, List* original_quals, RangeScanInRedis *rangeScanInRedis)
 {
 
     StringInfo qual_str = makeStringInfo();
@@ -857,14 +963,23 @@ List* eval_ctid_funcs(Relation rel, List* original_quals, bool* isRangeScanInRed
      */
     List* new_quals = (List*)copyObject((const void*)(original_quals));
 
-    *isRangeScanInRedis = false;
-
-    (void)eval_dnstable_func_mutator(rel, (Node*)new_quals, qual_str, isRangeScanInRedis, true);
+    rangeScanInRedis->isRangeScanInRedis = false;
+    rangeScanInRedis->sliceTotal = 0;
+    rangeScanInRedis->sliceIndex = 0;
+    (void)eval_dnstable_func_mutator(rel, (Node*)new_quals, qual_str, rangeScanInRedis, true);
 
     pfree_ext(qual_str->data);
     pfree_ext(qual_str);
 
     return new_quals;
+}
+
+static int32 get_expr_const_val(Node *val){
+    if (IsA(val, Const) && !((Const*)val)->constisnull && ((Const*)val)->consttype == INT4OID) {
+        return DatumGetInt32(((Const*)val)->constvalue);
+    } else {
+        return 0;
+    }
 }
 
 /*
@@ -880,7 +995,7 @@ List* eval_ctid_funcs(Relation rel, List* original_quals, bool* isRangeScanInRed
  *      @result: expression tree with dn stable function const-evaluated
  */
 static Node* eval_dnstable_func_mutator(
-    Relation rel, Node* node, StringInfo qual_str, bool* isRangeScanInRedis, bool isRoot)
+    Relation rel, Node* node, StringInfo qual_str, RangeScanInRedis *rangeScanInRedis, bool isRoot)
 {
     if (node == NULL)
         return NULL;
@@ -896,15 +1011,24 @@ static Node* eval_dnstable_func_mutator(
             if (redis_func_dnstable(expr->funcid)) {
                 Node* new_const = NULL;
                 char* funcname = get_func_name(expr->funcid);
-                Assert(funcname);
+                if (funcname == NULL) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                            errmsg("operation expression function with OID %u does not exist.", expr->funcid)));
+                }
+
                 bool is_func_get_start_ctid = pg_strcasecmp(funcname, "pg_get_redis_rel_start_ctid") == 0;
                 bool is_func_get_end_ctid = pg_strcasecmp(funcname, "pg_get_redis_rel_end_ctid") == 0;
 
-                if (is_func_get_start_ctid || is_func_get_end_ctid)
-                    new_const = eval_redis_func_direct(rel, is_func_get_start_ctid, is_func_get_end_ctid);
-                else
+                if (is_func_get_start_ctid || is_func_get_end_ctid){
+                    int32 numSlices = get_expr_const_val((Node*)list_nth(expr->args, 2));
+                    int32 idxSlices = get_expr_const_val((Node*)list_nth(expr->args, 3));
+                    new_const = eval_redis_func_direct(rel, is_func_get_start_ctid, numSlices, idxSlices);
+                    rangeScanInRedis->sliceIndex = idxSlices;
+                    rangeScanInRedis->sliceTotal = numSlices;
+                } else {
                     new_const = eval_const_expressions(NULL, node);
-
+                }
                 appendStringInfoString(qual_str, get_func_name(expr->funcid));
                 appendStringInfoString(qual_str, "+");
                 return new_const;
@@ -916,7 +1040,7 @@ static Node* eval_dnstable_func_mutator(
             List* l = (List*)node;
             for (int i = 0; i < list_length(l); i++) {
                 Node* expr = (Node*)list_nth(l, i);
-                Node* new_expr = eval_dnstable_func_mutator(rel, expr, qual_str, isRangeScanInRedis, false);
+                Node* new_expr = eval_dnstable_func_mutator(rel, expr, qual_str, rangeScanInRedis, false);
 
                 /*
                  * If a FuncExpr node is evalated into a T_Const value, we are hitting
@@ -933,7 +1057,7 @@ static Node* eval_dnstable_func_mutator(
              * and pg_get_redis_rel_end_ctid('xx')" on DN, we will pushdown the predicate at scan node.
              */
             if (isRoot && pg_strcasecmp(qual_str->data, RANGE_SCAN_IN_REDIS) == 0) {
-                *isRangeScanInRedis = true;
+                rangeScanInRedis->isRangeScanInRedis = true;
             }
 
             break;
@@ -949,7 +1073,7 @@ static Node* eval_dnstable_func_mutator(
             }
             appendStringInfoString(qual_str, funcname);
             appendStringInfoString(qual_str, "+");
-            eval_dnstable_func_mutator(rel, (Node*)opexpr->args, qual_str, isRangeScanInRedis, false);
+            eval_dnstable_func_mutator(rel, (Node*)opexpr->args, qual_str, rangeScanInRedis, false);
 
             break;
         }
@@ -1018,7 +1142,7 @@ Relation GetAndOpenNewTableRel(const Relation rel, LOCKMODE lockmode)
  * - Return:
  *      no return value
  */
-static inline void RelationGetNewTableName(Relation rel, char* newtable_name)
+void RelationGetNewTableName(Relation rel, char* newtable_name)
 {
     int rc = 0;
 

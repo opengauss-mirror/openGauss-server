@@ -14,7 +14,7 @@
 #include "access/gin.h"
 #include "access/itup.h"
 #include "fmgr.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "utils/rbtree.h"
 
 /*
@@ -31,8 +31,8 @@
 typedef struct GinPageOpaqueData {
     BlockNumber rightlink; /* next page if any */
     OffsetNumber maxoff;   /* number of PostingItems on GIN_DATA &
-                          * ~GIN_LEAF page. On GIN_LIST page, number of
-                          * heap tuples. */
+                            * ~GIN_LEAF page. On GIN_LIST page, number of
+                            * heap tuples. */
     uint16 flags;          /* see bit definitions below */
 } GinPageOpaqueData;
 
@@ -462,7 +462,7 @@ typedef struct ginxlogInsertDataInternal {
 typedef struct ginxlogSplit {
     RelFileNode node;
     BlockNumber rrlink;         /* right link, or root's blocknumber if root
-                         * split */
+                                 * split */
     BlockNumber leftChildBlkno; /* valid on a non-leaf split */
     BlockNumber rightChildBlkno;
     uint16 flags; /* see below */
@@ -893,7 +893,8 @@ typedef struct GinTupleCollector {
 extern void ginHeapTupleFastInsert(GinState *ginstate, GinTupleCollector *collector);
 extern void ginHeapTupleFastCollect(GinState *ginstate, GinTupleCollector *collector, OffsetNumber attnum, Datum value,
                                     bool isNull, ItemPointer ht_ctid);
-extern void ginInsertCleanup(GinState *ginstate, bool full_clean, bool fill_fsm, IndexBulkDeleteResult *stats);
+extern void ginInsertCleanup(GinState* ginstate, bool full_clean, bool fill_fsm, bool forceCleanup,
+                             IndexBulkDeleteResult* stats);
 
 /* ginpostinglist.c */
 extern GinPostingList *ginCompressPostingList(const ItemPointer ptrs, int nptrs, int maxsize, int *nwritten,
@@ -903,8 +904,7 @@ extern int ginPostingListDecodeAllSegmentsToTbm(GinPostingList *ptr, int totalsi
 extern ItemPointer ginPostingListDecodeAllSegments(GinPostingList *ptr, int len, int *ndecoded);
 extern ItemPointer ginPostingListDecode(GinPostingList *ptr, int *ndecoded);
 extern ItemPointer ginMergeItemPointers(ItemPointerData *a, uint32 na, ItemPointerData *b, uint32 nb, int *nmerged);
-extern void ginRedoRecompress(Page page, ginxlogRecompressDataLeaf* data);
-
+extern void GinRedoRecompress(Page page, ginxlogRecompressDataLeaf* data);
 /*
  * Merging the results of several gin scans compares item pointers a lot,
  * so we want this to be inlined. But if the compiler doesn't support that,

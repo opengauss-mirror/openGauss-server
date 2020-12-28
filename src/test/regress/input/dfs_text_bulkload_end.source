@@ -1,0 +1,253 @@
+--
+-- BULK LOAD END
+--
+----
+--4. INSERT INTO NORMAL TABLE AND PARTITIONED TABLE
+----
+CREATE TABLE LINEITEM_C
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+compress distribute by hash(L_ORDERKEY);
+
+CREATE TABLE LINEITEM_CP
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+compress
+distribute by hash(L_ORDERKEY)
+partition by range(L_ORDERKEY)
+(
+	partition p1 values less than (500),
+	partition p2 values less than (90000000)
+);
+
+CREATE FOREIGN TABLE EXT_LINEITEM (
+	L_ORDERKEY    BIGINT ,        
+	L_PARTKEY     BIGINT ,        
+	L_SUPPKEY     BIGINT ,        
+	L_LINENUMBER  BIGINT ,        
+	L_QUANTITY    DECIMAL(15,2) ,        
+	L_EXTENDEDPRICE  DECIMAL(15,2) ,        
+	L_DISCOUNT    DECIMAL(15,2) ,        
+	L_TAX     DECIMAL(15,2) ,        
+	L_RETURNFLAG  CHAR(1) ,        
+	L_LINESTATUS  CHAR(1) ,        
+	L_SHIPDATE    DATE ,        
+	L_COMMITDATE  DATE ,        
+	L_RECEIPTDATE DATE ,        
+	L_SHIPINSTRUCT CHAR(25) ,        
+	L_SHIPMODE     CHAR(10) ,        
+	L_COMMENT      VARCHAR(44) 
+)SERVER hdfs_server OPTIONS(format 'text', filenames '/user/hive/warehouse/text_on_hdfs/lineitem.data', delimiter '|')
+distribute by roundrobin;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+SELECT COUNT(*) FROM LINEITEM;
+
+TRUNCATE LINEITEM;
+
+----
+--4. INSERT INTO COMPRESS TABLE
+----
+INSERT INTO LINEITEM_C SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_C SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_C SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_C SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_C SELECT * FROM EXT_LINEITEM;
+SELECT COUNT(*) FROM LINEITEM_C;
+
+----
+--5. INSERT INTO COMPRESS PARTITION TABLE
+----
+INSERT INTO LINEITEM_CP SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_CP SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_CP SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_CP SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_CP SELECT * FROM EXT_LINEITEM;
+SELECT COUNT(*) FROM LINEITEM_CP;
+DROP FOREIGN TABLE EXT_LINEITEM;
+
+----
+--14. Foreign table with SUBQUERY
+----
+create  table LOAD_PARTITION_TABLE_001_2
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double  double precision,
+c_character_1 character varying(100), 
+c_varchar varchar(100),
+c_character_2 character(100), 
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_nvarchar2 nvarchar2,
+c_name name,
+c_timestamp_1 timestamp with time zone,
+c_timestamp_2 timestamp without time zone,
+c_date date
+)
+partition by range (c_smallint,c_integer,c_bigint,c_decimal)
+(
+partition LOAD_PARTITION_TABLE_001_2_1  values less than (0,0,0,0),
+partition LOAD_PARTITION_TABLE_001_2_2  values less than (3,30,300,400.3),
+partition LOAD_PARTITION_TABLE_001_2_3  values less than (6,60,600,800.6),
+partition LOAD_PARTITION_TABLE_001_2_4  values less than (10,100,1000,1100.2)
+);
+
+create foreign table  LOAD_PARTITION_TABLE_001_1
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double  double precision,
+c_character_1 character varying(100), 
+c_varchar varchar(100),
+c_character_2 character(100), 
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_nvarchar2 nvarchar2,
+c_name name,
+c_timestamp_1 timestamp with time zone,
+c_timestamp_2 timestamp without time zone,
+c_date date
+)
+SERVER hdfs_server
+OPTIONS(filenames '/user/hive/warehouse/text_on_hdfs/LOAD_PARTITION_TABLE_001',
+format 'text',
+delimiter ','
+)
+distribute by roundrobin;
+DELETE FROM LOAD_PARTITION_TABLE_001_1;
+
+insert into  LOAD_PARTITION_TABLE_001_2 
+    select 
+	c_smallint,
+	c_integer,
+	c_bigint ,
+	c_decimal ,
+	c_numeric ,
+	c_real ,
+	c_double ,
+	c_character_1 ,
+	c_varchar ,
+	trim(c_character_2) , 
+	trim(c_char_1) ,
+	c_character_3 ,
+	c_char_2 ,
+	c_text ,
+	c_nvarchar2 ,
+	c_name ,
+	c_timestamp_1 ,
+	c_timestamp_2 ,
+	c_date  
+    from LOAD_PARTITION_TABLE_001_1 order by 1,2,3,4,5,6,7,8,9,10;
+
+SELECT * FROM LOAD_PARTITION_TABLE_001_2 ORDER BY c_smallint;
+
+DROP TABLE LINEITEM;
+DROP TABLE LINEITEM_C;
+DROP TABLE LINEITEM_CP;
+DROP FOREIGN TABLE LOAD_PARTITION_TABLE_001_1;
+DROP TABLE LOAD_PARTITION_TABLE_001_2;
+
+----
+--15. Notice from Stream
+----
+create foreign table FULL_TEXT_TABLE_010
+(
+C_CHAR_3 CHAR(102400),  
+C_VARCHAR_3 VARCHAR(1024),  
+C_INT INTEGER,  
+C_NUMERIC numeric(10,5),  
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+C_TEXT  TEXT
+)
+SERVER hdfs_server
+OPTIONS(filenames '/user/hive/warehouse/text_on_hdfs/FULL_TEXT_TABLE_010',
+format 'text',
+delimiter ','
+)
+distribute by roundrobin;
+create table FULL_TEXT_TABLE_010_2 
+(
+C_CHAR_3 CHAR(102400),  
+C_VARCHAR_3 VARCHAR(1024),  
+C_INT INTEGER,  
+C_NUMERIC numeric(10,5),  
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+C_tsvector  tsvector
+);
+insert into FULL_TEXT_TABLE_010_2 select C_CHAR_3,C_VARCHAR_3,C_INT,C_NUMERIC,C_TS_WITHOUT,to_tsvector_for_batch(C_TEXT) from FULL_TEXT_TABLE_010;
+select trim(C_CHAR_3),trim(C_VARCHAR_3),c_int,C_NUMERIC,C_TS_WITHOUT,C_text from FULL_TEXT_TABLE_010 order by 1,2,3,4,5;
+select trim(C_CHAR_3),trim(C_VARCHAR_3),c_int,C_NUMERIC,C_TS_WITHOUT,C_tsvector from FULL_TEXT_TABLE_010_2 order by 1,2,3,4,5;
+DROP FOREIGN TABLE FULL_TEXT_TABLE_010;
+DROP TABLE FULL_TEXT_TABLE_010_2;
+
+\c regression
+
+---
+--29. Alter Foreign Table
+---
+CREATE FOREIGN TABLE FT_ALTER
+(
+c1 int,
+c2 varchar(10)
+)
+SERVER hdfs_server
+OPTIONS(filenames '/user/hive/warehouse/text_on_hdfs/*', format 'text', delimiter ',')
+distribute by roundrobin;
+ALTER FOREIGN TABLE FT_ALTER OPTIONS(set filenames '/user/hive/warehouse/text_on_hdfs/*');
+ALTER FOREIGN TABLE FT_ALTER OPTIONS(set format 'orc');
+ALTER FOREIGN TABLE FT_ALTER OPTIONS(drop delimiter);
+ALTER FOREIGN TABLE FT_ALTER OPTIONS(set format 'orc');
+ALTER FOREIGN TABLE FT_ALTER OPTIONS(set format 'csv');
+
+
+DROP FOREIGN TABLE FT_ALTER;
+DROP SERVER hdfs_server CASCADE;
+

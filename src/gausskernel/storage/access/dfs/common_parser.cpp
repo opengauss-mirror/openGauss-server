@@ -17,7 +17,7 @@
  *	  support the common class for parser.
  *
  * IDENTIFICATION
- *         src/gausskernel/storage/access/dfs/common_parser.cpp
+ *    src/gausskernel/storage/access/dfs/common_parser.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -30,6 +30,8 @@ namespace dfs {
 #define HDFS_READ_BUFFER_LEN (4 * 1024 * 1024)
 /* the default size of reading data from obs server for text, csv format file. */
 #define OBS_READ_BUFFER_LEN (32 * 1024 * 1024)
+
+#define MAX_INT32 2147483600
 
 BaseParserOption::BaseParserOption()
     : delimiter(NULL),
@@ -108,6 +110,10 @@ void BaseParserOption::setCommonOptionValue()
 
         if (chunk_size_str != NULL) {
             (void)parse_int(chunk_size_str, &chunk_size, 0, NULL);
+            if (chunk_size >= (MAX_INT32 / 1024 / 1024) || chunk_size < 0) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("chunk_size :%d is illegal.", chunk_size)));
+            }
             chunk_size = chunk_size * 1024 * 1024;
         }
     } else {
@@ -133,6 +139,10 @@ void BaseParserOption::setCommonOptionValue()
 
         if (chunk_size_str != NULL) {
             (void)parse_int(chunk_size_str, &chunk_size, 0, NULL);
+            if (chunk_size >= (MAX_INT32 / 1024 / 1024) || chunk_size < 0) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("chunk_size :%d is illegal.", chunk_size)));
+            }
             chunk_size = chunk_size * 1024 * 1024;
         }
     }
@@ -157,8 +167,7 @@ TextParserOption::TextParserOption(ForeignScanState *fScanState)
         /* commputing pool, we get the information from foreignOptions struct that built in CN. */
         char *optionValue = getFTOptionValue(fScanState->options->fOptions, OPTION_NAME_SERVER_TYPE);
         if (unlikely(optionValue == nullptr)) {
-            ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                errmsg("No \"type\" option provided.")));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("No \"type\" option provided.")));
         }
 
         if (0 == pg_strcasecmp(optionValue, OBS_SERVER)) {
@@ -240,8 +249,7 @@ CsvParserOption::CsvParserOption(ForeignScanState *fScanState)
         /* commputing pool, we get the information from foreignOptions struct that built in CN. */
         char *optionValue = getFTOptionValue(fScanState->options->fOptions, OPTION_NAME_SERVER_TYPE);
         if (unlikely(optionValue == nullptr)) {
-            ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                errmsg("No \"type\" option provided.")));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("No \"type\" option provided.")));
         }
 
         if (0 == pg_strcasecmp(optionValue, OBS_SERVER)) {
@@ -462,5 +470,4 @@ BaseParserOption *createParserOption(DFSFileType file_format, reader::ReaderStat
         return New(CurrentMemoryContext) CsvParserOption(fScanstate);
     }
 }
-
 }  // namespace dfs

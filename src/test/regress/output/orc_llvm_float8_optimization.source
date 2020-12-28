@@ -1,0 +1,414 @@
+--Test LLVM optimization operator about FLOAT8 data type
+DROP FOREIGN TABLE IF EXISTS lineitem CASCADE;
+NOTICE:  foreign table "lineitem" does not exist, skipping
+Create foreign table lineitem (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb_small.db/lineitem_small/')
+distribute by roundrobin;
+--test "=" operator
+set enable_codegen = off;
+select * from lineitem where  38 = L_QUANTITY order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct   | l_shipmode |              l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+-------------------+------------+-------------------------------------
+    5866757 |    115416 |      7928 |            7 |         38 |        54393.58 |        .08 |   .08 | N            | O            | 1998-02-06 | 1998-04-16   | 1998-02-28    | DELIVER IN PERSON | RAIL       | ar multipliers across the quickly b
+(1 row)
+
+set enable_codegen = on;
+select * from lineitem where  38 = L_QUANTITY order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct   | l_shipmode |              l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+-------------------+------------+-------------------------------------
+    5866757 |    115416 |      7928 |            7 |         38 |        54393.58 |        .08 |   .08 | N            | O            | 1998-02-06 | 1998-04-16   | 1998-02-28    | DELIVER IN PERSON | RAIL       | ar multipliers across the quickly b
+(1 row)
+
+set enable_codegen = off;
+select * from lineitem where  L_QUANTITY = 38 order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct   | l_shipmode |              l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+-------------------+------------+-------------------------------------
+    5866757 |    115416 |      7928 |            7 |         38 |        54393.58 |        .08 |   .08 | N            | O            | 1998-02-06 | 1998-04-16   | 1998-02-28    | DELIVER IN PERSON | RAIL       | ar multipliers across the quickly b
+(1 row)
+
+set enable_codegen = on;
+select * from lineitem where  L_QUANTITY = 38 order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct   | l_shipmode |              l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+-------------------+------------+-------------------------------------
+    5866757 |    115416 |      7928 |            7 |         38 |        54393.58 |        .08 |   .08 | N            | O            | 1998-02-06 | 1998-04-16   | 1998-02-28    | DELIVER IN PERSON | RAIL       | ar multipliers across the quickly b
+(1 row)
+
+select * from lineitem where  L_QUANTITY = 38::float4 order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct   | l_shipmode |              l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+-------------------+------------+-------------------------------------
+    5866757 |    115416 |      7928 |            7 |         38 |        54393.58 |        .08 |   .08 | N            | O            | 1998-02-06 | 1998-04-16   | 1998-02-28    | DELIVER IN PERSON | RAIL       | ar multipliers across the quickly b
+(1 row)
+
+--test ">" operator
+set enable_codegen = off;
+select * from lineitem where  38 > L_QUANTITY order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct  | l_shipmode |          l_comment          
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+------------------+------------+-----------------------------
+    5866758 |     93581 |      3582 |            2 |          1 |         1574.58 |        .09 |   .02 | R            | F            | 1994-10-19 | 1994-10-04   | 1994-11-13    | TAKE BACK RETURN | MAIL       | ly pending 
+    5866759 |     55747 |      3263 |            5 |         15 |         25541.1 |        .05 |   .08 | N            | O            | 1997-05-06 | 1997-04-18   | 1997-05-23    | TAKE BACK RETURN | REG AIR    | lithely after the furiously
+    5866759 |    174491 |      9526 |            4 |         28 |        43833.72 |        .09 |   .01 | N            | O            | 1997-05-24 | 1997-04-02   | 1997-06-04    | COLLECT COD      | MAIL       | into beans b
+    5866759 |    181126 |      1127 |            3 |          7 |         8449.84 |        .05 |   .01 | N            | O            | 1997-03-17 | 1997-04-22   | 1997-04-08    | COLLECT COD      | SHIP       | eposits. regula
+    5866759 |     78514 |      6036 |            2 |         28 |        41790.28 |         .1 |   .04 | N            | O            | 1997-01-27 | 1997-02-27   | 1997-02-21    | COLLECT COD      | SHIP       | s nag according to the
+(5 rows)
+
+set enable_codegen = on;
+select * from lineitem where  38 > L_QUANTITY order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct  | l_shipmode |          l_comment          
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+------------------+------------+-----------------------------
+    5866758 |     93581 |      3582 |            2 |          1 |         1574.58 |        .09 |   .02 | R            | F            | 1994-10-19 | 1994-10-04   | 1994-11-13    | TAKE BACK RETURN | MAIL       | ly pending 
+    5866759 |     55747 |      3263 |            5 |         15 |         25541.1 |        .05 |   .08 | N            | O            | 1997-05-06 | 1997-04-18   | 1997-05-23    | TAKE BACK RETURN | REG AIR    | lithely after the furiously
+    5866759 |    174491 |      9526 |            4 |         28 |        43833.72 |        .09 |   .01 | N            | O            | 1997-05-24 | 1997-04-02   | 1997-06-04    | COLLECT COD      | MAIL       | into beans b
+    5866759 |    181126 |      1127 |            3 |          7 |         8449.84 |        .05 |   .01 | N            | O            | 1997-03-17 | 1997-04-22   | 1997-04-08    | COLLECT COD      | SHIP       | eposits. regula
+    5866759 |     78514 |      6036 |            2 |         28 |        41790.28 |         .1 |   .04 | N            | O            | 1997-01-27 | 1997-02-27   | 1997-02-21    | COLLECT COD      | SHIP       | s nag according to the
+(5 rows)
+
+set enable_codegen = off;
+select * from lineitem where  L_QUANTITY > 38 order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct  | l_shipmode |            l_comment             
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+------------------+------------+----------------------------------
+    5866757 |     66158 |      3677 |            6 |         49 |        55083.35 |        .01 |   .07 | N            | O            | 1998-03-08 | 1998-03-14   | 1998-03-21    | TAKE BACK RETURN | TRUCK      | stealthily pendi
+    5866757 |     69821 |      9822 |            5 |         41 |        73423.62 |        .05 |   .07 | N            | O            | 1998-02-15 | 1998-04-04   | 1998-03-14    | NONE             | RAIL       | ronic, unusual instructions. exp
+    5866758 |    187202 |      2239 |            1 |         40 |           51568 |        .07 |   .01 | A            | F            | 1994-10-29 | 1994-09-20   | 1994-11-05    | NONE             | MAIL       | ounts-- furiously fin
+(3 rows)
+
+set enable_codegen = on;
+select * from lineitem where  L_QUANTITY > 38 order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct  | l_shipmode |            l_comment             
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+------------------+------------+----------------------------------
+    5866757 |     66158 |      3677 |            6 |         49 |        55083.35 |        .01 |   .07 | N            | O            | 1998-03-08 | 1998-03-14   | 1998-03-21    | TAKE BACK RETURN | TRUCK      | stealthily pendi
+    5866757 |     69821 |      9822 |            5 |         41 |        73423.62 |        .05 |   .07 | N            | O            | 1998-02-15 | 1998-04-04   | 1998-03-14    | NONE             | RAIL       | ronic, unusual instructions. exp
+    5866758 |    187202 |      2239 |            1 |         40 |           51568 |        .07 |   .01 | A            | F            | 1994-10-29 | 1994-09-20   | 1994-11-05    | NONE             | MAIL       | ounts-- furiously fin
+(3 rows)
+
+select * from lineitem where  L_QUANTITY > 38::float4 order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct  | l_shipmode |            l_comment             
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+------------------+------------+----------------------------------
+    5866757 |     66158 |      3677 |            6 |         49 |        55083.35 |        .01 |   .07 | N            | O            | 1998-03-08 | 1998-03-14   | 1998-03-21    | TAKE BACK RETURN | TRUCK      | stealthily pendi
+    5866757 |     69821 |      9822 |            5 |         41 |        73423.62 |        .05 |   .07 | N            | O            | 1998-02-15 | 1998-04-04   | 1998-03-14    | NONE             | RAIL       | ronic, unusual instructions. exp
+    5866758 |    187202 |      2239 |            1 |         40 |           51568 |        .07 |   .01 | A            | F            | 1994-10-29 | 1994-09-20   | 1994-11-05    | NONE             | MAIL       | ounts-- furiously fin
+(3 rows)
+
+--test ">=" operator
+set enable_codegen = off;
+select * from lineitem where  38 >= L_QUANTITY order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct   | l_shipmode |              l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+-------------------+------------+-------------------------------------
+    5866757 |    115416 |      7928 |            7 |         38 |        54393.58 |        .08 |   .08 | N            | O            | 1998-02-06 | 1998-04-16   | 1998-02-28    | DELIVER IN PERSON | RAIL       | ar multipliers across the quickly b
+    5866758 |     93581 |      3582 |            2 |          1 |         1574.58 |        .09 |   .02 | R            | F            | 1994-10-19 | 1994-10-04   | 1994-11-13    | TAKE BACK RETURN  | MAIL       | ly pending 
+    5866759 |    181126 |      1127 |            3 |          7 |         8449.84 |        .05 |   .01 | N            | O            | 1997-03-17 | 1997-04-22   | 1997-04-08    | COLLECT COD       | SHIP       | eposits. regula
+    5866759 |     55747 |      3263 |            5 |         15 |         25541.1 |        .05 |   .08 | N            | O            | 1997-05-06 | 1997-04-18   | 1997-05-23    | TAKE BACK RETURN  | REG AIR    | lithely after the furiously
+    5866759 |    177384 |      4936 |            1 |          3 |         4384.14 |        .05 |   .01 | N            | O            | 1997-05-07 | 1997-02-28   | 1997-06-03    | NONE              | SHIP       |  bold deposits cajole carefully aga
+(5 rows)
+
+set enable_codegen = on;
+select * from lineitem where  38 >= L_QUANTITY order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct   | l_shipmode |              l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+-------------------+------------+-------------------------------------
+    5866757 |    115416 |      7928 |            7 |         38 |        54393.58 |        .08 |   .08 | N            | O            | 1998-02-06 | 1998-04-16   | 1998-02-28    | DELIVER IN PERSON | RAIL       | ar multipliers across the quickly b
+    5866758 |     93581 |      3582 |            2 |          1 |         1574.58 |        .09 |   .02 | R            | F            | 1994-10-19 | 1994-10-04   | 1994-11-13    | TAKE BACK RETURN  | MAIL       | ly pending 
+    5866759 |    181126 |      1127 |            3 |          7 |         8449.84 |        .05 |   .01 | N            | O            | 1997-03-17 | 1997-04-22   | 1997-04-08    | COLLECT COD       | SHIP       | eposits. regula
+    5866759 |     55747 |      3263 |            5 |         15 |         25541.1 |        .05 |   .08 | N            | O            | 1997-05-06 | 1997-04-18   | 1997-05-23    | TAKE BACK RETURN  | REG AIR    | lithely after the furiously
+    5866759 |    177384 |      4936 |            1 |          3 |         4384.14 |        .05 |   .01 | N            | O            | 1997-05-07 | 1997-02-28   | 1997-06-03    | NONE              | SHIP       |  bold deposits cajole carefully aga
+(5 rows)
+
+set enable_codegen = off;
+select * from lineitem where  L_QUANTITY >= 38 order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct   | l_shipmode |              l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+-------------------+------------+-------------------------------------
+    5866757 |    115416 |      7928 |            7 |         38 |        54393.58 |        .08 |   .08 | N            | O            | 1998-02-06 | 1998-04-16   | 1998-02-28    | DELIVER IN PERSON | RAIL       | ar multipliers across the quickly b
+    5866757 |     66158 |      3677 |            6 |         49 |        55083.35 |        .01 |   .07 | N            | O            | 1998-03-08 | 1998-03-14   | 1998-03-21    | TAKE BACK RETURN  | TRUCK      | stealthily pendi
+    5866757 |     69821 |      9822 |            5 |         41 |        73423.62 |        .05 |   .07 | N            | O            | 1998-02-15 | 1998-04-04   | 1998-03-14    | NONE              | RAIL       | ronic, unusual instructions. exp
+    5866758 |    187202 |      2239 |            1 |         40 |           51568 |        .07 |   .01 | A            | F            | 1994-10-29 | 1994-09-20   | 1994-11-05    | NONE              | MAIL       | ounts-- furiously fin
+(4 rows)
+
+set enable_codegen = on;
+select * from lineitem where  L_QUANTITY >= 38 order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct   | l_shipmode |              l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+-------------------+------------+-------------------------------------
+    5866757 |    115416 |      7928 |            7 |         38 |        54393.58 |        .08 |   .08 | N            | O            | 1998-02-06 | 1998-04-16   | 1998-02-28    | DELIVER IN PERSON | RAIL       | ar multipliers across the quickly b
+    5866757 |     66158 |      3677 |            6 |         49 |        55083.35 |        .01 |   .07 | N            | O            | 1998-03-08 | 1998-03-14   | 1998-03-21    | TAKE BACK RETURN  | TRUCK      | stealthily pendi
+    5866757 |     69821 |      9822 |            5 |         41 |        73423.62 |        .05 |   .07 | N            | O            | 1998-02-15 | 1998-04-04   | 1998-03-14    | NONE              | RAIL       | ronic, unusual instructions. exp
+    5866758 |    187202 |      2239 |            1 |         40 |           51568 |        .07 |   .01 | A            | F            | 1994-10-29 | 1994-09-20   | 1994-11-05    | NONE              | MAIL       | ounts-- furiously fin
+(4 rows)
+
+select * from lineitem where  L_QUANTITY >= 38::float4 order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct   | l_shipmode |              l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+-------------------+------------+-------------------------------------
+    5866757 |    115416 |      7928 |            7 |         38 |        54393.58 |        .08 |   .08 | N            | O            | 1998-02-06 | 1998-04-16   | 1998-02-28    | DELIVER IN PERSON | RAIL       | ar multipliers across the quickly b
+    5866757 |     66158 |      3677 |            6 |         49 |        55083.35 |        .01 |   .07 | N            | O            | 1998-03-08 | 1998-03-14   | 1998-03-21    | TAKE BACK RETURN  | TRUCK      | stealthily pendi
+    5866757 |     69821 |      9822 |            5 |         41 |        73423.62 |        .05 |   .07 | N            | O            | 1998-02-15 | 1998-04-04   | 1998-03-14    | NONE              | RAIL       | ronic, unusual instructions. exp
+    5866758 |    187202 |      2239 |            1 |         40 |           51568 |        .07 |   .01 | A            | F            | 1994-10-29 | 1994-09-20   | 1994-11-05    | NONE              | MAIL       | ounts-- furiously fin
+(4 rows)
+
+--test "<" operator
+set enable_codegen = off;
+select * from lineitem where  38 < L_QUANTITY order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct  | l_shipmode |            l_comment             
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+------------------+------------+----------------------------------
+    5866757 |     66158 |      3677 |            6 |         49 |        55083.35 |        .01 |   .07 | N            | O            | 1998-03-08 | 1998-03-14   | 1998-03-21    | TAKE BACK RETURN | TRUCK      | stealthily pendi
+    5866757 |     69821 |      9822 |            5 |         41 |        73423.62 |        .05 |   .07 | N            | O            | 1998-02-15 | 1998-04-04   | 1998-03-14    | NONE             | RAIL       | ronic, unusual instructions. exp
+    5866758 |    187202 |      2239 |            1 |         40 |           51568 |        .07 |   .01 | A            | F            | 1994-10-29 | 1994-09-20   | 1994-11-05    | NONE             | MAIL       | ounts-- furiously fin
+(3 rows)
+
+set enable_codegen = on;
+select * from lineitem where  38 < L_QUANTITY order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct  | l_shipmode |            l_comment             
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+------------------+------------+----------------------------------
+    5866757 |     66158 |      3677 |            6 |         49 |        55083.35 |        .01 |   .07 | N            | O            | 1998-03-08 | 1998-03-14   | 1998-03-21    | TAKE BACK RETURN | TRUCK      | stealthily pendi
+    5866757 |     69821 |      9822 |            5 |         41 |        73423.62 |        .05 |   .07 | N            | O            | 1998-02-15 | 1998-04-04   | 1998-03-14    | NONE             | RAIL       | ronic, unusual instructions. exp
+    5866758 |    187202 |      2239 |            1 |         40 |           51568 |        .07 |   .01 | A            | F            | 1994-10-29 | 1994-09-20   | 1994-11-05    | NONE             | MAIL       | ounts-- furiously fin
+(3 rows)
+
+set enable_codegen = off;
+select * from lineitem where  L_QUANTITY < 38 order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct  | l_shipmode |          l_comment          
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+------------------+------------+-----------------------------
+    5866758 |     93581 |      3582 |            2 |          1 |         1574.58 |        .09 |   .02 | R            | F            | 1994-10-19 | 1994-10-04   | 1994-11-13    | TAKE BACK RETURN | MAIL       | ly pending 
+    5866759 |     55747 |      3263 |            5 |         15 |         25541.1 |        .05 |   .08 | N            | O            | 1997-05-06 | 1997-04-18   | 1997-05-23    | TAKE BACK RETURN | REG AIR    | lithely after the furiously
+    5866759 |    174491 |      9526 |            4 |         28 |        43833.72 |        .09 |   .01 | N            | O            | 1997-05-24 | 1997-04-02   | 1997-06-04    | COLLECT COD      | MAIL       | into beans b
+    5866759 |    181126 |      1127 |            3 |          7 |         8449.84 |        .05 |   .01 | N            | O            | 1997-03-17 | 1997-04-22   | 1997-04-08    | COLLECT COD      | SHIP       | eposits. regula
+    5866759 |     78514 |      6036 |            2 |         28 |        41790.28 |         .1 |   .04 | N            | O            | 1997-01-27 | 1997-02-27   | 1997-02-21    | COLLECT COD      | SHIP       | s nag according to the
+(5 rows)
+
+set enable_codegen = on;
+select * from lineitem where  L_QUANTITY < 38 order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct  | l_shipmode |          l_comment          
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+------------------+------------+-----------------------------
+    5866758 |     93581 |      3582 |            2 |          1 |         1574.58 |        .09 |   .02 | R            | F            | 1994-10-19 | 1994-10-04   | 1994-11-13    | TAKE BACK RETURN | MAIL       | ly pending 
+    5866759 |     55747 |      3263 |            5 |         15 |         25541.1 |        .05 |   .08 | N            | O            | 1997-05-06 | 1997-04-18   | 1997-05-23    | TAKE BACK RETURN | REG AIR    | lithely after the furiously
+    5866759 |    174491 |      9526 |            4 |         28 |        43833.72 |        .09 |   .01 | N            | O            | 1997-05-24 | 1997-04-02   | 1997-06-04    | COLLECT COD      | MAIL       | into beans b
+    5866759 |    181126 |      1127 |            3 |          7 |         8449.84 |        .05 |   .01 | N            | O            | 1997-03-17 | 1997-04-22   | 1997-04-08    | COLLECT COD      | SHIP       | eposits. regula
+    5866759 |     78514 |      6036 |            2 |         28 |        41790.28 |         .1 |   .04 | N            | O            | 1997-01-27 | 1997-02-27   | 1997-02-21    | COLLECT COD      | SHIP       | s nag according to the
+(5 rows)
+
+select * from lineitem where  L_QUANTITY < 38::float4 order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct  | l_shipmode |          l_comment          
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+------------------+------------+-----------------------------
+    5866758 |     93581 |      3582 |            2 |          1 |         1574.58 |        .09 |   .02 | R            | F            | 1994-10-19 | 1994-10-04   | 1994-11-13    | TAKE BACK RETURN | MAIL       | ly pending 
+    5866759 |     55747 |      3263 |            5 |         15 |         25541.1 |        .05 |   .08 | N            | O            | 1997-05-06 | 1997-04-18   | 1997-05-23    | TAKE BACK RETURN | REG AIR    | lithely after the furiously
+    5866759 |    174491 |      9526 |            4 |         28 |        43833.72 |        .09 |   .01 | N            | O            | 1997-05-24 | 1997-04-02   | 1997-06-04    | COLLECT COD      | MAIL       | into beans b
+    5866759 |    181126 |      1127 |            3 |          7 |         8449.84 |        .05 |   .01 | N            | O            | 1997-03-17 | 1997-04-22   | 1997-04-08    | COLLECT COD      | SHIP       | eposits. regula
+    5866759 |     78514 |      6036 |            2 |         28 |        41790.28 |         .1 |   .04 | N            | O            | 1997-01-27 | 1997-02-27   | 1997-02-21    | COLLECT COD      | SHIP       | s nag according to the
+(5 rows)
+
+--test "<=" operator
+set enable_codegen = off;
+select * from lineitem where  38 <= L_QUANTITY order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct   | l_shipmode |              l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+-------------------+------------+-------------------------------------
+    5866757 |    115416 |      7928 |            7 |         38 |        54393.58 |        .08 |   .08 | N            | O            | 1998-02-06 | 1998-04-16   | 1998-02-28    | DELIVER IN PERSON | RAIL       | ar multipliers across the quickly b
+    5866757 |     66158 |      3677 |            6 |         49 |        55083.35 |        .01 |   .07 | N            | O            | 1998-03-08 | 1998-03-14   | 1998-03-21    | TAKE BACK RETURN  | TRUCK      | stealthily pendi
+    5866757 |     69821 |      9822 |            5 |         41 |        73423.62 |        .05 |   .07 | N            | O            | 1998-02-15 | 1998-04-04   | 1998-03-14    | NONE              | RAIL       | ronic, unusual instructions. exp
+    5866758 |    187202 |      2239 |            1 |         40 |           51568 |        .07 |   .01 | A            | F            | 1994-10-29 | 1994-09-20   | 1994-11-05    | NONE              | MAIL       | ounts-- furiously fin
+(4 rows)
+
+set enable_codegen = on;
+select * from lineitem where  38 <= L_QUANTITY order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct   | l_shipmode |              l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+-------------------+------------+-------------------------------------
+    5866757 |    115416 |      7928 |            7 |         38 |        54393.58 |        .08 |   .08 | N            | O            | 1998-02-06 | 1998-04-16   | 1998-02-28    | DELIVER IN PERSON | RAIL       | ar multipliers across the quickly b
+    5866757 |     66158 |      3677 |            6 |         49 |        55083.35 |        .01 |   .07 | N            | O            | 1998-03-08 | 1998-03-14   | 1998-03-21    | TAKE BACK RETURN  | TRUCK      | stealthily pendi
+    5866757 |     69821 |      9822 |            5 |         41 |        73423.62 |        .05 |   .07 | N            | O            | 1998-02-15 | 1998-04-04   | 1998-03-14    | NONE              | RAIL       | ronic, unusual instructions. exp
+    5866758 |    187202 |      2239 |            1 |         40 |           51568 |        .07 |   .01 | A            | F            | 1994-10-29 | 1994-09-20   | 1994-11-05    | NONE              | MAIL       | ounts-- furiously fin
+(4 rows)
+
+set enable_codegen = off;
+select * from lineitem where  L_QUANTITY <= 38 order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct   | l_shipmode |              l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+-------------------+------------+-------------------------------------
+    5866757 |    115416 |      7928 |            7 |         38 |        54393.58 |        .08 |   .08 | N            | O            | 1998-02-06 | 1998-04-16   | 1998-02-28    | DELIVER IN PERSON | RAIL       | ar multipliers across the quickly b
+    5866758 |     93581 |      3582 |            2 |          1 |         1574.58 |        .09 |   .02 | R            | F            | 1994-10-19 | 1994-10-04   | 1994-11-13    | TAKE BACK RETURN  | MAIL       | ly pending 
+    5866759 |    181126 |      1127 |            3 |          7 |         8449.84 |        .05 |   .01 | N            | O            | 1997-03-17 | 1997-04-22   | 1997-04-08    | COLLECT COD       | SHIP       | eposits. regula
+    5866759 |     55747 |      3263 |            5 |         15 |         25541.1 |        .05 |   .08 | N            | O            | 1997-05-06 | 1997-04-18   | 1997-05-23    | TAKE BACK RETURN  | REG AIR    | lithely after the furiously
+    5866759 |    177384 |      4936 |            1 |          3 |         4384.14 |        .05 |   .01 | N            | O            | 1997-05-07 | 1997-02-28   | 1997-06-03    | NONE              | SHIP       |  bold deposits cajole carefully aga
+(5 rows)
+
+set enable_codegen = on;
+select * from lineitem where  L_QUANTITY <= 38 order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct   | l_shipmode |              l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+-------------------+------------+-------------------------------------
+    5866757 |    115416 |      7928 |            7 |         38 |        54393.58 |        .08 |   .08 | N            | O            | 1998-02-06 | 1998-04-16   | 1998-02-28    | DELIVER IN PERSON | RAIL       | ar multipliers across the quickly b
+    5866758 |     93581 |      3582 |            2 |          1 |         1574.58 |        .09 |   .02 | R            | F            | 1994-10-19 | 1994-10-04   | 1994-11-13    | TAKE BACK RETURN  | MAIL       | ly pending 
+    5866759 |    181126 |      1127 |            3 |          7 |         8449.84 |        .05 |   .01 | N            | O            | 1997-03-17 | 1997-04-22   | 1997-04-08    | COLLECT COD       | SHIP       | eposits. regula
+    5866759 |     55747 |      3263 |            5 |         15 |         25541.1 |        .05 |   .08 | N            | O            | 1997-05-06 | 1997-04-18   | 1997-05-23    | TAKE BACK RETURN  | REG AIR    | lithely after the furiously
+    5866759 |    177384 |      4936 |            1 |          3 |         4384.14 |        .05 |   .01 | N            | O            | 1997-05-07 | 1997-02-28   | 1997-06-03    | NONE              | SHIP       |  bold deposits cajole carefully aga
+(5 rows)
+
+select * from lineitem where  L_QUANTITY <= 38::float4 order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct   | l_shipmode |              l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+-------------------+------------+-------------------------------------
+    5866757 |    115416 |      7928 |            7 |         38 |        54393.58 |        .08 |   .08 | N            | O            | 1998-02-06 | 1998-04-16   | 1998-02-28    | DELIVER IN PERSON | RAIL       | ar multipliers across the quickly b
+    5866758 |     93581 |      3582 |            2 |          1 |         1574.58 |        .09 |   .02 | R            | F            | 1994-10-19 | 1994-10-04   | 1994-11-13    | TAKE BACK RETURN  | MAIL       | ly pending 
+    5866759 |    181126 |      1127 |            3 |          7 |         8449.84 |        .05 |   .01 | N            | O            | 1997-03-17 | 1997-04-22   | 1997-04-08    | COLLECT COD       | SHIP       | eposits. regula
+    5866759 |     55747 |      3263 |            5 |         15 |         25541.1 |        .05 |   .08 | N            | O            | 1997-05-06 | 1997-04-18   | 1997-05-23    | TAKE BACK RETURN  | REG AIR    | lithely after the furiously
+    5866759 |    177384 |      4936 |            1 |          3 |         4384.14 |        .05 |   .01 | N            | O            | 1997-05-07 | 1997-02-28   | 1997-06-03    | NONE              | SHIP       |  bold deposits cajole carefully aga
+(5 rows)
+
+--test "<>" operator
+set enable_codegen = off;
+select * from lineitem where  38 <> L_QUANTITY order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct  | l_shipmode |            l_comment             
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+------------------+------------+----------------------------------
+    5866757 |     66158 |      3677 |            6 |         49 |        55083.35 |        .01 |   .07 | N            | O            | 1998-03-08 | 1998-03-14   | 1998-03-21    | TAKE BACK RETURN | TRUCK      | stealthily pendi
+    5866757 |     69821 |      9822 |            5 |         41 |        73423.62 |        .05 |   .07 | N            | O            | 1998-02-15 | 1998-04-04   | 1998-03-14    | NONE             | RAIL       | ronic, unusual instructions. exp
+    5866758 |     93581 |      3582 |            2 |          1 |         1574.58 |        .09 |   .02 | R            | F            | 1994-10-19 | 1994-10-04   | 1994-11-13    | TAKE BACK RETURN | MAIL       | ly pending 
+    5866758 |    187202 |      2239 |            1 |         40 |           51568 |        .07 |   .01 | A            | F            | 1994-10-29 | 1994-09-20   | 1994-11-05    | NONE             | MAIL       | ounts-- furiously fin
+    5866759 |     55747 |      3263 |            5 |         15 |         25541.1 |        .05 |   .08 | N            | O            | 1997-05-06 | 1997-04-18   | 1997-05-23    | TAKE BACK RETURN | REG AIR    | lithely after the furiously
+(5 rows)
+
+set enable_codegen = on;
+select * from lineitem where  38 <> L_QUANTITY order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct  | l_shipmode |            l_comment             
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+------------------+------------+----------------------------------
+    5866757 |     66158 |      3677 |            6 |         49 |        55083.35 |        .01 |   .07 | N            | O            | 1998-03-08 | 1998-03-14   | 1998-03-21    | TAKE BACK RETURN | TRUCK      | stealthily pendi
+    5866757 |     69821 |      9822 |            5 |         41 |        73423.62 |        .05 |   .07 | N            | O            | 1998-02-15 | 1998-04-04   | 1998-03-14    | NONE             | RAIL       | ronic, unusual instructions. exp
+    5866758 |     93581 |      3582 |            2 |          1 |         1574.58 |        .09 |   .02 | R            | F            | 1994-10-19 | 1994-10-04   | 1994-11-13    | TAKE BACK RETURN | MAIL       | ly pending 
+    5866758 |    187202 |      2239 |            1 |         40 |           51568 |        .07 |   .01 | A            | F            | 1994-10-29 | 1994-09-20   | 1994-11-05    | NONE             | MAIL       | ounts-- furiously fin
+    5866759 |     55747 |      3263 |            5 |         15 |         25541.1 |        .05 |   .08 | N            | O            | 1997-05-06 | 1997-04-18   | 1997-05-23    | TAKE BACK RETURN | REG AIR    | lithely after the furiously
+(5 rows)
+
+set enable_codegen = off;
+select * from lineitem where  L_QUANTITY <> 38 order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct  | l_shipmode |            l_comment             
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+------------------+------------+----------------------------------
+    5866757 |     66158 |      3677 |            6 |         49 |        55083.35 |        .01 |   .07 | N            | O            | 1998-03-08 | 1998-03-14   | 1998-03-21    | TAKE BACK RETURN | TRUCK      | stealthily pendi
+    5866757 |     69821 |      9822 |            5 |         41 |        73423.62 |        .05 |   .07 | N            | O            | 1998-02-15 | 1998-04-04   | 1998-03-14    | NONE             | RAIL       | ronic, unusual instructions. exp
+    5866758 |     93581 |      3582 |            2 |          1 |         1574.58 |        .09 |   .02 | R            | F            | 1994-10-19 | 1994-10-04   | 1994-11-13    | TAKE BACK RETURN | MAIL       | ly pending 
+    5866758 |    187202 |      2239 |            1 |         40 |           51568 |        .07 |   .01 | A            | F            | 1994-10-29 | 1994-09-20   | 1994-11-05    | NONE             | MAIL       | ounts-- furiously fin
+    5866759 |     55747 |      3263 |            5 |         15 |         25541.1 |        .05 |   .08 | N            | O            | 1997-05-06 | 1997-04-18   | 1997-05-23    | TAKE BACK RETURN | REG AIR    | lithely after the furiously
+(5 rows)
+
+set enable_codegen = on;
+select * from lineitem where  L_QUANTITY <> 38 order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct  | l_shipmode |            l_comment             
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+------------------+------------+----------------------------------
+    5866757 |     66158 |      3677 |            6 |         49 |        55083.35 |        .01 |   .07 | N            | O            | 1998-03-08 | 1998-03-14   | 1998-03-21    | TAKE BACK RETURN | TRUCK      | stealthily pendi
+    5866757 |     69821 |      9822 |            5 |         41 |        73423.62 |        .05 |   .07 | N            | O            | 1998-02-15 | 1998-04-04   | 1998-03-14    | NONE             | RAIL       | ronic, unusual instructions. exp
+    5866758 |     93581 |      3582 |            2 |          1 |         1574.58 |        .09 |   .02 | R            | F            | 1994-10-19 | 1994-10-04   | 1994-11-13    | TAKE BACK RETURN | MAIL       | ly pending 
+    5866758 |    187202 |      2239 |            1 |         40 |           51568 |        .07 |   .01 | A            | F            | 1994-10-29 | 1994-09-20   | 1994-11-05    | NONE             | MAIL       | ounts-- furiously fin
+    5866759 |     55747 |      3263 |            5 |         15 |         25541.1 |        .05 |   .08 | N            | O            | 1997-05-06 | 1997-04-18   | 1997-05-23    | TAKE BACK RETURN | REG AIR    | lithely after the furiously
+(5 rows)
+
+select * from lineitem where  L_QUANTITY <> 38::float4 order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct  | l_shipmode |            l_comment             
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+------------------+------------+----------------------------------
+    5866757 |     66158 |      3677 |            6 |         49 |        55083.35 |        .01 |   .07 | N            | O            | 1998-03-08 | 1998-03-14   | 1998-03-21    | TAKE BACK RETURN | TRUCK      | stealthily pendi
+    5866757 |     69821 |      9822 |            5 |         41 |        73423.62 |        .05 |   .07 | N            | O            | 1998-02-15 | 1998-04-04   | 1998-03-14    | NONE             | RAIL       | ronic, unusual instructions. exp
+    5866758 |     93581 |      3582 |            2 |          1 |         1574.58 |        .09 |   .02 | R            | F            | 1994-10-19 | 1994-10-04   | 1994-11-13    | TAKE BACK RETURN | MAIL       | ly pending 
+    5866758 |    187202 |      2239 |            1 |         40 |           51568 |        .07 |   .01 | A            | F            | 1994-10-29 | 1994-09-20   | 1994-11-05    | NONE             | MAIL       | ounts-- furiously fin
+    5866759 |     55747 |      3263 |            5 |         15 |         25541.1 |        .05 |   .08 | N            | O            | 1997-05-06 | 1997-04-18   | 1997-05-23    | TAKE BACK RETURN | REG AIR    | lithely after the furiously
+(5 rows)
+
+--test "!=" operator
+set enable_codegen = off;
+select * from lineitem where  38 != L_QUANTITY order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct  | l_shipmode |            l_comment             
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+------------------+------------+----------------------------------
+    5866757 |     66158 |      3677 |            6 |         49 |        55083.35 |        .01 |   .07 | N            | O            | 1998-03-08 | 1998-03-14   | 1998-03-21    | TAKE BACK RETURN | TRUCK      | stealthily pendi
+    5866757 |     69821 |      9822 |            5 |         41 |        73423.62 |        .05 |   .07 | N            | O            | 1998-02-15 | 1998-04-04   | 1998-03-14    | NONE             | RAIL       | ronic, unusual instructions. exp
+    5866758 |     93581 |      3582 |            2 |          1 |         1574.58 |        .09 |   .02 | R            | F            | 1994-10-19 | 1994-10-04   | 1994-11-13    | TAKE BACK RETURN | MAIL       | ly pending 
+    5866758 |    187202 |      2239 |            1 |         40 |           51568 |        .07 |   .01 | A            | F            | 1994-10-29 | 1994-09-20   | 1994-11-05    | NONE             | MAIL       | ounts-- furiously fin
+    5866759 |     55747 |      3263 |            5 |         15 |         25541.1 |        .05 |   .08 | N            | O            | 1997-05-06 | 1997-04-18   | 1997-05-23    | TAKE BACK RETURN | REG AIR    | lithely after the furiously
+(5 rows)
+
+set enable_codegen = on;
+select * from lineitem where  38 != L_QUANTITY order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct  | l_shipmode |            l_comment             
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+------------------+------------+----------------------------------
+    5866757 |     66158 |      3677 |            6 |         49 |        55083.35 |        .01 |   .07 | N            | O            | 1998-03-08 | 1998-03-14   | 1998-03-21    | TAKE BACK RETURN | TRUCK      | stealthily pendi
+    5866757 |     69821 |      9822 |            5 |         41 |        73423.62 |        .05 |   .07 | N            | O            | 1998-02-15 | 1998-04-04   | 1998-03-14    | NONE             | RAIL       | ronic, unusual instructions. exp
+    5866758 |     93581 |      3582 |            2 |          1 |         1574.58 |        .09 |   .02 | R            | F            | 1994-10-19 | 1994-10-04   | 1994-11-13    | TAKE BACK RETURN | MAIL       | ly pending 
+    5866758 |    187202 |      2239 |            1 |         40 |           51568 |        .07 |   .01 | A            | F            | 1994-10-29 | 1994-09-20   | 1994-11-05    | NONE             | MAIL       | ounts-- furiously fin
+    5866759 |     55747 |      3263 |            5 |         15 |         25541.1 |        .05 |   .08 | N            | O            | 1997-05-06 | 1997-04-18   | 1997-05-23    | TAKE BACK RETURN | REG AIR    | lithely after the furiously
+(5 rows)
+
+set enable_codegen = off;
+select * from lineitem where  L_QUANTITY != 38 order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct  | l_shipmode |            l_comment             
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+------------------+------------+----------------------------------
+    5866757 |     66158 |      3677 |            6 |         49 |        55083.35 |        .01 |   .07 | N            | O            | 1998-03-08 | 1998-03-14   | 1998-03-21    | TAKE BACK RETURN | TRUCK      | stealthily pendi
+    5866757 |     69821 |      9822 |            5 |         41 |        73423.62 |        .05 |   .07 | N            | O            | 1998-02-15 | 1998-04-04   | 1998-03-14    | NONE             | RAIL       | ronic, unusual instructions. exp
+    5866758 |     93581 |      3582 |            2 |          1 |         1574.58 |        .09 |   .02 | R            | F            | 1994-10-19 | 1994-10-04   | 1994-11-13    | TAKE BACK RETURN | MAIL       | ly pending 
+    5866758 |    187202 |      2239 |            1 |         40 |           51568 |        .07 |   .01 | A            | F            | 1994-10-29 | 1994-09-20   | 1994-11-05    | NONE             | MAIL       | ounts-- furiously fin
+    5866759 |     55747 |      3263 |            5 |         15 |         25541.1 |        .05 |   .08 | N            | O            | 1997-05-06 | 1997-04-18   | 1997-05-23    | TAKE BACK RETURN | REG AIR    | lithely after the furiously
+(5 rows)
+
+set enable_codegen = on;
+select * from lineitem where  L_QUANTITY != 38 order by 1 limit 5;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct  | l_shipmode |            l_comment             
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+------------------+------------+----------------------------------
+    5866757 |     66158 |      3677 |            6 |         49 |        55083.35 |        .01 |   .07 | N            | O            | 1998-03-08 | 1998-03-14   | 1998-03-21    | TAKE BACK RETURN | TRUCK      | stealthily pendi
+    5866757 |     69821 |      9822 |            5 |         41 |        73423.62 |        .05 |   .07 | N            | O            | 1998-02-15 | 1998-04-04   | 1998-03-14    | NONE             | RAIL       | ronic, unusual instructions. exp
+    5866758 |     93581 |      3582 |            2 |          1 |         1574.58 |        .09 |   .02 | R            | F            | 1994-10-19 | 1994-10-04   | 1994-11-13    | TAKE BACK RETURN | MAIL       | ly pending 
+    5866758 |    187202 |      2239 |            1 |         40 |           51568 |        .07 |   .01 | A            | F            | 1994-10-29 | 1994-09-20   | 1994-11-05    | NONE             | MAIL       | ounts-- furiously fin
+    5866759 |     55747 |      3263 |            5 |         15 |         25541.1 |        .05 |   .08 | N            | O            | 1997-05-06 | 1997-04-18   | 1997-05-23    | TAKE BACK RETURN | REG AIR    | lithely after the furiously
+(5 rows)
+
+--add llt
+explain performance select * from lineitem where  L_QUANTITY != 38 order by 1 limit 5;
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+               Merge Sort Key: lineitem.l_orderkey
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+

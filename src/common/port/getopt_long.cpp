@@ -110,9 +110,6 @@ int getopt_long(int argc, char* const argv[], const char* optstring, const struc
                         }
                     } else {
                         optarg = NULL;
-                        if (place[namelen] != 0) {
-                            /* XXX error? */
-                        }
                     }
 
                     optind++;

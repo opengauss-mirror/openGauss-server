@@ -4,6 +4,7 @@
  *	  POSTGRES generalized index access method definitions.
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -17,10 +18,11 @@
 #include "access/sdir.h"
 #include "access/skey.h"
 #include "nodes/tidbitmap.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "utils/relcache.h"
 #include "utils/snapshot.h"
 #include "vecexecutor/vectorbatch.h"
+
 
 /*
  * Struct for statistics returned by ambuild
@@ -81,8 +83,7 @@ typedef bool (*IndexBulkDeleteCallback)(ItemPointer itemptr, void* state, Oid pa
 /* struct definitions appear in relscan.h */
 typedef struct IndexScanDescData* IndexScanDesc;
 typedef struct SysScanDescData* SysScanDesc;
-
-typedef struct ParallelIndexScanDescData* ParallelIndexScanDesc;
+struct ScanState;
 
 /*
  * Enumeration specifying the type of uniqueness check to perform in
@@ -128,18 +129,12 @@ extern bool index_insert(Relation indexRelation, Datum* values, const bool* isnu
     Relation heapRelation, IndexUniqueCheck checkUnique);
 
 extern IndexScanDesc index_beginscan(
-    Relation heapRelation, Relation indexRelation, Snapshot snapshot, int nkeys, int norderbys);
-extern IndexScanDesc index_beginscan_bitmap(Relation indexRelation, Snapshot snapshot, int nkeys);
+    Relation heapRelation, Relation indexRelation, Snapshot snapshot, int nkeys, int norderbys, ScanState* scan_state=NULL);
+extern IndexScanDesc index_beginscan_bitmap(Relation indexRelation, Snapshot snapshot, int nkeys, ScanState* scan_state=NULL);
 extern void index_rescan(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey orderbys, int norderbys);
 extern void index_endscan(IndexScanDesc scan);
 extern void index_markpos(IndexScanDesc scan);
 extern void index_restrpos(IndexScanDesc scan);
-extern Size index_parallelscan_estimate(Relation indexRelation, Snapshot snapshot);
-extern void index_parallelscan_initialize(Relation heapRelation, Size pscan_len, Relation indexRelation,
-        Snapshot snapshot, ParallelIndexScanDesc target);
-extern void index_parallelrescan(IndexScanDesc scan);
-extern IndexScanDesc index_beginscan_parallel(Relation heaprel, Relation indexrel, int nkeys, int norderbys,
-    ParallelIndexScanDesc pscan);
 extern ItemPointer index_getnext_tid(IndexScanDesc scan, ScanDirection direction);
 extern HeapTuple index_fetch_heap(IndexScanDesc scan);
 extern HeapTuple index_getnext(IndexScanDesc scan, ScanDirection direction);

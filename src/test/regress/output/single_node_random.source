@@ -17,7 +17,7 @@ CREATE TABLE onek_random (
         string4         name
 ) with(autovacuum_enabled = off);
 DELETE FROM onek_random;
-COPY onek_random FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/onek.data';
+COPY onek_random FROM '@abs_builddir@/data/onek.data';
 --
 -- RANDOM
 -- Test the random function

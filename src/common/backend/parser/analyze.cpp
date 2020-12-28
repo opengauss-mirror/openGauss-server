@@ -29,11 +29,12 @@
 #ifdef PGXC
 #include "catalog/pg_inherits.h"
 #include "catalog/pg_inherits_fn.h"
+#include "catalog/pg_proc.h"
 #include "catalog/pgxc_class.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
 #include "utils/fmgroids.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 #endif
 #include "catalog/pg_type.h"
 #include "executor/nodeModifyTable.h"
@@ -75,8 +76,13 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "commands/explain.h"
+#include "streaming/streaming_catalog.h"
 #include "instruments/instr_unique_sql.h"
+#include "streaming/init.h"
 
+#ifndef ENABLE_MULTIPLE_NODES
+#include "optimizer/clauses.h"
+#endif
 /* Hook for plugins to get control at end of parse analysis */
 THR_LOCAL post_parse_analyze_hook_type post_parse_analyze_hook = NULL;
 
@@ -99,7 +105,7 @@ static Query* transformExplainStmt(ParseState* pstate, ExplainStmt* stmt);
 static Query* transformCreateTableAsStmt(ParseState* pstate, CreateTableAsStmt* stmt);
 #ifdef PGXC
 static Query* transformExecDirectStmt(ParseState* pstate, ExecDirectStmt* stmt);
-static bool IsExecDirectUtilityStmt(Node* node);
+static bool IsExecDirectUtilityStmt(const Node* node);
 static bool is_relation_child(RangeTblEntry* child_rte, List* rtable);
 static bool is_rel_child_of_rel(RangeTblEntry* child_rte, RangeTblEntry* parent_rte);
 #endif
@@ -141,10 +147,12 @@ Query* parse_analyze(
 
     query = transformTopLevelStmt(pstate, parseTree, isFirstNode, isCreateView);
 
-    if (post_parse_analyze_hook) {
+    /* it's unsafe to deal with plugins hooks as dynamic lib may be released */
+    if (post_parse_analyze_hook && !(g_instance.status > NoShutdown)) {
         (*post_parse_analyze_hook)(pstate, query);
     }
 
+    pfree_ext(pstate->p_ref_hook_state);
     free_parsestate(pstate);
 
     /* For plpy CTAS query. CTAS is a recursive call. CREATE query is the first rewrited.
@@ -164,7 +172,13 @@ Query* parse_analyze(
  * symbol datatypes from context.  The passed-in paramTypes[] array can
  * be modified or enlarged (via repalloc).
  */
-Query* parse_analyze_varparams(Node* parseTree, const char* sourceText, Oid** paramTypes, int* numParams, char** paramTypeNames)
+
+#ifdef ENABLE_MULTIPLE_NODES
+Query* parse_analyze_varparams(Node* parseTree, const char* sourceText, Oid** paramTypes, int* numParams)
+#else
+Query* parse_analyze_varparams(Node* parseTree, const char* sourceText, Oid** paramTypes, int* numParams,
+    char** paramTypeNames)
+#endif
 {
     ParseState* pstate = make_parsestate(NULL);
     Query* query = NULL;
@@ -173,17 +187,23 @@ Query* parse_analyze_varparams(Node* parseTree, const char* sourceText, Oid** pa
     AssertEreport(sourceText != NULL, MOD_OPT, "para cannot be NULL");
 
     pstate->p_sourcetext = sourceText;
-
-    parse_variable_parameters(pstate, paramTypes, numParams, paramTypeNames);
+#ifdef ENABLE_MULTIPLE_NODES	
+    parse_variable_parameters(pstate, paramTypes, numParams);
+#else
+    parse_variable_parameters(pstate, paramTypes, numParams, paramTypeNames);	
+#endif	
 
     query = transformTopLevelStmt(pstate, parseTree);
 
     /* make sure all is well with parameter types */
     check_variable_parameters(pstate, query);
 
-    if (post_parse_analyze_hook)
+    /* it's unsafe to deal with plugins hooks as dynamic lib may be released */
+    if (post_parse_analyze_hook && !(g_instance.status > NoShutdown)) {
         (*post_parse_analyze_hook)(pstate, query);
+    }
 
+    pfree_ext(pstate->p_ref_hook_state);
     free_parsestate(pstate);
 
     return query;
@@ -202,8 +222,8 @@ Query* parse_sub_analyze(Node* parseTree, ParseState* parentParseState, CommonTa
     pstate->p_parent_cte = parentCTE;
     pstate->p_locked_from_parent = locked_from_parent;
     pstate->p_resolve_unknowns = resolve_unknowns;
-    if (u_sess->attr.attr_sql.td_compatible_truncation && DB_IS_CMPT(DB_CMPT_C))
-        set_subquery_is_under_insert(pstate); /* Set p_is_in_insert for parse state. */
+    if (u_sess->attr.attr_sql.td_compatible_truncation && u_sess->attr.attr_sql.sql_compatibility == C_FORMAT)
+        set_subquery_is_under_insert(pstate); /* Set p_is_in_insert for parse state.*/
 
     query = transformStmt(pstate, parseTree);
 
@@ -284,7 +304,6 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
 
         case T_SelectStmt: {
             SelectStmt* n = (SelectStmt*)parseTree;
-
             if (n->valuesLists)
                 result = transformValuesClause(pstate, n);
             else if (n->op == SETOP_NONE)
@@ -387,6 +406,12 @@ bool analyze_requires_snapshot(Node* parseTree)
             result = true;
             break;
 #endif
+        case T_RefreshMatViewStmt:
+            /* yes, because the SELECT from pg_rewrite must be analyzed */
+            if (IS_PGXC_DATANODE) {
+                result = true;
+            }
+            break;
 
         default:
             /* other utility statements don't have any real parse analysis */
@@ -578,6 +603,87 @@ const void SendCommandIdForInsertCte(Query* qry, WithClause* withclause)
 }
 
 /*
+ * CheckTsDelete - check if delete by timerange
+ */
+#ifdef ENABLE_MULTIPLE_NODES
+/*
+ * check delete by time range or not
+ */
+static bool check_del_timerange(const Node* qual)
+{
+    if (qual == NULL) {
+        return false;
+    }
+    OpExpr* opexpr = (OpExpr*)qual;
+    const int filter_param_num = 2;
+
+    if ((nodeTag(qual) == T_OpExpr) && (list_length(opexpr->args) == filter_param_num) &&
+        ((opexpr->opfuncid <= INTERVALINFUNCOID && opexpr->opfuncid >= TIMESTAMPTZOUTFUNCOID) ||
+        (opexpr->opfuncid <= TIMESTAMPTZCMPTIMESTAMPFUNCOID &&
+        opexpr->opfuncid >= TIMESTAMPLTTIMESTAMPTZFUNCOID) ||
+        (opexpr->opfuncid <= TimeOprId::TIMESTAMP_OP_MAX &&
+        opexpr->opfuncid >= TimeOprId::TIMESTAMP_OP_MIN) ||
+        (opexpr->opfuncid <= TimeOprId::TIMESTAMP_DATE_OP_MAX &&
+        opexpr->opfuncid >= TimeOprId::TIMESTAMP_DATE_OP_MIN))) {
+        return true;
+    } else if ((nodeTag(qual) == T_BoolExpr) && (((BoolExpr*)qual)->boolop == OR_EXPR)) {
+        bool check_time_qual = true;
+        ListCell* cell = NULL;
+        /* if is or expr, we must confirm each sub-clause has time range in least 1 hour */
+        for (cell = list_head(((BoolExpr*)qual)->args); cell != NULL && check_time_qual; cell = lnext(cell)) {
+            check_time_qual = check_time_qual && check_del_timerange((Node*)lfirst(cell));
+        }
+        return check_time_qual;
+    } else if ((nodeTag(qual) == T_BoolExpr) && (((BoolExpr*)qual)->boolop == AND_EXPR)) {
+        bool check_time_qual = false;
+        ListCell* cell = NULL;
+        /* if is and expr, we can just have one sub-clause has time range in least 1 hour */
+        for (cell = list_head(((BoolExpr*)qual)->args); cell != NULL; cell = lnext(cell)) {
+            check_time_qual = check_time_qual || check_del_timerange((Node*)lfirst(cell));
+        }
+        return check_time_qual;
+    }
+
+    return false;
+}
+
+static void CheckTsDelete(const ParseState* pstate, const Query* qry)
+{
+    if (pstate == NULL || qry == NULL) {
+        ereport(ERROR, (errmodule(MOD_TIMESERIES), errmsg("Parsing null pointer to CheckTsDelete!")));
+    }
+    if (g_instance.attr.attr_common.enable_tsdb && RelationIsTsStore(pstate->p_target_relation)) {
+        if (qry->jointree == NULL) {
+            ereport(ERROR, (errmodule(MOD_TIMESERIES), errmsg("Timeseries only supports deletion by time range!")));
+        } else {
+            Node* quals = qry->jointree->quals;
+            if (!check_del_timerange(quals)) {
+                ereport(ERROR, (errmodule(MOD_TIMESERIES), errmsg("Timeseries only supports deletion by time range!")));
+            }
+        }
+    }
+    return;    
+}
+#endif   /* ENABLE_MULTIPLE_NODES */
+
+static bool IsSupportDeleteLimit(Relation rel, bool hasLimit)
+{
+    RelationLocInfo* relLocInfo = NULL;
+
+    if (rel == NULL) {
+        return true;
+    }
+    relLocInfo = rel->rd_locator_info;
+    if (relLocInfo == NULL) {
+        return true;
+    }
+    if (IsRelationReplicated(relLocInfo) && hasLimit) {
+        return false;
+    }
+    return true;
+}
+
+/*
  * transformDeleteStmt -
  *	  transforms a Delete Statement
  */
@@ -621,6 +727,19 @@ static Query* transformDeleteStmt(ParseState* pstate, DeleteStmt* stmt)
                 errdetail("hdfs replication table doesn't allow DELETE")));
     }
 
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+#endif
+        if (pstate->p_target_relation != NULL && RelationIsMatview(pstate->p_target_relation)) {
+            ereport(ERROR,
+                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("Unsupported feature"),
+                 errdetail("Materialized view doesn't allow DELETE")));
+        }
+#ifdef ENABLE_MULTIPLE_NODES
+    }
+#endif
+
     /* check delete permission */
     if (pstate->p_target_relation &&
         ((unsigned int)RelationGetInternalMask(pstate->p_target_relation) & INTERNAL_MASK_DDELETE)) {
@@ -651,11 +770,16 @@ static Query* transformDeleteStmt(ParseState* pstate, DeleteStmt* stmt)
     qual = transformWhereClause(pstate, stmt->whereClause, "WHERE");
 
     qry->returningList = transformReturningList(pstate, stmt->returningList);
-    if (qry->returningList != NIL && RelationIsColStore(pstate->p_target_relation)) {
+    if (pstate->p_target_relation && qry->returningList != NIL && RelationIsColStore(pstate->p_target_relation)) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Un-support feature"),
                 errdetail("column stored relation doesn't support DELETE returning")));
+    } else if (pstate->p_target_relation && qry->returningList != NIL && RelationIsTsStore(pstate->p_target_relation)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Un-support feature"),
+                errdetail("Timeseries stored relation doesn't support DELETE returning")));
     }
 
     /* done building the range table and jointree */
@@ -674,6 +798,19 @@ static Query* transformDeleteStmt(ParseState* pstate, DeleteStmt* stmt)
     if (pstate->p_hasAggs)
         parseCheckAggregates(pstate, qry);
 
+    qry->hintState = stmt->hintState;
+    
+    qry->limitCount = transformLimitClause(pstate, stmt->limitClause, "LIMIT");
+    if (!IsSupportDeleteLimit(pstate->p_target_relation, (qry->limitCount != NULL))) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Un-support feature"),
+                errdetail("replication table doesn't allow DELETE LIMIT")));
+    }
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckTsDelete(pstate, qry);
+#endif   /* ENABLE_MULTIPLE_NODES */
+
     return qry;
 }
 
@@ -690,7 +827,7 @@ static bool IsFindPgfdwForeignTbl(Query* qry)
     foreach (lc, rtable) {
         RangeTblEntry* rte = (RangeTblEntry*)lfirst(lc);
 
-        if (rte->relkind == RELKIND_FOREIGN_TABLE) {
+        if (rte->relkind == RELKIND_FOREIGN_TABLE || rte->relkind == RELKIND_STREAM) {
             if (IS_POSTGRESFDW_FOREIGN_TABLE(rte->relid)) {
                 return true;
             }
@@ -712,7 +849,7 @@ static bool IsFindHDFSForeignTbl(Query* qry)
 
     foreach (lc, rtable) {
         RangeTblEntry* rte = (RangeTblEntry*)lfirst(lc);
-        if (rte->relkind == RELKIND_FOREIGN_TABLE) {
+        if (rte->relkind == RELKIND_FOREIGN_TABLE || rte->relkind == RELKIND_STREAM) {
             if (isObsOrHdfsTableFormTblOid(rte->relid) || IS_OBS_CSV_TXT_FOREIGN_TABLE(rte->relid)) {
                 return true;
             }
@@ -730,7 +867,7 @@ static Query* FindQueryContainForeignTbl(Query* qry)
     foreach (lc, rtable) {
         RangeTblEntry* rte = (RangeTblEntry*)lfirst(lc);
 
-        if (rte->relkind == RELKIND_FOREIGN_TABLE) {
+        if (rte->relkind == RELKIND_FOREIGN_TABLE || rte->relkind == RELKIND_STREAM) {
             return qry;
         } else if (rte->rtekind == RTE_SUBQUERY) {
             return FindQueryContainForeignTbl(rte->subquery);
@@ -749,6 +886,7 @@ static Query* FindQueryContainForeignTbl(Query* qry)
     return NULL;
 }
 
+#ifdef ENABLE_MOT
 /*
  * @brief: Expression_tree_walker callback function.
  * Checks the entire RTE used by a query to identify their storage engine type (MOT or PAGE).
@@ -934,6 +1072,7 @@ bool CheckMotIndexedColumnUpdate(Query* qry)
 
     return context.isIndexedColumnUpdate;
 }
+#endif
 
 static void CheckUnsupportInsertSelectClause(Query* query)
 {
@@ -945,11 +1084,22 @@ static void CheckUnsupportInsertSelectClause(Query* query)
     result = rt_fetch(query->resultRelation, query->rtable);
 
     AssertEreport(query->commandType == CMD_INSERT, MOD_OPT, "Only deal with CMD_INSERT commondType here");
-    if (result->relkind == RELKIND_FOREIGN_TABLE) {
+    if (result->relkind == RELKIND_FOREIGN_TABLE || result->relkind == RELKIND_STREAM) {
         if (CheckSupportedFDWType(result->relid)) {
             return;
         }
-
+#ifdef ENABLE_MULTIPLE_NODES
+         if (relid_is_stream(result->relid)) {
+            if (t_thrd.streaming_cxt.loaded) {
+                return;
+            } else {
+                ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Un-support feature"),
+                        errdetail("Before insert stream object, please switch on the stream engine")));
+            }
+        }
+#endif
         if (list_length(query->rtable) == 1)
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1149,6 +1299,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
     if (stmt->upsertClause != NULL && stmt->upsertClause->targetList != NIL) {
         targetPerms |= ACL_UPDATE;
     }
+
     qry->resultRelation = setTargetTable(pstate, stmt->relation, false, false, targetPerms);
     if (pstate->p_target_relation != NULL &&
         ((unsigned int)RelationGetInternalMask(pstate->p_target_relation) & INTERNAL_MASK_DINSERT)) {
@@ -1157,6 +1308,20 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
                 errmsg("Un-support feature"),
                 errdetail("internal relation doesn't allow INSERT")));
     }
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+#endif
+        if (pstate->p_target_relation != NULL
+                && RelationIsMatview(pstate->p_target_relation) && !stmt->isRewritten) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("Unsupported feature"),
+                            errdetail("Materialized view doesn't allow INSERT")));
+        }
+#ifdef ENABLE_MULTIPLE_NODES
+    }
+#endif
+
     if (pstate->p_target_relation != NULL && stmt->upsertClause != NULL) {
         /* non-supported upsert cases */
         if (!u_sess->attr.attr_sql.enable_upsert_to_merge && RelationIsColumnFormat(pstate->p_target_relation)) {
@@ -1164,7 +1329,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
                              errmsg("INSERT ON DUPLICATE KEY UPDATE is not supported on column orientated table."))));
         }
 
-        if (RelationIsForeignTable(pstate->p_target_relation)) {
+        if (RelationIsForeignTable(pstate->p_target_relation) || RelationIsStream(pstate->p_target_relation)) {
             ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                              errmsg("INSERT ON DUPLICATE KEY UPDATE is not supported on foreign table."))));
         }
@@ -1172,6 +1337,11 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
         if (RelationIsView(pstate->p_target_relation)) {
             ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("INSERT ON DUPLICATE KEY UPDATE is not supported on VIEW."))));
+        }
+
+        if (RelationIsContquery(pstate->p_target_relation)) {
+            ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("INSERT ON DUPLICATE KEY UPDATE is not supported on CONTQUERY."))));
         }
     }
 
@@ -1193,7 +1363,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
 
     /* Validate stmt->cols list, or build default list if no list given */
     icolumns = checkInsertTargets(pstate, stmt->cols, &attrnos);
-    AssertEreport(list_length(icolumns) == list_length(attrnos), MOD_OPT, "list length inconsistant");
+    AssertEreport(list_length(icolumns) == list_length(attrnos), MOD_OPT, "list length inconsistent");
 
     /*
      * Determine which variant of INSERT we have.
@@ -1250,7 +1420,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
          * Make the source be a subquery in the INSERT's rangetable, and add
          * it to the INSERT's joinlist.
          */
-        rte = addRangeTableEntryForSubquery(pstate, selectQuery, makeAlias("*SELECT*", NIL), false);
+        rte = addRangeTableEntryForSubquery(pstate, selectQuery, makeAlias("*SELECT*", NIL), false, false);
 #ifdef PGXC
         /*
          * For an INSERT SELECT involving INSERT on a child after scanning
@@ -1320,8 +1490,9 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
          * If td_compatible_truncation equal true and no foreign table found,
          * the auto truncation funciton should be enabled.
          */
-        if (DB_IS_CMPT(DB_CMPT_C) && pstate->p_target_relation != NULL &&
-            !RelationIsForeignTable(pstate->p_target_relation)) {
+        if (u_sess->attr.attr_sql.sql_compatibility == C_FORMAT && pstate->p_target_relation != NULL &&
+            !RelationIsForeignTable(pstate->p_target_relation) &&
+            !RelationIsStream(pstate->p_target_relation)) {
             if (u_sess->attr.attr_sql.td_compatible_truncation) {
                 pstate->p_is_td_compatible_truncation = true;
             } else {
@@ -1395,8 +1566,9 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
              * If td_compatible_truncation equal true and no foreign table found,
              * the auto truncation funciton should be enabled.
              */
-            if (DB_IS_CMPT(DB_CMPT_C) && pstate->p_target_relation != NULL &&
-                !RelationIsForeignTable(pstate->p_target_relation)) {
+            if (u_sess->attr.attr_sql.sql_compatibility == C_FORMAT && pstate->p_target_relation != NULL &&
+                !RelationIsForeignTable(pstate->p_target_relation) &&
+                !RelationIsStream(pstate->p_target_relation)) {
                 if (u_sess->attr.attr_sql.td_compatible_truncation) {
                     pstate->p_is_td_compatible_truncation = true;
                 } else {
@@ -1436,18 +1608,6 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
          */
         for (i = 0; i < sublist_length; i++) {
             collations = lappend_oid(collations, InvalidOid);
-        }
-
-        /*
-         * There mustn't have been any table references in the expressions,
-         * else strange things would happen, like Cartesian products of those
-         * tables with the VALUES list ...
-         */
-        if (pstate->p_joinlist != NIL) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("VALUES must not contain table references"),
-                    parser_errposition(pstate, locate_var_of_level((Node*)exprsLists, 0))));
         }
 
         if (list_length(pstate->p_rtable) != 1 && contain_vars_of_level((Node*)exprsLists, 0)) {
@@ -1497,8 +1657,9 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
          * If td_compatible_truncation equal true and no foreign table found,
          * the auto truncation funciton should be enabled.
          */
-        if (DB_IS_CMPT(DB_CMPT_C) && pstate->p_target_relation != NULL &&
-            !RelationIsForeignTable(pstate->p_target_relation)) {
+        if (u_sess->attr.attr_sql.sql_compatibility == C_FORMAT && pstate->p_target_relation != NULL &&
+            !RelationIsForeignTable(pstate->p_target_relation) &&
+            !RelationIsStream(pstate->p_target_relation)) {
             if (u_sess->attr.attr_sql.td_compatible_truncation) {
                 pstate->p_is_td_compatible_truncation = true;
             } else {
@@ -1541,7 +1702,6 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
     if (stmt->upsertClause) {
         qry->upsertClause = transformUpsertClause(pstate, stmt->upsertClause, stmt->relation);
     }
-
     /*
      * If we have a RETURNING clause, we need to add the target relation to
      * the query namespace before processing it, so that Var references in
@@ -1580,6 +1740,8 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
 
     /* Set query tdTruncCastStatus to recored if auto truncation enabled or not. */
     qry->tdTruncCastStatus = pstate->tdTruncCastStatus;
+    qry->hintState = stmt->hintState;
+
     return qry;
 }
 
@@ -1603,7 +1765,6 @@ static void checkUpsertTargetlist(Relation targetTable, List* updateTlist)
             index_info = (IndexInfo*)lfirst(index);
             for (int i = 0; i < index_info->ii_NumIndexAttrs; i++) {
                 int attrno = index_info->ii_KeyAttrNumbers[i];
-
                 if (attrno > 0) {
                     index_attrs = bms_add_member(index_attrs, attrno);
                 }
@@ -1621,8 +1782,8 @@ List* BuildExcludedTargetlist(Relation targetrel, Index exclRelIndex)
 {
     List* result = NIL;
     int attno;
-    Var* var;
-    TargetEntry* te;
+    Var* var = NULL;
+    TargetEntry* te = NULL;
 
     /*
      * Note that resnos of the tlist must correspond to attnos of the
@@ -1630,7 +1791,7 @@ List* BuildExcludedTargetlist(Relation targetrel, Index exclRelIndex)
      */
     for (attno = 0; attno < RelationGetNumberOfAttributes(targetrel); attno++) {
         Form_pg_attribute attr = targetrel->rd_att->attrs[attno];
-        char* name;
+        char* name = NULL;
 
         if (attr->attisdropped) {
             /*
@@ -1638,7 +1799,6 @@ List* BuildExcludedTargetlist(Relation targetrel, Index exclRelIndex)
              * the Const claims to be.
              */
             var = (Var*)makeNullConst(INT4OID, -1, InvalidOid);
-            name = NULL;
         } else {
             var = makeVar(exclRelIndex, attno + 1, attr->atttypid, attr->atttypmod,
                           attr->attcollation, 0);
@@ -1679,7 +1839,7 @@ static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upser
     if (targetrel->rd_rel->relhastriggers) {
         ereport(WARNING,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-             errmsg("INSERT ON DUPLICATE KEY UPDATE will ignore triggers.")));
+                 errmsg("triggers are not supported and will be ignored by INSERT ON DUPLICATE KEY UPDATE.")));
     }
 #endif
 
@@ -1716,9 +1876,13 @@ static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upser
         updateTlist = transformTargetList(pstate, upsertClause->targetList);
         updateTlist = transformUpdateTargetList(pstate, updateTlist, upsertClause->targetList, relation);
         /* We can't update primary or unique key in upsert, check it here */
-        if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) {
+#ifdef ENABLE_MULTIPLE_NODES
+        if (IS_PGXC_COORDINATOR && !u_sess->attr.attr_sql.enable_upsert_to_merge) {
             checkUpsertTargetlist(pstate->p_target_relation, updateTlist);
         }
+#else
+        checkUpsertTargetlist(pstate->p_target_relation, updateTlist);
+#endif
     }
 
     /* Finally, build DUPLICATE KEY UPDATE [NOTHING | ... ] expression */
@@ -1786,11 +1950,12 @@ List* transformInsertRow(ParseState* pstate, List* exprlist, List* stmtcols, Lis
     foreach (lc, exprlist) {
         Expr* expr = (Expr*)lfirst(lc);
         ResTarget* col = NULL;
+#ifndef ENABLE_MULTIPLE_NODES		
         /*
          * Rownum is not allowed in exprlist in INSERT statement.
          */
         ExcludeRownumExpr(pstate, (Node*)expr);
-
+#endif
         col = (ResTarget*)lfirst(icols);
         AssertEreport(IsA(col, ResTarget), MOD_OPT, "nodeType inconsistant");
 
@@ -1992,7 +2157,7 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
      * If query is under one insert statement and include a foreign table,
      * then set top level parsestate p_is_foreignTbl_exist to true.
      */
-    if (u_sess->attr.attr_sql.td_compatible_truncation && DB_IS_CMPT(DB_CMPT_C) &&
+    if (u_sess->attr.attr_sql.td_compatible_truncation && u_sess->attr.attr_sql.sql_compatibility == C_FORMAT &&
         pstate->p_is_in_insert && checkForeignTableExist(pstate->p_rtable))
         set_ancestor_ps_contain_foreigntbl(pstate);
 
@@ -2021,7 +2186,7 @@ static Query* transformValuesClause(ParseState* pstate, SelectStmt* stmt)
     List** colexprs = NULL;
     int sublist_length = -1;
     RangeTblEntry* rte = NULL;
-    RangeTblRef* rtr = NULL;
+    int rtindex;
     ListCell* lc = NULL;
     ListCell* lc2 = NULL;
     int i;
@@ -2096,13 +2261,12 @@ static Query* transformValuesClause(ParseState* pstate, SelectStmt* stmt)
                     (errcode(ERRCODE_SYNTAX_ERROR),
                         errmsg("DEFAULT can only appear in a VALUES list within INSERT"),
                         parser_errposition(pstate, exprLocation(col))));
-            } 
-
+            }
+#ifndef ENABLE_MULTIPLE_NODES
             ExcludeRownumExpr(pstate, col);
-
+#endif
             colexprs[i] = lappend(colexprs[i], col);
             i++;
-            
         }
 
         /* Release sub-list's cells to save memory */
@@ -2170,19 +2334,21 @@ static Query* transformValuesClause(ParseState* pstate, SelectStmt* stmt)
      * Generate the VALUES RTE
      */
     rte = addRangeTableEntryForValues(pstate, exprsLists, collations, NULL, true);
-    rtr = makeNode(RangeTblRef);
+    addRTEtoQuery(pstate, rte, true, true, true);
     /* assume new rte is at end */
-    rtr->rtindex = list_length(pstate->p_rtable);
-    AssertEreport(rte == rt_fetch(rtr->rtindex, pstate->p_rtable), MOD_OPT, "check failure with rt_fetch function");
-    pstate->p_joinlist = lappend(pstate->p_joinlist, rtr);
-    pstate->p_relnamespace = lappend(pstate->p_relnamespace, rte);
-    pstate->p_varnamespace = lappend(pstate->p_varnamespace, rte);
+    rtindex = list_length(pstate->p_rtable);
+    if (rte != rt_fetch(rtindex, pstate->p_rtable)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("rte is not in p_rtable list")));
+    }
+
 
     /*
      * Generate a targetlist as though expanding "*"
      */
     AssertEreport(pstate->p_next_resno == 1, MOD_OPT, "");
-    qry->targetList = expandRelAttrs(pstate, rte, rtr->rtindex, 0, -1);
+    qry->targetList = expandRelAttrs(pstate, rte, rtindex, 0, -1);
 
     /*
      * The grammar allows attaching ORDER BY, LIMIT, and FOR UPDATE to a
@@ -2344,9 +2510,8 @@ static Query* transformSetOperationStmt(ParseState* pstate, SelectStmt* stmt)
      * Re-find leftmost SELECT (now it's a sub-query in rangetable)
      */
     node = sostmt->larg;
-    while (node && IsA(node, SetOperationStmt)) {
+    while (node && IsA(node, SetOperationStmt))
         node = ((SetOperationStmt*)node)->larg;
-    }
     AssertEreport(node && IsA(node, RangeTblRef), MOD_OPT, "Node type inconsistant");
     leftmostRTI = ((RangeTblRef*)node)->rtindex;
     leftmostQuery = rt_fetch(leftmostRTI, pstate->p_rtable)->subquery;
@@ -2403,10 +2568,13 @@ static Query* transformSetOperationStmt(ParseState* pstate, SelectStmt* stmt)
     jrte = addRangeTableEntryForJoin(pstate, targetnames, JOIN_INNER, targetvars, NULL, false);
 
     sv_relnamespace = pstate->p_relnamespace;
-    pstate->p_relnamespace = NIL; /* no qualified names allowed */
 
     sv_varnamespace = pstate->p_varnamespace;
-    pstate->p_varnamespace = list_make1(jrte);
+    pstate->p_relnamespace = NIL;
+    pstate->p_varnamespace = NIL;
+
+    /* add jrte to varnamespace only */
+    addRTEtoQuery(pstate, jrte, false, false, true);
 
     /*
      * For now, we don't support resjunk sort clauses on the output of a
@@ -2571,7 +2739,7 @@ static Node* transformSetOperationTree(ParseState* pstate, SelectStmt* stmt, boo
         rc = snprintf_s(
             selectName, sizeof(selectName), sizeof(selectName) - 1, "*SELECT* %d", list_length(pstate->p_rtable) + 1);
         securec_check_ss(rc, "", "");
-        rte = addRangeTableEntryForSubquery(pstate, selectQuery, makeAlias(selectName, NIL), false);
+        rte = addRangeTableEntryForSubquery(pstate, selectQuery, makeAlias(selectName, NIL), false, false);
 
         /*
          * Return a RangeTblRef to replace the SelectStmt in the set-op tree.
@@ -2795,7 +2963,11 @@ static void determineRecursiveColTypes(ParseState* pstate, Node* larg, List* nrt
     AssertEreport(node && IsA(node, RangeTblRef), MOD_OPT, "check node type inconsistant");
     leftmostRTI = ((RangeTblRef*)node)->rtindex;
     leftmostQuery = rt_fetch(leftmostRTI, pstate->p_rtable)->subquery;
-    AssertEreport(leftmostQuery != NULL, MOD_OPT, "para should not be NULL");
+    if (unlikely(leftmostQuery == NULL)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
+                errmsg("leftmostQuery should not be null")));
+    }
 
     /*
      * Generate dummy targetlist using column names of leftmost select and
@@ -2825,7 +2997,7 @@ static void determineRecursiveColTypes(ParseState* pstate, Node* larg, List* nrt
 /*
  *  fixResTargetNameWithTableNameRef
  *  The goal of this function try to handle set_clause in updatestmt, and update
- *  with table name or alias prefix. Do this for compatibility ora.
+ *  with table name or alias prefix. Do this for compatibility A.
  */
 void fixResTargetNameWithTableNameRef(Relation rd, RangeVar* rel, ResTarget* res)
 {
@@ -2937,6 +3109,19 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
                 errdetail("replicated columnar table doesn't allow UPDATE")));
     }
 
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+#endif
+        if (pstate->p_target_relation != NULL && RelationIsMatview(pstate->p_target_relation)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("Unsupported feature"),
+                            errdetail("Materialized view doesn't allow UPDATE")));
+        }
+#ifdef ENABLE_MULTIPLE_NODES
+    }
+#endif
+
     // check update permission
     if (pstate->p_target_relation != NULL &&
         ((unsigned int)RelationGetInternalMask(pstate->p_target_relation) & INTERNAL_MASK_DUPDATE)) {
@@ -3001,6 +3186,8 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
     qry->targetList = transformUpdateTargetList(pstate, qry->targetList, stmt->targetList, stmt->relation);
 
     assign_query_collations(pstate, qry);
+    qry->hintState = stmt->hintState;
+
     return qry;
 }
 
@@ -3047,8 +3234,9 @@ static List* transformUpdateTargetList(ParseState* pstate, List* qryTlist, List*
             ereport(ERROR,
                 (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("UPDATE target count mismatch --- internal error")));
         }
+
         origTarget = (ResTarget*)lfirst(orig_tl);
-        AssertEreport(IsA(origTarget, ResTarget), MOD_OPT, "Node type inconsistant here");
+        Assert(IsA(origTarget, ResTarget));
         if (stmtrel != NULL) {
             fixResTargetNameWithTableNameRef(pstate->p_target_relation, stmtrel, origTarget);
         }
@@ -3098,7 +3286,6 @@ static List* transformReturningList(ParseState* pstate, List* returningList)
     int save_next_resno;
     bool save_hasAggs = false;
     bool save_hasWindowFuncs = false;
-    int length_rtable;
 
     if (returningList == NIL) {
         return NIL; /* nothing to do */
@@ -3117,7 +3304,6 @@ static List* transformReturningList(ParseState* pstate, List* returningList)
     pstate->p_hasAggs = false;
     save_hasWindowFuncs = pstate->p_hasWindowFuncs;
     pstate->p_hasWindowFuncs = false;
-    length_rtable = list_length(pstate->p_rtable);
 
     /* transform RETURNING identically to a SELECT targetlist */
     rlist = transformTargetList(pstate, returningList);
@@ -3136,23 +3322,6 @@ static List* transformReturningList(ParseState* pstate, List* returningList)
             (errcode(ERRCODE_WINDOWING_ERROR),
                 errmsg("cannot use window function in RETURNING"),
                 parser_errposition(pstate, locate_windowfunc((Node*)rlist))));
-    }
-
-    /* no new relation references please */
-    if (list_length(pstate->p_rtable) != length_rtable) {
-        int vlocation = -1;
-        int relid;
-
-        /* try to locate such a reference to point to */
-        for (relid = length_rtable + 1; relid <= list_length(pstate->p_rtable); relid++) {
-            vlocation = locate_var_of_relation((Node*)rlist, relid, 0);
-            if (vlocation >= 0)
-                break;
-        }
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("RETURNING cannot contain references to other relations"),
-                parser_errposition(pstate, vlocation)));
     }
 
     /* mark column origins */
@@ -3258,7 +3427,7 @@ static Query* transformExplainStmt(ParseState* pstate, ExplainStmt* stmt)
 {
     Query* result = NULL;
 
-    /* transform a CREATE TABLE AS, SELECT ... INTO, or CREATE MATERIALIZED VIEW Statement */
+    /* transform contained query, allowing SELECT INTO */
     stmt->query = (Node*)transformTopLevelStmt(pstate, stmt->query);
 
     /* represent the command as a utility Query */
@@ -3271,7 +3440,7 @@ static Query* transformExplainStmt(ParseState* pstate, ExplainStmt* stmt)
 
 /*
  * transformCreateTableAsStmt -
- *	transform a CREATE TABLE AS (or SELECT ... INTO) Statement
+ * transform a CREATE TABLE AS, SELECT ... INTO, or CREATE MATERIALIZED VIEW Statement
  *
  * As with EXPLAIN, transform the contained statement now.
  */
@@ -3279,61 +3448,27 @@ static Query* transformCreateTableAsStmt(ParseState* pstate, CreateTableAsStmt* 
 {
     Query* result = NULL;
     ListCell* lc = NULL;
-    Query* query;
+
+    /*
+     * Set relkind in IntoClause based on statement relkind.  These are
+     * different types, because the parser users the ObjectType enumeration
+     * and the executor uses RELKIND_* defines.
+     */
+    switch (stmt->relkind)
+    {
+        case (OBJECT_TABLE):
+            stmt->into->relkind = RELKIND_RELATION;
+            break;
+        case (OBJECT_MATVIEW):
+            stmt->into->relkind = RELKIND_MATVIEW;
+            break;
+        default:
+            elog(ERROR, "unrecognized object relkind: %d",
+                 (int) stmt->relkind);
+    }
 
     /* transform contained query */
-    query = transformStmt(pstate, stmt->query);
-    stmt->query = (Node*)query;
-    /* additional work needed for CREATE MATERIALIZED VIEW */
-    if (stmt->relkind == OBJECT_MATVIEW) {
-        /*
-         * Prohibit a data-modifying CTE in the query used to create a
-         * materialized view. It's not sufficiently clear what the user would
-         * want to happen if the MV is refreshed or incrementally maintained.
-         */
-        if (query->hasModifyingCTE)
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg(
-                "materialized views must not use data-modifying statements in WITH"))); 
-
-        /*
-         * Check whether any temporary database objects are used in the creation query. 
-         * It would be hard to refresh data or incrementally maintain it if a source 
-         * disappeared.
-         */
-        if (isQueryUsingTempRelation(query))
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("materialized views must not use temporary tables or views")));
-
-        if (is_query_using_gtt(query))
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("materialized views must not use global temporary tables or views")));
-
-        /*
-         * A materialized view would either need to save parameters for use in
-         * maintaining/loading the data or prohibit them entirely.  The latter
-         * seems safer and more sane.
-         */
-        if (query_contains_extern_params(query))
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("materialized views may not be defined using bound parameters")));
-        /*
-         * For now, we disallow unlogged materialized views, because it
-         * seems like a bad idea for them to just go to empty after a crash.
-         * (If we could mark them as unpopulated, that would be better, but
-         * that requires catalog changes which crash recovery can't presently
-         * handle.)
-         */
-        if (stmt->into->rel->relpersistence == RELPERSISTENCE_UNLOGGED)
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("materialized views cannot be UNLOGGED")));
-
-        /*
-         * At runtime, we'll need a copy of the parsed-but-not-rewritten Query
-         * for purposes of creating the view's ON SELECT rule.  We stash that
-         * in the IntoClause because that's where intorel_startup() can
-         * conveniently get it from.
-         */
-        stmt->into->viewQuery = (Node*)copyObject(query);
-    }
+    stmt->query = (Node*)transformStmt(pstate, stmt->query);
 
     /* if result type of new relation is unknown-type, then resolve as type TEXT */
     foreach (lc, ((Query*)stmt->query)->targetList) {
@@ -3360,7 +3495,7 @@ static Query* transformCreateTableAsStmt(ParseState* pstate, CreateTableAsStmt* 
 /*
  * Check if given GUC variable can go through EXECUTE DIRECT
  */
-static bool checkExecDirectVariableSetStmt(Node* node)
+static bool checkExecDirectVariableSetStmt(const Node* node)
 {
     if (nodeTag(node) == T_VariableSetStmt) {
         if (pg_strcasecmp(((VariableSetStmt*)node)->name, "distribute_test_param") == 0) {
@@ -3372,61 +3507,224 @@ static bool checkExecDirectVariableSetStmt(Node* node)
 }
 #endif
 
+static void get_index_and_type_from_nodename(const char* node_name, int* node_index, char* node_type)
+{
+    Oid node_oid;
+
+    if (node_name == NULL || node_index == NULL || node_type == NULL) {
+        return;
+    }
+
+    node_oid = get_pgxc_nodeoid(node_name);
+    if (!OidIsValid(node_oid)) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("PGXC Node %s: object not defined", node_name)));
+    }
+
+    *node_type = get_pgxc_nodetype(node_oid);
+    *node_index = PGXCNodeGetNodeId(node_oid, get_pgxc_nodetype(node_oid));
+
+    return;
+}
+
+RemoteQueryExecType fill_exec_type(char node_type, ExecDirectOption option)
+{
+    RemoteQueryExecType exec_type;
+
+    switch (option) {
+        case EXEC_DIRECT_ON_LIST:
+            if (node_type == PGXC_NODE_COORDINATOR) {
+                exec_type = EXEC_ON_COORDS;
+            } else {
+                exec_type = EXEC_ON_DATANODES;
+            }
+            break;
+        case EXEC_DIRECT_ON_ALL_CN:
+            exec_type = EXEC_ON_COORDS;
+            break;
+        case EXEC_DIRECT_ON_ALL_DN:
+            exec_type = EXEC_ON_DATANODES;
+            break;
+        case EXEC_DIRECT_ON_ALL_NODES:
+            exec_type = EXEC_ON_ALL_NODES;
+            break;
+        default:
+            exec_type = EXEC_ON_NONE;
+            break;
+    }
+
+    return exec_type;
+}
+
+void check_node_index(int node_index, char* node_flag, int length_node_flag)
+{
+    if ((node_flag != NULL) &&
+        (node_index < length_node_flag) &&
+        (node_index >= 0) &&
+        node_flag[node_index] == 0) {
+        node_flag[node_index] = 1;
+    } else {
+        ereport(ERROR,
+                (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                 errmsg("node name in node list is not correct")));
+    }
+}
+
+static void fill_node_list_and_exec_type(const List* nodenames_list, ExecDirectOption option, RemoteQuery* query, bool* include_local)
+{
+    char* node_name = NULL;
+    int node_index;
+    char node_type = PGXC_NODE_NONE;
+    ListCell* nodename_item = NULL;
+    List* index_list = NULL;
+    int number_of_cn = 0;
+    int number_of_dn = 0;
+    char* cn_flag = NULL;
+    char* dn_flag = NULL;
+
+    *include_local = false;
+    if (option == EXEC_DIRECT_ON_LIST) {
+        if (u_sess->pgxc_cxt.NumCoords > 0) {
+            cn_flag = (char*)palloc0(u_sess->pgxc_cxt.NumCoords);
+        }
+        if (u_sess->pgxc_cxt.NumDataNodes > 0) {
+            dn_flag = (char*)palloc0(u_sess->pgxc_cxt.NumDataNodes);
+        }
+
+        foreach(nodename_item, nodenames_list) {
+            node_name = strVal(lfirst(nodename_item));
+            get_index_and_type_from_nodename(node_name, &node_index, &node_type);
+            if (node_type == PGXC_NODE_COORDINATOR) {
+                check_node_index(node_index, cn_flag, u_sess->pgxc_cxt.NumCoords);
+                number_of_cn++;
+                if (node_index == u_sess->pgxc_cxt.PGXCNodeId - 1) {
+                    *include_local = true;
+                    continue;
+                }
+            } else if (node_type == PGXC_NODE_DATANODE) {
+                check_node_index(node_index, dn_flag, u_sess->pgxc_cxt.NumDataNodes);
+                number_of_dn++;
+            } else {
+                ereport(ERROR,
+                        (errcode(ERRCODE_UNEXPECTED_NODE_STATE),
+                         errmsg("unsupport node type: %d", node_type)));
+            }
+            index_list = lappend_int(index_list, node_index);
+        }
+
+        if ((number_of_cn != 0) && (number_of_dn != 0)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                     errmsg("not support both coordinator and datanode in the execute list")));
+        }
+    }
+
+    query->exec_type = fill_exec_type(node_type, option);
+    query->exec_nodes->nodeList = index_list;
+    if ((option == EXEC_DIRECT_ON_ALL_CN) || (option == EXEC_DIRECT_ON_ALL_NODES)) {
+        *include_local = true;
+    }
+
+    pfree_ext(cn_flag);
+    pfree_ext(dn_flag);
+
+    return;
+}
+
+ExecDirectType set_exec_direct_type(bool is_local, CmdType command_type)
+{
+    ExecDirectType type = EXEC_DIRECT_NONE;
+
+    if (is_local) {
+        if (command_type == CMD_UTILITY)
+            type = EXEC_DIRECT_LOCAL_UTILITY;
+        else
+            type = EXEC_DIRECT_LOCAL;
+    } else {
+        switch (command_type) {
+            case CMD_UTILITY:
+                type = EXEC_DIRECT_UTILITY;
+                break;
+            case CMD_SELECT:
+                type = EXEC_DIRECT_SELECT;
+                break;
+            case CMD_INSERT:
+                type = EXEC_DIRECT_INSERT;
+                break;
+            case CMD_UPDATE:
+                type = EXEC_DIRECT_UPDATE;
+                break;
+            case CMD_DELETE:
+                type = EXEC_DIRECT_DELETE;
+                break;
+            case CMD_UNKNOWN:
+                break;
+            default:
+                /* CMD_MERGE and CMD_NOTHING are handled before set up EXECUTE DIRECT flag */
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNEXPECTED_NODE_STATE),
+                        errmsg("unrecognized commandType: %d", command_type)));
+                break;
+        }
+    }
+
+    return type;
+}
+
+void check_command_type(CmdType command_type)
+{
+    if (command_type == CMD_MERGE) {
+        ereport(
+            ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("EXECUTE DIRECT cannot execute MERGE INTO query")));
+    }
+
+    if (command_type == CMD_NOTHING) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("EXECUTE DIRECT cannot execute CREATE RULE")));
+    }
+}
+
 /*
- * transformExecDirectStmt -
- *	transform an EXECUTE DIRECT Statement
- *
- * Handling is depends if we should execute on nodes or on Coordinator.
- * To execute on nodes we return CMD_UTILITY query having one T_RemoteQuery node
- * with the inner statement as a sql_command.
- * If statement is to run on Coordinator we should parse inner statement and
- * analyze resulting query tree.
+ * Features not yet supported
+ * DML can be launched without errors but this could compromise data
+ * consistency, so block it.
  */
-static Query* transformExecDirectStmt(ParseState* pstate, ExecDirectStmt* stmt)
+static void check_execute_direct_type_and_statement(ExecDirectType exec_direct_type, const Node* utility_statement, bool include_local)
+{
+    if (!u_sess->attr.attr_common.xc_maintenance_mode && !u_sess->attr.attr_common.IsInplaceUpgrade &&
+        (exec_direct_type == EXEC_DIRECT_DELETE || exec_direct_type == EXEC_DIRECT_UPDATE ||
+         exec_direct_type == EXEC_DIRECT_INSERT)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("EXECUTE DIRECT cannot execute DML queries")));
+    } else if (exec_direct_type == EXEC_DIRECT_UTILITY) {
+        if (include_local || (!IsExecDirectUtilityStmt(utility_statement) &&
+#ifdef ENABLE_DISTRIBUTE_TEST
+               // just enable the VariableSetStmt named distribute_test_param for distribute test.
+               !checkExecDirectVariableSetStmt(utility_statement) &&
+#endif
+               !u_sess->attr.attr_common.xc_maintenance_mode)) {
+                /* In case this statement is an utility, check if it is authorized */
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("EXECUTE DIRECT cannot execute this utility query")));
+        }
+    } else if (exec_direct_type == EXEC_DIRECT_LOCAL_UTILITY &&
+#ifdef ENABLE_DISTRIBUTE_TEST
+               // just enable the VariableSetStmt named distribute_test_param for distribute test.
+               !checkExecDirectVariableSetStmt(utility_statement) &&
+#endif
+               !u_sess->attr.attr_common.xc_maintenance_mode) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("EXECUTE DIRECT cannot execute locally this utility query")));
+    }
+
+    return;
+}
+
+static Query* generate_query_execdirect_statement(const ExecDirectStmt* stmt)
 {
     Query* result = makeNode(Query);
     char* query = NULL;
-    List* nodelist = stmt->node_names;
-    RemoteQuery* step = makeNode(RemoteQuery);
-    bool is_local = false;
+    StringInfoData strinfo;
     List* raw_parsetree_list = NIL;
     ListCell* raw_parsetree_item = NULL;
-    char* nodename = NULL;
-    Oid nodeoid;
-    int nodeIndex;
-    char nodetype;
-    StringInfoData strinfo;
-
-    /* Support not available on Datanodes  except single node */
-    if (IS_PGXC_DATANODE && !IS_SINGLE_NODE) {
-        ereport(
-            ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("EXECUTE DIRECT cannot be executed on a Datanode")));
-    }
-
-    if (list_length(nodelist) > 1) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Support for EXECUTE DIRECT on multiple nodes is not available yet")));
-    }
-
-    AssertEreport(list_length(nodelist) == 1, MOD_OPT, "list length could only be one here");
-    Assert(IS_PGXC_COORDINATOR || IS_SINGLE_NODE);
-
-    /* There is a single element here */
-    nodename = strVal(linitial(nodelist));
-    nodeoid = get_pgxc_nodeoid(nodename);
-
-    if (!OidIsValid(nodeoid)) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("PGXC Node %s: object not defined", nodename)));
-    }
-
-    /* Get node type and index */
-    nodetype = get_pgxc_nodetype(nodeoid);
-    nodeIndex = PGXCNodeGetNodeId(nodeoid, get_pgxc_nodetype(nodeoid));
-    /* Check if node is requested is the self-node or not */
-    if ((nodetype == PGXC_NODE_COORDINATOR && nodeIndex == u_sess->pgxc_cxt.PGXCNodeId - 1) || IS_SINGLE_NODE) {
-        is_local = true;
-    }
 
     //  When the EXECUTE DIRECT ON 'xxxxx' statement is executed,
     //  once the 'xxxxx' statement is in error, the error will dislocation,
@@ -3461,117 +3759,105 @@ static Query* transformExecDirectStmt(ParseState* pstate, ExecDirectStmt* stmt)
     }
 
     pfree_ext(strinfo.data);
+    return result;
+}
+
+static void init_execdirect_utility_stmt(RemoteQuery* step, const char* statement)
+{
+    step->cursor = NULL;
+    step->base_tlist = NIL;
+    step->force_autocommit = false;
+    step->read_only = true;
+    step->sql_statement = pstrdup(statement);
+    step->combine_type = COMBINE_TYPE_SAME;
+}
+
+/*
+ * find agg functions which need add finalize funcion on sql statement in deparse_query
+ */
+static bool check_agg_in_execute_direct_query(Node* node, void* context)
+{
+    if (node == NULL || IS_PGXC_DATANODE) {
+        return false;
+    }
+
+    if (IsA(node, Aggref)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+             errmsg("EXECUTE DIRECT on multinode not support agg functions.")));
+    }
+
+    if (IsA(node, Query)) {
+        if (query_tree_walker((Query*)node,
+            (bool (*)())check_agg_in_execute_direct_query, (void*)node, 0)) {
+            return true;
+        }
+    }
+
+    return expression_tree_walker(node, (bool (*)())check_agg_in_execute_direct_query, context);
+}
+
+/*
+ * transformExecDirectStmt -
+ *	transform an EXECUTE DIRECT Statement
+ *
+ * Handling is depends if we should execute on nodes or on Coordinator.
+ * To execute on nodes we return CMD_UTILITY query having one T_RemoteQuery node
+ * with the inner statement as a sql_command.
+ * If statement is to run on Coordinator we should parse inner statement and
+ * analyze resulting query tree.
+ */
+static Query* transformExecDirectStmt(ParseState* pstate, ExecDirectStmt* stmt)
+{
+    Query* result = NULL;
+    List* nodelist = stmt->node_names;
+    ExecDirectOption option = stmt->exec_option;
+    RemoteQuery* step = makeNode(RemoteQuery);
+    bool is_local = false;
+    bool include_local = false;
+    char nodetype = PGXC_NODE_COORDINATOR;
+    int node_index;
+
+    /* Support not available on Datanodes  except single node */
+    if (IS_PGXC_DATANODE && !IS_SINGLE_NODE)
+        ereport(
+            ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("EXECUTE DIRECT cannot be executed on a Datanode")));
+
+    Assert(IS_PGXC_COORDINATOR || IS_SINGLE_NODE);
+
+    step->exec_nodes = makeNode(ExecNodes);
+    result = generate_query_execdirect_statement(stmt);
+    if (list_length(nodelist) == 1) {
+        get_index_and_type_from_nodename(strVal(linitial(nodelist)), &node_index, &nodetype);
+        /* Check if node is requested is the self-node or not */
+        if ((nodetype == PGXC_NODE_COORDINATOR && node_index == u_sess->pgxc_cxt.PGXCNodeId - 1) || IS_SINGLE_NODE)
+            is_local = true;
+        step->exec_type = fill_exec_type(nodetype, option);
+        step->exec_nodes->nodeList = lappend_int(step->exec_nodes->nodeList, node_index);
+    } else {
+        check_agg_in_execute_direct_query((Node*)result, (void*)result);
+        fill_node_list_and_exec_type(nodelist, option, step, &include_local);
+        step->is_remote_function_query = true;
+    }
 
     /* Needed by planner */
     result->sql_statement = pstrdup(stmt->query);
+    init_execdirect_utility_stmt(step, result->sql_statement);
 
-    /* Default list of parameters to set */
-    step->sql_statement = NULL;
-    step->exec_nodes = makeNode(ExecNodes);
-    step->combine_type = COMBINE_TYPE_NONE;
-    step->read_only = true;
-    step->force_autocommit = false;
-    step->cursor = NULL;
-
-    /* This is needed by executor */
-    step->sql_statement = pstrdup(stmt->query);
-    if (nodetype == PGXC_NODE_COORDINATOR) {
-        step->exec_type = EXEC_ON_COORDS;
-    } else {
-        step->exec_type = EXEC_ON_DATANODES;
-    }
-
-    step->base_tlist = NIL;
-
-    /* Change the list of nodes that will be executed for the query and others */
-    step->force_autocommit = false;
-    step->combine_type = COMBINE_TYPE_SAME;
-    step->read_only = true;
-    step->exec_direct_type = EXEC_DIRECT_NONE;
-
-    if (result->commandType == CMD_MERGE) {
-        ereport(
-            ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("EXECUTE DIRECT cannot execute MERGE INTO query")));
-    }
-
-    if (result->commandType == CMD_NOTHING) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("EXECUTE DIRECT cannot execute CREATE RULE")));
-    }
-
-    /* Set up EXECUTE DIRECT flag */
-    if (is_local) {
-        if (result->commandType == CMD_UTILITY) {
-            step->exec_direct_type = EXEC_DIRECT_LOCAL_UTILITY;
-        } else {
-            step->exec_direct_type = EXEC_DIRECT_LOCAL;
-        }
-    } else {
-        switch (result->commandType) {
-            case CMD_UTILITY:
-                step->exec_direct_type = EXEC_DIRECT_UTILITY;
-                break;
-            case CMD_SELECT:
-                step->exec_direct_type = EXEC_DIRECT_SELECT;
-                break;
-            case CMD_INSERT:
-                step->exec_direct_type = EXEC_DIRECT_INSERT;
-                break;
-            case CMD_UPDATE:
-                step->exec_direct_type = EXEC_DIRECT_UPDATE;
-                break;
-            case CMD_DELETE:
-                step->exec_direct_type = EXEC_DIRECT_DELETE;
-                break;
-            case CMD_UNKNOWN:
-                break;
-            default:
-                /* CMD_MERGE and CMD_NOTHING are handled before set up EXECUTE DIRECT flag */
-                ereport(ERROR,
-                    (errcode(ERRCODE_UNEXPECTED_NODE_STATE),
-                        errmsg("unrecognized commandType: %d", result->commandType)));
-        }
-    }
-
-    /*
-     * Features not yet supported
-     * DML can be launched without errors but this could compromise data
-     * consistency, so block it.
-     */
-    if (!u_sess->attr.attr_common.xc_maintenance_mode && !u_sess->attr.attr_common.IsInplaceUpgrade &&
-        (step->exec_direct_type == EXEC_DIRECT_DELETE || step->exec_direct_type == EXEC_DIRECT_UPDATE ||
-            step->exec_direct_type == EXEC_DIRECT_INSERT)) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("EXECUTE DIRECT cannot execute DML queries")));
-    } else if (step->exec_direct_type == EXEC_DIRECT_UTILITY && !IsExecDirectUtilityStmt(result->utilityStmt) &&
-#ifdef ENABLE_DISTRIBUTE_TEST
-        // just enable the VariableSetStmt named distribute_test_param for distribute test.
-        !checkExecDirectVariableSetStmt(result->utilityStmt) &&
-#endif
-        !u_sess->attr.attr_common.xc_maintenance_mode) {
-        /* In case this statement is an utility, check if it is authorized */
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("EXECUTE DIRECT cannot execute this utility query")));
-    } else if (step->exec_direct_type == EXEC_DIRECT_LOCAL_UTILITY &&
-#ifdef ENABLE_DISTRIBUTE_TEST
-        // just enable the VariableSetStmt named distribute_test_param for distribute test.
-        !checkExecDirectVariableSetStmt(result->utilityStmt) &&
-#endif
-        !u_sess->attr.attr_common.xc_maintenance_mode) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("EXECUTE DIRECT cannot execute locally this utility query")));
-    }
-
-    /* Build Execute Node list, there is a unique node for the time being */
-    step->exec_nodes->nodeList = lappend_int(step->exec_nodes->nodeList, nodeIndex);
+    check_command_type(result->commandType);
+    step->exec_direct_type = set_exec_direct_type(is_local, result->commandType);
+    check_execute_direct_type_and_statement(step->exec_direct_type, result->utilityStmt, include_local);
 
     /* Associate newly-created RemoteQuery node to the returned Query result */
+    is_local = (is_local || include_local);
     result->is_local = is_local;
-    if (!is_local) {
+    if (!is_local || include_local) {
         result->utilityStmt = (Node*)step;
     }
 
     /* Not allow SELECT with normal table on CN (no data) */
-    if (nodetype == PGXC_NODE_COORDINATOR && result->commandType == CMD_SELECT &&
+    if ((step->exec_type == EXEC_ON_COORDS || (step->exec_type == EXEC_ON_ALL_NODES)) &&
+        result->commandType == CMD_SELECT &&
         containing_ordinary_table((Node*)result)) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -3584,7 +3870,7 @@ static Query* transformExecDirectStmt(ParseState* pstate, ExecDirectStmt* stmt)
 /*
  * Check if given node is authorized to go through EXECUTE DIRECT
  */
-static bool IsExecDirectUtilityStmt(Node* node)
+static bool IsExecDirectUtilityStmt(const Node* node)
 {
     bool res = true;
 
@@ -3953,7 +4239,7 @@ bool checkForeignTableExist(List* rte_table_list)
 
     foreach (lc, rte_table_list) {
         rte = (RangeTblEntry*)lfirst(lc);
-        if (rte->relkind == RELKIND_FOREIGN_TABLE) {
+        if (rte->relkind == RELKIND_FOREIGN_TABLE || rte->relkind == RELKIND_STREAM) {
             ret_val = true;
             break;
         }
@@ -3978,7 +4264,11 @@ void set_subquery_is_under_insert(ParseState* subParseState)
     ParseState* ancestor_ps = NULL;
     ParseState* temp_ps = NULL;
 
-    AssertEreport(subParseState != NULL, MOD_OPT, "para could not be NULL here");
+    if (unlikely(subParseState == NULL)) {
+        ereport(ERROR, 
+            (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
+                errmsg("subParseState should not be null")));
+    }
 
     /* If the subParseState's parentParseState is NULL then do nothing. */
     if (subParseState->parentParseState == NULL) {
@@ -4014,7 +4304,11 @@ void set_ancestor_ps_contain_foreigntbl(ParseState* subParseState)
     ParseState* ancestor_ps = NULL;
     ParseState* temp_ps = NULL;
 
-    AssertEreport(subParseState != NULL, MOD_OPT, "para could not be NULL here");
+    if (unlikely(subParseState == NULL)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
+                errmsg("subParseState should not be null")));
+    }
 
     /* If the subParseState's parentParseState is NULL then do nothing. */
     if (subParseState->parentParseState == NULL) {

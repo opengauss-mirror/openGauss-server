@@ -4,6 +4,7 @@
  *	  POSTGRES tuple descriptor definitions.
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -14,10 +15,36 @@
 #ifndef TUPDESC_H
 #define TUPDESC_H
 
+#ifndef FRONTEND_PARSER
 #include "postgres.h"
+#else
+#include "postgres_fe.h"
+#endif
 #include "access/attnum.h"
 #include "catalog/pg_attribute.h"
 #include "nodes/pg_list.h"
+
+/*
+ * Total number of different Table Access Method types.
+ */
+const int NUM_TABLE_AM = 2;
+
+/*
+ * range based values to specify the indexes
+ * for different table types to map access methods in
+ * class TableAccessorMethods
+ */
+typedef enum tableAmType
+{
+    TAM_INVALID = -1,
+    TAM_HEAP = 0,
+    TAM_USTORE = 1,
+} TableAmType;
+
+const static uint32 HEAP_TUPLE = 1;
+const static uint32 UHEAP_TUPLE = 2;
+
+#define TableAMGetTupleType(tableamType) (tableamType + 1)
 
 typedef struct attrDefault {
     AttrNumber adnum;
@@ -94,6 +121,7 @@ typedef struct InformationalConstraint {
  * always have tdrefcount >= 0.
  */
 typedef struct tupleDesc {
+    TableAmType tdTableAmType;  /*index for accessing the Table Accessor methods on singleton TableAccessorMethods */
     int natts; /* number of attributes in the tuple */
     bool tdisredistable; /* temp table created for data redistribution by the redis tool */
     Form_pg_attribute* attrs;
@@ -107,11 +135,11 @@ typedef struct tupleDesc {
 } * TupleDesc;
 
 /* Accessor for the i'th attribute of tupdesc. */
-#define TupleDescAttr(tupdesc, i) ((tupdesc)->attrs[(i)])
+#define TupleDescAttr(tupdesc, i) (tupdesc->attrs[(i)])
 
-extern TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid);
+extern TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid, TableAmType tam = TAM_HEAP);
 
-extern TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute* attrs);
+extern TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute* attrs, TableAmType tam = TAM_HEAP);
 
 extern TupleDesc CreateTupleDescCopy(TupleDesc tupdesc);
 

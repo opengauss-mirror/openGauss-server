@@ -27,9 +27,10 @@
 
 #include "catalog/genbki.h"
 
-#define OptModelRelationId          9998
+#define OptModelRelationId              9998
+#define OptModelRelationId_Rowtype_Id   9996
 
-CATALOG(gs_opt_model,9998) BKI_WITHOUT_OIDS
+CATALOG(gs_opt_model,9998) BKI_WITHOUT_OIDS BKI_SCHEMA_MACRO
 {
     /* index information */
     NameData        template_name;
@@ -53,7 +54,7 @@ CATALOG(gs_opt_model,9998) BKI_WITHOUT_OIDS
                                              *                      'T': Total time
                                              *                      'R': Rows
                                              *                      'M': Memory */
-    int8            max[1];                 /* keep tracks of the max values occured for each label*/
+    int8            max[1];                 /* keep tracks of the max values occured for each label */
     float4          acc[1];                 /* ratio error accuracy */
     text            description;                   /* description */
 #endif /* CATALOG_VARLEN */

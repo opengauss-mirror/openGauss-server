@@ -1,0 +1,1879 @@
+set explain_perf_mode = pretty;
+set current_schema='shipping_schema';
+---EC函数 多count distinct场景不下推---
+explain (num_costs off)
+SELECT count(distinct(a)),count(distinct(b))  FROM 
+exec_on_extension('ecshipping', 'select a, b from shipping_schema.shipping_test_row ;') 
+as (a int, b int);
+                QUERY PLAN                
+------------------------------------------
+ Aggregate
+   ->  Function Scan on exec_on_extension
+(2 rows)
+
+---EC CTE场景不下推---
+explain (num_costs off)
+with tmp1 as
+(select a from (select a from exec_on_extension('ecshipping', 'select a, b from shipping_schema.shipping_test_row ;') as (a int)))
+select b from 
+shipping_test_col, tmp1
+where 
+shipping_test_col.b = tmp1.a;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Hash Join
+   Hash Cond: (tmp1.a = shipping_test_col.b)
+   CTE tmp1
+     ->  Function Scan on exec_on_extension
+   ->  CTE Scan on tmp1
+   ->  Hash
+         ->  Data Node Scan on shipping_test_col "_REMOTE_TABLE_QUERY_"
+(7 rows)
+
+---下推场景1---
+explain (num_costs off)
+with tmp1 as
+(select b from shipping_test_col)
+select a from (select a from exec_on_extension('ecshipping', 'select a, b from shipping_schema.shipping_test_row ;') as (a int)) tmp2
+, tmp1
+where 
+tmp2.a = tmp1.b;
+ id |                      operation                      
+----+-----------------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Hash Join (3,4)
+  3 |       ->  Function Scan on exec_on_extension
+  4 |       ->  Hash
+  5 |          ->  Streaming(type: BROADCAST)
+  6 |             ->  Row Adapter
+  7 |                ->  CStore Scan on shipping_test_col
+(7 rows)
+
+         Predicate Information (identified by plan id)          
+----------------------------------------------------------------
+   2 --Hash Join (3,4)
+         Hash Cond: (exec_on_extension.a = shipping_test_col.b)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+---EC结果和复制表join（含CTE） 没有stream,存在倾斜，需要设置multiple---
+set enable_hashjoin = on;
+set enable_mergejoin = off;
+set enable_nestloop = off;
+explain (num_costs off)
+with tmp1 as
+(select b from shipping_test_replicalte)
+select a from (select a from exec_on_extension('ecshipping', 'select a, b from shipping_schema.shipping_test_row ;') as (a int)) tmp2
+, tmp1
+where 
+tmp2.a = tmp1.b;
+ id |                     operation                     
+----+---------------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Hash Join (3,4)
+  3 |       ->  Function Scan on exec_on_extension
+  4 |       ->  Hash
+  5 |          ->  Seq Scan on shipping_test_replicalte
+(5 rows)
+
+             Predicate Information (identified by plan id)             
+-----------------------------------------------------------------------
+   2 --Hash Join (3,4)
+         Hash Cond: (exec_on_extension.a = shipping_test_replicalte.b)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--EC结果和复制表join2 hashjoin 没有stream,存在倾斜，需要设置multiple--
+set enable_hashjoin = on;
+set enable_mergejoin = off;
+set enable_nestloop = off;
+explain (num_costs off)
+select tmp2.a from 
+exec_on_extension('ecshipping', 'select a, b from shipping_schema.shipping_test_row ;') as tmp2(a int), 
+shipping_test_replicalte tmp1
+where tmp2.a=tmp1.b;
+ id |                       operation                        
+----+--------------------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Hash Join (3,4)
+  3 |       ->  Function Scan on exec_on_extension tmp2
+  4 |       ->  Hash
+  5 |          ->  Seq Scan on shipping_test_replicalte tmp1
+(5 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   2 --Hash Join (3,4)
+         Hash Cond: (tmp2.a = tmp1.b)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--EC结果和复制表join2 hashjoin 有stream，不再倾斜，不需要设置multiple--
+set enable_hashjoin = on;
+set enable_mergejoin = off;
+set enable_nestloop = off;
+explain (num_costs off)
+select tmp2.a from 
+exec_on_extension('ecshipping', 'select a, b from shipping_schema.shipping_test_row ;') as tmp2(a int) full join 
+shipping_test_replicalte tmp1
+on tmp2.a=tmp1.b;
+ id |                       operation                        
+----+--------------------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Hash Full Join (3, 5)
+  3 |       ->  Streaming(type: REDISTRIBUTE)
+  4 |          ->  Function Scan on exec_on_extension tmp2
+  5 |       ->  Hash
+  6 |          ->  Seq Scan on shipping_test_replicalte tmp1
+(6 rows)
+
+  Predicate Information (identified by plan id)  
+-------------------------------------------------
+   2 --Hash Full Join (3, 5)
+         Hash Cond: (tmp2.a = tmp1.b)
+   6 --Seq Scan on shipping_test_replicalte tmp1
+         Filter: (Hash By b)
+(4 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--EC结果和复制表join2 nestloop，没有stream，数据倾斜，需要设置multiple --
+set enable_hashjoin = off ;
+set enable_mergejoin = off;
+set enable_nestloop = on;
+explain (num_costs off)
+select /*leading((tmp1 tmp2))*/tmp2.a from 
+exec_on_extension('ecshipping', 'select a, b from shipping_schema.shipping_test_row ;') as tmp2(a int) join 
+shipping_test_replicalte tmp1
+on tmp2.a=tmp1.b;
+ id |                       operation                        
+----+--------------------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Nested Loop (3,4)
+  3 |       ->  Function Scan on exec_on_extension tmp2
+  4 |       ->  Materialize
+  5 |          ->  Seq Scan on shipping_test_replicalte tmp1
+(5 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   2 --Nested Loop (3,4)
+         Join Filter: (tmp2.a = tmp1.b)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--EC结果和复制表join2 mergejoin，两边sort 没有stream，需要设置multiple --
+set enable_hashjoin = off ;
+set enable_nestloop = off;
+set enable_mergejoin = on;
+explain (num_costs off)
+select tmp2.a from 
+exec_on_extension('ecshipping', 'select a, b from shipping_schema.shipping_test_row ;') as tmp2(a int) join 
+shipping_test_replicalte tmp1
+on tmp2.a=tmp1.b;
+ id |                       operation                        
+----+--------------------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Merge Join (3,5)
+  3 |       ->  Sort
+  4 |          ->  Seq Scan on shipping_test_replicalte tmp1
+  5 |       ->  Sort
+  6 |          ->  Function Scan on exec_on_extension tmp2
+(6 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   2 --Merge Join (3,5)
+         Merge Cond: (tmp1.b = tmp2.a)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--两个EC函数join,两边redistribute + sort 走merger join，有steam，不需要设置multiple---
+set enable_hashjoin = off ;
+set enable_nestloop = off;
+set enable_mergejoin = on;
+explain (num_costs off)
+select tmp2.a from 
+exec_on_extension('ecshipping', 'select a from shipping_schema.shipping_test_row ;') as tmp2(a int) join 
+exec_on_extension('ecshipping', 'select b from shipping_schema.shipping_test_row ;') as tmp1(b int)
+on tmp2.a=tmp1.b;
+ id |                        operation                        
+----+---------------------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Merge Join (3,6)
+  3 |       ->  Sort
+  4 |          ->  Streaming(type: REDISTRIBUTE)
+  5 |             ->  Function Scan on exec_on_extension tmp2
+  6 |       ->  Sort
+  7 |          ->  Streaming(type: REDISTRIBUTE)
+  8 |             ->  Function Scan on exec_on_extension tmp1
+(8 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   2 --Merge Join (3,6)
+         Merge Cond: (tmp2.a = tmp1.b)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+
+----EC函数有DN裁剪的表做join----
+explain (num_costs off)
+SELECT  sum(c1), a1  FROM 
+exec_on_extension('ds_libra_115', 'select a1, c1 from ship_t1;') 
+as ship_t1(a1 int, c1 int), ship_t2 where ship_t1.a1 = ship_t2.b2 and c2 = 1 group by a1 order by 1,2;
+ id |                              operation                              
+----+---------------------------------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Sort
+  3 |       ->  HashAggregate
+  4 |          ->  Streaming(type: REDISTRIBUTE)
+  5 |             ->  HashAggregate
+  6 |                ->  Merge Join (7,11)
+  7 |                   ->  Sort
+  8 |                      ->  Streaming(type: BROADCAST)
+  9 |                         ->  Row Adapter
+ 10 |                            ->  CStore Scan on ship_t2
+ 11 |                   ->  Sort
+ 12 |                      ->  Function Scan on exec_on_extension ship_t1
+(12 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   6 --Merge Join (7,11)
+         Merge Cond: (ship_t2.b2 = ship_t1.a1)
+  10 --CStore Scan on ship_t2
+         Filter: (c2 = 1)
+(4 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+----EC与没有from子句的表做join---
+explain (num_costs off)
+SELECT  sum(c1)  FROM 
+exec_on_extension('ds_libra_115', 'select a1, c1 from ship_t1;') 
+as ship_t1(a1 int, c1 int) , (select (select c2) from ship_t2) tmp  
+where ship_t1.a1 = tmp.c2;
+ id |                           operation                           
+----+---------------------------------------------------------------
+  1 | ->  Aggregate
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Aggregate
+  4 |          ->  Merge Join (5,11)
+  5 |             ->  Sort
+  6 |                ->  Result
+  7 |                   ->  Streaming(type: BROADCAST)
+  8 |                      ->  Row Adapter
+  9 |                         ->  CStore Scan on ship_t2
+ 10 |                   ->  Result  [6, SubPlan 1]
+ 11 |             ->  Sort
+ 12 |                ->  Function Scan on exec_on_extension ship_t1
+(12 rows)
+
+  Predicate Information (identified by plan id)   
+--------------------------------------------------
+   4 --Merge Join (5,11)
+         Merge Cond: (((SubPlan 1)) = ship_t1.a1)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+explain (num_costs off)
+SELECT  sum(c1) sum,a1  FROM 
+exec_on_extension('ds_libra_115', 'select a1, c1 from ship_t1;') 
+as ship_t1(a1 int, c1 int) right join (select (select c2) from ship_t2) tmp  
+on ship_t1.a1 = tmp.c2 group by a1 order by a1, sum;
+ id |                              operation                              
+----+---------------------------------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Sort
+  3 |       ->  HashAggregate
+  4 |          ->  Streaming(type: REDISTRIBUTE)
+  5 |             ->  Merge Left Join (6, 11)
+  6 |                ->  Sort
+  7 |                   ->  Streaming(type: REDISTRIBUTE)
+  8 |                      ->  Row Adapter
+  9 |                         ->  CStore Scan on ship_t2
+ 10 |                            ->  Result  [9, SubPlan 1]
+ 11 |                ->  Sort
+ 12 |                   ->  Streaming(type: REDISTRIBUTE)
+ 13 |                      ->  Function Scan on exec_on_extension ship_t1
+(13 rows)
+
+  Predicate Information (identified by plan id)   
+--------------------------------------------------
+   5 --Merge Left Join (6, 11)
+         Merge Cond: (((SubPlan 1)) = ship_t1.a1)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+---两个EC函数的join-----
+explain (num_costs off)
+SELECT  count(*)  FROM 
+exec_on_extension('ds_libra_115', 'select a1, c1 from ship_t1;') 
+as ship_t1(c1 int), 
+exec_on_extension('ds_libra_115', 'select a2, c2 from ship_t2;') as ship_t2(c2 int) where c2<1  
+and c2 = c1;
+ id |                            operation                             
+----+------------------------------------------------------------------
+  1 | ->  Aggregate
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Aggregate
+  4 |          ->  Merge Join (5,8)
+  5 |             ->  Sort
+  6 |                ->  Streaming(type: REDISTRIBUTE)
+  7 |                   ->  Function Scan on exec_on_extension ship_t1
+  8 |             ->  Sort
+  9 |                ->  Streaming(type: REDISTRIBUTE)
+ 10 |                   ->  Function Scan on exec_on_extension ship_t2
+(10 rows)
+
+  Predicate Information (identified by plan id)   
+--------------------------------------------------
+   4 --Merge Join (5,8)
+         Merge Cond: (ship_t1.c1 = ship_t2.c2)
+   7 --Function Scan on exec_on_extension ship_t1
+         Filter: (c1 < 1)
+  10 --Function Scan on exec_on_extension ship_t2
+         Filter: (c2 < 1)
+(6 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+
+explain (num_costs off)
+SELECT  count(*)  FROM 
+exec_on_extension('ds_libra_115', 'select a1, c1 from ship_t1;') 
+as ship_t1(c1 int) left join
+exec_on_extension('ds_libra_115', 'select a2, c2 from ship_t2;') as ship_t2(c2 int) on c2 = c1 where c2<1;
+ id |                            operation                             
+----+------------------------------------------------------------------
+  1 | ->  Aggregate
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Aggregate
+  4 |          ->  Merge Join (5,8)
+  5 |             ->  Sort
+  6 |                ->  Streaming(type: REDISTRIBUTE)
+  7 |                   ->  Function Scan on exec_on_extension ship_t1
+  8 |             ->  Sort
+  9 |                ->  Streaming(type: REDISTRIBUTE)
+ 10 |                   ->  Function Scan on exec_on_extension ship_t2
+(10 rows)
+
+  Predicate Information (identified by plan id)   
+--------------------------------------------------
+   4 --Merge Join (5,8)
+         Merge Cond: (ship_t1.c1 = ship_t2.c2)
+   7 --Function Scan on exec_on_extension ship_t1
+         Filter: (c1 < 1)
+  10 --Function Scan on exec_on_extension ship_t2
+         Filter: (c2 < 1)
+(6 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+
+ --------CTE和EC函数结果做Join(CTE被多次复用)-------------
+explain (num_costs off)
+ with tmp as(
+     select a1,sum(d1) num from ship_t1 group by a1 order by 1,2)
+ select c2 from exec_on_extension('ds_libra_115', 'select a2, c2 from ship_t2;') as ship_t2(c2 int),
+     tmp t1 where t1.num < (select avg(num) from tmp t2 where t1.a1 = t2.a1)
+     order by 1;
+ id |                          operation                           
+----+--------------------------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Sort
+  3 |       ->  Nested Loop (4,5)
+  4 |          ->  Function Scan on exec_on_extension ship_t2
+  5 |          ->  Materialize
+  6 |             ->  Streaming(type: BROADCAST)
+  7 |                ->  Merge Join (8,14)
+  8 |                   ->  Sort
+  9 |                      ->  Subquery Scan on t1
+ 10 |                         ->  HashAggregate
+ 11 |                            ->  Streaming(type: REDISTRIBUTE)
+ 12 |                               ->  Row Adapter
+ 13 |                                  ->  CStore Scan on ship_t1
+ 14 |                   ->  Sort
+ 15 |                      ->  HashAggregate
+ 16 |                         ->  HashAggregate
+ 17 |                            ->  Streaming(type: REDISTRIBUTE)
+ 18 |                               ->  Row Adapter
+ 19 |                                  ->  CStore Scan on ship_t1
+(19 rows)
+
+                    Predicate Information (identified by plan id)                    
+-------------------------------------------------------------------------------------
+   7 --Merge Join (8,14)
+         Merge Cond: (t1.a1 = shipping_schema.ship_t1.a1)
+         Join Filter: ((t1.num)::numeric < (avg((sum(shipping_schema.ship_t1.d1)))))
+(3 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+-----EC函数Agg + Gather + Agg----------
+explain (num_costs off)
+SELECT  count(*)  FROM 
+exec_on_extension('ds_libra_115', 'select a1, c1 from ship_t1;') 
+as ship_t1(c1 int);
+ id |                        operation                        
+----+---------------------------------------------------------
+  1 | ->  Aggregate
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Aggregate
+  4 |          ->  Function Scan on exec_on_extension ship_t1
+(4 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+
+-----EC函数Agg + redistribute + Agg----------
+explain (num_costs off) 
+select d2, c2 from ship_t2 inner join
+(SELECT /*+ rows(ship_t1*100)*/ sum(a1) total, c1  FROM 
+exec_on_extension('ds_libra_115', 'select a1, c1 from ship_t1;') 
+as ship_t1(a1 int, c1 int) group by c1) on c1 = d2 order by 1,2 limit 3;
+ id |                                  operation                                   
+----+------------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Limit
+  4 |          ->  Sort
+  5 |             ->  Merge Join (6,10)
+  6 |                ->  Sort
+  7 |                   ->  Streaming(type: REDISTRIBUTE)
+  8 |                      ->  Row Adapter
+  9 |                         ->  CStore Scan on ship_t2
+ 10 |                ->  Sort
+ 11 |                   ->  Subquery Scan on __unnamed_subquery__
+ 12 |                      ->  HashAggregate
+ 13 |                         ->  Streaming(type: REDISTRIBUTE)
+ 14 |                            ->  HashAggregate
+ 15 |                               ->  Function Scan on exec_on_extension ship_t1
+(15 rows)
+
+       Predicate Information (identified by plan id)        
+------------------------------------------------------------
+   5 --Merge Join (6,10)
+         Merge Cond: (ship_t2.d2 = __unnamed_subquery__.c1)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+-----EC函数redistribute + Agg----------
+explain (num_costs off)
+select d2, c2 from ship_t2 inner join
+(SELECT /*+ rows(ship_t1*100)*/ sum(a1) total, c1  FROM 
+exec_on_extension('ds_libra_115', 'select a1, c1 from ship_t1;') 
+as ship_t1(a1 int, c1 int) group by c1) on c1 = d2 order by 1,2 limit 3;
+ id |                                 operation                                 
+----+---------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Limit
+  4 |          ->  Sort
+  5 |             ->  Merge Join (6,10)
+  6 |                ->  Sort
+  7 |                   ->  Streaming(type: REDISTRIBUTE)
+  8 |                      ->  Row Adapter
+  9 |                         ->  CStore Scan on ship_t2
+ 10 |                ->  Sort
+ 11 |                   ->  Subquery Scan on __unnamed_subquery__
+ 12 |                      ->  HashAggregate
+ 13 |                         ->  Streaming(type: REDISTRIBUTE)
+ 14 |                            ->  Function Scan on exec_on_extension ship_t1
+(14 rows)
+
+       Predicate Information (identified by plan id)        
+------------------------------------------------------------
+   5 --Merge Join (6,10)
+         Merge Cond: (ship_t2.d2 = __unnamed_subquery__.c1)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+----EC函数sort/GroupAgg---
+set enable_hashagg = off;
+explain (num_costs off)
+select d2, c2 from ship_t2 inner join
+(SELECT  sum(a1) total, c1  FROM 
+exec_on_extension('ds_libra_115', 'select a1, c1 from ship_t1;') 
+as ship_t1(a1 int, c1 int) group by c1) on c1 = d2 order by 1,2 limit 3;
+ id |                                  operation                                   
+----+------------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Limit
+  4 |          ->  Sort
+  5 |             ->  Merge Join (6,12)
+  6 |                ->  GroupAggregate
+  7 |                   ->  Sort
+  8 |                      ->  Streaming(type: REDISTRIBUTE)
+  9 |                         ->  GroupAggregate
+ 10 |                            ->  Sort
+ 11 |                               ->  Function Scan on exec_on_extension ship_t1
+ 12 |                ->  Sort
+ 13 |                   ->  Streaming(type: REDISTRIBUTE)
+ 14 |                      ->  Row Adapter
+ 15 |                         ->  CStore Scan on ship_t2
+(15 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   5 --Merge Join (6,12)
+         Merge Cond: (ship_t1.c1 = ship_t2.d2)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+reset enable_hashagg;
+-----EC函数AP函数---
+explain (num_costs off)
+select d2, c2 from ship_t2 inner join
+(SELECT  sum(a1) total, c1,a1  FROM 
+exec_on_extension('ds_libra_115', 'select a1, c1 from ship_t1;') 
+as ship_t1(a1 int, c1 int) group by c1,a1, grouping sets(c1,a1,())) on c1 = d2 order by 1,2 limit 3;
+ id |                                       operation                                       
+----+---------------------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Limit
+  4 |          ->  Sort
+  5 |             ->  Merge Join (6,10)
+  6 |                ->  Sort
+  7 |                   ->  Streaming(type: REDISTRIBUTE)
+  8 |                      ->  Row Adapter
+  9 |                         ->  CStore Scan on ship_t2
+ 10 |                ->  Sort
+ 11 |                   ->  Streaming(type: REDISTRIBUTE)
+ 12 |                      ->  Subquery Scan on __unnamed_subquery__
+ 13 |                         ->  HashAggregate
+ 14 |                            ->  Streaming(type: REDISTRIBUTE)
+ 15 |                               ->  HashAggregate
+ 16 |                                  ->  GroupAggregate
+ 17 |                                     ->  Sort
+ 18 |                                        ->  Function Scan on exec_on_extension ship_t1
+(18 rows)
+
+       Predicate Information (identified by plan id)        
+------------------------------------------------------------
+   5 --Merge Join (6,10)
+         Merge Cond: (ship_t2.d2 = __unnamed_subquery__.c1)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+----WindowAgg 函数---
+explain (num_costs off)
+select c2, sum(d2) over (partition by c2 order by d2)
+from exec_on_extension('ds_libra_115', 'select a1, c1 from ship_t1;') as ship_t1(a1 int, c1 int),
+ship_t2 where c2<2  and c1 = d2
+group by c2,d2
+order by 1,2;
+ id |                               operation                                
+----+------------------------------------------------------------------------
+  1 | ->  Sort
+  2 |    ->  WindowAgg
+  3 |       ->  Sort
+  4 |          ->  HashAggregate
+  5 |             ->  Streaming (type: GATHER)
+  6 |                ->  HashAggregate
+  7 |                   ->  Merge Join (8,12)
+  8 |                      ->  Sort
+  9 |                         ->  Streaming(type: BROADCAST)
+ 10 |                            ->  Row Adapter
+ 11 |                               ->  CStore Scan on ship_t2
+ 12 |                      ->  Sort
+ 13 |                         ->  Function Scan on exec_on_extension ship_t1
+(13 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   7 --Merge Join (8,12)
+         Merge Cond: (ship_t2.d2 = ship_t1.c1)
+  11 --CStore Scan on ship_t2
+         Filter: (c2 < 2)
+(4 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+----count distinct/windowAgg---
+explain (num_costs off)
+select count (distinct(c2)), sum(d2) over (partition by c2 order by d2)
+from exec_on_extension('ds_libra_115', 'select a1, c1 from ship_t1;') as ship_t1(a1 int, c1 int),
+ship_t2 where c2  and c1 = d2
+group by c2,d2
+order by 1,2
+limit 3;
+ id |                                       operation                                       
+----+---------------------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Limit
+  4 |          ->  Sort
+  5 |             ->  WindowAgg
+  6 |                ->  Sort
+  7 |                   ->  Streaming(type: REDISTRIBUTE)
+  8 |                      ->  HashAggregate
+  9 |                         ->  HashAggregate
+ 10 |                            ->  Streaming(type: REDISTRIBUTE)
+ 11 |                               ->  HashAggregate
+ 12 |                                  ->  Merge Join (13,17)
+ 13 |                                     ->  Sort
+ 14 |                                        ->  Streaming(type: BROADCAST)
+ 15 |                                           ->  Row Adapter
+ 16 |                                              ->  CStore Scan on ship_t2
+ 17 |                                     ->  Sort
+ 18 |                                        ->  Function Scan on exec_on_extension ship_t1
+(18 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+  12 --Merge Join (13,17)
+         Merge Cond: (ship_t2.d2 = ship_t1.c1)
+  16 --CStore Scan on ship_t2
+         Filter: c2
+(4 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+----多个EC函数union,union all----
+explain (num_costs off)
+select col1, col2 from (
+select count (distinct(c1)) col1, sum(a1) over (partition by c1 order by a1) col2
+from exec_on_extension('ds_libra_115', 'select a1, c1 from ship_t1;') as ship_t1(a1 int, c1 int)
+group by a1,c1
+union all
+select c2 col1 , a2 col2
+from 
+exec_on_extension('ds_libra_115', 'select a2, c2 from ship_t2;') as ship_t2(a2 int, c2 int)
+union
+select c1 col1 , a2 col2
+from 
+exec_on_extension('ds_libra_115', 'select a2, c1 from ship_t2 inner join ship_t1 on d1=d2;') 
+as ship_t2(a2 int, c1 int)
+intersect
+select c2 col1, d2 col2
+from 
+ship_t2 where c2 <1) order by 1,2 limit 3;
+ id |                                          operation                                          
+----+---------------------------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Limit
+  4 |          ->  Sort
+  5 |             ->  HashAggregate
+  6 |                ->  Append(7, 17, 20)
+  7 |                   ->  Streaming(type: REDISTRIBUTE)
+  8 |                      ->  Subquery Scan on "*SELECT* 1"
+  9 |                         ->  WindowAgg
+ 10 |                            ->  Sort
+ 11 |                               ->  Streaming(type: REDISTRIBUTE)
+ 12 |                                  ->  HashAggregate
+ 13 |                                     ->  HashAggregate
+ 14 |                                        ->  Streaming(type: REDISTRIBUTE)
+ 15 |                                           ->  HashAggregate
+ 16 |                                              ->  Function Scan on exec_on_extension ship_t1
+ 17 |                   ->  Streaming(type: REDISTRIBUTE)
+ 18 |                      ->  Subquery Scan on "*SELECT* 2"
+ 19 |                         ->  Function Scan on exec_on_extension ship_t2
+ 20 |                   ->  Result
+ 21 |                      ->  HashSetOp Intersect
+ 22 |                         ->  Append(23, 27)
+ 23 |                            ->  Streaming(type: REDISTRIBUTE)
+ 24 |                               ->  Subquery Scan on "*SELECT* 4"
+ 25 |                                  ->  Row Adapter
+ 26 |                                     ->  CStore Scan on ship_t2
+ 27 |                            ->  Streaming(type: REDISTRIBUTE)
+ 28 |                               ->  Subquery Scan on "*SELECT* 3"
+ 29 |                                  ->  Function Scan on exec_on_extension ship_t2
+(29 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+  26 --CStore Scan on ship_t2
+         Filter: (c2 < 1)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+----EC函数 相关子查询---
+explain (num_costs off)
+select sum(c1), d1 from ship_t1 where exists
+(select c2 
+from 
+exec_on_extension('ds_libra_115', 'select a2, c2 from ship_t2;') as ship_t2(a2 int, c2 int) where a2 > c1)
+group by
+d1
+order by 1,2 limit 3;
+ id |                                 operation                                 
+----+---------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Limit
+  4 |          ->  Sort
+  5 |             ->  HashAggregate
+  6 |                ->  Streaming(type: REDISTRIBUTE)
+  7 |                   ->  Nested Loop Semi Join (8, 10)
+  8 |                      ->  Row Adapter
+  9 |                         ->  CStore Scan on ship_t1
+ 10 |                      ->  Materialize
+ 11 |                         ->  Streaming(type: BROADCAST)
+ 12 |                            ->  Function Scan on exec_on_extension ship_t2
+(12 rows)
+
+ Predicate Information (identified by plan id)  
+------------------------------------------------
+   7 --Nested Loop Semi Join (8, 10)
+         Join Filter: (ship_t2.a2 > ship_t1.c1)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+explain (num_costs off)
+select sum(c1), a1 from exec_on_extension('ds_libra_115', 'select a1, c1 from ship_t1;') as ship_t1(a1 int, c1 int) 
+where exists
+(select c2 
+from 
+exec_on_extension('ds_libra_115', 'select a2, c2 from ship_t2;') as ship_t2(a2 int, c2 int) where a2 > c1)
+group by
+a1
+order by 1,2 limit 3;
+ id |                                  operation                                   
+----+------------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Limit
+  4 |          ->  Sort
+  5 |             ->  HashAggregate
+  6 |                ->  Streaming(type: REDISTRIBUTE)
+  7 |                   ->  HashAggregate
+  8 |                      ->  Nested Loop Semi Join (9, 10)
+  9 |                         ->  Function Scan on exec_on_extension ship_t1
+ 10 |                         ->  Materialize
+ 11 |                            ->  Streaming(type: BROADCAST)
+ 12 |                               ->  Function Scan on exec_on_extension ship_t2
+(12 rows)
+
+ Predicate Information (identified by plan id)  
+------------------------------------------------
+   8 --Nested Loop Semi Join (9, 10)
+         Join Filter: (ship_t2.a2 > ship_t1.c1)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+
+----EC函数 非相关子查询---
+explain (num_costs off)
+select sum(c1), d1 from ship_t1 where b1 in
+(select c2 
+from 
+exec_on_extension('ds_libra_115', 'select a2, c2 from ship_t2;') as ship_t2(a2 int, c2 int) where a2 < 100)
+group by
+d1
+order by 1,2 limit 3;
+ id |                                    operation                                    
+----+---------------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Limit
+  4 |          ->  Sort
+  5 |             ->  HashAggregate
+  6 |                ->  Streaming(type: REDISTRIBUTE)
+  7 |                   ->  Merge Join (8,12)
+  8 |                      ->  Sort
+  9 |                         ->  Streaming(type: REDISTRIBUTE)
+ 10 |                            ->  Row Adapter
+ 11 |                               ->  CStore Scan on ship_t1
+ 12 |                      ->  Sort
+ 13 |                         ->  HashAggregate
+ 14 |                            ->  Streaming(type: REDISTRIBUTE)
+ 15 |                               ->  HashAggregate
+ 16 |                                  ->  Function Scan on exec_on_extension ship_t2
+(16 rows)
+
+  Predicate Information (identified by plan id)   
+--------------------------------------------------
+   7 --Merge Join (8,12)
+         Merge Cond: (ship_t1.b1 = ship_t2.c2)
+  16 --Function Scan on exec_on_extension ship_t2
+         Filter: (a2 < 100)
+(4 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+-----多nodegroup场景组合场景1:------
+set expected_computing_nodegroup='group1';
+explain (num_costs off)
+select col1, col2 from (
+select count (distinct(c1)) col1, sum(a1) over (partition by c1 order by a1) col2
+from exec_on_extension('ds_libra_115', 'select a1, c1 from ship_t1;') as ship_t1(a1 int, c1 int), ship_t5
+where d5 = c1
+group by a1,c1
+union all
+select c4 col1 , a4 col2
+from ship_t4
+union
+select c5 col1 , a5 col2
+from 
+ship_t5 where d5 = 1
+intersect
+select c2 col1, a2 col2
+from exec_on_extension('ds_libra_115', 'select a2, c2 from ship_t2;') as ship_t2(a2 int, c2 int)
+full join ship_t4 on c4 = c2 where c2 <1) order by 1,2 limit 3;
+ id |                                                operation                                                 
+----+----------------------------------------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Limit
+  4 |          ->  Sort
+  5 |             ->  HashAggregate
+  6 |                ->  Append(7, 22, 25)
+  7 |                   ->  Streaming(type: REDISTRIBUTE ng: group1->ship_ng0)
+  8 |                      ->  Subquery Scan on "*SELECT* 1"
+  9 |                         ->  WindowAgg
+ 10 |                            ->  Sort
+ 11 |                               ->  Streaming(type: REDISTRIBUTE)
+ 12 |                                  ->  HashAggregate
+ 13 |                                     ->  HashAggregate
+ 14 |                                        ->  Streaming(type: REDISTRIBUTE ng: GenGroup->group1)
+ 15 |                                           ->  HashAggregate
+ 16 |                                              ->  Merge Join (17,20)
+ 17 |                                                 ->  Sort
+ 18 |                                                    ->  Streaming(type: BROADCAST ng: ship_ng0->GenGroup)
+ 19 |                                                       ->  Seq Scan on ship_t5
+ 20 |                                                 ->  Sort
+ 21 |                                                    ->  Function Scan on exec_on_extension ship_t1
+ 22 |                   ->  Subquery Scan on "*SELECT* 2"
+ 23 |                      ->  Row Adapter
+ 24 |                         ->  CStore Scan on ship_t4
+ 25 |                   ->  Streaming(type: REDISTRIBUTE ng: group1->ship_ng0)
+ 26 |                      ->  Result
+ 27 |                         ->  HashSetOp Intersect
+ 28 |                            ->  Append(29, 32)
+ 29 |                               ->  Streaming(type: REDISTRIBUTE ng: ship_ng0->group1)
+ 30 |                                  ->  Subquery Scan on "*SELECT* 3"
+ 31 |                                     ->  Seq Scan on ship_t5
+ 32 |                               ->  Subquery Scan on "*SELECT* 4"
+ 33 |                                  ->  Merge Left Join (34, 37)
+ 34 |                                     ->  Sort
+ 35 |                                        ->  Streaming(type: REDISTRIBUTE ng: GenGroup->group1)
+ 36 |                                           ->  Function Scan on exec_on_extension ship_t2
+ 37 |                                     ->  Sort
+ 38 |                                        ->  Streaming(type: REDISTRIBUTE ng: ship_ng0->group1)
+ 39 |                                           ->  Row Adapter
+ 40 |                                              ->  CStore Scan on ship_t4
+(40 rows)
+
+         Predicate Information (identified by plan id)         
+---------------------------------------------------------------
+  16 --Merge Join (17,20)
+         Merge Cond: (shipping_schema.ship_t5.d5 = ship_t1.c1)
+  31 --Seq Scan on ship_t5
+         Filter: (d5 = 1)
+  33 --Merge Left Join (34, 37)
+         Merge Cond: (ship_t2.c2 = shipping_schema.ship_t4.c4)
+  36 --Function Scan on exec_on_extension ship_t2
+         Filter: (c2 < 1)
+(8 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+reset expected_computing_nodegroup;
+-----多nodegroup场景组合场景2:------
+set expected_computing_nodegroup='group1';
+explain (num_costs off)
+select c4 col1, a4 col2
+from ship_t4 where ( 
+select a2 from 
+exec_on_extension('ds_libra_115', 'select a2, c2 from ship_t2;') as ship_t2(a2 int, c2 int) 
+where c4 = c2 and a2 < 1) > 2 order by 1,2 limit 3;
+ id |                                 operation                                 
+----+---------------------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Limit
+  3 |       ->  Vector Streaming (type: GATHER)
+  4 |          ->  Vector Limit
+  5 |             ->  Vector Sort
+  6 |                ->  CStore Scan on ship_t4
+  7 |                   ->  Result  [6, SubPlan 1]
+  8 |                      ->  Materialize
+  9 |                         ->  Streaming(type: BROADCAST)
+ 10 |                            ->  Function Scan on exec_on_extension ship_t2
+(10 rows)
+
+  Predicate Information (identified by plan id)   
+--------------------------------------------------
+   6 --CStore Scan on ship_t4
+         Filter: ((SubPlan 1) > 2)
+   7 --Result
+         Filter: (ship_t4.c4 = ship_t2.c2)
+  10 --Function Scan on exec_on_extension ship_t2
+         Filter: (a2 < 1)
+(6 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+reset expected_computing_nodegroup;
+-------------------------------------------exec_hadoop_sql--------------------------------------------
+----EC函数有DN裁剪的表做join----
+explain (num_costs off)
+SELECT  sum(c1), a1  FROM 
+exec_hadoop_sql('ecshipping', 'select a1, c1 from ship_t1;','') 
+as ship_t1(a1 int, c1 int), ship_t2 where ship_t1.a1 = ship_t2.b2 and c2 = 1 group by a1 order by 1,2;
+ id |                             operation                             
+----+-------------------------------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Sort
+  3 |       ->  HashAggregate
+  4 |          ->  Streaming(type: REDISTRIBUTE)
+  5 |             ->  HashAggregate
+  6 |                ->  Merge Join (7,11)
+  7 |                   ->  Sort
+  8 |                      ->  Streaming(type: BROADCAST)
+  9 |                         ->  Row Adapter
+ 10 |                            ->  CStore Scan on ship_t2
+ 11 |                   ->  Sort
+ 12 |                      ->  Function Scan on exec_hadoop_sql ship_t1
+(12 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   6 --Merge Join (7,11)
+         Merge Cond: (ship_t2.b2 = ship_t1.a1)
+  10 --CStore Scan on ship_t2
+         Filter: (c2 = 1)
+(4 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+explain (num_costs off)
+SELECT  sum(c1), a1  FROM 
+exec_hadoop_sql('ecshipping', 'select a1, c1 from ship_t1;','') 
+as ship_t1(a1 int, c1 int) full join ship_t2 on ship_t1.a1 = ship_t2.b2 where c2 = 1 group by a1 order by 1,2;
+ id |                             operation                             
+----+-------------------------------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Sort
+  3 |       ->  HashAggregate
+  4 |          ->  Streaming(type: REDISTRIBUTE)
+  5 |             ->  Merge Left Join (6, 10)
+  6 |                ->  Sort
+  7 |                   ->  Streaming(type: REDISTRIBUTE)
+  8 |                      ->  Row Adapter
+  9 |                         ->  CStore Scan on ship_t2
+ 10 |                ->  Sort
+ 11 |                   ->  Streaming(type: REDISTRIBUTE)
+ 12 |                      ->  Function Scan on exec_hadoop_sql ship_t1
+(12 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   5 --Merge Left Join (6, 10)
+         Merge Cond: (ship_t2.b2 = ship_t1.a1)
+   9 --CStore Scan on ship_t2
+         Filter: (c2 = 1)
+(4 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+----EC与没有from子句的表做join---
+explain (num_costs off)
+SELECT  sum(c1)  FROM 
+exec_hadoop_sql('ecshipping', 'select a1, c1 from ship_t1;','') 
+as ship_t1(a1 int, c1 int) , (select (select c2) from ship_t2) tmp  
+where ship_t1.a1 = tmp.c2;
+ id |                          operation                          
+----+-------------------------------------------------------------
+  1 | ->  Aggregate
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Aggregate
+  4 |          ->  Merge Join (5,11)
+  5 |             ->  Sort
+  6 |                ->  Result
+  7 |                   ->  Streaming(type: BROADCAST)
+  8 |                      ->  Row Adapter
+  9 |                         ->  CStore Scan on ship_t2
+ 10 |                   ->  Result  [6, SubPlan 1]
+ 11 |             ->  Sort
+ 12 |                ->  Function Scan on exec_hadoop_sql ship_t1
+(12 rows)
+
+  Predicate Information (identified by plan id)   
+--------------------------------------------------
+   4 --Merge Join (5,11)
+         Merge Cond: (((SubPlan 1)) = ship_t1.a1)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+explain (num_costs off)
+SELECT  sum(c1) sum,a1  FROM 
+exec_hadoop_sql('ecshipping', 'select a1, c1 from ship_t1;','') 
+as ship_t1(a1 int, c1 int) right join (select (select c2) from ship_t2) tmp  
+on ship_t1.a1 = tmp.c2 group by a1 order by a1, sum;
+ id |                             operation                             
+----+-------------------------------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Sort
+  3 |       ->  HashAggregate
+  4 |          ->  Streaming(type: REDISTRIBUTE)
+  5 |             ->  Merge Left Join (6, 11)
+  6 |                ->  Sort
+  7 |                   ->  Streaming(type: REDISTRIBUTE)
+  8 |                      ->  Row Adapter
+  9 |                         ->  CStore Scan on ship_t2
+ 10 |                            ->  Result  [9, SubPlan 1]
+ 11 |                ->  Sort
+ 12 |                   ->  Streaming(type: REDISTRIBUTE)
+ 13 |                      ->  Function Scan on exec_hadoop_sql ship_t1
+(13 rows)
+
+  Predicate Information (identified by plan id)   
+--------------------------------------------------
+   5 --Merge Left Join (6, 11)
+         Merge Cond: (((SubPlan 1)) = ship_t1.a1)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+---两个EC函数的join-----
+explain (num_costs off)
+SELECT  count(*)  FROM 
+exec_hadoop_sql('ecshipping', 'select a1, c1 from ship_t1;','') 
+as ship_t1(c1 int), 
+exec_hadoop_sql('ecshipping', 'select a2, c2 from ship_t2;','') as ship_t2(c2 int) where c2<1  
+and c2 = c1;
+ id |                           operation                            
+----+----------------------------------------------------------------
+  1 | ->  Aggregate
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Aggregate
+  4 |          ->  Merge Join (5,8)
+  5 |             ->  Sort
+  6 |                ->  Streaming(type: REDISTRIBUTE)
+  7 |                   ->  Function Scan on exec_hadoop_sql ship_t1
+  8 |             ->  Sort
+  9 |                ->  Streaming(type: REDISTRIBUTE)
+ 10 |                   ->  Function Scan on exec_hadoop_sql ship_t2
+(10 rows)
+
+ Predicate Information (identified by plan id)  
+------------------------------------------------
+   4 --Merge Join (5,8)
+         Merge Cond: (ship_t1.c1 = ship_t2.c2)
+   7 --Function Scan on exec_hadoop_sql ship_t1
+         Filter: (c1 < 1)
+  10 --Function Scan on exec_hadoop_sql ship_t2
+         Filter: (c2 < 1)
+(6 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+
+explain (num_costs off) 
+SELECT  count(*)  FROM 
+exec_hadoop_sql('ecshipping', 'select a1, c1 from ship_t1;','') 
+as ship_t1(c1 int) left join
+exec_hadoop_sql('ecshipping', 'select a2, c2 from ship_t2;','') as ship_t2(c2 int) on c2 = c1 where c2<1;
+ id |                           operation                            
+----+----------------------------------------------------------------
+  1 | ->  Aggregate
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Aggregate
+  4 |          ->  Merge Join (5,8)
+  5 |             ->  Sort
+  6 |                ->  Streaming(type: REDISTRIBUTE)
+  7 |                   ->  Function Scan on exec_hadoop_sql ship_t1
+  8 |             ->  Sort
+  9 |                ->  Streaming(type: REDISTRIBUTE)
+ 10 |                   ->  Function Scan on exec_hadoop_sql ship_t2
+(10 rows)
+
+ Predicate Information (identified by plan id)  
+------------------------------------------------
+   4 --Merge Join (5,8)
+         Merge Cond: (ship_t1.c1 = ship_t2.c2)
+   7 --Function Scan on exec_hadoop_sql ship_t1
+         Filter: (c1 < 1)
+  10 --Function Scan on exec_hadoop_sql ship_t2
+         Filter: (c2 < 1)
+(6 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+
+ --------CTE和EC函数结果做Join(CTE被多次复用)-------------
+ explain (num_costs off)
+ with tmp as(
+     select a1,sum(d1) num from ship_t1 group by a1 order by 1,2)
+ select c2 from exec_hadoop_sql('ecshipping', 'select a2, c2 from ship_t2;','') as ship_t2(c2 int),
+     tmp t1 where t1.num < (select avg(num) from tmp t2 where t1.a1 = t2.a1)
+     order by 1;
+ id |                          operation                           
+----+--------------------------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Sort
+  3 |       ->  Nested Loop (4,5)
+  4 |          ->  Function Scan on exec_hadoop_sql ship_t2
+  5 |          ->  Materialize
+  6 |             ->  Streaming(type: BROADCAST)
+  7 |                ->  Merge Join (8,14)
+  8 |                   ->  Sort
+  9 |                      ->  Subquery Scan on t1
+ 10 |                         ->  HashAggregate
+ 11 |                            ->  Streaming(type: REDISTRIBUTE)
+ 12 |                               ->  Row Adapter
+ 13 |                                  ->  CStore Scan on ship_t1
+ 14 |                   ->  Sort
+ 15 |                      ->  HashAggregate
+ 16 |                         ->  HashAggregate
+ 17 |                            ->  Streaming(type: REDISTRIBUTE)
+ 18 |                               ->  Row Adapter
+ 19 |                                  ->  CStore Scan on ship_t1
+(19 rows)
+
+                    Predicate Information (identified by plan id)                    
+-------------------------------------------------------------------------------------
+   7 --Merge Join (8,14)
+         Merge Cond: (t1.a1 = shipping_schema.ship_t1.a1)
+         Join Filter: ((t1.num)::numeric < (avg((sum(shipping_schema.ship_t1.d1)))))
+(3 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+-----EC函数Agg + Gather + Agg----------
+explain (num_costs off) 
+SELECT  count(*)  FROM 
+exec_hadoop_sql('ecshipping', 'select a1, c1 from ship_t1;','') 
+as ship_t1(c1 int);
+ id |                       operation                       
+----+-------------------------------------------------------
+  1 | ->  Aggregate
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Aggregate
+  4 |          ->  Function Scan on exec_hadoop_sql ship_t1
+(4 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+
+-----EC函数Agg + redistribute + Agg----------
+explain (num_costs off)  
+select d2, c2 from ship_t2 inner join
+(SELECT /*+ rows(ship_t1*100)*/ sum(a1) total, c1  FROM 
+exec_hadoop_sql('ecshipping', 'select a1, c1 from ship_t1;','') 
+as ship_t1(a1 int, c1 int) group by c1) on c1 = d2 order by 1,2 limit 3;
+ id |                                 operation                                  
+----+----------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Limit
+  4 |          ->  Sort
+  5 |             ->  Merge Join (6,10)
+  6 |                ->  Sort
+  7 |                   ->  Streaming(type: REDISTRIBUTE)
+  8 |                      ->  Row Adapter
+  9 |                         ->  CStore Scan on ship_t2
+ 10 |                ->  Sort
+ 11 |                   ->  Subquery Scan on __unnamed_subquery__
+ 12 |                      ->  HashAggregate
+ 13 |                         ->  Streaming(type: REDISTRIBUTE)
+ 14 |                            ->  HashAggregate
+ 15 |                               ->  Function Scan on exec_hadoop_sql ship_t1
+(15 rows)
+
+       Predicate Information (identified by plan id)        
+------------------------------------------------------------
+   5 --Merge Join (6,10)
+         Merge Cond: (ship_t2.d2 = __unnamed_subquery__.c1)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+-----EC函数redistribute + Agg----------
+explain (num_costs off)  
+select d2, c2 from ship_t2 inner join
+(SELECT /*+ rows(ship_t1*100)*/ sum(a1) total, c1  FROM 
+exec_hadoop_sql('ecshipping', 'select a1, c1 from ship_t1;','') 
+as ship_t1(a1 int, c1 int) group by c1) on c1 = d2 order by 1,2 limit 3;
+ id |                                operation                                
+----+-------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Limit
+  4 |          ->  Sort
+  5 |             ->  Merge Join (6,10)
+  6 |                ->  Sort
+  7 |                   ->  Streaming(type: REDISTRIBUTE)
+  8 |                      ->  Row Adapter
+  9 |                         ->  CStore Scan on ship_t2
+ 10 |                ->  Sort
+ 11 |                   ->  Subquery Scan on __unnamed_subquery__
+ 12 |                      ->  HashAggregate
+ 13 |                         ->  Streaming(type: REDISTRIBUTE)
+ 14 |                            ->  Function Scan on exec_hadoop_sql ship_t1
+(14 rows)
+
+       Predicate Information (identified by plan id)        
+------------------------------------------------------------
+   5 --Merge Join (6,10)
+         Merge Cond: (ship_t2.d2 = __unnamed_subquery__.c1)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+----EC函数sort/GroupAgg---
+set enable_hashagg = off;
+explain (num_costs off)  
+select d2, c2 from ship_t2 inner join
+(SELECT  sum(a1) total, c1  FROM 
+exec_hadoop_sql('ecshipping', 'select a1, c1 from ship_t1;','') 
+as ship_t1(a1 int, c1 int) group by c1) on c1 = d2 order by 1,2 limit 3;
+ id |                                 operation                                  
+----+----------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Limit
+  4 |          ->  Sort
+  5 |             ->  Merge Join (6,12)
+  6 |                ->  GroupAggregate
+  7 |                   ->  Sort
+  8 |                      ->  Streaming(type: REDISTRIBUTE)
+  9 |                         ->  GroupAggregate
+ 10 |                            ->  Sort
+ 11 |                               ->  Function Scan on exec_hadoop_sql ship_t1
+ 12 |                ->  Sort
+ 13 |                   ->  Streaming(type: REDISTRIBUTE)
+ 14 |                      ->  Row Adapter
+ 15 |                         ->  CStore Scan on ship_t2
+(15 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   5 --Merge Join (6,12)
+         Merge Cond: (ship_t1.c1 = ship_t2.d2)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+reset enable_hashagg;
+-----EC函数AP函数---
+explain (num_costs off)  
+select d2, c2 from ship_t2 inner join
+(SELECT  sum(a1) total, c1,a1  FROM 
+exec_hadoop_sql('ecshipping', 'select a1, c1 from ship_t1;','') 
+as ship_t1(a1 int, c1 int) group by c1,a1, grouping sets(c1,a1,())) on c1 = d2 order by 1,2 limit 3;
+ id |                                      operation                                      
+----+-------------------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Limit
+  4 |          ->  Sort
+  5 |             ->  Merge Join (6,10)
+  6 |                ->  Sort
+  7 |                   ->  Streaming(type: REDISTRIBUTE)
+  8 |                      ->  Row Adapter
+  9 |                         ->  CStore Scan on ship_t2
+ 10 |                ->  Sort
+ 11 |                   ->  Streaming(type: REDISTRIBUTE)
+ 12 |                      ->  Subquery Scan on __unnamed_subquery__
+ 13 |                         ->  HashAggregate
+ 14 |                            ->  Streaming(type: REDISTRIBUTE)
+ 15 |                               ->  HashAggregate
+ 16 |                                  ->  GroupAggregate
+ 17 |                                     ->  Sort
+ 18 |                                        ->  Function Scan on exec_hadoop_sql ship_t1
+(18 rows)
+
+       Predicate Information (identified by plan id)        
+------------------------------------------------------------
+   5 --Merge Join (6,10)
+         Merge Cond: (ship_t2.d2 = __unnamed_subquery__.c1)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+----WindowAgg 函数---
+explain (num_costs off)
+select c2, sum(d2) over (partition by c2 order by d2)
+from exec_hadoop_sql('ecshipping', 'select a1, c1 from ship_t1;','') as ship_t1(a1 int, c1 int),
+ship_t2 where c2<2  and c1 = d2
+group by c2,d2
+order by 1,2;
+ id |                              operation                               
+----+----------------------------------------------------------------------
+  1 | ->  Sort
+  2 |    ->  WindowAgg
+  3 |       ->  Sort
+  4 |          ->  HashAggregate
+  5 |             ->  Streaming (type: GATHER)
+  6 |                ->  HashAggregate
+  7 |                   ->  Merge Join (8,12)
+  8 |                      ->  Sort
+  9 |                         ->  Streaming(type: BROADCAST)
+ 10 |                            ->  Row Adapter
+ 11 |                               ->  CStore Scan on ship_t2
+ 12 |                      ->  Sort
+ 13 |                         ->  Function Scan on exec_hadoop_sql ship_t1
+(13 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   7 --Merge Join (8,12)
+         Merge Cond: (ship_t2.d2 = ship_t1.c1)
+  11 --CStore Scan on ship_t2
+         Filter: (c2 < 2)
+(4 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+----count distinct/windowAgg---
+explain (num_costs off)
+select count (distinct(c2)), sum(d2) over (partition by c2 order by d2)
+from exec_hadoop_sql('ecshipping', 'select a1, c1 from ship_t1;','') as ship_t1(a1 int, c1 int),
+ship_t2 where c2  and c1 = d2
+group by c2,d2
+order by 1,2
+limit 3;
+ id |                                      operation                                      
+----+-------------------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Limit
+  4 |          ->  Sort
+  5 |             ->  WindowAgg
+  6 |                ->  Sort
+  7 |                   ->  Streaming(type: REDISTRIBUTE)
+  8 |                      ->  HashAggregate
+  9 |                         ->  HashAggregate
+ 10 |                            ->  Streaming(type: REDISTRIBUTE)
+ 11 |                               ->  HashAggregate
+ 12 |                                  ->  Merge Join (13,17)
+ 13 |                                     ->  Sort
+ 14 |                                        ->  Streaming(type: BROADCAST)
+ 15 |                                           ->  Row Adapter
+ 16 |                                              ->  CStore Scan on ship_t2
+ 17 |                                     ->  Sort
+ 18 |                                        ->  Function Scan on exec_hadoop_sql ship_t1
+(18 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+  12 --Merge Join (13,17)
+         Merge Cond: (ship_t2.d2 = ship_t1.c1)
+  16 --CStore Scan on ship_t2
+         Filter: c2
+(4 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+----多个EC函数union,union all----
+explain (num_costs off)
+select col1, col2 from (
+select count (distinct(c1)) col1, sum(a1) over (partition by c1 order by a1) col2
+from exec_hadoop_sql('ecshipping', 'select a1, c1 from ship_t1;','') as ship_t1(a1 int, c1 int)
+group by a1,c1
+union all
+select c2 col1 , a2 col2
+from 
+exec_hadoop_sql('ecshipping', 'select a2, c2 from ship_t2;','') as ship_t2(a2 int, c2 int)
+union
+select c1 col1 , a2 col2
+from 
+exec_hadoop_sql('ecshipping', 'select a2, c1 from ship_t2 inner join ship_t1 on d1=d2;','') 
+as ship_t2(a2 int, c1 int)
+intersect
+select c2 col1, d2 col2
+from 
+ship_t2 where c2 <1) order by 1,2 limit 3;
+ id |                                         operation                                         
+----+-------------------------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Limit
+  4 |          ->  Sort
+  5 |             ->  HashAggregate
+  6 |                ->  Append(7, 17, 20)
+  7 |                   ->  Streaming(type: REDISTRIBUTE)
+  8 |                      ->  Subquery Scan on "*SELECT* 1"
+  9 |                         ->  WindowAgg
+ 10 |                            ->  Sort
+ 11 |                               ->  Streaming(type: REDISTRIBUTE)
+ 12 |                                  ->  HashAggregate
+ 13 |                                     ->  HashAggregate
+ 14 |                                        ->  Streaming(type: REDISTRIBUTE)
+ 15 |                                           ->  HashAggregate
+ 16 |                                              ->  Function Scan on exec_hadoop_sql ship_t1
+ 17 |                   ->  Streaming(type: REDISTRIBUTE)
+ 18 |                      ->  Subquery Scan on "*SELECT* 2"
+ 19 |                         ->  Function Scan on exec_hadoop_sql ship_t2
+ 20 |                   ->  Result
+ 21 |                      ->  HashSetOp Intersect
+ 22 |                         ->  Append(23, 27)
+ 23 |                            ->  Streaming(type: REDISTRIBUTE)
+ 24 |                               ->  Subquery Scan on "*SELECT* 4"
+ 25 |                                  ->  Row Adapter
+ 26 |                                     ->  CStore Scan on ship_t2
+ 27 |                            ->  Streaming(type: REDISTRIBUTE)
+ 28 |                               ->  Subquery Scan on "*SELECT* 3"
+ 29 |                                  ->  Function Scan on exec_hadoop_sql ship_t2
+(29 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+  26 --CStore Scan on ship_t2
+         Filter: (c2 < 1)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+----EC函数 相关子查询---
+explain (num_costs off)
+select sum(c1), d1 from ship_t1 where exists
+(select c2 
+from 
+exec_hadoop_sql('ecshipping', 'select a2, c2 from ship_t2;','') as ship_t2(a2 int, c2 int) where a2 > c1)
+group by
+d1
+order by 1,2 limit 3;
+ id |                                operation                                
+----+-------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Limit
+  4 |          ->  Sort
+  5 |             ->  HashAggregate
+  6 |                ->  Streaming(type: REDISTRIBUTE)
+  7 |                   ->  Nested Loop Semi Join (8, 10)
+  8 |                      ->  Row Adapter
+  9 |                         ->  CStore Scan on ship_t1
+ 10 |                      ->  Materialize
+ 11 |                         ->  Streaming(type: BROADCAST)
+ 12 |                            ->  Function Scan on exec_hadoop_sql ship_t2
+(12 rows)
+
+ Predicate Information (identified by plan id)  
+------------------------------------------------
+   7 --Nested Loop Semi Join (8, 10)
+         Join Filter: (ship_t2.a2 > ship_t1.c1)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+explain (num_costs off)
+select sum(c1), a1 from exec_hadoop_sql('ecshipping', 'select a1, c1 from ship_t1;','') as ship_t1(a1 int, c1 int) 
+where exists
+(select c2 
+from 
+exec_hadoop_sql('ecshipping', 'select a2, c2 from ship_t2;','') as ship_t2(a2 int, c2 int) where a2 > c1)
+group by
+a1
+order by 1,2 limit 3;
+ id |                                 operation                                  
+----+----------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Limit
+  4 |          ->  Sort
+  5 |             ->  HashAggregate
+  6 |                ->  Streaming(type: REDISTRIBUTE)
+  7 |                   ->  HashAggregate
+  8 |                      ->  Nested Loop Semi Join (9, 10)
+  9 |                         ->  Function Scan on exec_hadoop_sql ship_t1
+ 10 |                         ->  Materialize
+ 11 |                            ->  Streaming(type: BROADCAST)
+ 12 |                               ->  Function Scan on exec_hadoop_sql ship_t2
+(12 rows)
+
+ Predicate Information (identified by plan id)  
+------------------------------------------------
+   8 --Nested Loop Semi Join (9, 10)
+         Join Filter: (ship_t2.a2 > ship_t1.c1)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+
+----EC函数 非相关子查询---
+explain (num_costs off)
+select sum(c1), d1 from ship_t1 where b1 in
+(select c2 
+from 
+exec_hadoop_sql('ecshipping', 'select a2, c2 from ship_t2;','') as ship_t2(a2 int, c2 int) where a2 < 100)
+group by
+d1
+order by 1,2 limit 3;
+ id |                                   operation                                   
+----+-------------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Limit
+  4 |          ->  Sort
+  5 |             ->  HashAggregate
+  6 |                ->  Streaming(type: REDISTRIBUTE)
+  7 |                   ->  Merge Join (8,12)
+  8 |                      ->  Sort
+  9 |                         ->  Streaming(type: REDISTRIBUTE)
+ 10 |                            ->  Row Adapter
+ 11 |                               ->  CStore Scan on ship_t1
+ 12 |                      ->  Sort
+ 13 |                         ->  HashAggregate
+ 14 |                            ->  Streaming(type: REDISTRIBUTE)
+ 15 |                               ->  HashAggregate
+ 16 |                                  ->  Function Scan on exec_hadoop_sql ship_t2
+(16 rows)
+
+ Predicate Information (identified by plan id)  
+------------------------------------------------
+   7 --Merge Join (8,12)
+         Merge Cond: (ship_t1.b1 = ship_t2.c2)
+  16 --Function Scan on exec_hadoop_sql ship_t2
+         Filter: (a2 < 100)
+(4 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+-----多nodegroup场景组合场景1:------
+set expected_computing_nodegroup='group1';
+explain (num_costs off)
+select col1, col2 from (
+select count (distinct(c1)) col1, sum(a1) over (partition by c1 order by a1) col2
+from exec_hadoop_sql('ecshipping', 'select a1, c1 from ship_t1;','') as ship_t1(a1 int, c1 int), ship_t5
+where d5 = c1
+group by a1,c1
+union all
+select c4 col1 , a4 col2
+from ship_t4
+union
+select c5 col1 , a5 col2
+from 
+ship_t5 where d5 = 1
+intersect
+select c2 col1, a2 col2
+from exec_hadoop_sql('ecshipping', 'select a2, c2 from ship_t2;','') as ship_t2(a2 int, c2 int)
+full join ship_t4 on c4 = c2 where c2 <1) order by 1,2 limit 3;
+ id |                                                operation                                                 
+----+----------------------------------------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Limit
+  4 |          ->  Sort
+  5 |             ->  HashAggregate
+  6 |                ->  Append(7, 22, 25)
+  7 |                   ->  Streaming(type: REDISTRIBUTE ng: group1->ship_ng0)
+  8 |                      ->  Subquery Scan on "*SELECT* 1"
+  9 |                         ->  WindowAgg
+ 10 |                            ->  Sort
+ 11 |                               ->  Streaming(type: REDISTRIBUTE)
+ 12 |                                  ->  HashAggregate
+ 13 |                                     ->  HashAggregate
+ 14 |                                        ->  Streaming(type: REDISTRIBUTE ng: GenGroup->group1)
+ 15 |                                           ->  HashAggregate
+ 16 |                                              ->  Merge Join (17,20)
+ 17 |                                                 ->  Sort
+ 18 |                                                    ->  Streaming(type: BROADCAST ng: ship_ng0->GenGroup)
+ 19 |                                                       ->  Seq Scan on ship_t5
+ 20 |                                                 ->  Sort
+ 21 |                                                    ->  Function Scan on exec_hadoop_sql ship_t1
+ 22 |                   ->  Subquery Scan on "*SELECT* 2"
+ 23 |                      ->  Row Adapter
+ 24 |                         ->  CStore Scan on ship_t4
+ 25 |                   ->  Streaming(type: REDISTRIBUTE ng: group1->ship_ng0)
+ 26 |                      ->  Result
+ 27 |                         ->  HashSetOp Intersect
+ 28 |                            ->  Append(29, 32)
+ 29 |                               ->  Streaming(type: REDISTRIBUTE ng: ship_ng0->group1)
+ 30 |                                  ->  Subquery Scan on "*SELECT* 3"
+ 31 |                                     ->  Seq Scan on ship_t5
+ 32 |                               ->  Subquery Scan on "*SELECT* 4"
+ 33 |                                  ->  Merge Left Join (34, 37)
+ 34 |                                     ->  Sort
+ 35 |                                        ->  Streaming(type: REDISTRIBUTE ng: GenGroup->group1)
+ 36 |                                           ->  Function Scan on exec_hadoop_sql ship_t2
+ 37 |                                     ->  Sort
+ 38 |                                        ->  Streaming(type: REDISTRIBUTE ng: ship_ng0->group1)
+ 39 |                                           ->  Row Adapter
+ 40 |                                              ->  CStore Scan on ship_t4
+(40 rows)
+
+         Predicate Information (identified by plan id)         
+---------------------------------------------------------------
+  16 --Merge Join (17,20)
+         Merge Cond: (shipping_schema.ship_t5.d5 = ship_t1.c1)
+  31 --Seq Scan on ship_t5
+         Filter: (d5 = 1)
+  33 --Merge Left Join (34, 37)
+         Merge Cond: (ship_t2.c2 = shipping_schema.ship_t4.c4)
+  36 --Function Scan on exec_hadoop_sql ship_t2
+         Filter: (c2 < 1)
+(8 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+reset expected_computing_nodegroup;
+-----多nodegroup场景组合场景2:------
+set expected_computing_nodegroup='group1';
+explain (num_costs off)
+select c4 col1, a4 col2
+from ship_t4 where ( 
+select a2 from 
+exec_hadoop_sql('ecshipping', 'select a2, c2 from ship_t2;','') as ship_t2(a2 int, c2 int) 
+where c4 = c2 and a2 < 1) > 2 order by 1,2 limit 3;
+ id |                                operation                                
+----+-------------------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Limit
+  3 |       ->  Vector Streaming (type: GATHER)
+  4 |          ->  Vector Limit
+  5 |             ->  Vector Sort
+  6 |                ->  CStore Scan on ship_t4
+  7 |                   ->  Result  [6, SubPlan 1]
+  8 |                      ->  Materialize
+  9 |                         ->  Streaming(type: BROADCAST)
+ 10 |                            ->  Function Scan on exec_hadoop_sql ship_t2
+(10 rows)
+
+ Predicate Information (identified by plan id)  
+------------------------------------------------
+   6 --CStore Scan on ship_t4
+         Filter: ((SubPlan 1) > 2)
+   7 --Result
+         Filter: (ship_t4.c4 = ship_t2.c2)
+  10 --Function Scan on exec_hadoop_sql ship_t2
+         Filter: (a2 < 1)
+(6 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+reset expected_computing_nodegroup;

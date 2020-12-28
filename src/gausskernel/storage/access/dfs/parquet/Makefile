@@ -17,7 +17,7 @@
 #     Makefile for the access methods module
 # 
 # IDENTIFICATION
-#        src/gausskernel/storage/access/dfs/parquet/Makefile
+#     src/gausskernel/storage/access/dfs/parquet/Makefile
 # 
 # ---------------------------------------------------------------------------------------
 

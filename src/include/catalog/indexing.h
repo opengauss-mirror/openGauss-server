@@ -5,6 +5,7 @@
  *	  on system catalogs
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
@@ -330,6 +331,12 @@ DECLARE_UNIQUE_INDEX(pg_app_workloadgroup_mapping_oid_index, 9021, on pg_app_wor
 DECLARE_UNIQUE_INDEX(pgxc_node_id_index, 9003, on pgxc_node using btree(node_id int4_ops));
 #define PgxcNodeNodeIdIndexId 	9003
 
+DECLARE_UNIQUE_INDEX(pgxc_slice_relid_index, 9033, on pgxc_slice using btree(relid oid_ops, type char_ops, relname name_ops, sindex int4_ops));
+#define PgxcSliceIndexId 9033
+
+DECLARE_UNIQUE_INDEX(pgxc_slice_order_index, 9034, on pgxc_slice using btree(relid oid_ops, type char_ops, sliceorder int4_ops, sindex int4_ops));
+#define PgxcSliceOrderIndexId 9034
+
 #endif
 
 DECLARE_UNIQUE_INDEX(pg_foreign_table_relid_index, 3119, on pg_foreign_table using btree(ftrelid oid_ops));
@@ -393,11 +400,69 @@ DECLARE_UNIQUE_INDEX(pg_job_proc_oid_index, 3455, on pg_job_proc using btree(oid
 DECLARE_UNIQUE_INDEX(pg_job_proc_id_index, 3449, on pg_job_proc using btree(job_id int4_ops));
 #define PgJobProcIdIndexId	3449
 
+DECLARE_INDEX(gs_asp_sampletime_index, 2999, on gs_asp using btree(sample_time timestamptz_ops));
+#define GsAspSampleIdTimedexId 2999
+
 /* Add index of table oid for pg_directory */
 DECLARE_UNIQUE_INDEX(pg_directory_oid_index, 4349, on pg_directory using btree(oid oid_ops));
 #define PgDirectoryOidIndexId 4349
 DECLARE_UNIQUE_INDEX(pg_directory_name_index, 4350, on pg_directory using btree(dirname name_ops));
 #define PgDirectoryDirectoriesNameIndexId 4350
+
+/* Add index of table oid for gs_policy_label */
+DECLARE_UNIQUE_INDEX(gs_policy_label_oid_index, 9501, on gs_policy_label using btree(oid oid_ops));
+#define GsPolicyLabelOidIndexId  9501
+DECLARE_INDEX(gs_policy_label_name_index, 9502, on gs_policy_label using btree(labelname name_ops, fqdnnamespace oid_ops, fqdnid oid_ops));
+#define GsPolicyLabelNameIndexId  9502
+
+/* Add index of table oid for gs_auditing_policy */
+DECLARE_UNIQUE_INDEX(gs_auditing_policy_oid_index, 9511, on gs_auditing_policy using btree(oid oid_ops));
+#define GsAuditingPolicyOidIndexId  9511
+DECLARE_UNIQUE_INDEX(gs_auditing_policy_name_index, 9512, on gs_auditing_policy using btree(polname name_ops));
+#define GsAuditingPolicyNameIndexId 9512
+
+/* Add index of table oid for policy access and privileges */
+DECLARE_UNIQUE_INDEX(gs_auditing_policy_access_oid_index, 9521, on gs_auditing_policy_access using btree(oid oid_ops));
+#define GsAuditingPolicyAccessOidIndexId 9521
+DECLARE_UNIQUE_INDEX(gs_auditing_policy_privileges_oid_index, 9531, on gs_auditing_policy_privileges using btree(oid oid_ops));
+#define GsAuditingPolicyPrivilegesOidIndexId 9531
+
+/* Add index for whole policy access and privileges row */
+DECLARE_UNIQUE_INDEX(gs_auditing_policy_access_row_index, 9522, on gs_auditing_policy_access using btree(accesstype name_ops, labelname name_ops, policyoid oid_ops));
+#define GsAuditingPolicyAccessRowIndexId 9522
+DECLARE_UNIQUE_INDEX(gs_auditing_policy_privileges_row_index, 9532, on gs_auditing_policy_privileges using btree(privilegetype name_ops, labelname name_ops, policyoid oid_ops));
+#define GsAuditingPolicyPrivilegesRowIndexId 9532
+
+/* Add index for table oid for auditing policy filters */
+DECLARE_UNIQUE_INDEX(gs_auditing_policy_filters_oid_index, 9541, on gs_auditing_policy_filters using btree(oid oid_ops));
+#define GsAuditingPolicyFiltersOidIndexId 9541
+/* Add index for policy oid filter row */
+DECLARE_UNIQUE_INDEX(gs_auditing_policy_filters_row_index, 9542, on gs_auditing_policy_filters using btree(policyoid oid_ops));
+#define GsAuditingPolicyFiltersPolicyOidIndexId 9542
+
+/* Add index of table oid for gs_masking_policy */
+DECLARE_UNIQUE_INDEX(gs_masking_policy_oid_index, 9611, on gs_masking_policy using btree(oid oid_ops));
+#define GsMaskingPolicyOidIndexId  9611
+DECLARE_UNIQUE_INDEX(gs_masking_policy_name_index, 9612, on gs_masking_policy using btree(polname name_ops));
+#define GsMaskingPolicyNameIndexId 9612
+
+/* Add index for table oid for masking policy filters */
+DECLARE_UNIQUE_INDEX(gs_masking_policy_filters_oid_index, 9641, on gs_masking_policy_filters using btree(oid oid_ops));
+#define GsMaskingPolicyFiltersOidIndexId 9641
+/* Add index for whole masking policy filter row */
+DECLARE_UNIQUE_INDEX(gs_masking_policy_filters_row_index, 9642, on gs_masking_policy_filters using btree(policyoid oid_ops));
+#define GsMaskingPolicyFiltersPolicyOidIndexId 9642
+
+/* Add index of table oid for gs_masking_policy_actions */
+DECLARE_UNIQUE_INDEX(gs_masking_policy_actions_oid_index, 9651, on gs_masking_policy_actions using btree(oid oid_ops));
+#define GsMaskingPolicyActionsOidIndexId 9651
+
+/* Add index for whole masking actions row */
+DECLARE_UNIQUE_INDEX(gs_masking_policy_actions_row_index, 9652, on gs_masking_policy_actions using btree(actiontype name_ops, actlabelname name_ops, policyoid oid_ops));
+#define GsMaskingPolicyActionsRowIndexId 9652
+/* Add index for whole masking actions row */
+DECLARE_INDEX(gs_masking_policy_actions_policy_oid_index, 9653, on gs_masking_policy_actions using btree(policyoid oid_ops));
+#define GsMaskingPolicyActionsPolicyOidIndexId 9653
 
 /* Add index of table oid for pg_rlspolicy */
 DECLARE_UNIQUE_INDEX(pg_rlspolicy_oid_index, 3224, on pg_rlspolicy using btree(oid oid_ops));
@@ -414,6 +479,69 @@ DECLARE_UNIQUE_INDEX(pg_synonym_name_nsp_index, 3547, on pg_synonym using btree(
 #define SynonymNameNspIndexId  3547
 DECLARE_UNIQUE_INDEX(pg_synonym_oid_index, 3548, on pg_synonym using btree(oid oid_ops));
 #define SynonymOidIndexId  3548
+
+/* Add index of table oid for streaming_stream, streaming_cont_query */
+DECLARE_UNIQUE_INDEX(streaming_stream_oid_index, 3228, on streaming_stream using btree(oid oid_ops));
+#define StreamingStreamOidIndexId 3228
+DECLARE_UNIQUE_INDEX(streaming_stream_relid_index, 3229, on streaming_stream using btree(relid oid_ops));
+#define StreamingStreamRelidIndexId 3229
+
+DECLARE_UNIQUE_INDEX(streaming_cont_query_relid_index, 3230, on streaming_cont_query using btree(relid oid_ops));
+#define StreamingContQueryRelidIndexId 3230
+DECLARE_UNIQUE_INDEX(streaming_cont_query_defrelid_index, 3231, on streaming_cont_query using btree(defrelid oid_ops));
+#define StreamingContQueryDefrelidIndexId 3231
+DECLARE_UNIQUE_INDEX(streaming_cont_query_id_index, 3232, on streaming_cont_query using btree(id int4_ops));
+#define StreamingContQueryIdIndexId 3232
+DECLARE_UNIQUE_INDEX(streaming_cont_query_oid_index, 3233, on streaming_cont_query using btree(oid oid_ops));
+#define StreamingContQueryOidIndexId 3233
+DECLARE_INDEX(streaming_cont_query_matrelid_index, 3234, on streaming_cont_query using btree(matrelid oid_ops));
+#define StreamingContQueryMatrelidIndexId 3234
+DECLARE_INDEX(streaming_cont_query_lookupidxid_index, 3235, on streaming_cont_query using btree(lookupidxid oid_ops));
+#define StreamingContQueryLookupidxidIndexId 3235
+DECLARE_INDEX(streaming_cont_query_schema_change_index, 3236, on streaming_cont_query using btree(matrelid oid_ops, active bool_ops));
+#define StreamingContQuerySchemaChangeIndexId 3236
+DECLARE_INDEX(streaming_gather_agg_index, 3237, on pg_aggregate using btree(aggtransfn oid_ops, aggcollectfn oid_ops, aggfinalfn oid_ops));
+#define StreamingGatherAggIndexId 3237
+
+/* Add index of contquery oid for streaming_reaper_status */
+DECLARE_UNIQUE_INDEX(streaming_reaper_status_id_index, 9995, on streaming_reaper_status using btree(id int4_ops));
+#define StreamingReaperStatusOidIndexId 9995
+DECLARE_UNIQUE_INDEX(streaming_reaper_status_oid_index, 9999, on streaming_reaper_status using btree(oid oid_ops));
+#define StreamingCQReaperStatusOidIndexId 9999
+
+/* Add index of table oid for gs_encrypted_columns */
+DECLARE_UNIQUE_INDEX(gs_encrypted_columns_oid_index, 9701, on gs_encrypted_columns using btree(oid oid_ops));
+#define GsSecEncryptedColumnsOidIndexId  9701
+DECLARE_UNIQUE_INDEX(gs_encrypted_columns_rel_id_column_name_index, 9702, on gs_encrypted_columns using btree(rel_id oid_ops, column_name name_ops));
+#define GsSecEncryptedColumnsRelidColumnnameIndexId  9702
+
+/* Add index of table oid for gs_client_global_keys */
+DECLARE_UNIQUE_INDEX(gs_client_global_keys_oid_index, 9711, on gs_client_global_keys using btree(oid oid_ops));
+#define ClientLogicGlobalSettingsOidIndexId  9711
+DECLARE_UNIQUE_INDEX(gs_client_global_keys_name_index, 9712, on gs_client_global_keys using btree(global_key_name name_ops, key_namespace oid_ops));
+#define ClientLogicGlobalSettingsNameIndexId  9712
+
+/* Add index of table oid for gs_column_keys */
+DECLARE_UNIQUE_INDEX(gs_column_keys_oid_index, 9721, on gs_column_keys using btree(oid oid_ops));
+#define ClientLogicColumnSettingsOidIndexId  9721
+DECLARE_UNIQUE_INDEX(gs_column_keys_name_index, 9722, on gs_column_keys using btree(column_key_name name_ops, key_namespace oid_ops));
+#define ClientLogicColumnSettingsNameIndexId  9722
+DECLARE_UNIQUE_INDEX(gs_column_keys_distributed_id_index, 9723, on gs_column_keys using btree(column_key_distributed_id oid_ops));
+#define ClientLogicColumnSettingDistributedIdIndexId  9723
+
+/* Add index of table oid for gs_client_global_keys_args */
+DECLARE_UNIQUE_INDEX(gs_client_global_keys_args_oid_index, 9731, on gs_client_global_keys_args using btree(oid oid_ops));
+#define ClientLogicGlobalSettingsArgsOidIndexId  9731
+
+/* Add index of table oid for gs_sec_column_encrption_keys_args */
+DECLARE_UNIQUE_INDEX(gs_column_keys_args_oid_index, 9741, on gs_column_keys_args using btree(oid oid_ops));
+#define ClientLogicColumnSettingsArgsOidIndexId  9741
+/* Add index for matview catalog*/
+DECLARE_UNIQUE_INDEX(gs_matview_oid_index, 9991, on gs_matview using btree(oid oid_ops));
+#define GsMatviewOidIndexId 9991
+DECLARE_UNIQUE_INDEX(gs_matviewdep_oid_index, 9992, on gs_matview_dependency using btree(oid oid_ops));
+#define GsMatviewDepOidIndexId 9992
+
 
 /* Add index of table model name for gs_opt_model */
 DECLARE_UNIQUE_INDEX(gs_opt_model_name_index, 9997, on gs_opt_model using btree(model_name name_ops));

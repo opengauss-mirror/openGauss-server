@@ -30,4 +30,3 @@ void InstrUpdateUserLogCounter(bool is_login);
 void InitInstrUser();
 
 #endif
-

@@ -1,0 +1,72 @@
+CREATE SCHEMA sonic_hashjoin_test_string;
+SET current_schema = sonic_hashjoin_test_string;
+-- table with 65,600 rows
+CREATE TABLE sonic_hashjoin_test_string.VEC_HASHJOIN_TABLE_STRING_01(
+ C_INT INT,					--0 serial number from 1
+ C_BIGINT BIGINT,			--1 big int positive or negative
+ C_SMALLINT SMALLINT,		--2 small int positive or negative
+ C_CHAR_1 CHAR,				--3 one char (store as dict in charDatumArray, NO NULL)
+ C_CHAR_2 CHAR(1),			--4 sex (store as dict in charDatumArray, HAS NULL)
+ C_CHAR_3 CHAR(10),			--5 only a-z (store as char in charDatumArray, NO NULL)
+ C_CHAR_4 CHAR(100),		--6 simple chinese (store as char in charDatumArray, NO NULL)
+ C_BPCHAR_1 BPCHAR,			--7 c_char_1 + c_char_3 (encodingDatumArray, NO NULL)
+ C_BPCHAR_2 BPCHAR(10),		--8 date (store as char in charDatumArray, HAS NULL)
+ C_VARCHAR_1 VARCHAR,		--9 simple chinese (encodingDatumArray, NO NULL)
+ C_VARCHAR_2 VARCHAR(20),	--10 date (encodingDatumArray, HAS NULL)
+ C_TEXT text,				--11 rare chinese +  random char + simple chinese (encodingDatumArray, NO NULL)
+ C_CHAR_5 CHAR(4),			--12 rare chinese (store as dict in charDatumArray, HAS NULL)
+ C_CHAR_6 CHAR(20),			--13 rare chinese (store as char in charDatumArray, HAS NULL)
+ C_VARCHAR_3 VARCHAR		--14 rare chinese (store as encodingDatumArray, HAS NULL)
+ --C_NAME name /not supported by column table
+ --notice: those stored in charDatumArray when simple, will store in encodingDatumArray when as key
+ ) with (orientation=column)
+ DISTRIBUTE BY replication;
+-- table with 20,000 rows
+CREATE TABLE sonic_hashjoin_test_string.VEC_HASHJOIN_TABLE_STRING_02(
+ C_INT INT,
+ C_BIGINT BIGINT,
+ C_SMALLINT SMALLINT,
+ C_CHAR_1 CHAR,
+ C_CHAR_2 CHAR(1),
+ C_CHAR_3 CHAR(10),
+ C_CHAR_4 CHAR(100),
+ C_BPCHAR_1 BPCHAR,
+ C_BPCHAR_2 BPCHAR(10),
+ C_VARCHAR_1 VARCHAR,
+ C_VARCHAR_2 VARCHAR(20),
+ C_TEXT text,
+ C_CHAR_5 CHAR(4),
+ C_CHAR_6 CHAR(20),
+ C_VARCHAR_3 VARCHAR
+ --C_NAME name /not supported by column table
+ ) WITH (orientation=column)
+ DISTRIBUTE BY replication;
+-- table with 65,600 rows and all C_INT is same
+CREATE TABLE sonic_hashjoin_test_string.VEC_HASHJOIN_TABLE_STRING_03(
+ C_INT INT,
+ C_BIGINT BIGINT,
+ C_SMALLINT SMALLINT,
+ C_CHAR_1 CHAR,
+ C_CHAR_2 CHAR(1),
+ C_CHAR_3 CHAR(10),
+ C_CHAR_4 CHAR(100),
+ C_BPCHAR_1 BPCHAR,
+ C_BPCHAR_2 BPCHAR(10),
+ C_VARCHAR_1 VARCHAR,
+ C_VARCHAR_2 VARCHAR(20),
+ C_TEXT text,
+ C_CHAR_5 CHAR(4),
+ C_CHAR_6 CHAR(20),
+ C_VARCHAR_3 VARCHAR
+ ) WITH (orientation=column)
+ DISTRIBUTE BY hash(C_INT);
+\parallel on 3
+COPY VEC_HASHJOIN_TABLE_STRING_01 FROM '@abs_srcdir@/data/vec_sonic_hashjoin_string_1.data' DELIMITER AS '|';
+COPY VEC_HASHJOIN_TABLE_STRING_02 FROM '@abs_srcdir@/data/vec_sonic_hashjoin_string_2.data' DELIMITER AS '|';
+COPY VEC_HASHJOIN_TABLE_STRING_03 FROM '@abs_srcdir@/data/vec_sonic_hashjoin_string_3.data' DELIMITER AS '|';
+\parallel off
+\parallel on 3
+analyze VEC_HASHJOIN_TABLE_STRING_01;
+analyze VEC_HASHJOIN_TABLE_STRING_02;
+analyze VEC_HASHJOIN_TABLE_STRING_03;
+\parallel off

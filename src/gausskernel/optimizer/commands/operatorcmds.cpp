@@ -37,6 +37,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_operator.h"
@@ -99,6 +100,7 @@ void DefineOperator(List* names, List* parameters)
 
     if (u_sess->attr.attr_sql.enforce_a_behavior) {
         oprowner = GetUserIdFromNspId(oprNamespace);
+
         if (!OidIsValid(oprowner))
             oprowner = GetUserId();
         else if (oprowner != GetUserId())
@@ -113,18 +115,17 @@ void DefineOperator(List* names, List* parameters)
      * as the name of a user-defined operator.
      */
     if (strcmp(oprName, "=>") == 0)
-        ereport(WARNING,
-            (errmsg("=> is deprecated as an operator name"),
+        ereport(WARNING, (errmsg("=> is deprecated as an operator name"),
                 errdetail("This name may be disallowed altogether in future versions of PostgreSQL.")));
 
     /* Check we have creation rights in target namespace */
     aclresult = pg_namespace_aclcheck(oprNamespace, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(oprNamespace, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(oprNamespace));
     if (isalter) {
         aclresult = pg_namespace_aclcheck(oprNamespace, oprowner, ACL_CREATE);
         if (aclresult != ACLCHECK_OK)
-            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(oprNamespace, true));
+            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(oprNamespace));
     }
 
     /*
@@ -136,14 +137,12 @@ void DefineOperator(List* names, List* parameters)
         if (pg_strcasecmp(defel->defname, "leftarg") == 0) {
             typeName1 = defGetTypeName(defel);
             if (typeName1->setof)
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                ereport(ERROR, (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                         errmsg("SETOF type not allowed for operator argument")));
         } else if (pg_strcasecmp(defel->defname, "rightarg") == 0) {
             typeName2 = defGetTypeName(defel);
             if (typeName2->setof)
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                ereport(ERROR, (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                         errmsg("SETOF type not allowed for operator argument")));
         } else if (pg_strcasecmp(defel->defname, "procedure") == 0)
             functionName = defGetQualifiedName(defel);
@@ -186,8 +185,7 @@ void DefineOperator(List* names, List* parameters)
         typeId2 = typenameTypeId(NULL, typeName2);
 
     if (!OidIsValid(typeId1) && !OidIsValid(typeId2))
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+        ereport(ERROR, (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("at least one of leftarg or rightarg must be specified")));
 
     if (typeName1 != NULL) {
@@ -262,10 +260,10 @@ void DefineOperator(List* names, List* parameters)
         typeId[3] = INT4OID;     /* varRelid */
 
         restrictionOid = LookupFuncName(restrictionName, 4, typeId, false);
+
         /* estimators must return float8 */
         if (get_func_rettype(restrictionOid) != FLOAT8OID)
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+            ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                     errmsg("restriction estimator function %s must return type \"float8\"",
                         NameListToString(restrictionName))));
 
@@ -305,8 +303,7 @@ void DefineOperator(List* names, List* parameters)
 
         /* estimators must return float8 */
         if (get_func_rettype(joinOid) != FLOAT8OID)
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+            ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                     errmsg("join estimator function %s must return type \"float8\"", NameListToString(joinName))));
 
         /* Require EXECUTE rights for the estimator */
@@ -399,6 +396,7 @@ static void AlterOperatorOwner_internal(Relation rel, Oid operOid, Oid newOwnerI
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for operator %u", operOid)));
 
     oprForm = (Form_pg_operator)GETSTRUCT(tup);
+
     /*
      * If the new owner is the same as the existing owner, consider the
      * command to have succeeded.  This is for dump restoration purposes.
@@ -416,7 +414,7 @@ static void AlterOperatorOwner_internal(Relation rel, Oid operOid, Oid newOwnerI
             /* New owner must have CREATE privilege on namespace */
             aclresult = pg_namespace_aclcheck(oprForm->oprnamespace, newOwnerId, ACL_CREATE);
             if (aclresult != ACLCHECK_OK)
-                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(oprForm->oprnamespace, true));
+                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(oprForm->oprnamespace));
         }
 
         /*
@@ -432,7 +430,7 @@ static void AlterOperatorOwner_internal(Relation rel, Oid operOid, Oid newOwnerI
         changeDependencyOnOwner(OperatorRelationId, operOid, newOwnerId);
     }
 
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 }
 
 /*

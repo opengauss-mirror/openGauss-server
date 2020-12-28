@@ -1,7 +1,7 @@
 -- OWNER TO
 CREATE TABLE hw_cstore_alter_t1(a int, b text) WITH(orientation=column);
 CREATE INDEX ON hw_cstore_alter_t1(a);
-CREATE ROLE cstore_role PASSWORD 'ttest@123';
+CREATE ROLE cstore_role PASSWORD 'gauss@123';
 ALTER TABLE hw_cstore_alter_t1 OWNER TO cstore_role;
 DROP TABLE hw_cstore_alter_t1;
 --  unsupported feature
@@ -182,8 +182,8 @@ ALTER INDEX idx1_hw_cstore_alter_t16 RESET (autovacuum_enabled); -- failed
 DROP INDEX idx1_hw_cstore_alter_t16;
 DROP TABLE hw_cstore_alter_t16;
 -- 6.5 alter cstore partition table owner
-CREATE USER hw_user_u1 password 'TTEST@123';
-CREATE TABLE hw_cstore_alter_t17 (a int, b int, c int) with (orientation = column) 
+CREATE USER hw_user_u1 password 'GAUSS@123';
+CREATE TABLE hw_cstore_alter_t17 (a int, b int, c int) with (orientation = column) distribute by hash(a)
 partition by range (a)
 (
     partition p1  values less than (1000),
@@ -195,8 +195,8 @@ ALTER TABLE hw_cstore_alter_t17 owner to hw_user_u1;
 DROP TABLE hw_cstore_alter_t17;
 DROP USER hw_user_u1;
 
-CREATE USER hw_user_u2 password 'TTEST@123';
-CREATE TABLE hw_cstore_alter_t18 (a int, b int, c int) with (orientation = column) 
+CREATE USER hw_user_u2 password 'GAUSS@123';
+CREATE TABLE hw_cstore_alter_t18 (a int, b int, c int) with (orientation = column) distribute by hash(a)
 partition by range (a)
 (
     partition p1  values less than (1000),

@@ -22,7 +22,7 @@ override CPPFLAGS := -I../include -I$(top_srcdir)/src/interfaces/ecpg/include \
 	-I$(libpq_srcdir) -I$(top_srcdir)/src/include/utils $(CPPFLAGS)
 override CFLAGS += $(PTHREAD_CFLAGS)
 
-override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC -fstack-protector --param ssp-buffer-size=2 -Wstack-protector
+override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC
 override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC
 
 SHLIB_LINK = -L../ecpglib -lecpg -L../pgtypeslib -lpgtypes $(libpq) \

@@ -28,11 +28,10 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include <unistd.h>
 
 #include "miscadmin.h"
 #include "storage/ipc.h"
-#include "storage/pg_sema.h"
+#include "storage/lock/pg_sema.h"
 #include "storage/pg_shmem.h"
 
 /* stuff needed to satisfy references in shmem/sema code */

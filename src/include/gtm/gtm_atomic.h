@@ -96,7 +96,7 @@ public:
     /**
      * overload operator =
      */
-    GTM_Atomic<ValueType> &operator=(ValueType newValue)
+    GTM_Atomic<ValueType>& operator=(ValueType newValue)
     {
         store(newValue);
         return *this;
@@ -113,7 +113,7 @@ public:
     /**
      * overload operator ++
      */
-    const GTM_Atomic<ValueType> &operator++()
+    const GTM_Atomic<ValueType>& operator++()
     {
         inc();
         return *this;
@@ -128,7 +128,7 @@ public:
     /**
      * overload operator --
      */
-    const GTM_Atomic<ValueType> &operator--()
+    const GTM_Atomic<ValueType>& operator--()
     {
         add(-1);
         return *this;
@@ -164,7 +164,7 @@ protected:
  *   the critical section it is guaranteed to see any changes made in the
  *   current critical section.
  */
-inline static void GTM_loadStoreFence()
+static inline void GTM_loadStoreFence()
 {
 #ifdef __aarch64__
 
@@ -175,12 +175,12 @@ inline static void GTM_loadStoreFence()
 #endif
 }
 
-inline static void GTM_loadFence()
+static inline void GTM_loadFence()
 {
     __asm__ __volatile__("lfence" ::: "memory");
 }
 
-inline static void GTM_StoreFence()
+static inline void GTM_StoreFence()
 {
     __asm__ __volatile__("sfence" ::: "memory");
 }

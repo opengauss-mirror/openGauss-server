@@ -11,14 +11,14 @@ DROP ROLE IF EXISTS foreign_data_user, regress_test_role, regress_test_role2, re
 
 RESET client_min_messages;
 
-CREATE ROLE foreign_data_user PASSWORD 'ttest@123' LOGIN SYSADMIN;
+CREATE ROLE foreign_data_user PASSWORD 'gauss@123' LOGIN SYSADMIN;
 SET SESSION AUTHORIZATION 'foreign_data_user';
 
-CREATE ROLE regress_test_role PASSWORD 'ttest@123';
-CREATE ROLE regress_test_role2 PASSWORD 'ttest@123';
-CREATE ROLE regress_test_role_super PASSWORD 'ttest@123' SYSADMIN;
-CREATE ROLE regress_test_indirect PASSWORD 'ttest@123';
-CREATE ROLE unprivileged_role PASSWORD 'ttest@123';
+CREATE ROLE regress_test_role PASSWORD 'gauss@123';
+CREATE ROLE regress_test_role2 PASSWORD 'gauss@123';
+CREATE ROLE regress_test_role_super PASSWORD 'gauss@123' SYSADMIN;
+CREATE ROLE regress_test_indirect PASSWORD 'gauss@123';
+CREATE ROLE unprivileged_role PASSWORD 'gauss@123';
 
 CREATE FOREIGN DATA WRAPPER dummy;
 COMMENT ON FOREIGN DATA WRAPPER dummy IS 'useless';
@@ -45,7 +45,7 @@ CREATE FOREIGN DATA WRAPPER foo OPTIONS (testing '1', another '2');
 \dew+
 
 DROP FOREIGN DATA WRAPPER foo;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 CREATE FOREIGN DATA WRAPPER foo; -- ERROR
 RESET ROLE;
 CREATE FOREIGN DATA WRAPPER foo VALIDATOR postgresql_fdw_validator;
@@ -70,16 +70,16 @@ ALTER FOREIGN DATA WRAPPER foo OPTIONS (a '2');
 ALTER FOREIGN DATA WRAPPER foo OPTIONS (b '4');             -- ERROR
 \dew+
 
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 ALTER FOREIGN DATA WRAPPER foo OPTIONS (ADD d '5');         -- ERROR
-SET ROLE regress_test_role_super PASSWORD 'ttest@123';
+SET ROLE regress_test_role_super PASSWORD 'gauss@123';
 ALTER FOREIGN DATA WRAPPER foo OPTIONS (ADD d '5');
 \dew+
 
 ALTER FOREIGN DATA WRAPPER foo OWNER TO regress_test_role;  -- ERROR
 ALTER FOREIGN DATA WRAPPER foo OWNER TO regress_test_role_super;
 ALTER ROLE regress_test_role_super NOSYSADMIN;
-SET ROLE regress_test_role_super PASSWORD 'ttest@123';
+SET ROLE regress_test_role_super PASSWORD 'gauss@123';
 ALTER FOREIGN DATA WRAPPER foo OPTIONS (ADD e '6');         -- ERROR
 RESET ROLE;
 \dew+
@@ -94,7 +94,7 @@ DROP FOREIGN DATA WRAPPER IF EXISTS nonexistent;
 \dew+
 
 DROP ROLE regress_test_role_super;                          -- ERROR
-SET ROLE regress_test_role_super PASSWORD 'ttest@123';
+SET ROLE regress_test_role_super PASSWORD 'gauss@123';
 DROP FOREIGN DATA WRAPPER foo;
 RESET ROLE;
 DROP ROLE regress_test_role_super;
@@ -108,7 +108,7 @@ CREATE USER MAPPING FOR current_user SERVER s1;
 \des+
 \deu+
 DROP FOREIGN DATA WRAPPER foo;                              -- ERROR
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 DROP FOREIGN DATA WRAPPER foo CASCADE;                      -- ERROR
 RESET ROLE;
 DROP FOREIGN DATA WRAPPER foo CASCADE;
@@ -130,22 +130,22 @@ CREATE SERVER s7 TYPE 'a' VERSION '17.0' FOREIGN DATA WRAPPER foo OPTIONS (host 
 CREATE SERVER s8 FOREIGN DATA WRAPPER postgresql OPTIONS (foo '1'); -- ERROR
 CREATE SERVER s8 FOREIGN DATA WRAPPER postgresql OPTIONS (host 'localhost', dbname 's8db');
 \des+
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 CREATE SERVER t1 FOREIGN DATA WRAPPER foo;                 -- ERROR: no usage on FDW
 RESET ROLE;
 GRANT USAGE ON FOREIGN DATA WRAPPER foo TO regress_test_role;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 CREATE SERVER t1 FOREIGN DATA WRAPPER foo;
 RESET ROLE;
 \des+
 
 REVOKE USAGE ON FOREIGN DATA WRAPPER foo FROM regress_test_role;
 GRANT USAGE ON FOREIGN DATA WRAPPER foo TO regress_test_indirect;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 CREATE SERVER t2 FOREIGN DATA WRAPPER foo;                 -- ERROR
 RESET ROLE;
 GRANT regress_test_indirect TO regress_test_role;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 CREATE SERVER t2 FOREIGN DATA WRAPPER foo;
 \des+
 RESET ROLE;
@@ -160,27 +160,27 @@ ALTER SERVER s3 OPTIONS ("tns name" 'orcl', port '1521');
 GRANT USAGE ON FOREIGN SERVER s1 TO regress_test_role;
 GRANT USAGE ON FOREIGN SERVER s6 TO regress_test_role2 WITH GRANT OPTION;
 \des+
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 ALTER SERVER s1 VERSION '1.1';                              -- ERROR
 ALTER SERVER s1 OWNER TO regress_test_role;                 -- ERROR
 RESET ROLE;
 ALTER SERVER s1 OWNER TO regress_test_role;
 GRANT regress_test_role2 TO regress_test_role;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 ALTER SERVER s1 VERSION '1.1';
 ALTER SERVER s1 OWNER TO regress_test_role2;                -- ERROR
 RESET ROLE;
 ALTER SERVER s8 OPTIONS (foo '1');                          -- ERROR option validation
 ALTER SERVER s8 OPTIONS (connect_timeout '30', SET dbname 'db1', DROP host);
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 ALTER SERVER s1 OWNER TO regress_test_indirect;             -- ERROR
 RESET ROLE;
 GRANT regress_test_indirect TO regress_test_role;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 ALTER SERVER s1 OWNER TO regress_test_indirect;
 RESET ROLE;
 GRANT USAGE ON FOREIGN DATA WRAPPER foo TO regress_test_indirect;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 ALTER SERVER s1 OWNER TO regress_test_indirect;
 RESET ROLE;
 DROP ROLE regress_test_indirect;                            -- ERROR
@@ -194,13 +194,13 @@ ALTER SERVER s8new RENAME to s8;
 DROP SERVER nonexistent;                                    -- ERROR
 DROP SERVER IF EXISTS nonexistent;
 \des
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 DROP SERVER s2;                                             -- ERROR
 DROP SERVER s1;
 RESET ROLE;
 \des
 ALTER SERVER s2 OWNER TO regress_test_role;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 DROP SERVER s2;
 RESET ROLE;
 \des
@@ -221,7 +221,7 @@ CREATE USER MAPPING FOR user SERVER s8 OPTIONS (username 'test', password 'secre
 CREATE USER MAPPING FOR user SERVER s8 OPTIONS (user 'test', password 'secret');
 ALTER SERVER s5 OWNER TO regress_test_role;
 ALTER SERVER s6 OWNER TO regress_test_indirect;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 CREATE USER MAPPING FOR current_user SERVER s5;
 CREATE USER MAPPING FOR current_user SERVER s6 OPTIONS (username 'test');
 CREATE USER MAPPING FOR current_user SERVER s7;             -- ERROR
@@ -229,7 +229,7 @@ CREATE USER MAPPING FOR public SERVER s8;                   -- ERROR
 RESET ROLE;
 
 ALTER SERVER t1 OWNER TO regress_test_indirect;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 CREATE USER MAPPING FOR current_user SERVER t1 OPTIONS (username 'bob', password 'boo');
 CREATE USER MAPPING FOR public SERVER t1;
 RESET ROLE;
@@ -241,7 +241,7 @@ ALTER USER MAPPING FOR user SERVER ss4 OPTIONS (gotcha 'true'); -- ERROR
 ALTER USER MAPPING FOR public SERVER s5 OPTIONS (gotcha 'true');            -- ERROR
 ALTER USER MAPPING FOR current_user SERVER s8 OPTIONS (username 'test');    -- ERROR
 ALTER USER MAPPING FOR current_user SERVER s8 OPTIONS (DROP user, SET password 'public');
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 ALTER USER MAPPING FOR current_user SERVER s5 OPTIONS (ADD modified '1');
 ALTER USER MAPPING FOR public SERVER s4 OPTIONS (ADD modified '1'); -- ERROR
 ALTER USER MAPPING FOR public SERVER t1 OPTIONS (ADD modified '1');
@@ -256,7 +256,7 @@ DROP USER MAPPING IF EXISTS FOR regress_test_missing_role SERVER s4;
 DROP USER MAPPING IF EXISTS FOR user SERVER ss4;
 DROP USER MAPPING IF EXISTS FOR public SERVER s7;
 CREATE USER MAPPING FOR public SERVER s8;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 DROP USER MAPPING FOR public SERVER s8;                     -- ERROR
 RESET ROLE;
 DROP SERVER s7;
@@ -369,12 +369,12 @@ SELECT * FROM information_schema.usage_privileges WHERE object_type LIKE 'FOREIG
 SELECT * FROM information_schema.role_usage_grants WHERE object_type LIKE 'FOREIGN%' AND object_name IN ('s6', 'foo') ORDER BY 1, 2, 3, 4, 5;
 SELECT * FROM information_schema.foreign_tables ORDER BY 1, 2, 3;
 SELECT * FROM information_schema.foreign_table_options ORDER BY 1, 2, 3, 4;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 SELECT * FROM information_schema.user_mapping_options ORDER BY 1, 2, 3, 4;
 SELECT * FROM information_schema.usage_privileges WHERE object_type LIKE 'FOREIGN%' AND object_name IN ('s6', 'foo') ORDER BY 1, 2, 3, 4, 5;
 SELECT * FROM information_schema.role_usage_grants WHERE object_type LIKE 'FOREIGN%' AND object_name IN ('s6', 'foo') ORDER BY 1, 2, 3, 4, 5;
 DROP USER MAPPING FOR current_user SERVER t1;
-SET ROLE regress_test_role2 PASSWORD 'ttest@123';
+SET ROLE regress_test_role2 PASSWORD 'gauss@123';
 SELECT * FROM information_schema.user_mapping_options ORDER BY 1, 2, 3, 4;
 RESET ROLE;
 
@@ -417,7 +417,7 @@ ALTER USER MAPPING FOR regress_test_role SERVER s6 OPTIONS (DROP username);
 ALTER FOREIGN DATA WRAPPER foo VALIDATOR postgresql_fdw_validator;
 
 -- Privileges
-SET ROLE unprivileged_role PASSWORD 'ttest@123';
+SET ROLE unprivileged_role PASSWORD 'gauss@123';
 CREATE FOREIGN DATA WRAPPER foobar;                             -- ERROR
 ALTER FOREIGN DATA WRAPPER foo OPTIONS (gotcha 'true');         -- ERROR
 ALTER FOREIGN DATA WRAPPER foo OWNER TO unprivileged_role;      -- ERROR
@@ -435,7 +435,7 @@ RESET ROLE;
 
 GRANT USAGE ON FOREIGN DATA WRAPPER postgresql TO unprivileged_role;
 GRANT USAGE ON FOREIGN DATA WRAPPER foo TO unprivileged_role WITH GRANT OPTION;
-SET ROLE unprivileged_role PASSWORD 'ttest@123';
+SET ROLE unprivileged_role PASSWORD 'gauss@123';
 CREATE FOREIGN DATA WRAPPER foobar;                             -- ERROR
 ALTER FOREIGN DATA WRAPPER foo OPTIONS (gotcha 'true');         -- ERROR
 DROP FOREIGN DATA WRAPPER foo;                                  -- ERROR
@@ -454,7 +454,7 @@ RESET ROLE;
 
 REVOKE USAGE ON FOREIGN DATA WRAPPER foo FROM unprivileged_role; -- ERROR
 REVOKE USAGE ON FOREIGN DATA WRAPPER foo FROM unprivileged_role CASCADE;
-SET ROLE unprivileged_role PASSWORD 'ttest@123';
+SET ROLE unprivileged_role PASSWORD 'gauss@123';
 GRANT USAGE ON FOREIGN DATA WRAPPER foo TO regress_test_role;   -- ERROR
 CREATE SERVER s10 FOREIGN DATA WRAPPER foo;                     -- ERROR
 ALTER SERVER s9 VERSION '1.1';
@@ -464,7 +464,7 @@ DROP SERVER s9 CASCADE;
 RESET ROLE;
 CREATE SERVER s9 FOREIGN DATA WRAPPER foo;
 GRANT USAGE ON FOREIGN SERVER s9 TO unprivileged_role;
-SET ROLE unprivileged_role PASSWORD 'ttest@123';
+SET ROLE unprivileged_role PASSWORD 'gauss@123';
 ALTER SERVER s9 VERSION '1.2';                                  -- ERROR
 GRANT USAGE ON FOREIGN SERVER s9 TO regress_test_role;          -- WARNING
 CREATE USER MAPPING FOR current_user SERVER s9;

@@ -20,6 +20,7 @@
 #include "access/reloptions.h"
 #include "access/sysattr.h"
 #include "access/obs/obs_am.h"
+#include "access/tableam.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_foreign_table.h"
 #include "catalog/pg_trigger.h"
@@ -112,11 +113,11 @@ const char *GSFSS_PREFIX = "gsfss://";
 const char *ROACH_PREFIX = "roach://";
 const char *GSOBS_PREFIX = "gsobs://";
 
-const size_t LOCAL_PREFIX_LEN = strlen(LOCAL_PREFIX);
-const size_t GSFS_PREFIX_LEN = strlen(GSFS_PREFIX);
-const size_t GSFSS_PREFIX_LEN = strlen(GSFSS_PREFIX);
-const size_t ROACH_PREFIX_LEN = strlen(ROACH_PREFIX);
-const size_t GSOBS_PREFIX_LEN = strlen(GSOBS_PREFIX);
+const int LOCAL_PREFIX_LEN = strlen(LOCAL_PREFIX);
+const int GSFS_PREFIX_LEN = strlen(GSFS_PREFIX);
+const int GSFSS_PREFIX_LEN = strlen(GSFSS_PREFIX);
+const int ROACH_PREFIX_LEN = strlen(ROACH_PREFIX);
+const int GSOBS_PREFIX_LEN = strlen(GSOBS_PREFIX);
 
 /*
  * Valid options for file_fdw.
@@ -178,6 +179,10 @@ PG_FUNCTION_INFO_V1(dist_fdw_validator);
 #define BULKLOAD_FILE_MAX_SIZE_TO_DIVIDE (64 * 1024 * 1024)
 #define BULKLOAD_FILE_SIZE_OF_DIVIDE (16 * 1024 * 1024)
 #define BULKLOAD_RAW_BUFFER_SIZE 65536
+
+#ifdef ENABLE_UT
+#define static
+#endif
 
 IdGen gt_sessionId = {0, 0, false};
 
@@ -300,7 +305,7 @@ Datum dist_fdw_validator(PG_FUNCTION_ARGS)
     rc = memset_s(&execState, sizeof(execState), 0, sizeof(execState));
     securec_check(rc, "\0", "\0");
     ProcessDistImportOptions(&planstate, options_list, true, catalog != ForeignTableRelationId);
-    ProcessCopyOptions((CopyState)&execState, !planstate.writeOnly, planstate.options);
+    ProcessCopyOptions((CopyState) & execState, !planstate.writeOnly, planstate.options);
     VerifyEncoding(planstate.fileEncoding);
     if (execState.fileformat != FORMAT_TEXT && IS_SHARED_MODE(planstate.mode))
         ereport(ERROR, (errcode(ERRCODE_FDW_ERROR), errmsg("SHARED mode can only be used with TEXT format")));
@@ -406,7 +411,7 @@ void distGetOptions(Oid foreigntableid, char **locaionts, List **other_options)
  * used by fileAnalyzeForeignTable function.
  */
 static bool distAnalyzeForeignTable(Relation relation, AcquireSampleRowsFunc *func, BlockNumber *totalPageCount,
-                             void *additionalData, bool estimate_table_rownum)
+                                    void *additionalData, bool estimate_table_rownum)
 {
     if (isWriteOnlyFt(RelationGetRelid(relation))) {
         return false;
@@ -433,6 +438,7 @@ List *CNSchedulingForDistOBSFt(Oid foreignTableId)
     char *url = HdfsGetOptionValue(foreignTableId, optLocation);
     char *regionCode = HdfsGetOptionValue(foreignTableId, OPTION_NAME_REGION);
     char *newUrl = url;
+    errno_t rc = EOK;
 
     Assert(url != NULL);
     if (url != NULL && pg_strncasecmp(url, OBS_PREFIX, OBS_PREfIX_LEN) == 0) {
@@ -465,6 +471,11 @@ List *CNSchedulingForDistOBSFt(Oid foreignTableId)
     assignOBSFileToDataNode(obsFileList, &totalTask, dnNames);
 
     pfree(rlc);
+    if (sak != NULL) {
+        rc = memset_s(sak, strlen(sak), 0, strlen(sak));
+        securec_check(rc, "\0", "\0");
+        pfree(sak);
+    }
     return totalTask;
 }
 
@@ -510,7 +521,7 @@ ForeignScanState *buildRelatedStateInfo(Relation relation, DistFdwFileSegment *s
     ;
 
     /* setup tuple slot */
-    scanTupleSlot = MakeTupleTableSlot();
+    scanTupleSlot = MakeTupleTableSlot(true, tupleDescriptor->tdTableAmType);
     scanTupleSlot->tts_tupleDescriptor = tupleDescriptor;
     scanTupleSlot->tts_values = columnValues;
     scanTupleSlot->tts_isnull = columnNulls;
@@ -552,7 +563,7 @@ ForeignScanState *buildRelatedStateInfo(Relation relation, DistFdwFileSegment *s
  * input param @additionalData:we use this parameter to pass data.
  */
 static int distAcquireSampleRows(Relation relation, int logLevel, HeapTuple *sampleRows, int targetRowCount,
-                          double *totalRowCount, double *deadRows, void *additionalData, bool estimate_table_rownum)
+                                 double *totalRowCount, double *deadRows, void *additionalData, bool estimate_table_rownum)
 {
     /* We report "analyze" nothing if additionalData is null.  */
     if (additionalData == NULL) {
@@ -637,7 +648,7 @@ static int distAcquireSampleRows(Relation relation, int logLevel, HeapTuple *sam
              * reach the end of the relation.
              */
             if (sampleRowCount < targetRowCount) {
-                sampleRows[sampleRowCount++] = heap_form_tuple(tupleDescriptor, columnValues, columnNulls);
+                sampleRows[sampleRowCount++] = (HeapTuple)tableam_tops_form_tuple(tupleDescriptor, columnValues, columnNulls, HEAP_TUPLE);
             } else {
                 /*
                  * If we need to compute a new S value, we must use the "not yet
@@ -657,7 +668,7 @@ static int distAcquireSampleRows(Relation relation, int logLevel, HeapTuple *sam
                     Assert(rowIndex < targetRowCount);
 
                     heap_freetuple(sampleRows[rowIndex]);
-                    sampleRows[rowIndex] = heap_form_tuple(tupleDescriptor, columnValues, columnNulls);
+                    sampleRows[rowIndex] = (HeapTuple)tableam_tops_form_tuple(tupleDescriptor, columnValues, columnNulls, HEAP_TUPLE);
                 }
                 rowCountToSkip -= 1;
             }
@@ -841,7 +852,7 @@ static long searchForward(FILE *file, char *buf, long begin, long end, char *fil
             pos--;
         }
 
-        if (buf[pos] == searchChar) {
+        if (pos != -1) {
             /* find it */
             retPos = readStartPos + pos;
             break;
@@ -1063,6 +1074,7 @@ List *getOBSFileList(List *urllist, bool encrypt, const char *access_key, const 
     char *url = NULL;
 
     PROFILING_OBS_START();
+    pgstat_report_waitevent(WAIT_EVENT_OBS_LIST);
     foreach (lc, urllist) {
         url = strVal(lfirst(lc));
 
@@ -1074,6 +1086,7 @@ List *getOBSFileList(List *urllist, bool encrypt, const char *access_key, const 
             obs_file_list = list_concat(obs_file_list, flattened_locations);
         }
     }
+    pgstat_report_waitevent(WAIT_EVENT_END);
     PROFILING_OBS_END_LIST(list_length(obs_file_list));
 
     return obs_file_list;
@@ -1624,9 +1637,9 @@ static const char *FetchAndCheckFormat(DefElem *defel);
 static void distExportSwitchSegment(CopyState cstate, Relation rel);
 
 #ifndef WIN32
-static const char delimiter = '/';
+    static const char delimiter = '/';
 #else
-static const char delimiter = '\\';
+    static const char delimiter = '\\';
 #endif
 
 static const uint64 distExportMaxSegSize = (1 << 30);
@@ -1874,7 +1887,7 @@ static void CheckAndGetUserExportDir(const char *userExportDir)
 
     // until here the exporting directory is known, copy it into distExportDataDir.
     // make sure distExportDataDir ends with directory delimiter.
-    size_t lenOfDirName = strlen(userExportDir);
+    unsigned int lenOfDirName = strlen(userExportDir);
     if ((delimiter == userExportDir[lenOfDirName - 1]) && (lenOfDirName < MAX_PATH_LEN)) {
         rc = strncpy_s(t_thrd.bulk_cxt.distExportDataDir, MAX_PATH_LEN, userExportDir, lenOfDirName);
         securec_check(rc, "\0", "\0");
@@ -1980,110 +1993,120 @@ static void TransformFormatterOptions(CreateForeignTableStmt *stmt)
  * brief: Validate table definition
  * input param @obj: A Obj including infomation to validate when alter tabel and create table.
  */
-static void distValidateTableDef(Node *Obj)
+static void distValidateAlterTableStmt(Node* Obj)
+{
+    ListCell* lc = NULL;
+    AlterTableStmt* stmt = (AlterTableStmt*)Obj;
+
+    Oid relId = RangeVarGetRelid(stmt->relation, NoLock, true);
+    bool obsTbl = IS_OBS_CSV_TXT_FOREIGN_TABLE(relId);
+
+    foreach (lc, stmt->cmds) {
+        AlterTableCmd* cmd = (AlterTableCmd*)lfirst(lc);
+        if (obsTbl) {
+            if (!DIST_OBS_SUPPORT_AT_CMD(cmd->subtype)) {
+                ereport(ERROR, (errcode(ERRCODE_FDW_ERROR), errmsg("Un-support feature"),
+                                errdetail("target table is a foreign table")));
+            }
+        } else {
+            if (!FOREIGNTABLE_SUPPORT_AT_CMD(cmd->subtype)) {
+                if (!(AT_AddIndex == cmd->subtype || AT_DropConstraint == cmd->subtype)) {
+                    ereport(ERROR, (errcode(ERRCODE_FDW_ERROR), errmsg("Un-support feature"),
+                                    errdetail("target table is a foreign table")));
+                }
+            }
+        }
+
+        /* error_table, write_only can not SET, ADD or DROP by ALTER FOREIGN TABLE OPTIONS */
+        if (cmd->subtype == AT_GenericOptions) {
+            List* defList = (List*)cmd->def;
+            ListCell* deflc = NULL;
+            foreach (deflc, defList) {
+                DefElem* def = (DefElem*)lfirst(deflc);
+                if (strcmp(def->defname, optErrorRel) == 0 || strcmp(def->defname, optWriteOnly) == 0) {
+                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid option %s", def->defname)));
+                }
+            }
+        }
+    }
+}
+
+static void distValidateCreateForeignTableStmt(Node* Obj)
+{
+    CreateForeignTableStmt* stmt = (CreateForeignTableStmt*)Obj;
+    ListCell* lc = NULL;
+    List* options_list = stmt->options;
+    Node* errLog = stmt->error_relation;
+    Oid catalog = ForeignTableRelationId;
+    DistributeBy* DisByOp = ((CreateStmt*)Obj)->distributeby;
+
+    if (NULL != DisByOp && DISTTYPE_ROUNDROBIN != DisByOp->disttype) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Unsupport distribute type."),
+                        errdetail("Supported option value is \"roundrobin\".")));
+    }
+
+    foreach (lc, options_list) {
+        DefElem* def = (DefElem*)lfirst(lc);
+        if (!is_valid_option(def->defname, catalog)) {
+            const struct DistFdwOption* opt = NULL;
+            StringInfoData buf;
+
+            /*
+             * Unknown option specified, complain about it. Provide a hint
+             * with list of valid options for the object.
+             */
+            initStringInfo(&buf);
+            for (opt = loader_valid_options; opt->optname; opt++) {
+                if (catalog == opt->optcontext)
+                    appendStringInfo(&buf, "%s%s", (buf.len > 0) ? ", " : "", opt->optname);
+            }
+
+            ereport(ERROR,
+                    (errcode(ERRCODE_FDW_INVALID_OPTION_NAME), errmsg("invalid option \"%s\"", def->defname),
+                    buf.len > 0 ? errhint("Valid options in this context are: %s", buf.data)
+                    : errhint("There are no valid options in this context.")));
+        }
+    }
+
+    if (errLog != NULL) {
+        if (IsA(errLog, DefElem))
+            stmt->extOptions = lappend(stmt->extOptions, errLog);
+        else {
+            RangeVar *rv = (RangeVar *)errLog;
+            stmt->extOptions = lappend(stmt->extOptions, makeDefElem(pstrdup(optErrorRel),
+                                                                     (Node *)makeString(pstrdup(rv->relname))));
+        }
+    }
+
+    if (stmt->write_only) {
+        DefElem *writeOpt = makeDefElem(pstrdup(optWriteOnly),
+                                        (Node *)makeString(pstrdup(stmt->write_only ? "true" : "false")));
+        stmt->extOptions = lappend(stmt->extOptions, writeOpt);
+    }
+
+    if (stmt->part_state != NULL) {
+        ereport(ERROR, (errcode(ERRCODE_FDW_ERROR),
+                        errmsg("It is not allowed to create partition on this foreign table.")));
+    }
+
+    TransformFormatterOptions(stmt);
+    stmt->options = list_concat(stmt->options, stmt->extOptions);
+}
+
+static void distValidateTableDef(Node* Obj)
 {
     if (Obj == NULL)
         return;
 
     switch (nodeTag(Obj)) {
         case T_AlterTableStmt: {
-            ListCell *lc = NULL;
-            AlterTableStmt *stmt = (AlterTableStmt *)Obj;
-
-            Oid relId = RangeVarGetRelid(stmt->relation, NoLock, true);
-            bool obsTbl = IS_OBS_CSV_TXT_FOREIGN_TABLE(relId);
-
-            foreach (lc, stmt->cmds) {
-                AlterTableCmd *cmd = (AlterTableCmd *)lfirst(lc);
-                if (obsTbl) {
-                    if (!DIST_OBS_SUPPORT_AT_CMD(cmd->subtype)) {
-                        ereport(ERROR, (errcode(ERRCODE_FDW_ERROR), errmsg("Un-support feature"),
-                                        errdetail("target table is a foreign table")));
-                    }
-                } else {
-                    if (!FOREIGNTABLE_SUPPORT_AT_CMD(cmd->subtype)) {
-                        if (!(AT_AddIndex == cmd->subtype || AT_DropConstraint == cmd->subtype)) {
-                            ereport(ERROR, (errcode(ERRCODE_FDW_ERROR), errmsg("Un-support feature"),
-                                            errdetail("target table is a foreign table")));
-                        }
-                    }
-                }
-
-                /* error_table, write_only can not SET, ADD or DROP by ALTER FOREIGN TABLE OPTIONS */
-                if (cmd->subtype == AT_GenericOptions) {
-                    List *defList = (List *)cmd->def;
-                    ListCell *deflc = NULL;
-                    foreach (deflc, defList) {
-                        DefElem *def = (DefElem *)lfirst(deflc);
-                        if (strcmp(def->defname, optErrorRel) == 0 || strcmp(def->defname, optWriteOnly) == 0) {
-                            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid option %s", def->defname)));
-                        }
-                    }
-                }
-            }
-
+            distValidateAlterTableStmt(Obj);
             break;
         }
         case T_CreateForeignTableStmt: {
-            CreateForeignTableStmt *stmt = (CreateForeignTableStmt *)Obj;
-            ListCell *lc = NULL;
-            List *options_list = stmt->options;
-            Node *errLog = stmt->error_relation;
-            Oid catalog = ForeignTableRelationId;
-            DistributeBy *DisByOp = ((CreateStmt *)Obj)->distributeby;
-
-            if (NULL != DisByOp && DISTTYPE_ROUNDROBIN != DisByOp->disttype) {
-                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Unsupport distribute type."),
-                                errdetail("Supported option value is \"roundrobin\".")));
-            }
-
-            foreach (lc, options_list) {
-                DefElem *def = (DefElem *)lfirst(lc);
-                if (!is_valid_option(def->defname, catalog)) {
-                    const struct DistFdwOption *opt = NULL;
-                    StringInfoData buf;
-
-                    /*
-                     * Unknown option specified, complain about it. Provide a hint
-                     * with list of valid options for the object.
-                     */
-                    initStringInfo(&buf);
-                    for (opt = loader_valid_options; opt->optname; opt++) {
-                        if (catalog == opt->optcontext)
-                            appendStringInfo(&buf, "%s%s", (buf.len > 0) ? ", " : "", opt->optname);
-                    }
-
-                    ereport(ERROR,
-                            (errcode(ERRCODE_FDW_INVALID_OPTION_NAME), errmsg("invalid option \"%s\"", def->defname),
-                             buf.len > 0 ? errhint("Valid options in this context are: %s", buf.data)
-                                            : errhint("There are no valid options in this context.")));
-                }
-            }
-
-            if (errLog != NULL) {
-                if (IsA(errLog, DefElem))
-                    stmt->extOptions = lappend(stmt->extOptions, errLog);
-                else {
-                    RangeVar *rv = (RangeVar *)errLog;
-                    stmt->extOptions = lappend(stmt->extOptions, makeDefElem(pstrdup(optErrorRel),
-                                                                             (Node *)makeString(pstrdup(rv->relname))));
-                }
-            }
-
-            if (stmt->write_only) {
-                DefElem *writeOpt = makeDefElem(pstrdup(optWriteOnly),
-                                                (Node *)makeString(pstrdup(stmt->write_only ? "true" : "false")));
-                stmt->extOptions = lappend(stmt->extOptions, writeOpt);
-            }
-
-            if (stmt->part_state != NULL) {
-                ereport(ERROR, (errcode(ERRCODE_FDW_ERROR),
-                                errmsg("It is not allowed to create partition on this foreign table.")));
-            }
-
-            TransformFormatterOptions(stmt);
-            stmt->options = list_concat(stmt->options, stmt->extOptions);
-        } break;
+            distValidateCreateForeignTableStmt(Obj);
+            break;
+        }
         default:
             ereport(ERROR, (errcode(ERRCODE_FDW_ERROR), errmsg("unrecognized node type: %d", (int)nodeTag(Obj))));
             break;

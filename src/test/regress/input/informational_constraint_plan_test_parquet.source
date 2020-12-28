@@ -1,0 +1,290 @@
+--Test informational constraint on planner phase
+Drop server if exists hdfs_server cascade;
+-- CREATE SERVER hdfs_server FOREIGN DATA WRAPPER HDFS_FDW OPTIONS (type 'hdfs', address '10.67.128.30:25000,10.67.128.34:25000',HDFSCFGPATH '/home/hanfeng/FI_client/hadoop_client/HDFS/hadoop/etc/hadoop');
+set enable_constraint_optimization = on;
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+
+drop foreign table region;
+create foreign table region  (
+ R_REGIONKEY  int,
+ R_NAME TEXT,
+ R_COMMENT TEXT
+  , primary key (R_REGIONKEY) not enforced)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/region_parquet')
+distribute by roundrobin;
+
+drop foreign table nation;
+create foreign table nation  (
+ N_NATIONKEY INT4 unique not enforced,
+ N_NAME TEXT,
+ N_REGIONKEY INT4 primary key  not enforced,
+ N_COMMENT TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/nation_parquet/')
+distribute by roundrobin;
+----First£¬test foreign scan qual
+------ mode 1, [const1 operator ] col1 [operator const2]= const operator const, the operator are '+', '-' and '*'
+set enable_hdfs_predicate_pushdown =off;
+
+explain (costs off, nodes off) select * from region where r_regionkey = 5 ;
+explain (costs off, nodes off) select * from region where 5 = r_regionkey ;
+
+explain (costs off, nodes off) select * from region where r_regionkey  * 4  = 5 ;
+explain (costs off, nodes off) select * from region where 5  = 4  *  r_regionkey ;
+
+explain (costs off, nodes off) select * from region where 5  = 4  *  r_regionkey * 7 ;
+explain (costs off, nodes off) select * from region where  4  *  r_regionkey * 7  = 5;
+
+------ mode 2, [const1 operator ] col1 [operator const2] = const and expressioin (expressioin is not or clause ).
+
+explain (costs off, nodes off) select * from region where r_regionkey = 5 and R_NAME = 'top';
+explain (costs off, nodes off) select * from region where  R_NAME = 'top' and r_regionkey = 5;
+
+explain (costs off, nodes off) select * from region where r_regionkey * 3 = 5 and R_NAME = 'top';
+explain (costs off, nodes off) select * from region where r_regionkey = 5 +3;
+explain (costs off, nodes off) select * from region where 4 * r_regionkey * 3 = 5 and R_NAME = 'top';
+explain (costs off, nodes off) select * from region where  R_NAME = 'top' and 4 * r_regionkey * 3 = 5;
+explain (costs off, nodes off) select * from region where r_regionkey * 3 =5 and R_NAME = 'top';
+explain (costs off, nodes off) select * from region where 6 * r_regionkey * 3 =5 and R_NAME = 'top';
+explain (costs off, nodes off) select * from region where 6 - r_regionkey + 3 =5 and R_NAME = 'top';
+explain (costs off, nodes off) select N_nationkey from nation  where 9 = 3 + 3 * N_REGIONKEY +1;
+explain (costs off, nodes off) select N_nationkey from nation  where 3 + 3 * N_REGIONKEY +1 = 9;
+explain (costs off, nodes off) select N_nationkey from nation  where 3 + 3 * N_REGIONKEY +1 = 9 and N_REGIONKEY = 9;
+explain (costs off, nodes off) select N_nationkey from nation  where 9 = 3 * N_REGIONKEY +1;
+explain (costs off, nodes off) select N_nationkey from nation  where N_REGIONKEY *7 = 8; 
+
+------ test unnormal cases
+------this case do not optimization currently, if two informational constraint columns of one table appear in expression
+explain (costs off, nodes off) select N_nationkey from nation  where 3 + 3 * N_REGIONKEY +1 = N_NATIONKEY;
+
+drop foreign table nation;
+create foreign table nation  (
+ N_NATIONKEY INT4 unique not enforced,
+ N_NAME TEXT,
+ N_REGIONKEY INT4 ,
+ N_COMMENT TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/nation_parquet/')
+distribute by roundrobin;
+------this case do not optimization, if one cloumn is defined informational constaint, another is normal column
+explain (costs off, nodes off) select * from nation where n_nationkey = N_REGIONKEY;
+explain (costs off, nodes off) select N_nationkey from nation  where N_REGIONKEY+n_nationkey =9;
+explain (costs off, nodes off) select N_nationkey from nation  where N_REGIONKEY+n_nationkey*0 = 9; 
+------illegal operator
+explain (costs off, nodes off) select * from region where  4  *  r_regionkey / 7  = 5;
+explain (costs off, nodes off) select N_nationkey from nation  where 9 = N_REGIONKEY %2;
+------- if the operator is the '*', the const can not be a 0.
+explain (costs off, nodes off) select * from region where  4  *  r_regionkey * 0  = 5;
+explain (costs off, nodes off) select N_nationkey from nation  where 9 = N_REGIONKEY *0;
+------ the express must be and clause
+explain (costs off, nodes off) select * from region where (r_regionkey =5 or R_NAME = 'top') and R_COMMENT = 'tup';
+explain (costs off, nodes off) select * from region where r_regionkey =5 or R_NAME = 'top';
+explain (costs off, nodes off) select * from region where r_regionkey =5 and R_NAME = 'top' or R_COMMENT = 'tup';
+
+
+---- second, test join qual case
+set enable_hashjoin =off;
+drop foreign table nation;
+create foreign table nation  (
+ N_NATIONKEY INT4 unique not enforced,
+ N_NAME TEXT,
+ N_REGIONKEY INT4 primary key  not enforced,
+ N_COMMENT TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/nation_parquet/')
+distribute by roundrobin;
+--case1. [const1 operator ] col1 [operator const2] = [const3 operator ] col2 [operator const4]
+explain (costs off, nodes off) select * from nation, region where nation.n_regionkey = region.r_regionkey;  --(n_regionkey and r_regionkey are Informational Constaint column. )
+explain (costs off, nodes off) select * from nation, region where nation.n_regionkey * 3 = 3 + region. r_regionkey ;   --(n_regionkey and r_regionkey are Informational Constaint column. )
+explain (costs off, nodes off) select * from nation, region where 3 * nation.n_regionkey + 1 = region.r_regionkey + 4;  --(n_regionkey and r_regionkey are Informational Constaint column. )
+explain (costs off, nodes off) select * from nation, region where nation.n_regionkey %4 = region.r_regionkey * 4;   --(r_regionkey is Informational Constraint column, and is a inner table)
+explain (costs off, nodes off) select * from nation, region where 7*nation.n_regionkey + 1 = 6+ 9*region.r_regionkey + 4;
+------ the sub-expression which involved clumn of outer table may contain all operator.
+explain (costs off, nodes off) select * from nation, region where nation.n_regionkey %4 = region.r_regionkey * 4;
+
+------case2. [const1 operator ] col1 [operator const2]  operator [const3 operator] col2 [operator const4]= const
+drop foreign table region;
+create foreign table region  (
+ R_REGIONKEY  int,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/region_parquet')
+distribute by roundrobin;
+explain (costs off, nodes off) select * from nation, region where nation.n_regionkey + region.r_regionkey = 3;  --(n_regionkey is Informational Constraint column, and is a inner table)
+explain (costs off, nodes off) select * from nation, region where 3 + nation.n_regionkey + 8* region.r_regionkey = 0;  --(n_regionkey is Informational Constraint column, and is a inner table)
+explain (costs off, nodes off) select * from nation, region where nation.n_regionkey - region.r_regionkey = 3;  --(n_regionkey is Informational Constraint column, and is a inner table)
+explain (costs off, nodes off) select * from nation, region where nation.n_regionkey * region.r_regionkey = 3;  --(n_regionkey is Informational Constraint column, and is a inner table)
+explain (costs off, nodes off) select * from nation, region where 1 = region.r_regionkey+1  + nation.n_regionkey; --(n_regionkey is Informational Constraint column, and is a inner table)
+explain (costs off, nodes off) select * from nation, region where nation.n_regionkey + 1 - region.r_regionkey - 4 =3;
+explain (costs off, nodes off) select * from nation, region where nation.n_regionkey +region.r_regionkey + 1 = region.r_regionkey + 4;
+explain (costs off, nodes off) select * from nation, region where nation.n_regionkey * 4 + region.r_regionkey = 3;
+explain (costs off, nodes off) select * from nation, region where nation.n_regionkey + region.r_regionkey * 4 = 3;
+------ this sql, if the n_regionkey value is 0, the result will be error, but the custotmer could not do such operator.
+explain (costs off, nodes off) select * from nation, region where 8*nation.n_regionkey*region.r_regionkey  = 5;
+
+------ test unnormal cases
+explain (costs off, nodes off) select * from nation, region where 8*nation.n_regionkey*region.r_regionkey  = 0;
+
+explain (costs off, nodes off) select * from nation, region where nation.n_regionkey / region.r_regionkey = 3;  
+explain (costs off, nodes off) select * from nation, region where region.r_regionkey / nation.n_regionkey = 3; 
+--------currently, this case do not optimize. 
+explain (costs off, nodes off) select * from nation, region where 8*nation.n_regionkey*6 + 6*region.r_regionkey/5 +67=8;
+explain (costs off, nodes off) select * from nation, region where 8*nation.n_regionkey*6 + 6*region.r_regionkey/5 =8;
+-------- if the informational constraint column exist in two sides, currenty, do not optimize
+explain (costs off, nodes off) select * from nation, region where nation.n_regionkey %4 = region.r_regionkey * 4+ nation.N_NATIONKEY;
+explain (costs off, nodes off) select * from nation, region where nation.n_regionkey*6 + region.r_regionkey * 4= nation.n_nationkey;
+explain (costs off, nodes off) select * from nation, region where nation.n_regionkey*6 + region.r_regionkey = nation.n_nationkey;
+------illegal operator
+explain (costs off, nodes off) select * from nation, region where nation.n_regionkey * 4 = region.r_regionkey % 4;
+explain (costs off, nodes off) select * from nation, region where nation.n_regionkey / region.r_regionkey = 3;
+
+
+set enable_hdfs_predicate_pushdown=off;
+--test in not null qual remove case
+explain (costs off, nodes off) select * from nation  where N_REGIONKEY is not null ;
+
+explain (costs off, nodes off) select * from nation  where N_REGIONKEY is not null and n_name ='test';
+
+explain (costs off, nodes off) select * from nation  where N_REGIONKEY is not null or n_name ='test';
+
+explain (costs off, nodes off) select * from nation  where n_name ='test' or N_REGIONKEY is not null;
+
+explain (costs off, nodes off) select * from nation  where N_REGIONKEY is not null or n_name ='test' and n_name ='test' or N_COMMENT = 'top';
+
+explain (costs off, nodes off) select * from nation  where N_REGIONKEY is not null and n_name ='test' and N_COMMENT = 'top';
+
+explain (costs off, nodes off) select * from nation  where N_REGIONKEY is not null or n_name ='test' and N_COMMENT = 'top';
+
+explain (costs off, nodes off) select * from nation  where N_REGIONKEY is not null and n_name ='test' or N_COMMENT = 'top';
+explain (costs off, nodes off) select * from nation  where N_REGIONKEY is not null and n_name ='test' or N_COMMENT = 'top' or N_REGIONKEY is not null;
+
+explain (costs off, nodes off) select * from nation  where N_REGIONKEY is not null or n_name ='test' or N_COMMENT = 'top';
+
+explain (costs off, nodes off) select * from nation  where N_NATIONKEY is not null or N_REGIONKEY is not null;
+
+explain (costs off, nodes off) select * from nation  where N_REGIONKEY is not null and n_name ='test' and N_COMMENT = 'top';
+
+explain (costs off, nodes off) select * from nation  where N_REGIONKEY is not null or n_name ='test';
+
+drop foreign table nation;
+create foreign table nation  (
+ N_NATIONKEY INT4 not null,
+ N_NAME TEXT,
+ N_REGIONKEY INT4 primary key  not enforced,
+ N_COMMENT TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/nation_parquet/')
+distribute by roundrobin;
+explain (costs off, nodes off) select * from nation  where N_NATIONKEY is not null or n_name ='test';
+
+
+--test group by optimization(not enable)
+drop foreign table nation;
+create foreign table nation  (
+ N_NATIONKEY INT4 not null,
+ N_NAME TEXT,
+ N_REGIONKEY INT4 primary key  not enforced,
+ N_COMMENT TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/nation_parquet/')
+distribute by roundrobin;
+explain (costs off, nodes off) select N_REGIONKEY from nation group by n_regionkey; 
+explain (costs off, nodes off) select N_REGIONKEY + 1 from nation group by n_regionkey + 1;
+
+
+explain (costs off, nodes off) select N_REGIONKEY, max(n_nationkey) from nation group by n_regionkey; 
+explain (costs off, nodes off) select N_REGIONKEY, min(n_nationkey) from nation group by n_regionkey; 
+explain (costs off, nodes off) select N_REGIONKEY, sum(n_nationkey) from nation group by n_regionkey; 
+explain (costs off, nodes off) select sum(N_REGIONKEY), avg(n_nationkey) from nation group by n_regionkey;
+explain (costs off, nodes off) select N_REGIONKEY, sum(n_nationkey) from nation group by n_regionkey having n_regionkey < 10; 
+
+explain (costs off, nodes off) select N_REGIONKEY, sum(n_nationkey) from nation group by n_regionkey having n_nationkey < 10; 
+
+explain (costs off, nodes off) select n_regionkey, sum(n_nationkey)  from nation group by n_regionkey, n_nationkey ;
+
+--this case dose not optimized
+explain (costs off, nodes off) select N_REGIONKEY + n_nationkey from nation group by n_regionkey + n_nationkey;
+explain (costs off, nodes off) select N_REGIONKEY, count(n_nationkey) from nation group by n_regionkey; 
+explain (costs off, nodes off) select sum(N_REGIONKEY), count(n_nationkey) from nation group by n_regionkey;
+explain (costs off, nodes off) select N_REGIONKEY, sum(n_nationkey) from nation group by n_regionkey having sum(n_nationkey) < 10; 
+--test group by optimization
+explain (costs off, nodes off) select n_regionkey, sum(n_nationkey)  from nation group by n_nationkey, n_regionkey;
+
+----test not in, the Anti Join scan will appear in plan tree.
+drop foreign table region;
+create foreign table region  (
+ R_REGIONKEY  int,
+ R_NAME TEXT,
+ R_COMMENT TEXT
+  , primary key (R_REGIONKEY) not enforced)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/region_parquet')
+distribute by roundrobin;
+
+drop foreign table nation;
+create foreign table nation  (
+ N_NATIONKEY INT4 ,
+ N_NAME TEXT,
+ N_REGIONKEY INT4 primary key  not enforced,
+ N_COMMENT TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/nation_parquet/')
+distribute by roundrobin;
+explain (costs off, nodes off) select * from region where R_REGIONKEY not in (select N_REGIONKEY from nation );
+
+
+--test distinct optimization
+----explain select distinct (n_regionkey) from nation;
+----explain select distinct on (n_regionkey) n_nationkey from nation;
+----explain select distinct on (n_regionkey + 1) n_regionkey + 1 from nation ;
+----explain select distinct on (n_regionkey + 1) n_nationkey from nation ;
+----explain select distinct on (n_regionkey + 1) n_nationkey + 3 from nation ;
+----explain select distinct on (n_regionkey - 1) n_regionkey from nation ;
+----explain select distinct on (n_regionkey * 1) n_regionkey from nation ;
+----explain select distinct on (n_regionkey * 1 + 9) n_regionkey from nation ;
+----explain select distinct on (n_regionkey % 6 + 9) n_regionkey from nation ;
+----
+----explain select distinct (n_regionkey ,n_nationkey) from nation;
+------this case dose not optimized
+----explain select distinct on (n_regionkey * 0 + 9) n_regionkey from nation;
+----explain select distinct (n_regionkey + n_nationkey) from nation;
+----explain select distinct n_regionkey, n_nationkey from nation;
+
+--add llt
+set enable_hdfs_predicate_pushdown = on;
+drop foreign table if exists nation;
+create foreign table nation  (
+ N_NATIONKEY INT4 unique not enforced,
+ N_NAME TEXT,
+ N_REGIONKEY INT4 primary key  not enforced,
+ N_COMMENT TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/nation_parquet/')
+distribute by roundrobin;
+
+explain (costs off, nodes off) select * from nation where N_NATIONKEY = 5 and N_REGIONKEY+5 = 7;
+explain (costs off, nodes off) select * from nation where N_NATIONKEY = 5 ;
+
+set explain_perf_mode=pretty;
+explain (costs off, nodes off) select * from nation where N_NATIONKEY = 5 and N_REGIONKEY+5 = 7;
+explain (costs off, nodes off) select * from nation where N_NATIONKEY = 5 ;
+explain performance select * from  nation where N_NATIONKEY = 9;
+
+set enable_indexscan=off;
+set enable_indexonlyscan=off;
+set enable_bitmapscan=off;
+explain (costs off, nodes off) select c.relname
+from pg_class as c
+left join 
+(
+select p.oid as rel
+from pg_class as p
+group by 1
+) as tt on (c.oid = tt.rel)
+where (c.relname = 'storage_para_t1' or tt.rel is not null)
+order by c.reloptions;
+
+drop server if exists hdfs_server cascade;
+set enable_constraint_optimization = off;

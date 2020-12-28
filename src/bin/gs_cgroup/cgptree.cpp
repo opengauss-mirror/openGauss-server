@@ -28,12 +28,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <errno.h>
 #include <pthread.h>
-#include <pwd.h>
 #include <sys/syscall.h>
 
 #include <libcgroup.h>
@@ -702,13 +700,13 @@ static void cgptree_print_group_new(struct group_info* ginfo, int level)
     fprintf(stdout, "- %s ", ginfo->grpname);
 
     /* print cpu shares */
-    fprintf(stdout, "(shares: %d,", (int)ginfo->cpu_shares);
+    fprintf(stdout, "(shares: %lu,", ginfo->cpu_shares);
 
     /* print cpuset */
     fprintf(stdout, " cpus: %s", ginfo->cpuset_cpus);
 
     if (cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()) {
-        fprintf(stdout, ", weight: %ld", (long)ginfo->blkio_weight);
+        fprintf(stdout, ", weight: %lu", ginfo->blkio_weight);
 
         if ((ginfo->blkio_bpsread != NULL) && ginfo->blkio_bpsread[0]) {
             BLKIO_STR_UPDATE(ginfo->blkio_bpsread);
@@ -790,6 +788,24 @@ static void cgptree_free(struct controller_info* cinfo_head)
     }
 }
 
+void free_controller_list_resource(struct controller_info* curr_cinfo,
+                                   char* curr_path,
+                                   struct controller_info* cinfo_head,
+                                   void* ctrl_handle)
+{
+    if (curr_cinfo != NULL) {
+        if (curr_cinfo->ctrl_name != NULL) {
+            free(curr_cinfo->ctrl_name);
+        }
+        free(curr_cinfo);
+    }
+    if (curr_path != NULL) {
+        free(curr_path);
+    }
+    cgptree_free(cinfo_head);
+    cgroup_get_controller_end(&ctrl_handle);
+}
+
 /*
  * function name: cgptree_get_controller_list
  * description  : read all cgroups and make up of the controller information
@@ -814,15 +830,9 @@ static struct controller_info* cgptree_get_controller_list(void)
     }
 
     while (error != ECGEOF) {
-        if (curr_path != NULL) {
-            free(curr_path);
-            curr_path = NULL;
-        }
-
         curr_path = strdup(info.path);
         if (curr_path == NULL) {
-            cgptree_free(cinfo_head);
-            cgroup_get_controller_end(&ctrl_handle);
+            free_controller_list_resource(curr_cinfo, curr_path, cinfo_head, ctrl_handle);
             return NULL;
         }
 
@@ -833,7 +843,6 @@ static struct controller_info* cgptree_get_controller_list(void)
         ginfo = cgptree_get_group_tree(info);
         if (NULL == ginfo) {
             free(curr_path);
-            curr_path = NULL;
 
             error = cgroup_get_controller_next(&ctrl_handle, &info);
             if (error && error != ECGEOF) {
@@ -847,22 +856,18 @@ static struct controller_info* cgptree_get_controller_list(void)
         /* allocate structure for new controller */
         curr_cinfo = (struct controller_info*)calloc(1, sizeof(struct controller_info));
         if (curr_cinfo == NULL) {
-            free(curr_path);
-            curr_path = NULL;
-            cgptree_free(cinfo_head);
-            cgroup_get_controller_end(&ctrl_handle);
+            free_controller_list_resource(curr_cinfo, curr_path, cinfo_head, ctrl_handle);
             return NULL;
         }
 
         curr_cinfo->ctrl_name = strdup(info.name);
+        if (curr_cinfo->ctrl_name == NULL) {
+            free_controller_list_resource(curr_cinfo, curr_path, cinfo_head, ctrl_handle);
+            return NULL;
+        }
         curr_cinfo->mount_point = strdup(info.path);
-        if (curr_cinfo->ctrl_name == NULL || curr_cinfo->mount_point == NULL) {
-            free(curr_cinfo);
-            curr_cinfo = NULL;
-            free(curr_path);
-            curr_path = NULL;
-            cgptree_free(cinfo_head);
-            cgroup_get_controller_end(&ctrl_handle);
+        if (curr_cinfo->mount_point == NULL) {
+            free_controller_list_resource(curr_cinfo, curr_path, cinfo_head, ctrl_handle);
             return NULL;
         }
 
@@ -881,11 +886,10 @@ static struct controller_info* cgptree_get_controller_list(void)
             prev_cinfo->next = curr_cinfo;
 
         prev_cinfo = curr_cinfo;
-    }
-
-    if (curr_path != NULL) {
-        free(curr_path);
-        curr_path = NULL;
+        if (curr_path != NULL) {
+            free(curr_path);
+        }
+        curr_cinfo = NULL;
     }
 
     cgroup_get_controller_end(&ctrl_handle);

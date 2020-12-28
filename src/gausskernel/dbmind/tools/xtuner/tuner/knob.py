@@ -17,7 +17,7 @@ import json
 
 from prettytable import PrettyTable
 
-from tuner.utils import construct_header
+from tuner.utils import construct_dividing_line
 
 
 class _KnobEncoder(json.JSONEncoder):
@@ -38,9 +38,9 @@ class RecommendedKnobs:
                       'through the configuration file.'
 
     def output_formatted_knobs(self):
-        print(construct_header('Knob Recommendation Report', padding='*'))
+        print(construct_dividing_line('Knob Recommendation Report', padding='*'))
         print(self.report)
-        print(construct_header('Recommended Knob Settings', padding='*'))
+        print(construct_dividing_line('Recommended Knob Settings', padding='*'))
 
         knob_table = PrettyTable()
         knob_table.field_names = ['name', 'recommend', 'min', 'max', 'restart']
@@ -55,6 +55,9 @@ class RecommendedKnobs:
         print(knob_table)
 
     def dump(self, fp, dump_report_knobs=True):
+        """
+        Dump the tuning result.
+        """
         knob_dict = dict()
         knob_list = list()
 

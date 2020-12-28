@@ -12,13 +12,13 @@ create table copy_create_err_tab_001_01
    c_numeric numeric(7,2) ,
    c_timestamp timestamp without time zone 
 )  ;
-copy copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par' 
+copy copy_create_err_tab_001_01 from '@abs_srcdir@/data/data_err_par' 
 log errors reject limit 'unlimited'
 with(delimiter '|',format 'text',
 encoding 'utf8');
 drop table if exists pgxc_copy_error_log;
 select * from copy_error_log_create();
-copy copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par' 
+copy copy_create_err_tab_001_01 from '@abs_srcdir@/data/data_err_par' 
 log errors reject limit 'unlimited'
 with(delimiter '|',format 'text',
 encoding 'utf8');
@@ -50,17 +50,17 @@ create table err_copy_create_err_tab_001_01
    c_numeric numeric(7,2) ,
    c_timestamp timestamp without time zone 
 )  ;
-copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par' 
+copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/data/data_err_par' 
 log errors reject limit 'unlimited'
 with(delimiter ',',format 'text',
 encoding 'utf8');
 alter table pgxc_copy_error_log add  column   ext3 text;
-copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par' 
+copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/data/data_err_par' 
 log errors reject limit 'unlimited'
 with(delimiter ',',format 'text',
 encoding 'utf8');
 alter table pgxc_copy_error_log drop  column lineno ;
-copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par' 
+copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/data/data_err_par' 
 log errors reject limit 'unlimited'
 with(delimiter ',',format 'text',
 encoding 'utf8');
@@ -82,13 +82,13 @@ create table copy_create_err_tab_001_01
    c_numeric numeric(7,2) ,
    c_timestamp timestamp without time zone
 )  ;
-copy copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par'
+copy copy_create_err_tab_001_01 from '@abs_srcdir@/data/data_err_par'
 log errors data reject limit 'unlimited'
 with(delimiter '|',format 'text',
 encoding 'utf8');
 drop table if exists pgxc_copy_error_log;
 select * from copy_error_log_create();
-copy copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par'
+copy copy_create_err_tab_001_01 from '@abs_srcdir@/data/data_err_par'
 log errors data reject limit 'unlimited'
 with(delimiter '|',format 'text',
 encoding 'utf8');
@@ -120,17 +120,17 @@ create table err_copy_create_err_tab_001_01
    c_numeric numeric(7,2) ,
    c_timestamp timestamp without time zone
 )  ;
-copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par'
+copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/data/data_err_par'
 log errors data reject limit 'unlimited'
 with(delimiter ',',format 'text',
 encoding 'utf8');
 alter table pgxc_copy_error_log add  column   ext3 text;
-copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par'
+copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/data/data_err_par'
 log errors data reject limit 'unlimited'
 with(delimiter ',',format 'text',
 encoding 'utf8');
 alter table pgxc_copy_error_log drop  column lineno ;
-copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par'
+copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/data/data_err_par'
 log errors data reject limit 'unlimited'
 with(delimiter ',',format 'text',
 encoding 'utf8');

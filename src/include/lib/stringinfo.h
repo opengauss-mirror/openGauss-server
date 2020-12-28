@@ -147,8 +147,8 @@ extern void copyStringInfo(StringInfo to, StringInfo from);
  * enlargeBuffer
  * Make sure a buffer can hold at least 'needed' more bytes.
  */
-template <class T>
-void enlargeBuffer(_in_ int needed, _in_ int len, __inout T* maxlen, __inout char** data);
+void enlargeBuffer(int needed, int len, int* maxlen, char** data);
+void enlargeBufferSize(int needed, int len, size_t* maxlen, char** data);
 
 /* ------------------------
  * enlargeStringInfo

@@ -24,6 +24,7 @@
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
+#include "access/tableam.h"
 #include "access/reloptions.h"
 #include "catalog/pg_foreign_data_wrapper.h"
 #include "catalog/pg_foreign_server.h"
@@ -39,7 +40,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 /* The dummy server cache pointer. It store the struct DummyServerOptions
  * value. we search the sepcified server options info by server oid from the
@@ -61,14 +62,14 @@ DummyServerOptions* getDummyServerOptionsFromCache(Oid serverOid);
 Oid getDummyServerOid()
 {
     Relation rel;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tuple = NULL;
     Form_pg_foreign_server serverForm;
     Oid serverOid = InvalidOid;
 
     rel = heap_open(ForeignServerRelationId, AccessShareLock);
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         serverForm = (Form_pg_foreign_server)GETSTRUCT(tuple);
         if (isSpecifiedSrvTypeFromSrvName(NameStr(serverForm->srvname), DUMMY_SERVER)) {
             serverOid = HeapTupleGetOid(tuple);
@@ -76,7 +77,7 @@ Oid getDummyServerOid()
         }
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, NoLock);
 
     return serverOid;
@@ -195,9 +196,10 @@ DummyServerOptions* getDummyServerOptionsFromCache(Oid serverOid)
         return entry;
     }
 
-    MemoryContext oldCxt = MemoryContextSwitchTo(g_instance.instance_context);
+    MemoryContext oldCxt = MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
     char* userName = pstrdup(getServerOptionValue(serverOid, OPTION_NAME_USER_NAME));
-    char* passWord = pstrdup(getServerOptionValue(serverOid, OPTION_NAME_PASSWD));
+    /* pstrdup called in getServerOptionValue when password */
+    char* passWord = getServerOptionValue(serverOid, OPTION_NAME_PASSWD);
     char* address = pstrdup(getServerOptionValue(serverOid, OPTION_NAME_ADDRESS));
 
     char* dbname = getServerOptionValue(serverOid, OPTION_NAME_DBNAME);
@@ -228,6 +230,16 @@ DummyServerOptions* getDummyServerOptionsFromCache(Oid serverOid)
         entry->serverOid = serverOid;
     }
     LWLockRelease(dummyServerInfoCacheLock);
+    if (found) {
+        int passWordLength = strlen(passWord);
+        errno_t rc = memset_s(passWord, passWordLength, 0, passWordLength);
+        securec_check(rc, "\0", "\0");
+        pfree_ext(passWord);
+        pfree_ext(userName);
+        pfree_ext(address);
+        pfree_ext(dbname);
+        pfree_ext(remoteservername);
+    }
 
     return entry;
 }

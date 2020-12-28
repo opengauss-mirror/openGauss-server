@@ -1,0 +1,62 @@
+
+--
+----  ALTER TABLE SET WITHOUT CLUSTER
+--
+create table test_alter_table_set_without_cluster(a int, b int, c text)
+partition by range (a)
+(
+	partition p1_test_alter_table_set_without_cluster values less than (1),
+	partition p2_test_alter_table_set_without_cluster values less than (4),
+	partition p3_test_alter_table_set_without_cluster values less than (7)
+);
+
+create index test_alter_table_set_without_cluster_a_index on test_alter_table_set_without_cluster (a) local;
+create index test_alter_table_set_without_cluster_b_index on test_alter_table_set_without_cluster (b) local;
+create index test_alter_table_set_without_cluster_c_index on test_alter_table_set_without_cluster (c) local;
+create index test_alter_table_set_without_cluster_a_c_index on test_alter_table_set_without_cluster (a, c) local;
+create index test_alter_table_set_without_cluster_b_c_index on test_alter_table_set_without_cluster (b, c) local;
+
+insert into test_alter_table_set_without_cluster values (0, 0, 'd');
+insert into test_alter_table_set_without_cluster values (0, 0, 'c');
+insert into test_alter_table_set_without_cluster values (0, 5, 'a');
+insert into test_alter_table_set_without_cluster values (0, 3, 'b');
+insert into test_alter_table_set_without_cluster values (0, 6, 'e');
+insert into test_alter_table_set_without_cluster values (0, 6, 'd');
+insert into test_alter_table_set_without_cluster values (0, 1, 'ab');
+insert into test_alter_table_set_without_cluster values (0, 2, 'bd');
+insert into test_alter_table_set_without_cluster values (0, 4, 'fg');
+
+insert into test_alter_table_set_without_cluster values (2, 0, 'd');
+insert into test_alter_table_set_without_cluster values (2, 0, 'c');
+insert into test_alter_table_set_without_cluster values (2, 5, 'a');
+insert into test_alter_table_set_without_cluster values (2, 3, 'b');
+insert into test_alter_table_set_without_cluster values (2, 6, 'e');
+insert into test_alter_table_set_without_cluster values (2, 6, 'd');
+insert into test_alter_table_set_without_cluster values (2, 1, 'ab');
+insert into test_alter_table_set_without_cluster values (2, 2, 'bd');
+insert into test_alter_table_set_without_cluster values (2, 4, 'fg');
+
+
+cluster test_alter_table_set_without_cluster using test_alter_table_set_without_cluster_b_index;
+-- Verify that indisclustered is correctly set
+SELECT pg_class.relname FROM pg_index, pg_class, pg_class AS pg_class_2
+WHERE pg_class.oid=indexrelid
+	AND indrelid=pg_class_2.oid
+	AND pg_class_2.relname = 'test_alter_table_set_without_cluster'
+	AND indisclustered;
+
+alter table test_alter_table_set_without_cluster set without cluster;
+-- Verify that indisclustered is correctly set
+SELECT pg_class.relname FROM pg_index, pg_class, pg_class AS pg_class_2
+WHERE pg_class.oid=indexrelid
+	AND indrelid=pg_class_2.oid
+	AND pg_class_2.relname = 'test_alter_table_set_without_cluster'
+	AND indisclustered;
+
+insert into test_alter_table_set_without_cluster values(0, -1, 'A');
+cluster test_alter_table_set_without_cluster;
+select * from test_alter_table_set_without_cluster order by 1, 2, 3;
+
+
+-- clean
+drop table test_alter_table_set_without_cluster;

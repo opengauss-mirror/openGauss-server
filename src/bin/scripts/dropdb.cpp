@@ -13,7 +13,7 @@
 #include "common.h"
 #include "dumputils.h"
 
-static void help(const char* progname_tem);
+static void help(const char* progname);
 
 int main(int argc, char* argv[])
 {
@@ -30,12 +30,12 @@ int main(int argc, char* argv[])
         {"maintenance-db", required_argument, NULL, 2},
         {NULL, 0, NULL, 0}};
 
-    const char* progname_tem = NULL;
+    const char* progname = NULL;
     int optindex;
     int c;
 
-    char* dbname_tem = NULL;
-    const char* maintenance_db = NULL;
+    char* dbname = NULL;
+    char* maintenance_db = NULL;
     char* host = NULL;
     char* port = NULL;
     char* username = NULL;
@@ -48,7 +48,7 @@ int main(int argc, char* argv[])
     PGconn* conn = NULL;
     PGresult* result = NULL;
 
-    progname_tem = get_progname(argv[0]);
+    progname = get_progname(argv[0]);
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pgscripts"));
 
     handle_help_version_opts(argc, argv, "dropdb", help);
@@ -83,46 +83,46 @@ int main(int argc, char* argv[])
                 maintenance_db = optarg;
                 break;
             default:
-                fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname_tem);
+                fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
                 exit(1);
         }
     }
 
     switch (argc - optind) {
         case 0:
-            fprintf(stderr, _("%s: missing required argument database name\n"), progname_tem);
-            fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname_tem);
+            fprintf(stderr, _("%s: missing required argument database name\n"), progname);
+            fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
             exit(1);
         case 1:
-            dbname_tem = argv[optind];
+            dbname = argv[optind];
             break;
         default:
-            fprintf(stderr, _("%s: too many command-line arguments (first is \"%s\")\n"), progname_tem, argv[optind + 1]);
-            fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname_tem);
+            fprintf(stderr, _("%s: too many command-line arguments (first is \"%s\")\n"), progname, argv[optind + 1]);
+            fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
             exit(1);
     }
 
     if (interactive) {
-        printf(_("Database \"%s\" will be permanently removed.\n"), dbname_tem);
+        printf(_("Database \"%s\" will be permanently removed.\n"), dbname);
         if (!yesno_prompt("Are you sure?"))
             exit(0);
     }
 
     initPQExpBuffer(&sql);
 
-    appendPQExpBuffer(&sql, "DROP DATABASE %s%s;\n", (if_exists ? "IF EXISTS " : ""), fmtId(dbname_tem));
+    appendPQExpBuffer(&sql, "DROP DATABASE %s%s;\n", (if_exists ? "IF EXISTS " : ""), fmtId(dbname));
 
     /* Avoid trying to drop postgres db while we are connected to it. */
-    if (maintenance_db == NULL && strcmp(dbname_tem, "postgres") == 0)
+    if (maintenance_db == NULL && strcmp(dbname, "postgres") == 0)
         maintenance_db = "template1";
 
-    conn = connectMaintenanceDatabase(maintenance_db, host, port, username, prompt_password, progname_tem);
+    conn = connectMaintenanceDatabase(maintenance_db, host, port, username, prompt_password, progname);
 
     if (echo)
         printf("%s", sql.data);
     result = PQexec(conn, sql.data);
     if (PQresultStatus(result) != PGRES_COMMAND_OK) {
-        fprintf(stderr, _("%s: database removal failed: %s"), progname_tem, PQerrorMessage(conn));
+        fprintf(stderr, _("%s: database removal failed: %s"), progname, PQerrorMessage(conn));
         PQfinish(conn);
         exit(1);
     }
@@ -132,11 +132,11 @@ int main(int argc, char* argv[])
     exit(0);
 }
 
-static void help(const char* progname_tem)
+static void help(const char* progname)
 {
-    printf(_("%s removes a PostgreSQL database.\n\n"), progname_tem);
+    printf(_("%s removes a PostgreSQL database.\n\n"), progname);
     printf(_("Usage:\n"));
-    printf(_("  %s [OPTION]... DBNAME\n"), progname_tem);
+    printf(_("  %s [OPTION]... DBNAME\n"), progname);
     printf(_("\nOptions:\n"));
     printf(_("  -e, --echo                show the commands being sent to the server\n"));
     printf(_("  -i, --interactive         prompt before deleting anything\n"));
@@ -152,4 +152,3 @@ static void help(const char* progname_tem)
     printf(_("  --maintenance-db=DBNAME   alternate maintenance database\n"));
     printf(_("\nReport bugs to <pgsql-bugs@postgresql.org>.\n"));
 }
-

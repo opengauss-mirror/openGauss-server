@@ -62,7 +62,7 @@ select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesg
  partition_reindex_table3_ind1 | t              | t               | f           | t          | f            | t
 (1 row)
 
-explain (costs off, nodes off) select * from partition_reindex_table3 where c1 = 998 ;
+explain (costs off) select * from partition_reindex_table3 where c1 = 998 ;
                           QUERY PLAN                          
 --------------------------------------------------------------
  Streaming (type: GATHER)
@@ -86,7 +86,7 @@ select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesg
  partition_reindex_table3_ind1 | t              | t               | f           | t          | f            | t
 (1 row)
 
-explain (costs off, nodes off) select * from partition_reindex_table3 where c1 = 998;
+explain (costs off) select * from partition_reindex_table3 where c1 = 998;
                           QUERY PLAN                          
 --------------------------------------------------------------
  Streaming (type: GATHER)
@@ -112,7 +112,7 @@ select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesg
  partition_reindex_table3_ind1 | t              | t               | f           | t          | f            | t
 (1 row)
 
-explain (costs off, nodes off) select * from partition_reindex_table3 where c1 = 998 ;
+explain (costs off) select * from partition_reindex_table3 where c1 = 998 ;
                           QUERY PLAN                          
 --------------------------------------------------------------
  Streaming (type: GATHER)
@@ -136,7 +136,7 @@ select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesg
  partition_reindex_table3_ind1 | t              | t               | f           | t          | f            | t
 (1 row)
 
-explain (costs off, nodes off) select * from partition_reindex_table3 where c1 = 998;
+explain (costs off) select * from partition_reindex_table3 where c1 = 998;
                           QUERY PLAN                          
 --------------------------------------------------------------
  Streaming (type: GATHER)
@@ -163,7 +163,7 @@ select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesg
  partition_reindex_table3_ind1 | t              | t               | f           | t          | f            | t
 (1 row)
 
-explain (costs off, nodes off) select * from partition_reindex_table3 where c1 = 998 ;
+explain (costs off) select * from partition_reindex_table3 where c1 = 998 ;
                           QUERY PLAN                          
 --------------------------------------------------------------
  Streaming (type: GATHER)
@@ -187,7 +187,7 @@ select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesg
  partition_reindex_table3_ind1 | t              | t               | f           | t          | f            | t
 (1 row)
 
-explain (costs off, nodes off) select * from partition_reindex_table3 where c1 = 998;
+explain (costs off) select * from partition_reindex_table3 where c1 = 998;
                           QUERY PLAN                          
 --------------------------------------------------------------
  Streaming (type: GATHER)
@@ -214,7 +214,7 @@ select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesg
  partition_reindex_table3_ind1 | t              | t               | f           | t          | f            | t
 (1 row)
 
-explain (costs off, nodes off) select * from partition_reindex_table3 where c1 = 998 ;
+explain (costs off) select * from partition_reindex_table3 where c1 = 998 ;
                           QUERY PLAN                          
 --------------------------------------------------------------
  Streaming (type: GATHER)
@@ -238,7 +238,7 @@ select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesg
  partition_reindex_table3_ind1 | t              | t               | f           | t          | f            | t
 (1 row)
 
-explain (costs off, nodes off) select * from partition_reindex_table3 where c1 = 998;
+explain (costs off) select * from partition_reindex_table3 where c1 = 998;
                           QUERY PLAN                          
 --------------------------------------------------------------
  Streaming (type: GATHER)

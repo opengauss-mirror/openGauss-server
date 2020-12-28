@@ -1,3 +1,0 @@
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "wal_level=hot_standby"
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "wal_level=on"
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "wal_level=''"

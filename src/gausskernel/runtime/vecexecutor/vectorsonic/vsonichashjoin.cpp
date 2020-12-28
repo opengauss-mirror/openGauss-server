@@ -49,7 +49,12 @@
  * Estimated hash table size:
  * 4 bytes * (nrows + 1.01 nrows) = 8.04 nrows.
  */
+
+#ifdef USE_PRIME
+#define GETLOCID(val, mask) ((val) % (mask))
+#else
 #define GETLOCID(val, mask) ((val) & (mask))
+#endif
 
 /*
  * @Description:  Check condition for sonic hash join.
@@ -1050,7 +1055,11 @@ void SonicHashJoin::buildHashTable(uint32 curPartIdx)
     BucketType* hashBucket = ((BucketType*)mem_partition->m_bucket);
     BucketType* hashNext = ((BucketType*)mem_partition->m_next);
 
+#ifdef USE_PRIME
+    mem_partition->m_mask = mem_partition->m_hashSize;
+#else
     mem_partition->m_mask = mem_partition->m_hashSize - 1;
+#endif
 
     /* This partition hasn't any data. So return directly. */
     if (mem_partition->m_rows == 0) {
@@ -2951,7 +2960,11 @@ void SonicHashJoin::calcDatumArrayExpandSize()
  */
 inline uint64 SonicHashJoin::calcHashSize(int64 nrows)
 {
+#ifdef USE_PRIME
+    return hashfindprime(nrows);
+#else
     return Max(MIN_HASH_TABLE_SIZE, getPower2LessNum(Min(nrows, (int)(MAX_BUCKET_NUM))));
+#endif
 }
 
 /*

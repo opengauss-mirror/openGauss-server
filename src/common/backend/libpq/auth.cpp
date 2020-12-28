@@ -46,9 +46,11 @@
 #include "portability/instr_time.h"
 #include "postmaster/postmaster.h"
 #include "utils/acl.h"
+#include "gs_policy/policy_common.h"
 
 #include "cipher.h"
 #include "openssl/rand.h"
+#include "pgstat.h"
 
 extern bool dummyStandbyMode;
 extern GlobalNodeDefinition* global_node_definition;
@@ -61,6 +63,7 @@ static void sendAuthRequest(Port* port, AuthRequest areq);
 static void auth_failed(Port* port, int status);
 static char* recv_password_packet(Port* port);
 static int recv_and_check_password_packet(Port* port);
+static void clear_gss_info(pg_gssinfo* gss);
 
 /* ----------------------------------------------------------------
  * Ident authentication
@@ -192,6 +195,11 @@ static int pg_SSPI_recvauth(Port* port);
  */
 #define PG_MAX_AUTH_TOKEN_LENGTH 65535
 
+/* ----------------------------------------------------------------
+ * Global authentication functions
+ * ----------------------------------------------------------------
+ */
+
 /*
  * This hook allows plugins to get control following client authentication,
  * but before the user has been informed about the results.  It could be used
@@ -286,6 +294,12 @@ static void auth_failed(Port* port, int status)
         port->database_name,
         port->user_name);
     securec_check_ss(rc, "\0", "\0");
+
+
+    /* it's unsafe to deal with plugins hooks as dynamic lib may be released */
+    if (!(g_instance.status > NoShutdown) && user_login_hook) {
+        user_login_hook(port->database_name, port->user_name, false, true);
+	}
     pgaudit_user_login(FALSE, port->database_name, details);
     ereport(FATAL, (errcode(errcode_return), errmsg(errstr, port->user_name)));
     /* doesn't return */
@@ -316,7 +330,7 @@ void ClientAuthentication(Port* port)
     char details[PGAUDIT_MAXLENGTH] = {0};
     char token[TOKEN_LENGTH + 1] = {0};
     errno_t rc = EOK;
-    GS_UINT32 retval = 0;
+    int retval = 0;
 
     /*
      * Get the authentication method to use for this frontend/database
@@ -365,6 +379,26 @@ void ClientAuthentication(Port* port)
     }
 
     /*
+     * To prevent external applications from being spoofing coordinators, 
+     * here we check auth_method from coordinators. Connection from coor-
+     * dinators must use trust auth method or Kerberos(uaGss) auth method.
+     */
+    if (IS_PGXC_DATANODE && IsConnFromCoord()) {
+#ifdef ENABLE_GSS
+        if (port->hba->auth_method != uaTrust && port->hba->auth_method != uaGSS) {
+            ereport(FATAL,
+                    (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
+                        errmsg("Connection from CN must use trust or gss auth method.")));
+        }
+#else
+        if (port->hba->auth_method != uaTrust) {
+            ereport(FATAL,
+                    (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
+                        errmsg("Connection from CN must use trust auth method.")));
+        }
+#endif
+    }
+    /*
      * Now proceed to do the actual authentication check
      */
     switch (port->hba->auth_method) {
@@ -382,7 +416,13 @@ void ClientAuthentication(Port* port)
              */
             {
                 char hostinfo[NI_MAXHOST];
-                /* Audit user login */
+                /* 
+                 * Audit user login
+                 * it's unsafe to deal with plugins hooks as dynamic lib may be released 
+                 */
+                if (!(g_instance.status > NoShutdown) && user_login_hook) {
+                    user_login_hook(port->database_name, port->user_name, false, true);
+                }
                 rc = snprintf_s(details,
                     PGAUDIT_MAXLENGTH,
                     PGAUDIT_MAXLENGTH - 1,
@@ -448,13 +488,13 @@ void ClientAuthentication(Port* port)
 
 #define HOSTNAME_LOOKUP_DETAIL(port)                                                                                   \
     ((port)->remote_hostname                                                                                           \
-            ? ((port)->remote_hostname_resolv == +1                                                                    \
+            ? (((port)->remote_hostname_resolv == +1)                                                                  \
                       ? errdetail_log(                                                                                 \
                             "Client IP address resolved to \"%s\", forward lookup matches.", (port)->remote_hostname)  \
-                      : ((port)->remote_hostname_resolv == 0                                                           \
+                      : (((port)->remote_hostname_resolv == 0)                                                         \
                                 ? errdetail_log("Client IP address resolved to \"%s\", forward lookup not checked.",   \
                                       (port)->remote_hostname)                                                         \
-                                : ((port)->remote_hostname_resolv == -1                                                \
+                                : (((port)->remote_hostname_resolv == -1)                                              \
                                           ? errdetail_log("Client IP address resolved to \"%s\", forward lookup does " \
                                                           "not match.",                                                \
                                                 (port)->remote_hostname)                                               \
@@ -567,11 +607,11 @@ void ClientAuthentication(Port* port)
             securec_check(rc, "\0", "\0");
             /* Functions which alloc memory need hold interrupts for safe. */
             HOLD_INTERRUPTS();
-            retval = RAND_bytes((GS_UCHAR*)token, (GS_UINT32)TOKEN_LENGTH);
+            retval = RAND_priv_bytes((GS_UCHAR*)token, (GS_UINT32)TOKEN_LENGTH);
             RESUME_INTERRUPTS();
             CHECK_FOR_INTERRUPTS();
             if (retval != 1) {
-                ereport(ERROR, (errmsg("Failed to Generate the random number,errcode:%u", retval)));
+                ereport(ERROR, (errmsg("Failed to Generate the random number,errcode:%d", retval)));
             }
             sha_bytes_to_hex8((uint8*)token, port->token);
             port->token[TOKEN_LENGTH * 2] = '\0';
@@ -621,9 +661,8 @@ void ClientAuthentication(Port* port)
          */
         t_thrd.int_cxt.ImmediateInterruptOK = false;
 
-        /* We will not check lock status in app remoteTrust condition and inner connection. */
-        if (IsConnFromApp() && IsRoleExist(port->user_name) && !port->hba->remoteTrust) {
-
+        /* We will not check lock status for initial user. */
+        if (IsRoleExist(port->user_name) && GetRoleOid(port->user_name) != INITIAL_USER_ID) {
             Oid roleid = GetRoleOid(port->user_name);
             USER_STATUS rolestatus;
             if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
@@ -639,7 +678,11 @@ void ClientAuthentication(Port* port)
                 } else {
                     unlocked = TryUnlockAccount(roleid, false, false);
                 }
-                if (!unlocked) {
+                if (!unlocked && status != STATUS_EOF) { 
+                    /* it's unsafe to deal with plugins hooks as dynamic lib may be released */
+                    if (!(g_instance.status > NoShutdown) && user_login_hook) {
+                        user_login_hook(port->database_name, port->user_name, false, true);
+                    }
                     errorno = snprintf_s(details,
                         PGAUDIT_MAXLENGTH,
                         PGAUDIT_MAXLENGTH - 1,
@@ -655,9 +698,9 @@ void ClientAuthentication(Port* port)
                 }
             } else if (status == STATUS_OK) {
                 if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
-                    UnlockAccountToHashTable(roleid, false, true);
+                    (void)UnlockAccountToHashTable(roleid, false, true);
                 } else {
-                    TryUnlockAccount(roleid, false, true);
+                    (void)TryUnlockAccount(roleid, false, true);
                 }
             }
 
@@ -698,7 +741,7 @@ bool GenerateFakeSaltBytes(const char* user_name, char* fake_salt_bytes, int sal
 {
     SHA256_CTX2 ctx;
     int combine_string_length = PREFIX_LENGTH + strlen(user_name);
-    char combine_string[combine_string_length + 1] = {0};
+    char *combine_string = (char*)palloc0(sizeof(char) * (combine_string_length + 1));
     char prefix[PREFIX_LENGTH + 1] = {0};
     char superuser_name[NAMEDATALEN] = {0};
     unsigned char buf[SHA256_DIGEST_LENGTH] = {0};
@@ -712,6 +755,7 @@ bool GenerateFakeSaltBytes(const char* user_name, char* fake_salt_bytes, int sal
     if (superuser_stored_method != SHA256_PASSWORD && superuser_stored_method != COMBINED_PASSWORD) {
         rc = memset_s(encrypt_string, ENCRYPTED_STRING_LENGTH + 1, 0, ENCRYPTED_STRING_LENGTH);
         securec_check(rc, "\0", "\0");
+        pfree(combine_string);
         return false;
     }
 
@@ -722,13 +766,13 @@ bool GenerateFakeSaltBytes(const char* user_name, char* fake_salt_bytes, int sal
     SHA256_Init2(&ctx);
     SHA256_Update2(&ctx, (const uint8*)combine_string, combine_string_length);
     SHA256_Final2(buf, &ctx);
-    rc = memcpy_s(fake_salt_bytes, salt_len, buf, salt_len < SHA256_DIGEST_LENGTH ? salt_len : SHA256_DIGEST_LENGTH);
+    rc = memcpy_s(fake_salt_bytes, salt_len, buf, (salt_len < SHA256_DIGEST_LENGTH) ? salt_len : SHA256_DIGEST_LENGTH);
     securec_check(rc, "\0", "\0");
     rc = memset_s(encrypt_string, ENCRYPTED_STRING_LENGTH + 1, 0, ENCRYPTED_STRING_LENGTH);
     securec_check(rc, "\0", "\0");
     rc = memset_s(combine_string, combine_string_length + 1, 0, combine_string_length);
     securec_check(rc, "\0", "\0");
-
+    pfree(combine_string);
     return true;
 }
 
@@ -767,34 +811,37 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
      * t_thrd.int_cxt.ImmediateInterruptOK to true in some block condition and reset it at the end.
      */
     t_thrd.int_cxt.ImmediateInterruptOK = false;
-
+    
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IsDSorHaWalSender()) {
+#else        
     if (IsDSorHaWalSender() && is_node_internal_connection(port)) {
+#endif        
         stored_method = SHA256_PASSWORD;
     } else {
         if (!IsRoleExist(port->user_name)) {
-            GS_UINT32 retval = 0;
+            int retval = 0;
 
             /*
              * When login failed, let the server quit at the same place regardless of right or wrong
              * username. We construct a fake encrypted password here and send it the client.
              */
-            retval = GenerateFakeSaltBytes(port->user_name, fake_salt_bytes, SALT_LENGTH);
-            if (retval != 1) {
+            if (!GenerateFakeSaltBytes(port->user_name, fake_salt_bytes, SALT_LENGTH)) {
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
-                        errmsg("Failed to Generate the random salt,errcode:%u", retval)));
+                        errmsg("Failed to Generate the fake salt")));
             }
-            retval = RAND_bytes((GS_UCHAR*)fake_serverkey_bytes, (GS_UINT32)(HMAC_LENGTH));
+            retval = RAND_priv_bytes((GS_UCHAR*)fake_serverkey_bytes, (GS_UINT32)(HMAC_LENGTH));
             if (retval != 1) {
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
-                        errmsg("Failed to Generate the random serverkey,errcode:%u", retval)));
+                        errmsg("Failed to Generate the random serverkey,errcode:%d", retval)));
             }
-            retval = RAND_bytes((GS_UCHAR*)fake_storedkey_bytes, (GS_UINT32)(STORED_KEY_LENGTH));
+            retval = RAND_priv_bytes((GS_UCHAR*)fake_storedkey_bytes, (GS_UINT32)(STORED_KEY_LENGTH));
             if (retval != 1) {
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
-                        errmsg("Failed to Generate the random storedkey,errcode:%u", retval)));
+                        errmsg("Failed to Generate the random storedkey,errcode:%d", retval)));
             }
             sha_bytes_to_hex64((uint8*)fake_salt_bytes, fake_salt);
             sha_bytes_to_hex64((uint8*)fake_serverkey_bytes, fake_serverkey);
@@ -1095,6 +1142,10 @@ static char* recv_password_packet(Port* port)
     return buf.data;
 }
 
+/* ----------------------------------------------------------------
+ * MD5 authentication
+ * ----------------------------------------------------------------
+ */
 
 /*
  * Called when we have sent an authorization request for a password.
@@ -1118,6 +1169,10 @@ static int recv_and_check_password_packet(Port* port)
 
     /* client wouldn't send password */
     if (passwd == NULL) {
+        /* it's unsafe to deal with plugins hooks as dynamic lib may be released */
+        if (!(g_instance.status > NoShutdown) && user_login_hook) {
+            user_login_hook(port->database_name, port->user_name, false, true);
+        }
         /* Record the audit log for password-null condition. */
         rc = snprintf_s(details,
             PGAUDIT_MAXLENGTH,
@@ -1374,7 +1429,7 @@ static void pg_GSS_error(int severity, char* errmsg, OM_uint32 maj_stat, OM_uint
 
 static int pg_GSS_recvauth(Port* port)
 {
-    OM_uint32 maj_stat, min_stat, lmin_s, gflags;
+    OM_uint32 maj_stat, min_stat, gflags;
     int mtype;
     int ret = 0;
     StringInfoData buf;
@@ -1543,19 +1598,15 @@ static int pg_GSS_recvauth(Port* port)
             /*
              * Negotiation generated data to be sent to the client.
              */
-            OM_uint32 lmin_s;
-
+            OM_uint32 lmin_s = 0;
             elog(DEBUG4, "sending GSS response token of length %u", (unsigned int)port->gss->outbuf.length);
-
             sendAuthRequest(port, AUTH_REQ_GSS_CONT);
-
             gss_release_buffer(&lmin_s, &port->gss->outbuf);
         }
 
+        /* wrong status, release resource here and print error */
         if (maj_stat != GSS_S_COMPLETE && maj_stat != GSS_S_CONTINUE_NEEDED) {
-            OM_uint32 lmin_s;
-
-            gss_delete_sec_context(&lmin_s, &port->gss->ctx, GSS_C_NO_BUFFER);
+            clear_gss_info(port->gss);
             pg_GSS_error(ERROR, _("accepting GSS security context failed"), maj_stat, min_stat);
         }
 
@@ -1564,23 +1615,18 @@ static int pg_GSS_recvauth(Port* port)
 
     } while (maj_stat == GSS_S_CONTINUE_NEEDED);
 
-    if (port->gss->cred != GSS_C_NO_CREDENTIAL) {
-        /*
-         * Release service principal credentials
-         */
-        gss_release_cred(&min_stat, &port->gss->cred);
-    }
-
     /*
      * GSS_S_COMPLETE indicates that authentication is now complete.
-     *
      * Get the name of the user that authenticated, and compare it to the pg
      * username that was specified for the connection.
      */
     maj_stat = gss_display_name(&min_stat, port->gss->name, &gbuf, NULL);
-    if (maj_stat != GSS_S_COMPLETE)
+    if (maj_stat != GSS_S_COMPLETE) {
+        clear_gss_info(port->gss);
         pg_GSS_error(ERROR, _("retrieving GSS user name failed"), maj_stat, min_stat);
+    }
 
+    clear_gss_info(port->gss);
     /*
      * Split the username at the realm separator
      */
@@ -1606,6 +1652,7 @@ static int pg_GSS_recvauth(Port* port)
 
             if (ret) {
                 /* GSS realm does not match */
+                OM_uint32 lmin_s = 0;
                 elog(LOG, "GSSAPI realm (%s) and configured realm (%s) don't match", cp, port->hba->krb_realm);
                 gss_release_buffer(&lmin_s, &gbuf);
                 t_thrd.int_cxt.ImmediateInterruptOK = save_ImmediateInterruptOK;
@@ -1641,16 +1688,17 @@ static int pg_GSS_recvauth(Port* port)
 
     } else if (port->hba->krb_realm != NULL && strlen(port->hba->krb_realm)) {
         elog(LOG, "GSSAPI did not return realm but realm matching was requested");
-
+        OM_uint32 lmin_s = 0;
         gss_release_buffer(&lmin_s, &gbuf);
         t_thrd.int_cxt.ImmediateInterruptOK = save_ImmediateInterruptOK;
         return STATUS_ERROR;
     }
+
     /*
      * Currently only for internal authentication, no need to verify the database
      * user information.
      */
-
+    OM_uint32 lmin_s = 0;
     gss_release_buffer(&lmin_s, &gbuf);
 
     /* Resume t_thrd.int_cxt.ImmediateInterruptOK.*/
@@ -1675,7 +1723,10 @@ static int GssInternalSend(int fd, const void* data, int size)
      *  by a debugging tool can result in EINTR error.
      */
     while (nSend != size) {
+        PGSTAT_INIT_TIME_RECORD();
+        PGSTAT_START_TIME_RECORD();
         nbytes = send(fd, (const void*)((char*)data + nSend), size - nSend, 0);
+        END_NET_SEND_INFO(nbytes);
 
         if (nbytes <= 0) {
             if (nbytes == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR || errno == ENOBUFS)) {
@@ -1721,7 +1772,7 @@ static int GssInternalRecv(int fd, void* data, int size)
         error = recvmsg(fd, &inmsg, flags);
 
         /* We should ignore MSG_NOTIFICATION msg of SCTP here. */
-        if (MSG_NOTIFICATION & inmsg.msg_flags)
+        if (MSG_NOTIFICATION & (unsigned int)inmsg.msg_flags)
             continue;
 
         if (error > 0)
@@ -1737,7 +1788,7 @@ static int GssInternalRecv(int fd, void* data, int size)
             break;
     }
 
-    return (recv_bytes == size ? 0 : -1);
+    return ((recv_bytes == size) ? 0 : -1);
 }
 
 /*
@@ -2461,7 +2512,8 @@ static int pg_SSPI_recvauth(Port* port)
          * contents since the size does not change.
          */
         if (sspictx == NULL) {
-            sspictx = MemoryContextAlloc(u_sess->top_mem_cxt, sizeof(CtxtHandle));
+            sspictx = MemoryContextAlloc(
+                SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), sizeof(CtxtHandle));
             if (sspictx == NULL)
                 ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
         }
@@ -2518,7 +2570,7 @@ static int pg_SSPI_recvauth(Port* port)
     if (!GetTokenInformation(token, TokenUser, NULL, 0, &retlen) && GetLastError() != 122)
         ereport(ERROR, (errmsg_internal("could not get token user size: error code %lu", GetLastError())));
 
-    tokenuser = MemoryContextAlloc(u_sess->top_mem_cxt, retlen);
+    tokenuser = MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), retlen);
     if (tokenuser == NULL)
         ereport(ERROR, (errmsg("out of memory")));
 
@@ -2571,6 +2623,10 @@ static int pg_SSPI_recvauth(Port* port)
 
 #ifdef USE_IDENT
 
+/* ----------------------------------------------------------------
+ * Ident authentication system
+ * ----------------------------------------------------------------
+ */
 
 /*
  *	Parse the string "*ident_response" as a response from a query to an Ident
@@ -2765,7 +2821,10 @@ static int ident_inet(hbaPort* port)
 
     /* loop in case send is interrupted */
     do {
+        PGSTAT_INIT_TIME_RECORD();
+        PGSTAT_START_TIME_RECORD();
         rc = send(sock_fd, ident_query, strlen(ident_query), 0);
+        END_NET_SEND_INFO(rc);
     } while (rc < 0 && errno == EINTR);
 
     if (rc < 0) {
@@ -2778,7 +2837,10 @@ static int ident_inet(hbaPort* port)
     }
 
     do {
+        PGSTAT_INIT_TIME_RECORD();
+        PGSTAT_START_TIME_RECORD();
         rc = recv(sock_fd, ident_response, sizeof(ident_response) - 1, 0);
+        END_NET_RECV_INFO(rc);
     } while (rc < 0 && errno == EINTR);
 
     if (rc < 0) {
@@ -2857,6 +2919,10 @@ static int auth_peer(hbaPort* port)
 }
 #endif /* HAVE_UNIX_SOCKETS */
 
+/* ----------------------------------------------------------------
+ * PAM authentication system
+ * ----------------------------------------------------------------
+ */
 #ifdef USE_PAM
 
 /*
@@ -2890,7 +2956,8 @@ static int pam_passwd_conv_proc(
      * Explicitly not using palloc here - PAM will free this memory in
      * pam_end()
      */
-    reply = MemoryContextAllocZero(u_sess->top_mem_cxt, num_msg * sizeof(struct pam_response));
+    reply = MemoryContextAllocZero(
+        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), num_msg * sizeof(struct pam_response));
     if (reply == NULL) {
         ereport(LOG, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
         return PAM_CONV_ERR;
@@ -2915,7 +2982,8 @@ static int pam_passwd_conv_proc(
                         goto fail;
                     }
                 }
-                reply[i].resp = MemoryContextStrdup(u_sess->top_mem_cxt, passwd);
+                reply[i].resp = MemoryContextStrdup(
+                    SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), passwd);
                 if (reply[i].resp == NULL)
                     goto fail;
                 reply[i].resp_retcode = PAM_SUCCESS;
@@ -2925,7 +2993,7 @@ static int pam_passwd_conv_proc(
                 /* FALL THROUGH */
             case PAM_TEXT_INFO:
                 /* we don't bother to log TEXT_INFO messages */
-                reply[i].resp = MemoryContextStrdup(u_sess->top_mem_cxt, "");
+                reply[i].resp = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), "");
                 if (reply[i].resp == NULL)
                     goto fail;
                 reply[i].resp_retcode = PAM_SUCCESS;
@@ -3037,7 +3105,7 @@ static int CheckPAMAuth(Port* port, char* user, char* password)
 
     g_instance.libpq_cxt.pam_passwd = NULL; /* Unset pam_passwd */
 
-    return (retval == PAM_SUCCESS ? STATUS_OK : STATUS_ERROR);
+    return ((retval == PAM_SUCCESS) ? STATUS_OK : STATUS_ERROR);
 }
 #endif /* USE_PAM */
 
@@ -3441,4 +3509,21 @@ static int CheckIAMAuth(Port* port)
     pfree(passwd);
     passwd = NULL;
     return STATUS_OK;
+}
+
+/*
+ * release kerberos gss connection info 
+ * if the handle to be released is specified GSS_C_NO_CREDENTIAL or GSS_C_NO_CONTEXT(which is initial status), 
+ * the function will complete successfully but do nothing, so that it's safe to invoke the function without pre-judge
+ */
+static void clear_gss_info(pg_gssinfo* gss)
+{
+    /* status codes coming from gss interface */
+    OM_uint32 lmin_s = 0;
+    /* Release service principal credentials */
+    (void)gss_release_cred(&lmin_s, &gss->cred);
+    /* Release gss security context and name after server authentication finished */
+    (void)gss_delete_sec_context(&lmin_s, &gss->ctx, GSS_C_NO_BUFFER);
+    /* Release gss_name and gss_buf */
+    (void)gss_release_name(&lmin_s, &gss->name);
 }

@@ -1,0 +1,49 @@
+drop table if exists dfs_insert_append_mode;
+NOTICE:  table "dfs_insert_append_mode" does not exist, skipping
+create table dfs_insert_append_mode(a int, b int) tablespace hdfs_ts distribute by hash(a);
+insert into dfs_insert_append_mode values(1,2);
+update dfs_insert_append_mode set b=3;
+delete dfs_insert_append_mode where b=4;
+-- expecting an error
+alter table dfs_insert_append_mode set (append_mode=read_only);
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+alter table dfs_insert_append_mode set (append_mode=read_only);
+\d+ dfs_insert_append_mode
+                Table "public.dfs_insert_append_mode"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: append_mode=read_only, append_mode_internal=2, orientation=orc, compression=snappy, version=0.12
+
+-- read only case
+insert into dfs_insert_append_mode values(1,2);
+ERROR:  dfs_insert_append_mode is redistributing, please retry later.
+update dfs_insert_append_mode set b=3;
+ERROR:  dfs_insert_append_mode is redistributing, please retry later.
+delete dfs_insert_append_mode where b=4;
+ERROR:  dfs_insert_append_mode is redistributing, please retry later.
+-- read only case
+insert into dfs_insert_append_mode values(1,2);
+update dfs_insert_append_mode set b=3;
+delete dfs_insert_append_mode where b=4;
+alter table dfs_insert_append_mode set (append_mode=off);
+\d+ dfs_insert_append_mode
+                Table "public.dfs_insert_append_mode"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=snappy, version=0.12
+
+-- clean up
+drop table dfs_insert_append_mode;

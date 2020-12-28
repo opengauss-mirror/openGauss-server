@@ -20,6 +20,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/tableam.h"
 #include "executor/executor.h"
 #include "miscadmin.h"
 #include "utils/lsyscache.h"
@@ -58,6 +59,8 @@ bool execTuplesMatch(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols, 
     MemoryContextReset(evalContext);
     oldContext = MemoryContextSwitchTo(evalContext);
 
+    Assert(slot1->tts_tupleDescriptor->tdTableAmType == slot2->tts_tupleDescriptor->tdTableAmType);
+
     /*
      * We cannot report a match without checking all the fields, but we can
      * report a non-match as soon as we find unequal fields.  So, start
@@ -72,9 +75,9 @@ bool execTuplesMatch(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols, 
         bool isNull1 = false;
         bool isNull2 = false;
 
-        attr1 = slot_getattr(slot1, att, &isNull1);
+        attr1 = tableam_tslot_getattr(slot1, att, &isNull1);
 
-        attr2 = slot_getattr(slot2, att, &isNull2);
+        attr2 = tableam_tslot_getattr(slot2, att, &isNull2);
 
         if (isNull1 != isNull2) {
             result = false; /* one null and one not; they aren't equal */
@@ -114,6 +117,8 @@ bool execTuplesUnequal(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols
     bool result = false;
     int i;
 
+    Assert(slot1->tts_tupleDescriptor->tdTableAmType == slot2->tts_tupleDescriptor->tdTableAmType);
+
     /* Reset and switch into the temp context. */
     MemoryContextReset(evalContext);
     oldContext = MemoryContextSwitchTo(evalContext);
@@ -132,13 +137,13 @@ bool execTuplesUnequal(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols
         bool isNull1 = false;
         bool isNull2 = false;
 
-        attr1 = slot_getattr(slot1, att, &isNull1);
+        attr1 = tableam_tslot_getattr(slot1, att, &isNull1);
 
         if (isNull1) {
             continue; /* can't prove anything here */
         }
 
-        attr2 = slot_getattr(slot2, att, &isNull2);
+        attr2 = tableam_tslot_getattr(slot2, att, &isNull2);
 
         if (isNull2) {
             continue; /* can't prove anything here */
@@ -473,6 +478,7 @@ static uint32 TupleHashTableHash(const void* key, Size keysize)
         hashfunctions = hashtable->tab_hash_funcs;
     }
 
+    /* Get the Table Accessor Method*/
     for (i = 0; i < numCols; i++) {
         AttrNumber att = keyColIdx[i];
         Datum attr;
@@ -481,7 +487,7 @@ static uint32 TupleHashTableHash(const void* key, Size keysize)
         /* rotate hashkey left 1 bit at each step */
         hashkey = (hashkey << 1) | ((hashkey & 0x80000000) ? 1 : 0);
 
-        attr = slot_getattr(slot, att, &isNull);
+        attr = tableam_tslot_getattr(slot, att, &isNull);
         /* treat nulls as having hash key 0 */
         if (!isNull) {
             uint32 hkey;

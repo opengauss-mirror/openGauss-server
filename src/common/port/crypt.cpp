@@ -1286,6 +1286,7 @@ char* crypt(const char* key, const char* setting) throw()
     encp = &cryptresult[0];
     switch (*setting) {
         case _PASSWORD_EFMT1:
+
             /*
              * Involve the rest of the password 8 characters at a time.
              */

@@ -1037,7 +1037,11 @@ other			.
 							if (is_trans_stmt(yyextra->scanbuf, yyextra->scanbuflen))
 								return BEGIN_NON_ANOYBLOCK;
 						}
-						else if (keyword->value == SELECT)
+						else if (keyword->value == SELECT ||
+								 keyword->value == UPDATE||
+								 keyword->value == INSERT ||
+								 keyword->value == DELETE_P ||
+								 keyword->value == MERGE)
 						{
 							yyextra->is_hint_str = true;
 						}

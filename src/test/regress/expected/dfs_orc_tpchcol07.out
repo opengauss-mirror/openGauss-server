@@ -1,0 +1,143 @@
+set enable_global_stats = true;
+set current_schema=vector_engine;
+set enable_vector_engine=on;
+set enable_nestloop=off;
+explain (costs off) select
+	supp_nation,
+	cust_nation,
+	l_year,
+	sum(volume) as revenue
+from
+	(
+		select
+			n1.n_name as supp_nation,
+			n2.n_name as cust_nation,
+			extract(year from l_shipdate) as l_year,
+			l_extendedprice * (1 - l_discount) as volume
+		from
+			supplier,
+			lineitem,
+			orders,
+			customer,
+			nation n1,
+			nation n2
+		where
+			s_suppkey = l_suppkey
+			and o_orderkey = l_orderkey
+			and c_custkey = o_custkey
+			and s_nationkey = n1.n_nationkey
+			and c_nationkey = n2.n_nationkey
+			and (
+				(n1.n_name = 'FRANCE ' and n2.n_name = 'GERMANY')
+				or (n1.n_name = 'GERMANY' and n2.n_name = 'FRANCE')
+			)
+			and l_shipdate >= date '1995-01-01'
+            and l_shipdate <= date '1996-12-31'
+	) as shipping
+group by
+	supp_nation,
+	cust_nation,
+	l_year
+order by 
+	revenue;
+                                                                                                                               QUERY PLAN                                                                                                                               
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: (sum((sum((vector_engine.lineitem.l_extendedprice * (1::numeric - vector_engine.lineitem.l_discount))))))
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: n1.n_name, n2.n_name, (date_part('year'::text, vector_engine.lineitem.l_shipdate))
+               ->  Vector Streaming (type: GATHER)
+                     Node/s: All datanodes
+                     ->  Vector Sonic Hash Aggregate
+                           Group By Key: n1.n_name, n2.n_name, date_part('year'::text, vector_engine.lineitem.l_shipdate)
+                           ->  Vector Sonic Hash Join
+                                 Hash Cond: ((vector_engine.orders.o_custkey = vector_engine.customer.c_custkey) AND (n2.n_nationkey = vector_engine.customer.c_nationkey))
+                                 ->  Vector Streaming(type: REDISTRIBUTE)
+                                       Spawn on: All datanodes
+                                       ->  Vector Nest Loop
+                                             Join Filter: (((n1.n_name = 'FRANCE '::bpchar) AND (n2.n_name = 'GERMANY'::bpchar)) OR ((n1.n_name = 'GERMANY'::bpchar) AND (n2.n_name = 'FRANCE'::bpchar)))
+                                             ->  Vector Sonic Hash Join
+                                                   Hash Cond: (n1.n_nationkey = vector_engine.supplier.s_nationkey)
+                                                   ->  CStore Scan on nation n1
+                                                   ->  Vector Sonic Hash Join
+                                                         Hash Cond: (vector_engine.supplier.s_suppkey = vector_engine.lineitem.l_suppkey)
+                                                         Generate Bloom Filter On Expr: vector_engine.lineitem.l_suppkey
+                                                         Generate Bloom Filter On Index: 1
+                                                         ->  Vector Append
+                                                               ->  Dfs Scan on supplier
+                                                                     Filter By Bloom Filter On Expr: vector_engine.supplier.s_suppkey
+                                                                     Filter By Bloom Filter On Index: 1
+                                                               ->  Vector Adapter
+                                                                     ->  Seq Scan on pg_delta_vector_engine_supplier supplier
+                                                         ->  Vector Streaming(type: REDISTRIBUTE)
+                                                               Spawn on: All datanodes
+                                                               ->  Vector Sonic Hash Join
+                                                                     Hash Cond: (vector_engine.orders.o_orderkey = vector_engine.lineitem.l_orderkey)
+                                                                     Generate Bloom Filter On Expr: vector_engine.lineitem.l_orderkey
+                                                                     Generate Bloom Filter On Index: 0
+                                                                     ->  Vector Append
+                                                                           ->  Dfs Scan on orders
+                                                                                 Filter By Bloom Filter On Expr: vector_engine.orders.o_orderkey
+                                                                                 Filter By Bloom Filter On Index: 0
+                                                                           ->  Vector Adapter
+                                                                                 ->  Seq Scan on pg_delta_vector_engine_orders orders
+                                                                     ->  Vector Append
+                                                                           ->  Dfs Scan on lineitem
+                                                                                 Pushdown Predicate Filter: ((l_shipdate >= 'Sun Jan 01 00:00:00 1995'::timestamp(0) without time zone) AND (l_shipdate <= 'Tue Dec 31 00:00:00 1996'::timestamp(0) without time zone))
+                                                                           ->  Vector Adapter
+                                                                                 ->  Seq Scan on pg_delta_vector_engine_lineitem lineitem
+                                                                                       Filter: ((l_shipdate >= 'Sun Jan 01 00:00:00 1995'::timestamp(0) without time zone) AND (l_shipdate <= 'Tue Dec 31 00:00:00 1996'::timestamp(0) without time zone))
+                                             ->  CStore Scan on nation n2
+                                 ->  Vector Append
+                                       ->  Dfs Scan on customer
+                                       ->  Vector Adapter
+                                             ->  Seq Scan on pg_delta_vector_engine_customer customer
+(51 rows)
+
+select
+	supp_nation,
+	cust_nation,
+	l_year,
+	sum(volume) as revenue
+from
+	(
+		select
+			n1.n_name as supp_nation,
+			n2.n_name as cust_nation,
+			extract(year from l_shipdate) as l_year,
+			l_extendedprice * (1 - l_discount) as volume
+		from
+			supplier,
+			lineitem,
+			orders,
+			customer,
+			nation n1,
+			nation n2
+		where
+			s_suppkey = l_suppkey
+			and o_orderkey = l_orderkey
+			and c_custkey = o_custkey
+			and s_nationkey = n1.n_nationkey
+			and c_nationkey = n2.n_nationkey
+			and (
+				(n1.n_name = 'FRANCE ' and n2.n_name = 'GERMANY')
+				or (n1.n_name = 'GERMANY' and n2.n_name = 'FRANCE')
+			)
+			and l_shipdate >= date '1995-01-01'
+            and l_shipdate <= date '1996-12-31'
+	) as shipping
+group by
+	supp_nation,
+	cust_nation,
+	l_year
+order by 
+	revenue;
+        supp_nation        |        cust_nation        | l_year |   revenue   
+---------------------------+---------------------------+--------+-------------
+ FRANCE                    | GERMANY                   |   1995 | 268068.5774
+ FRANCE                    | GERMANY                   |   1996 | 303862.2980
+ GERMANY                   | FRANCE                    |   1996 | 379095.8854
+ GERMANY                   | FRANCE                    |   1995 | 621159.4882
+(4 rows)
+

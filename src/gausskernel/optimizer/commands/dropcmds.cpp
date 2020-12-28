@@ -27,11 +27,33 @@
 #include "nodes/makefuncs.h"
 #include "parser/parse_type.h"
 #include "utils/acl.h"
+#include "utils/inval.h"
 #include "utils/builtins.h"
 #include "utils/syscache.h"
 
 static void does_not_exist_skipping(ObjectType objtype, List* objname, List* objargs, bool missing_ok);
 
+static bool CheckObjectDropPrivilege(ObjectType removeType, Oid objectId)
+{
+    AclResult aclresult = ACLCHECK_NO_PRIV;
+    switch (removeType) {
+        case OBJECT_FUNCTION:
+            aclresult = pg_proc_aclcheck(objectId, GetUserId(), ACL_DROP);
+            break;
+        case OBJECT_SCHEMA:
+            aclresult = pg_namespace_aclcheck(objectId, GetUserId(), ACL_DROP);
+            break;
+        case OBJECT_TYPE:
+            aclresult = pg_type_aclcheck(objectId, GetUserId(), ACL_DROP);
+            break;
+        case OBJECT_FOREIGN_SERVER:
+            aclresult = pg_foreign_server_aclcheck(objectId, GetUserId(), ACL_DROP);
+            break;
+        default:
+            break;
+    }
+    return (aclresult == ACLCHECK_OK) ? true : false;
+}
 /*
  * @Description: drop one or more objects.
  *               We don't currently handle all object types here.  Relations, for example,
@@ -90,11 +112,13 @@ void RemoveObjects(DropStmt* stmt, bool missing_ok, bool is_securityadmin)
                 ereport(ERROR,
                     (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcOid)));
 
-            if (PROC_IS_AGG(((Form_pg_proc)GETSTRUCT(tup))->prokind))
-                ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                    errmsg("\"%s\" is an aggregate function", NameListToString(objname)),
-                    errhint("Use DROP AGGREGATE to drop aggregate functions.")));
+            if (((Form_pg_proc)GETSTRUCT(tup))->proisagg)
+                ereport(ERROR,
+                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                        errmsg("\"%s\" is an aggregate function", NameListToString(objname)),
+                        errhint("Use DROP AGGREGATE to drop aggregate functions.")));
 
+            CacheInvalidateFunction(funcOid);
             ReleaseSysCache(tup);
         }
 
@@ -107,6 +131,9 @@ void RemoveObjects(DropStmt* stmt, bool missing_ok, bool is_securityadmin)
             skip_check = true;
 
         /* Check permissions. */
+        if (!skip_check) {
+            skip_check = CheckObjectDropPrivilege(stmt->removeType, address.objectId);
+        }
         namespaceId = get_object_namespace(&address);
         if ((!is_securityadmin) && (!skip_check) &&
             (!OidIsValid(namespaceId) || !pg_namespace_ownercheck(namespaceId, GetUserId())))
@@ -181,6 +208,10 @@ static void does_not_exist_skipping(ObjectType objtype, List* objname, List* obj
             args = TypeNameListToString(objargs);
             break;
         case OBJECT_AGGREGATE:
+            /* Given ordered set aggregate with no direct args, aggr_args variable is modified in gram.y.
+               So the parse of aggr_args should be changed. See gram.y for detail. */
+            objargs = (List*)linitial(objargs);
+            
             msg = gettext_noop("aggregate %s(%s) does not exist");
             name = NameListToString(objname);
             args = TypeNameListToString(objargs);

@@ -72,7 +72,7 @@ bool _hash_checkqual(IndexScanDesc scan, IndexTuple itup)
  */
 uint32 _hash_datum2hashkey(Relation rel, Datum key)
 {
-    FmgrInfo* procinfo = NULL;
+    FmgrInfo *procinfo = NULL;
     Oid collation;
 
     /* XXX assumes index has only one attribute */
@@ -98,12 +98,8 @@ uint32 _hash_datum2hashkey_type(Relation rel, Datum key, Oid keytype)
     hash_proc = get_opfamily_proc(rel->rd_opfamily[0], keytype, keytype, HASHPROC);
     if (!RegProcedureIsValid(hash_proc))
         ereport(ERROR,
-            (errcode(ERRCODE_INDEX_CORRUPTED),
-                errmsg("missing support function %d(%u,%u) for index \"%s\"",
-                    HASHPROC,
-                    keytype,
-                    keytype,
-                    RelationGetRelationName(rel))));
+                (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("missing support function %d(%u,%u) for index \"%s\"",
+                                                          HASHPROC, keytype, keytype, RelationGetRelationName(rel))));
     collation = rel->rd_indcollation[0];
 
     return DatumGetUInt32(OidFunctionCall1Coll(hash_proc, collation, key));
@@ -153,33 +149,27 @@ void _hash_checkpage(Relation rel, Buffer buf, int flags)
      * case, however.
      */
     if (PageIsNew(page))
-        ereport(ERROR,
-            (errcode(ERRCODE_INDEX_CORRUPTED),
-                errmsg("index \"%s\" contains unexpected zero page at block %u",
-                    RelationGetRelationName(rel),
-                    BufferGetBlockNumber(buf)),
-                errhint("Please REINDEX it.")));
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                        errmsg("index \"%s\" contains unexpected zero page at block %u", RelationGetRelationName(rel),
+                               BufferGetBlockNumber(buf)),
+                        errhint("Please REINDEX it.")));
 
     /*
      * Additionally check that the special area looks sane.
      */
     if (PageGetSpecialSize(page) != MAXALIGN(sizeof(HashPageOpaqueData)))
-        ereport(ERROR,
-            (errcode(ERRCODE_INDEX_CORRUPTED),
-                errmsg("index \"%s\" contains corrupted page at block %u",
-                    RelationGetRelationName(rel),
-                    BufferGetBlockNumber(buf)),
-                errhint("Please REINDEX it.")));
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                        errmsg("index \"%s\" contains corrupted page at block %u", RelationGetRelationName(rel),
+                               BufferGetBlockNumber(buf)),
+                        errhint("Please REINDEX it.")));
 
     if (flags) {
         HashPageOpaque opaque = (HashPageOpaque)PageGetSpecialPointer(page);
         if ((opaque->hasho_flag & flags) == 0)
-            ereport(ERROR,
-                (errcode(ERRCODE_INDEX_CORRUPTED),
-                    errmsg("index \"%s\" contains corrupted page at block %u",
-                        RelationGetRelationName(rel),
-                        BufferGetBlockNumber(buf)),
-                    errhint("Please REINDEX it.")));
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                            errmsg("index \"%s\" contains corrupted page at block %u", RelationGetRelationName(rel),
+                                   BufferGetBlockNumber(buf)),
+                            errhint("Please REINDEX it.")));
     }
 
     /*
@@ -188,15 +178,13 @@ void _hash_checkpage(Relation rel, Buffer buf, int flags)
     if (flags == LH_META_PAGE) {
         HashMetaPage metap = HashPageGetMeta(page);
         if (metap->hashm_magic != HASH_MAGIC)
-            ereport(ERROR,
-                (errcode(ERRCODE_INDEX_CORRUPTED),
-                    errmsg("index \"%s\" is not a hash index", RelationGetRelationName(rel))));
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                            errmsg("index \"%s\" is not a hash index", RelationGetRelationName(rel))));
 
         if (metap->hashm_version != HASH_VERSION)
-            ereport(ERROR,
-                (errcode(ERRCODE_INDEX_CORRUPTED),
-                    errmsg("index \"%s\" has wrong hash version", RelationGetRelationName(rel)),
-                    errhint("Please REINDEX it.")));
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                            errmsg("index \"%s\" has wrong hash version", RelationGetRelationName(rel)),
+                            errhint("Please REINDEX it.")));
     }
 }
 
@@ -204,7 +192,7 @@ Datum hashoptions(PG_FUNCTION_ARGS)
 {
     Datum reloptions = PG_GETARG_DATUM(0);
     bool validate = PG_GETARG_BOOL(1);
-    bytea* result = NULL;
+    bytea *result = NULL;
 
     result = default_reloptions(reloptions, validate, RELOPT_KIND_HASH);
     if (result != NULL)
@@ -217,20 +205,20 @@ Datum hashoptions(PG_FUNCTION_ARGS)
  */
 uint32 _hash_get_indextuple_hashkey(IndexTuple itup)
 {
-    char* attp = NULL;
+    char *attp = NULL;
 
     /*
      * We assume the hash key is the first attribute and can't be null, so
      * this can be done crudely but very very cheaply ...
      */
-    attp = (char*)itup + IndexInfoFindDataOffset(itup->t_info);
-    return *((uint32*)attp);
+    attp = (char *)itup + IndexInfoFindDataOffset(itup->t_info);
+    return *((uint32 *)attp);
 }
 
 /*
  * _hash_form_tuple - form an index tuple containing hash code only
  */
-IndexTuple _hash_form_tuple(Relation index, Datum* values, const bool* isnull)
+IndexTuple _hash_form_tuple(Relation index, Datum *values, const bool *isnull)
 {
     IndexTuple itup;
     uint32 hashkey;

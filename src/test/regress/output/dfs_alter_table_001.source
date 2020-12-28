@@ -1,0 +1,1696 @@
+-----------------------------------------------------------HDFS table add column feature--------------------------
+-- Add Column on HDFS table testing 
+--   Evaluation point:
+--   1. Add column operator can be executed
+--   2. Verify import data scenarios with add column operator
+--   3. Verify update data scenarios with add column operator
+--   4. Verify delate data scenarios with add column operator
+--   5. Verify select data scenarios with add column operator
+-------------------------------------------------DDL test---------------------------------------------------------
+drop schema if exists alter_dfs_column;
+NOTICE:  schema "alter_dfs_column" does not exist, skipping
+create schema alter_dfs_column;
+set current_schema= alter_dfs_column;
+---------
+--add column
+drop table if exists dfs_add_column01;
+NOTICE:  table "dfs_add_column01" does not exist, skipping
+create table dfs_add_column01(a int) tablespace hdfs_ts distribute by hash(a);
+alter table dfs_add_column01 add column b int null;
+alter table dfs_add_column01 add column c int not null;
+alter table dfs_add_column01 add column d int not null default 5+3;
+alter table dfs_add_column01 add ( e int not null default 5+3, f float4 );
+select relname, relnatts from pg_class where relname='dfs_add_column01';
+     relname      | relnatts 
+------------------+----------
+ dfs_add_column01 |        6
+(1 row)
+
+select relnatts from pg_class where oid  in (select reldeltarelid from pg_class where relname='dfs_add_column01');
+ relnatts 
+----------
+        6
+(1 row)
+
+select attname from pg_attribute where attrelid in (select oid from pg_class where relname='dfs_add_column01') and attnum > 0 order  by 1;
+ attname 
+---------
+ a
+ b
+ c
+ d
+ e
+ f
+(6 rows)
+
+-- drop column
+alter table dfs_add_column01 drop column e;
+select relname, relnatts from pg_class where relname='dfs_add_column01';
+     relname      | relnatts 
+------------------+----------
+ dfs_add_column01 |        6
+(1 row)
+
+select relnatts from pg_class where oid  in (select reldeltarelid from pg_class where relname='dfs_add_column01');
+ relnatts 
+----------
+        6
+(1 row)
+
+alter table dfs_add_column01 drop column d;
+select relname, relnatts from pg_class where relname='dfs_add_column01';
+     relname      | relnatts 
+------------------+----------
+ dfs_add_column01 |        6
+(1 row)
+
+select relnatts from pg_class where oid  in (select reldeltarelid from pg_class where relname='dfs_add_column01');
+ relnatts 
+----------
+        6
+(1 row)
+
+select attname from pg_attribute where attrelid in (select oid from pg_class where relname='dfs_add_column01') and attnum > 0 order  by 1;
+           attname            
+------------------------------
+ ........pg.dropped.4........
+ ........pg.dropped.5........
+ a
+ b
+ c
+ f
+(6 rows)
+
+----test unsupported date type
+----if it has no default value, the oid, nvarchar2, clob and money is supported.
+alter table dfs_add_column01 add column aa oid not null;
+alter table dfs_add_column01 add column bb nvarchar2;
+alter table dfs_add_column01 add column cc clob not null;
+alter table dfs_add_column01 add column dd money not null;
+----if it has default value, the oid, nvarchar2, clob and money is  not supported.
+alter table dfs_add_column01 add column aaa oid default 4;
+ERROR:  It is not supported on DFS table. The detailed reasons are the followings:
+DETAIL:  1. the default value may be a volatile function.
+2. the storage length of default value may be greater than 127.
+3. the data type of new column is not supported.
+alter table dfs_add_column01 add column aaa nvarchar2 default 'nvarchar2';
+ERROR:  It is not supported on DFS table. The detailed reasons are the followings:
+DETAIL:  1. the default value may be a volatile function.
+2. the storage length of default value may be greater than 127.
+3. the data type of new column is not supported.
+alter table dfs_add_column01 add column aaa clob default 'colb';
+alter table dfs_add_column01 add column aaa money default 1;
+ERROR:  column "aaa" of relation "dfs_add_column01" already exists
+----test constraint
+alter table dfs_add_column01 add column aaa  int primary key ;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+alter table dfs_add_column01 add column aaa  int unique ;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+alter table dfs_add_column01 add column aaa  int check (aaa < 4) ;
+ERROR:  column "aaa" of relation "dfs_add_column01" already exists
+----test distribute by clause and partition clause
+drop table if exists dfs_add_column01;
+create table dfs_add_column01(a int, b int ) tablespace hdfs_ts distribute by hash(a) partition by values( b);
+alter table dfs_add_column01 drop column a;
+ERROR:  Distribution column cannot be dropped
+alter table dfs_add_column01 drop b;
+ERROR:  cannot drop partitioning column "b"
+---- test not null constraint
+drop table if exists dfs_add_column01;
+create table dfs_add_column01(a int) tablespace hdfs_ts distribute by hash(a);
+set cstore_insert_mode=main;
+insert into dfs_add_column01 values (1);
+alter table dfs_add_column01 add column b int not null;
+ERROR:  column "b" contains null values
+delete from dfs_add_column01;
+alter table dfs_add_column01 add column b int not null;
+insert into dfs_add_column01 values (1, 2);
+alter table dfs_add_column01 add column c int not null ;
+ERROR:  column "c" contains null values
+alter table dfs_add_column01 add column c int not null default 4;
+insert into dfs_add_column01 values (1, 2);
+set cstore_insert_mode=delta;
+alter table dfs_add_column01 drop column b;
+alter table dfs_add_column01 drop column c;
+delete from dfs_add_column01;
+insert into dfs_add_column01 values (1);
+alter table dfs_add_column01 add column b int not null;
+ERROR:  column "b" contains null values
+delete from dfs_add_column01;
+alter table dfs_add_column01 add column b int not null;
+insert into dfs_add_column01 values (1, 2);
+alter table dfs_add_column01 add column c int not null ;
+ERROR:  column "c" contains null values
+alter table dfs_add_column01 add column c int not null default 4;
+insert into dfs_add_column01 values (1, 2);
+----test volatile function
+alter table dfs_add_column01 add column dd int default random();
+ERROR:  It is not supported on DFS table. The detailed reasons are the followings:
+DETAIL:  1. the default value may be a volatile function.
+2. the storage length of default value may be greater than 127.
+3. the data type of new column is not supported.
+--test non-volatile function
+alter table dfs_add_column01 add column e date default now();
+--unsupport other constraint
+alter table dfs_add_column01 add column e int unique;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+alter table dfs_add_column01 add column e int primary key;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+alter table dfs_add_column01 add column f int check(e>9);
+ERROR:  column store unsupport constraint "CHECK"
+--find problem 
+drop table dfs_add_column01;
+create table dfs_add_column01(a int, b int, c int) tablespace hdfs_ts;
+drop table if exists temp;
+NOTICE:  table "temp" does not exist, skipping
+create table temp( a int, b int);
+insert into temp values(1, 2);
+alter table dfs_add_column01 drop column b;
+insert into dfs_add_column01 select * from temp;
+--use case 2, 3, 4
+set cstore_insert_mode=main;
+drop table if exists dfs_add_column01;
+create table dfs_add_column01(a int, b int) tablespace hdfs_ts;
+insert into dfs_add_column01 values(0, 0);
+alter table dfs_add_column01 add column c int ;
+alter table dfs_add_column01 add column d int not null default 5+3;
+insert into dfs_add_column01 values(1, 1);
+insert into dfs_add_column01 (a, b , c , d) values(1, 2, 3, 4);
+select * from dfs_add_column01 order by 1, 2;
+ a | b | c | d 
+---+---+---+---
+ 0 | 0 |   | 8
+ 1 | 1 |   | 8
+ 1 | 2 | 3 | 4
+(3 rows)
+
+alter table dfs_add_column01 add column e int;
+insert into dfs_add_column01 values(6, 6, 6, 6, 6);
+select * from dfs_add_column01 order by 1, 2;
+ a | b | c | d | e 
+---+---+---+---+---
+ 0 | 0 |   | 8 |  
+ 1 | 1 |   | 8 |  
+ 1 | 2 | 3 | 4 |  
+ 6 | 6 | 6 | 6 | 6
+(4 rows)
+
+alter table dfs_add_column01 drop column c;
+insert into dfs_add_column01 (a, b , d) values(1, 2, 5);
+insert into dfs_add_column01 (a, b) values(1, 2);
+select * from dfs_add_column01 order by 1, 2, 3;
+ a | b | d | e 
+---+---+---+---
+ 0 | 0 | 8 |  
+ 1 | 1 | 8 |  
+ 1 | 2 | 4 |  
+ 1 | 2 | 5 |  
+ 1 | 2 | 8 |  
+ 6 | 6 | 6 | 6
+(6 rows)
+
+select * from dfs_add_column01 where d = 5 order by 1;
+ a | b | d | e 
+---+---+---+---
+ 1 | 2 | 5 |  
+(1 row)
+
+select * from dfs_add_column01 where d = 8 order by 1;
+ a | b | d | e 
+---+---+---+---
+ 0 | 0 | 8 |  
+ 1 | 1 | 8 |  
+ 1 | 2 | 8 |  
+(3 rows)
+
+alter table dfs_add_column01 add column c int ;
+insert into dfs_add_column01 values(1, 1);
+--update 
+select * from dfs_add_column01 order by 1, 2, 3;
+ a | b | d | e | c 
+---+---+---+---+---
+ 0 | 0 | 8 |   |  
+ 1 | 1 | 8 |   |  
+ 1 | 1 | 8 |   |  
+ 1 | 2 | 4 |   |  
+ 1 | 2 | 5 |   |  
+ 1 | 2 | 8 |   |  
+ 6 | 6 | 6 | 6 |  
+(7 rows)
+
+select * from dfs_add_column01 where c is null order by 1, 2, 3, 4;
+ a | b | d | e | c 
+---+---+---+---+---
+ 0 | 0 | 8 |   |  
+ 1 | 1 | 8 |   |  
+ 1 | 1 | 8 |   |  
+ 1 | 2 | 4 |   |  
+ 1 | 2 | 5 |   |  
+ 1 | 2 | 8 |   |  
+ 6 | 6 | 6 | 6 |  
+(7 rows)
+
+update dfs_add_column01 set b = 7 where c is null;
+select * from dfs_add_column01 where c is null order by 1, 2, 3, 4;
+ a | b | d | e | c 
+---+---+---+---+---
+ 0 | 7 | 8 |   |  
+ 1 | 7 | 4 |   |  
+ 1 | 7 | 5 |   |  
+ 1 | 7 | 8 |   |  
+ 1 | 7 | 8 |   |  
+ 1 | 7 | 8 |   |  
+ 6 | 7 | 6 | 6 |  
+(7 rows)
+
+select * from dfs_add_column01 where d = 8 order by 1, 2, 3;
+ a | b | d | e | c 
+---+---+---+---+---
+ 0 | 7 | 8 |   |  
+ 1 | 7 | 8 |   |  
+ 1 | 7 | 8 |   |  
+ 1 | 7 | 8 |   |  
+(4 rows)
+
+update dfs_add_column01 set b = 8 where d = 8;
+select * from dfs_add_column01 where d = 8 order by 1, 2, 3, 4;
+ a | b | d | e | c 
+---+---+---+---+---
+ 0 | 8 | 8 |   |  
+ 1 | 8 | 8 |   |  
+ 1 | 8 | 8 |   |  
+ 1 | 8 | 8 |   |  
+(4 rows)
+
+select * from dfs_add_column01 order by 1, 2, 3;
+ a | b | d | e | c 
+---+---+---+---+---
+ 0 | 8 | 8 |   |  
+ 1 | 7 | 4 |   |  
+ 1 | 7 | 5 |   |  
+ 1 | 8 | 8 |   |  
+ 1 | 8 | 8 |   |  
+ 1 | 8 | 8 |   |  
+ 6 | 7 | 6 | 6 |  
+(7 rows)
+
+select * from dfs_add_column01 where d = 4;
+ a | b | d | e | c 
+---+---+---+---+---
+ 1 | 7 | 4 |   |  
+(1 row)
+
+update dfs_add_column01 set b = 4 where d = 4;
+select * from dfs_add_column01 where d = 4;
+ a | b | d | e | c 
+---+---+---+---+---
+ 1 | 4 | 4 |   |  
+(1 row)
+
+select * from dfs_add_column01 order by 1, 2, 3;
+ a | b | d | e | c 
+---+---+---+---+---
+ 0 | 8 | 8 |   |  
+ 1 | 4 | 4 |   |  
+ 1 | 7 | 5 |   |  
+ 1 | 8 | 8 |   |  
+ 1 | 8 | 8 |   |  
+ 1 | 8 | 8 |   |  
+ 6 | 7 | 6 | 6 |  
+(7 rows)
+
+start transaction;
+delete from dfs_add_column01 where c is null;
+select * from dfs_add_column01 order by 1, 4;
+ a | b | d | e | c 
+---+---+---+---+---
+(0 rows)
+
+abort;
+select * from dfs_add_column01 order by 1, 2, 3, 4, 5;
+ a | b | d | e | c 
+---+---+---+---+---
+ 0 | 8 | 8 |   |  
+ 1 | 4 | 4 |   |  
+ 1 | 7 | 5 |   |  
+ 1 | 8 | 8 |   |  
+ 1 | 8 | 8 |   |  
+ 1 | 8 | 8 |   |  
+ 6 | 7 | 6 | 6 |  
+(7 rows)
+
+alter table dfs_add_column01 drop column d;
+insert into dfs_add_column01 (a, b , c) values(1, 2, 33);
+insert into dfs_add_column01 (a, b ) values(1, 3);
+select * from dfs_add_column01 order by 1, 2, 3, 4;
+ a | b | e | c  
+---+---+---+----
+ 0 | 8 |   |   
+ 1 | 2 |   | 33
+ 1 | 3 |   |   
+ 1 | 4 |   |   
+ 1 | 7 |   |   
+ 1 | 8 |   |   
+ 1 | 8 |   |   
+ 1 | 8 |   |   
+ 6 | 7 | 6 |   
+(9 rows)
+
+select * from dfs_add_column01 where c = 33 order by 1;
+ a | b | e | c  
+---+---+---+----
+ 1 | 2 |   | 33
+(1 row)
+
+select * from dfs_add_column01 where c is null order by 1;
+ a | b | e | c 
+---+---+---+---
+ 0 | 8 |   |  
+ 1 | 7 |   |  
+ 1 | 8 |   |  
+ 1 | 8 |   |  
+ 1 | 8 |   |  
+ 1 | 4 |   |  
+ 1 | 3 |   |  
+ 6 | 7 | 6 |  
+(8 rows)
+
+alter table dfs_add_column01 add column d int not null default 5+3;
+insert into dfs_add_column01 values(1, 1);
+insert into dfs_add_column01 (a, b , c , d) values(1, 2, 3, 4);
+--delete
+select * from dfs_add_column01 order by 1, 2 , 3;
+ a | b | e | c  | d 
+---+---+---+----+---
+ 0 | 8 |   |    | 8
+ 1 | 1 |   |    | 8
+ 1 | 2 |   | 33 | 8
+ 1 | 2 |   |  3 | 4
+ 1 | 3 |   |    | 8
+ 1 | 4 |   |    | 8
+ 1 | 7 |   |    | 8
+ 1 | 8 |   |    | 8
+ 1 | 8 |   |    | 8
+ 1 | 8 |   |    | 8
+ 6 | 7 | 6 |    | 8
+(11 rows)
+
+start transaction;
+delete from dfs_add_column01 where c is null;
+select * from dfs_add_column01 order by 1, 2, 3, 4, 5;
+ a | b | e | c  | d 
+---+---+---+----+---
+ 1 | 2 |   |  3 | 4
+ 1 | 2 |   | 33 | 8
+(2 rows)
+
+abort;
+start transaction;
+select * from dfs_add_column01 order by 1, 2, 3;
+ a | b | e | c  | d 
+---+---+---+----+---
+ 0 | 8 |   |    | 8
+ 1 | 1 |   |    | 8
+ 1 | 2 |   | 33 | 8
+ 1 | 2 |   |  3 | 4
+ 1 | 3 |   |    | 8
+ 1 | 4 |   |    | 8
+ 1 | 7 |   |    | 8
+ 1 | 8 |   |    | 8
+ 1 | 8 |   |    | 8
+ 1 | 8 |   |    | 8
+ 6 | 7 | 6 |    | 8
+(11 rows)
+
+delete from dfs_add_column01 where d =8;
+select * from dfs_add_column01 order by 1;
+ a | b | e | c | d 
+---+---+---+---+---
+ 1 | 2 |   | 3 | 4
+(1 row)
+
+abort;
+start transaction;
+select * from dfs_add_column01 order by 1, 2, 3;
+ a | b | e | c  | d 
+---+---+---+----+---
+ 0 | 8 |   |    | 8
+ 1 | 1 |   |    | 8
+ 1 | 2 |   | 33 | 8
+ 1 | 2 |   |  3 | 4
+ 1 | 3 |   |    | 8
+ 1 | 4 |   |    | 8
+ 1 | 7 |   |    | 8
+ 1 | 8 |   |    | 8
+ 1 | 8 |   |    | 8
+ 1 | 8 |   |    | 8
+ 6 | 7 | 6 |    | 8
+(11 rows)
+
+delete from dfs_add_column01 where c is null;
+select * from dfs_add_column01 order by 1, 2, 3, 4, 5;
+ a | b | e | c  | d 
+---+---+---+----+---
+ 1 | 2 |   |  3 | 4
+ 1 | 2 |   | 33 | 8
+(2 rows)
+
+delete from dfs_add_column01 where d =8;
+delete from dfs_add_column01 where d =4;
+select * from dfs_add_column01 order by 1;
+ a | b | e | c | d 
+---+---+---+---+---
+(0 rows)
+
+abort;
+alter table dfs_add_column01 drop column d;
+insert into dfs_add_column01 (a, b , c) values(1, 2, 33);
+insert into dfs_add_column01 (a, b ) values(1, 3);
+select * from dfs_add_column01 order by 1, 2, 3, 4;
+ a | b | e | c  
+---+---+---+----
+ 0 | 8 |   |   
+ 1 | 1 |   |   
+ 1 | 2 |   |  3
+ 1 | 2 |   | 33
+ 1 | 2 |   | 33
+ 1 | 3 |   |   
+ 1 | 3 |   |   
+ 1 | 4 |   |   
+ 1 | 7 |   |   
+ 1 | 8 |   |   
+ 1 | 8 |   |   
+ 1 | 8 |   |   
+ 6 | 7 | 6 |   
+(13 rows)
+
+select * from dfs_add_column01 where c = 33 order by 1;
+ a | b | e | c  
+---+---+---+----
+ 1 | 2 |   | 33
+ 1 | 2 |   | 33
+(2 rows)
+
+select * from dfs_add_column01 where c is null order by 1, 2;
+ a | b | e | c 
+---+---+---+---
+ 0 | 8 |   |  
+ 1 | 1 |   |  
+ 1 | 3 |   |  
+ 1 | 3 |   |  
+ 1 | 4 |   |  
+ 1 | 7 |   |  
+ 1 | 8 |   |  
+ 1 | 8 |   |  
+ 1 | 8 |   |  
+ 6 | 7 | 6 |  
+(10 rows)
+
+alter table dfs_add_column01 add column f int default 10;
+select * from dfs_add_column01 order by 1, 2, 3, 4, 5;
+ a | b | e | c  | f  
+---+---+---+----+----
+ 0 | 8 |   |    | 10
+ 1 | 1 |   |    | 10
+ 1 | 2 |   |  3 | 10
+ 1 | 2 |   | 33 | 10
+ 1 | 2 |   | 33 | 10
+ 1 | 3 |   |    | 10
+ 1 | 3 |   |    | 10
+ 1 | 4 |   |    | 10
+ 1 | 7 |   |    | 10
+ 1 | 8 |   |    | 10
+ 1 | 8 |   |    | 10
+ 1 | 8 |   |    | 10
+ 6 | 7 | 6 |    | 10
+(13 rows)
+
+select * from dfs_add_column01 where f =10 order by 1, 2, 3, 4, 5;
+ a | b | e | c  | f  
+---+---+---+----+----
+ 0 | 8 |   |    | 10
+ 1 | 1 |   |    | 10
+ 1 | 2 |   |  3 | 10
+ 1 | 2 |   | 33 | 10
+ 1 | 2 |   | 33 | 10
+ 1 | 3 |   |    | 10
+ 1 | 3 |   |    | 10
+ 1 | 4 |   |    | 10
+ 1 | 7 |   |    | 10
+ 1 | 8 |   |    | 10
+ 1 | 8 |   |    | 10
+ 1 | 8 |   |    | 10
+ 6 | 7 | 6 |    | 10
+(13 rows)
+
+delete from dfs_add_column01 where c is null;
+select * from dfs_add_column01 order by 1, 2, 3;
+ a | b | e | c  | f  
+---+---+---+----+----
+ 1 | 2 |   | 33 | 10
+ 1 | 2 |   |  3 | 10
+ 1 | 2 |   | 33 | 10
+(3 rows)
+
+delete from dfs_add_column01 where c =3;
+select b from dfs_add_column01 where b = 2 order by 1;
+ b 
+---
+ 2
+ 2
+(2 rows)
+
+--use case 5
+drop table if exists dfs_add_column01;
+create table dfs_add_column01(a int) tablespace hdfs_ts;
+set cstore_insert_mode=main;
+insert into dfs_add_column01 values(1);
+alter table dfs_add_column01 add ( b int default 5, c int not null default 8);
+insert into dfs_add_column01 (a, b, c) values(2, 3, 4);
+insert into dfs_add_column01 (a, c) values(2, 4);
+insert into dfs_add_column01 (a, b) values(3, 6);
+insert into dfs_add_column01 (a, b) values(3, 6);
+select * from dfs_add_column01 order by 1, 2, 3;
+ a | b | c 
+---+---+---
+ 1 | 5 | 8
+ 2 | 3 | 4
+ 2 | 5 | 4
+ 3 | 6 | 8
+ 3 | 6 | 8
+(5 rows)
+
+select b from dfs_add_column01 order by 1;
+ b 
+---
+ 3
+ 5
+ 5
+ 6
+ 6
+(5 rows)
+
+select c from dfs_add_column01 order by 1;
+ c 
+---
+ 4
+ 4
+ 8
+ 8
+ 8
+(5 rows)
+
+select b from dfs_add_column01 where b = 5 order by 1;
+ b 
+---
+ 5
+ 5
+(2 rows)
+
+select b from dfs_add_column01 where b = 3 order by 1;
+ b 
+---
+ 3
+(1 row)
+
+select c from dfs_add_column01 where c = 8 order by 1;
+ c 
+---
+ 8
+ 8
+ 8
+(3 rows)
+
+set cstore_insert_mode=delta;
+delete from dfs_add_column01;
+insert into dfs_add_column01 values(1);
+alter table dfs_add_column01 add ( b int default 5, c int not null default 8);
+ERROR:  column "b" of relation "dfs_add_column01" already exists
+insert into dfs_add_column01 (a, b, c) values(2, 3, 4);
+insert into dfs_add_column01 (a, c) values(2, 4);
+insert into dfs_add_column01 (a, b) values(3, 6);
+insert into dfs_add_column01 (a, b) values(3, 6);
+select * from dfs_add_column01 order by 1, 2, 3;
+ a | b | c 
+---+---+---
+ 1 | 5 | 8
+ 2 | 3 | 4
+ 2 | 5 | 4
+ 3 | 6 | 8
+ 3 | 6 | 8
+(5 rows)
+
+select b from dfs_add_column01 order by 1;
+ b 
+---
+ 3
+ 5
+ 5
+ 6
+ 6
+(5 rows)
+
+select c from dfs_add_column01 order by 1;
+ c 
+---
+ 4
+ 4
+ 8
+ 8
+ 8
+(5 rows)
+
+select b from dfs_add_column01 where b = 5 order by 1;
+ b 
+---
+ 5
+ 5
+(2 rows)
+
+select b from dfs_add_column01 where b = 3 order by 1;
+ b 
+---
+ 3
+(1 row)
+
+select c from dfs_add_column01 where c = 8 order by 1;
+ c 
+---
+ 8
+ 8
+ 8
+(3 rows)
+
+			
+------------------------------------------------test data type--------------------------------------
+drop table if exists dfs_add_column01;
+create table dfs_add_column01(a int) tablespace hdfs_ts distribute by hash(a);
+set cstore_insert_mode=main;
+insert into dfs_add_column01 values( 1);
+alter table dfs_add_column01 add column b int not null default 5;
+select * from dfs_add_column01 order by 1, 2;
+ a | b 
+---+---
+ 1 | 5
+(1 row)
+
+select * from dfs_add_column01 where b is not null; 
+ a | b 
+---+---
+ 1 | 5
+(1 row)
+
+select * from dfs_add_column01 where b is null; 
+ a | b 
+---+---
+(0 rows)
+
+select * from dfs_add_column01 where b =5; 
+ a | b 
+---+---
+ 1 | 5
+(1 row)
+
+select * from dfs_add_column01 where b <5;
+ a | b 
+---+---
+(0 rows)
+
+select * from dfs_add_column01 where b >5;  
+ a | b 
+---+---
+(0 rows)
+
+--test bool
+alter table dfs_add_column01 drop column b;
+alter table dfs_add_column01 add column b bool default true;
+select * from dfs_add_column01 order by 1, 2;
+ a | b 
+---+---
+ 1 | t
+(1 row)
+
+select * from dfs_add_column01 where b is not null; 
+ a | b 
+---+---
+ 1 | t
+(1 row)
+
+select * from dfs_add_column01 where b is null; 
+ a | b 
+---+---
+(0 rows)
+
+select * from dfs_add_column01 where b =1;
+ a | b 
+---+---
+ 1 | t
+(1 row)
+
+--test int1
+alter table dfs_add_column01 drop column b;
+alter table dfs_add_column01 add column b int1 default 1;
+select * from dfs_add_column01 order by 1, 2;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+select * from dfs_add_column01 where b =1::int1;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+--test int2
+alter table dfs_add_column01 drop column b;
+alter table dfs_add_column01 add column b int2 default 1;
+select * from dfs_add_column01 order by 1, 2;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+select * from dfs_add_column01 where b =1::int2;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+--test int4
+alter table dfs_add_column01 drop column b;
+alter table dfs_add_column01 add column b int4 default 1;
+select * from dfs_add_column01 order by 1, 2;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+select * from dfs_add_column01 where b =1::int4;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+--test int8
+alter table dfs_add_column01 drop column b;
+alter table dfs_add_column01 add column b int8 default 1;
+select * from dfs_add_column01 where b =1::int8;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+--test float4
+alter table dfs_add_column01 drop column b;
+alter table dfs_add_column01 add column b float4 default 4.89;
+select * from dfs_add_column01 where b =4.89::float4;
+ a |  b   
+---+------
+ 1 | 4.89
+(1 row)
+
+--test float8
+alter table dfs_add_column01 drop column b;
+alter table dfs_add_column01 add column b float8 default 4.89;
+select * from dfs_add_column01 where b =4.89;
+ a |  b   
+---+------
+ 1 | 4.89
+(1 row)
+
+--test varchar
+alter table dfs_add_column01 drop column b;
+alter table dfs_add_column01 add column b varchar(10) default '4.89';
+select * from dfs_add_column01 where b ='4.89';
+ a |  b   
+---+------
+ 1 | 4.89
+(1 row)
+
+--test clob
+alter table dfs_add_column01 drop column b;
+alter table dfs_add_column01 add column b clob;
+select * from dfs_add_column01 where b is null;
+ a | b 
+---+---
+ 1 | 
+(1 row)
+
+--test text
+alter table dfs_add_column01 drop column b;
+alter table dfs_add_column01 add column b text default '4.89';
+select * from dfs_add_column01 where b ='4.89';
+ a |  b   
+---+------
+ 1 | 4.89
+(1 row)
+
+--test bpchar
+alter table dfs_add_column01 drop column b;
+alter table dfs_add_column01 add column b bpchar(10) default '4.89';
+select * from dfs_add_column01 where b ='4.89';
+ a |     b      
+---+------------
+ 1 | 4.89      
+(1 row)
+
+--test date
+alter table dfs_add_column01 drop column b;
+alter table dfs_add_column01 add column b date default date '12-10-2010';
+select * from dfs_add_column01 where b ='12-10-2010';
+ a |            b             
+---+--------------------------
+ 1 | Fri Dec 10 00:00:00 2010
+(1 row)
+
+--test timestamp
+alter table dfs_add_column01 drop column b;
+alter table dfs_add_column01 add column b timestamp default '12-10-2010';
+select * from dfs_add_column01 where b ='12-10-2010';
+ a |            b             
+---+--------------------------
+ 1 | Fri Dec 10 00:00:00 2010
+(1 row)
+
+--test numeric
+alter table dfs_add_column01 drop column b;
+alter table dfs_add_column01 add column b numeric(16, 3) default 4.896;
+select * from dfs_add_column01 where b =4.896;
+ a |   b   
+---+-------
+ 1 | 4.896
+(1 row)
+
+alter table dfs_add_column01 drop column b;
+alter table dfs_add_column01 add column b numeric(20, 3) default 4.896;
+select * from dfs_add_column01 where b =4.896;
+ a |   b   
+---+-------
+ 1 | 4.896
+(1 row)
+
+----------------------------------------test select query----------------------------------
+------------------------------Columns in ORC File--------------------
+-------------1 represents the column exits in file
+-------------0 represents the column exists in file, but the column is drop
+-------------	 |1 column|2 column|3 column|4 column|5 column|6 column|
+-------------1 row|  1     | 
+-------------2 row|  1     |    1   |
+-------------3 row|  1     |    1   |    0   |
+-------------4 row|  1     |    1   |
+-------------5 row|  1     |    1   |        |    1   |
+-------------6 row|  1     |    1   |        |    1   |    1   |
+-------------
+-------------
+-------------
+-------------1  step: insert value
+-------------2  step: add one clomun
+-------------3  step: insert value
+-------------4  step: add one clomun
+-------------5  step: insert value
+-------------6  step: drop one clomun
+-------------7  step: insert value
+-------------8  step: add one column
+-------------9  step: insert value
+-------------10 step: add one column
+-------------11 step: insert value
+-------------12 step: add one column
+drop table if exists dfs_add_column01;
+create table dfs_add_column01(a int) tablespace hdfs_ts distribute by hash(a);
+set cstore_insert_mode=main;
+insert into dfs_add_column01 values( 1);
+select * from dfs_add_column01 order by 1;
+ a 
+---
+ 1
+(1 row)
+
+alter table dfs_add_column01 add column b numeric(20, 3) default 2.896;
+select * from dfs_add_column01               order by 1, 2;
+ a |   b   
+---+-------
+ 1 | 2.896
+(1 row)
+
+select a from dfs_add_column01 order by 1;
+ a 
+---
+ 1
+(1 row)
+
+select b from dfs_add_column01 where b =2.896 order by 1;
+   b   
+-------
+ 2.896
+(1 row)
+
+select * from dfs_add_column01 where b =2.896 order by 1;
+ a |   b   
+---+-------
+ 1 | 2.896
+(1 row)
+
+select * from dfs_add_column01 where a =1     order by 1;
+ a |   b   
+---+-------
+ 1 | 2.896
+(1 row)
+
+insert into dfs_add_column01 values( 2, 12.1);
+select * from dfs_add_column01               order by 1, 2;
+ a |   b    
+---+--------
+ 1 |  2.896
+ 2 | 12.100
+(2 rows)
+
+select a from dfs_add_column01 where b = 12.1 order by 1;
+ a 
+---
+ 2
+(1 row)
+
+select b from dfs_add_column01 where b =12.1 order by 1;
+   b    
+--------
+ 12.100
+(1 row)
+
+select * from dfs_add_column01 where b =12.1 order by 1;
+ a |   b    
+---+--------
+ 2 | 12.100
+(1 row)
+
+alter table dfs_add_column01 add column c float8 default 3.896;
+select * from dfs_add_column01               order by 1, 2;
+ a |   b    |   c   
+---+--------+-------
+ 1 |  2.896 | 3.896
+ 2 | 12.100 | 3.896
+(2 rows)
+
+select c from dfs_add_column01 where c =3.896 order by 1;
+   c   
+-------
+ 3.896
+ 3.896
+(2 rows)
+
+select b from dfs_add_column01 where c =3.896 order by 1;
+   b    
+--------
+  2.896
+ 12.100
+(2 rows)
+
+select * from dfs_add_column01 where c =3.896 order by 1;
+ a |   b    |   c   
+---+--------+-------
+ 1 |  2.896 | 3.896
+ 2 | 12.100 | 3.896
+(2 rows)
+
+select * from dfs_add_column01 where a=1 order by 1;
+ a |   b   |   c   
+---+-------+-------
+ 1 | 2.896 | 3.896
+(1 row)
+
+insert into dfs_add_column01 values( 3, 12.2, 13.1);
+select * from dfs_add_column01               order by 1, 2;
+ a |   b    |   c   
+---+--------+-------
+ 1 |  2.896 | 3.896
+ 2 | 12.100 | 3.896
+ 3 | 12.200 |  13.1
+(3 rows)
+
+select c from dfs_add_column01 where c =13.1 order by 1;
+  c   
+------
+ 13.1
+(1 row)
+
+select b from dfs_add_column01 where c =13.1 order by 1;
+   b    
+--------
+ 12.200
+(1 row)
+
+select a from dfs_add_column01 where b =12.2 order by 1;
+ a 
+---
+ 3
+(1 row)
+
+select * from dfs_add_column01 where c =13.1 order by 1;
+ a |   b    |  c   
+---+--------+------
+ 3 | 12.200 | 13.1
+(1 row)
+
+alter table dfs_add_column01 drop column c;
+select * from dfs_add_column01               order by 1, 2;
+ a |   b    
+---+--------
+ 1 |  2.896
+ 2 | 12.100
+ 3 | 12.200
+(3 rows)
+
+select a from dfs_add_column01               order by 1;
+ a 
+---
+ 1
+ 2
+ 3
+(3 rows)
+
+select b from dfs_add_column01 where b =12.1 order by 1;
+   b    
+--------
+ 12.100
+(1 row)
+
+select b from dfs_add_column01 where b =12.2 order by 1;
+   b    
+--------
+ 12.200
+(1 row)
+
+select * from dfs_add_column01 where b =12.1 order by 1, 2;
+ a |   b    
+---+--------
+ 2 | 12.100
+(1 row)
+
+insert into dfs_add_column01 values( 3, 12.3);
+select * from dfs_add_column01               order by 1, 2;
+ a |   b    
+---+--------
+ 1 |  2.896
+ 2 | 12.100
+ 3 | 12.200
+ 3 | 12.300
+(4 rows)
+
+select a from dfs_add_column01 where b =12.3 order by 1;
+ a 
+---
+ 3
+(1 row)
+
+select b from dfs_add_column01 where b =12.3 order by 1;
+   b    
+--------
+ 12.300
+(1 row)
+
+select b from dfs_add_column01 where b =12.2 order by 1;
+   b    
+--------
+ 12.200
+(1 row)
+
+select b from dfs_add_column01 where b =12.1 order by 1;
+   b    
+--------
+ 12.100
+(1 row)
+
+select * from dfs_add_column01 where b =12.3 order by 1;
+ a |   b    
+---+--------
+ 3 | 12.300
+(1 row)
+
+alter table dfs_add_column01 add column d float8 default 4.896;
+select * from dfs_add_column01               order by 1, 2, 3;
+ a |   b    |   d   
+---+--------+-------
+ 1 |  2.896 | 4.896
+ 2 | 12.100 | 4.896
+ 3 | 12.200 | 4.896
+ 3 | 12.300 | 4.896
+(4 rows)
+
+select d from dfs_add_column01 where d =4.896 order by 1;
+   d   
+-------
+ 4.896
+ 4.896
+ 4.896
+ 4.896
+(4 rows)
+
+select a from dfs_add_column01 where d =4.896 order by 1;
+ a 
+---
+ 1
+ 2
+ 3
+ 3
+(4 rows)
+
+select * from dfs_add_column01 where b =12.3 order by 1, 2, 3;
+ a |   b    |   d   
+---+--------+-------
+ 3 | 12.300 | 4.896
+(1 row)
+
+select a from dfs_add_column01 order by 1;
+ a 
+---
+ 1
+ 2
+ 3
+ 3
+(4 rows)
+
+insert into dfs_add_column01 values( 3, 12.4, 14.2);
+select * from dfs_add_column01               order by 1, 2, 3;
+ a |   b    |   d   
+---+--------+-------
+ 1 |  2.896 | 4.896
+ 2 | 12.100 | 4.896
+ 3 | 12.200 | 4.896
+ 3 | 12.300 | 4.896
+ 3 | 12.400 |  14.2
+(5 rows)
+
+select d from dfs_add_column01 where d =14.2 order by 1;
+  d   
+------
+ 14.2
+(1 row)
+
+select * from dfs_add_column01 where d =14.2 order by 1;
+ a |   b    |  d   
+---+--------+------
+ 3 | 12.400 | 14.2
+(1 row)
+
+select * from dfs_add_column01 where b =12.4 order by 1;
+ a |   b    |  d   
+---+--------+------
+ 3 | 12.400 | 14.2
+(1 row)
+
+select * from dfs_add_column01 where b =12.3 order by 1;
+ a |   b    |   d   
+---+--------+-------
+ 3 | 12.300 | 4.896
+(1 row)
+
+select a from dfs_add_column01 order by 1;
+ a 
+---
+ 1
+ 2
+ 3
+ 3
+ 3
+(5 rows)
+
+select * from dfs_add_column01 where d =14.2 order by 1;
+ a |   b    |  d   
+---+--------+------
+ 3 | 12.400 | 14.2
+(1 row)
+
+alter table dfs_add_column01 add column e float8 default 5.896;
+select * from dfs_add_column01                order by 1, 2, 3;
+ a |   b    |   d   |   e   
+---+--------+-------+-------
+ 1 |  2.896 | 4.896 | 5.896
+ 2 | 12.100 | 4.896 | 5.896
+ 3 | 12.200 | 4.896 | 5.896
+ 3 | 12.300 | 4.896 | 5.896
+ 3 | 12.400 |  14.2 | 5.896
+(5 rows)
+
+select e from dfs_add_column01 where e =5.896 order by 1;
+   e   
+-------
+ 5.896
+ 5.896
+ 5.896
+ 5.896
+ 5.896
+(5 rows)
+
+select a from dfs_add_column01 where e =5.896 order by 1;
+ a 
+---
+ 1
+ 2
+ 3
+ 3
+ 3
+(5 rows)
+
+select a from dfs_add_column01 where d =14.2  order by 1;
+ a 
+---
+ 3
+(1 row)
+
+select a from dfs_add_column01 where b =12.4 order by 1;
+ a 
+---
+ 3
+(1 row)
+
+insert into dfs_add_column01 values( 3, 12.1, 14.2, 15.1);
+select * from dfs_add_column01                order by 1, 2, 3;
+ a |   b    |   d   |   e   
+---+--------+-------+-------
+ 1 |  2.896 | 4.896 | 5.896
+ 2 | 12.100 | 4.896 | 5.896
+ 3 | 12.100 |  14.2 |  15.1
+ 3 | 12.200 | 4.896 | 5.896
+ 3 | 12.300 | 4.896 | 5.896
+ 3 | 12.400 |  14.2 | 5.896
+(6 rows)
+
+select e from dfs_add_column01 where e =15.1 order by 1;
+  e   
+------
+ 15.1
+(1 row)
+
+select a from dfs_add_column01 where e =15.1 order by 1;
+ a 
+---
+ 3
+(1 row)
+
+select * from dfs_add_column01 where e =15.1 order by 1;
+ a |   b    |  d   |  e   
+---+--------+------+------
+ 3 | 12.100 | 14.2 | 15.1
+(1 row)
+
+select * from dfs_add_column01 where b =12.3 order by 1;
+ a |   b    |   d   |   e   
+---+--------+-------+-------
+ 3 | 12.300 | 4.896 | 5.896
+(1 row)
+
+select a, b from dfs_add_column01 where b = 12.1 order by 1, 2;
+ a |   b    
+---+--------
+ 2 | 12.100
+ 3 | 12.100
+(2 rows)
+
+alter table dfs_add_column01 add column f numeric(20, 3) default 6.896;
+select * from dfs_add_column01                order by 1, 2, 3;
+ a |   b    |   d   |   e   |   f   
+---+--------+-------+-------+-------
+ 1 |  2.896 | 4.896 | 5.896 | 6.896
+ 2 | 12.100 | 4.896 | 5.896 | 6.896
+ 3 | 12.100 |  14.2 |  15.1 | 6.896
+ 3 | 12.200 | 4.896 | 5.896 | 6.896
+ 3 | 12.300 | 4.896 | 5.896 | 6.896
+ 3 | 12.400 |  14.2 | 5.896 | 6.896
+(6 rows)
+
+select f from dfs_add_column01 where f =6.896 order by 1;
+   f   
+-------
+ 6.896
+ 6.896
+ 6.896
+ 6.896
+ 6.896
+ 6.896
+(6 rows)
+
+select a from dfs_add_column01 where f =6.896 order by 1;
+ a 
+---
+ 1
+ 2
+ 3
+ 3
+ 3
+ 3
+(6 rows)
+
+select * from dfs_add_column01 where f =6.896 order by 1, 2, 3;
+ a |   b    |   d   |   e   |   f   
+---+--------+-------+-------+-------
+ 1 |  2.896 | 4.896 | 5.896 | 6.896
+ 2 | 12.100 | 4.896 | 5.896 | 6.896
+ 3 | 12.100 |  14.2 |  15.1 | 6.896
+ 3 | 12.200 | 4.896 | 5.896 | 6.896
+ 3 | 12.300 | 4.896 | 5.896 | 6.896
+ 3 | 12.400 |  14.2 | 5.896 | 6.896
+(6 rows)
+
+select * from dfs_add_column01 where b =12.3 order by 1;
+ a |   b    |   d   |   e   |   f   
+---+--------+-------+-------+-------
+ 3 | 12.300 | 4.896 | 5.896 | 6.896
+(1 row)
+
+select a, b from dfs_add_column01 where b = 12.1 order by 1, 2;
+ a |   b    
+---+--------
+ 2 | 12.100
+ 3 | 12.100
+(2 rows)
+
+insert into dfs_add_column01 select * from dfs_add_column01;
+--------------------------random test-----------------------------
+drop table if exists dfs_add_column01;
+create table dfs_add_column01(a int, b int) tablespace hdfs_ts distribute by hash(a) partition by values (b);
+set cstore_insert_mode=main;
+insert into dfs_add_column01 values(1, 2);
+alter table dfs_add_column01 add column c int default 5;
+insert into dfs_add_column01 values(1, 2, 4);
+select * from dfs_add_column01 order by 1, 2, 3;
+ a | b | c 
+---+---+---
+ 1 | 2 | 4
+ 1 | 2 | 5
+(2 rows)
+
+select * from dfs_add_column01 where c = 5 order by 1;
+ a | b | c 
+---+---+---
+ 1 | 2 | 5
+(1 row)
+
+select * from dfs_add_column01 where c = 4 order by 1;
+ a | b | c 
+---+---+---
+ 1 | 2 | 4
+(1 row)
+
+alter table dfs_add_column01 drop column c;
+insert into dfs_add_column01 values(1, 3);
+select * from dfs_add_column01 order by 1;
+ a | b 
+---+---
+ 1 | 2
+ 1 | 2
+ 1 | 3
+(3 rows)
+
+select * from dfs_add_column01 where b = 3 order by 1;
+ a | b 
+---+---
+ 1 | 3
+(1 row)
+
+select * from dfs_add_column01 where b = 2 order by 1;
+ a | b 
+---+---
+ 1 | 2
+ 1 | 2
+(2 rows)
+
+alter table dfs_add_column01 add column c int default 6;
+select * from dfs_add_column01 where c = 6 order by 1;
+ a | b | c 
+---+---+---
+ 1 | 2 | 6
+ 1 | 2 | 6
+ 1 | 3 | 6
+(3 rows)
+
+select * from dfs_add_column01 where b = 3 order by 1;
+ a | b | c 
+---+---+---
+ 1 | 3 | 6
+(1 row)
+
+select * from dfs_add_column01 where b = 2 order by 1;
+ a | b | c 
+---+---+---
+ 1 | 2 | 6
+ 1 | 2 | 6
+(2 rows)
+
+insert into dfs_add_column01 values(1, 4, 7);
+select * from dfs_add_column01 order by 1;
+ a | b | c 
+---+---+---
+ 1 | 2 | 6
+ 1 | 2 | 6
+ 1 | 3 | 6
+ 1 | 4 | 7
+(4 rows)
+
+select * from dfs_add_column01 where b = 4 order by 1;
+ a | b | c 
+---+---+---
+ 1 | 4 | 7
+(1 row)
+
+select * from dfs_add_column01 where c = 6 order by 1;
+ a | b | c 
+---+---+---
+ 1 | 2 | 6
+ 1 | 2 | 6
+ 1 | 3 | 6
+(3 rows)
+
+select * from dfs_add_column01 where c = 7 order by 1;
+ a | b | c 
+---+---+---
+ 1 | 4 | 7
+(1 row)
+
+alter table dfs_add_column01 drop column c;
+select * from dfs_add_column01 order by 1;
+ a | b 
+---+---
+ 1 | 2
+ 1 | 2
+ 1 | 3
+ 1 | 4
+(4 rows)
+
+select * from dfs_add_column01 where b = 3 order by 1;
+ a | b 
+---+---
+ 1 | 3
+(1 row)
+
+select * from dfs_add_column01 where b = 2 order by 1;
+ a | b 
+---+---
+ 1 | 2
+ 1 | 2
+(2 rows)
+
+alter table dfs_add_column01 add column c int default 6;
+insert into dfs_add_column01 values(10, 10);
+insert into dfs_add_column01 values(11, 11, 11);
+select * from dfs_add_column01 order by 1;
+ a  | b  | c  
+----+----+----
+  1 |  2 |  6
+  1 |  2 |  6
+  1 |  3 |  6
+  1 |  4 |  6
+ 10 | 10 |  6
+ 11 | 11 | 11
+(6 rows)
+
+select * from dfs_add_column01 where c = 11 order by 1;
+ a  | b  | c  
+----+----+----
+ 11 | 11 | 11
+(1 row)
+
+select * from dfs_add_column01 where c = 12 order by 1;
+ a | b | c 
+---+---+---
+(0 rows)
+
+select * from dfs_add_column01 where b = 3 order by 1;
+ a | b | c 
+---+---+---
+ 1 | 3 | 6
+(1 row)
+
+select * from dfs_add_column01 where b = 2 order by 1;
+ a | b | c 
+---+---+---
+ 1 | 2 | 6
+ 1 | 2 | 6
+(2 rows)
+
+select * from dfs_add_column01 where b = 10 order by 1;
+ a  | b  | c 
+----+----+---
+ 10 | 10 | 6
+(1 row)
+
+drop table temp;
+create table temp( a int);
+insert into temp values(1);
+drop table dfs_alter_001;
+ERROR:  table "dfs_alter_001" does not exist
+create table dfs_alter_001( a int) tablespace hdfs_ts; 
+set cstore_insert_mode=main;
+insert into dfs_alter_001 select * from temp;
+alter table dfs_alter_001 add column b int default 5;
+select * from dfs_alter_001;
+ a | b 
+---+---
+ 1 | 5
+(1 row)
+
+drop server if exists hdfs_server_alter cascade;
+NOTICE:  server "hdfs_server_alter" does not exist, skipping
+CREATE SERVER hdfs_server_alter FOREIGN DATA WRAPPER HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+create foreign table f_dfs_alter_001  (a int, b int) server hdfs_server_alter options(format 'orc', foldername '/@hdfsstoreplus@/dfs_init_004/tablespace_secondary/regression/alter_dfs_column.dfs_alter_001') distribute by roundrobin;
+select * from f_dfs_alter_001;
+ a | b 
+---+---
+ 1 |  
+(1 row)
+
+vacuum full dfs_alter_001;
+analyze dfs_alter_001;
+select * from f_dfs_alter_001;
+ a | b 
+---+---
+ 1 | 5
+(1 row)
+
+drop table f_dfs_alter_001;
+ERROR:  "f_dfs_alter_001" is not a table
+HINT:  Use DROP FOREIGN TABLE to remove a foreign table.
+drop table dfs_alter_001;
+create table three_cols(a int , b int, c int) tablespace hdfs_ts;
+set cstore_insert_mode=main;
+insert into three_cols values(1,1,1);
+alter table three_cols drop column c;
+insert into three_cols values(2,2);
+alter table three_cols drop column b;
+insert into three_cols values(3);
+create foreign table f_three_cols_1  (a int, b int, c int) server hdfs_server_alter options(format 'orc', foldername '/@hdfsstoreplus@/dfs_init_004/tablespace_secondary/regression/alter_dfs_column.three_cols') distribute by roundrobin;
+create foreign table f_three_cols_2  (a int, b int) server hdfs_server_alter options(format 'orc', foldername '/@hdfsstoreplus@/dfs_init_004/tablespace_secondary/regression/alter_dfs_column.three_cols') distribute by roundrobin;
+create foreign table f_three_cols_3  (a int) server hdfs_server_alter options(format 'orc', foldername '/@hdfsstoreplus@/dfs_init_004/tablespace_secondary/regression/alter_dfs_column.three_cols') distribute by roundrobin;
+select * from f_three_cols_1 order by 1;
+ a | b | c 
+---+---+---
+ 1 | 1 | 1
+ 2 | 2 |  
+ 3 |   |  
+(3 rows)
+
+select * from f_three_cols_2 order by 1;
+ a | b 
+---+---
+ 1 | 1
+ 2 | 2
+ 3 |  
+(3 rows)
+
+select * from f_three_cols_3 order by 1;
+ a 
+---
+ 1
+ 2
+ 3
+(3 rows)
+
+drop table three_cols;
+--test sql_compatibility
+show sql_compatibility;
+ sql_compatibility 
+-------------------
+ ORA
+(1 row)
+
+drop table if exists dfs_compatibility;
+NOTICE:  table "dfs_compatibility" does not exist, skipping
+create table dfs_compatibility(a int) tablespace hdfs_ts;
+set cstore_insert_mode=main;
+insert into dfs_compatibility values(1);
+alter table dfs_compatibility add (b text default '', c int null);
+select * from dfs_compatibility where b is null;
+ a | b | c 
+---+---+---
+ 1 |   |  
+(1 row)
+
+select * from dfs_compatibility where b is not null;
+ a | b | c 
+---+---+---
+(0 rows)
+
+select * from dfs_compatibility where c is null;
+ a | b | c 
+---+---+---
+ 1 |   |  
+(1 row)
+
+select * from dfs_compatibility where c is not null;
+ a | b | c 
+---+---+---
+(0 rows)
+
+drop table dfs_compatibility;
+create database db_compatibility with dbcompatibility='TD';
+\c db_compatibility
+show sql_compatibility;
+ sql_compatibility 
+-------------------
+ TD
+(1 row)
+
+drop table if exists dfs_compatibility;
+NOTICE:  table "dfs_compatibility" does not exist, skipping
+create table dfs_compatibility(a int) tablespace hdfs_ts;
+set cstore_insert_mode=main;
+insert into dfs_compatibility values(1);
+alter table dfs_compatibility add (b text default '', c int null);
+select * from dfs_compatibility where b is null;
+ a | b | c 
+---+---+---
+(0 rows)
+
+select * from dfs_compatibility where b is not null;
+ a | b | c 
+---+---+---
+ 1 |   |  
+(1 row)
+
+select * from dfs_compatibility where c is null;
+ a | b | c 
+---+---+---
+ 1 |   |  
+(1 row)
+
+select * from dfs_compatibility where c is not null;
+ a | b | c 
+---+---+---
+(0 rows)
+
+drop table dfs_compatibility;
+\c regression
+drop database  db_compatibility;
+drop server hdfs_server_alter cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to foreign table alter_dfs_column.f_dfs_alter_001
+drop cascades to foreign table alter_dfs_column.f_three_cols_1
+drop cascades to foreign table alter_dfs_column.f_three_cols_2
+drop cascades to foreign table alter_dfs_column.f_three_cols_3
+drop schema alter_dfs_column cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table alter_dfs_column.dfs_add_column01
+drop cascades to table alter_dfs_column.temp

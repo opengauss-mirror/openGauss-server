@@ -11,43 +11,2256 @@ insert  into dcs_cpu VALUES(1.0,1,'node_a','scope_a','1.1.1.1',1.0,'2019-07-12 0
 insert  into dcs_cpu VALUES(2.0,2,'node_b','scope_a','1.1.1.2',2.0,'2019-07-12 00:12:10');
 insert  into dcs_cpu VALUES(3.0,3,'node_c','scope_b','1.1.1.3',3.0,'2019-07-12 00:13:10');
 select  time_window(interval '1 min',time_string),server_ip from dcs_cpu order by server_ip;
-ERROR:  function time_window(interval, timestamp without time zone) does not exist
-LINE 1: select  time_window(interval '1 min',time_string),server_ip ...
-                ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: time_window
+         time_window          | server_ip 
+------------------------------+-----------
+ Fri Jul 12 00:10:00 2019 PDT | 1.1.1.1
+ Fri Jul 12 00:12:00 2019 PDT | 1.1.1.2
+ Fri Jul 12 00:13:00 2019 PDT | 1.1.1.3
+(3 rows)
+
 select  time_fill(interval '1 min',time_string,'2019-07-12 00:09:00','2019-07-12 00:14:00'),avg(idle) from dcs_cpu group by time_fill order by time_fill;
-ERROR:  function time_fill(interval, timestamp without time zone, unknown, unknown) does not exist
-LINE 1: select  time_fill(interval '1 min',time_string,'2019-07-12 0...
-                ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: time_fill
+          time_fill           | avg 
+------------------------------+-----
+ Fri Jul 12 00:09:00 2019 PDT |    
+ Fri Jul 12 00:10:00 2019 PDT |   1
+ Fri Jul 12 00:11:00 2019 PDT |    
+ Fri Jul 12 00:12:00 2019 PDT |   2
+ Fri Jul 12 00:13:00 2019 PDT |   3
+ Fri Jul 12 00:14:00 2019 PDT |    
+(6 rows)
+
 select  time_fill(interval '1 min',time_string,'2019-07-12 00:09:00','2019-07-12 00:14:00'), fill_last(avg(idle)) from dcs_cpu group by time_fill order by time_fill;
-ERROR:  function time_fill(interval, timestamp without time zone, unknown, unknown) does not exist
-LINE 1: select  time_fill(interval '1 min',time_string,'2019-07-12 0...
-                ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: time_fill
+          time_fill           | fill_last 
+------------------------------+-----------
+ Fri Jul 12 00:09:00 2019 PDT |          
+ Fri Jul 12 00:10:00 2019 PDT |         1
+ Fri Jul 12 00:11:00 2019 PDT |         1
+ Fri Jul 12 00:12:00 2019 PDT |         2
+ Fri Jul 12 00:13:00 2019 PDT |         3
+ Fri Jul 12 00:14:00 2019 PDT |         3
+(6 rows)
+
 select  first(array_agg(idle),array_agg(time_string)), sum(idle) from dcs_cpu group by scope_name order by scope_name;
-ERROR:  function first(real[], timestamp without time zone[]) does not exist
-LINE 1: select  first(array_agg(idle),array_agg(time_string)), sum(i...
-                ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: first
+ first | sum 
+-------+-----
+     1 |   3
+     3 |   3
+(2 rows)
+
 select  last(array_agg(idle),array_agg(time_string)), sum(idle) from dcs_cpu group by scope_name order by scope_name;
-ERROR:  function last(real[], timestamp without time zone[]) does not exist
-LINE 1: select  last(array_agg(idle),array_agg(time_string)), sum(id...
-                ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: last
+ last | sum 
+------+-----
+    2 |   3
+    3 |   3
+(2 rows)
+
 drop table dcs_cpu;
+
 ---
 --- time window
 ---
 \set ON_ERROR_STOP 1
 SELECT time_window(interval '1 microsecond', '2019-07-12 11:09:01.001'::timestamptz);
-ERROR:  function time_window(interval, timestamp with time zone) does not exist
-LINE 1: SELECT time_window(interval '1 microsecond', '2019-07-12 11:...
+           time_window            
+----------------------------------
+ Fri Jul 12 11:09:01.001 2019 PDT
+(1 row)
+
+
+SELECT time_window(interval '1 millisecond', '2019-07-12 11:09:01.0000001'::timestamptz);
+         time_window          
+------------------------------
+ Fri Jul 12 11:09:01 2019 PDT
+(1 row)
+
+
+SELECT time_window(interval '1 second', '2019-07-12 11:09:01.001'::timestamptz);
+         time_window          
+------------------------------
+ Fri Jul 12 11:09:01 2019 PDT
+(1 row)
+
+
+SELECT time_window(interval '1 min', '2019-07-12 11:09:01'::timestamptz);
+         time_window          
+------------------------------
+ Fri Jul 12 11:09:00 2019 PDT
+(1 row)
+
+
+SELECT time_window(interval '1 hour', '2019-07-12 11:09:01'::timestamptz);
+         time_window          
+------------------------------
+ Fri Jul 12 11:00:00 2019 PDT
+(1 row)
+
+
+SELECT time_window(interval '1 day', '2019-07-12 11:09:01'::timestamptz);   ------------------------------------------
+         time_window          
+------------------------------
+ Thu Jul 11 17:00:00 2019 PDT
+(1 row)
+
+
+SELECT time_window(interval '1 week', '2019-07-12 11:09:01'::timestamptz);
+         time_window          
+------------------------------
+ Sun Jul 07 17:00:00 2019 PDT
+(1 row)
+
+
+SELECT time_window(interval '1 microsecond', '2019-07-12 11:09:01.001'::timestamp);
+           time_window            
+----------------------------------
+ Fri Jul 12 11:09:01.001 2019 PDT
+(1 row)
+
+
+SELECT time_window(interval '1 millisecond', '2019-07-12 11:09:01.0000001'::timestamp);
+         time_window          
+------------------------------
+ Fri Jul 12 11:09:01 2019 PDT
+(1 row)
+
+
+SELECT time_window(interval '1 second', '2019-07-12 11:09:01.001'::timestamp);
+         time_window          
+------------------------------
+ Fri Jul 12 11:09:01 2019 PDT
+(1 row)
+
+
+SELECT time_window(interval '1 min', '2019-07-12 11:09:01'::timestamp);
+         time_window          
+------------------------------
+ Fri Jul 12 11:09:00 2019 PDT
+(1 row)
+
+
+SELECT time_window(interval '1 hour', '2019-07-12 11:09:01'::timestamp);
+         time_window          
+------------------------------
+ Fri Jul 12 11:00:00 2019 PDT
+(1 row)
+
+
+SELECT time_window(interval '1 day', '2019-07-12 11:09:01'::timestamp);  ------------------------------------------
+         time_window          
+------------------------------
+ Thu Jul 11 17:00:00 2019 PDT
+(1 row)
+
+
+SELECT time_window(interval '1 week', '2019-07-12 11:09:01'::timestamp);
+         time_window          
+------------------------------
+ Sun Jul 07 17:00:00 2019 PDT
+(1 row)
+
+
+SELECT time_window(interval '10 week', '2019-07-12 11:09:01'::timestamp);
+         time_window          
+------------------------------
+ Sun May 12 17:00:00 2019 PDT
+(1 row)
+
+
+SELECT time_window(interval '100 day', '2019-07-12 11:09:01'::timestamp);
+         time_window          
+------------------------------
+ Tue Jun 11 17:00:00 2019 PDT
+(1 row)
+
+
+SELECT time_window(interval '1000 hour', '2019-07-12 11:09:01'::timestamp);
+         time_window          
+------------------------------
+ Sat Jul 06 17:00:00 2019 PDT
+(1 row)
+
+
+SELECT time_window(interval '1 min', '2019-07-12 11:09:01');
+         time_window          
+------------------------------
+ Fri Jul 12 11:09:00 2019 PDT
+(1 row)
+
+
+SELECT time_window(1, '2019-07-12 11:09:01'::timestamptz);
+         time_window          
+------------------------------
+ Thu Jul 11 17:00:00 2019 PDT
+(1 row)
+
+
+SELECT time_window(NULL, '2019-07-12 11:09:01'::timestamptz);   ------------------------------------------
+ time_window 
+-------------
+ 
+(1 row)
+
+
+SELECT time_window(interval '1 min', NULL);  ------------------------------------------
+ time_window 
+-------------
+ 
+(1 row)
+
+
+SELECT time_window(interval '1 min', NULL);  ------------------------------------------
+ time_window 
+-------------
+ 
+(1 row)
+
+
+
+
+\set ON_ERROR_STOP 0
+
+SELECT time_window(interval '1 month', '2019-07-12 11:09:01'::timestamptz);
+ERROR:  interval defined in terms of month, year, century etc. not supported
+CONTEXT:  referenced column: time_window
+
+SELECT time_window(interval '1 year', '2019-07-12 11:09:01'::timestamptz);
+ERROR:  interval defined in terms of month, year, century etc. not supported
+CONTEXT:  referenced column: time_window
+
+SELECT time_window(interval '1 month', '2019-07-12 11:09:01'::timestamp);
+ERROR:  interval defined in terms of month, year, century etc. not supported
+CONTEXT:  referenced column: time_window
+
+SELECT time_window(interval '1 year', '2019-07-12 11:09:01'::timestamp);
+ERROR:  interval defined in terms of month, year, century etc. not supported
+CONTEXT:  referenced column: time_window
+
+SELECT time_window(interval '1 min', 1);
+ERROR:  function time_window(interval, integer) does not exist
+LINE 1: SELECT time_window(interval '1 min', 1);
                ^
 HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 CONTEXT:  referenced column: time_window
+
+SELECT time_window(-1, '2019-07-12 11:09:01'::timestamptz);
+ERROR:  period must be greater than 0
+CONTEXT:  referenced column: time_window
+
+SELECT time_window(10000000000000, '2019-07-12 11:09:01'::timestamptz);
+ERROR:  function time_window(bigint, timestamp with time zone) does not exist
+LINE 1: SELECT time_window(10000000000000, '2019-07-12 11:09:01'::ti...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: time_window
+
+SELECT time_window(interval '1 min', 'test');
+ERROR:  invalid input syntax for type timestamp with time zone: "test"
+LINE 1: SELECT time_window(interval '1 min', 'test');
+                                             ^
+CONTEXT:  referenced column: time_window
+
+\set ON_ERROR_STOP 1
+
+-- test multiple time_window calls
+SELECT
+  time_window(interval '1 min',time),time_window(interval '3 min',time),time_window(interval '3 min',time,'2019-07-11 00:02:05'::timestamptz)
+FROM (VALUES ('2019-07-12 00:00:05'::timestamptz),('2019-07-12 00:02:10'::timestamptz)) v(time);
+         time_window          |         time_window          |         time_window          
+------------------------------+------------------------------+------------------------------
+ Fri Jul 12 00:00:00 2019 PDT | Fri Jul 12 00:00:00 2019 PDT | Thu Jul 11 23:59:05 2019 PDT
+ Fri Jul 12 00:02:00 2019 PDT | Fri Jul 12 00:00:00 2019 PDT | Fri Jul 12 00:02:05 2019 PDT
+(2 rows)
+
+
+SELECT
+  time_window(interval '1 min',time),time_window(interval '3 min',time)
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz),('2019-07-12 00:02:00'::timestamptz)) v(time)
+GROUP BY 1,2;
+         time_window          |         time_window          
+------------------------------+------------------------------
+ Fri Jul 12 00:00:00 2019 PDT | Fri Jul 12 00:00:00 2019 PDT
+ Fri Jul 12 00:02:00 2019 PDT | Fri Jul 12 00:00:00 2019 PDT
+(2 rows)
+
+
+-- test nested time_window calls
+SELECT
+  time_window(interval '3 min',time_window(interval '1 min',time))
+FROM (VALUES ('2019-07-12 00:00:01'::timestamptz),('2019-07-12 00:05:01'::timestamptz)) v(time);
+         time_window          
+------------------------------
+ Fri Jul 12 00:00:00 2019 PDT
+ Fri Jul 12 00:03:00 2019 PDT
+(2 rows)
+
+
+-- test references to different columns
+SELECT
+  time_window(interval '1 min',t) as t,
+  min(t),max(t),min(v),max(v)
+FROM(VALUES ('2019-07-12 00:00:01'::timestamptz,3), ('2019-07-12 00:00:01'::timestamptz,4),('2019-07-12 00:03:01'::timestamptz,5),('2019-07-12 00:03:01'::timestamptz,6)) tb(t,v)
+GROUP BY 1 ORDER BY 1;
+              t               |             min              |             max              | min | max 
+------------------------------+------------------------------+------------------------------+-----+-----
+ Fri Jul 12 00:00:00 2019 PDT | Fri Jul 12 00:00:01 2019 PDT | Fri Jul 12 00:00:01 2019 PDT |   3 |   4
+ Fri Jul 12 00:03:00 2019 PDT | Fri Jul 12 00:03:01 2019 PDT | Fri Jul 12 00:03:01 2019 PDT |   5 |   6
+(2 rows)
+
+
+-- test gap fill without rows in resultset
+SELECT
+  time_window(interval '1 min',time),
+  min(time)
+FROM ( VALUES ('2019-07-12 00:00:00'::timestamptz),('2019-07-12 00:02:00'::timestamptz)) v(time)
+WHERE false
+GROUP BY 1 ORDER BY 1;
+ time_window | min 
+-------------+-----
+(0 rows)
+
+
+-- test coalesce
+
+SELECT
+  time_window(interval '1 min',time),
+  coalesce(min(time),'2019-07-11 23:59:01'::timestamptz),
+  coalesce(min(value),0),
+  coalesce(min(value),7)
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz,1),('2019-07-12 00:01:00'::timestamptz,NULL),('2019-07-12 00:03:00'::timestamptz,3)) v(time,value)
+GROUP BY 1 ORDER BY 1;
+         time_window          |           coalesce           | coalesce | coalesce 
+------------------------------+------------------------------+----------+----------
+ Fri Jul 12 00:00:00 2019 PDT | Fri Jul 12 00:00:00 2019 PDT |        1 |        1
+ Fri Jul 12 00:01:00 2019 PDT | Fri Jul 12 00:01:00 2019 PDT |        0 |        7
+ Fri Jul 12 00:03:00 2019 PDT | Fri Jul 12 00:03:00 2019 PDT |        3 |        3
+(3 rows)
+
+
+-- test over
+SELECT
+  time_window(interval '1 min',time),
+  min(time),
+  4 as c,
+  lag(min(time)) OVER ()
+FROM (VALUES ('2019-07-12 00:01:01'::timestamptz),('2019-07-12 00:02:01'::timestamptz),('2019-07-12 00:03:01'::timestamptz)) v(time)
+GROUP BY 1;
+         time_window          |             min              | c |             lag              
+------------------------------+------------------------------+---+------------------------------
+ Fri Jul 12 00:03:00 2019 PDT | Fri Jul 12 00:03:01 2019 PDT | 4 | 
+ Fri Jul 12 00:02:00 2019 PDT | Fri Jul 12 00:02:01 2019 PDT | 4 | Fri Jul 12 00:03:01 2019 PDT
+ Fri Jul 12 00:01:00 2019 PDT | Fri Jul 12 00:01:01 2019 PDT | 4 | Fri Jul 12 00:02:01 2019 PDT
+(3 rows)
+
+
+
+---
+--- first / last
+---
+
+\set ON_ERROR_STOP 1
+
+-- test different type
+
+SELECT first(array_agg(1),array_agg('2019-07-12 00:01:01'::timestamptz)),last(array_agg(2),array_agg('2019-07-12 00:01:01'::timestamptz));
+ first | last 
+-------+------
+     1 |    2
+(1 row)
+
+
+SELECT first(array_agg(NULL::int),array_agg('2019-07-12 00:01:01'::timestamptz)),last(array_agg(NULL::int),array_agg('2019-07-12 00:01:01'::timestamptz));
+ first | last 
+-------+------
+       |     
+(1 row)
+
+
+SELECT first(array_agg('as'::text),array_agg('2019-07-12 00:01:01'::timestamptz)),last(array_agg('sa'::text),array_agg('2019-07-12 00:01:01'::timestamptz));
+ first | last 
+-------+------
+ as    | sa
+(1 row)
+
+
+SELECT first(array_agg(1::int),array_agg(NULL::timestamptz)),last(array_agg(2::int),array_agg(NULL::timestamptz));
+ first | last 
+-------+------
+     1 |    2
+(1 row)
+
+
+SELECT first(array_agg('2019-07-12 00:02:01'::timestamptz),array_agg('2019-07-12 00:01:01'::timestamptz)),
+       last(array_agg('2019-07-12 00:03:01'::timestamptz),array_agg('2019-07-12 00:01:01'::timestamptz));
+            first             |             last             
+------------------------------+------------------------------
+ Fri Jul 12 00:02:01 2019 PDT | Fri Jul 12 00:03:01 2019 PDT
+(1 row)
+
+
+SELECT first(array_agg(NULL::int),array_agg(NULL::timestamptz)),last(array_agg(NULL::int),array_agg(NULL::timestamptz));
+ first | last 
+-------+------
+       |     
+(1 row)
+
+
+SELECT first(array_agg(repeat('4',4)),array_agg(NULL::timestamptz)),last(array_agg(repeat('4',4)),array_agg(NULL::timestamptz));
+ first | last 
+-------+------
+ 4444  | 4444
+(1 row)
+
+
+-- test unmatched input length
+
+SELECT first(ARRAY[1,2,3],array_agg('2019-07-12 00:01:01'::timestamptz)),last(ARRAY[1,2,3],array_agg('2019-07-12 00:01:01'::timestamptz));
+ first | last 
+-------+------
+     1 |    1
+(1 row)
+
+
+SELECT first(ARRAY[2],ARRAY['2019-07-12 00:00:01'::timestamptz,'2019-07-12 00:01:01'::timestamptz]),
+       last(ARRAY[1],ARRAY['2019-07-12 00:00:01'::timestamptz,'2019-07-12 00:01:01'::timestamptz]);
+ first | last 
+-------+------
+     2 |     
+(1 row)
+
+
+
+SELECT
+  first(array_agg(value),array_agg(time)),last(array_agg(value),array_agg(time))
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, 1),('2019-07-12 00:00:00'::timestamptz, 2),('2019-07-12 00:02:00'::timestamptz, 3)) v(time,value);
+ first | last 
+-------+------
+     1 |    3
+(1 row)
+
+
+SELECT
+  first(array_agg(value),array_agg(time)),last(array_agg(value),array_agg(time))
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, 1),('2019-07-12 00:00:00'::timestamptz, 2),('2019-07-12 00:02:00'::timestamptz, 3)) v(time,value)
+GROUP BY value;
+ first | last 
+-------+------
+     3 |    3
+     1 |    1
+     2 |    2
+(3 rows)
+
+
+SELECT
+  first(array_agg(value),array_agg(time)),last(array_agg(value),array_agg(time))
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, 1),('2019-07-12 00:00:00'::timestamptz, 2),('2019-07-12 00:02:00'::timestamptz, 3)) v(time,value)
+GROUP BY time;
+ first | last 
+-------+------
+     3 |    3
+     1 |    1
+(2 rows)
+
+
+\set ON_ERROR_STOP 0
+
+SELECT first(1,2),last(1,2);
+ERROR:  function first(integer, integer) does not exist
+LINE 1: SELECT first(1,2),last(1,2);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: first
+
+SELECT first(NULL,array_agg('2019-07-12 00:01:01'::timestamptz)), last(NULL,array_agg('2019-07-12 00:01:01'::timestamptz));
+ERROR:  could not determine polymorphic type because input has type "unknown"
+CONTEXT:  referenced column: first
+
+SELECT first(NULL,array_agg('2019-07-12 00:01:01'::timestamptz)), last(NULL,array_agg('2019-07-12 00:01:01'::timestamptz));
+ERROR:  could not determine polymorphic type because input has type "unknown"
+CONTEXT:  referenced column: first
+
+SELECT
+  first(array_agg(time),array_agg(value)),last(array_agg(time),array_agg(value))
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, 1),('2019-07-12 00:00:00'::timestamptz, 2),('2019-07-12 00:02:00'::timestamptz, 3)) v(time,value);
+ERROR:  function first(timestamp with time zone[], integer[]) does not exist
+LINE 2:   first(array_agg(time),array_agg(value)),last(array_agg(tim...
+          ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: first
+
+-- test nested time_window calls
+SELECT
+  first(array_agg(last(value)),array_agg(time))
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, 1),('2019-07-12 00:00:00'::timestamptz, 2),('2019-07-12 00:02:00'::timestamptz, 1)) v(time,value)
+GROUP BY value;
+ERROR:  function last(integer) does not exist
+LINE 2:   first(array_agg(last(value)),array_agg(time))
+                          ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: first
+
+-- test result as group by reference
+SELECT
+  first(array_agg(value),array_agg(time)),last(array_agg(value),array_agg(time))
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, 1),('2019-07-12 00:00:00'::timestamptz, 2),('2019-07-12 00:02:00'::timestamptz, 1)) v(time,value)
+GROUP BY 1;
+ERROR:  aggregates not allowed in GROUP BY clause
+LINE 2:   first(array_agg(value),array_agg(time)),last(array_agg(val...
+                ^
+
+\set ON_ERROR_STOP 1
+-- test first without rows in resultset
+SELECT
+  first(array_agg(time),array_agg(time)),
+  last(array_agg(time),array_agg(time)),
+  min(time)
+FROM ( VALUES ('2019-07-12 00:00:00'::timestamptz),('2019-07-12 00:02:00'::timestamptz)) v(time)
+WHERE false
+GROUP BY time ORDER BY 1;
+ first | last | min 
+-------+------+-----
+(0 rows)
+
+
+-- test over
+SELECT
+  first(array_agg(time),array_agg(time)),
+  last(array_agg(time),array_agg(time)),
+  min(time),
+  4 as c,
+  lag(min(time)) OVER ()
+FROM (VALUES ('2019-07-12 00:01:01'::timestamptz),('2019-07-12 00:02:01'::timestamptz),('2019-07-12 00:03:01'::timestamptz)) v(time)
+GROUP BY time;
+            first             |             last             |             min              | c |             lag              
+------------------------------+------------------------------+------------------------------+---+------------------------------
+ Fri Jul 12 00:01:01 2019 PDT | Fri Jul 12 00:01:01 2019 PDT | Fri Jul 12 00:01:01 2019 PDT | 4 | 
+ Fri Jul 12 00:02:01 2019 PDT | Fri Jul 12 00:02:01 2019 PDT | Fri Jul 12 00:02:01 2019 PDT | 4 | Fri Jul 12 00:01:01 2019 PDT
+ Fri Jul 12 00:03:01 2019 PDT | Fri Jul 12 00:03:01 2019 PDT | Fri Jul 12 00:03:01 2019 PDT | 4 | Fri Jul 12 00:02:01 2019 PDT
+(3 rows)
+
+
+\set ON_ERROR_STOP 1
+---
+--- fill
+---
+
+-- test different argument in over 
+SELECT
+  time , CASE WHEN value is not null THEN value else fill(value) over(partition by time) END 
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, 1),('2019-07-12 00:00:00'::timestamptz, NULL),('2019-07-12 00:02:00'::timestamptz, 3)) v(time,value);
+             time             | fill 
+------------------------------+------
+ Fri Jul 12 00:00:00 2019 PDT |    1
+ Fri Jul 12 00:00:00 2019 PDT |    1
+ Fri Jul 12 00:02:00 2019 PDT |    3
+(3 rows)
+
+
+SELECT
+  time , CASE WHEN value is not null THEN value else fill(value) over(partition by value) END 
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, 1),('2019-07-12 00:00:00'::timestamptz, NULL),('2019-07-12 00:02:00'::timestamptz, 3)) v(time,value);
+             time             | fill 
+------------------------------+------
+ Fri Jul 12 00:00:00 2019 PDT |    1
+ Fri Jul 12 00:02:00 2019 PDT |    3
+ Fri Jul 12 00:00:00 2019 PDT |     
+(3 rows)
+
+
+SELECT
+  time , CASE WHEN value is not null THEN value else fill(value) over(partition by time,value) END 
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, 1),('2019-07-12 00:00:00'::timestamptz, NULL),('2019-07-12 00:02:00'::timestamptz, 3)) v(time,value);
+             time             | fill 
+------------------------------+------
+ Fri Jul 12 00:00:00 2019 PDT |    1
+ Fri Jul 12 00:00:00 2019 PDT |     
+ Fri Jul 12 00:02:00 2019 PDT |    3
+(3 rows)
+
+
+SELECT
+  time , CASE WHEN value is not null THEN value else fill(value) over(order by value,time) END 
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, 1),('2019-07-12 00:00:00'::timestamptz, NULL),('2019-07-12 00:02:00'::timestamptz, 3)) v(time,value);
+             time             | fill 
+------------------------------+------
+ Fri Jul 12 00:00:00 2019 PDT |    1
+ Fri Jul 12 00:02:00 2019 PDT |    3
+ Fri Jul 12 00:00:00 2019 PDT |    3
+(3 rows)
+
+
+SELECT
+  time , CASE WHEN value is not null THEN value else fill(value) over(order by time,value) END 
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, 1),('2019-07-12 00:00:00'::timestamptz, NULL),('2019-07-12 00:02:00'::timestamptz, 3)) v(time,value);
+             time             | fill 
+------------------------------+------
+ Fri Jul 12 00:00:00 2019 PDT |    1
+ Fri Jul 12 00:00:00 2019 PDT |    1
+ Fri Jul 12 00:02:00 2019 PDT |    3
+(3 rows)
+
+
+SELECT
+  time , CASE WHEN value is not null THEN value else fill(value) over(partition by time order by value) END 
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, 1),('2019-07-12 00:00:00'::timestamptz, NULL),('2019-07-12 00:02:00'::timestamptz, 3)) v(time,value);
+             time             | fill 
+------------------------------+------
+ Fri Jul 12 00:00:00 2019 PDT |    1
+ Fri Jul 12 00:00:00 2019 PDT |    1
+ Fri Jul 12 00:02:00 2019 PDT |    3
+(3 rows)
+
+
+SELECT
+  time , CASE WHEN value is not null THEN value else fill(value) over(partition by value order by time) END 
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, 1),('2019-07-12 00:00:00'::timestamptz, NULL),('2019-07-12 00:02:00'::timestamptz, 3)) v(time,value);
+             time             | fill 
+------------------------------+------
+ Fri Jul 12 00:00:00 2019 PDT |    1
+ Fri Jul 12 00:02:00 2019 PDT |    3
+ Fri Jul 12 00:00:00 2019 PDT |     
+(3 rows)
+
+
+SELECT
+  time , CASE WHEN value is not null THEN value else fill(value) over() END 
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, 1),('2019-07-12 00:00:00'::timestamptz, NULL),('2019-07-12 00:02:00'::timestamptz, 3)) v(time,value);
+             time             | fill 
+------------------------------+------
+ Fri Jul 12 00:00:00 2019 PDT |    1
+ Fri Jul 12 00:00:00 2019 PDT |    3
+ Fri Jul 12 00:02:00 2019 PDT |    3
+(3 rows)
+
+
+-- test different type in fill
+SELECT
+  time , CASE WHEN value is not null THEN value else fill(value) over() END 
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, 'a'),('2019-07-12 00:00:00'::timestamptz, NULL),('2019-07-12 00:02:00'::timestamptz, 'c')) v(time,value);
+             time             | fill 
+------------------------------+------
+ Fri Jul 12 00:00:00 2019 PDT | a
+ Fri Jul 12 00:00:00 2019 PDT | c
+ Fri Jul 12 00:02:00 2019 PDT | c
+(3 rows)
+
+
+SELECT
+  time , CASE WHEN value is not null THEN value else fill(value) over() END 
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, ARRAY[1,2,3]),('2019-07-12 00:00:00'::timestamptz, NULL),('2019-07-12 00:02:00'::timestamptz, ARRAY[4,5,6])) v(time,value);
+             time             |  fill   
+------------------------------+---------
+ Fri Jul 12 00:00:00 2019 PDT | {1,2,3}
+ Fri Jul 12 00:00:00 2019 PDT | {4,5,6}
+ Fri Jul 12 00:02:00 2019 PDT | {4,5,6}
+(3 rows)
+
+
+SELECT
+  time , CASE WHEN value is not null THEN value else fill(value) over() END 
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, repeat('4',4)),('2019-07-12 00:00:00'::timestamptz, NULL),('2019-07-12 00:02:00'::timestamptz, repeat('4',4))) v(time,value);
+             time             | fill 
+------------------------------+------
+ Fri Jul 12 00:00:00 2019 PDT | 4444
+ Fri Jul 12 00:00:00 2019 PDT | 4444
+ Fri Jul 12 00:02:00 2019 PDT | 4444
+(3 rows)
+
+
+SELECT
+  time , CASE WHEN value is not null THEN value else fill(value) over() END 
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, '2019-07-12 00:00:00'::timestamptz),
+             ('2019-07-12 00:00:00'::timestamptz, NULL),
+             ('2019-07-12 00:02:00'::timestamptz, '2019-07-12 00:00:00'::timestamptz)) v(time,value);
+             time             |             fill             
+------------------------------+------------------------------
+ Fri Jul 12 00:00:00 2019 PDT | Fri Jul 12 00:00:00 2019 PDT
+ Fri Jul 12 00:00:00 2019 PDT | Fri Jul 12 00:00:00 2019 PDT
+ Fri Jul 12 00:02:00 2019 PDT | Fri Jul 12 00:00:00 2019 PDT
+(3 rows)
+
+
+-- test duplicate call 
+SELECT
+  time , CASE WHEN value is not null THEN value else fill(value) over() END ,CASE WHEN value is not null THEN value else fill(value) over() END 
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, 1),('2019-07-12 00:00:00'::timestamptz, NULL),('2019-07-12 00:02:00'::timestamptz, 3)) v(time,value);
+             time             | fill | fill 
+------------------------------+------+------
+ Fri Jul 12 00:00:00 2019 PDT |    1 |    1
+ Fri Jul 12 00:00:00 2019 PDT |    3 |    3
+ Fri Jul 12 00:02:00 2019 PDT |    3 |    3
+(3 rows)
+
+
+-- test with group
+SELECT
+  min(time) , CASE WHEN min(value) is not null THEN min(value) else fill(min(value)) over() END ,tag
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, 1 ,'a'),('2019-07-12 00:00:00'::timestamptz, NULL ,'a'),('2019-07-12 00:02:00'::timestamptz, 3 ,'a')) v(time,value,tag)
+GROUP BY 3;
+             min              | fill | tag 
+------------------------------+------+-----
+ Fri Jul 12 00:00:00 2019 PDT |    1 | a
+(1 row)
+
+
+
+\set ON_ERROR_STOP 0
+-- test nested time_fill calls
+SELECT
+  time , CASE WHEN value is not null THEN value else fill(CASE WHEN value is not null THEN value else fill(value) over() END) over() END  
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, 1),('2019-07-12 00:00:00'::timestamptz, NULL),('2019-07-12 00:02:00'::timestamptz, 3)) v(time,value);
+ERROR:  window function calls cannot be nested
+LINE 2: ... fill(CASE WHEN value is not null THEN value else fill(value...
+                                                             ^
+CONTEXT:  referenced column: fill
+-- test with group
+SELECT
+  time , CASE WHEN value is not null THEN value else fill(value) over() END 
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, 1),('2019-07-12 00:00:00'::timestamptz, NULL),('2019-07-12 00:02:00'::timestamptz, 3)) v(time,value)
+GROUP BY 2;
+ERROR:  window functions not allowed in GROUP BY clause
+LINE 2: ...ime , CASE WHEN value is not null THEN value else fill(value...
+                                                             ^
+
+SELECT
+  time , CASE WHEN value is not null THEN value else fill(value) over() END 
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz, 1),('2019-07-12 00:00:00'::timestamptz, NULL),('2019-07-12 00:02:00'::timestamptz, 3)) v(time,value)
+GROUP BY 1;
+ERROR:  column "v.value" must appear in the GROUP BY clause or be used in an aggregate function
+LINE 2:   time , CASE WHEN value is not null THEN value else fill(va...
+                           ^
+
+---
+--- time fill
+---
+
+\set ON_ERROR_STOP 0
+-- test fill_last  call errors out when used outside gapfill context
+SELECT fill_last(1);
+ERROR:  fill_last function must appeared with correct fill function
+-- test fill_last call errors out when used outside gapfill context with NULL arguments
+SELECT fill_last(NULL::int);
+ fill_last 
+-----------
+          
+(1 row)
+
+
+-- test time_fill not top level function call
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz) + interval '1 min'
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz),('2019-07-12 00:02:00'::timestamptz)) v(time)
+GROUP BY 1;        -------------------------------------------------
+ERROR:   extra operations in time_fill function are not supported
+
+-- test multiple time_fill calls
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz),time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz)
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz),('2019-07-12 00:02:00'::timestamptz)) v(time)
+GROUP BY 1;
+ERROR:  multiple time_fill function calls are not supported
+
+-- test nested time_fill calls
+SELECT
+  time_fill(interval '1 min',time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz),'2019-07-11 23:59:01'::timestamptz)
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz),('2019-07-12 00:02:00'::timestamptz)) v(time)
+GROUP BY 1;
+ERROR:  unsupport time_fill operation, please check the parameters
+
+-- test time_fill without aggregation
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz)
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz),('2019-07-12 00:02:00'::timestamptz)) v(time);
+ERROR:  time_fill function must appear in the GROUP BY clause 
+
+-- test time_fill with within group
+
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz)
+WITHIN GROUP (ORDER BY time)
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz),('2019-07-12 00:02:00'::timestamptz)) v(time);
+ERROR:  function time_fill(interval, timestamp with time zone, timestamp with time zone, timestamp with time zone, timestamp with time zone) does not exist
+LINE 2:   time_fill(interval '1 min',time,'2019-07-11 23:59:01'::tim...
+          ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: time_fill
+
+
+-- test NULL args
+SELECT
+  time_fill(NULL,time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz)
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz),('2019-07-12 00:02:00'::timestamptz)) v(time)
+GROUP BY 1;
+ERROR:  unsupport time_fill operation, please check the parameters
+
+SELECT
+  time_fill(interval '1 min',NULL,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz)
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz),('2019-07-12 00:02:00'::timestamptz)) v(time)
+GROUP BY 1;
+ERROR:  unsupport time_fill operation, please check the parameters
+
+SELECT
+  time_fill(interval '1 min',time,NULL,'2019-07-12 00:03:01'::timestamptz)
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz),('2019-07-12 00:02:00'::timestamptz)) v(time)
+GROUP BY 1;
+ERROR:  unsupport time_fill operation, please check the parameters
+
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,NULL)
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz),('2019-07-12 00:02:00'::timestamptz)) v(time)
+GROUP BY 1;
+ERROR:  unsupport time_fill operation, please check the parameters
+
+-- test interval is bigger than the distance of start and finish
+
+SELECT
+  time_fill(interval '1 day',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz)
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz),('2019-07-12 00:02:00'::timestamptz)) v(time)
+GROUP BY 1;
+ERROR:  invalid time_fill argument: the distance between start and finish must  bigger than interval
+
+-- test start is bigger than finish
+
+SELECT
+  time_fill(interval '1 min',time,'2019-07-12 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz)
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz),('2019-07-12 00:02:00'::timestamptz)) v(time)
+GROUP BY 1;
+ERROR:  invalid time_fill argument: the distance between start and finish must  bigger than interval
+
+
+\set ON_ERROR_STOP 0
+-- test tamstamp
+SELECT
+   time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamp)
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz),('2019-07-12 00:02:00'::timestamptz)) v(time)
+GROUP BY 1;
+ERROR:  invalid time_fill argument
+
+SELECT
+   time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamp,'2019-07-12 00:03:01'::timestamptz)
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz),('2019-07-12 00:02:00'::timestamptz)) v(time)
+GROUP BY 1;
+ERROR:  invalid time_fill argument
+
+\set ON_ERROR_STOP 1
+
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz)
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz),('2019-07-12 00:02:00'::timestamptz)) v(time)
+GROUP BY 1;
+          time_fill           
+------------------------------
+ Fri Jul 12 00:00:00 2019 PDT
+ Fri Jul 12 00:02:00 2019 PDT
+ Thu Jul 11 23:59:00 2019 PDT
+ Fri Jul 12 00:01:00 2019 PDT
+ Fri Jul 12 00:03:00 2019 PDT
+(5 rows)
+
+
+SELECT
+   time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz)
+FROM (VALUES ('2019-07-12 00:00:00'::timestamp),('2019-07-12 00:02:00'::timestamp)) v(time)
+GROUP BY 1;
+          time_fill           
+------------------------------
+ Fri Jul 12 00:00:00 2019 PDT
+ Fri Jul 12 00:02:00 2019 PDT
+ Thu Jul 11 23:59:00 2019 PDT
+ Fri Jul 12 00:01:00 2019 PDT
+ Fri Jul 12 00:03:00 2019 PDT
+(5 rows)
+
+
+-- simple fill query
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:12:01'::timestamptz) AS time,
+  sum(value) AS value
+FROM (values ('2019-07-12 00:00:01'::timestamptz,1),('2019-07-12 00:00:59'::timestamptz,2),('2019-07-12 00:01:01'::timestamptz,3),
+  ('2019-07-12 00:03:01'::timestamptz,4),('2019-07-12 00:06:01'::timestamptz,5),('2019-07-12 00:10:01'::timestamptz,6),('2019-07-12 00:14:01'::timestamptz,7)) v(time,value)
+GROUP BY 1 ORDER BY 1;
+             time             | value 
+------------------------------+-------
+ Thu Jul 11 23:59:00 2019 PDT |      
+ Fri Jul 12 00:00:00 2019 PDT |     3
+ Fri Jul 12 00:01:00 2019 PDT |     3
+ Fri Jul 12 00:02:00 2019 PDT |      
+ Fri Jul 12 00:03:00 2019 PDT |     4
+ Fri Jul 12 00:04:00 2019 PDT |      
+ Fri Jul 12 00:05:00 2019 PDT |      
+ Fri Jul 12 00:06:00 2019 PDT |     5
+ Fri Jul 12 00:07:00 2019 PDT |      
+ Fri Jul 12 00:08:00 2019 PDT |      
+ Fri Jul 12 00:09:00 2019 PDT |      
+ Fri Jul 12 00:10:00 2019 PDT |     6
+ Fri Jul 12 00:11:00 2019 PDT |      
+ Fri Jul 12 00:12:00 2019 PDT |      
+ Fri Jul 12 00:14:00 2019 PDT |     7
+(15 rows)
+
+
+SELECT
+  time_fill(0.001,time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:12:01'::timestamptz) AS time,
+  sum(value) AS value
+FROM (values ('2019-07-12 00:00:01'::timestamptz,1),('2019-07-12 00:00:59'::timestamptz,2),('2019-07-12 00:01:01'::timestamptz,3),
+  ('2019-07-12 00:03:01'::timestamptz,4),('2019-07-12 00:06:01'::timestamptz,5),('2019-07-12 00:10:01'::timestamptz,6),('2019-07-12 00:14:01'::timestamptz,7)) v(time,value)
+GROUP BY 1 ORDER BY 1;
+              time              | value 
+--------------------------------+-------
+ Thu Jul 11 23:57:36 2019 PDT   |      
+ Thu Jul 11 23:59:02.4 2019 PDT |     1
+ Fri Jul 12 00:00:28.8 2019 PDT |     5
+ Fri Jul 12 00:01:55.2 2019 PDT |     4
+ Fri Jul 12 00:03:21.6 2019 PDT |      
+ Fri Jul 12 00:04:48 2019 PDT   |     5
+ Fri Jul 12 00:06:14.4 2019 PDT |      
+ Fri Jul 12 00:07:40.8 2019 PDT |      
+ Fri Jul 12 00:09:07.2 2019 PDT |     6
+ Fri Jul 12 00:10:33.6 2019 PDT |      
+ Fri Jul 12 00:12:00 2019 PDT   |      
+ Fri Jul 12 00:13:26.4 2019 PDT |     7
+(12 rows)
+
+
+-- test references to different columns
+SELECT
+  time_fill(interval '1 min',t,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:05:01'::timestamptz) as t,
+  min(t),max(t),min(v),max(v)
+FROM(VALUES ('2019-07-12 00:00:01'::timestamptz,3), ('2019-07-12 00:00:01'::timestamptz,4),('2019-07-12 00:03:01'::timestamptz,5),('2019-07-12 00:03:01'::timestamptz,6)) tb(t,v)
+GROUP BY 1 ORDER BY 1;
+              t               |             min              |             max              | min | max 
+------------------------------+------------------------------+------------------------------+-----+-----
+ Thu Jul 11 23:59:00 2019 PDT |                              |                              |     |    
+ Fri Jul 12 00:00:00 2019 PDT | Fri Jul 12 00:00:01 2019 PDT | Fri Jul 12 00:00:01 2019 PDT |   3 |   4
+ Fri Jul 12 00:01:00 2019 PDT |                              |                              |     |    
+ Fri Jul 12 00:02:00 2019 PDT |                              |                              |     |    
+ Fri Jul 12 00:03:00 2019 PDT | Fri Jul 12 00:03:01 2019 PDT | Fri Jul 12 00:03:01 2019 PDT |   5 |   6
+ Fri Jul 12 00:04:00 2019 PDT |                              |                              |     |    
+ Fri Jul 12 00:05:00 2019 PDT |                              |                              |     |    
+(7 rows)
+
+
+SELECT
+  time_fill(interval '1 min',t,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:05:01'::timestamptz) as t,
+  min(t),max(t),min(v),max(v)
+FROM(VALUES ('2019-07-12 00:00:01'::timestamptz,3), ('2019-07-12 00:00:02'::timestamptz,4),('2019-07-12 00:03:01'::timestamptz,5),('2019-07-12 00:03:02'::timestamptz,6)) tb(t,v)
+GROUP BY 1 ORDER BY 1;
+              t               |             min              |             max              | min | max 
+------------------------------+------------------------------+------------------------------+-----+-----
+ Thu Jul 11 23:59:00 2019 PDT |                              |                              |     |    
+ Fri Jul 12 00:00:00 2019 PDT | Fri Jul 12 00:00:01 2019 PDT | Fri Jul 12 00:00:02 2019 PDT |   3 |   4
+ Fri Jul 12 00:01:00 2019 PDT |                              |                              |     |    
+ Fri Jul 12 00:02:00 2019 PDT |                              |                              |     |    
+ Fri Jul 12 00:03:00 2019 PDT | Fri Jul 12 00:03:01 2019 PDT | Fri Jul 12 00:03:02 2019 PDT |   5 |   6
+ Fri Jul 12 00:04:00 2019 PDT |                              |                              |     |    
+ Fri Jul 12 00:05:00 2019 PDT |                              |                              |     |    
+(7 rows)
+
+
+
+-- test passing of values outside boundaries
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:05:01'::timestamptz),
+  min(time)
+FROM (VALUES ('2019-07-11 23:57:01'::timestamptz),('2019-07-12 00:01:01'::timestamptz),('2019-07-12 00:03:01'::timestamptz),('2019-07-12 00:07:01'::timestamptz)) v(time)
+GROUP BY 1 ORDER BY 1;
+          time_fill           |             min              
+------------------------------+------------------------------
+ Thu Jul 11 23:57:00 2019 PDT | Thu Jul 11 23:57:01 2019 PDT
+ Thu Jul 11 23:59:00 2019 PDT | 
+ Fri Jul 12 00:00:00 2019 PDT | 
+ Fri Jul 12 00:01:00 2019 PDT | Fri Jul 12 00:01:01 2019 PDT
+ Fri Jul 12 00:02:00 2019 PDT | 
+ Fri Jul 12 00:03:00 2019 PDT | Fri Jul 12 00:03:01 2019 PDT
+ Fri Jul 12 00:04:00 2019 PDT | 
+ Fri Jul 12 00:05:00 2019 PDT | 
+ Fri Jul 12 00:07:00 2019 PDT | Fri Jul 12 00:07:01 2019 PDT
+(9 rows)
+
+
+
+-- test gap fill without rows in resultset
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz),
+  min(time)
+FROM ( VALUES ('2019-07-12 00:00:00'::timestamptz),('2019-07-12 00:02:00'::timestamptz)) v(time)
+WHERE false
+GROUP BY 1 ORDER BY 1;
+ time_fill | min 
+-----------+-----
+(0 rows)
+
+
+-- test coalesce
+
+SELECT
+  time_fill(interval '1 min',time, '2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz),
+  coalesce(min(time),'2019-07-11 23:59:01'::timestamptz),
+  coalesce(min(value),0),
+  coalesce(min(value),7)
+FROM (VALUES ('2019-07-12 00:00:00'::timestamptz,1),('2019-07-12 00:01:00'::timestamptz,2),('2019-07-12 00:03:00'::timestamptz,3)) v(time,value)
+GROUP BY 1 ORDER BY 1;
+          time_fill           |           coalesce           | coalesce | coalesce 
+------------------------------+------------------------------+----------+----------
+ Thu Jul 11 23:59:00 2019 PDT | Thu Jul 11 23:59:01 2019 PDT |        0 |        7
+ Fri Jul 12 00:00:00 2019 PDT | Fri Jul 12 00:00:00 2019 PDT |        1 |        1
+ Fri Jul 12 00:01:00 2019 PDT | Fri Jul 12 00:01:00 2019 PDT |        2 |        2
+ Fri Jul 12 00:02:00 2019 PDT | Thu Jul 11 23:59:01 2019 PDT |        0 |        7
+ Fri Jul 12 00:03:00 2019 PDT | Fri Jul 12 00:03:00 2019 PDT |        3 |        3
+(5 rows)
+
+
+-- test case
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz),
+  min(time),
+  CASE WHEN min(time) IS NOT NULL THEN min(time) ELSE '2019-07-11 00:59:01'::timestamptz END,
+  CASE WHEN min(time) IS NOT NULL THEN min(time) + interval '6 min' ELSE '2019-07-11 00:59:01'::timestamptz END,
+  CASE WHEN 1 = 1 THEN 1 ELSE 0 END
+FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,1),('2019-07-12 00:01:01'::timestamptz,2),('2019-07-12 00:02:01'::timestamptz,3)) v(time,value)
+GROUP BY 1 ORDER BY 1;
+          time_fill           |             min              |             case             |             case             | case 
+------------------------------+------------------------------+------------------------------+------------------------------+------
+ Thu Jul 11 23:59:00 2019 PDT |                              | Thu Jul 11 00:59:01 2019 PDT | Thu Jul 11 00:59:01 2019 PDT |    1
+ Fri Jul 12 00:00:00 2019 PDT | Fri Jul 12 00:00:01 2019 PDT | Fri Jul 12 00:00:01 2019 PDT | Fri Jul 12 00:06:01 2019 PDT |    1
+ Fri Jul 12 00:01:00 2019 PDT | Fri Jul 12 00:01:01 2019 PDT | Fri Jul 12 00:01:01 2019 PDT | Fri Jul 12 00:07:01 2019 PDT |    1
+ Fri Jul 12 00:02:00 2019 PDT | Fri Jul 12 00:02:01 2019 PDT | Fri Jul 12 00:02:01 2019 PDT | Fri Jul 12 00:08:01 2019 PDT |    1
+ Fri Jul 12 00:03:00 2019 PDT |                              | Thu Jul 11 00:59:01 2019 PDT | Thu Jul 11 00:59:01 2019 PDT |    1
+(5 rows)
+
+
+-- test constants
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz),
+  count(time), 4 as c
+FROM (VALUES ('2019-07-12 00:00:01'::timestamptz),('2019-07-12 00:01:01'::timestamptz),('2019-07-12 00:02:01'::timestamptz)) v(time)
+GROUP BY 1 ORDER BY 1;
+          time_fill           | count | c 
+------------------------------+-------+---
+ Thu Jul 11 23:59:00 2019 PDT |       | 4
+ Fri Jul 12 00:00:00 2019 PDT |     1 | 4
+ Fri Jul 12 00:01:00 2019 PDT |     1 | 4
+ Fri Jul 12 00:02:00 2019 PDT |     1 | 4
+ Fri Jul 12 00:03:00 2019 PDT |       | 4
+(5 rows)
+
+
+-- test column reordering
+SELECT
+  1 as c1, '2' as c2,
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz),
+  3.0 as c3,
+  min(time), min(time), 4 as c4
+FROM (VALUES ('2019-07-12 00:00:01'::timestamptz),('2019-07-12 00:01:01'::timestamptz),('2019-07-12 00:02:01'::timestamptz)) v(time)
+GROUP BY 3 ORDER BY 3;
+ c1 | c2 |          time_fill           | c3  |             min              |             min              | c4 
+----+----+------------------------------+-----+------------------------------+------------------------------+----
+  1 | 2  | Thu Jul 11 23:59:00 2019 PDT | 3.0 |                              |                              |  4
+  1 | 2  | Fri Jul 12 00:00:00 2019 PDT | 3.0 | Fri Jul 12 00:00:01 2019 PDT | Fri Jul 12 00:00:01 2019 PDT |  4
+  1 | 2  | Fri Jul 12 00:01:00 2019 PDT | 3.0 | Fri Jul 12 00:01:01 2019 PDT | Fri Jul 12 00:01:01 2019 PDT |  4
+  1 | 2  | Fri Jul 12 00:02:00 2019 PDT | 3.0 | Fri Jul 12 00:02:01 2019 PDT | Fri Jul 12 00:02:01 2019 PDT |  4
+  1 | 2  | Fri Jul 12 00:03:00 2019 PDT | 3.0 |                              |                              |  4
+(5 rows)
+
+
+-- test grouping by non-time columns
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz) as time,
+  id,
+  min(value) as m
+FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,1,1),('2019-07-12 00:01:01'::timestamptz,2,2)) v(time,id,value)
+GROUP BY 1,id ORDER BY 2,1;
+             time             | id | m 
+------------------------------+----+---
+ Thu Jul 11 23:59:00 2019 PDT |  1 |  
+ Fri Jul 12 00:00:00 2019 PDT |  1 | 1
+ Fri Jul 12 00:01:00 2019 PDT |  1 |  
+ Fri Jul 12 00:02:00 2019 PDT |  1 |  
+ Fri Jul 12 00:03:00 2019 PDT |  1 |  
+ Thu Jul 11 23:59:00 2019 PDT |  2 |  
+ Fri Jul 12 00:00:00 2019 PDT |  2 |  
+ Fri Jul 12 00:01:00 2019 PDT |  2 | 2
+ Fri Jul 12 00:02:00 2019 PDT |  2 |  
+ Fri Jul 12 00:03:00 2019 PDT |  2 |  
+(10 rows)
+
+
+-- test grouping by non-time columns with no rows in resultset
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz) as time,
+  id,
+  min(value) as m
+FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,1,1),('2019-07-12 00:01:01',2,2)) v(time,id,value)
+WHERE false
+GROUP BY 1,id ORDER BY 2,1;
+ time | id | m 
+------+----+---
+(0 rows)
+
+
+-- test duplicate columns in GROUP BY
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz) as time,
+  id,
+  id,
+  min(value) as m
+FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,1,1),('2019-07-12 00:01:01'::timestamptz,2,2)) v(time,id,value)
+GROUP BY 1,2,3 ORDER BY 2,1;
+             time             | id | id | m 
+------------------------------+----+----+---
+ Thu Jul 11 23:59:00 2019 PDT |  1 |  1 |  
+ Fri Jul 12 00:00:00 2019 PDT |  1 |  1 | 1
+ Fri Jul 12 00:01:00 2019 PDT |  1 |  1 |  
+ Fri Jul 12 00:02:00 2019 PDT |  1 |  1 |  
+ Fri Jul 12 00:03:00 2019 PDT |  1 |  1 |  
+ Thu Jul 11 23:59:00 2019 PDT |  2 |  2 |  
+ Fri Jul 12 00:00:00 2019 PDT |  2 |  2 |  
+ Fri Jul 12 00:01:00 2019 PDT |  2 |  2 | 2
+ Fri Jul 12 00:02:00 2019 PDT |  2 |  2 |  
+ Fri Jul 12 00:03:00 2019 PDT |  2 |  2 |  
+(10 rows)
+
+
+-- test grouping by columns not in resultset
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz) as time,
+  min(value) as m
+FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,1,1),('2019-07-12 00:01:01'::timestamptz,2,2)) v(time,id,value)
+GROUP BY 1,id ORDER BY id,1;
+             time             | m 
+------------------------------+---
+ Thu Jul 11 23:59:00 2019 PDT |  
+ Fri Jul 12 00:00:00 2019 PDT | 1
+ Fri Jul 12 00:01:00 2019 PDT |  
+ Fri Jul 12 00:02:00 2019 PDT |  
+ Fri Jul 12 00:03:00 2019 PDT |  
+ Thu Jul 11 23:59:00 2019 PDT |  
+ Fri Jul 12 00:00:00 2019 PDT |  
+ Fri Jul 12 00:01:00 2019 PDT | 2
+ Fri Jul 12 00:02:00 2019 PDT |  
+ Fri Jul 12 00:03:00 2019 PDT |  
+(10 rows)
+
+
+-- test grouping by  with text columns
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz) as time,
+  color,
+  min(value) as m
+FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,'blue',1),('2019-07-12 00:01:01'::timestamptz,'red',2)) v(time,color,value)
+GROUP BY 1,color ORDER BY 2,1;
+             time             | color | m 
+------------------------------+-------+---
+ Thu Jul 11 23:59:00 2019 PDT | blue  |  
+ Fri Jul 12 00:00:00 2019 PDT | blue  | 1
+ Fri Jul 12 00:01:00 2019 PDT | blue  |  
+ Fri Jul 12 00:02:00 2019 PDT | blue  |  
+ Fri Jul 12 00:03:00 2019 PDT | blue  |  
+ Thu Jul 11 23:59:00 2019 PDT | red   |  
+ Fri Jul 12 00:00:00 2019 PDT | red   |  
+ Fri Jul 12 00:01:00 2019 PDT | red   | 2
+ Fri Jul 12 00:02:00 2019 PDT | red   |  
+ Fri Jul 12 00:03:00 2019 PDT | red   |  
+(10 rows)
+
+
+-- test grouping by with text columns with no rows in resultset
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz) as time,
+  color,
+  min(value) as m
+FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,'blue',1),('2019-07-12 00:01:01'::timestamptz,'red',2)) v(time,color,value)
+WHERE false
+GROUP BY 1,color ORDER BY 2,1;
+ time | color | m 
+------+-------+---
+(0 rows)
+
+
+-- test insert into SELECT
+CREATE TABLE insert_test(id timestamptz);
+INSERT INTO insert_test SELECT time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz) 
+  FROM (VALUES ('2019-07-12 00:03:01'::timestamptz),('2019-07-12 00:01:01'::timestamptz)) v(time) GROUP BY 1 ORDER BY 1;
+SELECT * FROM insert_test order by id;
+              id              
+------------------------------
+ Thu Jul 11 23:59:00 2019 PDT
+ Fri Jul 12 00:00:00 2019 PDT
+ Fri Jul 12 00:01:00 2019 PDT
+ Fri Jul 12 00:02:00 2019 PDT
+ Fri Jul 12 00:03:00 2019 PDT
+(5 rows)
+
+DROP TABLE insert_test;
+
+-- test join
+
+---------------- ERROR
+----------------
+----------------
+SELECT t1.*,t2.* FROM
+(
+  SELECT
+    time_fill(interval '1 min',time,'2019-07-11 23:58:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz) as time, color, min(value) as m
+  FROM
+    (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',1),('2019-07-12 00:01:01'::timestamptz,'blue',2)) v(time,color,value)
+  GROUP BY 1,color ORDER BY 2,1
+) t1 INNER JOIN
+(
+  SELECT
+    time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:05:01'::timestamptz) as time, color, min(value) as m
+  FROM
+    (VALUES ('2019-07-12 00:03:01'::timestamptz,'red',1),('2019-07-12 00:04:01'::timestamptz,'blue',2)) v(time,color,value)
+  GROUP BY 1,color ORDER BY 2,1
+) t2 ON t1.time = t2.time AND t1.color=t2.color;
+             time             | color | m |             time             | color | m 
+------------------------------+-------+---+------------------------------+-------+---
+ Fri Jul 12 00:01:00 2019 PDT | blue  | 2 | Fri Jul 12 00:01:00 2019 PDT | blue  |  
+ Thu Jul 11 23:59:00 2019 PDT | blue  |   | Thu Jul 11 23:59:00 2019 PDT | blue  |  
+ Fri Jul 12 00:00:00 2019 PDT | blue  |   | Fri Jul 12 00:00:00 2019 PDT | blue  |  
+ Fri Jul 12 00:02:00 2019 PDT | blue  |   | Fri Jul 12 00:02:00 2019 PDT | blue  |  
+ Fri Jul 12 00:03:00 2019 PDT | blue  |   | Fri Jul 12 00:03:00 2019 PDT | blue  |  
+ Fri Jul 12 00:00:00 2019 PDT | red   | 1 | Fri Jul 12 00:00:00 2019 PDT | red   |  
+ Thu Jul 11 23:59:00 2019 PDT | red   |   | Thu Jul 11 23:59:00 2019 PDT | red   |  
+ Fri Jul 12 00:01:00 2019 PDT | red   |   | Fri Jul 12 00:01:00 2019 PDT | red   |  
+ Fri Jul 12 00:02:00 2019 PDT | red   |   | Fri Jul 12 00:02:00 2019 PDT | red   |  
+ Fri Jul 12 00:03:00 2019 PDT | red   |   | Fri Jul 12 00:03:00 2019 PDT | red   | 1
+(10 rows)
+
+
+
+-- test join with fill_last
+SELECT t1.*,t2.m FROM
+(
+  SELECT
+    time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:05:01'::timestamptz) as time, 
+    color,
+    fill_last(min(value)) as fill_last
+  FROM
+    (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',1),('2019-07-12 00:00:01'::timestamptz,'blue',2)) v(time,color,value)
+  GROUP BY 1,color ORDER BY 2,1
+) t1 INNER JOIN
+(
+  SELECT
+    time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:05:01'::timestamptz) as time,
+    color,
+    fill_last(min(value)) as m
+  FROM
+    (VALUES ('2019-07-12 00:03:01'::timestamptz,'red',1),('2019-07-12 00:04:01'::timestamptz,'blue',2)) v(time,color,value)
+  GROUP BY 1,color ORDER BY 2,1
+) t2 ON t1.time = t2.time AND t1.color=t2.color;
+             time             | color | fill_last | m 
+------------------------------+-------+-----------+---
+ Fri Jul 12 00:00:00 2019 PDT | blue  |         2 |  
+ Thu Jul 11 23:59:00 2019 PDT | blue  |           |  
+ Fri Jul 12 00:01:00 2019 PDT | blue  |         2 |  
+ Fri Jul 12 00:02:00 2019 PDT | blue  |         2 |  
+ Fri Jul 12 00:03:00 2019 PDT | blue  |         2 |  
+ Fri Jul 12 00:04:00 2019 PDT | blue  |         2 | 2
+ Fri Jul 12 00:05:00 2019 PDT | blue  |         2 | 2
+ Fri Jul 12 00:00:00 2019 PDT | red   |         1 |  
+ Thu Jul 11 23:59:00 2019 PDT | red   |           |  
+ Fri Jul 12 00:01:00 2019 PDT | red   |         1 |  
+ Fri Jul 12 00:02:00 2019 PDT | red   |         1 |  
+ Fri Jul 12 00:03:00 2019 PDT | red   |         1 | 1
+ Fri Jul 12 00:04:00 2019 PDT | red   |         1 | 1
+ Fri Jul 12 00:05:00 2019 PDT | red   |         1 | 1
+(14 rows)
+
+
+
+-- test join with time_window
+
+SELECT t1.*,t2.* FROM
+(
+  SELECT
+    time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:02:01'::timestamptz) as time, 
+    color,
+    fill_last(min(value)) as fill_last
+  FROM
+    (VALUES ('2019-07-12 00:00:01'::timestamptz,10,1),('2019-07-12 00:00:01'::timestamptz,11,2),('2019-07-12 00:01:01'::timestamptz,10,3)) v(time,color,value)
+  GROUP BY 1,color ORDER BY 2,1
+) t1  JOIN
+(
+  SELECT
+    time_window(interval '1 min',time) as time, 
+    color,
+   min(value) as m
+  FROM
+    (VALUES ('2019-07-12 00:00:01'::timestamptz,10,1)) v(time,color,value)
+  GROUP BY 1,color ORDER BY 2,1
+) t2 ON 1 = 1;
+             time             | color | fill_last |             time             | color | m 
+------------------------------+-------+-----------+------------------------------+-------+---
+ Fri Jul 12 00:00:00 2019 PDT |    10 |         1 | Fri Jul 12 00:00:00 2019 PDT |    10 | 1
+ Fri Jul 12 00:01:00 2019 PDT |    10 |         3 | Fri Jul 12 00:00:00 2019 PDT |    10 | 1
+ Thu Jul 11 23:59:00 2019 PDT |    10 |           | Fri Jul 12 00:00:00 2019 PDT |    10 | 1
+ Fri Jul 12 00:02:00 2019 PDT |    10 |         3 | Fri Jul 12 00:00:00 2019 PDT |    10 | 1
+ Fri Jul 12 00:00:00 2019 PDT |    11 |         2 | Fri Jul 12 00:00:00 2019 PDT |    10 | 1
+ Thu Jul 11 23:59:00 2019 PDT |    11 |           | Fri Jul 12 00:00:00 2019 PDT |    10 | 1
+ Fri Jul 12 00:01:00 2019 PDT |    11 |         2 | Fri Jul 12 00:00:00 2019 PDT |    10 | 1
+ Fri Jul 12 00:02:00 2019 PDT |    11 |         2 | Fri Jul 12 00:00:00 2019 PDT |    10 | 1
+(8 rows)
+
+
+
+---------------- ExecNestLoop
+
+-- test fill_last
+SELECT
+  time_fill(interval '10 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:50:01'::timestamptz) AS time,
+  fill_last(min(value)) AS value
+FROM (values ('2019-07-12 00:00:01'::timestamptz,9),('2019-07-12 00:10:01'::timestamptz,3),('2019-07-12 00:40:01'::timestamptz,6)) v(time,value)
+GROUP BY 1 ORDER BY 1;
+             time             | value 
+------------------------------+-------
+ Thu Jul 11 23:50:00 2019 PDT |      
+ Fri Jul 12 00:00:00 2019 PDT |     9
+ Fri Jul 12 00:10:00 2019 PDT |     3
+ Fri Jul 12 00:20:00 2019 PDT |     3
+ Fri Jul 12 00:30:00 2019 PDT |     3
+ Fri Jul 12 00:40:00 2019 PDT |     6
+ Fri Jul 12 00:50:00 2019 PDT |     6
+(7 rows)
+
+
+-- test fill_last with constants
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz),
+  2,
+  fill_last(min(value))
+FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,1,3),('2019-07-12 00:02:01'::timestamptz,2,3)) v(time,value)
+GROUP BY 1 ORDER BY 1;
+          time_fill           | ?column? | fill_last 
+------------------------------+----------+-----------
+ Thu Jul 11 23:59:00 2019 PDT |        2 |          
+ Fri Jul 12 00:00:00 2019 PDT |        2 |         1
+ Fri Jul 12 00:01:00 2019 PDT |        2 |         1
+ Fri Jul 12 00:02:00 2019 PDT |        2 |         2
+ Fri Jul 12 00:03:00 2019 PDT |        2 |         2
+(5 rows)
+
+
+-- test fill_last with out of boundary lookup
+SELECT
+  time_fill(interval '10 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:50:01'::timestamptz) AS time,
+  fill_last(min(value)) AS value
+FROM (values ('2019-07-12 00:10:01'::timestamptz,9),('2019-07-12 00:30:01'::timestamptz,6)) v(time,value)
+GROUP BY 1 ORDER BY 1;
+             time             | value 
+------------------------------+-------
+ Thu Jul 11 23:50:00 2019 PDT |      
+ Fri Jul 12 00:00:00 2019 PDT |      
+ Fri Jul 12 00:10:00 2019 PDT |     9
+ Fri Jul 12 00:20:00 2019 PDT |     9
+ Fri Jul 12 00:30:00 2019 PDT |     6
+ Fri Jul 12 00:40:00 2019 PDT |     6
+ Fri Jul 12 00:50:00 2019 PDT |     6
+(7 rows)
+
+
+
+-- test fill_last with different datatypes
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:05:01'::timestamptz) as time,
+  fill_last(min(v1)) AS text,
+  fill_last(min(v2)) AS "int[]",
+  fill_last(min(v3)) AS "text 4/8k"
+FROM (VALUES
+  ('2019-07-12 00:01:01'::timestamptz,'foo',ARRAY[1,2,3],repeat('4',4)),
+  ('2019-07-12 00:03:01'::timestamptz,'bar',ARRAY[3,4,5],repeat('8',8))
+) v(time,v1,v2,v3)
+GROUP BY 1;
+             time             | text |  int[]  | text 4/8k 
+------------------------------+------+---------+-----------
+ Fri Jul 12 00:03:00 2019 PDT | bar  | {3,4,5} | 88888888
+ Fri Jul 12 00:01:00 2019 PDT | foo  | {1,2,3} | 4444
+ Thu Jul 11 23:59:00 2019 PDT |      |         | 
+ Fri Jul 12 00:00:00 2019 PDT |      |         | 
+ Fri Jul 12 00:02:00 2019 PDT | foo  | {1,2,3} | 4444
+ Fri Jul 12 00:04:00 2019 PDT | bar  | {3,4,5} | 88888888
+ Fri Jul 12 00:05:00 2019 PDT | bar  | {3,4,5} | 88888888
+(7 rows)
+
+
+-- test fill_last lookup query does not trigger when not needed
+--
+
+CREATE TABLE metrics_int(time timestamptz,device_id int, sensor_id int, value float);
+
+INSERT INTO metrics_int VALUES
+('2019-07-11 23:59:01'::timestamptz,1,1,0.0),
+('2019-07-11 23:59:01'::timestamptz,1,2,-100.0),
+('2019-07-12 00:00:01'::timestamptz,1,1,5.0),
+('2019-07-12 00:00:03'::timestamptz,1,2,10.0),
+('2019-07-12 00:01:01'::timestamptz,1,1,0.0),
+('2019-07-12 00:01:01'::timestamptz,1,2,-100.0)
+;
+
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:05:01'::timestamptz) AS time,
+  device_id,
+  sensor_id,
+  fill_last(min(value)::int) AS fill_last3
+FROM metrics_int m1
+WHERE time >= '2019-07-11 23:59:59'::timestamptz AND time < '2019-07-12 00:04:01'::timestamptz
+GROUP BY 1,2,3 ORDER BY 2,3,1;
+             time             | device_id | sensor_id | fill_last3 
+------------------------------+-----------+-----------+------------
+ Thu Jul 11 23:59:00 2019 PDT |         1 |         1 |           
+ Fri Jul 12 00:00:00 2019 PDT |         1 |         1 |          5
+ Fri Jul 12 00:01:00 2019 PDT |         1 |         1 |          0
+ Fri Jul 12 00:02:00 2019 PDT |         1 |         1 |          0
+ Fri Jul 12 00:03:00 2019 PDT |         1 |         1 |          0
+ Fri Jul 12 00:04:00 2019 PDT |         1 |         1 |          0
+ Fri Jul 12 00:05:00 2019 PDT |         1 |         1 |          0
+ Thu Jul 11 23:59:00 2019 PDT |         1 |         2 |           
+ Fri Jul 12 00:00:00 2019 PDT |         1 |         2 |         10
+ Fri Jul 12 00:01:00 2019 PDT |         1 |         2 |       -100
+ Fri Jul 12 00:02:00 2019 PDT |         1 |         2 |       -100
+ Fri Jul 12 00:03:00 2019 PDT |         1 |         2 |       -100
+ Fri Jul 12 00:04:00 2019 PDT |         1 |         2 |       -100
+ Fri Jul 12 00:05:00 2019 PDT |         1 |         2 |       -100
+(14 rows)
+
+drop table metrics_int;
+
+
+-- test cte with gap filling in outer query
+WITH data AS (
+  SELECT * FROM (VALUES ('2019-07-12 00:01:01'::timestamptz,1,1),('2019-07-12 00:02:01'::timestamptz,2,2)) v(time,id,value)
+)
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz) as time,
+  id,
+  min(value) as m
+FROM data
+GROUP BY 1,id;
+             time             | id | m 
+------------------------------+----+---
+ Fri Jul 12 00:01:00 2019 PDT |  1 | 1
+ Thu Jul 11 23:59:00 2019 PDT |  1 |  
+ Fri Jul 12 00:00:00 2019 PDT |  1 |  
+ Fri Jul 12 00:02:00 2019 PDT |  1 |  
+ Fri Jul 12 00:03:00 2019 PDT |  1 |  
+ Fri Jul 12 00:02:00 2019 PDT |  2 | 2
+ Thu Jul 11 23:59:00 2019 PDT |  2 |  
+ Fri Jul 12 00:00:00 2019 PDT |  2 |  
+ Fri Jul 12 00:01:00 2019 PDT |  2 |  
+ Fri Jul 12 00:03:00 2019 PDT |  2 |  
+(10 rows)
+
+
+-- test cte with gap filling in inner query
+WITH gapfill AS (
+  SELECT
+    time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz) as time,
+    id,
+    min(value) as m
+  FROM (VALUES ('2019-07-12 00:01:01'::timestamptz,1,1),('2019-07-12 00:02:01'::timestamptz,2,2)) v(time,id,value)
+  GROUP BY 1,id
+)
+SELECT * FROM gapfill;
+             time             | id | m 
+------------------------------+----+---
+ Fri Jul 12 00:01:00 2019 PDT |  1 | 1
+ Thu Jul 11 23:59:00 2019 PDT |  1 |  
+ Fri Jul 12 00:00:00 2019 PDT |  1 |  
+ Fri Jul 12 00:02:00 2019 PDT |  1 |  
+ Fri Jul 12 00:03:00 2019 PDT |  1 |  
+ Fri Jul 12 00:02:00 2019 PDT |  2 | 2
+ Thu Jul 11 23:59:00 2019 PDT |  2 |  
+ Fri Jul 12 00:00:00 2019 PDT |  2 |  
+ Fri Jul 12 00:01:00 2019 PDT |  2 |  
+ Fri Jul 12 00:03:00 2019 PDT |  2 |  
+(10 rows)
+
+
+\set ON_ERROR_STOP 0
+
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:05:01'::timestamptz),
+  min(time),
+  4 as c,
+  lag(min(time)) OVER ()
+FROM (VALUES ('2019-07-12 00:01:01'::timestamptz),('2019-07-12 00:02:01'::timestamptz),('2019-07-12 00:03:01'::timestamptz)) v(time)
+GROUP BY 1;
+ERROR:  time_fill function must appear in the GROUP BY clause 
+
+\set ON_ERROR_STOP 1
+
+-- test reorder
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz) as time,
+  id,
+  min(value) as m
+FROM
+  (VALUES ('2019-07-12 00:03:01'::timestamptz,1,1),('2019-07-12 00:01:01'::timestamptz,2,2)) v(time,id,value)
+GROUP BY 1,id ORDER BY 1,id;
+             time             | id | m 
+------------------------------+----+---
+ Thu Jul 11 23:59:00 2019 PDT |  1 |  
+ Thu Jul 11 23:59:00 2019 PDT |  2 |  
+ Fri Jul 12 00:00:00 2019 PDT |  1 |  
+ Fri Jul 12 00:00:00 2019 PDT |  2 |  
+ Fri Jul 12 00:01:00 2019 PDT |  1 |  
+ Fri Jul 12 00:01:00 2019 PDT |  2 | 2
+ Fri Jul 12 00:02:00 2019 PDT |  1 |  
+ Fri Jul 12 00:02:00 2019 PDT |  2 |  
+ Fri Jul 12 00:03:00 2019 PDT |  1 | 1
+ Fri Jul 12 00:03:00 2019 PDT |  2 |  
+(10 rows)
+
+
+-- test order by fill_last
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz),
+  fill_last(min(time))
+FROM
+  (VALUES ('2019-07-12 00:03:01'::timestamptz,1,1),('2019-07-12 00:01:01'::timestamptz,1,1)) v(time)
+GROUP BY 1 ORDER BY 2,1;
+          time_fill           |          fill_last           
+------------------------------+------------------------------
+ Fri Jul 12 00:01:00 2019 PDT | Fri Jul 12 00:01:01 2019 PDT
+ Fri Jul 12 00:02:00 2019 PDT | Fri Jul 12 00:01:01 2019 PDT
+ Fri Jul 12 00:03:00 2019 PDT | Fri Jul 12 00:03:01 2019 PDT
+ Thu Jul 11 23:59:00 2019 PDT | 
+ Fri Jul 12 00:00:00 2019 PDT | 
+(5 rows)
+
+
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz),
+  fill_last(min(time))
+FROM
+  (VALUES ('2019-07-12 00:03:01'::timestamptz,1,1),('2019-07-12 00:01:01'::timestamptz,1,1)) v(time)
+GROUP BY 1 ORDER BY 2 NULLS FIRST,1;
+          time_fill           |          fill_last           
+------------------------------+------------------------------
+ Thu Jul 11 23:59:00 2019 PDT | 
+ Fri Jul 12 00:00:00 2019 PDT | 
+ Fri Jul 12 00:01:00 2019 PDT | Fri Jul 12 00:01:01 2019 PDT
+ Fri Jul 12 00:02:00 2019 PDT | Fri Jul 12 00:01:01 2019 PDT
+ Fri Jul 12 00:03:00 2019 PDT | Fri Jul 12 00:03:01 2019 PDT
+(5 rows)
+
+
+SELECT
+  time_fill(interval '1 min',time,'2019-07-11 23:59:01'::timestamptz,'2019-07-12 00:03:01'::timestamptz),
+  fill_last(min(time))
+FROM
+  (VALUES ('2019-07-12 00:03:01'::timestamptz,1,1),('2019-07-12 00:01:01'::timestamptz,1,1)) v(time)
+GROUP BY 1 ORDER BY 2 NULLS LAST,1;
+          time_fill           |          fill_last           
+------------------------------+------------------------------
+ Fri Jul 12 00:01:00 2019 PDT | Fri Jul 12 00:01:01 2019 PDT
+ Fri Jul 12 00:02:00 2019 PDT | Fri Jul 12 00:01:01 2019 PDT
+ Fri Jul 12 00:03:00 2019 PDT | Fri Jul 12 00:03:01 2019 PDT
+ Thu Jul 11 23:59:00 2019 PDT | 
+ Fri Jul 12 00:00:00 2019 PDT | 
+(5 rows)
+
+
+
+\set ON_ERROR_STOP 0
+
+-- NULL start expression and no usable time constraints
+SELECT
+  time_fill(interval '1 min',t,CASE WHEN length(version())>0 THEN '2019-07-11 23:59:01'::timestamptz ELSE '2019-07-12 00:02:01'::timestamptz END,'2019-07-12 00:05:01'::timestamptz)
+FROM (VALUES ('2019-07-12 00:00:01'::timestamptz),('2019-07-12 00:03:01'::timestamptz)) v(t)
+WHERE true AND true
+GROUP BY 1;
+ERROR:  invalid time_fill argument
+
+-- unsupported start expression and no usable time constraints
+SELECT
+  time_fill(interval '1 min',t,t,'2019-07-12 00:05:01'::timestamptz)
+FROM (VALUES ('2019-07-12 00:00:01'::timestamptz),('2019-07-12 00:03:01'::timestamptz)) v(t)
+WHERE true AND true
+GROUP BY 1;
+ERROR:  invalid time_fill argument
+
+\set ON_ERROR_STOP 1
+-- expression with multiple column references
+SELECT
+  time_fill(interval '1 min',t1,'2019-07-11 23:59:01'::timestamptz + interval '1 min','2019-07-12 00:03:01'::timestamptz)
+FROM (VALUES ('2019-07-12 00:01:01'::timestamptz,2),('2019-07-12 00:02:01'::timestamptz,2)) v(t1,t2)
+WHERE true
+GROUP BY 1;
+          time_fill           
+------------------------------
+ Fri Jul 12 00:01:00 2019 PDT
+ Fri Jul 12 00:02:00 2019 PDT
+ Fri Jul 12 00:00:00 2019 PDT
+ Fri Jul 12 00:03:00 2019 PDT
+(4 rows)
+
+
+-- percentile_cont WITHIN GROUP
+
+\set ON_ERROR_STOP 0
+
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value,color) FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',1),('2019-07-12 00:00:01'::timestamptz,'blue',2)) v(time,color,value);
+ERROR:  function percentile_cont(numeric, integer, text) does not exist
+LINE 1: SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value,col...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: percentile_cont
+
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY color) FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',1),('2019-07-12 00:00:01'::timestamptz,'blue',2)) v(time,color,value);
+ERROR:  invalid input syntax for type double precision: "red"
+
+SELECT percentile_cont(0.5) WITHIN GROUP () FROM (VALUES (1),(2)) v(value);
+ERROR:  syntax error at or near ")"
+LINE 1: SELECT percentile_cont(0.5) WITHIN GROUP () FROM (VALUES (1)...
+                                                  ^
+
+SELECT percentile_cont(0.5) WITHIN GROUP (color) FROM (VALUES (1),(2)) v(value);
+ERROR:  syntax error at or near "color"
+LINE 1: SELECT percentile_cont(0.5) WITHIN GROUP (color) FROM (VALUE...
+                                                  ^
+-- NULL
+SELECT percentile_cont(NULL) WITHIN GROUP (ORDER BY value) FROM (VALUES (1),(2)) v(value);
+ERROR:  percentile cannot be NULL
+
+-- test different type in WITHIN GROUP
+SELECT percentile_cont(0.5) WITHIN GROUP (order by ARRAY[1,2,3]) FROM (VALUES (1),(2)) v(value);
+ERROR:  function percentile_cont(numeric, integer[]) does not exist
+LINE 1: SELECT percentile_cont(0.5) WITHIN GROUP (order by ARRAY[1,2...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: percentile_cont
+
+SELECT percentile_cont(0.5) WITHIN GROUP (order by value) FROM (VALUES ('red'),('yellow')) v(value);
+ERROR:  invalid input syntax for type double precision: "red"
+
+SELECT percentile_cont(0.5) WITHIN GROUP (order by value) FROM (VALUES (ARRAY[1,2,3]),(ARRAY[2,3,4])) v(value);
+ERROR:  function percentile_cont(numeric, integer[]) does not exist
+LINE 1: SELECT percentile_cont(0.5) WITHIN GROUP (order by value) FR...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: percentile_cont
+
+-- test not [0,1]
+SELECT percentile_cont(2) WITHIN GROUP (ORDER BY value) FROM (VALUES (1),(2)) v(value);
+ERROR:  percentile value 2 is not between 0 and 1
+
+SELECT percentile_cont(-1) WITHIN GROUP (ORDER BY value) FROM (VALUES (1),(2)) v(value);
+ERROR:  percentile value -1 is not between 0 and 1
+
+----- OVER
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value) over(partition by color) FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',1),('2019-07-12 00:00:01'::timestamptz,'blue',2)) v(time,color,value) ;
+ERROR:  OVER is not supported for ordered-set aggregate percentile_cont
+LINE 1: SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value) ov...
+               ^
+CONTEXT:  referenced column: percentile_cont
+
+SELECT percentile_cont(0.5)  over(ORDER BY value) FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',1),('2019-07-12 00:00:01'::timestamptz,'blue',2)) v(time,color,value) ;
+ERROR:  function percentile_cont(numeric) does not exist
+LINE 1: SELECT percentile_cont(0.5)  over(ORDER BY value) FROM (VALU...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: percentile_cont
+
+
+------ float8[]
+SELECT percentile_cont(array[0.5,0.9]) WITHIN GROUP (ORDER BY value) FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',1),('2019-07-12 00:00:01'::timestamptz,'blue',2)) v(time,color,value);
+ERROR:  function percentile_cont(numeric[], integer) does not exist
+LINE 1: SELECT percentile_cont(array[0.5,0.9]) WITHIN GROUP (ORDER B...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: percentile_cont
+------ multi-call
+SELECT percentile_cont(0.5),percentile_cont(0.7) WITHIN GROUP (ORDER BY value) FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',1),('2019-07-12 00:00:01'::timestamptz,'blue',2)) v(time,color,value);
+ERROR:  function percentile_cont(numeric) does not exist
+LINE 1: SELECT percentile_cont(0.5),percentile_cont(0.7) WITHIN GROU...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: percentile_cont
+
+\set ON_ERROR_STOP 1
+
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value) FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',1),('2019-07-12 00:00:01'::timestamptz,'blue',2)) v(time,color,value);
+ percentile_cont 
+-----------------
+             1.5
+(1 row)
+
+-- desc
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value desc) FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',1),('2019-07-12 00:00:01'::timestamptz,'blue',2)) v(time,color,value);
+ percentile_cont 
+-----------------
+             1.5
+(1 row)
+
+-- interval
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value) FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',interval '1 day'),('2019-07-12 00:00:01'::timestamptz,'blue','3 day')) v(time,color,value);
+ percentile_cont 
+-----------------
+ @ 2 days
+(1 row)
+
+
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value) FROM (VALUES (1),(2)) v(value);
+ percentile_cont 
+-----------------
+             1.5
+(1 row)
+
+
+SELECT percentile_cont(0.5) within group (order by value) FROM (SELECT generate_series(0.01, 1, 0.01) as value);
+ percentile_cont 
+-----------------
+            .505
+(1 row)
+
+
+-- test compute
+SELECT percentile_cont(0.5) within group (order by value * 2) FROM (SELECT generate_series(0.01, 1, 0.01) as value);
+ percentile_cont 
+-----------------
+            1.01
+(1 row)
+
+
+SELECT percentile_cont(0.5 * 2 - 0.3) within group (order by value) FROM (SELECT generate_series(0.01, 1, 0.01) as value);
+ percentile_cont 
+-----------------
+            .703
+(1 row)
+
+
+-- test NULL
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY NULL) FROM (VALUES (1),(2)) v(value);
+ percentile_cont 
+-----------------
+                
+(1 row)
+
+
+-- test GROUP BY
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value) FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',1),('2019-07-12 00:00:01'::timestamptz,'blue',2)) v(time,color,value) GROUP BY color;
+ percentile_cont 
+-----------------
+               2
+               1
+(2 rows)
+
+
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value) FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',1),('2019-07-12 00:00:01'::timestamptz,'blue',2)) v(time,color,value) GROUP BY color,time;
+ percentile_cont 
+-----------------
+               2
+               1
+(2 rows)
+
+
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value) FROM 
+  (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',0.1),('2019-07-12 00:00:01'::timestamptz,'blue',-3),('2019-07-12 00:00:01'::timestamptz,'blue',-0.3),('2019-07-12 00:00:01'::timestamptz,'red',2)) 
+  v(time,color,value) 
+GROUP BY color;
+ percentile_cont 
+-----------------
+           -1.65
+            1.05
+(2 rows)
+
+
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value) FROM 
+  (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',0.1),('2019-07-12 00:00:01'::timestamptz,'blue',-3),('2019-07-12 00:00:01'::timestamptz,'blue',-0.3),('2019-07-12 00:00:01'::timestamptz,'red',2)) 
+  v(time,color,value) 
+GROUP BY color,time,value;
+ percentile_cont 
+-----------------
+              -3
+             -.3
+              .1
+               2
+(4 rows)
+
+-- test GROUP BY desc
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value desc) FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',1),('2019-07-12 00:00:01'::timestamptz,'blue',2)) v(time,color,value) GROUP BY color;
+ percentile_cont 
+-----------------
+               2
+               1
+(2 rows)
+
+
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value desc) FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',1),('2019-07-12 00:00:01'::timestamptz,'blue',2)) v(time,color,value) GROUP BY color,time;
+ percentile_cont 
+-----------------
+               2
+               1
+(2 rows)
+
+
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value desc) FROM 
+  (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',0.1),('2019-07-12 00:00:01'::timestamptz,'blue',-3),('2019-07-12 00:00:01'::timestamptz,'blue',-0.3),('2019-07-12 00:00:01'::timestamptz,'red',2)) 
+  v(time,color,value) 
+GROUP BY color;
+ percentile_cont 
+-----------------
+           -1.65
+            1.05
+(2 rows)
+
+
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value desc) FROM 
+  (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',0.1),('2019-07-12 00:00:01'::timestamptz,'blue',-3),('2019-07-12 00:00:01'::timestamptz,'blue',-0.3),('2019-07-12 00:00:01'::timestamptz,'red',2)) 
+  v(time,color,value) 
+GROUP BY color,time,value;
+ percentile_cont 
+-----------------
+              -3
+             -.3
+              .1
+               2
+(4 rows)
+
+
+-- test order by const
+SELECT percentile_cont(0.5) WITHIN GROUP (order by 2) FROM (VALUES (1),(2)) v(value);
+ percentile_cont 
+-----------------
+               2
+(1 row)
+
+
+SELECT percentile_cont(0.5) WITHIN GROUP (order by 2);
+ percentile_cont 
+-----------------
+               2
+(1 row)
+
+
+SELECT percentile_cont(0.5) WITHIN GROUP (order by -2);
+ percentile_cont 
+-----------------
+              -2
+(1 row)
+
+
+--- multiple percentile_cont
+SELECT k, percentile_cont(k) within group (order by value)
+FROM (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',1),('2019-07-12 00:00:01'::timestamptz,'blue',2)) v(time,color,value) , generate_series(0.1, 1, 0.01) as k
+group by k;
+  k   | percentile_cont 
+------+-----------------
+   .1 |             1.1
+  .11 |            1.11
+  .12 |            1.12
+  .13 |            1.13
+  .14 |            1.14
+  .15 |            1.15
+  .16 |            1.16
+  .17 |            1.17
+  .18 |            1.18
+  .19 |            1.19
+  .20 |             1.2
+  .21 |            1.21
+  .22 |            1.22
+  .23 |            1.23
+  .24 |            1.24
+  .25 |            1.25
+  .26 |            1.26
+  .27 |            1.27
+  .28 |            1.28
+  .29 |            1.29
+  .30 |             1.3
+  .31 |            1.31
+  .32 |            1.32
+  .33 |            1.33
+  .34 |            1.34
+  .35 |            1.35
+  .36 |            1.36
+  .37 |            1.37
+  .38 |            1.38
+  .39 |            1.39
+  .40 |             1.4
+  .41 |            1.41
+  .42 |            1.42
+  .43 |            1.43
+  .44 |            1.44
+  .45 |            1.45
+  .46 |            1.46
+  .47 |            1.47
+  .48 |            1.48
+  .49 |            1.49
+  .50 |             1.5
+  .51 |            1.51
+  .52 |            1.52
+  .53 |            1.53
+  .54 |            1.54
+  .55 |            1.55
+  .56 |            1.56
+  .57 |            1.57
+  .58 |            1.58
+  .59 |            1.59
+  .60 |             1.6
+  .61 |            1.61
+  .62 |            1.62
+  .63 |            1.63
+  .64 |            1.64
+  .65 |            1.65
+  .66 |            1.66
+  .67 |            1.67
+  .68 |            1.68
+  .69 |            1.69
+  .70 |             1.7
+  .71 |            1.71
+  .72 |            1.72
+  .73 |            1.73
+  .74 |            1.74
+  .75 |            1.75
+  .76 |            1.76
+  .77 |            1.77
+  .78 |            1.78
+  .79 |            1.79
+  .80 |             1.8
+  .81 |            1.81
+  .82 |            1.82
+  .83 |            1.83
+  .84 |            1.84
+  .85 |            1.85
+  .86 |            1.86
+  .87 |            1.87
+  .88 |            1.88
+  .89 |            1.89
+  .90 |             1.9
+  .91 |            1.91
+  .92 |            1.92
+  .93 |            1.93
+  .94 |            1.94
+  .95 |            1.95
+  .96 |            1.96
+  .97 |            1.97
+  .98 |            1.98
+  .99 |            1.99
+ 1.00 |               2
+(91 rows)
+
+
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value),percentile_cont(0.5) WITHIN GROUP (ORDER BY value2) FROM 
+  (VALUES (0.1,'red',0.1),(-3,'blue',-3),(-0.3,'blue',-0.3),(2,'red',2)) 
+  v(value2,color,value) 
+GROUP BY color;
+ percentile_cont | percentile_cont 
+-----------------+-----------------
+           -1.65 |           -1.65
+            1.05 |            1.05
+(2 rows)
+
+
+WITH s1 as (
+  SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value) as per,percentile_cont(0.5) WITHIN GROUP (ORDER BY value2) FROM 
+    (VALUES (0.1,'red',0.1),(-3,'blue',-3),(-0.3,'blue',-0.3),(2,'red',2)) 
+    v(value2,color,value)  GROUP BY color)
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY s1.per) from s1;
+ percentile_cont 
+-----------------
+             -.3
+(1 row)
+
+
+--- with other aggregate
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value desc), sum(value),count(time),max(value)  FROM 
+  (VALUES ('2019-07-12 00:00:01'::timestamptz,'red',0.1),('2019-07-12 00:00:01'::timestamptz,'blue',-3),('2019-07-12 00:00:01'::timestamptz,'blue',-0.3),('2019-07-12 00:00:01'::timestamptz,'red',2)) 
+  v(time,color,value) 
+GROUP BY color;
+ percentile_cont | sum  | count | max 
+-----------------+------+-------+-----
+           -1.65 | -3.3 |     2 | -.3
+            1.05 |  2.1 |     2 |   2
+(2 rows)
+
+
+--- mix with time_fill
+
+WITH s1 as (
+  SELECT
+    time_fill(interval '1 min',time,'2019-07-12 00:01:01'::timestamptz,'2019-07-12 00:06:01'::timestamptz) as rtime,
+    fill_last(min(value)) as rvalue,
+    fill_last(min(tag)) as rtag
+  FROM
+    (VALUES ('2019-07-12 00:03:01'::timestamptz,2,2),('2019-07-12 00:01:01'::timestamptz,1,1),('2019-07-12 00:05:01'::timestamptz,3,3)) v(time, value, tag)
+  GROUP BY rtime ORDER BY 1
+)
+SELECT first(array_agg(s1.rvalue),array_agg(s1.rtime)),
+       last(array_agg(s1.rvalue),array_agg(s1.rtime)),
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY s1.rvalue)
+       FROM s1;
+ first | last | percentile_cont 
+-------+------+-----------------
+     1 |    3 |               2
+(1 row)
+
+
+
+CREATE TABLE metrics_int(time timestamptz,device_id int, sensor_id int, value float);
+
+INSERT INTO metrics_int VALUES
+('2019-07-11 23:59:01'::timestamptz,11,1,0.0),
+('2019-07-11 23:59:01'::timestamptz,11,2,-100.0),
+('2019-07-12 00:00:01'::timestamptz,12,3,5.0),
+('2019-07-12 00:00:03'::timestamptz,12,4,10.0),
+('2019-07-13 00:01:03'::timestamptz,11,5,0.0),
+('2019-07-14 00:01:04'::timestamptz,11,5,0.0),
+('2019-07-15 00:01:05'::timestamptz,11,5,0.0),
+('2019-07-16 00:01:06'::timestamptz,11,5,0.0),
+('2019-07-17 00:01:07'::timestamptz,11,5,0.0),
+('2019-07-12 00:01:01'::timestamptz,12,6,-100.0)
+;
+
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value) FROM metrics_int;
+ percentile_cont 
+-----------------
+               0
+(1 row)
+
+
+SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value) FROM metrics_int group by device_id;
+ percentile_cont 
+-----------------
+               0
+               5
+(2 rows)
+
+
+drop table metrics_int;
+
+---
+--- combination
+--
+
+-- combine time_fill, fill_last, time_window, first, last, percentile
+WITH s1 as (
+  SELECT
+    time_fill(interval '1 min',time,'2019-07-12 00:01:01'::timestamptz,'2019-07-12 00:06:01'::timestamptz) as rtime,
+    fill_last(min(value)) as rvalue,
+    fill_last(min(tag)) as rtag
+  FROM
+    (VALUES ('2019-07-12 00:03:01'::timestamptz,2,2),('2019-07-12 00:01:01'::timestamptz,1,1),('2019-07-12 00:05:01'::timestamptz,3,3)) v(time, value, tag)
+  GROUP BY rtime ORDER BY 1
+)
+SELECT first(array_agg(s1.rvalue),array_agg(s1.rtime)),
+       last(array_agg(s1.rvalue),array_agg(s1.rtime)),
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY rvalue)
+       FROM s1;
+ first | last | percentile_cont 
+-------+------+-----------------
+     1 |    3 |               2
+(1 row)
+
+
+-- combine time_fill, fill_last, time_window, first, last, percentile, fill
+WITH s1 as (
+  SELECT 
+       time_window(interval '1 min',time) as t_time,
+       first(array_agg(value),array_agg(time)) as f_value,
+       last(array_agg(value),array_agg(time)) as l_value,
+       first(array_agg(tag),array_agg(time)) as f_tag,
+       last(array_agg(tag),array_agg(time)) as l_tag,
+       CASE WHEN first(array_agg(tag),array_agg(time)) is NOT NULL THEN first(array_agg(tag),array_agg(time)) ELSE fill(first(array_agg(tag),array_agg(time))) over (order by 1) END as fill_tag
+  FROM
+    (VALUES ('2019-07-12 00:03:01'::timestamptz,2,2),('2019-07-12 00:01:01'::timestamptz,1,NULL),('2019-07-12 00:05:01'::timestamptz,3,3)) v(time, value, tag)
+  GROUP BY t_time
+) SELECT
+    time_fill(interval '1 min',t_time,'2019-07-12 00:01:01'::timestamptz,'2019-07-12 00:06:01'::timestamptz) as rtime,
+    min(f_value) as m_f_value,
+    min(l_value) as m_l_value,
+    min(f_tag) as m_f_tag,
+    min(l_tag) as m_l_tag,
+    min(fill_tag) as m_fill_tag,
+    fill_last(min(f_value)) as fill_f_value,
+    fill_last(min(l_value)) as fill_l_value,
+    fill_last(min(f_tag)) as fill_last_f_tag,
+    fill_last(min(l_tag)) as fill_last_l_tag
+  FROM s1
+  GROUP BY rtime
+  ORDER BY rtime;
+            rtime             | m_f_value | m_l_value | m_f_tag | m_l_tag | m_fill_tag | fill_f_value | fill_l_value | fill_last_f_tag | fill_last_l_tag 
+------------------------------+-----------+-----------+---------+---------+------------+--------------+--------------+-----------------+-----------------
+ Fri Jul 12 00:01:00 2019 PDT |         1 |         1 |         |         |          3 |            1 |            1 |                 |                
+ Fri Jul 12 00:02:00 2019 PDT |           |           |         |         |            |            1 |            1 |               0 |               0
+ Fri Jul 12 00:03:00 2019 PDT |         2 |         2 |       2 |       2 |          2 |            2 |            2 |               2 |               2
+ Fri Jul 12 00:04:00 2019 PDT |           |           |         |         |            |            2 |            2 |               2 |               2
+ Fri Jul 12 00:05:00 2019 PDT |         3 |         3 |       3 |       3 |          3 |            3 |            3 |               3 |               3
+ Fri Jul 12 00:06:00 2019 PDT |           |           |         |         |            |            3 |            3 |               3 |               3
+(6 rows)
+
+
+
+---
+--- bottom_k
+---
+\set ON_ERROR_STOP 1
+
+SELECT
+  bottom_k(ARRAY[1,2,3], 0.95);
+ bottom_k 
+----------
+ {3}
+(1 row)
+
+
+SELECT
+  bottom_k(array_agg(v), 0.95)
+FROM (VALUES (1),(2),(-3),(-1.1),(5),(6.6),(0)) v(v);
+ bottom_k 
+----------
+ {6.6}
+(1 row)
+
+
+SELECT
+  bottom_k(array_agg(v), 2)
+FROM (VALUES (1),(2),(-3),(-1.1),(5),(6.6),(0)) v(v);
+ bottom_k 
+----------
+ {6.6,5}
+(1 row)
+
+
+
+SELECT
+  bottom_k(array_agg(v), 0)
+FROM (VALUES (1),(2),(-3),(-1.1),(5),(6.6),(0)) v(v);
+ bottom_k 
+----------
+ 
+(1 row)
+
+
+SELECT
+  bottom_k(array_agg(v), -2)
+FROM (VALUES (1),(2),(-3),(-1.1),(5),(6.6),(0)) v(v);
+ bottom_k 
+----------
+ 
+(1 row)
+
+
+
+SELECT
+  bottom_k(array_agg(v), 0.5),v2
+FROM (VALUES (1,'a'),(2,'a'),(3,'a'),(4,'a'),(5,'a'),(6,'a')) v(v,v2) group by v2;
+ bottom_k | v2 
+----------+----
+ {6}      | a
+(1 row)
+
+
+SELECT
+  bottom_k(array_agg(v), 0.1),v2
+FROM (VALUES (1,'a'),(2,'a'),(3,'a'),(4,'a'),(5,'a'),(6,'a')) v(v,v2) group by v2;
+ bottom_k | v2 
+----------+----
+          | a
+(1 row)
+
+
+
+\set ON_ERROR_STOP 0
+SELECT
+  bottom_k(array_agg(v), 0.5),v2
+FROM (VALUES (1,'a'),(2,'a'),(3,'a'),(4,'a'),(5,'a'),(6,'a')) v(v,v2);
+ERROR:  column "v.v2" must appear in the GROUP BY clause or be used in an aggregate function
+LINE 2:   bottom_k(array_agg(v), 0.5),v2
+                                      ^
+
+SELECT
+  bottom_k(v, 0.5)
+FROM (VALUES (1),(2),(-3),(-1.1),(5),(6.6),(0)) v(v);
+ERROR:  function bottom_k(numeric, numeric) does not exist
+LINE 2:   bottom_k(v, 0.5)
+          ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: bottom_k
+
+
+---
+--- top_k
+---
+\set ON_ERROR_STOP 1
+
+SELECT
+  top_k(ARRAY[1,2,3], 0.95);
+ top_k 
+-------
+ {1}
+(1 row)
+
+
+SELECT
+  top_k(array_agg(v), 0.95)
+FROM (VALUES (1),(2),(-3),(-1.1),(5),(6.6),(0)) v(v);
+ top_k 
+-------
+ {-3}
+(1 row)
+
+
+SELECT
+  top_k(array_agg(v), 2)
+FROM (VALUES (1),(2),(-3),(-1.1),(5),(6.6),(0)) v(v);
+   top_k   
+-----------
+ {-3,-1.1}
+(1 row)
+
+
+
+SELECT
+  top_k(array_agg(v), 0)
+FROM (VALUES (1),(2),(-3),(-1.1),(5),(6.6),(0)) v(v);
+ top_k 
+-------
+ 
+(1 row)
+
+
+SELECT
+  top_k(array_agg(v), -2)
+FROM (VALUES (1),(2),(-3),(-1.1),(5),(6.6),(0)) v(v);
+ top_k 
+-------
+ 
+(1 row)
+
+
+
+SELECT
+  top_k(array_agg(v), 0.5),v2
+FROM (VALUES (1,'a'),(2,'a'),(3,'a'),(4,'a'),(5,'a'),(6,'a')) v(v,v2) group by v2;
+ top_k | v2 
+-------+----
+ {1}   | a
+(1 row)
+
+
+SELECT
+  top_k(array_agg(v), 0.1),v2
+FROM (VALUES (1,'a'),(2,'a'),(3,'a'),(4,'a'),(5,'a'),(6,'a')) v(v,v2) group by v2;
+ top_k | v2 
+-------+----
+       | a
+(1 row)
+
+
+
+\set ON_ERROR_STOP 0
+SELECT
+  top_k(array_agg(v), 0.5),v2
+FROM (VALUES (1,'a'),(2,'a'),(3,'a'),(4,'a'),(5,'a'),(6,'a')) v(v,v2);
+ERROR:  column "v.v2" must appear in the GROUP BY clause or be used in an aggregate function
+LINE 2:   top_k(array_agg(v), 0.5),v2
+                                   ^
+
+SELECT
+  top_k(v, 0.5)
+FROM (VALUES (1),(2),(-3),(-1.1),(5),(6.6),(0)) v(v);
+ERROR:  function top_k(numeric, numeric) does not exist
+LINE 2:   top_k(v, 0.5)
+          ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: top_k
+

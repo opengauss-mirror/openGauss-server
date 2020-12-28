@@ -39,4 +39,3 @@ extern int getopt_long(
 #endif
 
 #endif /* GETOPT_LONG_H */
-

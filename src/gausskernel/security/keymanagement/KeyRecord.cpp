@@ -196,7 +196,7 @@ std::string KeyRecord::getEncryptedSampleStr()
  */
 bool KeyRecord::create_dek_iv()
 {
-    if (RAND_bytes(dek_iv, TDE_IV_LEN) != 1) {
+    if (RAND_priv_bytes(dek_iv, TDE_IV_LEN) != 1) {
         return false;
     }
 

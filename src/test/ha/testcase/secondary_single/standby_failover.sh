@@ -7,7 +7,7 @@ function test_1()
 
     check_instance
 
-	gs_guc reload -D $data_dir/datanode1 -c "enable_incremental_catchup=off"
+	gs_guc reload -Z datanode -D $data_dir/datanode1 -c "enable_incremental_catchup=off"
 	
 	# Create Table
 	gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists standby_failover_test; create table standby_failover_test(ID int);"
@@ -49,7 +49,7 @@ function tear_down()
 {
 	sleep 1
 	gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists standby_failover_test;"
-	gs_guc reload -D $data_dir/datanode1 -c "enable_incremental_catchup=on"
+	gs_guc reload -Z datanode -D $data_dir/datanode1 -c "enable_incremental_catchup=on"
 }
 
 test_1

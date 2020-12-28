@@ -1,0 +1,4 @@
+-- init setup to test drop table cancel redistribution transaction
+-- drop function to set/reset proc as redistribution one
+DROP FUNCTION IF EXISTS pg_set_proc_redis;
+DROP FUNCTION IF EXISTS pg_reset_proc_redis;

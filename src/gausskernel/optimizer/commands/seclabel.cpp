@@ -17,6 +17,7 @@
 
 #include "access/genam.h"
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "catalog/catalog.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_seclabel.h"
@@ -28,7 +29,7 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 typedef struct {
     const char* provider_name;
@@ -93,16 +94,19 @@ void ExecSecLabelStmt(SecLabelStmt* stmt)
 
             /*
              * Allow security labels only on columns of tables, views,
-             * materialized views, composite types, and foreign tables (which
-             * are the only relkinds for which pg_dump will dump labels).
+             * composite types, and foreign tables (which are the only
+             * relkinds for which pg_dump will dump labels).
              */
-            if (relation->rd_rel->relkind != RELKIND_RELATION && relation->rd_rel->relkind != RELKIND_VIEW &&
+            if (relation->rd_rel->relkind != RELKIND_RELATION &&
+                relation->rd_rel->relkind != RELKIND_VIEW &&
+                relation->rd_rel->relkind != RELKIND_CONTQUERY &&
                 relation->rd_rel->relkind != RELKIND_MATVIEW &&
                 relation->rd_rel->relkind != RELKIND_COMPOSITE_TYPE &&
+                relation->rd_rel->relkind != RELKIND_STREAM &&
                 relation->rd_rel->relkind != RELKIND_FOREIGN_TABLE)
                 ereport(ERROR,
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                        errmsg("\"%s\" is not a table, view, materialized view, composite type, or foreign table",
+                        errmsg("\"%s\" is not a table, view, composite type, or foreign table",
                             RelationGetRelationName(relation))));
             break;
         default:
@@ -247,7 +251,7 @@ static void SetSharedSecurityLabel(const ObjectAddress* object, const char* prov
             simple_heap_delete(pg_shseclabel, &oldtup->t_self);
         else {
             replaces[Anum_pg_shseclabel_label - 1] = true;
-            newtup = heap_modify_tuple(oldtup, RelationGetDescr(pg_shseclabel), values, nulls, replaces);
+            newtup = (HeapTuple) tableam_tops_modify_tuple(oldtup, RelationGetDescr(pg_shseclabel), values, nulls, replaces);
             simple_heap_update(pg_shseclabel, &oldtup->t_self, newtup);
         }
     }
@@ -262,7 +266,7 @@ static void SetSharedSecurityLabel(const ObjectAddress* object, const char* prov
     /* Update indexes, if necessary */
     if (newtup != NULL) {
         CatalogUpdateIndexes(pg_shseclabel, newtup);
-        heap_freetuple_ext(newtup);
+        tableam_tops_free_tuple(newtup);
     }
 
     heap_close(pg_shseclabel, RowExclusiveLock);
@@ -316,7 +320,7 @@ void SetSecurityLabel(const ObjectAddress* object, const char* provider, const c
             simple_heap_delete(pg_seclabel, &oldtup->t_self);
         else {
             replaces[Anum_pg_seclabel_label - 1] = true;
-            newtup = heap_modify_tuple(oldtup, RelationGetDescr(pg_seclabel), values, nulls, replaces);
+            newtup = (HeapTuple) tableam_tops_modify_tuple(oldtup, RelationGetDescr(pg_seclabel), values, nulls, replaces);
             simple_heap_update(pg_seclabel, &oldtup->t_self, newtup);
         }
     }
@@ -331,7 +335,7 @@ void SetSecurityLabel(const ObjectAddress* object, const char* provider, const c
     /* Update indexes, if necessary */
     if (newtup != NULL) {
         CatalogUpdateIndexes(pg_seclabel, newtup);
-        heap_freetuple_ext(newtup);
+        tableam_tops_free_tuple(newtup);
     }
 
     heap_close(pg_seclabel, RowExclusiveLock);
@@ -404,7 +408,7 @@ void register_label_provider(const char* provider_name, check_object_relabel_typ
     LabelProvider* provider = NULL;
     MemoryContext oldcxt;
 
-    oldcxt = MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+    oldcxt = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
     provider = (LabelProvider*)palloc(sizeof(LabelProvider));
     provider->provider_name = pstrdup(provider_name);
     provider->hook = hook;

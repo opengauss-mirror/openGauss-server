@@ -53,7 +53,7 @@
 #include "parser/parsetree.h"
 #include "storage/lmgr.h"
 #include "utils/memutils.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 #include "utils/partitionmap.h"
 #include "utils/partitionmap_gs.h"
 #include "optimizer/var.h"
@@ -445,7 +445,7 @@ void ExecAssignResultType(PlanState* planstate, TupleDesc tupDesc)
  *		ExecAssignResultTypeFromTL
  * ----------------
  */
-void ExecAssignResultTypeFromTL(PlanState* planstate)
+void ExecAssignResultTypeFromTL(PlanState* planstate, TableAmType tam)
 {
     bool hasoid = false;
     TupleDesc tupDesc;
@@ -462,7 +462,7 @@ void ExecAssignResultTypeFromTL(PlanState* planstate)
      * list of ExprStates.	This is good because some plan nodes don't bother
      * to set up planstate->targetlist ...
      */
-    tupDesc = ExecTypeFromTL(planstate->plan->targetlist, hasoid);
+    tupDesc = ExecTypeFromTL(planstate->plan->targetlist, hasoid, false, tam);
     ExecAssignResultType(planstate, tupDesc);
 }
 
@@ -1279,8 +1279,8 @@ bool ExecCheckIndexConstraints(TupleTableSlot* slot, EState* estate,
      */
     for (i = 0; i < numIndices; i++) {
         Relation indexRelation = relationDescs[i];
-        IndexInfo* indexInfo;
-        bool satisfiesConstraint;
+        IndexInfo* indexInfo = NULL;
+        bool satisfiesConstraint = false;
         Relation actualIndex = NULL;
         Oid partitionedindexid = InvalidOid;
         Oid indexpartitionid = InvalidOid;
@@ -1704,7 +1704,7 @@ bool check_violation(Relation heap, Relation index, IndexInfo* indexInfo, ItemPo
 retry:
     conflict = false;
     found_self = false;
-    index_scan = index_beginscan(heap, index, &DirtySnapshot, indnkeyatts, 0);
+    index_scan = (IndexScanDesc)index_beginscan(heap, index, &DirtySnapshot, indnkeyatts, 0);
     index_rescan(index_scan, scankeys, indnkeyatts, NULL, 0);
 
     while ((tup = index_getnext(index_scan, ForwardScanDirection)) != NULL) {
@@ -1733,11 +1733,12 @@ retry:
         (void)ExecStoreTuple(tup, existing_slot, InvalidBuffer, false);
         FormIndexDatum(indexInfo, existing_slot, estate, existing_values, existing_isnull);
 
+        bool is_scan = index_scan->xs_recheck &&
+            !index_recheck_constraint(index, constr_procs, existing_values, existing_isnull, values);
         /* If lossy indexscan, must recheck the condition */
-        if (index_scan->xs_recheck) {
-            if (!index_recheck_constraint(index, constr_procs, existing_values, existing_isnull, values))
-                continue; /* tuple doesn't actually match, so no
-                           * conflict */
+        if (is_scan) {
+            /* tuple doesn't actually match, so no conflict */
+            continue; 
         }
 
         /*
@@ -1782,19 +1783,18 @@ retry:
          */
         error_new = BuildIndexValueDescription(index, values, isnull);
         error_existing = BuildIndexValueDescription(index, existing_values, existing_isnull);
-        if (newIndex)
+        newIndex ? 
             ereport(ERROR,
                 (errcode(ERRCODE_EXCLUSION_VIOLATION),
                     errmsg("could not create exclusion constraint \"%s\" when trying to build a new index",
                         RelationGetRelationName(index)),
-                    error_new && error_existing ? errdetail("Key %s conflicts with key %s.", error_new, error_existing)
-                                                : errdetail("Key conflicts exist.")));
-        else
+                    (error_new && error_existing) ? errdetail("Key %s conflicts with key %s.", error_new, error_existing)
+                                                : errdetail("Key conflicts exist."))) :
             ereport(ERROR,
                 (errcode(ERRCODE_EXCLUSION_VIOLATION),
                     errmsg(
                         "conflicting key value violates exclusion constraint \"%s\"", RelationGetRelationName(index)),
-                    error_new && error_existing
+                    (error_new && error_existing)
                         ? errdetail("Key %s conflicts with existing key %s.", error_new, error_existing)
                         : errdetail("Key conflicts with existing key.")));
     }

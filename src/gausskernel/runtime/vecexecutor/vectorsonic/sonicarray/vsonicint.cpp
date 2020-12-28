@@ -212,7 +212,7 @@ void SonicIntTemplateDatumArray<T>::loadIntValArray(void* file, int nrows)
     int loop_rows;
 
     bool need_expand = (uint32)nrows > (m_atomSize - m_atomIdx);
-    loop_rows = need_expand ? m_atomSize - m_atomIdx : nrows;
+    loop_rows = need_expand ? (m_atomSize - m_atomIdx) : nrows;
 
     if (loop_rows > 0) {
         loadIntVal(file, loop_rows);

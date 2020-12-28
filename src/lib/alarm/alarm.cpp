@@ -1,9 +1,22 @@
-/* ---------------------------------------------------------------------------------------
+/*
+ * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ *
+ * openGauss is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+ * ---------------------------------------------------------------------------------------
  *
  * alarm.cpp
  *    POSTGRES alarm reporting/logging definitions.
  *
- * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -13,7 +26,6 @@
  * ---------------------------------------------------------------------------------------
  */
 
-#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,6 +33,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/time.h>
+#include <time.h>
 #include "common/config/cm_config.h"
 
 #include "alarm/alarm.h"
@@ -53,7 +66,7 @@ THR_LOCAL int AlarmReportInterval = 10;
 #define ALARMITEMNUMBER 64
 #define ALARM_LOGEXIT(ErrMsg, fp)        \
     do {                                 \
-        AlarmLog(ALM_INFO, "%s", ErrMsg); \
+        AlarmLog(ALM_LOG, "%s", ErrMsg); \
         if ((fp) != NULL)                \
             fclose(fp);                  \
         return;                          \
@@ -363,7 +376,7 @@ static void GetHostName(char* myHostName, unsigned int myHostNameLen)
     rc = memcpy_s(myHostName, myHostNameLen, hostName, len);
     securec_check_c(rc, "\0", "\0");
     myHostName[len] = '\0';
-    AlarmLog(ALM_INFO, "Host Name: %s \n", myHostName);
+    AlarmLog(ALM_LOG, "Host Name: %s \n", myHostName);
 }
 
 static void GetHostIP(const char* myHostName, char* myHostIP, unsigned int myHostIPLen)
@@ -373,14 +386,14 @@ static void GetHostIP(const char* myHostName, char* myHostIP, unsigned int myHos
 
     hp = gethostbyname(myHostName);
     if (NULL == hp) {
-        AlarmLog(ALM_INFO, "GET host IP by name failed.\n");
+        AlarmLog(ALM_LOG, "GET host IP by name failed.\n");
     } else {
         char* ipstr = inet_ntoa(*((struct in_addr*)hp->h_addr));
         size_t len = (strlen(ipstr) < (myHostIPLen - 1)) ? strlen(ipstr) : (myHostIPLen - 1);
         rc = memcpy_s(myHostIP, myHostIPLen, ipstr, len);
         securec_check_c(rc, "\0", "\0");
         myHostIP[len] = '\0';
-        AlarmLog(ALM_INFO, "Host IP: %s \n", myHostIP);
+        AlarmLog(ALM_LOG, "Host IP: %s \n", myHostIP);
     }
 }
 
@@ -395,13 +408,13 @@ static void GetClusterName(char* clusterName, unsigned int clusterNameLen)
         rc = memcpy_s(clusterName, clusterNameLen, gsClusterName, len);
         securec_check_c(rc, "\0", "\0");
         clusterName[len] = '\0';
-        AlarmLog(ALM_INFO, "Cluster Name: %s \n", clusterName);
+        AlarmLog(ALM_LOG, "Cluster Name: %s \n", clusterName);
     } else {
         size_t len = strlen(CLUSTERNAME);
         rc = memcpy_s(clusterName, clusterNameLen, CLUSTERNAME, len);
         securec_check_c(rc, "\0", "\0");
         clusterName[len] = '\0';
-        AlarmLog(ALM_INFO, "Get ENV GS_CLUSTER_NAME failed!\n");
+        AlarmLog(ALM_LOG, "Get ENV GS_CLUSTER_NAME failed!\n");
     }
 }
 
@@ -411,7 +424,7 @@ void AlarmEnvInitialize()
     int nRet = 0;
     warningType = gs_getenv_r("GAUSS_WARNING_TYPE");
     if ((NULL == warningType) || ('\0' == warningType[0])) {
-        AlarmLog(ALM_INFO, "can not read GAUSS_WARNING_TYPE env.\n");
+        AlarmLog(ALM_LOG, "can not read GAUSS_WARNING_TYPE env.\n");
     } else {
         check_input_for_security1(warningType);
         // save warningType into WarningType array
@@ -1093,7 +1106,7 @@ void AlarmCheckerLoop(Alarm* checkList, int checkListSize)
             if (ALM_ACR_Normal == result) {
                 type = ALM_AT_Resume;
             }
-            AlarmReporter(alarmItem, type, &tempAdditionalParam);
+            (void)AlarmReporter(alarmItem, type, &tempAdditionalParam);
         }
     }
 }
@@ -1104,7 +1117,7 @@ void AlarmLog(int level, const char* fmt, ...)
     char buf[MAXPGPATH] = {0}; /*enough for log module*/
     int nRet = 0;
 
-    va_start(args, fmt);
+    (void)va_start(args, fmt);
     nRet = vsnprintf_s(buf, sizeof(buf), sizeof(buf) - 1, fmt, args);
     securec_check_ss_c(nRet, "\0", "\0");
     va_end(args);

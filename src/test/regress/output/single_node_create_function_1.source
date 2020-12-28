@@ -74,7 +74,7 @@ CREATE FUNCTION test1 (int) RETURNS int LANGUAGE C
 ERROR:  could not access file "nosuchfile": No such file or directory
 CREATE FUNCTION test1 (int) RETURNS int LANGUAGE C
     AS '@libdir@/regress@DLSUFFIX@', 'nosuchsymbol';
---?ERROR:  could not find function "nosuchsymbol" in file "@libdir@/.*regress@DLSUFFIX@"
+--?ERROR:  could not find function "nosuchsymbol" in file.*
 CREATE FUNCTION test1 (int) RETURNS int LANGUAGE internal
     AS 'nosuch';
 ERROR:  there is no built-in function named "nosuch"

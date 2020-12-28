@@ -22,8 +22,6 @@
 
 extern void AtEOXact_ComboCid(void);
 
-extern void RestoreComboCIDState(void *parallelCtx);
-extern void SerializeComboCIDState(void *parallelCtx);
 extern void StreamTxnContextSaveComboCid(void* stc);
 extern void StreamTxnContextRestoreComboCid(void* stc);
 

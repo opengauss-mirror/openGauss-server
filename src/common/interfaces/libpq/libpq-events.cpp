@@ -55,6 +55,7 @@ int PQregisterEventProc(PGconn* conn, PGEventProc proc, const char* name, void* 
 
         newSize = conn->eventArraySize ? conn->eventArraySize * 2 : 8;
         e = (PGEvent*)malloc(newSize * sizeof(PGEvent));
+
         if (e == NULL)
             return FALSE;
 

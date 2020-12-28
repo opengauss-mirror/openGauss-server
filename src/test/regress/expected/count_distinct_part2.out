@@ -14,7 +14,7 @@ insert into t_distinct select generate_series(1, 10000)%5001, generate_series(1,
 analyze t_distinct;
 -- Case 2.3 sub level
 -- Case 2.3.1 count_distinct within target list
-explain (costs off, nodes off) select distinct da from (select count(distinct(a)) da, max(b+c), avg(d) from t_distinct);
+explain (costs off) select distinct da from (select count(distinct(a)) da, max(b+c), avg(d) from t_distinct);
                  QUERY PLAN                  
 ---------------------------------------------
  HashAggregate
@@ -30,7 +30,7 @@ select distinct da from (select min(distinct(a)) da, max(b+c), avg(d) from t_dis
   0
 (1 row)
 
-explain (costs off, nodes off) select distinct db from (select count(distinct(b)) db, max(a-c), avg(d) from t_distinct);
+explain (costs off) select distinct db from (select count(distinct(b)) db, max(a-c), avg(d) from t_distinct);
                  QUERY PLAN                  
 ---------------------------------------------
  HashAggregate
@@ -46,7 +46,7 @@ select distinct db from (select max(distinct(b)) db, max(a-c), avg(d) from t_dis
  749
 (1 row)
 
-explain (costs off, nodes off) select distinct db from (select count(distinct(b+c)) db, max(a-c), avg(d) from t_distinct);
+explain (costs off) select distinct db from (select count(distinct(b+c)) db, max(a-c), avg(d) from t_distinct);
                  QUERY PLAN                  
 ---------------------------------------------
  HashAggregate
@@ -63,7 +63,7 @@ select distinct db from (select count(distinct(b+c)) db, max(a-c), avg(d) from t
 (1 row)
 
 -- Case 2.3.3 count_distinct within other place
-explain (costs off, nodes off) select distinct mb from (select max(b) mb from t_distinct order by count(distinct(d)));
+explain (costs off) select distinct mb from (select max(b) mb from t_distinct order by count(distinct(d)));
                        QUERY PLAN                       
 --------------------------------------------------------
  HashAggregate
@@ -81,7 +81,7 @@ select distinct mb from (select max(b) mb from t_distinct order by count(distinc
  749
 (1 row)
 
-explain (costs off, nodes off) select distinct mb from (select max(b) mb from t_distinct having count(distinct(d))=7);
+explain (costs off) select distinct mb from (select max(b) mb from t_distinct having count(distinct(d))=7);
                      QUERY PLAN                     
 ----------------------------------------------------
  HashAggregate
@@ -97,7 +97,7 @@ select distinct mb from (select max(b) mb from t_distinct having count(distinct(
  749
 (1 row)
 
-explain (costs off, nodes off) select distinct aabcd from (select avg(a+b+c+d) aabcd from t_distinct having count(distinct(a))=max(a)+1);
+explain (costs off) select distinct aabcd from (select avg(a+b+c+d) aabcd from t_distinct having count(distinct(a))=max(a)+1);
                                       QUERY PLAN                                      
 --------------------------------------------------------------------------------------
  HashAggregate
@@ -113,7 +113,7 @@ select distinct aabcd from (select avg(a+b+c+d) aabcd from t_distinct having cou
  2993.1028000000000000
 (1 row)
 
-explain (costs off, nodes off) select distinct ac from (select avg(c) ac from t_distinct order by count(distinct(a)));
+explain (costs off) select distinct ac from (select avg(c) ac from t_distinct order by count(distinct(a)));
                        QUERY PLAN                       
 --------------------------------------------------------
  HashAggregate
@@ -131,7 +131,7 @@ select distinct ac from (select avg(c::numeric(15,10)) ac from t_distinct order 
  121.8280000000000000
 (1 row)
 
-explain (costs off, nodes off) select distinct ac from (select avg(c) ac from t_distinct order by count(distinct(d)));
+explain (costs off) select distinct ac from (select avg(c) ac from t_distinct order by count(distinct(d)));
                        QUERY PLAN                       
 --------------------------------------------------------
  HashAggregate
@@ -150,7 +150,7 @@ select distinct ac from (select avg(c::numeric(15,10)) ac from t_distinct order 
 (1 row)
 
 -- Case 2.4 with distinct
-explain (costs off, nodes off) select distinct count(distinct(b)) from t_distinct;
+explain (costs off) select distinct count(distinct(b)) from t_distinct;
              QUERY PLAN             
 ------------------------------------
  HashAggregate
@@ -165,7 +165,7 @@ select distinct count(distinct(b)) from t_distinct;
    750
 (1 row)
 
-explain (costs off, nodes off) select distinct count(distinct(a)) from t_distinct;
+explain (costs off) select distinct count(distinct(a)) from t_distinct;
              QUERY PLAN             
 ------------------------------------
  HashAggregate
@@ -181,7 +181,7 @@ select distinct count(distinct(a)) from t_distinct;
 (1 row)
 
 -- Case 2.5 non-projection-capable-subplan
-explain (costs off, nodes off) select count(distinct(b+c)) from (select b, c, d from t_distinct union all select b, c, d from t_distinct);
+explain (costs off) select count(distinct(b+c)) from (select b, c, d from t_distinct union all select b, c, d from t_distinct);
              QUERY PLAN             
 ------------------------------------
  Aggregate
@@ -198,7 +198,7 @@ select count(distinct(b+c)) from (select b, c, d from t_distinct union all selec
 
 -- Case 3 groupagg optimization
 set enable_hashagg=off;
-explain (costs off, nodes off) select avg(distinct(a)) from t_distinct;
+explain (costs off) select avg(distinct(a)) from t_distinct;
           QUERY PLAN          
 ------------------------------
  Aggregate
@@ -211,7 +211,7 @@ select avg(distinct(a)) from t_distinct;
  2500.0000000000000000
 (1 row)
 
-explain (costs off, nodes off) select avg(distinct(b::numeric(5,1)))+5, d from t_distinct group by d order by 2;
+explain (costs off) select avg(distinct(b::numeric(5,1)))+5, d from t_distinct group by d order by 2;
              QUERY PLAN             
 ------------------------------------
  GroupAggregate
@@ -233,7 +233,7 @@ select avg(distinct(b::numeric(5,1)))+5, d from t_distinct group by d order by 2
  379.5000000000000000 | 6
 (7 rows)
 
-explain (costs off, nodes off) select avg(distinct(c))+count(distinct(c)), b from t_distinct group by b order by 2;
+explain (costs off) select avg(distinct(c))+count(distinct(c)), b from t_distinct group by b order by 2;
              QUERY PLAN             
 ------------------------------------
  GroupAggregate
@@ -258,7 +258,7 @@ select avg(distinct(c))+count(distinct(c)), b from t_distinct group by b order b
  101.0000000000000000 | 9
 (10 rows)
 
-explain (costs off, nodes off) select c from t_distinct group by c having avg(distinct(c))>50 order by 1;
+explain (costs off) select c from t_distinct group by c having avg(distinct(c))>50 order by 1;
                 QUERY PLAN                 
 -------------------------------------------
  GroupAggregate
@@ -284,7 +284,7 @@ select c from t_distinct group by c having avg(distinct(c))>50 order by 1 limit 
  60
 (10 rows)
 
-explain (costs off, nodes off) select b, c from t_distinct group by b, c order by b, count(distinct(c))-c;
+explain (costs off) select b, c from t_distinct group by b, c order by b, count(distinct(c))-c;
                 QUERY PLAN                
 ------------------------------------------
  Sort
@@ -311,7 +311,7 @@ select b, c from t_distinct group by b, c order by b, count(distinct(c))-c limit
  0 |  48
 (10 rows)
 
-explain (costs off, nodes off) select count(distinct(c)), d from t_distinct group by d having avg(distinct(c)) <> 0 order by 2;
+explain (costs off) select count(distinct(c)), d from t_distinct group by d having avg(distinct(c)) <> 0 order by 2;
                 QUERY PLAN                 
 -------------------------------------------
  GroupAggregate
@@ -336,7 +336,7 @@ select count(distinct(c)), d from t_distinct group by d having avg(distinct(c)) 
 
 reset enable_hashagg;
 -- Case 4 two_level_hashagg
-explain (costs off, nodes off) select count(distinct(b)), count(c), d from t_distinct group by d order by d;
+explain (costs off) select count(distinct(b)), count(c), d from t_distinct group by d order by d;
              QUERY PLAN             
 ------------------------------------
  GroupAggregate
@@ -358,7 +358,7 @@ select count(distinct(b)), count(c), d from t_distinct group by d order by d;
    750 |  1428 | 6
 (7 rows)
 
-explain (costs off, nodes off) select avg(distinct(b)), d, count(c) from t_distinct group by d order by d;
+explain (costs off) select avg(distinct(b)), d, count(c) from t_distinct group by d order by d;
              QUERY PLAN             
 ------------------------------------
  GroupAggregate
@@ -380,7 +380,7 @@ select avg(distinct(b)), d, count(c) from t_distinct group by d order by d;
  374.5000000000000000 | 6 |  1428
 (7 rows)
 
-explain (costs off, nodes off) select count(c), count(distinct(a)), d from t_distinct group by d order by d;
+explain (costs off) select count(c), count(distinct(a)), d from t_distinct group by d order by d;
              QUERY PLAN             
 ------------------------------------
  GroupAggregate
@@ -402,7 +402,7 @@ select count(c), count(distinct(a)), d from t_distinct group by d order by d;
   1428 |  1428 | 6
 (7 rows)
 
-explain (costs off, nodes off) select count(c), d, count(distinct(d)) from t_distinct group by d order by 1;
+explain (costs off) select count(c), d, count(distinct(d)) from t_distinct group by d order by 1;
                 QUERY PLAN                
 ------------------------------------------
  Sort
@@ -426,7 +426,7 @@ select count(c), d, count(distinct(d)) from t_distinct group by d order by 1, 2;
   1429 | 4 |     1
 (7 rows)
 
-explain (costs off, nodes off) select count(c), d, count(distinct(b)) from t_distinct group by d order by 3;
+explain (costs off) select count(c), d, count(distinct(b)) from t_distinct group by d order by 3;
                 QUERY PLAN                
 ------------------------------------------
  Sort
@@ -450,7 +450,7 @@ select count(c), d, count(distinct(b)) from t_distinct group by d order by 3, 2;
   1428 | 6 |   750
 (7 rows)
 
-explain (costs off, nodes off) select count(d), count(distinct(d)), a%2, b%2, c%2 from t_distinct group by 3,4,5 order by 3,4,5;
+explain (costs off) select count(d), count(distinct(d)), a%2, b%2, c%2 from t_distinct group by 3,4,5 order by 3,4,5;
                     QUERY PLAN                     
 ---------------------------------------------------
  GroupAggregate
@@ -469,7 +469,7 @@ select count(d), count(distinct(d)), a%2, b%2, c%2 from t_distinct group by 3,4,
   2500 |     7 |        1 |        1 |        1
 (4 rows)
 
-explain (costs off, nodes off) select count(c), d from t_distinct group by d having count(distinct(d))=1 order by d;
+explain (costs off) select count(c), d from t_distinct group by d having count(distinct(d))=1 order by d;
              QUERY PLAN             
 ------------------------------------
  GroupAggregate
@@ -492,7 +492,7 @@ select count(c), d from t_distinct group by d having count(distinct(d))=1 order 
   1428 | 6
 (7 rows)
 
-explain (costs off, nodes off) select count(c), count(distinct(b)) from t_distinct group by d having count(d)=1428 order by d;
+explain (costs off) select count(c), count(distinct(b)) from t_distinct group by d having count(d)=1428 order by d;
              QUERY PLAN             
 ------------------------------------
  GroupAggregate
@@ -511,7 +511,7 @@ select count(c), count(distinct(b)) from t_distinct group by d having count(d)=1
   1428 |   750
 (3 rows)
 
-explain (costs off, nodes off) select count(distinct(c)), d from t_distinct group by d order by count(c), d;
+explain (costs off) select count(distinct(c)), d from t_distinct group by d order by count(c), d;
                 QUERY PLAN                
 ------------------------------------------
  Sort
@@ -535,7 +535,7 @@ select count(distinct(c)), d from t_distinct group by d order by count(c), d;
    246 | 4
 (7 rows)
 
-explain (costs off, nodes off) select count(distinct(c)), d from t_distinct where c <= any (select count(distinct(b)) from t_distinct group by c limit 5) group by d order by d;
+explain (costs off) select count(distinct(c)), d from t_distinct where c <= any (select count(distinct(b)) from t_distinct group by c limit 5) group by d order by d;
                                              QUERY PLAN                                             
 ----------------------------------------------------------------------------------------------------
  GroupAggregate
@@ -569,7 +569,7 @@ select count(distinct(c)), d from t_distinct where c <= any (select count(distin
 
 -- Case 5 multi-level count(distinct)
 -- Case 5.1 normal case
-explain (costs off, nodes off) select count(distinct(a)), count(distinct(b)) from t_distinct;
+explain (costs off) select count(distinct(a)), count(distinct(b)) from t_distinct;
           QUERY PLAN          
 ------------------------------
  Aggregate
@@ -582,7 +582,7 @@ select count(distinct(a)), count(distinct(b)) from t_distinct;
   5001 |   750
 (1 row)
 
-explain (costs off, nodes off) select count(distinct(a)) from t_distinct having count(distinct(a))>5000;
+explain (costs off) select count(distinct(a)) from t_distinct having count(distinct(a))>5000;
               QUERY PLAN              
 --------------------------------------
  Aggregate
@@ -596,7 +596,7 @@ select count(distinct(a)) from t_distinct having count(distinct(a))>5000;
   5001
 (1 row)
 
-explain (costs off, nodes off) select count(distinct(b)) from t_distinct order by count(distinct(d)); 
+explain (costs off) select count(distinct(b)) from t_distinct order by count(distinct(d)); 
              QUERY PLAN             
 ------------------------------------
  Sort
@@ -611,7 +611,7 @@ select count(distinct(b)) from t_distinct order by count(distinct(d));
    750
 (1 row)
 
-explain (costs off, nodes off) select count(distinct(a)) col1, max(b) col2, count(distinct(b)) col3, c, count(distinct(c)) col4, d from t_distinct group by d,c;
+explain (costs off) select count(distinct(a)) col1, max(b) col2, count(distinct(b)) col3, c, count(distinct(c)) col4, d from t_distinct group by d,c;
              QUERY PLAN             
 ------------------------------------
  GroupAggregate
@@ -636,7 +636,7 @@ select count(distinct(a)) col1, max(b) col2, count(distinct(b)) col3, c, count(d
     6 |  711 |    6 | 9 |    1 | 0
 (10 rows)
 
-explain (costs off, nodes off) select count(distinct(a)) col1, max(b) col2, count(distinct(b)) col3, min(c) col4, count(distinct(c)) guo, avg(a) qiang from t_distinct;
+explain (costs off) select count(distinct(a)) col1, max(b) col2, count(distinct(b)) col3, min(c) col4, count(distinct(c)) guo, avg(a) qiang from t_distinct;
           QUERY PLAN          
 ------------------------------
  Aggregate
@@ -649,7 +649,7 @@ select count(distinct(a)) col1, max(b) col2, count(distinct(b)) col3, min(c) col
  5001 |  749 |  750 |    0 | 246 | 2500.0000000000000000
 (1 row)
 
-explain (costs off, nodes off) select count(distinct(a))+avg(b) col2, count(c) col3, d from t_distinct group by d having count(distinct(c))>5;
+explain (costs off) select count(distinct(a))+avg(b) col2, count(c) col3, d from t_distinct group by d having count(distinct(c))>5;
              QUERY PLAN             
 ------------------------------------
  GroupAggregate
@@ -672,7 +672,7 @@ select count(distinct(a))+avg(b) col2, count(c) col3, d from t_distinct group by
  1796.1470588235294118 | 1428 | 6
 (7 rows)
 
-explain (costs off, nodes off) select count(distinct(a)) col1, avg(b) col2, count(c) col3, d from t_distinct group by d order by d, avg(distinct(c));
+explain (costs off) select count(distinct(a)) col1, avg(b) col2, count(c) col3, d from t_distinct group by d order by d, avg(distinct(c));
                 QUERY PLAN                
 ------------------------------------------
  Sort
@@ -696,7 +696,7 @@ select count(distinct(a)) col1, avg(b) col2, count(c) col3, d from t_distinct gr
  1428 | 368.1470588235294118 | 1428 | 6
 (7 rows)
 
-explain (costs off, nodes off) select count(distinct(a)) col1, d, avg(b) col2, sum(distinct(a)) col3, avg(distinct(c)) col4 from t_distinct group by d order by d, avg(distinct(c));
+explain (costs off) select count(distinct(a)) col1, d, avg(b) col2, sum(distinct(a)) col3, avg(distinct(c)) col4 from t_distinct group by d order by d, avg(distinct(c));
                 QUERY PLAN                
 ------------------------------------------
  Sort
@@ -720,7 +720,7 @@ select count(distinct(a)) col1, d, avg(b) col2, sum(distinct(a)) col3, avg(disti
  1428 | 6 | 368.1470588235294118 | 3570000 | 122.5000000000000000
 (7 rows)
 
-explain (costs off, nodes off) select distinct case when min(distinct c)>60 then min(distinct c) else null end as min, count(distinct(b)) from t_distinct group by b;
+explain (costs off) select distinct case when min(distinct c)>60 then min(distinct c) else null end as min, count(distinct(b)) from t_distinct group by b;
                                                    QUERY PLAN                                                    
 -----------------------------------------------------------------------------------------------------------------
  HashAggregate
@@ -742,7 +742,7 @@ select distinct case when min(distinct c)>60 then min(distinct c) else null end 
   64 |     1
 (5 rows)
 
-explain (costs off, nodes off) select count(distinct(a)) col1, d, avg(b) col2, sum(distinct(a)) col3, avg(distinct(c)) col4 from t_distinct group by d having col1=1428 or d+col4>125 order by d, avg(distinct(c));
+explain (costs off) select count(distinct(a)) col1, d, avg(b) col2, sum(distinct(a)) col3, avg(distinct(c)) col4 from t_distinct group by d having col1=1428 or d+col4>125 order by d, avg(distinct(c));
                                             QUERY PLAN                                             
 ---------------------------------------------------------------------------------------------------
  Sort

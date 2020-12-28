@@ -35,6 +35,16 @@
 #include <arpa/inet.h>
 #endif
 
+#ifdef HAVE_CE
+#include "client_logic_cache/types_to_oid.h"
+#include "client_logic_cache/dataTypes.def"
+#include "client_logic_cache/cached_column_manager.h"
+#include "client_logic_processor/stmt_processor.h"
+#include "client_logic_fmt/gs_copy.h"
+#include "client_logic_processor/prepared_statement.h"
+#include "client_logic_processor/prepared_statements_list.h"
+#endif // HAVE_CE
+
 /*
  * This macro lists the backend message types that could be "long" (more
  * than a couple of kilobytes).
@@ -107,7 +117,7 @@ void pqParseInput3(PGconn* conn)
              * recovery strategy if we are unable to make the buffer big
              * enough.
              */
-            if (pqCheckInBufferSpace(conn->inCursor + (size_t)msgLength, conn)) {
+            if (pqCheckInBufferSpace(conn->inCursor + (size_t)(unsigned)msgLength, conn)) {
                 /*
                  * XXX add some better recovery code... plan is to skip over
                  * the message using its length, then report an error. For the
@@ -647,9 +657,7 @@ static int getAnotherTuple(PGconn* conn, int msgLength)
         }
         if (conn->rowBuf != NULL) {
             // the length > SECUREC_STRING_MAX_LEN
-            errno_t rc = memcpy_s(rowbuf, nfields * sizeof(PGdataValue), 
-                                  conn->rowBuf, conn->rowBufLen * sizeof(PGdataValue));
-            securec_check_c(rc, "\0", "\0");
+            memcpy(rowbuf, conn->rowBuf, conn->rowBufLen * sizeof(PGdataValue));
             free(conn->rowBuf);
         }
         conn->rowBuf = rowbuf;
@@ -732,6 +740,7 @@ set_error_result:
     return 0;
 }
 
+#define ERRCODE_INVALID_ENCRYPTED_COLUMN_DATA "2200Z"
 /*
  * Attempt to read an Error or Notice response message.
  * This is possible in several places, so we break it out as a subroutine.
@@ -748,15 +757,8 @@ int pqGetErrorNotice3(PGconn* conn, bool isError)
     const char* querytext = NULL;
     int querypos = 0;
     int errcodes = 0;
-
-    /*
-     * If this is an error message, pre-emptively clear any incomplete query
-     * result we may have.  We'd just throw it away below anyway, and
-     * releasing it before collecting the error might avoid out-of-memory.
-     */
-    if (isError)
-        pqClearAsyncResult(conn);
-
+    /* dbms_output */
+    
     /*
      * Since the fields might be pretty long, we create a temporary
      * PQExpBuffer rather than using conn->workBuffer.	workBuffer is intended
@@ -785,7 +787,14 @@ int pqGetErrorNotice3(PGconn* conn, bool isError)
             break; /* terminator found */
         if (pqGets(&workBuf, conn))
             goto fail;
+#ifdef HAVE_CE
+        if (strcmp(workBuf.data, ERRCODE_INVALID_ENCRYPTED_COLUMN_DATA)==0) { 
+            conn->client_logic->isInvalidOperationOnColumn = true; // failed to WRITE
+        }
+        pqSaveMessageField(res, id, workBuf.data, conn);
+#else
         pqSaveMessageField(res, id, workBuf.data);
+#endif
     }
 
     /*
@@ -801,8 +810,7 @@ int pqGetErrorNotice3(PGconn* conn, bool isError)
     if (conn->verbosity == PQERRORS_VERBOSE) {
         val = PQresultErrorField(res, PG_DIAG_INTERNEL_ERRCODE);
         if (val != NULL) {
-            char* res = NULL;
-            errcodes = strtol(val, &res, 10);  // 10 - max length of int
+            errcodes = atoi(val);
             if (0 < errcodes) {
                 appendPQExpBufferChar(&workBuf, '\n');
                 appendPQExpBuffer(&workBuf, "GAUSS-%05d: ", errcodes);
@@ -927,31 +935,19 @@ static void reportErrorPosition(PQExpBuffer msg, const char* query, int loc, int
 #define MIN_RIGHT_CUT 10 /* try to keep this far away from EOL */
 
     char* wquery = NULL;
-    int slen;
-    int cno;
-    int i;
-    int *qidx = NULL;
-    int *scridx = NULL;
-    int qoffset;
-    int scroffset;
-    int ibeg;
-    int iend;
-    int loc_line;
-
-    bool mb_encoding = false;
-    bool beg_trunc = false;
-    bool end_trunc = false;
+    int slen, cno, i, *qidx = NULL, *scridx = NULL, qoffset, scroffset, ibeg, iend, loc_line;
+    bool mb_encoding = false, beg_trunc = false, end_trunc = false;
 
     /* Convert loc from 1-based to 0-based; no-op if out of range */
     loc--;
-    if (loc < 0) {
+    if (loc < 0)
         return;
-    }
 
     /* Need a writable copy of the query */
     wquery = strdup(query);
-    if (wquery == NULL)
+    if (wquery == NULL) {
         return; /* fail silently if out of memory */
+    }
 
     /*
      * Each character might occupy multiple physical bytes in the string, and
@@ -1005,9 +1001,8 @@ static void reportErrorPosition(PQExpBuffer msg, const char* query, int loc, int
          * want to think about coping with their variable screen width, but
          * not today.)
          */
-        if (ch == '\t') {
+        if (ch == '\t')
             wquery[qoffset] = ' ';
-        }
 
         /*
          * If end-of-line, count lines and mark positions. Each \r or \n
@@ -1015,9 +1010,8 @@ static void reportErrorPosition(PQExpBuffer msg, const char* query, int loc, int
          */
         else if (ch == '\r' || ch == '\n') {
             if (cno < loc) {
-                if (ch == '\r' || cno == 0 || wquery[qidx[cno - 1]] != '\r') {
+                if (ch == '\r' || cno == 0 || wquery[qidx[cno - 1]] != '\r')
                     loc_line++;
-                }
                 /* extract beginning = last line start before loc. */
                 ibeg = cno + 1;
             } else {
@@ -1034,9 +1028,8 @@ static void reportErrorPosition(PQExpBuffer msg, const char* query, int loc, int
 
             w = pg_encoding_dsplen(encoding, &wquery[qoffset]);
             /* treat any non-tab control chars as width 1 */
-            if (w <= 0) {
+            if (w <= 0)
                 w = 1;
-            }
             scroffset += w;
             qoffset += pg_encoding_mblen(encoding, &wquery[qoffset]);
         } else {
@@ -1064,9 +1057,8 @@ static void reportErrorPosition(PQExpBuffer msg, const char* query, int loc, int
              * character right there, but that should be okay.
              */
             if (scridx[ibeg] + DISPLAY_SIZE >= scridx[loc] + MIN_RIGHT_CUT) {
-                while (scridx[iend] - scridx[ibeg] > DISPLAY_SIZE) {
+                while (scridx[iend] - scridx[ibeg] > DISPLAY_SIZE)
                     iend--;
-                }
                 end_trunc = true;
             } else {
                 /* Truncate right if not too close to loc. */
@@ -1097,7 +1089,7 @@ static void reportErrorPosition(PQExpBuffer msg, const char* query, int loc, int
          * width.
          */
         scroffset = 0;
-        for (; (size_t)i < msg->len; i += pg_encoding_mblen(encoding, &msg->data[i])) {
+        for (; (size_t)(unsigned)i < msg->len; i += pg_encoding_mblen(encoding, &msg->data[i])) {
             int w = pg_encoding_dsplen(encoding, &msg->data[i]);
 
             if (w <= 0)
@@ -1216,6 +1208,9 @@ static int getCopyStart(PGconn* conn, ExecStatusType copytype)
     PGresult* result = NULL;
     int nfields;
     int i;
+#ifdef HAVE_CE
+        PreparedStatement *entry = NULL;
+#endif
 
     result = PQmakeEmptyPGresult(conn, copytype);
     if (result == NULL)
@@ -1237,6 +1232,17 @@ static int getCopyStart(PGconn* conn, ExecStatusType copytype)
         check_memset_s(memset_s(result->attDescs, nfields * sizeof(PGresAttDesc), 0, nfields * sizeof(PGresAttDesc)));
     }
 
+#ifdef HAVE_CE
+    if (conn->client_logic->enable_client_encryption) {
+        Processor::accept_pending_statements(conn);
+        entry = conn->client_logic->preparedStatements->get_or_create(conn->client_logic->lastStmtName);
+        if (entry) {
+            libpq_free(entry->original_data_types_oids);
+            entry->original_data_types_oids_size = 0;
+        }
+    }
+#endif
+
     for (i = 0; i < nfields; i++) {
         int format;
 
@@ -1249,6 +1255,31 @@ static int getCopyStart(PGconn* conn, ExecStatusType copytype)
          */
         format = (int)((int16)format);
         result->attDescs[i].format = format;
+#ifdef HAVE_CE
+        /*
+         * if textual, then we do not change the format in the server and the format and 
+         * the result->binary will also be zero
+         * if binary, then we change the format of the specific column in the backend. In this case the format and the
+         * result->binary will not match.
+         */
+        if (format != result->binary) {
+            /*
+             * use the CL data type in typid so the the CL Formatter will work
+             * store the original data type in the atttymod
+             * reset the format field so the PG Formatter will not process the data.
+             */
+            result->attDescs[i].typid = BYTEAWITHOUTORDERWITHEQUALCOLOID;
+            result->attDescs[i].atttypmod = format; /* data type */
+            result->attDescs[i].format = 0;
+            if (entry) {
+                if (entry->original_data_types_oids_size == 0) {
+                    entry->original_data_types_oids = (Oid *)calloc(sizeof(Oid), nfields);
+                    entry->original_data_types_oids_size = nfields;
+                }
+                entry->original_data_types_oids[i] = format; /* data type */
+            }
+        }
+#endif
     }
 
     if (conn->result != NULL)
@@ -1269,8 +1300,22 @@ static int getReadyForQuery(PGconn* conn)
 {
     char xact_status;
 
-    if (pqGetc(&xact_status, conn))
-        return EOF;
+#ifdef HAVE_CE
+    if (conn->client_logic->enable_client_encryption) {
+        int ce_xact_status;
+        if (pqGetInt(&ce_xact_status, 2, conn))
+            return EOF;
+        xact_status = (ce_xact_status >>8);
+        conn->client_logic->cacheRefreshType = (CacheRefreshType) (ce_xact_status & 0x000000FF);
+    } else {
+        if (pqGetc(&xact_status, conn))
+            return EOF;
+}
+#else
+        if (pqGetc(&xact_status, conn))
+            return EOF;
+#endif
+
     switch (xact_status) {
         case 'I':
             conn->xactStatus = PQTRANS_IDLE;
@@ -1322,7 +1367,7 @@ static int getCopyDataMessage(PGconn* conn)
              * Before returning, enlarge the input buffer if needed to hold
              * the whole message.  See notes in parseInput.
              */
-            if (pqCheckInBufferSpace(conn->inCursor + (size_t)msgLength - 4, conn)) {
+            if (pqCheckInBufferSpace(conn->inCursor + (size_t)(unsigned)msgLength - 4, conn)) {
                 /*
                  * XXX add some better recovery code... plan is to skip over
                  * the message using its length, then report an error. For the
@@ -1399,9 +1444,8 @@ int pqGetCopyData3(PGconn* conn, char** buffer, int async)
         }
         if (msgLength == 0) {
             /* Don't block if async read requested */
-            if (async) {
+            if (async)
                 return 0;
-            }
             /* Need to load more data */
             if (pqWait(TRUE, FALSE, conn) || pqReadData(conn) < 0)
                 return -2;
@@ -1414,6 +1458,19 @@ int pqGetCopyData3(PGconn* conn, char** buffer, int async)
          */
         msgLength -= 4;
         if (msgLength > 0) {
+#ifdef HAVE_CE
+            PreparedStatement *entry = conn->client_logic->preparedStatements->get_or_create(conn->client_logic->lastStmtName);
+            if (entry && entry->copy_state && !entry->original_data_types_oids_size == 0)
+            {
+                int decryptedMsgLength;
+                decryptedMsgLength = deprocess_copy_line(conn, &conn->inBuffer[conn->inCursor], msgLength, buffer);
+                if (decryptedMsgLength > 0) {
+                    /* Mark message consumed */
+                    conn->inStart = conn->inCursor + msgLength;
+                    return decryptedMsgLength;
+                }
+            }
+#endif
             *buffer = (char*)malloc(msgLength + 1);
             if (*buffer == NULL) {
                 printfPQExpBuffer(&conn->errorMessage, libpq_gettext("out of memory\n"));
@@ -1492,12 +1549,10 @@ int pqGetlineAsync3(PGconn* conn, char* buffer, int bufsize)
      * (Note: unlike pqGetCopyData3, we do not change asyncStatus here.)
      */
     msgLength = getCopyDataMessage(conn);
-    if (msgLength < 0) {
+    if (msgLength < 0)
         return -1; /* end-of-copy or error */
-    }
-    if (msgLength == 0) {
+    if (msgLength == 0)
         return 0; /* no data yet */
-    }
 
     /*
      * Move data from libpq's buffer to the caller's.  In the case where a
@@ -1706,7 +1761,7 @@ PGresult* pqFunctionCall3(PGconn* conn, Oid fnid, int* result_buf, int* actual_r
              * Before looping, enlarge the input buffer if needed to hold the
              * whole message.  See notes in parseInput.
              */
-            if (pqCheckInBufferSpace(conn->inCursor + (size_t)msgLength, conn)) {
+            if (pqCheckInBufferSpace(conn->inCursor + (size_t)(unsigned)msgLength, conn)) {
                 /*
                  * XXX add some better recovery code... plan is to skip over
                  * the message using its length, then report an error. For the
@@ -1803,37 +1858,58 @@ char* pqBuildStartupPacket3(PGconn* conn, int* packetlen, const PQEnvironmentOpt
     char* startpacket = NULL;
 
     *packetlen = build_startup_packet(conn, NULL, options);
+#ifndef WIN32
     if (unlikely(*packetlen == -1)) {
         return NULL;
     }
+#else
+    if (*packetlen == -1) {
+        return NULL;
+    }
+#endif
     startpacket = (char*)malloc(*packetlen);
     if (startpacket == NULL) {
         return NULL;
     }
     *packetlen = build_startup_packet(conn, startpacket, options);
+#ifndef WIN32
     if (unlikely(*packetlen == -1)) {
         free(startpacket);
         return NULL;
     }
+#else
+    if (*packetlen == -1) {
+        free(startpacket);
+        return NULL;
+    }
+#endif
+
     return startpacket;
 }
 
 /* Add user name, database name, options, return false when packet len overflow */
-inline bool ADD_STARTUP_OPTION(const char *optname, const char *optval, char *packet, int *packet_len)
+static bool add_startup_option(const char* optname, const char* optval, char* packet, int* packet_len)
 {
     if (optname == NULL || optval == NULL) {
         return true;
     }
-
     uint64 nameLen = strlen(optname);
     uint64 valLen = strlen(optval);
     if (nameLen == 0 || valLen == 0) {
         return true;
     }
-    if (unlikely(nameLen >= PG_INT32_MAX || valLen >= PG_INT32_MAX ||
+#ifndef WIN32
+    if (unlikely(nameLen >= PG_INT32_MAX || valLen >= PG_INT32_MAX || 
         *packet_len > (int64)PG_INT32_MAX - (int64)nameLen - (int64)valLen - 2)) {
         return false;
     }
+#else
+    if (nameLen >= PG_INT32_MAX || valLen >= PG_INT32_MAX ||
+        *packet_len > (int64)PG_INT32_MAX - (int64)nameLen - (int64)valLen - 2) {
+        return false;
+    }
+#endif
+    
     if (packet != NULL) {
         check_strcpy_s(strcpy_s(packet + *packet_len, nameLen + 1, optname));
     }
@@ -1843,31 +1919,29 @@ inline bool ADD_STARTUP_OPTION(const char *optname, const char *optval, char *pa
     }
     *packet_len += valLen + 1;
     return true;
-}
+} 
 
 static bool add_options_to_package(const PGconn* conn, char* packet, int *packet_len)
 {
-    if (!ADD_STARTUP_OPTION("user", conn->pguser, packet, packet_len) ||
-        !ADD_STARTUP_OPTION("database", conn->dbName, packet, packet_len) ||
-        !ADD_STARTUP_OPTION("replication", conn->replication, packet, packet_len) ||
-        !ADD_STARTUP_OPTION("backend_version", conn->backend_version, packet, packet_len) ||
-        !ADD_STARTUP_OPTION("options", conn->pgoptions, packet, packet_len)) {
+    if (!add_startup_option("user", conn->pguser, packet, packet_len) ||
+        !add_startup_option("database", conn->dbName, packet, packet_len) ||
+        !add_startup_option("replication", conn->replication, packet, packet_len) ||
+        !add_startup_option("backend_version", conn->backend_version, packet, packet_len) ||
+        !add_startup_option("options", conn->pgoptions, packet, packet_len)) {
         return false;
     }
     if (conn->send_appname) {
         /* Use appname if present, otherwise use fallback */
         char* val = conn->appname != NULL ? conn->appname : conn->fbappname;
-        if (!ADD_STARTUP_OPTION("application_name", val, packet, packet_len)) {
+        if (!add_startup_option("application_name", val, packet, packet_len)) {
             return false;
         }
     }
-
-    if (!ADD_STARTUP_OPTION("client_encoding", conn->client_encoding_initial, packet, packet_len)) {
+    if (!add_startup_option("client_encoding", conn->client_encoding_initial, packet, packet_len)) {
         return false;
     }
-
     if (g_workingVersionNum && *g_workingVersionNum >= 92060) {
-        return ADD_STARTUP_OPTION("connect_timeout", conn->connect_timeout, packet, packet_len);
+        return add_startup_option("connect_timeout", conn->connect_timeout, packet, packet_len);
     }
 
     return true;
@@ -1900,20 +1974,26 @@ static int build_startup_packet(const PGconn* conn, char* packet, const PQEnviro
         return -1;
     }
 
+#ifdef HAVE_CE
+    if (conn->client_logic->enable_client_encryption) {
+        add_startup_option("enable_full_encryption", "1", packet, &packet_len);
+    }
+#endif
+
     /* Add any environment-driven GUC settings needed */
     for (next_eo = options; next_eo->envName != NULL; next_eo++) {
         val = gs_getenv_r(next_eo->envName);
         if (check_client_env(val) != NULL && pg_strcasecmp(val, "default") != 0 &&
-            !ADD_STARTUP_OPTION(next_eo->pgName, val, packet, &packet_len)) {
+            !add_startup_option((char*)next_eo->pgName, (char*)val, packet, &packet_len)) {
             return -1;
         }
     }
 
     /* Add trailing terminator */
-    if (packet != NULL)
+    if (packet != NULL) {
         packet[packet_len] = '\0';
+    }
     packet_len++;
 
     return packet_len;
 }
-

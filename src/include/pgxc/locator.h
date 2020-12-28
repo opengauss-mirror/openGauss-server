@@ -13,35 +13,37 @@
 #ifndef LOCATOR_H
 #define LOCATOR_H
 
-/* for distributed table without specific 
-* scheme, e.g. result of JOIN of         
-* replicated and distributed table */
 #define LOCATOR_TYPE_REPLICATED 'R'
 #define LOCATOR_TYPE_HASH 'H'
 #define LOCATOR_TYPE_RANGE 'G'
 #define LOCATOR_TYPE_RROBIN 'N'
 #define LOCATOR_TYPE_CUSTOM 'C'
 #define LOCATOR_TYPE_MODULO 'M'
+#define LOCATOR_TYPE_LIST 'L'
 #define LOCATOR_TYPE_NONE 'O'
-#define LOCATOR_TYPE_DISTRIBUTED 'D' 
-
+#define LOCATOR_TYPE_DISTRIBUTED                  \
+    'D' /* for distributed table without specific \
+         * scheme, e.g. result of JOIN of         \
+         * replicated and distributed table */
 /* We may consider the following type as future use */
-/* Maximum number of preferred Datanodes that can be defined in cluster */
-#define MAX_PREFERRED_NODES 64
-
 #define HASH_SIZE 4096
 #define HASH_MASK 0x00000FFF;
 
-#define IsLocatorNone(x) (x == LOCATOR_TYPE_NONE)
-#define IsLocatorReplicated(x) (x == LOCATOR_TYPE_REPLICATED)
+#define IsLocatorNone(x) ((x) == LOCATOR_TYPE_NONE)
+#define IsLocatorReplicated(x) ((x) == LOCATOR_TYPE_REPLICATED)
 #define IsLocatorColumnDistributed(x) \
-    (x == LOCATOR_TYPE_HASH || x == LOCATOR_TYPE_RROBIN || x == LOCATOR_TYPE_MODULO || x == LOCATOR_TYPE_DISTRIBUTED)
-#define IsLocatorDistributedByValue(x) (x == LOCATOR_TYPE_HASH || x == LOCATOR_TYPE_MODULO || x == LOCATOR_TYPE_RANGE)
+    ((x) == LOCATOR_TYPE_HASH || (x) == LOCATOR_TYPE_RROBIN || \
+     (x) == LOCATOR_TYPE_MODULO || (x) == LOCATOR_TYPE_DISTRIBUTED || \
+     (x) == LOCATOR_TYPE_LIST || (x) == LOCATOR_TYPE_RANGE)
+#define IsLocatorDistributedByValue(x) ((x) == LOCATOR_TYPE_HASH || (x) == LOCATOR_TYPE_MODULO || \
+    (x) == LOCATOR_TYPE_RANGE || (x) == LOCATOR_TYPE_LIST)
 
-#define IsLocatorDistributedByHash(x) (x == LOCATOR_TYPE_HASH || x == LOCATOR_TYPE_RROBIN)
+#define IsLocatorDistributedByHash(x) ((x) == LOCATOR_TYPE_HASH || (x) == LOCATOR_TYPE_RROBIN)
+#define IsLocatorDistributedBySlice(x) ((x) == LOCATOR_TYPE_RANGE || (x) == LOCATOR_TYPE_LIST)
 
 #include "nodes/primnodes.h"
 #include "utils/relcache.h"
+#include "utils/partitionmap.h"
 #include "nodes/nodes.h"
 #include "nodes/params.h"
 
@@ -82,7 +84,7 @@ typedef struct SplitMap {
     List* splits;           /* Splits to read */
 } SplitMap;
 
-/* @dfs
+/*@dfs
  * Struct stores the items which will be sent from CN to DN for hdfs foreign scan.
  */
 typedef struct DfsPrivateItem {
@@ -135,6 +137,24 @@ typedef struct Distribution {
 } Distribution;
 
 /*
+ * list/range distributed table's slice boundaries,
+ * used for dispatching row/batch in datanode StreamProducer
+ */
+typedef struct SliceBoundary {
+    NodeTag type;
+    int nodeIdx;
+    int len;
+    Const *boundary[RANGE_PARTKEYMAXNUM];
+} SliceBoundary;
+
+typedef struct ExecBoundary {
+    NodeTag type;
+    char locatorType;
+    int32 count;
+    SliceBoundary **eles;
+} ExecBoundary;
+
+/*
  * Nodes to execute on
  * primarynodelist is for replicated table writes, where to execute first.
  * If it succeeds, only then should it be executed on nodelist.
@@ -156,6 +176,12 @@ typedef struct {
                                     * if planner can not determine execution
                                     * nodes */
     Oid en_relid;                  /* Relation to determine execution nodes */
+
+    Oid rangelistOid;              /* list/range table oid that slice map references */
+    bool need_range_prune;         /* flag for list/range dynamic slice pruning */
+    Index en_varno;                /* relation varno */
+    ExecBoundary* boundaries; /* slice boundaries that used for list/range redistribution in DML */
+
     RelationAccessType accesstype; /* Access type to determine execution
                                     * nodes */
     List* en_dist_vars;            /* See above for details */
@@ -167,7 +193,14 @@ typedef struct {
     bool nodelist_is_nil;          /* true if nodeList is NIL when initialization */
     List* original_nodeList;       /* used to keep original nodeList when explain analyze pbe */
     List* dynamic_en_expr;         /* dynamic judge en_expr that should be judged later */
+    /* runtime pbe purning for hashbucket, we keep another copy for safe */
+    int   bucketid;                /* bucket id where the data should be in */
+    List *bucketexpr;              /* exprs which can be used for bucket purning */
+    Oid   bucketrelid;             /* relid of the purning relation */
+    List* hotkeys;                 /* List of HotkeyInfo */
 } ExecNodes;
+
+#define INVALID_BUCKET_ID -1
 
 #define IsExecNodesReplicated(en) IsLocatorReplicated((en)->baselocatortype)
 #define IsExecNodesColumnDistributed(en) IsLocatorColumnDistributed((en)->baselocatortype)
@@ -176,6 +209,7 @@ typedef struct {
 /* Function for RelationLocInfo building and management */
 extern void RelationBuildLocator(Relation rel);
 extern RelationLocInfo* GetRelationLocInfo(Oid relid);
+extern RelationLocInfo* GetRelationLocInfoDN(Oid relid);
 extern RelationLocInfo* CopyRelationLocInfo(RelationLocInfo* srcInfo);
 extern void FreeRelationLocInfo(RelationLocInfo* relationLocInfo);
 extern List* GetRelationDistribColumn(RelationLocInfo* locInfo);
@@ -183,16 +217,19 @@ extern char GetLocatorType(Oid relid);
 extern List* GetPreferredReplicationNode(List* relNodes);
 extern bool IsTableDistOnPrimary(RelationLocInfo* locInfo);
 extern bool IsLocatorInfoEqual(RelationLocInfo* locInfo1, RelationLocInfo* locInfo2);
+extern bool IsSliceInfoEqualByOid(Oid tabOid1, Oid tabOid2);
 extern int GetRoundRobinNode(Oid relid);
 extern bool IsTypeDistributable(Oid colType);
+extern bool IsTypeDistributableForSlice(Oid colType);
 extern bool IsDistribColumn(Oid relid, AttrNumber attNum);
 
 extern ExecNodes* GetRelationNodes(RelationLocInfo* rel_loc_info, Datum* values, const bool* nulls, Oid* attr,
-    List* idx_dist_by_col, RelationAccessType accessType, bool needDistribution = true);
+    List* idx_dist_by_col, RelationAccessType accessType, bool needDistribution = true, bool use_bucketmap = true);
 extern ExecNodes* GetRelationNodesByQuals(void* query, Oid reloid, Index varno, Node* quals,
     RelationAccessType relaccess, ParamListInfo boundParams, bool useDynamicReduce = false);
 /* Global locator data */
 extern Distribution* NewDistribution();
+extern void DestroyDistribution(Distribution* distribution);
 extern void FreeExecNodes(ExecNodes** exec_nodes);
 extern List* GetAllDataNodes(void);
 extern List* GetAllCoordNodes(void);
@@ -202,4 +239,7 @@ extern int compute_modulo(unsigned int numerator, unsigned int denominator);
 extern int get_node_from_modulo(int modulo, List* nodeList);
 extern int GetMinDnNum();
 extern Expr* pgxc_check_distcol_opexpr(Index varno, AttrNumber attrNum, OpExpr* opexpr);
+extern void PruningDatanode(ExecNodes* execNodes, ParamListInfo boundParams);
+extern void ConstructSliceBoundary(ExecNodes* en);
+
 #endif /* LOCATOR_H */

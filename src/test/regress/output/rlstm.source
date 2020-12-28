@@ -1,12 +1,3 @@
-/*
-################################################################################
-# TESTCASE NAME : rlstm
-# COMPONENT(S)  : rlstm model train and predict
-# MODIFIED BY   : WHO            WHEN          COMMENT
-#               : -------------- ------------- ---------------------------------
-#               :                1-9-2019      created
-################################################################################
-*/
 \c postgres
 delete from gs_opt_model;
 select count(*) from gs_wlm_plan_encoding_table;
@@ -31,7 +22,7 @@ select * from gs_opt_model where model_name = 'rlstm_fastcheck';
 (1 row)
 
 \c regression
-insert into gs_opt_model values('rlstm', 'rlstm_fastcheck', 'regression', '10.90.56.229', 9000, 1000, 1,  -1, 50, 2500, 0, false, false, '{T}', '{0,0}', '{0,0}', 'Fastcheck Instance of TPCH.');
+insert into gs_opt_model values('rlstm', 'rlstm_fastcheck', 'regression', '@aie_host@', @aie_port@, 1000, 1,  -1, 50, 2500, 0, false, false, '{T}', '{0,0}', '{0,0}', 'Fastcheck Instance of TPCH.');
 -- tpch Q9
 explain (analyze on, predictor rlstm_fastcheck)
 select
@@ -70,40 +61,40 @@ order by
 NOTICE:  Model setup successfully.
 --?                                                                               
 --?
---? GroupAggregate  (cost=.* rows=.* p-time=.* width=89) (actual time=.* rows=3098 loops=1)
+--? GroupAggregate  (cost=3240.29..3314.03 rows=2458 p-time=34 width=89) (actual time=63.445..74.055 rows=3098 loops=1)
    Group By Key: nation.n_name, orders.o_orderdate
---?   ->  Sort  (cost=.* rows=.* p-time=.* width=57) (actual time=.* rows=3223 loops=1)
+--?   ->  Sort  (cost=3240.29..3246.43 rows=2458 p-time=34 width=57) (actual time=63.385..63.809 rows=3223 loops=1)
          Sort Key: nation.n_name, orders.o_orderdate DESC
---?         Sort Method: quicksort  Memory: .*kB
---?         ->  Hash Join  (cost=.* rows=.* p-time=.* width=57) (actual time=.* rows=3223 loops=1)
+--?         Sort Method: quicksort  Memory: 625kB
+--?         ->  Hash Join  (cost=2559.24..3101.86 rows=2458 p-time=34 width=57) (actual time=43.791..55.374 rows=3223 loops=1)
                Hash Cond: (lineitem.l_suppkey = supplier.s_suppkey)
---?               ->  Hash Join  (cost=.* rows=.* p-time=.* width=39) (actual time=.* rows=3223 loops=1)
+--?               ->  Hash Join  (cost=2551.16..3059.99 rows=2458 p-time=34 width=39) (actual time=42.870..51.559 rows=3223 loops=1)
                      Hash Cond: (orders.o_orderkey = lineitem.l_orderkey)
---?                     ->  Seq Scan on orders  (cost=.* rows=15000 p-time=.* width=12) (actual time=.* rows=15000 loops=1)
---?                     ->  Hash  (cost=.* rows=.* p-time=.* width=35) (actual time=.* rows=3223 loops=1)
---?                            Buckets: 32768  Batches: 1  Memory Usage: .*kB
---?                           ->  Hash Join  (cost=.* rows=.* p-time=.* width=35) (actual time=.* rows=3223 loops=1)
+--?                     ->  Seq Scan on orders  (cost=0.00..428.00 rows=15000 p-time=3 width=12) (actual time=0.008..3.706 rows=15000 loops=1)
+--?                     ->  Hash  (cost=2520.43..2520.43 rows=2458 p-time=34 width=35) (actual time=41.504..41.504 rows=3223 loops=1)
+--?                            Buckets: 32768  Batches: 1  Memory Usage: 227kB
+--?                           ->  Hash Join  (cost=2176.73..2520.43 rows=2458 p-time=34 width=35) (actual time=33.527..39.694 rows=3223 loops=1)
                                  Hash Cond: ((partsupp.ps_suppkey = lineitem.l_suppkey) AND (partsupp.ps_partkey = lineitem.l_partkey))
---?                                 ->  Seq Scan on partsupp  (cost=.* rows=.* p-time=.* width=14) (actual time=.* rows=8000 loops=1)
---?                                 ->  Hash  (cost=.* rows=.* p-time=.* width=33) (actual time=.* rows=3223 loops=1)
---?                                        Buckets: 32768  Batches: 1  Memory Usage: .*kB
---?                                       ->  Hash Join  (cost=.* rows=.* p-time=.* width=33) (actual time=.* rows=3223 loops=1)
+--?                                 ->  Seq Scan on partsupp  (cost=0.00..258.42 rows=8142 p-time=2 width=14) (actual time=0.006..2.339 rows=8000 loops=1)
+--?                                 ->  Hash  (cost=2139.86..2139.86 rows=2458 p-time=33 width=33) (actual time=33.024..33.024 rows=3223 loops=1)
+--?                                        Buckets: 32768  Batches: 1  Memory Usage: 214kB
+--?                                       ->  Hash Join  (cost=67.01..2139.86 rows=2458 p-time=31 width=33) (actual time=1.175..30.957 rows=3223 loops=1)
                                              Hash Cond: (lineitem.l_partkey = part.p_partkey)
---?                                             ->  Seq Scan on lineitem  (cost=.* rows=.* p-time=.* width=29) (actual time=.* rows=60175 loops=1)
---?                                             ->  Hash  (cost=.* rows=81 p-time=.* width=4) (actual time=.* rows=107 loops=1)
---?                                                    Buckets: 32768  Batches: 1  Memory Usage: .*kB
---?                                                   ->  Seq Scan on part  (cost=.* rows=81 p-time=.* width=4) (actual time=.* rows=107 loops=1)
+--?                                             ->  Seq Scan on lineitem  (cost=0.00..1865.84 rows=60684 p-time=5 width=29) (actual time=0.006..15.173 rows=60175 loops=1)
+--?                                             ->  Hash  (cost=66.00..66.00 rows=81 p-time=0 width=4) (actual time=0.945..0.945 rows=107 loops=1)
+--?                                                    Buckets: 32768  Batches: 1  Memory Usage: 4kB
+--?                                                   ->  Seq Scan on part  (cost=0.00..66.00 rows=81 p-time=0 width=4) (actual time=0.026..0.879 rows=107 loops=1)
                                                          Filter: ((p_name)::text ~~ '%green%'::text)
-                                                         Rows Removed by Filter: 1893
---?               ->  Hash  (cost=.* rows=100 p-time=.* width=30) (actual time=.* rows=100 loops=1)
---?                      Buckets: 32768  Batches: 1  Memory Usage: .*kB
---?                     ->  Hash Join  (cost=.* rows=100 p-time=.* width=30) (actual time=.* rows=100 loops=1)
+--?                                                         Rows Removed by Filter: 1893
+--?               ->  Hash  (cost=6.83..6.83 rows=100 p-time=0 width=30) (actual time=0.455..0.455 rows=100 loops=1)
+--?                      Buckets: 32768  Batches: 1  Memory Usage: 7kB
+--?                     ->  Hash Join  (cost=1.56..6.83 rows=100 p-time=0 width=30) (actual time=0.290..0.383 rows=100 loops=1)
                            Hash Cond: (supplier.s_nationkey = nation.n_nationkey)
---?                           ->  Seq Scan on supplier  (cost=.* rows=100 p-time=.* width=8) (actual time=.* rows=100 loops=1)
---?                           ->  Hash  (cost=.* rows=25 p-time=.* width=30) (actual time=.* rows=25 loops=1)
---?                                  Buckets: 32768  Batches: 1  Memory Usage: .*kB
---?                                 ->  Seq Scan on nation  (cost=.* rows=25 p-time=.* width=30) (actual time=.* rows=25 loops=1)
---? Total runtime: .* ms
+--?                           ->  Seq Scan on supplier  (cost=0.00..4.00 rows=100 p-time=0 width=8) (actual time=0.011..0.042 rows=100 loops=1)
+--?                           ->  Hash  (cost=1.25..1.25 rows=25 p-time=0 width=30) (actual time=0.075..0.075 rows=25 loops=1)
+--?                                  Buckets: 32768  Batches: 1  Memory Usage: 2kB
+--?                                 ->  Seq Scan on nation  (cost=0.00..1.25 rows=25 p-time=0 width=30) (actual time=0.006..0.013 rows=25 loops=1)
+--? Total runtime: 81.393 ms
 (34 rows)
 
 -- tpch Q21
@@ -152,50 +143,50 @@ limit 100;
 NOTICE:  Model setup successfully.
 --?
 --?
---? Limit  (cost=.* rows=67 p-time=.* width=34) (actual time=.* rows=1 loops=1)
---?   ->  Sort  (cost=.* rows=67 p-time=.* width=34) (actual time=.* rows=1 loops=1)
+--? Limit  (cost=6400.33..6400.47 rows=55 p-time=5 width=34) (actual time=102.927..102.928 rows=1 loops=1)
+--?   ->  Sort  (cost=6400.33..6400.47 rows=55 p-time=5 width=34) (actual time=102.925..102.926 rows=1 loops=1)
          Sort Key: (count(*)) DESC, supplier.s_name
---?         Sort Method: quicksort  Memory: .*kB
---?         ->  HashAggregate  (cost=.* rows=67 p-time=.* width=34) (actual time=.* rows=1 loops=1)
+--?         Sort Method: quicksort  Memory: 25kB
+--?         ->  HashAggregate  (cost=6398.19..6398.74 rows=55 p-time=5 width=34) (actual time=102.802..102.803 rows=1 loops=1)
                Group By Key: supplier.s_name
---?               ->  Hash Right Semi Join  (cost=.* rows=67 p-time=.* width=26) (actual time=.* rows=9 loops=1)
+--?               ->  Hash Right Semi Join  (cost=4440.58..6397.92 rows=55 p-time=5 width=26) (actual time=85.971..102.366 rows=9 loops=1)
                      Hash Cond: (l2.l_orderkey = orders.o_orderkey)
                      Join Filter: (l2.l_suppkey <> l1.l_suppkey)
-                     Rows Removed by Join Filter: 11
---?                     ->  Seq Scan on lineitem l2  (cost=.* rows=.* p-time=.* width=8) (actual time=.* rows=60175 loops=1)
---?                     ->  Hash  (cost=.* rows=71 p-time=.* width=38) (actual time=.* rows=15 loops=1)
---?                            Buckets: 32768  Batches: 1  Memory Usage: .*kB
---?                           ->  Hash Right Anti Join  (cost=.* rows=71 p-time=.* width=38) (actual time=.* rows=15 loops=1)
+--?                     Rows Removed by Join Filter: 11
+--?                     ->  Seq Scan on lineitem l2  (cost=0.00..1757.56 rows=49856 p-time=5 width=8) (actual time=0.011..14.826 rows=60175 loops=1)
+--?                     ->  Hash  (cost=4439.86..4439.86 rows=58 p-time=5 width=38) (actual time=74.773..74.773 rows=15 loops=1)
+--?                            Buckets: 32768  Batches: 1  Memory Usage: 2kB
+--?                           ->  Hash Right Anti Join  (cost=2490.60..4439.86 rows=58 p-time=5 width=38) (actual time=74.604..74.689 rows=15 loops=1)
                                  Hash Cond: (l3.l_orderkey = l1.l_orderkey)
                                  Join Filter: (l3.l_suppkey <> l1.l_suppkey)
-                                 Rows Removed by Join Filter: 69
---?                                 ->  Seq Scan on lineitem l3  (cost=.* rows=.* p-time=.* width=8) (actual time=.* rows=37897 loops=1)
+--?                                 Rows Removed by Join Filter: 69
+--?                                 ->  Seq Scan on lineitem l3  (cost=0.00..1882.20 rows=16619 p-time=5 width=8) (actual time=0.210..25.779 rows=37897 loops=1)
                                        Filter: (l_receiptdate > l_commitdate)
-                                       Rows Removed by Filter: 22278
---?                                 ->  Hash  (cost=.* rows=.* p-time=.* width=38) (actual time=.* rows=182 loops=1)
---?                                        Buckets: 32768  Batches: 1  Memory Usage: .*kB
---?                                       ->  Hash Join  (cost=.* rows=.* p-time=.* width=38) (actual time=.* rows=182 loops=1)
+--?                                       Rows Removed by Filter: 22278
+--?                                 ->  Hash  (cost=2476.03..2476.03 rows=1166 p-time=5 width=38) (actual time=41.038..41.038 rows=182 loops=1)
+--?                                        Buckets: 32768  Batches: 1  Memory Usage: 13kB
+--?                                       ->  Hash Join  (cost=1971.48..2476.03 rows=1166 p-time=5 width=38) (actual time=33.609..40.911 rows=182 loops=1)
                                              Hash Cond: (orders.o_orderkey = l1.l_orderkey)
---?                                             ->  Seq Scan on orders  (cost=.* rows=7304 p-time=.* width=4) (actual time=.* rows=7304 loops=1)
+--?                                             ->  Seq Scan on orders  (cost=0.00..465.50 rows=7304 p-time=5 width=4) (actual time=0.024..5.748 rows=7304 loops=1)
                                                    Filter: (o_orderstatus = 'F'::bpchar)
-                                                   Rows Removed by Filter: 7696
---?                                             ->  Hash  (cost=.* rows=1124 p-time=.* width=34) (actual time=.* rows=397 loops=1)
---?                                                    Buckets: 32768  Batches: 1  Memory Usage: .*kB
---?                                                   ->  Hash Join  (cost=.* rows=.* p-time=.* width=34) (actual time=.* rows=397 loops=1)
+--?                                                   Rows Removed by Filter: 7696
+--?                                             ->  Hash  (cost=1959.94..1959.94 rows=923 p-time=5 width=34) (actual time=32.931..32.931 rows=397 loops=1)
+--?                                                    Buckets: 32768  Batches: 1  Memory Usage: 27kB
+--?                                                   ->  Hash Join  (cost=5.67..1959.94 rows=923 p-time=5 width=34) (actual time=0.947..32.742 rows=397 loops=1)
                                                          Hash Cond: (l1.l_suppkey = supplier.s_suppkey)
---?                                                         ->  Seq Scan on lineitem l1  (cost=.* rows=.* p-time=.* width=8) (actual time=.* rows=37897 loops=1)
+--?                                                         ->  Seq Scan on lineitem l1  (cost=0.00..1882.20 rows=16619 p-time=5 width=8) (actual time=0.020..25.213 rows=37897 loops=1)
                                                                Filter: (l_receiptdate > l_commitdate)
-                                                               Rows Removed by Filter: 22278
---?                                                         ->  Hash  (cost=.* rows=4 p-time=.* width=30) (actual time=.* rows=1 loops=1)
---?                                                                Buckets: 32768  Batches: 1  Memory Usage: .*kB
---?                                                               ->  Hash Join  (cost=.* rows=4 p-time=.* width=30) (actual time=.* rows=1 loops=1)
+--?                                                               Rows Removed by Filter: 22278
+--?                                                         ->  Hash  (cost=5.62..5.62 rows=4 p-time=5 width=30) (actual time=0.412..0.412 rows=1 loops=1)
+--?                                                                Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?                                                               ->  Hash Join  (cost=1.32..5.62 rows=4 p-time=5 width=30) (actual time=0.352..0.361 rows=1 loops=1)
                                                                      Hash Cond: (supplier.s_nationkey = nation.n_nationkey)
---?                                                                     ->  Seq Scan on supplier  (cost=.* rows=100 p-time=.* width=34) (actual time=.* rows=100 loops=1)
---?                                                                     ->  Hash  (cost=.* rows=1 p-time=.* width=4) (actual time=.* rows=1 loops=1)
---?                                                                            Buckets: 32768  Batches: 1  Memory Usage: .*kB
---?                                                                           ->  Seq Scan on nation  (cost=.* rows=1 p-time=.* width=4) (actual time=.* rows=1 loops=1)
+--?                                                                     ->  Seq Scan on supplier  (cost=0.00..4.00 rows=100 p-time=5 width=34) (actual time=0.007..0.033 rows=100 loops=1)
+--?                                                                     ->  Hash  (cost=1.31..1.31 rows=1 p-time=5 width=4) (actual time=0.074..0.074 rows=1 loops=1)
+--?                                                                            Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?                                                                           ->  Seq Scan on nation  (cost=0.00..1.31 rows=1 p-time=5 width=4) (actual time=0.022..0.026 rows=1 loops=1)
                                                                                  Filter: (n_name = 'SAUDI ARABIA'::bpchar)
                                                                                  Rows Removed by Filter: 24
---? Total runtime: .* ms
+--? Total runtime: 108.510 ms
 (45 rows)
 

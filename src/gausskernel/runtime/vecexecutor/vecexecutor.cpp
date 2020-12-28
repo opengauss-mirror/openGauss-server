@@ -59,6 +59,9 @@
 #include "vecexecutor/vecappend.h"
 #include "vecexecutor/veclimit.h"
 #include "vecexecutor/vecsetop.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "vecexecutor/vectsstorescan.h"
+#endif   /* ENABLE_MULTIPLE_NODES */
 #include "vecexecutor/vecgroup.h"
 #include "vecexecutor/vecunique.h"
 #include "vecexecutor/vecnestloop.h"
@@ -89,7 +92,9 @@ VectorEngineFunc VectorEngineRunner[] = {
     reinterpret_cast<VectorEngineFunc>(ExecVecForeignScan),
     reinterpret_cast<VectorEngineFunc>(ExecCStoreScan),
     reinterpret_cast<VectorEngineFunc>(ExecDfsScan),
+#ifdef ENABLE_MULTIPLE_NODES
     reinterpret_cast<VectorEngineFunc>(ExecTsStoreScan),
+#endif   /* ENABLE_MULTIPLE_NODES */
     reinterpret_cast<VectorEngineFunc>(ExecDfsIndexScan),
     reinterpret_cast<VectorEngineFunc>(ExecCstoreIndexScan),
     reinterpret_cast<VectorEngineFunc>(ExecCstoreIndexCtidScan),
@@ -118,21 +123,25 @@ int GetRunnerIdx(int idx)
 #ifdef ENABLE_MULTIPLE_NODES
     if (idx > T_VecStartState && idx < T_VecEndState)
 #else
-    if (idx > T_VecStartState && idx < T_VecEndState && idx != T_VecStreamState && idx != T_VecRemoteQueryState)
+    if (idx > T_VecStartState && idx < T_VecEndState && idx != T_VecRemoteQueryState)
 #endif
         return idx - T_VecStartState;
     else
         return 0;
 }
-
-#define NeedStub(node)                                                                                                 \
-    (nodeTag(node) == T_Agg || nodeTag(node) == T_ModifyTable || nodeTag(node) == T_VecModifyTable ||                  \
-        nodeTag(node) == T_SeqScan || nodeTag(node) == T_CStoreScan || nodeTag(node) == T_CStoreIndexScan ||           \
-        nodeTag(node) == T_CStoreIndexCtidScan || nodeTag(node) == T_CStoreIndexHeapScan || nodeTag(node) == T_Sort || \
-        nodeTag(node) == T_Limit || nodeTag(node) == T_PartIterator || nodeTag(node) == T_VecPartIterator ||           \
-        nodeTag(node) == T_Material || nodeTag(node) == T_MergeJoin || nodeTag(node) == T_HashJoin ||                  \
-        nodeTag(node) == T_SubqueryScan || nodeTag(node) == T_VecSubqueryScan || nodeTag(node) == T_TsStoreScan)
-
+#ifdef ENABLE_MULTIPLE_NODES
+static bool NeedStub(const Plan* node)
+{
+    return (
+        nodeTag(node) == T_Agg || nodeTag(node) == T_ModifyTable || nodeTag(node) == T_VecModifyTable ||
+        nodeTag(node) == T_SeqScan || nodeTag(node) == T_CStoreScan || nodeTag(node) == T_CStoreIndexScan ||
+        nodeTag(node) == T_CStoreIndexCtidScan || nodeTag(node) == T_CStoreIndexHeapScan || nodeTag(node) == T_Sort ||
+        nodeTag(node) == T_Limit || nodeTag(node) == T_PartIterator || nodeTag(node) == T_VecPartIterator ||
+        nodeTag(node) == T_Material || nodeTag(node) == T_MergeJoin || nodeTag(node) == T_HashJoin ||
+        nodeTag(node) == T_SubqueryScan || nodeTag(node) == T_VecSubqueryScan || nodeTag(node) == T_TsStoreScan
+    );
+}
+#endif   /* ENABLE_MULTIPLE_NODES */
 VectorBatch* VectorEngine(PlanState* node)
 {
     VectorBatch* result = NULL;
@@ -143,11 +152,11 @@ VectorBatch* VectorEngine(PlanState* node)
     /* Response to stop or cancel signal. */
     if (unlikely(executorEarlyStop()))
         return NULL;
-
+#ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_DATANODE && !NeedExecute(node->plan) && NeedStub(node->plan)) {
         return NULL;
     }
-
+#endif
     Assert(node->vectorized);
 
     old_context = MemoryContextSwitchTo(node->nodeContext);
@@ -222,7 +231,9 @@ void ExecVecMarkPos(PlanState* node)
         case T_CStoreIndexScan:
         case T_CStoreIndexCtidScan:
         case T_CStoreIndexHeapScan:
+#ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
             ereport(ERROR,
                 (errmodule(MOD_VEC_EXECUTOR),
                     errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -271,7 +282,9 @@ void ExecVecRestrPos(PlanState* node)
         case T_CStoreIndexScan:
         case T_CStoreIndexCtidScan:
         case T_CStoreIndexHeapScan:
+#ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
             ereport(ERROR,
                 (errmodule(MOD_VEC_EXECUTOR),
                     errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -292,8 +305,9 @@ void ExecVecRestrPos(PlanState* node)
     }
 }
 
+
 /*
- * @Description: Early free the memory for plan nodes.
+ * @Description: Entry of early free.
  *
  * @param[IN] node:  PlanState tree paralleling the Plan tree
  * @return: void
@@ -321,7 +335,18 @@ void ExecEarlyFree(PlanState* node)
 
         return;
     }
+    ExecEarlyFreeBody(node);
+}
 
+
+/*
+ * @Description: Early free the memory for plan nodes.
+ *
+ * @param[IN] node:  PlanState tree paralleling the Plan tree
+ * @return: void
+ */
+void ExecEarlyFreeBody(PlanState* node)
+{
     switch (nodeTag(node)) {
         /* Memory intensive operators, need for early free */
         case T_VecSortState:

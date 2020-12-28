@@ -4,18 +4,18 @@ CREATE ROLE account IDENTIFIED BY '1q2w3e';
 ERROR:  Password must contain at least 8 characters.
 CREATE ROLE account IDENTIFIED BY '1q2w3e4r5t';
 ERROR:  Password must contain at least three kinds of characters.
-CREATE ROLE testdbccount IDENTIFIED BY 'testdbccount';
+CREATE ROLE gaussdbaccount IDENTIFIED BY 'gaussdbaccount';
 ERROR:  Password must contain at least three kinds of characters.
 CREATE ROLE account IDENTIFIED BY '1q2w3e4r@';
 ALTER ROLE account IDENTIFIED BY '1q2w3e4r@';
 ERROR:  New password should not equal to the old ones.
 DROP ROLE account;
 --test alter user
-CREATE USER SECURITY_ADMIN1 WITH CREATEROLE PASSWORD 'testdb@123';
-CREATE USER SECURITY_ADMIN2 WITH CREATEROLE PASSWORD 'testdb@123';
-CREATE USER SYSADMIN1 WITH SYSADMIN   PASSWORD 'testdb@123';
-set role security_admin1 password 'testdb@123';
-ALTER USER SECURITY_ADMIN2 PASSWORD 'testdb@1234';
+CREATE USER SECURITY_ADMIN1 WITH CREATEROLE PASSWORD 'gaussdb@123';
+CREATE USER SECURITY_ADMIN2 WITH CREATEROLE PASSWORD 'gaussdb@123';
+CREATE USER SYSADMIN1 WITH SYSADMIN   PASSWORD 'gaussdb@123';
+set role security_admin1 password 'gaussdb@123';
+ALTER USER SECURITY_ADMIN2 PASSWORD 'gaussdb@1234';
 ERROR:  Permission denied.
 reset role;
 show enableSeparationOfDuty;
@@ -24,49 +24,49 @@ show enableSeparationOfDuty;
  off
 (1 row)
 
-set role sysadmin1 password 'ttestdb@123';
-ALTER USER SECURITY_ADMIN2 PASSWORD 'ttestdb@1234';
+set role sysadmin1 password 'gaussdb@123';
+ALTER USER SECURITY_ADMIN2 PASSWORD 'gaussdb@1234';
 reset role;
 drop user SECURITY_ADMIN1;
 drop user SECURITY_ADMIN2;
 drop user SYSADMIN1;
 --test new password complexity
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_max_length=9" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_max_length=9" >/dev/null 2>&1
 select pg_sleep(1);
  pg_sleep 
 ----------
  
 (1 row)
 
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_length=9" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_length=9" >/dev/null 2>&1
 select pg_sleep(1);
  pg_sleep 
 ----------
  
 (1 row)
 
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_uppercase=2" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_uppercase=2" >/dev/null 2>&1
 select pg_sleep(1);
  pg_sleep 
 ----------
  
 (1 row)
 
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_lowercase=2" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_lowercase=2" >/dev/null 2>&1
 select pg_sleep(1);
  pg_sleep 
 ----------
  
 (1 row)
 
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_digital=3" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_digital=3" >/dev/null 2>&1
 select pg_sleep(1);
  pg_sleep 
 ----------
  
 (1 row)
 
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_special=2" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_special=2" >/dev/null 2>&1
 select pg_sleep(1);
  pg_sleep 
 ----------
@@ -84,42 +84,42 @@ ERROR:  Password must contain at least 2 special characters.
 CREATE ROLE role_pwd_complex PASSWORD 'ABcd123@#';
 CREATE ROLE role_pwd_complex_2 PASSWORD 'ABcd123@#x';
 ERROR:  Password can't contain more than 9 characters.
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_max_length=32" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_max_length=32" >/dev/null 2>&1
 select pg_sleep(1);
  pg_sleep 
 ----------
  
 (1 row)
 
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_length=8" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_length=8" >/dev/null 2>&1
 select pg_sleep(1);
  pg_sleep 
 ----------
  
 (1 row)
 
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_uppercase=0" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_uppercase=0" >/dev/null 2>&1
 select pg_sleep(1);
  pg_sleep 
 ----------
  
 (1 row)
 
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_lowercase=0" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_lowercase=0" >/dev/null 2>&1
 select pg_sleep(1);
  pg_sleep 
 ----------
  
 (1 row)
 
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_digital=0" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_digital=0" >/dev/null 2>&1
 select pg_sleep(1);
  pg_sleep 
 ----------
  
 (1 row)
 
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_special=0" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_special=0" >/dev/null 2>&1
 select pg_sleep(1);
  pg_sleep 
 ----------
@@ -127,14 +127,14 @@ select pg_sleep(1);
 (1 row)
 
 --test max time of password effect
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_effect_time=1" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_effect_time=1" >/dev/null 2>&1
 select pg_sleep(1);
  pg_sleep 
 ----------
  
 (1 row)
 
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_notify_time=2" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_notify_time=2" >/dev/null 2>&1
 select pg_sleep(1);
  pg_sleep 
 ----------
@@ -154,7 +154,7 @@ SELECT gs_password_notifytime();
 (1 row)
 
 --test null password for '-W' in exists and noexists user condition
-create user exists_user password 'Ttest@123';
+create user exists_user password 'Gauss@123';
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -U exists_user -W ''
 gsql: FATAL:  Invalid username/password,login denied.
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -U noexists_user -W ''

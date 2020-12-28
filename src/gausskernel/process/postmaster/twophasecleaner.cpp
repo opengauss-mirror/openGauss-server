@@ -48,7 +48,6 @@
 #define PGXC_CLEAN "gs_clean"
 #define CM_STATIC_CONFIG_FILE "cluster_static_config"
 #define MAX_PATH_LEN 1024
-#define MAX_HOST_PARA_LENGTH 259 /* max host name length, normally 255, plus "-h " and termination */
 
 bool bSyncXactsCallGsclean = false;
 PGPROC* twoPhaseCleanerProc = NULL;
@@ -62,8 +61,6 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
 {
     MemoryContext twopc_context;
     bool clean_successed = false;
-    const char* cnhostaddr = NULL;
-    char hostpara[MAX_HOST_PARA_LENGTH] = {'\0'};
     int rc;
 
     /* we are a postmaster subprocess now */
@@ -71,11 +68,9 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
 
     t_thrd.proc_cxt.MyProcPid = gs_thread_self();
 
-    knl_thread_set_name("TwoPhaseCleaner");
-
     twoPhaseCleanerProc = t_thrd.proc;
 
-    ereport(DEBUG5, (errmsg("TwoPhaseCleaner process is started: %lu", t_thrd.proc_cxt.MyProcPid)));
+    ereport(DEBUG5, (errmsg("twophasecleaner process is started: %lu", t_thrd.proc_cxt.MyProcPid)));
 
     (void)gspqsignal(SIGHUP, TwoPCSigHupHandler);    /* set flag to read config file */
     (void)gspqsignal(SIGINT, TwoPCShutdownHandler);  /* request shutdown */
@@ -108,14 +103,6 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE);
     (void)MemoryContextSwitchTo(twopc_context);
-
-    cnhostaddr = get_explicit_host_addr();
-    if (cnhostaddr != NULL) {
-        rc = sprintf_s(hostpara, MAX_HOST_PARA_LENGTH, "-h %s", cnhostaddr);
-        securec_check_ss(rc, "\0", "\0");
-        pfree((void*)cnhostaddr);
-        cnhostaddr = NULL;
-    }
 
     /* Unblock signals (they were blocked when the postmaster forked us) */
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
@@ -170,28 +157,25 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
 #ifdef USE_ASSERT_CHECKING
                 rc = sprintf_s(cmd,
                     sizeof(cmd),
-                    "gs_clean -a -p %d %s -v -r -j %d >>%s 2>&1",
-                    hostpara[0] == '\0' ? g_instance.attr.attr_network.PostPortNumber
-                                        : g_instance.attr.attr_network.PoolerPort,
-                    hostpara[0] == '\0' ? "" : hostpara,
+                    "gs_clean -a -p %d -h localhost -v -r -j %d >>%s 2>&1",
+                    g_instance.attr.attr_network.PoolerPort,
                     u_sess->attr.attr_storage.twophase_clean_workers,
                     t_thrd.tpcleaner_cxt.pgxc_clean_log_path);
                 securec_check_ss(rc, "\0", "\0");
 #else
                 rc = sprintf_s(cmd,
                     sizeof(cmd),
-                    "gs_clean -a -p %d %s -v -r -j %d > /dev/null 2>&1",
-                    hostpara[0] == '\0' ? g_instance.attr.attr_network.PostPortNumber
-                                        : g_instance.attr.attr_network.PoolerPort,
-                    hostpara[0] == '\0' ? "" : hostpara,
+                    "gs_clean -a -p %d -h localhost -v -r -j %d > /dev/null 2>&1",
+                    g_instance.attr.attr_network.PoolerPort,
                     u_sess->attr.attr_storage.twophase_clean_workers);
                 securec_check_ss(rc, "\0", "\0");
 #endif
                 socket_close_on_exec();
 
                 pgstat_report_activity(STATE_RUNNING, NULL);
-                status = gs_system_security(cmd);
-                if (status != -1) {
+                status = system(cmd);
+
+                if (status == 0) {
                     ereport(DEBUG5, (errmsg("clean up 2pc transactions succeed")));
                     clean_successed = true;
                     bSyncXactsCallGsclean = false;

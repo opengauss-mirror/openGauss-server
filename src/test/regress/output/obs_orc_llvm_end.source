@@ -1,0 +1,9 @@
+-- clean up environment
+Drop server if exists obs_server cascade;
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*

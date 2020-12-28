@@ -18,6 +18,7 @@
 #include "access/genam.h"
 #include "access/heapam.h"
 #include "access/sysattr.h"
+#include "access/tableam.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
@@ -38,7 +39,7 @@
 #include "parser/parse_relation.h"
 #include "rewrite/rewriteManip.h"
 #include "rewrite/rewriteRlsPolicy.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "utils/acl.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
@@ -49,13 +50,13 @@
 #include "utils/rel.h"
 #include "utils/sec_rls_utils.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 /*
  * The row level security policies for one relation should be
  * less than or equal to 100
  */
-static const int MAX_RLS_POLICIES_FOR_RELATION = 100;
+#define MaxRlsPolciesForRelation 100
 
 /*
  * This struct is used for ContainRteInRlsPolicyWalker
@@ -174,6 +175,7 @@ void CreateRlsPolicy(CreateRlsPolicyStmt* stmt)
     SysScanDesc scanDesc =
         systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, SnapshotNow, 2, scanKey);
     HeapTuple rlsPolicyTuple = systable_getnext(scanDesc);
+
     /* Policy already exists */
     if (HeapTupleIsValid(rlsPolicyTuple)) {
         ereport(ERROR,
@@ -184,28 +186,32 @@ void CreateRlsPolicy(CreateRlsPolicyStmt* stmt)
     }
     systable_endscan(scanDesc);
 
-    /* RLS policies for one relation should not large than MAX_RLS_POLICIES_FOR_RELATION */
+    /* RLS policies for one relation should not large than MaxRlsPolciesForRelation */
     ScanKeyInit(&scanKey[0], Anum_pg_rlspolicy_polrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(tableOid));
     scanDesc = systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, SnapshotNow, 1, scanKey);
     int existRlsNum = 0;
     while ((rlsPolicyTuple = systable_getnext(scanDesc)) != NULL) {
         existRlsNum++;
     }
-    if (existRlsNum >= MAX_RLS_POLICIES_FOR_RELATION) {
+
+    /* 
+     * existRlsNum refers to the number of row level policies that already exist in the table, 
+     * excluding the new policy that will be inserted. When the existing number of policies in the 
+     * table already reach MaxRlsPolciesForRelation, excute exit in advance. 
+     */
+    if (existRlsNum >= MaxRlsPolciesForRelation) {
         ereport(ERROR,
             (errcode(ERRCODE_INTERNAL_ERROR),
                 errmsg("Num of row level policies for relation should less than or equal to %d",
-                    MAX_RLS_POLICIES_FOR_RELATION)));
+                    MaxRlsPolciesForRelation)));
     }
 
     char polName[NAMEDATALEN] = {0};
-    errno_t rc = strcpy_s(polName, sizeof(polName), stmt->policyName);
+    int rc = strcpy_s(polName, sizeof(polName), stmt->policyName);
     securec_check(rc, "\0", "\0");
     /* Set up values and nulls arrays */
     Datum values[Natts_pg_rlspolicy] = {0};
-    bool nulls[Natts_pg_rlspolicy];
-    rc = memset_s(nulls, sizeof(bool) * Natts_pg_rlspolicy, 0, sizeof(bool) * Natts_pg_rlspolicy);
-    securec_check(rc, "\0", "\0");
+    bool nulls[Natts_pg_rlspolicy] = {false};
     values[Anum_pg_rlspolicy_polname - 1] = NameGetDatum(polName);
     values[Anum_pg_rlspolicy_polrelid - 1] = ObjectIdGetDatum(tableOid);
     values[Anum_pg_rlspolicy_polcmd - 1] = CharGetDatum(polCmd);
@@ -306,6 +312,7 @@ void AlterRlsPolicy(AlterRlsPolicyStmt* stmt)
     SysScanDesc scanDesc =
         systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, SnapshotNow, 2, scanKey);
     HeapTuple rlsPolicyTuple = systable_getnext(scanDesc);
+
     /* Policy does not exists */
     if (HeapTupleIsValid(rlsPolicyTuple) == false) {
         ereport(ERROR,
@@ -319,12 +326,8 @@ void AlterRlsPolicy(AlterRlsPolicyStmt* stmt)
 
     /* Set up values and nulls arrays */
     Datum values[Natts_pg_rlspolicy] = {0};
-    bool nulls[Natts_pg_rlspolicy];
-    errno_t rc = memset_s(nulls, sizeof(bool) * Natts_pg_rlspolicy, 0, sizeof(bool) * Natts_pg_rlspolicy);
-    securec_check(rc, "\0", "\0");
-    bool replaces[Natts_pg_rlspolicy];
-    rc = memset_s(replaces, sizeof(bool) * Natts_pg_rlspolicy, 0, sizeof(bool) * Natts_pg_rlspolicy);
-    securec_check(rc, "\0", "\0");
+    bool nulls[Natts_pg_rlspolicy] = {false};
+    bool replaces[Natts_pg_rlspolicy] = {false};
 
     /* Get new role list for this policy */
     int roleNums = 0;
@@ -353,7 +356,7 @@ void AlterRlsPolicy(AlterRlsPolicyStmt* stmt)
         }
     }
 
-    /* Get using quals */
+    /* Get using quals*/
     ParseState* usingQualState = NULL;
     RangeTblEntry* rte = NULL;
     Node* usingQual = NULL;
@@ -399,7 +402,7 @@ void AlterRlsPolicy(AlterRlsPolicyStmt* stmt)
     }
 
     /* Form new tuple, update catalog, no need to update index */
-    HeapTuple newtuple = heap_modify_tuple(rlsPolicyTuple, RelationGetDescr(pg_rlspolicy), values, nulls, replaces);
+    HeapTuple newtuple = (HeapTuple) tableam_tops_modify_tuple(rlsPolicyTuple, RelationGetDescr(pg_rlspolicy), values, nulls, replaces);
     simple_heap_update(pg_rlspolicy, &newtuple->t_self, newtuple);
     CatalogUpdateIndexes(pg_rlspolicy, newtuple);
 
@@ -419,6 +422,9 @@ void AlterRlsPolicy(AlterRlsPolicyStmt* stmt)
     /* Policy id and relation id */
     recordDependencyOn(&myself, &referenced, DEPENDENCY_AUTO);
     /* Policy id and using quals */
+    if (usingQualState == NULL) {
+        return;
+    }
     recordDependencyOnExpr(&myself, usingQual, usingQualState->p_rtable, DEPENDENCY_NORMAL);
 
     /* Remove old shared dependency for roles */
@@ -494,6 +500,7 @@ void RenameRlsPolicy(RenameStmt* renameStmt)
     SysScanDesc scanDesc =
         systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, SnapshotNow, 2, scanKey);
     HeapTuple rlsPolicyTuple = systable_getnext(scanDesc);
+
     /* Policy already exists */
     if (HeapTupleIsValid(rlsPolicyTuple)) {
         ereport(ERROR,
@@ -513,26 +520,19 @@ void RenameRlsPolicy(RenameStmt* renameStmt)
     rlsPolicyTuple = systable_getnext(scanDesc);
     /* Policy does not exists */
     if (HeapTupleIsValid(rlsPolicyTuple) == false) {
-        if (renameStmt->missing_ok) {
-            ereport(NOTICE, 
-                (errmsg("row level security policy \"%s\" for relation \"%s\" does not exist, skipping",
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("row level security policy \"%s\" for relation \"%s\" does not exists",
                     renameStmt->subname,
                     renameStmt->relation->relname)));
-        } else {
-            ereport(ERROR,
-                (errcode(ERRCODE_UNDEFINED_OBJECT),
-                    errmsg("row level security policy \"%s\" for relation \"%s\" does not exist",
-                        renameStmt->subname,
-                        renameStmt->relation->relname)));
-        }
-    } else {
-        /* Copy tuple here, because of update index later */
-        rlsPolicyTuple = heap_copytuple(rlsPolicyTuple);
-        /* Update RLS policy name */
-        (void)namestrcpy(&(((Form_pg_rlspolicy)GETSTRUCT(rlsPolicyTuple))->polname), renameStmt->newname);
-        simple_heap_update(pg_rlspolicy, &rlsPolicyTuple->t_self, rlsPolicyTuple);
-        CatalogUpdateIndexes(pg_rlspolicy, rlsPolicyTuple);
     }
+
+    /* Copy tuple here, because of update index later */
+    rlsPolicyTuple = (HeapTuple)tableam_tops_copy_tuple(rlsPolicyTuple);
+    /* Update RLS policy name */
+    (void)namestrcpy(&(((Form_pg_rlspolicy)GETSTRUCT(rlsPolicyTuple))->polname), renameStmt->newname);
+    simple_heap_update(pg_rlspolicy, &rlsPolicyTuple->t_self, rlsPolicyTuple);
+    CatalogUpdateIndexes(pg_rlspolicy, rlsPolicyTuple);
 
     /*
      * Invalidate relation's relcache entry so that other backends (and this
@@ -596,6 +596,7 @@ bool RemoveRoleFromRlsPolicy(Oid roleid, Oid rlsrelid, Oid rlspolicyid)
     int roleNums = ARR_DIMS(roles)[0];
     Assert(roleNums >= 1);
     bool hasperm = pg_class_ownercheck(relid, GetUserId());
+
     /* Current do not have permission for table */
     if (false == hasperm) {
         ereport(WARNING,
@@ -609,12 +610,8 @@ bool RemoveRoleFromRlsPolicy(Oid roleid, Oid rlsrelid, Oid rlspolicyid)
     if (hasperm && roleNums > 1) {
         /* Set up values and nulls arrays */
         Datum values[Natts_pg_rlspolicy] = {0};
-        bool nulls[Natts_pg_rlspolicy];
-        errno_t rc = memset_s(nulls, sizeof(bool) * Natts_pg_rlspolicy, 0, sizeof(bool) * Natts_pg_rlspolicy);
-        securec_check(rc, "\0", "\0");
-        bool replaces[Natts_pg_rlspolicy];
-        rc = memset_s(replaces, sizeof(bool) * Natts_pg_rlspolicy, 0, sizeof(bool) * Natts_pg_rlspolicy);
-        securec_check(rc, "\0", "\0");
+        bool nulls[Natts_pg_rlspolicy] = {false};
+        bool replaces[Natts_pg_rlspolicy] = {false};
         Oid* oldroles = (Oid*)ARR_DATA_PTR(roles);
         Datum* newroles = NULL;
         newroles = (Datum*)palloc((roleNums - 1) * sizeof(Datum));
@@ -630,7 +627,7 @@ bool RemoveRoleFromRlsPolicy(Oid roleid, Oid rlsrelid, Oid rlspolicyid)
         values[Anum_pg_rlspolicy_polroles - 1] = PointerGetDatum(roleIds);
         nulls[Anum_pg_rlspolicy_polroles - 1] = false;
         replaces[Anum_pg_rlspolicy_polroles - 1] = true;
-        HeapTuple newTuple = heap_modify_tuple(rlsPolicyTuple, RelationGetDescr(pg_rlspolicy), values, nulls, replaces);
+        HeapTuple newTuple = (HeapTuple) tableam_tops_modify_tuple(rlsPolicyTuple, RelationGetDescr(pg_rlspolicy), values, nulls, replaces);
         simple_heap_update(pg_rlspolicy, &newTuple->t_self, newTuple);
         CatalogUpdateIndexes(pg_rlspolicy, newTuple);
 
@@ -744,6 +741,7 @@ Oid get_rlspolicy_oid(Oid relid, const char* policy_name, bool missing_ok)
     SysScanDesc scanDesc =
         systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, SnapshotNow, 2, scanKey);
     HeapTuple rlsPolicyTuple = systable_getnext(scanDesc);
+
     if (HeapTupleIsValid(rlsPolicyTuple)) {
         rlspolicy_oid = HeapTupleGetOid(rlsPolicyTuple);
     } else {
@@ -920,6 +918,10 @@ static Datum* RlsPolicyRolesToArray(List* roles, int& numRoles)
     /* If user do not specified, parser will autofill "public", never empty */
     numRoles = list_length(roles);
     Assert(numRoles > 0);
+    if (numRoles > (int)(MAX_INT32 / sizeof(Datum))) {
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                errmsg("too many roles specified in SQL statement.")));
+    }
     roleOids = (Datum*)palloc(numRoles * sizeof(Datum));
 
     /* Get role oids by role names */
@@ -929,6 +931,7 @@ static Datum* RlsPolicyRolesToArray(List* roles, int& numRoles)
     int currNum = 0;
     foreach (item, roles) {
         roleName = strVal(lfirst(item));
+
         /*
          * PUBLIC means that can cover all users, it makes sence alone.
          * When match role "public", set the unique role to ACL_ID_PUBLIC
@@ -987,12 +990,6 @@ static void RangeVarCallbackForRlsPolicy(
         return;
 
     Form_pg_class reltup = (Form_pg_class)GETSTRUCT(tuple);
-
-    /* Permissions check, only the owner of the table can do this operation */
-    if (!pg_class_ownercheck(relId, GetUserId())) {
-        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS, relation->relname);
-    }
-
     /* Get some information from callbackArg */
     Node* stmt = (Node*)callbackArg;
     Assert(stmt != NULL);
@@ -1009,6 +1006,12 @@ static void RangeVarCallbackForRlsPolicy(
         default:
             break;
     }
+
+    /* For externalCommand, only the owner of the table can do this operation. */
+    if (externalCommand && !pg_class_ownercheck(relId, GetUserId())) {
+        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS, relation->relname);
+    }
+
     /* Check this is system table or not */
     if (externalCommand && IsSystemClass(reltup)) {
         /* Do not support create R.L.S policy for system table by external interface(user side) */
@@ -1078,7 +1081,7 @@ void CreateRlsPolicyForSystem(
     A_Const* constval = NULL;
 
     /* RLS Policy apply to all users(public) */
-    errno_t rc = strcpy_s(rolName, sizeof(rolName), "public");
+    int rc = strcpy_s(rolName, sizeof(rolName), "public");
     securec_check(rc, "\0", "\0");
     /* RLS Policy only affect select */
     rc = strcpy_s(cmdName, sizeof(cmdName), "select");

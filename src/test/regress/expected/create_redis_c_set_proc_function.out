@@ -1,0 +1,8 @@
+-- init setup to test drop table cancel redistribution transaction
+-- create function to set/reset proc as redistribution one
+CREATE OR REPLACE FUNCTION pg_set_proc_redis() RETURNS bool AS 
+--?.*
+'pg_set_proc_redis' LANGUAGE C IMMUTABLE;
+CREATE OR REPLACE FUNCTION pg_reset_proc_redis() RETURNS bool AS 
+--?.*
+'pg_reset_proc_redis' LANGUAGE C IMMUTABLE;

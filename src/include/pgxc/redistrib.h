@@ -18,7 +18,7 @@
 #include "commands/defrem.h"
 #include "nodes/parsenodes.h"
 #include "utils/tuplestore.h"
-#include "storage/itemptr.h"
+#include "storage/item/itemptr.h"
 
 /*
  * Type of data redistribution operations.
@@ -70,8 +70,8 @@ typedef struct RedistribState {
 
 extern void PGXCRedistribTable(RedistribState* distribState, RedistribCatalog type);
 extern void PGXCRedistribCreateCommandList(RedistribState* distribState, RelationLocInfo* newLocInfo);
-extern RedistribCommand* makeRedistribCommand(
-    RedistribOperation type, RedistribCatalog updateState, ExecNodes* nodes);
+extern RedistribCommand* makeRedistribCommand(RedistribOperation type, 
+                        RedistribCatalog updateState, ExecNodes* nodes);
 extern RedistribState* makeRedistribState(Oid relOid);
 extern void FreeRedistribState(RedistribState* state);
 extern void FreeRedistribCommand(RedistribCommand* command);
@@ -83,15 +83,22 @@ extern void RelationGetCtids(Relation rel, ItemPointer start_ctid, ItemPointer e
 extern uint32 RelationGetEndBlock(Relation rel);
 extern void get_redis_rel_ctid(
     const char* rel_name, const char* partition_name, RedisCtidType ctid_type, ItemPointer result);
-extern void CheckRedistributeOption(
-    List* options, Oid* rel_cn_oid, RedisHtlAction* action, char *merge_list, Relation rel);
+#ifdef ENABLE_MULTIPLE_NODES
+extern void CheckRedistributeOption(List* options, Oid* rel_cn_oid, 
+                RedisHtlAction* action, char **merge_list, Relation rel);
+#else
+extern void CheckRedistributeOption(List* options, Oid* rel_cn_oid, 
+                RedisHtlAction* action, Relation rel);
+#endif
+
 
 extern bool set_proc_redis(void);
 extern bool reset_proc_redis(void);
 
 extern void RemoveRedisRelOptionsFromList(List** reloptions);
-extern Node* eval_redis_func_direct(Relation rel, bool is_func_get_start_ctid, bool is_func_get_end_ctid);
+extern Node* eval_redis_func_direct(Relation rel, bool is_func_get_start_ctid, int num_of_slice = 0, int slice_index = 0);
 extern List* add_ctid_string_to_reloptions(List *def_list, const char *item_name, ItemPointer ctid);
+extern ItemPointer eval_redis_func_direct_slice(ItemPointer start_ctid, ItemPointer end_ctid, bool is_func_get_start_ctid, int num_of_slices, int slice_index);
 
 /*
  * ItemPointerGetBlockNumber

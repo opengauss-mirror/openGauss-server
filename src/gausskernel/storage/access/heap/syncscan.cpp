@@ -92,21 +92,21 @@ typedef struct ss_scan_location_t {
 } ss_scan_location_t;
 
 typedef struct ss_lru_item_t {
-    struct ss_lru_item_t* prev;
-    struct ss_lru_item_t* next;
+    struct ss_lru_item_t *prev;
+    struct ss_lru_item_t *next;
     ss_scan_location_t location;
 } ss_lru_item_t;
 
 typedef struct ss_scan_locations_t {
-    ss_lru_item_t* head;
-    ss_lru_item_t* tail;
+    ss_lru_item_t *head;
+    ss_lru_item_t *tail;
     ss_lru_item_t items[1]; /* SYNC_SCAN_NELEM items */
 } ss_scan_locations_t;
 
 #define SizeOfScanLocations(N) offsetof(ss_scan_locations_t, items[N])
 
 /* prototypes for internal functions */
-static BlockNumber ss_search(const RelFileNode* relfilenode, BlockNumber location, bool set);
+static BlockNumber ss_search(const RelFileNode *relfilenode, BlockNumber location, bool set);
 
 /*
  * SyncScanShmemSize --- report amount of shared memory space needed
@@ -124,8 +124,9 @@ void SyncScanShmemInit(void)
     int i;
     bool found = false;
 
-    t_thrd.shemem_ptr_cxt.scan_locations =
-        (ss_scan_locations_t*)ShmemInitStruct("Sync Scan Locations List", SizeOfScanLocations(SYNC_SCAN_NELEM), &found);
+    t_thrd.shemem_ptr_cxt.scan_locations = (ss_scan_locations_t *)ShmemInitStruct("Sync Scan Locations List",
+                                                                                  SizeOfScanLocations(SYNC_SCAN_NELEM),
+                                                                                  &found);
 
     if (!IsUnderPostmaster) {
         /* Initialize shared memory area */
@@ -135,7 +136,7 @@ void SyncScanShmemInit(void)
         t_thrd.shemem_ptr_cxt.scan_locations->tail = &t_thrd.shemem_ptr_cxt.scan_locations->items[SYNC_SCAN_NELEM - 1];
 
         for (i = 0; i < SYNC_SCAN_NELEM; i++) {
-            ss_lru_item_t* item = &t_thrd.shemem_ptr_cxt.scan_locations->items[i];
+            ss_lru_item_t *item = &t_thrd.shemem_ptr_cxt.scan_locations->items[i];
 
             /*
              * Initialize all slots with invalid values. As scans are started,
@@ -158,14 +159,14 @@ void SyncScanShmemInit(void)
  * @brief search the scan_locations structure for an entry with the
  * given relfilenode. If "set" is true, the location is updated to the given location.
  * If no entry for the given relfilenode is found, it will be created at the head
- * of the list with the given location, even if "set" is false. In any case, 
+ * of the list with the given location, even if "set" is false. In any case,
  * the location after possible update is returned.
  * Note: Caller is responsible for having acquired suitable lock on the shared
  * data structure.
  */
-static BlockNumber ss_search(const RelFileNode* relfilenode, BlockNumber location, bool set)
+static BlockNumber ss_search(const RelFileNode *relfilenode, BlockNumber location, bool set)
 {
-    ss_lru_item_t* item = t_thrd.shemem_ptr_cxt.scan_locations->head;
+    ss_lru_item_t *item = t_thrd.shemem_ptr_cxt.scan_locations->head;
     for (;;) {
         bool match = RelFileNodeEquals(item->location.relfilenode, *relfilenode);
         if (match || item->next == NULL) {
@@ -237,8 +238,8 @@ BlockNumber ss_get_location(Relation rel, BlockNumber relnblocks)
 
 #ifdef TRACE_SYNCSCAN
     if (u_sess->attr.attr_resource.trace_syncscan) {
-        ereport(
-            LOG, errmsg("SYNC_SCAN: start \"%s\" (size %u) at %u", RelationGetRelationName(rel), relnblocks, startloc));
+        ereport(LOG,
+                errmsg("SYNC_SCAN: start \"%s\" (size %u) at %u", RelationGetRelationName(rel), relnblocks, startloc));
     }
 #endif
 
@@ -280,4 +281,3 @@ void ss_report_location(Relation rel, BlockNumber location)
         }
     }
 }
-

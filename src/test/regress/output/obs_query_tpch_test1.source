@@ -1,0 +1,78 @@
+--
+--part 
+--
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/tpch_part_out/ address=@obshostname@ ak=@ak@ sk=@sk@
+DROP TABLE if exists PART;
+NOTICE:  table "part" does not exist, skipping
+CREATE TABLE PART (
+  P_PARTKEY   BIGINT,
+  P_NAME      VARCHAR(55),
+  P_MFGR      CHAR(25),
+  P_BRAND     CHAR(10),
+  P_TYPE      VARCHAR(25),
+  P_SIZE      INTEGER,
+  P_CONTAINER   CHAR(10),
+  P_RETAILPRICE DECIMAL,
+  P_COMMENT   VARCHAR(23)
+);
+DROP FOREIGN TABLE if exists EXTPART;
+NOTICE:  foreign table "extpart" does not exist, skipping
+CREATE FOREIGN TABLE EXTPART (
+  P_PARTKEY   BIGINT,
+  P_NAME      VARCHAR(55),
+  P_MFGR      CHAR(25),
+  P_BRAND     CHAR(10),
+  P_TYPE      VARCHAR(25),
+  P_SIZE      INTEGER,
+  P_CONTAINER   CHAR(10),
+  P_RETAILPRICE DECIMAL,
+  P_COMMENT   VARCHAR(23)
+)SERVER obs_server OPTIONS (
+    location 'obs://@obsbucket@/obscheck/tpch_part/',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '32'
+)distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+insert into PART select * from EXTPART;
+drop table PART;
+drop foreign table EXTPART;
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/tpch_part_out/ address=@obshostname@ ak=@ak@ sk=@sk@
+--
+--supplier
+--
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/tpch_supplier_out/ address=@obshostname@ ak=@ak@ sk=@sk@
+DROP FOREIGN TABLE if exists EXTSUPPLIER;
+NOTICE:  foreign table "extsupplier" does not exist, skipping
+CREATE FOREIGN TABLE EXTSUPPLIER (
+  S_SUPPKEY   BIGINT,
+  S_NAME      CHAR(25),
+  S_ADDRESS   VARCHAR(40),
+  S_NATIONKEY   INTEGER NOT NULL, -- references N_NATIONKEY
+  S_PHONE     CHAR(15),
+  S_ACCTBAL   DECIMAL,
+  S_COMMENT   VARCHAR(101)
+)SERVER obs_server OPTIONS (
+    location 'obs://@obsbucket@/obscheck/tpch_supplier/',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '32'
+) distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+DROP TABLE if exists SUPPLIER;
+NOTICE:  table "supplier" does not exist, skipping
+CREATE TABLE SUPPLIER (
+  S_SUPPKEY   BIGINT,
+  S_NAME      CHAR(25),
+  S_ADDRESS   VARCHAR(40),
+  S_NATIONKEY   INTEGER NOT NULL, -- references N_NATIONKEY
+  S_PHONE     CHAR(15),
+  S_ACCTBAL   DECIMAL,
+  S_COMMENT   VARCHAR(101)
+);
+insert into SUPPLIER select * from EXTSUPPLIER;
+drop table SUPPLIER;
+drop foreign table EXTSUPPLIER;
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/tpch_supplier_out/ address=@obshostname@ ak=@ak@ sk=@sk@

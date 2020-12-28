@@ -43,7 +43,7 @@
 #include "knl/knl_variable.h"
 
 #include <sys/stat.h>
-
+#include "access/csnlog.h"
 #include "access/transam.h"
 #include "access/twophase.h"
 #include "access/xact.h"
@@ -58,11 +58,10 @@
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #endif
-SnapshotData CatalogSnapshotData = {HeapTupleSatisfiesMVCC};
+SnapshotData CatalogSnapshotData = {SNAPSHOT_MVCC};
 
 extern THR_LOCAL bool need_reset_xmin;
 /*
@@ -97,28 +96,353 @@ static THR_LOCAL bool RegisterStreamSnapshot = false;
     }
 #define MAX_ULONG_LENGTH 22
 
+/* Static variables representing various special snapshot semantics */
+THR_LOCAL SnapshotData SnapshotNowData = {SNAPSHOT_NOW};
+THR_LOCAL SnapshotData SnapshotSelfData = {SNAPSHOT_SELF};
+THR_LOCAL SnapshotData SnapshotAnyData = {SNAPSHOT_ANY};
+THR_LOCAL SnapshotData SnapshotToastData = {SNAPSHOT_TOAST};
+
+/* local functions */
 static Snapshot CopySnapshot(Snapshot snapshot);
 static void FreeSnapshot(Snapshot snapshot);
 static void SnapshotResetXmin(void);
+static bool TransactionIdIsPreparedAtSnapshot(TransactionId xid, Snapshot snapshot);
 
 /*
- * Snapshot fields to be serialized.
+ * TransactionIdIsPreparedAtSnapshot
+ *   At the time of snapshot, true iff transaction associated
+ *   with the identifier is prepared for two-phase commit
  *
- * Only these fields need to be sent to the cooperating backend; the
- * remaining ones can (and must) set by the receiver upon restore.
+ * Note: only gxacts marked "valid" are considered; but notice we do not
+ * check the locking status.
+ *
  */
-typedef struct SerializedSnapshotData {
-    TransactionId xmin;
-    TransactionId xmax;
-    uint32 xcnt;
-    int32 subxcnt;
-    bool suboverflowed;
-    bool takenDuringRecovery;
-    CommandId curcid;
-    GTM_Timeline timeline;
-    CommitSeqNo snapshotcsn;
-    SnapshotType snapshot_type;
-} SerializedSnapshotData;
+static bool TransactionIdIsPreparedAtSnapshot(TransactionId xid, Snapshot snapshot)
+{
+    for (int i = 0; i < snapshot->prepared_count; i++) {
+        if (xid == snapshot->prepared_array[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool IsXidVisibleInGtmLiteLocalSnapshot(TransactionId xid, Snapshot snapshot,
+    TransactionIdStatus hint_status, bool xmin_equal_xmax, Buffer buffer, bool *sync)
+{
+    /*
+     * calling XidVisibleInSnapshot(), it will determine that if it is visible correctly.
+     * However, because we support mixed snapshots (global and local), we have to
+     * examine if the xmin is in prepared list or not. Even if it is "invisible",
+     * but if it is in the list, we will treat it as visible (if the transaction is NOT aborted at the end).
+     * exceptional case for xmin == xmax when check xmin
+     * xmin_qual_xmax always false when check xmax
+     */
+    if (hint_status == XID_ABORTED || xmin_equal_xmax) {
+        return false;
+    }
+
+    /* if in abort transaction, no need to check prepared array */
+    if (!t_thrd.xact_cxt.bInAbortTransaction && TransactionIdIsPreparedAtSnapshot(xid, snapshot)) {
+        if (hint_status == XID_COMMITTED) {
+            return true;
+        }
+
+        /* Don't need to sync wait at maintenance mode */
+        if (u_sess->attr.attr_common.xc_maintenance_mode) {
+            return false;
+        }
+        /* Wait for txn end and check again. */
+        if (sync != NULL) {
+            *sync = true;
+        }
+        SyncWaitXidEnd(xid, buffer);
+        /* should we always use clog ? */
+        if (TransactionIdDidCommit(xid) == true) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void RecheckXidFinish(TransactionId xid, CommitSeqNo csn)
+{
+    if (TransactionIdIsInProgress(xid)) {
+        ereport(defence_errlevel(), (errmsg("transaction id %lu is still running, "
+            "cannot set csn %lu to abort.", xid, csn)));
+    }
+}
+
+/*
+ * XidVisibleInSnapshot
+ *		Is the given XID visible according to the snapshot?
+ *
+ * On return, *hintstatus is set to indicate if the transaction had committed,
+ * or aborted, whether or not it's not visible to us.
+ */
+bool XidVisibleInSnapshot(TransactionId xid, Snapshot snapshot, TransactionIdStatus* hintstatus, Buffer buffer, bool* sync)
+{
+    volatile CommitSeqNo csn;
+    bool looped = false;
+    TransactionId parentXid = InvalidTransactionId;
+
+    *hintstatus = XID_INPROGRESS;
+
+    ereport(DEBUG1,
+        (errmsg("XidVisibleInSnapshot xid %ld cur_xid %ld snapshot csn %lu xmax %ld",
+            xid,
+            GetCurrentTransactionIdIfAny(),
+            snapshot->snapshotcsn,
+            snapshot->xmax)));
+
+    /*
+     * Any xid >= xmax is in-progress (or aborted, but we don't distinguish
+     * that here).
+     *
+     * We can't do anything useful with xmin, because the xmin only tells us
+     * whether we see it as completed. We have to check the transaction log to
+     * see if the transaction committed or aborted, in any case.
+     */
+    if (GTM_MODE && TransactionIdFollowsOrEquals(xid, snapshot->xmax)) {
+            return false;
+    }
+
+loop:
+    csn = TransactionIdGetCommitSeqNo(xid, false, true, false);
+
+    ereport(DEBUG1,
+        (errmsg("XidVisibleInSnapshot xid %ld cur_xid %ld csn %ld snapshot"
+                "csn %ld xmax %ld",
+            xid,
+            GetCurrentTransactionIdIfAny(),
+            csn,
+            snapshot->snapshotcsn,
+            snapshot->xmax)));
+
+    if (COMMITSEQNO_IS_COMMITTED(csn)) {
+        *hintstatus = XID_COMMITTED;
+        if (csn < snapshot->snapshotcsn)
+            return true;
+        else
+            return false;
+    } else if (COMMITSEQNO_IS_COMMITTING(csn)) {
+        if (looped) {
+            ereport(DEBUG1, (errmsg("transaction id %lu's csn %ld is changed to ABORT after lockwait.", xid, csn)));
+            /* recheck if transaction id is finished */
+            RecheckXidFinish(xid, csn);
+            CSNLogSetCommitSeqNo(xid, 0, NULL, COMMITSEQNO_ABORTED);
+            SetLatestFetchState(xid, COMMITSEQNO_ABORTED);
+            *hintstatus = XID_ABORTED;
+            return false;
+        } else {
+            if (!COMMITSEQNO_IS_SUBTRANS(csn)) {
+                /* If snapshotcsn lower than csn stored in csn log, don't need to wait. */
+                CommitSeqNo latestCSN = GET_COMMITSEQNO(csn);
+                if (latestCSN >= snapshot->snapshotcsn) {
+                    ereport(DEBUG1,
+                        (errmsg(
+                            "snapshotcsn %lu lower than csn %lu stored in csn log, don't need to sync wait, trx id %lu",
+                            snapshot->snapshotcsn,
+                            csn,
+                            xid)));
+                    return false;
+                }
+            } else {
+                parentXid = (TransactionId)GET_PARENTXID(csn);
+            }
+
+            if (u_sess->attr.attr_common.xc_maintenance_mode || t_thrd.xact_cxt.bInAbortTransaction) {
+                return false;
+            }
+
+            /* Wait for txn end and check again. */
+            if (sync != NULL) {
+                *sync = true;
+            }
+            if (TransactionIdIsValid(parentXid))
+                SyncWaitXidEnd(parentXid, buffer);
+            else
+                SyncWaitXidEnd(xid, buffer);
+            looped = true;
+            parentXid = InvalidTransactionId;
+            goto loop;
+        }
+    } else {
+        if (csn == COMMITSEQNO_ABORTED)
+            *hintstatus = XID_ABORTED;
+
+        return false;
+    }
+}
+
+/*
+ * XidVisibleInLocalSnapshot
+ *		Is the given XID visible according to the local multi-version snapshot?
+ *
+ * On return whether or not it's not visible to us.
+ */
+bool XidVisibleInLocalSnapshot(TransactionId xid, Snapshot snapshot)
+{
+    volatile CommitSeqNo csn;
+    bool looped = false;
+    TransactionId parentXid = InvalidTransactionId;
+
+    ereport(DEBUG1,
+        (errmsg("XidVisibleInSnapshot xid " XID_FMT " cur_xid " XID_FMT " snapshot csn " CSN_FMT " xmax " XID_FMT,
+            xid,
+            GetCurrentTransactionIdIfAny(),
+            snapshot->snapshotcsn,
+            snapshot->xmax)));
+
+    /*
+     * Any xid >= xmax is in-progress (or aborted, but we don't distinguish
+     * that here).
+     *
+     * We can't do anything useful with xmin, because the xmin only tells us
+     * whether we see it as completed. We have to check the transaction log to
+     * see if the transaction committed or aborted, in any case.
+     */
+    if (GTM_MODE && TransactionIdFollowsOrEquals(xid, snapshot->xmax)) {
+            return false;
+    }
+
+loop:
+    csn = TransactionIdGetCommitSeqNoNCache(xid, false, true, false);
+
+    ereport(DEBUG1,
+        (errmsg("XidVisibleInSnapshot xid " XID_FMT " cur_xid " XID_FMT " csn " CSN_FMT " snapshot"
+                "csn " CSN_FMT " xmax " XID_FMT,
+            xid,
+            GetCurrentTransactionIdIfAny(),
+            csn,
+            snapshot->snapshotcsn,
+            snapshot->xmax)));
+
+    if (COMMITSEQNO_IS_COMMITTED(csn)) {
+        if (csn < snapshot->snapshotcsn)
+            return true;
+        else
+            return false;
+    } else if (COMMITSEQNO_IS_COMMITTING(csn)) {
+        if (looped) {
+            ereport(DEBUG1, (errmsg("transaction id " XID_FMT "'s csn " CSN_FMT " is changed to ABORT after lockwait.", xid, csn)));
+            return false;
+        } else {
+            if (COMMITSEQNO_IS_SUBTRANS(csn)) {
+                parentXid = (TransactionId)GET_PARENTXID(csn);
+            }
+
+            if (u_sess->attr.attr_common.xc_maintenance_mode) {
+                return false;
+            }
+
+            /* Wait for txn end and check again. */
+            if (TransactionIdIsValid(parentXid))
+                SyncLocalXidWait(parentXid);
+            else
+                SyncLocalXidWait(xid);
+            looped = true;
+            parentXid = InvalidTransactionId;
+            goto loop;
+        }
+    } else {
+        return false;
+    }
+}
+
+/*
+ * CommittedXidVisibleInSnapshot
+ *		Is the given XID visible according to the snapshot?
+ *
+ * This is the same as XidVisibleInSnapshot, but the caller knows that the
+ * given XID committed. The only question is whether it's visible to our
+ * snapshot or not.
+ */
+bool CommittedXidVisibleInSnapshot(TransactionId xid, Snapshot snapshot, Buffer buffer)
+{
+    CommitSeqNo csn;
+    bool looped = false;
+    TransactionId parentXid = InvalidTransactionId;
+
+    if (!GTM_LITE_MODE || snapshot->gtm_snapshot_type == GTM_SNAPSHOT_TYPE_LOCAL) {
+        /*
+         * Make a quick range check to eliminate most XIDs without looking at the
+         * CSN log.
+         */
+        if (TransactionIdPrecedes(xid, snapshot->xmin))
+            return true;
+
+        /*
+         * Any xid >= xmax is in-progress (or aborted, but we don't distinguish
+         * that here.
+         */
+        if (GTM_MODE && TransactionIdFollowsOrEquals(xid, snapshot->xmax)) {
+            return false;
+        }
+    }
+
+loop:
+    csn = TransactionIdGetCommitSeqNo(xid, true, true, false);
+
+    if (COMMITSEQNO_IS_COMMITTING(csn)) {
+        if (looped) {
+            ereport(WARNING,
+                (errmsg("committed transaction id %lu's csn %lu"
+                        "is changed to frozen after lockwait.",
+                    xid,
+                    csn)));
+            CSNLogSetCommitSeqNo(xid, 0, NULL, COMMITSEQNO_FROZEN);
+            SetLatestFetchState(xid, COMMITSEQNO_FROZEN);
+            return true;
+        } else {
+            if (!COMMITSEQNO_IS_SUBTRANS(csn)) {
+                /* If snapshotcsn lower than csn stored in csn log, don't need to wait. */
+                CommitSeqNo latestCSN = GET_COMMITSEQNO(csn);
+                if (latestCSN >= snapshot->snapshotcsn) {
+                    ereport(DEBUG1,
+                        (errmsg("snapshotcsn %lu lower than csn %lu"
+                                " stored in csn log, don't need to sync wait, trx id %lu",
+                            snapshot->snapshotcsn,
+                            csn,
+                            xid)));
+                    return false;
+                }
+            } else {
+                parentXid = (TransactionId)GET_PARENTXID(csn);
+            }
+
+            if (u_sess->attr.attr_common.xc_maintenance_mode || t_thrd.xact_cxt.bInAbortTransaction) {
+                return false;
+            }
+
+            /* Wait for txn end and check again. */
+            if (TransactionIdIsValid(parentXid))
+                SyncWaitXidEnd(parentXid, buffer);
+            else
+                SyncWaitXidEnd(xid, buffer);
+            looped = true;
+            parentXid = InvalidTransactionId;
+            goto loop;
+        }
+    } else if (!COMMITSEQNO_IS_COMMITTED(csn)) {
+        ereport(WARNING,
+            (errmsg("transaction/csn %lu/%lu was hinted as "
+                    "committed, but was not marked as committed in "
+                    "the transaction log",
+                xid,
+                csn)));
+        /*
+         * We have contradicting evidence on whether the transaction committed or
+         * not. Let's assume that it did. That seems better than erroring out.
+         */
+        return true;
+    }
+
+    if (csn < snapshot->snapshotcsn)
+        return true;
+    else
+        return false;
+}
 
 
 /*
@@ -147,12 +471,6 @@ Snapshot GetTransactionSnapshot(bool force_local_snapshot)
     if (!u_sess->utils_cxt.FirstSnapshotSet) {
         Assert(u_sess->utils_cxt.RegisteredSnapshots == 0);
         Assert(u_sess->utils_cxt.FirstXactSnapshot == NULL);
-
-        if (IsInParallelMode()) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("cannot take query snapshot during a parallel operation")));
-        }
 
         /*
          * In transaction-snapshot mode, the first snapshot must live until
@@ -257,15 +575,6 @@ void StreamTxnContextSetMyPgXactXmin(TransactionId xmin)
 Snapshot GetLatestSnapshot(void)
 {
     /*
-     * We might be able to relax this, but nothing that could otherwise work
-     * needs it.
-     */
-    if (IsInParallelMode()) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("cannot update SecondarySnapshot during a parallel operation")));
-    }
-
-    /*
      * So far there are no cases requiring support for GetLatestSnapshot()
      * during logical decoding, but it wouldn't be hard to add if
      * required.
@@ -359,7 +668,7 @@ void SnapshotSetCommandId(CommandId curcid)
  * must take care of all the same considerations as the first-snapshot case
  * in GetTransactionSnapshot.
  */
-static void SetTransactionSnapshot(Snapshot sourcesnap, TransactionId sourcexid, PGPROC *sourceproc)
+static void SetTransactionSnapshot(Snapshot sourcesnap, TransactionId sourcexid)
 {
     /* Caller should have checked this already */
     Assert(!u_sess->utils_cxt.FirstSnapshotSet);
@@ -385,6 +694,7 @@ static void SetTransactionSnapshot(Snapshot sourcesnap, TransactionId sourcexid,
     u_sess->utils_cxt.CurrentSnapshot->snapshotcsn = sourcesnap->snapshotcsn;
     u_sess->utils_cxt.CurrentSnapshot->timeline = sourcesnap->timeline;
     u_sess->utils_cxt.CurrentSnapshot->takenDuringRecovery = sourcesnap->takenDuringRecovery;
+    /* NB: curcid should NOT be copied, it's a local matter */
 
     /*
      * Now we have to fix what GetSnapshotData did with MyPgXact->xmin and
@@ -397,28 +707,8 @@ static void SetTransactionSnapshot(Snapshot sourcesnap, TransactionId sourcexid,
      * doesn't seem worth contorting the logic here to avoid two calls,
      * especially since it's not clear that predicate.c *must* do this.
      */
-    if (sourceproc != NULL) {
-        if (!ProcArrayInstallRestoredXmin(u_sess->utils_cxt.CurrentSnapshot->xmin, sourceproc))
-            ereport(ERROR,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("could not import the requested snapshot"),
-                errdetail("The source transaction is not running anymore.")));
-    } else if (!ProcArrayInstallImportedXmin(u_sess->utils_cxt.CurrentSnapshot->xmin, sourcexid)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("could not import the requested snapshot"),
-            errdetail("The source transaction %lu is not running anymore.", sourcexid)));
-    }
 
     /*
-	 * NB: curcid should NOT be copied, it's a local matter
-     * Now we have to fix what GetSnapshotData did with MyPgXact->xmin and
-     * TransactionXmin.  There is a race condition: to make sure we are not
-     * causing the global xmin to go backwards, we have to test that the
-     * source transaction is still running, and that has to be done
-     * atomically. So let procarray.c do it.
-     *
-     * Note: in serializable mode, predicate.c will do this a second time. It
-     * doesn't seem worth contorting the logic here to avoid two calls,
-     * especially since it's not clear that predicate.c *must* do this.
      * In transaction-snapshot mode, the first snapshot must live until end of
      * xact, so we must make a copy of it.	Furthermore, if we're running in
      * serializable mode, predicate.c needs to do its own processing.
@@ -462,7 +752,8 @@ Snapshot CopySnapshot(Snapshot snapshot)
     newsnap->user_data = NULL;
 
     if (GTM_LITE_MODE && snapshot->prepared_array) { /* prepared_array is only defined for gtm_lite */
-        int arraySize = sizeof(TransactionId) * snapshot->prepared_array_capacity;
+        Assert(snapshot->prepared_array_capacity > 0);
+        size_t arraySize = sizeof(TransactionId) * snapshot->prepared_array_capacity;
         newsnap->prepared_array =
             (TransactionId *)MemoryContextAlloc(u_sess->top_transaction_mem_cxt, arraySize);
         rc = memcpy_s(newsnap->prepared_array, arraySize, snapshot->prepared_array, arraySize);
@@ -580,21 +871,6 @@ void UpdateActiveSnapshotCommandId(void)
     Assert(u_sess->utils_cxt.ActiveSnapshot->as_snap->active_count == 1);
     Assert(u_sess->utils_cxt.ActiveSnapshot->as_snap->regd_count == 0);
 
-    /*
-     * Don't allow modification of the active snapshot during parallel
-     * operation.  We share the snapshot to worker backends at the beginning
-     * of parallel operation, so any change to the snapshot can lead to
-     * inconsistencies.  We have other defenses against
-     * CommandCounterIncrement, but there are a few places that call this
-     * directly, so we put an additional guard here.
-     */
-    CommandId save_curcid = u_sess->utils_cxt.ActiveSnapshot->as_snap->curcid;
-    CommandId curcid = GetCurrentCommandId(false);
-    if (IsInParallelMode() && save_curcid != curcid) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("cannot modify commandid in active snapshot during a parallel operation")));
-    }
-
     u_sess->utils_cxt.ActiveSnapshot->as_snap->curcid = GetCurrentCommandId(false);
 }
 
@@ -606,14 +882,13 @@ void UpdateActiveSnapshotCommandId(void)
  */
 void PopActiveSnapshot(void)
 {
-    /*
-     * In multi commit/rollback within stored procedure, the ActiveSnapshot already poped.
-     * Therefore, no need to pop the active snapshot. Otherwise it will cause seg fault.
+    /* 
+     * In multi commit/rollback within stored procedure, the AciveSnapshot already poped.
+     * Therefore, no need to pop the active snapshot. Otherwise it will cause seg falut.
      */
-    if (!u_sess->utils_cxt.ActiveSnapshot) {
+    if(!u_sess->utils_cxt.ActiveSnapshot) {
         return;
     }
-
     ActiveSnapshotElt* newstack = NULL;
 
     newstack = u_sess->utils_cxt.ActiveSnapshot->as_next;
@@ -905,7 +1180,7 @@ void AtEOXact_Snapshot(bool isCommit)
 
         /* complain about unpopped active snapshots */
         for (active = u_sess->utils_cxt.ActiveSnapshot; active != NULL; active = active->as_next)
-            ereport(LOG, (errmsg("snapshot still active")));
+            ereport(WARNING, (errmsg("snapshot still active")));
     }
 
     /* free static snapshotData prepared array memory in GTM Lite if needed */
@@ -960,6 +1235,9 @@ char* ExportSnapshot(Snapshot snapshot, CommitSeqNo *snapshotCsn)
      * Also note that we don't make any restriction on the transaction's
      * isolation level; however, importers must check the level if they are
      * serializable.
+     */
+
+    /*
      * This will assign a transaction ID if we do not yet have one.
      */
     topXid = GetTopTransactionId();
@@ -1061,6 +1339,7 @@ char* ExportSnapshot(Snapshot snapshot, CommitSeqNo *snapshotCsn)
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not write to file \"%s\": %m", pathtmp)));
 
     /* no fsync() since file need not survive a system crash */
+
     if (FreeFile(f))
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not write to file \"%s\": %m", pathtmp)));
 
@@ -1090,12 +1369,6 @@ char* ExportSnapshot(Snapshot snapshot, CommitSeqNo *snapshotCsn)
 Datum pg_export_snapshot(PG_FUNCTION_ARGS)
 {
     char* snapshotName = NULL;
-    
-    if (!superuser()) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), 
-                (errmsg("Must be system admin to export snapshot."))));
-    }
 
     snapshotName = ExportSnapshot(GetActiveSnapshot(), NULL);
     PG_RETURN_TEXT_P(cstring_to_text(snapshotName));
@@ -1123,7 +1396,7 @@ Datum pg_export_snapshot_and_csn(PG_FUNCTION_ARGS)
      * Construct a tuple descriptor for the result row.  This must match this
      * function's pg_proc entry!
      */
-    tupdesc = CreateTemplateTupleDesc(2, false);
+    tupdesc = CreateTemplateTupleDesc(2, false, TAM_HEAP);
     TupleDescInitEntry(tupdesc, (AttrNumber) 1, "snapshot_name", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) 2, "CSN", TEXTOID, -1, 0);
     tupdesc = BlessTupleDesc(tupdesc);
@@ -1339,7 +1612,7 @@ void ImportSnapshot(const char* idstr)
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot import a snapshot from a different database")));
 
     /* OK, install the snapshot */
-    SetTransactionSnapshot(&snapshot, src_xid, NULL);
+    SetTransactionSnapshot(&snapshot, src_xid);
 }
 
 /*
@@ -1451,149 +1724,4 @@ HTAB* HistoricSnapshotGetTupleCids(void)
 {
     Assert(HistoricSnapshotActive());
     return u_sess->utils_cxt.tuplecid_data;
-}
-
-/*
- * EstimateSnapshotSpace
- *      Returns the size need to store the given snapshot.
- *
- * We are exporting only required fields from the Snapshot, stored in
- * SerializedSnapshotData.
- */
-Size EstimateSnapshotSpace(Snapshot snap)
-{
-    Assert(snap != InvalidSnapshot);
-    Assert(snap->satisfies == HeapTupleSatisfiesMVCC);
-
-    /* We allocate any XID arrays needed in the same palloc block. */
-    Size size = add_size(sizeof(SerializedSnapshotData), mul_size(snap->xcnt, sizeof(TransactionId)));
-    if (snap->subxcnt > 0 && (!snap->suboverflowed || snap->takenDuringRecovery)) {
-        size = add_size(size, mul_size((Size)snap->subxcnt, sizeof(TransactionId)));
-    }
-
-    return size;
-}
-
-/*
- * SerializeSnapshot
- * 		Dumps the serialized snapshot (extracted from given snapshot) onto the
- * 		memory location at start_address.
- */
-void SerializeSnapshot(Snapshot snapshot, char *start_address, Size len)
-{
-    Assert(snapshot->subxcnt >= 0);
-
-    SerializedSnapshotData *serialized_snapshot = (SerializedSnapshotData *)start_address;
-    int rc;
-
-    /* Copy all required fields */
-    serialized_snapshot->xmin = snapshot->xmin;
-    serialized_snapshot->xmax = snapshot->xmax;
-    serialized_snapshot->xcnt = snapshot->xcnt;
-    serialized_snapshot->subxcnt = snapshot->subxcnt;
-    serialized_snapshot->suboverflowed = snapshot->suboverflowed;
-    serialized_snapshot->takenDuringRecovery = snapshot->takenDuringRecovery;
-    serialized_snapshot->curcid = snapshot->curcid;
-    serialized_snapshot->timeline = snapshot->timeline;
-    serialized_snapshot->snapshotcsn = snapshot->snapshotcsn;
-    serialized_snapshot->snapshot_type = snapshot->snapshot_type;
-
-    /*
-     * Ignore the SubXID array if it has overflowed, unless the snapshot was
-     * taken during recovey - in that case, top-level XIDs are in subxip as
-     * well, and we mustn't lose them.
-     */
-    if (serialized_snapshot->suboverflowed && !snapshot->takenDuringRecovery)
-        serialized_snapshot->subxcnt = 0;
-
-    /* Copy XID array */
-    if (snapshot->xcnt > 0) {
-        rc = memcpy_s((TransactionId *)(serialized_snapshot + 1), len - 1,
-            snapshot->xip, snapshot->xcnt * sizeof(TransactionId));
-        securec_check_c(rc, "", "");
-    }
-
-    /*
-     * Copy SubXID array. Don't bother to copy it if it had overflowed,
-     * though, because it's not used anywhere in that case. Except if it's a
-     * snapshot taken during recovery; all the top-level XIDs are in subxip as
-     * well in that case, so we mustn't lose them.
-     */
-    if (serialized_snapshot->subxcnt > 0) {
-        Size subxipoff = sizeof(SerializedSnapshotData) + snapshot->xcnt * sizeof(TransactionId);
-
-        rc = memcpy_s(((char *)serialized_snapshot + subxipoff), len - subxipoff, snapshot->subxip,
-            snapshot->subxcnt * sizeof(TransactionId));
-        securec_check_c(rc, "", "");
-    }
-}
-
-/*
- * RestoreSnapshot
- * 		Restore a serialized snapshot from the specified address.
- *
- * The copy is palloc'd in TopTransactionContext and has initial refcounts set
- * to 0.  The returned snapshot has the copied flag set.
- */
-Snapshot RestoreSnapshot(char *start_address, Size len)
-{
-    SerializedSnapshotData *serialized_snapshot = (SerializedSnapshotData*)start_address;
-    TransactionId *serialized_xids = (TransactionId*)(start_address + sizeof(SerializedSnapshotData));
-
-    /* We allocate any XID arrays needed in the same palloc block. */
-    Size size = sizeof(SnapshotData) + serialized_snapshot->xcnt * sizeof(TransactionId) +
-        serialized_snapshot->subxcnt * sizeof(TransactionId);
-
-    /* Copy all required fields */
-    Snapshot snapshot = (Snapshot)MemoryContextAlloc(u_sess->top_transaction_mem_cxt, size);
-    snapshot->satisfies = HeapTupleSatisfiesMVCC;
-    snapshot->xmin = serialized_snapshot->xmin;
-    snapshot->xmax = serialized_snapshot->xmax;
-    snapshot->xip = NULL;
-    snapshot->xcnt = serialized_snapshot->xcnt;
-    snapshot->subxip = NULL;
-    snapshot->subxcnt = serialized_snapshot->subxcnt;
-    snapshot->suboverflowed = serialized_snapshot->suboverflowed;
-    snapshot->takenDuringRecovery = serialized_snapshot->takenDuringRecovery;
-    snapshot->curcid = serialized_snapshot->curcid;
-    snapshot->user_data = NULL;
-    snapshot->timeline = serialized_snapshot->timeline;
-    snapshot->snapshotcsn = serialized_snapshot->snapshotcsn;
-    snapshot->snapshot_type = serialized_snapshot->snapshot_type;
-
-    /* Copy XIDs, if present. */
-    int rc;
-    Size remainLen = len - sizeof(SerializedSnapshotData);
-    if (serialized_snapshot->xcnt > 0) {
-        snapshot->xip = (TransactionId *)(snapshot + 1);
-        rc = memcpy_s(snapshot->xip, remainLen, serialized_xids, serialized_snapshot->xcnt * sizeof(TransactionId));
-        remainLen -= serialized_snapshot->xcnt * sizeof(TransactionId);
-        securec_check_c(rc, "", "");
-    }
-
-    /* Copy SubXIDs, if present. */
-    if (serialized_snapshot->subxcnt > 0) {
-        snapshot->subxip = ((TransactionId*)(snapshot + 1)) + serialized_snapshot->xcnt;
-        rc = memcpy_s(snapshot->subxip, remainLen, serialized_xids + serialized_snapshot->xcnt,
-            serialized_snapshot->subxcnt * sizeof(TransactionId));
-        securec_check_c(rc, "", "");
-    }
-
-    /* Set the copied flag so that the caller will set refcounts correctly. */
-    snapshot->regd_count = 0;
-    snapshot->active_count = 0;
-    snapshot->copied = true;
-
-    return snapshot;
-}
-
-/*
- * Install a restored snapshot as the transaction snapshot.
- *
- * The second argument is of type void * so that snapmgr.h need not include
- * the declaration for PGPROC.
- */
-void RestoreTransactionSnapshot(Snapshot snapshot, void *master_pgproc)
-{
-    SetTransactionSnapshot(snapshot, InvalidTransactionId, (PGPROC *)master_pgproc);
 }

@@ -10,7 +10,6 @@
  */
 
 #include "postgres.h"
-#include "miscadmin.h"
 #include "knl/knl_variable.h"
 
 #include "catalog/namespace.h"
@@ -192,11 +191,10 @@ extern "C" {
 Datum start_upgrade_functions_manually(PG_FUNCTION_ARGS)
 {
     if (!superuser()) {
-        ereport(ERROR,
-                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                 errmsg("must be system admin to execute start_upgrade_functions_manually")));
+        ereport(ERROR, (errmodule(MOD_INSTR), errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                (errmsg("[upgrade_functions] only system admin can start upgrade functions"))));
     }
-    
+
     u_sess->proc_cxt.IsBinaryUpgrade = true;
 
     PG_RETURN_VOID();
@@ -205,9 +203,8 @@ Datum start_upgrade_functions_manually(PG_FUNCTION_ARGS)
 Datum stop_upgrade_functions_manually(PG_FUNCTION_ARGS)
 {
     if (!superuser()) {
-        ereport(ERROR,
-                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                 errmsg("must be system admin to execute stop_upgrade_functions_manually")));
+        ereport(ERROR, (errmodule(MOD_INSTR), errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                (errmsg("[upgrade_functions] only system admin can stop upgrade functions"))));
     }
 
     u_sess->proc_cxt.IsBinaryUpgrade = false;
@@ -353,8 +350,8 @@ Datum set_next_part_pg_partition_oids(PG_FUNCTION_ARGS)
     deconstruct_array(partition_oids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.binary_upgrade_next_part_pg_partition_oid) {
-        u_sess->upg_cxt.binary_upgrade_next_part_pg_partition_oid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.binary_upgrade_next_part_pg_partition_oid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.binary_upgrade_cur_part_pg_partition_oid = 0;
@@ -387,8 +384,8 @@ Datum setnext_part_toast_pg_class_oids(PG_FUNCTION_ARGS)
     deconstruct_array(part_toast_class_oids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.binary_upgrade_next_part_toast_pg_class_oid) {
-        u_sess->upg_cxt.binary_upgrade_next_part_toast_pg_class_oid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.binary_upgrade_next_part_toast_pg_class_oid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.binary_upgrade_cur_part_toast_pg_class_oid = 0;
@@ -421,8 +418,8 @@ Datum set_next_part_toast_pg_type_oids(PG_FUNCTION_ARGS)
     deconstruct_array(part_toast_type_oids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.binary_upgrade_next_part_toast_pg_type_oid) {
-        u_sess->upg_cxt.binary_upgrade_next_part_toast_pg_type_oid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.binary_upgrade_next_part_toast_pg_type_oid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.binary_upgrade_cur_part_toast_pg_type_oid = 0;
@@ -455,8 +452,8 @@ Datum setnext_part_index_pg_class_oids(PG_FUNCTION_ARGS)
     deconstruct_array(part_index_class_oids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.binary_upgrade_next_part_index_pg_class_oid) {
-        u_sess->upg_cxt.binary_upgrade_next_part_index_pg_class_oid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.binary_upgrade_next_part_index_pg_class_oid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.binary_upgrade_cur_part_index_pg_class_oid = 0;
@@ -555,8 +552,8 @@ Datum set_next_cstore_psort_oid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_psort_oids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_psort_pg_class_oid) {
-        u_sess->upg_cxt.bupgrade_next_psort_pg_class_oid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_psort_pg_class_oid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_psort_pg_class_oid = 0;
@@ -589,8 +586,8 @@ Datum set_next_cstore_psort_typoid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_psort_oids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_psort_pg_type_oid) {
-        u_sess->upg_cxt.bupgrade_next_psort_pg_type_oid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_psort_pg_type_oid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_psort_pg_type_oid = 0;
@@ -623,8 +620,8 @@ Datum set_next_cstore_psort_atypoid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_psort_oids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_psort_array_pg_type_oid) {
-        u_sess->upg_cxt.bupgrade_next_psort_array_pg_type_oid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_psort_array_pg_type_oid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_psort_array_pg_type_oid = 0;
@@ -657,8 +654,8 @@ Datum set_next_cstore_delta_oid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_delta_oids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_delta_pg_class_oid) {
-        u_sess->upg_cxt.bupgrade_next_delta_pg_class_oid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_delta_pg_class_oid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_delta_pg_class_oid = 0;
@@ -691,8 +688,8 @@ Datum set_next_cstore_delta_typoid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_delta_oids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_delta_pg_type_oid) {
-        u_sess->upg_cxt.bupgrade_next_delta_pg_type_oid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_delta_pg_type_oid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_delta_pg_type_oid = 0;
@@ -725,8 +722,8 @@ Datum set_next_cstore_delta_atypoid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_delta_oids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_delta_array_pg_type_oid) {
-        u_sess->upg_cxt.bupgrade_next_delta_array_pg_type_oid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_delta_array_pg_type_oid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_delta_array_pg_type_oid = 0;
@@ -759,8 +756,8 @@ Datum set_next_cstore_cudesc_oid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_cudesc_oids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_cudesc_pg_class_oid) {
-        u_sess->upg_cxt.bupgrade_next_cudesc_pg_class_oid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_cudesc_pg_class_oid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_cudesc_pg_class_oid = 0;
@@ -793,8 +790,8 @@ Datum set_next_cstore_cudesc_typoid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_cudesc_oids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_cudesc_pg_type_oid) {
-        u_sess->upg_cxt.bupgrade_next_cudesc_pg_type_oid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_cudesc_pg_type_oid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_cudesc_pg_type_oid = 0;
@@ -827,8 +824,8 @@ Datum set_next_cstore_cudesc_atypoid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_cudesc_oids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_cudesc_array_pg_type_oid) {
-        u_sess->upg_cxt.bupgrade_next_cudesc_array_pg_type_oid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_cudesc_array_pg_type_oid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_cudesc_array_pg_type_oid = 0;
@@ -861,8 +858,8 @@ Datum set_next_cstore_cudesc_idx_oid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_delta_oids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_cudesc_index_oid) {
-        u_sess->upg_cxt.bupgrade_next_cudesc_index_oid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_cudesc_index_oid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_cudesc_index_oid = 0;
@@ -895,8 +892,8 @@ Datum set_next_cstore_cudesc_toast_oid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_delta_oids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_cudesc_toast_pg_class_oid) {
-        u_sess->upg_cxt.bupgrade_next_cudesc_toast_pg_class_oid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_cudesc_toast_pg_class_oid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_cudesc_toast_pg_class_oid = 0;
@@ -929,8 +926,8 @@ Datum set_next_cstore_cudesc_toast_typoid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_delta_oids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_cudesc_toast_pg_type_oid) {
-        u_sess->upg_cxt.bupgrade_next_cudesc_toast_pg_type_oid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_cudesc_toast_pg_type_oid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_cudesc_toast_pg_type_oid = 0;
@@ -963,8 +960,8 @@ Datum set_next_cstore_cudesc_toast_idx_oid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_delta_oids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_cudesc_toast_index_oid) {
-        u_sess->upg_cxt.bupgrade_next_cudesc_toast_index_oid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_cudesc_toast_index_oid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_cudesc_toast_index_oid = 0;
@@ -997,8 +994,8 @@ Datum set_next_cstore_delta_toast_oid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_delta_oids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_delta_toast_pg_class_oid) {
-        u_sess->upg_cxt.bupgrade_next_delta_toast_pg_class_oid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_delta_toast_pg_class_oid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_delta_toast_pg_class_oid = 0;
@@ -1031,8 +1028,8 @@ Datum set_next_cstore_delta_toast_typoid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_delta_oids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_delta_toast_pg_type_oid) {
-        u_sess->upg_cxt.bupgrade_next_delta_toast_pg_type_oid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_delta_toast_pg_type_oid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_delta_toast_pg_type_oid = 0;
@@ -1065,8 +1062,8 @@ Datum set_next_cstore_delta_toast_idx_oid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_delta_oids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_delta_toast_index_oid) {
-        u_sess->upg_cxt.bupgrade_next_delta_toast_index_oid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_delta_toast_index_oid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_delta_toast_index_oid = 0;
@@ -1162,8 +1159,8 @@ Datum set_next_part_pg_partition_rfoids(PG_FUNCTION_ARGS)
     deconstruct_array(partition_rfoids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.binary_upgrade_next_part_pg_partition_rfoid) {
-        u_sess->upg_cxt.binary_upgrade_next_part_pg_partition_rfoid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.binary_upgrade_next_part_pg_partition_rfoid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.binary_upgrade_cur_part_pg_partition_rfoid = 0;
@@ -1196,8 +1193,8 @@ Datum setnext_part_toast_pg_class_rfoids(PG_FUNCTION_ARGS)
     deconstruct_array(part_toast_class_rfoids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.binary_upgrade_next_part_toast_pg_class_rfoid) {
-        u_sess->upg_cxt.binary_upgrade_next_part_toast_pg_class_rfoid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.binary_upgrade_next_part_toast_pg_class_rfoid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.binary_upgrade_cur_part_toast_pg_class_rfoid = 0;
@@ -1230,8 +1227,8 @@ Datum setnext_part_index_pg_class_rfoids(PG_FUNCTION_ARGS)
     deconstruct_array(part_index_class_rfoids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.binary_upgrade_next_part_index_pg_class_rfoid) {
-        u_sess->upg_cxt.binary_upgrade_next_part_index_pg_class_rfoid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.binary_upgrade_next_part_index_pg_class_rfoid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.binary_upgrade_cur_part_index_pg_class_rfoid = 0;
@@ -1264,8 +1261,8 @@ Datum set_next_cstore_psort_rfoid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_psort_rfoids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_psort_pg_class_rfoid) {
-        u_sess->upg_cxt.bupgrade_next_psort_pg_class_rfoid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_psort_pg_class_rfoid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_psort_pg_class_rfoid = 0;
@@ -1298,8 +1295,8 @@ Datum set_next_cstore_delta_rfoid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_delta_rfoids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_delta_pg_class_rfoid) {
-        u_sess->upg_cxt.bupgrade_next_delta_pg_class_rfoid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_delta_pg_class_rfoid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_delta_pg_class_rfoid = 0;
@@ -1332,8 +1329,8 @@ Datum set_next_cstore_cudesc_rfoid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_cudesc_rfoids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_cudesc_pg_class_rfoid) {
-        u_sess->upg_cxt.bupgrade_next_cudesc_pg_class_rfoid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_cudesc_pg_class_rfoid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_cudesc_pg_class_rfoid = 0;
@@ -1366,8 +1363,8 @@ Datum set_next_cstore_cudesc_idx_rfoid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_delta_rfoids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_cudesc_index_rfoid) {
-        u_sess->upg_cxt.bupgrade_next_cudesc_index_rfoid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_cudesc_index_rfoid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_cudesc_index_rfoid = 0;
@@ -1400,8 +1397,8 @@ Datum set_next_cstore_cudesc_toast_rfoid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_delta_rfoids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_cudesc_toast_pg_class_rfoid) {
-        u_sess->upg_cxt.bupgrade_next_cudesc_toast_pg_class_rfoid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_cudesc_toast_pg_class_rfoid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_cudesc_toast_pg_class_rfoid = 0;
@@ -1434,8 +1431,8 @@ Datum set_next_cstore_cudesc_toast_idx_rfoid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_delta_rfoids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_cudesc_toast_index_rfoid) {
-        u_sess->upg_cxt.bupgrade_next_cudesc_toast_index_rfoid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_cudesc_toast_index_rfoid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_cudesc_toast_index_rfoid = 0;
@@ -1468,8 +1465,8 @@ Datum set_next_cstore_delta_toast_rfoid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_delta_rfoids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_delta_toast_pg_class_rfoid) {
-        u_sess->upg_cxt.bupgrade_next_delta_toast_pg_class_rfoid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_delta_toast_pg_class_rfoid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_delta_toast_pg_class_rfoid = 0;
@@ -1502,8 +1499,8 @@ Datum set_next_cstore_delta_toast_idx_rfoid(PG_FUNCTION_ARGS)
     deconstruct_array(cs_delta_rfoids, OIDOID, sizeof(Oid), true, 'i', &oiddatums, NULL, &ndatums);
 
     if (NULL == u_sess->upg_cxt.bupgrade_next_delta_toast_index_rfoid) {
-        u_sess->upg_cxt.bupgrade_next_delta_toast_index_rfoid =
-            (Oid*)MemoryContextAllocZero(u_sess->top_mem_cxt, MAX_PARTITION_NUM * sizeof(Oid));
+        u_sess->upg_cxt.bupgrade_next_delta_toast_index_rfoid = (Oid*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), MAX_PARTITION_NUM * sizeof(Oid));
     }
 
     u_sess->upg_cxt.bupgrade_cur_delta_toast_index_rfoid = 0;

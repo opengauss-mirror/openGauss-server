@@ -1,0 +1,137 @@
+set resource_track_duration=0;
+set resource_track_cost=30;
+set resource_track_level=operator;
+set resource_track_log=detail;
+/* FIFO test */
+create table t01(c1 int, c2 int, c3 int);
+create table t02(c1 int, c2 int, c3 int);
+create table t03(c1 int, c2 int, c3 int);
+create table t04(c1 int, c2 int, c3 int);
+create table t05(c1 int, c2 int, c3 int);
+create table t06(c1 int, c2 int, c3 int);
+create table t07(c1 int, c2 int, c3 int);
+create table t08(c1 int, c2 int, c3 int);
+create table t09(c1 int, c2 int, c3 int);
+create table t10(c1 int, c2 int, c3 int);
+insert into t01 select v,v,v from generate_series(1,20) as v;
+insert into t02 select * from t01;
+insert into t03 select * from t01;
+insert into t04 select 1,c2,c3 from t01;
+insert into t05 select * from t01;
+insert into t06 select 1,c2,c3 from t01;
+insert into t07 select * from t01;
+insert into t08 select * from t01;
+insert into t09 select * from t01;
+insert into t10 select * from t01;
+analyze t01;
+analyze t02;
+create index self_tuning_index_03 on t01(c3);
+create index self_tuning_index_02 on t01(c2);
+update pg_class set reltuples = 1200000 where relname in ('t01', 't02', 't03', 't04', 't05', 't06', 't07', 't08', 't09', 't10');
+/* FIFO test */ select /*+ nestloop(t01 t03) nestloop(t02 t05) broadcast(t07) broadcast(t02) */
+t01.c1, sum(t02.c2) from t01, t02, t03, t04, t05, t06, t07, t08
+where t01.c2 = t02.c2 and
+	  t01.c2 = t03.c2 and
+	  t01.c2 = t04.c2 and
+	  t01.c2 = t05.c2 and
+	  t02.c3 = t05.c3 and
+	  t01.c2 = t06.c2 and
+	  t01.c2 = t07.c2 and
+	  t01.c2 = t08.c2
+group by 1
+order by 1,2;
+ c1 | sum 
+----+-----
+  1 |   1
+  2 |   2
+  3 |   3
+  4 |   4
+  5 |   5
+  6 |   6
+  7 |   7
+  8 |   8
+  9 |   9
+ 10 |  10
+ 11 |  11
+ 12 |  12
+ 13 |  13
+ 14 |  14
+ 15 |  15
+ 16 |  16
+ 17 |  17
+ 18 |  18
+ 19 |  19
+ 20 |  20
+(20 rows)
+
+select warning, query_plan from pgxc_wlm_session_history where query like '%FIFO%';
+                                    warning                                    |                                                     query_plan                                                      
+-------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------
+--? Statistic Not Collect:                                                       +|  1 | Streaming (type: GATHER)  (.*)                                +
+     public.t03(c1,c2)                                                        +|    |  Merge Sort Key: t01.c1, (sum(t02.c2))                                                                        +
+--?     public.t02((c2,c3))                                                      +|  2 |  ->  Sort  (.*)                                               +
+     public.t05(c2,c3,c1)    public.t05((c2,c3))                              +|    |   Sort Key: t01.c1, (sum(t02.c2))                                                                             +
+--?                                                                              +|  3 |   ->  Streaming(type: LOCAL GATHER dop: 1/2)  (.*)            +
+--?                                                                              +|  4 |    ->  HashAggregate  (.*)                                    +
+ PlanNode[8] Inaccurate Estimation-Rows: "Seq Scan" A-Rows:20, E-Rows:1200000 +|    |     Group By Key: t01.c1                                                                                      +
+--? PlanNode[13] Inaccurate Estimation-Rows: "Seq Scan" A-Rows:20, E-Rows:1200000+|  5 |     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (.*)              +
+--? PlanNode[22] Inaccurate Estimation-Rows: "Seq Scan" A-Rows:20, E-Rows:1200000+|  6 |      ->  Nested Loop  (.*)                                              +
+ PlanNode[27] Inaccurate Estimation-Rows: "Seq Scan" A-Rows:20, E-Rows:1200000+|    |       Join Filter: (t01.c2 = t08.c2)                                                                          +
+--? PlanNode[29] Inaccurate Estimation-Rows: "Seq Scan" A-Rows:20, E-Rows:1200000+|  7 |       ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (.*)            +
+--? PlanNode[32] Inaccurate Estimation-Rows: "Seq Scan" A-Rows:20, E-Rows:1200000+|  8 |        ->  Seq Scan on t08  (.*)                                         +
+--? PlanNode[37] Inaccurate Estimation-Rows: "Seq Scan" A-Rows:20, E-Rows:1200000 |  9 |       ->  Materialize  (.*)                                            +
+--?                                                                               | 10 |        ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)  (.*)          +
+--?                                                                               | 11 |         ->  Nested Loop  (.*)                                          +
+                                                                               |    |          Join Filter: (t01.c2 = t06.c2)                                                                       +
+--?                                                                               | 12 |          ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (.*)         +
+--?                                                                               | 13 |           ->  Seq Scan on t06  (.*)                                      +
+--?                                                                               | 14 |          ->  Materialize  (.*)                                         +
+--?                                                                               | 15 |           ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)  (.*)       +
+--?                                                                               | 16 |            ->  Nested Loop  (.*)                                       +
+                                                                               |    |             Join Filter: (t01.c2 = t02.c2)                                                                    +
+--?                                                                               | 17 |             ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)  (.*)     +
+--?                                                                               | 18 |              ->  Nested Loop  (.*)                                     +
+                                                                               |    |               Join Filter: (t02.c2 = t04.c2)                                                                  +
+--?                                                                               | 19 |               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/1)  (.*)   +
+--?                                                                               | 20 |                ->  Nested Loop  (.*)                                   +
+                                                                               |    |                 Join Filter: (t02.c2 = t07.c2)                                                                +
+--?                                                                               | 21 |                 ->  Streaming(type: BROADCAST dop: 1/2)  (.*)         +
+--?                                                                               | 22 |                  ->  Seq Scan on t07  (.*)                               +
+--?                                                                               | 23 |                 ->  Materialize  (.*)                                   +
+--?                                                                               | 24 |                  ->  Streaming(type: LOCAL GATHER dop: 1/2)  (.*)       +
+--?                                                                               | 25 |                   ->  Nested Loop  (.*)                                 +
+                                                                               |    |                    Join Filter: ((t02.c2 = t05.c2) AND (t02.c3 = t05.c3))                                     +
+--?                                                                               | 26 |                    ->  Streaming(type: SPLIT BROADCAST dop: 2/2)  (.*)+
+--?                                                                               | 27 |                     ->  Seq Scan on t02  (.*)                             +
+--?                                                                               | 28 |                    ->  Materialize  (.*)                                 +
+--?                                                                               | 29 |                     ->  Seq Scan on t05  (.*)                            +
+--?                                                                               | 30 |               ->  Materialize  (.*)                                     +
+--?                                                                               | 31 |                ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (.*)   +
+--?                                                                               | 32 |                 ->  Seq Scan on t04  (.*)                                +
+--?                                                                               | 33 |             ->  Materialize  (.*)                                     +
+--?                                                                               | 34 |              ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/1)  (.*)   +
+--?                                                                               | 35 |               ->  Nested Loop  (.*)                                   +
+--?                                                                               | 36 |                ->  Streaming(type: BROADCAST dop: 1/2)  (.*)          +
+--?                                                                               | 37 |                 ->  Seq Scan on t03  (.*)                                +
+--?                                                                               | 38 |                ->  Index Scan using self_tuning_index_02 on t01  (.*)             +
+                                                                               |    |                 Index Cond: (c2 = t03.c2)
+(1 row)
+
+set enable_seqscan=off;
+set enable_indexscan=on;
+select count(*)self_tuning_bitmapOr from t01 where c3>1 or c2>2;
+ self_tuning_bitmapor 
+----------------------
+                   19
+(1 row)
+
+drop table t01;
+drop table t02;
+drop table t03;
+drop table t04;
+drop table t05;
+drop table t06;
+drop table t07;
+drop table t08;
+drop table t09;
+drop table t10;

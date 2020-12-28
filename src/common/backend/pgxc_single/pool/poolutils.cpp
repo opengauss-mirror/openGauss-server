@@ -49,8 +49,9 @@
  */
 Datum pgxc_pool_check(PG_FUNCTION_ARGS)
 {
-    if (!superuser())
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("must be system admin to manage pooler"))));
+    if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            (errmsg("must be system admin or operator admin in operation mode to manage pooler"))));
 
     /* A Datanode has no pooler active, so do not bother about that */
     if (IS_PGXC_DATANODE)
@@ -92,8 +93,9 @@ Datum pgxc_pool_reload(PG_FUNCTION_ARGS)
 {
     MemoryContext old_context;
 
-    if (!superuser())
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("must be system admin to manage pooler"))));
+    if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            (errmsg("must be system admin or operator admin in operation mode to manage pooler"))));
 
     if (IsTransactionBlock())
         ereport(ERROR,
@@ -119,7 +121,7 @@ Datum pgxc_pool_reload(PG_FUNCTION_ARGS)
     HandlePreparedStatementsForReload();
 
     /* Now session information is reset in correct memory context */
-    old_context = MemoryContextSwitchTo(u_sess->top_mem_cxt);
+    old_context = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION));
 
     /* Reinitialize session, while old pooler connection is active */
     InitMultinodeExecutor(true);
@@ -183,7 +185,7 @@ void CleanConnection(CleanConnStmt* stmt)
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return;
 #else
-    ListCell* nodelist_item;
+    ListCell* nodelist_item = NULL;
     List* co_list = NIL;
     List* dn_list = NIL;
     List* stmt_nodes = NIL;
@@ -259,7 +261,6 @@ void CleanConnection(CleanConnStmt* stmt)
     foreach (nodelist_item, stmt->nodes) {
         char* node_name = strVal(lfirst(nodelist_item));
         Oid nodeoid = get_pgxc_nodeoid(node_name);
-
         if (!OidIsValid(nodeoid))
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("PGXC Node %s: object not defined", node_name)));
 
@@ -315,8 +316,10 @@ void DropDBCleanConnection(const char* dbname)
     List* dn_list = GetAllDataNodes();
 
     /* Check permissions for this database */
-    if (!pg_database_ownercheck(get_database_oid(dbname, true), GetUserId()))
-        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DATABASE, dbname);
+    AclResult aclresult = pg_database_aclcheck(get_database_oid(dbname, true), GetUserId(), ACL_ALTER | ACL_DROP);
+    if (aclresult != ACLCHECK_OK && !pg_database_ownercheck(get_database_oid(dbname, true), GetUserId())) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_DATABASE, dbname);
+    }
 
     PoolManagerCleanConnection(dn_list, co_list, dbname, NULL);
 
@@ -362,8 +365,9 @@ Datum pgxc_pool_connection_status(PG_FUNCTION_ARGS)
     List* dn_list = GetAllDataNodes();
     bool status = true;
 
-    if (!superuser())
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("must be system admin to manage pooler"))));
+    if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            (errmsg("must be system admin or operator admin in operation mode to manage pooler"))));
 
     /* cannot exec func in transaction or a write query */
     if (IsTransactionBlock() || TransactionIdIsValid(GetTopTransactionIdIfAny()))
@@ -373,7 +377,7 @@ Datum pgxc_pool_connection_status(PG_FUNCTION_ARGS)
                     "can not execute pgxc_pool_connection_status in a transaction block or a write transaction."))));
     // A Datanode has no pooler active, so do not bother about that.
     //
-    if (IS_PGXC_DATANODE || IS_SINGLE_NODE)
+    if (IS_PGXC_DATANODE)
         PG_RETURN_BOOL(true);
 
     status = PoolManagerConnectionStatus(dn_list, co_list);
@@ -406,8 +410,9 @@ Datum pg_pool_validate(PG_FUNCTION_ARGS)
     rc = memset_s(node_name, NAMEDATALEN, '\0', NAMEDATALEN);
     securec_check(rc, "\0", "\0");
 
-    if (!superuser())
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("must be system admin to manage pooler"))));
+    if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            (errmsg("must be system admin or operator admin in operation mode to manage pooler"))));
 
     if (IsTransactionBlock())
         ereport(ERROR,
@@ -432,7 +437,7 @@ Datum pg_pool_validate(PG_FUNCTION_ARGS)
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* construct a tuple descriptor for the result row. */
-        tupdesc = CreateTemplateTupleDesc(2, false);
+        tupdesc = CreateTemplateTupleDesc(2, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "pid", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "node_name", TEXTOID, -1, 0);
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
@@ -486,8 +491,9 @@ Datum pg_pool_ping(PG_FUNCTION_ARGS)
 {
     bool mod = PG_GETARG_BOOL(0);
 
-    if (!superuser())
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("must be system admin to manage pooler"))));
+    if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            (errmsg("must be system admin or operator admin in operation mode to manage pooler"))));
 
     if (IsTransactionBlock())
         ereport(ERROR,
@@ -525,10 +531,10 @@ void HandlePoolerReload(void)
     DropAllPreparedStatements();
 
     /* Now session information is reset in correct memory context */
-    old_context = MemoryContextSwitchTo(TopMemoryContext);
+    old_context = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION));
 
     /* Need to be able to look into catalogs */
-    CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForPoolerReload");
+    CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForPoolerReload", MEMORY_CONTEXT_COMMUNICATION);
 
     /* Reinitialize session, while old pooler connection is active */
     InitMultinodeExecutor(true);

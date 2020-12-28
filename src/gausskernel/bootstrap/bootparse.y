@@ -45,10 +45,10 @@
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
 #include "rewrite/prs2lock.h"
-#include "storage/block.h"
+#include "storage/buf/block.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"
-#include "storage/itemptr.h"
+#include "storage/item/itemptr.h"
 #include "storage/off.h"
 #include "storage/smgr.h"
 #include "tcop/dest.h"
@@ -195,7 +195,7 @@ Boot_CreateStmt:
 
 					do_start();
 
-					tupdesc = CreateTupleDesc(t_thrd.bootstrap_cxt.numattr, !($6), t_thrd.bootstrap_cxt.attrtypes);
+					tupdesc = CreateTupleDesc(t_thrd.bootstrap_cxt.numattr, !($6), t_thrd.bootstrap_cxt.attrtypes, TAM_HEAP);
 
 					shared_relation = $5;
 
@@ -234,7 +234,8 @@ Boot_CreateStmt:
 												   true,
 												   REL_CMPRS_NOT_SUPPORT,
 												   BOOTSTRAP_SUPERUSERID,
-												   false);
+												   false,
+												   TAM_HEAP);
 						ereport(DEBUG4, (errmsg("bootstrap relation created")));
 						
 						/*

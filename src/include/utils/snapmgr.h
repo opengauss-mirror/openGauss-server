@@ -15,6 +15,41 @@
 
 #include "utils/resowner.h"
 #include "utils/snapshot.h"
+#include "access/transam.h"
+
+/* Static variables representing various special snapshot semantics */
+extern THR_LOCAL PGDLLIMPORT SnapshotData SnapshotNowData;
+extern THR_LOCAL PGDLLIMPORT SnapshotData SnapshotSelfData;
+extern THR_LOCAL PGDLLIMPORT SnapshotData SnapshotAnyData;
+extern THR_LOCAL PGDLLIMPORT SnapshotData SnapshotToastData;
+
+#define SnapshotNow (&SnapshotNowData)
+#define SnapshotSelf (&SnapshotSelfData)
+#define SnapshotAny (&SnapshotAnyData)
+#define SnapshotToast (&SnapshotToastData)
+
+#ifdef USE_ASSERT_CHECKING
+#define LatestTransactionStatusError(xid, snapshot, action) PrintCurrentSnapshotInfo(PANIC, xid, snapshot, action)
+#else
+#define LatestTransactionStatusError(xid, snapshot, action) PrintCurrentSnapshotInfo(ERROR, xid, snapshot, action)
+#endif
+
+extern bool XidVisibleInSnapshot(TransactionId xid, Snapshot snapshot, TransactionIdStatus *hintstatus,
+                                                        Buffer buffer, bool *sync);
+extern bool XidVisibleInLocalSnapshot(TransactionId xid, Snapshot snapshot);
+extern bool CommittedXidVisibleInSnapshot(TransactionId xid, Snapshot snapshot, Buffer buffer);
+extern bool IsXidVisibleInGtmLiteLocalSnapshot(TransactionId xid, Snapshot snapshot, TransactionIdStatus hint_status,
+                                                                                    bool xmin_equal_xmax, Buffer buffer, bool *sync);
+/*
+ * We don't provide a static SnapshotDirty variable because it would be
+ * non-reentrant.  Instead, users of that snapshot type should declare a
+ * local variable of type SnapshotData, and initialize it with this macro.
+ */
+#define InitDirtySnapshot(snapshotdata) ((snapshotdata).satisfies = SNAPSHOT_DIRTY)
+
+/* This macro encodes the knowledge of which snapshots are MVCC-safe */
+#define IsMVCCSnapshot(snapshot) \
+    ((((snapshot)->satisfies) == SNAPSHOT_MVCC) || (((snapshot)->satisfies) == SNAPSHOT_HISTORIC_MVCC))
 
 extern Snapshot GetTransactionSnapshot(bool force_local_snapshot = false);
 extern Snapshot GetLatestSnapshot(void);
@@ -54,16 +89,13 @@ extern bool ThereAreNoPriorRegisteredSnapshots(void);
 extern Snapshot PgFdwCopySnapshot(Snapshot snapshot);
 extern char* ExportSnapshot(Snapshot snapshot, CommitSeqNo *snapshotcsn);
 
+extern Snapshot CopySnapshotByCurrentMcxt(Snapshot snapshot);
+
+
 /* Support for catalog timetravel for logical decoding */
 struct HTAB;
 extern struct HTAB* HistoricSnapshotGetTupleCids(void);
 extern void SetupHistoricSnapshot(Snapshot snapshot_now, struct HTAB* tuplecids);
 extern void TeardownHistoricSnapshot(bool is_error);
 extern bool HistoricSnapshotActive(void);
-
-extern Size EstimateSnapshotSpace(Snapshot snapshot);
-extern void SerializeSnapshot(Snapshot snapshot, char *start_address, Size len);
-extern Snapshot RestoreSnapshot(char *start_address, Size len);
-extern void RestoreTransactionSnapshot(Snapshot snapshot, void *master_pgproc);
-
 #endif /* SNAPMGR_H */

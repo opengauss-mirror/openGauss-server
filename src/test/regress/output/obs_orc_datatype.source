@@ -1,0 +1,393 @@
+-- INT2, 6 rows. Hive type: SMALLINT
+CREATE SERVER obs_server FOREIGN DATA WRAPPER 	dfs_fdw OPTIONS (address '@obshostname@', type 'obs', access_key '@ak@', secret_access_key '@sk@');
+Create foreign table t_smallint (c_smallint int2) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_smallint_orc/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+select * from t_smallint where c_smallint > 0;
+ c_smallint 
+------------
+          1
+          1
+          2
+          3
+          5
+          8
+(6 rows)
+
+-- Integer (int4), 6 rows. Hive type: INT  
+Create foreign table t_int (c_int int) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_int_orc/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+SELECT * FROM T_INT;
+ c_int 
+-------
+     1
+     1
+     2
+     3
+     5
+     8
+(6 rows)
+
+-- INT8, 6 rows. Hive type: BIGINT
+Create foreign table t_bigint (c_bigint int8) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_bigint_orc/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+select * from t_bigint;
+ c_bigint 
+----------
+        1
+        1
+        2
+        3
+        5
+        8
+(6 rows)
+
+-- FLOAT4, 6 rows. Hive type: float
+Create foreign table t_float4 (c_float4 float4) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_float_orc/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+select * from t_float4 where c_float4 > 2;
+ c_float4 
+----------
+      2.3
+    3.454
+     5.67
+     8.01
+(4 rows)
+
+-- FLOAT8, 6 rows. Hive type: double
+Create foreign table t_float8 (c_float8 float8) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_double_orc/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+select * from t_float8;
+ c_float8 
+----------
+      1.8
+      1.9
+      2.3
+    3.454
+     5.67
+     8.01
+(6 rows)
+
+-- String, 14 rows. Hive type: String
+Create foreign table t_text (c_text text) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_string_orc/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+SELECT * FROM T_TEXT;
+  c_text   
+-----------
+ demai
+ zhangli
+ jason
+ xiaoqiang
+ xubo
+ renyang
+ xiangfei
+ hongfei
+ yahui
+ masong
+ weiqing
+ hailong
+ hanghuang
+ liuyong
+(14 rows)
+
+-- char(10), 14 rows. Hive type: String, with max lengthf of 9
+Create foreign table t_charfromstring (c_char text) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_string_orc/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+SELECT * FROM T_charfromstring;
+  c_char   
+-----------
+ demai
+ zhangli
+ jason
+ xiaoqiang
+ xubo
+ renyang
+ xiangfei
+ hongfei
+ yahui
+ masong
+ weiqing
+ hailong
+ hanghuang
+ liuyong
+(14 rows)
+
+-- varchar(10), 14 rows. Hive type: String, with max lengthf of 9
+Create foreign table t_varcharfromstring (c_varchar text) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_string_orc/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+SELECT * FROM T_varcharfromstring;
+ c_varchar 
+-----------
+ demai
+ zhangli
+ jason
+ xiaoqiang
+ xubo
+ renyang
+ xiangfei
+ hongfei
+ yahui
+ masong
+ weiqing
+ hailong
+ hanghuang
+ liuyong
+(14 rows)
+
+-- timestamp, 6 rows. Hive type: timestamp
+Create foreign table t_timestamp (c_timestamp timestamp) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_timestamp_orc/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+select * from t_timestamp where c_timestamp < '2015-01-15 10:11:12';
+       c_timestamp        
+--------------------------
+ Sat Jan 10 10:13:12 2015
+ Wed Dec 10 11:11:12 2014
+ Thu Dec 11 23:11:12 2014
+ Sun Dec 14 22:11:12 2014
+ Sun Dec 15 13:11:12 2013
+(5 rows)
+
+-- date, 6 rows. Hive type: date
+Create foreign table t_date (c_date date) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_date_orc/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+select * from t_date;
+          c_date          
+--------------------------
+ Thu Jan 15 00:00:00 2015
+ Sat Jan 10 00:00:00 2015
+ Wed Dec 10 00:00:00 2014
+ Thu Dec 11 00:00:00 2014
+ Sun Dec 14 00:00:00 2014
+ Sun Dec 15 00:00:00 2013
+(6 rows)
+
+-- date, 7 rows. Hive type: bool
+Create foreign table t_bool (c_bool bool) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_bool_orc/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+select * from t_bool where c_bool;
+ c_bool 
+--------
+ t
+ t
+ t
+ t
+(4 rows)
+
+select * from t_bool where c_bool is null;
+ c_bool 
+--------
+(0 rows)
+
+-- Decimal, 4 rows. Hive type: decimal(38,5)
+ Create foreign table t_dec (decField decimal(38,5)) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/largeTypeTest_orc11_64stripe/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+ select * from t_dec where decfield>0 order by 1;
+        decfield        
+------------------------
+                5.66800
+ 7896545642121286.00000
+(2 rows)
+
+ select * from t_dec where decfield=5.668 order by 1;
+ decfield 
+----------
+  5.66800
+(1 row)
+
+ select * from t_dec where decfield>-7.20 order by 1;
+        decfield        
+------------------------
+               -6.53200
+                5.66800
+ 7896545642121286.00000
+(3 rows)
+
+ 
+-- char(15),4rows.Hive type:char(15)
+create foreign table test_char(chField char(15)) SERVER obs_server  OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/mppdb.db/test_char_orc/') distribute by roundrobin; 
+WARNING:  It is not specified totalrows option for the foreign table.
+select * from test_char;
+     chfield     
+-----------------
+ afsd           
+ bhg            
+ cdfgt          
+ dghfh          
+(4 rows)
+
+ 
+-- varChar(15),6rows.Hive type:varChar(15)
+create foreign table test_varChar(varField varChar(15)) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/mppdb.db/test_varChar_orc/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+select * from test_varChar where varField != '123';
+ varfield 
+----------
+ dfg
+ ggdf
+ vbvbhd
+ reg
+ fdg
+(5 rows)
+
+-- clob ,5rows.Hive type:string
+create foreign table test_Clob(clField clob) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/mppdb.db/test_Clob_orc/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+select * from test_Clob where clField != '123';
+  clfield   
+------------
+ ffsdft
+ hgfhfgy
+ fdgdfgt
+ sfgfdg
+ hgfhfghfgh
+(5 rows)
+
+ 
+ 
+create foreign table testN8(decFiled decimal(38,28),decField2 decimal(38,18),decField3 decimal(38,8),decField4 decimal(28,18),decField5 decimal(28,8))
+SERVER obs_server  OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/mppdb.db/testN8_orc/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+select * from testN8 where decfield4 > 0 order by 1,2,3,4,5;
+                decfiled                 |               decfield2               |             decfield3             |           decfield4           |         decfield5          
+-----------------------------------------+---------------------------------------+-----------------------------------+-------------------------------+----------------------------
+          -.1564561454444500000000000000 |           21254093.154541212124001000 |                         .12212100 |         12.250030000000000000 |         122454574.12314700
+  123213000.4564561747752211224012112200 |     12122212470044.544513000000000000 |      1245555550088404201.02545100 | 2321200286.122322002440412240 | 21200414579215435.11044902
+ 4564246849.2156595641224799540044555440 | 123214564545564556.054100455041453400 | 325235454353445467567657.57676575 |           .156545587454000000 |         154541112.12314450
+ 4564564179.4564650000000000000000000000 |               -123.478920045000000000 |             -28888851104.00215000 |     444443.111100000000000000 |              1122.33109000
+(4 rows)
+
+ 
+ 
+-- the following has bugs, so comment out for now
+-- Integer, 7 rows. Hive type: INT
+-- with NULL value as the very last row, the result show all 7 row empty.
+-- Create foreign table t_int_w_null (c_int int) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_int_w_null_orc/') distribute by roundrobin;
+-- Select * from t_int_w_null;
+-- char(10), 14 rows. Hive type: char(10)
+-- ERROR:  Error occurred while reading column 1: ORC and PSQL types do not match, ORC type is
+-- Create foreign table t_char (c_char char(10)) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_char_orc/') distribute by roundrobin;
+-- select * from t_char;
+-- varchar(10), 14 rows. Hive type: varchar(10) 
+-- ERROR:  Error occurred while reading column 1: ORC and PSQL types do not match, ORC type is 
+-- Create foreign table t_varchar (c_varchar varchar(10)) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_varchar_orc/') distribute by roundrobin;
+-- select * from t_varchar;
+-- Decimal, 6 rows. Hive type: decimal(10,5)
+-- ERROR:  Error occurred while reading column 1: ORC and PSQL types do not match, ORC type is DECIMAL
+-- Create foreign table t_dec (c_dec decimal(10,5)) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_dec_orc/') distribute by roundrobin;
+-- select * from t_dec;
+create foreign table elk_datatype_float_table_028_2
+(
+c_float4 float4,
+c_real real,
+c_double double precision,
+c_float8 float8,
+c_decimal decimal(39,38),
+c_int integer
+)
+server obs_server OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/decimal/elk_datatype_float_table_001/')
+distribute by roundrobin;
+ERROR:  The maximum accuracy of decimal/numeric data type supported is 38 bits.
+create foreign table elk_datatype_float_table_028_2
+(
+c_float4 float4,
+c_real real,
+c_double double precision,
+c_float8 float8,
+c_decimal decimal(39),
+c_int integer
+)
+server obs_server OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/decimal/elk_datatype_float_table_001/')
+distribute by roundrobin;
+ERROR:  The maximum accuracy of decimal/numeric data type supported is 38 bits.
+create foreign table elk_datatype_float_table_028_2
+(
+c_float4 float4,
+c_real real,
+c_double double precision,
+c_float8 float8,
+c_decimal decimal(38,3),
+c_int integer
+)
+server obs_server OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/decimal/elk_datatype_float_table_001/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+select * from elk_datatype_float_table_028_2;
+ERROR:  Error occurred while reading column 5: ORC and mpp types do not match, ORC type is decimal(10,2) and mpp type is numeric(38,3).
+alter foreign table elk_datatype_float_table_028_2 alter c_decimal type decimal(40);
+ERROR:  The maximum accuracy of decimal/numeric data type supported is 38 bits.
+alter foreign table elk_datatype_float_table_028_2 alter c_decimal type decimal(10,2);
+select * from elk_datatype_float_table_028_2;
+ c_float4 | c_real | c_double | c_float8 | c_decimal | c_int 
+----------+--------+----------+----------+-----------+-------
+     40.1 |   40.1 |     40.1 |     40.1 |     40.11 |    40
+     10.1 |   10.1 |     10.1 |     10.1 |     10.11 |    10
+     20.1 |   20.1 |     20.1 |     20.1 |     20.11 |    20
+     50.1 |   50.1 |     50.1 |     50.1 |     50.11 |    50
+     30.1 |   30.1 |     30.1 |     30.1 |     30.11 |    30
+(5 rows)
+
+drop foreign table elk_datatype_float_table_028_2;
+create foreign table elk_datatype_float_table_028_2
+(
+c_float4 float4,
+c_real real,
+c_double double precision,
+c_float8 float8,
+c_decimal decimal,
+c_int integer
+)
+server obs_server OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/decimal/elk_datatype_float_table_001/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+select * from elk_datatype_float_table_028_2;
+ c_float4 | c_real | c_double | c_float8 | c_decimal | c_int 
+----------+--------+----------+----------+-----------+-------
+     40.1 |   40.1 |     40.1 |     40.1 |     40.11 |    40
+     10.1 |   10.1 |     10.1 |     10.1 |     10.11 |    10
+     20.1 |   20.1 |     20.1 |     20.1 |     20.11 |    20
+     50.1 |   50.1 |     50.1 |     50.1 |     50.11 |    50
+     30.1 |   30.1 |     30.1 |     30.1 |     30.11 |    30
+(5 rows)
+
+create foreign table  biginteger 
+(
+x  decimal
+) 
+server obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/biginteger/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+select * from biginteger where x<5;
+      x       
+--------------
+ 0.0000000000
+ 0.0000000000
+ 0.0000000000
+ 0.0000000000
+ 0.0000000000
+ 1.1234567890
+ 2.3456789012
+ 3.3456789012
+ 4.4567890123
+  .1234567890
+  .0000000568
+(11 rows)
+
+DROP SERVER obs_server CASCADE;
+NOTICE:  drop cascades to 18 other objects
+DETAIL:  drop cascades to foreign table t_smallint
+drop cascades to foreign table t_int
+drop cascades to foreign table t_bigint
+drop cascades to foreign table t_float4
+drop cascades to foreign table t_float8
+drop cascades to foreign table t_text
+drop cascades to foreign table t_charfromstring
+drop cascades to foreign table t_varcharfromstring
+drop cascades to foreign table t_timestamp
+drop cascades to foreign table t_date
+drop cascades to foreign table t_bool
+drop cascades to foreign table t_dec
+drop cascades to foreign table test_char
+drop cascades to foreign table test_varchar
+drop cascades to foreign table test_clob
+drop cascades to foreign table testn8
+drop cascades to foreign table elk_datatype_float_table_028_2
+drop cascades to foreign table biginteger

@@ -37,4 +37,8 @@ extern void ExecEndExtensiblePlan(ExtensiblePlanState* node);
 extern void ExecReScanExtensiblePlan(ExtensiblePlanState* node);
 extern ExtensiblePlanMethods* GetExtensiblePlanMethods(const char* ExtensibleName, bool missing_ok);
 
+#ifdef ENABLE_MULTIPLE_NODES
+extern void InitExtensiblePlanMethodsHashTable();
+#endif
+
 #endif /* NODEEXTENSIBLE_H */

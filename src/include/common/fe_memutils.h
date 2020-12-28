@@ -23,6 +23,8 @@
 #define MCXT_ALLOC_NO_OOM 0x02 /* no failure if out-of-memory */
 #define MCXT_ALLOC_ZERO 0x04   /* zero allocated memory */
 
+#include "c.h"
+
 /*
  * "Safe" memory allocation functions --- these exit(1) on failure
  * (except pg_malloc_extended with MCXT_ALLOC_NO_OOM)

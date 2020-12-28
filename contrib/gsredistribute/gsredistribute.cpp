@@ -28,6 +28,7 @@ extern "C" Datum pg_enable_redis_proc_cancelable(PG_FUNCTION_ARGS);
 extern "C" Datum pg_disable_redis_proc_cancelable(PG_FUNCTION_ARGS);
 extern "C" Datum pg_tupleid_get_blocknum(PG_FUNCTION_ARGS);
 extern "C" Datum pg_tupleid_get_offset(PG_FUNCTION_ARGS);
+extern "C" Datum pg_tupleid_get_ctid_to_bigint(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(pg_get_redis_rel_end_ctid);
 PG_FUNCTION_INFO_V1(pg_get_redis_rel_start_ctid);
@@ -35,6 +36,7 @@ PG_FUNCTION_INFO_V1(pg_enable_redis_proc_cancelable);
 PG_FUNCTION_INFO_V1(pg_disable_redis_proc_cancelable);
 PG_FUNCTION_INFO_V1(pg_tupleid_get_blocknum);
 PG_FUNCTION_INFO_V1(pg_tupleid_get_offset);
+PG_FUNCTION_INFO_V1(pg_tupleid_get_ctid_to_bigint);
 
 /*
  * - Brief:  SQL interface for finding the end_ctid of redis relaion
@@ -119,6 +121,10 @@ Datum pg_tupleid_get_blocknum(PG_FUNCTION_ARGS)
 {
     ItemPointer tupleid = NULL;
     tupleid = PG_GETARG_ITEMPOINTER(0);
+    if (!ItemPointerIsValid(tupleid)) {
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                        errmsg("pg_tupleid_get_blocknum para tupleid is null!")));
+    }
     PG_RETURN_UINT32(ItemPointerGetBlockNumber(tupleid));
 }
 
@@ -133,5 +139,20 @@ Datum pg_tupleid_get_offset(PG_FUNCTION_ARGS)
 {
     ItemPointer tupleid = NULL;
     tupleid = PG_GETARG_ITEMPOINTER(0);
+    if (!ItemPointerIsValid(tupleid)) {
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                        errmsg("pg_tupleid_get_offset para tupleid is null!")));
+    }
     PG_RETURN_UINT16(ItemPointerGetOffsetNumber(tupleid));
+}
+
+Datum pg_tupleid_get_ctid_to_bigint(PG_FUNCTION_ARGS)
+{
+    ItemPointer tupleid = NULL;
+    tupleid = PG_GETARG_ITEMPOINTER(0);
+    if (!ItemPointerIsValid(tupleid)) {
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                        errmsg("pg_tupleid_get_ctid_to_bigint para tupleid is null!")));
+    }
+    PG_RETURN_INT64(((uint64)ItemPointerGetBlockNumber(tupleid) << 16) | ItemPointerGetOffsetNumber(tupleid));
 }

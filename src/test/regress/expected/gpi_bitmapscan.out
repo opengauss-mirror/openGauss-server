@@ -4,6 +4,7 @@ DROP TABLE if exists gpi_bitmap_table2;
 NOTICE:  table "gpi_bitmap_table2" does not exist, skipping
 SET enable_seqscan=off;
 SET enable_indexscan=off;
+SET force_bitmapand=on;
 CREATE TABLE gpi_bitmap_table1
 (
     c1 int,
@@ -27,13 +28,13 @@ CREATE INDEX idx2_gpi_bitmap_table1 ON gpi_bitmap_table1 (c2) GLOBAL;
 --ok
 -- test bitmap-and
 SELECT count(*) FROM gpi_bitmap_table1 WHERE c1 = 1 AND c2 = 1;
- count
+ count 
 -------
     23
 (1 row)
 
 SELECT * FROM gpi_bitmap_table1 WHERE c1 = 1 AND c2 = 1;
- c1 | c2 | c3
+ c1 | c2 | c3 
 ----+----+----
   1 |  1 |  1
   1 |  1 | 48
@@ -61,7 +62,7 @@ SELECT * FROM gpi_bitmap_table1 WHERE c1 = 1 AND c2 = 1;
 (23 rows)
 
 SELECT * FROM gpi_bitmap_table1 WHERE c1 = 1 AND c2 = 1 ORDER BY c3;
- c1 | c2 | c3
+ c1 | c2 | c3 
 ----+----+----
   1 |  1 |  1
   1 |  1 |  3
@@ -90,7 +91,7 @@ SELECT * FROM gpi_bitmap_table1 WHERE c1 = 1 AND c2 = 1 ORDER BY c3;
 
 -- test bitmap-or
 SELECT count(*) FROM gpi_bitmap_table1 WHERE c1 = 1 OR c2 = 1;
- count
+ count 
 -------
   2485
 (1 row)
@@ -118,7 +119,7 @@ CREATE INDEX idx1_gpi_bitmap_table2 ON gpi_bitmap_table2 (c1) GLOBAL;
 CREATE INDEX idx2_gpi_bitmap_table2 ON gpi_bitmap_table2 (c2) GLOBAL;
 --ok
 EXPLAIN (COSTS OFF) SELECT count(*) FROM gpi_bitmap_table2 WHERE c1 > 9990 AND c1 < 10010;
-                        QUERY PLAN
+                        QUERY PLAN                        
 ----------------------------------------------------------
  Aggregate
    ->  Bitmap Heap Scan on gpi_bitmap_table2
@@ -128,13 +129,13 @@ EXPLAIN (COSTS OFF) SELECT count(*) FROM gpi_bitmap_table2 WHERE c1 > 9990 AND c
 (5 rows)
 
 SELECT count(*) FROM gpi_bitmap_table2 WHERE c1 > 9990 AND c1 < 10010;
- count
+ count 
 -------
     19
 (1 row)
 
 SELECT * FROM gpi_bitmap_table2 WHERE c1 > 9990 AND c1 < 10010;
-  c1   |  c2   | c3
+  c1   |  c2   | c3  
 -------+-------+-----
   9991 |  9992 | 500
   9992 |  9993 | 500
@@ -158,7 +159,7 @@ SELECT * FROM gpi_bitmap_table2 WHERE c1 > 9990 AND c1 < 10010;
 (19 rows)
 
 EXPLAIN (COSTS OFF) SELECT * FROM gpi_bitmap_table2 WHERE c1 = 10000 AND c2 = 10000;
-                       QUERY PLAN
+                       QUERY PLAN                        
 ---------------------------------------------------------
  Bitmap Heap Scan on gpi_bitmap_table2
    Recheck Cond: ((c2 = 10000) AND (c1 = 10000))
@@ -170,12 +171,12 @@ EXPLAIN (COSTS OFF) SELECT * FROM gpi_bitmap_table2 WHERE c1 = 10000 AND c2 = 10
 (7 rows)
 
 SELECT * FROM gpi_bitmap_table2 WHERE c1 = 10000 AND c2 = 10000;
- c1 | c2 | c3
+ c1 | c2 | c3 
 ----+----+----
 (0 rows)
 
 EXPLAIN (COSTS OFF) SELECT * FROM gpi_bitmap_table2 WHERE c1 = 10000 OR c2 = 10000;
-                       QUERY PLAN
+                       QUERY PLAN                        
 ---------------------------------------------------------
  Bitmap Heap Scan on gpi_bitmap_table2
    Recheck Cond: ((c1 = 10000) OR (c2 = 10000))
@@ -187,21 +188,21 @@ EXPLAIN (COSTS OFF) SELECT * FROM gpi_bitmap_table2 WHERE c1 = 10000 OR c2 = 100
 (7 rows)
 
 SELECT * FROM gpi_bitmap_table2 WHERE c1 = 10000 OR c2 = 10000;
-  c1   |  c2   | c3
+  c1   |  c2   | c3  
 -------+-------+-----
   9999 | 10000 | 500
  10000 | 10001 | 500
 (2 rows)
 
 SELECT * FROM gpi_bitmap_table2 WHERE c1 = 9999 OR c2 = 10001;
-  c1   |  c2   | c3
+  c1   |  c2   | c3  
 -------+-------+-----
   9999 | 10000 | 500
  10000 | 10001 | 500
 (2 rows)
 
 EXPLAIN (COSTS OFF) SELECT * FROM gpi_bitmap_table2 WHERE c1 = 10000 OR c2 = 30000;
-                       QUERY PLAN
+                       QUERY PLAN                        
 ---------------------------------------------------------
  Bitmap Heap Scan on gpi_bitmap_table2
    Recheck Cond: ((c1 = 10000) OR (c2 = 30000))
@@ -213,7 +214,7 @@ EXPLAIN (COSTS OFF) SELECT * FROM gpi_bitmap_table2 WHERE c1 = 10000 OR c2 = 300
 (7 rows)
 
 SELECT * FROM gpi_bitmap_table2 WHERE c1 = 10000 OR c2 = 30000;
-  c1   |  c2   | c3
+  c1   |  c2   | c3  
 -------+-------+-----
  10000 | 10001 | 500
  29999 | 30000 | 500
@@ -227,13 +228,14 @@ ERROR:  "idx1_gpi_bitmap_table2" is not a table
 HINT:  Use DROP INDEX to remove an global partition index.
 SET enable_seqscan=on;
 SET enable_indexscan=on;
+SET force_bitmapand=off;
 drop table if exists test_part_bitmapand_ginst_btree;
 NOTICE:  table "test_part_bitmapand_ginst_btree" does not exist, skipping
 CREATE TABLE test_part_bitmapand_ginst_btree (a int, txtkeyword TEXT, txtsample TEXT) partition by range(a) (partition p1 values less than (1001), partition p2 values  less than (2001), partition p3 values less than (3001));
 insert into test_part_bitmapand_ginst_btree values (10, $$'New York'$$, 'new & york | big & apple | nyc');
-insert into test_part_bitmapand_ginst_btree values (1010, 'Moscow',     'moskva | moscow');
-insert into test_part_bitmapand_ginst_btree values (1020, $$'Sanct Peter'$$,    $$Peterburg | peter | 'Sanct Peterburg'$$);
-insert into test_part_bitmapand_ginst_btree values (1030, $$'foo bar qq'$$,     'foo & (bar | qq) & city');
+insert into test_part_bitmapand_ginst_btree values (1010, 'Moscow',	'moskva | moscow');
+insert into test_part_bitmapand_ginst_btree values (1020, $$'Sanct Peter'$$,	$$Peterburg | peter | 'Sanct Peterburg'$$);
+insert into test_part_bitmapand_ginst_btree values (1030, $$'foo bar qq'$$,	'foo & (bar | qq) & city');
 ALTER TABLE test_part_bitmapand_ginst_btree ADD COLUMN keyword tsquery;
 UPDATE test_part_bitmapand_ginst_btree SET keyword = to_tsquery('english', txtkeyword);
 ALTER TABLE test_part_bitmapand_ginst_btree ADD COLUMN sample tsquery;
@@ -246,7 +248,7 @@ CREATE INDEX qq ON test_part_bitmapand_ginst_btree USING gist (keyword tsquery_o
 CREATE INDEX ON test_part_bitmapand_ginst_btree USING gist (keyword tsquery_ops);
 ERROR:  Global partition index only support btree.
 explain (costs off) SELECT keyword FROM test_part_bitmapand_ginst_btree WHERE keyword @> 'new' and a = 10;
-                                QUERY PLAN
+                                QUERY PLAN                                
 --------------------------------------------------------------------------
  Partition Iterator
    Iterations: 1
@@ -257,7 +259,7 @@ explain (costs off) SELECT keyword FROM test_part_bitmapand_ginst_btree WHERE ke
 (6 rows)
 
 SELECT keyword FROM test_part_bitmapand_ginst_btree WHERE keyword @> 'new' and a = 10;
-    keyword
+    keyword     
 ----------------
  'new' & 'york'
 (1 row)
@@ -267,7 +269,7 @@ set enable_seqscan = off;
 set enable_indexscan = off;
 --bitmapand scan
 explain (costs off) SELECT keyword FROM test_part_bitmapand_ginst_btree WHERE keyword @> 'new' and a = 10;
-                                        QUERY PLAN
+                                        QUERY PLAN                                        
 ------------------------------------------------------------------------------------------
  Partition Iterator
    Iterations: 1
@@ -284,7 +286,7 @@ explain (costs off) SELECT keyword FROM test_part_bitmapand_ginst_btree WHERE ke
 (12 rows)
 
 SELECT keyword FROM test_part_bitmapand_ginst_btree WHERE keyword @> 'new' and a = 10;
-    keyword
+    keyword     
 ----------------
  'new' & 'york'
 (1 row)
@@ -298,18 +300,18 @@ explain (costs off) SELECT keyword FROM test_part_bitmapand_ginst_btree WHERE ke
  Partition Iterator
    Iterations: 1
    ->  Partitioned Bitmap Heap Scan on test_part_bitmapand_ginst_btree
-         Recheck Cond: ((keyword @> '''new'''::tsquery) AND (a = 10))
+         Recheck Cond: ((a = 10) AND (keyword @> '''new'''::tsquery))
          Selected Partitions:  1
          ->  BitmapAnd
+               ->  Bitmap Index Scan on test_part_bitmapand_ginst_btree_a_tableoid_idx
+                     Index Cond: (a = 10)
                ->  Partitioned Bitmap Index Scan on qq
                      Index Cond: (keyword @> '''new'''::tsquery)
                      Selected Partitions:  1
-               ->  Bitmap Index Scan on test_part_bitmapand_ginst_btree_a_tableoid_idx
-                     Index Cond: (a = 10)
 (11 rows)
 
 SELECT keyword FROM test_part_bitmapand_ginst_btree WHERE keyword @> 'new' and a = 10;
-    keyword
+    keyword     
 ----------------
  'new' & 'york'
 (1 row)
@@ -325,7 +327,7 @@ set force_bitmapand = on;
 set enable_seqscan = off;
 set enable_indexscan = off;
 explain (costs off) select * from test_part_bitmapand_gin_btree where 'ipsu:*'::tsquery @@ ts and a = 10;
-                                       QUERY PLAN
+                                       QUERY PLAN                                       
 ----------------------------------------------------------------------------------------
  Partition Iterator
    Iterations: 1
@@ -342,12 +344,12 @@ explain (costs off) select * from test_part_bitmapand_gin_btree where 'ipsu:*'::
 (12 rows)
 
 select * from test_part_bitmapand_gin_btree where 'ipsu:*'::tsquery @@ ts and a = 10;
- a | ts
+ a | ts 
 ---+----
 (0 rows)
 
 explain (costs off) select * from test_part_bitmapand_gin_btree where 'ipsu:*'::tsquery @@ ts and a = 1010;
-                                       QUERY PLAN
+                                       QUERY PLAN                                       
 ----------------------------------------------------------------------------------------
  Partition Iterator
    Iterations: 1
@@ -364,7 +366,7 @@ explain (costs off) select * from test_part_bitmapand_gin_btree where 'ipsu:*'::
 (12 rows)
 
 select * from test_part_bitmapand_gin_btree where 'ipsu:*'::tsquery @@ ts and a = 1010;
-  a   |         ts
+  a   |         ts         
 ------+--------------------
  1010 | 'ipsum':2 'lore':1
 (1 row)
@@ -372,7 +374,7 @@ select * from test_part_bitmapand_gin_btree where 'ipsu:*'::tsquery @@ ts and a 
 drop index test_part_bitmapand_gin_btree_idx_a;
 create index test_part_bitmapand_gin_btree_idx_a on test_part_bitmapand_gin_btree using btree(a) global;
 explain (costs off) select * from test_part_bitmapand_gin_btree where 'ipsu:*'::tsquery @@ ts and a = 1010;
-                                      QUERY PLAN
+                                      QUERY PLAN                                      
 --------------------------------------------------------------------------------------
  Partition Iterator
    Iterations: 1
@@ -388,7 +390,7 @@ explain (costs off) select * from test_part_bitmapand_gin_btree where 'ipsu:*'::
 (11 rows)
 
 select * from test_part_bitmapand_gin_btree where 'ipsu:*'::tsquery @@ ts and a = 1010;
-  a   |         ts
+  a   |         ts         
 ------+--------------------
  1010 | 'ipsum':2 'lore':1
 (1 row)

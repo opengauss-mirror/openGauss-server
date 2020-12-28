@@ -1,0 +1,241 @@
+--create normal tablespace
+\! rm -rf @abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts
+drop tablespace if exists hdfs_ts;
+NOTICE:  Tablespace "hdfs_ts" does not exist, skipping.
+create  tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/temp_dir/hdfs_ts');
+-- create dfs table 
+drop table if exists hdfs_table005; 
+NOTICE:  table "hdfs_table005" does not exist, skipping
+create table hdfs_table005 (a int, b int) tablespace hdfs_ts;
+set enable_global_stats = true;
+set cstore_insert_mode=main;
+insert into hdfs_table005 values(12, 13);
+set cstore_insert_mode=delta;
+insert into hdfs_table005 values(generate_series(1, 100), generate_series(1, 100));
+analyze;
+--create normal table
+drop table if exists normal_table ;
+NOTICE:  table "normal_table" does not exist, skipping
+create table normal_table(a int, b int);
+insert into normal_table values(generate_series(1, 100), generate_series(1, 100));
+analyze normal_table;
+explain (verbose, costs off) select * from hdfs_table005 , normal_table where hdfs_table005.a = normal_table.b;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.hdfs_table005.a, public.hdfs_table005.b, normal_table.a, normal_table.b
+   ->  Hash Join
+         Output: public.hdfs_table005.a, public.hdfs_table005.b, normal_table.a, normal_table.b
+         Hash Cond: (public.hdfs_table005.a = normal_table.b)
+         ->  Append
+               ->  Row Adapter
+                     Output: public.hdfs_table005.a, public.hdfs_table005.b
+                     ->  Dfs Scan on public.hdfs_table005
+                           Output: public.hdfs_table005.a, public.hdfs_table005.b
+                           Distribute Key: public.hdfs_table005.a
+                           Filter By Bloom Filter On Expr: public.hdfs_table005.a
+                           Filter By Bloom Filter On Index: 0
+               ->  Seq Scan on cstore.pg_delta_public_hdfs_table005 hdfs_table005
+                     Output: cstore.hdfs_table005.a, cstore.hdfs_table005.b
+                     Distribute Key: cstore.hdfs_table005.a
+         ->  Hash
+               Output: normal_table.a, normal_table.b
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: normal_table.a, normal_table.b
+                     Distribute Key: normal_table.b
+                     ->  Seq Scan on public.normal_table
+                           Output: normal_table.a, normal_table.b
+                           Distribute Key: normal_table.a
+(24 rows)
+
+explain (verbose, costs off) select * from hdfs_table005 , normal_table where hdfs_table005.b = normal_table.b;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.hdfs_table005.a, public.hdfs_table005.b, normal_table.a, normal_table.b
+   ->  Hash Join
+         Output: public.hdfs_table005.a, public.hdfs_table005.b, normal_table.a, normal_table.b
+         Hash Cond: (public.hdfs_table005.b = normal_table.b)
+         ->  Streaming(type: REDISTRIBUTE)
+               Output: public.hdfs_table005.a, public.hdfs_table005.b
+               Distribute Key: public.hdfs_table005.b
+               ->  Append
+                     ->  Row Adapter
+                           Output: public.hdfs_table005.a, public.hdfs_table005.b
+                           ->  Dfs Scan on public.hdfs_table005
+                                 Output: public.hdfs_table005.a, public.hdfs_table005.b
+                                 Distribute Key: public.hdfs_table005.a
+                     ->  Seq Scan on cstore.pg_delta_public_hdfs_table005 hdfs_table005
+                           Output: cstore.hdfs_table005.a, cstore.hdfs_table005.b
+                           Distribute Key: cstore.hdfs_table005.a
+         ->  Hash
+               Output: normal_table.a, normal_table.b
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: normal_table.a, normal_table.b
+                     Distribute Key: normal_table.b
+                     ->  Seq Scan on public.normal_table
+                           Output: normal_table.a, normal_table.b
+                           Distribute Key: normal_table.a
+(25 rows)
+
+explain (verbose, costs off) select * from hdfs_table005  where hdfs_table005.a in (select normal_table.a from normal_table where hdfs_table005.a = normal_table.b);
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: public.hdfs_table005.a, public.hdfs_table005.b
+   ->  Vector Streaming (type: GATHER)
+         Output: public.hdfs_table005.a, public.hdfs_table005.b
+         ->  Vector Result
+               Output: public.hdfs_table005.a, public.hdfs_table005.b
+               ->  Vector Append
+                     ->  Dfs Scan on public.hdfs_table005
+                           Output: public.hdfs_table005.a, public.hdfs_table005.b
+                           Distribute Key: public.hdfs_table005.a
+                           Filter: (SubPlan 1)
+                           SubPlan 1
+                             ->  Result
+                                   Output: normal_table.a
+                                   Filter: (public.hdfs_table005.a = normal_table.b)
+                                   ->  Materialize
+                                         Output: normal_table.a, normal_table.b
+                                         ->  Streaming(type: BROADCAST)
+                                               Output: normal_table.a, normal_table.b
+                                               ->  Seq Scan on public.normal_table
+                                                     Output: normal_table.a, normal_table.b
+                                                     Distribute Key: normal_table.a
+                     ->  Vector Adapter
+                           Output: cstore.hdfs_table005.a, cstore.hdfs_table005.b
+                           ->  Seq Scan on cstore.pg_delta_public_hdfs_table005 hdfs_table005
+                                 Output: cstore.hdfs_table005.a, cstore.hdfs_table005.b
+                                 Distribute Key: cstore.hdfs_table005.a
+                                 Filter: (SubPlan 1)
+                                 SubPlan 1
+                                   ->  Result
+                                         Output: normal_table.a
+                                         Filter: (cstore.hdfs_table005.a = normal_table.b)
+                                         ->  Materialize
+                                               Output: normal_table.a, normal_table.b
+                                               ->  Streaming(type: BROADCAST)
+                                                     Output: normal_table.a, normal_table.b
+                                                     ->  Seq Scan on public.normal_table
+                                                           Output: normal_table.a, normal_table.b
+                                                           Distribute Key: normal_table.a
+(39 rows)
+
+explain (verbose, costs off) select * from hdfs_table005  where hdfs_table005.a in (select normal_table.a from normal_table);
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.hdfs_table005.a, public.hdfs_table005.b
+   ->  Hash Semi Join
+         Output: public.hdfs_table005.a, public.hdfs_table005.b
+         Hash Cond: (public.hdfs_table005.a = normal_table.a)
+         ->  Append
+               ->  Row Adapter
+                     Output: public.hdfs_table005.a, public.hdfs_table005.b
+                     ->  Dfs Scan on public.hdfs_table005
+                           Output: public.hdfs_table005.a, public.hdfs_table005.b
+                           Distribute Key: public.hdfs_table005.a
+               ->  Seq Scan on cstore.pg_delta_public_hdfs_table005 hdfs_table005
+                     Output: cstore.hdfs_table005.a, cstore.hdfs_table005.b
+                     Distribute Key: cstore.hdfs_table005.a
+         ->  Hash
+               Output: normal_table.a
+               ->  Seq Scan on public.normal_table
+                     Output: normal_table.a
+                     Distribute Key: normal_table.a
+(19 rows)
+
+explain (verbose, costs off) delete from hdfs_table005 using normal_table where normal_table.b = hdfs_table005.b;
+                                                                                 QUERY PLAN                                                                                  
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Append
+         ->  Row Adapter
+               ->  Vector Delete on public.hdfs_table005
+                     ->  Vector Adapter
+                           Output: public.hdfs_table005.b, public.hdfs_table005.ctid, public.hdfs_table005.xc_node_id, public.hdfs_table005.a, normal_table.ctid
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: public.hdfs_table005.b, public.hdfs_table005.ctid, public.hdfs_table005.xc_node_id, public.hdfs_table005.a, normal_table.ctid
+                                 Distribute Key: public.hdfs_table005.a
+                                 ->  Nested Loop
+                                       Output: public.hdfs_table005.b, public.hdfs_table005.ctid, public.hdfs_table005.xc_node_id, public.hdfs_table005.a, normal_table.ctid
+                                       Join Filter: (public.hdfs_table005.b = normal_table.b)
+                                       ->  Streaming(type: REDISTRIBUTE)
+                                             Output: public.hdfs_table005.b, public.hdfs_table005.ctid, public.hdfs_table005.xc_node_id, public.hdfs_table005.a
+                                             Distribute Key: public.hdfs_table005.b
+                                             ->  Row Adapter
+                                                   Output: public.hdfs_table005.b, public.hdfs_table005.ctid, public.hdfs_table005.xc_node_id, public.hdfs_table005.a
+                                                   ->  Dfs Scan on public.hdfs_table005
+                                                         Output: public.hdfs_table005.b, public.hdfs_table005.ctid, public.hdfs_table005.xc_node_id, public.hdfs_table005.a
+                                                         Distribute Key: public.hdfs_table005.a
+                                       ->  Materialize
+                                             Output: normal_table.ctid, normal_table.b
+                                             ->  Streaming(type: REDISTRIBUTE)
+                                                   Output: normal_table.ctid, normal_table.b
+                                                   Distribute Key: normal_table.b
+                                                   ->  Seq Scan on public.normal_table
+                                                         Output: normal_table.ctid, normal_table.b
+                                                         Distribute Key: normal_table.a
+         ->  Delete on cstore.pg_delta_public_hdfs_table005 hdfs_table005
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: cstore.hdfs_table005.b, cstore.hdfs_table005.ctid, cstore.hdfs_table005.xc_node_id, cstore.hdfs_table005.a, normal_table.ctid
+                     Distribute Key: cstore.hdfs_table005.a
+                     ->  Hash Join
+                           Output: cstore.hdfs_table005.b, cstore.hdfs_table005.ctid, cstore.hdfs_table005.xc_node_id, cstore.hdfs_table005.a, normal_table.ctid
+                           Hash Cond: (cstore.hdfs_table005.b = normal_table.b)
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: cstore.hdfs_table005.b, cstore.hdfs_table005.ctid, cstore.hdfs_table005.xc_node_id, cstore.hdfs_table005.a
+                                 Distribute Key: cstore.hdfs_table005.b
+                                 ->  Seq Scan on cstore.pg_delta_public_hdfs_table005 hdfs_table005
+                                       Output: cstore.hdfs_table005.b, cstore.hdfs_table005.ctid, cstore.hdfs_table005.xc_node_id, cstore.hdfs_table005.a
+                                       Distribute Key: cstore.hdfs_table005.a
+                           ->  Hash
+                                 Output: normal_table.ctid, normal_table.b
+                                 ->  Streaming(type: REDISTRIBUTE)
+                                       Output: normal_table.ctid, normal_table.b
+                                       Distribute Key: normal_table.b
+                                       ->  Seq Scan on public.normal_table
+                                             Output: normal_table.ctid, normal_table.b
+                                             Distribute Key: normal_table.a
+(49 rows)
+
+explain (verbose, costs off) update hdfs_table005 set b = 5 where hdfs_table005.a in (select normal_table.a from normal_table);
+                                                                                QUERY PLAN                                                                                
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Append
+         ->  Row Adapter
+               ->  Vector Update on public.hdfs_table005
+                     ->  Vector Adapter
+                           Output: public.hdfs_table005.a, (5), public.hdfs_table005.a, public.hdfs_table005.ctid, public.hdfs_table005.xc_node_id, normal_table.ctid
+                           ->  Nested Loop Semi Join
+                                 Output: public.hdfs_table005.a, 5, public.hdfs_table005.a, public.hdfs_table005.ctid, public.hdfs_table005.xc_node_id, normal_table.ctid
+                                 Join Filter: (public.hdfs_table005.a = normal_table.a)
+                                 ->  Row Adapter
+                                       Output: public.hdfs_table005.a, public.hdfs_table005.ctid, public.hdfs_table005.xc_node_id
+                                       ->  Dfs Scan on public.hdfs_table005
+                                             Output: public.hdfs_table005.a, public.hdfs_table005.ctid, public.hdfs_table005.xc_node_id
+                                             Distribute Key: public.hdfs_table005.a
+                                 ->  Seq Scan on public.normal_table
+                                       Output: normal_table.ctid, normal_table.a
+                                       Distribute Key: normal_table.a
+         ->  Update on cstore.pg_delta_public_hdfs_table005 hdfs_table005
+               ->  Hash Semi Join
+                     Output: cstore.hdfs_table005.a, 5, cstore.hdfs_table005.a, cstore.hdfs_table005.ctid, cstore.hdfs_table005.xc_node_id, normal_table.ctid
+                     Hash Cond: (cstore.hdfs_table005.a = normal_table.a)
+                     ->  Seq Scan on cstore.pg_delta_public_hdfs_table005 hdfs_table005
+                           Output: cstore.hdfs_table005.a, cstore.hdfs_table005.ctid, cstore.hdfs_table005.xc_node_id
+                           Distribute Key: cstore.hdfs_table005.a
+                     ->  Hash
+                           Output: normal_table.ctid, normal_table.a
+                           ->  Seq Scan on public.normal_table
+                                 Output: normal_table.ctid, normal_table.a
+                                 Distribute Key: normal_table.a
+(29 rows)
+
+--clean environment
+drop table if exists normal_table ;
+drop table if exists hdfs_table005;
+drop tablespace if exists hdfs_ts;
+\! rm -rf @abs_srcdir@/tmp_check/temp_hdfs_dir

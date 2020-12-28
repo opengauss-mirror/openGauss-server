@@ -1,3 +1,4 @@
+
 --
 -- FLOAT8
 --
@@ -185,11 +186,6 @@ SELECT '-9223372036854780000'::float8::int8;
 SELECT sin('1');
 SELECT cos('1');
 SELECT tan('1');
-SELECT cot('1');
-SELECT sin('0');
-SELECT cos('0');
-SELECT tan('0');
-SELECT cot('0');
 -- test Inf/NaN cases for functions
 SELECT sin('infinity');
 SELECT sin('-infinity');
@@ -200,9 +196,6 @@ SELECT cos('nan');
 SELECT tan('infinity');
 SELECT tan('-infinity');
 SELECT tan('nan');
-SELECT cot('infinity');
-SELECT cot('-infinity');
-SELECT cot('nan');
 
 --test power
 SELECT power('0', '0');
@@ -239,14 +232,3 @@ SELECT power('nan', '2');
 SELECT power('nan', 'infinity');
 SELECT power('nan', '-infinity');
 SELECT power('nan', 'nan');
-
-create type xfloat8;
-create function xfloat8in(cstring) returns xfloat8 immutable strict
-  language internal as 'int8in';
-create function xfloat8out(xfloat8) returns cstring immutable strict
-  language internal as 'int8out';
-create type xfloat8 (input = xfloat8in, output = xfloat8out, like = float8);
-create cast (xfloat8 as float8) without function;
-create cast (float8 as xfloat8) without function;
-create cast (xfloat8 as bigint) without function;
-create cast (bigint as xfloat8) without function;

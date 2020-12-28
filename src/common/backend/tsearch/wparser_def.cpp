@@ -1617,7 +1617,9 @@ static bool TParserGet(TParser* prs)
             prs->state->charlen = (prs->charmaxlen == 1) ? prs->charmaxlen : pg_mblen(prs->str + prs->state->posbyte);
         }
 
-        Assert(prs->state->posbyte + prs->state->charlen <= prs->lenstr);
+        if (prs->state->posbyte + prs->state->charlen > prs->lenstr) {
+            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("posbyte plus charlen greater than lenstr")));
+        }
         Assert(prs->state->state >= TPS_Base && prs->state->state < TPS_Null);
         Assert(Actions[prs->state->state].state == prs->state->state);
 

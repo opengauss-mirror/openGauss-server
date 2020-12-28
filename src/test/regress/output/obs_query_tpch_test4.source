@@ -1,0 +1,30 @@
+--
+--nation
+--
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/tpch_nation_out/ address=@obshostname@ ak=@ak@ sk=@sk@
+DROP FOREIGN TABLE if exists EXTNATION;
+NOTICE:  foreign table "extnation" does not exist, skipping
+CREATE FOREIGN TABLE EXTNATION (
+  N_NATIONKEY   BIGINT,
+  N_NAME      CHAR(25),
+  N_REGIONKEY   INTEGER NOT NULL,  -- references R_REGIONKEY
+  N_COMMENT   VARCHAR(152)
+)SERVER obs_server OPTIONS (
+    location 'obs://@obsbucket@/obscheck/tpch_nation/',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '32') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+DROP TABLE if exists NATION;
+NOTICE:  table "nation" does not exist, skipping
+CREATE TABLE NATION (
+  N_NATIONKEY   BIGINT,
+  N_NAME      CHAR(25),
+  N_REGIONKEY   INTEGER NOT NULL,  -- references R_REGIONKEY
+  N_COMMENT   VARCHAR(152)
+);
+insert into NATION select * from EXTNATION;
+drop table NATION;
+drop foreign table EXTNATION;
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/tpch_nation_out/ address=@obshostname@ ak=@ak@ sk=@sk@

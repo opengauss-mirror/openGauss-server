@@ -1,0 +1,42 @@
+set enable_global_stats = true;
+set enable_vector_engine=on;
+-- Problem:
+-- basic timestamp with time zone type data compression, including DELTA method, min/max computation.
+CREATE TABLE colcmpr_timestamp_with_timezone
+(
+	distkey INT4,
+	a timestamp with time zone,
+	b timestamp with time zone,
+	c timestamp with time zone,
+	d timestamp with time zone,
+	e timestamp with time zone,
+	f timestamp with time zone
+) with (orientation = orc) tablespace hdfs_ts  DISTRIBUTE BY HASH(distkey);
+COPY colcmpr_timestamp_with_timezone FROM '@abs_srcdir@/data/colcmpr_timestamp_with_timezone.data' delimiter ',';
+SET DATESTYLE=POSTGRESQL;
+SELECT * FROM colcmpr_timestamp_with_timezone;
+ distkey |              a               |                 b                 |                 c                 |                d                |                e                |                f                
+---------+------------------------------+-----------------------------------+-----------------------------------+---------------------------------+---------------------------------+---------------------------------
+       1 | Fri Feb 05 08:00:30 1954 PST | Sat Feb 06 23:12:12.2356 1954 PST | Sat Feb 06 13:12:12.2356 1954 PST | Wed Dec 31 01:01:00 4714 PST BC | Wed Dec 31 01:01:00 4714 PST BC | Sun Dec 31 06:59:00 294276 PST
+       1 | Wed Feb 05 08:00:30 1964 PST | Thu Feb 06 23:12:12.2356 1964 PST | Thu Feb 06 13:12:12.2356 1964 PST | Sat Jan 01 06:59:00 294276 PST  | Wed Dec 31 01:02:00 4714 PST BC | Sun Dec 31 06:58:00 294276 PST
+       1 | Tue Feb 05 09:00:30 1974 PDT | Wed Feb 06 23:12:12.2356 1974 PDT | Wed Feb 06 13:12:12.2356 1974 PDT | Wed Dec 31 01:02:00 4714 PST BC | Wed Dec 31 01:03:00 4714 PST BC | Sun Dec 31 06:57:00 294276 PST
+       1 | Sun Feb 05 08:00:30 1984 PST | Mon Feb 06 23:12:12.2356 1984 PST | Mon Feb 06 13:12:12.2356 1984 PST | Wed Dec 31 01:03:00 4714 PST BC | Wed Dec 31 01:04:00 4714 PST BC | Sun Dec 31 06:56:00 294276 PST
+       1 | Sat Feb 05 08:00:30 1994 PST | Sun Feb 06 23:12:12.2356 1994 PST | Sun Feb 06 13:12:12.2356 1994 PST | Thu Jan 01 01:01:00 4713 PST BC | Wed Dec 31 01:05:00 4714 PST BC | Sat Dec 30 06:59:00 294276 PST
+       1 | Thu Feb 05 08:00:30 2004 PST | Fri Feb 06 23:12:12.2356 2004 PST | Fri Feb 06 13:12:12.2356 2004 PST | Sat Jan 01 06:58:00 294276 PST  | Thu Jan 01 01:02:00 4713 PST BC | Sat Dec 30 01:01:00 294276 PST
+       1 | Wed Feb 05 08:00:30 2014 PST | Thu Feb 06 23:12:12.2356 2014 PST | Thu Feb 06 13:12:12.2356 2014 PST | Sat Jan 01 06:57:00 294276 PST  | Fri Jan 02 01:03:00 4713 PST BC | Fri Dec 29 01:01:00 294276 PST
+       1 | Mon Feb 05 08:00:30 2024 PST | Tue Feb 06 23:12:12.2356 2024 PST | Tue Feb 06 13:12:12.2356 2024 PST | Sat Jan 01 06:56:00 294276 PST  | Sat Jan 03 01:04:00 4713 PST BC | Thu Dec 28 01:01:00 294276 PST
+       1 | Sun Feb 05 08:00:30 2034 PST | Mon Feb 06 23:12:12.2356 2034 PST | Mon Feb 06 13:12:12.2356 2034 PST | Sun Jan 02 06:59:00 294276 PST  | Thu Jan 01 01:05:00 4713 PST BC | Wed Dec 27 01:01:00 294276 PST
+       1 | Fri Feb 05 08:00:30 2044 PST | Sat Feb 06 23:12:12.2356 2044 PST | Sat Feb 06 13:12:12.2356 2044 PST | Mon Jan 03 06:59:00 294276 PST  | Thu Jan 01 01:02:00 4713 PST BC | Tue Aug 19 20:38:45 2014 PDT
+       1 | Fri Feb 05 08:00:30 1954 PST | Sat Feb 06 23:12:12.2356 1954 PST | Sat Feb 06 13:12:12.2356 1954 PST | Wed Dec 31 01:01:00 4714 PST BC | Thu Jan 01 01:02:00 4713 PST BC | Mon Jan 01 06:59:00 0001 PST
+       1 | Wed Feb 05 08:00:30 1964 PST | Thu Feb 06 23:12:12.2356 1964 PST | Thu Feb 06 13:12:12.2356 1964 PST | Sat Jan 01 06:59:00 294276 PST  | Thu Jan 01 01:02:00 4713 PST BC | Sun Dec 31 01:01:00 0001 PST BC
+       1 | Tue Feb 05 09:00:30 1974 PDT | Wed Feb 06 23:12:12.2356 1974 PDT | Wed Feb 06 13:12:12.2356 1974 PDT | Wed Dec 31 01:02:00 4714 PST BC | Thu Jan 01 01:02:00 4713 PST BC | Mon Jan 01 01:01:00 0001 PST
+       1 | Sun Feb 05 08:00:30 1984 PST | Mon Feb 06 23:12:12.2356 1984 PST | Mon Feb 06 13:12:12.2356 1984 PST | Wed Dec 31 01:03:00 4714 PST BC | Thu Jan 01 01:02:00 4713 PST BC | Tue Dec 11 01:01:00 0001 PST
+       1 | Sat Feb 05 08:00:30 1994 PST | Sun Feb 06 23:12:12.2356 1994 PST | Sun Feb 06 13:12:12.2356 1994 PST | Thu Dec 30 01:01:00 4713 PST BC | Thu Jan 01 01:02:00 4713 PST BC | Mon Jan 01 06:59:00 0001 PST
+       1 | Thu Feb 05 08:00:30 2004 PST | Fri Feb 06 23:12:12.2356 2004 PST | Fri Feb 06 13:12:12.2356 2004 PST | Sat Jan 01 06:58:00 294276 PST  | Thu Jan 01 01:02:00 4713 PST BC | Sun Dec 31 01:01:00 0001 PST BC
+       1 | Wed Feb 05 08:00:30 2014 PST | Thu Feb 06 23:12:12.2356 2014 PST | Thu Feb 06 13:12:12.2356 2014 PST | Sat Jan 01 06:57:00 294276 PST  | Thu Jan 01 01:02:00 4713 PST BC | Sun Dec 31 01:01:00 0001 PST BC
+       1 | Mon Feb 05 08:00:30 2024 PST | Tue Feb 06 23:12:12.2356 2024 PST | Tue Feb 06 13:12:12.2356 2024 PST | Sat Jan 01 06:56:00 294276 PST  | Thu Jan 01 01:02:00 4713 PST BC | Sun Dec 31 01:01:00 0001 PST BC
+       1 | Sun Feb 05 08:00:30 2034 PST | Mon Feb 06 23:12:12.2356 2034 PST | Mon Feb 06 13:12:12.2356 2034 PST | Sat Dec 30 06:59:00 294276 PST  | Thu Jan 01 01:02:00 4713 PST BC | Sun Dec 31 01:01:00 0001 PST BC
+       1 | Fri Feb 05 08:00:30 2044 PST | Sat Feb 06 23:12:12.2356 2044 PST | Sat Feb 06 13:12:12.2356 2044 PST | Sun Dec 31 06:59:00 294276 PST  | Thu Jan 01 01:02:00 4713 PST BC | Sun Dec 31 01:01:00 0001 PST BC
+(20 rows)
+
+DROP TABLE colcmpr_timestamp_with_timezone;

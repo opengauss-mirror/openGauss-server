@@ -84,8 +84,10 @@ int set_node_info(const char* node_name, int port, const char* host, NODE_TYPE t
         return -1;
     cur_node_info->port = port;
     cur_node_info->host = strdup(host);
-    if (cur_node_info->host == NULL)
+    if (cur_node_info->host == NULL) {
+        free(cur_node_info->node_name);
         return -1;
+    }
     cur_node_info->type = type;
     return 0;
 }
@@ -116,7 +118,8 @@ int find_node_index(const char* node_name)
     return -1;
 }
 
-static void add_txn_gid_info(txn_info* txn, gid_info* txn_gid_info, const char* gid, bool is_exec_cn)
+static void add_txn_gid_info(txn_info* txn, gid_info* txn_gid_info, const char* gid,
+                                        bool is_exec_cn, const char* node_name)
 {
     /* old version just return. */
     if (gid[0] != 'N') {
@@ -139,14 +142,24 @@ static void add_txn_gid_info(txn_info* txn, gid_info* txn_gid_info, const char* 
         return;
     }
 
-    for (i = 0; i < len; i++) {
-        if (idx == 0 && gid[i] == 'T') {
+    for (i = 1; i < len; i++) {
+        if (idx == 0 && (gid[i] == 'T' || gid[i] == 'N')) {
+            txn->new_ddl_version = (gid[i] == 'N');
             loc[idx] = i;
             idx++;
         } else if (gid[i] == '_' && idx == 1) {
             loc[idx] = i;
             break;
         }
+    }
+    /*
+     * CN's in-doubt transactions may be built by other CN,
+     * so gid information doesn't include next node info, return.
+     */
+    if (idx == 0) {
+        write_stderr("gid info was built by other cn, local cn name: \"%s\", "
+            " gid: \"%s\" .\n", node_name, gid);
+        return;
     }
 
     errorno = strncpy_s(xidstr, sizeof(xidstr), gid + 1 + loc[0], loc[1] - loc[0] - 1);
@@ -160,11 +173,11 @@ static void add_txn_gid_info(txn_info* txn, gid_info* txn_gid_info, const char* 
     if (next_node_idx != -1) {
         txn_gid_info->next_node_idx = next_node_idx;
     } else {
-        write_stderr("deleted cn name: \"%s\".\n", next_node_name);
+        write_stderr("can not found datanode name in node list: \"%s\", "
+            " gid: \"%s\".\n", next_node_name, gid);
         /* reset my node info */
         txn_gid_info->next_node_idx = 0;
         txn_gid_info->next_node_xid = 0;
-        txn->missing_cn_in_chain = true;
     }
 
 }
@@ -187,7 +200,7 @@ void add_txn_info(const char* dbname, const char* node_name, TransactionId local
     if (nodeidx != -1) {
         is_exec_cn = (strcmp(node_name, txn->cn_nodename) == 0);
         txn->txn_stat[nodeidx] = status;
-        add_txn_gid_info(txn, &txn->txn_gid_info[nodeidx], gid, is_exec_cn);
+        add_txn_gid_info(txn, &txn->txn_gid_info[nodeidx], gid, is_exec_cn, node_name);
     } else {
         write_stderr("invalid node_name or not defined node_name: \"%s\".\n", node_name);
     }
@@ -212,11 +225,11 @@ static char* parse_gid_info(const char* gid, txn_info* txn)
                 if (gid[i] == '_' && idx == 0) {
                     loc = i;
                     if (gid[0] == 'T') {
-                        break;
+                       break;
                     } else {
-                        idx++;
+                       idx++;
                     }
-                } else if (gid[i] == 'T' && idx == 1) {
+                } else if ((gid[i] == 'T' || gid[i] == 'N') && idx == 1) {
                     end_loc = i - 1;
                     break;
                 }
@@ -240,6 +253,7 @@ static char* parse_gid_info(const char* gid, txn_info* txn)
 
     txn->gid = (char*)malloc(sizeof(char) * (end_loc + 1));
     if (txn->gid == NULL) {
+        free(txn);
         return NULL;
     }
     errorno = strncpy_s(txn->gid, (end_loc + 1), gid, end_loc);
@@ -268,11 +282,15 @@ static txn_info* make_txn_info(const char* dbname, TransactionId localxid, const
 
     txn->localxid = localxid;
     if (parse_gid_info(gid, txn) == NULL) {
-        goto err;
-    }
+        free(txn);
+        return NULL;
+    }    
     txn->owner = strdup(owner);
     if (txn->owner == NULL) {
-        goto err;
+        free(txn->gid);
+        txn->gid = NULL;
+        free(txn);
+        return NULL;
     }
     /* assign jobs */
     int work_index = dbinfo->index_count;
@@ -286,7 +304,10 @@ static txn_info* make_txn_info(const char* dbname, TransactionId localxid, const
     dbinfo->index_count = (dbinfo->index_count + 1) % g_gs_clean_worker_num;
     txn->txn_stat = (TXN_STATUS*)malloc(sizeof(TXN_STATUS) * pgxc_clean_node_count);
     if (txn->txn_stat == NULL) {
-        goto err;
+        free(txn->gid);
+        free(txn->owner);
+        free(txn);
+        return (NULL);
     }
     errorno = memset_s(
         txn->txn_stat, sizeof(TXN_STATUS) * pgxc_clean_node_count, 0, sizeof(TXN_STATUS) * pgxc_clean_node_count);
@@ -294,7 +315,11 @@ static txn_info* make_txn_info(const char* dbname, TransactionId localxid, const
 
     txn->txn_gid_info = (gid_info*)malloc(sizeof(gid_info) * pgxc_clean_node_count);
     if (txn->txn_gid_info == NULL) {
-        goto err;
+        free(txn->gid);
+        free(txn->owner);
+        free(txn->txn_stat);
+        free(txn);
+        return (NULL);
     }
     errorno = memset_s(
         txn->txn_gid_info, sizeof(gid_info) * pgxc_clean_node_count, 0, sizeof(gid_info) * pgxc_clean_node_count);
@@ -308,24 +333,6 @@ static txn_info* make_txn_info(const char* dbname, TransactionId localxid, const
         txn->new_version ? "new" : "old or gtm");
 
     return txn;
-
-err:
-    if (txn != NULL) {
-        if (txn->gid != NULL) {
-            free(txn->gid);
-        }
-        if (txn->owner != NULL) {
-            free(txn->owner);
-        }
-        if (txn->txn_stat != NULL) {
-            free(txn->txn_stat);
-        }
-        if (txn->txn_gid_info != NULL) {
-            free(txn->txn_gid_info);
-        }
-        free(txn);
-    }
-    return NULL;
 }
 
 static txn_info* find_txn(const char* gid)
@@ -377,15 +384,25 @@ static TXN_STATUS get_txn_global_status(txn_info* txn, uint32 check_flag)
     return TXN_STATUS_PREPARED;
 }
 
-TXN_STATUS check_txn_global_status(txn_info* txn)
+TXN_STATUS check_txn_global_status(txn_info* txn, bool commit_all_prepared, bool rollback_all_prepared)
 {
     int ii;
     uint32 check_flag = 0;
 
     if (txn == NULL)
         return TXN_STATUS_INITIAL;
-    if (txn->missing_cn_in_chain == true) {
-        check_flag |= TXN_UNCONNECT;
+    /*
+     * if exec cn is prepared but not running,
+     * all participater should be prepared, because
+     * always finish local prepared transaction firstly.
+     * add quick notification.
+     */
+    if (txn->is_exec_cn_prepared == true) {
+        if (commit_all_prepared) {
+            check_flag |= TXN_COMMITTED;
+        } else if (rollback_all_prepared) {
+            check_flag |= TXN_ABORTED;
+        }
     }
     for (ii = 0; ii < pgxc_clean_node_count; ii++) {
         if (txn->txn_stat[ii] == TXN_STATUS_RUNNING) {

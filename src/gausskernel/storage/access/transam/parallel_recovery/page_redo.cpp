@@ -57,37 +57,37 @@
 
 namespace parallel_recovery {
 
-static const char* const PROCESS_TYPE_CMD_ARG = "--forkpageredo";
-static const int AUXILIARY_TYPE_CMD_ARG_LEN = 16;
-static char g_AUXILIARY_TYPE_CMD_ARG[AUXILIARY_TYPE_CMD_ARG_LEN] = {0};
+static const char *const PROCESS_TYPE_CMD_ARG = "--forkpageredo";
+static char g_AUXILIARY_TYPE_CMD_ARG[16] = {0};
 static const uint32 REDO_WORKER_ALIGN_LEN = 16; /* need 128-bit aligned */
 
-THR_LOCAL PageRedoWorker* g_redoWorker = NULL;
+THR_LOCAL PageRedoWorker *g_redoWorker = NULL;
 
 static RedoItem g_redoEndMark = {};
 static RedoItem g_terminateMark = {};
+static RedoItem g_cleanupMark = { false, false, false, false, 0 };
 
 static const int PAGE_REDO_WORKER_ARG = 3;
 static const int REDO_SLEEP_50US = 50;
 static const int REDO_SLEEP_100US = 100;
 
 static void AddSafeRecoveryRestartPoint(XLogRecPtr restartPoint);
-static void ApplyAndFreeRedoItem(RedoItem*);
-static void ApplyMultiPageRecord(RedoItem*);
+static void ApplyAndFreeRedoItem(RedoItem *);
+static void ApplyMultiPageRecord(RedoItem *);
 static int ApplyRedoLoop();
-static void ApplySinglePageRecord(RedoItem*);
-static PageRedoWorker* CreateWorker(uint32);
+static void ApplySinglePageRecord(RedoItem *);
+static PageRedoWorker *CreateWorker(uint32);
 static void DeleteExpiredRecoveryRestartPoint();
 static void InitGlobals();
 static void LastMarkReached();
 static void SetupSignalHandlers();
 static void SigHupHandler(SIGNAL_ARGS);
-static ThreadId StartWorkerThread(PageRedoWorker*);
-static void ApplyMultiPageShareWithTrxnRecord(RedoItem* item);
-static void ApplyMultiPageSyncWithTrxnRecord(RedoItem* item);
-static void ApplyMultiPageAllWorkerRecord(RedoItem* item);
+static ThreadId StartWorkerThread(PageRedoWorker *);
+static void ApplyMultiPageShareWithTrxnRecord(RedoItem *item);
+static void ApplyMultiPageSyncWithTrxnRecord(RedoItem *item);
+static void ApplyMultiPageAllWorkerRecord(RedoItem *item);
 
-void UpdateRecordGlobals(RedoItem* item, HotStandbyState standbyState)
+void UpdateRecordGlobals(RedoItem *item, HotStandbyState standbyState)
 {
     t_thrd.xlog_cxt.ReadRecPtr = item->record.ReadRecPtr;
     t_thrd.xlog_cxt.EndRecPtr = item->record.EndRecPtr;
@@ -101,9 +101,9 @@ void UpdateRecordGlobals(RedoItem* item, HotStandbyState standbyState)
 }
 
 /* Run from the dispatcher thread. */
-PageRedoWorker* StartPageRedoWorker(uint32 id)
+PageRedoWorker *StartPageRedoWorker(uint32 id)
 {
-    PageRedoWorker* worker = CreateWorker(id);
+    PageRedoWorker *worker = CreateWorker(id);
 
     ThreadId threadId = StartWorkerThread(worker);
     if (threadId == 0) {
@@ -111,10 +111,8 @@ PageRedoWorker* StartPageRedoWorker(uint32 id)
         DestroyPageRedoWorker(worker);
         return NULL;
     } else {
-        ereport(LOG,
-            (errmsg("StartPageRedoWorker successfully create page-redo-worker id: %u, threadId:%lu.",
-                id,
-                worker->tid.thid)));
+        ereport(LOG, (errmsg("StartPageRedoWorker successfully create page-redo-worker id: %u, threadId:%lu.", id,
+                             worker->tid.thid)));
     }
     g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[id].threadId = threadId;
     SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.rwlock));
@@ -126,12 +124,19 @@ PageRedoWorker* StartPageRedoWorker(uint32 id)
     return worker;
 }
 
-/* Run from the dispatcher thread. */
-static PageRedoWorker* CreateWorker(uint32 id)
+void RedoWorkerQueueCallBack()
 {
-    PageRedoWorker* tmp = (PageRedoWorker*)palloc0(sizeof(PageRedoWorker) + REDO_WORKER_ALIGN_LEN);
-    PageRedoWorker* worker;
-    worker = (PageRedoWorker*)TYPEALIGN(REDO_WORKER_ALIGN_LEN, tmp);
+    RedoInterruptCallBack();
+}
+
+
+
+/* Run from the dispatcher thread. */
+static PageRedoWorker *CreateWorker(uint32 id)
+{
+    PageRedoWorker *tmp = (PageRedoWorker *)palloc0(sizeof(PageRedoWorker) + REDO_WORKER_ALIGN_LEN);
+    PageRedoWorker *worker;
+    worker = (PageRedoWorker *)TYPEALIGN(REDO_WORKER_ALIGN_LEN, tmp);
     worker->selfOrinAddr = tmp;
     worker->id = id;
     worker->originId = id;
@@ -142,7 +147,7 @@ static PageRedoWorker* CreateWorker(uint32 id)
     worker->initialTimeLineID = t_thrd.xlog_cxt.ThisTimeLineID;
     worker->pendingHead = NULL;
     worker->pendingTail = NULL;
-    worker->queue = SPSCBlockingQueueCreate(PAGE_WORK_QUEUE_SIZE);
+    worker->queue = SPSCBlockingQueueCreate(PAGE_WORK_QUEUE_SIZE, RedoWorkerQueueCallBack);
     worker->safePointHead = NULL;
     worker->lastCheckedRestartPoint = 0;
     worker->lastReplayedEndRecPtr = 0;
@@ -165,14 +170,14 @@ static PageRedoWorker* CreateWorker(uint32 id)
 }
 
 /* Run from the dispatcher thread. */
-static ThreadId StartWorkerThread(PageRedoWorker* worker)
+static ThreadId StartWorkerThread(PageRedoWorker *worker)
 {
     worker->tid.thid = initialize_util_thread(PAGEREDO, worker);
     return worker->tid.thid;
 }
 
 /* Run from the dispatcher thread. */
-void DestroyPageRedoWorker(PageRedoWorker* worker)
+void DestroyPageRedoWorker(PageRedoWorker *worker)
 {
     PosixSemaphoreDestroy(&worker->phaseMarker);
     SPSCBlockingQueueDestroy(worker->queue);
@@ -180,13 +185,13 @@ void DestroyPageRedoWorker(PageRedoWorker* worker)
 }
 
 /* Run from both the dispatcher and the worker thread. */
-bool IsPageRedoWorkerProcess(int argc, char* argv[])
+bool IsPageRedoWorkerProcess(int argc, char *argv[])
 {
     return strcmp(argv[1], PROCESS_TYPE_CMD_ARG) == 0;
 }
 
 /* Run from the worker thread. */
-void AdaptArgvForPageRedoWorker(char* argv[])
+void AdaptArgvForPageRedoWorker(char *argv[])
 {
     if (g_AUXILIARY_TYPE_CMD_ARG[0] == 0) {
         sprintf_s(g_AUXILIARY_TYPE_CMD_ARG, sizeof(g_AUXILIARY_TYPE_CMD_ARG), "-x%d", PageRedoProcess);
@@ -195,7 +200,7 @@ void AdaptArgvForPageRedoWorker(char* argv[])
 }
 
 /* Run from the worker thread. */
-void GetThreadNameIfPageRedoWorker(int argc, char* argv[], char** threadNamePtr)
+void GetThreadNameIfPageRedoWorker(int argc, char *argv[], char **threadNamePtr)
 {
     if (*threadNamePtr == NULL && IsPageRedoWorkerProcess(argc, argv)) {
         *threadNamePtr = "PageRedoWorker";
@@ -218,7 +223,7 @@ uint32 GetMyPageRedoWorkerOrignId()
 }
 
 /* Run from any worker thread. */
-PGPROC* GetPageRedoWorkerProc(PageRedoWorker* worker)
+PGPROC *GetPageRedoWorkerProc(PageRedoWorker *worker)
 {
     return worker->proc;
 }
@@ -232,9 +237,8 @@ void HandlePageRedoInterrupts()
 
     if (t_thrd.page_redo_cxt.shutdown_requested) {
         ereport(LOG,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("page worker(id %u, originId %u) exit for request", g_redoWorker->id, g_redoWorker->originId)));
+                (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                 errmsg("page worker(id %u, originId %u) exit for request", g_redoWorker->id, g_redoWorker->originId)));
 
         pg_atomic_write_u32(
             &(g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[g_redoWorker->originId].threadState),
@@ -247,8 +251,6 @@ void HandlePageRedoInterrupts()
 /* Run from the worker thread. */
 void PageRedoWorkerMain()
 {
-    knl_thread_set_name("ParallelRecov");
-
     bool isWorkerStarting = false;
     SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.rwlock));
     isWorkerStarting = ((g_instance.comm_cxt.predo_cxt.state == REDO_STARTING_BEGIN) ? true : false);
@@ -259,13 +261,15 @@ void PageRedoWorkerMain()
     }
     SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.rwlock));
     if (!isWorkerStarting) {
-        ereport(WARNING, (errmsg("PageRedoWorkerMain ParallelRecov %u exit.", (uint32)isWorkerStarting)));
+        ereport(WARNING, (errmsg("PageRedoWorkerMain Page-redo-worker %u exit.", (uint32)isWorkerStarting)));
         SetPageWorkStateByThreadId(PAGE_REDO_WORKER_EXIT);
         proc_exit(0);
     }
-    ereport(LOG, (errmsg("ParallelRecov thread %u started.", g_redoWorker->id)));
+    ereport(LOG, (errmsg("Page-redo-worker thread %u started.", g_redoWorker->id)));
 
     SetupSignalHandlers();
+    (void)RegisterRedoInterruptCallBack(HandlePageRedoInterrupts);
+    
     InitGlobals();
     ResourceManagerStartup();
 
@@ -276,10 +280,10 @@ void PageRedoWorkerMain()
     (void)MemoryContextSwitchTo(g_redoWorker->oldCtx);
 
     ResourceManagerStop();
-    ereport(LOG, (errmsg("ParallelRecov thread %u terminated, retcode %d.", g_redoWorker->id, retCode)));
+    ereport(LOG, (errmsg("Page-redo-worker thread %u terminated, retcode %d.", g_redoWorker->id, retCode)));
     LastMarkReached();
     pg_atomic_write_u32(&(g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[g_redoWorker->originId].threadState),
-        PAGE_REDO_WORKER_EXIT);
+                        PAGE_REDO_WORKER_EXIT);
     proc_exit(0);
 }
 
@@ -342,53 +346,64 @@ static void InitGlobals()
     g_redoWorker->proc = t_thrd.proc;
 }
 
+void ApplyProcHead(RedoItem *head)
+{
+    uint32 isSkipItem;
+    while (head != NULL) {
+        RedoItem *cur = head;
+        head = head->nextByWorker[g_redoWorker->id + 1];
+        isSkipItem = pg_atomic_read_u32(&g_redoWorker->skipItemFlg);
+        if (isSkipItem == PAGE_REDO_WORKER_APPLY_ITEM) {
+            ApplyAndFreeRedoItem(cur);
+        } else {
+            OnlyFreeRedoItem(cur);
+        }
+    }
+}
+
 /* Run from the worker thread. */
 static int ApplyRedoLoop()
 {
-    RedoItem* head;
+    RedoItem *head;
     instr_time startTime;
     instr_time endTime;
 
     INSTR_TIME_SET_CURRENT(startTime);
 
-    while ((head = (RedoItem*)SPSCBlockingQueueTop(g_redoWorker->queue)) != &g_redoEndMark) {
-        while (head != NULL) {
-            RedoItem* cur = head;
-            head = head->nextByWorker[g_redoWorker->id + 1];
-            ApplyAndFreeRedoItem(cur);
+    while ((head = (RedoItem *)SPSCBlockingQueueTop(g_redoWorker->queue)) != &g_redoEndMark) {
+        if (head == &g_cleanupMark) {
+            g_redoWorker->btreeIncompleteActions = btree_get_incomplete_actions();
+            g_redoWorker->xlogInvalidPages = XLogGetInvalidPages();
+        } else {
+            ApplyProcHead(head);
         }
         SPSCBlockingQueuePop(g_redoWorker->queue);
-        HandlePageRedoInterrupts();
+        RedoInterruptCallBack();
     }
     SPSCBlockingQueuePop(g_redoWorker->queue);
 
     INSTR_TIME_SET_CURRENT(endTime);
     INSTR_TIME_SUBTRACT(endTime, startTime);
 
-    ereport(LOG,
-        (errmodule(MOD_REDO),
-            errcode(ERRCODE_LOG),
-            errmsg("worker[%u]: multipage cnt = %u, wait reach elapsed %lu us, "
-                   "wait replay elapsed %lu us, total elapsed = %lu",
-                g_redoWorker->id,
-                g_redoWorker->statMulpageCnt,
-                g_redoWorker->statWaitReach,
-                g_redoWorker->statWaitReplay,
-                INSTR_TIME_GET_MICROSEC(endTime))));
+    ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                  errmsg("worker[%u]: multipage cnt = %u, wait reach elapsed %lu us, "
+                         "wait replay elapsed %lu us, total elapsed = %lu",
+                         g_redoWorker->id, g_redoWorker->statMulpageCnt, g_redoWorker->statWaitReach,
+                         g_redoWorker->statWaitReplay, INSTR_TIME_GET_MICROSEC(endTime))));
 
     /*
      * We need to get the exit code here before we allow the dispatcher
      * to proceed and change the exit code.
      */
     int exitCode = GetDispatcherExitCode();
-    g_redoWorker->btreeIncompleteActions = BTreeGetIncompleteActions();
+    g_redoWorker->btreeIncompleteActions = btree_get_incomplete_actions();
     g_redoWorker->xlogInvalidPages = XLogGetInvalidPages();
 
     return exitCode;
 }
 
 /* Run from the worker thread. */
-static void ApplyAndFreeRedoItem(RedoItem* item)
+static void ApplyAndFreeRedoItem(RedoItem *item)
 {
     UpdateRecordGlobals(item, g_redoWorker->standbyState);
 
@@ -420,9 +435,17 @@ static void ApplyAndFreeRedoItem(RedoItem* item)
 }
 
 /* Run from the worker thread. */
-static void ApplySinglePageRecord(RedoItem* item)
+void OnlyFreeRedoItem(RedoItem *item)
 {
-    XLogReaderState* record = &item->record;
+    if (pg_atomic_read_u32(&item->freed) == 0) {
+        FreeRedoItem(item);
+    }
+}
+
+/* Run from the worker thread. */
+static void ApplySinglePageRecord(RedoItem *item)
+{
+    XLogReaderState *record = &item->record;
     bool bOld = item->oldVersion;
 
     MemoryContext oldCtx = MemoryContextSwitchTo(g_redoWorker->oldCtx);
@@ -434,12 +457,12 @@ static void ApplySinglePageRecord(RedoItem* item)
 
 static void AddSafeRecoveryRestartPoint(XLogRecPtr restartPoint)
 {
-    SafeRestartPoint* oldHead = (SafeRestartPoint*)pg_atomic_read_uintptr((uintptr_t*)&g_redoWorker->safePointHead);
-    SafeRestartPoint* newPoint = (SafeRestartPoint*)palloc(sizeof(SafeRestartPoint));
+    SafeRestartPoint *oldHead = (SafeRestartPoint *)pg_atomic_read_uintptr((uintptr_t *)&g_redoWorker->safePointHead);
+    SafeRestartPoint *newPoint = (SafeRestartPoint *)palloc(sizeof(SafeRestartPoint));
     newPoint->next = oldHead;
     newPoint->restartPoint = restartPoint;
 
-    pg_atomic_write_uintptr((uintptr_t*)&g_redoWorker->safePointHead, (uintptr_t)newPoint);
+    pg_atomic_write_uintptr((uintptr_t *)&g_redoWorker->safePointHead, (uintptr_t)newPoint);
 
     DeleteExpiredRecoveryRestartPoint();
 }
@@ -447,8 +470,8 @@ static void AddSafeRecoveryRestartPoint(XLogRecPtr restartPoint)
 static void DeleteExpiredRecoveryRestartPoint()
 {
     XLogRecPtr expireLSN = pg_atomic_read_u64(&g_redoWorker->lastCheckedRestartPoint);
-    SafeRestartPoint* prev = (SafeRestartPoint*)pg_atomic_read_uintptr((uintptr_t*)&g_redoWorker->safePointHead);
-    SafeRestartPoint* cur = prev->next;
+    SafeRestartPoint *prev = (SafeRestartPoint *)pg_atomic_read_uintptr((uintptr_t *)&g_redoWorker->safePointHead);
+    SafeRestartPoint *cur = prev->next;
     while (cur != NULL) {
         if (cur->restartPoint <= expireLSN) {
             prev->next = NULL;
@@ -464,7 +487,7 @@ static void DeleteExpiredRecoveryRestartPoint()
     }
 }
 
-static void ApplyMultiPageRecord(RedoItem* item)
+static void ApplyMultiPageRecord(RedoItem *item)
 {
     g_redoWorker->statMulpageCnt++;
     uint32 refCount = pg_atomic_add_fetch_u32(&item->refCount, 1);
@@ -486,19 +509,13 @@ static void ApplyMultiPageRecord(RedoItem* item)
             blockcnt++;
             if ((blockcnt & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
                 XLogRecPtr LatestReplayedRecPtr = GetXLogReplayRecPtr(NULL);
-                ereport(WARNING,
-                    (errmodule(MOD_REDO),
-                        errcode(ERRCODE_LOG),
-                        errmsg("[REDO_LOG_TRACE]MultiPageRecord:recordEndLsn:%lu, blockcnt:%lu, "
-                               "Workerid:%u, shareCount:%u, refcount:%u, LatestReplayedRecPtr:%lu",
-                            item->record.EndRecPtr,
-                            blockcnt,
-                            g_redoWorker->id,
-                            item->shareCount,
-                            item->refCount,
-                            LatestReplayedRecPtr)));
+                ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                                  errmsg("[REDO_LOG_TRACE]MultiPageRecord:recordEndLsn:%lu, blockcnt:%lu, "
+                                         "Workerid:%u, shareCount:%u, refcount:%u, LatestReplayedRecPtr:%lu",
+                                         item->record.EndRecPtr, blockcnt, g_redoWorker->id, item->shareCount,
+                                         item->refCount, LatestReplayedRecPtr)));
             }
-            HandlePageRedoInterrupts();
+            RedoInterruptCallBack();
         };
         pgstat_report_waitevent(WAIT_EVENT_END);
 
@@ -517,18 +534,13 @@ static void ApplyMultiPageRecord(RedoItem* item)
             blockcnt++;
             if ((blockcnt & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
                 XLogRecPtr LatestReplayedRecPtr = GetXLogReplayRecPtr(NULL);
-                ereport(WARNING,
-                    (errmodule(MOD_REDO),
-                        errcode(ERRCODE_LOG),
-                        errmsg("[REDO_LOG_TRACE]MultiPageRecord:recordEndLsn:%lu, blockcnt:%lu, Workerid:%u,"
-                               " replayed:%u, LatestReplayedRecPtr:%lu",
-                            item->record.EndRecPtr,
-                            blockcnt,
-                            g_redoWorker->id,
-                            item->replayed,
-                            LatestReplayedRecPtr)));
+                ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                                  errmsg("[REDO_LOG_TRACE]MultiPageRecord:recordEndLsn:%lu, blockcnt:%lu, Workerid:%u,"
+                                         " replayed:%u, LatestReplayedRecPtr:%lu",
+                                         item->record.EndRecPtr, blockcnt, g_redoWorker->id, item->replayed,
+                                         LatestReplayedRecPtr)));
             }
-            HandlePageRedoInterrupts();
+            RedoInterruptCallBack();
         };
         pgstat_report_waitevent(WAIT_EVENT_END);
     }
@@ -542,10 +554,10 @@ static void ApplyMultiPageRecord(RedoItem* item)
     }
 }
 
-static void ApplyMultiPageAllWorkerRecord(RedoItem* item)
+static void ApplyMultiPageAllWorkerRecord(RedoItem *item)
 {
     g_redoWorker->statMulpageCnt++;
-    XLogReaderState* record = &item->record;
+    XLogReaderState *record = &item->record;
     bool bOld = item->oldVersion;
     XLogRecPtr endLSN = item->record.EndRecPtr;
     XLogRecPtr readLSN = item->record.ReadRecPtr;
@@ -569,19 +581,16 @@ static void ApplyMultiPageAllWorkerRecord(RedoItem* item)
             AddSafeRecoveryRestartPoint(record->ReadRecPtr);
         }
     } else if (IsDataBaseDrop(record)) {
-        xl_dbase_drop_rec* xlrec = (xl_dbase_drop_rec*)XLogRecGetData(record);
+        xl_dbase_drop_rec *xlrec = (xl_dbase_drop_rec *)XLogRecGetData(record);
         MemoryContext oldCtx = MemoryContextSwitchTo(g_redoWorker->oldCtx);
         /* process invalid db and close files */
         XLogDropDatabase(xlrec->db_id);
         (void)MemoryContextSwitchTo(oldCtx);
     } else {
-        ereport(PANIC,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("[REDO_LOG_TRACE]ApplyMultiPageAllWorkerRecord encounter fatal error:"
-                       "rmgrID:%u, info:%u",
-                    (uint32)XLogRecGetRmid(&item->record),
-                    (uint32)XLogRecGetInfo(&item->record))));
+        ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                        errmsg("[REDO_LOG_TRACE]ApplyMultiPageAllWorkerRecord encounter fatal error:"
+                               "rmgrID:%u, info:%u",
+                               (uint32)XLogRecGetRmid(&item->record), (uint32)XLogRecGetInfo(&item->record))));
     }
 
     pg_memory_barrier();
@@ -593,7 +602,7 @@ static void ApplyMultiPageAllWorkerRecord(RedoItem* item)
      */
 }
 
-static void ApplyMultiPageShareWithTrxnRecord(RedoItem* item)
+static void ApplyMultiPageShareWithTrxnRecord(RedoItem *item)
 {
     (void)pg_atomic_add_fetch_u32(&item->refCount, 1);
     uint32 designatedWorker = item->designatedWorker;
@@ -603,18 +612,15 @@ static void ApplyMultiPageShareWithTrxnRecord(RedoItem* item)
     g_redoWorker->statMulpageCnt++;
 
     if ((designatedWorker != ALL_WORKER) && (designatedWorker != TRXN_WORKER)) {
-        ereport(PANIC,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("[REDO_LOG_TRACE]ApplyMultiPageShareWithTrxnRecord encounter fatal error:rmgrID:%u, "
-                       "info:%u, designatedWorker:%u",
-                    (uint32)XLogRecGetRmid(&item->record),
-                    (uint32)XLogRecGetInfo(&item->record),
-                    designatedWorker)));
+        ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                        errmsg("[REDO_LOG_TRACE]ApplyMultiPageShareWithTrxnRecord encounter fatal error:rmgrID:%u, "
+                               "info:%u, designatedWorker:%u",
+                               (uint32)XLogRecGetRmid(&item->record), (uint32)XLogRecGetInfo(&item->record),
+                               designatedWorker)));
     }
 
     if (designatedWorker == ALL_WORKER) {
-        XLogReaderState* record = &item->record;
+        XLogReaderState *record = &item->record;
 
         MemoryContext oldCtx = MemoryContextSwitchTo(g_redoWorker->oldCtx);
         /* pageworker  need to execute ? */
@@ -625,13 +631,10 @@ static void ApplyMultiPageShareWithTrxnRecord(RedoItem* item)
             smgrApplyXLogTruncateRelation(record);
         } else {
             /* panic error */
-            ereport(PANIC,
-                (errmodule(MOD_REDO),
-                    errcode(ERRCODE_LOG),
-                    errmsg("[REDO_LOG_TRACE]ApplyMultiPageShareWithTrxnRecord encounter fatal error:"
-                           "rmgrID:%u, info:%u",
-                        (uint32)XLogRecGetRmid(&item->record),
-                        (uint32)XLogRecGetInfo(&item->record))));
+            ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                            errmsg("[REDO_LOG_TRACE]ApplyMultiPageShareWithTrxnRecord encounter fatal error:"
+                                   "rmgrID:%u, info:%u",
+                                   (uint32)XLogRecGetRmid(&item->record), (uint32)XLogRecGetInfo(&item->record))));
         }
         (void)MemoryContextSwitchTo(oldCtx);
     }
@@ -648,19 +651,13 @@ static void ApplyMultiPageShareWithTrxnRecord(RedoItem* item)
         blockcnt++;
         if ((blockcnt & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
             XLogRecPtr LatestReplayedRecPtr = GetXLogReplayRecPtr(NULL);
-            ereport(WARNING,
-                (errmodule(MOD_REDO),
-                    errcode(ERRCODE_LOG),
-                    errmsg("[REDO_LOG_TRACE]MultiPageShare %u:pagerreplayedLsn:%lu, "
-                           "blockcnt:%lu, Workerid:%u, replayed:%u, LatestReplayedRecPtr:%lu",
-                        designatedWorker,
-                        endLSN,
-                        blockcnt,
-                        g_redoWorker->id,
-                        item->replayed,
-                        LatestReplayedRecPtr)));
+            ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                              errmsg("[REDO_LOG_TRACE]MultiPageShare %u:pagerreplayedLsn:%lu, "
+                                     "blockcnt:%lu, Workerid:%u, replayed:%u, LatestReplayedRecPtr:%lu",
+                                     designatedWorker, endLSN, blockcnt, g_redoWorker->id, item->replayed,
+                                     LatestReplayedRecPtr)));
         }
-        HandlePageRedoInterrupts();
+        RedoInterruptCallBack();
     }
 
     pgstat_report_waitevent(WAIT_EVENT_END);
@@ -676,7 +673,7 @@ static void ApplyMultiPageShareWithTrxnRecord(RedoItem* item)
 }
 
 /* Run from the worker thread. */
-static void ApplyMultiPageSyncWithTrxnRecord(RedoItem* item)
+static void ApplyMultiPageSyncWithTrxnRecord(RedoItem *item)
 {
     XLogRecPtr endLSN = item->record.EndRecPtr;
     XLogRecPtr readLSN = item->record.ReadRecPtr;
@@ -703,17 +700,12 @@ static void ApplyMultiPageSyncWithTrxnRecord(RedoItem* item)
         LatestReplayedRecPtr = GetXLogReplayRecPtr(NULL, NULL);
         blockcnt++;
         if ((blockcnt & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
-            ereport(LOG,
-                (errmodule(MOD_REDO),
-                    errcode(ERRCODE_LOG),
-                    errmsg("[REDO_LOG_TRACE]MultiPageSync:pagerreplayedLsn:%lu, blockcnt:%lu, Workerid:%u, "
-                           "LatestReplayedRecPtr:%lu",
-                        endLSN,
-                        blockcnt,
-                        g_redoWorker->id,
-                        LatestReplayedRecPtr)));
+            ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                          errmsg("[REDO_LOG_TRACE]MultiPageSync:pagerreplayedLsn:%lu, blockcnt:%lu, Workerid:%u, "
+                                 "LatestReplayedRecPtr:%lu",
+                                 endLSN, blockcnt, g_redoWorker->id, LatestReplayedRecPtr)));
         }
-        HandlePageRedoInterrupts();
+        RedoInterruptCallBack();
     }
     pgstat_report_waitevent(WAIT_EVENT_END);
     return;
@@ -726,13 +718,13 @@ static void LastMarkReached()
 }
 
 /* Run from the dispatcher thread. */
-void WaitPageRedoWorkerReachLastMark(PageRedoWorker* worker)
+void WaitPageRedoWorkerReachLastMark(PageRedoWorker *worker)
 {
     PosixSemaphoreWait(&worker->phaseMarker);
 }
 
 /* Run from the dispatcher thread. */
-void AddPageRedoItem(PageRedoWorker* worker, RedoItem* item)
+void AddPageRedoItem(PageRedoWorker *worker, RedoItem *item)
 {
     /*
      * Based on the performance profiling, calls to semaphores inside
@@ -751,19 +743,24 @@ void AddPageRedoItem(PageRedoWorker* worker, RedoItem* item)
 }
 
 /* Run from the dispatcher thread. */
-bool SendPageRedoEndMark(PageRedoWorker* worker)
+bool SendPageRedoEndMark(PageRedoWorker *worker)
 {
     return SPSCBlockingQueuePut(worker->queue, &g_redoEndMark);
 }
 
 /* Run from the dispatcher thread. */
-bool SendPageRedoWorkerTerminateMark(PageRedoWorker* worker)
+bool SendPageRedoClearMark(PageRedoWorker *worker)
+{
+    return SPSCBlockingQueuePut(worker->queue, &g_cleanupMark);
+}
+
+bool SendPageRedoWorkerTerminateMark(PageRedoWorker *worker)
 {
     return SPSCBlockingQueuePut(worker->queue, &g_terminateMark);
 }
 
 /* Run from the dispatcher thread. */
-bool ProcessPendingPageRedoItems(PageRedoWorker* worker)
+bool ProcessPendingPageRedoItems(PageRedoWorker *worker)
 {
     if (worker->pendingHead == NULL) {
         return true;
@@ -780,7 +777,7 @@ bool ProcessPendingPageRedoItems(PageRedoWorker* worker)
 }
 
 /* Run from the txn worker thread. */
-void UpdatePageRedoWorkerStandbyState(PageRedoWorker* worker, HotStandbyState newState)
+void UpdatePageRedoWorkerStandbyState(PageRedoWorker *worker, HotStandbyState newState)
 {
     /*
      * Here we only save the new state into the worker struct.
@@ -791,26 +788,26 @@ void UpdatePageRedoWorkerStandbyState(PageRedoWorker* worker, HotStandbyState ne
 }
 
 /* Run from the txn worker thread. */
-XLogRecPtr GetCompletedRecPtr(PageRedoWorker* worker)
+XLogRecPtr GetCompletedRecPtr(PageRedoWorker *worker)
 {
     return pg_atomic_read_u64(&worker->lastReplayedEndRecPtr);
 }
 
 /* automic write for lastReplayedReadRecPtr and lastReplayedEndRecPtr */
-void SetCompletedReadEndPtr(PageRedoWorker* worker, XLogRecPtr readPtr, XLogRecPtr endPtr)
+void SetCompletedReadEndPtr(PageRedoWorker *worker, XLogRecPtr readPtr, XLogRecPtr endPtr)
 {
-    volatile PageRedoWorker* tmpWk = worker;
+    volatile PageRedoWorker *tmpWk = worker;
 #if defined(__x86_64__) || defined(__aarch64__)
     uint128_u exchange;
     uint128_u current;
-    uint128_u compare = atomic_compare_and_swap_u128((uint128_u*)&tmpWk->lastReplayedReadRecPtr);
+    uint128_u compare = atomic_compare_and_swap_u128((uint128_u *)&tmpWk->lastReplayedReadRecPtr);
     Assert(sizeof(tmpWk->lastReplayedEndRecPtr) == 8);
     Assert(sizeof(tmpWk->lastReplayedReadRecPtr) == 8);
 
     exchange.u64[0] = (uint64)readPtr;
     exchange.u64[1] = (uint64)endPtr;
 loop:
-    current = atomic_compare_and_swap_u128((uint128_u*)&tmpWk->lastReplayedReadRecPtr, compare, exchange);
+    current = atomic_compare_and_swap_u128((uint128_u *)&tmpWk->lastReplayedReadRecPtr, compare, exchange);
     if (!UINT128_IS_EQUAL(compare, current)) {
         UINT128_COPY(compare, current);
         goto loop;
@@ -824,11 +821,11 @@ loop:
 }
 
 /* automic write for lastReplayedReadRecPtr and lastReplayedEndRecPtr */
-void GetCompletedReadEndPtr(PageRedoWorker* worker, XLogRecPtr* readPtr, XLogRecPtr* endPtr)
+void GetCompletedReadEndPtr(PageRedoWorker *worker, XLogRecPtr *readPtr, XLogRecPtr *endPtr)
 {
-    volatile PageRedoWorker* tmpWk = worker;
+    volatile PageRedoWorker *tmpWk = worker;
 #if defined(__x86_64__) || defined(__aarch64__)
-    uint128_u compare = atomic_compare_and_swap_u128((uint128_u*)&tmpWk->lastReplayedReadRecPtr);
+    uint128_u compare = atomic_compare_and_swap_u128((uint128_u *)&tmpWk->lastReplayedReadRecPtr);
     Assert(sizeof(tmpWk->lastReplayedReadRecPtr) == 8);
     Assert(sizeof(tmpWk->lastReplayedEndRecPtr) == 8);
 
@@ -837,16 +834,16 @@ void GetCompletedReadEndPtr(PageRedoWorker* worker, XLogRecPtr* readPtr, XLogRec
 
 #else
     SpinLockAcquire(&tmpWk->ptrLck);
-    readPtr = tmpWk->lastReplayedReadRecPtr;
-    endPtr = tmpWk->lastReplayedEndRecPtr;
+    *readPtr = tmpWk->lastReplayedReadRecPtr;
+    *endPtr = tmpWk->lastReplayedEndRecPtr;
     SpinLockRelease(&tmpWk->ptrLck);
 #endif /* __x86_64__ */
 }
 
 /* Run from the txn worker thread. */
-bool IsRecoveryRestartPointSafe(PageRedoWorker* worker, XLogRecPtr restartPoint)
+bool IsRecoveryRestartPointSafe(PageRedoWorker *worker, XLogRecPtr restartPoint)
 {
-    SafeRestartPoint* point = (SafeRestartPoint*)pg_atomic_read_uintptr((uintptr_t*)&worker->safePointHead);
+    SafeRestartPoint *point = (SafeRestartPoint *)pg_atomic_read_uintptr((uintptr_t *)&worker->safePointHead);
 
     bool safe = false;
     while (point != NULL) {
@@ -860,66 +857,58 @@ bool IsRecoveryRestartPointSafe(PageRedoWorker* worker, XLogRecPtr restartPoint)
     return safe;
 }
 
-void SetWorkerRestartPoint(PageRedoWorker* worker, XLogRecPtr restartPoint)
+void SetWorkerRestartPoint(PageRedoWorker *worker, XLogRecPtr restartPoint)
 {
-    pg_atomic_write_u64((uint64*)&worker->lastCheckedRestartPoint, restartPoint);
+    pg_atomic_write_u64((uint64 *)&worker->lastCheckedRestartPoint, restartPoint);
 }
 
-void* GetBTreeIncompleteActions(PageRedoWorker* worker)
+void *GetBTreeIncompleteActions(PageRedoWorker *worker)
 {
     return worker->btreeIncompleteActions;
 }
 
-void ClearBTreeIncompleteActions(PageRedoWorker* worker)
+void ClearBTreeIncompleteActions(PageRedoWorker *worker)
 {
     worker->btreeIncompleteActions = NULL;
 }
 
 /* Run from the dispatcher thread. */
-void* GetXLogInvalidPages(PageRedoWorker* worker)
+void *GetXLogInvalidPages(PageRedoWorker *worker)
 {
     return worker->xlogInvalidPages;
 }
 
-bool RedoWorkerIsIdle(PageRedoWorker* worker)
+bool RedoWorkerIsIdle(PageRedoWorker *worker)
 {
     return SPSCBlockingQueueIsEmpty(worker->queue);
 }
 
-void DumpPageRedoWorker(PageRedoWorker* worker)
+void DumpPageRedoWorker(PageRedoWorker *worker)
 {
-    ereport(LOG,
-        (errmodule(MOD_REDO),
-            errcode(ERRCODE_LOG),
-            errmsg("[REDO_LOG_TRACE]RedoWorker common info: id %u, originId %u tid %lu"
-                   "lastCheckedRestartPoint %lu, lastReplayedEndRecPtr %lu standbyState %u",
-                worker->id,
-                worker->originId,
-                worker->tid.thid,
-                worker->lastCheckedRestartPoint,
-                worker->lastReplayedEndRecPtr,
-                (uint32)worker->standbyState)));
+    ereport(
+        LOG,
+        (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+         errmsg("[REDO_LOG_TRACE]RedoWorker common info: id %u, originId %u tid %lu,"
+                "lastCheckedRestartPoint %lu, lastReplayedReadRecPtr %lu, lastReplayedEndRecPtr %lu, standbyState %u",
+                worker->id, worker->originId, worker->tid.thid, worker->lastCheckedRestartPoint,
+                worker->lastReplayedReadRecPtr, worker->lastReplayedEndRecPtr, (uint32)worker->standbyState)));
     DumpQueue(worker->queue);
 }
 
 void redo_dump_worker_queue_info()
 {
-    PageRedoWorker* redoWorker = NULL;
+    PageRedoWorker *redoWorker = NULL;
 
     for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
         redoWorker = (g_dispatcher->pageWorkers[i]);
         ereport(LOG,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("[REDO_STATS]redo_dump_all_stats: the redo worker queue statistic during redo are as follows : "
-                       "worker info id:%u, originId:%u, tid:%lu, queue_usage:%u, "
-                       "queue_max_usage:%u, redo_rec_count:%lu",
-                    redoWorker->id,
-                    redoWorker->originId,
-                    redoWorker->tid.thid,
-                    SPSCGetQueueCount(redoWorker->queue),
-                    pg_atomic_read_u32(&(redoWorker->queue->maxUsage)),
-                    pg_atomic_read_u64(&(redoWorker->queue->totalCnt)))));
+                (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                 errmsg("[REDO_STATS]redo_dump_all_stats: the redo worker queue statistic during redo are as follows : "
+                        "worker info id:%u, originId:%u, tid:%lu, queue_usage:%u, "
+                        "queue_max_usage:%u, redo_rec_count:%lu",
+                        redoWorker->id, redoWorker->originId, redoWorker->tid.thid,
+                        SPSCGetQueueCount(redoWorker->queue), pg_atomic_read_u32(&(redoWorker->queue->maxUsage)),
+                        pg_atomic_read_u64(&(redoWorker->queue->totalCnt)))));
     }
 }
 

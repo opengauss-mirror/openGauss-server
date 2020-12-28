@@ -33,9 +33,9 @@
  */
 static TupleTableSlot* ExecScanFetch(ScanState* node, ExecScanAccessMtd access_mtd, ExecScanRecheckMtd recheck_mtd)
 {
-    EState* e_state = node->ps.state;
+    EState* estate = node->ps.state;
 
-    if (e_state->es_epqTuple != NULL) {
+    if (estate->es_epqTuple != NULL) {
         /*
          * We are inside an EvalPlanQual recheck.  Return the test tuple if
          * one is available, after rechecking any access-method-specific
@@ -44,21 +44,21 @@ static TupleTableSlot* ExecScanFetch(ScanState* node, ExecScanAccessMtd access_m
         Index scan_rel_id = ((Scan*)node->ps.plan)->scanrelid;
 
         Assert(scan_rel_id > 0);
-        if (e_state->es_epqTupleSet[scan_rel_id - 1]) {
+        if (estate->es_epqTupleSet[scan_rel_id - 1]) {
             TupleTableSlot* slot = node->ss_ScanTupleSlot;
 
             /* Return empty slot if we already returned a tuple */
-            if (e_state->es_epqScanDone[scan_rel_id - 1])
+            if (estate->es_epqScanDone[scan_rel_id - 1])
                 return ExecClearTuple(slot);
             /* Else mark to remember that we shouldn't return more */
-            e_state->es_epqScanDone[scan_rel_id - 1] = true;
+            estate->es_epqScanDone[scan_rel_id - 1] = true;
 
             /* Return empty slot if we haven't got a test tuple */
-            if (e_state->es_epqTuple[scan_rel_id - 1] == NULL)
+            if (estate->es_epqTuple[scan_rel_id - 1] == NULL)
                 return ExecClearTuple(slot);
 
             /* Store test tuple in the plan node's scan slot */
-            (void)ExecStoreTuple(e_state->es_epqTuple[scan_rel_id - 1], slot, InvalidBuffer, false);
+            (void)ExecStoreTuple(estate->es_epqTuple[scan_rel_id - 1], slot, InvalidBuffer, false);
 
             /* Check if it meets the access-method conditions */
             if (!(*recheck_mtd)(node, slot))
@@ -99,7 +99,7 @@ static TupleTableSlot* ExecScanFetch(ScanState* node, ExecScanAccessMtd access_m
 TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd access_mtd, /* function returning a tuple */
     ExecScanRecheckMtd recheck_mtd)
 {
-    ExprContext* e_context = NULL;
+    ExprContext* econtext = NULL;
     List* qual = NIL;
     ProjectionInfo* proj_info = NULL;
     ExprDoneCond is_done;
@@ -113,14 +113,14 @@ TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd access_mtd, /* funct
      */
     qual = node->ps.qual;
     proj_info = node->ps.ps_ProjInfo;
-    e_context = node->ps.ps_ExprContext;
+    econtext = node->ps.ps_ExprContext;
 
     /*
      * If we have neither a qual to check nor a projection to do, just skip
      * all the overhead and return the raw scan tuple.
      */
     if (qual == NULL && proj_info == NULL) {
-        ResetExprContext(e_context);
+        ResetExprContext(econtext);
         return ExecScanFetch(node, access_mtd, recheck_mtd);
     }
 
@@ -152,7 +152,7 @@ TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd access_mtd, /* funct
      * storage allocated in the previous tuple cycle.  Note this can't happen
      * until we're done projecting out tuples from a scan tuple.
      */
-    ResetExprContext(e_context);
+    ResetExprContext(econtext);
 
     /*
      * get a tuple from the access method.	Loop until we obtain a tuple that
@@ -182,7 +182,7 @@ TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd access_mtd, /* funct
         /*
          * place the current tuple into the expr context
          */
-        e_context->ecxt_scantuple = slot;
+        econtext->ecxt_scantuple = slot;
 
         /*
          * check that the current tuple satisfies the qual-clause
@@ -191,7 +191,7 @@ TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd access_mtd, /* funct
          * when the qual is nil ... saves only a few cycles, but they add up
          * ...
          */
-        if (qual == NULL || ExecQual(qual, e_context, false)) {
+        if (qual == NULL || ExecQual(qual, econtext, false)) {
             /*
              * Found a satisfactory scan tuple.
              */
@@ -252,7 +252,7 @@ TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd access_mtd, /* funct
         /*
          * Tuple fails qual, so free per-tuple memory and try again.
          */
-        ResetExprContext(e_context);
+        ResetExprContext(econtext);
     }
 }
 
@@ -303,21 +303,21 @@ void ExecAssignScanProjectionInfoWithVarno(ScanState* node, Index var_no)
         ExecAssignProjectionInfo(&node->ps, node->ss_ScanTupleSlot->tts_tupleDescriptor);
 }
 
-bool tlist_matches_tupdesc(PlanState* ps, List* t_list, Index var_no, TupleDesc tup_desc)
+bool tlist_matches_tupdesc(PlanState* ps, List* tlist, Index var_no, TupleDesc tup_desc)
 {
     int num_attrs = tup_desc->natts;
     int attr_no;
     bool has_oid = false;
-    ListCell* t_list_item = list_head(t_list);
+    ListCell* tlist_item = list_head(tlist);
 
     /* Check the tlist attributes */
     for (attr_no = 1; attr_no <= num_attrs; attr_no++) {
         Form_pg_attribute att_tup = tup_desc->attrs[attr_no - 1];
         Var* var = NULL;
 
-        if (t_list_item == NULL)
+        if (tlist_item == NULL)
             return false; /* tlist too short */
-        var = (Var*)((TargetEntry*)lfirst(t_list_item))->expr;
+        var = (Var*)((TargetEntry*)lfirst(tlist_item))->expr;
         if (var == NULL || !IsA(var, Var))
             return false; /* tlist item not a Var */
         /* if these Asserts fail, planner messed up */
@@ -341,10 +341,10 @@ bool tlist_matches_tupdesc(PlanState* ps, List* t_list, Index var_no, TupleDesc 
         if (var->vartype != att_tup->atttypid || (var->vartypmod != att_tup->atttypmod && var->vartypmod != -1))
             return false; /* type mismatch */
 
-        t_list_item = lnext(t_list_item);
+        tlist_item = lnext(tlist_item);
     }
 
-    if (t_list_item != NULL)
+    if (tlist_item != NULL)
         return false; /* tlist too long */
 
     /*
@@ -365,17 +365,17 @@ bool tlist_matches_tupdesc(PlanState* ps, List* t_list, Index var_no, TupleDesc 
  */
 void ExecScanReScan(ScanState* node)
 {
-    EState* e_state = node->ps.state;
+    EState* estate = node->ps.state;
 
     /* Stop projecting any tuples from SRFs in the targetlist */
     node->ps.ps_TupFromTlist = false;
 
     /* Rescan EvalPlanQual tuple if we're inside an EvalPlanQual recheck */
-    if (e_state->es_epqScanDone != NULL) {
+    if (estate->es_epqScanDone != NULL) {
         Index scan_rel_id = ((Scan*)node->ps.plan)->scanrelid;
 
         Assert(scan_rel_id > 0);
 
-        e_state->es_epqScanDone[scan_rel_id - 1] = false;
+        estate->es_epqScanDone[scan_rel_id - 1] = false;
     }
 }

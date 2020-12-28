@@ -19,7 +19,7 @@
 #else
 #include "postgres_fe.h"
 #endif
-
+#define _WINSOCKAPI_
 #include <windows.h>
 #include <fcntl.h>
 #include <assert.h>

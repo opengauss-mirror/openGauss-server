@@ -27,6 +27,9 @@
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_statistic.h"
 #include "catalog/heap.h"
+#include "catalog/pg_collation.h"
+#include "catalog/pg_operator.h"
+#include "catalog/pg_proc.h"
 #include "catalog/storage_gtt.h"
 #include "commands/dbcommands.h"
 #include "executor/nodeModifyTable.h"
@@ -44,12 +47,13 @@
 #include "parser/parse_relation.h"
 #include "parser/parsetree.h"
 #include "rewrite/rewriteManip.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "utils/acl.h"
 #include "utils/lsyscache.h"
 #include "utils/partcache.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
+#include "utils/selfuncs.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #ifdef PGXC
@@ -75,9 +79,16 @@ static void acquireSamplesForPartitionedRelation(
     Relation relation, LOCKMODE lmode, RelPageType* samplePages, List** sampledPartitionOids)
 {
     if (RelationIsPartitioned(relation)) {
-        if (relation->rd_rel->relkind == RELKIND_RELATION) {
-            RangePartitionMap* partMap = (RangePartitionMap*)(relation->partMap);
-            int totalPartitionNumber = getNumberOfRangePartitions(relation);
+        if (relation->rd_rel->relkind == RELKIND_RELATION) {  
+            int totalRangePartitionNumber = 0;
+            if (relation->partMap->type == PART_TYPE_LIST) {
+                totalRangePartitionNumber = getNumberOfListPartitions(relation);
+            } else if (relation->partMap->type == PART_TYPE_HASH) {
+                totalRangePartitionNumber = getNumberOfHashPartitions(relation);
+            } else {
+                totalRangePartitionNumber = getNumberOfRangePartitions(relation);
+            }
+            int totalPartitionNumber = totalRangePartitionNumber;
             int partitionNumber = 0;
             int nonzeroPartitionNumber = 0;
             BlockNumber partPages = 0;
@@ -85,7 +96,34 @@ static void acquireSamplesForPartitionedRelation(
             Partition part = NULL;
 
             for (partitionNumber = 0; partitionNumber < totalPartitionNumber; partitionNumber++) {
-                Oid partitionOid = partMap->rangeElements[partitionNumber].partitionOid;
+                Oid partitionOid = InvalidOid;
+                if (relation->partMap->type == PART_TYPE_LIST) {
+                    ListPartitionMap* partMap = (ListPartitionMap*)(relation->partMap);
+                    partitionOid = partMap->listElements[partitionNumber].partitionOid;
+                } else if (relation->partMap->type == PART_TYPE_HASH) {
+                    HashPartitionMap* partMap = (HashPartitionMap*)(relation->partMap);
+                    partitionOid = partMap->hashElements[partitionNumber].partitionOid;
+                } else {
+                    RangePartitionMap* partMap = (RangePartitionMap*)(relation->partMap);
+
+#ifdef PGXC  /* open range partition */
+                    partitionOid = partMap->rangeElements[partitionNumber].partitionOid;
+#else  /* open range partition or interval partition */
+                    if (partitionNumber < totalRangePartitionNumber) {
+                        partitionOid = partMap->rangeElements[partitionNumber].partitionOid;
+                    } else {
+                        IntervalPartitionMap* intervalPartMap = NULL;
+                        int intervalPartitionIndex = partitionNumber - totalRangePartitionNumber;
+
+                        AssertEreport(relation->partMap->type == PART_TYPE_INTERVAL,
+                            MOD_OPT,
+                            "Expected interval partition type but exception occurred.");
+                        intervalPartMap = (IntervalPartitionMap*)(relation->partMap);
+
+                        partitionOid = intervalPartMap->intervalElements[intervalPartitionIndex].partitionOid;
+                    }
+#endif
+                }
                 if (!OidIsValid(partitionOid))
                     continue;
 
@@ -93,7 +131,7 @@ static void acquireSamplesForPartitionedRelation(
                 currentPartPages = PartitionGetNumberOfBlocks(relation, part);
                 partitionClose(relation, part, lmode);
 
-                // for empty heap, PartitionGetNumberOfBlocks() return 0
+                /* for empty heap, PartitionGetNumberOfBlocks() return 0 */
                 if (currentPartPages > 0) {
                     if (sampledPartitionOids != NULL)
                         *sampledPartitionOids = lappend_oid(*sampledPartitionOids, partitionOid);
@@ -105,7 +143,7 @@ static void acquireSamplesForPartitionedRelation(
                 }
             }
 
-            // compute the total pages
+            /* compute the total pages */
             if (nonzeroPartitionNumber >= 0 && nonzeroPartitionNumber < ESTIMATE_PARTITION_NUMBER) {
                 *samplePages = partPages;
             } else if (nonzeroPartitionNumber == ESTIMATE_PARTITION_NUMBER) {
@@ -141,7 +179,6 @@ static void acquireSamplesForPartitionedRelation(
 void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, RelOptInfo* rel)
 {
     Index varno = rel->relid;
-    Relation relation;
     bool hasindex = false;
     List* indexinfos = NIL;
     List* sampledPartitionIds = NIL;
@@ -151,7 +188,7 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
      * the rewriter or when expand_inherited_rtentry() added it to the query's
      * rangetable.
      */
-    relation = heap_open(relationObjectId, NoLock);
+    Relation relation = heap_open(relationObjectId, NoLock);
     /* Temporary and unlogged relations are inaccessible during recovery. */
     if (!RelationNeedsWAL(relation) && RecoveryInProgress())
         ereport(ERROR,
@@ -181,9 +218,6 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
             &rel->allvisfrac,
             &sampledPartitionIds);
 
-    /* Retrieve the parallel_workers reloption, or -1 if not set. */
-    rel->rel_parallel_workers = RelationGetParallelWorkers(relation, -1);
-
     /*
      * Make list of indexes.  Ignore indexes on system catalogs if told to.
      * Don't bother with indexes for an inheritance parent, either.
@@ -194,11 +228,10 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
         hasindex = relation->rd_rel->relhasindex;
 
     if (hasindex) {
-        List* indexoidlist = NIL;
         ListCell* l = NULL;
         LOCKMODE lmode;
 
-        indexoidlist = RelationGetIndexList(relation);
+        List* indexoidlist = RelationGetIndexList(relation);
 
         /*
          * For each index, we get the same type of lock that the executor will
@@ -215,9 +248,6 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
 
         foreach (l, indexoidlist) {
             Oid indexoid = lfirst_oid(l);
-            Relation indexRelation;
-            Form_pg_index index;
-            IndexOptInfo* info = NULL;
             int ncolumns;
             int nkeycolumns;
             int i;
@@ -225,8 +255,8 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
             /*
              * Extract info from the relation descriptor for the index.
              */
-            indexRelation = index_open(indexoid, lmode);
-            index = indexRelation->rd_index;
+            Relation indexRelation = index_open(indexoid, lmode);
+            Form_pg_index index = indexRelation->rd_index;
 
             /*
              * Ignore invalid indexes, since they can't safely be used for
@@ -246,6 +276,7 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
                 index_close(indexRelation, NoLock);
                 continue;
             }
+
             /*
              * If the index is valid, but cannot yet be used, ignore it; but
              * mark the plan we are generating as transient. See
@@ -267,7 +298,7 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
                 }
             }
 
-            info = makeNode(IndexOptInfo);
+            IndexOptInfo* info = makeNode(IndexOptInfo);
 
             info->indexoid = index->indexrelid;
             info->reltablespace = RelationGetForm(indexRelation)->reltablespace;
@@ -298,7 +329,6 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
             info->amoptionalkey = indexRelation->rd_am->amoptionalkey;
             info->amsearcharray = indexRelation->rd_am->amsearcharray;
             info->amsearchnulls = indexRelation->rd_am->amsearchnulls;
-            info->amcanparallel = indexRelation->rd_rel->relam == BTREE_AM_OID;
             info->amhasgettuple = OidIsValid(indexRelation->rd_am->amgettuple);
             info->amhasgetbitmap = OidIsValid(indexRelation->rd_am->amgetbitmap);
 
@@ -343,15 +373,14 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
 
                 for (i = 0; i < nkeycolumns; i++) {
                     int16 opt = indexRelation->rd_indoption[i];
-                    Oid ltopr;
                     Oid btopfamily;
                     Oid btopcintype;
                     int16 btstrategy;
 
-                    info->reverse_sort[i] = (opt & INDOPTION_DESC) != 0;
-                    info->nulls_first[i] = (opt & INDOPTION_NULLS_FIRST) != 0;
+                    info->reverse_sort[i] = (((unsigned int)opt) & INDOPTION_DESC) != 0;
+                    info->nulls_first[i] = (((unsigned int)opt) & INDOPTION_NULLS_FIRST) != 0;
 
-                    ltopr = get_opfamily_member(
+                    Oid ltopr = get_opfamily_member(
                         info->opfamily[i], info->opcintype[i], info->opcintype[i], BTLessStrategyNumber);
                     if (OidIsValid(ltopr) &&
                         get_ordering_op_properties(ltopr, &btopfamily, &btopcintype, &btstrategy) &&
@@ -413,7 +442,11 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
 #endif
                     // non-partitioned index or global partition index
                     if (!RelationIsPartitioned(indexRelation) || RelationIsGlobalIndex(indexRelation)) {
-                        info->pages = RelationGetNumberOfBlocks(indexRelation);
+                        if (RELATION_CREATE_BUCKET(indexRelation)) {
+                            info->pages = RelationGetNumberOfBlocksInFork(indexRelation, MAIN_FORKNUM, true); 
+                        } else {
+                            info->pages = RelationGetNumberOfBlocks(indexRelation);
+                        }
                     } else {  // partitioned index
                         ListCell* cell = NULL;
                         BlockNumber partIndexPages = 0;
@@ -463,7 +496,7 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
     setRelStoreInfo(rel, relation);
 
     /* Grab the fdwroutine info using the relcache, while we have it */
-    if (relation->rd_rel->relkind == RELKIND_FOREIGN_TABLE)
+    if (relation->rd_rel->relkind == RELKIND_FOREIGN_TABLE || relation->rd_rel->relkind == RELKIND_STREAM)
         rel->fdwroutine = GetFdwRoutineForRelation(relation, true);
     else
         rel->fdwroutine = NULL;
@@ -500,6 +533,7 @@ void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, dou
 
     switch (rel->rd_rel->relkind) {
         case RELKIND_RELATION:
+        case RELKIND_MATVIEW:
 #ifdef PGXC
             /*
              * This is a remote table... we have no idea how many pages/rows
@@ -526,8 +560,8 @@ void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, dou
                         *pages = rel->rd_rel->relpages;
                         *tuples = (double)rel->rd_rel->reltuples;
                         *tuples = clamp_row_est(*tuples);
-                    } else if (rel->rd_id >= FirstNormalObjectId && !check_relation_analyzed(rel->rd_id)) {
-                        if (u_sess->analyze_cxt.need_autoanalyze) {
+                    } else if (rel->rd_id >= FirstNormalObjectId) {
+                        if (u_sess->analyze_cxt.need_autoanalyze && !check_relation_analyzed(rel->rd_id)) {
                             bool is_analyzed = AutoAnaProcess::runAutoAnalyze(rel);
                             if (is_analyzed) {
                                 /* refresh the statistic info */
@@ -542,7 +576,7 @@ void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, dou
                             } else {
                                 elog(LOG,
                                     "[AUTO-ANALYZE] fail to do autoanalyze on table \"%s.%s\"",
-                                    get_namespace_name(RelationGetNamespace(rel), true),
+                                    get_namespace_name(RelationGetNamespace(rel)),
                                     RelationGetRelationName(rel));
 
                                 set_noanalyze_rellist(rel->rd_id, 0);
@@ -558,7 +592,6 @@ void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, dou
         /* fall through */
         case RELKIND_INDEX:
         case RELKIND_GLOBAL_INDEX:
-        case RELKIND_MATVIEW:
         /* fall through */
         case RELKIND_TOASTVALUE:
             /*
@@ -585,7 +618,11 @@ void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, dou
                  */
                 curpages = rel->rd_rel->relpages;
             } else {
-                curpages = RelationGetNumberOfBlocks(rel);
+                if (RELATION_CREATE_BUCKET(rel)) {
+                    curpages = RelationGetNumberOfBlocksInFork(rel, MAIN_FORKNUM, true);
+                } else {
+                    curpages = RelationGetNumberOfBlocks(rel);
+                }
             }
 
             /*
@@ -695,6 +732,7 @@ void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, dou
             *tuples = 1;
             *allvisfrac = 0;
             break;
+        case RELKIND_STREAM:
         case RELKIND_FOREIGN_TABLE:
             /* Just use whatever's in pg_class */
             *pages = rel->rd_rel->relpages;
@@ -819,6 +857,8 @@ int32 getPartitionDataWidth(Relation partRel, int32* attr_widths)
     return get_rel_data_width(partRel, attr_widths);
 }
 
+#define REL_GET_ITH_ATT(rel, i) (rel->rd_att->attrs[i])
+
 int32 getIdxDataWidth(Relation rel, IndexInfo* info, bool vectorized)
 {
     int32 width = 0;
@@ -833,15 +873,14 @@ int32 getIdxDataWidth(Relation rel, IndexInfo* info, bool vectorized)
         int32 item_width = 0;
 
         if (attnum > 0) {
-            Form_pg_attribute att = rel->rd_att->attrs[attnum - 1];
-
             /* This should match set_rel_width() in costsize.c */
             item_width = get_attavgwidth(RelationGetRelid(rel), attnum, isPartition);
             if (item_width <= 0) {
-                item_width = get_typavgwidth(att->atttypid, att->atttypmod);
+                item_width = get_typavgwidth(
+                    REL_GET_ITH_ATT(rel, attnum - 1)->atttypid, REL_GET_ITH_ATT(rel, attnum - 1)->atttypmod);
                 AssertEreport(item_width > 0, MOD_OPT, "");
             }
-            typid = att->atttypid;
+            typid = REL_GET_ITH_ATT(rel, attnum - 1)->atttypid;
         } else if (expr_i < list_length(info->ii_Expressions)) {
             Node* expr = (Node*)list_nth(info->ii_Expressions, expr_i);
             typid = exprType(expr);
@@ -1233,6 +1272,205 @@ List* build_index_tlist(PlannerInfo* root, IndexOptInfo* index, Relation heapRel
     return tlist;
 }
 
+static void FixWildcardSymbol(char** src)
+{
+    size_t lenSrc = strlen(*src);
+    /* Resize to 2len + 1 when all symbol are wildcards that needs an extra '\' sign, 1 is for the trailing ending. */
+    size_t lenResize = 2 * lenSrc + 1;
+    errno_t rc = EOK;
+    const char* symbols = "_%\\";
+    size_t loc = 0;
+    size_t cnt = 0;
+    *src = (char*)repalloc(*src, sizeof(char) * lenResize);
+    rc = memset_s(*src + lenSrc, lenResize - lenSrc, '\0', lenResize - lenSrc);
+    securec_check(rc, "", "");
+    while ((*src)[loc] != '\0') {
+        if (strchr(symbols, (*src)[loc]) != NULL) {
+            rc = memmove_s((*src) + loc + 1, lenResize - loc - 1, (*src) + loc, lenSrc - loc + cnt);
+            securec_check(rc, "", "");
+            (*src)[loc] = '\\';
+            cnt++;
+            loc++;
+        }
+        loc++;
+    }
+}
+
+/*
+ * generate a substituted function args for pattern match selectivity.
+ * caller should free the returned list after use.
+ */
+static List* GetInstrPatternArgs(const char* fmt, Node* func)
+{
+    Node* funcArg1 = (Node*)linitial(((FuncExpr*)func)->args);
+    char* instrConstArg = text_to_cstring(DatumGetTextPP(((Const*)lsecond(((FuncExpr*)func)->args))->constvalue));
+    FixWildcardSymbol(&instrConstArg);
+    const int extraDigits = 3;
+    size_t lenPatternlikeConstArg = strlen(instrConstArg) + extraDigits;
+    char* patternlikeConstArg = (char*)palloc0(lenPatternlikeConstArg);
+    errno_t rc = sprintf_s(patternlikeConstArg, lenPatternlikeConstArg, fmt, instrConstArg);
+    securec_check_ss(rc, "", "");
+    Const* constArg = (Const*)copyObject(lsecond(((FuncExpr*)func)->args));
+    Pointer p = DatumGetPointer(constArg->constvalue);
+    pfree_ext(p);
+    constArg->constvalue = PointerGetDatum(cstring_to_text(patternlikeConstArg));
+    pfree_ext(instrConstArg);
+    if (IsA(funcArg1, Var) || IsA(funcArg1, RelabelType)) {
+        return list_make2(linitial(((FuncExpr*)func)->args), (Node*)constArg);
+    } else { /* CheckInstrRICanOpt ensures that first arg can only be var(bpchar/name)::text */
+        return list_make2(linitial(((FuncExpr*)funcArg1)->args), (Node*)constArg);
+    }
+}
+
+
+static Oid GetInstrPatternOprcode(const Node* func, bool like)
+{
+    Node* funcArg1 = (Node*)linitial(((FuncExpr*)func)->args);
+    if (IsA(funcArg1, Var) || IsA(funcArg1, RelabelType)) {
+        return like ? OID_TEXT_LIKE_OP : TEXTNOTLIKEOID;
+    } else if (((FuncExpr*)funcArg1)->funcid == RTRIM1FUNCOID) {
+        return like ? OID_BPCHAR_LIKE_OP : OID_BPCHAR_NOT_LIKE_OP;
+    } else if (((FuncExpr*)funcArg1)->funcid == NAME2TEXTFUNCOID) {
+        return like ? OID_NAME_LIKE_OP : OID_NAME_NOT_LIKE_OP;
+    } else { /* should not be here */
+        ereport(ERROR,
+            (errmodule(MOD_OPT),
+                errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                errmsg("invalid instr argument")));
+        return InvalidOid; /* to keep compiler quiet */
+    }
+}
+
+static bool CheckInstrRICanOpt(const Node* funcSide, const Node* constSide)
+{
+    /* need to be instr() <opr> const or const <opr> instr() */
+    if (!IsA(funcSide, FuncExpr) || ((FuncExpr*)funcSide)->funcid != INSTR2FUNCOID || !IsA(constSide, Const)) {
+        return false;
+    }
+
+    /* only handle int operend */
+    if (((Const*)constSide)->consttype != INT4OID) {
+        return false;
+    }
+
+    Node* funcArg1 = (Node*)linitial(((FuncExpr*)funcSide)->args);
+    Node* funcArg2 = (Node*)lsecond(((FuncExpr*)funcSide)->args);
+
+    /* do not handle instr(var1, var2) or instr('xxx', var) */
+    if (!(IsA(funcArg1, Var) || IsA(funcArg1, RelabelType) || IsA(funcArg1, FuncExpr)) || !IsA(funcArg2, Const)) {
+        return false;
+    }
+
+    /* if instr's first arg is not var, only accept bpchar and name to text typecast */
+    if (IsA(funcArg1, FuncExpr) &&
+        ((((FuncExpr*)funcArg1)->funcid != RTRIM1FUNCOID && ((FuncExpr*)funcArg1)->funcid != NAME2TEXTFUNCOID) ||
+        !(IsA(linitial(((FuncExpr*)funcArg1)->args), Var)))) {
+        return false;
+    }
+
+    return true;
+}
+
+enum { EXPR_LT_CONST, EXPR_LE_CONST, EXPR_EQ_CONST, EXPR_GE_CONST, EXPR_GT_CONST, INSTR_CASE_INVALID };
+
+static unsigned int GetInstrRestrictPattern(Oid operatorid, bool varOnLeft)
+{
+    const unsigned int varOnLeftMirror = EXPR_GT_CONST;
+    unsigned int res = INSTR_CASE_INVALID;
+    switch (operatorid) {
+        case INT4LTOID:
+            res = EXPR_LT_CONST;
+            break;
+        case INT4LEOID:
+            res = EXPR_LE_CONST;
+            break;
+        case INT4EQOID:
+            res = EXPR_EQ_CONST;
+            break;
+        case INT4GEOID:
+            res = EXPR_GE_CONST;
+            break;
+        case INT4GTOID:
+            res = EXPR_GT_CONST;
+            break;
+        default:
+            return INSTR_CASE_INVALID;
+    }
+    if (!varOnLeft) {
+        res = varOnLeftMirror - res;
+    }
+    return res;
+}
+
+/*
+ * check if restriction contains function instr(var, '<pattern>') and handle accordingly.
+ * valid cases are:
+ *  +------------------------+----------------------+
+ *  | instr                  | pattern match        |
+ *  +------------------------+----------------------+
+ *  | instr(var, 'xxx') = 0  | var not like '%xxx%' |
+ *  +------------------------+----------------------+
+ *  | instr(var, 'xxx') <= 0 | var not like '%xxx%' |
+ *  +------------------------+----------------------+
+ *  | instr(var, 'xxx') > 0  | var like '%xxx%'     |
+ *  +------------------------+----------------------+
+ *  | instr(var, 'xxx') < 1  | var not like '%xxx%' |
+ *  +------------------------+----------------------+
+ *  | instr(var, 'xxx') = 1  | var like 'xxx%'      |
+ *  +------------------------+----------------------+
+ */
+static bool InstrAsPatternMatch(Oid* operatorid, List** args)
+{
+    bool valid = false;
+    bool varOnLeft = IsA((Node*)lsecond(*args), Const);
+    Node* constSide = varOnLeft ? (Node*)lsecond(*args) : (Node*)linitial(*args);
+    Node* funcSide = varOnLeft ? (Node*)linitial(*args) : (Node*)lsecond(*args);
+
+    if (!CheckInstrRICanOpt(funcSide, constSide)) {
+        return false;
+    }
+
+    List* patternselArgs = NIL;
+    Oid patternselOprcode = InvalidOid;
+    int instrCond = DatumGetInt32(((Const*)constSide)->constvalue);
+
+    unsigned int pattern = GetInstrRestrictPattern(*operatorid, varOnLeft);
+    if (pattern == INSTR_CASE_INVALID) {
+        return false;
+    }
+
+    if (instrCond == 0) {
+        if (pattern == EXPR_EQ_CONST || pattern == EXPR_LE_CONST) {
+            /* estimate instr(var, 'XXX') = 0 as var not like 'XXX' */
+            patternselArgs = GetInstrPatternArgs("%%%s%%", funcSide);
+            patternselOprcode = GetInstrPatternOprcode(funcSide, false);
+            valid = true;
+        } else if (pattern == EXPR_GT_CONST) {
+            /* estimate instr(var, 'XXX') > 0 as var like '%XXX%' */
+            patternselArgs = GetInstrPatternArgs("%%%s%%", funcSide);
+            patternselOprcode = GetInstrPatternOprcode(funcSide, true);
+            valid = true;
+        }
+    } else if (instrCond == 1) {
+        if (pattern == EXPR_EQ_CONST) {
+            /* estimate instr(var, 'XXX') = 1 as var like 'XXX%' */
+            patternselArgs = GetInstrPatternArgs("%s%%", funcSide);
+            patternselOprcode = GetInstrPatternOprcode(funcSide, true);
+            valid = true;
+        } else if (pattern == EXPR_LT_CONST) {
+            /* estimate instr(var, 'XXX') < 1 as var not like '%XXX%' */
+            patternselArgs = GetInstrPatternArgs("%%%s%%", funcSide);
+            patternselOprcode = GetInstrPatternOprcode(funcSide, false);
+            valid = true;
+        }
+    }
+    if (valid) {
+        *operatorid = patternselOprcode;
+        *args = patternselArgs;
+    }
+    return valid;
+}
+
 /*
  * restriction_selectivity
  *
@@ -1244,9 +1482,14 @@ List* build_index_tlist(PlannerInfo* root, IndexOptInfo* index, Relation heapRel
  */
 Selectivity restriction_selectivity(PlannerInfo* root, Oid operatorid, List* args, Oid inputcollid, int varRelid)
 {
-    RegProcedure oprrest = get_oprrest(operatorid);
     float8 result;
 
+    bool useInstrOpt = false;
+    if (ENABLE_SQL_BETA_FEATURE(SEL_EXPR_INSTR)) {
+        useInstrOpt = InstrAsPatternMatch(&operatorid, &args);
+    }
+
+    RegProcedure oprrest = get_oprrest(operatorid);
     /*
      * if the oprrest procedure is missing for whatever reason, use a
      * selectivity of 0.5
@@ -1260,6 +1503,11 @@ Selectivity restriction_selectivity(PlannerInfo* root, Oid operatorid, List* arg
         ObjectIdGetDatum(operatorid),
         PointerGetDatum(args),
         Int32GetDatum(varRelid)));
+
+    if (useInstrOpt) {
+        list_free_ext(args);
+    }
+
     if (result < 0.0 || result > 1.0)
         ereport(ERROR,
             (errmodule(MOD_OPT),

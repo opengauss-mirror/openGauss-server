@@ -1,0 +1,5 @@
+--GUC parameters post check
+begin;
+set IsInplaceUpgrade=on;
+ERROR:  Can not set IsInPlaceUpgrade to true while not performing upgrade.
+commit;

@@ -158,9 +158,9 @@ CREATE TABLE alter_table_instant_test_04 (
 	R7_ID smallint NOT NULL,
 	R8_ID smallint NOT NULL,
 	R9_ID smallint NOT NULL
-)  COMPRESS
+)  
 ;
-COPY alter_table_instant_test_04 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+COPY alter_table_instant_test_04 FROM '@abs_srcdir@/data/cmpr_int_raw.data';
 CREATE TABLE alter_table_instant_tmp_00 (a int, tuple_xmin xid);
 INSERT INTO alter_table_instant_tmp_00 SELECT 1, xmin FROM alter_table_instant_test_04;
 ALTER TABLE alter_table_instant_test_04 ADD COLUMN a int DEFAULT 4;
@@ -195,7 +195,7 @@ CREATE TABLE alter_table_instant_tmp_04 (
 	R9_ID smallint NOT NULL
 )  
 ;
-COPY alter_table_instant_tmp_04 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+COPY alter_table_instant_tmp_04 FROM '@abs_srcdir@/data/cmpr_int_raw.data';
 ALTER TABLE alter_table_instant_tmp_04 ADD COLUMN a int DEFAULT 4;
 ALTER TABLE alter_table_instant_tmp_04 ADD COLUMN b integer DEFAULT 3+2;
 ALTER TABLE alter_table_instant_tmp_04 ADD COLUMN c text DEFAULT 'test_text';

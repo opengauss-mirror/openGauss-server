@@ -1,0 +1,89 @@
+--
+--nation
+--
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/tpch_nation_out/ address=@obshostname@ ak=@ak@ sk=@sk@
+DROP FOREIGN TABLE if exists EXTNATION;
+CREATE FOREIGN TABLE EXTNATION (
+  N_NATIONKEY   BIGINT,
+  N_NAME      CHAR(25),
+  N_REGIONKEY   INTEGER NOT NULL,  -- references R_REGIONKEY
+  N_COMMENT   VARCHAR(152)
+)SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/tpch_nation/nation',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+);
+
+
+DROP TABLE if exists NATION;
+CREATE TABLE NATION (
+  N_NATIONKEY   BIGINT,
+  N_NAME      CHAR(25),
+  N_REGIONKEY   INTEGER NOT NULL,  -- references R_REGIONKEY
+  N_COMMENT   VARCHAR(152)
+);
+insert into NATION select * from EXTNATION;
+
+DROP FOREIGN TABLE if exists EXTNATION_WRITE;
+CREATE FOREIGN TABLE EXTNATION_WRITE (
+  N_NATIONKEY   BIGINT,
+  N_NAME      CHAR(25),
+  N_REGIONKEY   INTEGER NOT NULL,  -- references R_REGIONKEY
+  N_COMMENT   VARCHAR(152)
+)SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/tpch_nation_out/',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+)
+Write Only;
+
+insert into EXTNATION_WRITE select * from NATION;
+
+drop foreign table if exists EXTNATION_READ;
+CREATE FOREIGN TABLE EXTNATION_READ
+(
+  N_NATIONKEY   BIGINT,
+  N_NAME      CHAR(25),
+  N_REGIONKEY   INTEGER NOT NULL,  -- references R_REGIONKEY
+  N_COMMENT   VARCHAR(152)
+)SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/tpch_nation_out/',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+);
+
+
+select count(*) from EXTNATION_READ;
+
+drop table if exists NATION_READ;
+CREATE TABLE NATION_READ
+(
+  N_NATIONKEY   BIGINT,
+  N_NAME      CHAR(25),
+  N_REGIONKEY   INTEGER NOT NULL,  -- references R_REGIONKEY
+  N_COMMENT   VARCHAR(152)
+);
+
+insert into NATION_READ select * from EXTNATION_READ;
+select count(*) from (select * from NATION minus all select * from NATION_READ);
+
+drop foreign table EXTNATION_READ;
+drop foreign table EXTNATION_WRITE;
+drop table NATION_READ;
+drop table NATION;
+drop foreign table EXTNATION;
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/tpch_nation_out/ address=@obshostname@ ak=@ak@ sk=@sk@

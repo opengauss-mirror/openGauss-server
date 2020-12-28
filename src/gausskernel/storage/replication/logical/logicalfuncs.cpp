@@ -48,7 +48,7 @@
 #define str_lsn_len 128
 /* private date for writing out data */
 typedef struct DecodingOutputState {
-    Tuplestorestate* tupstore;
+    Tuplestorestate *tupstore;
     TupleDesc tupdesc;
     bool binary_output;
     int64 returned_rows;
@@ -57,7 +57,7 @@ typedef struct DecodingOutputState {
 /*
  * Prepare for a output plugin write.
  */
-static void LogicalOutputPrepareWrite(LogicalDecodingContext* ctx, XLogRecPtr lsn, TransactionId xid, bool last_write)
+static void LogicalOutputPrepareWrite(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid, bool last_write)
 {
     resetStringInfo(ctx->out);
 }
@@ -65,23 +65,23 @@ static void LogicalOutputPrepareWrite(LogicalDecodingContext* ctx, XLogRecPtr ls
 /*
  * Perform output plugin write into tuplestore.
  */
-static void LogicalOutputWrite(LogicalDecodingContext* ctx, XLogRecPtr lsn, TransactionId xid, bool last_write)
+static void LogicalOutputWrite(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid, bool last_write)
 {
     Datum values[3];
     bool nulls[3];
-    DecodingOutputState* p = NULL;
-    char* str_lsn_temp = NULL;
+    DecodingOutputState *p = NULL;
+    char *str_lsn_temp = NULL;
     int rc = 0;
     /* SQL Datums can only be of a limited length... */
     if ((uint32)ctx->out->len > MaxAllocSize - VARHDRSZ)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("too much output for sql interface")));
 
-    p = (DecodingOutputState*)ctx->output_writer_private;
+    p = (DecodingOutputState *)ctx->output_writer_private;
 
     rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
     securec_check(rc, "", "");
 
-    str_lsn_temp = (char*)palloc0(str_lsn_len);
+    str_lsn_temp = (char *)palloc0(str_lsn_len);
     rc = sprintf_s(str_lsn_temp, str_lsn_len, "%X/%X", uint32(lsn >> 32), uint32(lsn));
     securec_check_ss(rc, "", "");
     values[0] = CStringGetTextDatum(str_lsn_temp);
@@ -102,21 +102,22 @@ static void LogicalOutputWrite(LogicalDecodingContext* ctx, XLogRecPtr lsn, Tran
     p->returned_rows++;
 }
 
-void check_permissions(void)
+void check_permissions(bool for_backup)
 {
-    if (!superuser() && !has_rolreplication(GetUserId()))
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                (errmsg("must be superuser or replication role to use replication slots"))));
+    if (!superuser() && !has_rolreplication(GetUserId()) &&
+        !(for_backup && isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                        (errmsg("must be superuser or replication role to use replication slots"))));
+    }
 }
 
 /*
  * This is duplicate code with pg_xlogdump, similar to walsender.c, but
  * we currently don't have the infrastructure (elog!) to share it.
  */
-static void XLogRead(char* buf, TimeLineID tli, XLogRecPtr startptr, Size count)
+static void XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 {
-    char* p = NULL;
+    char *p = NULL;
     XLogRecPtr recptr = InvalidXLogRecPtr;
     Size nbytes = 0;
 
@@ -141,21 +142,17 @@ static void XLogRead(char* buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 
             t_thrd.logical_cxt.sendSegNo = (recptr) / XLogSegSize;
             int nRet = 0;
-            nRet = snprintf_s(path,
-                MAXPGPATH,
-                MAXPGPATH - 1,
-                XLOGDIR "/%08X%08X%08X",
-                tli,
-                (uint32)((t_thrd.logical_cxt.sendSegNo) / XLogSegmentsPerXLogId),
-                (uint32)((t_thrd.logical_cxt.sendSegNo) % XLogSegmentsPerXLogId));
+            nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X%08X%08X", tli,
+                              (uint32)((t_thrd.logical_cxt.sendSegNo) / XLogSegmentsPerXLogId),
+                              (uint32)((t_thrd.logical_cxt.sendSegNo) % XLogSegmentsPerXLogId));
             securec_check_ss(nRet, "", "");
 
             t_thrd.logical_cxt.sendFd = BasicOpenFile(path, O_RDONLY | PG_BINARY, 0);
 
             if (t_thrd.logical_cxt.sendFd < 0) {
                 if (errno == ENOENT)
-                    ereport(ERROR,
-                        (errcode_for_file_access(), errmsg("requested WAL segment %s has already been removed", path)));
+                    ereport(ERROR, (errcode_for_file_access(),
+                                    errmsg("requested WAL segment %s has already been removed", path)));
                 else
                     ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", path)));
             }
@@ -168,12 +165,12 @@ static void XLogRead(char* buf, TimeLineID tli, XLogRecPtr startptr, Size count)
                 char path[MAXPGPATH] = "\0";
 
                 int nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X%08X%08X", tli,
-                    (uint32)((t_thrd.logical_cxt.sendSegNo) / XLogSegmentsPerXLogId),
-                    (uint32)((t_thrd.logical_cxt.sendSegNo) % XLogSegmentsPerXLogId));
+                                      (uint32)((t_thrd.logical_cxt.sendSegNo) / XLogSegmentsPerXLogId),
+                                      (uint32)((t_thrd.logical_cxt.sendSegNo) % XLogSegmentsPerXLogId));
                 securec_check_ss(nRet, "", "");
 
                 ereport(ERROR, (errcode_for_file_access(),
-                    errmsg("could not seek in log segment %s to offset %u: %m", path, startoff)));
+                                errmsg("could not seek in log segment %s to offset %u: %m", path, startoff)));
             }
             t_thrd.logical_cxt.sendOff = startoff;
         }
@@ -190,13 +187,13 @@ static void XLogRead(char* buf, TimeLineID tli, XLogRecPtr startptr, Size count)
             char path[MAXPGPATH] = "\0";
 
             int nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X%08X%08X", tli,
-                (uint32)((t_thrd.logical_cxt.sendSegNo) / XLogSegmentsPerXLogId),
-                (uint32)((t_thrd.logical_cxt.sendSegNo) % XLogSegmentsPerXLogId));
+                                  (uint32)((t_thrd.logical_cxt.sendSegNo) / XLogSegmentsPerXLogId),
+                                  (uint32)((t_thrd.logical_cxt.sendSegNo) % XLogSegmentsPerXLogId));
             securec_check_ss(nRet, "", "");
 
-            ereport(ERROR, (errcode_for_file_access(),
-                errmsg("could not read from log segment %s, offset %u, length %lu: %m",
-                    path, t_thrd.logical_cxt.sendOff, INT2ULONG(segbytes))));
+            ereport(ERROR,
+                    (errcode_for_file_access(), errmsg("could not read from log segment %s, offset %u, length %lu: %m",
+                                                       path, t_thrd.logical_cxt.sendOff, INT2ULONG(segbytes))));
         }
 
         /* Update state for read */
@@ -219,8 +216,8 @@ static void XLogRead(char* buf, TimeLineID tli, XLogRecPtr startptr, Size count)
  * exists for normal backends, so we have to do a check/sleep/repeat style of
  * loop for now.
  */
-int logical_read_local_xlog_page(XLogReaderState* state, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
-    char* cur_page, TimeLineID* pageTLI)
+int logical_read_local_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
+                                 char *cur_page, TimeLineID *pageTLI)
 {
     XLogRecPtr flushptr, loc;
     int count;
@@ -263,7 +260,7 @@ int logical_read_local_xlog_page(XLogReaderState* state, XLogRecPtr targetPagePt
     return count;
 }
 
-bool AssignLsn(XLogRecPtr* lsn_ptr, const char* input)
+bool AssignLsn(XLogRecPtr *lsn_ptr, const char *input)
 {
     int len1 = 0;
     int len2 = 0;
@@ -300,17 +297,17 @@ static Datum pg_logical_slot_get_changes_guts(FunctionCallInfo fcinfo, bool conf
     Name name = PG_GETARG_NAME(0);
     XLogRecPtr upto_lsn = InvalidXLogRecPtr;
     int64 upto_nchanges = 0;
-    ReturnSetInfo* rsinfo = (ReturnSetInfo*)fcinfo->resultinfo;
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
     MemoryContext per_query_ctx = NULL;
     MemoryContext oldcontext = NULL;
     XLogRecPtr end_of_wal = InvalidXLogRecPtr;
     XLogRecPtr startptr = InvalidXLogRecPtr;
-    LogicalDecodingContext* ctx = NULL;
+    LogicalDecodingContext *ctx = NULL;
     ResourceOwner old_resowner = t_thrd.utils_cxt.CurrentResourceOwner;
-    ArrayType* arr = NULL;
+    ArrayType *arr = NULL;
     Size ndim = 0;
-    List* options = NIL;
-    DecodingOutputState* p = NULL;
+    List *options = NIL;
+    DecodingOutputState *p = NULL;
     int rc = 0;
     char path[MAXPGPATH];
     struct stat st;
@@ -323,14 +320,13 @@ static Datum pg_logical_slot_get_changes_guts(FunctionCallInfo fcinfo, bool conf
     if (PG_ARGISNULL(1))
         upto_lsn = InvalidXLogRecPtr;
     else {
-        const char* str_upto_lsn = TextDatumGetCString(PG_GETARG_DATUM(1));
+        const char *str_upto_lsn = TextDatumGetCString(PG_GETARG_DATUM(1));
         ValidateName(str_upto_lsn);
         if (!AssignLsn(&upto_lsn, str_upto_lsn)) {
             ereport(ERROR,
-                (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-                    errmsg("invalid input syntax for type lsn: \"%s\" "
-                           "of start_lsn",
-                        str_upto_lsn)));
+                    (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid input syntax for type lsn: \"%s\" "
+                                                                          "of start_lsn",
+                                                                          str_upto_lsn)));
         }
     }
 
@@ -342,16 +338,14 @@ static Datum pg_logical_slot_get_changes_guts(FunctionCallInfo fcinfo, bool conf
 
     /* check to see if caller supports us returning a tuplestore */
     if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("set-valued function called in context that cannot accept a set")));
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("set-valued function called in context that cannot accept a set")));
     if (!(rsinfo->allowedModes & SFRM_Materialize))
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("materialize mode required, but it is not allowed in this context")));
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("materialize mode required, but it is not allowed in this context")));
 
     /* state to write output to */
-    p = (DecodingOutputState*)palloc0(sizeof(DecodingOutputState));
+    p = (DecodingOutputState *)palloc0(sizeof(DecodingOutputState));
 
     p->binary_output = binary;
 
@@ -373,10 +367,12 @@ static Datum pg_logical_slot_get_changes_guts(FunctionCallInfo fcinfo, bool conf
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("array must not contain nulls")));
     } else if (ndim == 1) {
         int nelems = 0;
-        Datum* datum_opts = NULL;
+        Datum *datum_opts = NULL;
         int i = 0;
 
-        AssertEreport(ARR_ELEMTYPE(arr) == TEXTOID, MOD_FUNCTION, "must be TEXTOID");
+        if (ARR_ELEMTYPE(arr) != TEXTOID) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("array must be TEXTOID")));
+        }
 
         deconstruct_array(arr, TEXTOID, -1, false, 'i', &datum_opts, NULL, &nelems);
 
@@ -384,10 +380,10 @@ static Datum pg_logical_slot_get_changes_guts(FunctionCallInfo fcinfo, bool conf
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("array must have even number of elements")));
 
         for (i = 0; i < nelems; i += 2) {
-            char* dname = TextDatumGetCString(datum_opts[i]);
-            char* opt = TextDatumGetCString(datum_opts[i + 1]);
+            char *dname = TextDatumGetCString(datum_opts[i]);
+            char *opt = TextDatumGetCString(datum_opts[i + 1]);
             ValidateName(dname);
-            options = lappend(options, makeDefElem(dname, (Node*)makeString(opt)));
+            options = lappend(options, makeDefElem(dname, (Node *)makeString(opt)));
         }
     }
 
@@ -416,12 +412,8 @@ static Datum pg_logical_slot_get_changes_guts(FunctionCallInfo fcinfo, bool conf
 
     PG_TRY();
     {
-        ctx = CreateDecodingContext(InvalidXLogRecPtr,
-            options,
-            false,
-            logical_read_local_xlog_page,
-            LogicalOutputPrepareWrite,
-            LogicalOutputWrite);
+        ctx = CreateDecodingContext(InvalidXLogRecPtr, options, false, logical_read_local_xlog_page,
+                                    LogicalOutputPrepareWrite, LogicalOutputWrite);
 
         (void)MemoryContextSwitchTo(oldcontext);
 
@@ -430,32 +422,29 @@ static Datum pg_logical_slot_get_changes_guts(FunctionCallInfo fcinfo, bool conf
          * what we need.
          */
         if (!binary && ctx->options.output_type != OUTPUT_PLUGIN_TEXTUAL_OUTPUT)
-            ereport(
-                ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("output plugin cannot produce binary output")));
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("output plugin cannot produce binary output")));
 
         ctx->output_writer_private = p;
 
         startptr = t_thrd.slot_cxt.MyReplicationSlot->data.restart_lsn;
 
-        t_thrd.utils_cxt.CurrentResourceOwner =
-            ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "logical decoding");
+        t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner,
+                                                                    "logical decoding", MEMORY_CONTEXT_STORAGE);
 
         /* invalidate non-timetravel entries */
         InvalidateSystemCaches();
 
         while ((!XLByteEQ(startptr, InvalidXLogRecPtr) && XLByteLT(startptr, end_of_wal)) ||
                (!XLByteEQ(ctx->reader->EndRecPtr, InvalidXLogRecPtr) && XLByteLT(ctx->reader->EndRecPtr, end_of_wal))) {
-            XLogRecord* record = NULL;
-            char* errm = NULL;
+            XLogRecord *record = NULL;
+            char *errm = NULL;
 
             record = XLogReadRecord(ctx->reader, startptr, &errm);
             if (errm != NULL)
-                ereport(ERROR,
-                    (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
-                        errmsg("Stopped to parse any valid XLog Record at %X/%X: %s.",
-                            (uint32)(ctx->reader->EndRecPtr >> 32),
-                            (uint32)ctx->reader->EndRecPtr,
-                            errm)));
+                ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+                                errmsg("Stopped to parse any valid XLog Record at %X/%X: %s.",
+                                       (uint32)(ctx->reader->EndRecPtr >> 32), (uint32)ctx->reader->EndRecPtr, errm)));
 
             startptr = InvalidXLogRecPtr;
 

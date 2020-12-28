@@ -2,7 +2,7 @@
 -- test audit for new object
 --
 -- open the audit guc parameter.
-\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1/ -c "audit_system_object=8191" > /dev/null
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1/ -c "audit_system_object=8191" > /dev/null 2>&1
 select pg_sleep(1);
 
 --1¡¢audit for resouce pool and workload.
@@ -24,7 +24,7 @@ select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-
 
 --3¡¢audit for server in hardoop
 select * from pg_delete_audit('1111-1-1','2222-2-2');
-create role temp_role password 'Ttest@123';
+create role temp_role password 'Gauss@123';
 create server test_serverforhardoop_audit foreign data wrapper hdfs_fdw options (address '10.10.0.100:25000', hdfscfgpath '/home/omm', type 'hdfs');
 --alter server test_serverforhardoop_audit options (add hdfscfgpath '/opt/hadoop');
 alter server test_serverforhardoop_audit owner to temp_role;
@@ -34,12 +34,12 @@ drop role temp_role;
 select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where object_name LIKE 'test_serverforhardoop';
 
 -- close the audit guc parameter.
-\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1/ -c "audit_system_object=7" > /dev/null
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1/ -c "audit_system_object=7" > /dev/null 2>&1
 select pg_sleep(1);
 
 GRANT CREATE ON SCHEMA public TO PUBLIC;
-create role nologin_privilege_role password 'Ttest@123';
-set role nologin_privilege_role password 'Ttest@123';
+create role nologin_privilege_role password 'Gauss@123';
+set role nologin_privilege_role password 'Gauss@123';
 create table stream_test(id int);
 insert into stream_test values(1),(2);
 drop table stream_test;
@@ -52,37 +52,37 @@ REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 --select pg_stat_get_backend_pid(1);
 --select pg_stat_get_activity(123456789101112);
 
-create user sec_app_account_02_001_roleadmin with createrole identified by 'TestPwd@123';
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -U sec_app_account_02_001_roleadmin -W TestPwd@123 -r -c "create user sec_app_account_02_001_testa identified by 'TestPwd@123';"
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -U sec_app_account_02_001_roleadmin -W TestPwd@123 -r -c "drop user sec_app_account_02_001_testa;"
+create user sec_app_account_02_001_roleadmin with createrole identified by 'Gauss_234';
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U sec_app_account_02_001_roleadmin -W Gauss_234 -r -c "create user sec_app_account_02_001_testa identified by 'Gauss_234';"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U sec_app_account_02_001_roleadmin -W Gauss_234 -r -c "drop user sec_app_account_02_001_testa;"
 drop user sec_app_account_02_001_roleadmin;
 
 --audit for set parameter operator.
 select * from pg_delete_audit('1111-1-1','2222-2-2');
-create user set_role_user password 'ttest@123';
-set role set_role_user password 'ttest@123';
+create user set_role_user password 'gauss@123';
+set role set_role_user password 'gauss@123';
 reset role;
 drop user set_role_user;
 select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where detail_info like '%set_role_user%';
 select * from pg_delete_audit('1111-1-1','2222-2-2');
 
-\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1/ -c "audit_dml_state=1" > /dev/null
-\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1/ -c "audit_dml_state_select=1" > /dev/null
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1/ -c "audit_dml_state=1" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1/ -c "audit_dml_state_select=1" > /dev/null 2>&1
 select pg_sleep(1);
-\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_dml_state;show audit_dml_state_select;create table openGauss1101101_t1 (id int, num int)  ;"
-\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "insert into openGauss1101101_t1 values (1,1);"
-\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "select * from openGauss1101101_t1 where id=1;"
-\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "drop table openGauss1101101_t1;"
-\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "select type,result,object_name,detail_info from pg_query_audit('0007-1-1','9999-12-31') where OBJECT_name ='openGauss1101101_t1' order by time;";
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_dml_state;show audit_dml_state_select;create table DTS2018091711491_t1 (id int, num int) distribute by hash(id);"
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "insert into DTS2018091711491_t1 values (1,1);"
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "select * from DTS2018091711491_t1 where id=1;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "drop table DTS2018091711491_t1;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "select type,result,object_name,detail_info from pg_query_audit('0007-1-1','9999-12-31') where OBJECT_name ='dts2018091711491_t1' order by time;";
 \! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "select * from pg_delete_audit('0007-1-1','9999-12-31');";
 
 -- llt for pbe and lightcn
-\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_dml_state;show audit_dml_state_select;create table lightcn_t1 (id int, num int)  ;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_dml_state;show audit_dml_state_select;create table lightcn_t1 (id int, num int) distribute by hash(id);"
 \! @pgbench_dir@/pgbench -p @portstring@ postgres -c 1 -t 1 -M prepared -f @abs_srcdir@/data/pgbench.sql -n > /dev/null
 \! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "drop table lightcn_t1;"
 \! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "select type,result,object_name,detail_info from pg_query_audit('0007-1-1','9999-12-31') where OBJECT_name ='lightcn_t1' order by time;";
 \! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "select * from pg_delete_audit('0007-1-1','9999-12-31');";
 
-\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1/ -c "audit_dml_state=0" > /dev/null
-\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1/ -c "audit_dml_state_select=0" > /dev/null
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1/ -c "audit_dml_state=0" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1/ -c "audit_dml_state_select=0" > /dev/null 2>&1
 select pg_sleep(1);

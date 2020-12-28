@@ -11,7 +11,7 @@
  * -------------------------------------------------------------------------
  */
 #include "postgres_fe.h"
-
+#include <time.h>
 #include <fcntl.h>
 
 #include "pgtz.h"
@@ -230,8 +230,9 @@ static int score_timezone(const char* tz_name, struct tztry* tt)
     for (i = 0; i < tt->n_test_times; i++) {
         pgtt = (pg_time_t)(tt->test_times[i]);
         pgtm = pg_localtime(&pgtt, tz);
-        if (pgtm == NULL)
+        if (pgtm == NULL) {
             return -1; /* probably shouldn't happen */
+        }
         systm = localtime(&(tt->test_times[i]));
         if (systm == NULL) {
 #ifdef DEBUG_IDENTIFY_TIMEZONE
@@ -308,7 +309,7 @@ const char* identify_system_timezone(void)
     static char resultbuf[TZ_STRLEN_MAX + 1];
     time_t tnow;
     time_t t;
-    struct tztry tt;
+    struct tztry tt = {0};
     struct tm* tm_val = NULL;
     int thisyear;
     int bestscore;
@@ -343,8 +344,9 @@ const char* identify_system_timezone(void)
      */
     tnow = time(NULL);
     tm_val = localtime(&tnow);
-    if (tm_val == NULL)
+    if (tm_val == NULL) {
         return NULL; /* give up if localtime is broken... */
+    }
     thisyear = tm_val->tm_year + 1900;
 
     t = build_time_t(thisyear, 1, 15);
@@ -412,10 +414,12 @@ const char* identify_system_timezone(void)
      */
     for (t = tnow; t <= tnow + T_MONTH * 14; t += T_MONTH) {
         tm_val = localtime(&t);
-        if (tm_val == NULL)
+        if (tm_val == NULL) {
             continue;
-        if (tm_val->tm_isdst < 0)
+        }
+        if (tm_val->tm_isdst < 0) {
             continue;
+        }
         if (tm_val->tm_isdst == 0 && std_zone_name[0] == '\0') {
             /* found STD zone */
             rc = memset_s(cbuf, (TZ_STRLEN_MAX + 1), 0, sizeof(cbuf));
@@ -509,13 +513,14 @@ const char* identify_system_timezone(void)
  */
 void scan_available_timezones(char* tzdir, char* tzdirsub, struct tztry* tt, int* bestscore, char* bestzonename)
 {
-    size_t tzdir_orig_len = strlen(tzdir);
+    int tzdir_orig_len = strlen(tzdir);
     char** names;
     char** namep;
 
     names = pgfnames(tzdir);
-    if (names == NULL)
+    if (names == NULL) {
         return;
+    }
 
     for (namep = names; *namep != NULL; namep++) {
         char* name = *namep;
@@ -523,8 +528,9 @@ void scan_available_timezones(char* tzdir, char* tzdirsub, struct tztry* tt, int
         int nRet = 0;
 
         /* Ignore . and .., plus any other "hidden" files */
-        if (name[0] == '.')
+        if (name[0] == '.') {
             continue;
+        }
 
         nRet = snprintf_s(
             tzdir + tzdir_orig_len, (MAXPGPATH - tzdir_orig_len), MAXPGPATH - tzdir_orig_len - 1, "/%s", name);
@@ -915,15 +921,18 @@ static bool validate_zone(const char* tz_name)
 {
     pg_tz* tz = NULL;
 
-    if ((tz_name == NULL) || !tz_name[0])
+    if ((tz_name == NULL) || !tz_name[0]) {
         return false;
+    }
 
     tz = pg_load_tz(tz_name);
-    if (tz == NULL)
+    if (tz == NULL) {
         return false;
+    }
 
-    if (!pg_tz_acceptable(tz))
+    if (!pg_tz_acceptable(tz)) {
         return false;
+    }
 
     return true;
 }

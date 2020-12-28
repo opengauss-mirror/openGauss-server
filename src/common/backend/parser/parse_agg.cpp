@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *
- * parse_agg.cpp
+ * parse_agg.c
  *	  handle aggregates and window functions in parser
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -56,8 +56,9 @@ static void finalize_grouping_exprs(
 
 static bool finalize_grouping_exprs_walker(Node* node, check_ungrouped_columns_context* context);
 static List* expand_groupingset_node(GroupingSet* gs);
+#ifndef ENABLE_MULTIPLE_NODES
 static void find_rownum_in_groupby_clauses(Rownum *rownumVar, check_ungrouped_columns_context* context);
-
+#endif
 /*
  * transformAggregateCall -
  *		Finish initial transformation of an aggregate call
@@ -227,6 +228,15 @@ void transformAggregateCall(ParseState* pstate, Aggref* agg, List* args, List* a
     while (min_varlevel-- > 0)
         pstate = pstate->parentParseState;
     pstate->p_hasAggs = true;
+    /*
+     * Complain if we are inside a LATERAL subquery of the aggregation query.
+     * We must be in its FROM clause, so the aggregate is misplaced.
+    */
+    if (pstate->p_lateral_active)
+        ereport(ERROR,
+            (errcode(ERRCODE_GROUPING_ERROR),
+             errmsg("aggregates not allowed in FROM clause"),
+             parser_errposition(pstate, agg->location)));
 #ifdef PGXC
     /*
      * Return data type of PGXC Datanode's aggregate should always return the
@@ -253,9 +263,8 @@ void transformAggregateCall(ParseState* pstate, Aggref* agg, List* args, List* a
      * operator does not exist: (user-defined enum type) = anyenum.
      */
     if (IS_PGXC_DATANODE && !isRestoreMode && !u_sess->catalog_cxt.Parse_sql_language && !IsInitdb &&
-        !u_sess->attr.attr_common.IsInplaceUpgrade && !IS_SINGLE_NODE && (agg->aggtrantype != anyenum_typeoid)) {
+        !u_sess->attr.attr_common.IsInplaceUpgrade && !IS_SINGLE_NODE && (anyenum_typeoid != agg->aggtrantype))
         agg->aggtype = agg->aggtrantype;
-    }
 
     ReleaseSysCache(aggTuple);
 #endif
@@ -741,10 +750,12 @@ static bool check_ungrouped_columns_walker(Node* node, check_ungrouped_columns_c
         }
     }
 
+#ifndef ENABLE_MULTIPLE_NODES
     /* If There is ROWNUM, it must appear in the GROUP BY clause or be used in an aggregate function. */
     if (IsA(node, Rownum)) {
         find_rownum_in_groupby_clauses((Rownum *)node, context);
     }
+#endif
     /*
      * If we have an ungrouped Var of the original query level, we have a
      * failure.  Vars below the original query level are not a problem, and
@@ -1479,6 +1490,7 @@ Oid resolve_aggregate_transtype(Oid aggfuncid, Oid aggtranstype, Oid* inputTypes
     return aggtranstype;
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
 static void find_rownum_in_groupby_clauses(Rownum *rownumVar, check_ungrouped_columns_context *context)
 {
     bool haveRownum = false;
@@ -1500,3 +1512,4 @@ static void find_rownum_in_groupby_clauses(Rownum *rownumVar, check_ungrouped_co
         }
     }
 }
+#endif

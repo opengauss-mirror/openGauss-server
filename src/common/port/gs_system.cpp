@@ -1,18 +1,7 @@
-/*
+/* -------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1988, 1993 The Regents of the University of California.
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
  *
  * gs_system.cpp
  *
@@ -157,14 +146,11 @@ FILE* popen_security(const char* command, char type)
             if (cmd == NULL) {
                 _exit(1);
             }
-            /* cmd should be freed after execvp, cause argv point to cmd */
             argv = parseStringToArgs(cmd, &argc);
             if (argv == NULL || argc == 0) {
-                free(cmd);
                 _exit(1);
             }
             (void)execvp(argv[0], argv);
-            free(cmd);
             _exit(127);
         default: /* in parent process */
             break;
@@ -274,8 +260,10 @@ int gs_system_security(const char* command)
     char** argv = NULL;
     int argc = 0;
 
-    if (command == NULL) /* just checking... */
-        return -1;
+    if (command == NULL) {
+        /* just checking... */
+        return 1;
+    }
 
     /*
      * Ignore SIGINT and SIGQUIT, block SIGCHLD. Remember to save existing
@@ -301,16 +289,15 @@ int gs_system_security(const char* command)
             (void)sigprocmask(SIG_SETMASK, &oldsigblock, NULL);
             /* parse string info args */
             cmd = strdup(command);
-            if (cmd == NULL)
+            if (cmd == NULL) {
                 _exit(1);
-            /* cmd should be freed after execvp, cause argv point to cmd */
+            }
             argv = parseStringToArgs(cmd, &argc);
+            free(cmd);
             if (argv == NULL || argc == 0) {
-                free(cmd);
                 _exit(1);
             }
             (void)execvp(argv[0], argv);
-            free(cmd);
             _exit(127);
         default: /* parent */
             do {
@@ -322,5 +309,5 @@ int gs_system_security(const char* command)
     (void)sigaction(SIGQUIT, &quitact, NULL);
     (void)sigprocmask(SIG_SETMASK, &oldsigblock, NULL);
 
-    return (pid == -1 ? -1 : status);
+    return ((pid == -1) ? -1 : status);
 }

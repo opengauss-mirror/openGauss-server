@@ -35,7 +35,7 @@
    to have large tuples, since fields can be spread across multiple tuples).
    BLCKSZ must be a power of 2. The maximum possible value of BLCKSZ is
    currently 2^15 (32768). This is determined by the 15-bit widths of the
-   lp_off and lp_len fields in ItemIdData (see include/storage/itemid.h).
+   lp_off and lp_len fields in ItemIdData (see include/storage/item/itemid.h).
    Changing BLCKSZ requires an initdb. */
 #undef BLCKSZ
 
@@ -58,8 +58,15 @@
 /* Define to 1 if you want National Language Support. (--enable-nls) */
 #undef ENABLE_NLS
 
+/* Define to 1 if you want to generate gauss product as single node. (--enable-privategauss) */
+#undef ENABLE_PRIVATEGAUSS
+
 /* Define to 1 if you want to generate gauss product as multiple nodes. (--enable-multiple-nodes) */
 #undef ENABLE_MULTIPLE_NODES 
+
+/* Define to 1 if you want MOT support. (--enable-mot).
+   Supported only in single_node mode, not supported with (--enable-multiple-nodes) */
+#undef ENABLE_MOT
 
 /* Define to 1 if you want to check memory. (--enable-memory-check) */
 #undef ENABLE_MEMORY_CHECK

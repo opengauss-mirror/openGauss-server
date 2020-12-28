@@ -1,0 +1,279 @@
+-- problem:
+-- SQL clause about CREATE TABLE for compression
+-- case 1: default compress level
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+\dS+ cstore_create_clause_00
+DROP TABLE cstore_create_clause_00;
+
+-- case 2: no compress
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = no ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+\dS+ cstore_create_clause_00
+DROP TABLE cstore_create_clause_00;
+
+-- case 3: compress yes
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+\dS+ cstore_create_clause_00
+DROP TABLE cstore_create_clause_00;
+
+-- case 4: compress low
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+\dS+ cstore_create_clause_00
+DROP TABLE cstore_create_clause_00;
+
+-- case 5: compress middle
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+\dS+ cstore_create_clause_00
+DROP TABLE cstore_create_clause_00;
+
+-- case 4: compress high
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+\dS+ cstore_create_clause_00
+DROP TABLE cstore_create_clause_00;
+
+-- case 5: invalid compress type
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a) ;
+
+-- case 6: max_batchrow option test
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , max_batchrow = 10000) tablespace hdfs_ts DISTRIBUTE BY HASH(a) ;
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+\dS+ cstore_create_clause_00
+DROP TABLE cstore_create_clause_00;
+
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , max_batchrow = 60000) tablespace hdfs_ts DISTRIBUTE BY HASH(a) ;
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+\dS+ cstore_create_clause_00
+DROP TABLE cstore_create_clause_00;
+
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , max_batchrow = 65536) tablespace hdfs_ts DISTRIBUTE BY HASH(a) ;
+
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , max_batchrow = 9999) tablespace hdfs_ts DISTRIBUTE BY HASH(a) ;
+
+-- case 7: deltarow_threshold option test
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , deltarow_threshold = 10000) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , deltarow_threshold = -1) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , deltarow_threshold = 0) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+\dS+ cstore_create_clause_00;
+DROP TABLE cstore_create_clause_00;
+
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , deltarow_threshold = 9999) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+\dS+ cstore_create_clause_00;
+DROP TABLE cstore_create_clause_00;
+-- problem:
+-- SQL clause about CREATE TABLE for compression
+-- case 1: default compress level
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+\dS+ cstore_create_clause_00
+DROP TABLE cstore_create_clause_00;
+
+-- case 2: no compress
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = no ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+\dS+ cstore_create_clause_00
+DROP TABLE cstore_create_clause_00;
+
+-- case 3: compress yes
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+\dS+ cstore_create_clause_00
+DROP TABLE cstore_create_clause_00;
+
+-- case 4: compress low
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+\dS+ cstore_create_clause_00
+DROP TABLE cstore_create_clause_00;
+
+-- case 5: compress middle
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+\dS+ cstore_create_clause_00
+DROP TABLE cstore_create_clause_00;
+
+-- case 4: compress high
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+\dS+ cstore_create_clause_00
+DROP TABLE cstore_create_clause_00;
+
+-- case 5: invalid compress type
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+
+-- case 6: max_batchrow option test
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , max_batchrow = 10000) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+\dS+ cstore_create_clause_00
+DROP TABLE cstore_create_clause_00;
+
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , max_batchrow = 60000) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+\dS+ cstore_create_clause_00
+DROP TABLE cstore_create_clause_00;
+
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , max_batchrow = 65536) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , max_batchrow = 9999) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+
+-- case 7: deltarow_threshold option test
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , deltarow_threshold = 10000) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , deltarow_threshold = -1) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , deltarow_threshold = 0) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+\dS+ cstore_create_clause_00;
+DROP TABLE cstore_create_clause_00;
+
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , deltarow_threshold = 9999) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+\dS+ cstore_create_clause_00;
+DROP TABLE cstore_create_clause_00;
+
+-- case 8: partial_cluster_rows
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc, partial_cluster_rows = 500000 ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc, partial_cluster_rows = 600000 ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+\dS+ cstore_create_clause_00;
+DROP TABLE cstore_create_clause_00;
+
+

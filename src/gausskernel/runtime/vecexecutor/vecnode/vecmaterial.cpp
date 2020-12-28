@@ -1,19 +1,8 @@
-/*
+/* -------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2010, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
  *
  * vecmaterial.cpp
  *	  Routines to handle materialization nodes.
@@ -68,7 +57,7 @@ static VectorBatch* exec_vec_material_all(VecMaterialState* node) /* result tupl
         batch_store_stat =
             batchstore_begin_heap(tup_desc, true, false, operator_mem, max_mem, plan->plan_node_id, SET_DOP(plan->dop));
         batchstore_set_eflags(batch_store_stat, node->eflags);
-        if (node->eflags & EXEC_FLAG_MARK) {
+        if ((uint32)node->eflags & EXEC_FLAG_MARK) {
             /*
              * Allocate a second read pointer to serve as the mark. We know it
              * must have index 1, so needn't store that.
@@ -175,7 +164,7 @@ static VectorBatch* exec_vec_material_one(VecMaterialState* node) /* result tupl
         batch_store_stat =
             batchstore_begin_heap(tup_desc, true, false, operator_mem, max_mem, plan->plan_node_id, SET_DOP(plan->dop));
         batchstore_set_eflags(batch_store_stat, node->eflags);
-        if (node->eflags & EXEC_FLAG_MARK) {
+        if ((uint32)node->eflags & EXEC_FLAG_MARK) {
             /*
              * Allocate a second read pointer to serve as the mark. We know it
              * must have index 1, so needn't store that.
@@ -310,7 +299,7 @@ VecMaterialState* ExecInitVecMaterial(VecMaterial* node, EState* estate, int efl
      * if we might be called on to rewind and replay it many times. However,
      * if none of these cases apply, we can skip storing the data.
      */
-    matstate->eflags = (eflags & (EXEC_FLAG_REWIND | EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK));
+    matstate->eflags = ((uint32)eflags & (EXEC_FLAG_REWIND | EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK));
 
     /*
      * Tuplestore's interpretation of the flag bits is subtly different from
@@ -319,12 +308,12 @@ VecMaterialState* ExecInitVecMaterial(VecMaterial* node, EState* estate, int efl
      * must include REWIND in the tuplestore eflags, else tuplestore_trim
      * might throw away too much.
      */
-    if (eflags & EXEC_FLAG_BACKWARD)
-        matstate->eflags |= EXEC_FLAG_REWIND;
+    if ((uint32)eflags & EXEC_FLAG_BACKWARD)
+        matstate->eflags = (uint32)matstate->eflags | EXEC_FLAG_REWIND;
 
     /* Currently, we don't want to rescan stream node in subplans */
     if (node->materialize_all)
-        matstate->eflags |= EXEC_FLAG_REWIND;
+        matstate->eflags = (uint32)matstate->eflags | EXEC_FLAG_REWIND;
 
     matstate->eof_underlying = false;
     matstate->batchstorestate = NULL;
@@ -353,7 +342,7 @@ VecMaterialState* ExecInitVecMaterial(VecMaterial* node, EState* estate, int efl
      * We shield the child node from the need to support REWIND, BACKWARD, or
      * MARK/RESTORE.
      */
-    eflags &= ~(EXEC_FLAG_REWIND | EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK);
+    eflags = (uint32)eflags & ~(EXEC_FLAG_REWIND | EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK);
 
     left_plan = outerPlan(node);
     outerPlanState(matstate) = ExecInitNode(left_plan, estate, eflags);
@@ -362,8 +351,12 @@ VecMaterialState* ExecInitVecMaterial(VecMaterial* node, EState* estate, int efl
      * initialize tuple type.  no need to initialize projection info because
      * this node doesn't do projections.
      */
-    ExecAssignResultTypeFromTL(&matstate->ss.ps);
     ExecAssignScanTypeFromOuterPlan(&matstate->ss);
+
+    ExecAssignResultTypeFromTL(
+            &matstate->ss.ps,
+            matstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+
     matstate->ss.ps.ps_ProjInfo = NULL;
 
     /*
@@ -500,7 +493,7 @@ void ExecVecReScanMaterial(VecMaterialState* node)
          * Otherwise we can just rewind and rescan the stored output. The
          * state of the subnode does not change.
          */
-        if (node->ss.ps.lefttree->chgParam != NULL || (node->eflags & EXEC_FLAG_REWIND) == 0) {
+        if (node->ss.ps.lefttree->chgParam != NULL || ((uint32)node->eflags & EXEC_FLAG_REWIND) == 0) {
             batchstore_end(node->batchstorestate);
             node->batchstorestate = NULL;
             if (node->ss.ps.lefttree->chgParam == NULL) {

@@ -24,6 +24,7 @@
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
 #include "mb/pg_wchar.h"
 
@@ -56,7 +57,7 @@ static bool check_env(const char* input_env_value)
 {
 #define MAXENVLEN 1024
 
-    const char* danger_character_list[] = {";", "`", "\\", "'", "\"", ">", "<", "$", "&", "|", "!", "\n", "../", NULL};
+    const char* danger_character_list[] = {";", "`", "\\", "'", "\"", ">", "<", "$", "&", "|", "!", "\n", NULL};
     int i = 0;
 
     if (input_env_value == NULL || strlen(input_env_value) >= MAXENVLEN) {
@@ -85,8 +86,8 @@ static bool check_env(const char* input_env_value)
 static int validate_exec(const char* path)
 {
     struct stat buf;
-    bool is_r = false;
-    bool is_x = false;
+    int is_r;
+    int is_x;
 
 #ifdef WIN32
     char path_exe[MAXPGPATH + sizeof(".exe") - 1];
@@ -95,8 +96,8 @@ static int validate_exec(const char* path)
     if (strlen(path) >= strlen(".exe") && pg_strcasecmp(path + strlen(path) - strlen(".exe"), ".exe") != 0) {
         errno_t rc = strncpy_s(path_exe, MAXPGPATH, path, MAXPGPATH - 1);
         securec_check_c(rc, "\0", "\0");
-        int rc = strcat_s(path_exe, sizeof(path_exe), ".exe");
-        securec_check_c(rc, "", "");
+        rc = strcat_s(path_exe, MAXPGPATH + sizeof(".exe") - 1, ".exe");
+        securec_check_c(rc, "\0", "\0");
         path = path_exe;
     }
 #endif
@@ -262,6 +263,7 @@ static int resolve_symlinks(char* path)
      * chdir(). its function is tested well under SUSE and redhat system.
      * Note: maybe some other platform/system fails to work.
      */
+
     if (is_absolute_path(path)) {
         len = strlen(path);
         rc = memcpy_s(tmp_path, MAXPGPATH, path, len + 1);
@@ -343,7 +345,7 @@ int find_other_exec(const char* argv0, const char* target, const char* versionst
     if (pipe_read_line(cmd, line, sizeof(line)) == NULL) {
         return -1;
     }
-#ifndef ENABLE_LLT
+#if (defined ENABLE_MULTIPLE_NODES) && (!defined ENABLE_LLT)
     if (strcmp(line, versionstr) != 0) {
         return -2;
     }
@@ -538,7 +540,7 @@ int pclose_check(FILE* stream)
             sizeof(str) - 1,
             "%d: %s",
             WTERMSIG(exitstatus),
-            WTERMSIG(exitstatus) < NSIG ? sys_siglist[WTERMSIG(exitstatus)] : "(unknown)");
+            (WTERMSIG(exitstatus) < NSIG) ? sys_siglist[WTERMSIG(exitstatus)] : "(unknown)");
         securec_check_ss_c(rc, "\0", "\0");
 
         log_error(_("child process was terminated by signal %s"), str);
@@ -596,7 +598,7 @@ void set_pglocale_pgservice(const char* argv0, const char* app)
 #ifdef FRONTEND
         ptr = strdup(env_path);
 #else
-        ptr = MemoryContextStrdup(t_thrd.top_mem_cxt, env_path);
+        ptr = MemoryContextStrdup(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), env_path);
 #endif
         if (ptr != NULL) {
             gs_putenv_r(ptr);
@@ -616,7 +618,7 @@ void set_pglocale_pgservice(const char* argv0, const char* app)
 #ifdef FRONTEND
         ptr = strdup(env_path);
 #else
-        ptr = MemoryContextStrdup(t_thrd.top_mem_cxt, env_path);
+        ptr = MemoryContextStrdup(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), env_path);
 #endif
         if (ptr != NULL) {
             gs_putenv_r(ptr);
@@ -799,4 +801,3 @@ static BOOL GetTokenUser(HANDLE hToken, PTOKEN_USER* ppTokenUser)
 }
 
 #endif
-

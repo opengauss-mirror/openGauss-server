@@ -591,7 +591,6 @@ void SonicHashAgg::initBatch()
     }
 
     int idx = m_hashNeed + m_aggNum - 1;
-
     /* description order to loop over agg functions */
     foreach (l, m_runtime->aggs) {
         AggrefExprState* aggrefstate = (AggrefExprState*)lfirst(l);
@@ -799,9 +798,17 @@ void SonicHashAgg::initMatchFunc(TupleDesc desc, uint16* keyIdx, uint16 keyNum)
 void SonicHashAgg::BindingFp()
 {
     if (m_useSegHashTbl) {
-        m_buildFun = &SonicHashAgg::buildAggTblBatch<true>;
+        if (((Agg *) m_runtime->ss.ps.plan)->unique_check) {
+            m_buildFun = &SonicHashAgg::buildAggTblBatch<true, true>;
+        } else {
+            m_buildFun = &SonicHashAgg::buildAggTblBatch<true, false>;
+        }
     } else {
-        m_buildFun = &SonicHashAgg::buildAggTblBatch<false>;
+        if (((Agg *) m_runtime->ss.ps.plan)->unique_check) {
+            m_buildFun = &SonicHashAgg::buildAggTblBatch<false, true>;
+        } else {
+            m_buildFun = &SonicHashAgg::buildAggTblBatch<false, false>;
+        }
     }
 }
 
@@ -1036,7 +1043,7 @@ VectorBatch* SonicHashAgg::Probe()
             return NULL;
         }
 
-        rows = BatchMaxSize < (m_rows - last_idx) ? BatchMaxSize : (m_rows - last_idx);
+        rows = (BatchMaxSize < (m_rows - last_idx)) ? BatchMaxSize : (m_rows - last_idx);
 
         for (int i = 0; i < rows; i++) {
             last_idx++;
@@ -1283,6 +1290,7 @@ bool SonicHashAgg::matchValue(ScalarVector* pVector, uint16 keyIdx, int16 pVecto
         fcinfo.arg = &args[0];
         fcinfo.arg[0] = pVector->m_vals[pVectorIdx];
         fcinfo.arg[1] = val;
+        fcinfo.flinfo = (m_equalFuncs + keyIdx);
         notnull_check = notnull_check && (bool)m_equalFuncs[keyIdx].fn_addr(&fcinfo);
     }
 
@@ -1320,6 +1328,7 @@ void SonicHashAgg::matchArray(ScalarVector* pVector, uint16 keyIdx, uint16 cmpRo
             } else {
                 fcinfo.arg[0] = pVector->m_vals[m_suspectIdx[i]];
                 fcinfo.arg[1] = val;
+                fcinfo.flinfo = (m_equalFuncs + keyIdx);
                 m_match[i] = null_check || (notnull_check && (bool)m_equalFuncs[keyIdx].fn_addr(&fcinfo));
             }
         }
@@ -1330,7 +1339,7 @@ void SonicHashAgg::matchArray(ScalarVector* pVector, uint16 keyIdx, uint16 cmpRo
  * @Description	: Get data batch and build hash table.
  * @in batch		: data source from lefttree or temp file
  */
-template <bool useSegHashTable>
+template <bool useSegHashTable, bool unique_check>
 void SonicHashAgg::buildAggTblBatch(VectorBatch* batch)
 {
     int i, j;
@@ -1348,7 +1357,11 @@ void SonicHashAgg::buildAggTblBatch(VectorBatch* batch)
     INSTR_TIME_SET_CURRENT(start_time);
 
     /* the hash table may be resized yet */
+#ifdef USE_PRIME
+    uint32 mask = m_hashSize;
+#else
     uint32 mask = m_hashSize - 1;
+#endif
 
     /* 1. calculate hash value. */
     hashBatchArray(batch, (void*)m_buildOp.hashFunc, m_buildOp.hashFmgr, m_buildOp.keyIndx, m_hashVal);
@@ -1359,7 +1372,11 @@ void SonicHashAgg::buildAggTblBatch(VectorBatch* batch)
 
     /* seperate tuples that missed and matched */
     for (i = 0; i < rows; i++) {
+#ifdef USE_PRIME
+        hash_loc = hash_val[i] % mask;
+#else
         hash_loc = hash_val[i] & mask;
+#endif
 
         if (!useSegHashTable) {
             data_loc = ((uint32*)m_bucket)[hash_loc];
@@ -1401,10 +1418,14 @@ void SonicHashAgg::buildAggTblBatch(VectorBatch* batch)
 
                     /* update the new position */
                     m_loc[miss_idx] = data_loc;
-                } else {
+                } else
                     m_missIdx[m_missNum++] = miss_idx;
-                }
             } else {
+                if (unique_check) {
+                    ereport(ERROR,
+                            (errcode(ERRCODE_CARDINALITY_VIOLATION),
+                             errmsg("more than one row returned by a subquery used as an expression")));
+                }
                 matched++;
             }
         }
@@ -1453,6 +1474,10 @@ void SonicHashAgg::buildAggTblBatch(VectorBatch* batch)
         /* if not matched, it is a new hashvalue */
         if (!keymatch) {
             AllocHashTbl(batch, m_missIdx[i], hash_val[m_missIdx[i]], m_bucketLoc[cmpBatchIdx]);
+        } else if (unique_check) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_CARDINALITY_VIOLATION),
+                     errmsg("more than one row returned by a subquery used as an expression")));
         }
     }
 
@@ -1697,11 +1722,15 @@ int64 SonicHashAgg::calcHashTableSize(int64 oldSize)
     int64 allowed_size;
 
     if (expand == false) {
+#ifdef USE_PRIME
+        hash_size = (uint32)hashfindprime(oldSize);
+#else
         /* supporting zero sized hashes would complicate matters */
         hash_size = Max(oldSize, MIN_HASH_TABLE_SIZE);
 
         /* round up size to the next power of 2, that's the bucketing works */
         hash_size = 1L << my_log2(hash_size);
+#endif
 
         allowed_size = m_memControl.totalMem / sizeof(uint32);
 
@@ -1728,12 +1757,15 @@ int64 SonicHashAgg::calcHashTableSize(int64 oldSize)
         Assert(oldSize * HASH_EXPAND_SIZE <= allowed_size);
 
         hash_size = oldSize * HASH_EXPAND_SIZE;
-
+#ifdef USE_PRIME
+        hash_size = (uint32)hashfindprime(hash_size);
+#else
         /* supporting zero sized hashes would complicate matters */
         hash_size = Max(hash_size, MIN_HASH_TABLE_SIZE);
 
         /* round up size to the next power of 2, that's the bucketing works  */
         hash_size = 1L << my_log2(hash_size);
+#endif
 
         if (hash_size * HASH_EXPAND_SIZE > allowed_size) {
             m_enableExpansion = false;
@@ -1853,8 +1885,11 @@ void SonicHashAgg::AllocHashTbl(VectorBatch* batch, int idx, uint32 hashval, int
              * mark which partition this element belongs to
              */
             HashKey key = DatumGetUInt32(hash_uint32(hashval));
+#ifdef USE_PRIME
+            part_idx = key % m_partNum;
+#else
             part_idx = key & (m_partNum - 1);
-
+#endif
             if (u_sess->attr.attr_sql.enable_sonic_optspill) {
                 for (int k = 0; k < m_partFileSource[part_idx]->m_cols; k++) {
                     pVector = &batch->m_arr[k];
@@ -1920,8 +1955,11 @@ void SonicHashAgg::AllocHashTbl(VectorBatch* batch, int idx, uint32 hashval, int
             /* Compute the hash value for tuple and resave to disk, first mark
              * which partition this element belongs to */
             HashKey key = DatumGetUInt32(hash_uint32(hashval));
+#ifdef USE_PRIME
+            part_idx = key % m_overflowNum;
+#else
             part_idx = key & (m_overflowNum - 1);
-
+#endif
             if (u_sess->attr.attr_sql.enable_sonic_optspill) {
                 for (int j = 0; j < m_overflowFileSource[part_idx]->m_cols; j++) {
                     pVector = &batch->m_arr[j];
@@ -2033,7 +2071,13 @@ void SonicHashAgg::expandHashTable()
             DatumDesc description;
             getDataDesc(&description, 4, NULL, false);
             m_useSegHashTbl = true;
-            m_buildFun = &SonicHashAgg::buildAggTblBatch<true>;
+
+            if (((Agg *) m_runtime->ss.ps.plan)->unique_check) {
+                m_buildFun = &SonicHashAgg::buildAggTblBatch<true, true>;
+            } else {
+                m_buildFun = &SonicHashAgg::buildAggTblBatch<true, false>;
+            }
+
             m_segBucket = New(CurrentMemoryContext)
                 SonicIntTemplateDatumArray<uint32>(m_memControl.hashContext, m_atomSize, false, &description);
             m_segNum = (m_hashSize - 1) / INIT_DATUM_ARRAY_SIZE + 1;
@@ -2052,7 +2096,12 @@ void SonicHashAgg::expandHashTable()
         hash_val = (uint32)m_hash->getNthDatum(idx);
 
         rows_num++;
+
+#ifdef USE_PRIME
+        hash_loc = hash_val % m_hashSize;
+#else
         hash_loc = hash_val & (m_hashSize - 1);
+#endif
 
         if (likely(!m_useSegHashTbl)) {
             m_next->putArray((Datum*)&(((uint32*)m_bucket)[hash_loc]), NULL, 1);

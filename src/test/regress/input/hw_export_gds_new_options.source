@@ -1,0 +1,310 @@
+-- clean up work
+\! rm -rf @abs_srcdir@/data/parallel_export/* >/dev/null 2>&1
+\! rm -rf @abs_srcdir@/results/parallel_export -r >/dev/null 2>&1
+\! mkdir @abs_srcdir@/results/parallel_export >/dev/null 2>&1
+-- setup GDS
+\! @abs_bindir@/gds -d @abs_srcdir@/ -p 0.0.0.0:12021 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status -S 10MB
+
+
+-- GDS FOREIGN TABLE NEW OPTIONS
+
+
+-- 1. out_fix_alignment
+---
+--- 1) first import target data so we can do export
+
+drop foreign table if exists f_test_fix_alignment;
+create foreign table f_test_fix_alignment
+(
+id numeric position(0,3),
+nm varchar(10) position(3,10),
+col1 char(15) position(13,15),
+col2 varchar position(28,10),
+col3 text position(38,10),
+col4 name position(48,10)
+)
+server gsmpp_server
+options(location 'gsfs://127.0.0.1:12021/data/datanode1/test_fix_alignment.txt', format 'fixed', fix '58', encoding 'UTF8')
+with err_table_fix_alignment per node reject limit 'unlimited';
+
+drop table if exists test_fix_alignment;
+create table test_fix_alignment(like f_test_fix_alignment);
+
+insert into test_fix_alignment select * from f_test_fix_alignment;
+
+select * from test_fix_alignment;
+
+select length(id),length(nm),length(col1),length(col2),length(col3),length(col4) from test_fix_alignment;
+
+--- 2) then export out to file using align_right, align_left
+
+drop foreign table if exists f_test_fix_alignment_out_right;
+create foreign table f_test_fix_alignment_out_right
+(
+id numeric position(0,3),
+nm varchar(20) position(3,20),
+col1 char(15) position(23,20),
+col2 varchar position(43,20),
+col3 text position(63,15),
+col4 name position(78,15)
+)
+server gsmpp_server
+options(location 'gsfs://127.0.0.1:12021/results/parallel_export', format 'fixed', encoding 'UTF8', out_fix_alignment 'align_right')
+write only;
+
+insert into f_test_fix_alignment_out_right select * from test_fix_alignment;
+
+\! cat @abs_srcdir@/results/parallel_export/f_test_fix_alignment_out_right.dat.0
+
+drop foreign table if exists f_test_fix_alignment_out_left;
+create foreign table f_test_fix_alignment_out_left
+(
+id numeric position(0,3),
+nm varchar(20) position(3,20),
+col1 char(15) position(23,20),
+col2 varchar position(43,20),
+col3 text position(63,15),
+col4 name position(78,15)
+)
+server gsmpp_server
+options(location 'gsfs://127.0.0.1:12021/results/parallel_export', format 'fixed', encoding 'UTF8', out_fix_alignment 'align_left')
+write only;
+
+insert into f_test_fix_alignment_out_left select * from test_fix_alignment;
+
+\! cat @abs_srcdir@/results/parallel_export/f_test_fix_alignment_out_left.dat.0
+
+--- 3) then we check whether we could use that exported file to do import and turn into the same as the beginning
+
+drop foreign table if exists f_test_fix_alignment_out_in;
+create foreign table f_test_fix_alignment_out_in
+(
+id numeric position(0,3),
+nm varchar(20) position(3,20),
+col1 char(15) position(23,20),
+col2 varchar position(43,20),
+col3 text position(63,15),
+col4 name position(78,15)
+)
+server gsmpp_server
+options(location 'gsfs://127.0.0.1:12021/results/parallel_export/f_test_fix_alignment_out_left.dat.0', format 'fixed', encoding 'UTF8', fix '93');
+
+insert into test_fix_alignment select * from f_test_fix_alignment_out_in;
+
+select * from test_fix_alignment;
+
+select length(id),length(nm),length(col1),length(col2),length(col3),length(col4) from test_fix_alignment;
+
+--- 4) finally we check invalid input for this option
+
+drop foreign table if exists f_test_fix_alignment_out_right_err;
+create foreign table f_test_fix_alignment_out_right_err
+(
+id numeric position(0,3),
+nm varchar(20) position(3,20),
+col1 char(15) position(23,20),
+col2 varchar position(43,20),
+col3 text position(63,15),
+col4 name position(78,15)
+)
+server gsmpp_server
+options(location 'gsfs://127.0.0.1:12021/', format 'fixed', encoding 'UTF8', out_fix_alignment '')
+write only;
+
+create foreign table f_test_fix_alignment_out_right_err
+(
+id numeric position(0,3),
+nm varchar(20) position(3,20),
+col1 char(15) position(23,20),
+col2 varchar position(43,20),
+col3 text position(63,15),
+col4 name position(78,15)
+)
+server gsmpp_server
+options(location 'gsfs://127.0.0.1:12021/', format 'csv', encoding 'UTF8', out_fix_alignment '')
+write only;
+
+create foreign table f_test_fix_alignment_out_right_err
+(
+id numeric position(0,3),
+nm varchar(20) position(3,20),
+col1 char(15) position(23,20),
+col2 varchar position(43,20),
+col3 text position(63,15),
+col4 name position(78,15)
+)
+server gsmpp_server
+options(location 'gsfs://127.0.0.1:12021/', format 'fixed', encoding 'UTF8', out_fix_alignment '');
+
+create foreign table f_test_fix_alignment_out_right_err
+(
+id numeric position(0,3),
+nm varchar(20) position(3,20),
+col1 char(15) position(23,20),
+col2 varchar position(43,20),
+col3 text position(63,15),
+col4 name position(78,15)
+)
+server gsmpp_server
+options(location 'gsfs://127.0.0.1:12021/', format 'fixed', encoding 'UTF8', out_fix_alignment 'left', out_fix_alignment 'left')
+write only;
+
+
+create foreign table f_test_fix_alignment_out_right_err
+(
+id numeric position(0,3),
+nm varchar(20) position(3,20),
+col1 char(15) position(23,20),
+col2 varchar position(43,20),
+col3 text position(63,15),
+col4 name position(78,15)
+)
+server gsmpp_server
+options(format 'csv', out_fix_alignment 'left', location 'gsobs://@obshostname@/@obsbucket@/obscheck/lineitem.data', delimiter '|',
+access_key '@ak@',
+secret_access_key '@sk@');
+
+
+-- 2. out_filename_prefix
+
+-- 1) test whether the filename prefix is what we give
+
+drop table if exists hw_export_source_table;
+CREATE TABLE hw_export_source_table
+(
+C_CHAR_3 CHAR(16),
+C_VARCHAR_3 VARCHAR(1024) ,
+C_INT INTEGER,
+C_NUMERIC numeric(10,5),
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE DEFAULT '1971-1-1',
+C_TSVECTOR TSVECTOR
+)
+distribute by hash(C_CHAR_3);
+
+COPY hw_export_source_table FROM '@abs_srcdir@/data/hw_export_data.data';
+
+drop foreign table if exists f_test_filename_prefix;
+create foreign table f_test_filename_prefix (like hw_export_source_table)
+server gsmpp_server
+options(location 'gsfs://127.0.0.1:12021/data/parallel_export/', format 'text', out_filename_prefix 'test_file_prefix1', encoding 'utf8') write only;
+insert into f_test_filename_prefix select * from hw_export_source_table;
+
+\! file @abs_srcdir@/data/parallel_export/test_file_prefix1.dat.0
+
+-- 2) then test cases we do not allow
+
+drop foreign table if exists partsupp_ssl_unload_err;
+CREATE FOREIGN TABLE partsupp_ssl_unload_err
+(
+PS_PARTKEY BIGINT,
+PS_SUPPKEY BIGINT,
+PS_AVAILQTY BIGINT,
+PS_SUPPLYCOST DECIMAL(15,2),
+PS_COMMENT VARCHAR(199) 
+)
+SERVER gsmpp_server
+OPTIONS(location 'gsfs://127.0.0.1:12021/',
+format 'text',
+delimiter '|',
+encoding 'utf8',
+out_filename_prefix ''
+) write only;
+
+CREATE FOREIGN TABLE partsupp_ssl_unload_err
+(
+PS_PARTKEY BIGINT,
+PS_SUPPKEY BIGINT,
+PS_AVAILQTY BIGINT,
+PS_SUPPLYCOST DECIMAL(15,2),
+PS_COMMENT VARCHAR(199) 
+)
+SERVER gsmpp_server
+OPTIONS(location 'gsfs://127.0.0.1:12021/',
+format 'text',
+delimiter '|',
+encoding 'utf8',
+out_filename_prefix ''
+);
+
+CREATE FOREIGN TABLE partsupp_ssl_unload_err
+(
+PS_PARTKEY BIGINT,
+PS_SUPPKEY BIGINT,
+PS_AVAILQTY BIGINT,
+PS_SUPPLYCOST DECIMAL(15,2),
+PS_COMMENT VARCHAR(199) 
+)
+SERVER gsmpp_server
+OPTIONS(location 'gsfs://127.0.0.1:12021/',
+format 'text',
+delimiter '|',
+encoding 'utf8',
+out_filename_prefix '1l#!!RFAAA$@'
+) write only;
+
+CREATE FOREIGN TABLE partsupp_ssl_unload_err
+(
+PS_PARTKEY BIGINT,
+PS_SUPPKEY BIGINT,
+PS_AVAILQTY BIGINT,
+PS_SUPPLYCOST DECIMAL(15,2),
+PS_COMMENT VARCHAR(199) 
+)
+SERVER gsmpp_server
+OPTIONS(location 'gsfs://127.0.0.1:12021/',
+format 'text',
+delimiter '|',
+encoding 'utf8',
+out_filename_prefix 'aux'
+) write only;
+
+CREATE FOREIGN TABLE partsupp_ssl_unload_err
+(
+PS_PARTKEY BIGINT,
+PS_SUPPKEY BIGINT,
+PS_AVAILQTY BIGINT,
+PS_SUPPLYCOST DECIMAL(15,2),
+PS_COMMENT VARCHAR(199) 
+)
+SERVER gsmpp_server
+OPTIONS(location 'gsfs://127.0.0.1:12021/',
+format 'text',
+delimiter '|',
+encoding 'utf8',
+out_filename_prefix 'abc',
+out_filename_prefix 'abc'
+) write only;
+
+create foreign table f_test_fix_alignment_out_right_err
+(
+id numeric position(0,3),
+nm varchar(20) position(3,20),
+col1 char(15) position(23,20),
+col2 varchar position(43,20),
+col3 text position(63,15),
+col4 name position(78,15)
+)
+server gsmpp_server
+options(format 'csv', out_filename_prefix 'abc', location 'gsobs://@obshostname@/@obsbucket@/obscheck/lineitem.data', delimiter '|',
+access_key '@ak@',
+secret_access_key '@sk@');
+
+COPY hw_export_source_table FROM '@abs_srcdir@/data/hw_export_data.data' with (out_filename_prefix 'abc', out_filename_prefix 'abc');
+
+COPY hw_export_source_table FROM '@abs_srcdir@/data/hw_export_data.data' with (out_fix_alignment 'left', out_fix_alignment 'left');
+
+--- last. clear the context
+
+drop foreign table if exists f_test_fix_alignment;
+drop table if exists test_fix_alignment;
+drop foreign table if exists f_test_fix_alignment_out_right;
+drop foreign table if exists f_test_fix_alignment_out_left;
+drop foreign table if exists f_test_fix_alignment_out_in;
+drop foreign table if exists f_test_fix_alignment_out_right_err;
+drop table if exists hw_export_source_table;
+drop foreign table if exists f_test_filename_prefix;
+drop foreign table if exists partsupp_ssl_unload_err;
+
+
+\! rm -rf @abs_srcdir@/data/parallel_export/* >/dev/null 2>&1
+\! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 9 > /dev/null 2>&1

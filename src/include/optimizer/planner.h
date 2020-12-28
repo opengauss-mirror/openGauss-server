@@ -24,13 +24,16 @@
 #define INSTALLATION_MODE "installation"
 
 /* Expression kind codes for preprocess_expression */
-#define EXPRKIND_QUAL 0
-#define EXPRKIND_TARGET 1
-#define EXPRKIND_RTFUNC 2
-#define EXPRKIND_VALUES 3
-#define EXPRKIND_LIMIT 4
-#define EXPRKIND_APPINFO 5
-#define EXPRKIND_TABLESAMPLE 6
+#define EXPRKIND_QUAL              0
+#define EXPRKIND_TARGET            1
+#define EXPRKIND_RTFUNC            2
+#define EXPRKIND_RTFUNC_LATERAL    3
+#define EXPRKIND_VALUES            4
+#define EXPRKIND_VALUES_LATERAL    5
+#define EXPRKIND_LIMIT             6
+#define EXPRKIND_APPINFO           7
+#define EXPRKIND_PHV               8
+#define EXPRKIND_TABLESAMPLE       9
 
 /*
  * @hdfs
@@ -44,19 +47,15 @@ typedef struct {
     bool has_denserank;
 } DenseRank_context;
 
-/* possible values for force_parallel_mode */
-typedef enum {
-    FORCE_PARALLEL_OFF,
-    FORCE_PARALLEL_ON,
-    FORCE_PARALLEL_REGRESS
-} ForceParallelMode;
-
 extern ExecNodes* getExecNodesByGroupName(const char* gname);
 extern PlannedStmt* planner(Query* parse, int cursorOptions, ParamListInfo boundParams);
 extern PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo boundParams);
 
+typedef PlannedStmt *(*planner_hook_type) (Query* parse, int cursorOptions, ParamListInfo boundParams);
+
 extern Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_root, bool hasRecursion,
-    double tuple_fraction, PlannerInfo** subroot, ItstDisKey* diskeys = NULL, List* subqueryRestrictInfo = NIL);
+    double tuple_fraction, PlannerInfo** subroot, int options = SUBQUERY_NORMAL, ItstDisKey* diskeys = NULL,
+    List* subqueryRestrictInfo = NIL);
 
 extern void add_tlist_costs_to_plan(PlannerInfo* root, Plan* plan, List* tlist);
 
@@ -66,9 +65,9 @@ extern bool is_single_baseresult_plan(Plan* plan);
 
 extern Expr* expression_planner(Expr* expr);
 
-extern bool plan_cluster_use_sort(Oid tableOid, Oid indexOid);
+extern Expr *preprocess_phv_expression(PlannerInfo *root, Expr *expr);
 
-extern int plan_create_index_workers(Oid tableOid, Oid indexOid);
+extern bool plan_cluster_use_sort(Oid tableOid, Oid indexOid);
 
 extern bool ContainRecursiveUnionSubplan(PlannedStmt* pstmt);
 
@@ -114,7 +113,7 @@ extern void find_inlist2join_path(PlannerInfo* root, Path* best_path);
 
 extern bool planClusterPartitionUseSort(Relation partRel, Oid indexOid, PlannerInfo* root, RelOptInfo* relOptInfo);
 extern void select_active_windows(PlannerInfo* root, WindowLists* wflists);
-extern List* make_pathkeys_for_window(PlannerInfo* root, WindowClause* wc, List* tlist);
+extern List* make_pathkeys_for_window(PlannerInfo* root, WindowClause* wc, List* tlist, bool canonicalize);
 
 extern List* get_distributekey_from_tlist(
     PlannerInfo* root, List* tlist, List* groupcls, double rows, double* result_multiple, void* skew_info = NULL);
@@ -173,7 +172,14 @@ extern void GetPlanNodePlainText(
     Plan* plan, char** pname, char** sname, char** strategy, char** operation, char** pt_operation, char** pt_options);
 extern void RecordQueryPlanIssues(const List* results);
 extern bool enable_check_implicit_cast();
+extern void check_gtm_free_plan(PlannedStmt *stmt, int elevel);
 extern THR_LOCAL List* g_index_vars;
 extern bool PreprocessOperator(Node* node, void* context);
+extern void check_plan_mergeinto_replicate(PlannedStmt* stmt, int elevel);
+extern void check_entry_mergeinto_replicate(Query* parse);
+extern List* get_plan_list(Plan* plan);
+extern RelOptInfo* build_alternative_rel(const RelOptInfo* origin, RTEKind rtekind);
+extern Plan* get_foreign_scan(Plan* plan);
+extern uint64 adjust_plsize(Oid relid, uint64 plan_width, uint64 pl_size, uint64* width);
 
 #endif /* PLANNER_H */

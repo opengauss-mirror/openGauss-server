@@ -143,7 +143,6 @@ DATA(insert ( 405        oid_ops             PGNSP PGUID 1990   26 t 0 ));
 DATA(insert ( 403        oidvector_ops       PGNSP PGUID 1991   30 t 0 ));
 DATA(insert ( 405        oidvector_ops       PGNSP PGUID 1992   30 t 0 ));
 DATA(insert ( 403        record_ops          PGNSP PGUID 2994 2249 t 0 ));
-DATA(insert ( 403        record_image_ops    PGNSP PGUID 3194 2249 f 0 ));
 DATA(insert OID = 3126 ( 403    text_ops    PGNSP PGUID 1994   25 t 0 ));
 #define TEXT_BTREE_OPS_OID 3126
 DATA(insert ( 405        text_ops            PGNSP PGUID 1995   25 t 0 ));
@@ -312,6 +311,10 @@ DATA(insert ( 4239    tinterval_ops    PGNSP    PGUID  4261   704    t    0));
 DATA(insert ( 4239    int1_ops         PGNSP    PGUID  4262  5545    t    0));
 DATA(insert ( 4239    bool_ops         PGNSP    PGUID  4263    16    t    0));
 DATA(insert ( 4239    smalldatetime_ops  PGNSP  PGUID  4264  9003    t    0));
+
+/* encrypted column operators */
+DATA(insert ( 403     byteawithoutorderwithequalcol_ops PGNSP PGUID  436  4402 t 0 ));
+DATA(insert ( 405     byteawithoutorderwithequalcol_ops PGNSP PGUID 4470 4402 t 0 ));
 
 #endif   /* PG_OPCLASS_H */
 

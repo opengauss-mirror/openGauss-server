@@ -1,0 +1,22 @@
+prepare p2 as select * from hash_col order by 1;
+EXECUTE p2;
+ c1 | c2  |  c3  
+----+-----+------
+  3 |  30 |  300
+  4 |  40 |  400
+  5 |  50 |  500
+  6 |  60 |  600
+  7 |  70 |  700
+  8 |  80 |  800
+  9 |  90 |  900
+ 10 | 100 | 1000
+ 11 | 110 | 1100
+ 12 | 120 | 1200
+(10 rows)
+
+prepare p4(int, int) as select * from hash_col where c2 >= $2 and c2 <= $1 order by 1;
+EXECUTE p4(30, 80);
+ c1 | c2 | c3 
+----+----+----
+(0 rows)
+

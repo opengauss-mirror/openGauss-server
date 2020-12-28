@@ -37,15 +37,16 @@
 #include "utils/builtins.h"
 #include "nodes/pg_list.h"
 #include "access/htup.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "access/heapam.h"
 
 #define MAX_PARTITIONKEY_NUM 4
 #define MAX_PARTITION_NUM 32767    /* update LEN_PARTITION_PREFIX as well ! */
+#define MAX_LH_PARTITION_NUM 64    /* update LEN_LIST/HASH_PARTITION_PREFIX as well ! */
 #define INTERVAL_PARTITION_NAME_PREFIX "sys_p"
 #define INTERVAL_PARTITION_NAME_PREFIX_FMT "sys_p%u"
 #define INTERVAL_PARTITION_NAME_SUFFIX_LEN 5  /* max length of partitio num */
- 
+
 /* 
  * In start/end syntax, partition name is of form: 
  *     PARTITION_PREFIX_NUM, 
@@ -75,7 +76,7 @@
 typedef void (*PartitionNameGetPartidCallback) (Oid partitioned_relation, const char *partition_name, Oid partId,
     Oid oldPartId, char partition_type, void *callback_arg, LOCKMODE callbackobj_lockMode);
 extern void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, Oid new_part_id, 
-                                 int2vector *pkey, const oidvector *inttablespace, Datum interval, 
+                                 int2vector *pkey, const oidvector *inttablespace, Datum interval,
                                  Datum maxValues, Datum transitionPoint, Datum reloptions, char parttype);
 extern bool isPartitionedObject(Oid relid, char relkind, bool missing_ok);
 extern bool isPartitionObject(Oid partid, char partkind, bool missing_ok);

@@ -103,7 +103,7 @@ select count(*) from test_tablesample_col tablesample hybrid (50, 50) repeatable
      0
 (1 row)
 
-explain (verbose on, costs off, nodes off) 
+explain (verbose on, costs off) 
   select id from test_tablesample_col tablesample bernoulli (50) repeatable (2);
                                QUERY PLAN                                
 -------------------------------------------------------------------------
@@ -182,7 +182,7 @@ select count(*) from test_tablesample_col_rep tablesample hybrid (100, 50) repea
    506
 (1 row)
 
-explain (verbose on, costs off, nodes off) 
+explain (verbose on, costs off) 
   select id from test_tablesample_col_rep tablesample bernoulli (50) repeatable (2);
                                QUERY PLAN                                
 -------------------------------------------------------------------------
@@ -261,7 +261,7 @@ select count(*) from test_tablesample_col_part tablesample hybrid (100, 50) repe
    506
 (1 row)
 
-explain (verbose on, costs off, nodes off) 
+explain (verbose on, costs off) 
   select id from test_tablesample_col_part tablesample bernoulli (50) repeatable (2);
                                QUERY PLAN                                
 -------------------------------------------------------------------------

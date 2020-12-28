@@ -81,10 +81,6 @@ int main(int ac, char* av[])
     char* database = NULL;
 
     progname = strdup(av[0]);
-    if (progname == NULL) {
-        fprintf(stderr, "out of memory\n");
-        exit(1);
-    }
 
     /* Print help if necessary */
     if (ac > 1) {
@@ -110,26 +106,14 @@ int main(int ac, char* av[])
             case 'h':
                 Free(host);
                 host = strdup(optarg);
-                if (host == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit(1);
-                }
                 break;
             case 'n':
                 Free(nodename);
                 nodename = strdup(optarg);
-                if (nodename == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit(1);
-                }
                 break;
             case 'p':
                 Free(port);
                 port = strdup(optarg);
-                if (port == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit(1);
-                }
                 break;
             case 'q':
                 verbose = false;
@@ -139,17 +123,9 @@ int main(int ac, char* av[])
                 break;
             case 'U':
                 username = strdup(optarg);
-                if (username == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit(1);
-                }
                 break;
             case 'd':
                 database = strdup(optarg);
-                if (database == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit(1);
-                }
                 break;
             default:
                 fprintf(stderr, "%s: unknow option %c.\n", progname, opt);

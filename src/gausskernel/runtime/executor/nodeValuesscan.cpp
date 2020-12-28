@@ -28,7 +28,7 @@
 #include "executor/nodeValuesscan.h"
 #include "parser/parsetree.h"
 
-static TupleTableSlot* values_next(ValuesScanState* node);
+static TupleTableSlot* ValuesNext(ValuesScanState* node);
 
 /* ----------------------------------------------------------------
  *						Scan Support
@@ -40,7 +40,7 @@ static TupleTableSlot* values_next(ValuesScanState* node);
  *		This is a workhorse for ExecValuesScan
  * ----------------------------------------------------------------
  */
-static TupleTableSlot* values_next(ValuesScanState* node)
+static TupleTableSlot* ValuesNext(ValuesScanState* node)
 {
     List* expr_list = NIL;
 
@@ -142,7 +142,7 @@ static TupleTableSlot* values_next(ValuesScanState* node)
 /*
  * ValuesRecheck -- access method routine to recheck a tuple in EvalPlanQual
  */
-static bool values_recheck(ValuesScanState* node, TupleTableSlot* slot)
+static bool ValuesRecheck(ValuesScanState* node, TupleTableSlot* slot)
 {
     /* nothing to check */
     return true;
@@ -159,7 +159,7 @@ static bool values_recheck(ValuesScanState* node, TupleTableSlot* slot)
  */
 TupleTableSlot* ExecValuesScan(ValuesScanState* node)
 {
-    return ExecScan(&node->ss, (ExecScanAccessMtd)values_next, (ExecScanRecheckMtd)values_recheck);
+    return ExecScan(&node->ss, (ExecScanAccessMtd)ValuesNext, (ExecScanRecheckMtd)ValuesRecheck);
 }
 
 /* ----------------------------------------------------------------
@@ -215,8 +215,9 @@ ValuesScanState* ExecInitValuesScan(ValuesScan* node, EState* estate, int eflags
 
     /*
      * get info about values list
+     * value lists scan, no relation is  involved, default tableAm type is set to HEAP.
      */
-    tupdesc = ExecTypeFromExprList((List*)linitial(node->values_lists), rte->eref->colnames);
+    tupdesc = ExecTypeFromExprList((List*)linitial(node->values_lists), rte->eref->colnames, TAM_HEAP);
 
     ExecAssignScanType(&scan_state->ss, tupdesc);
 
@@ -238,8 +239,10 @@ ValuesScanState* ExecInitValuesScan(ValuesScan* node, EState* estate, int eflags
 
     /*
      * Initialize result tuple type and projection info.
+     * value lists result tuple is set to default tableAm type HEAP.
      */
-    ExecAssignResultTypeFromTL(&scan_state->ss.ps);
+    ExecAssignResultTypeFromTL(&scan_state->ss.ps, TAM_HEAP);
+
     ExecAssignScanProjectionInfo(&scan_state->ss);
 
     return scan_state;

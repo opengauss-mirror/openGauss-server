@@ -32,6 +32,74 @@
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
 
+const static Oid cstoreSupportType[] = {BOOLOID,
+    HLL_OID, // same as BYTEA
+    BYTEAOID,
+    CHAROID,
+    HLL_HASHVAL_OID, // same as INT8
+    INT8OID,
+    INT2OID,
+    INT4OID,
+    INT1OID,
+    NUMERICOID,
+    BPCHAROID,
+    VARCHAROID,
+    NVARCHAR2OID,
+    SMALLDATETIMEOID,
+    TEXTOID,
+    OIDOID,
+    FLOAT4OID,
+    FLOAT8OID,
+    ABSTIMEOID,
+    RELTIMEOID,
+    TINTERVALOID,
+    INETOID,
+    DATEOID,
+    TIMEOID,
+    TIMESTAMPOID,
+    TIMESTAMPTZOID,
+    INTERVALOID,
+    TIMETZOID,
+    CASHOID,
+    CIDROID,
+    BITOID,
+    VARBITOID,
+    CLOBOID,
+    BOOLARRAYOID, // array
+    HLL_ARRAYOID,
+    BYTEARRAYOID,
+    CHARARRAYOID,
+    HLL_HASHVAL_ARRAYOID,
+    INT8ARRAYOID,
+    INT2ARRAYOID,
+    INT4ARRAYOID,
+    INT1ARRAYOID,
+    ARRAYNUMERICOID,
+    BPCHARARRAYOID,
+    VARCHARARRAYOID,
+    NVARCHAR2ARRAYOID,
+    SMALLDATETIMEARRAYOID,
+    TEXTARRAYOID,
+    FLOAT4ARRAYOID,
+    FLOAT8ARRAYOID,
+    ABSTIMEARRAYOID,
+    RELTIMEARRAYOID,
+    ARRAYTINTERVALOID,
+    INETARRAYOID,
+    DATEARRAYOID,
+    TIMEARRAYOID,
+    TIMESTAMPARRAYOID,
+    TIMESTAMPTZARRAYOID,
+    ARRAYINTERVALOID,
+    ARRAYTIMETZOID,
+    CASHARRAYOID,
+    CIDRARRAYOID,
+    BITARRAYOID,
+    VARBITARRAYOID,
+    BYTEAWITHOUTORDERCOLOID,
+    BYTEAWITHOUTORDERWITHEQUALCOLOID
+};
+
 static int32 typenameTypeMod(ParseState* pstate, const TypeName* typname, Type typ);
 
 static bool IsTypeInBlacklist(Oid typoid);
@@ -215,7 +283,7 @@ Type typenameType(ParseState* pstate, const TypeName* typname, int32* typmod_p)
                 errmsg("type \"%s\" does not exist", TypeNameToString(typname)),
                 parser_errposition(pstate, typname->location)));
     }
-
+        
     if (!((Form_pg_type)GETSTRUCT(tup))->typisdefined) {
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_OBJECT),
@@ -512,7 +580,7 @@ Type typeidType(Oid id)
 /* given type (as type struct), return the type OID */
 Oid typeTypeId(Type tp)
 {
-    if (tp == NULL) { /* probably useless */
+    if (tp == NULL)  { /* probably useless */ 
         ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("typeTypeId() called with NULL type struct")));
     }
     return HeapTupleGetOid(tp);
@@ -730,42 +798,10 @@ bool IsTypeSupportedByCStore(_in_ Oid typeOid, _in_ int32 typeMod)
         return false;
     }
 
-    static Oid supportType[] = {BOOLOID,
-        BYTEAOID,
-        CHAROID,
-        INT8OID,
-        INT2OID,
-        INT4OID,
-        INT1OID,
-        NUMERICOID,
-        BPCHAROID,
-        VARCHAROID,
-        NVARCHAR2OID,
-        SMALLDATETIMEOID,
-        TEXTOID,
-        OIDOID,
-        FLOAT4OID,
-        FLOAT8OID,
-        ABSTIMEOID,
-        RELTIMEOID,
-        TINTERVALOID,
-        INETOID,
-        DATEOID,
-        TIMEOID,
-        TIMESTAMPOID,
-        TIMESTAMPTZOID,
-        INTERVALOID,
-        TIMETZOID,
-        CASHOID,
-        CIDROID,
-        BITOID,
-        VARBITOID,
-        CLOBOID};
-
-    for (uint32 i = 0; i < sizeof(supportType) / sizeof(Oid); ++i) {
-        if (supportType[i] == typeOid) {
+    for (uint32 i = 0; i < sizeof(cstoreSupportType) / sizeof(Oid); ++i) {
+        if (cstoreSupportType[i] == typeOid) {
             return true;
-        }
+		}
     }
     return false;
 }
@@ -804,19 +840,101 @@ bool IsTypeSupportedByORCRelation(_in_ Oid typeOid)
         TIMETZOID,
         SMALLDATETIMEOID,
         CASHOID};
-    if (typeOid == DATEOID && DB_IS_CMPT(DB_CMPT_C)) {
+    if (DATEOID == typeOid && C_FORMAT == u_sess->attr.attr_sql.sql_compatibility) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmodule(MOD_HDFS),
-                errmsg("Date type is unsupported for hdfs table in TD-format database.")));
+                errmsg("Date type is unsupported for hdfs table in C-format database.")));
     }
 
     for (uint32 i = 0; i < sizeof(supportType) / sizeof(Oid); ++i) {
         if (supportType[i] == typeOid) {
             return true;
-        }
+		}
     }
     return false;
+}
+
+static bool is_support_old_ts_style(int kvtype, Oid typeOid)
+{
+    if (kvtype == ATT_KV_TAG || kvtype == ATT_KV_HIDE) {       
+        return typeOid == TEXTOID;
+    } else if (kvtype == ATT_KV_FIELD) {
+        return (typeOid == NUMERICOID || typeOid == TEXTOID);
+    } else if (kvtype == ATT_KV_TIMETAG) {
+        return (typeOid == TIMESTAMPTZOID || typeOid == TIMESTAMPOID);
+    } else {
+        /* unrecognized data type */
+        return false;
+    }
+}
+
+static bool is_support_new_ts_style(int kvtype, Oid typeOid)
+{
+    static Oid support_type[] = {BOOLOID,
+        INT8OID,
+        INT4OID,
+        NUMERICOID,
+        BPCHAROID,
+        TEXTOID,
+        FLOAT4OID,
+        FLOAT8OID};
+    /* not support numeric */
+    static Oid tag_support_type[] = {BOOLOID,
+        INT8OID,
+        INT4OID,
+        BPCHAROID,
+        TEXTOID};
+    if (kvtype == ATT_KV_TAG) {
+        for (uint32 i = 0; i < sizeof(tag_support_type) / sizeof(Oid); ++i) {           
+            if (tag_support_type[i] == typeOid) {
+                return true;
+            }
+        }
+        return false;
+    } else if (kvtype == ATT_KV_FIELD) {
+        for (uint32 i = 0; i < sizeof(support_type) / sizeof(Oid); ++i) {           
+            if (support_type[i] == typeOid) {
+                return true;
+            }
+        }
+        return false;
+    } else if (kvtype == ATT_KV_TIMETAG) {
+        return (typeOid == TIMESTAMPTZOID || typeOid == TIMESTAMPOID);
+    } else if (kvtype == ATT_KV_HIDE) {
+        /* hidetag column only support type char */
+        if (typeOid == CHAROID) {
+            return true;
+        } else {
+            ereport(LOG, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Invalid hide column type: %u", typeOid)));
+            return false;
+        }
+    } else {
+        /* unrecognized data type */
+        return false;
+    }
+}
+
+/*
+ * Used in tsdb. Return true if the type is supported by tsdb.
+ * Supported types for tags: text
+ * Supported types for fields and tag: numeric, text, bool, int, float, double
+ * for upgrade, if create the new table using new support data type before commit after all nodes are new version,
+ * after rollback to old version, insert will core, so if we support new data type, we must use version number to
+ * control only can create the table after commit 
+ * Parameters:
+ *  - kvtype: whether the column is a tag or a field
+ *  - typeOid: oid of the data type
+ */
+bool IsTypeSupportedByTsStore(_in_ int kvtype, _in_ Oid typeOid)
+{
+    const int support_type_number = 92257;
+    if (pg_atomic_read_u32(&WorkingGrandVersionNum) >= support_type_number) {
+        return is_support_new_ts_style(kvtype, typeOid);
+    } else {
+        return is_support_old_ts_style(kvtype, typeOid);
+    }
 }
 
 /* Check whether the type is in blacklist. */
@@ -825,6 +943,10 @@ bool IsTypeInBlacklist(Oid typoid)
     bool isblack = false;
 
     switch (typoid) {
+#ifdef ENABLE_MULTIPLE_NODES
+        case XMLOID:
+#endif /* ENABLE_MULTIPLE_NODES */
+        case LINEOID:
         case PGNODETREEOID:
             isblack = true;
             break;
@@ -845,7 +967,7 @@ bool IsTypeTableInInstallationGroup(const Type type_tup)
 
         if (OidIsValid(typeForm->typrelid)) {
             char relkind = get_rel_relkind(typeForm->typrelid);
-            if (RELKIND_VIEW != relkind) {
+            if (RELKIND_VIEW != relkind && RELKIND_CONTQUERY != relkind) {
                 groupoid = ng_get_baserel_groupoid(typeForm->typrelid, relkind);
             }
 

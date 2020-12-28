@@ -26,6 +26,7 @@
 #include "bulkload/roach_adpter.h"
 #include "parser/parse_func.h"
 #include "utils/lsyscache.h"
+#include "optimizer/streamplan.h"
 
 template bool getNextRoach<true>(CopyState cstate);
 template bool getNextRoach<false>(CopyState cstate);

@@ -15,7 +15,7 @@
 #ifndef CHECKSUM_H
 #define CHECKSUM_H
 
-#include "storage/block.h"
+#include "storage/buf/block.h"
 
 /*
  * Compute the checksum for a Postgres page.  The page must be aligned on a

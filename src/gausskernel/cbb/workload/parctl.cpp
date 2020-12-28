@@ -131,6 +131,69 @@ bool WLMDeleteRequestListNode(ListCell* lcnode, WLMQNodeInfo* datum)
     return false;
 }
 
+
+static int CheckStatEnqueueConditionGlobal(ParctlManager* parctl)
+{
+    if (parctl->max_active_statements <= 0) {
+        return 0;
+    }
+
+    /*
+     * If the statement will do parallel control, we must check
+     * current total memory that active statements used whether is out of
+     * 80% of max process memory, or current running statements is
+     * out of max active statements.
+     */
+    if (t_thrd.wlm_cxt.parctl_state.enqueue && t_thrd.wlm_cxt.parctl_state.global_reserve == 0) {
+        if (parctl->max_statements > 0 && parctl->statements_waiting_count >= parctl->max_statements) {
+            return -1;
+        }
+
+        if (u_sess->wlm_cxt->query_count_record == false && parctl->max_support_statements > 0 &&
+            parctl->current_support_statements >= parctl->max_support_statements) {
+            return 1;
+        }
+
+        if (parctl->statements_runtime_count >= parctl->max_active_statements) {
+            /*
+             * If we have active statements waiting in the resource pool,
+             * we will check whether we can make a new statement run.
+             */
+            if (parctl->statements_runtime_count >= parctl->respool_waiting_count &&
+                (parctl->statements_runtime_count - parctl->respool_waiting_count) <
+                    parctl->max_active_statements) {
+                return 0;
+            } else {
+                return 1;
+            }
+        }
+    }
+
+    return 0;
+}
+
+
+static int CheckStatEnqueueConditionRespool()
+{
+    if (t_thrd.wlm_cxt.parctl_state.rp_reserve == 0) {
+        if (t_thrd.wlm_cxt.parctl_state.simple) {
+            if (t_thrd.wlm_cxt.qnode.rp->running_count_simple >=
+                u_sess->wlm_cxt->wlm_params.rpdata.max_stmt_simple) {
+                return 1;
+            }
+        } else {
+            if ((t_thrd.wlm_cxt.qnode.rp->active_points + u_sess->wlm_cxt->wlm_params.rpdata.act_pts) >
+                u_sess->wlm_cxt->wlm_params.rpdata.max_pts) {
+                return 1;
+            }
+        }
+    }
+
+    return 0;    
+}
+
+
+
 /*
  * function name: CheckStatementsEnqueueCondition
  * description  : check the statements whether need enqueue.
@@ -140,67 +203,22 @@ bool WLMDeleteRequestListNode(ListCell* lcnode, WLMQNodeInfo* datum)
  */
 int CheckStatementsEnqueueCondition(ParctlManager* parctl, ParctlType qtype)
 {
+    int ret = 0;
     switch (qtype) {
         case PARCTL_GLOBAL: {
-            if (parctl->max_active_statements <= 0) {
-                return 0;
-            }
-
-            /*
-             * If the statement will do parallel control, we must check
-             * current total memory that active statements used whether is out of
-             * 80% of max process memory, or current running statements is
-             * out of max active statements.
-             */
-            if (t_thrd.wlm_cxt.parctl_state.enqueue && t_thrd.wlm_cxt.parctl_state.global_reserve == 0) {
-                if (parctl->max_statements > 0 && parctl->statements_waiting_count >= parctl->max_statements) {
-                    return -1;
-                }
-
-                if (u_sess->wlm_cxt->query_count_record == false && parctl->max_support_statements > 0 &&
-                    parctl->current_support_statements >= parctl->max_support_statements) {
-                    return 1;
-                }
-
-                if (parctl->statements_runtime_count >= parctl->max_active_statements) {
-                    /*
-                     * If we have active statements waiting in the resource pool,
-                     * we will check whether we can make a new statement run.
-                     */
-                    if (parctl->statements_runtime_count >= parctl->respool_waiting_count &&
-                        (parctl->statements_runtime_count - parctl->respool_waiting_count) <
-                            parctl->max_active_statements) {
-                        return 0;
-                    } else {
-                        return 1;
-                    }
-                }
-            }
+            ret = CheckStatEnqueueConditionGlobal(parctl);
 
             break;
         }
         case PARCTL_RESPOOL: {
-            /* we only do resource pool parallel control of statements count for the simple query */
-            if (t_thrd.wlm_cxt.parctl_state.rp_reserve == 0) {
-                if (t_thrd.wlm_cxt.parctl_state.simple) {
-                    if (t_thrd.wlm_cxt.qnode.rp->running_count_simple >=
-                        u_sess->wlm_cxt->wlm_params.rpdata.max_stmt_simple) {
-                        return 1;
-                    }
-                } else {
-                    if ((t_thrd.wlm_cxt.qnode.rp->active_points + u_sess->wlm_cxt->wlm_params.rpdata.act_pts) >
-                        u_sess->wlm_cxt->wlm_params.rpdata.max_pts) {
-                        return 1;
-                    }
-                }
-            }
+            ret = CheckStatEnqueueConditionRespool();
             break;
         }
         default:
             break;
     }
 
-    return 0;
+    return ret;
 }
 
 /*
@@ -343,7 +361,7 @@ void WLMGroupSimpleThreadWakeUp(ResourcePool* rp)
 
         if (qnode != NULL) {
             ereport(DEBUG3,
-                (errmsg("wake up simple statements_cond: act_statements: %d, "
+                (errmsg("wake up simple statements_cond, act_statements: %d, "
                         "max_statements: %d.",
                     rp->active_points,
                     u_sess->wlm_cxt->wlm_params.rpdata.max_pts)));
@@ -371,7 +389,7 @@ void WLMGroupComplicateThreadWakeUp(ResourcePool* rp)
 
         if (qnode != NULL) {
             ereport(DEBUG3,
-                (errmsg("wake up complicated acstatements_cond: act_statements: %d, "
+                (errmsg("wake up complicated acstatements_cond, act_statements: %d, "
                         "max_statements: %d.",
                     rp->active_points,
                     u_sess->wlm_cxt->wlm_params.rpdata.max_pts)));
@@ -541,21 +559,8 @@ void WLMReleaseGlobalActiveStatement(int toWakeUp)
     t_thrd.wlm_cxt.parctl_state.global_release = 1;
 }
 
-/*
- * function name: WLMReserveGlobalActiveStatement
- * description  : Global Workload Manager.
- *                Reserve resource to execute statement.
- * return value : void
- */
-void WLMReserveGlobalActiveStatement(void)
+void WLMCheckReserveGlobalActiveStatement(ParctlManager* parctl)
 {
-    ParctlManager* parctl = &(t_thrd.wlm_cxt.thread_node_group->parctl);
-
-    WLMContextLock list_lock(&parctl->statements_list_mutex);
-    int ret;
-
-    list_lock.Lock();
-
     if (u_sess->wlm_cxt->reserved_in_active_statements > 0) {
         ereport(LOG,
             (errmsg("When new query is arriving, thread is reserved %d statement and "
@@ -599,6 +604,25 @@ void WLMReserveGlobalActiveStatement(void)
                 u_sess->wlm_cxt->reserved_in_group_statements_simple,
                 u_sess->wlm_cxt->reserved_debug_query)));
     }
+
+}
+
+/*
+ * function name: WLMReserveGlobalActiveStatement
+ * description  : Global Workload Manager.
+ *                Reserve resource to execute statement.
+ * return value : void
+ */
+void WLMReserveGlobalActiveStatement(void)
+{
+    ParctlManager* parctl = &(t_thrd.wlm_cxt.thread_node_group->parctl);
+
+    WLMContextLock list_lock(&parctl->statements_list_mutex);
+    int ret;
+
+    list_lock.Lock();
+
+    WLMCheckReserveGlobalActiveStatement(parctl);
 
     if ((ret = CheckStatementsEnqueueCondition(parctl, PARCTL_GLOBAL)) == -1) {
         list_lock.UnLock();
@@ -889,33 +913,27 @@ void WLMReserveGroupActiveStatement(void)
     }
     /* adjust the count in the resource pool */
     if (u_sess->wlm_cxt->reserved_in_group_statements > 0) {
-        ereport(LOG,
-            (errmsg("When query is arriving, thread is reserved %d group statement and "
+        ereport(LOG, (errmsg("When query is arriving, thread is reserved %d group statement and "
                     "the reserved debug query is %s.",
-                u_sess->wlm_cxt->reserved_in_group_statements,
-                u_sess->wlm_cxt->reserved_debug_query)));
+                    u_sess->wlm_cxt->reserved_in_group_statements, u_sess->wlm_cxt->reserved_debug_query)));
 
         if (respool_reserved != NULL) {
             respool_reserved->active_points =
                 (respool_reserved->active_points > u_sess->wlm_cxt->reserved_in_group_statements)
-                    ? (respool_reserved->active_points - u_sess->wlm_cxt->reserved_in_group_statements)
-                    : 0;
+                    ? (respool_reserved->active_points - u_sess->wlm_cxt->reserved_in_group_statements) : 0;
         }
 
         u_sess->wlm_cxt->reserved_in_group_statements = 0;
     }
 
     if (u_sess->wlm_cxt->reserved_in_group_statements_simple > 0) {
-        ereport(LOG,
-            (errmsg("When query is arriving, thread is reserved %d simple group statement and "
+        ereport(LOG, (errmsg("When query is arriving, thread is reserved %d simple group statement and "
                     "the reserved debug query is %s.",
-                u_sess->wlm_cxt->reserved_in_group_statements_simple,
-                u_sess->wlm_cxt->reserved_debug_query)));
+                    u_sess->wlm_cxt->reserved_in_group_statements_simple, u_sess->wlm_cxt->reserved_debug_query)));
         if (respool_reserved != NULL) {
             respool_reserved->running_count_simple =
                 (respool_reserved->running_count_simple > u_sess->wlm_cxt->reserved_in_group_statements_simple)
-                    ? (respool_reserved->running_count_simple - u_sess->wlm_cxt->reserved_in_group_statements_simple)
-                    : 0;
+                ? (respool_reserved->running_count_simple - u_sess->wlm_cxt->reserved_in_group_statements_simple) : 0;
         }
 
         u_sess->wlm_cxt->reserved_in_group_statements_simple = 0;
@@ -927,14 +945,11 @@ void WLMReserveGroupActiveStatement(void)
         u_sess->wlm_cxt->reserved_in_group_statements = 0;  // reset the value if the session respool is changed
 
     }
-    ereport(DEBUG3,
-        (errmsg("reserve active statement, "
+    ereport(DEBUG3, (errmsg("reserve active statement, "
                 "respool->active_points: %d, "
                 "g_wlm_params.rpdata.max_pts: %d. "
                 "waiters: %d",
-            respool->active_points,
-            g_wlm_params->rpdata.max_pts,
-            list_length(respool->waiters))));
+                respool->active_points, g_wlm_params->rpdata.max_pts, list_length(respool->waiters))));
 
     ret = CheckStatementsEnqueueCondition(parctl, PARCTL_RESPOOL);
 
@@ -1047,8 +1062,7 @@ void WLMReserveGroupActiveStatement(void)
             PG_END_TRY();
 
         } while ((CheckStatementsEnqueueCondition(parctl, PARCTL_RESPOOL) ||
-                     CheckStatementsEnqueueCondition(parctl, PARCTL_GLOBAL)) &&
-                 !timeout);
+                     CheckStatementsEnqueueCondition(parctl, PARCTL_GLOBAL)) && !timeout);
 
         t_thrd.wlm_cxt.parctl_state.respool_waiting = 0;
 
@@ -1129,9 +1143,7 @@ void WLMReserveGroupActiveStatement(void)
         /* reserved the string for later checking */
         if (t_thrd.postgres_cxt.debug_query_string) {
             int rc = snprintf_truncated_s(u_sess->wlm_cxt->reserved_debug_query,
-                sizeof(u_sess->wlm_cxt->reserved_debug_query),
-                "%s",
-                t_thrd.postgres_cxt.debug_query_string);
+                sizeof(u_sess->wlm_cxt->reserved_debug_query), "%s", t_thrd.postgres_cxt.debug_query_string);
             securec_check_ss(rc, "\0", "\0");
         }
     } else {
@@ -1947,9 +1959,9 @@ void WLMVerifyGlobalParallelControl(ParctlManager* parctl)
             }
 
             if (entries != NULL) {
-            list_free(entries);
+                list_free(entries);
+            }
         }
-    }
     }
     PG_CATCH();
     {
@@ -1973,7 +1985,7 @@ void WLMVerifyGlobalParallelControl(ParctlManager* parctl)
                 parctl->statements_runtime_plus)));
 
         if (parctl->statements_runtime_count - parctl->statements_runtime_plus >
-            (running_count + 10)) { // it is not accute
+            (running_count + 2)) { // it is not accute
             parctl->statements_runtime_count = running_count;
 
             WLMGlobalRequestListThreadWakeUp(parctl);

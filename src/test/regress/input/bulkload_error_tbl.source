@@ -1,7 +1,22 @@
 -- clean up last work
-\! rm -rf @abs_srcdir@/data/parallel_export >/dev/null 2>&1
+\! rm -rf @abs_srcdir@/data/parallel_export/* >/dev/null 2>&1
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds_error_tbl.log -s ./tmp_check/status -e @abs_srcdir@/data/parallel_export
 -----Error table name longer than 64 chars
-
+create foreign table  ERROR_LOADING_TABLE_011
+(
+C_CHAR_3 CHAR(102400),  
+C_VARCHAR_3 VARCHAR(1024), 
+C_INT TINYINT,  
+C_NUMERIC numeric(10,5),  
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE
+)
+SERVER gsmpp_server
+OPTIONS(location '@abs_srcdir@/data/ERROR_LOADING_TABLE_011',
+format 'text',
+delimiter ',', 
+mode 'shared',
+reject_limit '1'
+) with error_loading_table_011_0123456789_0123456789_0123456789_0123456789;
 
 create table  LOADING_TABLE_011
 (
@@ -12,6 +27,42 @@ C_NUMERIC numeric(10,5),
 C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE
 );
 
+insert into LOADING_TABLE_011 select trim(C_CHAR_3),trim(C_VARCHAR_3),c_int,C_NUMERIC,C_TS_WITHOUT from 	ERROR_LOADING_TABLE_011;
+
+select rownum, rawrecord, detail from error_loading_table_011_0123456789_0123456789_0123456789_0123456789;
+
+CREATE FOREIGN TABLE error_data_1
+(
+c varchar(2),
+id int, 
+num float,  
+time timestamp without time zone,
+memo text
+)
+SERVER gsmpp_server
+OPTIONS(location '@abs_srcdir@/data/error_data_1.txt',
+format 'text',
+delimiter ',', 
+mode 'private',
+reject_limit '100'
+) WITH error_table_1;
+
+CREATE FOREIGN TABLE error_data_1_1
+(
+c varchar(2),
+id int, 
+num float,  
+time timestamp without time zone,
+memo text
+)
+SERVER gsmpp_server
+OPTIONS(location '@abs_srcdir@/data/error_data_1.txt',
+format 'text',
+delimiter ',', 
+mode 'private',
+reject_limit '1'
+) WITH error_table_1_1;
+
 create table  data_1_1
 (
 c varchar(2),
@@ -20,36 +71,84 @@ num float,
 time timestamp without time zone,
 memo text
 );
+SELECT * FROM error_data_1;
 
+INSERT INTO data_1_1 SELECT * FROM error_data_1;
 
+SELECT rownum, rawrecord, detail FROM error_table_1;
 
 DELETE FROM data_1_1;
 
+INSERT INTO data_1_1 SELECT * FROM error_data_1_1;
 
+SELECT filename, rownum, rawrecord, detail FROM error_table_1_1;
 
-
+explain insert into data_1_1 select * from error_data_1 limit 1;
 
 --complex statement to foreign table
 ---
 create table data_1_2 (c1 int);
-
+insert into data_1_2(c1) select (select id from error_data_1);
+insert into data_1_2(c1) select (select id from error_data_1) limit 1;
 
 --statment contains agg
-
+-----
+insert into data_1_2 select count(*) from error_data_1;
 select * from data_1_2;
 
 --statment contains ORDER BY
 create table  LOADING_TABLE_000(C_CHAR_3 CHAR(10),C_VARCHAR_3 VARCHAR(10),C_INT int,C_NUMERIC numeric(10,5),C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE);
-
+insert into LOADING_TABLE_000 select trim(C_CHAR_3),trim(C_VARCHAR_3),c_int,C_NUMERIC,C_TS_WITHOUT from ERROR_LOADING_TABLE_011 order by c_int;
 select * from LOADING_TABLE_000 order by c_int;
 
+--alter error table
+---
+alter table error_table_1_1 add column c1 int;
+alter table error_table_1_1 rename nodeid to node_id;
 
+--insert into error table
+---
+insert into error_table_1_1 values(11);
+
+--update error table
+---
+update error_table_1_1 set nodeid = 0;
+
+---
+--Log error to remote
+---
+create foreign table ft_remote_log(c1 int, c2 varchar) server gsmpp_server options(location 'gsfs://127.0.0.1:8900/error_data_2.data', delimiter '|')
+remote log 'ft_remote_log' per node reject limit '100';
 create table t_remote(c1 int, c2 varchar);
+insert into t_remote select * from ft_remote_log;
 
+---
+--Log error to remote and local
+---
+create foreign table ft_log_both(c1 int, c2 varchar) server gsmpp_server options(location 'gsfs://127.0.0.1:8900/error_data_2.data', delimiter '|')
+log into err_ft_remote_log remote log 'err_ft_remote_log' per node reject limit '100';
+insert into t_remote select * from ft_log_both;
+select rownum, rawrecord, detail from err_ft_remote_log order by rownum;
 
-
-
-
+CREATE NODE GROUP group_storage WITH (datanode1,datanode3);
+set default_storage_nodegroup = group_storage;
+show default_storage_nodegroup;
+drop foreign table if exists f_s_latin1_utf8_001_01;
+CREATE FOREIGN TABLE f_s_latin1_utf8_001_01
+(
+    C_BIGINT BIGINT,
+    C_CHAR_1 CHAR(100),
+    C_CHAR_2 CHAR(100),
+    C_VARCHAR VARCHAR(1024),
+    C_TEXT TEXT,
+    C_CLOB CLOB,
+    C_NUMERIC NUMERIC(20,5),
+    C_DP DOUBLE PRECISION
+) SERVER gsmpp_server
+ OPTIONS (LOCATION '@abs_srcdir@/data/UTF8.txt',
+ COMPATIBLE_ILLEGAL_CHARS 'off',FORMAT 'text',DELIMITER '|',mode 'private',ENCODING 'UTF8')
+ WITH err_f_s_latin1_utf8_001_01
+ PER NODE REJECT LIMIT '10000';
 \d+ err_f_s_latin1_utf8_001_01
 drop table if exists s_latin1_utf8_001_01;
 CREATE TABLE s_latin1_utf8_001_01
@@ -62,13 +161,15 @@ CREATE TABLE s_latin1_utf8_001_01
     C_CLOB CLOB,
     C_NUMERIC NUMERIC(20,5),
     C_DP DOUBLE PRECISION
-) ;
+) DISTRIBUTE BY HASH(C_BIGINT);
 \d+ s_latin1_utf8_001_01
-
+insert into s_latin1_utf8_001_01 select * from f_s_latin1_utf8_001_01;
 select count(*) from s_latin1_utf8_001_01;
 drop table if exists s_latin1_utf8_001_01;
-
-
+drop foreign table if exists f_s_latin1_utf8_001_01;
+drop node group group_storage;
+reset default_storage_nodegroup;
+show default_storage_nodegroup;
 
 \! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 34
 
@@ -77,10 +178,16 @@ drop table if exists s_latin1_utf8_001_01;
 ---
 \! gds_num=`ps ux | grep -w gds | grep -v grep | awk '{print $2}'|wc -l`; while(($gds_num>0)); do sleep 1; gds_num=`ps ux | grep -w gds | grep -v grep | awk '{print $2}'|wc -l`; done
 
-
+DROP FOREIGN TABLE ft_log_both;
+DROP FOREIGN TABLE ft_remote_log;
+DROP FOREIGN TABLE ERROR_LOADING_TABLE_011;
+DROP FOREIGN TABLE error_data_1;
+DROP FOREIGN TABLE error_data_1_1;
 DROP TABLE t_remote;
 DROP TABLE LOADING_TABLE_000;
 DROP TABLE data_1_2;
 DROP TABLE data_1_1;
 DROP TABLE LOADING_TABLE_011;
 
+\! wc -l @abs_srcdir@/data/parallel_export/ft_remote_log.0 | awk '{print $1}'
+\! wc -l @abs_srcdir@/data/parallel_export/err_ft_remote_log.0 | awk '{print $1}'

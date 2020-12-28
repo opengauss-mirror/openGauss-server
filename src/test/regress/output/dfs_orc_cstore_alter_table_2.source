@@ -1,0 +1,622 @@
+set enable_global_stats = true;
+--
+-- ALTER_TABLE
+-- Add column for empty table, type test
+--
+set time zone 'PRC';
+CREATE TABLE tmp (initial int4) with(orientation = orc) tablespace hdfs_ts;
+ALTER TABLE tmp ADD COLUMN xmin integer; -- fails
+ERROR:  column name "xmin" conflicts with a system column name
+ALTER TABLE tmp ADD COLUMN a int4 default 3;
+ALTER TABLE tmp ADD COLUMN b tinyint default 1;
+ALTER TABLE tmp ADD COLUMN c smallint default 2;
+ALTER TABLE tmp ADD COLUMN d bigint;
+ALTER TABLE tmp ADD COLUMN e decimal(5,2);
+ALTER TABLE tmp ADD COLUMN f numeric(10,5);
+ALTER TABLE tmp ADD COLUMN g float4;
+ALTER TABLE tmp ADD COLUMN h float8;
+ALTER TABLE tmp ADD COLUMN i char;
+ALTER TABLE tmp ADD COLUMN j varchar(10);
+ALTER TABLE tmp ADD COLUMN k char(5);
+ALTER TABLE tmp ADD COLUMN l text;
+ALTER TABLE tmp ADD COLUMN m nvarchar2;
+ALTER TABLE tmp ADD COLUMN o timestamptz;
+ALTER TABLE tmp ADD COLUMN p timestamp;
+ALTER TABLE tmp ADD COLUMN q date;
+ALTER TABLE tmp ADD COLUMN r timetz;
+ALTER TABLE tmp ADD COLUMN s time;
+ALTER TABLE tmp ADD COLUMN t tinterval;
+ALTER TABLE tmp ADD COLUMN u interval;
+ALTER TABLE tmp ADD COLUMN v smalldatetime;
+ALTER TABLE tmp ADD COLUMN w oid;
+ALTER TABLE tmp ADD COLUMN x bit(8);
+ERROR:  type "bit(8)" is not supported in DFS table.
+ALTER TABLE tmp ADD COLUMN y varbit(8);
+ERROR:  type "bit varying(8)" is not supported in DFS table.
+--unsupport type
+ALTER TABLE tmp ADD COLUMN n name;
+ERROR:  type "name" is not supported in DFS table.
+ALTER TABLE tmp ADD COLUMN aa tid;
+ERROR:  type "tid" is not supported in DFS table.
+ALTER TABLE tmp ADD COLUMN bb xid;
+ERROR:  type "xid" is not supported in DFS table.
+ALTER TABLE tmp ADD COLUMN cc oidvector;
+ERROR:  type "oidvector" is not supported in DFS table.
+ALTER TABLE tmp ADD COLUMN dd smgr;
+ERROR:  type "smgr" is not supported in DFS table.
+ALTER TABLE tmp ADD COLUMN ee point;
+ERROR:  type "point" is not supported in DFS table.
+ALTER TABLE tmp ADD COLUMN ff lseg;
+ERROR:  type "lseg" is not supported in DFS table.
+ALTER TABLE tmp ADD COLUMN gg path;
+ERROR:  type "path" is not supported in DFS table.
+ALTER TABLE tmp ADD COLUMN hh box;
+ERROR:  type "box" is not supported in DFS table.
+ALTER TABLE tmp ADD COLUMN ii polygon;
+ERROR:  type "polygon" is not supported in DFS table.
+ALTER TABLE tmp ADD COLUMN ll float8[];
+ERROR:  type "double precision[]" is not supported in DFS table.
+ALTER TABLE tmp ADD COLUMN mm float4[];
+ERROR:  type "real[]" is not supported in DFS table.
+ALTER TABLE tmp ADD COLUMN nn int2[];
+ERROR:  type "smallint[]" is not supported in DFS table.
+INSERT INTO tmp (initial, a, b, c, d, e, f, g, h, i, j, k, l, m, o, p, q, r, s, u,
+	v, w, x, y)
+   VALUES (1, 2, 3, 4, 5, 6.1, 7.2, 8.3, 9.4, 'a', 'b', 'c', 'd', 'e', '2015-04-10 09:00:00', '2015-04-10 09:00:00', 
+   '2015-04-10 09:00:00', '2015-04-10 09:00:00', '2015-04-10 09:00:00','02:30:00','2015-04-10',1,'01010101','0101');
+ERROR:  column "x" of relation "tmp" does not exist
+LINE 2:  v, w, x, y)
+               ^
+SELECT * FROM tmp;
+ initial | a | b | c | d | e | f | g | h | i | j | k | l | m | o | p | q | r | s | t | u | v | w 
+---------+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---
+(0 rows)
+
+DROP TABLE tmp;
+-- Add column for not-empty table
+CREATE TABLE tmp (initial int4) with(orientation = orc) tablespace hdfs_ts;
+insert into tmp values(1);
+insert into tmp values(2);
+ALTER TABLE tmp ADD COLUMN a int4 default 3;
+ALTER TABLE tmp ADD COLUMN b tinyint default 1;
+ALTER TABLE tmp ADD COLUMN c smallint default 2;
+ALTER TABLE tmp ADD COLUMN d bigint;
+ALTER TABLE tmp ADD COLUMN e decimal(5,2);
+ALTER TABLE tmp ADD COLUMN f numeric(10,5);
+ALTER TABLE tmp ADD COLUMN g float4;
+ALTER TABLE tmp ADD COLUMN h float8;
+ALTER TABLE tmp ADD COLUMN i char;
+ALTER TABLE tmp ADD COLUMN j varchar(10);
+ALTER TABLE tmp ADD COLUMN k char(5);
+ALTER TABLE tmp ADD COLUMN l text;
+ALTER TABLE tmp ADD COLUMN m nvarchar2;
+ALTER TABLE tmp ADD COLUMN o timestamptz;
+ALTER TABLE tmp ADD COLUMN p timestamp;
+ALTER TABLE tmp ADD COLUMN q date;
+ALTER TABLE tmp ADD COLUMN r timetz;
+ALTER TABLE tmp ADD COLUMN s time;
+ALTER TABLE tmp ADD COLUMN t tinterval;
+ALTER TABLE tmp ADD COLUMN u interval;
+ALTER TABLE tmp ADD COLUMN v smalldatetime;
+ALTER TABLE tmp ADD COLUMN w oid;
+ALTER TABLE tmp ADD COLUMN x bit(8);
+ERROR:  type "bit(8)" is not supported in DFS table.
+ALTER TABLE tmp ADD COLUMN y varbit(8);
+ERROR:  type "bit varying(8)" is not supported in DFS table.
+INSERT INTO tmp (initial, a, b, c, d, e, f, g, h, i, j, k, l, m, o, p, q, r, s, u,
+	v, w, x, y)
+   VALUES (1, 2, 3, 4, 5, 6.1, 7.2, 8.3, 9.4, 'a', 'b', 'c', 'd', 'e', '2015-04-10 09:00:00', '2015-04-10 09:00:00', 
+   '2015-04-10 09:00:00', '2015-04-10 09:00:00', '2015-04-10 09:00:00','02:30:00','2015-04-10',1,'01010101','0101');
+ERROR:  column "x" of relation "tmp" does not exist
+LINE 2:  v, w, x, y)
+               ^
+SELECT * FROM tmp;
+ initial | a | b | c | d | e | f | g | h | i | j | k | l | m | o | p | q | r | s | t | u | v | w 
+---------+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---
+       1 | 3 | 1 | 2 |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |  
+       2 | 3 | 1 | 2 |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |  
+(2 rows)
+
+DROP TABLE tmp;
+--
+--Add mutliple column 
+CREATE TABLE tmp (initial int4) with(orientation = orc) tablespace hdfs_ts;
+insert into tmp values(1);
+ALTER TABLE tmp ADD(mychar char default 'a', mychar1 varchar(10) NOT NULL default 'ab', id integer NULL);
+select * from tmp;
+ initial | mychar | mychar1 | id 
+---------+--------+---------+----
+       1 | a      | ab      |   
+(1 row)
+
+insert into tmp values(2,'b','abc',2);
+select * from tmp order by initial;
+ initial | mychar | mychar1 | id 
+---------+--------+---------+----
+       1 | a      | ab      |   
+       2 | b      | abc     |  2
+(2 rows)
+
+drop table tmp;
+-- Add column for patitioned table
+CREATE TABLE tmp(a int, b int) with ( orientation = column ) distribute by hash(a) partition by range(b)
+(
+partition p1 values less than (3),
+partition p2 values less than (6),
+partition p3 values less than (10)
+);
+insert into tmp values(1,1);
+insert into tmp values(2,4);
+insert into tmp values(3,9);
+Alter table tmp add column c int default 2;
+select * from tmp order by a;
+ a | b | c 
+---+---+---
+ 1 | 1 | 2
+ 2 | 4 | 2
+ 3 | 9 | 2
+(3 rows)
+
+insert into tmp values(2,5,4);
+select * from tmp order by a;
+ a | b | c 
+---+---+---
+ 1 | 1 | 2
+ 2 | 4 | 2
+ 2 | 5 | 4
+ 3 | 9 | 2
+(4 rows)
+
+drop table tmp;
+--
+--Alter type
+--
+--char,char(n),varchar(n),integer
+create table t1(id1 integer, mychar char, name char(5), name2 varchar(5)) with(orientation = orc) tablespace hdfs_ts;
+insert into t1 values(1,'1','12','1234');
+insert into t1 values(2,'a','ab','abcd');
+select * from t1 order by id1;
+ id1 | mychar | name  | name2 
+-----+--------+-------+-------
+   1 | 1      | 12    | 1234
+   2 | a      | ab    | abcd
+(2 rows)
+
+\d+ t1;
+                                 Table "public.t1"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ id1    | integer              |           | plain    |              | 
+ mychar | character(1)         |           | extended |              | 
+ name   | character(5)         |           | extended |              | 
+ name2  | character varying(5) |           | extended |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(id1)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=snappy, version=0.12
+
+--can't alter distributed key
+alter table t1 alter id1 type char;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+-- char->int, failed
+alter table t1 alter mychar type int;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+-- char(n) extended
+alter table t1 alter name type char(10);
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+\d+ t1;
+                                 Table "public.t1"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ id1    | integer              |           | plain    |              | 
+ mychar | character(1)         |           | extended |              | 
+ name   | character(5)         |           | extended |              | 
+ name2  | character varying(5) |           | extended |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(id1)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=snappy, version=0.12
+
+ 
+--test altered column char extended
+update t1 set name = 'abcdefg' where id1=2;
+ERROR:  value too long for type character(5)
+CONTEXT:  referenced column: name
+select * from t1 order by id1;
+ id1 | mychar | name  | name2 
+-----+--------+-------+-------
+   1 | 1      | 12    | 1234
+   2 | a      | ab    | abcd
+(2 rows)
+
+delete t1 where id1=2;
+-- char->int, succeed
+alter table t1 alter mychar type int;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+\d+ t1;
+                                 Table "public.t1"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ id1    | integer              |           | plain    |              | 
+ mychar | character(1)         |           | extended |              | 
+ name   | character(5)         |           | extended |              | 
+ name2  | character varying(5) |           | extended |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(id1)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=snappy, version=0.12
+
+--test altered column char->int, can't insert succeed
+insert into t1 values(1,'b','abcdef','1234');
+ERROR:  value too long for type character(5)
+CONTEXT:  referenced column: name
+-- varchar(n) extended
+alter table t1 alter name2 type varchar(20);
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+\d+ t1;
+                                 Table "public.t1"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ id1    | integer              |           | plain    |              | 
+ mychar | character(1)         |           | extended |              | 
+ name   | character(5)         |           | extended |              | 
+ name2  | character varying(5) |           | extended |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(id1)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=snappy, version=0.12
+
+--test altered column varchar(n)
+insert into t1 values(2,3,'abcdef','1234567');
+ERROR:  value too long for type character(5)
+CONTEXT:  referenced column: name
+select * from t1 order by id1;
+ id1 | mychar | name  | name2 
+-----+--------+-------+-------
+   1 | 1      | 12    | 1234
+(1 row)
+
+-- varchar(n)->int
+alter table t1 alter name2 type int;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+\d+ t1;
+                                 Table "public.t1"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ id1    | integer              |           | plain    |              | 
+ mychar | character(1)         |           | extended |              | 
+ name   | character(5)         |           | extended |              | 
+ name2  | character varying(5) |           | extended |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(id1)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=snappy, version=0.12
+
+-- int->char(n)
+alter table t1 alter mychar type char(4);
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+\d+ t1;
+                                 Table "public.t1"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ id1    | integer              |           | plain    |              | 
+ mychar | character(1)         |           | extended |              | 
+ name   | character(5)         |           | extended |              | 
+ name2  | character varying(5) |           | extended |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(id1)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=snappy, version=0.12
+
+insert into t1 values(3,'abc','abcde',12);
+ERROR:  value too long for type character(1)
+CONTEXT:  referenced column: mychar
+select * from t1 order by id1;
+ id1 | mychar | name  | name2 
+-----+--------+-------+-------
+   1 | 1      | 12    | 1234
+(1 row)
+
+-- char(n)->char(m) cut shorter
+alter table t1 alter name type char(5);
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+alter table t1 alter name type char(7);
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+-- char(n)->varchar(m)
+alter table t1 alter name type varchar(4);
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+alter table t1 alter name type varchar(12);
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+\d+ t1;
+                                 Table "public.t1"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ id1    | integer              |           | plain    |              | 
+ mychar | character(1)         |           | extended |              | 
+ name   | character(5)         |           | extended |              | 
+ name2  | character varying(5) |           | extended |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(id1)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=snappy, version=0.12
+
+-- int->smallint
+alter table t1 alter name2 type smallint;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+delete from t1 where id1=2;
+alter table t1 alter name2 type smallint;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+\d+ t1;
+                                 Table "public.t1"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ id1    | integer              |           | plain    |              | 
+ mychar | character(1)         |           | extended |              | 
+ name   | character(5)         |           | extended |              | 
+ name2  | character varying(5) |           | extended |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(id1)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=snappy, version=0.12
+
+-- varchar(n)->text
+alter table t1 alter name type text;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+\d+ t1;
+                                 Table "public.t1"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ id1    | integer              |           | plain    |              | 
+ mychar | character(1)         |           | extended |              | 
+ name   | character(5)         |           | extended |              | 
+ name2  | character varying(5) |           | extended |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(id1)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=snappy, version=0.12
+
+-- int->numeric
+alter table t1 alter name2 type numeric(10,2);
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+\d+ t1;
+                                 Table "public.t1"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ id1    | integer              |           | plain    |              | 
+ mychar | character(1)         |           | extended |              | 
+ name   | character(5)         |           | extended |              | 
+ name2  | character varying(5) |           | extended |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(id1)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=snappy, version=0.12
+
+select * from t1 order by id1;
+ id1 | mychar | name  | name2 
+-----+--------+-------+-------
+   1 | 1      | 12    | 1234
+(1 row)
+
+insert into t1 values(4,'bc','ab',3.1415);
+ERROR:  value too long for type character(1)
+CONTEXT:  referenced column: mychar
+select * from t1 order by id1;
+ id1 | mychar | name  | name2 
+-----+--------+-------+-------
+   1 | 1      | 12    | 1234
+(1 row)
+
+-- numeric->numeric
+alter table t1 alter name2 type numeric(5,2);  --failed
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+alter table t1 alter name2 type numeric(7,3);  --succeed
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+select * from t1 order by id1;
+ id1 | mychar | name  | name2 
+-----+--------+-------+-------
+   1 | 1      | 12    | 1234
+(1 row)
+
+-- numeric->char(n)
+alter table t1 alter name2 type char(6);  --failed
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+alter table t1 alter name2 type char(10);  --succeed
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+\d+ t1;
+                                 Table "public.t1"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ id1    | integer              |           | plain    |              | 
+ mychar | character(1)         |           | extended |              | 
+ name   | character(5)         |           | extended |              | 
+ name2  | character varying(5) |           | extended |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(id1)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=snappy, version=0.12
+
+insert into t1 values(5,'ab','123','12.34567890123');  --failed
+ERROR:  value too long for type character(1)
+CONTEXT:  referenced column: mychar
+insert into t1 values(5,'ab','123','12.3456789');  --succeed
+ERROR:  value too long for type character(1)
+CONTEXT:  referenced column: mychar
+-- char(n)->decimal
+alter table t1 alter name2 type decimal;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+select * from t1 order by id1;
+ id1 | mychar | name  | name2 
+-----+--------+-------+-------
+   1 | 1      | 12    | 1234
+(1 row)
+
+-- decimal->float8
+alter table t1 alter name2 type float;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+select * from t1 order by id1;
+ id1 | mychar | name  | name2 
+-----+--------+-------+-------
+   1 | 1      | 12    | 1234
+(1 row)
+
+-- float8->real(float4)
+alter table t1 alter name2 type real;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+select * from t1 order by id1;
+ id1 | mychar | name  | name2 
+-----+--------+-------+-------
+   1 | 1      | 12    | 1234
+(1 row)
+
+-- real->numeric()
+alter table t1 alter name2 type numeric(5,2);  --failed
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+alter table t1 alter name2 type numeric(5,1);  --succeed
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+select * from t1 order by id1;
+ id1 | mychar | name  | name2 
+-----+--------+-------+-------
+   1 | 1      | 12    | 1234
+(1 row)
+
+-- numeric->int
+alter table t1 alter name2 type int;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+select * from t1 order by id1;
+ id1 | mychar | name  | name2 
+-----+--------+-------+-------
+   1 | 1      | 12    | 1234
+(1 row)
+
+drop table t1;
+--time type 
+create table timetest(c1 timestamp, c2 timestamptz, c3 date) with(orientation = orc) tablespace hdfs_ts;
+insert into timetest values('2015-04-13 16:50:12', '2015-04-13 16:51:13', '2015-01-13');
+insert into timetest values('2015/04/13 04:11:12 pm','04/13/2015 15:30:21', '02/04/2015');
+select * from timetest order by c1;
+            c1            |              c2              |            c3            
+--------------------------+------------------------------+--------------------------
+ Mon Apr 13 16:11:12 2015 | Mon Apr 13 15:30:21 2015 CST | Wed Feb 04 00:00:00 2015
+ Mon Apr 13 16:50:12 2015 | Mon Apr 13 16:51:13 2015 CST | Tue Jan 13 00:00:00 2015
+(2 rows)
+
+-- timestamptz->time
+alter table timetest alter c2 type time;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+select * from timetest order by c1;
+            c1            |              c2              |            c3            
+--------------------------+------------------------------+--------------------------
+ Mon Apr 13 16:11:12 2015 | Mon Apr 13 15:30:21 2015 CST | Wed Feb 04 00:00:00 2015
+ Mon Apr 13 16:50:12 2015 | Mon Apr 13 16:51:13 2015 CST | Tue Jan 13 00:00:00 2015
+(2 rows)
+
+-- time->timetz
+alter table timetest alter c2 type timetz;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+select * from timetest order by c1;
+            c1            |              c2              |            c3            
+--------------------------+------------------------------+--------------------------
+ Mon Apr 13 16:11:12 2015 | Mon Apr 13 15:30:21 2015 CST | Wed Feb 04 00:00:00 2015
+ Mon Apr 13 16:50:12 2015 | Mon Apr 13 16:51:13 2015 CST | Tue Jan 13 00:00:00 2015
+(2 rows)
+
+-- timetz->timestamptz
+alter table timetest alter c2 type timestamptz;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+-- date->timestamptz
+alter table timetest alter c3 type timestamptz;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+select * from timetest order by c1;
+            c1            |              c2              |            c3            
+--------------------------+------------------------------+--------------------------
+ Mon Apr 13 16:11:12 2015 | Mon Apr 13 15:30:21 2015 CST | Wed Feb 04 00:00:00 2015
+ Mon Apr 13 16:50:12 2015 | Mon Apr 13 16:51:13 2015 CST | Tue Jan 13 00:00:00 2015
+(2 rows)
+
+-- timestamptz->date
+alter table timetest alter c3 type date;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+select * from timetest order by c1;
+            c1            |              c2              |            c3            
+--------------------------+------------------------------+--------------------------
+ Mon Apr 13 16:11:12 2015 | Mon Apr 13 15:30:21 2015 CST | Wed Feb 04 00:00:00 2015
+ Mon Apr 13 16:50:12 2015 | Mon Apr 13 16:51:13 2015 CST | Tue Jan 13 00:00:00 2015
+(2 rows)
+
+-- timetz->char(n)
+alter table timetest alter c2 type char(15);
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+select * from timetest order by c1;
+            c1            |              c2              |            c3            
+--------------------------+------------------------------+--------------------------
+ Mon Apr 13 16:11:12 2015 | Mon Apr 13 15:30:21 2015 CST | Wed Feb 04 00:00:00 2015
+ Mon Apr 13 16:50:12 2015 | Mon Apr 13 16:51:13 2015 CST | Tue Jan 13 00:00:00 2015
+(2 rows)
+
+-- char(n)->timetz
+alter table timetest alter c2 type timetz;  --failed
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+alter table timetest alter c2 type char(12); 
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+alter table timetest alter c2 type timetz;  --failed
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+--using
+alter table timetest alter c2 type timetz using timetz(c2);  --succeed
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+select * from timetest order by c1;
+            c1            |              c2              |            c3            
+--------------------------+------------------------------+--------------------------
+ Mon Apr 13 16:11:12 2015 | Mon Apr 13 15:30:21 2015 CST | Wed Feb 04 00:00:00 2015
+ Mon Apr 13 16:50:12 2015 | Mon Apr 13 16:51:13 2015 CST | Tue Jan 13 00:00:00 2015
+(2 rows)
+
+alter table timetest alter c2 type date using c3;  --refer other column,failed
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+drop table timetest;

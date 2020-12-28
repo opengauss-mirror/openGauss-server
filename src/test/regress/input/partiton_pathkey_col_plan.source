@@ -12,7 +12,7 @@ PARTITION BY RANGE (a, b)
   PARTITION P_150 VALUES LESS THAN (200, 100),
   PARTITION P_200 VALUES LESS THAN (200, 200)
 );
-COPY part_col FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/partition_pathkey.dat';
+COPY part_col FROM '@abs_srcdir@/data/partition_pathkey.dat';
 analyze part_col;
 
 set enable_seqscan = off;

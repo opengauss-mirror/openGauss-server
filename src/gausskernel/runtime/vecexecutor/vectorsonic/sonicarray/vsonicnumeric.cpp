@@ -525,7 +525,11 @@ void SonicNumericDatumArray::loadDatumFlagArrayByRow(void* file_source, int left
 
     AutoContextSwitch mem_guard(m_cxt);
 
-    Assert(m_curFlag);
+    if (m_curFlag == NULL) {
+        ereport(ERROR,
+                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                 errmsg("m_curFlag should not be NULL")));
+    }
     nread = (file->read)((void*)m_curFlag, sizeof(uint8));
     CheckReadIsValid(nread, sizeof(uint8));
 

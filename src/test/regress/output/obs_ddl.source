@@ -1,0 +1,497 @@
+------------------------------------------------------------------test server start--------------------------------------------
+---------------------test positive options
+----test create server
+drop server if exists  obs_server cascade;
+NOTICE:  server "obs_server" does not exist, skipping
+create server obs_server foreign data wrapper dfs_fdw options (
+address '@obshostname@',
+encrypt 'off',
+access_key '@ak@',
+secret_access_key '@sk@',
+type 'obs'
+);
+---domain option
+drop server if exists  obs_server cascade;
+create server obs_server foreign data wrapper dfs_fdw options (
+address '@obshostname@',
+encrypt 'off',
+access_key '@ak@',
+secret_access_key '@sk@',
+type 'obs'
+);
+drop server hdfs_server cascade;
+ERROR:  server "hdfs_server" does not exist
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER HDFS_FDW OPTIONS (address '10.185.178.241:25000,10.185.178.239:25000',hdfscfgpath '/opt/config', type 'hdfs');
+drop server hdfs_server cascade;
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER DFS_FDW OPTIONS (hdfscfgpath '/opt/config', type 'hdfs');
+----test alter server
+--alter server obs_server options (set address '10.175.38.75');
+alter server obs_server options (set encrypt 'on');
+ERROR:  Fail to connect OBS in node:coordinator1 with error code: InternalError
+alter server obs_server options (set access_key 'ak');
+ERROR:  Fail to connect OBS host @obshostname@ in node:coordinator1 with error code: InvalidAccessKeyId message: The OBS Access Key Id you provided does not exist in our records.
+alter server obs_server options (set secret_access_key 'ask');
+ERROR:  Fail to connect OBS host @obshostname@ in node:coordinator1 with error code: SignatureDoesNotMatch message: The request signature we calculated does not match the signature you provided. Check your key and signing method.
+alter server obs_server options (set type 'obs');
+alter server obs_server options (drop encrypt);
+alter server obs_server options (add encrypt 'off');
+alter server obs_server rename to new_obs_server;
+create user new_user password 'Gauss@123';
+alter server new_obs_server owner to new_user;
+drop server new_obs_server;
+drop user new_user;
+---------------------test positive options end
+---------------------test negative options
+---test create server
+drop server if exists  obs_server cascade;
+NOTICE:  server "obs_server" does not exist, skipping
+--lack type
+create server obs_server foreign data wrapper dfs_fdw options (
+encrypt 'off',
+access_key '@ak@',
+secret_access_key '@sk@'
+);
+ERROR:  Need type option for the server.
+HINT:  Valid options in this context are: obs, hdfs, dummy
+--lack access_key
+create server obs_server foreign data wrapper dfs_fdw options (
+address '@obshostname@',
+encrypt 'off',
+secret_access_key '@sk@',
+type 'obs'
+);
+ERROR:  Need access_key option for the OBS server.
+--lack secret_access_key
+create server obs_server foreign data wrapper dfs_fdw options (
+address '@obshostname@',
+encrypt 'off',
+access_key '@ak@',
+type 'obs'
+);
+ERROR:  Need secret_access_key option for the OBS server.
+--lack type
+create server obs_server foreign data wrapper dfs_fdw options (
+address '@obshostname@',
+encrypt 'off',
+access_key '@ak@',
+secret_access_key '@sk@'
+);
+ERROR:  Need type option for the server.
+HINT:  Valid options in this context are: obs, hdfs, dummy
+--unacquainted option
+create server obs_server foreign data wrapper dfs_fdw options (
+address '@obshostname@',
+encrypt 'off',
+access_key '@ak@',
+secret_access_key '@sk@',
+type 'obs',
+hdfscfgpath '/hanfeng'
+);
+ERROR:  Invalid option "hdfscfgpath"
+HINT:  Valid options in this context are: region, address, encrypt, access_key, secret_access_key, type
+create server obs_server foreign data wrapper dfs_fdw options (
+address '@obshostname@',
+encrypt 'off',
+access_key '@ak@',
+secret_access_key '@sk@',
+type 'obs',
+location '/hanfeng'
+);
+ERROR:  Invalid option "location"
+HINT:  Valid options in this context are: region, address, encrypt, access_key, secret_access_key, type
+select pg_sleep(5);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+-- incorrect option
+create server obs_server foreign data wrapper dfs_fdw options (
+address '@obshostname@',
+encrypt 'off',
+access_key 'PXOCFVMGOMNOJSAWI2I',
+secret_access_key '@sk@',
+type 'obs'
+);
+--?ERROR:  Fail to connect OBS host @obshostname@ in node:coordinator1 with error code: .*
+create server obs_server foreign data wrapper dfs_fdw options (
+address '@obshostname@',
+encrypt 'off',
+access_key '@ak@',
+secret_access_key 'FiqwtDDeUCtsieCbOCWzrQ3fwJHFJetzzXbdLHE',
+type 'obs'
+);
+--?ERROR:  Fail to connect OBS host @obshostname@ in node:coordinator1 with error code: .*
+---test alter server
+drop server if exists obs_server cascade;
+NOTICE:  server "obs_server" does not exist, skipping
+create server obs_server foreign data wrapper dfs_fdw options (
+address '@obshostname@',
+encrypt 'off',
+access_key '@ak@',
+secret_access_key '@sk@',
+type 'obs'
+);
+alter server obs_server options (drop address);
+alter server obs_server options (drop access_key);
+ERROR:  Need access_key option for the OBS server.
+alter server obs_server options (drop secret_access_key);
+ERROR:  Need secret_access_key option for the OBS server.
+alter server obs_server options (drop type);
+ERROR:  Need type option for the server.
+HINT:  Valid options in this context are: obs, hdfs, dummy
+alter server obs_server options (add address '10.185.178.239');
+--?.*
+alter server obs_server options (add access_key 'ak');
+ERROR:  option "access_key" provided more than once
+alter server obs_server options (add secret_access_key 'sak');
+ERROR:  option "secret_access_key" provided more than once
+alter server obs_server options (add type 'obs');
+ERROR:  option "type" provided more than once
+alter server obs_server options (set type 'hdfs');
+ERROR:  Invalid option "encrypt"
+HINT:  Valid options in this context are: address, hdfscfgpath, type
+--test hdfs server
+drop server hdfs_server cascade;
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER DFS_FDW OPTIONS (hdfscfgpath '/opt/config');
+ERROR:  Need type option for the server.
+HINT:  Valid options in this context are: obs, hdfs, dummy
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER DFS_FDW OPTIONS (type 'hdfs');
+ERROR:  Need hdfscfgpath option for the HDFS server.
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER DFS_FDW OPTIONS (type 'hdfs', hdfscfgpath '/opt/config', encrypt 'off');
+ERROR:  Invalid option "encrypt"
+HINT:  Valid options in this context are: address, hdfscfgpath, type
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER DFS_FDW OPTIONS (type 'hdfs', hdfscfgpath '/opt/config', access_key '@ak@');
+ERROR:  Invalid option "access_key"
+HINT:  Valid options in this context are: address, hdfscfgpath, type
+drop server hdfs_server cascade;
+ERROR:  server "hdfs_server" does not exist
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER DFS_FDW OPTIONS (hdfscfgpath '/opt/config', type 'HDFS');
+alter server hdfs_server options(add address '10.185.78.20:25000');
+alter server hdfs_server options(add path 'asdf');
+ERROR:  Invalid option "path"
+HINT:  Valid options in this context are: address, hdfscfgpath, type
+alter server hdfs_server options(set address '10');
+ERROR:  The incorrect address format
+alter server hdfs_server options(set hdfscfgpath '/han');
+alter server hdfs_server options(set type 'hdfs');
+alter server hdfs_server options(drop hdfscfgpath );
+ERROR:  Need hdfscfgpath option for the HDFS server.
+alter server hdfs_server options(drop address );
+------------------------------------------------------------------test server end------------------------------------------
+------------------------------------------------------------------test obs foreign table start------------------------------------------
+drop server if exists  obs_server cascade;
+create server obs_server foreign data wrapper dfs_fdw options (
+address '@obshostname@',
+encrypt 'off',
+access_key '@ak@',
+secret_access_key '@sk@',
+type 'obs'
+);
+---------------------test positive
+drop foreign table if exists part_3;
+NOTICE:  foreign table "part_3" does not exist, skipping
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/gaussdb/part_3/')
+distribute by roundrobin
+partition by (b, c);
+WARNING:  It is not specified totalrows option for the foreign table.
+--muti-bucket
+drop foreign table if exists part_3;
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/gaussdb/part_3/, /gaussdb/part_3_2/')
+distribute by roundrobin
+partition by (b, c);
+WARNING:  It is not specified totalrows option for the foreign table.
+--test alter server
+alter foreign table part_3 options (set encoding 'gbk');
+WARNING:  It is not specified totalrows option for the foreign table.
+alter foreign table part_3 options (set foldername '/hanfeng/huawei/');
+WARNING:  It is not specified totalrows option for the foreign table.
+alter foreign table part_3 alter column b set data type int;
+alter foreign table part_3 alter column b set not null;
+alter foreign table part_3 alter column b set statistics 600;
+drop user if exists new_user;
+NOTICE:  role "new_user" does not exist, skipping
+create user new_user password 'Gauss@123';
+alter foreign table part_3 owner to new_user;
+drop foreign table part_3;
+drop user new_user;
+---------------------test negative
+--incorrect option
+--encodingsss
+drop foreign table if exists part_3;
+NOTICE:  foreign table "part_3" does not exist, skipping
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encodingsss 'utf-8',format 'orc', foldername '/gaussdb/part_3/')
+distribute by roundrobin
+partition by (b, c);
+ERROR:  Invalid option "encodingsss"
+HINT:  Valid options in this context are: location, format, encoding, foldername, checkencoding, totalrows
+--filenames
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/gaussdb/part_3/', filenames '/hanfeng/hanfengff')
+distribute by roundrobin
+partition by (b, c);
+ERROR:  The filenames option is not supported for a partitioned foreign table.
+--filenames
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/gaussdb/part_3/', filenames '/hanfeng/hanfengff')
+distribute by roundrobin;
+ERROR:  Invalid option "filenames"
+HINT:  Valid options in this context are: location, format, encoding, foldername, checkencoding, totalrows
+--lack option
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(format 'orc', foldername '/gaussdb/part_3/')
+distribute by roundrobin
+partition by (b, c);
+ERROR:  Need encoding option for the foreign table.
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8', foldername '/gaussdb/part_3/')
+distribute by roundrobin
+partition by (b, c);
+ERROR:  Need format option for the foreign table.
+drop foreign table if exists part_3;
+NOTICE:  foreign table "part_3" does not exist, skipping
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc')
+distribute by roundrobin
+partition by (b, c);
+ERROR:  Either location option or foldername option is specified for the foreign table.
+--incorrect option value
+drop foreign table if exists part_3;
+NOTICE:  foreign table "part_3" does not exist, skipping
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'text', foldername '/gaussdb/part_3/')
+distribute by roundrobin
+partition by (b, c);
+ERROR:  The obs partition foreign table is not supported on text, csv, carbondata format.
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '')
+distribute by roundrobin
+partition by (b, c);
+ERROR:  No foldername is specified for the foreign table.
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/gaussdb/part_3')
+distribute by roundrobin
+partition by (b, c);
+ERROR:  The first character and the end character of each foldername must be a '/' in string "/gaussdb/part_3".
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername 'gaussdb/part_3/')
+distribute by roundrobin
+partition by (b, c);
+ERROR:  The first character and the end character of each foldername must be a '/' in string "gaussdb/part_3/".
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername 'gaussdb/part_3/, /hanfeng')
+distribute by roundrobin
+partition by (b, c);
+ERROR:  The first character and the end character of each foldername must be a '/' in string "gaussdb/part_3/, /hanfeng".
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/gaussdb/part_3, /hanfeng/')
+distribute by roundrobin
+partition by (b, c);
+ERROR:  The first character and the end character of each foldername must be a '/' in string "/gaussdb/part_3, /hanfeng/".
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/gaussdb/part_3/, hanfeng/')
+distribute by roundrobin
+partition by (b, c);
+ERROR:  The first character and the end character of each foldername must be a '/' in string "/gaussdb/part_3/, hanfeng/".
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/gaussdb/part_3/, /hanfeng')
+distribute by roundrobin
+partition by (b, c);
+ERROR:  The first character and the end character of each foldername must be a '/' in string "/gaussdb/part_3/, /hanfeng".
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/gaussdb/part_3/, /hanfeng/, ')
+distribute by roundrobin
+partition by (b, c);
+ERROR:  The first character and the end character of each foldername must be a '/' in string "/gaussdb/part_3/, /hanfeng/, ".
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/')
+distribute by roundrobin
+partition by (b, c);
+ERROR:  Unsupport any empy foldername for the foreign table.
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '//')
+distribute by roundrobin
+partition by (b, c);
+ERROR:  Unsupport any empy foldername for the foreign table.
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/gaussdb/part_3/, /k')
+distribute by roundrobin
+partition by (b, c);
+ERROR:  The first character and the end character of each foldername must be a '/' in string "/gaussdb/part_3/, /k".
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/gaussdb/part_3/, k/')
+distribute by roundrobin
+partition by (b, c);
+ERROR:  The first character and the end character of each foldername must be a '/' in string "/gaussdb/part_3/, k/".
+--error encoding
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'asd',format 'orc', foldername '/gaussdb/part_3/')
+distribute by roundrobin
+partition by (b, c);
+ERROR:  argument to option"encoding" must be a valid encoding name
+--repliction disritbute
+drop foreign table if exists part_3;
+NOTICE:  foreign table "part_3" does not exist, skipping
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/gaussdb/non_exists/')
+distribute by replication
+partition by (b, c);
+ERROR:  Only support ROUNDROBIN distribution type for this foreign table.
+drop foreign table if exists part_3;
+NOTICE:  foreign table "part_3" does not exist, skipping
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/gaussdb/non_exists/')
+distribute by hash(a)
+partition by (b, c);
+ERROR:  Only support ROUNDROBIN distribution type for this foreign table.
+--alter foreign table 
+drop foreign table if exists part_3;
+NOTICE:  foreign table "part_3" does not exist, skipping
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/gaussdb/non_exists/')
+distribute by roundrobin
+partition by (b, c);
+WARNING:  It is not specified totalrows option for the foreign table.
+alter foreign table part_3 add column d  int;
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table part_3 drop column b;
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table part_3 rename to new_part_3;
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table part_3 options (set format 'txt');
+ERROR:  Invalid option "txt"
+HINT:  Valid options in this context are: orc, parquet, carbondata, text, csv
+alter foreign table part_3 options (drop format);
+ERROR:  Need format option for the foreign table.
+alter foreign table part_3 options (drop encoding);
+ERROR:  Need encoding option for the foreign table.
+alter foreign table part_3 options (drop foldername);
+ERROR:  Either location option or foldername option is specified for the foreign table.
+alter foreign table part_3 options( add filenames '/han/');
+ERROR:  Invalid option "filenames"
+HINT:  Valid options in this context are: location, format, encoding, foldername, checkencoding, totalrows
+----test hdfs foreign table
+drop server hdfs_server cascade;
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER DFS_FDW OPTIONS (address '10.185.178.241:25000,10.185.178.239:25000',hdfscfgpath '/opt/config', type 'hdfs');
+drop foreign table if exists region020;
+NOTICE:  foreign table "region020" does not exist, skipping
+create foreign table region020  (a int) SERVER  hdfs_server 
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/region_orc11_64stripe', encoding 'GBK')
+distribute by replication;
+--
+alter foreign table region020 options(drop encoding);
+alter foreign table region020 options(drop foldername);
+ERROR:  It is not allowed to specify both filenames and foldername for the foreign table, need either filenames or foldername.
+alter foreign table region020 options(set format 'text');
+alter foreign table region020 options(set foldername '/gaussdb/part_3/,hanfeng/');
+ERROR:  Only a folder path is allowed for the foreign table.
+drop foreign table if exists region020;
+create foreign table region020  (a int) SERVER  hdfs_server 
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/region_orc11_64stripe, /han', encoding 'GBK')
+distribute by replication;
+ERROR:  There is an illegal character ' ' in the option foldername.
+drop foreign table if exists region020;
+NOTICE:  foreign table "region020" does not exist, skipping
+create foreign table region020  (a int) SERVER  hdfs_server 
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/region_orc11_64stripe,/han', encoding 'GBK')
+distribute by replication;
+ERROR:  Only a folder path is allowed for the foreign table.
+create foreign table region020  (a int) SERVER  hdfs_server 
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/region_orc11_64stripe,/han', encodingxxx 'GBK')
+distribute by replication;
+ERROR:  Invalid option "encodingxxx"
+HINT:  Valid options in this context are: format, encoding, filenames, foldername, checkencoding
+------------------------test select
+----test muti-bucket
+drop foreign table part_3;
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obs_ddl/part_3/, /@obsbucket@/obs_ddl/part_3_2/')
+distribute by roundrobin
+partition by (b, c) automapped;
+WARNING:  It is not specified totalrows option for the foreign table.
+select * from part_3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+(2 rows)
+
+---test non-exists key
+drop foreign table if exists part_3;
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/non_exists/')
+distribute by roundrobin
+partition by (b, c);
+WARNING:  It is not specified totalrows option for the foreign table.
+select * from part_3;
+ a | b | c 
+---+---+---
+(0 rows)
+
+drop foreign table if exists part_3;
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/')
+distribute by roundrobin
+partition by (b, c);
+WARNING:  It is not specified totalrows option for the foreign table.
+select * from part_3;
+ERROR:  The number of partition columns defined of foreign table part_3 is larger than it should be.
+--test 4 partitions
+drop foreign table part_3;
+create foreign table part_3 (a int, b varchar(20), c date, d int,  e int)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obs_ddl/four_partitoin/')
+distribute by roundrobin
+partition by (b, c, d, e);
+WARNING:  It is not specified totalrows option for the foreign table.
+select * from part_3;
+ a |  b  |            c             | d | e 
+---+-----+--------------------------+---+---
+ 2 | 123 | Wed Jan 04 00:00:00 2012 | 4 | 5
+(1 row)
+
+drop server obs_server cascade;
+NOTICE:  drop cascades to foreign table part_3
+drop server hdfs_server cascade;
+--add llt
+drop foreign table if exists llt_001;
+NOTICE:  foreign table "llt_001" does not exist, skipping
+create foreign table llt_001(
+a int,
+b int
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://10.175.38.120/gaussdbcheck/obscheck/test_rescan| ',
+    format 'text',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'on',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+compatible_illegal_chars 'true'
+) read only;
+ERROR:  Invalid URL " " in LOCATION
+drop foreign table if exists llt_001;
+NOTICE:  foreign table "llt_001" does not exist, skipping
+create foreign table llt_001(
+a int,
+b int
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://gaussdbcheck.obs.myhwclouds.com/obscheck/test_rescan|dfs',
+    format 'text',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'on',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+compatible_illegal_chars 'true'
+) read only;
+ERROR:  OBS URL's hostname is not valid 'dfs'
+drop foreign table if exists llt_001;
+NOTICE:  foreign table "llt_001" does not exist, skipping

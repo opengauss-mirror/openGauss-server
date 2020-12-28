@@ -1,4 +1,5 @@
 
+
 subdir = src/gausskernel/storage/replication/logical
 top_builddir = ../../../../..
 include $(top_builddir)/src/Makefile.global

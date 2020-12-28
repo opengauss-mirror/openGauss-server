@@ -69,6 +69,9 @@ PGFunction pg_dlsym(void* handle, char* funcname)
 {
     NSSymbol symbol;
     char* symname = (char*)malloc(strlen(funcname) + 2);
+    if (symname == NULL) {
+        ereport(ERROR, (errmsg("malloc memory failed in dynamic loader.")));
+    }
 
     errno_t rc = sprintf_s(symname, strlen(funcname) + 2, "_%s", funcname);
     securec_check_ss_c(rc, "\0", "\0");

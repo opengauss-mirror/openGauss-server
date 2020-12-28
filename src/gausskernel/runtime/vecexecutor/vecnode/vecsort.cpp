@@ -1,19 +1,8 @@
-/*
+/* -------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2008, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * ----------------------------------------------------------
  * vecsort.cpp
  *
  *
@@ -67,6 +56,7 @@ VectorBatch* ExecVecSort(VecSortState* node)
     long total_size = 0;
     uint64 spill_count = 0;
     TimestampTz start_time = 0;
+
 
     /*
      * get state info from node
@@ -324,8 +314,12 @@ VecSortState* ExecInitVecSort(Sort* node, EState* estate, int eflags)
      * initialize tuple type.  no need to initialize projection info because
      * this node doesn't do projections.
      */
-    ExecAssignResultTypeFromTL(&sort_stat->ss.ps);
     ExecAssignScanTypeFromOuterPlan(&sort_stat->ss);
+
+    ExecAssignResultTypeFromTL(
+            &sort_stat->ss.ps,
+            sort_stat->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+
     sort_stat->ss.ps.ps_ProjInfo = NULL;
 
     /*
@@ -341,7 +335,7 @@ VecSortState* ExecInitVecSort(Sort* node, EState* estate, int eflags)
      * Consider codegeneration for sort node. In fact, CompareMultiColumn is the
      * hotest function in sort node.
      */
-    bool use_prefetch = true;
+    bool use_prefetch = false;
     sort_stat->jitted_CompareMultiColumn = NULL;
     sort_stat->jitted_CompareMultiColumn_TOPN = NULL;
     llvm::Function* jitted_comparecol = NULL;
@@ -494,8 +488,10 @@ void ExecReScanVecSort(VecSortState* node)
     if (node->ss.ps.lefttree->chgParam != NULL || node->bounded != node->bounded_Done ||
         node->bound != node->bound_Done || !node->randomAccess) {
         node->sort_Done = false;
-        batchsort_end((Batchsortstate*)node->tuplesortstate);
-        node->tuplesortstate = NULL;
+        if (node->tuplesortstate != NULL) {            
+            batchsort_end((Batchsortstate*)node->tuplesortstate);
+            node->tuplesortstate = NULL;
+        }
 
         /*
          * if chgParam of subnode is not null then plan will be re-scanned by
@@ -507,8 +503,10 @@ void ExecReScanVecSort(VecSortState* node)
     } else {
         if (node->ss.ps.plan->ispwj && need_switch_part) {
             node->sort_Done = false;
-            batchsort_end((Batchsortstate*)node->tuplesortstate);
-            node->tuplesortstate = NULL;
+            if (node->tuplesortstate != NULL) {
+                batchsort_end((Batchsortstate*)node->tuplesortstate);
+                node->tuplesortstate = NULL;
+            }
 
             /*
              * if chgParam of subnode is not null then plan will be re-scanned by

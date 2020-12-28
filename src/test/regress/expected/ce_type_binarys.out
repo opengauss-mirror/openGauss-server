@@ -1,0 +1,80 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+DROP CLIENT MASTER KEY IF EXISTS binaryCMK CASCADE;
+NOTICE:  global setting "binarycmk" does not exist
+CREATE CLIENT MASTER KEY binaryCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY binaryCEK WITH VALUES (CLIENT_MASTER_KEY = binaryCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+create table IF NOT EXISTS binary_type(
+c1 int, 
+c2 BLOB ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = binaryCEK, ENCRYPTION_TYPE = DETERMINISTIC), 
+c3 RAW, 
+c4 BYTEA ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = binaryCEK, ENCRYPTION_TYPE = DETERMINISTIC)
+);
+insert into binary_type values(1, 'DEADBEEF', 'DEADBEEF', '\xDEADBEEF');
+insert into binary_type values(2, 'BC9CA87B', 'BC9CA87B', '\xBC9CA87B');
+insert into binary_type values(3, '6789ABCD', '6789ABCD', '\x6789ABCD');
+insert into binary_type values(4, empty_blob(), 'DEADBEEF', '\xDEADBEEF');
+select * from binary_type ORDER BY c1;
+ c1 |    c2    |    c3    |     c4     
+----+----------+----------+------------
+  1 | DEADBEEF | DEADBEEF | \xdeadbeef
+  2 | BC9CA87B | BC9CA87B | \xbc9ca87b
+  3 | 6789ABCD | 6789ABCD | \x6789abcd
+  4 |          | DEADBEEF | \xdeadbeef
+(4 rows)
+
+SELECT * from binary_type where c2 = 'DEADBEEF';
+ c1 |    c2    |    c3    |     c4     
+----+----------+----------+------------
+  1 | DEADBEEF | DEADBEEF | \xdeadbeef
+(1 row)
+
+UPDATE binary_type SET c2 = 'DEADBEE5674' where c2 = 'DEADBEEF';
+DELETE FROM binary_type where c2='DEADBEE5674';
+SELECT * from binary_type order by c1;
+ c1 |    c2    |    c3    |     c4     
+----+----------+----------+------------
+  2 | BC9CA87B | BC9CA87B | \xbc9ca87b
+  3 | 6789ABCD | 6789ABCD | \x6789abcd
+  4 |          | DEADBEEF | \xdeadbeef
+(3 rows)
+
+DELETE FROM binary_type as alias_test where alias_test.c2 ='6789ABCD';
+SELECT * from binary_type order by c1;
+ c1 |    c2    |    c3    |     c4     
+----+----------+----------+------------
+  2 | BC9CA87B | BC9CA87B | \xbc9ca87b
+  4 |          | DEADBEEF | \xdeadbeef
+(2 rows)
+
+create table IF NOT EXISTS binary_type_enc(
+c1 int ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = binaryCEK, ENCRYPTION_TYPE = DETERMINISTIC), 
+c2 BLOB ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = binaryCEK, ENCRYPTION_TYPE = DETERMINISTIC), 
+c3 RAW ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = binaryCEK, ENCRYPTION_TYPE = DETERMINISTIC), 
+c4 BYTEA ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = binaryCEK, ENCRYPTION_TYPE = DETERMINISTIC)
+);
+ERROR(CLIENT): encrypted raw column is not implemented
+DROP TABLE IF exists binary_type;
+DROP TABLE IF exists binary_type_enc;
+NOTICE:  table "binary_type_enc" does not exist, skipping
+DROP COLUMN ENCRYPTION KEY binaryCEK;
+DROP CLIENT MASTER KEY binaryCMK;
+select  count(*), 'count' from gs_client_global_keys;
+ count | ?column? 
+-------+----------
+     0 | count
+(1 row)
+
+select  count(*), 'count' from gs_column_keys;
+ count | ?column? 
+-------+----------
+     0 | count
+(1 row)
+
+\! gs_ktool -d all
+DELETE ALL
+ 1

@@ -1,0 +1,114 @@
+--create resource pool success.
+select count(*) from pg_total_user_resource_info;
+
+CREATE RESOURCE POOL respool_temp_error WITH(control_group='DefaultClass');
+CREATE RESOURCE POOL respool_temp_default WITH(mem_percent=101);
+CREATE RESOURCE POOL respool_temp_default WITH(mem_percent=10, mem_percent=20);
+CREATE RESOURCE POOL respool_temp_default;
+SELECT * FROM pg_resource_pool order by respool_name;
+
+CREATE RESOURCE POOL respool_temp14 WITH(CONTROL_GROUP='class1'); --group resource pool
+CREATE RESOURCE POOL respool_temp15 WITH(control_group='class1:Medium'); --child resource pool
+CREATE RESOURCE POOL respool_temp16 WITH(control_group='class1:High', mem_percent=20,active_statements=5); --child resource pool
+CREATE RESOURCE POOL respool_temp17 WITH(control_group='class1:Medium', mem_percent=20,active_statements=5); --error case
+CREATE RESOURCE POOL respool_temp18 WITH(control_group='class1:Low', mem_percent=41,active_statements=5); --memory out of range
+CREATE RESOURCE POOL respool_temp18 WITH(control_group='class2'); --another group resource pool
+CREATE RESOURCE POOL respool_temp19 WITH(control_group='class2:Medium', mem_percent=0); --memory cannot be 0
+CREATE RESOURCE POOL respool_temp19 WITH(control_group='class2:Medium');
+CREATE RESOURCE POOL respool_temp20 WITH(parent='');
+SELECT count(*) FROM pg_resource_pool where parentid=0;
+SELECT count(*) FROM pg_resource_pool;
+
+CREATE RESOURCE POOL respool_temp21 with(active_statements=20, active_statements=20);
+CREATE RESOURCE POOL respool_temp21 with(active_statements=-2);
+CREATE RESOURCE POOL respool_temp21 with(max_dop=20, max_dop=20);
+CREATE RESOURCE POOL respool_temp21 with(mem_percent=20, memory_limit='2GB', active_statements=-1);
+CREATE RESOURCE POOL respool_temp22abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz with(control_group='class2:High');
+
+--alter resource pool 
+ALTER RESOURCE POOL respool_temp_default WITH(control_group='class2'); --error case
+ALTER RESOURCE POOL respool_temp14 WITH(mem_percent=90);
+ALTER RESOURCE POOL respool_temp14 WITH(control_group='class2:Low');
+ALTER RESOURCE POOL respool_temp16 with(control_group='class1:Low', mem_percent=20); --success
+ALTER RESOURCE POOL respool_temp16 WITH(control_group='class1:Medium');
+ALTER RESOURCE POOL respool_temp16 WITH(mem_percent=0);
+SELECT count(*) from gs_wlm_resource_pool;
+
+--create role
+--success
+CREATE USER temp_role1 resource pool 'respool_temp14' password 'Gauss_234' perm space '2G';
+CREATE USER temp_role2 resource pool 'RESPOOL_temp16' password 'Gauss_234' USER GROUP 'TEMP_ROLE1';
+CREATE USER temp_role2abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz resource pool 'respool_temp18' password 'Gauss_234';
+create user temp_role3 resource pool 'respool_temp22abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz' password 'Gauss_234' user group 'temp_role2abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz';
+DROP USER temp_role2abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyza;
+CREATE USER temp_role4 password 'Gauss_234';
+CREATE USER temp_role5 resource pool 'respool_temp_default' password 'Gauss_234';
+CREATE USER temp_role resource pool 'respool_temp_default' password 'Gauss_234' nologin;
+
+--error cases
+CREATE USER temp_role resource pool 'respool_temp14' password 'Gauss_234';
+CREATE USER temp_role resource pool 'respool_error' password 'Gauss_234';
+CREATE USER temp_role resource pool 'respool_temp14' password 'Gauss_234' resource pool 'respool_temp14';
+CREATE USER temp_role user group default resource pool 'RESPOOL_temp16' password 'Gauss_234' USER GROUP 'TEMP_ROLE1';
+CREATE USER temp_role resource pool 'RESPOOL_temp16' password 'Gauss_234' USER GROUP 'TEMP_ROLE1' USER GROUP 'TEMP_ROLE1';
+CREATE USER temp_role user group 'temp_role' password 'Gauss_234';
+CREATE USER temp_role user group 'temp_error' password 'Gauss_234';
+CREATE USER temp_role user group 'temp_role4' password 'Gauss_234';
+CREATE USER temp_role user group 'TEMP_ROLE1' password 'Gauss_234';
+CREATE USER temp_role resource pool 'RESPOOL_temp16' password 'Gauss@123';
+CREATE USER temp_role resource pool 'RESPOOL_temp1' password 'Gauss@123';
+CREATE USER temp_role resource pool 'respool_temp18' USER GROUP 'TEMP_ROLE1' password 'Gauss_234';
+CREATE USER temp_role resource pool 'respool_temp19' USER GROUP 'TEMP_ROLE1' password 'Gauss_234';
+
+--alter role success
+ALTER USER temp_role2 resource pool 'respool_temp15' USER GROUP 'temp_role1';
+CREATE USER temp_role2abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz resource pool 'respool_temp18' password 'Gauss_234';
+ALTER USER temp_role2 resource pool 'respool_temp22abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz' user group 'temp_role2abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz';
+DROP USER temp_role2abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz;
+DROP RESOURCE POOL respool_temp22abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz;
+ALTER USER temp_role4 user group 'temp_role1' resource pool 'respool_temp15';
+ALTER USER temp_role5 user group 'temp_role1' resource pool 'respool_temp15';
+ALTER USER temp_role5 resource pool 'respool_temp_default' user group default;
+ALTER USER temp_role5 nologin;
+ALTER USER temp_role4 nologin;
+
+--alter role error cases
+ALTER USER temp_role4 resource pool 'respool_temp15' USER GROUP 'temp_role1' resource pool 'respool_temp15';
+ALTER USER temp_role4 resource pool 'respool_temp15' USER GROUP 'temp_role1' USER GROUP 'temp_role1';
+ALTER USER temp_role4 resource pool 'respool_temp15' USER GROUP 'temp_role1' USER GROUP DEFAULT;
+ALTER USER temp_role4 USER GROUP 'temp_role4';
+ALTER USER temp_role4 USER GROUP 'role_error';
+ALTER USER temp_role4 resource pool 'respool_error';
+ALTER USER temp_role4 user group default;
+ALTER USER temp_role1 resource pool 'respool_temp_default';
+ALTER USER temp_role4 resource pool 'respool_temp_default';
+ALTER USER temp_role4 sysadmin;
+
+--transaction cases
+start transaction;
+ALTER USER temp_role4 resource pool 'respool_temp_default' user group default;
+ALTER USER temp_role1 resource pool 'respool_temp_default' user group default;
+ALTER USER temp_role4 resource pool 'respool_temp14';
+ALTER USER temp_role1 resource pool 'respool_temp15' user group 'temp_role4';
+COMMIT;
+select usename, respool from pg_user where parent !=0;
+
+--views
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from gs_all_control_group_info;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from gs_respool_exception_info('respool_temp15');" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from gs_respool_exception_info('respool_temp14');" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from gs_control_group_info('respool_temp15');" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from gs_control_group_info('respool_temp14');" > /dev/null 2>&1
+
+--drop process
+DROP RESOURCE POOL respool_temp14;
+DROP USER temp_role4;
+DROP USER temp_role5;
+SELECT *from pg_user where usesysid !=10;
+drop resource pool respool_temp14;
+drop resource pool respool_temp18;
+drop resource pool respool_temp21;
+drop user temp_role;
+drop resource pool respool_temp_default;
+select *From pg_resource_pool;
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup --revert > /dev/null 2>&1

@@ -180,7 +180,8 @@ Datum cube_a_f8_f8(PG_FUNCTION_ARGS)
     int i;
     int dim;
     int size;
-    double *dur, *dll;
+    double *dur = NULL;
+    double *dll = NULL;
 
     if (array_contains_nulls(ur) || array_contains_nulls(ll))
         ereport(ERROR, (errcode(ERRCODE_ARRAY_ELEMENT_ERROR), errmsg("cannot work with arrays containing NULLs")));
@@ -296,8 +297,9 @@ Datum cube_out(PG_FUNCTION_ARGS)
         if (i > 0)
             appendStringInfo(&buf, ", ");
         appendStringInfo(&buf, "%.*g", ndig, cube->x[i]);
-        if (cube->x[i] != cube->x[i + dim])
+        if (cube->x[i] != cube->x[i + dim]) {
             equal = false;
+        }
     }
     appendStringInfoChar(&buf, ')');
 
@@ -471,7 +473,6 @@ Datum g_cube_picksplit(PG_FUNCTION_ARGS)
             datum_beta = DatumGetNDBOX(entryvec->vector[j].key);
 
             /* compute the wasted space by unioning these guys */
-            /* size_waste = size_union - size_inter; */
             union_d = cube_union_v0(datum_alpha, datum_beta);
             rt_cube_size(union_d, &size_union);
             inter_d = DatumGetNDBOX(DirectFunctionCall2(cube_inter, entryvec->vector[i].key, entryvec->vector[j].key));
@@ -1153,10 +1154,11 @@ Datum cube_ll_coord(PG_FUNCTION_ARGS)
     int n = PG_GETARG_INT16(1);
     double result;
 
-    if (c->dim >= n && n > 0)
+    if (c->dim >= n && n > 0) {
         result = Min(c->x[n - 1], c->x[c->dim + n - 1]);
-    else
+    } else {
         result = 0;
+    }
 
     PG_FREE_IF_COPY(c, 0);
     PG_RETURN_FLOAT8(result);
@@ -1169,10 +1171,11 @@ Datum cube_ur_coord(PG_FUNCTION_ARGS)
     int n = PG_GETARG_INT16(1);
     double result;
 
-    if (c->dim >= n && n > 0)
+    if (c->dim >= n && n > 0) {
         result = Max(c->x[n - 1], c->x[c->dim + n - 1]);
-    else
+    } else {
         result = 0;
+    }
 
     PG_FREE_IF_COPY(c, 0);
     PG_RETURN_FLOAT8(result);
@@ -1193,8 +1196,9 @@ Datum cube_enlarge(PG_FUNCTION_ARGS)
         n = CUBE_MAX_DIM;
     if (r > 0 && n > 0)
         dim = n;
-    if (a->dim > dim)
+    if (a->dim > dim) {
         dim = a->dim;
+    }
     size = offsetof(NDBOX, x[0]) + sizeof(double) * dim * 2;
     result = (NDBOX*)palloc0(size);
     SET_VARSIZE(result, size);

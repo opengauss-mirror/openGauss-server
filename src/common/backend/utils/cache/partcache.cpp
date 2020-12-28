@@ -68,7 +68,7 @@
 #include "utils/resowner.h"
 #include "utils/syscache.h"
 #include "access/cstore_am.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 #include "utils/partitionmap.h"
 #include "utils/partitionmap_gs.h"
 #include "catalog/pg_partition.h"
@@ -122,7 +122,7 @@ typedef struct partidcacheent {
  */
 static HeapTuple ScanPgPartition(Oid targetPartId, bool indexOK, Snapshot snapshot);
 static Partition AllocatePartitionDesc(Form_pg_partition relp);
-static Partition PartitionBuildDesc(Oid targetPartId, bool insertIt);
+static Partition PartitionBuildDesc(Oid targetPartId, bool insertIt, bool isbucket);
 static void PartitionInitPhysicalAddr(Partition partition);
 static void PartitionDestroyPartition(Partition partition);
 static void PartitionFlushPartition(Partition partition);
@@ -170,6 +170,7 @@ static HeapTuple ScanPgPartition(Oid targetPartId, bool indexOK, Snapshot snapsh
         key);
 
     pg_partition_tuple = systable_getnext(pg_partition_scan);
+
     /*
      * Must copy tuple before releasing buffer.
      */
@@ -188,7 +189,7 @@ static Partition AllocatePartitionDesc(Form_pg_partition partp)
 {
     Partition partition;
     MemoryContext oldcxt;
-    Form_pg_partition partition_form;
+    Form_pg_partition partitionForm;
     errno_t rc = 0;
 
     /* Relcache entries must live in u_sess->cache_mem_cxt */
@@ -214,19 +215,19 @@ static Partition AllocatePartitionDesc(Form_pg_partition partp)
      * form of reloptions (however, we do store the parsed form of reloptions
      * in rd_options).
      */
-    partition_form = (Form_pg_partition)palloc(PARTITION_TUPLE_SIZE);
+    partitionForm = (Form_pg_partition)palloc(PARTITION_TUPLE_SIZE);
 
-    rc = memcpy_s(partition_form, PARTITION_TUPLE_SIZE, partp, PARTITION_TUPLE_SIZE);
+    rc = memcpy_s(partitionForm, PARTITION_TUPLE_SIZE, partp, PARTITION_TUPLE_SIZE);
     securec_check(rc, "\0", "\0");
 
     /* initialize relation tuple form */
-    partition->pd_part = partition_form;
+    partition->pd_part = partitionForm;
 
     (void)MemoryContextSwitchTo(oldcxt);
     return partition;
 }
 
-static Partition PartitionBuildDesc(Oid targetPartId, bool insertIt)
+static Partition PartitionBuildDesc(Oid targetPartId, bool insertIt, bool isbukcet)
 {
     Partition partition;
     Oid partid;
@@ -283,7 +284,8 @@ static Partition PartitionBuildDesc(Oid targetPartId, bool insertIt)
     if (partition->pd_part->parentid != InvalidOid) {
         PartitionInitPhysicalAddr(partition);
     }
-    partition->pd_node.bucketNode = InvalidBktId;
+    
+    partition->pd_node.bucketNode = isbukcet ? DIR_BUCKET_ID : InvalidBktId;
 
     /* make sure relation is marked as having no open file yet */
     partition->pd_smgr = NULL;
@@ -330,8 +332,12 @@ static void PartitionInitPhysicalAddr(Partition partition)
     }
 }
 
-/* part 3: functions can be used by  other modules */
-Partition PartitionIdGetPartition(Oid partitionId)
+/*
+ *part 3: functions can be used by  other modules
+ *
+ *
+ */
+Partition PartitionIdGetPartition(Oid partitionId, bool isbucket)
 {
     Partition pd;
 
@@ -362,7 +368,7 @@ Partition PartitionIdGetPartition(Oid partitionId)
      * no partdesc in the cache, so have PartitionBuildDesc() build one and add
      * it.
      */
-    pd = PartitionBuildDesc(partitionId, true);
+    pd = PartitionBuildDesc(partitionId, true, isbucket);
     if (PartitionIsValid(pd)) {
         PartitionIncrementReferenceCount(pd);
     }
@@ -449,14 +455,14 @@ Partition PartitionBuildLocalPartition(const char* relname, Oid partid, Oid part
     /*
      * Insert relation physical and logical identifiers (OIDs) into the right
      * places.  For a mapped relation, we set relfilenode to zero and rely on
-     * relation_init_physical_addr to consult the map.
+     * RelationInitPhysicalAddr to consult the map.
      */
     part->pd_id = partid;
     part->pd_part->reltablespace = parttablespace;
 
     part->pd_part->relfilenode = partfilenode;
 
-    /* belowing: cast out from Partition to Relation */
+    /*belowing: cast out from Partition to Relation*/
     PartitionInitLockInfo(part); /* see lmgr.c */
 
     if (partfilenode != InvalidOid) {
@@ -549,7 +555,7 @@ static void PartitionClearPartition(Partition partition, bool rebuild)
 
     /*
      * Never, never ever blow away a nailed-in system relation, because we'd
-     * be unable to recover.  However, we must redo relation_init_physical_addr
+     * be unable to recover.  However, we must redo RelationInitPhysicalAddr
      * in case it is a mapped relation whose mapping changed.
      *
      * If it's a nailed index, then we need to re-read the pg_partition row to see
@@ -559,6 +565,7 @@ static void PartitionClearPartition(Partition partition, bool rebuild)
      * AtEOXact_RelationCache).  Otherwise just mark the entry as possibly
      * invalid, and it'll be fixed when next opened.
      */
+
     /*
      * Even non-system indexes should not be blown away if they are open and
      * have valid index support information.  This avoids problems with active
@@ -622,8 +629,8 @@ static void PartitionClearPartition(Partition partition, bool rebuild)
         errno_t rc = 0;
 
         /* Build temporary entry, but don't link it into hashtable */
-        newpart = PartitionBuildDesc(save_partid, false);
-        if (newpart == NULL) {
+        newpart = PartitionBuildDesc(save_partid, false, partition->pd_node.bucketNode != InvalidBktId);
+        if (NULL == newpart) {
             /* Should only get here if partition was deleted */
             PartitionCacheDelete(partition);
             PartitionDestroyPartition(partition);
@@ -669,6 +676,7 @@ static void PartitionClearPartition(Partition partition, bool rebuild)
         /* un-swap rd_rel pointers, swap contents instead */
         SWAPFIELD(Form_pg_partition, pd_part);
         /* ... but actually, we don't have to update newrel->rd_rel */
+
         rc = memcpy_s(partition->pd_part, PARTITION_TUPLE_SIZE, newpart->pd_part, PARTITION_TUPLE_SIZE);
         securec_check(rc, "\0", "\0");
 
@@ -800,12 +808,13 @@ void PartitionCacheInvalidate(void)
     HASH_SEQ_STATUS status;
     PartIdCacheEnt* idhentry = NULL;
     Partition partition;
-    List* rebuild_list = NIL;
+    List* rebuildList = NIL;
     ListCell* l = NULL;
 
     /*
      * Reload relation mapping data before starting to reconstruct cache.
      */
+
     /* Phase 1 */
     hash_seq_init(&status, u_sess->cache_cxt.PartitionIdCache);
 
@@ -823,7 +832,7 @@ void PartitionCacheInvalidate(void)
             /* Delete this entry immediately */
             PartitionClearPartition(partition, false);
         } else {
-            rebuild_list = lappend(rebuild_list, partition);
+            rebuildList = lappend(rebuildList, partition);
         }
     }
 
@@ -835,11 +844,11 @@ void PartitionCacheInvalidate(void)
     smgrcloseall();
 
     /* Phase 2: rebuild the items found to need rebuild in phase 1 */
-    foreach (l, rebuild_list) {
+    foreach (l, rebuildList) {
         partition = (Partition)lfirst(l);
         PartitionClearPartition(partition, true);
     }
-    list_free_ext(rebuild_list);
+    list_free_ext(rebuildList);
 }
 
 /*
@@ -954,7 +963,7 @@ void AtEOXact_PartitionCache(bool isCommit)
  *
  * Note: this must be called *before* processing invalidation messages.
  */
-void AtEOSubXact_PartitionCache(bool isCommit, SubTransactionId mySubid, SubTransactionId parent_subid)
+void AtEOSubXact_PartitionCache(bool isCommit, SubTransactionId mySubid, SubTransactionId parentSubid)
 {
     HASH_SEQ_STATUS status;
     PartIdCacheEnt* idhentry = NULL;
@@ -979,7 +988,7 @@ void AtEOSubXact_PartitionCache(bool isCommit, SubTransactionId mySubid, SubTran
          */
         if (partition->pd_createSubid == mySubid) {
             if (isCommit)
-                partition->pd_createSubid = parent_subid;
+                partition->pd_createSubid = parentSubid;
             else {
                 PartitionClearPartition(partition, false);
                 continue;
@@ -992,7 +1001,7 @@ void AtEOSubXact_PartitionCache(bool isCommit, SubTransactionId mySubid, SubTran
          */
         if (partition->pd_newRelfilenodeSubid == mySubid) {
             if (isCommit)
-                partition->pd_newRelfilenodeSubid = parent_subid;
+                partition->pd_newRelfilenodeSubid = parentSubid;
             else
                 partition->pd_newRelfilenodeSubid = InvalidSubTransactionId;
         }
@@ -1072,8 +1081,7 @@ void PartitionDecrementReferenceCount(Partition part)
 
 bytea* merge_rel_part_reloption(Oid rel_oid, Oid part_oid)
 {
-    HeapTuple part_tuple = NULL;
-    HeapTuple rel_tuple = NULL;
+    HeapTuple part_tuple = NULL, rel_tuple = NULL;
     Datum rel_reloptions = (Datum)0;
     Datum part_reloptions = (Datum)0;
     Datum merged_reloptions = (Datum)0;
@@ -1143,10 +1151,12 @@ bytea* merge_rel_part_reloption(Oid rel_oid, Oid part_oid)
  * Description	:
  * Notes		: the invoker should release the EMS memory
  */
+
 Relation partitionGetRelation(Relation rel, Partition part)
 {
     Relation relation;
     MemoryContext oldcxt;
+    errno_t rc = 0;
     bytea* merge_reloption = NULL;
     bytea* des_reloption = NULL;
 
@@ -1176,7 +1186,7 @@ Relation partitionGetRelation(Relation rel, Partition part)
     relation->rd_createSubid = part->pd_createSubid;
     relation->rd_newRelfilenodeSubid = part->pd_newRelfilenodeSubid;
     relation->rd_rel = (Form_pg_class)palloc(sizeof(FormData_pg_class));
-    errno_t rc = memcpy_s(relation->rd_rel, sizeof(FormData_pg_class), rel->rd_rel, sizeof(FormData_pg_class));
+    rc = memcpy_s(relation->rd_rel, sizeof(FormData_pg_class), rel->rd_rel, sizeof(FormData_pg_class));
     securec_check(rc, "\0", "\0");
     relation->rd_rel->reltoastrelid = part->pd_part->reltoastrelid;
     relation->rd_rel->reltablespace = part->pd_part->reltablespace;
@@ -1200,6 +1210,7 @@ Relation partitionGetRelation(Relation rel, Partition part)
     relation->rd_indextuple = rel->rd_indextuple;
     relation->rd_am = rel->rd_am;
     relation->rd_indnkeyatts = rel->rd_indnkeyatts;
+	relation->rd_tam_type = rel->rd_tam_type;
 
     if (!OidIsValid(rel->rd_rel->relam)) {
         relation->rd_indexcxt = NULL;
@@ -1237,21 +1248,20 @@ Relation partitionGetRelation(Relation rel, Partition part)
     relation->parentId = rel->rd_id;
     relation->rd_smgr = part->pd_smgr;
 
-    /* detach the binding between partition and SmgrRelation */
+    /*detach the binding between partition and SmgrRelation*/
     part->pd_smgr = NULL;
 
-    /* build the binding between dummy Relation and SmgrRelation */
+    /*build the binding between dummy Relation and SmgrRelation*/
     if (relation->rd_smgr) {
         smgrsetowner(&((relation)->rd_smgr), relation->rd_smgr);
     }
 
-    if (merge_reloption != NULL) {
+    if (NULL != merge_reloption)
         des_reloption = merge_reloption;
-    } else {
+    else
         des_reloption = rel->rd_options;
-    }
 
-    if (des_reloption != NULL) {
+    if (NULL != des_reloption) {
         int relOptSize = VARSIZE_ANY(des_reloption);
         errno_t ret = EOK;
         relation->rd_options = (bytea*)palloc(relOptSize);
@@ -1276,9 +1286,10 @@ void releaseDummyRelation(Relation* relation)
     if (!IsBootstrapProcessingMode()) {
         ResourceOwnerForgetFakerelRef(t_thrd.utils_cxt.CurrentResourceOwner, *relation);
     }
-    /* detach the binding between Relation and SmgrRelation */
+
+    /*detach the binding between Relation and SmgrRelation*/
     if ((*relation)->rd_smgr != NULL) {
-		/* put SmgrRelation object into unowned list */
+        /* put SmgrRelation object into unowned list */
         smgrclearowner(&(*relation)->rd_smgr, (*relation)->rd_smgr);
     }
 
@@ -1287,16 +1298,15 @@ void releaseDummyRelation(Relation* relation)
         (*relation)->rd_indexcxt = NULL;
     }
 
-    /* free relation */
-    /* if palloc(sizeof(FormData_pg_class)) throw exception, (*relation)->rd_rel will be null */
+    /*free relation*/
+    /*if palloc(sizeof(FormData_pg_class)) throw exception, (*relation)->rd_rel will be null*/
     if (PointerIsValid((*relation)->rd_rel)) {
         pfree_ext((*relation)->rd_rel);
     }
 
-    if ((*relation)->rd_options != NULL) {
+    if (NULL != (*relation)->rd_options) {
         pfree_ext((*relation)->rd_options);
     }
-
     pfree_ext(*relation);
     *relation = NULL;
 }
@@ -1311,16 +1321,17 @@ static void PartitionReloadIndexInfo(Partition part)
 {
     HeapTuple pg_partition_tuple;
     Form_pg_partition partForm;
+    errno_t rc = 0;
 
     /*
      * Should be called only for invalidated indexe partition
      */
-    Assert(part->pd_part->parttype == PART_OBJ_TYPE_INDEX_PARTITION && !part->pd_isvalid);
+    Assert(PART_OBJ_TYPE_INDEX_PARTITION == part->pd_part->parttype && !part->pd_isvalid);
 
     /*
      * Should be closed at smgr level
      */
-    Assert(part->pd_smgr == NULL);
+    Assert(NULL == part->pd_smgr);
 
     pg_partition_tuple = ScanPgPartition(PartitionGetPartid(part), true, SnapshotNow);
     if (!HeapTupleIsValid(pg_partition_tuple)) {
@@ -1337,14 +1348,15 @@ static void PartitionReloadIndexInfo(Partition part)
 
     partForm = (Form_pg_partition)GETSTRUCT(pg_partition_tuple);
 
-    errno_t rc = memcpy_s(part->pd_part, PARTITION_TUPLE_SIZE, partForm, PARTITION_TUPLE_SIZE);
+    rc = memcpy_s(part->pd_part, PARTITION_TUPLE_SIZE, partForm, PARTITION_TUPLE_SIZE);
     securec_check(rc, "\0", "\0");
 
     heap_freetuple_ext(pg_partition_tuple);
 
-    /* We must recalculate physical address in case it changed */
+    /* We must recalculate physical address in case it changed 
+     * bucketNode will not change anyway 
+     */
     PartitionInitPhysicalAddr(part);
-    part->pd_node.bucketNode = InvalidBktId;
 
     /*
      * we can't read value from pg_index, we should read value from pg_partition
@@ -1377,8 +1389,8 @@ void PartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId f
     errno_t rc;
 
     Assert((parent->rd_rel->relkind == RELKIND_INDEX || parent->rd_rel->relkind == RELKIND_SEQUENCE)
-                ? freezeXid == InvalidTransactionId
-                : TransactionIdIsNormal(freezeXid));
+               ? freezeXid == InvalidTransactionId
+               : TransactionIdIsNormal(freezeXid));
 
     /* Allocate a new relfilenode */
     newrelfilenode = GetNewRelFileNode(part->pd_part->reltablespace, NULL, parent->rd_rel->relpersistence);
@@ -1389,6 +1401,7 @@ void PartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId f
     pg_partition = heap_open(PartitionRelationId, RowExclusiveLock);
 
     tuple = SearchSysCacheCopy1(PARTRELID, ObjectIdGetDatum(PartitionGetPartid(part)));
+
     if (!HeapTupleIsValid(tuple)) {
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
@@ -1485,27 +1498,27 @@ static void PartitionParseRelOptions(Partition partition, HeapTuple tuple)
     bytea* options = NULL;
     bool isnull = false;
     Datum datum;
-    Relation partition_rel;
+    Relation partitionRel;
     errno_t rc;
 
     partition->rd_options = NULL;
 
-    partition_rel = relation_open(PartitionRelationId, RowExclusiveLock);
+    partitionRel = relation_open(PartitionRelationId, RowExclusiveLock);
     /*
      * Fetch reloptions from tuple; have to use a hardwired descriptor because
      * we might not have any other for pg_class yet (consider executing this
      * code for pg_class itself)
      */
-    datum = fastgetattr(tuple, Anum_pg_partition_reloptions, RelationGetDescr(partition_rel), &isnull);
+    datum = fastgetattr(tuple, Anum_pg_partition_reloptions, RelationGetDescr(partitionRel), &isnull);
 
-    /* close pg_partition catalog */
-    relation_close(partition_rel, RowExclusiveLock);
+    /*close pg_partition catalog*/
+    relation_close(partitionRel, RowExclusiveLock);
 
-    if (isnull) {
+    if (isnull)
         return;
-    }
 
     options = heap_reloptions(RELKIND_RELATION, datum, false);
+
     /*
      * Copy parsed data into u_sess->cache_mem_cxt.  To guard against the
      * possibility of leaks in the reloptions code, we want to do the actual
@@ -1615,7 +1628,7 @@ static PartStatus PartitionStatusForVacuum(Oid partOid)
 
     scan = systable_beginscan(pgPartition, InvalidOid, false, SnapshotAny, 1, key);
     while (HeapTupleIsValid(partTuple = systable_getnext(scan))) {
-        partStatus = PartTupleStatusForVacuum(partTuple, scan->scan->rs_cbuf, oldestXmin);
+        partStatus = PartTupleStatusForVacuum(partTuple, scan->scan->rs_base.rs_cbuf, oldestXmin);
         /* The status of a partition is creating or live, the partition status is the latest */
         if (partStatus == PART_METADATA_CREATING || partStatus == PART_METADATA_LIVE) {
             break;

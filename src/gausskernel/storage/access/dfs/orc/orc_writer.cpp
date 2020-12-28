@@ -15,9 +15,8 @@
  *
  * orc_writer.cpp
  *
- *
  * IDENTIFICATION
- *         src/gausskernel/storage/access/dfs/orc/orc_writer.cpp
+ *    src/gausskernel/storage/access/dfs/orc/orc_writer.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -33,7 +32,9 @@
 #include "utils/syscache.h"
 #include "access/dfs/dfs_insert.h"
 #include "access/sysattr.h"
+#include "access/tableam.h"
 #include "dfs_adaptor.h"
+#include "access/dfs/dfs_common.h"
 #include "access/dfs/dfs_query.h"
 #include "catalog/dfsstore_ctlg.h"
 #include "commands/tablespace.h"
@@ -198,80 +199,80 @@ void ORCColWriter::init(IndexInsertInfo *indexInsertInfo)
 
         switch (m_desc->attrs[i]->atttypid) {
             case BOOLOID:
-                (void)m_opts.schema->addStructField(orc::BOOLEAN, attrs[i]->attname.data);
+                m_opts.schema->addStructField(orc::BOOLEAN, attrs[i]->attname.data);
                 m_convertToDatumFunc[realColId] = &convertToDatumT<orc::BOOLEAN, BOOLOID, WRITER>;
                 m_appendDatumFunc[realColId] = &appendDatumT<orc::BOOLEAN, BOOLOID, false>;
                 checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(char), m_maxBufferSize);
                 break;
             case INT1OID:
-                (void)m_opts.schema->addStructField(orc::BYTE, attrs[i]->attname.data);
+                m_opts.schema->addStructField(orc::BYTE, attrs[i]->attname.data);
                 m_convertToDatumFunc[realColId] = &convertToDatumT<orc::BYTE, INT1OID, WRITER>;
                 m_appendDatumFunc[realColId] = &appendDatumT<orc::BYTE, INT1OID, false>;
                 checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(int8), m_maxBufferSize);
                 break;
             case INT2OID:
-                (void)m_opts.schema->addStructField(orc::SHORT, attrs[i]->attname.data);
+                m_opts.schema->addStructField(orc::SHORT, attrs[i]->attname.data);
                 m_convertToDatumFunc[realColId] = &convertToDatumT<orc::SHORT, INT2OID, WRITER>;
                 m_appendDatumFunc[realColId] = &appendDatumT<orc::SHORT, INT2OID, false>;
                 checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(int16), m_maxBufferSize);
                 break;
             case INT4OID:
-                (void)m_opts.schema->addStructField(orc::INT, attrs[i]->attname.data);
+                m_opts.schema->addStructField(orc::INT, attrs[i]->attname.data);
                 m_convertToDatumFunc[realColId] = &convertToDatumT<orc::INT, INT4OID, WRITER>;
                 m_appendDatumFunc[realColId] = &appendDatumT<orc::INT, INT4OID, false>;
                 checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(int32), m_maxBufferSize);
                 break;
             case INT8OID:
-                (void)m_opts.schema->addStructField(orc::LONG, attrs[i]->attname.data);
+                m_opts.schema->addStructField(orc::LONG, attrs[i]->attname.data);
                 m_convertToDatumFunc[realColId] = &convertToDatumT<orc::LONG, INT8OID, WRITER>;
                 m_appendDatumFunc[realColId] = &appendDatumT<orc::LONG, INT8OID, false>;
                 checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(int64), m_maxBufferSize);
                 break;
             case OIDOID:
-                (void)m_opts.schema->addStructField(orc::LONG, attrs[i]->attname.data);
+                m_opts.schema->addStructField(orc::LONG, attrs[i]->attname.data);
                 m_convertToDatumFunc[realColId] = &convertToDatumT<orc::LONG, OIDOID, WRITER>;
                 m_appendDatumFunc[realColId] = &appendDatumT<orc::LONG, OIDOID, false>;
                 checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(int64), m_maxBufferSize);
                 break;
             case TIMESTAMPTZOID:
-                (void)m_opts.schema->addStructField(orc::LONG, attrs[i]->attname.data);
+                m_opts.schema->addStructField(orc::LONG, attrs[i]->attname.data);
                 m_convertToDatumFunc[realColId] = &convertToDatumT<orc::LONG, TIMESTAMPTZOID, WRITER>;
                 m_appendDatumFunc[realColId] = &appendDatumT<orc::LONG, TIMESTAMPTZOID, false>;
                 checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(int64), m_maxBufferSize);
                 break;
             case TIMEOID:
-                (void)m_opts.schema->addStructField(orc::LONG, attrs[i]->attname.data);
+                m_opts.schema->addStructField(orc::LONG, attrs[i]->attname.data);
                 m_convertToDatumFunc[realColId] = &convertToDatumT<orc::LONG, TIMEOID, WRITER>;
                 m_appendDatumFunc[realColId] = &appendDatumT<orc::LONG, TIMEOID, false>;
                 checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(int64), m_maxBufferSize);
                 break;
             case SMALLDATETIMEOID:
-                (void)m_opts.schema->addStructField(orc::LONG, attrs[i]->attname.data);
+                m_opts.schema->addStructField(orc::LONG, attrs[i]->attname.data);
                 m_convertToDatumFunc[realColId] = &convertToDatumT<orc::LONG, SMALLDATETIMEOID, WRITER>;
                 m_appendDatumFunc[realColId] = &appendDatumT<orc::LONG, SMALLDATETIMEOID, false>;
                 checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(int64), m_maxBufferSize);
                 break;
             case CASHOID:
-                (void)m_opts.schema->addStructField(orc::LONG, attrs[i]->attname.data);
+                m_opts.schema->addStructField(orc::LONG, attrs[i]->attname.data);
                 m_convertToDatumFunc[realColId] = &convertToDatumT<orc::LONG, CASHOID, WRITER>;
                 m_appendDatumFunc[realColId] = &appendDatumT<orc::LONG, CASHOID, false>;
                 checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(int64), m_maxBufferSize);
                 break;
             case FLOAT4OID:
-                (void)m_opts.schema->addStructField(orc::FLOAT, attrs[i]->attname.data);
+                m_opts.schema->addStructField(orc::FLOAT, attrs[i]->attname.data);
                 m_convertToDatumFunc[realColId] = &convertToDatumT<orc::FLOAT, FLOAT4OID, WRITER>;
                 m_appendDatumFunc[realColId] = &appendDatumT<orc::FLOAT, FLOAT4OID, false>;
                 checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(float4), m_maxBufferSize);
                 break;
             case FLOAT8OID:
-                (void)m_opts.schema->addStructField(orc::DOUBLE, attrs[i]->attname.data);
+                m_opts.schema->addStructField(orc::DOUBLE, attrs[i]->attname.data);
                 m_convertToDatumFunc[realColId] = &convertToDatumT<orc::DOUBLE, FLOAT8OID, WRITER>;
                 m_appendDatumFunc[realColId] = &appendDatumT<orc::DOUBLE, FLOAT8OID, false>;
                 checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(float8), m_maxBufferSize);
                 break;
             case TEXTOID:
             case CLOBOID:
-                (void)m_opts.schema->addStructField(orc::STRING, attrs[i]->attname.data);
+                m_opts.schema->addStructField(orc::STRING, attrs[i]->attname.data);
                 m_convertToDatumFunc[realColId] = &convertToDatumT<orc::STRING, TEXTOID, WRITER>;
                 m_appendDatumFunc[realColId] = &appendDatumT<orc::STRING, TEXTOID, false>;
                 checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(char *), m_maxBufferSize);
@@ -279,13 +280,13 @@ void ORCColWriter::init(IndexInsertInfo *indexInsertInfo)
             case BPCHAROID: {
                 int typmod = m_desc->attrs[i]->atttypmod;
                 if (typmod > 0) {
-                    (void)m_opts.schema->addStructField(orc::createCharType(orc::CHAR,
+                    m_opts.schema->addStructField(orc::createCharType(orc::CHAR,
                                                                       m_desc->attrs[i]->atttypmod - VARHDRSZ),
                                                   attrs[i]->attname.data);
                     m_convertToDatumFunc[realColId] = &convertToDatumT<orc::CHAR, BPCHAROID, WRITER>;
                     m_appendDatumFunc[realColId] = &appendDatumT<orc::CHAR, BPCHAROID, false>;
                 } else {
-                    (void)m_opts.schema->addStructField(orc::STRING, attrs[i]->attname.data);
+                    m_opts.schema->addStructField(orc::STRING, attrs[i]->attname.data);
                     m_convertToDatumFunc[realColId] = &convertToDatumT<orc::STRING, BPCHAROID, WRITER>;
                     m_appendDatumFunc[realColId] = &appendDatumT<orc::STRING, BPCHAROID, false>;
                 }
@@ -295,13 +296,13 @@ void ORCColWriter::init(IndexInsertInfo *indexInsertInfo)
             case VARCHAROID: {
                 int typmod = m_desc->attrs[i]->atttypmod;
                 if (typmod > 0) {
-                    (void)m_opts.schema->addStructField(orc::createCharType(orc::VARCHAR,
+                    m_opts.schema->addStructField(orc::createCharType(orc::VARCHAR,
                                                                       m_desc->attrs[i]->atttypmod - VARHDRSZ),
                                                   attrs[i]->attname.data);
                     m_convertToDatumFunc[realColId] = &convertToDatumT<orc::VARCHAR, VARCHAROID, WRITER>;
                     m_appendDatumFunc[realColId] = &appendDatumT<orc::VARCHAR, VARCHAROID, false>;
                 } else {
-                    (void)m_opts.schema->addStructField(orc::STRING, attrs[i]->attname.data);
+                    m_opts.schema->addStructField(orc::STRING, attrs[i]->attname.data);
                     m_convertToDatumFunc[realColId] = &convertToDatumT<orc::STRING, VARCHAROID, WRITER>;
                     m_appendDatumFunc[realColId] = &appendDatumT<orc::STRING, VARCHAROID, false>;
                 }
@@ -309,7 +310,7 @@ void ORCColWriter::init(IndexInsertInfo *indexInsertInfo)
                 break;
             }
             case TIMESTAMPOID:
-                (void)m_opts.schema->addStructField(orc::TIMESTAMP, attrs[i]->attname.data);
+                m_opts.schema->addStructField(orc::TIMESTAMP, attrs[i]->attname.data);
                 m_convertToDatumFunc[realColId] = &convertToDatumT<orc::TIMESTAMP, TIMESTAMPOID, WRITER>;
                 m_appendDatumFunc[realColId] = &appendDatumT<orc::TIMESTAMP, TIMESTAMPOID, false>;
                 checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(int64) * 2, m_maxBufferSize);
@@ -322,21 +323,21 @@ void ORCColWriter::init(IndexInsertInfo *indexInsertInfo)
                 m_scales[realColId] = scale;
 
                 if (attrs[i]->atttypmod != -1 && precision <= 18) {
-                    (void)m_opts.schema->addStructField(orc::createDecimalType(precision, scale), attrs[i]->attname.data);
+                    m_opts.schema->addStructField(orc::createDecimalType(precision, scale), attrs[i]->attname.data);
 
                     m_convertToDatumFunc[realColId] = &convertDecimalToDatumT<false, false>;
                     m_appendDatumFunc[realColId] = &appendDatumT<orc::DECIMAL, NUMERICOID, false>;
 
                     checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(int64), m_maxBufferSize);
                 } else if (attrs[i]->atttypmod != -1 && precision <= 38) {
-                    (void)m_opts.schema->addStructField(orc::createDecimalType(precision, scale), attrs[i]->attname.data);
+                    m_opts.schema->addStructField(orc::createDecimalType(precision, scale), attrs[i]->attname.data);
 
                     m_convertToDatumFunc[realColId] = &convertDecimalToDatumT<true, false>;
                     m_appendDatumFunc[realColId] = &appendDatumT<orc::DECIMAL, NUMERICOID, true>;
 
                     checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(orc::Int128), m_maxBufferSize);
                 } else { /* still save as string on precision > 38 */
-                    (void)m_opts.schema->addStructField(orc::STRING, attrs[i]->attname.data);
+                    m_opts.schema->addStructField(orc::STRING, attrs[i]->attname.data);
 
                     m_convertToDatumFunc[realColId] = &convertToDatumT<orc::STRING, NUMERICOID, WRITER>;
                     m_appendDatumFunc[realColId] = &appendDatumT<orc::STRING, NUMERICOID, false>;
@@ -347,31 +348,31 @@ void ORCColWriter::init(IndexInsertInfo *indexInsertInfo)
                 break;
             }
             case INTERVALOID:
-                (void)m_opts.schema->addStructField(orc::STRING, attrs[i]->attname.data);
+                m_opts.schema->addStructField(orc::STRING, attrs[i]->attname.data);
                 m_convertToDatumFunc[realColId] = &convertToDatumT<orc::STRING, INTERVALOID, WRITER>;
                 m_appendDatumFunc[realColId] = &appendDatumT<orc::STRING, INTERVALOID, false>;
                 checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(char *), m_maxBufferSize);
                 break;
             case TINTERVALOID:
-                (void)m_opts.schema->addStructField(orc::STRING, attrs[i]->attname.data);
+                m_opts.schema->addStructField(orc::STRING, attrs[i]->attname.data);
                 m_convertToDatumFunc[realColId] = &convertToDatumT<orc::STRING, TINTERVALOID, WRITER>;
                 m_appendDatumFunc[realColId] = &appendDatumT<orc::STRING, TINTERVALOID, false>;
                 checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(char *), m_maxBufferSize);
                 break;
             case TIMETZOID:
-                (void)m_opts.schema->addStructField(orc::STRING, attrs[i]->attname.data);
+                m_opts.schema->addStructField(orc::STRING, attrs[i]->attname.data);
                 m_convertToDatumFunc[realColId] = &convertToDatumT<orc::STRING, TIMETZOID, WRITER>;
                 m_appendDatumFunc[realColId] = &appendDatumT<orc::STRING, TIMETZOID, false>;
                 checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(char *), m_maxBufferSize);
                 break;
             case CHAROID:
-                (void)m_opts.schema->addStructField(orc::STRING, attrs[i]->attname.data);
+                m_opts.schema->addStructField(orc::STRING, attrs[i]->attname.data);
                 m_convertToDatumFunc[realColId] = &convertToDatumT<orc::STRING, CHAROID, WRITER>;
                 m_appendDatumFunc[realColId] = &appendDatumT<orc::STRING, CHAROID, false>;
                 checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(char *), m_maxBufferSize);
                 break;
             case NVARCHAR2OID:
-                (void)m_opts.schema->addStructField(orc::STRING, attrs[i]->attname.data);
+                m_opts.schema->addStructField(orc::STRING, attrs[i]->attname.data);
                 m_convertToDatumFunc[realColId] = &convertToDatumT<orc::STRING, NVARCHAR2OID, WRITER>;
                 m_appendDatumFunc[realColId] = &appendDatumT<orc::STRING, NVARCHAR2OID, false>;
                 checkMemory(m_fixedBufferSize, m_bufferCapacity * sizeof(char *), m_maxBufferSize);
@@ -391,9 +392,10 @@ void ORCColWriter::init(IndexInsertInfo *indexInsertInfo)
         m_columnVectorBatch = orc::Writer::createColBatch(m_bufferCapacity, m_opts.getType(), *orc::getDefaultPool());
     }
     DFS_CATCH();
-    DFS_ERRREPORT_WITHOUTARGS("Error occurs while creating orc column batch because of %s, "
-                              "detail can be found in dn log of %s.",
-                              MOD_ORC);
+    DFS_ERRREPORT_WITHOUTARGS(
+        "Error occurs while creating orc column batch because of %s, "
+        "detail can be found in dn log of %s.",
+        MOD_ORC);
 
     /* Initialize the variables needed for index if exist. */
     initIndexInsertInfo(indexInsertInfo);
@@ -480,7 +482,7 @@ void ORCColWriter::initLabelInfo()
         errno_t rcc = 0;
         rcc = memset_s(&ipv4addr, sizeof(ipv4addr), 0, sizeof(ipv4addr));
         securec_check(rcc, "\0", "\0");
-        (void)inet_pton(AF_INET, t_thrd.postmaster_cxt.ReplConnArray[1]->remotehost, &ipv4addr);
+        inet_pton(AF_INET, t_thrd.postmaster_cxt.ReplConnArray[1]->remotehost, &ipv4addr);
         int rc = gethostbyaddr_r((char *)&ipv4addr, sizeof(ipv4addr), AF_INET, &hst_ent, buff, 1024, &hp, &error);
         if (0 != rc || 0 != error) {
             ereport(WARNING, (errmodule(MOD_ORC), errmsg("Fail to find the remote host.")));
@@ -604,9 +606,10 @@ int ORCColWriter::spill(uint64 fileID)
         ret = m_orcWriter->addColumnBatch(*m_columnVectorBatch.get());
     }
     DFS_CATCH();
-    DFS_ERRREPORT_WITHARGS("Error occurs while spilling a new file %lu to write because of %s, "
-                           "detail can be found in dn log of %s.",
-                           MOD_ORC, fileID);
+    DFS_ERRREPORT_WITHARGS(
+        "Error occurs while spilling a new file %lu to write because of %s, "
+        "detail can be found in dn log of %s.",
+        MOD_ORC, fileID);
 
     /*
      * Read the content of the batchrow and insert some of them, which starts from 0 and
@@ -646,9 +649,10 @@ void ORCColWriter::appendColDatum(int colID, Datum *vals, bool *isNull, uint32 s
                                        m_totalBufferSize, m_maxBufferSize);
         }
         DFS_CATCH();
-        DFS_ERRREPORT_WITHARGS("Error occurs while add a column batch on column %d because of %s, "
-                               "detail can be found in dn log of %s.",
-                               MOD_ORC, colID);
+        DFS_ERRREPORT_WITHARGS(
+            "Error occurs while add a column batch on column %d because of %s, "
+            "detail can be found in dn log of %s.",
+            MOD_ORC, colID);
     }
 }
 
@@ -731,7 +735,7 @@ void ORCColWriter::extractDatumFromOrcBatchByRow(int rowId, Datum *values, bool 
  * @in nulls, The output nulls.
  * @return None.
  */
-void ORCColWriter::setNullIntoDroppedCol(Datum *values, bool *nulls) const
+void ORCColWriter::setNullIntoDroppedCol(Datum *values, bool *nulls)
 {
     int attrNum = m_desc->natts;
     for (int col = 0; col < attrNum; col++) {
@@ -754,7 +758,7 @@ void ORCColWriter::insert2Batchrow(uint64 startOffset, uint64 fileID)
     int rows = m_columnVectorBatch->numElements;
     Datum *tids = (Datum *)palloc0(sizeof(Datum) * rows);
 
-    rc = memset_s(m_idxChooseKey, m_desc->natts, 0, m_desc->natts);
+    rc = memset_s(m_idxChooseKey, m_desc->natts, false, m_desc->natts);
     securec_check(rc, "\0", "\0");
 
     /* form the ctid data accordint to fileID and offset. */
@@ -828,7 +832,7 @@ void ORCColWriter::flush2Index(int32 rowCount)
             while (iter.not_end()) {
                 iter.next(values, isnull);
                 ItemPointer tupleid = (ItemPointer)&values[m_idxInsertBatchRow->m_attr_num - 1];
-                (void)index_insert(indexRel,         /* index relation */
+                index_insert(indexRel,         /* index relation */
                              values,           /* array of index Datums */
                              isnull,           /* null flags */
                              tupleid,          /* tid of heap tuple */
@@ -878,9 +882,9 @@ void ORCColWriter::deltaInsert(int options)
         tuple = heap_form_tuple(m_desc, values, nulls);
 
         /* We always generate xlog for delta tuple */
-        options = (unsigned int)options & (~HEAP_INSERT_SKIP_WAL);
+        options = (unsigned int)options & (~TABLE_INSERT_SKIP_WAL);
 
-        (void)heap_insert(delta, tuple, GetCurrentCommandId(true), options, NULL);
+        (void)tableam_tuple_insert(delta, tuple, GetCurrentCommandId(true), options, NULL);
     }
 
     heap_close(delta, RowExclusiveLock);
@@ -986,9 +990,10 @@ bool ORCColWriter::getMinMax(uint32 colId, char *&minStr, char *&maxStr, bool &h
         }
     }
     DFS_CATCH();
-    DFS_ERRREPORT_WITHARGS("Error occurs while get the min max statistics of column %u because of %s, "
-                           "detail can be found in dn log of %s.",
-                           MOD_ORC, colId);
+    DFS_ERRREPORT_WITHARGS(
+        "Error occurs while get the min max statistics of column %u because of %s, "
+        "detail can be found in dn log of %s.",
+        MOD_ORC, colId);
 
     return ret;
 }
@@ -998,12 +1003,13 @@ void ORCColWriter::closeCurWriter()
     if (NULL != m_orcWriter.get()) {
         DFS_TRY()
         {
-            (void)m_orcWriter->close();
+            m_orcWriter->close();
         }
         DFS_CATCH();
-        DFS_ERRREPORT_WITHOUTARGS("Error occurs while close the orc writer because of %s, "
-                                  "detail can be found in dn log of %s.",
-                                  MOD_ORC);
+        DFS_ERRREPORT_WITHOUTARGS(
+            "Error occurs while close the orc writer because of %s, "
+            "detail can be found in dn log of %s.",
+            MOD_ORC);
     }
 }
 

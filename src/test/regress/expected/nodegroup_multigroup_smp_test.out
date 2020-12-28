@@ -1,0 +1,2157 @@
+/*--------------------------------------------------------------------------------------y
+ *
+ *  Multiple nodegroup join test case
+ *      t1(c1,c2) hash by (c1) on node group ngroup1 <datanode1, datanode3, datanode5, datanode7>
+ *      t2(c1,c2) hash by (c1) on node group ngroup2 <datanode1, datanode3, datanode5, datanode7, datanode9>
+ *      group1 is default nodegroup, it has datanode1..datanode12
+*
+ * Portions Copyright (c) 2016, Huawei
+ *
+ *
+ * IDENTIFICATION
+ *    src/test/regress/sql/nodegroup_basic_test.sql
+ *---------------------------------------------------------------------------------------
+ */
+set query_dop=1002;
+create schema nodegroup_multigroup_test;
+set current_schema = nodegroup_multigroup_test;
+create node group ngroup1 with (datanode1, datanode3, datanode5, datanode7);
+create node group ngroup2 with (datanode2, datanode4, datanode6, datanode8, datanode10, datanode12);
+create node group ngroup3 with (datanode1, datanode2, datanode3, datanode4, datanode5, datanode6);
+-- insert select
+create table t1ng1(c1 int, c2 int) distribute by hash(c1) to group ngroup1;
+create table t1ng2(c1 int, c2 int) distribute by hash(c1) to group ngroup2;
+create table t1ng3(c1 int, c2 int) distribute by hash(c1) to group ngroup3;
+insert into t1ng1 select v,v from generate_series(1,30) as v;
+insert into t1ng2 select * from t1ng1;
+insert into t1ng3 select * from t1ng2;
+set enable_nodegroup_explain = on;
+ERROR:  unrecognized configuration parameter "enable_nodegroup_explain"
+-- test Hash Join
+set enable_hashjoin=true;
+set enable_mergejoin=false;
+set enable_nestloop=false;
+set expected_computing_nodegroup='group1';
+-- T1's distribution key join T2's distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c1 order by 1;
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: (GenGroup) datanode1, datanode3, datanode5, datanode7, datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+               ->  Hash Join
+                     Hash Cond: (t1.c1 = t2.c1)
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Hash
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup2->ngroup1)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c1 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+-- T1's distribution key join T2's none-distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c2 order by 1;
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: (GenGroup) datanode1, datanode3, datanode5, datanode7, datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+               ->  Hash Join
+                     Hash Cond: (t1.c1 = t2.c2)
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Hash
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup2->ngroup1)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c2 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+-- T1's none-distribution key join T2's distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c1 order by 1;
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: (GenGroup) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8, datanode1, datanode3, datanode5, datanode7
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+               ->  Hash Join
+                     Hash Cond: (t1.c2 = t2.c1)
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup1->ngroup2)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Hash
+                           ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c1 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+-- T1's none-distribution key join T2's none-distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c2 order by 1;
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: (GenGroup) datanode1, datanode3, datanode5, datanode7, datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+               ->  Hash Join
+                     Hash Cond: (t1.c2 = t2.c2)
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Hash
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup2->ngroup1)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c2 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+set expected_computing_nodegroup='ngroup1';
+-- T1's distribution key join T2's distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c1 order by 1;
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: (GenGroup) datanode1, datanode3, datanode5, datanode7, datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+               ->  Hash Join
+                     Hash Cond: (t1.c1 = t2.c1)
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Hash
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup2->ngroup1)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c1 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+-- T1's distribution key join T2's none-distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c2 order by 1;
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: (GenGroup) datanode1, datanode3, datanode5, datanode7, datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+               ->  Hash Join
+                     Hash Cond: (t1.c1 = t2.c2)
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Hash
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup2->ngroup1)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c2 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+-- T1's none-distribution key join T2's distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c1 order by 1;
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: (GenGroup) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8, datanode1, datanode3, datanode5, datanode7
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+               ->  Hash Join
+                     Hash Cond: (t1.c2 = t2.c1)
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup1->ngroup2)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Hash
+                           ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c1 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+-- T1's none-distribution key join T2's none-distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c2 order by 1;
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: (GenGroup) datanode1, datanode3, datanode5, datanode7, datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+               ->  Hash Join
+                     Hash Cond: (t1.c2 = t2.c2)
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Hash
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup2->ngroup1)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c2 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+set expected_computing_nodegroup='ngroup2';
+-- T1's distribution key join T2's distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c1 order by 1;
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: (GenGroup) datanode1, datanode3, datanode5, datanode7, datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+               ->  Hash Join
+                     Hash Cond: (t1.c1 = t2.c1)
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Hash
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup2->ngroup1)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c1 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+-- T1's distribution key join T2's none-distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c2 order by 1;
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: (GenGroup) datanode1, datanode3, datanode5, datanode7, datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+               ->  Hash Join
+                     Hash Cond: (t1.c1 = t2.c2)
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Hash
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup2->ngroup1)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c2 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+-- T1's none-distribution key join T2's distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c1 order by 1;
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: (GenGroup) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8, datanode1, datanode3, datanode5, datanode7
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+               ->  Hash Join
+                     Hash Cond: (t1.c2 = t2.c1)
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup1->ngroup2)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Hash
+                           ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c1 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+-- T1's none-distribution key join T2's none-distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c2 order by 1;
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: (GenGroup) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8, datanode1, datanode3, datanode5, datanode7
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+               ->  Hash Join
+                     Hash Cond: (t1.c2 = t2.c2)
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup1->ngroup2)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Hash
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c2 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+-- test MergeJoin
+set enable_hashjoin=false;
+set enable_mergejoin=true;
+set enable_nestloop=false;
+set expected_computing_nodegroup='group1';
+-- T1's distribution key join T2's distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c1 order by 1;
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: All datanodes
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: All datanodes
+               ->  Nested Loop
+                     Join Filter: (t1.c1 = t2.c1)
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup1->group1)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Materialize
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup2->group1)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c1 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+-- T1's distribution key join T2's none-distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c2 order by 1;
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: All datanodes
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: All datanodes
+               ->  Nested Loop
+                     Join Filter: (t1.c1 = t2.c2)
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup1->group1)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Materialize
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup2->group1)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c2 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+-- T1's none-distribution key join T2's distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c1 order by 1;
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: All datanodes
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: All datanodes
+               ->  Nested Loop
+                     Join Filter: (t1.c2 = t2.c1)
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup1->group1)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Materialize
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup2->group1)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c1 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+-- T1's none-distribution key join T2's none-distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c2 order by 1;
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: All datanodes
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: All datanodes
+               ->  Nested Loop
+                     Join Filter: (t1.c2 = t2.c2)
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup1->group1)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Materialize
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup2->group1)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c2 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+set expected_computing_nodegroup='ngroup1';
+-- T1's distribution key join T2's distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c1 order by 1;
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: (GenGroup) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8, datanode1, datanode3, datanode5, datanode7
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+               ->  Nested Loop
+                     Join Filter: (t1.c1 = t2.c1)
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup1->ngroup2)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Materialize
+                           ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c1 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+-- T1's distribution key join T2's none-distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c2 order by 1;
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: (GenGroup) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8, datanode1, datanode3, datanode5, datanode7
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+               ->  Nested Loop
+                     Join Filter: (t1.c1 = t2.c2)
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup1->ngroup2)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Materialize
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c2 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+-- T1's none-distribution key join T2's distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c1 order by 1;
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: (GenGroup) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8, datanode1, datanode3, datanode5, datanode7
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+               ->  Nested Loop
+                     Join Filter: (t1.c2 = t2.c1)
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup1->ngroup2)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Materialize
+                           ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c1 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+-- T1's none-distribution key join T2's none-distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c2 order by 1;
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: (GenGroup) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8, datanode1, datanode3, datanode5, datanode7
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+               ->  Nested Loop
+                     Join Filter: (t1.c2 = t2.c2)
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup1->ngroup2)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Materialize
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c2 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+set expected_computing_nodegroup='ngroup2';
+-- T1's distribution key join T2's distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c1 order by 1;
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: (GenGroup) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8, datanode1, datanode3, datanode5, datanode7
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+               ->  Nested Loop
+                     Join Filter: (t1.c1 = t2.c1)
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup1->ngroup2)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Materialize
+                           ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c1 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+-- T1's distribution key join T2's none-distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c2 order by 1;
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: (GenGroup) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8, datanode1, datanode3, datanode5, datanode7
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+               ->  Nested Loop
+                     Join Filter: (t1.c1 = t2.c2)
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup1->ngroup2)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Materialize
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c1 = t2.c2 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+-- T1's none-distribution key join T2's distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c1 order by 1;
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: (GenGroup) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8, datanode1, datanode3, datanode5, datanode7
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+               ->  Nested Loop
+                     Join Filter: (t1.c2 = t2.c1)
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup1->ngroup2)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Materialize
+                           ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c1 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+-- T1's none-distribution key join T2's none-distribution key
+explain (costs off) select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c2 order by 1;
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t1.c1
+   Node/s: (GenGroup) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8, datanode1, datanode3, datanode5, datanode7
+   ->  Sort
+         Sort Key: t1.c1
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+               ->  Nested Loop
+                     Join Filter: (t1.c2 = t2.c2)
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ngroup1->ngroup2)
+                           Spawn on: (ngroup1) datanode1, datanode3, datanode5, datanode7
+                           ->  Seq Scan on t1ng1 t1
+                     ->  Materialize
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Spawn on: (ngroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 ->  Seq Scan on t1ng2 t2
+(16 rows)
+
+select * from t1ng1 as t1 join t1ng2 as t2 on t1.c2 = t2.c2 order by 1;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+ 11 | 11 | 11 | 11
+ 12 | 12 | 12 | 12
+ 13 | 13 | 13 | 13
+ 14 | 14 | 14 | 14
+ 15 | 15 | 15 | 15
+ 16 | 16 | 16 | 16
+ 17 | 17 | 17 | 17
+ 18 | 18 | 18 | 18
+ 19 | 19 | 19 | 19
+ 20 | 20 | 20 | 20
+ 21 | 21 | 21 | 21
+ 22 | 22 | 22 | 22
+ 23 | 23 | 23 | 23
+ 24 | 24 | 24 | 24
+ 25 | 25 | 25 | 25
+ 26 | 26 | 26 | 26
+ 27 | 27 | 27 | 27
+ 28 | 28 | 28 | 28
+ 29 | 29 | 29 | 29
+ 30 | 30 | 30 | 30
+(30 rows)
+
+drop table t1ng1;
+drop table t1ng2;
+drop table t1ng3;
+reset expected_computing_nodegroup;
+drop node group ngroup1;
+drop node group ngroup2;
+drop node group ngroup3;
+/*
+ * Test BROADCAST can work with REDISTRIBUTION
+ * proposed by Yonghua
+ */
+create node group ng1 with(datanode2, datanode3);
+create node group ng2 with(datanode1, datanode4);
+create node group ng3 with(datanode1, datanode2, datanode3, datanode4, datanode5, datanode6, datanode7, datanode8);
+create table t1ng1(c1 int, c2 int) distribute by hash(c1) to group ng1;
+create table t1ng2(c1 int, c2 int) distribute by hash(c1) to group ng2;
+insert into t1ng1 select v,v%5 from generate_series(1,10) as v;
+insert into t1ng2 select v,v%5 from generate_series(1,10) as v;
+-- TODO, fix me as we have some issues support ANALYZE nodegorup table, so just hack statistics
+update pg_class set reltuples = 500000 where relname = 't1ng2';
+update pg_class set relpages = 500000 where relname = 't1ng2';
+/* Verify HashJoin */
+set enable_hashjoin=on;
+set enable_mergejoin=off;
+set enable_nestloop=off;
+set expected_computing_nodegroup = 'group1';
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode1, datanode4, datanode2, datanode3
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: (ng2) datanode1, datanode4
+         ->  Hash Join
+               Hash Cond: (t2.c2 = t1.c2)
+               ->  Seq Scan on t1ng2 t2
+               ->  Hash
+                     ->  Streaming(type: SPLIT BROADCAST dop: 2/2 ng: ng1->ng2)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(11 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  1 |  1 |  6 |  1
+  2 |  2 |  2 |  2
+  2 |  2 |  7 |  2
+  3 |  3 |  3 |  3
+(5 rows)
+
+-- also verify distribution-key
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c1 = t2.c1;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode1, datanode4, datanode2, datanode3
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: (ng2) datanode1, datanode4
+         ->  Hash Join
+               Hash Cond: (t2.c1 = t1.c1)
+               ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                     Spawn on: (ng2) datanode1, datanode4
+                     ->  Seq Scan on t1ng2 t2
+               ->  Hash
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng1->ng2)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(13 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  6 |  1 |  1 |  1
+(5 rows)
+
+set expected_computing_nodegroup = 'ng1';
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode1, datanode4, datanode2, datanode3
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: (ng2) datanode1, datanode4
+         ->  Hash Join
+               Hash Cond: (t2.c2 = t1.c2)
+               ->  Seq Scan on t1ng2 t2
+               ->  Hash
+                     ->  Streaming(type: SPLIT BROADCAST dop: 2/2 ng: ng1->ng2)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(11 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  1 |  1 |  6 |  1
+  2 |  2 |  2 |  2
+  2 |  2 |  7 |  2
+  3 |  3 |  3 |  3
+(5 rows)
+
+-- also verify distribution-key
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c1 = t2.c1;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode1, datanode4, datanode2, datanode3
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: (ng2) datanode1, datanode4
+         ->  Hash Join
+               Hash Cond: (t2.c1 = t1.c1)
+               ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                     Spawn on: (ng2) datanode1, datanode4
+                     ->  Seq Scan on t1ng2 t2
+               ->  Hash
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng1->ng2)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(13 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  6 |  1 |  1 |  1
+(5 rows)
+
+set expected_computing_nodegroup = 'ng2';
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode1, datanode4, datanode2, datanode3
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: (ng2) datanode1, datanode4
+         ->  Hash Join
+               Hash Cond: (t2.c2 = t1.c2)
+               ->  Seq Scan on t1ng2 t2
+               ->  Hash
+                     ->  Streaming(type: SPLIT BROADCAST dop: 2/2 ng: ng1->ng2)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(11 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  1 |  1 |  6 |  1
+  2 |  2 |  2 |  2
+  2 |  2 |  7 |  2
+  3 |  3 |  3 |  3
+(5 rows)
+
+-- also verify distribution-key
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c1 = t2.c1;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode1, datanode4, datanode2, datanode3
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: (ng2) datanode1, datanode4
+         ->  Hash Join
+               Hash Cond: (t2.c1 = t1.c1)
+               ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                     Spawn on: (ng2) datanode1, datanode4
+                     ->  Seq Scan on t1ng2 t2
+               ->  Hash
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng1->ng2)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(13 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  6 |  1 |  1 |  1
+(5 rows)
+
+set expected_computing_nodegroup = 'ng3';
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode1, datanode4, datanode2, datanode3
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: (ng2) datanode1, datanode4
+         ->  Hash Join
+               Hash Cond: (t2.c2 = t1.c2)
+               ->  Seq Scan on t1ng2 t2
+               ->  Hash
+                     ->  Streaming(type: SPLIT BROADCAST dop: 2/2 ng: ng1->ng2)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(11 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  1 |  1 |  6 |  1
+  2 |  2 |  2 |  2
+  2 |  2 |  7 |  2
+  3 |  3 |  3 |  3
+(5 rows)
+
+-- also verify distribution-key
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c1 = t2.c1;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode1, datanode4, datanode2, datanode3
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: (ng2) datanode1, datanode4
+         ->  Hash Join
+               Hash Cond: (t2.c1 = t1.c1)
+               ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                     Spawn on: (ng2) datanode1, datanode4
+                     ->  Seq Scan on t1ng2 t2
+               ->  Hash
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng1->ng2)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(13 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  6 |  1 |  1 |  1
+(5 rows)
+
+/* Verify MergeJoin */
+set enable_hashjoin=off;
+set enable_mergejoin=on;
+set enable_nestloop=off;
+set expected_computing_nodegroup = 'group1';
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: All datanodes
+         ->  Nested Loop
+               Join Filter: (t1.c2 = t2.c2)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng2->group1)
+                     Spawn on: (ng2) datanode1, datanode4
+                     ->  Seq Scan on t1ng2 t2
+               ->  Materialize
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng1->group1)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(13 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  1 |  1 |  6 |  1
+  2 |  2 |  2 |  2
+  2 |  2 |  7 |  2
+  3 |  3 |  3 |  3
+(5 rows)
+
+-- also verify distribution-key
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c1 = t2.c1;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: All datanodes
+         ->  Nested Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng2->group1)
+                     Spawn on: (ng2) datanode1, datanode4
+                     ->  Seq Scan on t1ng2 t2
+               ->  Materialize
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng1->group1)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(13 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  6 |  1 |  1 |  1
+(5 rows)
+
+set expected_computing_nodegroup = 'ng1';
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode2, datanode3, datanode1, datanode4
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: (ng1) datanode2, datanode3
+         ->  Nested Loop
+               Join Filter: (t1.c2 = t2.c2)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng2->ng1)
+                     Spawn on: (ng2) datanode1, datanode4
+                     ->  Seq Scan on t1ng2 t2
+               ->  Materialize
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(13 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  1 |  1 |  6 |  1
+  2 |  2 |  2 |  2
+  2 |  2 |  7 |  2
+  3 |  3 |  3 |  3
+(5 rows)
+
+-- also verify distribution-key
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c1 = t2.c1;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode1, datanode4, datanode2, datanode3
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: (ng2) datanode1, datanode4
+         ->  Nested Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                     Spawn on: (ng2) datanode1, datanode4
+                     ->  Seq Scan on t1ng2 t2
+               ->  Materialize
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng1->ng2)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(13 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  6 |  1 |  1 |  1
+(5 rows)
+
+set expected_computing_nodegroup = 'ng2';
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode1, datanode4, datanode2, datanode3
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: (ng2) datanode1, datanode4
+         ->  Nested Loop
+               Join Filter: (t1.c2 = t2.c2)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Spawn on: (ng2) datanode1, datanode4
+                     ->  Seq Scan on t1ng2 t2
+               ->  Materialize
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng1->ng2)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(13 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  1 |  1 |  6 |  1
+  2 |  2 |  2 |  2
+  2 |  2 |  7 |  2
+  3 |  3 |  3 |  3
+(5 rows)
+
+-- also verify distribution-key
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c1 = t2.c1;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode1, datanode4, datanode2, datanode3
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: (ng2) datanode1, datanode4
+         ->  Nested Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                     Spawn on: (ng2) datanode1, datanode4
+                     ->  Seq Scan on t1ng2 t2
+               ->  Materialize
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng1->ng2)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(13 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  6 |  1 |  1 |  1
+(5 rows)
+
+set expected_computing_nodegroup = 'ng3';
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2;
+                                                   QUERY PLAN                                                   
+----------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode1, datanode2, datanode3, datanode4, datanode5, datanode6, datanode7, datanode8
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: (ng3) datanode1, datanode2, datanode3, datanode4, datanode5, datanode6, datanode7, datanode8
+         ->  Nested Loop
+               Join Filter: (t1.c2 = t2.c2)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng2->ng3)
+                     Spawn on: (ng2) datanode1, datanode4
+                     ->  Seq Scan on t1ng2 t2
+               ->  Materialize
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng1->ng3)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(13 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  1 |  1 |  6 |  1
+  2 |  2 |  2 |  2
+  2 |  2 |  7 |  2
+  3 |  3 |  3 |  3
+(5 rows)
+
+-- also verify distribution-key
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c1 = t2.c1;
+                                                   QUERY PLAN                                                   
+----------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode1, datanode2, datanode3, datanode4, datanode5, datanode6, datanode7, datanode8
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: (ng3) datanode1, datanode2, datanode3, datanode4, datanode5, datanode6, datanode7, datanode8
+         ->  Nested Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng2->ng3)
+                     Spawn on: (ng2) datanode1, datanode4
+                     ->  Seq Scan on t1ng2 t2
+               ->  Materialize
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng1->ng3)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(13 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  6 |  1 |  1 |  1
+(5 rows)
+
+/* Verify Nestloop */
+set enable_hashjoin=off;
+set enable_mergejoin=off;
+set enable_nestloop=on;
+set expected_computing_nodegroup = 'group1';
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: All datanodes
+         ->  Nested Loop
+               Join Filter: (t1.c2 = t2.c2)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng2->group1)
+                     Spawn on: (ng2) datanode1, datanode4
+                     ->  Seq Scan on t1ng2 t2
+               ->  Materialize
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng1->group1)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(13 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  1 |  1 |  6 |  1
+  2 |  2 |  2 |  2
+  2 |  2 |  7 |  2
+  3 |  3 |  3 |  3
+(5 rows)
+
+-- also verify distribution-key
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c1 = t2.c1;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: All datanodes
+         ->  Nested Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng2->group1)
+                     Spawn on: (ng2) datanode1, datanode4
+                     ->  Seq Scan on t1ng2 t2
+               ->  Materialize
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng1->group1)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(13 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  6 |  1 |  1 |  1
+(5 rows)
+
+set expected_computing_nodegroup = 'ng1';
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode2, datanode3, datanode1, datanode4
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: (ng1) datanode2, datanode3
+         ->  Nested Loop
+               Join Filter: (t1.c2 = t2.c2)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng2->ng1)
+                     Spawn on: (ng2) datanode1, datanode4
+                     ->  Seq Scan on t1ng2 t2
+               ->  Materialize
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(13 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  1 |  1 |  6 |  1
+  2 |  2 |  2 |  2
+  2 |  2 |  7 |  2
+  3 |  3 |  3 |  3
+(5 rows)
+
+-- also verify distribution-key
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c1 = t2.c1;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode1, datanode4, datanode2, datanode3
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: (ng2) datanode1, datanode4
+         ->  Nested Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                     Spawn on: (ng2) datanode1, datanode4
+                     ->  Seq Scan on t1ng2 t2
+               ->  Materialize
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng1->ng2)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(13 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  6 |  1 |  1 |  1
+(5 rows)
+
+set expected_computing_nodegroup = 'ng2';
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode1, datanode4, datanode2, datanode3
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: (ng2) datanode1, datanode4
+         ->  Nested Loop
+               Join Filter: (t1.c2 = t2.c2)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Spawn on: (ng2) datanode1, datanode4
+                     ->  Seq Scan on t1ng2 t2
+               ->  Materialize
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng1->ng2)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(13 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  1 |  1 |  6 |  1
+  2 |  2 |  2 |  2
+  2 |  2 |  7 |  2
+  3 |  3 |  3 |  3
+(5 rows)
+
+-- also verify distribution-key
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c1 = t2.c1;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode1, datanode4, datanode2, datanode3
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: (ng2) datanode1, datanode4
+         ->  Nested Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                     Spawn on: (ng2) datanode1, datanode4
+                     ->  Seq Scan on t1ng2 t2
+               ->  Materialize
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng1->ng2)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(13 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  6 |  1 |  1 |  1
+(5 rows)
+
+set expected_computing_nodegroup = 'ng3';
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2;
+                                                   QUERY PLAN                                                   
+----------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode1, datanode2, datanode3, datanode4, datanode5, datanode6, datanode7, datanode8
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: (ng3) datanode1, datanode2, datanode3, datanode4, datanode5, datanode6, datanode7, datanode8
+         ->  Nested Loop
+               Join Filter: (t1.c2 = t2.c2)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng2->ng3)
+                     Spawn on: (ng2) datanode1, datanode4
+                     ->  Seq Scan on t1ng2 t2
+               ->  Materialize
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng1->ng3)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(13 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c2 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  1 |  1 |  6 |  1
+  2 |  2 |  2 |  2
+  2 |  2 |  7 |  2
+  3 |  3 |  3 |  3
+(5 rows)
+
+-- also verify distribution-key
+explain (costs off) select * from t1ng1 as t1, t1ng2 as t2 where t1.c1 = t2.c1;
+                                                   QUERY PLAN                                                   
+----------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode1, datanode2, datanode3, datanode4, datanode5, datanode6, datanode7, datanode8
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Spawn on: (ng3) datanode1, datanode2, datanode3, datanode4, datanode5, datanode6, datanode7, datanode8
+         ->  Nested Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng2->ng3)
+                     Spawn on: (ng2) datanode1, datanode4
+                     ->  Seq Scan on t1ng2 t2
+               ->  Materialize
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2 ng: ng1->ng3)
+                           Spawn on: (ng1) datanode2, datanode3
+                           ->  Seq Scan on t1ng1 t1
+(13 rows)
+
+select * from t1ng1 as t1, t1ng2 as t2 where t1.c2 = t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  6 |  1 |  1 |  1
+(5 rows)
+
+set expected_computing_nodegroup=optimal;
+select c1, count(c2) from t1ng1 group by 1 order by 1,2;
+ c1 | count 
+----+-------
+  1 |     1
+  2 |     1
+  3 |     1
+  4 |     1
+  5 |     1
+  6 |     1
+  7 |     1
+  8 |     1
+  9 |     1
+ 10 |     1
+(10 rows)
+
+drop table t1ng1;
+drop table t1ng2;
+reset expected_computing_nodegroup;
+drop node group ng1;
+drop node group ng2;
+drop node group ng3;
+drop schema nodegroup_multigroup_test cascade;
+reset query_dop;
+--end

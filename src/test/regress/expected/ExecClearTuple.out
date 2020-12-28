@@ -1,0 +1,4479 @@
+CREATE TABLE ExecClearTuple_1(a int, b int);
+INSERT INTO ExecClearTuple_1 SELECT generate_series(1,5), generate_series(1,5);
+analyze ExecClearTuple_1;
+WITH x AS
+(SELECT a, b FROM ExecClearTuple_1)
+SELECT 1 FROM ExecClearTuple_1 s 
+WHERE s.a not in 
+(SELECT a FROM x)
+OR EXISTS
+(SELECT 1 FROM x WHERE x.a=s.a)
+OR s.a >     
+(SELECT AVG(a) FROM x WHERE x.b=s.b);
+ ?column? 
+----------
+        1
+        1
+        1
+        1
+        1
+(5 rows)
+
+DROP TABLE ExecClearTuple_1 CASCADE;
+SELECT DISTINCT p1.proargtypes[0], p2.proargtypes[0]
+FROM pg_proc AS p1, pg_proc AS p2
+WHERE p1.oid != p2.oid AND
+    p1.prosrc = p2.prosrc AND
+    p1.prolang = 12 AND p2.prolang = 12 AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
+    p1.prosrc NOT LIKE E'RANGE\\_constructor_' AND
+    p2.prosrc NOT LIKE E'RANGE\\_constructor_' AND
+    (p1.proargtypes[0] < p2.proargtypes[0])
+ORDER BY 1, 2;
+ proargtypes | proargtypes 
+-------------+-------------
+          17 |          86
+          20 |          23
+          20 |        1082
+          20 |        1114
+          20 |        1184
+          20 |        1700
+          23 |        1082
+          23 |        1114
+          23 |        1184
+          23 |        1700
+          25 |        1042
+          25 |        1043
+        1082 |        1114
+        1082 |        1184
+        1082 |        1700
+        1114 |        1184
+        1114 |        1700
+        1184 |        1700
+        1560 |        1562
+        2277 |        2283
+(20 rows)
+
+SELECT p1.oid, p1.oprcode, p2.oid, p2.oprcode
+FROM pg_operator AS p1, pg_operator AS p2
+WHERE p1.oid != p2.oid AND
+    p1.oprname = p2.oprname AND
+    p1.oprkind = p2.oprkind AND
+    p1.oprleft = p2.oprleft AND
+    p1.oprright = p2.oprright
+ORDER BY 1, 2, 3;
+ oid | oprcode | oid | oprcode 
+-----+---------+-----+---------
+(0 rows)
+
+CREATE TABLE ExecClearTuple_2(a integer, b integer);
+SELECT  MIN(b) OVER (PARTITION BY b) FROM ExecClearTuple_2 GROUP BY b;
+ min 
+-----
+(0 rows)
+
+DROP TABLE ExecClearTuple_2 CASCADE;
+CREATE TABLE ExecClearTuple_3 (
+    col1 INT,
+    col2 INT,
+    col3 INT DEFAULT 1,
+--    col4 TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    col5 BIGSERIAL
+)  ;
+NOTICE:  CREATE TABLE will create implicit sequence "execcleartuple_3_col5_seq" for serial column "execcleartuple_3.col5"
+--- distribute KEY are not allowed to UPDATE
+INSERT INTO ExecClearTuple_3 VALUES (1, 2) ON DUPLICATE KEY UPDATE col1 = 3;
+--- should always insert
+INSERT INTO ExecClearTuple_3 VALUES (1, 2) ON DUPLICATE KEY UPDATE col2 = 3;
+INSERT INTO ExecClearTuple_3 VALUES (1, 2) ON DUPLICATE KEY UPDATE ExecClearTuple_3.col2 = 4;
+--- appoint column list in insert clause, should always insert
+INSERT INTO ExecClearTuple_3(col1, col3) VALUES (1, 3) ON DUPLICATE KEY UPDATE col2 = 5;
+INSERT INTO ExecClearTuple_3(col1, col3) VALUES (1, 3) ON DUPLICATE KEY UPDATE ExecClearTuple_3.col2 = 6;
+--- multiple rows, should always insert
+INSERT INTO ExecClearTuple_3 VALUES (2, 1), (2, 1) ON DUPLICATE KEY UPDATE col2 = 7, col3 = 7;
+(SELECT col1, col1 + col2 FROM ExecClearTuple_3 WHERE col2 IS NOT NULL
+    UNION
+    SELECT 1, 2)
+    INTERSECT
+    SELECT col1, col3 FROM ExecClearTuple_3;
+ col1 | ?column? 
+------+----------
+    1 |        3
+(1 row)
+
+DROP TABLE ExecClearTuple_3 CASCADE;
+CREATE SCHEMA sche1;
+CREATE SCHEMA sche2;
+CREATE TABLE sche1.t1(a int) /*distribute BY replication*/;
+SET search_path = sche2;
+CREATE OR REPLACE FUNCTION sche1.fun_001()
+RETURNS setof sche1.t1
+AS $$
+DECLARE
+        row_data t1%ROWTYPE;
+        row_name RECORD;
+        query_str text;
+        BEGIN
+                query_str := 'WITH t AS (
+				INSERT INTO t1 VALUES (11),(12),(13) RETURNING *
+			)
+			SELECT * FROM t ORDER BY 1;';
+                FOR row_data IN EXECUTE(query_str) LOOP
+                      RETURN NEXT row_data;
+                END LOOP;
+                RETURN;
+        END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+SELECT sche1.fun_001();
+ fun_001 
+---------
+ (11)
+ (12)
+ (13)
+(3 rows)
+
+DROP SCHEMA sche1 CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table sche1.t1
+drop cascades to function sche1.fun_001()
+DROP SCHEMA sche2 CASCADE;
+reset search_path;
+CREATE TABLE ExecClearTuple_4 (f1 abstime);
+START TRANSACTION;
+INSERT INTO ExecClearTuple_4 (f1) VALUES (abstime 'now');
+INSERT INTO ExecClearTuple_4 (f1) VALUES (abstime 'now');
+SELECT COUNT(*) AS two FROM ExecClearTuple_4 WHERE f1 = 'now' ;
+ two 
+-----
+   2
+(1 row)
+
+END;
+DELETE FROM ExecClearTuple_4;
+DROP TABLE ExecClearTuple_4 CASCADE;
+CREATE TYPE type_array AS (
+id int,
+name varchar(50),
+score decimal(5,2),
+create_time timestamp
+);
+CREATE TABLE ExecClearTuple_5(a serial, b type_array[])
+PARTITION BY RANGE (a)
+(PARTITION p1 VALUES LESS THAN(100),PARTITION p2 VALUES LESS THAN(maxvalue));
+NOTICE:  CREATE TABLE will create implicit sequence "execcleartuple_5_a_seq" for serial column "execcleartuple_5.a"
+INSERT INTO ExecClearTuple_5(b) VALUES('{}');
+INSERT INTO ExecClearTuple_5(b) VALUES(ARRAY[CAST((1,'test',12,'2018-01-01') AS type_array),CAST((2,'test2',212,'2018-02-01') AS type_array)]);
+analyze ExecClearTuple_5;
+UPDATE ExecClearTuple_5 SET b=ARRAY[CAST((1,'test',12,'2018-01-01') AS type_array),CAST((2,'test2',212,'2018-02-01') AS type_array)] WHERE b='{}';
+CREATE INDEX i_array ON ExecClearTuple_5(b) local;
+SELECT * FROM ExecClearTuple_5 WHERE b>ARRAY[CAST((0,'test',12,'') AS type_array),CAST((1,'test2',212,'') AS type_array)]
+ORDER BY 1,2;
+ a |                                                b                                                
+---+-------------------------------------------------------------------------------------------------
+ 1 | {"(1,test,12.00,\"Mon Jan 01 00:00:00 2018\")","(2,test2,212.00,\"Thu Feb 01 00:00:00 2018\")"}
+ 2 | {"(1,test,12.00,\"Mon Jan 01 00:00:00 2018\")","(2,test2,212.00,\"Thu Feb 01 00:00:00 2018\")"}
+(2 rows)
+
+alter TYPE type_array add attribute attr bool;
+SELECT b, LISTAGG(a, ',') WITHIN GROUP(ORDER BY b DESC)
+FROM ExecClearTuple_5 GROUP BY 1;
+                                                 b                                                 | listagg 
+---------------------------------------------------------------------------------------------------+---------
+ {"(1,test,12.00,\"Mon Jan 01 00:00:00 2018\",)","(2,test2,212.00,\"Thu Feb 01 00:00:00 2018\",)"} | 2,1
+(1 row)
+
+DROP TYPE type_array CASCADE;
+NOTICE:  drop cascades to table execcleartuple_5 column b
+DROP TABLE ExecClearTuple_5 CASCADE;
+CREATE TABLE ExecClearTuple_6(col1 int, col2 int, col3 text);
+CREATE INDEX iExecClearTuple_6 ON ExecClearTuple_6(col1,col2);
+INSERT INTO ExecClearTuple_6 VALUES (0,0,'test_insert');
+INSERT INTO ExecClearTuple_6 VALUES (0,1,'test_insert');
+INSERT INTO ExecClearTuple_6 VALUES (1,1,'test_insert');
+INSERT INTO ExecClearTuple_6 VALUES (1,2,'test_insert');
+INSERT INTO ExecClearTuple_6 VALUES (0,0,'test_insert2');
+INSERT INTO ExecClearTuple_6 VALUES (2,2,'test_insert2');
+INSERT INTO ExecClearTuple_6 VALUES (0,0,'test_insert3');
+INSERT INTO ExecClearTuple_6 VALUES (3,3,'test_insert3');
+INSERT INTO ExecClearTuple_6(col1,col2) VALUES (1,1);
+INSERT INTO ExecClearTuple_6(col1,col2) VALUES (2,2);
+INSERT INTO ExecClearTuple_6(col1,col2) VALUES (3,3);
+INSERT INTO ExecClearTuple_6 VALUES (null,null,null);
+SELECT col1,col2 FROM ExecClearTuple_6 WHERE col1=0 AND col2=0 ORDER BY col1,col2 for UPDATE LIMIT 1;
+ col1 | col2 
+------+------
+    0 |    0
+(1 row)
+
+-- DROP TABLE ExecClearTuple_6 CASCADE;
+DROP TABLE ExecClearTuple_6 CASCADE;
+CREATE TEMP TABLE ExecClearTuple_7 (s1 int);
+INSERT INTO ExecClearTuple_7 VALUES (42),(3),(10),(7),(null),(null),(1);
+CREATE INDEX Ei ON ExecClearTuple_7 (s1);
+SET enable_sort = FALSE;
+SELECT * FROM ExecClearTuple_7 ORDER BY s1;
+ s1 
+----
+  1
+  3
+  7
+ 10
+ 42
+   
+   
+(7 rows)
+
+DROP TABLE ExecClearTuple_7 CASCADE;
+SET current_schema=information_schema;
+CREATE TABLE ExecClearTuple_8(a int, b int);
+INSERT INTO ExecClearTuple_8 VALUES(1,2),(2,3),(3,4),(4,5);
+\d+ ExecClearTuple_8
+             Table "information_schema.execcleartuple_8"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ sql_features
+                        Table "information_schema.sql_features"
+      Column      |      Type      | Modifiers | Storage  | Stats target | Description 
+------------------+----------------+-----------+----------+--------------+-------------
+ feature_id       | character_data |           | extended |              | 
+ feature_name     | character_data |           | extended |              | 
+ sub_feature_id   | character_data |           | extended |              | 
+ sub_feature_name | character_data |           | extended |              | 
+ is_supported     | yes_or_no      |           | extended |              | 
+ is_verified_by   | character_data |           | extended |              | 
+ comments         | character_data |           | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+explain (verbose ON, costs OFF, nodes OFF) SELECT COUNT(*) FROM sql_features;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(*)
+   ->  Seq Scan on information_schema.sql_features
+         Output: feature_id, feature_name, sub_feature_id, sub_feature_name, is_supported, is_verified_by, comments
+(4 rows)
+
+SELECT COUNT(*) FROM sql_features;
+ count 
+-------
+   672
+(1 row)
+
+explain (verbose ON, costs OFF, nodes OFF) SELECT * FROM ExecClearTuple_8;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Seq Scan on information_schema.execcleartuple_8
+   Output: a, b
+(2 rows)
+
+SELECT COUNT(*) FROM ExecClearTuple_8;
+ count 
+-------
+     4
+(1 row)
+
+DROP TABLE ExecClearTuple_8;
+reset current_schema;
+CREATE TABLE ExecClearTuple_9(id int, name varchar2(20));
+INSERT INTO ExecClearTuple_9 VALUES(1,'x');
+INSERT INTO ExecClearTuple_9 VALUES(11,'xx');
+INSERT INTO ExecClearTuple_9 VALUES(111,'xxx');
+CREATE TABLE my_table( i int);
+INSERT INTO ExecClearTuple_9 VALUES(1);
+BEGIN;
+DECLARE foo cursor WITH hold for SELECT * FROM ExecClearTuple_9 WHERE id > 1;
+DECLARE foo1 cursor WITH hold for SELECT * FROM ExecClearTuple_9, my_table WHERE id != i;
+END;
+FETCH FROM foo;
+ id | name 
+----+------
+ 11 | xx
+(1 row)
+
+FETCH FROM foo1;
+ id | name | i 
+----+------+---
+(0 rows)
+
+CLOSE foo;
+CLOSE foo1;
+DROP TABLE ExecClearTuple_9 CASCADE;
+DROP TABLE my_table CASCADE;
+CREATE SCHEMA distribute_aggregates_part1;
+SET current_schema = distribute_aggregates_part1;
+-- prepare a temp TABLE for import data
+CREATE TABLE tmp_t1(c1 int);
+INSERT INTO tmp_t1 VALUES (1);
+-- Create Table AND Insert Data
+CREATE TABLE t_agg1(a int, b int, c int, d int, e int, f int, g regproc);
+CREATE TABLE t_agg2(a int, b int, c int);
+INSERT INTO t_agg1 SELECT generate_series(1, 10000), generate_series(1, 10000)%5000, generate_series(1, 10000)%500, generate_series(1, 10000)%5, 500, 3, 'sin' FROM tmp_t1;
+INSERT INTO t_agg2 SELECT generate_series(1, 10), generate_series(11, 2, -1), generate_series(3, 12);
+/*SELECT * FROM table_skewness('t_agg1', 'b,c') ORDER BY 1, 2, 3;*/
+analyze t_agg1;
+analyze t_agg2;
+explain (costs OFF, nodes OFF) SELECT b, d, MIN(c), RANK() OVER (PARTITION BY d ORDER BY d) FROM t_agg1 GROUP BY b, d;
+              QUERY PLAN              
+--------------------------------------
+ WindowAgg
+   ->  Sort
+         Sort Key: d
+         ->  HashAggregate
+               Group By Key: b, d
+               ->  Seq Scan on t_agg1
+(6 rows)
+
+SELECT b, d, MIN(c), RANK() OVER (PARTITION BY d ORDER BY d) FROM t_agg1 GROUP BY b, d ORDER BY b, d LIMIT 10;
+ b | d | min | rank 
+---+---+-----+------
+ 0 | 0 |   0 |    1
+ 1 | 1 |   1 |    1
+ 2 | 2 |   2 |    1
+ 3 | 3 |   3 |    1
+ 4 | 4 |   4 |    1
+ 5 | 0 |   5 |    1
+ 6 | 1 |   6 |    1
+ 7 | 2 |   7 |    1
+ 8 | 3 |   8 |    1
+ 9 | 4 |   9 |    1
+(10 rows)
+
+DROP TABLE tmp_t1 CASCADE;
+DROP TABLE t_agg1 CASCADE;
+DROP TABLE t_agg2 CASCADE;
+DROP SCHEMA distribute_aggregates_part1 CASCADE;
+reset current_schema;
+CREATE USER clstr_user PASSWORD 'gauss@123';
+CREATE TABLE clstr_1 (a INT PRIMARY KEY);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "clstr_1_pkey" for table "clstr_1"
+CREATE TABLE clstr_2 (a INT PRIMARY KEY);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "clstr_2_pkey" for table "clstr_2"
+CREATE TABLE clstr_3 (a INT PRIMARY KEY);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "clstr_3_pkey" for table "clstr_3"
+ALTER TABLE clstr_1 OWNER TO clstr_user;
+ALTER TABLE clstr_3 OWNER TO clstr_user;
+GRANT SELECT ON clstr_2 TO clstr_user;
+INSERT INTO clstr_1 VALUES (2);
+INSERT INTO clstr_1 VALUES (1);
+INSERT INTO clstr_2 VALUES (2);
+INSERT INTO clstr_2 VALUES (1);
+INSERT INTO clstr_3 VALUES (2);
+INSERT INTO clstr_3 VALUES (1);
+CLUSTER clstr_2;
+ERROR:  there is no previously clustered index for table "clstr_2"
+CLUSTER clstr_1_pkey ON clstr_1;
+CLUSTER clstr_2 USING clstr_2_pkey;
+SELECT * FROM clstr_1 UNION ALL
+  SELECT * FROM clstr_2 UNION ALL
+  SELECT * FROM clstr_3
+  ORDER BY 1;
+ a 
+---
+ 1
+ 1
+ 1
+ 2
+ 2
+ 2
+(6 rows)
+
+DROP TABLE clstr_1 CASCADE;
+DROP TABLE clstr_2 CASCADE;
+DROP TABLE clstr_3 CASCADE;
+DROP user clstr_user CASCADE;
+CREATE TABLE clustertest (KEY int PRIMARY KEY);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "clustertest_pkey" for table "clustertest"
+INSERT INTO clustertest VALUES (10);
+INSERT INTO clustertest VALUES (20);
+INSERT INTO clustertest VALUES (30);
+INSERT INTO clustertest VALUES (40);
+INSERT INTO clustertest VALUES (50);
+-- Test UPDATE WHERE the old row version is found first in the scan
+UPDATE clustertest SET KEY = 100 WHERE KEY = 10;
+-- Test UPDATE WHERE the new row version is found first in the scan
+UPDATE clustertest SET KEY = 35 WHERE KEY = 40;
+-- Test longer UPDATE chain
+UPDATE clustertest SET KEY = 60 WHERE KEY = 50;
+UPDATE clustertest SET KEY = 70 WHERE KEY = 60;
+UPDATE clustertest SET KEY = 80 WHERE KEY = 70;
+DROP TABLE clustertest CASCADE;
+CREATE TABLE tmp_t1(c1 int);
+INSERT INTO tmp_t1 VALUES (1);
+CREATE TABLE t_distinct1(a int, b int, c int, d int, e regproc);
+INSERT INTO t_distinct1 SELECT generate_series(1, 10000), generate_series(1, 10000)%20, generate_series(1, 10000)%20, generate_series(1, 10000)%1000, 'sin' FROM tmp_t1;
+analyze t_distinct1;
+explain (verbose ON, costs OFF, nodes OFF) SELECT AVG(a::numeric(7, 2)) OVER(PARTITION BY b, d) FROM t_distinct1;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ WindowAgg
+   Output: avg((a)::numeric(7,2)) OVER (PARTITION BY b, d), b, d
+   ->  Sort
+         Output: b, d, a
+         Sort Key: t_distinct1.b, t_distinct1.d
+         ->  Seq Scan on public.t_distinct1
+               Output: b, d, a
+(7 rows)
+
+SELECT AVG(a::numeric(7, 2)) OVER(PARTITION BY b, d) FROM t_distinct1 ORDER BY 1 DESC LIMIT 10;
+          avg          
+-----------------------
+ 5500.0000000000000000
+ 5500.0000000000000000
+ 5500.0000000000000000
+ 5500.0000000000000000
+ 5500.0000000000000000
+ 5500.0000000000000000
+ 5500.0000000000000000
+ 5500.0000000000000000
+ 5500.0000000000000000
+ 5500.0000000000000000
+(10 rows)
+
+DROP TABLE tmp_t1 CASCADE;
+DROP TABLE t_distinct1 CASCADE;
+CREATE SCHEMA distribute_dml_ExecClearTuple;
+SET current_schema = distribute_dml_ExecClearTuple;
+CREATE TABLE src(a int);
+INSERT INTO src VALUES(1);
+CREATE TABLE distribute_source_replication_01(c1 int, c2 int, c3 char(10));
+INSERT INTO distribute_source_replication_01 SELECT generate_series(500,1000,8), generate_series(500,1000,8), 'row'|| generate_series(1,100) FROM src;
+analyze distribute_source_replication_01;
+explain (verbose ON, costs OFF, nodes OFF)  SELECT * FROM  distribute_source_replication_01 WHERE ctid='(0,1)';
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Tid Scan on distribute_dml_execcleartuple.distribute_source_replication_01
+   Output: c1, c2, c3
+   TID Cond: (distribute_source_replication_01.ctid = '(0,1)'::tid)
+(3 rows)
+
+explain (verbose ON, costs OFF, nodes OFF) SELECT * FROM pg_class  WHERE ctid='(0,1)';
+                                                                                                                                                                                                                                                        QUERY PLAN                                                                                                                                                                                                                                                        
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Tid Scan on pg_catalog.pg_class
+   Output: relname, relnamespace, reltype, reloftype, relowner, relam, relfilenode, reltablespace, relpages, reltuples, relallvisible, reltoastrelid, reltoastidxid, reldeltarelid, reldeltaidx, relcudescrelid, relcudescidx, relhasindex, relisshared, relpersistence, relkind, relnatts, relchecks, relhasoids, relhaspkey, relhasrules, relhastriggers, relhassubclass, relcmprs, relhasclusterkey, relrowmovement, parttype, relfrozenxid, relacl, reloptions, relreplident, relfrozenxid64, relbucket, relbucketkey
+   TID Cond: (pg_class.ctid = '(0,1)'::tid)
+(3 rows)
+
+DROP TABLE src CASCADE;
+DROP TABLE distribute_source_replication_01 CASCADE;
+DROP SCHEMA distribute_dml_ExecClearTuple CASCADE;
+reset current_schema;
+CREATE TEMP TABLE ExecClearTuple_10 AS
+SELECT t.seq_scan, t.seq_tup_read, t.idx_scan, t.idx_tup_fetch,
+       (b.heap_blks_read + b.heap_blks_hit) AS heap_blks,
+       (b.idx_blks_read + b.idx_blks_hit) AS idx_blks
+  FROM pg_catalog.pg_stat_user_tables AS t,
+       pg_catalog.pg_statio_user_tables AS b
+ WHERE t.relname='tenk2' AND b.relname='tenk2';
+DROP TABLE ExecClearTuple_10 CASCADE;
+CREATE TABLE t1(a int, b int);
+CREATE TABLE t2(j int, k int);
+CREATE TABLE t3(x int, y int);
+INSERT INTO t1 VALUES(1,1);
+INSERT INTO t1 VALUES(1,1);
+INSERT INTO t1 VALUES(100,100);
+INSERT INTO t1 VALUES(200,200);
+INSERT INTO t1 VALUES(200,200);
+INSERT INTO t1 VALUES(121,121);
+INSERT INTO t1 VALUES(122,122);
+INSERT INTO t1 VALUES(122,122);
+INSERT INTO t1 VALUES(131,131);
+INSERT INTO t1 VALUES(132,132);
+INSERT INTO t1 VALUES(132,132);
+INSERT INTO t2 VALUES(2,2);
+INSERT INTO t2 VALUES(2,2);
+INSERT INTO t2 VALUES(100,100);
+INSERT INTO t2 VALUES(200,200);
+INSERT INTO t2 VALUES(200,200);
+INSERT INTO t2 VALUES(121,121);
+INSERT INTO t2 VALUES(122,122);
+INSERT INTO t2 VALUES(122,122);
+INSERT INTO t2 VALUES(231,231);
+INSERT INTO t2 VALUES(232,232);
+INSERT INTO t2 VALUES(232,232);
+INSERT INTO t3 VALUES(3,3);
+INSERT INTO t3 VALUES(3,3);
+INSERT INTO t3 VALUES(100,100);
+INSERT INTO t3 VALUES(200,200);
+INSERT INTO t3 VALUES(200,200);
+INSERT INTO t3 VALUES(232,232);
+INSERT INTO t3 VALUES(232,232);
+INSERT INTO t3 VALUES(131,131);
+INSERT INTO t3 VALUES(132,132);
+INSERT INTO t3 VALUES(132,132);
+SET enable_nestloop=ON;
+SET enable_hashjoin=OFF;
+SET enable_mergejoin=OFF;	
+SELECT * FROM t1 LEFT JOIN t2 FULL JOIN t3 ON 1=1 ON 1=1 ORDER BY 1,2,3,4,5,6;
+  a  |  b  |  j  |  k  |  x  |  y  
+-----+-----+-----+-----+-----+-----
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 | 100 | 100
+   1 |   1 |   2 |   2 | 100 | 100
+   1 |   1 |   2 |   2 | 100 | 100
+   1 |   1 |   2 |   2 | 100 | 100
+   1 |   1 |   2 |   2 | 131 | 131
+   1 |   1 |   2 |   2 | 131 | 131
+   1 |   1 |   2 |   2 | 131 | 131
+   1 |   1 |   2 |   2 | 131 | 131
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 | 100 | 100 |   3 |   3
+   1 |   1 | 100 | 100 |   3 |   3
+   1 |   1 | 100 | 100 |   3 |   3
+   1 |   1 | 100 | 100 |   3 |   3
+   1 |   1 | 100 | 100 | 100 | 100
+   1 |   1 | 100 | 100 | 100 | 100
+   1 |   1 | 100 | 100 | 131 | 131
+   1 |   1 | 100 | 100 | 131 | 131
+   1 |   1 | 100 | 100 | 132 | 132
+   1 |   1 | 100 | 100 | 132 | 132
+   1 |   1 | 100 | 100 | 132 | 132
+   1 |   1 | 100 | 100 | 132 | 132
+   1 |   1 | 100 | 100 | 200 | 200
+   1 |   1 | 100 | 100 | 200 | 200
+   1 |   1 | 100 | 100 | 200 | 200
+   1 |   1 | 100 | 100 | 200 | 200
+   1 |   1 | 100 | 100 | 232 | 232
+   1 |   1 | 100 | 100 | 232 | 232
+   1 |   1 | 100 | 100 | 232 | 232
+   1 |   1 | 100 | 100 | 232 | 232
+   1 |   1 | 121 | 121 |   3 |   3
+   1 |   1 | 121 | 121 |   3 |   3
+   1 |   1 | 121 | 121 |   3 |   3
+   1 |   1 | 121 | 121 |   3 |   3
+   1 |   1 | 121 | 121 | 100 | 100
+   1 |   1 | 121 | 121 | 100 | 100
+   1 |   1 | 121 | 121 | 131 | 131
+   1 |   1 | 121 | 121 | 131 | 131
+   1 |   1 | 121 | 121 | 132 | 132
+   1 |   1 | 121 | 121 | 132 | 132
+   1 |   1 | 121 | 121 | 132 | 132
+   1 |   1 | 121 | 121 | 132 | 132
+   1 |   1 | 121 | 121 | 200 | 200
+   1 |   1 | 121 | 121 | 200 | 200
+   1 |   1 | 121 | 121 | 200 | 200
+   1 |   1 | 121 | 121 | 200 | 200
+   1 |   1 | 121 | 121 | 232 | 232
+   1 |   1 | 121 | 121 | 232 | 232
+   1 |   1 | 121 | 121 | 232 | 232
+   1 |   1 | 121 | 121 | 232 | 232
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 | 100 | 100
+   1 |   1 | 122 | 122 | 100 | 100
+   1 |   1 | 122 | 122 | 100 | 100
+   1 |   1 | 122 | 122 | 100 | 100
+   1 |   1 | 122 | 122 | 131 | 131
+   1 |   1 | 122 | 122 | 131 | 131
+   1 |   1 | 122 | 122 | 131 | 131
+   1 |   1 | 122 | 122 | 131 | 131
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 | 100 | 100
+   1 |   1 | 200 | 200 | 100 | 100
+   1 |   1 | 200 | 200 | 100 | 100
+   1 |   1 | 200 | 200 | 100 | 100
+   1 |   1 | 200 | 200 | 131 | 131
+   1 |   1 | 200 | 200 | 131 | 131
+   1 |   1 | 200 | 200 | 131 | 131
+   1 |   1 | 200 | 200 | 131 | 131
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 231 | 231 |   3 |   3
+   1 |   1 | 231 | 231 |   3 |   3
+   1 |   1 | 231 | 231 |   3 |   3
+   1 |   1 | 231 | 231 |   3 |   3
+   1 |   1 | 231 | 231 | 100 | 100
+   1 |   1 | 231 | 231 | 100 | 100
+   1 |   1 | 231 | 231 | 131 | 131
+   1 |   1 | 231 | 231 | 131 | 131
+   1 |   1 | 231 | 231 | 132 | 132
+   1 |   1 | 231 | 231 | 132 | 132
+   1 |   1 | 231 | 231 | 132 | 132
+   1 |   1 | 231 | 231 | 132 | 132
+   1 |   1 | 231 | 231 | 200 | 200
+   1 |   1 | 231 | 231 | 200 | 200
+   1 |   1 | 231 | 231 | 200 | 200
+   1 |   1 | 231 | 231 | 200 | 200
+   1 |   1 | 231 | 231 | 232 | 232
+   1 |   1 | 231 | 231 | 232 | 232
+   1 |   1 | 231 | 231 | 232 | 232
+   1 |   1 | 231 | 231 | 232 | 232
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 | 100 | 100
+   1 |   1 | 232 | 232 | 100 | 100
+   1 |   1 | 232 | 232 | 100 | 100
+   1 |   1 | 232 | 232 | 100 | 100
+   1 |   1 | 232 | 232 | 131 | 131
+   1 |   1 | 232 | 232 | 131 | 131
+   1 |   1 | 232 | 232 | 131 | 131
+   1 |   1 | 232 | 232 | 131 | 131
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+ 100 | 100 |   2 |   2 |   3 |   3
+ 100 | 100 |   2 |   2 |   3 |   3
+ 100 | 100 |   2 |   2 |   3 |   3
+ 100 | 100 |   2 |   2 |   3 |   3
+ 100 | 100 |   2 |   2 | 100 | 100
+ 100 | 100 |   2 |   2 | 100 | 100
+ 100 | 100 |   2 |   2 | 131 | 131
+ 100 | 100 |   2 |   2 | 131 | 131
+ 100 | 100 |   2 |   2 | 132 | 132
+ 100 | 100 |   2 |   2 | 132 | 132
+ 100 | 100 |   2 |   2 | 132 | 132
+ 100 | 100 |   2 |   2 | 132 | 132
+ 100 | 100 |   2 |   2 | 200 | 200
+ 100 | 100 |   2 |   2 | 200 | 200
+ 100 | 100 |   2 |   2 | 200 | 200
+ 100 | 100 |   2 |   2 | 200 | 200
+ 100 | 100 |   2 |   2 | 232 | 232
+ 100 | 100 |   2 |   2 | 232 | 232
+ 100 | 100 |   2 |   2 | 232 | 232
+ 100 | 100 |   2 |   2 | 232 | 232
+ 100 | 100 | 100 | 100 |   3 |   3
+ 100 | 100 | 100 | 100 |   3 |   3
+ 100 | 100 | 100 | 100 | 100 | 100
+ 100 | 100 | 100 | 100 | 131 | 131
+ 100 | 100 | 100 | 100 | 132 | 132
+ 100 | 100 | 100 | 100 | 132 | 132
+ 100 | 100 | 100 | 100 | 200 | 200
+ 100 | 100 | 100 | 100 | 200 | 200
+ 100 | 100 | 100 | 100 | 232 | 232
+ 100 | 100 | 100 | 100 | 232 | 232
+ 100 | 100 | 121 | 121 |   3 |   3
+ 100 | 100 | 121 | 121 |   3 |   3
+ 100 | 100 | 121 | 121 | 100 | 100
+ 100 | 100 | 121 | 121 | 131 | 131
+ 100 | 100 | 121 | 121 | 132 | 132
+ 100 | 100 | 121 | 121 | 132 | 132
+ 100 | 100 | 121 | 121 | 200 | 200
+ 100 | 100 | 121 | 121 | 200 | 200
+ 100 | 100 | 121 | 121 | 232 | 232
+ 100 | 100 | 121 | 121 | 232 | 232
+ 100 | 100 | 122 | 122 |   3 |   3
+ 100 | 100 | 122 | 122 |   3 |   3
+ 100 | 100 | 122 | 122 |   3 |   3
+ 100 | 100 | 122 | 122 |   3 |   3
+ 100 | 100 | 122 | 122 | 100 | 100
+ 100 | 100 | 122 | 122 | 100 | 100
+ 100 | 100 | 122 | 122 | 131 | 131
+ 100 | 100 | 122 | 122 | 131 | 131
+ 100 | 100 | 122 | 122 | 132 | 132
+ 100 | 100 | 122 | 122 | 132 | 132
+ 100 | 100 | 122 | 122 | 132 | 132
+ 100 | 100 | 122 | 122 | 132 | 132
+ 100 | 100 | 122 | 122 | 200 | 200
+ 100 | 100 | 122 | 122 | 200 | 200
+ 100 | 100 | 122 | 122 | 200 | 200
+ 100 | 100 | 122 | 122 | 200 | 200
+ 100 | 100 | 122 | 122 | 232 | 232
+ 100 | 100 | 122 | 122 | 232 | 232
+ 100 | 100 | 122 | 122 | 232 | 232
+ 100 | 100 | 122 | 122 | 232 | 232
+ 100 | 100 | 200 | 200 |   3 |   3
+ 100 | 100 | 200 | 200 |   3 |   3
+ 100 | 100 | 200 | 200 |   3 |   3
+ 100 | 100 | 200 | 200 |   3 |   3
+ 100 | 100 | 200 | 200 | 100 | 100
+ 100 | 100 | 200 | 200 | 100 | 100
+ 100 | 100 | 200 | 200 | 131 | 131
+ 100 | 100 | 200 | 200 | 131 | 131
+ 100 | 100 | 200 | 200 | 132 | 132
+ 100 | 100 | 200 | 200 | 132 | 132
+ 100 | 100 | 200 | 200 | 132 | 132
+ 100 | 100 | 200 | 200 | 132 | 132
+ 100 | 100 | 200 | 200 | 200 | 200
+ 100 | 100 | 200 | 200 | 200 | 200
+ 100 | 100 | 200 | 200 | 200 | 200
+ 100 | 100 | 200 | 200 | 200 | 200
+ 100 | 100 | 200 | 200 | 232 | 232
+ 100 | 100 | 200 | 200 | 232 | 232
+ 100 | 100 | 200 | 200 | 232 | 232
+ 100 | 100 | 200 | 200 | 232 | 232
+ 100 | 100 | 231 | 231 |   3 |   3
+ 100 | 100 | 231 | 231 |   3 |   3
+ 100 | 100 | 231 | 231 | 100 | 100
+ 100 | 100 | 231 | 231 | 131 | 131
+ 100 | 100 | 231 | 231 | 132 | 132
+ 100 | 100 | 231 | 231 | 132 | 132
+ 100 | 100 | 231 | 231 | 200 | 200
+ 100 | 100 | 231 | 231 | 200 | 200
+ 100 | 100 | 231 | 231 | 232 | 232
+ 100 | 100 | 231 | 231 | 232 | 232
+ 100 | 100 | 232 | 232 |   3 |   3
+ 100 | 100 | 232 | 232 |   3 |   3
+ 100 | 100 | 232 | 232 |   3 |   3
+ 100 | 100 | 232 | 232 |   3 |   3
+ 100 | 100 | 232 | 232 | 100 | 100
+ 100 | 100 | 232 | 232 | 100 | 100
+ 100 | 100 | 232 | 232 | 131 | 131
+ 100 | 100 | 232 | 232 | 131 | 131
+ 100 | 100 | 232 | 232 | 132 | 132
+ 100 | 100 | 232 | 232 | 132 | 132
+ 100 | 100 | 232 | 232 | 132 | 132
+ 100 | 100 | 232 | 232 | 132 | 132
+ 100 | 100 | 232 | 232 | 200 | 200
+ 100 | 100 | 232 | 232 | 200 | 200
+ 100 | 100 | 232 | 232 | 200 | 200
+ 100 | 100 | 232 | 232 | 200 | 200
+ 100 | 100 | 232 | 232 | 232 | 232
+ 100 | 100 | 232 | 232 | 232 | 232
+ 100 | 100 | 232 | 232 | 232 | 232
+ 100 | 100 | 232 | 232 | 232 | 232
+ 121 | 121 |   2 |   2 |   3 |   3
+ 121 | 121 |   2 |   2 |   3 |   3
+ 121 | 121 |   2 |   2 |   3 |   3
+ 121 | 121 |   2 |   2 |   3 |   3
+ 121 | 121 |   2 |   2 | 100 | 100
+ 121 | 121 |   2 |   2 | 100 | 100
+ 121 | 121 |   2 |   2 | 131 | 131
+ 121 | 121 |   2 |   2 | 131 | 131
+ 121 | 121 |   2 |   2 | 132 | 132
+ 121 | 121 |   2 |   2 | 132 | 132
+ 121 | 121 |   2 |   2 | 132 | 132
+ 121 | 121 |   2 |   2 | 132 | 132
+ 121 | 121 |   2 |   2 | 200 | 200
+ 121 | 121 |   2 |   2 | 200 | 200
+ 121 | 121 |   2 |   2 | 200 | 200
+ 121 | 121 |   2 |   2 | 200 | 200
+ 121 | 121 |   2 |   2 | 232 | 232
+ 121 | 121 |   2 |   2 | 232 | 232
+ 121 | 121 |   2 |   2 | 232 | 232
+ 121 | 121 |   2 |   2 | 232 | 232
+ 121 | 121 | 100 | 100 |   3 |   3
+ 121 | 121 | 100 | 100 |   3 |   3
+ 121 | 121 | 100 | 100 | 100 | 100
+ 121 | 121 | 100 | 100 | 131 | 131
+ 121 | 121 | 100 | 100 | 132 | 132
+ 121 | 121 | 100 | 100 | 132 | 132
+ 121 | 121 | 100 | 100 | 200 | 200
+ 121 | 121 | 100 | 100 | 200 | 200
+ 121 | 121 | 100 | 100 | 232 | 232
+ 121 | 121 | 100 | 100 | 232 | 232
+ 121 | 121 | 121 | 121 |   3 |   3
+ 121 | 121 | 121 | 121 |   3 |   3
+ 121 | 121 | 121 | 121 | 100 | 100
+ 121 | 121 | 121 | 121 | 131 | 131
+ 121 | 121 | 121 | 121 | 132 | 132
+ 121 | 121 | 121 | 121 | 132 | 132
+ 121 | 121 | 121 | 121 | 200 | 200
+ 121 | 121 | 121 | 121 | 200 | 200
+ 121 | 121 | 121 | 121 | 232 | 232
+ 121 | 121 | 121 | 121 | 232 | 232
+ 121 | 121 | 122 | 122 |   3 |   3
+ 121 | 121 | 122 | 122 |   3 |   3
+ 121 | 121 | 122 | 122 |   3 |   3
+ 121 | 121 | 122 | 122 |   3 |   3
+ 121 | 121 | 122 | 122 | 100 | 100
+ 121 | 121 | 122 | 122 | 100 | 100
+ 121 | 121 | 122 | 122 | 131 | 131
+ 121 | 121 | 122 | 122 | 131 | 131
+ 121 | 121 | 122 | 122 | 132 | 132
+ 121 | 121 | 122 | 122 | 132 | 132
+ 121 | 121 | 122 | 122 | 132 | 132
+ 121 | 121 | 122 | 122 | 132 | 132
+ 121 | 121 | 122 | 122 | 200 | 200
+ 121 | 121 | 122 | 122 | 200 | 200
+ 121 | 121 | 122 | 122 | 200 | 200
+ 121 | 121 | 122 | 122 | 200 | 200
+ 121 | 121 | 122 | 122 | 232 | 232
+ 121 | 121 | 122 | 122 | 232 | 232
+ 121 | 121 | 122 | 122 | 232 | 232
+ 121 | 121 | 122 | 122 | 232 | 232
+ 121 | 121 | 200 | 200 |   3 |   3
+ 121 | 121 | 200 | 200 |   3 |   3
+ 121 | 121 | 200 | 200 |   3 |   3
+ 121 | 121 | 200 | 200 |   3 |   3
+ 121 | 121 | 200 | 200 | 100 | 100
+ 121 | 121 | 200 | 200 | 100 | 100
+ 121 | 121 | 200 | 200 | 131 | 131
+ 121 | 121 | 200 | 200 | 131 | 131
+ 121 | 121 | 200 | 200 | 132 | 132
+ 121 | 121 | 200 | 200 | 132 | 132
+ 121 | 121 | 200 | 200 | 132 | 132
+ 121 | 121 | 200 | 200 | 132 | 132
+ 121 | 121 | 200 | 200 | 200 | 200
+ 121 | 121 | 200 | 200 | 200 | 200
+ 121 | 121 | 200 | 200 | 200 | 200
+ 121 | 121 | 200 | 200 | 200 | 200
+ 121 | 121 | 200 | 200 | 232 | 232
+ 121 | 121 | 200 | 200 | 232 | 232
+ 121 | 121 | 200 | 200 | 232 | 232
+ 121 | 121 | 200 | 200 | 232 | 232
+ 121 | 121 | 231 | 231 |   3 |   3
+ 121 | 121 | 231 | 231 |   3 |   3
+ 121 | 121 | 231 | 231 | 100 | 100
+ 121 | 121 | 231 | 231 | 131 | 131
+ 121 | 121 | 231 | 231 | 132 | 132
+ 121 | 121 | 231 | 231 | 132 | 132
+ 121 | 121 | 231 | 231 | 200 | 200
+ 121 | 121 | 231 | 231 | 200 | 200
+ 121 | 121 | 231 | 231 | 232 | 232
+ 121 | 121 | 231 | 231 | 232 | 232
+ 121 | 121 | 232 | 232 |   3 |   3
+ 121 | 121 | 232 | 232 |   3 |   3
+ 121 | 121 | 232 | 232 |   3 |   3
+ 121 | 121 | 232 | 232 |   3 |   3
+ 121 | 121 | 232 | 232 | 100 | 100
+ 121 | 121 | 232 | 232 | 100 | 100
+ 121 | 121 | 232 | 232 | 131 | 131
+ 121 | 121 | 232 | 232 | 131 | 131
+ 121 | 121 | 232 | 232 | 132 | 132
+ 121 | 121 | 232 | 232 | 132 | 132
+ 121 | 121 | 232 | 232 | 132 | 132
+ 121 | 121 | 232 | 232 | 132 | 132
+ 121 | 121 | 232 | 232 | 200 | 200
+ 121 | 121 | 232 | 232 | 200 | 200
+ 121 | 121 | 232 | 232 | 200 | 200
+ 121 | 121 | 232 | 232 | 200 | 200
+ 121 | 121 | 232 | 232 | 232 | 232
+ 121 | 121 | 232 | 232 | 232 | 232
+ 121 | 121 | 232 | 232 | 232 | 232
+ 121 | 121 | 232 | 232 | 232 | 232
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 | 100 | 100
+ 122 | 122 |   2 |   2 | 100 | 100
+ 122 | 122 |   2 |   2 | 100 | 100
+ 122 | 122 |   2 |   2 | 100 | 100
+ 122 | 122 |   2 |   2 | 131 | 131
+ 122 | 122 |   2 |   2 | 131 | 131
+ 122 | 122 |   2 |   2 | 131 | 131
+ 122 | 122 |   2 |   2 | 131 | 131
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 | 100 | 100 |   3 |   3
+ 122 | 122 | 100 | 100 |   3 |   3
+ 122 | 122 | 100 | 100 |   3 |   3
+ 122 | 122 | 100 | 100 |   3 |   3
+ 122 | 122 | 100 | 100 | 100 | 100
+ 122 | 122 | 100 | 100 | 100 | 100
+ 122 | 122 | 100 | 100 | 131 | 131
+ 122 | 122 | 100 | 100 | 131 | 131
+ 122 | 122 | 100 | 100 | 132 | 132
+ 122 | 122 | 100 | 100 | 132 | 132
+ 122 | 122 | 100 | 100 | 132 | 132
+ 122 | 122 | 100 | 100 | 132 | 132
+ 122 | 122 | 100 | 100 | 200 | 200
+ 122 | 122 | 100 | 100 | 200 | 200
+ 122 | 122 | 100 | 100 | 200 | 200
+ 122 | 122 | 100 | 100 | 200 | 200
+ 122 | 122 | 100 | 100 | 232 | 232
+ 122 | 122 | 100 | 100 | 232 | 232
+ 122 | 122 | 100 | 100 | 232 | 232
+ 122 | 122 | 100 | 100 | 232 | 232
+ 122 | 122 | 121 | 121 |   3 |   3
+ 122 | 122 | 121 | 121 |   3 |   3
+ 122 | 122 | 121 | 121 |   3 |   3
+ 122 | 122 | 121 | 121 |   3 |   3
+ 122 | 122 | 121 | 121 | 100 | 100
+ 122 | 122 | 121 | 121 | 100 | 100
+ 122 | 122 | 121 | 121 | 131 | 131
+ 122 | 122 | 121 | 121 | 131 | 131
+ 122 | 122 | 121 | 121 | 132 | 132
+ 122 | 122 | 121 | 121 | 132 | 132
+ 122 | 122 | 121 | 121 | 132 | 132
+ 122 | 122 | 121 | 121 | 132 | 132
+ 122 | 122 | 121 | 121 | 200 | 200
+ 122 | 122 | 121 | 121 | 200 | 200
+ 122 | 122 | 121 | 121 | 200 | 200
+ 122 | 122 | 121 | 121 | 200 | 200
+ 122 | 122 | 121 | 121 | 232 | 232
+ 122 | 122 | 121 | 121 | 232 | 232
+ 122 | 122 | 121 | 121 | 232 | 232
+ 122 | 122 | 121 | 121 | 232 | 232
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 | 100 | 100
+ 122 | 122 | 122 | 122 | 100 | 100
+ 122 | 122 | 122 | 122 | 100 | 100
+ 122 | 122 | 122 | 122 | 100 | 100
+ 122 | 122 | 122 | 122 | 131 | 131
+ 122 | 122 | 122 | 122 | 131 | 131
+ 122 | 122 | 122 | 122 | 131 | 131
+ 122 | 122 | 122 | 122 | 131 | 131
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 | 100 | 100
+ 122 | 122 | 200 | 200 | 100 | 100
+ 122 | 122 | 200 | 200 | 100 | 100
+ 122 | 122 | 200 | 200 | 100 | 100
+ 122 | 122 | 200 | 200 | 131 | 131
+ 122 | 122 | 200 | 200 | 131 | 131
+ 122 | 122 | 200 | 200 | 131 | 131
+ 122 | 122 | 200 | 200 | 131 | 131
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 231 | 231 |   3 |   3
+ 122 | 122 | 231 | 231 |   3 |   3
+ 122 | 122 | 231 | 231 |   3 |   3
+ 122 | 122 | 231 | 231 |   3 |   3
+ 122 | 122 | 231 | 231 | 100 | 100
+ 122 | 122 | 231 | 231 | 100 | 100
+ 122 | 122 | 231 | 231 | 131 | 131
+ 122 | 122 | 231 | 231 | 131 | 131
+ 122 | 122 | 231 | 231 | 132 | 132
+ 122 | 122 | 231 | 231 | 132 | 132
+ 122 | 122 | 231 | 231 | 132 | 132
+ 122 | 122 | 231 | 231 | 132 | 132
+ 122 | 122 | 231 | 231 | 200 | 200
+ 122 | 122 | 231 | 231 | 200 | 200
+ 122 | 122 | 231 | 231 | 200 | 200
+ 122 | 122 | 231 | 231 | 200 | 200
+ 122 | 122 | 231 | 231 | 232 | 232
+ 122 | 122 | 231 | 231 | 232 | 232
+ 122 | 122 | 231 | 231 | 232 | 232
+ 122 | 122 | 231 | 231 | 232 | 232
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 | 100 | 100
+ 122 | 122 | 232 | 232 | 100 | 100
+ 122 | 122 | 232 | 232 | 100 | 100
+ 122 | 122 | 232 | 232 | 100 | 100
+ 122 | 122 | 232 | 232 | 131 | 131
+ 122 | 122 | 232 | 232 | 131 | 131
+ 122 | 122 | 232 | 232 | 131 | 131
+ 122 | 122 | 232 | 232 | 131 | 131
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 131 | 131 |   2 |   2 |   3 |   3
+ 131 | 131 |   2 |   2 |   3 |   3
+ 131 | 131 |   2 |   2 |   3 |   3
+ 131 | 131 |   2 |   2 |   3 |   3
+ 131 | 131 |   2 |   2 | 100 | 100
+ 131 | 131 |   2 |   2 | 100 | 100
+ 131 | 131 |   2 |   2 | 131 | 131
+ 131 | 131 |   2 |   2 | 131 | 131
+ 131 | 131 |   2 |   2 | 132 | 132
+ 131 | 131 |   2 |   2 | 132 | 132
+ 131 | 131 |   2 |   2 | 132 | 132
+ 131 | 131 |   2 |   2 | 132 | 132
+ 131 | 131 |   2 |   2 | 200 | 200
+ 131 | 131 |   2 |   2 | 200 | 200
+ 131 | 131 |   2 |   2 | 200 | 200
+ 131 | 131 |   2 |   2 | 200 | 200
+ 131 | 131 |   2 |   2 | 232 | 232
+ 131 | 131 |   2 |   2 | 232 | 232
+ 131 | 131 |   2 |   2 | 232 | 232
+ 131 | 131 |   2 |   2 | 232 | 232
+ 131 | 131 | 100 | 100 |   3 |   3
+ 131 | 131 | 100 | 100 |   3 |   3
+ 131 | 131 | 100 | 100 | 100 | 100
+ 131 | 131 | 100 | 100 | 131 | 131
+ 131 | 131 | 100 | 100 | 132 | 132
+ 131 | 131 | 100 | 100 | 132 | 132
+ 131 | 131 | 100 | 100 | 200 | 200
+ 131 | 131 | 100 | 100 | 200 | 200
+ 131 | 131 | 100 | 100 | 232 | 232
+ 131 | 131 | 100 | 100 | 232 | 232
+ 131 | 131 | 121 | 121 |   3 |   3
+ 131 | 131 | 121 | 121 |   3 |   3
+ 131 | 131 | 121 | 121 | 100 | 100
+ 131 | 131 | 121 | 121 | 131 | 131
+ 131 | 131 | 121 | 121 | 132 | 132
+ 131 | 131 | 121 | 121 | 132 | 132
+ 131 | 131 | 121 | 121 | 200 | 200
+ 131 | 131 | 121 | 121 | 200 | 200
+ 131 | 131 | 121 | 121 | 232 | 232
+ 131 | 131 | 121 | 121 | 232 | 232
+ 131 | 131 | 122 | 122 |   3 |   3
+ 131 | 131 | 122 | 122 |   3 |   3
+ 131 | 131 | 122 | 122 |   3 |   3
+ 131 | 131 | 122 | 122 |   3 |   3
+ 131 | 131 | 122 | 122 | 100 | 100
+ 131 | 131 | 122 | 122 | 100 | 100
+ 131 | 131 | 122 | 122 | 131 | 131
+ 131 | 131 | 122 | 122 | 131 | 131
+ 131 | 131 | 122 | 122 | 132 | 132
+ 131 | 131 | 122 | 122 | 132 | 132
+ 131 | 131 | 122 | 122 | 132 | 132
+ 131 | 131 | 122 | 122 | 132 | 132
+ 131 | 131 | 122 | 122 | 200 | 200
+ 131 | 131 | 122 | 122 | 200 | 200
+ 131 | 131 | 122 | 122 | 200 | 200
+ 131 | 131 | 122 | 122 | 200 | 200
+ 131 | 131 | 122 | 122 | 232 | 232
+ 131 | 131 | 122 | 122 | 232 | 232
+ 131 | 131 | 122 | 122 | 232 | 232
+ 131 | 131 | 122 | 122 | 232 | 232
+ 131 | 131 | 200 | 200 |   3 |   3
+ 131 | 131 | 200 | 200 |   3 |   3
+ 131 | 131 | 200 | 200 |   3 |   3
+ 131 | 131 | 200 | 200 |   3 |   3
+ 131 | 131 | 200 | 200 | 100 | 100
+ 131 | 131 | 200 | 200 | 100 | 100
+ 131 | 131 | 200 | 200 | 131 | 131
+ 131 | 131 | 200 | 200 | 131 | 131
+ 131 | 131 | 200 | 200 | 132 | 132
+ 131 | 131 | 200 | 200 | 132 | 132
+ 131 | 131 | 200 | 200 | 132 | 132
+ 131 | 131 | 200 | 200 | 132 | 132
+ 131 | 131 | 200 | 200 | 200 | 200
+ 131 | 131 | 200 | 200 | 200 | 200
+ 131 | 131 | 200 | 200 | 200 | 200
+ 131 | 131 | 200 | 200 | 200 | 200
+ 131 | 131 | 200 | 200 | 232 | 232
+ 131 | 131 | 200 | 200 | 232 | 232
+ 131 | 131 | 200 | 200 | 232 | 232
+ 131 | 131 | 200 | 200 | 232 | 232
+ 131 | 131 | 231 | 231 |   3 |   3
+ 131 | 131 | 231 | 231 |   3 |   3
+ 131 | 131 | 231 | 231 | 100 | 100
+ 131 | 131 | 231 | 231 | 131 | 131
+ 131 | 131 | 231 | 231 | 132 | 132
+ 131 | 131 | 231 | 231 | 132 | 132
+ 131 | 131 | 231 | 231 | 200 | 200
+ 131 | 131 | 231 | 231 | 200 | 200
+ 131 | 131 | 231 | 231 | 232 | 232
+ 131 | 131 | 231 | 231 | 232 | 232
+ 131 | 131 | 232 | 232 |   3 |   3
+ 131 | 131 | 232 | 232 |   3 |   3
+ 131 | 131 | 232 | 232 |   3 |   3
+ 131 | 131 | 232 | 232 |   3 |   3
+ 131 | 131 | 232 | 232 | 100 | 100
+ 131 | 131 | 232 | 232 | 100 | 100
+ 131 | 131 | 232 | 232 | 131 | 131
+ 131 | 131 | 232 | 232 | 131 | 131
+ 131 | 131 | 232 | 232 | 132 | 132
+ 131 | 131 | 232 | 232 | 132 | 132
+ 131 | 131 | 232 | 232 | 132 | 132
+ 131 | 131 | 232 | 232 | 132 | 132
+ 131 | 131 | 232 | 232 | 200 | 200
+ 131 | 131 | 232 | 232 | 200 | 200
+ 131 | 131 | 232 | 232 | 200 | 200
+ 131 | 131 | 232 | 232 | 200 | 200
+ 131 | 131 | 232 | 232 | 232 | 232
+ 131 | 131 | 232 | 232 | 232 | 232
+ 131 | 131 | 232 | 232 | 232 | 232
+ 131 | 131 | 232 | 232 | 232 | 232
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 | 100 | 100
+ 132 | 132 |   2 |   2 | 100 | 100
+ 132 | 132 |   2 |   2 | 100 | 100
+ 132 | 132 |   2 |   2 | 100 | 100
+ 132 | 132 |   2 |   2 | 131 | 131
+ 132 | 132 |   2 |   2 | 131 | 131
+ 132 | 132 |   2 |   2 | 131 | 131
+ 132 | 132 |   2 |   2 | 131 | 131
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 | 100 | 100 |   3 |   3
+ 132 | 132 | 100 | 100 |   3 |   3
+ 132 | 132 | 100 | 100 |   3 |   3
+ 132 | 132 | 100 | 100 |   3 |   3
+ 132 | 132 | 100 | 100 | 100 | 100
+ 132 | 132 | 100 | 100 | 100 | 100
+ 132 | 132 | 100 | 100 | 131 | 131
+ 132 | 132 | 100 | 100 | 131 | 131
+ 132 | 132 | 100 | 100 | 132 | 132
+ 132 | 132 | 100 | 100 | 132 | 132
+ 132 | 132 | 100 | 100 | 132 | 132
+ 132 | 132 | 100 | 100 | 132 | 132
+ 132 | 132 | 100 | 100 | 200 | 200
+ 132 | 132 | 100 | 100 | 200 | 200
+ 132 | 132 | 100 | 100 | 200 | 200
+ 132 | 132 | 100 | 100 | 200 | 200
+ 132 | 132 | 100 | 100 | 232 | 232
+ 132 | 132 | 100 | 100 | 232 | 232
+ 132 | 132 | 100 | 100 | 232 | 232
+ 132 | 132 | 100 | 100 | 232 | 232
+ 132 | 132 | 121 | 121 |   3 |   3
+ 132 | 132 | 121 | 121 |   3 |   3
+ 132 | 132 | 121 | 121 |   3 |   3
+ 132 | 132 | 121 | 121 |   3 |   3
+ 132 | 132 | 121 | 121 | 100 | 100
+ 132 | 132 | 121 | 121 | 100 | 100
+ 132 | 132 | 121 | 121 | 131 | 131
+ 132 | 132 | 121 | 121 | 131 | 131
+ 132 | 132 | 121 | 121 | 132 | 132
+ 132 | 132 | 121 | 121 | 132 | 132
+ 132 | 132 | 121 | 121 | 132 | 132
+ 132 | 132 | 121 | 121 | 132 | 132
+ 132 | 132 | 121 | 121 | 200 | 200
+ 132 | 132 | 121 | 121 | 200 | 200
+ 132 | 132 | 121 | 121 | 200 | 200
+ 132 | 132 | 121 | 121 | 200 | 200
+ 132 | 132 | 121 | 121 | 232 | 232
+ 132 | 132 | 121 | 121 | 232 | 232
+ 132 | 132 | 121 | 121 | 232 | 232
+ 132 | 132 | 121 | 121 | 232 | 232
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 | 100 | 100
+ 132 | 132 | 122 | 122 | 100 | 100
+ 132 | 132 | 122 | 122 | 100 | 100
+ 132 | 132 | 122 | 122 | 100 | 100
+ 132 | 132 | 122 | 122 | 131 | 131
+ 132 | 132 | 122 | 122 | 131 | 131
+ 132 | 132 | 122 | 122 | 131 | 131
+ 132 | 132 | 122 | 122 | 131 | 131
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 | 100 | 100
+ 132 | 132 | 200 | 200 | 100 | 100
+ 132 | 132 | 200 | 200 | 100 | 100
+ 132 | 132 | 200 | 200 | 100 | 100
+ 132 | 132 | 200 | 200 | 131 | 131
+ 132 | 132 | 200 | 200 | 131 | 131
+ 132 | 132 | 200 | 200 | 131 | 131
+ 132 | 132 | 200 | 200 | 131 | 131
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 231 | 231 |   3 |   3
+ 132 | 132 | 231 | 231 |   3 |   3
+ 132 | 132 | 231 | 231 |   3 |   3
+ 132 | 132 | 231 | 231 |   3 |   3
+ 132 | 132 | 231 | 231 | 100 | 100
+ 132 | 132 | 231 | 231 | 100 | 100
+ 132 | 132 | 231 | 231 | 131 | 131
+ 132 | 132 | 231 | 231 | 131 | 131
+ 132 | 132 | 231 | 231 | 132 | 132
+ 132 | 132 | 231 | 231 | 132 | 132
+ 132 | 132 | 231 | 231 | 132 | 132
+ 132 | 132 | 231 | 231 | 132 | 132
+ 132 | 132 | 231 | 231 | 200 | 200
+ 132 | 132 | 231 | 231 | 200 | 200
+ 132 | 132 | 231 | 231 | 200 | 200
+ 132 | 132 | 231 | 231 | 200 | 200
+ 132 | 132 | 231 | 231 | 232 | 232
+ 132 | 132 | 231 | 231 | 232 | 232
+ 132 | 132 | 231 | 231 | 232 | 232
+ 132 | 132 | 231 | 231 | 232 | 232
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 | 100 | 100
+ 132 | 132 | 232 | 232 | 100 | 100
+ 132 | 132 | 232 | 232 | 100 | 100
+ 132 | 132 | 232 | 232 | 100 | 100
+ 132 | 132 | 232 | 232 | 131 | 131
+ 132 | 132 | 232 | 232 | 131 | 131
+ 132 | 132 | 232 | 232 | 131 | 131
+ 132 | 132 | 232 | 232 | 131 | 131
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 | 100 | 100
+ 200 | 200 |   2 |   2 | 100 | 100
+ 200 | 200 |   2 |   2 | 100 | 100
+ 200 | 200 |   2 |   2 | 100 | 100
+ 200 | 200 |   2 |   2 | 131 | 131
+ 200 | 200 |   2 |   2 | 131 | 131
+ 200 | 200 |   2 |   2 | 131 | 131
+ 200 | 200 |   2 |   2 | 131 | 131
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 | 100 | 100 |   3 |   3
+ 200 | 200 | 100 | 100 |   3 |   3
+ 200 | 200 | 100 | 100 |   3 |   3
+ 200 | 200 | 100 | 100 |   3 |   3
+ 200 | 200 | 100 | 100 | 100 | 100
+ 200 | 200 | 100 | 100 | 100 | 100
+ 200 | 200 | 100 | 100 | 131 | 131
+ 200 | 200 | 100 | 100 | 131 | 131
+ 200 | 200 | 100 | 100 | 132 | 132
+ 200 | 200 | 100 | 100 | 132 | 132
+ 200 | 200 | 100 | 100 | 132 | 132
+ 200 | 200 | 100 | 100 | 132 | 132
+ 200 | 200 | 100 | 100 | 200 | 200
+ 200 | 200 | 100 | 100 | 200 | 200
+ 200 | 200 | 100 | 100 | 200 | 200
+ 200 | 200 | 100 | 100 | 200 | 200
+ 200 | 200 | 100 | 100 | 232 | 232
+ 200 | 200 | 100 | 100 | 232 | 232
+ 200 | 200 | 100 | 100 | 232 | 232
+ 200 | 200 | 100 | 100 | 232 | 232
+ 200 | 200 | 121 | 121 |   3 |   3
+ 200 | 200 | 121 | 121 |   3 |   3
+ 200 | 200 | 121 | 121 |   3 |   3
+ 200 | 200 | 121 | 121 |   3 |   3
+ 200 | 200 | 121 | 121 | 100 | 100
+ 200 | 200 | 121 | 121 | 100 | 100
+ 200 | 200 | 121 | 121 | 131 | 131
+ 200 | 200 | 121 | 121 | 131 | 131
+ 200 | 200 | 121 | 121 | 132 | 132
+ 200 | 200 | 121 | 121 | 132 | 132
+ 200 | 200 | 121 | 121 | 132 | 132
+ 200 | 200 | 121 | 121 | 132 | 132
+ 200 | 200 | 121 | 121 | 200 | 200
+ 200 | 200 | 121 | 121 | 200 | 200
+ 200 | 200 | 121 | 121 | 200 | 200
+ 200 | 200 | 121 | 121 | 200 | 200
+ 200 | 200 | 121 | 121 | 232 | 232
+ 200 | 200 | 121 | 121 | 232 | 232
+ 200 | 200 | 121 | 121 | 232 | 232
+ 200 | 200 | 121 | 121 | 232 | 232
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 | 100 | 100
+ 200 | 200 | 122 | 122 | 100 | 100
+ 200 | 200 | 122 | 122 | 100 | 100
+ 200 | 200 | 122 | 122 | 100 | 100
+ 200 | 200 | 122 | 122 | 131 | 131
+ 200 | 200 | 122 | 122 | 131 | 131
+ 200 | 200 | 122 | 122 | 131 | 131
+ 200 | 200 | 122 | 122 | 131 | 131
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 | 100 | 100
+ 200 | 200 | 200 | 200 | 100 | 100
+ 200 | 200 | 200 | 200 | 100 | 100
+ 200 | 200 | 200 | 200 | 100 | 100
+ 200 | 200 | 200 | 200 | 131 | 131
+ 200 | 200 | 200 | 200 | 131 | 131
+ 200 | 200 | 200 | 200 | 131 | 131
+ 200 | 200 | 200 | 200 | 131 | 131
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 231 | 231 |   3 |   3
+ 200 | 200 | 231 | 231 |   3 |   3
+ 200 | 200 | 231 | 231 |   3 |   3
+ 200 | 200 | 231 | 231 |   3 |   3
+ 200 | 200 | 231 | 231 | 100 | 100
+ 200 | 200 | 231 | 231 | 100 | 100
+ 200 | 200 | 231 | 231 | 131 | 131
+ 200 | 200 | 231 | 231 | 131 | 131
+ 200 | 200 | 231 | 231 | 132 | 132
+ 200 | 200 | 231 | 231 | 132 | 132
+ 200 | 200 | 231 | 231 | 132 | 132
+ 200 | 200 | 231 | 231 | 132 | 132
+ 200 | 200 | 231 | 231 | 200 | 200
+ 200 | 200 | 231 | 231 | 200 | 200
+ 200 | 200 | 231 | 231 | 200 | 200
+ 200 | 200 | 231 | 231 | 200 | 200
+ 200 | 200 | 231 | 231 | 232 | 232
+ 200 | 200 | 231 | 231 | 232 | 232
+ 200 | 200 | 231 | 231 | 232 | 232
+ 200 | 200 | 231 | 231 | 232 | 232
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 | 100 | 100
+ 200 | 200 | 232 | 232 | 100 | 100
+ 200 | 200 | 232 | 232 | 100 | 100
+ 200 | 200 | 232 | 232 | 100 | 100
+ 200 | 200 | 232 | 232 | 131 | 131
+ 200 | 200 | 232 | 232 | 131 | 131
+ 200 | 200 | 232 | 232 | 131 | 131
+ 200 | 200 | 232 | 232 | 131 | 131
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+(1210 rows)
+
+SET enable_nestloop=OFF;
+SET enable_hashjoin=ON;
+SET enable_mergejoin=OFF;
+SELECT * FROM t1 LEFT JOIN t2 FULL JOIN t3 ON 1=1 ON 1=1 ORDER BY 1,2,3,4,5,6;
+  a  |  b  |  j  |  k  |  x  |  y  
+-----+-----+-----+-----+-----+-----
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 | 100 | 100
+   1 |   1 |   2 |   2 | 100 | 100
+   1 |   1 |   2 |   2 | 100 | 100
+   1 |   1 |   2 |   2 | 100 | 100
+   1 |   1 |   2 |   2 | 131 | 131
+   1 |   1 |   2 |   2 | 131 | 131
+   1 |   1 |   2 |   2 | 131 | 131
+   1 |   1 |   2 |   2 | 131 | 131
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 | 100 | 100 |   3 |   3
+   1 |   1 | 100 | 100 |   3 |   3
+   1 |   1 | 100 | 100 |   3 |   3
+   1 |   1 | 100 | 100 |   3 |   3
+   1 |   1 | 100 | 100 | 100 | 100
+   1 |   1 | 100 | 100 | 100 | 100
+   1 |   1 | 100 | 100 | 131 | 131
+   1 |   1 | 100 | 100 | 131 | 131
+   1 |   1 | 100 | 100 | 132 | 132
+   1 |   1 | 100 | 100 | 132 | 132
+   1 |   1 | 100 | 100 | 132 | 132
+   1 |   1 | 100 | 100 | 132 | 132
+   1 |   1 | 100 | 100 | 200 | 200
+   1 |   1 | 100 | 100 | 200 | 200
+   1 |   1 | 100 | 100 | 200 | 200
+   1 |   1 | 100 | 100 | 200 | 200
+   1 |   1 | 100 | 100 | 232 | 232
+   1 |   1 | 100 | 100 | 232 | 232
+   1 |   1 | 100 | 100 | 232 | 232
+   1 |   1 | 100 | 100 | 232 | 232
+   1 |   1 | 121 | 121 |   3 |   3
+   1 |   1 | 121 | 121 |   3 |   3
+   1 |   1 | 121 | 121 |   3 |   3
+   1 |   1 | 121 | 121 |   3 |   3
+   1 |   1 | 121 | 121 | 100 | 100
+   1 |   1 | 121 | 121 | 100 | 100
+   1 |   1 | 121 | 121 | 131 | 131
+   1 |   1 | 121 | 121 | 131 | 131
+   1 |   1 | 121 | 121 | 132 | 132
+   1 |   1 | 121 | 121 | 132 | 132
+   1 |   1 | 121 | 121 | 132 | 132
+   1 |   1 | 121 | 121 | 132 | 132
+   1 |   1 | 121 | 121 | 200 | 200
+   1 |   1 | 121 | 121 | 200 | 200
+   1 |   1 | 121 | 121 | 200 | 200
+   1 |   1 | 121 | 121 | 200 | 200
+   1 |   1 | 121 | 121 | 232 | 232
+   1 |   1 | 121 | 121 | 232 | 232
+   1 |   1 | 121 | 121 | 232 | 232
+   1 |   1 | 121 | 121 | 232 | 232
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 | 100 | 100
+   1 |   1 | 122 | 122 | 100 | 100
+   1 |   1 | 122 | 122 | 100 | 100
+   1 |   1 | 122 | 122 | 100 | 100
+   1 |   1 | 122 | 122 | 131 | 131
+   1 |   1 | 122 | 122 | 131 | 131
+   1 |   1 | 122 | 122 | 131 | 131
+   1 |   1 | 122 | 122 | 131 | 131
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 | 100 | 100
+   1 |   1 | 200 | 200 | 100 | 100
+   1 |   1 | 200 | 200 | 100 | 100
+   1 |   1 | 200 | 200 | 100 | 100
+   1 |   1 | 200 | 200 | 131 | 131
+   1 |   1 | 200 | 200 | 131 | 131
+   1 |   1 | 200 | 200 | 131 | 131
+   1 |   1 | 200 | 200 | 131 | 131
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 231 | 231 |   3 |   3
+   1 |   1 | 231 | 231 |   3 |   3
+   1 |   1 | 231 | 231 |   3 |   3
+   1 |   1 | 231 | 231 |   3 |   3
+   1 |   1 | 231 | 231 | 100 | 100
+   1 |   1 | 231 | 231 | 100 | 100
+   1 |   1 | 231 | 231 | 131 | 131
+   1 |   1 | 231 | 231 | 131 | 131
+   1 |   1 | 231 | 231 | 132 | 132
+   1 |   1 | 231 | 231 | 132 | 132
+   1 |   1 | 231 | 231 | 132 | 132
+   1 |   1 | 231 | 231 | 132 | 132
+   1 |   1 | 231 | 231 | 200 | 200
+   1 |   1 | 231 | 231 | 200 | 200
+   1 |   1 | 231 | 231 | 200 | 200
+   1 |   1 | 231 | 231 | 200 | 200
+   1 |   1 | 231 | 231 | 232 | 232
+   1 |   1 | 231 | 231 | 232 | 232
+   1 |   1 | 231 | 231 | 232 | 232
+   1 |   1 | 231 | 231 | 232 | 232
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 | 100 | 100
+   1 |   1 | 232 | 232 | 100 | 100
+   1 |   1 | 232 | 232 | 100 | 100
+   1 |   1 | 232 | 232 | 100 | 100
+   1 |   1 | 232 | 232 | 131 | 131
+   1 |   1 | 232 | 232 | 131 | 131
+   1 |   1 | 232 | 232 | 131 | 131
+   1 |   1 | 232 | 232 | 131 | 131
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+ 100 | 100 |   2 |   2 |   3 |   3
+ 100 | 100 |   2 |   2 |   3 |   3
+ 100 | 100 |   2 |   2 |   3 |   3
+ 100 | 100 |   2 |   2 |   3 |   3
+ 100 | 100 |   2 |   2 | 100 | 100
+ 100 | 100 |   2 |   2 | 100 | 100
+ 100 | 100 |   2 |   2 | 131 | 131
+ 100 | 100 |   2 |   2 | 131 | 131
+ 100 | 100 |   2 |   2 | 132 | 132
+ 100 | 100 |   2 |   2 | 132 | 132
+ 100 | 100 |   2 |   2 | 132 | 132
+ 100 | 100 |   2 |   2 | 132 | 132
+ 100 | 100 |   2 |   2 | 200 | 200
+ 100 | 100 |   2 |   2 | 200 | 200
+ 100 | 100 |   2 |   2 | 200 | 200
+ 100 | 100 |   2 |   2 | 200 | 200
+ 100 | 100 |   2 |   2 | 232 | 232
+ 100 | 100 |   2 |   2 | 232 | 232
+ 100 | 100 |   2 |   2 | 232 | 232
+ 100 | 100 |   2 |   2 | 232 | 232
+ 100 | 100 | 100 | 100 |   3 |   3
+ 100 | 100 | 100 | 100 |   3 |   3
+ 100 | 100 | 100 | 100 | 100 | 100
+ 100 | 100 | 100 | 100 | 131 | 131
+ 100 | 100 | 100 | 100 | 132 | 132
+ 100 | 100 | 100 | 100 | 132 | 132
+ 100 | 100 | 100 | 100 | 200 | 200
+ 100 | 100 | 100 | 100 | 200 | 200
+ 100 | 100 | 100 | 100 | 232 | 232
+ 100 | 100 | 100 | 100 | 232 | 232
+ 100 | 100 | 121 | 121 |   3 |   3
+ 100 | 100 | 121 | 121 |   3 |   3
+ 100 | 100 | 121 | 121 | 100 | 100
+ 100 | 100 | 121 | 121 | 131 | 131
+ 100 | 100 | 121 | 121 | 132 | 132
+ 100 | 100 | 121 | 121 | 132 | 132
+ 100 | 100 | 121 | 121 | 200 | 200
+ 100 | 100 | 121 | 121 | 200 | 200
+ 100 | 100 | 121 | 121 | 232 | 232
+ 100 | 100 | 121 | 121 | 232 | 232
+ 100 | 100 | 122 | 122 |   3 |   3
+ 100 | 100 | 122 | 122 |   3 |   3
+ 100 | 100 | 122 | 122 |   3 |   3
+ 100 | 100 | 122 | 122 |   3 |   3
+ 100 | 100 | 122 | 122 | 100 | 100
+ 100 | 100 | 122 | 122 | 100 | 100
+ 100 | 100 | 122 | 122 | 131 | 131
+ 100 | 100 | 122 | 122 | 131 | 131
+ 100 | 100 | 122 | 122 | 132 | 132
+ 100 | 100 | 122 | 122 | 132 | 132
+ 100 | 100 | 122 | 122 | 132 | 132
+ 100 | 100 | 122 | 122 | 132 | 132
+ 100 | 100 | 122 | 122 | 200 | 200
+ 100 | 100 | 122 | 122 | 200 | 200
+ 100 | 100 | 122 | 122 | 200 | 200
+ 100 | 100 | 122 | 122 | 200 | 200
+ 100 | 100 | 122 | 122 | 232 | 232
+ 100 | 100 | 122 | 122 | 232 | 232
+ 100 | 100 | 122 | 122 | 232 | 232
+ 100 | 100 | 122 | 122 | 232 | 232
+ 100 | 100 | 200 | 200 |   3 |   3
+ 100 | 100 | 200 | 200 |   3 |   3
+ 100 | 100 | 200 | 200 |   3 |   3
+ 100 | 100 | 200 | 200 |   3 |   3
+ 100 | 100 | 200 | 200 | 100 | 100
+ 100 | 100 | 200 | 200 | 100 | 100
+ 100 | 100 | 200 | 200 | 131 | 131
+ 100 | 100 | 200 | 200 | 131 | 131
+ 100 | 100 | 200 | 200 | 132 | 132
+ 100 | 100 | 200 | 200 | 132 | 132
+ 100 | 100 | 200 | 200 | 132 | 132
+ 100 | 100 | 200 | 200 | 132 | 132
+ 100 | 100 | 200 | 200 | 200 | 200
+ 100 | 100 | 200 | 200 | 200 | 200
+ 100 | 100 | 200 | 200 | 200 | 200
+ 100 | 100 | 200 | 200 | 200 | 200
+ 100 | 100 | 200 | 200 | 232 | 232
+ 100 | 100 | 200 | 200 | 232 | 232
+ 100 | 100 | 200 | 200 | 232 | 232
+ 100 | 100 | 200 | 200 | 232 | 232
+ 100 | 100 | 231 | 231 |   3 |   3
+ 100 | 100 | 231 | 231 |   3 |   3
+ 100 | 100 | 231 | 231 | 100 | 100
+ 100 | 100 | 231 | 231 | 131 | 131
+ 100 | 100 | 231 | 231 | 132 | 132
+ 100 | 100 | 231 | 231 | 132 | 132
+ 100 | 100 | 231 | 231 | 200 | 200
+ 100 | 100 | 231 | 231 | 200 | 200
+ 100 | 100 | 231 | 231 | 232 | 232
+ 100 | 100 | 231 | 231 | 232 | 232
+ 100 | 100 | 232 | 232 |   3 |   3
+ 100 | 100 | 232 | 232 |   3 |   3
+ 100 | 100 | 232 | 232 |   3 |   3
+ 100 | 100 | 232 | 232 |   3 |   3
+ 100 | 100 | 232 | 232 | 100 | 100
+ 100 | 100 | 232 | 232 | 100 | 100
+ 100 | 100 | 232 | 232 | 131 | 131
+ 100 | 100 | 232 | 232 | 131 | 131
+ 100 | 100 | 232 | 232 | 132 | 132
+ 100 | 100 | 232 | 232 | 132 | 132
+ 100 | 100 | 232 | 232 | 132 | 132
+ 100 | 100 | 232 | 232 | 132 | 132
+ 100 | 100 | 232 | 232 | 200 | 200
+ 100 | 100 | 232 | 232 | 200 | 200
+ 100 | 100 | 232 | 232 | 200 | 200
+ 100 | 100 | 232 | 232 | 200 | 200
+ 100 | 100 | 232 | 232 | 232 | 232
+ 100 | 100 | 232 | 232 | 232 | 232
+ 100 | 100 | 232 | 232 | 232 | 232
+ 100 | 100 | 232 | 232 | 232 | 232
+ 121 | 121 |   2 |   2 |   3 |   3
+ 121 | 121 |   2 |   2 |   3 |   3
+ 121 | 121 |   2 |   2 |   3 |   3
+ 121 | 121 |   2 |   2 |   3 |   3
+ 121 | 121 |   2 |   2 | 100 | 100
+ 121 | 121 |   2 |   2 | 100 | 100
+ 121 | 121 |   2 |   2 | 131 | 131
+ 121 | 121 |   2 |   2 | 131 | 131
+ 121 | 121 |   2 |   2 | 132 | 132
+ 121 | 121 |   2 |   2 | 132 | 132
+ 121 | 121 |   2 |   2 | 132 | 132
+ 121 | 121 |   2 |   2 | 132 | 132
+ 121 | 121 |   2 |   2 | 200 | 200
+ 121 | 121 |   2 |   2 | 200 | 200
+ 121 | 121 |   2 |   2 | 200 | 200
+ 121 | 121 |   2 |   2 | 200 | 200
+ 121 | 121 |   2 |   2 | 232 | 232
+ 121 | 121 |   2 |   2 | 232 | 232
+ 121 | 121 |   2 |   2 | 232 | 232
+ 121 | 121 |   2 |   2 | 232 | 232
+ 121 | 121 | 100 | 100 |   3 |   3
+ 121 | 121 | 100 | 100 |   3 |   3
+ 121 | 121 | 100 | 100 | 100 | 100
+ 121 | 121 | 100 | 100 | 131 | 131
+ 121 | 121 | 100 | 100 | 132 | 132
+ 121 | 121 | 100 | 100 | 132 | 132
+ 121 | 121 | 100 | 100 | 200 | 200
+ 121 | 121 | 100 | 100 | 200 | 200
+ 121 | 121 | 100 | 100 | 232 | 232
+ 121 | 121 | 100 | 100 | 232 | 232
+ 121 | 121 | 121 | 121 |   3 |   3
+ 121 | 121 | 121 | 121 |   3 |   3
+ 121 | 121 | 121 | 121 | 100 | 100
+ 121 | 121 | 121 | 121 | 131 | 131
+ 121 | 121 | 121 | 121 | 132 | 132
+ 121 | 121 | 121 | 121 | 132 | 132
+ 121 | 121 | 121 | 121 | 200 | 200
+ 121 | 121 | 121 | 121 | 200 | 200
+ 121 | 121 | 121 | 121 | 232 | 232
+ 121 | 121 | 121 | 121 | 232 | 232
+ 121 | 121 | 122 | 122 |   3 |   3
+ 121 | 121 | 122 | 122 |   3 |   3
+ 121 | 121 | 122 | 122 |   3 |   3
+ 121 | 121 | 122 | 122 |   3 |   3
+ 121 | 121 | 122 | 122 | 100 | 100
+ 121 | 121 | 122 | 122 | 100 | 100
+ 121 | 121 | 122 | 122 | 131 | 131
+ 121 | 121 | 122 | 122 | 131 | 131
+ 121 | 121 | 122 | 122 | 132 | 132
+ 121 | 121 | 122 | 122 | 132 | 132
+ 121 | 121 | 122 | 122 | 132 | 132
+ 121 | 121 | 122 | 122 | 132 | 132
+ 121 | 121 | 122 | 122 | 200 | 200
+ 121 | 121 | 122 | 122 | 200 | 200
+ 121 | 121 | 122 | 122 | 200 | 200
+ 121 | 121 | 122 | 122 | 200 | 200
+ 121 | 121 | 122 | 122 | 232 | 232
+ 121 | 121 | 122 | 122 | 232 | 232
+ 121 | 121 | 122 | 122 | 232 | 232
+ 121 | 121 | 122 | 122 | 232 | 232
+ 121 | 121 | 200 | 200 |   3 |   3
+ 121 | 121 | 200 | 200 |   3 |   3
+ 121 | 121 | 200 | 200 |   3 |   3
+ 121 | 121 | 200 | 200 |   3 |   3
+ 121 | 121 | 200 | 200 | 100 | 100
+ 121 | 121 | 200 | 200 | 100 | 100
+ 121 | 121 | 200 | 200 | 131 | 131
+ 121 | 121 | 200 | 200 | 131 | 131
+ 121 | 121 | 200 | 200 | 132 | 132
+ 121 | 121 | 200 | 200 | 132 | 132
+ 121 | 121 | 200 | 200 | 132 | 132
+ 121 | 121 | 200 | 200 | 132 | 132
+ 121 | 121 | 200 | 200 | 200 | 200
+ 121 | 121 | 200 | 200 | 200 | 200
+ 121 | 121 | 200 | 200 | 200 | 200
+ 121 | 121 | 200 | 200 | 200 | 200
+ 121 | 121 | 200 | 200 | 232 | 232
+ 121 | 121 | 200 | 200 | 232 | 232
+ 121 | 121 | 200 | 200 | 232 | 232
+ 121 | 121 | 200 | 200 | 232 | 232
+ 121 | 121 | 231 | 231 |   3 |   3
+ 121 | 121 | 231 | 231 |   3 |   3
+ 121 | 121 | 231 | 231 | 100 | 100
+ 121 | 121 | 231 | 231 | 131 | 131
+ 121 | 121 | 231 | 231 | 132 | 132
+ 121 | 121 | 231 | 231 | 132 | 132
+ 121 | 121 | 231 | 231 | 200 | 200
+ 121 | 121 | 231 | 231 | 200 | 200
+ 121 | 121 | 231 | 231 | 232 | 232
+ 121 | 121 | 231 | 231 | 232 | 232
+ 121 | 121 | 232 | 232 |   3 |   3
+ 121 | 121 | 232 | 232 |   3 |   3
+ 121 | 121 | 232 | 232 |   3 |   3
+ 121 | 121 | 232 | 232 |   3 |   3
+ 121 | 121 | 232 | 232 | 100 | 100
+ 121 | 121 | 232 | 232 | 100 | 100
+ 121 | 121 | 232 | 232 | 131 | 131
+ 121 | 121 | 232 | 232 | 131 | 131
+ 121 | 121 | 232 | 232 | 132 | 132
+ 121 | 121 | 232 | 232 | 132 | 132
+ 121 | 121 | 232 | 232 | 132 | 132
+ 121 | 121 | 232 | 232 | 132 | 132
+ 121 | 121 | 232 | 232 | 200 | 200
+ 121 | 121 | 232 | 232 | 200 | 200
+ 121 | 121 | 232 | 232 | 200 | 200
+ 121 | 121 | 232 | 232 | 200 | 200
+ 121 | 121 | 232 | 232 | 232 | 232
+ 121 | 121 | 232 | 232 | 232 | 232
+ 121 | 121 | 232 | 232 | 232 | 232
+ 121 | 121 | 232 | 232 | 232 | 232
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 | 100 | 100
+ 122 | 122 |   2 |   2 | 100 | 100
+ 122 | 122 |   2 |   2 | 100 | 100
+ 122 | 122 |   2 |   2 | 100 | 100
+ 122 | 122 |   2 |   2 | 131 | 131
+ 122 | 122 |   2 |   2 | 131 | 131
+ 122 | 122 |   2 |   2 | 131 | 131
+ 122 | 122 |   2 |   2 | 131 | 131
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 | 100 | 100 |   3 |   3
+ 122 | 122 | 100 | 100 |   3 |   3
+ 122 | 122 | 100 | 100 |   3 |   3
+ 122 | 122 | 100 | 100 |   3 |   3
+ 122 | 122 | 100 | 100 | 100 | 100
+ 122 | 122 | 100 | 100 | 100 | 100
+ 122 | 122 | 100 | 100 | 131 | 131
+ 122 | 122 | 100 | 100 | 131 | 131
+ 122 | 122 | 100 | 100 | 132 | 132
+ 122 | 122 | 100 | 100 | 132 | 132
+ 122 | 122 | 100 | 100 | 132 | 132
+ 122 | 122 | 100 | 100 | 132 | 132
+ 122 | 122 | 100 | 100 | 200 | 200
+ 122 | 122 | 100 | 100 | 200 | 200
+ 122 | 122 | 100 | 100 | 200 | 200
+ 122 | 122 | 100 | 100 | 200 | 200
+ 122 | 122 | 100 | 100 | 232 | 232
+ 122 | 122 | 100 | 100 | 232 | 232
+ 122 | 122 | 100 | 100 | 232 | 232
+ 122 | 122 | 100 | 100 | 232 | 232
+ 122 | 122 | 121 | 121 |   3 |   3
+ 122 | 122 | 121 | 121 |   3 |   3
+ 122 | 122 | 121 | 121 |   3 |   3
+ 122 | 122 | 121 | 121 |   3 |   3
+ 122 | 122 | 121 | 121 | 100 | 100
+ 122 | 122 | 121 | 121 | 100 | 100
+ 122 | 122 | 121 | 121 | 131 | 131
+ 122 | 122 | 121 | 121 | 131 | 131
+ 122 | 122 | 121 | 121 | 132 | 132
+ 122 | 122 | 121 | 121 | 132 | 132
+ 122 | 122 | 121 | 121 | 132 | 132
+ 122 | 122 | 121 | 121 | 132 | 132
+ 122 | 122 | 121 | 121 | 200 | 200
+ 122 | 122 | 121 | 121 | 200 | 200
+ 122 | 122 | 121 | 121 | 200 | 200
+ 122 | 122 | 121 | 121 | 200 | 200
+ 122 | 122 | 121 | 121 | 232 | 232
+ 122 | 122 | 121 | 121 | 232 | 232
+ 122 | 122 | 121 | 121 | 232 | 232
+ 122 | 122 | 121 | 121 | 232 | 232
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 | 100 | 100
+ 122 | 122 | 122 | 122 | 100 | 100
+ 122 | 122 | 122 | 122 | 100 | 100
+ 122 | 122 | 122 | 122 | 100 | 100
+ 122 | 122 | 122 | 122 | 131 | 131
+ 122 | 122 | 122 | 122 | 131 | 131
+ 122 | 122 | 122 | 122 | 131 | 131
+ 122 | 122 | 122 | 122 | 131 | 131
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 | 100 | 100
+ 122 | 122 | 200 | 200 | 100 | 100
+ 122 | 122 | 200 | 200 | 100 | 100
+ 122 | 122 | 200 | 200 | 100 | 100
+ 122 | 122 | 200 | 200 | 131 | 131
+ 122 | 122 | 200 | 200 | 131 | 131
+ 122 | 122 | 200 | 200 | 131 | 131
+ 122 | 122 | 200 | 200 | 131 | 131
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 231 | 231 |   3 |   3
+ 122 | 122 | 231 | 231 |   3 |   3
+ 122 | 122 | 231 | 231 |   3 |   3
+ 122 | 122 | 231 | 231 |   3 |   3
+ 122 | 122 | 231 | 231 | 100 | 100
+ 122 | 122 | 231 | 231 | 100 | 100
+ 122 | 122 | 231 | 231 | 131 | 131
+ 122 | 122 | 231 | 231 | 131 | 131
+ 122 | 122 | 231 | 231 | 132 | 132
+ 122 | 122 | 231 | 231 | 132 | 132
+ 122 | 122 | 231 | 231 | 132 | 132
+ 122 | 122 | 231 | 231 | 132 | 132
+ 122 | 122 | 231 | 231 | 200 | 200
+ 122 | 122 | 231 | 231 | 200 | 200
+ 122 | 122 | 231 | 231 | 200 | 200
+ 122 | 122 | 231 | 231 | 200 | 200
+ 122 | 122 | 231 | 231 | 232 | 232
+ 122 | 122 | 231 | 231 | 232 | 232
+ 122 | 122 | 231 | 231 | 232 | 232
+ 122 | 122 | 231 | 231 | 232 | 232
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 | 100 | 100
+ 122 | 122 | 232 | 232 | 100 | 100
+ 122 | 122 | 232 | 232 | 100 | 100
+ 122 | 122 | 232 | 232 | 100 | 100
+ 122 | 122 | 232 | 232 | 131 | 131
+ 122 | 122 | 232 | 232 | 131 | 131
+ 122 | 122 | 232 | 232 | 131 | 131
+ 122 | 122 | 232 | 232 | 131 | 131
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 131 | 131 |   2 |   2 |   3 |   3
+ 131 | 131 |   2 |   2 |   3 |   3
+ 131 | 131 |   2 |   2 |   3 |   3
+ 131 | 131 |   2 |   2 |   3 |   3
+ 131 | 131 |   2 |   2 | 100 | 100
+ 131 | 131 |   2 |   2 | 100 | 100
+ 131 | 131 |   2 |   2 | 131 | 131
+ 131 | 131 |   2 |   2 | 131 | 131
+ 131 | 131 |   2 |   2 | 132 | 132
+ 131 | 131 |   2 |   2 | 132 | 132
+ 131 | 131 |   2 |   2 | 132 | 132
+ 131 | 131 |   2 |   2 | 132 | 132
+ 131 | 131 |   2 |   2 | 200 | 200
+ 131 | 131 |   2 |   2 | 200 | 200
+ 131 | 131 |   2 |   2 | 200 | 200
+ 131 | 131 |   2 |   2 | 200 | 200
+ 131 | 131 |   2 |   2 | 232 | 232
+ 131 | 131 |   2 |   2 | 232 | 232
+ 131 | 131 |   2 |   2 | 232 | 232
+ 131 | 131 |   2 |   2 | 232 | 232
+ 131 | 131 | 100 | 100 |   3 |   3
+ 131 | 131 | 100 | 100 |   3 |   3
+ 131 | 131 | 100 | 100 | 100 | 100
+ 131 | 131 | 100 | 100 | 131 | 131
+ 131 | 131 | 100 | 100 | 132 | 132
+ 131 | 131 | 100 | 100 | 132 | 132
+ 131 | 131 | 100 | 100 | 200 | 200
+ 131 | 131 | 100 | 100 | 200 | 200
+ 131 | 131 | 100 | 100 | 232 | 232
+ 131 | 131 | 100 | 100 | 232 | 232
+ 131 | 131 | 121 | 121 |   3 |   3
+ 131 | 131 | 121 | 121 |   3 |   3
+ 131 | 131 | 121 | 121 | 100 | 100
+ 131 | 131 | 121 | 121 | 131 | 131
+ 131 | 131 | 121 | 121 | 132 | 132
+ 131 | 131 | 121 | 121 | 132 | 132
+ 131 | 131 | 121 | 121 | 200 | 200
+ 131 | 131 | 121 | 121 | 200 | 200
+ 131 | 131 | 121 | 121 | 232 | 232
+ 131 | 131 | 121 | 121 | 232 | 232
+ 131 | 131 | 122 | 122 |   3 |   3
+ 131 | 131 | 122 | 122 |   3 |   3
+ 131 | 131 | 122 | 122 |   3 |   3
+ 131 | 131 | 122 | 122 |   3 |   3
+ 131 | 131 | 122 | 122 | 100 | 100
+ 131 | 131 | 122 | 122 | 100 | 100
+ 131 | 131 | 122 | 122 | 131 | 131
+ 131 | 131 | 122 | 122 | 131 | 131
+ 131 | 131 | 122 | 122 | 132 | 132
+ 131 | 131 | 122 | 122 | 132 | 132
+ 131 | 131 | 122 | 122 | 132 | 132
+ 131 | 131 | 122 | 122 | 132 | 132
+ 131 | 131 | 122 | 122 | 200 | 200
+ 131 | 131 | 122 | 122 | 200 | 200
+ 131 | 131 | 122 | 122 | 200 | 200
+ 131 | 131 | 122 | 122 | 200 | 200
+ 131 | 131 | 122 | 122 | 232 | 232
+ 131 | 131 | 122 | 122 | 232 | 232
+ 131 | 131 | 122 | 122 | 232 | 232
+ 131 | 131 | 122 | 122 | 232 | 232
+ 131 | 131 | 200 | 200 |   3 |   3
+ 131 | 131 | 200 | 200 |   3 |   3
+ 131 | 131 | 200 | 200 |   3 |   3
+ 131 | 131 | 200 | 200 |   3 |   3
+ 131 | 131 | 200 | 200 | 100 | 100
+ 131 | 131 | 200 | 200 | 100 | 100
+ 131 | 131 | 200 | 200 | 131 | 131
+ 131 | 131 | 200 | 200 | 131 | 131
+ 131 | 131 | 200 | 200 | 132 | 132
+ 131 | 131 | 200 | 200 | 132 | 132
+ 131 | 131 | 200 | 200 | 132 | 132
+ 131 | 131 | 200 | 200 | 132 | 132
+ 131 | 131 | 200 | 200 | 200 | 200
+ 131 | 131 | 200 | 200 | 200 | 200
+ 131 | 131 | 200 | 200 | 200 | 200
+ 131 | 131 | 200 | 200 | 200 | 200
+ 131 | 131 | 200 | 200 | 232 | 232
+ 131 | 131 | 200 | 200 | 232 | 232
+ 131 | 131 | 200 | 200 | 232 | 232
+ 131 | 131 | 200 | 200 | 232 | 232
+ 131 | 131 | 231 | 231 |   3 |   3
+ 131 | 131 | 231 | 231 |   3 |   3
+ 131 | 131 | 231 | 231 | 100 | 100
+ 131 | 131 | 231 | 231 | 131 | 131
+ 131 | 131 | 231 | 231 | 132 | 132
+ 131 | 131 | 231 | 231 | 132 | 132
+ 131 | 131 | 231 | 231 | 200 | 200
+ 131 | 131 | 231 | 231 | 200 | 200
+ 131 | 131 | 231 | 231 | 232 | 232
+ 131 | 131 | 231 | 231 | 232 | 232
+ 131 | 131 | 232 | 232 |   3 |   3
+ 131 | 131 | 232 | 232 |   3 |   3
+ 131 | 131 | 232 | 232 |   3 |   3
+ 131 | 131 | 232 | 232 |   3 |   3
+ 131 | 131 | 232 | 232 | 100 | 100
+ 131 | 131 | 232 | 232 | 100 | 100
+ 131 | 131 | 232 | 232 | 131 | 131
+ 131 | 131 | 232 | 232 | 131 | 131
+ 131 | 131 | 232 | 232 | 132 | 132
+ 131 | 131 | 232 | 232 | 132 | 132
+ 131 | 131 | 232 | 232 | 132 | 132
+ 131 | 131 | 232 | 232 | 132 | 132
+ 131 | 131 | 232 | 232 | 200 | 200
+ 131 | 131 | 232 | 232 | 200 | 200
+ 131 | 131 | 232 | 232 | 200 | 200
+ 131 | 131 | 232 | 232 | 200 | 200
+ 131 | 131 | 232 | 232 | 232 | 232
+ 131 | 131 | 232 | 232 | 232 | 232
+ 131 | 131 | 232 | 232 | 232 | 232
+ 131 | 131 | 232 | 232 | 232 | 232
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 | 100 | 100
+ 132 | 132 |   2 |   2 | 100 | 100
+ 132 | 132 |   2 |   2 | 100 | 100
+ 132 | 132 |   2 |   2 | 100 | 100
+ 132 | 132 |   2 |   2 | 131 | 131
+ 132 | 132 |   2 |   2 | 131 | 131
+ 132 | 132 |   2 |   2 | 131 | 131
+ 132 | 132 |   2 |   2 | 131 | 131
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 | 100 | 100 |   3 |   3
+ 132 | 132 | 100 | 100 |   3 |   3
+ 132 | 132 | 100 | 100 |   3 |   3
+ 132 | 132 | 100 | 100 |   3 |   3
+ 132 | 132 | 100 | 100 | 100 | 100
+ 132 | 132 | 100 | 100 | 100 | 100
+ 132 | 132 | 100 | 100 | 131 | 131
+ 132 | 132 | 100 | 100 | 131 | 131
+ 132 | 132 | 100 | 100 | 132 | 132
+ 132 | 132 | 100 | 100 | 132 | 132
+ 132 | 132 | 100 | 100 | 132 | 132
+ 132 | 132 | 100 | 100 | 132 | 132
+ 132 | 132 | 100 | 100 | 200 | 200
+ 132 | 132 | 100 | 100 | 200 | 200
+ 132 | 132 | 100 | 100 | 200 | 200
+ 132 | 132 | 100 | 100 | 200 | 200
+ 132 | 132 | 100 | 100 | 232 | 232
+ 132 | 132 | 100 | 100 | 232 | 232
+ 132 | 132 | 100 | 100 | 232 | 232
+ 132 | 132 | 100 | 100 | 232 | 232
+ 132 | 132 | 121 | 121 |   3 |   3
+ 132 | 132 | 121 | 121 |   3 |   3
+ 132 | 132 | 121 | 121 |   3 |   3
+ 132 | 132 | 121 | 121 |   3 |   3
+ 132 | 132 | 121 | 121 | 100 | 100
+ 132 | 132 | 121 | 121 | 100 | 100
+ 132 | 132 | 121 | 121 | 131 | 131
+ 132 | 132 | 121 | 121 | 131 | 131
+ 132 | 132 | 121 | 121 | 132 | 132
+ 132 | 132 | 121 | 121 | 132 | 132
+ 132 | 132 | 121 | 121 | 132 | 132
+ 132 | 132 | 121 | 121 | 132 | 132
+ 132 | 132 | 121 | 121 | 200 | 200
+ 132 | 132 | 121 | 121 | 200 | 200
+ 132 | 132 | 121 | 121 | 200 | 200
+ 132 | 132 | 121 | 121 | 200 | 200
+ 132 | 132 | 121 | 121 | 232 | 232
+ 132 | 132 | 121 | 121 | 232 | 232
+ 132 | 132 | 121 | 121 | 232 | 232
+ 132 | 132 | 121 | 121 | 232 | 232
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 | 100 | 100
+ 132 | 132 | 122 | 122 | 100 | 100
+ 132 | 132 | 122 | 122 | 100 | 100
+ 132 | 132 | 122 | 122 | 100 | 100
+ 132 | 132 | 122 | 122 | 131 | 131
+ 132 | 132 | 122 | 122 | 131 | 131
+ 132 | 132 | 122 | 122 | 131 | 131
+ 132 | 132 | 122 | 122 | 131 | 131
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 | 100 | 100
+ 132 | 132 | 200 | 200 | 100 | 100
+ 132 | 132 | 200 | 200 | 100 | 100
+ 132 | 132 | 200 | 200 | 100 | 100
+ 132 | 132 | 200 | 200 | 131 | 131
+ 132 | 132 | 200 | 200 | 131 | 131
+ 132 | 132 | 200 | 200 | 131 | 131
+ 132 | 132 | 200 | 200 | 131 | 131
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 231 | 231 |   3 |   3
+ 132 | 132 | 231 | 231 |   3 |   3
+ 132 | 132 | 231 | 231 |   3 |   3
+ 132 | 132 | 231 | 231 |   3 |   3
+ 132 | 132 | 231 | 231 | 100 | 100
+ 132 | 132 | 231 | 231 | 100 | 100
+ 132 | 132 | 231 | 231 | 131 | 131
+ 132 | 132 | 231 | 231 | 131 | 131
+ 132 | 132 | 231 | 231 | 132 | 132
+ 132 | 132 | 231 | 231 | 132 | 132
+ 132 | 132 | 231 | 231 | 132 | 132
+ 132 | 132 | 231 | 231 | 132 | 132
+ 132 | 132 | 231 | 231 | 200 | 200
+ 132 | 132 | 231 | 231 | 200 | 200
+ 132 | 132 | 231 | 231 | 200 | 200
+ 132 | 132 | 231 | 231 | 200 | 200
+ 132 | 132 | 231 | 231 | 232 | 232
+ 132 | 132 | 231 | 231 | 232 | 232
+ 132 | 132 | 231 | 231 | 232 | 232
+ 132 | 132 | 231 | 231 | 232 | 232
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 | 100 | 100
+ 132 | 132 | 232 | 232 | 100 | 100
+ 132 | 132 | 232 | 232 | 100 | 100
+ 132 | 132 | 232 | 232 | 100 | 100
+ 132 | 132 | 232 | 232 | 131 | 131
+ 132 | 132 | 232 | 232 | 131 | 131
+ 132 | 132 | 232 | 232 | 131 | 131
+ 132 | 132 | 232 | 232 | 131 | 131
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 | 100 | 100
+ 200 | 200 |   2 |   2 | 100 | 100
+ 200 | 200 |   2 |   2 | 100 | 100
+ 200 | 200 |   2 |   2 | 100 | 100
+ 200 | 200 |   2 |   2 | 131 | 131
+ 200 | 200 |   2 |   2 | 131 | 131
+ 200 | 200 |   2 |   2 | 131 | 131
+ 200 | 200 |   2 |   2 | 131 | 131
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 | 100 | 100 |   3 |   3
+ 200 | 200 | 100 | 100 |   3 |   3
+ 200 | 200 | 100 | 100 |   3 |   3
+ 200 | 200 | 100 | 100 |   3 |   3
+ 200 | 200 | 100 | 100 | 100 | 100
+ 200 | 200 | 100 | 100 | 100 | 100
+ 200 | 200 | 100 | 100 | 131 | 131
+ 200 | 200 | 100 | 100 | 131 | 131
+ 200 | 200 | 100 | 100 | 132 | 132
+ 200 | 200 | 100 | 100 | 132 | 132
+ 200 | 200 | 100 | 100 | 132 | 132
+ 200 | 200 | 100 | 100 | 132 | 132
+ 200 | 200 | 100 | 100 | 200 | 200
+ 200 | 200 | 100 | 100 | 200 | 200
+ 200 | 200 | 100 | 100 | 200 | 200
+ 200 | 200 | 100 | 100 | 200 | 200
+ 200 | 200 | 100 | 100 | 232 | 232
+ 200 | 200 | 100 | 100 | 232 | 232
+ 200 | 200 | 100 | 100 | 232 | 232
+ 200 | 200 | 100 | 100 | 232 | 232
+ 200 | 200 | 121 | 121 |   3 |   3
+ 200 | 200 | 121 | 121 |   3 |   3
+ 200 | 200 | 121 | 121 |   3 |   3
+ 200 | 200 | 121 | 121 |   3 |   3
+ 200 | 200 | 121 | 121 | 100 | 100
+ 200 | 200 | 121 | 121 | 100 | 100
+ 200 | 200 | 121 | 121 | 131 | 131
+ 200 | 200 | 121 | 121 | 131 | 131
+ 200 | 200 | 121 | 121 | 132 | 132
+ 200 | 200 | 121 | 121 | 132 | 132
+ 200 | 200 | 121 | 121 | 132 | 132
+ 200 | 200 | 121 | 121 | 132 | 132
+ 200 | 200 | 121 | 121 | 200 | 200
+ 200 | 200 | 121 | 121 | 200 | 200
+ 200 | 200 | 121 | 121 | 200 | 200
+ 200 | 200 | 121 | 121 | 200 | 200
+ 200 | 200 | 121 | 121 | 232 | 232
+ 200 | 200 | 121 | 121 | 232 | 232
+ 200 | 200 | 121 | 121 | 232 | 232
+ 200 | 200 | 121 | 121 | 232 | 232
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 | 100 | 100
+ 200 | 200 | 122 | 122 | 100 | 100
+ 200 | 200 | 122 | 122 | 100 | 100
+ 200 | 200 | 122 | 122 | 100 | 100
+ 200 | 200 | 122 | 122 | 131 | 131
+ 200 | 200 | 122 | 122 | 131 | 131
+ 200 | 200 | 122 | 122 | 131 | 131
+ 200 | 200 | 122 | 122 | 131 | 131
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 | 100 | 100
+ 200 | 200 | 200 | 200 | 100 | 100
+ 200 | 200 | 200 | 200 | 100 | 100
+ 200 | 200 | 200 | 200 | 100 | 100
+ 200 | 200 | 200 | 200 | 131 | 131
+ 200 | 200 | 200 | 200 | 131 | 131
+ 200 | 200 | 200 | 200 | 131 | 131
+ 200 | 200 | 200 | 200 | 131 | 131
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 231 | 231 |   3 |   3
+ 200 | 200 | 231 | 231 |   3 |   3
+ 200 | 200 | 231 | 231 |   3 |   3
+ 200 | 200 | 231 | 231 |   3 |   3
+ 200 | 200 | 231 | 231 | 100 | 100
+ 200 | 200 | 231 | 231 | 100 | 100
+ 200 | 200 | 231 | 231 | 131 | 131
+ 200 | 200 | 231 | 231 | 131 | 131
+ 200 | 200 | 231 | 231 | 132 | 132
+ 200 | 200 | 231 | 231 | 132 | 132
+ 200 | 200 | 231 | 231 | 132 | 132
+ 200 | 200 | 231 | 231 | 132 | 132
+ 200 | 200 | 231 | 231 | 200 | 200
+ 200 | 200 | 231 | 231 | 200 | 200
+ 200 | 200 | 231 | 231 | 200 | 200
+ 200 | 200 | 231 | 231 | 200 | 200
+ 200 | 200 | 231 | 231 | 232 | 232
+ 200 | 200 | 231 | 231 | 232 | 232
+ 200 | 200 | 231 | 231 | 232 | 232
+ 200 | 200 | 231 | 231 | 232 | 232
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 | 100 | 100
+ 200 | 200 | 232 | 232 | 100 | 100
+ 200 | 200 | 232 | 232 | 100 | 100
+ 200 | 200 | 232 | 232 | 100 | 100
+ 200 | 200 | 232 | 232 | 131 | 131
+ 200 | 200 | 232 | 232 | 131 | 131
+ 200 | 200 | 232 | 232 | 131 | 131
+ 200 | 200 | 232 | 232 | 131 | 131
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+(1210 rows)
+
+SET enable_nestloop=OFF;
+SET enable_hashjoin=OFF;
+SET enable_mergejoin=ON;
+SELECT * FROM t1 LEFT JOIN t2 FULL JOIN t3 ON 1=1 ON 1=1 ORDER BY 1,2,3,4,5,6;
+  a  |  b  |  j  |  k  |  x  |  y  
+-----+-----+-----+-----+-----+-----
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 |   3 |   3
+   1 |   1 |   2 |   2 | 100 | 100
+   1 |   1 |   2 |   2 | 100 | 100
+   1 |   1 |   2 |   2 | 100 | 100
+   1 |   1 |   2 |   2 | 100 | 100
+   1 |   1 |   2 |   2 | 131 | 131
+   1 |   1 |   2 |   2 | 131 | 131
+   1 |   1 |   2 |   2 | 131 | 131
+   1 |   1 |   2 |   2 | 131 | 131
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 132 | 132
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 200 | 200
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 |   2 |   2 | 232 | 232
+   1 |   1 | 100 | 100 |   3 |   3
+   1 |   1 | 100 | 100 |   3 |   3
+   1 |   1 | 100 | 100 |   3 |   3
+   1 |   1 | 100 | 100 |   3 |   3
+   1 |   1 | 100 | 100 | 100 | 100
+   1 |   1 | 100 | 100 | 100 | 100
+   1 |   1 | 100 | 100 | 131 | 131
+   1 |   1 | 100 | 100 | 131 | 131
+   1 |   1 | 100 | 100 | 132 | 132
+   1 |   1 | 100 | 100 | 132 | 132
+   1 |   1 | 100 | 100 | 132 | 132
+   1 |   1 | 100 | 100 | 132 | 132
+   1 |   1 | 100 | 100 | 200 | 200
+   1 |   1 | 100 | 100 | 200 | 200
+   1 |   1 | 100 | 100 | 200 | 200
+   1 |   1 | 100 | 100 | 200 | 200
+   1 |   1 | 100 | 100 | 232 | 232
+   1 |   1 | 100 | 100 | 232 | 232
+   1 |   1 | 100 | 100 | 232 | 232
+   1 |   1 | 100 | 100 | 232 | 232
+   1 |   1 | 121 | 121 |   3 |   3
+   1 |   1 | 121 | 121 |   3 |   3
+   1 |   1 | 121 | 121 |   3 |   3
+   1 |   1 | 121 | 121 |   3 |   3
+   1 |   1 | 121 | 121 | 100 | 100
+   1 |   1 | 121 | 121 | 100 | 100
+   1 |   1 | 121 | 121 | 131 | 131
+   1 |   1 | 121 | 121 | 131 | 131
+   1 |   1 | 121 | 121 | 132 | 132
+   1 |   1 | 121 | 121 | 132 | 132
+   1 |   1 | 121 | 121 | 132 | 132
+   1 |   1 | 121 | 121 | 132 | 132
+   1 |   1 | 121 | 121 | 200 | 200
+   1 |   1 | 121 | 121 | 200 | 200
+   1 |   1 | 121 | 121 | 200 | 200
+   1 |   1 | 121 | 121 | 200 | 200
+   1 |   1 | 121 | 121 | 232 | 232
+   1 |   1 | 121 | 121 | 232 | 232
+   1 |   1 | 121 | 121 | 232 | 232
+   1 |   1 | 121 | 121 | 232 | 232
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 |   3 |   3
+   1 |   1 | 122 | 122 | 100 | 100
+   1 |   1 | 122 | 122 | 100 | 100
+   1 |   1 | 122 | 122 | 100 | 100
+   1 |   1 | 122 | 122 | 100 | 100
+   1 |   1 | 122 | 122 | 131 | 131
+   1 |   1 | 122 | 122 | 131 | 131
+   1 |   1 | 122 | 122 | 131 | 131
+   1 |   1 | 122 | 122 | 131 | 131
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 132 | 132
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 200 | 200
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 122 | 122 | 232 | 232
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 |   3 |   3
+   1 |   1 | 200 | 200 | 100 | 100
+   1 |   1 | 200 | 200 | 100 | 100
+   1 |   1 | 200 | 200 | 100 | 100
+   1 |   1 | 200 | 200 | 100 | 100
+   1 |   1 | 200 | 200 | 131 | 131
+   1 |   1 | 200 | 200 | 131 | 131
+   1 |   1 | 200 | 200 | 131 | 131
+   1 |   1 | 200 | 200 | 131 | 131
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 132 | 132
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 200 | 200
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 200 | 200 | 232 | 232
+   1 |   1 | 231 | 231 |   3 |   3
+   1 |   1 | 231 | 231 |   3 |   3
+   1 |   1 | 231 | 231 |   3 |   3
+   1 |   1 | 231 | 231 |   3 |   3
+   1 |   1 | 231 | 231 | 100 | 100
+   1 |   1 | 231 | 231 | 100 | 100
+   1 |   1 | 231 | 231 | 131 | 131
+   1 |   1 | 231 | 231 | 131 | 131
+   1 |   1 | 231 | 231 | 132 | 132
+   1 |   1 | 231 | 231 | 132 | 132
+   1 |   1 | 231 | 231 | 132 | 132
+   1 |   1 | 231 | 231 | 132 | 132
+   1 |   1 | 231 | 231 | 200 | 200
+   1 |   1 | 231 | 231 | 200 | 200
+   1 |   1 | 231 | 231 | 200 | 200
+   1 |   1 | 231 | 231 | 200 | 200
+   1 |   1 | 231 | 231 | 232 | 232
+   1 |   1 | 231 | 231 | 232 | 232
+   1 |   1 | 231 | 231 | 232 | 232
+   1 |   1 | 231 | 231 | 232 | 232
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 |   3 |   3
+   1 |   1 | 232 | 232 | 100 | 100
+   1 |   1 | 232 | 232 | 100 | 100
+   1 |   1 | 232 | 232 | 100 | 100
+   1 |   1 | 232 | 232 | 100 | 100
+   1 |   1 | 232 | 232 | 131 | 131
+   1 |   1 | 232 | 232 | 131 | 131
+   1 |   1 | 232 | 232 | 131 | 131
+   1 |   1 | 232 | 232 | 131 | 131
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 132 | 132
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 200 | 200
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+   1 |   1 | 232 | 232 | 232 | 232
+ 100 | 100 |   2 |   2 |   3 |   3
+ 100 | 100 |   2 |   2 |   3 |   3
+ 100 | 100 |   2 |   2 |   3 |   3
+ 100 | 100 |   2 |   2 |   3 |   3
+ 100 | 100 |   2 |   2 | 100 | 100
+ 100 | 100 |   2 |   2 | 100 | 100
+ 100 | 100 |   2 |   2 | 131 | 131
+ 100 | 100 |   2 |   2 | 131 | 131
+ 100 | 100 |   2 |   2 | 132 | 132
+ 100 | 100 |   2 |   2 | 132 | 132
+ 100 | 100 |   2 |   2 | 132 | 132
+ 100 | 100 |   2 |   2 | 132 | 132
+ 100 | 100 |   2 |   2 | 200 | 200
+ 100 | 100 |   2 |   2 | 200 | 200
+ 100 | 100 |   2 |   2 | 200 | 200
+ 100 | 100 |   2 |   2 | 200 | 200
+ 100 | 100 |   2 |   2 | 232 | 232
+ 100 | 100 |   2 |   2 | 232 | 232
+ 100 | 100 |   2 |   2 | 232 | 232
+ 100 | 100 |   2 |   2 | 232 | 232
+ 100 | 100 | 100 | 100 |   3 |   3
+ 100 | 100 | 100 | 100 |   3 |   3
+ 100 | 100 | 100 | 100 | 100 | 100
+ 100 | 100 | 100 | 100 | 131 | 131
+ 100 | 100 | 100 | 100 | 132 | 132
+ 100 | 100 | 100 | 100 | 132 | 132
+ 100 | 100 | 100 | 100 | 200 | 200
+ 100 | 100 | 100 | 100 | 200 | 200
+ 100 | 100 | 100 | 100 | 232 | 232
+ 100 | 100 | 100 | 100 | 232 | 232
+ 100 | 100 | 121 | 121 |   3 |   3
+ 100 | 100 | 121 | 121 |   3 |   3
+ 100 | 100 | 121 | 121 | 100 | 100
+ 100 | 100 | 121 | 121 | 131 | 131
+ 100 | 100 | 121 | 121 | 132 | 132
+ 100 | 100 | 121 | 121 | 132 | 132
+ 100 | 100 | 121 | 121 | 200 | 200
+ 100 | 100 | 121 | 121 | 200 | 200
+ 100 | 100 | 121 | 121 | 232 | 232
+ 100 | 100 | 121 | 121 | 232 | 232
+ 100 | 100 | 122 | 122 |   3 |   3
+ 100 | 100 | 122 | 122 |   3 |   3
+ 100 | 100 | 122 | 122 |   3 |   3
+ 100 | 100 | 122 | 122 |   3 |   3
+ 100 | 100 | 122 | 122 | 100 | 100
+ 100 | 100 | 122 | 122 | 100 | 100
+ 100 | 100 | 122 | 122 | 131 | 131
+ 100 | 100 | 122 | 122 | 131 | 131
+ 100 | 100 | 122 | 122 | 132 | 132
+ 100 | 100 | 122 | 122 | 132 | 132
+ 100 | 100 | 122 | 122 | 132 | 132
+ 100 | 100 | 122 | 122 | 132 | 132
+ 100 | 100 | 122 | 122 | 200 | 200
+ 100 | 100 | 122 | 122 | 200 | 200
+ 100 | 100 | 122 | 122 | 200 | 200
+ 100 | 100 | 122 | 122 | 200 | 200
+ 100 | 100 | 122 | 122 | 232 | 232
+ 100 | 100 | 122 | 122 | 232 | 232
+ 100 | 100 | 122 | 122 | 232 | 232
+ 100 | 100 | 122 | 122 | 232 | 232
+ 100 | 100 | 200 | 200 |   3 |   3
+ 100 | 100 | 200 | 200 |   3 |   3
+ 100 | 100 | 200 | 200 |   3 |   3
+ 100 | 100 | 200 | 200 |   3 |   3
+ 100 | 100 | 200 | 200 | 100 | 100
+ 100 | 100 | 200 | 200 | 100 | 100
+ 100 | 100 | 200 | 200 | 131 | 131
+ 100 | 100 | 200 | 200 | 131 | 131
+ 100 | 100 | 200 | 200 | 132 | 132
+ 100 | 100 | 200 | 200 | 132 | 132
+ 100 | 100 | 200 | 200 | 132 | 132
+ 100 | 100 | 200 | 200 | 132 | 132
+ 100 | 100 | 200 | 200 | 200 | 200
+ 100 | 100 | 200 | 200 | 200 | 200
+ 100 | 100 | 200 | 200 | 200 | 200
+ 100 | 100 | 200 | 200 | 200 | 200
+ 100 | 100 | 200 | 200 | 232 | 232
+ 100 | 100 | 200 | 200 | 232 | 232
+ 100 | 100 | 200 | 200 | 232 | 232
+ 100 | 100 | 200 | 200 | 232 | 232
+ 100 | 100 | 231 | 231 |   3 |   3
+ 100 | 100 | 231 | 231 |   3 |   3
+ 100 | 100 | 231 | 231 | 100 | 100
+ 100 | 100 | 231 | 231 | 131 | 131
+ 100 | 100 | 231 | 231 | 132 | 132
+ 100 | 100 | 231 | 231 | 132 | 132
+ 100 | 100 | 231 | 231 | 200 | 200
+ 100 | 100 | 231 | 231 | 200 | 200
+ 100 | 100 | 231 | 231 | 232 | 232
+ 100 | 100 | 231 | 231 | 232 | 232
+ 100 | 100 | 232 | 232 |   3 |   3
+ 100 | 100 | 232 | 232 |   3 |   3
+ 100 | 100 | 232 | 232 |   3 |   3
+ 100 | 100 | 232 | 232 |   3 |   3
+ 100 | 100 | 232 | 232 | 100 | 100
+ 100 | 100 | 232 | 232 | 100 | 100
+ 100 | 100 | 232 | 232 | 131 | 131
+ 100 | 100 | 232 | 232 | 131 | 131
+ 100 | 100 | 232 | 232 | 132 | 132
+ 100 | 100 | 232 | 232 | 132 | 132
+ 100 | 100 | 232 | 232 | 132 | 132
+ 100 | 100 | 232 | 232 | 132 | 132
+ 100 | 100 | 232 | 232 | 200 | 200
+ 100 | 100 | 232 | 232 | 200 | 200
+ 100 | 100 | 232 | 232 | 200 | 200
+ 100 | 100 | 232 | 232 | 200 | 200
+ 100 | 100 | 232 | 232 | 232 | 232
+ 100 | 100 | 232 | 232 | 232 | 232
+ 100 | 100 | 232 | 232 | 232 | 232
+ 100 | 100 | 232 | 232 | 232 | 232
+ 121 | 121 |   2 |   2 |   3 |   3
+ 121 | 121 |   2 |   2 |   3 |   3
+ 121 | 121 |   2 |   2 |   3 |   3
+ 121 | 121 |   2 |   2 |   3 |   3
+ 121 | 121 |   2 |   2 | 100 | 100
+ 121 | 121 |   2 |   2 | 100 | 100
+ 121 | 121 |   2 |   2 | 131 | 131
+ 121 | 121 |   2 |   2 | 131 | 131
+ 121 | 121 |   2 |   2 | 132 | 132
+ 121 | 121 |   2 |   2 | 132 | 132
+ 121 | 121 |   2 |   2 | 132 | 132
+ 121 | 121 |   2 |   2 | 132 | 132
+ 121 | 121 |   2 |   2 | 200 | 200
+ 121 | 121 |   2 |   2 | 200 | 200
+ 121 | 121 |   2 |   2 | 200 | 200
+ 121 | 121 |   2 |   2 | 200 | 200
+ 121 | 121 |   2 |   2 | 232 | 232
+ 121 | 121 |   2 |   2 | 232 | 232
+ 121 | 121 |   2 |   2 | 232 | 232
+ 121 | 121 |   2 |   2 | 232 | 232
+ 121 | 121 | 100 | 100 |   3 |   3
+ 121 | 121 | 100 | 100 |   3 |   3
+ 121 | 121 | 100 | 100 | 100 | 100
+ 121 | 121 | 100 | 100 | 131 | 131
+ 121 | 121 | 100 | 100 | 132 | 132
+ 121 | 121 | 100 | 100 | 132 | 132
+ 121 | 121 | 100 | 100 | 200 | 200
+ 121 | 121 | 100 | 100 | 200 | 200
+ 121 | 121 | 100 | 100 | 232 | 232
+ 121 | 121 | 100 | 100 | 232 | 232
+ 121 | 121 | 121 | 121 |   3 |   3
+ 121 | 121 | 121 | 121 |   3 |   3
+ 121 | 121 | 121 | 121 | 100 | 100
+ 121 | 121 | 121 | 121 | 131 | 131
+ 121 | 121 | 121 | 121 | 132 | 132
+ 121 | 121 | 121 | 121 | 132 | 132
+ 121 | 121 | 121 | 121 | 200 | 200
+ 121 | 121 | 121 | 121 | 200 | 200
+ 121 | 121 | 121 | 121 | 232 | 232
+ 121 | 121 | 121 | 121 | 232 | 232
+ 121 | 121 | 122 | 122 |   3 |   3
+ 121 | 121 | 122 | 122 |   3 |   3
+ 121 | 121 | 122 | 122 |   3 |   3
+ 121 | 121 | 122 | 122 |   3 |   3
+ 121 | 121 | 122 | 122 | 100 | 100
+ 121 | 121 | 122 | 122 | 100 | 100
+ 121 | 121 | 122 | 122 | 131 | 131
+ 121 | 121 | 122 | 122 | 131 | 131
+ 121 | 121 | 122 | 122 | 132 | 132
+ 121 | 121 | 122 | 122 | 132 | 132
+ 121 | 121 | 122 | 122 | 132 | 132
+ 121 | 121 | 122 | 122 | 132 | 132
+ 121 | 121 | 122 | 122 | 200 | 200
+ 121 | 121 | 122 | 122 | 200 | 200
+ 121 | 121 | 122 | 122 | 200 | 200
+ 121 | 121 | 122 | 122 | 200 | 200
+ 121 | 121 | 122 | 122 | 232 | 232
+ 121 | 121 | 122 | 122 | 232 | 232
+ 121 | 121 | 122 | 122 | 232 | 232
+ 121 | 121 | 122 | 122 | 232 | 232
+ 121 | 121 | 200 | 200 |   3 |   3
+ 121 | 121 | 200 | 200 |   3 |   3
+ 121 | 121 | 200 | 200 |   3 |   3
+ 121 | 121 | 200 | 200 |   3 |   3
+ 121 | 121 | 200 | 200 | 100 | 100
+ 121 | 121 | 200 | 200 | 100 | 100
+ 121 | 121 | 200 | 200 | 131 | 131
+ 121 | 121 | 200 | 200 | 131 | 131
+ 121 | 121 | 200 | 200 | 132 | 132
+ 121 | 121 | 200 | 200 | 132 | 132
+ 121 | 121 | 200 | 200 | 132 | 132
+ 121 | 121 | 200 | 200 | 132 | 132
+ 121 | 121 | 200 | 200 | 200 | 200
+ 121 | 121 | 200 | 200 | 200 | 200
+ 121 | 121 | 200 | 200 | 200 | 200
+ 121 | 121 | 200 | 200 | 200 | 200
+ 121 | 121 | 200 | 200 | 232 | 232
+ 121 | 121 | 200 | 200 | 232 | 232
+ 121 | 121 | 200 | 200 | 232 | 232
+ 121 | 121 | 200 | 200 | 232 | 232
+ 121 | 121 | 231 | 231 |   3 |   3
+ 121 | 121 | 231 | 231 |   3 |   3
+ 121 | 121 | 231 | 231 | 100 | 100
+ 121 | 121 | 231 | 231 | 131 | 131
+ 121 | 121 | 231 | 231 | 132 | 132
+ 121 | 121 | 231 | 231 | 132 | 132
+ 121 | 121 | 231 | 231 | 200 | 200
+ 121 | 121 | 231 | 231 | 200 | 200
+ 121 | 121 | 231 | 231 | 232 | 232
+ 121 | 121 | 231 | 231 | 232 | 232
+ 121 | 121 | 232 | 232 |   3 |   3
+ 121 | 121 | 232 | 232 |   3 |   3
+ 121 | 121 | 232 | 232 |   3 |   3
+ 121 | 121 | 232 | 232 |   3 |   3
+ 121 | 121 | 232 | 232 | 100 | 100
+ 121 | 121 | 232 | 232 | 100 | 100
+ 121 | 121 | 232 | 232 | 131 | 131
+ 121 | 121 | 232 | 232 | 131 | 131
+ 121 | 121 | 232 | 232 | 132 | 132
+ 121 | 121 | 232 | 232 | 132 | 132
+ 121 | 121 | 232 | 232 | 132 | 132
+ 121 | 121 | 232 | 232 | 132 | 132
+ 121 | 121 | 232 | 232 | 200 | 200
+ 121 | 121 | 232 | 232 | 200 | 200
+ 121 | 121 | 232 | 232 | 200 | 200
+ 121 | 121 | 232 | 232 | 200 | 200
+ 121 | 121 | 232 | 232 | 232 | 232
+ 121 | 121 | 232 | 232 | 232 | 232
+ 121 | 121 | 232 | 232 | 232 | 232
+ 121 | 121 | 232 | 232 | 232 | 232
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 |   3 |   3
+ 122 | 122 |   2 |   2 | 100 | 100
+ 122 | 122 |   2 |   2 | 100 | 100
+ 122 | 122 |   2 |   2 | 100 | 100
+ 122 | 122 |   2 |   2 | 100 | 100
+ 122 | 122 |   2 |   2 | 131 | 131
+ 122 | 122 |   2 |   2 | 131 | 131
+ 122 | 122 |   2 |   2 | 131 | 131
+ 122 | 122 |   2 |   2 | 131 | 131
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 132 | 132
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 200 | 200
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 |   2 |   2 | 232 | 232
+ 122 | 122 | 100 | 100 |   3 |   3
+ 122 | 122 | 100 | 100 |   3 |   3
+ 122 | 122 | 100 | 100 |   3 |   3
+ 122 | 122 | 100 | 100 |   3 |   3
+ 122 | 122 | 100 | 100 | 100 | 100
+ 122 | 122 | 100 | 100 | 100 | 100
+ 122 | 122 | 100 | 100 | 131 | 131
+ 122 | 122 | 100 | 100 | 131 | 131
+ 122 | 122 | 100 | 100 | 132 | 132
+ 122 | 122 | 100 | 100 | 132 | 132
+ 122 | 122 | 100 | 100 | 132 | 132
+ 122 | 122 | 100 | 100 | 132 | 132
+ 122 | 122 | 100 | 100 | 200 | 200
+ 122 | 122 | 100 | 100 | 200 | 200
+ 122 | 122 | 100 | 100 | 200 | 200
+ 122 | 122 | 100 | 100 | 200 | 200
+ 122 | 122 | 100 | 100 | 232 | 232
+ 122 | 122 | 100 | 100 | 232 | 232
+ 122 | 122 | 100 | 100 | 232 | 232
+ 122 | 122 | 100 | 100 | 232 | 232
+ 122 | 122 | 121 | 121 |   3 |   3
+ 122 | 122 | 121 | 121 |   3 |   3
+ 122 | 122 | 121 | 121 |   3 |   3
+ 122 | 122 | 121 | 121 |   3 |   3
+ 122 | 122 | 121 | 121 | 100 | 100
+ 122 | 122 | 121 | 121 | 100 | 100
+ 122 | 122 | 121 | 121 | 131 | 131
+ 122 | 122 | 121 | 121 | 131 | 131
+ 122 | 122 | 121 | 121 | 132 | 132
+ 122 | 122 | 121 | 121 | 132 | 132
+ 122 | 122 | 121 | 121 | 132 | 132
+ 122 | 122 | 121 | 121 | 132 | 132
+ 122 | 122 | 121 | 121 | 200 | 200
+ 122 | 122 | 121 | 121 | 200 | 200
+ 122 | 122 | 121 | 121 | 200 | 200
+ 122 | 122 | 121 | 121 | 200 | 200
+ 122 | 122 | 121 | 121 | 232 | 232
+ 122 | 122 | 121 | 121 | 232 | 232
+ 122 | 122 | 121 | 121 | 232 | 232
+ 122 | 122 | 121 | 121 | 232 | 232
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 |   3 |   3
+ 122 | 122 | 122 | 122 | 100 | 100
+ 122 | 122 | 122 | 122 | 100 | 100
+ 122 | 122 | 122 | 122 | 100 | 100
+ 122 | 122 | 122 | 122 | 100 | 100
+ 122 | 122 | 122 | 122 | 131 | 131
+ 122 | 122 | 122 | 122 | 131 | 131
+ 122 | 122 | 122 | 122 | 131 | 131
+ 122 | 122 | 122 | 122 | 131 | 131
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 132 | 132
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 200 | 200
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 122 | 122 | 232 | 232
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 |   3 |   3
+ 122 | 122 | 200 | 200 | 100 | 100
+ 122 | 122 | 200 | 200 | 100 | 100
+ 122 | 122 | 200 | 200 | 100 | 100
+ 122 | 122 | 200 | 200 | 100 | 100
+ 122 | 122 | 200 | 200 | 131 | 131
+ 122 | 122 | 200 | 200 | 131 | 131
+ 122 | 122 | 200 | 200 | 131 | 131
+ 122 | 122 | 200 | 200 | 131 | 131
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 132 | 132
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 200 | 200
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 200 | 200 | 232 | 232
+ 122 | 122 | 231 | 231 |   3 |   3
+ 122 | 122 | 231 | 231 |   3 |   3
+ 122 | 122 | 231 | 231 |   3 |   3
+ 122 | 122 | 231 | 231 |   3 |   3
+ 122 | 122 | 231 | 231 | 100 | 100
+ 122 | 122 | 231 | 231 | 100 | 100
+ 122 | 122 | 231 | 231 | 131 | 131
+ 122 | 122 | 231 | 231 | 131 | 131
+ 122 | 122 | 231 | 231 | 132 | 132
+ 122 | 122 | 231 | 231 | 132 | 132
+ 122 | 122 | 231 | 231 | 132 | 132
+ 122 | 122 | 231 | 231 | 132 | 132
+ 122 | 122 | 231 | 231 | 200 | 200
+ 122 | 122 | 231 | 231 | 200 | 200
+ 122 | 122 | 231 | 231 | 200 | 200
+ 122 | 122 | 231 | 231 | 200 | 200
+ 122 | 122 | 231 | 231 | 232 | 232
+ 122 | 122 | 231 | 231 | 232 | 232
+ 122 | 122 | 231 | 231 | 232 | 232
+ 122 | 122 | 231 | 231 | 232 | 232
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 |   3 |   3
+ 122 | 122 | 232 | 232 | 100 | 100
+ 122 | 122 | 232 | 232 | 100 | 100
+ 122 | 122 | 232 | 232 | 100 | 100
+ 122 | 122 | 232 | 232 | 100 | 100
+ 122 | 122 | 232 | 232 | 131 | 131
+ 122 | 122 | 232 | 232 | 131 | 131
+ 122 | 122 | 232 | 232 | 131 | 131
+ 122 | 122 | 232 | 232 | 131 | 131
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 132 | 132
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 200 | 200
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 122 | 122 | 232 | 232 | 232 | 232
+ 131 | 131 |   2 |   2 |   3 |   3
+ 131 | 131 |   2 |   2 |   3 |   3
+ 131 | 131 |   2 |   2 |   3 |   3
+ 131 | 131 |   2 |   2 |   3 |   3
+ 131 | 131 |   2 |   2 | 100 | 100
+ 131 | 131 |   2 |   2 | 100 | 100
+ 131 | 131 |   2 |   2 | 131 | 131
+ 131 | 131 |   2 |   2 | 131 | 131
+ 131 | 131 |   2 |   2 | 132 | 132
+ 131 | 131 |   2 |   2 | 132 | 132
+ 131 | 131 |   2 |   2 | 132 | 132
+ 131 | 131 |   2 |   2 | 132 | 132
+ 131 | 131 |   2 |   2 | 200 | 200
+ 131 | 131 |   2 |   2 | 200 | 200
+ 131 | 131 |   2 |   2 | 200 | 200
+ 131 | 131 |   2 |   2 | 200 | 200
+ 131 | 131 |   2 |   2 | 232 | 232
+ 131 | 131 |   2 |   2 | 232 | 232
+ 131 | 131 |   2 |   2 | 232 | 232
+ 131 | 131 |   2 |   2 | 232 | 232
+ 131 | 131 | 100 | 100 |   3 |   3
+ 131 | 131 | 100 | 100 |   3 |   3
+ 131 | 131 | 100 | 100 | 100 | 100
+ 131 | 131 | 100 | 100 | 131 | 131
+ 131 | 131 | 100 | 100 | 132 | 132
+ 131 | 131 | 100 | 100 | 132 | 132
+ 131 | 131 | 100 | 100 | 200 | 200
+ 131 | 131 | 100 | 100 | 200 | 200
+ 131 | 131 | 100 | 100 | 232 | 232
+ 131 | 131 | 100 | 100 | 232 | 232
+ 131 | 131 | 121 | 121 |   3 |   3
+ 131 | 131 | 121 | 121 |   3 |   3
+ 131 | 131 | 121 | 121 | 100 | 100
+ 131 | 131 | 121 | 121 | 131 | 131
+ 131 | 131 | 121 | 121 | 132 | 132
+ 131 | 131 | 121 | 121 | 132 | 132
+ 131 | 131 | 121 | 121 | 200 | 200
+ 131 | 131 | 121 | 121 | 200 | 200
+ 131 | 131 | 121 | 121 | 232 | 232
+ 131 | 131 | 121 | 121 | 232 | 232
+ 131 | 131 | 122 | 122 |   3 |   3
+ 131 | 131 | 122 | 122 |   3 |   3
+ 131 | 131 | 122 | 122 |   3 |   3
+ 131 | 131 | 122 | 122 |   3 |   3
+ 131 | 131 | 122 | 122 | 100 | 100
+ 131 | 131 | 122 | 122 | 100 | 100
+ 131 | 131 | 122 | 122 | 131 | 131
+ 131 | 131 | 122 | 122 | 131 | 131
+ 131 | 131 | 122 | 122 | 132 | 132
+ 131 | 131 | 122 | 122 | 132 | 132
+ 131 | 131 | 122 | 122 | 132 | 132
+ 131 | 131 | 122 | 122 | 132 | 132
+ 131 | 131 | 122 | 122 | 200 | 200
+ 131 | 131 | 122 | 122 | 200 | 200
+ 131 | 131 | 122 | 122 | 200 | 200
+ 131 | 131 | 122 | 122 | 200 | 200
+ 131 | 131 | 122 | 122 | 232 | 232
+ 131 | 131 | 122 | 122 | 232 | 232
+ 131 | 131 | 122 | 122 | 232 | 232
+ 131 | 131 | 122 | 122 | 232 | 232
+ 131 | 131 | 200 | 200 |   3 |   3
+ 131 | 131 | 200 | 200 |   3 |   3
+ 131 | 131 | 200 | 200 |   3 |   3
+ 131 | 131 | 200 | 200 |   3 |   3
+ 131 | 131 | 200 | 200 | 100 | 100
+ 131 | 131 | 200 | 200 | 100 | 100
+ 131 | 131 | 200 | 200 | 131 | 131
+ 131 | 131 | 200 | 200 | 131 | 131
+ 131 | 131 | 200 | 200 | 132 | 132
+ 131 | 131 | 200 | 200 | 132 | 132
+ 131 | 131 | 200 | 200 | 132 | 132
+ 131 | 131 | 200 | 200 | 132 | 132
+ 131 | 131 | 200 | 200 | 200 | 200
+ 131 | 131 | 200 | 200 | 200 | 200
+ 131 | 131 | 200 | 200 | 200 | 200
+ 131 | 131 | 200 | 200 | 200 | 200
+ 131 | 131 | 200 | 200 | 232 | 232
+ 131 | 131 | 200 | 200 | 232 | 232
+ 131 | 131 | 200 | 200 | 232 | 232
+ 131 | 131 | 200 | 200 | 232 | 232
+ 131 | 131 | 231 | 231 |   3 |   3
+ 131 | 131 | 231 | 231 |   3 |   3
+ 131 | 131 | 231 | 231 | 100 | 100
+ 131 | 131 | 231 | 231 | 131 | 131
+ 131 | 131 | 231 | 231 | 132 | 132
+ 131 | 131 | 231 | 231 | 132 | 132
+ 131 | 131 | 231 | 231 | 200 | 200
+ 131 | 131 | 231 | 231 | 200 | 200
+ 131 | 131 | 231 | 231 | 232 | 232
+ 131 | 131 | 231 | 231 | 232 | 232
+ 131 | 131 | 232 | 232 |   3 |   3
+ 131 | 131 | 232 | 232 |   3 |   3
+ 131 | 131 | 232 | 232 |   3 |   3
+ 131 | 131 | 232 | 232 |   3 |   3
+ 131 | 131 | 232 | 232 | 100 | 100
+ 131 | 131 | 232 | 232 | 100 | 100
+ 131 | 131 | 232 | 232 | 131 | 131
+ 131 | 131 | 232 | 232 | 131 | 131
+ 131 | 131 | 232 | 232 | 132 | 132
+ 131 | 131 | 232 | 232 | 132 | 132
+ 131 | 131 | 232 | 232 | 132 | 132
+ 131 | 131 | 232 | 232 | 132 | 132
+ 131 | 131 | 232 | 232 | 200 | 200
+ 131 | 131 | 232 | 232 | 200 | 200
+ 131 | 131 | 232 | 232 | 200 | 200
+ 131 | 131 | 232 | 232 | 200 | 200
+ 131 | 131 | 232 | 232 | 232 | 232
+ 131 | 131 | 232 | 232 | 232 | 232
+ 131 | 131 | 232 | 232 | 232 | 232
+ 131 | 131 | 232 | 232 | 232 | 232
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 |   3 |   3
+ 132 | 132 |   2 |   2 | 100 | 100
+ 132 | 132 |   2 |   2 | 100 | 100
+ 132 | 132 |   2 |   2 | 100 | 100
+ 132 | 132 |   2 |   2 | 100 | 100
+ 132 | 132 |   2 |   2 | 131 | 131
+ 132 | 132 |   2 |   2 | 131 | 131
+ 132 | 132 |   2 |   2 | 131 | 131
+ 132 | 132 |   2 |   2 | 131 | 131
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 132 | 132
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 200 | 200
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 |   2 |   2 | 232 | 232
+ 132 | 132 | 100 | 100 |   3 |   3
+ 132 | 132 | 100 | 100 |   3 |   3
+ 132 | 132 | 100 | 100 |   3 |   3
+ 132 | 132 | 100 | 100 |   3 |   3
+ 132 | 132 | 100 | 100 | 100 | 100
+ 132 | 132 | 100 | 100 | 100 | 100
+ 132 | 132 | 100 | 100 | 131 | 131
+ 132 | 132 | 100 | 100 | 131 | 131
+ 132 | 132 | 100 | 100 | 132 | 132
+ 132 | 132 | 100 | 100 | 132 | 132
+ 132 | 132 | 100 | 100 | 132 | 132
+ 132 | 132 | 100 | 100 | 132 | 132
+ 132 | 132 | 100 | 100 | 200 | 200
+ 132 | 132 | 100 | 100 | 200 | 200
+ 132 | 132 | 100 | 100 | 200 | 200
+ 132 | 132 | 100 | 100 | 200 | 200
+ 132 | 132 | 100 | 100 | 232 | 232
+ 132 | 132 | 100 | 100 | 232 | 232
+ 132 | 132 | 100 | 100 | 232 | 232
+ 132 | 132 | 100 | 100 | 232 | 232
+ 132 | 132 | 121 | 121 |   3 |   3
+ 132 | 132 | 121 | 121 |   3 |   3
+ 132 | 132 | 121 | 121 |   3 |   3
+ 132 | 132 | 121 | 121 |   3 |   3
+ 132 | 132 | 121 | 121 | 100 | 100
+ 132 | 132 | 121 | 121 | 100 | 100
+ 132 | 132 | 121 | 121 | 131 | 131
+ 132 | 132 | 121 | 121 | 131 | 131
+ 132 | 132 | 121 | 121 | 132 | 132
+ 132 | 132 | 121 | 121 | 132 | 132
+ 132 | 132 | 121 | 121 | 132 | 132
+ 132 | 132 | 121 | 121 | 132 | 132
+ 132 | 132 | 121 | 121 | 200 | 200
+ 132 | 132 | 121 | 121 | 200 | 200
+ 132 | 132 | 121 | 121 | 200 | 200
+ 132 | 132 | 121 | 121 | 200 | 200
+ 132 | 132 | 121 | 121 | 232 | 232
+ 132 | 132 | 121 | 121 | 232 | 232
+ 132 | 132 | 121 | 121 | 232 | 232
+ 132 | 132 | 121 | 121 | 232 | 232
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 |   3 |   3
+ 132 | 132 | 122 | 122 | 100 | 100
+ 132 | 132 | 122 | 122 | 100 | 100
+ 132 | 132 | 122 | 122 | 100 | 100
+ 132 | 132 | 122 | 122 | 100 | 100
+ 132 | 132 | 122 | 122 | 131 | 131
+ 132 | 132 | 122 | 122 | 131 | 131
+ 132 | 132 | 122 | 122 | 131 | 131
+ 132 | 132 | 122 | 122 | 131 | 131
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 132 | 132
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 200 | 200
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 122 | 122 | 232 | 232
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 |   3 |   3
+ 132 | 132 | 200 | 200 | 100 | 100
+ 132 | 132 | 200 | 200 | 100 | 100
+ 132 | 132 | 200 | 200 | 100 | 100
+ 132 | 132 | 200 | 200 | 100 | 100
+ 132 | 132 | 200 | 200 | 131 | 131
+ 132 | 132 | 200 | 200 | 131 | 131
+ 132 | 132 | 200 | 200 | 131 | 131
+ 132 | 132 | 200 | 200 | 131 | 131
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 132 | 132
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 200 | 200
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 200 | 200 | 232 | 232
+ 132 | 132 | 231 | 231 |   3 |   3
+ 132 | 132 | 231 | 231 |   3 |   3
+ 132 | 132 | 231 | 231 |   3 |   3
+ 132 | 132 | 231 | 231 |   3 |   3
+ 132 | 132 | 231 | 231 | 100 | 100
+ 132 | 132 | 231 | 231 | 100 | 100
+ 132 | 132 | 231 | 231 | 131 | 131
+ 132 | 132 | 231 | 231 | 131 | 131
+ 132 | 132 | 231 | 231 | 132 | 132
+ 132 | 132 | 231 | 231 | 132 | 132
+ 132 | 132 | 231 | 231 | 132 | 132
+ 132 | 132 | 231 | 231 | 132 | 132
+ 132 | 132 | 231 | 231 | 200 | 200
+ 132 | 132 | 231 | 231 | 200 | 200
+ 132 | 132 | 231 | 231 | 200 | 200
+ 132 | 132 | 231 | 231 | 200 | 200
+ 132 | 132 | 231 | 231 | 232 | 232
+ 132 | 132 | 231 | 231 | 232 | 232
+ 132 | 132 | 231 | 231 | 232 | 232
+ 132 | 132 | 231 | 231 | 232 | 232
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 |   3 |   3
+ 132 | 132 | 232 | 232 | 100 | 100
+ 132 | 132 | 232 | 232 | 100 | 100
+ 132 | 132 | 232 | 232 | 100 | 100
+ 132 | 132 | 232 | 232 | 100 | 100
+ 132 | 132 | 232 | 232 | 131 | 131
+ 132 | 132 | 232 | 232 | 131 | 131
+ 132 | 132 | 232 | 232 | 131 | 131
+ 132 | 132 | 232 | 232 | 131 | 131
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 132 | 132
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 200 | 200
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 132 | 132 | 232 | 232 | 232 | 232
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 |   3 |   3
+ 200 | 200 |   2 |   2 | 100 | 100
+ 200 | 200 |   2 |   2 | 100 | 100
+ 200 | 200 |   2 |   2 | 100 | 100
+ 200 | 200 |   2 |   2 | 100 | 100
+ 200 | 200 |   2 |   2 | 131 | 131
+ 200 | 200 |   2 |   2 | 131 | 131
+ 200 | 200 |   2 |   2 | 131 | 131
+ 200 | 200 |   2 |   2 | 131 | 131
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 132 | 132
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 200 | 200
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 |   2 |   2 | 232 | 232
+ 200 | 200 | 100 | 100 |   3 |   3
+ 200 | 200 | 100 | 100 |   3 |   3
+ 200 | 200 | 100 | 100 |   3 |   3
+ 200 | 200 | 100 | 100 |   3 |   3
+ 200 | 200 | 100 | 100 | 100 | 100
+ 200 | 200 | 100 | 100 | 100 | 100
+ 200 | 200 | 100 | 100 | 131 | 131
+ 200 | 200 | 100 | 100 | 131 | 131
+ 200 | 200 | 100 | 100 | 132 | 132
+ 200 | 200 | 100 | 100 | 132 | 132
+ 200 | 200 | 100 | 100 | 132 | 132
+ 200 | 200 | 100 | 100 | 132 | 132
+ 200 | 200 | 100 | 100 | 200 | 200
+ 200 | 200 | 100 | 100 | 200 | 200
+ 200 | 200 | 100 | 100 | 200 | 200
+ 200 | 200 | 100 | 100 | 200 | 200
+ 200 | 200 | 100 | 100 | 232 | 232
+ 200 | 200 | 100 | 100 | 232 | 232
+ 200 | 200 | 100 | 100 | 232 | 232
+ 200 | 200 | 100 | 100 | 232 | 232
+ 200 | 200 | 121 | 121 |   3 |   3
+ 200 | 200 | 121 | 121 |   3 |   3
+ 200 | 200 | 121 | 121 |   3 |   3
+ 200 | 200 | 121 | 121 |   3 |   3
+ 200 | 200 | 121 | 121 | 100 | 100
+ 200 | 200 | 121 | 121 | 100 | 100
+ 200 | 200 | 121 | 121 | 131 | 131
+ 200 | 200 | 121 | 121 | 131 | 131
+ 200 | 200 | 121 | 121 | 132 | 132
+ 200 | 200 | 121 | 121 | 132 | 132
+ 200 | 200 | 121 | 121 | 132 | 132
+ 200 | 200 | 121 | 121 | 132 | 132
+ 200 | 200 | 121 | 121 | 200 | 200
+ 200 | 200 | 121 | 121 | 200 | 200
+ 200 | 200 | 121 | 121 | 200 | 200
+ 200 | 200 | 121 | 121 | 200 | 200
+ 200 | 200 | 121 | 121 | 232 | 232
+ 200 | 200 | 121 | 121 | 232 | 232
+ 200 | 200 | 121 | 121 | 232 | 232
+ 200 | 200 | 121 | 121 | 232 | 232
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 |   3 |   3
+ 200 | 200 | 122 | 122 | 100 | 100
+ 200 | 200 | 122 | 122 | 100 | 100
+ 200 | 200 | 122 | 122 | 100 | 100
+ 200 | 200 | 122 | 122 | 100 | 100
+ 200 | 200 | 122 | 122 | 131 | 131
+ 200 | 200 | 122 | 122 | 131 | 131
+ 200 | 200 | 122 | 122 | 131 | 131
+ 200 | 200 | 122 | 122 | 131 | 131
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 132 | 132
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 200 | 200
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 122 | 122 | 232 | 232
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 |   3 |   3
+ 200 | 200 | 200 | 200 | 100 | 100
+ 200 | 200 | 200 | 200 | 100 | 100
+ 200 | 200 | 200 | 200 | 100 | 100
+ 200 | 200 | 200 | 200 | 100 | 100
+ 200 | 200 | 200 | 200 | 131 | 131
+ 200 | 200 | 200 | 200 | 131 | 131
+ 200 | 200 | 200 | 200 | 131 | 131
+ 200 | 200 | 200 | 200 | 131 | 131
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 132 | 132
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 200 | 200
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 200 | 200 | 232 | 232
+ 200 | 200 | 231 | 231 |   3 |   3
+ 200 | 200 | 231 | 231 |   3 |   3
+ 200 | 200 | 231 | 231 |   3 |   3
+ 200 | 200 | 231 | 231 |   3 |   3
+ 200 | 200 | 231 | 231 | 100 | 100
+ 200 | 200 | 231 | 231 | 100 | 100
+ 200 | 200 | 231 | 231 | 131 | 131
+ 200 | 200 | 231 | 231 | 131 | 131
+ 200 | 200 | 231 | 231 | 132 | 132
+ 200 | 200 | 231 | 231 | 132 | 132
+ 200 | 200 | 231 | 231 | 132 | 132
+ 200 | 200 | 231 | 231 | 132 | 132
+ 200 | 200 | 231 | 231 | 200 | 200
+ 200 | 200 | 231 | 231 | 200 | 200
+ 200 | 200 | 231 | 231 | 200 | 200
+ 200 | 200 | 231 | 231 | 200 | 200
+ 200 | 200 | 231 | 231 | 232 | 232
+ 200 | 200 | 231 | 231 | 232 | 232
+ 200 | 200 | 231 | 231 | 232 | 232
+ 200 | 200 | 231 | 231 | 232 | 232
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 |   3 |   3
+ 200 | 200 | 232 | 232 | 100 | 100
+ 200 | 200 | 232 | 232 | 100 | 100
+ 200 | 200 | 232 | 232 | 100 | 100
+ 200 | 200 | 232 | 232 | 100 | 100
+ 200 | 200 | 232 | 232 | 131 | 131
+ 200 | 200 | 232 | 232 | 131 | 131
+ 200 | 200 | 232 | 232 | 131 | 131
+ 200 | 200 | 232 | 232 | 131 | 131
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 132 | 132
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 200 | 200
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+ 200 | 200 | 232 | 232 | 232 | 232
+(1210 rows)
+
+DROP TABLE t1 CASCADE;
+DROP TABLE t2 CASCADE;
+DROP TABLE t3 CASCADE;
+CREATE TABLE ExecClearTuple_11 (col1 int PRIMARY KEY, col2 INT, col3 smallserial)  ;
+NOTICE:  CREATE TABLE will create implicit sequence "execcleartuple_11_col3_seq" for serial column "execcleartuple_11.col3"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "execcleartuple_11_pkey" for table "execcleartuple_11"
+PREPARE p1 AS INSERT INTO ExecClearTuple_11 VALUES($1, $2) ON DUPLICATE KEY UPDATE col2 = $1*100;
+EXECUTE p1(5, 50);
+SELECT * FROM ExecClearTuple_11 WHERE col1 = 5;
+ col1 | col2 | col3 
+------+------+------
+    5 |   50 |    1
+(1 row)
+
+EXECUTE p1(5, 50);
+SELECT * FROM ExecClearTuple_11 WHERE col1 = 5;
+ col1 | col2 | col3 
+------+------+------
+    5 |  500 |    1
+(1 row)
+
+DELETE ExecClearTuple_11 WHERE col1 = 5;
+DEALLOCATE p1;
+DROP TABLE ExecClearTuple_11 CASCADE;
+CREATE TABLE ExecClearTuple_subplan1(a1 int, b1 int, c1 int, d1 int) WITH (autovacuum_enabled= FALSE);
+CREATE TABLE ExecClearTuple_subplan2(a2 int, b2 int, c2 int, d2 int) WITH (autovacuum_enabled= FALSE);
+INSERT INTO ExecClearTuple_subplan1 SELECT generate_series(1, 100)%98, generate_series(1, 100)%20, generate_series(1, 100)%13, generate_series(1, 100)%6;
+INSERT INTO ExecClearTuple_subplan2 SELECT generate_series(1, 50)%48, generate_series(1, 50)%28, generate_series(1, 50)%12, generate_series(1, 50)%9;
+explain (costs OFF, nodes OFF)
+SELECT * FROM ExecClearTuple_subplan1 WHERE a1 in (SELECT a2 FROM ExecClearTuple_subplan2 WHERE b2=b1 intersect SELECT c2 FROM ExecClearTuple_subplan2) ORDER BY 1, 2 LIMIT 5;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: execcleartuple_subplan1.a1, execcleartuple_subplan1.b1
+         ->  Seq Scan on execcleartuple_subplan1
+               Filter: (SubPlan 1)
+               SubPlan 1
+                 ->  HashSetOp Intersect
+                       ->  Append
+                             ->  Subquery Scan on "*SELECT* 1"
+                                   ->  Seq Scan on execcleartuple_subplan2
+                                         Filter: (b2 = execcleartuple_subplan1.b1)
+                             ->  Subquery Scan on "*SELECT* 2"
+                                   ->  Seq Scan on execcleartuple_subplan2
+(13 rows)
+
+SELECT * FROM ExecClearTuple_subplan1 WHERE a1 in (SELECT a2 FROM ExecClearTuple_subplan2 WHERE b2=b1 intersect SELECT c2 FROM ExecClearTuple_subplan2) ORDER BY 1, 2 LIMIT 5;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs OFF, nodes OFF, verbose ON)
+SELECT ARRAY(SELECT a1 FROM ExecClearTuple_subplan1 WHERE ExecClearTuple_subplan1.b1=ExecClearTuple_subplan2.b2 ORDER BY 1) FROM ExecClearTuple_subplan2 ORDER BY a2, b2, c2, d2;
+                                                                 QUERY PLAN                                                                  
+---------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: ((SubPlan 1)), execcleartuple_subplan2.a2, execcleartuple_subplan2.b2, execcleartuple_subplan2.c2, execcleartuple_subplan2.d2
+   Sort Key: execcleartuple_subplan2.a2, execcleartuple_subplan2.b2, execcleartuple_subplan2.c2, execcleartuple_subplan2.d2
+   ->  Seq Scan on public.execcleartuple_subplan2
+         Output: (SubPlan 1), execcleartuple_subplan2.a2, execcleartuple_subplan2.b2, execcleartuple_subplan2.c2, execcleartuple_subplan2.d2
+         SubPlan 1
+           ->  Sort
+                 Output: execcleartuple_subplan1.a1
+                 Sort Key: execcleartuple_subplan1.a1
+                 ->  Seq Scan on public.execcleartuple_subplan1
+                       Output: execcleartuple_subplan1.a1
+                       Filter: (execcleartuple_subplan1.b1 = execcleartuple_subplan2.b2)
+(12 rows)
+
+SELECT ARRAY(SELECT a1 FROM ExecClearTuple_subplan1 WHERE ExecClearTuple_subplan1.b1=ExecClearTuple_subplan2.b2 ORDER BY 1) FROM ExecClearTuple_subplan2 ORDER BY a2, b2, c2, d2;
+      array       
+------------------
+ {}
+ {1,21,41,61,81}
+ {}
+ {2,22,42,62,82}
+ {}
+ {3,23,43,63,83}
+ {4,24,44,64,84}
+ {5,25,45,65,85}
+ {6,26,46,66,86}
+ {7,27,47,67,87}
+ {8,28,48,68,88}
+ {9,29,49,69,89}
+ {10,30,50,70,90}
+ {11,31,51,71,91}
+ {12,32,52,72,92}
+ {13,33,53,73,93}
+ {14,34,54,74,94}
+ {15,35,55,75,95}
+ {16,36,56,76,96}
+ {17,37,57,77,97}
+ {0,18,38,58,78}
+ {1,19,39,59,79}
+ {}
+ {}
+ {}
+ {}
+ {}
+ {}
+ {}
+ {}
+ {2,20,40,60,80}
+ {1,21,41,61,81}
+ {2,22,42,62,82}
+ {3,23,43,63,83}
+ {4,24,44,64,84}
+ {5,25,45,65,85}
+ {6,26,46,66,86}
+ {7,27,47,67,87}
+ {8,28,48,68,88}
+ {9,29,49,69,89}
+ {10,30,50,70,90}
+ {11,31,51,71,91}
+ {12,32,52,72,92}
+ {13,33,53,73,93}
+ {14,34,54,74,94}
+ {15,35,55,75,95}
+ {16,36,56,76,96}
+ {17,37,57,77,97}
+ {0,18,38,58,78}
+ {1,19,39,59,79}
+(50 rows)
+
+explain (costs OFF, nodes OFF, verbose ON)
+SELECT (WITH cte(foo) AS (VALUES(b1)) VALUES((SELECT foo FROM cte))) FROM ExecClearTuple_subplan1 ORDER BY 1 LIMIT 3;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Limit
+   Output: ((SubPlan 3))
+   ->  Sort
+         Output: ((SubPlan 3))
+         Sort Key: ((SubPlan 3))
+         ->  Seq Scan on public.execcleartuple_subplan1
+               Output: (SubPlan 3)
+               SubPlan 3
+                 ->  Values Scan on "*VALUES*"
+                       Output: "*VALUES*".column1
+                       CTE cte
+                         ->  Values Scan on "*VALUES*"
+                               Output: "*VALUES*".column1
+                       InitPlan 2 (returns $2)
+                         ->  CTE Scan on cte
+                               Output: cte.foo
+(16 rows)
+
+SELECT (WITH cte(foo) AS (VALUES(b1)) VALUES((SELECT foo FROM cte))) FROM ExecClearTuple_subplan1 ORDER BY 1 LIMIT 3;
+ column1 
+---------
+       0
+       0
+       0
+(3 rows)
+
+DROP TABLE ExecClearTuple_subplan1 CASCADE;
+DROP TABLE ExecClearTuple_subplan2 CASCADE;
+WITH RECURSIVE t(n) AS (
+    VALUES (1)
+UNION ALL
+    SELECT n+1 FROM t WHERE n < 100
+)
+SELECT SUM(n) FROM t;
+ sum  
+------
+ 5050
+(1 row)
+
+WITH RECURSIVE
+  tab(id_key,link) AS (VALUES (1,17), (2,17), (3,17), (4,17), (6,17), (5,17)),
+  iter (id_key, row_type, link) AS (
+      SELECT 0, 'base', 17
+    UNION ALL (
+      WITH remaining(id_key, row_type, link, MIN) AS (
+        SELECT tab.id_key, 'TRUE'::text, iter.link, MIN(tab.id_key) OVER ()
+        FROM tab INNER JOIN iter USING (link)
+        WHERE tab.id_key > iter.id_key
+      ),
+      first_remaining AS (
+        SELECT id_key, row_type, link
+        FROM remaining
+        WHERE id_key=MIN
+      ),
+      effect AS (
+        SELECT tab.id_key, 'new'::text, tab.link
+        FROM first_remaining e INNER JOIN tab ON e.id_key=tab.id_key
+        WHERE e.row_type = 'FALSE'
+      )
+      SELECT * FROM first_remaining
+      UNION ALL SELECT * FROM effect
+    )
+  )
+SELECT * FROM iter;
+ id_key | row_type | link 
+--------+----------+------
+      0 | base     |   17
+      1 | TRUE     |   17
+      2 | TRUE     |   17
+      3 | TRUE     |   17
+      4 | TRUE     |   17
+      5 | TRUE     |   17
+      6 | TRUE     |   17
+(7 rows)
+
+CREATE TABLE ExecClearTuple_12(a int, b varchar(10));
+SET enable_hashagg=OFF;
+SET enable_sort=ON;
+explain (costs OFF)
+SELECT 1
+FROM (
+ SELECT 1 c1, case when b in (
+   SELECT 'g' FROM ExecClearTuple_12 
+   GROUP BY 1) THEN 'e' END c2, COUNT(DISTINCT(a)), MAX(5)
+ FROM ExecClearTuple_12 
+ GROUP BY 1,2) temp1
+WHERE temp1.c2=temp1.c1;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Subquery Scan on temp1
+   ->  GroupAggregate
+         Group By Key: (1), (CASE WHEN (hashed SubPlan 1) THEN 'e'::text ELSE NULL::text END)
+         Filter: ((CASE WHEN (hashed SubPlan 2) THEN 'e'::text ELSE NULL::text END)::bigint = 1)
+         ->  Sort
+               Sort Key: (1), (CASE WHEN (hashed SubPlan 1) THEN 'e'::text ELSE NULL::text END)
+               ->  Seq Scan on execcleartuple_12
+                     SubPlan 1
+                       ->  Group
+                             Group By Key: 'g'::text
+                             ->  Seq Scan on execcleartuple_12
+         SubPlan 2
+           ->  Group
+                 Group By Key: 'g'::text
+                 ->  Seq Scan on execcleartuple_12
+(15 rows)
+
+DROP TABLE ExecClearTuple_12 CASCADE;
+CREATE TABLE ExecClearTuple_13(a int, b int);
+INSERT INTO ExecClearTuple_13 SELECT generate_series(1,5), generate_series(1,5);
+analyze ExecClearTuple_13;
+CREATE TABLE x (n integer);
+explain (verbose ON, costs OFF, nodes OFF)
+SELECT * FROM ExecClearTuple_13 t1
+WHERE EXISTS (
+ WITH x AS (SELECT a,b FROM ExecClearTuple_13 t2 WHERE t1.a=t2.a),
+ x2 AS (SELECT * FROM x)
+ SELECT * FROM x2 x1 WHERE EXISTS(
+  WITH x AS (SELECT a+b a, a-b b FROM ExecClearTuple_13)
+  SELECT 1 FROM x2 WHERE x2.a=x1.a
+  )
+ UNION
+ SELECT 1,2 FROM x2
+ )
+ORDER BY 1,2;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b
+   Sort Key: t1.a, t1.b
+   ->  Seq Scan on public.execcleartuple_13 t1
+         Output: t1.a, t1.b
+         Filter: (SubPlan 5)
+         SubPlan 5
+           ->  Unique
+                 Output: x1.a, x1.b
+                 CTE x
+                   ->  Seq Scan on public.execcleartuple_13 t2
+                         Output: t2.a, t2.b
+                         Filter: (t1.a = t2.a)
+                 CTE x2
+                   ->  CTE Scan on x
+                         Output: x.a, x.b
+                 ->  Sort
+                       Output: x1.a, x1.b
+                       Sort Key: x1.a, x1.b
+                       ->  Append
+                             ->  CTE Scan on x2 x1
+                                   Output: x1.a, x1.b
+                                   Filter: (alternatives: SubPlan 3 or hashed SubPlan 4)
+                                   SubPlan 3
+                                     ->  CTE Scan on x2
+                                           Filter: (x2.a = x1.a)
+                                   SubPlan 4
+                                     ->  CTE Scan on x2
+                                           Output: x2.a
+                             ->  CTE Scan on x2
+                                   Output: 1, 2
+(31 rows)
+
+SELECT * FROM ExecClearTuple_13 t1
+WHERE EXISTS (
+ WITH x AS (SELECT a,b FROM ExecClearTuple_13 t2 WHERE t1.a=t2.a),
+ x2 AS (SELECT * FROM x)
+ SELECT * FROM x2 x1 WHERE EXISTS(
+  WITH x AS (SELECT a+b a, a-b b FROM ExecClearTuple_13)
+  SELECT 1 FROM x2 WHERE x2.a=x1.a
+  )
+ UNION
+ SELECT 1,2 FROM x2
+ )
+ORDER BY 1,2;
+ a | b 
+---+---
+ 1 | 1
+ 2 | 2
+ 3 | 3
+ 4 | 4
+ 5 | 5
+(5 rows)
+
+DROP TABLE x CASCADE;
+DROP TABLE ExecClearTuple_13 CASCADE;

@@ -15402,36 +15402,50 @@ select A.col_int, B.col_int, A.col_date, b.col_date from vector_nestloop_table_0
 set enable_mergejoin=false;
 set enable_hashjoin=false;
 explain (verbose on, costs off) select * from vector_nestloop_table_01 A where A.col_int in (select B.col_int from vector_nestloop_table_02 B);
-                                                        QUERY PLAN                                                         
----------------------------------------------------------------------------------------------------------------------------
+                                                           QUERY PLAN                                                            
+---------------------------------------------------------------------------------------------------------------------------------
  Row Adapter
    Output: a.col_int, a.col_char, a.col_vchar, a.col_date, a.col_num, a.col_float1, a.col_float2, a.col_timetz
-   ->  Vector Nest Loop Semi Join
+   ->  Vector Streaming (type: GATHER)
          Output: a.col_int, a.col_char, a.col_vchar, a.col_date, a.col_num, a.col_float1, a.col_float2, a.col_timetz
-         Join Filter: (a.col_int = b.col_int)
-         ->  CStore Scan on vec_nestloop_engine.vector_nestloop_table_01 a
+         Node/s: All datanodes
+         ->  Vector Nest Loop Semi Join
                Output: a.col_int, a.col_char, a.col_vchar, a.col_date, a.col_num, a.col_float1, a.col_float2, a.col_timetz
-         ->  Vector Materialize
-               Output: b.col_int
-               ->  CStore Scan on vec_nestloop_engine.vector_nestloop_table_02 b
+               Join Filter: (a.col_int = b.col_int)
+               ->  CStore Scan on vec_nestloop_engine.vector_nestloop_table_01 a
+                     Output: a.col_int, a.col_char, a.col_vchar, a.col_date, a.col_num, a.col_float1, a.col_float2, a.col_timetz
+                     Distribute Key: a.col_int
+               ->  Vector Materialize
                      Output: b.col_int
-(11 rows)
+                     ->  CStore Scan on vec_nestloop_engine.vector_nestloop_table_02 b
+                           Output: b.col_int
+                           Distribute Key: b.col_int
+(16 rows)
 
 explain (verbose on, costs off) select * from vector_nestloop_table_01 A where A.col_int not in (select B.col_int from vector_nestloop_table_02 B);
-                                                        QUERY PLAN                                                         
----------------------------------------------------------------------------------------------------------------------------
+                                                           QUERY PLAN                                                            
+---------------------------------------------------------------------------------------------------------------------------------
  Row Adapter
    Output: a.col_int, a.col_char, a.col_vchar, a.col_date, a.col_num, a.col_float1, a.col_float2, a.col_timetz
-   ->  Vector Nest Loop Anti Join
+   ->  Vector Streaming (type: GATHER)
          Output: a.col_int, a.col_char, a.col_vchar, a.col_date, a.col_num, a.col_float1, a.col_float2, a.col_timetz
-         Join Filter: ((a.col_int = b.col_int) OR (a.col_int IS NULL) OR (b.col_int IS NULL))
-         ->  CStore Scan on vec_nestloop_engine.vector_nestloop_table_01 a
+         Node/s: All datanodes
+         ->  Vector Nest Loop Anti Join
                Output: a.col_int, a.col_char, a.col_vchar, a.col_date, a.col_num, a.col_float1, a.col_float2, a.col_timetz
-         ->  Vector Materialize
-               Output: b.col_int
-               ->  CStore Scan on vec_nestloop_engine.vector_nestloop_table_02 b
+               Join Filter: ((a.col_int = b.col_int) OR (a.col_int IS NULL) OR (b.col_int IS NULL))
+               ->  CStore Scan on vec_nestloop_engine.vector_nestloop_table_01 a
+                     Output: a.col_int, a.col_char, a.col_vchar, a.col_date, a.col_num, a.col_float1, a.col_float2, a.col_timetz
+                     Distribute Key: a.col_int
+               ->  Vector Materialize
                      Output: b.col_int
-(11 rows)
+                     ->  Vector Streaming(type: BROADCAST)
+                           Output: b.col_int
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  CStore Scan on vec_nestloop_engine.vector_nestloop_table_02 b
+                                 Output: b.col_int
+                                 Distribute Key: b.col_int
+(20 rows)
 
 select * from vector_nestloop_table_01 A where A.col_int in (select B.col_int from vector_nestloop_table_02 B) order by 1, 2;
  col_int |         col_char          |   col_vchar    |         col_date         | col_num | col_float1 | col_float2 | col_timetz  

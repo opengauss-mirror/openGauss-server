@@ -324,4 +324,3 @@ drop table tbl_return;
 --SELECT * FROM joinview ORDER BY f1;
 --SELECT * FROM foo ORDER BY f1;
 --SELECT * FROM voo ORDER BY f1;
-drop table INT8_TBL cascade;

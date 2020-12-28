@@ -226,7 +226,7 @@ SELECT collation for ('foo'); -- unknown type - null
 SELECT collation for ('foo'::text);
 SELECT collation for ((SELECT a FROM collate_test1 LIMIT 1)); -- non-collatable type - error
 SELECT collation for ((SELECT b FROM collate_test1 LIMIT 1));
-explain (verbose, costs off, nodes off) SELECT collation for ((SELECT b FROM collate_test1 LIMIT 1));
+explain (verbose, costs off) SELECT collation for ((SELECT b FROM collate_test1 LIMIT 1));
 
 
 --

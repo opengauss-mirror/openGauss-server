@@ -20,16 +20,16 @@
 #include "catalog/storage_xlog.h"
 #include "storage/custorage.h"
 
-void smgr_desc(StringInfo buf, XLogReaderState* record)
+void smgr_desc(StringInfo buf, XLogReaderState *record)
 {
-    char* rec = XLogRecGetData(record);
+    char *rec = XLogRecGetData(record);
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
     if (info == XLOG_SMGR_CREATE) {
-        xl_smgr_create* xlrec = (xl_smgr_create*)rec;
+        xl_smgr_create *xlrec = (xl_smgr_create *)rec;
         RelFileNode rnode;
         RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
 
-        char* path = relpathperm(rnode, xlrec->forkNum);
+        char *path = relpathperm(rnode, xlrec->forkNum);
 
         appendStringInfo(buf, "file create: %s", path);
 #ifdef FRONTEND
@@ -39,11 +39,11 @@ void smgr_desc(StringInfo buf, XLogReaderState* record)
         pfree_ext(path);
 #endif
     } else if (info == XLOG_SMGR_TRUNCATE) {
-        xl_smgr_truncate* xlrec = (xl_smgr_truncate*)rec;
+        xl_smgr_truncate *xlrec = (xl_smgr_truncate *)rec;
         RelFileNode rnode;
         RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
 
-        char* path = relpathperm(rnode, MAIN_FORKNUM);
+        char *path = relpathperm(rnode, MAIN_FORKNUM);
 
         appendStringInfo(buf, "file truncate: %s to %u blocks", path, xlrec->blkno);
 #ifdef FRONTEND
@@ -55,4 +55,3 @@ void smgr_desc(StringInfo buf, XLogReaderState* record)
     } else
         appendStringInfo(buf, "UNKNOWN");
 }
-

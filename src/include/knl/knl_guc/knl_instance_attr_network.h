@@ -49,8 +49,6 @@ typedef struct knl_instance_attr_network {
     int PostPortNumber;
     int Unix_socket_permissions;
     int MaxPoolSize;
-    int MinPoolSize;
-    int PoolerMaxIdleTime;
     int PoolerPort;
     int MaxCoords;
     int comm_sctp_port;
@@ -65,7 +63,7 @@ typedef struct knl_instance_attr_network {
     char* Unix_socket_group;
     char* UnixSocketDir;
     char* ListenAddresses;
-    char* sctp_link_addr;
+    char* tcp_link_addr;
 } knl_instance_attr_network;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_NETWORK_H_ */

@@ -1,0 +1,10 @@
+--
+-- OBS BULK LOAD PARALLEL TEST 3
+--
+----
+--16. noescaping in TEXT format
+----
+create foreign table escaping(c1 int, c2 varchar, c3 int) server obs_server options (location 'obs://@obsbucket@/obscheck/load_escape/', format 'text', noescaping 'true', delimiter '|', encoding 'utf-8') distribute by roundrobin;
+
+select * from escaping;
+drop foreign table escaping;

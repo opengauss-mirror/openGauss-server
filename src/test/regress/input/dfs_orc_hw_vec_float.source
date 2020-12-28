@@ -1,0 +1,71 @@
+set enable_global_stats = true;
+
+--float4
+CREATE TABLE vfloat4_test(a INT4, b float4, c float4) with (orientation = orc) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+copy vfloat4_test from '@abs_srcdir@/data/vfloat4_normal.data' delimiter '|' NULL '';
+
+--test vfloat4_sop
+select b,c from vfloat4_test where b=c order by a;
+select b,c from vfloat4_test where b<>c order by a;
+select b,c from vfloat4_test where b>c order by a;
+select b,c from vfloat4_test where b>=c order by a;
+select b,c from vfloat4_test where b<c order by a;
+select b,c from vfloat4_test where b<=c order by a;
+
+select b,c from vfloat4_test where b=c and a > 0 order by a ;
+select b,c from vfloat4_test where b<>c and a > 0 order by a;
+select b,c from vfloat4_test where b>c and a > 0 order by a;
+select b,c from vfloat4_test where b>=c and a > 0 order by a;
+select b,c from vfloat4_test where b<c and a > 0 order by a;
+select b,c from vfloat4_test where b<=c and a > 0 order by a;
+
+select b+c from vfloat4_test where b=c order by a;
+select b+c from vfloat4_test where b<>c order by a;
+select b+c from vfloat4_test where b>c order by a;
+select b+c from vfloat4_test where b>=c order by a;
+select b+c from vfloat4_test where b<c order by a;
+select b+c from vfloat4_test where b<=c order by a;
+
+select b+c from vfloat4_test where b=c and a > 0 order by a ;
+select b+c from vfloat4_test where b<>c and a > 0 order by a;
+select b+c from vfloat4_test where b>c and a > 0 order by a;
+select b+c from vfloat4_test where b>=c and a > 0 order by a;
+select b+c from vfloat4_test where b<c and a > 0 order by a;
+select b+c from vfloat4_test where b<=c and a > 0 order by a;
+        
+--float8
+CREATE TABLE vfloat8_test(a INT4, b float8, c float8) with (orientation = orc) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+copy vfloat8_test from '@abs_srcdir@/data/vfloat8_normal.data' delimiter '|' NULL '';
+
+--test vfloat_sop
+select b,c from vfloat8_test where b=c order by a;
+select b,c from vfloat8_test where b<>c order by a;
+select b,c from vfloat8_test where b>c order by a;
+select b,c from vfloat8_test where b>=c order by a;
+select b,c from vfloat8_test where b<c order by a;
+select b,c from vfloat8_test where b<=c order by a;
+
+select b,c from vfloat8_test where b=c and a > 0 order by a;
+select b,c from vfloat8_test where b<>c and a > 0 order by a;
+select b,c from vfloat8_test where b>c and a > 0 order by a;
+select b,c from vfloat8_test where b>=c and a > 0 order by a;
+select b,c from vfloat8_test where b<c and a > 0 order by a;
+select b,c from vfloat8_test where b<=c and a > 0 order by a;
+
+select b+c from vfloat8_test where b=c order by a;
+select b+c from vfloat8_test where b<>c order by a;
+select b+c from vfloat8_test where b>c order by a;
+select b+c from vfloat8_test where b>=c order by a;
+select b+c from vfloat8_test where b<c order by a;
+select b+c from vfloat8_test where b<=c order by a;
+        
+select b+c from vfloat8_test where b=c and a > 0 order by a;
+select b+c from vfloat8_test where b<>c and a > 0 order by a;
+select b+c from vfloat8_test where b>c and a > 0 order by a;
+select b+c from vfloat8_test where b>=c and a > 0 order by a;
+select b+c from vfloat8_test where b<c and a > 0 order by a;
+select b+c from vfloat8_test where b<=c and a > 0 order by a;		
+--clean table
+drop table vfloat4_test;
+drop table vfloat8_test;
+

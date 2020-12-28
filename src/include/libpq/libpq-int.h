@@ -33,6 +33,10 @@
 #include <sys/time.h>
 #endif
 
+#include <memory>
+#include <vector>
+#include <unordered_map>
+
 #ifdef ENABLE_THREAD_SAFETY
 #ifdef WIN32
 #include "pthread-win32.h"
@@ -84,10 +88,15 @@ typedef struct {
 #include "openssl/ossl_typ.h"
 #endif /* USE_SSL */
 
+#ifdef HAVE_CE
+#include "cl_state.h"
+#endif
+
 /*
  * POSTGRES backend dependent Constants.
  */
 #define CMDSTATUS_LEN 64 /* should match COMPLETION_TAG_BUFSIZE */
+#define MAX_ERRMSG_LENGTH 1024
 
 /*
  * PGresult and the subsidiary types PGresAttDesc, PGresAttValue
@@ -364,7 +373,6 @@ struct pg_conn {
     bool dot_pgpass_used;     /* true if used .pgpass */
     bool sigpipe_so;          /* have we masked SIGPIPE via SO_NOSIGPIPE? */
     bool sigpipe_flag;        /* can we mask SIGPIPE via MSG_NOSIGNAL? */
-    bool sctp_flag;
 
     /* Transient state needed while establishing connection */
     struct addrinfo* addrlist;       /* list of possible backend addresses */
@@ -473,6 +481,10 @@ struct pg_conn {
      */
     char* connection_info;
     bool connection_extra_info;
+
+#ifdef HAVE_CE
+    PGClientLogic* client_logic;
+#endif
 };
 
 /* PGcancel stores all data necessary to cancel a connection. A copy of this
@@ -532,7 +544,7 @@ extern PGresult* pqPrepareAsyncResult(PGconn* conn);
 extern void pqInternalNotice(const PGNoticeHooks* hooks, const char* fmt, ...)
     /* This lets gcc check the format string for consistency. */
     __attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3)));
-extern void pqSaveMessageField(PGresult* res, char code, const char* value);
+extern void pqSaveMessageField(PGresult* res, char code, const char* value, PGconn* conn = NULL);
 extern void pqSaveParameterStatus(PGconn* conn, const char* name, const char* value);
 extern int pqRowProcessor(PGconn* conn, const char** errmsgp);
 extern void pqHandleSendFailure(PGconn* conn);

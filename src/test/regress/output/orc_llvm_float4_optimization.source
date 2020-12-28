@@ -1,0 +1,360 @@
+--Test LLVM optimization operator about FLOAT4 data type
+DROP FOREIGN TABLE IF EXISTS customer;
+NOTICE:  foreign table "customer" does not exist, skipping
+CREATE FOREIGN TABLE customer ( 
+ c_custkey BIGINT, 
+ c_name TEXT, 
+ c_address TEXT, 
+ c_nationkey INT4, 
+ c_phone TEXT, 
+ c_acctbal FLOAT4, 
+ c_mktsegment TEXT, 
+ c_comment TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb_small.db/customer_small/')
+distribute by roundrobin;
+--test "=" operator
+set enable_codegen = off;
+select * from customer where  c_acctbal = '868.9';
+ c_custkey | c_name | c_address | c_nationkey | c_phone | c_acctbal | c_mktsegment | c_comment 
+-----------+--------+-----------+-------------+---------+-----------+--------------+-----------
+(0 rows)
+
+set enable_codegen = on;
+select * from customer where  c_acctbal = '868.9' ;
+ c_custkey | c_name | c_address | c_nationkey | c_phone | c_acctbal | c_mktsegment | c_comment 
+-----------+--------+-----------+-------------+---------+-----------+--------------+-----------
+(0 rows)
+
+--test ">" operator
+set enable_codegen = off;
+select * from customer where  '868.9' > c_acctbal order by 1 limit 5;
+ c_custkey |       c_name       |      c_address       | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |             c_comment              
+-----------+--------------------+----------------------+-------------+-----------------+-----------+--------------+------------------------------------
+  11457539 | Customer#011457539 | dpwOx,BU,sivEMg6fk6u |          14 | 24-216-131-5420 |   -231.37 | MACHINERY    | kly across the furiously final pac
+(1 row)
+
+set enable_codegen = on;
+select * from customer where  '868.9' > c_acctbal order by 1 limit 5;
+ c_custkey |       c_name       |      c_address       | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |             c_comment              
+-----------+--------------------+----------------------+-------------+-----------------+-----------+--------------+------------------------------------
+  11457539 | Customer#011457539 | dpwOx,BU,sivEMg6fk6u |          14 | 24-216-131-5420 |   -231.37 | MACHINERY    | kly across the furiously final pac
+(1 row)
+
+set enable_codegen = off;
+select * from customer where  c_acctbal > '868.9' order by 1 limit 5;
+ c_custkey |       c_name       |              c_address              | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                               c_comment                                                
+-----------+--------------------+-------------------------------------+-------------+-----------------+-----------+--------------+--------------------------------------------------------------------------------------------------------
+  11457535 | Customer#011457535 | vdyopGT10VBk                        |           9 | 19-180-890-9709 |   6110.84 | BUILDING     | uctions. slyly slow instructions unwind alongside of the even, final dinos. regular packages around th
+  11457536 | Customer#011457536 | JiP7cC3uQo8z2D1C6iQUPr3AnMxWD32fuDM |          16 | 26-622-571-1952 |   6915.62 | HOUSEHOLD    |  final instructions. blithely sile
+  11457537 | Customer#011457537 |  SQIG2yftjysJp 7H                   |          23 | 33-541-333-8249 |    2843.6 | BUILDING     | encies serve blithely. ruthless requests after the busily regular accounts impress fluffily quickly
+  11457538 | Customer#011457538 | ,2oppUrPUmr17UE7H5zkQ5,FaBLfu       |          20 | 30-666-509-4542 |   6384.65 | AUTOMOBILE   | lites. regular requests nag furiously furiously 
+  11457540 | Customer#011457540 | ttYELU7,arcZK6yH0MvqAiD,bz4z        |           8 | 18-629-541-8397 |   3230.11 | MACHINERY    | usual deposits sleep furiously along
+(5 rows)
+
+set enable_codegen = on;
+select * from customer where  c_acctbal > '868.9' order by 1 limit 5;
+ c_custkey |       c_name       |              c_address              | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                               c_comment                                                
+-----------+--------------------+-------------------------------------+-------------+-----------------+-----------+--------------+--------------------------------------------------------------------------------------------------------
+  11457535 | Customer#011457535 | vdyopGT10VBk                        |           9 | 19-180-890-9709 |   6110.84 | BUILDING     | uctions. slyly slow instructions unwind alongside of the even, final dinos. regular packages around th
+  11457536 | Customer#011457536 | JiP7cC3uQo8z2D1C6iQUPr3AnMxWD32fuDM |          16 | 26-622-571-1952 |   6915.62 | HOUSEHOLD    |  final instructions. blithely sile
+  11457537 | Customer#011457537 |  SQIG2yftjysJp 7H                   |          23 | 33-541-333-8249 |    2843.6 | BUILDING     | encies serve blithely. ruthless requests after the busily regular accounts impress fluffily quickly
+  11457538 | Customer#011457538 | ,2oppUrPUmr17UE7H5zkQ5,FaBLfu       |          20 | 30-666-509-4542 |   6384.65 | AUTOMOBILE   | lites. regular requests nag furiously furiously 
+  11457540 | Customer#011457540 | ttYELU7,arcZK6yH0MvqAiD,bz4z        |           8 | 18-629-541-8397 |   3230.11 | MACHINERY    | usual deposits sleep furiously along
+(5 rows)
+
+select * from customer where  c_acctbal > 868.9::float8 order by 1 limit 5;
+ c_custkey |       c_name       |              c_address              | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                               c_comment                                                
+-----------+--------------------+-------------------------------------+-------------+-----------------+-----------+--------------+--------------------------------------------------------------------------------------------------------
+  11457535 | Customer#011457535 | vdyopGT10VBk                        |           9 | 19-180-890-9709 |   6110.84 | BUILDING     | uctions. slyly slow instructions unwind alongside of the even, final dinos. regular packages around th
+  11457536 | Customer#011457536 | JiP7cC3uQo8z2D1C6iQUPr3AnMxWD32fuDM |          16 | 26-622-571-1952 |   6915.62 | HOUSEHOLD    |  final instructions. blithely sile
+  11457537 | Customer#011457537 |  SQIG2yftjysJp 7H                   |          23 | 33-541-333-8249 |    2843.6 | BUILDING     | encies serve blithely. ruthless requests after the busily regular accounts impress fluffily quickly
+  11457538 | Customer#011457538 | ,2oppUrPUmr17UE7H5zkQ5,FaBLfu       |          20 | 30-666-509-4542 |   6384.65 | AUTOMOBILE   | lites. regular requests nag furiously furiously 
+  11457540 | Customer#011457540 | ttYELU7,arcZK6yH0MvqAiD,bz4z        |           8 | 18-629-541-8397 |   3230.11 | MACHINERY    | usual deposits sleep furiously along
+(5 rows)
+
+--test ">=" operator
+set enable_codegen = off;
+select * from customer where  '868.9' >= c_acctbal order by 1 limit 5;
+ c_custkey |       c_name       |      c_address       | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |             c_comment              
+-----------+--------------------+----------------------+-------------+-----------------+-----------+--------------+------------------------------------
+  11457539 | Customer#011457539 | dpwOx,BU,sivEMg6fk6u |          14 | 24-216-131-5420 |   -231.37 | MACHINERY    | kly across the furiously final pac
+(1 row)
+
+set enable_codegen = on;
+select * from customer where  '868.9' >= c_acctbal order by 1 limit 5;
+ c_custkey |       c_name       |      c_address       | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |             c_comment              
+-----------+--------------------+----------------------+-------------+-----------------+-----------+--------------+------------------------------------
+  11457539 | Customer#011457539 | dpwOx,BU,sivEMg6fk6u |          14 | 24-216-131-5420 |   -231.37 | MACHINERY    | kly across the furiously final pac
+(1 row)
+
+set enable_codegen = off;
+select * from customer where  c_acctbal >= '868.9' order by 1 limit 5;
+ c_custkey |       c_name       |              c_address              | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                               c_comment                                                
+-----------+--------------------+-------------------------------------+-------------+-----------------+-----------+--------------+--------------------------------------------------------------------------------------------------------
+  11457535 | Customer#011457535 | vdyopGT10VBk                        |           9 | 19-180-890-9709 |   6110.84 | BUILDING     | uctions. slyly slow instructions unwind alongside of the even, final dinos. regular packages around th
+  11457536 | Customer#011457536 | JiP7cC3uQo8z2D1C6iQUPr3AnMxWD32fuDM |          16 | 26-622-571-1952 |   6915.62 | HOUSEHOLD    |  final instructions. blithely sile
+  11457537 | Customer#011457537 |  SQIG2yftjysJp 7H                   |          23 | 33-541-333-8249 |    2843.6 | BUILDING     | encies serve blithely. ruthless requests after the busily regular accounts impress fluffily quickly
+  11457538 | Customer#011457538 | ,2oppUrPUmr17UE7H5zkQ5,FaBLfu       |          20 | 30-666-509-4542 |   6384.65 | AUTOMOBILE   | lites. regular requests nag furiously furiously 
+  11457540 | Customer#011457540 | ttYELU7,arcZK6yH0MvqAiD,bz4z        |           8 | 18-629-541-8397 |   3230.11 | MACHINERY    | usual deposits sleep furiously along
+(5 rows)
+
+set enable_codegen = on;
+select * from customer where  c_acctbal >= '868.9' order by 1 limit 5;
+ c_custkey |       c_name       |              c_address              | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                               c_comment                                                
+-----------+--------------------+-------------------------------------+-------------+-----------------+-----------+--------------+--------------------------------------------------------------------------------------------------------
+  11457535 | Customer#011457535 | vdyopGT10VBk                        |           9 | 19-180-890-9709 |   6110.84 | BUILDING     | uctions. slyly slow instructions unwind alongside of the even, final dinos. regular packages around th
+  11457536 | Customer#011457536 | JiP7cC3uQo8z2D1C6iQUPr3AnMxWD32fuDM |          16 | 26-622-571-1952 |   6915.62 | HOUSEHOLD    |  final instructions. blithely sile
+  11457537 | Customer#011457537 |  SQIG2yftjysJp 7H                   |          23 | 33-541-333-8249 |    2843.6 | BUILDING     | encies serve blithely. ruthless requests after the busily regular accounts impress fluffily quickly
+  11457538 | Customer#011457538 | ,2oppUrPUmr17UE7H5zkQ5,FaBLfu       |          20 | 30-666-509-4542 |   6384.65 | AUTOMOBILE   | lites. regular requests nag furiously furiously 
+  11457540 | Customer#011457540 | ttYELU7,arcZK6yH0MvqAiD,bz4z        |           8 | 18-629-541-8397 |   3230.11 | MACHINERY    | usual deposits sleep furiously along
+(5 rows)
+
+select * from customer where  c_acctbal >= 868.9::float8 order by 1 limit 5;
+ c_custkey |       c_name       |              c_address              | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                               c_comment                                                
+-----------+--------------------+-------------------------------------+-------------+-----------------+-----------+--------------+--------------------------------------------------------------------------------------------------------
+  11457535 | Customer#011457535 | vdyopGT10VBk                        |           9 | 19-180-890-9709 |   6110.84 | BUILDING     | uctions. slyly slow instructions unwind alongside of the even, final dinos. regular packages around th
+  11457536 | Customer#011457536 | JiP7cC3uQo8z2D1C6iQUPr3AnMxWD32fuDM |          16 | 26-622-571-1952 |   6915.62 | HOUSEHOLD    |  final instructions. blithely sile
+  11457537 | Customer#011457537 |  SQIG2yftjysJp 7H                   |          23 | 33-541-333-8249 |    2843.6 | BUILDING     | encies serve blithely. ruthless requests after the busily regular accounts impress fluffily quickly
+  11457538 | Customer#011457538 | ,2oppUrPUmr17UE7H5zkQ5,FaBLfu       |          20 | 30-666-509-4542 |   6384.65 | AUTOMOBILE   | lites. regular requests nag furiously furiously 
+  11457540 | Customer#011457540 | ttYELU7,arcZK6yH0MvqAiD,bz4z        |           8 | 18-629-541-8397 |   3230.11 | MACHINERY    | usual deposits sleep furiously along
+(5 rows)
+
+--test "<" operator
+set enable_codegen = off;
+select * from customer where  '868.9' < c_acctbal order by 1 limit 5;
+ c_custkey |       c_name       |              c_address              | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                               c_comment                                                
+-----------+--------------------+-------------------------------------+-------------+-----------------+-----------+--------------+--------------------------------------------------------------------------------------------------------
+  11457535 | Customer#011457535 | vdyopGT10VBk                        |           9 | 19-180-890-9709 |   6110.84 | BUILDING     | uctions. slyly slow instructions unwind alongside of the even, final dinos. regular packages around th
+  11457536 | Customer#011457536 | JiP7cC3uQo8z2D1C6iQUPr3AnMxWD32fuDM |          16 | 26-622-571-1952 |   6915.62 | HOUSEHOLD    |  final instructions. blithely sile
+  11457537 | Customer#011457537 |  SQIG2yftjysJp 7H                   |          23 | 33-541-333-8249 |    2843.6 | BUILDING     | encies serve blithely. ruthless requests after the busily regular accounts impress fluffily quickly
+  11457538 | Customer#011457538 | ,2oppUrPUmr17UE7H5zkQ5,FaBLfu       |          20 | 30-666-509-4542 |   6384.65 | AUTOMOBILE   | lites. regular requests nag furiously furiously 
+  11457540 | Customer#011457540 | ttYELU7,arcZK6yH0MvqAiD,bz4z        |           8 | 18-629-541-8397 |   3230.11 | MACHINERY    | usual deposits sleep furiously along
+(5 rows)
+
+set enable_codegen = on;
+select * from customer where  '868.9' < c_acctbal order by 1 limit 5;
+ c_custkey |       c_name       |              c_address              | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                               c_comment                                                
+-----------+--------------------+-------------------------------------+-------------+-----------------+-----------+--------------+--------------------------------------------------------------------------------------------------------
+  11457535 | Customer#011457535 | vdyopGT10VBk                        |           9 | 19-180-890-9709 |   6110.84 | BUILDING     | uctions. slyly slow instructions unwind alongside of the even, final dinos. regular packages around th
+  11457536 | Customer#011457536 | JiP7cC3uQo8z2D1C6iQUPr3AnMxWD32fuDM |          16 | 26-622-571-1952 |   6915.62 | HOUSEHOLD    |  final instructions. blithely sile
+  11457537 | Customer#011457537 |  SQIG2yftjysJp 7H                   |          23 | 33-541-333-8249 |    2843.6 | BUILDING     | encies serve blithely. ruthless requests after the busily regular accounts impress fluffily quickly
+  11457538 | Customer#011457538 | ,2oppUrPUmr17UE7H5zkQ5,FaBLfu       |          20 | 30-666-509-4542 |   6384.65 | AUTOMOBILE   | lites. regular requests nag furiously furiously 
+  11457540 | Customer#011457540 | ttYELU7,arcZK6yH0MvqAiD,bz4z        |           8 | 18-629-541-8397 |   3230.11 | MACHINERY    | usual deposits sleep furiously along
+(5 rows)
+
+set enable_codegen = off;
+select * from customer where  c_acctbal < '868.9' order by 1 limit 5;
+ c_custkey |       c_name       |      c_address       | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |             c_comment              
+-----------+--------------------+----------------------+-------------+-----------------+-----------+--------------+------------------------------------
+  11457539 | Customer#011457539 | dpwOx,BU,sivEMg6fk6u |          14 | 24-216-131-5420 |   -231.37 | MACHINERY    | kly across the furiously final pac
+(1 row)
+
+set enable_codegen = on;
+select * from customer where  c_acctbal < '868.9' order by 1 limit 5;
+ c_custkey |       c_name       |      c_address       | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |             c_comment              
+-----------+--------------------+----------------------+-------------+-----------------+-----------+--------------+------------------------------------
+  11457539 | Customer#011457539 | dpwOx,BU,sivEMg6fk6u |          14 | 24-216-131-5420 |   -231.37 | MACHINERY    | kly across the furiously final pac
+(1 row)
+
+select * from customer where  c_acctbal < 868.9::float8 order by 1 limit 5;
+ c_custkey |       c_name       |      c_address       | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |             c_comment              
+-----------+--------------------+----------------------+-------------+-----------------+-----------+--------------+------------------------------------
+  11457539 | Customer#011457539 | dpwOx,BU,sivEMg6fk6u |          14 | 24-216-131-5420 |   -231.37 | MACHINERY    | kly across the furiously final pac
+(1 row)
+
+--test "<=" operator
+set enable_codegen = off;
+select * from customer where  '868.9' <= c_acctbal order by 1 limit 5;
+ c_custkey |       c_name       |              c_address              | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                               c_comment                                                
+-----------+--------------------+-------------------------------------+-------------+-----------------+-----------+--------------+--------------------------------------------------------------------------------------------------------
+  11457535 | Customer#011457535 | vdyopGT10VBk                        |           9 | 19-180-890-9709 |   6110.84 | BUILDING     | uctions. slyly slow instructions unwind alongside of the even, final dinos. regular packages around th
+  11457536 | Customer#011457536 | JiP7cC3uQo8z2D1C6iQUPr3AnMxWD32fuDM |          16 | 26-622-571-1952 |   6915.62 | HOUSEHOLD    |  final instructions. blithely sile
+  11457537 | Customer#011457537 |  SQIG2yftjysJp 7H                   |          23 | 33-541-333-8249 |    2843.6 | BUILDING     | encies serve blithely. ruthless requests after the busily regular accounts impress fluffily quickly
+  11457538 | Customer#011457538 | ,2oppUrPUmr17UE7H5zkQ5,FaBLfu       |          20 | 30-666-509-4542 |   6384.65 | AUTOMOBILE   | lites. regular requests nag furiously furiously 
+  11457540 | Customer#011457540 | ttYELU7,arcZK6yH0MvqAiD,bz4z        |           8 | 18-629-541-8397 |   3230.11 | MACHINERY    | usual deposits sleep furiously along
+(5 rows)
+
+set enable_codegen = on;
+select * from customer where  '868.9' <= c_acctbal order by 1 limit 5;
+ c_custkey |       c_name       |              c_address              | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                               c_comment                                                
+-----------+--------------------+-------------------------------------+-------------+-----------------+-----------+--------------+--------------------------------------------------------------------------------------------------------
+  11457535 | Customer#011457535 | vdyopGT10VBk                        |           9 | 19-180-890-9709 |   6110.84 | BUILDING     | uctions. slyly slow instructions unwind alongside of the even, final dinos. regular packages around th
+  11457536 | Customer#011457536 | JiP7cC3uQo8z2D1C6iQUPr3AnMxWD32fuDM |          16 | 26-622-571-1952 |   6915.62 | HOUSEHOLD    |  final instructions. blithely sile
+  11457537 | Customer#011457537 |  SQIG2yftjysJp 7H                   |          23 | 33-541-333-8249 |    2843.6 | BUILDING     | encies serve blithely. ruthless requests after the busily regular accounts impress fluffily quickly
+  11457538 | Customer#011457538 | ,2oppUrPUmr17UE7H5zkQ5,FaBLfu       |          20 | 30-666-509-4542 |   6384.65 | AUTOMOBILE   | lites. regular requests nag furiously furiously 
+  11457540 | Customer#011457540 | ttYELU7,arcZK6yH0MvqAiD,bz4z        |           8 | 18-629-541-8397 |   3230.11 | MACHINERY    | usual deposits sleep furiously along
+(5 rows)
+
+set enable_codegen = off;
+select * from customer where  c_acctbal <= '868.9' order by 1 limit 5;
+ c_custkey |       c_name       |      c_address       | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |             c_comment              
+-----------+--------------------+----------------------+-------------+-----------------+-----------+--------------+------------------------------------
+  11457539 | Customer#011457539 | dpwOx,BU,sivEMg6fk6u |          14 | 24-216-131-5420 |   -231.37 | MACHINERY    | kly across the furiously final pac
+(1 row)
+
+set enable_codegen = on;
+select * from customer where  c_acctbal <= '868.9' order by 1 limit 5;
+ c_custkey |       c_name       |      c_address       | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |             c_comment              
+-----------+--------------------+----------------------+-------------+-----------------+-----------+--------------+------------------------------------
+  11457539 | Customer#011457539 | dpwOx,BU,sivEMg6fk6u |          14 | 24-216-131-5420 |   -231.37 | MACHINERY    | kly across the furiously final pac
+(1 row)
+
+select * from customer where  c_acctbal <= 868.9::float8 order by 1 limit 5;
+ c_custkey |       c_name       |      c_address       | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |             c_comment              
+-----------+--------------------+----------------------+-------------+-----------------+-----------+--------------+------------------------------------
+  11457539 | Customer#011457539 | dpwOx,BU,sivEMg6fk6u |          14 | 24-216-131-5420 |   -231.37 | MACHINERY    | kly across the furiously final pac
+(1 row)
+
+--test "<>" operator
+set enable_codegen = off;
+select * from customer where  '868.9' <> c_acctbal order by 1 limit 5;
+ c_custkey |       c_name       |              c_address              | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                               c_comment                                                
+-----------+--------------------+-------------------------------------+-------------+-----------------+-----------+--------------+--------------------------------------------------------------------------------------------------------
+  11457535 | Customer#011457535 | vdyopGT10VBk                        |           9 | 19-180-890-9709 |   6110.84 | BUILDING     | uctions. slyly slow instructions unwind alongside of the even, final dinos. regular packages around th
+  11457536 | Customer#011457536 | JiP7cC3uQo8z2D1C6iQUPr3AnMxWD32fuDM |          16 | 26-622-571-1952 |   6915.62 | HOUSEHOLD    |  final instructions. blithely sile
+  11457537 | Customer#011457537 |  SQIG2yftjysJp 7H                   |          23 | 33-541-333-8249 |    2843.6 | BUILDING     | encies serve blithely. ruthless requests after the busily regular accounts impress fluffily quickly
+  11457538 | Customer#011457538 | ,2oppUrPUmr17UE7H5zkQ5,FaBLfu       |          20 | 30-666-509-4542 |   6384.65 | AUTOMOBILE   | lites. regular requests nag furiously furiously 
+  11457539 | Customer#011457539 | dpwOx,BU,sivEMg6fk6u                |          14 | 24-216-131-5420 |   -231.37 | MACHINERY    | kly across the furiously final pac
+(5 rows)
+
+set enable_codegen = on;
+select * from customer where  '868.9' <> c_acctbal order by 1 limit 5;
+ c_custkey |       c_name       |              c_address              | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                               c_comment                                                
+-----------+--------------------+-------------------------------------+-------------+-----------------+-----------+--------------+--------------------------------------------------------------------------------------------------------
+  11457535 | Customer#011457535 | vdyopGT10VBk                        |           9 | 19-180-890-9709 |   6110.84 | BUILDING     | uctions. slyly slow instructions unwind alongside of the even, final dinos. regular packages around th
+  11457536 | Customer#011457536 | JiP7cC3uQo8z2D1C6iQUPr3AnMxWD32fuDM |          16 | 26-622-571-1952 |   6915.62 | HOUSEHOLD    |  final instructions. blithely sile
+  11457537 | Customer#011457537 |  SQIG2yftjysJp 7H                   |          23 | 33-541-333-8249 |    2843.6 | BUILDING     | encies serve blithely. ruthless requests after the busily regular accounts impress fluffily quickly
+  11457538 | Customer#011457538 | ,2oppUrPUmr17UE7H5zkQ5,FaBLfu       |          20 | 30-666-509-4542 |   6384.65 | AUTOMOBILE   | lites. regular requests nag furiously furiously 
+  11457539 | Customer#011457539 | dpwOx,BU,sivEMg6fk6u                |          14 | 24-216-131-5420 |   -231.37 | MACHINERY    | kly across the furiously final pac
+(5 rows)
+
+set enable_codegen = off;
+select * from customer where  c_acctbal <> '868.9' order by 1 limit 5;
+ c_custkey |       c_name       |              c_address              | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                               c_comment                                                
+-----------+--------------------+-------------------------------------+-------------+-----------------+-----------+--------------+--------------------------------------------------------------------------------------------------------
+  11457535 | Customer#011457535 | vdyopGT10VBk                        |           9 | 19-180-890-9709 |   6110.84 | BUILDING     | uctions. slyly slow instructions unwind alongside of the even, final dinos. regular packages around th
+  11457536 | Customer#011457536 | JiP7cC3uQo8z2D1C6iQUPr3AnMxWD32fuDM |          16 | 26-622-571-1952 |   6915.62 | HOUSEHOLD    |  final instructions. blithely sile
+  11457537 | Customer#011457537 |  SQIG2yftjysJp 7H                   |          23 | 33-541-333-8249 |    2843.6 | BUILDING     | encies serve blithely. ruthless requests after the busily regular accounts impress fluffily quickly
+  11457538 | Customer#011457538 | ,2oppUrPUmr17UE7H5zkQ5,FaBLfu       |          20 | 30-666-509-4542 |   6384.65 | AUTOMOBILE   | lites. regular requests nag furiously furiously 
+  11457539 | Customer#011457539 | dpwOx,BU,sivEMg6fk6u                |          14 | 24-216-131-5420 |   -231.37 | MACHINERY    | kly across the furiously final pac
+(5 rows)
+
+set enable_codegen = on;
+select * from customer where  c_acctbal <> '868.9' order by 1 limit 5;
+ c_custkey |       c_name       |              c_address              | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                               c_comment                                                
+-----------+--------------------+-------------------------------------+-------------+-----------------+-----------+--------------+--------------------------------------------------------------------------------------------------------
+  11457535 | Customer#011457535 | vdyopGT10VBk                        |           9 | 19-180-890-9709 |   6110.84 | BUILDING     | uctions. slyly slow instructions unwind alongside of the even, final dinos. regular packages around th
+  11457536 | Customer#011457536 | JiP7cC3uQo8z2D1C6iQUPr3AnMxWD32fuDM |          16 | 26-622-571-1952 |   6915.62 | HOUSEHOLD    |  final instructions. blithely sile
+  11457537 | Customer#011457537 |  SQIG2yftjysJp 7H                   |          23 | 33-541-333-8249 |    2843.6 | BUILDING     | encies serve blithely. ruthless requests after the busily regular accounts impress fluffily quickly
+  11457538 | Customer#011457538 | ,2oppUrPUmr17UE7H5zkQ5,FaBLfu       |          20 | 30-666-509-4542 |   6384.65 | AUTOMOBILE   | lites. regular requests nag furiously furiously 
+  11457539 | Customer#011457539 | dpwOx,BU,sivEMg6fk6u                |          14 | 24-216-131-5420 |   -231.37 | MACHINERY    | kly across the furiously final pac
+(5 rows)
+
+select * from customer where  c_acctbal <> 868.9::float8 order by 1 limit 5;
+ c_custkey |       c_name       |              c_address              | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                               c_comment                                                
+-----------+--------------------+-------------------------------------+-------------+-----------------+-----------+--------------+--------------------------------------------------------------------------------------------------------
+  11457535 | Customer#011457535 | vdyopGT10VBk                        |           9 | 19-180-890-9709 |   6110.84 | BUILDING     | uctions. slyly slow instructions unwind alongside of the even, final dinos. regular packages around th
+  11457536 | Customer#011457536 | JiP7cC3uQo8z2D1C6iQUPr3AnMxWD32fuDM |          16 | 26-622-571-1952 |   6915.62 | HOUSEHOLD    |  final instructions. blithely sile
+  11457537 | Customer#011457537 |  SQIG2yftjysJp 7H                   |          23 | 33-541-333-8249 |    2843.6 | BUILDING     | encies serve blithely. ruthless requests after the busily regular accounts impress fluffily quickly
+  11457538 | Customer#011457538 | ,2oppUrPUmr17UE7H5zkQ5,FaBLfu       |          20 | 30-666-509-4542 |   6384.65 | AUTOMOBILE   | lites. regular requests nag furiously furiously 
+  11457539 | Customer#011457539 | dpwOx,BU,sivEMg6fk6u                |          14 | 24-216-131-5420 |   -231.37 | MACHINERY    | kly across the furiously final pac
+(5 rows)
+
+--test "!=" operator
+set enable_codegen = off;
+select * from customer where  '868.9' != c_acctbal order by 1 limit 5;
+ c_custkey |       c_name       |              c_address              | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                               c_comment                                                
+-----------+--------------------+-------------------------------------+-------------+-----------------+-----------+--------------+--------------------------------------------------------------------------------------------------------
+  11457535 | Customer#011457535 | vdyopGT10VBk                        |           9 | 19-180-890-9709 |   6110.84 | BUILDING     | uctions. slyly slow instructions unwind alongside of the even, final dinos. regular packages around th
+  11457536 | Customer#011457536 | JiP7cC3uQo8z2D1C6iQUPr3AnMxWD32fuDM |          16 | 26-622-571-1952 |   6915.62 | HOUSEHOLD    |  final instructions. blithely sile
+  11457537 | Customer#011457537 |  SQIG2yftjysJp 7H                   |          23 | 33-541-333-8249 |    2843.6 | BUILDING     | encies serve blithely. ruthless requests after the busily regular accounts impress fluffily quickly
+  11457538 | Customer#011457538 | ,2oppUrPUmr17UE7H5zkQ5,FaBLfu       |          20 | 30-666-509-4542 |   6384.65 | AUTOMOBILE   | lites. regular requests nag furiously furiously 
+  11457539 | Customer#011457539 | dpwOx,BU,sivEMg6fk6u                |          14 | 24-216-131-5420 |   -231.37 | MACHINERY    | kly across the furiously final pac
+(5 rows)
+
+set enable_codegen = on;
+select * from customer where  '868.9' != c_acctbal order by 1 limit 5;
+ c_custkey |       c_name       |              c_address              | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                               c_comment                                                
+-----------+--------------------+-------------------------------------+-------------+-----------------+-----------+--------------+--------------------------------------------------------------------------------------------------------
+  11457535 | Customer#011457535 | vdyopGT10VBk                        |           9 | 19-180-890-9709 |   6110.84 | BUILDING     | uctions. slyly slow instructions unwind alongside of the even, final dinos. regular packages around th
+  11457536 | Customer#011457536 | JiP7cC3uQo8z2D1C6iQUPr3AnMxWD32fuDM |          16 | 26-622-571-1952 |   6915.62 | HOUSEHOLD    |  final instructions. blithely sile
+  11457537 | Customer#011457537 |  SQIG2yftjysJp 7H                   |          23 | 33-541-333-8249 |    2843.6 | BUILDING     | encies serve blithely. ruthless requests after the busily regular accounts impress fluffily quickly
+  11457538 | Customer#011457538 | ,2oppUrPUmr17UE7H5zkQ5,FaBLfu       |          20 | 30-666-509-4542 |   6384.65 | AUTOMOBILE   | lites. regular requests nag furiously furiously 
+  11457539 | Customer#011457539 | dpwOx,BU,sivEMg6fk6u                |          14 | 24-216-131-5420 |   -231.37 | MACHINERY    | kly across the furiously final pac
+(5 rows)
+
+set enable_codegen = off;
+select * from customer where  c_acctbal != '868.9' order by 1 limit 5;
+ c_custkey |       c_name       |              c_address              | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                               c_comment                                                
+-----------+--------------------+-------------------------------------+-------------+-----------------+-----------+--------------+--------------------------------------------------------------------------------------------------------
+  11457535 | Customer#011457535 | vdyopGT10VBk                        |           9 | 19-180-890-9709 |   6110.84 | BUILDING     | uctions. slyly slow instructions unwind alongside of the even, final dinos. regular packages around th
+  11457536 | Customer#011457536 | JiP7cC3uQo8z2D1C6iQUPr3AnMxWD32fuDM |          16 | 26-622-571-1952 |   6915.62 | HOUSEHOLD    |  final instructions. blithely sile
+  11457537 | Customer#011457537 |  SQIG2yftjysJp 7H                   |          23 | 33-541-333-8249 |    2843.6 | BUILDING     | encies serve blithely. ruthless requests after the busily regular accounts impress fluffily quickly
+  11457538 | Customer#011457538 | ,2oppUrPUmr17UE7H5zkQ5,FaBLfu       |          20 | 30-666-509-4542 |   6384.65 | AUTOMOBILE   | lites. regular requests nag furiously furiously 
+  11457539 | Customer#011457539 | dpwOx,BU,sivEMg6fk6u                |          14 | 24-216-131-5420 |   -231.37 | MACHINERY    | kly across the furiously final pac
+(5 rows)
+
+set enable_codegen = on;
+select * from customer where  c_acctbal != '868.9' order by 1 limit 5;
+ c_custkey |       c_name       |              c_address              | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                               c_comment                                                
+-----------+--------------------+-------------------------------------+-------------+-----------------+-----------+--------------+--------------------------------------------------------------------------------------------------------
+  11457535 | Customer#011457535 | vdyopGT10VBk                        |           9 | 19-180-890-9709 |   6110.84 | BUILDING     | uctions. slyly slow instructions unwind alongside of the even, final dinos. regular packages around th
+  11457536 | Customer#011457536 | JiP7cC3uQo8z2D1C6iQUPr3AnMxWD32fuDM |          16 | 26-622-571-1952 |   6915.62 | HOUSEHOLD    |  final instructions. blithely sile
+  11457537 | Customer#011457537 |  SQIG2yftjysJp 7H                   |          23 | 33-541-333-8249 |    2843.6 | BUILDING     | encies serve blithely. ruthless requests after the busily regular accounts impress fluffily quickly
+  11457538 | Customer#011457538 | ,2oppUrPUmr17UE7H5zkQ5,FaBLfu       |          20 | 30-666-509-4542 |   6384.65 | AUTOMOBILE   | lites. regular requests nag furiously furiously 
+  11457539 | Customer#011457539 | dpwOx,BU,sivEMg6fk6u                |          14 | 24-216-131-5420 |   -231.37 | MACHINERY    | kly across the furiously final pac
+(5 rows)
+
+--add llt
+explain performance select * from customer where  c_acctbal != '868.9' order by 1 limit 5;
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+               Merge Sort Key: customer.c_custkey
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+

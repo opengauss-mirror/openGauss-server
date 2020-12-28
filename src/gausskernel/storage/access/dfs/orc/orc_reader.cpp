@@ -15,9 +15,8 @@
  *
  * orc_reader.cpp
  *
- *
  * IDENTIFICATION
- *         src/gausskernel/storage/access/dfs/orc/orc_reader.cpp
+ *    src/gausskernel/storage/access/dfs/orc/orc_reader.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -29,7 +28,10 @@
 #include "orc/Reader.hh"
 #include "storage/dfs/dfscache_mgr.h"
 #include "storage/cucache_mgr.h"
+#include "access/dfs/dfs_common.h"
 #include "access/dfs/dfs_query.h"
+#include "access/dfs/dfs_query_check.h"
+#include "access/dfs/dfs_wrapper.h"
 #include "optimizer/predtest.h"
 #include "pgstat.h"
 #include "dfs_adaptor.h"
@@ -37,19 +39,19 @@
 #include "orc_stream_adapter.h"
 
 #define READER_SETSTRIPEFOOTER(reader, stripeIndex, stripeFooter) do { \
-    DFS_TRY()                                                                                 \
-    {                                                                                         \
-        (reader)->setStripeFooter(stripeIndex, stripeFooter);                                 \
-    }                                                                                         \
-    DFS_CATCH();                                                                              \
-    DFS_ERRREPORT_WITHARGS("Error occurs while set stripe footer of "                         \
-                           "orc file %s because of %s, detail can be found in dn log of %s.", \
-                           MOD_ORC, readerState->currentSplit->filePath);                     \
+    DFS_TRY()                                                              \
+    {                                                                      \
+        (reader)->setStripeFooter(stripeIndex, stripeFooter);              \
+    }                                                                      \
+    DFS_CATCH();                                                           \
+    DFS_ERRREPORT_WITHARGS(                                                \
+        "Error occurs while set stripe footer of "                         \
+        "orc file %s because of %s, detail can be found in dn log of %s.", \
+        MOD_ORC, readerState->currentSplit->filePath);                     \
 } while (0)
 
 namespace dfs {
 namespace reader {
-
 #define NOT_STRING(oid) (((oid) != VARCHAROID && (oid) != BPCHAROID) && ((oid) != TEXTOID && (oid) != CLOBOID))
 
 /*
@@ -300,31 +302,13 @@ private:
     char *fileName;
 };
 
-OrcReaderImpl::OrcReaderImpl(ReaderState *_readerState, dfs::DFSConnector *_conn)
-    : currentFilePath(NULL),
-      numberOfColumns(0),
-      numberOfRows(0),
-      numberOfOrcCols(0),
-      numberOfFields(0),
-      numberOfStripes(0),
-      numberOfStrides(0),
-      rowsReadInCurrentStripe(0),
-      currentStripeIdx(0),
-      currentStrideIdx(0),
-      rowsInStride(10000),
-      rowsInCurrentStripe(0),
-      readerState(_readerState),
-      maxRowsReadOnce(0),
-      isSelected(NULL),
-      internalContext(NULL),
-      hasBloomFilter(false),
-      conn(_conn),
-      bloomFilters(NULL),
-      staticBloomFilters(NULL),
-      newStream(NULL)
-{
-    /* do nothing */
-}
+/* do nothing */
+OrcReaderImpl::OrcReaderImpl(ReaderState *_readerState, dfs::DFSConnector *_conn) : currentFilePath(NULL),
+    numberOfColumns(0), numberOfRows(0), numberOfOrcCols(0), numberOfFields(0), numberOfStripes(0), numberOfStrides(0),
+    rowsReadInCurrentStripe(0), currentStripeIdx(0), currentStrideIdx(0), rowsInStride(10000), rowsInCurrentStripe(0),
+    readerState(_readerState), maxRowsReadOnce(0), isSelected(NULL), internalContext(NULL), hasBloomFilter(false),
+    conn(_conn), bloomFilters(NULL), staticBloomFilters(NULL), newStream(NULL)
+{}
 
 OrcReaderImpl::~OrcReaderImpl()
 {
@@ -650,7 +634,7 @@ bool OrcReaderImpl::tryDynamicPrunning()
  * @IN stream: input stream
  * @See also:
  */
-void OrcReaderImpl::createStructReaderWithCacheForInnerTable(std::unique_ptr<orc::InputStream> &stream)
+inline void OrcReaderImpl::createStructReaderWithCacheForInnerTable(std::unique_ptr<orc::InputStream> &stream)
 {
     orc::ReaderOptions opts;
     OrcMetadataValue *metaData = NULL;
@@ -662,15 +646,14 @@ void OrcReaderImpl::createStructReaderWithCacheForInnerTable(std::unique_ptr<orc
     bool hasFound = false;
 
     pgstat_count_buffer_read(readerState->scanstate->ss_currentRelation);
-    slotId = MetaCacheAllocBlock(&fileNode, fileID, stripeID, columnID, hasFound);
+    slotId = MetaCacheAllocBlock((RelFileNodeOld *)&fileNode, fileID, stripeID, columnID, hasFound, CACHE_ORC_INDEX);
     ereport(DEBUG1,
             (errmodule(MOD_ORC),
              errmsg("build struct reader: slotID(%d), spcID(%u), dbID(%u), relID(%u), fileID(%d), stripeID(%u), "
-                    "columnID(%u), found(%d)",
-                    slotId, fileNode.spcNode, fileNode.dbNode, fileNode.relNode, fileID, stripeID, columnID,
-                    hasFound)));
+                 "columnID(%u), found(%d)",
+                 slotId, fileNode.spcNode, fileNode.dbNode, fileNode.relNode, fileID, stripeID, columnID, hasFound)));
 
-    metaData = MetaCacheGetBlock(slotId);
+    metaData = OrcMetaCacheGetBlock(slotId);
     if (hasFound) {
         orc::proto::PostScript *ps = new orc::proto::PostScript();
         orc::proto::Footer *footer = new orc::proto::Footer();
@@ -680,15 +663,15 @@ void OrcReaderImpl::createStructReaderWithCacheForInnerTable(std::unique_ptr<orc
                                          std::unique_ptr<orc::proto::Footer>(footer), metaData->footerStart);
 
         readerState->orcMetaCacheBlockCount++;
-        readerState->orcMetaCacheBlockSize += MetaCacheGetBlockSize(slotId);
+        readerState->orcMetaCacheBlockSize += OrcMetaCacheGetBlockSize(slotId);
         pgstat_count_buffer_hit(readerState->scanstate->ss_currentRelation);
     } else {
         structReader = orc::createReader(std::move(stream), opts);
-        MetaCacheSetBlock(slotId, structReader->getFooterStart(), structReader->getPostScript().get(),
-                          structReader->getFooter().get(), NULL, NULL, NULL, NULL);
+        OrcMetaCacheSetBlock(slotId, structReader->getFooterStart(), structReader->getPostScript().get(),
+                             structReader->getFooter().get(), NULL, NULL, NULL, NULL);
 
         readerState->orcMetaLoadBlockCount++;
-        readerState->orcMetaLoadBlockSize += MetaCacheGetBlockSize(slotId);
+        readerState->orcMetaLoadBlockSize += OrcMetaCacheGetBlockSize(slotId);
     }
     ReleaseMetaBlock(slotId);
 }
@@ -698,7 +681,7 @@ void OrcReaderImpl::createStructReaderWithCacheForInnerTable(std::unique_ptr<orc
  * @IN stream: input stream
  * @See also:
  */
-void OrcReaderImpl::createStructReaderWithCacheForForeignTable(std::unique_ptr<orc::InputStream> &stream)
+inline void OrcReaderImpl::createStructReaderWithCacheForForeignTable(std::unique_ptr<orc::InputStream> &stream)
 {
     orc::ReaderOptions opts;
     OrcMetadataValue *metaData = NULL;
@@ -721,9 +704,10 @@ void OrcReaderImpl::createStructReaderWithCacheForForeignTable(std::unique_ptr<o
      * test if collision happens. If so, we read the info directly from OBS file and not
      * update the info into cache.
      */
-    slotId = MetaCacheAllocBlock(&fileNode, (int32_t)prefixNameHash, stripeID, columnID, hasFound);
+    slotId = MetaCacheAllocBlock((RelFileNodeOld *)&fileNode, (int32_t)prefixNameHash, stripeID, columnID, hasFound,
+                                 CACHE_ORC_INDEX);
 
-    metaData = MetaCacheGetBlock(slotId);
+    metaData = OrcMetaCacheGetBlock(slotId);
 
     if (hasFound) {
         Assert(metaData->fileName);
@@ -748,7 +732,7 @@ void OrcReaderImpl::createStructReaderWithCacheForForeignTable(std::unique_ptr<o
                                                  std::unique_ptr<orc::proto::Footer>(footer), metaData->footerStart);
 
                 readerState->orcMetaCacheBlockCount++;
-                readerState->orcMetaCacheBlockSize += MetaCacheGetBlockSize(slotId);
+                readerState->orcMetaCacheBlockSize += OrcMetaCacheGetBlockSize(slotId);
                 pgstat_count_buffer_hit(readerState->scanstate->ss_currentRelation);
 
                 ReleaseMetaBlock(slotId);
@@ -763,11 +747,11 @@ void OrcReaderImpl::createStructReaderWithCacheForForeignTable(std::unique_ptr<o
     /* not find in cache and eTag doesn't match when we need update cache */
     if (!hasFound || (dataChg && !renewCollision)) {
         structReader = orc::createReader(std::move(stream), opts);
-        MetaCacheSetBlock(slotId, structReader->getFooterStart(), structReader->getPostScript().get(),
-                          structReader->getFooter().get(), NULL, NULL, fileName.c_str(),
-                          readerState->currentSplit->eTag);
+        OrcMetaCacheSetBlock(slotId, structReader->getFooterStart(), structReader->getPostScript().get(),
+                             structReader->getFooter().get(), NULL, NULL, fileName.c_str(),
+                             readerState->currentSplit->eTag);
         readerState->orcMetaLoadBlockCount++;
-        readerState->orcMetaLoadBlockSize += MetaCacheGetBlockSize(slotId);
+        readerState->orcMetaLoadBlockSize += OrcMetaCacheGetBlockSize(slotId);
         ReleaseMetaBlock(slotId);
     } else if (collision || (dataChg && renewCollision)) { /* renewCollision is ture */
         ReleaseMetaBlock(slotId);
@@ -810,9 +794,9 @@ void OrcReaderImpl::buildStructReader()
         createStructReaderWithCache();
     }
     DFS_CATCH();
-    DFS_ERRREPORT_WITHARGS("Error occurs while creating an orc reader for file %s because of %s, "
-                           "detail can be found in dn log of %s.",
-                           MOD_ORC, currentFilePath);
+    DFS_ERRREPORT_WITHARGS(
+        "Error occurs while creating an orc reader for file %s because of %s, detail can be found in dn log of %s.",
+        MOD_ORC, currentFilePath);
     Assert(NULL != structReader.get());
 
     /* check the number of rows first */
@@ -834,9 +818,7 @@ void OrcReaderImpl::buildStructReader()
          * greater than or equal to getSelectedColumns().size() - 1.
          */
         ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmodule(MOD_ORC),
-                        errmsg("Column count in table definition does not "
-                               "match with ORC file %s.",
-                               currentFilePath)));
+                        errmsg("Column count in table definition does not match with ORC file %s.", currentFilePath)));
     }
 
     rowsReadInCurrentStripe = 0;
@@ -883,9 +865,9 @@ void OrcReaderImpl::initializeColumnReaders()
                 streamCopy = newStream->copy();
             }
             DFS_CATCH();
-            DFS_ERRREPORT_WITHARGS("Error occurs while opening hdfs file %s because of %s, "
-                                   "detail can be found in dn log of %s.",
-                                   MOD_ORC, currentFilePath);
+            DFS_ERRREPORT_WITHARGS(
+                "Error occurs while opening hdfs file %s because of %s, detail can be found in dn log of %s.",
+                MOD_ORC, currentFilePath);
 
             const Var *var = GetVarFromColumnList(readerState->allColumnList, static_cast<int32_t>(i + 1));
             OrcColumnReader *readerImpl = NULL;
@@ -899,80 +881,67 @@ void OrcReaderImpl::initializeColumnReaders()
             switch (structReader->getType().getSubtype(orcColIDs[i]).getKind()) {
                 case orc::LONG: {
                     readerImpl = New(readerState->persistCtx) OrcColumnReaderImpl<orc::LONG>(orcColIDs[i] + 1,
-                                                                                             mppColIDs[i] + 1,
-                                                                                             readerState, var);
+                        mppColIDs[i] + 1, readerState, var);
                     break;
                 }
                 case orc::INT: {
                     readerImpl = New(readerState->persistCtx) OrcColumnReaderImpl<orc::INT>(orcColIDs[i] + 1,
-                                                                                            mppColIDs[i] + 1,
-                                                                                            readerState, var);
+                        mppColIDs[i] + 1, readerState, var);
                     break;
                 }
                 case orc::SHORT: {
                     readerImpl = New(readerState->persistCtx) OrcColumnReaderImpl<orc::SHORT>(orcColIDs[i] + 1,
-                                                                                              mppColIDs[i] + 1,
-                                                                                              readerState, var);
+                        mppColIDs[i] + 1, readerState, var);
                     break;
                 }
                 case orc::BYTE: {
                     readerImpl = New(readerState->persistCtx) OrcColumnReaderImpl<orc::BYTE>(orcColIDs[i] + 1,
-                                                                                             mppColIDs[i] + 1,
-                                                                                             readerState, var);
+                        mppColIDs[i] + 1, readerState, var);
                     break;
                 }
                 case orc::FLOAT: {
                     readerImpl = New(readerState->persistCtx) OrcColumnReaderImpl<orc::FLOAT>(orcColIDs[i] + 1,
-                                                                                              mppColIDs[i] + 1,
-                                                                                              readerState, var);
+                        mppColIDs[i] + 1, readerState, var);
                     break;
                 }
                 case orc::DOUBLE: {
                     readerImpl = New(readerState->persistCtx) OrcColumnReaderImpl<orc::DOUBLE>(orcColIDs[i] + 1,
-                                                                                               mppColIDs[i] + 1,
-                                                                                               readerState, var);
+                        mppColIDs[i] + 1, readerState, var);
                     break;
                 }
                 case orc::BOOLEAN: {
                     readerImpl = New(readerState->persistCtx) OrcColumnReaderImpl<orc::BOOLEAN>(orcColIDs[i] + 1,
-                                                                                                mppColIDs[i] + 1,
-                                                                                                readerState, var);
+                        mppColIDs[i] + 1, readerState, var);
                     break;
                 }
                 case orc::CHAR: {
                     readerImpl = New(readerState->persistCtx) OrcColumnReaderImpl<orc::CHAR>(orcColIDs[i] + 1,
-                                                                                             mppColIDs[i] + 1,
-                                                                                             readerState, var);
+                        mppColIDs[i] + 1, readerState, var);
                     break;
                 }
                 case orc::VARCHAR: {
                     readerImpl = New(readerState->persistCtx) OrcColumnReaderImpl<orc::VARCHAR>(orcColIDs[i] + 1,
-                                                                                                mppColIDs[i] + 1,
-                                                                                                readerState, var);
+                        mppColIDs[i] + 1, readerState, var);
                     break;
                 }
                 case orc::STRING: {
                     readerImpl = New(readerState->persistCtx) OrcColumnReaderImpl<orc::STRING>(orcColIDs[i] + 1,
-                                                                                               mppColIDs[i] + 1,
-                                                                                               readerState, var);
+                        mppColIDs[i] + 1, readerState, var);
                     break;
                 }
                 case orc::DATE: {
                     readerImpl = New(readerState->persistCtx) OrcColumnReaderImpl<orc::DATE>(orcColIDs[i] + 1,
-                                                                                             mppColIDs[i] + 1,
-                                                                                             readerState, var);
+                        mppColIDs[i] + 1, readerState, var);
                     break;
                 }
                 case orc::TIMESTAMP: {
                     readerImpl = New(readerState->persistCtx) OrcColumnReaderImpl<orc::TIMESTAMP>(orcColIDs[i] + 1,
-                                                                                                  mppColIDs[i] + 1,
-                                                                                                  readerState, var);
+                        mppColIDs[i] + 1,  readerState, var);
                     break;
                 }
                 case orc::DECIMAL: {
                     readerImpl = New(readerState->persistCtx) OrcColumnReaderImpl<orc::DECIMAL>(orcColIDs[i] + 1,
-                                                                                                mppColIDs[i] + 1,
-                                                                                                readerState, var);
+                    mppColIDs[i] + 1, readerState, var);
                     break;
                 }
                 default: {
@@ -1000,7 +969,7 @@ inline uint64_t OrcReaderImpl::computeRowsToRead(uint64_t maxRows)
 /*
  * @Description: get stripe footer from cache for inner table
  */
-const orc::proto::StripeFooter *OrcReaderImpl::getStripeFooterFromCacheForInnerTable()
+inline const orc::proto::StripeFooter *OrcReaderImpl::getStripeFooterFromCacheForInnerTable()
 {
     const orc::proto::StripeFooter *stripeFooter = NULL;
     RelFileNode fileNode = readerState->scanstate->ss_currentRelation->rd_node;
@@ -1010,26 +979,26 @@ const orc::proto::StripeFooter *OrcReaderImpl::getStripeFooterFromCacheForInnerT
     bool found = false;
 
     pgstat_count_buffer_read(readerState->scanstate->ss_currentRelation);
-    CacheSlotId_t slotId = MetaCacheAllocBlock(&fileNode, fileID, stripeID, columnID, found);
+    CacheSlotId_t slotId = MetaCacheAllocBlock((RelFileNodeOld *)&fileNode, fileID, stripeID, columnID, found,
+                                               CACHE_ORC_INDEX);
     ereport(DEBUG1,
-            (errmodule(MOD_ORC),
-             errmsg("set stripe footer : slotID(%d), spcID(%u), dbID(%u), relID(%u), fileID(%d), stripeID(%u), "
-                    "columnID(%u), found(%d)",
-                    slotId, fileNode.spcNode, fileNode.dbNode, fileNode.relNode, fileID, stripeID, columnID, found)));
+            (errmodule(MOD_ORC), errmsg("set stripe footer : slotID(%d), spcID(%u), dbID(%u), " 
+                "relID(%u), fileID(%d), stripeID(%u), columnID(%u), found(%d)",
+                slotId, fileNode.spcNode, fileNode.dbNode, fileNode.relNode, fileID, stripeID, columnID, found)));
 
-    OrcMetadataValue *metaData = MetaCacheGetBlock(slotId);
+    OrcMetadataValue *metaData = OrcMetaCacheGetBlock(slotId);
     if (found) {
         READER_SETSTRIPEFOOTER(structReader, currentStripeIdx, metaData->stripeFooter);
         stripeFooter = structReader->getCurrentStripeFooter();
         readerState->orcMetaCacheBlockCount++;
-        readerState->orcMetaCacheBlockSize += MetaCacheGetBlockSize(slotId);
+        readerState->orcMetaCacheBlockSize += OrcMetaCacheGetBlockSize(slotId);
         pgstat_count_buffer_hit(readerState->scanstate->ss_currentRelation);
     } else {
         READER_SETSTRIPEFOOTER(structReader, currentStripeIdx, NULL);
         stripeFooter = structReader->getCurrentStripeFooter();
-        MetaCacheSetBlock(slotId, 0, NULL, NULL, stripeFooter, NULL, NULL, NULL);
+        OrcMetaCacheSetBlock(slotId, 0, NULL, NULL, stripeFooter, NULL, NULL, NULL);
         readerState->orcMetaLoadBlockCount++;
-        readerState->orcMetaLoadBlockSize += MetaCacheGetBlockSize(slotId);
+        readerState->orcMetaLoadBlockSize += OrcMetaCacheGetBlockSize(slotId);
     }
     ReleaseMetaBlock(slotId);
 
@@ -1039,7 +1008,7 @@ const orc::proto::StripeFooter *OrcReaderImpl::getStripeFooterFromCacheForInnerT
 /*
  * @Description: get stripe footer from cache for forign table
  */
-const orc::proto::StripeFooter *OrcReaderImpl::getStripeFooterFromCacheForForeignTable()
+inline const orc::proto::StripeFooter *OrcReaderImpl::getStripeFooterFromCacheForForeignTable()
 {
     const orc::proto::StripeFooter *stripeFooter = NULL;
 
@@ -1052,7 +1021,8 @@ const orc::proto::StripeFooter *OrcReaderImpl::getStripeFooterFromCacheForForeig
 
     pgstat_count_buffer_read(readerState->scanstate->ss_currentRelation);
     uint32_t prefixNameHash = string_hash((void *)fileName.c_str(), fileName.length() + 1);
-    CacheSlotId_t slotId = MetaCacheAllocBlock(&fileNode, (int32_t)prefixNameHash, stripeID, columnID, found);
+    CacheSlotId_t slotId = MetaCacheAllocBlock((RelFileNodeOld *)&fileNode, (int32_t)prefixNameHash, stripeID, columnID,
+                                               found, CACHE_ORC_INDEX);
 
     /*
      * we use RelFileNode & prefixNameHash as the hash key. If the RelFileNode has files
@@ -1061,7 +1031,7 @@ const orc::proto::StripeFooter *OrcReaderImpl::getStripeFooterFromCacheForForeig
      * test if collision happens. If so, we read the info directly from OBS file and not
      * update the info into cache.
      */
-    OrcMetadataValue *metaData = MetaCacheGetBlock(slotId);
+    OrcMetadataValue *metaData = OrcMetaCacheGetBlock(slotId);
     bool dataChg = false;
     bool renewCollision = false;
 
@@ -1083,7 +1053,7 @@ const orc::proto::StripeFooter *OrcReaderImpl::getStripeFooterFromCacheForForeig
                 READER_SETSTRIPEFOOTER(structReader, currentStripeIdx, metaData->stripeFooter);
                 stripeFooter = structReader->getCurrentStripeFooter();
                 readerState->orcMetaCacheBlockCount++;
-                readerState->orcMetaCacheBlockSize += MetaCacheGetBlockSize(slotId);
+                readerState->orcMetaCacheBlockSize += OrcMetaCacheGetBlockSize(slotId);
                 pgstat_count_buffer_hit(readerState->scanstate->ss_currentRelation);
                 ReleaseMetaBlock(slotId);
             }
@@ -1098,10 +1068,11 @@ const orc::proto::StripeFooter *OrcReaderImpl::getStripeFooterFromCacheForForeig
     if (!found || (dataChg && !renewCollision)) {
         READER_SETSTRIPEFOOTER(structReader, currentStripeIdx, NULL);
         stripeFooter = structReader->getCurrentStripeFooter();
-        MetaCacheSetBlock(slotId, 0, NULL, NULL, stripeFooter, NULL, fileName.c_str(), readerState->currentSplit->eTag);
+        OrcMetaCacheSetBlock(slotId, 0, NULL, NULL, stripeFooter, NULL, fileName.c_str(),
+                             readerState->currentSplit->eTag);
 
         readerState->orcMetaLoadBlockCount++;
-        readerState->orcMetaLoadBlockSize += MetaCacheGetBlockSize(slotId);
+        readerState->orcMetaLoadBlockSize += OrcMetaCacheGetBlockSize(slotId);
         ReleaseMetaBlock(slotId);
     } else if (collision || (dataChg && renewCollision)) {
         ReleaseMetaBlock(slotId);
@@ -1118,7 +1089,7 @@ const orc::proto::StripeFooter *OrcReaderImpl::getStripeFooterFromCacheForForeig
  * @Description: Load the row index's information from file for the current stripe.
  * @IN loadBF: flag indicates whether we should load the bloom filter information
  */
-void OrcReaderImpl::setStripeRowIndex(bool loadBF)
+inline void OrcReaderImpl::setStripeRowIndex(bool loadBF)
 {
     uint32_t *orcColIDs = readerState->readColIDs;
     bool *orcRequired = readerState->readRequired;
@@ -1388,7 +1359,7 @@ inline void OrcReaderImpl::tryStripeEnd()
     }
 }
 
-bool OrcReaderImpl::checkPredicateOnCurrentFile(List *descFileRestriction)
+inline bool OrcReaderImpl::checkPredicateOnCurrentFile(List *descFileRestriction)
 {
     List *fileRestriction = buildRestriction(FILE);
     List *fileRestrictionOrigin = fileRestriction;  // store the pointer in order to free the memory
@@ -1406,7 +1377,7 @@ bool OrcReaderImpl::checkPredicateOnCurrentFile(List *descFileRestriction)
     return ret;
 }
 
-bool OrcReaderImpl::checkPredicateOnCurrentStripe()
+inline bool OrcReaderImpl::checkPredicateOnCurrentStripe()
 {
     /*
      * ORC 0.11 don't support storing min/max on stripe level.
@@ -1427,10 +1398,11 @@ bool OrcReaderImpl::checkPredicateOnCurrentStripe()
         readerState->minmaxFilterStripe++;
     }
     readerState->minmaxCheckStripe++;
+    list_free_ext(stripeRestriction);
     return ret;
 }
 
-bool OrcReaderImpl::checkPredicateOnCurrentStride()
+inline bool OrcReaderImpl::checkPredicateOnCurrentStride()
 {
     /*
      * If there is only one stride in the stripe, the min/max is equal to the min/max
@@ -1555,24 +1527,11 @@ void OrcReaderImpl::collectFileReadingStatus()
 template <FieldKind fieldKind>
 OrcColumnReaderImpl<fieldKind>::OrcColumnReaderImpl(int64_t _columnIdx, int64_t _mppColumnIdx,
                                                     ReaderState *_readerState, const Var *_var)
-    : readerState(_readerState),
-      lessThanExpr(NULL),
-      greaterThanExpr(NULL),
-      columnIdx(_columnIdx),
-      mppColumnIdx(_mppColumnIdx),
-      var(_var),
-      predicate(NIL),
-      useDecimal128(false),
-      checkEncodingLevel(readerState->checkEncodingLevel),
-      skipRowsBuffer(0),
-      epochOffsetDiff(0),
-      bloomFilter(NULL),
-      convertToDatumFunc(NULL),
-      columnReaderCtx(NULL),
-      scale(0),
-      checkBloomFilterOnRow(false),
-      checkPredicateOnRow(false),
-      fileName(NULL)
+    : readerState(_readerState), lessThanExpr(NULL), greaterThanExpr(NULL), columnIdx(_columnIdx),
+      mppColumnIdx(_mppColumnIdx), var(_var), predicate(NIL), useDecimal128(false),
+      checkEncodingLevel(readerState->checkEncodingLevel), skipRowsBuffer(0), epochOffsetDiff(0), bloomFilter(NULL),
+      convertToDatumFunc(NULL), columnReaderCtx(NULL), scale(0), checkBloomFilterOnRow(false),
+      checkPredicateOnRow(false), fileName(NULL)
 {
     /* do nothing */
 }
@@ -1595,15 +1554,14 @@ void OrcColumnReaderImpl<fieldKind>::begin(std::unique_ptr<orc::InputStream> str
     predicate = readerState->hdfsScanPredicateArr[mppColumnIdx - 1];
     checkPredicateOnRow = list_length(predicate) > 0 ? true : false;
     columnReaderCtx = AllocSetContextCreate(readerState->persistCtx, "orc column reader context",
-                                            ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
-                                            ALLOCSET_DEFAULT_MAXSIZE);
+        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     MemoryContext oldContext = MemoryContextSwitchTo(columnReaderCtx);
     lessThanExpr = MakeOperatorExpression(const_cast<Var *>(var), BTLessEqualStrategyNumber);
     greaterThanExpr = MakeOperatorExpression(const_cast<Var *>(var), BTGreaterEqualStrategyNumber);
 
     /* be careful: we must append stream->getName to fileName before move operation */
     fileName = (char *)palloc0(stream->getName().length() + 1);
-    errno_t rc = memcpy_s(fileName, stream->getName().length(), stream->getName().c_str(), stream->getName().length());
+    error_t rc = memcpy_s(fileName, stream->getName().length(), stream->getName().c_str(), stream->getName().length());
     securec_check(rc, "", "");
 
     initColumnReader(std::move(stream), structReader, maxBatchSize, opts);
@@ -1613,8 +1571,7 @@ void OrcColumnReaderImpl<fieldKind>::begin(std::unique_ptr<orc::InputStream> str
 
 template <FieldKind fieldKind>
 void OrcColumnReaderImpl<fieldKind>::initColumnReader(std::unique_ptr<orc::InputStream> stream,
-                                                      const orc::Reader *structReader, const uint64_t maxBatchSize,
-                                                      const orc::ReaderOptions &opts)
+    const orc::Reader *structReader, const uint64_t maxBatchSize, const orc::ReaderOptions &opts)
 {
     DFS_TRY()
     {
@@ -1625,9 +1582,9 @@ void OrcColumnReaderImpl<fieldKind>::initColumnReader(std::unique_ptr<orc::Input
         primitiveBatch = reader->createRowBatch(maxBatchSize);
     }
     DFS_CATCH();
-    DFS_ERRREPORT_WITHARGS("Error occurs while creating an orc reader for file %s because of %s, "
-                           "detail can be found in dn log of %s.",
-                           MOD_ORC, readerState->currentSplit->filePath);
+    DFS_ERRREPORT_WITHARGS(
+        "Error occurs while creating an orc reader for file %s because of %s, detail can be found in dn log of %s.",
+        MOD_ORC, readerState->currentSplit->filePath);
 
     scale = reader->getType().getScale();
     if (!matchOrcWithPsql()) {
@@ -1730,8 +1687,8 @@ void OrcColumnReaderImpl<fieldKind>::Destroy()
 }
 
 template <FieldKind fieldKind>
-void OrcColumnReaderImpl<fieldKind>::setRowIndexForInnerTable(uint64_t stripeIndex, bool hasCheck,
-    const orc::proto::StripeFooter *stripeFooter)
+inline void OrcColumnReaderImpl<fieldKind>::setRowIndexForInnerTable(uint64_t stripeIndex, bool hasCheck,
+                                                                     const orc::proto::StripeFooter *stripeFooter)
 {
     OrcMetadataValue *metaData = NULL;
     RelFileNode fileNode = readerState->scanstate->ss_currentRelation->rd_node;
@@ -1742,31 +1699,30 @@ void OrcColumnReaderImpl<fieldKind>::setRowIndexForInnerTable(uint64_t stripeInd
     bool found = false;
 
     pgstat_count_buffer_read(readerState->scanstate->ss_currentRelation);
-    slotId = MetaCacheAllocBlock(&fileNode, fileID, stripeID, columnID, found);
+    slotId = MetaCacheAllocBlock((RelFileNodeOld *)&fileNode, fileID, stripeID, columnID, found, CACHE_ORC_INDEX);
     ereport(DEBUG1,
-            (errmodule(MOD_ORC),
-             errmsg("set row index : slotID(%d), spcID(%u), dbID(%u), relID(%u), fileID(%d), stripeID(%u), "
-                    "columnID(%u), found(%d)",
-                    slotId, fileNode.spcNode, fileNode.dbNode, fileNode.relNode, fileID, stripeID, columnID, found)));
+            (errmodule(MOD_ORC), errmsg("set row index : slotID(%d), spcID(%u), dbID(%u), relID(%u), "
+                "fileID(%d), stripeID(%u), columnID(%u), found(%d)",
+                slotId, fileNode.spcNode, fileNode.dbNode, fileNode.relNode, fileID, stripeID, columnID, found)));
 
-    metaData = MetaCacheGetBlock(slotId);
+    metaData = OrcMetaCacheGetBlock(slotId);
     if (found) {
         reader->setRowIndex(stripeIndex, hasCheck, stripeFooter, metaData->rowIndex);
         readerState->orcMetaCacheBlockCount++;
-        readerState->orcMetaCacheBlockSize += MetaCacheGetBlockSize(slotId);
+        readerState->orcMetaCacheBlockSize += OrcMetaCacheGetBlockSize(slotId);
         pgstat_count_buffer_hit(readerState->scanstate->ss_currentRelation);
     } else {
         reader->setRowIndex(stripeIndex, hasCheck, stripeFooter, NULL);
-        MetaCacheSetBlock(slotId, 0, NULL, NULL, NULL, reader->getCurrentRowIndex(), NULL, NULL);
+        OrcMetaCacheSetBlock(slotId, 0, NULL, NULL, NULL, reader->getCurrentRowIndex(), NULL, NULL);
         readerState->orcMetaLoadBlockCount++;
-        readerState->orcMetaLoadBlockSize += MetaCacheGetBlockSize(slotId);
+        readerState->orcMetaLoadBlockSize += OrcMetaCacheGetBlockSize(slotId);
     }
     ReleaseMetaBlock(slotId);
 }
 
 template <FieldKind fieldKind>
-void OrcColumnReaderImpl<fieldKind>::setRowIndexForForeignTable(uint64_t stripeIndex, bool hasCheck,
-        const orc::proto::StripeFooter *stripeFooter)
+inline void OrcColumnReaderImpl<fieldKind>::setRowIndexForForeignTable(uint64_t stripeIndex, bool hasCheck,
+                                                                       const orc::proto::StripeFooter *stripeFooter)
 {
     bool found = false;
     bool dataChg = false;
@@ -1790,14 +1746,14 @@ void OrcColumnReaderImpl<fieldKind>::setRowIndexForForeignTable(uint64_t stripeI
      * test if collision happens. If so, we read the info directly from OBS file and not
      * update the info into cache.
      */
-    slotId = MetaCacheAllocBlock(&fileNode, (int32_t)prefixNameHash, stripeID, columnID, found);
-    ereport(DEBUG1,
-            (errmodule(MOD_ORC),
+    slotId = MetaCacheAllocBlock((RelFileNodeOld *)&fileNode, (int32_t)prefixNameHash, stripeID, columnID, found,
+                                 CACHE_ORC_INDEX);
+    ereport(DEBUG1, (errmodule(MOD_ORC),
              errmsg("set row index : slotID(%d), spcID(%u), dbID(%u), relID(%u), fileID(%d), stripeID(%u), "
                     "columnID(%u), found(%d)",
                     slotId, fileNode.spcNode, fileNode.dbNode, fileNode.relNode, fileID, stripeID, columnID, found)));
 
-    metaData = MetaCacheGetBlock(slotId);
+    metaData = OrcMetaCacheGetBlock(slotId);
 
     if (found) {
         Assert(metaData->fileName);
@@ -1808,13 +1764,12 @@ void OrcColumnReaderImpl<fieldKind>::setRowIndexForForeignTable(uint64_t stripeI
             collision = true;
         } else {
             size_t dataDNALen = strlen(readerState->currentSplit->eTag);
-
-            if (strncmp(readerState->currentSplit->eTag, metaData->dataDNA, dataDNALen)) {
+            if (strncmp(readerState->currentSplit->eTag, metaData->dataDNA, dataDNALen))
                 dataChg = true;
-            } else {
+            else {
                 reader->setRowIndex(stripeIndex, hasCheck, stripeFooter, metaData->rowIndex);
                 readerState->orcMetaCacheBlockCount++;
-                readerState->orcMetaCacheBlockSize += MetaCacheGetBlockSize(slotId);
+                readerState->orcMetaCacheBlockSize += OrcMetaCacheGetBlockSize(slotId);
                 pgstat_count_buffer_hit(readerState->scanstate->ss_currentRelation);
                 ReleaseMetaBlock(slotId);
             }
@@ -1827,10 +1782,10 @@ void OrcColumnReaderImpl<fieldKind>::setRowIndexForForeignTable(uint64_t stripeI
 
     if (!found || (dataChg && !renewCollision)) {
         reader->setRowIndex(stripeIndex, hasCheck, stripeFooter, NULL);
-        MetaCacheSetBlock(slotId, 0, NULL, NULL, NULL, reader->getCurrentRowIndex(), fileName,
-                        readerState->currentSplit->eTag);
+        OrcMetaCacheSetBlock(slotId, 0, NULL, NULL, NULL, reader->getCurrentRowIndex(), fileName,
+                             readerState->currentSplit->eTag);
         readerState->orcMetaLoadBlockCount++;
-        readerState->orcMetaLoadBlockSize += MetaCacheGetBlockSize(slotId);
+        readerState->orcMetaLoadBlockSize += OrcMetaCacheGetBlockSize(slotId);
         ReleaseMetaBlock(slotId);
     } else if (collision || (dataChg && renewCollision)) {
         ReleaseMetaBlock(slotId);
@@ -1859,8 +1814,8 @@ void OrcColumnReaderImpl<fieldKind>::setRowIndex(uint64_t stripeIndex, bool hasC
     }
     DFS_CATCH();
     DFS_ERRREPORT_WITHARGS("Error occurs while read row index of orc file %s because of %s, "
-                           "detail can be found in dn log of %s.",
-                           MOD_ORC, readerState->currentSplit->filePath);
+        "detail can be found in dn log of %s.",
+        MOD_ORC, readerState->currentSplit->filePath);
 }
 
 template <FieldKind fieldKind>
@@ -1880,19 +1835,17 @@ void OrcColumnReaderImpl<fieldKind>::nextInternal(uint64_t numValues)
     }
     DFS_CATCH();
     DFS_ERRREPORT_WITHARGS("Error occurs while reading orc file %s because of %s, "
-                           "detail can be found in dn log of %s.",
-                           MOD_ORC, readerState->currentSplit->filePath);
+        "detail can be found in dn log of %s.",
+        MOD_ORC, readerState->currentSplit->filePath);
 
     if (errOccur) {
-        ereport(WARNING,
-                (errmodule(MOD_ORC),
-                 errmsg("Exception detail is relation: %s, file: %s, column id: "
-                        "%d, skip number: %d, read number: %d.",
-                        RelationGetRelationName(readerState->scanstate->ss_currentRelation),
-                        readerState->currentSplit->filePath, (int32_t)columnIdx, skipRecords, (int32_t)numValues)));
+        ereport(WARNING, (errmodule(MOD_ORC), 
+            errmsg("Exception detail is relation: %s, file: %s, column id: "
+                "%d, skip number: %d, read number: %d.",
+                RelationGetRelationName(readerState->scanstate->ss_currentRelation),
+                readerState->currentSplit->filePath, (int32_t)columnIdx, skipRecords, (int32_t)numValues)));
         ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmodule(MOD_ORC),
-                        errmsg("Error occurs while reading orc file %s, "
-                               "detail can be found in dn log of %s.",
+                        errmsg("Error occurs while reading orc file %s, detail can be found in dn log of %s.",
                                readerState->currentSplit->filePath, g_instance.attr.attr_common.PGXCNodeName)));
     }
 }
@@ -2011,7 +1964,7 @@ void OrcColumnReaderImpl<fieldKind>::predicateFilter(uint64_t numValues, bool *i
                     char lastChar = '\0';
                     char *tmpValue = data[i];
                     int64_t length = lengths[i];
-                    if (length == 0 && DB_IS_CMPT(DB_CMPT_A)) {
+                    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && 0 == length) {
                         tmpValue = NULL;
                     } else {
                         lastChar = tmpValue[length];
@@ -2029,22 +1982,19 @@ void OrcColumnReaderImpl<fieldKind>::predicateFilter(uint64_t numValues, bool *i
                                 uint32_t local_scale = typmod & 0xffff;
                                 if (precision <= 18) {
                                     Datum result = DirectFunctionCall3(numeric_in, CStringGetDatum(tmpValue),
-                                                                       ObjectIdGetDatum(InvalidOid),
-                                                                       Int32GetDatum(var->vartypmod));
+                                        ObjectIdGetDatum(InvalidOid), Int32GetDatum(var->vartypmod));
                                     int64 value = convert_short_numeric_to_int64_byscale(DatumGetNumeric(result),
                                                                                          local_scale);
                                     isSelected[i] = HdfsPredicateCheckValue<Int64Wrapper, int64_t>(value, predicate);
                                 } else if (precision <= 38) {
                                     int128 value = 0;
                                     Datum result = DirectFunctionCall3(numeric_in, CStringGetDatum(tmpValue),
-                                                                       ObjectIdGetDatum(InvalidOid),
-                                                                       Int32GetDatum(var->vartypmod));
+                                        ObjectIdGetDatum(InvalidOid), Int32GetDatum(var->vartypmod));
                                     convert_short_numeric_to_int128_byscale(DatumGetNumeric(result), local_scale,
                                                                             value);
                                     isSelected[i] = HdfsPredicateCheckValue<Int128Wrapper, int128>(value, predicate);
                                 } else { /* must NOT run here, decimal(p>38) doesn't support predicate pushdown. */
-                                    ereport(ERROR,
-                                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_ORC),
+                                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_ORC),
                                              errmsg("The type of decimal(precision>38) doesn't support predicate "
                                                     "pushdown.")));
                                 }
@@ -2259,8 +2209,8 @@ void OrcColumnReaderImpl<orc::CHAR>::fillScalarVectorInternal(uint64_t numValues
             } else {
                 int64_t length = lengths[i];
 
-                /* Check compatibility and convert '' into null if the db is DB_CMPT_A. */
-                if (length == 0 && DB_IS_CMPT(DB_CMPT_A)) {
+                /* Check compatibility and convert '' into null if the db is A_FORMAT. */
+                if (A_FORMAT == u_sess->attr.attr_sql.sql_compatibility && 0 == length) {
                     vec->SetNull(offset);
                 } else {
                     char *tmpValue = values[i];
@@ -2371,8 +2321,8 @@ void OrcColumnReaderImpl<orc::VARCHAR>::fillScalarVectorInternal(uint64_t numVal
             } else {
                 int64_t length = lengths[i];
 
-                /* Check compatibility and convert '' into null if the db is DB_CMPT_A. */
-                if (length == 0 && DB_IS_CMPT(DB_CMPT_A)) {
+                /* Check compatibility and convert '' into null if the db is A_FORMAT. */
+                if (A_FORMAT == u_sess->attr.attr_sql.sql_compatibility && 0 == length) {
                     vec->SetNull(offset);
                 } else {
                     char *tmpValue = values[i];
@@ -2640,10 +2590,8 @@ int32_t OrcColumnReaderImpl<fieldKind>::getStatistics(const orc::ColumnStatistic
             const orc::TimestampColumnStatistics *tmpStat =
                 static_cast<const orc::TimestampColumnStatistics *>(statistics);
             SET_SIMPLE_MIN_MAX_STATISTICS(tmpStat, TimestampGetDatum,
-                                          tmpStat->getMinimum() * NANOSECONDS_PER_MICROSECOND -
-                                              (epochOffsetDiff * MICROSECONDS_PER_SECOND),
-                                          tmpStat->getMaximum() * NANOSECONDS_PER_MICROSECOND -
-                                              (epochOffsetDiff * MICROSECONDS_PER_SECOND));
+                tmpStat->getMinimum() * NANOSECONDS_PER_MICROSECOND - (epochOffsetDiff * MICROSECONDS_PER_SECOND),
+                tmpStat->getMaximum() * NANOSECONDS_PER_MICROSECOND - (epochOffsetDiff * MICROSECONDS_PER_SECOND));
 
             break;
         }
@@ -2747,6 +2695,5 @@ bool OrcColumnReaderImpl<fieldKind>::matchOrcWithPsql() const
 
     return matches;
 }
-
 }  // namespace reader
 }  // namespace dfs

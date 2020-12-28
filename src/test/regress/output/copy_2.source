@@ -1,0 +1,114 @@
+-- test header line feature
+create temp table copytest3 (
+	c1 int,
+	"col with , comma" text,
+	"col with "" quote"  int);
+copy copytest3 from stdin csv header;
+copy copytest3 to stdout csv header;
+c1,"col with , comma","col with "" quote"
+1,a,1
+2,b,2
+--added for llt
+--test copy dist
+CREATE FOREIGN TABLE int4_extern_invalid_1(a INT4 ,b int4)  SERVER gsmpp_server OPTIONS(format 'binary', location '@abs_builddir@/data/hash.data',mode 'shared');
+ERROR:  LOAD format "binary" not recognized
+select * from int4_extern_invalid_1 order by a limit 1;
+ERROR:  relation "int4_extern_invalid_1" does not exist
+LINE 1: select * from int4_extern_invalid_1 order by a limit 1;
+                      ^
+CREATE FOREIGN TABLE int4_extern_invalid_2(a INT4 ,b int4)  SERVER gsmpp_server OPTIONS(format 'text', location '@abs_builddir@/data/hash.data', mode 'shared');
+select * from int4_extern_invalid_2 order by a limit 1;
+ a |     b      
+---+------------
+ 0 | 1935401906
+(1 row)
+
+DROP FOREIGN TABLE int4_extern_invalid_1;
+ERROR:  foreign table "int4_extern_invalid_1" does not exist
+DROP FOREIGN TABLE int4_extern_invalid_2;
+CREATE TABLE ESCAPING (c1 int, c2 varchar, c3 int);
+copy escaping from '@abs_srcdir@/data/datanode1/load_escape.data' without escaping with delimiter '|';
+drop table escaping;
+create table TMP_CUST_ASSET_SUM_1
+(
+Party_Id                 VARCHAR(30)    NOT NULL,
+Zone_Num                 CHAR(5)        NOT NULL,
+Asset_Max_Belong_Org_Num VARCHAR(30)    NOT NULL
+);
+-- cancel COPY FROM and vacuum && free the space
+SET enable_data_replicate = off;
+TRUNCATE TMP_CUST_ASSET_SUM_1;
+START TRANSACTION;
+copy TMP_CUST_ASSET_SUM_1 from '@abs_srcdir@/data/hashagg_writefile.data' delimiter '|';
+CHECKPOINT;
+ROLLBACK;
+VACUUM TMP_CUST_ASSET_SUM_1;
+copy TMP_CUST_ASSET_SUM_1 from '@abs_srcdir@/data/hashagg_writefile.data' delimiter '|';
+copy TMP_CUST_ASSET_SUM_1 from '@abs_srcdir@/data/hashagg_writefile.data' delimiter '|';
+create table base_tab_000 (
+col_tinyint		     tinyint,
+col_smallint	     smallint,
+col_int			     integer,
+col_bigint		     bigint,
+col_numeric		     numeric,
+col_real		     real,
+col_double		     double precision,
+col_decimal          decimal,
+col_varchar  	     varchar,
+col_char		     char(30),
+col_nvarchar2	     nvarchar2,
+col_text		     text,
+col_timestamptz		 timestamp with time zone,
+col_timestamp		 timestamp without time zone,
+col_date		     date,
+col_time		     time without time zone,
+col_timetz		     time with time zone,
+col_interval	     interval,
+col_smalldatetine	 smalldatetime
+) with (orientation=column) distribute by hash(col_int)
+partition by range (col_int)
+(
+partition vector_base_tab_000_1 values less than (10),
+partition vector_base_tab_000_2 values less than (77),
+partition vector_base_tab_000_3 values less than (337),
+partition vector_base_tab_000_4 values less than (573),
+partition vector_base_tab_000_5 values less than (1357),
+partition vector_base_tab_000_6 values less than (2033),
+partition vector_base_tab_000_7 values less than (2087),
+partition vector_base_tab_000_8 values less than (2387),
+partition vector_base_tab_000_9 values less than (2687),
+partition vector_base_tab_000_10 values less than (2987),
+partition vector_base_tab_000_11 values less than (maxvalue)
+);
+copy base_tab_000 from '@abs_srcdir@/data/vecctor_base_tab.data'  DELIMITER as ',' NULL as '' ;
+create table base_type_tab_000 (
+col_tinyint		     tinyint,
+col_smallint	     smallint,
+col_int			     integer,
+col_bigint		     bigint,
+col_money            money,
+col_numeric		     numeric,
+col_real		     real,
+col_double		     double precision,
+col_decimal          decimal,
+col_varchar  	     varchar,
+col_char		     char(30),
+col_nvarchar2	     nvarchar2,
+col_text		     text,
+col_timestamp		 timestamp with time zone,
+col_timestamptz		 timestamp without time zone,
+col_date		     date,
+col_time		     time without time zone,
+col_timetz		     time with time zone,
+col_interval	     interval,
+col_tinterval        tinterval,
+col_smalldatetine	 smalldatetime,
+col_bytea			 bytea,
+col_boolean			 boolean,
+col_inet			 inet,
+col_cidr			 cidr,
+col_bit				 bit(10),
+col_varbit			 varbit(10),
+col_oid				 oid
+) with (orientation=column) distribute by hash(col_int) ;
+copy base_type_tab_000 from '@abs_srcdir@/data/vecctor_type_tab.data'  DELIMITER as ',' NULL as '' ;

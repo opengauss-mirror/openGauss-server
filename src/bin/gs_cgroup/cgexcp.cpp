@@ -28,7 +28,6 @@
 #include <ctype.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
-#include <unistd.h>
 #include <errno.h>
 #include <libcgroup.h>
 #include <linux/version.h>
@@ -40,14 +39,10 @@
     {                                                                                                                \
         char *tmp = NULL, *bad = NULL;                                                                               \
         tmp = strchr(p, '=');                                                                                        \
-        if (!tmp) {                                                                                                  \
-            fprintf(stderr, "ERROR: Exception format string, is not assignment expression!\n");                      \
-            return (-1);                                                                                             \
-        }                                                                                                            \
         *tmp++ = '\0';                                                                                               \
         val = (unsigned long)strtoul(tmp, &bad, 10);                                                                 \
         if (*tmp == '\0' || (bad && *bad)) {                                                                         \
-            fprintf(stderr, "ERROR: Exception format string, value \"%s\" is invalid!\n", *tmp == '\0' ? " " : tmp); \
+            fprintf(stderr, "ERROR: Exception format string, value \"%s\" is invalid!\n", (*tmp == '\0') ? " " : tmp); \
             return (-1);                                                                                             \
         }                                                                                                            \
     }
@@ -266,8 +261,9 @@ int cgexcp_class_exception(void)
     }
 
     /* back up the config file */
-    if (-1 == cgconf_backup_config_file())
+    if (-1 == cgconf_backup_config_file()) {
         return -1;
+    }
 
     if (cls) {
         if (IS_EXCEPT_FLAG(cgutil_opt.eflag, EXCEPT_ABORT) && cgutil_opt.wdname[0]) {

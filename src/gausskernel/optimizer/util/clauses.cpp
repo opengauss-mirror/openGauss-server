@@ -89,12 +89,6 @@ typedef struct {
     char* prosrc;
 } inline_error_callback_arg;
 
-typedef struct {
-    bool allow_restricted;
-    List *safe_param_ids; /* PARAM_EXEC Param IDs to treat as safe */
-} has_parallel_hazard_arg;
-
-
 typedef enum { CONTAIN_FUNCTION_ID, CONTAIN_MUTABLE_FUNCTION, CONTAIN_VOLATILE_FUNTION } checkFuntionType;
 
 typedef struct {
@@ -115,9 +109,6 @@ static bool expression_returns_set_rows_walker(Node* node, double* count);
 static bool contain_subplans_walker(Node* node, void* context);
 template <bool isSimpleVar>
 static bool contain_specified_functions_walker(Node* node, check_function_context* context);
-static bool has_parallel_hazard_walker(Node *node, has_parallel_hazard_arg *context);
-static bool parallel_too_dangerous(char proparallel, has_parallel_hazard_arg *context);
-static bool typeid_is_temp(Oid type_id);
 static bool contain_nonstrict_functions_walker(Node* node, void* context);
 static bool contain_leaky_functions_walker(Node* node, void* context);
 static Relids find_nonnullable_rels_walker(Node* node, bool top_level);
@@ -152,6 +143,7 @@ static bool is_operator_pushdown(Oid opno);
 static bool contain_var_unsubstitutable_functions_walker(Node* node, void* context);
 static bool is_accurate_estimatable_func(Oid funcId);
 static Node* convert_equalsimplevar_to_nulltest(Oid opno, List* args);
+
 /*****************************************************************************
  *		OPERATOR clause functions
  *****************************************************************************/
@@ -588,152 +580,158 @@ void count_agg_clauses(PlannerInfo* root, Node* clause, AggClauseCosts* costs)
     (void)count_agg_clauses_walker(clause, &context);
 }
 
+static void count_agg_clauses_walker_isa(Node* node, count_agg_clauses_context* context)
+{
+    Aggref* aggref = (Aggref*)node;
+    AggClauseCosts* costs = context->costs;
+    HeapTuple aggTuple;
+    Form_pg_aggregate aggform;
+    Oid aggtransfn;
+    Oid aggfinalfn;
+    Oid aggtranstype;
+    QualCost argcosts;
+    Oid inputTypes[FUNC_MAX_ARGS];
+    int numArguments;
+    bool hasgroupclause = (context->root->parse->groupClause != NIL);
+    bool hasorderclause = (costs->numOrderedAggs > 0);
+    bool isOrderedSet = false;
+    bool isnull = false;
+    char aggkind = 'n';
+
+    AssertEreport(aggref->agglevelsup == 0, MOD_OPT, "");
+
+    /* fetch info about aggregate from pg_aggregate */
+    aggTuple = SearchSysCache1(AGGFNOID, ObjectIdGetDatum(aggref->aggfnoid));
+    if (!HeapTupleIsValid(aggTuple))
+        ereport(ERROR,
+            (errmodule(MOD_OPT),
+                errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for aggregate %u", aggref->aggfnoid)));
+    aggform = (Form_pg_aggregate)GETSTRUCT(aggTuple);
+    aggtransfn = aggform->aggtransfn;
+    aggfinalfn = aggform->aggfinalfn;
+    aggtranstype = aggform->aggtranstype;
+    /* 91269 version support orderedset agg  */
+    aggkind = DatumGetChar(SysCacheGetAttr(AGGFNOID, aggTuple, Anum_pg_aggregate_aggkind, &isnull));
+    if (!AGGKIND_IS_ORDERED_SET(aggkind))
+        aggkind = 'n';
+    isOrderedSet = AGGKIND_IS_ORDERED_SET(aggkind);
+    ReleaseSysCache(aggTuple);
+
+    if (IsPolymorphicType(aggref->aggtrantype)) {
+        costs->hasPolymorphicType = true;
+    }
+
+    /* count it ,note ordered-set aggs always have nonempty aggorder */
+    costs->numAggs++;
+    if (aggref->aggorder != NIL || (isOrderedSet && aggref->aggdistinct != NIL))
+        costs->numOrderedAggs++;
+    if (aggref->aggdistinct != NIL) {
+        Node* distinct_node =
+            get_sortgroupclause_expr((SortGroupClause*)linitial(aggref->aggdistinct), aggref->args);
+        costs->exprAggs = list_append_unique(costs->exprAggs, distinct_node);
+        costs->unhashable = costs->unhashable || !grouping_is_hashable(aggref->aggdistinct);
+        if (is_dn_agg_function_only(aggref->aggfnoid, aggref->args, hasgroupclause, hasorderclause))
+            costs->hasdctDnAggs = true;
+    } else if (is_dn_agg_function_only(aggref->aggfnoid, aggref->args, hasgroupclause, hasorderclause))
+        costs->hasDnAggs = true;
+
+    /* add component function execution costs to appropriate totals */
+    costs->transCost.per_tuple += get_func_cost(aggtransfn) * u_sess->attr.attr_sql.cpu_operator_cost;
+    if (OidIsValid(aggfinalfn))
+        costs->finalCost += get_func_cost(aggfinalfn) * u_sess->attr.attr_sql.cpu_operator_cost;
+
+    /* also add the input expressions' cost to per-input-row costs */
+    cost_qual_eval_node(&argcosts, (Node*)aggref->args, context->root);
+    costs->transCost.startup += argcosts.startup;
+    costs->transCost.per_tuple += argcosts.per_tuple;
+
+    /*
+        * If there are direct arguments, treat their evaluation cost like the
+        * cost of the finalfn.
+        */
+    if (aggref->aggdirectargs) {
+        cost_qual_eval_node(&argcosts, (Node*)aggref->aggdirectargs, context->root);
+        costs->transCost.startup += argcosts.startup;
+        costs->finalCost += argcosts.per_tuple;
+    }
+
+    /* extract argument types (ignoring any ORDER BY expressions) */
+    numArguments = get_aggregate_argtypes(aggref, inputTypes, FUNC_MAX_ARGS);
+
+    /* resolve actual type of transition state, if polymorphic */
+    aggtranstype = resolve_aggregate_transtype(aggref->aggfnoid, aggtranstype, inputTypes, numArguments);
+
+    /*
+        * If the transition type is pass-by-value then it doesn't add
+        * anything to the required size of the hashtable.	If it is
+        * pass-by-reference then we have to add the estimated size of the
+        * value itself, plus palloc overhead.
+        */
+    if (!get_typbyval(aggtranstype)) {
+        /*
+            * If transition state is of same type as first aggregated
+            * input, assume it's the same typmod (same width) as well.
+            * This works for cases like MAX/MIN and is probably somewhat
+            * reasonable otherwise.
+            */
+        int numdirectargs = list_length(aggref->aggdirectargs);
+        int32 aggtranstypmod;
+        Size avgwidth;
+
+        /*
+            * If transition state is of same type as first input, assume it's
+            * the same typmod (same width) as well.  This works for cases
+            * like MAX/MIN and is probably somewhat reasonable otherwise.
+            */
+        if (numArguments > 0 && aggtranstype == inputTypes[numdirectargs])
+            aggtranstypmod = exprTypmod((Node*)linitial(aggref->args));
+        else
+            aggtranstypmod = -1;
+
+        avgwidth = get_typavgwidth(aggtranstype, aggtranstypmod);
+        avgwidth = MAXALIGN(avgwidth);
+
+        costs->transitionSpace += avgwidth + 2 * sizeof(void*);
+        costs->aggWidth += avgwidth;
+    } else if (aggtranstype == INTERNALOID) {
+        /*
+            * INTERNAL transition type is a special case: although INTERNAL
+            * is pass-by-value, it's almost certainly being used as a pointer
+            * to some large data structure.  We assume usage of
+            * ALLOCSET_DEFAULT_INITSIZE, which is a good guess if the data is
+            * being kept in a private memory context, as is done by
+            * array_agg() for instance.
+            */
+        costs->transitionSpace += ALLOCSET_DEFAULT_INITSIZE;
+        costs->aggWidth += ALLOCSET_DEFAULT_INITSIZE;
+    } else {
+        costs->aggWidth += get_typavgwidth(aggtranstype, -1);
+    }
+
+    /*
+        * Complain if the aggregate's arguments contain any aggregates;
+        * nested agg functions are semantically nonsensical.
+        */
+    if (contain_agg_clause((Node*)aggref->args))
+        ereport(ERROR,
+            (errmodule(MOD_OPT),
+                (errcode(ERRCODE_GROUPING_ERROR), errmsg("aggregate function calls cannot be nested"))));
+}
+
 static bool count_agg_clauses_walker(Node* node, count_agg_clauses_context* context)
 {
-    if (node == NULL)
-        return false;
-    if (IsA(node, Aggref)) {
-        Aggref* aggref = (Aggref*)node;
-        AggClauseCosts* costs = context->costs;
-        HeapTuple aggTuple;
-        Form_pg_aggregate aggform;
-        Oid aggtransfn;
-        Oid aggfinalfn;
-        Oid aggtranstype;
-        QualCost argcosts;
-        Oid inputTypes[FUNC_MAX_ARGS];
-        int numArguments;
-        bool hasgroupclause = (context->root->parse->groupClause != NIL);
-        bool hasorderclause = (costs->numOrderedAggs > 0);
-        bool isOrderedSet = false;
-        bool isnull = false;
-        char aggkind = 'n';
-
-        AssertEreport(aggref->agglevelsup == 0, MOD_OPT, "");
-
-        /* fetch info about aggregate from pg_aggregate */
-        aggTuple = SearchSysCache1(AGGFNOID, ObjectIdGetDatum(aggref->aggfnoid));
-        if (!HeapTupleIsValid(aggTuple))
-            ereport(ERROR,
-                (errmodule(MOD_OPT),
-                    errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                    errmsg("cache lookup failed for aggregate %u", aggref->aggfnoid)));
-        aggform = (Form_pg_aggregate)GETSTRUCT(aggTuple);
-        aggtransfn = aggform->aggtransfn;
-        aggfinalfn = aggform->aggfinalfn;
-        aggtranstype = aggform->aggtranstype;
-        /* 91269 version support orderedset agg  */
-        aggkind = DatumGetChar(SysCacheGetAttr(AGGFNOID, aggTuple, Anum_pg_aggregate_aggkind, &isnull));
-        if (!AGGKIND_IS_ORDERED_SET(aggkind))
-            aggkind = 'n';
-        isOrderedSet = AGGKIND_IS_ORDERED_SET(aggkind);
-        ReleaseSysCache(aggTuple);
-
-        if (IsPolymorphicType(aggref->aggtrantype)) {
-            costs->hasPolymorphicType = true;
-        }
-
-        /* count it ,note ordered-set aggs always have nonempty aggorder */
-        costs->numAggs++;
-        if (aggref->aggorder != NIL || (isOrderedSet && aggref->aggdistinct != NIL))
-            costs->numOrderedAggs++;
-        if (aggref->aggdistinct != NIL) {
-            Node* distinct_node =
-                get_sortgroupclause_expr((SortGroupClause*)linitial(aggref->aggdistinct), aggref->args);
-            costs->exprAggs = list_append_unique(costs->exprAggs, distinct_node);
-            costs->unhashable = costs->unhashable || !grouping_is_hashable(aggref->aggdistinct);
-            if (is_dn_agg_function_only(aggref->aggfnoid, aggref->args, hasgroupclause, hasorderclause))
-                costs->hasdctDnAggs = true;
-        } else if (is_dn_agg_function_only(aggref->aggfnoid, aggref->args, hasgroupclause, hasorderclause))
-            costs->hasDnAggs = true;
-
-        /* add component function execution costs to appropriate totals */
-        costs->transCost.per_tuple += get_func_cost(aggtransfn) * u_sess->attr.attr_sql.cpu_operator_cost;
-        if (OidIsValid(aggfinalfn))
-            costs->finalCost += get_func_cost(aggfinalfn) * u_sess->attr.attr_sql.cpu_operator_cost;
-
-        /* also add the input expressions' cost to per-input-row costs */
-        cost_qual_eval_node(&argcosts, (Node*)aggref->args, context->root);
-        costs->transCost.startup += argcosts.startup;
-        costs->transCost.per_tuple += argcosts.per_tuple;
-
-        /*
-         * If there are direct arguments, treat their evaluation cost like the
-         * cost of the finalfn.
-         */
-        if (aggref->aggdirectargs) {
-            cost_qual_eval_node(&argcosts, (Node*)aggref->aggdirectargs, context->root);
-            costs->transCost.startup += argcosts.startup;
-            costs->finalCost += argcosts.per_tuple;
-        }
-
-        /* extract argument types (ignoring any ORDER BY expressions) */
-        numArguments = get_aggregate_argtypes(aggref, inputTypes, FUNC_MAX_ARGS);
-
-        /* resolve actual type of transition state, if polymorphic */
-        aggtranstype = resolve_aggregate_transtype(aggref->aggfnoid, aggtranstype, inputTypes, numArguments);
-
-        /*
-         * If the transition type is pass-by-value then it doesn't add
-         * anything to the required size of the hashtable.	If it is
-         * pass-by-reference then we have to add the estimated size of the
-         * value itself, plus palloc overhead.
-         */
-        if (!get_typbyval(aggtranstype)) {
-            /*
-             * If transition state is of same type as first aggregated
-             * input, assume it's the same typmod (same width) as well.
-             * This works for cases like MAX/MIN and is probably somewhat
-             * reasonable otherwise.
-             */
-            int numdirectargs = list_length(aggref->aggdirectargs);
-            int32 aggtranstypmod;
-            Size avgwidth;
-
-            /*
-             * If transition state is of same type as first input, assume it's
-             * the same typmod (same width) as well.  This works for cases
-             * like MAX/MIN and is probably somewhat reasonable otherwise.
-             */
-            if (numArguments > 0 && aggtranstype == inputTypes[numdirectargs])
-                aggtranstypmod = exprTypmod((Node*)linitial(aggref->args));
-            else
-                aggtranstypmod = -1;
-
-            avgwidth = get_typavgwidth(aggtranstype, aggtranstypmod);
-            avgwidth = MAXALIGN(avgwidth);
-
-            costs->transitionSpace += avgwidth + 2 * sizeof(void*);
-            costs->aggWidth += avgwidth;
-        } else if (aggtranstype == INTERNALOID) {
-            /*
-             * INTERNAL transition type is a special case: although INTERNAL
-             * is pass-by-value, it's almost certainly being used as a pointer
-             * to some large data structure.  We assume usage of
-             * ALLOCSET_DEFAULT_INITSIZE, which is a good guess if the data is
-             * being kept in a private memory context, as is done by
-             * array_agg() for instance.
-             */
-            costs->transitionSpace += ALLOCSET_DEFAULT_INITSIZE;
-            costs->aggWidth += ALLOCSET_DEFAULT_INITSIZE;
-        } else {
-            costs->aggWidth += get_typavgwidth(aggtranstype, -1);
-        }
-
-        /*
-         * Complain if the aggregate's arguments contain any aggregates;
-         * nested agg functions are semantically nonsensical.
-         */
-        if (contain_agg_clause((Node*)aggref->args))
-            ereport(ERROR,
-                (errmodule(MOD_OPT),
-                    (errcode(ERRCODE_GROUPING_ERROR), errmsg("aggregate function calls cannot be nested"))));
-
-        /*
-         * Having checked that, we need not recurse into the argument.
-         */
+    if (node == NULL) {
         return false;
     }
+    if (IsA(node, Aggref)) {
+        count_agg_clauses_walker_isa(node, context);
+        /*
+        * Having checked that, we need not recurse into the argument.
+        */
+        return false;
+    }
+
     AssertEreport(!IsA(node, SubLink), MOD_OPT, "");
     return expression_tree_walker(node, (bool (*)())count_agg_clauses_walker, (void*)context);
 }
@@ -851,10 +849,8 @@ double expression_returns_set_rows(Node* clause)
     return clamp_row_est(result);
 }
 
-static bool expression_returns_set_rows_walker(Node* node, double* count)
+static void expression_returns_set_rows_walker_isa(Node* node, double* count)
 {
-    if (node == NULL)
-        return false;
     if (IsA(node, FuncExpr)) {
         FuncExpr* expr = (FuncExpr*)node;
 
@@ -869,6 +865,14 @@ static bool expression_returns_set_rows_walker(Node* node, double* count)
             *count *= get_func_rows(expr->opfuncid);
         }
     }
+}
+
+static bool expression_returns_set_rows_walker(Node* node, double* count)
+{
+    if (node == NULL)
+        return false;
+
+    expression_returns_set_rows_walker_isa(node, count);
 
     /* Avoid recursion for some cases that can't return a set */
     if (IsA(node, Aggref))
@@ -1154,237 +1158,11 @@ bool exec_simple_check_mutable_function(Node* clause)
 }
 
 /*****************************************************************************
- *		Check queries for parallel unsafe and/or restricted constructs
+ *		Check clauses for nonstrict functions
  *****************************************************************************/
 /*
- * Check whether a node tree contains parallel hazards.  This is used both
- * on the entire query tree, to see whether the query can be parallelized at
- * all, and also to evaluate whether a particular expression is safe to
- * run in a parallel worker.  We could separate these concerns into two
- * different functions, but there's enough overlap that it doesn't seem
- * worthwhile.
- */
-bool has_parallel_hazard(Node *node, bool allow_restricted)
-{
-    has_parallel_hazard_arg context;
-
-    context.allow_restricted = allow_restricted;
-    context.safe_param_ids = NIL;
-    return has_parallel_hazard_walker(node, &context);
-}
-
-static bool has_parallel_hazard_walker(Node *node, has_parallel_hazard_arg *context)
-{
-    if (node == NULL)
-        return false;
-
-    /*
-     * When we're first invoked on a completely unplanned tree, we must
-     * recurse through Query objects to as to locate parallel-unsafe
-     * constructs anywhere in the tree.
-     *
-     * Later, we'll be called again for specific quals, possibly after
-     * some planning has been done, we may encounter SubPlan, SubLink,
-     * or AlternativeSubLink nodes.  Currently, there's no need to recurse
-     * through these; they can't be unsafe, since we've already cleared
-     * the entire query of unsafe operations, and they're definitely
-     * parallel-restricted.
-     */
-    if (IsA(node, Query)) {
-        Query *query = (Query *)node;
-
-        if (query->rowMarks != NULL)
-            return true;
-
-        /* Recurse into subselects */
-        return query_tree_walker(query, (bool (*)())has_parallel_hazard_walker, context, 0);
-    } else if (IsA(node, SubLink) || IsA(node, AlternativeSubPlan)) {
-        if (!context->allow_restricted) {
-            return true;
-        }
-    } else if (IsA(node, SubPlan)) {
-        /*
-         * Only parallel-safe SubPlans can be sent to workers.  Within the
-         * testexpr of the SubPlan, Params representing the output columns of the
-         * subplan can be treated as parallel-safe, so temporarily add their IDs
-         * to the safe_param_ids list while examining the testexpr.
-         */
-        SubPlan *subplan = (SubPlan *)node;
-
-        if (!subplan->parallel_safe && !context->allow_restricted) {
-            return true;
-        }
-        List *saveSafeParamIds = context->safe_param_ids;
-        context->safe_param_ids = list_concat(list_copy(context->safe_param_ids), list_copy(subplan->paramIds));
-        if (has_parallel_hazard_walker(subplan->testexpr, context)) {
-            return true; /* no need to restore safe_param_ids */
-        }
-        list_free(context->safe_param_ids);
-        context->safe_param_ids = saveSafeParamIds;
-        /* we must also check args, but no special Param treatment there */
-        if (has_parallel_hazard_walker((Node *) subplan->args, context)) {
-            return true;
-        }
-        /* don't want to recurse normally, so we're done */
-        return false;
-    } else if (IsA(node, Param)) {
-        /*
-         * We can't pass Params to workers at the moment either, so they are also
-         * parallel-restricted, unless they are PARAM_EXTERN Params or are
-         * PARAM_EXEC Params listed in safe_param_ids, meaning they could be
-         * either generated within workers or can be computed by the leader and
-         * then their value can be passed to workers.
-         */
-        Param *param = (Param *)node;
-        if (param->paramkind == PARAM_EXTERN) {
-            return false;
-        }
-        if (param->paramkind != PARAM_EXEC || !list_member_int(context->safe_param_ids, param->paramid)) {
-            if (!context->allow_restricted) {
-                return true;
-            }
-        }
-        return false; /* nothing to recurse to */
-    }
-
-    /* This is just a notational convenience for callers. */
-    if (IsA(node, RestrictInfo)) {
-        RestrictInfo *rinfo = (RestrictInfo *)node;
-        return has_parallel_hazard_walker((Node *)rinfo->clause, context);
-    }
-
-    /*
-     * It is an error for a parallel worker to touch a temporary table in any
-     * way, so we can't handle nodes whose type is the rowtype of such a table.
-     */
-    if (!context->allow_restricted) {
-        switch (nodeTag(node)) {
-            case T_Var:
-            case T_Const:
-            case T_Param:
-            case T_Aggref:
-            case T_WindowFunc:
-            case T_ArrayRef:
-            case T_FuncExpr:
-            case T_NamedArgExpr:
-            case T_OpExpr:
-            case T_DistinctExpr:
-            case T_NullIfExpr:
-            case T_FieldSelect:
-            case T_FieldStore:
-            case T_RelabelType:
-            case T_CoerceViaIO:
-            case T_ArrayCoerceExpr:
-            case T_ConvertRowtypeExpr:
-            case T_CaseExpr:
-            case T_CaseTestExpr:
-            case T_ArrayExpr:
-            case T_RowExpr:
-            case T_CoalesceExpr:
-            case T_MinMaxExpr:
-            case T_CoerceToDomain:
-            case T_CoerceToDomainValue:
-            case T_SetToDefault:
-                if (typeid_is_temp(exprType(node)))
-                    return true;
-                break;
-            default:
-                break;
-        }
-    }
-
-    /*
-     * For each node that might potentially call a function, we need to
-     * examine the pg_proc.proparallel marking for that function to see
-     * whether it's safe enough for the current value of allow_restricted.
-     */
-    if (IsA(node, FuncExpr)) {
-        FuncExpr *expr = (FuncExpr *)node;
-
-        if (parallel_too_dangerous(func_parallel(expr->funcid), context))
-            return true;
-    } else if (IsA(node, OpExpr)) {
-        OpExpr *expr = (OpExpr *)node;
-
-        set_opfuncid(expr);
-        if (parallel_too_dangerous(func_parallel(expr->opfuncid), context))
-            return true;
-    } else if (IsA(node, DistinctExpr)) {
-        DistinctExpr *expr = (DistinctExpr *)node;
-
-        set_opfuncid((OpExpr *)expr); /* rely on struct equivalence */
-        if (parallel_too_dangerous(func_parallel(expr->opfuncid), context))
-            return true;
-    } else if (IsA(node, NullIfExpr)) {
-        NullIfExpr *expr = (NullIfExpr *)node;
-
-        set_opfuncid((OpExpr *)expr); /* rely on struct equivalence */
-        if (parallel_too_dangerous(func_parallel(expr->opfuncid), context))
-            return true;
-    } else if (IsA(node, ScalarArrayOpExpr)) {
-        ScalarArrayOpExpr *expr = (ScalarArrayOpExpr *)node;
-
-        set_sa_opfuncid(expr);
-        if (parallel_too_dangerous(func_parallel(expr->opfuncid), context))
-            return true;
-    } else if (IsA(node, CoerceViaIO)) {
-        CoerceViaIO *expr = (CoerceViaIO *)node;
-        Oid iofunc;
-        Oid typioparam;
-        bool typisvarlena;
-
-        /* check the result type's input function */
-        getTypeInputInfo(expr->resulttype, &iofunc, &typioparam);
-        if (parallel_too_dangerous(func_parallel(iofunc), context))
-            return true;
-        /* check the input type's output function */
-        getTypeOutputInfo(exprType((Node *)expr->arg), &iofunc, &typisvarlena);
-        if (parallel_too_dangerous(func_parallel(iofunc), context))
-            return true;
-    } else if (IsA(node, ArrayCoerceExpr)) {
-        ArrayCoerceExpr *expr = (ArrayCoerceExpr *)node;
-
-        if (OidIsValid(expr->elemfuncid) && parallel_too_dangerous(func_parallel(expr->elemfuncid), context))
-            return true;
-    } else if (IsA(node, RowCompareExpr)) {
-        RowCompareExpr *rcexpr = (RowCompareExpr *)node;
-        ListCell *opid;
-
-        foreach (opid, rcexpr->opnos) {
-            Oid opfuncid = get_opcode(lfirst_oid(opid));
-            if (parallel_too_dangerous(func_parallel(opfuncid), context))
-                return true;
-        }
-    }
-
-    /* ... and recurse to check substructure */
-    return expression_tree_walker(node, (bool (*)())has_parallel_hazard_walker, context);
-}
-
-static bool parallel_too_dangerous(char proparallel, has_parallel_hazard_arg *context)
-{
-    if (context->allow_restricted)
-        return proparallel == PROPARALLEL_UNSAFE;
-    else
-        return proparallel != PROPARALLEL_SAFE;
-}
-
-static bool typeid_is_temp(Oid type_id)
-{
-    Oid relid = get_typ_typrelid(type_id);
-
-    if (!OidIsValid(relid))
-        return false;
-
-    return (get_rel_persistence(relid) == RELPERSISTENCE_TEMP);
-}
-
-/* ****************************************************************************
- * 		Check clauses for nonstrict functions
- * *************************************************************************** */
-/*
  * contain_nonstrict_functions
- * 	  Recursively search for nonstrict functions within a clause.
+ *	  Recursively search for nonstrict functions within a clause.
  *
  * Returns true if any nonstrict construct is found --- ie, anything that
  * could produce non-NULL output with a NULL input.
@@ -2454,11 +2232,15 @@ Node* eval_const_expressions_params(PlannerInfo* root, Node* node, ParamListInfo
  * 3. Reduce PlaceHolderVar nodes to their contained expressions.
  * --------------------
  */
-Node* estimate_expression_value(PlannerInfo* root, Node* node)
+Node* estimate_expression_value(PlannerInfo* root, Node* node, EState* estate)
 {
     eval_const_expressions_context context;
 
-    context.boundParams = root->glob->boundParams; /* bound Params */
+    if (estate == NULL) {
+        context.boundParams = root->glob->boundParams; /* bound Params */
+    } else {
+        context.boundParams = estate->es_param_list_info; /* bound Params */
+    }
     /* we do not need to mark the plan as depending on inlined functions */
     context.root = NULL;
     context.active_fns = NIL; /* nothing being recursively simplified */
@@ -2467,6 +2249,108 @@ Node* estimate_expression_value(PlannerInfo* root, Node* node)
     return eval_const_expressions_mutator(node, &context);
 }
 
+/**
+ * only work on oracle database, find string equal or not equal filter condition
+ * if the expr is string equal or not equal, return true, otherwise return false
+ */
+static bool is_support_empty_str_optimization(OpExpr *expr)
+{
+    if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+        return false;
+    }
+    const int SUPPORT_EQ_NE = 4;
+    const Oid TEXTNEOID = 531;
+    const Oid var_eq_const_op_array[SUPPORT_EQ_NE] = {
+        BPCHAREQOID, BPCHARNEOID,
+        TEXTEQOID, TEXTNEOID
+    };
+    bool is_support_optimize = false;
+    for (int i = 0; i < SUPPORT_EQ_NE; i++) {
+        if (expr->opno == var_eq_const_op_array[i]) {
+            is_support_optimize = true;
+            break;
+        }
+    }
+    return is_support_optimize;
+}
+
+/**
+ * only work on oracle database, find string equal or not equal filter condition
+ * if the args has var column element, return true, otherwise return false
+ */
+static bool contain_var_element(List *args)
+{
+    ListCell *lc = NULL;
+    foreach(lc, args) {
+        Expr *expr = (Expr *)lfirst(lc);
+        if (IsA(expr, Var)) {
+            return true;
+        } else if (IsA(expr, RelabelType) && ((RelabelType *)expr)->relabelformat == COERCE_IMPLICIT_CAST) {
+            Var *var = (Var *)((RelabelType *)expr)->arg;
+            if (var != NULL && IsA(var, Var)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/**
+ * only work on oracle database, find string equal or not equal filter condition
+ * if the args has null const element or null param element, return true, otherwise return false
+ */
+static bool contain_null_element(List *args, const eval_const_expressions_context *context)
+{
+    ListCell *lc = NULL;
+    foreach(lc, args) {
+        Expr *expr = (Expr *)lfirst(lc);
+        if (IsA(expr, Const)) {
+            Const *val = (Const *)expr;
+            if (!val->constisnull) {
+                return false;
+            }
+            return true;
+        } else if (IsA(expr, Param)) {
+            Param *param = (Param *)expr;
+            if (context == NULL || context->boundParams == NULL || context->boundParams->params == NULL) {
+                return false;
+            }
+            if (context->boundParams->numParams < param->paramid) {
+                return false;
+            }
+            ParamExternData *prm = &context->boundParams->params[param->paramid - 1];
+            if (!prm->isnull) {
+                return false;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * only work on oracle database, find empty string equal or not equal filter condition
+ * if the expr has null string (not) equal operator, return true, otherwise return false
+ */
+static Expr *oracle_emptystr_equal_optimize(OpExpr *expr, eval_const_expressions_context *context)
+{
+    Assert(IsA(expr, OpExpr));
+    if (!is_support_empty_str_optimization(expr)) {
+        return NULL;
+    }
+    List *args = expr->args;
+    const int EQUAL_OPERATOR_ARGS = 2;
+    if (list_length(args) != EQUAL_OPERATOR_ARGS) {
+        return NULL;
+    }
+    if (!contain_var_element(args)) {
+        return NULL;
+    }
+    if (!contain_null_element(args, context)) {
+        return NULL;
+    }
+    return (Expr *)makeBoolConst(false, false);
+}
 Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context* context)
 {
     if (node == NULL)
@@ -2611,7 +2495,10 @@ Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context*
              * on input to this extent.
              */
             set_opfuncid(expr);
-
+            simple = oracle_emptystr_equal_optimize(expr, context);
+            if (simple != NULL) {
+                return (Node *)simple;
+            }
             /*
              * Code for op/func reduction is pretty bulky, so split it out
              * as a separate function.
@@ -3777,6 +3664,54 @@ static Expr* simplify_function(Oid funcid, Oid result_type, int32 result_typmod,
     return newexpr;
 }
 
+static List* StartExtractFunctionOutarguments
+    (const List* parameters, int narg, const char* p_argmodes, char** p_argnames, List** in_parameters)
+{
+    int i = 0;
+    ListCell* cell = NULL;
+    foreach (cell, parameters) {
+        Node* arg = (Node*)lfirst(cell);
+        char* argname = NULL;
+        char argmode = 0;
+
+        if (IsA(arg, NamedArgExpr)) {
+            NamedArgExpr* na = (NamedArgExpr*)arg;
+
+            argname = na->name;
+            int k = 0;
+            bool found = false;
+            for (i = 0; i < narg; i++) {
+                /* consider only input parameters */
+                if (p_argmodes && (p_argmodes[i] != FUNC_PARAM_IN && p_argmodes[i] != FUNC_PARAM_INOUT &&
+                                      p_argmodes[i] != FUNC_PARAM_VARIADIC))
+                    continue;
+                if (p_argnames[i] != NULL && strcmp(p_argnames[i], argname) == 0) {
+                    na->argnumber = k;
+                    found = true;
+                    break;
+                }
+                /* increase pp only for input parameters */
+                k++;
+            }
+
+            if (found && argmode != FUNC_PARAM_OUT)
+                *in_parameters = lappend(*in_parameters, arg);
+        } else {
+            if (p_argmodes != NULL)
+                argmode = p_argmodes[i];
+            else
+                argmode = FUNC_PARAM_IN;
+
+            if (argmode != FUNC_PARAM_OUT)
+                *in_parameters = lappend(*in_parameters, lfirst(cell));
+        }
+
+        i++;
+    }
+    return *in_parameters;
+}
+
+
 /*
  * @Description: extract out parameters from all parameters
  * @in funcid - function oid
@@ -3826,47 +3761,7 @@ List* extract_function_outarguments(Oid funcid, List* parameters, List* funcname
                 errmsg("function \"%s\" with %d parameters doesn't exist", name, parameters->length)));
     }
 
-    int i = 0;
-    ListCell* cell = NULL;
-    foreach (cell, parameters) {
-        Node* arg = (Node*)lfirst(cell);
-        char* argname = NULL;
-        char argmode = 0;
-
-        if (IsA(arg, NamedArgExpr)) {
-            NamedArgExpr* na = (NamedArgExpr*)arg;
-
-            argname = na->name;
-            int k = 0;
-            bool found = false;
-            for (i = 0; i < narg; i++) {
-                /* consider only input parameters */
-                if (p_argmodes && (p_argmodes[i] != FUNC_PARAM_IN && p_argmodes[i] != FUNC_PARAM_INOUT &&
-                                      p_argmodes[i] != FUNC_PARAM_VARIADIC))
-                    continue;
-                if (p_argnames[i] != NULL && strcmp(p_argnames[i], argname) == 0) {
-                    na->argnumber = k;
-                    found = true;
-                    break;
-                }
-                /* increase pp only for input parameters */
-                k++;
-            }
-
-            if (found && argmode != FUNC_PARAM_OUT)
-                in_parameters = lappend(in_parameters, arg);
-        } else {
-            if (p_argmodes != NULL)
-                argmode = p_argmodes[i];
-            else
-                argmode = FUNC_PARAM_IN;
-
-            if (argmode != FUNC_PARAM_OUT)
-                in_parameters = lappend(in_parameters, lfirst(cell));
-        }
-
-        i++;
-    }
+    (void*)StartExtractFunctionOutarguments(parameters, narg, p_argmodes, p_argnames, &in_parameters);
 
     return in_parameters;
 }
@@ -3995,14 +3890,17 @@ static List* reorder_function_arguments(List* args, HeapTuple func_tuple)
         }
 
         pfree_ext(argdefpos);
-        pfree_ext(argtypes);
-        pfree_ext(argmodes);
+        if (argtypes != NULL)
+            pfree_ext(argtypes);
+        if (argmodes != NULL)
+            pfree_ext(argmodes);
         if (argnames != NULL) {
             for (counter = 0; counter < proallargs; counter++) {
-                pfree_ext(argnames[counter]);
+                if (argnames[counter])
+                    pfree_ext(argnames[counter]);
             }
+            pfree_ext(argnames);
         }
-        pfree_ext(argnames);
         list_free_ext(defaults);
     }
 
@@ -5406,8 +5304,7 @@ static Node* convert_equalsimplevar_to_nulltest(Oid opno, List* args)
     return nullTest;
 }
 
-
-
+#ifndef ENABLE_MULTIPLE_NODES
 /*
  * check whether the node have rownum expr or not, test all kinds of nodes,
  * check if it has the volatile rownum. If the node include rownum
@@ -5447,3 +5344,4 @@ List *get_quals_lists(Node *jtnode)
 
     return quallist;
 }
+#endif

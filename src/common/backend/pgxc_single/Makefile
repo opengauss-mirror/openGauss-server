@@ -8,6 +8,6 @@ subdir = src/common/backend/pgxc_single
 top_builddir = ../../../..
 include $(top_builddir)/src/Makefile.global
 
-SUBDIRS     = barrier locator copy nodemgr pool stream
+SUBDIRS     = barrier locator copy nodemgr pool
 
 include $(top_srcdir)/src/gausskernel/common.mk

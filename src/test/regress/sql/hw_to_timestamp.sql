@@ -211,7 +211,7 @@ SELECT to_date('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 
 /*----------------------------------------------
-openGauss7777777: support timezone Asia/Beijing
+DTS2017031602663: support timezone Asia/Beijing
 ----------------------------------------------*/
 set timezone='Asia/Beijing';
 select extract(timezone from now());

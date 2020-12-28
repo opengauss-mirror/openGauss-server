@@ -43,7 +43,6 @@ typedef struct knl_session_attr_storage {
     bool raise_errors_if_no_files;
     bool enableFsync;
     bool fullPageWrites;
-    bool wal_compression;
     bool Log_connections;
     bool autovacuum_start_daemon;
 #ifdef LOCK_DEBUG
@@ -67,12 +66,14 @@ typedef struct knl_session_attr_storage {
     bool hot_standby_feedback;
     bool enable_stream_replication;
     bool EnforceTwoPhaseCommit;
+    bool guc_most_available_sync;
     bool enable_show_any_tuples;
     bool enable_debug_vacuum;
     bool enable_adio_debug;
     bool gds_debug_mod;
     bool log_pagewriter;
     bool enable_incremental_catchup;
+    bool auto_explain_log_verbose;
     int wait_dummy_time;
     int DeadlockTimeout;
     int LockWaitTimeout;
@@ -145,6 +146,7 @@ typedef struct knl_session_attr_storage {
     int dfs_max_parsig_length;
     int plog_merge_age;
     int max_redo_log_size;
+    int max_io_capacity;
     int64 vacuum_freeze_min_age;
     int64 vacuum_freeze_table_age;
     int64 vacuum_defer_cleanup_age;
@@ -171,16 +173,19 @@ typedef struct knl_session_attr_storage {
     int autovacuum_mode;
     int cstore_insert_mode;
     int pageWriterSleep;
-    int pagewriter_threshold;
     bool enable_cbm_tracking;
     bool enable_copy_server_files;
     int target_rto;
+    int time_to_target_rpo;
     bool enable_twophase_commit;
     /*
      * xlog keep for all standbys even through they are not connect and donnot created replslot.
      */
     bool enable_xlog_prune;
+    int max_size_for_xlog_prune;
     int defer_csn_cleanup_time;
+
+    bool enable_hashbucket;
 
     /* for GTT */
     int max_active_gtt;

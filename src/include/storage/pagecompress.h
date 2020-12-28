@@ -35,7 +35,7 @@
 #include "c.h"
 #include "access/htup.h"
 #include "utils/relcache.h"
-#include "storage/bufpage.h"
+#include "storage/buf/bufpage.h"
 #include "utils/hsearch.h"
 
 /* Compression Mode
@@ -298,4 +298,3 @@ private:
 #define getPageDict(page) (AssertMacro(PageIsCompressed(page)), (PageGetSpecialPointer(page)))
 
 #endif /* PAGE_COMPRESS_H */
-

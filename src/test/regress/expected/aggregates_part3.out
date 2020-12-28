@@ -18,7 +18,7 @@ insert into t_agg2 select generate_series(1, 10), generate_series(11, 2, -1), ge
 analyze t_agg1;
 analyze t_agg2;
 -- (3) windowagg
-explain (costs off, nodes off) select c, sum(x) from (select c, row_number() over (partition by c, d, e order by d, e) x from t_agg1) group by c;
+explain (costs off) select c, sum(x) from (select c, row_number() over (partition by c, d, e order by d, e) x from t_agg1) group by c;
                       QUERY PLAN                      
 ------------------------------------------------------
  GroupAggregate
@@ -44,7 +44,7 @@ select c, sum(x) from (select c, row_number() over (partition by c, d, e order b
  9 | 210
 (10 rows)
 
-explain (costs off, nodes off) select x, sum(c+d+e) from (select c, d, e, row_number() over (partition by d order by c, e) x from t_agg1) group by x;
+explain (costs off) select x, sum(c+d+e) from (select c, d, e, row_number() over (partition by d order by c, e) x from t_agg1) group by x;
                          QUERY PLAN                         
 ------------------------------------------------------------
  HashAggregate
@@ -72,7 +72,7 @@ select x, sum(c+d+e) from (select c, d, e, row_number() over (partition by d ord
 (10 rows)
 
 -- join
-explain (costs off, nodes off) select sum(t_agg1.a) from t_agg1 join t_agg2 on t_agg1.c=t_agg2.b group by t_agg1.c;
+explain (costs off) select sum(t_agg1.a) from t_agg1 join t_agg2 on t_agg1.c=t_agg2.b group by t_agg1.c;
                 QUERY PLAN                
 ------------------------------------------
  HashAggregate
@@ -99,7 +99,7 @@ select sum(t_agg1.a) from t_agg1 join t_agg2 on t_agg1.c=t_agg2.b group by t_agg
  95220
 (10 rows)
 
-explain (costs off, nodes off) select a, b, count(c) from (select t_agg1.c a, t_agg1.d b, t_agg2.b-t_agg2.a c from t_agg1 join t_agg2 on t_agg1.b=t_agg2.c) group by a, b; 
+explain (costs off) select a, b, count(c) from (select t_agg1.c a, t_agg1.d b, t_agg2.b-t_agg2.a c from t_agg1 join t_agg2 on t_agg1.b=t_agg2.c) group by a, b; 
                 QUERY PLAN                
 ------------------------------------------
  HashAggregate
@@ -126,7 +126,7 @@ select a, b, count(c) from (select t_agg1.c a, t_agg1.d b, t_agg2.b-t_agg2.a c f
  12 | 2 |     2
 (10 rows)
 
-explain (costs off, nodes off) select a, b, count(c) from (select t_agg1.c a, t_agg1.d b, sum(t_agg2.b-t_agg2.a) c from t_agg1 join t_agg2 on t_agg1.b=t_agg2.c group by t_agg1.d, t_agg1.c) group by a, b; 
+explain (costs off) select a, b, count(c) from (select t_agg1.c a, t_agg1.d b, sum(t_agg2.b-t_agg2.a) c from t_agg1 join t_agg2 on t_agg1.b=t_agg2.c group by t_agg1.d, t_agg1.c) group by a, b; 
                    QUERY PLAN                   
 ------------------------------------------------
  HashAggregate
@@ -155,7 +155,7 @@ select a, b, count(c) from (select t_agg1.c a, t_agg1.d b, sum(t_agg2.b-t_agg2.a
  12 | 2 |     1
 (10 rows)
 
-explain (costs off, nodes off) select a, b, count(c) from (select t_agg1.c a, t_agg1.d b, sum(t_agg2.b-t_agg2.a) c from t_agg1 join t_agg2 on t_agg1.b=t_agg2.c group by t_agg1.d, t_agg1.c having avg(t_agg2.a-t_agg2.b)>=0) group by a, b having count(c)=1; 
+explain (costs off) select a, b, count(c) from (select t_agg1.c a, t_agg1.d b, sum(t_agg2.b-t_agg2.a) c from t_agg1 join t_agg2 on t_agg1.b=t_agg2.c group by t_agg1.d, t_agg1.c having avg(t_agg2.a-t_agg2.b)>=0) group by a, b having count(c)=1; 
                          QUERY PLAN                         
 ------------------------------------------------------------
  HashAggregate
@@ -182,7 +182,7 @@ select a, b, count(c) from (select t_agg1.c a, t_agg1.d b, sum(t_agg2.b+t_agg2.a
 (5 rows)
 
 -- distinct pull down
-explain (costs off, nodes off) select distinct count(a) as result from t_agg1 group by a order by count(a) using < fetch next 15 rows only;
+explain (costs off) select distinct count(a) as result from t_agg1 group by a order by count(a) using < fetch next 15 rows only;
                  QUERY PLAN                 
 --------------------------------------------
  Limit
@@ -201,7 +201,7 @@ select distinct count(a) as result from t_agg1 group by a order by count(a) usin
       1
 (1 row)
 
-explain (costs off, nodes off) select distinct count(d) as result from t_agg1 group by c order by count(d) using < fetch next 15 rows only;
+explain (costs off) select distinct count(d) as result from t_agg1 group by c order by count(d) using < fetch next 15 rows only;
                  QUERY PLAN                 
 --------------------------------------------
  Limit
@@ -226,7 +226,7 @@ select * from (select distinct count(d) as result from t_agg1 group by c order b
      20
 (1 row)
 
-explain (costs off, nodes off) select * from (select distinct count(a) as result from t_agg1 group by a order by count(a) using < limit all) order by result using < nulls first fetch next 15 rows only;
+explain (costs off) select * from (select distinct count(a) as result from t_agg1 group by a order by count(a) using < limit all) order by result using < nulls first fetch next 15 rows only;
                           QUERY PLAN                          
 --------------------------------------------------------------
  Limit
@@ -248,7 +248,7 @@ select * from (select distinct count(a) as result from t_agg1 group by a order b
       1
 (1 row)
 
-explain (costs off, nodes off) select * from (select distinct count(d) as result from t_agg1 group by c order by count(d) using < limit all) order by result using < nulls first fetch next 15 rows only;
+explain (costs off) select * from (select distinct count(d) as result from t_agg1 group by c order by count(d) using < limit all) order by result using < nulls first fetch next 15 rows only;
                           QUERY PLAN                          
 --------------------------------------------------------------
  Limit
@@ -271,7 +271,7 @@ select * from (select distinct count(d) as result from t_agg1 group by c order b
 (1 row)
 
 set enable_hashagg=off;
-explain (costs off, nodes off) select all * from (select distinct case when b%2=1 then 'id=1' when b%2=0 then 'id=0' else 'id=2' end as result from t_agg1 order by 1); 
+explain (costs off) select all * from (select distinct case when b%2=1 then 'id=1' when b%2=0 then 'id=0' else 'id=2' end as result from t_agg1 order by 1); 
                                                                QUERY PLAN                                                               
 ----------------------------------------------------------------------------------------------------------------------------------------
  Unique
@@ -287,7 +287,7 @@ select all * from (select distinct case when b%2=1 then 'id=1' when b%2=0 then '
  id=1
 (2 rows)
 
-explain (costs off, nodes off) select all * from (select case when b%2=1 then 'id=1' when b%2=0 then 'id=0' else 'id=2' end as result from t_agg1 group by result order by 1); 
+explain (costs off) select all * from (select case when b%2=1 then 'id=1' when b%2=0 then 'id=0' else 'id=2' end as result from t_agg1 group by result order by 1); 
                                                                QUERY PLAN                                                               
 ----------------------------------------------------------------------------------------------------------------------------------------
  Group
@@ -304,7 +304,7 @@ select all * from (select case when b%2=1 then 'id=1' when b%2=0 then 'id=0' els
  id=1
 (2 rows)
 
-explain (costs off, nodes off) select sum(x) from (select sum(a) x from t_agg1 group by b);
+explain (costs off) select sum(x) from (select sum(a) x from t_agg1 group by b);
               QUERY PLAN              
 --------------------------------------
  Aggregate
@@ -322,7 +322,7 @@ select sum(x) from (select sum(a) x from t_agg1 group by b);
 (1 row)
 
 reset enable_hashagg;
-explain (costs off, nodes off) select x from (select d, sum(a) x from t_agg1 group by 1);
+explain (costs off) select x from (select d, sum(a) x from t_agg1 group by 1);
               QUERY PLAN               
 ---------------------------------------
  Subquery Scan on __unnamed_subquery__
@@ -341,7 +341,7 @@ select x from (select d, sum(a) x from t_agg1 group by 1) order by 1;
  10005000
 (5 rows)
 
-explain (costs off, nodes off) select x from (select g, sum(a) x from t_agg1 group by 1);
+explain (costs off) select x from (select g, sum(a) x from t_agg1 group by 1);
               QUERY PLAN               
 ---------------------------------------
  Subquery Scan on __unnamed_subquery__
@@ -357,7 +357,7 @@ select x from (select g, sum(a) x from t_agg1 group by 1) order by 1;
 (1 row)
 
 set plan_mode_seed=2;
-explain (costs off, nodes off) SELECT DISTINCT * FROM ( SELECT DISTINCT SUM(b) as result1 FROM t_agg1 where b <= 8 group by b having b < 10 order by result1 ASC OFFSET 1 ROW FETCH NEXT 30 ROW ONLY ) AS RESULT where result1 !=(3+3-1) group by result1 order by 1;
+explain (costs off) SELECT DISTINCT * FROM ( SELECT DISTINCT SUM(b) as result1 FROM t_agg1 where b <= 8 group by b having b < 10 order by result1 ASC OFFSET 1 ROW FETCH NEXT 30 ROW ONLY ) AS RESULT where result1 !=(3+3-1) group by result1 order by 1;
                                QUERY PLAN (RANDOM seed 2)                                
 -----------------------------------------------------------------------------------------
  Unique
@@ -393,7 +393,7 @@ SELECT DISTINCT * FROM ( SELECT DISTINCT SUM(b) as result1 FROM t_agg1 where b <
       16
 (8 rows)
 
-explain (costs off, nodes off) SELECT ALL * FROM (SELECT DISTINCT CASE WHEN d=1 THEN 'ID1' WHEN d=2 THEN 'ID2' ELSE 'ID0' END as result FROM t_agg1 where d is not null group by d order by 1 OFFSET 1 ROW FETCH NEXT 25 ROW ONLY ) ;
+explain (costs off) SELECT ALL * FROM (SELECT DISTINCT CASE WHEN d=1 THEN 'ID1' WHEN d=2 THEN 'ID2' ELSE 'ID0' END as result FROM t_agg1 where d is not null group by d order by 1 OFFSET 1 ROW FETCH NEXT 25 ROW ONLY ) ;
                                                       QUERY PLAN (RANDOM seed 2)                                                       
 ---------------------------------------------------------------------------------------------------------------------------------------
  Subquery Scan on __unnamed_subquery__
@@ -532,7 +532,7 @@ CREATE TABLE sales_transaction_line
     tran_line_status_cd clob null,
     tran_line_sales_type_cd char(100) null
 )with (orientation=row);
-explain (costs off, nodes off)
+explain (costs off)
 SELECT
     CAST(TRAN_LINE_STATUS_CD AS char) c1,
     CAST(TRAN_LINE_STATUS_CD AS char) c2,
@@ -550,7 +550,7 @@ GROUP BY c1,c3 ;
                ->  Seq Scan on sales_transaction_line
 (6 rows)
 
-explain (costs off, nodes off)
+explain (costs off)
 SELECT
     CAST(TRAN_LINE_STATUS_CD AS char) c1,
     CAST(TRAN_LINE_STATUS_CD AS char) c2,

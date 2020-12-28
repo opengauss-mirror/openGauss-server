@@ -30,7 +30,7 @@ CREATE TABLE SUPPLIER_base
   , S_COMMENT     VARCHAR(101) NOT NULL
   --, primary key (S_SUPPKEY)
 ); 
-copy SUPPLIER_base from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/supplier.tbl' delimiter as '|'null as '';
+copy SUPPLIER_base from '@abs_srcdir@/data/supplier.tbl' delimiter as '|'null as '';
 
 -- 2.1 row ordinary table
 drop index if exists t2_row_idx;

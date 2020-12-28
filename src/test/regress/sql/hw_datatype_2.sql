@@ -79,8 +79,7 @@ SELECT ID,IT,int1larger(ID,IT) FROM TEST_TINYINT ORDER BY 1,2;
 SELECT ID,IT,int1smaller(ID,IT) FROM TEST_TINYINT ORDER BY 1,2;
 	
 SELECT int1abs(ID) FROM TEST_TINYINT ORDER BY 1;
-SELECT int1mod(ID,IT) FROM TEST_TINYINT WHERE IT != 0 ORDER BY 1;
-SELECT int1mod(ID, 0) FROM TEST_TINYINT ORDER BY 1;
+SELECT int1mod(ID,IT) FROM TEST_TINYINT ORDER BY 1;
 	  
 SELECT int1um(ID) FROM TEST_TINYINT ORDER BY 1;
 SELECT int1up(ID) FROM TEST_TINYINT ORDER BY 1;
@@ -265,32 +264,6 @@ INSERT INTO test_type VALUES(1E-323);
 INSERT INTO test_type VALUES(1E-324);
 INSERT INTO test_type VALUES(1E+308);
 INSERT INTO test_type VALUES(1E+309);
-SELECT * FROM test_type order by 1;
-DROP TABLE test_type;
-
-/* f.BINARY_FLOAT type */
-CREATE TABLE test_type(
-	my_float BINARY_FLOAT
-	);
-INSERT INTO test_type VALUES ('    0.0');
-INSERT INTO test_type VALUES ('1004.30   ');
-INSERT INTO test_type VALUES ('     -34.84    ');
-INSERT INTO test_type VALUES ('1.2345678901234e+20');
-INSERT INTO test_type VALUES ('1.2345678901234e-20');
--- test for over and under flow
-INSERT INTO test_type VALUES ('10e70');
-INSERT INTO test_type VALUES ('-10e70');
-INSERT INTO test_type VALUES ('10e-70');
-INSERT INTO test_type VALUES ('-10e-70');
--- bad input
-INSERT INTO test_type VALUES ('');
-INSERT INTO test_type VALUES ('       ');
-INSERT INTO test_type VALUES ('xyz');
-INSERT INTO test_type VALUES ('5.0.0');
-INSERT INTO test_type VALUES ('5 . 0');
-INSERT INTO test_type VALUES ('5.   0');
-INSERT INTO test_type VALUES ('     - 3.0');
-INSERT INTO test_type VALUES ('123            5');
 SELECT * FROM test_type order by 1;
 DROP TABLE test_type;
 

@@ -1,0 +1,84 @@
+set enable_global_stats = true;
+-- problem: list all unsupported feature in cstore table
+-- feature 1: CREATE TABLE name OF type_name
+CREATE TYPE cstore_person_type AS (id int, name text);
+CREATE TABLE cstore_persions OF cstore_person_type WITH (orientation = orc, COMPRESSION = zlib) tablespace hdfs_ts;
+ERROR:  Unsupport feature
+DETAIL:  cstore/timeseries don't support relation defination with composite type using CREATE TABLE OF TYPENAME.
+DROP TYPE cstore_person_type;
+-- feature 2: inheritance
+CREATE TABLE cstore_parent_tbl( a1 int, a2 bool, a3 bigint) tablespace hdfs_ts;
+CREATE TABLE cstore_child_tbl( b1 bool, b2 bool, b3 bigint) INHERITS ( cstore_parent_tbl ) with (orientation = orc ) tablespace hdfs_ts;
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+DROP TABLE cstore_parent_tbl;
+-- feature 3: unchange some storage parameter
+CREATE TABLE cstore_coltbl( a1 int, a2 int ) with (orientation = orc) tablespace hdfs_ts ;
+ALTER TABLE cstore_coltbl SET ( orientation = 'row' );
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+ALTER TABLE cstore_coltbl SET ( compression = no );
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+ALTER TABLE cstore_coltbl SET ( compression = zlib, orientation = 'row' );
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+CREATE TABLE cstore_rowtbl( a1 int, a2 int ) with (orientation = 'row' );
+ALTER TABLE cstore_rowtbl SET ( orientation = orc );
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+ALTER TABLE cstore_rowtbl SET ( orientation = orc, compression = zlib );
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+DROP TABLE cstore_coltbl;
+DROP TABLE cstore_rowtbl;
+-- feature 4: at least 1 attribute in column orientated table
+CREATE TABLE cstore_zero_attr () with ( orientation = orc ) tablespace hdfs_ts;
+ERROR:  must have at least one column
+-- feature 5: don't vacuum column stored table
+CREATE TABLE cstore_vacuum_coltbl1( c_smallint smallint   null,c_double_precision double precision , c_timestamp_with_timezone timestamp with time zone) with (orientation = orc , compression=zlib) tablespace hdfs_ts distribute by hash(c_smallint) ;
+VACUUM cstore_vacuum_coltbl1;
+CREATE INDEX cstore_vacuum_coltbl1_idx ON cstore_vacuum_coltbl1 ( c_timestamp_with_timezone);
+VACUUM cstore_vacuum_coltbl1;
+DROP TABLE cstore_vacuum_coltbl1 CASCADE;
+CREATE TABLE cstore_vacuum_coltbl1( c_smallint smallint   null,c_double_precision double precision , c_timestamp_with_timezone timestamp with time zone) with (orientation = orc ,compression=zlib) tablespace hdfs_ts distribute by hash(c_smallint)  partition by range(c_smallint) (
+partition p1 values less than(100),
+partition p2 values less than(200),
+partition p3 values less than(300));
+ERROR:  Unsupport partition strategy 'RANGE-PARTITION' feature for dfs table.
+VACUUM cstore_vacuum_coltbl1;
+ERROR:  relation "cstore_vacuum_coltbl1" does not exist
+CREATE INDEX cstore_vacuum_coltbl1_idx ON cstore_vacuum_coltbl1 ( c_timestamp_with_timezone) LOCAL;
+ERROR:  relation "cstore_vacuum_coltbl1" does not exist
+VACUUM cstore_vacuum_coltbl1;
+ERROR:  relation "cstore_vacuum_coltbl1" does not exist
+DROP TABLE cstore_vacuum_coltbl1 CASCADE;
+ERROR:  table "cstore_vacuum_coltbl1" does not exist
+-- feature 6: alter cstore-table set schema to pg_catalog
+CREATE TABLE cstore_unsupport_tbl06 ( a int, b int , PARTIAL CLUSTER KEY(a)) with ( orientation = orc ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+ALTER TABLE cstore_unsupport_tbl06 SET SCHEMA pg_catalog;
+ERROR:  Un-support feature
+DETAIL:  DFS table doesn't allow ALTER TABLE SET SCHEMA
+-- feature 7: rename
+ALTER TABLE cstore_unsupport_tbl06 RENAME TO cstore_unsupport_tbl07;
+ERROR:  Un-support feature
+DETAIL:  RENAME operation is not supported for DFS table.
+ALTER TABLE cstore_unsupport_tbl07 RENAME TO cstore_unsupport_tbl06;
+ERROR:  relation "cstore_unsupport_tbl07" does not exist
+ALTER TABLE cstore_unsupport_tbl06 RENAME a to c;
+ERROR:  Un-support feature
+DETAIL:  RENAME operation is not supported for DFS table.
+ALTER TABLE cstore_unsupport_tbl06 RENAME CONSTRAINT cstore_unsupport_tbl07_cluster TO cstore_unsupport_tbl07_cluster01;
+ERROR:  Un-support feature
+DETAIL:  RENAME operation is not supported for DFS table.
+-- feature 8: reset
+ALTER TABLE cstore_unsupport_tbl06 RESET ( ORIENTATION, MAX_BATCHROW );
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter a DFS table.
+-- feature 9: LIKE INCLUDING DISTRIBUTION REPLICATION
+CREATE TABLE cstore_unsupport_tbl07 ( a int , b int , c int ) WITH ( ORIENTATION = 'ROW' ) DISTRIBUTE BY REPLICATION;
+CREATE TABLE cstore_unsupport_tbl08 ( LIKE cstore_unsupport_tbl07 INCLUDING DISTRIBUTION ) WITH ( orientation = orc ) tablespace hdfs_ts;
+CREATE TABLE cstore_unsupport_tbl09 ( a int , b int , c int ) WITH ( orientation = 'orc' ) tablespace hdfs_ts DISTRIBUTE BY REPLICATION;
+DROP TABLE cstore_unsupport_tbl06;
+DROP TABLE cstore_unsupport_tbl07;
+DROP TABLE cstore_unsupport_tbl08;
+DROP TABLE cstore_unsupport_tbl09;

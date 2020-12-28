@@ -176,6 +176,29 @@ static void pcb_error_callback(void* arg)
     }
 }
 
+/* 
+ * For timeseries table to identify hidden column type and return NULL or
+ * build a Var node for an attribute identified by RTE and attrno for others.
+ */
+Var* ts_make_var(ParseState* pstate, RangeTblEntry* rte, int attrno, int location)
+{
+    Oid var_type_id;
+    int32 type_mod;
+    Oid var_collid;
+    int kv_type = ATT_KV_UNDEFINED;
+    get_rte_attribute_type(rte, attrno, &var_type_id, &type_mod, &var_collid, &kv_type);
+    if (kv_type == ATT_KV_HIDE) {
+        return NULL;
+    }
+
+    Var* result = NULL;
+    int vnum, sublevels_up;
+    vnum = RTERangeTablePosn(pstate, rte, &sublevels_up);
+    result = makeVar(vnum, attrno, var_type_id, type_mod, var_collid, sublevels_up);
+    result->location = location;
+    return result;
+}
+
 /*
  * make_var
  *		Build a Var node for an attribute identified by RTE and attrno

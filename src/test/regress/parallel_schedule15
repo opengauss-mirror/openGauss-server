@@ -1,72 +1,18 @@
-#split from parallel_schedule2
 
-# ----------
-# Advisory lock need to be tested in series in Postgres-XC
-# ---------
-test: advisory_lock
+#test: hw_partition_index hw_partition_reindex hw_partition_unusable_index_1 hw_partition_unusable_index_3 hw_partition_unusable_index_2
+#test: hw_partition_insert hw_partition_insert_01 hw_partition_update0 hw_partition_update1 hw_partition_dml hw_partition_sql_adapt1
+#test: hw_partition_grant hw_partition_of_type hw_partition_sql_adapt0 
+#test: hw_partition_nodes hw_partition_size hw_partition_compare hw_partition_storage_parameters hw_partition_storage_parameters_index hw_partition_toast hw_partition_cross hw_partition_maxvalue hw_partition_sql_adapt2
+# FIXME: move me back to the parallel test when the refcnt issue is fixed
+# Below two teste are unstable, temporarily ignoring. This is same to distribute_dattistic, relallvisible, Dongwang will solve the problem.
+#test: hw_partition_vacuum_full 
+#test: hw_partition_vacuum 
 
-# ----------
-# Another group of parallel tests
-# ----------
-test: cluster dependency guc bitmapops tsdicts functional_deps json
+#the following part will running in schedule9
+#test: hw_expression_alias
+#test: hw_partition_lock
+#test: hw_partition_llt
+#test: hw_analyze_percent
+#test: hw_sql_llt_case
 
-# test for vec sonic hash
-test: vec_sonic_hashjoin_number_prepare
-test: vec_sonic_hashjoin_number_nospill
-#test: hw_pwd_complexity
-
-test: timeout
-test: dml
-#test: iud
-#test: random_plan
-test: hashfilter hashfilter_1
-test: reduce_orderby
-test: backtrace_log
-#test: global_stats
-test: bulkload_start
-test: bulkload_parallel_test_1 bulkload_parallel_test_2 bulkload_parallel_test_3 bulkload_parallel_test_4
-test: bulkload_end
-test: bulkload_error_tbl
-
-test: vec_prepare_001
-test: vec_prepare_002
-test: vec_prepare_003
-test: tpchcol05 tpchcol07 tpchcol08 tpchcol09
-
-test: tpchcol01
-test: tpchcol06
-test: tpchcol03 tpchcol04
-test: tpchcol12 tpchcol13 tpchcol14 tpchcol16 tpchcol18 tpchcol19 tpchcol21
-#test: threadpool_view
-
-#test: vec_sort
-test: vec_partition vec_partition_1 vec_material_001
-#test: vec_material_002
-
-test: llvm_vecsort llvm_vecsort2
-
-test: udf_crem create_c_function
-
-#test: redis_prepare_c_functions
-#test: pre_redis_create_tx  pre_redis_create_cmpts
-#test: redis_proc_ut1 drop_proc_ut1
-#test: redis_proc_ut2 normal_IUD_proc_ut2 drop_proc_ut2
-#test: redis_proc_ut3 drop_proc_ut3
-#test: redis_proc_ut4 normal_IUD_proc_ut4 drop_proc_ut4
-#test: post_redis_drop_cmpts
-#test: normal_IUD_proc_ut9 redis_proc_ut9 drop_proc_ut9
-#test: post_redis_drop_cmpts
-#test: pre_redis_create_tx2 
-#test: pre_redis_tx_insert
-#test: redis_proc_ut5 truncate_proc_ut5
-#test: redis_proc_ut6 normal_IUD_proc_ut6 truncate_proc_ut6
-#test: redis_proc_ut7 truncate_proc_ut7
-#test: redis_proc_ut8 normal_IUD_proc_ut8 truncate_proc_ut8
-#test: normal_IUD_proc_ut10 redis_proc_ut10 truncate_proc_ut10
-#test: post_redis_drop_tx2
-#test: redis_clean_c_functions
-#test: redis_truncate
-#test: redis_truncate_col
-#test: redis_alter_truncate_partition
-#test: redis_alter_truncate_col_partition
-
+test: hw_sql_llt sqlLLT

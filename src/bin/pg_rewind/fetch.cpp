@@ -26,7 +26,7 @@
 #include "catalog/catalog.h"
 #include "catalog/pg_type.h"
 
-static PGconn* conn = NULL;
+PGconn* conn = NULL;
 char source_slot_name[NAMEDATALEN] = {0};
 
 /*
@@ -236,13 +236,13 @@ void libpqGetSourceSlot(XLogRecPtr* recptr)
         }
         char* val = PQgetvalue(res, i, 7);
         if (sscanf_s(val, "%X/%X", &hi, &lo) != 2) {
-            PQclear(res);
             pg_log(PG_PROGRESS, "unrecognized result \"%s\" for slot restart_lsn\n", val);
         }
         *recptr = ((uint64)hi) << 32 | lo;
         break;
     }
     PQclear(res);
+    res = NULL;
     return;
 }
 
@@ -260,19 +260,19 @@ char* libpqGetTargetSlotName()
 
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         pg_log(PG_ERROR, "could not fetch pg_get_replication_slot_name list: %s", PQresultErrorMessage(res));
-        PQclear(res);
-        return target_slot_name;
     }
 
     /* sanity check the result set */
     if (PQnfields(res) != 1) {
         PQclear(res);
+        res = NULL;
         pg_fatal("unexpected result set while fetching pg_get_replication_slot_name list\n");
     }
     target_slot_name = pg_strdup(PQgetvalue(res, 0, 0));
     PQclear(res);
     return target_slot_name;
 }
+
 /*
  * Get a list of all files in the data directory.
  */
@@ -280,10 +280,9 @@ BuildErrorCode fetchSourceFileList()
 {
     PGresult* res = NULL;
     const char* sql = NULL;
-    int nmatch;
     int i;
-    char xlogpath[XLOG_NAME_LENGTH + 1] = {0};
     BuildErrorCode rv = BUILD_SUCCESS;
+    
     /*
      * Create a recursive directory listing of the whole data directory.
      *
@@ -311,7 +310,7 @@ BuildErrorCode fetchSourceFileList()
     }
     /* wait for local stat */
     rv = waitEndTargetFileStatThread();
-    PG_CHECKRETURN_AND_RETURN(rv);
+    PG_CHECKRETURN_AND_FREE_PGRESULT_RETURN(rv, res);
     /* Read result to local variables */
     for (i = 0; i < PQntuples(res); i++) {
         char* path = PQgetvalue(res, i, 0);
@@ -332,13 +331,6 @@ BuildErrorCode fetchSourceFileList()
             continue;
         }
 
-        nmatch = sscanf_s(path, "pg_xlog/%[0-9A-F]", xlogpath, XLOG_NAME_LENGTH);
-        if (nmatch == 1) {
-            /* if redoxlog is older than current xlog skip it */
-            if (strncmp(lastxlogfileName, xlogpath, XLOG_NAME_LENGTH) > 0) {
-                continue;
-            }
-        }
         if (link_target[0])
             type = FILE_TYPE_SYMLINK;
         else if (isdir)
@@ -350,7 +342,7 @@ BuildErrorCode fetchSourceFileList()
                 isrowfile = isRelDataFile(path);
                 if (isrowfile) {
                     filesize = filesize - (filesize % BLOCKSIZE);
-                    pg_log(PG_PROGRESS, "filesize mod BLOCKSIZE not equal 0 %s %s \n", path, PQgetvalue(res, i, 1));
+                    pg_log(PG_PROGRESS, "source filesize mod BLOCKSIZE not equal 0 %s %s \n", path, PQgetvalue(res, i, 1));
                 }
             }
         }
@@ -579,11 +571,6 @@ BuildErrorCode executeFileMap(filemap_t* map, FILE* file)
     const char* sql = NULL;
     PGresult* res = NULL;
     int i;
-    int nRet;
-    char bkup_file[MAXPGPATH] = {0};
-
-    nRet = snprintf_s(bkup_file, MAXPGPATH, MAXPGPATH - 1, "%s/%s", datadir_target, "pg_rewind_bak");
-    securec_check_ss_c(nRet, "", "");
 
     /*
      * First create a temporary table, and load it with the blocks that we
@@ -774,7 +761,7 @@ static void execute_waldatamap(datapagemap_t* pagemap, const char* path, size_t 
 /*
  * Backup all relevant blocks from local target data directory.
  */
-BuildErrorCode backupFileMap(filemap_t* map, const char* lastoff)
+BuildErrorCode backupFileMap(filemap_t* map)
 {
     file_entry_t* entry = NULL;
     int i;
@@ -815,17 +802,33 @@ BuildErrorCode backupFileMap(filemap_t* map, const char* lastoff)
 
         switch (entry->action) {
             case FILE_ACTION_NONE:
-            case FILE_ACTION_COPY_TAIL:
+                /* for entry with page map not null, back up corresponding file */
+                if (entry->pagemap.bitmapsize > 0) {
+                    backup_target_file(entry->path, divergeXlogFileName);
+                }
+                break;
+
             case FILE_ACTION_CREATE:
+                /* to be supported later */
                 break;
 
             case FILE_ACTION_COPY:
+                /* create fake file for restore when file not exist, otherwise, backup file */
+                file_entry_t statbuf;
+                if (targetFilemapSearch(entry->path, &statbuf) < 0) {
+                    backup_fake_target_file(entry->path);
+                } else {
+                    backup_target_file(entry->path, divergeXlogFileName);
+                }
+                break;
+
+            case FILE_ACTION_COPY_TAIL:
             case FILE_ACTION_TRUNCATE:
-                backup_target_file(entry->path, lastoff);
+                backup_target_file(entry->path, divergeXlogFileName);
                 break;
 
             case FILE_ACTION_REMOVE:
-                backup_target(entry, lastoff);
+                backup_target(entry, divergeXlogFileName);
                 break;
 
             default:
@@ -915,7 +918,7 @@ static BuildErrorCode recurse_dir(const char* datadir, const char* parentpath, p
                  */
             } else {
                 pg_fatal("could not stat file \"%s\" in recurse_dir: %s\n", fullpath, strerror(errno));
-                closedir(xldir);
+                (void)closedir(xldir);
                 return BUILD_FATAL;
             }
         }
@@ -932,12 +935,18 @@ static BuildErrorCode recurse_dir(const char* datadir, const char* parentpath, p
         if (S_ISREG(fst.st_mode)) {
             if ((uint64)fst.st_size <= MAX_FILE_SIZE) {
                 callback(path, FILE_TYPE_REGULAR, fst.st_size, NULL);
+                if (increment_return_code != BUILD_SUCCESS) {
+                    (void)closedir(xldir);
+                }
                 PG_CHECKBUILD_AND_RETURN();
             } else {
                 pg_log(PG_WARNING, "file size of \"%s\" is over %ld\n", fullpath, MAX_FILE_SIZE);
             }
         } else if (S_ISDIR(fst.st_mode)) {
             callback(path, FILE_TYPE_DIRECTORY, 0, NULL);
+            if (increment_return_code != BUILD_SUCCESS) {
+                (void)closedir(xldir);
+            }
             PG_CHECKBUILD_AND_RETURN();
             /* recurse to handle subdirectories */
             recurse_dir(datadir, path, callback);
@@ -949,10 +958,12 @@ static BuildErrorCode recurse_dir(const char* datadir, const char* parentpath, p
             len = readlink(fullpath, link_target, sizeof(link_target));
             if (len < 0) {
                 pg_fatal("could not read symbolic link \"%s\": %s\n", fullpath, strerror(errno));
+                (void)closedir(xldir);
                 return BUILD_FATAL;
             }
             if (len >= (int)sizeof(link_target)) {
                 pg_fatal("symbolic link \"%s\" target is too long\n", fullpath);
+                (void)closedir(xldir);
                 return BUILD_FATAL;
             }
             link_target[len] = '\0';
@@ -966,6 +977,9 @@ static BuildErrorCode recurse_dir(const char* datadir, const char* parentpath, p
              */
             if (((parentpath != NULL) && strcmp(parentpath, "pg_tblspc") == 0) || strcmp(path, "pg_xlog") == 0) {
                 recurse_dir(datadir, path, callback);
+                if (increment_return_code != BUILD_SUCCESS) {
+                    (void)closedir(xldir);
+                }
                 PG_CHECKBUILD_AND_RETURN();
             }
         }
@@ -973,6 +987,7 @@ static BuildErrorCode recurse_dir(const char* datadir, const char* parentpath, p
 
     if (errno) {
         pg_fatal("could not read directory \"%s\": %s\n", fullparentpath, strerror(errno));
+        (void)closedir(xldir);
         return BUILD_FATAL;
     }
 
@@ -1058,6 +1073,7 @@ static void get_slot_name_by_app_name(void)
 
     if ((optlines = (const char**)readfile(conf_path)) != NULL) {
         lines_index = find_gucoption(optlines, config_para_build, NULL, NULL, &optvalue_off, &optvalue_len);
+
         if (lines_index != INVALID_LINES_IDX) {
             errno_t rc = 0;
             rc = strcpy_s(arg_str, NAMEDATALEN, optlines[lines_index] + optvalue_off);
@@ -1116,10 +1132,12 @@ bool checkDummyStandbyConnection(void)
         if (peer_role == NULL) {
             continue;
         }
-        if (strcmp(peer_role, "Secondary") == 0 && strcmp(state, "Streaming") == 0) {
+        if (strcmp(peer_role, "Secondary") == 0 &&
+            (strcmp(state, "Streaming") == 0 || strcmp(state, "Catchup") == 0)) {
             ret = true;
             break;
         }
+        pg_log(PG_WARNING, " the results are peer_role: %s, state: %s\n", peer_role, state);
     }
 
     PQclear(res);

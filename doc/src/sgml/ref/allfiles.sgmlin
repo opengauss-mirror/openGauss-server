@@ -42,7 +42,6 @@ Complete list of usable sgml source files in this directory.
 <!ENTITY alterUser          SYSTEM "alter_user.sgml">
 <!ENTITY alterUserMapping   SYSTEM "alter_user_mapping.sgml">
 <!ENTITY alterView          SYSTEM "alter_view.sgml">
-<!ENTITY alterRule          SYSTEM "alter_rule.sgml">
 <!ENTITY analyze            SYSTEM "analyze.sgml">
 <!ENTITY begin              SYSTEM "begin.sgml">
 <!## XC>
@@ -71,6 +70,7 @@ Complete list of usable sgml source files in this directory.
 <!ENTITY createGroup        SYSTEM "create_group.sgml">
 <!ENTITY createIndex        SYSTEM "create_index.sgml">
 <!ENTITY createLanguage     SYSTEM "create_language.sgml">
+<!ENTITY createMaterializedView SYSTEM "create_materialized_view.sgml">
 <!## XC>
 <!entity createNode         SYSTEM "create_node.sgml">
 <!entity createNodeGroup    SYSTEM "create_nodegroup.sgml">
@@ -114,6 +114,7 @@ Complete list of usable sgml source files in this directory.
 <!ENTITY dropGroup          SYSTEM "drop_group.sgml">
 <!ENTITY dropIndex          SYSTEM "drop_index.sgml">
 <!ENTITY dropLanguage       SYSTEM "drop_language.sgml">
+<!ENTITY dropMaterializedView SYSTEM "drop_materialized_view.sgml">
 <!## XC>
 <!entity dropNode           SYSTEM "drop_node.sgml">
 <!entity dropNodeGroup      SYSTEM "drop_nodegroup.sgml">
@@ -157,6 +158,7 @@ Complete list of usable sgml source files in this directory.
 <!ENTITY prepare            SYSTEM "prepare.sgml">
 <!ENTITY prepareTransaction SYSTEM "prepare_transaction.sgml">
 <!ENTITY reassignOwned      SYSTEM "reassign_owned.sgml">
+<!ENTITY refreshMaterializedView SYSTEM "refresh_materialized_view.sgml">
 <!ENTITY reindex            SYSTEM "reindex.sgml">
 <!ENTITY releaseSavepoint   SYSTEM "release_savepoint.sgml">
 <!ENTITY reset              SYSTEM "reset.sgml">

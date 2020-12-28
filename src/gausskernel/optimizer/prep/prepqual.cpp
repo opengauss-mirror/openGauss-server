@@ -403,10 +403,9 @@ static Expr* process_duplicate_ors(List* orlist)
 
     if (orlist == NIL)
         return NULL;              /* probably can't happen */
-    /* single-expression OR (can this happen?) */
-    if (list_length(orlist) == 1) {
+    if (list_length(orlist) == 1) /* single-expression OR (can this
+                                   * happen?) */
         return (Expr*)linitial(orlist);
-    }
 
     /*
      * Choose the shortest AND clause as the reference list --- obviously, any

@@ -30,992 +30,446 @@
 #include "access/xact.h"
 #include "catalog/pgxc_node.h"
 #include "commands/prepare.h"
+#include "executor/lightProxy.h"
+#include "executor/spi_priv.h"
 #include "optimizer/nodegroups.h"
 #include "pgxc/groupmgr.h"
 #include "pgxc/pgxcnode.h"
 #include "utils/dynahash.h"
 #include "utils/globalplancache.h"
+#include "utils/globalpreparestmt.h"
 #include "utils/memutils.h"
 #include "utils/plancache.h"
 #include "utils/syscache.h"
+#include "utils/plpgsql.h"
 
-extern List *RevalidateCachedQuery(CachedPlanSource *plansource);
-
-/* global plan cache */
-static void GPCReleaseCachedPlan(CachedPlan *plan)
+static bool
+CompareSearchPath(struct OverrideSearchPath* path1, struct OverrideSearchPath* path2)
 {
-    Assert(plan->magic == CACHEDPLAN_MAGIC);
+    Assert(path1 != NULL);
 
-    /* Mark it no longer valid */
-    plan->magic = 0;
-
-    MemoryContextDelete(plan->context);
-}
-
-typedef struct TimelineEntry {
-    uint32 id;      // CN index
-    uint32 timeline;
-} TimelineEntry;
-
-GlobalPlanCache::GlobalPlanCache()
-{
-    PlanInit();
-    PrepareInit();
-
-    HASHCTL ctl_func;
-    errno_t rc;
-    rc = memset_s(&ctl_func, sizeof(ctl_func), 0, sizeof(ctl_func));
-    securec_check_c(rc, "\0", "\0");
-
-    ctl_func.keysize = sizeof(uint32);
-    ctl_func.entrysize = sizeof(TimelineEntry);
-    ctl_func.hcxt = g_instance.cache_cxt.global_cache_mem;
-    m_cn_timeline =
-        hash_create("cn_timeline", 64, &ctl_func, HASH_ELEM | HASH_SHRCTX);
-}
-
-/*
- * @Description: generate the env the plancache belongs to 
- * @in num: void
- * @return - GPCEnv
-*/
-GPCEnv *GlobalPlanCache::EnvCreate()
-{
-    GPCEnv *environment = NULL;
-
-    MemoryContext env_context = AllocSetContextCreate(g_instance.cache_cxt.global_cache_mem,
-                                                      "CachedEnvironmentContext",
-                                                      ALLOCSET_SMALL_MINSIZE,
-                                                      ALLOCSET_SMALL_INITSIZE,
-                                                      ALLOCSET_DEFAULT_MAXSIZE,
-                                                      SHARED_CONTEXT);
-
-    MemoryContext oldcxt = MemoryContextSwitchTo(env_context);
-
-    environment = (GPCEnv *) palloc0(sizeof(GPCEnv));
-    environment->filled = false;
-    environment->env_signature_pgxc = 0;
-    environment->env_signature = 0;
-    environment->env_signature2 = 0;
-    environment->globalplancacheentry = NULL;
-    environment->plansource = NULL;
-    environment->context = env_context;
-    environment->memory_size = 0;
-
-    MemoryContextSwitchTo(oldcxt);
-
-    return environment;
-}
-
-static void GPCFillClassicEnvSignatures(GPCEnv *env)
-{
-    env->env_signature = 0;
-    env->env_signature |= u_sess->attr.attr_sql.enable_fast_numeric;
-    env->env_signature |= u_sess->attr.attr_sql.enable_global_stats << 1;
-#ifdef ENABLE_MULTIPLE_NODES
-    env->env_signature |= u_sess->attr.attr_sql.enable_hdfs_predicate_pushdown << 2;
-#endif
-    env->env_signature |= u_sess->attr.attr_sql.enable_absolute_tablespace << 3;
-#ifdef ENABLE_MULTIPLE_NODES
-    env->env_signature |= u_sess->attr.attr_sql.enable_hadoop_env << 4;
-#endif
-    env->env_signature |= u_sess->attr.attr_sql.enable_valuepartition_pruning << 5;
-#ifdef ENABLE_MULTIPLE_NODES
-    env->env_signature |= u_sess->attr.attr_sql.enable_constraint_optimization << 6;
-#endif
-    env->env_signature |= u_sess->attr.attr_sql.enable_bloom_filter << 7;
-    env->env_signature |= u_sess->attr.attr_sql.enable_codegen << 8;
-    env->env_signature |= u_sess->attr.attr_sql.enable_codegen_print << 9;
-    env->env_signature |= u_sess->attr.attr_sql.enable_seqscan << 10;
-    env->env_signature |= u_sess->attr.attr_sql.enable_indexscan << 11;
-    env->env_signature |= u_sess->attr.attr_sql.enable_indexonlyscan << 12;
-    env->env_signature |= u_sess->attr.attr_sql.enable_bitmapscan << 13;
-    env->env_signature |= u_sess->attr.attr_sql.force_bitmapand << 14;
-    env->env_signature |= u_sess->attr.attr_sql.enable_tidscan << 15;
-    env->env_signature |= u_sess->attr.attr_sql.enable_sort << 16;
-    env->env_signature |= u_sess->attr.attr_sql.enable_compress_spill << 17;
-    env->env_signature |= u_sess->attr.attr_sql.enable_hashagg << 18;
-    env->env_signature |= u_sess->attr.attr_sql.enable_material << 19;
-    env->env_signature |= u_sess->attr.attr_sql.enable_nestloop << 20;
-    env->env_signature |= u_sess->attr.attr_sql.enable_mergejoin << 21;
-    env->env_signature |= u_sess->attr.attr_sql.enable_hashjoin << 22;
-    env->env_signature |= u_sess->attr.attr_sql.enable_index_nestloop << 23;
-    env->env_signature |= u_sess->attr.attr_sql.enable_nodegroup_debug << 24;
-    env->env_signature |= u_sess->attr.attr_sql.enable_partitionwise << 25;
-    env->env_signature |= u_sess->attr.attr_sql.enable_kill_query << 26;
-#ifdef ENABLE_MULTIPLE_NODES        
-    env->env_signature |= u_sess->attr.attr_sql.agg_redistribute_enhancement << 27;
-#endif
-    env->env_signature |= u_sess->attr.attr_sql.enable_broadcast << 28;
-#ifdef ENABLE_MULTIPLE_NODES
-    env->env_signature |= g_instance.attr.attr_sql.enable_orc_cache << 29;
-    env->env_signature |= u_sess->attr.attr_sql.acceleration_with_compute_pool << 30;
-#endif
-    env->env_signature |= u_sess->attr.attr_sql.enable_extrapolation_stats << 31;
-}
-
-
-/*
- * @Description:Fill in the environment signatures which are bitmaps for the boolean type GUC parameters
- * @in num: GPCEnv
- * @return - void
-*/
-static void GPCFillEnvSignatures(GPCEnv *env)
-{
-    /* We should only call this function if env is not NULL and it's not filled */
-    Assert(env && !env->filled);
-#ifdef PGXC
-    env->env_signature_pgxc = 0;
-    env->env_signature_pgxc |= g_instance.attr.attr_sql.string_hash_compatible;
-#ifdef ENABLE_MULTIPLE_NODES    
-    env->env_signature_pgxc |= u_sess->attr.attr_sql.enable_remotejoin << 1;
-    env->env_signature_pgxc |= u_sess->attr.attr_sql.enable_fast_query_shipping << 2;
-    env->env_signature_pgxc |= u_sess->attr.attr_sql.enable_remotegroup << 3;
-    env->env_signature_pgxc |= u_sess->attr.attr_sql.enable_remotesort << 4;
-    env->env_signature_pgxc |= u_sess->attr.attr_sql.enable_remotelimit << 5;
-    env->env_signature_pgxc |= u_sess->attr.attr_sql.gtm_backup_barrier << 6;
-    env->env_signature_pgxc |= u_sess->attr.attr_sql.enable_stream_operator << 7;
-#endif    
-    env->env_signature_pgxc |= u_sess->attr.attr_sql.enable_vector_engine << 8;
-    env->env_signature_pgxc |= u_sess->attr.attr_sql.enable_force_vector_engine << 9;
-#ifdef ENABLE_MULTIPLE_NODES 
-    env->env_signature_pgxc |= u_sess->attr.attr_sql.enable_random_datanode << 10;
-    env->env_signature_pgxc |= u_sess->attr.attr_sql.enable_fstream << 11;
-#endif
-#endif
-    GPCFillClassicEnvSignatures(env);
-    env->env_signature2 = 0;
-    env->env_signature2 |= u_sess->attr.attr_sql.enable_geqo;
-    env->env_signature2 |= u_sess->attr.attr_sql.td_compatible_truncation << 1;
-    env->env_signature2 |= u_sess->attr.attr_sql.enable_upgrade_merge_lock_mode << 2;
-    env->env_signature2 |= u_sess->attr.attr_sql.enforce_a_behavior << 3;
-    env->env_signature2 |= u_sess->attr.attr_sql.standard_conforming_strings << 4;
-
-    /* some new GUC parameters which affect the plan */
-#ifdef ENABLE_MULTIPLE_NODES 
-    env->env_signature2 |= u_sess->attr.attr_sql.enable_stream_concurrent_update << 5;
-    env->env_signature2 |= u_sess->attr.attr_sql.enable_stream_recursive << 6;
-#endif    
-    env->env_signature2 |= u_sess->attr.attr_sql.enable_change_hjcost << 7;
-    env->env_signature2 |= u_sess->attr.attr_sql.enable_analyze_check << 8;
-    env->env_signature2 |= u_sess->attr.attr_sql.enable_sonic_hashagg << 9;
-    env->env_signature2 |= u_sess->attr.attr_sql.enable_sonic_hashjoin << 10;
-    env->env_signature2 |= u_sess->attr.attr_sql.enable_sonic_optspill << 11;
-#ifdef ENABLE_MULTIPLE_NODES
-    env->env_signature2 |= u_sess->attr.attr_sql.enable_csqual_pushdown << 13;
-#endif
-    env->env_signature2 |= u_sess->attr.attr_sql.enable_pbe_optimization << 14;
-    env->env_signature2 |= u_sess->attr.attr_sql.enable_light_proxy << 15;
-    env->env_signature2 |= u_sess->attr.attr_sql.enable_early_free << 16;
-    env->env_signature2 |= u_sess->attr.attr_sql.enable_opfusion << 17;
-}
-
-void GlobalPlanCache::GetSchemaName(GPCEnv *env)
-{
-    /* get schema name */
-    if (u_sess->attr.attr_common.namespace_current_schema) {
-        int rc = memcpy_s(env->schema_name,
-                          NAMEDATALEN,
-                          u_sess->attr.attr_common.namespace_current_schema,
-                          strlen(u_sess->attr.attr_common.namespace_current_schema));
-        securec_check(rc, "", "");
-    } else {
-        env->schema_name[0] = '\0';
+    if (path2 == NULL) {
+        return OverrideSearchPathMatchesCurrent(path1);
     }
+
+    if (path1 == path2) {
+        return true;
+    }
+
+    if (path1->addTemp != path2->addTemp) {
+        return false;
+    }
+    if (path1->addCatalog != path2->addCatalog) {
+        return false;
+    }
+    if (list_difference_oid(path1->schemas, path2->schemas) != NULL) {
+        return false;
+    }
+    return true;
 }
-
-void GlobalPlanCache::EnvFill(GPCEnv *env)
-{
-    /* We should only call this function if env is not NULL and it's not filled */
-    Assert(env && !env->filled);
-    GPCFillEnvSignatures(env);
-#ifdef ENABLE_MULTIPLE_NODES
-    env->best_agg_plan = u_sess->attr.attr_sql.best_agg_plan;
-    env->query_dop_tmp = u_sess->attr.attr_sql.query_dop_tmp;
-#endif
-#ifdef DEBUG_BOUNDED_SORT
-    env->optimize_bounded_sort = optimize_bounded_sort;
-#endif
-    env->rewrite_rule = u_sess->attr.attr_sql.rewrite_rule;
-    env->codegen_strategy = u_sess->attr.attr_sql.codegen_strategy;
-    env->plan_mode_seed = u_sess->attr.attr_sql.plan_mode_seed;
-
-    MemoryContext old_context = MemoryContextSwitchTo(env->context);
-    env->expected_computing_nodegroup = pstrdup(u_sess->attr.attr_sql.expected_computing_nodegroup);
-    env->default_storage_nodegroup = pstrdup(u_sess->attr.attr_sql.default_storage_nodegroup);
-    MemoryContextSwitchTo(old_context);
-
-    env->effective_cache_size = u_sess->attr.attr_sql.effective_cache_size;
-    env->codegen_cost_threshold = u_sess->attr.attr_sql.codegen_cost_threshold;
-    env->seq_page_cost = u_sess->attr.attr_sql.seq_page_cost;
-    env->random_page_cost = u_sess->attr.attr_sql.random_page_cost;
-    env->cpu_tuple_cost = u_sess->attr.attr_sql.cpu_tuple_cost;
-    env->allocate_mem_cost = u_sess->attr.attr_sql.allocate_mem_cost;
-    env->cpu_index_tuple_cost = u_sess->attr.attr_sql.cpu_index_tuple_cost;
-    env->cpu_operator_cost = u_sess->attr.attr_sql.cpu_operator_cost;
-#ifdef ENABLE_MULTIPLE_NODES
-    env->stream_multiple = u_sess->attr.attr_sql.stream_multiple;
-#endif
-    env->geqo_threshold = u_sess->attr.attr_sql.geqo_threshold;
-    env->Geqo_effort = u_sess->attr.attr_sql.Geqo_effort;
-    env->Geqo_pool_size = u_sess->attr.attr_sql.Geqo_pool_size;
-    env->Geqo_generations = u_sess->attr.attr_sql.Geqo_generations;
-    env->Geqo_selection_bias = u_sess->attr.attr_sql.Geqo_selection_bias;
-    env->Geqo_seed = u_sess->attr.attr_sql.Geqo_seed;
-    env->default_statistics_target = u_sess->attr.attr_sql.default_statistics_target;
-    env->from_collapse_limit = u_sess->attr.attr_sql.from_collapse_limit;
-    env->join_collapse_limit = u_sess->attr.attr_sql.join_collapse_limit;
-    env->cost_param = u_sess->attr.attr_sql.cost_param;
-#ifdef ENABLE_MULTIPLE_NODES
-    env->schedule_splits_threshold = u_sess->attr.attr_sql.schedule_splits_threshold;
-#endif
-    env->hashagg_table_size = u_sess->attr.attr_sql.hashagg_table_size;
-    env->cursor_tuple_fraction = u_sess->attr.attr_sql.cursor_tuple_fraction;
-    env->constraint_exclusion = u_sess->attr.attr_sql.constraint_exclusion;
-    env->behavior_compat_flags = u_sess->utils_cxt.behavior_compat_flags;
-    env->datestyle = u_sess->time_cxt.DateStyle;
-    env->dateorder = u_sess->time_cxt.DateOrder;
-    env->filled = true;
-
-    /* new GUC parameters which affect the plan */
-    env->qrw_inlist2join_optmode = u_sess->opt_cxt.qrw_inlist2join_optmode;
-    env->skew_strategy_store = u_sess->attr.attr_sql.skew_strategy_store;
-
-    env->database_id = u_sess->proc_cxt.MyDatabaseId;
-    GetSchemaName(env);
-}
-
-static bool GPCCheckOtherEnvSignature(GPCEnv *env)
-{
-    bool is_same = false;
-    is_same = (env->database_id == u_sess->proc_cxt.MyDatabaseId &&
-#ifdef ENABLE_MULTIPLE_NODES
-               env->query_dop_tmp == u_sess->attr.attr_sql.query_dop_tmp &&
-#endif
-               env->rewrite_rule == u_sess->attr.attr_sql.rewrite_rule &&
-               env->codegen_strategy == u_sess->attr.attr_sql.codegen_strategy &&
-               env->plan_mode_seed == u_sess->attr.attr_sql.plan_mode_seed &&
-               env->effective_cache_size == u_sess->attr.attr_sql.effective_cache_size &&
-               env->codegen_cost_threshold == u_sess->attr.attr_sql.codegen_cost_threshold &&
-               env->seq_page_cost == u_sess->attr.attr_sql.seq_page_cost &&
-               env->random_page_cost == u_sess->attr.attr_sql.random_page_cost &&
-               env->cpu_tuple_cost == u_sess->attr.attr_sql.cpu_tuple_cost &&
-               env->allocate_mem_cost == u_sess->attr.attr_sql.allocate_mem_cost &&
-               env->cpu_index_tuple_cost == u_sess->attr.attr_sql.cpu_index_tuple_cost &&
-               env->cpu_operator_cost == u_sess->attr.attr_sql.cpu_operator_cost &&
-               env->stream_multiple == u_sess->attr.attr_sql.stream_multiple &&
-               env->geqo_threshold == u_sess->attr.attr_sql.geqo_threshold &&
-               env->Geqo_effort == u_sess->attr.attr_sql.Geqo_effort &&
-               env->Geqo_pool_size == u_sess->attr.attr_sql.Geqo_pool_size &&
-               env->Geqo_generations == u_sess->attr.attr_sql.Geqo_generations &&
-               env->Geqo_selection_bias == u_sess->attr.attr_sql.Geqo_selection_bias &&
-               env->Geqo_seed == u_sess->attr.attr_sql.Geqo_seed &&
-               env->default_statistics_target == u_sess->attr.attr_sql.default_statistics_target &&
-               env->from_collapse_limit == u_sess->attr.attr_sql.from_collapse_limit &&
-               env->join_collapse_limit == u_sess->attr.attr_sql.join_collapse_limit &&
-               env->cost_param == u_sess->attr.attr_sql.cost_param &&
-               env->schedule_splits_threshold == u_sess->attr.attr_sql.schedule_splits_threshold &&
-               env->hashagg_table_size == u_sess->attr.attr_sql.hashagg_table_size &&
-               env->cursor_tuple_fraction == u_sess->attr.attr_sql.cursor_tuple_fraction &&
-               env->constraint_exclusion == u_sess->attr.attr_sql.constraint_exclusion &&
-               env->behavior_compat_flags == u_sess->utils_cxt.behavior_compat_flags &&
-               env->datestyle == u_sess->time_cxt.DateStyle &&
-               env->dateorder == u_sess->time_cxt.DateOrder &&
-               env->qrw_inlist2join_optmode == u_sess->opt_cxt.qrw_inlist2join_optmode &&
-               env->skew_strategy_store == u_sess->attr.attr_sql.skew_strategy_store);
-    return is_same;
-}
-/* 
+/*
  * Return false when the given compilation environment matches the current
  * session compilation environment, mainly compares GUC parameter settings.
  */
-static bool GPCCompareEnvSignature(GPCEnv *env)
+static bool
+GPCCompareEnv(GPCEnv *env1, GPCEnv *env2)
 {
-    // OverrideSearchPath *currPath;
-    GPCEnv sessEnv;
-    bool diff = true;
-    sessEnv.filled = false;
-    GPCFillEnvSignatures(&sessEnv);
-    
-    // If the cached env is not filled, we don't have a match
-    if (env->filled &&
-#ifdef PGXC
-        env->env_signature_pgxc == sessEnv.env_signature_pgxc &&
-        env->best_agg_plan == u_sess->attr.attr_sql.best_agg_plan &&
-#endif
-#ifdef DEBUG_BOUNDED_SORT
-        env->optimize_bounded_sort == optimize_bounded_sort &&
-#endif
-        env->env_signature == sessEnv.env_signature &&
-        env->env_signature2 == sessEnv.env_signature2 &&
-        GPCCheckOtherEnvSignature(env)) {
-        uint len1 = strlen(env->expected_computing_nodegroup);
-        uint len2 = strlen(env->default_storage_nodegroup);
-        if (len1 == strlen(CNG_OPTION_QUERY) &&
-            0 == memcmp(env->expected_computing_nodegroup, CNG_OPTION_QUERY, len1) &&
-            len2 == strlen(INSTALLATION_MODE) &&
-            0 == memcmp(env->default_storage_nodegroup, INSTALLATION_MODE, len2)) {
-            if (u_sess->attr.attr_common.namespace_current_schema &&
-                strcmp(env->schema_name, u_sess->attr.attr_common.namespace_current_schema) == 0) {
-                diff = false;
+    Assert (env1 != NULL);
+    Assert (env2 != NULL);
+    if (memcmp(&env1->plainenv, &env2->plainenv, sizeof(GPCPlainEnv)) == 0
+        && strncmp(env1->default_storage_nodegroup, env2->default_storage_nodegroup, NAMEDATALEN) == 0
+         && strncmp(env1->expected_computing_nodegroup, env2->expected_computing_nodegroup, NAMEDATALEN) == 0
+         && env1->num_params == env2->num_params)
+    {
+        if (CompareSearchPath(env1->search_path, env2->search_path)) {
+            if (env1->depends_on_role != env2->depends_on_role && env1->user_oid != env2->user_oid) {
+                return false;
+            } else if (env1->depends_on_role && env2->depends_on_role && env1->user_oid != env2->user_oid) {
+                return false;
+            } else {
+                return true;
             }
         }
     }
 
-    return diff;
-}
-
-DListCell* GPCFetchStmtInList(DList* target, const char* stmt) 
-{
-    Assert(target != NULL);
-    DListCell* iter = target->head;
-    for (; iter != NULL; iter = iter->next) {
-        PreparedStatement *prepare_statement = (PreparedStatement *)(iter->data.ptr_value);
-        if (strcmp(stmt, prepare_statement->stmt_name) == 0)
-            return iter;
-    }
-    return NULL;
+    return false;
 }
 
 uint32 GPCHashFunc(const void *key, Size keysize)
 {
-    const GPCKey *item = (const GPCKey *) key; 
-    return DatumGetUInt32(hash_any((const unsigned char *)item->query_string, item->query_length));
+    const GPCKey *item = (const GPCKey *) key;
+    uint32 val1 = DatumGetUInt32(hash_any((const unsigned char *)item->query_string, item->query_length));
+    uint32 val2 = DatumGetUInt32(hash_any((const unsigned char *)(&item->env.plainenv), sizeof(GPCPlainEnv)));
+    uint32 val3 = DatumGetUInt32(hash_any((const unsigned char *)(&item->spi_signature), sizeof(SPISign)));
+    val1 ^= val2;
+    val1 ^= val3;
+
+    return val1;
 }
 
-int GPCHashMatch(const void *left, const void *right, Size keysize)
+int GPCKeyMatch(const void *left, const void *right, Size keysize)
 {
-    const GPCKey *leftItem = (GPCKey*)left;
-    const GPCKey *rightItem = (GPCKey*)right;
-    Assert(NULL != leftItem && NULL != rightItem);
+    GPCKey *leftItem = (GPCKey*)left;
+    GPCKey *rightItem = (GPCKey*)right;
+    Assert(NULL != leftItem);
+    Assert(NULL != rightItem);
 
     /* we just care whether the result is 0 or not. */
     if (leftItem->query_length != rightItem->query_length) {
         return 1;
     }
 
-    return memcmp(leftItem->query_string, rightItem->query_string, leftItem->query_length);
+    if(strncmp(leftItem->query_string, rightItem->query_string, leftItem->query_length)) {
+        return 1;
+    }
+
+    if(GPCCompareEnv(&(leftItem->env), &(rightItem->env)) == false) {
+        return 1;
+    }
+
+    return 0;
 }
 
-void GlobalPlanCache::PlanInit()
+/*****************
+ global plan cache
+ *****************/
+
+GlobalPlanCache::GlobalPlanCache()
+{
+    Init();
+}
+
+GlobalPlanCache::~GlobalPlanCache()
+{
+}
+
+void GlobalPlanCache::Init()
 {
     HASHCTL ctl;
     errno_t rc = 0;
     rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
     securec_check(rc, "\0", "\0");
-    ctl.hcxt = g_instance.cache_cxt.global_cache_mem;
     ctl.keysize = sizeof(GPCKey);
     ctl.entrysize = sizeof(GPCEntry);
     ctl.hash = (HashValueFunc)GPCHashFunc;
-    ctl.match = (HashCompareFunc)GPCHashMatch;
-    ctl.num_partitions = GPC_NUM_OF_BUCKETS;
+    ctl.match = (HashCompareFunc)GPCKeyMatch;
 
-    int flags = HASH_ELEM | HASH_FUNCTION | HASH_COMPARE | HASH_PARTITION | HASH_SHRCTX;
-    m_global_plan_cache = hash_create("Global_Plan_Cache",
-                                      GPC_NUM_OF_BUCKETS,
-                                      &ctl,
-                                      flags);
+    int flags = HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_COMPARE | HASH_EXTERN_CONTEXT | HASH_NOEXCEPT;
 
-    m_gpc_bucket_info_array = (GPCBucketInfo*) MemoryContextAllocZero(g_instance.cache_cxt.global_cache_mem,
-                                                                      sizeof(GPCBucketInfo) * GPC_NUM_OF_BUCKETS); 
+    m_array = (GPCHashCtl *) MemoryContextAllocZero(g_instance.cache_cxt.global_cache_mem,
+                                                                      sizeof(GPCHashCtl) * GPC_NUM_OF_BUCKETS); 
 
     for (uint32 i = 0; i < GPC_NUM_OF_BUCKETS; i++) {
+        m_array[i].count = 0;
+        m_array[i].lockId = FirstGPCMappingLock + i;
+        
         /*
         * Create a MemoryContext per hash bucket so that all entries, plans etc under the bucket will live
         * under this Memory context. This is for performance purposes. We do not want everything to be under
         * the shared GlobalPlanCacheContext because more threads would need to synchronize everytime it needs a chunk 
         * of memory and that would become a bottleneck.
         */
-        m_gpc_bucket_info_array[i].context = AllocSetContextCreate(g_instance.cache_cxt.global_cache_mem,
-                                                                   "GPC_Bucket_Context",
+        m_array[i].context = AllocSetContextCreate(g_instance.cache_cxt.global_cache_mem,
+                                                                   "GPC_Plan_Bucket_Context",
                                                                    ALLOCSET_DEFAULT_MINSIZE,
                                                                    ALLOCSET_DEFAULT_INITSIZE,
                                                                    ALLOCSET_DEFAULT_MAXSIZE,
                                                                    SHARED_CONTEXT);
+
+
+        ctl.hcxt = m_array[i].context;
+        m_array[i].hash_tbl = hash_create("Global_Plan_Cache",
+                                                        GPC_HTAB_SIZE,
+                                                        &ctl,
+                                                        flags);
+ 
     }
 
-    m_gpc_invalid_plansource = NULL;
+    m_invalid_list = NULL;
 }
 
-/* Get the HTAB Bucket index based on the hashvalue. 
- * This function is a direct copy from dynahash.cpp.
- */
-uint32 GlobalPlanCache::GetBucket(uint32 hashvalue)
-{
-    HASHHDR *hctl = (HASHHDR *)(m_global_plan_cache->hctl);
-    uint32 bucket = hashvalue & hctl->high_mask;
-    
-    if (bucket > hctl->max_bucket)
-        bucket = bucket & hctl->low_mask;
-    
-    Assert(bucket < GPC_NUM_OF_BUCKETS);
-    return bucket;
-}
-
-void GlobalPlanCache::PlanStore(CachedPlanSource *plansource)
+bool GlobalPlanCache::TryStore(CachedPlanSource *plansource,  PreparedStatement *ps)
 {
     Assert (plansource != NULL);
     Assert (plansource->magic == CACHEDPLANSOURCE_MAGIC);
-    Assert (plansource->gpc.is_insert == true);
+    Assert (!plansource->gpc.status.InShareTable());
+    Assert (plansource->gpc.status.IsSharePlan());
+    Assert (plansource->is_support_gplan || (plansource->gplan == NULL && plansource->cplan == NULL));
 
-    GPCKey key;
-    key.query_string = plansource->query_string;
-    key.query_length = strlen(plansource->query_string);
-    uint32 hashCode = GPCHashFunc((const void *) &key, sizeof(key));
-    plansource->gpc.query_hash_code = hashCode;
+    GPCKey* key = plansource->gpc.key;
 
-    uint32 gpc_bucket_index = GetBucket(hashCode);
-    int partitionLock = (int) (FirstGPCMappingLock + gpc_bucket_index);
-    Assert ((int) partitionLock >= FirstGPCMappingLock);
-    Assert ((int) partitionLock < FirstGPCMappingLock + GPC_NUM_OF_BUCKETS);
+    uint32 hashCode = GPCHashFunc((const void *) key, sizeof(*key));
 
-    LWLockAcquire(GetMainLWLockByIndex(partitionLock), LW_EXCLUSIVE);
-    Assert (plansource->gpc.entry == NULL);
+    uint32 bucket_id = GetBucket(hashCode);
+    Assert (bucket_id >= 0 && bucket_id < GPC_NUM_OF_BUCKETS);
+    int lock_id = m_array[bucket_id].lockId;
+
+    (void)LWLockAcquire(GetMainLWLockByIndex(lock_id), LW_EXCLUSIVE);
+    MemoryContext oldcontext = MemoryContextSwitchTo(m_array[bucket_id].context);
 
     bool found = false;
-    GPCEntry *entry = (GPCEntry *)hash_search_with_hash_value(m_global_plan_cache,
-                                                              (const void*)&key, hashCode, HASH_ENTER, &found);
-    Assert (entry != NULL);
-    if (found == false) {
-        // Initialize the new GPC entry
-        entry->cachedPlans = NULL;
-        entry->refcount = 0;
-        entry->is_valid = true;
-        entry->lockId = partitionLock;
-        entry->CAS_flag = false;
-
-        /* Deep copy the query_string to the GPC entry's query_string */
-        MemoryContext oldcontext = MemoryContextSwitchTo(m_gpc_bucket_info_array[gpc_bucket_index].context);
-        entry->key.query_string = pnstrdup(key.query_string, key.query_length);
+    GPCEntry *entry = (GPCEntry *)hash_search_with_hash_value(m_array[bucket_id].hash_tbl,
+                                                                (const void*)key, hashCode, HASH_ENTER, &found);
+    if (entry == NULL) {
         MemoryContextSwitchTo(oldcontext);
-
-        /* Set the magic number. */
-        entry->magic = GLOBALPLANCACHEKEY_MAGIC;
-    
-        gs_atomic_add_32(&m_gpc_bucket_info_array[gpc_bucket_index].entries_count, 1);
+        LWLockRelease(GetMainLWLockByIndex(lock_id));
+        ereport(ERROR,
+              (errcode(ERRCODE_UNDEFINED_PSTATEMENT),
+               errmsg("store global plan source failed due to memory allocation failed")));
+        return false;
     }
-    plansource->gpc.entry = entry;
-    plansource->gpc.env->globalplancacheentry = entry;
-    gs_atomic_add_32(&plansource->gpc.entry->refcount, 1);
 
-    /* Each GPC entry maintains a List of CachedEnvironments. 
-    * Append the new CachedEnvironment to the entry's List. 
-    * But make sure there is only one thread inserting into the List.
-    */
-    while (!gs_compare_and_swap_32(&entry->CAS_flag, FALSE, TRUE))
-        pg_usleep(CAS_SLEEP_DURATION); // microseconds.
+    if (found == false) {
+        START_CRIT_SECTION();
+        /* Deep copy the query_string to the GPC entry's query_string */
+        entry->key.query_string = key->query_string;
+        entry->key.query_length = key->query_length;
+        /* Set the magic number. */
+        entry->val.plansource = plansource;
+        /* off the link */
+        plansource->next_saved = NULL;
+        /* initialize the ref count .*/
+        plansource->gpc.status.AddRefcount();
 
-    MemoryContext oldcontext = MemoryContextSwitchTo(m_gpc_bucket_info_array[gpc_bucket_index].context);
-    entry->cachedPlans = dlappend(entry->cachedPlans, plansource->gpc.env);
+        m_array[bucket_id].count++;
+        Assert(plansource->context->is_shared);
+        MemoryContextSeal(plansource->context);
+        Assert(plansource->query_context->is_shared);
+        MemoryContextSeal(plansource->query_context);
+        if (plansource->gplan) {
+            pg_atomic_fetch_add_u32((volatile uint32*)&plansource->gplan->global_refcount, 1);
+            plansource->gplan->is_share = true;
+            Assert(plansource->gplan->context->is_shared);
+            MemoryContextSeal(plansource->gplan->context);
+        }
+#ifdef USE_ASSERT_CHECKING
+        else {
+            Assert(IS_PGXC_COORDINATOR && plansource->single_exec_node &&
+                   plansource->gplan == NULL && plansource->cplan == NULL);
+        }
+#endif
+        plansource->gpc.status.SetLoc(GPC_SHARE_IN_SHARE_TABLE);
+        END_CRIT_SECTION();
+
+    } else {
+        /* some guys win. */
+        CachedPlanSource* newsource = entry->val.plansource;
+        ps->plansource = newsource;
+        newsource->gpc.status.AddRefcount();
+        u_sess->pcache_cxt.gpc_in_try_store = true;
+
+        /* purge old one. */
+        GPC_LOG("drop cache plan in try store", plansource, 0);
+#ifdef ENABLE_MULTIPLE_NODES
+        if (IS_PGXC_COORDINATOR) {
+            GPCDropLPIfNecessary(ps->stmt_name, false, false, newsource);
+        }
+#endif
+        DropCachedPlan(plansource);
+        u_sess->pcache_cxt.gpc_in_try_store = false;
+
+    }
+
     MemoryContextSwitchTo(oldcontext);
-
-    gs_compare_and_swap_32(&entry->CAS_flag, TRUE, FALSE);
-
-    plansource->gpc.is_share = true;
-    plansource->gpc.is_insert = false;
-    Assert (plansource->gplan != NULL);
-    Assert (plansource->gplan->is_share == true);
-    Assert (plansource->gplan->context->parent == g_instance.cache_cxt.global_cache_mem);
-
-    LWLockRelease(GetMainLWLockByIndex(partitionLock));
+    LWLockRelease(GetMainLWLockByIndex(lock_id));
+    return true;
 }
 
-GPCEnv* GlobalPlanCache::PlanFetch(const char *query_string, uint32 query_len, int num_params)
+CachedPlanSource* GlobalPlanCache::Fetch(const char *query_string, uint32 query_len,
+                                         int num_params, SPISign* spi_sign_ptr)
 {
     GPCKey key;
+    key.env.filled = false;
     key.query_string = query_string;
     key.query_length = query_len;
+    EnvFill(&key.env, false);
+    key.env.search_path = NULL;
+    key.env.num_params = num_params;
+    if (spi_sign_ptr != NULL)
+        key.spi_signature = *spi_sign_ptr;
+    else
+        key.spi_signature = {(uint32)-1, 0, (uint32)-1, -1};
+#ifdef ENABLE_MULTIPLE_NODES
+    GPCCheckGuc();
+#endif
     uint32 hashCode = GPCHashFunc((const void *) &key, sizeof(key));
 
-    uint32 gpc_bucket_index = GetBucket(hashCode);
-    int partitionLock = (int) (FirstGPCMappingLock + gpc_bucket_index);
-    Assert ((int) partitionLock >= FirstGPCMappingLock);
-    Assert ((int) partitionLock < FirstGPCMappingLock + GPC_NUM_OF_BUCKETS);
+    uint32 bucket_id = GetBucket(hashCode);
+    Assert (bucket_id >= 0 && bucket_id < GPC_NUM_OF_BUCKETS);
+    int lock_id = m_array[bucket_id].lockId;
 
-    LWLockAcquire(GetMainLWLockByIndex(partitionLock), LW_SHARED);
+    (void)LWLockAcquire(GetMainLWLockByIndex(lock_id), LW_SHARED);
+    MemoryContext oldcontext = MemoryContextSwitchTo(m_array[bucket_id].context);
 
     bool foundCachedEntry = false;
-    GPCEntry *cachedEntry = (GPCEntry *) hash_search_with_hash_value(m_global_plan_cache,
+    GPCEntry *entry = (GPCEntry *) hash_search_with_hash_value(m_array[bucket_id].hash_tbl,
                                                                      (const void*)(&key),
                                                                      hashCode,
                                                                      HASH_FIND,
                                                                      &foundCachedEntry);
 
-    if (cachedEntry == NULL || cachedEntry->cachedPlans == NULL) {
-        LWLockRelease(GetMainLWLockByIndex(partitionLock));
+    if (!foundCachedEntry) {
+        MemoryContextSwitchTo(oldcontext);
+        LWLockRelease(GetMainLWLockByIndex(lock_id));
         return NULL;
     }
-
-    GPCEnv *gpc_env = NULL;
-    int numCachedPlans = cachedEntry->cachedPlans->length;
-    DListCell *cell = cachedEntry->cachedPlans->head;
-
-    for (int i = 0; i < numCachedPlans; i++) {
-        Assert(cell != NULL);
-
-        gpc_env = (GPCEnv *) cell->data.ptr_value;
-        if (gpc_env != NULL && num_params == gpc_env->num_params &&
-            GPCCompareEnvSignature(gpc_env) == false) {
-            if (gpc_env->plansource->gpc.is_share == true) {
-                Assert (gpc_env->plansource->gplan != NULL);
-                Assert (gpc_env->plansource->gplan->is_share == true);
-                Assert (gpc_env->plansource->gplan->context->parent == g_instance.cache_cxt.global_cache_mem);
-                break;
-            }
-        }
-        gpc_env = NULL;
-        cell = cell->next;
+    else {
+        entry->val.plansource->gpc.status.AddRefcount();
+        MemoryContextSwitchTo(oldcontext);
+        LWLockRelease(GetMainLWLockByIndex(lock_id));
+        return entry->val.plansource;
     }
 
-    LWLockRelease(GetMainLWLockByIndex(partitionLock));
-
-    return gpc_env;
+    return NULL;
 }
 
-void GlobalPlanCache::InvalidPlanDrop()
+void GlobalPlanCache::AddInvalidList(CachedPlanSource* plansource)
 {
-    if (m_gpc_invalid_plansource != NULL) {
-        DListCell *cell = m_gpc_invalid_plansource->head;
+    (void)LWLockAcquire(GPCClearLock, LW_EXCLUSIVE);
+    MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.cache_cxt.global_cache_mem);
+    START_CRIT_SECTION();
+    m_invalid_list = dlappend(m_invalid_list, plansource);
+    plansource->gpc.status.SetLoc(GPC_SHARE_IN_SHARE_TABLE_INVALID_LIST);
+    plansource->gpc.status.SetStatus(GPC_INVALID);
+    END_CRIT_SECTION();
+    MemoryContextSwitchTo(oldcontext);
+    LWLockRelease(GPCClearLock);
+}
 
+void GlobalPlanCache::DropInvalid()
+{
+    (void)LWLockAcquire(GPCClearLock, LW_EXCLUSIVE);
+    if (m_invalid_list != NULL) {
+        DListCell *cell = m_invalid_list->head;
         while (cell != NULL) {
             CachedPlanSource *curr = (CachedPlanSource *)cell->data.ptr_value;
-            
-            if (curr->gpc.refcount == 0) {
+            if (!curr->gpc.status.CheckRefCount())
+                ereport(PANIC,
+                        (errmsg("plancache refcount %d less than 0: %s.(%lu,%u,%u)",
+                         curr->gpc.status.GetRefCount(),  curr->stmt_name, u_sess->sess_ident.cn_sessid,
+                         u_sess->sess_ident.cn_timeline, u_sess->sess_ident.cn_nodeid)));
+            if (curr->gpc.status.RefCountZero()) {
+                Assert(curr->next_saved == NULL);
                 DListCell *next = cell->next;
-                m_gpc_invalid_plansource = dlist_delete_cell(m_gpc_invalid_plansource, cell, false);
-
-                CachedPlan *gplan = curr->gplan;
+                GPC_LOG("drop invalid shared plancache", curr, curr->stmt_name);
+                m_invalid_list = dlist_delete_cell(m_invalid_list, cell, false);
                 DropCachedPlanInternal(curr);
-                GPCReleaseCachedPlan(gplan);
                 curr->magic = 0;
+                MemoryContextUnSeal(curr->context);
+                MemoryContextUnSeal(curr->query_context);
                 MemoryContextDelete(curr->context);
-                
+
                 cell = next;
             } else {
                 cell = cell->next;
             }
         }
     }
-}
-
-void GlobalPlanCache::PlanDrop(GPCEnv *cachedenv)
-{
-    LWLockAcquire(GPCClearLock, LW_EXCLUSIVE);
-
-    CachedPlanSource *plansource = cachedenv->plansource;
-
-    if (plansource->gpc.is_valid == false) {
-        LWLockRelease(GPCClearLock);
-        return ;
-    }
-    plansource->gpc.is_valid = false;
-
-    Assert (plansource->gpc.env == cachedenv);
-    GPCEntry *entry = cachedenv->globalplancacheentry;
-    Assert (entry->cachedPlans != NULL);
-
-    int numCachedPlans = entry->cachedPlans->length;
-    Assert(numCachedPlans <= entry->refcount);
-    DListCell *cell = entry->cachedPlans->head;
-    for (int i = 0; i < numCachedPlans; i++) {
-        GPCEnv *curr = (GPCEnv *)cell->data.ptr_value;
-        if (curr == cachedenv) {
-            cachedenv->globalplancacheentry->cachedPlans = 
-                dlist_delete_cell(cachedenv->globalplancacheentry->cachedPlans, cell, false);
-            gs_atomic_add_32(&entry->refcount, -1);
-
-            if (entry->refcount == 0) {
-                /* Remove the GPC entry */
-                Assert(entry->cachedPlans == NULL);
-
-                bool found = false;
-                hash_search(m_global_plan_cache, (void *) &(entry->key), HASH_REMOVE, &found);
-                Assert(true == found);
-                uint32 gpc_bucket_index = (uint32)(entry->lockId - FirstGPCMappingLock);
-                m_gpc_bucket_info_array[gpc_bucket_index].entries_count--;
-
-                entry->magic = 0;
-                pfree((void *)entry->key.query_string);
-
-                cachedenv->plansource = NULL;
-                MemoryContextDelete(cachedenv->context);
-            }
-
-            break;
-        }
-        cell = cell->next;
-    }
-    InvalidPlanDrop();
-    MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.cache_cxt.global_cache_mem);
-    m_gpc_invalid_plansource = dlappend(m_gpc_invalid_plansource, plansource);
-    MemoryContextSwitchTo(oldcontext);
-    
     LWLockRelease(GPCClearLock);
 }
 
-uint32 GPCPrepareHashFunc(const void *key, Size keysize)
+void GlobalPlanCache::RemovePlanSourceInRecreate(CachedPlanSource* plansource)
 {
-    return ((*(uint64 *)key) % NUM_GPC_PARTITIONS);
-}
-
-int GPCPrepareHashMatch(const void *left, const void *right, Size keysize)
-{
-    if (*((uint64 *)left) == *((uint64 *)right)) {
-        return 0;
+    if(plansource->gpc.status.InShareTable()) {
+        GPCKey* key = plansource->gpc.key;
+        uint32 hashCode = GPCHashFunc((const void *) key, sizeof(*key));
+        uint32 bucket_id = GetBucket(hashCode);
+        int lock_id = m_array[bucket_id].lockId;
+        (void)LWLockAcquire(GetMainLWLockByIndex(lock_id), LW_EXCLUSIVE);
+        if (plansource->gpc.status.InShareTableInvalidList() == false) {
+            bool found = false;
+            hash_search(m_array[bucket_id].hash_tbl, (void *)key, HASH_REMOVE, &found);
+            m_array[bucket_id].count--;
+            AddInvalidList(plansource);
+        }
+        plansource->gpc.status.SubRefCount();
+        DropInvalid();
+        LWLockRelease(GetMainLWLockByIndex(lock_id));
     } else {
-        return 1;
+        GPC_LOG("remove private plansource", plansource, plansource->stmt_name);
+        DropCachedPlan(plansource);
     }
 }
 
-/* init the HTAB which stores the prepare statements refer to global plancache */
-void GlobalPlanCache::PrepareInit()
+void GlobalPlanCache::InvalidPlanSourceForReload(CachedPlanSource* plansource, const char* stmt_name)
 {
-    HASHCTL     hash_ctl;
-    errno_t     rc = 0;
-
-    rc = memset_s(&hash_ctl, sizeof(hash_ctl), 0, sizeof(hash_ctl));
-    securec_check(rc, "\0", "\0");
-
-    hash_ctl.keysize = sizeof(uint64);
-    hash_ctl.entrysize = sizeof(GPCPreparedStatement);
-    hash_ctl.hcxt = g_instance.cache_cxt.global_cache_mem;
-    hash_ctl.hash = (HashValueFunc)GPCPrepareHashFunc;
-    hash_ctl.match = (HashCompareFunc)GPCPrepareHashMatch;
-    hash_ctl.num_partitions = GPC_NUM_OF_BUCKETS;
-
-    int flags = HASH_ELEM | HASH_SHRCTX | HASH_PARTITION | HASH_FUNCTION | HASH_COMPARE;
-    m_global_prepared = hash_create("Global Prepared Queries",
-                                    GPC_NUM_OF_BUCKETS,
-                                    &hash_ctl,
-                                    flags);
-}
-
-void GlobalPlanCache::PrepareStore(const char *stmt_name,
-                                   CachedPlanSource *plansource,
-                                   bool from_sql)
-{
-    ereport(DEBUG3, (errmodule(MOD_GPC), errcode(ERRCODE_LOG),
-            errmsg("gpc  <prepare store>  global_sess_id:%lu  stmt_name:%s  session_id:%lu",
-                   u_sess->global_sess_id, stmt_name, u_sess->session_id)));
-
-    GPCPreparedStatement *entry = NULL;
-    TimestampTz cur_ts = GetCurrentStatementStartTimestamp();
-    bool        found = false;
-
-    uint32 gpc_bucket_index = GPCPrepareHashFunc(&u_sess->global_sess_id, sizeof(u_sess->global_sess_id));
-    int lockid = (int)(FirstGPCPrepareMappingLock + gpc_bucket_index);
-    LWLockAcquire(GetMainLWLockByIndex(lockid), LW_EXCLUSIVE);
-
-    /* Add entry to hash table */
-    entry = (GPCPreparedStatement *) hash_search(m_global_prepared,
-                                                 &u_sess->global_sess_id,
-                                                 HASH_ENTER,
-                                                 &found);
-
-    entry->global_sess_id = u_sess->global_sess_id;
-    /* Shouldn't get a duplicate entry */
-    if (found && entry->prepare_statement_list != NULL) {
-        DListCell* find = GPCFetchStmtInList(entry->prepare_statement_list, stmt_name);
-        if (find != NULL) {
-            LWLockRelease(GetMainLWLockByIndex(lockid));
-            ereport(ERROR,
-                    (errcode(ERRCODE_DUPLICATE_PSTATEMENT),
-                     errmsg("global prepared statement \"%s\" already exists",
-                            stmt_name)));
+    Assert(IS_PGXC_COORDINATOR);
+    if (plansource->gpc.status.InShareTable()) {
+        /* Close any active planned Datanode statements */
+#ifdef ENABLE_MULTIPLE_NODES
+        if (plansource->gplan != NULL) {
+            GPCCleanDatanodeStatement(plansource->gplan->dn_stmt_num, stmt_name);
+        } else
+            GPCDropLPIfNecessary(stmt_name, true, true, NULL);
+#endif
+        /* add into invalidlist */
+        CN_GPC_LOG("invalid global plan for reload ", plansource, stmt_name);
+        GPCKey* key = plansource->gpc.key;
+        uint32 hashCode = GPCHashFunc((const void *) key, sizeof(*key));
+        uint32 bucket_id = GetBucket(hashCode);
+        int lock_id = m_array[bucket_id].lockId;
+        (void)LWLockAcquire(GetMainLWLockByIndex(lock_id), LW_EXCLUSIVE);
+        if (plansource->gpc.status.InShareTableInvalidList() == false) {
+            bool found = false;
+            hash_search(m_array[bucket_id].hash_tbl, (void *)key, HASH_REMOVE, &found);
+            m_array[bucket_id].count--;
+            AddInvalidList(plansource);
         }
-    }
-    if (found == false) {
-        entry->prepare_statement_list = NULL;
-        gs_atomic_add_32(&m_gpc_bucket_info_array[gpc_bucket_index].prepare_count, 1);
-    }
-
-    /* Fill in the hash table entry */
-    MemoryContext old_cxt = MemoryContextSwitchTo(g_instance.cache_cxt.global_cache_mem);
-    PreparedStatement* stmt = (PreparedStatement*)palloc(sizeof(PreparedStatement));
-    stmt->plansource = plansource;
-    stmt->from_sql = from_sql;
-    stmt->prepare_time = cur_ts;
-    int rc = memcpy_s(stmt->stmt_name, NAMEDATALEN, stmt_name, NAMEDATALEN);
-    securec_check(rc, "", "");
-
-    entry->prepare_statement_list = dlappend(entry->prepare_statement_list, (void*)stmt);
-
-    MemoryContextSwitchTo(old_cxt);
-
-    LWLockRelease(GetMainLWLockByIndex(lockid));
-
-    if (plansource->gpc.is_share == false) {
-        /* mark insert global plan cache */
-        plansource->gpc.is_insert = true;
-        SaveCachedPlan(plansource);
-    }
-
-    ereport(DEBUG3, (errmodule(MOD_GPC), errcode(ERRCODE_LOG),
-            errmsg("gpc  <prepare store success>  global_sess_id:%lu  stmt_name:%s  session_id:%lu",
-                   u_sess->global_sess_id, stmt_name, u_sess->session_id))); 
-}
-
-PreparedStatement* GlobalPlanCache::PrepareFetch(const char *stmt_name, bool throwError)
-{
-    GPCPreparedStatement *entry = NULL;
-
-    int lockid = (int)(FirstGPCPrepareMappingLock +
-                        GPCPrepareHashFunc(&u_sess->global_sess_id, sizeof(u_sess->global_sess_id)));
-    LWLockAcquire(GetMainLWLockByIndex(lockid), LW_SHARED);
-    entry = (GPCPreparedStatement *) hash_search(m_global_prepared,
-                                                 &u_sess->global_sess_id,
-                                                 HASH_FIND,
-                                                 NULL);
-    if (entry == NULL) {
-        if (throwError == true) {
-            ereport(ERROR,
-                    (errcode(ERRCODE_UNDEFINED_PSTATEMENT),
-                     errmsg("global prepared statement \"%s\" does not exist",
-                            stmt_name)));
+        LWLockRelease(GetMainLWLockByIndex(lock_id));
+    } else {
+        CN_GPC_LOG("invalid plan for reload ", plansource, stmt_name);
+        plansource->gpc.status.SetStatus(GPC_INVALID);
+        plansource->is_valid = false;
+        if (plansource->gplan == NULL) {
+            GPCDropLPIfNecessary(stmt_name, true, true, NULL);
         } else {
-            LWLockRelease(GetMainLWLockByIndex(lockid));
-            return NULL;
+            plansource->gplan->is_valid = false;
+            Assert(!plansource->gplan->isShared());
         }
-    }
-
-    DListCell* result = GPCFetchStmtInList(entry->prepare_statement_list, stmt_name);
-    if (result == NULL) {
-        LWLockRelease(GetMainLWLockByIndex(lockid));
-        return NULL;
-    }
-
-    LWLockRelease(GetMainLWLockByIndex(lockid));
-    return (PreparedStatement *)(result->data.ptr_value);
-}
-
-void GlobalPlanCache::PrepareDrop(const char *stmt_name, bool showError)
-{
-    ereport(DEBUG3, (errmodule(MOD_GPC), errcode(ERRCODE_LOG),
-            errmsg("gpc  <prepare remove>  global_sess_id:%lu  stmt_name:%s  session_id:%lu",
-                   u_sess->global_sess_id, stmt_name, u_sess->session_id)));
-    /* Find the query's hash table entry; raise error if wanted */
-    GPCPreparedStatement *entry = NULL;
-
-    uint32 gpc_bucket_index = GPCPrepareHashFunc(&u_sess->global_sess_id, sizeof(u_sess->global_sess_id));
-    int lockid = (int)(FirstGPCPrepareMappingLock + gpc_bucket_index);
-    LWLockAcquire(GetMainLWLockByIndex(lockid), LW_EXCLUSIVE);
-    entry = (GPCPreparedStatement *) hash_search(m_global_prepared,
-                                                 &u_sess->global_sess_id,
-                                                 HASH_FIND,
-                                                 NULL);
-    if (entry == NULL) {
-        LWLockRelease(GetMainLWLockByIndex(lockid));
-        return;
-    }
-    DListCell* result = GPCFetchStmtInList(entry->prepare_statement_list, stmt_name);
-
-    if (result == NULL) {
-        LWLockRelease(GetMainLWLockByIndex(lockid));
-        return;
-    }
-    
-    PreparedStatement* target = (PreparedStatement *)(result->data.ptr_value);
-    if (target != NULL) {
-        if (target->plansource->gpc.is_share == true) {
-            ereport(DEBUG3, (errmodule(MOD_GPC), errcode(ERRCODE_LOG),
-                    errmsg("gpc  <prepare remove success>  global_sess_id:%lu  stmt_name:%s  session_id:%lu",
-                           u_sess->global_sess_id, stmt_name, u_sess->session_id)));
-            RefcountSub(target->plansource);
-        } else {
-            Assert (target->plansource->gpc.is_insert == true);
-            DropCachedPlan(target->plansource);
-        }
-        entry->prepare_statement_list = dlist_delete_cell(entry->prepare_statement_list, result, false);
-    }
-
-    if (entry->prepare_statement_list == NULL) {
-        ereport(DEBUG3, (errmodule(MOD_GPC), errcode(ERRCODE_LOG),
-                errmsg("gpc  <prepare drop>  global_sess_id:%lu  stmt_name:%s  session_id:%lu",
-                       u_sess->global_sess_id, stmt_name, u_sess->session_id)));
-
-        /* Now we can remove the hash table entry */
-        hash_search(m_global_prepared, &u_sess->global_sess_id, HASH_REMOVE, NULL);
-        m_gpc_bucket_info_array[gpc_bucket_index].prepare_count--;
-    }
-
-    LWLockRelease(GetMainLWLockByIndex(lockid));
-}
-/*
- * @Description: Drop ALL global plancaches which belongs to current session.
- * This function only be called before the session aborts.
- * @in num: uint64 global_sess_id ,boolean need_lock
- * @return - void
- */
-void GlobalPlanCache::PrepareDropAll(uint64 global_sess_id, bool need_lock)
-{
-    ereport(DEBUG3, (errmodule(MOD_GPC), errcode(ERRCODE_LOG),
-            errmsg("gpc  <prepare drop all>  global_sess_id:%lu  session_id:%lu need_lock:%s",
-                   global_sess_id, u_sess->session_id, need_lock ? "true" : "false")));
-    /* Find the query's hash table entry; raise error if wanted */
-    GPCPreparedStatement *entry = NULL;
-
-    uint32 gpc_bucket_index = GPCPrepareHashFunc(&global_sess_id, sizeof(global_sess_id));
-    int lockid = (int)(FirstGPCPrepareMappingLock + gpc_bucket_index);
-    if (need_lock) {
-        LWLockAcquire(GetMainLWLockByIndex(lockid), LW_EXCLUSIVE);
-    }
-    entry = (GPCPreparedStatement *) hash_search(m_global_prepared,
-                                                 &global_sess_id,
-                                                 HASH_FIND,
-                                                 NULL);
-    if (entry == NULL) {
-        if (need_lock) {
-            LWLockRelease(GetMainLWLockByIndex(lockid));
-        }
-        return;
-    }
-    DListCell* iter = entry->prepare_statement_list->head;
-    for (; iter != NULL; iter = iter->next) {
-        PreparedStatement *prepare_statement = (PreparedStatement *)(iter->data.ptr_value);
-        RefcountSub(prepare_statement->plansource);
-        ereport(DEBUG3, (errmodule(MOD_GPC), errcode(ERRCODE_LOG),
-                errmsg("gpc  <prepare drop all success>  global_sess_id:%lu  session_id:%lu",
-                       global_sess_id, u_sess->session_id)));
-    }
-
-    dlist_free(entry->prepare_statement_list, true);
-    hash_search(m_global_prepared, &global_sess_id, HASH_REMOVE, NULL);
-    m_gpc_bucket_info_array[gpc_bucket_index].prepare_count--;
-
-    if (need_lock) {
-        LWLockRelease(GetMainLWLockByIndex(lockid));
+        DropCachedPlanInternal(plansource);
     }
 }
 
-void GlobalPlanCache::PrepareClean(uint32 cn_id)
+void GlobalPlanCache::InvalidPlanSourceForCNretry(CachedPlanSource* plansource)
 {
-    GPCPreparedStatement *entry = NULL;
-
-    for (uint32 currBucket = 0; currBucket < GPC_NUM_OF_BUCKETS; currBucket++) {
-        LWLockAcquire(GetMainLWLockByIndex(FirstGPCPrepareMappingLock + currBucket), LW_EXCLUSIVE);
-
-        uint32 bucketEntriesCount = m_gpc_bucket_info_array[currBucket].prepare_count;
-        if (bucketEntriesCount != 0) {
-            HASH_SEQ_STATUS hash_seq;
-            hash_seq_init(&hash_seq, m_global_prepared);
-            hash_seq.curBucket = currBucket;
-            hash_seq.curEntry = NULL;
-
-            for (uint32 entryIndex = 0; entryIndex < bucketEntriesCount; entryIndex++) {
-                 entry = (GPCPreparedStatement *)hash_seq_search(&hash_seq);
-                 if (cn_id == (entry->global_sess_id >> 48)) {
-                     PrepareDropAll(entry->global_sess_id, false);
-                 }
-            }
-            /* hash_seq_search terminates the sequence if it reaches the last entry in the hash
-             * ie: if it returns a NULL. So if it has not returned a NULL, we terminate it explicitly.
-             */
-            if (entry != NULL) {
-                hash_seq_term(&hash_seq);
-            }
+    if (plansource->gpc.status.InShareTable()) {
+        GPCKey* key = plansource->gpc.key;
+        uint32 hashCode = GPCHashFunc((const void *) key, sizeof(*key));
+        uint32 bucket_id = GetBucket(hashCode);
+        int lock_id = m_array[bucket_id].lockId;
+        CN_GPC_LOG("invalid global plan for cnretry ", plansource, 0);
+        (void)LWLockAcquire(GetMainLWLockByIndex(lock_id), LW_EXCLUSIVE);
+        if (plansource->gpc.status.InShareTableInvalidList() == false) {
+            bool found = false;
+            hash_search(m_array[bucket_id].hash_tbl, (void *)key, HASH_REMOVE, &found);
+            m_array[bucket_id].count--;
+            AddInvalidList(plansource);
         }
-
-        LWLockRelease(GetMainLWLockByIndex(FirstGPCPrepareMappingLock + currBucket));
+        DropInvalid();
+        LWLockRelease(GetMainLWLockByIndex(lock_id));
+    } else {
+        CN_GPC_LOG("invalid plan for cnretry ", plansource, 0);
+        plansource->gpc.status.SetStatus(GPC_INVALID);
+        plansource->is_valid = false;
+        if (plansource->gplan)
+            plansource->gplan->is_valid = false;
     }
 }
 
-void GlobalPlanCache::CheckTimeline(uint32 timeline)
+void GlobalPlanCache::RemoveEntry(uint32 htblIdx, GPCEntry *entry)
 {
-    LWLockAcquire(GPCTimelineLock, LW_SHARED);
-    TimelineEntry *entry = NULL;
+    CachedPlanSource *plansource = entry->val.plansource;
+
     bool found = false;
-    uint32 id = (uint32)(u_sess->global_sess_id >> 48);
-
-    ereport(DEBUG3, (errmodule(MOD_GPC), errcode(ERRCODE_LOG),
-            errmsg("gpc  <timeline check>  global_sess_id:%lu  timeline:%u  cn_id:%u",
-                   u_sess->global_sess_id, timeline, id)));
-
-    entry = (TimelineEntry *) hash_search(m_cn_timeline,
-                                          &id,
-                                          HASH_FIND,
-                                          &found);
-
-    if (found == false) {
-        LWLockRelease(GPCTimelineLock);
-        LWLockAcquire(GPCTimelineLock, LW_EXCLUSIVE);
-
-        entry = (TimelineEntry *) hash_search(m_cn_timeline,
-                                              &id,
-                                              HASH_ENTER,
-                                              &found);
-        if (found == false) {
-            entry->id = id;
-            entry->timeline = timeline;
-        }
-    } else {
-        if (entry->timeline != timeline) {
-            LWLockRelease(GPCTimelineLock);
-            LWLockAcquire(GPCTimelineLock, LW_EXCLUSIVE);
-
-            if (entry->timeline != timeline) {
-                ereport(DEBUG3, (errmodule(MOD_GPC), errcode(ERRCODE_LOG),
-                        errmsg("gpc  <timeline check fail>  global_sess_id:%lu  old_timeline:%u  new_timeline:%u",
-                               u_sess->global_sess_id, entry->timeline, timeline)));
-                PrepareClean(id);
-            }
-
-            entry->timeline = timeline;
-        }
-    }
-
-    LWLockRelease(GPCTimelineLock);
+    hash_search(m_array[htblIdx].hash_tbl, (void *) &(entry->key), HASH_REMOVE, &found);
+    Assert(found == true);
+    m_array[htblIdx].count--;
+    AddInvalidList(plansource);
+    DropInvalid();
 }
 
-void GlobalPlanCache::PrepareUpdate(CachedPlanSource *plansource, CachedPlanSource *share_plansource, bool throwError)
-{
-    PreparedStatement *entry = NULL;
-    entry = PrepareFetch(plansource->stmt_name, false);
-    if (entry == NULL) {
-        if (throwError == true) {
-            ereport(ERROR,
-                    (errcode(ERRCODE_UNDEFINED_PSTATEMENT),
-                     errmsg("global prepared statement \"%s\" does not exist",
-                            plansource->stmt_name)));
-        }
-        return;
-    }
 
-    entry->plansource = share_plansource;
-    RefcountAdd(share_plansource);
-}
-
-/*
- * @Description: Send k message to DNs with a clean flag.
- * this function will first get the handles from all DNs due to the fact that
- * in some cases there is no handles between CN and DN because GPC, but we still need to clean their global plancaches
- * @in num: void
- * @return - void
- */
-void GlobalPlanCache::SendPrepareDestoryMsg()
-{
-    if(ENABLE_CN_GPC && HaveActiveDatanodeStatements() && IS_PGXC_COORDINATOR) {
-        PGXCNodeAllHandles *pgxc_handles = NULL;
-
-        List *DataNodeList = GetAllDataNodes();
-        pgxc_handles = get_handles(DataNodeList, NULL, false, NULL);
-        for (int i = 0; i < pgxc_handles->dn_conn_count; i++) {
-            if (IS_VALID_CONNECTION(pgxc_handles->datanode_handles[i])) {
-                pgxc_handles->datanode_handles[i]->state = DN_CONNECTION_STATE_IDLE;
-                if (pgxc_node_send_sessid(pgxc_handles->datanode_handles[i], u_sess->global_sess_id, HANDLE_CLEAN) != 0) {
-                    pgxc_handles->datanode_handles[i]->state = DN_CONNECTION_STATE_ERROR_FATAL;
-                    ereport(WARNING,
-                        (errcode(ERRCODE_CONNECTION_EXCEPTION),
-                            errmsg("Failed to send global session id to Datanode %u", 
-                                   pgxc_handles->datanode_handles[i]->nodeoid)));
-                }
-                pgxc_node_flush(pgxc_handles->datanode_handles[i]);
-            }
-        }
-        release_handles();
-    }
-}
-
-void GlobalPlanCache::RecreateCachePlan(PreparedStatement *entry)
+bool GlobalPlanCache::CheckRecreateCachePlan(PreparedStatement *entry)
 {
     /*
      * Start up a transaction command so we can run parse analysis etc. (Note
@@ -1023,18 +477,167 @@ void GlobalPlanCache::RecreateCachePlan(PreparedStatement *entry)
      * if we are already in one.
      */
     start_xact_command();
+    Assert(entry->plansource->magic == CACHEDPLANSOURCE_MAGIC);
 
+    if (entry->plansource->gpc.status.InSavePlanList(GPC_SHARED)) {
+        return false;
+    }
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR && !entry->plansource->gpc.status.InShareTable()) {
+        return false;
+    }
+#else
+    if (!entry->plansource->gpc.status.InShareTable()) {
+        return false;
+    }
+#endif
+
+    if (u_sess->pcache_cxt.gpc_in_ddl == true) {
+        return true;
+    }
+    if (!entry->plansource->gpc.status.IsValid()) {
+        return true;
+    }
+    if (entry->plansource->dependsOnRole && (entry->plansource->rewriteRoleId != GetUserId())) {
+        return true;
+    }
+    if ((entry->plansource->gplan != NULL && TransactionIdIsValid(entry->plansource->gplan->saved_xmin))) {
+        return true;
+    }
+
+    if (entry->plansource->search_path && !OverrideSearchPathMatchesCurrent(entry->plansource->search_path)) {
+        return true;
+    }
+
+    return false;
+}
+
+bool GlobalPlanCache::CheckRecreateSPICachePlan(SPIPlanPtr spi_plan)
+{
+    start_xact_command();
+    ListCell* cell = NULL;
+    Assert(spi_plan->magic == _SPI_PLAN_MAGIC);
+    foreach(cell, spi_plan->plancache_list) {
+        CachedPlanSource* plansource = (CachedPlanSource*)lfirst(cell);
+        if (!plansource->gpc.status.InShareTable()) {
+            continue;
+        }
+        if (u_sess->pcache_cxt.gpc_in_ddl == true) {
+            return true;
+        }
+        if (!plansource->gpc.status.IsValid()) {
+            return true;
+        }
+        if (plansource->dependsOnRole && (plansource->rewriteRoleId != GetUserId())) {
+            return true;
+        }
+        if ((plansource->gplan != NULL &&
+            TransactionIdIsValid(plansource->gplan->saved_xmin) &&
+            !TransactionIdEquals(plansource->gplan->saved_xmin, u_sess->utils_cxt.TransactionXmin))) {
+            return true;
+        }
+
+        if (plansource->search_path && !OverrideSearchPathMatchesCurrent(plansource->search_path)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void GlobalPlanCache::RecreateSPICachePlan(SPIPlanPtr spiplan)
+{
+    ListCell* cell = NULL;
+    Assert(spiplan->magic == _SPI_PLAN_MAGIC);
+    /* push error context stack */
+    ErrorContextCallback spi_err_context;
+    spi_err_context.callback = _SPI_error_callback;
+    spi_err_context.arg = NULL; /* we'll fill this below */
+    spi_err_context.previous = t_thrd.log_cxt.error_context_stack;
+    t_thrd.log_cxt.error_context_stack = &spi_err_context;
+    foreach(cell, spiplan->plancache_list) {
+        CachedPlanSource* oldsource = (CachedPlanSource*)lfirst(cell);
+        if (!oldsource->gpc.status.InShareTable())
+            continue;
+        GPC_LOG("recreate spi cachedplan", oldsource, 0);
+        CachedPlanSource *newsource = CopyCachedPlan(oldsource, true);
+        spi_err_context.arg = (void *)newsource->query_string;
+        Assert (u_sess->SPI_cxt._current->spi_hash_key == oldsource->spi_signature.spi_key);
+        MemoryContext oldcxt = MemoryContextSwitchTo(newsource->context);
+        newsource->stream_enabled = u_sess->attr.attr_sql.enable_stream_operator;
+        Assert (oldsource->gpc.status.IsSharePlan());
+        newsource->gpc.status.ShareInit();
+        newsource->spi_signature = oldsource->spi_signature;
+        newsource->parserSetup = spiplan->parserSetup;
+        newsource->parserSetupArg = spiplan->parserSetupArg;
+        // If the planSource is set to invalid, the AST must be analyzed again
+        // because the meta has changed.
+        newsource->is_valid = false;
+        (void)RevalidateCachedQuery(newsource);
+        newsource->next_saved = u_sess->pcache_cxt.first_saved_plan;
+        u_sess->pcache_cxt.first_saved_plan = newsource;
+        newsource->is_saved = true;
+        newsource->gpc.status.SetLoc(GPC_SHARE_IN_LOCAL_SAVE_PLAN_LIST);
+        cell->data.ptr_value = (void*)newsource;
+        MemoryContextSwitchTo(oldcxt);
+        RemovePlanSourceInRecreate(oldsource);
+    }
+    /* pop error context stack */
+    t_thrd.log_cxt.error_context_stack = spi_err_context.previous;
+    Assert(SPIPlanCacheTableLookup(u_sess->SPI_cxt._current->spi_hash_key));
+}
+
+void GlobalPlanCache::RecreateCachePlan(PreparedStatement *entry, const char* stmt_name)
+{
+    CachedPlanSource *oldsource = entry->plansource;
+    GPC_LOG("recreate plan", oldsource, stmt_name);
     CachedPlanSource *newsource = CopyCachedPlan(entry->plansource, true);
-
-    newsource->gpc.is_share = false;
-    newsource->gpc.is_insert = true;
-    newsource->gpc.is_valid = true;
-    newsource->gpc.query_hash_code = 0;
-
+    MemoryContext oldcxt = MemoryContextSwitchTo(newsource->context);
+    newsource->stream_enabled = u_sess->attr.attr_sql.enable_stream_operator;
+    newsource->stmt_name = pstrdup(stmt_name);
+    // If the planSource is set to invalid, the AST must be analyzed again
+    // because the meta has changed.
+    newsource->is_valid = false;
+    Assert (oldsource->gpc.status.IsSharePlan());
+    newsource->gpc.status.ShareInit();
+#ifdef ENABLE_MULTIPLE_NODES
+    bool had_lp = (IS_PGXC_COORDINATOR && oldsource->single_exec_node != NULL &&
+                    oldsource->gplan == NULL && oldsource->cplan == NULL);
+    (void)RevalidateCachedQuery(newsource, had_lp);
+    /* clean session's datanode statment on cn */
+    if (had_lp) {
+        /* no lp in newsource, delete old lp */
+        GPCDropLPIfNecessary(entry->stmt_name, false, true, NULL);
+    } else {
+        if (IS_PGXC_COORDINATOR && oldsource->gplan != NULL) {
+            /* Close any active planned Datanode statements, recreate in BuildCachedPlan later */
+            GPCCleanDatanodeStatement(oldsource->gplan->dn_stmt_num, stmt_name);
+        }
+    }
+#else
     (void)RevalidateCachedQuery(newsource);
-
-    RefcountSub(entry->plansource);
+#endif
+    newsource->next_saved = u_sess->pcache_cxt.first_saved_plan;
+    u_sess->pcache_cxt.first_saved_plan = newsource;
+    newsource->is_saved = true;
+    newsource->gpc.status.SetLoc(GPC_SHARE_IN_LOCAL_SAVE_PLAN_LIST);
+    u_sess->exec_cxt.CurrentOpFusionObj = NULL;
     entry->plansource = newsource;
+    MemoryContextSwitchTo(oldcxt);
+    RemovePlanSourceInRecreate(oldsource);
+}
+
+void GlobalPlanCache::Commit()
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR) {
+        CNCommit();
+    } else {
+        DNCommit();
+    }
+#else
+    CNCommit();
+#endif
 }
 
 /*
@@ -1045,56 +648,273 @@ void GlobalPlanCache::RecreateCachePlan(PreparedStatement *entry)
  * @in num: void
  * @return - void
  */
-void GlobalPlanCache::Commit()
+void GlobalPlanCache::DNCommit()
 {
-    CachedPlanSource *plansource = NULL;
-    CachedPlanSource *prev_plansource = NULL;
     CachedPlanSource *next_plansource = NULL;
-    GPCEnv *env = NULL;
-
-    plansource = u_sess->pcache_cxt.first_saved_plan;
-    prev_plansource = u_sess->pcache_cxt.first_saved_plan;
+    CachedPlanSource *plansource = u_sess->pcache_cxt.first_saved_plan;
+    u_sess->pcache_cxt.first_saved_plan = NULL;
     while (plansource != NULL) {
         Assert(plansource->magic == CACHEDPLANSOURCE_MAGIC);
-        Assert(plansource->gpc.is_share == false);
-
-        if (!plansource->is_valid || plansource->gpc.is_insert == false) {
-            prev_plansource = plansource;
-            plansource = plansource->next_saved;
-            continue;
+        Assert(!plansource->gpc.status.InShareTable());
+        if (unlikely(plansource->magic != CACHEDPLANSOURCE_MAGIC)) {
+            ereport(PANIC,
+                  (errcode(ERRCODE_UNDEFINED_PSTATEMENT),
+                   errmsg("In gpc commit stage, plansource has already been freed(%lu,%u,%u)",
+                          u_sess->sess_ident.cn_sessid, u_sess->sess_ident.cn_timeline, u_sess->sess_ident.cn_nodeid)));
         }
 
-        LWLockAcquire(GPCCommitLock, LW_EXCLUSIVE);
-        env = PlanFetch(plansource->query_string, strlen(plansource->query_string), plansource->num_params);
-        ereport(DEBUG3, (errmodule(MOD_GPC), errcode(ERRCODE_LOG),
-                errmsg("gpc  <commit>  global_sess_id:%lu  stmt_name:%s  session_id:%lu find:%s",
-                       u_sess->global_sess_id, plansource->stmt_name, u_sess->session_id,
-                       env != NULL ? "YES" : "NO")));
+        next_plansource = plansource->next_saved;
 
-        if (env == NULL) {
-            PlanStore(plansource);
-
-            if (prev_plansource == u_sess->pcache_cxt.first_saved_plan) {
-                u_sess->pcache_cxt.first_saved_plan = plansource->next_saved;
-                prev_plansource = plansource->next_saved;
-            } else {
-                prev_plansource->next_saved = plansource->next_saved;
-            }
-
-            plansource = plansource->next_saved;
+        if (!plansource->is_valid || plansource->gpc.status.IsPrivatePlan() ||
+            plansource->gplan == NULL || !plansource->is_support_gplan) {
+            GPC_LOG("invalid plan in commit", plansource, plansource->stmt_name);
+            plansource->is_valid = false;
+            plansource->next_saved = NULL;
+            plansource->gpc.status.SetLoc(GPC_SHARE_IN_PREPARE_STATEMENT);
+            plansource->gpc.status.SetStatus(GPC_INVALID);
         } else {
-            PrepareUpdate(plansource, env->plansource, true);
+            PreparedStatement* ps = g_instance.prepare_cache->Fetch(plansource->stmt_name, true);
 
-            if (prev_plansource == u_sess->pcache_cxt.first_saved_plan) {
-                prev_plansource = plansource->next_saved;
+            if (unlikely(ps == NULL)) {
+#ifdef MEMORY_CONTEXT_CHECKING
+                ereport(PANIC,
+#else
+                ereport(ERROR,
+#endif
+                      (errcode(ERRCODE_UNDEFINED_PSTATEMENT),
+                       errmsg("In gpc commit stage, fail to fetch prepare statement: %s.(%lu,%u,%u)", plansource->stmt_name,
+                              u_sess->sess_ident.cn_sessid, u_sess->sess_ident.cn_timeline, u_sess->sess_ident.cn_nodeid)));
             }
-
-            next_plansource = plansource->next_saved;
-            CachedPlan *gplan = plansource->gplan;
-            DropCachedPlan(plansource);
-            GPCReleaseCachedPlan(gplan);
-            plansource = next_plansource;
+            TryStore(plansource, ps);
         }
-        LWLockRelease(GPCCommitLock);
+
+        plansource = next_plansource;
     }
 }
+
+void GlobalPlanCache::CNCommit()
+{
+    CachedPlanSource *next_plansource = NULL;
+    CachedPlanSource *plansource = u_sess->pcache_cxt.first_saved_plan;
+    u_sess->pcache_cxt.first_saved_plan = NULL;
+    while (plansource != NULL) {
+        Assert(plansource->magic == CACHEDPLANSOURCE_MAGIC);
+        Assert(!plansource->gpc.status.InShareTable());
+        if (unlikely(plansource->magic != CACHEDPLANSOURCE_MAGIC)) {
+            ereport(PANIC,
+                  (errcode(ERRCODE_UNDEFINED_PSTATEMENT),
+                   errmsg("In gpc commit stage, plansource has already been freed(%lu,%u,%u)",
+                          u_sess->sess_ident.cn_sessid, u_sess->sess_ident.cn_timeline, u_sess->sess_ident.cn_nodeid)));
+        }
+
+        next_plansource = plansource->next_saved;
+        bool has_lp = false;
+#ifdef ENABLE_MULTIPLE_NODES
+        has_lp = plansource->single_exec_node &&
+                 plansource->gplan == NULL && plansource->cplan == NULL && plansource->stmt_name;
+        if (has_lp) {
+            has_lp = (lightProxy::locateLpByStmtName(plansource->stmt_name) != NULL);
+        }
+#endif
+        if (!plansource->gpc.status.IsSharePlan() || (plansource->gplan == NULL && plansource->cplan)) {
+            /* stream or private plan or cplan need put into ungpc_save_plan */
+            plansource->is_saved = true;
+            if (!plansource->is_support_gplan && plansource->gpc.status.IsSharePlan())
+                plansource->gpc.status.SetKind(GPC_CPLAN);
+            Assert (!plansource->gpc.status.IsSharePlan());
+            plansource->gpc.status.SetLoc(GPC_SHARE_IN_LOCAL_UNGPC_PLAN_LIST);
+            plansource->next_saved = u_sess->pcache_cxt.ungpc_saved_plan;
+            u_sess->pcache_cxt.ungpc_saved_plan = plansource;
+        } else if (!plansource->is_valid || (plansource->gplan && !plansource->gplan->is_valid)) {
+            plansource->is_valid = false;
+            plansource->is_saved = true;
+            Assert (plansource->gpc.status.IsSharePlan());
+            plansource->gpc.status.SetStatus(GPC_INVALID);
+            plansource->gpc.status.SetLoc(GPC_SHARE_IN_LOCAL_SAVE_PLAN_LIST);
+            plansource->next_saved = u_sess->pcache_cxt.first_saved_plan;
+            u_sess->pcache_cxt.first_saved_plan = plansource;
+        } else if (plansource->gplan == NULL && plansource->cplan == NULL && !has_lp) {
+            /* get commit before create cachedplan or lp, not init gpckey. keep in first_saved_plan */
+            plansource->is_saved = true;
+            Assert (plansource->gpc.status.IsSharePlan());
+            plansource->gpc.status.SetLoc(GPC_SHARE_IN_LOCAL_SAVE_PLAN_LIST);
+            plansource->next_saved = u_sess->pcache_cxt.first_saved_plan;
+            u_sess->pcache_cxt.first_saved_plan = plansource;
+        } else {
+            if (plansource->spi_signature.spi_key != INVALID_SPI_KEY) {
+                Assert(!has_lp);
+                Assert(plansource->gplan);
+                Assert(plansource->is_support_gplan);
+                g_instance.plan_cache->SPICommit(plansource);
+            } else {
+                PreparedStatement* ps = FetchPreparedStatement(plansource->stmt_name, true, false);
+                if (unlikely(ps == NULL)) {
+#ifdef MEMORY_CONTEXT_CHECKING
+                    ereport(PANIC,
+#else
+                    ereport(ERROR,
+#endif
+                            (errcode(ERRCODE_UNDEFINED_PSTATEMENT),
+                             errmsg("In gpc commit stage, fail to fetch prepare statement: %s.(%lu,%u,%u)", plansource->stmt_name,
+                                    u_sess->sess_ident.cn_sessid, u_sess->sess_ident.cn_timeline, u_sess->sess_ident.cn_nodeid)));
+                }
+                TryStore(plansource, ps);
+            }
+        }
+
+        plansource = next_plansource;
+    }
+}
+
+void GlobalPlanCache::SPITryStore(CachedPlanSource* plansource, SPIPlanPtr spiplan, int nth)
+{
+    Assert (plansource != NULL);
+    Assert (plansource->magic == CACHEDPLANSOURCE_MAGIC);
+    Assert (!plansource->gpc.status.InShareTable());
+    Assert (plansource->gpc.status.IsSharePlan());
+    Assert (spiplan->saved);
+
+    GPCKey* key = plansource->gpc.key;
+
+    uint32 hashCode = GPCHashFunc((const void *) key, sizeof(*key));
+
+    uint32 bucket_id = GetBucket(hashCode);
+    Assert (bucket_id >= 0 && bucket_id < GPC_NUM_OF_BUCKETS);
+    int lock_id = m_array[bucket_id].lockId;
+
+    (void)LWLockAcquire(GetMainLWLockByIndex(lock_id), LW_EXCLUSIVE);
+    MemoryContext oldcontext = MemoryContextSwitchTo(m_array[bucket_id].context);
+
+    bool found = false;
+    GPCEntry *entry = (GPCEntry *)hash_search_with_hash_value(m_array[bucket_id].hash_tbl,
+                                                                (const void*)key, hashCode, HASH_ENTER, &found);
+    if (entry == NULL) {
+        MemoryContextSwitchTo(oldcontext);
+        LWLockRelease(GetMainLWLockByIndex(lock_id));
+        ereport(ERROR,
+              (errcode(ERRCODE_UNDEFINED_PSTATEMENT),
+               errmsg("store global plan source failed due to memory allocation failed")));
+    }
+
+    if (found == false) {
+        /* Deep copy the query_string to the GPC entry's query_string */
+        entry->key.query_string = key->query_string;
+        entry->key.query_length = key->query_length;
+        entry->key.spi_signature = key->spi_signature;
+        /* Set the magic number. */
+        entry->val.plansource = plansource;
+        //off the link
+        plansource->next_saved = NULL;
+        //initialize the ref count .
+        plansource->gpc.status.AddRefcount();
+
+        m_array[bucket_id].count++;
+        pg_atomic_fetch_add_u32((volatile uint32*)&plansource->gplan->global_refcount, 1);
+        plansource->gplan->is_share = true;
+        Assert(plansource->context->is_shared);
+        MemoryContextSeal(plansource->context);
+        Assert(plansource->query_context->is_shared);
+        MemoryContextSeal(plansource->query_context);
+        Assert(plansource->gplan->context->is_shared);
+        MemoryContextSeal(plansource->gplan->context);
+        plansource->gpc.status.SetLoc(GPC_SHARE_IN_SHARE_TABLE);
+
+    } else {
+        //some guys win.
+        CachedPlanSource* newsource = entry->val.plansource;
+        ListCell* n_cell = list_nth_cell(spiplan->plancache_list, nth);
+        n_cell->data.ptr_value = (void*)newsource;
+        newsource->gpc.status.AddRefcount();
+
+        // purge old one.
+        CN_GPC_LOG("drop cache plan in try store", plansource, 0);
+        DropCachedPlan(plansource);
+        CN_GPC_LOG("change to cache plan", newsource, 0);
+    }
+
+    MemoryContextSwitchTo(oldcontext);
+    LWLockRelease(GetMainLWLockByIndex(lock_id));
+}
+
+void GlobalPlanCache::SPICommit(CachedPlanSource* plansource)
+{
+    Assert (u_sess->SPI_cxt.SPICacheTable != NULL);
+    plpgsql_SPIPlanCacheEnt* entry = SPIPlanCacheTableLookup(plansource->spi_signature.spi_key);
+    Assert(entry != NULL);
+    Assert(entry->func_oid != InvalidOid);
+    List* spiplan_list = entry->SPIplan_list;
+    ListCell* cell = NULL;
+    bool has_cachedplan = false;
+    foreach(cell, spiplan_list) {
+        SPIPlanPtr spi_plan = (SPIPlanPtr)lfirst(cell);
+        if (spi_plan->id == plansource->spi_signature.spi_id) {
+            SPITryStore(plansource, spi_plan, plansource->spi_signature.plansource_id);
+            has_cachedplan = true;
+            break;
+        }
+    }
+    Assert(has_cachedplan);
+    if (unlikely(has_cachedplan == false)) {
+#ifdef MEMORY_CONTEXT_CHECKING
+        ereport(PANIC,
+#else
+        ereport(ERROR,
+#endif
+                (errcode(ERRCODE_UNDEFINED_PSTATEMENT),
+                 errmsg("In gpc spi finish stage, fail to get spi func: %u. hashkey: %u",
+                        plansource->spi_signature.func_oid, plansource->spi_signature.spi_key)));
+    }
+
+#ifdef USE_ASSERT_CHECKING
+    foreach(cell, spiplan_list) {
+        SPIPlanPtr spi_plan = (SPIPlanPtr)lfirst(cell);
+        ListCell* cl = NULL;
+        if (list_length(spi_plan->plancache_list) == 0)
+            continue;
+        foreach(cl, spi_plan->plancache_list) {
+            CachedPlanSource *cur = (CachedPlanSource*)(cl->data.ptr_value);
+            Assert(cur->magic == CACHEDPLANSOURCE_MAGIC);
+        }
+    }
+#endif
+}
+
+void GlobalPlanCache::RemovePlanCacheInSPIPlan(SPIPlanPtr plan)
+{
+    Assert (plan->magic == _SPI_PLAN_MAGIC);
+    if (list_length(plan->plancache_list) > 0) {
+        ListCell* cell = NULL;
+        foreach(cell, plan->plancache_list) {
+            CachedPlanSource* plansource = (CachedPlanSource*)lfirst(cell);
+            if (plansource->gpc.status.InShareTable()) {
+                Assert(plan->saved);
+                CN_GPC_LOG("drop shared spi plan, subrefcount", plansource, 0);
+                /* move plansource into invalid list if during delet func */
+                if (u_sess->plsql_cxt.is_delete_function) {
+                    GPCKey* gpckey = plansource->gpc.key;
+                    uint32 hashCode = GPCHashFunc((const void *) gpckey, sizeof(*gpckey));
+                    uint32 bucket_id = GetBucket(hashCode);
+                    int lock_id = m_array[bucket_id].lockId;
+                    (void)LWLockAcquire(GetMainLWLockByIndex(lock_id), LW_EXCLUSIVE);
+                    if (!plansource->gpc.status.InShareTableInvalidList()) {
+                        bool found = false;
+                        (void)hash_search(m_array[bucket_id].hash_tbl, (void *)gpckey, HASH_REMOVE, &found);
+                        m_array[bucket_id].count--;
+                        AddInvalidList(plansource);
+                    }
+                    plansource->gpc.status.SubRefCount();
+                    DropInvalid();
+                    LWLockRelease(GetMainLWLockByIndex(lock_id));
+                } else {
+                    plansource->gpc.status.SubRefCount();
+                }
+            } else {
+                CN_GPC_LOG("drop unshared spi plan", plansource, 0);
+                DropCachedPlan(plansource);
+            }
+        }
+    }
+    if (plan->spi_key != INVALID_SPI_KEY)
+        SPIPlanCacheTableDeletePlan(plan->spi_key, plan);
+}
+

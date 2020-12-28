@@ -1,0 +1,1199 @@
+/*
+################################################################################
+# TESTCASE NAME : plan_table
+# COMPONENT(S)  : plan_table:复杂查询 tpch测试
+################################################################################
+*/
+--I1. 建表
+create schema tpch;
+set current_schema=tpch;
+drop table if exists customer;
+NOTICE:  table "customer" does not exist, skipping
+drop table if exists lineitem;
+NOTICE:  table "lineitem" does not exist, skipping
+drop table if exists nation;
+NOTICE:  table "nation" does not exist, skipping
+drop table if exists orders;
+NOTICE:  table "orders" does not exist, skipping
+drop table if exists part;
+NOTICE:  table "part" does not exist, skipping
+drop table if exists partsupp;
+NOTICE:  table "partsupp" does not exist, skipping
+drop table if exists region;
+NOTICE:  table "region" does not exist, skipping
+drop table if exists supplier;
+NOTICE:  table "supplier" does not exist, skipping
+CREATE TABLE customer (
+    c_custkey integer NOT NULL,
+    c_name character varying(25) NOT NULL,
+    c_address character varying(40) NOT NULL,
+    c_nationkey integer NOT NULL,
+    c_phone character(15) NOT NULL,
+    c_acctbal numeric(15,2) NOT NULL,
+    c_mktsegment character(10) NOT NULL,
+    c_comment character varying(117) NOT NULL
+)
+with (orientation = column)
+DISTRIBUTE BY HASH (c_custkey);
+CREATE TABLE lineitem (
+    l_orderkey integer NOT NULL,
+    l_partkey integer NOT NULL,
+    l_suppkey integer NOT NULL,
+    l_linenumber integer NOT NULL,
+    l_quantity numeric(15,2) NOT NULL,
+    l_extendedprice numeric(15,2) NOT NULL,
+    l_discount numeric(15,2) NOT NULL,
+    l_tax numeric(15,2) NOT NULL,
+    l_returnflag character(1) NOT NULL,
+    l_linestatus character(1) NOT NULL,
+    l_shipdate date NOT NULL,
+    l_commitdate date NOT NULL,
+    l_receiptdate date NOT NULL,
+    l_shipinstruct character(25) NOT NULL,
+    l_shipmode character(10) NOT NULL,
+    l_comment character varying(44) NOT NULL
+)
+with (orientation = column)
+DISTRIBUTE BY HASH (l_orderkey);
+CREATE TABLE nation (
+    n_nationkey integer NOT NULL,
+    n_name character(25) NOT NULL,
+    n_regionkey integer NOT NULL,
+    n_comment character varying(152)
+)
+with (orientation = column)
+DISTRIBUTE BY REPLICATION;
+CREATE TABLE orders (
+    o_orderkey integer NOT NULL,
+    o_custkey integer NOT NULL,
+    o_orderstatus character(1) NOT NULL,
+    o_totalprice numeric(15,2) NOT NULL,
+    o_orderdate date NOT NULL,
+    o_orderpriority character(15) NOT NULL,
+    o_clerk character(15) NOT NULL,
+    o_shippriority integer NOT NULL,
+    o_comment character varying(79) NOT NULL
+)
+with (orientation = column)
+DISTRIBUTE BY HASH (o_orderkey);
+CREATE TABLE part (
+    p_partkey integer NOT NULL,
+    p_name character varying(55) NOT NULL,
+    p_mfgr character(25) NOT NULL,
+    p_brand character(10) NOT NULL,
+    p_type character varying(25) NOT NULL,
+    p_size integer NOT NULL,
+    p_container character(10) NOT NULL,
+    p_retailprice numeric(15,2) NOT NULL,
+    p_comment character varying(23) NOT NULL
+)
+with (orientation = column)
+DISTRIBUTE BY HASH (p_partkey);
+CREATE TABLE partsupp (
+    ps_partkey integer NOT NULL,
+    ps_suppkey integer NOT NULL,
+    ps_availqty integer NOT NULL,
+    ps_supplycost numeric(15,2) NOT NULL,
+    ps_comment character varying(199) NOT NULL
+)
+with (orientation = column)
+DISTRIBUTE BY HASH (ps_partkey);
+CREATE TABLE region (
+    r_regionkey integer NOT NULL,
+    r_name character(25) NOT NULL,
+    r_comment character varying(152)
+)
+with (orientation = column)
+DISTRIBUTE BY REPLICATION;
+CREATE TABLE supplier (
+    s_suppkey integer NOT NULL,
+    s_name character(25) NOT NULL,
+    s_address character varying(40) NOT NULL,
+    s_nationkey integer NOT NULL,
+    s_phone character(15) NOT NULL,
+    s_acctbal numeric(15,2) NOT NULL,
+    s_comment character varying(101) NOT NULL
+)
+with (orientation = column)
+DISTRIBUTE BY HASH (s_suppkey);
+SET explain_perf_mode=pretty;
+--I1.q1
+--S1.
+explain plan set statement_id='q1' for
+select
+        l_returnflag,
+        l_linestatus,
+        sum(l_quantity) as sum_qty,
+        sum(l_extendedprice) as sum_base_price,
+        sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,
+        sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)/1000) as sum_charge, --add /1000
+        avg(l_quantity) as avg_qty,
+        avg(l_extendedprice) as avg_price,
+        avg(l_discount) as avg_disc,
+        count(*) as count_order
+from
+        lineitem
+where
+        l_shipdate <= date '1998-12-01' - interval '3 day'
+group by
+        l_returnflag,
+        l_linestatus
+order by
+        l_returnflag,
+        l_linestatus;
+--S2
+select id,operation,options,object_name,object_type,object_owner,projection from plan_table_data where statement_id='q1' order by id;
+ id |    operation     |   options    | object_name | object_type | object_owner |                                                                                                                                               projection                                                                                                                                               
+----+------------------+--------------+-------------+-------------+--------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  1 | ROW ADAPTER      |              |             |             |              | l_returnflag, l_linestatus, (sum(l_quantity)), (sum(l_extendedprice)), (sum((l_extendedprice * (1::numeric - l_discount)))), (sum((((l_extendedprice * (1::numeric - l_discount)) * (1::numeric + l_tax)) / 1000::numeric))), (avg(l_quantity)), (avg(l_extendedprice)), (avg(l_discount)), (count(*))
+  2 | VECTOR STREAMING | GATHER       |             |             |              | l_returnflag, l_linestatus, (sum(l_quantity)), (sum(l_extendedprice)), (sum((l_extendedprice * (1::numeric - l_discount)))), (sum((((l_extendedprice * (1::numeric - l_discount)) * (1::numeric + l_tax)) / 1000::numeric))), (avg(l_quantity)), (avg(l_extendedprice)), (avg(l_discount)), (count(*))
+  3 | VECTOR SORT      |              |             |             |              | l_returnflag, l_linestatus, (sum(l_quantity)), (sum(l_extendedprice)), (sum((l_extendedprice * (1::numeric - l_discount)))), (sum((((l_extendedprice * (1::numeric - l_discount)) * (1::numeric + l_tax)) / 1000::numeric))), (avg(l_quantity)), (avg(l_extendedprice)), (avg(l_discount)), (count(*))
+  4 | VECTOR AGGREGATE | HASHED       |             |             |              | l_returnflag, l_linestatus, sum(l_quantity), sum(l_extendedprice), sum((l_extendedprice * (1::numeric - l_discount))), sum((((l_extendedprice * (1::numeric - l_discount)) * (1::numeric + l_tax)) / 1000::numeric)), avg(l_quantity), avg(l_extendedprice), avg(l_discount), count(*)
+  5 | VECTOR STREAMING | REDISTRIBUTE |             |             |              | l_returnflag, l_linestatus, l_quantity, l_extendedprice, l_discount, l_tax
+  6 | TABLE ACCESS     | CSTORE SCAN  | lineitem    | TABLE       | tpch         | l_returnflag, l_linestatus, l_quantity, l_extendedprice, l_discount, l_tax
+(6 rows)
+
+--S3
+explain(costs off)
+select
+        l_returnflag,
+        l_linestatus,
+        sum(l_quantity) as sum_qty,
+        sum(l_extendedprice) as sum_base_price,
+        sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,
+        sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)/1000) as sum_charge, --add /1000
+        avg(l_quantity) as avg_qty,
+        avg(l_extendedprice) as avg_price,
+        avg(l_discount) as avg_disc,
+        count(*) as count_order
+from
+        lineitem
+where
+        l_shipdate <= date '1998-12-01' - interval '3 day'
+group by
+        l_returnflag,
+        l_linestatus
+order by
+        l_returnflag,
+        l_linestatus;
+ id |                      operation                       
+----+------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Streaming (type: GATHER)
+  3 |       ->  Vector Sort
+  4 |          ->  Vector Sonic Hash Aggregate
+  5 |             ->  Vector Streaming(type: REDISTRIBUTE)
+  6 |                ->  CStore Scan on lineitem
+(6 rows)
+
+                      Predicate Information (identified by plan id)                      
+-----------------------------------------------------------------------------------------
+   6 --CStore Scan on lineitem
+         Filter: (l_shipdate <= 'Sat Nov 28 00:00:00 1998'::timestamp without time zone)
+(2 rows)
+
+   ====== Query Summary =====   
+--------------------------------
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--I3.q2
+--S2.
+explain plan set statement_id='q2' for
+select
+        s_acctbal,
+        s_name,
+        n_name,
+        p_partkey,
+        p_mfgr,
+        s_address,
+        s_phone,
+        s_comment
+from
+        part,
+        supplier,
+        partsupp,
+        nation,
+        region
+where
+        p_partkey = ps_partkey
+        and s_suppkey = ps_suppkey
+        and p_size = 15
+        and p_type like 'SMALL%'
+        and s_nationkey = n_nationkey
+        and n_regionkey = r_regionkey
+        and r_name = 'EUROPE '
+        and ps_supplycost = (
+                select
+                        min(ps_supplycost)
+                from
+                        partsupp,
+                        supplier,
+                        nation,
+                        region
+                where
+                        p_partkey = ps_partkey
+                        and s_suppkey = ps_suppkey
+                        and s_nationkey = n_nationkey
+                        and n_regionkey = r_regionkey
+                        and n_regionkey = r_regionkey
+                        and r_name = 'EUROPE '
+        )
+order by
+        s_acctbal desc,
+        n_name,
+        s_name,
+        p_partkey
+limit 100
+;
+--S2.
+select id,operation,options,object_name,object_type,object_owner,projection from plan_table_data where statement_id='q2' order by id;	
+ id |      operation      |   options    | object_name | object_type | object_owner |                                                                                    projection                                                                                     
+----+---------------------+--------------+-------------+-------------+--------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  1 | ROW ADAPTER         |              |             |             |              | tpch.supplier.s_acctbal, tpch.supplier.s_name, tpch.nation.n_name, tpch.part.p_partkey, tpch.part.p_mfgr, tpch.supplier.s_address, tpch.supplier.s_phone, tpch.supplier.s_comment
+  2 | VECTOR LIMIT        |              |             |             |              | tpch.supplier.s_acctbal, tpch.supplier.s_name, tpch.nation.n_name, tpch.part.p_partkey, tpch.part.p_mfgr, tpch.supplier.s_address, tpch.supplier.s_phone, tpch.supplier.s_comment
+  3 | VECTOR STREAMING    | GATHER       |             |             |              | tpch.supplier.s_acctbal, tpch.supplier.s_name, tpch.nation.n_name, tpch.part.p_partkey, tpch.part.p_mfgr, tpch.supplier.s_address, tpch.supplier.s_phone, tpch.supplier.s_comment
+  4 | VECTOR LIMIT        |              |             |             |              | tpch.supplier.s_acctbal, tpch.supplier.s_name, tpch.nation.n_name, tpch.part.p_partkey, tpch.part.p_mfgr, tpch.supplier.s_address, tpch.supplier.s_phone, tpch.supplier.s_comment
+  5 | VECTOR SORT         |              |             |             |              | tpch.supplier.s_acctbal, tpch.supplier.s_name, tpch.nation.n_name, tpch.part.p_partkey, tpch.part.p_mfgr, tpch.supplier.s_address, tpch.supplier.s_phone, tpch.supplier.s_comment
+  6 | VECTOR NESTED LOOPS | INNER        |             |             |              | tpch.supplier.s_acctbal, tpch.supplier.s_name, tpch.nation.n_name, tpch.part.p_partkey, tpch.part.p_mfgr, tpch.supplier.s_address, tpch.supplier.s_phone, tpch.supplier.s_comment
+  7 | VECTOR NESTED LOOPS | INNER        |             |             |              | tpch.supplier.s_acctbal, tpch.supplier.s_name, tpch.supplier.s_address, tpch.supplier.s_phone, tpch.supplier.s_comment, tpch.supplier.s_suppkey, tpch.nation.n_name
+  8 | VECTOR NESTED LOOPS | INNER        |             |             |              | tpch.nation.n_name, tpch.nation.n_nationkey
+  9 | TABLE ACCESS        | CSTORE SCAN  | region      | TABLE       | tpch         | tpch.region.r_regionkey
+ 10 | TABLE ACCESS        | CSTORE SCAN  | nation      | TABLE       | tpch         | tpch.nation.n_name, tpch.nation.n_nationkey, tpch.nation.n_regionkey
+ 11 | TABLE ACCESS        | CSTORE SCAN  | supplier    | TABLE       | tpch         | tpch.supplier.s_acctbal, tpch.supplier.s_name, tpch.supplier.s_address, tpch.supplier.s_phone, tpch.supplier.s_comment, tpch.supplier.s_suppkey, tpch.supplier.s_nationkey
+ 12 | VECTOR MATERIALIZE  |              |             |             |              | tpch.part.p_partkey, tpch.part.p_mfgr, tpch.partsupp.ps_suppkey
+ 13 | VECTOR STREAMING    | REDISTRIBUTE |             |             |              | tpch.part.p_partkey, tpch.part.p_mfgr, tpch.partsupp.ps_suppkey
+ 14 | VECTOR NESTED LOOPS | INNER        |             |             |              | tpch.part.p_partkey, tpch.part.p_mfgr, tpch.partsupp.ps_suppkey
+ 15 | VECTOR NESTED LOOPS | INNER        |             |             |              | tpch.part.p_partkey, tpch.part.p_mfgr, tpch.partsupp.ps_partkey, tpch.partsupp.ps_suppkey, tpch.partsupp.ps_supplycost
+ 16 | TABLE ACCESS        | CSTORE SCAN  | part        | TABLE       | tpch         | tpch.part.p_partkey, tpch.part.p_mfgr
+ 17 | TABLE ACCESS        | CSTORE SCAN  | partsupp    | TABLE       | tpch         | tpch.partsupp.ps_partkey, tpch.partsupp.ps_suppkey, tpch.partsupp.ps_supplycost
+ 18 | VECTOR MATERIALIZE  |              |             |             |              | (min(tpch.partsupp.ps_supplycost)), tpch.partsupp.ps_partkey
+ 19 | VECTOR AGGREGATE    | HASHED       |             |             |              | min(tpch.partsupp.ps_supplycost), tpch.partsupp.ps_partkey
+ 20 | VECTOR STREAMING    | REDISTRIBUTE |             |             |              | tpch.partsupp.ps_partkey, tpch.partsupp.ps_supplycost
+ 21 | VECTOR NESTED LOOPS | INNER        |             |             |              | tpch.partsupp.ps_partkey, tpch.partsupp.ps_supplycost
+ 22 | VECTOR NESTED LOOPS | INNER        |             |             |              | tpch.supplier.s_suppkey
+ 23 | VECTOR NESTED LOOPS | INNER        |             |             |              | tpch.nation.n_nationkey
+ 24 | TABLE ACCESS        | CSTORE SCAN  | region      | TABLE       | tpch         | tpch.region.r_regionkey
+ 25 | TABLE ACCESS        | CSTORE SCAN  | nation      | TABLE       | tpch         | tpch.nation.n_nationkey, tpch.nation.n_regionkey
+ 26 | TABLE ACCESS        | CSTORE SCAN  | supplier    | TABLE       | tpch         | tpch.supplier.s_suppkey, tpch.supplier.s_nationkey
+ 27 | VECTOR MATERIALIZE  |              |             |             |              | tpch.partsupp.ps_partkey, tpch.partsupp.ps_supplycost, tpch.partsupp.ps_suppkey
+ 28 | VECTOR STREAMING    | REDISTRIBUTE |             |             |              | tpch.partsupp.ps_partkey, tpch.partsupp.ps_supplycost, tpch.partsupp.ps_suppkey
+ 29 | VECTOR NESTED LOOPS | SEMI         |             |             |              | tpch.partsupp.ps_partkey, tpch.partsupp.ps_supplycost, tpch.partsupp.ps_suppkey
+ 30 | TABLE ACCESS        | CSTORE SCAN  | partsupp    | TABLE       | tpch         | tpch.partsupp.ps_partkey, tpch.partsupp.ps_supplycost, tpch.partsupp.ps_suppkey
+ 31 | VECTOR MATERIALIZE  |              |             |             |              | tpch.part.p_partkey
+ 32 | TABLE ACCESS        | CSTORE SCAN  | part        | TABLE       | tpch         | tpch.part.p_partkey
+(32 rows)
+
+--S3.
+explain(costs off)
+select
+        s_acctbal,
+        s_name,
+        n_name,
+        p_partkey,
+        p_mfgr,
+        s_address,
+        s_phone,
+        s_comment
+from
+        part,
+        supplier,
+        partsupp,
+        nation,
+        region
+where
+        p_partkey = ps_partkey
+        and s_suppkey = ps_suppkey
+        and p_size = 15
+        and p_type like 'SMALL%'
+        and s_nationkey = n_nationkey
+        and n_regionkey = r_regionkey
+        and r_name = 'EUROPE '
+        and ps_supplycost = (
+                select
+                        min(ps_supplycost)
+                from
+                        partsupp,
+                        supplier,
+                        nation,
+                        region
+                where
+                        p_partkey = ps_partkey
+                        and s_suppkey = ps_suppkey
+                        and s_nationkey = n_nationkey                                                                                                                                                      1,1           Top
+                        and s_nationkey = n_nationkey
+                        and n_regionkey = r_regionkey
+                        and r_name = 'EUROPE '
+        )
+order by
+        s_acctbal desc,
+        n_name,
+        s_name,
+        p_partkey
+limit 100
+;
+ERROR:  syntax error at or near "1"
+LINE 36: ...                                                  1,1       ...
+                                                              ^
+--I3.q3
+--S1.
+explain plan set statement_id='q3' for
+select
+        l_orderkey,
+        sum(l_extendedprice * (1 - l_discount)) as revenue,
+        o_orderdate,
+        o_shippriority
+from
+        customer,
+        orders,
+        lineitem
+where
+        c_mktsegment = 'BUILDING'
+        and c_custkey = o_custkey
+        and l_orderkey = o_orderkey
+        and o_orderdate < '1995-03-15'::date
+        and l_shipdate > '1995-03-15'::date
+group by
+        l_orderkey,
+        o_orderdate,
+        o_shippriority
+order by
+        revenue desc,
+        o_orderdate
+limit 10
+;
+--S2.
+select id,operation,options,object_name,object_type,object_owner,projection from plan_table_data where statement_id='q3' order by id;	
+ id |       operation        |   options    | object_name | object_type | object_owner |                                                               projection                                                               
+----+------------------------+--------------+-------------+-------------+--------------+----------------------------------------------------------------------------------------------------------------------------------------
+  1 | ROW ADAPTER            |              |             |             |              | lineitem.l_orderkey, (sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)))), orders.o_orderdate, orders.o_shippriority
+  2 | VECTOR LIMIT           |              |             |             |              | lineitem.l_orderkey, (sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)))), orders.o_orderdate, orders.o_shippriority
+  3 | VECTOR STREAMING       | GATHER       |             |             |              | lineitem.l_orderkey, (sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)))), orders.o_orderdate, orders.o_shippriority
+  4 | VECTOR LIMIT           |              |             |             |              | lineitem.l_orderkey, (sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)))), orders.o_orderdate, orders.o_shippriority
+  5 | VECTOR SORT            |              |             |             |              | lineitem.l_orderkey, (sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)))), orders.o_orderdate, orders.o_shippriority
+  6 | VECTOR AGGREGATE       | HASHED       |             |             |              | lineitem.l_orderkey, sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount))), orders.o_orderdate, orders.o_shippriority
+  7 | VECTOR STREAMING       | REDISTRIBUTE |             |             |              | orders.o_orderdate, orders.o_shippriority, lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount
+  8 | VECTOR NESTED LOOPS    | INNER        |             |             |              | orders.o_orderdate, orders.o_shippriority, lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount
+  9 | TABLE ACCESS           | CSTORE SCAN  | customer    | TABLE       | tpch         | customer.c_custkey
+ 10 | VECTOR MATERIALIZE     |              |             |             |              | orders.o_orderdate, orders.o_shippriority, orders.o_custkey, lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount
+ 11 | VECTOR STREAMING       | REDISTRIBUTE |             |             |              | orders.o_orderdate, orders.o_shippriority, orders.o_custkey, lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount
+ 12 | VECTOR SONIC HASH JOIN | INNER        |             |             |              | orders.o_orderdate, orders.o_shippriority, orders.o_custkey, lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount
+ 13 | TABLE ACCESS           | CSTORE SCAN  | orders      | TABLE       | tpch         | orders.o_orderdate, orders.o_shippriority, orders.o_custkey, orders.o_orderkey
+ 14 | TABLE ACCESS           | CSTORE SCAN  | lineitem    | TABLE       | tpch         | lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount
+(14 rows)
+
+--S3.
+explain(costs off)
+select
+        l_orderkey,
+        sum(l_extendedprice * (1 - l_discount)) as revenue,
+        o_orderdate,
+        o_shippriority
+from
+        customer,
+        orders,
+        lineitem
+where
+        c_mktsegment = 'BUILDING'
+        and c_custkey = o_custkey
+        and l_orderkey = o_orderkey
+        and o_orderdate < '1995-03-15'::date
+        and l_shipdate > '1995-03-15'::date
+group by
+        l_orderkey,
+        o_orderdate,
+        o_shippriority
+order by
+        revenue desc,
+        o_orderdate
+limit 10
+;
+ id |                              operation                              
+----+---------------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Limit
+  3 |       ->  Vector Streaming (type: GATHER)
+  4 |          ->  Vector Limit
+  5 |             ->  Vector Sort
+  6 |                ->  Vector Sonic Hash Aggregate
+  7 |                   ->  Vector Streaming(type: REDISTRIBUTE)
+  8 |                      ->  Vector Nest Loop (9,10)
+  9 |                         ->  CStore Scan on customer
+ 10 |                         ->  Vector Materialize
+ 11 |                            ->  Vector Streaming(type: REDISTRIBUTE)
+ 12 |                               ->  Vector Sonic Hash Join (13,14)
+ 13 |                                  ->  CStore Scan on orders
+ 14 |                                  ->  CStore Scan on lineitem
+(14 rows)
+
+                       Predicate Information (identified by plan id)                        
+--------------------------------------------------------------------------------------------
+   8 --Vector Nest Loop (9,10)
+         Join Filter: (orders.o_custkey = customer.c_custkey)
+   9 --CStore Scan on customer
+         Filter: (c_mktsegment = 'BUILDING'::bpchar)
+  12 --Vector Sonic Hash Join (13,14)
+         Hash Cond: (orders.o_orderkey = lineitem.l_orderkey)
+  13 --CStore Scan on orders
+         Filter: (o_orderdate < 'Wed Mar 15 00:00:00 1995'::timestamp(0) without time zone)
+  14 --CStore Scan on lineitem
+         Filter: (l_shipdate > 'Wed Mar 15 00:00:00 1995'::timestamp(0) without time zone)
+(10 rows)
+
+   ====== Query Summary =====   
+--------------------------------
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--I4.q4
+explain plan set statement_id='q4' for
+select
+        o_orderpriority,
+        count(*) as order_count
+from
+        orders
+where
+        o_orderdate >= '1993-07-01'::date
+        and o_orderdate < '1993-07-01'::date + interval '3 month'
+        and exists (
+                select
+                        *
+                from
+                        lineitem
+                where
+                        l_orderkey = o_orderkey
+                        and l_commitdate < l_receiptdate
+        )
+group by
+        o_orderpriority
+order by
+        o_orderpriority;
+--S2.
+select id,operation,options,object_name,object_type,object_owner,projection from plan_table_data where statement_id='q4' order by id;	
+ id |      operation      |   options   | object_name | object_type | object_owner |                  projection                   
+----+---------------------+-------------+-------------+-------------+--------------+-----------------------------------------------
+  1 | ROW ADAPTER         |             |             |             |              | orders.o_orderpriority, (pg_catalog.count(*))
+  2 | VECTOR SORT         |             |             |             |              | orders.o_orderpriority, (pg_catalog.count(*))
+  3 | VECTOR AGGREGATE    | HASHED      |             |             |              | orders.o_orderpriority, pg_catalog.count(*)
+  4 | VECTOR STREAMING    | GATHER      |             |             |              | orders.o_orderpriority, (count(*))
+  5 | VECTOR AGGREGATE    | HASHED      |             |             |              | orders.o_orderpriority, count(*)
+  6 | VECTOR NESTED LOOPS | SEMI        |             |             |              | orders.o_orderpriority
+  7 | TABLE ACCESS        | CSTORE SCAN | orders      | TABLE       | tpch         | orders.o_orderpriority, orders.o_orderkey
+  8 | VECTOR MATERIALIZE  |             |             |             |              | lineitem.l_orderkey
+  9 | TABLE ACCESS        | CSTORE SCAN | lineitem    | TABLE       | tpch         | lineitem.l_orderkey
+(9 rows)
+
+--S3.
+explain(costs off)
+select
+        o_orderpriority,
+        count(*) as order_count
+from
+        orders
+where
+        o_orderdate >= '1993-07-01'::date
+        and o_orderdate < '1993-07-01'::date + interval '3 month'
+        and exists (
+                select
+                        *
+                from
+                        lineitem
+                where
+                        l_orderkey = o_orderkey
+                        and l_commitdate < l_receiptdate
+        )
+group by
+        o_orderpriority
+order by
+        o_orderpriority;
+ id |                      operation                       
+----+------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Sort
+  3 |       ->  Vector Sonic Hash Aggregate
+  4 |          ->  Vector Streaming (type: GATHER)
+  5 |             ->  Vector Sonic Hash Aggregate
+  6 |                ->  Vector Nest Loop Semi Join (7, 8)
+  7 |                   ->  CStore Scan on orders
+  8 |                   ->  Vector Materialize
+  9 |                      ->  CStore Scan on lineitem
+(9 rows)
+
+                                                               Predicate Information (identified by plan id)                                                               
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+   6 --Vector Nest Loop Semi Join (7, 8)
+         Join Filter: (orders.o_orderkey = lineitem.l_orderkey)
+   7 --CStore Scan on orders
+         Filter: ((o_orderdate >= 'Thu Jul 01 00:00:00 1993'::timestamp(0) without time zone) AND (o_orderdate < 'Fri Oct 01 00:00:00 1993'::timestamp without time zone))
+   9 --CStore Scan on lineitem
+         Filter: (l_commitdate < l_receiptdate)
+(6 rows)
+
+   ====== Query Summary =====   
+--------------------------------
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--I5.q5
+explain plan set statement_id='q5' for
+select
+        n_name,
+        sum(l_extendedprice * (1 - l_discount)) as revenue
+from
+        customer,
+        orders,
+        lineitem,
+        supplier,
+        nation,
+        region
+where
+        c_custkey = o_custkey
+        and l_orderkey = o_orderkey
+        and l_suppkey = s_suppkey
+        and c_nationkey = s_nationkey
+        and s_nationkey = n_nationkey
+        and n_regionkey = r_regionkey
+        and r_name = 'ASIA'
+        and o_orderdate >= '1994-01-01'::date
+        and o_orderdate < '1994-01-01'::date + interval '1 year'
+group by
+        n_name
+order by
+        revenue desc;
+--S2.
+select id,operation,options,object_name,object_type,object_owner,projection from plan_table_data where statement_id='q5' order by id;	
+ id |      operation      |   options    | object_name | object_type | object_owner |                                                        projection                                                        
+----+---------------------+--------------+-------------+-------------+--------------+--------------------------------------------------------------------------------------------------------------------------
+  1 | ROW ADAPTER         |              |             |             |              | nation.n_name, (sum((sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount))))))
+  2 | VECTOR SORT         |              |             |             |              | nation.n_name, (sum((sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount))))))
+  3 | VECTOR AGGREGATE    | HASHED       |             |             |              | nation.n_name, sum((sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)))))
+  4 | VECTOR STREAMING    | GATHER       |             |             |              | nation.n_name, (sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount))))
+  5 | VECTOR AGGREGATE    | HASHED       |             |             |              | nation.n_name, sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)))
+  6 | VECTOR NESTED LOOPS | INNER        |             |             |              | lineitem.l_extendedprice, lineitem.l_discount, nation.n_name
+  7 | VECTOR STREAMING    | REDISTRIBUTE |             |             |              | orders.o_custkey, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, nation.n_name, nation.n_nationkey
+  8 | VECTOR NESTED LOOPS | INNER        |             |             |              | orders.o_custkey, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, nation.n_name, nation.n_nationkey
+  9 | VECTOR NESTED LOOPS | INNER        |             |             |              | supplier.s_suppkey, supplier.s_nationkey, nation.n_name, nation.n_nationkey
+ 10 | VECTOR NESTED LOOPS | INNER        |             |             |              | nation.n_name, nation.n_nationkey
+ 11 | TABLE ACCESS        | CSTORE SCAN  | region      | TABLE       | tpch         | region.r_regionkey
+ 12 | TABLE ACCESS        | CSTORE SCAN  | nation      | TABLE       | tpch         | nation.n_name, nation.n_nationkey, nation.n_regionkey
+ 13 | TABLE ACCESS        | CSTORE SCAN  | supplier    | TABLE       | tpch         | supplier.s_suppkey, supplier.s_nationkey
+ 14 | VECTOR MATERIALIZE  |              |             |             |              | orders.o_custkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey
+ 15 | VECTOR STREAMING    | REDISTRIBUTE |             |             |              | orders.o_custkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey
+ 16 | VECTOR NESTED LOOPS | INNER        |             |             |              | orders.o_custkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey
+ 17 | TABLE ACCESS        | CSTORE SCAN  | orders      | TABLE       | tpch         | orders.o_custkey, orders.o_orderkey
+ 18 | TABLE ACCESS        | CSTORE SCAN  | lineitem    | TABLE       | tpch         | lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_suppkey
+ 19 | TABLE ACCESS        | CSTORE SCAN  | customer    | TABLE       | tpch         | customer.c_custkey, customer.c_nationkey
+(19 rows)
+
+--S3.
+explain(costs off)
+select
+        n_name,
+        sum(l_extendedprice * (1 - l_discount)) as revenue
+from
+        customer,
+        orders,
+        lineitem,
+        supplier,
+        nation,
+        region
+where
+        c_custkey = o_custkey
+        and l_orderkey = o_orderkey
+        and l_suppkey = s_suppkey
+        and c_nationkey = s_nationkey
+        and s_nationkey = n_nationkey
+        and n_regionkey = r_regionkey
+        and r_name = 'ASIA'
+        and o_orderdate >= '1994-01-01'::date
+        and o_orderdate < '1994-01-01'::date + interval '1 year'
+group by
+        n_name
+order by
+        revenue desc;
+ id |                              operation                              
+----+---------------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Sort
+  3 |       ->  Vector Sonic Hash Aggregate
+  4 |          ->  Vector Streaming (type: GATHER)
+  5 |             ->  Vector Sonic Hash Aggregate
+  6 |                ->  Vector Nest Loop (7,19)
+  7 |                   ->  Vector Streaming(type: REDISTRIBUTE)
+  8 |                      ->  Vector Nest Loop (9,14)
+  9 |                         ->  Vector Nest Loop (10,13)
+ 10 |                            ->  Vector Nest Loop (11,12)
+ 11 |                               ->  CStore Scan on region
+ 12 |                               ->  CStore Scan on nation
+ 13 |                            ->  CStore Scan on supplier
+ 14 |                         ->  Vector Materialize
+ 15 |                            ->  Vector Streaming(type: REDISTRIBUTE)
+ 16 |                               ->  Vector Nest Loop (17,18)
+ 17 |                                  ->  CStore Scan on orders
+ 18 |                                  ->  CStore Scan on lineitem
+ 19 |                   ->  CStore Scan on customer
+(19 rows)
+
+                                                               Predicate Information (identified by plan id)                                                               
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+   6 --Vector Nest Loop (7,19)
+         Join Filter: ((orders.o_custkey = customer.c_custkey) AND (supplier.s_nationkey = customer.c_nationkey))
+   8 --Vector Nest Loop (9,14)
+         Join Filter: (lineitem.l_suppkey = supplier.s_suppkey)
+   9 --Vector Nest Loop (10,13)
+         Join Filter: (nation.n_nationkey = supplier.s_nationkey)
+  10 --Vector Nest Loop (11,12)
+         Join Filter: (nation.n_regionkey = region.r_regionkey)
+  11 --CStore Scan on region
+         Filter: (r_name = 'ASIA'::bpchar)
+  16 --Vector Nest Loop (17,18)
+         Join Filter: (orders.o_orderkey = lineitem.l_orderkey)
+  17 --CStore Scan on orders
+         Filter: ((o_orderdate >= 'Sat Jan 01 00:00:00 1994'::timestamp(0) without time zone) AND (o_orderdate < 'Sun Jan 01 00:00:00 1995'::timestamp without time zone))
+(14 rows)
+
+   ====== Query Summary =====   
+--------------------------------
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--I6.q6
+explain plan set statement_id='q6' for
+select
+        sum(l_extendedprice * l_discount) as revenue
+from
+        lineitem
+where
+        l_shipdate >= '1994-01-01'::date
+        and l_shipdate < '1994-01-01'::date + interval '1 year'
+        and l_discount between 0.06 - 0.01 and 0.06 + 0.01
+        and l_quantity < 24;
+--S2.
+select id,operation,options,object_name,object_type,object_owner,projection from plan_table_data where statement_id='q6' order by id;	
+ id |    operation     |   options   | object_name | object_type | object_owner |                  projection                  
+----+------------------+-------------+-------------+-------------+--------------+----------------------------------------------
+  1 | ROW ADAPTER      |             |             |             |              | (sum((sum((l_extendedprice * l_discount)))))
+  2 | VECTOR AGGREGATE | PLAIN       |             |             |              | sum((sum((l_extendedprice * l_discount))))
+  3 | VECTOR STREAMING | GATHER      |             |             |              | (sum((l_extendedprice * l_discount)))
+  4 | VECTOR AGGREGATE | PLAIN       |             |             |              | sum((l_extendedprice * l_discount))
+  5 | TABLE ACCESS     | CSTORE SCAN | lineitem    | TABLE       | tpch         | l_extendedprice, l_discount
+(5 rows)
+
+--S3.
+explain(costs off)
+select
+        sum(l_extendedprice * l_discount) as revenue
+from
+        lineitem
+where
+        l_shipdate >= '1994-01-01'::date
+        and l_shipdate < '1994-01-01'::date + interval '1 year'
+        and l_discount between 0.06 - 0.01 and 0.06 + 0.01
+        and l_quantity < 24;
+ id |                 operation                 
+----+-------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Aggregate
+  3 |       ->  Vector Streaming (type: GATHER)
+  4 |          ->  Vector Aggregate
+  5 |             ->  CStore Scan on lineitem
+(5 rows)
+
+                                                                                                     Predicate Information (identified by plan id)                                                                                                      
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+   5 --CStore Scan on lineitem
+         Filter: ((l_shipdate >= 'Sat Jan 01 00:00:00 1994'::timestamp(0) without time zone) AND (l_shipdate < 'Sun Jan 01 00:00:00 1995'::timestamp without time zone) AND (l_discount >= .05) AND (l_discount <= .07) AND (l_quantity < 24::numeric))
+(2 rows)
+
+   ====== Query Summary =====   
+--------------------------------
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--I7.q7
+explain plan set statement_id='q7' for
+select
+        supp_nation,
+        cust_nation,
+        l_year,
+        sum(volume) as revenue
+from
+        (
+                select
+                        n1.n_name as supp_nation,
+                        n2.n_name as cust_nation,
+                        extract(year from l_shipdate) as l_year,
+                        l_extendedprice * (1 - l_discount) as volume
+                from
+                        supplier,
+                        lineitem,
+                        orders,
+                        customer,
+                        nation n1,
+                        nation n2
+                where
+                        s_suppkey = l_suppkey
+                        and o_orderkey = l_orderkey
+                        and c_custkey = o_custkey
+                        and s_nationkey = n1.n_nationkey
+                        and c_nationkey = n2.n_nationkey
+                        and (
+                                (n1.n_name = 'FRANCE' and n2.n_name = 'GERMANY')
+                                or (n1.n_name = 'GERMANY' and n2.n_name = 'FRANCE')
+                        )
+                        and l_shipdate between date '1995-01-01' and date '1996-12-31'
+        ) as shipping
+group by
+        supp_nation,
+        cust_nation,
+        l_year
+order by
+        supp_nation,
+        cust_nation,
+        l_year;
+--S2.
+select id,operation,options,object_name,object_type,object_owner,projection from plan_table_data where statement_id='q7' order by id;	
+ id |       operation        |   options    | object_name | object_type | object_owner |                                                                     projection                                                                      
+----+------------------------+--------------+-------------+-------------+--------------+-----------------------------------------------------------------------------------------------------------------------------------------------------
+  1 | ROW ADAPTER            |              |             |             |              | n1.n_name, n2.n_name, (date_part('year'::text, lineitem.l_shipdate)), (sum((sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount))))))
+  2 | VECTOR SORT            |              |             |             |              | n1.n_name, n2.n_name, (date_part('year'::text, lineitem.l_shipdate)), (sum((sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount))))))
+  3 | VECTOR AGGREGATE       | HASHED       |             |             |              | n1.n_name, n2.n_name, (date_part('year'::text, lineitem.l_shipdate)), sum((sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)))))
+  4 | VECTOR STREAMING       | GATHER       |             |             |              | n1.n_name, n2.n_name, (date_part('year'::text, lineitem.l_shipdate)), (sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount))))
+  5 | VECTOR AGGREGATE       | HASHED       |             |             |              | n1.n_name, n2.n_name, (date_part('year'::text, lineitem.l_shipdate)), sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)))
+  6 | VECTOR NESTED LOOPS    | INNER        |             |             |              | n1.n_name, n2.n_name, date_part('year'::text, lineitem.l_shipdate), lineitem.l_extendedprice, lineitem.l_discount
+  7 | VECTOR SONIC HASH JOIN | INNER        |             |             |              | customer.c_custkey, n2.n_name
+  8 | TABLE ACCESS           | CSTORE SCAN  | nation      | TABLE       | tpch         | n2.n_name, n2.n_nationkey
+  9 | TABLE ACCESS           | CSTORE SCAN  | customer    | TABLE       | tpch         | customer.c_custkey, customer.c_nationkey
+ 10 | VECTOR MATERIALIZE     |              |             |             |              | lineitem.l_shipdate, lineitem.l_extendedprice, lineitem.l_discount, orders.o_custkey, n1.n_name
+ 11 | VECTOR STREAMING       | REDISTRIBUTE |             |             |              | lineitem.l_shipdate, lineitem.l_extendedprice, lineitem.l_discount, orders.o_custkey, n1.n_name
+ 12 | VECTOR NESTED LOOPS    | INNER        |             |             |              | lineitem.l_shipdate, lineitem.l_extendedprice, lineitem.l_discount, orders.o_custkey, n1.n_name
+ 13 | VECTOR SONIC HASH JOIN | INNER        |             |             |              | supplier.s_nationkey, lineitem.l_shipdate, lineitem.l_extendedprice, lineitem.l_discount, orders.o_custkey
+ 14 | VECTOR STREAMING       | REDISTRIBUTE |             |             |              | lineitem.l_shipdate, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, orders.o_custkey
+ 15 | VECTOR NESTED LOOPS    | INNER        |             |             |              | lineitem.l_shipdate, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, orders.o_custkey
+ 16 | TABLE ACCESS           | CSTORE SCAN  | lineitem    | TABLE       | tpch         | lineitem.l_shipdate, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, lineitem.l_orderkey
+ 17 | TABLE ACCESS           | CSTORE SCAN  | orders      | TABLE       | tpch         | orders.o_orderkey, orders.o_custkey
+ 18 | TABLE ACCESS           | CSTORE SCAN  | supplier    | TABLE       | tpch         | supplier.s_suppkey, supplier.s_nationkey
+ 19 | TABLE ACCESS           | CSTORE SCAN  | nation      | TABLE       | tpch         | n1.n_name, n1.n_nationkey
+(19 rows)
+
+--S3.
+explain(costs off)
+select
+        supp_nation,
+        cust_nation,
+        l_year,
+        sum(volume) as revenue
+from
+        (
+                select
+                        n1.n_name as supp_nation,
+                        n2.n_name as cust_nation,
+                        extract(year from l_shipdate) as l_year,
+                        l_extendedprice * (1 - l_discount) as volume
+                from
+                        supplier,
+                        lineitem,
+                        orders,
+                        customer,
+                        nation n1,
+                        nation n2
+                where
+                        s_suppkey = l_suppkey
+                        and o_orderkey = l_orderkey
+                        and c_custkey = o_custkey
+                        and s_nationkey = n1.n_nationkey
+                        and c_nationkey = n2.n_nationkey
+                        and (
+                                (n1.n_name = 'FRANCE' and n2.n_name = 'GERMANY')
+                                or (n1.n_name = 'GERMANY' and n2.n_name = 'FRANCE')
+                        )
+                        and l_shipdate between date '1995-01-01' and date '1996-12-31'
+        ) as shipping
+group by
+        supp_nation,
+        cust_nation,
+        l_year
+order by
+        supp_nation,
+        cust_nation,
+        l_year;
+ id |                               operation                                
+----+------------------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Sort
+  3 |       ->  Vector Sonic Hash Aggregate
+  4 |          ->  Vector Streaming (type: GATHER)
+  5 |             ->  Vector Sonic Hash Aggregate
+  6 |                ->  Vector Nest Loop (7,10)
+  7 |                   ->  Vector Sonic Hash Join (8,9)
+  8 |                      ->  CStore Scan on nation n2
+  9 |                      ->  CStore Scan on customer
+ 10 |                   ->  Vector Materialize
+ 11 |                      ->  Vector Streaming(type: REDISTRIBUTE)
+ 12 |                         ->  Vector Nest Loop (13,19)
+ 13 |                            ->  Vector Sonic Hash Join (14,18)
+ 14 |                               ->  Vector Streaming(type: REDISTRIBUTE)
+ 15 |                                  ->  Vector Nest Loop (16,17)
+ 16 |                                     ->  CStore Scan on lineitem
+ 17 |                                     ->  CStore Scan on orders
+ 18 |                               ->  CStore Scan on supplier
+ 19 |                            ->  CStore Scan on nation n1
+(19 rows)
+
+                                                                                   Predicate Information (identified by plan id)                                                                                   
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+   6 --Vector Nest Loop (7,10)
+         Join Filter: ((customer.c_custkey = orders.o_custkey) AND (((n1.n_name = 'FRANCE'::bpchar) AND (n2.n_name = 'GERMANY'::bpchar)) OR ((n1.n_name = 'GERMANY'::bpchar) AND (n2.n_name = 'FRANCE'::bpchar))))
+   7 --Vector Sonic Hash Join (8,9)
+         Hash Cond: (n2.n_nationkey = customer.c_nationkey)
+  12 --Vector Nest Loop (13,19)
+         Join Filter: (supplier.s_nationkey = n1.n_nationkey)
+  13 --Vector Sonic Hash Join (14,18)
+         Hash Cond: (lineitem.l_suppkey = supplier.s_suppkey)
+  15 --Vector Nest Loop (16,17)
+         Join Filter: (lineitem.l_orderkey = orders.o_orderkey)
+  16 --CStore Scan on lineitem
+         Filter: ((l_shipdate >= 'Sun Jan 01 00:00:00 1995'::timestamp(0) without time zone) AND (l_shipdate <= 'Tue Dec 31 00:00:00 1996'::timestamp(0) without time zone))
+(12 rows)
+
+   ====== Query Summary =====   
+--------------------------------
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--I8.q8
+explain plan set statement_id='q8' for
+select
+        o_year,
+        sum(case
+                when nation = 'BRAZIL' then volume
+                else 0
+        end) / sum(volume) as mkt_share
+from
+        (
+                select
+                        extract(year from o_orderdate) as o_year,
+                        l_extendedprice * (1 - l_discount) as volume,
+                        n2.n_name as nation
+                from
+                        part,
+                        supplier,
+                        lineitem,
+                        orders,
+                        customer,
+                        nation n1,
+                        nation n2,
+                        region
+                where
+                        p_partkey = l_partkey
+                        and s_suppkey = l_suppkey
+                        and l_orderkey = o_orderkey
+                        and o_custkey = c_custkey
+                        and c_nationkey = n1.n_nationkey
+                        and n1.n_regionkey = r_regionkey
+                        and r_name = 'AMERICA'
+                        and s_nationkey = n2.n_nationkey
+                        and o_orderdate between date '1995-01-01' and date '1996-12-31'
+                        and p_type = 'ECONOMY ANODIZED STEEL'
+        ) as all_nations
+group by
+        o_year
+order by
+        o_year;
+--S2.
+select id,operation,options,object_name,object_type,object_owner,projection from plan_table_data where statement_id='q8' order by id;	
+ id |      operation      |   options    | object_name | object_type | object_owner |                                                                                                                                   projection                                                                                                                                   
+----+---------------------+--------------+-------------+-------------+--------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  1 | ROW ADAPTER         |              |             |             |              | (date_part('year'::text, orders.o_orderdate)), ((sum((sum(CASE WHEN (n2.n_name = 'BRAZIL'::bpchar) THEN (lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)) ELSE 0::numeric END))) / sum((sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)))))))
+  2 | VECTOR SORT         |              |             |             |              | (date_part('year'::text, orders.o_orderdate)), ((sum((sum(CASE WHEN (n2.n_name = 'BRAZIL'::bpchar) THEN (lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)) ELSE 0::numeric END))) / sum((sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)))))))
+  3 | VECTOR AGGREGATE    | HASHED       |             |             |              | (date_part('year'::text, orders.o_orderdate)), (sum((sum(CASE WHEN (n2.n_name = 'BRAZIL'::bpchar) THEN (lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)) ELSE 0::numeric END))) / sum((sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount))))))
+  4 | VECTOR STREAMING    | GATHER       |             |             |              | (date_part('year'::text, orders.o_orderdate)), (sum(CASE WHEN (n2.n_name = 'BRAZIL'::bpchar) THEN (lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)) ELSE 0::numeric END)), (sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount))))
+  5 | VECTOR AGGREGATE    | HASHED       |             |             |              | (date_part('year'::text, orders.o_orderdate)), sum(CASE WHEN (n2.n_name = 'BRAZIL'::bpchar) THEN (lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)) ELSE 0::numeric END), sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)))
+  6 | VECTOR NESTED LOOPS | INNER        |             |             |              | date_part('year'::text, orders.o_orderdate), n2.n_name, lineitem.l_extendedprice, lineitem.l_discount
+  7 | VECTOR NESTED LOOPS | INNER        |             |             |              | lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, orders.o_orderdate
+  8 | VECTOR STREAMING    | REDISTRIBUTE |             |             |              | lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, orders.o_orderdate
+  9 | VECTOR NESTED LOOPS | INNER        |             |             |              | lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, orders.o_orderdate
+ 10 | VECTOR NESTED LOOPS | INNER        |             |             |              | customer.c_custkey
+ 11 | VECTOR NESTED LOOPS | INNER        |             |             |              | n1.n_nationkey
+ 12 | TABLE ACCESS        | CSTORE SCAN  | region      | TABLE       | tpch         | region.r_regionkey
+ 13 | TABLE ACCESS        | CSTORE SCAN  | nation      | TABLE       | tpch         | n1.n_nationkey, n1.n_regionkey
+ 14 | TABLE ACCESS        | CSTORE SCAN  | customer    | TABLE       | tpch         | customer.c_custkey, customer.c_nationkey
+ 15 | VECTOR MATERIALIZE  |              |             |             |              | lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, orders.o_orderdate, orders.o_custkey
+ 16 | VECTOR STREAMING    | REDISTRIBUTE |             |             |              | lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, orders.o_orderdate, orders.o_custkey
+ 17 | VECTOR NESTED LOOPS | INNER        |             |             |              | lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, orders.o_orderdate, orders.o_custkey
+ 18 | TABLE ACCESS        | CSTORE SCAN  | part        | TABLE       | tpch         | part.p_partkey
+ 19 | VECTOR MATERIALIZE  |              |             |             |              | lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_partkey, lineitem.l_suppkey, orders.o_orderdate, orders.o_custkey
+ 20 | VECTOR STREAMING    | REDISTRIBUTE |             |             |              | lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_partkey, lineitem.l_suppkey, orders.o_orderdate, orders.o_custkey
+ 21 | VECTOR NESTED LOOPS | INNER        |             |             |              | lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_partkey, lineitem.l_suppkey, orders.o_orderdate, orders.o_custkey
+ 22 | TABLE ACCESS        | CSTORE SCAN  | orders      | TABLE       | tpch         | orders.o_orderdate, orders.o_orderkey, orders.o_custkey
+ 23 | TABLE ACCESS        | CSTORE SCAN  | lineitem    | TABLE       | tpch         | lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_orderkey
+ 24 | TABLE ACCESS        | CSTORE SCAN  | supplier    | TABLE       | tpch         | supplier.s_suppkey, supplier.s_nationkey
+ 25 | TABLE ACCESS        | CSTORE SCAN  | nation      | TABLE       | tpch         | n2.n_name, n2.n_nationkey
+(25 rows)
+
+--S3.
+explain(costs off)
+select
+        o_year,
+        sum(case
+                when nation = 'BRAZIL' then volume
+                else 0
+        end) / sum(volume) as mkt_share
+from
+        (
+                select
+                        extract(year from o_orderdate) as o_year,
+                        l_extendedprice * (1 - l_discount) as volume,
+                        n2.n_name as nation
+                from
+                        part,
+                        supplier,
+                        lineitem,
+                        orders,
+                        customer,
+                        nation n1,
+                        nation n2,
+                        region
+                where
+                        p_partkey = l_partkey
+                        and s_suppkey = l_suppkey
+                        and l_orderkey = o_orderkey
+                        and o_custkey = c_custkey
+                        and c_nationkey = n1.n_nationkey
+                        and n1.n_regionkey = r_regionkey
+                        and r_name = 'AMERICA'
+                        and s_nationkey = n2.n_nationkey
+                        and o_orderdate between date '1995-01-01' and date '1996-12-31'
+                        and p_type = 'ECONOMY ANODIZED STEEL'
+        ) as all_nations
+group by
+        o_year
+order by
+        o_year;
+ id |                                    operation                                    
+----+---------------------------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Sort
+  3 |       ->  Vector Hash Aggregate
+  4 |          ->  Vector Streaming (type: GATHER)
+  5 |             ->  Vector Hash Aggregate
+  6 |                ->  Vector Nest Loop (7,25)
+  7 |                   ->  Vector Nest Loop (8,24)
+  8 |                      ->  Vector Streaming(type: REDISTRIBUTE)
+  9 |                         ->  Vector Nest Loop (10,15)
+ 10 |                            ->  Vector Nest Loop (11,14)
+ 11 |                               ->  Vector Nest Loop (12,13)
+ 12 |                                  ->  CStore Scan on region
+ 13 |                                  ->  CStore Scan on nation n1
+ 14 |                               ->  CStore Scan on customer
+ 15 |                            ->  Vector Materialize
+ 16 |                               ->  Vector Streaming(type: REDISTRIBUTE)
+ 17 |                                  ->  Vector Nest Loop (18,19)
+ 18 |                                     ->  CStore Scan on part
+ 19 |                                     ->  Vector Materialize
+ 20 |                                        ->  Vector Streaming(type: REDISTRIBUTE)
+ 21 |                                           ->  Vector Nest Loop (22,23)
+ 22 |                                              ->  CStore Scan on orders
+ 23 |                                              ->  CStore Scan on lineitem
+ 24 |                      ->  CStore Scan on supplier
+ 25 |                   ->  CStore Scan on nation n2
+(25 rows)
+
+                                                                 Predicate Information (identified by plan id)                                                                 
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+   6 --Vector Nest Loop (7,25)
+         Join Filter: (supplier.s_nationkey = n2.n_nationkey)
+   7 --Vector Nest Loop (8,24)
+         Join Filter: (lineitem.l_suppkey = supplier.s_suppkey)
+   9 --Vector Nest Loop (10,15)
+         Join Filter: (orders.o_custkey = customer.c_custkey)
+  10 --Vector Nest Loop (11,14)
+         Join Filter: (n1.n_nationkey = customer.c_nationkey)
+  11 --Vector Nest Loop (12,13)
+         Join Filter: (n1.n_regionkey = region.r_regionkey)
+  12 --CStore Scan on region
+         Filter: (r_name = 'AMERICA'::bpchar)
+  17 --Vector Nest Loop (18,19)
+         Join Filter: (lineitem.l_partkey = part.p_partkey)
+  18 --CStore Scan on part
+         Filter: ((p_type)::text = 'ECONOMY ANODIZED STEEL'::text)
+  21 --Vector Nest Loop (22,23)
+         Join Filter: (lineitem.l_orderkey = orders.o_orderkey)
+  22 --CStore Scan on orders
+         Filter: ((o_orderdate >= 'Sun Jan 01 00:00:00 1995'::timestamp(0) without time zone) AND (o_orderdate <= 'Tue Dec 31 00:00:00 1996'::timestamp(0) without time zone))
+(20 rows)
+
+   ====== Query Summary =====   
+--------------------------------
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--I9.q9
+explain plan set statement_id='q9' for
+select
+        nation,
+        o_year,
+        sum(amount) as sum_profit
+from
+        (
+                select
+                        n_name as nation,
+                        extract(year from o_orderdate) as o_year,
+                        l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity as amount
+                from
+                        part,
+                        supplier,
+                        lineitem,
+                        partsupp,
+                        orders,
+                        nation
+                where
+                        s_suppkey = l_suppkey
+                        and ps_suppkey = l_suppkey
+                        and ps_partkey = l_partkey
+                        and p_partkey = l_partkey
+                        and o_orderkey = l_orderkey
+                        and s_nationkey = n_nationkey
+                        and p_name like '%green%'
+        ) as profit
+group by
+        nation,
+        o_year
+order by
+        nation,
+        o_year desc;
+--S2.
+select id,operation,options,object_name,object_type,object_owner,projection from plan_table_data where statement_id='q9' order by id;	
+ id |      operation      |   options    | object_name | object_type | object_owner |                                                                                        projection                                                                                        
+----+---------------------+--------------+-------------+-------------+--------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  1 | ROW ADAPTER         |              |             |             |              | nation.n_name, (date_part('year'::text, orders.o_orderdate)), (sum(((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity))))
+  2 | VECTOR STREAMING    | GATHER       |             |             |              | nation.n_name, (date_part('year'::text, orders.o_orderdate)), (sum(((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity))))
+  3 | VECTOR SORT         |              |             |             |              | nation.n_name, (date_part('year'::text, orders.o_orderdate)), (sum(((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity))))
+  4 | VECTOR AGGREGATE    | HASHED       |             |             |              | nation.n_name, (date_part('year'::text, orders.o_orderdate)), sum(((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity)))
+  5 | VECTOR STREAMING    | REDISTRIBUTE |             |             |              | nation.n_name, (date_part('year'::text, orders.o_orderdate)), lineitem.l_extendedprice, lineitem.l_discount, partsupp.ps_supplycost, lineitem.l_quantity
+  6 | VECTOR NESTED LOOPS | INNER        |             |             |              | nation.n_name, date_part('year'::text, orders.o_orderdate), lineitem.l_extendedprice, lineitem.l_discount, partsupp.ps_supplycost, lineitem.l_quantity
+  7 | VECTOR NESTED LOOPS | INNER        |             |             |              | lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, supplier.s_nationkey, partsupp.ps_supplycost, orders.o_orderdate
+  8 | VECTOR STREAMING    | REDISTRIBUTE |             |             |              | part.p_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, lineitem.l_suppkey, lineitem.l_partkey, supplier.s_suppkey, supplier.s_nationkey, orders.o_orderdate
+  9 | VECTOR NESTED LOOPS | INNER        |             |             |              | part.p_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, lineitem.l_suppkey, lineitem.l_partkey, supplier.s_suppkey, supplier.s_nationkey, orders.o_orderdate
+ 10 | VECTOR STREAMING    | REDISTRIBUTE |             |             |              | part.p_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, lineitem.l_suppkey, lineitem.l_partkey, orders.o_orderdate
+ 11 | VECTOR NESTED LOOPS | INNER        |             |             |              | part.p_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, lineitem.l_suppkey, lineitem.l_partkey, orders.o_orderdate
+ 12 | VECTOR NESTED LOOPS | INNER        |             |             |              | part.p_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, lineitem.l_suppkey, lineitem.l_partkey, lineitem.l_orderkey
+ 13 | VECTOR STREAMING    | BROADCAST    |             |             |              | part.p_partkey
+ 14 | TABLE ACCESS        | CSTORE SCAN  | part        | TABLE       | tpch         | part.p_partkey
+ 15 | TABLE ACCESS        | CSTORE SCAN  | lineitem    | TABLE       | tpch         | lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, lineitem.l_suppkey, lineitem.l_partkey, lineitem.l_orderkey
+ 16 | TABLE ACCESS        | CSTORE SCAN  | orders      | TABLE       | tpch         | orders.o_orderdate, orders.o_orderkey
+ 17 | VECTOR MATERIALIZE  |              |             |             |              | supplier.s_suppkey, supplier.s_nationkey
+ 18 | TABLE ACCESS        | CSTORE SCAN  | supplier    | TABLE       | tpch         | supplier.s_suppkey, supplier.s_nationkey
+ 19 | VECTOR MATERIALIZE  |              |             |             |              | partsupp.ps_supplycost, partsupp.ps_suppkey, partsupp.ps_partkey
+ 20 | TABLE ACCESS        | CSTORE SCAN  | partsupp    | TABLE       | tpch         | partsupp.ps_supplycost, partsupp.ps_suppkey, partsupp.ps_partkey
+ 21 | TABLE ACCESS        | CSTORE SCAN  | nation      | TABLE       | tpch         | nation.n_name, nation.n_nationkey
+(21 rows)
+
+--S3.
+explain(costs off)
+select
+        nation,
+        o_year,
+        sum(amount) as sum_profit
+from
+        (
+                select
+                        n_name as nation,
+                        extract(year from o_orderdate) as o_year,
+                        l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity as amount
+                from
+                        part,
+                        supplier,
+                        lineitem,
+                        partsupp,
+                        orders,
+                        nation
+                where
+                        s_suppkey = l_suppkey
+                        and ps_suppkey = l_suppkey
+                        and ps_partkey = l_partkey
+                        and p_partkey = l_partkey
+                        and o_orderkey = l_orderkey
+                        and s_nationkey = n_nationkey
+                        and p_name like '%green%'
+        ) as profit
+group by
+        nation,
+        o_year
+order by
+        nation,
+        o_year desc;
+ id |                                 operation                                 
+----+---------------------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Streaming (type: GATHER)
+  3 |       ->  Vector Sort
+  4 |          ->  Vector Sonic Hash Aggregate
+  5 |             ->  Vector Streaming(type: REDISTRIBUTE)
+  6 |                ->  Vector Nest Loop (7,21)
+  7 |                   ->  Vector Nest Loop (8,19)
+  8 |                      ->  Vector Streaming(type: REDISTRIBUTE)
+  9 |                         ->  Vector Nest Loop (10,17)
+ 10 |                            ->  Vector Streaming(type: REDISTRIBUTE)
+ 11 |                               ->  Vector Nest Loop (12,16)
+ 12 |                                  ->  Vector Nest Loop (13,15)
+ 13 |                                     ->  Vector Streaming(type: BROADCAST)
+ 14 |                                        ->  CStore Scan on part
+ 15 |                                     ->  CStore Scan on lineitem
+ 16 |                                  ->  CStore Scan on orders
+ 17 |                            ->  Vector Materialize
+ 18 |                               ->  CStore Scan on supplier
+ 19 |                      ->  Vector Materialize
+ 20 |                         ->  CStore Scan on partsupp
+ 21 |                   ->  CStore Scan on nation
+(21 rows)
+
+                                  Predicate Information (identified by plan id)                                   
+------------------------------------------------------------------------------------------------------------------
+   6 --Vector Nest Loop (7,21)
+         Join Filter: (supplier.s_nationkey = nation.n_nationkey)
+   7 --Vector Nest Loop (8,19)
+         Join Filter: ((lineitem.l_suppkey = partsupp.ps_suppkey) AND (lineitem.l_partkey = partsupp.ps_partkey))
+   9 --Vector Nest Loop (10,17)
+         Join Filter: (lineitem.l_suppkey = supplier.s_suppkey)
+  11 --Vector Nest Loop (12,16)
+         Join Filter: (lineitem.l_orderkey = orders.o_orderkey)
+  12 --Vector Nest Loop (13,15)
+         Join Filter: (part.p_partkey = lineitem.l_partkey)
+  14 --CStore Scan on part
+         Filter: ((p_name)::text ~~ '%green%'::text)
+(12 rows)
+
+   ====== Query Summary =====   
+--------------------------------
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--清理
+delete from plan_table_data;
+drop schema tpch cascade;
+NOTICE:  drop cascades to 8 other objects
+DETAIL:  drop cascades to table customer
+drop cascades to table lineitem
+drop cascades to table nation
+drop cascades to table orders
+drop cascades to table part
+drop cascades to table partsupp
+drop cascades to table region
+drop cascades to table supplier

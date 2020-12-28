@@ -128,27 +128,6 @@ void* pg_calloc(size_t nmemb, size_t size)
     return tmp;
 }
 
-void* pg_realloc(void* ptr, size_t size)
-{
-    void* tmp = NULL;
-
-    /* When realloc failed gsql will exit, with no memory leak for ptr. */
-    tmp = (void*)realloc(ptr, size);
-    if (NULL == tmp) {
-        psql_error("out of memory\n");
-        exit(EXIT_FAILURE);
-    }
-    return tmp;
-}
-
-void pg_free(void *ptr)
-{
-    if (ptr != NULL) {
-        free(ptr);
-        ptr = NULL;
-    }
-}
-
 /*
  * setQFout
  * -- handler for -o command line option and \o command
@@ -1825,7 +1804,6 @@ const char* session_username(void)
  */
 void expand_tilde(char** filename)
 {
-    errno_t rc;
     if ((filename == NULL) || ((*filename) == NULL))
         return;
 
@@ -1858,13 +1836,13 @@ void expand_tilde(char** filename)
         if (*(fn + 1) == '\0') {
             (void)get_home_path(home, sizeof(home)); /* ~ or ~/ only */
         } else if ((pw = getpwnam(fn + 1)) != NULL) {
-            rc = strncpy_s(home, sizeof(home), pw->pw_dir, strlen(pw->pw_dir)); /* ~user */
-            securec_check_c(rc, "", "");
+            strlcpy(home, pw->pw_dir, sizeof(home)); /* ~user */
         }
 
         *p = oldp;
         if (strlen(home) != 0) {
             char* newfn = NULL;
+            errno_t rc;
             size_t len = strlen(home) + strlen(p) + 1;
             newfn = (char*)pg_malloc(len);
             rc = sprintf_s(newfn, len, "%s%s", home, p);
@@ -2080,8 +2058,19 @@ static void RecordGucStmt(PGresult* results, const char* query)
      * As normal user can't set role/session, there are no sensitive information leak
      * risk for the use of realloc.
      */
-    if (pset.num_guc_stmt % MAX_STMTS == 0)
-        pset.guc_stmt = (char**)pg_realloc(pset.guc_stmt, sizeof(char*) * (pset.num_guc_stmt + MAX_STMTS));
+    if (pset.num_guc_stmt % MAX_STMTS == 0) {
+        if(NULL != pset.guc_stmt) {
+            char** temp = (char**)pg_calloc(1, sizeof(char*) * (pset.num_guc_stmt + MAX_STMTS));
+            rc = memcpy_s(temp, sizeof(char*) * pset.num_guc_stmt, pset.guc_stmt, sizeof(char*) * pset.num_guc_stmt);
+            securec_check_c(rc, "\0", "\0");
+
+            free(pset.guc_stmt);
+            pset.guc_stmt = temp;
+        }
+        else {
+            pset.guc_stmt = (char**)pg_calloc(1, sizeof(char*) * (pset.num_guc_stmt + MAX_STMTS));
+        }
+    }
 
     pset.guc_stmt[pset.num_guc_stmt] = (char*)pg_malloc(sizeof(char) * (strlen(query) + 1));
 
@@ -2145,7 +2134,16 @@ static int file_lock(int fd, unsigned int operation)
 /* Set search_path for parallel execute in temp table. */
 static void set_searchpath_for_tmptbl(PGconn* conn)
 {
-    static const char* stmt1 = "select nspname from pg_namespace where oid = pg_my_temp_schema();";
+    static const char *stmt1 = "select                  \
+        case                                            \
+        when instr(s.setting, 'pg_temp_') = 1 then      \
+            s.setting                                   \
+        else                                            \
+            n.nspname||','||s.setting                   \
+        end                                             \
+        from pg_namespace n, pg_settings s              \
+        where n.oid = pg_my_temp_schema()               \
+            and s.name='search_path';";
     char stmt2[128] = {0};
     char* value1 = NULL;
     PGresult* res1 = NULL;
@@ -2189,6 +2187,10 @@ static int CreateMutexForParallel()
     pset.parallelMutex = (struct parallelMutex_t*)mmap(
         NULL, sizeof(*pset.parallelMutex), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     if (NULL == pset.parallelMutex) {
+        psql_error("Failed to create mutex for parallel execution.\n");
+        return -1;
+    }
+    if (pset.parallelMutex == MAP_FAILED) {
         psql_error("Failed to create mutex for parallel execution.\n");
         return -1;
     }
@@ -2245,30 +2247,3 @@ static int DestroyMutexForParallel()
 
     return ret;
 }
-
-/*
- * GetEnvStr
- *
- * Note: malloc space for get the return of getenv() function, then return the malloc space.
- *         so, this space need be free.
- */
-char* GetEnvStr(const char* env)
-{
-    char* tmpvar = NULL;
-    const char* temp = getenv(env);
-    errno_t rc = 0;
-    if (temp != NULL) {
-        size_t len = strlen(temp);
-        if (len == 0 || len > MAXPGPATH) {
-            return NULL;
-        }
-        tmpvar = (char*)malloc(len + 1);
-        if (tmpvar != NULL) {
-            rc = strcpy_s(tmpvar, len + 1, temp);
-            securec_check_c(rc, "\0", "\0");
-            return tmpvar;
-        }
-    }
-    return NULL;
-}
-

@@ -27,4 +27,6 @@ include $(top_builddir)/src/Makefile.global
 
 SUBDIRS     = core/src fdw_adapter/src jit_exec/src
 
+export MASSTREE_HOME
+
 include $(top_srcdir)/src/gausskernel/common.mk

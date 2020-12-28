@@ -3,7 +3,7 @@
 --
 -- sanity check of pg_proc catalog to the given parameters
 --
-CREATE USER regtest_unpriv_user PASSWORD 'ttest@123';
+CREATE USER regtest_unpriv_user PASSWORD 'gauss@123';
 
 CREATE SCHEMA temp_func_test;
 GRANT ALL ON SCHEMA temp_func_test TO public;
@@ -98,7 +98,7 @@ SELECT proname, proleakproof FROM pg_proc
 ALTER FUNCTION functext_E_1(int) OWNER TO regtest_unpriv_user;
 ALTER FUNCTION functext_E_2(int) OWNER TO regtest_unpriv_user;
 
-SET SESSION AUTHORIZATION regtest_unpriv_user PASSWORD 'ttest@123';
+SET SESSION AUTHORIZATION regtest_unpriv_user PASSWORD 'gauss@123';
 SET search_path TO temp_func_test, public;
 ALTER FUNCTION functext_E_1(int) NOT LEAKPROOF;
 ALTER FUNCTION functext_E_2(int) LEAKPROOF;
@@ -147,6 +147,6 @@ RESET search_path;
 --test do anonymous for mask password
 DO
 $$BEGIN
-create role role_in_do_anonymous password 'test@123';
+create role role_in_do_anonymous password 'gaussdb@123';
 END$$;
 drop role role_in_do_anonymous;

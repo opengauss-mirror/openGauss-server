@@ -1,0 +1,40 @@
+drop table if exists lineitem_with_null;
+CREATE TABLE lineitem_with_null
+(
+    L_ORDERKEY    BIGINT
+  , L_PARTKEY     BIGINT
+  , L_SUPPKEY     BIGINT
+  , L_LINENUMBER  BIGINT
+  , L_QUANTITY    DECIMAL(15,2)
+  , L_EXTENDEDPRICE  DECIMAL(15,2)
+  , L_DISCOUNT    DECIMAL(15,2)
+  , L_TAX         DECIMAL(15,2)
+  , L_RETURNFLAG  CHAR(1)
+  , L_LINESTATUS  CHAR(1)
+  , L_SHIPDATE    DATE
+  , L_COMMITDATE  DATE
+  , L_RECEIPTDATE DATE
+  , L_SHIPINSTRUCT CHAR(25)
+  , L_SHIPMODE     CHAR(10)
+  , L_COMMENT      VARCHAR(44)
+)
+with (orientation = orc) tablespace hdfs_ts 
+distribute by hash(L_ORDERKEY);
+COPY lineitem_with_null FROM '@abs_srcdir@/data/lineitem_null.data' with (format 'text', delimiter '|', null '');
+analyze lineitem_with_null;
+analyze lineitem_with_null(L_PARTKEY);
+analyze lineitem_with_null(L_SHIPMODE);
+analyze lineitem_with_null(L_COMMENT);
+drop table lineitem_with_null;
+------
+--case 2:
+------
+create table t(c1 int, c2 varchar(64), c3 char(20), c4 char(64), c5 time with time zone) 
+with (orientation = orc) tablespace hdfs_ts  distribute by hash(c1);
+copy t from '@abs_srcdir@/data/cstore_copy_t.data' DELIMITER '|';
+analyze t;
+analyze t(c4);
+analyze t(c5);
+analyze t(c1);
+select * from t order by c1,c2,c3,c4,c5;
+drop table t;

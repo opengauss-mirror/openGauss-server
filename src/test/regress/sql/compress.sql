@@ -33,10 +33,10 @@ SELECT * FROM uncmprs ORDER BY id;
 DROP TABLE uncmprs;
 
 -- case 3:  Given compress/COMPRESS
-CREATE TABLE cmprs(id int, name text) compress;
+CREATE TABLE cmprs(id int, name text) ;
 SELECT relcmprs FROM pg_class WHERE relname='cmprs';
 DROP TABLE cmprs;
-CREATE TABLE cmprs(id int, name text) COMPRESS;
+CREATE TABLE cmprs(id int, name text) ;
 SELECT relcmprs FROM pg_class WHERE relname='cmprs';
 INSERT INTO cmprs VALUES(1, 'Cat');
 INSERT INTO cmprs VALUES(2, 'Dog');
@@ -55,7 +55,7 @@ DROP TABLE cmprs CASCADE;
 
 -- ****************** ALTER TABLE ********************
 -- case 1: COMPRESS -> NOCOMPRESS -> COMPRESS
-CREATE TABLE compresstbl(id int, name text, addr text) COMPRESS;
+CREATE TABLE compresstbl(id int, name text, addr text) ;
 SELECT relcmprs FROM pg_class WHERE relname='compresstbl';
 -- 	case 1.1: COMPRESS -> NOCOMPRESS
 ALTER TABLE compresstbl SET NOCOMPRESS;
@@ -94,7 +94,7 @@ CREATE TABLE cmpr_methods
 	d varchar(100) numstr,
 	e date nocompress,
 	f timestamp
-) COMPRESS;
+) ;
 SELECT relcmprs FROM pg_class WHERE relname='cmpr_methods';
 SELECT attcmprmode FROM pg_attribute WHERE attname = 'id' AND attrelid=(SELECT oid FROM pg_class WHERE relname='cmpr_methods');
 SELECT attcmprmode FROM pg_attribute WHERE attname = 'a' AND attrelid=(SELECT oid FROM pg_class WHERE relname='cmpr_methods');
@@ -112,7 +112,7 @@ create table rp
 	c1 int,
 	c2 int
 )
-COMPRESS
+
 partition by range (c1)
 (
 	partition p0 values less than (50),
@@ -135,7 +135,7 @@ SELECT relcmprs FROM pg_class WHERE relname='rp';
 DROP TABLE rp;
 
 -- test infterface pg_relation_with_compression()
-create table row_tbl ( a int , b int ) compress;
+create table row_tbl ( a int , b int ) ;
 select pg_relation_with_compression('row_tbl');
 alter table row_tbl set nocompress;
 select pg_relation_with_compression('row_tbl');

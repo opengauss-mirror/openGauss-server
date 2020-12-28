@@ -9,7 +9,7 @@
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
- *			src/gausskernel/storage/access/gin/ginbulk.cpp
+ *    src/gausskernel/storage/access/gin/ginbulk.cpp
  * -------------------------------------------------------------------------
  */
 #include "postgres.h"
@@ -25,25 +25,23 @@
 #define DEF_NPTR 5      /* ItemPointer initial allocation quantum */
 
 /* Combiner function for rbtree.c */
-static void ginCombineData(RBNode* existing, const RBNode* newdata, void* arg)
+static void ginCombineData(RBNode *existing, const RBNode *newdata, void *arg)
 {
-    GinEntryAccumulator* eo = (GinEntryAccumulator*)existing;
-    const GinEntryAccumulator* en = (const GinEntryAccumulator*)newdata;
-    BuildAccumulator* accum = (BuildAccumulator*)arg;
+    GinEntryAccumulator *eo = (GinEntryAccumulator *)existing;
+    const GinEntryAccumulator *en = (const GinEntryAccumulator *)newdata;
+    BuildAccumulator *accum = (BuildAccumulator *)arg;
 
     /*
      * Note this code assumes that newdata contains only one itempointer.
      */
     if (eo->count >= eo->maxcount) {
         if (eo->maxcount > INT_MAX / sizeof(ItemPointerData))
-            ereport(ERROR,
-                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                    errmsg("posting list is too long"),
-                    errhint("Reduce maintenance_work_mem.")));
+            ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("posting list is too long"),
+                            errhint("Reduce maintenance_work_mem.")));
 
         accum->allocatedMemory -= GetMemoryChunkSpace(eo->list);
         eo->maxcount *= 2;
-        eo->list = (ItemPointerData*)repalloc_huge(eo->list, sizeof(ItemPointerData) * eo->maxcount);
+        eo->list = (ItemPointerData *)repalloc_huge(eo->list, sizeof(ItemPointerData) * eo->maxcount);
         accum->allocatedMemory += GetMemoryChunkSpace(eo->list);
     }
 
@@ -63,27 +61,27 @@ static void ginCombineData(RBNode* existing, const RBNode* newdata, void* arg)
 }
 
 /* Comparator function for rbtree.c */
-static int cmpEntryAccumulator(const RBNode* a, const RBNode* b, void* arg)
+static int cmpEntryAccumulator(const RBNode *a, const RBNode *b, void *arg)
 {
-    const GinEntryAccumulator* ea = (const GinEntryAccumulator*)a;
-    const GinEntryAccumulator* eb = (const GinEntryAccumulator*)b;
-    BuildAccumulator* accum = (BuildAccumulator*)arg;
+    const GinEntryAccumulator *ea = (const GinEntryAccumulator *)a;
+    const GinEntryAccumulator *eb = (const GinEntryAccumulator *)b;
+    BuildAccumulator *accum = (BuildAccumulator *)arg;
 
     return ginCompareAttEntries(accum->ginstate, ea->attnum, ea->key, ea->category, eb->attnum, eb->key, eb->category);
 }
 
 /* Allocator function for rbtree.c */
-static RBNode* ginAllocEntryAccumulator(void* arg)
+static RBNode *ginAllocEntryAccumulator(void *arg)
 {
-    BuildAccumulator* accum = (BuildAccumulator*)arg;
-    GinEntryAccumulator* ea = NULL;
+    BuildAccumulator *accum = (BuildAccumulator *)arg;
+    GinEntryAccumulator *ea = NULL;
 
     /*
      * Allocate memory by rather big chunks to decrease overhead.  We have no
      * need to reclaim RBNodes individually, so this costs nothing.
      */
     if (accum->entryallocator == NULL || accum->eas_used >= DEF_NENTRY) {
-        accum->entryallocator = (GinEntryAccumulator*)palloc(sizeof(GinEntryAccumulator) * DEF_NENTRY);
+        accum->entryallocator = (GinEntryAccumulator *)palloc(sizeof(GinEntryAccumulator) * DEF_NENTRY);
         accum->allocatedMemory += GetMemoryChunkSpace(accum->entryallocator);
         accum->eas_used = 0;
     }
@@ -92,28 +90,25 @@ static RBNode* ginAllocEntryAccumulator(void* arg)
     ea = accum->entryallocator + accum->eas_used;
     accum->eas_used++;
 
-    return (RBNode*)ea;
+    return (RBNode *)ea;
 }
 
-void ginInitBA(BuildAccumulator* accum)
+void ginInitBA(BuildAccumulator *accum)
 {
     /* accum->ginstate is intentionally not set here */
     accum->allocatedMemory = 0;
     accum->entryallocator = NULL;
     accum->eas_used = 0;
-    accum->tree = rb_create(sizeof(GinEntryAccumulator),
-        cmpEntryAccumulator,
-        ginCombineData,
-        ginAllocEntryAccumulator,
-        NULL, /* no freefunc needed */
-        (void*)accum);
+    accum->tree = rb_create(sizeof(GinEntryAccumulator), cmpEntryAccumulator, ginCombineData, ginAllocEntryAccumulator,
+                            NULL, /* no freefunc needed */
+                            (void *)accum);
 }
 
 /*
  * This is basically the same as datumCopy(), but extended to count
  * palloc'd space in accum->allocatedMemory.
  */
-static Datum getDatumCopy(BuildAccumulator* accum, OffsetNumber attnum, Datum value)
+static Datum getDatumCopy(BuildAccumulator *accum, OffsetNumber attnum, Datum value)
 {
     Form_pg_attribute att = accum->ginstate->origTupdesc->attrs[attnum - 1];
     Datum res;
@@ -130,11 +125,11 @@ static Datum getDatumCopy(BuildAccumulator* accum, OffsetNumber attnum, Datum va
 /*
  * Find/store one entry from indexed value.
  */
-static void ginInsertBAEntry(
-    BuildAccumulator* accum, ItemPointer heapptr, OffsetNumber attnum, Datum key, GinNullCategory category)
+static void ginInsertBAEntry(BuildAccumulator *accum, ItemPointer heapptr, OffsetNumber attnum, Datum key,
+                             GinNullCategory category)
 {
     GinEntryAccumulator eatmp;
-    GinEntryAccumulator* ea = NULL;
+    GinEntryAccumulator *ea = NULL;
     bool isNew = false;
 
     /*
@@ -147,7 +142,7 @@ static void ginInsertBAEntry(
     /* temporarily set up single-entry itempointer list */
     eatmp.list = heapptr;
 
-    ea = (GinEntryAccumulator*)rb_insert(accum->tree, (RBNode*)&eatmp, &isNew);
+    ea = (GinEntryAccumulator *)rb_insert(accum->tree, (RBNode *)&eatmp, &isNew);
 
     if (isNew) {
         /*
@@ -159,7 +154,7 @@ static void ginInsertBAEntry(
         ea->maxcount = DEF_NPTR;
         ea->count = 1;
         ea->shouldSort = FALSE;
-        ea->list = (ItemPointerData*)palloc(sizeof(ItemPointerData) * DEF_NPTR);
+        ea->list = (ItemPointerData *)palloc(sizeof(ItemPointerData) * DEF_NPTR);
         ea->list[0] = *heapptr;
         accum->allocatedMemory += GetMemoryChunkSpace(ea->list);
     } else {
@@ -185,8 +180,8 @@ static void ginInsertBAEntry(
  * tree; then, we insert the middles of each half of our virtual array, then
  * middles of quarters, etc.
  */
-void ginInsertBAEntries(BuildAccumulator* accum, ItemPointer heapptr, OffsetNumber attnum, Datum* entries,
-    GinNullCategory* categories, int32 nentries)
+void ginInsertBAEntries(BuildAccumulator *accum, ItemPointer heapptr, OffsetNumber attnum, Datum *entries,
+                        GinNullCategory *categories, int32 nentries)
 {
     uint32 step = nentries;
 
@@ -216,7 +211,7 @@ void ginInsertBAEntries(BuildAccumulator* accum, ItemPointer heapptr, OffsetNumb
     }
 }
 
-static int qsortCompareItemPointers(const void* a, const void* b)
+static int qsortCompareItemPointers(const void *a, const void *b)
 {
     int res = ginCompareItemPointers((ItemPointer)a, (ItemPointer)b);
 
@@ -226,7 +221,7 @@ static int qsortCompareItemPointers(const void* a, const void* b)
 }
 
 /* Prepare to read out the rbtree contents using ginGetBAEntry */
-void ginBeginBAScan(BuildAccumulator* accum)
+void ginBeginBAScan(BuildAccumulator *accum)
 {
     rb_begin_iterate(accum->tree, LeftRightWalk);
 }
@@ -236,13 +231,13 @@ void ginBeginBAScan(BuildAccumulator* accum)
  * This consists of a single key datum and a list (array) of one or more
  * heap TIDs in which that key is found.  The list is guaranteed sorted.
  */
-ItemPointerData* ginGetBAEntry(
-    BuildAccumulator* accum, OffsetNumber* attnum, Datum* key, GinNullCategory* category, uint32* n)
+ItemPointerData *ginGetBAEntry(BuildAccumulator *accum, OffsetNumber *attnum, Datum *key, GinNullCategory *category,
+                               uint32 *n)
 {
-    GinEntryAccumulator* entry = NULL;
-    ItemPointerData* list = NULL;
+    GinEntryAccumulator *entry = NULL;
+    ItemPointerData *list = NULL;
 
-    entry = (GinEntryAccumulator*)rb_iterate(accum->tree);
+    entry = (GinEntryAccumulator *)rb_iterate(accum->tree);
     if (entry == NULL)
         return NULL; /* no more entries */
 

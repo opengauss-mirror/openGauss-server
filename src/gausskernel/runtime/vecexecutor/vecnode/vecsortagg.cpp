@@ -140,7 +140,6 @@ void SortAggRunner::switch_phase()
     init_phase();
 
     /* Set next group columns in this phase.*/
-    
     if (m_runtime->current_phase < m_runtime->numphases) {
         set_key();
     }
@@ -180,14 +179,12 @@ void SortAggRunner::init_indexForApFun()
     Bitmapset* all_need_cols = NULL;
 
     /* Get all columns participate in group*/
-    
     foreach (lc, m_runtime->all_grouped_cols) {
         int var_number = lfirst_int(lc) - 1;
         all_need_cols = bms_add_member(all_need_cols, var_number);
     }
 
     /* Get other columns not participate in group*/
-    
     foreach (lc, m_runtime->hash_needed) {
         int var_number = lfirst_int(lc) - 1;
         all_need_cols = bms_add_member(all_need_cols, var_number);
@@ -242,13 +239,11 @@ SortAggRunner::SortAggRunner(VecAggState* runtime)
 
     init_phase();
     /* OLAP function*/
-    
     if (node->groupingSets) {
         m_ApFun = true;
         init_indexForApFun();
         if (m_runtime->numphases > 1) {
             /* Store return results of phase sort. */
-            
             m_SortBatch = New(CurrentMemoryContext)
                 VectorBatch(CurrentMemoryContext, m_runtime->ss.ss_ScanTupleSlot->tts_tupleDescriptor);
         }
@@ -260,7 +255,6 @@ SortAggRunner::SortAggRunner(VecAggState* runtime)
     m_groupState = GET_MATCH_KEY;
 
     /* Init sort state for distinct operate. */
-    
     int64 workmem = SET_NODEMEM(node->plan.operatorMemKB[0], node->plan.dop);
     int64 maxmem = (node->plan.operatorMaxMem > 0) ? SET_NODEMEM(node->plan.operatorMaxMem, node->plan.dop) : 0;
     initialize_sortstate(workmem, maxmem, node->plan.plan_node_id, SET_DOP(node->plan.dop));
@@ -319,7 +313,6 @@ void SortAggRunner::FreeSortGrpMem(int num)
     errno_t rc;
 
     /* Find agg column and free m_sortGrp value.*/
-    
     for (i = 0; i < m_aggNum; i++) {
         /*
          * If column is vec avg type and data type is int1/int2/int4/folat4/float8,
@@ -360,7 +353,6 @@ void SortAggRunner::FreeSortGrpMem(int num)
 
         securec_check(rc, "\0", "\0");
         /* Reset the sort group index.*/
-        
         m_sortGrps[m_projected_set].sortGrpIdx = remain_grp - 1;
 
         m_sortGrps[m_projected_set].sortBckBuf->Reset();
@@ -376,10 +368,8 @@ void SortAggRunner::FreeSortGrpMem(int num)
 
         m_sortGrps[m_projected_set].sortGrpIdx = 0;
         /* release the space*/
-        
         m_sortGrps[m_projected_set].sortBckBuf->Reset();
         /* reset the batch.*/
-        
         m_scanBatch->Reset();
     }
 }
@@ -428,7 +418,6 @@ void SortAggRunner::BatchMatchAndAgg(int current_grp, VectorBatch* batch)
     sort_grp = m_sortGrps[current_grp].sortGrp;
 
     /* Compute agg for all data, no need group.*/
-    
     if (m_key == 0) {
         for (int i = 0; i < nrows; i++) {
             cell = sort_grp[current_sortGrpIdx];
@@ -451,7 +440,6 @@ void SortAggRunner::BatchMatchAndAgg(int current_grp, VectorBatch* batch)
             if (cell != NULL) {
                 if (m_runtime->jitted_SortAggMatchKey) {
                     /* mark if math_key of sortagg has been codegened or not */
-                    
                     if (HAS_INSTR(&m_runtime->ss, false)) {
                         m_runtime->ss.ps.instrument->isLlvmOpt = true;
                     }
@@ -464,16 +452,13 @@ void SortAggRunner::BatchMatchAndAgg(int current_grp, VectorBatch* batch)
             }
 
             /* means we got match fail*/
-            
             if (cell == NULL || matched_keys == false) {
                 if (cell != NULL) {
                     /* if we got no match, we should inc sort group index*/
-                    
                     current_sortGrpIdx++;
 
                     if (current_sortGrpIdx == BatchMaxSize) {
                         /* switch  buffer*/
-                        
                         VarBuf* tmp = NULL;
                         tmp = m_sortGrps[current_grp].sortCurrentBuf;
                         m_sortGrps[current_grp].sortCurrentBuf = m_sortGrps[current_grp].sortBckBuf;
@@ -554,7 +539,6 @@ VectorBatch* SortAggRunner::Run()
     for (;;) {
         switch (m_prepareState) {
             /* Get data source it possible be leftree or sort state*/
-            
             case GET_SOURCE: {
                 m_sortSource = GetSortSource();
                 if (m_sortSource == NULL) {
@@ -565,7 +549,6 @@ VectorBatch* SortAggRunner::Run()
                 break;
             }
             /* Execute group and agg*/
-            
             case RUN_SORT: {
                 VectorBatch* batch = RunSort();
                 if (BatchIsNull(batch)) {
@@ -576,9 +559,9 @@ VectorBatch* SortAggRunner::Run()
                 } else {
                     return batch;
                 }
+                break;
             }
             /* Switch parse if exist*/
-            
             case SWITCH_PARSE: {
                 switch_phase();
                 m_prepareState = GET_SOURCE;
@@ -604,7 +587,6 @@ VectorBatch* SortAggRunner::ReturnData()
             Assert(m_projected_set >= 0);
 
             /* Free memory which is used by previous return data.*/
-            
             FreeSortGrpMem<false>(BatchMaxSize);
         }
 
@@ -647,7 +629,6 @@ VectorBatch* SortAggRunner::ReturnLastData()
             Assert(m_projected_set >= 0);
 
             /* Free memory which is used by previous return date.*/
-            
             FreeSortGrpMem<true>(m_sortGrps[m_projected_set].sortGrpIdx);
         }
 
@@ -716,7 +697,6 @@ VectorBatch* SortAggRunner::ReturnNullData()
     while (m_runtime->phase->gset_lengths && m_projected_set < numset) {
         if (0 == m_runtime->phase->gset_lengths[m_projected_set]) {
             /* m_scanBatch need build only one row, result of return should be same */
-            
             if (m_scanBatch->m_rows == 0) {
                 BuildNullScanBatch();
             }
@@ -755,7 +735,6 @@ VectorBatch* SortAggRunner::RunSort()
     for (;;) {
         switch (m_runState) {
             /* Get data, grouping and  compute agg*/
-            
             case AGG_FETCH:
                 outer_batch = m_sortSource->getBatch();
                 if (unlikely(BatchIsNull(outer_batch))) {
@@ -766,13 +745,11 @@ VectorBatch* SortAggRunner::RunSort()
                     }
                     if (m_hasDistinct) {
                         /* compute last batch when numSortCols > 0 */
-                        
                         for (int i = 0; i < numset; i++) {
                             BatchSortAggregation(i, workmem, maxmem, plan->plan_node_id, SET_DOP(plan->dop));
                         }
                     }
                     /* return last data */
-                    
                     m_projected_set = -1;
                     m_runState = AGG_RETURN_LAST;
                     break;
@@ -789,7 +766,6 @@ VectorBatch* SortAggRunner::RunSort()
                 m_runState = AGG_RETURN;
                 break;
             /* Return data when rows > 1000 */
-            
             case AGG_RETURN:
                 result_batch = ReturnData();
                 if (result_batch != NULL) {
@@ -800,7 +776,6 @@ VectorBatch* SortAggRunner::RunSort()
                 }
                 break;
             /* Return last data, when outerBatch is null*/
-            
             case AGG_RETURN_LAST:
                 result_batch = ReturnLastData();
                 if (result_batch != NULL) {
@@ -812,7 +787,6 @@ VectorBatch* SortAggRunner::RunSort()
                 }
                 break;
             /* Return data for the case of group by column is null and left tree return data is null*/
-            
             case AGG_RETURN_NULL:
                 result_batch = ReturnNullData();
                 if (result_batch != NULL) {
@@ -887,7 +861,6 @@ void SortAggRunner::endSortAgg()
     }
 
     /* Free buf mem*/
-    
     int numset = Max(m_runtime->maxsets, 1);
     for (int i = 0; i < numset; i++) {
         m_sortGrps[i].sortBckBuf->DeInit();

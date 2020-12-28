@@ -1,0 +1,547 @@
+/*---------------------------------------------------------------------------------------
+ *
+ * Test multi-nodegroup create table ... like functionality
+ *
+ * Portions Copyright (c) 2016, Huawei
+ *
+ *
+ * IDENTIFICATION
+ *	  src/test/regress/sql/nodegroup_table_like.sql
+ *---------------------------------------------------------------------------------------
+ */
+create schema nodegroup_table_like_test;
+set current_schema = nodegroup_table_like_test;
+select node_name, node_type from pgxc_node order by 1,2;
+  node_name   | node_type 
+--------------+-----------
+ coordinator1 | C
+ coordinator2 | C
+ coordinator3 | C
+ datanode1    | D
+ datanode10   | D
+ datanode11   | D
+ datanode12   | D
+ datanode2    | D
+ datanode3    | D
+ datanode4    | D
+ datanode5    | D
+ datanode6    | D
+ datanode7    | D
+ datanode8    | D
+ datanode9    | D
+(15 rows)
+
+create node group ngroup1 with (datanode1, datanode3, datanode5, datanode7);
+create node group ngroup2 with (datanode2, datanode4, datanode6, datanode8, datanode10, datanode12);
+CREATE TABLE test1 (a int, b serial) TO GROUP ngroup1;
+NOTICE:  CREATE TABLE will create implicit sequence "test1_b_seq" for serial column "test1.b"
+CREATE TABLE test2 (a int, b int DEFAULT nextval('test1_b_seq') ) TO GROUP ngroup1;
+CREATE TABLE like_test2 (LIKE test2 including all) TO GROUP ngroup2;
+DROP TABLE like_test2;
+CREATE TABLE test3 (c int, d serial) TO GROUP ngroup2;
+NOTICE:  CREATE TABLE will create implicit sequence "test3_d_seq" for serial column "test3.d"
+alter table test3 alter d drop default;
+alter table test3 drop column d;
+drop table test3;
+CREATE TABLE test3 (c int, d serial) TO GROUP ngroup2;
+NOTICE:  CREATE TABLE will create implicit sequence "test3_d_seq" for serial column "test3.d"
+create sequence test3_seq owned by test3.c;
+alter sequence test3_seq owned by test1.a;
+drop sequence test3_seq cascade;
+create sequence test3_seq owned by test3.c;
+create table like_test1_test3 (id int, like test1, like test3 including all) TO GROUP ngroup2;
+NOTICE:  CREATE TABLE will create implicit sequence "like_test1_test3_b_seq" for serial column "like_test1_test3.b"
+NOTICE:  CREATE TABLE will create implicit sequence "like_test1_test3_d_seq" for serial column "like_test1_test3.d"
+create schema "spc schema";
+CREATE TABLE "spc schema"."special tab" (a int, "b col" serial) TO GROUP ngroup2;
+NOTICE:  CREATE TABLE will create implicit sequence "special tab_b col_seq" for serial column "special tab.b col"
+CREATE TABLE "spc schema"."tab2" (a int, b int) TO GROUP ngroup1;
+alter sequence "spc schema"."special tab_b col_seq" owned by "spc schema".tab2.b;
+alter sequence "spc schema"."special tab_b col_seq" owned by "spc schema"."special tab".b;
+ERROR:  column "b" of relation "special tab" does not exist
+set xc_maintenance_mode=on;
+alter node group ngroup1 set sequence to local;
+alter node group ngroup2 set sequence to local;
+alter node group ngroup1 set sequence to all node;
+alter node group ngroup2 set sequence to all node;
+set xc_maintenance_mode=off;
+drop schema "spc schema" cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table "spc schema"."special tab"
+drop cascades to table "spc schema".tab2
+drop table test3;
+drop table like_test1_test3;
+CREATE TABLE REGION
+(
+    R_REGIONKEY  INT NOT NULL
+  , R_NAME       CHAR(25) NOT NULL
+  , R_COMMENT    VARCHAR(152)
+)
+with (orientation=column,compression=high  )
+distribute by replication
+TO GROUP ngroup1
+;
+CREATE TABLE NATION
+(
+    N_NATIONKEY  INT NOT NULL
+  , N_NAME       CHAR(25) NOT NULL
+  , N_REGIONKEY  INT NOT NULL
+  , N_COMMENT    VARCHAR(152)
+)
+with (orientation=column,compression=high )
+distribute by replication
+TO GROUP ngroup1
+;
+CREATE TABLE SUPPLIER
+(
+    S_SUPPKEY     BIGINT NOT NULL
+  , S_NAME        CHAR(25) NOT NULL
+  , S_ADDRESS     VARCHAR(40) NOT NULL
+  , S_NATIONKEY   INT NOT NULL
+  , S_PHONE       CHAR(15) NOT NULL
+  , S_ACCTBAL     DECIMAL(15,2) NOT NULL
+  , S_COMMENT     VARCHAR(101) NOT NULL
+  --, primary key (S_SUPPKEY)
+)
+with (orientation=column,compression=high )
+distribute by hash(S_SUPPKEY)
+TO GROUP ngroup1 
+PARTITION BY RANGE(S_NATIONKEY)
+(
+    PARTITION S_NATIONKEY_1 VALUES LESS THAN(1),
+    PARTITION S_NATIONKEY_2 VALUES LESS THAN(2),
+    PARTITION S_NATIONKEY_3 VALUES LESS THAN(3),
+	PARTITION S_NATIONKEY_4 VALUES LESS THAN(4),
+	PARTITION S_NATIONKEY_5 VALUES LESS THAN(5),
+	PARTITION S_NATIONKEY_6 VALUES LESS THAN(6),
+	PARTITION S_NATIONKEY_7 VALUES LESS THAN(7),
+	PARTITION S_NATIONKEY_8 VALUES LESS THAN(8),
+	PARTITION S_NATIONKEY_9 VALUES LESS THAN(9),
+	PARTITION S_NATIONKEY_10 VALUES LESS THAN(10),
+	PARTITION S_NATIONKEY_11 VALUES LESS THAN(11),
+	PARTITION S_NATIONKEY_12 VALUES LESS THAN(12),
+	PARTITION S_NATIONKEY_13 VALUES LESS THAN(13),
+	PARTITION S_NATIONKEY_14 VALUES LESS THAN(14),
+	PARTITION S_NATIONKEY_15 VALUES LESS THAN(15),
+	PARTITION S_NATIONKEY_16 VALUES LESS THAN(16),
+	PARTITION S_NATIONKEY_17 VALUES LESS THAN(17),
+	PARTITION S_NATIONKEY_18 VALUES LESS THAN(18),
+	PARTITION S_NATIONKEY_19 VALUES LESS THAN(19),
+	PARTITION S_NATIONKEY_20 VALUES LESS THAN(20),
+	PARTITION S_NATIONKEY_21 VALUES LESS THAN(21),
+	PARTITION S_NATIONKEY_22 VALUES LESS THAN(22),
+	PARTITION S_NATIONKEY_23 VALUES LESS THAN(23),
+	PARTITION S_NATIONKEY_24 VALUES LESS THAN(24),
+	PARTITION S_NATIONKEY_25 VALUES LESS THAN(25)
+)
+;
+create index on SUPPLIER(S_SUPPKEY) LOCAL;
+CREATE TABLE CUSTOMER
+(
+    C_CUSTKEY     BIGINT NOT NULL
+  , C_NAME        VARCHAR(25) NOT NULL
+  , C_ADDRESS     VARCHAR(40) NOT NULL
+  , C_NATIONKEY   INT NOT NULL
+  , C_PHONE       CHAR(15) NOT NULL
+  , C_ACCTBAL     DECIMAL(15,2)   NOT NULL
+  , C_MKTSEGMENT  CHAR(10) NOT NULL
+  , C_COMMENT     VARCHAR(117) NOT NULL
+)
+with (orientation=column,compression=high )
+distribute by hash(C_CUSTKEY)
+TO GROUP ngroup1
+PARTITION BY RANGE(C_NATIONKEY)
+(
+    PARTITION C_NATIONKEY_1 VALUES LESS THAN(1),
+    PARTITION C_NATIONKEY_2 VALUES LESS THAN(2),
+    PARTITION C_NATIONKEY_3 VALUES LESS THAN(3),
+	PARTITION C_NATIONKEY_4 VALUES LESS THAN(4),
+	PARTITION C_NATIONKEY_5 VALUES LESS THAN(5),
+	PARTITION C_NATIONKEY_6 VALUES LESS THAN(6),
+	PARTITION C_NATIONKEY_7 VALUES LESS THAN(7),
+	PARTITION C_NATIONKEY_8 VALUES LESS THAN(8),
+	PARTITION C_NATIONKEY_9 VALUES LESS THAN(9),
+	PARTITION C_NATIONKEY_10 VALUES LESS THAN(10),
+	PARTITION C_NATIONKEY_11 VALUES LESS THAN(11),
+	PARTITION C_NATIONKEY_12 VALUES LESS THAN(12),
+	PARTITION C_NATIONKEY_13 VALUES LESS THAN(13),
+	PARTITION C_NATIONKEY_14 VALUES LESS THAN(14),
+	PARTITION C_NATIONKEY_15 VALUES LESS THAN(15),
+	PARTITION C_NATIONKEY_16 VALUES LESS THAN(16),
+	PARTITION C_NATIONKEY_17 VALUES LESS THAN(17),
+	PARTITION C_NATIONKEY_18 VALUES LESS THAN(18),
+	PARTITION C_NATIONKEY_19 VALUES LESS THAN(19),
+	PARTITION C_NATIONKEY_20 VALUES LESS THAN(20),
+	PARTITION C_NATIONKEY_21 VALUES LESS THAN(21),
+	PARTITION C_NATIONKEY_22 VALUES LESS THAN(22),
+	PARTITION C_NATIONKEY_23 VALUES LESS THAN(23),
+	PARTITION C_NATIONKEY_24 VALUES LESS THAN(24),
+	PARTITION C_NATIONKEY_25 VALUES LESS THAN(25)
+)
+;
+create index on CUSTOMER(C_CUSTKEY) LOCAL;
+CREATE TABLE PART
+(
+    P_PARTKEY     BIGINT NOT NULL
+  , P_NAME        VARCHAR(55) NOT NULL
+  , P_MFGR        CHAR(25) NOT NULL
+  , P_BRAND       CHAR(10) NOT NULL
+  , P_TYPE        VARCHAR(25) NOT NULL
+  , P_SIZE        BIGINT NOT NULL
+  , P_CONTAINER   CHAR(10) NOT NULL
+  , P_RETAILPRICE DECIMAL(15,2) NOT NULL
+  , P_COMMENT     VARCHAR(23) NOT NULL
+  --, primary key (P_PARTKEY)
+)
+with (orientation=column,compression=high )
+distribute by hash(P_PARTKEY)
+TO GROUP ngroup1 
+PARTITION BY RANGE(P_SIZE)
+(
+    PARTITION P_SIZE_1 VALUES LESS THAN(11),
+    PARTITION P_SIZE_2 VALUES LESS THAN(21),
+    PARTITION P_SIZE_3 VALUES LESS THAN(31),
+	PARTITION P_SIZE_4 VALUES LESS THAN(41),
+	PARTITION P_SIZE_5 VALUES LESS THAN(51)
+)
+;
+create index on PART(P_PARTKEY) LOCAL;
+CREATE TABLE PARTSUPP
+(
+    PS_PARTKEY     BIGINT NOT NULL
+  , PS_SUPPKEY     BIGINT NOT NULL
+  , PS_AVAILQTY    BIGINT NOT NULL
+  , PS_SUPPLYCOST  DECIMAL(15,2)  NOT NULL
+  , PS_COMMENT     VARCHAR(199) NOT NULL
+  --, primary key (PS_PARTKEY, PS_SUPPKEY)
+)
+with (orientation=column,compression=high )
+distribute by hash(PS_PARTKEY)
+TO GROUP ngroup1 
+PARTITION BY RANGE(PS_AVAILQTY)
+(
+    PARTITION PS_AVAILQTY_1 VALUES LESS THAN(1000),
+    PARTITION PS_AVAILQTY_2 VALUES LESS THAN(2000),
+    PARTITION PS_AVAILQTY_3 VALUES LESS THAN(3000),
+	PARTITION PS_AVAILQTY_4 VALUES LESS THAN(4000),
+	PARTITION PS_AVAILQTY_5 VALUES LESS THAN(5000),
+	PARTITION PS_AVAILQTY_6 VALUES LESS THAN(6000),
+	PARTITION PS_AVAILQTY_7 VALUES LESS THAN(7000),
+	PARTITION PS_AVAILQTY_8 VALUES LESS THAN(8000),
+	PARTITION PS_AVAILQTY_9 VALUES LESS THAN(9000),
+	PARTITION PS_AVAILQTY_10 VALUES LESS THAN(10000)
+)
+;
+create index on PARTSUPP(PS_PARTKEY, PS_SUPPKEY) LOCAL;
+CREATE TABLE ORDERS
+(
+    O_ORDERKEY       BIGINT NOT NULL
+  , O_CUSTKEY        BIGINT NOT NULL
+  , O_ORDERSTATUS    CHAR(1) NOT NULL
+  , O_TOTALPRICE     DECIMAL(15,2) NOT NULL
+  , O_ORDERDATE      DATE NOT NULL
+  , O_ORDERPRIORITY  CHAR(15) NOT NULL
+  , O_CLERK          CHAR(15) NOT NULL
+  , O_SHIPPRIORITY   BIGINT NOT NULL
+  , O_COMMENT        VARCHAR(79) NOT NULL
+  --, primary key (O_ORDERKEY)
+)
+with (orientation=column,compression=high )
+distribute by hash(O_ORDERKEY)
+TO GROUP ngroup1 
+PARTITION BY RANGE(O_ORDERDATE)
+(
+    PARTITION O_ORDERDATE_1 VALUES LESS THAN('1993-01-01 00:00:00'),
+    PARTITION O_ORDERDATE_2 VALUES LESS THAN('1994-01-01 00:00:00'),
+    PARTITION O_ORDERDATE_3 VALUES LESS THAN('1995-01-01 00:00:00'),
+	PARTITION O_ORDERDATE_4 VALUES LESS THAN('1996-01-01 00:00:00'),
+	PARTITION O_ORDERDATE_5 VALUES LESS THAN('1997-01-01 00:00:00'),
+	PARTITION O_ORDERDATE_6 VALUES LESS THAN('1998-01-01 00:00:00'),
+	PARTITION O_ORDERDATE_7 VALUES LESS THAN('1999-01-01 00:00:00')
+)
+;
+create index on ORDERS(O_ORDERKEY) LOCAL;
+CREATE TABLE LINEITEM
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+  --, primary key (L_ORDERKEY, L_LINENUMBER)
+)
+with (orientation=column,compression=high )
+distribute by hash(L_ORDERKEY)
+TO GROUP ngroup1 
+PARTITION BY RANGE(L_SHIPDATE)
+(
+    PARTITION L_SHIPDATE_1 VALUES LESS THAN('1993-01-01 00:00:00'),
+    PARTITION L_SHIPDATE_2 VALUES LESS THAN('1994-01-01 00:00:00'),
+    PARTITION L_SHIPDATE_3 VALUES LESS THAN('1995-01-01 00:00:00'),
+	PARTITION L_SHIPDATE_4 VALUES LESS THAN('1996-01-01 00:00:00'),
+	PARTITION L_SHIPDATE_5 VALUES LESS THAN('1997-01-01 00:00:00'),
+	PARTITION L_SHIPDATE_6 VALUES LESS THAN('1998-01-01 00:00:00'),
+	PARTITION L_SHIPDATE_7 VALUES LESS THAN('1999-01-01 00:00:00')
+)
+;
+create index on LINEITEM(L_ORDERKEY, L_LINENUMBER) LOCAL;
+CREATE TABLE films0 (
+    code        char(5) CONSTRAINT firstkey PRIMARY KEY,
+    title       varchar(40) NOT NULL,
+    did         integer NOT NULL,
+    date_prod   date,
+    kind        varchar(10),
+    len         interval hour to minute
+) TO GROUP ngroup1;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "firstkey" for table "films0"
+CREATE SEQUENCE serial1;
+CREATE TABLE distributors0 (
+     did    integer PRIMARY KEY DEFAULT nextval('serial1'),
+     name   varchar(40) NOT NULL CHECK (name <> '')
+) TO GROUP ngroup1;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "distributors0_pkey" for table "distributors0"
+CREATE TABLE array_int (
+    a       int,
+    vector  int[][]
+) TO GROUP ngroup1;
+CREATE TABLE films1 (
+    code        char(5),
+    title       varchar(40),
+    did         integer,
+    date_prod   date,
+    kind        varchar(10),
+    len         interval hour to minute,
+    CONSTRAINT production UNIQUE(date_prod)
+)TO GROUP ngroup1;
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "production" for table "films1"
+CREATE TABLE distributors1 (
+    did     integer CHECK (did > 100),
+    name    varchar(40)
+)TO GROUP ngroup1;
+CREATE TABLE distributors2 (
+    did     integer,
+    name    varchar(40)
+    CONSTRAINT con1 CHECK (did > 100 AND name <> '')
+)TO GROUP ngroup1;
+CREATE TABLE films2 (
+    code        char(5),
+    title       varchar(40),
+    did         integer,
+    date_prod   date,
+    kind        varchar(10),
+    len         interval hour to minute,
+    CONSTRAINT code_title PRIMARY KEY(code,title)
+) TO GROUP NGROUP1;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "code_title" for table "films2"
+CREATE TABLE distributors3 (
+    did     integer,
+    name    varchar(40),
+    PRIMARY KEY(did)
+) TO GROUP NGROUP1;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "distributors3_pkey" for table "distributors3"
+CREATE TABLE distributors4 (
+    did     integer PRIMARY KEY,
+    name    varchar(40)
+) TO GROUP NGROUP1;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "distributors4_pkey" for table "distributors4"
+CREATE TABLE distributors5 (
+    name      varchar(40) DEFAULT 'Luso Films',
+    did       integer DEFAULT nextval('serial1'),
+    modtime   timestamp DEFAULT current_timestamp
+) TO GROUP NGROUP1;
+CREATE TABLE distributors6 (
+    did     integer CONSTRAINT no_null NOT NULL,
+    name    varchar(40) NOT NULL
+)TO GROUP NGROUP1;
+CREATE TABLE distributors7 (
+    did     integer,
+    name    varchar(40) UNIQUE
+) TO GROUP NGROUP1;
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "distributors7_name_key" for table "distributors7"
+CREATE TABLE distributors8 (
+    did     integer,
+    name    varchar(40),
+    UNIQUE(name) WITH (fillfactor=70)
+)
+WITH (fillfactor=70)
+TO GROUP ngroup1;
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "distributors8_name_key" for table "distributors8"
+CREATE TABLE circles(
+c1 serial ,
+c2 varchar(100),
+c3 date default '2018-06-14',
+c4 timestamp with time zone default '2018-06-14 12:30:30+8',
+c5 numeric(18,9) default -999999999.000000009,
+c6 text default 'comments',
+partial  cluster key(c1,c3) )with(orientation=column, compression=middle)distribute by hash(c1)
+TO GROUP ngroup1 
+partition by range(c1)
+(partition col_on_01 start(-32768) end(0) every(200),
+partition col_on_02 start(0) end(32767) every(500) );
+NOTICE:  CREATE TABLE will create implicit sequence "circles_c1_seq" for serial column "circles.c1"
+CREATE TABLE warehouse_t1
+(
+W_WAREHOUSE_SK INTEGER NOT NULL,
+W_WAREHOUSE_ID CHAR(16) NOT NULL,
+W_WAREHOUSE_NAME VARCHAR(20) ,
+W_WAREHOUSE_SQ_FT INTEGER ,
+W_STREET_NUMBER CHAR(10) ,
+W_STREET_NAME VARCHAR(60) ,
+W_STREET_TYPE CHAR(15) ,
+W_SUITE_NUMBER CHAR(10) ,
+W_CITY VARCHAR(60) ,
+W_COUNTY VARCHAR(30) ,
+W_STATE CHAR(2) ,
+W_ZIP CHAR(10) ,
+W_COUNTRY VARCHAR(20) ,
+W_GMT_OFFSET DECIMAL(5,2)
+)DISTRIBUTE BY REPLICATION
+TO GROUP ngroup1;
+CREATE TABLE warehouse_t2
+(
+W_WAREHOUSE_SK INTEGER PRIMARY KEY CHECK (W_WAREHOUSE_SK > 0),
+W_WAREHOUSE_ID CHAR(16) NOT NULL,
+W_WAREHOUSE_NAME VARCHAR(20) CHECK (W_WAREHOUSE_NAME IS NOT NULL),
+W_WAREHOUSE_SQ_FT serial ,
+W_STREET_NUMBER bigserial ,
+W_STREET_NAME VARCHAR(60) ,
+W_STREET_TYPE CHAR(15) ,
+W_SUITE_NUMBER smallserial ,
+W_CITY VARCHAR(60) ,
+W_COUNTY VARCHAR(30) ,
+W_STATE CHAR(2) ,
+W_ZIP CHAR(10) ,
+W_COUNTRY VARCHAR(20) ,
+W_GMT_OFFSET DECIMAL(5,2),
+CONSTRAINT W_CONSTR_KEY2 CHECK(W_WAREHOUSE_SK > 0 AND W_WAREHOUSE_NAME IS NOT NULL)
+)COMPRESS  TO GROUP ngroup1;
+NOTICE:  CREATE TABLE will create implicit sequence "warehouse_t2_w_warehouse_sq_ft_seq" for serial column "warehouse_t2.w_warehouse_sq_ft"
+NOTICE:  CREATE TABLE will create implicit sequence "warehouse_t2_w_street_number_seq" for serial column "warehouse_t2.w_street_number"
+NOTICE:  CREATE TABLE will create implicit sequence "warehouse_t2_w_suite_number_seq" for serial column "warehouse_t2.w_suite_number"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "warehouse_t2_pkey" for table "warehouse_t2"
+CREATE TEMPORARY TABLE warehouse_t3
+(
+W_WAREHOUSE_SK INTEGER NOT NULL,
+W_WAREHOUSE_ID CHAR(16) NOT NULL,
+W_WAREHOUSE_NAME VARCHAR(20) ,
+W_WAREHOUSE_SQ_FT INTEGER ,
+W_STREET_NUMBER CHAR(10) ,
+W_STREET_NAME VARCHAR(60) ,
+W_STREET_TYPE CHAR(15) ,
+W_SUITE_NUMBER CHAR(10) ,
+W_CITY VARCHAR(60) ,
+W_COUNTY VARCHAR(30) ,
+W_STATE CHAR(2) ,
+W_ZIP CHAR(10) ,
+W_COUNTRY VARCHAR(20) ,
+W_GMT_OFFSET DECIMAL(5,2)
+) TO GROUP ngroup1;
+CREATE TABLE like_region(LIKE nodegroup_table_like_test.region INCLUDING ALL) TO GROUP ngroup2;
+CREATE TABLE like_nation(LIKE nodegroup_table_like_test.nation INCLUDING ALL) TO GROUP ngroup2;
+CREATE TABLE like_supplier(LIKE nodegroup_table_like_test.supplier INCLUDING ALL) TO GROUP ngroup2;
+CREATE TABLE like_customer(LIKE nodegroup_table_like_test.customer INCLUDING ALL) TO GROUP ngroup2;
+CREATE TABLE like_part(LIKE nodegroup_table_like_test.part INCLUDING ALL) TO GROUP ngroup2;
+CREATE TABLE like_partsupp(LIKE nodegroup_table_like_test.partsupp INCLUDING ALL) TO GROUP ngroup2;
+CREATE TABLE like_orders(LIKE nodegroup_table_like_test.orders INCLUDING ALL) TO GROUP ngroup2;
+CREATE TABLE like_lineitem(LIKE nodegroup_table_like_test.lineitem INCLUDING ALL) TO GROUP ngroup2;
+CREATE TABLE like_lineitem2(a int, LIKE nodegroup_table_like_test.lineitem INCLUDING ALL, b text, c serial) TO GROUP ngroup2;
+NOTICE:  CREATE TABLE will create implicit sequence "like_lineitem2_c_seq" for serial column "like_lineitem2.c"
+CREATE TABLE like_films0(LIKE nodegroup_table_like_test.films0 INCLUDING ALL) TO GROUP ngroup2;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "like_films0_pkey" for table "like_films0"
+CREATE TABLE like_films1(LIKE nodegroup_table_like_test.films1 INCLUDING ALL) TO GROUP ngroup2;
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "like_films1_date_prod_key" for table "like_films1"
+CREATE TABLE like_films2(LIKE nodegroup_table_like_test.films2 INCLUDING ALL) TO GROUP ngroup2;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "like_films2_pkey" for table "like_films2"
+CREATE TABLE like_array_int(LIKE nodegroup_table_like_test.array_int INCLUDING ALL) TO GROUP ngroup2;
+CREATE TABLE like_distributors0(LIKE nodegroup_table_like_test.distributors0 INCLUDING ALL) TO GROUP ngroup2;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "like_distributors0_pkey" for table "like_distributors0"
+CREATE TABLE like_distributors1(LIKE nodegroup_table_like_test.distributors1 INCLUDING ALL) TO GROUP ngroup2;
+CREATE TABLE like_distributors2(LIKE nodegroup_table_like_test.distributors2 INCLUDING ALL) TO GROUP ngroup2;
+CREATE TABLE like_distributors3(LIKE nodegroup_table_like_test.distributors3 INCLUDING ALL) TO GROUP ngroup2;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "like_distributors3_pkey" for table "like_distributors3"
+CREATE TABLE like_distributors4(LIKE nodegroup_table_like_test.distributors4 INCLUDING ALL) TO GROUP ngroup2;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "like_distributors4_pkey" for table "like_distributors4"
+CREATE TABLE like_distributors5(LIKE nodegroup_table_like_test.distributors5 INCLUDING ALL) TO GROUP ngroup2;
+CREATE TABLE like_distributors6(LIKE nodegroup_table_like_test.distributors6 INCLUDING ALL) TO GROUP ngroup2;
+CREATE TABLE like_distributors7(LIKE nodegroup_table_like_test.distributors7 INCLUDING ALL) TO GROUP ngroup2;
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "like_distributors7_name_key" for table "like_distributors7"
+CREATE TABLE like_distributors8(LIKE nodegroup_table_like_test.distributors8 INCLUDING ALL) TO GROUP ngroup2;
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "like_distributors8_name_key" for table "like_distributors8"
+CREATE TABLE like_circles(LIKE nodegroup_table_like_test.circles INCLUDING ALL) TO GROUP ngroup2;
+NOTICE:  CREATE TABLE will create implicit sequence "like_circles_c1_seq" for serial column "like_circles.c1"
+CREATE TABLE like_warehouse_t1(LIKE nodegroup_table_like_test.warehouse_t1 INCLUDING ALL) TO GROUP ngroup2;
+CREATE TABLE like_warehouse_t2(LIKE nodegroup_table_like_test.warehouse_t2 INCLUDING ALL) TO GROUP ngroup2;
+NOTICE:  CREATE TABLE will create implicit sequence "like_warehouse_t2_w_warehouse_sq_ft_seq" for serial column "like_warehouse_t2.w_warehouse_sq_ft"
+NOTICE:  CREATE TABLE will create implicit sequence "like_warehouse_t2_w_street_number_seq" for serial column "like_warehouse_t2.w_street_number"
+NOTICE:  CREATE TABLE will create implicit sequence "like_warehouse_t2_w_suite_number_seq" for serial column "like_warehouse_t2.w_suite_number"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "like_warehouse_t2_pkey" for table "like_warehouse_t2"
+CREATE TEMPORARY TABLE like_warehouse_t3(LIKE warehouse_t3 INCLUDING ALL) TO GROUP ngroup2;
+DROP TABLE warehouse_t3;
+DROP TABLE like_warehouse_t3;
+drop schema nodegroup_table_like_test cascade;
+NOTICE:  drop cascades to 52 other objects
+DETAIL:  drop cascades to table test1
+drop cascades to table test2
+drop cascades to table region
+drop cascades to table nation
+drop cascades to table supplier
+drop cascades to table customer
+drop cascades to table part
+drop cascades to table partsupp
+drop cascades to table orders
+drop cascades to table lineitem
+drop cascades to table films0
+drop cascades to sequence serial1
+drop cascades to table distributors0
+drop cascades to table array_int
+drop cascades to table films1
+drop cascades to table distributors1
+drop cascades to table distributors2
+drop cascades to table films2
+drop cascades to table distributors3
+drop cascades to table distributors4
+drop cascades to table distributors5
+drop cascades to table distributors6
+drop cascades to table distributors7
+drop cascades to table distributors8
+drop cascades to table circles
+drop cascades to table warehouse_t1
+drop cascades to table warehouse_t2
+drop cascades to table like_region
+drop cascades to table like_nation
+drop cascades to table like_supplier
+drop cascades to table like_customer
+drop cascades to table like_part
+drop cascades to table like_partsupp
+drop cascades to table like_orders
+drop cascades to table like_lineitem
+drop cascades to table like_lineitem2
+drop cascades to table like_films0
+drop cascades to table like_films1
+drop cascades to table like_films2
+drop cascades to table like_array_int
+drop cascades to table like_distributors0
+drop cascades to table like_distributors1
+drop cascades to table like_distributors2
+drop cascades to table like_distributors3
+drop cascades to table like_distributors4
+drop cascades to table like_distributors5
+drop cascades to table like_distributors6
+drop cascades to table like_distributors7
+drop cascades to table like_distributors8
+drop cascades to table like_circles
+drop cascades to table like_warehouse_t1
+drop cascades to table like_warehouse_t2
+drop node group ngroup1;
+drop node group ngroup2;

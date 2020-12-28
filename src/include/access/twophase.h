@@ -4,6 +4,7 @@
  *	  Two-phase-commit related declarations.
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -61,31 +62,21 @@ typedef struct GlobalTransactionData {
     char gid[GIDSIZE];         /* The GID assigned to the prepared xact */
 } GlobalTransactionData;
 
-typedef struct ValidPrepXidData
-{
-    volatile unsigned int refCount;
-    unsigned int numPrepXid;
-    TransactionId *validPrepXid;
-} ValidPrepXidData;
-
-typedef ValidPrepXidData *ValidPrepXid;
-
 /*
  * 2PC state file format:
  *
- *	1. TwoPhaseFileHeader
- *	2. TransactionId[] (subtransactions)
- *	3. ColFileNode[] (files to be deleted at commit)
- *	4. ColFileNode[] (files to be deleted at abort)
- *	5. SharedInvalidationMessage[] (inval messages to be sent at commit)
- *	6. TwoPhaseRecordOnDisk
- *	7. ...
- *	8. TwoPhaseRecordOnDisk (end sentinel, rmid == TWOPHASE_RM_END_ID)
- *	9. CRC32
+ *  1. TwoPhaseFileHeader
+ *  2. TransactionId[] (subtransactions)
+ *  3. ColFileNode[] (files to be deleted at commit)
+ *  4. ColFileNode[] (files to be deleted at abort)
+ *  5. SharedInvalidationMessage[] (inval messages to be sent at commit)
+ *  6. TwoPhaseRecordOnDisk
+ *  7. ...
+ *  8. TwoPhaseRecordOnDisk (end sentinel, rmid == TWOPHASE_RM_END_ID)
+ *  9. CRC32
  *
  * Each segment except the final CRC32 is MAXALIGN'd.
  */
-
 /*
  * Header for a 2PC state file
  */
@@ -107,6 +98,16 @@ typedef struct TwoPhaseFileHeader {
     int32 ncommitlibrarys;   /* number of delete-on-commit library file  */
     int32 nabortlibrarys;    /* number of delete-on-abort library file */
 } TwoPhaseFileHeader;
+
+typedef struct ValidPrepXidData
+{
+    volatile unsigned int refCount;
+    unsigned int numPrepXid;
+    bool isOverflow;
+    TransactionId *validPrepXid;
+} ValidPrepXidData;
+
+typedef ValidPrepXidData *ValidPrepXid;
 
 /*
  * Two Phase Commit shared state.  Access to this struct is protected
@@ -143,7 +144,7 @@ extern PGPROC* TwoPhaseGetDummyProc(TransactionId xid);
 extern BackendId TwoPhaseGetDummyBackendId(TransactionId xid);
 
 extern GlobalTransaction MarkAsPreparing(GTM_TransactionHandle handle, TransactionId xid, const char* gid,
-    TimestampTz prepared_at, Oid owner, Oid databaseid);
+    TimestampTz prepared_at, Oid owner, Oid databaseid, uint64 sessionid);
 
 extern void EndPrepare(GlobalTransaction gxact);
 extern void StartPrepare(GlobalTransaction gxact);
@@ -154,6 +155,9 @@ extern void StandbyRecoverPreparedTransactions(void);
 extern void RecoverPreparedTransactions(void);
 
 extern void CheckPointTwoPhase(XLogRecPtr redo_horizon);
+
+void DropBufferForDelRelinXlogUsingScan(ColFileNodeRel *delrels, int ndelrels);
+void DropBufferForDelRelsinXlogUsingHash(ColFileNodeRel *delrels, int ndelrels);
 
 extern void FinishPreparedTransaction(const char* gid, bool isCommit);
 

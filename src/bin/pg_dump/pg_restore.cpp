@@ -83,6 +83,7 @@ static int use_setsessauth = 0;
 static int no_security_labels = 0;
 static char* passwd = NULL;
 static char* decrypt_key = NULL;
+static bool is_encrypt = false;
 
 typedef struct option optType;
 #ifdef GSDUMP_LLT
@@ -171,7 +172,11 @@ int main(int argc, char** argv)
             exit_nicely(0);
         }
         if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0) {
+#ifdef ENABLE_MULTIPLE_NODES
             puts("gs_restore " DEF_GS_VERSION);
+#else
+            puts("gs_restore (openGauss) " PG_VERSION);
+#endif
             exit_nicely(0);
         }
     }
@@ -227,14 +232,17 @@ int main(int argc, char** argv)
     /* Make sure the input file exists */
     FILE* fd = fopen(inputFileSpec, PG_BINARY_R);
     if (NULL == fd) {
-        fprintf(stderr, "%s: %s\n", inputFileSpec, strerror(errno));
+        (void)fprintf(stderr, "%s: %s\n", inputFileSpec, strerror(errno));
         exit_nicely(1);
     }
-    fclose(fd);
+    (void)fclose(fd);
     fd = NULL;
 
     /* validate the restore options before start the actual operation */
     validate_restore_options(argv, opts);
+    if (is_encrypt) {
+        exit_horribly(NULL, "Encrypt mode is not supported yet.\n");
+    }
     decryptfile = checkDecryptArchive(&inputFileSpec, (ArchiveFormat)opts->format, decrypt_key);
 
     /* Take lock on the file itself on non-directory format and create a
@@ -395,6 +403,7 @@ static void free_restoreopts(RestoreOptions* opts)
         free_SimpleStringList(&opts->schemaNames);
 
         free(opts);
+        opts = NULL;
     }
 }
 
@@ -649,6 +658,7 @@ static void restore_getopts(int argc, char** argv, struct option* options, Resto
                 GS_FREE(decrypt_key);
                 decrypt_key = gs_strdup(optarg);
                 replace_password(argc, argv, "--with-key");
+                is_encrypt = true;
                 break;
 
             default:
@@ -712,7 +722,6 @@ void usage(const char* pchProgname)
     printf(_("  --section=SECTION                     restore named section (pre-data, data, or post-data)\n"));
     printf(_("  --use-set-session-authorization       use SET SESSION AUTHORIZATION commands instead of\n"
              "                                        ALTER OWNER commands to set ownership\n"));
-    printf(_("  --with-key=KEY                        AES128 decryption key, must be 16 bytes in length\n"));
 
     printf(_("\nConnection options:\n"));
     printf(_("  -h, --host=HOSTNAME                   database server host or socket directory\n"));
@@ -745,6 +754,7 @@ static bool checkDecryptArchive(char** pFileSpec, const ArchiveFormat fm, const 
         free(AH->fSpec);
         AH->fSpec = NULL;
         free(AH);
+        AH = NULL;
         return false;
     }
 
@@ -758,6 +768,7 @@ static bool checkDecryptArchive(char** pFileSpec, const ArchiveFormat fm, const 
     free(AH->fSpec);
     AH->fSpec = NULL;
     free(AH);
+    AH = NULL;
 
     return true;
 }

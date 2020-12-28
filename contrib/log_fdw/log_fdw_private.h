@@ -53,7 +53,7 @@
 #include "utils/lsyscache.h"
 #include "utils/relcache.h"
 #include "utils/syscache.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "miscadmin.h"
 #include "zlib.h"
 #include "unzip.h"

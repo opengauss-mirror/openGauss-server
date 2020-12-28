@@ -244,7 +244,7 @@ void pq_sendfloat4(StringInfo buf, float4 f)
     union {
         float4 f;
         uint32 i;
-    } swap;
+    } swap = { .i = 0 };
 
     swap.f = f;
     pq_sendint32(buf, swap.i);
@@ -266,7 +266,7 @@ void pq_sendfloat8(StringInfo buf, float8 f)
     union {
         float8 f;
         int64 i;
-    } swap;
+    } swap = { .i = 0 };
 
     swap.f = f;
     pq_sendint64(buf, swap.i);
@@ -463,7 +463,7 @@ unsigned int pq_getmsgint(StringInfo msg, int b)
  */
 int64 pq_getmsgint64(StringInfo msg)
 {
-    int64 result;
+    uint64 result;
     uint32 h32;
     uint32 l32;
 
@@ -476,7 +476,7 @@ int64 pq_getmsgint64(StringInfo msg)
     result <<= 32;
     result |= l32;
 
-    return result;
+    return (int64)result;
 }
 
 /* --------------------------------
@@ -490,7 +490,7 @@ float4 pq_getmsgfloat4(StringInfo msg)
     union {
         float4 f;
         uint32 i;
-    } swap;
+    } swap = { .i = 0 };
 
     swap.i = pq_getmsgint(msg, 4);
     return swap.f;
@@ -507,7 +507,7 @@ float8 pq_getmsgfloat8(StringInfo msg)
     union {
         float8 f;
         int64 i;
-    } swap;
+    } swap = { .i = 0 };
 
     swap.i = pq_getmsgint64(msg);
     return swap.f;
@@ -608,34 +608,6 @@ const char* pq_getmsgstring(StringInfo msg)
     msg->cursor += slen + 1;
 
     return pg_client_to_server(str, slen);
-}
-
-/* --------------------------------
- *		pq_getmsgrawstring - get a null-terminated text string - NO conversion
- *
- *		Returns a pointer directly into the message buffer.
- * --------------------------------
- */
-const char *pq_getmsgrawstring(StringInfo msg)
-{
-    char *str;
-    int slen;
-
-    str = &msg->data[msg->cursor];
-
-	/*
-	 * It's safe to use strlen() here because a StringInfo is guaranteed to
-	 * have a trailing null byte.  But check we found a null inside the
-	 * message.
-	 */
-    slen = strlen(str);
-    if (msg->cursor + slen >= msg->len)
-        ereport(ERROR,
-            (errcode(ERRCODE_PROTOCOL_VIOLATION),
-			    errmsg("invalid string in message")));
-    msg->cursor += slen + 1;
-
-    return str;
 }
 
 /* --------------------------------

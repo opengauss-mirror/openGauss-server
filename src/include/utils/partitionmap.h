@@ -30,7 +30,7 @@
 #include "access/htup.h"
 #include "catalog/pg_type.h"
 #include "nodes/primnodes.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "utils/hsearch.h"
 #include "utils/relcache.h"
 #include "utils/partcache.h"
@@ -53,6 +53,7 @@ typedef struct PartitionMap {
 
 // describe range partition
 #define RANGE_PARTKEYMAXNUM 4
+#define PARTITION_PARTKEYMAXNUM 4
 #define VALUE_PARTKEYMAXNUM 4
 #define INTERVAL_PARTKEYMAXNUM 1
 
@@ -69,6 +70,10 @@ void decre_partmap_refcount(PartitionMap* map);
 #define PartitionMapGetType(partmap) (((RangePartitionMap*)(partmap))->partitionKeyDataType)
 
 #define PartitionMapIsRange(partmap) (PART_TYPE_RANGE == ((RangePartitionMap*)(partmap))->type.type)
+
+#define PartitionMapIsList(partmap) (PART_TYPE_LIST == ((ListPartitionMap*)(partmap))->type.type)
+
+#define PartitionMapIsHash(partmap) (PART_TYPE_HASH == ((HashPartitionMap*)(partmap))->type.type)
 
 #define PartitionMapIsInterval(partmap) (PART_TYPE_INTERVAL == ((RangePartitionMap*)(partmap))->type.type)
 
@@ -92,11 +97,15 @@ extern List* relationGetPartitionOidList(Relation rel);
 extern void RelationInitPartitionMap(Relation relation);
 
 extern int partOidGetPartSequence(Relation rel, Oid partOid);
-extern Oid getRangePartitionOid(Relation relation, Const** partKeyValue, int* partIndex, bool topClosed);
-
+extern Oid getListPartitionOid(Relation relation, Const** partKeyValue, int* partIndex, bool topClosed);
+extern Oid getHashPartitionOid(Relation relation, Const** partKeyValue, int* partIndex, bool topClosed);
+extern Oid getRangePartitionOid(PartitionMap* partitionmap, Const** partKeyValue, int* partIndex, bool topClosed);
+extern Oid GetPartitionOidByParam(Relation relation, Param *paramArg, ParamExternData *prm);
 extern List* getPartitionBoundaryList(Relation rel, int sequence);
 extern Oid partitionKeyValueListGetPartitionOid(Relation rel, List* partKeyValueList, bool topClosed);
 extern int getNumberOfRangePartitions(Relation rel);
+extern int getNumberOfListPartitions(Relation rel);
+extern int getNumberOfHashPartitions(Relation rel);
 extern int getNumberOfPartitions(Relation rel);
 extern Const* transformDatum2Const(TupleDesc tupledesc, int16 attnum, Datum datumValue, bool isnull, Const* cnst);
 
@@ -112,6 +121,11 @@ extern int2vector* getPartitionKeyAttrNo(
     Oid** typeOids, HeapTuple pg_part_tup, TupleDesc tupledsc, TupleDesc rel_tupledsc);
 extern void unserializePartitionStringAttribute(Const** outMax, int outMaxLen, Oid* partKeyType, int partKeyTypeLen,
     Oid relid, int2vector* partkey, HeapTuple pg_part_tup, int att_num, TupleDesc tupledsc);
+extern void unserializeListPartitionAttribute(int *len, Const*** listValues, Oid* partKeyType, int partKeyTypeLen,
+    Oid relid, int2vector* partkey, HeapTuple pg_part_tup, int att_num, TupleDesc tupledsc);
+extern void unserializeHashPartitionAttribute(Const** outMax, int outMaxLen,
+    Oid relid, int2vector* partkey, HeapTuple pg_part_tup, int att_num, TupleDesc tupledsc);
+
 extern int partitonKeyCompare(Const** value1, Const** value2, int len);
 extern int getPartitionNumber(PartitionMap* map);
 
@@ -119,8 +133,10 @@ extern bool targetListHasPartitionKey(List* targetList, Oid partitiondtableid);
 
 extern int constCompare_constType(Const* value1, Const* value2);
 
-extern bool tupleLocateThePartition(Relation partTableRel, int partSeq, TupleDesc tupleDesc, HeapTuple tuple);
+extern bool tupleLocateThePartition(Relation partTableRel, int partSeq, TupleDesc tupleDesc, void* tuple);
 
 extern bool partitionHasToast(Oid partOid);
+
+extern void constCompare(Const* value1, Const* value2, int& compare);
 
 #endif /* PARTITIONMAP_H_ */

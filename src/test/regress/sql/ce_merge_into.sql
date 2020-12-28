@@ -1,0 +1,76 @@
+\! gs_ktool -d all
+\! gs_ktool -g
+
+DROP CLIENT MASTER KEY IF EXISTS MergeIntoCMK CASCADE;
+CREATE CLIENT MASTER KEY MergeIntoCMK WITH ( KEY_STORE = gs_ktool ,  KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY MergeIntoCEK WITH VALUES (CLIENT_MASTER_KEY = MergeIntoCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE COLUMN ENCRYPTION KEY MergeIntoCEK1 WITH VALUES (CLIENT_MASTER_KEY = MergeIntoCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE products
+(
+id int,
+product_id INTEGER ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MergeIntoCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+product_name VARCHAR2(60) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MergeIntoCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+category VARCHAR2(60) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MergeIntoCEK, ENCRYPTION_TYPE = DETERMINISTIC)
+);
+
+CREATE TABLE newproducts
+(
+id int,
+product_id INTEGER ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MergeIntoCEK1, ENCRYPTION_TYPE = DETERMINISTIC),
+product_name VARCHAR2(60) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MergeIntoCEK1, ENCRYPTION_TYPE = DETERMINISTIC),
+category VARCHAR2(60) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MergeIntoCEK1, ENCRYPTION_TYPE = DETERMINISTIC)
+);
+-- ERROR
+MERGE INTO products p
+USING newproducts np
+ON (p.product_id = np.product_id)
+WHEN MATCHED THEN
+  UPDATE SET p.product_name = np.product_name, p.category = np.category WHERE p.product_name != 'play gym'
+WHEN NOT MATCHED THEN
+  INSERT VALUES (np.id,np.product_id, np.product_name, np.category) WHERE np.category = 'books';
+
+DROP TABLE products;
+DROP TABLE newproducts;
+
+CREATE TABLE products
+(
+product_id INTEGER,
+product_name VARCHAR2(60) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MergeIntoCEK1, ENCRYPTION_TYPE = DETERMINISTIC),
+category VARCHAR2(60) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MergeIntoCEK1, ENCRYPTION_TYPE = DETERMINISTIC)
+);
+
+CREATE TABLE newproducts
+(
+product_id INTEGER,
+product_name VARCHAR2(60) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MergeIntoCEK1, ENCRYPTION_TYPE = DETERMINISTIC),
+category VARCHAR2(60) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MergeIntoCEK1, ENCRYPTION_TYPE = DETERMINISTIC)
+);
+
+INSERT INTO products VALUES (1501, 'vivitar 35mm', 'electrncs');
+INSERT INTO products VALUES (1502, 'olympus is50', 'electrncs');
+INSERT INTO products VALUES (1600, 'play gym', 'toys');
+INSERT INTO products VALUES (1601, 'lamaze', 'toys');
+INSERT INTO products VALUES (1666, 'harry potter', 'dvd');
+
+INSERT INTO newproducts VALUES (1502, 'olympus camera', 'electrncs');
+INSERT INTO newproducts VALUES (1601, 'lamaze', 'toys');
+INSERT INTO newproducts VALUES (1666, 'harry potter', 'toys');
+INSERT INTO newproducts VALUES (1700, 'wait interface', 'books');
+
+MERGE INTO products p
+USING newproducts np
+ON (p.product_id = np.product_id)
+WHEN MATCHED THEN
+  UPDATE SET p.product_name = np.product_name, p.category = np.category WHERE p.product_name != 'play gym'
+WHEN NOT MATCHED THEN
+  INSERT VALUES (np.product_id, np.product_name, np.category) WHERE np.category = 'books';
+
+SELECT * FROM products ORDER BY product_id;
+
+DROP TABLE products;
+DROP TABLE newproducts;
+DROP COLUMN ENCRYPTION KEY MergeIntoCEK;
+DROP COLUMN ENCRYPTION KEY MergeIntoCEK1;
+DROP CLIENT MASTER KEY MergeIntoCMK;
+
+\! gs_ktool -d all

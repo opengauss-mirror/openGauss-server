@@ -4,6 +4,7 @@
  *	  prototypes for functions in backend/catalog/catalog.c
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -40,6 +41,8 @@ extern int	forkname_chars(const char *str, ForkNumber *);
 
 extern char *relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum);
 extern char *GetDatabasePath(Oid dbNode, Oid spcNode);
+extern char* GetBucketDirPath(const RelFileNodeBackend& rel_file_node_backend);
+
 
 /* First argument is a RelFileNodeBackend */
 #define relpath(rnode, forknum) \

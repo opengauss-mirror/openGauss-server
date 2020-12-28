@@ -1,0 +1,605 @@
+\! source ./s3bin/s3_env
+-- Syntax & Option checks
+create user u1 password "gauss@123" useft;
+alter user u1 useft;
+drop user u1;
+create table ut_t1
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+);
+create foreign table ut_test1
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@',
+    format 'text',
+    DELIMITER ',',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+);
+ERROR:  OBS URL's hostname is not valid 'gsobs://@obshostname@'
+drop foreign table ut_test1;
+ERROR:  foreign table "ut_test1" does not exist
+create foreign table ut_test1
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@',
+    format 'text',
+    DELIMITER ',',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+);
+ERROR:  OBS URL's bucket is not valid 'gsobs://@obshostname@/@obsbucket@'
+drop foreign table ut_test1;
+ERROR:  foreign table "ut_test1" does not exist
+drop table ut_t1;
+--test rewind function
+create foreign table obs_from_table_005
+(
+   col_text   text
+) 
+SERVER gsmpp_server
+OPTIONS (
+location 'gsobs://@obshostname@/@obsbucket@/obscheck/customer_address_new',
+format 'csv',
+delimiter ',',
+encoding 'utf8',
+reject_limit 'unlimited',
+quote '"',
+chunksize '8',
+access_key '@ak@',
+secret_access_key '@sk@',
+encrypt 'off'
+)with err_obs_from_table_005;
+select count(*) from obs_from_table_005;
+ count 
+-------
+     1
+(1 row)
+
+drop foreign table obs_from_table_005;
+-------------------------------------------------------------------------------
+-- OBS Write table
+-------------------------------------------------------------------------------
+create foreign table t1_obs_read_ok
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/household_demographics.dat.0',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '32',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+    encrypt 'on');
+drop foreign table t1_obs_read_ok;
+-- Should fail as chunksize not in [8,512]
+create foreign table t1_obs_read_fail_invalid_chunksize
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/household_demographics.dat.0',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '4',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+    encrypt 'on');
+ERROR:  Invalid 'chunksize' option value '4' for OBS Read-Only table, valid range [8, 512] in MB
+-- Should fail as chunksize not in [8,512]
+create foreign table t1_obs_read_fail_invalid_chunksize
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/household_demographics.dat.0',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '513',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+    encrypt 'on');
+ERROR:  Invalid 'chunksize' option value '513' for OBS Read-Only table, valid range [8, 512] in MB
+-- Should fail as chunksize not a number
+create foreign table t1_obs_read_fail_invalid_chunksize
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/household_demographics.dat.0',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize 'test',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+    encrypt 'on');
+ERROR:  Invalid 'chunksize' option value 'test', only numeric value can be set
+create foreign table t1_obs_read_encrypt_on
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/household_demographics.dat.0',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+    encrypt 'on');
+drop foreign table t1_obs_read_encrypt_on;
+create foreign table t1_obs_read_encrypt_off
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/household_demographics.dat.0',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+    encrypt 'off');
+drop foreign table t1_obs_read_encrypt_off;
+-- Should fail as encrypt is not a valid value
+create foreign table t1_obs_read_fail_invalid_encrypt
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/household_demographics.dat.0',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+    encrypt 'invalid option');
+ERROR:  Invalid 'encrypt' option value 'invalid option' for OBS foreign table
+-- Should fail as no access_key
+create foreign table t1_obs_read_fail_noak
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/household_demographics.dat.0',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    --access_key '@ak@',
+    secret_access_key '@sk@',
+    encrypt 'on');
+ERROR:  OBS foreign table have to specify 'access_key' option
+-- Should fail as no secret_access_key
+create foreign table t1_obs_read_fail_nosk
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/household_demographics.dat.0',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    access_key '@ak@',
+    --secret_access_key '@sk@',
+    encrypt 'on');
+ERROR:  OBS foreign table have to specify 'secret_access_key' option
+-- Should fail if have redundant options
+create foreign table t1_obs_read_fail_nosk
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/household_demographics.dat.0',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+    encrypt 'on',
+    encrypt 'off');
+ERROR:  option "encrypt" provided more than once
+create foreign table t1_obs_read_fail_nosk
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/household_demographics.dat.0',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+    chunksize '32',
+    encrypt 'on',
+    chunksize '32');
+ERROR:  option "chunksize" provided more than once
+-------------------------------------------------------------------------------
+-- OBS Write table
+-------------------------------------------------------------------------------
+CREATE FOREIGN TABLE t1_obs_write_ok
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server
+OPTIONS(
+    location 'gsobs://@obshostname@/@obsbucket@/abcde/',
+    format 'text',
+    delimiter ',',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+    encoding 'utf8')
+    Write Only;
+drop foreign table t1_obs_write_ok;
+-- Should fail as obs location is not a directory
+\! chmod +x ./s3bin/s3
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/tpch_nation_out/ address=@obshostname@ ak=@ak@ sk=@sk@
+CREATE FOREIGN TABLE EXTNATION_WRITE (
+  N_NATIONKEY   BIGINT,
+  N_NAME      CHAR(25),
+  N_REGIONKEY   INTEGER NOT NULL,  -- references R_REGIONKEY
+  N_COMMENT   VARCHAR(152)
+)SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/tpch_nation_out',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+)
+Write Only;
+CREATE TABLE NATION (
+  N_NATIONKEY   BIGINT,
+  N_NAME      CHAR(25),
+  N_REGIONKEY   INTEGER NOT NULL,  -- references R_REGIONKEY
+  N_COMMENT   VARCHAR(152)
+);
+insert into EXTNATION_WRITE select * from NATION;
+drop foreign table EXTNATION_WRITE;
+drop table NATION;
+-- OBS Write table failed as chunksize specified
+CREATE FOREIGN TABLE t1_obs_write_fail_chunksize
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server
+OPTIONS(
+    location 'gsobs://@obshostname@/@obsbucket@/abcdef/',
+    format 'text',
+    chunksize '16',
+    delimiter ',',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+    encoding 'utf8')
+    Write Only;
+ERROR:  Option 'chunksize' is not allowed in OBS write-only table
+-- Should fail as specified an invalid encrypt value
+CREATE FOREIGN TABLE t1_obs_write_fail_invalid_encrypt
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server
+OPTIONS(
+    location 'gsobs://@obshostname@/@obsbucket@/abcdef/',
+    format 'text',
+    delimiter ',',
+    encoding 'utf8',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+    encrypt 'invalid value')
+Write Only;
+ERROR:  Invalid 'encrypt' option value 'invalid value' for OBS foreign table
+CREATE FOREIGN TABLE t1_obs_write_ok
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server
+OPTIONS(
+    location 'gsobs://10.175.38.76/gaussdb/abcde/|gsobs://10.175.38.76/gaussdb/fghij/',
+    format 'text',
+    delimiter ',',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+    encoding 'utf8')
+    Write Only;
+ERROR:  can not specify multiple locations
+-------------------------------------------------------------------------------
+-- OBS Other not allowed syntax
+-------------------------------------------------------------------------------
+-- Should fail with mode 
+create foreign table t1_obs_fail_mode
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/household_demographics.dat.0',
+    format 'text',
+    mode 'normal',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '32',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+    encrypt 'on');
+ERROR:  OBS foreign table does not support 'mode' option
+-- Should fail with fixed format
+create foreign table t1_obs_fail_fixed_
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/household_demographics.dat.0',
+    format 'fixed',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '32',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+    encrypt 'on');
+ERROR:  This OBS foreign table only supports CSV/TEXT format
+-- Should fail with log_remote option
+create foreign table t1_obs_fail_log_remote
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/household_demographics.dat.0',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '32',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+)
+log into err_ft_remote_log remote log 'err_ft_remote_log' per node reject limit '100';
+ERROR:  OBS foreign table does not support remote_log option
+-- Should fail with hasHeader option
+create foreign table t1_obs_fail_log_remote
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/household_demographics.dat.0',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    header 'on',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+);
+ERROR:  COPY HEADER available only in CSV mode
+-- Should fail with hasHeader option
+create foreign table t1_obs_fail_log_remote
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/household_demographics.dat.0',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    fileheader 'on',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+);
+ERROR:  OBS foreign table does not support 'fileheader' option
+-- other type foreign table not allowed
+--chunksize
+CREATE foreign TABLE extNATION(
+                N_NATIONKEY             BIGINT,
+                N_NAME                  CHAR(25),
+                N_REGIONKEY             BIGINT, 
+                N_COMMENT               VARCHAR(152)
+)
+SERVER gsmpp_server OPTIONS (
+location 'gsfs://10.185.240.54:8098/nation.csv',
+format 'text', 
+mode 'normal', 
+delimiter '|',
+chunksize '32');
+ERROR:  None OBS foreign table does not support 'chunksize' option
+--encrypt
+CREATE foreign TABLE extNATION(
+                N_NATIONKEY             BIGINT,
+                N_NAME                  CHAR(25),
+                N_REGIONKEY             BIGINT, 
+                N_COMMENT               VARCHAR(152)
+)
+SERVER gsmpp_server OPTIONS (
+location 'gsfs://10.185.240.54:8098/nation.csv',
+format 'text', 
+mode 'normal', 
+delimiter '|',
+encrypt 'on');
+ERROR:  None OBS foreign table does not support 'encrypt' option
+--access_key
+CREATE foreign TABLE extNATION(
+                N_NATIONKEY             BIGINT,
+                N_NAME                  CHAR(25),
+                N_REGIONKEY             BIGINT, 
+                N_COMMENT               VARCHAR(152)
+)
+SERVER gsmpp_server OPTIONS (
+location 'gsfs://10.185.240.54:8098/nation.csv',
+format 'text', 
+mode 'normal', 
+delimiter '|',
+access_key '@ak@');
+ERROR:  None OBS foreign table does not support 'access_key' option
+--secret_access_key
+CREATE foreign TABLE extNATION(
+                N_NATIONKEY             BIGINT,
+                N_NAME                  CHAR(25),
+                N_REGIONKEY             BIGINT, 
+                N_COMMENT               VARCHAR(152)
+)
+SERVER gsmpp_server OPTIONS (
+location 'gsfs://10.185.240.54:8098/nation.csv',
+format 'text', 
+mode 'normal', 
+delimiter '|',
+secret_access_key '@ak@');
+ERROR:  None OBS foreign table does not support 'secret_access_key' option
+--test multi tasks
+CREATE TABLE multitast(
+  P_PARTKEY   BIGINT,
+  P_NAME      VARCHAR(55),
+  P_MFGR      CHAR(25),
+  P_BRAND     CHAR(10),
+  P_TYPE      VARCHAR(25),
+  P_SIZE      INTEGER,
+  P_CONTAINER   CHAR(10),
+  P_RETAILPRICE DECIMAL,
+  P_COMMENT   VARCHAR(23)
+);
+CREATE FOREIGN TABLE multitastext (
+  P_PARTKEY   BIGINT,
+  P_NAME      VARCHAR(55),
+  P_MFGR      CHAR(25),
+  P_BRAND     CHAR(10),
+  P_TYPE      VARCHAR(25),
+  P_SIZE      INTEGER,
+  P_CONTAINER   CHAR(10),
+  P_RETAILPRICE DECIMAL,
+  P_COMMENT   VARCHAR(23)
+)SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/multitast/',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+);
+insert into multitast select * from multitastext;
+drop table multitast;
+drop foreign table multitastext;
+--duplicate URL locations
+CREATE FOREIGN TABLE ft_region_imp_obs_txt_50bucket
+(
+ R_REGIONKEY  INT,
+    R_NAME       CHAR(25),
+    R_COMMENT    VARCHAR(152)
+)
+SERVER gsmpp_server
+OPTIONS(
+location 'gsobs://@obshostname@/@obsbucket@/txt/region/region/|
+gsobs://@obshostname@/@obsbucket@/txt/region/region/',
+format 'text',
+encoding 'utf8',
+delimiter E'\x08',
+null '',
+access_key '@ak@',
+secret_access_key '@sk@',
+reject_limit 'unlimited',
+chunksize '64',
+encrypt 'on'
+) with err_region_obs_txt_50bucket;
+ERROR:  duplicated URL "gsobs://@obshostname@/@obsbucket@/txt/region/region/" in LOCATION

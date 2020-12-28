@@ -115,8 +115,9 @@ char** save_ps_display_args(int argc, char** argv)
             if (i == 0 || end_of_area + 1 == argv[i])
                 end_of_area = argv[i] + strlen(argv[i]);
         }
-        /* probably can't happen? */
-        if (end_of_area == NULL) {
+
+        if (end_of_area == NULL) /* probably can't happen? */
+        {
             u_sess->ps_cxt.ps_buffer = NULL;
             u_sess->ps_cxt.ps_buffer_size = 0;
             return argv;
@@ -126,9 +127,8 @@ char** save_ps_display_args(int argc, char** argv)
          * check for contiguous environ strings following argv
          */
         for (i = 0; environ[i] != NULL; i++) {
-            if (end_of_area + 1 == environ[i]) {
+            if (end_of_area + 1 == environ[i])
                 end_of_area = environ[i] + strlen(environ[i]);
-            }
         }
 
         u_sess->ps_cxt.ps_buffer = argv[0];
@@ -137,16 +137,19 @@ char** save_ps_display_args(int argc, char** argv)
         /*
          * move the environment out of the way
          */
-        new_environ = (char**)MemoryContextAlloc(t_thrd.top_mem_cxt, (i + 1) * sizeof(char*));
-        if (new_environ == NULL) {
-            ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY),
+        new_environ = (char**)MemoryContextAlloc(
+            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), (i + 1) * sizeof(char*));
+        if (NULL == new_environ) {
+            ereport(ERROR,
+                (errcode(ERRCODE_OUT_OF_MEMORY),
                     errmsg("out of memory"),
                     errdetail("Failed on request of size %lu.", (unsigned long)(size_t)((i + 1) * sizeof(char*)))));
             return NULL;
         }
 
         for (i = 0; environ[i] != NULL; i++) {
-            new_environ[i] = MemoryContextStrdup(t_thrd.top_mem_cxt, environ[i]);
+            new_environ[i] =
+                MemoryContextStrdup(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), environ[i]);
         }
         new_environ[i] = NULL;
         environ = new_environ;
@@ -171,7 +174,9 @@ char** save_ps_display_args(int argc, char** argv)
         char** new_argv;
         int i;
 
-        new_argv = (char**)MemoryContextAlloc(t_thrd.top_mem_cxt, (argc + 1) * sizeof(char*));
+        new_argv = (char**)MemoryContextAlloc(
+            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), (argc + 1) * sizeof(char*));
+
         if (NULL == new_argv) {
             ereport(ERROR,
                 (errcode(ERRCODE_OUT_OF_MEMORY),
@@ -181,7 +186,7 @@ char** save_ps_display_args(int argc, char** argv)
         }
 
         for (i = 0; i < argc; i++) {
-            new_argv[i] = MemoryContextStrdup(t_thrd.top_mem_cxt, argv[i]);
+            new_argv[i] = MemoryContextStrdup(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), argv[i]);
         }
         new_argv[argc] = NULL;
 
@@ -236,9 +241,10 @@ void init_ps_display(const char* username, const char* dbname, const char* host_
         return;
 #endif
 
-     /*
-      * Overwrite argv[] to point at appropriate space, if needed
-      */
+        /*
+         * Overwrite argv[] to point at appropriate space, if needed
+         */
+
 #ifdef PS_USE_CHANGE_ARGV
     u_sess->ps_cxt.save_argv[0] = u_sess->ps_cxt.ps_buffer;
     u_sess->ps_cxt.save_argv[1] = NULL;
@@ -257,6 +263,7 @@ void init_ps_display(const char* username, const char* dbname, const char* host_
     /*
      * Make fixed prefix of ps display.
      */
+
 #ifdef PS_USE_SETPROCTITLE
 
     /*
@@ -316,6 +323,7 @@ void set_ps_display(const char* activity, bool force)
     u_sess->ps_cxt.ps_buffer_cur_len = strlen(u_sess->ps_cxt.ps_buffer);
 
     /* Transmit new setting to kernel, if necessary */
+
 #ifdef PS_USE_SETPROCTITLE
     setproctitle("%s", u_sess->ps_cxt.ps_buffer);
 #endif

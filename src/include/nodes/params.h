@@ -79,7 +79,6 @@ typedef struct ParamListInfoData {
     void* parserSetupArg;
     int numParams; /* number of ParamExternDatas following */
     bool params_need_process;
-    struct Bitmapset *paramMask; /* if non-NULL, can ignore omitted params */
     ParamExternData params[FLEXIBLE_ARRAY_MEMBER];
 } ParamListInfoData;
 
@@ -113,8 +112,5 @@ enum { CURSOR_ISOPEN = 1, CURSOR_FOUND, CURSOR_NOTFOUND, CURSOR_ROWCOUNT };
 
 /* Functions found in src/backend/nodes/params.c */
 extern ParamListInfo copyParamList(ParamListInfo from);
-extern Size EstimateParamListSpace(ParamListInfo paramLI);
-extern void SerializeParamList(ParamListInfo paramLI, char *start_address, Size len);
-extern ParamListInfo RestoreParamList(char *start_address, Size len);
 
 #endif /* PARAMS_H */

@@ -1,0 +1,38 @@
+--create normal tablespace
+\! rm -rf @abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts
+drop tablespace if exists hdfs_ts;
+create  tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/temp_dir/hdfs_ts');
+
+-- create dfs table 
+drop table if exists hdfs_table005; 
+create table hdfs_table005 (a int, b int) tablespace hdfs_ts;
+set enable_global_stats = true;
+set cstore_insert_mode=main;
+insert into hdfs_table005 values(12, 13);
+set cstore_insert_mode=delta;
+insert into hdfs_table005 values(generate_series(1, 100), generate_series(1, 100));
+analyze;
+--create normal table
+drop table if exists normal_table ;
+create table normal_table(a int, b int);
+insert into normal_table values(generate_series(1, 100), generate_series(1, 100));
+analyze normal_table;
+
+explain (verbose, costs off, nodes off) select * from hdfs_table005 , normal_table where hdfs_table005.a = normal_table.b;
+
+explain (verbose, costs off, nodes off) select * from hdfs_table005 , normal_table where hdfs_table005.b = normal_table.b;
+
+explain (verbose, costs off, nodes off) select * from hdfs_table005  where hdfs_table005.a in (select normal_table.a from normal_table where hdfs_table005.a = normal_table.b);
+
+explain (verbose, costs off, nodes off) select * from hdfs_table005  where hdfs_table005.a in (select normal_table.a from normal_table);
+
+explain (verbose, costs off, nodes off) delete from hdfs_table005 using normal_table where normal_table.b = hdfs_table005.b;
+
+explain (verbose, costs off, nodes off) update hdfs_table005 set b = 5 where hdfs_table005.a in (select normal_table.a from normal_table);
+
+
+--clean environment
+drop table if exists normal_table ;
+drop table if exists hdfs_table005;
+drop tablespace if exists hdfs_ts;
+\! rm -rf @abs_srcdir@/tmp_check/temp_hdfs_dir

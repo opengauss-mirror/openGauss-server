@@ -15,6 +15,7 @@
 #include "miscadmin.h"
 
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
 #include "catalog/heap.h"
@@ -28,6 +29,7 @@
 #include "catalog/pg_depend.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_proc.h"
+#include "commands/dbcommands.h"
 #include "libpq/libpq-fe.h"
 #include "nodes/parsenodes.h"
 #include "nodes/makefuncs.h"
@@ -42,7 +44,7 @@
 #include "utils/syscache.h"
 #include "utils/lsyscache.h"
 #include "utils/array.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 #include "utils/acl.h"
 #include "utils/elog.h"
 #include "access/xact.h"
@@ -56,6 +58,7 @@
 #include "tcop/utility.h"
 #include "storage/proc.h"
 #include "utils/elog.h"
+#include "utils/snapmgr.h"
 
 #define CHAR_BUF_SIZE 512
 #define BUCKET_MAP_SIZE 32
@@ -79,17 +82,6 @@ typedef struct BucketMapCache {
 static void BucketMapCacheAddEntry(Oid groupoid, Datum groupanme_datum, Datum bucketmap_datum, ItemPointer ctid);
 static void BucketMapCacheRemoveEntry(Oid groupoid);
 
-typedef struct nodeinfo {
-    Oid node_id;
-    uint2 old_node_index;
-    uint2 new_node_index;
-    int old_buckets_num;
-#ifdef USE_ASSERT_CHECKING
-    int new_buckets_num;
-#endif
-    bool deleted;
-} nodeinfo;
-
 #define BUCKETMAP_MODE_DEFAULT 0
 #define BUCKETMAP_MODE_REMAP 1
 
@@ -107,7 +99,8 @@ void PgxcOpenGroupRelation(Relation* pgxc_group_rel);
 static void set_current_installation_nodegroup(const char* group_name)
 {
     /* Local cache value stored in top memory context */
-    MemoryContext oldcontext = MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+    MemoryContext oldcontext =
+        MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
     t_thrd.pgxc_cxt.current_installation_nodegroup = pstrdup(group_name);
     MemoryContextSwitchTo(oldcontext);
 }
@@ -115,7 +108,8 @@ static void set_current_installation_nodegroup(const char* group_name)
 static void set_current_redistribution_nodegroup(const char* group_name)
 {
     /* Local cache value stored in top memory context */
-    MemoryContext oldcontext = MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+    MemoryContext oldcontext =
+        MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
     t_thrd.pgxc_cxt.current_redistribution_nodegroup = pstrdup(group_name);
     MemoryContextSwitchTo(oldcontext);
 }
@@ -357,7 +351,7 @@ static char* get_bucket_string(uint2* bucket_ptr)
     for (i = 1; i < BUCKETDATALEN; i++) {
         rc = snprintf_s(one_bucket_str, sizeof(one_bucket_str), CHAR_BUF_SIZE - 1, ",%d", bucket_ptr[i]);
         securec_check_ss(rc, "\0", "\0");
-        rc = strncat_s(bucket_str, BUCKETSTRLEN - 1 - strlen(bucket_str), one_bucket_str, strlen(one_bucket_str));
+        rc = strncat_s(bucket_str, BUCKETSTRLEN, one_bucket_str, strlen(one_bucket_str));
         securec_check(rc, "\0", "\0");
     }
     return bucket_str;
@@ -406,7 +400,7 @@ static oidvector* get_group_member(Oid group_oid)
     tup = SearchSysCache(PGXCGROUPOID, ObjectIdGetDatum(group_oid), 0, 0, 0);
 
     if (!HeapTupleIsValid(tup))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("PGXC Group %d: group not defined", group_oid)));
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("PGXC Group %u: group not defined", group_oid)));
 
     gmember = (oidvector*)PG_DETOAST_DATUM_COPY(SysCacheGetAttr(PGXCGROUPOID, tup, Anum_pgxc_group_members, &isNull));
 
@@ -424,11 +418,11 @@ static bool exist_logic_cluster(Relation rel)
 {
     char group_kind;
     HeapTuple tuple;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     bool exist = false;
 
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
-    tuple = heap_getnext(scan, ForwardScanDirection);
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
+    tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
     while (tuple) {
         group_kind = get_group_kind(tuple);
         if (group_kind == PGXC_GROUPKIND_LCGROUP) {
@@ -436,9 +430,9 @@ static bool exist_logic_cluster(Relation rel)
             break;
         }
 
-        tuple = heap_getnext(scan, ForwardScanDirection);
+        tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
 
     return exist;
 }
@@ -527,7 +521,7 @@ static oidvector* oidvector_add(oidvector* nodes, oidvector* added)
         rc = memcpy_s(oids, count * sizeof(Oid), nodes->values, nodes->dim1 * sizeof(Oid));
         securec_check(rc, "\0", "\0");
     }
-    if (added->dim1 > 0) {
+    if (added->dim1 > 0 && nodes->dim1 >= 0) {
         rc = memcpy_s(&oids[nodes->dim1], added->dim1 * sizeof(Oid), added->values, added->dim1 * sizeof(Oid));
         securec_check(rc, "\0", "\0");
     }
@@ -681,7 +675,7 @@ static void PgxcChangeGroupName(Oid group_oid, const char* group_name)
     tup = SearchSysCache(PGXCGROUPOID, ObjectIdGetDatum(group_oid), 0, 0, 0);
 
     if (!HeapTupleIsValid(tup)) /* should not happen */
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("PGXC Group %d: group not defined", group_oid)));
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("PGXC Group %u: group not defined", group_oid)));
 
     // change installation group name
     rc = memset_s(values, sizeof(values), 0, sizeof(values));
@@ -776,7 +770,7 @@ static void PgxcChangeGroupMember(Oid group_oid, oidvector* gmember)
  *
  * Change in_redistribution filed of pgxc_group  to 'y'.
  */
-static void PgxcChangeRedistribution(Oid group_oid, char in_redistribution)
+void PgxcChangeRedistribution(Oid group_oid, char in_redistribution)
 {
     HeapTuple tup;
     HeapTuple newtuple;
@@ -791,7 +785,7 @@ static void PgxcChangeRedistribution(Oid group_oid, char in_redistribution)
     tup = SearchSysCache(PGXCGROUPOID, ObjectIdGetDatum(group_oid), 0, 0, 0);
 
     if (!HeapTupleIsValid(tup)) /* should not happen */
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("PGXC Group %d: group not defined", group_oid)));
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("PGXC Group %u: group not defined", group_oid)));
 
     // change in_redistribution
     rc = memset_s(values, sizeof(values), 0, sizeof(values));
@@ -840,14 +834,14 @@ static Oid PgxcGetFirstRoleId(Oid group_oid)
 {
     HeapTuple tuple;
     Relation auth_rel;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     Oid roleid;
     Form_pg_authid auth;
 
     roleid = InvalidOid;
     auth_rel = heap_open(AuthIdRelationId, AccessShareLock);
-    scan = heap_beginscan(auth_rel, SnapshotNow, 0, NULL);
-    tuple = heap_getnext(scan, ForwardScanDirection);
+    scan = tableam_scan_begin(auth_rel, SnapshotNow, 0, NULL);
+    tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
 
     while (tuple) {
         auth = (Form_pg_authid)GETSTRUCT(tuple);
@@ -856,10 +850,10 @@ static Oid PgxcGetFirstRoleId(Oid group_oid)
             break;
         }
 
-        tuple = heap_getnext(scan, ForwardScanDirection);
+        tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(auth_rel, AccessShareLock);
 
     return roleid;
@@ -874,14 +868,14 @@ static List* PgxcGetGroupRoleList()
 {
     HeapTuple tuple;
     Relation auth_rel;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     Oid roleid;
     Form_pg_authid auth;
     List* roles_list = NULL;
 
     auth_rel = heap_open(AuthIdRelationId, AccessShareLock);
-    scan = heap_beginscan(auth_rel, SnapshotNow, 0, NULL);
-    tuple = heap_getnext(scan, ForwardScanDirection);
+    scan = tableam_scan_begin(auth_rel, SnapshotNow, 0, NULL);
+    tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
 
     while (tuple) {
         auth = (Form_pg_authid)GETSTRUCT(tuple);
@@ -890,10 +884,10 @@ static List* PgxcGetGroupRoleList()
             roles_list = list_append_unique_oid(roles_list, roleid);
         }
 
-        tuple = heap_getnext(scan, ForwardScanDirection);
+        tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(auth_rel, AccessShareLock);
 
     return roles_list;
@@ -910,7 +904,7 @@ static List* PgxcGetRelationRoleList()
 {
     HeapTuple tuple;
     Relation rel;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     Form_pg_shdepend shdepend;
     Form_pg_authid auth;
     Oid roleid;
@@ -920,32 +914,36 @@ static List* PgxcGetRelationRoleList()
     List* roles_list = NULL;
 
     rel = heap_open(SharedDependRelationId, AccessShareLock);
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
-    tuple = heap_getnext(scan, ForwardScanDirection);
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
+    tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
 
     while (tuple) {
         shdepend = (Form_pg_shdepend)GETSTRUCT(tuple);
         if ((shdepend->classid != RelationRelationId && shdepend->classid != NamespaceRelationId &&
                 shdepend->classid != ProcedureRelationId) ||
+#ifdef ENABLE_MOT
             (shdepend->deptype != SHARED_DEPENDENCY_OWNER &&
                 shdepend->deptype != SHARED_DEPENDENCY_ACL &&
                 shdepend->deptype != SHARED_DEPENDENCY_MOT_TABLE)) {
-            tuple = heap_getnext(scan, ForwardScanDirection);
+#else
+            (shdepend->deptype != SHARED_DEPENDENCY_OWNER && shdepend->deptype != SHARED_DEPENDENCY_ACL)) {
+#endif
+            tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
             continue;
         }
 
         roles_list = list_append_unique_oid(roles_list, shdepend->refobjid);
 
-        tuple = heap_getnext(scan, ForwardScanDirection);
+        tuple =  (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
 
     /* Include all roles related to resource pool (excluding default resource pool). */
     rel = heap_open(AuthIdRelationId, AccessShareLock);
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
-    tuple = heap_getnext(scan, ForwardScanDirection);
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
+    tuple =  (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
 
     while (tuple) {
         rpoid = InvalidOid;
@@ -961,10 +959,10 @@ static List* PgxcGetRelationRoleList()
             roles_list = list_append_unique_oid(roles_list, roleid);
         }
 
-        tuple = heap_getnext(scan, ForwardScanDirection);
+        tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
 
     return roles_list;
@@ -1082,10 +1080,10 @@ static void PgxcChangeUserGroupOid(List* role_list, const char* group_name, Exec
  * if redist_kind is source group, we return [3 4 7];
  * if redist_kind is destination group, we return [2 8 9 10 11];
  */
-static oidvector* PgxcGetRedisNodes(Relation rel, char redist_kind)
+oidvector* PgxcGetRedisNodes(Relation rel, char redist_kind)
 {
     HeapTuple tuple;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     char in_redistribution;
     int self_index = -1;
     oidvector* gmember = NULL;
@@ -1094,8 +1092,8 @@ static oidvector* PgxcGetRedisNodes(Relation rel, char redist_kind)
 
     node_oids[0] = NULL;
     node_oids[1] = NULL;
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
-    tuple = heap_getnext(scan, ForwardScanDirection);
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
+    tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
 
     while (tuple) {
         bool need_free = false;
@@ -1116,9 +1114,9 @@ static oidvector* PgxcGetRedisNodes(Relation rel, char redist_kind)
         if (need_free)
             pfree_ext(gmember);
 
-        tuple = heap_getnext(scan, ForwardScanDirection);
+        tuple =  (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
 
     /* node_oids[0] is DST_GROUP and node_oids[1] is SRC_GROUP. */
     if (self_index == 1) {
@@ -1175,10 +1173,10 @@ static oidvector* PgxcGetRedisNodes(Relation rel, char redist_kind)
  * We shoule set in_redistribution to 'n'
  * We should call the function in  final phase of expanding logic cluster.
  */
-static void PgxcUpdateRedistSrcGroup(Relation rel, oidvector* gmember, text* bucket_str, char* group_name)
+void PgxcUpdateRedistSrcGroup(Relation rel, oidvector* gmember, text* bucket_str, char* group_name)
 {
     HeapTuple tuple;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     bool nulls[Natts_pgxc_group];
     Datum values[Natts_pgxc_group];
     bool replaces[Natts_pgxc_group];
@@ -1186,8 +1184,8 @@ static void PgxcUpdateRedistSrcGroup(Relation rel, oidvector* gmember, text* buc
     char in_redistribution;
     errno_t rc;
 
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
-    tuple = heap_getnext(scan, ForwardScanDirection);
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
+    tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
 
     while (tuple) {
         in_redistribution = ((Form_pgxc_group)GETSTRUCT(tuple))->in_redistribution;
@@ -1195,11 +1193,11 @@ static void PgxcUpdateRedistSrcGroup(Relation rel, oidvector* gmember, text* buc
             break;
         }
 
-        tuple = heap_getnext(scan, ForwardScanDirection);
+        tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
     }
 
     if (tuple == NULL) {
-        heap_endscan(scan);
+        tableam_scan_end(scan);
         /* Can not find redistributed source group. */
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_OBJECT),
@@ -1230,7 +1228,7 @@ static void PgxcUpdateRedistSrcGroup(Relation rel, oidvector* gmember, text* buc
     CatalogUpdateIndexes(rel, newtuple);
     heap_freetuple(newtuple);
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
 }
 
 /*
@@ -1251,7 +1249,7 @@ void PgxcGroupAddNode(Oid group_oid, Oid nodeid)
     tup = SearchSysCache(PGXCGROUPOID, ObjectIdGetDatum(group_oid), 0, 0, 0);
 
     if (!HeapTupleIsValid(tup)) /* should not happen */
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("PGXC Group %d: group not defined", group_oid)));
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("PGXC Group %u: group not defined", group_oid)));
 
     gmember_ref = get_group_member_ref(tup, &need_free);
 
@@ -1272,6 +1270,9 @@ void PgxcGroupAddNode(Oid group_oid, Oid nodeid)
     if (need_free)
         pfree_ext(gmember_ref);
     pfree_ext(gmember);
+
+    // Group has changed, so remove it's cache.
+    ngroup_info_hash_delete(group_oid);
 }
 
 /*
@@ -1312,6 +1313,9 @@ void PgxcGroupRemoveNode(Oid group_oid, Oid nodeid)
         pfree_ext(gmember_ref);
 
     ReleaseSysCache(tup);
+
+    // Group has changed, so remove it's cache.
+    ngroup_info_hash_delete(group_oid);
 }
 #pragma GCC diagnostic pop
 /*
@@ -1323,7 +1327,7 @@ bool IsNodeInLogicCluster(Oid* oid_array, int count, Oid excluded)
 {
     Relation relation;
     HeapTuple tuple;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     bool find = false;
     Oid group_oid;
     oidvector* gmember = NULL;
@@ -1332,9 +1336,9 @@ bool IsNodeInLogicCluster(Oid* oid_array, int count, Oid excluded)
 
     /* Scan pgxc_group, find all node oids and append them to oid_list. */
     relation = heap_open(PgxcGroupRelationId, AccessShareLock);
-    scan = heap_beginscan(relation, SnapshotNow, 0, NULL);
+    scan = tableam_scan_begin(relation, SnapshotNow, 0, NULL);
 
-    tuple = heap_getnext(scan, ForwardScanDirection);
+    tuple =  (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
 
     while (tuple) {
         group_oid = HeapTupleGetOid(tuple);
@@ -1349,10 +1353,10 @@ bool IsNodeInLogicCluster(Oid* oid_array, int count, Oid excluded)
                 pfree_ext(gmember);
         }
 
-        tuple = heap_getnext(scan, ForwardScanDirection);
+        tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(relation, AccessShareLock);
 
     find = false;
@@ -1420,7 +1424,7 @@ void PgxcGroupCreate(CreateGroupStmt* stmt)
     int i = 0;
     uint2* bucket_ptr = NULL;
     char* bucket_str = NULL;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tuple;
     char group_kind = 'i';
     bool is_installation = false;
@@ -1437,9 +1441,10 @@ void PgxcGroupCreate(CreateGroupStmt* stmt)
     List* tmp_list = NIL;
 
     /* Only a DB administrator can add cluster node groups */
-    if (!superuser())
+    if (!have_createdb_privilege())
         ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be system admin to create cluster node groups")));
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("must be system admin or createdb role to create cluster node groups")));
 
     /* Check node group is preserved group name */
     if (group_name &&
@@ -1454,7 +1459,7 @@ void PgxcGroupCreate(CreateGroupStmt* stmt)
 
     /* Don't support logic cluster in multi_standby mode. */
     if (stmt->vcgroup && u_sess->attr.attr_storage.enable_data_replicate &&
-        g_instance.attr.attr_storage.replication_type == RT_WITH_MULTI_STNADBY)
+        g_instance.attr.attr_storage.replication_type == RT_WITH_MULTI_STANDBY)
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Don't support logic cluster in multi_standby mode.")));
 
@@ -1547,8 +1552,8 @@ void PgxcGroupCreate(CreateGroupStmt* stmt)
     i = 0;
 
     /* Generate buckemap for new node group */
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
-    tuple = heap_getnext(scan, ForwardScanDirection);
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
+    tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
 
     /*
      * No nodegroup found, it is the first node group creation, so generate bucketmap
@@ -1565,7 +1570,7 @@ void PgxcGroupCreate(CreateGroupStmt* stmt)
             is_installation = true;
 
             if (stmt->vcgroup) {
-                heap_endscan(scan);
+                tableam_scan_end(scan);
                 ereport(ERROR,
                     (errcode(ERRCODE_SYSTEM_ERROR),
                         errmsg("Can not create logic cluster group, create installation group first.")));
@@ -1587,7 +1592,7 @@ void PgxcGroupCreate(CreateGroupStmt* stmt)
 
             if (group_kind == 'i') {
                 /* The first node group is installation group, we need to check the second node group */
-                tuple = heap_getnext(scan, ForwardScanDirection);
+                tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
                 if (tuple) {
                     group_kind = get_group_kind(tuple);
                 }
@@ -1619,7 +1624,7 @@ void PgxcGroupCreate(CreateGroupStmt* stmt)
                     }
                 }
 
-                tuple = heap_getnext(scan, ForwardScanDirection);
+                tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
                 if (tuple && group_kind == 'i') {
                     /* The first node group is installation group, we need to check the second node group */
                     group_kind = get_group_kind(tuple);
@@ -1627,7 +1632,7 @@ void PgxcGroupCreate(CreateGroupStmt* stmt)
             }
 
             if (!tuple) {
-                heap_endscan(scan);
+                tableam_scan_end(scan);
                 ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_OBJECT),
                         errmsg("installation node group or source node group not found")));
@@ -1638,7 +1643,7 @@ void PgxcGroupCreate(CreateGroupStmt* stmt)
         }
 
         if ((group_kind == 'n' && stmt->vcgroup) || ((group_kind == 'v' || group_kind == 'e') && !stmt->vcgroup)) {
-            heap_endscan(scan);
+            tableam_scan_end(scan);
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Do not support logic cluster in coexistence with common node group!")));
@@ -1684,8 +1689,8 @@ void PgxcGroupCreate(CreateGroupStmt* stmt)
          *  installation group or elastic group. If group_kind is 'i', we
          * need to query installation group; Or we need to query elastic group.
          */
-        heap_rescan(scan, 0);
-        tuple = heap_getnext(scan, ForwardScanDirection);
+        tableam_scan_rescan(scan, 0);
+        tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
         while (tuple) {
             group_kind = get_group_kind(tuple);
             if (group_kind == search_group_kind) {
@@ -1694,18 +1699,18 @@ void PgxcGroupCreate(CreateGroupStmt* stmt)
                 break;
             }
 
-            tuple = heap_getnext(scan, ForwardScanDirection);
+            tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
         }
 
         if (IsNodeInLogicCluster(nodes_array->values, nodes_array->dim1, src_group_oid)) {
-            heap_endscan(scan);
+            tableam_scan_end(scan);
             ereport(ERROR,
                 (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("Some nodes have been allocated to logic cluster!")));
         }
 
         /* If pgxc_group has installation only, we need to judge whether some tables is created. */
         if (search_group_kind == PGXC_GROUPKIND_INSTALLATION && !CanPgxcGroupRemove(group_oid, true)) {
-            heap_endscan(scan);
+            tableam_scan_end(scan);
             ereport(ERROR,
                 (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
                     errmsg("PGXC Group %s: some tables is distributed in installation group,"
@@ -1719,7 +1724,7 @@ void PgxcGroupCreate(CreateGroupStmt* stmt)
         if (src_group_nodes != NULL) {
             oidvector* add_nodes = NULL;
             if (oidvector_eq(nodes_array, src_group_nodes)) {
-                heap_endscan(scan);
+                tableam_scan_end(scan);
                 ereport(
                     ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Don't need to expand the node group!")));
             }
@@ -1759,7 +1764,7 @@ void PgxcGroupCreate(CreateGroupStmt* stmt)
             pfree_ext(gmember);
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
 
     // restore values and nulls for insert new node group record
     rc = memset_s(values, sizeof(values), 0, sizeof(values));
@@ -1848,7 +1853,7 @@ static void PgxcGroupSetDefault(const char* group_name)
     bool replaces[Natts_pgxc_group];
     HeapTuple tup;
     HeapTuple newtuple;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     errno_t rc;
 
     Oid group_oid = get_pgxc_groupoid(group_name);
@@ -1882,8 +1887,8 @@ static void PgxcGroupSetDefault(const char* group_name)
     ReleaseSysCache(tup);
 
     /* update in_redistribution of the left node group, if there is one */
-    scan = heap_beginscan(relation, SnapshotNow, 0, NULL);
-    while ((tup = heap_getnext(scan, ForwardScanDirection))) {
+    scan = tableam_scan_begin(relation, SnapshotNow, 0, NULL);
+    while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
         if (HeapTupleGetOid(tup) != group_oid) {
             rc = memset_s(values, sizeof(values), 0, sizeof(values));
             securec_check(rc, "\0", "\0");
@@ -1901,7 +1906,7 @@ static void PgxcGroupSetDefault(const char* group_name)
             CatalogUpdateIndexes(relation, newtuple);
         }
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(relation, RowExclusiveLock);
 }
 
@@ -1915,7 +1920,7 @@ static void PgxcGroupConvertVCGroup(const char* group_name, const char* lcname)
     Oid group_oid;
     Relation rel;
     HeapTuple tuple;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     char group_kind;
     oidvector* gmember = NULL;
     oidvector* gmember_ref = NULL;
@@ -1929,8 +1934,8 @@ static void PgxcGroupConvertVCGroup(const char* group_name, const char* lcname)
     /* Open the relation for read */
     rel = heap_open(PgxcGroupRelationId, AccessShareLock);
 
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
-    tuple = heap_getnext(scan, ForwardScanDirection);
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
+    tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
     if (tuple == NULL) {
         ereport(ERROR, (errcode(ERRCODE_DUPLICATE_OBJECT), errmsg("PGXC Group %s: group not defined", group_name)));
     }
@@ -1962,14 +1967,14 @@ static void PgxcGroupConvertVCGroup(const char* group_name, const char* lcname)
     }
 
     /* check whether other node group exist or not. */
-    tuple = heap_getnext(scan, ForwardScanDirection);
+    tuple =  (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
     if (tuple) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Do not allow to convert installation group to logic cluster"
                        "when other node group exists.")));
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
 
     role_list = PgxcGetRelationRoleList();
@@ -2020,7 +2025,7 @@ static void PgxcGroupSetVCGroup(const char* group_name, const char* install_name
     Oid group_oid;
     Relation rel;
     HeapTuple tuple;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     char group_kind;
     oidvector* gmember = NULL;
     oidvector* gmember_ref = NULL;
@@ -2034,8 +2039,8 @@ static void PgxcGroupSetVCGroup(const char* group_name, const char* install_name
     /* Open the relation for read */
     rel = heap_open(PgxcGroupRelationId, AccessShareLock);
 
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
-    tuple = heap_getnext(scan, ForwardScanDirection);
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
+    tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
     if (tuple == NULL) {
         ereport(ERROR, (errcode(ERRCODE_DUPLICATE_OBJECT), errmsg("PGXC Group %s: group not defined", group_name)));
     }
@@ -2067,14 +2072,14 @@ static void PgxcGroupSetVCGroup(const char* group_name, const char* install_name
     }
 
     /* check whether other node group exist or not. */
-    tuple = heap_getnext(scan, ForwardScanDirection);
+    tuple =  (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
     if (tuple) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Do not allow to convert installation group to logic cluster"
                        "when other node group exists.")));
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
 
     role_list = PgxcGetRelationRoleList();
@@ -2128,7 +2133,7 @@ static void PgxcGroupSetNotVCGroup(const char* group_name)
     HeapTuple tuple;
     HeapTuple newtuple;
     Relation rel;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     char group_kind;
     bool nulls[Natts_pgxc_group];
     Datum values[Natts_pgxc_group];
@@ -2143,8 +2148,8 @@ static void PgxcGroupSetNotVCGroup(const char* group_name)
     securec_check(rc, "\0", "\0");
 
     rel = heap_open(PgxcGroupRelationId, RowExclusiveLock);
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
-    tuple = heap_getnext(scan, ForwardScanDirection);
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
+    tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
 
     while (tuple) {
         group_kind = get_group_kind(tuple);
@@ -2155,12 +2160,12 @@ static void PgxcGroupSetNotVCGroup(const char* group_name)
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("PGXC Group %s is not installation group.", group_name)));
             }
-            tuple = heap_getnext(scan, ForwardScanDirection);
+            tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
             continue;
         }
 
         if (group_kind == 'n') {
-            tuple = heap_getnext(scan, ForwardScanDirection);
+            tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
             continue;
         }
 
@@ -2169,7 +2174,7 @@ static void PgxcGroupSetNotVCGroup(const char* group_name)
             deleteSharedDependencyRecordsFor(PgxcGroupRelationId, elastic_group_oid, 0);
             simple_heap_delete(rel, &tuple->t_self);
             RemoveNodeGroupInfoInHTAB(VNG_OPTION_ELASTIC_GROUP);
-            tuple = heap_getnext(scan, ForwardScanDirection);
+            tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
             continue;
         }
 
@@ -2197,10 +2202,10 @@ static void PgxcGroupSetNotVCGroup(const char* group_name)
         CatalogUpdateIndexes(rel, newtuple);
         heap_freetuple(newtuple);
 
-        tuple = heap_getnext(scan, ForwardScanDirection);
+        tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, RowExclusiveLock);
 
     CommandCounterIncrement();
@@ -2294,7 +2299,7 @@ static void PgxcChangeTableGroupName(const char* group_name, const char* new_nam
     Datum values[Natts_pgxc_class];
     bool replaces[Natts_pgxc_class];
     char* pgroup = NULL;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     Datum datum;
     bool isNull = false;
     errno_t rc;
@@ -2324,20 +2329,20 @@ static void PgxcChangeTableGroupName(const char* group_name, const char* new_nam
     values[Anum_pgxc_class_pgroup - 1] = DirectFunctionCall1(namein, CStringGetDatum(new_name));
 
     rel = heap_open(PgxcClassRelationId, RowExclusiveLock);
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
-    tup = heap_getnext(scan, ForwardScanDirection);
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
+    tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
 
     while (tup) {
         datum = SysCacheGetAttr(PGXCCLASSRELID, tup, Anum_pgxc_class_pgroup, &isNull);
 
         if (isNull) {
-            tup = heap_getnext(scan, ForwardScanDirection);
+            tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
             continue;
         }
         pgroup = DatumGetCString(datum);
 
         if (pg_strcasecmp(pgroup, group_name) != 0) {
-            tup = heap_getnext(scan, ForwardScanDirection);
+            tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
             continue;
         }
         /* Update relation */
@@ -2346,9 +2351,9 @@ static void PgxcChangeTableGroupName(const char* group_name, const char* new_nam
         CatalogUpdateIndexes(rel, newtuple);
         heap_freetuple(newtuple);
 
-        tup = heap_getnext(scan, ForwardScanDirection);
+        tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, RowExclusiveLock);
 
     CommandCounterIncrement();
@@ -2532,7 +2537,7 @@ static void DropRemoteSeqs(char* queryString, ExecNodes* excluded_nodes)
 static void PgxcGroupSetSeqNodes(const char* group_name, bool allnodes)
 {
     Relation depRel;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tup;
     const char* seqName = NULL;
     const char* nspName = NULL;
@@ -2557,8 +2562,8 @@ static void PgxcGroupSetSeqNodes(const char* group_name, bool allnodes)
         char* name = NULL;
         Relation pgxc_group_rel = heap_open(PgxcGroupRelationId, AccessShareLock);
 
-        scan = heap_beginscan(pgxc_group_rel, SnapshotNow, 0, NULL);
-        while ((tup = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+        scan = tableam_scan_begin(pgxc_group_rel, SnapshotNow, 0, NULL);
+        while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
             name = NameStr(((Form_pgxc_group)GETSTRUCT(tup))->group_name);
 
             /* skip installation nodegroup. */
@@ -2568,7 +2573,7 @@ static void PgxcGroupSetSeqNodes(const char* group_name, bool allnodes)
             PgxcGroupSetSeqNodes(name, allnodes);
         }
 
-        heap_endscan(scan);
+        tableam_scan_end(scan);
         heap_close(pgxc_group_rel, AccessShareLock);
 
         return;
@@ -2594,9 +2599,9 @@ static void PgxcGroupSetSeqNodes(const char* group_name, bool allnodes)
 
     depRel = heap_open(DependRelationId, AccessShareLock);
 
-    scan = heap_beginscan(depRel, SnapshotNow, 0, NULL);
+    scan = tableam_scan_begin(depRel, SnapshotNow, 0, NULL);
 
-    while (HeapTupleIsValid(tup = heap_getnext(scan, ForwardScanDirection))) {
+    while (HeapTupleIsValid(tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
         Form_pg_depend deprec = (Form_pg_depend)GETSTRUCT(tup);
 
         if (deprec->classid == RelationRelationId && deprec->refclassid == RelationRelationId &&
@@ -2619,7 +2624,7 @@ static void PgxcGroupSetSeqNodes(const char* group_name, bool allnodes)
             nspoid = reltup->relnamespace;
             relowner = reltup->relowner;
 
-            schName = get_namespace_name(nspoid, true);
+            schName = get_namespace_name(nspoid);
             seqName = quote_identifier(relName);
             nspName = quote_identifier(schName);
 
@@ -2708,7 +2713,7 @@ static void PgxcGroupSetSeqNodes(const char* group_name, bool allnodes)
         }
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
 
     heap_close(depRel, AccessShareLock);
 
@@ -2732,17 +2737,24 @@ static void PgxcGroupSetSeqNodes(const char* group_name, bool allnodes)
  *
  * modify attr of pgxc_group for cluster resize
  */
-static void PgxcGroupResize(const char* src_group_name, const char* dest_group_name)
+void PgxcGroupResize(const char* src_group_name, const char* dest_group_name)
 {
     if (in_logic_cluster()) {
         ereport(
             ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Resize is not supported in logical cluster mode")));
     }
 
-    /* Only a DB administrator can remove cluster node groups */
-    if (!superuser())
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be system admin to remove cluster node groups")));
+    /* Permission check */
+    Oid group_oid = get_pgxc_groupoid(dest_group_name);
+    if (!OidIsValid(group_oid)) {
+        ereport(ERROR, (errcode(ERRCODE_DUPLICATE_OBJECT),
+            errmsg("PGXC Group %s: group not defined", dest_group_name)));
+    }
+    AclResult aclresult = pg_nodegroup_aclcheck(group_oid, GetUserId(), ACL_ALTER);
+    if (aclresult != ACLCHECK_OK && !have_createdb_privilege()) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("must have sysadmin or createdb or alter privilege to resize cluster node groups")));
+    }
 
     Form_pgxc_group groupattr = (Form_pgxc_group)palloc(sizeof(*groupattr));
 
@@ -2766,7 +2778,7 @@ bool PgxcGroup_Resizing()
 {
     Relation relation;
     HeapTuple tuple;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     char in_redistribution;
     bool isfind = false;
 
@@ -2774,16 +2786,16 @@ bool PgxcGroup_Resizing()
         return false;
 
     relation = heap_open(PgxcGroupRelationId, RowExclusiveLock);
-    scan = heap_beginscan(relation, SnapshotNow, 0, NULL);
+    scan = tableam_scan_begin(relation, SnapshotNow, 0, NULL);
 
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         in_redistribution = ((Form_pgxc_group)GETSTRUCT(tuple))->in_redistribution;
         if (in_redistribution == PGXC_REDISTRIBUTION_DST_GROUP) {
             isfind = true;
             break;
         }
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(relation, RowExclusiveLock);
 
     return isfind;
@@ -2794,12 +2806,12 @@ bool PgxcGroup_Resizing()
  *
  * modify destgroup's attr in pgxc_group before we delete srcgroup
  */
-static void PgxcGroupResizeComplete()
+void PgxcGroupResizeComplete()
 {
     Relation relation;
     HeapTuple tuple;
     HeapTuple newtuple;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     char in_redistribution;
     bool nulls[Natts_pgxc_group];
     Datum values[Natts_pgxc_group];
@@ -2807,9 +2819,9 @@ static void PgxcGroupResizeComplete()
     errno_t rc;
 
     relation = heap_open(PgxcGroupRelationId, RowExclusiveLock);
-    scan = heap_beginscan(relation, SnapshotNow, 0, NULL);
+    scan = tableam_scan_begin(relation, SnapshotNow, 0, NULL);
 
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         in_redistribution = ((Form_pgxc_group)GETSTRUCT(tuple))->in_redistribution;
         if (in_redistribution == PGXC_REDISTRIBUTION_DST_GROUP) {
             break;
@@ -2837,7 +2849,7 @@ static void PgxcGroupResizeComplete()
     simple_heap_update(relation, &newtuple->t_self, newtuple);
     CatalogUpdateIndexes(relation, newtuple);
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_freetuple(newtuple);
     heap_close(relation, RowExclusiveLock);
 }
@@ -2923,6 +2935,9 @@ static void PgxcGroupAddNodes(const char* group_name, List* nodes)
 
     PgxcChangeGroupMember(group_oid, gmember);
     pfree_ext(gmember);
+
+    // Group has changed, so remove it's cache.
+    ngroup_info_hash_delete(group_oid);
 }
 
 /*
@@ -3018,6 +3033,9 @@ static void PgxcGroupDeleteNodes(const char* group_name, List* nodes)
 
     PgxcChangeGroupMember(group_oid, gmember);
     pfree_ext(gmember);
+
+    // Group has changed, so remove it's cache.
+    ngroup_info_hash_delete(group_oid);
 }
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -3028,10 +3046,17 @@ static void PgxcGroupDeleteNodes(const char* group_name, List* nodes)
  */
 void PgxcGroupAlter(AlterGroupStmt* stmt)
 {
-    /* Only a DB administrator can alter cluster node groups */
-    if (!superuser())
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be system admin to alter cluster node groups")));
+    Oid group_oid = get_pgxc_groupoid(stmt->group_name);
+    if (!OidIsValid(group_oid)) {
+        ereport(ERROR, (errcode(ERRCODE_DUPLICATE_OBJECT),
+            errmsg("PGXC Group %s: group not defined", stmt->group_name)));
+    }
+    /* Permission check for users to alter node group */
+    AclResult aclresult = pg_nodegroup_aclcheck(group_oid, GetUserId(), ACL_ALTER);
+    if (aclresult != ACLCHECK_OK && !have_createdb_privilege()) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("must have sysadmin or createdb or alter privilege to alter cluster node groups")));
+    }
 
     if (!u_sess->attr.attr_common.xc_maintenance_mode && stmt->alter_type != AG_SET_DEFAULT) {
         ereport(ERROR,
@@ -3098,11 +3123,6 @@ void PgxcGroupRemove(DropGroupStmt* stmt)
     ExecNodes* exec_nodes = NULL;
     bool ignore_pmk = false;
 
-    /* Only a DB administrator can remove cluster node groups */
-    if (!superuser())
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be system admin to remove cluster node groups")));
-
     /* Check if group exists */
     if (!OidIsValid(group_oid)) {
         if (IS_PGXC_DATANODE)
@@ -3110,6 +3130,14 @@ void PgxcGroupRemove(DropGroupStmt* stmt)
 
         ereport(ERROR, (errcode(ERRCODE_DUPLICATE_OBJECT), errmsg("PGXC Group %s: group not defined", group_name)));
     }
+
+    /* Permission check for users to remove cluster node group */
+    AclResult aclresult = pg_nodegroup_aclcheck(group_oid, GetUserId(), ACL_DROP);
+    if (aclresult != ACLCHECK_OK && !have_createdb_privilege()) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("must have sysadmin or createdb or drop privilege to remove cluster node groups")));
+    }
+
     /* Check node group is preserved group name */
     if (group_name && !ng_is_valid_group_name(group_name)) {
         ereport(ERROR,
@@ -3444,7 +3472,7 @@ char* PgxcGroupGetCurrentLogicCluster()
 Oid PgxcGroupGetRedistDestGroupOid()
 {
     Relation pgxc_group_rel = NULL;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tup = NULL;
     Datum datum;
     bool isNull = false;
@@ -3456,8 +3484,8 @@ Oid PgxcGroupGetRedistDestGroupOid()
     }
     PgxcOpenGroupRelation(&pgxc_group_rel);
 
-    scan = heap_beginscan(pgxc_group_rel, SnapshotNow, 0, NULL);
-    while ((tup = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(pgxc_group_rel, SnapshotNow, 0, NULL);
+    while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         datum = heap_getattr(tup, Anum_pgxc_group_in_redistribution, RelationGetDescr(pgxc_group_rel), &isNull);
 
         if (PGXC_REDISTRIBUTION_DST_GROUP == DatumGetChar(datum)) {
@@ -3466,7 +3494,7 @@ Oid PgxcGroupGetRedistDestGroupOid()
         }
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(pgxc_group_rel, AccessShareLock);
 
     return group_oid;
@@ -3480,7 +3508,7 @@ Oid PgxcGroupGetRedistDestGroupOid()
 char* PgxcGroupGetStmtExecGroupInRedis()
 {
     Relation pgxc_group_rel = NULL;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tup = NULL;
     bool isNull = false;
     Datum datum;
@@ -3499,8 +3527,8 @@ char* PgxcGroupGetStmtExecGroupInRedis()
     }
     PgxcOpenGroupRelation(&pgxc_group_rel);
 
-    scan = heap_beginscan(pgxc_group_rel, SnapshotNow, 0, NULL);
-    while ((tup = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(pgxc_group_rel, SnapshotNow, 0, NULL);
+    while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         datum = heap_getattr(tup, Anum_pgxc_group_in_redistribution, RelationGetDescr(pgxc_group_rel), &isNull);
 
         if (PGXC_REDISTRIBUTION_DST_GROUP == DatumGetChar(datum)) {
@@ -3529,7 +3557,7 @@ char* PgxcGroupGetStmtExecGroupInRedis()
         }
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(pgxc_group_rel, AccessShareLock);
 
     if (need_free_dst)
@@ -3554,8 +3582,8 @@ char* PgxcGroupGetStmtExecGroupInRedis()
  */
 static void BucketMapCacheAddEntry(Oid groupoid, Datum groupanme_datum, Datum bucketmap_datum, ItemPointer ctid)
 {
-    /* BucketmapCache and its underlying element is allocated in u_sess->top_mem_cxt */
-    MemoryContext oldcontext = MemoryContextSwitchTo(u_sess->top_mem_cxt);
+    /* BucketmapCache and its underlying element is allocated in u_sess.MEMORY_CONTEXT_EXECUTOR */
+    MemoryContext oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
 
     /* Create bucketmap element */
     BucketMapCache* bmc = (BucketMapCache*)palloc0(sizeof(BucketMapCache));
@@ -3857,7 +3885,7 @@ char* PgxcGroupGetInstallationGroup()
     char* group_name = NULL;
     char* installation_node_group = NULL;
     Relation pgxc_group_rel = NULL;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tup = NULL;
     Datum datum;
     bool isNull = false;
@@ -3878,8 +3906,8 @@ char* PgxcGroupGetInstallationGroup()
     }
     PgxcOpenGroupRelation(&pgxc_group_rel);
 
-    scan = heap_beginscan(pgxc_group_rel, SnapshotNow, 0, NULL);
-    while ((tup = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(pgxc_group_rel, SnapshotNow, 0, NULL);
+    while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         bool need_free = false;
         gmember = get_group_member_ref(tup, &need_free);
 
@@ -3907,7 +3935,7 @@ char* PgxcGroupGetInstallationGroup()
             pfree_ext(gmember);
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(pgxc_group_rel, AccessShareLock);
 
     /*
@@ -4122,7 +4150,7 @@ bool CanPgxcGroupRemove(Oid group_oid, bool ignore_pmk)
 
     char* database_name = NULL;
     Relation pg_database_rel = NULL;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tup = NULL;
     Datum datum;
     bool isNull = false;
@@ -4151,12 +4179,8 @@ bool CanPgxcGroupRemove(Oid group_oid, bool ignore_pmk)
 
     pg_database_rel = heap_open(DatabaseRelationId, AccessShareLock);
 
-    if (!pg_database_rel) {
-        ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("can not open pg_database")));
-    }
-
-    scan = heap_beginscan(pg_database_rel, SnapshotNow, 0, NULL);
-    while ((tup = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(pg_database_rel, SnapshotNow, 0, NULL);
+    while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         datum = heap_getattr(tup, Anum_pg_database_datname, RelationGetDescr(pg_database_rel), &isNull);
         Assert(!isNull);
 
@@ -4196,7 +4220,7 @@ bool CanPgxcGroupRemove(Oid group_oid, bool ignore_pmk)
         }
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(pg_database_rel, AccessShareLock);
 
     return result;
@@ -4223,7 +4247,7 @@ int GetTableCountByDatabase(const char* database_name, char* query)
     ret = snprintf_s(conninfo,
         sizeof(conninfo),
         sizeof(conninfo) - 1,
-        "dbname=%s port=%d connect_timeout=60 application_name='gs_clean' options='-c xc_maintenance_mode=on'",
+        "dbname=%s port=%d connect_timeout=60 options='-c xc_maintenance_mode=on'",
         database_name,
         g_instance.attr.attr_network.PostPortNumber);
     securec_check_ss_c(ret, "\0", "\0");
@@ -4242,7 +4266,10 @@ int GetTableCountByDatabase(const char* database_name, char* query)
         ereport(ERROR,
             (errcode(ERRCODE_SYSTEM_ERROR), errmsg("execute statement: %s failed: %s", query, PQerrorMessage(pgconn))));
     }
-    AssertEreport(PQntuples(res) > 0, MOD_OPT, "");
+    if (PQntuples(res) <= 0) {
+        ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), 
+            errmsg("PQtuples num is invalid : %d", PQntuples(res))));
+    }
 
     int num = atoi(PQgetvalue(res, 0, 0));
     PQclear(res);
@@ -4265,7 +4292,7 @@ static void GetTablesByDatabase(const char* database_name, char* query, size_t s
     ret = snprintf_s(conninfo,
         sizeof(conninfo),
         sizeof(conninfo) - 1,
-        "dbname=%s port=%d connect_timeout=60 application_name='gs_clean' options='-c xc_maintenance_mode=on'",
+        "dbname=%s port=%d connect_timeout=60 options='-c xc_maintenance_mode=on'",
         database_name,
         g_instance.attr.attr_network.PostPortNumber);
     securec_check_ss_c(ret, "\0", "\0");
@@ -4307,7 +4334,7 @@ char* PgxcGroupGetInRedistributionGroup()
 {
     char* group_name = NULL;
     Relation pgxc_group_rel = NULL;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tup = NULL;
     Datum datum;
     bool isNull = false;
@@ -4322,8 +4349,8 @@ char* PgxcGroupGetInRedistributionGroup()
     }
     PgxcOpenGroupRelation(&pgxc_group_rel);
 
-    scan = heap_beginscan(pgxc_group_rel, SnapshotNow, 0, NULL);
-    while ((tup = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(pgxc_group_rel, SnapshotNow, 0, NULL);
+    while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         datum = heap_getattr(tup, Anum_pgxc_group_in_redistribution, RelationGetDescr(pgxc_group_rel), &isNull);
 
         if ('y' == DatumGetChar(datum)) {
@@ -4336,7 +4363,7 @@ char* PgxcGroupGetInRedistributionGroup()
         }
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(pgxc_group_rel, AccessShareLock);
 
     if (group_name != NULL) {
@@ -4356,11 +4383,11 @@ void PgxcOpenGroupRelation(Relation* pgxc_group_rel)
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("can not open pgxc_group")));
     }
 }
-List* Get_nodegroup_oid_compute(Oid role_id)
+List* GetNodeGroupOidCompute(Oid role_id)
 {
     List* objects = NIL;
     Relation pgxc_group_rel = NULL;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tup = NULL;
     Oid group_oid;
 
@@ -4370,8 +4397,8 @@ List* Get_nodegroup_oid_compute(Oid role_id)
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("can not open pgxc_group")));
     }
 
-    scan = heap_beginscan(pgxc_group_rel, SnapshotNow, 0, NULL);
-    while ((tup = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(pgxc_group_rel, SnapshotNow, 0, NULL);
+    while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         group_oid = HeapTupleGetOid(tup);
 
         if (OidIsValid(group_oid)) {
@@ -4383,7 +4410,7 @@ List* Get_nodegroup_oid_compute(Oid role_id)
         }
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(pgxc_group_rel, AccessShareLock);
 
     return objects;
@@ -4519,11 +4546,11 @@ char* DeduceGroupByNodeList(Oid* nodeoids, int numnodes)
         Relation pgxc_group_rel = heap_open(PgxcGroupRelationId, AccessShareLock);
         oidvector* gmember = NULL;
         HeapTuple tup = NULL;
-        HeapScanDesc scan = NULL;
+        TableScanDesc scan = NULL;
 
-        scan = heap_beginscan(pgxc_group_rel, SnapshotNow, 0, NULL);
+        scan = tableam_scan_begin(pgxc_group_rel, SnapshotNow, 0, NULL);
 
-        while ((tup = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+        while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
             bool need_free = false;
             gmember = get_group_member_ref(tup, &need_free);
 
@@ -4545,7 +4572,7 @@ char* DeduceGroupByNodeList(Oid* nodeoids, int numnodes)
             if (need_free != false)
                 pfree_ext(gmember);
         }
-        heap_endscan(scan);
+        tableam_scan_end(scan);
         heap_close(pgxc_group_rel, AccessShareLock);
     }
 
@@ -4676,11 +4703,10 @@ Datum gs_get_nodegroup_tablecount(PG_FUNCTION_ARGS)
 {
     Name str = PG_GETARG_NAME(0);
     int32 count = 0;
-    int32 tablenum = 0;
     char* group_name = NULL;
     char* database_name = NULL;
     Relation pg_database_rel = NULL;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tup = NULL;
     Datum datum;
     bool isNull = false;
@@ -4715,8 +4741,8 @@ Datum gs_get_nodegroup_tablecount(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("can not open pg_database")));
     }
 
-    scan = heap_beginscan(pg_database_rel, SnapshotNow, 0, NULL);
-    while ((tup = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(pg_database_rel, SnapshotNow, 0, NULL);
+    while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         datum = heap_getattr(tup, Anum_pg_database_datname, RelationGetDescr(pg_database_rel), &isNull);
         Assert(!isNull);
 
@@ -4724,17 +4750,16 @@ Datum gs_get_nodegroup_tablecount(PG_FUNCTION_ARGS)
         if (strcmp(database_name, "template0") == 0) {
             continue;
         }
-        
-        tablenum = GetTableCountByDatabase(database_name, cmd);
-        if (tablenum > INT_MAX - count) {
-            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("the number of total tables is out of limit")));
-        }
 
-        count += tablenum;
+        int tmpCount = GetTableCountByDatabase(database_name, cmd);
+        if (INT_MAX - tmpCount < count) {
+            ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), 
+                errmsg("count is invalid, count:%d, tmpCount:%d", count, tmpCount)));
+        }
+        count += tmpCount;
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(pg_database_rel, AccessShareLock);
 
     PG_RETURN_INT32(count);

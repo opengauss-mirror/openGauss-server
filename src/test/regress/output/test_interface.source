@@ -1,0 +1,38 @@
+---do redistribute
+\! source @abs_srcdir@/tmp_check/redis_envir_opt && gs_redis --help
+gs_redis -p port -v or -d
+
+Options are:
+    -p port         Port number of the coordinator node. 
+    -d database     Database name to connect to. Default is "postgres".  
+    -u username     Connect as specified database user. 
+    -v              build pgxc_redistb for tables needing redistirbution.
+    -V              show the version.
+    -r              build pgxc_redistb if not exist and start re-distribution.
+    -t timeout      set timeout for data redistribution.
+    -j jobs         use this many parallel jobs to redis.
+    -c              does vacuum full after data redistribution (default no); if -f specified, -c is ignored. 
+    -f              fast data redistribution; need extra storage during data redistribution (default no).
+    -m mode         run data redistribution in different mode: read-only or insert (default read-only).
+    --help          Prints the help message and exits with 0.
+\! source @abs_srcdir@/tmp_check/redis_envir_opt && gs_redis -V -m read-only > /dev/null 2>&1
+\! source @abs_srcdir@/tmp_check/redis_envir_opt && gs_redis -m wrongmode > /dev/null 2>&1
+\! source @abs_srcdir@/tmp_check/redis_envir_opt && gs_redis -r -u $USER -d regression -p $PGPORT -j -1 -t 8 -c 2 >/dev/null 2>&1
+\! source @abs_srcdir@/tmp_check/redis_envir_opt && gs_redis -r -u $USER -d regression -p $PGPORT -j 1025 -t 8 -c 2 >/dev/null 2>&1
+\d+ redis_status;
+                                Table "public.redis_status"
+ Column  |            Type             | Modifiers | Storage  | Stats target | Description 
+---------+-----------------------------+-----------+----------+--------------+-------------
+ status  | text                        |           | extended |              | 
+ updated | timestamp without time zone |           | plain    |              | 
+Has OIDs: no
+Distribute By: HASH(status)
+Location Nodes: ALL DATANODES
+Options: orientation=row, compression=no
+
+\d+ redis_progress_detail;
+DROP TABLE IF EXISTS redis_status CASCADE;
+DROP TABLE IF EXISTS redis_progress_detail CASCADE;
+NOTICE:  table "redis_progress_detail" does not exist, skipping
+\d+ redis_status;
+\d+ redis_progress_detail;

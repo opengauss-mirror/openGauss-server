@@ -42,6 +42,7 @@
 /*
  * Selectivity for operators that depend on area, such as "overlap".
  */
+
 Datum areasel(PG_FUNCTION_ARGS)
 {
     PG_RETURN_FLOAT8(0.005);
@@ -58,6 +59,7 @@ Datum areajoinsel(PG_FUNCTION_ARGS)
  * How likely is a box to be strictly left of (right of, above, below)
  * a given box?
  */
+
 Datum positionsel(PG_FUNCTION_ARGS)
 {
     PG_RETURN_FLOAT8(0.1);
@@ -74,6 +76,7 @@ Datum positionjoinsel(PG_FUNCTION_ARGS)
  * This is a tighter constraint than "overlap", so produce a smaller
  * estimate than areasel does.
  */
+
 Datum contsel(PG_FUNCTION_ARGS)
 {
     PG_RETURN_FLOAT8(0.001);

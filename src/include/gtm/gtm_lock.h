@@ -3,6 +3,7 @@
  * gtm_lock.h
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2009, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
@@ -34,32 +35,32 @@ typedef struct GTM_CV {
     pthread_cond_t cv_condvar;
 } GTM_CV;
 
-extern void GTM_RWLockAcquire(GTM_RWLock *lock, GTM_LockMode mode);
-extern void GTM_RWLockRelease(GTM_RWLock *lock);
-extern void GTM_RWLockInit(GTM_RWLock *lock);
-extern void GTM_RWLockDestroy(GTM_RWLock *lock);
-extern bool GTM_RWLockConditionalAcquire(GTM_RWLock *lock, GTM_LockMode mode);
+extern void GTM_RWLockAcquire(GTM_RWLock* lock, GTM_LockMode mode);
+extern void GTM_RWLockRelease(GTM_RWLock* lock);
+extern void GTM_RWLockInit(GTM_RWLock* lock);
+extern void GTM_RWLockDestroy(GTM_RWLock* lock);
+extern bool GTM_RWLockConditionalAcquire(GTM_RWLock* lock, GTM_LockMode mode);
 
-extern void GTM_MutexLockAcquire(GTM_MutexLock *lock);
-extern void GTM_MutexLockRelease(GTM_MutexLock *lock);
-extern void GTM_MutexLockInit(GTM_MutexLock *lock);
-extern void GTM_MutexLockDestroy(GTM_MutexLock *lock);
-extern void GTM_MutexLockConditionalAcquire(GTM_MutexLock *lock);
+extern void GTM_MutexLockAcquire(GTM_MutexLock* lock);
+extern void GTM_MutexLockRelease(GTM_MutexLock* lock);
+extern void GTM_MutexLockInit(GTM_MutexLock* lock);
+extern void GTM_MutexLockDestroy(GTM_MutexLock* lock);
+extern void GTM_MutexLockConditionalAcquire(GTM_MutexLock* lock);
 
-extern int GTM_CVInit(GTM_CV *cv);
-extern int GTM_CVDestroy(GTM_CV *cv);
-extern int GTM_CVSignal(GTM_CV *cv);
-extern int GTM_CVBcast(GTM_CV *cv);
-extern int GTM_CVWait(GTM_CV *cv, GTM_MutexLock *lock);
+extern int GTM_CVInit(GTM_CV* cv);
+extern int GTM_CVDestroy(GTM_CV* cv);
+extern int GTM_CVSignal(GTM_CV* cv);
+extern int GTM_CVBcast(GTM_CV* cv);
+extern int GTM_CVWait(GTM_CV* cv, GTM_MutexLock* lock);
 
 // AutoGTMRWLock
-// 		 		 Auto object for GTM reader-writer lock
-// 
+//		 		 Auto object for GTM reader-writer lock
+//
 class AutoGTMRWLock {
 public:
-    AutoGTMRWLock(_in_ volatile GTM_RWLock *glock)
+    AutoGTMRWLock(_in_ volatile GTM_RWLock* glock)
     {
-        m_glock = (GTM_RWLock *)glock;
+        m_glock = (GTM_RWLock*)glock;
     }
 
     ~AutoGTMRWLock()
@@ -87,7 +88,7 @@ public:
 
 private:
     // Point to an existing GTM_RWLock object
-    // 
-    GTM_RWLock *m_glock;
+    //
+    GTM_RWLock* m_glock;
 };
 #endif

@@ -1,0 +1,160 @@
+set enable_global_stats = true;
+set enable_vector_engine=on;
+-- problem:
+-- basic test for local dictionary compression, excluding conficts testing
+CREATE TABLE colcmpr_dict_00
+(
+	distKey int,
+	name varchar(20),
+	city char(20),
+	gender char,
+	postcode char(10),
+	coutry varchar(20),
+	telephone varchar(15)
+)  with (orientation = orc) tablespace hdfs_ts  DISTRIBUTE BY hash(distKey);
+COPY colcmpr_dict_00 FROM '@abs_srcdir@/data/colcmpr_dict_00.data';
+SELECT * FROM colcmpr_dict_00;
+ distkey | name  |         city         | gender |  postcode  | coutry |  telephone  
+---------+-------+----------------------+--------+------------+--------+-------------
+       1 | Tom   | XiAn                 | M      | 100701     | China  | 12345678901
+       1 | Tom   | ChongQing            | M      | 208654     | China  | 13203584671
+       1 | Tom   | HangZhou             | M      | 412365     | China  | 15864973261
+       1 | Tom   | ShangHai             | M      | 000002     | China  | 15115115111
+       1 | Tom   | GuiLin               | M      | 100000     | China  | 16116161611
+       1 | Tom   | BeiJing              | M      | 000001     | China  | 17117117171
+       1 | Lucy  | XiAn                 | F      | 100701     | China  | 12345678900
+       1 | Lucy  | ChongQing            | F      | 208654     | China  | 13203584670
+       1 | Lucy  | HangZhou             | F      | 412365     | China  | 15864973260
+       1 | Lucy  | ShangHai             | F      | 000002     | China  | 15115115110
+       1 | Lucy  | GuiLin               | F      | 100000     | China  | 16116161610
+       1 | Lucy  | BeiJing              | F      | 000001     | China  | 17117117170
+       1 | Jack  | XiAn                 | M      | 100701     | China  | 12345678902
+       1 | Jack  | ChongQing            | M      | 208654     | China  | 13203584672
+       1 | Jack  | HangZhou             | M      | 412365     | China  | 15864973262
+       1 | Jack  | ShangHai             | M      | 000002     | China  | 15115115112
+       1 | Jack  | GuiLin               | M      | 100000     | China  | 16116161612
+       1 | Jack  | BeiJing              | M      | 000001     | China  | 17117117172
+       1 | Karma | XiAn                 | M      | 100701     | China  | 12345678903
+       1 | Karma | ChongQing            | M      | 208654     | China  | 13203584673
+       1 | Karma | HangZhou             | M      | 412365     | China  | 15864973263
+       1 | Karma | ShangHai             | M      | 000002     | China  | 15115115113
+       1 | Karma | GuiLin               | M      | 100000     | China  | 16116161613
+       1 | Karma | BeiJing              | M      | 000001     | China  | 17117117173
+       1 | Winni | XiAn                 | M      | 100701     | China  | 12345678904
+       1 | Winni | ChongQing            | M      | 208654     | China  | 13203584674
+       1 | Winni | HangZhou             | M      | 412365     | China  | 15864973264
+       1 | Winni | ShangHai             | M      | 000002     | China  | 15115115114
+       1 | Winni | GuiLin               | M      | 100000     | China  | 16116161614
+       1 | Winni | BeiJing              | M      | 000001     | China  | 17117117174
+       1 | Kitty | XiAn                 | M      | 100701     | China  | 12345678905
+       1 | Kitty | ChongQing            | M      | 208654     | China  | 13203584675
+       1 | Kitty | HangZhou             | M      | 412365     | China  | 15864973265
+       1 | Kitty | ShangHai             | M      | 000002     | China  | 15115115115
+       1 | Kitty | GuiLin               | M      | 100000     | China  | 16116161615
+       1 | Kitty | BeiJing              | M      | 000001     | China  | 17117117175
+       1 | DinDa | XiAn                 | F      | 100701     | China  | 12345678906
+       1 | DinDa | ChongQing            | F      | 208654     | China  | 13203584676
+       1 | DinDa | HangZhou             | F      | 412365     | China  | 15864973266
+       1 | DinDa | ShangHai             | F      | 000002     | China  | 15115115116
+       1 | DinDa | GuiLin               | F      | 100000     | China  | 16116161616
+       1 | DinDa | BeiJing              | F      | 000001     | China  | 17117117176
+       1 | Snopy | XiAn                 | F      | 100701     | China  | 12345678907
+       1 | Snopy | ChongQing            | F      | 208654     | China  | 13203584677
+       1 | Snopy | HangZhou             | F      | 412365     | China  | 15864973267
+       1 | Snopy | ShangHai             | F      | 000002     | China  | 15115115117
+       1 | Snopy | GuiLin               | F      | 100000     | China  | 16116161617
+       1 | Snopy | BeiJing              | F      | 000001     | China  | 17117117177
+       1 | Xiong | XiAn                 | F      | 100701     | China  | 12345678908
+       1 | Xiong | ChongQing            | F      | 208654     | China  | 13203584678
+       1 | Xiong | HangZhou             | F      | 412365     | China  | 15864973268
+       1 | Xiong | ShangHai             | F      | 000002     | China  | 15115115118
+       1 | Xiong | GuiLin               | F      | 100000     | China  | 16116161618
+       1 | Xiong | BeiJing              | F      | 000001     | China  | 17117117178
+       1 | Andyl | XiAn                 | F      | 100701     | China  | 12345678909
+       1 | Andyl | ChongQing            | F      | 208654     | China  | 13203584679
+       1 | Andyl | HangZhou             | F      | 412365     | China  | 15864973269
+       1 | Andyl | ShangHai             | F      | 000002     | China  | 15115115119
+       1 | Andyl | GuiLin               | F      | 100000     | China  | 16116161619
+       1 | Andyl | BeiJing              | F      | 000001     | China  | 17117117179
+(60 rows)
+
+DROP TABLE colcmpr_dict_00;
+-- problem:
+-- datatype: numeric text char(1) 
+CREATE TABLE colcmpr_dict_01
+(
+	distKey int,
+	myname text,
+	city text,
+	gender char(1),
+	postcode text,
+	coutry text,
+	telephone numeric(15,2)
+) with (orientation = orc) tablespace hdfs_ts ;
+COPY colcmpr_dict_01 FROM '@abs_srcdir@/data/colcmpr_dict_01.data';
+SELECT * FROM colcmpr_dict_01;
+ distkey | myname |   city    | gender | postcode | coutry |   telephone    
+---------+--------+-----------+--------+----------+--------+----------------
+       1 | Tom    | XiAn      | M      | 100701   | China  | 12345678901.00
+       1 | Tom    | ChongQing | M      | 208654   | China  | 12345678901.00
+       1 | Tom    | HangZhou  | M      | 412365   | China  | 12345678901.00
+       1 | Tom    | ShangHai  | M      | 000002   | China  | 12345678901.00
+       1 | Tom    | GuiLin    | M      | 100000   | China  | 12345678901.00
+       1 | Tom    | BeiJing   | M      | 000001   | China  | 12345678901.00
+       1 | Lucy   | XiAn      | F      | 100701   | China  | 12345678900.00
+       1 | Lucy   | ChongQing | F      | 208654   | China  | 12345678900.00
+       1 | Lucy   | HangZhou  | F      | 412365   | China  | 12345678900.00
+       1 | Lucy   | ShangHai  | F      | 000002   | China  | 12345678900.00
+       1 | Lucy   | GuiLin    | F      | 100000   | China  | 12345678900.00
+       1 | Lucy   | BeiJing   | F      | 000001   | China  | 12345678900.00
+       1 | Jack   | XiAn      | M      | 100701   | China  | 12345678902.00
+       1 | Jack   | ChongQing | M      | 208654   | China  | 12345678902.00
+       1 | Jack   | HangZhou  | M      | 412365   | China  | 12345678902.00
+       1 | Jack   | ShangHai  | M      | 000002   | China  | 12345678902.00
+       1 | Jack   | GuiLin    | M      | 100000   | China  | 12345678902.00
+       1 | Jack   | BeiJing   | M      | 000001   | China  | 12345678902.00
+       1 | Karma  | XiAn      | M      | 100701   | China  | 12345678903.00
+       1 | Karma  | ChongQing | M      | 208654   | China  | 12345678903.00
+       1 | Karma  | HangZhou  | M      | 412365   | China  | 12345678903.00
+       1 | Karma  | ShangHai  | M      | 000002   | China  | 12345678903.00
+       1 | Karma  | GuiLin    | M      | 100000   | China  | 12345678903.00
+       1 | Karma  | BeiJing   | M      | 000001   | China  | 12345678903.00
+       1 | Winni  | XiAn      | M      | 100701   | China  | 12345678904.00
+       1 | Winni  | ChongQing | M      | 208654   | China  | 12345678904.00
+       1 | Winni  | HangZhou  | M      | 412365   | China  | 12345678904.00
+       1 | Winni  | ShangHai  | M      | 000002   | China  | 12345678904.00
+       1 | Winni  | GuiLin    | M      | 100000   | China  | 12345678904.00
+       1 | Winni  | BeiJing   | M      | 000001   | China  | 12345678904.00
+       1 | Kitty  | XiAn      | M      | 100701   | China  | 12345678905.00
+       1 | Kitty  | ChongQing | M      | 208654   | China  | 12345678905.00
+       1 | Kitty  | HangZhou  | M      | 412365   | China  | 12345678905.00
+       1 | Kitty  | ShangHai  | M      | 000002   | China  | 12345678905.00
+       1 | Kitty  | GuiLin    | M      | 100000   | China  | 12345678905.00
+       1 | Kitty  | BeiJing   | M      | 000001   | China  | 12345678905.00
+       1 | DinDa  | XiAn      | F      | 100701   | China  | 12345678906.00
+       1 | DinDa  | ChongQing | F      | 208654   | China  | 12345678906.00
+       1 | DinDa  | HangZhou  | F      | 412365   | China  | 12345678906.00
+       1 | DinDa  | ShangHai  | F      | 000002   | China  | 12345678906.00
+       1 | DinDa  | GuiLin    | F      | 100000   | China  | 12345678906.00
+       1 | DinDa  | BeiJing   | F      | 000001   | China  | 12345678906.00
+       1 | Snopy  | XiAn      | F      | 100701   | China  | 12345678907.00
+       1 | Snopy  | ChongQing | F      | 208654   | China  | 12345678907.00
+       1 | Snopy  | HangZhou  | F      | 412365   | China  | 12345678907.00
+       1 | Snopy  | ShangHai  | F      | 000002   | China  | 12345678907.00
+       1 | Snopy  | GuiLin    | F      | 100000   | China  | 12345678907.00
+       1 | Snopy  | BeiJing   | F      | 000001   | China  | 12345678907.00
+       1 | Xiong  | XiAn      | F      | 100701   | China  | 12345678908.00
+       1 | Xiong  | ChongQing | F      | 208654   | China  | 12345678908.00
+       1 | Xiong  | HangZhou  | F      | 412365   | China  | 12345678908.00
+       1 | Xiong  | ShangHai  | F      | 000002   | China  | 12345678908.00
+       1 | Xiong  | GuiLin    | F      | 100000   | China  | 12345678908.00
+       1 | Xiong  | BeiJing   | F      | 000001   | China  | 12345678908.00
+       1 | Andyl  | XiAn      | F      | 100701   | China  | 12345678909.00
+       1 | Andyl  | ChongQing | F      | 208654   | China  | 12345678909.00
+       1 | Andyl  | HangZhou  | F      | 412365   | China  | 12345678909.00
+       1 | Andyl  | ShangHai  | F      | 000002   | China  | 12345678909.00
+       1 | Andyl  | GuiLin    | F      | 100000   | China  | 12345678909.00
+       1 | Andyl  | BeiJing   | F      | 000001   | China  | 12345678909.00
+(60 rows)
+
+DROP TABLE colcmpr_dict_01;

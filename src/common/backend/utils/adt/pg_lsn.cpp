@@ -22,11 +22,10 @@
 /*----------------------------------------------------------
  * Formatting and conversion routines.
  *---------------------------------------------------------*/
-
 Datum pg_lsn_in(PG_FUNCTION_ARGS)
 {
     char* str = PG_GETARG_CSTRING(0);
-    int len1, len2;
+    Size len1, len2;
     uint32 id, off;
     XLogRecPtr result;
 
@@ -49,3 +48,4 @@ Datum pg_lsn_in(PG_FUNCTION_ARGS)
 
     PG_RETURN_LSN(result);
 }
+

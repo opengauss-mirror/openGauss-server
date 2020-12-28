@@ -88,8 +88,7 @@ typedef enum {
     DO_PRE_DATA_BOUNDARY,
     DO_POST_DATA_BOUNDARY,
     DO_FTBL_CONSTRAINT, /* dump informational constraint info of the HDFS foreign table */
-    DO_RLSPOLICY,       /* dump row level security policy of table */
-    DO_REFRESH_MATVIEW
+    DO_RLSPOLICY        /* dump row level security policy of table */
 } DumpableObjectType;
 
 typedef struct _dumpableObject {
@@ -202,12 +201,11 @@ typedef struct _tableInfo {
     char relkind;
     int1 relcmprs;            /* row compression attribution */
     char relpersistence;      /* relation persistence */
-    bool relispopulated;      /* relation is populated */
     char relreplident;        /* replica identifier */
     char* reltablespace;      /* relation tablespace */
     char* reloptions;         /* options specified by WITH (...) */
     Oid   relbucket;          /* relation bucket OID */	    
-    char* toast_reloptions;   /* WITH options for the TOAST table */
+    char* toast_reloptions;   /* ditto, for the TOAST table */
     bool hasindex;            /* does it have any indexes? */
     bool hasrules;            /* does it have any rules? */
     bool hastriggers;         /* does it have any triggers? */
@@ -225,9 +223,9 @@ typedef struct _tableInfo {
     int owning_col; /* attr # of column owning sequence */
     char parttype;
     bool relrowmovement;
+    bool isIncremental; /* for matview, true if is an incremental type */
 
     bool interesting; /* true if need to collect more data */
-    bool postponed_def;  /* matview must be postponed into post-data */
 
 #ifdef PGXC
     /* PGXC table locator Data */
@@ -241,6 +239,8 @@ typedef struct _tableInfo {
      */
     int numatts;                        /* number of attributes */
     char** attnames;                    /* the attribute names */
+    char** column_key_names;            /* column key names */
+    int* encryption_type;               /* encryption type */
     char** atttypnames;                 /* attribute type names */
     int* typid;                         /* attribute type oid */
     int* atttypmod;                     /* type-specific type modifiers */
@@ -256,6 +256,7 @@ typedef struct _tableInfo {
     char** attfdwoptions;               /* per-attribute fdw options */
     bool* notnull;                      /* NOT NULL constraints on attributes */
     bool* inhNotNull;                   /* true if NOT NULL is inherited */
+    int* attkvtype;                     /* will not be 0 in timeseries table other wise 0 */
     struct _attrDefInfo** attrdefs;     /* DEFAULT expressions */
     struct _constraintInfo* checkexprs; /* CHECK constraints */
 

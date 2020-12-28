@@ -89,7 +89,6 @@
 #include "executor/nodeExtensible.h"
 #include "executor/nodeForeignscan.h"
 #include "executor/nodeFunctionscan.h"
-#include "executor/nodeGather.h"
 #include "executor/nodeGroup.h"
 #include "executor/nodeHash.h"
 #include "executor/nodeHashjoin.h"
@@ -117,7 +116,6 @@
 #include "executor/nodeWindowAgg.h"
 #include "executor/nodeWorktablescan.h"
 #include "executor/execStream.h"
-#include "nodes/nodeFuncs.h"
 #include "optimizer/clauses.h"
 #include "optimizer/encoding.h"
 #include "optimizer/ml_model.h"
@@ -144,6 +142,10 @@
 #include "vecexecutor/vecappend.h"
 #include "vecexecutor/veclimit.h"
 #include "vecexecutor/vecsetop.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "vecexecutor/vectsstorescan.h"
+#include "tsdb/cache/tags_cachemgr.h"
+#endif   /* ENABLE_MULTIPLE_NODES */
 #include "vecexecutor/vecgroup.h"
 #include "vecexecutor/vecunique.h"
 #include "vecexecutor/vecnestloop.h"
@@ -155,6 +157,7 @@
 #ifdef PGXC
 #include "pgxc/execRemote.h"
 #endif
+#include "distributelayer/streamMain.h"
 #include "pgxc/pgxc.h"
 #include "securec.h"
 #include "gstrace/gstrace_infra.h"
@@ -170,8 +173,11 @@
  * initilaization work like open scanrel, instead allow NodeInit work to continue on its
  * lefttree/righttree
  */
-static bool NeedStubExecution(Plan* plan)
+bool NeedStubExecution(Plan* plan)
 {
+#ifndef ENABLE_MULTIPLE_NODES
+    return false;
+#endif
     /* If a plan node is under recursive union, we don't consider stub execution */
     if (EXEC_IN_RECURSIVE_MODE(plan)) {
         return false;
@@ -194,7 +200,9 @@ static bool NeedStubExecution(Plan* plan)
         case T_BitmapHeapScan:
         case T_TidScan:
         case T_CStoreScan:
+#ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
+#endif
         case T_CStoreIndexScan:
         case T_CStoreIndexCtidScan:
         case T_CStoreIndexHeapScan:
@@ -202,7 +210,7 @@ static bool NeedStubExecution(Plan* plan)
         case T_FunctionScan:
             return true;
         default:
-            return false;
+            return false;          
     }
 }
 
@@ -222,162 +230,167 @@ static inline bool SeqScanNodeIsStub(SeqScanState* seq_scan)
 {
     return seq_scan->ss_currentScanDesc == NULL;
 }
+
 static inline bool IdxScanNodeIsStub(IndexScanState* index_scan)
 {
     return index_scan->iss_ScanDesc == NULL;
 }
+
 static inline bool IdxOnlyScanNodeIsStub(IndexOnlyScanState* index_only_scan)
 {
     return index_only_scan->ioss_ScanDesc == NULL;
 }
+
 static inline bool BmIdxOnlyScanNodeIsStub(BitmapIndexScanState* bm_index_scan)
 {
     return bm_index_scan->biss_ScanDesc == NULL;
 }
+
 static inline bool BmHeapScanNodeIsStub(BitmapHeapScanState* bm_heap_scan)
 {
     return bm_heap_scan->ss.ss_currentScanDesc == NULL;
 }
-PlanState* ExecInitNodeByType(Plan* node, EState* e_state, int e_flags)
+
+PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
 {
     switch (nodeTag(node)) {
         case T_BaseResult:
-            return (PlanState*)ExecInitResult((BaseResult*)node, e_state, e_flags);
+            return (PlanState*)ExecInitResult((BaseResult*)node, estate, eflags);
         case T_ModifyTable:
-            return (PlanState*)ExecInitModifyTable((ModifyTable*)node, e_state, e_flags);
+            return (PlanState*)ExecInitModifyTable((ModifyTable*)node, estate, eflags);
         case T_Append:
-            return (PlanState*)ExecInitAppend((Append*)node, e_state, e_flags);
+            return (PlanState*)ExecInitAppend((Append*)node, estate, eflags);
         case T_MergeAppend:
-            return (PlanState*)ExecInitMergeAppend((MergeAppend*)node, e_state, e_flags);
+            return (PlanState*)ExecInitMergeAppend((MergeAppend*)node, estate, eflags);
         case T_RecursiveUnion:
-            return (PlanState*)ExecInitRecursiveUnion((RecursiveUnion*)node, e_state, e_flags);
+            return (PlanState*)ExecInitRecursiveUnion((RecursiveUnion*)node, estate, eflags);
         case T_BitmapAnd:
-            return (PlanState*)ExecInitBitmapAnd((BitmapAnd*)node, e_state, e_flags);
+            return (PlanState*)ExecInitBitmapAnd((BitmapAnd*)node, estate, eflags);
         case T_BitmapOr:
-            return (PlanState*)ExecInitBitmapOr((BitmapOr*)node, e_state, e_flags);
+            return (PlanState*)ExecInitBitmapOr((BitmapOr*)node, estate, eflags);
         case T_SeqScan:
-            return (PlanState*)ExecInitSeqScan((SeqScan*)node, e_state, e_flags);
+            return (PlanState*)ExecInitSeqScan((SeqScan*)node, estate, eflags);
         case T_IndexScan:
-            return (PlanState*)ExecInitIndexScan((IndexScan*)node, e_state, e_flags);
+            return (PlanState*)ExecInitIndexScan((IndexScan*)node, estate, eflags);
         case T_IndexOnlyScan:
-            return (PlanState*)ExecInitIndexOnlyScan((IndexOnlyScan*)node, e_state, e_flags);
+            return (PlanState*)ExecInitIndexOnlyScan((IndexOnlyScan*)node, estate, eflags);
         case T_BitmapIndexScan:
-            return (PlanState*)ExecInitBitmapIndexScan((BitmapIndexScan*)node, e_state, e_flags);
+            return (PlanState*)ExecInitBitmapIndexScan((BitmapIndexScan*)node, estate, eflags);
         case T_BitmapHeapScan:
-            return (PlanState*)ExecInitBitmapHeapScan((BitmapHeapScan*)node, e_state, e_flags);
+            return (PlanState*)ExecInitBitmapHeapScan((BitmapHeapScan*)node, estate, eflags);
         case T_TidScan:
-            return (PlanState*)ExecInitTidScan((TidScan*)node, e_state, e_flags);
+            return (PlanState*)ExecInitTidScan((TidScan*)node, estate, eflags);
         case T_SubqueryScan:
-            return (PlanState*)ExecInitSubqueryScan((SubqueryScan*)node, e_state, e_flags);
+            return (PlanState*)ExecInitSubqueryScan((SubqueryScan*)node, estate, eflags);
         case T_FunctionScan:
-            return (PlanState*)ExecInitFunctionScan((FunctionScan*)node, e_state, e_flags);
+            return (PlanState*)ExecInitFunctionScan((FunctionScan*)node, estate, eflags);
         case T_ValuesScan:
-            return (PlanState*)ExecInitValuesScan((ValuesScan*)node, e_state, e_flags);
+            return (PlanState*)ExecInitValuesScan((ValuesScan*)node, estate, eflags);
         case T_CteScan:
-            return (PlanState*)ExecInitCteScan((CteScan*)node, e_state, e_flags);
+            return (PlanState*)ExecInitCteScan((CteScan*)node, estate, eflags);
         case T_WorkTableScan:
-            return (PlanState*)ExecInitWorkTableScan((WorkTableScan*)node, e_state, e_flags);
+            return (PlanState*)ExecInitWorkTableScan((WorkTableScan*)node, estate, eflags);
         case T_ForeignScan:
-            return (PlanState*)ExecInitForeignScan((ForeignScan*)node, e_state, e_flags);
+            return (PlanState*)ExecInitForeignScan((ForeignScan*)node, estate, eflags);
         case T_ExtensiblePlan:
-            return (PlanState*)ExecInitExtensiblePlan((ExtensiblePlan*)node, e_state, e_flags);
+            return (PlanState*)ExecInitExtensiblePlan((ExtensiblePlan*)node, estate, eflags);
         case T_NestLoop:
-            return (PlanState*)ExecInitNestLoop((NestLoop*)node, e_state, e_flags);
+            return (PlanState*)ExecInitNestLoop((NestLoop*)node, estate, eflags);
         case T_MergeJoin:
-            return (PlanState*)ExecInitMergeJoin((MergeJoin*)node, e_state, e_flags);
+            return (PlanState*)ExecInitMergeJoin((MergeJoin*)node, estate, eflags);
         case T_HashJoin:
-            return (PlanState*)ExecInitHashJoin((HashJoin*)node, e_state, e_flags);
+            return (PlanState*)ExecInitHashJoin((HashJoin*)node, estate, eflags);
         case T_Material:
-            return (PlanState*)ExecInitMaterial((Material*)node, e_state, e_flags);
+            return (PlanState*)ExecInitMaterial((Material*)node, estate, eflags);
         case T_Sort:
-            return (PlanState*)ExecInitSort((Sort*)node, e_state, e_flags);
+            return (PlanState*)ExecInitSort((Sort*)node, estate, eflags);
         case T_Group:
-            return (PlanState*)ExecInitGroup((Group*)node, e_state, e_flags);
+            return (PlanState*)ExecInitGroup((Group*)node, estate, eflags);
         case T_Agg:
-            return (PlanState*)ExecInitAgg((Agg*)node, e_state, e_flags);
+            return (PlanState*)ExecInitAgg((Agg*)node, estate, eflags);
         case T_WindowAgg:
-            return (PlanState*)ExecInitWindowAgg((WindowAgg*)node, e_state, e_flags);
+            return (PlanState*)ExecInitWindowAgg((WindowAgg*)node, estate, eflags);
         case T_Unique:
-            return (PlanState*)ExecInitUnique((Unique*)node, e_state, e_flags);
-        case T_Gather:
-            return (PlanState*)ExecInitGather((Gather*)node, e_state, e_flags);
+            return (PlanState*)ExecInitUnique((Unique*)node, estate, eflags);
         case T_Hash:
-            return (PlanState*)ExecInitHash((Hash*)node, e_state, e_flags);
+            return (PlanState*)ExecInitHash((Hash*)node, estate, eflags);
         case T_SetOp:
-            return (PlanState*)ExecInitSetOp((SetOp*)node, e_state, e_flags);
+            return (PlanState*)ExecInitSetOp((SetOp*)node, estate, eflags);
         case T_LockRows:
-            return (PlanState*)ExecInitLockRows((LockRows*)node, e_state, e_flags);
+            return (PlanState*)ExecInitLockRows((LockRows*)node, estate, eflags);
         case T_Limit:
-            return (PlanState*)ExecInitLimit((Limit*)node, e_state, e_flags);
+            return (PlanState*)ExecInitLimit((Limit*)node, estate, eflags);
         case T_PartIterator:
-            return (PlanState*)ExecInitPartIterator((PartIterator*)node, e_state, e_flags);
+            return (PlanState*)ExecInitPartIterator((PartIterator*)node, estate, eflags);
         case T_Stream:
-            return (PlanState*)ExecInitStream((Stream*)node, e_state, e_flags);
+            return (PlanState*)ExecInitStream((Stream*)node, estate, eflags);
 #ifdef PGXC
         case T_RemoteQuery:
-            return (PlanState*)ExecInitRemoteQuery((RemoteQuery*)node, e_state, e_flags);
+            return (PlanState*)ExecInitRemoteQuery((RemoteQuery*)node, estate, eflags);
 #endif
 
         case T_VecToRow:
-            return (PlanState*)ExecInitVecToRow((VecToRow*)node, e_state, e_flags);
+            return (PlanState*)ExecInitVecToRow((VecToRow*)node, estate, eflags);
         case T_RowToVec:
-            return (PlanState*)ExecInitRowToVec((RowToVec*)node, e_state, e_flags);
+            return (PlanState*)ExecInitRowToVec((RowToVec*)node, estate, eflags);
         case T_VecRemoteQuery:
-            return (PlanState*)ExecInitVecRemoteQuery((VecRemoteQuery*)node, e_state, e_flags);
+            return (PlanState*)ExecInitVecRemoteQuery((VecRemoteQuery*)node, estate, eflags);
         case T_VecStream:
-            return (PlanState*)ExecInitVecStream((Stream*)node, e_state, e_flags);
+            return (PlanState*)ExecInitVecStream((Stream*)node, estate, eflags);
         case T_CStoreScan:
-            return (PlanState*)ExecInitCStoreScan((CStoreScan*)node, NULL, e_state, e_flags);
+            return (PlanState*)ExecInitCStoreScan((CStoreScan*)node, NULL, estate, eflags);
         case T_DfsScan:
-            return (PlanState*)ExecInitDfsScan((DfsScan*)node, NULL, e_state, e_flags);
+            return (PlanState*)ExecInitDfsScan((DfsScan*)node, NULL, estate, eflags);
+#ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
-            return (PlanState*)ExecInitCStoreScan((CStoreScan *)node, NULL, e_state, e_flags);
+            return (PlanState*)ExecInitTsStoreScan((TsStoreScan *)node, NULL, estate, eflags);
+#endif   /* ENABLE_MULTIPLE_NODES */
         case T_VecHashJoin:
-            return (PlanState*)ExecInitVecHashJoin((VecHashJoin*)node, e_state, e_flags);
+            return (PlanState*)ExecInitVecHashJoin((VecHashJoin*)node, estate, eflags);
         case T_VecAgg:
-            return (PlanState*)ExecInitVecAggregation((VecAgg*)node, e_state, e_flags);
+            return (PlanState*)ExecInitVecAggregation((VecAgg*)node, estate, eflags);
         case T_DfsIndexScan:
-            return (PlanState*)ExecInitDfsIndexScan((DfsIndexScan*)node, e_state, e_flags);
+            return (PlanState*)ExecInitDfsIndexScan((DfsIndexScan*)node, estate, eflags);
         case T_CStoreIndexScan:
-            return (PlanState*)ExecInitCstoreIndexScan((CStoreIndexScan*)node, e_state, e_flags);
+            return (PlanState*)ExecInitCstoreIndexScan((CStoreIndexScan*)node, estate, eflags);
         case T_CStoreIndexCtidScan:
-            return (PlanState*)ExecInitCstoreIndexCtidScan((CStoreIndexCtidScan*)node, e_state, e_flags);
+            return (PlanState*)ExecInitCstoreIndexCtidScan((CStoreIndexCtidScan*)node, estate, eflags);
         case T_CStoreIndexHeapScan:
-            return (PlanState*)ExecInitCstoreIndexHeapScan((CStoreIndexHeapScan*)node, e_state, e_flags);
+            return (PlanState*)ExecInitCstoreIndexHeapScan((CStoreIndexHeapScan*)node, estate, eflags);
         case T_CStoreIndexAnd:
-            return (PlanState*)ExecInitCstoreIndexAnd((CStoreIndexAnd*)node, e_state, e_flags);
+            return (PlanState*)ExecInitCstoreIndexAnd((CStoreIndexAnd*)node, estate, eflags);
         case T_CStoreIndexOr:
-            return (PlanState*)ExecInitCstoreIndexOr((CStoreIndexOr*)node, e_state, e_flags);
+            return (PlanState*)ExecInitCstoreIndexOr((CStoreIndexOr*)node, estate, eflags);
         case T_VecSort:
-            return (PlanState*)ExecInitVecSort((Sort*)node, e_state, e_flags);
+            return (PlanState*)ExecInitVecSort((Sort*)node, estate, eflags);
         case T_VecMaterial:
-            return (PlanState*)ExecInitVecMaterial((VecMaterial*)node, e_state, e_flags);
+            return (PlanState*)ExecInitVecMaterial((VecMaterial*)node, estate, eflags);
         case T_VecResult:
-            return (PlanState*)ExecInitVecResult((VecResult*)node, e_state, e_flags);
+            return (PlanState*)ExecInitVecResult((VecResult*)node, estate, eflags);
         case T_VecSubqueryScan:
-            return (PlanState*)ExecInitVecSubqueryScan((VecSubqueryScan*)node, e_state, e_flags);
+            return (PlanState*)ExecInitVecSubqueryScan((VecSubqueryScan*)node, estate, eflags);
         case T_VecForeignScan:
-            return (PlanState*)ExecInitVecForeignScan((VecForeignScan*)node, e_state, e_flags);
+            return (PlanState*)ExecInitVecForeignScan((VecForeignScan*)node, estate, eflags);
         case T_VecModifyTable:
-            return (PlanState*)ExecInitVecModifyTable((VecModifyTable*)node, e_state, e_flags);
+            return (PlanState*)ExecInitVecModifyTable((VecModifyTable*)node, estate, eflags);
         case T_VecPartIterator:
-            return (PlanState*)ExecInitVecPartIterator((VecPartIterator*)node, e_state, e_flags);
+            return (PlanState*)ExecInitVecPartIterator((VecPartIterator*)node, estate, eflags);
         case T_VecAppend:
-            return (PlanState*)ExecInitVecAppend((VecAppend*)node, e_state, e_flags);
+            return (PlanState*)ExecInitVecAppend((VecAppend*)node, estate, eflags);
         case T_VecGroup:
-            return (PlanState*)ExecInitVecGroup((VecGroup*)node, e_state, e_flags);
+            return (PlanState*)ExecInitVecGroup((VecGroup*)node, estate, eflags);
         case T_VecLimit:
-            return (PlanState*)ExecInitVecLimit((VecLimit*)node, e_state, e_flags);
+            return (PlanState*)ExecInitVecLimit((VecLimit*)node, estate, eflags);
         case T_VecUnique:
-            return (PlanState*)ExecInitVecUnique((VecUnique*)node, e_state, e_flags);
+            return (PlanState*)ExecInitVecUnique((VecUnique*)node, estate, eflags);
         case T_VecSetOp:
-            return (PlanState*)ExecInitVecSetOp((VecSetOp*)node, e_state, e_flags);
+            return (PlanState*)ExecInitVecSetOp((VecSetOp*)node, estate, eflags);
         case T_VecNestLoop:
-            return (PlanState*)ExecInitVecNestLoop((VecNestLoop*)node, e_state, e_flags);
+            return (PlanState*)ExecInitVecNestLoop((VecNestLoop*)node, estate, eflags);
         case T_VecMergeJoin:
-            return (PlanState*)ExecInitVecMergeJoin((VecMergeJoin*)node, e_state, e_flags);
+            return (PlanState*)ExecInitVecMergeJoin((VecMergeJoin*)node, estate, eflags);
         case T_VecWindowAgg:
-            return (PlanState*)ExecInitVecWindowAgg((VecWindowAgg*)node, e_state, e_flags);
+            return (PlanState*)ExecInitVecWindowAgg((VecWindowAgg*)node, estate, eflags);
         default:
             ereport(ERROR,
                 (errmodule(MOD_EXECUTOR),
@@ -386,7 +399,8 @@ PlanState* ExecInitNodeByType(Plan* node, EState* e_state, int e_flags)
             return NULL; /* keep compiler quiet */
     }
 }
-void ExecInitNodeSubPlan(Plan* node, EState* e_state, PlanState* result)
+
+void ExecInitNodeSubPlan(Plan* node, EState* estate, PlanState* result)
 {
     List* sub_ps = NIL;
     ListCell* l = NULL;
@@ -396,8 +410,8 @@ void ExecInitNodeSubPlan(Plan* node, EState* e_state, PlanState* result)
         if (NULL == sub_plan)
             continue;
         Assert(IsA(sub_plan, SubPlan));
-        if (IS_PGXC_COORDINATOR || e_state->es_subplan_ids == NIL ||
-            node->plan_node_id == list_nth_int(e_state->es_subplan_ids, sub_plan->plan_id - 1)) {
+        if (IS_PGXC_COORDINATOR || estate->es_subplan_ids == NIL ||
+            node->plan_node_id == list_nth_int(estate->es_subplan_ids, sub_plan->plan_id - 1)) {
             s_state = ExecInitSubPlan(sub_plan, result);
             if (s_state->planstate)
                 sub_ps = lappend(sub_ps, s_state);
@@ -419,7 +433,7 @@ void ExecInitNodeSubPlan(Plan* node, EState* e_state, PlanState* result)
  *		Returns a PlanState node corresponding to the given Plan node.
  * ------------------------------------------------------------------------
  */
-PlanState* ExecInitNode(Plan* node, EState* e_state, int e_flags)
+PlanState* ExecInitNode(Plan* node, EState* estate, int e_flags)
 {
     PlanState* result = NULL;
     MemoryContext old_context;
@@ -450,23 +464,23 @@ PlanState* ExecInitNode(Plan* node, EState* e_state, int e_flags)
             NODENAMELEN - 1,
             "%s_%lu_%d",
             nodeTagToString(nodeTag(node)),
-            e_state->es_plannedstmt->queryId,
+            estate->es_plannedstmt->queryId,
             node->plan_node_id);
     securec_check_ss(rc, "", "");
 
     /*
      * Create working memory for expression evaluation in this context.
      */
-    node_context = AllocSetContextCreate(e_state->es_const_query_cxt,
+    node_context = AllocSetContextCreate(estate->es_const_query_cxt,
         context_name,
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE);
 
-    query_context = e_state->es_query_cxt;
+    query_context = estate->es_query_cxt;
 
     // reassign the node context as we must run under this context.
-    e_state->es_query_cxt = node_context;
+    estate->es_query_cxt = node_context;
 
     /* Switch to Node Level Memory Context */
     old_context = MemoryContextSwitchTo(node_context);
@@ -478,9 +492,9 @@ PlanState* ExecInitNode(Plan* node, EState* e_state, int e_flags)
      * Note: We only have to do such kind of specialy pocessing in some plan nodes
      */
     if (unlikely(IS_PGXC_DATANODE && NeedStubExecution(node))) {
-        result = (PlanState*)ExecInitNodeStubNorm(node, e_state, e_flags);
-    } else {
-        result = ExecInitNodeByType(node, e_state, e_flags);
+        result = (PlanState*)ExecInitNodeStubNorm(node, estate, e_flags);
+    } else {       
+        result = ExecInitNodeByType(node, estate, e_flags);
     }
 
     /* Set the nodeContext */
@@ -495,10 +509,11 @@ PlanState* ExecInitNode(Plan* node, EState* e_state, int e_flags)
      * We initialize subplan node on coordinator (for explain) or one dn thread
      * that executes the subplan
      */
-    ExecInitNodeSubPlan(node, e_state, result);
+    ExecInitNodeSubPlan(node, estate, result);
 
     /* Set up instrumentation for this node if requested */
-    if (e_state->es_instrument != INSTRUMENT_NONE) {
+    if (estate->es_instrument != INSTRUMENT_NONE) {
+#ifdef ENABLE_MULTIPLE_NODES
         /*
          * "plan_node_id == 0" is special case, "with recursive + hdfs foreign table"
          * will lead to plan_node_id of all plan node in subplan are zero.
@@ -509,51 +524,63 @@ PlanState* ExecInitNode(Plan* node, EState* e_state, int e_flags)
             IS_PGXC_COORDINATOR && StreamTopConsumerAmI()) {
             /* on compute pool */
             result->instrument = u_sess->instr_cxt.thread_instr->allocInstrSlot(
-                node->plan_node_id, node->parent_node_id, result->plan, e_state);
+                node->plan_node_id, node->parent_node_id, result->plan, estate);
         } else if (u_sess->instr_cxt.global_instr != NULL && u_sess->instr_cxt.thread_instr && node->plan_node_id > 0 &&
                  (IS_PGXC_DATANODE || (IS_PGXC_COORDINATOR && node->exec_type == EXEC_ON_COORDS))) {
             /* plannode(exec on cn)or dn */
             result->instrument = u_sess->instr_cxt.thread_instr->allocInstrSlot(
-                node->plan_node_id, node->parent_node_id, result->plan, e_state);
+                node->plan_node_id, node->parent_node_id, result->plan, estate);
         } else {
             /* on MPPDB CN */
-            result->instrument = InstrAlloc(1, e_state->es_instrument);
+            result->instrument = InstrAlloc(1, estate->es_instrument);
         }
-
+#else
+        if (u_sess->instr_cxt.global_instr != NULL && u_sess->instr_cxt.thread_instr && node->plan_node_id > 0 &&
+            u_sess->instr_cxt.global_instr->get_planIdOffsetArray()[node->plan_node_id - 1] ==
+            u_sess->instr_cxt.thread_instr->getSegmentId() - 1) {
+            result->instrument = u_sess->instr_cxt.thread_instr->allocInstrSlot(
+                node->plan_node_id, node->parent_node_id, result->plan, estate);
+        } else {
+            result->instrument = InstrAlloc(1, estate->es_instrument);
+        }
+#endif
+        if (result->instrument) {
         result->instrument->memoryinfo.nodeContext = node_context;
 
         if (u_sess->attr.attr_resource.use_workload_manager &&
             u_sess->attr.attr_resource.resource_track_level == RESOURCE_TRACK_OPERATOR &&
-            e_state->es_can_realtime_statistics && u_sess->exec_cxt.need_track_resource && NeedExecuteActiveSql(node)) {
-            Qpid qid;
-            qid.plannodeid = node->plan_node_id;
-            qid.procId = u_sess->instr_cxt.gs_query_id->procId;
-            qid.queryId = u_sess->instr_cxt.gs_query_id->queryId;
-            int plan_dop = node->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
-            result->instrument->dop = plan_dop;
+            estate->es_can_realtime_statistics && u_sess->exec_cxt.need_track_resource && NeedExecuteActiveSql(node)) {
+                Qpid qid;
+                qid.plannodeid = node->plan_node_id;
+                qid.procId = u_sess->instr_cxt.gs_query_id->procId;
+                qid.queryId = u_sess->instr_cxt.gs_query_id->queryId;
+                int plan_dop = node->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
+                result->instrument->dop = plan_dop;
 
-            int64 plan_rows = e_rows_convert_to_int64(node->plan_rows);
-            if (nodeTag(node) == T_VecAgg && ((Agg*)node)->aggstrategy == AGG_HASHED && ((VecAgg*)node)->is_sonichash) {
-                ExplainCreateDNodeInfoOnDN(&qid,
-                    result->instrument,
-                    node->exec_type == EXEC_ON_DATANODES,
-                    "VectorSonicHashAgg",
-                    plan_dop,
-                    plan_rows);
-            } else if (nodeTag(node) == T_VecHashJoin && ((HashJoin*)node)->isSonicHash) {
-                ExplainCreateDNodeInfoOnDN(&qid,
-                    result->instrument,
-                    node->exec_type == EXEC_ON_DATANODES,
-                    "VectorSonicHashJoin",
-                    plan_dop,
-                    plan_rows);
-            } else {
-                ExplainCreateDNodeInfoOnDN(&qid,
-                    result->instrument,
-                    node->exec_type == EXEC_ON_DATANODES,
-                    nodeTagToString(nodeTag(node)),
-                    plan_dop,
-                    plan_rows);
+                int64 plan_rows = e_rows_convert_to_int64(node->plan_rows);
+                if (nodeTag(node) == T_VecAgg &&
+                    ((Agg*)node)->aggstrategy == AGG_HASHED && ((VecAgg*)node)->is_sonichash) {
+                    ExplainCreateDNodeInfoOnDN(&qid,
+                        result->instrument,
+                        node->exec_type == EXEC_ON_DATANODES,
+                        "VectorSonicHashAgg",
+                        plan_dop,
+                        plan_rows);
+                } else if (nodeTag(node) == T_VecHashJoin && ((HashJoin*)node)->isSonicHash) {
+                    ExplainCreateDNodeInfoOnDN(&qid,
+                        result->instrument,
+                        node->exec_type == EXEC_ON_DATANODES,
+                        "VectorSonicHashJoin",
+                        plan_dop,
+                        plan_rows);
+                } else {
+                    ExplainCreateDNodeInfoOnDN(&qid,
+                        result->instrument,
+                        node->exec_type == EXEC_ON_DATANODES,
+                        nodeTagToString(nodeTag(node)),
+                        plan_dop,
+                        plan_rows);
+                }
             }
         }
     }
@@ -562,8 +589,7 @@ PlanState* ExecInitNode(Plan* node, EState* e_state, int e_flags)
     MemoryContextSwitchTo(old_context);
 
     /* restore the per query context */
-    e_state->es_query_cxt = query_context;
-
+    estate->es_query_cxt = query_context;
     result->ps_rownum = 0;
 
     gstrace_exit(GS_TRC_ID_ExecInitNode);
@@ -639,8 +665,6 @@ TupleTableSlot* ExecProcNodeByType(PlanState* node)
             return ExecWindowAgg((WindowAggState*)node);
         case T_UniqueState:
             return ExecUnique((UniqueState*)node);
-        case T_GatherState:
-            return ExecGather((GatherState*)node);
         case T_HashState:
             return ExecHash();
         case T_SetOpState:
@@ -896,9 +920,10 @@ void ExplainNodeFinish(PlanState* result_plan, PlannedStmt *pstmt, TimestampTz c
             }
 
             OperatorPlanInfo* opt_plan_info = NULL;
-            if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && pstmt != NULL)
+#ifndef ENABLE_MULTIPLE_NODES
+            if (pstmt != NULL)
                 opt_plan_info = ExtractOperatorPlanInfo(result_plan, pstmt);
-
+#endif /* ENABLE_MULTIPLE_NODES */
             ExplainSetSessionInfo(result_plan->plan->plan_node_id,
                 result_plan->instrument, 
                 result_plan->plan->exec_type == EXEC_ON_DATANODES,
@@ -1088,12 +1113,11 @@ static void ExecEndNodeByType(PlanState* node)
         case T_DfsScanState:
             ExecEndDfsScan((DfsScanState*)node);
             break;
+#ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScanState:
-            ExecEndCStoreScan((CStoreScanState*)node, false);
+            ExecEndTsStoreScan((TsStoreScanState *)node, false);
             break;
-        case T_GatherState:
-            ExecEndGather((GatherState *)node);
-            break;
+#endif   /* ENABLE_MULTIPLE_NODES */
         case T_IndexScanState:
             ExecEndIndexScan((IndexScanState*)node);
             break;
@@ -1349,129 +1373,3 @@ void ExecEndNode(PlanState* node)
     }
     ExecEndNodeByType(node);
 }
-
-/*
- * ExecShutdownNode
- *
- * Give execution nodes a chance to stop asynchronous resource consumption
- * and release any resources still held.  Currently, this is only used for
- * parallel query, but we might want to extend it to other cases also (e.g.
- * FDW).  We might also want to call it sooner, as soon as it's evident that
- * no more rows will be needed (e.g. when a Limit is filled) rather than only
- * at the end of ExecutorRun.
- */
-bool ExecShutdownNode(PlanState* node)
-{
-    if (node == NULL) {
-        return false;
-    }
-    (void)planstate_tree_walker(node, (bool (*)())ExecShutdownNode, NULL);
-    switch (nodeTag(node)) {
-        case T_GatherState:
-            ExecShutdownGather((GatherState*)node);
-            break;
-        case T_HashState:
-            ExecShutdownHash((HashState*)node);
-            break;
-        case T_HashJoinState:
-            ExecShutdownHashJoin((HashJoinState*)node);
-            break;
-        default:
-            break;
-    }
-
-    return false;
-}
-
-/*
- * ExecSetTupleBound
- *
- * Set a tuple bound for a planstate node.  This lets child plan nodes
- * optimize based on the knowledge that the maximum number of tuples that
- * their parent will demand is limited.  The tuple bound for a node may
- * only be changed between scans (i.e., after node initialization or just
- * before an ExecReScan call).
- *
- * Any negative tuples_needed value means "no limit", which should be the
- * default assumption when this is not called at all for a particular node.
- *
- * Note: if this is called repeatedly on a plan tree, the exact same set
- * of nodes must be updated with the new limit each time; be careful that
- * only unchanging conditions are tested here.
- */
-void ExecSetTupleBound(int64 tuples_needed, PlanState *child_node)
-{
-    /*
-     * Since this function recurses, in principle we should check stack depth
-     * here.  In practice, it's probably pointless since the earlier node
-     * initialization tree traversal would surely have consumed more stack.
-     */
-    if (IsA(child_node, SortState) || IsA(child_node, VecSortState)) {
-        /*
-         * If it is a Sort node, notify it that it can use bounded sort.
-         *
-         * Note: it is the responsibility of nodeSort.c to react properly to
-         * changes of these parameters.  If we ever redesign this, it'd be a
-         * good idea to integrate this signaling with the parameter-change
-         * mechanism.
-         */
-        SortState *sortState = (SortState *)child_node;
-
-        if (tuples_needed < 0) {
-            /* make sure flag gets reset if needed upon rescan */
-            sortState->bounded = false;
-        } else {
-            sortState->bounded = true;
-            sortState->bound = tuples_needed;
-        }
-    } else if (IsA(child_node, MergeAppendState)) {
-        /*
-         * If it is a MergeAppend, we can apply the bound to any nodes that
-         * are children of the MergeAppend, since the MergeAppend surely need
-         * read no more than that many tuples from any one input.
-         */
-        MergeAppendState *maState = (MergeAppendState *)child_node;
-
-        for (int i = 0; i < maState->ms_nplans; i++) {
-            ExecSetTupleBound(tuples_needed, maState->mergeplans[i]);
-        }
-    } else if (IsA(child_node, ResultState) || IsA(child_node, VecResultState)) {
-        /*
-         * An extra consideration here is that if the Result is projecting a
-         * targetlist that contains any SRFs, we can't assume that every input
-         * tuple generates an output tuple, so a Sort underneath might need to
-         * return more than N tuples to satisfy LIMIT N. So we cannot use
-         * bounded sort.
-         *
-         * If Result supported qual checking, we'd have to punt on seeing a
-         * qual, too.  Note that having a resconstantqual is not a
-         * showstopper: if that fails we're not getting any rows at all.
-         */
-        if (outerPlanState(child_node) && !expression_returns_set((Node*)child_node->plan->targetlist)) {
-            ExecSetTupleBound(tuples_needed, outerPlanState(child_node));
-        }
-    } else if (IsA(child_node, GatherState)) {
-        /*
-         * A Gather node can propagate the bound to its workers.  As with
-         * MergeAppend, no one worker could possibly need to return more
-         * tuples than the Gather itself needs to.
-         *
-         * Note: As with Sort, the Gather node is responsible for reacting
-         * properly to changes to this parameter.
-         */
-        GatherState *gstate = (GatherState *)child_node;
-
-        gstate->tuples_needed = tuples_needed;
-
-        /* Also pass down the bound to our own copy of the child plan */
-        ExecSetTupleBound(tuples_needed, outerPlanState(child_node));
-    }
-
-    /*
-     * In principle we could descend through any plan node type that is
-     * certain not to discard or combine input rows; but on seeing a node that
-     * can do that, we can't propagate the bound any further.  For the moment
-     * it's unclear that any other cases are worth checking here.
-     */
-}
-

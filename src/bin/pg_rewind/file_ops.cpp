@@ -27,11 +27,14 @@
 #include "common/build_query/build_query.h"
 #include "replication/replicainternal.h"
 
+#define BLOCKSIZE (8 * 1024)
+
 /*
  * Currently open target file.
  */
 static int dstfd = -1;
 static char dstpath[MAXPGPATH] = "";
+static bool g_isRelDataFile = false;
 
 static void create_target_dir(const char* path);
 static void remove_target_dir(const char* path);
@@ -61,6 +64,13 @@ void open_target_file(const char* path, bool trunc)
     if (dstfd != -1 && !trunc && strcmp(path, &dstpath[strlen(pg_data) + 1]) == 0)
         return; /* already open */
 
+    /* fsync xlog file to prevent read checkpoint record failure after execute file map */
+    if (dstfd != -1 && strstr(path, "pg_xlog") != NULL) {
+        if (fsync(dstfd) !=0 ) {
+            pg_fatal("could not fsync target file \"%s\": %s\n", dstpath, strerror(errno));
+        }
+    }
+
     close_target_file();
 
     ss_c = snprintf_s(dstpath, sizeof(dstpath), sizeof(dstpath) - 1, "%s/%s", pg_data, path);
@@ -72,6 +82,7 @@ void open_target_file(const char* path, bool trunc)
     dstfd = open(dstpath, mode, 0600);
     if (dstfd < 0)
         pg_fatal("could not open target file \"%s\": %s\n", dstpath, strerror(errno));
+    g_isRelDataFile = isRelDataFile(dstpath);
 }
 
 /*
@@ -88,7 +99,6 @@ void close_target_file(void)
     }
 
     dstfd = -1;
-    /* fsync? */
 }
 
 void write_target_range(char* buf, off_t begin, size_t size, int space)
@@ -102,8 +112,14 @@ void write_target_range(char* buf, off_t begin, size_t size, int space)
     if (dry_run)
         return;
 
+    if (begin % BLOCKSIZE != 0) {
+        (void)close(dstfd);
+        dstfd = -1;
+        pg_fatal("seek position %ld in target file \"%s\" is not in BLOCKSIZEs\n", size, dstpath);
+    }
+
     if (lseek(dstfd, begin, SEEK_SET) == -1) {
-        close(dstfd);
+        (void)close(dstfd);
         dstfd = -1;
         pg_fatal("could not seek in target file \"%s\": %s\n", dstpath, strerror(errno));
     }
@@ -134,9 +150,13 @@ void write_target_range(char* buf, off_t begin, size_t size, int space)
             /* if write didn't set errno, assume problem is no disk space */
             if (errno == 0)
                 errno = ENOSPC;
-            close(dstfd);
+            (void)close(dstfd);
             dstfd = -1;
             pg_fatal("could not write file \"%s\": %s\n", dstpath, strerror(errno));
+            break;
+        } else if (writelen % BLOCKSIZE != 0 && g_isRelDataFile) {
+            pg_log(PG_WARNING, "write length %d is not in BLOCKSIZEs which may be risky, "
+                "file %s, size %ld, write left %d\n", writelen, dstpath, size, writeleft);
         }
 
         p += writelen;
@@ -145,6 +165,7 @@ void write_target_range(char* buf, off_t begin, size_t size, int space)
 
     if (isempty && q != NULL) {
         free(q);
+        q = NULL;
     }
 
     /* update progress report */
@@ -157,7 +178,7 @@ void write_target_range(char* buf, off_t begin, size_t size, int space)
 void remove_target(file_entry_t* entry)
 {
     Assert(entry->action == FILE_ACTION_REMOVE);
-    pg_log(PG_PROGRESS, "remove file %s, type% d\n", entry->path, entry->type);
+    pg_log(PG_DEBUG, "remove file %s, type% d\n", entry->path, entry->type);
     switch (entry->type) {
         case FILE_TYPE_DIRECTORY:
             remove_target_dir(entry->path);
@@ -240,10 +261,11 @@ void truncate_target_file(const char* path, off_t newsize)
 
     if (ftruncate(fd, newsize) != 0) {
         pg_fatal("could not truncate file \"%s\" to %u bytes: %s\n", destpath, (unsigned int)newsize, strerror(errno));
+        (void)close(fd);
+        return;
     }
 
-    close(fd);
-    return;
+    (void)close(fd);
 }
 
 /*
@@ -389,7 +411,7 @@ char* slurpFile(const char* datadir, const char* path, size_t* filesize)
     }
 
     if (fstat(fd, &statbuf) < 0) {
-        close(fd);
+        (void)close(fd);
         pg_fatal("could not open file \"%s\" for reading: %s\n", fullpath, strerror(errno));
         return NULL;
     }
@@ -397,7 +419,7 @@ char* slurpFile(const char* datadir, const char* path, size_t* filesize)
     len = statbuf.st_size;
 
     if (len < 0 || len > max_file_size) {
-        close(fd);
+        (void)close(fd);
         pg_fatal("could not read file \"%s\": unexpected file size\n", fullpath);
         return NULL;
     }
@@ -405,12 +427,12 @@ char* slurpFile(const char* datadir, const char* path, size_t* filesize)
     buffer = (char*)pg_malloc(len + 1);
 
     if (read(fd, buffer, len) != len) {
-        close(fd);
+        (void)close(fd);
         pg_free(buffer);
         pg_fatal("could not read file \"%s\": %s\n", fullpath, strerror(errno));
         return NULL;
     }
-    close(fd);
+    (void)close(fd);
 
     /* Zero-terminate the buffer. */
     buffer[len] = '\0';
@@ -478,10 +500,10 @@ static void get_file_path(const char* path, const char* file_name, char* file_pa
     securec_check_c(rc, "", "");
 
     if (file_path[strlen(path) - 1] != '/') {
-        rc = strcat_s(file_path, MAXPGPATH - strlen(file_path), "/");
+        rc = strcat_s(file_path, MAXPGPATH, "/");
         securec_check_c(rc, "", "");
     }
-    rc = strcat_s(file_path, MAXPGPATH - strlen(file_path), file_name);
+    rc = strcat_s(file_path, MAXPGPATH, file_name);
     securec_check_c(rc, "", "");
 }
 
@@ -574,6 +596,7 @@ void create_backup_filepath(const char* fullpath, char* backupPath)
 /*
  * There are three types of the path, we should deal with the paths with different functions.
  */
+
 void backup_target(file_entry_t* entry, const char* lastoff)
 {
     switch (entry->type) {
@@ -635,7 +658,7 @@ void backup_target_file(char* path, const char* lastoff)
     securec_check_ss_c(ss_c, "", "");
 
     /*we should skip the condition when file is fsm, vm or build_completed.done.*/
-    if (NULL != strstr(path, "_fsm") || NULL != strstr(path, "_vm") || NULL != strstr(path, "_bcm") ||
+    if (NULL != strstr(path, "_fsm") || NULL != strstr(path, "_vm") ||
         NULL != strstr(path, "_cbm") || NULL != strstr(path, "build_completed.start") ||
         NULL != strstr(path, "build_completed.done"))
         return;
@@ -671,7 +694,7 @@ void backup_target_file(char* path, const char* lastoff)
     errno = 0;
     if (read(fd, buffer, len) != len && errno != 0)
         pg_fatal("could not read file \"%s\": %s in backup\n ", fullpath, strerror(errno));
-    close(fd);
+    (void)close(fd);
 
     /* Zero-terminate the buffer. */
     buffer[len] = '\0';
@@ -696,6 +719,7 @@ void backup_target_file(char* path, const char* lastoff)
  *
  * if the slink doesn't exist, it will return and do nothing.
  */
+
 void backup_target_symlink(const char* path)
 {
     char destpath[MAXPGPATH] = {0};
@@ -735,9 +759,11 @@ void backup_target_symlink(const char* path)
                 pg_fatal("out pf memory\n");
             }
             if (pg_mkdir_p(mkpath, S_IRWXU) == -1) {
+                free(mkpath);
                 pg_fatal("could not create tablespace directory \"%s\": %s\n", targetSlink, strerror(errno));
             }
             free(mkpath);
+            mkpath = NULL;
             break;
         }
         case 1:
@@ -750,6 +776,49 @@ void backup_target_symlink(const char* path)
 
     if (symlink(targetSlink, destpath) != 0)
         pg_fatal("could not create symbolic link at \"%s\": %s\n", destpath, strerror(errno));
+}
+
+/*
+ * Perform restore operation for file of action copy, should create a fake one so as to delete the copied one 
+ * during build in target dir.
+ */
+void backup_fake_target_file(const char* path)
+{
+    char fullpath[MAXPGPATH] = {0};
+    char backupPath[MAXPGPATH] = {0};
+    char backupDirPath[MAXPGPATH] = {0};
+    const char prefix_bak[20] = "pg_rewind_bak";
+    char* tempPath = NULL;
+    char* anchor = NULL;
+    int ret = 0;
+    int fd = -1;
+    int len = 0;
+
+    ret = snprintf_s(fullpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", pg_data, path);
+    securec_check_ss_c(ret, "", "");
+    ret = snprintf_s(backupPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s/%s.delete", pg_data, prefix_bak, path);
+    securec_check_ss_c(ret, "", "");
+    tempPath = backupPath;
+
+    /* type for copy action entry can only be file. search the last subpath of the backupPath. */
+    while ((anchor = strchr(tempPath, '/')) != NULL) {
+        tempPath = anchor + 1;
+    }
+
+    len = tempPath - backupPath;
+    ret = strncpy_s(backupDirPath, MAXPGPATH, backupPath, len);
+    securec_check_c(ret, "", "");
+    backupDirPath[len] = '\0';
+
+    if (pg_mkdir_p(backupDirPath, S_IRWXU) != 0)
+        pg_fatal("could not create file directory for backup\"%s\": %s\n", backupDirPath, strerror(errno));
+
+    canonicalize_path(backupPath);
+    fd = open(backupPath, O_CREAT | PG_BINARY, S_IRUSR | S_IWUSR);
+    if (fd < 0) {
+        pg_fatal("could not create fake file \"%s\": %s\n", backupPath, strerror(errno));
+    }
+    (void)close(fd);
 }
 
 /*
@@ -816,7 +885,7 @@ bool restore_target_dir(const char* datadir_target, bool remove_from)
         goto go_exit;
     }
 
-    close(fd);
+    (void)close(fd);
 
     ss_c = snprintf_s(todir, MAXPGPATH, MAXPGPATH - 1, "%s", datadir_target);
     securec_check_ss_c(ss_c, "", "");
@@ -885,6 +954,7 @@ static void copy_dir(const char* fromdir, char* todir)
     struct dirent* xlde = NULL;
     char fromfile[MAXPGPATH];
     char tofile[MAXPGPATH];
+    char targetfile[MAXPGPATH];
     char errmsg[MAXPGPATH];
     int ss_c = 0;
 
@@ -921,6 +991,23 @@ static void copy_dir(const char* fromdir, char* todir)
             goto go_exit;
         }
 
+        /* just delete corresponding file copied from primary during rewind */
+        if (strstr(xlde->d_name, ".delete") != NULL) {
+            ss_c = snprintf_s(
+                targetfile, MAXPGPATH, MAXPGPATH - 1, "%s/%.*s", todir, strlen(xlde->d_name) - 7, xlde->d_name);
+            securec_check_ss_c(ss_c, "", "");
+            if (unlink(targetfile) != 0) {
+                if (errno == ENOENT) {
+                    continue;
+                }
+                ss_c = snprintf_s(errmsg, MAXPGPATH, MAXPGPATH - 1,
+                    "could not remove file \"%s\": %s\n", targetfile, gs_strerror(errno));
+                securec_check_ss_c(ss_c, "", "");
+                goto go_exit;
+            }
+            continue;
+        }
+
         if (S_ISDIR(fst.st_mode)) {
             copy_dir(fromfile, tofile);
         } else if (S_ISREG(fst.st_mode)) {
@@ -955,7 +1042,7 @@ static void copy_file(const char* fromfile, char* tofile)
 {
     char* buffer = NULL;
     int srcfd = 0;
-    int dstfd = 0;
+    int dstfdCopy = 0;
     int dstflag = 0;
     int nbytes = 0;
     off_t offset = 0;
@@ -967,9 +1054,7 @@ static void copy_file(const char* fromfile, char* tofile)
     /* add extern BLCKSZ for protect memory overstep the boundary */
     buffer = (char*)malloc(COPY_BUF_SIZE + BLCKSZ);
     if (buffer == NULL) {
-        ss_c = snprintf_s(
-            errmsg, MAXPGPATH, MAXPGPATH - 1, "Failed to alloc memory.\n");
-        securec_check_ss_c(ss_c, "", "");
+        pg_log(PG_ERROR, "malloc for buffer failed!");
         goto go_exit;
     }
 
@@ -988,9 +1073,9 @@ static void copy_file(const char* fromfile, char* tofile)
     }
 
     dstflag = (O_RDWR | O_CREAT | O_EXCL | PG_BINARY);
-    dstfd = open(tofile, dstflag, S_IRUSR | S_IWUSR);
-    if (dstfd < 0) {
-        close(srcfd);
+    dstfdCopy = open(tofile, dstflag, S_IRUSR | S_IWUSR);
+    if (dstfdCopy < 0) {
+        (void)close(srcfd);
         ss_c = snprintf_s(
             errmsg, MAXPGPATH, MAXPGPATH - 1, "could not create file \"%s\": %s\n", tofile, gs_strerror(errno));
         securec_check_ss_c(ss_c, "", "");
@@ -1001,8 +1086,8 @@ static void copy_file(const char* fromfile, char* tofile)
     for (offset = 0;; offset += nbytes) {
         nbytes = read(srcfd, buffer, COPY_BUF_SIZE);
         if (nbytes < 0) {
-            close(srcfd);
-            close(dstfd);
+            (void)close(srcfd);
+            (void)close(dstfdCopy);
             ss_c = snprintf_s(
                 errmsg, MAXPGPATH, MAXPGPATH - 1, "could not read to file \"%s\": %s\n", fromfile, gs_strerror(errno));
             securec_check_ss_c(ss_c, "", "");
@@ -1013,9 +1098,9 @@ static void copy_file(const char* fromfile, char* tofile)
         }
 
         errno = 0;
-        if ((int)write(dstfd, buffer, nbytes) != nbytes) {
-            close(srcfd);
-            close(dstfd);
+        if ((int)write(dstfdCopy, buffer, nbytes) != nbytes) {
+            (void)close(srcfd);
+            (void)close(dstfdCopy);
             ss_c = snprintf_s(
                 errmsg, MAXPGPATH, MAXPGPATH - 1, "could not write to file \"%s\": %s", tofile, gs_strerror(errno));
             securec_check_ss_c(ss_c, "", "");
@@ -1023,8 +1108,8 @@ static void copy_file(const char* fromfile, char* tofile)
         }
     }
 
-    if (close(dstfd)) {
-        close(srcfd);
+    if (close(dstfdCopy)) {
+        (void)close(srcfd);
 
         ss_c =
             snprintf_s(errmsg, MAXPGPATH, MAXPGPATH - 1, "could not close file \"%s\": %s", tofile, gs_strerror(errno));
@@ -1032,7 +1117,7 @@ static void copy_file(const char* fromfile, char* tofile)
         goto go_exit;
     }
 
-    close(srcfd);
+    (void)close(srcfd);
     if (buffer != NULL) {
         free(buffer);
         buffer = NULL;

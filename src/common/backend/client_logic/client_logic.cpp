@@ -1,0 +1,1116 @@
+/*
+ * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ *
+ * openGauss is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+ * -------------------------------------------------------------------------
+ *
+ * client_logic.cpp
+ *
+ * IDENTIFICATION
+ *	  src\common\backend\client_logic\client_logic.cpp
+ *
+ * -------------------------------------------------------------------------
+ */
+
+#include "client_logic/client_logic.h"
+#include "client_logic/client_logic_common.h"
+#include "access/sysattr.h"
+#include "commands/dbcommands.h"
+#include "catalog/dependency.h"
+#include "catalog/pg_namespace.h"
+#include "client_logic/cache.h"
+#include "client_logic/client_logic_common.h"
+#include "utils/builtins.h"
+#include "utils/timestamp.h"
+#include "utils/acl.h"
+#include "access/heapam.h"
+#include "utils/snapmgr.h"
+#include "utils/syscache.h"
+#include "utils/lsyscache.h"
+#include "storage/lock/lock.h"
+#include "access/xact.h"
+#include "catalog/indexing.h"
+#include "catalog/namespace.h"
+#include "commands/sec_rls_cmds.h"
+#include "rewrite/rewriteRlsPolicy.h"
+#include "commands/tablecmds.h"
+#include "nodes/pg_list.h"
+#include "tcop/utility.h"
+#include "pgxc/pgxc.h"
+#include "utils/fmgroids.h"
+#include "MurmurHash3.h"
+
+#define INIT_VALUES_NULLS(type, id)                                                         \
+    do {                                                                                    \
+        HeapTuple htup = NULL;                                                              \
+        Relation rel = heap_open(id, RowExclusiveLock);                                     \
+        bool type##_nulls[Natts_gs_sec_##type];                                             \
+        Datum type##_values[Natts_gs_sec_##type];                                           \
+        int rc = memset_s(type##_values, sizeof(type##_values), 0, sizeof(type##_values));  \
+        securec_check(rc, "\0", "\0");                                                      \
+        rc = memset_s(type##_nulls, sizeof(type##_nulls), false, sizeof(type##_nulls));     \
+        securec_check(rc, "\0", "\0");                                                      \
+    } while (0)
+
+static bool get_cmk_name(const Oid global_key_id, NameData &cmk_name);
+
+static Oid check_namespace(const List *key_name, Node * const stmt, char **keyname)
+{
+    Oid namespace_id;
+    AclResult aclresult;
+    namespace_id = QualifiedNameGetCreationNamespace(key_name, keyname);
+
+    /* Check we have creation rights in target namespace */
+    aclresult = pg_namespace_aclcheck(namespace_id, GetUserId(), ACL_CREATE);
+    if (aclresult != ACLCHECK_OK)
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespace_id));
+
+        /*
+         * @Temp Table. Lock Cluster after determine whether is a temp object,
+         * so we can decide if locking other coordinator
+         */
+#ifdef ENABLE_MULTIPLE_NODES
+    pgxc_lock_for_utility_stmt(stmt, namespace_id == u_sess->catalog_cxt.myTempNamespace);
+#endif
+    return namespace_id;
+}
+static Oid check_user(const Oid namespace_id)
+{
+    Oid keyowner = InvalidOid;
+    AclResult aclresult;
+    bool isalter = false;
+    if (u_sess->attr.attr_sql.enforce_a_behavior) {
+        keyowner = GetUserIdFromNspId(namespace_id, true);
+        if (!OidIsValid(keyowner))
+            keyowner = GetUserId();
+        else if (keyowner != GetUserId())
+            isalter = true;
+        if (isalter) {
+            aclresult = pg_namespace_aclcheck(namespace_id, keyowner, ACL_CREATE);
+            if (aclresult != ACLCHECK_OK)
+                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespace_id));
+        }
+    } else {
+        keyowner = GetUserId();
+    }
+    return keyowner;
+}
+
+Oid finish_processing(Relation *rel, HeapTuple *tup)
+{
+    Oid res = simple_heap_insert(*rel, *tup);
+    CatalogUpdateIndexes(*rel, *tup);
+    heap_freetuple(*tup);
+    heap_close(*rel, RowExclusiveLock);
+    return res;
+}
+
+Oid get_column_key_id_by_namespace(const char *key_name, const Oid namespace_id, Oid &global_key_id)
+{
+    HeapTuple rtup = NULL;
+    Form_gs_column_keys rel_data = NULL;
+    Oid column_key_id = InvalidOid;
+    rtup = search_syscache_cek_name(key_name, namespace_id);
+    if (rtup != NULL) {
+        rel_data = (Form_gs_column_keys)GETSTRUCT(rtup);
+        if (rel_data != NULL && namespace_id == rel_data->key_namespace &&
+            strcmp(rel_data->column_key_name.data, key_name) == 0) {
+            column_key_id = HeapTupleGetOid(rtup);
+            global_key_id = rel_data->global_key_id;
+            ReleaseSysCache(rtup);
+            return column_key_id;
+        }
+        ReleaseSysCache(rtup);
+    }
+    return column_key_id;
+}
+
+Oid get_column_key_id(const List *keyname_list, const Oid user_id, Oid &global_key_id)
+{
+    Oid column_key_id = InvalidOid;
+    char *keyname = NULL;
+    ListCell *l = NULL;
+    char *schemaname = NULL;
+    Oid namespace_id = InvalidOid;
+    DeconstructQualifiedName(keyname_list, &schemaname, &keyname);
+    if (schemaname != NULL) {
+        namespace_id = SchemaNameGetSchemaOid(schemaname);
+        Assert(OidIsValid(namespace_id));
+        column_key_id = get_column_key_id_by_namespace(keyname, namespace_id, global_key_id);
+        if (column_key_id != InvalidOid) {
+            AclResult acl_res = gs_sec_cek_aclcheck(column_key_id, user_id, ACL_USAGE);
+            if (acl_res != ACLCHECK_OK) {
+                aclcheck_error(acl_res, ACL_KIND_COLUMN_SETTING, NameListToString(keyname_list));
+            }
+            return column_key_id;
+        }
+    } else { /* keyname_list doesn't include schema */
+        recomputeNamespacePath();
+        List *temp_active_search_path = NIL;
+        temp_active_search_path = list_copy(u_sess->catalog_cxt.activeSearchPath);
+        foreach (l, temp_active_search_path) {
+            namespace_id = lfirst_oid(l);
+            column_key_id = get_column_key_id_by_namespace(keyname, namespace_id, global_key_id);
+            if (column_key_id != InvalidOid) {
+                AclResult acl_res = gs_sec_cek_aclcheck(column_key_id, user_id, ACL_USAGE);
+                if (acl_res != ACLCHECK_OK) {
+                    aclcheck_error(acl_res, ACL_KIND_COLUMN_SETTING, NameListToString(keyname_list));
+                    break;
+                }
+                list_free_ext(temp_active_search_path);
+                return column_key_id;
+            }
+        }
+        list_free_ext(temp_active_search_path);
+    }
+    return column_key_id;
+}
+
+void get_catalog_name(const RangeVar * const rel)
+{
+    Oid namespace_id;
+    Oid existing_relid;
+    RangeVar *relation = const_cast<RangeVar *>(rel);
+    relation->catalogname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
+    namespace_id = RangeVarGetAndCheckCreationNamespace(relation, NoLock, &existing_relid);
+    if (relation->schemaname == NULL) {
+        relation->schemaname = get_namespace_name(namespace_id);
+    }
+}
+
+int process_encrypted_columns(const ColumnDef * const def, CeHeapInfo *ce_heap_info)
+{
+    (void)namestrcpy(&ce_heap_info->column_name, def->colname);
+    ce_heap_info->alg_type = static_cast<int>(def->clientLogicColumnRef->columnEncryptionAlgorithmType);
+    ce_heap_info->orig_typ = def->clientLogicColumnRef->orig_typname->typeOid;
+    ce_heap_info->orig_mod = def->clientLogicColumnRef->orig_typname->typemod;
+    Oid global_key_id(0);
+    ce_heap_info->cek_id = get_column_key_id(def->clientLogicColumnRef->column_key_name, GetUserId(), global_key_id);
+    if (
+#ifdef ENABLE_MULTIPLE_NODES
+        IS_PGXC_COORDINATOR && 
+#endif
+        ce_heap_info->cek_id == InvalidOid) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("object does not exist. column encryption key: %s",
+            NameListToString(def->clientLogicColumnRef->column_key_name))));
+        return -1;
+    }
+    AclResult acl_res = gs_sec_cmk_aclcheck(global_key_id, GetUserId(), ACL_USAGE);
+    if (acl_res != ACLCHECK_OK) {
+        NameData cmk_name;
+        (void)get_cmk_name(global_key_id, cmk_name);
+        aclcheck_error(acl_res, ACL_KIND_GLOBAL_SETTING, cmk_name.data);
+        return -1;
+    }
+    return 0;
+}
+void insert_gs_sec_encrypted_column_tuple(CeHeapInfo *ce_heap_info, Relation rel, const Oid rel_id,
+    CatalogIndexState indstate)
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    if (!IS_PGXC_COORDINATOR)
+        return;
+#endif
+    HeapTuple htup = NULL;
+
+    bool encrypted_columns_nulls[Natts_gs_encrypted_columns];
+    Datum encrypted_columns_values[Natts_gs_encrypted_columns];
+    int rc = memset_s(encrypted_columns_values, sizeof(encrypted_columns_values), 0, sizeof(encrypted_columns_values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(encrypted_columns_nulls, sizeof(encrypted_columns_nulls), false, sizeof(encrypted_columns_nulls));
+    securec_check(rc, "\0", "\0");
+
+    encrypted_columns_values[Anum_gs_encrypted_columns_rel_id - 1] = CStringGetDatum(rel_id);
+    encrypted_columns_values[Anum_gs_encrypted_columns_column_name - 1] = NameGetDatum(&ce_heap_info->column_name);
+    encrypted_columns_values[Anum_gs_encrypted_columns_column_key_id - 1] = ce_heap_info->cek_id;
+    encrypted_columns_values[Anum_gs_sec_encrypted_columns_encryption_type - 1] = ce_heap_info->alg_type;
+    encrypted_columns_values[Anum_gs_encrypted_columns_data_type_original_oid - 1] = ce_heap_info->orig_typ;
+    encrypted_columns_values[Anum_gs_encrypted_columns_data_type_original_mod - 1] = ce_heap_info->orig_mod;
+    encrypted_columns_values[Anum_gs_encrypted_columns_create_date - 1] =
+        DirectFunctionCall1(timestamptz_timestamp, GetCurrentTimestamp());
+
+    /* finally insert the new tuple, update the indexes, and clean up */
+    htup = heap_form_tuple(RelationGetDescr(rel), encrypted_columns_values, encrypted_columns_nulls);
+    const Oid myOid = simple_heap_insert(rel, htup);
+
+    if (indstate != NULL) {
+        CatalogIndexInsert(indstate, htup);
+    } else {
+        CatalogUpdateIndexes(rel, htup);
+    }
+    heap_freetuple(htup);
+    ObjectAddress pg_attr_addr;
+    ObjectAddress column_addr;
+    ObjectAddress cek_addr;
+    pg_attr_addr.classId = RelationRelationId;
+    pg_attr_addr.objectId = rel_id;
+    pg_attr_addr.objectSubId = ce_heap_info->attnum;
+    column_addr.classId = ClientLogicCachedColumnsId;
+    column_addr.objectId = myOid;
+    column_addr.objectSubId = 0;
+    cek_addr.classId = ClientLogicColumnSettingsId;
+    cek_addr.objectId = ce_heap_info->cek_id;
+    cek_addr.objectSubId = 0;
+
+    recordDependencyOn(&column_addr, &cek_addr, DEPENDENCY_NORMAL);
+    recordDependencyOn(&column_addr, &pg_attr_addr, DEPENDENCY_AUTO);
+
+    ce_cache_refresh_type |= 4; /* 4: COLUMNS type */
+    pfree_ext(ce_heap_info);
+}
+
+static const int MAX_ARGS_SIZE = 1024;
+static bool process_global_settings_flush_args(Oid global_key_id, const char *global_function, const char *key,
+    size_t keySize, const char *value, size_t valueSize)
+{
+    char key_str[MAX_ARGS_SIZE] = {0};
+    char value_str[MAX_ARGS_SIZE] = {0};
+    errno_t rc = EOK;
+    rc = strncpy_s(key_str, MAX_ARGS_SIZE, key, keySize);
+    securec_check(rc, "\0", "\0");
+    key_str[keySize] = '\0';
+    rc = strncpy_s(value_str, MAX_ARGS_SIZE, value, valueSize);
+    securec_check(rc, "\0", "\0");
+    value_str[valueSize] = '\0';
+
+    /* reset catalog variables */
+    bool client_master_keys_args_nulls[Natts_gs_client_global_keys_args];
+    Datum client_master_keys_args_values[Natts_gs_client_global_keys_args];
+    rc = memset_s(client_master_keys_args_values, sizeof(client_master_keys_args_values), 0,
+        sizeof(client_master_keys_args_values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(client_master_keys_args_nulls, sizeof(client_master_keys_args_nulls), false,
+        sizeof(client_master_keys_args_nulls));
+    securec_check(rc, "\0", "\0");
+
+    /* fill catalog variable */
+    client_master_keys_args_values[Anum_gs_client_global_keys_args_global_key_id - 1] = ObjectIdGetDatum(global_key_id);
+    client_master_keys_args_values[Anum_gs_client_global_keys_args_function_name - 1] =
+        DirectFunctionCall1(namein, CStringGetDatum(global_function));
+    client_master_keys_args_values[Anum_gs_client_global_keys_args_key - 1] =
+        DirectFunctionCall1(namein, CStringGetDatum(key_str));
+    client_master_keys_args_values[Anum_gs_client_global_keys_args_value - 1] =
+        DirectFunctionCall1(byteain, CStringGetDatum(value_str));
+
+    /* write to catalog table */
+    Relation rel = heap_open(ClientLogicGlobalSettingsArgsId, RowExclusiveLock);
+    HeapTuple htup = heap_form_tuple(rel->rd_att, client_master_keys_args_values, client_master_keys_args_nulls);
+    const Oid args_id = finish_processing(&rel, &htup);
+    ObjectAddress cmk_addr;
+    ObjectAddress args_addr;
+    cmk_addr.classId = ClientLogicGlobalSettingsId;
+    cmk_addr.objectId = global_key_id;
+    cmk_addr.objectSubId = 0;
+    args_addr.classId = ClientLogicGlobalSettingsArgsId;
+    args_addr.objectId = args_id;
+    args_addr.objectSubId = 0;
+    recordDependencyOn(&args_addr, &cmk_addr, DEPENDENCY_INTERNAL);
+    return true;
+}
+
+static void check_key_path(const char *key_path)
+{
+    const char *key_path_tag = "gs_ktool/";
+    if (key_path == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid key path")));
+    }
+    if ((strlen(key_path) <= strlen(key_path_tag)) && 
+        (strncmp(key_path, key_path_tag, strlen(key_path_tag)) != 0)) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid key path")));
+    }
+    for (size_t i = strlen(key_path_tag); i < strlen(key_path); i++) {
+        if (key_path[i] < '0' || key_path[i] > '9') {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid key path")));
+        }
+    }
+}
+
+static int process_global_settings_args(CreateClientLogicGlobal *parsetree, Oid global_key_id)
+{
+    /* get arguments */
+    const char *global_function(NULL);
+    ListCell *key_item(NULL);
+    StringArgsVec string_args;
+    foreach (key_item, parsetree->global_setting_params) {
+        ClientLogicGlobalParam *global_param = static_cast<ClientLogicGlobalParam *> lfirst(key_item);
+        switch (global_param->key) {
+            case ClientLogicGlobalProperty::CLIENT_GLOBAL_FUNCTION:
+                global_function = global_param->value;
+                break;
+            case ClientLogicGlobalProperty::CMK_KEY_STORE: {
+                CmkKeyStore key_store = get_key_store_from_string(global_param->value);
+                if (key_store != CmkKeyStore::GS_KTOOL) {
+                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid key store")));
+                }
+                string_args.set("KEY_STORE", global_param->value);
+                break;
+            }
+            case ClientLogicGlobalProperty::CMK_KEY_PATH: {
+                check_key_path(global_param->value);
+                string_args.set("KEY_PATH", global_param->value);
+                break;
+            }
+            case ClientLogicGlobalProperty::CMK_ALGORITHM: {
+                CmkAlgorithm cmk_algo = get_algorithm_from_string(global_param->value);
+                if (cmk_algo != CmkAlgorithm::AES_256_CBC) {
+                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid algorithm")));
+                }
+                string_args.set("ALGORITHM", global_param->value);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    if (global_function == NULL || strlen(global_function) == 0) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("global function is missing")));
+        return 1;
+    }
+
+    for (size_t i = 0; i < string_args.Size(); ++i) {
+        const char *key = string_args.at(i)->key;
+        const char *value = string_args.at(i)->value;
+        const size_t valsize = string_args.at(i)->valsize;
+        if (!process_global_settings_flush_args(global_key_id, global_function, key, strlen(key), value, valsize)) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("failed to flush args")));
+            return 1;
+        }
+    }
+    return 0;
+}
+
+
+int process_global_settings(CreateClientLogicGlobal *parsetree)
+{
+    /* permissions */
+    char *keyname = NULL;
+    const Oid namespace_id = check_namespace(parsetree->global_key_name, reinterpret_cast<Node *>(parsetree), &keyname);
+    const Oid user_id = check_user(namespace_id);
+    Acl *key_acl = get_user_default_acl(ACL_OBJECT_GLOBAL_SETTING, user_id, namespace_id);
+
+    /* reset catalog variables */
+    Datum client_master_keys_values[Natts_gs_client_global_keys];
+    bool client_master_keys_nulls[Natts_gs_client_global_keys];
+    errno_t rc = EOK;
+    rc = memset_s(client_master_keys_values, sizeof(client_master_keys_values), 0, sizeof(client_master_keys_values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(client_master_keys_nulls, sizeof(client_master_keys_nulls), false, sizeof(client_master_keys_nulls));
+    securec_check(rc, "\0", "\0");
+
+    /* fill catalog variable */
+    client_master_keys_values[Anum_gs_client_global_keys_global_key_name - 1] =
+        DirectFunctionCall1(namein, CStringGetDatum(keyname));
+    client_master_keys_values[Anum_gs_client_global_keys_key_namespace - 1] = ObjectIdGetDatum(namespace_id);
+    client_master_keys_values[Anum_gs_client_global_keys_key_owner - 1] = ObjectIdGetDatum(user_id);
+    if (key_acl != NULL)
+        client_master_keys_values[Anum_gs_client_global_keys_key_acl - 1] = PointerGetDatum(key_acl);
+    else
+        client_master_keys_nulls[Anum_gs_client_global_keys_key_acl - 1] = true;
+    client_master_keys_values[Anum_gs_client_global_keys_create_date - 1] =
+        DirectFunctionCall1(timestamptz_timestamp, GetCurrentTimestamp());
+
+    /* write to catalog table */
+    Relation rel = heap_open(ClientLogicGlobalSettingsId, RowExclusiveLock);
+    HeapTuple htup = heap_form_tuple(rel->rd_att, client_master_keys_values, client_master_keys_nulls);
+    const Oid global_key_id = finish_processing(&rel, &htup);
+
+    /* update dependency tables */
+    ObjectAddress nsp_addr;
+    ObjectAddress cmk_addr;
+    nsp_addr.classId = NamespaceRelationId;
+    nsp_addr.objectId = namespace_id;
+    nsp_addr.objectSubId = 0;
+    cmk_addr.classId = ClientLogicGlobalSettingsId;
+    cmk_addr.objectId = global_key_id;
+    cmk_addr.objectSubId = 0;
+    recordDependencyOn(&cmk_addr, &nsp_addr, DEPENDENCY_NORMAL);
+
+    /* write to arguments table */
+    (void)process_global_settings_args(parsetree, global_key_id);
+
+    ce_cache_refresh_type |= 1; /* 1: CMK type */
+
+    Oid rlsPolicyId = get_rlspolicy_oid(ClientLogicGlobalSettingsId, "gs_client_global_keys_rls", true);
+    if (OidIsValid(rlsPolicyId) == false) {
+        CreateRlsPolicyForSystem("pg_catalog", "gs_client_global_keys", "gs_client_global_keys_rls",
+            "has_cmk_privilege", "oid", "usage");
+        rel = relation_open(ClientLogicGlobalSettingsId, ShareUpdateExclusiveLock);
+        ATExecEnableDisableRls(rel, RELATION_RLS_ENABLE, ShareUpdateExclusiveLock);
+        relation_close(rel, ShareUpdateExclusiveLock);
+    }
+
+    return 0;
+}
+
+static Oid get_cmk_oid(const char *key_name, const Oid namespace_id)
+{
+    HeapTuple rtup = NULL;
+    Form_gs_client_global_keys rel_data = NULL;
+    Oid cmk_oid = InvalidOid;
+    rtup = search_syscache_cmk_name(key_name, namespace_id);
+    if (rtup != NULL) {
+        rel_data = (Form_gs_client_global_keys)GETSTRUCT(rtup);
+        if (rel_data != NULL && namespace_id == rel_data->key_namespace &&
+            strcmp(rel_data->global_key_name.data, key_name) == 0) {
+            cmk_oid = HeapTupleGetOid(rtup);
+            ReleaseSysCache(rtup);
+            return cmk_oid;
+        }
+        ReleaseSysCache(rtup);
+    }
+    return cmk_oid;
+}
+
+static Oid get_cmk_oid(const List *key_name, const Oid user_id)
+{
+    Oid cmk_oid = InvalidOid;
+    char *keyname = NULL;
+    ListCell *l = NULL;
+    char *schemaname = NULL;
+    Oid namespace_id = InvalidOid;
+    DeconstructQualifiedName(key_name, &schemaname, &keyname);
+    if (schemaname != NULL) {
+        namespace_id = SchemaNameGetSchemaOid(schemaname);
+        Assert(OidIsValid(namespace_id));
+        cmk_oid = get_cmk_oid(keyname, namespace_id);
+        if (cmk_oid != InvalidOid) {
+            AclResult acl_res = gs_sec_cmk_aclcheck(cmk_oid, user_id, ACL_USAGE);
+            if (acl_res != ACLCHECK_OK) {
+                aclcheck_error(acl_res, ACL_KIND_GLOBAL_SETTING, NameListToString(key_name));
+            }
+            return cmk_oid;
+        }
+    } else { /* key_name doesn't include schema */
+        recomputeNamespacePath();
+        List *temp_active_search_path = NIL;
+        temp_active_search_path = list_copy(u_sess->catalog_cxt.activeSearchPath);
+        foreach (l, temp_active_search_path) {
+            namespace_id = lfirst_oid(l);
+            cmk_oid = get_cmk_oid(keyname, namespace_id);
+            if (cmk_oid != InvalidOid) {
+                AclResult acl_res = gs_sec_cmk_aclcheck(cmk_oid, user_id, ACL_USAGE);
+                if (acl_res != ACLCHECK_OK) {
+                    aclcheck_error(acl_res, ACL_KIND_GLOBAL_SETTING, NameListToString(key_name));
+                    break;
+                }
+                list_free_ext(temp_active_search_path);
+                return cmk_oid;
+            }
+        }
+        list_free_ext(temp_active_search_path);
+    }
+    return cmk_oid;
+}
+
+static bool get_cmk_name(const Oid global_key_id, NameData &cmk_name)
+{
+    HeapTuple rtup = NULL;
+    Relation relation = heap_open(ClientLogicGlobalSettingsId, RowExclusiveLock);
+    Form_gs_client_global_keys rel_data = NULL;
+    TableScanDesc scan = heap_beginscan(relation, SnapshotNow, 0, NULL);
+    while ((rtup = heap_getnext(scan, ForwardScanDirection))) {
+        if (HeapTupleGetOid(rtup) != global_key_id) {
+            continue;
+        }
+        rel_data = (Form_gs_client_global_keys)GETSTRUCT(rtup);
+        if (rel_data == NULL) {
+            continue;
+        }
+        cmk_name = rel_data->global_key_name;
+        heap_endscan(scan);
+        heap_close(relation, RowExclusiveLock);
+        return true;
+    }
+
+    heap_endscan(scan);
+    heap_close(relation, RowExclusiveLock);
+    return false;
+}
+
+static bool process_column_settings_flush_args(Oid column_key_id, const char *column_function, const char *key,
+    size_t keySize, const char *value, size_t valueSize)
+{
+    char key_str[MAX_ARGS_SIZE];
+    char value_str[MAX_ARGS_SIZE];
+    errno_t rc = EOK;
+    rc = strncpy_s(key_str, MAX_ARGS_SIZE, key, keySize);
+    securec_check(rc, "\0", "\0");
+    key_str[keySize] = '\0';
+    rc = strncpy_s(value_str, MAX_ARGS_SIZE, value, valueSize);
+    securec_check(rc, "\0", "\0");
+    value_str[valueSize] = '\0';
+
+    /* reset catalog variables */
+    bool column_settings_args_nulls[Natts_gs_column_keys_args];
+    Datum column_settings_args_values[Natts_gs_column_keys_args];
+    rc = memset_s(column_settings_args_values, sizeof(column_settings_args_values), 0,
+        sizeof(column_settings_args_values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(column_settings_args_nulls, sizeof(column_settings_args_nulls), false,
+        sizeof(column_settings_args_nulls));
+    securec_check(rc, "\0", "\0");
+
+    /* fill catalog variable */
+    column_settings_args_values[Anum_gs_column_keys_args_column_key_id - 1] =
+        ObjectIdGetDatum(column_key_id);
+    column_settings_args_values[Anum_gs_column_keys_args_function_name - 1] =
+        DirectFunctionCall1(namein, CStringGetDatum(column_function));
+    column_settings_args_values[Anum_gs_column_keys_args_key - 1] =
+        DirectFunctionCall1(namein, CStringGetDatum(key_str));
+    column_settings_args_values[Anum_gs_column_keys_args_value - 1] =
+        DirectFunctionCall1(byteain, CStringGetDatum(value_str));
+
+    /* write to catalog table */
+    Relation rel = heap_open(ClientLogicColumnSettingsArgsId, RowExclusiveLock);
+    HeapTuple htup = heap_form_tuple(rel->rd_att, column_settings_args_values, column_settings_args_nulls);
+    const Oid cek_args_oid = finish_processing(&rel, &htup);
+    if (cek_args_oid == 0) {
+        return false;
+    }
+    ObjectAddress cek_addr;
+    ObjectAddress args_addr;
+    cek_addr.classId = ClientLogicColumnSettingsId;
+    cek_addr.objectId = column_key_id;
+    cek_addr.objectSubId = 0;
+    args_addr.classId = ClientLogicColumnSettingsArgsId;
+    args_addr.objectId = cek_args_oid;
+    args_addr.objectSubId = 0;
+    recordDependencyOn(&args_addr, &cek_addr, DEPENDENCY_INTERNAL);
+    return true;
+}
+
+static int process_column_settings_args(CreateClientLogicColumn *parsetree, Oid column_key_id)
+{
+    /* get arguments */
+    const char *column_function(NULL);
+    ListCell *key_item(NULL);
+    StringArgsVec string_args;
+    foreach (key_item, parsetree->column_setting_params) {
+        ClientLogicColumnParam *columnParam = static_cast<ClientLogicColumnParam *> lfirst(key_item);
+        switch (columnParam->key) {
+            case ClientLogicColumnProperty::COLUMN_COLUMN_FUNCTION:
+                column_function = columnParam->value;
+                break;
+            case ClientLogicColumnProperty::CEK_ALGORITHM: {
+                ColumnEncryptionAlgorithm  column_encryption_algorithm = 
+                    get_cek_algorithm_from_string(columnParam->value);
+                if (column_encryption_algorithm == ColumnEncryptionAlgorithm::INVALID_ALGORITHM) {
+                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid algorithm")));
+                }
+                string_args.set("ALGORITHM", columnParam->value);
+                break;
+            }
+            case ClientLogicColumnProperty::CEK_EXPECTED_VALUE:
+                string_args.set("ENCRYPTED_VALUE", columnParam->value);
+                break;
+            default:
+                break;
+        }
+    }
+
+    if (column_function == NULL || strlen(column_function) == 0) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("column function is missing")));
+        return 1;
+    }
+
+    for (size_t i = 0; i < string_args.Size(); ++i) {
+        const char *key = string_args.at(i)->key;
+        const char *value = string_args.at(i)->value;
+        const size_t valsize = string_args.at(i)->valsize;
+        if (!process_column_settings_flush_args(column_key_id, column_function, key, strlen(key), value, valsize)) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("failed to flush column args")));
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int process_column_settings(CreateClientLogicColumn *parsetree)
+{
+    /* permissions */
+    char *cek_name = NULL;
+    char *schema_name = NULL;
+    const Oid namespace_id =
+        check_namespace(parsetree->column_key_name, reinterpret_cast<Node *>(parsetree), &cek_name);
+    const Oid user_id = check_user(namespace_id);
+    Acl *key_acl = get_user_default_acl(ACL_OBJECT_COLUMN_SETTING, user_id, namespace_id);
+
+    schema_name = get_namespace_name(namespace_id);
+    /* retrieve global setting id (foreign key) */
+    ListCell *key_item(NULL);
+    Oid global_key_id(InvalidOid);
+    const char *global_key_name = NULL;
+    foreach (key_item, parsetree->column_setting_params) {
+        ClientLogicColumnParam *kp = static_cast<ClientLogicColumnParam *> lfirst(key_item);
+        switch (kp->key) {
+            case ClientLogicColumnProperty::CLIENT_GLOBAL_SETTING: {
+                global_key_name = NameListToString(kp->qualname);
+                global_key_id = get_cmk_oid(kp->qualname, user_id);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    if (global_key_id == InvalidOid) {
+        ereport(ERROR,
+            (errcode(ERRCODE_SYNTAX_ERROR), errmsg("object does not exist. client master key: %s", global_key_name)));
+        return 1;
+    }
+
+    /* validate arguments in hook ? */
+    const unsigned char buf_size = 2 * NAMEDATALEN + 1;
+    char fqdn[buf_size] = {0};
+
+    errno_t rc = EOK;
+    rc = strncpy_s(fqdn, buf_size, schema_name, NAMEDATALEN);
+    securec_check(rc, "\0", "\0");
+    rc = strncat_s(fqdn, buf_size, ".", 1);
+    securec_check(rc, "\0", "\0");
+    rc = strncat_s(fqdn, buf_size, cek_name, NAMEDATALEN);
+    securec_check(rc, "\0", "\0");
+
+    /* reset catalog variables */
+    Datum column_settings_values[Natts_gs_column_keys];
+    bool column_settings_nulls[Natts_gs_column_keys];
+    rc = memset_s(column_settings_values, sizeof(column_settings_values), 0, sizeof(column_settings_values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(column_settings_nulls, sizeof(column_settings_nulls), false, sizeof(column_settings_nulls));
+    securec_check(rc, "\0", "\0");
+
+    /* fill catalog variable */
+    Oid distid = 0;
+    column_settings_values[Anum_gs_column_keys_column_key_name - 1] =
+        DirectFunctionCall1(namein, CStringGetDatum(cek_name));
+    MurmurHash3_x86_32(fqdn, strlen(fqdn), 0x12345, &distid);
+    column_settings_values[Anum_gs_column_keys_column_key_distributed_id - 1] = ObjectIdGetDatum(distid);
+    column_settings_values[Anum_gs_column_keys_global_key_id - 1] = ObjectIdGetDatum(global_key_id);
+    column_settings_values[Anum_gs_column_keys_key_namespace - 1] = ObjectIdGetDatum(namespace_id);
+    if (key_acl != NULL)
+        column_settings_values[Anum_gs_column_keys_key_acl - 1] = PointerGetDatum(key_acl);
+    else
+        column_settings_nulls[Anum_gs_column_keys_key_acl - 1] = true;
+    column_settings_values[Anum_gs_column_keys_key_owner - 1] = ObjectIdGetDatum(user_id);
+    column_settings_values[Anum_gs_column_keys_create_date - 1] =
+        DirectFunctionCall1(timestamptz_timestamp, GetCurrentTimestamp());
+
+    /* write to catalog table */
+    Relation rel = heap_open(ClientLogicColumnSettingsId, RowExclusiveLock);
+    HeapTuple htup = heap_form_tuple(rel->rd_att, column_settings_values, column_settings_nulls);
+    const Oid column_key_id = finish_processing(&rel, &htup);
+
+    /* update dependency table */
+    ObjectAddress cmk_addr;
+    ObjectAddress cek_addr;
+    cmk_addr.classId = ClientLogicGlobalSettingsId;
+    cmk_addr.objectId = global_key_id;
+    cmk_addr.objectSubId = 0;
+    cek_addr.classId = ClientLogicColumnSettingsId;
+    cek_addr.objectId = column_key_id;
+    cek_addr.objectSubId = 0;
+    ObjectAddress nsp_addr;
+    nsp_addr.classId = NamespaceRelationId;
+    nsp_addr.objectId = namespace_id;
+    nsp_addr.objectSubId = 0;
+    recordDependencyOn(&cek_addr, &cmk_addr, DEPENDENCY_NORMAL);
+    recordDependencyOn(&cek_addr, &nsp_addr, DEPENDENCY_NORMAL);
+
+    /* write to arguments table */
+    (void)process_column_settings_args(parsetree, column_key_id);
+
+    ce_cache_refresh_type |= 2; /* 2: CEK type */
+
+    Oid rlsPolicyId = get_rlspolicy_oid(ClientLogicColumnSettingsId, "gs_column_keys_rls", true);
+    if (OidIsValid(rlsPolicyId) == false) {
+        CreateRlsPolicyForSystem(
+            "pg_catalog", "gs_column_keys", "gs_column_keys_rls", "has_cek_privilege", "oid", "usage");
+        rel = relation_open(ClientLogicColumnSettingsId, ShareUpdateExclusiveLock);
+        ATExecEnableDisableRls(rel, RELATION_RLS_ENABLE, ShareUpdateExclusiveLock);
+        relation_close(rel, ShareUpdateExclusiveLock);
+    }
+    return 0;
+}
+int set_column_encryption(const ColumnDef *def, CeHeapInfo *ce_heap_info)
+{
+    Oid res = 0;
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR)
+#endif
+        res = process_encrypted_columns(def, ce_heap_info);
+    return res;
+}
+
+int drop_global_settings(DropStmt *stmt)
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    if (!IS_PGXC_COORDINATOR) {
+        return 0;
+    }
+    if (!IsConnFromCoord() && !u_sess->attr.attr_common.enable_full_encryption) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                errmsg("Un-support to drop client master key when client encryption is disabled.")));
+    }
+#else
+    if (!u_sess->attr.attr_common.enable_full_encryption) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                errmsg("Un-support to drop client master key when client encryption is disabled.")));
+    }
+#endif
+    char *global_key_name = NULL;
+    ListCell *cell = NULL;
+    foreach (cell, stmt->objects) {
+        Oid cmk_oid = InvalidOid;
+        Oid namespace_id = InvalidOid;
+        char *schema_name = NULL;
+        List *namespace_list = NIL;
+        ListCell *nslc = NULL;
+        DeconstructQualifiedName((List *)lfirst(cell), &schema_name, &global_key_name);
+        if (schema_name != NULL) {
+            namespace_id = LookupExplicitNamespace(schema_name);
+            namespace_list = list_make1_oid(namespace_id);
+        } else {
+            namespace_list = fetch_search_path(false);
+        }
+
+        foreach (nslc, namespace_list) {
+            namespace_id = lfirst_oid(nslc);
+            cmk_oid = get_cmk_oid(global_key_name, namespace_id);
+            if (cmk_oid != InvalidOid) {
+                /* Check we have creation rights in target namespace */
+                AclResult aclresult = pg_namespace_aclcheck(namespace_id, GetUserId(), ACL_CREATE);
+                if (aclresult != ACLCHECK_OK) {
+                    aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespace_id));
+                }
+                break;
+            }
+        }
+        list_free_ext(namespace_list);
+        HeapTuple rtup = SearchSysCache1(GLOBALSETTINGOID, ObjectIdGetDatum(cmk_oid));
+        if (!rtup) {
+            if (!stmt->missing_ok) {
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_KEY),
+                    errmsg("client master key \"%s\" does not exist", global_key_name)));
+            } else {
+                ereport(NOTICE, (errmsg("client master key \"%s\" does not exist", global_key_name)));
+                return 0;
+            }
+        } else {
+            Form_gs_client_global_keys rel_data = NULL;
+            rel_data = (Form_gs_client_global_keys)GETSTRUCT(rtup);
+            const Oid global_key_id = HeapTupleGetOid(rtup);
+            ObjectAddress cmk_addr;
+            cmk_addr.classId = ClientLogicGlobalSettingsId;
+            cmk_addr.objectId = global_key_id;
+            cmk_addr.objectSubId = 0;
+
+            performDeletion(&cmk_addr, stmt->behavior, 0);
+        }
+
+        ReleaseSysCache(rtup);
+    }
+    return 0;
+}
+
+int drop_column_settings(DropStmt *stmt)
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    if (!IS_PGXC_COORDINATOR) {
+        return 0;
+    }
+    if (!IsConnFromCoord() && !u_sess->attr.attr_common.enable_full_encryption) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                errmsg("Un-support to drop column encryption key when client encryption is disabled.")));
+    }
+#else
+    if (!u_sess->attr.attr_common.enable_full_encryption) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                errmsg("Un-support to drop column encryption key when client encryption is disabled.")));
+    }
+#endif
+    char *cek_name = NULL;
+    ListCell *cell = NULL;
+    foreach (cell, stmt->objects) {
+        Oid cek_oid = InvalidOid;
+        Oid namespace_id = InvalidOid;
+        char *schema_name = NULL;
+        List *namespace_list = NIL;
+        ListCell *nslc = NULL;
+        DeconstructQualifiedName((List *)lfirst(cell), &schema_name, &cek_name);
+        if (schema_name != NULL) {
+            namespace_id = LookupExplicitNamespace(schema_name);
+            namespace_list = list_make1_oid(namespace_id);
+        } else {
+            namespace_list = fetch_search_path(false);
+        }
+        Oid cmk_oid = InvalidOid;
+        foreach (nslc, namespace_list) {
+            namespace_id = lfirst_oid(nslc);
+            cek_oid = get_column_key_id_by_namespace(cek_name, namespace_id, cmk_oid);
+            if (cek_oid != InvalidOid) {
+                /* Check we have creation rights in target namespace */
+                AclResult aclresult = pg_namespace_aclcheck(namespace_id, GetUserId(), ACL_CREATE);
+                if (aclresult != ACLCHECK_OK) {
+                    aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespace_id));
+                }
+                break;
+            }
+        }
+        list_free_ext(namespace_list);
+        HeapTuple rtup = SearchSysCache1(COLUMNSETTINGOID, ObjectIdGetDatum(cek_oid));
+        Form_gs_column_keys rel_data = NULL;
+        if (!rtup) {
+            if (!stmt->missing_ok)
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_KEY), errmsg("column encryption key \"%s\" does not exist", cek_name)));
+            else {
+                ereport(NOTICE, (errmsg("column encryption key \"%s\" does not exist", cek_name)));
+                return 0;
+            }
+        } else {
+            rel_data = (Form_gs_column_keys)GETSTRUCT(rtup);
+            if (rel_data->key_namespace == namespace_id && strcmp(rel_data->column_key_name.data, cek_name) == 0) {
+                const Oid column_key_id = HeapTupleGetOid(rtup);
+                ObjectAddress cek_addr;
+                cek_addr.classId = ClientLogicColumnSettingsId;
+                cek_addr.objectId = column_key_id;
+                cek_addr.objectSubId = 0;
+
+                performDeletion(&cek_addr, stmt->behavior, 0);
+            }
+            ReleaseSysCache(rtup);
+        }
+    }
+    return 0;
+}
+void remove_cek_by_id(Oid id)
+{
+    Relation cek_rel = heap_open(ClientLogicColumnSettingsId, RowExclusiveLock);
+    HeapTuple tup = SearchSysCache1(COLUMNSETTINGOID, ObjectIdGetDatum(id));
+    if (!HeapTupleIsValid(tup)) /* should not happen */
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for column encryption key")));
+    Form_gs_column_keys rel_data = (Form_gs_column_keys)GETSTRUCT(tup);
+
+    AclResult acl_res = gs_sec_cek_aclcheck(id, GetUserId(), ACL_DROP);
+    if (acl_res == ACLCHECK_OK || pg_namespace_ownercheck(rel_data->key_namespace, GetUserId()) ||
+        GetUserId() == rel_data->key_owner) {
+            simple_heap_delete(cek_rel, &tup->t_self);
+    } else {
+        aclcheck_error(acl_res, ACL_KIND_COLUMN_SETTING, rel_data->column_key_name.data);
+    }
+
+    ReleaseSysCache(tup);
+    heap_close(cek_rel, RowExclusiveLock);
+}
+void remove_cmk_by_id(Oid id)
+{
+    Relation cek_rel = heap_open(ClientLogicGlobalSettingsId, RowExclusiveLock);
+    HeapTuple tup = SearchSysCache1(GLOBALSETTINGOID, ObjectIdGetDatum(id));
+    if (!HeapTupleIsValid(tup)) /* should not happen */
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for client master key")));
+    Form_gs_client_global_keys rel_data = (Form_gs_client_global_keys)GETSTRUCT(tup);
+
+    AclResult acl_res = gs_sec_cmk_aclcheck(id, GetUserId(), ACL_DROP);
+    if (acl_res == ACLCHECK_OK || pg_namespace_ownercheck(rel_data->key_namespace, GetUserId()) ||
+        GetUserId() == rel_data->key_owner) {
+            simple_heap_delete(cek_rel, &tup->t_self);
+    } else {
+        aclcheck_error(acl_res, ACL_KIND_GLOBAL_SETTING, rel_data->global_key_name.data);
+    }
+
+    ReleaseSysCache(tup);
+    heap_close(cek_rel, RowExclusiveLock);
+}
+void remove_encrypted_col_by_id(Oid id)
+{
+    Relation ce_rel = heap_open(ClientLogicCachedColumnsId, RowExclusiveLock);
+    HeapTuple tup = SearchSysCache1(CEOID, ObjectIdGetDatum(id));
+    if (!HeapTupleIsValid(tup)) /* should not happen */
+        ereport(ERROR,
+            (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for encrypted column %u", id)));
+    simple_heap_delete(ce_rel, &tup->t_self);
+    ReleaseSysCache(tup);
+    heap_close(ce_rel, RowExclusiveLock);
+}
+void remove_cmk_args_by_id(Oid id)
+{
+    Relation ce_rel = heap_open(ClientLogicGlobalSettingsArgsId, RowExclusiveLock);
+    ScanKeyData scankey;
+    SysScanDesc scan;
+    HeapTuple tuple;
+
+    ScanKeyInit(&scankey, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(id));
+    scan = systable_beginscan(ce_rel, ClientLogicGlobalSettingsArgsOidIndexId, true, SnapshotNow, 1, &scankey);
+
+    tuple = systable_getnext(scan);
+    if (!HeapTupleIsValid(tuple))
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("could not find tuple for cast %u", id)));
+    simple_heap_delete(ce_rel, &tuple->t_self);
+
+    systable_endscan(scan);
+    heap_close(ce_rel, RowExclusiveLock);
+}
+void remove_cek_args_by_id(Oid id)
+{
+    Relation ce_rel = heap_open(ClientLogicColumnSettingsArgsId, RowExclusiveLock);
+    ScanKeyData scankey;
+    SysScanDesc scan;
+    HeapTuple tuple;
+
+    ScanKeyInit(&scankey, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(id));
+    scan = systable_beginscan(ce_rel, ClientLogicColumnSettingsArgsOidIndexId, true, SnapshotNow, 1, &scankey);
+
+    tuple = systable_getnext(scan);
+    if (!HeapTupleIsValid(tuple))
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("could not find tuple for cast %u", id)));
+    simple_heap_delete(ce_rel, &tuple->t_self);
+
+    systable_endscan(scan);
+    heap_close(ce_rel, RowExclusiveLock);
+}
+
+void get_global_setting_description(StringInfo buffer, const ObjectAddress *object)
+{
+    Relation cmKeys = NULL;
+    ScanKeyData skey[1];
+    SysScanDesc rcscan = NULL;
+    HeapTuple tup = NULL;
+    Form_gs_client_global_keys cmk_form = NULL;
+
+    cmKeys = heap_open(ClientLogicGlobalSettingsId, AccessShareLock);
+
+    ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(object->objectId));
+    rcscan = systable_beginscan(cmKeys, ClientLogicGlobalSettingsOidIndexId, true, SnapshotNow, 1, skey);
+    tup = systable_getnext(rcscan);
+    if (!HeapTupleIsValid(tup)) {
+        systable_endscan(rcscan);
+        heap_close(cmKeys, AccessShareLock);
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+            errmsg("could not find tuple for cmk %u", object->objectId)));
+    }
+    cmk_form = (Form_gs_client_global_keys)GETSTRUCT(tup);
+    appendStringInfo(buffer, _("client master key: %s"), cmk_form->global_key_name.data);
+    systable_endscan(rcscan);
+    heap_close(cmKeys, AccessShareLock);
+}
+
+void get_column_setting_description(StringInfo buffer, const ObjectAddress *object)
+{
+    Relation column_setting_rel = NULL;
+    ScanKeyData skey[1];
+    SysScanDesc rcscan = NULL;
+    HeapTuple tup = NULL;
+    Form_gs_column_keys cek_form = NULL;
+
+    column_setting_rel = heap_open(ClientLogicColumnSettingsId, AccessShareLock);
+
+    ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(object->objectId));
+    rcscan = systable_beginscan(column_setting_rel, ClientLogicColumnSettingsOidIndexId, true, SnapshotNow, 1, skey);
+    tup = systable_getnext(rcscan);
+    if (!HeapTupleIsValid(tup)) {
+        systable_endscan(rcscan);
+        heap_close(column_setting_rel, AccessShareLock);
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+            errmsg("could not find tuple for cek %u", object->objectId)));
+    }
+    cek_form = (Form_gs_column_keys)GETSTRUCT(tup);
+    appendStringInfo(buffer, _("column encryption key: %s"), cek_form->column_key_name.data);
+    systable_endscan(rcscan);
+    heap_close(column_setting_rel, AccessShareLock);
+}
+
+void get_cached_column_description(StringInfo buffer, const ObjectAddress *object)
+{
+    Relation encColumns = NULL;
+    ScanKeyData skey[1];
+    SysScanDesc rcscan = NULL;
+    HeapTuple tup = NULL;
+    Form_gs_encrypted_columns ec_form = NULL;
+    encColumns = heap_open(ClientLogicCachedColumnsId, AccessShareLock);
+
+    ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(object->objectId));
+    rcscan = systable_beginscan(encColumns, GsSecEncryptedColumnsOidIndexId, true, SnapshotNow, 1, skey);
+    tup = systable_getnext(rcscan);
+    if (!HeapTupleIsValid(tup)) {
+        systable_endscan(rcscan);
+        heap_close(encColumns, AccessShareLock);
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+            errmsg("could not find tuple for encrypted column %u", object->objectId)));
+    }
+    ec_form = (Form_gs_encrypted_columns)GETSTRUCT(tup);
+    appendStringInfo(buffer, _("encrypted column: %s"), ec_form->column_name.data);
+    systable_endscan(rcscan);
+    heap_close(encColumns, AccessShareLock);
+}
+
+void get_global_setting_args_description(StringInfo buffer, const ObjectAddress *object)
+{
+    Relation rel = NULL;
+    ScanKeyData skey[1];
+    SysScanDesc rcscan = NULL;
+    HeapTuple tup = NULL;
+    Form_gs_client_global_keys_args cmk_args = NULL;
+    rel = heap_open(ClientLogicGlobalSettingsArgsId, AccessShareLock);
+
+    ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(object->objectId));
+    rcscan = systable_beginscan(rel, ClientLogicGlobalSettingsArgsOidIndexId, true, SnapshotNow, 1, skey);
+    tup = systable_getnext(rcscan);
+    if (!HeapTupleIsValid(tup)) {
+        systable_endscan(rcscan);
+        heap_close(rel, AccessShareLock);
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+            errmsg("could not find tuple for encrypted column %u", object->objectId)));
+    }
+    cmk_args = (Form_gs_client_global_keys_args)GETSTRUCT(tup);
+    appendStringInfo(buffer, _("ckm args: %s"), cmk_args->function_name.data);
+    systable_endscan(rcscan);
+    heap_close(rel, AccessShareLock);
+}
+
+void get_column_setting_args_description(StringInfo buffer, const ObjectAddress *object)
+{
+    Relation rel = NULL;
+    ScanKeyData skey[1];
+    SysScanDesc rcscan = NULL;
+    HeapTuple tup = NULL;
+    Form_gs_column_keys_args cek_args = NULL;
+    rel = heap_open(ClientLogicColumnSettingsArgsId, AccessShareLock);
+
+    ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(object->objectId));
+    rcscan = systable_beginscan(rel, ClientLogicColumnSettingsArgsOidIndexId, true, SnapshotNow, 1, skey);
+    tup = systable_getnext(rcscan);
+    if (!HeapTupleIsValid(tup)) {
+        systable_endscan(rcscan);
+        heap_close(rel, AccessShareLock);
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+            errmsg("could not find tuple for encrypted column %u", object->objectId)));
+    }
+    cek_args = (Form_gs_column_keys_args)GETSTRUCT(tup);
+    appendStringInfo(buffer, _("cek args: %s"), cek_args->function_name.data);
+    systable_endscan(rcscan);
+    heap_close(rel, AccessShareLock);
+}
+
+bool is_exist_encrypted_column(const ObjectAddresses *targetObjects)
+{
+    for (int i = 0; i < targetObjects->numrefs; i++) {
+        ObjectAddress *object = targetObjects->refs + i;
+        if (getObjectClass(object) == OCLASS_CL_CACHED_COLUMN) {
+            return true;
+        }
+    }
+    return false;
+}

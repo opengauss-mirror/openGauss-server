@@ -430,7 +430,7 @@ Datum tsa_rewrite_accum(PG_FUNCTION_ARGS)
             QTNBinary(acctree);
             oldcontext = MemoryContextSwitchTo(aggcontext);
             acc = QTN2QT(acctree);
-            (void)MemoryContextSwitchTo(oldcontext);
+            MemoryContextSwitchTo(oldcontext);
         } else {
             acc = (TSQuery)MemoryContextAlloc(aggcontext, HDRSIZETQ);
             SET_VARSIZE(acc, HDRSIZETQ);

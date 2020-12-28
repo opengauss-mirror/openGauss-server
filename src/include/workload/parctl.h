@@ -80,6 +80,20 @@ typedef struct RespoolData {
     char* cgroup; /* control group in resource pool */
 } RespoolData;
 
+/* used for BuildResourcePoolHash function, avoid dead lock */
+typedef struct TmpResourcePool
+{
+    Oid rpoid;                          /* resource pool id */
+    Oid parentoid;                      /* resource pool id */
+    int32 iops_limits;                    /* iops limit for each resource pool */
+    int io_priority;                    /* io_percent for each resource pool */
+    int mempct;                         /* setting percent */
+    bool is_foreign;                     /* indicate that the resource pool is used for foreign users */
+
+    char cgroup[NAMEDATALEN];            /* cgroup information */
+    char ngroup[NAMEDATALEN];            /* nodegroup information */
+} TmpResourcePool;
+
 typedef struct ParctlManager {
     int max_active_statements;      /* global max active statements */
     int statements_waiting_count;   /* count of statements in waiting */
@@ -111,7 +125,7 @@ typedef struct WLMListNode {
         if (this->data == *data)
             return 0;
 
-        return this->data < *data ? 1 : -1;
+        return ((this->data < *data) ? 1 : -1);
     }
 } WLMListNode;
 

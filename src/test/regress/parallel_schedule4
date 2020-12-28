@@ -2,19 +2,25 @@
 # run tablespace by itself, and first, because it forces a checkpoint;
 # we'd prefer not to have checkpoints later in the tests because that
 # interferes with crash-recovery testing.
-test: hw_alter_session 
+test: hw_alter_session
 test: tablespace
-test: hw_account_lock 
-#test: hw_user_audit
 
+#hw_user_audit
+test: hw_account_lock
+# test: hw_user_audit
 # ----------
 # Another group of parallel tests
 # ----------
-test: hw_independent_user hw_user_basic hw_user_revoke hw_user_privilege hw_user_pguser hw_user_namespace 
-test: hw_interval_format hw_function_p_1 hw_function_p_2 hw_function_p_3 hw_function_p_4 hw_current_schema hw_functions
-#test: hw_user_alter_pguser
+# plsql_packages tests, include utl_raw dbms_random dbms_lob dbms_ouput
+#test: hw_packages hw_independent_user hw_user
+#hw_packages hw_independent_user hw_user_namespace
+test: hw_user_basic hw_user_revoke hw_user_pguser hw_user_privilege
+
+#test: hw_interval_format hw_function_p_1 hw_function_p_2 hw_function_p_3 hw_function_p_4 hw_current_schema hw_user_alter_pguser hw_functions
+test: hw_function_p_3 hw_current_schema hw_functions
 test: hw_dba_enable_partition hw_tablespace 
 test: hw_procedure_define hw_anonymous_block hw_procedure
+ignore: hw_alter_system
 test: hw_grant_all hw_dynamic_sql hw_func_return_out 
 #test: hw_show_tabledef
 test: hw_package_function

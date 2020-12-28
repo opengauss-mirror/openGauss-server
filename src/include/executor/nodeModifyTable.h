@@ -14,7 +14,7 @@
 #define NODEMODIFYTABLE_H
 
 #include "nodes/execnodes.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 
 typedef TupleTableSlot* (*ExecInsertMtd)(ModifyTableState* state,TupleTableSlot*,
                         TupleTableSlot*,  EState*, bool, int, List**);
@@ -35,9 +35,10 @@ extern bool RelationIsDeleteDeltaTable(char* delete_delta_name);
 extern Relation GetAndOpenDeleteDeltaRel(const Relation rel, LOCKMODE lockmode, bool isMultiCatchup);
 extern Relation GetAndOpenNewTableRel(const Relation rel, LOCKMODE lockmode);
 extern bool redis_func_dnstable(Oid funcid);
-extern List* eval_ctid_funcs(Relation rel, List* original_quals, bool* isRangeScanInRedis);
+extern List* eval_ctid_funcs(Relation rel, List* original_quals, RangeScanInRedis *rangeScanInRedis);
 extern char* nodeTagToString(NodeTag type);
 extern bool ClusterResizingInProgress();
+extern void RelationGetNewTableName(Relation rel, char* newtable_name);
 
 extern TupleTableSlot* ExecDelete(ItemPointer tupleid, Oid deletePartitionOid, int2 bucketid, HeapTupleHeader oldtuple,
     TupleTableSlot* planSlot, EPQState* epqstate, ModifyTableState* node, bool canSetTag);

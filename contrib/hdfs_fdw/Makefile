@@ -21,7 +21,7 @@ top_builddir = ../..
 include $(top_builddir)/src/Makefile.global
 
 include $(top_srcdir)/src/gausskernel/common.mk
-override CXXFLAGS += -I$(top_builddir)/contrib/hdfs_fdw/include
+override CXXFLAGS += -I$(top_builddir)/contrib/hdfs_fdw/include -I$(LIBCARBONDATA_INCLUDE_PATH) -I$(LIBTHRIFT_INCLUDE_PATH)
 install:install-data
 
 .PHONY: install-data

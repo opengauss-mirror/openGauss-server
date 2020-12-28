@@ -1,0 +1,3 @@
+create node group group_test with (datanode1);
+alter node group group_test set default;
+drop node group group_test;

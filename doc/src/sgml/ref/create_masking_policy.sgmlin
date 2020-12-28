@@ -1,0 +1,28 @@
+<refentry id="SQL-CREATE_MASKING_POLICY">
+<refmeta>
+<refentrytitle>CREATE MASKING POLICY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE MASKING POLICY</refname>
+<refpurpose>define a new masking policy</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE MASKING POLICY policy_name masking_clause [, ... ] [ policy_filter_clause ] [ ENABLE | DISABLE ];
+
+where masking_clause can be:
+masking_function ON LABEL(label_name [, ... ])
+
+where masking_function can be:
+{ maskall | randommasking | creditcardmasking | basicemailmasking | fullemailmasking | shufflemasking | alldigitsmasking }
+
+where policy_filter_clause can be:
+FILTER ON { ( FILTER_TYPE ( filter_value [, ... ] ) ) [, ... ] }
+
+where FILTER_TYPE can be:
+{ APP | ROLES | IP }
+</synopsis>
+</refsynopsisdiv>
+</refentry>

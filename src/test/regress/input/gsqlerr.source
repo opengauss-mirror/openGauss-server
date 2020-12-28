@@ -6,13 +6,13 @@
 \! @abs_srcdir@/../../../src/bin/gsqlerr/scanEreport @abs_srcdir@/../../../src/common/backend/ @abs_srcdir@/../../../src/gausskernel/ src/errcodes.txt
 \! @abs_srcdir@/../../../src/bin/gsqlerr/scanEreport @abs_srcdir@/../../../src/common/backend/ @abs_srcdir@/../../../src/gausskernel/ @abs_srcdir@/../../../src/common/backend/utils/errcodes.txt
 --test gsqlerr error
-\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr
-\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr -a 11
+\! @abs_bindir@/gsqlerr
+\! @abs_bindir@/gsqlerr -a 11
 --test gsqlerr outer help
-\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr -h
+\! @abs_bindir@/gsqlerr -h
 --test gsql outer -v
-\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr -v
+\! @abs_bindir@/gsqlerr -v
 --test gsql outer -errcode
-\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr 0
-\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr 1
-\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr 9999
+\! @abs_bindir@/gsqlerr 0
+\! @abs_bindir@/gsqlerr 1
+\! @abs_bindir@/gsqlerr 9999

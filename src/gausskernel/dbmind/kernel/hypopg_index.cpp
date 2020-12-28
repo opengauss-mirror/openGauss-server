@@ -46,7 +46,7 @@
 #include "optimizer/var.h"
 #include "parser/parse_utilcmd.h"
 #include "parser/parser.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "tcop/utility.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
@@ -1001,6 +1001,10 @@ const char *hypo_explain_get_index_name_hook(Oid indexId)
  */
 Datum hypopg_display_index(PG_FUNCTION_ARGS)
 {
+#ifdef ENABLE_MULTIPLE_NODES
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("not support for distributed scenarios yet.")));
+#endif
+
     ReturnSetInfo *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
     MemoryContext per_query_ctx;
     MemoryContext oldcontext;
@@ -1078,6 +1082,10 @@ Datum hypopg_display_index(PG_FUNCTION_ARGS)
  */
 Datum hypopg_create_index(PG_FUNCTION_ARGS)
 {
+#ifdef ENABLE_MULTIPLE_NODES
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("not support for distributed scenarios yet.")));
+#endif
+
     char *sql = TextDatumGetCString(PG_GETARG_TEXT_PP(0));
     List *parsetree_list;
     ListCell *parsetree_item;
@@ -1153,6 +1161,10 @@ Datum hypopg_create_index(PG_FUNCTION_ARGS)
  */
 Datum hypopg_drop_index(PG_FUNCTION_ARGS)
 {
+#ifdef ENABLE_MULTIPLE_NODES
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("not support for distributed scenarios yet.")));
+#endif
+
     Oid indexid = PG_GETARG_OID(0);
 
     PG_RETURN_BOOL(hypo_index_remove(indexid));
@@ -1163,6 +1175,10 @@ Datum hypopg_drop_index(PG_FUNCTION_ARGS)
  */
 Datum hypopg_estimate_size(PG_FUNCTION_ARGS)
 {
+#ifdef ENABLE_MULTIPLE_NODES
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("not support for distributed scenarios yet.")));
+#endif
+
     BlockNumber pages;
     double tuples;
     Oid indexid = PG_GETARG_OID(0);
@@ -1186,6 +1202,10 @@ Datum hypopg_estimate_size(PG_FUNCTION_ARGS)
  */
 Datum hypopg_reset_index(PG_FUNCTION_ARGS)
 {
+#ifdef ENABLE_MULTIPLE_NODES
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("not support for distributed scenarios yet.")));
+#endif
+
     hypo_index_reset();
     PG_RETURN_VOID();
 }

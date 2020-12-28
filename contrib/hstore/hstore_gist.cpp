@@ -101,6 +101,7 @@ Datum ghstore_compress(PG_FUNCTION_ARGS)
     if (entry->leafkey) {
         GISTTYPE* res = (GISTTYPE*)palloc0(CALCGTSIZE(0));
         HStore* val = DatumGetHStoreP(entry->key);
+        NOT_NULL_HS(val);
         HEntry* hsent = ARRPTR(val);
         char* ptr = STRPTR(val);
         int count = HS_COUNT(val);
@@ -432,7 +433,6 @@ Datum ghstore_consistent(PG_FUNCTION_ARGS)
     GISTTYPE* entry = (GISTTYPE*)DatumGetPointer(((GISTENTRY*)PG_GETARG_POINTER(0))->key);
     StrategyNumber strategy = (StrategyNumber)PG_GETARG_UINT16(2);
 
-    /* Oid		subtype = PG_GETARG_OID(3); */
     bool* recheck = (bool*)PG_GETARG_POINTER(4);
     bool res = true;
     BITVECP sign = NULL;
@@ -447,6 +447,7 @@ Datum ghstore_consistent(PG_FUNCTION_ARGS)
 
     if (strategy == HStoreContainsStrategyNumber || strategy == HStoreOldContainsStrategyNumber) {
         HStore* query = PG_GETARG_HS(1);
+        NOT_NULL_HS(query);
         HEntry* qe = ARRPTR(query);
         char* qv = STRPTR(query);
         int count = HS_COUNT(query);

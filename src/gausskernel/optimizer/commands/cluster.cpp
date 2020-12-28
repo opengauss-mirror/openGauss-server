@@ -24,6 +24,7 @@
 #include "access/heapam.h"
 #include "access/relscan.h"
 #include "access/rewriteheap.h"
+#include "access/tableam.h"
 #include "access/transam.h"
 #include "access/xact.h"
 #include "access/xlog.h"
@@ -32,9 +33,12 @@
 #include "catalog/heap.h"
 #include "catalog/index.h"
 #include "catalog/namespace.h"
+#include "catalog/pgxc_slice.h"
+#include "catalog/storage.h"
 #include "catalog/toasting.h"
 #include "catalog/storage_gtt.h"
 #include "commands/cluster.h"
+#include "commands/matview.h"
 #include "commands/tablecmds.h"
 #include "commands/vacuum.h"
 #include "miscadmin.h"
@@ -43,7 +47,7 @@
 #include "optimizer/planner.h"
 #include "optimizer/pathnode.h"
 #include "optimizer/plancat.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/lmgr.h"
 #include "storage/predicate.h"
 #include "storage/smgr.h"
@@ -56,7 +60,6 @@
 #include "utils/relmapper.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
 #include "utils/tuplesort.h"
 #include "access/cstore_am.h"
 #include "access/cstore_insert.h"
@@ -67,6 +70,11 @@
 #include "catalog/pg_hashbucket_fn.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/commands_gstrace.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "tsdb/storage/part_merge.h"
+#include "tsdb/utils/ts_relcache.h"
+#include "tsdb/cache/tags_cachemgr.h"
+#endif
 
 /*
  * This struct is used to pass around the information on tables to be
@@ -130,8 +138,8 @@ static void rebuildPartVacFull(
 static void RebuildCStoreRelation(
     Relation OldHeap, Oid indexOid, int freeze_min_age, int freeze_table_age, bool verbose, AdaptMem* mem_info);
 
-extern void Start_Prefetch(HeapScanDesc scan, SeqScanAccessor* pAccessor, ScanDirection dir);
-extern void SeqScan_Init(AbsTblScanDesc Scan, SeqScanAccessor* pAccessor);
+extern void Start_Prefetch(TableScanDesc scan, SeqScanAccessor* pAccessor, ScanDirection dir);
+extern void SeqScan_Init(TableScanDesc Scan, SeqScanAccessor* pAccessor, Relation relation);
 
 static void swap_partition_relfilenode(
     Oid partitionOid1, Oid partitionOid2, bool swapToastByContent, TransactionId frozenXid, Oid* mappedTables);
@@ -140,6 +148,9 @@ static void relfilenode_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool swapBucket);
 #ifdef ENABLE_MULTIPLE_NODES
 static Datum pgxc_parallel_execution(const char* query, ExecNodes* exec_nodes);
 static int switch_relfilenode_execnode(Oid relOid1, Oid relOid2, bool isbucket, RedisSwitchNode* rsn);
+namespace Tsdb {
+static void VacFullCompaction(Relation oldHeap, Oid partOid);
+}
 #endif
 static void swapRelationIndicesRelfileNode(Relation rel1, Relation rel2, bool swapBucket);
 static void GttSwapRelationFiles(Oid r1, Oid r2);
@@ -166,7 +177,7 @@ static void GttSwapRelationFiles(Oid r1, Oid r2);
  * We also allow a relation to be specified without index.	In that case,
  * the indisclustered bit will be looked up, and an ERROR will be thrown
  * if there is no index with the bit set.
- * ---------------------------------------------------------------------------
+ *---------------------------------------------------------------------------
  */
 void cluster(ClusterStmt* stmt, bool isTopLevel)
 {
@@ -476,18 +487,6 @@ void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, boo
         check_index_is_clusterable(OldHeap, indexOid, recheck, lockMode, &amid);
 
     /*
-     * Quietly ignore the request if this is a materialized view which has not
-     * been populated from its query. No harm is done because there is no data
-     * to deal with, and we don't want to throw an error if this is part of a
-     * multi-relation request -- for example, CLUSTER was run on the entire
-     * database.
-     */
-    if (OldHeap->rd_rel->relkind == RELKIND_MATVIEW && !RelationIsPopulated(OldHeap)) {
-        relation_close(OldHeap, AccessExclusiveLock);
-        return;
-    }
-
-    /*
      * There is no data on Coordinator except system tables, it is no sense to rewrite a relation
      * on Coordinator.so we can skip to vacuum full user-define tables
      */
@@ -528,6 +527,19 @@ void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, boo
 
         pgstat_report_vacuum(relid, parentid, false, 0);
         gstrace_exit(GS_TRC_ID_cluster_rel);
+        return;
+    }
+
+    /*
+     * Quietly ignore the request if the a materialized view is not scannable.
+     * No harm is done because there is nothing no data to deal with, and we
+     * don't want to throw an error if this is part of a multi-relation
+     * request -- for example, CLUSTER was run on the entire database.
+     */
+    if (OldHeap->rd_rel->relkind == RELKIND_MATVIEW &&
+        !OldHeap->rd_isscannable)
+    {
+        relation_close(OldHeap, AccessExclusiveLock);
         return;
     }
 
@@ -598,7 +610,7 @@ void check_index_is_clusterable(Relation OldHeap, Oid indexOid, bool recheck, LO
      * seqscan pass over the table to copy the missing rows, but that seems
      * expensive and tedious.
      */
-    if (!heap_attisnull(OldIndex->rd_indextuple, Anum_pg_index_indpred, NULL))
+	if (!tableam_tops_tuple_attisnull(OldIndex->rd_indextuple, Anum_pg_index_indpred, NULL))
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("cannot cluster on partial index \"%s\"", RelationGetRelationName(OldIndex))));
@@ -773,7 +785,7 @@ TransactionId getPartitionRelfrozenxid(Relation ordTableRel)
                 errmsg("cache lookup failed for relation %u", RelationGetRelid(ordTableRel))));
     }
     Datum xid64datum =
-        heap_getattr(tuple, Anum_pg_partition_relfrozenxid64, RelationGetDescr(rel), &relfrozenxid_isNull);
+        tableam_tops_tuple_getattr(tuple, Anum_pg_partition_relfrozenxid64, RelationGetDescr(rel), &relfrozenxid_isNull);
     heap_close(rel, AccessShareLock);
     heap_freetuple(tuple);
 
@@ -801,7 +813,7 @@ TransactionId getRelationRelfrozenxid(Relation ordTableRel)
             (errcode(ERRCODE_UNDEFINED_TABLE),
                 errmsg("cache lookup failed for relation %u", RelationGetRelid(ordTableRel))));
     }
-    Datum xid64datum = heap_getattr(tuple, Anum_pg_class_relfrozenxid64, RelationGetDescr(rel), &relfrozenxid_isNull);
+    Datum xid64datum = tableam_tops_tuple_getattr(tuple, Anum_pg_class_relfrozenxid64, RelationGetDescr(rel), &relfrozenxid_isNull);
     heap_close(rel, AccessShareLock);
     heap_freetuple(tuple);
 
@@ -1290,8 +1302,6 @@ Oid make_new_heap(Oid OIDOldHeap, Oid NewTableSpace, int lockMode)
     bool isNull = false;
     int ss_c = 0;
     HashBucketInfo bucketinfo;
-    Oid namespaceid;
-    char relpersistence;
 
     OldHeap = heap_open(OIDOldHeap, lockMode);
     OldHeapDesc = RelationGetDescr(OldHeap);
@@ -1312,9 +1322,6 @@ Oid make_new_heap(Oid OIDOldHeap, Oid NewTableSpace, int lockMode)
     if (isNull)
         reloptions = (Datum)0;
 
-    namespaceid = RelationGetNamespace(OldHeap);
-    relpersistence = OldHeap->rd_rel->relpersistence;
-
     /*
      * Create the new heap, using a temporary name in the same namespace as
      * the existing table.	NOTE: there is some risk of collision with user
@@ -1332,7 +1339,7 @@ Oid make_new_heap(Oid OIDOldHeap, Oid NewTableSpace, int lockMode)
 
     bucketinfo.bucketOid = RelationGetBucketOid(OldHeap);
     OIDNewHeap = heap_create_with_catalog(NewHeapName,
-        namespaceid,
+        RelationGetNamespace(OldHeap),
         NewTableSpace,
         InvalidOid,
         InvalidOid,
@@ -1340,8 +1347,8 @@ Oid make_new_heap(Oid OIDOldHeap, Oid NewTableSpace, int lockMode)
         OldHeap->rd_rel->relowner,
         OldHeapDesc,
         NIL,
-        RELKIND_RELATION,
-        relpersistence,
+        OldHeap->rd_rel->relkind,
+        OldHeap->rd_rel->relpersistence,
         false,
         RelationIsMapped(OldHeap),
         true,
@@ -1502,7 +1509,42 @@ Oid makePartitionNewHeap(Relation partitionedTableRel, TupleDesc partTabHeapDesc
     return OIDNewHeap;
 }
 
-static double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relation NewHeap, TransactionId OldestXmin,
+/*
+ * @@GaussDB@@
+ * Target       : log
+ * Brief        : Log what we're doing about clustering.
+ * Description  :
+ * Notes        :
+ * Input        :
+ * Output       :
+ */
+static void ClusterRunMsg(
+    Relation tblRelation, Relation indexRelation, IndexScanDesc indexScan, Tuplesortstate* tuplesort, bool verbose)
+{
+    int elevel = verbose ? VERBOSEMESSAGE : DEBUG2;
+    if (indexScan != NULL) {
+        ereport(elevel,
+            (errcode(ERRCODE_LOG),
+                errmsg("clustering \"%s.%s\" using index scan on \"%s\"",
+                    get_namespace_name(RelationGetNamespace(tblRelation)),
+                    RelationGetRelationName(tblRelation),
+                    RelationGetRelationName(indexRelation))));
+    } else if (tuplesort != NULL) {
+        ereport(elevel,
+            (errcode(ERRCODE_LOG),
+                errmsg("clustering \"%s.%s\" using sequential scan and sort",
+                    get_namespace_name(RelationGetNamespace(tblRelation)),
+                    RelationGetRelationName(tblRelation))));
+    } else {
+        ereport(elevel,
+            (errcode(ERRCODE_LOG),
+                errmsg("vacuuming \"%s.%s\"",
+                    get_namespace_name(RelationGetNamespace(tblRelation)),
+                    RelationGetRelationName(tblRelation))));
+    }
+}
+
+double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relation NewHeap, TransactionId OldestXmin,
     TransactionId FreezeXid, bool verbose, bool use_sort, AdaptMem* memUsage)
 {
 
@@ -1513,7 +1555,7 @@ static double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relat
     Datum* values = NULL;
     bool* isnull = NULL;
     IndexScanDesc indexScan;
-    HeapScanDesc heapScan;
+    TableScanDesc heapScan;
     bool use_wal = XLogIsNeeded() && RelationNeedsWAL(NewHeap);
     bool is_system_catalog = IsSystemRelation(OldHeap);
     RewriteState rwstate;
@@ -1551,7 +1593,7 @@ static double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relat
     if (use_sort) {
         int workMem = (memUsage->work_mem > 0) ? memUsage->work_mem : u_sess->attr.attr_memory.maintenance_work_mem;
         int maxMem = memUsage->max_mem;
-        tuplesort = tuplesort_begin_cluster(oldTupDesc, OldIndex, workMem, NULL, false, maxMem);
+        tuplesort = tuplesort_begin_cluster(oldTupDesc, OldIndex, workMem, false, maxMem);
     } else {
         tuplesort = NULL;
     }
@@ -1570,44 +1612,31 @@ static double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relat
             heapRelation = heap_open(heapId, NoLock);
             indexScan = index_beginscan(heapRelation, OldIndex, SnapshotAny, 0, 0);
         } else {
-            indexScan = index_beginscan(OldHeap, OldIndex, SnapshotAny, 0, 0);
+        indexScan = (IndexScanDesc)index_beginscan(OldHeap, OldIndex, SnapshotAny, 0, 0);
         }
         index_rescan(indexScan, NULL, 0, NULL, 0);
     } else {
-        heapScan = heap_beginscan(OldHeap, SnapshotAny, 0, (ScanKey)NULL);
+        heapScan = tableam_scan_begin(OldHeap, SnapshotAny, 0, (ScanKey)NULL);
         indexScan = NULL;
         ADIO_RUN()
         {
-            SeqScan_Init((AbsTblScanDesc)heapScan, &scanaccessor);
+            SeqScan_Init(heapScan, &scanaccessor, OldHeap);
         }
         ADIO_END();
     }
 
     /* Log what we're doing */
-    if (indexScan != NULL)
-        ereport(elevel,
-            (errcode(ERRCODE_LOG),
-                errmsg("clustering \"%s.%s\" using index scan on \"%s\"",
-                    get_namespace_name(RelationGetNamespace(OldHeap), true),
-                    RelationGetRelationName(OldHeap),
-                    RelationGetRelationName(OldIndex))));
-    else if (tuplesort != NULL)
-        ereport(elevel,
-            (errcode(ERRCODE_LOG),
-                errmsg("clustering \"%s.%s\" using sequential scan and sort",
-                    get_namespace_name(RelationGetNamespace(OldHeap), true),
-                    RelationGetRelationName(OldHeap))));
-    else
-        ereport(elevel,
-            (errcode(ERRCODE_LOG),
-                errmsg("vacuuming \"%s.%s\"",
-                    get_namespace_name(RelationGetNamespace(OldHeap), true),
-                    RelationGetRelationName(OldHeap))));
+    ClusterRunMsg(OldHeap, OldIndex, indexScan, tuplesort, verbose);
 
     if (verbose)
         messageLevel = VERBOSEMESSAGE;
     else
         messageLevel = WARNING;
+
+    if (OldHeap->rd_rel->relkind == RELKIND_MATVIEW) {
+    /* Make sure the heap looks good even if no rows are written. */
+        SetRelationIsScannable(NewHeap);
+    }
 
     /*
      * Scan through the OldHeap, either in OldIndex order or sequentially;
@@ -1643,7 +1672,7 @@ static double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relat
 
             buf = indexScan->xs_cbuf;
         } else {
-            tuple = heap_getnext(heapScan, ForwardScanDirection);
+            tuple =  (HeapTuple) tableam_scan_getnexttuple(heapScan, ForwardScanDirection);
             if (tuple == NULL)
                 break;
 
@@ -1685,8 +1714,7 @@ static double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relat
                  */
                 if (!is_system_catalog &&
                     !TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(page, tuple->t_data)))
-                    ereport(messageLevel,
-                        (errcode(ERRCODE_OBJECT_IN_USE),
+                    ereport(messageLevel, (errcode(ERRCODE_OBJECT_IN_USE),
                             errmsg("concurrent insert in progress within table \"%s\"",
                                 RelationGetRelationName(OldHeap))));
                 /* treat as live */
@@ -1700,8 +1728,7 @@ static double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relat
                 Assert(!(tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI));
                 if (!is_system_catalog &&
                     !TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(page, tuple->t_data)))
-                    ereport(messageLevel,
-                        (errcode(ERRCODE_OBJECT_IN_USE),
+                    ereport(messageLevel, (errcode(ERRCODE_OBJECT_IN_USE),
                             errmsg("concurrent delete in progress within table \"%s\"",
                                 RelationGetRelationName(OldHeap))));
                 /* treat as recently dead */
@@ -1745,7 +1772,7 @@ static double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relat
 
         num_tuples += 1;
         if (tuplesort != NULL)
-            tuplesort_putheaptuple(tuplesort, tuple);
+            tuplesort_putheaptuple(tuplesort,  tuple);
         else
             reform_and_rewrite_tuple(
                 tuple, oldTupDesc, newTupDesc, values, isnull, NewHeap->rd_rel->relhasoids, rwstate);
@@ -1760,7 +1787,7 @@ static double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relat
     }
 
     if (heapScan != NULL)
-        heap_endscan(heapScan);
+        tableam_scan_end(heapScan);
 
     /*
      * In scan-and-sort mode, complete the sort, then read out all live tuples
@@ -1797,8 +1824,7 @@ static double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relat
         (errcode(ERRCODE_LOG),
             errmsg("\"%s\": found %.0f removable, %.0f nonremovable row versions in %u pages",
                 RelationGetRelationName(OldHeap),
-                tups_vacuumed,
-                num_tuples,
+                tups_vacuumed, num_tuples,
                 RelationGetNumberOfBlocks(OldHeap)),
             errdetail("%.0f dead row versions cannot be removed yet.\n"
                       "%s.",
@@ -1886,6 +1912,7 @@ static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int 
          * work for values copied over from the old toast table, but not for
          * any values that we toast which were previously not toasted.)
          */
+
         NewHeap->rd_toastoid = OldHeap->rd_rel->reltoastrelid;
     } else
         *pSwapToastByContent = false;
@@ -1914,7 +1941,7 @@ static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int 
                 (errcode(ERRCODE_UNDEFINED_TABLE),
                     errmsg("cache lookup failed for relation %u", RelationGetRelid(OldHeap))));
         }
-        Datum xid64datum = heap_getattr(tuple, Anum_pg_class_relfrozenxid64, RelationGetDescr(rel), &isNull);
+        Datum xid64datum = tableam_tops_tuple_getattr(tuple, Anum_pg_class_relfrozenxid64, RelationGetDescr(rel), &isNull);
         heap_close(rel, AccessShareLock);
         heap_freetuple(tuple);
 
@@ -1959,8 +1986,8 @@ static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int 
             if (OldIndex != NULL)
                 OldBucketIndex = bucketGetRelation(OldIndex, NULL, bucketlist->values[i]);
 
-            tups_vacuumed += copy_heap_data_internal(
-                OldBucketHeap, OldBucketIndex, NewBucketHeap, OldestXmin, FreezeXid, verbose, use_sort, memUsage);
+            tups_vacuumed += tableam_relation_copy_for_cluster(
+                OldBucketHeap, OldBucketIndex, NewBucketHeap, OldestXmin, FreezeXid, verbose, use_sort, memUsage, NULL);
             bucketCloseRelation(OldBucketHeap);
             bucketCloseRelation(NewBucketHeap);
             if (OldBucketIndex != NULL)
@@ -1982,7 +2009,7 @@ static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int 
         }
     } else {
         tups_vacuumed =
-            copy_heap_data_internal(OldHeap, OldIndex, NewHeap, OldestXmin, FreezeXid, verbose, use_sort, memUsage);
+            tableam_relation_copy_for_cluster(OldHeap, OldIndex, NewHeap, OldestXmin, FreezeXid, verbose, use_sort, memUsage, NULL);
     }
     /* Reset rd_toastoid just to be tidy --- it shouldn't be looked at again */
     NewHeap->rd_toastoid = InvalidOid;
@@ -1994,6 +2021,35 @@ static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int 
         index_close(OldIndex, NoLock);
     heap_close(OldHeap, NoLock);
     heap_close(NewHeap, NoLock);
+}
+
+static Relation GetPartitionIndexRel(
+    const Relation oldHeap, Oid indexOid, Relation* partTabIndexRel, Partition* partIndexRel)
+{
+    Relation oldIndex = NULL;
+
+    if (OidIsValid(indexOid)) {
+        Oid partIndexOid = InvalidOid;
+        *partTabIndexRel = index_open(indexOid, NoLock);
+        if (RelationIsGlobalIndex(*partTabIndexRel)) {
+            oldIndex = *partTabIndexRel;
+        } else {
+            partIndexOid = getPartitionIndexOid(indexOid, RelationGetRelid(oldHeap));
+            *partIndexRel = partitionOpen(*partTabIndexRel, partIndexOid, ExclusiveLock);
+            if (!(*partIndexRel)->pd_part->indisusable) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("can not cluster partition %s using %s bacause of unusable local index",
+                            getPartitionName(oldHeap->rd_id, false),
+                            get_rel_name(indexOid))));
+            }
+            oldIndex = partitionGetRelation(*partTabIndexRel, *partIndexRel);
+        }
+    } else {
+        oldIndex = NULL;
+    }
+
+    return oldIndex;
 }
 
 /*
@@ -2020,26 +2076,7 @@ static void copyPartitionHeapData(Relation newHeap, Relation oldHeap, Oid indexO
     TransactionId relfrozenxid = InvalidTransactionId;
     double tups_vacuumed = 0;
 
-    if (OidIsValid(indexOid)) {
-        Oid partIndexOid = InvalidOid;
-        partTabIndexRel = index_open(indexOid, NoLock);
-        if (RelationIsGlobalIndex(partTabIndexRel)) {
-            oldIndex = partTabIndexRel;
-        } else {
-            partIndexOid = getPartitionIndexOid(indexOid, RelationGetRelid(oldHeap));
-            partIndexRel = partitionOpen(partTabIndexRel, partIndexOid, ExclusiveLock);
-            if (!partIndexRel->pd_part->indisusable) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("can not cluster partition %s using %s bacause of unusable local index",
-                            getPartitionName(oldHeap->rd_id, false),
-                            get_rel_name(indexOid))));
-            }
-            oldIndex = partitionGetRelation(partTabIndexRel, partIndexRel);
-        }
-    } else {
-        oldIndex = NULL;
-    }
+    oldIndex = GetPartitionIndexRel(oldHeap, indexOid, &partTabIndexRel, &partIndexRel);
 
     /*
      * If the OldHeap has a toast table, get lock on the toast table to keep
@@ -2097,8 +2134,8 @@ static void copyPartitionHeapData(Relation newHeap, Relation oldHeap, Oid indexO
                 OldBucketIndex = bucketGetRelation(oldIndex, NULL, bucketlist->values[i]);
 
             /* */
-            tups_vacuumed += copy_heap_data_internal(
-                OldBucketHeap, OldBucketIndex, NewBucketHeap, oldestXmin, freezeXid, verbose, useSort, memUsage);
+            tups_vacuumed += tableam_relation_copy_for_cluster(
+                OldBucketHeap, OldBucketIndex, NewBucketHeap, oldestXmin, freezeXid, verbose, useSort, memUsage, NULL);
             bucketCloseRelation(OldBucketHeap);
             bucketCloseRelation(NewBucketHeap);
             if (OldBucketIndex != NULL)
@@ -2109,7 +2146,7 @@ static void copyPartitionHeapData(Relation newHeap, Relation oldHeap, Oid indexO
         }
     } else {
         tups_vacuumed =
-            copy_heap_data_internal(oldHeap, oldIndex, newHeap, oldestXmin, freezeXid, verbose, useSort, memUsage);
+            tableam_relation_copy_for_cluster(oldHeap, oldIndex, newHeap, oldestXmin, freezeXid, verbose, useSort, memUsage, NULL);
     }
 
     /* Reset rd_toastoid just to be tidy --- it shouldn't be looked at again */
@@ -2307,7 +2344,7 @@ static void swap_relation_files(
         replaces[Anum_pg_class_relfrozenxid64 - 1] = true;
         values[Anum_pg_class_relfrozenxid64 - 1] = TransactionIdGetDatum(frozenXid);
 
-        nctup = heap_modify_tuple(reltup1, RelationGetDescr(relRelation), values, nulls, replaces);
+        nctup = (HeapTuple) tableam_tops_modify_tuple(reltup1, RelationGetDescr(relRelation), values, nulls, replaces);
 
         relform1 = (Form_pg_class)GETSTRUCT(nctup);
 
@@ -2620,7 +2657,7 @@ static void swapPartitionfiles(
         replaces[Anum_pg_partition_relfrozenxid64 - 1] = true;
         values[Anum_pg_partition_relfrozenxid64 - 1] = TransactionIdGetDatum(frozenXid);
 
-        ntup = heap_modify_tuple(reltup1, RelationGetDescr(relRelation1), values, nulls, replaces);
+        ntup = (HeapTuple) tableam_tops_modify_tuple(reltup1, RelationGetDescr(relRelation1), values, nulls, replaces);
 
         relform1 = (Form_pg_partition)GETSTRUCT(ntup);
 
@@ -2781,7 +2818,7 @@ static void SwapCStoreTables(Oid relId1, Oid relId2, Oid parentOid, Oid tempTabl
             if (!tempTableOid && count != 0) {
                 ereport(ERROR,
                     (errcode(ERRCODE_OPERATE_RESULT_NOT_EXPECTED),
-                        errmsg("expected none dependency record for partiton's CUDesc/Delta table, found %ld", count)));
+                        errmsg("expected none dependency record for partition's CUDesc/Delta table, found %ld", count)));
             }
         }
 
@@ -2793,7 +2830,7 @@ static void SwapCStoreTables(Oid relId1, Oid relId2, Oid parentOid, Oid tempTabl
             if (!parentOid && count != 0) {
                 ereport(ERROR,
                     (errcode(ERRCODE_OPERATE_RESULT_NOT_EXPECTED),
-                        errmsg("expected none dependency record for partiton's CUDesc/Delta table, found %ld", count)));
+                        errmsg("expected none dependency record for partition's CUDesc/Delta table, found %ld", count)));
             } else if (parentOid && count != 1)
                 ereport(ERROR,
                     (errcode(ERRCODE_OPERATE_RESULT_NOT_EXPECTED),
@@ -2992,7 +3029,7 @@ void finishPartitionHeapSwap(
 static List* get_tables_to_cluster(MemoryContext cluster_context)
 {
     Relation indRelation;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     ScanKeyData entry;
     HeapTuple indexTuple;
     Form_pg_index index;
@@ -3008,8 +3045,8 @@ static List* get_tables_to_cluster(MemoryContext cluster_context)
      */
     indRelation = heap_open(IndexRelationId, AccessShareLock);
     ScanKeyInit(&entry, Anum_pg_index_indisclustered, BTEqualStrategyNumber, F_BOOLEQ, BoolGetDatum(true));
-    scan = heap_beginscan(indRelation, SnapshotNow, 1, &entry);
-    while ((indexTuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(indRelation, SnapshotNow, 1, &entry);
+    while ((indexTuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         index = (Form_pg_index)GETSTRUCT(indexTuple);
 
         if (!pg_class_ownercheck(index->indrelid, GetUserId()))
@@ -3028,7 +3065,7 @@ static List* get_tables_to_cluster(MemoryContext cluster_context)
 
         MemoryContextSwitchTo(old_context);
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
 
     relation_close(indRelation, AccessShareLock);
 
@@ -3094,7 +3131,7 @@ static void reform_and_rewrite_tuple(HeapTuple tuple, TupleDesc oldTupDesc, Tupl
     int i;
     MemoryContext oldMemCxt = NULL;
 
-    heap_deform_tuple(tuple, oldTupDesc, values, isnull);
+    tableam_tops_deform_tuple(tuple, oldTupDesc, values, isnull);
 
     /* Be sure to null out any dropped columns */
     for (i = 0; i < newTupDesc->natts; i++) {
@@ -3105,8 +3142,7 @@ static void reform_and_rewrite_tuple(HeapTuple tuple, TupleDesc oldTupDesc, Tupl
     bool usePrivateMemcxt = use_heap_rewrite_memcxt(rwstate);
     if (usePrivateMemcxt)
         oldMemCxt = MemoryContextSwitchTo(get_heap_rewrite_memcxt(rwstate));
-
-    copiedTuple = heap_form_tuple(newTupDesc, values, isnull);
+    copiedTuple = (HeapTuple)heap_form_tuple(newTupDesc, values, isnull);
 
     /* Preserve OID, if any */
     if (newRelHasOids)
@@ -3118,7 +3154,7 @@ static void reform_and_rewrite_tuple(HeapTuple tuple, TupleDesc oldTupDesc, Tupl
         (void)MemoryContextSwitchTo(oldMemCxt);
     } else {
         rewrite_heap_tuple(rwstate, tuple, copiedTuple);
-        heap_freetuple(copiedTuple);
+        tableam_tops_free_tuple(copiedTuple);
     }
 }
 
@@ -3218,10 +3254,80 @@ void vacuumFullPart(Oid partOid, VacuumStmt* vacstmt, int freeze_min_age, int fr
      */
     CheckTableNotInUse(oldHeap, "VACUUM");
 
+#ifdef ENABLE_MULTIPLE_NODES
+    if (unlikely(RelationIsTsStore(oldHeap))) {
+        Tsdb::VacFullCompaction(oldHeap, partOid);
+    } else {
+        rebuildPartVacFull(oldHeap, partOid, freeze_min_age, freeze_table_age, vacstmt);
+    }
+#else  // ENABLE_MULTIPLE_NODES
     rebuildPartVacFull(oldHeap, partOid, freeze_min_age, freeze_table_age, vacstmt);
+#endif  // ENABLE_MULTIPLE_NODES
 
     /* NB: rebuildPartVacFull does heap_close() on OldHeap */
 }
+
+#ifdef ENABLE_MULTIPLE_NODES
+namespace Tsdb {
+/**
+ * Used in tsdb. Execute VACUUM FULL in one partition.
+ * This function first find all cudesc tables in the partition. Then, it calls MergeUtils::merge_parts() to
+ * do the compaction work. After that, it drops old parts(cudesc tables, cu data files, timestamp files).
+ * Parameters:
+ *  - oldHeap: opened ts store table
+ *  - partOid: oid of the partition to be compacted
+ */
+static void VacFullCompaction(Relation oldHeap, Oid partOid)
+{
+    if (u_sess->attr.attr_common.enable_ts_compaction) {
+        ereport(WARNING, (errcode(MOD_TIMESERIES), errmsg("Ts compaction is on, please disable ts compaction first.")));
+        return;
+    }
+
+    Partition part = partitionOpen(oldHeap, partOid, NoLock);
+    LockRelationOid(partOid, AccessExclusiveLock);
+    List *cudesc_oids = NIL;
+    cudesc_oids = search_cudesc(partOid, false);
+    /* It is unnecessary to do compaction if there is only one part in the partition */
+    if (list_length(cudesc_oids) > 1) {
+        List* target_cudesc = NIL;
+        List* target_cudesc_oids = NIL;
+        Relation tmp_cudesc_rel = NULL;
+        ListCell *cudesc_cell = NULL;
+        foreach(cudesc_cell, cudesc_oids) {
+            Oid cudesc_oid = lfirst_oid(cudesc_cell);
+            tmp_cudesc_rel = heap_open(cudesc_oid, AccessExclusiveLock);
+            if (target_cudesc == NIL) {
+                target_cudesc = list_make1(tmp_cudesc_rel);
+                target_cudesc_oids = list_make1_oid(cudesc_oid);
+            } else {
+                lappend(target_cudesc, tmp_cudesc_rel);
+                lappend_oid(target_cudesc_oids, cudesc_oid);
+            }
+        }
+        Oid new_desc_oid = Tsdb::MergeUtils::merge_parts(oldHeap, partOid, target_cudesc);
+        ListCell* cell = NULL;
+        foreach (cell, target_cudesc) {
+            tmp_cudesc_rel = (Relation)lfirst(cell);
+            heap_close(tmp_cudesc_rel, NoLock);
+        }
+        Tsdb::PartCacheMgr::GetInstance().refresh_part_item_cache(partOid, new_desc_oid, target_cudesc_oids);
+        Tsdb::DropPartStorage(
+             partOid, &(part->pd_node), oldHeap->rd_backend, oldHeap->rd_rel->relowner, target_cudesc_oids);
+
+        list_free_ext(target_cudesc);
+        if (list_length(target_cudesc_oids) > 1) {
+            list_free_ext(target_cudesc_oids);
+        }
+    }
+
+    partitionClose(oldHeap, part, NoLock);
+    UnlockRelationOid(partOid, AccessExclusiveLock);
+    heap_close(oldHeap, NoLock);
+    list_free_ext(cudesc_oids);
+}
+}
+#endif  // ENABLE_MULTIPLE_NODES
 
 static void rebuildPartVacFull(Relation oldHeap, Oid partOid, int freezeMinAge, int freezeTableAge, VacuumStmt* vacstmt)
 {
@@ -3451,7 +3557,7 @@ static void CopyCStoreData(Relation oldRel, Relation newRel, int freeze_min_age,
                 (errcode(ERRCODE_UNDEFINED_TABLE),
                     errmsg("cache lookup failed for relation %u", RelationGetRelid(oldRel))));
         }
-        xid64datum = heap_getattr(tuple, Anum_pg_partition_relfrozenxid64, RelationGetDescr(rel), &isNull);
+        xid64datum = tableam_tops_tuple_getattr(tuple, Anum_pg_partition_relfrozenxid64, RelationGetDescr(rel), &isNull);
     } else {
         rel = heap_open(RelationRelationId, AccessShareLock);
         tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(oldRel->rd_id));
@@ -3460,7 +3566,7 @@ static void CopyCStoreData(Relation oldRel, Relation newRel, int freeze_min_age,
                 (errcode(ERRCODE_UNDEFINED_TABLE),
                     errmsg("cache lookup failed for relation %u", RelationGetRelid(oldRel))));
         }
-        xid64datum = heap_getattr(tuple, Anum_pg_class_relfrozenxid64, RelationGetDescr(rel), &isNull);
+        xid64datum = tableam_tops_tuple_getattr(tuple, Anum_pg_class_relfrozenxid64, RelationGetDescr(rel), &isNull);
     }
 
     heap_close(rel, AccessShareLock);
@@ -3545,6 +3651,27 @@ static void CopyCStoreData(Relation oldRel, Relation newRel, int freeze_min_age,
     }
 }
 
+/**
+ * filter droped column
+ * give an error when we see a droped cloumn have none 0 ScalarValue in batch 
+ */
+static void filter_batch(const TupleDesc oldTupDesc, const VectorBatch* pbatch) 
+{
+    for (int i = 0; i < oldTupDesc->natts; i++) {
+        if (!oldTupDesc->attrs[i]->attisdropped) {
+            continue;
+        }
+        
+        for (int j = 0; j < pbatch->m_arr[i].m_rows; j++) {
+            if (pbatch->m_arr[i].m_vals[j] != 0) {
+                pbatch->m_arr[i].m_vals[j] = 0;
+                ereport(LOG, (errcode(ERRCODE_UNDEFINED_COLUMN),
+                    errmsg("droped column %d have not null scalar value in batch in row %d", i, j)));
+            }
+        }
+    }
+}
+
 /*
  * copy the data of old col table to new col table
  */
@@ -3585,11 +3712,12 @@ static void DoCopyCUFormatData(Relation oldRel, Relation newRel, TupleDesc oldTu
 
         batch = CStoreGetNextBatch(scan);
         if (!BatchIsNull(batch)) {
-            cstoreOpt->BatchInsert(batch, HEAP_INSERT_FROZEN);
+            filter_batch(oldTupDesc, batch);
+            cstoreOpt->BatchInsert(batch, TABLE_INSERT_FROZEN);
         }
     } while (!CStoreIsEndScan(scan));
     cstoreOpt->SetEndFlag();
-    cstoreOpt->BatchInsert((VectorBatch*)NULL, HEAP_INSERT_FROZEN);
+    cstoreOpt->BatchInsert((VectorBatch*)NULL, TABLE_INSERT_FROZEN);
     DELETE_EX(cstoreOpt);
 
     pfree_ext(colIdx);
@@ -3643,7 +3771,7 @@ static List* FindMergedDescs(Relation oldRel, Relation newRel)
 
         ListCell* lc = NULL;
         foreach (lc, to_newrel_desc)
-            new_handler->Add((DFSDesc*)lfirst(lc), 1, GetCurrentCommandId(true), HEAP_INSERT_FROZEN);
+            new_handler->Add((DFSDesc*)lfirst(lc), 1, GetCurrentCommandId(true), TABLE_INSERT_FROZEN);
     }
 
     return t_thrd.vacuum_cxt.vacuum_full_compact ? merged_descs : all_descs;
@@ -3657,7 +3785,7 @@ static void CopyOldDeltaToNewRel(Oid OIDOldHeap, Oid OIDNewHeap)
     Datum* values = NULL;
     bool* isnull = NULL;
 
-    HeapScanDesc heapScan;
+    TableScanDesc heapScan;
     HeapTuple tuple;
 
     /*
@@ -3679,17 +3807,17 @@ static void CopyOldDeltaToNewRel(Oid OIDOldHeap, Oid OIDNewHeap)
     insert->BeginBatchInsert(TUPLE_SORT);
     insert->RegisterInsertPendingFunc(InsertNewFileToDfsPending);
 
-    heapScan = heap_beginscan(OldDeltaHeap, SnapshotNow, 0, (ScanKey)NULL);
+    heapScan = tableam_scan_begin(OldDeltaHeap, SnapshotNow, 0, (ScanKey)NULL);
 
-    while ((tuple = heap_getnext(heapScan, ForwardScanDirection)) != NULL) {
-        heap_deform_tuple(tuple, oldTupDesc, values, isnull);
-        insert->TupleInsert(values, isnull, HEAP_INSERT_FROZEN);
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(heapScan, ForwardScanDirection)) != NULL) {
+        tableam_tops_deform_tuple(tuple, oldTupDesc, values, isnull);
+        insert->TupleInsert(values, isnull, TABLE_INSERT_FROZEN);
     }
 
-    heap_endscan(heapScan);
+    tableam_scan_end(heapScan);
 
     insert->SetEndFlag();
-    insert->TupleInsert(NULL, NULL, HEAP_INSERT_FROZEN);
+    insert->TupleInsert(NULL, NULL, TABLE_INSERT_FROZEN);
     DELETE_EX(insert);
 
     /* Clean up */
@@ -3717,7 +3845,8 @@ static void DoCopyPaxFormatData(Relation oldRel, Relation newRel)
      * save path for relation, and this path will be used in doPendingDfsDelete()
      */
     StringInfo store_path = getDfsStorePath(oldRel);
-    MemoryContext oldcontext = MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+    MemoryContext oldcontext =
+        MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
     u_sess->catalog_cxt.vf_store_root = makeStringInfo();
     MemoryContextSwitchTo(oldcontext);
 
@@ -3727,7 +3856,8 @@ static void DoCopyPaxFormatData(Relation oldRel, Relation newRel)
      * get connection object and will be used in doPendingDfsDelete()
      */
     DfsSrvOptions* dfsoptions = GetDfsSrvOptions(oldRel->rd_rel->reltablespace);
-    dfs::DFSConnector* conn = dfs::createConnector(t_thrd.top_mem_cxt, dfsoptions, oldRel->rd_rel->reltablespace);
+    dfs::DFSConnector* conn = dfs::createConnector(
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), dfsoptions, oldRel->rd_rel->reltablespace);
     u_sess->catalog_cxt.delete_conn = conn;
 
     /*
@@ -3766,9 +3896,9 @@ static void DoCopyPaxFormatData(Relation oldRel, Relation newRel)
         batch = dfs::reader::DFSGetNextBatch(scan);
         if (BatchIsNull(batch)) {
             insert->SetEndFlag();
-            insert->BatchInsert((VectorBatch*)NULL, HEAP_INSERT_FROZEN);
+            insert->BatchInsert((VectorBatch*)NULL, TABLE_INSERT_FROZEN);
         } else {
-            insert->BatchInsert(batch, HEAP_INSERT_FROZEN);
+            insert->BatchInsert(batch, TABLE_INSERT_FROZEN);
         }
 
         if (BatchIsNull(batch))
@@ -4002,7 +4132,7 @@ static int switch_relfilenode_execnode(Oid relOid1, Oid relOid2, bool isbucket, 
     Distribution* distribution = ng_convert_to_distribution(execNodes->nodeList);
     ng_set_distribution(&execNodes->distribution, distribution);
     rsn->nodes = execNodes;
-    rsn->type = REDIS_SWITCH_EXEC_NORMAL;
+    rsn->type = REDIS_SWITCH_EXEC_DROP;
     rsn++;
     /* add drop bucket node */
     execNodes = makeNode(ExecNodes);
@@ -4010,7 +4140,7 @@ static int switch_relfilenode_execnode(Oid relOid1, Oid relOid2, bool isbucket, 
     distribution = ng_convert_to_distribution(execNodes->nodeList);
     ng_set_distribution(&execNodes->distribution, distribution);
     rsn->nodes = execNodes;
-    rsn->type = REDIS_SWITCH_EXEC_DROP;
+    rsn->type = REDIS_SWITCH_EXEC_NORMAL;
 
     return 2;
 }
@@ -4059,12 +4189,28 @@ static int64 execute_relfilenode_swap(Oid relOid1, Oid relOid2, bool swapBucket)
     /* swap bucket info while doing data redis */
     if (swapBucket) {
         Assert(RELATION_HAS_BUCKET(rel));
+        CommandCounterIncrement();
         relation_swap_bucket(relOid1, relOid2);
     }
 
     relation_close(rel, NoLock);
     return 1;
 }
+
+#ifdef ENABLE_MULTIPLE_NODES
+static void RouteSwitchQuery2CNForSlice(char* relName1, char* relName2)
+{
+    ParallelFunctionState* state = NULL;
+    StringInfoData buf;
+    
+    initStringInfo(&buf);
+    appendStringInfo(&buf, "SELECT pg_catalog.gs_switch_relfilenode('%s','%s',0)",
+        relName1, relName2);
+    state = RemoteFunctionResultHandler(buf.data, NULL, NULL, false, EXEC_ON_COORDS, true, true);
+    FreeParallelFunctionState(state);
+    pfree_ext(buf.data);
+}
+#endif
 
 /*
  * @Description : Parallel exchange relfilenode.
@@ -4089,6 +4235,7 @@ Datum pg_switch_relfilenode_name(PG_FUNCTION_ARGS)
     bool isbucket = false;
     bool ispart = false;
     bool swap_bucket = false;
+    bool isSlice = false;
     int64 size = 0;
 
     if (!u_sess->attr.attr_sql.enable_cluster_resize)
@@ -4101,6 +4248,11 @@ Datum pg_switch_relfilenode_name(PG_FUNCTION_ARGS)
 
     ispart = RELATION_IS_PARTITIONED(rel1);
     isbucket = RELATION_HAS_BUCKET(rel1);
+
+    if (rel1->rd_locator_info != NULL) {
+        isSlice = IsLocatorDistributedBySlice(rel1->rd_locator_info->locatorType);
+    }
+    
     if (isbucket != RELATION_HAS_BUCKET(rel2)) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -4120,6 +4272,14 @@ Datum pg_switch_relfilenode_name(PG_FUNCTION_ARGS)
 
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+        /*
+         * route gs_switch_relfilenode to all-cn to update redis-table's slice info.
+         */
+        if (isSlice) {
+            UpdateSliceForRedisTable(relOid1, relOid2);
+            RouteSwitchQuery2CNForSlice(relName1, relName2);
+        }
+        
         ExecNodes* exec_nodes = NULL;
         char sqlStr[SQL_STR_LEN];
         RedisSwitchNode rsn[2];
@@ -4145,6 +4305,10 @@ Datum pg_switch_relfilenode_name(PG_FUNCTION_ARGS)
             ret += DatumGetInt64(pgxc_parallel_execution(sqlStr, exec_nodes));
         }
         PG_RETURN_INT64(ret);
+    } else if (IS_PGXC_COORDINATOR && IsConnFromCoord()) {
+        /* update redis-table's slice info for list/range distributed table */
+        UpdateSliceForRedisTable(relOid1, relOid2);
+        PG_RETURN_INT64(0);
     }
 #endif
     /* not run on cn */
@@ -4289,7 +4453,7 @@ static void swap_partition_relfilenode(
         replaces[Anum_pg_partition_relfrozenxid64 - 1] = true;
         values[Anum_pg_partition_relfrozenxid64 - 1] = TransactionIdGetDatum(frozenXid);
 
-        ntup = heap_modify_tuple(reltup1, RelationGetDescr(relRelation), values, nulls, replaces);
+        ntup = (HeapTuple) tableam_tops_modify_tuple(reltup1, RelationGetDescr(relRelation), values, nulls, replaces);
 
         relform1 = (Form_pg_partition)GETSTRUCT(ntup);
 
@@ -4367,6 +4531,62 @@ static void swap_partition_relfilenode(
 }
 
 /*
+ * For index partition, order by heap partition oid.
+ */
+static List* GetIndexPartitionListByOrder(Relation indexRelation, const Oid indexOid)
+{
+    Oid relation_oid = IndexGetRelation(indexOid, false);
+    Relation rel = relation_open(relation_oid, NoLock);
+    List* relation_oid_list = relationGetPartitionOidList(rel);
+    List* old_partitions = indexGetPartitionList(indexRelation, ExclusiveLock);
+    List* indexPartitionList = NIL;
+    ListCell* cell = NULL;
+
+    foreach (cell, relation_oid_list) {
+        Oid relid = lfirst_oid(cell);
+        ListCell* parCell = NULL;
+        bool found = false;
+        foreach (parCell, old_partitions) {
+            Partition indexPartition = (Partition)lfirst(parCell);
+            if (relid == indexPartition->pd_part->indextblid) {
+                indexPartitionList = lappend(indexPartitionList, indexPartition);
+                found = true;
+                break;
+            }
+        }
+        Assert(found);
+    }
+    list_free_ext(relation_oid_list);
+    list_free_ext(old_partitions);
+    relation_close(rel, NoLock);
+    return indexPartitionList;
+}
+
+/*
+ * For partition table, exchange meta information for each partition.
+ */
+static void PartitionRelfilenodeSwap(
+    Relation oldHeap, const List* oldPartitions, Relation newHeap, const List* newPartitions)
+{
+    ListCell* old_cell = NULL;
+    ListCell* new_cell = NULL;
+    forboth(old_cell, oldPartitions, new_cell, newPartitions)
+    {
+        Partition old_partition = (Partition)lfirst(old_cell);
+        Partition new_partition = (Partition)lfirst(new_cell);
+        Relation old_partRel = partitionGetRelation(oldHeap, old_partition);
+        Relation new_partRel = partitionGetRelation(newHeap, new_partition);
+        TransactionId relfrozenxid = getPartitionRelfrozenxid(old_partRel);
+        /* Exchange two partition's meta information */
+        finishPartitionHeapSwap(old_partRel->rd_id, new_partRel->rd_id, false, relfrozenxid, true);
+
+        /* Release partition relations. */
+        releaseDummyRelation(&old_partRel);
+        releaseDummyRelation(&new_partRel);
+    }
+}
+
+/*
  * @Description : For partition table, exchange meta information for each partition
  * @in         	: OIDOldHeap, the relation oid.
  * @in          : OIDNewHeap, the relation oid.
@@ -4377,40 +4597,19 @@ void partition_relfilenode_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool swapBucket)
 {
     List* old_partitions = NIL;
     List* new_partitions = NIL;
-    ListCell* old_cell = NULL;
-    ListCell* new_cell = NULL;
-    Partition old_partition = NULL;
-    Partition new_partition = NULL;
-    Relation old_partRel = NULL;
-    Relation new_partRel = NULL;
 
     Relation OldHeap = relation_open(OIDOldHeap, ExclusiveLock);
     Relation NewHeap = relation_open(OIDNewHeap, ExclusiveLock);
 
     if (RelationIsIndex(OldHeap)) {
-        old_partitions = indexGetPartitionList(OldHeap, ExclusiveLock);
-        new_partitions = indexGetPartitionList(NewHeap, ExclusiveLock);
+        old_partitions = GetIndexPartitionListByOrder(OldHeap, OIDOldHeap);
+        new_partitions = GetIndexPartitionListByOrder(NewHeap, OIDNewHeap);
     } else {
         old_partitions = relationGetPartitionList(OldHeap, ExclusiveLock);
         new_partitions = relationGetPartitionList(NewHeap, ExclusiveLock);
     }
-
     Assert(list_length(old_partitions) == list_length(new_partitions));
-
-    forboth(old_cell, old_partitions, new_cell, new_partitions)
-    {
-        old_partition = (Partition)lfirst(old_cell);
-        new_partition = (Partition)lfirst(new_cell);
-        old_partRel = partitionGetRelation(OldHeap, old_partition);
-        new_partRel = partitionGetRelation(NewHeap, new_partition);
-        TransactionId relfrozenxid = getPartitionRelfrozenxid(old_partRel);
-        /* Exchange two partition's meta information */
-        finishPartitionHeapSwap(old_partRel->rd_id, new_partRel->rd_id, false, relfrozenxid, true);
-
-        /* Release partition relations. */
-        releaseDummyRelation(&old_partRel);
-        releaseDummyRelation(&new_partRel);
-    }
+    PartitionRelfilenodeSwap(OldHeap, old_partitions, NewHeap, new_partitions);
 
     releasePartitionList(NewHeap, &new_partitions, ExclusiveLock);
     releasePartitionList(OldHeap, &old_partitions, ExclusiveLock);

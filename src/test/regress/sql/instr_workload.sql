@@ -46,7 +46,7 @@ show track_sql_count;
 
 SET track_sql_count=on;
 start transaction;
-create table t1_workload_sql(id int, num int) ;
+create table t1_workload_sql(id int, num int) distribute by hash(id);
 insert into t1_workload_sql values(1,1);
 update t1_workload_sql set num = 2 where id = 1;
 select * from t1_workload_sql;

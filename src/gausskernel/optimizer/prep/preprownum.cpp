@@ -30,6 +30,7 @@
 #include "optimizer/prep.h"
 #include "nodes/makefuncs.h"
 
+#ifndef ENABLE_MULTIPLE_NODES
 static Node* preprocess_rownum_opexpr(PlannerInfo* root, Query* parse, OpExpr* expr, bool isOrExpr);
 static Node* process_rownum_boolexpr(PlannerInfo *root, Query* parse, BoolExpr* quals);
 static Node* process_rownum_lt(Query *parse, OpExpr* qual, bool isOrExpr);
@@ -373,3 +374,4 @@ static Node* process_rownum_ne(Query* parse, OpExpr* qual, bool isOrExpr)
         return makeBoolConst(true, false);
     }
 }
+#endif

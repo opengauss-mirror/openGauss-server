@@ -101,14 +101,12 @@ static void 	yylex_outparam(char** fieldnames,
                                int *token,
                                bool overload = false);
 
-static bool is_function(const char *name, bool is_assign);
+static bool is_function(const char *name, bool is_assign, bool no_parenthesis);
 static void 	plpgsql_parser_funcname(const char *s, char **output,
                                         int numidents);
 static PLpgSQL_stmt 	*make_callfunc_stmt(const char *sqlstart,
                                 int location, bool is_assign);
-
 static PLpgSQL_stmt 	*make_callfunc_stmt_no_arg(const char *sqlstart, int location);
-                                
 static PLpgSQL_expr 	*read_sql_construct5(int until,
                                              int until2,
                                              int until3,
@@ -139,6 +137,7 @@ static	PLpgSQL_expr	*read_sql_expression2(int until, int until2,
                                               int *endtoken);
 static	PLpgSQL_expr	*read_sql_stmt(const char *sqlstart);
 static	PLpgSQL_type	*read_datatype(int tok);
+static  PLpgSQL_stmt	*parse_lob_open_close(int location);
 static	PLpgSQL_stmt	*make_execsql_stmt(int firsttoken, int location);
 static	PLpgSQL_stmt_fetch *read_fetch_direction(void);
 static	void			 complete_direction(PLpgSQL_stmt_fetch *fetch,
@@ -480,7 +479,9 @@ pl_block		: decl_sect K_BEGIN proc_sect exception_sect K_END opt_label
                         newp->cmd_type	= PLPGSQL_STMT_BLOCK;
                         newp->lineno		= plpgsql_location_to_lineno(@2);
                         newp->label		= $1.label;
+#ifndef ENABLE_MULTIPLE_NODES
                         newp->autonomous = $1.autonomous;
+#endif
                         newp->n_initvars = $1.n_initvars;
                         newp->initvarnos = $1.initvarnos;
                         newp->body		= $3;
@@ -729,13 +730,20 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
                                      errmsg("build variable failed")));
                         pfree_ext($1.name);
                     }
-				| K_PRAGMA any_identifier ';'
-					{
-						if (pg_strcasecmp($2, "autonomous_transaction") == 0)
-							last_pragma = true;
-						else
-							elog(ERROR, "invalid pragma");
-					}
+		|	K_PRAGMA any_identifier ';'
+		    {
+			if (pg_strcasecmp($2, "autonomous_transaction") == 0)
+#ifndef ENABLE_MULTIPLE_NODES			
+				last_pragma = true;
+#else			     
+
+				ereport(ERROR,
+		                	(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+		                         errmsg("autonomous transaction is not yet supported.")));
+#endif				
+			else
+				elog(ERROR, "invalid pragma");
+		    }
                 ;
 
 record_attr_list : record_attr
@@ -862,7 +870,7 @@ cursor_in_out_option :  K_IN	|
             /* empty */
         ;
 
-decl_is_for		:	K_IS |		/* Oracle */
+decl_is_for		:	K_IS |		/* A db */
                     K_FOR;		/* SQL standard */
 
 decl_aliasitem	: T_WORD
@@ -1041,6 +1049,10 @@ proc_stmt		: pl_block ';'
                         { $$ = $1; }
                 | stmt_foreach_a
                         { $$ = $1; }
+                | stmt_commit
+                        { $$ = $1; }
+                | stmt_rollback
+                        { $$ = $1; }
                 | label_stmts
                         { $$ = $1; }
                 ;
@@ -1099,10 +1111,6 @@ label_stmt		: stmt_assign
                 | stmt_close
                         { $$ = $1; }
                 | stmt_null
-                        { $$ = $1; }
-                | stmt_commit
-                        { $$ = $1; }
-                | stmt_rollback
                         { $$ = $1; }
                 ;
 
@@ -1540,7 +1548,7 @@ stmt_for		: opt_block_label K_FOR for_control loop_body
                 | opt_block_label K_FORALL forall_control forall_body
                     {
                         /* This runs after we've scanned the loop body */
-                        /* A FORALL support 3 types like below. We implemented the first one.  
+                        /* A db FORALL support 3 types like below. We implemented the first one.  
                          * FORALL index_name IN lower_bound .. upper_bound
                          * FORALL index_name IN INDICES OF collection between lower_bound and upper_bound
                          * FORALL index_name IN VALUES OF index_collection
@@ -2339,103 +2347,136 @@ stmt_execsql			: K_ALTER
                     {
                         int			tok = -1;
 
-                        tok = yylex();
-                        plpgsql_push_back_token(tok);
-                        $$ = make_execsql_stmt(K_DELETE, @1);
-                    }
-                | K_WITH
-                    {
-                        $$ = make_execsql_stmt(K_WITH, @1);
-                    }
-                | K_SAVEPOINT
-                    {
-                        ereport(ERROR,
-                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                             errmsg("SAVEPOINT in function/procedure is not yet supported.")));
-                    }
-                | K_MERGE
-                    {
-                        $$ = make_execsql_stmt(K_MERGE, @1);
-                    }
-                | T_WORD		/*C-style function call */
-                    {	
-                        int tok = -1;
-                        bool isCallFunc = false;
-                        bool funcNoarg = false;
+			tok = yylex();
+			plpgsql_push_back_token(tok);
+			$$ = make_execsql_stmt(K_DELETE, @1);
+		    }
+		| K_WITH
+		    {
+		    	$$ = make_execsql_stmt(K_WITH, @1);
+		    }
+		| K_SAVEPOINT
+		    {
+		    	ereport(ERROR,
+			    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			     errmsg("SAVEPOINT in function/procedure is not yet supported.")));
+		    }
+		| K_MERGE
+		    {
+		    	$$ = make_execsql_stmt(K_MERGE, @1);
+		    }
+        | T_WORD    /*C-style function call */
+            {
+                int tok = -1;
+                bool isCallFunc = false;
+                bool FuncNoarg = false;
 
-                        tok = yylex();
-                        if ('(' == tok)
-                            isCallFunc = is_function($1.ident, false);
-                        else if ('=' ==tok || COLON_EQUALS == tok || '[' == tok)
-                            word_is_not_variable(&($1), @1);
-                        else if (';' == tok)
-                            funcNoarg = true;
-
-                        if (funcNoarg) {
-                            isCallFunc = is_function($1.ident, false);
-                            if (isCallFunc)
-                                $$ = make_callfunc_stmt_no_arg($1.ident, @1);
-                            else
-                                $$ = make_execsql_stmt(T_WORD, @1);
-                        } else {
-                            plpgsql_push_back_token(tok);
-                            if (isCallFunc)
-                                $$ = make_callfunc_stmt($1.ident, @1, false);
-                            else
-                                $$ = make_execsql_stmt(T_WORD, @1);
-                        }
-                    }
-                | T_CWORD
+                if (0 == strcasecmp($1.ident, "DBMS_LOB")
+                && (plpgsql_is_token_match2('.', K_OPEN)
+                || plpgsql_is_token_match2('.', K_CLOSE)))
+                    $$ = parse_lob_open_close(@1);
+                else
+                {
+                    tok = yylex();
+                    if ('(' == tok)
+                        isCallFunc = is_function($1.ident, false, false);
+                    else if ('=' ==tok || COLON_EQUALS == tok || '[' == tok)
+                        word_is_not_variable(&($1), @1);
+                    else if (';' == tok)
                     {
-                        int tok = yylex();
-                        char *name = NULL;
-                        bool isCallFunc = false;
-                        bool funcNoarg = false;
+                        isCallFunc = is_function($1.ident, false, true);
+                        FuncNoarg = true;
+                    }
 
-                        if ('(' == tok)
+                    plpgsql_push_back_token(tok);
+                    if(isCallFunc)
+                    {
+                        if (FuncNoarg)
                         {
-                            MemoryContext colCxt = MemoryContextSwitchTo(u_sess->plsql_cxt.compile_tmp_cxt);
-                            name = NameListToString($1.idents);
-                            (void)MemoryContextSwitchTo(colCxt);
-                            isCallFunc = is_function(name, false);
-                        }
-                        else if ('=' == tok || COLON_EQUALS == tok || '[' == tok) 
-                            cword_is_not_variable(&($1), @1);
-                        else if (';' == tok) {
-                            MemoryContext colCxt = MemoryContextSwitchTo(u_sess->plsql_cxt.compile_tmp_cxt);
-                            name = NameListToString($1.idents);
-                            (void)MemoryContextSwitchTo(colCxt);
-                            isCallFunc = is_function(name, false);
-                            funcNoarg = true;
-                        }
-
-                        if (funcNoarg) {
-                            if (isCallFunc)
-                                $$ = make_callfunc_stmt_no_arg(name, @1);
-                            else
-                                $$ = make_execsql_stmt(T_CWORD, @1);
-                        } else {
-                            plpgsql_push_back_token(tok);
-                            if (isCallFunc)
-                                $$ = make_callfunc_stmt(name, @1, false);
-                            else
-                                $$ = make_execsql_stmt(T_CWORD, @1);
-                        }
-                    }
-                | T_ARRAY_EXTEND
-                    {
-                        int tok = yylex();
-                        if (';' == tok)
-                        {
-                            $$ =  NULL;
+                            $$ = make_callfunc_stmt_no_arg($1.ident, @1);
                         }
                         else
                         {
-                            plpgsql_push_back_token(tok);
-                            $$ = make_callfunc_stmt("array_extend", @1, false);
+                            PLpgSQL_stmt *stmt = make_callfunc_stmt($1.ident, @1, false);
+                            if (stmt->cmd_type == PLPGSQL_STMT_PERFORM)
+                            {
+                                ((PLpgSQL_stmt_perform *)stmt)->expr->is_funccall = true;
+                            }
+                            else if (stmt->cmd_type == PLPGSQL_STMT_EXECSQL)
+                            {
+                                ((PLpgSQL_stmt_execsql *)stmt)->sqlstmt->is_funccall = true;
+                            }
+                            $$ = stmt;
                         }
                     }
-                ;
+                    else
+                    {
+                        $$ = make_execsql_stmt(T_WORD, @1);
+                    }
+                }
+            }
+        | T_CWORD
+            {
+                int tok = yylex();
+                char *name = NULL;
+                bool isCallFunc = false;
+                bool FuncNoarg = false;
+
+                if ('(' == tok)
+                {
+                    MemoryContext colCxt = MemoryContextSwitchTo(u_sess->plsql_cxt.compile_tmp_cxt);
+                    name = NameListToString($1.idents);
+                    (void)MemoryContextSwitchTo(colCxt);
+                    isCallFunc = is_function(name, false, false);
+                }
+                else if ('=' == tok || COLON_EQUALS == tok || '[' == tok)
+                    cword_is_not_variable(&($1), @1);
+                else if (';' == tok) {
+                    MemoryContext colCxt = MemoryContextSwitchTo(u_sess->plsql_cxt.compile_tmp_cxt);
+                    name = NameListToString($1.idents);
+                    (void)MemoryContextSwitchTo(colCxt);
+                    isCallFunc = is_function(name, false, true);
+                    FuncNoarg = true;
+                }
+
+                plpgsql_push_back_token(tok);
+                if (isCallFunc)
+                {
+                    if (FuncNoarg)
+                        $$ = make_callfunc_stmt_no_arg(name, @1);
+                    else
+                    {
+                        PLpgSQL_stmt *stmt = make_callfunc_stmt(name, @1, false);
+                        if (stmt->cmd_type == PLPGSQL_STMT_PERFORM)
+                        {
+                            ((PLpgSQL_stmt_perform *)stmt)->expr->is_funccall = true;
+                        }
+                        else if (stmt->cmd_type == PLPGSQL_STMT_EXECSQL)
+                        {
+                            ((PLpgSQL_stmt_execsql *)stmt)->sqlstmt->is_funccall = true;
+                        }
+                        $$ = stmt;
+                    }
+                }
+                else
+                {
+                    $$ = make_execsql_stmt(T_CWORD, @1);
+                }
+            }
+        | T_ARRAY_EXTEND
+            {
+                int tok = yylex();
+                if (';' == tok)
+                {
+                    $$ =  NULL;
+                }
+                else
+                {
+                    plpgsql_push_back_token(tok);
+                    $$ = make_callfunc_stmt("array_extend", @1, false);
+                }
+            }
+        ;
 
 stmt_dynexecute : K_EXECUTE
                     {
@@ -2671,29 +2712,31 @@ stmt_null		: K_NULL ';'
                     }
                 ;
 
-stmt_commit    : K_COMMIT ';'
+stmt_commit		: opt_block_label K_COMMIT ';'
                     {
-                        /* We do building a node for NULL for GOTO */
                         PLpgSQL_stmt_commit *newp;
 
                         newp = (PLpgSQL_stmt_commit *)palloc(sizeof(PLpgSQL_stmt_commit));
                         newp->cmd_type = PLPGSQL_STMT_COMMIT;
                         newp->lineno = plpgsql_location_to_lineno(@1);
+                        plpgsql_ns_pop();
 
                         $$ = (PLpgSQL_stmt *)newp;
+                        record_stmt_label($1, (PLpgSQL_stmt *)newp);
                     }
                 ;
 
-stmt_rollback	: K_ROLLBACK ';'
+stmt_rollback		: opt_block_label K_ROLLBACK ';'
                     {
-                        /* We do building a node for NULL for GOTO */
                         PLpgSQL_stmt_rollback *newp;
 
-                        newp = (PLpgSQL_stmt_rollback *)palloc(sizeof(PLpgSQL_stmt_rollback));
+                        newp = (PLpgSQL_stmt_rollback *) palloc(sizeof(PLpgSQL_stmt_rollback));
                         newp->cmd_type = PLPGSQL_STMT_ROLLBACK;
                         newp->lineno = plpgsql_location_to_lineno(@1);
+                        plpgsql_ns_pop();
 
                         $$ = (PLpgSQL_stmt *)newp;
+                        record_stmt_label($1, (PLpgSQL_stmt *)newp);
                     }
                 ;
 
@@ -2873,6 +2916,7 @@ expr_until_semi :
                         int tok = -1;
                         char *name = NULL;
                         bool isCallFunc = false;
+                        PLpgSQL_expr* expr = NULL;
 
                         if (plpgsql_is_token_match2(T_WORD, '(') || 
                             plpgsql_is_token_match2(T_CWORD,'('))
@@ -2883,16 +2927,19 @@ expr_until_semi :
                             else
                                 name = NameListToString(yylval.cword.idents);
 
-                            isCallFunc = is_function(name, true);
+                            isCallFunc = is_function(name, true, false);
                         }
 
                         if (isCallFunc)
                         {
                             stmt = make_callfunc_stmt(name, yylloc, true);
                             if (PLPGSQL_STMT_EXECSQL == stmt->cmd_type)
-                                $$ = ((PLpgSQL_stmt_execsql*)stmt)->sqlstmt;
+                                expr = ((PLpgSQL_stmt_execsql*)stmt)->sqlstmt;
                             else if (PLPGSQL_STMT_PERFORM == stmt->cmd_type)
-                                $$ = ((PLpgSQL_stmt_perform*)stmt)->expr;
+                                expr = ((PLpgSQL_stmt_perform*)stmt)->expr;
+
+                            expr->is_funccall = true;
+                            $$ = expr;
                         }
                         else
                         {
@@ -2972,9 +3019,9 @@ unreserved_keyword	:
                 | K_ALTER
                 | K_ARRAY
                 | K_BACKWARD
+                | K_COMMIT
                 | K_CONSTANT
                 | K_CONTINUE
-                | K_COMMIT
                 | K_CURRENT
                 | K_DEBUG
                 | K_DETAIL
@@ -3668,6 +3715,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign)
     expr->plan			= NULL;
     expr->paramnos 		= NULL;
     expr->ns			= plpgsql_ns_top();
+    expr->idx			= (uint32)-1;
 
     if (multi_func)
     {
@@ -3899,11 +3947,12 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign)
  * Description	: 
  * in name: the ident name
  * in is_assign: is an assign stmt or not.
+ * in no_parenthesis: if no-parenthesis function is called.
  * returns: true if is a function.
  * Notes		: 
  */ 
 static bool 
-is_function(const char *name, bool is_assign)
+is_function(const char *name, bool is_assign, bool no_parenthesis)
 {
     ScanKeyword * keyword = NULL;
     List *funcname = NIL;
@@ -3938,6 +3987,14 @@ is_function(const char *name, bool is_assign)
             pg_strcasecmp("ts_parse", cp[0]) == 0 ||
             pg_strcasecmp("dblink_get_notify", cp[0]) == 0 ||
             pg_strcasecmp("ts_debug", cp[0]) == 0)
+            return false;
+
+        keyword = (ScanKeyword *)ScanKeywordLookup(cp[0], ScanKeywords, NumScanKeywords);
+        /* function name can not be reserved keyword */
+        if (keyword && RESERVED_KEYWORD == keyword->category)
+            return false;
+        /* and function name can not be unreserved keyword when no-parenthesis function is called.*/
+        if(keyword && no_parenthesis && UNRESERVED_KEYWORD == keyword->category)
             return false;
 
         if (cp[1] && cp[1][0] != '\0')
@@ -3993,12 +4050,8 @@ is_function(const char *name, bool is_assign)
 
         if (!have_outargs && is_assign)
             return false;
-
-        /* function name can not be reserved keyword */
-        keyword = (ScanKeyword *)ScanKeywordLookup(cp[0], ScanKeywords, NumScanKeywords);
-        if (!(keyword && 
-              RESERVED_KEYWORD == keyword->category))
-            return true;
+        
+        return true;/* passed all test */
     }
     return false;
 }
@@ -4295,6 +4348,7 @@ read_sql_construct5(int until,
     expr->paramnos		= NULL;
     expr->ns			= plpgsql_ns_top();
     expr->isouttype 		= false;
+    expr->idx			= (uint32)-1;
 
     pfree_ext(ds.data);
 
@@ -4573,6 +4627,7 @@ make_execsql_stmt(int firsttoken, int location)
     expr->plan			= NULL;
     expr->paramnos		= NULL;
     expr->ns			= plpgsql_ns_top();
+    expr->idx			= (uint32)-1;
     pfree_ext(ds.data);
 
     check_sql_expr(expr->query, location, 0);
@@ -4773,7 +4828,7 @@ make_return_stmt(int location)
                      parser_errposition(yylloc)));
     }
 
-    // adapting A, where return value is independent from OUT parameters 
+    // adapting A db, where return value is independent from OUT parameters 
     else if (';' == (token = yylex()) && u_sess->plsql_cxt.plpgsql_curr_compile->out_param_varno >= 0)
         newp->retvarno = u_sess->plsql_cxt.plpgsql_curr_compile->out_param_varno;
     else
@@ -5831,6 +5886,7 @@ read_cursor_args(PLpgSQL_var *cursor, int until, const char *expected)
     expr->plan			= NULL;
     expr->paramnos		= NULL;
     expr->ns            = plpgsql_ns_top();
+    expr->idx			= (uint32)-1;
     pfree_ext(ds.data);
 
     /* Next we'd better find the until token */
@@ -5973,40 +6029,60 @@ make_case(int location, PLpgSQL_expr *t_expr,
 static PLpgSQL_stmt *
 make_callfunc_stmt_no_arg(const char *sqlstart, int location)
 {
-    char *cp[3];
-
+    char *cp[3] = {0};
+    HeapTuple proctup = NULL;
+    Oid *p_argtypes = NULL;
+    char **p_argnames = NULL;
+    char *p_argmodes = NULL;
+    int narg = 0;
     List *funcname = NIL;
     PLpgSQL_expr* expr = NULL;
     FuncCandidateList clist = NULL;
     StringInfoData func_inparas;
     char *quoted_sqlstart = NULL;
-
     MemoryContext oldCxt = NULL;
-    /*get the function's name*/
-    cp[0] = NULL;
-    cp[1] = NULL;
-    cp[2] = NULL;
-    /* the function make_callfunc_stmt is only to assemble a sql statement, so the context is set to tmp context */
+
+    /*
+     * the function make_callfunc_stmt_no_arg is only to assemble a sql statement, 
+     * so the context is set to tmp context. 
+     */
     oldCxt = MemoryContextSwitchTo(u_sess->plsql_cxt.compile_tmp_cxt);
+    /* get the function's name. */
     plpgsql_parser_funcname(sqlstart, cp, 3);
 
-    if (cp[2] && cp[2][0] != '\0')
+    if (cp[2] != NULL && cp[2][0] != '\0')
         funcname = list_make3(makeString(cp[0]), makeString(cp[1]), makeString(cp[2]));
     else if (cp[1] && cp[1][0] != '\0')
         funcname = list_make2(makeString(cp[0]), makeString(cp[1]));
     else
         funcname = list_make1(makeString(cp[0]));
 
-
     /* search the function */
     clist = FuncnameGetCandidates(funcname, -1, NIL, false, false, false);
-    if (!clist)
+    if (clist == NULL)
     {
         ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_FUNCTION),
                  errmsg("function \"%s\" doesn't exist ", sqlstart)));
-        return NULL;
     }
+
+    proctup = SearchSysCache(PROCOID,
+                            ObjectIdGetDatum(clist->oid),
+                            0, 0, 0);
+    /* function may be deleted after clist be searched. */
+    if (!HeapTupleIsValid(proctup))
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                errmsg("function \"%s\" doesn't exist ", sqlstart)));
+    }
+    /* get the all args informations, only "in" parameters if p_argmodes is null */
+    narg = get_func_arg_info(proctup,&p_argtypes, &p_argnames, &p_argmodes);
+    ReleaseSysCache(proctup);
+    if (narg != 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                 errmsg("function %s has no enough parameters", sqlstart)));
 
     initStringInfo(&func_inparas);
 
@@ -6020,21 +6096,100 @@ make_callfunc_stmt_no_arg(const char *sqlstart, int location)
 
     appendStringInfoString(&func_inparas, ")");
 
+    /* read the end token */
+    yylex();
+
     (void)MemoryContextSwitchTo(oldCxt);
 
     /* generate the expression */
-    expr 				= (PLpgSQL_expr*)palloc0(sizeof(PLpgSQL_expr));
-    expr->dtype			= PLPGSQL_DTYPE_EXPR;
-    expr->query			= pstrdup(func_inparas.data);
-    expr->plan			= NULL;
-    expr->paramnos 		= NULL;
-    expr->ns			= plpgsql_ns_top();
+    expr = (PLpgSQL_expr*)palloc0(sizeof(PLpgSQL_expr));
+    expr->dtype = PLPGSQL_DTYPE_EXPR;
+    expr->query = pstrdup(func_inparas.data);
+    expr->plan = NULL;
+    expr->paramnos = NULL;
+    expr->ns = plpgsql_ns_top();
+    expr->idx = (uint32)-1;
 
     PLpgSQL_stmt_perform *perform = NULL;
     perform = (PLpgSQL_stmt_perform*)palloc0(sizeof(PLpgSQL_stmt_perform));
     perform->cmd_type = PLPGSQL_STMT_PERFORM;
-    perform->lineno   = plpgsql_location_to_lineno(location);
-    perform->expr	  = expr;
+    perform->lineno = plpgsql_location_to_lineno(location);
+    perform->expr = expr;
 
     return (PLpgSQL_stmt *)perform;
+}
+
+/*
+ * Brief		: special handling of dbms_lob.open and dbms_lob.close 
+ * Description	: open and close are keyword, which need to be handled separately
+ * Notes		: 
+ */ 
+static PLpgSQL_stmt *
+parse_lob_open_close(int location)
+{
+	StringInfoData func;
+	int tok = yylex();
+	char *mode = NULL;
+	bool is_open = false;
+	PLpgSQL_expr *expr = NULL;
+	PLpgSQL_stmt_perform *perform = NULL;
+
+	initStringInfo(&func);
+	appendStringInfoString(&func, "CALL DBMS_LOB.");
+	tok = yylex();
+	if (K_OPEN == tok)
+	{
+		is_open = true;
+		appendStringInfoString(&func,"OPEN(");
+	}
+	else
+		appendStringInfoString(&func,"CLOSE(");
+
+	if ('(' == (tok = yylex()))
+	{
+		tok = yylex();
+		if (T_DATUM == tok)
+			appendStringInfoString(&func, NameOfDatum(&yylval.wdatum));
+		else if (T_PLACEHOLDER == tok)
+			appendStringInfoString(&func, yylval.word.ident);
+		else
+			yyerror("syntax error");
+
+		if (is_open)
+		{
+			if (',' == (tok = yylex()) && T_CWORD == (tok = yylex()))
+			{
+				mode = NameListToString(yylval.cword.idents);
+				if (strcasecmp(mode, "DBMS_LOB.LOB_READWRITE") != 0 
+					&& strcasecmp(mode, "DBMS_LOB.LOB_READWRITE") != 0)
+					yyerror("syntax error");
+				else if (!(')' == yylex() && ';' == yylex()))
+					yyerror("syntax error");
+
+				appendStringInfoChar(&func, ')');
+			}
+			else
+				yyerror("syntax error");
+		}
+		else if(')' == yylex() && ';' == yylex())
+			appendStringInfoChar(&func, ')');
+		else
+			yyerror("syntax error");
+
+		expr = (PLpgSQL_expr *)palloc0(sizeof(PLpgSQL_expr));
+		expr->dtype = PLPGSQL_DTYPE_EXPR;
+		expr->query = pstrdup(func.data);
+		expr->plan = NULL;
+		expr->paramnos = NULL;
+		expr->ns = plpgsql_ns_top();
+        expr->idx = (uint32)-1;
+
+		perform = (PLpgSQL_stmt_perform*)palloc0(sizeof(PLpgSQL_stmt_perform));
+		perform->cmd_type = PLPGSQL_STMT_PERFORM;
+		perform->lineno = plpgsql_location_to_lineno(location);
+		perform->expr = expr;
+		return (PLpgSQL_stmt *)perform;
+	}
+	yyerror("syntax error");
+	return NULL;
 }

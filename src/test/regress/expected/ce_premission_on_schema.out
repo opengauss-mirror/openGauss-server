@@ -1,0 +1,118 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+DROP CLIENT MASTER KEY IF EXISTS MyCMK1 CASCADE;
+NOTICE:  global setting "mycmk1" does not exist
+-- create another user
+DROP ROLE IF EXISTS newuser;
+NOTICE:  role "newuser" does not exist, skipping
+CREATE USER newuser PASSWORD 'gauss@123';
+-- create schema
+DROP SCHEMA IF EXISTS testns CASCADE;
+NOTICE:  schema "testns" does not exist, skipping
+CREATE SCHEMA testns;
+SET search_path to testns;
+-- grant privileges on schema (ALL = USAGE, CREATE)
+GRANT ALL ON SCHEMA testns TO newuser;
+-- CREATE CMK
+CREATE CLIENT MASTER KEY MyCMK1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+-- CREATE CEK
+CREATE COLUMN ENCRYPTION KEY MyCEK1 WITH VALUES (CLIENT_MASTER_KEY = MyCMK1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+-------------------------
+-- change to new user
+-------------------------
+SET SESSION AUTHORIZATION newuser PASSWORD 'gauss@123';
+SET search_path to testns;
+-- add permission to the keys to  newuser 
+RESET SESSION AUTHORIZATION;
+GRANT USAGE ON COLUMN_ENCRYPTION_KEY MyCEK1 to newuser;
+GRANT USAGE ON CLIENT_MASTER_KEY MyCMK1 to newuser;
+SET SESSION AUTHORIZATION newuser PASSWORD 'gauss@123';
+SET search_path to testns;
+-- create TABLE 
+CREATE TABLE acltest1 (x int, x2 varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK1, ENCRYPTION_TYPE = DETERMINISTIC));
+-- create another user
+DROP ROLE IF EXISTS newuser;
+ERROR:  Permission denied to drop role.
+CREATE USER newuser PASSWORD 'gauss@123';
+ERROR:  Permission denied to create role.
+-- create schema
+DROP SCHEMA IF EXISTS testns CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to global setting: mycmk1
+drop cascades to column setting: mycek1
+drop cascades to table acltest1
+ERROR:  permission denied for column setting mycek1
+CREATE SCHEMA testns;
+ERROR:  permission denied for database regression
+SET search_path to testns;
+-- grant privileges on schema (ALL = USAGE, CREATE)
+GRANT ALL ON SCHEMA testns TO newuser;
+WARNING:  no privileges were granted for "testns"
+-- CREATE CMK
+CREATE CLIENT MASTER KEY MyCMK1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+ERROR(CLIENT): key store and key path are already in use by another object
+-- CREATE CEK
+CREATE COLUMN ENCRYPTION KEY MyCEK1 WITH VALUES (CLIENT_MASTER_KEY = MyCMK1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+ERROR:  duplicate key value violates unique constraint "gs_column_keys_name_index"
+--?.*
+-------------------------
+-- change to new user
+-------------------------
+SET SESSION AUTHORIZATION newuser PASSWORD 'gauss@123';
+SET search_path to testns;
+-- add permission to the keys to  newuser 
+RESET SESSION AUTHORIZATION;
+GRANT USAGE ON COLUMN_ENCRYPTION_KEY MyCEK1 to newuser;
+GRANT USAGE ON CLIENT_MASTER_KEY MyCMK1 to newuser;
+SET SESSION AUTHORIZATION newuser PASSWORD 'gauss@123';
+SET search_path to testns;
+-- create TABLE 
+CREATE TABLE acltest1 (x int, x2 varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK1, ENCRYPTION_TYPE = DETERMINISTIC));
+ERROR:  relation "acltest1" already exists
+SELECT has_cmk_privilege('newuser', 'testns.MyCMK1', 'USAGE');
+ has_cmk_privilege 
+-------------------
+ t
+(1 row)
+
+SELECT has_cek_privilege('newuser', 'testns.MyCEK1', 'USAGE');
+ has_cek_privilege 
+-------------------
+ t
+(1 row)
+
+SELECT has_schema_privilege('newuser', 'testns', 'USAGE');
+ has_schema_privilege 
+----------------------
+ t
+(1 row)
+
+SELECT has_schema_privilege('newuser', 'testns', 'CREATE');
+ has_schema_privilege 
+----------------------
+ t
+(1 row)
+
+SELECT has_table_privilege('newuser', 'acltest1', 'INSERT, SELECT, UPDATE, DELETE, TRUNCATE, TRIGGER');
+ has_table_privilege 
+---------------------
+ t
+(1 row)
+
+RESET SESSION AUTHORIZATION;
+DROP TABLE acltest1;
+REVOKE USAGE ON COLUMN_ENCRYPTION_KEY MyCEK1 FROM newuser;
+REVOKE USAGE ON CLIENT_MASTER_KEY MyCMK1 FROM newuser;
+DROP COLUMN ENCRYPTION KEY MyCEK1;
+DROP CLIENT MASTER KEY MyCMK1;
+DROP SCHEMA IF EXISTS testns CASCADE;
+DROP ROLE IF EXISTS newuser;
+ERROR:  role "newuser" cannot be dropped because some objects depend on it
+DETAIL:  owner of schema newuser
+\! gs_ktool -d all
+DELETE ALL
+ 1

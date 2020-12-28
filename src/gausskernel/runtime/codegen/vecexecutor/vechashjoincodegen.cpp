@@ -312,42 +312,6 @@ bool VecHashJoinCodeGen::JittableHashJoin_bloomfilter(VecHashJoinState* node)
     return true;
 }
 
-/* @Description	: Codegen keyMatch of hash join, the jitted function will be
- * 				  called by innerJoinT.
- * int8
- * jitted_keyMatch(%struct.hashCell *mcellCache, bool flag_batch,
- *							int64 vals_batch, int64 keyIdx, bool *mkeyMatch)
- * {
- * 		if (mkeyMatch == false)
- *			result = int8_0;
- *		else
- * 		{
- *			flag_cell = mcellCache->m_val[keyIdx].flag
- *			and_flag = flag_cell && flag_batch;
- *			if (and_flag)
- *			{
- *				if (nulleqnull)
- *					result = int8_1;
- *				else
- *					result = int8_0;
- *			}
- *			else
- *			{
- *				or_flag = flag_cell || flag_batch;
- *				if (or_flag)
- *					result = int8_0;
- *				else
- *				{
- *					val_cell = mcellCache->m_val[keyIdx].val;
- *					// for integer keys
- *					result = (val_cell == vals_batch);
- *				}
- *			}
- *		}
- *		*mkeyMatch = result;   //if node->enable_fast_keyMatch == 0
- *		return result;
- * }
- */
 llvm::Function* VecHashJoinCodeGen::KeyMatchCodeGen(VecHashJoinState* node, Var* variable)
 {
     bool nulleqnull = (node->js.nulleqqual != NIL);
@@ -735,7 +699,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
     DEFINE_CG_PTRTYPE(hashCellPPtrType, hashCellPtrType);
     llvm::Value* mcellCache = builder.CreateIntToPtr(tmpval, hashCellPPtrType);
 
-    /* m_cellCache[lastBuildIdx] = m_joinStateLog.lastCell */
     builder.CreateAlignedStore(lastCell, mcellCache, 8);
     builder.CreateBr(bb_restoreFalse);
 
@@ -960,7 +923,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
      * and the match key result will be saved in m_keyMatch[i]
      */
     if (node->enable_fast_keyMatch == 0) {
-        /* m_keyMatch[i] = 1 */
         builder.CreateAlignedStore(int8_1, mkeyMatch, 1);
     }
     /* for each key, call the matchKey function
@@ -1003,28 +965,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
         builder.CreateCondBr(keyMatch_result, bb_Matched, bb_NoMatch);
     }
 
-    /* Generate the code to copy data from batch/hashCell to m_outerBatch/m_innerBatch
-     * if(m_keyMatch[i])
-     * {
-     *		val = m_cellCache[i]->m_val;
-     *
-     *		for(j = 0 ; j < m_innerBatch->m_cols; j++)
-     *		{
-     *			pVector = &m_innerBatch->m_arr[j];
-     *
-     *			pVector->m_vals[resultRow] = val[j].val;
-     *			pVector->m_flag[resultRow] = val[j].flag;
-     *		}
-     *
-     *		for(j = 0 ; j < m_outerBatch->m_cols; j++)
-     *		{
-     *			pVector = &m_outerBatch->m_arr[j];
-     * 			pVector->m_vals[resultRow] = batch->m_arr[j].m_vals[i];
-     *			pVector->m_flag[resultRow] = batch->m_arr[j].m_flag[i];
-     *		}
-     *		resultRow++;
-     * }
-     */
     builder.SetInsertPoint(bb_Matched);
     llvm::Value* cellCache = Phi_cellCache_keyMatch;
 
@@ -1080,16 +1020,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
     builder.SetInsertPoint(bb_NoMatch);
     builder.CreateBr(bb_TryNextCell);
 
-    /*
-     * corresponding to the following code:
-     * if(resultRow ==  BatchMaxSize)
-     * {
-     *	m_joinStateLog.lastBuildIdx = i;
-     * 	m_joinStateLog.lastCell = m_cellCache[i]->flag.m_next;
-     *	m_joinStateLog.restore = true;
-     *	return batch;
-     * }
-     */
     builder.SetInsertPoint(bb_BatchFull);
     llvm::Value* idx_int32 = builder.CreateTrunc(Phi_Idx, int32Type);
     builder.CreateAlignedStore(idx_int32, lastBuildIdx_addr, 4);
@@ -1122,11 +1052,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
     tmpval = builder.CreateICmpEQ(tmpval, int64_0);
     builder.CreateCondBr(tmpval, bb_crit_edge, bb_keyMatch);
 
-    /* loop_index++ */
-    /* Phi resultRow (loopEntry, TryNextCell)
-     * if (loop_index < nRows) goto bb_loopEntry
-     * else goto bb_ret
-     */
     builder.SetInsertPoint(bb_crit_edge);
     Phi_resultRow_01 = builder.CreatePHI(int32Type, 2);
     Phi_resultRow_01->addIncoming(Phi_resultRow_06, bb_loopEntry);
@@ -1289,7 +1214,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_fastpath(VecHashJoinState* n
     DEFINE_CG_PTRTYPE(hashCellPPtrType, hashCellPtrType);
     llvm::Value* mcellCache = builder.CreateIntToPtr(tmpval, hashCellPPtrType);
 
-    /* m_cellCache[lastBuildIdx] = m_joinStateLog.lastCell */
     builder.CreateAlignedStore(lastCell, mcellCache, 8);
     builder.CreateBr(bb_restoreFalse);
 
@@ -1524,28 +1448,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_fastpath(VecHashJoinState* n
     }
     builder.CreateCondBr(fastPath_result, bb_Matched, bb_NoMatch);
 
-    /* Generate the code to copy data from batch/hashCell to m_outerBatch/m_innerBatch
-     * if(m_keyMatch[i])
-     * {
-     *		val = m_cellCache[i]->m_val;
-     *
-     *		for(j = 0 ; j < m_innerBatch->m_cols; j++)
-     *		{
-     *			pVector = &m_innerBatch->m_arr[j];
-     *
-     *			pVector->m_vals[resultRow] = val[j].val;
-     *			pVector->m_flag[resultRow] = val[j].flag;
-     *		}
-     *
-     *		for(j = 0 ; j < m_outerBatch->m_cols; j++)
-     *		{
-     *			pVector = &m_outerBatch->m_arr[j];
-     * 			pVector->m_vals[resultRow] = batch->m_arr[j].m_vals[i];
-     *			pVector->m_flag[resultRow] = batch->m_arr[j].m_flag[i];
-     *		}
-     *		resultRow++;
-     * }
-     */
     builder.SetInsertPoint(bb_Matched);
     cellCache = Phi_cellCache_keyMatch;
 
@@ -1599,16 +1501,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_fastpath(VecHashJoinState* n
     builder.SetInsertPoint(bb_NoMatch);
     builder.CreateBr(bb_TryNextCell);
 
-    /*
-     * corresponding to the following code:
-     * if(resultRow ==  BatchMaxSize)
-     * {
-     *		m_joinStateLog.lastBuildIdx = i;
-     * 		m_joinStateLog.lastCell = m_cellCache[i]->flag.m_next;
-     *		m_joinStateLog.restore = true;
-     *		return batch;
-     * }
-     */
     builder.SetInsertPoint(bb_BatchFull);
     llvm::Value* idx_int32 = builder.CreateTrunc(Phi_Idx, int32Type);
     builder.CreateAlignedStore(idx_int32, lastBuildIdx_addr, 4);
@@ -1639,7 +1531,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_fastpath(VecHashJoinState* n
     Phi_resultRow_01 = builder.CreatePHI(int32Type, 2);
     Phi_resultRow_01->addIncoming(Phi_resultRow_06, bb_loopEntry);
     Phi_resultRow_01->addIncoming(Phi_resultRow_02, bb_TryNextCell);
-    /* Phi_resultRow_06- is in bb_loopEntry */
     Phi_resultRow_06->addIncoming(Phi_resultRow_01, bb_crit_edge);
     loopIdx2 = builder.CreateAdd(Phi_Idx, int64_1);  // Phi_Idx is in bb_loopEntry
     Phi_Idx->addIncoming(loopIdx2, bb_crit_edge);
@@ -1819,7 +1710,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable(VecHashJoinSt
         inner_var[j] = variable;
 
         DEFINE_CGVAR_INT64(int64_keyIdx, (long long)keyIdx_var);
-        /* m_keyIdx[j] = variable->varattno - 1 */
         inner_keyIdx_array[j] = int64_keyIdx;
         j++;
     }
@@ -1941,7 +1831,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable(VecHashJoinSt
     Phi_result->addIncoming(hash_result, bb_hashing[num_hashkey - 1]);
     Phi_result->addIncoming(prev_hash_value, bb_checkFlag[num_hashkey - 1]);
 
-    /* location = hashVal & mask */
     tmpval = builder.CreateAnd(Phi_result, mask);
     llvm::Value* bucketIdx = builder.CreateZExt(tmpval, int64Type);
 
@@ -1950,11 +1839,9 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable(VecHashJoinSt
     llvm::Value* m_data = builder.CreateInBoundsGEP(hashTbl, Vals2);
     m_data = builder.CreateAlignedLoad(m_data, 8, "m_data");
 
-    /* lastCell = m_hashTbl->m_data[location] */
     llvm::Value* m_data_idx = builder.CreateInBoundsGEP(m_data, bucketIdx);
     llvm::Value* lastCell = builder.CreateAlignedLoad(m_data_idx, 8, "lastCell");
 
-    /* m_hashTbl->m_data[location] = cell */
     builder.CreateAlignedStore(Phi_cell, m_data_idx, 8);
 
     /* get cell->flag.m_next */
@@ -1962,7 +1849,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable(VecHashJoinSt
     Vals3[2] = int32_0;
     llvm::Value* next_addr = builder.CreateInBoundsGEP(Phi_cell, Vals3);
 
-    /* cell->flag.m_next = lastCell */
     builder.CreateAlignedStore(lastCell, next_addr, 8);
     tmpval = builder.CreateBitCast(Phi_cell, int8PtrType);
     tmpval = builder.CreateInBoundsGEP(tmpval, int64_cellsize);
@@ -2102,9 +1988,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable_NeedCopy(VecH
      */
     builder.SetInsertPoint(bb_pre_loop);
 
-    /* since needcopy is true, do allocate for copyCellArray
-     * copyCellArray = (hashCell*)palloc0(nrows * m_cellSize);
-     */
+    /* since needcopy is true, do allocate for copyCellArray */
     llvm::Function* func_palloc = llvmCodeGen->module()->getFunction("Wrappalloc");
     if (NULL == func_palloc) {
         GsCodeGen::FnPrototype func_prototype(llvmCodeGen, "Wrappalloc", int8PtrType);
@@ -2152,7 +2036,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable_NeedCopy(VecH
         inner_var[j] = variable;
 
         DEFINE_CGVAR_INT64(int64_keyIdx, (long long)keyIdx_var);
-        /* m_keyIdx[j] = variable->varattno - 1 */
         inner_keyIdx_array[j] = int64_keyIdx;
         j++;
     }
@@ -2274,7 +2157,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable_NeedCopy(VecH
     Phi_result->addIncoming(hash_result, bb_hashing[num_hashkey - 1]);
     Phi_result->addIncoming(prev_hash_value, bb_checkFlag[num_hashkey - 1]);
 
-    /* location = hashVal & mask */
     tmpval = builder.CreateAnd(Phi_result, mask);
     llvm::Value* bucketIdx = builder.CreateZExt(tmpval, int64Type);
 
@@ -2283,19 +2165,13 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable_NeedCopy(VecH
     llvm::Value* m_data = builder.CreateInBoundsGEP(hashTbl, Vals2);
     m_data = builder.CreateAlignedLoad(m_data, 8, "m_data");
 
-    /* lastCell = m_hashTbl->m_data[location] */
     llvm::Value* m_data_idx = builder.CreateInBoundsGEP(m_data, bucketIdx);
     llvm::Value* lastCell = builder.CreateAlignedLoad(m_data_idx, 8, "lastCell");
 
-    /* needcopy is true, need the following functionality :
-     * Phi_copyCell = GET_NTH_CELL(copyCellArray, i);
-     * memcpy_s(Phi_copyCell, m_cellSize, Phi_cell, m_cellSize);
-     */
     llvm::Value* target = builder.CreateBitCast(Phi_copyCell, int8PtrType);
     llvm::Value* source = builder.CreateBitCast(Phi_cell, int8PtrType);
-    builder.CreateMemCpy(target, 1, source, 1, int32_cellsize);
+    builder.CreateMemCpy(target, (llvm::MaybeAlign)1, source, (llvm::MaybeAlign)1, cellSize_value);
 
-    /* m_hashTbl->m_data[location] = copyCell */
     builder.CreateAlignedStore(Phi_copyCell, m_data_idx, 8);
 
     /* get copyCell->flag.m_next */
@@ -2303,7 +2179,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable_NeedCopy(VecH
     Vals3[2] = int32_0;
     llvm::Value* next_addr = builder.CreateInBoundsGEP(Phi_copyCell, Vals3);
 
-    /* copyCell->flag.m_next = lastCell */
     builder.CreateAlignedStore(lastCell, next_addr, 8);
 
     /* Get next cell and next copyCell : GET_NTH_CELL(hashcell, i) */
@@ -2453,7 +2328,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_probeHashTable(VecHashJoinSt
     Vals2[1] = int32_pos_hashtbl_size;
     mask = builder.CreateInBoundsGEP(hashTbl, Vals2);
     mask = builder.CreateAlignedLoad(mask, 4, "m_size");
-    /* mask = m_hashTbl->m_size -1 */
     mask = builder.CreateSub(mask, int32_1);
 
     /* get m_arr from the batch */
@@ -2465,15 +2339,13 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_probeHashTable(VecHashJoinSt
     Vals2[1] = int32_pos_hjointbl_match;
     llvm::Value* m_match_addr = builder.CreateInBoundsGEP(hashJoinTbl, Vals2, "m_match");
     llvm::Value* int64_nRows = builder.CreateZExt(nRows, int64Type);
-    /* set m_match[i] = false */
-    builder.CreateMemSet(m_match_addr, int8_0, int64_nRows, 1);
+    builder.CreateMemSet(m_match_addr, int8_0, int64_nRows, (llvm::MaybeAlign)1);
 
     /* get hashBasedOperator.m_keyMatch */
     Vals2[0] = int64_0;
     Vals2[1] = int32_pos_hBOper_keyMatch;
     llvm::Value* m_keyMatch_addr = builder.CreateInBoundsGEP(hashBasedOperator, Vals2, "m_keyMatch");
-    /* set m_keyMatch[i] = true */
-    builder.CreateMemSet(m_keyMatch_addr, int8_1, int64_nRows, 1);
+    builder.CreateMemSet(m_keyMatch_addr, int8_1, int64_nRows, (llvm::MaybeAlign)1);
 
     ListCell* lc_outer = NULL;
     int keyIdx_var = 0;
@@ -2501,7 +2373,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_probeHashTable(VecHashJoinSt
         outer_var[j] = variable;
 
         DEFINE_CGVAR_INT64(int64_keyIdx, (long long)keyIdx_var);
-        /* m_outkeyIdx[j] = variable->varattno - 1 */
         outer_keyIdx_array[j] = int64_keyIdx;
         j++;
     }
@@ -2624,7 +2495,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_probeHashTable(VecHashJoinSt
     Phi_result->addIncoming(hash_result, bb_hashing[num_hashkey - 1]);
     Phi_result->addIncoming(prev_hash_value, bb_checkFlag[num_hashkey - 1]);
 
-    /* compute bucketIdx = hashVal & mask */
     tmpval = builder.CreateAnd(Phi_result, mask);
     llvm::Value* bucketIdx = builder.CreateZExt(tmpval, int64Type);
 
@@ -2634,7 +2504,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_probeHashTable(VecHashJoinSt
     Vals3[2] = Phi_Idx;
     llvm::Value* m_cacheLoc_idx = builder.CreateInBoundsGEP(hashBasedOperator, Vals3);
 
-    /* m_cacheLoc[i] = bucketIdx = hashVal & mask */
     builder.CreateAlignedStore(bucketIdx, m_cacheLoc_idx, 8);
 
     /* get vechashtable.m_data */
@@ -2643,7 +2512,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_probeHashTable(VecHashJoinSt
     llvm::Value* m_data = builder.CreateInBoundsGEP(hashTbl, Vals2);
     m_data = builder.CreateAlignedLoad(m_data, 8, "m_data");
 
-    /* m_hashTbl->m_data[m_cacheLoc[i]] */
     llvm::Value* m_data_idx = builder.CreateInBoundsGEP(m_data, bucketIdx);
     llvm::Value* lastCell = builder.CreateAlignedLoad(m_data_idx, 8, "lastCell");
 
@@ -2653,7 +2521,6 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_probeHashTable(VecHashJoinSt
     Vals3[2] = Phi_Idx;
     llvm::Value* m_cellCache_idx = builder.CreateInBoundsGEP(hashBasedOperator, Vals3);
 
-    /* m_cellCache[i] = m_hashTbl->m_data[m_cacheLoc[i]] */
     builder.CreateAlignedStore(lastCell, m_cellCache_idx, 8);
 
     /* increase idx */

@@ -30,7 +30,7 @@ $DBNAME = 'perftest';
 # is not empty string. Otherwise, each query in test is to be executed
 # in own transaction ($XACTBLOCK is empty string). In accordance with
 # $XACTBLOCK, script is to do DBMS specific preparation before execution
-# of queries. (Look at example in sqls/inssimple for B - it gives
+# of queries. (Look at example in sqls/inssimple for B db - it gives
 # an idea of what can be done for features unsupported by an DBMS.)
 #
 @perftests = (

@@ -51,7 +51,7 @@
 #include "vecexecutor/vectorbatch.h"
 #include "utils/builtins.h"
 #include "executor/tuptable.h"
-#include "storage/buffile.h"
+#include "storage/buf/buffile.h"
 #include "utils/resowner.h"
 #include "utils/batchstore.h"
 
@@ -198,8 +198,15 @@ void batchstore_set_eflags(BatchStore* state, int eflags)
                 errmsg("too late to call batchstore_set_eflags")));
 
     state->m_readptrs[0].eflags = eflags;
-    for (i = 1; i < state->m_readptrcount; i++)
-        eflags |= state->m_readptrs[i].eflags;
+    if (eflags < 0)
+            ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                            errmsg("number need be a positive number in bitwise operation")));
+    for (i = 1; i < state->m_readptrcount; i++) {
+        if (state->m_readptrs[i].eflags < 0)
+                ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                                errmsg("number need be a positive number in bitwise operation")));
+        eflags = (unsigned int)eflags | (unsigned int)state->m_readptrs[i].eflags;
+    }
     state->m_eflags = eflags;
 }
 
@@ -207,7 +214,7 @@ int batchstore_alloc_read_pointer(BatchStore* state, int eflags)
 {
     /* Check for possible increase of requirements */
     if (state->m_status != BSS_INMEM || state->m_storeColumns.m_memRowNum != 0) {
-        if ((state->m_eflags | eflags) != state->m_eflags)
+        if ((int)((unsigned int)state->m_eflags | (unsigned int)eflags) != state->m_eflags)
             ereport(ERROR,
                 (errmodule(MOD_EXECUTOR),
                     errcode(ERRCODE_UNEXPECTED_NODE_STATE),
@@ -226,7 +233,13 @@ int batchstore_alloc_read_pointer(BatchStore* state, int eflags)
     state->m_readptrs[state->m_readptrcount] = state->m_readptrs[0];
     state->m_readptrs[state->m_readptrcount].eflags = eflags;
 
-    state->m_eflags |= eflags;
+    if (eflags < 0)
+            ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                            errmsg("number need be a positive number in bitwise operation")));
+    if (state->m_eflags < 0)
+            ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                            errmsg("number need be a positive number in bitwise operation")));
+    state->m_eflags = (unsigned int)state->m_eflags | (unsigned int)eflags;
 
     return state->m_readptrcount++;
 }

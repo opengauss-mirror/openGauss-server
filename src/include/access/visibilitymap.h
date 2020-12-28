@@ -15,8 +15,8 @@
 #define VISIBILITYMAP_H
 
 #include "access/xlogdefs.h"
-#include "storage/block.h"
-#include "storage/buf.h"
+#include "storage/buf/block.h"
+#include "storage/buf/buf.h"
 #include "utils/relcache.h"
 
 /*

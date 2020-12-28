@@ -46,11 +46,6 @@ extern void unlockLogFile(void);
 #define elog elog_start(__FILE__, __FUNCTION__, __LINE__), elogFinish
 #define elogMsg elog_start(__FILE__, __FUNCTION__, __LINE__), elogMsgRaw
 #define elogFile elog_start(__FILE__, __FUNCTION__, __LINE__), elogFileRaw
-/*
-#define elog elogFinish
-#define elogMsg elogMsgRaw
-#define elogFile elogFileRaw
-*/
 
 extern char logFileName[MAXPATH + 1];
 

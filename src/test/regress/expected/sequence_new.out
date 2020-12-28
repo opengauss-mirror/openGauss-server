@@ -1,0 +1,616 @@
+create schema test_sequence_uuid;
+set current_schema = 'test_sequence_uuid';
+--create function that used to check the uuid is unique in all CN/DN node--
+create table result_check(a text);
+CREATE FUNCTION sequence_uuid(seq_name text)
+RETURNS void
+AS $$
+DECLARE
+    query_str      text;
+    run_str     text;
+    node_rd         record;
+    fetch_node_str  text;
+    result text;
+	fin_result text;
+BEGIN
+    query_str      := 'select uuid from ';
+    fetch_node_str := 'SELECT node_name FROM pg_catalog.pgxc_node';
+	truncate result_check;
+    FOR node_rd IN EXECUTE(fetch_node_str) LOOP
+        run_str := 'EXECUTE DIRECT ON ('|| node_rd.node_name || ') ''' || query_str || seq_name|| '''';
+        EXECUTE(run_str) INTO result;
+        insert into result_check values(result);
+    END LOOP;
+	select count(distinct(a)) from result_check INTO fin_result;
+    END; $$
+LANGUAGE 'plpgsql';
+----base test----
+create sequence seq1 start -1 minvalue -10 increment 3 cache 2 ;
+select nextval('seq1');
+ nextval 
+---------
+      -1
+(1 row)
+
+select nextval('seq1');
+ nextval 
+---------
+       2
+(1 row)
+
+EXECUTE DIRECT ON(coordinator2) 'select nextval(''seq1'')';
+ nextval 
+---------
+       5
+(1 row)
+
+EXECUTE DIRECT ON(coordinator2) 'select nextval(''seq1'')';
+ nextval 
+---------
+       8
+(1 row)
+
+select nextval('seq1');
+ nextval 
+---------
+      11
+(1 row)
+
+select nextval('seq1');
+ nextval 
+---------
+      14
+(1 row)
+
+EXECUTE DIRECT ON(coordinator2) 'select nextval(''seq1'')';
+ nextval 
+---------
+      17
+(1 row)
+
+EXECUTE DIRECT ON(coordinator2) 'select nextval(''seq1'')';
+ nextval 
+---------
+      20
+(1 row)
+
+create table sequence_t1 (a int ,b serial);
+NOTICE:  CREATE TABLE will create implicit sequence "sequence_t1_b_seq" for serial column "sequence_t1.b"
+insert into sequence_t1 values(1);
+select * from sequence_t1 order by 1,2;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+insert into sequence_t1(a) select a from sequence_t1;
+select * from sequence_t1 order by 1,2;
+ a | b 
+---+---
+ 1 | 1
+ 1 | 2
+(2 rows)
+
+insert into sequence_t1(a) select a from sequence_t1;
+select * from sequence_t1 order by 1,2;
+ a | b 
+---+---
+ 1 | 1
+ 1 | 2
+ 1 | 3
+ 1 | 4
+(4 rows)
+
+select setval('seq1', 1);
+ setval 
+--------
+      1
+(1 row)
+
+select nextval('seq1');
+ nextval 
+---------
+       4
+(1 row)
+
+select nextval('seq1');
+ nextval 
+---------
+       7
+(1 row)
+
+select setval('seq1', 1);
+ setval 
+--------
+      1
+(1 row)
+
+select nextval('seq1');
+ nextval 
+---------
+       4
+(1 row)
+
+select setval('seq1', 100, true);
+ setval 
+--------
+    100
+(1 row)
+
+select nextval('seq1');
+ nextval 
+---------
+     103
+(1 row)
+
+select setval('seq1', 100, false);
+ setval 
+--------
+    100
+(1 row)
+
+select nextval('seq1');
+ nextval 
+---------
+     100
+(1 row)
+
+----special test when used with CreateSchemaStmt----
+create schema test_uuid_seq
+create table sequence_t4(like sequence_t1)
+create sequence seq2
+create table sequence_t2(a serial,b serial)
+create sequence seq3
+create table sequence_t3(a serial,b serial);
+NOTICE:  CREATE TABLE will create implicit sequence "sequence_t4_b_seq" for serial column "sequence_t4.b"
+NOTICE:  CREATE TABLE will create implicit sequence "sequence_t2_a_seq" for serial column "sequence_t2.a"
+NOTICE:  CREATE TABLE will create implicit sequence "sequence_t2_b_seq" for serial column "sequence_t2.b"
+NOTICE:  CREATE TABLE will create implicit sequence "sequence_t3_a_seq" for serial column "sequence_t3.a"
+NOTICE:  CREATE TABLE will create implicit sequence "sequence_t3_b_seq" for serial column "sequence_t3.b"
+select sequence_uuid('test_uuid_seq.sequence_t4_b_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+select sequence_uuid('test_uuid_seq.sequence_t2_b_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+select sequence_uuid('test_uuid_seq.sequence_t2_a_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+select sequence_uuid('test_uuid_seq.sequence_t3_a_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+select sequence_uuid('test_uuid_seq.sequence_t3_b_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+select sequence_uuid('test_uuid_seq.seq2');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+select sequence_uuid('test_uuid_seq.seq3');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+insert into test_uuid_seq.sequence_t4 values(1),(2),(3);
+select * from test_uuid_seq.sequence_t4 order by 1,2;
+ a | b 
+---+---
+ 1 | 1
+ 2 | 2
+ 3 | 3
+(3 rows)
+
+-----create table like----
+create table sequence_t3 (like sequence_t1 including defaults);
+NOTICE:  CREATE TABLE will create implicit sequence "sequence_t3_b_seq" for serial column "sequence_t3.b"
+select sequence_uuid('sequence_t3_b_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+insert into sequence_t3 values(1),(2),(3);
+select * from sequence_t3 order by 1,2;
+ a | b 
+---+---
+ 1 | 1
+ 2 | 2
+ 3 | 3
+(3 rows)
+
+---multi-nodegroup----
+create node group ngroup1 with (datanode1, datanode3);
+create node group ngroup2 with (datanode2, datanode4);
+CREATE TABLE test1 (a int, b serial) TO GROUP ngroup1;
+NOTICE:  CREATE TABLE will create implicit sequence "test1_b_seq" for serial column "test1.b"
+CREATE TABLE test2 (a int, b int DEFAULT nextval('test1_b_seq') ) TO GROUP ngroup1;
+CREATE TABLE like_test2 (LIKE test2 including all) TO GROUP ngroup2;
+DROP TABLE like_test2;
+----create database-----
+create database sequence_new_test;
+\c sequence_new_test
+create table sequence_t1 (a int ,b serial);
+NOTICE:  CREATE TABLE will create implicit sequence "sequence_t1_b_seq" for serial column "sequence_t1.b"
+insert into sequence_t1 values(1);
+create schema test_uuid_seq
+create table sequence_t4(like sequence_t1)
+create sequence seq2
+create table sequence_t2(a serial,b serial)
+create sequence seq3
+create table sequence_t3(a serial,b serial);
+NOTICE:  CREATE TABLE will create implicit sequence "sequence_t4_b_seq" for serial column "sequence_t4.b"
+NOTICE:  CREATE TABLE will create implicit sequence "sequence_t2_a_seq" for serial column "sequence_t2.a"
+NOTICE:  CREATE TABLE will create implicit sequence "sequence_t2_b_seq" for serial column "sequence_t2.b"
+NOTICE:  CREATE TABLE will create implicit sequence "sequence_t3_a_seq" for serial column "sequence_t3.a"
+NOTICE:  CREATE TABLE will create implicit sequence "sequence_t3_b_seq" for serial column "sequence_t3.b"
+create table result_check(a text);
+CREATE FUNCTION sequence_uuid(seq_name text)
+RETURNS void
+AS $$
+DECLARE
+    query_str      text;
+    run_str     text;
+    node_rd         record;
+    fetch_node_str  text;
+    result text;
+	fin_result text;
+BEGIN
+    query_str      := 'select uuid from ';
+    fetch_node_str := 'SELECT node_name FROM pg_catalog.pgxc_node';
+	truncate result_check;
+    FOR node_rd IN EXECUTE(fetch_node_str) LOOP
+        run_str := 'EXECUTE DIRECT ON ('|| node_rd.node_name || ') ''' || query_str || seq_name|| '''';
+        EXECUTE(run_str) INTO result;
+        insert into result_check values(result);
+    END LOOP;
+	select count(distinct(a)) from result_check INTO fin_result;
+    END; $$
+LANGUAGE 'plpgsql';
+select sequence_uuid('test_uuid_seq.sequence_t4_b_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+select sequence_uuid('test_uuid_seq.sequence_t2_b_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+select sequence_uuid('test_uuid_seq.sequence_t2_a_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+select sequence_uuid('test_uuid_seq.sequence_t3_a_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+select sequence_uuid('test_uuid_seq.sequence_t3_b_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+select sequence_uuid('test_uuid_seq.seq2');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+select sequence_uuid('test_uuid_seq.seq3');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+insert into test_uuid_seq.sequence_t4 values(1),(2),(3);
+select * from test_uuid_seq.sequence_t4 order by 1,2;
+ a | b 
+---+---
+ 1 | 1
+ 2 | 2
+ 3 | 3
+(3 rows)
+
+\c regression
+-- cached plan
+set current_schema = 'test_sequence_uuid';
+CREATE FUNCTION create_table_uuid() RETURNS int
+LANGUAGE plpgsql AS $$
+BEGIN
+  drop table if exists uuid_tb;
+  create table uuid_tb(c1 serial, c2 text, c3 serial);
+  insert into uuid_tb(c2) values('i am a student');
+  insert into uuid_tb(c2) values('i am a student');
+  RETURN 1;
+END $$;
+select create_table_uuid();
+NOTICE:  table "uuid_tb" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists uuid_tb"
+PL/pgSQL function create_table_uuid() line 3 at SQL statement
+referenced column: create_table_uuid
+NOTICE:  CREATE TABLE will create implicit sequence "uuid_tb_c1_seq" for serial column "uuid_tb.c1"
+CONTEXT:  SQL statement "create table uuid_tb(c1 serial, c2 text, c3 serial)"
+PL/pgSQL function create_table_uuid() line 4 at SQL statement
+referenced column: create_table_uuid
+NOTICE:  CREATE TABLE will create implicit sequence "uuid_tb_c3_seq" for serial column "uuid_tb.c3"
+CONTEXT:  SQL statement "create table uuid_tb(c1 serial, c2 text, c3 serial)"
+PL/pgSQL function create_table_uuid() line 4 at SQL statement
+referenced column: create_table_uuid
+CONTEXT:  SQL statement "create table uuid_tb(c1 serial, c2 text, c3 serial)"
+PL/pgSQL function create_table_uuid() line 4 at SQL statement
+referenced column: create_table_uuid
+ create_table_uuid 
+-------------------
+                 1
+(1 row)
+
+select * from uuid_tb order by 1,2,3;
+ c1 |       c2       | c3 
+----+----------------+----
+  1 | i am a student |  1
+  2 | i am a student |  2
+(2 rows)
+
+select sequence_uuid('test_sequence_uuid.uuid_tb_c1_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+select sequence_uuid('test_sequence_uuid.uuid_tb_c3_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+select create_table_uuid();
+NOTICE:  CREATE TABLE will create implicit sequence "uuid_tb_c1_seq" for serial column "uuid_tb.c1"
+CONTEXT:  SQL statement "create table uuid_tb(c1 serial, c2 text, c3 serial)"
+PL/pgSQL function create_table_uuid() line 4 at SQL statement
+referenced column: create_table_uuid
+NOTICE:  CREATE TABLE will create implicit sequence "uuid_tb_c3_seq" for serial column "uuid_tb.c3"
+CONTEXT:  SQL statement "create table uuid_tb(c1 serial, c2 text, c3 serial)"
+PL/pgSQL function create_table_uuid() line 4 at SQL statement
+referenced column: create_table_uuid
+CONTEXT:  SQL statement "create table uuid_tb(c1 serial, c2 text, c3 serial)"
+PL/pgSQL function create_table_uuid() line 4 at SQL statement
+referenced column: create_table_uuid
+ create_table_uuid 
+-------------------
+                 1
+(1 row)
+
+select * from uuid_tb order by 1,2,3;
+ c1 |       c2       | c3 
+----+----------------+----
+  1 | i am a student |  1
+  2 | i am a student |  2
+(2 rows)
+
+select sequence_uuid('test_sequence_uuid.uuid_tb_c1_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+select sequence_uuid('test_sequence_uuid.uuid_tb_c3_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+BEGIN;
+DECLARE ctt1 CURSOR FOR SELECT create_table_uuid();
+DECLARE ctt2 CURSOR FOR SELECT create_table_uuid();
+SAVEPOINT s1;
+FETCH ctt1;
+NOTICE:  CREATE TABLE will create implicit sequence "uuid_tb_c1_seq" for serial column "uuid_tb.c1"
+CONTEXT:  SQL statement "create table uuid_tb(c1 serial, c2 text, c3 serial)"
+PL/pgSQL function create_table_uuid() line 4 at SQL statement
+referenced column: create_table_uuid
+NOTICE:  CREATE TABLE will create implicit sequence "uuid_tb_c3_seq" for serial column "uuid_tb.c3"
+CONTEXT:  SQL statement "create table uuid_tb(c1 serial, c2 text, c3 serial)"
+PL/pgSQL function create_table_uuid() line 4 at SQL statement
+referenced column: create_table_uuid
+CONTEXT:  SQL statement "create table uuid_tb(c1 serial, c2 text, c3 serial)"
+PL/pgSQL function create_table_uuid() line 4 at SQL statement
+referenced column: create_table_uuid
+ create_table_uuid 
+-------------------
+                 1
+(1 row)
+
+select * from uuid_tb order by 1,2,3;
+ c1 |       c2       | c3 
+----+----------------+----
+  1 | i am a student |  1
+  2 | i am a student |  2
+(2 rows)
+
+select sequence_uuid('test_sequence_uuid.uuid_tb_c1_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+select sequence_uuid('test_sequence_uuid.uuid_tb_c3_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+ROLLBACK TO s1;
+select * from uuid_tb order by 1,2,3;
+ c1 |       c2       | c3 
+----+----------------+----
+  1 | i am a student |  1
+  2 | i am a student |  2
+(2 rows)
+
+select sequence_uuid('test_sequence_uuid.uuid_tb_c1_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+select sequence_uuid('test_sequence_uuid.uuid_tb_c3_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+savepoint s2;
+FETCH ctt2; 
+NOTICE:  CREATE TABLE will create implicit sequence "uuid_tb_c1_seq" for serial column "uuid_tb.c1"
+CONTEXT:  SQL statement "create table uuid_tb(c1 serial, c2 text, c3 serial)"
+PL/pgSQL function create_table_uuid() line 4 at SQL statement
+referenced column: create_table_uuid
+NOTICE:  CREATE TABLE will create implicit sequence "uuid_tb_c3_seq" for serial column "uuid_tb.c3"
+CONTEXT:  SQL statement "create table uuid_tb(c1 serial, c2 text, c3 serial)"
+PL/pgSQL function create_table_uuid() line 4 at SQL statement
+referenced column: create_table_uuid
+CONTEXT:  SQL statement "create table uuid_tb(c1 serial, c2 text, c3 serial)"
+PL/pgSQL function create_table_uuid() line 4 at SQL statement
+referenced column: create_table_uuid
+ create_table_uuid 
+-------------------
+                 1
+(1 row)
+
+select * from uuid_tb order by 1,2,3;
+ c1 |       c2       | c3 
+----+----------------+----
+  1 | i am a student |  1
+  2 | i am a student |  2
+(2 rows)
+
+select sequence_uuid('test_sequence_uuid.uuid_tb_c1_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+select sequence_uuid('test_sequence_uuid.uuid_tb_c3_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+COMMIT;
+select * from uuid_tb order by 1,2,3;
+ c1 |       c2       | c3 
+----+----------------+----
+  1 | i am a student |  1
+  2 | i am a student |  2
+(2 rows)
+
+select sequence_uuid('test_sequence_uuid.uuid_tb_c1_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+select sequence_uuid('test_sequence_uuid.uuid_tb_c3_seq');
+1
+ sequence_uuid 
+---------------
+ 
+(1 row)
+
+drop table uuid_tb;
+drop FUNCTION create_table_uuid();
+-- cached plan
+set current_schema = 'test_sequence_uuid';
+CREATE OR REPLACE FUNCTION ha_pro_001_01(out wh_num integer,out cus_count integer,out date_count integer) RETURN boolean AS
+i INTEGER;
+j INTEGER;
+BEGIN
+drop sequence if exists seq1;
+create sequence seq1;
+    RETURN TRUE;
+END;
+/
+call ha_pro_001_01(@a,@b,@c);
+ ha_pro_001_01 
+---------------
+ t
+(1 row)
+
+call ha_pro_001_01(@a,@b,@c);
+ ha_pro_001_01 
+---------------
+ t
+(1 row)
+
+-----clean-----
+set current_schema ='test_uuid_seq';
+drop sequence test_uuid_seq.seq2;
+drop sequence test_uuid_seq.seq3;
+drop table test_uuid_seq.sequence_t2;
+drop table test_uuid_seq.sequence_t3;
+drop table test_uuid_seq.sequence_t4;
+drop schema test_uuid_seq;
+set current_schema = 'test_sequence_uuid';
+drop table test_sequence_uuid.result_check;
+drop function sequence_uuid();
+drop function ha_pro_001_01();
+drop sequence test_sequence_uuid.seq1;
+drop table test_sequence_uuid.sequence_t1;
+drop table test_sequence_uuid.sequence_t3;
+drop table test1 cascade;
+NOTICE:  drop cascades to default for table test2 column b
+drop table test2;
+drop schema test_sequence_uuid;
+drop node group ngroup1;
+drop node group ngroup2;
+drop database sequence_new_test;

@@ -49,11 +49,9 @@ typedef struct IdentifyChannelCmd {
     int channel_identifier;
 } IdentifyChannelCmd;
 
-#ifndef ENABLE_MULTIPLE_NODES
 typedef struct IdentifyAZCmd {
     NodeTag type;
 } IdentifyAZCmd;
-#endif
 
 /* ----------------------
  *		BASE_BACKUP command

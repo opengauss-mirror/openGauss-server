@@ -1,0 +1,116 @@
+--
+-- BULK LOAD
+--
+SET ENABLE_FAST_QUERY_SHIPPING=FALSE;
+SET ENABLE_VECTOR_ENGINE=TRUE;
+SET PARTITION_MAX_CACHE_SIZE='32MB';
+CREATE TABLE LINEITEM_INSERT
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10)
+  , L_COMMENT      VARCHAR(44)
+)
+with (orientation = column)
+distribute by hash(L_ORDERKEY);
+CREATE TABLE LINEITEM_COPY
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10)
+  , L_COMMENT      VARCHAR(44)
+)
+with (orientation = column)
+distribute by hash(L_ORDERKEY);
+CREATE TABLE LINEITEM_PART
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10)
+  , L_COMMENT      VARCHAR(44)
+)
+with (orientation = column)
+distribute by hash(L_ORDERKEY)
+partition by range(L_ORDERKEY)
+(
+	partition p1 values less than (10),
+	partition p2 values less than (20),
+	partition p3 values less than (30),
+	partition p4 values less than (maxvalue)
+);
+CREATE FOREIGN TABLE EXT_LINEITEM (
+	L_ORDERKEY    BIGINT ,        
+	L_PARTKEY     BIGINT ,        
+	L_SUPPKEY     BIGINT ,        
+	L_LINENUMBER  BIGINT ,        
+	L_QUANTITY    DECIMAL(15,2) ,        
+	L_EXTENDEDPRICE  DECIMAL(15,2) ,        
+	L_DISCOUNT    DECIMAL(15,2) ,        
+	L_TAX     DECIMAL(15,2) ,        
+	L_RETURNFLAG  CHAR(1) ,        
+	L_LINESTATUS  CHAR(1) ,        
+	L_SHIPDATE    DATE ,        
+	L_COMMITDATE  DATE ,        
+	L_RECEIPTDATE DATE ,        
+	L_SHIPINSTRUCT CHAR(25) ,        
+	L_SHIPMODE     CHAR(10) ,        
+	L_COMMENT      VARCHAR(44) 
+)SERVER gsmpp_server OPTIONS(format 'text', location
+	'@abs_srcdir@/data/lineitem_cstore.data', delimiter '|', mode 'shared');
+INSERT INTO LINEITEM_INSERT SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_COPY SELECT * FROM LINEITEM_INSERT;
+INSERT INTO LINEITEM_PART SELECT * FROM EXT_LINEITEM;
+select * from LINEITEM_COPY order by L_ORDERKEY, L_PARTKEY, L_LINENUMBER;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus |        l_shipdate        |       l_commitdate       |      l_receiptdate       |      l_shipinstruct       | l_shipmode |              l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+--------------------------+--------------------------+--------------------------+---------------------------+------------+-------------------------------------
+          1 |      2132 |      4633 |            4 |      28.00 |        28955.64 |        .09 |   .06 | N            | O            | Sun Apr 21 00:00:00 1996 | Sat Mar 30 00:00:00 1996 | Thu May 16 00:00:00 1996 | NONE                      | AIR        | lites. fluffily even de
+          1 |     15635 |       638 |            6 |      32.00 |        49620.16 |        .07 |   .02 | N            | O            | Tue Jan 30 00:00:00 1996 | Wed Feb 07 00:00:00 1996 | Sat Feb 03 00:00:00 1996 | DELIVER IN PERSON         | MAIL       | arefully slyly ex
+          1 |     24027 |      1534 |            5 |      24.00 |        22824.48 |        .10 |   .04 | N            | O            | Sat Mar 30 00:00:00 1996 | Thu Mar 14 00:00:00 1996 | Mon Apr 01 00:00:00 1996 | NONE                      | FOB        |  pending foxes. slyly re
+          1 |     63700 |      3701 |            3 |       8.00 |        13309.60 |        .10 |   .02 | N            | O            | Mon Jan 29 00:00:00 1996 | Tue Mar 05 00:00:00 1996 | Wed Jan 31 00:00:00 1996 | TAKE BACK RETURN          | REG AIR    | riously. regular, express dep
+          1 |     67310 |      7311 |            2 |      36.00 |        45983.16 |        .09 |   .06 | N            | O            | Fri Apr 12 00:00:00 1996 | Wed Feb 28 00:00:00 1996 | Sat Apr 20 00:00:00 1996 | TAKE BACK RETURN          | MAIL       | ly final dependencies: slyly bold 
+          1 |    155190 |      7706 |            1 |      17.00 |        21168.23 |        .04 |   .02 | N            | O            | Wed Mar 13 00:00:00 1996 | Mon Feb 12 00:00:00 1996 | Fri Mar 22 00:00:00 1996 | DELIVER IN PERSON         | TRUCK      | egular courts above the
+          2 |    106170 |      1191 |            1 |      38.00 |        44694.46 |       0.00 |   .05 | N            | O            | Tue Jan 28 00:00:00 1997 | Tue Jan 14 00:00:00 1997 | Sun Feb 02 00:00:00 1997 | TAKE BACK RETURN          | RAIL       | ven requests. deposits breach a
+          3 |      4297 |      1798 |            1 |      45.00 |        54058.05 |        .06 |  0.00 | R            | F            | Wed Feb 02 00:00:00 1994 | Tue Jan 04 00:00:00 1994 | Wed Feb 23 00:00:00 1994 | NONE                      | AIR        | ongside of the furiously brave acco
+          3 |     19036 |      6540 |            2 |      49.00 |        46796.47 |        .10 |  0.00 | R            | F            | Tue Nov 09 00:00:00 1993 | Mon Dec 20 00:00:00 1993 | Wed Nov 24 00:00:00 1993 | TAKE BACK RETURN          | RAIL       | 
+          3 |    128449 |      3474 |            3 |      27.00 |        39890.88 |        .06 |   .07 | A            | F            | Sun Jan 16 00:00:00 1994 | Mon Nov 22 00:00:00 1993 | Sun Jan 23 00:00:00 1994 | DELIVER IN PERSON         |            | 
+(10 rows)
+
+DROP TABLE LINEITEM_COPY;
+DROP TABLE LINEITEM_PART;
+DROP FOREIGN TABLE EXT_LINEITEM;

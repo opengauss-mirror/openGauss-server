@@ -23,6 +23,6 @@ subdir = src/gausskernel/process
 top_builddir = ../../..
 include $(top_builddir)/src/Makefile.global
 
-SUBDIRS     = datasource  job  main  postmaster  tcop  threadpool  globalplancache
+SUBDIRS     = datasource  job  main  postmaster  tcop  threadpool  globalplancache stream
 
 include $(top_srcdir)/src/gausskernel/common.mk

@@ -52,8 +52,6 @@
 <func> smgrpostckpt
 <func> AtEOXact_SMgr
 <func> BufferAlloc
-<func> StrategyGetBuffer
-<func> BufTableLookup
 <func> SyncLocalXidWait
 <func> BufferSync
 <func> BgBufferSync

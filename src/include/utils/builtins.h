@@ -14,6 +14,7 @@
 #ifndef BUILTINS_H
 #define BUILTINS_H
 
+#ifndef FRONTEND_PARSER
 #include "fmgr.h"
 #include "lib/stringinfo.h"
 #include "nodes/parsenodes.h"
@@ -123,6 +124,18 @@ extern Datum pg_has_role_id_name(PG_FUNCTION_ARGS);
 extern Datum pg_has_role_id_id(PG_FUNCTION_ARGS);
 extern Datum pg_has_role_name(PG_FUNCTION_ARGS);
 extern Datum pg_has_role_id(PG_FUNCTION_ARGS);
+extern Datum has_cmk_privilege_name_name(PG_FUNCTION_ARGS);
+extern Datum has_cmk_privilege_name_id(PG_FUNCTION_ARGS);
+extern Datum has_cmk_privilege_id_name(PG_FUNCTION_ARGS);
+extern Datum has_cmk_privilege_id_id(PG_FUNCTION_ARGS);
+extern Datum has_cmk_privilege_name(PG_FUNCTION_ARGS);
+extern Datum has_cmk_privilege_id(PG_FUNCTION_ARGS);
+extern Datum has_cek_privilege_name_name(PG_FUNCTION_ARGS);
+extern Datum has_cek_privilege_name_id(PG_FUNCTION_ARGS);
+extern Datum has_cek_privilege_id_name(PG_FUNCTION_ARGS);
+extern Datum has_cek_privilege_id_id(PG_FUNCTION_ARGS);
+extern Datum has_cek_privilege_name(PG_FUNCTION_ARGS);
+extern Datum has_cek_privilege_id(PG_FUNCTION_ARGS);
 
 /* bool.c */
 extern Datum boolin(PG_FUNCTION_ARGS);
@@ -330,6 +343,7 @@ extern Datum encode_plan_node(PG_FUNCTION_ARGS);
 /* ml_model.cpp */
 extern Datum model_train_opt(PG_FUNCTION_ARGS);
 extern Datum track_model_train_opt(PG_FUNCTION_ARGS);
+
 /* lsyscache.cpp */
 extern Datum node_oid_name(PG_FUNCTION_ARGS);
 /* tablespace.cpp */
@@ -551,14 +565,14 @@ extern Datum pg_partition_indexes_size(PG_FUNCTION_ARGS);
 extern Datum pg_indexes_size(PG_FUNCTION_ARGS);
 extern Datum pg_relation_filenode(PG_FUNCTION_ARGS);
 extern Datum pg_filenode_relation(PG_FUNCTION_ARGS);
-extern Datum pg_partition_filepath(PG_FUNCTION_ARGS);
 extern Datum pg_relation_filepath(PG_FUNCTION_ARGS);
+extern Datum pg_relation_is_scannable(PG_FUNCTION_ARGS);
 #ifdef PGXC
 extern Datum pg_relation_with_compression(PG_FUNCTION_ARGS);
 extern Datum pg_relation_compression_ratio(PG_FUNCTION_ARGS);
 #endif
 extern Datum pg_partition_filenode(PG_FUNCTION_ARGS);
-
+extern Datum pg_partition_filepath(PG_FUNCTION_ARGS);
 /* regioninfo.cpp */
 extern Datum pg_clean_region_info(PG_FUNCTION_ARGS);
 
@@ -578,8 +592,6 @@ extern Datum current_database(PG_FUNCTION_ARGS);
 extern Datum current_query(PG_FUNCTION_ARGS);
 extern Datum pg_cancel_backend(PG_FUNCTION_ARGS);
 extern Datum pg_cancel_invalid_query(PG_FUNCTION_ARGS);
-extern Datum report_fatal(PG_FUNCTION_ARGS);
-extern Datum signal_backend(PG_FUNCTION_ARGS);
 extern Datum pg_terminate_backend(PG_FUNCTION_ARGS);
 extern Datum pg_terminate_session(PG_FUNCTION_ARGS);
 extern Datum pg_reload_conf(PG_FUNCTION_ARGS);
@@ -646,6 +658,8 @@ extern Datum pgxc_node_str(PG_FUNCTION_ARGS);
 extern Datum pgxc_lock_for_backup(PG_FUNCTION_ARGS);
 extern Datum pgxc_lock_for_sp_database(PG_FUNCTION_ARGS);
 extern Datum pgxc_unlock_for_sp_database(PG_FUNCTION_ARGS);
+extern Datum pgxc_lock_for_transfer(PG_FUNCTION_ARGS);
+extern Datum pgxc_unlock_for_transfer(PG_FUNCTION_ARGS);
 #endif
 extern Datum trigger_in(PG_FUNCTION_ARGS);
 extern Datum trigger_out(PG_FUNCTION_ARGS);
@@ -739,13 +753,6 @@ extern Datum record_gt(PG_FUNCTION_ARGS);
 extern Datum record_le(PG_FUNCTION_ARGS);
 extern Datum record_ge(PG_FUNCTION_ARGS);
 extern Datum btrecordcmp(PG_FUNCTION_ARGS);
-extern Datum record_image_eq(PG_FUNCTION_ARGS);
-extern Datum record_image_ne(PG_FUNCTION_ARGS);
-extern Datum record_image_lt(PG_FUNCTION_ARGS);
-extern Datum record_image_gt(PG_FUNCTION_ARGS);
-extern Datum record_image_le(PG_FUNCTION_ARGS);
-extern Datum record_image_ge(PG_FUNCTION_ARGS);
-extern Datum btrecordimagecmp(PG_FUNCTION_ARGS);
 
 /* ruleutils.c */
 extern Datum pg_get_ruledef(PG_FUNCTION_ARGS);
@@ -772,7 +779,8 @@ extern Datum pg_get_functiondef(PG_FUNCTION_ARGS);
 extern Datum pg_get_function_arguments(PG_FUNCTION_ARGS);
 extern Datum pg_get_function_identity_arguments(PG_FUNCTION_ARGS);
 extern Datum pg_get_function_result(PG_FUNCTION_ARGS);
-extern char* deparse_expression(Node* expr, List* dpcontext, bool forceprefix, bool showimplicit, bool no_alias = false);
+extern char* deparse_expression(
+    Node* expr, List* dpcontext, bool forceprefix, bool showimplicit, bool no_alias = false);
 extern char* deparse_create_sequence(Node* stmt, bool owned_by_none = false);
 extern char* deparse_alter_sequence(Node* stmt, bool owned_by_none = false);
 
@@ -788,9 +796,8 @@ extern List* deparse_context_for_plan(Node* plan, List* ancestors, List* rtable)
 #endif
 extern const char* quote_identifier(const char* ident);
 extern char* quote_qualified_identifier(const char* qualifier, const char* ident);
-extern void generate_operator_clause(fmStringInfo buf, const char* leftop, Oid leftoptype, Oid opoid,
-    const char* rightop, Oid rightoptype);
 extern char* generate_collation_name(Oid collid);
+extern void get_utility_stmt_def(AlterTableStmt* stmt, StringInfo buf);
 
 /* tid.c */
 extern Datum tidin(PG_FUNCTION_ARGS);
@@ -863,6 +870,7 @@ extern Datum nvarchar2(PG_FUNCTION_ARGS);
 /* varlena.c */
 extern text* cstring_to_text(const char* s);
 extern text* cstring_to_text_with_len(const char* s, size_t len);
+extern bytea *cstring_to_bytea_with_len(const char *s, int len);
 extern char* text_to_cstring(const text* t);
 extern void text_to_cstring_buffer(const text* src, char* dst, size_t dst_len);
 extern int text_instr_3args(text* textStr, text* textStrToSearch, int32 beginIndex);
@@ -877,6 +885,8 @@ extern void text_to_bktmap(text* gbucket, uint2* bktmap, int len);
 
 #define CStringGetTextDatum(s) PointerGetDatum(cstring_to_text(s))
 #define TextDatumGetCString(d) text_to_cstring((text*)DatumGetPointer(d))
+
+#define CStringGetByteaDatum(s, len) PointerGetDatum(cstring_to_bytea_with_len(s, len))
 
 extern Datum rawin(PG_FUNCTION_ARGS);
 extern Datum rawout(PG_FUNCTION_ARGS);
@@ -928,7 +938,7 @@ extern Datum text_name(PG_FUNCTION_ARGS);
 extern int varstr_cmp(char* arg1, int len1, char* arg2, int len2, Oid collid);
 extern void varstr_sortsupport(SortSupport ssup, Oid collid, bool bpchar);
 extern List* textToQualifiedNameList(text* textval);
-extern bool SplitIdentifierString(char* rawstring, char separator, List** namelist, bool downCase = true);
+extern bool SplitIdentifierString(char* rawstring, char separator, List** namelist, bool downCase = true, bool truncateToolong = true);
 extern bool SplitIdentifierInteger(char* rawstring, char separator, List** namelist);
 extern Datum replace_text(PG_FUNCTION_ARGS);
 extern text* replace_text_regexp(text* src_text, void* regexp, text* replace_text, bool glob);
@@ -988,6 +998,12 @@ extern Datum text_reverse(PG_FUNCTION_ARGS);
 extern Datum text_format(PG_FUNCTION_ARGS);
 extern Datum text_format_nv(PG_FUNCTION_ARGS);
 
+/* byteawithoutorderwithequalcol.cpp */
+extern Datum byteawithoutordercolin(PG_FUNCTION_ARGS);
+extern Datum byteawithoutorderwithequalcolin(PG_FUNCTION_ARGS);
+extern Datum byteawithoutorderwithequalcoltypmodin(PG_FUNCTION_ARGS);
+extern Datum byteawithoutorderwithequalcoltypmodout(PG_FUNCTION_ARGS);
+
 /* version.c */
 extern Datum pgsql_version(PG_FUNCTION_ARGS);
 #ifdef PGXC
@@ -1031,6 +1047,12 @@ extern Datum texticlike(PG_FUNCTION_ARGS);
 extern Datum texticnlike(PG_FUNCTION_ARGS);
 extern Datum bytealike(PG_FUNCTION_ARGS);
 extern Datum byteanlike(PG_FUNCTION_ARGS);
+extern Datum byteawithoutorderwithequalcollike(PG_FUNCTION_ARGS);
+extern Datum byteawithoutorderwithequalcolnlike(PG_FUNCTION_ARGS);
+extern Datum byteawithoutorderwithequalcollikebytear(PG_FUNCTION_ARGS);
+extern Datum byteawithoutorderwithequalcolnlikebytear(PG_FUNCTION_ARGS);
+extern Datum byteawithoutorderwithequalcollikebyteal(PG_FUNCTION_ARGS);
+extern Datum byteawithoutorderwithequalcolnlikebyteal(PG_FUNCTION_ARGS);
 extern Datum like_escape(PG_FUNCTION_ARGS);
 extern Datum like_escape_bytea(PG_FUNCTION_ARGS);
 extern int GenericMatchText(char* s, int slen, char* p, int plen);
@@ -1268,10 +1290,6 @@ extern Datum show_config_by_name(PG_FUNCTION_ARGS);
 extern Datum set_config_by_name(PG_FUNCTION_ARGS);
 extern Datum show_all_settings(PG_FUNCTION_ARGS);
 
-/* pg_controldata.cpp */
-extern Datum pg_control_system(PG_FUNCTION_ARGS);
-extern Datum pg_control_checkpoint(PG_FUNCTION_ARGS);
-
 /* lockfuncs.c */
 extern Datum pg_lock_status(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_lock_int8(PG_FUNCTION_ARGS);
@@ -1339,6 +1357,7 @@ extern Datum window_lead_with_offset_and_default(PG_FUNCTION_ARGS);
 extern Datum window_first_value(PG_FUNCTION_ARGS);
 extern Datum window_last_value(PG_FUNCTION_ARGS);
 extern Datum window_nth_value(PG_FUNCTION_ARGS);
+extern Datum window_delta(PG_FUNCTION_ARGS);
 
 /* access/spgist/spgquadtreeproc.c */
 extern Datum spg_quad_config(PG_FUNCTION_ARGS);
@@ -1414,6 +1433,7 @@ extern Datum pgxc_pool_reload(PG_FUNCTION_ARGS);
 extern Datum pgxc_pool_connection_status(PG_FUNCTION_ARGS);
 extern Datum pg_pool_validate(PG_FUNCTION_ARGS);
 extern Datum pg_pool_ping(PG_FUNCTION_ARGS);
+extern Datum comm_check_connection_status(PG_FUNCTION_ARGS);
 #endif
 
 /* backend/access/transam/transam.c */
@@ -1422,9 +1442,9 @@ extern Datum pgxc_is_committed(PG_FUNCTION_ARGS);
 extern Datum pgxc_get_csn(PG_FUNCTION_ARGS);
 #endif
 
-/*adapt a's empty_blob*/
+/*adapt A db's empty_blob*/
 extern Datum get_empty_blob(PG_FUNCTION_ARGS);
-/*adapt a's substr*/
+/*adapt A db's substr*/
 extern Datum substrb_with_lenth(PG_FUNCTION_ARGS);
 extern Datum substrb_without_lenth(PG_FUNCTION_ARGS);
 /*aes encrypt/decrypt function*/
@@ -1487,17 +1507,15 @@ extern Datum text_float8(PG_FUNCTION_ARGS);
 extern Datum text_numeric(PG_FUNCTION_ARGS);
 extern Datum getDistributeKey(PG_FUNCTION_ARGS);
 extern Datum text_timestamp(PG_FUNCTION_ARGS);
-extern void encryptOBS(const char* srcplaintext, char destciphertext[], uint32 destcipherlength);
+extern void encryptOBS(char* srcplaintext, char destciphertext[], uint32 destcipherlength);
 extern void decryptOBS(
     const char* srcciphertext, char destplaintext[], uint32 destplainlength, const char* obskey = NULL);
-extern void encryptECString(const char* src_plain_text, char* dest_cipher_text, uint32 dest_cipher_length);
+extern void encryptECString(char* src_plain_text, char* dest_cipher_text, uint32 dest_cipher_length);
 extern void decryptECString(const char* src_cipher_text, char* dest_plain_text, uint32 dest_plain_length);
 extern bool IsECEncryptedString(const char* src_cipher_text);
 
 /* fencedudf.cpp */
-#ifdef ENABLE_MULTIPLE_NODES
 extern Datum fenced_udf_process(PG_FUNCTION_ARGS);
-#endif
 extern Datum gs_extend_library(PG_FUNCTION_ARGS);
 
 /* cstore_am.cpp */
@@ -1513,18 +1531,28 @@ extern Datum pg_lsn_in(PG_FUNCTION_ARGS);
 
 // template function implementation
 //
-/* tsdb */
-extern  Datum add_job_class_depend_internal(PG_FUNCTION_ARGS);
-extern  Datum remove_job_class_depend_internal(PG_FUNCTION_ARGS);
 
-extern Datum check_engine_status(PG_FUNCTION_ARGS);
+/* client logic */
+extern Datum globalsettingin(PG_FUNCTION_ARGS);
+extern Datum columnsettingin(PG_FUNCTION_ARGS);
+
+/* tsdb */
+extern Datum add_job_class_depend_internal(PG_FUNCTION_ARGS);
+extern Datum remove_job_class_depend_internal(PG_FUNCTION_ARGS);
+extern Datum series_internal(PG_FUNCTION_ARGS);
+extern Datum top_key_internal(PG_FUNCTION_ARGS);
+extern Datum job_cancel(PG_FUNCTION_ARGS);
+extern void job_update(PG_FUNCTION_ARGS);
+extern Datum submit_job_on_nodes(PG_FUNCTION_ARGS);
+extern Datum isubmit_job_on_nodes(PG_FUNCTION_ARGS);
+extern Datum isubmit_job_on_nodes_internal(PG_FUNCTION_ARGS);
 
 /* AI */
 extern Datum gs_index_advise(PG_FUNCTION_ARGS);
-extern Datum hypopg_create_index(PG_FUNCTION_ARGS);
-extern Datum hypopg_display_index(PG_FUNCTION_ARGS);
-extern Datum hypopg_drop_index(PG_FUNCTION_ARGS);
-extern Datum hypopg_estimate_size(PG_FUNCTION_ARGS);
+extern Datum hypopg_create_index(PG_FUNCTION_ARGS);                             
+extern Datum hypopg_display_index(PG_FUNCTION_ARGS);                            
+extern Datum hypopg_drop_index(PG_FUNCTION_ARGS);                               
+extern Datum hypopg_estimate_size(PG_FUNCTION_ARGS);                            
 extern Datum hypopg_reset_index(PG_FUNCTION_ARGS);
 
 /* MOT */
@@ -1532,4 +1560,5 @@ extern Datum mot_global_memory_detail(PG_FUNCTION_ARGS);
 extern Datum mot_local_memory_detail(PG_FUNCTION_ARGS);
 extern Datum mot_session_memory_detail(PG_FUNCTION_ARGS);
 
+#endif /* !FRONTEND_PARSER */
 #endif /* BUILTINS_H */

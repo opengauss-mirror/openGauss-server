@@ -135,9 +135,9 @@ TargetEntry* tlist_member_except_aggref(Node* node, List* targetlist, bool* nest
         TargetEntry* tlentry = (TargetEntry*)lfirst(temp);
         Expr* tlexpr = tlentry->expr;
 
-        if (equal(node, tlentry->expr))
-            return tlentry;
         if (IsA(node, Aggref) && IsA(tlexpr, Aggref) && equal_node_except_aggref(node, tlexpr, nested_agg))
+            return tlentry;
+        if (equal(node, tlentry->expr))
             return tlentry;
     }
 
@@ -574,10 +574,16 @@ List* make_agg_var_list(PlannerInfo* root, List* tlist, List** duplicate_tlist)
      * find all Aggref and Var from TargetEntry used in group clauses
      */
     foreach (lc, non_group_vars) {
-        /* we only care about Aggref(s) */
         Node* non_group_var = (Node*)lfirst(lc);
         if (IsA(non_group_var, Var)) {
-            continue;
+            if (((Var *) non_group_var)->varlevelsup != 0) {
+                continue;
+            }
+
+            Index   varno = ((Var *) non_group_var)->varno;
+            RangeTblEntry *tbl = (RangeTblEntry *) list_nth(root->parse->rtable, (int)(varno - 1));
+            if (!tbl->sublink_pull_up)
+                continue;
         }
 
         ListCell* target_lc = NULL;
@@ -692,3 +698,15 @@ bool var_from_dependency_rel(Query* parse, Var* var, List* dep_oids)
     return list_member_oid(dep_oids, tbl->relid);
 }
 
+/*
+ * Check if var comes from sublink pulled up
+ *  @in parse: the parse tree contained the vars.
+ *  @in var: the vars need be checked.
+ */
+bool var_from_sublink_pulluped(Query *parse, Var *var)
+{
+    Index varno = var->varno;
+    RangeTblEntry *tbl = rt_fetch((int)varno, parse->rtable);
+
+    return tbl->sublink_pull_up;
+}

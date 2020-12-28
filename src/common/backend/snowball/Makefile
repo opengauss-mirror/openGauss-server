@@ -18,6 +18,8 @@ override CFLAGS := $(CPPFLAGS) -fPIC
 
 override CXXFLAGS := $(filter-out -fstack-protector, $(CFLAGS)) -fstack-protector-all -Wl,-z,relro,-z,now
 
+override LDFLAGS := $(LDFLAGS) -Wl,-Bsymbolic -rdynamic
+
 ifneq "$(MAKECMDGOALS)" "clean"
   ifneq "$(MAKECMDGOALS)" "distclean"
     ifneq "$(shell which g++ |grep hutaf_llt |wc -l)" "1"

@@ -54,7 +54,7 @@ typedef struct trace_func_stat {
     double average_elapsed_time;
 } trace_func_stat;
 
-typedef std::map<uint32_t, trace_func_stat *> func_stat;
+typedef std::map<uint32_t, trace_func_stat*> func_stat;
 
 // Class: ThreadFlow
 //      Using a stack to construct a control flow for each thread.
@@ -86,7 +86,7 @@ private:
     const int max_step_analyze_line_size = 2048;
 };
 
-typedef std::map<pid_t, ThreadFlow *> map_flow;
+typedef std::map<pid_t, ThreadFlow*> map_flow;
 
 // Class: DumpFileVisitor
 //      Define the interface for any kind of visitors. To decouple the parser
@@ -170,7 +170,7 @@ public:
 
     // Dynamically accept a visitor as the logic used for processing records
     // during parsing.
-    void acceptVisitor(DumpFileVisitor* pVisitor);
+    void acceptVisitor(DumpFileVisitor* visitor);
     trace_msg_code parseOneRecord(const char rec_tmp_buf[MAX_TRC_RC_SZ], size_t bufSize, bool hasdata);
     trace_msg_code readAndParseOneRecord(void);
     uint64_t findStartSlot(uint64_t maxSeq, uint64_t maxSlots, off_t* firstRecordOffset);
@@ -184,4 +184,3 @@ private:
 };
 
 #endif
-

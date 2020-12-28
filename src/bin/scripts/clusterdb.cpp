@@ -35,11 +35,11 @@ int main(int argc, char* argv[])
         {"maintenance-db", required_argument, NULL, 2},
         {NULL, 0, NULL, 0}};
 
-    const char* progname_tem = NULL;
+    const char* progname = NULL;
     int optindex;
     int c;
 
-    const char* dbname_tem = NULL;
+    const char* dbname = NULL;
     const char* maintenance_db = NULL;
     char* host = NULL;
     char* port = NULL;
@@ -51,7 +51,7 @@ int main(int argc, char* argv[])
     char* table = NULL;
     bool verbose = false;
 
-    progname_tem = get_progname(argv[0]);
+    progname = get_progname(argv[0]);
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pgscripts"));
 
     handle_help_version_opts(argc, argv, "clusterdb", help);
@@ -80,7 +80,7 @@ int main(int argc, char* argv[])
                 quiet = true;
                 break;
             case 'd':
-                dbname_tem = optarg;
+                dbname = optarg;
                 break;
             case 'a':
                 alldb = true;
@@ -95,7 +95,7 @@ int main(int argc, char* argv[])
                 maintenance_db = optarg;
                 break;
             default:
-                fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname_tem);
+                fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
                 exit(1);
         }
     }
@@ -104,48 +104,48 @@ int main(int argc, char* argv[])
      * Non-option argument specifies database name as long as it wasn't
      * already specified with -d / --dbname
      */
-    if (optind < argc && dbname_tem == NULL) {
-        dbname_tem = argv[optind];
+    if (optind < argc && dbname == NULL) {
+        dbname = argv[optind];
         optind++;
     }
 
     if (optind < argc) {
-        fprintf(stderr, _("%s: too many command-line arguments (first is \"%s\")\n"), progname_tem, argv[optind]);
-        fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname_tem);
+        fprintf(stderr, _("%s: too many command-line arguments (first is \"%s\")\n"), progname, argv[optind]);
+        fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
         exit(1);
     }
 
     setup_cancel_handler();
 
     if (alldb) {
-        if (dbname_tem != NULL) {
-            fprintf(stderr, _("%s: cannot cluster all databases and a specific one at the same time\n"), progname_tem);
+        if (dbname != NULL) {
+            fprintf(stderr, _("%s: cannot cluster all databases and a specific one at the same time\n"), progname);
             exit(1);
         }
         if (table != NULL) {
-            fprintf(stderr, _("%s: cannot cluster a specific table in all databases\n"), progname_tem);
+            fprintf(stderr, _("%s: cannot cluster a specific table in all databases\n"), progname);
             exit(1);
         }
 
-        cluster_all_databases(verbose, maintenance_db, host, port, username, prompt_password, progname_tem, echo, quiet);
+        cluster_all_databases(verbose, maintenance_db, host, port, username, prompt_password, progname, echo, quiet);
     } else {
-        if (dbname_tem == NULL) {
+        if (dbname == NULL) {
             if (getenv("PGDATABASE") != NULL)
-                dbname_tem = getenv("PGDATABASE");
+                dbname = getenv("PGDATABASE");
             else if (getenv("PGUSER") != NULL)
-                dbname_tem = getenv("PGUSER");
+                dbname = getenv("PGUSER");
             else
-                dbname_tem = get_user_name(progname_tem);
+                dbname = get_user_name(progname);
         }
 
-        cluster_one_database(dbname_tem, verbose, table, host, port, username, prompt_password, progname_tem, echo);
+        cluster_one_database(dbname, verbose, table, host, port, username, prompt_password, progname, echo);
     }
 
     exit(0);
 }
 
-static void cluster_one_database(const char* dbname_tem, bool verbose, const char* table, const char* host,
-    const char* port, const char* username, enum trivalue prompt_password, const char* progname_tem, bool echo)
+static void cluster_one_database(const char* dbname, bool verbose, const char* table, const char* host,
+    const char* port, const char* username, enum trivalue prompt_password, const char* progname, bool echo)
 {
     PQExpBufferData sql;
 
@@ -160,17 +160,17 @@ static void cluster_one_database(const char* dbname_tem, bool verbose, const cha
         appendPQExpBuffer(&sql, " %s", table);
     appendPQExpBuffer(&sql, ";\n");
 
-    conn = connectDatabase(dbname_tem, host, port, username, prompt_password, progname_tem, false);
+    conn = connectDatabase(dbname, host, port, username, prompt_password, progname, false);
     if (!executeMaintenanceCommand(conn, sql.data, echo)) {
         if (table != NULL)
             fprintf(stderr,
                 _("%s: clustering of table \"%s\" in database \"%s\" failed: %s"),
-                progname_tem,
+                progname,
                 table,
-                dbname_tem,
+                dbname,
                 PQerrorMessage(conn));
         else
-            fprintf(stderr, _("%s: clustering of database \"%s\" failed: %s"), progname_tem, dbname_tem, PQerrorMessage(conn));
+            fprintf(stderr, _("%s: clustering of database \"%s\" failed: %s"), progname, dbname, PQerrorMessage(conn));
         PQfinish(conn);
         exit(1);
     }
@@ -179,35 +179,35 @@ static void cluster_one_database(const char* dbname_tem, bool verbose, const cha
 }
 
 static void cluster_all_databases(bool verbose, const char* maintenance_db, const char* host, const char* port,
-    const char* username, enum trivalue prompt_password, const char* progname_tem, bool echo, bool quiet)
+    const char* username, enum trivalue prompt_password, const char* progname, bool echo, bool quiet)
 {
     PGconn* conn = NULL;
     PGresult* result = NULL;
     int i;
 
-    conn = connectMaintenanceDatabase(maintenance_db, host, port, username, prompt_password, progname_tem);
-    result = executeQuery(conn, "SELECT datname FROM pg_database WHERE datallowconn ORDER BY 1;", progname_tem, echo);
+    conn = connectMaintenanceDatabase(maintenance_db, host, port, username, prompt_password, progname);
+    result = executeQuery(conn, "SELECT datname FROM pg_database WHERE datallowconn ORDER BY 1;", progname, echo);
     PQfinish(conn);
 
     for (i = 0; i < PQntuples(result); i++) {
-        char* dbname_tem = PQgetvalue(result, i, 0);
+        char* dbname = PQgetvalue(result, i, 0);
 
         if (!quiet) {
-            printf(_("%s: clustering database \"%s\"\n"), progname_tem, dbname_tem);
+            printf(_("%s: clustering database \"%s\"\n"), progname, dbname);
             fflush(stdout);
         }
 
-        cluster_one_database(dbname_tem, verbose, NULL, host, port, username, prompt_password, progname_tem, echo);
+        cluster_one_database(dbname, verbose, NULL, host, port, username, prompt_password, progname, echo);
     }
 
     PQclear(result);
 }
 
-static void help(const char* progname_tem)
+static void help(const char* progname)
 {
-    printf(_("%s clusters all previously clustered tables in a database.\n\n"), progname_tem);
+    printf(_("%s clusters all previously clustered tables in a database.\n\n"), progname);
     printf(_("Usage:\n"));
-    printf(_("  %s [OPTION]... [DBNAME]\n"), progname_tem);
+    printf(_("  %s [OPTION]... [DBNAME]\n"), progname);
     printf(_("\nOptions:\n"));
     printf(_("  -a, --all                 cluster all databases\n"));
     printf(_("  -d, --dbname=DBNAME       database to cluster\n"));

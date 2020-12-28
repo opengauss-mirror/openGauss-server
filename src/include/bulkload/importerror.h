@@ -15,8 +15,8 @@
  *
  * importerror.h
  *
- *
- *
+ * 
+ * 
  * IDENTIFICATION
  *        src/include/bulkload/importerror.h
  *
@@ -30,7 +30,7 @@
 #include "commands/gds_stream.h"
 #include "storage/fd.h"
 
-typedef struct CopyStateData *CopyState;
+typedef struct CopyStateData* CopyState;
 
 struct ErrLogInfo {
     /* SMP ID */
@@ -113,8 +113,8 @@ public:
     }
 
     virtual void Destroy() = 0;
-    virtual int FetchError(BaseError *edata);
-    virtual void SaveError(BaseError *edata);
+    virtual int FetchError(BaseError* edata);
+    virtual void SaveError(BaseError* edata);
 
     MemoryContext m_memCxt;
     TupleDesc m_errDesc;
@@ -137,8 +137,8 @@ public:
 
     virtual void Destroy() override;
 
-    virtual void Initialize(const void *output, TupleDesc errDesc, ErrLogInfo &errInfo);
-    virtual void FormError(CopyState cstate, Datum begintime, ImportError *edata){};
+    virtual void Initialize(const void* output, TupleDesc errDesc, ErrLogInfo& errInfo);
+    virtual void FormError(CopyState cstate, Datum begintime, ImportError* edata){};
 };
 
 class GDSErrorLogger : public ImportErrorLogger {
@@ -150,16 +150,16 @@ public:
     {
     }
 
-    void Initialize(const void *output, TupleDesc errDesc, ErrLogInfo &errInfo) override;
+    void Initialize(const void* output, TupleDesc errDesc, ErrLogInfo& errInfo) override;
     void Destroy() override;
     /* GDSErrorLogger doesn't support FetchError method */
-    int FetchError(BaseError *edata) override;
-    void SaveError(BaseError *edata) override;
-    void FormError(CopyState cstate, Datum begintime, ImportError *edata) override;
+    int FetchError(BaseError* edata) override;
+    void SaveError(BaseError* edata) override;
+    void FormError(CopyState cstate, Datum begintime, ImportError* edata) override;
 
 private:
-    GDSStream *m_output;
-    char *m_name;
+    GDSStream* m_output;
+    char* m_name;
 #ifdef USE_ASSERT_CHECKING
     int m_counter;
 #endif
@@ -174,9 +174,9 @@ public:
     {
     }
 
-    void Initialize(const void *output, TupleDesc errDesc, ErrLogInfo &errInfo) override;
+    void Initialize(const void* output, TupleDesc errDesc, ErrLogInfo& errInfo) override;
     void Destroy() override;
-    void FormError(CopyState cstate, Datum begintime, ImportError *edata) override;
+    void FormError(CopyState cstate, Datum begintime, ImportError* edata) override;
 };
 
 /* Error logger for copy */
@@ -193,13 +193,13 @@ public:
 
     void Initialize(CopyState cstate);
     void Reset();
-    void FormError(CopyState cstate, Datum begintime, CopyError *edata);
+    void FormError(CopyState cstate, Datum begintime, CopyError* edata);
 
-    char *m_namespace;
+    char* m_namespace;
 };
 
-extern char *generate_unique_cache_name_prefix(Oid oid, uint32 distSessionKey);
-extern char *generate_unique_cache_name_prefix(const char *relname);
-extern void unlink_local_cache_file(const char *prefix, const uint32 smpId);
+extern char* generate_unique_cache_name_prefix(Oid oid, uint32 distSessionKey);
+extern char* generate_unique_cache_name_prefix(const char* relname);
+extern void unlink_local_cache_file(const char* prefix, const uint32 smpId);
 
 #endif

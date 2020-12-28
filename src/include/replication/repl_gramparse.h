@@ -29,4 +29,3 @@ extern void replication_scanner_finish(replication_scanner_yyscan_t yyscanner);
 extern void replication_scanner_yyerror(const char* message, replication_scanner_yyscan_t yyscanner);
 
 #endif /* _SYNCREP_GRAMPARSE_H */
-

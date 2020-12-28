@@ -1,0 +1,360 @@
+set enable_global_stats = true;
+--
+-- ALTER_TABLE
+-- Add column for empty table, type test
+--
+
+set time zone 'PRC';
+
+CREATE TABLE tmp (initial int4) with(orientation = orc) tablespace hdfs_ts;
+
+ALTER TABLE tmp ADD COLUMN xmin integer; -- fails
+
+ALTER TABLE tmp ADD COLUMN a int4 default 3;
+
+ALTER TABLE tmp ADD COLUMN b tinyint default 1;
+
+ALTER TABLE tmp ADD COLUMN c smallint default 2;
+
+ALTER TABLE tmp ADD COLUMN d bigint;
+
+ALTER TABLE tmp ADD COLUMN e decimal(5,2);
+
+ALTER TABLE tmp ADD COLUMN f numeric(10,5);
+
+ALTER TABLE tmp ADD COLUMN g float4;
+
+ALTER TABLE tmp ADD COLUMN h float8;
+
+ALTER TABLE tmp ADD COLUMN i char;
+
+ALTER TABLE tmp ADD COLUMN j varchar(10);
+
+ALTER TABLE tmp ADD COLUMN k char(5);
+
+ALTER TABLE tmp ADD COLUMN l text;
+
+ALTER TABLE tmp ADD COLUMN m nvarchar2;
+
+ALTER TABLE tmp ADD COLUMN o timestamptz;
+
+ALTER TABLE tmp ADD COLUMN p timestamp;
+
+ALTER TABLE tmp ADD COLUMN q date;
+
+ALTER TABLE tmp ADD COLUMN r timetz;
+
+ALTER TABLE tmp ADD COLUMN s time;
+
+ALTER TABLE tmp ADD COLUMN t tinterval;
+
+ALTER TABLE tmp ADD COLUMN u interval;
+
+ALTER TABLE tmp ADD COLUMN v smalldatetime;
+
+ALTER TABLE tmp ADD COLUMN w oid;
+
+ALTER TABLE tmp ADD COLUMN x bit(8);
+
+ALTER TABLE tmp ADD COLUMN y varbit(8);
+
+--unsupport type
+
+ALTER TABLE tmp ADD COLUMN n name;
+
+ALTER TABLE tmp ADD COLUMN aa tid;
+
+ALTER TABLE tmp ADD COLUMN bb xid;
+
+ALTER TABLE tmp ADD COLUMN cc oidvector;
+
+ALTER TABLE tmp ADD COLUMN dd smgr;
+
+ALTER TABLE tmp ADD COLUMN ee point;
+
+ALTER TABLE tmp ADD COLUMN ff lseg;
+
+ALTER TABLE tmp ADD COLUMN gg path;
+
+ALTER TABLE tmp ADD COLUMN hh box;
+
+ALTER TABLE tmp ADD COLUMN ii polygon;
+
+ALTER TABLE tmp ADD COLUMN ll float8[];
+
+ALTER TABLE tmp ADD COLUMN mm float4[];
+
+ALTER TABLE tmp ADD COLUMN nn int2[];
+
+INSERT INTO tmp (initial, a, b, c, d, e, f, g, h, i, j, k, l, m, o, p, q, r, s, u,
+	v, w, x, y)
+   VALUES (1, 2, 3, 4, 5, 6.1, 7.2, 8.3, 9.4, 'a', 'b', 'c', 'd', 'e', '2015-04-10 09:00:00', '2015-04-10 09:00:00', 
+   '2015-04-10 09:00:00', '2015-04-10 09:00:00', '2015-04-10 09:00:00','02:30:00','2015-04-10',1,'01010101','0101');
+
+SELECT * FROM tmp;
+
+DROP TABLE tmp;
+
+-- Add column for not-empty table
+
+CREATE TABLE tmp (initial int4) with(orientation = orc) tablespace hdfs_ts;
+
+insert into tmp values(1);
+
+insert into tmp values(2);
+
+ALTER TABLE tmp ADD COLUMN a int4 default 3;
+
+ALTER TABLE tmp ADD COLUMN b tinyint default 1;
+
+ALTER TABLE tmp ADD COLUMN c smallint default 2;
+
+ALTER TABLE tmp ADD COLUMN d bigint;
+
+ALTER TABLE tmp ADD COLUMN e decimal(5,2);
+
+ALTER TABLE tmp ADD COLUMN f numeric(10,5);
+
+ALTER TABLE tmp ADD COLUMN g float4;
+
+ALTER TABLE tmp ADD COLUMN h float8;
+
+ALTER TABLE tmp ADD COLUMN i char;
+
+ALTER TABLE tmp ADD COLUMN j varchar(10);
+
+ALTER TABLE tmp ADD COLUMN k char(5);
+
+ALTER TABLE tmp ADD COLUMN l text;
+
+ALTER TABLE tmp ADD COLUMN m nvarchar2;
+
+ALTER TABLE tmp ADD COLUMN o timestamptz;
+
+ALTER TABLE tmp ADD COLUMN p timestamp;
+
+ALTER TABLE tmp ADD COLUMN q date;
+
+ALTER TABLE tmp ADD COLUMN r timetz;
+
+ALTER TABLE tmp ADD COLUMN s time;
+
+ALTER TABLE tmp ADD COLUMN t tinterval;
+
+ALTER TABLE tmp ADD COLUMN u interval;
+
+ALTER TABLE tmp ADD COLUMN v smalldatetime;
+
+ALTER TABLE tmp ADD COLUMN w oid;
+
+ALTER TABLE tmp ADD COLUMN x bit(8);
+
+ALTER TABLE tmp ADD COLUMN y varbit(8);
+
+INSERT INTO tmp (initial, a, b, c, d, e, f, g, h, i, j, k, l, m, o, p, q, r, s, u,
+	v, w, x, y)
+   VALUES (1, 2, 3, 4, 5, 6.1, 7.2, 8.3, 9.4, 'a', 'b', 'c', 'd', 'e', '2015-04-10 09:00:00', '2015-04-10 09:00:00', 
+   '2015-04-10 09:00:00', '2015-04-10 09:00:00', '2015-04-10 09:00:00','02:30:00','2015-04-10',1,'01010101','0101');
+
+SELECT * FROM tmp;
+
+DROP TABLE tmp;
+
+--
+--Add mutliple column 
+CREATE TABLE tmp (initial int4) with(orientation = orc) tablespace hdfs_ts;
+insert into tmp values(1);
+ALTER TABLE tmp ADD(mychar char default 'a', mychar1 varchar(10) NOT NULL default 'ab', id integer NULL);
+select * from tmp;
+insert into tmp values(2,'b','abc',2);
+select * from tmp order by initial;
+drop table tmp;
+
+-- Add column for patitioned table
+CREATE TABLE tmp(a int, b int) with ( orientation = column ) distribute by hash(a) partition by range(b)
+(
+partition p1 values less than (3),
+partition p2 values less than (6),
+partition p3 values less than (10)
+);
+insert into tmp values(1,1);
+insert into tmp values(2,4);
+insert into tmp values(3,9);
+Alter table tmp add column c int default 2;
+select * from tmp order by a;
+insert into tmp values(2,5,4);
+select * from tmp order by a;
+
+drop table tmp;
+--
+--Alter type
+--
+
+--char,char(n),varchar(n),integer
+create table t1(id1 integer, mychar char, name char(5), name2 varchar(5)) with(orientation = orc) tablespace hdfs_ts;
+insert into t1 values(1,'1','12','1234');
+insert into t1 values(2,'a','ab','abcd');
+select * from t1 order by id1;
+\d+ t1;
+
+--can't alter distributed key
+alter table t1 alter id1 type char;
+
+-- char->int, failed
+alter table t1 alter mychar type int;
+
+-- char(n) extended
+alter table t1 alter name type char(10);
+\d+ t1;
+ 
+--test altered column char extended
+update t1 set name = 'abcdefg' where id1=2;
+select * from t1 order by id1;
+
+delete t1 where id1=2;
+
+-- char->int, succeed
+alter table t1 alter mychar type int;
+\d+ t1;
+
+--test altered column char->int, can't insert succeed
+insert into t1 values(1,'b','abcdef','1234');
+
+-- varchar(n) extended
+alter table t1 alter name2 type varchar(20);
+\d+ t1;
+
+--test altered column varchar(n)
+insert into t1 values(2,3,'abcdef','1234567');
+select * from t1 order by id1;
+
+-- varchar(n)->int
+alter table t1 alter name2 type int;
+\d+ t1;
+
+-- int->char(n)
+alter table t1 alter mychar type char(4);
+\d+ t1;
+insert into t1 values(3,'abc','abcde',12);
+select * from t1 order by id1;
+
+-- char(n)->char(m) cut shorter
+alter table t1 alter name type char(5);
+alter table t1 alter name type char(7);
+
+-- char(n)->varchar(m)
+alter table t1 alter name type varchar(4);
+alter table t1 alter name type varchar(12);
+\d+ t1;
+
+
+-- int->smallint
+alter table t1 alter name2 type smallint;
+delete from t1 where id1=2;
+alter table t1 alter name2 type smallint;
+\d+ t1;
+
+-- varchar(n)->text
+alter table t1 alter name type text;
+\d+ t1;
+
+-- int->numeric
+alter table t1 alter name2 type numeric(10,2);
+\d+ t1;
+select * from t1 order by id1;
+insert into t1 values(4,'bc','ab',3.1415);
+select * from t1 order by id1;
+
+-- numeric->numeric
+alter table t1 alter name2 type numeric(5,2);  --failed
+alter table t1 alter name2 type numeric(7,3);  --succeed
+select * from t1 order by id1;
+
+-- numeric->char(n)
+alter table t1 alter name2 type char(6);  --failed
+alter table t1 alter name2 type char(10);  --succeed
+\d+ t1;
+insert into t1 values(5,'ab','123','12.34567890123');  --failed
+insert into t1 values(5,'ab','123','12.3456789');  --succeed
+
+-- char(n)->decimal
+alter table t1 alter name2 type decimal;
+select * from t1 order by id1;
+
+-- decimal->float8
+alter table t1 alter name2 type float;
+select * from t1 order by id1;
+
+-- float8->real(float4)
+alter table t1 alter name2 type real;
+select * from t1 order by id1;
+
+-- real->numeric()
+alter table t1 alter name2 type numeric(5,2);  --failed
+alter table t1 alter name2 type numeric(5,1);  --succeed
+select * from t1 order by id1;
+
+-- numeric->int
+alter table t1 alter name2 type int;
+select * from t1 order by id1;
+
+drop table t1;
+
+--time type 
+create table timetest(c1 timestamp, c2 timestamptz, c3 date) with(orientation = orc) tablespace hdfs_ts;
+insert into timetest values('2015-04-13 16:50:12', '2015-04-13 16:51:13', '2015-01-13');
+insert into timetest values('2015/04/13 04:11:12 pm','04/13/2015 15:30:21', '02/04/2015');
+select * from timetest order by c1;
+
+-- timestamptz->time
+alter table timetest alter c2 type time;
+select * from timetest order by c1;
+
+-- time->timetz
+alter table timetest alter c2 type timetz;
+select * from timetest order by c1;
+
+-- timetz->timestamptz
+alter table timetest alter c2 type timestamptz;
+
+-- date->timestamptz
+alter table timetest alter c3 type timestamptz;
+select * from timetest order by c1;
+
+-- timestamptz->date
+alter table timetest alter c3 type date;
+select * from timetest order by c1;
+
+-- timetz->char(n)
+alter table timetest alter c2 type char(15);
+select * from timetest order by c1;
+
+-- char(n)->timetz
+alter table timetest alter c2 type timetz;  --failed
+alter table timetest alter c2 type char(12); 
+alter table timetest alter c2 type timetz;  --failed
+
+--using
+alter table timetest alter c2 type timetz using timetz(c2);  --succeed
+select * from timetest order by c1;
+
+alter table timetest alter c2 type date using c3;  --refer other column,failed
+
+drop table timetest;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

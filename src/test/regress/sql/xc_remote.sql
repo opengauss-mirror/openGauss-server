@@ -191,7 +191,7 @@ create table xcrem_temptable as select * from xcrem_employee;
 create or replace function volatile_func(id int) returns int as
 $$begin return 3;end $$ language plpgsql;
 
-\set EXP 'explain (verbose true, costs false, nodes false)'
+\set EXP 'explain (verbose true, costs false)'
 \set SEL 'select empno, edlevel, lastname, salary, bonus from xcrem_employee order by empno'
 
 -- Test UPDATE

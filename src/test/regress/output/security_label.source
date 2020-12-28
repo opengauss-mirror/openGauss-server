@@ -8,8 +8,8 @@ DROP ROLE IF EXISTS seclabel_user2;
 DROP TABLE IF EXISTS seclabel_tbl1;
 DROP TABLE IF EXISTS seclabel_tbl2;
 DROP TABLE IF EXISTS seclabel_tbl3;
-CREATE USER seclabel_user1 WITH CREATEROLE PASSWORD 'ttest@123';
-CREATE USER seclabel_user2 PASSWORD 'ttest@123';
+CREATE USER seclabel_user1 WITH CREATEROLE PASSWORD 'gauss@123';
+CREATE USER seclabel_user2 PASSWORD 'gauss@123';
 CREATE TABLE seclabel_tbl1 (a int, b text);
 CREATE TABLE seclabel_tbl2 (x int, y text);
 CREATE VIEW seclabel_view1 AS SELECT * FROM seclabel_tbl2;
@@ -42,7 +42,7 @@ LOAD '@abs_builddir@/dummy_seclabel@DLSUFFIX@';
 --
 -- Test of SECURITY LABEL statement with a plugin
 --
-SET SESSION AUTHORIZATION seclabel_user1 PASSWORD 'ttest@123';
+SET SESSION AUTHORIZATION seclabel_user1 PASSWORD 'gauss@123';
 SECURITY LABEL ON TABLE seclabel_tbl1 IS 'classified';			-- OK
 SECURITY LABEL ON COLUMN seclabel_tbl1.a IS 'unclassified';		-- OK
 SECURITY LABEL ON COLUMN seclabel_tbl1 IS 'unclassified';	-- fail
@@ -58,14 +58,14 @@ SECURITY LABEL ON TABLE seclabel_tbl1 IS 'secret';		-- fail (not superuser)
 ERROR:  only system admin can set 'secret' label
 SECURITY LABEL ON TABLE seclabel_tbl3 IS 'unclassified';	-- fail (not found)
 ERROR:  relation "seclabel_tbl3" does not exist
-SET SESSION AUTHORIZATION seclabel_user2 PASSWORD 'ttest@123';
+SET SESSION AUTHORIZATION seclabel_user2 PASSWORD 'gauss@123';
 SECURITY LABEL ON TABLE seclabel_tbl1 IS 'unclassified';		-- fail
 ERROR:  must be owner of relation seclabel_tbl1
 SECURITY LABEL ON TABLE seclabel_tbl2 IS 'classified';			-- OK
 --
 -- Test for shared database object
 --
-SET SESSION AUTHORIZATION seclabel_user1 PASSWORD 'ttest@123';
+SET SESSION AUTHORIZATION seclabel_user1 PASSWORD 'gauss@123';
 SECURITY LABEL ON ROLE seclabel_user1 IS 'classified';			-- OK
 SECURITY LABEL ON ROLE seclabel_user1 IS '...invalid label...';	-- fail
 ERROR:  '...invalid label...' is not a valid security label
@@ -76,7 +76,7 @@ SECURITY LABEL ON ROLE seclabel_user1 IS 'secret';	-- fail (not superuser)
 ERROR:  only system admin can set 'secret' label
 SECURITY LABEL ON ROLE seclabel_user3 IS 'unclassified';	-- fail (not found)
 ERROR:  role "seclabel_user3" does not exist
-SET SESSION AUTHORIZATION seclabel_user2 PASSWORD 'ttest@123';
+SET SESSION AUTHORIZATION seclabel_user2 PASSWORD 'gauss@123';
 SECURITY LABEL ON ROLE seclabel_user2 IS 'unclassified';	-- fail (not privileged)
 ERROR:  must have CREATEROLE privilege
 RESET SESSION AUTHORIZATION;

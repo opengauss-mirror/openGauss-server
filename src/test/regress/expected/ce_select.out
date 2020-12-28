@@ -1,0 +1,372 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+\! gs_ktool -g
+GENERATE
+2
+\! gs_ktool -g
+GENERATE
+3
+DROP CLIENT MASTER KEY IF EXISTS ImgCMK1 CASCADE;
+NOTICE:  global setting "imgcmk1" does not exist
+DROP CLIENT MASTER KEY IF EXISTS ImgCMK CASCADE;
+NOTICE:  global setting "imgcmk" does not exist
+CREATE CLIENT MASTER KEY ImgCMK1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE CLIENT MASTER KEY ImgCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/2" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY ImgCEK1 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK1, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE COLUMN ENCRYPTION KEY ImgCEK WITH VALUES (CLIENT_MASTER_KEY = ImgCMK, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE creditcard_info (id_number    int, name         text encrypted with (column_encryption_key = ImgCEK, encryption_type = DETERMINISTIC),
+credit_card  varchar(19) encrypted with (column_encryption_key = ImgCEK1, encryption_type = DETERMINISTIC));
+INSERT INTO creditcard_info VALUES (1,'joe','6217986500001288393');
+INSERT INTO creditcard_info VALUES (2, 'joy','6219985678349800033');
+INSERT INTO creditcard_info VALUES (3, 'xiaoli', '6211877800001008888');
+INSERT INTO creditcard_info VALUES (4, 'Nina', '6189486985800056893');
+INSERT INTO creditcard_info VALUES (5, 'fanny', '7689458639568569354');
+INSERT INTO creditcard_info VALUES (6, 'cora', '7584572945579384675');
+INSERT INTO creditcard_info VALUES (7, 'nancy', '7497593456879650677');
+CREATE TABLE creditcard_info1 (id_number    int, name         text encrypted with (column_encryption_key = ImgCEK, encryption_type = DETERMINISTIC),
+credit_card  varchar(19) encrypted with (column_encryption_key = ImgCEK1, encryption_type = DETERMINISTIC));
+INSERT INTO creditcard_info1 VALUES (1,'joe','6217986500001288393');
+INSERT INTO creditcard_info1 VALUES (2, 'joy','6219985678349800033');
+INSERT INTO creditcard_info1 VALUES (3, 'xiaoli', '6211877800001008888');
+INSERT INTO creditcard_info1 VALUES (4, 'Nina', '6189486985800056893');
+INSERT INTO creditcard_info1 VALUES (5, 'fanny', '7689458639568569354');
+--支持
+select * from creditcard_info1 where name = (select name from creditcard_info order by id_number limit 1);
+ id_number | name |     credit_card     
+-----------+------+---------------------
+         1 | joe  | 6217986500001288393
+(1 row)
+
+CREATE TABLE creditcard_info2 (id_number    int, name1  text encrypted with (column_encryption_key = ImgCEK1, encryption_type = DETERMINISTIC),
+name2  text encrypted with (column_encryption_key = ImgCEK1, encryption_type = DETERMINISTIC),
+credit_card  varchar(19) encrypted with (column_encryption_key = ImgCEK1, encryption_type = DETERMINISTIC));
+INSERT INTO creditcard_info2 VALUES (1,'joe','joe','6217986500001288393');
+INSERT INTO creditcard_info2 VALUES (2, 'joy','joy','6219985678349800033');
+INSERT INTO creditcard_info2 VALUES (3, 'xiaoli','xiaoli', '6211877800001008888');
+CREATE TABLE creditcard_info3 (id_number    int, name1  text encrypted with (column_encryption_key = ImgCEK1, encryption_type = DETERMINISTIC),
+name2  text encrypted with (column_encryption_key = ImgCEK, encryption_type = DETERMINISTIC),
+credit_card  int encrypted with (column_encryption_key = ImgCEK1, encryption_type = DETERMINISTIC));
+INSERT INTO creditcard_info3 VALUES (1,'joe','joe',62176500);
+INSERT INTO creditcard_info3 VALUES (2, 'joy','joy',62199856);
+INSERT INTO creditcard_info3 VALUES (3, 'xiaoli','xiaoli', 621187780);
+explain INSERT INTO creditcard_info3 VALUES (3, 'xiaoli','xiaoli', 621187780);
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ [Bypass]
+ Insert on creditcard_info3  (cost=0.00..0.01 rows=1 width=0)
+   ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(3 rows)
+
+--支持
+select * from creditcard_info2 where name1 = (select name1 from creditcard_info3 order by id_number limit 1);
+ id_number | name1 | name2 |     credit_card     
+-----------+-------+-------+---------------------
+         1 | joe   | joe   | 6217986500001288393
+(1 row)
+
+select * from (select * from creditcard_info3) where credit_card = 62176500;
+ id_number | name1 | name2 | credit_card 
+-----------+-------+-------+-------------
+         1 | joe   | joe   |    62176500
+(1 row)
+
+select name2 from (select * from creditcard_info3) group by name1 ,name2 having name1 = 'joe';
+ name2 
+-------
+ joe
+(1 row)
+
+select * from (select * from creditcard_info3 where credit_card = 62176500);
+ id_number | name1 | name2 | credit_card 
+-----------+-------+-------+-------------
+         1 | joe   | joe   |    62176500
+(1 row)
+
+select * from (select * from creditcard_info3) as a , (select * from creditcard_info2) as b where a.credit_card = 62176500 and a.name1='joe' and b.name1='joe';
+ id_number | name1 | name2 | credit_card | id_number | name1 | name2 |     credit_card     
+-----------+-------+-------+-------------+-----------+-------+-------+---------------------
+         1 | joe   | joe   |    62176500 |         1 | joe   | joe   | 6217986500001288393
+(1 row)
+
+explain select * from (select * from creditcard_info3) as a , (select * from creditcard_info2) as b where a.credit_card = 62176500 and a.name1='joe' and b.name1='joe';
+                                                                                                                                                                                                         QUERY PLAN                                                                                                                                                                                                          
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+
+select credit_card, name1 
+from 
+(select name1,credit_card from creditcard_info3) as a , 
+(select name2 from creditcard_info2) as b 
+where name1='joe' and name2='joe'
+group by credit_card, name1
+having credit_card = 62176500;
+ credit_card | name1 
+-------------+-------
+    62176500 | joe
+(1 row)
+
+-- select * from creditcard_info3 where exists (select * from creditcard_info2 where name1 = 'joe' and creditcard_info2.name1 = creditcard_info3.name1);
+select * from creditcard_info3 where name1 in (select name1 from creditcard_info3 where name2 = 'joe');
+ id_number | name1 | name2 | credit_card 
+-----------+-------+-------+-------------
+         1 | joe   | joe   |    62176500
+(1 row)
+
+select * from  creditcard_info3 as a , creditcard_info2 as b where a.credit_card = 62176500 and a.name1='joe' and b.name1='joe';
+ id_number | name1 | name2 | credit_card | id_number | name1 | name2 |     credit_card     
+-----------+-------+-------+-------------+-----------+-------+-------+---------------------
+         1 | joe   | joe   |    62176500 |         1 | joe   | joe   | 6217986500001288393
+(1 row)
+
+select * from (select name1,credit_card from creditcard_info3) as a , (select name2 from creditcard_info2) as b where a.credit_card = 62176500 and name1='joe' and name2='joe';
+ name1 | credit_card | name2 
+-------+-------------+-------
+ joe   |    62176500 | joe
+(1 row)
+
+select name1 from  creditcard_info3  where credit_card = 62176500 INTERSECT select name1 from  creditcard_info2 ;
+ name1 
+-------
+ joe
+(1 row)
+
+select id_number, name1 from  creditcard_info2  EXCEPT select id_number,name1 from  creditcard_info3 where credit_card = 62176500 order by id_number;
+ id_number | name1  
+-----------+--------
+         2 | joy
+         3 | xiaoli
+(2 rows)
+
+select * from (select name1 from  creditcard_info3  where credit_card = 62176500 INTERSECT select name1 from  creditcard_info2) where name1 ='joe';
+ name1 
+-------
+ joe
+(1 row)
+
+select id_number, name1 from  creditcard_info3  INTERSECT select id_number,name2 from  creditcard_info2 order by id_number;
+ id_number | name1  
+-----------+--------
+         1 | joe
+         2 | joy
+         3 | xiaoli
+(3 rows)
+
+select id_number, name1 from  creditcard_info3   where credit_card = 62176500 UNION select id_number,name1 from  creditcard_info2 order by id_number;
+ id_number | name1  
+-----------+--------
+         1 | joe
+         2 | joy
+         3 | xiaoli
+(3 rows)
+
+select id_number, name1 from  creditcard_info3  UNION select id_number,name2 from  creditcard_info2 order by id_number;
+ id_number | name1  
+-----------+--------
+         1 | joe
+         2 | joy
+         3 | xiaoli
+(3 rows)
+
+select id_number, name2 from  creditcard_info3  INTERSECT select id_number,name2 from  creditcard_info2 order by id_number;
+ERROR(CLIENT): set operator is not allowed on columns with different keys
+select id_number, name2 from  creditcard_info3  UNION select id_number,name2 from  creditcard_info2 order by id_number;
+ERROR(CLIENT): set operator is not allowed on columns with different keys
+--不支持--输出为空
+select * from creditcard_info2 where name1 = (select name from creditcard_info order by id_number limit 1);
+ id_number | name1 | name2 | credit_card 
+-----------+-------+-------+-------------
+(0 rows)
+
+select * from (select * from creditcard_info3) as a , (select * from creditcard_info2) as b where a.credit_card = 62176500 and a.name2='joe' and b.name2='joe';
+ id_number | name1 | name2 | credit_card | id_number | name1 | name2 |     credit_card     
+-----------+-------+-------+-------------+-----------+-------+-------+---------------------
+         1 | joe   | joe   |    62176500 |         1 | joe   | joe   | 6217986500001288393
+(1 row)
+
+select * from (select * from creditcard_info3) as a , (select * from creditcard_info2) as b where a.credit_card = 62176500 and a.name1='joe' and b.credit_card ='6217986500001288393';
+ id_number | name1 | name2 | credit_card | id_number | name1 | name2 |     credit_card     
+-----------+-------+-------+-------------+-----------+-------+-------+---------------------
+         1 | joe   | joe   |    62176500 |         1 | joe   | joe   | 6217986500001288393
+(1 row)
+
+DROP TABLE creditcard_info2;
+DROP TABLE creditcard_info3;
+CREATE TABLE creditcard_info2 (id_number    int, name1  text encrypted with (column_encryption_key = ImgCEK1, encryption_type = DETERMINISTIC),
+name2  text encrypted with (column_encryption_key = ImgCEK1, encryption_type = RANDOMIZED),
+credit_card  varchar(19) encrypted with (column_encryption_key = ImgCEK1, encryption_type = DETERMINISTIC));
+INSERT INTO creditcard_info2 VALUES (1,'joe','joe','6217986500001288393');
+INSERT INTO creditcard_info2 VALUES (2, 'joy','joy','6219985678349800033');
+INSERT INTO creditcard_info2 VALUES (3, 'xiaoli','xiaoli', '6211877800001008888');
+CREATE TABLE creditcard_info3 (id_number    int, name1  text encrypted with (column_encryption_key = ImgCEK1, encryption_type = DETERMINISTIC),
+name2  text encrypted with (column_encryption_key = ImgCEK, encryption_type = DETERMINISTIC),
+credit_card  int encrypted with (column_encryption_key = ImgCEK1, encryption_type = DETERMINISTIC));
+INSERT INTO creditcard_info3 VALUES (1,'joe','joe',62176500);
+INSERT INTO creditcard_info3 VALUES (2, 'joy','joy',62199856);
+INSERT INTO creditcard_info3 VALUES (3, 'xiaoli','xiaoli', 621187780);
+select name1 from  creditcard_info2   where name2 = 'joe';
+ERROR(CLIENT): operator is not allowed on datatype of this column
+select name1 from  creditcard_info2  INTERSECT select name2 from  creditcard_info2;
+ERROR(CLIENT): set operations are not allowed on randomized encrypted column
+select name1 from  creditcard_info3  UNION select name2 from  creditcard_info2;
+ERROR(CLIENT): set operations are not allowed on randomized encrypted column
+select name2 from  creditcard_info3  INTERSECT select name2 from  creditcard_info2;
+ERROR(CLIENT): set operations are not allowed on randomized encrypted column
+CREATE TEMP TABLE creditcard_info4 (id_number    int, name1  text encrypted with (column_encryption_key = ImgCEK1, encryption_type = DETERMINISTIC),
+name2  text encrypted with (column_encryption_key = ImgCEK1, encryption_type = RANDOMIZED),
+credit_card  varchar(19) encrypted with (column_encryption_key = ImgCEK1, encryption_type = DETERMINISTIC));
+INSERT INTO creditcard_info4 VALUES (1,'joe','joe','6217986500001288393');
+INSERT INTO creditcard_info4 VALUES (2, 'joy','joy','6219985678349800033');
+INSERT INTO creditcard_info4 VALUES (3, 'xiaoli','xiaoli', '6211877800001008888');
+CREATE TEMP TABLE creditcard_info5 (id_number    int, name1  text encrypted with (column_encryption_key = ImgCEK1, encryption_type = DETERMINISTIC),
+name2  text encrypted with (column_encryption_key = ImgCEK, encryption_type = DETERMINISTIC),
+credit_card  int encrypted with (column_encryption_key = ImgCEK1, encryption_type = DETERMINISTIC));
+INSERT INTO creditcard_info5 VALUES (1,'joe','joe',62176500);
+INSERT INTO creditcard_info5 VALUES (2, 'joy','joy',62199856);
+INSERT INTO creditcard_info5 VALUES (3, 'xiaoli','xiaoli', 621187780);
+select * from creditcard_info4 where name1 = (select name1 from creditcard_info5 order by id_number limit 1);
+ id_number | name1 | name2 |     credit_card     
+-----------+-------+-------+---------------------
+         1 | joe   | joe   | 6217986500001288393
+(1 row)
+
+select * from (select * from creditcard_info5) where credit_card = 62176500;
+ id_number | name1 | name2 | credit_card 
+-----------+-------+-------+-------------
+         1 | joe   | joe   |    62176500
+(1 row)
+
+select name2 from (select * from creditcard_info5) group by name1 ,name2 having name1 = 'joe';
+ name2 
+-------
+ joe
+(1 row)
+
+select * from (select * from creditcard_info5 where credit_card = 62176500);
+ id_number | name1 | name2 | credit_card 
+-----------+-------+-------+-------------
+         1 | joe   | joe   |    62176500
+(1 row)
+
+begin;
+CREATE TEMP TABLE creditcard_info7 (id_number    int, name1  text encrypted with (column_encryption_key = ImgCEK1, encryption_type = DETERMINISTIC),
+name2  text encrypted with (column_encryption_key = ImgCEK, encryption_type = DETERMINISTIC),
+credit_card  int encrypted with (column_encryption_key = ImgCEK1, encryption_type = DETERMINISTIC)) on commit preserve rows;
+CREATE TEMP TABLE creditcard_info8 (id_number    int, name1  text encrypted with (column_encryption_key = ImgCEK1, encryption_type = DETERMINISTIC),
+name2  text encrypted with (column_encryption_key = ImgCEK, encryption_type = DETERMINISTIC),
+credit_card  int encrypted with (column_encryption_key = ImgCEK1, encryption_type = DETERMINISTIC)) on commit delete rows;
+INSERT INTO creditcard_info7 VALUES (1,'joe','joe',62176500);
+INSERT INTO creditcard_info8 VALUES (2, 'joy','joy',62199856);
+commit;
+select * from creditcard_info7;
+ id_number | name1 | name2 | credit_card 
+-----------+-------+-------+-------------
+         1 | joe   | joe   |    62176500
+(1 row)
+
+select * from creditcard_info8;
+ id_number | name1 | name2 | credit_card 
+-----------+-------+-------+-------------
+(0 rows)
+
+DROP TABLE creditcard_info;
+DROP TABLE creditcard_info1;
+DROP TABLE creditcard_info2;
+DROP TABLE creditcard_info3;
+CREATE CLIENT MASTER KEY lidj_cmk WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/3" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY lidj_cek WITH VALUES (CLIENT_MASTER_KEY = lidj_cmk, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256);
+BEGIN;
+DROP CLIENT MASTER KEY IF EXISTS lidj_cmk CASCADE;
+NOTICE:  drop cascades to column setting: lidj_cek
+ROLLBACK;
+CREATE TABLE creditcard_info (id_number  int, name  text encrypted with (column_encryption_key = lidj_cek, encryption_type = DETERMINISTIC));
+INSERT INTO creditcard_info VALUES (1,'joe');
+INSERT INTO creditcard_info VALUES (2, 'joy');
+INSERT INTO creditcard_info VALUES (3, 'xiaoli');
+INSERT INTO creditcard_info VALUES (4, 'Nina');
+INSERT INTO creditcard_info VALUES (5, 'fanny');
+INSERT INTO creditcard_info VALUES (6, 'cora');
+INSERT INTO creditcard_info VALUES (7, 'nancy');
+select * from creditcard_info order by id_number;
+ id_number |  name  
+-----------+--------
+         1 | joe
+         2 | joy
+         3 | xiaoli
+         4 | Nina
+         5 | fanny
+         6 | cora
+         7 | nancy
+(7 rows)
+
+BEGIN;
+DROP TABLE creditcard_info;
+DROP CLIENT MASTER KEY IF EXISTS lidj_cmk CASCADE;
+NOTICE:  drop cascades to column setting: lidj_cek
+ROLLBACK;
+select * from creditcard_info order by id_number;
+ id_number |  name  
+-----------+--------
+         1 | joe
+         2 | joy
+         3 | xiaoli
+         4 | Nina
+         5 | fanny
+         6 | cora
+         7 | nancy
+(7 rows)
+
+DROP TABLE creditcard_info;
+DROP TABLE creditcard_info4;
+DROP TABLE creditcard_info5;
+DROP TABLE IF EXISTS creditcard_info7;
+DROP TABLE IF EXISTS creditcard_info8;
+DROP COLUMN ENCRYPTION KEY ImgCEK1;
+DROP COLUMN ENCRYPTION KEY ImgCEK;
+DROP COLUMN ENCRYPTION KEY lidj_cek;
+DROP CLIENT MASTER KEY ImgCMK1;
+DROP CLIENT MASTER KEY ImgCMK;
+DROP CLIENT MASTER KEY lidj_cmk;
+SELECT * FROM gs_client_global_keys;
+ global_key_name | key_namespace | key_owner | key_acl | create_date 
+-----------------+---------------+-----------+---------+-------------
+(0 rows)
+
+SELECT * FROM gs_client_global_keys_args;
+ global_key_id | function_name | key | value 
+---------------+---------------+-----+-------
+(0 rows)
+
+SELECT * FROM gs_column_keys;
+ column_key_name | column_key_distributed_id | global_key_id | key_namespace | key_owner | create_date | key_acl 
+-----------------+---------------------------+---------------+---------------+-----------+-------------+---------
+(0 rows)
+
+SELECT * FROM gs_column_keys_args;
+ column_key_id | function_name | key | value 
+---------------+---------------+-----+-------
+(0 rows)
+
+select  count(*), 'count' from gs_client_global_keys;
+ count | ?column? 
+-------+----------
+     0 | count
+(1 row)
+
+select  count(*), 'count' from gs_column_keys;
+ count | ?column? 
+-------+----------
+     0 | count
+(1 row)
+
+\! gs_ktool -d all
+DELETE ALL
+ 1 2 3

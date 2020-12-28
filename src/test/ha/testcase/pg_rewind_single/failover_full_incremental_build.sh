@@ -20,7 +20,7 @@ gs_ctl query -D $data_dir/datanode1_standby
 stop_primary
 
 #use gs_rewind to mirror the stadnby to primary, sync the different part between them.
-gs_ctl build -D $data_dir/datanode1 
+gs_ctl build -D $data_dir/datanode1 -Z single_node
 
 #check if rewind is ok.
 check_standby_as_primary_setup
@@ -43,7 +43,7 @@ kill_standby
 check_dummy_setup
 
 #use full build to mirror the primary on standby, sync the different part between them.
-gs_ctl build -D $data_dir/datanode1_standby
+gs_ctl build -D $data_dir/datanode1_standby -Z single_node -b full
 
 #check if rewind is ok.
 check_replication_setup
@@ -66,12 +66,12 @@ rm -f $data_dir/datanode1_dummystandby/pg_xlog/0000*
 
 kill_primary
 start_primary_as_standby
-gs_ctl failover -D $data_dir/datanode1 
+gs_ctl failover -D $data_dir/datanode1 -Z single_node
 
 check_dummy_setup
 
 #use incremental build to mirror the primary on standby, sync the different part between them.
-gs_ctl build -D $data_dir/datanode1_standby
+gs_ctl build -D $data_dir/datanode1_standby -Z single_node -b incremental
 
 #check if rewind is ok.
 check_replication_setup

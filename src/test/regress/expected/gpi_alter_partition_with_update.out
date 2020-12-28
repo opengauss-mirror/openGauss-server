@@ -1,0 +1,1221 @@
+--drop table and index
+drop index if exists local_exchange_table_index1;
+NOTICE:  index "local_exchange_table_index1" does not exist, skipping
+drop table if exists exchange_table;
+NOTICE:  table "exchange_table" does not exist, skipping
+drop index if exists local_alter_table_index1;
+NOTICE:  index "local_alter_table_index1" does not exist, skipping
+drop index if exists global_alter_table_index1;
+NOTICE:  index "global_alter_table_index1" does not exist, skipping
+drop index if exists global_alter_table_index2;
+NOTICE:  index "global_alter_table_index2" does not exist, skipping
+drop table if exists alter_table;
+NOTICE:  table "alter_table" does not exist, skipping
+create table alter_table
+(
+    INV_DATE_SK               integer               not null,
+    INV_ITEM_SK               integer               not null,
+    INV_WAREHOUSE_SK          integer               not null,
+    INV_QUANTITY_ON_HAND      integer
+)
+partition by range(inv_date_sk)
+(
+    partition p0 values less than(5000),
+    partition p1 values less than(10000),
+    partition p2 values less than(20000),
+    partition p3 values less than(30000),
+    partition p4 values less than(40000),
+    partition p5 values less than(50000),
+    partition p6 values less than(60000),
+    partition p7 values less than(100001)
+);
+--succeed
+insert into alter_table values (generate_series(1,100000), generate_series(1,100000), generate_series(1,100000));
+--succeed 
+create index local_alter_table_index1 on alter_table(INV_DATE_SK) local;
+create index global_alter_table_index1 on alter_table(INV_ITEM_SK) global;
+create index global_alter_table_index2 on alter_table(INV_WAREHOUSE_SK) global;
+explain (costs off) select count(*) from alter_table where INV_DATE_SK < 10000;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 2
+         ->  Partitioned Bitmap Heap Scan on alter_table
+               Recheck Cond: (inv_date_sk < 10000)
+               Selected Partitions:  1..2
+               ->  Partitioned Bitmap Index Scan on local_alter_table_index1
+                     Index Cond: (inv_date_sk < 10000)
+                     Selected Partitions:  1..2
+(9 rows)
+
+select count(*) from alter_table where INV_DATE_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_DATE_SK < 20000;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 3
+         ->  Partitioned Bitmap Heap Scan on alter_table
+               Recheck Cond: (inv_date_sk < 20000)
+               Selected Partitions:  1..3
+               ->  Partitioned Bitmap Index Scan on local_alter_table_index1
+                     Index Cond: (inv_date_sk < 20000)
+                     Selected Partitions:  1..3
+(9 rows)
+
+select count(*) from alter_table where INV_DATE_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_ITEM_SK < 10000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_item_sk < 10000)
+         ->  Bitmap Index Scan on global_alter_table_index1
+               Index Cond: (inv_item_sk < 10000)
+(5 rows)
+
+select count(*) from alter_table where INV_ITEM_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_ITEM_SK < 20000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_item_sk < 20000)
+         ->  Bitmap Index Scan on global_alter_table_index1
+               Index Cond: (inv_item_sk < 20000)
+(5 rows)
+
+select count(*) from alter_table where INV_ITEM_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_WAREHOUSE_SK < 10000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_warehouse_sk < 10000)
+         ->  Bitmap Index Scan on global_alter_table_index2
+               Index Cond: (inv_warehouse_sk < 10000)
+(5 rows)
+
+select count(*) from alter_table where INV_WAREHOUSE_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_WAREHOUSE_SK < 20000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_warehouse_sk < 20000)
+         ->  Bitmap Index Scan on global_alter_table_index2
+               Index Cond: (inv_warehouse_sk < 20000)
+(5 rows)
+
+select count(*) from alter_table where INV_WAREHOUSE_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
+    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'alter_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
+   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples 
+-------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {10000}    |      5000
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {10000}    |      5000
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {10000}    |      5000
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     10000
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     10000
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+(27 rows)
+
+ALTER TABLE alter_table add partition p8 values less than(500000);
+select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
+    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'alter_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
+   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples 
+-------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {10000}    |      5000
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {10000}    |      5000
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {10000}    |      5000
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     10000
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     10000
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+(30 rows)
+
+explain (costs off) select count(*) from alter_table where INV_DATE_SK < 10000;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 2
+         ->  Partitioned Bitmap Heap Scan on alter_table
+               Recheck Cond: (inv_date_sk < 10000)
+               Selected Partitions:  1..2
+               ->  Partitioned Bitmap Index Scan on local_alter_table_index1
+                     Index Cond: (inv_date_sk < 10000)
+                     Selected Partitions:  1..2
+(9 rows)
+
+select count(*) from alter_table where INV_DATE_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_DATE_SK < 20000;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 3
+         ->  Partitioned Bitmap Heap Scan on alter_table
+               Recheck Cond: (inv_date_sk < 20000)
+               Selected Partitions:  1..3
+               ->  Partitioned Bitmap Index Scan on local_alter_table_index1
+                     Index Cond: (inv_date_sk < 20000)
+                     Selected Partitions:  1..3
+(9 rows)
+
+select count(*) from alter_table where INV_DATE_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_ITEM_SK < 10000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_item_sk < 10000)
+         ->  Bitmap Index Scan on global_alter_table_index1
+               Index Cond: (inv_item_sk < 10000)
+(5 rows)
+
+select count(*) from alter_table where INV_ITEM_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_ITEM_SK < 20000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_item_sk < 20000)
+         ->  Bitmap Index Scan on global_alter_table_index1
+               Index Cond: (inv_item_sk < 20000)
+(5 rows)
+
+select count(*) from alter_table where INV_ITEM_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_WAREHOUSE_SK < 10000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_warehouse_sk < 10000)
+         ->  Bitmap Index Scan on global_alter_table_index2
+               Index Cond: (inv_warehouse_sk < 10000)
+(5 rows)
+
+select count(*) from alter_table where INV_WAREHOUSE_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_WAREHOUSE_SK < 20000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_warehouse_sk < 20000)
+         ->  Bitmap Index Scan on global_alter_table_index2
+               Index Cond: (inv_warehouse_sk < 20000)
+(5 rows)
+
+select count(*) from alter_table where INV_WAREHOUSE_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
+    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'alter_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
+   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples 
+-------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {10000}    |      5000
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {10000}    |      5000
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {10000}    |      5000
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     10000
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     10000
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+(30 rows)
+
+ALTER TABLE alter_table drop partition p1 update global index;
+select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
+    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'alter_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
+   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples 
+-------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     10000
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     10000
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+(27 rows)
+
+explain (costs off) select count(*) from alter_table where INV_DATE_SK < 10000;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 2
+         ->  Partitioned Bitmap Heap Scan on alter_table
+               Recheck Cond: (inv_date_sk < 10000)
+               Selected Partitions:  1..2
+               ->  Partitioned Bitmap Index Scan on local_alter_table_index1
+                     Index Cond: (inv_date_sk < 10000)
+                     Selected Partitions:  1..2
+(9 rows)
+
+select count(*) from alter_table where INV_DATE_SK < 10000;
+ count 
+-------
+  4999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_DATE_SK < 20000;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 2
+         ->  Partitioned Bitmap Heap Scan on alter_table
+               Recheck Cond: (inv_date_sk < 20000)
+               Selected Partitions:  1..2
+               ->  Partitioned Bitmap Index Scan on local_alter_table_index1
+                     Index Cond: (inv_date_sk < 20000)
+                     Selected Partitions:  1..2
+(9 rows)
+
+select count(*) from alter_table where INV_DATE_SK < 20000;
+ count 
+-------
+ 14999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_ITEM_SK < 10000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_item_sk < 10000)
+         ->  Bitmap Index Scan on global_alter_table_index1
+               Index Cond: (inv_item_sk < 10000)
+(5 rows)
+
+select count(*) from alter_table where INV_ITEM_SK < 10000;
+ count 
+-------
+  4999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_ITEM_SK < 20000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_item_sk < 20000)
+         ->  Bitmap Index Scan on global_alter_table_index1
+               Index Cond: (inv_item_sk < 20000)
+(5 rows)
+
+select count(*) from alter_table where INV_ITEM_SK < 20000;
+ count 
+-------
+ 14999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_WAREHOUSE_SK < 10000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_warehouse_sk < 10000)
+         ->  Bitmap Index Scan on global_alter_table_index2
+               Index Cond: (inv_warehouse_sk < 10000)
+(5 rows)
+
+select count(*) from alter_table where INV_WAREHOUSE_SK < 10000;
+ count 
+-------
+  4999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_WAREHOUSE_SK < 20000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_warehouse_sk < 20000)
+         ->  Bitmap Index Scan on global_alter_table_index2
+               Index Cond: (inv_warehouse_sk < 20000)
+(5 rows)
+
+select count(*) from alter_table where INV_WAREHOUSE_SK < 20000;
+ count 
+-------
+ 14999
+(1 row)
+
+select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
+    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'alter_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
+   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples 
+-------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     10000
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     10000
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+(27 rows)
+
+ALTER TABLE alter_table TRUNCATE partition p2 update global index;
+select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
+    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'alter_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
+   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples 
+-------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+(27 rows)
+
+explain (costs off) select count(*) from alter_table where INV_DATE_SK < 10000;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 2
+         ->  Partitioned Bitmap Heap Scan on alter_table
+               Recheck Cond: (inv_date_sk < 10000)
+               Selected Partitions:  1..2
+               ->  Partitioned Bitmap Index Scan on local_alter_table_index1
+                     Index Cond: (inv_date_sk < 10000)
+                     Selected Partitions:  1..2
+(9 rows)
+
+select count(*) from alter_table where INV_DATE_SK < 10000;
+ count 
+-------
+  4999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_DATE_SK < 20000;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 2
+         ->  Partitioned Bitmap Heap Scan on alter_table
+               Recheck Cond: (inv_date_sk < 20000)
+               Selected Partitions:  1..2
+               ->  Partitioned Bitmap Index Scan on local_alter_table_index1
+                     Index Cond: (inv_date_sk < 20000)
+                     Selected Partitions:  1..2
+(9 rows)
+
+select count(*) from alter_table where INV_DATE_SK < 20000;
+ count 
+-------
+  4999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_ITEM_SK < 10000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_item_sk < 10000)
+         ->  Bitmap Index Scan on global_alter_table_index1
+               Index Cond: (inv_item_sk < 10000)
+(5 rows)
+
+select count(*) from alter_table where INV_ITEM_SK < 10000;
+ count 
+-------
+  4999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_ITEM_SK < 20000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_item_sk < 20000)
+         ->  Bitmap Index Scan on global_alter_table_index1
+               Index Cond: (inv_item_sk < 20000)
+(5 rows)
+
+select count(*) from alter_table where INV_ITEM_SK < 20000;
+ count 
+-------
+  4999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_WAREHOUSE_SK < 10000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_warehouse_sk < 10000)
+         ->  Bitmap Index Scan on global_alter_table_index2
+               Index Cond: (inv_warehouse_sk < 10000)
+(5 rows)
+
+select count(*) from alter_table where INV_WAREHOUSE_SK < 10000;
+ count 
+-------
+  4999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_WAREHOUSE_SK < 20000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_warehouse_sk < 20000)
+         ->  Bitmap Index Scan on global_alter_table_index2
+               Index Cond: (inv_warehouse_sk < 20000)
+(5 rows)
+
+select count(*) from alter_table where INV_WAREHOUSE_SK < 20000;
+ count 
+-------
+  4999
+(1 row)
+
+select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
+    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'alter_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
+   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples 
+-------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4999
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+(27 rows)
+
+ALTER TABLE alter_table SPLIT PARTITION p0 AT (2500) INTO (PARTITION p10, PARTITION p11) update global index;
+select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
+    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'alter_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
+   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples 
+-------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ p10         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {2500}     |      2499
+ p10         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {2500}     |      2499
+ p10         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {2500}     |      2499
+ p11         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      2500
+ p11         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      2500
+ p11         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      2500
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+(30 rows)
+
+explain (costs off) select count(*) from alter_table where INV_DATE_SK < 10000;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 3
+         ->  Partitioned Bitmap Heap Scan on alter_table
+               Recheck Cond: (inv_date_sk < 10000)
+               Selected Partitions:  1..3
+               ->  Partitioned Bitmap Index Scan on local_alter_table_index1
+                     Index Cond: (inv_date_sk < 10000)
+                     Selected Partitions:  1..3
+(9 rows)
+
+select count(*) from alter_table where INV_DATE_SK < 10000;
+ count 
+-------
+  4999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_DATE_SK < 20000;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 3
+         ->  Partitioned Bitmap Heap Scan on alter_table
+               Recheck Cond: (inv_date_sk < 20000)
+               Selected Partitions:  1..3
+               ->  Partitioned Bitmap Index Scan on local_alter_table_index1
+                     Index Cond: (inv_date_sk < 20000)
+                     Selected Partitions:  1..3
+(9 rows)
+
+select count(*) from alter_table where INV_DATE_SK < 20000;
+ count 
+-------
+  4999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_ITEM_SK < 10000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_item_sk < 10000)
+         ->  Bitmap Index Scan on global_alter_table_index1
+               Index Cond: (inv_item_sk < 10000)
+(5 rows)
+
+select count(*) from alter_table where INV_ITEM_SK < 10000;
+ count 
+-------
+  4999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_ITEM_SK < 20000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_item_sk < 20000)
+         ->  Bitmap Index Scan on global_alter_table_index1
+               Index Cond: (inv_item_sk < 20000)
+(5 rows)
+
+select count(*) from alter_table where INV_ITEM_SK < 20000;
+ count 
+-------
+  4999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_WAREHOUSE_SK < 10000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_warehouse_sk < 10000)
+         ->  Bitmap Index Scan on global_alter_table_index2
+               Index Cond: (inv_warehouse_sk < 10000)
+(5 rows)
+
+select count(*) from alter_table where INV_WAREHOUSE_SK < 10000;
+ count 
+-------
+  4999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_WAREHOUSE_SK < 20000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_warehouse_sk < 20000)
+         ->  Bitmap Index Scan on global_alter_table_index2
+               Index Cond: (inv_warehouse_sk < 20000)
+(5 rows)
+
+select count(*) from alter_table where INV_WAREHOUSE_SK < 20000;
+ count 
+-------
+  4999
+(1 row)
+
+select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
+    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'alter_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
+   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples 
+-------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ p10         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {2500}     |      2499
+ p10         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {2500}     |      2499
+ p10         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {2500}     |      2499
+ p11         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      2500
+ p11         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      2500
+ p11         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      2500
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+(30 rows)
+
+ALTER TABLE alter_table MERGE PARTITIONS p10, p11 INTO PARTITION p1 update global index;
+select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
+    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'alter_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
+   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples 
+-------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |         0
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |         0
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+(27 rows)
+
+explain (costs off) select count(*) from alter_table where INV_DATE_SK < 10000;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 2
+         ->  Partitioned Bitmap Heap Scan on alter_table
+               Recheck Cond: (inv_date_sk < 10000)
+               Selected Partitions:  1..2
+               ->  Partitioned Bitmap Index Scan on local_alter_table_index1
+                     Index Cond: (inv_date_sk < 10000)
+                     Selected Partitions:  1..2
+(9 rows)
+
+select count(*) from alter_table where INV_DATE_SK < 10000;
+ count 
+-------
+  4999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_DATE_SK < 20000;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 2
+         ->  Partitioned Bitmap Heap Scan on alter_table
+               Recheck Cond: (inv_date_sk < 20000)
+               Selected Partitions:  1..2
+               ->  Partitioned Bitmap Index Scan on local_alter_table_index1
+                     Index Cond: (inv_date_sk < 20000)
+                     Selected Partitions:  1..2
+(9 rows)
+
+select count(*) from alter_table where INV_DATE_SK < 20000;
+ count 
+-------
+  4999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_ITEM_SK < 10000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_item_sk < 10000)
+         ->  Bitmap Index Scan on global_alter_table_index1
+               Index Cond: (inv_item_sk < 10000)
+(5 rows)
+
+select count(*) from alter_table where INV_ITEM_SK < 10000;
+ count 
+-------
+  4999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_ITEM_SK < 20000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_item_sk < 20000)
+         ->  Bitmap Index Scan on global_alter_table_index1
+               Index Cond: (inv_item_sk < 20000)
+(5 rows)
+
+select count(*) from alter_table where INV_ITEM_SK < 20000;
+ count 
+-------
+  4999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_WAREHOUSE_SK < 10000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_warehouse_sk < 10000)
+         ->  Bitmap Index Scan on global_alter_table_index2
+               Index Cond: (inv_warehouse_sk < 10000)
+(5 rows)
+
+select count(*) from alter_table where INV_WAREHOUSE_SK < 10000;
+ count 
+-------
+  4999
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_WAREHOUSE_SK < 20000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_warehouse_sk < 20000)
+         ->  Bitmap Index Scan on global_alter_table_index2
+               Index Cond: (inv_warehouse_sk < 20000)
+(5 rows)
+
+select count(*) from alter_table where INV_WAREHOUSE_SK < 20000;
+ count 
+-------
+  4999
+(1 row)
+
+create table exchange_table
+(
+    INV_DATE_SK               integer               not null,
+    INV_ITEM_SK               integer               not null,
+    INV_WAREHOUSE_SK          integer               not null,
+    INV_QUANTITY_ON_HAND      integer
+);
+--succeed
+insert into exchange_table values (generate_series(1,4000), generate_series(1,4000), generate_series(1,4000));
+--succeed 
+create index local_exchange_table_index1 on exchange_table(INV_DATE_SK);
+select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
+    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'alter_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
+   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples 
+-------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |         0
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |         0
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+(27 rows)
+
+ALTER TABLE alter_table EXCHANGE PARTITION FOR(2500) WITH TABLE exchange_table update global index;
+select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
+    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'alter_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
+   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples 
+-------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4000
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4000
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      4000
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+(27 rows)
+
+explain (costs off) select count(*) from alter_table where INV_DATE_SK < 10000;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 2
+         ->  Partitioned Bitmap Heap Scan on alter_table
+               Recheck Cond: (inv_date_sk < 10000)
+               Selected Partitions:  1..2
+               ->  Partitioned Bitmap Index Scan on local_alter_table_index1
+                     Index Cond: (inv_date_sk < 10000)
+                     Selected Partitions:  1..2
+(9 rows)
+
+select count(*) from alter_table where INV_DATE_SK < 10000;
+ count 
+-------
+  4000
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_DATE_SK < 20000;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 2
+         ->  Partitioned Bitmap Heap Scan on alter_table
+               Recheck Cond: (inv_date_sk < 20000)
+               Selected Partitions:  1..2
+               ->  Partitioned Bitmap Index Scan on local_alter_table_index1
+                     Index Cond: (inv_date_sk < 20000)
+                     Selected Partitions:  1..2
+(9 rows)
+
+select count(*) from alter_table where INV_DATE_SK < 20000;
+ count 
+-------
+  4000
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_ITEM_SK < 10000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_item_sk < 10000)
+         ->  Bitmap Index Scan on global_alter_table_index1
+               Index Cond: (inv_item_sk < 10000)
+(5 rows)
+
+select count(*) from alter_table where INV_ITEM_SK < 10000;
+ count 
+-------
+  4000
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_ITEM_SK < 20000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_item_sk < 20000)
+         ->  Bitmap Index Scan on global_alter_table_index1
+               Index Cond: (inv_item_sk < 20000)
+(5 rows)
+
+select count(*) from alter_table where INV_ITEM_SK < 20000;
+ count 
+-------
+  4000
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_WAREHOUSE_SK < 10000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_warehouse_sk < 10000)
+         ->  Bitmap Index Scan on global_alter_table_index2
+               Index Cond: (inv_warehouse_sk < 10000)
+(5 rows)
+
+select count(*) from alter_table where INV_WAREHOUSE_SK < 10000;
+ count 
+-------
+  4000
+(1 row)
+
+explain (costs off) select count(*) from alter_table where INV_WAREHOUSE_SK < 20000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on alter_table
+         Recheck Cond: (inv_warehouse_sk < 20000)
+         ->  Bitmap Index Scan on global_alter_table_index2
+               Index Cond: (inv_warehouse_sk < 20000)
+(5 rows)
+
+select count(*) from alter_table where INV_WAREHOUSE_SK < 20000;
+ count 
+-------
+  4000
+(1 row)
+
+--clean
+drop index if exists local_exchange_table_index1;
+drop table if exists exchange_table;
+drop index if exists local_alter_table_index1;
+drop index if exists global_alter_table_index1;
+drop index if exists global_alter_table_index2;
+drop table if exists alter_table;

@@ -4,21 +4,30 @@
  */
 set enable_nodegroup_debug=on;
 set expected_computing_nodegroup=group_b;
+create node group group_a with (datanode1,datanode2,datanode3,datanode4);
+create node group group_b with (datanode1,datanode2,datanode3,datanode4,datanode5,datanode6);
 CREATE SCHEMA data_redis;
+CREATE OR REPLACE FUNCTION pg_tupleid_get_blocknum(tid) RETURNS int8 AS '@abs_bindir@/../lib/postgresql/gsredistribute.so', 'pg_tupleid_get_blocknum' LANGUAGE C STABLE not fenced;
+CREATE OR REPLACE FUNCTION pg_tupleid_get_offset(tid) RETURNS int AS '@abs_bindir@/../lib/postgresql/gsredistribute.so', 'pg_tupleid_get_offset' LANGUAGE C STABLE not fenced;
 
 /* Verify delete_delta mechanism via DELETE operation */
 create table tx(c1 int, c2 int, c3 int) 
 with(orientation = column)
+distribute by hash (c1) 
+to group group_a
 PARTITION BY RANGE (c3)
 (
 	partition p0 values less than (10),
 	partition p1 values less than (20),
 	partition p2 values less than (30),
 	partition p3 values less than (maxvalue)
-);
+)
+;
 
 create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, block_number bigint, block_offset int)
 with(orientation = column)
+distribute by hash (c1) 
+to group group_b
 PARTITION BY RANGE (c3)
 (
 	partition p0 values less than (10),
@@ -32,18 +41,21 @@ create unlogged table data_redis.pg_delete_delta_12345
 (
 	xcnodeid int,
 	dnrelid int,
-	table_bucketid int,
 	block_number bigint,
 	block_offset int
-);
+)
+distribute by hash(xcnodeid,dnrelid,block_number,block_offset) to group group_a;
 
 insert into tx select v,v,v from generate_series(1,30) as v;
+insert into tx_verify select *, xc_node_id, tableoid, pg_tupleid_get_blocknum(ctid), pg_tupleid_get_offset(ctid) from tx;
 
 /*
  * DELETE rows in tx via regular DELETE operation and meanwhile make the deleted rows
  * are populated in data_redis.pg_delete_delta_12345 and using DELETE-USING on tx_verify
  */
+ALTER TABLE tx SET (append_mode=on,rel_cn_oid=12345);
 delete from tx where c1 < 15;
+ALTER TABLE tx SET (append_mode=off);
 
 delete from tx_verify as t1 using data_redis.pg_delete_delta_12345 as t2
 where t1.xcnodeid = t2.xcnodeid and
@@ -69,6 +81,7 @@ from
 );
 
 -- error path test expecting error
+alter table tx set (append_mode=on,rel_cn_oid=12345); 
 drop table data_redis.pg_delete_delta_12345;
 delete from tx where c1 < 15;
 
@@ -78,6 +91,8 @@ drop table tx_verify;
 /* Verify delete_delta mechanism via UPDATE operation */
 create table tx(c1 int, c2 int, c3 int) 
 with(orientation = column)
+distribute by hash (c1) 
+to group group_a
 PARTITION BY RANGE (c3)
 (
 	partition p0 values less than (10),
@@ -88,6 +103,8 @@ PARTITION BY RANGE (c3)
 ;
 create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, block_number bigint, block_offset int)
 with(orientation = column)
+distribute by hash (c1) 
+to group group_b
 PARTITION BY RANGE (c3)
 (
 	partition p0 values less than (10),
@@ -101,14 +118,17 @@ create unlogged table data_redis.pg_delete_delta_12345
 (
 	xcnodeid int,
 	dnrelid int,
-	table_bucketid int,
 	block_number bigint,
 	block_offset int
-);
+)
+distribute by hash(xcnodeid,dnrelid,block_number,block_offset) to group group_a;
 
 insert into tx select v,v,v from generate_series(1,30) as v;
+insert into tx_verify select *, xc_node_id, tableoid, pg_tupleid_get_blocknum(ctid), pg_tupleid_get_offset(ctid) from tx;
 
+ALTER TABLE tx SET (append_mode=on,rel_cn_oid=12345);
 update tx set c2 = 999 where c1 > 15;
+ALTER TABLE tx SET (append_mode=off);
 
 update tx_verify as t1 set c2 = 999 from data_redis.pg_delete_delta_12345 as t2
 where t1.xcnodeid = t2.xcnodeid and
@@ -133,7 +153,8 @@ from
    select c1,c2,c3 from tx
 );
 
--- error path test expecting error 
+-- error path test expecting error
+alter table tx set (append_mode=on,rel_cn_oid=12345); 
 drop table data_redis.pg_delete_delta_12345;
 update tx set c2 = 999 where c1 > 15;
 
@@ -143,6 +164,8 @@ drop table tx_verify;
 /* Verify delete join operation */
 create table tx(c1 int, c2 int, c3 int) 
 with(orientation = column)
+distribute by hash (c1) 
+to group group_a
 PARTITION BY RANGE (c3)
 (
 	partition p0 values less than (10),
@@ -154,6 +177,8 @@ PARTITION BY RANGE (c3)
 create table rowtable(c1 int, c2 int, c3 int);
 create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, block_number bigint, block_offset int)
 with(orientation = column)
+distribute by hash (c1)
+to group group_b
 PARTITION BY RANGE (c3)
 (
 	partition p0 values less than (10),
@@ -166,16 +191,19 @@ create unlogged table data_redis.pg_delete_delta_12345
 (
 	xcnodeid int,
 	dnrelid int,
-	table_bucketid int,
 	block_number bigint,
 	block_offset int
-);
+)
+distribute by hash(xcnodeid,dnrelid,block_number,block_offset) to group group_a;
 
 insert into tx select v,v,v from generate_series(1,30) as v;
+insert into tx_verify select *, xc_node_id, tableoid, pg_tupleid_get_blocknum(ctid), pg_tupleid_get_offset(ctid) from tx;
 insert into rowtable values(10,10,10),(20,20,20),(30,30,30);
 
+ALTER TABLE tx SET (append_mode=on,rel_cn_oid=12345);
 delete from tx as t1 using rowtable as t2 
 where t1.c1 = t2.c1;
+ALTER TABLE tx SET (append_mode=off);
 
 delete from tx_verify as t1 using data_redis.pg_delete_delta_12345 as t2
 where t1.xcnodeid = t2.xcnodeid and
@@ -208,6 +236,8 @@ drop table rowtable;
 /* Verify update join operation */
 create table tx(c1 int, c2 int, c3 int) 
 with(orientation = column)
+distribute by hash (c1) 
+to group group_a
 PARTITION BY RANGE (c3)
 (
 	partition p0 values less than (10),
@@ -219,6 +249,8 @@ PARTITION BY RANGE (c3)
 create table rowtable(c1 int, c2 int, c3 int);
 create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, block_number bigint, block_offset int)
 with(orientation = column)
+distribute by hash (c1) 
+to group group_b
 PARTITION BY RANGE (c3)
 (
 	partition p0 values less than (10),
@@ -231,16 +263,19 @@ create unlogged table data_redis.pg_delete_delta_12345
 (
 	xcnodeid int,
 	dnrelid int,
-	table_bucketid int,
 	block_number bigint,
 	block_offset int
-);
+)
+distribute by hash(xcnodeid,dnrelid,block_number,block_offset) to group group_a;
 
 insert into tx select v,v,v from generate_series(1,30) as v;
+insert into tx_verify select *, xc_node_id, tableoid, pg_tupleid_get_blocknum(ctid), pg_tupleid_get_offset(ctid) from tx;
 insert into rowtable values(10,10,10),(20,20,20),(30,30,30);
 
+ALTER TABLE tx SET (append_mode=on,rel_cn_oid=12345);
 update tx as t1 set c2 = 1 from rowtable as t2
 where t1.c1 = t2.c1;
+ALTER TABLE tx SET (append_mode=off);
 
 update tx_verify as t1 set c2 = 1 from data_redis.pg_delete_delta_12345 as t2
 where t1.xcnodeid = t2.xcnodeid and
@@ -273,6 +308,8 @@ drop table rowtable;
 /* Verify disable row movement partition update */
 create table tx(c1 int, c2 int, c3 int) 
 with(orientation = column)
+distribute by hash (c1) 
+to group group_a
 PARTITION BY RANGE (c3)
 (
 	partition p0 values less than (10),
@@ -283,6 +320,8 @@ PARTITION BY RANGE (c3)
 ;
 create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, block_number bigint, block_offset int)
 with(orientation = column)
+distribute by hash (c1) 
+to group group_b
 PARTITION BY RANGE (c3)
 (
 	partition p0 values less than (10),
@@ -295,14 +334,17 @@ create unlogged table data_redis.pg_delete_delta_12345
 (
 	xcnodeid int,
 	dnrelid int,
-	table_bucketid int,
 	block_number bigint,
 	block_offset int
-);
+)
+distribute by hash(xcnodeid,dnrelid,block_number,block_offset) to group group_a;
 
 insert into tx select v,v,v from generate_series(1,30) as v;
+insert into tx_verify select *, xc_node_id, tableoid, pg_tupleid_get_blocknum(ctid), pg_tupleid_get_offset(ctid) from tx;
 
+ALTER TABLE tx SET (append_mode=on,rel_cn_oid=12345);
 update tx set c2 = c2*2 where c1 > 15;
+ALTER TABLE tx SET (append_mode=off);
 
 update tx_verify as t1 set c2 = c2*2 from data_redis.pg_delete_delta_12345 as t2
 where t1.xcnodeid = t2.xcnodeid and
@@ -333,7 +375,11 @@ drop table data_redis.pg_delete_delta_12345;
 ------------------------------------------
 /* CStore replicated table doen't support delete or update yet */
 
+drop function pg_tupleid_get_blocknum;
+drop function pg_tupleid_get_offset;
+
+drop node group group_a;
+drop node group group_b;
 DROP SCHEMA data_redis CASCADE;
-reset enable_fast_query_shipping;
 reset expected_computing_nodegroup;
 reset enable_nodegroup_debug;

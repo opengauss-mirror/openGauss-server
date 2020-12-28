@@ -4,10 +4,16 @@
  */
 set enable_nodegroup_debug=on;
 set expected_computing_nodegroup=group_b;
+create node group group_a with (datanode1,datanode2,datanode3,datanode4);
+create node group group_b with (datanode1,datanode2,datanode3,datanode4,datanode5,datanode6);
 CREATE SCHEMA data_redis;
+CREATE OR REPLACE FUNCTION pg_tupleid_get_blocknum(tid) RETURNS int8 AS '@abs_bindir@/../lib/postgresql/gsredistribute.so', 'pg_tupleid_get_blocknum' LANGUAGE C STABLE not fenced;
+CREATE OR REPLACE FUNCTION pg_tupleid_get_offset(tid) RETURNS int AS '@abs_bindir@/../lib/postgresql/gsredistribute.so', 'pg_tupleid_get_offset' LANGUAGE C STABLE not fenced;
 /* Verify delete_delta mechanism via DELETE operation */
 create table tx (c1 int, c2 int, c3 int)
 with(orientation = column)
+distribute by hash (c1) 
+to group group_a
 PARTITION BY RANGE (c3)
 (
 	partition p0 values less than (10),
@@ -16,8 +22,10 @@ PARTITION BY RANGE (c3)
 	partition p3 values less than (maxvalue)
 )
 ;
-create table tx_dup (c1 int, c2 int, c3 int);
+create table tx_dup (c1 int, c2 int, c3 int) distribute by hash (c1) to group group_a;
 create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, block_number bigint, block_offset int)
+distribute by hash (c1) 
+to group group_b
 PARTITION BY RANGE (c3)
 (
 	partition p0 values less than (10),
@@ -30,21 +38,24 @@ create unlogged table data_redis.pg_delete_delta_12345
 (
 	xcnodeid int,
 	dnrelid int,
-	table_bucketid int,
 	block_number bigint,
 	block_offset int
-);
+)
+distribute by hash(xcnodeid,dnrelid,block_number,block_offset) to group group_a;
 insert into tx select v,v,v from generate_series(1,500) as v;
 insert into tx_dup select v%10,v%20,v%30 from generate_series(1,200) as v;
+insert into tx_verify select *, xc_node_id, tableoid, pg_tupleid_get_blocknum(ctid), pg_tupleid_get_offset(ctid) from tx;
 /*
  * DELETE rows in tx via regular DELETE operation and meanwhile make the deleted rows
  * are populated in data_redis.pg_delete_delta_12345 and using DELETE-USING on tx_verify
  */
+ALTER TABLE tx SET (append_mode=on,rel_cn_oid=12345);
 delete from tx using tx_dup where tx.c2 = tx_dup.c2;
+ALTER TABLE tx SET (append_mode=off);
 select count(*) from data_redis.pg_delete_delta_12345;
  count 
 -------
-     0
+   190
 (1 row)
 
 delete from tx_verify as t1 using data_redis.pg_delete_delta_12345 as t2
@@ -60,9 +71,9 @@ from
    minus all
    select c1,c2,c3 from tx_verify
 );
-           ?column?            
--------------------------------
- Check result return code: 481
+          ?column?           
+-----------------------------
+ Check result return code: 0
 (1 row)
 
 select 'Check result return code: ' || count(*)
@@ -83,6 +94,8 @@ drop table tx_verify;
 drop table data_redis.pg_delete_delta_12345;
 /* Verify delete_delta mechanism via UPDATE operation */
 create table tx(c1 int, c2 int, c3 int) with(orientation = column)
+distribute by hash (c1) 
+to group group_a
 PARTITION BY RANGE (c3)
 (
 	partition p0 values less than (10),
@@ -91,8 +104,10 @@ PARTITION BY RANGE (c3)
 	partition p3 values less than (maxvalue)
 )
 ;
-create table tx_dup(c1 int, c2 int, c3 int); -- distribute by hash (c1) to group group_a;
+create table tx_dup(c1 int, c2 int, c3 int) distribute by hash (c1) to group group_a;
 create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, block_number bigint, block_offset int)
+distribute by hash (c1) 
+to group group_b
 PARTITION BY RANGE (c3)
 (
 	partition p0 values less than (10),
@@ -105,15 +120,18 @@ create unlogged table data_redis.pg_delete_delta_12345
 (
 	xcnodeid int,
 	dnrelid int,
-	table_bucketid int,
 	block_number bigint,
 	block_offset int
-);
+)
+distribute by hash(xcnodeid,dnrelid,block_number,block_offset) to group group_a;
 insert into tx select v,v,v from generate_series(1,500) as v;
 insert into tx_dup select v%10,v%20,v%30 from generate_series(1,200) as v;
+insert into tx_verify select *, xc_node_id, tableoid, pg_tupleid_get_blocknum(ctid), pg_tupleid_get_offset(ctid) from tx;
+ALTER TABLE tx SET (append_mode=on,rel_cn_oid=12345);
 update tx set c2 = 999 from tx_dup where tx.c2 = tx_dup.c2;
 ERROR:  Non-deterministic UPDATE
 DETAIL:  multiple updates to a row by a single query for column store table.
+ALTER TABLE tx SET (append_mode=off);
 select count(*) from data_redis.pg_delete_delta_12345;
  count 
 -------
@@ -133,9 +151,9 @@ from
    minus all
    select c1,c2,c3 from tx_verify
 );
-           ?column?            
--------------------------------
- Check result return code: 500
+          ?column?           
+-----------------------------
+ Check result return code: 0
 (1 row)
 
 select 'Check result return code: ' || count(*)
@@ -157,6 +175,8 @@ drop table data_redis.pg_delete_delta_12345;
 ------------------------------------------
 /* Verify disable row movement partition update */
 create table tx(c1 int, c2 int, c3 int) with(orientation = column)
+distribute by hash (c1) 
+to group group_a
 PARTITION BY RANGE (c3)
 (
 	partition p0 values less than (10),
@@ -165,8 +185,10 @@ PARTITION BY RANGE (c3)
 	partition p3 values less than (maxvalue)
 )
 ;
-create table tx_dup(c1 int, c2 int, c3 int);
+create table tx_dup(c1 int, c2 int, c3 int) distribute by hash (c1) to group group_a;
 create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, block_number bigint, block_offset int)
+distribute by hash (c1) 
+to group group_b
 PARTITION BY RANGE (c3)
 (
 	partition p0 values less than (10),
@@ -179,15 +201,18 @@ create unlogged table data_redis.pg_delete_delta_12345
 (
 	xcnodeid int,
 	dnrelid int,
-	table_bucketid int,
 	block_number bigint,
 	block_offset int
-);
+)
+distribute by hash(xcnodeid,dnrelid,block_number,block_offset) to group group_a;
 insert into tx select v,v,v from generate_series(1,500) as v;
 insert into tx_dup select v%10,v%20,v%30 from generate_series(1,200) as v;
+insert into tx_verify select *, xc_node_id, tableoid, pg_tupleid_get_blocknum(ctid), pg_tupleid_get_offset(ctid) from tx;
+ALTER TABLE tx SET (append_mode=on,rel_cn_oid=12345);
 update tx set c2 = tx.c2*2 from tx_dup where tx.c2 = tx_dup.c2;
 ERROR:  Non-deterministic UPDATE
 DETAIL:  multiple updates to a row by a single query for column store table.
+ALTER TABLE tx SET (append_mode=off);
 select count(*) from data_redis.pg_delete_delta_12345;
  count 
 -------
@@ -207,9 +232,9 @@ from
    minus all
    select c1,c2,c3 from tx_verify
 );
-           ?column?            
--------------------------------
- Check result return code: 500
+          ?column?           
+-----------------------------
+ Check result return code: 0
 (1 row)
 
 select 'Check result return code: ' || count(*)
@@ -231,6 +256,8 @@ drop table data_redis.pg_delete_delta_12345;
 ------------------------------------------
 /* Verify replicated table delete */
 create table tx(c1 int, c2 int, c3 int) with(orientation = column)
+distribute by replication
+to group group_a
 PARTITION BY RANGE (c3)
 (
 	partition p0 values less than (10),
@@ -239,8 +266,10 @@ PARTITION BY RANGE (c3)
 	partition p3 values less than (maxvalue)
 )
 ;
-create table tx_dup(c1 int, c2 int, c3 int);
+create table tx_dup(c1 int, c2 int, c3 int) distribute by hash (c1) to group group_a;
 create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, block_number bigint, block_offset int)
+distribute by replication
+to group group_b
 PARTITION BY RANGE (c3)
 (
 	partition p0 values less than (10),
@@ -258,17 +287,20 @@ create unlogged table data_redis.pg_delete_delta_12345
 (
 	xcnodeid int,
 	dnrelid int,
-	table_bucketid int,
 	block_number bigint,
 	block_offset int
-);
+)
+distribute by hash(xcnodeid,dnrelid,block_number,block_offset) to group group_a;
 insert into tx select v,v,v from generate_series(1,500) as v;
 insert into tx_dup select v%10,v%20,v%30 from generate_series(1,200) as v;
+insert into tx_verify select *, xc_node_id, tableoid, pg_tupleid_get_blocknum(ctid), pg_tupleid_get_offset(ctid) from tx;
+ALTER TABLE tx SET (append_mode=on,rel_cn_oid=12345);
 delete from tx using tx_dup where tx.c2 = tx_dup.c2;
+ALTER TABLE tx SET (append_mode=off);
 select count(*) from data_redis.pg_delete_delta_12345;
  count 
 -------
-     0
+    76
 (1 row)
 
 delete from tx_verify as t1 using data_redis.pg_delete_delta_12345 as t2
@@ -284,9 +316,9 @@ from
    minus all
    select c1,c2,c3 from tx_verify
 );
-           ?column?            
--------------------------------
- Check result return code: 481
+          ?column?           
+-----------------------------
+ Check result return code: 0
 (1 row)
 
 select 'Check result return code: ' || count(*)
@@ -308,6 +340,8 @@ drop table data_redis.pg_delete_delta_12345;
 ------------------------------------------
 /* Verify replicated table update*/
 create table tx(c1 int, c2 int, c3 int) with(orientation = column)
+distribute by replication
+to group group_a
 PARTITION BY RANGE (c3)
 (
 	partition p0 values less than (10),
@@ -317,8 +351,10 @@ PARTITION BY RANGE (c3)
 )
 ENABLE ROW MOVEMENT
 ;
-create table tx_dup(c1 int, c2 int, c3 int);
+create table tx_dup(c1 int, c2 int, c3 int) distribute by hash (c1) to group group_a;
 create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, block_number bigint, block_offset int)
+distribute by replication
+to group group_b
 PARTITION BY RANGE (c3)
 (
 	partition p0 values less than (10),
@@ -337,15 +373,18 @@ create unlogged table data_redis.pg_delete_delta_12345
 (
 	xcnodeid int,
 	dnrelid int,
-	table_bucketid int,
 	block_number bigint,
 	block_offset int
-);
+)
+distribute by hash(xcnodeid,dnrelid,block_number,block_offset) to group group_a;
 insert into tx select v,v,v from generate_series(1,500) as v;
 insert into tx_dup select v%10,v%20,v%30 from generate_series(1,200) as v;
+insert into tx_verify select *, xc_node_id, tableoid, pg_tupleid_get_blocknum(ctid), pg_tupleid_get_offset(ctid) from tx;
+ALTER TABLE tx SET (append_mode=on,rel_cn_oid=12345);
 update tx set c3 = tx.c3*2 from tx_dup where tx.c2 = tx_dup.c2;
-ERROR:  Non-deterministic UPDATE
-DETAIL:  multiple updates to a row by a single query for column store table.
+ERROR:  Un-support feature
+DETAIL:  replicated columnar table doesn't allow UPDATE
+ALTER TABLE tx SET (append_mode=off);
 update tx_verify as t1 set c3 = c3*2 from data_redis.pg_delete_delta_12345 as t2
 where t1.xcnodeid = t2.xcnodeid and
 	  t1.dnrelid = t2.dnrelid and
@@ -359,9 +398,9 @@ from
    minus all
    select c1,c2,c3 from tx_verify
 );
-           ?column?            
--------------------------------
- Check result return code: 500
+          ?column?           
+-----------------------------
+ Check result return code: 0
 (1 row)
 
 select 'Check result return code: ' || count(*)
@@ -380,6 +419,10 @@ drop table tx;
 drop table tx_dup;
 drop table tx_verify;
 drop table data_redis.pg_delete_delta_12345;
+drop function pg_tupleid_get_blocknum;
+drop function pg_tupleid_get_offset;
+drop node group group_a;
+drop node group group_b;
 DROP SCHEMA data_redis CASCADE;
 reset expected_computing_nodegroup;
 reset enable_nodegroup_debug;

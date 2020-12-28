@@ -20,7 +20,6 @@
 #include "nodes/nodeFuncs.h"
 #include "nodes/print.h"
 #include "parser/parse_hint.h"
-#include "optimizer/clauses.h"
 #include "optimizer/cost.h"
 #include "optimizer/pathnode.h"
 #include "optimizer/paths.h"
@@ -170,8 +169,6 @@ RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind
     rel->partflag = PARTITION_NONE;
     rel->rows = 0;
     rel->width = 0;
-    rel->consider_parallel = false; /* might get changed later */
-    rel->rel_parallel_workers = -1; /* set up in GetRelationInfo */
     rel->encodedwidth = 0;
     rel->encodednum = 0;
     rel->reltargetlist = NIL;
@@ -186,6 +183,8 @@ RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind
     rel->relid = relid;
     rel->rtekind = rte->rtekind;
     /* min_attr, max_attr, attr_needed, attr_widths are set below */
+    rel->lateral_vars = NIL;
+    rel->lateral_relids = NULL;
     rel->indexlist = NIL;
     rel->pages = 0;
     rel->tuples = 0;
@@ -199,6 +198,7 @@ RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind
     rel->partItrs_for_index_unusable = -1;
     rel->subplan = NULL;
     rel->subroot = NULL;
+    rel->subplan_params = NIL;
     rel->fdwroutine = NULL;
     rel->fdw_private = NULL;
     rel->baserestrictinfo = NIL;
@@ -210,8 +210,18 @@ RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind
     rel->varratio = NIL;
 #ifdef STREAMPLAN
     if (rel->rtekind == RTE_RELATION) {
+#ifndef ENABLE_MULTIPLE_NODES
+        if (IS_STREAM_PLAN && get_rel_persistence(rte->relid) == RELPERSISTENCE_GLOBAL_TEMP) {
+            errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+                NOTPLANSHIPPING_LENGTH,
+                "global template table not support stream operator.");
+            securec_check_ss_c(sprintf_rc, "\0", "\0");
+            mark_stream_unsupport();
+        }
+#endif
         rel->locator_type = GetLocatorType(rte->relid);
         rel->distribute_keys = build_baserel_distributekey(rte, relid);
+        rel->rangelistOid = (IsLocatorDistributedBySlice(rel->locator_type)) ? rte->relid : InvalidOid;
     } else if (rel->rtekind == RTE_CTE) {
         Index levelsup = rte->ctelevelsup;
         PlannerInfo* cteroot = root;
@@ -431,6 +441,20 @@ RelOptInfo* find_join_rel(PlannerInfo* root, Relids relids)
     return NULL;
 }
 
+void remove_join_rel(PlannerInfo *root, RelOptInfo *rel)
+{
+    root->join_rel_level[root->join_cur_level] =
+        list_delete_ptr(root->join_rel_level[root->join_cur_level], rel);
+    if (!root->join_rel_hash) {
+        root->join_rel_list = list_delete_ptr(root->join_rel_list, rel);
+        return;
+    }
+
+    Relids hashkey = rel->relids;
+    hash_search(root->join_rel_hash, &hashkey, HASH_REMOVE, NULL);
+    return;
+}
+
 /*
  * @Description: Search rows hint of this joinrel and set it's rows according to this hint.
  * @in root: Global information for planning/optimization.
@@ -536,11 +560,9 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
          */
         if (restrictlist_ptr != NULL)
             *restrictlist_ptr = build_joinrel_restrictlist(root, joinrel, outer_rel, inner_rel);
-
-#ifdef ENABLE_MULTIPLE_NODES
         /* set interesting distribute keys */
         build_joinrel_itst_diskeys(root, joinrel, outer_rel, inner_rel, sjinfo->jointype);
-#endif
+
         return joinrel;
     }
 
@@ -554,14 +576,11 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
     joinrel->partflag = PARTITION_NONE;
     joinrel->rows = 0;
     joinrel->width = 0;
-    joinrel->consider_parallel = false;
     joinrel->encodedwidth = 0;
     joinrel->encodednum = 0;
     joinrel->reltargetlist = NIL;
-    joinrel->rel_parallel_workers = -1;
     joinrel->pathlist = NIL;
     joinrel->ppilist = NIL;
-    joinrel->partial_pathlist = NIL;
     joinrel->cheapest_startup_path = NULL;
     joinrel->cheapest_total_path = NIL;
     joinrel->cheapest_unique_path = NULL;
@@ -572,6 +591,8 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
     joinrel->max_attr = 0;
     joinrel->attr_needed = NULL;
     joinrel->attr_widths = NULL;
+    joinrel->lateral_vars = NIL;
+    joinrel->lateral_relids = NULL;
     joinrel->indexlist = NIL;
     joinrel->pages = 0.0;
     joinrel->tuples = 0;
@@ -585,6 +606,7 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
     joinrel->partItrs_for_index_unusable = -1;
     joinrel->subplan = NULL;
     joinrel->subroot = NULL;
+    joinrel->subplan_params = NIL;
     joinrel->fdwroutine = NULL;
     joinrel->fdw_private = NULL;
     joinrel->baserestrictinfo = NIL;
@@ -633,26 +655,6 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
     set_joinrel_size_estimates(root, joinrel, outer_rel, inner_rel, sjinfo, restrictlist);
 
     /*
-     * Set the consider_parallel flag if this joinrel could potentially be
-     * scanned within a parallel worker.  If this flag is false for either
-     * inner_rel or outer_rel, then it must be false for the joinrel also.
-     * Even if both are true, there might be parallel-restricted quals at our
-     * level.
-     *
-     * Note that if there are more than two rels in this relation, they could
-     * be divided between inner_rel and outer_rel in any arbitary way.  We
-     * assume this doesn't matter, because we should hit all the same baserels
-     * and joinclauses while building up to this joinrel no matter which we
-     * take; therefore, we should make the same decision here however we get
-     * here.
-     */
-    if (inner_rel->consider_parallel && outer_rel->consider_parallel &&
-        !has_parallel_hazard((Node *)restrictlist, false) &&
-        !has_parallel_hazard((Node *)joinrel->reltargetlist, false)) {
-        joinrel->consider_parallel = true;
-    }
-
-    /*
      * Add the joinrel to the query's joinrel list, and store it into the
      * auxiliary hashtable if there is one.  NB: GEQO requires us to append
      * the new joinrel to the end of the list!
@@ -682,10 +684,9 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
         root->join_rel_level[root->join_cur_level] = lappend(root->join_rel_level[root->join_cur_level], joinrel);
     }
 
-#ifdef ENABLE_MULTIPLE_NODES 
     /* set interesting distribute keys */
     build_joinrel_itst_diskeys(root, joinrel, outer_rel, inner_rel, sjinfo->jointype);
-#endif
+
     /* Adjust joinrel globle_rows according hint. */
     adjust_rows_according_to_hint(root->parse->hintState, joinrel, outer_rel->relids);
 
@@ -710,8 +711,7 @@ static void build_joinrel_tlist(PlannerInfo* root, RelOptInfo* joinrel, const Re
     ListCell* vars = NULL;
 
     foreach (vars, input_rel->reltargetlist) {
-        Node* origvar = (Node*)lfirst(vars);
-        Var* var = NULL;
+        Var *var = (Var *) lfirst(vars);
         RelOptInfo* baserel = NULL;
         int ndx;
 
@@ -719,23 +719,17 @@ static void build_joinrel_tlist(PlannerInfo* root, RelOptInfo* joinrel, const Re
          * Ignore PlaceHolderVars in the input tlists; we'll make our own
          * decisions about whether to copy them.
          */
-        if (IsA(origvar, PlaceHolderVar))
+        if (IsA(var, PlaceHolderVar))
             continue;
 
         /*
          * We can't run into any child RowExprs here, but we could find a
          * whole-row Var with a ConvertRowtypeExpr atop it.
          */
-        var = (Var*)origvar;
-        while (!IsA(var, Var)) {
-            if (IsA(var, ConvertRowtypeExpr))
-                var = (Var*)((ConvertRowtypeExpr*)var)->arg;
-            else
-                ereport(ERROR,
-                    (errmodule(MOD_OPT),
-                        errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                        errmsg("unexpected node type in reltargetlist: %d", (int)nodeTag(var))));
-        }
+        if (!IsA(var, Var))
+            elog(ERROR, "unexpected node type in reltargetlist: %d",
+                 (int) nodeTag(var));
+
 
         /* Get the Var's original base rel */
         baserel = find_base_rel(root, var->varno);
@@ -747,10 +741,10 @@ static void build_joinrel_tlist(PlannerInfo* root, RelOptInfo* joinrel, const Re
         ndx = var->varattno - baserel->min_attr;
         if (bms_nonempty_difference(baserel->attr_needed[ndx], relids)) {
             /* Yup, add it to the output */
-            joinrel->reltargetlist = lappend(joinrel->reltargetlist, origvar);
+            joinrel->reltargetlist = lappend(joinrel->reltargetlist, var);
             joinrel->width += baserel->attr_widths[ndx];
             if (root->glob->vectorized) {
-                joinrel->encodedwidth += columnar_get_col_width(exprType(origvar), baserel->attr_widths[ndx]);
+                joinrel->encodedwidth += columnar_get_col_width(exprType((Node *)var), baserel->attr_widths[ndx]);
                 joinrel->encodednum++;
             }
         }
@@ -923,34 +917,6 @@ static List* subbuild_joinrel_joinlist(const RelOptInfo* joinrel, const List* jo
 }
 
 /*
- * build_empty_join_rel
- *		Build a dummy join relation describing an empty set of base rels.
- *
- * This is used for queries with empty FROM clauses, such as "SELECT 2+2" or
- * "INSERT INTO foo VALUES(...)".  We don't try very hard to make the empty
- * joinrel completely valid, since no real planning will be done with it ---
- * we just need it to carry a simple Result path out of query_planner().
- */
-RelOptInfo* build_empty_join_rel(PlannerInfo* root)
-{
-    RelOptInfo* joinrel;
-
-    /* The dummy join relation should be the only one ... */
-    Assert(root->join_rel_list == NIL);
-
-    joinrel = makeNode(RelOptInfo);
-    joinrel->reloptkind = RELOPT_JOINREL;
-    joinrel->relids = NULL; /* empty set */
-    joinrel->rows = 1;      /* we produce one row for such cases */
-    joinrel->width = 0;     /* it contains no Vars */
-
-    joinrel->rtekind = RTE_JOIN;
-    root->join_rel_list = lappend(root->join_rel_list, joinrel);
-
-    return joinrel;
-}
-
-/*
  * find_childrel_appendrelinfo
  *		Get the AppendRelInfo associated with an appendrel child rel.
  *
@@ -990,7 +956,8 @@ AppendRelInfo* find_childrel_appendrelinfo(PlannerInfo* root, RelOptInfo* rel)
  * place to determine which movable join clauses the parameterized path will
  * be responsible for evaluating.
  */
-ParamPathInfo* get_baserel_parampathinfo(PlannerInfo* root, RelOptInfo* baserel, Relids required_outer)
+ParamPathInfo* get_baserel_parampathinfo(PlannerInfo* root, RelOptInfo* baserel,
+            Relids required_outer, Bitmapset *upper_params)
 {
     ParamPathInfo* ppi = NULL;
     Relids joinrelids;
@@ -999,10 +966,10 @@ ParamPathInfo* get_baserel_parampathinfo(PlannerInfo* root, RelOptInfo* baserel,
     ListCell* lc = NULL;
 
     /* Unparameterized paths have no ParamPathInfo */
-    if (bms_is_empty(required_outer))
+    if (bms_is_empty(required_outer) && bms_is_empty(upper_params))
         return NULL;
 
-    AssertEreport(!bms_overlap(baserel->relids, required_outer), MOD_OPT, "");
+    Assert(!bms_overlap(baserel->relids, required_outer));
 
     /* If we already have a PPI for this parameterization, just return it */
     foreach (lc, baserel->ppilist) {
@@ -1024,6 +991,70 @@ ParamPathInfo* get_baserel_parampathinfo(PlannerInfo* root, RelOptInfo* baserel,
             pclauses = lappend(pclauses, rinfo);
     }
 
+    if (!(baserel->rtekind == RTE_SUBQUERY && ENABLE_PRED_PUSH_ALL(root)))
+    {
+        /*
+         * Add in joinclauses generated by EquivalenceClasses, too.  (These
+         * necessarily satisfy join_clause_is_movable_into.)
+         */
+        pclauses = list_concat(pclauses, generate_join_implied_equalities(root, joinrelids, required_outer, baserel));
+    }
+
+    /* Estimate the number of global rows returned by the parameterized scan */
+    rows = get_parameterized_baserel_size(root, baserel, pclauses);
+
+    /* And now we can build the ParamPathInfo */
+    ppi = makeNode(ParamPathInfo);
+    ppi->ppi_req_outer = required_outer;
+    ppi->ppi_req_upper = upper_params;
+    ppi->ppi_rows = rows;
+    ppi->ppi_clauses = pclauses;
+    baserel->ppilist = lappend(baserel->ppilist, ppi);
+
+    return ppi;
+}
+
+/*
+ * get_subquery_parampathinfo
+ *		Get the ParamPathInfo for a parameterized path for a sbuquery,
+ *		constructing one if we don't have one already, only used for reparameterize_path.
+ */
+ParamPathInfo* get_subquery_parampathinfo(PlannerInfo* root, RelOptInfo* baserel,
+            Relids required_outer, Bitmapset *upper_params)
+{
+    ParamPathInfo* ppi = NULL;
+    Relids joinrelids;
+    List* pclauses = NIL;
+    double rows;
+    ListCell* lc = NULL;
+
+    /* Unparameterized paths have no ParamPathInfo */
+    if (bms_is_empty(required_outer) && bms_is_empty(upper_params))
+        return NULL;
+
+    Assert(!bms_overlap(baserel->relids, required_outer));
+
+    /* If we already have a PPI for this parameterization, just return it */
+    foreach (lc, baserel->ppilist) {
+        ppi = (ParamPathInfo*)lfirst(lc);
+        if (bms_equal(ppi->ppi_req_outer, required_outer))
+            return ppi;
+    }
+
+    /*
+     * Identify all joinclauses that are movable to this base rel given this
+     * parameterization.
+     */
+    joinrelids = bms_union(baserel->relids, required_outer);
+    pclauses = NIL;
+    foreach (lc, baserel->joininfo) {
+        RestrictInfo* rinfo = (RestrictInfo*)lfirst(lc);
+
+        if (join_clause_is_movable_into(rinfo, baserel->relids, joinrelids))
+            pclauses = lappend(pclauses, rinfo);
+    }
+
+    Assert(baserel->rtekind == RTE_SUBQUERY);
     /*
      * Add in joinclauses generated by EquivalenceClasses, too.  (These
      * necessarily satisfy join_clause_is_movable_into.)
@@ -1036,6 +1067,7 @@ ParamPathInfo* get_baserel_parampathinfo(PlannerInfo* root, RelOptInfo* baserel,
     /* And now we can build the ParamPathInfo */
     ppi = makeNode(ParamPathInfo);
     ppi->ppi_req_outer = required_outer;
+    ppi->ppi_req_upper = upper_params;
     ppi->ppi_rows = rows;
     ppi->ppi_clauses = pclauses;
     baserel->ppilist = lappend(baserel->ppilist, ppi);
@@ -1083,9 +1115,12 @@ ParamPathInfo* get_joinrel_parampathinfo(PlannerInfo* root, RelOptInfo* joinrel,
     List* dropped_ecs = NIL;
     double rows;
     ListCell* lc = NULL;
+    Bitmapset *upper_params = NULL;
 
     /* Unparameterized paths have no ParamPathInfo or extra join clauses */
-    if (bms_is_empty(required_outer))
+    if (bms_is_empty(required_outer) &&
+        bms_is_empty(PATH_REQ_UPPER(outer_path)) &&
+        bms_is_empty(PATH_REQ_UPPER(inner_path)))
         return NULL;
 
     AssertEreport(!bms_overlap(joinrel->relids, required_outer), MOD_OPT, "");
@@ -1219,10 +1254,12 @@ ParamPathInfo* get_joinrel_parampathinfo(PlannerInfo* root, RelOptInfo* joinrel,
      * Note: in GEQO mode, we'll be called in a temporary memory context, but
      * the joinrel structure is there too, so no problem.
      */
+    upper_params = bms_union(PATH_REQ_UPPER(outer_path), PATH_REQ_UPPER(inner_path));
     ppi = makeNode(ParamPathInfo);
     ppi->ppi_req_outer = required_outer;
     ppi->ppi_rows = rows;
     ppi->ppi_clauses = NIL;
+    ppi->ppi_req_upper = upper_params;
     joinrel->ppilist = lappend(joinrel->ppilist, ppi);
 
     return ppi;
@@ -1238,16 +1275,16 @@ ParamPathInfo* get_joinrel_parampathinfo(PlannerInfo* root, RelOptInfo* joinrel,
  * a suitable struct with zero ppi_rows (and no ppi_clauses either, since
  * the Append node isn't responsible for checking quals).
  */
-ParamPathInfo* get_appendrel_parampathinfo(RelOptInfo* appendrel, Relids required_outer)
+ParamPathInfo* get_appendrel_parampathinfo(RelOptInfo* appendrel, Relids required_outer, Bitmapset* upper_params)
 {
     ParamPathInfo* ppi = NULL;
     ListCell* lc = NULL;
 
     /* Unparameterized paths have no ParamPathInfo */
-    if (bms_is_empty(required_outer))
+    if (bms_is_empty(required_outer) && bms_is_empty(upper_params))
         return NULL;
 
-    AssertEreport(!bms_overlap(appendrel->relids, required_outer), MOD_OPT, "");
+    Assert(!bms_overlap(appendrel->relids, required_outer));
 
     /* If we already have a PPI for this parameterization, just return it */
     foreach (lc, appendrel->ppilist) {
@@ -1261,6 +1298,7 @@ ParamPathInfo* get_appendrel_parampathinfo(RelOptInfo* appendrel, Relids require
     ppi->ppi_req_outer = required_outer;
     ppi->ppi_rows = 0;
     ppi->ppi_clauses = NIL;
+    ppi->ppi_req_upper = upper_params;
     appendrel->ppilist = lappend(appendrel->ppilist, ppi);
 
     return ppi;

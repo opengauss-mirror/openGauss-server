@@ -82,4 +82,3 @@ extern void SnapBuildSerializationPoint(SnapBuild* builder, XLogRecPtr lsn);
 extern void SnapBuildSetInitXmin(SnapBuild* builder, TransactionId xmin);
 extern void SnapBuildSetState(SnapBuild* builder, SnapBuildState s_state);
 #endif /* SNAPBUILD_H */
-

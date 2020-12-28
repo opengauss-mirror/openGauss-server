@@ -80,7 +80,7 @@ typedef struct {
  */
 typedef DataSndMessage DataSndKeepaliveMessage;
 
-/* Notify message structure for dummy scan incremental files for catchup */
+/*Notify message structure for dummy scan incremental files for catchup */
 typedef struct {
     /* Sender's system clock at the time of transmission */
     TimestampTz sendTime;
@@ -151,4 +151,3 @@ typedef struct StandbyDataReplyMessage {
 #define MAX_SEND_SIZE (XLOG_BLCKSZ * 16)
 
 #endif /* _DATAPROTOCOL_H */
-

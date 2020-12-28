@@ -93,6 +93,19 @@ int t_isprint(const char* ptr)
  * better than just reading the file directly because it provides error
  * context pointing to the specific line where a problem is detected.
  *
+ * Expected usage is:
+ *
+ *		tsearch_readline_state trst;
+ *
+ *		if (!tsearch_readline_begin(&trst, filename))
+ *			ereport(ERROR,
+ *					(errcode(ERRCODE_CONFIG_FILE_ERROR),
+ *					 errmsg("could not open stop-word file \"%s\": %m",
+ *							filename)));
+ *		while ((line = tsearch_readline(&trst)) != NULL)
+ *			process line;
+ *		tsearch_readline_end(&trst);
+ *
  * Note that the caller supplies the ereport() for file open failure;
  * this is so that a custom message can be provided.  The filename string
  * passed to tsearch_readline_begin() must remain valid through
@@ -180,7 +193,7 @@ char* t_readline(FILE* fp)
         return NULL;
     }
 
-    len = (int)strlen(buf);
+    len = strlen(buf);
 
     /* Make sure the input is valid UTF-8 */
     (void)pg_verify_mbstr(PG_UTF8, buf, len, false);
@@ -288,6 +301,7 @@ char* lowerstr_with_len(const char* str, int len)
         }
         *outptr = '\0';
     }
+
     return out;
 }
 

@@ -117,8 +117,9 @@ create unique index on hw_partition_index_ip (logdate) local
 	partition sip4_index_local tablespace PG_DEFAULT
 );
 
-create unique index global_internal_index on hw_partition_index_ip (logdate);
---fail
+create unique index on hw_partition_index_ip (logdate);
+--fail wrong syntax
+
 drop table hw_partition_index_ip;
 
 --unique index , index para must contain partition key
@@ -326,7 +327,7 @@ select relname, case when reltoastrelid > 0 then 'TRUE' else 'FALSE' end as has_
 
 insert into interval_sales values (generate_series(1,10), generate_series(1,10), generate_series(TO_DATE('2020-01-01', 'YYYY-MM-DD'),TO_DATE('2020-07-01', 'YYYY-MM-DD'),'1 day'), 1, 1, 1, 1);
 
-select relname, case when reltoastrelid > 0 then 'TRUE' else 'FALSE' end as has_toastrelid, boundaries from pg_partition order by relname;
+select relname, case when reltoastrelid > 0 then 'TRUE' else 'FALSE' end as has_toastrelid, boundaries from pg_partition;
 
 drop table interval_sales;
 

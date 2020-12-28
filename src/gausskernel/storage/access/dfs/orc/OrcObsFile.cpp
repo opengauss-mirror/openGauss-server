@@ -15,9 +15,8 @@
  *
  * OrcObsFile.cpp
  *
- *
  * IDENTIFICATION
- *         src/gausskernel/storage/access/dfs/orc/OrcObsFile.cpp
+ *    src/gausskernel/storage/access/dfs/orc/OrcObsFile.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -159,7 +158,9 @@ public:
         m_handler->m_option.bucket_options.bucket_name = m_bucket;
 
         PROFILING_OBS_START();
+        pgstat_report_waitevent(WAIT_EVENT_OBS_READ);
         readSize = read_bucket_object(m_handler, static_cast<char *>(buf), length);
+        pgstat_report_waitevent(WAIT_EVENT_END);
         PROFILING_OBS_END_READ(readSize);
 
         ereport(DEBUG1,
@@ -341,7 +342,6 @@ public:
                     /* probe the etag len in data buffer */
                     char *pdataDNAInBuf = (char *)dataBuffer->value + perfixLenInBuf + 1;
                     size_t dataDNALenInBuf = strlen(pdataDNAInBuf);
-
                     /* check the etag len and prefix character */
                     if (dataDNALen != dataDNALenInBuf ||
                         strncmp(pdataDNAInBuf, readerState->currentSplit->eTag, dataDNALen)) { /* data DNA changed */
@@ -410,7 +410,8 @@ public:
 protected:
     /* copy constructor */
     ObsCacheFileInputStream(const ObsCacheFileInputStream &other) : ObsFileInputStream(other)
-    {}
+    {
+    }
 };  // end of define ObsCacheFileInputStream
 
 DFS_UNIQUE_PTR<GSInputStream> readObsFile(OBSReadWriteHandler *handler, const std::string &path,

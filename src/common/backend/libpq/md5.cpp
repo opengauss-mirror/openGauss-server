@@ -309,10 +309,15 @@ bool pg_md5_encrypt(const char* passwd, const char* salt, size_t salt_len, char*
 {
     size_t passwd_len = strlen(passwd);
     errno_t rc = EOK;
-
+#ifndef WIN32
     if (unlikely(passwd_len >= SIZE_MAX - salt_len)) {
         return false;
     }
+#else
+    if (passwd_len >= SIZE_MAX - salt_len) {
+        return false;
+    }
+#endif
     /* +1 here is just to avoid risk of unportable malloc(0) */
     char* crypt_buf = (char*)malloc(passwd_len + salt_len + 1);
     bool ret = false;

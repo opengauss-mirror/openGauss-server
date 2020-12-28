@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * string.c
+ * string.cpp
  *		string handling helpers
  *
  *
@@ -9,7 +9,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  *
  * IDENTIFICATION
- *	  src/common/string.c
+ *	  src/common/backend/lib/string.cpp
  *
  * -------------------------------------------------------------------------
  */

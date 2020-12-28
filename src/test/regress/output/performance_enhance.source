@@ -25,10 +25,11 @@ explain performance select count(*) from PERFORMANCE_1 where PERFORMANCE_1.a = 1
 --?         ->  CStore Scan on enhance_performance.performance_1  (cost=.* rows=11 width=0) (actual time=.* rows=1 loops=1)
                Output: 'Dummy'
                Filter: (performance_1.a = 1)
+               Rows Removed by Filter: 99
 --?               (Buffers: shared hit=.*)
 --?               (CPU: ex c/r=.*, ex row=.*, ex cyc=.*, inc cyc=.*)
 --? Total runtime: .* ms
-(13 rows)
+(14 rows)
 
 drop table enhance_performance.PERFORMANCE_1;
 drop schema enhance_performance;

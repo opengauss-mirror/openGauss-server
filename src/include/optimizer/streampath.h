@@ -61,6 +61,9 @@ protected:
     /* Init if we need stream. */
     void initDistribution();
 
+    /* special process for list/range distributed table */
+    void initRangeListDistribution();
+
     /* Reset member variable for later use. */
     void reset();
 
@@ -231,6 +234,15 @@ protected:
 
     /* If the outer path is replicate. */
     bool m_replicateOuter;
+
+    /* If the inner path is rangelist. */
+    bool m_rangelistInner;
+
+    /* If the outer path is rangelist. */
+    bool m_rangelistOuter;
+
+    /* true if outer and inner path's rangelist boundary same. */
+    bool m_sameBoundary;
 
     /* If we should redistribute the inner side. */
     bool m_redistributeInner;

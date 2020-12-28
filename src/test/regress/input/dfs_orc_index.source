@@ -1,0 +1,574 @@
+﻿drop schema index_test cascade;
+create schema index_test;
+set current_schema=index_test;
+set enable_hashjoin=off;
+set enable_nestloop=on;
+set enable_mergejoin=off;
+set enable_seqscan=off;
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+
+--prepare
+create table number_data1(a int, c1 int, c2 smallint, c3 tinyint, c4 bigint, c5 float4, c6 float8, c7 bool, c8 numeric(7,2)) tablespace hdfs_ts;
+create table number_data2(a int, c1 int, c2 smallint, c3 tinyint, c4 bigint, c5 float4, c6 float8, c7 bool, c8 numeric(7,2)) tablespace hdfs_ts partition by values(a,c3);
+create table number_data3(a int, c1 int, c2 smallint, c3 tinyint, c4 bigint, c5 float4, c6 float8, c7 bool, c8 numeric(7,2)) tablespace hdfs_ts;
+
+create table string_data1(a int, c1 char, c2 char(10), c3 varchar, c4 varchar(20), c41 varchar2(20), c42 nvarchar2(20), c5 text, c6 "char", c7 clob, c8 numeric, c9 numeric(30,5)) tablespace hdfs_ts;
+
+create table other_data1(a int, c1 date, c2 time with time zone, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), c9 oid, c10 money) tablespace hdfs_ts;
+
+create table replication_data1(a int, b float4, c float8, d varchar(20)) with(orientation=column) distribute by replication;
+insert into replication_data1 values(1,1.05,-1.05,'123');
+insert into replication_data1 values(100,100.05,-100.05,'456');
+insert into replication_data1 values(10200,0.05,100.0,'abc');
+insert into replication_data1 values(9300, 50.05, -50.05, '法国');
+
+create table number_rowdata(a int, c1 int, c2 smallint, c3 tinyint, c4 bigint, c5 float4, c6 float8, c7 bool, c8 numeric(7,2));
+insert into number_rowdata values(1, generate_series(1,100), generate_series(10001,10100), 10,generate_series(10001,10100),generate_series(1,100)+0.05,generate_series(-100,-1)+0.05, false, generate_series(1,100)+0.05);
+insert into number_rowdata values(1, 10200, 9300, 0, 15000, 0.05, 100.0, true, 1055.55);
+insert into number_rowdata values(1,null,null,null,null,null,null,null,null);
+insert into number_rowdata values(1, generate_series(1,100), generate_series(10001,10100), 5,generate_series(10001,10100),generate_series(1,100)+0.05,generate_series(-100,-1)+0.05, false, generate_series(1,100)+0.05);
+
+create table string_rowdata(a int, c1 char, c2 char(10), c3 varchar, c4 varchar(20), c41 varchar2(20), c42 nvarchar2(20), c5 text, c6 "char", c7 clob, c8 numeric, c9 numeric(30,5));
+insert into string_rowdata values(2,'1','123','124','123','123','123','123','123','中国',12345.678,12345.678);
+insert into string_rowdata values(2,'4','456','456','456','456','456','456','456','法国',9876.123,9876.123);
+insert into string_rowdata values(2,'1','123','1234567890123456789012345678901234567890','125','125','125','123','123','中国',12345.678,12345.678);
+
+create table other_rowdata(a int, c1 date, c2 time with time zone, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), c9 oid, c10 money);
+insert into other_rowdata values(1, date '12-10-2010', '21:21:21 pst', '21:21:21', '2010-12-12', '2010-12-12', '2013-12-11 pst', '2003-04-12 04:05:06', interval '2' year, 234, '100'::money);
+insert into other_rowdata values(1, null,null,null,null,null,null,null,null,null,null);
+insert into other_rowdata values(1,date '12-10-2010', '21:21:21 pst', '21:21:21', '2010-12-12', '2010-12-12', '2013-12-11 pst', '2003-04-12 04:05:06', interval '2' year, 234, '100'::money);
+
+create table pck_data1(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) tablespace hdfs_ts;
+create table pck_data2(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money, partial cluster key(a1,a2,a3)) tablespace hdfs_ts;
+
+--DDL test
+-- create single index
+create index on number_data1(c1);
+create index on number_data1(c2);
+create index on number_data1(c3);
+create index on number_data1(c4);
+create index on number_data1(c5);
+create index on number_data1(c6);
+create index on number_data1(c7);
+create index on number_data1(c8);
+create index on number_data2(c1);
+create index on number_data2(c2);
+create index on number_data2(c3);
+create index on number_data2(c4);
+create index on number_data2(c5);
+create index on number_data2(c6);
+create index on number_data2(c7);
+create index on number_data2(c8);
+create index on number_data2(c3,c2);
+create index on string_data1(c1);
+create index on string_data1(c2);
+create index on string_data1(c3);
+create index on string_data1(c4);
+create index on string_data1(c5);
+create index on string_data1(c6);
+create index on string_data1(c7);
+create index on string_data1(c8);
+create index on string_data1(c9);
+create index on string_data1(c1,c2,c3);
+create index on other_data1(c1);
+create index on other_data1(c2);
+create index on other_data1(c3);
+create index on other_data1(c4);
+create index on other_data1(c5);
+create index on other_data1(c6);
+create index on other_data1(c7);
+create index on other_data1(c8);
+create index on other_data1(c9);
+create index on other_data1(c10);
+
+--insert data
+set cstore_insert_mode='main';
+insert into number_data1 select * from number_rowdata;
+insert into number_data2 select * from number_rowdata;
+insert into number_data3 select * from number_rowdata;
+set cstore_insert_mode='delta';
+insert into number_data1 values(-1,103,10,100,1.05,1000.987, 256.8, true, 100.5);
+insert into number_data2 values(-1,103,10,100,1.05,1000.987, 256.8, true, 100.5);
+insert into number_data3 values(-1,103,10,100,1.05,1000.987, 256.8, true, 100.5);
+
+set cstore_insert_mode='main';
+insert into string_data1 select * from string_rowdata;
+set cstore_insert_mode='delta';
+insert into string_data1 values(2,'5','a','abc','abcdifue','abcdifue','abcdifue','ajkdlfus','ioerer','美国',1.1,2.2);
+
+set cstore_insert_mode='main';
+insert into other_data1 select * from other_rowdata;
+reset cstore_insert_mode;
+
+analyze number_data1;
+analyze number_data2;
+analyze number_data3;
+analyze string_data1;
+analyze other_data1;
+analyze replication_data1;
+
+-- create multi-col index
+create index on number_data2(c1,c2);
+create index on number_data2(c4, c2);
+create index idx1 on number_data1(c1,c3,c5,c7);
+create index idx1 on number_data1(c1,c3,c5,c7);
+create index on string_data1(substr(c4,0,2));
+create index on string_data1(c1) where a=2;
+create index on pck_data2(a5,a1);
+
+-- drop index
+create table temp1(a int, b int) tablespace hdfs_ts;
+create index idx_tmp1 on temp1(a);
+set cstore_insert_mode='main';
+insert into temp1 values(1,1);
+reset cstore_insert_mode;
+insert into temp1 values(2,2);
+drop index idx_tmp1;
+create index idx_tmp1 on temp1(b);
+drop table temp1;
+
+-- alter index
+alter index idx1 rename to idx2;
+alter index idx2 set tablespace hdfs_ts;
+alter index idx2 set tablespace pg_default;
+alter index idx2 set (fillfactor=75);
+reindex index idx2;
+
+-- pck test
+set cstore_insert_mode='main';
+alter table pck_data1 add constraint a1 partial cluster key(a1);
+insert into pck_data1 values(true, 2, 3, 4, 5, 6.66, 7.77, 8.88, 9.99999, 10.45, 10.45, 'a', 'a2', '333', '444', '55555', '6666', '777', '888', '9999', '10101010', date '12-10-2010', '21:21:21 pst', '21:21:21', '2010-12-12', '2010-12-12', '2013-12-11 pst', '2003-04-12 04:05:06', interval '2' year, 234, '100'::money);
+alter table pck_data1 add constraint a2 partial cluster key(a1);
+alter table pck_data1 drop constraint a1;
+alter table pck_data1 drop constraint a1;
+alter table pck_data1 add constraint a1 partial cluster key(a2,a3,a4,a5,a6,a7,a8,a9,a10,a11);
+insert into pck_data1 values(true, 2, 3, 4, 5, 6.66, 7.77, 8.88, 9.99999, 10.45, 10.45, 'a', 'a2', '333', '444', '55555', '6666', '777', '888', '9999', '10101010', date '12-10-2010', '21:21:21 pst', '21:21:21', '2010-12-12', '2010-12-12', '2013-12-11 pst', '2003-04-12 04:05:06', interval '2' year, 234, '100'::money);
+alter table pck_data1 drop constraint a1;
+
+alter table pck_data1 add constraint a1 partial cluster key(b1,b2,b3,b4,b5,b6,b7,b8,b9,b10);
+insert into pck_data1 values(true, 2, 3, 4, 5, 6.66, 7.77, 8.88, 9.99999, 10.45, 10.45, 'a', 'a2', '333', '444', '55555', '6666', '777', '888', '9999', '10101010', date '12-10-2010', '21:21:21 pst', '21:21:21', '2010-12-12', '2010-12-12', '2013-12-11 pst', '2003-04-12 04:05:06', interval '2' year, 234, '100'::money);
+alter table pck_data1 drop constraint a1;
+
+alter table pck_data1 add constraint a1 partial cluster key(c1,c2,c3,c4,c5,c6,c7,c8,d1,d2);
+insert into pck_data1 values(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+alter table pck_data1 drop constraint a1;
+
+insert into pck_data2 values(true, 2, 3, 4, 5, 6.66, 7.77, 8.88, 9.99999, 10.45, 10.45, 'a', 'a2', '333', '444', '55555', '6666', '777', '888', '9999', '10101010', date '12-10-2010', '21:21:21 pst', '21:21:21', '2010-12-12', '2010-12-12', '2013-12-11 pst', '2003-04-12 04:05:06', interval '2' year, 234, '100'::money);
+reset cstore_insert_mode;
+
+-- test foreign table
+drop foreign table  item;
+create foreign table  item ( 
+       i_item_sk        int          ,
+       i_item_id        char(16)     ,
+       i_rec_start_date date         ,
+       i_rec_end_date   date         ,
+       i_item_desc      varchar(200) ,
+       i_current_price  decimal(7,2) ,
+       i_wholesale_cost decimal(7,2) ,
+       i_brand_id       int          ,
+       i_brand          char(50)     ,
+       i_class_id       int          ,
+       i_class          char(50)     ,
+       i_category_id    int          ,
+       i_category       char(50)     ,
+       i_manufact_id    int          ,
+       i_manufact       char(50)     ,
+       i_size           char(20)     ,
+       i_formulation    char(20)     ,
+       i_color          char(20)     ,
+       i_units          char(10)     ,
+       i_container      char(10)     ,
+       i_manager_id     int          ,
+       i_product_name   char(50)     ,
+	   partial cluster key(i_item_sk)) 
+server hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/tpcds_10x.db/item')
+distribute by replication;
+
+create foreign table  item ( 
+       i_item_sk        int          ,
+       i_item_id        char(16)     ,
+       i_rec_start_date date         ,
+       i_rec_end_date   date         ,
+       i_item_desc      varchar(200) ,
+       i_current_price  decimal(7,2) ,
+       i_wholesale_cost decimal(7,2) ,
+       i_brand_id       int          ,
+       i_brand          char(50)     ,
+       i_class_id       int          ,
+       i_class          char(50)     ,
+       i_category_id    int          ,
+       i_category       char(50)     ,
+       i_manufact_id    int          ,
+       i_manufact       char(50)     ,
+       i_size           char(20)     ,
+       i_formulation    char(20)     ,
+       i_color          char(20)     ,
+       i_units          char(10)     ,
+       i_container      char(10)     ,
+       i_manager_id     int          ,
+       i_product_name   char(50)     ) 
+server hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/tpcds_10x.db/item')
+distribute by replication;
+create index on item(i_item_sk);
+drop foreign table item;
+
+-- test plan
+explain (verbose, costs off, nodes off) select * from number_data1 where c1=5;
+set enable_indexscan=off;
+explain (verbose, costs off, nodes off) select * from number_data1 where c1=5;
+reset enable_indexscan;
+explain (verbose, costs off, nodes off) select * from number_data1 where c5=5.05;
+explain (verbose, costs off, nodes off) select * from number_data1 where c5<5.05;
+explain (verbose, costs off, nodes off) select * from number_data1 where c5>5.05;
+explain (verbose, costs off, nodes off) select * from number_data1 where c5<=5.05;
+explain (verbose, costs off, nodes off) select * from number_data1 where c5>=5.05;
+explain (verbose, costs off, nodes off) select * from number_data1 where c5!=5.05;
+explain (verbose, costs off, nodes off) select * from number_data1 where c5 is null;
+explain (verbose, costs off, nodes off) select * from number_data1 where c5 is not null;
+
+explain (verbose, costs off, nodes off) select * from number_data1,replication_data1 where number_data1.c1=replication_data1.a and replication_data1.c > 0;
+explain (verbose, costs off, nodes off) select * from number_data1 where c1=(select max(a) from replication_data1);
+
+-- test explain
+set explain_perf_mode='pretty';
+explain (verbose, costs off, nodes off) select * from number_data1 where c1=5;
+set explain_perf_mode='summary';
+explain (verbose, costs off, nodes off) select * from number_data1 where c1=5;
+set explain_perf_mode='run';
+explain (verbose, costs off, nodes off) select * from number_data1 where c1=5;
+reset explain_perf_mode;
+
+-- test result
+select * from number_data1 where c6=-5.95 order by 1,2,3,4,5,6,7;
+select * from number_data1 where c6<-5.95 order by 1,2,3,4,5,6,7;
+select * from number_data1 where c6>-5.95 order by 1,2,3,4,5,6,7;
+select * from number_data1 where c6<=-5.95 order by 1,2,3,4,5,6,7;
+select * from number_data1 where c6>=-5.95 order by 1,2,3,4,5,6,7;
+select * from number_data1 where c6!=5.05 order by 1,2,3,4,5,6,7;
+select * from number_data1 where c6 is null order by 1,2,3,4,5,6,7;
+select * from number_data1 where c6 is not null order by 1,2,3,4,5,6,7;
+select * from number_data1 where c1=5 order by 1,2,3,4,5,6,7;
+select * from number_data1 where c2=9300 order by 1,2,3,4,5,6,7;
+select * from number_data1 where c3=-1 order by 1,2,3,4,5,6,7;
+select * from number_data1 where c4=15000 order by 1,2,3,4,5,6,7;
+select * from number_data1 where c5=1.05::float4 order by 1,2,3,4,5,6,7;
+select * from number_data1 where c6>-3 order by 1,2,3,4,5,6,7;
+select * from number_data1 where c7=true order by 1,2,3,4,5,6,7;
+select * from number_data1 where c8 is null order by 1,2,3,4,5,6,7;
+select * from string_data1 where c2='123' and c7='法国' order by 1,2,3,4,5,6,7;
+select * from string_data1 where c9=9876.123 order by 1,2,3,4,5,6,7;
+select * from other_data1 where c1='12-10-2010' and c6='2013-12-11 pst' order by 1,2,3,4,5,6,7;
+select * from other_data1 where c9 is not null order by 1,2,3,4,5,6,7;
+select * from number_data2 where c1=10200 and c2=9300 order by 1,2,3,4,5,6,7;
+select * from number_data2 where c1=10200 and c2=9300 and c4=15001 order by 1,2,3,4,5,6,7;
+
+-- test multi index
+create index idx3 on number_data3(c1,c3,c5);
+select * from number_data3 where c1=5 order by 1,2,3,4,5;
+select c5,c7 from number_data3 where c1=10200 and c3=-1 and c4=1500 order by 1,2;
+select c5,c7 from number_data3 where c1=5 order by 1,2;
+select c1 from number_data3 where c1=5 order by 1;
+select c3 from number_data3 where c1=5 order by 1;
+select c4 from number_data3 where c1=5 order by 1;
+select c4 from number_data3 where c2-9300 order by 1;
+select count(*) from number_data3 where c1=5;
+select * from number_data3,replication_data1 where number_data3.c1=replication_data1.a order by 1,2,3,4,5,6,7,8,9,10,11,12,13;
+select c5 from number_data3,replication_data1 where number_data3.c1=replication_data1.a and replication_data1.c > 0 order by 1;
+select c4 from number_data3 where c1=(select max(a) from replication_data1) order by 1;
+
+-- test pck result
+select * from pck_data1 where c2 is null;
+
+set cstore_insert_mode='main';
+drop table if exists household_demographics;
+create table household_demographics
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         tinyint               default 255,
+    hd_buy_potential          char(15)              default '    ',
+    hd_dep_count              smallint              default -32768 ,
+    hd_vehicle_count          numeric(1,0)          default 9           
+) 
+tablespace hdfs_ts distribute by hash(hd_demo_sk,hd_income_band_sk,hd_buy_potential,hd_dep_count,hd_vehicle_count);
+insert into household_demographics(hd_demo_sk) values(2147483647);
+insert into household_demographics(hd_demo_sk) values(-2147483648);
+insert into household_demographics(hd_demo_sk) values(0);
+select hd_income_band_sk,hd_buy_potential  
+from household_demographics   
+where hd_income_band_sk<0 
+and hd_demo_sk <=10;
+create index i_house_demo1 on household_demographics(hd_demo_sk);
+select hd_income_band_sk,hd_buy_potential  
+from household_demographics   
+where hd_income_band_sk<0 
+and hd_demo_sk <=10;
+reset cstore_insert_mode;
+
+set cstore_insert_mode='main';
+drop table if exists abort_test_row;
+drop table if exists abort_test;
+create table abort_test_row(a int, b char(10));
+create table abort_test(a int, b char(2)) tablespace hdfs_ts;
+insert into abort_test_row values(1,'12');
+insert into abort_test_row values(2,'12345');
+insert into abort_test select * from abort_test_row;
+create index on abort_test(b);
+insert into abort_test select * from abort_test_row;
+reset cstore_insert_mode;
+
+set cstore_insert_mode='main';
+drop table if exists update_index_test1;
+create table update_index_test1(a int, b int) tablespace hdfs_ts;
+insert into update_index_test1 values(1,1);
+update update_index_test1 set b=2 where a=1;
+create index on update_index_test1(a);
+update update_index_test1 set b=3 where a=1;
+select * from update_index_test1;
+update update_index_test1 set b=4 where a=1;
+select * from update_index_test1;
+reset cstore_insert_mode;
+
+drop table if exists test6；
+drop table if exists row6;
+create table test6 (col int, a int,b int, c int) tablespace hdfs_ts partition by values(c);
+create index on test6(b);
+create table row6(col int, a int,b int, c int);
+insert into row6 values(1,1,2,1);
+insert into row6 values(1,3,2,1);
+set cstore_insert_mode='main';
+insert into test6 select * from row6;
+select * from test6 where b=2 and a=2;
+reset cstore_insert_mode;
+
+drop table if exists associate_benefit_expense cascade;
+create table associate_benefit_expense
+(
+    period_end_dt date not null ,
+    benefit_cost_amt number(18,4) 
+)tablespace hdfs_ts distribute by hash(period_end_dt);
+drop table if exists offers_20050701 cascade;
+create table offers_20050701
+(
+    promo_id varchar(10) not null ,
+    party_id varchar(10) null,
+    location_id integer null 
+)tablespace hdfs_ts distribute by hash(promo_id) ;
+set cstore_insert_mode='main';
+insert into associate_benefit_expense values (date '1970-01-01', 0.0);
+insert into offers_20050701 values ('a', 'a' , 0);
+select dt1.co1 column_011
+from (
+select ofe.location_id-(
+select abe.benefit_cost_amt 
+from associate_benefit_expense abe 
+order by 1 asc limit 1 ) co1 
+from offers_20050701 ofe) dt1 
+right outer join associate_benefit_expense abe1 
+on 1=1;
+reset cstore_insert_mode;
+
+drop table if exists household_demographics;
+set cstore_insert_mode='main';
+create table household_demographics
+(
+    hd_demo_sk                integer               not null,
+    hd_vehicle_count          numeric(1,0)          default 9           
+) 
+ tablespace hdfs_ts distribute by hash(hd_demo_sk);
+
+insert into household_demographics(hd_demo_sk) values(0);
+
+select hd_vehicle_count
+from household_demographics
+where hd_vehicle_count<0.00000000000000000000000000000000000000000001;
+
+drop table if exists customer_demographics;
+create table customer_demographics
+(
+    cd_demo_sk                numeric(18,0)               not null,
+    cd_gender                 char(1)                     default NULL,
+    cd_marital_status         char(1)                     default ' ',
+    cd_education_status       char(20)                    default '9223372036854775807',
+    cd_purchase_estimate      smallint                    default 32767,
+    cd_credit_rating          varchar(10)                 default '2147483647',
+    cd_dep_count              tinyint                     default 127,
+    cd_dep_employed_count     bigint                      default 9223372036854775807,
+    cd_dep_college_count      integer                     default -2147483648
+) tablespace hdfs_ts distribute by hash(cd_demo_sk,cd_gender);
+
+insert into customer_demographics(cd_demo_sk) values(999999999999999999);
+insert into customer_demographics(cd_demo_sk) values(-999999999999999999);
+
+select distinct cd_education_status
+from customer_demographics
+where cd_demo_sk between -170141183460469231731687303715884105728.0 and 170141183460469231731687303715884105727.00; 
+
+create table numeric_test11(a int, b decimal(18,5)) tablespace hdfs_ts;
+create table numeric_row11(a int, b decimal(18,5));
+insert into numeric_row11 values(1,1);
+insert into numeric_row11 values(1,1);
+insert into numeric_row11 values(1,1);
+insert into numeric_row11 values(1,2);
+insert into numeric_row11 values(1,2);
+insert into numeric_test11 select * from numeric_row11;
+select distinct b
+from numeric_test11
+where b between 1.000001 and 1.99999
+order by 1;
+reset cstore_insert_mode;
+
+drop table if exists customer_demographics;
+set cstore_insert_mode='main';
+create table customer_demographics
+(
+    cd_demo_sk                numeric(18,0)               not null,
+    cd_gender                 char(1)                     default NULL,
+    cd_marital_status         char(1)                     default ' ',
+    cd_education_status       char(20)                    default '9223372036854775807',
+    cd_purchase_estimate      smallint                    default 32767,
+    cd_credit_rating          varchar(10)                 default '2147483647',
+    cd_dep_count              tinyint                     default 127,
+    cd_dep_employed_count     bigint                      default 9223372036854775807,
+    cd_dep_college_count      integer                     default -2147483648
+) 
+tablespace hdfs_ts distribute by hash(cd_demo_sk,cd_gender); 
+create index i_cust_demo1 on customer_demographics(cd_demo_sk) ;
+create index i_cust_demo on customer_demographics(cd_gender,cd_demo_sk) ;
+analyze customer_demographics;
+explain (verbose, costs off, nodes off) select distinct cd_gender
+from customer_demographics
+where cd_demo_sk in(14,48,62,67,90,106,115,141,146,156,159,175,219,220,225,230,345,353,361,381,
+403,405,407,409,412,416,418,432,435,438,442,450,454,459,480,482,490,500,515,525,530,535,540,
+556,560,565,570,573,378,579,600,621,624,660,780,718,778,779,780,822,823,857,888,931,967)
+and( cd_gender between 'L' and 'N'
+or not cd_gender between 'N' and 'M')
+order by 1;
+reset cstore_insert_mode;
+
+create table hdfs_partition_table_001
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double  double precision,
+c_character_1 character varying(1024000), 
+c_varchar varchar(100),
+c_character_2 character(100), 
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_timestamp_1 timestamp without time zone ,
+c_date date
+)
+tablespace hdfs_ts
+partition by values (c_smallint);
+
+create table hdfs_partition_table_002
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double  double precision,
+c_character_1 character varying(1024000), 
+c_varchar varchar(100),
+c_character_2 character(100), 
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_timestamp_1 timestamp without time zone ,
+c_date date
+)
+tablespace hdfs_ts;
+
+create index hdfs_partition_index_01 on hdfs_partition_table_001 using psort(c_smallint)local; 
+create index hdfs_partition_index_02 on hdfs_partition_table_002 using psort(c_smallint)local; 
+
+drop table if exists call_center;
+create table call_center
+(
+    cc_call_center_sk         integer               not null,
+    cc_call_center_id         char(16)              not null,
+    cc_rec_start_date         date                          ,
+    cc_rec_end_date           date                          ,
+    cc_closed_date_sk         integer                       ,
+    cc_open_date_sk           integer                       ,
+    cc_name                   varchar(50)                   ,
+    cc_class                  varchar(50)                   ,
+    cc_employees              integer                       ,
+    cc_sq_ft                  integer                       ,
+    cc_hours                  char(20)                      ,
+    cc_manager                varchar(40)                   ,
+    cc_mkt_id                 bigint                        ,
+    cc_mkt_class              char(50)                      ,
+    cc_mkt_desc               varchar(100)                  ,
+    cc_market_manager         varchar(40)                   ,
+    cc_division               integer                       ,
+    cc_division_name          varchar(50)                   ,
+    cc_company                integer                       ,
+    cc_company_name           char(50)                      ,
+    cc_street_number          char(10)                      ,
+    cc_street_name            varchar(60)                   ,
+    cc_street_type            char(15)                      ,
+    cc_suite_number           char(10)                      ,
+    cc_city                   text                   default 'my city',
+    cc_county                 varchar(30)            default '     ',
+    cc_state                  char(2)                default NULL,
+    cc_zip                    char(10)                      ,
+    cc_country                varchar(20)                   ,
+    cc_gmt_offset             float8                        ,
+    cc_tax_percentage         float8                  
+) 
+ tablespace hdfs_ts distribute by hash(cc_call_center_sk,cc_rec_start_date);
+set cstore_insert_mode='main';
+copy  call_center from '@abs_srcdir@/data/call_center.dat' with DELIMITER '|';
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+
+create index i_call_center1 on call_center(cc_call_center_sk);
+analyze call_center;
+explain (costs off, nodes off)
+select cc_call_center_sk 
+from call_center 
+where cc_call_center_sk <= 0 
+or cc_call_center_sk=2147483647 
+order by 1;
+select cc_call_center_sk 
+from call_center 
+where cc_call_center_sk <= 0 
+or cc_call_center_sk=2147483647 
+order by 1;
+
+drop table call_center;
+reset cstore_insert_mode;
+
+create table pck_partition_rowdata(a int, b int);
+insert into pck_partition_rowdata values(1,1);
+insert into pck_partition_rowdata values(1,2);
+create table pck_partition_tab1(a int, b int, partial cluster key(b)) tablespace hdfs_ts partition by values(b);
+set cstore_insert_mode='main';
+insert into pck_partition_tab1 select * from pck_partition_rowdata;
+drop table pck_partition_tab1;
+drop table pck_partition_rowdata;
+reset  cstore_insert_mode;
+
+--clean
+drop schema index_test cascade;

@@ -252,6 +252,7 @@ typedef struct ReorderBufferTXN {
      * ---
      */
     dlist_node node;
+
 } ReorderBufferTXN;
 
 /* so we can define the callbacks used inside struct ReorderBuffer itself */
@@ -379,4 +380,3 @@ void ReorderBufferSetRestartPoint(ReorderBuffer*, XLogRecPtr ptr);
 void StartupReorderBuffer(void);
 
 #endif
-

@@ -24,7 +24,7 @@
  */
 #ifndef CM_CGROUP_H
 #define CM_CGROUP_H
-
+#ifdef ENABLE_MULTIPLE_NODES
 /* get the cm cgroup relpath and initialize cgroup.
  * Please note,caller should free the return value.
  */
@@ -33,5 +33,5 @@ extern char* gscgroup_cm_init();
 /* make the current thread attach to cm cgroup */
 extern void gscgroup_cm_attach_task(const char* relpath);
 extern void gscgroup_cm_attach_task_pid(const char* relpath, pid_t tid);
-
+#endif
 #endif

@@ -20,8 +20,8 @@
 #include "access/gist_private.h"
 #include "catalog/index.h"
 #include "miscadmin.h"
-#include "storage/buffile.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/buffile.h"
+#include "storage/buf/bufmgr.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
@@ -45,6 +45,10 @@ GISTBuildBuffers *gistInitBuildBuffers(int pagesPerBuffer, int levelStep, int ma
 {
     GISTBuildBuffers *gfbb = NULL;
     HASHCTL hashCtl;
+    errno_t rc;
+    /* Initialize the hash table. */
+    rc = memset_s(&hashCtl, sizeof(hashCtl), 0, sizeof(hashCtl));
+    securec_check(rc, "", "");
 
     gfbb = (GISTBuildBuffers *)palloc(sizeof(GISTBuildBuffers));
     gfbb->pagesPerBuffer = pagesPerBuffer;
@@ -189,7 +193,7 @@ static void gistAddLoadedBuffer(GISTBuildBuffers *gfbb, GISTNodeBuffer *nodeBuff
     if (gfbb->loadedBuffersCount >= gfbb->loadedBuffersLen) {
         gfbb->loadedBuffersLen *= 2;
         gfbb->loadedBuffers = (GISTNodeBuffer **)repalloc(gfbb->loadedBuffers,
-            (Size)(gfbb->loadedBuffersLen) * sizeof(GISTNodeBuffer *));
+                                                          (Size)(gfbb->loadedBuffersLen) * sizeof(GISTNodeBuffer *));
     }
 
     gfbb->loadedBuffers[gfbb->loadedBuffersCount] = nodeBuffer;
@@ -698,4 +702,3 @@ static void WriteTempFileBlock(BufFile *file, long blknum, void *ptr)
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not write block %ld of temporary file: %m", blknum)));
     }
 }
-

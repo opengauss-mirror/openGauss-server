@@ -36,10 +36,10 @@ const int MAX_LOOPS = 16;
 
 const int MAX_RETRY_NUM = 3;
 
-struct CacheLookupEnt {
+typedef struct CacheLookupEnt {
     CacheTag cache_tag;
     CacheSlotId_t slot_id;
-};
+} CacheLookupEnt;
 
 // 2147483648 = 2 *1024*1024*1024 == 2G
 #define MAX_METADATA_CACHE_SIZE 2147483648
@@ -221,7 +221,7 @@ void CacheMgr::InitCacheBlockTag(CacheTag *cacheTag, int32 type, const void *key
 {
     Assert(((m_cache_type == MGR_CACHE_TYPE_DATA) &&
             (type == CACHE_COlUMN_DATA || type == CACHE_ORC_DATA || type == CACHE_OBS_DATA)) ||
-           ((m_cache_type == MGR_CACHE_TYPE_INDEX) && (type == CACHE_ORC_INDEX)));
+           ((m_cache_type == MGR_CACHE_TYPE_INDEX) && (type == CACHE_ORC_INDEX || type == CACHE_CARBONDATA_METADATA)));
 
     Assert(length <= MAX_CACHE_TAG_LEN);
 
@@ -245,7 +245,7 @@ CacheSlotId_t CacheMgr::FindCacheBlock(CacheTag *cacheTag, bool first_enter_bloc
     uint32 hashCode = 0;
 
     /* invalid tag */
-    Assert(cacheTag->type > CACHE_TYPE_NONE && cacheTag->type <= CACHE_ORC_INDEX);
+    Assert(cacheTag->type > CACHE_TYPE_NONE && cacheTag->type <= CACHE_CARBONDATA_METADATA);
 
     hashCode = GetHashCode(cacheTag);
     (void)LockHashPartion(hashCode, LW_SHARED);
@@ -260,7 +260,9 @@ CacheSlotId_t CacheMgr::FindCacheBlock(CacheTag *cacheTag, bool first_enter_bloc
         Assert(((m_cache_type == MGR_CACHE_TYPE_DATA) && (m_CacheDesc[slotId].m_cache_tag.type == CACHE_COlUMN_DATA ||
                                                           m_CacheDesc[slotId].m_cache_tag.type == CACHE_ORC_DATA ||
                                                           m_CacheDesc[slotId].m_cache_tag.type == CACHE_OBS_DATA)) ||
-               ((m_cache_type == MGR_CACHE_TYPE_INDEX) && (m_CacheDesc[slotId].m_cache_tag.type == CACHE_ORC_INDEX)));
+               ((m_cache_type == MGR_CACHE_TYPE_INDEX) &&
+                (m_CacheDesc[slotId].m_cache_tag.type == CACHE_ORC_INDEX ||
+                 m_CacheDesc[slotId].m_cache_tag.type == CACHE_CARBONDATA_METADATA)));
 
         LockCacheDescHeader(slotId);
         if (first_enter_block && (m_CacheDesc[slotId].m_usage_count < CACHE_BLOCK_MAX_USAGE)) {
@@ -349,7 +351,7 @@ void CacheMgr::InvalidateCacheBlock(CacheTag *cacheTag)
 void CacheMgr::DeleteCacheBlock(CacheTag *cacheTag)
 {
     /* invalid tag */
-    Assert(cacheTag->type > CACHE_TYPE_NONE && cacheTag->type <= CACHE_ORC_INDEX);
+    Assert(cacheTag->type > CACHE_TYPE_NONE && cacheTag->type <= CACHE_CARBONDATA_METADATA);
 
     uint32 hashCode = GetHashCode(cacheTag);
     (void)LockHashPartion(hashCode, LW_EXCLUSIVE);
@@ -568,6 +570,28 @@ void CacheMgr::FreeCacheBlockMem(CacheSlotId_t slot)
         }
         value->footerStart = 0;
         value->size = 0;
+    } else if (m_CacheDesc[slot].m_cache_tag.type == CACHE_CARBONDATA_METADATA) {
+        CarbonMetadataValue* value = (CarbonMetadataValue*)(&m_CacheSlots[slot * m_slot_length]);
+        if (NULL != value->fileHeader) {
+            free(value->fileHeader);
+            value->fileHeader = NULL;
+        }
+        if (NULL != value->fileFooter) {
+            free(value->fileFooter);
+            value->fileFooter = NULL;
+        }
+        if (NULL != value->fileName) {
+            free(value->fileName);
+            value->fileName = NULL;
+        }
+        if (NULL != value->dataDNA) {
+            free(value->dataDNA);
+            value->dataDNA = NULL;
+        }
+
+        value->headerSize = 0;
+        value->footerSize = 0;
+        value->size = 0;
     } else if (m_CacheDesc[slot].m_cache_tag.type == CACHE_COlUMN_DATA) {
         /* Important: the memory with the same slot may be hold and used by CACHE_ORC_DATA,
          * CACHE_COlUMN_DATA and CACHE_ORC_INDEX, so we must confirm that the memory should
@@ -604,6 +628,9 @@ int CacheMgr::GetCacheBlockMemSize(CacheSlotId_t slot)
     if (m_CacheDesc[slot].m_cache_tag.type == CACHE_ORC_INDEX) {
         OrcMetadataValue *value = (OrcMetadataValue *)(&m_CacheSlots[slot * m_slot_length]);
         slot_size = value->size;
+    } else if (m_CacheDesc[slot].m_cache_tag.type == CACHE_CARBONDATA_METADATA) {
+        CarbonMetadataValue* value = (CarbonMetadataValue*)(&m_CacheSlots[slot * m_slot_length]);
+        return value->size;
     } else if (m_CacheDesc[slot].m_cache_tag.type == CACHE_COlUMN_DATA) {
         CU *cu = (CU *)(&m_CacheSlots[slot * m_slot_length]);
         if (!cu->m_cache_compressed) {
@@ -741,7 +768,7 @@ void CacheMgr::PutFreeListCache(CacheSlotId_t freeSlotIdx)
  * @Return: lock*
  * @See also:
  */
-LWLock *CacheMgr::LockHashPartion(uint32 hashCode, LWLockMode lockMode) const
+LWLock* CacheMgr::LockHashPartion(uint32 hashCode, LWLockMode lockMode) const
 {
     LWLock *partionLock = GetMainLWLockByIndex(m_partition_lock + (hashCode % (NUM_CACHE_BUFFER_PARTITIONS / 2)));
     (void)LWLockAcquire(partionLock, lockMode);
@@ -805,7 +832,9 @@ bool CacheMgr::PinCacheBlock(CacheSlotId_t slotId)
     Assert(((m_cache_type == MGR_CACHE_TYPE_DATA) && (m_CacheDesc[slotId].m_cache_tag.type == CACHE_COlUMN_DATA ||
                                                       m_CacheDesc[slotId].m_cache_tag.type == CACHE_ORC_DATA ||
                                                       m_CacheDesc[slotId].m_cache_tag.type == CACHE_OBS_DATA)) ||
-           ((m_cache_type == MGR_CACHE_TYPE_INDEX) && (m_CacheDesc[slotId].m_cache_tag.type == CACHE_ORC_INDEX)));
+           ((m_cache_type == MGR_CACHE_TYPE_INDEX) &&
+            (m_CacheDesc[slotId].m_cache_tag.type == CACHE_ORC_INDEX ||
+             m_CacheDesc[slotId].m_cache_tag.type == CACHE_CARBONDATA_METADATA)));
 
     LockCacheDescHeader(slotId);
 
@@ -870,7 +899,9 @@ void CacheMgr::UnPinCacheBlock(CacheSlotId_t slotId)
     Assert(((m_cache_type == MGR_CACHE_TYPE_DATA) && (m_CacheDesc[slotId].m_cache_tag.type == CACHE_COlUMN_DATA ||
                                                       m_CacheDesc[slotId].m_cache_tag.type == CACHE_ORC_DATA ||
                                                       m_CacheDesc[slotId].m_cache_tag.type == CACHE_OBS_DATA)) ||
-           ((m_cache_type == MGR_CACHE_TYPE_INDEX) && (m_CacheDesc[slotId].m_cache_tag.type == CACHE_ORC_INDEX)));
+           ((m_cache_type == MGR_CACHE_TYPE_INDEX) &&
+            (m_CacheDesc[slotId].m_cache_tag.type == CACHE_ORC_INDEX ||
+             m_CacheDesc[slotId].m_cache_tag.type == CACHE_CARBONDATA_METADATA)));
 
     if (m_cache_type == MGR_CACHE_TYPE_INDEX) {
         ResourceOwnerForgetMetaCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner, slotId);
@@ -899,11 +930,11 @@ void CacheMgr::WaitEvictSlot(CacheSlotId_t slotId)
         /* no other session referenced to this slot anymore */
         if (m_CacheDesc[slotId].m_refcount == 1) {
             m_CacheDesc[slotId].m_flag = CACHE_BLOCK_INFREE;  // !Valid
-                                                              /*
-             * The slot will be reused with some buffer space,
-             * the space must be freed and reused.
-             * The slot is Invalid and Pinned!!!
-             */
+            /*
+            * The slot will be reused with some buffer space,
+            * the space must be freed and reused.
+            * The slot is Invalid and Pinned!!!
+            */
             UnLockCacheDescHeader(slotId);
             break;
         }
@@ -1439,7 +1470,9 @@ void CacheMgr::CompleteIO(CacheSlotId_t slotId)
     Assert(((m_cache_type == MGR_CACHE_TYPE_DATA) && (m_CacheDesc[slotId].m_cache_tag.type == CACHE_COlUMN_DATA ||
                                                       m_CacheDesc[slotId].m_cache_tag.type == CACHE_ORC_DATA ||
                                                       m_CacheDesc[slotId].m_cache_tag.type == CACHE_OBS_DATA)) ||
-           ((m_cache_type == MGR_CACHE_TYPE_INDEX) && (m_CacheDesc[slotId].m_cache_tag.type == CACHE_ORC_INDEX)));
+           ((m_cache_type == MGR_CACHE_TYPE_INDEX) &&
+            (m_CacheDesc[slotId].m_cache_tag.type == CACHE_ORC_INDEX ||
+             m_CacheDesc[slotId].m_cache_tag.type == CACHE_CARBONDATA_METADATA)));
 
     LockCacheDescHeader(slotId);
     if (!(m_CacheDesc[slotId].m_flag & CACHE_BLOCK_IOBUSY)) {

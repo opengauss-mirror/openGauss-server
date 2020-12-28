@@ -23,16 +23,16 @@
 #include "access/relscan.h"
 #include "access/transam.h"
 #include "catalog/index.h"
-#include "catalog/heap.h"
 #include "miscadmin.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
+#include "catalog/heap.h"
 
 /* ----------------------------------------------------------------
  *		general access method routines
@@ -78,6 +78,7 @@ IndexScanDesc RelationGetIndexScan(Relation index_relation, int nkeys, int norde
     scan = (IndexScanDesc)palloc(SizeofIndexScanDescData + MaxHeapTupleSize);
 
     scan->heapRelation = NULL; /* may be set later */
+    scan->xs_heapfetch = NULL;
     scan->indexRelation = index_relation;
     scan->xs_snapshot = SnapshotNow; /* may be set later */
     scan->numberOfKeys = nkeys;
@@ -124,6 +125,7 @@ IndexScanDesc RelationGetIndexScan(Relation index_relation, int nkeys, int norde
     scan->xs_itup = NULL;
     scan->xs_itupdesc = NULL;
 
+    scan->xs_ctup.tupTableType = HEAP_TUPLE;
     ItemPointerSetInvalid(&scan->xs_ctup.t_self);
     scan->xs_ctup.t_data = NULL;
     scan->xs_cbuf = InvalidBuffer;
@@ -171,7 +173,7 @@ void IndexScanEnd(IndexScanDesc scan)
  * e.g. results of FormIndexDatum --- this is not necessarily what is stored
  * in the index, but it's what the user perceives to be stored.
  */
-char* BuildIndexValueDescription(Relation index_relation, Datum* values, const bool* isnull)
+char *BuildIndexValueDescription(Relation index_relation, Datum *values, const bool *isnull)
 {
     StringInfoData buf;
     Form_pg_index idxrec;
@@ -302,8 +304,8 @@ char* BuildIndexValueDescription(Relation index_relation, Datum* values, const b
  * but caller can make additional checks and pass indexOK=false if needed.
  * In standard case indexOK can simply be constant TRUE.
  */
-SysScanDesc systable_beginscan(
-    Relation heap_relation, Oid index_id, bool index_ok, Snapshot snapshot, int nkeys, ScanKey key)
+SysScanDesc systable_beginscan(Relation heap_relation, Oid index_id, bool index_ok, Snapshot snapshot, int nkeys,
+                               ScanKey key)
 {
     SysScanDesc sysscan;
     Relation irel;
@@ -354,7 +356,7 @@ SysScanDesc systable_beginscan(
          * disadvantage; and there are no compensating advantages, because
          * it's unlikely that such scans will occur in parallel.
          */
-        sysscan->scan = heap_beginscan_strat(heap_relation, snapshot, nkeys, key, true, false);
+        sysscan->scan = (HeapScanDesc)heap_beginscan_strat(heap_relation, snapshot, nkeys, key, true, false);
         sysscan->iscan = NULL;
     }
 
@@ -384,11 +386,10 @@ HeapTuple systable_getnext(SysScanDesc sysscan)
          * wouldn't need to support indexes on expressions.
          */
         if (htup && sysscan->iscan->xs_recheck)
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("system catalog scans with lossy index conditions are not implemented")));
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("system catalog scans with lossy index conditions are not implemented")));
     } else
-        htup = heap_getnext(sysscan->scan, ForwardScanDirection);
+        htup = heap_getnext((TableScanDesc) (sysscan->scan), ForwardScanDirection);
 
     return htup;
 }
@@ -419,11 +420,11 @@ bool systable_recheck_tuple(SysScanDesc sysscan, HeapTuple tup)
         HeapScanDesc scan = sysscan->scan;
 
         Assert(tup == &scan->rs_ctup);
-        Assert(BufferIsValid(scan->rs_cbuf));
+        Assert(BufferIsValid(scan->rs_base.rs_cbuf));
         /* must hold a buffer lock to call HeapTupleSatisfiesVisibility */
-        LockBuffer(scan->rs_cbuf, BUFFER_LOCK_SHARE);
-        result = HeapTupleSatisfiesVisibility(tup, scan->rs_snapshot, scan->rs_cbuf);
-        LockBuffer(scan->rs_cbuf, BUFFER_LOCK_UNLOCK);
+        LockBuffer(scan->rs_base.rs_cbuf, BUFFER_LOCK_SHARE);
+        result = HeapTupleSatisfiesVisibility(tup, scan->rs_base.rs_snapshot, scan->rs_base.rs_cbuf);
+        LockBuffer(scan->rs_base.rs_cbuf, BUFFER_LOCK_UNLOCK);
     }
     return result;
 }
@@ -439,7 +440,7 @@ void systable_endscan(SysScanDesc sysscan)
         index_endscan(sysscan->iscan);
         index_close(sysscan->irel, AccessShareLock);
     } else
-        heap_endscan(sysscan->scan);
+        heap_endscan((TableScanDesc)(sysscan->scan));
 
     pfree(sysscan);
 }
@@ -460,18 +461,17 @@ void systable_endscan(SysScanDesc sysscan)
  * existence is to centralize possible future support of lossy operators
  * in catalog scans.
  */
-SysScanDesc systable_beginscan_ordered(
-    Relation heap_relation, Relation index_relation, Snapshot snapshot, int nkeys, ScanKey key)
+SysScanDesc systable_beginscan_ordered(Relation heap_relation, Relation index_relation, Snapshot snapshot, int nkeys,
+                                       ScanKey key)
 {
     SysScanDesc sysscan;
     int i;
 
     /* REINDEX can probably be a hard error here ... */
     if (ReindexIsProcessingIndex(RelationGetRelid(index_relation)))
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_OPERATION),
-                errmsg("cannot do ordered scan on index \"%s\", because it is being reindexed",
-                    RelationGetRelationName(index_relation))));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
+                        errmsg("cannot do ordered scan on index \"%s\", because it is being reindexed",
+                               RelationGetRelationName(index_relation))));
     /* ... but we only throw a warning about violating IgnoreSystemIndexes */
     if (u_sess->attr.attr_common.IgnoreSystemIndexes) {
         elog(WARNING, "using index \"%s\" despite IgnoreSystemIndexes", RelationGetRelationName(index_relation));
@@ -496,7 +496,7 @@ SysScanDesc systable_beginscan_ordered(
             ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("column is not in index")));
     }
 
-    sysscan->iscan = index_beginscan(heap_relation, index_relation, snapshot, nkeys, 0);
+    sysscan->iscan = (IndexScanDesc)index_beginscan(heap_relation, index_relation, snapshot, nkeys, 0);
     index_rescan(sysscan->iscan, key, nkeys, NULL, 0);
     sysscan->scan = NULL;
 
@@ -514,9 +514,8 @@ HeapTuple systable_getnext_ordered(SysScanDesc sysscan, ScanDirection direction)
     htup = index_getnext(sysscan->iscan, direction);
     /* See notes in systable_getnext */
     if (htup && sysscan->iscan->xs_recheck)
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("system catalog scans with lossy index conditions are not implemented")));
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("system catalog scans with lossy index conditions are not implemented")));
 
     return htup;
 }
@@ -543,7 +542,7 @@ HeapTuple systable_getnext_back(SysScanDesc sysscan)
     if (sysscan->irel)
         htup = index_getnext(sysscan->iscan, BackwardScanDirection);
     else
-        htup = heap_getnext(sysscan->scan, BackwardScanDirection);
+        htup = heap_getnext((TableScanDesc) (sysscan->scan), BackwardScanDirection);
 
     return htup;
 }
@@ -691,3 +690,5 @@ bool GPIGetNextPartRelation(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMODE lmo
 
     return result;
 }
+
+

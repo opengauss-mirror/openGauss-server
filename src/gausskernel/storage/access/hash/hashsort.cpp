@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * hashsort.cpp
- *		Sort tuples for insertion into a new hash index.
+ *    Sort tuples for insertion into a new hash index.
  *
  * When building a very large hash index, we pre-sort the tuples by bucket
  * number to improve locality of access to the index, and thereby avoid
@@ -35,18 +35,18 @@
  * Status record for spooling/sorting phase.
  */
 struct HSpool {
-    Tuplesortstate* sortstate; /* state data for tuplesort.c */
+    Tuplesortstate *sortstate; /* state data for tuplesort.c */
     Relation index;
 };
 
 /*
  * create and initialize a spool structure
  */
-HSpool* _h_spoolinit(Relation index, uint32 num_buckets, void* meminfo)
+HSpool *_h_spoolinit(Relation index, uint32 num_buckets, void *meminfo)
 {
-    HSpool* hspool = (HSpool*)palloc0(sizeof(HSpool));
+    HSpool *hspool = (HSpool *)palloc0(sizeof(HSpool));
     uint32 hash_mask;
-    UtilityDesc* desc = (UtilityDesc*)meminfo;
+    UtilityDesc *desc = (UtilityDesc *)meminfo;
     int work_mem = (desc->query_mem[0] > 0) ? desc->query_mem[0] : u_sess->attr.attr_memory.maintenance_work_mem;
     int max_mem = (desc->query_mem[1] > 0) ? desc->query_mem[1] : 0;
 
@@ -68,7 +68,7 @@ HSpool* _h_spoolinit(Relation index, uint32 num_buckets, void* meminfo)
      * speed index creation.  This should be OK since a single backend can't
      * run multiple index creations in parallel.
      */
-    hspool->sortstate = tuplesort_begin_index_hash(index, hash_mask, work_mem, NULL, false, max_mem);
+    hspool->sortstate = tuplesort_begin_index_hash(index, hash_mask, work_mem, false, max_mem);
 
     return hspool;
 }
@@ -76,7 +76,7 @@ HSpool* _h_spoolinit(Relation index, uint32 num_buckets, void* meminfo)
 /*
  * clean up a spool structure and its substructures.
  */
-void _h_spooldestroy(HSpool* hspool)
+void _h_spooldestroy(HSpool *hspool)
 {
     tuplesort_end(hspool->sortstate);
     pfree(hspool);
@@ -85,7 +85,7 @@ void _h_spooldestroy(HSpool* hspool)
 /*
  * spool an index entry into the sort file.
  */
-void _h_spool(HSpool* hspool, ItemPointer self, Datum* values, const bool* isnull)
+void _h_spool(HSpool *hspool, ItemPointer self, Datum *values, const bool *isnull)
 {
     tuplesort_putindextuplevalues(hspool->sortstate, hspool->index, self, values, isnull);
 }
@@ -94,7 +94,7 @@ void _h_spool(HSpool* hspool, ItemPointer self, Datum* values, const bool* isnul
  * given a spool loaded by successive calls to _h_spool,
  * create an entire index.
  */
-void _h_indexbuild(HSpool* hspool)
+void _h_indexbuild(HSpool *hspool)
 {
     IndexTuple itup;
     bool should_free = false;

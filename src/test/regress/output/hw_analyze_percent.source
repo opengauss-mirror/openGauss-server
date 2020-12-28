@@ -20,8 +20,8 @@ create table analyze_table_01
   , L_COMMENT      VARCHAR(44) NOT NULL
 )
 with (orientation = column)
- ;
-COPY analyze_table_01 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/lineitem.data' DELIMITER '|';
+distribute by hash(L_ORDERKEY);
+COPY analyze_table_01 FROM '@abs_srcdir@/data/lineitem.data' DELIMITER '|';
 set default_statistics_target = -30;
 analyze analyze_table_01;
 --error test

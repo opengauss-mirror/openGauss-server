@@ -36,6 +36,7 @@
 
 #include "access/genam.h"
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "access/sysattr.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
@@ -52,6 +53,7 @@
 #include "commands/defrem.h"
 #include "commands/proclang.h"
 #include "executor/executor.h"
+#include "gs_policy/gs_policy_masking.h"
 #include "miscadmin.h"
 #include "optimizer/var.h"
 #include "optimizer/nodegroups.h"
@@ -68,7 +70,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 #include "catalog/pg_class.h"
 #include "access/transam.h"
 #include "pgxc/execRemote.h"
@@ -84,8 +86,6 @@ static void AlterFunctionOwner_internal(Relation rel, HeapTuple tup, Oid newOwne
 
 static int2vector* GetDefaultArgPos(List* defargpos);
 
-static const int PRO_SQL_COST = 100;
-static const int PRO_RETURN_SET_COST = 1000;
 /*
  *	 Examine the RETURNS clause of the CREATE FUNCTION statement
  *	 and return information about it as *prorettype_p and *returnsSet.
@@ -112,6 +112,7 @@ static void compute_return_type(
     bool isalter = false;
 
     typtup = LookupTypeName(NULL, returnType, NULL);
+
     /*
      * If the type is relation, then we check
      * whether the table is in installation group
@@ -170,6 +171,7 @@ static void compute_return_type(
 
         if (u_sess->attr.attr_sql.enforce_a_behavior) {
             typowner = GetUserIdFromNspId(namespaceId);
+
             if (!OidIsValid(typowner))
                 typowner = GetUserId();
             else if (typowner != GetUserId())
@@ -179,11 +181,11 @@ static void compute_return_type(
         }
         aclresult = pg_namespace_aclcheck(namespaceId, GetUserId(), ACL_CREATE);
         if (aclresult != ACLCHECK_OK)
-            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId, true));
+            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
         if (isalter) {
             aclresult = pg_namespace_aclcheck(namespaceId, typowner, ACL_CREATE);
             if (aclresult != ACLCHECK_OK)
-                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId, true));
+                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
         }
         rettype = TypeShellMake(typname, namespaceId, typowner);
         Assert(OidIsValid(rettype));
@@ -229,6 +231,10 @@ static void examine_parameter_list(List* parameters, Oid languageOid, const char
 
     *requiredResultType = InvalidOid; /* default result */
 
+    if ((INT_MAX / sizeof(Oid) < (uint)parameterCount) || (INT_MAX / sizeof(Datum) < (uint)parameterCount)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("parameterCount is invalid %d", parameterCount)));
+    }
     inTypes = (Oid*)palloc(parameterCount * sizeof(Oid));
     allTypes = (Datum*)palloc(parameterCount * sizeof(Datum));
     paramModes = (Datum*)palloc(parameterCount * sizeof(Datum));
@@ -250,6 +256,7 @@ static void examine_parameter_list(List* parameters, Oid languageOid, const char
         AclResult aclresult;
 
         typtup = LookupTypeName(NULL, t, NULL);
+
         /*
          * If the type is relation, then we check
          * whether the table is in installation group
@@ -595,8 +602,17 @@ static void compute_attributes_sql_style(const List* options, List** as, char** 
             if (windowfunc_item != NULL)
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
             windowfunc_item = defel;
-        } else if (compute_common_attribute(defel, &volatility_item, &strict_item, &security_item,
-            &leakproof_item, &set_items, &cost_item, &rows_item, &fencedItem, &shippable_item, &package_item)) {
+        } else if (compute_common_attribute(defel,
+                       &volatility_item,
+                       &strict_item,
+                       &security_item,
+                       &leakproof_item,
+                       &set_items,
+                       &cost_item,
+                       &rows_item,
+                       &fencedItem,
+                       &shippable_item,
+                       &package_item)) {
             /* recognized common option */
             continue;
         } else
@@ -663,9 +679,10 @@ static void compute_attributes_sql_style(const List* options, List** as, char** 
     if (package_item != NULL) {
         *package = intVal(package_item->arg);
     }
+    list_free(set_items);
 }
 
-/*
+/* -------------
  *	 Interpret the parameters *parameters and return their contents via
  *	 *isStrict_p and *volatility_p.
  *
@@ -677,7 +694,7 @@ static void compute_attributes_sql_style(const List* options, List** as, char** 
  *
  *	 * volatility tells the optimizer whether the function's result can
  *	   be assumed to be repeatable over multiple evaluations.
- *
+ * ------------
  */
 static void compute_attributes_with_style(const List* parameters, bool* isStrict_p, char* volatility_p)
 {
@@ -810,7 +827,7 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString)
     ArrayType* parameterModes = NULL;
     ArrayType* parameterNames = NULL;
     List* parameterDefaults = NIL;
-    Oid requiredResultType = InvalidOid;
+    Oid requiredResultType;
     bool isWindowFunc = false;
     bool isStrict = false;
     bool security = false;
@@ -828,6 +845,7 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString)
     bool fenced = IS_SINGLE_NODE ? false : true;
     bool shippable = false;
     bool package = false;
+    bool proIsProcedure = stmt->isProcedure;
 
     probin_str = NULL;
     prosrc_str = NULL;
@@ -844,22 +862,24 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString)
     /* Check we have creation rights in target namespace */
     aclresult = pg_namespace_aclcheck(namespaceId, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
 
-    // @Temp Table. Lock Cluster after determine whether is a temp object,
+    //@Temp Table. Lock Cluster after determine whether is a temp object,
     // so we can decide if locking other coordinator
     pgxc_lock_for_utility_stmt((Node*)stmt, namespaceId == u_sess->catalog_cxt.myTempNamespace);
 
     if (u_sess->attr.attr_sql.enforce_a_behavior) {
         proowner = GetUserIdFromNspId(namespaceId);
+
         if (!OidIsValid(proowner))
             proowner = GetUserId();
         else if (proowner != GetUserId())
             isalter = true;
+
         if (isalter) {
             aclresult = pg_namespace_aclcheck(namespaceId, proowner, ACL_CREATE);
             if (aclresult != ACLCHECK_OK)
-                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId, true));
+                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
         }
     } else {
         proowner = GetUserId();
@@ -876,31 +896,38 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString)
     shippable = false;
 
     /* override attributes from explicit list */
-    compute_attributes_sql_style((const List*)stmt->options,
-        &as_clause,
-        &language,
-        &isWindowFunc,
-        &volatility,
-        &isStrict,
-        &security,
-        &isLeakProof,
-        &proconfig,
-        &procost,
-        &prorows,
-        &fenced,
-        &shippable,
-        &package);
+    compute_attributes_sql_style((const List*)stmt->options, &as_clause, &language, &isWindowFunc, &volatility,
+        &isStrict, &security, &isLeakProof, &proconfig, &procost, &prorows, &fenced, &shippable, &package);
 
     /* Look up the language and validate permissions */
     languageTuple = SearchSysCache1(LANGNAME, PointerGetDatum(language));
     if (!HeapTupleIsValid(languageTuple))
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_OBJECT),
-                errmsg("language \"%s\" does not exist", language),
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("language \"%s\" does not exist", language),
                 (PLTemplateExists(language) ? errhint("Use CREATE LANGUAGE to load the language into the database.")
                                             : 0)));
 
     languageOid = HeapTupleGetOid(languageTuple);
+	
+#ifdef ENABLE_MULTIPLE_NODES
+    if (languageOid == JavalanguageId) {
+        /*
+         * single node dose not support Java UDF or other fenced functions.
+         * check it here because users may not know the Java UDF is fenced by default,
+         * so it's better to report detailed error messages for different senarios.
+         */
+        if (IS_SINGLE_NODE) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("JAVA UDF is not yet supported in current version.")));
+        }
+
+        /* only support fenced mode Java UDF */
+        if (!fenced) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Java UDF dose not support NOT FENCED functions.")));
+        }
+    }
+#endif
+
     languageStruct = (Form_pg_language)GETSTRUCT(languageTuple);
 
     /* Check user's privilege regardless of whether langugae is a trust type */
@@ -935,17 +962,8 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString)
      * Convert remaining parameters of CREATE to form wanted by
      * ProcedureCreate.
      */
-    examine_parameter_list(stmt->parameters,
-        languageOid,
-        queryString,
-        &parameterTypes,
-        &allParameterTypes,
-        &parameterModes,
-        &parameterNames,
-        &parameterDefaults,
-        &requiredResultType,
-        &defargpos,
-        fenced);
+    examine_parameter_list(stmt->parameters, languageOid, queryString, &parameterTypes, &allParameterTypes,
+        &parameterModes, &parameterNames, &parameterDefaults, &requiredResultType, &defargpos, fenced);
 
     prodefaultargpos = GetDefaultArgPos(defargpos);
 
@@ -966,14 +984,15 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString)
 
     if (returnsSet) {
         Oid typerelid = typeidTypeRelid(prorettype);
+
         if (typerelid > FirstNormalObjectId) {
             HeapTuple tp = SearchSysCache1(RELOID, ObjectIdGetDatum(typerelid));
+
             if (HeapTupleIsValid(tp)) {
                 Form_pg_class reltup = (Form_pg_class)GETSTRUCT(tp);
-                if (reltup->relkind == RELKIND_VIEW) {
+                if (reltup->relkind == RELKIND_VIEW || reltup->relkind == RELKIND_CONTQUERY) {
                     ReleaseSysCache(tp);
-                    ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                             errmsg("function result type cannot be a view.")));
                 }
                 ReleaseSysCache(tp);
@@ -993,16 +1012,15 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString)
         if (languageOid == INTERNALlanguageId || languageOid == ClanguageId)
             procost = 1;
         else
-            procost = PRO_SQL_COST;
+            procost = 100;
     }
     if (prorows < 0) {
         if (returnsSet)
-            prorows = PRO_RETURN_SET_COST;
+            prorows = 1000;
         else
             prorows = 0; /* dummy value if not returnsSet */
     } else if (!returnsSet)
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("ROWS is not applicable when function does not return a set")));
 
     if (isWindowFunc) {
@@ -1024,7 +1042,8 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString)
         languageValidator,
         prosrc_str, /* converted to text later */
         probin_str, /* converted to text later */
-        stmt->isProcedure ? PROKIND_PROCEDURE : (isWindowFunc ? PROKIND_WINDOW : PROKIND_FUNCTION),
+        false,      /* not an aggregate */
+        isWindowFunc,
         security,
         isLeakProof,
         isStrict,
@@ -1040,7 +1059,8 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString)
         prodefaultargpos,
         fenced,
         shippable,
-        package);
+        package,
+        proIsProcedure);
 }
 
 /*
@@ -1050,7 +1070,7 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString)
  */
 bool PrepareCFunctionLibrary(HeapTuple tup)
 {
-    /* To user-defined C function, we need close it's file handle and drop library file. */
+    /* To user-defined C function, we need close it's file handle and drop library file.*/
     bool isnull = false;
     Datum probinattr;
     char* probinstring = NULL;
@@ -1058,7 +1078,8 @@ bool PrepareCFunctionLibrary(HeapTuple tup)
 
     if (!isnull) {
         probinstring = TextDatumGetCString(probinattr);
-        /* If is user-define function. */
+
+        /* If is user-define function.*/
         if (strncmp(probinstring, "$libdir/pg_plugin/", strlen("$libdir/pg_plugin/")) == 0) {
             InsertIntoPendingLibraryDelete(probinstring, true);
             pfree_ext(probinstring);
@@ -1086,7 +1107,7 @@ void removeLibrary(const char* filename)
  */
 void InsertIntoPendingLibraryDelete(const char* filename, bool atCommit)
 {
-    AutoContextSwitch newContext(t_thrd.top_mem_cxt);
+    AutoContextSwitch newContext(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
 
     PendingLibraryDelete* pending = (PendingLibraryDelete*)palloc(sizeof(PendingLibraryDelete));
     pending->filename = pstrdup(filename);
@@ -1119,14 +1140,14 @@ void libraryDoPendingDeletes(bool isCommit)
 
         /* delete files according to status of transaction */
         if (del_file->atCommit == isCommit) {
-            /* Close library handle and delete this file. */
+            /* Close library handle and delete this file.*/
             delete_file_handle(del_file->filename);
 
             removeLibrary(del_file->filename);
         }
     }
 
-    /* Reset PendingLibraryDeletes. */
+    /* Reset PendingLibraryDeletes.*/
     ResetPendingLibraryDelete();
     libraryLock.unLock();
 }
@@ -1169,7 +1190,7 @@ void RemoveFunctionById(Oid funcOid)
     /* if the function is a builtin function, its Oid is less than 10000.
      * we can't allow removing the builtin functions
      */
-    if (IsBuiltinFuncOid(funcOid) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
+    if (IsSystemObjOid(funcOid) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("the builtin function can not be removed,its function oid is \"%u\"", funcOid)));
@@ -1180,7 +1201,7 @@ void RemoveFunctionById(Oid funcOid)
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcOid)));
 
     Form_pg_proc procedureStruct = (Form_pg_proc)GETSTRUCT(tup);
-    isagg = PROC_IS_AGG(procedureStruct->prokind);
+    isagg = procedureStruct->proisagg;
 
     if (procedureStruct->prolang == ClanguageId) {
         PrepareCFunctionLibrary(tup);
@@ -1232,43 +1253,57 @@ void RenameFunction(List* name, List* argtypes, const char* newname)
     rel = heap_open(ProcedureRelationId, RowExclusiveLock);
 
     procOid = LookupFuncNameTypeNames(name, argtypes, false);
+
     /* if the function is a builtin function, its Oid is less than 10000.
      * we can't allow renaming the builtin functions
      */
-    if (IsBuiltinFuncOid(procOid) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
+    if (IsSystemObjOid(procOid) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("the builtin function can not be renamed,its function oid is \"%u\"", procOid)));
     }
+    /* if the function is a masking function, we can't allow to rename it. */
+    if (IsMaskingFunctionOid(procOid) && !u_sess->attr.attr_common.IsInplaceUpgrade) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                errmsg("the masking function \"%s\" can not be renamed", get_func_name(procOid))));
+    }
+
     tup = SearchSysCacheCopy1(PROCOID, ObjectIdGetDatum(procOid));
     if (!HeapTupleIsValid(tup)) /* should not happen */
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", procOid)));
     procForm = (Form_pg_proc)GETSTRUCT(tup);
-    if (PROC_IS_AGG(procForm->prokind))
+
+    if (procForm->proisagg)
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("\"%s\" is an aggregate function", NameListToString(name)),
                 errhint("Use ALTER AGGREGATE to rename aggregate functions.")));
 
     namespaceOid = procForm->pronamespace;
+
     /* make sure the new name doesn't exist */
-    if (SearchSysCacheExists3(PROCNAMEARGSNSP, CStringGetDatum(newname),
-        PointerGetDatum(&procForm->proargtypes), ObjectIdGetDatum(namespaceOid))) {
+    if (SearchSysCacheExists3(PROCNAMEARGSNSP,
+            CStringGetDatum(newname),
+            PointerGetDatum(&procForm->proargtypes),
+            ObjectIdGetDatum(namespaceOid))) {
         ereport(ERROR,
             (errcode(ERRCODE_DUPLICATE_FUNCTION),
                 errmsg("function %s already exists in schema \"%s\"",
                     funcname_signature_string(newname, procForm->pronargs, NIL, procForm->proargtypes.values),
-                    get_namespace_name(namespaceOid, true))));
+                    get_namespace_name(namespaceOid))));
     }
 
-    /* must be owner */
-    if (!pg_proc_ownercheck(procOid, GetUserId()))
-        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_PROC, NameListToString(name));
+    /* Must be owner or have alter privilege of the target object. */
+    aclresult = pg_proc_aclcheck(procOid, GetUserId(), ACL_ALTER);
+    if (aclresult != ACLCHECK_OK && !pg_proc_ownercheck(procOid, GetUserId())) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC, NameListToString(name));
+    }
 
     /* must have CREATE privilege on namespace */
     aclresult = pg_namespace_aclcheck(namespaceOid, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid));
 
     /* rename */
     (void)namestrcpy(&(procForm->proname), newname);
@@ -1281,7 +1316,7 @@ void RenameFunction(List* name, List* argtypes, const char* newname)
     }
 
     heap_close(rel, NoLock);
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 }
 
 /*
@@ -1296,18 +1331,27 @@ void AlterFunctionOwner(List* name, List* argtypes, Oid newOwnerId)
     rel = heap_open(ProcedureRelationId, RowExclusiveLock);
 
     procOid = LookupFuncNameTypeNames(name, argtypes, false);
+
     /* if the function is a builtin function, its Oid is less than 10000.
      * we can't allow change the ownerId of the builtin functions
      */
-    if (IsBuiltinFuncOid(procOid) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
+    if (IsSystemObjOid(procOid) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("function \"%s\" is a builtin function,its owner can not be changed", NameListToString(name))));
     }
+    /* if the function is a masking function, we can't allow to change it's ownerId. */
+    if (IsMaskingFunctionOid(procOid) && !u_sess->attr.attr_common.IsInplaceUpgrade) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                errmsg("function \"%s\" is a masking function,its owner can not be changed", NameListToString(name))));
+    }
+
     tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(procOid));
     if (!HeapTupleIsValid(tup)) /* should not happen */
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", procOid)));
-    if (PROC_IS_AGG(((Form_pg_proc)GETSTRUCT(tup))->prokind))
+
+    if (((Form_pg_proc)GETSTRUCT(tup))->proisagg)
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("\"%s\" is an aggregate function", NameListToString(name)),
@@ -1332,10 +1376,17 @@ void AlterFunctionOwner_oid(Oid procOid, Oid newOwnerId)
     /* if the function is a builtin function, its Oid is less than 10000.
      * we can't allow change the ownerId of the builtin functions
      */
-    if (IsBuiltinFuncOid(procOid) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
+    if (IsSystemObjOid(procOid) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("ownerId change failed for function %u, because it is a builtin function.", procOid)));
+    }
+    /* if the function is a masking function, we can't allow to change it's ownerId. */
+    if (IsMaskingFunctionOid(procOid) && !u_sess->attr.attr_common.IsInplaceUpgrade) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                errmsg("ownerId change failed for function \"%s\", because it is a masking function.",
+                    get_func_name(procOid))));
     }
 
     rel = heap_open(ProcedureRelationId, RowExclusiveLock);
@@ -1369,9 +1420,12 @@ static void AlterFunctionOwner_internal(Relation rel, HeapTuple tup, Oid newOwne
     procForm = (Form_pg_proc)GETSTRUCT(tup);
     procOid = HeapTupleGetOid(tup);
 
-    if (u_sess->attr.attr_common.IsInplaceUpgrade == false) {
-        Assert(!IsBuiltinFuncOid(procOid));
+    if (IsSystemObjOid(procOid) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                errmsg("ownerId change failed for function %u, because it is a builtin function.", procOid)));
     }
+
     /*
      * If the new owner is the same as the existing owner, consider the
      * command to have succeeded.  This is for dump restoration purposes.
@@ -1397,13 +1451,13 @@ static void AlterFunctionOwner_internal(Relation rel, HeapTuple tup, Oid newOwne
             /* New owner must have CREATE privilege on namespace */
             aclresult = pg_namespace_aclcheck(procForm->pronamespace, newOwnerId, ACL_CREATE);
             if (aclresult != ACLCHECK_OK)
-                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(procForm->pronamespace, true));
+                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(procForm->pronamespace));
         }
 
         errno_t errorno = EOK;
-        errorno = memset_s(repl_null, sizeof(repl_null), 0, sizeof(repl_null));
+        errorno = memset_s(repl_null, sizeof(repl_null), false, sizeof(repl_null));
         securec_check(errorno, "\0", "\0");
-        errorno = memset_s(repl_repl, sizeof(repl_repl), 0, sizeof(repl_repl));
+        errorno = memset_s(repl_repl, sizeof(repl_repl), false, sizeof(repl_repl));
         securec_check(errorno, "\0", "\0");
 
         repl_repl[Anum_pg_proc_proowner - 1] = true;
@@ -1420,12 +1474,12 @@ static void AlterFunctionOwner_internal(Relation rel, HeapTuple tup, Oid newOwne
             repl_val[Anum_pg_proc_proacl - 1] = PointerGetDatum(newAcl);
         }
 
-        newtuple = heap_modify_tuple(tup, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
+        newtuple = (HeapTuple) tableam_tops_modify_tuple(tup, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
 
         simple_heap_update(rel, &newtuple->t_self, newtuple);
         CatalogUpdateIndexes(rel, newtuple);
 
-        heap_freetuple_ext(newtuple);
+        tableam_tops_free_tuple(newtuple);
 
         /* Update owner dependency reference */
         changeDependencyOnOwner(ProcedureRelationId, procOid, newOwnerId);
@@ -1450,13 +1504,15 @@ bool IsFunctionTemp(AlterFunctionStmt* stmt)
     }
 
     procForm = (Form_pg_proc)GETSTRUCT(tup);
+
     if (procForm->pronamespace == u_sess->catalog_cxt.myTempNamespace) {
         heap_close(rel, RowExclusiveLock);
-        heap_freetuple_ext(tup);
+        tableam_tops_free_tuple(tup);
         return true;
     }
+
     heap_close(rel, RowExclusiveLock);
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
     return false;
 }
 
@@ -1489,10 +1545,17 @@ void AlterFunction(AlterFunctionStmt* stmt)
     /* if the function is a builtin function, its Oid is less than 10000.
      * we can't allow alter the builtin functions
      */
-    if (IsBuiltinFuncOid(funcOid) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
+    if (IsSystemObjOid(funcOid) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("function \"%s\" is a builtin function,it can not be altered",
+                    NameListToString(stmt->func->funcname))));
+    }
+    /* if the function is a masking function, we can't allow to alter it. */
+    if (IsMaskingFunctionOid(funcOid) && !u_sess->attr.attr_common.IsInplaceUpgrade) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                errmsg("function \"%s\" is a masking function, it can not be altered",
                     NameListToString(stmt->func->funcname))));
     }
 
@@ -1502,11 +1565,13 @@ void AlterFunction(AlterFunctionStmt* stmt)
 
     procForm = (Form_pg_proc)GETSTRUCT(tup);
 
-    /* Permission check: must own function */
-    if (!pg_proc_ownercheck(funcOid, GetUserId()))
-        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_PROC, NameListToString(stmt->func->funcname));
+    /* Must be owner or have alter privilege of the target object. */
+    AclResult aclresult = pg_proc_aclcheck(funcOid, GetUserId(), ACL_ALTER);
+    if (aclresult != ACLCHECK_OK && !pg_proc_ownercheck(funcOid, GetUserId())) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC, NameListToString(stmt->func->funcname));
+    }
 
-    if (PROC_IS_AGG(procForm->prokind))
+    if (procForm->proisagg)
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("\"%s\" is an aggregate function", NameListToString(stmt->func->funcname))));
@@ -1518,8 +1583,17 @@ void AlterFunction(AlterFunctionStmt* stmt)
     foreach (l, stmt->actions) {
         DefElem* defel = (DefElem*)lfirst(l);
 
-        if (compute_common_attribute(defel, &volatility_item, &strict_item, &security_def_item, &leakproof_item,
-            &set_items, &cost_item, &rows_item, &fencedItem, &shippable_item, &package_item) == false)
+        if (compute_common_attribute(defel,
+                &volatility_item,
+                &strict_item,
+                &security_def_item,
+                &leakproof_item,
+                &set_items,
+                &cost_item,
+                &rows_item,
+                &fencedItem,
+                &shippable_item,
+                &package_item) == false)
             ereport(ERROR,
                 (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmsg("option \"%s\" not recognized", defel->defname)));
     }
@@ -1563,7 +1637,7 @@ void AlterFunction(AlterFunctionStmt* stmt)
         bool repl_repl[Natts_pg_proc];
         errno_t rc = EOK;
 
-        rc = memset_s(repl_repl, sizeof(repl_repl), 0, sizeof(repl_repl));
+        rc = memset_s(repl_repl, sizeof(repl_repl), false, sizeof(repl_repl));
         securec_check(rc, "\0", "\0");
 
         if (set_items != NULL) {
@@ -1610,7 +1684,7 @@ void AlterFunction(AlterFunctionStmt* stmt)
                 elog(NOTICE, "Immutable function will be shippable anyway.");
             }
         }
-        tup = heap_modify_tuple(tup, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
+        tup = (HeapTuple) tableam_tops_modify_tuple(tup, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
     }
 
     /* Do the update */
@@ -1623,7 +1697,7 @@ void AlterFunction(AlterFunctionStmt* stmt)
     }
 
     heap_close(rel, NoLock);
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 }
 
 /*
@@ -1642,7 +1716,7 @@ void SetFunctionReturnType(Oid funcOid, Oid newRetType)
     /* if the function is a builtin function, its Oid is less than 10000.
      * we can't allow setting return type for the builtin functions
      */
-    if (IsBuiltinFuncOid(funcOid) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
+    if (IsSystemObjOid(funcOid) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("set return type failed for function %u, because it is a builtin function.", funcOid)));
@@ -1654,6 +1728,7 @@ void SetFunctionReturnType(Oid funcOid, Oid newRetType)
     if (!HeapTupleIsValid(tup)) /* should not happen */
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcOid)));
     procForm = (Form_pg_proc)GETSTRUCT(tup);
+
     if (procForm->prorettype != OPAQUEOID) /* caller messed up */
         ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("function %u doesn't return OPAQUE", funcOid)));
 
@@ -1682,7 +1757,7 @@ void SetFunctionArgType(Oid funcOid, int argIndex, Oid newArgType)
     /* if the function is a builtin function, its Oid is less than 10000.
      * we can't allow setting argument type for the builtin functions
      */
-    if (IsBuiltinFuncOid(funcOid) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
+    if (IsSystemObjOid(funcOid) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("set argument type failed for function %u, because it is a builtin function.", funcOid)));
@@ -1693,6 +1768,7 @@ void SetFunctionArgType(Oid funcOid, int argIndex, Oid newArgType)
     if (!HeapTupleIsValid(tup)) /* should not happen */
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcOid)));
     procForm = (Form_pg_proc)GETSTRUCT(tup);
+
     if (argIndex < 0 || argIndex >= procForm->pronargs || procForm->proargtypes.values[argIndex] != OPAQUEOID)
         ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("function %u doesn't return OPAQUE", funcOid)));
 
@@ -1820,11 +1896,11 @@ void CreateCast(CreateCastStmt* stmt)
         if (procstruct->provolatile == PROVOLATILE_VOLATILE)
             ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("cast function must not be volatile")));
 #endif
-        if (PROC_IS_AGG(procstruct->prokind))
+        if (procstruct->proisagg)
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                     errmsg("cast function must not be an aggregate function")));
-        if (PROC_IS_WIN(procstruct->prokind))
+        if (procstruct->proiswindow)
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("cast function must not be a window function")));
         if (procstruct->proretset)
@@ -1955,7 +2031,7 @@ void CreateCast(CreateCastStmt* stmt)
     values[Anum_pg_cast_castcontext - 1] = CharGetDatum(castcontext);
     values[Anum_pg_cast_castmethod - 1] = CharGetDatum(castmethod);
 
-    ss_rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    ss_rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
     securec_check(ss_rc, "", "");
 
     tuple = heap_form_tuple(RelationGetDescr(relation), values, nulls);
@@ -1995,7 +2071,7 @@ void CreateCast(CreateCastStmt* stmt)
     /* Post creation hook for new cast */
     InvokeObjectAccessHook(OAT_POST_CREATE, CastRelationId, castid, 0, NULL);
 
-    heap_freetuple_ext(tuple);
+    tableam_tops_free_tuple(tuple);
 
     heap_close(relation, RowExclusiveLock);
 }
@@ -2073,10 +2149,17 @@ Oid AlterFunctionNamespace_oid(Oid procOid, Oid nspOid)
     /* if the function is a builtin function, its Oid is less than 10000.
      * we can't allow change the namespace of the builtin functions
      */
-    if (IsBuiltinFuncOid(procOid) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
+    if (IsSystemObjOid(procOid) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("namespace change failed for function %u, because it is a builtin function.", procOid)));
+    }
+    /* if the function is a masking function, we can't allow to alter it's namespace oid. */
+    if (IsMaskingFunctionOid(procOid) && !u_sess->attr.attr_common.IsInplaceUpgrade) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                errmsg("namespace change failed for function \"%s\", because it is a masking function.",
+                    get_func_name(procOid))));
     }
 
     procRel = heap_open(ProcedureRelationId, RowExclusiveLock);
@@ -2097,14 +2180,14 @@ Oid AlterFunctionNamespace_oid(Oid procOid, Oid nspOid)
 
     /* check for duplicate name (more friendly than unique-index failure) */
     if (SearchSysCacheExists3(PROCNAMEARGSNSP,
-        CStringGetDatum(NameStr(proc->proname)),
-        PointerGetDatum(&proc->proargtypes),
-        ObjectIdGetDatum(nspOid)))
+            CStringGetDatum(NameStr(proc->proname)),
+            PointerGetDatum(&proc->proargtypes),
+            ObjectIdGetDatum(nspOid)))
         ereport(ERROR,
             (errcode(ERRCODE_DUPLICATE_FUNCTION),
                 errmsg("function \"%s\" already exists in schema \"%s\"",
                     NameStr(proc->proname),
-                    get_namespace_name(nspOid, true))));
+                    get_namespace_name(nspOid))));
 
     /* OK, modify the pg_proc row */
     /* tup is a copy, so we can scribble directly on it */
@@ -2122,7 +2205,7 @@ Oid AlterFunctionNamespace_oid(Oid procOid, Oid nspOid)
             (errcode(ERRCODE_CHECK_VIOLATION),
                 errmsg("failed to change schema dependency for function \"%s\"", NameStr(proc->proname))));
 
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 
     heap_close(procRel, RowExclusiveLock);
 
@@ -2133,7 +2216,7 @@ Oid AlterFunctionNamespace_oid(Oid procOid, Oid nspOid)
  * ExecuteDoStmt
  *		Execute inline procedural-language code
  */
-void ExecuteDoStmt(const DoStmt* stmt, bool atomic)
+void ExecuteDoStmt(DoStmt* stmt, bool atomic)
 {
     InlineCodeBlock* codeblock = makeNode(InlineCodeBlock);
     ListCell* arg = NULL;
@@ -2343,17 +2426,19 @@ Oid GetFunctionNodeGroup(CreateFunctionStmt* stmt, bool* multi_group)
             break;
 
         if (typtup == NULL) {
-            ereport(ERROR, 
+            ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_OBJECT),
                     errmsg("type \"%s\" does not exist",
                         (stmt->returnType == NULL) ? TypeNameToString(fp->argType)
-                        : TypeNameToString(stmt->returnType))));
+                                                   : TypeNameToString(stmt->returnType))));
         }
 
         typeForm = (Form_pg_type)GETSTRUCT(typtup);
+
         if (OidIsValid(typeForm->typrelid)) {
             char relkind = get_rel_relkind(typeForm->typrelid);
-            if (RELKIND_VIEW != relkind) {
+            bool flag = RELKIND_VIEW != relkind && RELKIND_CONTQUERY != relkind;
+            if (flag) { 
                 goid = ng_get_baserel_groupoid(typeForm->typrelid, relkind);
                 if (OidIsValid(goid)) {
                     if (groupoid == InvalidOid)
@@ -2406,10 +2491,13 @@ Oid GetFunctionNodeGroupByFuncid(Oid funcid)
         typtup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typOid));
         if (!HeapTupleIsValid(typtup))
             ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("type with OID %u does not exist", typOid)));
+
         typeForm = (Form_pg_type)GETSTRUCT(typtup);
+
         if (OidIsValid(typeForm->typrelid)) {
             char relkind = get_rel_relkind(typeForm->typrelid);
-            if (RELKIND_VIEW != relkind) {
+
+            if (RELKIND_VIEW != relkind && RELKIND_CONTQUERY != relkind) {
                 goid = ng_get_baserel_groupoid(typeForm->typrelid, relkind);
                 if (OidIsValid(goid)) {
                     /* Only need to find the first relation type. */
@@ -2441,4 +2529,3 @@ Oid GetFunctionNodeGroup(AlterFunctionStmt* stmt)
 
     return GetFunctionNodeGroupByFuncid(funcid);
 }
-

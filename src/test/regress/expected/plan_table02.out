@@ -1,0 +1,720 @@
+/*
+################################################################################
+# TESTCASE NAME : plan_table
+# COMPONENT(S)  : plan_table:列内容测试
+################################################################################
+*/
+--I1.设置guc参数
+set current_schema = pt_test;
+set explain_perf_mode = pretty;
+--I2.创建列存表
+create table vec_pt_t1(a integer, b int, c int)with (orientation=column) distribute by hash (c);
+create table vec_pt_t2(a int, b int, c int)with (orientation=column) distribute by hash(c);
+create table vec_pt_t3(a int, b int, c int)with (orientation=column) distribute by hash(c);
+insert into vec_pt_t1 select * from pt_t1;
+insert into vec_pt_t2 select * from pt_t2;
+insert into vec_pt_t3 select * from pt_t3;
+--I3.行存测试
+--S1.stream + join + agg + subquery
+--执行explain plan
+explain plan 
+set statement_id='row' for                                                                                                                
+with tmp(a,b) as                                                                                                                                                    
+(                                                                                                                                                                       
+   select count(s.a) as sa, s.b as sb from pt_t3 s, pt_t2 t2 where s.a = t2.a group by sb                                                                        
+)select count(*) from pt_t1 t1, tmp where t1.b = tmp.b;
+--S2.查询plan_table
+select * from plan_table_data where statement_id = 'row' order by plan_id, id;
+--?        session_id         | user_id | statement_id | plan_id  | id |   operation   |   options    | object_name | object_type | object_owner |     projection      
+--?
+--?              .*            |      10 | row          |    .*    |  1 | AGGREGATE     | PLAIN        |             |             |              | .*
+--?              .*            |      10 | row          |    .*    |  2 | STREAMING     | GATHER       |             |             |              | .*
+--?              .*            |      10 | row          |    .*    |  3 | AGGREGATE     | PLAIN        |             |             |              | .*
+--?              .*            |      10 | row          |    .*    |  4 | HASH JOIN     | INNER        |             |             |              | 
+--?              .*            |      10 | row          |    .*    |  5 | STREAMING     | REDISTRIBUTE |             |             |              | t1.b
+--?              .*            |      10 | row          |    .*    |  6 | TABLE ACCESS  | SEQ SCAN     | pt_t1       | TABLE       | pt_test      | t1.b
+--?              .*            |      10 | row          |    .*    |  7 | HASH          |              |             |             |              | tmp.b
+--?              .*            |      10 | row          |    .*    |  8 | SUBQUERY SCAN |              | tmp         | SUBQUERY    |              | tmp.b
+--?              .*            |      10 | row          |    .*    |  9 | AGGREGATE     | HASHED       |             |             |              | count(s.a), s.b
+--?              .*            |      10 | row          |    .*    | 10 | STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+--?              .*            |      10 | row          |    .*    | 11 | HASH JOIN     | INNER        |             |             |              | s.b, s.a
+--?              .*            |      10 | row          |    .*    | 12 | STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+--?              .*            |      10 | row          |    .*    | 13 | TABLE ACCESS  | SEQ SCAN     | pt_t3       | TABLE       | pt_test      | s.b, s.a
+--?              .*            |      10 | row          |    .*    | 14 | HASH          |              |             |             |              | t2.a
+--?              .*            |      10 | row          |    .*    | 15 | STREAMING     | REDISTRIBUTE |             |             |              | t2.a
+--?              .*            |      10 | row          |    .*    | 16 | TABLE ACCESS  | SEQ SCAN     | pt_t2       | TABLE       | pt_test      | t2.a
+(16 rows)
+
+--S3.进行计划的对比
+explain(verbose on, costs off)
+with tmp(a,b) as 
+( 
+   select count(s.a) as sa, s.b as sb from pt_t3 s, pt_t2 t2 where s.a = t2.a group by sb      
+)select count(*) from pt_t1 t1, tmp where t1.b = tmp.b;
+WARNING:  Statistics in some tables or columns(pt_test.pt_t1.c, pt_test.pt_t1.b, pt_test.pt_t3.c, pt_test.pt_t3.a, pt_test.pt_t3.b, pt_test.pt_t2.c, pt_test.pt_t2.a) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+--?.*
+--?.*
+  1 | ->  Aggregate
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Aggregate
+--?.*
+  5 |             ->  Streaming(type: REDISTRIBUTE)
+  6 |                ->  Seq Scan on pt_test.pt_t1 t1
+  7 |             ->  Hash
+  8 |                ->  Subquery Scan on tmp
+  9 |                   ->  HashAggregate
+ 10 |                      ->  Streaming(type: REDISTRIBUTE)
+--?.*
+ 12 |                            ->  Streaming(type: REDISTRIBUTE)
+ 13 |                               ->  Seq Scan on pt_test.pt_t3 s
+ 14 |                            ->  Hash
+ 15 |                               ->  Streaming(type: REDISTRIBUTE)
+ 16 |                                  ->  Seq Scan on pt_test.pt_t2 t2
+(16 rows)
+
+--?.*
+--?.*
+--?.*
+         Hash Cond: (t1.b = tmp.b)
+--?.*
+         Hash Cond: (s.a = t2.a)
+(4 rows)
+
+--?.*
+--?.*
+   1 --Aggregate
+         Output: pg_catalog.count(*)
+   2 --Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+   3 --Aggregate
+         Output: count(*)
+--?.*
+   5 --Streaming(type: REDISTRIBUTE)
+         Output: t1.b
+         Distribute Key: t1.b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+   6 --Seq Scan on pt_test.pt_t1 t1
+         Output: t1.b
+         Distribute Key: t1.c
+   7 --Hash
+         Output: tmp.b
+   8 --Subquery Scan on tmp
+         Output: tmp.b
+   9 --HashAggregate
+         Output: count(s.a), s.b
+         Group By Key: s.b
+  10 --Streaming(type: REDISTRIBUTE)
+         Output: s.b, s.a
+         Distribute Key: s.b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+--?.*
+         Output: s.b, s.a
+  12 --Streaming(type: REDISTRIBUTE)
+         Output: s.b, s.a
+         Distribute Key: s.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+  13 --Seq Scan on pt_test.pt_t3 s
+         Output: s.b, s.a
+         Distribute Key: s.c
+  14 --Hash
+         Output: t2.a
+  15 --Streaming(type: REDISTRIBUTE)
+         Output: t2.a
+         Distribute Key: t2.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+  16 --Seq Scan on pt_test.pt_t2 t2
+         Output: t2.a
+         Distribute Key: t2.c
+(48 rows)
+
+   ====== Query Summary =====   
+--------------------------------
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--I4.列存测试
+--S1.stream + join + agg + subquery
+--执行explain plan
+explain plan 
+set statement_id='vector' for                                                                                                                
+with tmp(a,b) as                                                                                                                                                   
+(                                                                                                                                                                       
+  select count(s.a) as sa, s.b as sb from vec_pt_t3 s, vec_pt_t2 t2 where s.a = t2.a group by sb                                                                        
+)select count(*) from vec_pt_t1 t1, tmp where t1.b = tmp.b;
+--S2.查询plan_table
+select * from plan_table_data where statement_id = 'vector' order by plan_id, id;
+--?        session_id         | user_id | statement_id | plan_id  | id |      operation       |   options    | object_name | object_type | object_owner |      projection       
+--?
+--?              .*            |      10 | vector       |    .*    |  1 | ROW ADAPTER            |              |             |             |              | .*
+--?              .*            |      10 | vector       |    .*    |  2 | VECTOR AGGREGATE       | PLAIN        |             |             |              | .*
+--?              .*            |      10 | vector       |    .*    |  3 | VECTOR STREAMING       | GATHER       |             |             |              | .*
+--?              .*            |      10 | vector       |    .*    |  4 | VECTOR AGGREGATE       | PLAIN        |             |             |              | .*
+--?              .*            |      10 | vector       |    .*    |  5 | VECTOR SONIC HASH JOIN | INNER        |             |             |              | 'Dummy'
+--?              .*            |      10 | vector       |    .*    |  6 | VECTOR STREAMING       | REDISTRIBUTE |             |             |              | t1.b
+--?              .*            |      10 | vector       |    .*    |  7 | TABLE ACCESS           | CSTORE SCAN  | vec_pt_t1   | TABLE       | pt_test      | t1.b
+--?              .*            |      10 | vector       |    .*    |  8 | VECTOR SUBQUERY SCAN   |              | tmp         | SUBQUERY    |              | tmp.b
+--?              .*            |      10 | vector       |    .*    |  9 | VECTOR AGGREGATE       | HASHED       |             |             |              | count(s.a), s.b
+--?              .*            |      10 | vector       |    .*    | 10 | VECTOR STREAMING       | REDISTRIBUTE |             |             |              | s.b, s.a
+--?              .*            |      10 | vector       |    .*    | 11 | VECTOR SONIC HASH JOIN | INNER        |             |             |              | s.b, s.a
+--?              .*            |      10 | vector       |    .*    | 12 | VECTOR STREAMING       | REDISTRIBUTE |             |             |              | s.b, s.a
+--?              .*            |      10 | vector       |    .*    | 13 | TABLE ACCESS           | CSTORE SCAN  | vec_pt_t3   | TABLE       | pt_test      | s.b, s.a
+--?              .*            |      10 | vector       |    .*    | 14 | VECTOR STREAMING       | REDISTRIBUTE |             |             |              | t2.a
+--?              .*            |      10 | vector       |    .*    | 15 | TABLE ACCESS           | CSTORE SCAN  | vec_pt_t2   | TABLE       | pt_test      | t2.a
+(15 rows)
+
+--S3.进行计划的对比
+explain(verbose on, costs off)
+with tmp(a,b) as 
+( 
+  select count(s.a) as sa, s.b as sb from vec_pt_t3 s, vec_pt_t2 t2 where s.a = t2.a group by sb      
+)select count(*) from vec_pt_t1 t1, tmp where t1.b = tmp.b;
+WARNING:  Statistics in some tables or columns(pt_test.vec_pt_t1.c, pt_test.vec_pt_t1.b, pt_test.vec_pt_t3.c, pt_test.vec_pt_t3.a, pt_test.vec_pt_t3.b, pt_test.vec_pt_t2.c, pt_test.vec_pt_t2.a) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+--?.*
+--?.*
+  1 | ->  Row Adapter
+  2 |    ->  Vector Aggregate
+  3 |       ->  Vector Streaming (type: GATHER)
+  4 |          ->  Vector Aggregate
+--?.*
+  6 |                ->  Vector Streaming(type: REDISTRIBUTE)
+  7 |                   ->  CStore Scan on pt_test.vec_pt_t1 t1
+  8 |                ->  Vector Subquery Scan on tmp
+  9 |                   ->  Vector Sonic Hash Aggregate
+ 10 |                      ->  Vector Streaming(type: REDISTRIBUTE)
+--?.*
+ 12 |                            ->  Vector Streaming(type: REDISTRIBUTE)
+ 13 |                               ->  CStore Scan on pt_test.vec_pt_t3 s
+ 14 |                            ->  Vector Streaming(type: REDISTRIBUTE)
+ 15 |                               ->  CStore Scan on pt_test.vec_pt_t2 t2
+(15 rows)
+
+--?.*
+--?.*
+--?.*
+         Hash Cond: (t1.b = tmp.b)
+--?.*
+         Hash Cond: (s.a = t2.a)
+(4 rows)
+
+--?.*
+--?.*
+   1 --Row Adapter
+         Output: (pg_catalog.count(*))
+   2 --Vector Aggregate
+         Output: pg_catalog.count(*)
+   3 --Vector Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+   4 --Vector Aggregate
+         Output: count(*)
+--?.*
+         Output: 'Dummy'
+   6 --Vector Streaming(type: REDISTRIBUTE)
+         Output: t1.b
+         Distribute Key: t1.b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+   7 --CStore Scan on pt_test.vec_pt_t1 t1
+         Output: t1.b
+         Distribute Key: t1.c
+   8 --Vector Subquery Scan on tmp
+         Output: tmp.b
+   9 --Vector Sonic Hash Aggregate
+         Output: count(s.a), s.b
+         Group By Key: s.b
+  10 --Vector Streaming(type: REDISTRIBUTE)
+         Output: s.b, s.a
+         Distribute Key: s.b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+--?.*
+         Output: s.b, s.a
+  12 --Vector Streaming(type: REDISTRIBUTE)
+         Output: s.b, s.a
+         Distribute Key: s.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+  13 --CStore Scan on pt_test.vec_pt_t3 s
+         Output: s.b, s.a
+         Distribute Key: s.c
+  14 --Vector Streaming(type: REDISTRIBUTE)
+         Output: t2.a
+         Distribute Key: t2.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+  15 --CStore Scan on pt_test.vec_pt_t2 t2
+         Output: t2.a
+         Distribute Key: t2.c
+(47 rows)
+
+   ====== Query Summary =====   
+--------------------------------
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--I5.index scan
+create index t1_indexa on pt_t1(a);
+create index t2_indexb on pt_t2(b);
+--S1.执行explain plan
+explain plan set statement_id='indext test' for select t1.a from pt_t1 t1 join pt_t2 on t1.a=pt_t2.c;
+--S2.查询plan_table
+select * from plan_table_data where statement_id = 'indext test' order by plan_id, id;
+--?        session_id         | user_id | statement_id | plan_id  | id |  operation   |   options    | object_name | object_type | object_owner | projection 
+--?
+--?            .*              |      10 | indext test  |  .*      |  1 | STREAMING    | GATHER       |             |             |              | t1.a
+--?            .*              |      10 | indext test  |  .*      |  2 | HASH JOIN    | INNER        |             |             |              | t1.a
+--?            .*              |      10 | indext test  |  .*      |  3 | STREAMING    | REDISTRIBUTE |             |             |              | t1.a
+--?            .*              |      10 | indext test  |  .*      |  4 | TABLE ACCESS | SEQ SCAN     | pt_t1       | TABLE       | pt_test      | t1.a
+--?            .*              |      10 | indext test  |  .*      |  5 | HASH         |              |             |             |              | pt_t2.c
+--?            .*              |      10 | indext test  |  .*      |  6 | TABLE ACCESS | SEQ SCAN     | pt_t2       | TABLE       | pt_test      | pt_t2.c
+(6 rows)
+
+--S3.进行计划的对比
+explain(verbose on, costs off) select t1.a from pt_t1 t1 join pt_t2 on t1.a=pt_t2.c;
+WARNING:  Statistics in some tables or columns(pt_test.pt_t1.c, pt_test.pt_t1.a, pt_test.pt_t2.c) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+--?.*
+--?.*
+  1 | ->  Streaming (type: GATHER)
+--?.*
+  3 |       ->  Streaming(type: REDISTRIBUTE)
+  4 |          ->  Seq Scan on pt_test.pt_t1 t1
+  5 |       ->  Hash
+  6 |          ->  Seq Scan on pt_test.pt_t2
+(6 rows)
+
+--?.*
+--?.*
+--?.*
+         Hash Cond: (t1.a = pt_t2.c)
+(2 rows)
+
+--?.*
+--?.*
+   1 --Streaming (type: GATHER)
+         Output: t1.a
+         Node/s: All datanodes
+--?.*
+         Output: t1.a
+   3 --Streaming(type: REDISTRIBUTE)
+         Output: t1.a
+         Distribute Key: t1.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+   4 --Seq Scan on pt_test.pt_t1 t1
+         Output: t1.a
+         Distribute Key: t1.c
+   5 --Hash
+         Output: pt_t2.c
+   6 --Seq Scan on pt_test.pt_t2
+         Output: pt_t2.c
+         Distribute Key: pt_t2.c
+(18 rows)
+
+   ====== Query Summary =====   
+--------------------------------
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--I6.bitmap heap scan
+create index t1_indexb on pt_t1(b);
+--S1.执行explain plan
+explain plan set statement_id='bitmap test' for select a,b from pt_t1 where a=1 or b=2;
+--S2.查询plan_table
+select * from plan_table_data where statement_id = 'bitmap test' order by plan_id, id;
+--?        session_id         | user_id | statement_id | plan_id  | id |  operation   |      options      | object_name | object_type | object_owner | projection 
+--?
+--?              .*            |      10 | bitmap test  |    .*    |  1 | STREAMING    | GATHER            |             |             |              | a, b
+--?              .*            |      10 | bitmap test  |    .*    |  2 | TABLE ACCESS | BITMAP HEAP SCAN  | pt_t1       | TABLE       | pt_test      | a, b
+--?              .*            |      10 | bitmap test  |    .*    |  3 | BITMAP OR    |                   |             |             |              | 
+--?              .*            |      10 | bitmap test  |    .*    |  4 | INDEX        | BITMAP INDEX SCAN | t1_indexa   | INDEX       | pt_test      | 
+--?              .*            |      10 | bitmap test  |    .*    |  5 | INDEX        | BITMAP INDEX SCAN | t1_indexb   | INDEX       | pt_test      | 
+(5 rows)
+
+--进行计划对比
+explain(verbose on, costs off)
+select a,b from pt_t1 where a=1 or b=2;
+WARNING:  Statistics in some tables or columns(pt_test.pt_t1.c, pt_test.pt_t1.a, pt_test.pt_t1.b) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                operation                 
+----+------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Bitmap Heap Scan on pt_test.pt_t1
+  3 |       ->  BitmapOr
+  4 |          ->  Bitmap Index Scan
+  5 |          ->  Bitmap Index Scan
+(5 rows)
+
+     Predicate Information (identified by plan id)      
+--------------------------------------------------------
+   2 --Bitmap Heap Scan on pt_test.pt_t1
+         Recheck Cond: ((pt_t1.a = 1) OR (pt_t1.b = 2))
+   4 --Bitmap Index Scan
+         Index Cond: (pt_t1.a = 1)
+   5 --Bitmap Index Scan
+         Index Cond: (pt_t1.b = 2)
+(6 rows)
+
+ Targetlist Information (identified by plan id) 
+------------------------------------------------
+   1 --Streaming (type: GATHER)
+         Output: a, b
+         Node/s: All datanodes
+   2 --Bitmap Heap Scan on pt_test.pt_t1
+         Output: a, b
+         Distribute Key: c
+   3 --BitmapOr
+   4 --Bitmap Index Scan
+   5 --Bitmap Index Scan
+(9 rows)
+
+   ====== Query Summary =====   
+--------------------------------
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--I7.function
+explain plan set statement_id='function test' for select pg_backend_pid();
+--S2.查询plan_table
+select * from plan_table_data where statement_id = 'function test' order by plan_id, id;
+--?        session_id         | user_id | statement_id  | plan_id  | id | operation | options | object_name | object_type | object_owner |    projection    
+--?
+--?         .*             |      10 | function test |   .*     |  1 | RESULT    |         |             |             |              | pg_backend_pid()
+(1 row)
+
+--进行计划对比
+explain(verbose on, costs off)
+select pg_backend_pid();
+         QUERY PLAN         
+----------------------------
+ Result
+   Output: pg_backend_pid()
+(2 rows)
+
+--I8.partition表（object_type与A db一致）
+create table test_cstore_pg_table_size (a int)
+partition by range (a)
+(
+partition test_cstore_pg_table_size_p1 values less than (2),
+partition test_cstore_pg_table_size_p2 values less than (4)
+);
+insert into test_cstore_pg_table_size values (1), (3);
+explain plan set statement_id='partition test' for select * from test_cstore_pg_table_size where a>2;
+select * from plan_table_data where statement_id = 'partition test' order by plan_id, id;
+--?        session_id         | user_id |  statement_id  | plan_id  | id |     operation      |       options        |        object_name        | object_type | object_owner | projection 
+--?
+--?       .*               |      10 | partition test |    .*    |  1 | STREAMING          | GATHER               |                           |             |              | a
+--?       .*               |      10 | partition test |    .*    |  2 | PARTITION ITERATOR |                      |                           |             |              | a
+--?       .*               |      10 | partition test |    .*    |  3 | TABLE ACCESS       | PARTITIONED SEQ SCAN | test_cstore_pg_table_size | TABLE       | pt_test      | a
+(3 rows)
+
+--I9.大小写敏感测试
+--S1.object_name测试
+create table "PT_t5"(A int, b int);
+explain plan for select * from "PT_t5";
+select statement_id,id,operation,options,object_name,object_type,object_owner,projection from plan_table order by plan_id, id;
+  statement_id  | id |       operation        |       options        |        object_name        | object_type | object_owner |      projection       
+----------------+----+------------------------+----------------------+---------------------------+-------------+--------------+-----------------------
+ row            |  1 | AGGREGATE              | PLAIN                |                           |             |              | pg_catalog.count(*)
+ row            |  2 | STREAMING              | GATHER               |                           |             |              | (count(*))
+ row            |  3 | AGGREGATE              | PLAIN                |                           |             |              | count(*)
+ row            |  4 | HASH JOIN              | INNER                |                           |             |              | 
+ row            |  5 | STREAMING              | REDISTRIBUTE         |                           |             |              | t1.b
+ row            |  6 | TABLE ACCESS           | SEQ SCAN             | pt_t1                     | TABLE       | pt_test      | t1.b
+ row            |  7 | HASH                   |                      |                           |             |              | tmp.b
+ row            |  8 | SUBQUERY SCAN          |                      | tmp                       | SUBQUERY    |              | tmp.b
+ row            |  9 | AGGREGATE              | HASHED               |                           |             |              | count(s.a), s.b
+ row            | 10 | STREAMING              | REDISTRIBUTE         |                           |             |              | s.b, s.a
+ row            | 11 | HASH JOIN              | INNER                |                           |             |              | s.b, s.a
+ row            | 12 | STREAMING              | REDISTRIBUTE         |                           |             |              | s.b, s.a
+ row            | 13 | TABLE ACCESS           | SEQ SCAN             | pt_t3                     | TABLE       | pt_test      | s.b, s.a
+ row            | 14 | HASH                   |                      |                           |             |              | t2.a
+ row            | 15 | STREAMING              | REDISTRIBUTE         |                           |             |              | t2.a
+ row            | 16 | TABLE ACCESS           | SEQ SCAN             | pt_t2                     | TABLE       | pt_test      | t2.a
+ vector         |  1 | ROW ADAPTER            |                      |                           |             |              | (pg_catalog.count(*))
+ vector         |  2 | VECTOR AGGREGATE       | PLAIN                |                           |             |              | pg_catalog.count(*)
+ vector         |  3 | VECTOR STREAMING       | GATHER               |                           |             |              | (count(*))
+ vector         |  4 | VECTOR AGGREGATE       | PLAIN                |                           |             |              | count(*)
+ vector         |  5 | VECTOR SONIC HASH JOIN | INNER                |                           |             |              | 'Dummy'
+ vector         |  6 | VECTOR STREAMING       | REDISTRIBUTE         |                           |             |              | t1.b
+ vector         |  7 | TABLE ACCESS           | CSTORE SCAN          | vec_pt_t1                 | TABLE       | pt_test      | t1.b
+ vector         |  8 | VECTOR SUBQUERY SCAN   |                      | tmp                       | SUBQUERY    |              | tmp.b
+ vector         |  9 | VECTOR AGGREGATE       | HASHED               |                           |             |              | count(s.a), s.b
+ vector         | 10 | VECTOR STREAMING       | REDISTRIBUTE         |                           |             |              | s.b, s.a
+ vector         | 11 | VECTOR SONIC HASH JOIN | INNER                |                           |             |              | s.b, s.a
+ vector         | 12 | VECTOR STREAMING       | REDISTRIBUTE         |                           |             |              | s.b, s.a
+ vector         | 13 | TABLE ACCESS           | CSTORE SCAN          | vec_pt_t3                 | TABLE       | pt_test      | s.b, s.a
+ vector         | 14 | VECTOR STREAMING       | REDISTRIBUTE         |                           |             |              | t2.a
+ vector         | 15 | TABLE ACCESS           | CSTORE SCAN          | vec_pt_t2                 | TABLE       | pt_test      | t2.a
+ indext test    |  1 | STREAMING              | GATHER               |                           |             |              | t1.a
+ indext test    |  2 | HASH JOIN              | INNER                |                           |             |              | t1.a
+ indext test    |  3 | STREAMING              | REDISTRIBUTE         |                           |             |              | t1.a
+ indext test    |  4 | TABLE ACCESS           | SEQ SCAN             | pt_t1                     | TABLE       | pt_test      | t1.a
+ indext test    |  5 | HASH                   |                      |                           |             |              | pt_t2.c
+ indext test    |  6 | TABLE ACCESS           | SEQ SCAN             | pt_t2                     | TABLE       | pt_test      | pt_t2.c
+ bitmap test    |  1 | STREAMING              | GATHER               |                           |             |              | a, b
+ bitmap test    |  2 | TABLE ACCESS           | BITMAP HEAP SCAN     | pt_t1                     | TABLE       | pt_test      | a, b
+ bitmap test    |  3 | BITMAP OR              |                      |                           |             |              | 
+ bitmap test    |  4 | INDEX                  | BITMAP INDEX SCAN    | t1_indexa                 | INDEX       | pt_test      | 
+ bitmap test    |  5 | INDEX                  | BITMAP INDEX SCAN    | t1_indexb                 | INDEX       | pt_test      | 
+ function test  |  1 | RESULT                 |                      |                           |             |              | pg_backend_pid()
+ partition test |  1 | STREAMING              | GATHER               |                           |             |              | a
+ partition test |  2 | PARTITION ITERATOR     |                      |                           |             |              | a
+ partition test |  3 | TABLE ACCESS           | PARTITIONED SEQ SCAN | test_cstore_pg_table_size | TABLE       | pt_test      | a
+                |  1 | STREAMING              | GATHER               |                           |             |              | a, b
+                |  2 | TABLE ACCESS           | SEQ SCAN             | PT_t5                     | TABLE       | pt_test      | a, b
+(48 rows)
+
+delete from plan_table;
+--S2.列大小写测试
+create table "PT_t6"("A" int, "b" int);
+explain plan for select * from "PT_t6";
+select statement_id,id,operation,options,object_name,object_type,object_owner,projection from plan_table order by plan_id, id;
+ statement_id | id |  operation   | options  | object_name | object_type | object_owner | projection 
+--------------+----+--------------+----------+-------------+-------------+--------------+------------
+              |  1 | STREAMING    | GATHER   |             |             |              | "A", b
+              |  2 | TABLE ACCESS | SEQ SCAN | PT_t6       | TABLE       | pt_test      | "A", b
+(2 rows)
+
+delete from plan_table;
+--S3.schema测试
+create schema "pt_test_SCHEMA";
+set current_schema to "pt_test_SCHEMA";
+create table "PT_t7"("A" int, "b" int);
+explain plan for select * from "PT_t7";
+select statement_id,id,operation,options,object_name,object_type,object_owner,projection from plan_table order by plan_id, id;
+ statement_id | id |  operation   | options  | object_name | object_type |  object_owner  | projection 
+--------------+----+--------------+----------+-------------+-------------+----------------+------------
+              |  1 | STREAMING    | GATHER   |             |             |                | "A", b
+              |  2 | TABLE ACCESS | SEQ SCAN | PT_t7       | TABLE       | pt_test_SCHEMA | "A", b
+(2 rows)
+
+delete from plan_table;
+--S4.表别名测试:不存储别名
+explain plan for select * from "PT_t7" "A_pt7";
+select statement_id,id,operation,options,object_name,object_type,object_owner,projection from plan_table order by plan_id, id;
+ statement_id | id |  operation   | options  | object_name | object_type |  object_owner  | projection 
+--------------+----+--------------+----------+-------------+-------------+----------------+------------
+              |  1 | STREAMING    | GATHER   |             |             |                | "A", b
+              |  2 | TABLE ACCESS | SEQ SCAN | PT_t7       | TABLE       | pt_test_SCHEMA | "A", b
+(2 rows)
+
+delete from plan_table;
+--S5.列别名测试:不存储别名
+create table test(a int);
+explain plan for select a.b as ab from "PT_t7" a, test where a.b=test.a;
+select statement_id,id,operation,options,object_name,object_type,object_owner,projection from plan_table order by plan_id, id;
+ statement_id | id |  operation   |   options    | object_name | object_type |  object_owner  | projection 
+--------------+----+--------------+--------------+-------------+-------------+----------------+------------
+              |  1 | STREAMING    | GATHER       |             |             |                | a.b
+              |  2 | HASH JOIN    | INNER        |             |             |                | a.b
+              |  3 | STREAMING    | REDISTRIBUTE |             |             |                | a.b
+              |  4 | TABLE ACCESS | SEQ SCAN     | PT_t7       | TABLE       | pt_test_SCHEMA | a.b
+              |  5 | HASH         |              |             |             |                | test.a
+              |  6 | TABLE ACCESS | SEQ SCAN     | test        | TABLE       | pt_test_SCHEMA | test.a
+(6 rows)
+
+delete from plan_table;
+--I10.长度测试
+--S1.statement_id长度31报错
+explain plan set statement_id='kkkkkkkkkkkkkkkkkkkkkkkkkkkk31k' for select * from test;
+ERROR:  statement_id is too long. Input statement_id length=31, however max length=30.
+--S2.statement_id长度30，成功
+explain plan set statement_id='kkkkkkkkkkkkkkkkkkkkkkkkkkkk30' for select * from test;
+--S3.object name长度
+create table kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk63(a int);
+explain plan set statement_id='kkkkkkkkkkkkkkkkkkkkkkkkkkkk30' for select * from kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk63;
+select statement_id,id,operation,options,object_name,object_type,object_owner,projection from plan_table order by plan_id, id;
+          statement_id          | id |  operation   | options  |                           object_name                           | object_type |  object_owner  | projection 
+--------------------------------+----+--------------+----------+-----------------------------------------------------------------+-------------+----------------+------------
+ kkkkkkkkkkkkkkkkkkkkkkkkkkkk30 |  1 | STREAMING    | GATHER   |                                                                 |             |                | a
+ kkkkkkkkkkkkkkkkkkkkkkkkkkkk30 |  2 | TABLE ACCESS | SEQ SCAN | test                                                            | TABLE       | pt_test_SCHEMA | a
+ kkkkkkkkkkkkkkkkkkkkkkkkkkkk30 |  1 | STREAMING    | GATHER   |                                                                 |             |                | a
+ kkkkkkkkkkkkkkkkkkkkkkkkkkkk30 |  2 | TABLE ACCESS | SEQ SCAN | kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk63 | TABLE       | pt_test_SCHEMA | a
+(4 rows)
+
+delete from plan_table;
+--I11.CTE测试
+--S1.with recursive中不下推的CTE，仅收集主plan的信息，收集到ctescan节点。
+CREATE TABLE chinamap
+(
+  id INTEGER,
+  pid INTEGER,
+  name TEXT
+) with (orientation=column) distribute by hash(id);
+--计划对比
+explain (costs false) with recursive rq as
+(
+  select id, name from  chinamap where id = 11
+  union all
+  select origin.id, rq.name || ' > ' || origin.name
+  from rq join chinamap origin on origin.pid = rq.id
+)
+select id, name from rq order by 1;
+ id |                                 operation                                  
+----+----------------------------------------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Sort
+  3 |       ->  Result
+  4 |          ->  Streaming(type: LOCAL GATHER)
+  5 |             ->  CTE Scan on rq
+  6 |                ->  Recursive Union (7,9)
+  7 |                   ->  Row Adapter
+  8 |                      ->  CStore Scan on chinamap
+  9 |                   ->  Hash Join (10,13)
+ 10 |                      ->  Streaming(type: REDISTRIBUTE) stream_level:1 
+ 11 |                         ->  Row Adapter <<ruid:[6] ctlid:[6] (SYNC)>>
+ 12 |                            ->  CStore Scan on chinamap origin
+ 13 |                      ->  Hash
+ 14 |                         ->  Streaming(type: REDISTRIBUTE) stream_level:1 
+ 15 |                            ->  WorkTable Scan on rq <<ruid:[6] ctlid:[6]>>
+(15 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   8 --CStore Scan on chinamap
+         Filter: (id = 11)
+   9 --Hash Join (10,13)
+         Hash Cond: (origin.pid = rq.id)
+(4 rows)
+
+   ====== Query Summary =====   
+--------------------------------
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--plan_table收集的计划
+explain plan for with recursive rq as
+(
+  select id, name from  chinamap where id = 11
+  union all
+  select origin.id, rq.name || ' > ' || origin.name
+  from rq join chinamap origin on origin.pid = rq.id
+)
+select id, name from rq order by 1;
+select statement_id,id,operation,options,object_name,object_type,object_owner,projection from plan_table order by plan_id, id;
+ statement_id | id |    operation    |   options    | object_name | object_type |  object_owner  |                      projection                      
+--------------+----+-----------------+--------------+-------------+-------------+----------------+------------------------------------------------------
+              |  1 | STREAMING       | GATHER       |             |             |                | rq.id, rq.name
+              |  2 | SORT            |              |             |             |                | rq.id, rq.name
+              |  3 | RESULT          |              |             |             |                | rq.id, rq.name
+              |  4 | STREAMING       | LOCAL GATHER |             |             |                | rq.id, rq.name
+              |  5 | CTE SCAN        |              | rq          | CTE         |                | rq.id, rq.name
+              |  6 | RECURSIVE UNION |              |             |             |                | 
+              |  7 | ROW ADAPTER     |              |             |             |                | chinamap.id, chinamap.name
+              |  8 | TABLE ACCESS    | CSTORE SCAN  | chinamap    | TABLE       | pt_test_SCHEMA | chinamap.id, chinamap.name
+              |  9 | HASH JOIN       | INNER        |             |             |                | origin.id, ((rq.name || ' > '::text) || origin.name)
+              | 10 | STREAMING       | REDISTRIBUTE |             |             |                | origin.id, origin.name, origin.pid
+              | 11 | ROW ADAPTER     |              |             |             |                | origin.id, origin.name, origin.pid
+              | 12 | TABLE ACCESS    | CSTORE SCAN  | chinamap    | TABLE       | pt_test_SCHEMA | origin.id, origin.name, origin.pid
+              | 13 | HASH            |              |             |             |                | rq.name, rq.id
+              | 14 | STREAMING       | REDISTRIBUTE |             |             |                | rq.name, rq.id
+              | 15 | WORKTABLE SCAN  |              | rq          | CTE         |                | rq.name, rq.id
+(15 rows)
+
+delete from plan_table;
+--I12.Object 类型补充测试:rtekind(SUBQUERY, JOIN, VALUES, CTE, REMOTE_DUMMY)
+--S1.能下推的CTE,收集所有的节点信息。
+--计划对比
+delete from plan_table;
+--S2.VALUES
+--计划对比
+explain(verboe on, costs off) select * from (values(1,2)) as t1(a), (values (3,4)) as t2(a);
+ERROR:  unrecognized EXPLAIN option "verboe"
+--plan_table收集的计划
+explain plan for select * from (values(1,2)) as t1(a), (values (3,4)) as t2(a);
+select statement_id,id,operation,options,object_name,object_type,object_owner,projection from plan_table order by plan_id, id;
+ statement_id | id |  operation   |  options  | object_name | object_type | object_owner |                                   projection                                   
+--------------+----+--------------+-----------+-------------+-------------+--------------+--------------------------------------------------------------------------------
+              |  1 | STREAMING    | GATHER    |             |             |              | "*VALUES*".column1, "*VALUES*".column2, "*VALUES*".column1, "*VALUES*".column2
+              |  2 | NESTED LOOPS | CARTESIAN |             |             |              | "*VALUES*".column1, "*VALUES*".column2, "*VALUES*".column1, "*VALUES*".column2
+              |  3 | VALUES SCAN  |           | *VALUES*    | VALUES      |              | "*VALUES*".column1, "*VALUES*".column2
+              |  4 | VALUES SCAN  |           | *VALUES*    | VALUES      |              | "*VALUES*".column1, "*VALUES*".column2
+(4 rows)
+
+delete from plan_table;
+--S3.REMOTE QUERY
+set current_schema to pt_test;
+---计划对比
+explain select current_user from pt_t1,pt_t2;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Nested Loop  (cost=0.00..144.00 rows=14400 width=0)
+   ->  Data Node Scan on pt_t1 "_REMOTE_TABLE_QUERY_"  (cost=0.00..0.00 rows=120 width=0)
+         Node/s: All datanodes
+   ->  Data Node Scan on pt_t2 "_REMOTE_TABLE_QUERY_"  (cost=0.00..0.00 rows=120 width=0)
+         Node/s: All datanodes
+(5 rows)
+
+---计划收集
+explain plan for select current_user from pt_t1,pt_t2;
+select statement_id,id,operation,options,object_name,object_type,object_owner,projection from plan_table order by plan_id, id;
+--? statement_id | id |   operation    |  options  | object_name | object_type  | object_owner |  projection   
+--?
+--?              |  1 | NESTED LOOPS   | CARTESIAN |             |              |              | .*
+              |  2 | DATA NODE SCAN |           | pt_t1       | REMOTE_QUERY |              | 
+              |  3 | DATA NODE SCAN |           | pt_t2       | REMOTE_QUERY |              | 
+(3 rows)
+
+delete from plan_table;
+--I13.Select for update测试
+set current_schema to "pt_test_SCHEMA";
+--计划对比
+explain select * from test for update;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Data Node Scan on "__REMOTE_FQS_QUERY__"  (cost=0.00..0.00 rows=0 width=0)
+   Node/s: All datanodes
+(2 rows)
+
+--计划收集
+explain plan for select * from test for update;
+select statement_id,id,operation,options,object_name,object_type,object_owner,projection from plan_table order by plan_id, id;
+ statement_id | id |   operation    | options |     object_name      | object_type  | object_owner | projection 
+--------------+----+----------------+---------+----------------------+--------------+--------------+------------
+              |  1 | DATA NODE SCAN |         | __REMOTE_FQS_QUERY__ | REMOTE_QUERY |              | test.a
+(1 row)
+
+delete from plan_table;
+explain select * from test for update;
+ERROR:  Unsupported FOR UPDATE/SHARE in non shippable plan.
+explain plan for select * from test for update;
+ERROR:  Unsupported FOR UPDATE/SHARE in non shippable plan.
+set current_schema to pt_test;
+--clean
+drop schema pt_test cascade;
+NOTICE:  drop cascades to 11 other objects
+DETAIL:  drop cascades to table src
+drop cascades to table t1
+drop cascades to table pt_t1
+drop cascades to table pt_t2
+drop cascades to table pt_t3
+drop cascades to table vec_pt_t1
+drop cascades to table vec_pt_t2
+drop cascades to table vec_pt_t3
+drop cascades to table test_cstore_pg_table_size
+drop cascades to table "PT_t5"
+drop cascades to table "PT_t6"
+drop schema "pt_test_SCHEMA" cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table "pt_test_SCHEMA"."PT_t7"
+drop cascades to table "pt_test_SCHEMA".test
+drop cascades to table "pt_test_SCHEMA".kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk63
+drop cascades to table "pt_test_SCHEMA".chinamap

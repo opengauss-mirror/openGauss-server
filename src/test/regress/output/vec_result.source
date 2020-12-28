@@ -40,7 +40,7 @@ create table vector_result_engine.VECTOR_RESULT_TABLE_01
    ,col_interval	interval
    ,col_tinterval	tinterval
 )with(orientation=column);
-copy row_result_table_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vec_result.data' DELIMITER as ',' NULL as '';
+copy row_result_table_01 from '@abs_srcdir@/data/vec_result.data' DELIMITER as ',' NULL as '';
 insert into vector_result_table_01 select * from row_result_table_01;
 CREATE TABLE vector_result_engine.VECTOR_RESULT_TABLE_02(
     a1 character varying(1000),
@@ -280,7 +280,7 @@ select * from vector_result_table_04;
 ----
 --- case 6: Test Vtimstamp_part
 ----
-explain (costs off, nodes off, verbose on) select distinct date_trunc('microsecon',col_date), date_trunc('millisecon',col_date) from vector_result_table_01 order by 1, 2;
+explain (costs off, verbose on) select distinct date_trunc('microsecon',col_date), date_trunc('millisecon',col_date) from vector_result_table_01 order by 1, 2;
                                                                           QUERY PLAN                                                                          
 --------------------------------------------------------------------------------------------------------------------------------------------------------------
  Row Adapter
@@ -422,7 +422,7 @@ create table location_type
     location_type_cd varchar(50) not null ,
     location_type_desc varchar(250) not null 
 )with (orientation=column);
-explain (costs off, nodes off, verbose on) WITH WITH_345 AS (SELECT Table_037.location_type_desc Column_024 
+explain (costs off, verbose on) WITH WITH_345 AS (SELECT Table_037.location_type_desc Column_024 
 FROM (SELECT 1 Column_017
 FROM region Table_010 RIGHT OUTER JOIN job_classification Table_030 ON FALSE) Table_036,
 location_type Table_037 ) 

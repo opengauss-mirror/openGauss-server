@@ -19,7 +19,7 @@
 #include "access/multixact.h"
 #include "access/twophase_rmgr.h"
 #include "pgstat.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "storage/predicate.h"
 
 const TwoPhaseCallback g_twophase_recover_callbacks[TWOPHASE_RM_MAX_ID + 1] = {

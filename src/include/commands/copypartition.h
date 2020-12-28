@@ -52,16 +52,17 @@ typedef struct CopyFromMemCxtData {
     CopyFromBulk chunk[PART_NUM_PER_MEMCXT];
 } CopyFromMemCxtData;
 
-typedef struct CopyFromBulkKey{
+typedef struct CopyFromBulkKey
+{
 	/* the hash key */
-	Oid			partOid;
+	Oid				partOid;
 	int4			bucketId;
 } CopyFromBulkKey;
 
 typedef struct CopyFromBulkData {
     /* the hash key */
     Oid  partOid;
-    int4 bucketId;
+	int4 bucketId;
 
     /* the other entry info in hash table */
     int numTuples;
@@ -117,7 +118,7 @@ void addToBulk(CopyFromBulk bulk, HeapTuple tup, bool needCopy)
             for (idx = 0; idx < copyFromMemCxt->nextBulk; idx++) {
                 found = found || (copyFromMemCxt->chunk[idx] == bulk);
             }
-            Assert(found == true);
+            Assert(true == found);
         }
 #endif
 
@@ -155,6 +156,7 @@ bool CopyFromChunkInsert(CopyState cstate, EState* estate, CopyFromBulk bulk, Co
     MemoryContext oldCxt;
 
     if (!mgr->isPartRel) {
+
         if (isInsertSelect) {
             CopyFromBulkInsert(estate, bulk, pCState, mycid, hiOptions, resultRelInfo, myslot, mgr->LastFlush, bistate);
             if (bulk->numTuples == 0) {
@@ -163,7 +165,7 @@ bool CopyFromChunkInsert(CopyState cstate, EState* estate, CopyFromBulk bulk, Co
             }
         } else
             CopyFromBulkInsert(estate, bulk, pCState, mycid, hiOptions, resultRelInfo, myslot, mgr->LastFlush, bistate);
-        return (bulk->numTuples == 0);
+        return (0 == bulk->numTuples);
     }
 
     Assert(((InvalidOid != bulk->partOid) && (InvalidOid == mgr->switchKey.partOid)) ||

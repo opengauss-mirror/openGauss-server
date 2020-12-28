@@ -67,26 +67,20 @@ extern void SetDataRcvDummyStandbySyncPercent(int percent);
 /*
  * reference SetWalRcvConninfo
  */
-void connect_dn_str(char* conninfo, int replIndex)
+void connect_dn_str(char *conninfo, int replIndex)
 {
-    ReplConnInfo* replConnArray = NULL;
+    ReplConnInfo *replConnArray = NULL;
     int rc = 0;
 
     if (t_thrd.postmaster_cxt.ReplConnArray[1] == NULL || t_thrd.postmaster_cxt.ReplConnArray[2] == NULL) {
-        ereport(FATAL,
-            (errmsg("replconninfo1 or replconninfo2 not configured."),
-                errhint("please check your configuration in postgresql.conf.")));
+        ereport(FATAL, (errmsg("replconninfo1 or replconninfo2 not configured."),
+                        errhint("please check your configuration in postgresql.conf.")));
     }
 
     replConnArray = t_thrd.postmaster_cxt.ReplConnArray[replIndex];
-    rc = snprintf_s((char*)conninfo,
-        MAXCONNINFO,
-        MAXCONNINFO - 1,
-        "host=%s port=%d localhost=%s localport=%d",
-        replConnArray->remotehost,
-        replConnArray->remoteport,
-        replConnArray->localhost,
-        replConnArray->localport);
+    rc = snprintf_s((char *)conninfo, MAXCONNINFO, MAXCONNINFO - 1, "host=%s port=%d localhost=%s localport=%d",
+                    replConnArray->remotehost, replConnArray->remoteport, replConnArray->localhost,
+                    replConnArray->localport);
     securec_check_ss(rc, "\0", "\0");
 }
 
@@ -125,9 +119,9 @@ static void SetFailoverFailedState(void)
  */
 static void SetWalRcvConninfo(ReplConnTarget conn_target)
 {
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-    volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
-    ReplConnInfo* conninfo = NULL;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    ReplConnInfo *conninfo = NULL;
 
     if (IS_DN_DUMMY_STANDYS_MODE()) {
         if (conn_target == REPCONNTARGET_PRIMARY) {
@@ -137,12 +131,12 @@ static void SetWalRcvConninfo(ReplConnTarget conn_target)
             /* if have tried to connect dummy and standby, set failover failed */
             if (t_thrd.walreceiverfuncs_cxt.WalReplIndex == REPL_IDX_STANDBY) {
                 SetFailoverFailedState();
-            /* else, try to connect to another standby */
+                /* else, try to connect to another standby */
             } else {
                 conn_target = REPCONNTARGET_STANDBY;
             }
             ereport(LOG, (errmsg("wal receiver get replconninfo[%d] to failover to another instance.",
-                t_thrd.walreceiverfuncs_cxt.WalReplIndex)));
+                                 t_thrd.walreceiverfuncs_cxt.WalReplIndex)));
         } else {
             /* always connect to dummy standby */
             ereport(LOG, (errmsg("wal receiver get conninfo[2] for dummystandby.")));
@@ -155,14 +149,9 @@ static void SetWalRcvConninfo(ReplConnTarget conn_target)
         int rcs = 0;
 
         SpinLockAcquire(&walrcv->mutex);
-        rcs = snprintf_s((char*)walrcv->conninfo,
-            MAXCONNINFO,
-            MAXCONNINFO - 1,
-            "host=%s port=%d localhost=%s localport=%d",
-            conninfo->remotehost,
-            conninfo->remoteport,
-            conninfo->localhost,
-            conninfo->localport);
+        rcs = snprintf_s((char *)walrcv->conninfo, MAXCONNINFO, MAXCONNINFO - 1,
+                         "host=%s port=%d localhost=%s localport=%d", conninfo->remotehost, conninfo->remoteport,
+                         conninfo->localhost, conninfo->localport);
         securec_check_ss(rcs, "\0", "\0");
         walrcv->conninfo[MAXCONNINFO - 1] = '\0';
         walrcv->conn_errno = NONE_ERROR;
@@ -195,12 +184,12 @@ void WalRcvShmemInit(void)
     bool found = false;
     errno_t rc = 0;
 
-    t_thrd.walreceiverfuncs_cxt.WalRcv = (WalRcvData*)ShmemInitStruct("Wal Receiver Ctl", WalRcvShmemSize(), &found);
+    t_thrd.walreceiverfuncs_cxt.WalRcv = (WalRcvData *)ShmemInitStruct("Wal Receiver Ctl", WalRcvShmemSize(), &found);
 
     if (!found) {
         /* First time through, so initialize */
         rc = memset_s(t_thrd.walreceiverfuncs_cxt.WalRcv, WalRcvShmemSize(), 0, WalRcvShmemSize());
-        securec_check(rc, "\0", "\0");
+        securec_check(rc, "", "");
         t_thrd.walreceiverfuncs_cxt.WalRcv->walRcvState = WALRCV_STOPPED;
         t_thrd.walreceiverfuncs_cxt.WalRcv->node_state = NODESTATE_NORMAL;
         t_thrd.walreceiverfuncs_cxt.WalRcv->conn_errno = NONE_ERROR;
@@ -208,6 +197,7 @@ void WalRcvShmemInit(void)
         t_thrd.walreceiverfuncs_cxt.WalRcv->dummyStandbySyncPercent = 0;
         t_thrd.walreceiverfuncs_cxt.WalRcv->dummyStandbyConnectFailed = false;
         SpinLockInit(&t_thrd.walreceiverfuncs_cxt.WalRcv->mutex);
+        SpinLockInit(&t_thrd.walreceiverfuncs_cxt.WalRcv->exitLock);
     }
 }
 
@@ -215,7 +205,7 @@ void WalRcvShmemInit(void)
 bool WalRcvInProgress(void)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     WalRcvState state;
     pg_time_t startTime;
 
@@ -239,12 +229,9 @@ bool WalRcvInProgress(void)
             if (walrcv->walRcvState == WALRCV_STARTING)
                 state = walrcv->walRcvState = WALRCV_STOPPED;
             SpinLockRelease(&walrcv->mutex);
-            ereport(WARNING,
-                (errmsg("shut down walreceiver due to start up timeout,"
-                        "timeout=%d,now=%ld,starttime=%ld",
-                    WALRCV_STARTUP_TIMEOUT,
-                    now,
-                    startTime)));
+            ereport(WARNING, (errmsg("shut down walreceiver due to start up timeout,"
+                                     "timeout=%d,now=%ld,starttime=%ld",
+                                     WALRCV_STARTUP_TIMEOUT, now, startTime)));
         }
     }
 
@@ -262,9 +249,9 @@ StringInfo get_rcv_slot_name(void)
 {
     StringInfo slotname = makeStringInfo();
 
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
 
-    /* creaet slot in dummystandby mode */
+    /* only for dummy standby mode */
     if (IS_DN_DUMMY_STANDYS_MODE()) {
         SpinLockAcquire(&walrcv->mutex);
         appendStringInfo(slotname, "%s", g_instance.attr.attr_common.PGXCNodeName);
@@ -278,11 +265,11 @@ StringInfo get_rcv_slot_name(void)
  * Set current walrcv's slotname.
  *  depend on have setting the hashmdata->current_repl
  */
-static void set_rcv_slot_name(const char* slotname)
+static void set_rcv_slot_name(const char *slotname)
 {
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-    volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
-    ReplConnInfo* conninfo = NULL;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    ReplConnInfo *conninfo = NULL;
     int replIdx = 0;
     errno_t retcode = EOK;
 
@@ -295,27 +282,22 @@ static void set_rcv_slot_name(const char* slotname)
 
     SpinLockAcquire(&walrcv->mutex);
     if (slotname != NULL) {
-        retcode = strncpy_s((char*)walrcv->slotname, NAMEDATALEN, slotname, NAMEDATALEN - 1);
+        retcode = strncpy_s((char *)walrcv->slotname, NAMEDATALEN, slotname, NAMEDATALEN - 1);
         securec_check(retcode, "\0", "\0");
     } else if (u_sess->attr.attr_common.application_name && strlen(u_sess->attr.attr_common.application_name) > 0) {
         int rc = 0;
-        rc = snprintf_s(
-            (char*)walrcv->slotname, NAMEDATALEN, NAMEDATALEN - 1, "%s", u_sess->attr.attr_common.application_name);
+        rc = snprintf_s((char *)walrcv->slotname, NAMEDATALEN, NAMEDATALEN - 1, "%s",
+                        u_sess->attr.attr_common.application_name);
         securec_check_ss(rc, "\0", "\0");
     } else if (g_instance.attr.attr_common.PGXCNodeName != NULL) {
         int rc = 0;
 
         if (IS_DN_DUMMY_STANDYS_MODE()) {
-            rc = snprintf_s(
-                (char*)walrcv->slotname, NAMEDATALEN, NAMEDATALEN - 1, "%s", g_instance.attr.attr_common.PGXCNodeName);
+            rc = snprintf_s((char *)walrcv->slotname, NAMEDATALEN, NAMEDATALEN - 1, "%s",
+                            g_instance.attr.attr_common.PGXCNodeName);
         } else if (conninfo != NULL) {
-            rc = snprintf_s((char*)walrcv->slotname,
-                NAMEDATALEN,
-                NAMEDATALEN - 1,
-                "%s_%s_%d",
-                g_instance.attr.attr_common.PGXCNodeName,
-                conninfo->localhost,
-                conninfo->localport);
+            rc = snprintf_s((char *)walrcv->slotname, NAMEDATALEN, NAMEDATALEN - 1, "%s_%s_%d",
+                            g_instance.attr.attr_common.PGXCNodeName, conninfo->localhost, conninfo->localport);
         }
         securec_check_ss(rc, "\0", "\0");
     } else
@@ -332,10 +314,9 @@ static void set_rcv_slot_name(const char* slotname)
 void ShutdownWalRcv(void)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     ThreadId walrcvpid = 0;
     int i = 1;
-    const int COUNTS = 2000;
 
     /*
      * Request walreceiver to stop. Walreceiver will switch to WALRCV_STOPPED
@@ -352,7 +333,7 @@ void ShutdownWalRcv(void)
 
         case WALRCV_RUNNING:
             walrcv->walRcvState = WALRCV_STOPPING;
-            // lint -fallthrough
+            // fall through
         case WALRCV_STOPPING:
             walrcvpid = walrcv->pid;
             break;
@@ -375,14 +356,14 @@ void ShutdownWalRcv(void)
          * This possibly-long loop needs to handle interrupts of startup
          * process.
          */
-        HandleStartupProcInterrupts();
+        RedoInterruptCallBack();
         pg_usleep(100000); /* 100ms */
 
         SpinLockAcquire(&walrcv->mutex);
         walrcvpid = walrcv->pid;
         SpinLockRelease(&walrcv->mutex);
 
-        if ((walrcvpid != 0) && (i % COUNTS == 0)) {
+        if ((walrcvpid != 0) && (i % 2000 == 0)) {
             (void)gs_signal_send(walrcvpid, SIGTERM);
             i = 1;
         }
@@ -397,19 +378,21 @@ void ShutdownWalRcv(void)
  * is a libpq connection string to use, and slotname is, optionally, the name
  * of a replication slot to acquire.
  */
-void RequestXLogStreaming(XLogRecPtr* recptr, const char* conninfo, ReplConnTarget conn_target, const char* slotname)
+void RequestXLogStreaming(XLogRecPtr *recptr, const char *conninfo, ReplConnTarget conn_target, const char *slotname)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     pg_time_t now = (pg_time_t)time(NULL);
     XLogRecPtr Lcrecptr;
-    const int MAX_RETRY_TIMES = 3;
     errno_t retcode = EOK;
 
     Lcrecptr = *recptr;
 
-    knl_g_set_is_local_redo_finish(true);
-    ereport(LOG, (errmsg("knl_g_set_is_local_redo_finish true in RequestXLogStreaming")));
+    /*
+     * Enter this function means redo done, set redo finish to true.
+     */
+    knl_g_set_redo_finish_status(REDO_FINISH_STATUS_LOCAL | REDO_FINISH_STATUS_CM);
+    ereport(LOG, (errmsg("knl_g_set_redo_finish_status true in RequestXLogStreaming")));
     /*
      * We always start at the beginning of the segment. That prevents a broken
      * segment (i.e., with no records in the first half of a segment) from
@@ -427,27 +410,29 @@ void RequestXLogStreaming(XLogRecPtr* recptr, const char* conninfo, ReplConnTarg
     }
 
     SpinLockAcquire(&walrcv->mutex);
-    if (walrcv->ntries >= MAX_RETRY_TIMES && !dummyStandbyMode) {
+    if (walrcv->ntries > 2 && !dummyStandbyMode) {
         walrcv->isRuning = false;
         SpinLockRelease(&walrcv->mutex);
         return;
     }
-
+    walrcv->conn_target = conn_target;
     /* It better be stopped before we try to restart it */
     Assert(walrcv->walRcvState == WALRCV_STOPPED);
-
-    if (conninfo != NULL) {
-        retcode = strncpy_s((char*)walrcv->conninfo, MAXCONNINFO, conninfo, MAXCONNINFO - 1);
-        securec_check(retcode, "\0", "\0");
-    } else {
+    if(conn_target != REPCONNTARGET_OBS) {
+        if (conninfo != NULL) {
+            retcode = strncpy_s((char *)walrcv->conninfo, MAXCONNINFO, conninfo, MAXCONNINFO - 1);
+            securec_check(retcode, "\0", "\0");
+            walrcv->conn_errno = NONE_ERROR;
+            walrcv->conn_target = conn_target;
+        } else {
+            SpinLockRelease(&walrcv->mutex);
+            SetWalRcvConninfo(conn_target);
+            SpinLockAcquire(&walrcv->mutex);
+        }
         SpinLockRelease(&walrcv->mutex);
-        SetWalRcvConninfo(conn_target);
+        set_rcv_slot_name(slotname);
         SpinLockAcquire(&walrcv->mutex);
     }
-
-    SpinLockRelease(&walrcv->mutex);
-    set_rcv_slot_name(slotname);
-    SpinLockAcquire(&walrcv->mutex);
 
     walrcv->walRcvState = WALRCV_STARTING;
     walrcv->startTime = now;
@@ -482,10 +467,10 @@ void RequestXLogStreaming(XLogRecPtr* recptr, const char* conninfo, ReplConnTarg
  * written in the most recent walreceiver flush cycle.	Callers not
  * interested in that value may pass NULL for latestChunkStart.
  */
-XLogRecPtr GetWalRcvWriteRecPtr(XLogRecPtr* latestChunkStart)
+XLogRecPtr GetWalRcvWriteRecPtr(XLogRecPtr *latestChunkStart)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     XLogRecPtr recptr;
     errno_t rc = 0;
 
@@ -493,8 +478,8 @@ XLogRecPtr GetWalRcvWriteRecPtr(XLogRecPtr* latestChunkStart)
     recptr = walrcv->receivedUpto;
     if (latestChunkStart != NULL) {
         /* FUTURE CASE: */
-        rc = strncpy_s(
-            (char*)latestChunkStart, sizeof(XLogRecPtr), (char*)&walrcv->latestChunkStart, sizeof(XLogRecPtr) - 1);
+        rc = strncpy_s((char *)latestChunkStart, sizeof(XLogRecPtr), (char *)&walrcv->latestChunkStart,
+                       sizeof(XLogRecPtr) - 1);
         securec_check(rc, "\0", "\0");
     }
 
@@ -503,26 +488,20 @@ XLogRecPtr GetWalRcvWriteRecPtr(XLogRecPtr* latestChunkStart)
     return recptr;
 }
 
-XLogRecPtr GetWalRcvWriteLsn(XLogRecPtr* latestChunkStart)
+
+XLogRecPtr GetWalStartPtr()
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-    XLogRecPtr recptr;
-    errno_t rc = 0;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    XLogRecPtr recptr = InvalidXLogRecPtr;
 
     SpinLockAcquire(&walrcv->mutex);
-    if (walrcv->walRcvCtlBlock != NULL)
-        recptr = walrcv->walRcvCtlBlock->walStart;
-    else
-        recptr = walrcv->receivedUpto;
-    if (latestChunkStart != NULL) {
-        /* FUTURE CASE: */
-        rc = strncpy_s(
-            (char*)latestChunkStart, sizeof(XLogRecPtr), (char*)&walrcv->latestChunkStart, sizeof(XLogRecPtr) - 1);
-        securec_check(rc, "\0", "\0");
+    WalRcvCtlBlock *ctlBlock = walrcv->walRcvCtlBlock;
+    if (ctlBlock != NULL) {
+        recptr = ctlBlock->walStart;
     }
-    SpinLockRelease(&walrcv->mutex);
 
+    SpinLockRelease(&walrcv->mutex);
     return recptr;
 }
 
@@ -530,7 +509,7 @@ XLogRecPtr GetWalRcvWriteLsn(XLogRecPtr* latestChunkStart)
 bool WalRcvAllReplayIsDone()
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     XLogRecPtr theLatestReplayedRecPtr = InvalidXLogRecPtr;
     XLogRecPtr theLatestReceivedRecPtr = InvalidXLogRecPtr;
 
@@ -541,22 +520,18 @@ bool WalRcvAllReplayIsDone()
     SpinLockRelease(&walrcv->mutex);
 
     if (XLByteLT(theLatestReplayedRecPtr, theLatestReceivedRecPtr)) {
-        ereport(LOG,
+        ereport(
+            LOG,
             (errmsg("still waiting for the redo on the standby: the latest replayed %X/%X, the latest received %X/%X.",
-                (uint32)(theLatestReplayedRecPtr >> 32),
-                (uint32)theLatestReplayedRecPtr,
-                (uint32)(theLatestReceivedRecPtr >> 32),
-                (uint32)theLatestReceivedRecPtr)));
+                    (uint32)(theLatestReplayedRecPtr >> 32), (uint32)theLatestReplayedRecPtr,
+                    (uint32)(theLatestReceivedRecPtr >> 32), (uint32)theLatestReceivedRecPtr)));
 
         return false;
     }
 
-    ereport(LOG,
-        (errmsg("all redo done on the standby: the latest replayed %X/%X, the latest received %X/%X.",
-            (uint32)(theLatestReplayedRecPtr >> 32),
-            (uint32)theLatestReplayedRecPtr,
-            (uint32)(theLatestReceivedRecPtr >> 32),
-            (uint32)theLatestReceivedRecPtr)));
+    ereport(LOG, (errmsg("all redo done on the standby: the latest replayed %X/%X, the latest received %X/%X.",
+                         (uint32)(theLatestReplayedRecPtr >> 32), (uint32)theLatestReplayedRecPtr,
+                         (uint32)(theLatestReceivedRecPtr >> 32), (uint32)theLatestReceivedRecPtr)));
 
     return true;
 }
@@ -576,7 +551,7 @@ bool WalRcvIsDone()
 int GetReplicationApplyDelay(void)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
 
     XLogRecPtr receivePtr;
     XLogRecPtr replayPtr;
@@ -609,7 +584,7 @@ int GetReplicationApplyDelay(void)
 int GetReplicationTransferLatency(void)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
 
     TimestampTz lastMsgSendTime;
     TimestampTz lastMsgReceiptTime;
@@ -633,7 +608,7 @@ int GetReplicationTransferLatency(void)
 int GetWalRcvDummyStandbySyncPercent(void)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     int percent = 0;
 
     SpinLockAcquire(&walrcv->mutex);
@@ -646,7 +621,7 @@ int GetWalRcvDummyStandbySyncPercent(void)
 void SetWalRcvDummyStandbySyncPercent(int percent)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
 
     SpinLockAcquire(&walrcv->mutex);
     walrcv->dummyStandbySyncPercent = percent;
@@ -656,13 +631,13 @@ void SetWalRcvDummyStandbySyncPercent(int percent)
 /*
  * We check the conninfo one by one. We should consider the method later.
  */
-ReplConnInfo* GetRepConnArray(int* cur_idx)
+ReplConnInfo *GetRepConnArray(int *cur_idx)
 {
     int loop_retry = 0;
 
     if (*cur_idx < 0 || *cur_idx > MAX_REPLNODE_NUM) {
         ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid replication node index:%d", *cur_idx)));
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid replication node index:%d", *cur_idx)));
     }
 
     /* do ... while  until the node is avaliable to me */
@@ -721,21 +696,20 @@ void get_failover_host_conninfo_for_dummy(int *repl)
 
 static int get_repl_idx(const char *host, int port)
 {
-	int i = 0;
-	int replIdx = -1;
+    int i = 0;
+    int replIdx = -1;
 
-	for (i = 0; i < MAX_REPLNODE_NUM; ++i) {
-		if (t_thrd.postmaster_cxt.ReplConnArray[i] != NULL &&
-			strcmp(t_thrd.postmaster_cxt.ReplConnArray[i]->remotehost, host) == 0 &&
-			t_thrd.postmaster_cxt.ReplConnArray[i]->remoteport == port) {
-			replIdx = i;
-			break;
-		}
-	}
+    for (i = 0; i < MAX_REPLNODE_NUM; ++i) {
+        if (t_thrd.postmaster_cxt.ReplConnArray[i] != NULL &&
+            strcmp(t_thrd.postmaster_cxt.ReplConnArray[i]->remotehost, host) == 0 &&
+            t_thrd.postmaster_cxt.ReplConnArray[i]->remoteport == port) {
+            replIdx = i;
+            break;
+        }
+    }
 
-	return replIdx;
+    return replIdx;
 }
-
 
 void set_failover_host_conninfo_for_dummy(const char *remote_host, int remote_port)
 {
@@ -790,19 +764,33 @@ void set_failover_host_conninfo_for_dummy(const char *remote_host, int remote_po
 
 void clean_failover_host_conninfo_for_dummy(void)
 {
-	char	newHostPath[MAXPGPATH];
-	int		ret = 0;
-	errno_t	rc = EOK;
+    char newHostPath[MAXPGPATH];
+    int ret = 0;
+    errno_t rc = EOK;
 
-	rc = memset_s(newHostPath, sizeof(newHostPath), 0, sizeof(newHostPath));
-	securec_check(rc, "\0", "\0");
+    rc = memset_s(newHostPath, sizeof(newHostPath), 0, sizeof(newHostPath));
+    securec_check(rc, "\0", "\0");
 
-	ret = snprintf_s(newHostPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", t_thrd.proc_cxt.DataDir, FAILOVER_HOST_FOR_DUMMY);
-	securec_check_ss(ret, "\0", "\0");
+    ret = snprintf_s(newHostPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", t_thrd.proc_cxt.DataDir, FAILOVER_HOST_FOR_DUMMY);
+    securec_check_ss(ret, "\0", "\0");
 
-	if (unlink(newHostPath) < 0) {
-		ereport(LOG, (errmsg("remove %s failed", newHostPath)));
-	} else {
-		ereport(LOG, (errmsg("remove %s success", newHostPath)));
-	}
+    if (unlink(newHostPath) < 0) {
+        ereport(LOG, (errmsg("remove %s failed", newHostPath)));
+    } else {
+        ereport(LOG, (errmsg("remove %s success", newHostPath)));
+    }
+}
+
+void set_wal_rcv_write_rec_ptr(XLogRecPtr rec_ptr)
+{
+    /* use volatile pointer to prevent code rearrangement */
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    SpinLockAcquire(&walrcv->mutex);
+    if (XLByteLT(rec_ptr, walrcv->receivedUpto)) {
+        walrcv->receivedUpto = rec_ptr;
+    }
+    if (XLByteLT(rec_ptr, walrcv->latestChunkStart)) {
+        walrcv->latestChunkStart = rec_ptr;
+    }
+    SpinLockRelease(&walrcv->mutex);
 }

@@ -1,0 +1,113 @@
+--
+--orders
+--
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/tpch_orders_out/ address=@obshostname@ ak=@ak@ sk=@sk@
+DROP FOREIGN TABLE if exists EXTORDERS;
+CREATE FOREIGN TABLE EXTORDERS (
+  O_ORDERKEY    BIGINT,
+  O_CUSTKEY   INTEGER NOT NULL, -- references C_CUSTKEY
+  O_ORDERSTATUS CHAR(1),
+  O_TOTALPRICE  DECIMAL,
+  O_ORDERDATE   DATE,
+  O_ORDERPRIORITY CHAR(15),
+  O_CLERK     CHAR(15),
+  O_SHIPPRIORITY  INTEGER,
+  O_COMMENT   VARCHAR(79)
+)SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/tpch_orders/orders',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+);
+
+DROP TABLE if exists ORDERS;
+CREATE TABLE ORDERS (
+  O_ORDERKEY    BIGINT,
+  O_CUSTKEY   INTEGER NOT NULL, -- references C_CUSTKEY
+  O_ORDERSTATUS CHAR(1),
+  O_TOTALPRICE  DECIMAL,
+  O_ORDERDATE   DATE,
+  O_ORDERPRIORITY CHAR(15),
+  O_CLERK     CHAR(15),
+  O_SHIPPRIORITY  INTEGER,
+  O_COMMENT   VARCHAR(79)
+);
+insert into ORDERS select * from EXTORDERS;
+
+DROP FOREIGN TABLE if exists EXTORDERS_WRITE;
+CREATE FOREIGN TABLE EXTORDERS_WRITE (
+  O_ORDERKEY    BIGINT,
+  O_CUSTKEY   INTEGER NOT NULL, -- references C_CUSTKEY
+  O_ORDERSTATUS CHAR(1),
+  O_TOTALPRICE  DECIMAL,
+  O_ORDERDATE   DATE,
+  O_ORDERPRIORITY CHAR(15),
+  O_CLERK     CHAR(15),
+  O_SHIPPRIORITY  INTEGER,
+  O_COMMENT   VARCHAR(79)
+)SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/tpch_orders_out/',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+)
+Write Only;
+
+insert into EXTORDERS_WRITE select * from ORDERS;
+
+drop foreign table if exists EXTORDERS_READ;
+CREATE FOREIGN TABLE EXTORDERS_READ
+(
+  O_ORDERKEY    BIGINT,
+  O_CUSTKEY   INTEGER NOT NULL, -- references C_CUSTKEY
+  O_ORDERSTATUS CHAR(1),
+  O_TOTALPRICE  DECIMAL,
+  O_ORDERDATE   DATE,
+  O_ORDERPRIORITY CHAR(15),
+  O_CLERK     CHAR(15),
+  O_SHIPPRIORITY  INTEGER,
+  O_COMMENT   VARCHAR(79)
+)SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/tpch_orders_out/',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+);
+
+
+select count(*) from EXTORDERS_READ;
+
+drop table if exists ORDERS_READ;
+CREATE TABLE ORDERS_READ
+(
+  O_ORDERKEY    BIGINT,
+  O_CUSTKEY   INTEGER NOT NULL, -- references C_CUSTKEY
+  O_ORDERSTATUS CHAR(1),
+  O_TOTALPRICE  DECIMAL,
+  O_ORDERDATE   DATE,
+  O_ORDERPRIORITY CHAR(15),
+  O_CLERK     CHAR(15),
+  O_SHIPPRIORITY  INTEGER,
+  O_COMMENT   VARCHAR(79)
+);
+
+insert into ORDERS_READ select * from EXTORDERS_READ;
+select count(*) from (select * from ORDERS minus all select * from ORDERS_READ);
+
+drop foreign table EXTORDERS_READ;
+drop foreign table EXTORDERS_WRITE;
+drop table ORDERS_READ;
+drop table ORDERS;
+drop foreign table EXTORDERS;
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/tpch_orders_out/ address=@obshostname@ ak=@ak@ sk=@sk@

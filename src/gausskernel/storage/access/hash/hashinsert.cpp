@@ -68,12 +68,10 @@ void _hash_doinsert(Relation rel, IndexTuple itup)
      * XXX this is useless code if we are only storing hash keys.
      */
     if (itemsz > (Size)HashMaxItemSize(metapage))
-        ereport(ERROR,
-            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                errmsg("index row size %lu exceeds hash maximum %lu",
-                    (unsigned long)itemsz,
-                    (unsigned long)HashMaxItemSize(metapage)),
-                errhint("Values larger than a buffer page cannot be indexed.")));
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                        errmsg("index row size %lu exceeds hash maximum %lu", (unsigned long)itemsz,
+                               (unsigned long)HashMaxItemSize(metapage)),
+                        errhint("Values larger than a buffer page cannot be indexed.")));
 
     /*
      * Compute the target bucket number, and convert to block number.
@@ -189,9 +187,8 @@ OffsetNumber _hash_pgaddtup(Relation rel, Buffer buf, Size itemsize, IndexTuple 
     hashkey = _hash_get_indextuple_hashkey(itup);
     itup_off = _hash_binsearch(page, hashkey);
     if (PageAddItem(page, (Item)itup, itemsize, itup_off, false, false) == InvalidOffsetNumber)
-        ereport(ERROR,
-            (errcode(ERRCODE_INDEX_CORRUPTED),
-                errmsg("failed to add index item to \"%s\"", RelationGetRelationName(rel))));
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                        errmsg("failed to add index item to \"%s\"", RelationGetRelationName(rel))));
 
     return itup_off;
 }

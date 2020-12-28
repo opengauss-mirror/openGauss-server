@@ -1,0 +1,82 @@
+--copy from check
+---
+--case 1:
+---
+drop table if exists lineitem;
+CREATE TABLE LINEITEM
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+with (orientation = column)
+distribute by hash(L_ORDERKEY)
+partition by range (L_ORDERKEY)
+(
+     partition CstorePartition_11 values less than (100000),
+     partition CstorePartition_12 values less than (200000),
+	 partition CstorePartition_13 values less than (300000),
+	 partition CstorePartition_14 values less than (400000),
+	 partition CstorePartition_15 values less than (500000),
+	 partition CstorePartition_16 values less than (600000),
+	 partition CstorePartition_17 values less than (100000000)
+);
+COPY LINEITEM FROM '@abs_srcdir@/data/lineitem.data' DELIMITER '|';
+drop table lineitem;
+
+--partition insert optimization
+create table col_part_insert_opt (id int, cu int, num int, num1 int) with (orientation = column) distribute by hash(id)
+partition by range (num1)
+(
+	partition p1  values less than (1000),
+	partition p2  values less than (2000),
+	partition p3  values less than (3000),
+	partition p4  values less than (4000),
+	partition p5  values less than (5000),
+	partition p6  values less than (maxvalue)
+);
+
+create table col_part_insert_opt2 (id int, cu int, num int, num1 int) with (orientation = column) distribute by hash(id)
+partition by range (num1)
+(
+	partition p1  values less than (1000),
+	partition p2  values less than (2000),
+	partition p3  values less than (3000),
+	partition p4  values less than (4000),
+	partition p6  values less than (maxvalue)
+);
+
+create table col_part_insert_opt3 (id int, cu int, num int, num1 numeric(8,1)) with (orientation = column) distribute by hash(id)
+partition by range (num1)
+(
+	partition p1  values less than (1000),
+	partition p2  values less than (2000),
+	partition p3  values less than (3000),
+	partition p4  values less than (4000),
+	partition p5  values less than (5000),
+	partition p6  values less than (maxvalue)
+);
+
+create table col_insert_opt (id int, cu int, num int, num1 int) with (orientation = column) distribute by hash(id);
+
+insert into col_part_insert_opt select * from col_part_insert_opt2;
+insert into col_part_insert_opt select * from col_part_insert_opt3;
+insert into col_part_insert_opt select * from col_insert_opt;
+
+drop table col_part_insert_opt;
+drop table col_part_insert_opt2;
+drop table col_part_insert_opt3;
+drop table col_insert_opt;

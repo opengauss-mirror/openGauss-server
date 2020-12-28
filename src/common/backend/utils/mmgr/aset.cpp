@@ -263,7 +263,7 @@ static inline int AllocSetFreeIndex(Size size)
          * the tsize value.
          */
         t = tsize >> 8;
-        idx = t ? LogTable256[t] + 8 : LogTable256[tsize];
+        idx = t ? (LogTable256[t] + 8) : LogTable256[tsize];
 
         Assert(idx < ALLOCSET_NUM_FREELISTS);
     } else
@@ -411,6 +411,13 @@ MemoryContext AllocSetContextCreate(_in_ MemoryContext parent, _in_ const char* 
     _in_ Size initBlockSize, _in_ Size maxBlockSize, _in_ MemoryContextType contextType, _in_ Size maxSize,
     _in_ bool isSession)
 {
+    /* The following situation is forbidden, parent context is not shared, while current context is shared. */
+    if (parent != NULL && !parent->is_shared && contextType == SHARED_CONTEXT) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OPERATE_FAILED),
+                errmsg("Failed while creating shared memory context \"%s\" from standard context\"%s\".",
+                    name, parent->name)));
+    }
     switch (contextType) {
 #ifndef ENABLE_MEMORY_CHECK
         case STANDARD_CONTEXT:
@@ -425,7 +432,7 @@ MemoryContext AllocSetContextCreate(_in_ MemoryContext parent, _in_ const char* 
                 parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, false, isSession);
         case SHARED_CONTEXT:
             return AsanMemoryAllocator::AllocSetContextCreate(
-                parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, true, isSession);
+                parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, true, false);
 #endif
         case STACK_CONTEXT:
             return StackMemoryAllocator::AllocSetContextCreate(
@@ -525,12 +532,11 @@ MemoryContext GenericMemoryAllocator::AllocSetContextCreate(MemoryContext parent
     else
         func = &SessionFunctions;
 
-    /* we want to be sure ErrorContext still has some memory
-     * even if we've run out elsewhere!
-     * Don't limit the memory allocation for ErrorContext.
-     * And skip memory tracking memory allocation.
+    /* we want to be sure ErrorContext still has some memory even if we've run out elsewhere!
+     * Don't limit the memory allocation for ErrorContext. And skip memory tracking memory allocation.
      */
-    if (GS_MP_INITED && (0 != strcmp(name, "ErrorContext")) && (0 != strcmp(name, "MemoryTrackMemoryContext")))
+    if ((0 != strcmp(name, "ErrorContext")) && (0 != strcmp(name, "MemoryTrackMemoryContext")) &&
+        (strcmp(name, "Track MemoryInfo hash") != 0))
         value |= IS_PROTECT;
 
     /* only track the unshared context after t_thrd.mem_cxt.mem_track_mem_cxt is created */
@@ -612,7 +618,7 @@ MemoryContext GenericMemoryAllocator::AllocSetContextCreate(MemoryContext parent
         AllocBlock block;
 
         if (GS_MP_INITED)
-            block = (AllocBlock)(*func->malloc)(blksize);
+            block = (AllocBlock)(*func->malloc)(blksize, (value & IS_PROTECT) == 1 ? true : false);
         else
             gs_malloc(blksize, block, AllocBlock);
 
@@ -732,7 +738,7 @@ void GenericMemoryAllocator::AllocSetReset(MemoryContext context)
                 MemoryTrackingFreeInfo(context, tempSize);
 
             /* Normal case, release the block */
-            if (enable_memoryprotect)
+            if (GS_MP_INITED)
                 (*func->free)(block, tempSize);
             else
                 gs_free(block, tempSize);
@@ -806,7 +812,7 @@ void GenericMemoryAllocator::AllocSetDelete(MemoryContext context)
         if (is_tracked)
             MemoryTrackingFreeInfo(context, tempSize);
 
-        if (enable_memoryprotect)
+        if (GS_MP_INITED)
             (*func->free)(block, tempSize);
         else
             gs_free(block, tempSize);
@@ -875,10 +881,11 @@ void* GenericMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, S
         chunk_size = MAXALIGN(size);
         blksize = chunk_size + ALLOC_BLOCKHDRSZ + ALLOC_CHUNKHDRSZ;
 
-        if (enable_memoryprotect)
-            block = (AllocBlock)(*func->malloc)(blksize);
-        else
+        if (GS_MP_INITED) {
+            block = (AllocBlock)(*func->malloc)(blksize, enable_memoryprotect);
+        } else {
             gs_malloc(blksize, block, AllocBlock);
+        }
         if (block == NULL) {
             if (is_shared)
                 MemoryContextUnlock(context);
@@ -1000,7 +1007,7 @@ void* GenericMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, S
     /*
      * Choose the actual chunk size to allocate.
      */
-    chunk_size = (1 << ALLOC_MINBITS) << fidx;
+    chunk_size = ((unsigned long)1 << ALLOC_MINBITS) << fidx;
     Assert(chunk_size >= size);
 
     /*
@@ -1083,8 +1090,8 @@ void* GenericMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, S
             blksize <<= 1;
 
         /* Try to allocate it */
-        if (enable_memoryprotect)
-            block = (AllocBlock)(*func->malloc)(blksize);
+        if (GS_MP_INITED)
+            block = (AllocBlock)(*func->malloc)(blksize, enable_memoryprotect);
         else
             gs_malloc(blksize, block, AllocBlock);
         if (block == NULL) {
@@ -1170,6 +1177,27 @@ void* GenericMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, S
 #endif
 }
 
+static void check_pointer_valid(AllocBlock block, bool is_shared,
+    MemoryContext context, AllocChunk chunk)
+{
+    AllocSet set = (AllocSet)context;
+
+    if (block->aset != set) {
+        if (is_shared)
+            MemoryContextUnlock(context);
+        ereport(ERROR, (errcode(ERRCODE_OPERATE_RESULT_NOT_EXPECTED),
+            errmsg("The block was freed before this time.")));
+    }
+    
+    if (block->freeptr != block->endptr ||
+        block->freeptr != ((char*)block) + (chunk->size + ALLOC_BLOCKHDRSZ + ALLOC_CHUNKHDRSZ)) {
+        if (is_shared)
+            MemoryContextUnlock(context);
+        ereport(ERROR, (errcode(ERRCODE_OPERATE_RESULT_NOT_EXPECTED),
+            errmsg("The memory use was overflow.")));
+    }
+}
+
 /*
  * AllocSetFree
  *		Frees allocated memory; memory is removed from the set.
@@ -1205,6 +1233,9 @@ void GenericMemoryAllocator::AllocSetFree(MemoryContext context, void* pointer)
     /* Test for someone scribbling on unused space in chunk */
     if (chunk->requested_size != (Size)MAXALIGN(chunk->requested_size) && chunk->requested_size < chunk->size)
         if (!sentinel_ok(pointer, chunk->requested_size - ALLOC_MAGICHDRSZ)) {
+            if (is_shared) {
+                MemoryContextUnlock(context);
+            }
             ereport(PANIC, (errmsg("detected write past chunk end in %s", set->header.name)));
         }
     AllocMagicData* magic =
@@ -1221,15 +1252,8 @@ void GenericMemoryAllocator::AllocSetFree(MemoryContext context, void* pointer)
          */
         AllocBlock block = (AllocBlock)(((char*)chunk) - ALLOC_BLOCKHDRSZ);
 
-        if (block->aset != set || block->freeptr != block->endptr ||
-            block->freeptr != ((char*)block) + (chunk->size + ALLOC_BLOCKHDRSZ + ALLOC_CHUNKHDRSZ)) {
-            if (is_shared)
-                MemoryContextUnlock(context);
-            ereport(ERROR,
-                (errcode(ERRCODE_OPERATE_RESULT_NOT_EXPECTED),
-                errmsg("%s Memory Context could not find block containing chunk", context->name)));
-        }
-       
+        check_pointer_valid(block, is_shared, context, chunk);
+
         /* OK, remove block from aset's list and free it */
         if (block->prev)
             block->prev->next = block->next;
@@ -1241,7 +1265,7 @@ void GenericMemoryAllocator::AllocSetFree(MemoryContext context, void* pointer)
 
         tempSize = block->allocSize;
 
-        set->totalSpace -= block->endptr - ((char*)block);
+        set->totalSpace -= block->allocSize;
 
         /* clean the structure of block */
         block->aset = NULL;
@@ -1254,7 +1278,7 @@ void GenericMemoryAllocator::AllocSetFree(MemoryContext context, void* pointer)
         if (is_tracked)
             MemoryTrackingFreeInfo(context, tempSize);
 
-        if (enable_memoryprotect)
+        if (GS_MP_INITED)
             (*func->free)(block, tempSize);
         else
             gs_free(block, tempSize);
@@ -1280,6 +1304,7 @@ void GenericMemoryAllocator::AllocSetFree(MemoryContext context, void* pointer)
         magic->posnum = 0;
 #endif
         set->freelist[fidx] = chunk;
+        Assert(chunk->aset != set);
     }
 #endif
     if (is_shared)
@@ -1329,6 +1354,9 @@ void* GenericMemoryAllocator::AllocSetRealloc(
     /* Test for someone scribbling on unused space in chunk */
     if (chunk->requested_size != (Size)MAXALIGN(chunk->requested_size) && chunk->requested_size < oldsize)
         if (!sentinel_ok(pointer, chunk->requested_size - ALLOC_MAGICHDRSZ)) {
+            if (is_shared) {
+                MemoryContextUnlock(context);
+            }
             ereport(PANIC, (errmsg("detected write past chunk end in %s", set->header.name)));
         }
     AllocMagicData* magic =
@@ -1392,22 +1420,16 @@ void* GenericMemoryAllocator::AllocSetRealloc(
          * reference the correct aset, and freeptr and endptr should point
          * just past the chunk.
          */
-        if (block->aset != set || block->freeptr != block->endptr ||
-            block->freeptr != ((char*)block) + (chunk->size + ALLOC_BLOCKHDRSZ + ALLOC_CHUNKHDRSZ)) {
-            if (is_shared)
-                MemoryContextUnlock(context);
-            ereport(ERROR,
-                (errcode(ERRCODE_OPERATE_RESULT_NOT_EXPECTED),
-                    errmsg("%s Memory Context could not find block containing chunk", context->name)));
-        }
+        check_pointer_valid(block, is_shared, context, chunk);
 
         /* Do the realloc */
         chksize = MAXALIGN(size);
         blksize = chksize + ALLOC_BLOCKHDRSZ + ALLOC_CHUNKHDRSZ;
         oldBlock = block;
+        oldsize = block->allocSize;
 
-        if (enable_memoryprotect)
-            block = (AllocBlock)(*func->realloc)(oldBlock, oldBlock->allocSize, blksize);
+        if (GS_MP_INITED)
+            block = (AllocBlock)(*func->realloc)(oldBlock, oldBlock->allocSize, blksize, enable_memoryprotect);
         else
             gs_realloc(oldBlock, oldBlock->allocSize, block, blksize, AllocBlock);
 
@@ -1633,7 +1655,7 @@ void GenericMemoryAllocator::AllocSetCheck(MemoryContext context)
         if (!blk_used) {
             if (set->keeper != block) {
                 Assert(0);
-                ereport(LOG, (errmsg("problem in alloc set %s: empty block", name)));
+                ereport(WARNING, (errmsg("problem in alloc set %s: empty block", name)));
             }
         }
 
@@ -1641,7 +1663,7 @@ void GenericMemoryAllocator::AllocSetCheck(MemoryContext context)
          * Check block header fields
          */
         if (block->aset != set || block->prev != prevblock || block->freeptr < bpoz || block->freeptr > block->endptr) {
-            ereport(LOG, (errmsg("problem in alloc set %s: corrupt header in block", name)));
+            ereport(WARNING, (errmsg("problem in alloc set %s: corrupt header in block", name)));
         }
 
         /*
@@ -1659,14 +1681,14 @@ void GenericMemoryAllocator::AllocSetCheck(MemoryContext context)
              */
             if (dsize > chsize) {
                 Assert(0);
-                ereport(LOG,
-                    (errmsg("problem in alloc set %s: req size > alloc size for chunk",
+                ereport(WARNING,
+                    (errmsg("problem in alloc set %s: req size > alloc size",
                         name)));
             }
             if (chsize < (1 << ALLOC_MINBITS)) {
                 Assert(0);
-                ereport(LOG,
-                    (errmsg("problem in alloc set %s: bad size %lu for chunk",
+                ereport(WARNING,
+                    (errmsg("problem in alloc set %s: bad size %lu",
                         name,
                         (unsigned long)chsize)));
             }
@@ -1675,7 +1697,7 @@ void GenericMemoryAllocator::AllocSetCheck(MemoryContext context)
             if (chsize > set->allocChunkLimit && (long)(chsize + ALLOC_CHUNKHDRSZ) != blk_used) {
                 Assert(0);
                 ereport(
-                    LOG, (errmsg("problem in alloc set %s: bad single-chunk", name)));
+                    WARNING, (errmsg("problem in alloc set %s: bad single-chunk in block", name)));
             }
 
             /*
@@ -1685,8 +1707,8 @@ void GenericMemoryAllocator::AllocSetCheck(MemoryContext context)
              */
             if (dsize > 0 && chunk->aset != (void*)set) {
                 Assert(0);
-                ereport(LOG,
-                    (errmsg("problem in alloc set %s: bogus aset link in block", name)));
+                ereport(WARNING,
+                    (errmsg("problem in alloc set %s: bogus aset link", name)));
             }
 
             /*
@@ -1695,9 +1717,8 @@ void GenericMemoryAllocator::AllocSetCheck(MemoryContext context)
             if (dsize > 0 && dsize < chsize && dsize != (Size)MAXALIGN(dsize) &&
                 !sentinel_ok(chunk, ALLOC_CHUNKHDRSZ + dsize - ALLOC_MAGICHDRSZ)) {
                 Assert(0);
-                ereport(LOG,
-                    (errmsg("problem in alloc set %s: detected write past chunk end in block",
-                        name)));
+                ereport(WARNING,
+                    (errmsg("problem in alloc set %s: detected write past chunk end", name)));
             }
 
             blk_data += chsize;
@@ -1708,7 +1729,7 @@ void GenericMemoryAllocator::AllocSetCheck(MemoryContext context)
 
         if ((blk_data + (nchunks * ALLOC_CHUNKHDRSZ)) != (unsigned long)blk_used) {
             Assert(0);
-            ereport(LOG, (errmsg("problem in alloc set %s: found inconsistent memory block", name)));
+            ereport(WARNING, (errmsg("problem in alloc set %s: found inconsistent memory block", name)));
         }
     }
 #endif
@@ -1736,7 +1757,7 @@ static void dumpAllocChunk(AllocBlock blk, StringInfoData* memoryBuf)
         if (dsize > chsize) {
             ereport(LOG,
                 (errmsg("dump_memory: ERROR in chunk: req size > alloc size for "
-                        "chunk of context %s",
+                        "chunk in block of context %s",
                     name)));
             ereport(LOG, (errmsg("dump_memory: don't dump all chunks after invalid chunk in this block!")));
             return;

@@ -92,6 +92,7 @@ typedef PQExpBufferData* PQExpBuffer;
  *		Both the PQExpBufferData and the data buffer are malloc'd.
  *
  * PQExpBufferData string;
+ * initPQExpBuffer(&string);
  *		The data buffer is malloc'd but the PQExpBufferData is presupplied.
  *		This is appropriate if the PQExpBufferData is a field of another
  *		struct.
@@ -148,6 +149,7 @@ extern void resetPQExpBuffer(PQExpBuffer str);
  */
 extern int enlargePQExpBuffer(PQExpBuffer str, size_t needed);
 
+#ifndef WIN32
 /*------------------------
  * printfPQExpBuffer
  * Format text data under the control of fmt (an sprintf-like format string)
@@ -170,6 +172,10 @@ extern void appendPQExpBuffer(PQExpBuffer str, const char* fmt, ...)
     /* This extension allows gcc to check the format string */
     __attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3)));
 
+#else
+extern void printfPQExpBuffer(PQExpBuffer str, const char* fmt, ...);
+extern void appendPQExpBuffer(PQExpBuffer str, const char* fmt, ...);
+#endif
 /*------------------------
  * appendPQExpBufferStr
  * Append the given string to a PQExpBuffer, allocating more space

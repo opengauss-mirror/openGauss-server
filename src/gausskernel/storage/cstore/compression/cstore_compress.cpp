@@ -24,7 +24,7 @@
 #include "access/htup.h"
 #include "catalog/pg_type.h"
 #include "nodes/primnodes.h"
-#include "storage/cstore_compress.h"
+#include "storage/cstore/cstore_compress.h"
 #include "storage/cu.h"
 #include "utils/biginteger.h"
 #include "utils/gs_bitmap.h"
@@ -38,7 +38,7 @@ extern int8 heaprel_get_compression_from_modes(int16 modes);
 /// so we redefine *static* if *ENABLE_UT* is defined.
 /// at the end of this file we will restore it.
 #ifdef ENABLE_UT
-#define static
+    #define static
 #endif
 
 /* compress level table for different compression values */
@@ -46,20 +46,24 @@ static const int8 compresslevel_tables[COMPRESS_HIGH + 1][REL_MAX_COMPRESSLEVEL 
     /* COMPRESS_NO */
     {0, 0, 0, 0},
     /* COMPRESS_LOW :: LZ4 */
-    {LZ4Wrapper::lz4_min_level,
+    {   LZ4Wrapper::lz4_min_level,
         LZ4Wrapper::lz4hc_min_level,
         LZ4Wrapper::lz4hc_min_level + LZ4Wrapper::lz4hc_level_step,
-        LZ4Wrapper::lz4hc_min_level + LZ4Wrapper::lz4hc_level_step * 2},
+        LZ4Wrapper::lz4hc_min_level + LZ4Wrapper::lz4hc_level_step * 2
+    },
     /* COMPRESS_MIDDLE :: LZ4 */
-    {LZ4Wrapper::lz4hc_recommend_level - LZ4Wrapper::lz4hc_level_step,
+    {   LZ4Wrapper::lz4hc_recommend_level - LZ4Wrapper::lz4hc_level_step,
         LZ4Wrapper::lz4hc_recommend_level,
         LZ4Wrapper::lz4hc_recommend_level + LZ4Wrapper::lz4hc_level_step,
-        LZ4Wrapper::lz4hc_recommend_level + LZ4Wrapper::lz4hc_level_step * 2},
+        LZ4Wrapper::lz4hc_recommend_level + LZ4Wrapper::lz4hc_level_step * 2
+    },
     /* COMPRESS_HIGH :: ZLIB */
-    {ZlibEncoder::zlib_recommend_level,
+    {   ZlibEncoder::zlib_recommend_level,
         ZlibEncoder::zlib_recommend_level + ZlibEncoder::zlib_level_step,
         ZlibEncoder::zlib_recommend_level + ZlibEncoder::zlib_level_step * 2,
-        ZlibEncoder::zlib_max_level}};
+        ZlibEncoder::zlib_max_level
+    }
+};
 
 // FUTURE CASE: add other types in ascending order
 // all types in this table needn't to compute the min/max value.
@@ -110,19 +114,19 @@ int64 ConvertToInt64Data(_in_ const char* inBuf, _in_ const short eachValSize)
     switch (eachValSize) {
         case sizeof(int8):
             return *(int8*)inBuf;
-            // no need to break
+        // no need to break
         case sizeof(int16):
             return *(int16*)inBuf;
-            // no need to break
+        // no need to break
         case sizeof(int32):
             return *(int32*)inBuf;
-            // no need to break
+        // no need to break
         case sizeof(int64):
             return *(int64*)inBuf;
-            // no need to break
+        // no need to break
         default:
             Assert(false);
-            return -1;  // keep complier slient
+            return -1;  // keep complier silient
     }
 }
 
@@ -275,7 +279,7 @@ static void IntegerCheckCompressedData(
 #endif
 
 static FORCE_INLINE void prepareSwapBuf(char *&buf1, char *&buf2, int &sz1, int &sz2, char *newbuf2, int newsz2,
-    bool &prepared)
+                                        bool &prepared)
 {
     Assert(prepared == false);
     buf1 = buf2;
@@ -362,7 +366,6 @@ int IntegerCoder::CompressInner(const CompressionArg1& in, CompressionArg2& out)
         // and the resulting size must be smaller than the input data size.
         Assert(tempOutBuf.bufSize > delta.GetBound((in.sz / this->m_eachValSize)));
         cmprSize = delta.Compress(currInBuf, tempOutBuf.buf, currInBufSize, tempOutBuf.bufSize, this->m_eachValSize);
-
         // Compressed size plus min/max value should be less than source buffer size
         // If condition is ok, we can apply delta compression.
         // InsertMinMaxVal() can be called safely later.
@@ -679,9 +682,9 @@ int StringCoder::CompressInner(CompressionArg1& in, CompressionArg2& out)
     Assert(heaprel_get_compression_from_modes(in.mode) >= COMPRESS_LOW);
     Assert(heaprel_get_compression_from_modes(in.mode) <= COMPRESS_HIGH);
     Assert((in.buildGlobalDict && in.globalDict != NULL) || // case 1: to build global dictionary
-        (in.useGlobalDict && in.globalDict != NULL) ||      // case 2: to compress by global dictionary
-        (in.useDict && !in.useGlobalDict) ||                // case 3: to compress by local dictionary
-        (!in.useDict && in.globalDict == NULL));            // case 4: no suitable for dictionary method
+            (in.useGlobalDict && in.globalDict != NULL) ||      // case 2: to compress by global dictionary
+            (in.useDict && !in.useGlobalDict) ||                // case 3: to compress by local dictionary
+            (!in.useDict && in.globalDict == NULL));            // case 4: no suitable for dictionary method
 
     int mode = 0;
     int cmprSize = 0;
@@ -701,7 +704,6 @@ int StringCoder::CompressInner(CompressionArg1& in, CompressionArg2& out)
 
         dicCodeSize = dict->Compress((char*)this->m_dicCodes);
         dictHeader = dict->GetHeader();
-
         // Only dictionary method make benefits to raw data, number compression continues.
         // that will exclude the special condition, in which dictionary' size plus compressed
         // number's size is also smaller than raw data' size.
@@ -720,7 +722,7 @@ int StringCoder::CompressInner(CompressionArg1& in, CompressionArg2& out)
             //   and the maxval is dict-items count subtracted 1.
             //   the same level to dict compression is used to compress numbers.
             cmprSize = (int)dictHeader->m_totalSize + this->CompressNumbers((dictHeader->m_itemsCount - 1), in.mode,
-                (out.buf + dictHeader->m_totalSize), (out.sz - dictHeader->m_totalSize), out.modes);
+                                                                            (out.buf + dictHeader->m_totalSize), (out.sz - dictHeader->m_totalSize), out.modes);
         }
 
         /* destroy unused object */
@@ -752,7 +754,7 @@ template int StringCoder::CompressInner<false>(CompressionArg1&, CompressionArg2
 
 // compress directly using zlib/lz4 methods
 int StringCoder::CompressWithoutDict(_in_ char* inBuf, _in_ int inBufSize, _in_ int compressing_modes,
-    _out_ char* outBuf, _in_ int outBufSize, _out_ int& mode)
+                                     _out_ char* outBuf, _in_ int outBufSize, _out_ int& mode)
 {
     int8 compression = heaprel_get_compression_from_modes(compressing_modes);
     int8 compresslevel = heaprel_get_compresslevel_from_modes(compressing_modes);
@@ -871,7 +873,7 @@ int StringCoder::Decompress(_in_ const CompressionArg2& in, _out_ CompressionArg
 
 /// check the compressed data.
 static void DeltaPlusRLEv2_Check(char* rawData, char* cmprData, int cmprSize, int64 minVal, int nValues, uint16 modes,
-    short orgValSize, short dltDataSize)
+                                 short orgValSize, short dltDataSize)
 {
     /// don't care max-value.
     DeltaPlusRLEv2 deltaPlusRle(minVal, orgValSize, nValues, orgValSize);
@@ -938,7 +940,6 @@ int DeltaPlusRLEv2::CompressInner(char** out, int outSize, uint16* outModes, cha
             int rleBoundSize = rle.CompressGetBound(deltaCmprSize);
             char* rleBoundBuf = (char*)palloc(rleBoundSize);
             rleCmprSize = rle.Compress(*out, rleBoundBuf, deltaCmprSize, rleBoundSize);
-
             if (rleCmprSize > 0 && rleCmprSize < deltaCmprSize) {
                 /// first free the unused *out* space.
                 pfree(*out);
@@ -949,8 +950,8 @@ int DeltaPlusRLEv2::CompressInner(char** out, int outSize, uint16* outModes, cha
 
 #ifdef USE_ASSERT_CHECKING
                 DeltaPlusRLEv2_Check(in, *out, rleCmprSize,
-                    this->m_minVal, this->m_nValues, *outModes,
-                    this->m_valueBytes, this->m_deltaBytes);
+                                     this->m_minVal, this->m_nValues, *outModes,
+                                     this->m_valueBytes, this->m_deltaBytes);
 #endif
                 return rleCmprSize;
             } else {
@@ -962,8 +963,8 @@ int DeltaPlusRLEv2::CompressInner(char** out, int outSize, uint16* outModes, cha
 
 #ifdef USE_ASSERT_CHECKING
         DeltaPlusRLEv2_Check(in, *out, deltaCmprSize,
-            this->m_minVal, this->m_nValues, *outModes,
-            this->m_valueBytes, this->m_deltaBytes);
+                             this->m_minVal, this->m_nValues, *outModes,
+                             this->m_valueBytes, this->m_deltaBytes);
 #endif
         return deltaCmprSize;
     }
@@ -978,8 +979,8 @@ int DeltaPlusRLEv2::CompressInner(char** out, int outSize, uint16* outModes, cha
 
 #ifdef USE_ASSERT_CHECKING
             DeltaPlusRLEv2_Check(in, *out, rleCmprSize,
-                this->m_minVal, this->m_nValues, *outModes,
-                this->m_valueBytes, this->m_deltaBytes);
+                                 this->m_minVal, this->m_nValues, *outModes,
+                                 this->m_valueBytes, this->m_deltaBytes);
 #endif
             return rleCmprSize;
         }
@@ -1098,32 +1099,6 @@ static void NumericDecompressDscaleCount(numerics_statistics_out* inStat)
     inStat->failed_cnt = total - nInt64 - nInt32;
 }
 
-// fill bitmap according to values[n_values]
-// bit should be set to 0 if it's equal to *valueIfUnset*,
-// otherwise bit should be set to 1.
-template <typename T>
-static void FillBitmap(char* buf, const T* values, int nValues, T valueIfUnset)
-{
-    unsigned char* byteBuf = (unsigned char*)(buf - 1);
-    uint32 bitMask = HIGHBIT;
-
-    for (int cnt = 0; cnt < nValues; ++cnt) {
-        if (bitMask != HIGHBIT) {
-            bitMask <<= 1;
-        } else {
-            byteBuf++;
-            *byteBuf = 0x00;
-            bitMask = 1;
-        }
-
-        if (valueIfUnset == values[cnt]) {
-            continue;
-        }
-
-        *byteBuf |= bitMask;
-    }
-}
-
 /// Given the two values, (*valueIfSet* is for bit=1 and
 /// *valueIfUnset* is for bit=0), and the bitmap, then parse
 /// this map and fill the values into *values* array whose size
@@ -1165,22 +1140,22 @@ static int ParseBitmap(char* buf, T* values, int nValues, T valueIfSet, T valueI
     switch (bpRemainBits) {
         case 7:
             *values++ = (eachByte & (*pmask++)) ? valueIfSet : valueIfUnset;
-            /* fall-through */
+        /* fall-through */
         case 6:
             *values++ = (eachByte & (*pmask++)) ? valueIfSet : valueIfUnset;
-            /* fall-through */
+        /* fall-through */
         case 5:
             *values++ = (eachByte & (*pmask++)) ? valueIfSet : valueIfUnset;
-            /* fall-through */
+        /* fall-through */
         case 4:
             *values++ = (eachByte & (*pmask++)) ? valueIfSet : valueIfUnset;
-            /* fall-through */
+        /* fall-through */
         case 3:
             *values++ = (eachByte & (*pmask++)) ? valueIfSet : valueIfUnset;
-            /* fall-through */
+        /* fall-through */
         case 2:
             *values++ = (eachByte & (*pmask++)) ? valueIfSet : valueIfUnset;
-            /* fall-through */
+        /* fall-through */
         case 1:
             *values++ = (eachByte & (*pmask++)) ? valueIfSet : valueIfUnset;
             /// count the number of FALSE value.
@@ -1422,13 +1397,13 @@ static void ParseAscaleCodesBy4Bits(numerics_statistics_out* out, uint8* inBuf, 
     switch (remain) {
         case 6:
             DecodeAndAdvance();
-            /* fall-through */
+        /* fall-through */
         case 4:
             DecodeAndAdvance();
-            /* fall-through */
+        /* fall-through */
         case 2:
             DecodeAndAdvance();
-            /* fall-through */
+        /* fall-through */
         case 0:
         default:
             /// nothing to do
@@ -1438,51 +1413,6 @@ static void ParseAscaleCodesBy4Bits(numerics_statistics_out* out, uint8* inBuf, 
     if (lastIsOdd) {
         *outValues = ((*inBuf & 0xF0) >> 4);
     }
-}
-
-/*
- * @Description:  compact 2bits in 1Byte for dscale codes
- *   (2 bits + 2 bits + 2 bits + 2 bits) --> 1Byte
- *   dscale numeric using 2bit flags to  distinguish int32, int64 and numeric
- * @IN/OUT outBuf: dest buffer of store compacted bytes
- * @IN  inValues:  srcource buffer of dscale bits
- * @IN  nInValues: number of dscale in buffer
- * @Return: size of dest buffer used
- */
-static int CompactDscaleCodesBy2Bits(uint8* outBuf, uint8* inValues, int nInValues)
-{
-    uint8* startPos = outBuf;
-    // treat every 4 values as a group
-    const uint32 groups = (uint32)nInValues >> 2;
-    const uint32 remain = (uint32)nInValues & 0x03;
-
-#ifdef USE_ASSERT_CHECKING
-    for (int i = 0; i < nInValues; i++) {
-        Assert(inValues[i] < 4);
-    }
-#endif
-
-    for (uint32 i = 0; i < groups; ++i, inValues += 4) {
-        // 2 bits + 2 bits + 2 bits + 2 bits
-        *outBuf++ = (inValues[0] << 6) | (inValues[1] << 4) | (inValues[2] << 2) | inValues[3];
-    }
-
-    switch (remain) {
-        case 3:
-            *outBuf++ = (inValues[0] << 6) | (inValues[1] << 4) | (inValues[2] << 2);
-            break;
-        case 2:
-            *outBuf++ = (inValues[0] << 6) | (inValues[1] << 4);
-            break;
-        case 1:
-            *outBuf++ = (inValues[0] << 6);
-            break;
-        default:
-            // nothing to do
-            break;
-    }
-
-    return outBuf - startPos;
 }
 
 /*
@@ -1533,7 +1463,7 @@ static int ParseDscaleCodesBy2Bits(uint8* inBuf, uint8* outValues, int nOutValue
 
 template <bool hasNull, bool allAreInteger>
 static void NumericStatistics(numerics_statistics_out* numStatic, Datum* batchValues, char* batchNulls, int batchRows,
-    SetNullNumericFunc SetNullFunc, void* memobj)
+                              SetNullNumericFunc SetNullFunc, void* memobj)
 {
     bool* success = numStatic->success;
     char* ascaleCodes = numStatic->ascale_codes;
@@ -1661,7 +1591,7 @@ static void NumericCompressEachValuesPart(
         deltaPlusRle.m_adopt_rle = out->filter->m_adopt_numeric2int_int64_rle;
 
         out->int64_cmpr_size = deltaPlusRle.Compress(
-            &pOutArg->buf, pOutArg->sz, &pOutArg->modes, (char*)in->int64_values, sizeof(int64) * in->int64_n_values);
+                                   &pOutArg->buf, pOutArg->sz, &pOutArg->modes, (char*)in->int64_values, sizeof(int64) * in->int64_n_values);
     }
 
     // try to compress int32 values with DELTA && RLE.
@@ -1678,7 +1608,7 @@ static void NumericCompressEachValuesPart(
         deltaPlusRle.m_adopt_rle = out->filter->m_adopt_numeric2int_int32_rle;
 
         out->int32_cmpr_size = deltaPlusRle.Compress(
-            &pOutArg->buf, pOutArg->sz, &pOutArg->modes, (char*)in->int32_values, sizeof(int32) * in->int32_n_values);
+                                   &pOutArg->buf, pOutArg->sz, &pOutArg->modes, (char*)in->int32_values, sizeof(int32) * in->int32_n_values);
     }
 
     // try to compress the other numerics
@@ -1716,10 +1646,10 @@ static void NumericCompressEachValuesPart(
 }
 
 // compute the total size needed for this compressed numeric data.
-static inline int NumericCompressGetTotalSize(numerics_statistics_out* phase1_out, numerics_cmprs_out* phase2_out)
+static inline int NumericCompressGetTotalSize(numerics_statistics_out* phase1_out, numerics_cmprs_out* phase2_out, int align_size)
 {
     int total_size = NUMERIC_FLAG_SIZE                             // head flags info
-                     + ALIGNOF_CUSIZE                              // extra for padding
+                     + align_size                              // extra for padding
                      + sizeof(int)                                 // original size info
                      + sizeof(int64) * 2                           // the same int64 value or min/max values
                      + sizeof(int32)                               // int64 compressed size
@@ -1729,7 +1659,7 @@ static inline int NumericCompressGetTotalSize(numerics_statistics_out* phase1_ou
                      + sizeof(char)                                // the same int32 scale
                      + sizeof(int32)                               // failed size
                      + ((uint32)(phase1_out->n_notnull + 1) >> 1)  // status collection
-        ;
+                    ;
 
     // int64 values
     if (phase2_out->int64_out_args.modes != 0) {
@@ -1755,115 +1685,6 @@ static inline int NumericCompressGetTotalSize(numerics_statistics_out* phase1_ou
     }
 
     return total_size;
-}
-
-static char* NumericCompressFillHeader(char* ptr, numerics_statistics_out* out1, numerics_cmprs_out* out2)
-{
-    uint16* flags = (uint16*)ptr;
-    ptr += sizeof(uint16);
-
-    /// first remember the original total size needed.
-    *(int*)ptr = out1->original_size;
-    ptr += sizeof(int);
-
-    /// reset all the flags.
-    *flags = 0;
-
-    /// handle the part of int64 values
-    if (out1->int64_n_values > 0) {
-        uint16 modes = out2->int64_out_args.modes;
-
-        *flags |= NUMERIC_FLAG_EXIST_INT64_VAL;
-        if (out1->int64_values_are_same) {
-            /// we can compute the original size, so that
-            /// we don't remember its value here.
-            *flags |= NUMERIC_FLAG_INT64_SAME_VAL;
-            *(int64*)ptr = out1->int64_minval;
-            ptr += sizeof(int64);
-        } else if (modes != 0) {
-            if (modes & CU_DeltaCompressed) {
-                *flags |= NUMERIC_FLAG_INT64_WITH_DELTA;
-                /// remember the min value.
-                *(int64*)ptr = out1->int64_minval;
-                ptr += sizeof(int64);
-                /// remember the size of each value.
-                /// it's safe to use uint8 data type, because the
-                /// the returned value is 0~8.
-                *(uint8*)ptr = (uint8)DeltaGetBytesNum(out1->int64_minval, out1->int64_maxval);
-                ptr += sizeof(uint8);
-            }
-            if (modes & CU_RLECompressed) {
-                *flags |= NUMERIC_FLAG_INT64_WITH_RLE;
-            }
-
-            /// i don't think we should remember the original size,
-            /// because we can scan the scalues' map, get the number
-            /// of int64 values, and compute this info by multiple.
-            *(int32*)ptr = out2->int64_cmpr_size;
-            ptr += sizeof(int32);
-        }
-
-        if (out1->int64_ascales_are_same) {
-            *flags |= NUMERIC_FLAG_INT64_SAME_ASCALE;
-            *ptr++ = out1->int64_same_ascale;
-        }
-    }
-
-    /// handle the part of int32 values
-    if (out1->int32_n_values > 0) {
-        uint16 modes = out2->int32_out_args.modes;
-
-        *flags |= NUMERIC_FLAG_EXIST_INT32_VAL;
-        if (out1->int32_values_are_same) {
-            /// we can compute the original size, so that
-            /// we don't remember its value here.
-            *flags |= NUMERIC_FLAG_INT32_SAME_VAL;
-            *(int32*)ptr = out1->int32_minval;
-            ptr += sizeof(int32);
-        } else if (modes != 0) {
-            if (modes & CU_DeltaCompressed) {
-                *flags |= NUMERIC_FLAG_INT32_WITH_DELTA;
-                /// remember the min value.
-                *(int32*)ptr = out1->int32_minval;
-                ptr += sizeof(int32);
-                /// remember the size of each value.
-                /// it's safe to use uint8 data type, because the
-                /// the returned value is 0~8.
-                *(uint8*)ptr = (uint8)DeltaGetBytesNum(out1->int32_minval, out1->int32_maxval);
-                ptr += sizeof(uint8);
-            }
-            if (modes & CU_RLECompressed) {
-                *flags |= NUMERIC_FLAG_INT32_WITH_RLE;
-            }
-
-            /// i don't think we should remember the original size,
-            /// because we can scan the scalues' map, get the number
-            /// of int32 values, and compute this info by multiple.
-            *(int32*)ptr = out2->int32_cmpr_size;
-            ptr += sizeof(int32);
-        }
-
-        if (out1->int32_ascales_are_same) {
-            *flags |= NUMERIC_FLAG_INT32_SAME_ASCALE;
-            *ptr++ = out1->int32_same_ascale;
-        }
-    }
-
-    // handle the part of remain numeric values
-    if (out1->failed_cnt > 0) {
-        *flags |= NUMERIC_FLAG_EXIST_OTHERS;
-
-        if (out2->other_apply_lz4) {
-            /// we needn't store the compressed size,
-            /// because the header of compressed data has
-            /// remembered this info.
-            *flags |= NUMERIC_FLAG_OTHER_WITH_LZ4;
-        } else {
-            *(int32*)ptr = out1->failed_size;
-            ptr += sizeof(int32);
-        }
-    }
-    return ptr;
 }
 
 char* NumericDecompressParseHeader(
@@ -2098,10 +1919,10 @@ char* NumericDecompressParseAscales(char* inBuf, numerics_statistics_out* decmpr
 
         if (decmprStatOut->int64_ascales_are_same && decmprStatOut->int32_ascales_are_same) {
             decmprStatOut->int64_n_values = ParseBitmap<char>(inBuf,
-                decmprStatOut->ascale_codes,
-                decmprStatOut->n_notnull,
-                decmprStatOut->int32_same_ascale,
-                decmprStatOut->int64_same_ascale);
+                                                              decmprStatOut->ascale_codes,
+                                                              decmprStatOut->n_notnull,
+                                                              decmprStatOut->int32_same_ascale,
+                                                              decmprStatOut->int64_same_ascale);
             decmprStatOut->int32_n_values = decmprStatOut->n_notnull - decmprStatOut->int64_n_values;
             return inBuf + (long)BITMAPLEN(decmprStatOut->n_notnull);
         }
@@ -2111,10 +1932,10 @@ char* NumericDecompressParseAscales(char* inBuf, numerics_statistics_out* decmpr
 
         if (decmprStatOut->int64_ascales_are_same && ((flags & NUMERIC_FLAG_EXIST_INT32_VAL) == 0)) {
             decmprStatOut->int64_n_values = ParseBitmap<char>(inBuf,
-                decmprStatOut->ascale_codes,
-                decmprStatOut->n_notnull,
-                FAILED_ENCODING,
-                decmprStatOut->int64_same_ascale);
+                                                              decmprStatOut->ascale_codes,
+                                                              decmprStatOut->n_notnull,
+                                                              FAILED_ENCODING,
+                                                              decmprStatOut->int64_same_ascale);
             decmprStatOut->int32_n_values = 0;
             decmprStatOut->failed_cnt = decmprStatOut->n_notnull - decmprStatOut->int64_n_values;
             return inBuf + (long)BITMAPLEN(decmprStatOut->n_notnull);
@@ -2123,10 +1944,10 @@ char* NumericDecompressParseAscales(char* inBuf, numerics_statistics_out* decmpr
         if ((flags & NUMERIC_FLAG_EXIST_INT64_VAL) == 0) {
             if (decmprStatOut->int32_ascales_are_same) {
                 decmprStatOut->int32_n_values = ParseBitmap<char>(inBuf,
-                    decmprStatOut->ascale_codes,
-                    decmprStatOut->n_notnull,
-                    FAILED_ENCODING,
-                    decmprStatOut->int32_same_ascale);
+                                                                  decmprStatOut->ascale_codes,
+                                                                  decmprStatOut->n_notnull,
+                                                                  FAILED_ENCODING,
+                                                                  decmprStatOut->int32_same_ascale);
                 decmprStatOut->int64_n_values = 0;
                 decmprStatOut->failed_cnt = decmprStatOut->n_notnull - decmprStatOut->int32_n_values;
                 return inBuf + (long)BITMAPLEN(decmprStatOut->n_notnull);
@@ -2151,8 +1972,8 @@ char* NumericDecompressParseAscales(char* inBuf, numerics_statistics_out* decmpr
         int rleOrigSize = rle.Decompress(inBuf, outBuf, inSize, ascaleSize);
         if (unlikely(rleOrigSize != ascaleSize)) {
             ereport(ERROR,
-                (errcode(ERRCODE_DATA_CORRUPTED),
-                    errmsg("RLE decompress failed, expected bytes %d, real size %d", ascaleSize, rleOrigSize)));
+                    (errcode(ERRCODE_DATA_CORRUPTED),
+                     errmsg("RLE decompress failed, expected bytes %d, real size %d", ascaleSize, rleOrigSize)));
         }
 
         /// decode and count the integer values
@@ -2171,61 +1992,7 @@ char* NumericDecompressParseAscales(char* inBuf, numerics_statistics_out* decmpr
     }
 }
 
-/*
- * @Description: compress dscale and store in buffer
- * @IN/OUT ptr:  pointer of buffer to store compressed dscale
- * @IN out1:  statistics result
- * @IN out2:  compression result
- * @OUT pFlags: reserved for compression flag
- * @Return: pointer of after store compressed dscale
- */
-static char* NumericCompressFillDscales(
-    char* ptr, numerics_statistics_out* out1, numerics_cmprs_out* out2, uint16* /* pFlags */)
-{
-    // we cannot tolerate this case where either int64 or int32 part exists.
-    Assert(out1->n_notnull != out1->failed_cnt);
-    Assert(out1->int32_n_values > 0 || out1->int64_n_values > 0);
-    Assert(out1->n_notnull > 0);
-    Assert(out1->int32_ascales_are_same);
-    Assert(out1->int64_ascales_are_same);
 
-    // Case 1: All values are converted to integer
-    if (out1->failed_cnt == 0) {
-        if (out1->int64_n_values == 0) {
-            // only int32 with same scale
-            // each value is equal to out1->int32_same_ascale
-            // so we needn't store anything.
-            return ptr;
-        } else if (out1->int32_n_values == 0) {
-            // only int64 with same scale
-            // each value is equal to out1->int64_same_ascale.
-            // so we needn't remember anything.
-            return ptr;
-        } else {
-            // int32 with same scale and int64 with same scale
-            // set int32 with 1, int64 with 0 in bitmap
-            FillBitmap<char>(ptr, out1->ascale_codes, out1->n_notnull, INT64_DSCALE_ENCODING);
-            return ptr + (long)BITMAPLEN(out1->n_notnull);
-        }
-
-    } else { // Case 2: Mixed values with integer or numeric
-        if (out1->int32_n_values == 0) {
-            // int64 with same scale and numeric
-            // set numeric with 1, int64 with 0 in bitmap
-            FillBitmap<char>(ptr, out1->ascale_codes, out1->n_notnull, INT64_DSCALE_ENCODING);
-            return ptr + (long)BITMAPLEN(out1->n_notnull);
-        } else if (out1->int64_n_values == 0) {
-            // int32 with same scale and numeric
-            // set numeric with 1, int32 with 0 in bitmap
-            FillBitmap<char>(ptr, out1->ascale_codes, out1->n_notnull, INT32_DSCALE_ENCODING);
-            return ptr + (long)BITMAPLEN(out1->n_notnull);
-        } else {
-            // int32 with same scale,int64 with same scale and numeric
-            // encoding NUMERIC_DSCALE_ENCODING,INT32_DSCALE_ENCODING and INT64_DSCALE_ENCODING using 2bit
-            return ptr + CompactDscaleCodesBy2Bits((uint8*)ptr, (uint8*)out1->ascale_codes, out1->n_notnull);
-        }
-    }
-}
 
 /*
  * @Description:  decompress  dscale
@@ -2267,10 +2034,10 @@ char* NumericDecompressParseDscales(char* inBuf, numerics_statistics_out* decmpr
             decmprStatOut->ascale_codes = (char*)palloc(decmprStatOut->n_notnull);
 
             decmprStatOut->int64_n_values = ParseBitmap<char>(inBuf,
-                decmprStatOut->ascale_codes,
-                decmprStatOut->n_notnull,
-                INT32_DSCALE_ENCODING,
-                INT64_DSCALE_ENCODING);
+                                                              decmprStatOut->ascale_codes,
+                                                              decmprStatOut->n_notnull,
+                                                              INT32_DSCALE_ENCODING,
+                                                              INT64_DSCALE_ENCODING);
             decmprStatOut->int32_n_values = decmprStatOut->n_notnull - decmprStatOut->int64_n_values;
             return inBuf + (long)BITMAPLEN(decmprStatOut->n_notnull);
         }
@@ -2281,20 +2048,20 @@ char* NumericDecompressParseDscales(char* inBuf, numerics_statistics_out* decmpr
         if ((flags & NUMERIC_FLAG_EXIST_INT32_VAL) == 0) {
             // int64 with same scale and numeric
             decmprStatOut->int64_n_values = ParseBitmap<char>(inBuf,
-                decmprStatOut->ascale_codes,
-                decmprStatOut->n_notnull,
-                NUMERIC_DSCALE_ENCODING,
-                INT64_DSCALE_ENCODING);
+                                                              decmprStatOut->ascale_codes,
+                                                              decmprStatOut->n_notnull,
+                                                              NUMERIC_DSCALE_ENCODING,
+                                                              INT64_DSCALE_ENCODING);
             decmprStatOut->int32_n_values = 0;
             decmprStatOut->failed_cnt = decmprStatOut->n_notnull - decmprStatOut->int64_n_values;
             return inBuf + (long)BITMAPLEN(decmprStatOut->n_notnull);
         } else if ((flags & NUMERIC_FLAG_EXIST_INT64_VAL) == 0) {
             // int32 with same scale and numeric
             decmprStatOut->int32_n_values = ParseBitmap<char>(inBuf,
-                decmprStatOut->ascale_codes,
-                decmprStatOut->n_notnull,
-                NUMERIC_DSCALE_ENCODING,
-                INT32_DSCALE_ENCODING);
+                                                              decmprStatOut->ascale_codes,
+                                                              decmprStatOut->n_notnull,
+                                                              NUMERIC_DSCALE_ENCODING,
+                                                              INT32_DSCALE_ENCODING);
             decmprStatOut->int64_n_values = 0;
             decmprStatOut->failed_cnt = decmprStatOut->n_notnull - decmprStatOut->int32_n_values;
             return inBuf + (long)BITMAPLEN(decmprStatOut->n_notnull);
@@ -2307,54 +2074,6 @@ char* NumericDecompressParseDscales(char* inBuf, numerics_statistics_out* decmpr
             return inBuf + usedBytes;
         }
     }
-}
-
-static char* NumericCompressFillValues(char* ptr, numerics_statistics_out* out1, numerics_cmprs_out* out2)
-{
-    int rc = 0;
-    int src_size = 0;
-
-    // step 1: int64 values
-    if (out1->int64_n_values > 0 && out1->int64_minval != out1->int64_maxval) {
-        if (out2->int64_out_args.modes != 0) {
-            rc = memcpy_s(ptr, out2->int64_cmpr_size, out2->int64_out_args.buf, out2->int64_cmpr_size);
-            securec_check(rc, "", "");
-            ptr += out2->int64_cmpr_size;
-        } else {
-            src_size = sizeof(int64) * out1->int64_n_values;
-            rc = memcpy_s(ptr, src_size, (char*)out1->int64_values, src_size);
-            securec_check(rc, "", "");
-            ptr += src_size;
-        }
-    }
-
-    // step 2: int32 values
-    if (out1->int32_n_values > 0 && out1->int32_minval != out1->int32_maxval) {
-        if (out2->int32_out_args.modes != 0) {
-            rc = memcpy_s(ptr, out2->int32_cmpr_size, out2->int32_out_args.buf, out2->int32_cmpr_size);
-            securec_check(rc, "", "");
-            ptr += out2->int32_cmpr_size;
-        } else {
-            src_size = sizeof(int32) * out1->int32_n_values;
-            rc = memcpy_s(ptr, src_size, (char*)out1->int32_values, src_size);
-            securec_check(rc, "", "");
-            ptr += src_size;
-        }
-    }
-
-    // step 3: the other numeric values
-    if (out1->failed_cnt > 0) {
-        if (out2->other_apply_lz4) {
-            rc = memcpy_s(ptr, out2->other_cmpr_size, out2->other_outbuf, out2->other_cmpr_size);
-            securec_check(rc, "", "");
-            ptr += out2->other_cmpr_size;
-        } else {
-            rc = memcpy_s(ptr, out1->failed_size, out2->other_srcbuf, out1->failed_size);
-            securec_check(rc, "", "");
-            ptr += out1->failed_size;
-        }
-    }
-    return ptr;
 }
 
 char* NumericDecompressParseEachPart(
@@ -2459,7 +2178,7 @@ void NumericConfigFailedRatio(int failed_ratio)
 }
 
 bool NumericCompressBatchValues(
-    BatchNumeric* batch, numerics_statistics_out* out1, numerics_cmprs_out* out2, int* compressed_datasize)
+    BatchNumeric* batch, numerics_statistics_out* out1, numerics_cmprs_out* out2, int* compressed_datasize, int align_size)
 {
     Datum* batchValues = batch->values;
     char* batchNulls = batch->nulls;
@@ -2469,8 +2188,7 @@ bool NumericCompressBatchValues(
 
     /* Step 1: Convert numeric to integer if need */
     nSuccess = batch_convert_short_numeric_to_int64(batchValues, batchNulls, batchRows, batch->hasNull,
-        out1->int64_values, out1->ascale_codes, out1->success, &nullCount);
-
+                                                    out1->int64_values, out1->ascale_codes, out1->success, &nullCount);
     /* Null values should be excluded when calculating the conversion success rate */
     if (nSuccess == 0 || nSuccess < (batchRows - nullCount) * (100 - NumericMaxFailedRatio) * 0.01) {
 #ifdef ENABLE_UT
@@ -2503,23 +2221,8 @@ bool NumericCompressBatchValues(
     }
 
     // compute the total size of this cu
-    *compressed_datasize = NumericCompressGetTotalSize(out1, out2);
+    *compressed_datasize = NumericCompressGetTotalSize(out1, out2, align_size);
     return true;
-}
-
-char* NumericCopyCompressedBatchValues(char* ptr, numerics_statistics_out* out1, numerics_cmprs_out* out2)
-{
-    // step 1: set header flags and its possible metadata.
-    uint16* pFlags = (uint16*)ptr;
-    ptr = NumericCompressFillHeader(ptr, out1, out2);
-
-    // step 2: fill all the status codes.
-    ptr = NumericCompressFillDscales(ptr, out1, out2, pFlags);
-
-    // step 3: fill the real values.
-    ptr = NumericCompressFillValues(ptr, out1, out2);
-
-    return ptr;
 }
 
 /// release resources after numeric compression
@@ -2637,7 +2340,7 @@ static void RestoreNumericsWithSameAscaleT(char* dest, T* values, int nValues, c
  */
 template <bool int64SameValue, bool int32SameValue>
 static void ConvertMixedToBINumeric(char* outPtr, int32* int32Val, int64* int64Val, const char* flag, int int32Dscale,
-    int int64Dscale, int nNotNulls, char* otherValuesPtr)
+                                    int int64Dscale, int nNotNulls, char* otherValuesPtr)
 {
     int out_len = 0;
     char* tmpNumeric = NULL;
@@ -2654,7 +2357,7 @@ static void ConvertMixedToBINumeric(char* outPtr, int32* int32Val, int64* int64V
             Assert(dscale >= 0 && dscale <= MAXINT64DIGIT);
 
             if (!int32SameValue) {
-                val = (int64)*int32Val++;
+                val = (int64) * int32Val++;
             } else {
                 val = *int32Val;
             }
@@ -2692,21 +2395,21 @@ static void ConvertMixedToBINumeric(char* outPtr, int32* int32Val, int64* int64V
 /// Given all the int64[], int32[], numeric[] values, and adjust scale codes,
 /// original Numeric data will be restored and stored in *outBuf*.
 template extern void NumericDecompressRestoreValues<true>(char* outBuf, int typeMode,
-    numerics_statistics_out* decmprStatOut, numerics_cmprs_out* decmprOut, numerics_decmprs_addr_ref* addrRefs);
+                                                          numerics_statistics_out* decmprStatOut, numerics_cmprs_out* decmprOut, numerics_decmprs_addr_ref* addrRefs);
 
 template extern void NumericDecompressRestoreValues<false>(char* outBuf, int typeMode,
-    numerics_statistics_out* decmprStatOut, numerics_cmprs_out* decmprOut, numerics_decmprs_addr_ref* addrRefs);
+                                                           numerics_statistics_out* decmprStatOut, numerics_cmprs_out* decmprOut, numerics_decmprs_addr_ref* addrRefs);
 
 template <bool DscaleFlag>
 void NumericDecompressRestoreValues(char* outBuf, int typeMode, numerics_statistics_out* decmprStatOut,
-    numerics_cmprs_out* decmprOut, numerics_decmprs_addr_ref* addrRefs)
+                                    numerics_cmprs_out* decmprOut, numerics_decmprs_addr_ref* addrRefs)
 {
     char* ascaleCodes = decmprStatOut->ascale_codes;
 
     /// int64 values may be from either *int64_values* or *int64_addr_ref*.
     /// it dependents on the *int64_out_args.modes*.
     /// the same to int32 values and raw numeric part.
-    int64* int64Values = 
+    int64* int64Values =
         (decmprOut->int64_out_args.modes != 0) ? decmprStatOut->int64_values : (int64*)addrRefs->int64_addr_ref;
     int32* int32Values =
         (decmprOut->int32_out_args.modes != 0) ? decmprStatOut->int32_values : (int32*)addrRefs->int32_addr_ref;
@@ -2780,18 +2483,18 @@ void NumericDecompressRestoreValues(char* outBuf, int typeMode, numerics_statist
         if (int64SameValue) {
             if (int32SameValue) {
                 ConvertMixedToBINumeric<true, true>(out, &tmpInt32Val, &tmpInt64Val, ascaleCodes,
-                    tmpInt32Ascale, tmpInt64Ascale, nNotNulls, otherValues);
+                                                    tmpInt32Ascale, tmpInt64Ascale, nNotNulls, otherValues);
             } else {
                 ConvertMixedToBINumeric<true, false>(out, int32Values, &tmpInt64Val, ascaleCodes,
-                    tmpInt32Ascale, tmpInt64Ascale, nNotNulls, otherValues);
+                                                     tmpInt32Ascale, tmpInt64Ascale, nNotNulls, otherValues);
             }
         } else {
             if (int32SameValue) {
                 ConvertMixedToBINumeric<false, true>(out, &tmpInt32Val, int64Values, ascaleCodes,
-                    tmpInt32Ascale, tmpInt64Ascale, nNotNulls, otherValues);
+                                                     tmpInt32Ascale, tmpInt64Ascale, nNotNulls, otherValues);
             } else {
-                ConvertMixedToBINumeric<false, false>(out, int32Values, int64Values, ascaleCodes, 
-                    tmpInt32Ascale, tmpInt64Ascale, nNotNulls, otherValues);
+                ConvertMixedToBINumeric<false, false>(out, int32Values, int64Values, ascaleCodes,
+                                                      tmpInt32Ascale, tmpInt64Ascale, nNotNulls, otherValues);
             }
         }
         return;
@@ -2896,5 +2599,5 @@ void compression_options::set_common_flags(uint32 modes)
 }
 
 #ifdef ENABLE_UT
-#undef static
+    #undef static
 #endif

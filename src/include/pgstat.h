@@ -24,12 +24,13 @@
 #include "utils/memutils.h"
 #include "pgtime.h"
 #include "pgxc/execRemote.h"
-#include "storage/lwlock.h"
-#include "storage/block.h"
+#include "storage/lock/lwlock.h"
+#include "storage/buf/block.h"
 #include "storage/relfilenode.h"
 #include "workload/workload.h"
 #include "access/multi_redo_settings.h"
 #include "instruments/instr_event.h"
+#include "instruments/unique_sql_basic.h"
 #include "knl/knl_instance.h"
 
 /* Values for track_functions GUC variable --- order is significant! */
@@ -65,7 +66,8 @@ typedef enum StatMsgType {
     PGSTAT_MTYPE_BADBLOCK,
     PGSTAT_MTYPE_COLLECTWAITINFO,
     PGSTAT_MTYPE_RESPONSETIME,
-    PGSTAT_MTYPE_PROCESSPERCENTILE
+    PGSTAT_MTYPE_PROCESSPERCENTILE,
+    PGSTAT_MTYPE_CLEANUPHOTKEYS
 } StatMsgType;
 
 /* ----------
@@ -105,6 +107,11 @@ typedef struct PgStat_TableCounts {
     PgStat_Counter t_tuples_updated;
     PgStat_Counter t_tuples_deleted;
     PgStat_Counter t_tuples_hot_updated;
+    bool t_truncated;
+
+    PgStat_Counter t_tuples_inserted_post_truncate;
+    PgStat_Counter t_tuples_updated_post_truncate;
+    PgStat_Counter t_tuples_deleted_post_truncate;
 
     PgStat_Counter t_delta_live_tuples;
     PgStat_Counter t_delta_dead_tuples;
@@ -127,8 +134,9 @@ typedef enum PgStat_Single_Reset_Type { RESET_TABLE, RESET_FUNCTION } PgStat_Sin
 /* ------------------------------------------------------------
  * Structures kept in backend local memory while accumulating counts
  * ------------------------------------------------------------
- *
- * ----------
+ */
+
+/* ----------
  * PgStat_TableStatus			Per-table status within a backend
  *
  * Many of the event counters are nontransactional, ie, we count events
@@ -160,10 +168,14 @@ typedef struct PgStat_TableStatus {
  * ----------
  */
 typedef struct PgStat_TableXactStatus {
-    PgStat_Counter tuples_inserted; /* tuples inserted in (sub)xact */
-    PgStat_Counter tuples_updated;  /* tuples updated in (sub)xact */
-    PgStat_Counter tuples_deleted;  /* tuples deleted in (sub)xact */
-    int nest_level;                 /* subtransaction nest level */
+    PgStat_Counter tuples_inserted;    /* tuples inserted in (sub)xact */
+    PgStat_Counter tuples_updated;     /* tuples updated in (sub)xact */
+    PgStat_Counter tuples_deleted;     /* tuples deleted in (sub)xact */
+    bool truncated;                    /* relation truncated in this (sub)xact */
+    PgStat_Counter inserted_pre_trunc; /* tuples inserted prior to truncate */
+    PgStat_Counter updated_pre_trunc;  /* tuples updated prior to truncate */
+    PgStat_Counter deleted_pre_trunc;  /* tuples deleted prior to truncate */
+    int nest_level;                    /* subtransaction nest level */
     /* links to other structs for same relation: */
     struct PgStat_TableXactStatus* upper; /* next higher subxact if any */
     PgStat_TableStatus* parent;           /* per-table status */
@@ -174,8 +186,9 @@ typedef struct PgStat_TableXactStatus {
 /* ------------------------------------------------------------
  * Message formats follow
  * ------------------------------------------------------------
- *
- * ----------
+ */
+
+/* ----------
  * PgStat_MsgHdr				The common message header
  * ----------
  */
@@ -205,6 +218,7 @@ typedef struct PgStat_MsgDummy {
  *								to write the stats file.
  * ----------
  */
+
 typedef struct PgStat_MsgInquiry {
     PgStat_MsgHdr m_hdr;
     TimestampTz inquiry_time; /* minimum acceptable file timestamp */
@@ -275,6 +289,12 @@ typedef struct PgStat_MsgResetcounter {
     PgStat_MsgHdr m_hdr;
     Oid m_databaseid;
 } PgStat_MsgResetcounter;
+
+typedef struct PgStat_MsgCleanupHotkeys {
+    PgStat_MsgHdr m_hdr;
+    Oid m_databaseOid;
+    Oid m_tableOid;
+} PgStat_MsgCleanupHotkeys;
 
 /* ----------
  * PgStat_MsgResetsharedcounter Sent by the backend to tell the collector
@@ -358,6 +378,7 @@ typedef struct PgStat_MsgAutovacStat {
  * PgStat_MsgTruncate				Sent by the truncate
  * ----------
  */
+
 typedef struct PgStat_MsgTruncate {
     PgStat_MsgHdr m_hdr;
     Oid m_databaseid;
@@ -533,6 +554,7 @@ typedef struct PgStat_MsgFile {
 /*
  * PgStat_MsgBadBlock Sent by the backend where read bad page / cu
  */
+
 typedef struct BadBlockHashKey {
     RelFileNode relfilenode;
     ForkNumber forknum;
@@ -562,7 +584,7 @@ typedef struct SqlRTInfo {
 } SqlRTInfo;
 
 typedef struct SqlRTInfoArray {
-    volatile uint32 sqlRTIndex;
+    volatile int32 sqlRTIndex;
     bool isFull;
     SqlRTInfo sqlRT[MAX_SQL_RT_INFO_COUNT];
 } SqlRTInfoArray;
@@ -571,7 +593,7 @@ typedef struct PgStat_SqlRT {
     PgStat_MsgHdr m_hdr;
     SqlRTInfo sqlRT;
 } PgStat_SqlRT;
-const int MAX_SQL_RT_INFO_COUNT_REMOTE = MaxAllocSize/sizeof(SqlRTInfo);
+const int MAX_SQL_RT_INFO_COUNT_REMOTE = MaxAllocSize / sizeof(SqlRTInfo);
 
 typedef struct PgStat_PrsPtl {
     PgStat_MsgHdr m_hdr;
@@ -613,6 +635,7 @@ typedef union PgStat_Msg {
  * data structures change.
  * ------------------------------------------------------------
  */
+
 #define PGSTAT_FILE_FORMAT_ID 0x01A5BC9B
 
 /* ----------
@@ -939,13 +962,21 @@ typedef enum WaitEventIO {
     WAIT_EVENT_WAL_BUFFER_FULL,
     WAIT_EVENT_DW_READ,
     WAIT_EVENT_DW_WRITE,
+    WAIT_EVENT_DW_SINGLE_POS,
+    WAIT_EVENT_DW_SINGLE_WRITE,
     WAIT_EVENT_PREDO_PROCESS_PENDING,
     WAIT_EVENT_PREDO_APPLY,
     WAIT_EVENT_DISABLE_CONNECT_FILE_READ,
     WAIT_EVENT_DISABLE_CONNECT_FILE_SYNC,
     WAIT_EVENT_DISABLE_CONNECT_FILE_WRITE,
-    IO_EVENT_NUM =
-        WAIT_EVENT_DISABLE_CONNECT_FILE_WRITE - WAIT_EVENT_BUFFILE_READ + 1  // MUST be last, DO NOT use this value.
+    WAIT_EVENT_MPFL_INIT,
+    WAIT_EVENT_MPFL_READ,
+    WAIT_EVENT_MPFL_WRITE,
+    WAIT_EVENT_OBS_LIST,
+    WAIT_EVENT_OBS_READ,
+    WAIT_EVENT_OBS_WRITE,
+    WAIT_EVENT_LOGCTRL_SLEEP,
+    IO_EVENT_NUM = WAIT_EVENT_LOGCTRL_SLEEP - WAIT_EVENT_BUFFILE_READ + 1  // MUST be last, DO NOT use this value.
 } WaitEventIO;
 
 /* ----------
@@ -1053,13 +1084,14 @@ typedef struct RemoteInfo {
     char remote_port[MAX_PORT_LEN];
     int socket;
     int logic_id;
-}RemoteInfo;
+} RemoteInfo;
 
 /* ----------
  * Shared-memory data structures
  * ----------
- *
- * Reserve 2 additional 3rd plugin lwlocks .*/
+ */
+
+/* Reserve 2 additional 3rd plugin lwlocks.*/
 #define LWLOCK_EVENT_NUM (LWTRANCHE_NATIVE_TRANCHE_NUM + 2)
 typedef struct WaitStatisticsInfo {
     int64 max_duration;
@@ -1068,6 +1100,7 @@ typedef struct WaitStatisticsInfo {
     int64 avg_duration;
     uint64 counter;
     uint64 failed_counter;
+    TimestampTz last_updated;
 } WaitStatisticsInfo;
 
 typedef struct WaitStatusInfo {
@@ -1106,12 +1139,12 @@ typedef struct PgBackendStatus {
      * st_changecount again.  If the value hasn't changed, and if it's even,
      * the copy is valid; otherwise start over.  This makes updates cheap
      * while reads are potentially expensive, but that's the tradeoff we want.
-	 *
-	 * The above protocol needs the memory barriers to ensure that
-	 * the apparent order of execution is as it desires. Otherwise,
-	 * for example, the CPU might rearrange the code so that st_changecount
-	 * is incremented twice before the modification on a machine with
-	 * weak memory ordering. This surprising result can lead to bugs.
+     *
+     * The above protocol needs the memory barriers to ensure that
+     * the apparent order of execution is as it desires. Otherwise,
+     * for example, the CPU might rearrange the code so that st_changecount
+     * is incremented twice before the modification on a machine with
+     * weak memory ordering. This surprising result can lead to bugs.
      */
     int st_changecount;
 
@@ -1159,6 +1192,7 @@ typedef struct PgBackendStatus {
     WorkloadManagerStmtTag st_stmttag;  /* 0: none 1: read: 2: write */
 
     uint64 st_queryid;                  /* debug query id of current query */
+    UniqueSQLKey st_unique_sql_key;     /* get unique sql key */
     pid_t st_tid;                       /* thread ID */
     uint64 st_parent_sessionid;         /* parent session ID, equals parent pid under non thread pool mode */
     int st_thread_level;                /* thread level, mark with plan node id of Stream node */
@@ -1172,9 +1206,9 @@ typedef struct PgBackendStatus {
     int st_stmtmem;                     /* statment mem for query */
     uint64 st_xid;                      /* for transaction id, fit for 64-bit */
     WaitStatePhase st_waitstatus_phase; /* detailed phase for wait status, now only for 'wait node' status */
-    char* st_relname;                   /* relation name, for analyze, vacuum, .etc. */
-    Oid st_libpq_wait_nodeid;           /* for libpq, point to libpq_wait_node */
-    int st_libpq_wait_nodecount;        /* for libpq, point to libpq_wait_nodecount */
+    char* st_relname;                   /* relation name, for analyze, vacuum, .etc.*/
+    Oid st_libpq_wait_nodeid;           /* for libpq, point to libpq_wait_node*/
+    int st_libpq_wait_nodecount;        /* for libpq, point to libpq_wait_nodecount*/
     uint32 st_tempid;                   /* tempid for temp table */
     uint32 st_timelineid;               /* timeline id for temp table */
     int4 st_jobid;                      /* job work id */
@@ -1198,7 +1232,18 @@ typedef struct PgBackendStatus {
 
     RemoteInfo remote_info;
     WaitInfo waitInfo;
+    LOCALLOCKTAG locallocktag; /* locked object */
+    /* The entry is valid if st_block_sessionid > 0, unused if st_block_sessionid == 0 */
+    volatile uint64 st_block_sessionid; /* block session */
+    syscalllock statement_cxt_lock;     /* mutex for statement context(between session and statement flush thread) */
+    void* statement_cxt;                /* statement context of full sql */
 } PgBackendStatus;
+
+typedef struct PgBackendStatusNode {
+    PgBackendStatus* data;
+    NameData database_name;
+    PgBackendStatusNode* next;
+} PgBackendStatusNode;
 
 typedef struct ThreadWaitStatusInfo {
     ParallelFunctionState* state;
@@ -1206,11 +1251,11 @@ typedef struct ThreadWaitStatusInfo {
 } ThreadWaitStatusInfo;
 
 typedef struct CommInfoParallel {
-    ParallelFunctionState *state;
-    TupleTableSlot *slot;
+    ParallelFunctionState* state;
+    TupleTableSlot* slot;
 } CommInfoParallel;
 
-extern CommInfoParallel *getGlobalCommStatus(TupleDesc tuple_desc, char *queryString);
+extern CommInfoParallel* getGlobalCommStatus(TupleDesc tuple_desc, const char* queryString);
 extern ThreadWaitStatusInfo* getGlobalThreadWaitStatus(TupleDesc tuple_desc);
 
 extern PgBackendStatus* PgBackendStatusArray;
@@ -1227,34 +1272,35 @@ extern PgBackendStatus* PgBackendStatusArray;
  * need to be called before and after PgBackendStatus entries are copied into
  * private memory, respectively.
  */
-#define pgstat_increment_changecount_before(beentry)    \
-    do {    \
-        beentry->st_changecount++;  \
-        pg_write_barrier(); \
+#define pgstat_increment_changecount_before(beentry) \
+    do {                                             \
+        beentry->st_changecount++;                   \
+        pg_write_barrier();                          \
     } while (0)
 
 #define pgstat_increment_changecount_after(beentry) \
-    do {    \
-        pg_write_barrier(); \
-        beentry->st_changecount++;  \
+    do {                                            \
+        pg_write_barrier();                         \
+        beentry->st_changecount++;                  \
         Assert((beentry->st_changecount & 1) == 0); \
     } while (0)
 
-#define pgstat_save_changecount_before(beentry, save_changecount)   \
-    do {    \
-        save_changecount = beentry->st_changecount; \
-        pg_read_barrier();  \
+#define pgstat_save_changecount_before(beentry, save_changecount) \
+    do {                                                          \
+        save_changecount = beentry->st_changecount;               \
+        pg_read_barrier();                                        \
     } while (0)
 
-#define pgstat_save_changecount_after(beentry, save_changecount)    \
-    do {    \
-        pg_read_barrier();  \
-        save_changecount = beentry->st_changecount; \
+#define pgstat_save_changecount_after(beentry, save_changecount) \
+    do {                                                         \
+        pg_read_barrier();                                       \
+        save_changecount = beentry->st_changecount;              \
     } while (0)
 
 extern char* getThreadWaitStatusDesc(PgBackendStatus* beentry);
 extern const char* pgstat_get_waitstatusdesc(uint32 wait_event_info);
 extern const char* pgstat_get_waitstatusname(uint32 wait_event_info);
+extern const char* PgstatGetWaitstatephasename(uint32 waitPhaseInfo);
 
 /*
  * Working state needed to accumulate per-function-call timing statistics.
@@ -1297,6 +1343,7 @@ extern void UpdateWaitStatusStat(volatile WaitInfo* InstrWaitInfo, uint32 waitst
 extern void UpdateWaitEventStat(volatile WaitInfo* InstrWaitInfo, uint32 wait_event_info, int64 duration);
 extern void UpdateWaitEventFaildStat(volatile WaitInfo* InstrWaitInfo, uint32 wait_event_info);
 extern void CollectWaitInfo(WaitInfo* gsInstrWaitInfo, WaitStatusInfo status_info, WaitEventInfo event_info);
+extern void InstrWaitEventInitLastUpdated(PgBackendStatus* current_entry, TimestampTz current_time);
 extern void pgstat_report_stat(bool force);
 extern void pgstat_vacuum_stat(void);
 extern void pgstat_drop_database(Oid databaseid);
@@ -1340,6 +1387,7 @@ extern void pgstat_report_queryid(uint64 queryid);
 extern void pgstat_report_jobid(uint64 jobid);
 extern void pgstat_report_parent_sessionid(uint64 sessionid, uint32 level = 0);
 extern void pgstat_report_smpid(uint32 smpid);
+extern void pgstat_report_blocksid(void* waitLockThrd, uint64 blockSessionId);
 extern bool pgstat_get_waitlock(uint32 wait_event_info);
 extern const char* pgstat_get_wait_event(uint32 wait_event_info);
 extern const char* pgstat_get_backend_current_activity(ThreadId pid, bool checkUser);
@@ -1357,7 +1405,8 @@ extern void pgstat_reply_percentile_record();
 extern int pgstat_fetch_sql_rt_info_counter();
 extern void pgstat_fetch_sql_rt_info_internal(SqlRTInfo* sqlrt);
 extern void processCalculatePercentile(void);
-extern void pgstat_update_responstime_singlenode(uint64 UniqueSQLId, int64 start_time, int64 rt);
+void pgstat_update_responstime_singlenode(uint64 UniqueSQLId, int64 start_time, int64 rt);
+void pgstate_update_percentile_responsetime(void);
 
 #define IS_PGSTATE_TRACK_UNDEFINE \
     (!u_sess->attr.attr_common.pgstat_track_activities || !t_thrd.shemem_ptr_cxt.MyBEEntry)
@@ -1472,7 +1521,7 @@ static inline WaitState pgstat_report_waitstatus_relname(WaitState waitstatus, c
 
     /* This should be unnecessary if GUC did its job, but be safe */
     if (relname != NULL) {
-        len = pg_mbcliplen(relname, strlen(relname), NAMEDATALEN * 2 - 1); 
+        len = pg_mbcliplen(relname, strlen(relname), NAMEDATALEN * 2 - 1);
     }
 
     if (u_sess->attr.attr_common.enable_instr_track_wait && (int)waitstatus != (int)STATE_WAIT_UNDEFINED)
@@ -1610,8 +1659,10 @@ static inline void pgstat_report_waitevent(uint32 wait_event_info)
 static inline void pgstat_report_waitevent_count(uint32 wait_event_info)
 {
     volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+
     if (IS_PGSTATE_TRACK_UNDEFINE)
         return;
+
     pgstat_increment_changecount_before(beentry);
     /*
      * Since this is a four-byte field which is always read and written as
@@ -1620,29 +1671,6 @@ static inline void pgstat_report_waitevent_count(uint32 wait_event_info)
     if (u_sess->attr.attr_common.enable_instr_track_wait && wait_event_info != WAIT_EVENT_END) {
         beentry->st_waitevent = WAIT_EVENT_END;
         UpdateWaitEventStat(&beentry->waitInfo, wait_event_info, 0);
-    }
-    pgstat_increment_changecount_after(beentry);
-}
-
-/* wal_buffer full waitevent report use wal_write's duration. */
-static inline void pgstat_report_wal_buffer_full_waitevent()
-{
-    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
-
-    if (IS_PGSTATE_TRACK_UNDEFINE)
-        return;
-
-    pgstat_increment_changecount_before(beentry);
-    /*
-     * Since this is a four-byte field which is always read and written as
-     * four-bytes, updates are atomic.
-     */
-    uint32 old_wait_event_info = WAIT_EVENT_WAL_BUFFER_FULL;
-    beentry->st_waitevent = WAIT_EVENT_END;
-
-    if (u_sess->attr.attr_common.enable_instr_track_wait) {
-        UpdateWaitEventStat(&beentry->waitInfo, old_wait_event_info, beentry->waitInfo.event_info.duration);
-        beentry->waitInfo.event_info.start_time = 0;
     }
 
     pgstat_increment_changecount_after(beentry);
@@ -1726,9 +1754,10 @@ static inline void pgstat_reset_waitStatePhase(WaitState waitstatus, WaitStatePh
             (rel)->pgstat_info->t_counts.t_cu_hdd_asyn += (n); \
     } while (0)
 
-extern void pgstat_count_heap_insert(Relation rel, PgStat_Counter n);
+extern void pgstat_count_heap_insert(Relation rel, int n);
 extern void pgstat_count_heap_update(Relation rel, bool hot);
 extern void pgstat_count_heap_delete(Relation rel);
+extern void pgstat_count_truncate(Relation rel);
 extern void pgstat_update_heap_dead_tuples(Relation rel, int delta);
 
 extern void pgstat_count_cu_update(Relation rel, int n);
@@ -1773,9 +1802,7 @@ extern void pgstat_send_bgwriter(void);
  */
 extern PgStat_StatDBEntry* pgstat_fetch_stat_dbentry(Oid dbid);
 extern PgStat_StatTabEntry* pgstat_fetch_stat_tabentry(PgStat_StatTabKey* tabkey);
-extern PgBackendStatus* pgstat_fetch_stat_beentry(int beid);
 extern PgStat_StatFuncEntry* pgstat_fetch_stat_funcentry(Oid funcid);
-extern int pgstat_fetch_stat_numbackends(void);
 extern PgStat_GlobalStats* pgstat_fetch_global(void);
 extern PgStat_WaitCountStatus* pgstat_fetch_waitcount(void);
 
@@ -1798,7 +1825,7 @@ typedef enum STAT_VIEW {
     PV_INSTANCE_STAT,
     PV_STAT_NAME,
     PV_OS_RUN_INFO,
-    PV_BASIC_LEVEL, /*Above are at basic level,defaut on */
+    PV_BASIC_LEVEL, /*Above are at basic level,defaut on*/
 
     PV_LIGHTWEIGHT_LOCK,
     PV_WAIT_TYPE,
@@ -1811,14 +1838,14 @@ typedef enum STAT_VIEW {
     PV_DB_TIME,
     PV_INSTANCE_TIME,
     PV_REDO_STAT,
-    PV_TYPICAL_LEVEL, /*Above are at typical level,defaut off */
+    PV_TYPICAL_LEVEL, /*Above are at typical level,defaut off*/
 
     PV_STATEMENT,
     PV_FILE_STAT,
     PV_IOSTAT_NETWORK,
     PV_SHARE_MEMORY_INFO,
     PV_PLAN,
-    PV_ALL_LEVEL /*Above are at all level,defaut off */
+    PV_ALL_LEVEL /*Above are at all level,defaut off*/
 } STAT_VIEW;
 
 // static StatisticsLevel viewLevel[]={
@@ -1854,12 +1881,12 @@ typedef enum STAT_VIEW {
 //									};
 
 typedef enum OSRunInfoTypes {
-    /* cpu numbers */
+    /*cpu numbers*/
     NUM_CPUS = 0,
     NUM_CPU_CORES,
     NUM_CPU_SOCKETS,
 
-    /* cpu times */
+    /*cpu times*/
     IDLE_TIME,
     BUSY_TIME,
     USER_TIME,
@@ -1867,7 +1894,7 @@ typedef enum OSRunInfoTypes {
     IOWAIT_TIME,
     NICE_TIME,
 
-    /* avg cpu times */
+    /*avg cpu times*/
     AVG_IDLE_TIME,
     AVG_BUSY_TIME,
     AVG_USER_TIME,
@@ -1875,50 +1902,50 @@ typedef enum OSRunInfoTypes {
     AVG_IOWAIT_TIME,
     AVG_NICE_TIME,
 
-    /* virtual memory page in/out data */
+    /*virtual memory page in/out data*/
     VM_PAGE_IN_BYTES,
     VM_PAGE_OUT_BYTES,
 
-    /* os run load */
+    /*os run load*/
     RUNLOAD,
 
-    /* physical memory size */
+    /*physical memory size*/
     PHYSICAL_MEMORY_BYTES,
 
     TOTAL_OS_RUN_INFO_TYPES
 } OSRunInfoTypes;
 
 /*
- * this is used to represent the numbers of cpu time we should read from file.BUSY_TIME will be
- * calculate by USER_TIME plus SYS_TIME,so it wouldn't be counted.
+ *this is used to represent the numbers of cpu time we should read from file.BUSY_TIME will be
+ *calculate by USER_TIME plus SYS_TIME,so it wouldn't be counted.
  */
 #define NumOfCpuTimeReads (AVG_IDLE_TIME - IDLE_TIME - 1)
 
-/* the type we restore our collected data. It is a union of all the possible data types of the os run info */
+/*the type we restore our collected data. It is a union of all the possible data types of the os run info*/
 typedef union NumericValue {
-    uint64 int64Value;  /* cpu times,vm pgin/pgout size,total memory etc. */
-    float8 float8Value; /* load */
-    uint32 int32Value;  /* cpu numbers */
+    uint64 int64Value;  /*cpu times,vm pgin/pgout size,total memory etc.*/
+    float8 float8Value; /*load*/
+    uint32 int32Value;  /*cpu numbers*/
 } NumericValue;
 
 /*
- * description of the os run info fields. For a particluar field, all the members except got
- * are fixed.
+ *description of the os run info fields. For a particluar field, all the members except got
+ *are fixed.
  */
 typedef struct OSRunInfoDesc {
-    /* hook to convert our data to Datum type, it decides by the data type the field */
+    /*hook to convert our data to Datum type, it decides by the data type the field*/
     Datum (*getDatum)(NumericValue data);
 
-    char* name;      /* field name */
-    bool cumulative; /* represent whether the field is cumulative */
+    char* name;      /*field name*/
+    bool cumulative; /*represent whether the field is cumulative*/
 
     /*
-     * it represent whether we successfully get data of this field. Because some fields may be subject to the
-     * os platform on which the database is running, or not available in some exception cases. I don't think
-     * it's a big deal, we just show the infomation we can get.
+     *it represent whether we successfully get data of this field. Because some fields may be subject to the
+     *os platform on which the database is running, or not available in some exception cases. I don't think
+     *it's a big deal, we just show the infomation we can get.
      */
     bool got;
-    char* comments; /* field comments */
+    char* comments; /*field comments*/
 } OSRunInfoDesc;
 
 extern const OSRunInfoDesc osStatDescArrayOrg[TOTAL_OS_RUN_INFO_TYPES];
@@ -1945,8 +1972,6 @@ static inline ssize_t gs_getline(char** lineptr, size_t* n, FILE* stream)
 #define SESSION_ID_LEN 32
 extern void getSessionID(char* sessid, pg_time_t startTime, ThreadId Threadid);
 extern void getThrdID(char* thrdid, pg_time_t startTime, ThreadId Threadid);
-
-#define NUM_SESSION_MEMORY_DETAIL_ELEM 8
 
 #define NUM_MOT_SESSION_MEMORY_DETAIL_ELEM 4
 
@@ -1977,48 +2002,28 @@ typedef struct MotMemoryDetailPad {
 extern MotSessionMemoryDetail* GetMotSessionMemoryDetail(uint32* num);
 extern MotMemoryDetail* GetMotMemoryDetail(uint32* num, bool isGlobal);
 
-typedef struct ThreadMemoryDetail {
-    char contextName[MEMORY_CONTEXT_NAME_LEN];
-    char parent[MEMORY_CONTEXT_NAME_LEN];
-    int64 totalSize;
-    int64 freeSize;
-    int64 usedSize;
-    int level;
-    char threadType[PROC_NAME_LEN];
-    pg_time_t threadStartTime;
-    ThreadId threadId;
-    ThreadMemoryDetail *next;
-} ThreadMemoryDetail;
-
-typedef struct ThreadMemoryDetailPad {
-    uint32 nelements;
-    ThreadMemoryDetail* threadMemoryDetail;
-} ThreadMemoryDetailPad;
-
-extern void getMemoryContextDetailForEachThread(volatile PGPROC* proc, ThreadMemoryDetailPad* data);
 #ifdef MEMORY_CONTEXT_CHECKING
 typedef enum { STANDARD_DUMP, SHARED_DUMP } DUMP_TYPE;
 
 extern void DumpMemoryContext(DUMP_TYPE type);
 #endif
 
-extern SessionMemoryDetail* getSessionMemoryDetail(uint32* num);
-extern ThreadMemoryDetail* getThreadMemoryDetail(uint32* num);
-extern ThreadMemoryDetail* getSharedMemoryDetail(uint32* num);
+extern void getThreadMemoryDetail(Tuplestorestate* tupStore, TupleDesc tupDesc, uint32* procIdx);
+extern void getSharedMemoryDetail(Tuplestorestate* tupStore, TupleDesc tupDesc);
 
 typedef enum TimeInfoType {
-    DB_TIME = 0, /* total elapsed time while dealing user command. */
-    CPU_TIME,    /* total cpu time used while dealing user command. */
+    DB_TIME = 0, /*total elapsed time while dealing user command.*/
+    CPU_TIME,    /*total cpu time used while dealing user command.*/
 
     /*statistics of specific execution stage.*/
-    EXECUTION_TIME, /* total elapsed time of execution stage. */
-    PARSE_TIME,     /* total elapsed time of parse stage. */
-    PLAN_TIME,      /* total elapsed time of plan stage. */
-    REWRITE_TIME,   /* total elapsed time of rewrite stage. */
+    EXECUTION_TIME, /*total elapsed time of execution stage.*/
+    PARSE_TIME,     /*total elapsed time of parse stage.*/
+    PLAN_TIME,      /*total elapsed time of plan stage.*/
+    REWRITE_TIME,   /*total elapsed time of rewrite stage.*/
 
-    /* statistics for plpgsql especially */
-    PL_EXECUTION_TIME,   /* total elapsed time of plpgsql exection. */
-    PL_COMPILATION_TIME, /* total elapsed time of plpgsql compilation. */
+    /*statistics for plpgsql especially*/
+    PL_EXECUTION_TIME,   /*total elapsed time of plpgsql exection.*/
+    PL_COMPILATION_TIME, /*total elapsed time of plpgsql compilation.*/
 
     NET_SEND_TIME,
     DATA_IO_TIME,
@@ -2028,7 +2033,7 @@ typedef enum TimeInfoType {
 
 typedef struct SessionTimeEntry {
     /*
-     * protect the rest part of the entry.
+     *protect the rest part of the entry.
      */
     uint32 changeCount;
 
@@ -2041,8 +2046,8 @@ typedef struct SessionTimeEntry {
 } SessionTimeEntry;
 
 /*
- * this macro is used to read a entry from global array to a local buffer. we use changeCount to
- * ensure data consistency.
+ *this macro is used to read a entry from global array to a local buffer. we use changeCount to
+ *ensure data consistency.
  */
 #define READ_AN_ENTRY(dest, src, changeCount, type)                           \
     do {                                                                      \
@@ -2098,7 +2103,9 @@ extern void sessionTimeShmemInit(void);
 extern void timeInfoRecordStart(void);
 extern void timeInfoRecordEnd(void);
 
-extern SessionTimeEntry* getSessionTimeStatus(uint32* num);
+extern void getSessionTimeStatus(Tuplestorestate *tupStore, TupleDesc tupDesc,
+    void (*insert)(Tuplestorestate *tupStore, TupleDesc tupDesc, const SessionTimeEntry *entry));
+
 extern SessionTimeEntry* getInstanceTimeStatus();
 
 typedef struct PgStat_RedoEntry {
@@ -2150,7 +2157,7 @@ typedef enum SessionStatisticType {
     N_TABLE_SCAN_SESSION_LEVEL,
 
     N_BLOCKS_FETCHED_SESSION_LEVEL,
-    N_PHYSICAL_READ_OPERATION_SESSION_LEVEL, /* it is equal to N_BLOCKS_FETCHED_SESSION_LEVEL now */
+    N_PHYSICAL_READ_OPERATION_SESSION_LEVEL, /*it is equal to N_BLOCKS_FETCHED_SESSION_LEVEL now*/
     N_SHARED_BLOCKS_DIRTIED_SESSION_LEVEL,
     N_LOCAL_BLOCKS_DIRTIED_SESSION_LEVEL,
     N_SHARED_BLOCKS_READ_SESSION_LEVEL,
@@ -2281,7 +2288,8 @@ typedef struct SessionLevelStatistic {
     } while (0)
 
 extern void DumpLWLockInfoToServerLog(void);
-extern SessionLevelStatistic* getSessionStatistics(uint32* num);
+extern void getSessionStatistics(Tuplestorestate* tupStore, TupleDesc tupDesc,
+    void (* insert)(Tuplestorestate* tupStore, TupleDesc tupDesc, const SessionLevelStatistic* entry));
 extern Size sessionStatShmemSize(void);
 extern void sessionStatShmemInit(void);
 
@@ -2295,7 +2303,7 @@ extern void sessionStatShmemInit(void);
 typedef struct {
     uint32 bufferid;
     Oid relfilenode;
-    int2    bucketnode;
+    int2 bucketnode;
     Oid reltablespace;
     Oid reldatabase;
     ForkNumber forknum;
@@ -2339,14 +2347,15 @@ typedef struct SessionLevelMemory {
     char* query_plan;        /* query plan */
     TimestampTz dnStartTime; /* start time on dn */
     TimestampTz dnEndTime;   /* end time on dn */
+    uint64 plan_size;
 } SessionLevelMemory;
 
-extern SessionLevelMemory* getSessionMemory(uint32* num);
+extern void getSessionMemory(Tuplestorestate* tupStore, TupleDesc tupDesc,
+    void (* insert)(Tuplestorestate* tupStore, TupleDesc tupDesc, const SessionLevelMemory* entry));
 extern Size sessionMemoryShmemSize(void);
 extern void sessionMemoryShmemInit(void);
 
 extern int pgstat_get_current_active_numbackends(void);
-extern PgBackendStatus* pgstat_get_backend_entry(uint64 sess_id);
 extern PgBackendStatus* pgstat_get_backend_single_entry(ThreadId tid);
 extern void pgstat_increase_session_spill();
 extern void pgstat_increase_session_spill_size(int64 size);
@@ -2359,7 +2368,6 @@ extern ThreadId* pgstat_get_user_io_entry(Oid userid, int* num);
 extern ThreadId* pgstat_get_stmttag_write_entry(int* num);
 extern List* pgstat_get_user_backend_entry(Oid userid);
 extern void pgstat_reset_current_status(void);
-extern int pgstat_get_backend_entries(void);
 extern WaitInfo* read_current_instr_wait_info(void);
 extern TableDistributionInfo* getTableDataDistribution(
     TupleDesc tuple_desc, char* schema_name = NULL, char* table_name = NULL);
@@ -2368,6 +2376,7 @@ extern TableDistributionInfo* getTableStat(
 extern TableDistributionInfo* get_remote_stat_pagewriter(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_remote_stat_ckpt(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_remote_stat_bgwriter(TupleDesc tuple_desc);
+extern TableDistributionInfo* get_remote_single_flush_dw_stat(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_remote_stat_double_write(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_remote_stat_redo(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_rto_stat(TupleDesc tuple_desc);
@@ -2380,16 +2389,16 @@ extern TableDistributionInfo* get_remote_node_xid_csn(TupleDesc tuple_desc);
 
 #define CHANGECOUNT_IS_EVEN(_x) (((_x)&1) == 0)
 
+typedef void (*FuncType)(Tuplestorestate *tupStore, TupleDesc tupDesc, const PgBackendStatus *beentry);
+
 typedef struct {
     ThreadId thread_id;
     uint64 st_sessionid;
 } lock_entry_id;
 
 typedef struct {
-
     /* thread id for backend */
     lock_entry_id entry_id;
-    
     /* light weight change count */
     int lw_count;
 } lwm_light_detect;
@@ -2402,7 +2411,7 @@ typedef struct {
 typedef struct {
     lock_entry_id be_tid;         /* thread id */
     int be_idx;                   /* backend position */
-    LWLockAddr want_lwlock;         /* lock to acquire */
+    LWLockAddr want_lwlock;       /* lock to acquire */
     int lwlocks_num;              /* number of locks held */
     lwlock_id_mode* held_lwlocks; /* held lwlocks */
 } lwm_lwlocks;
@@ -2435,31 +2444,76 @@ extern void resetBadBlockStat();
 extern bool CalcSQLRowStatCounter(
     PgStat_TableCounts* last_total_counter, PgStat_TableCounts* current_sql_table_counter);
 extern void GetCurrentTotalTableCounter(PgStat_TableCounts* total_table_counter);
-
-typedef struct XLogStatCollect {
-    double entryScanTime;
-    double IOTime;
-    double memsetTime;
-    double entryUpdateTime;
-    uint64 writeBytes;
-    uint64 scanEntryCount;
-    uint64 writeSomethingCount;
-    uint64 flushWaitCount;
-    double xlogFlushWaitTime;
-    uint32 walAuxWakeNum;
-    XLogRecPtr writeRqstPtr;
-    XLogRecPtr minCopiedPtr;
-    double IONotificationTime;
-    double sendBufferTime;
-    double memsetNotificationTime;
-    uint32 remoteFlushWaitCount;
-} XLogStatCollect;
-
-extern THR_LOCAL XLogStatCollect *g_xlog_stat_shared;
-
-extern void XLogStatShmemInit(void);
-extern Size XLogStatShmemSize(void);
-
 extern bool CheckUserExist(Oid userId, bool removeCount);
-void pgstat_init_sql_rt_info_array(knl_g_stat_context* stat_cxt);
+extern PgBackendStatusNode* gs_stat_read_current_status(uint32* maxCalls);
+extern uint32 gs_stat_read_current_status(Tuplestorestate *tupStore, TupleDesc tupDesc, FuncType insert,
+                                          bool hasTID = false, ThreadId threadId = 0);
+extern void pgstat_setup_memcxt(void);
+extern PgBackendStatus* gs_stat_fetch_stat_beentry(int32 beid);
+extern void pgstat_send(void* msg, int len);
+
+typedef struct PgStat_NgMemSize {
+    int* ngmemsize;
+    char** ngname;
+    uint32 cnti;
+    uint32 cntj;
+    uint32 allcnt;
+} PgStat_NgMemSize;
+
+typedef enum NetInfoType {
+    NET_SEND_TIMES,
+    NET_SEND_N_CALLS,
+    NET_SEND_SIZE,
+
+    NET_RECV_TIMES,
+    NET_RECV_N_CALLS,
+    NET_RECV_SIZE,
+
+    NET_STREAM_SEND_TIMES,
+    NET_STREAM_SEND_N_CALLS,
+    NET_STREAM_SEND_SIZE,
+
+    NET_STREAM_RECV_TIMES,
+    NET_STREAM_RECV_N_CALLS,
+    NET_STREAM_RECV_SIZE,
+
+    TOTAL_NET_INFO_TYPES
+} NetInfoType;
+
+#define END_NET_SEND_INFO(str_len)                                                              \
+    do {                                                                                        \
+        if (str_len > 0 && t_thrd.shemem_ptr_cxt.mySessionTimeEntry) {                          \
+            u_sess->stat_cxt.localNetInfo[NET_SEND_TIMES] += GetCurrentTimestamp() - startTime; \
+            u_sess->stat_cxt.localNetInfo[NET_SEND_N_CALLS]++;                                  \
+            u_sess->stat_cxt.localNetInfo[NET_SEND_SIZE] += str_len;                            \
+        }                                                                                       \
+    } while (0)
+
+#define END_NET_STREAM_SEND_INFO(str_len)                                                              \
+    do {                                                                                               \
+        if (str_len > 0 && t_thrd.shemem_ptr_cxt.mySessionTimeEntry) {                                 \
+            u_sess->stat_cxt.localNetInfo[NET_STREAM_SEND_TIMES] += GetCurrentTimestamp() - startTime; \
+            u_sess->stat_cxt.localNetInfo[NET_STREAM_SEND_N_CALLS]++;                                  \
+            u_sess->stat_cxt.localNetInfo[NET_STREAM_SEND_SIZE] += str_len;                            \
+        }                                                                                              \
+    } while (0)
+
+#define END_NET_RECV_INFO(str_len)                                                              \
+    do {                                                                                        \
+        if (str_len > 0 && t_thrd.shemem_ptr_cxt.mySessionTimeEntry) {                          \
+            u_sess->stat_cxt.localNetInfo[NET_RECV_TIMES] += GetCurrentTimestamp() - startTime; \
+            u_sess->stat_cxt.localNetInfo[NET_RECV_N_CALLS]++;                                  \
+            u_sess->stat_cxt.localNetInfo[NET_RECV_SIZE] += str_len;                            \
+        }                                                                                       \
+    } while (0)
+
+#define END_NET_STREAM_RECV_INFO(str_len)                                                              \
+    do {                                                                                               \
+        if (str_len > 0 && t_thrd.shemem_ptr_cxt.mySessionTimeEntry) {                                 \
+            u_sess->stat_cxt.localNetInfo[NET_STREAM_RECV_TIMES] += GetCurrentTimestamp() - startTime; \
+            u_sess->stat_cxt.localNetInfo[NET_STREAM_RECV_N_CALLS]++;                                  \
+            u_sess->stat_cxt.localNetInfo[NET_STREAM_RECV_SIZE] += str_len;                            \
+        }                                                                                              \
+    } while (0)
+
 #endif /* PGSTAT_H */

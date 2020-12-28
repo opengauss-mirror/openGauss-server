@@ -46,7 +46,7 @@ namespace extreme_rto {
  * @in  sem       - The semaphore to be initialized.
  * @in  initValue - The initial value for the semaphore.
  */
-void PosixSemaphoreInit(PosixSemaphore* sem, unsigned int initValue)
+void PosixSemaphoreInit(PosixSemaphore *sem, unsigned int initValue)
 {
     Assert(!sem->initialized);
 
@@ -64,7 +64,7 @@ void PosixSemaphoreInit(PosixSemaphore* sem, unsigned int initValue)
  *
  * @in  sem - The semaphore to destroy.
  */
-void PosixSemaphoreDestroy(PosixSemaphore* sem)
+void PosixSemaphoreDestroy(PosixSemaphore *sem)
 {
     if (sem->initialized && sem_destroy(&sem->semaphore) != 0)
         ereport(FATAL, (errmodule(MOD_REDO), errcode(ERRCODE_LOG), errmsg("sem_destroy failed: %m")));
@@ -77,7 +77,7 @@ void PosixSemaphoreDestroy(PosixSemaphore* sem)
  *
  * @in  sem - The semaphore to decrement.
  */
-void PosixSemaphoreWait(PosixSemaphore* sem)
+void PosixSemaphoreWait(PosixSemaphore *sem)
 {
     int ret = 0;
     do {
@@ -95,7 +95,7 @@ void PosixSemaphoreWait(PosixSemaphore* sem)
  *
  * @in  sem - The semaphore to increment.
  */
-void PosixSemaphorePost(PosixSemaphore* sem)
+void PosixSemaphorePost(PosixSemaphore *sem)
 {
     int ret = 0;
     while ((ret = sem_post(&sem->semaphore)) != 0 && errno == EINTR)

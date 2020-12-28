@@ -118,8 +118,10 @@ VecHashJoinState* ExecInitVecHashJoin(VecHashJoin* node, EState* estate, int efl
 
     /*
      * initialize tuple type and projection info
+     * result tupleSlot only contains virtual tuple, so the default
+     * tableAm type is set to HEAP.
      */
-    ExecAssignResultTypeFromTL(&hash_state->js.ps);
+    ExecAssignResultTypeFromTL(&hash_state->js.ps, TAM_HEAP);
 
     /*
      * Check if the following exprs can be codegened or not.
@@ -357,6 +359,7 @@ HashJoinTbl::HashJoinTbl(VecHashJoinState* runtime_context)
     m_filesource = NULL;
     m_overflowsource = NULL;
     m_probOpSource = NULL;
+    m_strategy = HASH_IN_MEMORY;
 
     node = (VecHashJoin*)m_runtime->js.ps.plan;
     inner_tree = innerPlan(node);
@@ -366,19 +369,11 @@ HashJoinTbl::HashJoinTbl(VecHashJoinState* runtime_context)
 
     initMemoryControl();
 
-    m_hashContext = AllocSetContextCreate(CurrentMemoryContext,
-        "HashContext",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE,
-        STACK_CONTEXT,
-        m_totalMem);
+    m_hashContext = AllocSetContextCreate(CurrentMemoryContext, "HashContext", ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, STACK_CONTEXT, m_totalMem);
 
-    m_tmpContext = AllocSetContextCreate(CurrentMemoryContext,
-        "TmpHashContext",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    m_tmpContext = AllocSetContextCreate(CurrentMemoryContext, "TmpHashContext", ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
 
     AddControlMemoryContext(m_runtime->js.ps.instrument, m_hashContext);
 
@@ -3595,6 +3590,7 @@ void HashJoinTbl::matchKey(ScalarVector* val, int rows, int hashValKeyIdx, int k
     Datum args[2];
 
     fc_info.arg = &args[0];
+    fc_info.flinfo = (m_eqfunctions + key_num);
 
     for (i = 0; i < rows; i++) {
         if (m_keyMatch[i] == true && m_cellCache[i] && NOT_NULL(m_cellCache[i]->m_val[hashValKeyIdx].flag)) {

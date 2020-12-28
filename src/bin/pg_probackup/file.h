@@ -11,7 +11,7 @@
 #ifndef __FILE__H__
 #define __FILE__H__
 
-#include "storage/bufpage.h"
+#include "storage/buf/bufpage.h"
 #include <stdio.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -22,56 +22,56 @@
 
 typedef enum
 {
-	/* message for compatibility check */
-	FIO_AGENT_VERSION, /* never move this */
-	FIO_OPEN,
-	FIO_CLOSE,
-	FIO_WRITE,
-	FIO_SYNC,
-	FIO_RENAME,
-	FIO_SYMLINK,
-	FIO_UNLINK,
-	FIO_MKDIR,
-	FIO_CHMOD,
-	FIO_SEEK,
-	FIO_TRUNCATE,
-	FIO_DELETE,
-	FIO_PREAD,
-	FIO_READ,
-	FIO_LOAD,
-	FIO_STAT,
-	FIO_SEND,
-	FIO_ACCESS,
-	FIO_OPENDIR,
-	FIO_READDIR,
-	FIO_CLOSEDIR,
-	FIO_PAGE,
-	FIO_WRITE_COMPRESSED,
-	FIO_GET_CRC32,
-	/* used for incremental restore */
-	FIO_GET_CHECKSUM_MAP,
-	FIO_GET_LSN_MAP,
-	 /* used in fio_send_pages */
-	FIO_SEND_PAGES,
-	FIO_ERROR,
-	FIO_SEND_FILE,
-//	FIO_CHUNK,
-	FIO_SEND_FILE_EOF,
-	FIO_SEND_FILE_CORRUPTION,
-	FIO_SEND_FILE_HEADERS,
-	/* messages for closing connection */
-	FIO_DISCONNECT,
-	FIO_DISCONNECTED,
-	FIO_LIST_DIR,
-	FIO_CHECK_POSTMASTER
+    /* message for compatibility check */
+    FIO_AGENT_VERSION, /* never move this */
+    FIO_OPEN,
+    FIO_CLOSE,
+    FIO_WRITE,
+    FIO_SYNC,
+    FIO_RENAME,
+    FIO_SYMLINK,
+    FIO_UNLINK,
+    FIO_MKDIR,
+    FIO_CHMOD,
+    FIO_SEEK,
+    FIO_TRUNCATE,
+    FIO_DELETE,
+    FIO_PREAD,
+    FIO_READ,
+    FIO_LOAD,
+    FIO_STAT,
+    FIO_SEND,
+    FIO_ACCESS,
+    FIO_OPENDIR,
+    FIO_READDIR,
+    FIO_CLOSEDIR,
+    FIO_PAGE,
+    FIO_WRITE_COMPRESSED,
+    FIO_GET_CRC32,
+    /* used for incremental restore */
+    FIO_GET_CHECKSUM_MAP,
+    FIO_GET_LSN_MAP,
+     /* used in fio_send_pages */
+    FIO_SEND_PAGES,
+    FIO_ERROR,
+    FIO_SEND_FILE,
+    //	FIO_CHUNK,
+    FIO_SEND_FILE_EOF,
+    FIO_SEND_FILE_CORRUPTION,
+    FIO_SEND_FILE_HEADERS,
+    /* messages for closing connection */
+    FIO_DISCONNECT,
+    FIO_DISCONNECTED,
+    FIO_LIST_DIR,
+    FIO_CHECK_POSTMASTER
 } fio_operations;
 
 typedef enum
 {
-	FIO_LOCAL_HOST,  /* data is locate at local host */
-	FIO_DB_HOST,     /* data is located at Postgres server host */
-	FIO_BACKUP_HOST, /* data is located at backup host */
-	FIO_REMOTE_HOST  /* date is located at remote host */
+    FIO_LOCAL_HOST,  /* data is locate at local host */
+    FIO_DB_HOST,     /* data is located at Postgres server host */
+    FIO_BACKUP_HOST, /* data is located at backup host */
+    FIO_REMOTE_HOST  /* date is located at remote host */
 } fio_location;
 
 #define FIO_FDMAX 64
@@ -80,21 +80,26 @@ typedef enum
 #define SYS_CHECK(cmd) do if ((cmd) < 0) { fprintf(stderr, "%s:%d: (%s) %s\n", __FILE__, __LINE__, #cmd, strerror(errno)); exit(EXIT_FAILURE); } while (0)
 #define IO_CHECK(cmd, size) do { int _rc = (cmd); if (_rc != (size)) fio_error(_rc, size, __FILE__, __LINE__); } while (0)
 
+#define FILE_PERMISSIONS 0600
+
 typedef struct
 {
-//	fio_operations cop;
-//	16
-	unsigned cop    : 32;
-	unsigned handle : 32;
-	unsigned size   : 32;
-	unsigned arg;
+    //  fio_operations cop;
+    //  16
+    unsigned cop    : 32;
+    unsigned handle : 32;
+    unsigned size   : 32;
+    unsigned arg;
 } fio_header;
 
 extern fio_location MyLocation;
+extern __thread int fio_stdout;
+extern __thread int fio_stdin;
 
 /* Check if FILE handle is local or remote (created by FIO) */
 #define fio_is_remote_file(file) ((size_t)(file) <= FIO_FDMAX)
-
+extern ssize_t fio_read_all(int fd, void* buf, size_t size);
+extern ssize_t fio_write_all(int fd, void const* buf, size_t size);
 extern void    fio_redirect(int in, int out, int err);
 extern void    fio_communicate(int in, int out);
 
@@ -141,7 +146,7 @@ extern int     fio_close_stream(FILE* f);
 extern gzFile  fio_gzopen(char const* path, char const* mode, int level, fio_location location);
 extern int     fio_gzclose(gzFile file);
 extern int     fio_gzread(gzFile f, void *buf, unsigned size);
-extern int     fio_gzwrite(gzFile f, void const* buf, unsigned size);
+extern int     fio_gzwrite(gzFile f, void * buf, unsigned size);
 extern int     fio_gzeof(gzFile f);
 extern z_off_t fio_gzseek(gzFile f, z_off_t offset, int whence);
 extern const char* fio_gzerror(gzFile file, int *errnum);

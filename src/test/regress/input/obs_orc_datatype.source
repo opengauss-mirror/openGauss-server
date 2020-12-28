@@ -1,0 +1,162 @@
+-- INT2, 6 rows. Hive type: SMALLINT
+CREATE SERVER obs_server FOREIGN DATA WRAPPER 	dfs_fdw OPTIONS (address '@obshostname@', type 'obs', access_key '@ak@', secret_access_key '@sk@');
+Create foreign table t_smallint (c_smallint int2) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_smallint_orc/') distribute by roundrobin;
+select * from t_smallint where c_smallint > 0;
+
+-- Integer (int4), 6 rows. Hive type: INT  
+Create foreign table t_int (c_int int) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_int_orc/') distribute by roundrobin;
+SELECT * FROM T_INT;
+
+-- INT8, 6 rows. Hive type: BIGINT
+Create foreign table t_bigint (c_bigint int8) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_bigint_orc/') distribute by roundrobin;
+select * from t_bigint;
+
+-- FLOAT4, 6 rows. Hive type: float
+Create foreign table t_float4 (c_float4 float4) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_float_orc/') distribute by roundrobin;
+select * from t_float4 where c_float4 > 2;
+
+-- FLOAT8, 6 rows. Hive type: double
+Create foreign table t_float8 (c_float8 float8) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_double_orc/') distribute by roundrobin;
+select * from t_float8;
+
+-- String, 14 rows. Hive type: String
+Create foreign table t_text (c_text text) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_string_orc/') distribute by roundrobin;
+SELECT * FROM T_TEXT;
+
+-- char(10), 14 rows. Hive type: String, with max lengthf of 9
+Create foreign table t_charfromstring (c_char text) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_string_orc/') distribute by roundrobin;
+SELECT * FROM T_charfromstring;
+
+-- varchar(10), 14 rows. Hive type: String, with max lengthf of 9
+Create foreign table t_varcharfromstring (c_varchar text) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_string_orc/') distribute by roundrobin;
+SELECT * FROM T_varcharfromstring;
+
+-- timestamp, 6 rows. Hive type: timestamp
+Create foreign table t_timestamp (c_timestamp timestamp) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_timestamp_orc/') distribute by roundrobin;
+select * from t_timestamp where c_timestamp < '2015-01-15 10:11:12';
+
+-- date, 6 rows. Hive type: date
+Create foreign table t_date (c_date date) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_date_orc/') distribute by roundrobin;
+select * from t_date;
+
+-- date, 7 rows. Hive type: bool
+Create foreign table t_bool (c_bool bool) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_bool_orc/') distribute by roundrobin;
+select * from t_bool where c_bool;
+select * from t_bool where c_bool is null;
+
+-- Decimal, 4 rows. Hive type: decimal(38,5)
+ Create foreign table t_dec (decField decimal(38,5)) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/largeTypeTest_orc11_64stripe/') distribute by roundrobin;
+ select * from t_dec where decfield>0 order by 1;
+ select * from t_dec where decfield=5.668 order by 1;
+ select * from t_dec where decfield>-7.20 order by 1;
+ 
+-- char(15),4rows.Hive type:char(15)
+create foreign table test_char(chField char(15)) SERVER obs_server  OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/mppdb.db/test_char_orc/') distribute by roundrobin; 
+select * from test_char;
+ 
+-- varChar(15),6rows.Hive type:varChar(15)
+create foreign table test_varChar(varField varChar(15)) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/mppdb.db/test_varChar_orc/') distribute by roundrobin;
+select * from test_varChar where varField != '123';
+
+-- clob ,5rows.Hive type:string
+create foreign table test_Clob(clField clob) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/mppdb.db/test_Clob_orc/') distribute by roundrobin;
+select * from test_Clob where clField != '123';
+ 
+ 
+create foreign table testN8(decFiled decimal(38,28),decField2 decimal(38,18),decField3 decimal(38,8),decField4 decimal(28,18),decField5 decimal(28,8))
+SERVER obs_server  OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/mppdb.db/testN8_orc/') distribute by roundrobin;
+select * from testN8 where decfield4 > 0 order by 1,2,3,4,5;
+ 
+ 
+-- the following has bugs, so comment out for now
+
+-- Integer, 7 rows. Hive type: INT
+-- with NULL value as the very last row, the result show all 7 row empty.
+-- Create foreign table t_int_w_null (c_int int) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_int_w_null_orc/') distribute by roundrobin;
+-- Select * from t_int_w_null;
+
+-- char(10), 14 rows. Hive type: char(10)
+-- ERROR:  Error occurred while reading column 1: ORC and PSQL types do not match, ORC type is
+-- Create foreign table t_char (c_char char(10)) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_char_orc/') distribute by roundrobin;
+-- select * from t_char;
+
+-- varchar(10), 14 rows. Hive type: varchar(10) 
+-- ERROR:  Error occurred while reading column 1: ORC and PSQL types do not match, ORC type is 
+-- Create foreign table t_varchar (c_varchar varchar(10)) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_varchar_orc/') distribute by roundrobin;
+-- select * from t_varchar;
+
+-- Decimal, 6 rows. Hive type: decimal(10,5)
+-- ERROR:  Error occurred while reading column 1: ORC and PSQL types do not match, ORC type is DECIMAL
+-- Create foreign table t_dec (c_dec decimal(10,5)) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_dec_orc/') distribute by roundrobin;
+-- select * from t_dec;
+
+create foreign table elk_datatype_float_table_028_2
+(
+c_float4 float4,
+c_real real,
+c_double double precision,
+c_float8 float8,
+c_decimal decimal(39,38),
+c_int integer
+)
+server obs_server OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/decimal/elk_datatype_float_table_001/')
+distribute by roundrobin;
+
+create foreign table elk_datatype_float_table_028_2
+(
+c_float4 float4,
+c_real real,
+c_double double precision,
+c_float8 float8,
+c_decimal decimal(39),
+c_int integer
+)
+server obs_server OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/decimal/elk_datatype_float_table_001/')
+distribute by roundrobin;
+
+create foreign table elk_datatype_float_table_028_2
+(
+c_float4 float4,
+c_real real,
+c_double double precision,
+c_float8 float8,
+c_decimal decimal(38,3),
+c_int integer
+)
+server obs_server OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/decimal/elk_datatype_float_table_001/')
+distribute by roundrobin;
+
+select * from elk_datatype_float_table_028_2;
+
+alter foreign table elk_datatype_float_table_028_2 alter c_decimal type decimal(40);
+
+alter foreign table elk_datatype_float_table_028_2 alter c_decimal type decimal(10,2);
+
+select * from elk_datatype_float_table_028_2;
+
+drop foreign table elk_datatype_float_table_028_2;
+
+create foreign table elk_datatype_float_table_028_2
+(
+c_float4 float4,
+c_real real,
+c_double double precision,
+c_float8 float8,
+c_decimal decimal,
+c_int integer
+)
+server obs_server OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/decimal/elk_datatype_float_table_001/')
+distribute by roundrobin;
+
+select * from elk_datatype_float_table_028_2;
+
+create foreign table  biginteger 
+(
+x  decimal
+) 
+server obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/biginteger/')
+distribute by roundrobin;
+
+select * from biginteger where x<5;
+
+DROP SERVER obs_server CASCADE;

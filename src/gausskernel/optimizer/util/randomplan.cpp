@@ -167,6 +167,18 @@ List* get_random_path(RelOptInfo* parent_rel, Path** cheapest_startup_path, Path
         nonParamPathlist = lappend(nonParamPathlist, path);
     }
 
+    /* when only ParamPath exist */
+    if (nonParamPathlist == NIL) {
+        cheapest_path_list = set_random_cheapest_path_list(ParamPathlist, cheapest_path_list, &random_pathno);
+        *cheapest_startup_path = (Path*)list_nth(ParamPathlist, random_pathno);
+
+        cheapest_path_list = set_random_cheapest_path_list(ParamPathlist, cheapest_path_list, &random_pathno);
+        *cheapest_total_path = (Path*)list_nth(ParamPathlist, random_pathno);
+
+        list_free_ext(ParamPathlist);
+        return cheapest_path_list;
+    }
+
     /* Choose cheapest_startup_path from nonParamPathlist and add it into cheapest_path_list. */
     cheapest_path_list = set_random_cheapest_path_list(nonParamPathlist, cheapest_path_list, &random_pathno);
     *cheapest_startup_path = (Path*)list_nth(nonParamPathlist, random_pathno);

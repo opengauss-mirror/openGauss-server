@@ -27,4 +27,3 @@ extern syncrep_scanner_yyscan_t syncrep_scanner_init(const char* query_string);
 extern void syncrep_scanner_finish(syncrep_scanner_yyscan_t yyscanner);
 
 #endif /* _SYNCREP_GRAMPARSE_H */
-

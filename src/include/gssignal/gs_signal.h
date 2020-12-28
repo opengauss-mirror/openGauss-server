@@ -28,12 +28,20 @@
 
 #include "gs_thread.h"
 #include <signal.h>
-#include "storage/s_lock.h"
+#include "storage/lock/s_lock.h"
 #include <sys/time.h>
 
-#define GS_SIGNAL_COUNT 32
+#ifdef WIN32
+#include "pthread-win32.h"
+#endif
+
+#define GS_SIGNAL_COUNT         32
 
 typedef void (*gs_sigfunc)(int);
+
+#ifdef WIN32
+typedef int sigset_t;
+#endif
 
 typedef enum GsSignalCheckType {
     SIGNAL_CHECK_NONE,
@@ -84,7 +92,11 @@ typedef struct GsSignal {
     gs_sigfunc handlerList[GS_SIGNAL_COUNT];
     sigset_t masksignal;
     SignalPool sig_pool;
+#ifndef WIN32
     volatile unsigned int bitmapSigProtectFun;
+#else
+    HANDLE signal_event;
+#endif
 } GsSignal;
 
 /* each thread has a GsSignalSlot to keep their thread id, thread name, signals and signal handles */
@@ -96,13 +108,24 @@ typedef struct GsSignalSlot {
 
 typedef volatile int gs_atomic_t;
 
+#ifndef WIN32
 extern sigset_t gs_signal_unblock_sigusr2(void);
 
 extern sigset_t gs_signal_block_sigusr2(void);
 
 extern void gs_signal_recover_mask(sigset_t mask);
 
-typedef void (*gs_sigaction_func)(int, siginfo_t*, void*);
+#else
+
+#define gs_signal_unblock_sigusr2() 0
+#define gs_signal_block_sigusr2() 0
+#define gs_signal_recover_mask(_mask) _mask
+
+#endif
+
+#ifndef WIN32
+typedef void (*gs_sigaction_func) (int, siginfo_t *, void *);
+#endif
 
 /* global GsSignalSlot manager, keeps all threads' GsSignalSlot */
 typedef struct GsSignalBase {
@@ -110,6 +133,10 @@ typedef struct GsSignalBase {
     unsigned int slots_size;
     pthread_mutex_t slots_lock;
 } GsSignalBase;
+
+#ifdef WIN32
+#define pgwin32_signal_event    (MySignalSlot->gssignal->signal_event)
+#endif
 
 extern gs_sigfunc gspqsignal(int signo, gs_sigfunc func);
 
@@ -122,7 +149,7 @@ extern void gs_signal_slots_init(unsigned long size);
 
 extern GsSignalSlot* gs_signal_slot_release(ThreadId thread_id);
 
-/* gs send signal to thread */
+/*gs send signal to thread*/
 extern int gs_signal_send(ThreadId thread_id, int signo, int nowait = 0);
 extern int gs_signal_send(ThreadId thread_id, int signo, bool is_thread_pool);
 
@@ -146,5 +173,9 @@ extern int gs_signal_deletetimer(void);
 
 extern void gs_signal_monitor_startup(void);
 
-#endif /* GS_SIGNAL_H_ */
+#ifdef WIN32
+#define pgwin32_dispatch_queued_signals gs_signal_handle
+#define UNBLOCKED_SIGNAL_QUEUE() true
+#endif
 
+#endif /* GS_SIGNAL_H_ */

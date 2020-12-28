@@ -22,7 +22,6 @@ typedef struct notifysignaldata {
     sig_atomic_t NotifySignalFlags[NUM_NOTIFYS];
 } NotifySignalData;
 
-extern void HandleStartupProcInterrupts(void);
 extern void StartupProcessMain(void);
 extern void PreRestoreCommand(void);
 extern void PostRestoreCommand(void);

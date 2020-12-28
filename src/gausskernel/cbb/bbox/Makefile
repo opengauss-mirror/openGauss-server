@@ -35,7 +35,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
    endif
 endif
 OBJS =  bbox_create.o bbox_elf_dump.o bbox_lib.o bbox_print.o bbox_syscall_support.o \
-		bbox_threads.o bbox_elf_dump_base.o
+		bbox_threads.o bbox_elf_dump_base.o gs_bbox.o
 
 include $(top_srcdir)/src/gausskernel/common.mk
 

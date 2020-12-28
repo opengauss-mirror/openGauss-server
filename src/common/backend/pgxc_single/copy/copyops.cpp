@@ -172,6 +172,10 @@ char** CopyOps_RawDataToArrayField(TupleDesc tupdesc, char* message, int len)
     /* Then alloc necessary space */
     raw_fields = (char**)palloc(fields * sizeof(char*));
 
+    if (unlikely(len < 0 || (len + 1 < 0))) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("message len is invalid.")));
+    }
+
     /* Take a copy of message to manipulate */
     origin_ptr = (char*)palloc0(sizeof(char) * (len + 1));
     rc = memcpy_s(origin_ptr, len + 1, message, len + 1);

@@ -2,6 +2,492 @@
 -- BULK LOAD START
 --
 ---
+-- Check gds argments
+---
+\! @abs_bindir@/gds -h > /dev/null 2>&1
+\! @abs_bindir@/gds -d -2
+Illegal data directory "-2".
+gds [options]:
+	-d dir			Set data directory.
+	-p port			Set GDS listening port.
+	   ip:port		Set GDS listening ip address and port.
+	-l log_file		Set log file.
+	-H secure_ip_range	Set secure IP checklist in CIDR notation. Required for GDS to start.
+	-e dir			Set error log directory.
+	-E size			Set size of per error log segment.(0 < size < 1TB)
+	-S size			Set size of data segment.(1MB < size < 100TB)
+	-t worker_num		Set number of worker thread in multi-thread mode, the upper limit is 32. If without setting, the default value is 1.
+	--enable-ssl 		Set GDS connection with SSL security.
+	--ssl-dir 		Set the directory holding certificate files.
+	--debug-level 		Set the debug level, which decides how much debug information we print in log. Default value is 0.
+					0:  OFF. Keep the minimum amount of log. Only contains session descriptions.
+					1:  NORMAL. Log the basic "connnect" and "disconnect" information. Useful for identify issues with network traffics.
+					2:  ON. Keep detailed log about node connections, package sent and received, status information.
+	-s status_file		Enable GDS status report.
+	-D 			Run the GDS as a daemon process.
+	-r 			Read the working directory recursively.
+	-V 			Show the compiled version information.
+	-h			Display usage.
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -t
+Bad argurment "-t".
+gds [options]:
+	-d dir			Set data directory.
+	-p port			Set GDS listening port.
+	   ip:port		Set GDS listening ip address and port.
+	-l log_file		Set log file.
+	-H secure_ip_range	Set secure IP checklist in CIDR notation. Required for GDS to start.
+	-e dir			Set error log directory.
+	-E size			Set size of per error log segment.(0 < size < 1TB)
+	-S size			Set size of data segment.(1MB < size < 100TB)
+	-t worker_num		Set number of worker thread in multi-thread mode, the upper limit is 32. If without setting, the default value is 1.
+	--enable-ssl 		Set GDS connection with SSL security.
+	--ssl-dir 		Set the directory holding certificate files.
+	--debug-level 		Set the debug level, which decides how much debug information we print in log. Default value is 0.
+					0:  OFF. Keep the minimum amount of log. Only contains session descriptions.
+					1:  NORMAL. Log the basic "connnect" and "disconnect" information. Useful for identify issues with network traffics.
+					2:  ON. Keep detailed log about node connections, package sent and received, status information.
+	-s status_file		Enable GDS status report.
+	-D 			Run the GDS as a daemon process.
+	-r 			Read the working directory recursively.
+	-V 			Show the compiled version information.
+	-h			Display usage.
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -t -1
+Invalid worker threads number "-1"
+gds [options]:
+	-d dir			Set data directory.
+	-p port			Set GDS listening port.
+	   ip:port		Set GDS listening ip address and port.
+	-l log_file		Set log file.
+	-H secure_ip_range	Set secure IP checklist in CIDR notation. Required for GDS to start.
+	-e dir			Set error log directory.
+	-E size			Set size of per error log segment.(0 < size < 1TB)
+	-S size			Set size of data segment.(1MB < size < 100TB)
+	-t worker_num		Set number of worker thread in multi-thread mode, the upper limit is 32. If without setting, the default value is 1.
+	--enable-ssl 		Set GDS connection with SSL security.
+	--ssl-dir 		Set the directory holding certificate files.
+	--debug-level 		Set the debug level, which decides how much debug information we print in log. Default value is 0.
+					0:  OFF. Keep the minimum amount of log. Only contains session descriptions.
+					1:  NORMAL. Log the basic "connnect" and "disconnect" information. Useful for identify issues with network traffics.
+					2:  ON. Keep detailed log about node connections, package sent and received, status information.
+	-s status_file		Enable GDS status report.
+	-D 			Run the GDS as a daemon process.
+	-r 			Read the working directory recursively.
+	-V 			Show the compiled version information.
+	-h			Display usage.
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -t 100
+Invalid worker threads number "100"
+gds [options]:
+	-d dir			Set data directory.
+	-p port			Set GDS listening port.
+	   ip:port		Set GDS listening ip address and port.
+	-l log_file		Set log file.
+	-H secure_ip_range	Set secure IP checklist in CIDR notation. Required for GDS to start.
+	-e dir			Set error log directory.
+	-E size			Set size of per error log segment.(0 < size < 1TB)
+	-S size			Set size of data segment.(1MB < size < 100TB)
+	-t worker_num		Set number of worker thread in multi-thread mode, the upper limit is 32. If without setting, the default value is 1.
+	--enable-ssl 		Set GDS connection with SSL security.
+	--ssl-dir 		Set the directory holding certificate files.
+	--debug-level 		Set the debug level, which decides how much debug information we print in log. Default value is 0.
+					0:  OFF. Keep the minimum amount of log. Only contains session descriptions.
+					1:  NORMAL. Log the basic "connnect" and "disconnect" information. Useful for identify issues with network traffics.
+					2:  ON. Keep detailed log about node connections, package sent and received, status information.
+	-s status_file		Enable GDS status report.
+	-D 			Run the GDS as a daemon process.
+	-r 			Read the working directory recursively.
+	-V 			Show the compiled version information.
+	-h			Display usage.
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p :8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status
+Invalid IP address: 
+gds [options]:
+	-d dir			Set data directory.
+	-p port			Set GDS listening port.
+	   ip:port		Set GDS listening ip address and port.
+	-l log_file		Set log file.
+	-H secure_ip_range	Set secure IP checklist in CIDR notation. Required for GDS to start.
+	-e dir			Set error log directory.
+	-E size			Set size of per error log segment.(0 < size < 1TB)
+	-S size			Set size of data segment.(1MB < size < 100TB)
+	-t worker_num		Set number of worker thread in multi-thread mode, the upper limit is 32. If without setting, the default value is 1.
+	--enable-ssl 		Set GDS connection with SSL security.
+	--ssl-dir 		Set the directory holding certificate files.
+	--debug-level 		Set the debug level, which decides how much debug information we print in log. Default value is 0.
+					0:  OFF. Keep the minimum amount of log. Only contains session descriptions.
+					1:  NORMAL. Log the basic "connnect" and "disconnect" information. Useful for identify issues with network traffics.
+					2:  ON. Keep detailed log about node connections, package sent and received, status information.
+	-s status_file		Enable GDS status report.
+	-D 			Run the GDS as a daemon process.
+	-r 			Read the working directory recursively.
+	-V 			Show the compiled version information.
+	-h			Display usage.
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status
+Invalid port "0.0.0.0"
+gds [options]:
+	-d dir			Set data directory.
+	-p port			Set GDS listening port.
+	   ip:port		Set GDS listening ip address and port.
+	-l log_file		Set log file.
+	-H secure_ip_range	Set secure IP checklist in CIDR notation. Required for GDS to start.
+	-e dir			Set error log directory.
+	-E size			Set size of per error log segment.(0 < size < 1TB)
+	-S size			Set size of data segment.(1MB < size < 100TB)
+	-t worker_num		Set number of worker thread in multi-thread mode, the upper limit is 32. If without setting, the default value is 1.
+	--enable-ssl 		Set GDS connection with SSL security.
+	--ssl-dir 		Set the directory holding certificate files.
+	--debug-level 		Set the debug level, which decides how much debug information we print in log. Default value is 0.
+					0:  OFF. Keep the minimum amount of log. Only contains session descriptions.
+					1:  NORMAL. Log the basic "connnect" and "disconnect" information. Useful for identify issues with network traffics.
+					2:  ON. Keep detailed log about node connections, package sent and received, status information.
+	-s status_file		Enable GDS status report.
+	-D 			Run the GDS as a daemon process.
+	-r 			Read the working directory recursively.
+	-V 			Show the compiled version information.
+	-h			Display usage.
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:9999999999999999999999999999999999999999999999999999999999999999999999999999999999999 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status
+Invalid port "9999999999999999999999999999999999999999999999999999999999999999999999999999999999999"
+gds [options]:
+	-d dir			Set data directory.
+	-p port			Set GDS listening port.
+	   ip:port		Set GDS listening ip address and port.
+	-l log_file		Set log file.
+	-H secure_ip_range	Set secure IP checklist in CIDR notation. Required for GDS to start.
+	-e dir			Set error log directory.
+	-E size			Set size of per error log segment.(0 < size < 1TB)
+	-S size			Set size of data segment.(1MB < size < 100TB)
+	-t worker_num		Set number of worker thread in multi-thread mode, the upper limit is 32. If without setting, the default value is 1.
+	--enable-ssl 		Set GDS connection with SSL security.
+	--ssl-dir 		Set the directory holding certificate files.
+	--debug-level 		Set the debug level, which decides how much debug information we print in log. Default value is 0.
+					0:  OFF. Keep the minimum amount of log. Only contains session descriptions.
+					1:  NORMAL. Log the basic "connnect" and "disconnect" information. Useful for identify issues with network traffics.
+					2:  ON. Keep detailed log about node connections, package sent and received, status information.
+	-s status_file		Enable GDS status report.
+	-D 			Run the GDS as a daemon process.
+	-r 			Read the working directory recursively.
+	-V 			Show the compiled version information.
+	-h			Display usage.
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:12345 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status -S 0
+Invalid data segment size "0"
+gds [options]:
+	-d dir			Set data directory.
+	-p port			Set GDS listening port.
+	   ip:port		Set GDS listening ip address and port.
+	-l log_file		Set log file.
+	-H secure_ip_range	Set secure IP checklist in CIDR notation. Required for GDS to start.
+	-e dir			Set error log directory.
+	-E size			Set size of per error log segment.(0 < size < 1TB)
+	-S size			Set size of data segment.(1MB < size < 100TB)
+	-t worker_num		Set number of worker thread in multi-thread mode, the upper limit is 32. If without setting, the default value is 1.
+	--enable-ssl 		Set GDS connection with SSL security.
+	--ssl-dir 		Set the directory holding certificate files.
+	--debug-level 		Set the debug level, which decides how much debug information we print in log. Default value is 0.
+					0:  OFF. Keep the minimum amount of log. Only contains session descriptions.
+					1:  NORMAL. Log the basic "connnect" and "disconnect" information. Useful for identify issues with network traffics.
+					2:  ON. Keep detailed log about node connections, package sent and received, status information.
+	-s status_file		Enable GDS status report.
+	-D 			Run the GDS as a daemon process.
+	-r 			Read the working directory recursively.
+	-V 			Show the compiled version information.
+	-h			Display usage.
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status -E aa
+Invalid log segment size "aa"
+gds [options]:
+	-d dir			Set data directory.
+	-p port			Set GDS listening port.
+	   ip:port		Set GDS listening ip address and port.
+	-l log_file		Set log file.
+	-H secure_ip_range	Set secure IP checklist in CIDR notation. Required for GDS to start.
+	-e dir			Set error log directory.
+	-E size			Set size of per error log segment.(0 < size < 1TB)
+	-S size			Set size of data segment.(1MB < size < 100TB)
+	-t worker_num		Set number of worker thread in multi-thread mode, the upper limit is 32. If without setting, the default value is 1.
+	--enable-ssl 		Set GDS connection with SSL security.
+	--ssl-dir 		Set the directory holding certificate files.
+	--debug-level 		Set the debug level, which decides how much debug information we print in log. Default value is 0.
+					0:  OFF. Keep the minimum amount of log. Only contains session descriptions.
+					1:  NORMAL. Log the basic "connnect" and "disconnect" information. Useful for identify issues with network traffics.
+					2:  ON. Keep detailed log about node connections, package sent and received, status information.
+	-s status_file		Enable GDS status report.
+	-D 			Run the GDS as a daemon process.
+	-r 			Read the working directory recursively.
+	-V 			Show the compiled version information.
+	-h			Display usage.
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/bbbbb/gds.log -s ./tmp_check/status
+Unable to open log file "@abs_bindir@/bbbbb/gds.log".
+gds [options]:
+	-d dir			Set data directory.
+	-p port			Set GDS listening port.
+	   ip:port		Set GDS listening ip address and port.
+	-l log_file		Set log file.
+	-H secure_ip_range	Set secure IP checklist in CIDR notation. Required for GDS to start.
+	-e dir			Set error log directory.
+	-E size			Set size of per error log segment.(0 < size < 1TB)
+	-S size			Set size of data segment.(1MB < size < 100TB)
+	-t worker_num		Set number of worker thread in multi-thread mode, the upper limit is 32. If without setting, the default value is 1.
+	--enable-ssl 		Set GDS connection with SSL security.
+	--ssl-dir 		Set the directory holding certificate files.
+	--debug-level 		Set the debug level, which decides how much debug information we print in log. Default value is 0.
+					0:  OFF. Keep the minimum amount of log. Only contains session descriptions.
+					1:  NORMAL. Log the basic "connnect" and "disconnect" information. Useful for identify issues with network traffics.
+					2:  ON. Keep detailed log about node connections, package sent and received, status information.
+	-s status_file		Enable GDS status report.
+	-D 			Run the GDS as a daemon process.
+	-r 			Read the working directory recursively.
+	-V 			Show the compiled version information.
+	-h			Display usage.
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:99999 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status
+Invalid port "99999"
+gds [options]:
+	-d dir			Set data directory.
+	-p port			Set GDS listening port.
+	   ip:port		Set GDS listening ip address and port.
+	-l log_file		Set log file.
+	-H secure_ip_range	Set secure IP checklist in CIDR notation. Required for GDS to start.
+	-e dir			Set error log directory.
+	-E size			Set size of per error log segment.(0 < size < 1TB)
+	-S size			Set size of data segment.(1MB < size < 100TB)
+	-t worker_num		Set number of worker thread in multi-thread mode, the upper limit is 32. If without setting, the default value is 1.
+	--enable-ssl 		Set GDS connection with SSL security.
+	--ssl-dir 		Set the directory holding certificate files.
+	--debug-level 		Set the debug level, which decides how much debug information we print in log. Default value is 0.
+					0:  OFF. Keep the minimum amount of log. Only contains session descriptions.
+					1:  NORMAL. Log the basic "connnect" and "disconnect" information. Useful for identify issues with network traffics.
+					2:  ON. Keep detailed log about node connections, package sent and received, status information.
+	-s status_file		Enable GDS status report.
+	-D 			Run the GDS as a daemon process.
+	-r 			Read the working directory recursively.
+	-V 			Show the compiled version information.
+	-h			Display usage.
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -s ./tmp_check/status -a
+Un-recognized argurment "-a".
+gds [options]:
+	-d dir			Set data directory.
+	-p port			Set GDS listening port.
+	   ip:port		Set GDS listening ip address and port.
+	-l log_file		Set log file.
+	-H secure_ip_range	Set secure IP checklist in CIDR notation. Required for GDS to start.
+	-e dir			Set error log directory.
+	-E size			Set size of per error log segment.(0 < size < 1TB)
+	-S size			Set size of data segment.(1MB < size < 100TB)
+	-t worker_num		Set number of worker thread in multi-thread mode, the upper limit is 32. If without setting, the default value is 1.
+	--enable-ssl 		Set GDS connection with SSL security.
+	--ssl-dir 		Set the directory holding certificate files.
+	--debug-level 		Set the debug level, which decides how much debug information we print in log. Default value is 0.
+					0:  OFF. Keep the minimum amount of log. Only contains session descriptions.
+					1:  NORMAL. Log the basic "connnect" and "disconnect" information. Useful for identify issues with network traffics.
+					2:  ON. Keep detailed log about node connections, package sent and received, status information.
+	-s status_file		Enable GDS status report.
+	-D 			Run the GDS as a daemon process.
+	-r 			Read the working directory recursively.
+	-V 			Show the compiled version information.
+	-h			Display usage.
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -s ./tmp_check/status -work
+Un-recognized argurment "./tmp_check/status".
+gds [options]:
+	-d dir			Set data directory.
+	-p port			Set GDS listening port.
+	   ip:port		Set GDS listening ip address and port.
+	-l log_file		Set log file.
+	-H secure_ip_range	Set secure IP checklist in CIDR notation. Required for GDS to start.
+	-e dir			Set error log directory.
+	-E size			Set size of per error log segment.(0 < size < 1TB)
+	-S size			Set size of data segment.(1MB < size < 100TB)
+	-t worker_num		Set number of worker thread in multi-thread mode, the upper limit is 32. If without setting, the default value is 1.
+	--enable-ssl 		Set GDS connection with SSL security.
+	--ssl-dir 		Set the directory holding certificate files.
+	--debug-level 		Set the debug level, which decides how much debug information we print in log. Default value is 0.
+					0:  OFF. Keep the minimum amount of log. Only contains session descriptions.
+					1:  NORMAL. Log the basic "connnect" and "disconnect" information. Useful for identify issues with network traffics.
+					2:  ON. Keep detailed log about node connections, package sent and received, status information.
+	-s status_file		Enable GDS status report.
+	-D 			Run the GDS as a daemon process.
+	-r 			Read the working directory recursively.
+	-V 			Show the compiled version information.
+	-h			Display usage.
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -work -H 0.0.0.0/0 -s ./tmp_check/status
+Un-recognized argurment "-D".
+gds [options]:
+	-d dir			Set data directory.
+	-p port			Set GDS listening port.
+	   ip:port		Set GDS listening ip address and port.
+	-l log_file		Set log file.
+	-H secure_ip_range	Set secure IP checklist in CIDR notation. Required for GDS to start.
+	-e dir			Set error log directory.
+	-E size			Set size of per error log segment.(0 < size < 1TB)
+	-S size			Set size of data segment.(1MB < size < 100TB)
+	-t worker_num		Set number of worker thread in multi-thread mode, the upper limit is 32. If without setting, the default value is 1.
+	--enable-ssl 		Set GDS connection with SSL security.
+	--ssl-dir 		Set the directory holding certificate files.
+	--debug-level 		Set the debug level, which decides how much debug information we print in log. Default value is 0.
+					0:  OFF. Keep the minimum amount of log. Only contains session descriptions.
+					1:  NORMAL. Log the basic "connnect" and "disconnect" information. Useful for identify issues with network traffics.
+					2:  ON. Keep detailed log about node connections, package sent and received, status information.
+	-s status_file		Enable GDS status report.
+	-D 			Run the GDS as a daemon process.
+	-r 			Read the working directory recursively.
+	-V 			Show the compiled version information.
+	-h			Display usage.
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/AAAA/gds.log -s ./tmp_check/status
+Unable to open log file "@abs_bindir@/AAAA/gds.log".
+gds [options]:
+	-d dir			Set data directory.
+	-p port			Set GDS listening port.
+	   ip:port		Set GDS listening ip address and port.
+	-l log_file		Set log file.
+	-H secure_ip_range	Set secure IP checklist in CIDR notation. Required for GDS to start.
+	-e dir			Set error log directory.
+	-E size			Set size of per error log segment.(0 < size < 1TB)
+	-S size			Set size of data segment.(1MB < size < 100TB)
+	-t worker_num		Set number of worker thread in multi-thread mode, the upper limit is 32. If without setting, the default value is 1.
+	--enable-ssl 		Set GDS connection with SSL security.
+	--ssl-dir 		Set the directory holding certificate files.
+	--debug-level 		Set the debug level, which decides how much debug information we print in log. Default value is 0.
+					0:  OFF. Keep the minimum amount of log. Only contains session descriptions.
+					1:  NORMAL. Log the basic "connnect" and "disconnect" information. Useful for identify issues with network traffics.
+					2:  ON. Keep detailed log about node connections, package sent and received, status information.
+	-s status_file		Enable GDS status report.
+	-D 			Run the GDS as a daemon process.
+	-r 			Read the working directory recursively.
+	-V 			Show the compiled version information.
+	-h			Display usage.
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status -E 100MB -t 2 --debug-level 100
+Invalid debug option. Please input 0, 1, or 2 for debug level.
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status -E 100MB -t 2 --debug-level hahahah
+The input debug level cannot be converted. Please input 0, 1, or 2 for debug level.
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status -E 100MB -t 2 --debug-level 2
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -H 0.0.0.0/0
+The given port is already in use
+Failed to initialize server.
+\! @abs_bindir@/gds -V >/dev/null
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8901 -H 0.0.0.999
+Invalid IP address: 0.0.0.999
+gds [options]:
+	-d dir			Set data directory.
+	-p port			Set GDS listening port.
+	   ip:port		Set GDS listening ip address and port.
+	-l log_file		Set log file.
+	-H secure_ip_range	Set secure IP checklist in CIDR notation. Required for GDS to start.
+	-e dir			Set error log directory.
+	-E size			Set size of per error log segment.(0 < size < 1TB)
+	-S size			Set size of data segment.(1MB < size < 100TB)
+	-t worker_num		Set number of worker thread in multi-thread mode, the upper limit is 32. If without setting, the default value is 1.
+	--enable-ssl 		Set GDS connection with SSL security.
+	--ssl-dir 		Set the directory holding certificate files.
+	--debug-level 		Set the debug level, which decides how much debug information we print in log. Default value is 0.
+					0:  OFF. Keep the minimum amount of log. Only contains session descriptions.
+					1:  NORMAL. Log the basic "connnect" and "disconnect" information. Useful for identify issues with network traffics.
+					2:  ON. Keep detailed log about node connections, package sent and received, status information.
+	-s status_file		Enable GDS status report.
+	-D 			Run the GDS as a daemon process.
+	-r 			Read the working directory recursively.
+	-V 			Show the compiled version information.
+	-h			Display usage.
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8901 -H 0.0.0.0/99
+invalid CIDR mask in address "0.0.0.0/99"
+gds [options]:
+	-d dir			Set data directory.
+	-p port			Set GDS listening port.
+	   ip:port		Set GDS listening ip address and port.
+	-l log_file		Set log file.
+	-H secure_ip_range	Set secure IP checklist in CIDR notation. Required for GDS to start.
+	-e dir			Set error log directory.
+	-E size			Set size of per error log segment.(0 < size < 1TB)
+	-S size			Set size of data segment.(1MB < size < 100TB)
+	-t worker_num		Set number of worker thread in multi-thread mode, the upper limit is 32. If without setting, the default value is 1.
+	--enable-ssl 		Set GDS connection with SSL security.
+	--ssl-dir 		Set the directory holding certificate files.
+	--debug-level 		Set the debug level, which decides how much debug information we print in log. Default value is 0.
+					0:  OFF. Keep the minimum amount of log. Only contains session descriptions.
+					1:  NORMAL. Log the basic "connnect" and "disconnect" information. Useful for identify issues with network traffics.
+					2:  ON. Keep detailed log about node connections, package sent and received, status information.
+	-s status_file		Enable GDS status report.
+	-D 			Run the GDS as a daemon process.
+	-r 			Read the working directory recursively.
+	-V 			Show the compiled version information.
+	-h			Display usage.
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8901 -H 127.0.0.1
+Invalid CIDR address "127.0.0.1"
+gds [options]:
+	-d dir			Set data directory.
+	-p port			Set GDS listening port.
+	   ip:port		Set GDS listening ip address and port.
+	-l log_file		Set log file.
+	-H secure_ip_range	Set secure IP checklist in CIDR notation. Required for GDS to start.
+	-e dir			Set error log directory.
+	-E size			Set size of per error log segment.(0 < size < 1TB)
+	-S size			Set size of data segment.(1MB < size < 100TB)
+	-t worker_num		Set number of worker thread in multi-thread mode, the upper limit is 32. If without setting, the default value is 1.
+	--enable-ssl 		Set GDS connection with SSL security.
+	--ssl-dir 		Set the directory holding certificate files.
+	--debug-level 		Set the debug level, which decides how much debug information we print in log. Default value is 0.
+					0:  OFF. Keep the minimum amount of log. Only contains session descriptions.
+					1:  NORMAL. Log the basic "connnect" and "disconnect" information. Useful for identify issues with network traffics.
+					2:  ON. Keep detailed log about node connections, package sent and received, status information.
+	-s status_file		Enable GDS status report.
+	-D 			Run the GDS as a daemon process.
+	-r 			Read the working directory recursively.
+	-V 			Show the compiled version information.
+	-h			Display usage.
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8901 -r -D -H 0.0.0.0/0,0.0.0.0/0 -l @abs_bindir@/gds1.log -s ./tmp_check/status1 -E 1GB
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8902 -r -D -H 0.0.0.0/0,0.0.0.0/0 -l @abs_bindir@/gds1.log -E 1GB
+\! cp @abs_bindir@/../share/postgresql/gds.conf @abs_bindir@/
+\! python @abs_bindir@/gds_ctl.py start
+gds [options]:
+	-d dir			Set data directory.
+	-p port			Set GDS listening port.
+	   ip:port		Set GDS listening ip address and port.
+	-l log_file		Set log file.
+	-H secure_ip_range	Set secure IP checklist in CIDR notation. Required for GDS to start.
+	-e dir			Set error log directory.
+	-E size			Set size of per error log segment.(0 < size < 1TB)
+	-S size			Set size of data segment.(1MB < size < 100TB)
+	-t worker_num		Set number of worker thread in multi-thread mode, the upper limit is 32. If without setting, the default value is 1.
+	--enable-ssl 		Set GDS connection with SSL security.
+	--ssl-dir 		Set the directory holding certificate files.
+	--debug-level 		Set the debug level, which decides how much debug information we print in log. Default value is 0.
+					0:  OFF. Keep the minimum amount of log. Only contains session descriptions.
+					1:  NORMAL. Log the basic "connnect" and "disconnect" information. Useful for identify issues with network traffics.
+					2:  ON. Keep detailed log about node connections, package sent and received, status information.
+	-s status_file		Enable GDS status report.
+	-D 			Run the GDS as a daemon process.
+	-r 			Read the working directory recursively.
+	-V 			Show the compiled version information.
+	-h			Display usage.
+Start GDS gds_sample_1                  [OK]
+\! python @abs_bindir@/gds_ctl.py status
+GDS gds_sample_1                    [IDEL]
+\! python @abs_bindir@/gds_ctl.py stop
+Stop GDS gds_sample_1                    [OK]
+\! python @abs_bindir@/gds_ctl.py start
+gds [options]:
+	-d dir			Set data directory.
+	-p port			Set GDS listening port.
+	   ip:port		Set GDS listening ip address and port.
+	-l log_file		Set log file.
+	-H secure_ip_range	Set secure IP checklist in CIDR notation. Required for GDS to start.
+	-e dir			Set error log directory.
+	-E size			Set size of per error log segment.(0 < size < 1TB)
+	-S size			Set size of data segment.(1MB < size < 100TB)
+	-t worker_num		Set number of worker thread in multi-thread mode, the upper limit is 32. If without setting, the default value is 1.
+	--enable-ssl 		Set GDS connection with SSL security.
+	--ssl-dir 		Set the directory holding certificate files.
+	--debug-level 		Set the debug level, which decides how much debug information we print in log. Default value is 0.
+					0:  OFF. Keep the minimum amount of log. Only contains session descriptions.
+					1:  NORMAL. Log the basic "connnect" and "disconnect" information. Useful for identify issues with network traffics.
+					2:  ON. Keep detailed log about node connections, package sent and received, status information.
+	-s status_file		Enable GDS status report.
+	-D 			Run the GDS as a daemon process.
+	-r 			Read the working directory recursively.
+	-V 			Show the compiled version information.
+	-h			Display usage.
+Start GDS gds_sample_1                  [OK]
+\! python @abs_bindir@/gds_ctl.py stop 127.0.0.1:8098
+Stop GDS 127.0.0.1:8098                  [OK]
+\! rm -f @abs_bindir@/gds.conf
+\! strings @abs_bindir@/gds  | grep '18\.244\.0\.188'
+SET ENABLE_STREAM_OPERATOR=ON;
+---
 -- Create Foreign Table Like Grammar Check
 ---
 --1. Create the table that our foreign table like_clauses will inherit column def from
@@ -22,10 +508,106 @@ U_ID        VARCHAR(10)   NOT NULL
 COMPRESS
 TABLESPACE CREATE_FOREIGN_TABLE_LIKE_tblsp1;
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "create_foreign_table_like_basic_info_pkey" for table "create_foreign_table_like_basic_info"
+--2. Create a foreign table with create foreign table like, and check column def
+DROP FOREIGN TABLE IF EXISTS F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO; 
+NOTICE:  foreign table "f_create_foreign_table_like_basic_info" does not exist, skipping
+ CREATE FOREIGN TABLE F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO 
+(like CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO) 
+ server gsmpp_server options( 
+ location 'gsfs://127.0.0.1/BASIC_INFO.bin', 
+ encoding 'LATIN1', 
+ mode 'Normal'
+)  LOG INTO ERR_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO 
+ PER NODE REJECT LIMIT '10';
+\d+ F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO
+                   Foreign table "public.f_create_foreign_table_like_basic_info"
+ Column  |         Type          | Modifiers | FDW Options | Storage  | Stats target | Description 
+---------+-----------------------+-----------+-------------+----------+--------------+-------------
+ u_id    | character varying(10) | not null  |             | extended |              | 
+ u_fname | character varying(80) |           |             | extended |              | 
+ u_sname | character varying(80) |           |             | extended |              | 
+ zipcode | character varying(20) |           |             | extended |              | 
+ phone   | character varying(40) |           |             | extended |              | 
+ age     | numeric(8,0)          |           |             | main     |              | 
+ rank    | numeric(8,0)          |           |             | main     |              | 
+Server: gsmpp_server
+FDW Options: (location 'gsfs://127.0.0.1/BASIC_INFO.bin', encoding 'LATIN1', mode 'Normal', reject_limit '10', error_table 'err_create_foreign_table_like_basic_info')
+FDW permition: read only
+Has OIDs: no
+Distribute By: ROUND ROBIN
+Location Nodes: ALL DATANODES
+
+--3. We do not allow like_option, so check this constraint
+DROP FOREIGN TABLE IF EXISTS F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO1; 
+NOTICE:  foreign table "f_create_foreign_table_like_basic_info1" does not exist, skipping
+ CREATE FOREIGN TABLE F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO1 
+(like CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO INCLUDING INDEXES) 
+ server gsmpp_server options( 
+ location 'gsfs://127.0.0.1/BASIC_INFO.bin', 
+ encoding 'LATIN1', 
+ mode 'Normal'
+)  LOG INTO ERR_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO1 
+ PER NODE REJECT LIMIT '10';
+ERROR:  syntax error at or near "INCLUDING INDEXES"
+LINE 2: (like CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO INCLUDING INDEXES...
+                                                   ^
+ 
+ 
+ 
+--4. Create another foreign table using pervious foreign table column defs and see if it works
+DROP FOREIGN TABLE IF EXISTS F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO2; 
+NOTICE:  foreign table "f_create_foreign_table_like_basic_info2" does not exist, skipping
+ CREATE FOREIGN TABLE F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO2 
+(like F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO) 
+ server gsmpp_server options( 
+ location 'gsfs://127.0.0.1/BASIC_INFO.bin', 
+ encoding 'LATIN1', 
+ mode 'Normal'
+)  LOG INTO ERR_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO2 
+ PER NODE REJECT LIMIT '10';
+\d+ F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO2
+                  Foreign table "public.f_create_foreign_table_like_basic_info2"
+ Column  |         Type          | Modifiers | FDW Options | Storage  | Stats target | Description 
+---------+-----------------------+-----------+-------------+----------+--------------+-------------
+ u_id    | character varying(10) | not null  |             | extended |              | 
+ u_fname | character varying(80) |           |             | extended |              | 
+ u_sname | character varying(80) |           |             | extended |              | 
+ zipcode | character varying(20) |           |             | extended |              | 
+ phone   | character varying(40) |           |             | extended |              | 
+ age     | numeric(8,0)          |           |             | main     |              | 
+ rank    | numeric(8,0)          |           |             | main     |              | 
+Server: gsmpp_server
+FDW Options: (location 'gsfs://127.0.0.1/BASIC_INFO.bin', encoding 'LATIN1', mode 'Normal', reject_limit '10', error_table 'err_create_foreign_table_like_basic_info2')
+FDW permition: read only
+Has OIDs: no
+Distribute By: ROUND ROBIN
+Location Nodes: ALL DATANODES
+
+--5. Like_clause is not compatible with fixed read, so check this constraint
+DROP FOREIGN TABLE IF EXISTS F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO3; 
+NOTICE:  foreign table "f_create_foreign_table_like_basic_info3" does not exist, skipping
+ CREATE FOREIGN TABLE F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO3 
+(like CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO) 
+ server gsmpp_server options( 
+ location 'gsfs://127.0.0.1/BASIC_INFO.bin', 
+ encoding 'LATIN1',
+ format 'fixed', 
+ mode 'Normal'
+)  LOG INTO ERR_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO 
+ PER NODE REJECT LIMIT '10';
+WARNING:  The above Read-Only foreign table is using FIXED mode without specifying 'fix' option.
+HINT:  Please use 'fix' option to specify expected fixed record length in order to parser the data file correctly.
+ERROR:  FORMATTER must be specified in FIXED mode
  
  
 ---
 --Create foreign table like grammar check over, cleaning up
 ---
 DROP TABLE IF EXISTS CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO;
+DROP FOREIGN TABLE IF EXISTS F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO;
+DROP FOREIGN TABLE IF EXISTS F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO1;
+NOTICE:  foreign table "f_create_foreign_table_like_basic_info1" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO2;
+DROP FOREIGN TABLE IF EXISTS F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO3;
+NOTICE:  foreign table "f_create_foreign_table_like_basic_info3" does not exist, skipping
 DROP TABLESPACE CREATE_FOREIGN_TABLE_LIKE_tblsp1;

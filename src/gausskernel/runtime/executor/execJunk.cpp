@@ -16,6 +16,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/tableam.h"
 #include "executor/executor.h"
 #include "pgxc/pgxc.h"
 
@@ -59,7 +60,7 @@
  * of whether to include room for an OID or not.
  * An optional resultSlot can be passed as well.
  */
-JunkFilter* ExecInitJunkFilter(List* targetList, bool hasoid, TupleTableSlot* slot)
+JunkFilter* ExecInitJunkFilter(List* targetList, bool hasoid, TupleTableSlot* slot, TableAmType tam)
 {
     JunkFilter* junkfilter = NULL;
     TupleDesc cleanTupType;
@@ -71,7 +72,7 @@ JunkFilter* ExecInitJunkFilter(List* targetList, bool hasoid, TupleTableSlot* sl
     /*
      * Compute the tuple descriptor for the cleaned tuple.
      */
-    cleanTupType = ExecCleanTypeFromTL(targetList, hasoid);
+    cleanTupType = ExecCleanTypeFromTL(targetList, hasoid, tam);
 
     /*
      * Use the given slot, or make a new slot if we weren't given one.
@@ -256,8 +257,9 @@ AttrNumber ExecFindJunkAttributeInTlist(List* targetlist, const char* attrName)
 Datum ExecGetJunkAttribute(TupleTableSlot* slot, AttrNumber attno, bool* isNull)
 {
     Assert(attno > 0);
+    Assert(slot != NULL);
 
-    return slot_getattr(slot, attno, isNull);
+    return tableam_tslot_getattr(slot, attno, isNull);
 }
 
 /*
@@ -280,7 +282,10 @@ TupleTableSlot* ExecFilterJunk(JunkFilter* junkfilter, TupleTableSlot* slot)
     /*
      * Extract all the values of the old tuple.
      */
-    slot_getallattrs(slot);
+
+    /* Get the Table Accessor Method*/
+    Assert(slot != NULL && slot->tts_tupleDescriptor != NULL);
+    tableam_tslot_getallattrs(slot);
     old_values = slot->tts_values;
     old_isnull = slot->tts_isnull;
 

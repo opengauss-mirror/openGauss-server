@@ -2,47 +2,41 @@
 // source: TDEKeysRecords.proto
 
 #include "TDEKeysRecords.pb.h"
-#include "securec.h"
+
 #include <algorithm>
 
-#include <google/protobuf/stubs/common.h>
 #include <google/protobuf/io/coded_stream.h>
 #include <google/protobuf/extension_set.h>
-#include <google/protobuf/wire_format_lite_inl.h>
+#include <google/protobuf/wire_format_lite.h>
 #include <google/protobuf/descriptor.h>
 #include <google/protobuf/generated_message_reflection.h>
 #include <google/protobuf/reflection_ops.h>
 #include <google/protobuf/wire_format.h>
 // @@protoc_insertion_point(includes)
 #include <google/protobuf/port_def.inc>
-
 class TDEKeysRecordsDefaultTypeInternal {
  public:
-  ::google::protobuf::internal::ExplicitlyConstructed<TDEKeysRecords> _instance;
+  ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<TDEKeysRecords> _instance;
 } _TDEKeysRecords_default_instance_;
-static void InitDefaultsTDEKeysRecords_TDEKeysRecords_2eproto() {
+static void InitDefaultsscc_info_TDEKeysRecords_TDEKeysRecords_2eproto() {
   GOOGLE_PROTOBUF_VERIFY_VERSION;
 
   {
     void* ptr = &::_TDEKeysRecords_default_instance_;
     new (ptr) ::TDEKeysRecords();
-    ::google::protobuf::internal::OnShutdownDestroyMessage(ptr);
+    ::PROTOBUF_NAMESPACE_ID::internal::OnShutdownDestroyMessage(ptr);
   }
   ::TDEKeysRecords::InitAsDefaultInstance();
 }
 
-::google::protobuf::internal::SCCInfo<0> scc_info_TDEKeysRecords_TDEKeysRecords_2eproto =
-    {{ATOMIC_VAR_INIT(::google::protobuf::internal::SCCInfoBase::kUninitialized), 0, InitDefaultsTDEKeysRecords_TDEKeysRecords_2eproto}, {}};
+::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<0> scc_info_TDEKeysRecords_TDEKeysRecords_2eproto =
+    {{ATOMIC_VAR_INIT(::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase::kUninitialized), 0, 0, InitDefaultsscc_info_TDEKeysRecords_TDEKeysRecords_2eproto}, {}};
 
-void InitDefaults_TDEKeysRecords_2eproto() {
-  ::google::protobuf::internal::InitSCC(&scc_info_TDEKeysRecords_TDEKeysRecords_2eproto.base);
-}
+static ::PROTOBUF_NAMESPACE_ID::Metadata file_level_metadata_TDEKeysRecords_2eproto[1];
+static const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* file_level_enum_descriptors_TDEKeysRecords_2eproto[2];
+static constexpr ::PROTOBUF_NAMESPACE_ID::ServiceDescriptor const** file_level_service_descriptors_TDEKeysRecords_2eproto = nullptr;
 
-::google::protobuf::Metadata file_level_metadata_TDEKeysRecords_2eproto[1];
-const ::google::protobuf::EnumDescriptor* file_level_enum_descriptors_TDEKeysRecords_2eproto[2];
-constexpr ::google::protobuf::ServiceDescriptor const** file_level_service_descriptors_TDEKeysRecords_2eproto = nullptr;
-
-const ::google::protobuf::uint32 TableStruct_TDEKeysRecords_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
+const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_TDEKeysRecords_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
   PROTOBUF_FIELD_OFFSET(::TDEKeysRecords, _has_bits_),
   PROTOBUF_FIELD_OFFSET(::TDEKeysRecords, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -69,21 +63,15 @@ const ::google::protobuf::uint32 TableStruct_TDEKeysRecords_2eproto::offsets[] P
   ~0u,
   8,
 };
-static const ::google::protobuf::internal::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
+static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
   { 0, 15, sizeof(::TDEKeysRecords)},
 };
 
-static ::google::protobuf::Message const * const file_default_instances[] = {
-  reinterpret_cast<const ::google::protobuf::Message*>(&::_TDEKeysRecords_default_instance_),
+static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] = {
+  reinterpret_cast<const ::PROTOBUF_NAMESPACE_ID::Message*>(&::_TDEKeysRecords_default_instance_),
 };
 
-::google::protobuf::internal::AssignDescriptorsTable assign_descriptors_table_TDEKeysRecords_2eproto = {
-  {}, AddDescriptors_TDEKeysRecords_2eproto, "TDEKeysRecords.proto", schemas,
-  file_default_instances, TableStruct_TDEKeysRecords_2eproto::offsets,
-  file_level_metadata_TDEKeysRecords_2eproto, 1, file_level_enum_descriptors_TDEKeysRecords_2eproto, file_level_service_descriptors_TDEKeysRecords_2eproto,
-};
-
-const char descriptor_table_protodef_TDEKeysRecords_2eproto[] =
+const char descriptor_table_protodef_TDEKeysRecords_2eproto[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) =
   "\n\024TDEKeysRecords.proto\"\206\003\n\016TDEKeysRecord"
   "s\022\020\n\010table_id\030\001 \002(\014\022\023\n\013database_id\030\002 \002(\014"
   "\0224\n\nDEK_status\030\003 \002(\0162\032.TDEKeysRecords.DE"
@@ -96,25 +84,24 @@ const char descriptor_table_protodef_TDEKeysRecords_2eproto[] =
   "\377\377\377\377\377\377\377\377\001\",\n\010TDE_ALGO\022\017\n\013AES_CTR_128\020\001\022\017"
   "\n\013SM4_CTR_128\020\002"
   ;
-::google::protobuf::internal::DescriptorTable descriptor_table_TDEKeysRecords_2eproto = {
-  false, InitDefaults_TDEKeysRecords_2eproto, 
-  descriptor_table_protodef_TDEKeysRecords_2eproto,
-  "TDEKeysRecords.proto", &assign_descriptors_table_TDEKeysRecords_2eproto, 415,
+static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_TDEKeysRecords_2eproto_deps[1] = {
+};
+static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_TDEKeysRecords_2eproto_sccs[1] = {
+  &scc_info_TDEKeysRecords_TDEKeysRecords_2eproto.base,
+};
+static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_TDEKeysRecords_2eproto_once;
+static bool descriptor_table_TDEKeysRecords_2eproto_initialized = false;
+const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_TDEKeysRecords_2eproto = {
+  &descriptor_table_TDEKeysRecords_2eproto_initialized, descriptor_table_protodef_TDEKeysRecords_2eproto, "TDEKeysRecords.proto", 415,
+  &descriptor_table_TDEKeysRecords_2eproto_once, descriptor_table_TDEKeysRecords_2eproto_sccs, descriptor_table_TDEKeysRecords_2eproto_deps, 1, 0,
+  schemas, file_default_instances, TableStruct_TDEKeysRecords_2eproto::offsets,
+  file_level_metadata_TDEKeysRecords_2eproto, 1, file_level_enum_descriptors_TDEKeysRecords_2eproto, file_level_service_descriptors_TDEKeysRecords_2eproto,
 };
 
-void AddDescriptors_TDEKeysRecords_2eproto() {
-  static constexpr ::google::protobuf::internal::InitFunc deps[1] =
-  {
-  };
- ::google::protobuf::internal::AddDescriptors(&descriptor_table_TDEKeysRecords_2eproto, deps, 0);
-}
-
 // Force running AddDescriptors() at dynamic initialization time.
-#ifdef USE_ASSERT_CHECKING
-static bool dynamic_init_dummy_TDEKeysRecords_2eproto = []() { AddDescriptors_TDEKeysRecords_2eproto(); return true; }();
-#endif
-const ::google::protobuf::EnumDescriptor* TDEKeysRecords_DEK_STATUS_descriptor() {
-  ::google::protobuf::internal::AssignDescriptors(&assign_descriptors_table_TDEKeysRecords_2eproto);
+static bool dynamic_init_dummy_TDEKeysRecords_2eproto = (  ::PROTOBUF_NAMESPACE_ID::internal::AddDescriptors(&descriptor_table_TDEKeysRecords_2eproto), true);
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* TDEKeysRecords_DEK_STATUS_descriptor() {
+  ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&descriptor_table_TDEKeysRecords_2eproto);
   return file_level_enum_descriptors_TDEKeysRecords_2eproto[0];
 }
 bool TDEKeysRecords_DEK_STATUS_IsValid(int value) {
@@ -128,16 +115,16 @@ bool TDEKeysRecords_DEK_STATUS_IsValid(int value) {
   }
 }
 
-#if !defined(_MSC_VER) || _MSC_VER >= 1900
-const TDEKeysRecords_DEK_STATUS TDEKeysRecords::ALIVED;
-const TDEKeysRecords_DEK_STATUS TDEKeysRecords::DEAD;
-const TDEKeysRecords_DEK_STATUS TDEKeysRecords::INVALID;
-const TDEKeysRecords_DEK_STATUS TDEKeysRecords::DEK_STATUS_MIN;
-const TDEKeysRecords_DEK_STATUS TDEKeysRecords::DEK_STATUS_MAX;
-const int TDEKeysRecords::DEK_STATUS_ARRAYSIZE;
-#endif  // !defined(_MSC_VER) || _MSC_VER >= 1900
-const ::google::protobuf::EnumDescriptor* TDEKeysRecords_TDE_ALGO_descriptor() {
-  ::google::protobuf::internal::AssignDescriptors(&assign_descriptors_table_TDEKeysRecords_2eproto);
+#if (__cplusplus < 201703) && (!defined(_MSC_VER) || _MSC_VER >= 1900)
+constexpr TDEKeysRecords_DEK_STATUS TDEKeysRecords::ALIVED;
+constexpr TDEKeysRecords_DEK_STATUS TDEKeysRecords::DEAD;
+constexpr TDEKeysRecords_DEK_STATUS TDEKeysRecords::INVALID;
+constexpr TDEKeysRecords_DEK_STATUS TDEKeysRecords::DEK_STATUS_MIN;
+constexpr TDEKeysRecords_DEK_STATUS TDEKeysRecords::DEK_STATUS_MAX;
+constexpr int TDEKeysRecords::DEK_STATUS_ARRAYSIZE;
+#endif  // (__cplusplus < 201703) && (!defined(_MSC_VER) || _MSC_VER >= 1900)
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* TDEKeysRecords_TDE_ALGO_descriptor() {
+  ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&descriptor_table_TDEKeysRecords_2eproto);
   return file_level_enum_descriptors_TDEKeysRecords_2eproto[1];
 }
 bool TDEKeysRecords_TDE_ALGO_IsValid(int value) {
@@ -150,124 +137,104 @@ bool TDEKeysRecords_TDE_ALGO_IsValid(int value) {
   }
 }
 
-#if !defined(_MSC_VER) || _MSC_VER >= 1900
-const TDEKeysRecords_TDE_ALGO TDEKeysRecords::AES_CTR_128;
-const TDEKeysRecords_TDE_ALGO TDEKeysRecords::SM4_CTR_128;
-const TDEKeysRecords_TDE_ALGO TDEKeysRecords::TDE_ALGO_MIN;
-const TDEKeysRecords_TDE_ALGO TDEKeysRecords::TDE_ALGO_MAX;
-const int TDEKeysRecords::TDE_ALGO_ARRAYSIZE;
-#endif  // !defined(_MSC_VER) || _MSC_VER >= 1900
+#if (__cplusplus < 201703) && (!defined(_MSC_VER) || _MSC_VER >= 1900)
+constexpr TDEKeysRecords_TDE_ALGO TDEKeysRecords::AES_CTR_128;
+constexpr TDEKeysRecords_TDE_ALGO TDEKeysRecords::SM4_CTR_128;
+constexpr TDEKeysRecords_TDE_ALGO TDEKeysRecords::TDE_ALGO_MIN;
+constexpr TDEKeysRecords_TDE_ALGO TDEKeysRecords::TDE_ALGO_MAX;
+constexpr int TDEKeysRecords::TDE_ALGO_ARRAYSIZE;
+#endif  // (__cplusplus < 201703) && (!defined(_MSC_VER) || _MSC_VER >= 1900)
 
 // ===================================================================
 
 void TDEKeysRecords::InitAsDefaultInstance() {
 }
-class TDEKeysRecords::HasBitSetters {
+class TDEKeysRecords::_Internal {
  public:
-  static void set_has_table_id(TDEKeysRecords* msg) {
-    msg->_has_bits_[0] |= 0x00000001u;
+  using HasBits = decltype(std::declval<TDEKeysRecords>()._has_bits_);
+  static void set_has_table_id(HasBits* has_bits) {
+    (*has_bits)[0] |= 1u;
   }
-  static void set_has_database_id(TDEKeysRecords* msg) {
-    msg->_has_bits_[0] |= 0x00000002u;
+  static void set_has_database_id(HasBits* has_bits) {
+    (*has_bits)[0] |= 2u;
   }
-  static void set_has_dek_status(TDEKeysRecords* msg) {
-    msg->_has_bits_[0] |= 0x00000080u;
+  static void set_has_dek_status(HasBits* has_bits) {
+    (*has_bits)[0] |= 128u;
   }
-  static void set_has_cek_name(TDEKeysRecords* msg) {
-    msg->_has_bits_[0] |= 0x00000004u;
+  static void set_has_cek_name(HasBits* has_bits) {
+    (*has_bits)[0] |= 4u;
   }
-  static void set_has_cek_version(TDEKeysRecords* msg) {
-    msg->_has_bits_[0] |= 0x00000008u;
+  static void set_has_cek_version(HasBits* has_bits) {
+    (*has_bits)[0] |= 8u;
   }
-  static void set_has_cek_iv(TDEKeysRecords* msg) {
-    msg->_has_bits_[0] |= 0x00000010u;
+  static void set_has_cek_iv(HasBits* has_bits) {
+    (*has_bits)[0] |= 16u;
   }
-  static void set_has_encrypted_sample_string(TDEKeysRecords* msg) {
-    msg->_has_bits_[0] |= 0x00000020u;
+  static void set_has_encrypted_sample_string(HasBits* has_bits) {
+    (*has_bits)[0] |= 32u;
   }
-  static void set_has_dek_cipher(TDEKeysRecords* msg) {
-    msg->_has_bits_[0] |= 0x00000040u;
+  static void set_has_dek_cipher(HasBits* has_bits) {
+    (*has_bits)[0] |= 64u;
   }
-  static void set_has_algo(TDEKeysRecords* msg) {
-    msg->_has_bits_[0] |= 0x00000100u;
+  static void set_has_algo(HasBits* has_bits) {
+    (*has_bits)[0] |= 256u;
   }
 };
 
-#if !defined(_MSC_VER) || _MSC_VER >= 1900
-const int TDEKeysRecords::kTableIdFieldNumber;
-const int TDEKeysRecords::kDatabaseIdFieldNumber;
-const int TDEKeysRecords::kDEKStatusFieldNumber;
-const int TDEKeysRecords::kCEKNameFieldNumber;
-const int TDEKeysRecords::kCEKVersionFieldNumber;
-const int TDEKeysRecords::kCEKIVFieldNumber;
-const int TDEKeysRecords::kEncryptedSampleStringFieldNumber;
-const int TDEKeysRecords::kDEKCipherFieldNumber;
-const int TDEKeysRecords::kDEKIVFieldNumber;
-const int TDEKeysRecords::kAlgoFieldNumber;
-#endif  // !defined(_MSC_VER) || _MSC_VER >= 1900
-
 TDEKeysRecords::TDEKeysRecords()
-  : ::google::protobuf::Message(), _internal_metadata_(nullptr) {
+  : ::PROTOBUF_NAMESPACE_ID::Message(), _internal_metadata_(nullptr) {
   SharedCtor();
   // @@protoc_insertion_point(constructor:TDEKeysRecords)
 }
 TDEKeysRecords::TDEKeysRecords(const TDEKeysRecords& from)
-  : ::google::protobuf::Message(),
+  : ::PROTOBUF_NAMESPACE_ID::Message(),
       _internal_metadata_(nullptr),
       _has_bits_(from._has_bits_),
       dek_iv_(from.dek_iv_) {
   _internal_metadata_.MergeFrom(from._internal_metadata_);
-  table_id_.UnsafeSetDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
-  if (from.has_table_id()) {
-    table_id_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.table_id_);
+  table_id_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (from._internal_has_table_id()) {
+    table_id_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.table_id_);
   }
-  database_id_.UnsafeSetDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
-  if (from.has_database_id()) {
-    database_id_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.database_id_);
+  database_id_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (from._internal_has_database_id()) {
+    database_id_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.database_id_);
   }
-  cek_name_.UnsafeSetDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
-  if (from.has_cek_name()) {
-    cek_name_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.cek_name_);
+  cek_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (from._internal_has_cek_name()) {
+    cek_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.cek_name_);
   }
-  cek_version_.UnsafeSetDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
-  if (from.has_cek_version()) {
-    cek_version_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.cek_version_);
+  cek_version_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (from._internal_has_cek_version()) {
+    cek_version_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.cek_version_);
   }
-  cek_iv_.UnsafeSetDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
-  if (from.has_cek_iv()) {
-    cek_iv_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.cek_iv_);
+  cek_iv_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (from._internal_has_cek_iv()) {
+    cek_iv_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.cek_iv_);
   }
-  encrypted_sample_string_.UnsafeSetDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
-  if (from.has_encrypted_sample_string()) {
-    encrypted_sample_string_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.encrypted_sample_string_);
+  encrypted_sample_string_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (from._internal_has_encrypted_sample_string()) {
+    encrypted_sample_string_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.encrypted_sample_string_);
   }
-  dek_cipher_.UnsafeSetDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
-  if (from.has_dek_cipher()) {
-    dek_cipher_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.dek_cipher_);
+  dek_cipher_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (from._internal_has_dek_cipher()) {
+    dek_cipher_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.dek_cipher_);
   }
-
-  int rc = memcpy_s(&dek_status_, 
-                    static_cast<size_t>(reinterpret_cast<char*>(&algo_) - 
-                    reinterpret_cast<char*>(&dek_status_)) + sizeof(algo_),
-                    &from.dek_status_,
-                    static_cast<size_t>(reinterpret_cast<char*>(&algo_) - 
-                    reinterpret_cast<char*>(&dek_status_)) + sizeof(algo_));
-  if (rc != 0) {
-      return;
-  }
+  ::memcpy(&dek_status_, &from.dek_status_,
+    static_cast<size_t>(reinterpret_cast<char*>(&algo_) -
+    reinterpret_cast<char*>(&dek_status_)) + sizeof(algo_));
   // @@protoc_insertion_point(copy_constructor:TDEKeysRecords)
 }
 
 void TDEKeysRecords::SharedCtor() {
-  ::google::protobuf::internal::InitSCC(
-      &scc_info_TDEKeysRecords_TDEKeysRecords_2eproto.base);
-  table_id_.UnsafeSetDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
-  database_id_.UnsafeSetDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
-  cek_name_.UnsafeSetDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
-  cek_version_.UnsafeSetDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
-  cek_iv_.UnsafeSetDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
-  encrypted_sample_string_.UnsafeSetDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
-  dek_cipher_.UnsafeSetDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
+  ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_TDEKeysRecords_TDEKeysRecords_2eproto.base);
+  table_id_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  database_id_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  cek_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  cek_version_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  cek_iv_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  encrypted_sample_string_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  dek_cipher_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   dek_status_ = 0;
   algo_ = 1;
 }
@@ -278,549 +245,257 @@ TDEKeysRecords::~TDEKeysRecords() {
 }
 
 void TDEKeysRecords::SharedDtor() {
-  table_id_.DestroyNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
-  database_id_.DestroyNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
-  cek_name_.DestroyNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
-  cek_version_.DestroyNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
-  cek_iv_.DestroyNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
-  encrypted_sample_string_.DestroyNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
-  dek_cipher_.DestroyNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
+  table_id_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  database_id_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  cek_name_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  cek_version_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  cek_iv_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  encrypted_sample_string_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  dek_cipher_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
 
 void TDEKeysRecords::SetCachedSize(int size) const {
   _cached_size_.Set(size);
 }
 const TDEKeysRecords& TDEKeysRecords::default_instance() {
-  ::google::protobuf::internal::InitSCC(&::scc_info_TDEKeysRecords_TDEKeysRecords_2eproto.base);
+  ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&::scc_info_TDEKeysRecords_TDEKeysRecords_2eproto.base);
   return *internal_default_instance();
 }
 
 
 void TDEKeysRecords::Clear() {
-	// @@protoc_insertion_point(message_clear_start:TDEKeysRecords)
-	::google::protobuf::uint32 cached_has_bits = 0;
-	// Prevent compiler warnings about cached_has_bits being unused
-	(void) cached_has_bits;
+// @@protoc_insertion_point(message_clear_start:TDEKeysRecords)
+  ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
 
-	dek_iv_.Clear();
-	cached_has_bits = _has_bits_[0];
-	if (cached_has_bits & 0x0000007fu) {
-	    if (cached_has_bits & 0x00000001u) {
-	      table_id_.ClearNonDefaultToEmptyNoArena();
-	    }
-	    if (cached_has_bits & 0x00000002u) {
-	      database_id_.ClearNonDefaultToEmptyNoArena();
-	    }
-	    if (cached_has_bits & 0x00000004u) {
-	      cek_name_.ClearNonDefaultToEmptyNoArena();
-	    }
-	    if (cached_has_bits & 0x00000008u) {
-	      cek_version_.ClearNonDefaultToEmptyNoArena();
-	    }
-	    if (cached_has_bits & 0x00000010u) {
-	      cek_iv_.ClearNonDefaultToEmptyNoArena();
-	    }
-	    if (cached_has_bits & 0x00000020u) {
-	      encrypted_sample_string_.ClearNonDefaultToEmptyNoArena();
-	    }
-	    if (cached_has_bits & 0x00000040u) {
-	      dek_cipher_.ClearNonDefaultToEmptyNoArena();
-	    }
-	}
+  dek_iv_.Clear();
+  cached_has_bits = _has_bits_[0];
+  if (cached_has_bits & 0x0000007fu) {
+    if (cached_has_bits & 0x00000001u) {
+      table_id_.ClearNonDefaultToEmptyNoArena();
+    }
+    if (cached_has_bits & 0x00000002u) {
+      database_id_.ClearNonDefaultToEmptyNoArena();
+    }
+    if (cached_has_bits & 0x00000004u) {
+      cek_name_.ClearNonDefaultToEmptyNoArena();
+    }
+    if (cached_has_bits & 0x00000008u) {
+      cek_version_.ClearNonDefaultToEmptyNoArena();
+    }
+    if (cached_has_bits & 0x00000010u) {
+      cek_iv_.ClearNonDefaultToEmptyNoArena();
+    }
+    if (cached_has_bits & 0x00000020u) {
+      encrypted_sample_string_.ClearNonDefaultToEmptyNoArena();
+    }
+    if (cached_has_bits & 0x00000040u) {
+      dek_cipher_.ClearNonDefaultToEmptyNoArena();
+    }
+  }
   dek_status_ = 0;
   algo_ = 1;
   _has_bits_.Clear();
   _internal_metadata_.Clear();
 }
 
-#if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
-const char* TDEKeysRecords::_InternalParse(const char* begin, const char* end, void* object,
-                                          ::google::protobuf::internal::ParseContext* ctx) {
-  auto msg = static_cast<TDEKeysRecords*>(object);
-  ::google::protobuf::int32 size; (void)size;
-  int depth; (void)depth;
-  ::google::protobuf::uint32 tag;
-  ::google::protobuf::internal::ParseFunc parser_till_end; (void)parser_till_end;
-  auto ptr = begin;
-  while (ptr < end) {
-    ptr = ::google::protobuf::io::Parse32(ptr, &tag);
-    GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
+const char* TDEKeysRecords::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  _Internal::HasBits has_bits{};
+  while (!ctx->Done(&ptr)) {
+    ::PROTOBUF_NAMESPACE_ID::uint32 tag;
+    ptr = ::PROTOBUF_NAMESPACE_ID::internal::ReadTag(ptr, &tag);
+    CHK_(ptr);
     switch (tag >> 3) {
       // required bytes table_id = 1;
-      case 1: {
-        if (static_cast<::google::protobuf::uint8>(tag) != 10) goto handle_unusual;
-        ptr = ::google::protobuf::io::ReadSize(ptr, &size);
-        GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
-        object = msg->mutable_table_id();
-        if (size > end - ptr + ::google::protobuf::internal::ParseContext::kSlopBytes) {
-          parser_till_end = ::google::protobuf::internal::GreedyStringParser;
-          goto string_till_end;
-        }
-        GOOGLE_PROTOBUF_PARSER_ASSERT(::google::protobuf::internal::StringCheck(ptr, size, ctx));
-        ::google::protobuf::internal::InlineGreedyStringParser(object, ptr, size, ctx);
-        ptr += size;
-        break;
-      }
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 10)) {
+          auto str = _internal_mutable_table_id();
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
       // required bytes database_id = 2;
-      case 2: {
-        if (static_cast<::google::protobuf::uint8>(tag) != 18) goto handle_unusual;
-        ptr = ::google::protobuf::io::ReadSize(ptr, &size);
-        GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
-        object = msg->mutable_database_id();
-        if (size > end - ptr + ::google::protobuf::internal::ParseContext::kSlopBytes) {
-          parser_till_end = ::google::protobuf::internal::GreedyStringParser;
-          goto string_till_end;
-        }
-        GOOGLE_PROTOBUF_PARSER_ASSERT(::google::protobuf::internal::StringCheck(ptr, size, ctx));
-        ::google::protobuf::internal::InlineGreedyStringParser(object, ptr, size, ctx);
-        ptr += size;
-        break;
-      }
-      case 3: {
-        if (static_cast<::google::protobuf::uint8>(tag) != 24) goto handle_unusual;
-        ::google::protobuf::uint64 val = ::google::protobuf::internal::ReadVarint(&ptr);
-        if (!::TDEKeysRecords_DEK_STATUS_IsValid(val)) {
-          ::google::protobuf::internal::WriteVarint(3, val, msg->mutable_unknown_fields());
-          break;
-        }
-        msg->set_dek_status(static_cast<::TDEKeysRecords_DEK_STATUS>(val));
-        GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
-        break;
-      }
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 18)) {
+          auto str = _internal_mutable_database_id();
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // required .TDEKeysRecords.DEK_STATUS DEK_status = 3 [default = DEAD];
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 24)) {
+          ::PROTOBUF_NAMESPACE_ID::uint64 val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
+          CHK_(ptr);
+          if (PROTOBUF_PREDICT_TRUE(::TDEKeysRecords_DEK_STATUS_IsValid(val))) {
+            _internal_set_dek_status(static_cast<::TDEKeysRecords_DEK_STATUS>(val));
+          } else {
+            ::PROTOBUF_NAMESPACE_ID::internal::WriteVarint(3, val, mutable_unknown_fields());
+          }
+        } else goto handle_unusual;
+        continue;
       // required bytes CEK_name = 4;
-      case 4: {
-        if (static_cast<::google::protobuf::uint8>(tag) != 34) goto handle_unusual;
-        ptr = ::google::protobuf::io::ReadSize(ptr, &size);
-        GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
-        object = msg->mutable_cek_name();
-        if (size > end - ptr + ::google::protobuf::internal::ParseContext::kSlopBytes) {
-          parser_till_end = ::google::protobuf::internal::GreedyStringParser;
-          goto string_till_end;
-        }
-        GOOGLE_PROTOBUF_PARSER_ASSERT(::google::protobuf::internal::StringCheck(ptr, size, ctx));
-        ::google::protobuf::internal::InlineGreedyStringParser(object, ptr, size, ctx);
-        ptr += size;
-        break;
-      }
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 34)) {
+          auto str = _internal_mutable_cek_name();
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
       // required bytes CEK_version = 5;
-      case 5: {
-        if (static_cast<::google::protobuf::uint8>(tag) != 42) goto handle_unusual;
-        ptr = ::google::protobuf::io::ReadSize(ptr, &size);
-        GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
-        object = msg->mutable_cek_version();
-        if (size > end - ptr + ::google::protobuf::internal::ParseContext::kSlopBytes) {
-          parser_till_end = ::google::protobuf::internal::GreedyStringParser;
-          goto string_till_end;
-        }
-        GOOGLE_PROTOBUF_PARSER_ASSERT(::google::protobuf::internal::StringCheck(ptr, size, ctx));
-        ::google::protobuf::internal::InlineGreedyStringParser(object, ptr, size, ctx);
-        ptr += size;
-        break;
-      }
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 42)) {
+          auto str = _internal_mutable_cek_version();
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
       // required bytes CEK_IV = 6;
-      case 6: {
-        if (static_cast<::google::protobuf::uint8>(tag) != 50) goto handle_unusual;
-        ptr = ::google::protobuf::io::ReadSize(ptr, &size);
-        GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
-        object = msg->mutable_cek_iv();
-        if (size > end - ptr + ::google::protobuf::internal::ParseContext::kSlopBytes) {
-          parser_till_end = ::google::protobuf::internal::GreedyStringParser;
-          goto string_till_end;
-        }
-        GOOGLE_PROTOBUF_PARSER_ASSERT(::google::protobuf::internal::StringCheck(ptr, size, ctx));
-        ::google::protobuf::internal::InlineGreedyStringParser(object, ptr, size, ctx);
-        ptr += size;
-        break;
-      }
+      case 6:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 50)) {
+          auto str = _internal_mutable_cek_iv();
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
       // required bytes encrypted_sample_string = 7;
-      case 7: {
-        if (static_cast<::google::protobuf::uint8>(tag) != 58) goto handle_unusual;
-        ptr = ::google::protobuf::io::ReadSize(ptr, &size);
-        GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
-        object = msg->mutable_encrypted_sample_string();
-        if (size > end - ptr + ::google::protobuf::internal::ParseContext::kSlopBytes) {
-          parser_till_end = ::google::protobuf::internal::GreedyStringParser;
-          goto string_till_end;
-        }
-        GOOGLE_PROTOBUF_PARSER_ASSERT(::google::protobuf::internal::StringCheck(ptr, size, ctx));
-        ::google::protobuf::internal::InlineGreedyStringParser(object, ptr, size, ctx);
-        ptr += size;
-        break;
-      }
+      case 7:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 58)) {
+          auto str = _internal_mutable_encrypted_sample_string();
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
       // required bytes DEK_cipher = 8;
-      case 8: {
-        if (static_cast<::google::protobuf::uint8>(tag) != 66) goto handle_unusual;
-        ptr = ::google::protobuf::io::ReadSize(ptr, &size);
-        GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
-        object = msg->mutable_dek_cipher();
-        if (size > end - ptr + ::google::protobuf::internal::ParseContext::kSlopBytes) {
-          parser_till_end = ::google::protobuf::internal::GreedyStringParser;
-          goto string_till_end;
-        }
-        GOOGLE_PROTOBUF_PARSER_ASSERT(::google::protobuf::internal::StringCheck(ptr, size, ctx));
-        ::google::protobuf::internal::InlineGreedyStringParser(object, ptr, size, ctx);
-        ptr += size;
-        break;
-      }
-      case 9: {
-        if (static_cast<::google::protobuf::uint8>(tag) != 72) goto handle_unusual;
-        ::google::protobuf::uint64 val = ::google::protobuf::internal::ReadVarint(&ptr);
-        if (!::TDEKeysRecords_TDE_ALGO_IsValid(val)) {
-          ::google::protobuf::internal::WriteVarint(9, val, msg->mutable_unknown_fields());
-          break;
-        }
-        msg->set_algo(static_cast<::TDEKeysRecords_TDE_ALGO>(val));
-        GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
-        break;
-      }
-	  // repeated fixed32 DEK_IV = 10;
-      case 10: {
-        if (static_cast<::google::protobuf::uint8>(tag) == 85) {
+      case 8:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 66)) {
+          auto str = _internal_mutable_dek_cipher();
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // required .TDEKeysRecords.TDE_ALGO Algo = 9 [default = AES_CTR_128];
+      case 9:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 72)) {
+          ::PROTOBUF_NAMESPACE_ID::uint64 val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
+          CHK_(ptr);
+          if (PROTOBUF_PREDICT_TRUE(::TDEKeysRecords_TDE_ALGO_IsValid(val))) {
+            _internal_set_algo(static_cast<::TDEKeysRecords_TDE_ALGO>(val));
+          } else {
+            ::PROTOBUF_NAMESPACE_ID::internal::WriteVarint(9, val, mutable_unknown_fields());
+          }
+        } else goto handle_unusual;
+        continue;
+      // repeated fixed32 DEK_IV = 10;
+      case 10:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 85)) {
+          ptr -= 1;
           do {
-            msg->add_dek_iv(::google::protobuf::io::UnalignedLoad<::google::protobuf::uint32>(ptr));
-            ptr += sizeof(::google::protobuf::uint32);
-            if (ptr >= end) break;
-          } while (((::google::protobuf::io::UnalignedLoad<::google::protobuf::uint64>(ptr) & 255) == 85) && (ptr += 1));
-          break;
-        } else if (static_cast<::google::protobuf::uint8>(tag) != 82) goto handle_unusual;
-        ptr = ::google::protobuf::io::ReadSize(ptr, &size);
-        GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
-        parser_till_end = ::google::protobuf::internal::PackedFixed32Parser;
-        object = msg->mutable_dek_iv();
-        if (size > end - ptr) goto len_delim_till_end;
-        auto newend = ptr + size;
-        if (size) ptr = parser_till_end(ptr, newend, object, ctx);
-        GOOGLE_PROTOBUF_PARSER_ASSERT(ptr == newend);
-        break;
-      }
+            ptr += 1;
+            _internal_add_dek_iv(::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint32>(ptr));
+            ptr += sizeof(::PROTOBUF_NAMESPACE_ID::uint32);
+            if (!ctx->DataAvailable(ptr)) break;
+          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<85>(ptr));
+        } else if (static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 82) {
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::PackedFixed32Parser(_internal_mutable_dek_iv(), ptr, ctx);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
       default: {
       handle_unusual:
         if ((tag & 7) == 4 || tag == 0) {
-          ctx->EndGroup(tag);
-          return ptr;
+          ctx->SetLastTag(tag);
+          goto success;
         }
-        auto res = UnknownFieldParse(tag, {_InternalParse, msg},
-          ptr, end, msg->_internal_metadata_.mutable_unknown_fields(), ctx);
-        ptr = res.first;
-        GOOGLE_PROTOBUF_PARSER_ASSERT(ptr != nullptr);
-        if (res.second) return ptr;
+        ptr = UnknownFieldParse(tag, &_internal_metadata_, ptr, ctx);
+        CHK_(ptr != nullptr);
+        continue;
       }
     }  // switch
   }  // while
-  return ptr;
-string_till_end:
-  static_cast<::std::string*>(object)->clear();
-  static_cast<::std::string*>(object)->reserve(size);
-  goto len_delim_till_end;
-len_delim_till_end:
-  return ctx->StoreAndTailCall(ptr, end, {_InternalParse, msg},
-                               {parser_till_end, object}, size);
-}
-#else  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
-bool TDEKeysRecords::MergePartialFromCodedStream(
-    ::google::protobuf::io::CodedInputStream* input) {
-#define DO_(EXPRESSION) if (!PROTOBUF_PREDICT_TRUE(EXPRESSION)) goto failure
-  ::google::protobuf::uint32 tag;
-  // @@protoc_insertion_point(parse_start:TDEKeysRecords)
-  for (;;) {
-    ::std::pair<::google::protobuf::uint32, bool> p = input->ReadTagWithCutoffNoLastTag(127u);
-    tag = p.first;
-    if (!p.second) goto handle_unusual;
-    switch (::google::protobuf::internal::WireFormatLite::GetTagFieldNumber(tag)) {
-      // required bytes table_id = 1;
-      case 1: {
-        if (static_cast< ::google::protobuf::uint8>(tag) == (10 & 0xFF)) {
-          DO_(::google::protobuf::internal::WireFormatLite::ReadBytes(
-                input, this->mutable_table_id()));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      // required bytes database_id = 2;
-      case 2: {
-        if (static_cast< ::google::protobuf::uint8>(tag) == (18 & 0xFF)) {
-          DO_(::google::protobuf::internal::WireFormatLite::ReadBytes(
-                input, this->mutable_database_id()));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      case 3: {
-        if (static_cast< ::google::protobuf::uint8>(tag) == (24 & 0xFF)) {
-          int value = 0;
-          DO_((::google::protobuf::internal::WireFormatLite::ReadPrimitive<
-                   int, ::google::protobuf::internal::WireFormatLite::TYPE_ENUM>(
-                 input, &value)));
-          if (::TDEKeysRecords_DEK_STATUS_IsValid(value)) {
-            set_dek_status(static_cast< ::TDEKeysRecords_DEK_STATUS >(value));
-          } else {
-            mutable_unknown_fields()->AddVarint(
-                3, static_cast<::google::protobuf::uint64>(value));
-          }
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      // required bytes CEK_name = 4;
-      case 4: {
-        if (static_cast< ::google::protobuf::uint8>(tag) == (34 & 0xFF)) {
-          DO_(::google::protobuf::internal::WireFormatLite::ReadBytes(
-                input, this->mutable_cek_name()));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      // required bytes CEK_version = 5;
-      case 5: {
-        if (static_cast< ::google::protobuf::uint8>(tag) == (42 & 0xFF)) {
-          DO_(::google::protobuf::internal::WireFormatLite::ReadBytes(
-                input, this->mutable_cek_version()));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      // required bytes CEK_IV = 6;
-      case 6: {
-        if (static_cast< ::google::protobuf::uint8>(tag) == (50 & 0xFF)) {
-          DO_(::google::protobuf::internal::WireFormatLite::ReadBytes(
-                input, this->mutable_cek_iv()));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      // required bytes encrypted_sample_string = 7;
-      case 7: {
-        if (static_cast< ::google::protobuf::uint8>(tag) == (58 & 0xFF)) {
-          DO_(::google::protobuf::internal::WireFormatLite::ReadBytes(
-                input, this->mutable_encrypted_sample_string()));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      // required bytes DEK_cipher = 8;
-      case 8: {
-        if (static_cast< ::google::protobuf::uint8>(tag) == (66 & 0xFF)) {
-          DO_(::google::protobuf::internal::WireFormatLite::ReadBytes(
-                input, this->mutable_dek_cipher()));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      case 9: {
-        if (static_cast< ::google::protobuf::uint8>(tag) == (72 & 0xFF)) {
-          int value = 0;
-          DO_((::google::protobuf::internal::WireFormatLite::ReadPrimitive<
-                   int, ::google::protobuf::internal::WireFormatLite::TYPE_ENUM>(
-                 input, &value)));
-          if (::TDEKeysRecords_TDE_ALGO_IsValid(value)) {
-            set_algo(static_cast< ::TDEKeysRecords_TDE_ALGO >(value));
-          } else {
-            mutable_unknown_fields()->AddVarint(
-                9, static_cast<::google::protobuf::uint64>(value));
-          }
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-      // repeated fixed32 DEK_IV = 10;
-      case 10: {
-        if (static_cast< ::google::protobuf::uint8>(tag) == (85 & 0xFF)) {
-          DO_((::google::protobuf::internal::WireFormatLite::ReadRepeatedPrimitive<
-                   ::google::protobuf::uint32, ::google::protobuf::internal::WireFormatLite::TYPE_FIXED32>(
-                 1, 85u, input, this->mutable_dek_iv())));
-        } else if (static_cast< ::google::protobuf::uint8>(tag) == (82 & 0xFF)) {
-          DO_((::google::protobuf::internal::WireFormatLite::ReadPackedPrimitiveNoInline<
-                   ::google::protobuf::uint32, ::google::protobuf::internal::WireFormatLite::TYPE_FIXED32>(
-                 input, this->mutable_dek_iv())));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-      default: {
-      handle_unusual:
-        if (tag == 0) {
-          goto success;
-        }
-        DO_(::google::protobuf::internal::WireFormat::SkipField(
-              input, tag, _internal_metadata_.mutable_unknown_fields()));
-        break;
-      }
-    }
-  }
 success:
-  // @@protoc_insertion_point(parse_success:TDEKeysRecords)
-  return true;
+  _has_bits_.Or(has_bits);
+  return ptr;
 failure:
-  // @@protoc_insertion_point(parse_failure:TDEKeysRecords)
-  return false;
-#undef DO_
-}
-#endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
-
-void TDEKeysRecords::SerializeWithCachedSizes(
-    ::google::protobuf::io::CodedOutputStream* output) const {
-  // @@protoc_insertion_point(serialize_start:TDEKeysRecords)
-  ::google::protobuf::uint32 cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  cached_has_bits = _has_bits_[0];
-  // required bytes table_id = 1;
-  if (cached_has_bits & 0x00000001u) {
-    ::google::protobuf::internal::WireFormatLite::WriteBytesMaybeAliased(
-      1, this->table_id(), output);
-  }
-
-  // required bytes database_id = 2;
-  if (cached_has_bits & 0x00000002u) {
-    ::google::protobuf::internal::WireFormatLite::WriteBytesMaybeAliased(
-      2, this->database_id(), output);
-  }
-
-  if (cached_has_bits & 0x00000080u) {
-    ::google::protobuf::internal::WireFormatLite::WriteEnum(
-      3, this->dek_status(), output);
-  }
-
-  // required bytes CEK_name = 4;
-  if (cached_has_bits & 0x00000004u) {
-    ::google::protobuf::internal::WireFormatLite::WriteBytesMaybeAliased(
-      4, this->cek_name(), output);
-  }
-
-  // required bytes CEK_version = 5;
-  if (cached_has_bits & 0x00000008u) {
-    ::google::protobuf::internal::WireFormatLite::WriteBytesMaybeAliased(
-      5, this->cek_version(), output);
-  }
-
-  // required bytes CEK_IV = 6;
-  if (cached_has_bits & 0x00000010u) {
-    ::google::protobuf::internal::WireFormatLite::WriteBytesMaybeAliased(
-      6, this->cek_iv(), output);
-  }
-
-  // required bytes encrypted_sample_string = 7;
-  if (cached_has_bits & 0x00000020u) {
-    ::google::protobuf::internal::WireFormatLite::WriteBytesMaybeAliased(
-      7, this->encrypted_sample_string(), output);
-  }
-
-  // required bytes DEK_cipher = 8;
-  if (cached_has_bits & 0x00000040u) {
-    ::google::protobuf::internal::WireFormatLite::WriteBytesMaybeAliased(
-      8, this->dek_cipher(), output);
-  }
-
-  if (cached_has_bits & 0x00000100u) {
-    ::google::protobuf::internal::WireFormatLite::WriteEnum(
-      9, this->algo(), output);
-  }
-
-  // repeated fixed32 DEK_IV = 10;
-  int i, n;
-  for (i = 0, n = this->dek_iv_size(); i < n; i++) {
-    ::google::protobuf::internal::WireFormatLite::WriteFixed32(
-      10, this->dek_iv(i), output);
-  }
-
-  if (_internal_metadata_.have_unknown_fields()) {
-    ::google::protobuf::internal::WireFormat::SerializeUnknownFields(
-        _internal_metadata_.unknown_fields(), output);
-  }
-  // @@protoc_insertion_point(serialize_end:TDEKeysRecords)
+  ptr = nullptr;
+  goto success;
+#undef CHK_
 }
 
-::google::protobuf::uint8* TDEKeysRecords::InternalSerializeWithCachedSizesToArray(
-    ::google::protobuf::uint8* target) const {
+::PROTOBUF_NAMESPACE_ID::uint8* TDEKeysRecords::_InternalSerialize(
+    ::PROTOBUF_NAMESPACE_ID::uint8* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
   // @@protoc_insertion_point(serialize_to_array_start:TDEKeysRecords)
-  ::google::protobuf::uint32 cached_has_bits = 0;
+  ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
   cached_has_bits = _has_bits_[0];
   // required bytes table_id = 1;
   if (cached_has_bits & 0x00000001u) {
-    target =
-      ::google::protobuf::internal::WireFormatLite::WriteBytesToArray(
-        1, this->table_id(), target);
+    target = stream->WriteBytesMaybeAliased(
+        1, this->_internal_table_id(), target);
   }
 
   // required bytes database_id = 2;
   if (cached_has_bits & 0x00000002u) {
-    target =
-      ::google::protobuf::internal::WireFormatLite::WriteBytesToArray(
-        2, this->database_id(), target);
+    target = stream->WriteBytesMaybeAliased(
+        2, this->_internal_database_id(), target);
   }
 
+  // required .TDEKeysRecords.DEK_STATUS DEK_status = 3 [default = DEAD];
   if (cached_has_bits & 0x00000080u) {
-    target = ::google::protobuf::internal::WireFormatLite::WriteEnumToArray(
-      3, this->dek_status(), target);
+    target = stream->EnsureSpace(target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnumToArray(
+      3, this->_internal_dek_status(), target);
   }
 
   // required bytes CEK_name = 4;
   if (cached_has_bits & 0x00000004u) {
-    target =
-      ::google::protobuf::internal::WireFormatLite::WriteBytesToArray(
-        4, this->cek_name(), target);
+    target = stream->WriteBytesMaybeAliased(
+        4, this->_internal_cek_name(), target);
   }
 
   // required bytes CEK_version = 5;
   if (cached_has_bits & 0x00000008u) {
-    target =
-      ::google::protobuf::internal::WireFormatLite::WriteBytesToArray(
-        5, this->cek_version(), target);
+    target = stream->WriteBytesMaybeAliased(
+        5, this->_internal_cek_version(), target);
   }
 
   // required bytes CEK_IV = 6;
   if (cached_has_bits & 0x00000010u) {
-    target =
-      ::google::protobuf::internal::WireFormatLite::WriteBytesToArray(
-        6, this->cek_iv(), target);
+    target = stream->WriteBytesMaybeAliased(
+        6, this->_internal_cek_iv(), target);
   }
 
   // required bytes encrypted_sample_string = 7;
   if (cached_has_bits & 0x00000020u) {
-    target =
-      ::google::protobuf::internal::WireFormatLite::WriteBytesToArray(
-        7, this->encrypted_sample_string(), target);
+    target = stream->WriteBytesMaybeAliased(
+        7, this->_internal_encrypted_sample_string(), target);
   }
 
   // required bytes DEK_cipher = 8;
   if (cached_has_bits & 0x00000040u) {
-    target =
-      ::google::protobuf::internal::WireFormatLite::WriteBytesToArray(
-        8, this->dek_cipher(), target);
+    target = stream->WriteBytesMaybeAliased(
+        8, this->_internal_dek_cipher(), target);
   }
 
+  // required .TDEKeysRecords.TDE_ALGO Algo = 9 [default = AES_CTR_128];
   if (cached_has_bits & 0x00000100u) {
-    target = ::google::protobuf::internal::WireFormatLite::WriteEnumToArray(
-      9, this->algo(), target);
+    target = stream->EnsureSpace(target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnumToArray(
+      9, this->_internal_algo(), target);
   }
 
   // repeated fixed32 DEK_IV = 10;
-  target = ::google::protobuf::internal::WireFormatLite::WriteFixed32ToArray(
-    10, this->dek_iv_, target);
+  for (int i = 0, n = this->_internal_dek_iv_size(); i < n; i++) {
+    target = stream->EnsureSpace(target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteFixed32ToArray(10, this->_internal_dek_iv(i), target);
+  }
 
-  if (_internal_metadata_.have_unknown_fields()) {
-    target = ::google::protobuf::internal::WireFormat::SerializeUnknownFieldsToArray(
-        _internal_metadata_.unknown_fields(), target);
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::InternalSerializeUnknownFieldsToArray(
+        _internal_metadata_.unknown_fields(), target, stream);
   }
   // @@protoc_insertion_point(serialize_to_array_end:TDEKeysRecords)
   return target;
@@ -830,147 +505,151 @@ size_t TDEKeysRecords::RequiredFieldsByteSizeFallback() const {
 // @@protoc_insertion_point(required_fields_byte_size_fallback_start:TDEKeysRecords)
   size_t total_size = 0;
 
-  if (has_table_id()) {
+  if (_internal_has_table_id()) {
     // required bytes table_id = 1;
     total_size += 1 +
-      ::google::protobuf::internal::WireFormatLite::BytesSize(
-        this->table_id());
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_table_id());
   }
 
-  if (has_database_id()) {
+  if (_internal_has_database_id()) {
     // required bytes database_id = 2;
     total_size += 1 +
-      ::google::protobuf::internal::WireFormatLite::BytesSize(
-        this->database_id());
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_database_id());
   }
 
-  if (has_cek_name()) {
+  if (_internal_has_cek_name()) {
     // required bytes CEK_name = 4;
     total_size += 1 +
-      ::google::protobuf::internal::WireFormatLite::BytesSize(
-        this->cek_name());
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_cek_name());
   }
 
-  if (has_cek_version()) {
+  if (_internal_has_cek_version()) {
     // required bytes CEK_version = 5;
     total_size += 1 +
-      ::google::protobuf::internal::WireFormatLite::BytesSize(
-        this->cek_version());
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_cek_version());
   }
 
-  if (has_cek_iv()) {
+  if (_internal_has_cek_iv()) {
     // required bytes CEK_IV = 6;
     total_size += 1 +
-      ::google::protobuf::internal::WireFormatLite::BytesSize(
-        this->cek_iv());
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_cek_iv());
   }
 
-  if (has_encrypted_sample_string()) {
+  if (_internal_has_encrypted_sample_string()) {
     // required bytes encrypted_sample_string = 7;
     total_size += 1 +
-      ::google::protobuf::internal::WireFormatLite::BytesSize(
-        this->encrypted_sample_string());
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_encrypted_sample_string());
   }
 
-  if (has_dek_cipher()) {
+  if (_internal_has_dek_cipher()) {
     // required bytes DEK_cipher = 8;
     total_size += 1 +
-      ::google::protobuf::internal::WireFormatLite::BytesSize(
-        this->dek_cipher());
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_dek_cipher());
   }
 
-  if (has_dek_status()) {
+  if (_internal_has_dek_status()) {
+    // required .TDEKeysRecords.DEK_STATUS DEK_status = 3 [default = DEAD];
     total_size += 1 +
-      ::google::protobuf::internal::WireFormatLite::EnumSize(this->dek_status());
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->_internal_dek_status());
   }
 
-  if (has_algo()) {
+  if (_internal_has_algo()) {
+    // required .TDEKeysRecords.TDE_ALGO Algo = 9 [default = AES_CTR_128];
     total_size += 1 +
-      ::google::protobuf::internal::WireFormatLite::EnumSize(this->algo());
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->_internal_algo());
   }
 
   return total_size;
 }
 size_t TDEKeysRecords::ByteSizeLong() const {
-  // @@protoc_insertion_point(message_byte_size_start:TDEKeysRecords)
+// @@protoc_insertion_point(message_byte_size_start:TDEKeysRecords)
   size_t total_size = 0;
 
-  if (_internal_metadata_.have_unknown_fields()) {
-    total_size +=
-      ::google::protobuf::internal::WireFormat::ComputeUnknownFieldsSize(
-        _internal_metadata_.unknown_fields());
-  }
   if (((_has_bits_[0] & 0x000001ff) ^ 0x000001ff) == 0) {  // All required fields are present.
     // required bytes table_id = 1;
     total_size += 1 +
-      ::google::protobuf::internal::WireFormatLite::BytesSize(
-        this->table_id());
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_table_id());
 
     // required bytes database_id = 2;
     total_size += 1 +
-      ::google::protobuf::internal::WireFormatLite::BytesSize(
-        this->database_id());
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_database_id());
 
     // required bytes CEK_name = 4;
     total_size += 1 +
-      ::google::protobuf::internal::WireFormatLite::BytesSize(
-        this->cek_name());
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_cek_name());
 
     // required bytes CEK_version = 5;
     total_size += 1 +
-      ::google::protobuf::internal::WireFormatLite::BytesSize(
-        this->cek_version());
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_cek_version());
 
     // required bytes CEK_IV = 6;
     total_size += 1 +
-      ::google::protobuf::internal::WireFormatLite::BytesSize(
-        this->cek_iv());
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_cek_iv());
 
     // required bytes encrypted_sample_string = 7;
     total_size += 1 +
-      ::google::protobuf::internal::WireFormatLite::BytesSize(
-        this->encrypted_sample_string());
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_encrypted_sample_string());
 
     // required bytes DEK_cipher = 8;
     total_size += 1 +
-      ::google::protobuf::internal::WireFormatLite::BytesSize(
-        this->dek_cipher());
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_dek_cipher());
 
+    // required .TDEKeysRecords.DEK_STATUS DEK_status = 3 [default = DEAD];
     total_size += 1 +
-      ::google::protobuf::internal::WireFormatLite::EnumSize(this->dek_status());
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->_internal_dek_status());
 
+    // required .TDEKeysRecords.TDE_ALGO Algo = 9 [default = AES_CTR_128];
     total_size += 1 +
-      ::google::protobuf::internal::WireFormatLite::EnumSize(this->algo());
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->_internal_algo());
 
   } else {
     total_size += RequiredFieldsByteSizeFallback();
   }
-  ::google::protobuf::uint32 cached_has_bits = 0;
+  ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
   // repeated fixed32 DEK_IV = 10;
   {
-    unsigned int count = static_cast<unsigned int>(this->dek_iv_size());
+    unsigned int count = static_cast<unsigned int>(this->_internal_dek_iv_size());
     size_t data_size = 4UL * count;
-    total_size += 1 * ::google::protobuf::internal::FromIntSize(this->dek_iv_size());
+    total_size += 1 *
+                  ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(this->_internal_dek_iv_size());
     total_size += data_size;
   }
 
-  int cached_size = ::google::protobuf::internal::ToCachedSize(total_size);
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    return ::PROTOBUF_NAMESPACE_ID::internal::ComputeUnknownFieldsSize(
+        _internal_metadata_, total_size, &_cached_size_);
+  }
+  int cached_size = ::PROTOBUF_NAMESPACE_ID::internal::ToCachedSize(total_size);
   SetCachedSize(cached_size);
   return total_size;
 }
 
-void TDEKeysRecords::MergeFrom(const ::google::protobuf::Message& from) {
+void TDEKeysRecords::MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) {
 // @@protoc_insertion_point(generalized_merge_from_start:TDEKeysRecords)
   GOOGLE_DCHECK_NE(&from, this);
   const TDEKeysRecords* source =
-      ::google::protobuf::DynamicCastToGenerated<TDEKeysRecords>(
+      ::PROTOBUF_NAMESPACE_ID::DynamicCastToGenerated<TDEKeysRecords>(
           &from);
   if (source == nullptr) {
   // @@protoc_insertion_point(generalized_merge_from_cast_fail:TDEKeysRecords)
-    ::google::protobuf::internal::ReflectionOps::Merge(from, this);
+    ::PROTOBUF_NAMESPACE_ID::internal::ReflectionOps::Merge(from, this);
   } else {
   // @@protoc_insertion_point(generalized_merge_from_cast_success:TDEKeysRecords)
     MergeFrom(*source);
@@ -981,7 +660,7 @@ void TDEKeysRecords::MergeFrom(const TDEKeysRecords& from) {
 // @@protoc_insertion_point(class_specific_merge_from_start:TDEKeysRecords)
   GOOGLE_DCHECK_NE(&from, this);
   _internal_metadata_.MergeFrom(from._internal_metadata_);
-  ::google::protobuf::uint32 cached_has_bits = 0;
+  ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
   dek_iv_.MergeFrom(from.dek_iv_);
@@ -989,31 +668,31 @@ void TDEKeysRecords::MergeFrom(const TDEKeysRecords& from) {
   if (cached_has_bits & 0x000000ffu) {
     if (cached_has_bits & 0x00000001u) {
       _has_bits_[0] |= 0x00000001u;
-      table_id_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.table_id_);
+      table_id_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.table_id_);
     }
     if (cached_has_bits & 0x00000002u) {
       _has_bits_[0] |= 0x00000002u;
-      database_id_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.database_id_);
+      database_id_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.database_id_);
     }
     if (cached_has_bits & 0x00000004u) {
       _has_bits_[0] |= 0x00000004u;
-      cek_name_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.cek_name_);
+      cek_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.cek_name_);
     }
     if (cached_has_bits & 0x00000008u) {
       _has_bits_[0] |= 0x00000008u;
-      cek_version_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.cek_version_);
+      cek_version_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.cek_version_);
     }
     if (cached_has_bits & 0x00000010u) {
       _has_bits_[0] |= 0x00000010u;
-      cek_iv_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.cek_iv_);
+      cek_iv_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.cek_iv_);
     }
     if (cached_has_bits & 0x00000020u) {
       _has_bits_[0] |= 0x00000020u;
-      encrypted_sample_string_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.encrypted_sample_string_);
+      encrypted_sample_string_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.encrypted_sample_string_);
     }
     if (cached_has_bits & 0x00000040u) {
       _has_bits_[0] |= 0x00000040u;
-      dek_cipher_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.dek_cipher_);
+      dek_cipher_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.dek_cipher_);
     }
     if (cached_has_bits & 0x00000080u) {
       dek_status_ = from.dek_status_;
@@ -1021,11 +700,11 @@ void TDEKeysRecords::MergeFrom(const TDEKeysRecords& from) {
     _has_bits_[0] |= cached_has_bits;
   }
   if (cached_has_bits & 0x00000100u) {
-    set_algo(from.algo());
+    _internal_set_algo(from._internal_algo());
   }
 }
 
-void TDEKeysRecords::CopyFrom(const ::google::protobuf::Message& from) {
+void TDEKeysRecords::CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) {
 // @@protoc_insertion_point(generalized_copy_from_start:TDEKeysRecords)
   if (&from == this) return;
   Clear();
@@ -1044,47 +723,40 @@ bool TDEKeysRecords::IsInitialized() const {
   return true;
 }
 
-void TDEKeysRecords::Swap(TDEKeysRecords* other) {
-  if (other == this) return;
-  InternalSwap(other);
-}
 void TDEKeysRecords::InternalSwap(TDEKeysRecords* other) {
   using std::swap;
   _internal_metadata_.Swap(&other->_internal_metadata_);
   swap(_has_bits_[0], other->_has_bits_[0]);
   dek_iv_.InternalSwap(&other->dek_iv_);
-  table_id_.Swap(&other->table_id_, &::google::protobuf::internal::GetEmptyStringAlreadyInited(),
+  table_id_.Swap(&other->table_id_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
     GetArenaNoVirtual());
-  database_id_.Swap(&other->database_id_, &::google::protobuf::internal::GetEmptyStringAlreadyInited(),
+  database_id_.Swap(&other->database_id_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
     GetArenaNoVirtual());
-  cek_name_.Swap(&other->cek_name_, &::google::protobuf::internal::GetEmptyStringAlreadyInited(),
+  cek_name_.Swap(&other->cek_name_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
     GetArenaNoVirtual());
-  cek_version_.Swap(&other->cek_version_, &::google::protobuf::internal::GetEmptyStringAlreadyInited(),
+  cek_version_.Swap(&other->cek_version_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
     GetArenaNoVirtual());
-  cek_iv_.Swap(&other->cek_iv_, &::google::protobuf::internal::GetEmptyStringAlreadyInited(),
+  cek_iv_.Swap(&other->cek_iv_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
     GetArenaNoVirtual());
-  encrypted_sample_string_.Swap(&other->encrypted_sample_string_, &::google::protobuf::internal::GetEmptyStringAlreadyInited(),
+  encrypted_sample_string_.Swap(&other->encrypted_sample_string_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
     GetArenaNoVirtual());
-  dek_cipher_.Swap(&other->dek_cipher_, &::google::protobuf::internal::GetEmptyStringAlreadyInited(),
+  dek_cipher_.Swap(&other->dek_cipher_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
     GetArenaNoVirtual());
   swap(dek_status_, other->dek_status_);
   swap(algo_, other->algo_);
 }
 
-::google::protobuf::Metadata TDEKeysRecords::GetMetadata() const {
-  ::google::protobuf::internal::AssignDescriptors(&::assign_descriptors_table_TDEKeysRecords_2eproto);
-  return ::file_level_metadata_TDEKeysRecords_2eproto[kIndexInFileMessages];
+::PROTOBUF_NAMESPACE_ID::Metadata TDEKeysRecords::GetMetadata() const {
+  return GetMetadataStatic();
 }
 
 
 // @@protoc_insertion_point(namespace_scope)
-namespace google {
-namespace protobuf {
+PROTOBUF_NAMESPACE_OPEN
 template<> PROTOBUF_NOINLINE ::TDEKeysRecords* Arena::CreateMaybeMessage< ::TDEKeysRecords >(Arena* arena) {
   return Arena::CreateInternal< ::TDEKeysRecords >(arena);
 }
-}  // namespace protobuf
-}  // namespace google
+PROTOBUF_NAMESPACE_CLOSE
 
 // @@protoc_insertion_point(global_scope)
 #include <google/protobuf/port_undef.inc>

@@ -25,4 +25,8 @@ extern int GetIntoRelEFlags(IntoClause* intoClause);
 
 extern DestReceiver* CreateIntoRelDestReceiver(IntoClause* intoClause);
 
+extern Query *SetupForCreateTableAs(Query *query, IntoClause *into,
+                                    const char *queryString,
+                                    ParamListInfo params, DestReceiver *dest);
+
 #endif /* CREATEAS_H */

@@ -146,6 +146,7 @@ int lo_truncate(PGconn* conn, int fd, size_t len)
     argv[1].u.integer = len;
 
     res = PQfn(conn, conn->lobjfuncs->fn_lo_truncate, &retval, &result_len, 1, argv, 2);
+
     if (PQresultStatus(res) == PGRES_COMMAND_OK) {
         PQclear(res);
         return retval;
@@ -210,9 +211,8 @@ int lo_write(PGconn* conn, int fd, const char* buf, size_t len)
             return -1;
     }
 
-    if (len <= 0) {
+    if (len <= 0)
         return 0;
-    }
 
     argv[0].isint = 1;
     argv[0].len = 4;
@@ -451,10 +451,8 @@ static Oid lo_import_internal(PGconn* conn, const char* filename, Oid oid)
     fd = open(filename, O_RDONLY | PG_BINARY, 0666);
     if (fd < 0) { /* error */
         printfPQExpBuffer(&conn->errorMessage,
-                libpq_gettext("could not open file \"%s\": %s, remote datanode %s, errno: %s\n"),
-                filename,
-                pqStrerror(errno, sebuf, sizeof(sebuf)),
-                conn->remote_nodename, strerror(errno));
+            libpq_gettext("could not open file \"%s\": %s, remote datanode %s, errno: %s\n"),
+            filename, pqStrerror(errno, sebuf, sizeof(sebuf)), conn->remote_nodename, strerror(errno));
         return InvalidOid;
     }
 
@@ -503,11 +501,11 @@ static Oid lo_import_internal(PGconn* conn, const char* filename, Oid oid)
         (void)lo_close(conn, lobj);
         (void)close(fd);
         printfPQExpBuffer(&conn->errorMessage,
-                libpq_gettext("could not read from file \"%s\": %s, remote datanode %s, errno: %s\n"),
-                filename,
-                pqStrerror(save_errno, sebuf, sizeof(sebuf)),
-                conn->remote_nodename,
-                strerror(errno));
+            libpq_gettext("could not read from file \"%s\": %s, remote datanode %s, errno: %s\n"),
+            filename,
+            pqStrerror(save_errno, sebuf, sizeof(sebuf)),
+            conn->remote_nodename,
+            strerror(errno));
         return InvalidOid;
     }
 
@@ -554,10 +552,8 @@ int lo_export(PGconn* conn, Oid lobjId, const char* filename)
 
         (void)lo_close(conn, lobj);
         printfPQExpBuffer(&conn->errorMessage,
-                libpq_gettext("could not open file \"%s\": %s, remote datanode %s, errno: %s\n"),
-                filename,
-                pqStrerror(save_errno, sebuf, sizeof(sebuf)),
-                conn->remote_nodename, strerror(errno));
+            libpq_gettext("could not open file \"%s\": %s, remote datanode %s, errno: %s\n"),
+                filename, pqStrerror(save_errno, sebuf, sizeof(sebuf)), conn->remote_nodename, strerror(errno));
         return -1;
     }
 
@@ -573,10 +569,8 @@ int lo_export(PGconn* conn, Oid lobjId, const char* filename)
             (void)lo_close(conn, lobj);
             (void)close(fd);
             printfPQExpBuffer(&conn->errorMessage,
-                    libpq_gettext("could not write to file \"%s\": %s, remote datanode %s, errno: %s\n"),
-                    filename,
-                    pqStrerror(save_errno, sebuf, sizeof(sebuf)),
-                    conn->remote_nodename, strerror(errno));
+                libpq_gettext("could not write to file \"%s\": %s, remote datanode %s, errno: %s\n"),
+                    filename, pqStrerror(save_errno, sebuf, sizeof(sebuf)), conn->remote_nodename, strerror(errno));
             return -1;
         }
     }
@@ -595,10 +589,8 @@ int lo_export(PGconn* conn, Oid lobjId, const char* filename)
     /* if we already failed, don't overwrite that msg with a close error */
     if (close(fd) && result >= 0) {
         printfPQExpBuffer(&conn->errorMessage,
-                libpq_gettext("could not write to file \"%s\": %s, remote datanode %s, errno: %s\n"),
-                filename,
-                pqStrerror(errno, sebuf, sizeof(sebuf)),
-                conn->remote_nodename, strerror(errno));
+            libpq_gettext("could not write to file \"%s\": %s, remote datanode %s, errno: %s\n"),
+            filename, pqStrerror(errno, sebuf, sizeof(sebuf)), conn->remote_nodename, strerror(errno));
         result = -1;
     }
 
@@ -621,9 +613,8 @@ static int lo_initialize(PGconn* conn)
     const char* fname = NULL;
     Oid foid;
 
-    if (conn == NULL){
+    if (conn == NULL)
         return -1;
-    }
 
     /*
      * Allocate the structure to hold the functions OID's

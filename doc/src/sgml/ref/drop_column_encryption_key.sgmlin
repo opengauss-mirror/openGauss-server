@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_COLUMN_ENCRYPTION_KEY">
+<refmeta>
+<refentrytitle>SQL-DROP COLUMN ENCRYPTION KEY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP COLUMN ENCRYPTION KEY</refname>
+<refpurpose>drop column encryption key</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP COLUMN ENCRYPTION KEY [ IF EXISTS ] client_column_key_name [, ...];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

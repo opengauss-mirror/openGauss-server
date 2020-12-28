@@ -57,7 +57,7 @@
 #define XLogRecordMaxSize ((uint32)0x3fffffff) /* 1 gigabyte - 1 */
 
 /* Compute XLogRecPtr with segment number and offset. */
-#define XLogSegNoOffsetToRecPtr(segno, offset, dest) (dest) = (segno) * XLOG_SEG_SIZE + (offset)
+#define XLogSegNoOffsetToRecPtr(segno, offset, dest) (dest) = (segno)*XLOG_SEG_SIZE + (offset)
 
 /*
  * Compute ID and segment from an XLogRecPtr.
@@ -69,7 +69,7 @@
  */
 #define XLByteToSeg(xlrp, logSegNo) logSegNo = (xlrp) / XLogSegSize
 
-#define XLByteToPrevSeg(xlrp, logSegNo) logSegNo = ((xlrp) - 1) / XLogSegSize
+#define XLByteToPrevSeg(xlrp, logSegNo) logSegNo = ((xlrp)-1) / XLogSegSize
 
 /*
  * Is an XLogRecPtr within a particular XLOG segment?
@@ -79,7 +79,7 @@
  */
 #define XLByteInSeg(xlrp, logSegNo) (((xlrp) / XLogSegSize) == (logSegNo))
 
-#define XLByteInPrevSeg(xlrp, logSegNo) ((((xlrp) - 1) / XLogSegSize) == (logSegNo))
+#define XLByteInPrevSeg(xlrp, logSegNo) ((((xlrp)-1) / XLogSegSize) == (logSegNo))
 
 /* Check if an XLogRecPtr value is in a plausible range */
 #define XRecOffIsValid(xlrp) ((xlrp) % XLOG_BLCKSZ >= SizeOfXLogShortPHD)
@@ -90,8 +90,12 @@
 #define XLOGDIR "pg_xlog"
 #define XLOG_CONTROL_FILE "global/pg_control"
 #define XLOG_CONTROL_FILE_BAK "global/pg_control.backup"
+#define MAX_PAGE_FLUSH_LSN_FILE           "global/max_page_flush_lsn"
 
 #define PG_LSN_XLOG_FLUSH_CHK_FILE "global/pg_lsnxlogflushchk"
+#define REDO_STATS_FILE             "redo.state"
+#define REDO_STATS_FILE_TMP         "redo.state.tmp"
+
 
 #define InvalidRepOriginId 0
 
@@ -146,8 +150,6 @@ typedef struct {
     char* bkp_image;
     uint16 hole_offset;
     uint16 hole_length;
-    uint16 bimg_len;
-    bool is_compressed;
 
     /* Buffer holding the rmgr-specific data associated with this block */
     bool has_data;
@@ -156,6 +158,9 @@ typedef struct {
     uint16 data_bufsz;
     XLogRecPtr last_lsn;
     uint16 extra_flag;
+#ifdef USE_ASSERT_CHECKING
+    uint8 replayed;
+#endif
 } DecodedBkpBlock;
 
 /*
@@ -352,6 +357,11 @@ typedef struct XLogLongPageHeaderData {
     uint32 xlp_seg_size;    /* just as a cross-check */
     uint32 xlp_xlog_blcksz; /* just as a cross-check */
 } XLogLongPageHeaderData;
+typedef struct PageLsnInfo
+{
+	XLogRecPtr	max_page_flush_lsn;
+	pg_crc32c	crc;
+} PageLsnInfo;
 
 #define SizeOfXLogLongPHD MAXALIGN(sizeof(XLogLongPageHeaderData))
 

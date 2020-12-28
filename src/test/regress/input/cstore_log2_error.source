@@ -9,6 +9,6 @@ CREATE TABLE cstore_log2_error
 	a int,
 	b bigint
 ) with (orientation = column)  ;
-COPY cstore_log2_error FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_log2_error.data' delimiter '|';
+COPY cstore_log2_error FROM '@abs_srcdir@/data/cstore_log2_error.data' delimiter '|';
 SELECT * FROM cstore_log2_error ORDER BY 1, 2;
 DROP TABLE cstore_log2_error;

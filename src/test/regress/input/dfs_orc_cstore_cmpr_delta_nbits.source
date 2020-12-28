@@ -1,0 +1,45 @@
+set enable_global_stats = true;
+set enable_vector_engine=on;
+-- Problem:
+-- during delta compression the n-bits and n-bytes holding delta values is computed wrong.
+-- if n bits are used, the valid data is [0, 2^n - 1], but excluding 2^n.
+-- so that when diff is equal to 2^n, (n+1) bits should be used.
+-- Testcase:
+-- 1. all values in CU are the same ;
+-- 2. there are only two values in CU;
+-- 3. delta values is hold by one byte, but not suitable for RLE compression;
+-- 4. delta values is hold by one byte, and just suitable for RLE compression;
+-- 5. normal case that both delta and rle methods are applied to;
+-- 6. the max delta is 2^n, and (n+1) bits are used to store all the delta values;
+-- 7. the max delta is during [2^n, 2^(n+1)), and (n+1) bits are used to ;
+CREATE TABLE colcmpr_delta_nbits
+(
+	distKey INT4,
+	twoVals INT4,
+	downLimitRle INT4,
+	minRleValues INT4,
+	normalRleVal INT4,
+	rleValues    INT4,
+	oneByteDelta INT4,
+	twoByteDelta INT4,
+	f09 INT4,
+	f10 INT4,
+	f11 INT4
+) with (orientation = orc) tablespace hdfs_ts  DISTRIBUTE BY HASH(distkey);
+COPY colcmpr_delta_nbits FROM '@abs_srcdir@/data/colcmpr_delta_nbits.data';                                                                                                    
+SELECT * FROM colcmpr_delta_nbits;
+DROP TABLE colcmpr_delta_nbits;
+-- Problem:
+-- when nbits is 64, assert clause failed. 2^64 cannot be represented by (1UL << 64)
+-- Testcase:
+-- 1. the diff is the max uplimits 0xffffffffffffffff
+CREATE TABLE colcmpr_delta_nbits_01
+(
+	distKey INT8,
+	a INT8,
+	b INT8,
+	c INT8
+) with (orientation = orc) tablespace hdfs_ts  DISTRIBUTE BY HASH(distkey);
+COPY colcmpr_delta_nbits_01 FROM '@abs_srcdir@/data/colcmpr_delta_nbits_01.data' delimiter '|';
+SELECT * FROM colcmpr_delta_nbits_01;
+DROP TABLE colcmpr_delta_nbits_01;

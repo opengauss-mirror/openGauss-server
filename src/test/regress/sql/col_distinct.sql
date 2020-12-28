@@ -46,8 +46,8 @@ set enable_nestloop=off;
 --2. Without Group;
 --3. Without Agg;
 
-explain (verbose, costs off, nodes off) select distinct c2, c3 from distribute_table_01 order by c2, c3 asc;
-explain (verbose, costs off, nodes off) select distinct c1, c2, c3 from distribute_table_01 order by c1, c2, c3 asc;
+explain (verbose, costs off) select distinct c2, c3 from distribute_table_01 order by c2, c3 asc;
+explain (verbose, costs off) select distinct c1, c2, c3 from distribute_table_01 order by c1, c2, c3 asc;
 
 -- distribute key is hashkey
 select distinct c1 from distribute_table_01 order by c1;
@@ -73,7 +73,7 @@ select distinct c31 from (select distinct c2, count(c3) c31 from distribute_tabl
 --1. With union;
 --2. With or without distributed columns;
 --3. Using agg or unique node;
-explain (verbose, costs off, nodes off) 
+explain (verbose, costs off) 
 (select distinct c1, c2, c3 from distribute_table_01 where c1<13) 
 union
 (select distinct c1, c2, c3 from distribute_table_01 where c1>=13);

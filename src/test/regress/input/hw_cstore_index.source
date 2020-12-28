@@ -4,7 +4,7 @@
 DROP TABLE if exists cstore_insert_t1;
 DROP TABLE if exists row_table;
 CREATE TABLE cstore_insert_t1(c1 int, c2 float, c3 text) WITH (orientation = column);
-COPY cstore_insert_t1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_copy_t2.data' DELIMITER ',';
+COPY cstore_insert_t1 FROM '@abs_srcdir@/data/cstore_copy_t2.data' DELIMITER ',';
 CREATE UNIQUE INDEX unsupport1_idx ON cstore_insert_t1(c1);
 CREATE INDEX CONCURRENTLY unsupport2_idx ON cstore_insert_t1(c1);
 CREATE INDEX unsupport3_idx ON cstore_insert_t1(lower(c2));
@@ -14,7 +14,7 @@ CREATE INDEX unsupport6_idx ON cstore_insert_t1 USING hash (c1);
 CREATE INDEX unsupport7_idx ON cstore_insert_t1 USING gist (c1);
 CREATE INDEX unsupport9_idx ON cstore_insert_t1 USING spgist (c1);
 CREATE INDEX unsupport10_idx ON cstore_insert_t1 USING btree (c1);
-COPY cstore_insert_t1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_copy_t2.data' DELIMITER ',';
+COPY cstore_insert_t1 FROM '@abs_srcdir@/data/cstore_copy_t2.data' DELIMITER ',';
 DROP TABLE if exists cstore_insert_t1;
 
 CREATE TABLE row_table(c1 int, c2 float, c3 text);
@@ -56,13 +56,13 @@ PARTITION BY RANGE(L_SHIPDATE)
         PARTITION p6 VALUES LESS THAN('1998-01-01 00:00:00'),
         PARTITION p7 VALUES LESS THAN('2030-01-01 00:00:00')
 );
-COPY LINEITEM FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/lineitem_index.data' DELIMITER '|';
+COPY LINEITEM FROM '@abs_srcdir@/data/lineitem_index.data' DELIMITER '|';
 create index idx1 on lineitem(L_ORDERKEY) local;
 create index idx2 on lineitem(L_PARTKEY) local;
 create index idx3 on lineitem(L_LINENUMBER, L_SHIPDATE) local;
 create index idx4 on lineitem(L_RETURNFLAG) local;
 create index idx5 on lineitem(L_LINESTATUS, L_SHIPINSTRUCT) local;
-COPY LINEITEM FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/lineitem_index.data' DELIMITER '|';
+COPY LINEITEM FROM '@abs_srcdir@/data/lineitem_index.data' DELIMITER '|';
 set enable_bitmapscan=off;
 set enable_seqscan=off;
 select count(*) from lineitem where L_ORDERKEY > 100 and L_ORDERKEY < 200;

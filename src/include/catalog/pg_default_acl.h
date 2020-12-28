@@ -70,6 +70,7 @@ typedef FormData_pg_default_acl *Form_pg_default_acl;
 #define DEFACLOBJ_SEQUENCE        'S'        /* sequence */
 #define DEFACLOBJ_FUNCTION        'f'        /* function */
 #define DEFACLOBJ_TYPE            'T'        /* type */
-
+#define DEFACLOBJ_GLOBAL_SETTING  'K'        /* Global Setting */
+#define DEFACLOBJ_COLUMN_SETTING  'k'        /* Column Setting */
 #endif   /* PG_DEFAULT_ACL_H */
 

@@ -17,7 +17,7 @@
 /*
  * Hash functions must have this signature.
  */
-typedef uint32 (*HashValueFunc)(const void *key, Size keysize);
+typedef uint32 (*HashValueFunc)(const void* key, Size keysize);
 
 /*
  * Key comparison functions must have this signature.  Comparison functions
@@ -25,27 +25,27 @@ typedef uint32 (*HashValueFunc)(const void *key, Size keysize);
  * definition is designed to allow memcmp() and strncmp() to be used directly
  * as key comparison functions.)
  */
-typedef int (*HashCompareFunc)(const void *key1, const void *key2, Size keysize);
+typedef int (*HashCompareFunc)(const void* key1, const void* key2, Size keysize);
 
 /*
  * Key copying functions must have this signature.	The return value is not
  * used.  (The definition is set up to allow memcpy() and strncpy() to be
  * used directly.)
  */
-typedef void *(*HashCopyFunc)(void *dest, const void *src, Size keysize);
+typedef void* (*HashCopyFunc)(void* dest, const void* src, Size keysize);
 
 /*
  * Space allocation function for a hashtable --- designed to match malloc().
  * Note: there is no free function API; can't destroy a hashtable unless you
  * use the default allocator.
  */
-typedef void *(*HashAllocFunc)(Size request);
+typedef void* (*HashAllocFunc)(Size request);
 
 /*
  * Space deallocation function for a hashtable --- designed to match allocator().
  * Note: it's a free function API; you must use it with allocator you defined.
  */
-typedef void (*HashDeallocFunc)(void *pointer);
+typedef void (*HashDeallocFunc)(void* pointer);
 
 /*
  * HASHELEMENT is the private part of a hashtable entry.  The caller's data
@@ -53,7 +53,7 @@ typedef void (*HashDeallocFunc)(void *pointer);
  * is expected to be at the start of the caller's hash entry data structure.
  */
 typedef struct HASHELEMENT {
-    struct HASHELEMENT *link; /* link to next entry in same bucket */
+    struct HASHELEMENT* link; /* link to next entry in same bucket */
     uint32 hashvalue;         /* hash function result for this entry */
 } HASHELEMENT;
 
@@ -79,7 +79,7 @@ typedef struct HASHCTL {
     HashAllocFunc alloc;     /* memory allocator */
     HashDeallocFunc dealloc; /* memory deallocator */
     MemoryContext hcxt;      /* memory context to use for allocations */
-    HASHHDR *hctl;           /* location of header in shared mem */
+    HASHHDR* hctl;           /* location of header in shared mem */
 } HASHCTL;
 
 /* Flags to indicate which parameters are supplied */
@@ -116,9 +116,9 @@ typedef enum {
 
 /* hash_seq status (should be considered an opaque type by callers) */
 typedef struct {
-    HTAB *hashp;
+    HTAB* hashp;
     uint32 curBucket;      /* index of current bucket */
-    HASHELEMENT *curEntry; /* current entry in bucket */
+    HASHELEMENT* curEntry; /* current entry in bucket */
 } HASH_SEQ_STATUS;
 
 /*
@@ -139,7 +139,7 @@ extern void hash_seq_term(HASH_SEQ_STATUS *status);
 extern void hash_freeze(HTAB *hashp);
 extern Size hash_estimate_size(long num_entries, Size entrysize);
 extern long hash_select_dirsize(long num_entries);
-extern Size hash_get_shared_size(HASHCTL *info, int flags);
+extern Size hash_get_shared_size(HASHCTL* info, int flags);
 extern int hash_get_seq_num();
 extern void release_all_seq_scan();
 extern MemoryContext hash_get_current_dynacxt(void);
@@ -147,10 +147,10 @@ extern MemoryContext hash_get_current_dynacxt(void);
 /*
  * prototypes for functions in hashfn.c
  */
-extern uint32 string_hash(const void *key, Size keysize);
-extern uint32 tag_hash(const void *key, Size keysize);
-extern uint32 oid_hash(const void *key, Size keysize);
-extern uint32 bitmap_hash(const void *key, Size keysize);
-extern int bitmap_match(const void *key1, const void *key2, Size keysize);
+extern uint32 string_hash(const void* key, Size keysize);
+extern uint32 tag_hash(const void* key, Size keysize);
+extern uint32 oid_hash(const void* key, Size keysize);
+extern uint32 bitmap_hash(const void* key, Size keysize);
+extern int bitmap_match(const void* key1, const void* key2, Size keysize);
 
 #endif /* HSEARCH_H */

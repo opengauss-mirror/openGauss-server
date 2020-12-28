@@ -108,7 +108,6 @@ Datum gbt_text_consistent(PG_FUNCTION_ARGS)
     void* query = (void*)DatumGetTextP(PG_GETARG_DATUM(1));
     StrategyNumber strategy = (StrategyNumber)PG_GETARG_UINT16(2);
 
-    /* Oid		subtype = PG_GETARG_OID(3); */
     bool* recheck = (bool*)PG_GETARG_POINTER(4);
     bool retval = false;
     GBT_VARKEY* key = (GBT_VARKEY*)DatumGetPointer(entry->key);
@@ -132,7 +131,6 @@ Datum gbt_bpchar_consistent(PG_FUNCTION_ARGS)
     void* query = (void*)DatumGetPointer(PG_DETOAST_DATUM(PG_GETARG_DATUM(1)));
     StrategyNumber strategy = (StrategyNumber)PG_GETARG_UINT16(2);
 
-    /* Oid		subtype = PG_GETARG_OID(3); */
     bool* recheck = (bool*)PG_GETARG_POINTER(4);
     bool retval = false;
     GBT_VARKEY* key = (GBT_VARKEY*)DatumGetPointer(entry->key);

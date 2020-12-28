@@ -9,7 +9,7 @@
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
- *		 src/gausskernel/storage/access/gist/gistxlog.cpp
+ *    src/gausskernel/storage/access/gist/gistxlog.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -20,7 +20,6 @@
 #include "access/xloginsert.h"
 #include "access/xlogutils.h"
 #include "access/xlogproc.h"
-
 #include "utils/memutils.h"
 
 /*
@@ -34,7 +33,7 @@
  * we never need to do anything else to the child page in the current WAL
  * action.)
  */
-static void gistRedoClearFollowRight(XLogReaderState* record, uint8 block_id)
+static void gistRedoClearFollowRight(XLogReaderState *record, uint8 block_id)
 {
     RedoBufferInfo buffer;
     XLogRedoAction action;
@@ -45,7 +44,8 @@ static void gistRedoClearFollowRight(XLogReaderState* record, uint8 block_id)
      */
     action = XLogReadBufferForRedo(record, block_id, &buffer);
     if (action == BLK_NEEDS_REDO || action == BLK_RESTORED) {
-        gistRedoClearFollowRightOperatorPage(&buffer);
+        GistRedoClearFollowRightOperatorPage(&buffer);
+
         MarkBufferDirty(buffer.buf);
     }
     if (BufferIsValid(buffer.buf))
@@ -55,16 +55,31 @@ static void gistRedoClearFollowRight(XLogReaderState* record, uint8 block_id)
 /*
  * redo any page update (except page split)
  */
-static void gistRedoPageUpdateRecord(XLogReaderState* record)
+static void gistRedoPageUpdateRecord(XLogReaderState *record)
 {
-    void* xldata = (void*)XLogRecGetData(record);
+    void *xldata = (void *)XLogRecGetData(record);
     RedoBufferInfo buffer;
 
     if (XLogReadBufferForRedo(record, 0, &buffer) == BLK_NEEDS_REDO) {
         Size datalen;
-        char* data = XLogRecGetBlockData(record, 0, &datalen);
 
-        gistRedoPageUpdateOperatorPage(&buffer, xldata, data, datalen);
+        char *data = XLogRecGetBlockData(record, 0, &datalen);
+
+        /* Delete old tuples */
+
+        GistRedoPageUpdateOperatorPage(&buffer, xldata, data, datalen);
+
+        /* add tuples */
+
+        /*
+         * special case: leafpage, nothing to insert, nothing to delete, then
+         * vacuum marks page
+         */
+
+        /*
+         * all links on non-leaf root page was deleted by vacuum full, so root
+         * page becomes a leaf
+         */
 
         MarkBufferDirty(buffer.buf);
     }
@@ -86,11 +101,11 @@ static void gistRedoPageUpdateRecord(XLogReaderState* record)
 /*
  * Returns an array of index pointers.
  */
-IndexTuple* decodePageSplitRecord(char* begin, int len, int* n)
+IndexTuple *decodePageSplitRecord(char *begin, int len, int *n)
 {
-    char* ptr = NULL;
+    char *ptr = NULL;
     int i = 0;
-    IndexTuple* tuples = NULL;
+    IndexTuple *tuples = NULL;
     errno_t ret = EOK;
 
     /* extract the number of tuples */
@@ -98,7 +113,7 @@ IndexTuple* decodePageSplitRecord(char* begin, int len, int* n)
     securec_check(ret, "", "");
     ptr = begin + sizeof(int);
 
-    tuples = (IndexTuple*)palloc(*n * sizeof(IndexTuple));
+    tuples = (IndexTuple *)palloc(*n * sizeof(IndexTuple));
 
     for (i = 0; i < *n; i++) {
         Assert(ptr - begin < len);
@@ -110,14 +125,18 @@ IndexTuple* decodePageSplitRecord(char* begin, int len, int* n)
     return tuples;
 }
 
-bool IsGistPageUpdate(XLogReaderState* record)
+bool IsGistPageUpdate(XLogReaderState *record)
 {
-    return (XLogRecGetRmid(record) == RM_GIST_ID && (XLogRecGetInfo(record) & ~XLR_INFO_MASK) == XLOG_GIST_PAGE_SPLIT);
+    uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
+    if ((XLogRecGetRmid(record) == RM_GIST_ID) && (info == XLOG_GIST_PAGE_SPLIT)) {
+        return true;
+    }
+    return false;
 }
 
-static void gistRedoPageSplitRecord(XLogReaderState* record)
+static void gistRedoPageSplitRecord(XLogReaderState *record)
 {
-    gistxlogPageSplit* xldata = (gistxlogPageSplit*)XLogRecGetData(record);
+    gistxlogPageSplit *xldata = (gistxlogPageSplit *)XLogRecGetData(record);
     RedoBufferInfo firstbuffer;
     RedoBufferInfo buffer;
     int i;
@@ -130,10 +149,10 @@ static void gistRedoPageSplitRecord(XLogReaderState* record)
      * there is no path for concurrent queries to reach those pages without
      * first visiting the first-listed page.
      *
-     * loop around all pages 
+     * loop around all pages
      */
     for (i = 0; i < xldata->npage; i++) {
-        char* data = NULL;
+        char *data = NULL;
         Size datalen;
         BlockNumber blkno;
         BlockNumber nextblkno = InvalidBlockNumber;
@@ -157,7 +176,7 @@ static void gistRedoPageSplitRecord(XLogReaderState* record)
             if (i < xldata->npage - 1 && !isrootsplit && xldata->markfollowright)
                 markflag = true;
         }
-        gistRedoPageSplitOperatorPage(&buffer, (void*)xldata, data, datalen, markflag, nextblkno);
+        GistRedoPageSplitOperatorPage(&buffer, (void *)xldata, data, datalen, markflag, nextblkno);
 
         MarkBufferDirty(buffer.buf);
 
@@ -176,17 +195,18 @@ static void gistRedoPageSplitRecord(XLogReaderState* record)
         UnlockReleaseBuffer(firstbuffer.buf);
 }
 
-static void gistRedoCreateIndex(XLogReaderState* record)
+static void gistRedoCreateIndex(XLogReaderState *record)
 {
     RedoBufferInfo buffer;
 
     XLogInitBufferForRedo(record, GIST_ROOT_BLKNO, &buffer);
-    gistRedoCreateIndexOperatorPage(&buffer);
+    GistRedoCreateIndexOperatorPage(&buffer);
+
     MarkBufferDirty(buffer.buf);
     UnlockReleaseBuffer(buffer.buf);
 }
 
-void gist_redo(XLogReaderState* record)
+void gist_redo(XLogReaderState *record)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
     MemoryContext oldCxt;
@@ -231,11 +251,11 @@ void gist_xlog_cleanup(void)
 /*
  * Write WAL record of a page split.
  */
-XLogRecPtr gistXLogSplit(bool page_is_leaf, SplitedPageLayout* dist, BlockNumber origrlink, GistNSN orignsn,
-    Buffer leftchildbuf, bool markfollowright)
+XLogRecPtr gistXLogSplit(bool page_is_leaf, SplitedPageLayout *dist, BlockNumber origrlink, GistNSN orignsn,
+                         Buffer leftchildbuf, bool markfollowright)
 {
     gistxlogPageSplit xlrec;
-    SplitedPageLayout* ptr = NULL;
+    SplitedPageLayout *ptr = NULL;
     int npage = 0;
     XLogRecPtr recptr;
     int i;
@@ -265,13 +285,13 @@ XLogRecPtr gistXLogSplit(bool page_is_leaf, SplitedPageLayout* dist, BlockNumber
      * of buffer or data registrations here, make sure you modify the
      * XLogEnsureRecordSpace() calls accordingly!
      */
-    XLogRegisterData((char*)&xlrec, sizeof(gistxlogPageSplit));
+    XLogRegisterData((char *)&xlrec, sizeof(gistxlogPageSplit));
 
     i = 1;
     for (ptr = dist; ptr; ptr = ptr->next) {
         XLogRegisterBuffer(i, ptr->buffer, REGBUF_WILL_INIT);
-        XLogRegisterBufData(i, (char*)&(ptr->block.num), sizeof(int));
-        XLogRegisterBufData(i, (char*)ptr->list, ptr->lenlist);
+        XLogRegisterBufData(i, (char *)&(ptr->block.num), sizeof(int));
+        XLogRegisterBufData(i, (char *)ptr->list, ptr->lenlist);
         i++;
     }
 
@@ -291,8 +311,8 @@ XLogRecPtr gistXLogSplit(bool page_is_leaf, SplitedPageLayout* dist, BlockNumber
  * to the target buffer; they need not be stored in XLOG if XLogInsert decides
  * to log the whole buffer contents instead.
  */
-XLogRecPtr gistXLogUpdate(
-    Buffer buffer, OffsetNumber* todelete, int ntodelete, IndexTuple* itup, int ituplen, Buffer leftchildbuf)
+XLogRecPtr gistXLogUpdate(Buffer buffer, OffsetNumber *todelete, int ntodelete, IndexTuple *itup, int ituplen,
+                          Buffer leftchildbuf)
 {
     gistxlogPageUpdate xlrec;
     int i;
@@ -302,14 +322,14 @@ XLogRecPtr gistXLogUpdate(
     xlrec.ntoinsert = ituplen;
 
     XLogBeginInsert();
-    XLogRegisterData((char*)&xlrec, sizeof(gistxlogPageUpdate));
+    XLogRegisterData((char *)&xlrec, sizeof(gistxlogPageUpdate));
 
     XLogRegisterBuffer(0, buffer, REGBUF_STANDARD);
-    XLogRegisterBufData(0, (char*)todelete, sizeof(OffsetNumber) * ntodelete);
+    XLogRegisterBufData(0, (char *)todelete, sizeof(OffsetNumber) * ntodelete);
 
     /* new tuples */
     for (i = 0; i < ituplen; i++)
-        XLogRegisterBufData(0, (char*)(itup[i]), IndexTupleSize(itup[i]));
+        XLogRegisterBufData(0, (char *)(itup[i]), IndexTupleSize(itup[i]));
 
     /*
      * Include a full page image of the child buf. (only necessary if a

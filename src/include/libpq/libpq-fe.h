@@ -21,7 +21,9 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
+#ifndef WIN32
+#include <stdbool.h>
+#endif
 #include <stdio.h>
 #include <assert.h>
 
@@ -30,6 +32,7 @@ extern "C" {
  * such as Oid.
  */
 #include "postgres_ext.h"
+#include "gs_thread.h"
 
 /*
  * Option flags for PQcopyResult
@@ -391,6 +394,7 @@ extern PGresult* PQexecPreparedBatch(PGconn* conn, const char* stmtName, int nPa
 
 /* Interface for multiple-result or asynchronous queries */
 extern int PQsendQuery(PGconn* conn, const char* query);
+extern int PqSendQueryCheckConnValid(Oid nod_oid, PGconn* conn, const char* query);
 extern int PQsendQueryPoolerStatelessReuse(PGconn* conn, const char* query);
 extern int PQsendQueryParams(PGconn* conn, const char* command, int nParams, const Oid* paramTypes,
     const char* const* paramValues, const int* paramLengths, const int* paramFormats, int resultFormat);
@@ -494,12 +498,16 @@ extern int PQsetvalue(PGresult* res, int tup_num, int field_num, const char* val
 extern size_t PQescapeStringConn(PGconn* conn, char* to, const char* from, size_t length, int* error);
 extern char* PQescapeLiteral(PGconn* conn, const char* str, size_t len);
 extern char* PQescapeIdentifier(PGconn* conn, const char* str, size_t len);
-extern unsigned char* PQescapeByteaConn(PGconn* conn, const unsigned char* from, size_t from_length, size_t* to_length);
+extern unsigned char *PQescapeByteaConn(PGconn *conn, const unsigned char *from,
+    size_t from_length, size_t *to_length);
 extern unsigned char* PQunescapeBytea(const unsigned char* strtext, size_t* retbuflen);
 
 /* These forms are deprecated! */
 extern size_t PQescapeString(char* to, const char* from, size_t length);
 extern unsigned char* PQescapeBytea(const unsigned char* from, size_t from_length, size_t* to_length);
+#ifdef HAVE_CE
+extern void checkRefreshCacheOnError(PGconn* conn);
+#endif
 
 /* === in fe-print.c === */
 

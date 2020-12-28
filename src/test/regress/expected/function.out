@@ -15,7 +15,7 @@ IMMUTABLE
 CALLED ON NULL INPUT
 SECURITY INVOKER
 COST 100;
-explain (verbose, costs off, nodes off) select * from test_function_immutable();
+explain (verbose, costs off) select * from test_function_immutable();
                 QUERY PLAN                
 ------------------------------------------
  Function Scan on test_function_immutable
@@ -31,7 +31,7 @@ select * from test_function_immutable();
 
 CREATE VIEW functionview AS SELECT f1,f2,left(f3,test_function_immutable()::INT) f3 FROM function_table_01;
 --targetlist
-explain (verbose, costs off, nodes off) select f1,left(f3,test_function_immutable()::INT) from function_table_01 order by 1 limit 3;
+explain (verbose, costs off) select f1,left(f3,test_function_immutable()::INT) from function_table_01 order by 1 limit 3;
                           QUERY PLAN                           
 ---------------------------------------------------------------
  Limit
@@ -52,7 +52,7 @@ select f1,left(f3,test_function_immutable()::INT) from function_table_01 order b
 (3 rows)
 
 --fromQual
-explain (verbose, costs off, nodes off) select * from function_table_01 where f1 = test_function_immutable();
+explain (verbose, costs off) select * from function_table_01 where f1 = test_function_immutable();
                     QUERY PLAN                     
 ---------------------------------------------------
  Seq Scan on distribute_function.function_table_01
@@ -67,7 +67,7 @@ select * from function_table_01 where f1 = test_function_immutable();
 (1 row)
 
 --sortClause
-explain (verbose, costs off, nodes off) select f1,f3 from function_table_01 order by left(f3,test_function_immutable()::INT) limit 3;
+explain (verbose, costs off) select f1,f3 from function_table_01 order by left(f3,test_function_immutable()::INT) limit 3;
                           QUERY PLAN                           
 ---------------------------------------------------------------
  Limit
@@ -88,7 +88,7 @@ select f1,f3 from function_table_01 order by left(f3,test_function_immutable()::
 (3 rows)
 
 --groupClause
-explain (verbose, costs off, nodes off) select avg(f2),left(f3,test_function_immutable()::INT) from function_table_01 group by 2 order by 1;
+explain (verbose, costs off) select avg(f2),left(f3,test_function_immutable()::INT) from function_table_01 group by 2 order by 1;
                           QUERY PLAN                           
 ---------------------------------------------------------------
  Sort
@@ -111,7 +111,7 @@ select avg(f2),left(f3,test_function_immutable()::INT) from function_table_01 gr
 (4 rows)
 
 --havingClause
-explain (verbose, costs off, nodes off) select avg(f2) fa,f3 from function_table_01 group by f3 having avg(f2)>test_function_immutable()  order by 1;
+explain (verbose, costs off) select avg(f2) fa,f3 from function_table_01 group by f3 having avg(f2)>test_function_immutable()  order by 1;
                             QUERY PLAN                             
 -------------------------------------------------------------------
  Sort
@@ -133,7 +133,7 @@ select avg(f2) fa,f3 from function_table_01 group by f3 having avg(f2)>test_func
 (2 rows)
 
 --limitClause && offsetClause
-explain (verbose, costs off, nodes off) select * from function_table_01 order by 1 limit test_function_immutable() offset test_function_immutable();
+explain (verbose, costs off) select * from function_table_01 order by 1 limit test_function_immutable() offset test_function_immutable();
                           QUERY PLAN                           
 ---------------------------------------------------------------
  Limit
@@ -153,7 +153,7 @@ select * from function_table_01 order by 1  limit test_function_immutable() offs
   6 |  3 | affde
 (3 rows)
 
-explain (verbose, costs off, nodes off) select avg(f2),left(f3,test_function_immutable()::INT) from function_table_01 group by 2 having avg(f2)>test_function_immutable() order by 1 limit test_function_immutable() offset test_function_immutable()-2;
+explain (verbose, costs off) select avg(f2),left(f3,test_function_immutable()::INT) from function_table_01 group by 2 having avg(f2)>test_function_immutable() order by 1 limit test_function_immutable() offset test_function_immutable()-2;
                                QUERY PLAN                                
 -------------------------------------------------------------------------
  Limit
@@ -191,7 +191,7 @@ VOLATILE
 CALLED ON NULL INPUT
 SECURITY INVOKER
 COST 100;
-explain (verbose on, costs off, nodes off) select * from test_function_volatile();
+explain (verbose on, costs off) select * from test_function_volatile();
                          QUERY PLAN                          
 -------------------------------------------------------------
  Function Scan on distribute_function.test_function_volatile
@@ -205,7 +205,7 @@ select * from test_function_volatile();
                       3
 (1 row)
 
-explain (verbose on, costs off, nodes off) select test_function_volatile();
+explain (verbose on, costs off) select test_function_volatile();
              QUERY PLAN             
 ------------------------------------
  Result
@@ -284,7 +284,7 @@ drop schema distribute_function;
 reset current_schema;
 create table distribute_function_t1(a int, b int) /*distribute by hash(a)*/;
 create table distribute_function_t2(a int, b int) /*distribute by replication*/;
-explain (verbose on, costs off, nodes off) select * from distribute_function_t1, generate_series(1, 1, 5);
+explain (verbose on, costs off) select * from distribute_function_t1, generate_series(1, 1, 5);
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
  Nested Loop
@@ -298,7 +298,7 @@ explain (verbose on, costs off, nodes off) select * from distribute_function_t1,
                Output: distribute_function_t1.a, distribute_function_t1.b
 (9 rows)
 
-explain (verbose on, costs off, nodes off) select * from distribute_function_t1, generate_series(1, 1, 5);
+explain (verbose on, costs off) select * from distribute_function_t1, generate_series(1, 1, 5);
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
  Nested Loop

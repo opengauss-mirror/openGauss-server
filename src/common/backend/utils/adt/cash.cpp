@@ -38,6 +38,7 @@
 /*************************************************************************
  * Private routines
  ************************************************************************/
+
 static const char* num_word(Cash value)
 {
     char* buf = t_thrd.buf_cxt.cash_buf;
@@ -74,9 +75,8 @@ static const char* num_word(Cash value)
     errno_t rc = EOK;
 
     /* deal with the simple cases first */
-    if (value <= 20) {
+    if (value <= 20)
         return small[value];
-    }
 
     /* is it an even multiple of 100? */
     if (!tu) {
@@ -125,13 +125,10 @@ Datum cash_in(PG_FUNCTION_ARGS)
     Cash sgn = 1;
     bool seen_dot = false;
     const char* s = str;
-    int frac_point;
-    char d_symbol;
-    const char *s_symbol = NULL;
-    const char *p_symbol = NULL;
-    const char *n_symbol = NULL;
-    const char *c_symbol = NULL;
-    struct lconv* local_convert = PGLC_localeconv();
+    int fpoint;
+    char dsymbol;
+    const char *ssymbol = NULL, *psymbol = NULL, *nsymbol = NULL, *csymbol = NULL;
+    struct lconv* lconvert = PGLC_localeconv();
 
     /*
      * frac_digits will be CHAR_MAX in some locales, notably C.  However, just
@@ -143,37 +140,33 @@ Datum cash_in(PG_FUNCTION_ARGS)
      * to test for CHAR_MAX at all, but to impose a range check for plausible
      * frac_digits values.
      */
-    frac_point = local_convert->frac_digits;
-    if (frac_point < 0 || frac_point > 10) {
-        frac_point = 2; /* best guess in this case, I think */
-    }
+    fpoint = lconvert->frac_digits;
+    if (fpoint < 0 || fpoint > 10)
+        fpoint = 2; /* best guess in this case, I think */
 
     /* we restrict dsymbol to be a single byte, but not the other symbols */
-    if (*local_convert->mon_decimal_point != '\0' && local_convert->mon_decimal_point[1] == '\0') {
-        d_symbol = *local_convert->mon_decimal_point;
+    if (*lconvert->mon_decimal_point != '\0' && lconvert->mon_decimal_point[1] == '\0') {
+        dsymbol = *lconvert->mon_decimal_point;
     } else {
-        d_symbol = '.';
+        dsymbol = '.';
     }
-
-    if (*local_convert->mon_thousands_sep != '\0') {
-        s_symbol = local_convert->mon_thousands_sep;
-    } else {
-        /* ssymbol should not equal dsymbol */
-        s_symbol = (d_symbol != ',') ? "," : ".";
+    if (*lconvert->mon_thousands_sep != '\0') {
+        ssymbol = lconvert->mon_thousands_sep;
+    } else { /* ssymbol should not equal dsymbol */
+        ssymbol = (dsymbol != ',') ? "," : ".";
     }
-
-    c_symbol = (*local_convert->currency_symbol != '\0') ? local_convert->currency_symbol : "$";
-    p_symbol = (*local_convert->positive_sign != '\0') ? local_convert->positive_sign : "+";
-    n_symbol = (*local_convert->negative_sign != '\0') ? local_convert->negative_sign : "-";
+    csymbol = (*lconvert->currency_symbol != '\0') ? lconvert->currency_symbol : "$";
+    psymbol = (*lconvert->positive_sign != '\0') ? lconvert->positive_sign : "+";
+    nsymbol = (*lconvert->negative_sign != '\0') ? lconvert->negative_sign : "-";
 
 #ifdef CASHDEBUG
     printf("cashin- precision '%d'; decimal '%c'; thousands '%s'; currency '%s'; positive '%s'; negative '%s'\n",
-        frac_point,
-        d_symbol,
-        s_symbol,
-        c_symbol,
-        p_symbol,
-        n_symbol);
+        fpoint,
+        dsymbol,
+        ssymbol,
+        csymbol,
+        psymbol,
+        nsymbol);
 #endif
 
     /* we need to add all sorts of checking here.  For now just */
@@ -181,15 +174,11 @@ Datum cash_in(PG_FUNCTION_ARGS)
     while (isspace((unsigned char)*s)) {
         s++;
     }
-
-    if (strncmp(s, c_symbol, strlen(c_symbol)) == 0) {
-        s += strlen(c_symbol);
-    }
-
+    if (strncmp(s, csymbol, strlen(csymbol)) == 0)
+        s += strlen(csymbol);
     while (isspace((unsigned char)*s)) {
         s++;
     }
-
 
 #ifdef CASHDEBUG
     printf("cashin- string is '%s'\n", s);
@@ -198,16 +187,14 @@ Datum cash_in(PG_FUNCTION_ARGS)
     /* a leading minus or paren signifies a negative number */
     /* again, better heuristics needed */
     /* XXX - doesn't properly check for balanced parens - djmc */
-    if (strncmp(s, n_symbol, strlen(n_symbol)) == 0) {
+    if (strncmp(s, nsymbol, strlen(nsymbol)) == 0) {
         sgn = -1;
-        s += strlen(n_symbol);
+        s += strlen(nsymbol);
     } else if (*s == '(') {
         sgn = -1;
         s++;
-    } else if (strncmp(s, p_symbol, strlen(p_symbol)) == 0) {
-        s += strlen(p_symbol);
-    }
-
+    } else if (strncmp(s, psymbol, strlen(psymbol)) == 0)
+        s += strlen(psymbol);
 
 #ifdef CASHDEBUG
     printf("cashin- string is '%s'\n", s);
@@ -217,15 +204,11 @@ Datum cash_in(PG_FUNCTION_ARGS)
     while (isspace((unsigned char)*s)) {
         s++;
     }
-
-    if (strncmp(s, c_symbol, strlen(c_symbol)) == 0) {
-        s += strlen(c_symbol);
-    }
-
+    if (strncmp(s, csymbol, strlen(csymbol)) == 0)
+        s += strlen(csymbol);
     while (isspace((unsigned char)*s)) {
         s++;
     }
-
 
 #ifdef CASHDEBUG
     printf("cashin- string is '%s'\n", s);
@@ -245,47 +228,43 @@ Datum cash_in(PG_FUNCTION_ARGS)
          * We look for digits as long as we have found less than the required
          * number of decimal places.
          */
-        if (isdigit((unsigned char)*s) && (!seen_dot || dec < frac_point)) {
+        if (isdigit((unsigned char)*s) && (!seen_dot || dec < fpoint)) {
             int8 digit = *s - '0';
 
-            if (pg_mul_s64_overflow(value, 10, &value) || pg_sub_s64_overflow(value, digit, &value)) {
+            if (pg_mul_s64_overflow(value, 10, &value) || pg_sub_s64_overflow(value, digit, &value))
                 ereport(ERROR,
                     (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
                         errmsg("value \"%s\" is out of range for type %s", str, "money")));
-            }
 
-            if (seen_dot) {
+            if (seen_dot)
                 dec++;
-            }
-
-        } else if (*s == d_symbol && !seen_dot) {
-            /* decimal point? then start counting fractions... */
-            seen_dot = true;
-        } else if (strncmp(s, s_symbol, strlen(s_symbol)) == 0) {
-            /* ignore if "thousands" separator, else we're done */
-            s += strlen(s_symbol) - 1;
-        } else {
-            break;
         }
+        /* decimal point? then start counting fractions... */
+        else if (*s == dsymbol && !seen_dot) {
+            seen_dot = true;
+        }
+        /* ignore if "thousands" separator, else we're done */
+        else if (strncmp(s, ssymbol, strlen(ssymbol)) == 0)
+            s += strlen(ssymbol) - 1;
+        else
+            break;
     }
 
     /* round off if there's another digit */
     if (isdigit((unsigned char)*s) && *s >= '5') {
         /* remember we build the value in the negative */
-        if (pg_sub_s64_overflow(value, 1, &value)) {
+        if (pg_sub_s64_overflow(value, 1, &value))
             ereport(ERROR,
                 (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
                     errmsg("value \"%s\" is out of range for type %s", str, "money")));
-        }
     }
 
     /* adjust for less than required decimal places */
-    for (; dec < frac_point; dec++) {
-        if (pg_mul_s64_overflow(value, 10, &value)) {
+    for (; dec < fpoint; dec++) {
+        if (pg_mul_s64_overflow(value, 10, &value))
             ereport(ERROR,
                 (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
                     errmsg("value \"%s\" is out of range for type %s", str, "money")));
-        }
     }
 
     /*
@@ -296,22 +275,20 @@ Datum cash_in(PG_FUNCTION_ARGS)
         s++;
     }
 
-
     while (*s) {
         if (isspace((unsigned char)*s) || *s == ')') {
             s++;
-        } else if (strncmp(s, n_symbol, strlen(n_symbol)) == 0) {
+        } else if (strncmp(s, nsymbol, strlen(nsymbol)) == 0) {
             sgn = -1;
-            s += strlen(n_symbol);
-        } else if (strncmp(s, p_symbol, strlen(p_symbol)) == 0) {
-            s += strlen(p_symbol);
-        } else if (strncmp(s, c_symbol, strlen(c_symbol)) == 0) {
-            s += strlen(c_symbol);
-        } else {
+            s += strlen(nsymbol);
+        } else if (strncmp(s, psymbol, strlen(psymbol)) == 0)
+            s += strlen(psymbol);
+        else if (strncmp(s, csymbol, strlen(csymbol)) == 0)
+            s += strlen(csymbol);
+        else
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                     errmsg("invalid input syntax for type %s: \"%s\"", "money", str)));
-        }
     }
 
     /*
@@ -319,15 +296,13 @@ Datum cash_in(PG_FUNCTION_ARGS)
      * the most negative number.
      */
     if (sgn > 0) {
-        if (value == PG_INT64_MIN) {
+        if (value == PG_INT64_MIN)
             ereport(ERROR,
                 (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
                     errmsg("value \"%s\" is out of range for type %s", str, "money")));
-        }
         result = -value;
-    } else {
+    } else
         result = value;
-    }
 
 #ifdef CASHDEBUG
     printf("cashin- result is " INT64_FORMAT "\n", result);
@@ -345,67 +320,60 @@ Datum cash_out(PG_FUNCTION_ARGS)
     Cash value = PG_GETARG_CASH(0);
     char* result = NULL;
     char buf[CACHE_BUFF_LEN];
-    char* buf_ptr = NULL;
+    char* bufptr = NULL;
     int digit_pos;
     int points, mon_group;
-    char d_symbol;
-    const char *s_symbol = NULL;
-    const char *c_symbol = NULL;
-    const char *sign_symbol = NULL;
-    char sign_posn;
-    char cs_precedes;
-    char sep_by_space;
-    struct lconv* local_convert = PGLC_localeconv();
+    char dsymbol;
+    const char *ssymbol = NULL, *csymbol = NULL, *signsymbol = NULL;
+    char sign_posn, cs_precedes, sep_by_space;
+    struct lconv* lconvert = PGLC_localeconv();
     errno_t rc = EOK;
 
     /* see comments about frac_digits in cash_in() */
-    points = local_convert->frac_digits;
-    if (points < 0 || points > 10) {
+    points = lconvert->frac_digits;
+    if (points < 0 || points > 10)
         points = 2; /* best guess in this case, I think */
-    }
 
     /*
      * As with frac_digits, must apply a range check to mon_grouping to avoid
      * being fooled by variant CHAR_MAX values.
      */
-    mon_group = *local_convert->mon_grouping;
-    if (mon_group <= 0 || mon_group > 6) {
+    mon_group = *lconvert->mon_grouping;
+    if (mon_group <= 0 || mon_group > 6)
         mon_group = 3;
-    }
 
     /* we restrict dsymbol to be a single byte, but not the other symbols */
-    if (*local_convert->mon_decimal_point != '\0' && local_convert->mon_decimal_point[1] == '\0') {
-        d_symbol = *local_convert->mon_decimal_point;
+    if (*lconvert->mon_decimal_point != '\0' && lconvert->mon_decimal_point[1] == '\0') {
+        dsymbol = *lconvert->mon_decimal_point;
     } else {
-        d_symbol = '.';
+        dsymbol = '.';
     }
-    if (*local_convert->mon_thousands_sep != '\0') {
-        s_symbol = local_convert->mon_thousands_sep;
+    if (*lconvert->mon_thousands_sep != '\0') {
+        ssymbol = lconvert->mon_thousands_sep;
     } else {
         /* ssymbol should not equal dsymbol */
-        s_symbol = (d_symbol != ',') ? "," : ".";
+        ssymbol = (dsymbol != ',') ? "," : ".";
     }
-
-    c_symbol = (*local_convert->currency_symbol != '\0') ? local_convert->currency_symbol : "$";
+    csymbol = (*lconvert->currency_symbol != '\0') ? lconvert->currency_symbol : "$";
 
     if (value < 0) {
         /* make the amount positive for digit-reconstruction loop */
         value = -value;
         /* set up formatting data */
-        sign_symbol = (*local_convert->negative_sign != '\0') ? local_convert->negative_sign : "-";
-        sign_posn = local_convert->n_sign_posn;
-        cs_precedes = local_convert->n_cs_precedes;
-        sep_by_space = local_convert->n_sep_by_space;
+        signsymbol = (*lconvert->negative_sign != '\0') ? lconvert->negative_sign : "-";
+        sign_posn = lconvert->n_sign_posn;
+        cs_precedes = lconvert->n_cs_precedes;
+        sep_by_space = lconvert->n_sep_by_space;
     } else {
-        sign_symbol = local_convert->positive_sign;
-        sign_posn = local_convert->p_sign_posn;
-        cs_precedes = local_convert->p_cs_precedes;
-        sep_by_space = local_convert->p_sep_by_space;
+        signsymbol = lconvert->positive_sign;
+        sign_posn = lconvert->p_sign_posn;
+        cs_precedes = lconvert->p_cs_precedes;
+        sep_by_space = lconvert->p_sep_by_space;
     }
 
     /* we build the digits+decimal-point+sep string right-to-left in buf[] */
-    buf_ptr = buf + sizeof(buf) - 1;
-    *buf_ptr = '\0';
+    bufptr = buf + sizeof(buf) - 1;
+    *bufptr = '\0';
 
     /*
      * Generate digits till there are no non-zero digits left and we emitted
@@ -417,15 +385,15 @@ Datum cash_out(PG_FUNCTION_ARGS)
     do {
         if (points && digit_pos == 0) {
             /* insert decimal point, but not if value cannot be fractional */
-            *(--buf_ptr) = d_symbol;
+            *(--bufptr) = dsymbol;
         } else if (digit_pos < 0 && (digit_pos % mon_group) == 0) {
             /* insert thousands sep, but only to left of radix point */
-            buf_ptr -= strlen(s_symbol);
-            rc = memcpy_s(buf_ptr, strlen(s_symbol), s_symbol, strlen(s_symbol));
+            bufptr -= strlen(ssymbol);
+            rc = memcpy_s(bufptr, strlen(ssymbol), ssymbol, strlen(ssymbol));
             securec_check(rc, "\0", "\0");
         }
 
-        *(--buf_ptr) = ((uint64)value % 10) + '0';
+        *(--bufptr) = ((uint64)value % 10) + '0';
         value = ((uint64)value) / 10;
         digit_pos--;
     } while (value || digit_pos >= 0);
@@ -454,16 +422,17 @@ Datum cash_out(PG_FUNCTION_ARGS)
      *		from the value.
      * ----------
      */
-    int buf_len = strlen(buf_ptr) + strlen(c_symbol) + strlen(sign_symbol) + 4;
-    result = (char*)palloc(buf_len);
+
+    int buflen = strlen(bufptr) + strlen(csymbol) + strlen(signsymbol) + 4;
+    result = (char*)palloc(buflen);
 
     switch (sign_posn) {
         case 0:
             if (cs_precedes) {
-                rc = sprintf_s(result, buf_len, "(%s%s%s)", c_symbol, (sep_by_space == 1) ? " " : "", buf_ptr);
+                rc = sprintf_s(result, buflen, "(%s%s%s)", csymbol, (sep_by_space == 1) ? " " : "", bufptr);
                 securec_check_ss(rc, "", "");
             } else {
-                rc = sprintf_s(result, buf_len, "(%s%s%s)", buf_ptr, (sep_by_space == 1) ? " " : "", c_symbol);
+                rc = sprintf_s(result, buflen, "(%s%s%s)", bufptr, (sep_by_space == 1) ? " " : "", csymbol);
                 securec_check_ss(rc, "", "");
             }
             break;
@@ -471,92 +440,92 @@ Datum cash_out(PG_FUNCTION_ARGS)
         default:
             if (cs_precedes) {
                 rc = sprintf_s(result,
-                    buf_len,
+                    buflen,
                     "%s%s%s%s%s",
-                    sign_symbol,
+                    signsymbol,
                     (sep_by_space == 2) ? " " : "",
-                    c_symbol,
+                    csymbol,
                     (sep_by_space == 1) ? " " : "",
-                    buf_ptr);
+                    bufptr);
                 securec_check_ss(rc, "", "");
             } else {
                 rc = sprintf_s(result,
-                    buf_len,
+                    buflen,
                     "%s%s%s%s%s",
-                    sign_symbol,
+                    signsymbol,
                     (sep_by_space == 2) ? " " : "",
-                    buf_ptr,
+                    bufptr,
                     (sep_by_space == 1) ? " " : "",
-                    c_symbol);
+                    csymbol);
                 securec_check_ss(rc, "", "");
             }
             break;
         case 2:
             if (cs_precedes) {
                 rc = sprintf_s(result,
-                    buf_len,
+                    buflen,
                     "%s%s%s%s%s",
-                    c_symbol,
+                    csymbol,
                     (sep_by_space == 1) ? " " : "",
-                    buf_ptr,
+                    bufptr,
                     (sep_by_space == 2) ? " " : "",
-                    sign_symbol);
+                    signsymbol);
                 securec_check_ss(rc, "", "");
             } else {
                 rc = sprintf_s(result,
-                    buf_len,
+                    buflen,
                     "%s%s%s%s%s",
-                    buf_ptr,
+                    bufptr,
                     (sep_by_space == 1) ? " " : "",
-                    c_symbol,
+                    csymbol,
                     (sep_by_space == 2) ? " " : "",
-                    sign_symbol);
+                    signsymbol);
                 securec_check_ss(rc, "", "");
             }
             break;
         case 3:
             if (cs_precedes) {
                 rc = sprintf_s(result,
-                    buf_len,
+                    buflen,
                     "%s%s%s%s%s",
-                    sign_symbol,
+                    signsymbol,
                     (sep_by_space == 2) ? " " : "",
-                    c_symbol,
+                    csymbol,
                     (sep_by_space == 1) ? " " : "",
-                    buf_ptr);
+                    bufptr);
                 securec_check_ss(rc, "", "");
             } else {
                 rc = sprintf_s(result,
-                    buf_len,
+                    buflen,
                     "%s%s%s%s%s",
-                    buf_ptr,
+                    bufptr,
                     (sep_by_space == 1) ? " " : "",
-                    sign_symbol,
+                    signsymbol,
                     (sep_by_space == 2) ? " " : "",
-                    c_symbol);
+                    csymbol);
                 securec_check_ss(rc, "", "");
             }
             break;
         case 4:
             if (cs_precedes) {
                 rc = sprintf_s(result,
-                    buf_len,
+                    buflen,
                     "%s%s%s%s%s",
-                    c_symbol,
+                    csymbol,
                     (sep_by_space == 2) ? " " : "",
-                    sign_symbol,
+                    signsymbol,
                     (sep_by_space == 1) ? " " : "",
-                    buf_ptr);
+                    bufptr);
                 securec_check_ss(rc, "", "");
             } else {
                 rc = sprintf_s(result,
-                    buf_len,
+                    buflen,
                     "%s%s%s%s%s",
-                    buf_ptr,
+                    bufptr,
                     (sep_by_space == 1) ? " " : "",
-                    c_symbol,
+                    csymbol,
                     (sep_by_space == 2) ? " " : "",
-                    sign_symbol);
+                    signsymbol);
                 securec_check_ss(rc, "", "");
             }
             break;
@@ -591,6 +560,7 @@ Datum cash_send(PG_FUNCTION_ARGS)
 /*
  * Comparison functions
  */
+
 Datum cash_eq(PG_FUNCTION_ARGS)
 {
     Cash c1 = PG_GETARG_CASH(0);
@@ -731,9 +701,8 @@ Datum cash_div_flt8(PG_FUNCTION_ARGS)
     float8 f = PG_GETARG_FLOAT8(1);
     Cash result;
 
-    if (f == 0.0) {
+    if (f == 0.0)
         ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
-    }
 
     result = rint(c / f);
     PG_RETURN_CASH(result);
@@ -775,9 +744,8 @@ Datum cash_div_flt4(PG_FUNCTION_ARGS)
     float4 f = PG_GETARG_FLOAT4(1);
     Cash result;
 
-    if (f == 0.0) {
+    if (f == 0.0)
         ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
-    }
 
     result = rint(c / (float8)f);
     PG_RETURN_CASH(result);
@@ -818,9 +786,8 @@ Datum cash_div_int8(PG_FUNCTION_ARGS)
     int64 i = PG_GETARG_INT64(1);
     Cash result;
 
-    if (i == 0) {
+    if (i == 0)
         ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
-    }
 
     result = c / i;
 
@@ -863,9 +830,8 @@ Datum cash_div_int4(PG_FUNCTION_ARGS)
     int32 i = PG_GETARG_INT32(1);
     Cash result;
 
-    if (i == 0) {
+    if (i == 0)
         ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
-    }
 
     result = c / i;
 
@@ -908,10 +874,8 @@ Datum cash_div_int2(PG_FUNCTION_ARGS)
     int16 s = PG_GETARG_INT16(1);
     Cash result;
 
-    if (s == 0) {
+    if (s == 0)
         ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
-    }
-
 
     result = c / s;
     PG_RETURN_CASH(result);
@@ -953,9 +917,8 @@ Datum cash_div_int1(PG_FUNCTION_ARGS)
     int1 s = PG_GETARG_INT8(1);
     Cash result;
 
-    if (s == 0) {
+    if (s == 0)
         ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
-    }
 
     result = c / s;
     PG_RETURN_CASH(result);
@@ -1014,10 +977,8 @@ Datum cash_words(PG_FUNCTION_ARGS)
         rc = strcpy_s(buf, CACHE_BUFF_LEN_L, "minus ");
         securec_check(rc, "", "");
         p += 6;
-    } else {
+    } else
         buf[0] = '\0';
-    }
-
 
     /* Now treat as unsigned, to avoid trouble at INT_MIN */
     val = (uint64)value;
@@ -1079,7 +1040,7 @@ Datum cash_words(PG_FUNCTION_ARGS)
     securec_check(rc, "", "");
     rc = strcat_s(buf, CACHE_BUFF_LEN_L, num_word(m0));
     securec_check(rc, "", "");
-    rc = strcat_s(buf, CACHE_BUFF_LEN_L, m0 == 1 ? " cent" : " cents");
+    rc = strcat_s(buf, CACHE_BUFF_LEN_L, (m0 == 1) ? " cent" : " cents");
     securec_check(rc, "", "");
 
     /* capitalize output */
@@ -1096,27 +1057,23 @@ Datum cash_numeric(PG_FUNCTION_ARGS)
 {
     Cash money = PG_GETARG_CASH(0);
     Numeric result;
-    int frac_point;
+    int fpoint;
     int64 scale;
     int i;
     Datum amount;
     Datum numeric_scale;
     Datum quotient;
-    struct lconv* local_convert = PGLC_localeconv();
+    struct lconv* lconvert = PGLC_localeconv();
 
     /* see comments about frac_digits in cash_in() */
-    frac_point = local_convert->frac_digits;
-    if (frac_point < 0 || frac_point > 10) {
-        frac_point = 2;
-    }
-
+    fpoint = lconvert->frac_digits;
+    if (fpoint < 0 || fpoint > 10)
+        fpoint = 2;
 
     /* compute required scale factor */
     scale = 1;
-    for (i = 0; i < frac_point; i++) {
+    for (i = 0; i < fpoint; i++)
         scale *= 10;
-    }
-
 
     /* form the result as money / scale */
     amount = DirectFunctionCall1(int8_numeric, Int64GetDatum(money));
@@ -1124,7 +1081,7 @@ Datum cash_numeric(PG_FUNCTION_ARGS)
     quotient = DirectFunctionCall2(numeric_div, amount, numeric_scale);
 
     /* forcibly round to exactly the intended number of digits */
-    result = DatumGetNumeric(DirectFunctionCall2(numeric_round, quotient, Int32GetDatum(frac_point)));
+    result = DatumGetNumeric(DirectFunctionCall2(numeric_round, quotient, Int32GetDatum(fpoint)));
 
     PG_RETURN_NUMERIC(result);
 }
@@ -1136,25 +1093,21 @@ Datum numeric_cash(PG_FUNCTION_ARGS)
 {
     Datum amount = PG_GETARG_DATUM(0);
     Cash result;
-    int frac_point;
+    int fpoint;
     int64 scale;
     int i;
     Datum numeric_scale;
-    struct lconv* local_convert = PGLC_localeconv();
+    struct lconv* lconvert = PGLC_localeconv();
 
     /* see comments about frac_digits in cash_in() */
-    frac_point = local_convert->frac_digits;
-    if (frac_point < 0 || frac_point > 10) {
-        frac_point = 2;
-    }
-
+    fpoint = lconvert->frac_digits;
+    if (fpoint < 0 || fpoint > 10)
+        fpoint = 2;
 
     /* compute required scale factor */
     scale = 1;
-    for (i = 0; i < frac_point; i++) {
+    for (i = 0; i < fpoint; i++)
         scale *= 10;
-    }
-
 
     /* multiply the input amount by scale factor */
     numeric_scale = DirectFunctionCall1(int8_numeric, Int64GetDatum(scale));
@@ -1173,23 +1126,20 @@ Datum int4_cash(PG_FUNCTION_ARGS)
 {
     int32 amount = PG_GETARG_INT32(0);
     Cash result;
-    int frac_point;
+    int fpoint;
     int64 scale;
     int i;
-    struct lconv* local_convert = PGLC_localeconv();
+    struct lconv* lconvert = PGLC_localeconv();
 
     /* see comments about frac_digits in cash_in() */
-    frac_point = local_convert->frac_digits;
-    if (frac_point < 0 || frac_point > 10) {
-        frac_point = 2;
-    }
+    fpoint = lconvert->frac_digits;
+    if (fpoint < 0 || fpoint > 10)
+        fpoint = 2;
 
     /* compute required scale factor */
     scale = 1;
-    for (i = 0; i < frac_point; i++) {
+    for (i = 0; i < fpoint; i++)
         scale *= 10;
-    }
-
 
     /* compute amount * scale, checking for overflow */
     result = DatumGetInt64(DirectFunctionCall2(int8mul, Int64GetDatum(amount), Int64GetDatum(scale)));
@@ -1204,22 +1154,20 @@ Datum int8_cash(PG_FUNCTION_ARGS)
 {
     int64 amount = PG_GETARG_INT64(0);
     Cash result;
-    int frac_point;
+    int fpoint;
     int64 scale;
     int i;
-    struct lconv* local_convert = PGLC_localeconv();
+    struct lconv* lconvert = PGLC_localeconv();
 
     /* see comments about frac_digits in cash_in() */
-    frac_point = local_convert->frac_digits;
-    if (frac_point < 0 || frac_point > 10) {
-        frac_point = 2;
-    }
+    fpoint = lconvert->frac_digits;
+    if (fpoint < 0 || fpoint > 10)
+        fpoint = 2;
 
     /* compute required scale factor */
     scale = 1;
-    for (i = 0; i < frac_point; i++) {
+    for (i = 0; i < fpoint; i++)
         scale *= 10;
-    }
 
     /* compute amount * scale, checking for overflow */
     result = DatumGetInt64(DirectFunctionCall2(int8mul, Int64GetDatum(amount), Int64GetDatum(scale)));

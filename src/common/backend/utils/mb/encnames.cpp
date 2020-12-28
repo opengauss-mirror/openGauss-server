@@ -6,7 +6,9 @@
  */
 #ifdef FRONTEND
 #include "postgres_fe.h"
+#ifndef Assert
 #define Assert(condition)
+#endif
 #else
 #include "postgres.h"
 #include "knl/knl_variable.h"

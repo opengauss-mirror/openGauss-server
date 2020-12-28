@@ -24,7 +24,7 @@
 
 Datum spg_quad_config(PG_FUNCTION_ARGS)
 {
-    spgConfigOut* cfg = (spgConfigOut*)PG_GETARG_POINTER(1);
+    spgConfigOut *cfg = (spgConfigOut *)PG_GETARG_POINTER(1);
 
     cfg->prefixType = POINTOID;
     cfg->labelType = VOIDOID; /* we don't need node labels */
@@ -47,7 +47,7 @@ Datum spg_quad_config(PG_FUNCTION_ARGS)
  * Points on one of the axes are taken to lie in the lowest-numbered
  * adjacent quadrant.
  */
-static int2 getQuadrant(Point* centroid, Point* tst)
+static int2 getQuadrant(Point *centroid, Point *tst)
 {
     if ((SPTEST(point_above, tst, centroid) || SPTEST(point_horiz, tst, centroid)) &&
         (SPTEST(point_right, tst, centroid) || SPTEST(point_vert, tst, centroid)))
@@ -68,10 +68,10 @@ static int2 getQuadrant(Point* centroid, Point* tst)
 
 Datum spg_quad_choose(PG_FUNCTION_ARGS)
 {
-    spgChooseIn* in = (spgChooseIn*)PG_GETARG_POINTER(0);
-    spgChooseOut* out = (spgChooseOut*)PG_GETARG_POINTER(1);
-    Point* inPoint = DatumGetPointP(in->datum);
-    Point* centroid = NULL;
+    spgChooseIn *in = (spgChooseIn *)PG_GETARG_POINTER(0);
+    spgChooseOut *out = (spgChooseOut *)PG_GETARG_POINTER(1);
+    Point *inPoint = DatumGetPointP(in->datum);
+    Point *centroid = NULL;
 
     if (in->allTheSame) {
         out->resultType = spgMatchNode;
@@ -95,20 +95,20 @@ Datum spg_quad_choose(PG_FUNCTION_ARGS)
 }
 
 #ifdef USE_MEDIAN
-static int x_cmp(const void* a, const void* b, void* arg)
+static int x_cmp(const void *a, const void *b, void *arg)
 {
-    Point* pa = *(Point**)a;
-    Point* pb = *(Point**)b;
+    Point *pa = *(Point **)a;
+    Point *pb = *(Point **)b;
 
     if (pa->x == pb->x)
         return 0;
     return (pa->x > pb->x) ? 1 : -1;
 }
 
-static int y_cmp(const void* a, const void* b, void* arg)
+static int y_cmp(const void *a, const void *b, void *arg)
 {
-    Point* pa = *(Point**)a;
-    Point* pb = *(Point**)b;
+    Point *pa = *(Point **)a;
+    Point *pb = *(Point **)b;
 
     if (pa->y == pb->y)
         return 0;
@@ -118,14 +118,14 @@ static int y_cmp(const void* a, const void* b, void* arg)
 
 Datum spg_quad_picksplit(PG_FUNCTION_ARGS)
 {
-    spgPickSplitIn* in = (spgPickSplitIn*)PG_GETARG_POINTER(0);
-    spgPickSplitOut* out = (spgPickSplitOut*)PG_GETARG_POINTER(1);
+    spgPickSplitIn *in = (spgPickSplitIn *)PG_GETARG_POINTER(0);
+    spgPickSplitOut *out = (spgPickSplitOut *)PG_GETARG_POINTER(1);
     int i;
-    Point* centroid = NULL;
+    Point *centroid = NULL;
 
 #ifdef USE_MEDIAN
     /* Use the median values of x and y as the centroid point */
-    Point** sorted;
+    Point **sorted;
 
     sorted = palloc(sizeof(*sorted) * in->nTuples);
     for (i = 0; i < in->nTuples; i++)
@@ -139,7 +139,7 @@ Datum spg_quad_picksplit(PG_FUNCTION_ARGS)
     centroid->y = sorted[in->nTuples >> 1]->y;
 #else
     /* Use the average values of x and y as the centroid point */
-    centroid = (Point*)palloc0(sizeof(*centroid));
+    centroid = (Point *)palloc0(sizeof(*centroid));
 
     for (i = 0; i < in->nTuples; i++) {
         centroid->x += DatumGetPointP(in->datums[i])->x;
@@ -156,11 +156,11 @@ Datum spg_quad_picksplit(PG_FUNCTION_ARGS)
     out->nNodes = 4;
     out->nodeLabels = NULL; /* we don't need node labels */
 
-    out->mapTuplesToNodes = (int*)palloc(sizeof(int) * in->nTuples);
-    out->leafTupleDatums = (Datum*)palloc(sizeof(Datum) * in->nTuples);
+    out->mapTuplesToNodes = (int *)palloc(sizeof(int) * in->nTuples);
+    out->leafTupleDatums = (Datum *)palloc(sizeof(Datum) * in->nTuples);
 
     for (i = 0; i < in->nTuples; i++) {
-        Point* p = DatumGetPointP(in->datums[i]);
+        Point *p = DatumGetPointP(in->datums[i]);
         int quadrant = getQuadrant(centroid, p) - 1;
 
         out->leafTupleDatums[i] = PointPGetDatum(p);
@@ -172,9 +172,9 @@ Datum spg_quad_picksplit(PG_FUNCTION_ARGS)
 
 Datum spg_quad_inner_consistent(PG_FUNCTION_ARGS)
 {
-    spgInnerConsistentIn* in = (spgInnerConsistentIn*)PG_GETARG_POINTER(0);
-    spgInnerConsistentOut* out = (spgInnerConsistentOut*)PG_GETARG_POINTER(1);
-    Point* centroid = NULL;
+    spgInnerConsistentIn *in = (spgInnerConsistentIn *)PG_GETARG_POINTER(0);
+    spgInnerConsistentOut *out = (spgInnerConsistentOut *)PG_GETARG_POINTER(1);
+    Point *centroid = NULL;
     int which;
     int i;
 
@@ -184,7 +184,7 @@ Datum spg_quad_inner_consistent(PG_FUNCTION_ARGS)
     if (in->allTheSame) {
         /* Report that all nodes should be visited */
         out->nNodes = in->nNodes;
-        out->nodeNumbers = (int*)palloc(sizeof(int) * in->nNodes);
+        out->nodeNumbers = (int *)palloc(sizeof(int) * in->nNodes);
         for (i = 0; i < in->nNodes; i++)
             out->nodeNumbers[i] = i;
         PG_RETURN_VOID();
@@ -196,8 +196,8 @@ Datum spg_quad_inner_consistent(PG_FUNCTION_ARGS)
     which = (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4);
 
     for (i = 0; i < in->nkeys; i++) {
-        Point* query = DatumGetPointP(in->scankeys[i].sk_argument);
-        BOX* boxQuery = NULL;
+        Point *query = DatumGetPointP(in->scankeys[i].sk_argument);
+        BOX *boxQuery = NULL;
 
         switch (in->scankeys[i].sk_strategy) {
             case RTLeftStrategyNumber:
@@ -248,9 +248,8 @@ Datum spg_quad_inner_consistent(PG_FUNCTION_ARGS)
                 }
                 break;
             default:
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("unrecognized strategy number: %d", in->scankeys[i].sk_strategy)));
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                                errmsg("unrecognized strategy number: %d", in->scankeys[i].sk_strategy)));
                 break;
         }
 
@@ -259,7 +258,7 @@ Datum spg_quad_inner_consistent(PG_FUNCTION_ARGS)
     }
 
     /* We must descend into the quadrant(s) identified by which */
-    out->nodeNumbers = (int*)palloc(sizeof(int) * 4);
+    out->nodeNumbers = (int *)palloc(sizeof(int) * 4);
     out->nNodes = 0;
     for (i = 1; i <= 4; i++) {
         if (which & (1U << (uint32)i))
@@ -271,9 +270,9 @@ Datum spg_quad_inner_consistent(PG_FUNCTION_ARGS)
 
 Datum spg_quad_leaf_consistent(PG_FUNCTION_ARGS)
 {
-    spgLeafConsistentIn* in = (spgLeafConsistentIn*)PG_GETARG_POINTER(0);
-    spgLeafConsistentOut* out = (spgLeafConsistentOut*)PG_GETARG_POINTER(1);
-    Point* datum = DatumGetPointP(in->leafDatum);
+    spgLeafConsistentIn *in = (spgLeafConsistentIn *)PG_GETARG_POINTER(0);
+    spgLeafConsistentOut *out = (spgLeafConsistentOut *)PG_GETARG_POINTER(1);
+    Point *datum = DatumGetPointP(in->leafDatum);
     bool res = true;
     int i;
 
@@ -286,7 +285,7 @@ Datum spg_quad_leaf_consistent(PG_FUNCTION_ARGS)
     /* Perform the required comparison(s) */
     res = true;
     for (i = 0; i < in->nkeys; i++) {
-        Point* query = DatumGetPointP(in->scankeys[i].sk_argument);
+        Point *query = DatumGetPointP(in->scankeys[i].sk_argument);
 
         switch (in->scankeys[i].sk_strategy) {
             case RTLeftStrategyNumber:
@@ -314,9 +313,8 @@ Datum spg_quad_leaf_consistent(PG_FUNCTION_ARGS)
                 res = SPTEST(box_contain_pt, query, datum);
                 break;
             default:
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("unrecognized strategy number: %d", in->scankeys[i].sk_strategy)));
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                                errmsg("unrecognized strategy number: %d", in->scankeys[i].sk_strategy)));
                 break;
         }
 

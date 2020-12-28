@@ -1,0 +1,222 @@
+create schema inlist2join_cost_base;
+set current_schema=inlist2join_cost_base;
+set qrw_inlist2join_optmode=disable;
+set qrw_inlist2join_optmode=rule_base;
+set qrw_inlist2join_optmode=-1;
+ERROR:  invalid value for parameter "qrw_inlist2join_optmode": "-1"
+DETAIL:  Available values: disable, cost_base, rule_base, or any positive integer as a inlist2join threshold
+set qrw_inlist2join_optmode=cost_base;
+create table t1(c1 int, c2 int, c3 int) distribute by hash(c1);
+copy t1 from '@abs_srcdir@/data/inlist2join.data';
+create table t2(c1 int, c2 int, c3 int) distribute by hash(c1);
+insert into t2 select * from t1;
+ANALYZE t1;
+ANALYZE t2;
+-- T_HashJoin   T_Stream T_SubqueryScan
+explain (costs off) select t2.c3, t2.c2 from t2 where t2.c1 > 1 AND t2.c2 in (select t1.c2 from t1 where t1.c1 IN (22376, 7697,91842,32482,49627,89493,83303,64430,62630,12468,41219,86264,57512,26467,83933,90814,96326,94490,16793,30622,54667,71608,83944,40124,90224,11409,47022,93382,33348,22693,40793,84920,13919,79189, 6675,49103,65433,12945,31682, 2106,42248,61990,66384,86546,62487,60545,74527,73315,42924,47691,88203,67892,26852,72041,35315,33527,57991, 5747, 45109,74104,17051,73311,67981,72523,89732,97553, 7721, 2093,60644,66857,18634,79095,44341,11184,72487, 3615,48173,17393,27185, 6279,69965,22133, 2138,33295,32935,49062,76352,27384,49675,39611,11423, 3726,43077,97087,70532,47240,74421,83989,59023,29279)) order by 1,2;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t2.c3, t2.c2
+   ->  Sort
+         Sort Key: t2.c3, t2.c2
+         ->  Hash Semi Join
+               Hash Cond: (t2.c2 = inlist2join_cost_base.t1.c2)
+               ->  Seq Scan on t2
+                     Filter: (c1 > 1)
+               ->  Hash
+                     ->  Streaming(type: BROADCAST)
+                           ->  Hash Semi Join
+                                 Hash Cond: (inlist2join_cost_base.t1.c1 = "*VALUES*".column1)
+                                 ->  Seq Scan on t1
+                                 ->  Hash
+                                       ->  Streaming(type: REDISTRIBUTE)
+                                             ->  Values Scan on "*VALUES*"
+(16 rows)
+
+-- T_MergeJoin
+set enable_hashjoin =off;
+explain (costs off) select t2.c3, t2.c2 from t2 where t2.c1 > 1 AND t2.c2 in (select t1.c2 from t1 where t1.c1 IN (22376, 7697,91842,32482,49627,89493,83303,64430,62630,12468,41219,86264,57512,26467,83933,90814,96326,94490,16793,30622,54667,71608,83944,40124,90224,11409,47022,93382,33348,22693,40793,84920,13919,79189, 6675,49103,65433,12945,31682, 2106,42248,61990,66384,86546,62487,60545,74527,73315,42924,47691,88203,67892,26852,72041,35315,33527,57991, 5747, 45109,74104,17051,73311,67981,72523,89732,97553, 7721, 2093,60644,66857,18634,79095,44341,11184,72487, 3615,48173,17393,27185, 6279,69965,22133, 2138,33295,32935,49062,76352,27384,49675,39611,11423, 3726,43077,97087,70532,47240,74421,83989,59023,29279)) order by 1,2;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t2.c3, t2.c2
+   ->  Sort
+         Sort Key: t2.c3, t2.c2
+         ->  Merge Semi Join
+               Merge Cond: (t2.c2 = inlist2join_cost_base.t1.c2)
+               ->  Sort
+                     Sort Key: t2.c2
+                     ->  Seq Scan on t2
+                           Filter: (c1 > 1)
+               ->  Sort
+                     Sort Key: inlist2join_cost_base.t1.c2
+                     ->  Streaming(type: BROADCAST)
+                           ->  Merge Semi Join
+                                 Merge Cond: (inlist2join_cost_base.t1.c1 = "*VALUES*".column1)
+                                 ->  Sort
+                                       Sort Key: inlist2join_cost_base.t1.c1
+                                       ->  Seq Scan on t1
+                                 ->  Sort
+                                       Sort Key: "*VALUES*".column1
+                                       ->  Streaming(type: REDISTRIBUTE)
+                                             ->  Values Scan on "*VALUES*"
+(22 rows)
+
+-- T_MergeJoin T_Material
+set enable_mergejoin = off;
+explain (costs off) select t2.c3, t2.c2 from t2 where t2.c1 > 1 AND t2.c2 in (select t1.c2 from t1 where t1.c1 IN (22376, 7697,91842,32482,49627,89493,83303,64430,62630,12468,41219,86264,57512,26467,83933,90814,96326,94490,16793,30622,54667,71608,83944,40124,90224,11409,47022,93382,33348,22693,40793,84920,13919,79189, 6675,49103,65433,12945,31682, 2106,42248,61990,66384,86546,62487,60545,74527,73315,42924,47691,88203,67892,26852,72041,35315,33527,57991, 5747, 45109,74104,17051,73311,67981,72523,89732,97553, 7721, 2093,60644,66857,18634,79095,44341,11184,72487, 3615,48173,17393,27185, 6279,69965,22133, 2138,33295,32935,49062,76352,27384,49675,39611,11423, 3726,43077,97087,70532,47240,74421,83989,59023,29279)) order by 1,2;
+                                                                                                                                                                                                                                                                                                                                    QUERY PLAN                                                                                                                                                                                                                                                                                                                                     
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t2.c3, t2.c2
+   ->  Sort
+         Sort Key: t2.c3, t2.c2
+         ->  Nested Loop Semi Join
+               Join Filter: (t2.c2 = t1.c2)
+               ->  Streaming(type: REDISTRIBUTE)
+                     ->  Seq Scan on t2
+                           Filter: (c1 > 1)
+               ->  Materialize
+                     ->  Streaming(type: REDISTRIBUTE)
+                           ->  Seq Scan on t1
+                                 Filter: (c1 = ANY ('{22376,7697,91842,32482,49627,89493,83303,64430,62630,12468,41219,86264,57512,26467,83933,90814,96326,94490,16793,30622,54667,71608,83944,40124,90224,11409,47022,93382,33348,22693,40793,84920,13919,79189,6675,49103,65433,12945,31682,2106,42248,61990,66384,86546,62487,60545,74527,73315,42924,47691,88203,67892,26852,72041,35315,33527,57991,5747,45109,74104,17051,73311,67981,72523,89732,97553,7721,2093,60644,66857,18634,79095,44341,11184,72487,3615,48173,17393,27185,6279,69965,22133,2138,33295,32935,49062,76352,27384,49675,39611,11423,3726,43077,97087,70532,47240,74421,83989,59023,29279}'::integer[]))
+(13 rows)
+
+create index index1 on t1(c1);
+create index index2 on t2(c1);
+-- T_Append
+set enable_nestloop =on;
+set  enable_hashjoin = on;
+set enable_bitmapscan = off;
+explain (costs off) select * from (select * from t1 where t1.c1 in (22376, 7697,91842,32482,49627,89493,83303,64430,62630,12468,41219,86264,57512,26467,83933,90814,96326,94490,16793) union all select * from t2) as dt where dt.c1 in ( 2093,60644,66857,18634,79095,44341,11184,72487, 3615,48173,17393,27185, 6279,69965,22133, 2138,33295,32935,49062,76352,27384,49675,39611,11423, 3726,43077,97087,70532,47240,74421,83989,59023,29279) order by 1;
+                                                                                                                             QUERY PLAN                                                                                                                             
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: inlist2join_cost_base.t1.c1
+   ->  Sort
+         Sort Key: inlist2join_cost_base.t1.c1
+         ->  Result
+               ->  Append
+                     ->  Nested Loop Semi Join
+                           Join Filter: (inlist2join_cost_base.t1.c1 = "*VALUES*".column1)
+                           ->  Nested Loop
+                                 ->  Streaming(type: REDISTRIBUTE)
+                                       ->  HashAggregate
+                                             Group By Key: "*VALUES*".column1
+                                             ->  Values Scan on "*VALUES*"
+                                 ->  Index Scan using index1 on t1
+                                       Index Cond: (c1 = "*VALUES*".column1)
+                           ->  Materialize
+                                 ->  Streaming(type: REDISTRIBUTE)
+                                       ->  Values Scan on "*VALUES*"
+                     ->  Index Scan using index2 on t2
+                           Index Cond: (c1 = ANY ('{2093,60644,66857,18634,79095,44341,11184,72487,3615,48173,17393,27185,6279,69965,22133,2138,33295,32935,49062,76352,27384,49675,39611,11423,3726,43077,97087,70532,47240,74421,83989,59023,29279}'::integer[]))
+(20 rows)
+
+-- T_MergeAppend
+-- partition table
+create table t1_p(c1 int, c2 int, c3 int)
+distribute by hash(c1)
+PARTITION BY RANGE(c1)
+(
+PARTITION P1 VALUES LESS THAN(20000),
+PARTITION P2 VALUES LESS THAN(40000),
+PARTITION P3 VALUES LESS THAN(60000),
+PARTITION P4 VALUES LESS THAN(80000),
+PARTITION P8 VALUES LESS THAN(MAXVALUE)
+);
+create table t2_p(c1 int, c2 int, c3 int)
+distribute by hash(c1)
+PARTITION BY RANGE(c1)
+(
+PARTITION P1 VALUES LESS THAN(30000),
+PARTITION P2 VALUES LESS THAN(60000),
+PARTITION P3 VALUES LESS THAN(90000),
+PARTITION P8 VALUES LESS THAN(MAXVALUE)
+);
+insert into t1_p select * from t1;
+insert into t2_p select * from t1;
+ANALYZE t1_p;
+ANALYZE t2_p;
+-- T_PartIterator
+explain (costs off) select t2_p.c2 from t2_p join t1_p on t1_p.c1=t2_p.c2 and t2_p.c2 in (1,2,3,4,5,6,7,8,9,10,11);
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         Join Filter: (inlist2join_cost_base.t2_p.c2 = inlist2join_cost_base.t1_p.c1)
+         ->  Hash Semi Join
+               Hash Cond: (inlist2join_cost_base.t1_p.c1 = "*VALUES*".column1)
+               ->  Partition Iterator
+                     Iterations: 5
+                     ->  Partitioned Seq Scan on t1_p
+                           Selected Partitions:  1..5
+               ->  Hash
+                     ->  Streaming(type: REDISTRIBUTE)
+                           ->  Values Scan on "*VALUES*"
+         ->  Materialize
+               ->  Streaming(type: REDISTRIBUTE)
+                     ->  Hash Semi Join
+                           Hash Cond: (inlist2join_cost_base.t2_p.c2 = "*VALUES*".column1)
+                           ->  Partition Iterator
+                                 Iterations: 4
+                                 ->  Partitioned Seq Scan on t2_p
+                                       Selected Partitions:  1..4
+                           ->  Hash
+                                 ->  Values Scan on "*VALUES*"
+(22 rows)
+
+set enable_nestloop =off;
+explain (costs off) select t2_p.c2 from t2_p join t1_p on t1_p.c1=t2_p.c2 and t2_p.c2 in (22376, 7697,91842,32482,49627,89493,83303,64430,62630,12468,41219,86264,57512,26467,83933,90814,96326,94490,16793,30622,54667,71608,83944,40124,90224,11409,47022,93382,33348,22693,40793,84920,13919,79189, 6675,49103,65433,12945,31682, 2106,42248,61990,66384,86546,62487,60545,74527,73315,42924,47691,88203,67892,26852,72041,35315,33527,57991, 5747, 45109,74104,17051,73311,67981,72523,89732,97553, 7721, 2093,60644,66857,18634,79095,44341,11184,72487, 3615,48173,17393,27185, 6279,69965,22133, 2138,33295,32935,49062,76352,27384,49675,39611,11423, 3726,43077,97087,70532,47240,74421,83989,59023,29279);
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (inlist2join_cost_base.t2_p.c2 = inlist2join_cost_base.t1_p.c1)
+         ->  Streaming(type: REDISTRIBUTE)
+               ->  Hash Semi Join
+                     Hash Cond: (inlist2join_cost_base.t2_p.c2 = "*VALUES*".column1)
+                     ->  Partition Iterator
+                           Iterations: 4
+                           ->  Partitioned Seq Scan on t2_p
+                                 Selected Partitions:  1..4
+                     ->  Hash
+                           ->  Values Scan on "*VALUES*"
+         ->  Hash
+               ->  Hash Semi Join
+                     Hash Cond: (inlist2join_cost_base.t1_p.c1 = "*VALUES*".column1)
+                     ->  Partition Iterator
+                           Iterations: 5
+                           ->  Partitioned Seq Scan on t1_p
+                                 Selected Partitions:  1..5
+                     ->  Hash
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 ->  Values Scan on "*VALUES*"
+(22 rows)
+
+set enable_nestloop =on;
+-- T_WindowAgg plan
+explain (costs off) select c1,c2,avg(c3) OVER (PARTITION BY c1) from t1 where t1.c1 in (1,2,3,4,5,6,7,8,9,10,11) and t1.c2 in (1,2);
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  WindowAgg
+         ->  Sort
+               Sort Key: inlist2join_cost_base.t1.c1
+               ->  Nested Loop
+                     ->  Streaming(type: REDISTRIBUTE)
+                           ->  HashAggregate
+                                 Group By Key: "*VALUES*".column1
+                                 ->  Values Scan on "*VALUES*"
+                     ->  Index Scan using index1 on t1
+                           Index Cond: (c1 = "*VALUES*".column1)
+                           Filter: (c2 = ANY ('{1,2}'::integer[]))
+(12 rows)
+
+drop schema inlist2join_cost_base cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table t1
+drop cascades to table t2
+drop cascades to table t1_p
+drop cascades to table t2_p

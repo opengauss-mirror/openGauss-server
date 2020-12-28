@@ -9,7 +9,7 @@
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
- *		  src/gausskernel/storage/access/gist/gistutil.cpp
+ *    src/gausskernel/storage/access/gist/gistutil.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -146,7 +146,6 @@ void gistMakeUnionItVec(GISTSTATE *giststate, IndexTuple *itvec, int len, Datum 
     int i;
     GistEntryVector *evec = NULL;
     int attrsize;
-
     evec = (GistEntryVector *)palloc((len + 2) * sizeof(GISTENTRY) + GEVHDRSZ);
 
     for (i = 0; i < giststate->tupdesc->natts; i++) {
@@ -204,7 +203,6 @@ IndexTuple gistunion(Relation r, IndexTuple *itvec, int len, GISTSTATE *giststat
  * makes union of two key
  */
 #pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Warray-bounds"
 void gistMakeUnionKey(GISTSTATE *giststate, int attno, GISTENTRY *entry1, bool isnull1, GISTENTRY *entry2, bool isnull2,
                       Datum *dst, bool *dstisnull)
 {
@@ -535,7 +533,6 @@ void GISTInitBuffer(Buffer b, uint32 f)
 void gistcheckpage(Relation rel, Buffer buf)
 {
     Page page = BufferGetPage(buf);
-
     /*
      * ReadBuffer verifies that every newly-read page passes
      * PageHeaderIsValid, which means it either contains a reasonably sane
@@ -573,19 +570,16 @@ Buffer gistNewBuffer(Relation r)
     /* First, try to get a page from FSM */
     for (;;) {
         BlockNumber blkno = GetFreeIndexPage(r);
-
         if (blkno == InvalidBlockNumber)
             break; /* nothing left in FSM */
 
         buffer = ReadBuffer(r, blkno);
-
         /*
          * We have to guard against the possibility that someone else already
          * recycled this page; the buffer may be locked if so.
          */
         if (ConditionalLockBuffer(buffer)) {
             Page page = BufferGetPage(buffer);
-
             if (PageIsNew(page))
                 return buffer; /* OK to use, if never initialized */
 
@@ -603,7 +597,6 @@ Buffer gistNewBuffer(Relation r)
 
     /* Must extend the file */
     needLock = !RELATION_IS_LOCAL(r);
-
     if (needLock)
         LockRelationForExtension(r, ExclusiveLock);
 
@@ -620,12 +613,12 @@ Datum gistoptions(PG_FUNCTION_ARGS)
 {
     Datum reloptions = PG_GETARG_DATUM(0);
     bool validate = PG_GETARG_BOOL(1);
-    relopt_value* options = NULL;
-    GiSTOptions* rdopts = NULL;
+    relopt_value *options = NULL;
+    GiSTOptions *rdopts = NULL;
     int numoptions;
     static const relopt_parse_elt tab[] = {
-        {"fillfactor", RELOPT_TYPE_INT, offsetof(GiSTOptions, fillfactor)},
-        {"buffering", RELOPT_TYPE_STRING, offsetof(GiSTOptions, bufferingModeOffset)}
+        { "fillfactor", RELOPT_TYPE_INT, offsetof(GiSTOptions, fillfactor) },
+        { "buffering", RELOPT_TYPE_STRING, offsetof(GiSTOptions, bufferingModeOffset) }
     };
 
     options = parseRelOptions(reloptions, validate, RELOPT_KIND_GIST, &numoptions);

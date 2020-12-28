@@ -32,7 +32,45 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
+
+static void UpdateConstraintDependencyOn(
+    Oid relId, Oid domainId, const int16* constraintKey, int constraintNTotalKeys, ObjectAddress* conobject)
+{
+    if (OidIsValid(relId)) {
+        /*
+         * Register auto dependency from constraint to owning relation, or to
+         * specific column(s) if any are mentioned.
+         */
+        ObjectAddress relobject;
+
+        relobject.classId = RelationRelationId;
+        relobject.objectId = relId;
+        if (constraintNTotalKeys > 0) {
+            for (int i = 0; i < constraintNTotalKeys; i++) {
+                relobject.objectSubId = constraintKey[i];
+                recordDependencyOn(conobject, &relobject, DEPENDENCY_AUTO);
+            }
+        } else {
+            relobject.objectSubId = 0;
+
+            recordDependencyOn(conobject, &relobject, DEPENDENCY_AUTO);
+        }
+    }
+
+    if (OidIsValid(domainId)) {
+        /*
+         * Register auto dependency from constraint to owning domain
+         */
+        ObjectAddress domobject;
+
+        domobject.classId = TypeRelationId;
+        domobject.objectId = domainId;
+        domobject.objectSubId = 0;
+
+        recordDependencyOn(conobject, &domobject, DEPENDENCY_AUTO);
+    }
+}
 
 /*
  * CreateConstraintEntry
@@ -85,11 +123,9 @@ Oid CreateConstraintEntry(const char* constraintName, Oid constraintNamespace, c
         conkeyArray = NULL;
     }
 
-    // index attrs have key attrs and include attrs, the num of include attrs maybe 0
     if (constraintNTotalKeys > constraintNKeys) {
         int j = 0;
         int constraintNIncludedKeys = constraintNTotalKeys - constraintNKeys;
-
         Datum* conincluding = (Datum*)palloc(constraintNIncludedKeys * sizeof(Datum));
         for (i = constraintNKeys; i < constraintNTotalKeys; i++) {
             conincluding[j++] = Int16GetDatum(constraintKey[i]);
@@ -164,8 +200,6 @@ Oid CreateConstraintEntry(const char* constraintName, Oid constraintNamespace, c
         values[Anum_pg_constraint_conopt - 1] = BoolGetDatum(inforConstraint->enableOpt);
     }
 
-    values[Anum_pg_constraint_conisenable - 1] = BoolGetDatum(true);
-
     if (conkeyArray != NULL)
         values[Anum_pg_constraint_conkey - 1] = PointerGetDatum(conkeyArray);
     else
@@ -231,40 +265,7 @@ Oid CreateConstraintEntry(const char* constraintName, Oid constraintNamespace, c
 
     heap_close(conDesc, RowExclusiveLock);
 
-    if (OidIsValid(relId)) {
-        /*
-         * Register auto dependency from constraint to owning relation, or to
-         * specific column(s) if any are mentioned.
-         */
-        ObjectAddress relobject;
-
-        relobject.classId = RelationRelationId;
-        relobject.objectId = relId;
-        if (constraintNTotalKeys > 0) {
-            for (i = 0; i < constraintNTotalKeys; i++) {
-                relobject.objectSubId = constraintKey[i];
-
-                recordDependencyOn(&conobject, &relobject, DEPENDENCY_AUTO);
-            }
-        } else {
-            relobject.objectSubId = 0;
-
-            recordDependencyOn(&conobject, &relobject, DEPENDENCY_AUTO);
-        }
-    }
-
-    if (OidIsValid(domainId)) {
-        /*
-         * Register auto dependency from constraint to owning domain
-         */
-        ObjectAddress domobject;
-
-        domobject.classId = TypeRelationId;
-        domobject.objectId = domainId;
-        domobject.objectSubId = 0;
-
-        recordDependencyOn(&conobject, &domobject, DEPENDENCY_AUTO);
-    }
+    UpdateConstraintDependencyOn(relId, domainId, constraintKey, constraintNTotalKeys, &conobject);
 
     if (OidIsValid(foreignRelId)) {
         /*
@@ -530,7 +531,7 @@ void RemoveConstraintById(Oid conId)
                         errmsg("cache lookup failed for relation %u", con->conrelid)));
             classForm = (Form_pg_class)GETSTRUCT(relTup);
 
-            if (classForm->relchecks == 0 && con->conisenable) /* should not happen */
+            if (classForm->relchecks == 0) /* should not happen */
                 ereport(ERROR,
                     (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                         errmsg("relation \"%s\" has relchecks = 0", RelationGetRelationName(rel))));

@@ -25,13 +25,13 @@ SELECT relcmprs  FROM pg_class WHERE relname = 'compress_11';
 DROP TABLE compress_11;
 ALTER TABLE compress_10 SET NOCOMPRESS;
 SELECT relcmprs  FROM pg_class WHERE relname = 'compress_10';
-CREATE TABLE compress_11 COMPRESS as SELECT a00, a01 FROM compress_10;
+CREATE TABLE compress_11 as SELECT a00, a01 FROM compress_10;
 SELECT relcmprs  FROM pg_class WHERE relname = 'compress_11';
 ALTER TABLE compress_11 SET NOCOMPRESS;
 SELECT relcmprs  FROM pg_class WHERE relname = 'compress_11';
 -- CASE 1.4  USER SPECIFY
 DROP TABLE compress_11;
-CREATE TABLE compress_11(b00, b01) COMPRESS as SELECT a00, a01 FROM compress_10;
+CREATE TABLE compress_11(b00, b01) SELECT a00, a01 FROM compress_10;
 SELECT relcmprs  FROM pg_class WHERE relname = 'compress_11';
 ALTER TABLE compress_11 SET NOCOMPRESS;
 SELECT relcmprs  FROM pg_class WHERE relname = 'compress_11';
@@ -45,8 +45,8 @@ CREATE TABLE compress_10 (
 	a02 int NOCOMPRESS,
 	a03 varchar(100) PREFIX,
 	a04 int
-) COMPRESS;
-CREATE TABLE compress_11 COMPRESS as SELECT * FROM compress_10;
+) ;
+CREATE TABLE compress_11 as SELECT * FROM compress_10;
 SELECT attname, attcmprmode FROM pg_attribute WHERE attname LIKE 'a%' and attrelid = (SELECT oid FROM pg_class WHERE relname='compress_10') ORDER BY attname;
 SELECT attname, attcmprmode FROM pg_attribute WHERE attname LIKE 'a%' and attrelid = (SELECT oid FROM pg_class WHERE relname='compress_11') ORDER BY attname;
 -- CLEAN UP
@@ -68,7 +68,7 @@ DROP TABLE compress_12;
 CREATE TABLE compress_12 OF compress_type_12 (
 PRIMARY KEY (name),
 salary WITH OPTIONS DEFAULT 1000
-) COMPRESS;
+) ;
 SELECT relcmprs  FROM pg_class WHERE relname = 'compress_12';
 ALTER TABLE compress_12 SET NOCOMPRESS;
 SELECT relcmprs  FROM pg_class WHERE relname = 'compress_12';
@@ -87,7 +87,7 @@ CREATE TYPE compress_type_13 AS (
 	a08 INT ,
 	a09 INT
 );
-CREATE TABLE compress_14 OF compress_type_13 COMPRESS;
+CREATE TABLE compress_14 OF compress_type_13 ;
 CREATE TABLE compress_13(
 	a00 INT ,
 	a01 INT ,
@@ -114,8 +114,8 @@ INSERT INTO compress_13 SELECT * FROM compress_13;
 INSERT INTO compress_13 SELECT * FROM compress_13;
 INSERT INTO compress_13 SELECT * FROM compress_13;
 INSERT INTO compress_13 SELECT * FROM compress_13;
-COPY compress_13 TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/compress_13.tmp.data';
-COPY compress_14 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/compress_13.tmp.data';
+COPY compress_13 TO '@abs_srcdir@/data/compress_13.tmp.data';
+COPY compress_14 FROM '@abs_srcdir@/data/compress_13.tmp.data';
 SELECT (SELECT pg_relation_size('compress_14')) < (SELECT pg_relation_size('compress_13'));
 SELECT (SELECT COUNT(*) FROM compress_13) - (SELECT COUNT(*) FROM compress_14);
 (SELECT * FROM compress_13) MINUS ALL (SELECT * FROM compress_14);
@@ -124,7 +124,7 @@ SELECT (SELECT COUNT(*) FROM compress_13) - (SELECT COUNT(*) FROM compress_14);
 DROP TABLE compress_14;
 DROP TABLE compress_13;
 DROP TYPE compress_type_13;
-\! rm @abs_srcdir@/tmp_check/datanode1/pg_copydir/compress_13.tmp.data
+\! rm @abs_srcdir@/data/compress_13.tmp.data
 -- TEST CASE3: CREATE TABLE IF NOT EXISTS OF type_name
 CREATE TABLE IF NOT EXISTS compress_15 OF compress_type_12 (
 PRIMARY KEY (name),
@@ -140,7 +140,7 @@ CREATE TABLE compress_17 (
 	a02 int NOCOMPRESS,
 	a03 varchar(100) PREFIX,
 	a04 int
-) COMPRESS;
+) ;
 CREATE TABLE compress_16 (LIKE compress_17);
 -- CASE 4.1
 SELECT relcmprs  FROM pg_class WHERE relname = 'compress_16';
@@ -150,7 +150,7 @@ SELECT attname, attcmprmode FROM pg_attribute WHERE attname LIKE 'a%' and attrel
 -- CASE 4.2
 DROP TABLE compress_16;
 ALTER TABLE compress_17 SET NOCOMPRESS;
-CREATE TABLE compress_16 (LIKE compress_17) COMPRESS;
+CREATE TABLE compress_16 (LIKE compress_17) ;
 SELECT relcmprs  FROM pg_class WHERE relname = 'compress_16';
 SELECT relcmprs  FROM pg_class WHERE relname = 'compress_17';
 SELECT attname, attcmprmode FROM pg_attribute WHERE attname LIKE 'a%' and attrelid = (SELECT oid FROM pg_class WHERE relname='compress_17') ORDER BY attname;
@@ -165,7 +165,7 @@ CREATE TABLE compress_18 (
 	a02 int NOCOMPRESS,
 	a03 varchar(100) PREFIX,
 	a04 int
-) COMPRESS;
+) ;
 ALTER TABLE compress_18 ADD COLUMN a05 int DELTA not null;
 SELECT attname, attcmprmode FROM pg_attribute WHERE attname LIKE 'a%' and attrelid = (SELECT oid FROM pg_class WHERE relname='compress_18') ORDER BY attname;
 DROP TABLE compress_18;

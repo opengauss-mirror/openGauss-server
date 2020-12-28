@@ -24,6 +24,6 @@ subdir = src/gausskernel/cbb/utils
 top_builddir = ../../../..
 include $(top_builddir)/src/Makefile.global
 
-SUBDIRS     = aes  biginteger  bloomfilter  debug  gssignal  partition  ssl  zfiles
+SUBDIRS     = aes  biginteger  bloomfilter  debug  gssignal  hll  partition  ssl  zfiles
 
 include $(top_srcdir)/src/gausskernel/common.mk

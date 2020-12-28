@@ -51,4 +51,3 @@ void heartbeat_shmem_init(void);
 Size heartbeat_shmem_size(void);
 
 #endif /* _HEARTBEAT_H */
-

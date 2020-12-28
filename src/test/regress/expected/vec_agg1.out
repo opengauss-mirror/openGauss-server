@@ -1,0 +1,1098 @@
+/*
+ * This file is used to test the function of ExecVecAggregation()---(1)
+ */
+----
+--- Create Table and Insert Data
+----
+create schema vector_agg_engine;
+set current_schema=vector_agg_engine;
+set time zone prc;
+set time zone prc;
+set datestyle to iso;
+\parallel on  5
+create table vector_agg_engine.ROW_AGG_TABLE_01
+( 
+   col_smallint smallint null
+  ,col_integer	integer default 23423
+  ,col_bigint 	bigint default 923423432
+  ,col_oid		Oid
+  ,col_real 	real
+  ,col_numeric 	numeric(18,12) null
+  ,col_numeric2 numeric null
+  ,col_double_precision double precision
+  ,col_decimal 			decimal(19) default 923423423
+  ,col_char 	char(57) null
+  ,col_char2 	char default '0'
+  ,col_varchar 	varchar(19)
+  ,col_text text 	null
+  ,col_varchar2 	varchar2(20)
+  ,col_time_without_time_zone	time without time zone null
+  ,col_time_with_time_zone 		time with time zone
+  ,col_timestamp_without_timezone	timestamp
+  ,col_timestamp_with_timezone 	timestamptz
+  ,col_smalldatetime	smalldatetime
+  ,col_money			money
+  ,col_date date
+) distribute by hash(col_integer);
+create table vector_agg_engine.VECTOR_AGG_TABLE_01
+( 
+   col_smallint smallint null
+  ,col_integer	integer default 23423
+  ,col_bigint 	bigint default 923423432
+  ,col_oid		Oid
+  ,col_real 	real
+  ,col_numeric 	numeric(18,12) null
+  ,col_numeric2 numeric null
+  ,col_double_precision double precision
+  ,col_decimal 			decimal(19) default 923423423
+  ,col_char 		char(57) null
+  ,col_char2 		char default '0'
+  ,col_varchar 		varchar(19)
+  ,col_text text 	null
+  ,col_varchar2 	varchar2(25)
+  ,col_time_without_time_zone		time without time zone null
+  ,col_time_with_time_zone 			time with time zone
+  ,col_timestamp_without_timezone	timestamp
+  ,col_timestamp_with_timezone 		timestamptz
+  ,col_smalldatetime	smalldatetime
+  ,col_money			money
+  ,col_date date
+) with (orientation=column) distribute by hash(col_integer);
+create table vector_agg_engine.VECTOR_AGG_TABLE_02
+(  col_int  int
+  ,col_num  numeric
+  ,col_bint bigint
+)with(orientation = column) distribute by hash(col_int);
+create table vector_agg_engine.ROW_AGG_TABLE_03
+( 
+   col_smallint smallint null
+  ,col_integer  integer default 23423
+  ,col_bigint   bigint default 923423432
+  ,col_real   real
+  ,col_numeric  numeric(18,12) null
+  ,col_serial int 
+  ,col_double_precision double precision
+  ,col_decimal      decimal(19) default 923423423
+  ,col_char     char(57) null
+  ,col_char2    char default '0'
+  ,col_varchar    varchar(19)
+  ,col_text text  null
+  ,col_varchar2   varchar2(25)
+  ,col_time_without_time_zone   time without time zone null
+  ,col_time_with_time_zone      time with time zone
+  ,col_timestamp_without_timezone timestamp
+  ,col_timestamp_with_timezone    timestamptz
+  ,col_smalldatetime  smalldatetime
+  ,col_money      money
+  ,col_date date
+) with (orientation=column) distribute by hash(col_integer)
+partition by range(col_numeric, col_date, col_integer)(
+partition partition_p1 values less than(3,'2002-02-04 00:01:00',20),
+partition partition_p2 values less than(21,'2005-03-26 00:00:00',1061) ,
+partition partition_p3 values less than(121,'2005-06-01 20:00:00',1600),
+partition partition_p4 values less than(121,'2006-08-01 20:00:00',1987) ,
+partition partition_p5 values less than(1456,'2007-12-03 10:00:00',2567),
+partition partition_p6 values less than(2678,'2008-02-03 11:01:34',2800),
+partition partition_p7 values less than(3601,'2008-02-13 01:01:34',3801),
+partition partition_p8 values less than(3601,'2012-04-18 23:01:44',4560),
+partition partition_p9 values less than(4500,'2012-06-18 23:01:44',4900),
+partition partition_p10 values less than(9845,'2016-06-28 23:21:44',6200)) ;
+create table vector_agg_engine.VECTOR_AGG_TABLE_03
+( 
+   col_smallint smallint null
+  ,col_integer  integer default 23423
+  ,col_bigint   bigint default 923423432
+  ,col_real   real
+  ,col_numeric  numeric(18,12) null
+  ,col_numeric2 numeric null
+  ,col_double_precision double precision
+  ,col_decimal      decimal(19) default 923423423
+  ,col_char     char(57) null
+  ,col_char2    char default '0'
+  ,col_varchar    varchar(19)
+  ,col_text text  null
+  ,col_varchar2   varchar2(25)
+  ,col_time_without_time_zone   time without time zone null
+  ,col_time_with_time_zone      time with time zone
+  ,col_timestamp_without_timezone timestamp
+  ,col_timestamp_with_timezone    timestamptz
+  ,col_smalldatetime  smalldatetime
+  ,col_money      money
+  ,col_date date
+) with (orientation=column) distribute by hash(col_integer)
+partition by range(col_numeric, col_date, col_integer)(
+partition partition_p1 values less than(3,'2002-02-04 00:01:00',20),
+partition partition_p2 values less than(21,'2005-03-26 00:00:00',1061) ,
+partition partition_p3 values less than(121,'2005-06-01 20:00:00',1600),
+partition partition_p4 values less than(121,'2006-08-01 20:00:00',1987) ,
+partition partition_p5 values less than(1456,'2007-12-03 10:00:00',2567),
+partition partition_p6 values less than(2678,'2008-02-03 11:01:34',2800),
+partition partition_p7 values less than(3601,'2008-02-13 01:01:34',3801),
+partition partition_p8 values less than(3601,'2012-04-18 23:01:44',4560),
+partition partition_p9 values less than(4500,'2012-06-18 23:01:44',4900),
+partition partition_p10 values less than(9845,'2016-06-28 23:21:44',6200)) ;
+\parallel off
+--CREATE OR REPLACE PROCEDURE func_insert_tbl_agg_01()
+--AS  
+--BEGIN  
+--	FOR I IN 1..6000 LOOP
+--		if I < 2000 then
+--			INSERT INTO vector_agg_engine.row_agg_table_01 VALUES(1, i, 111111, 23, i + 10.001, 561.322815379585 + i, 20857435000485996218310931968699256001981133222933850071857221402.725428507532497489821939560364033880 + i * 2,8885.169 - i * 0.125, 61032419811910588 + i, 'test_agg_'||i, 'F', 'vector_agg_'||i, '597b5b23f4aadf9513306bcd59afb6e4c9_'||i, 'beijing_agg'||i, '08:20:12', '06:26:42+08', 'Mon Feb 10 17:32:01.4 1997 PST', '1971-03-23 11:14:05', '1997-03-03 11:04', 56 + i, '2005-02-14');
+--		elsif i > 1999 AND i < 2488 then
+--			INSERT INTO vector_agg_engine.row_agg_table_01 VALUES(1, i, 121111, 45, i + 9.08, 27.25684426652 + i * 0.001, 20857434798277339938397404472048722532796412222119506033298219314.596941867590737379779439339277062225 + i, 8885.169 - i * 0.125, 61032419811910588 + i, 'test_agg_'||i, 'T', 'vector_agg_'||i, '597b5b23f4aadf9513306bcd59afb6e4c9_'||i, 'beijing_agg'||i, '14:21:56', '15:12:22+08', 'Mon Feb 10 17:32:01.4 1997 PST', '1971-03-23 11:14:05', '1996-06-12 03:06', 56 + i, '2008-02-14');
+--		else
+--			INSERT INTO vector_agg_engine.row_agg_table_01 VALUES(1, i, 111131, 2345, i + 2.047, 39.2456977995 + i * 0.3, 20857434796839002905636223150710041116810786801730952028511523795.100678976382813790191855282491921088 + i * 1.5, 8885.169 - i * 0.125, 61032419811910588 + i, 'test_agg_'||i, 'F', 'vector_agg_'||i, '597b5b23f4aadf9513306bcd59afb6e4c9_'||i, 'beijing_agg'||i, '19:07:24', '22:32:36+08', 'Mon Feb 10 17:32:01.4 1997 PST', '1971-03-23 11:14:05', '1992-02-06 03:08', 56 + i, '2015-02-14');
+--		end if;
+--	END LOOP; 
+--END;
+--/
+--CALL func_insert_tbl_agg_01();
+create table src(a int);
+insert into src values(1);
+create table t1(a int);
+insert into t1 select generate_series(1,1999) from src;
+insert into vector_agg_engine.row_agg_table_01 select 1, i.a, 111111, 23, i.a + 10.001, 561.322815379585 + i.a, 20857435000485996218310931968699256001981133222933850071857221402.725428507532497489821939560364033880 + i.a * 2,8885.169 - i.a * 0.125, 61032419811910588 + i.a, 'test_agg_'||i.a, 'F', 'vector_agg_'||i.a, '597b5b23f4aadf9513306bcd59afb6e4c9_'||i.a, 'beijing_agg'||i.a, '08:20:12', '06:26:42+08', 'Mon Feb 10 17:32:01.4 1997 PST', '1971-03-23 11:14:05', '1997-03-03 11:04', 56 + i.a, '2005-02-14' from t1 i;
+create table t2(a int);
+insert into t2 select generate_series(2000,2487) from src;
+insert into vector_agg_engine.row_agg_table_01 select  1, i.a, 121111, 45, i.a + 9.08, 27.25684426652 + i.a * 0.001, 20857434798277339938397404472048722532796412222119506033298219314.596941867590737379779439339277062225 + i.a, 8885.169 - i.a * 0.125, 61032419811910588 + i.a, 'test_agg_'||i.a, 'T', 'vector_agg_'||i.a, '597b5b23f4aadf9513306bcd59afb6e4c9_'||i.a, 'beijing_agg'||i.a, '14:21:56', '15:12:22+08', 'Mon Feb 10 17:32:01.4 1997 PST', '1971-03-23 11:14:05', '1996-06-12 03:06', 56 + i.a, '2008-02-14' from t2 i;
+create table t3(a int);
+insert into t3 select generate_series(2488, 6000) from src;
+insert into vector_agg_engine.row_agg_table_01 select 1, i.a, 111131, 2345, i.a + 2.047, 39.2456977995 + i.a * 0.3, 20857434796839002905636223150710041116810786801730952028511523795.100678976382813790191855282491921088 + i.a * 1.5, 8885.169 - i.a * 0.125, 61032419811910588 + i.a, 'test_agg_'||i.a, 'F', 'vector_agg_'||i.a, '597b5b23f4aadf9513306bcd59afb6e4c9_'||i.a, 'beijing_agg'||i.a, '19:07:24', '22:32:36+08', 'Mon Feb 10 17:32:01.4 1997 PST', '1971-03-23 11:14:05', '1992-02-06 03:08', 56 + i.a, '2015-02-14' from t3 i;
+drop table t1;
+drop table t2;
+drop table t3;
+insert into  vector_agg_table_01 select * from row_agg_table_01;
+COPY VECTOR_AGG_TABLE_02(col_int, col_num, col_bint) FROM stdin;
+--CREATE OR REPLACE PROCEDURE func_insert_tbl_agg_03()
+--AS  
+--BEGIN  
+--	FOR I IN 1..1000 LOOP
+--		if I < 200 then
+--			INSERT INTO vector_agg_engine.row_agg_table_03 VALUES(1, i, 111111, i + 10.001, 561.322815379585 + i, 1112 + i * 3, 8885.169 - i * 0.125, 61032419811910588 + i, 'test_agg_'||i, 'F', 'vector_agg_'||i, '597b5b23f4aadf9513306bcd59afb6e4c9_'||i, 'beijing_agg'||i, '08:20:12', '06:26:42+08', 'Mon Feb 10 17:32:01.4 1997 PST', '1971-03-23 11:14:05', '1997-02-02 03:04', 56 + i, '2005-02-14');
+--		elsif i > 199 AND i < 248 then
+--			INSERT INTO vector_agg_engine.row_agg_table_03 VALUES(4, i + 2000, 121111, i + 2009.08, 27.25684426652 + i * 0.001, 25467 + i * 2, 8885.169 - i * 0.125, 61032419811910588 + i, 'test_agg_'||i, 'F', 'vector_agg_'||i, '597b5b23f4aadf9513306bcd59afb6e4c9_'||i, 'beijing_agg'||i, '14:21:56', '15:12:22+08', 'Mon Feb 10 17:32:01.4 1997 PST', '1971-03-23 11:14:05', '1997-02-02 03:04', 56 + i, '2008-02-14');
+--		else
+--			INSERT INTO vector_agg_engine.row_agg_table_03 VALUES(7, i + 4000, 111131, i + 4002.047, 39.2456977995 + i * 0.3, 3658742 + i, 8885.169 - i * 0.125, 61032419811910588 + i, 'test_agg_'||i, 'F', 'vector_agg_'||i, '597b5b23f4aadf9513306bcd59afb6e4c9_'||i, 'beijing_agg'||i, '19:07:24', '22:32:36+08', 'Mon Feb 10 17:32:01.4 1997 PST', '1971-03-23 11:14:05', '1997-02-02 03:04', 56 + i, '2015-02-14');
+--		end if;
+--	END LOOP; 
+--END;
+--/
+--CALL func_insert_tbl_agg_03();
+create table t1(a int);
+insert into t1 select generate_series(1,199) from src;
+insert into vector_agg_engine.row_agg_table_03 select 1, i.a, 111111, i.a + 10.001, 561.322815379585 + i.a, 1112 + i.a * 3, 8885.169 - i.a * 0.125, 61032419811910588 + i.a, 'test_agg_'||i.a, 'F', 'vector_agg_'||i.a, '597b5b23f4aadf9513306bcd59afb6e4c9_'||i.a, 'beijing_agg'||i.a, '08:20:12', '06:26:42+08', 'Mon Feb 10 17:32:01.4 1997 PST', '1971-03-23 11:14:05', '1997-02-02 03:04', 56 + i.a, '2005-02-14' from t1 i;
+create table t2(a int);
+insert into t2 select generate_series(200,247) from src;
+insert into vector_agg_engine.row_agg_table_03 select 4, i.a + 2000, 121111, i.a + 2009.08, 27.25684426652 + i.a * 0.001, 25467 + i.a * 2, 8885.169 - i.a * 0.125, 61032419811910588 + i.a, 'test_agg_'||i.a, 'F', 'vector_agg_'||i.a, '597b5b23f4aadf9513306bcd59afb6e4c9_'||i.a, 'beijing_agg'||i.a, '14:21:56', '15:12:22+08', 'Mon Feb 10 17:32:01.4 1997 PST', '1971-03-23 11:14:05', '1997-02-02 03:04', 56 + i.a, '2008-02-14' from t2 i;
+create table t3(a int);
+insert into t3 select generate_series(248,1000) from src;
+insert into vector_agg_engine.row_agg_table_03 select 7, i.a + 4000, 111131, i.a + 4002.047, 39.2456977995 + i.a * 0.3, 3658742 + i.a, 8885.169 - i.a * 0.125, 61032419811910588 + i.a, 'test_agg_'||i.a, 'F', 'vector_agg_'||i.a, '597b5b23f4aadf9513306bcd59afb6e4c9_'||i.a, 'beijing_agg'||i.a, '19:07:24', '22:32:36+08', 'Mon Feb 10 17:32:01.4 1997 PST', '1971-03-23 11:14:05', '1997-02-02 03:04', 56 + i.a, '2015-02-14' from t3 i;
+insert into VECTOR_AGG_TABLE_03 select * from ROW_AGG_TABLE_03;
+drop table t1;
+drop table t2;
+drop table t3;
+drop table src;
+ 
+analyze vector_agg_table_01;
+analyze vector_agg_table_02;
+analyze vector_agg_table_03;
+--test max/min optimization
+explain (costs off)
+select
+max(col_smallint), min(col_smallint), 
+max(col_timestamp_without_timezone), min(col_timestamp_without_timezone),
+max(col_numeric), min(col_numeric)
+from vector_agg_engine.VECTOR_AGG_TABLE_01;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Aggregate
+         ->  Vector Streaming (type: GATHER)
+               Node/s: All datanodes
+               ->  Vector Aggregate
+                     ->  CStore Scan on vector_agg_table_01 (min-max optimization)
+(6 rows)
+
+select
+max(col_smallint), min(col_smallint), 
+max(col_timestamp_without_timezone), min(col_timestamp_without_timezone),
+max(col_numeric), min(col_numeric)
+from vector_agg_engine.VECTOR_AGG_TABLE_01;
+ max | min |          max          |          min          |        max        |       min       
+-----+-----+-----------------------+-----------------------+-------------------+-----------------
+   1 |   1 | 1997-02-10 17:32:01.4 | 1997-02-10 17:32:01.4 | 2560.322815379585 | 29.256844266520
+(1 row)
+
+explain (costs off)
+select
+max(col_smallint), min(col_smallint), 
+max(col_timestamp_without_timezone), min(col_timestamp_without_timezone),
+max(col_numeric), min(col_numeric)
+from vector_agg_engine.VECTOR_AGG_TABLE_03;
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Aggregate
+         ->  Vector Streaming (type: GATHER)
+               Node/s: All datanodes
+               ->  Vector Aggregate
+                     ->  Vector Partition Iterator
+                           Iterations: 10
+                           ->  Partitioned CStore Scan on vector_agg_table_03 (min-max optimization)
+                                 Selected Partitions:  1..10
+(9 rows)
+
+select
+max(col_smallint), min(col_smallint), 
+max(col_timestamp_without_timezone), min(col_timestamp_without_timezone),
+max(col_numeric), min(col_numeric)
+from vector_agg_engine.VECTOR_AGG_TABLE_03;
+ max | min |          max          |          min          |       max        |       min       
+-----+-----+-----------------------+-----------------------+------------------+-----------------
+   7 |   1 | 1997-02-10 17:32:01.4 | 1997-02-10 17:32:01.4 | 760.322815379585 | 27.456844266520
+(1 row)
+
+drop table if exists minmax_test;
+NOTICE:  table "minmax_test" does not exist, skipping
+create table minmax_test
+(
+ l_tint tinyint default 255,
+ l_num1 numeric(18,0)
+)with(orientation=column,compression=low) distribute by hash(l_tint);
+insert into minmax_test values(generate_series(1,2));
+select min(l_num1) from minmax_test;
+ min 
+-----
+    
+(1 row)
+
+----
+--- case 1: Basic Test Without NULL (HashAgg || SortAgg)
+----
+--explain (verbose on, costs off) select count(*), sum(col_integer), avg(col_integer), sum(col_integer)::float8/count(*), col_bigint from vector_agg_table_01 group by col_bigint order by col_bigint;
+select count(*), sum(col_integer), avg(col_integer), sum(col_integer)::float8/count(*), col_bigint from vector_agg_table_01 group by col_bigint order by col_bigint;
+ count |   sum    |          avg          | ?column? | col_bigint 
+-------+----------+-----------------------+----------+------------
+  1999 |  1999000 | 1000.0000000000000000 |     1000 |     111111
+  3513 | 14909172 | 4244.0000000000000000 |     4244 |     111131
+   488 |  1094828 | 2243.5000000000000000 |   2243.5 |     121111
+(3 rows)
+
+select count(*), sum(A.col_integer * B.col_int), avg(A.col_integer * B.col_int), sum(A.col_integer * B.col_int)::float8/count(*), A.col_bigint, B.col_bint from vector_agg_table_01 A full outer join vector_agg_table_02 B on A.col_bigint = B.col_bint group by A.col_bigint, B.col_bint order by A.col_bigint, B.col_bint;
+ count |   sum    |          avg          | ?column? | col_bigint | col_bint 
+-------+----------+-----------------------+----------+------------+----------
+  7996 | 33983000 | 4250.0000000000000000 |     4250 |     111111 |   111111
+  7026 | 74545860 |    10610.000000000000 |    10610 |     111131 |   111131
+   976 | 14232764 |    14582.750000000000 | 14582.75 |     121111 |   121111
+(3 rows)
+
+select sum(y) from (select sum(col_integer) y, col_bigint%2 x from vector_agg_table_01 group by col_bigint) q1 group by x order by x;
+   sum    
+----------
+ 18003000
+(1 row)
+
+select col_bigint - 1, col_bigint + 1, sum(col_integer), col_bigint - 3, avg(col_integer),  col_bigint%2, min(col_integer) from vector_agg_table_01 group by col_bigint order by col_bigint;
+ ?column? | ?column? |   sum    | ?column? |          avg          | ?column? | min  
+----------+----------+----------+----------+-----------------------+----------+------
+   111110 |   111112 |  1999000 |   111108 | 1000.0000000000000000 |        1 |    1
+   111130 |   111132 | 14909172 |   111128 | 4244.0000000000000000 |        1 | 2488
+   121110 |   121112 |  1094828 |   121108 | 2243.5000000000000000 |        1 | 2000
+(3 rows)
+
+select col_integer from vector_agg_table_01 group by col_integer order by col_integer limit 10;
+ col_integer 
+-------------
+           1
+           2
+           3
+           4
+           5
+           6
+           7
+           8
+           9
+          10
+(10 rows)
+
+select col_integer + col_numeric from vector_agg_table_01 group by col_integer + col_numeric order by col_integer + col_numeric limit 10 offset 100;
+     ?column?     
+------------------
+ 763.322815379585
+ 765.322815379585
+ 767.322815379585
+ 769.322815379585
+ 771.322815379585
+ 773.322815379585
+ 775.322815379585
+ 777.322815379585
+ 779.322815379585
+ 781.322815379585
+(10 rows)
+
+select A.col_integer + B.col_bint, A.col_integer, B.col_bint from vector_agg_table_01 A, vector_agg_table_02 B where A.col_bigint = B.col_bint group by A.col_integer, B.col_bint order by 1, 2 limit 30;
+ ?column? | col_integer | col_bint 
+----------+-------------+----------
+   111112 |           1 |   111111
+   111113 |           2 |   111111
+   111114 |           3 |   111111
+   111115 |           4 |   111111
+   111116 |           5 |   111111
+   111117 |           6 |   111111
+   111118 |           7 |   111111
+   111119 |           8 |   111111
+   111120 |           9 |   111111
+   111121 |          10 |   111111
+   111122 |          11 |   111111
+   111123 |          12 |   111111
+   111124 |          13 |   111111
+   111125 |          14 |   111111
+   111126 |          15 |   111111
+   111127 |          16 |   111111
+   111128 |          17 |   111111
+   111129 |          18 |   111111
+   111130 |          19 |   111111
+   111131 |          20 |   111111
+   111132 |          21 |   111111
+   111133 |          22 |   111111
+   111134 |          23 |   111111
+   111135 |          24 |   111111
+   111136 |          25 |   111111
+   111137 |          26 |   111111
+   111138 |          27 |   111111
+   111139 |          28 |   111111
+   111140 |          29 |   111111
+   111141 |          30 |   111111
+(30 rows)
+
+select A.col_integer + B.col_bint from vector_agg_table_01 A, vector_agg_table_02 B where A.col_bigint = B.col_bint group by A.col_integer + B.col_bint order by 1 limit 30;
+ ?column? 
+----------
+   111112
+   111113
+   111114
+   111115
+   111116
+   111117
+   111118
+   111119
+   111120
+   111121
+   111122
+   111123
+   111124
+   111125
+   111126
+   111127
+   111128
+   111129
+   111130
+   111131
+   111132
+   111133
+   111134
+   111135
+   111136
+   111137
+   111138
+   111139
+   111140
+   111141
+(30 rows)
+
+select count(*) + sum(col_integer) + avg(col_integer), col_bigint from vector_agg_table_01 group by col_bigint order by col_bigint;
+         ?column?          | col_bigint 
+---------------------------+------------
+  2001999.0000000000000000 |     111111
+ 14916929.0000000000000000 |     111131
+  1097559.5000000000000000 |     121111
+(3 rows)
+
+select col_numeric, avg(col_numeric) from vector_agg_table_01 group by col_numeric order by col_numeric limit 50;
+   col_numeric   |         avg         
+-----------------+---------------------
+ 29.256844266520 | 29.2568442665200000
+ 29.257844266520 | 29.2578442665200000
+ 29.258844266520 | 29.2588442665200000
+ 29.259844266520 | 29.2598442665200000
+ 29.260844266520 | 29.2608442665200000
+ 29.261844266520 | 29.2618442665200000
+ 29.262844266520 | 29.2628442665200000
+ 29.263844266520 | 29.2638442665200000
+ 29.264844266520 | 29.2648442665200000
+ 29.265844266520 | 29.2658442665200000
+ 29.266844266520 | 29.2668442665200000
+ 29.267844266520 | 29.2678442665200000
+ 29.268844266520 | 29.2688442665200000
+ 29.269844266520 | 29.2698442665200000
+ 29.270844266520 | 29.2708442665200000
+ 29.271844266520 | 29.2718442665200000
+ 29.272844266520 | 29.2728442665200000
+ 29.273844266520 | 29.2738442665200000
+ 29.274844266520 | 29.2748442665200000
+ 29.275844266520 | 29.2758442665200000
+ 29.276844266520 | 29.2768442665200000
+ 29.277844266520 | 29.2778442665200000
+ 29.278844266520 | 29.2788442665200000
+ 29.279844266520 | 29.2798442665200000
+ 29.280844266520 | 29.2808442665200000
+ 29.281844266520 | 29.2818442665200000
+ 29.282844266520 | 29.2828442665200000
+ 29.283844266520 | 29.2838442665200000
+ 29.284844266520 | 29.2848442665200000
+ 29.285844266520 | 29.2858442665200000
+ 29.286844266520 | 29.2868442665200000
+ 29.287844266520 | 29.2878442665200000
+ 29.288844266520 | 29.2888442665200000
+ 29.289844266520 | 29.2898442665200000
+ 29.290844266520 | 29.2908442665200000
+ 29.291844266520 | 29.2918442665200000
+ 29.292844266520 | 29.2928442665200000
+ 29.293844266520 | 29.2938442665200000
+ 29.294844266520 | 29.2948442665200000
+ 29.295844266520 | 29.2958442665200000
+ 29.296844266520 | 29.2968442665200000
+ 29.297844266520 | 29.2978442665200000
+ 29.298844266520 | 29.2988442665200000
+ 29.299844266520 | 29.2998442665200000
+ 29.300844266520 | 29.3008442665200000
+ 29.301844266520 | 29.3018442665200000
+ 29.302844266520 | 29.3028442665200000
+ 29.303844266520 | 29.3038442665200000
+ 29.304844266520 | 29.3048442665200000
+ 29.305844266520 | 29.3058442665200000
+(50 rows)
+
+select col_double_precision, avg(col_double_precision) from vector_agg_table_01 group by col_double_precision order by col_double_precision limit 50;
+ col_double_precision |   avg    
+----------------------+----------
+             8135.169 | 8135.169
+             8135.294 | 8135.294
+             8135.419 | 8135.419
+             8135.544 | 8135.544
+             8135.669 | 8135.669
+             8135.794 | 8135.794
+             8135.919 | 8135.919
+             8136.044 | 8136.044
+             8136.169 | 8136.169
+             8136.294 | 8136.294
+             8136.419 | 8136.419
+             8136.544 | 8136.544
+             8136.669 | 8136.669
+             8136.794 | 8136.794
+             8136.919 | 8136.919
+             8137.044 | 8137.044
+             8137.169 | 8137.169
+             8137.294 | 8137.294
+             8137.419 | 8137.419
+             8137.544 | 8137.544
+             8137.669 | 8137.669
+             8137.794 | 8137.794
+             8137.919 | 8137.919
+             8138.044 | 8138.044
+             8138.169 | 8138.169
+             8138.294 | 8138.294
+             8138.419 | 8138.419
+             8138.544 | 8138.544
+             8138.669 | 8138.669
+             8138.794 | 8138.794
+             8138.919 | 8138.919
+             8139.044 | 8139.044
+             8139.169 | 8139.169
+             8139.294 | 8139.294
+             8139.419 | 8139.419
+             8139.544 | 8139.544
+             8139.669 | 8139.669
+             8139.794 | 8139.794
+             8139.919 | 8139.919
+             8140.044 | 8140.044
+             8140.169 | 8140.169
+             8140.294 | 8140.294
+             8140.419 | 8140.419
+             8140.544 | 8140.544
+             8140.669 | 8140.669
+             8140.794 | 8140.794
+             8140.919 | 8140.919
+             8141.044 | 8141.044
+             8141.169 | 8141.169
+             8141.294 | 8141.294
+(50 rows)
+
+select col_decimal, avg(col_decimal) from vector_agg_table_01 group by col_decimal order by col_decimal limit 50;
+    col_decimal    |        avg        
+-------------------+-------------------
+ 61032419811910589 | 61032419811910589
+ 61032419811910590 | 61032419811910590
+ 61032419811910591 | 61032419811910591
+ 61032419811910592 | 61032419811910592
+ 61032419811910593 | 61032419811910593
+ 61032419811910594 | 61032419811910594
+ 61032419811910595 | 61032419811910595
+ 61032419811910596 | 61032419811910596
+ 61032419811910597 | 61032419811910597
+ 61032419811910598 | 61032419811910598
+ 61032419811910599 | 61032419811910599
+ 61032419811910600 | 61032419811910600
+ 61032419811910601 | 61032419811910601
+ 61032419811910602 | 61032419811910602
+ 61032419811910603 | 61032419811910603
+ 61032419811910604 | 61032419811910604
+ 61032419811910605 | 61032419811910605
+ 61032419811910606 | 61032419811910606
+ 61032419811910607 | 61032419811910607
+ 61032419811910608 | 61032419811910608
+ 61032419811910609 | 61032419811910609
+ 61032419811910610 | 61032419811910610
+ 61032419811910611 | 61032419811910611
+ 61032419811910612 | 61032419811910612
+ 61032419811910613 | 61032419811910613
+ 61032419811910614 | 61032419811910614
+ 61032419811910615 | 61032419811910615
+ 61032419811910616 | 61032419811910616
+ 61032419811910617 | 61032419811910617
+ 61032419811910618 | 61032419811910618
+ 61032419811910619 | 61032419811910619
+ 61032419811910620 | 61032419811910620
+ 61032419811910621 | 61032419811910621
+ 61032419811910622 | 61032419811910622
+ 61032419811910623 | 61032419811910623
+ 61032419811910624 | 61032419811910624
+ 61032419811910625 | 61032419811910625
+ 61032419811910626 | 61032419811910626
+ 61032419811910627 | 61032419811910627
+ 61032419811910628 | 61032419811910628
+ 61032419811910629 | 61032419811910629
+ 61032419811910630 | 61032419811910630
+ 61032419811910631 | 61032419811910631
+ 61032419811910632 | 61032419811910632
+ 61032419811910633 | 61032419811910633
+ 61032419811910634 | 61032419811910634
+ 61032419811910635 | 61032419811910635
+ 61032419811910636 | 61032419811910636
+ 61032419811910637 | 61032419811910637
+ 61032419811910638 | 61032419811910638
+(50 rows)
+
+select sum(col_money), min(col_money),max(col_money) from vector_agg_table_01 limit 50;
+      sum       |  min   |    max    
+----------------+--------+-----------
+ $18,339,000.00 | $57.00 | $6,056.00
+(1 row)
+
+select sum(col_money), min(col_money),max(col_money) from vector_agg_table_01 group by col_time_without_time_zone order by 1;
+      sum       |    min    |    max    
+----------------+-----------+-----------
+  $1,122,156.00 | $2,056.00 | $2,543.00
+  $2,110,944.00 |    $57.00 | $2,055.00
+ $15,105,900.00 | $2,544.00 | $6,056.00
+(3 rows)
+
+select A.col_money + B.col_money from vector_agg_table_01 A, vector_agg_table_03 B order by 1 limit 10;
+ ?column? 
+----------
+  $114.00
+  $115.00
+  $115.00
+  $116.00
+  $116.00
+  $116.00
+  $117.00
+  $117.00
+  $117.00
+  $117.00
+(10 rows)
+
+select min(col_oid), max(col_oid) from vector_agg_table_01;
+ min | max  
+-----+------
+  23 | 2345
+(1 row)
+
+select min(col_smalldatetime), max(col_smalldatetime) from vector_agg_table_01;
+         min         |         max         
+---------------------+---------------------
+ 1992-02-06 03:08:00 | 1997-03-03 11:04:00
+(1 row)
+
+select min(col_smalldatetime), max(col_smalldatetime) from vector_agg_table_01 group by col_smalldatetime order by 1, 2;
+         min         |         max         
+---------------------+---------------------
+ 1992-02-06 03:08:00 | 1992-02-06 03:08:00
+ 1996-06-12 03:06:00 | 1996-06-12 03:06:00
+ 1997-03-03 11:04:00 | 1997-03-03 11:04:00
+(3 rows)
+
+select avg(col_bigint) + sum(col_numeric / 2.4) from vector_agg_table_01 group by col_integer, col_char2 order by 1 limit 10;
+        ?column?         
+-------------------------
+ 111345.3011730748270833
+ 111345.7178397414937500
+ 111346.1345064081604167
+ 111346.5511730748270833
+ 111346.9678397414937500
+ 111347.3845064081604167
+ 111347.8011730748270833
+ 111348.2178397414937500
+ 111348.6345064081604167
+ 111349.0511730748270833
+(10 rows)
+
+select sum(col_bint), avg(col_num - 0.99999999999999999999999), avg(col_num * 1.1) from vector_agg_table_02 group by col_int order by 1, 2, 3 limit 10;
+  sum   |            avg             |          avg           
+--------+----------------------------+------------------------
+ 111111 |   .20000000000000000000001 | 1.32000000000000000000
+ 111111 |  1.10000000000000000000001 |     2.3100000000000000
+ 111111 |  3.20000000000000000000001 |     4.6200000000000000
+ 111131 |  1.40000000000000000000001 |     2.6400000000000000
+ 121111 |  2.60000000000000000000001 |     3.9600000000000000
+ 121111 | 20.70000000000000000000001 |    23.8700000000000000
+ 222242 |  2.60000000000000000000001 |     3.9600000000000000
+(7 rows)
+
+select sum(col_bint), count(*) from vector_agg_table_02 group by col_int order by 1, 2 limit 10;
+  sum   | count 
+--------+-------
+ 111111 |     1
+ 111111 |     1
+ 111111 |     1
+ 111131 |     1
+ 121111 |     1
+ 121111 |     1
+ 222242 |     2
+(7 rows)
+
+select sum((col_bigint + 8::bigint) * 2::bigint - 7::bigint), col_integer from vector_agg_table_03 where col_real > 4890.00 group by col_integer order by col_integer;
+  sum   | col_integer 
+--------+-------------
+ 222271 |        4888
+ 222271 |        4889
+ 222271 |        4890
+ 222271 |        4891
+ 222271 |        4892
+ 222271 |        4893
+ 222271 |        4894
+ 222271 |        4895
+ 222271 |        4896
+ 222271 |        4897
+ 222271 |        4898
+ 222271 |        4899
+ 222271 |        4900
+ 222271 |        4901
+ 222271 |        4902
+ 222271 |        4903
+ 222271 |        4904
+ 222271 |        4905
+ 222271 |        4906
+ 222271 |        4907
+ 222271 |        4908
+ 222271 |        4909
+ 222271 |        4910
+ 222271 |        4911
+ 222271 |        4912
+ 222271 |        4913
+ 222271 |        4914
+ 222271 |        4915
+ 222271 |        4916
+ 222271 |        4917
+ 222271 |        4918
+ 222271 |        4919
+ 222271 |        4920
+ 222271 |        4921
+ 222271 |        4922
+ 222271 |        4923
+ 222271 |        4924
+ 222271 |        4925
+ 222271 |        4926
+ 222271 |        4927
+ 222271 |        4928
+ 222271 |        4929
+ 222271 |        4930
+ 222271 |        4931
+ 222271 |        4932
+ 222271 |        4933
+ 222271 |        4934
+ 222271 |        4935
+ 222271 |        4936
+ 222271 |        4937
+ 222271 |        4938
+ 222271 |        4939
+ 222271 |        4940
+ 222271 |        4941
+ 222271 |        4942
+ 222271 |        4943
+ 222271 |        4944
+ 222271 |        4945
+ 222271 |        4946
+ 222271 |        4947
+ 222271 |        4948
+ 222271 |        4949
+ 222271 |        4950
+ 222271 |        4951
+ 222271 |        4952
+ 222271 |        4953
+ 222271 |        4954
+ 222271 |        4955
+ 222271 |        4956
+ 222271 |        4957
+ 222271 |        4958
+ 222271 |        4959
+ 222271 |        4960
+ 222271 |        4961
+ 222271 |        4962
+ 222271 |        4963
+ 222271 |        4964
+ 222271 |        4965
+ 222271 |        4966
+ 222271 |        4967
+ 222271 |        4968
+ 222271 |        4969
+ 222271 |        4970
+ 222271 |        4971
+ 222271 |        4972
+ 222271 |        4973
+ 222271 |        4974
+ 222271 |        4975
+ 222271 |        4976
+ 222271 |        4977
+ 222271 |        4978
+ 222271 |        4979
+ 222271 |        4980
+ 222271 |        4981
+ 222271 |        4982
+ 222271 |        4983
+ 222271 |        4984
+ 222271 |        4985
+ 222271 |        4986
+ 222271 |        4987
+ 222271 |        4988
+ 222271 |        4989
+ 222271 |        4990
+ 222271 |        4991
+ 222271 |        4992
+ 222271 |        4993
+ 222271 |        4994
+ 222271 |        4995
+ 222271 |        4996
+ 222271 |        4997
+ 222271 |        4998
+ 222271 |        4999
+ 222271 |        5000
+(113 rows)
+
+set enable_codegen=off;
+select sum((col_bigint + 8::bigint) * 2::bigint - 7::bigint), col_integer from vector_agg_table_03 where col_real > 4890.00 group by col_integer order by col_integer;
+  sum   | col_integer 
+--------+-------------
+ 222271 |        4888
+ 222271 |        4889
+ 222271 |        4890
+ 222271 |        4891
+ 222271 |        4892
+ 222271 |        4893
+ 222271 |        4894
+ 222271 |        4895
+ 222271 |        4896
+ 222271 |        4897
+ 222271 |        4898
+ 222271 |        4899
+ 222271 |        4900
+ 222271 |        4901
+ 222271 |        4902
+ 222271 |        4903
+ 222271 |        4904
+ 222271 |        4905
+ 222271 |        4906
+ 222271 |        4907
+ 222271 |        4908
+ 222271 |        4909
+ 222271 |        4910
+ 222271 |        4911
+ 222271 |        4912
+ 222271 |        4913
+ 222271 |        4914
+ 222271 |        4915
+ 222271 |        4916
+ 222271 |        4917
+ 222271 |        4918
+ 222271 |        4919
+ 222271 |        4920
+ 222271 |        4921
+ 222271 |        4922
+ 222271 |        4923
+ 222271 |        4924
+ 222271 |        4925
+ 222271 |        4926
+ 222271 |        4927
+ 222271 |        4928
+ 222271 |        4929
+ 222271 |        4930
+ 222271 |        4931
+ 222271 |        4932
+ 222271 |        4933
+ 222271 |        4934
+ 222271 |        4935
+ 222271 |        4936
+ 222271 |        4937
+ 222271 |        4938
+ 222271 |        4939
+ 222271 |        4940
+ 222271 |        4941
+ 222271 |        4942
+ 222271 |        4943
+ 222271 |        4944
+ 222271 |        4945
+ 222271 |        4946
+ 222271 |        4947
+ 222271 |        4948
+ 222271 |        4949
+ 222271 |        4950
+ 222271 |        4951
+ 222271 |        4952
+ 222271 |        4953
+ 222271 |        4954
+ 222271 |        4955
+ 222271 |        4956
+ 222271 |        4957
+ 222271 |        4958
+ 222271 |        4959
+ 222271 |        4960
+ 222271 |        4961
+ 222271 |        4962
+ 222271 |        4963
+ 222271 |        4964
+ 222271 |        4965
+ 222271 |        4966
+ 222271 |        4967
+ 222271 |        4968
+ 222271 |        4969
+ 222271 |        4970
+ 222271 |        4971
+ 222271 |        4972
+ 222271 |        4973
+ 222271 |        4974
+ 222271 |        4975
+ 222271 |        4976
+ 222271 |        4977
+ 222271 |        4978
+ 222271 |        4979
+ 222271 |        4980
+ 222271 |        4981
+ 222271 |        4982
+ 222271 |        4983
+ 222271 |        4984
+ 222271 |        4985
+ 222271 |        4986
+ 222271 |        4987
+ 222271 |        4988
+ 222271 |        4989
+ 222271 |        4990
+ 222271 |        4991
+ 222271 |        4992
+ 222271 |        4993
+ 222271 |        4994
+ 222271 |        4995
+ 222271 |        4996
+ 222271 |        4997
+ 222271 |        4998
+ 222271 |        4999
+ 222271 |        5000
+(113 rows)
+
+set enable_codegen=on;
+----
+--- case 2: Basic Test with NULL
+----
+delete from vector_agg_table_01;
+INSERT INTO vector_agg_engine.row_agg_table_01 VALUES(1, 12, NULL, 23, 12.021, 515.343815379585, NULL, 8875.15, 61032419811910575, 'test_agg_0', 'T', 'vector_agg_0', '597b5b23f4abcf9513306bcd59afb6e4c9_0', 'beijing_agg_0', '17:25:28', NULL, NULL, '1971-03-23 11:14:05', '1997-02-02 03:04', 79.3, '2005-02-25');
+INSERT INTO vector_agg_engine.row_agg_table_01 VALUES(3, NULL, 114531, NULL,  2.047, NULL, 20857434796839002905636223150710041116810786801730952028511513795.100678976382813790191855282491921068, 8885.169, NULL, 'test_agg_7002', 'T', 'vector_agg_7002', '597b5b23f4aadf9473306bcd59afb6e4c9', 'beijing_agg_7002', '16:19:25', NULL, 'Mon Jan 15 17:32:01.4 1997 PST', NULL, '1997-02-02 03:04', 21.6, '2005-06-12');
+INSERT INTO vector_agg_engine.row_agg_table_01 VALUES(1, 15, 152161, 2355, NULL, 227.25684426652, 18857434798277339938397404472048722532796412222119506033298219325.596941867590737379779439339277062225, NULL, 61032419811910588, 'test_agg_0', 'F', 'vector_agg_0', '597b5b23f4aadf9513306bcd59afb6e4c9_0', 'beijing_agg_0', NULL, '14:32:42+08', 'Mon Feb 10 17:32:01.4 1997 PST', '1971-03-23 11:14:05', NULL, 56, NULL);
+INSERT INTO vector_agg_engine.row_agg_table_01 VALUES(NULL, 12, 121111, 25, 9.08, 27.25684426652, 20857434798277339938397404472048722532796412222119506033298219314.596941867590737379779439339277062225, 8885.169, 61032419811910588, NULL, 'T', NULL, NULL, 'beijing_agg_8010', '17:09:24', NULL, 'Mon Feb 10 17:32:01.4 1997 PST', NULL, '1997-02-02 03:04', 56, '2005-02-14');
+INSERT INTO vector_agg_engine.row_agg_table_01 VALUES(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+insert into vector_agg_table_01 select * from row_agg_table_01;
+select avg(col_integer), sum(col_integer), count(*), col_bigint from vector_agg_table_01 group by col_bigint order by col_bigint;
+          avg          |   sum    | count | col_bigint 
+-----------------------+----------+-------+------------
+ 1000.0000000000000000 |  1999000 |  1999 |     111111
+ 4244.0000000000000000 | 14909172 |  3513 |     111131
+                       |          |     1 |     114531
+ 2238.9366053169734151 |  1094840 |   489 |     121111
+   15.0000000000000000 |       15 |     1 |     152161
+   12.0000000000000000 |       12 |     2 |           
+(6 rows)
+
+select col_integer,  sum(col_integer),sum(col_bigint), col_integer from vector_agg_table_01  group by 1,4 order by 1,2,3,4 limit 5;
+ col_integer | sum |  sum   | col_integer 
+-------------+-----+--------+-------------
+           1 |   1 | 111111 |           1
+           2 |   2 | 111111 |           2
+           3 |   3 | 111111 |           3
+           4 |   4 | 111111 |           4
+           5 |   5 | 111111 |           5
+(5 rows)
+
+select col_char2 from vector_agg_table_01 group by col_char2 order by col_char2;
+ col_char2 
+-----------
+ F
+ T
+ 
+(3 rows)
+
+select col_char2, count(1) from vector_agg_table_01 group by col_char2 order by col_char2;
+ col_char2 | count 
+-----------+-------
+ F         |  5513
+ T         |   491
+           |     1
+(3 rows)
+
+select col_char2, count(col_char2) from vector_agg_table_01 group by col_char2 order by col_char2;
+ col_char2 | count 
+-----------+-------
+ F         |  5513
+ T         |   491
+           |     0
+(3 rows)
+
+select count(*) from vector_agg_table_01 where col_char2 is null group by col_char2;
+ count 
+-------
+     1
+(1 row)
+
+select max(col_smallint), min(col_smallint) from vector_agg_table_01 where col_smallint is not null;
+ max | min 
+-----+-----
+   3 |   1
+(1 row)
+
+select min(col_numeric), max(col_numeric), sum(col_numeric), avg(col_numeric) from vector_agg_table_01 group by col_smallint order by col_smallint;
+       min       |        max        |         sum          |          avg          
+-----------------+-------------------+----------------------+-----------------------
+ 29.256844266520 | 2560.322815379585 | 7746844.812975141780 | 1290.7105653074211563
+                 |                   |                      |                      
+ 27.256844266520 |   27.256844266520 |      27.256844266520 |   27.2568442665200000
+(3 rows)
+
+select min(col_decimal), max(col_decimal), sum(col_decimal), avg(col_decimal) from vector_agg_table_01 group by col_date order by col_date;
+        min        |        max        |          sum          |        avg        
+-------------------+-------------------+-----------------------+-------------------
+ 61032419811910588 | 61032419811912587 | 122064839623823175000 | 61032419811911588
+ 61032419811910575 | 61032419811910575 |     61032419811910575 | 61032419811910575
+                   |                   |                       |                  
+ 61032419811912588 | 61032419811913075 |  29783820868213461772 | 61032419811912832
+ 61032419811913076 | 61032419811916588 | 214406890799256804816 | 61032419811914832
+ 61032419811910588 | 61032419811910588 |     61032419811910588 | 61032419811910588
+(6 rows)
+
+select max(col_time_without_time_zone), min(col_time_without_time_zone) from vector_agg_table_01 where col_time_without_time_zone is not null;
+   max    |   min    
+----------+----------
+ 19:07:24 | 08:20:12
+(1 row)
+
+select max(col_time_with_time_zone), min(col_time_with_time_zone) from vector_agg_table_01 where col_time_with_time_zone is not null;
+     max     |     min     
+-------------+-------------
+ 22:32:36+08 | 06:26:42+08
+(1 row)
+
+select max(col_timestamp_without_timezone), min(col_timestamp_without_timezone) from vector_agg_table_01 where col_timestamp_without_timezone is not null;
+          max          |          min          
+-----------------------+-----------------------
+ 1997-02-10 17:32:01.4 | 1997-01-15 17:32:01.4
+(1 row)
+
+select max(col_timestamp_with_timezone), min(col_timestamp_with_timezone) from vector_agg_table_01 where col_timestamp_with_timezone is not null;
+          max           |          min           
+------------------------+------------------------
+ 1971-03-23 11:14:05+08 | 1971-03-23 11:14:05+08
+(1 row)
+
+select sum(col_time_without_time_zone), avg(col_time_without_time_zone) from vector_agg_table_01;
+                 sum                  |               avg               
+--------------------------------------+---------------------------------
+ @ 3787 days 18 hours 33 mins 45 secs | @ 15 hours 8 mins 36.67916 secs
+(1 row)
+
+select sum(col_time_without_time_zone), avg(col_time_without_time_zone) from vector_agg_table_01 group by col_bigint order by 1, 2;
+                 sum                 |                avg                
+-------------------------------------+-----------------------------------
+ @ 16 hours 19 mins 25 secs          | @ 16 hours 19 mins 25 secs
+ @ 17 hours 25 mins 28 secs          | @ 17 hours 25 mins 28 secs
+ @ 292 days 19 hours 32 mins 52 secs | @ 14 hours 22 mins 16.548057 secs
+ @ 694 days 8 hours 59 mins 48 secs  | @ 8 hours 20 mins 12 secs
+ @ 2799 days 4 hours 16 mins 12 secs | @ 19 hours 7 mins 24 secs
+                                     | 
+(6 rows)
+
+select sum(col_time_without_time_zone), avg(col_time_without_time_zone) from vector_agg_table_01 group by col_time_without_time_zone order by 1, 2;
+                 sum                 |            avg             
+-------------------------------------+----------------------------
+ @ 16 hours 19 mins 25 secs          | @ 16 hours 19 mins 25 secs
+ @ 17 hours 9 mins 24 secs           | @ 17 hours 9 mins 24 secs
+ @ 17 hours 25 mins 28 secs          | @ 17 hours 25 mins 28 secs
+ @ 292 days 2 hours 23 mins 28 secs  | @ 14 hours 21 mins 56 secs
+ @ 694 days 8 hours 59 mins 48 secs  | @ 8 hours 20 mins 12 secs
+ @ 2799 days 4 hours 16 mins 12 secs | @ 19 hours 7 mins 24 secs
+                                     | 
+(7 rows)
+
+----
+--- case 3: Basic Test with Partition
+----
+select count(*), sum(length(col_varchar2)), avg(col_numeric) from vector_agg_table_03 where 'DAsdf;redis' = 'DAsdf;redis' and col_smallint != 4 or col_integer%148=1 and col_varchar != 'vector_agg_500' or col_numeric < 1239.5 and col_smallint in (1,5,7) order by 1,2 limit 5;
+ count |  sum  |         avg          
+-------+-------+----------------------
+   953 | 13235 | 317.0454654226940556
+(1 row)
+
+select count(*), null as "hnull", sum(col_integer) as c_int_sum, avg(col_numeric) as c_num_avg, sum(col_real) as c_real_sum, avg(col_double_precision) as c_dp_avg, sum(col_decimal) as c_dec_num from vector_agg_table_03 where col_integer <= 201 and col_smallint >= 1 or col_bigint < 10200 and col_smallint != 7 and col_smallint != 4;
+ count | hnull | c_int_sum |      c_num_avg       | c_real_sum | c_dp_avg |      c_dec_num       
+-------+-------+-----------+----------------------+------------+----------+----------------------
+   199 |       |     19900 | 661.3228153795850000 |    21890.2 | 8872.669 | 12145451542570226912
+(1 row)
+
+delete from vector_agg_engine.VECTOR_AGG_TABLE_03 where col_smallint = 4;
+select
+max(col_smallint), min(col_smallint),
+max(col_timestamp_without_timezone), min(col_timestamp_without_timezone),
+max(col_numeric), min(col_numeric)
+from vector_agg_engine.VECTOR_AGG_TABLE_03;
+ max | min |          max          |          min          |       max        |       min        
+-----+-----+-----------------------+-----------------------+------------------+------------------
+   7 |   1 | 1997-02-10 17:32:01.4 | 1997-02-10 17:32:01.4 | 760.322815379585 | 113.645697799500
+(1 row)
+
+select
+max(col_smallint), min(col_smallint), 10 as col1,
+max(col_timestamp_without_timezone), min(col_timestamp_without_timezone),
+max(col_numeric), min(col_numeric), 200 as col2
+from vector_agg_engine.VECTOR_AGG_TABLE_03;
+ max | min | col1 |          max          |          min          |       max        |       min        | col2 
+-----+-----+------+-----------------------+-----------------------+------------------+------------------+------
+   7 |   1 |   10 | 1997-02-10 17:32:01.4 | 1997-02-10 17:32:01.4 | 760.322815379585 | 113.645697799500 |  200
+(1 row)
+
+delete from vector_agg_engine.VECTOR_AGG_TABLE_03;
+select
+max(col_smallint), min(col_smallint), 10 as col1,
+max(col_timestamp_without_timezone), min(col_timestamp_without_timezone),
+max(col_numeric), min(col_numeric), 200 as col2
+from vector_agg_engine.VECTOR_AGG_TABLE_03;
+ max | min | col1 | max | min | max | min | col2 
+-----+-----+------+-----+-----+-----+-----+------
+     |     |   10 |     |     |     |     |  200
+(1 row)
+
+----
+--- Clean Resource and Tables
+----
+drop schema vector_agg_engine cascade;
+NOTICE:  drop cascades to 6 other objects
+--?DETAIL:  drop cascades to table .*
+--?drop cascades to table .*
+--?drop cascades to table .*
+--?drop cascades to table .*
+--?drop cascades to table .*
+--?drop cascades to table .*

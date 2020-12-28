@@ -77,6 +77,7 @@
 #include "access/gtm.h"
 #include "access/heapam.h"
 #include "access/reloptions.h"
+#include "access/tableam.h"
 #include "access/twophase.h"
 #include "access/transam.h"
 #include "access/xact.h"
@@ -86,6 +87,7 @@
 #include "catalog/pgxc_class.h"
 #include "commands/dbcommands.h"
 #include "commands/vacuum.h"
+#include "commands/matview.h"
 #include "executor/spi.h"
 #include "funcapi.h"
 #include "libpq/pqsignal.h"
@@ -96,7 +98,7 @@
 #include "postmaster/autovacuum.h"
 #include "postmaster/fork_process.h"
 #include "postmaster/postmaster.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/pmsignal.h"
@@ -115,11 +117,12 @@
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #include "utils/timestamp.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "commands/user.h"
 #include "gssignal/gs_signal.h"
 #include "common/config/cm_config.h"
 #include "catalog/pg_namespace.h"
+#include "storage/lmgr.h"
 
 /* how long to keep pgstat data in the launcher, in milliseconds */
 #define STATS_READ_DELAY 1000
@@ -356,12 +359,13 @@ NON_EXEC_STATIC void AutoVacLauncherMain()
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
-    knl_thread_set_name("AutoVacLauncher");
+    t_thrd.proc_cxt.MyProgName = "AutoVacLauncher";
+    u_sess->attr.attr_common.application_name = pstrdup("AutoVacLauncher");
 
     /* Identify myself via ps */
-    init_ps_display("AutoVacLauncher process", "", "", "");
+    init_ps_display("autovacuum launcher process", "", "", "");
 
-    ereport(LOG, (errmsg("AutoVacLauncher started")));
+    ereport(LOG, (errmsg("autovacuum launcher started")));
 
     if (u_sess->attr.attr_security.PostAuthDelay)
         pg_usleep(u_sess->attr.attr_security.PostAuthDelay * 1000000L);
@@ -412,11 +416,8 @@ NON_EXEC_STATIC void AutoVacLauncherMain()
      * that we can reset the context during error recovery and thereby avoid
      * possible memory leaks.
      */
-    t_thrd.autovacuum_cxt.AutovacMemCxt = AllocSetContextCreate(t_thrd.top_mem_cxt,
-        "Autovacuum Launcher",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    t_thrd.autovacuum_cxt.AutovacMemCxt = AllocSetContextCreate(t_thrd.top_mem_cxt, "Autovacuum Launcher",
+        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     (void)MemoryContextSwitchTo(t_thrd.autovacuum_cxt.AutovacMemCxt);
 
     /*
@@ -549,8 +550,7 @@ NON_EXEC_STATIC void AutoVacLauncherMain()
          * Wait until naptime expires or we get some type of signal (all the
          * signal handlers will wake us by calling SetLatch).
          */
-        rc = WaitLatch(&t_thrd.proc->procLatch,
-            WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+        rc = WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
             (nap.tv_sec * 1000L) + (nap.tv_usec / 1000L));
 
         ResetLatch(&t_thrd.proc->procLatch);
@@ -708,7 +708,7 @@ NON_EXEC_STATIC void AutoVacLauncherMain()
 
     /* Normal exit from the autovac launcher is here */
 shutdown:
-    ereport(LOG, (errmsg("AutoVacLauncher shutting down")));
+    ereport(LOG, (errmsg("autovacuum launcher shutting down")));
     t_thrd.autovacuum_cxt.AutoVacuumShmem->av_launcherpid = 0;
 
     proc_exit(0); /* done */
@@ -803,11 +803,8 @@ static void rebuild_database_list(Oid newdb)
     /* use fresh stats */
     autovac_refresh_stats();
 
-    newcxt = AllocSetContextCreate(t_thrd.autovacuum_cxt.AutovacMemCxt,
-        "AV dblist",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    newcxt = AllocSetContextCreate(t_thrd.autovacuum_cxt.AutovacMemCxt, "AV dblist",
+        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     tmpcxt = AllocSetContextCreate(
         newcxt, "tmp AV dblist", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     oldcxt = MemoryContextSwitchTo(tmpcxt);
@@ -920,8 +917,7 @@ static void rebuild_database_list(Oid newdb)
         int rc = 0;
 
         if (unlikely(nelems > MaxAllocSize / sizeof(avl_dbase))) {
-            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("Invalid database num:%u", nelems)));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid database num:%u", nelems)));
         }
 
         /* put all the hash elements into an array */
@@ -1023,11 +1019,8 @@ static Oid do_start_worker(void)
      * Create and switch to a temporary context to avoid leaking the memory
      * allocated for the database list.
      */
-    tmpcxt = AllocSetContextCreate(CurrentMemoryContext,
-        "Start worker tmp cxt",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    tmpcxt = AllocSetContextCreate(CurrentMemoryContext, "Start worker tmp cxt",
+        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     oldcxt = MemoryContextSwitchTo(tmpcxt);
 
     /* use fresh stats */
@@ -1299,10 +1292,11 @@ NON_EXEC_STATIC void AutoVacWorkerMain()
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
-    knl_thread_set_name("AutoVacWorker");
+    t_thrd.proc_cxt.MyProgName = "AutoVacWorker";
+    u_sess->attr.attr_common.application_name = pstrdup("AutoVacWorker");
 
     /* Identify myself via ps */
-    init_ps_display("AutoVacWorker process", "", "", "");
+    init_ps_display("autovacuum worker process", "", "", "");
 
     SetProcessingMode(InitProcessing);
 
@@ -1431,7 +1425,7 @@ NON_EXEC_STATIC void AutoVacWorkerMain()
             gs_signal_send(t_thrd.autovacuum_cxt.AutoVacuumShmem->av_launcherpid, SIGUSR2);
     } else {
         /* no worker entry for me, go away */
-        ereport(WARNING, (errmsg("AutoVacWorker started without a worker entry")));
+        ereport(WARNING, (errmsg("autovacuum worker started without a worker entry")));
         dbid = InvalidOid;
         LWLockRelease(AutovacuumLock);
     }
@@ -1474,25 +1468,19 @@ NON_EXEC_STATIC void AutoVacWorkerMain()
          * t_thrd.mem_cxt.msg_mem_cxt is reset once per iteration of the main loop, ie, upon
          * completion of processing of each command message from the client.
          */
-        t_thrd.mem_cxt.msg_mem_cxt = AllocSetContextCreate(t_thrd.top_mem_cxt,
-            "MessageContext",
-            ALLOCSET_DEFAULT_MINSIZE,
-            ALLOCSET_DEFAULT_INITSIZE,
-            ALLOCSET_DEFAULT_MAXSIZE);
+        t_thrd.mem_cxt.msg_mem_cxt = AllocSetContextCreate(t_thrd.top_mem_cxt, "MessageContext",
+            ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
 
-        t_thrd.mem_cxt.mask_password_mem_cxt = AllocSetContextCreate(t_thrd.top_mem_cxt,
-            "MaskPasswordCtx",
-            ALLOCSET_DEFAULT_MINSIZE,
-            ALLOCSET_DEFAULT_INITSIZE,
-            ALLOCSET_DEFAULT_MAXSIZE);
+        t_thrd.mem_cxt.mask_password_mem_cxt = AllocSetContextCreate(t_thrd.top_mem_cxt, "MaskPasswordCtx",
+            ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
 
         /*
          * Create a resource owner to keep track of our resources (currently only
          * buffer pins).
          */
-        t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "AutoVacuumWorker");
+        t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "AutoVacuumWorker", MEMORY_CONTEXT_STORAGE);
 
-        oldcontext = MemoryContextSwitchTo(u_sess->top_mem_cxt);
+        oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
         if (u_sess->proc_cxt.MyProcPort->database_name)
             pfree_ext(u_sess->proc_cxt.MyProcPort->database_name);
         if (u_sess->proc_cxt.MyProcPort->user_name)
@@ -1529,7 +1517,6 @@ static void FreeWorkerInfo(int code, Datum arg)
             LWLockRelease(AutovacuumLock);
             return;
         }
-
         /*
          * Wake the launcher up so that he can launch a new worker immediately
          * if required.  We only save the launcher's PID in local memory here;
@@ -1615,14 +1602,12 @@ static void autovac_balance_cost(void)
     /* caculate the total base cost limit of active workers */
     cost_total = 0.0;
     worker = (WorkerInfo)SHMQueueNext(&t_thrd.autovacuum_cxt.AutoVacuumShmem->av_runningWorkers,
-        &t_thrd.autovacuum_cxt.AutoVacuumShmem->av_runningWorkers,
-        offsetof(WorkerInfoData, wi_links));
+        &t_thrd.autovacuum_cxt.AutoVacuumShmem->av_runningWorkers, offsetof(WorkerInfoData, wi_links));
     while (worker != NULL) {
         if (worker->wi_proc != NULL && worker->wi_cost_limit_base > 0 && worker->wi_cost_delay > 0)
             cost_total += (double)worker->wi_cost_limit_base / worker->wi_cost_delay;
 
-        worker = (WorkerInfo)SHMQueueNext(&t_thrd.autovacuum_cxt.AutoVacuumShmem->av_runningWorkers,
-            &worker->wi_links,
+        worker = (WorkerInfo)SHMQueueNext(&t_thrd.autovacuum_cxt.AutoVacuumShmem->av_runningWorkers, &worker->wi_links,
             offsetof(WorkerInfoData, wi_links));
     }
     /* there are no cost limits -- nothing to do */
@@ -1636,8 +1621,7 @@ static void autovac_balance_cost(void)
      */
     cost_avail = (double)vac_cost_limit / vac_cost_delay;
     worker = (WorkerInfo)SHMQueueNext(&t_thrd.autovacuum_cxt.AutoVacuumShmem->av_runningWorkers,
-        &t_thrd.autovacuum_cxt.AutoVacuumShmem->av_runningWorkers,
-        offsetof(WorkerInfoData, wi_links));
+        &t_thrd.autovacuum_cxt.AutoVacuumShmem->av_runningWorkers, offsetof(WorkerInfoData, wi_links));
     while (worker != NULL) {
         if (worker->wi_proc != NULL && worker->wi_cost_limit_base > 0 && worker->wi_cost_delay > 0) {
             int limit = (int)(cost_avail * worker->wi_cost_limit_base / cost_total);
@@ -1650,16 +1634,10 @@ static void autovac_balance_cost(void)
              */
             worker->wi_cost_limit = Max(Min(limit, worker->wi_cost_limit_base), 1);
 
-            AUTOVAC_LOG(LOG,
-                "autovac_balance_cost(pid=%lu db=%u, rel=%u, parent=%u, cost_limit=%d, cost_limit_base=%d, "
-                "cost_delay=%d)",
-                worker->wi_proc->pid,
-                worker->wi_dboid,
-                worker->wi_tableoid,
-                worker->wi_parentoid,
-                worker->wi_cost_limit,
-                worker->wi_cost_limit_base,
-                worker->wi_cost_delay);
+            AUTOVAC_LOG(LOG, "autovac_balance_cost(pid=%lu db=%u, rel=%u, parent=%u, cost_limit=%d, "
+                "cost_limit_base=%d, cost_delay=%d)",
+                worker->wi_proc->pid, worker->wi_dboid, worker->wi_tableoid, worker->wi_parentoid,
+                worker->wi_cost_limit, worker->wi_cost_limit_base, worker->wi_cost_delay);
         }
 
         worker = (WorkerInfo)SHMQueueNext(&t_thrd.autovacuum_cxt.AutoVacuumShmem->av_runningWorkers,
@@ -1684,7 +1662,7 @@ static List* get_database_list(void)
 {
     List* dblist = NIL;
     Relation rel;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tup;
     MemoryContext resultcxt;
 
@@ -1702,9 +1680,9 @@ static List* get_database_list(void)
     (void)GetTransactionSnapshot();
 
     rel = heap_open(DatabaseRelationId, AccessShareLock);
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
 
-    while (HeapTupleIsValid(tup = heap_getnext(scan, ForwardScanDirection))) {
+    while (HeapTupleIsValid(tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
         Form_pg_database pgdatabase = (Form_pg_database)GETSTRUCT(tup);
         avw_dbase* avdb = NULL;
         MemoryContext oldcxt;
@@ -1742,7 +1720,7 @@ static List* get_database_list(void)
         (void)MemoryContextSwitchTo(oldcxt);
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
 
     CommitTransactionCommand();
@@ -1782,13 +1760,6 @@ void relation_support_autoavac(HeapTuple tuple, bool* enable_analyze, bool* enab
         return;
 
     /*
-     * 1. data in temp/unlogged is short-lived, so do nothing for temp/unlogged table
-     * 2. foreign table dose not have stat info, so just support ordinary table
-     */
-    if (RELPERSISTENCE_PERMANENT != classForm->relpersistence || RELKIND_RELATION != classForm->relkind)
-        return;
-
-    /*
      * 1. never analyze internal table since we never select them directly
      * 2. just analyze row/colume orientation table since analyze hdfs table is too inefficient
      */
@@ -1796,6 +1767,12 @@ void relation_support_autoavac(HeapTuple tuple, bool* enable_analyze, bool* enab
     if (StdRelOptGetInternalMask(relopts)) {
         /* do nothing, but set is_internal_relation to be true */
         *is_internal_relation = true;
+
+        /* if it is mlog or matmap then set it */
+        if (StdRelOptIsRowStore(relopts) && (ISMATMAP(classForm->relname.data) || ISMLOG(classForm->relname.data))) {
+            *enable_analyze = true;
+            *enable_vacuum = true;
+        }
     } else if (StdRelOptIsColStore(relopts)) {
         *enable_analyze = true;
     } else if (StdRelOptIsRowStore(relopts)) {
@@ -1803,14 +1780,28 @@ void relation_support_autoavac(HeapTuple tuple, bool* enable_analyze, bool* enab
         *enable_vacuum = true;
     }
 
-    if (StatisticRelationId == HeapTupleGetOid(tuple) || RELKIND_TOASTVALUE == classForm->relkind || !DO_ANALYZE)
+    if (StatisticRelationId == HeapTupleGetOid(tuple) || RELKIND_TOASTVALUE == classForm->relkind || !DO_ANALYZE) {
         *enable_analyze = false;
+    }
 
-    if (!DO_VACUUM)
+    if (!DO_VACUUM) {
         *enable_vacuum = false;
+    }
 
     if (relopts != NULL)
         pfree_ext(relopts);
+        
+    /*
+     * 1. data in temp/unlogged is short-lived, so do nothing for temp/unlogged table
+     * 2. foreign table dose not have stat info, so just support ordinary table
+     */    
+    if (RELPERSISTENCE_PERMANENT != classForm->relpersistence || RELKIND_RELATION != classForm->relkind) {
+        *enable_analyze = false;
+        *is_internal_relation = false;
+    }
+    if (RELKIND_RELATION != classForm->relkind) {
+        *enable_vacuum = false;
+    }
 }
 
 bool allow_autoanalyze(HeapTuple tuple)
@@ -1842,59 +1833,38 @@ static void fetch_global_autovac_info()
 
     initStringInfo(&buf);
     if (DO_VACUUM) {
-        appendStringInfo(&buf,
-            "with f as (select nspname, relname, partname, "
-            "sum(n_dead_tuples) as n_dead_tuples, "
-            "sum(n_live_tuples) as n_live_tuples, "
-            "sum(changes_since_analyze) as changes_since_analyze, "
-            "count(1) as count "
-            "from pg_total_autovac_tuples(%s) "
-            "group by nspname, relname, partname), "
+        appendStringInfo(&buf, "with f as (select nspname, relname, partname, sum(n_dead_tuples) as n_dead_tuples, "
+            "sum(n_live_tuples) as n_live_tuples, sum(changes_since_analyze) as changes_since_analyze, "
+            "count(1) as count from pg_total_autovac_tuples(%s) group by nspname, relname, partname), "
             "t as(SELECT c.oid as relid,n.nspname AS nspname, c.relname AS relname, "
             "case when p.parttype = 'r' then null else p.oid end as partid, "
-            "case when p.parttype = 'r' then null else p.relname end as partname, "
-            "x.pclocatortype as locatortype "
+            "case when p.parttype = 'r' then null else p.relname end as partname, x.pclocatortype as locatortype "
             "FROM pg_class c "
-            "INNER JOIN pg_namespace n ON n.oid = c.relnamespace "
-            "INNER JOIN pgxc_class x on x.pcrelid = c.oid "
+            "INNER JOIN pg_namespace n ON n.oid = c.relnamespace INNER JOIN pgxc_class x on x.pcrelid = c.oid "
             "LEFT JOIN pg_partition p on c.oid = p.parentid "
-            "WHERE c.relkind = 'r' and c.relpersistence = 'p' "
-            "and n.nspname not in ('pg_toast','cstore'))"
-            "select t.relid, t.partid, "
-            "(case when locatortype = 'R' then (f.n_dead_tuples/f.count) else f.n_dead_tuples end)::bigint as "
-            "n_dead_tuples, "
+            "WHERE c.relkind = 'r' and n.nspname not in ('pg_toast','cstore'))"
+            "select t.relid, t.partid, (case when locatortype = 'R' then (f.n_dead_tuples/f.count) else "
+            "f.n_dead_tuples end)::bigint as n_dead_tuples, "
             "(case when locatortype = 'R' then (f.n_live_tuples/f.count) else f.n_live_tuples end)::bigint as "
-            "n_live_tuples, "
-            "(case when locatortype = 'R' then (f.changes_since_analyze/f.count) else f.changes_since_analyze "
-            "end)::bigint as changes_since_analyze "
+            "n_live_tuples, (case when locatortype = 'R' then "
+            "(f.changes_since_analyze/f.count) else f.changes_since_analyze end)::bigint as changes_since_analyze "
             "from t inner join f on (t.nspname = f.nspname and t.relname = f.relname "
-            "and (t.partname = f.partname or (t.partname is null and f.partname is null))) ",
-            "false");
+            "and (t.partname = f.partname or (t.partname is null and f.partname is null))) ", "false");
     } else {
         appendStringInfo(&buf,
-            "with f as (select nspname, relname, "
-            "sum(n_dead_tuples) as n_dead_tuples, "
-            "sum(changes_since_analyze) as changes_since_analyze, "
-            "count(1) as count "
-            "from pg_total_autovac_tuples(%s) "
-            "group by nspname, relname), "
-            "t as(SELECT c.oid as relid, "
-            "n.nspname AS nspname, c.relname AS relname, "
-            "x.pclocatortype as locatortype "
+            "with f as (select nspname, relname, sum(n_dead_tuples) as n_dead_tuples, "
+            "sum(changes_since_analyze) as changes_since_analyze, count(1) as count "
+            "from pg_total_autovac_tuples(%s) group by nspname, relname), "
+            "t as(SELECT c.oid as relid, n.nspname AS nspname, c.relname AS relname, x.pclocatortype as locatortype "
             "FROM pg_class c "
-            "INNER JOIN pg_namespace n ON n.oid = c.relnamespace "
-            "INNER JOIN pgxc_class x on x.pcrelid = c.oid "
-            "WHERE c.relkind = 'r' and c.relpersistence = 'p' "
-            "and n.nspname not in ('pg_toast','cstore'))"
-            "select t.relid, "
-            "NULL AS partid, "
+            "INNER JOIN pg_namespace n ON n.oid = c.relnamespace INNER JOIN pgxc_class x on x.pcrelid = c.oid "
+            "WHERE c.relkind = 'r' and c.relpersistence = 'p' and n.nspname not in ('pg_toast','cstore'))"
+            "select t.relid, NULL AS partid, "
             "(case when locatortype = 'R' then (f.n_dead_tuples/f.count) else f.n_dead_tuples end)::bigint as "
-            "n_dead_tuples, "
-            "0 AS n_live_tuples, "
+            "n_dead_tuples, 0 AS n_live_tuples, "
             "(case when locatortype = 'R' then (f.changes_since_analyze/f.count) else f.changes_since_analyze "
             "end)::bigint as changes_since_analyze "
-            "from t inner join f on (t.nspname = f.nspname and t.relname = f.relname) ",
-            "true");
+            "from t inner join f on (t.nspname = f.nspname and t.relname = f.relname) ", "true");
     }
 
     AUTOVAC_LOG(DEBUG2, "FETCH GLOABLE AUTOVAC INFO STRING: %s", buf.data);
@@ -1924,7 +1894,6 @@ static void fetch_global_autovac_info()
             int64 changes_since_analyze = 0;
             bool isnull = false;
             bool partid_isnull = true;
-            bool found = false;
             avw_info* entry = NULL;
 
             relid = DatumGetObjectId(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 1, &isnull));
@@ -1943,7 +1912,7 @@ static void fetch_global_autovac_info()
             }
 
             entry =
-                (avw_info*)hash_search(t_thrd.autovacuum_cxt.pgStatAutoVacInfo, (void*)(&tablekey), HASH_ENTER, &found);
+                (avw_info*)hash_search(t_thrd.autovacuum_cxt.pgStatAutoVacInfo, (void*)(&tablekey), HASH_ENTER, NULL);
             entry->n_dead_tuples = n_dead_tuples;
             entry->n_live_tuples = n_live_tuples;
             entry->changes_since_analyze = changes_since_analyze;
@@ -1980,7 +1949,7 @@ static void do_autovacuum(void)
 {
     Relation classRel = NULL;
     HeapTuple tuple = NULL;
-    HeapScanDesc relScan = NULL;
+    TableScanDesc relScan = NULL;
     Form_pg_database dbForm = NULL;
     List* table_oids = NIL;
     HASHCTL partitioned_tables_ctl;
@@ -1999,7 +1968,7 @@ static void do_autovacuum(void)
     bool freeze_autovacuum = false; /* just do vacuum since need freeze the old tuple */
     bool is_internal_relation = false;  /* whether current relation is an internal relation */
     ScanKeyData key[1];
-    HeapScanDesc partScan;
+    TableScanDesc partScan;
     Relation partRel;
     HeapTuple partTuple;
     TupleDesc pg_class_desc;
@@ -2040,8 +2009,7 @@ static void do_autovacuum(void)
      */
     tuple = SearchSysCache1(DATABASEOID, ObjectIdGetDatum(u_sess->proc_cxt.MyDatabaseId));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR,
-            (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                 errmsg("cache lookup failed for database %u", u_sess->proc_cxt.MyDatabaseId)));
     dbForm = (Form_pg_database)GETSTRUCT(tuple);
     datallowconn = dbForm->datallowconn;
@@ -2138,7 +2106,6 @@ static void do_autovacuum(void)
     /*
      * Scan pg_class to determine which tables to vacuum.
      *
-     * We do this in two passes: on the first one we collect the list of plain
      * relations and materialized views, and on the second one we collect
      * TOAST tables. The reason for doing the second pass is that during it we
      * want to use the main relation's pg_class.reloptions entry if the TOAST
@@ -2149,13 +2116,13 @@ static void do_autovacuum(void)
      * wide tables there might be proportionally much more activity in the
      * TOAST table than in its parent.
      */
-    relScan = heap_beginscan(classRel, SnapshotNow, 0, NULL);
+    relScan = tableam_scan_begin(classRel, SnapshotNow, 0, NULL);
 
     /*
      * On the first pass, we collect main tables to vacuum, and also the main
      * table relid to TOAST relid mapping.
      */
-    while ((tuple = heap_getnext(relScan, ForwardScanDirection)) != NULL) {
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(relScan, ForwardScanDirection)) != NULL) {
         Form_pg_class classForm = (Form_pg_class)GETSTRUCT(tuple);
         PgStat_StatTabEntry* tabentry = NULL;
         AutoVacOpts* relopts = NULL;
@@ -2166,10 +2133,9 @@ static void do_autovacuum(void)
         bool enable_analyze = false;
         bool enable_vacuum = false;
 
-        /* Only autovacuum table and materialized view */
-        if (classForm->relkind != RELKIND_RELATION && classForm->relkind != RELKIND_MATVIEW) {
+        if (classForm->relkind != RELKIND_RELATION &&
+            classForm->relkind != RELKIND_MATVIEW)
             continue;
-        }
 
         /* We cannot safely process other backends' temp tables, so skip 'em. */
         if (classForm->relpersistence == RELPERSISTENCE_TEMP ||
@@ -2185,17 +2151,8 @@ static void do_autovacuum(void)
         relation_support_autoavac(tuple, &enable_analyze, &enable_vacuum, &is_internal_relation);
 
         /* Check if it needs vacuum or analyze */
-        relation_needs_vacanalyze(relid,
-            relopts,
-            classForm,
-            tuple,
-            tabentry,
-            enable_analyze,
-            enable_vacuum,
-            false,
-            &dovacuum,
-            &doanalyze,
-            &need_freeze);
+        relation_needs_vacanalyze(relid, relopts, classForm, tuple, tabentry, enable_analyze, enable_vacuum,
+            false, &dovacuum, &doanalyze, &need_freeze);
 
         if (freeze_autovacuum) {
             dovacuum = need_freeze;
@@ -2293,22 +2250,19 @@ static void do_autovacuum(void)
         }
     }
 
-    heap_endscan(relScan);
+    tableam_scan_end(relScan);
     DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "AUTOVAC TIMER: Scan pg_class to determine which tables to vacuum");
 
     /*
      * On the second pass, to collect all the partitions in the pg_partition,
      * and also the partitioned table relid to TOAST relid mapping.
      */
-    ScanKeyInit(&key[0],
-        Anum_pg_partition_parttype,
-        BTEqualStrategyNumber,
-        F_CHAREQ,
+    ScanKeyInit(&key[0], Anum_pg_partition_parttype, BTEqualStrategyNumber, F_CHAREQ,
         CharGetDatum(PART_OBJ_TYPE_TABLE_PARTITION));
 
     partRel = heap_open(PartitionRelationId, AccessShareLock);
-    partScan = heap_beginscan(partRel, SnapshotNow, 1, key);
-    while (NULL != (partTuple = heap_getnext(partScan, ForwardScanDirection))) {
+    partScan = tableam_scan_begin(partRel, SnapshotNow, 1, key);
+    while (NULL != (partTuple = (HeapTuple) tableam_scan_getnexttuple(partScan, ForwardScanDirection))) {
         Form_pg_partition partForm = (Form_pg_partition)GETSTRUCT(partTuple);
         PgStat_StatTabEntry* tabentry = NULL;
         AutoVacOpts* relopts = NULL;
@@ -2333,7 +2287,10 @@ static void do_autovacuum(void)
             relopts = &ar_hentry->ar_reloptions;
 
         ap_entry = (at_partitioned_table*)hash_search(partitioned_tables_map, &partForm->parentid, HASH_FIND, &found);
-        Assert(true == found);
+        if (!found) {
+            ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED), errmsg("Oid: %u does not "
+                "find in partitioned tables map.", partForm->parentid)));
+        }
 
         /* Every partition table is local */
         partOid = HeapTupleGetOid(partTuple);
@@ -2375,7 +2332,7 @@ static void do_autovacuum(void)
                 at_entry->at_needfreeze = need_freeze;
                 at_entry->at_internal = false;
             }
-            /*
+            /* 
              * if we found map but parentid doesn't equal to partFrom->parentid
              * may be the reltoastrelid has been exchanged by some one,
              * (e.g. alter table exchange partition)
@@ -2386,8 +2343,7 @@ static void do_autovacuum(void)
                     ereport(LOG, (errmsg("reltoastrelid: %u toast table map "
                         "has been changed, skip it.", partForm->reltoastrelid)));
                 } else {
-                    ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
-                        errmsg("toast table map hash table corrupted.")));
+                    ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("toast table map hash table corrupted.")));
                 }
             } else {
                 Assert(OidIsValid(at_entry->at_relid) && OidIsValid(at_entry->at_parentid));
@@ -2396,14 +2352,14 @@ static void do_autovacuum(void)
     }
 
     /* Close the pg_partition */
-    heap_endscan(partScan);
+    tableam_scan_end(partScan);
     heap_close(partRel, AccessShareLock);
     DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "AUTOVAC TIMER: Scan pg_partition to determine which partitions to vacuum");
 
     /* On the third pass: check TOAST tables */
     ScanKeyInit(&key[0], Anum_pg_class_relkind, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(RELKIND_TOASTVALUE));
-    relScan = heap_beginscan(classRel, SnapshotNow, 1, &key[0]);
-    while ((tuple = heap_getnext(relScan, ForwardScanDirection)) != NULL) {
+    relScan = tableam_scan_begin(classRel, SnapshotNow, 1, &key[0]);
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(relScan, ForwardScanDirection)) != NULL) {
         Form_pg_class classForm = (Form_pg_class)GETSTRUCT(tuple);
         Oid relid = HeapTupleGetOid(tuple);
         PgStat_StatTabEntry* tabentry = NULL;
@@ -2455,21 +2411,17 @@ static void do_autovacuum(void)
         /* Fetch the pgstat entry for this table */
         tabentry = get_pgstat_tabentry_relid(relid, classForm->relisshared, InvalidOid, shared, dbentry);
         relation_support_autoavac(tuple, &enable_analyze, &enable_vacuum, &is_internal_relation);
-        relation_needs_vacanalyze(relid,
-            relopts,
-            classForm,
-            tuple,
-            tabentry,
-            enable_analyze,
-            enable_vacuum,
-            true,
-            &dovacuum,
-            &doanalyze,
-            &need_freeze);
+        relation_needs_vacanalyze(relid, relopts, classForm, tuple, tabentry, enable_analyze, enable_vacuum, true,
+            &dovacuum, &doanalyze, &need_freeze);
 
         if (freeze_autovacuum) {
-            dovacuum = need_freeze;
-            doanalyze = false;
+            if (ISMATMAP(classForm->relname.data) || ISMLOG(classForm->relname.data)) {
+                dovacuum = true;
+                doanalyze = false;
+            } else {
+                dovacuum = need_freeze;
+                doanalyze = false;
+            }
         }
 
         /* vacuum main table/partition instead if toast table */
@@ -2498,7 +2450,7 @@ static void do_autovacuum(void)
         }
     }
 
-    heap_endscan(relScan);
+    tableam_scan_end(relScan);
     heap_close(classRel, AccessShareLock);
     DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "AUTOVAC TIMER: Scan pg_class to determine which toast tables to vacuum");
 
@@ -2513,11 +2465,8 @@ static void do_autovacuum(void)
      * create a memory context to act as fake t_thrd.mem_cxt.portal_mem_cxt, so that the
      * contexts created in the vacuum code are cleaned up for each table.
      */
-    t_thrd.mem_cxt.portal_mem_cxt = AllocSetContextCreate(t_thrd.autovacuum_cxt.AutovacMemCxt,
-        "Autovacuum Portal",
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    t_thrd.mem_cxt.portal_mem_cxt = AllocSetContextCreate(t_thrd.autovacuum_cxt.AutovacMemCxt, "Autovacuum Portal",
+        ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_MAXSIZE);
 
     /*
      * Perform operations on collected tables.
@@ -2555,8 +2504,7 @@ static void do_autovacuum(void)
          */
         skipit = false;
         worker = (WorkerInfo)SHMQueueNext(&t_thrd.autovacuum_cxt.AutoVacuumShmem->av_runningWorkers,
-            &t_thrd.autovacuum_cxt.AutoVacuumShmem->av_runningWorkers,
-            offsetof(WorkerInfoData, wi_links));
+            &t_thrd.autovacuum_cxt.AutoVacuumShmem->av_runningWorkers, offsetof(WorkerInfoData, wi_links));
         while (worker != NULL) {
             /* ignore myself */
             if (worker == t_thrd.autovacuum_cxt.MyWorkerInfo)
@@ -2575,8 +2523,7 @@ static void do_autovacuum(void)
 
         next_worker:
             worker = (WorkerInfo)SHMQueueNext(&t_thrd.autovacuum_cxt.AutoVacuumShmem->av_runningWorkers,
-                &worker->wi_links,
-                offsetof(WorkerInfoData, wi_links));
+                &worker->wi_links, offsetof(WorkerInfoData, wi_links));
         }
         LWLockRelease(AutovacuumLock);
         if (skipit) {
@@ -2618,7 +2565,7 @@ static void do_autovacuum(void)
         t_thrd.autovacuum_cxt.MyWorkerInfo->wi_tableoid = relid;
         t_thrd.autovacuum_cxt.MyWorkerInfo->wi_parentoid = parentid;
         t_thrd.autovacuum_cxt.MyWorkerInfo->wi_sharedrel = tab->at_sharedrel;
-        t_thrd.autovacuum_cxt.MyWorkerInfo->wi_ispartition = vacuumPartition(vacObj->flags);
+        t_thrd.autovacuum_cxt.MyWorkerInfo->wi_ispartition = vacuumPartition((uint32)(vacObj->flags));
         LWLockRelease(AutovacuumScheduleLock);
 
         /*
@@ -2657,7 +2604,7 @@ static void do_autovacuum(void)
          * Note: they must live in a long-lived memory context because we call
          * vacuum and analyze in different transactions.
          */
-        if (vacuumPartition(vacObj->flags)) {
+        if (vacuumPartition((uint32)(vacObj->flags))) {
             Oid at_parentid = partid_get_parentid(tab->at_relid);
 
             tab->at_partname = getPartitionName(tab->at_relid, false);
@@ -2692,6 +2639,9 @@ static void do_autovacuum(void)
             CommitTransactionCommand();
 
             StartTransactionCommand();
+            /* vacuum must hold RowExclusiveLock on db for a new transaction */
+            LockSharedObject(DatabaseRelationId, u_sess->proc_cxt.MyDatabaseId, 0, RowExclusiveLock);
+            
             PushActiveSnapshot(GetTransactionSnapshot());
 
             (void)MemoryContextSwitchTo(t_thrd.mem_cxt.portal_mem_cxt);
@@ -2751,6 +2701,8 @@ static void do_autovacuum(void)
             /* restart our transaction for the following operations */
             StartTransactionCommand();
             RESUME_INTERRUPTS();
+            /* vacuum must hold RowExclusiveLock on db for a new transaction */
+            LockSharedObject(DatabaseRelationId, u_sess->proc_cxt.MyDatabaseId, 0, RowExclusiveLock);
         }
         PG_END_TRY();
 
@@ -2810,8 +2762,8 @@ AutoVacOpts* extract_autovac_opts(HeapTuple tup, TupleDesc pg_class_desc)
     int rc = 0;
 
     Assert(((Form_pg_class)GETSTRUCT(tup))->relkind == RELKIND_RELATION ||
-           ((Form_pg_class)GETSTRUCT(tup))->relkind == RELKIND_TOASTVALUE ||
-           ((Form_pg_class)GETSTRUCT(tup))->relkind == RELKIND_MATVIEW);
+           ((Form_pg_class) GETSTRUCT(tup))->relkind == RELKIND_MATVIEW ||
+           ((Form_pg_class)GETSTRUCT(tup))->relkind == RELKIND_TOASTVALUE);
 
     relopts = extractRelOptions(tup, pg_class_desc, InvalidOid);
     if (relopts == NULL)
@@ -2969,21 +2921,18 @@ static autovac_table* table_recheck_autovac(
     /* fetch the pgstat table entry */
     tabentry = get_pgstat_tabentry_relid(relid, classForm->relisshared, InvalidOid, shared, dbentry);
     relation_support_autoavac(classTup, &enable_analyze, &enable_vacuum, &is_internal_relation);
-    relation_needs_vacanalyze(relid,
-        avopts,
-        classForm,
-        classTup,
-        tabentry,
-        enable_analyze,
-        enable_vacuum,
-        true,
-        &dovacuum,
-        &doanalyze,
-        &need_freeze);
+    relation_needs_vacanalyze(relid, avopts, classForm, classTup, tabentry, enable_analyze, enable_vacuum, true,
+        &dovacuum, &doanalyze, &need_freeze);
 
     /* ignore ANALYZE for toast tables */
     if (classForm->relkind == RELKIND_TOASTVALUE)
         doanalyze = false;
+
+    /* do vacuum with mlog and matmap anyway */
+    if (ISMATMAP(classForm->relname.data) || ISMLOG(classForm->relname.data)) {
+        dovacuum = true;
+        doanalyze = true;
+    }
 
     /* OK, it needs something done */
     if (doanalyze || dovacuum || dovacuum_toast) {
@@ -3109,14 +3058,8 @@ static void relation_needs_vacanalyze(Oid relid, AutoVacOpts* relopts, Form_pg_c
     AssertArg(classForm != NULL);
     AssertArg(OidIsValid(relid));
 
-    determine_vacuum_params(vac_scale_factor,
-        vac_base_thresh,
-        anl_scale_factor,
-        anl_base_thresh,
-        freeze_max_age,
-        av_enabled,
-        xidForceLimit,
-        relopts);
+    determine_vacuum_params(vac_scale_factor, vac_base_thresh, anl_scale_factor, anl_base_thresh, freeze_max_age,
+        av_enabled, xidForceLimit, relopts);
 
     bool isNull = false;
     TransactionId relfrozenxid = InvalidTransactionId;
@@ -3164,21 +3107,15 @@ static void relation_needs_vacanalyze(Oid relid, AutoVacOpts* relopts, Form_pg_c
         if (tabentry && (tabentry->changes_since_analyze || tabentry->n_dead_tuples)) {
             anltuples = tabentry->changes_since_analyze;
             vactuples = tabentry->n_dead_tuples;
-            AUTOVAC_LOG(DEBUG2,
-                "fetch local stat info: vac \"%s\" changes_since_analyze = %ld  n_dead_tuples = %ld ",
-                NameStr(classForm->relname),
-                tabentry->changes_since_analyze,
-                tabentry->n_dead_tuples);
+            AUTOVAC_LOG(DEBUG2, "fetch local stat info: vac \"%s\" changes_since_analyze = %ld  n_dead_tuples = %ld ",
+                NameStr(classForm->relname), tabentry->changes_since_analyze, tabentry->n_dead_tuples);
         }
 
         if (avwentry && (avwentry->changes_since_analyze || avwentry->n_dead_tuples)) {
             anltuples = avwentry->changes_since_analyze;
             vactuples = avwentry->n_dead_tuples;
-            AUTOVAC_LOG(DEBUG2,
-                "fetch global stat info: vac \"%s\" changes_since_analyze = %ld  n_dead_tuples = %ld ",
-                NameStr(classForm->relname),
-                avwentry->changes_since_analyze,
-                avwentry->n_dead_tuples);
+            AUTOVAC_LOG(DEBUG2, "fetch global stat info: vac \"%s\" changes_since_analyze = %ld  n_dead_tuples = %ld ",
+                NameStr(classForm->relname), avwentry->changes_since_analyze, avwentry->n_dead_tuples);
         }
 
         /* Determine if this table needs vacuum. */
@@ -3194,19 +3131,11 @@ static void relation_needs_vacanalyze(Oid relid, AutoVacOpts* relopts, Form_pg_c
     }
 
     if (*dovacuum || *doanalyze) {
-        AUTOVAC_LOG(DEBUG2,
-            "vac \"%s\": recheck = %s need_freeze = %s "
+        AUTOVAC_LOG(DEBUG2, "vac \"%s\": recheck = %s need_freeze = %s"
             "dovacuum = %s (dead tuples %ld vacuum threshold %.0f) "
             "doanalyze = %s (changed tuples %ld analyze threshold %.0f)",
-            NameStr(classForm->relname),
-            is_recheck ? "true" : "false",
-            *need_freeze ? "true" : "false",
-            *dovacuum ? "true" : "false",
-            vactuples,
-            vacthresh,
-            *doanalyze ? "true" : "false",
-            anltuples,
-            anlthresh);
+            NameStr(classForm->relname), is_recheck ? "true" : "false", *need_freeze ? "true" : "false",
+            *dovacuum ? "true" : "false", vactuples, vacthresh, *doanalyze ? "true" : "false", anltuples, anlthresh);
     }
 }
 
@@ -3224,7 +3153,9 @@ static void fill_in_vac_stmt(VacuumStmt& vacstmt, const autovac_table& tab, Rang
         vacstmt.options = (unsigned int)vacstmt.options | VACOPT_VACUUM;
     if (tab.at_doanalyze)
         vacstmt.options = (unsigned int)vacstmt.options | VACOPT_ANALYZE;
+#ifdef ENABLE_MOT
     vacstmt.options |= VACOPT_AUTOVAC;
+#endif
     vacstmt.flags = tab.at_flags;
     vacstmt.rely_oid = InvalidOid; /* we just simple set it invalid, maybe change */
     vacstmt.freeze_min_age = tab.at_freeze_min_age;
@@ -3337,10 +3268,7 @@ static void autovac_report_activity(autovac_table* tab)
 
     /* Report the command and possible options */
     if (tab->at_dovacuum)
-        rc = snprintf_s(activity,
-            MAX_AUTOVAC_ACTIV_LEN,
-            MAX_AUTOVAC_ACTIV_LEN - 1,
-            "autovacuum: VACUUM%s",
+        rc = snprintf_s(activity, MAX_AUTOVAC_ACTIV_LEN, MAX_AUTOVAC_ACTIV_LEN - 1, "autovacuum: VACUUM%s",
             tab->at_doanalyze ? " ANALYZE" : "");
     else
         rc = snprintf_s(activity, MAX_AUTOVAC_ACTIV_LEN, MAX_AUTOVAC_ACTIV_LEN - 1, "autovacuum: ANALYZE");
@@ -3351,13 +3279,8 @@ static void autovac_report_activity(autovac_table* tab)
      */
     len = strlen(activity);
 
-    rc = snprintf_s(activity + len,
-        MAX_AUTOVAC_ACTIV_LEN - len,
-        MAX_AUTOVAC_ACTIV_LEN - len - 1,
-        " %s.%s%s",
-        tab->at_nspname,
-        tab->at_relname,
-        tab->at_needfreeze ? " (freeze old tuple for recycle clog)" : "");
+    rc = snprintf_s(activity + len, MAX_AUTOVAC_ACTIV_LEN - len, MAX_AUTOVAC_ACTIV_LEN - len - 1,
+        " %s.%s%s", tab->at_nspname, tab->at_relname, tab->at_needfreeze ? " (freeze old tuple for recycle clog)" : "");
     securec_check_ss(rc, "\0", "\0");
 
     /* Set statement_timestamp() to current time for pg_stat_activity */
@@ -3387,8 +3310,7 @@ bool AutoVacuumingActive(void)
 void autovac_init(void)
 {
     if (u_sess->attr.attr_storage.autovacuum_start_daemon && !u_sess->attr.attr_common.pgstat_track_counts)
-        ereport(WARNING,
-            (errmsg("autovacuum not started because of misconfiguration"),
+        ereport(WARNING, (errmsg("autovacuum not started because of misconfiguration"),
                 errhint("Enable the \"track_counts\" option.")));
 }
 
@@ -3405,6 +3327,12 @@ bool IsAutoVacuumLauncherProcess(void)
 bool IsAutoVacuumWorkerProcess(void)
 {
     return t_thrd.role == AUTOVACUUM_WORKER;
+}
+
+bool IsFromAutoVacWoker(void)
+{
+    return (u_sess->attr.attr_common.application_name != NULL &&
+        strcmp(u_sess->attr.attr_common.application_name, "AutoVacWorker") == 0);
 }
 
 /*
@@ -3522,14 +3450,8 @@ static void partition_needs_vacanalyze(Oid partid, AutoVacOpts* relopts, Form_pg
     char* partname = NULL;
 
     AssertArg(partForm != NULL && OidIsValid(partid));
-    determine_vacuum_params(vac_scale_factor,
-        vac_base_thresh,
-        anl_scale_factor,
-        anl_base_thresh,
-        freeze_max_age,
-        av_enabled,
-        xidForceLimit,
-        relopts);
+    determine_vacuum_params(vac_scale_factor, vac_base_thresh, anl_scale_factor, anl_base_thresh, freeze_max_age,
+        av_enabled, xidForceLimit, relopts);
     /* Force vacuum if table need freeze the old tuple to recycle clog */
     if (t_thrd.autovacuum_cxt.recentXid > FirstNormalTransactionId + freeze_max_age)
         xidForceLimit = t_thrd.autovacuum_cxt.recentXid - freeze_max_age;
@@ -3590,26 +3512,18 @@ static void partition_needs_vacanalyze(Oid partid, AutoVacOpts* relopts, Form_pg
         if (tabentry && (tabentry->changes_since_analyze || tabentry->n_dead_tuples)) {
             vactuples = tabentry->n_dead_tuples;
             anltuples = tabentry->changes_since_analyze;
-            AUTOVAC_LOG(DEBUG2,
-                "fetch local stat info: vac \"%s\" partition(\"%s\") "
+            AUTOVAC_LOG(DEBUG2, "fetch local stat info: vac \"%s\" partition(\"%s\") "
                 "changes_since_analyze = %ld  n_dead_tuples = %ld ",
-                relname,
-                partname,
-                tabentry->changes_since_analyze,
-                tabentry->n_dead_tuples);
+                relname, partname, tabentry->changes_since_analyze, tabentry->n_dead_tuples);
         }
 
         if (avwentry && (avwentry->changes_since_analyze || avwentry->n_dead_tuples)) {
             anltuples = avwentry->changes_since_analyze;
             vactuples = avwentry->n_dead_tuples;
 
-            AUTOVAC_LOG(DEBUG2,
-                "fetch local stat info: vac \"%s\" partition(\"%s\") "
+            AUTOVAC_LOG(DEBUG2, "fetch local stat info: vac \"%s\" partition(\"%s\") "
                 "changes_since_analyze = %ld  n_dead_tuples = %ld ",
-                relname,
-                partname,
-                avwentry->changes_since_analyze,
-                avwentry->n_dead_tuples);
+                relname, partname, avwentry->changes_since_analyze, avwentry->n_dead_tuples);
 
             /*
              * refresh partition's vacthresh/anlthresh with n_live_tuples because we
@@ -3634,16 +3548,10 @@ static void partition_needs_vacanalyze(Oid partid, AutoVacOpts* relopts, Form_pg
     }
 
     if (!is_recheck && (*dovacuum || *doanalyze)) {
-        AUTOVAC_LOG(DEBUG2,
-            "vac table \"%s\" partition(\"%s\"): recheck = %s need_freeze = %s "
+        AUTOVAC_LOG(DEBUG2, "vac table \"%s\" partition(\"%s\"): recheck = %s need_freeze = %s "
             "dovacuum = %s (dead tuples %ld vacuum threshold %.0f)",
-            relname,
-            partname,
-            is_recheck ? "true" : "false",
-            *need_freeze ? "true" : "false",
-            *dovacuum ? "true" : "false",
-            vactuples,
-            vacthresh);
+            relname, partname, is_recheck ? "true" : "false", *need_freeze ? "true" : "false",
+            *dovacuum ? "true" : "false", vactuples, vacthresh);
     }
 }
 
@@ -3684,11 +3592,18 @@ static autovac_table* partition_recheck_autovac(
 
     /* fetch the relation's syscache entry */
     hentry = (av_relation*)hash_search(table_relopt_map, &relid, HASH_FIND, &found);
-    Assert(found && hentry->ar_hasrelopts);
+    if (!(found && hentry->ar_hasrelopts)) {
+        ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED), errmsg("Oid: %u does not "
+            "find in rel options map.", relid)));
+    }
     avopts = &(hentry->ar_reloptions);
 
     /* fetch the pgstat table entry */
     ap_entry = (at_partitioned_table*)hash_search(partitioned_tables_map, &partForm->parentid, HASH_FIND, &found);
+    if (!found) {
+        ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED), errmsg("Oid: %u does not "
+            "find in partitioned tables map.", partForm->parentid)));
+    }
     tabentry = get_pgstat_tabentry_relid(partid, false, relid, shared, dbentry);
     partition_needs_vacanalyze(
         partid, avopts, partForm, partTuple, ap_entry, tabentry, true, &dovacuum, &doanalyze, &need_freeze);
@@ -3707,10 +3622,4 @@ static autovac_table* partition_recheck_autovac(
 
     return tab;
 }
-bool enable_page_prune(void)
-{
-    if (u_sess->attr.attr_storage.autovacuum_start_daemon && g_instance.attr.attr_storage.autovacuum_max_workers > 0)
-        return true;
-    else
-        return false;
-}
+

@@ -40,57 +40,134 @@
 #include "utils/memutils.h"
 #include "utils/ps_status.h"
 #include "utils/guc.h"
+#include "utils/globalpreparestmt.h"
 
-#define SCHEDULER_TIME_UNIT 1000000  // us
+#define SCHEDULER_TIME_UNIT 1000000  //us
 #define ENLARGE_THREAD_TIME 5
 #define MAX_HANG_TIME 100
 #define REDUCE_THREAD_TIME 100
 #define SHUTDOWN_THREAD_TIME 1000
+#define GPC_CLEAN_TIME 600
+
+static void SchedulerSIGKILLHandler(SIGNAL_ARGS)
+{
+    proc_exit(0);
+}
 
 void TpoolSchedulerMain(ThreadPoolScheduler *scheduler)
 {
+    int gpc_count = 0;
+    int cn_gpc_count = 0;
+
+    (void)gspqsignal(SIGKILL, SchedulerSIGKILLHandler);
+    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
+    (void)gs_signal_unblock_sigusr2();
+
     while (true) {
         pg_usleep(SCHEDULER_TIME_UNIT);
         scheduler->DynamicAdjustThreadPool();
+        scheduler->GPCScheduleCleaner(&gpc_count);
+        scheduler->CNGPCScheduleCleaner(&cn_gpc_count);
+        g_threadPoolControler->GetSessionCtrl()->CheckSessionTimeout();
     }
     proc_exit(0);
 }
 
 ThreadPoolScheduler::ThreadPoolScheduler(int groupNum, ThreadPoolGroup** groups)
-    :m_groupNum(groupNum)
-    , m_groups(groups)
+:m_groupNum(groupNum), m_groups(groups), m_has_shutdown(false)
 {
     m_tid = 0;
     m_hangTestCount = (uint *)palloc0(sizeof(uint) * groupNum);
     m_freeTestCount = (uint *)palloc0(sizeof(uint) * groupNum);
+    m_freeStreamCount = (uint *)palloc0(sizeof(uint) * groupNum);
+}
+
+ThreadPoolScheduler::~ThreadPoolScheduler()
+{
+    m_groups = NULL;
+    m_hangTestCount = NULL;
+    m_freeStreamCount = NULL;
+    m_freeTestCount = NULL;
 }
 
 int ThreadPoolScheduler::StartUp()
 {
     m_tid = initialize_util_thread(THREADPOOL_SCHEDULER, (void*)this);
-    return (m_tid == 0 ? STATUS_ERROR : STATUS_OK);
+    return ((m_tid == 0) ? STATUS_ERROR : STATUS_OK);
 }
 
 void ThreadPoolScheduler::DynamicAdjustThreadPool()
 {
-    ThreadPoolGroup* group = NULL;
-
     for (int i = 0; i < m_groupNum; i++) {
-        group = m_groups[i];
-
         if (pmState == PM_RUN) {
-            /* When no idle worker and no task has been processed, the system may hang. */
-            if (group->IsGroupHang()) {
-                m_hangTestCount[i]++;
-                m_freeTestCount[i] = 0;
-                EnlargeWorkerIfNecessage(i);
-            } else {
-                m_hangTestCount[i] = 0;
-                m_freeTestCount[i]++;
-                ReduceWorkerIfNecessary(i);
-            }
+            AdjustWorkerPool(i);
+            AdjustStreamPool(i);
         }
     }
+}
+
+void ThreadPoolScheduler::GPCScheduleCleaner(int* gpc_count)
+{
+    if (ENABLE_DN_GPC && *gpc_count == GPC_CLEAN_TIME) {
+        if (pmState == PM_RUN) {
+            pthread_mutex_lock(&g_instance.gpc_reset_lock);
+            g_instance.prepare_cache->PrepareCleanUpByTime(true);
+            pthread_mutex_unlock(&g_instance.gpc_reset_lock);
+        }
+        *gpc_count = 0;
+    }
+    (*gpc_count)++;
+}
+
+void ThreadPoolScheduler::CNGPCScheduleCleaner(int* gpc_count)
+{
+    if (ENABLE_CN_GPC && *gpc_count == GPC_CLEAN_TIME) {
+        if (pmState == PM_RUN) {
+            pthread_mutex_lock(&g_instance.gpc_reset_lock);
+            g_instance.plan_cache->DropInvalid();
+            pthread_mutex_unlock(&g_instance.gpc_reset_lock);
+        }
+        *gpc_count = 0;
+    }
+    (*gpc_count)++;
+}
+
+void ThreadPoolScheduler::ShutDown() const
+{
+    if (m_tid != 0)
+        gs_signal_send(m_tid, SIGKILL);
+}
+
+void ThreadPoolScheduler::AdjustWorkerPool(int idx)
+{
+    ThreadPoolGroup* group = m_groups[idx];
+    /* When no idle worker and no task has been processed, the system may hang. */
+    if (group->IsGroupHang()) {
+        m_hangTestCount[idx]++;
+        m_freeTestCount[idx] = 0;
+        EnlargeWorkerIfNecessage(idx);
+    } else {
+        m_hangTestCount[idx] = 0;
+        m_freeTestCount[idx]++;
+        ReduceWorkerIfNecessary(idx);
+    }
+}
+
+void ThreadPoolScheduler::AdjustStreamPool(int idx)
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    ThreadPoolGroup* group = m_groups[idx];
+
+    if (group->HasFreeStream()) {
+        m_freeStreamCount[idx]++;
+        if (m_freeStreamCount[idx] == SHUTDOWN_THREAD_TIME) {
+            group->ReduceStreams();
+            m_freeStreamCount[idx] = 0;
+        }
+    } else {
+        m_freeStreamCount[idx] = 0;
+    }
+#endif
 }
 
 void ThreadPoolScheduler::EnlargeWorkerIfNecessage(int groupIdx)

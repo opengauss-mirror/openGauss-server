@@ -36,7 +36,8 @@ static char* inet_cidr_ntop_ipv4(const u_char* src, int bits, char* dst, size_t 
 static char* inet_cidr_ntop_ipv6(const u_char* src, int bits, char* dst, size_t size);
 
 /*
- * inet_cidr_ntop:
+ * char *
+ * inet_cidr_ntop(af, src, bits, dst, size)
  *	convert network number from network to presentation format.
  *	generates CIDR style result always.
  * return:
@@ -56,7 +57,8 @@ char* inet_cidr_ntop(int af, const void* src, int bits, char* dst, size_t size)
 }
 
 /*
- * inet_cidr_ntop_ipv4:
+ * static char *
+ * inet_cidr_ntop_ipv4(src, bits, dst, size)
  *	convert IPv4 network number from network to presentation format.
  *	generates CIDR style result always.
  * return:
@@ -79,8 +81,9 @@ static char* inet_cidr_ntop_ipv4(const u_char* src, int bits, char* dst, size_t 
     }
 
     if (bits == 0) {
-        if (size < sizeof"0")
+        if (size < sizeof "0") {
             goto emsgsize;
+        }
         *dst++ = '0';
         size--;
         *dst = '\0';
@@ -88,8 +91,9 @@ static char* inet_cidr_ntop_ipv4(const u_char* src, int bits, char* dst, size_t 
 
     /* Format whole octets. */
     for (b = bits / 8; b > 0; b--) {
-        if (size <= sizeof"255.")
+        if (size <= sizeof "255.") {
             goto emsgsize;
+        }
         t = dst;
         rc = sprintf_s(dst, size, "%u", *src++);
         securec_check_ss(rc, "\0", "\0");
@@ -104,7 +108,7 @@ static char* inet_cidr_ntop_ipv4(const u_char* src, int bits, char* dst, size_t 
     /* Format partial octet. */
     b = bits % 8;
     if (b > 0) {
-        if (size <= sizeof".255") {
+        if (size <= sizeof ".255") {
             goto emsgsize;
         }
         t = dst;
@@ -119,8 +123,9 @@ static char* inet_cidr_ntop_ipv4(const u_char* src, int bits, char* dst, size_t 
     }
 
     /* Format CIDR /width. */
-    if (size <= sizeof"/32")
+    if (size <= sizeof "/32") {
         goto emsgsize;
+    }
     rc = sprintf_s(dst, size, "/%d", bits);
     securec_check_ss(rc, "\0", "\0");
     dst += rc;
@@ -132,7 +137,8 @@ emsgsize:
 }
 
 /*
- * inet_cidr_ntop_ipv6:
+ * static char *
+ * inet_cidr_ntop_ipv6(src, bits, fakebits, dst, size)
  *	convert IPv6 network number from network to presentation format.
  *	generates CIDR style result always. Picks the shortest representation
  *	unless the IP is really IPv4.
@@ -143,6 +149,7 @@ emsgsize:
  *	network byte order assumed.  this means 192.5.5.240/28 has
  *	0x11110000 in its fourth octet.
  */
+
 static char* inet_cidr_ntop_ipv6(const u_char* src, int bits, char* dst, size_t size)
 {
     u_int m;
@@ -188,17 +195,15 @@ static char* inet_cidr_ntop_ipv6(const u_char* src, int bits, char* dst, size_t 
 
         /* how many words need to be displayed in output */
         words = (bits + 15) / 16;
-        if (words == 1) {
+        if (words == 1)
             words = 2;
-        }
 
         /* Find the longest substring of zero's */
         zero_s = zero_l = tmp_zero_s = tmp_zero_l = 0;
         for (i = 0; i < (words * 2); i += 2) {
             if ((s[i] | s[i + 1]) == 0) {
-                if (tmp_zero_l == 0) {
+                if (tmp_zero_l == 0)
                     tmp_zero_s = i / 2;
-                }
                 tmp_zero_l++;
             } else {
                 if (tmp_zero_l && zero_l < tmp_zero_l) {
@@ -218,7 +223,7 @@ static char* inet_cidr_ntop_ipv6(const u_char* src, int bits, char* dst, size_t 
             ((zero_l == 6) ||
                 ((zero_l == 5 && s[10] == 0xff && s[11] == 0xff) || ((zero_l == 7 && s[14] != 0 && s[15] != 1))))) {
             is_ipv4 = 1;
-		}
+        }
 
         /* Format whole words. */
         for (p = 0; p < words; p++) {
@@ -248,9 +253,8 @@ static char* inet_cidr_ntop_ipv6(const u_char* src, int bits, char* dst, size_t 
                     cp += rc;
                 }
             } else {
-                if (cp != outbuf) {
+                if (cp != outbuf)
                     *cp++ = ':';
-                }
                 rc = sprintf_s(cp, size, "%x", *s * 256 + s[1]);
                 securec_check_ss(rc, "\0", "\0");
                 cp += rc;
@@ -263,9 +267,8 @@ static char* inet_cidr_ntop_ipv6(const u_char* src, int bits, char* dst, size_t 
     rc = sprintf_s(cp, size, "/%d", bits);
     securec_check_ss(rc, "\0", "\0");
 
-    if (strlen(outbuf) + 1 > size) {
+    if (strlen(outbuf) + 1 > size)
         goto emsgsize;
-    }
     rc = strcpy_s(dst, size, outbuf);
     securec_check(rc, "\0", "\0");
 

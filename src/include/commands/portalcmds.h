@@ -28,4 +28,3 @@ extern void PortalCleanup(Portal portal);
 extern void PersistHoldablePortal(Portal portal);
 
 #endif /* PORTALCMDS_H */
-

@@ -141,6 +141,9 @@ typedef struct trace_infra {
     /* the number of trace records since startup */
     volatile uint64_t g_Counter;
 
+    /* the number of used slots since startup */
+    volatile uint64_t g_slot_count;
+
     /* ensure the previous one field in an sepreate cacheline */
     char pad[CACHE_LINE_SIZE - sizeof(uint64_t)];
 
@@ -258,4 +261,3 @@ extern int trace_open_filedesc(const char* file_name, int oflag, int mode);
 extern int trace_close_filedesc(int fd);
 
 #endif /* TRACE_INFRA_INT_H_ */
-

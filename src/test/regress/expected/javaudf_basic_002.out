@@ -1,0 +1,345 @@
+/*
+ * This file is used to test the function of JavaUDF
+ * on parameter types and boundaries.
+ */
+DROP SCHEMA javaudf_parameters;
+ERROR:  schema "javaudf_parameters" does not exist
+CREATE SCHEMA javaudf_parameters;
+SET CURRENT_SCHEMA = javaudf_parameters;
+--test type: basic type
+CREATE FUNCTION dummy(BOOL)
+	RETURNS BOOL
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+----default match bool
+CREATE FUNCTION dummy(BOOLEAN)
+	RETURNS BOOLEAN
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+ERROR:  function "dummy" already exists with same argument types
+----return true when passing null
+CREATE FUNCTION dummyBoolean(BOOLEAN)
+	RETURNS BOOLEAN
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummyBoolean(java.lang.Boolean)'
+	IMMUTABLE LANGUAGE java;
+CREATE FUNCTION dummy("char")
+	RETURNS "char"
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+CREATE FUNCTION dummy(BYTEA)
+	RETURNS BYTEA
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+----return java error when passing null
+CREATE FUNCTION dummyByte("char")
+	RETURNS "char"
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummyByte(java.lang.Byte)'
+	IMMUTABLE LANGUAGE java;
+----should return value
+CREATE FUNCTION dummy(INT2)
+	RETURNS INT2
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+----default match int2
+CREATE FUNCTION dummy(SMALLINT)
+	RETURNS SMALLINT
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+ERROR:  function "dummy" already exists with same argument types
+----return 0 when passing null
+CREATE FUNCTION dummyShort(SMALLINT)
+	RETURNS SMALLINT
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummyShort(java.lang.Short)'
+	IMMUTABLE LANGUAGE java;
+----should return value+1
+CREATE FUNCTION dummy(INT4)
+	RETURNS INT4
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+----default match int4
+CREATE FUNCTION dummy(INTEGER)
+	RETURNS INTEGER
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+ERROR:  function "dummy" already exists with same argument types
+----return 0 when passing null
+CREATE FUNCTION dummyInteger(INTEGER)
+	RETURNS INTEGER
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummyInteger(java.lang.Integer)'
+	IMMUTABLE LANGUAGE java;
+----should return value+1
+CREATE FUNCTION dummy(INT8)
+	RETURNS INT8
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+----default match int8
+CREATE FUNCTION dummy(BIGINT)
+	RETURNS BIGINT
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+ERROR:  function "dummy" already exists with same argument types
+----return 0 when passing null
+CREATE FUNCTION dummyLong(BIGINT)
+	RETURNS BIGINT
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummyLong(java.lang.Long)'
+	IMMUTABLE LANGUAGE java;
+----should return value
+CREATE FUNCTION dummy(FLOAT4)
+	RETURNS FLOAT4
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+----default match float4
+CREATE FUNCTION dummy(REAL)
+	RETURNS REAL
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+ERROR:  function "dummy" already exists with same argument types
+----return 0 when passing null
+CREATE FUNCTION dummyFloat(REAL)
+	RETURNS REAL
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummyFloat(java.lang.Float)'
+	IMMUTABLE LANGUAGE java;
+----should return value+1
+CREATE FUNCTION dummy(FLOAT8)
+	RETURNS FLOAT8
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+----default match float8
+CREATE FUNCTION dummy(DOUBLE PRECISION)
+	RETURNS DOUBLE PRECISION
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+ERROR:  function "dummy" already exists with same argument types
+----default match float8
+CREATE FUNCTION dummyDouble(DOUBLE PRECISION)
+	RETURNS DOUBLE PRECISION
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummyDouble(java.lang.Double)'
+	IMMUTABLE LANGUAGE java;
+CREATE FUNCTION dummy(TIME)
+	RETURNS TIME
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+CREATE FUNCTION dummy(TIMETZ)
+	RETURNS TIMETZ
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+CREATE FUNCTION dummy(TIMESTAMP)
+	RETURNS TIMESTAMP
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+----default match timestamp
+CREATE FUNCTION dummy(DATE)
+	RETURNS DATE
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+ERROR:  function "dummy" already exists with same argument types
+CREATE FUNCTION dummy(TIMESTAMPTZ)
+	RETURNS TIMESTAMPTZ
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+----the match sequence should be char, text, varchar.
+CREATE FUNCTION dummy(TEXT)
+	RETURNS TEXT
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+CREATE FUNCTION dummy(VARCHAR)
+	RETURNS VARCHAR
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+----default match varchar
+CREATE FUNCTION dummy(CHARACTER VARYING)
+	RETURNS CHARACTER VARYING
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+ERROR:  function "dummy" already exists with same argument types
+CREATE FUNCTION dummy(CHAR)
+	RETURNS CHAR
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+----default match char
+CREATE FUNCTION dummy(CHARACTER)
+	RETURNS CHARACTER
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	IMMUTABLE LANGUAGE java;
+ERROR:  function "dummy" already exists with same argument types
+--on target list
+SELECT dummy(boolCol), dummy(charCol), dummy(int2Col), dummy(int4Col), dummy(int8Col), dummy(floatCol), dummy(varcharCol), dummy(textCol), dummy(textCol), dummy(timestampCol)
+FROM javaudf_basic.typeTable
+WHERE boolCol = true
+ORDER BY 3;
+ dummy | dummy | dummy | dummy | dummy | dummy | dummy | dummy | dummy |          dummy           
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------------------------
+ t     | a     |     1 |     2 |     3 |     1 | abc   | abc   | abc   | Fri Jun 01 01:00:00 2018
+ t     | c     |     3 |     4 |     5 |     3 | cde   | cde   | cde   | Sun Jun 03 03:00:00 2018
+ t     | e     |     5 |     6 |     7 |     5 | efg   | efg   | efg   | Tue Jun 05 05:00:00 2018
+(3 rows)
+
+SELECT dummyBoolean(boolCol), dummyByte(charCol::"char"), dummyShort(int2Col), dummyInteger(int4Col), dummyLong(int8Col), dummyFloat(floatCol), dummyDouble(doubleCol)
+FROM javaudf_basic.typeTable
+WHERE boolCol = true
+ORDER BY 3;
+ dummyboolean | dummybyte | dummyshort | dummyinteger | dummylong | dummyfloat | dummydouble 
+--------------+-----------+------------+--------------+-----------+------------+-------------
+ t            | a         |          1 |            1 |         1 |          1 |           1
+ t            | c         |          3 |            3 |         3 |          3 |           3
+ t            | e         |          5 |            5 |         5 |          5 |           5
+(3 rows)
+
+SELECT dummy(to_date('08 Jun 2018', 'DD Mon YYYY'));
+          dummy           
+--------------------------
+ Fri Jun 08 00:00:00 2018
+(1 row)
+
+SELECT dummy(to_timestamp('08 Jun 2018', 'DD Mon YYYY'));
+          dummy           
+--------------------------
+ Fri Jun 08 00:00:00 2018
+(1 row)
+
+SELECT dummy(to_timestamp(200120400));
+            dummy             
+------------------------------
+ Tue May 04 21:00:00 1976 PDT
+(1 row)
+
+SELECT dummy('b'::BYTEA);
+ dummy 
+-------
+ \x62
+(1 row)
+
+----test passing as a map to Java container
+SELECT dummyShort(int2Col), dummyInteger(int4Col), dummyLong(int8Col), dummyFloat(floatCol), dummyDouble(doubleCol)
+FROM javaudf_basic.boundaryTable
+WHERE textCol = 'null';
+ dummyshort | dummyinteger | dummylong | dummyfloat | dummydouble 
+------------+--------------+-----------+------------+-------------
+        517 |          517 |       517 |        517 |         517
+(1 row)
+
+SELECT dummyByte(null);
+ dummybyte 
+-----------
+ \x01
+(1 row)
+
+-- test mppdb boundary
+SELECT  dummyShort(int2Col), dummyInteger(int4Col), dummyLong(int8Col), dummyFloat(floatCol), dummyDouble(doubleCol)
+FROM javaudf_basic.boundaryTable
+WHERE textCol = 'min';
+ dummyshort | dummyinteger |      dummylong       | dummyfloat | dummydouble 
+------------+--------------+----------------------+------------+-------------
+     -32768 |  -2147483648 | -9223372036854775808 |    10.9999 |     20.9999
+(1 row)
+
+SELECT dummyShort(int2Col), dummyInteger(int4Col), dummyLong(int8Col), dummyFloat(floatCol), dummyDouble(doubleCol)
+FROM javaudf_basic.boundaryTable
+WHERE textCol = 'max';
+ dummyshort | dummyinteger |      dummylong      | dummyfloat | dummydouble 
+------------+--------------+---------------------+------------+-------------
+      32767 |   2147483647 | 9223372036854775807 |    10.9999 |     20.9999
+(1 row)
+
+-- try type mismatch
+--- only has dummy(int2) in mppdb, all other integer should be regarded as int2 and call dummy(int2) in java
+DROP FUNCTION dummy(BOOLEAN);
+DROP FUNCTION dummy(INTEGER);
+DROP FUNCTION dummy(BIGINT);
+SELECT dummy(int4Col::INT4)
+FROM javaudf_basic.typeTable
+WHERE dummy(int4col::INT4) < 3
+ORDER BY 1;
+ dummy 
+-------
+     2
+(1 row)
+
+SELECT dummy(int8Col::INT8)
+FROM javaudf_basic.typeTable
+WHERE dummy(int8col::INT8) < 3
+ORDER BY 1;
+ dummy 
+-------
+     2
+(1 row)
+
+--on WHERE condition
+SELECT dummy(charCol)
+FROM javaudf_basic.typeTable
+WHERE dummy(int4Col) = 3;
+ dummy 
+-------
+ b
+(1 row)
+
+SELECT dummy(charCol)
+FROM javaudf_basic.typeTable
+WHERE dummy(int4Col)+dummy(floatCol) < 5
+ORDER BY 1;
+ dummy 
+-------
+ a
+(1 row)
+
+SELECT charCol
+FROM javaudf_basic.typeTable
+WHERE dummy(charCol) = 'a';
+ charcol 
+---------
+ a
+(1 row)
+
+--try volatile
+explain verbose
+SELECT charCol
+FROM javaudf_basic.typeTable
+WHERE dummy(int4Col) = 3;
+                                                                 QUERY PLAN                                                                  
+---------------------------------------------------------------------------------------------------------------------------------------------
+ Data Node Scan  (cost=0.00..0.00 rows=0 width=0)
+   Output: typetable.charcol
+   Node/s: All datanodes
+   Remote query: SELECT charcol FROM javaudf_basic.typetable WHERE javaudf_parameters.dummy(int4col::double precision) = 3::double precision
+(4 rows)
+
+--try immutable
+CREATE FUNCTION dummy_immutable(INT4)
+	RETURNS INT4
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	LANGUAGE java IMMUTABLE;
+explain verbose
+SELECT charCol
+FROM javaudf_basic.typeTable
+WHERE dummy_immutable(int4Col) = 3;
+                                                    QUERY PLAN                                                     
+-------------------------------------------------------------------------------------------------------------------
+ Data Node Scan  (cost=0.00..0.00 rows=0 width=0)
+   Output: typetable.charcol
+   Node/s: All datanodes
+   Remote query: SELECT charcol FROM javaudf_basic.typetable WHERE javaudf_parameters.dummy_immutable(int4col) = 3
+(4 rows)
+
+-- clear up
+DROP SCHEMA javaudf_parameters CASCADE;
+NOTICE:  drop cascades to 20 other objects
+DETAIL:  drop cascades to function dummyboolean(boolean)
+drop cascades to function dummy("char")
+drop cascades to function dummy(bytea)
+drop cascades to function dummybyte("char")
+drop cascades to function dummy(smallint)
+drop cascades to function dummyshort(smallint)
+drop cascades to function dummyinteger(integer)
+drop cascades to function dummylong(bigint)
+drop cascades to function dummy(real)
+drop cascades to function dummyfloat(real)
+drop cascades to function dummy(double precision)
+drop cascades to function dummydouble(double precision)
+drop cascades to function dummy(time without time zone)
+drop cascades to function dummy(time with time zone)
+drop cascades to function dummy(timestamp without time zone)
+drop cascades to function dummy(timestamp with time zone)
+drop cascades to function dummy(text)
+drop cascades to function dummy(character varying)
+drop cascades to function dummy(character)
+drop cascades to function dummy_immutable(integer)

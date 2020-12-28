@@ -211,6 +211,58 @@ CREATE TABLE products (
 </programlisting>
 
   </para>
+
+  <para>
+   Alternatively, you can choose List Distribution for distribution by lists of values, or Range
+   Distribution for distribution by ranges of values.
+  </para>
+
+  <para>
+   To distribute a table by lists of values, specify <type>DISTRIBUTE BY LIST ... VALUES ...</> as
+   follows:
+<programlisting>
+CREATE TABLE products (
+    product_no integer,
+    name text,
+    price numeric
+) DISTRIBUTE BY LIST(product_no)
+(
+  SLICE S1 VALUES (1, 2),
+  SLICE S2 VALUES (DEFAULT) -- values that belong not to any previous slices distribute to DEFAULT slice
+);
+</programlisting>
+
+  </para>
+
+  <para>
+     To distribute a table by ranges of values, specify 
+     <type>DISTRIBUTE BY RANGE ... VALUES LESS THAN/START...END...EVERY...</> as follows:
+  <programlisting>
+  CREATE TABLE products (
+      product_no integer,
+      name text,
+      price numeric
+  ) DISTRIBUTE BY RANGE(product_no)
+  (
+    SLICE S1 VALUES LESS THAN (2),
+    SLICE S2 VALUES LESS THAN (MAXVALUE)
+  );
+
+  CREATE TABLE products (
+      product_no integer,
+      name text,
+      price numeric
+  ) DISTRIBUTE BY RANGE(product_no)
+  (
+    SLICE S1 START (1000) END (3000) EVERY (1000),
+    SLICE S2 START (3000) END (5000),
+    SLICE S3 START (5000) END (5500),
+    SLICE S4 END (MAXVALUE)
+  );
+  </programlisting>
+
+  </para>
+
 <!## end>
 
   <indexterm>

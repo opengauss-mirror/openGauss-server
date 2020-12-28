@@ -1,0 +1,1906 @@
+/*
+################################################################################
+# TCASE NAME : skew_agg_01.py 
+# COMPONENT(S)  : hashagg倾斜优化功能测试: 新增的skew hint agg优化与其他影响agg计划因子的交叉测试 + agg下层outer join补空优化
+# PREREQUISITE  : skew_setup.py
+# PLATFORM      : all
+# DESCRIPTION   : hashagg optimize base on skew hint
+# TAG           : agg
+# TC LEVEL      : Level 1
+################################################################################
+*/
+--I1.设置guc参数
+--S1.设置schema
+set current_schema = skew_hint;
+--S1.关闭sort agg
+set enable_sort = off;
+--S2.关闭query下推
+--S3.设置计划格式
+set explain_perf_mode = normal;
+--S3.设置query_dop使得explain中倾斜优化生效
+set query_dop = 1002;
+--I1.only skew_hint
+---------------------------------single column--------------------------------------------------------
+--S1:single skew column +　distribute_key = skew column + before_plan = DN_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select count(c), count(a) from skew_t1 group by a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(c)), (count(a)), a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(c)), (count(a)), a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(c), count(a), a
+               Group By Key: skew_t1.a
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: a, c
+                     Distribute Key: a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.skew_t1
+                           Output: a, c
+                           Distribute Key: c
+(18 rows)
+
+explain(verbose on, costs off) select /*+ skew(skew_t1 (a) (1)) */ count(c), count(a) from skew_t1 group by a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count((count(c)))), (count((count(a)))), a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count((count(c)))), (count((count(a)))), a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count((count(c))), count((count(a))), a
+               Group By Key: skew_t1.a
+               Skew Agg Optimized by Hint
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: (count(c)), (count(a)), a
+                     Distribute Key: a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: count(c), count(a), a
+                           Group By Key: skew_t1.a
+                           ->  Seq Scan on skew_hint.skew_t1
+                                 Output: a, c
+                                 Distribute Key: c
+(22 rows)
+
+--S2:single skew column +　distribute_key != skew column + before_plan = DN_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select /*+ skew(skew_t1 (b) (1)) */ count(c), count(a) from skew_t1 group by a;
+WARNING:  unused hint: Skew(skew_t1 (b) (1))
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(c)), (count(a)), a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(c)), (count(a)), a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(c), count(a), a
+               Group By Key: skew_t1.a
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: a, c
+                     Distribute Key: a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.skew_t1
+                           Output: a, c
+                           Distribute Key: c
+(18 rows)
+
+--S3:single skew column +　distribute_key = skew column + before_plan != DN_REDISTRIBUTE_AGG
+analyze skew_t1;
+explain(verbose on, costs off) select count(c), count(a) from skew_t1 group by a;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count((count(c)))), (count((count(a)))), a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count((count(c)))), (count((count(a)))), a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count((count(c))), count((count(a))), a
+               Group By Key: skew_t1.a
+               Skew Agg Optimized by Statistic
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: (count(c)), (count(a)), a
+                     Distribute Key: a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: count(c), count(a), a
+                           Group By Key: skew_t1.a
+                           ->  Seq Scan on skew_hint.skew_t1
+                                 Output: a, c
+                                 Distribute Key: c
+(22 rows)
+
+explain(verbose on, costs off) select /*+ skew(skew_t1 (a) (1)) */ count(c), count(a) from skew_t1 group by a;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count((count(c)))), (count((count(a)))), a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count((count(c)))), (count((count(a)))), a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count((count(c))), count((count(a))), a
+               Group By Key: skew_t1.a
+               Skew Agg Optimized by Hint
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: (count(c)), (count(a)), a
+                     Distribute Key: a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: count(c), count(a), a
+                           Group By Key: skew_t1.a
+                           ->  Seq Scan on skew_hint.skew_t1
+                                 Output: a, c
+                                 Distribute Key: c
+(22 rows)
+
+--S4:single skew column +　distribute_key != skew column + before_plan != DN_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select /*+ skew(skew_t1 (b) (1)) */ count(c), count(a) from skew_t1 group by a;
+WARNING:  unused hint: Skew(skew_t1 (b) (1))
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count((count(c)))), (count((count(a)))), a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count((count(c)))), (count((count(a)))), a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count((count(c))), count((count(a))), a
+               Group By Key: skew_t1.a
+               Skew Agg Optimized by Statistic
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: (count(c)), (count(a)), a
+                     Distribute Key: a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: count(c), count(a), a
+                           Group By Key: skew_t1.a
+                           ->  Seq Scan on skew_hint.skew_t1
+                                 Output: a, c
+                                 Distribute Key: c
+(22 rows)
+
+---------------------------------mutiple columns--------------------------------------------------------
+--S5:mutiple skew columns +　distribute_keys = skew columns + before_plan = DN_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select count(distinct a) from skew_t2 group by a,b;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(a)), a, b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(a)), a, b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(a), a, b
+               Group By Key: skew_t2.a, skew_t2.b
+               ->  HashAggregate
+                     Output: a, b, a
+                     Group By Key: skew_t2.a, skew_t2.b
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.skew_t2
+                                 Output: a, b
+                                 Distribute Key: c
+(21 rows)
+
+explain(verbose on, costs off) select /*+ skew(skew_t2 (a b) (1 1)) */ count(distinct a) from skew_t2 group by a,b;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(a)), a, b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(a)), a, b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(a), a, b
+               Group By Key: skew_t2.a, skew_t2.b
+               ->  HashAggregate
+                     Output: a, b, a
+                     Group By Key: skew_t2.a, skew_t2.b
+                     Skew Agg Optimized by Hint
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  HashAggregate
+                                 Output: a, b
+                                 Group By Key: skew_t2.a, skew_t2.b
+                                 ->  Seq Scan on skew_hint.skew_t2
+                                       Output: a, b
+                                       Distribute Key: c
+(25 rows)
+
+explain(verbose on, costs off) select /*+ skew(skew_t2 (a b c) (1 1 1)) */ count(distinct a) from skew_t2 group by a,b;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(a)), a, b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(a)), a, b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(a), a, b
+               Group By Key: skew_t2.a, skew_t2.b
+               ->  HashAggregate
+                     Output: a, b, a
+                     Group By Key: skew_t2.a, skew_t2.b
+                     Skew Agg Optimized by Hint
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  HashAggregate
+                                 Output: a, b
+                                 Group By Key: skew_t2.a, skew_t2.b
+                                 ->  Seq Scan on skew_hint.skew_t2
+                                       Output: a, b
+                                       Distribute Key: c
+(25 rows)
+
+--S6:mutiple skew columns +　distribute_keys != skew columns + before_plan = DN_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select /*+ skew(skew_t2 (a c) (1 1)) */ count(distinct a) from skew_t2 group by a,b;
+WARNING:  unused hint: Skew(skew_t2 (a c) (1 1))
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(a)), a, b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(a)), a, b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(a), a, b
+               Group By Key: skew_t2.a, skew_t2.b
+               ->  HashAggregate
+                     Output: a, b, a
+                     Group By Key: skew_t2.a, skew_t2.b
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.skew_t2
+                                 Output: a, b
+                                 Distribute Key: c
+(21 rows)
+
+explain(verbose on, costs off) select /*+ skew(skew_t2 (b c) (1 1)) */ count(distinct a) from skew_t2 group by a,b;
+WARNING:  unused hint: Skew(skew_t2 (b c) (1 1))
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(a)), a, b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(a)), a, b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(a), a, b
+               Group By Key: skew_t2.a, skew_t2.b
+               ->  HashAggregate
+                     Output: a, b, a
+                     Group By Key: skew_t2.a, skew_t2.b
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.skew_t2
+                                 Output: a, b
+                                 Distribute Key: c
+(21 rows)
+
+--S7:mutiple skew columns +　distribute_keys = skew columns + before_plan != DN_REDISTRIBUTE_AGG
+analyze skew_t2;
+explain(verbose on, costs off) select count(distinct a) from skew_t2 group by a,b;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(a)), a, b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(a)), a, b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(a), a, b
+               Group By Key: skew_t2.a, skew_t2.b
+               ->  HashAggregate
+                     Output: a, b, a
+                     Group By Key: skew_t2.a, skew_t2.b
+                     Skew Agg Optimized by Statistic
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  HashAggregate
+                                 Output: a, b
+                                 Group By Key: skew_t2.a, skew_t2.b
+                                 ->  Seq Scan on skew_hint.skew_t2
+                                       Output: a, b
+                                       Distribute Key: c
+(25 rows)
+
+explain(verbose on, costs off) select /*+ skew(skew_t2 (a b) (1 1)) */ count(distinct a) from skew_t2 group by a,b;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(a)), a, b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(a)), a, b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(a), a, b
+               Group By Key: skew_t2.a, skew_t2.b
+               ->  HashAggregate
+                     Output: a, b, a
+                     Group By Key: skew_t2.a, skew_t2.b
+                     Skew Agg Optimized by Hint
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  HashAggregate
+                                 Output: a, b
+                                 Group By Key: skew_t2.a, skew_t2.b
+                                 ->  Seq Scan on skew_hint.skew_t2
+                                       Output: a, b
+                                       Distribute Key: c
+(25 rows)
+
+explain(verbose on, costs off) select /*+ skew(skew_t2 (a b c) (1 1 1)) */ count(distinct a) from skew_t2 group by a,b;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(a)), a, b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(a)), a, b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(a), a, b
+               Group By Key: skew_t2.a, skew_t2.b
+               ->  HashAggregate
+                     Output: a, b, a
+                     Group By Key: skew_t2.a, skew_t2.b
+                     Skew Agg Optimized by Hint
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  HashAggregate
+                                 Output: a, b
+                                 Group By Key: skew_t2.a, skew_t2.b
+                                 ->  Seq Scan on skew_hint.skew_t2
+                                       Output: a, b
+                                       Distribute Key: c
+(25 rows)
+
+--S8:mutiple skew columns +　distribute_keys != skew columns + before_plan != DN_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select /*+ skew(skew_t2 (a c) (1 1)) */ count(distinct a) from skew_t2 group by a,b;
+WARNING:  unused hint: Skew(skew_t2 (a c) (1 1))
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(a)), a, b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(a)), a, b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(a), a, b
+               Group By Key: skew_t2.a, skew_t2.b
+               ->  HashAggregate
+                     Output: a, b, a
+                     Group By Key: skew_t2.a, skew_t2.b
+                     Skew Agg Optimized by Statistic
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  HashAggregate
+                                 Output: a, b
+                                 Group By Key: skew_t2.a, skew_t2.b
+                                 ->  Seq Scan on skew_hint.skew_t2
+                                       Output: a, b
+                                       Distribute Key: c
+(25 rows)
+
+explain(verbose on, costs off) select /*+ skew(skew_t2 (b c) (1 1)) */ count(distinct a) from skew_t2 group by a,b;
+WARNING:  unused hint: Skew(skew_t2 (b c) (1 1))
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(a)), a, b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(a)), a, b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(a), a, b
+               Group By Key: skew_t2.a, skew_t2.b
+               ->  HashAggregate
+                     Output: a, b, a
+                     Group By Key: skew_t2.a, skew_t2.b
+                     Skew Agg Optimized by Statistic
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  HashAggregate
+                                 Output: a, b
+                                 Group By Key: skew_t2.a, skew_t2.b
+                                 ->  Seq Scan on skew_hint.skew_t2
+                                       Output: a, b
+                                       Distribute Key: c
+(25 rows)
+
+--I2:plan_mode_seed + skew_hint
+set plan_mode_seed = 1000;
+--S1: single skew column + distribute_key = skew column + before_plan = DN_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select count(c), count(a) from skew_t1 group by a;
+                 QUERY PLAN (RANDOM seed 1000)                  
+----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(c)), (count(a)), a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(c)), (count(a)), a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(c), count(a), a
+               Group By Key: skew_t1.a
+               Skew Agg Optimized by Statistic
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: a, c
+                     Distribute Key: a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.skew_t1
+                           Output: a, c
+                           Distribute Key: c
+(19 rows)
+
+explain(verbose on, costs off) select /*+ skew(skew_t1 (a) (1)) */ count(c), count(a) from skew_t1 group by a;
+                 QUERY PLAN (RANDOM seed 1000)                  
+----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(c)), (count(a)), a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(c)), (count(a)), a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(c), count(a), a
+               Group By Key: skew_t1.a
+               Skew Agg Optimized by Hint
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: a, c
+                     Distribute Key: a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.skew_t1
+                           Output: a, c
+                           Distribute Key: c
+(19 rows)
+
+--S2: mutiple skew columns +　distribute_keys = skew columns + before_plan = DN_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select count(distinct a) from skew_t2 group by a,b;
+                    QUERY PLAN (RANDOM seed 1000)                     
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(a)), a, b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(a)), a, b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(a), a, b
+               Group By Key: skew_t2.a, skew_t2.b
+               ->  HashAggregate
+                     Output: a, b, a
+                     Group By Key: skew_t2.a, skew_t2.b
+                     Skew Agg Optimized by Statistic
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.skew_t2
+                                 Output: a, b
+                                 Distribute Key: c
+(22 rows)
+
+explain(verbose on, costs off) select /*+ skew(skew_t2 (a b) (1 1)) */ count(distinct a) from skew_t2 group by a,b;
+                    QUERY PLAN (RANDOM seed 1000)                     
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(a)), a, b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(a)), a, b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(a), a, b
+               Group By Key: skew_t2.a, skew_t2.b
+               ->  HashAggregate
+                     Output: a, b, a
+                     Group By Key: skew_t2.a, skew_t2.b
+                     Skew Agg Optimized by Hint
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.skew_t2
+                                 Output: a, b
+                                 Distribute Key: c
+(22 rows)
+
+reset plan_mode_seed;
+-- DN_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select count(c), count(a) from skew_t3 group by a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(c)), (count(a)), a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(c)), (count(a)), a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(c), count(a), a
+               Group By Key: skew_t3.a
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: a, c
+                     Distribute Key: a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.skew_t3
+                           Output: a, c
+                           Distribute Key: c
+(18 rows)
+
+-- DN_AGG_CN_AGG 
+explain(verbose on, costs off) select count(c), count(a) from skew_t3 group by a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                      QUERY PLAN                       
+-------------------------------------------------------
+ HashAggregate
+   Output: count((count(c))), count((count(a))), a
+   Group By Key: skew_t3.a
+   ->  Streaming (type: GATHER)
+         Output: (count(c)), (count(a)), a
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(c)), (count(a)), a
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  HashAggregate
+                     Output: count(c), count(a), a
+                     Group By Key: skew_t3.a
+                     ->  Seq Scan on skew_hint.skew_t3
+                           Output: a, c
+                           Distribute Key: c
+(16 rows)
+
+-- DN_AGG_REDISTRIBUTE_AGG: choose the cheapest plan
+explain(verbose on, costs off) select /*+ skew(skew_t3 (a) (1)) */ count(c), count(a) from skew_t3 group by a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count((count(c)))), (count((count(a)))), a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count((count(c)))), (count((count(a)))), a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count((count(c))), count((count(a))), a
+               Group By Key: skew_t3.a
+               Skew Agg Optimized by Hint
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: (count(c)), (count(a)), a
+                     Distribute Key: a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: count(c), count(a), a
+                           Group By Key: skew_t3.a
+                           ->  Seq Scan on skew_hint.skew_t3
+                                 Output: a, c
+                                 Distribute Key: c
+(22 rows)
+
+--  DN_AGG_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select count(c), count(a) from skew_t1 group by a;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count((count(c)))), (count((count(a)))), a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count((count(c)))), (count((count(a)))), a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count((count(c))), count((count(a))), a
+               Group By Key: skew_t1.a
+               Skew Agg Optimized by Statistic
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: (count(c)), (count(a)), a
+                     Distribute Key: a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: count(c), count(a), a
+                           Group By Key: skew_t1.a
+                           ->  Seq Scan on skew_hint.skew_t1
+                                 Output: a, c
+                                 Distribute Key: c
+(22 rows)
+
+-- DN_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select count(c), count(a) from skew_t1 group by a;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(c)), (count(a)), a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(c)), (count(a)), a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(c), count(a), a
+               Group By Key: skew_t1.a
+               Skew Agg Optimized by Statistic
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: a, c
+                     Distribute Key: a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.skew_t1
+                           Output: a, c
+                           Distribute Key: c
+(19 rows)
+
+-- DN_AGG_REDISTRIBUTE_AGG (still choose the cheapest plan)
+explain(verbose on, costs off) select /*+ skew(skew_t1 (a) (1)) */ count(c), count(a) from skew_t1 group by a;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count((count(c)))), (count((count(a)))), a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count((count(c)))), (count((count(a)))), a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count((count(c))), count((count(a))), a
+               Group By Key: skew_t1.a
+               Skew Agg Optimized by Hint
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: (count(c)), (count(a)), a
+                     Distribute Key: a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: count(c), count(a), a
+                           Group By Key: skew_t1.a
+                           ->  Seq Scan on skew_hint.skew_t1
+                                 Output: a, c
+                                 Distribute Key: c
+(22 rows)
+
+-- DN_AGG_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select count(c), count(a) from skew_t1 group by a;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count((count(c)))), (count((count(a)))), a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count((count(c)))), (count((count(a)))), a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count((count(c))), count((count(a))), a
+               Group By Key: skew_t1.a
+               Skew Agg Optimized by Statistic
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: (count(c)), (count(a)), a
+                     Distribute Key: a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: count(c), count(a), a
+                           Group By Key: skew_t1.a
+                           ->  Seq Scan on skew_hint.skew_t1
+                                 Output: a, c
+                                 Distribute Key: c
+(22 rows)
+
+-- DN_AGG_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select count(c), count(a) from skew_t1 group by a;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count((count(c)))), (count((count(a)))), a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count((count(c)))), (count((count(a)))), a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count((count(c))), count((count(a))), a
+               Group By Key: skew_t1.a
+               Skew Agg Optimized by Statistic
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: (count(c)), (count(a)), a
+                     Distribute Key: a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: count(c), count(a), a
+                           Group By Key: skew_t1.a
+                           ->  Seq Scan on skew_hint.skew_t1
+                                 Output: a, c
+                                 Distribute Key: c
+(22 rows)
+
+-- DN_AGG_REDISTRIBUTE_AGG (still choose the cheapest plan)
+explain(verbose on, costs off) select /*+ skew(skew_t1 (a) (1)) */ count(c), count(a) from skew_t1 group by a;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count((count(c)))), (count((count(a)))), a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count((count(c)))), (count((count(a)))), a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count((count(c))), count((count(a))), a
+               Group By Key: skew_t1.a
+               Skew Agg Optimized by Hint
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: (count(c)), (count(a)), a
+                     Distribute Key: a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: count(c), count(a), a
+                           Group By Key: skew_t1.a
+                           ->  Seq Scan on skew_hint.skew_t1
+                                 Output: a, c
+                                 Distribute Key: c
+(22 rows)
+
+-- DN_AGG_REDISTRIBUTE_AGG, however hint does not work
+explain(verbose on, costs off) select /*+ skew(skew_t1 (b) (1)) */ count(c), count(a) from skew_t1 group by a;
+WARNING:  unused hint: Skew(skew_t1 (b) (1))
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count((count(c)))), (count((count(a)))), a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count((count(c)))), (count((count(a)))), a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count((count(c))), count((count(a))), a
+               Group By Key: skew_t1.a
+               Skew Agg Optimized by Statistic
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: (count(c)), (count(a)), a
+                     Distribute Key: a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: count(c), count(a), a
+                           Group By Key: skew_t1.a
+                           ->  Seq Scan on skew_hint.skew_t1
+                                 Output: a, c
+                                 Distribute Key: c
+(22 rows)
+
+--I4: two_level_agg
+-- DN_AGG_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select count(distinct a) from skew_t1 group by a,b;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(a)), a, b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(a)), a, b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(a), a, b
+               Group By Key: skew_t1.a, skew_t1.b
+               ->  HashAggregate
+                     Output: a, b, a
+                     Group By Key: skew_t1.a, skew_t1.b
+                     Skew Agg Optimized by Statistic
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  HashAggregate
+                                 Output: a, b
+                                 Group By Key: skew_t1.a, skew_t1.b
+                                 ->  Seq Scan on skew_hint.skew_t1
+                                       Output: a, b
+                                       Distribute Key: c
+(25 rows)
+
+-- DN_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select count(distinct a) from skew_t1 group by a,b;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(a)), a, b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(a)), a, b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(a), a, b
+               Group By Key: skew_t1.a, skew_t1.b
+               ->  HashAggregate
+                     Output: a, b, a
+                     Group By Key: skew_t1.a, skew_t1.b
+                     Skew Agg Optimized by Statistic
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.skew_t1
+                                 Output: a, b
+                                 Distribute Key: c
+(22 rows)
+
+-- DN_AGG_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select /*+ skew(skew_t1 (a b) (1 1)) */ count(distinct a) from skew_t1 group by a,b; 
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(a)), a, b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(a)), a, b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(a), a, b
+               Group By Key: skew_t1.a, skew_t1.b
+               ->  HashAggregate
+                     Output: a, b, a
+                     Group By Key: skew_t1.a, skew_t1.b
+                     Skew Agg Optimized by Hint
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  HashAggregate
+                                 Output: a, b
+                                 Group By Key: skew_t1.a, skew_t1.b
+                                 ->  Seq Scan on skew_hint.skew_t1
+                                       Output: a, b
+                                       Distribute Key: c
+(25 rows)
+
+-- DN_REDISTRIBUTE_AGG, because hint does not work
+explain(verbose on, costs off) select /*+ skew(skew_t1 (a c) (1 1)) */ count(distinct a) from skew_t1 group by a,b;
+WARNING:  unused hint: Skew(skew_t1 (a c) (1 1))
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(a)), a, b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(a)), a, b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(a), a, b
+               Group By Key: skew_t1.a, skew_t1.b
+               ->  HashAggregate
+                     Output: a, b, a
+                     Group By Key: skew_t1.a, skew_t1.b
+                     Skew Agg Optimized by Statistic
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.skew_t1
+                                 Output: a, b
+                                 Distribute Key: c
+(22 rows)
+
+-- DN_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select count(distinct a) from skew_t3 group by a,b;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(a)), a, b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(a)), a, b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(a), a, b
+               Group By Key: skew_t3.a, skew_t3.b
+               ->  HashAggregate
+                     Output: a, b, a
+                     Group By Key: skew_t3.a, skew_t3.b
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.skew_t3
+                                 Output: a, b
+                                 Distribute Key: c
+(21 rows)
+
+-- DN_AGG_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select /*+ skew(skew_t3 (a b) (1 1)) */ count(distinct a) from skew_t3 group by a,b;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(a)), a, b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(a)), a, b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(a), a, b
+               Group By Key: skew_t3.a, skew_t3.b
+               ->  HashAggregate
+                     Output: a, b, a
+                     Group By Key: skew_t3.a, skew_t3.b
+                     Skew Agg Optimized by Hint
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  HashAggregate
+                                 Output: a, b
+                                 Group By Key: skew_t3.a, skew_t3.b
+                                 ->  Seq Scan on skew_hint.skew_t3
+                                       Output: a, b
+                                       Distribute Key: c
+(25 rows)
+
+-- DN_REDISTRIBUTE_AGG, because hint does not work
+explain(verbose on, costs off) select /*+ skew(skew_t3 (a c) (1 1)) */ count(distinct a) from skew_t3 group by a,b;
+WARNING:  unused hint: Skew(skew_t3 (a c) (1 1))
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(a)), a, b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(a)), a, b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(a), a, b
+               Group By Key: skew_t3.a, skew_t3.b
+               ->  HashAggregate
+                     Output: a, b, a
+                     Group By Key: skew_t3.a, skew_t3.b
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.skew_t3
+                                 Output: a, b
+                                 Distribute Key: c
+(21 rows)
+
+--I5: test for distribute key choose optimization
+--S1: before optimization: DN_REDISTRIBUTE_AGG + diskey (c1, c2, c3)
+explain(verbose on, costs off) select count(*) from skew_t5 group by c1, c2, c3, c4, c5, c5, c7 , c8, c9 limit 10;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                  QUERY PLAN                                                                  
+----------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+   ->  Vector Limit
+         Output: (count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+         ->  Vector Streaming (type: GATHER)
+               Output: (count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+               Node/s: All datanodes
+               ->  Vector Limit
+                     Output: (count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+                     ->  Vector Streaming(type: LOCAL GATHER dop: 1/2)
+                           Output: (count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Vector Sonic Hash Aggregate
+                                 Output: count(*), c1, c2, c3, c4, c5, c7, c8, c9
+                                 Group By Key: skew_t5.c1, skew_t5.c2, skew_t5.c3, skew_t5.c4, skew_t5.c5, skew_t5.c7, skew_t5.c8, skew_t5.c9
+                                 ->  Vector Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: c1, c2, c3, c4, c5, c7, c8, c9
+                                       Distribute Key: c1, c2
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  CStore Scan on skew_hint.skew_t5
+                                             Output: c1, c2, c3, c4, c5, c7, c8, c9
+                                             Distribute Key: c0
+(24 rows)
+
+--S2: only choose diskey + still DN_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select /*+ skew(t (c1 c2 c3 c4)) */count(*) from skew_t5 t group by c1, c2, c3, c4, c5, c5, c7 , c8, c9 limit 10;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+   ->  Vector Limit
+         Output: (count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+         ->  Vector Streaming (type: GATHER)
+               Output: (count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+               Node/s: All datanodes
+               ->  Vector Limit
+                     Output: (count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+                     ->  Vector Streaming(type: LOCAL GATHER dop: 1/2)
+                           Output: (count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Vector Sonic Hash Aggregate
+                                 Output: count(*), c1, c2, c3, c4, c5, c7, c8, c9
+                                 Group By Key: t.c1, t.c2, t.c3, t.c4, t.c5, t.c7, t.c8, t.c9
+                                 ->  Vector Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: c1, c2, c3, c4, c5, c7, c8, c9
+                                       Distribute Key: c1, c2, c3, c4, c5
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  CStore Scan on skew_hint.skew_t5 t
+                                             Output: c1, c2, c3, c4, c5, c7, c8, c9
+                                             Distribute Key: c0
+(24 rows)
+
+--S3: choose diskey + choose plan: DN_AGG_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select /*+ skew(t (c1 c2 c3 c4 c5 c7 c8 c9)) */count(*) from skew_t5 t group by c1, c2, c3, c4, c5, c5, c7 , c8, c9 limit 10;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (pg_catalog.count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+   ->  Vector Limit
+         Output: (pg_catalog.count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+         ->  Vector Streaming (type: GATHER)
+               Output: (pg_catalog.count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+               Node/s: All datanodes
+               ->  Vector Limit
+                     Output: (pg_catalog.count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+                     ->  Vector Streaming(type: LOCAL GATHER dop: 1/2)
+                           Output: (pg_catalog.count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Vector Sonic Hash Aggregate
+                                 Output: pg_catalog.count(*), c1, c2, c3, c4, c5, c7, c8, c9
+                                 Group By Key: t.c1, t.c2, t.c3, t.c4, t.c5, t.c7, t.c8, t.c9
+                                 Skew Agg Optimized by Hint
+                                 ->  Vector Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: (count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+                                       Distribute Key: c1, c2, c3, c4, c5, c7, c8, c9
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Vector Sonic Hash Aggregate
+                                             Output: count(*), c1, c2, c3, c4, c5, c7, c8, c9
+                                             Group By Key: t.c1, t.c2, t.c3, t.c4, t.c5, t.c7, t.c8, t.c9
+                                             ->  CStore Scan on skew_hint.skew_t5 t
+                                                   Output: c1, c2, c3, c4, c5, c7, c8, c9
+                                                   Distribute Key: c0
+(28 rows)
+
+--S4: hint does not work
+explain(verbose on, costs off) select /*+ skew(t (c1 c2)) */count(*) from skew_t5 t group by c1, c2, c3, c4, c5, c5, c7 , c8, c9 limit 10;  
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+   ->  Vector Limit
+         Output: (count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+         ->  Vector Streaming (type: GATHER)
+               Output: (count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+               Node/s: All datanodes
+               ->  Vector Limit
+                     Output: (count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+                     ->  Vector Streaming(type: LOCAL GATHER dop: 1/2)
+                           Output: (count(*)), c1, c2, c3, c4, c5, c7, c8, c9
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Vector Sonic Hash Aggregate
+                                 Output: count(*), c1, c2, c3, c4, c5, c7, c8, c9
+                                 Group By Key: t.c1, t.c2, t.c3, t.c4, t.c5, t.c7, t.c8, t.c9
+                                 ->  Vector Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: c1, c2, c3, c4, c5, c7, c8, c9
+                                       Distribute Key: c1, c2, c3
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  CStore Scan on skew_hint.skew_t5 t
+                                             Output: c1, c2, c3, c4, c5, c7, c8, c9
+                                             Distribute Key: c0
+(24 rows)
+
+--I6: unable to optimization because choosing local_distibute_keys
+--S1: before optimization
+explain(verbose on, costs off) select a,b,d,e,count(distinct f) from skew_t4 group by a,b,d,e;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, d, e, (count(f))
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: a, b, d, e, (count(f))
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: a, b, d, e, count(f)
+               Group By Key: skew_t4.a, skew_t4.b, skew_t4.d, skew_t4.e
+               ->  HashAggregate
+                     Output: a, b, d, e, f
+                     Group By Key: skew_t4.a, skew_t4.b, skew_t4.d, skew_t4.e, skew_t4.f
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b, d, e, f
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.skew_t4
+                                 Output: a, b, d, e, f
+                                 Distribute Key: c
+(21 rows)
+
+--S2: hint does not work : choose the lowest cost diskeys
+explain(verbose on, costs off) select /*+ skew(skew_t4 (a b d e f)) */ a,b,d,e,count(distinct f) from skew_t4 group by a,b,d,e;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, d, e, (count(f))
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: a, b, d, e, (count(f))
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: a, b, d, e, count(f)
+               Group By Key: skew_t4.a, skew_t4.b, skew_t4.d, skew_t4.e
+               ->  HashAggregate
+                     Output: a, b, d, e, f
+                     Group By Key: skew_t4.a, skew_t4.b, skew_t4.d, skew_t4.e, skew_t4.f
+                     Skew Agg Optimized by Hint
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b, d, e, f
+                           Distribute Key: a, b, d, e
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  HashAggregate
+                                 Output: a, b, d, e, f
+                                 Group By Key: skew_t4.a, skew_t4.b, skew_t4.d, skew_t4.e, skew_t4.f
+                                 ->  Seq Scan on skew_hint.skew_t4
+                                       Output: a, b, d, e, f
+                                       Distribute Key: c
+(25 rows)
+
+--I7: test for agg null skew : left join
+--S1: turn off skew_option
+set skew_option = off;
+--DN_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select count(agg_null_skew.a) from skew_t3 left outer join agg_null_skew on skew_t3.b  = agg_null_skew.a group by agg_null_skew.a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(agg_null_skew.a)), agg_null_skew.a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(agg_null_skew.a)), agg_null_skew.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(agg_null_skew.a), agg_null_skew.a
+               Group By Key: agg_null_skew.a
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: agg_null_skew.a
+                     Distribute Key: agg_null_skew.a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Hash Left Join
+                           Output: agg_null_skew.a
+                           Hash Cond: (skew_t3.b = agg_null_skew.a)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: skew_t3.b
+                                 Distribute Key: skew_t3.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t3
+                                       Output: skew_t3.b
+                                       Distribute Key: skew_t3.c
+                           ->  Hash
+                                 Output: agg_null_skew.a
+                                 ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                       Output: agg_null_skew.a
+                                       Distribute Key: agg_null_skew.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.agg_null_skew
+                                             Output: agg_null_skew.a
+                                             Distribute Key: agg_null_skew.a
+(36 rows)
+
+explain(verbose on, costs off) select count(agg_null_skew.b) from skew_t3 left outer join agg_null_skew on skew_t3.b  = agg_null_skew.a group by agg_null_skew.a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(agg_null_skew.b)), agg_null_skew.a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(agg_null_skew.b)), agg_null_skew.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(agg_null_skew.b), agg_null_skew.a
+               Group By Key: agg_null_skew.a
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: agg_null_skew.a, agg_null_skew.b
+                     Distribute Key: agg_null_skew.a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Hash Left Join
+                           Output: agg_null_skew.a, agg_null_skew.b
+                           Hash Cond: (skew_t3.b = agg_null_skew.a)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: skew_t3.b
+                                 Distribute Key: skew_t3.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t3
+                                       Output: skew_t3.b
+                                       Distribute Key: skew_t3.c
+                           ->  Hash
+                                 Output: agg_null_skew.a, agg_null_skew.b
+                                 ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                       Output: agg_null_skew.a, agg_null_skew.b
+                                       Distribute Key: agg_null_skew.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.agg_null_skew
+                                             Output: agg_null_skew.a, agg_null_skew.b
+                                             Distribute Key: agg_null_skew.a
+(36 rows)
+
+--S2: turn on skew_option to normal
+--DN_AGG_REDISTRIBUTE_AGG 
+set skew_option = normal;
+explain(verbose on, costs off) select count(agg_null_skew.a) from skew_t3 left outer join agg_null_skew on skew_t3.b  = agg_null_skew.a group by agg_null_skew.a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count((count(agg_null_skew.a)))), agg_null_skew.a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count((count(agg_null_skew.a)))), agg_null_skew.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count((count(agg_null_skew.a))), agg_null_skew.a
+               Group By Key: agg_null_skew.a
+               Skew Agg Optimized by Rule
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: (count(agg_null_skew.a)), agg_null_skew.a
+                     Distribute Key: agg_null_skew.a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: count(agg_null_skew.a), agg_null_skew.a
+                           Group By Key: agg_null_skew.a
+                           ->  Hash Left Join
+                                 Output: agg_null_skew.a
+                                 Hash Cond: (skew_t3.b = agg_null_skew.a)
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: skew_t3.b
+                                       Distribute Key: skew_t3.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t3
+                                             Output: skew_t3.b
+                                             Distribute Key: skew_t3.c
+                                 ->  Hash
+                                       Output: agg_null_skew.a
+                                       ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                             Output: agg_null_skew.a
+                                             Distribute Key: agg_null_skew.a
+                                             Spawn on: All datanodes
+                                             Consumer Nodes: All datanodes
+                                             ->  Seq Scan on skew_hint.agg_null_skew
+                                                   Output: agg_null_skew.a
+                                                   Distribute Key: agg_null_skew.a
+(40 rows)
+
+explain(verbose on, costs off) select count(agg_null_skew.b) from skew_t3 left outer join agg_null_skew on skew_t3.b  = agg_null_skew.a group by agg_null_skew.a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count((count(agg_null_skew.b)))), agg_null_skew.a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count((count(agg_null_skew.b)))), agg_null_skew.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count((count(agg_null_skew.b))), agg_null_skew.a
+               Group By Key: agg_null_skew.a
+               Skew Agg Optimized by Rule
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: (count(agg_null_skew.b)), agg_null_skew.a
+                     Distribute Key: agg_null_skew.a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: count(agg_null_skew.b), agg_null_skew.a
+                           Group By Key: agg_null_skew.a
+                           ->  Hash Left Join
+                                 Output: agg_null_skew.a, agg_null_skew.b
+                                 Hash Cond: (skew_t3.b = agg_null_skew.a)
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: skew_t3.b
+                                       Distribute Key: skew_t3.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t3
+                                             Output: skew_t3.b
+                                             Distribute Key: skew_t3.c
+                                 ->  Hash
+                                       Output: agg_null_skew.a, agg_null_skew.b
+                                       ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                             Output: agg_null_skew.a, agg_null_skew.b
+                                             Distribute Key: agg_null_skew.a
+                                             Spawn on: All datanodes
+                                             Consumer Nodes: All datanodes
+                                             ->  Seq Scan on skew_hint.agg_null_skew
+                                                   Output: agg_null_skew.a, agg_null_skew.b
+                                                   Distribute Key: agg_null_skew.a
+(40 rows)
+
+--S3: turn on skew_option to lazy
+set skew_option = lazy;
+explain(verbose on, costs off) select count(agg_null_skew.a) from skew_t3 left outer join agg_null_skew on skew_t3.b  = agg_null_skew.a group by agg_null_skew.a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count((count(agg_null_skew.a)))), agg_null_skew.a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count((count(agg_null_skew.a)))), agg_null_skew.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count((count(agg_null_skew.a))), agg_null_skew.a
+               Group By Key: agg_null_skew.a
+               Skew Agg Optimized by Rule
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: (count(agg_null_skew.a)), agg_null_skew.a
+                     Distribute Key: agg_null_skew.a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: count(agg_null_skew.a), agg_null_skew.a
+                           Group By Key: agg_null_skew.a
+                           ->  Hash Left Join
+                                 Output: agg_null_skew.a
+                                 Hash Cond: (skew_t3.b = agg_null_skew.a)
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: skew_t3.b
+                                       Distribute Key: skew_t3.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t3
+                                             Output: skew_t3.b
+                                             Distribute Key: skew_t3.c
+                                 ->  Hash
+                                       Output: agg_null_skew.a
+                                       ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                             Output: agg_null_skew.a
+                                             Distribute Key: agg_null_skew.a
+                                             Spawn on: All datanodes
+                                             Consumer Nodes: All datanodes
+                                             ->  Seq Scan on skew_hint.agg_null_skew
+                                                   Output: agg_null_skew.a
+                                                   Distribute Key: agg_null_skew.a
+(40 rows)
+
+--S4: optimize for agg null skew and join redis skew
+explain(verbose on, costs off) select /*+ skew(skew_t3 (b) (12)) */ count(agg_null_skew.b) from skew_t3 left outer join agg_null_skew on skew_t3.b  = agg_null_skew.a group by agg_null_skew.a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count((count(agg_null_skew.b)))), agg_null_skew.a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count((count(agg_null_skew.b)))), agg_null_skew.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count((count(agg_null_skew.b))), agg_null_skew.a
+               Group By Key: agg_null_skew.a
+               Skew Agg Optimized by Rule
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: (count(agg_null_skew.b)), agg_null_skew.a
+                     Distribute Key: agg_null_skew.a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: count(agg_null_skew.b), agg_null_skew.a
+                           Group By Key: agg_null_skew.a
+                           ->  Hash Left Join
+                                 Output: agg_null_skew.a, agg_null_skew.b
+                                 Hash Cond: (skew_t3.b = agg_null_skew.a)
+                                 Skew Join Optimized by Hint
+                                 ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                       Output: skew_t3.b
+                                       Distribute Key: skew_t3.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t3
+                                             Output: skew_t3.b
+                                             Distribute Key: skew_t3.c
+                                 ->  Hash
+                                       Output: agg_null_skew.a, agg_null_skew.b
+                                       ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                             Output: agg_null_skew.a, agg_null_skew.b
+                                             Distribute Key: agg_null_skew.a
+                                             Spawn on: All datanodes
+                                             Consumer Nodes: All datanodes
+                                             ->  Seq Scan on skew_hint.agg_null_skew
+                                                   Output: agg_null_skew.a, agg_null_skew.b
+                                                   Distribute Key: agg_null_skew.a
+(41 rows)
+
+--S5.priority test
+--still DN_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select count(agg_null_skew.a) from skew_t3 left outer join agg_null_skew on skew_t3.b  = agg_null_skew.a group by agg_null_skew.a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(agg_null_skew.a)), agg_null_skew.a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(agg_null_skew.a)), agg_null_skew.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(agg_null_skew.a), agg_null_skew.a
+               Group By Key: agg_null_skew.a
+               Skew Agg Optimized by Rule
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: agg_null_skew.a
+                     Distribute Key: agg_null_skew.a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Hash Left Join
+                           Output: agg_null_skew.a
+                           Hash Cond: (skew_t3.b = agg_null_skew.a)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: skew_t3.b
+                                 Distribute Key: skew_t3.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t3
+                                       Output: skew_t3.b
+                                       Distribute Key: skew_t3.c
+                           ->  Hash
+                                 Output: agg_null_skew.a
+                                 ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                       Output: agg_null_skew.a
+                                       Distribute Key: agg_null_skew.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.agg_null_skew
+                                             Output: agg_null_skew.a
+                                             Distribute Key: agg_null_skew.a
+(37 rows)
+
+--I8: right join
+--S1: turn off skew_option
+set skew_option = off;
+--DN_REDISTRIBUTE_AGG
+explain(verbose on, costs off) select count(skew_t3.a) from skew_t3 right outer join agg_null_skew on skew_t3.b  = agg_null_skew.a group by skew_t3.a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(skew_t3.a)), skew_t3.a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(skew_t3.a)), skew_t3.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(skew_t3.a), skew_t3.a
+               Group By Key: skew_t3.a
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: skew_t3.a
+                     Distribute Key: skew_t3.a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Hash Right Join
+                           Output: skew_t3.a
+                           Hash Cond: (skew_t3.b = agg_null_skew.a)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: skew_t3.a, skew_t3.b
+                                 Distribute Key: skew_t3.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t3
+                                       Output: skew_t3.a, skew_t3.b
+                                       Distribute Key: skew_t3.c
+                           ->  Hash
+                                 Output: agg_null_skew.a
+                                 ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                       Output: agg_null_skew.a
+                                       Distribute Key: agg_null_skew.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.agg_null_skew
+                                             Output: agg_null_skew.a
+                                             Distribute Key: agg_null_skew.a
+(36 rows)
+
+--S2: turn on skew_option
+set skew_option = normal;
+explain(verbose on, costs off) select count(skew_t3.a) from skew_t3 right outer join agg_null_skew on skew_t3.b  = agg_null_skew.a group by skew_t3.a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count((count(skew_t3.a)))), skew_t3.a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count((count(skew_t3.a)))), skew_t3.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count((count(skew_t3.a))), skew_t3.a
+               Group By Key: skew_t3.a
+               Skew Agg Optimized by Rule
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: (count(skew_t3.a)), skew_t3.a
+                     Distribute Key: skew_t3.a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: count(skew_t3.a), skew_t3.a
+                           Group By Key: skew_t3.a
+                           ->  Hash Right Join
+                                 Output: skew_t3.a
+                                 Hash Cond: (skew_t3.b = agg_null_skew.a)
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: skew_t3.a, skew_t3.b
+                                       Distribute Key: skew_t3.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t3
+                                             Output: skew_t3.a, skew_t3.b
+                                             Distribute Key: skew_t3.c
+                                 ->  Hash
+                                       Output: agg_null_skew.a
+                                       ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                             Output: agg_null_skew.a
+                                             Distribute Key: agg_null_skew.a
+                                             Spawn on: All datanodes
+                                             Consumer Nodes: All datanodes
+                                             ->  Seq Scan on skew_hint.agg_null_skew
+                                                   Output: agg_null_skew.a
+                                                   Distribute Key: agg_null_skew.a
+(40 rows)
+
+--I9: full join
+--S1: turn off skew_option
+set skew_option = off;
+-- right side null
+explain(verbose on, costs off) select count(agg_null_skew.a) from skew_t3 full outer join agg_null_skew on skew_t3.b  = agg_null_skew.a group by agg_null_skew.a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(agg_null_skew.a)), agg_null_skew.a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(agg_null_skew.a)), agg_null_skew.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(agg_null_skew.a), agg_null_skew.a
+               Group By Key: agg_null_skew.a
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: agg_null_skew.a
+                     Distribute Key: agg_null_skew.a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Hash Full Join
+                           Output: agg_null_skew.a
+                           Hash Cond: (skew_t3.b = agg_null_skew.a)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: skew_t3.b
+                                 Distribute Key: skew_t3.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t3
+                                       Output: skew_t3.b
+                                       Distribute Key: skew_t3.c
+                           ->  Hash
+                                 Output: agg_null_skew.a
+                                 ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                       Output: agg_null_skew.a
+                                       Distribute Key: agg_null_skew.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.agg_null_skew
+                                             Output: agg_null_skew.a
+                                             Distribute Key: agg_null_skew.a
+(36 rows)
+
+-- left side null
+explain(verbose on, costs off) select count(skew_t3.a) from skew_t3 right outer join agg_null_skew on skew_t3.b  = agg_null_skew.a group by skew_t3.a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(skew_t3.a)), skew_t3.a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(skew_t3.a)), skew_t3.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(skew_t3.a), skew_t3.a
+               Group By Key: skew_t3.a
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: skew_t3.a
+                     Distribute Key: skew_t3.a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Hash Right Join
+                           Output: skew_t3.a
+                           Hash Cond: (skew_t3.b = agg_null_skew.a)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: skew_t3.a, skew_t3.b
+                                 Distribute Key: skew_t3.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t3
+                                       Output: skew_t3.a, skew_t3.b
+                                       Distribute Key: skew_t3.c
+                           ->  Hash
+                                 Output: agg_null_skew.a
+                                 ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                       Output: agg_null_skew.a
+                                       Distribute Key: agg_null_skew.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.agg_null_skew
+                                             Output: agg_null_skew.a
+                                             Distribute Key: agg_null_skew.a
+(36 rows)
+
+--S2: turn on skew_option
+--DN_AGG_REDISTRIBUTE_AGG 
+set skew_option = normal;
+-- right side optimization
+explain(verbose on, costs off) select count(agg_null_skew.a) from skew_t3 full outer join agg_null_skew on skew_t3.b  = agg_null_skew.a group by agg_null_skew.a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count((count(agg_null_skew.a)))), agg_null_skew.a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count((count(agg_null_skew.a)))), agg_null_skew.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count((count(agg_null_skew.a))), agg_null_skew.a
+               Group By Key: agg_null_skew.a
+               Skew Agg Optimized by Rule
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: (count(agg_null_skew.a)), agg_null_skew.a
+                     Distribute Key: agg_null_skew.a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: count(agg_null_skew.a), agg_null_skew.a
+                           Group By Key: agg_null_skew.a
+                           ->  Hash Full Join
+                                 Output: agg_null_skew.a
+                                 Hash Cond: (skew_t3.b = agg_null_skew.a)
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: skew_t3.b
+                                       Distribute Key: skew_t3.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t3
+                                             Output: skew_t3.b
+                                             Distribute Key: skew_t3.c
+                                 ->  Hash
+                                       Output: agg_null_skew.a
+                                       ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                             Output: agg_null_skew.a
+                                             Distribute Key: agg_null_skew.a
+                                             Spawn on: All datanodes
+                                             Consumer Nodes: All datanodes
+                                             ->  Seq Scan on skew_hint.agg_null_skew
+                                                   Output: agg_null_skew.a
+                                                   Distribute Key: agg_null_skew.a
+(40 rows)
+
+-- left side optimization
+explain(verbose on, costs off) select count(skew_t3.a) from skew_t3 right outer join agg_null_skew on skew_t3.b  = agg_null_skew.a group by skew_t3.a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count((count(skew_t3.a)))), skew_t3.a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count((count(skew_t3.a)))), skew_t3.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count((count(skew_t3.a))), skew_t3.a
+               Group By Key: skew_t3.a
+               Skew Agg Optimized by Rule
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: (count(skew_t3.a)), skew_t3.a
+                     Distribute Key: skew_t3.a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: count(skew_t3.a), skew_t3.a
+                           Group By Key: skew_t3.a
+                           ->  Hash Right Join
+                                 Output: skew_t3.a
+                                 Hash Cond: (skew_t3.b = agg_null_skew.a)
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: skew_t3.a, skew_t3.b
+                                       Distribute Key: skew_t3.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t3
+                                             Output: skew_t3.a, skew_t3.b
+                                             Distribute Key: skew_t3.c
+                                 ->  Hash
+                                       Output: agg_null_skew.a
+                                       ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                             Output: agg_null_skew.a
+                                             Distribute Key: agg_null_skew.a
+                                             Spawn on: All datanodes
+                                             Consumer Nodes: All datanodes
+                                             ->  Seq Scan on skew_hint.agg_null_skew
+                                                   Output: agg_null_skew.a
+                                                   Distribute Key: agg_null_skew.a
+(40 rows)
+
+--I10.reset
+set query_dop = 2002;

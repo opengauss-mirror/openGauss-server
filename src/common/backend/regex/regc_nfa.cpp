@@ -635,7 +635,7 @@ static void moveins(struct nfa* nfa, struct state* oldState, struct state* newSt
 {
     Assert(oldState != newState);
 
-    if (!BULK_ARC_OP_USE_SORT(oldState->nins, newState->nins)) {
+    if ((!BULK_ARC_OP_USE_SORT(oldState->nins, newState->nins))) {
         /* With not too many arcs, just do them one at a time */
         struct arc* a = NULL;
 
@@ -710,7 +710,7 @@ static void copyins(struct nfa* nfa, struct state* oldState, struct state* newSt
 
     Assert(oldState != newState);
 
-    if (!BULK_ARC_OP_USE_SORT(oldState->nins, newState->nins)) {
+    if ((!BULK_ARC_OP_USE_SORT(oldState->nins, newState->nins))) {
         /* With not too many arcs, just do them one at a time */
         struct arc* a = NULL;
 
@@ -864,7 +864,7 @@ static void moveouts(struct nfa* nfa, struct state* oldState, struct state* newS
 {
     Assert(oldState != newState);
 
-    if (!BULK_ARC_OP_USE_SORT(oldState->nouts, newState->nouts)) {
+    if ((!BULK_ARC_OP_USE_SORT(oldState->nouts, newState->nouts))) {
         /* With not too many arcs, just do them one at a time */
         struct arc* a = NULL;
 
@@ -935,7 +935,7 @@ static void copyouts(struct nfa* nfa, struct state* oldState, struct state* newS
 {
     Assert(oldState != newState);
 
-    if (!BULK_ARC_OP_USE_SORT(oldState->nouts, newState->nouts)) {
+    if ((!BULK_ARC_OP_USE_SORT(oldState->nouts, newState->nouts))) {
         /* With not too many arcs, just do them one at a time */
         struct arc* a = NULL;
 

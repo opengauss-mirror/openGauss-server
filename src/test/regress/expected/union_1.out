@@ -1,0 +1,746 @@
+SET ENABLE_STREAM_OPERATOR = ON;
+--
+-- UNION (also INTERSECT, EXCEPT)
+--
+-- Simple UNION constructs
+SELECT 1 AS two UNION SELECT 2 ORDER BY 1;
+ two 
+-----
+   1
+   2
+(2 rows)
+
+SELECT 1 AS one UNION SELECT 1 ORDER BY 1;
+ one 
+-----
+   1
+(1 row)
+
+SELECT 1 AS two UNION ALL SELECT 2 ORDER BY 1;
+ two 
+-----
+   1
+   2
+(2 rows)
+
+SELECT 1 AS two UNION ALL SELECT 1 ORDER BY 1;
+ two 
+-----
+   1
+   1
+(2 rows)
+
+SELECT 1 AS three UNION SELECT 2 UNION SELECT 3 ORDER BY 1;
+ three 
+-------
+     1
+     2
+     3
+(3 rows)
+
+SELECT 1 AS two UNION SELECT 2 UNION SELECT 2 ORDER BY 1;
+ two 
+-----
+   1
+   2
+(2 rows)
+
+SELECT 1 AS three UNION SELECT 2 UNION ALL SELECT 2 ORDER BY 1;
+ three 
+-------
+     1
+     2
+     2
+(3 rows)
+
+SELECT 1.1 AS two UNION SELECT 2.2 ORDER BY 1;
+ two 
+-----
+ 1.1
+ 2.2
+(2 rows)
+
+-- Mixed types
+SELECT 1.1 AS two UNION SELECT 2 ORDER BY 1;
+ two 
+-----
+ 1.1
+   2
+(2 rows)
+
+SELECT 1 AS two UNION SELECT 2.2 ORDER BY 1;
+ two 
+-----
+   1
+ 2.2
+(2 rows)
+
+SELECT 1 AS one UNION SELECT 1.0::float8 ORDER BY 1;
+ one 
+-----
+   1
+(1 row)
+
+SELECT 1.1 AS two UNION ALL SELECT 2 ORDER BY 1;
+ two 
+-----
+ 1.1
+   2
+(2 rows)
+
+SELECT 1.0::float8 AS two UNION ALL SELECT 1 ORDER BY 1;
+ two 
+-----
+   1
+   1
+(2 rows)
+
+SELECT 1.1 AS three UNION SELECT 2 UNION SELECT 3 ORDER BY 1;
+ three 
+-------
+   1.1
+     2
+     3
+(3 rows)
+
+SELECT 1.1::float8 AS two UNION SELECT 2 UNION SELECT 2.0::float8 ORDER BY 1;
+ two 
+-----
+ 1.1
+   2
+(2 rows)
+
+SELECT 1.1 AS three UNION SELECT 2 UNION ALL SELECT 2 ORDER BY 1;
+ three 
+-------
+   1.1
+     2
+     2
+(3 rows)
+
+SELECT 1.1 AS two UNION (SELECT 2 UNION ALL SELECT 2) ORDER BY 1;
+ two 
+-----
+ 1.1
+   2
+(2 rows)
+
+--
+-- Try testing from tables...
+--
+SELECT f1 AS five FROM FLOAT8_TBL
+UNION
+SELECT f1 FROM FLOAT8_TBL
+ORDER BY 1;
+         five          
+-----------------------
+ -1.2345678901234e+200
+               -1004.3
+                -34.84
+ -1.2345678901234e-200
+                     0
+(5 rows)
+
+SELECT f1 AS ten FROM FLOAT8_TBL
+UNION ALL
+SELECT f1 FROM FLOAT8_TBL 
+ORDER BY 1;
+          ten          
+-----------------------
+ -1.2345678901234e+200
+ -1.2345678901234e+200
+               -1004.3
+               -1004.3
+                -34.84
+                -34.84
+ -1.2345678901234e-200
+ -1.2345678901234e-200
+                     0
+                     0
+(10 rows)
+
+SELECT f1 AS nine FROM FLOAT8_TBL
+UNION
+SELECT f1 FROM INT4_TBL
+ORDER BY 1;
+         nine          
+-----------------------
+ -1.2345678901234e+200
+           -2147483647
+               -123456
+               -1004.3
+                -34.84
+ -1.2345678901234e-200
+                     0
+                123456
+            2147483647
+                      
+(10 rows)
+
+SELECT f1 AS ten FROM FLOAT8_TBL
+UNION ALL
+SELECT f1 FROM INT4_TBL 
+ORDER BY 1;
+          ten          
+-----------------------
+ -1.2345678901234e+200
+           -2147483647
+               -123456
+               -1004.3
+                -34.84
+ -1.2345678901234e-200
+                     0
+                     0
+                123456
+            2147483647
+                      
+(11 rows)
+
+SELECT f1 AS five FROM FLOAT8_TBL
+  WHERE f1 BETWEEN -1e6 AND 1e6
+UNION
+SELECT f1 FROM INT4_TBL
+  WHERE f1 BETWEEN 0 AND 1000000 
+  ORDER BY 1;
+         five          
+-----------------------
+               -1004.3
+                -34.84
+ -1.2345678901234e-200
+                     0
+                123456
+(5 rows)
+
+SELECT CAST(f1 AS char(4)) AS three FROM VARCHAR_TBL
+UNION
+SELECT f1 FROM CHAR_TBL
+ORDER BY 1;
+ three 
+-------
+ a   
+ ab  
+ abcd
+(3 rows)
+
+SELECT f1 AS three FROM VARCHAR_TBL
+UNION
+SELECT CAST(f1 AS varchar) FROM CHAR_TBL
+ORDER BY 1;
+ three 
+-------
+ a
+ ab
+ abcd
+(3 rows)
+
+SELECT f1 AS eight FROM VARCHAR_TBL
+UNION ALL
+SELECT f1 FROM CHAR_TBL 
+ORDER BY 1;
+ eight 
+-------
+ a
+ a
+ ab
+ ab
+ abcd
+ abcd
+ abcd
+ abcd
+(8 rows)
+
+SELECT f1 AS five FROM TEXT_TBL
+UNION
+SELECT f1 FROM VARCHAR_TBL
+UNION
+SELECT TRIM(TRAILING FROM f1) FROM CHAR_TBL
+ORDER BY 1;
+       five        
+-------------------
+ a
+ ab
+ abcd
+ doh!
+ hi de ho neighbor
+(5 rows)
+
+--
+-- INTERSECT and EXCEPT
+--
+SELECT q2 FROM int8_tbl INTERSECT SELECT q1 FROM int8_tbl ORDER BY 1;
+        q2        
+------------------
+              123
+ 4567890123456789
+                 
+(3 rows)
+
+SELECT q2 FROM int8_tbl INTERSECT ALL SELECT q1 FROM int8_tbl ORDER BY 1;
+        q2        
+------------------
+              123
+ 4567890123456789
+ 4567890123456789
+                 
+(4 rows)
+
+SELECT q2 FROM int8_tbl EXCEPT SELECT q1 FROM int8_tbl ORDER BY 1;
+        q2         
+-------------------
+ -4567890123456789
+               456
+(2 rows)
+
+SELECT q2 FROM int8_tbl EXCEPT ALL SELECT q1 FROM int8_tbl ORDER BY 1;
+        q2         
+-------------------
+ -4567890123456789
+               456
+(2 rows)
+
+SELECT q2 FROM int8_tbl EXCEPT ALL SELECT DISTINCT q1 FROM int8_tbl ORDER BY 1;
+        q2         
+-------------------
+ -4567890123456789
+               456
+  4567890123456789
+(3 rows)
+
+SELECT q1 FROM int8_tbl EXCEPT SELECT q2 FROM int8_tbl ORDER BY 1;
+ q1 
+----
+(0 rows)
+
+SELECT q1 FROM int8_tbl EXCEPT ALL SELECT q2 FROM int8_tbl ORDER BY 1;
+        q1        
+------------------
+              123
+ 4567890123456789
+(2 rows)
+
+SELECT q1 FROM int8_tbl EXCEPT ALL SELECT DISTINCT q2 FROM int8_tbl ORDER BY 1;
+        q1        
+------------------
+              123
+ 4567890123456789
+ 4567890123456789
+(3 rows)
+
+--
+-- Mixed types
+--
+SELECT f1 FROM float8_tbl INTERSECT SELECT f1 FROM int4_tbl ORDER BY 1;
+ f1 
+----
+  0
+(1 row)
+
+SELECT f1 FROM float8_tbl EXCEPT SELECT f1 FROM int4_tbl ORDER BY 1;
+          f1           
+-----------------------
+ -1.2345678901234e+200
+               -1004.3
+                -34.84
+ -1.2345678901234e-200
+(4 rows)
+
+--
+-- Operator precedence and (((((extra))))) parentheses
+--
+SELECT q1 FROM int8_tbl INTERSECT SELECT q2 FROM int8_tbl UNION ALL SELECT q2 FROM int8_tbl ORDER BY 1;
+        q1         
+-------------------
+ -4567890123456789
+               123
+               123
+               456
+  4567890123456789
+  4567890123456789
+  4567890123456789
+                  
+                  
+(9 rows)
+
+SELECT q1 FROM int8_tbl INTERSECT (((SELECT q2 FROM int8_tbl UNION ALL SELECT q2 FROM int8_tbl))) ORDER BY 1;
+        q1        
+------------------
+              123
+ 4567890123456789
+                 
+(3 rows)
+
+(((SELECT q1 FROM int8_tbl INTERSECT SELECT q2 FROM int8_tbl))) UNION ALL SELECT q2 FROM int8_tbl ORDER BY 1;
+        q1         
+-------------------
+ -4567890123456789
+               123
+               123
+               456
+  4567890123456789
+  4567890123456789
+  4567890123456789
+                  
+                  
+(9 rows)
+
+SELECT q1 FROM int8_tbl UNION ALL SELECT q2 FROM int8_tbl EXCEPT SELECT q1 FROM int8_tbl ORDER BY 1;
+        q1         
+-------------------
+ -4567890123456789
+               456
+(2 rows)
+
+SELECT q1 FROM int8_tbl UNION ALL (((SELECT q2 FROM int8_tbl EXCEPT SELECT q1 FROM int8_tbl ORDER BY 1))) ORDER BY 1;
+        q1         
+-------------------
+ -4567890123456789
+               123
+               123
+               456
+  4567890123456789
+  4567890123456789
+  4567890123456789
+                  
+(8 rows)
+
+(((SELECT q1 FROM int8_tbl UNION ALL SELECT q2 FROM int8_tbl))) EXCEPT SELECT q1 FROM int8_tbl ORDER BY 1;
+        q1         
+-------------------
+ -4567890123456789
+               456
+(2 rows)
+
+--
+-- Subqueries with ORDER BY & LIMIT clauses
+--
+-- In this syntax, ORDER BY/LIMIT apply to the result of the EXCEPT
+SELECT q1,q2 FROM int8_tbl EXCEPT SELECT q2,q1 FROM int8_tbl
+ORDER BY q2,q1;
+        q1        |        q2         
+------------------+-------------------
+ 4567890123456789 | -4567890123456789
+              123 |               456
+(2 rows)
+
+-- This should fail, because q2 isn't a name of an EXCEPT output column
+SELECT q1 FROM int8_tbl EXCEPT SELECT q2 FROM int8_tbl ORDER BY q2 LIMIT 1;
+ERROR:  column "q2" does not exist
+LINE 1: ... int8_tbl EXCEPT SELECT q2 FROM int8_tbl ORDER BY q2 LIMIT 1...
+                                                             ^
+-- But this should work:
+SELECT q1 FROM int8_tbl EXCEPT (((SELECT q2 FROM int8_tbl ORDER BY q2 LIMIT 1))) ORDER BY q1;
+        q1        
+------------------
+              123
+ 4567890123456789
+                 
+(3 rows)
+
+--
+-- New syntaxes (7.1) permit new tests
+--
+(((((select * from int8_tbl  ORDER BY q1, q2)))));
+        q1        |        q2         
+------------------+-------------------
+              123 |               456
+              123 |  4567890123456789
+ 4567890123456789 | -4567890123456789
+ 4567890123456789 |               123
+ 4567890123456789 |  4567890123456789
+                  |                  
+(6 rows)
+
+--
+-- Check handling of a case with unknown constants.  We don't guarantee
+-- an undecorated constant will work in all cases, but historically this
+-- usage has worked, so test we don't break it.
+--
+SELECT a.f1 FROM (SELECT 'test' AS f1 FROM varchar_tbl) a
+UNION
+SELECT b.f1 FROM (SELECT f1 FROM varchar_tbl) b
+ORDER BY 1;
+  f1  
+------
+ a
+ ab
+ abcd
+ test
+(4 rows)
+
+-- This should fail, but it should produce an error cursor
+SELECT '3.4'::numeric UNION SELECT 'foo';
+ERROR:  invalid input syntax for type numeric: "foo"
+LINE 1: SELECT '3.4'::numeric UNION SELECT 'foo';
+                                           ^
+--
+-- Test that expression-index constraints can be pushed down through
+-- UNION or UNION ALL
+--
+-- Enforce use of COMMIT instead of 2PC for temporary objects
+SET enforce_two_phase_commit TO off;
+-- CREATE TEMP TABLE union_t1 (a text, b text);
+CREATE  TABLE union_t1 (a text, b text);
+CREATE INDEX t1_ab_idx on union_t1 ((a || b));
+-- CREATE TEMP TABLE union_t2 (ab text primary key);
+CREATE  TABLE union_t2 (ab text primary key);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "union_t2_pkey" for table "union_t2"
+INSERT INTO union_t1 VALUES ('a', 'b'), ('x', 'y');
+INSERT INTO union_t2 VALUES ('ab'), ('xy');
+set enable_seqscan = off;
+set enable_indexscan = on;
+set enable_bitmapscan = off;
+explain (num_costs off)
+ SELECT * FROM
+ (SELECT a || b AS ab FROM union_t1
+  UNION ALL
+  SELECT * FROM union_t2) t
+ WHERE ab = 'ab';
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Result
+         ->  Append
+               ->  Index Scan using t1_ab_idx on union_t1
+                     Index Cond: ((a || b) = 'ab'::text)
+               ->  Index Only Scan using union_t2_pkey on union_t2
+                     Index Cond: (ab = 'ab'::text)
+(7 rows)
+
+explain (num_costs off)
+ SELECT * FROM
+ (SELECT a || b AS ab FROM union_t1
+  UNION
+  SELECT * FROM union_t2) t
+ WHERE ab = 'ab';
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Unique
+         ->  Sort
+               Sort Key: ((union_t1.a || union_t1.b))
+               ->  Append
+                     ->  Streaming(type: REDISTRIBUTE)
+                           ->  Index Scan using t1_ab_idx on union_t1
+                                 Index Cond: ((a || b) = 'ab'::text)
+                     ->  Index Only Scan using union_t2_pkey on union_t2
+                           Index Cond: (ab = 'ab'::text)
+(10 rows)
+
+reset enable_seqscan;
+reset enable_indexscan;
+reset enable_bitmapscan;
+DROP TABLE union_t1 CASCADE;
+DROP TABLE union_t2 CASCADE;
+-- doesn't pull down for intersect all query
+create table reg_t1(r1 int, r2 regproc, r3 regproc);
+insert into reg_t1 values(1, 'sin', 'cos'), (2, 'cos', 'tan'), (3, 'tan', 'cot');
+explain (costs off, verbose on)
+ SELECT * FROM
+ (SELECT r2 FROM reg_t1
+  INTERSECT ALL
+  SELECT r3 FROM reg_t1) t;
+WARNING:  Statistics in some tables or columns(public.reg_t1.r1, public.reg_t1.r2, public.reg_t1.r3) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Subquery Scan on t
+   Output: t.r2
+   ->  HashSetOp Intersect All
+         Output: "*SELECT* 1".r2, (0)
+         ->  Append
+               ->  Streaming (type: GATHER)
+                     Output: "*SELECT* 1".r2, (0)
+                     ->  Subquery Scan on "*SELECT* 1"
+                           Output: "*SELECT* 1".r2, 0
+                           ->  Seq Scan on public.reg_t1
+                                 Output: public.reg_t1.r2
+                                 Distribute Key: public.reg_t1.r1
+               ->  Streaming (type: GATHER)
+                     Output: "*SELECT* 2".r3, (1)
+                     ->  Subquery Scan on "*SELECT* 2"
+                           Output: "*SELECT* 2".r3, 1
+                           ->  Seq Scan on public.reg_t1
+                                 Output: public.reg_t1.r3
+                                 Distribute Key: public.reg_t1.r1
+(19 rows)
+
+SELECT * FROM
+(SELECT r2 FROM reg_t1
+ INTERSECT ALL
+ SELECT r3 FROM reg_t1) t order by 1;
+ r2  
+-----
+ cos
+ tan
+(2 rows)
+
+drop table reg_t1;
+-- Test constraint exclusion of UNION ALL subqueries
+explain (num_costs off)
+ SELECT * FROM
+  (SELECT 1 AS t, * FROM tenk1 a
+   UNION ALL
+   SELECT 2 AS t, * FROM tenk1 b) c
+ WHERE t = 2;
+              QUERY PLAN               
+---------------------------------------
+ Streaming (type: GATHER)
+   ->  Result
+         ->  Append
+               ->  Seq Scan on tenk1 b
+(4 rows)
+
+-- Test that we push quals into UNION sub-selects only when it's safe
+explain (costs off)
+SELECT * FROM
+  (SELECT 1 AS t, 2 AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x < 4;
+              QUERY PLAN              
+--------------------------------------
+ HashAggregate
+   Group By Key: (1), (2)
+   ->  Append
+         ->  Result
+         ->  Result
+               One-Time Filter: false
+(6 rows)
+
+SELECT * FROM
+  (SELECT 1 AS t, 2 AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x < 4;
+ t | x 
+---+---
+ 1 | 2
+(1 row)
+
+explain (costs off)
+SELECT * FROM
+  (SELECT 1 AS t, generate_series(1,10) AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x < 4
+ORDER BY x;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Sort
+   Sort Key: ss.x
+   ->  Subquery Scan on ss
+         Filter: (ss.x < 4)
+         ->  HashAggregate
+               Group By Key: (1), (generate_series(1, 10))
+               ->  Append
+                     ->  Result
+                     ->  Result
+(9 rows)
+
+SELECT * FROM
+  (SELECT 1 AS t, generate_series(1,10) AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x < 4
+ORDER BY x;
+ t | x 
+---+---
+ 1 | 1
+ 1 | 2
+ 1 | 3
+(3 rows)
+
+explain (costs off)
+SELECT * FROM
+  (SELECT 1 AS t, (random()*3)::int AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x > 3;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Subquery Scan on ss
+   Filter: (ss.x > 3)
+   ->  Unique
+         ->  Sort
+               Sort Key: (1), (((random() * 3::double precision))::integer)
+               ->  Append
+                     ->  Result
+                     ->  Result
+(8 rows)
+
+SELECT * FROM
+  (SELECT 1 AS t, (random()*3)::int AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x > 3;
+ t | x 
+---+---
+ 2 | 4
+(1 row)
+
+explain (costs off)
+SELECT * FROM
+  (SELECT distinct on (t) 1 AS t, 2 AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x < 4
+ORDER BY x;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Sort
+   Sort Key: ss.x
+   ->  Subquery Scan on ss
+         Filter: (ss.x < 4)
+         ->  Unique
+               ->  Sort
+                     Sort Key: (1), (2)
+                     ->  Append
+                           ->  Subquery Scan on "*SELECT* 1"
+                                 ->  Unique
+                                       ->  Result
+                           ->  Result
+(12 rows)
+
+SELECT * FROM
+  (SELECT distinct on (t) 1 AS t, 2 AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x < 4
+ORDER BY x;
+ t | x 
+---+---
+ 1 | 2
+(1 row)
+
+explain (costs off)
+SELECT * FROM
+  (SELECT 1.3 AS t, 2.5 AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x < 4
+ORDER BY x;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Sort
+   Sort Key: ss.x
+   ->  Subquery Scan on ss
+         Filter: (ss.x < 4::numeric)
+         ->  HashAggregate
+               Group By Key: (1.3), (2.5)
+               ->  Append
+                     ->  Result
+                     ->  Subquery Scan on "*SELECT* 2"
+                           ->  Result
+(10 rows)
+
+SELECT * FROM
+  (SELECT 1.3 AS t, 2.5 AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x < 4
+ORDER BY x;
+  t  |  x  
+-----+-----
+ 1.3 | 2.5
+(1 row)
+

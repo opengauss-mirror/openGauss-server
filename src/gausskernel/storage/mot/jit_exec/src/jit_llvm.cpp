@@ -77,7 +77,7 @@ GsCodeGen* SetupCodegenEnv()
     MOT_ASSERT(g_instance.mot_cxt.jitExecMode == JIT_EXEC_MODE_LLVM);
 
     // create GsCodeGen object for LLVM code generation
-    GsCodeGen* code_gen = New(g_instance.instance_context) GsCodeGen();
+    GsCodeGen* code_gen = New(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR)) GsCodeGen();
     if (code_gen != nullptr) {
         code_gen->initialize();
         code_gen->createNewModule();

@@ -1,4 +1,4 @@
-src/gausskernel/storage/access/transam/README
+src/backend/access/transam/README
 
 The Transaction System
 ======================

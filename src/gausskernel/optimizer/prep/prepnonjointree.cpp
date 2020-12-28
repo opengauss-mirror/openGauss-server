@@ -536,7 +536,7 @@ static bool lazyagg_is_countparam_compatible(lazyagg_query_context* parentContex
  */
 static Oid lazyagg_get_aggtrantype(Oid aggfnoid)
 {
-    Oid aggTrantype;
+    Oid aggTrantype = 0;
 
     HeapTuple tup = SearchSysCache1(AGGFNOID, ObjectIdGetDatum(aggfnoid));
     if (!HeapTupleIsValid(tup)) {
@@ -651,7 +651,7 @@ static List* lazyagg_get_agg_list(Node* node, bool* has_AggrefsOuterquery)
      */
     if (has_AggrefsOuterquery != NULL) { /* should not be NULL when check childquery */
         ListCell* lc1 = NULL;
-        List* sublinks = pull_sublink(node);
+        List* sublinks = pull_sublink(node, 0, false, true);
         foreach (lc1, sublinks) {
             AssertEreport(IsA(lfirst(lc1), SubLink), MOD_OPT_REWRITE, "Sublink mismatch in lazyagg_get_agg_list");
 
@@ -781,8 +781,8 @@ static bool lazyagg_check_delay_rewrite_compatibility(lazyagg_query_context* par
          * Not match the compatibility, this parent-query/child-querys pair should not be rewriten
          * set the InvalidOid slot to mark this bms is invalid
          */
-        bms_add_member(parentContext->bms_count, InvalidOid);
-        bms_add_member(parentContext->bms_countStar, InvalidOid);
+        parentContext->bms_count = bms_add_member(parentContext->bms_count, InvalidOid);
+        parentContext->bms_countStar = bms_add_member(parentContext->bms_countStar, InvalidOid);
         bms_free_ext(parentSumToCount);
         bms_free_ext(parentSumToCountStar);
 
@@ -856,8 +856,10 @@ static bool lazyagg_check_childquery_feasibility(Query* parentParse, Query* chil
 
         List* te_AggrefList = lazyagg_get_agg_list((Node*)te, &has_AggrefsOuterquery);
 
-        if (has_AggrefsOuterquery)
+        if (has_AggrefsOuterquery) {
+            list_free_ext(te_AggrefList);
             return false;
+        }
 
         if (NIL != te_AggrefList) {
             if (!resetContextOnly) {
@@ -928,6 +930,7 @@ static bool lazyagg_check_childquery_feasibility(Query* parentParse, Query* chil
                  * ------ Rule joint 4 ------
                  * COUNT typed child-query's parent-query should have GROUP BY
                  */
+                list_free_ext(te_AggrefList);
                 return false;
             }
 
@@ -952,6 +955,7 @@ static bool lazyagg_check_childquery_feasibility(Query* parentParse, Query* chil
                 default:
                     break;
             }
+            list_free_ext(te_AggrefList);
         }
         ++tleIndex;
     }
@@ -990,6 +994,7 @@ static bool lazyagg_check_parentquery_feasibility(
     Query* parentParse, Index* targetRTEIndex, lazyagg_query_context* parentContext)
 {
     *targetRTEIndex = 0;
+    List *tlist_var_list = NIL;
     ListCell* lc = NULL;
 
     if (!(parentParse->hasAggs || parentParse->groupClause != NIL)) {
@@ -999,6 +1004,22 @@ static bool lazyagg_check_parentquery_feasibility(
          */
         return false;
     }
+
+    tlist_var_list = pull_var_clause((Node *)parentParse->targetList,
+                                  PVC_INCLUDE_AGGREGATES,
+                                  PVC_INCLUDE_PLACEHOLDERS,
+                                  PVC_RECURSE_SPECIAL_EXPR,
+                                  true, true);
+
+    /* We can not use lazyagg if any var in targetlist is from sublink pulled up */
+    foreach(lc, tlist_var_list)	{
+        Node *node = (Node *)lfirst(lc);
+        if (IsA(node, Var) && (((Var *) node)->varlevelsup == 0) &&
+            var_from_sublink_pulluped(parentParse, (Var *)node)) {
+            return false;
+        }
+    }
+
 
     /* check volatile in JOIN and WHERE of parent-query */
     bool isJoinHasVolatile = contain_volatile_functions((Node*)parentParse->jointree);
@@ -1857,7 +1878,7 @@ Query* lazyagg_main(Query* parse)
     ListCell* lc = NULL;
     foreach (lc, parse->rtable) {
         RangeTblEntry* rte = (RangeTblEntry*)lfirst(lc);
-        if (rte->rtekind == RTE_SUBQUERY) {
+        if (RTE_SUBQUERY == rte->rtekind && !rte->subquery->unique_check) {
             Query* childParse = rte->subquery;
 
             /* child-query need to be a setop or has GROUP BY */
@@ -1941,6 +1962,7 @@ static void reduce_orderby_recurse(Query* query, Node* jtnode, bool reduce)
         /* Reduce orderby clause in subquery for join or from clause of more than one rte */
         reduce_orderby_final(rte, reduce);
     } else if (IsA(jtnode, FromExpr)) {
+#ifndef ENABLE_MULTIPLE_NODES
         /* If there is ROWNUM, can not reduce orderby clause in subquery from fromlist.
          * For example, If there is a SQL {select * from table_name where rownum < n union
          * select * from (select * from table_name order by column_name desc) where rownum < n;},
@@ -1949,6 +1971,7 @@ static void reduce_orderby_recurse(Query* query, Node* jtnode, bool reduce)
         if (contain_rownum_walker(jtnode, NULL)) {
             return;
         }
+#endif
         FromExpr* f = (FromExpr*)jtnode;
         ListCell* l = NULL;
         bool flag = false;
@@ -2045,3 +2068,6 @@ void reduce_orderby(Query* query, bool reduce)
         reduce_orderby_recurse(query, ((SetOperationStmt*)query->setOperations)->rarg, true);
     }
 }
+
+/* ------------------------------------------------------------ */
+/* Reduce orderby : end                                       */

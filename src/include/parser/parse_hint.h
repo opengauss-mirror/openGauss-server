@@ -29,6 +29,7 @@
 #include "optimizer/streamplan.h"
 #include "parser/parse_node.h"
 #include "tcop/dest.h"
+#include "utils/guc.h"
 
 /* hint keywords */
 #define HINT_NESTLOOP "NestLoop"
@@ -44,9 +45,12 @@
 #define HINT_INDEXSCAN "IndexScan"
 #define HINT_INDEXONLYSCAN "IndexOnlyScan"
 #define HINT_SKEW "Skew"
+#define HINT_MULTI_NODE "MultiNode"
 #define HINT_NULL "Null"
 #define HINT_TRUE "True"
 #define HINT_FALSE "False"
+#define HINT_PRED_PUSH "Predpush"
+#define HINT_REWRITE "Rewrite_rule"
 
 #define BLOCK_COMMENT_START "/*"
 #define BLOCK_COMMENT_END "*/"
@@ -71,7 +75,7 @@ typedef struct pull_hint_warning_context {
 extern THR_LOCAL List* hint_list;
 extern THR_LOCAL List* hint_warning;
 
-/* hint keyword of enum type */
+/* hint keyword of enum type*/
 typedef enum HintKeyword {
     HINT_KEYWORD_NESTLOOP = 0,
     HINT_KEYWORD_MERGEJOIN,
@@ -84,7 +88,9 @@ typedef enum HintKeyword {
     HINT_KEYWORD_TABLESCAN,
     HINT_KEYWORD_INDEXSCAN,
     HINT_KEYWORD_INDEXONLYSCAN,
-    HINT_KEYWORD_SKEW
+    HINT_KEYWORD_SKEW,
+    HINT_KEYWORD_PREDPUSH,
+    HINT_KEYWORD_REWRITE,
 } HintKeyword;
 
 /* hint status */
@@ -160,6 +166,12 @@ typedef struct SkewHint {
     List* value_list;  /* skew value list */
 } SkewHint;
 
+/* multinode hints */
+typedef struct MultiNodeHint {
+    Hint base;         /* base hint */
+    bool multi_node_hint;
+} MultiNodeHint;
+
 /* relation information from RangeTblEntry and pg_class */
 typedef struct SkewRelInfo {
     NodeTag type;
@@ -195,6 +207,22 @@ typedef struct SkewHintTransf {
     List* value_info_list;  /* value info list after transform */
 } SkewHintTransf;
 
+/* prompts which predicates can be pushdown */
+typedef struct PredpushHint {
+    Hint base; /* base hint */
+    bool negative;
+    char *dest_name;
+    int dest_id;
+    Relids candidates;      /* which one will be push down */
+} PredpushHint;
+
+/* Enable/disable rewrites with hint */
+typedef struct RewriteHint {
+    Hint base; /* base hint */
+    List* param_names;   /* rewrite parameters */
+    unsigned int param_bits;
+} RewriteHint;
+
 typedef struct hintKeyword {
     const char* name;
     int value;
@@ -219,6 +247,9 @@ extern List* retrieve_query_hint_warning(Node* parse);
 extern void output_utility_hint_warning(Node* query, int lev);
 extern void output_hint_warning(List* warning, int lev);
 extern void HintStateDelete(HintState* hintState);
+extern bool permit_predpush(PlannerInfo *root);
+extern bool permit_from_rewrite_hint(PlannerInfo *root, unsigned int params);
+extern Relids predpush_candidates_same_level(PlannerInfo *root);
 
 #define skip_space(str)   \
     while (isspace(*str)) \

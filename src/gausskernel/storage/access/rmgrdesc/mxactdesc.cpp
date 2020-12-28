@@ -20,9 +20,9 @@
 #include "common/fe_memutils.h"
 #endif
 
-void multixact_desc(StringInfo buf, XLogReaderState* record)
+void multixact_desc(StringInfo buf, XLogReaderState *record)
 {
-    char* rec = XLogRecGetData(record);
+    char *rec = XLogRecGetData(record);
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
     errno_t rc;
 
@@ -40,7 +40,7 @@ void multixact_desc(StringInfo buf, XLogReaderState* record)
         securec_check(rc, "", "");
         appendStringInfo(buf, "zero members page: " INT64_FORMAT, pageno);
     } else if (info == XLOG_MULTIXACT_CREATE_ID) {
-        xl_multixact_create* xlrec = (xl_multixact_create*)rec;
+        xl_multixact_create *xlrec = (xl_multixact_create *)rec;
         int i = 0;
 
         appendStringInfo(buf, "create multixact " XID_FMT " offset %lu:", xlrec->mid, xlrec->moff);
@@ -49,4 +49,3 @@ void multixact_desc(StringInfo buf, XLogReaderState* record)
     } else
         appendStringInfo(buf, "UNKNOWN");
 }
-

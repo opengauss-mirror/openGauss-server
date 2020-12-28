@@ -49,6 +49,7 @@ Oid get_data_source_oid(const char* sourcename, bool missing_ok)
     Oid oid;
 
     oid = GetSysCacheOid1(DATASOURCENAME, CStringGetDatum(sourcename));
+
     if (!OidIsValid(oid) && !missing_ok)
         ereport(ERROR,
             (errmodule(MOD_EC), errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("source \"%s\" does not exist", sourcename)));
@@ -71,6 +72,7 @@ DataSource* GetDataSource(Oid sourceid)
     bool isnull = false;
 
     tp = SearchSysCache1(DATASOURCEOID, ObjectIdGetDatum(sourceid));
+
     if (!HeapTupleIsValid(tp))
         ereport(ERROR,
             (errmodule(MOD_EC),
@@ -120,6 +122,7 @@ DataSource* GetDataSourceByName(const char* sourcename, bool missing_ok)
         return NULL;
 
     sourceid = get_data_source_oid(sourcename, missing_ok);
+
     if (!OidIsValid(sourceid))
         return NULL;
 

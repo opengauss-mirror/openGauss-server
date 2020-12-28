@@ -298,10 +298,10 @@ static void SharedInvalReserveBackendInit(bool sendOnly)
             t_thrd.proc_cxt.MyBackendId = InvalidBackendId;
             LWLockRelease(SInvalWriteLock);
             ereport(FATAL,
-                (errcode(ERRCODE_TOO_MANY_CONNECTIONS),
-                    errmsg("sorry, too many reserve thread already lastreserveBackend:%d, maxreserveBackends:%d",
-                        segP->lastreserveBackend,
-                        segP->maxreserveBackends)));
+                    (errcode(ERRCODE_TOO_MANY_CONNECTIONS),
+                     errmsg("sorry, too many reserve thread already lastreserveBackend:%d, maxreserveBackends:%d",
+                            segP->lastreserveBackend,
+                            segP->maxreserveBackends)));
         }
     }
     if (segP->lastreserveBackend > segP->lastBackend) {
@@ -353,11 +353,11 @@ static void SharedInvalWorkSessionInit(bool sendOnly)
         t_thrd.proc_cxt.MyBackendId = InvalidBackendId;
         LWLockRelease(SInvalWriteLock);
         ereport(FATAL,
-            (errcode(ERRCODE_TOO_MANY_CONNECTIONS),
-                errmsg("sorry, session index isnot valid index:%d, maxreserveBackends:%d, maxBackends:%d",
-                    index,
-                    segP->maxreserveBackends,
-                    segP->maxBackends)));
+                (errcode(ERRCODE_TOO_MANY_CONNECTIONS),
+                 errmsg("sorry, session index isnot valid index:%d, maxreserveBackends:%d, maxBackends:%d",
+                        index,
+                        segP->maxreserveBackends,
+                        segP->maxBackends)));
     }
     stateP = &segP->procState[index];
 
@@ -365,11 +365,11 @@ static void SharedInvalWorkSessionInit(bool sendOnly)
         t_thrd.proc_cxt.MyBackendId = InvalidBackendId;
         LWLockRelease(SInvalWriteLock);
         ereport(FATAL,
-            (errcode(ERRCODE_TOO_MANY_CONNECTIONS),
-                errmsg("sorry, session slot isnot valid:%d, maxreserveBackends:%d, maxBackends:%d",
-                    index,
-                    segP->maxreserveBackends,
-                    segP->maxBackends)));
+                (errcode(ERRCODE_TOO_MANY_CONNECTIONS),
+                 errmsg("sorry, session slot isnot valid:%d, maxreserveBackends:%d, maxBackends:%d",
+                        index,
+                        segP->maxreserveBackends,
+                        segP->maxBackends)));
     }
 
     if ((index + 1) > segP->lastBackend) {
@@ -429,6 +429,16 @@ static void CleanupInvalidationState(int status, Datum arg)
     int i;
 
     Assert(PointerIsValid(segP));
+
+    /*
+     * Clear the invalid msg slot of any session that might still be attached to pool worker.
+     * We need to do this after AbortOutOfAnyTransaction but before ProcKill.
+     * Conservertively, we could just leave the slot as it is, which will eventually be marked as reset. However,
+     * this might lead to inefficient invalid-msg-array traverse, because last backend is not refreshed in that case.
+     */
+    if (IS_THREAD_POOL_WORKER && u_sess->session_ctr_index >= GLOBAL_RESERVE_SESSION_NUM) {
+        CleanupWorkSessionInvalidation();
+    }
 
     LWLockAcquire(SInvalWriteLock, LW_EXCLUSIVE);
 

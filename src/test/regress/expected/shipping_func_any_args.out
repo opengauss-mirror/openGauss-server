@@ -1,0 +1,363 @@
+--pg_typeof(any)
+--textanycat(text,any)
+--anytextcat(any,text)
+--format(text,any)
+set current_schema='shipping_schema';
+---------------------pg_typeof(any)--------------------------
+----case1 shipping---
+explain (num_costs off)
+select pg_typeof(t4.a),pg_typeof(t5.b), pg_typeof(t4.c) from t4, t5 where t4.b=t5.a limit 1;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Limit
+   ->  Streaming (type: GATHER)
+         ->  Limit
+               ->  Nested Loop
+                     Join Filter: (t4.b = t5.a)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           ->  Seq Scan on t4
+                     ->  Materialize
+                           ->  Seq Scan on t5
+(9 rows)
+
+select pg_typeof(t4.a),pg_typeof(t5.b), pg_typeof(t4.c) from t4, t5 where t4.b=t5.a limit 1;
+ pg_typeof | pg_typeof | pg_typeof 
+-----------+-----------+-----------
+ integer   | integer   | text
+(1 row)
+
+----case2 shipping---
+explain (num_costs off)
+select sum(t4.a),t4.c from t4, t5 where t4.b=t5.a and pg_typeof(shipping_schema.t5.c)::text ='text' group by t4.c order by 1,2;
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: (sum(t4.a)), t4.c
+   ->  Sort
+         Sort Key: (sum(t4.a)), t4.c
+         ->  HashAggregate
+               Group By Key: t4.c
+               ->  Streaming(type: REDISTRIBUTE)
+                     ->  Nested Loop
+                           Join Filter: (t4.b = t5.a)
+                           ->  Streaming(type: BROADCAST)
+                                 ->  Seq Scan on t5
+                                       Filter: ((pg_typeof(c))::text = 'text'::text)
+                           ->  Seq Scan on t4
+(13 rows)
+
+select sum(t4.a),t4.c from t4, t5 where t4.b=t5.a and pg_typeof(shipping_schema.t5.c)::text ='text' group by t4.c order by 1,2;
+ sum | c 
+-----+---
+   4 | 1
+   9 | 2
+  17 | 3
+  25 | 0
+(4 rows)
+
+---case3 shipping---
+explain (num_costs off) 
+select pg_typeof(t4.a) , pg_typeof(t4.c) from t4;
+   QUERY PLAN   
+----------------
+ Data Node Scan
+(1 row)
+
+select pg_typeof(t4.a) , pg_typeof(t4.c) from t4 order by 1,2;
+ pg_typeof | pg_typeof 
+-----------+-----------
+ integer   | text
+ integer   | text
+ integer   | text
+ integer   | text
+ integer   | text
+ integer   | text
+ integer   | text
+ integer   | text
+(8 rows)
+
+---------------------anytextcat(any,text)--------------------------
+----case1  record cause not-shipping---
+explain (num_costs off)
+select anytextcat(t4,t5.c) from t4, t5 where t4.b=t5.a order by 1 limit 3;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: (anytextcat(t4.*, t5.c))
+         ->  Hash Join
+               Hash Cond: (t4.b = t5.a)
+               ->  Data Node Scan on t4 "_REMOTE_TABLE_QUERY_"
+               ->  Hash
+                     ->  Data Node Scan on t5 "_REMOTE_TABLE_QUERY_"
+(8 rows)
+
+select anytextcat(t4,t5.c) from t4, t5 where t4.b=t5.a order by 1 limit 3;
+ anytextcat 
+------------
+ (0,2,1)0
+ (0,2,1)0
+ (0,2,1)1
+(3 rows)
+
+----case2: shipping---
+explain (num_costs off)
+select anytextcat(t5.c,min((t4.b::numeric))),t4.a from t4, t5 where t4.b=t5.c group by t5.c ,t4.a order by 1,2;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: (anytextcat(t5.c, (min((t4.b)::numeric))::text)), t4.a
+   ->  Sort
+         Sort Key: (anytextcat(t5.c, (min((t4.b)::numeric))::text)), t4.a
+         ->  HashAggregate
+               Group By Key: t5.c, t4.a
+               ->  Streaming(type: REDISTRIBUTE)
+                     ->  Hash Join
+                           Hash Cond: (t4.b = ((t5.c)::bigint))
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 ->  Seq Scan on t4
+                           ->  Hash
+                                 ->  Streaming(type: REDISTRIBUTE)
+                                       ->  Seq Scan on t5
+(14 rows)
+
+---case3: array_expr cases not-shipping ---
+explain (num_costs off)
+select anytextcat(concat(array[t4.a,t4.b]),t5.c) from t4, t5 where t4.a=t5.a order by 1 limit 3;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: (anytextcat(concat(ARRAY[t4.a, t4.b]), t5.c))
+         ->  Data Node Scan on "__REMOTE_SORT_QUERY__"
+(4 rows)
+
+select anytextcat(concat(array[t4.a,t4.b]),t5.c) from t4, t5 where t4.a=t5.a order by 1 limit 3;
+ anytextcat 
+------------
+ {0,2}0
+ {0,2}1
+ {0,2}1
+(3 rows)
+
+---case4: shipping---
+explain (num_costs off)
+select anytextcat(t4.a,t4.c) from t4 where t4.a  limit 3;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Limit
+   ->  Data Node Scan on "__REMOTE_LIMIT_QUERY__"
+(2 rows)
+
+select anytextcat(t4.a,t4.c) from t4 where t4.a order by 1 limit 3;
+ anytextcat 
+------------
+ 11
+ 12
+ 22
+(3 rows)
+
+---case5: array_expr cases not-shipping ---
+explain (num_costs off)
+select anytextcat(concat(array[t4.a,t4.b]),t4.c) from t4;
+   QUERY PLAN   
+----------------
+ Data Node Scan
+(1 row)
+
+select anytextcat(concat(array[t4.a,t4.b]),t4.c) from t4 order by 1 limit 3;
+ anytextcat 
+------------
+ {0,2}1
+ {1,0}2
+ {1,1}1
+(3 rows)
+
+---------------------textanycat(text,any)--------------------------
+----case1  record cause not-shipping---
+explain (num_costs off)
+select textanycat(t5.c,t4) from t4, t5 where t4.b=t5.a order by 1 limit 3;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: (textanycat(t5.c, t4.*))
+         ->  Hash Join
+               Hash Cond: (t4.b = t5.a)
+               ->  Data Node Scan on t4 "_REMOTE_TABLE_QUERY_"
+               ->  Hash
+                     ->  Data Node Scan on t5 "_REMOTE_TABLE_QUERY_"
+(8 rows)
+
+select textanycat(t5.c,t4) from t4, t5 where t4.b=t5.a order by 1 limit 3;
+ textanycat 
+------------
+ 0(0,2,1)
+ 0(0,2,1)
+ 0(1,0,2)
+(3 rows)
+
+----case2: shipping---
+explain (num_costs off)
+select t4.a from t4, t5 where t4.b=t5.c and textanycat(t5.c,(t4.b::numeric))='11' group by t5.c ,t4.a, t4.b order by 1;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: t4.a, t5.c, t4.b
+   ->  Group
+         Group By Key: t4.a, t5.c, t4.b
+         ->  Sort
+               Sort Key: t4.a, t5.c, t4.b
+               ->  Hash Join
+                     Hash Cond: (t4.b = ((t5.c)::bigint))
+                     Join Filter: (textanycat(t5.c, (t4.b)::numeric) = '11'::text)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           ->  Seq Scan on t4
+                     ->  Hash
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 ->  Seq Scan on t5
+(14 rows)
+
+select t4.a from t4, t5 where t4.b=t5.c and textanycat(t5.c,(t4.b::numeric))='11' group by t5.c ,t4.a, t4.b order by 1;
+ a 
+---
+ 1
+ 2
+ 4
+(3 rows)
+
+---case3: shipping ---
+explain (num_costs off)
+select sum(t5.a) from t4, t5 where t4.a=t5.a group by t5.c,t4.a,t4.b having length(textanycat(concat(t4.a,t4.b),t5.c))>1 order by 1 limit 3;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Limit
+   ->  Streaming (type: GATHER)
+         Merge Sort Key: (sum(t5.a))
+         ->  Limit
+               ->  Sort
+                     Sort Key: (sum(t5.a))
+                     ->  HashAggregate
+                           Group By Key: t5.c, t4.a, t4.b
+                           ->  Hash Join
+                                 Hash Cond: (t4.a = t5.a)
+                                 Join Filter: (length(textanycat(concat(t4.a, t4.b), t5.c)) > 1)
+                                 ->  Seq Scan on t4
+                                 ->  Hash
+                                       ->  Seq Scan on t5
+(14 rows)
+
+select sum(t5.a) from t4, t5 where t4.a=t5.a group by t5.c,t4.a,t4.b having length(textanycat(concat(t4.a,t4.b),t5.c))>1 order by 1 limit 3;
+ sum 
+-----
+   0
+   0
+   2
+(3 rows)
+
+---case4: array_expr cases not-shipping ---
+explain (num_costs off)
+select sum(t5.a) from t4, t5 where t4.a=t5.a group by t5.c,t4.a,t4.b having length(textanycat(concat(array[t4.a,t4.b]),t5.c))>1 order by 1 limit 3;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: (sum(t5.a))
+         ->  Data Node Scan on "__REMOTE_SORT_QUERY__"
+(4 rows)
+
+select sum(t5.a) from t4, t5 where t4.a=t5.a group by t5.c,t4.a,t4.b having length(textanycat(concat(array[t4.a,t4.b]),t5.c))>1 order by 1 limit 3;
+ sum 
+-----
+   0
+   0
+   2
+(3 rows)
+
+---case5: array_expr cases not-shipping ---
+explain (num_costs off)
+select textanycat(concat(array[t4.a,t4.b]),t4.c) from t4;
+   QUERY PLAN   
+----------------
+ Data Node Scan
+(1 row)
+
+select textanycat(concat(array[t4.a,t4.b]),t4.c) from t4 order by 1 limit 3;
+ textanycat 
+------------
+ {0,2}1
+ {1,0}2
+ {1,1}1
+(3 rows)
+
+---------------------format(text,any)--------------------------
+----case1  record cause not-shipping---
+explain (num_costs off)
+select format('Hello %s, %1$s', t4) from t4, t5 where t4.b=t5.a order by 1 limit 3;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: (format('Hello %s, %1$s'::text, t4.*))
+         ->  Hash Join
+               Hash Cond: (t4.b = t5.a)
+               ->  Data Node Scan on t4 "_REMOTE_TABLE_QUERY_"
+               ->  Hash
+                     ->  Data Node Scan on t5 "_REMOTE_TABLE_QUERY_"
+(8 rows)
+
+select format('Hello %s, %1$s', t4) from t4, t5 where t4.b=t5.a order by 1 limit 3;
+         format         
+------------------------
+ Hello (0,2,1), (0,2,1)
+ Hello (0,2,1), (0,2,1)
+ Hello (0,2,1), (0,2,1)
+(3 rows)
+
+----case2: shipping---
+explain (num_costs off)
+select format('Hello %s, %1$s', t4.c, t5.a) from t4, t5 where t4.b=t5.c and textanycat(t5.c,(t4.b::numeric))='11' group by t5.a ,t4.a, t4.b,t4.c order by 1 limit 3;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Limit
+   ->  Streaming (type: GATHER)
+         Merge Sort Key: (format('Hello %s, %1$s'::text, t4.c, t5.a))
+         ->  Limit
+               ->  Sort
+                     Sort Key: (format('Hello %s, %1$s'::text, t4.c, t5.a))
+                     ->  HashAggregate
+                           Group By Key: t5.a, t4.a, t4.b, t4.c
+                           ->  Hash Join
+                                 Hash Cond: (t4.b = ((t5.c)::bigint))
+                                 Join Filter: (textanycat(t5.c, (t4.b)::numeric) = '11'::text)
+                                 ->  Streaming(type: REDISTRIBUTE)
+                                       ->  Seq Scan on t4
+                                 ->  Hash
+                                       ->  Streaming(type: REDISTRIBUTE)
+                                             ->  Seq Scan on t5
+(16 rows)
+
+select format('Hello %s, %1$s', t4.c, t5.a) from t4, t5 where t4.b=t5.c and textanycat(t5.c,(t4.b::numeric))='11' group by t5.a ,t4.a, t4.b, t4.c order by 1 limit 3;
+   format   
+------------
+ Hello 0, 0
+ Hello 0, 0
+ Hello 0, 0
+(3 rows)
+
+----case3: shipping---
+explain (num_costs off)
+select format('Hello %s, %1$s', t4.c) from t4;
+   QUERY PLAN   
+----------------
+ Data Node Scan
+(1 row)
+
+select format('Hello %s, %1$s', t4.c) from t4 order by 1 limit 3;
+   format   
+------------
+ Hello 0, 0
+ Hello 0, 0
+ Hello 1, 1
+(3 rows)
+

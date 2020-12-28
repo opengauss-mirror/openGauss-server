@@ -303,8 +303,10 @@ Datum xpath_string(PG_FUNCTION_ARGS)
     /* We could try casting to string using the libxml function? */
 
     xpath = (xmlChar*)palloc(pathsize + 9);
-    strncpy((char*)xpath, "string(", 7);
-    memcpy((char*)(xpath + 7), VARDATA(xpathsupp), pathsize);
+    errno_t rc = strncpy_s((char*)xpath, pathsize + 9, "string(", 7);
+    securec_check_c(rc, "", "");
+    rc = memcpy_s((char*)(xpath + 7), pathsize + 2, VARDATA(xpathsupp), pathsize);
+    securec_check_c(rc, "", "");
     xpath[pathsize + 7] = ')';
     xpath[pathsize + 8] = '\0';
 
@@ -552,7 +554,7 @@ Datum xpath_table(PG_FUNCTION_ARGS)
     tupstore =
         tuplestore_begin_heap(rsinfo->allowedModes & SFRM_Materialize_Random, false, u_sess->attr.attr_memory.work_mem);
 
-    (void)MemoryContextSwitchTo(oldcontext);
+    MemoryContextSwitchTo(oldcontext);
 
     /* get the requested return tuple description */
     ret_tupdesc = CreateTupleDescCopy(rsinfo->expectedDesc);
@@ -608,12 +610,11 @@ Datum xpath_table(PG_FUNCTION_ARGS)
         elog(ERROR, "xpath_table: SPI execution failed for query %s", query_buf.data);
 
     proc = SPI_processed;
-    /* elog(DEBUG1,"xpath_table: SPI returned %d rows",proc); */
     tuptable = SPI_tuptable;
     spi_tupdesc = tuptable->tupdesc;
 
     /* Switch out of SPI context */
-    (void)MemoryContextSwitchTo(oldcontext);
+    MemoryContextSwitchTo(oldcontext);
 
     /*
      * Check that SPI returned correct result. If you put a comma into one of

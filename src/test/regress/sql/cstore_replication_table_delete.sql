@@ -43,8 +43,8 @@ insert into col_rep_tb2 select * from base_table;
 
 create table hash_tb1(a int,b int,c text,d int);
 insert into hash_tb1 select * from hash_base_table;
-explain (verbose on,costs off, nodes off) delete from col_rep_tb2 using hash_tb1 where col_rep_tb2.a=hash_tb1.b and col_rep_tb2.c>2;
-explain (ANALYSE on,costs off, nodes off, timing off) delete from col_rep_tb2 using hash_tb1 where col_rep_tb2.a=hash_tb1.b and col_rep_tb2.c>2;
+explain (verbose on,costs off) delete from col_rep_tb2 using hash_tb1 where col_rep_tb2.a=hash_tb1.b and col_rep_tb2.c>2;
+explain (ANALYSE on,costs off, timing off) delete from col_rep_tb2 using hash_tb1 where col_rep_tb2.a=hash_tb1.b and col_rep_tb2.c>2;
 select * from col_rep_tb2 order by a,b,c;
 
 
@@ -441,8 +441,8 @@ insert into row_rep_tb select * from base_table;
 create table hash_tb3(a int,b int,c text,d int);
 insert into hash_tb3 select * from hash_base_table;
 
-explain (verbose on,costs off, nodes off) delete from row_rep_tb using hash_tb3 where row_rep_tb.a=hash_tb3.b and row_rep_tb.c>2;
-explain (ANALYSE on,costs off, nodes off, timing off) delete from row_rep_tb using hash_tb3 where row_rep_tb.a=hash_tb3.b and row_rep_tb.c>2;
+explain (verbose on,costs off) delete from row_rep_tb using hash_tb3 where row_rep_tb.a=hash_tb3.b and row_rep_tb.c>2;
+explain (ANALYSE on,costs off, timing off) delete from row_rep_tb using hash_tb3 where row_rep_tb.a=hash_tb3.b and row_rep_tb.c>2;
 select * from row_rep_tb order by a,b,c;
 
 

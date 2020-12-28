@@ -478,7 +478,7 @@ FROM bool_test;
 --
 analyze tenk1;		-- ensure we get consistent plans here
 -- Basic cases
-explain (costs off, nodes off)
+explain (costs off)
   select min(unique1) from tenk1;
                          QUERY PLAN                         
 ------------------------------------------------------------
@@ -495,7 +495,7 @@ select min(unique1) from tenk1;
    0
 (1 row)
 
-explain (costs off, nodes off)
+explain (costs off)
   select max(unique1) from tenk1;
                              QUERY PLAN                              
 ---------------------------------------------------------------------
@@ -512,7 +512,7 @@ select max(unique1) from tenk1;
  9999
 (1 row)
 
-explain (costs off, nodes off)
+explain (costs off)
   select max(unique1) from tenk1 where unique1 < 42;
                                QUERY PLAN                               
 ------------------------------------------------------------------------
@@ -529,7 +529,7 @@ select max(unique1) from tenk1 where unique1 < 42;
   41
 (1 row)
 
-explain (costs off, nodes off)
+explain (costs off)
   select max(unique1) from tenk1 where unique1 > 42;
                                QUERY PLAN                               
 ------------------------------------------------------------------------
@@ -546,7 +546,7 @@ select max(unique1) from tenk1 where unique1 > 42;
  9999
 (1 row)
 
-explain (costs off, nodes off)
+explain (costs off)
   select max(unique1) from tenk1 where unique1 > 42000;
                                 QUERY PLAN                                 
 ---------------------------------------------------------------------------
@@ -564,7 +564,7 @@ select max(unique1) from tenk1 where unique1 > 42000;
 (1 row)
 
 -- multi-column index (uses tenk1_thous_tenthous)
-explain (costs off, nodes off)
+explain (costs off)
   select max(tenthous) from tenk1 where thousand = 33;
                                  QUERY PLAN                                 
 ----------------------------------------------------------------------------
@@ -581,7 +581,7 @@ select max(tenthous) from tenk1 where thousand = 33;
  9033
 (1 row)
 
-explain (costs off, nodes off)
+explain (costs off)
   select min(tenthous) from tenk1 where thousand = 33;
                                 QUERY PLAN                                
 --------------------------------------------------------------------------
@@ -599,7 +599,7 @@ select min(tenthous) from tenk1 where thousand = 33;
 (1 row)
 
 -- check parameter propagation into an indexscan subquery
-explain (costs off, nodes off)
+explain (costs off)
   select f1, (select min(unique1) from tenk1 where unique1 > f1) AS gt
     from int4_tbl;
                                        QUERY PLAN                                        
@@ -627,7 +627,7 @@ order by f1;
 (6 rows)
 
 -- check some cases that were handled incorrectly in 8.3.0
-explain (costs off, nodes off)
+explain (costs off)
   select distinct max(unique2) from tenk1;
                              QUERY PLAN                              
 ---------------------------------------------------------------------
@@ -646,7 +646,7 @@ select distinct max(unique2) from tenk1;
  9999
 (1 row)
 
-explain (costs off, nodes off)
+explain (costs off)
   select max(unique2) from tenk1 order by 1;
                              QUERY PLAN                              
 ---------------------------------------------------------------------
@@ -665,7 +665,7 @@ select max(unique2) from tenk1 order by 1;
  9999
 (1 row)
 
-explain (costs off, nodes off)
+explain (costs off)
   select max(unique2) from tenk1 order by max(unique2);
                              QUERY PLAN                              
 ---------------------------------------------------------------------
@@ -684,7 +684,7 @@ select max(unique2) from tenk1 order by max(unique2);
  9999
 (1 row)
 
-explain (costs off, nodes off)
+explain (costs off)
   select max(unique2) from tenk1 order by max(unique2)+1;
                              QUERY PLAN                              
 ---------------------------------------------------------------------
@@ -703,7 +703,7 @@ select max(unique2) from tenk1 order by max(unique2)+1;
  9999
 (1 row)
 
-explain (costs off, nodes off)
+explain (costs off)
   select max(unique2), generate_series(1,3) as g from tenk1 order by g desc;
                              QUERY PLAN                              
 ---------------------------------------------------------------------
@@ -752,7 +752,7 @@ insert into minmaxtest3 values(17), (18);
 ERROR:  relation "minmaxtest3" does not exist on datanode1
 LINE 1: insert into minmaxtest3 values(17), (18);
                     ^
-explain (costs off, nodes off)
+explain (costs off)
   select min(f1), max(f1) from minmaxtest;
                                QUERY PLAN                               
 ------------------------------------------------------------------------
@@ -774,7 +774,7 @@ select min(f1), max(f1) from minmaxtest;
 (1 row)
 
 -- DISTINCT doesn't do anything useful here, but it shouldn't fail
-explain (costs off, num_nodes off, nodes off)
+explain (costs off)
   select distinct min(f1), max(f1) from minmaxtest;
                                QUERY PLAN                               
 ------------------------------------------------------------------------
@@ -864,7 +864,7 @@ select string_agg(a,',') from (values('aaaa'),('bbbb'),('cccc')) g(a);
  aaaa,bbbb,cccc
 (1 row)
 
-explain (verbose, costs off, nodes off) select string_agg(a,',') from (values('aaaa'),('bbbb'),('cccc')) g(a);
+explain (verbose, costs off) select string_agg(a,',') from (values('aaaa'),('bbbb'),('cccc')) g(a);
                      QUERY PLAN                      
 -----------------------------------------------------
  Aggregate
@@ -898,7 +898,7 @@ select string_agg(distinct f1, ',') from varchar_tbl;  -- ok
  a,ab,abcd
 (1 row)
 
-explain (verbose, costs off, nodes off) select string_agg(distinct f1, ',') from varchar_tbl;  -- ok
+explain (verbose, costs off) select string_agg(distinct f1, ',') from varchar_tbl;  -- ok
                       QUERY PLAN                      
 ------------------------------------------------------
  Aggregate
@@ -913,7 +913,7 @@ select string_agg(distinct f1, ',' order by f1) from varchar_tbl;  -- ok
  a,ab,abcd
 (1 row)
 
-explain (verbose, costs off, nodes off) select string_agg(distinct f1, ',' order by f1) from varchar_tbl;  -- ok
+explain (verbose, costs off) select string_agg(distinct f1, ',' order by f1) from varchar_tbl;  -- ok
                                 QUERY PLAN                                
 --------------------------------------------------------------------------
  Aggregate
@@ -938,7 +938,7 @@ select string_agg(distinct f1::text, ',') from varchar_tbl;  -- ok
  a,ab,abcd
 (1 row)
 
-explain (verbose, costs off, nodes off) select string_agg(distinct f1::text, ',') from varchar_tbl;  -- ok
+explain (verbose, costs off) select string_agg(distinct f1::text, ',') from varchar_tbl;  -- ok
                       QUERY PLAN                      
 ------------------------------------------------------
  Aggregate
@@ -953,7 +953,7 @@ select string_agg(distinct f1::text, ',' order by f1::text) from varchar_tbl;  -
  a,ab,abcd
 (1 row)
 
-explain (verbose, costs off, nodes off) select string_agg(distinct f1::text, ',' order by f1::text) from varchar_tbl;  -- ok
+explain (verbose, costs off) select string_agg(distinct f1::text, ',' order by f1::text) from varchar_tbl;  -- ok
                                 QUERY PLAN                                
 --------------------------------------------------------------------------
  Aggregate
@@ -984,7 +984,7 @@ select string_agg(v, '' order by v) from bytea_test_table;
  \xaaff
 (1 row)
 
-explain (verbose, costs off, nodes off) select string_agg(v, '' order by v) from bytea_test_table;
+explain (verbose, costs off) select string_agg(v, '' order by v) from bytea_test_table;
                    QUERY PLAN                    
 -------------------------------------------------
  Aggregate
@@ -1014,7 +1014,7 @@ insert into string_agg_dn values(2,'shangdi','0106568','2', 3);
 insert into string_agg_dn values(3,'changping','0105888','5', 5);
 insert into string_agg_dn values(4,'nanjing','0565888','6', 6);
 insert into string_agg_dn values(5,'haidian','0211167','1', 8);
-explain (verbose off, costs off, nodes off)
+explain (verbose off, costs off)
 select
 	 cino, 
 	 substr(string_agg(addr , ';') , 
@@ -1086,7 +1086,7 @@ select string_agg(addr, ';') from string_agg_dn;
  haidian;shangdi;changping;nanjing;haidian
 (1 row)
 
-explain (verbose, costs off, nodes off) select string_agg(addr, ';') from string_agg_dn;
+explain (verbose, costs off) select string_agg(addr, ';') from string_agg_dn;
                       QUERY PLAN                      
 ------------------------------------------------------
  Aggregate
@@ -1101,7 +1101,7 @@ select string_agg(addr, ';' order by cino) from string_agg_dn;
  haidian;shangdi;changping;nanjing;haidian
 (1 row)
 
-explain (verbose, costs off, nodes off) select string_agg(addr, ';' order by cino) from string_agg_dn;
+explain (verbose, costs off) select string_agg(addr, ';' order by cino) from string_agg_dn;
                       QUERY PLAN                      
 ------------------------------------------------------
  Aggregate
@@ -1116,7 +1116,7 @@ select string_agg(addr, ';') from string_agg_dn where valid_flag='5' group by ci
  changping
 (1 row)
 
-explain (verbose, costs off, nodes off) select string_agg(addr, ';') from string_agg_dn where valid_flag='5' group by cino;
+explain (verbose, costs off) select string_agg(addr, ';') from string_agg_dn where valid_flag='5' group by cino;
                         QUERY PLAN                        
 ----------------------------------------------------------
  HashAggregate
@@ -1133,7 +1133,7 @@ select string_agg(cino, ';') from string_agg_dn where valid_flag='5' group by ci
  3
 (1 row)
 
-explain (verbose, costs off, nodes off) select string_agg(cino, ';') from string_agg_dn where valid_flag='5' group by id;
+explain (verbose, costs off) select string_agg(cino, ';') from string_agg_dn where valid_flag='5' group by id;
                         QUERY PLAN                        
 ----------------------------------------------------------
  HashAggregate
@@ -1154,7 +1154,7 @@ select cino from string_agg_dn group by cino order by cino;
     5
 (5 rows)
 
-explain (verbose, costs off, nodes off) select cino from string_agg_dn group by cino order by cino;
+explain (verbose, costs off) select cino from string_agg_dn group by cino order by cino;
                   QUERY PLAN                  
 ----------------------------------------------
  Sort
@@ -1173,7 +1173,7 @@ select max(id) from string_agg_dn having string_agg(cino, ';' order by cino) = '
    8
 (1 row)
 
-explain (verbose, costs off, nodes off) select max(id) from string_agg_dn having string_agg(cino, ';' order by cino) = '1;2;3;4;5';
+explain (verbose, costs off) select max(id) from string_agg_dn having string_agg(cino, ';' order by cino) = '1;2;3;4;5';
                                                       QUERY PLAN                                                       
 -----------------------------------------------------------------------------------------------------------------------
  Aggregate
@@ -1192,7 +1192,7 @@ select string_agg(addr, ';'order by addr) from string_agg_dn  group by valid_fla
  shangdi
 (4 rows)
 
-explain (verbose, costs off, nodes off) select string_agg(addr, ';'order by addr) from string_agg_dn  group by valid_flag;
+explain (verbose, costs off) select string_agg(addr, ';'order by addr) from string_agg_dn  group by valid_flag;
                            QUERY PLAN                            
 -----------------------------------------------------------------
  GroupAggregate
@@ -1214,7 +1214,7 @@ select string_agg(distinct addr, ';'order by addr) from string_agg_dn  group by 
  shangdi
 (4 rows)
 
-explain (verbose, costs off, nodes off) select string_agg(distinct addr, ';'order by addr) from string_agg_dn  group by valid_flag;
+explain (verbose, costs off) select string_agg(distinct addr, ';'order by addr) from string_agg_dn  group by valid_flag;
                                 QUERY PLAN                                
 --------------------------------------------------------------------------
  GroupAggregate
@@ -1233,7 +1233,7 @@ select string_agg(t1.cino,','order by t1.cino) from string_agg_dn t1,string_agg_
  1,2,3,4,5
 (1 row)
 
-explain (verbose, costs off, nodes off) select string_agg(t1.cino,','order by t1.cino) from string_agg_dn t1,string_agg_dn t2 where t1.id=t2.id;
+explain (verbose, costs off) select string_agg(t1.cino,','order by t1.cino) from string_agg_dn t1,string_agg_dn t2 where t1.id=t2.id;
                                 QUERY PLAN                                 
 ---------------------------------------------------------------------------
  Aggregate
@@ -1258,7 +1258,7 @@ select c1, string_agg(c2,',') from string_agg_dn_col group by c1;
   1 | test
 (1 row)
 
-explain (verbose, costs off, nodes off) select c1, string_agg(c2,',') from string_agg_dn_col group by c1;
+explain (verbose, costs off) select c1, string_agg(c2,',') from string_agg_dn_col group by c1;
                      QUERY PLAN                      
 -----------------------------------------------------
  HashAggregate
@@ -1279,7 +1279,7 @@ select c3, string_agg(c2, ',') from string_agg_dn_dk_null group by c3;
  sin | test
 (1 row)
 
-explain (verbose, costs off, nodes off) select c3, string_agg(c2, ',') from string_agg_dn_dk_null group by c3;
+explain (verbose, costs off) select c3, string_agg(c2, ',') from string_agg_dn_dk_null group by c3;
                    QUERY PLAN                   
 ------------------------------------------------
  HashAggregate
@@ -1295,7 +1295,7 @@ create table t_collection(a1 int, b1 int, c1 int, d1 int);
 insert into t_collection select generate_series(1, 100)%8, generate_series(1, 100)%7, generate_series(1, 100)%6, generate_series(1, 100)%5;
 analyze t_collection;
 -- normal
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(d1), 1) from t_collection;
                 QUERY PLAN                
 ------------------------------------------
@@ -1311,7 +1311,7 @@ select array_length(array_agg(d1), 1) from t_collection;
           100
 (1 row)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(d1), 1) from t_collection group by b1 order by 1;
                         QUERY PLAN                         
 -----------------------------------------------------------
@@ -1337,7 +1337,7 @@ select array_length(array_agg(d1), 1) from t_collection group by b1 order by 1;
            15
 (7 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(distinct d1), 1) from t_collection;
                     QUERY PLAN                     
 ---------------------------------------------------
@@ -1353,7 +1353,7 @@ select array_length(array_agg(distinct d1), 1) from t_collection;
             5
 (1 row)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(distinct d1), 1) from t_collection group by b1 order by 1;
                              QUERY PLAN                             
 --------------------------------------------------------------------
@@ -1382,7 +1382,7 @@ select array_length(array_agg(distinct d1), 1) from t_collection group by b1 ord
             5
 (7 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(d1 order by d1), ':') from t_collection;
                            QUERY PLAN                            
 -----------------------------------------------------------------
@@ -1398,7 +1398,7 @@ select array_to_string(array_agg(d1 order by d1), ':') from t_collection;
  0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:2:2:2:2:2:2:2:2:2:2:2:2:2:2:2:2:2:2:2:2:3:3:3:3:3:3:3:3:3:3:3:3:3:3:3:3:3:3:3:3:4:4:4:4:4:4:4:4:4:4:4:4:4:4:4:4:4:4:4:4
 (1 row)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(d1 order by d1), ':') from t_collection group by b1 order by 1;
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
@@ -1427,7 +1427,7 @@ select array_to_string(array_agg(d1 order by d1), ':') from t_collection group b
  0:0:1:1:1:2:2:2:3:3:3:4:4:4
 (7 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(distinct d1 order by d1), ':') from t_collection;
                                 QUERY PLAN                                
 --------------------------------------------------------------------------
@@ -1443,7 +1443,7 @@ select array_to_string(array_agg(distinct d1 order by d1), ':') from t_collectio
  0:1:2:3:4
 (1 row)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(distinct d1 order by d1), ':') from t_collection group by b1 order by 1;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
@@ -1473,7 +1473,7 @@ select array_to_string(array_agg(distinct d1 order by d1), ':') from t_collectio
 (7 rows)
 
 -- count(distinct)
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(d1), 1), count(distinct(c1)) from t_collection;
                           QUERY PLAN                          
 --------------------------------------------------------------
@@ -1489,7 +1489,7 @@ select array_length(array_agg(d1), 1), count(distinct(c1)) from t_collection;
           100 |     6
 (1 row)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(d1), 1), count(distinct(c1)) from t_collection group by b1 order by 1;
                                QUERY PLAN                               
 ------------------------------------------------------------------------
@@ -1518,7 +1518,7 @@ select array_length(array_agg(d1), 1), count(distinct(c1)) from t_collection gro
            15 |     6
 (7 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(distinct d1), 1), count(distinct(c1)) from t_collection;
                               QUERY PLAN                               
 -----------------------------------------------------------------------
@@ -1534,7 +1534,7 @@ select array_length(array_agg(distinct d1), 1), count(distinct(c1)) from t_colle
             5 |     6
 (1 row)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(distinct d1), 1), count(distinct(c1)) from t_collection group by b1 order by 1;
                                    QUERY PLAN                                    
 ---------------------------------------------------------------------------------
@@ -1563,7 +1563,7 @@ select array_length(array_agg(distinct d1), 1), count(distinct(c1)) from t_colle
             5 |     6
 (7 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(d1 order by d1), ':'), count(distinct(c1)) from t_collection;
                                      QUERY PLAN                                      
 -------------------------------------------------------------------------------------
@@ -1579,7 +1579,7 @@ select array_to_string(array_agg(d1 order by d1), ':'), count(distinct(c1)) from
  0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:2:2:2:2:2:2:2:2:2:2:2:2:2:2:2:2:2:2:2:2:3:3:3:3:3:3:3:3:3:3:3:3:3:3:3:3:3:3:3:3:4:4:4:4:4:4:4:4:4:4:4:4:4:4:4:4:4:4:4:4 |     6
 (1 row)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(d1 order by d1), ':'), count(distinct(c1)) from t_collection group by b1 order by 1;
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
@@ -1608,7 +1608,7 @@ select array_to_string(array_agg(d1 order by d1), ':'), count(distinct(c1)) from
  0:0:1:1:1:2:2:2:3:3:3:4:4:4   |     6
 (7 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(distinct d1 order by d1), ':'), count(distinct(c1)) from t_collection;
                                           QUERY PLAN                                          
 ----------------------------------------------------------------------------------------------
@@ -1624,7 +1624,7 @@ select array_to_string(array_agg(distinct d1 order by d1), ':'), count(distinct(
  0:1:2:3:4       |     6
 (1 row)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(distinct d1 order by d1), ':'), count(distinct(c1)) from t_collection group by b1 order by 1;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
@@ -1654,7 +1654,7 @@ select array_to_string(array_agg(distinct d1 order by d1), ':'), count(distinct(
 (7 rows)
 
 -- multi non-collection agg
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(d1), 1), array_length(array_agg(distinct c1), 1) from t_collection;
                                     QUERY PLAN                                     
 -----------------------------------------------------------------------------------
@@ -1670,7 +1670,7 @@ select array_length(array_agg(d1), 1), array_length(array_agg(distinct c1), 1) f
           100 |            6
 (1 row)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(d1), 1), array_length(array_agg(distinct c1), 1) from t_collection group by b1 order by 1;
                                          QUERY PLAN                                          
 ---------------------------------------------------------------------------------------------
@@ -1699,7 +1699,7 @@ select array_length(array_agg(d1), 1), array_length(array_agg(distinct c1), 1) f
            15 |            6
 (7 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(distinct d1), 1), array_length(array_agg(distinct c1), 1) from t_collection;
                                          QUERY PLAN                                         
 --------------------------------------------------------------------------------------------
@@ -1715,7 +1715,7 @@ select array_length(array_agg(distinct d1), 1), array_length(array_agg(distinct 
             5 |            6
 (1 row)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(distinct d1), 1), array_length(array_agg(distinct c1), 1) from t_collection group by b1 order by 1;
                                               QUERY PLAN                                              
 ------------------------------------------------------------------------------------------------------
@@ -1744,7 +1744,7 @@ select array_length(array_agg(distinct d1), 1), array_length(array_agg(distinct 
             5 |            6
 (7 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(d1 order by d1), ':'), array_length(array_agg(distinct c1), 1) from t_collection;
                                                 QUERY PLAN                                                
 ----------------------------------------------------------------------------------------------------------
@@ -1760,7 +1760,7 @@ select array_to_string(array_agg(d1 order by d1), ':'), array_length(array_agg(d
  0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:2:2:2:2:2:2:2:2:2:2:2:2:2:2:2:2:2:2:2:2:3:3:3:3:3:3:3:3:3:3:3:3:3:3:3:3:3:3:3:3:4:4:4:4:4:4:4:4:4:4:4:4:4:4:4:4:4:4:4:4 |            6
 (1 row)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(d1 order by d1), ':'), array_length(array_agg(distinct c1), 1) from t_collection group by b1 order by 1;
                                                      QUERY PLAN                                                     
 --------------------------------------------------------------------------------------------------------------------
@@ -1789,7 +1789,7 @@ select array_to_string(array_agg(d1 order by d1), ':'), array_length(array_agg(d
  0:0:1:1:1:2:2:2:3:3:3:4:4:4   |            6
 (7 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(distinct d1 order by d1), ':'), array_length(array_agg(distinct c1), 1) from t_collection;
                                                     QUERY PLAN                                                     
 -------------------------------------------------------------------------------------------------------------------
@@ -1805,7 +1805,7 @@ select array_to_string(array_agg(distinct d1 order by d1), ':'), array_length(ar
  0:1:2:3:4       |            6
 (1 row)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(distinct d1 order by d1), ':'), array_length(array_agg(distinct c1), 1) from t_collection group by b1 order by 1;
                                                          QUERY PLAN                                                          
 -----------------------------------------------------------------------------------------------------------------------------
@@ -1847,7 +1847,7 @@ SELECT array_to_string(ARRAY[NULL, NULL, NULL, NULL, NULL], ',') is null;
 (1 row)
 
 -- grouping sets
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(distinct d1), 1) from t_collection group by rollup(a1) order by a1;  -- can't push down
                          QUERY PLAN                          
 -------------------------------------------------------------
@@ -1879,7 +1879,7 @@ select array_length(array_agg(distinct d1), 1) from t_collection group by rollup
             5
 (9 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(distinct d1), 1) from t_collection group by rollup(a1), c1 order by a1, c1; -- can push down
                            QUERY PLAN                            
 -----------------------------------------------------------------
@@ -1932,7 +1932,7 @@ select array_length(array_agg(distinct d1), 1) from t_collection group by rollup
             5
 (30 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_agg(distinct d1 order by d1) from t_collection group by rollup(a1), c1 order by a1, c1; -- can push down
                          QUERY PLAN                         
 ------------------------------------------------------------
@@ -1985,7 +1985,7 @@ select array_agg(distinct d1 order by d1) from t_collection group by rollup(a1),
  {0,1,2,3,4}
 (30 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select c1, d1, length(string_agg(distinct b1, 'x')) from t_collection group by grouping sets(c1, d1) order by c1, d1;
                                  QUERY PLAN                                 
 ----------------------------------------------------------------------------
@@ -2020,7 +2020,7 @@ select c1, d1, length(string_agg(distinct b1, 'x')) from t_collection group by g
     |  4 |     13
 (11 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select c1, d1, length(string_agg(distinct b1, 'x')) from t_collection group by grouping sets((c1, d1)) order by c1, d1;
                               QUERY PLAN                              
 ----------------------------------------------------------------------
@@ -2069,7 +2069,7 @@ select c1, d1, length(string_agg(distinct b1, 'x')) from t_collection group by g
   5 |  4 |      5
 (30 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select c1, d1, length(string_agg(distinct b1, 'x')) from t_collection group by cube(c1, d1) order by c1, d1;
                                  QUERY PLAN                                 
 ----------------------------------------------------------------------------
@@ -2137,7 +2137,7 @@ select c1, d1, length(string_agg(distinct b1, 'x')) from t_collection group by c
     |    |     13
 (42 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select c1, d1, length(string_agg(distinct b1, 'x')) from t_collection group by cube(c1), d1 order by c1, d1;
                                  QUERY PLAN                                 
 ----------------------------------------------------------------------------
@@ -2231,7 +2231,7 @@ create table t_fqs_abs (a int, b int, c int, d int);
 insert into t_fqs_abs values (1,1,1,1);
 insert into t_fqs_abs values (2,2,2,2);
 insert into t_fqs_abs values (3,3,3,3);
-explain (nodes off, costs off, verbose on)
+explain (costs off, verbose on)
 SELECT abs(a)
     , abs(a) + sum(b)
 FROM t_fqs_abs
@@ -2496,7 +2496,7 @@ ALTER TABLE t ADD PRIMARY KEY (pk);
 NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "t_pkey" for table "t"
 set enable_sort=off;
 -- original
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 SELECT pk, b, (c * sum(d))
 FROM t
 GROUP BY pk
@@ -2536,7 +2536,7 @@ order by 1,2;
  15 | 0 |        0
 (15 rows)
 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 SELECT pk, b, (c * count(distinct d))
 FROM t
 GROUP BY pk
@@ -2576,7 +2576,7 @@ order by 1,2;
  15 | 0 |        0
 (15 rows)
 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 SELECT pk, b, (c * count(distinct d)), count(distinct c)
 FROM t
 GROUP BY pk
@@ -2616,7 +2616,7 @@ order by 1,2;
  15 | 0 |        0 |     1
 (15 rows)
 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 SELECT t1.pk, t1.b, (t2.b * count(distinct t1.d)),
 count(distinct t1.c), t1.d+sum(t2.c)+t1.c
 FROM t t1 join t t2 on t1.b=t2.c
@@ -2699,7 +2699,7 @@ order by 1,2,3,4,5;
 (45 rows)
 
 drop table t;
--- test listagg (compatible with A DB)
+-- test listagg (compatible with A db 11g2)
 CREATE SCHEMA listagg_test;
 SET current_schema = listagg_test;
 CREATE TABLE emp

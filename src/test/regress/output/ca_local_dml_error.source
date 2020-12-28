@@ -1,0 +1,49 @@
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't4');
+select * from t1;
+ERROR:  cooperation analysis: relation does not exist.
+DROP FOREIGN TABLE t1;
+\c test
+create index i1 on t1(c1);
+\c regression
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 'i1');
+select * from t1;
+ERROR:  cooperation analysis: relation kind is not supported.
+DROP FOREIGN TABLE t1;
+CREATE FOREIGN TABLE t1(c1 int, c2 text, c3 int) server server_remote options (schema_name 'public', table_name 't1');
+select * from t1;
+ERROR:  cooperation analysis: colomn information does not match.
+DROP FOREIGN TABLE t1;
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't1');
+execute direct on (datanode1) 'select * from t1';
+ERROR:  Query on datanode is not supported currently for the foreign table: t1.
+DROP FOREIGN TABLE t1;
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't1');
+create table tmp(c1 int, c2 int, c3 int);
+insert into t1 values(1, 2, 3);
+ERROR:  Un-support feature
+DETAIL:  insert statement is an INSERT INTO VALUES(...)
+insert into t1 select * from t1;
+ERROR:  Un-support feature
+DETAIL:  range table of subquery should be a normal relation
+insert into t1 select * from tmp;
+ERROR:  cannot insert into foreign table "t1"
+delete from t1;
+ERROR:  cannot delete from foreign table "t1"
+update t1 set c1=2;
+ERROR:  cannot update foreign table "t1"
+truncate t1;
+ERROR:  It is not supported to truncate foreign table "t1".
+drop table tmp;
+DROP FOREIGN TABLE t1;
+create foreign table t_char(c1 int, c2 char(20), c3 int) server server_remote;
+create foreign table t_varchar(c1 int, c2 varchar(20), c3 int) server server_remote;
+create foreign table t_numeric(c1 int, c2 numeric(4, 2), c3 int) server server_remote;
+select * from t_char;
+ERROR:  cooperation analysis: colomn information does not match.
+select * from t_varchar;
+ERROR:  cooperation analysis: colomn information does not match.
+select * from t_numeric;
+ERROR:  cooperation analysis: colomn information does not match.
+drop foreign table t_char;
+drop foreign table t_varchar;
+drop foreign table t_numeric;

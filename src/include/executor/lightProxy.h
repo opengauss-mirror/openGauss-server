@@ -47,6 +47,10 @@
 
 /* check whether query executed through light proxy or not*/
 extern bool IsLightProxyOn(void);
+extern void GPCDropLPIfNecessary(const char *stmt_name, bool need_drop_dnstmt,
+                                 bool need_del, CachedPlanSource *reset_plan);
+void GPCFillMsgForLp(CachedPlanSource* psrc);
+
 CmdType set_command_type_by_commandTag(const char* commandTag);
 
 typedef enum LightUnSupportType {
@@ -87,33 +91,65 @@ struct lightProxyMsgCtl {
 #endif
 };
 
+typedef struct stmtLpObj {
+    char stmtname[NAMEDATALEN];
+    lightProxy *proxy;
+} stmtLpObj;
+
+typedef struct lightProxyNamedObj {
+    char portalname[NAMEDATALEN];
+    lightProxy *proxy;
+} lightProxyNamedObj;
+
 class lightProxy : public BaseObject {
 public:
     // constructor.
-    lightProxy(MemoryContext context, CachedPlanSource* psrc);
+    lightProxy(MemoryContext context, CachedPlanSource *psrc, const char *portalname, const char *stmtname);
 
-    lightProxy(Query* query);
+    lightProxy(Query *query);
 
     ~lightProxy();
 
-    static ExecNodes* checkLightQuery(Query* query);
+    static ExecNodes *checkLightQuery(Query *query);
+
+    // check if enable router for lightproxy
+    static ExecNodes *checkRouterQuery(Query *query);
 
     // after bind we need to set this for discrible and execute
-    static void setCurrentProxy(lightProxy* proxy);
+    static void setCurrentProxy(lightProxy *proxy);
 
     // process B/D/E message
     static bool processMsg(int msgType, StringInfo msg);
 
+    static void initStmtHtab();
+
+    static void initlightProxyTable();
+
+    static lightProxy *locateLpByStmtName(const char *stmtname);
+
+    static lightProxy *locateLightProxy(const char *portalname);
+
+    static lightProxy *tryLocateLightProxy(StringInfo msg);
     // run with simple query message
     void runSimpleQuery(StringInfo exec_message);
 
     // run with batch message
     int runBatchMsg(StringInfo batch_message, bool sendDMsg, int batch_count);
 
-    static void tearDown(lightProxy* proxy);
+    static void tearDown(lightProxy *proxy);
+
+    void storeLpByStmtName(const char *stmtname);
+
+    void storeLightProxy(const char *portalname);
+
+    void removeLpByStmtName(const char *stmtname);
+
+    static void removeLightProxy(const char* portalname);
+
+    static bool isDeleteLimit(const Query *query);
 
 public:
-    CachedPlanSource* m_cplan;
+    CachedPlanSource *m_cplan;
 
     int m_nodeIdx;
 
@@ -122,9 +158,19 @@ public:
     /* whether row trigger can shippable. */
     bool m_isRowTriggerShippable;
 
+    const char *m_stmtName;
+
+    const char *m_portalName;
+
+    int16 *m_formats;
+
+    DatanodeStatement *m_entry;
+
 protected:
     // saveMsg
     void saveMsg(int msgType, StringInfo msg);
+    // get result format from msg
+    void getResultFormat(StringInfo message);
 
     void assemableMsg(char msgtype, StringInfo msgBuf, bool trigger_ship = false);
 
@@ -143,17 +189,18 @@ protected:
     CmdType queryType;
 
 private:
-    Query* m_query;
+    Query *m_query;
 
-    PGXCNodeHandle* m_handle;
+    PGXCNodeHandle *m_handle;
 
     StringInfoData m_bindMessage;
 
     StringInfoData m_describeMessage;
 
-    lightProxyMsgCtl* m_msgctl;
-
-    DatanodeStatement* m_entry;
+    lightProxyMsgCtl *m_msgctl;
 };
+
+extern bool exec_query_through_light_proxy(List* querytree_list, Node* parsetree, bool snapshot_set, StringInfo msg,
+                                           MemoryContext OptimizerContext);
 
 #endif /* SRC_INCLUDE_EXECUTOR_LIGHTPROXY_H_ */

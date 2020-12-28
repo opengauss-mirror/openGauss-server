@@ -31,7 +31,7 @@
 #include "executor/execdebug.h"
 #include "executor/nodeTidscan.h"
 #include "optimizer/clauses.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "utils/array.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
@@ -40,11 +40,11 @@
     ((node) != NULL && IsA((node), Var) && ((Var*)(node))->varattno == SelfItemPointerAttributeNumber && \
         ((Var*)(node))->varlevelsup == 0)
 
-static void tid_list_create(TidScanState* tidstate);
-static int itemptr_comparator(const void* a, const void* b);
-static TupleTableSlot* tid_next(TidScanState* node);
-static void exec_init_next_partition_for_tidscan(TidScanState* node);
-static void exec_init_partition_for_tidscan(TidScanState* tidstate, EState* estate);
+static void TidListCreate(TidScanState* tidstate);
+static int ItemptrComparator(const void* a, const void* b);
+static TupleTableSlot* TidNext(TidScanState* node);
+static void ExecInitNextPartitionForTidScan(TidScanState* node);
+static void ExecInitPartitionForTidScan(TidScanState* tidstate, EState* estate);
 
 /*
  * Compute the list of TIDs to be visited, by evaluating the expressions
@@ -52,7 +52,7 @@ static void exec_init_partition_for_tidscan(TidScanState* tidstate, EState* esta
  *
  * (The result is actually an array, not a list.)
  */
-static void tid_list_create(TidScanState* tidstate)
+static void TidListCreate(TidScanState* tidstate)
 {
     List* eval_list = tidstate->tss_tidquals;
     ExprContext* econtext = tidstate->ss.ps.ps_ExprContext;
@@ -156,7 +156,7 @@ static void tid_list_create(TidScanState* tidstate)
         } else
             ereport(ERROR,
                 (errcode(ERRCODE_DATA_EXCEPTION),
-                    errmsg("could not identify CTID expression, %s", expr == NULL ? "expr is NULL" : "")));
+                    errmsg("could not identify CTID expression, %s", (expr == NULL) ? "expr is NULL" : "")));
     }
 
     /*
@@ -172,7 +172,7 @@ static void tid_list_create(TidScanState* tidstate)
         /* CurrentOfExpr could never appear OR'd with something else */
         Assert(!tidstate->tss_isCurrentOf);
 
-        qsort((void*)tid_list, num_tids, sizeof(ItemPointerData), itemptr_comparator);
+        qsort((void*)tid_list, num_tids, sizeof(ItemPointerData), ItemptrComparator);
         last_tid = 0;
         for (i = 1; i < num_tids; i++) {
             if (!ItemPointerEquals(&tid_list[last_tid], &tid_list[i]))
@@ -189,7 +189,7 @@ static void tid_list_create(TidScanState* tidstate)
 /*
  * qsort comparator for ItemPointerData items
  */
-static int itemptr_comparator(const void* a, const void* b)
+static int ItemptrComparator(const void* a, const void* b)
 {
     const ItemPointerData* ipa = (const ItemPointerData*)a;
     const ItemPointerData* ipb = (const ItemPointerData*)b;
@@ -228,7 +228,7 @@ void InitTidPtr(TidScanState* node, bool bBackward)
     }
 }
 
-static void move_to_next_tid(TidScanState* node, bool is_backward)
+static void MoveToNextTid(TidScanState* node, bool is_backward)
 {
     if (is_backward) {
         node->tss_TidPtr--;
@@ -237,7 +237,7 @@ static void move_to_next_tid(TidScanState* node, bool is_backward)
     }
 }
 
-static TupleTableSlot* hbkt_tid_fetch_tuple(TidScanState* node, bool bBackward)
+static TupleTableSlot* HbktTidFetchTuple(TidScanState* node, bool bBackward)
 {
     Assert(node != NULL);
 
@@ -266,16 +266,16 @@ static TupleTableSlot* hbkt_tid_fetch_tuple(TidScanState* node, bool bBackward)
             Assert(tuple->t_data != NULL);
 
             if (node->tss_isCurrentOf) {
-                heap_get_latest_tid(bkt_rel, snapshot, &tuple->t_self);
+                tableam_tuple_get_latest_tid(bkt_rel, snapshot, &tuple->t_self);
             }
 
             /* before fetch tuple, ensure that the bucket relation to be fetched has tuples */
-            if (RelationGetNumberOfBlocks(bkt_rel) > 0 && heap_fetch(bkt_rel, snapshot, tuple, &buffer, false, NULL)) {
+            if (RelationGetNumberOfBlocks(bkt_rel) > ItemPointerGetBlockNumber(&(tuple->t_self)) && tableam_tuple_fetch(bkt_rel, snapshot, tuple, &buffer, false, NULL)) {
                 (void)ExecStoreTuple(tuple, slot, buffer, false);
                 ReleaseBuffer(buffer);
                 return slot;
             }
-            move_to_next_tid(node, bBackward);
+            MoveToNextTid(node, bBackward);
         }
         /* switch to the next bucket relation and reset the tidptr, because we should
          * find the tids from the first one in the new hash bucket relation */
@@ -290,7 +290,7 @@ static TupleTableSlot* hbkt_tid_fetch_tuple(TidScanState* node, bool bBackward)
     return ExecClearTuple(slot);
 }
 
-static TupleTableSlot* tid_fetch_tuple(TidScanState* node, bool b_backward, Relation heap_relation)
+static TupleTableSlot* TidFetchTuple(TidScanState* node, bool b_backward, Relation heap_relation)
 {
     Assert(node != NULL);
 
@@ -323,10 +323,10 @@ static TupleTableSlot* tid_fetch_tuple(TidScanState* node, bool b_backward, Rela
          * current according to our snapshot.
          */
         if (node->tss_isCurrentOf) {
-            heap_get_latest_tid(heap_relation, snapshot, &tuple->t_self);
+                tableam_tuple_get_latest_tid(heap_relation, snapshot, &tuple->t_self);
             }
 
-        if (heap_fetch(heap_relation, snapshot, tuple, &buffer, false, NULL)) {
+        if (tableam_tuple_fetch(heap_relation, snapshot, tuple, &buffer, false, NULL)) {
             /*
              * store the scanned tuple in the scan tuple slot of the scan
              * state.  Eventually we will only do this and not return a tuple.
@@ -348,7 +348,7 @@ static TupleTableSlot* tid_fetch_tuple(TidScanState* node, bool b_backward, Rela
             return slot;
         }
         /* Bad TID or failed snapshot qual; try next */
-        move_to_next_tid(node, b_backward);
+        MoveToNextTid(node, b_backward);
     }
 
     /*
@@ -366,7 +366,7 @@ static TupleTableSlot* tid_fetch_tuple(TidScanState* node, bool b_backward, Rela
  *
  * ----------------------------------------------------------------
  */
-static TupleTableSlot* tid_next(TidScanState* node)
+static TupleTableSlot* TidNext(TidScanState* node)
 {
     HeapTuple tuple;
     TupleTableSlot* slot = NULL;
@@ -394,7 +394,7 @@ static TupleTableSlot* tid_next(TidScanState* node)
      * First time through, compute the list of TIDs to be visited
      */
     if (node->tss_TidList == NULL)
-        tid_list_create(node);
+        TidListCreate(node);
 
     if (node->tss_isCurrentOf && node->ss.isPartTbl) {
         if (PointerIsValid(node->tss_CurrentOf_CurrentPartition)) {
@@ -415,16 +415,16 @@ static TupleTableSlot* tid_next(TidScanState* node)
     b_backward = ScanDirectionIsBackward(direction);
 
     if (RELATION_CREATE_BUCKET(heap_relation)) {
-        return hbkt_tid_fetch_tuple(node, b_backward);
+        return HbktTidFetchTuple(node, b_backward);
     } else {
-        return tid_fetch_tuple(node, b_backward, heap_relation);
+        return TidFetchTuple(node, b_backward, heap_relation);
     }
 }
 
 /*
  * TidRecheck -- access method routine to recheck a tuple in EvalPlanQual
  */
-static bool tid_recheck(TidScanState* node, TupleTableSlot* slot)
+static bool TidRecheck(TidScanState* node, TupleTableSlot* slot)
 {
     /*
      * We should check here to make sure tuple matches TID list.
@@ -458,7 +458,7 @@ static bool tid_recheck(TidScanState* node, TupleTableSlot* slot)
  */
 TupleTableSlot* ExecTidScan(TidScanState* node)
 {
-    return ExecScan(&node->ss, (ExecScanAccessMtd)tid_next, (ExecScanRecheckMtd)tid_recheck);
+    return ExecScan(&node->ss, (ExecScanAccessMtd)TidNext, (ExecScanRecheckMtd)TidRecheck);
 }
 
 /* ----------------------------------------------------------------
@@ -474,11 +474,11 @@ void ExecReScanTidScan(TidScanState* node)
     node->tss_TidPtr = -1;
 
     if (node->ss.isPartTbl) {
-        abs_tbl_end_tidscan(node->ss.ss_currentScanDesc);
+        scan_handler_tbl_end_tidscan((TableScanDesc)(node->ss.ss_currentScanDesc));
 
         if (PointerIsValid(node->ss.partitions)) {
             /* switch to next partition for scan */
-            exec_init_next_partition_for_tidscan(node);
+            ExecInitNextPartitionForTidScan(node);
         }
     }
 
@@ -505,7 +505,7 @@ void ExecEndTidScan(TidScanState* node)
     (void)ExecClearTuple(node->ss.ps.ps_ResultTupleSlot);
     (void)ExecClearTuple(node->ss.ss_ScanTupleSlot);
 
-    abs_tbl_end_tidscan(node->ss.ss_currentScanDesc);
+    scan_handler_tbl_end_tidscan((TableScanDesc)(node->ss.ss_currentScanDesc));
     if (node->ss.isPartTbl) {
         if (PointerIsValid(node->ss.partitions)) {
             /* switch node->ss.ss_currentRelation to partitioned relation */
@@ -572,7 +572,8 @@ TidScanState* ExecInitTidScan(TidScan* node, EState* estate, int eflags)
     tidstate->ss.isPartTbl = node->scan.isPartTbl;
     tidstate->ss.currentSlot = 0;
     tidstate->ss.partScanDirection = node->scan.partScanDirection;
-
+	
+    tidstate->tss_htup.tupTableType = HEAP_TUPLE;
     /*
      * Miscellaneous initialization
      *
@@ -591,12 +592,6 @@ TidScanState* ExecInitTidScan(TidScan* node, EState* estate, int eflags)
     tidstate->tss_tidquals = (List*)ExecInitExpr((Expr*)node->tidquals, (PlanState*)tidstate);
 
     /*
-     * tuple table initialization
-     */
-    ExecInitResultTupleSlot(estate, &tidstate->ss.ps);
-    ExecInitScanTupleSlot(estate, &tidstate->ss);
-
-    /*
      * mark tid list as not computed yet
      */
     tidstate->tss_TidList = NULL;
@@ -611,6 +606,12 @@ TidScanState* ExecInitTidScan(TidScan* node, EState* estate, int eflags)
     tidstate->ss.ss_currentRelation = current_relation;
     tidstate->ss.ss_currentScanDesc = NULL; /* no heap scan here */
 
+    /*
+     * tuple table initialization
+     */
+    ExecInitResultTupleSlot(estate, &tidstate->ss.ps, current_relation->rd_tam_type);
+    ExecInitScanTupleSlot(estate, &tidstate->ss, current_relation->rd_tam_type);
+
     /* deal with partitioned table branch */
     if (node->scan.isPartTbl) {
         tidstate->ss.ss_currentPartition = NULL;
@@ -620,16 +621,16 @@ TidScanState* ExecInitTidScan(TidScan* node, EState* estate, int eflags)
             Relation partitiontrel = NULL;
 
             /* get table partition list for partitioned table */
-            exec_init_partition_for_tidscan(tidstate, estate);
+            ExecInitPartitionForTidScan(tidstate, estate);
 
             /* make dummy table realtion with the first partition for scan */
             partition = (Partition)list_nth(tidstate->ss.partitions, 0);
             partitiontrel = partitionGetRelation(current_relation, partition);
             tidstate->ss.ss_currentPartition = partitiontrel;
-            tidstate->ss.ss_currentScanDesc = abs_tbl_begin_tidscan(partitiontrel, (ScanState*)tidstate);
+            tidstate->ss.ss_currentScanDesc = scan_handler_tbl_begin_tidscan(partitiontrel, (ScanState*)tidstate);
         }
     } else {
-        tidstate->ss.ss_currentScanDesc = abs_tbl_begin_tidscan(current_relation, (ScanState*)tidstate);
+        tidstate->ss.ss_currentScanDesc = scan_handler_tbl_begin_tidscan(current_relation, (ScanState*)tidstate);
     }
 
     /*
@@ -640,8 +641,13 @@ TidScanState* ExecInitTidScan(TidScan* node, EState* estate, int eflags)
     /*
      * Initialize result tuple type and projection info.
      */
-    ExecAssignResultTypeFromTL(&tidstate->ss.ps);
+    ExecAssignResultTypeFromTL(
+            &tidstate->ss.ps,
+            tidstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+
     ExecAssignScanProjectionInfo(&tidstate->ss);
+
+    Assert(tidstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
 
     /*
      * all done.
@@ -660,17 +666,18 @@ TidScanState* ExecInitTidScan(TidScan* node, EState* estate, int eflags)
  * Output	:
  * Notes		:
  */
-static void exec_init_next_partition_for_tidscan(TidScanState* node)
+static void ExecInitNextPartitionForTidScan(TidScanState* node)
 {
-    Partition current_partition;
-    Relation current_partitionrel;
+    Partition current_partition = NULL;
+    Relation current_partitionrel = NULL;
     TidScan* plan = NULL;
+    int paramno = -1;
     ParamExecData* param = NULL;
 
     plan = (TidScan*)(node->ss.ps.plan);
 
     /* get partition sequnce */
-    int paramno = plan->scan.plan.paramno;
+    paramno = plan->scan.plan.paramno;
     param = &(node->ss.ps.state->es_param_exec_vals[paramno]);
     node->ss.currentSlot = (int)param->value;
 
@@ -686,7 +693,7 @@ static void exec_init_next_partition_for_tidscan(TidScanState* node)
     releaseDummyRelation(&(node->ss.ss_currentPartition));
     node->ss.ss_currentPartition = current_partitionrel;
 
-    node->ss.ss_currentScanDesc = abs_tbl_begin_tidscan(current_partitionrel, (ScanState*)node);
+    node->ss.ss_currentScanDesc = scan_handler_tbl_begin_tidscan(current_partitionrel, (ScanState*)node);
 }
 
 /*
@@ -698,10 +705,13 @@ static void exec_init_next_partition_for_tidscan(TidScanState* node)
  * Output	:
  * Notes		:
  */
-static void exec_init_partition_for_tidscan(TidScanState* tidstate, EState* estate)
+static void ExecInitPartitionForTidScan(TidScanState* tidstate, EState* estate)
 {
-    TidScan* plan = (TidScan*)tidstate->ss.ps.plan;
-    Relation current_relation = tidstate->ss.ss_currentRelation;
+    TidScan* plan = NULL;
+    Relation current_relation = NULL;
+
+    plan = (TidScan*)tidstate->ss.ps.plan;
+    current_relation = tidstate->ss.ss_currentRelation;
 
     tidstate->ss.ss_currentPartition = NULL;
     tidstate->ss.partitions = NIL;

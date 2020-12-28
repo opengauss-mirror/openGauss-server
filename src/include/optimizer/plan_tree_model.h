@@ -42,7 +42,7 @@ extern char* TreeModelPredict(const char* modelName, char* filepath, const char*
     do {                                                                                                  \
         pfree_ext(buf);                                                                                   \
         if ((filename) != NULL) {                                                                         \
-            unlinkfile(filename);                                                                         \
+            Unlinkfile(filename);                                                                         \
         }                                                                                                 \
         ereport(ERROR, (errmodule(MOD_OPT_AI), errcode(ERRCODE_UNEXPECTED_NODE_STATE), errmsg(msg_str))); \
     } while (0)

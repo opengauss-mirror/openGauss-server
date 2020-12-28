@@ -26,7 +26,15 @@
 
 #include "nodes/relation.h"
 #include "nodes/parsenodes.h"
+#include "nodes/execnodes.h"
+#include "utils/plancache.h"
+#include "utils/globalplancache.h"
+
 
 extern void set_rel_bucketinfo(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte);
 extern double getBucketPruningRatio(BucketInfo* bucket_info);
+extern void setPlanBucketId(Plan* plan, ParamListInfo params, MemoryContext cxt);
+extern void setCachedPlanBucketId(CachedPlan *cplan, ParamListInfo boundParams);
+extern BucketInfo* CalBucketInfo(ScanState* state);
+
 #endif

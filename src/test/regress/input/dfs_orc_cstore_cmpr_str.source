@@ -1,0 +1,94 @@
+set enable_global_stats = true;
+set enable_vector_engine=on;
+-- Problem:
+-- compress string directly using lz4/zlib, including varchar and numeric
+CREATE TABLE colcmpr_str_00
+(
+	distKey int,
+	L_QUANTITY    DECIMAL(15,2) NOT NULL,
+	L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,
+	L_DISCOUNT    DECIMAL(15,2) NOT NULL,
+	L_TAX         DECIMAL(15,2) NOT NULL,
+	L_SHIPINSTRUCT CHAR(25) NOT NULL,
+	L_SHIPMODE     CHAR(10) NOT NULL,
+	L_COMMENT      VARCHAR(44) NOT NULL
+) with (orientation = orc) tablespace hdfs_ts  distribute by hash(distKey);
+COPY colcmpr_str_00 FROM '@abs_srcdir@/data/colcmpr_str_00.data' delimiter '|';
+SELECT * FROM colcmpr_str_00 ORDER BY 1, 2, 3, 4, 5, 6, 7, 8;
+DROP TABLE colcmpr_str_00;
+-- Problem:
+-- compress string directly using lz4/zlib, including varchar and numeric
+CREATE TABLE colcmpr_str_01
+(
+	distKey int,
+	L_QUANTITY    DECIMAL(15,2) NOT NULL,
+	L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,
+	L_DISCOUNT    DECIMAL(15,2) NOT NULL,
+	L_TAX         DECIMAL(15,2) NOT NULL,
+	L_SHIPINSTRUCT CHAR(25) NOT NULL,
+	L_SHIPMODE     CHAR(10) NOT NULL,
+	L_COMMENT      VARCHAR(44) NOT NULL
+) with (orientation = orc, compression=zlib) tablespace hdfs_ts distribute by hash(distKey);
+COPY colcmpr_str_01 FROM '@abs_srcdir@/data/colcmpr_str_00.data' delimiter '|';
+SELECT L_DISCOUNT, L_SHIPMODE, L_COMMENT FROM colcmpr_str_01 ORDER BY 1, 2, 3;
+DROP TABLE colcmpr_str_01;
+-- Problem:<Encode Numeric>
+-- for both compression level LOW and NO, they have the same CU size.
+CREATE TABLE colcmpr_numeric_00 ( id int, a numeric(20,3) ) with (orientation = orc, compression=no) tablespace hdfs_ts;
+CREATE TABLE colcmpr_numeric_01 ( id int, a numeric(20,3) ) with (orientation = orc, compression=no) tablespace hdfs_ts;
+CREATE TABLE colcmpr_numeric_lineitem
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL                                                                                                                                            
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+  --, primary key (L_ORDERKEY, L_LINENUMBER)
+)
+with (orientation = orc) tablespace hdfs_ts 
+distribute by hash(L_ORDERKEY)
+;
+COPY colcmpr_numeric_lineitem FROM '@abs_srcdir@/data/lineitem.data' delimiter '|';
+INSERT INTO colcmpr_numeric_00 SELECT 1, L_EXTENDEDPRICE FROM colcmpr_numeric_lineitem;
+INSERT INTO colcmpr_numeric_00 SELECT 1, L_QUANTITY FROM colcmpr_numeric_lineitem;
+INSERT INTO colcmpr_numeric_00 SELECT 1, L_DISCOUNT FROM colcmpr_numeric_lineitem;
+INSERT INTO colcmpr_numeric_00 SELECT 1, L_TAX FROM colcmpr_numeric_lineitem;
+VACUUM FULL colcmpr_numeric_00;
+INSERT INTO colcmpr_numeric_01 SELECT * FROM colcmpr_numeric_00;
+-- check the table size
+SELECT (SELECT pg_table_size('colcmpr_numeric_00')) > (SELECT pg_table_size('colcmpr_numeric_01'));
+DROP TABLE colcmpr_numeric_00;
+DROP TABLE colcmpr_numeric_01;
+DROP TABLE colcmpr_numeric_lineitem;
+-- problem: numeric don't display its real scale after columar compression 
+CREATE TABLE colcmpr_numeric_02 ( id int, a numeric ) with (orientation = orc) tablespace hdfs_ts ;
+COPY colcmpr_numeric_02 FROM STDIN;
+1	1000
+1	1001.20
+1	1002.00
+1	1003.100
+1	1004.00
+1	1005.00
+1	1006.00
+1	1007.00
+1	1008.00
+1	1009.00
+1	1010.00
+1	1011.00
+1	1012.00
+1	1013.00
+1	1014.00
+\.
+SELECT * FROM colcmpr_numeric_02 ORDER BY 2;
+DROP TABLE colcmpr_numeric_02;

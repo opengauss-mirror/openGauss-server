@@ -9,6 +9,7 @@
  *	  polluting the namespace with lots of stuff...
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -50,10 +51,11 @@
  * on some platforms, and we only want our definitions used if stdlib.h doesn't
  * have its own.  The same goes for stddef and stdarg if present.
  */
+
 #include "pg_config.h"
 #include "pg_config_manual.h"               /* must be after pg_config.h */
-#if !defined(WIN32) && !defined(__CYGWIN__) /* win32 will include further down */
-
+#if !defined(WIN32) && !defined(__CYGWIN__) /* win32 will include further \
+                                             * down */
 #include "pg_config_os.h"                   /* must be before any system header files */
 #endif
 #include "postgres_ext.h"
@@ -127,8 +129,9 @@
  *
  * type prefixes (const, signed, volatile, inline) are handled in pg_config.h.
  * ----------------------------------------------------------------
- *
- *
+ */
+
+/*
  * CppAsString
  *		Convert the argument to a string, using the C preprocessor.
  * CppConcat
@@ -174,7 +177,9 @@
 /* ----------------------------------------------------------------
  *				Section 2:	bool, true, false, TRUE, FALSE, NULL
  * ----------------------------------------------------------------
- *
+ */
+
+/*
  * bool
  *		Boolean value, either true or false.
  *
@@ -218,8 +223,9 @@ typedef bool* BoolPtr;
 /* ----------------------------------------------------------------
  *				Section 3:	standard system types
  * ----------------------------------------------------------------
- *
- *
+ */
+
+/*
  * Pointer
  *		Variable holding address of any memory resident object.
  *
@@ -352,6 +358,7 @@ typedef signed int Offset;
 /*
  * Common Postgres datatype names (as used in the catalogs)
  */
+
 typedef int8 int1;
 typedef int16 int2;
 typedef int32 int4;
@@ -373,19 +380,20 @@ typedef unsigned __int128 uint128;
 #endif
 #else
 #ifdef __linux__
-#if __GNUC__ >= 8
+#if __GNUC__ >= 7
 typedef __int128 int128;
 typedef unsigned __int128 uint128;
 #endif
 #endif
 #endif
 
-
+#if !defined(WIN32)
 typedef union {
     uint128   u128;
     uint64    u64[2];
     uint32    u32[4];
 } uint128_u;
+#endif
 
 /*
  * int128 type has 128 bits.
@@ -406,11 +414,11 @@ typedef union {
 /*
  * Oid, RegProcedure, TransactionId, SubTransactionId, MultiXactId,
  * CommandId
- *
- *
- * typedef Oid is in postgres_ext.h 
- *
- * 
+ */
+
+/* typedef Oid is in postgres_ext.h */
+
+/*
  * regproc is the type name used in the include/catalog headers, but
  * RegProcedure is the preferred name in C code.
  */
@@ -438,6 +446,8 @@ typedef uint64 SubTransactionId;
 
 #define XID_FMT UINT64_FORMAT
 
+#define CSN_FMT UINT64_FORMAT
+
 #define InvalidSubTransactionId ((SubTransactionId)0)
 #define TopSubTransactionId ((SubTransactionId)1)
 
@@ -463,8 +473,6 @@ typedef uint32 CommandId;
 typedef uint64 CommitSeqNo;
 
 #define InvalidCommitSeqNo ((CommitSeqNo)0)
-
-#define CSN_FMT UINT64_FORMAT
 
 /*
  * Array indexing support
@@ -500,6 +508,7 @@ struct varlena {
  * always VARSIZE(ptr) - VARHDRSZ.
  */
 typedef struct varlena bytea;
+typedef struct varlena byteawithoutorderwithequalcol;
 typedef struct varlena text;
 typedef struct varlena BpChar;    /* blank-padded char, ie SQL char(n) */
 typedef struct varlena VarChar;   /* var-length char, ie SQL varchar(n) */
@@ -621,6 +630,10 @@ typedef NameData* Name;
 
 #define NameStr(name) ((name).data)
 
+typedef struct pathData {
+    char data[MAXPGPATH];
+} PathData;
+
 /*
  * Support macros for escaping strings.  escape_backslash should be TRUE
  * if generating a non-standard-conforming string.	Prefixing a string
@@ -652,8 +665,6 @@ typedef NameData* Name;
  *		True iff pointer is properly aligned to point to the given type.
  */
 #define PointerIsAligned(pointer, type) (((intptr_t)(pointer) % (sizeof(type))) == 0)
-
-#define OffsetToPointer(base, offset) ((void *)((char *) base + offset))
 
 #define OidIsValid(objectId) ((bool)((objectId) != InvalidOid))
 
@@ -833,11 +844,10 @@ static inline void* MemCpy(void* dest, const void* src, Size len)
         Size _len = (len);                                                                                 \
                                                                                                            \
         if ((((uintptr_t)_vstart) & LONG_ALIGN_MASK) == 0 && (_len & LONG_ALIGN_MASK) == 0 && _val == 0 && \
-            _len <= MEMSET_LOOP_LIMIT &&                                                                   \
-            /*                                                                                             \
-             * If MEMSET_LOOP_LIMIT == 0, optimizer should find                                            \
-             * the whole "if" false at compile time.                                                       \
-             */                                                                                            \
+            _len <= MEMSET_LOOP_LIMIT && /*                                                                \
+                                          *	If MEMSET_LOOP_LIMIT == 0, optimizer should find               \
+                                          *	the whole "if" false at compile time.                          \
+                                          */                                                               \
             MEMSET_LOOP_LIMIT != 0) {                                                                      \
             long* _start = (long*)_vstart;                                                                 \
             long* _stop = (long*)((char*)_start + _len);                                                   \

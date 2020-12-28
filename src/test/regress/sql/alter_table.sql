@@ -346,13 +346,13 @@ create table nv_child_2010 () inherits (nv_parent);
 create table nv_child_2011 () inherits (nv_parent);
 alter table nv_child_2010 add check (d between '2010-01-01'::date and '2010-12-31'::date) not valid;
 alter table nv_child_2011 add check (d between '2011-01-01'::date and '2011-12-31'::date) not valid;
-explain (costs off, nodes off) select * from nv_parent where d between '2011-08-01' and '2011-08-31';
+explain (costs off) select * from nv_parent where d between '2011-08-01' and '2011-08-31';
 create table nv_child_2009 (check (d between '2009-01-01'::date and '2009-12-31'::date)) inherits (nv_parent);
-explain (costs off, nodes off) select * from nv_parent where d between '2011-08-01'::date and '2011-08-31'::date;
-explain (costs off, nodes off) select * from nv_parent where d between '2009-08-01'::date and '2009-08-31'::date;
+explain (costs off) select * from nv_parent where d between '2011-08-01'::date and '2011-08-31'::date;
+explain (costs off) select * from nv_parent where d between '2009-08-01'::date and '2009-08-31'::date;
 -- after validation, the constraint should be used
 alter table nv_child_2011 VALIDATE CONSTRAINT nv_child_2011_d_check;
-explain (costs off, nodes off) select * from nv_parent where d between '2009-08-01'::date and '2009-08-31'::date;
+explain (costs off) select * from nv_parent where d between '2009-08-01'::date and '2009-08-31'::date;
 
 
 -- Foreign key adding test with mixed types
@@ -1753,7 +1753,7 @@ STORAGE
 );
 \d+ STUDENTS
 DROP TABLE STUDENTS;
---simulate A's ALTER TABLE gram
+--simulate A db's ALTER TABLE gram
 CREATE TABLE MODIFY_TABLE_A(I INTEGER);
 ALTER TABLE MODIFY_TABLE_A ADD (mychar CHAR); 
 ALTER TABLE MODIFY_TABLE_A ADD (myint1 INT, mychar1 CHAR);
@@ -1784,8 +1784,8 @@ alter table test_mod alter column a set default "d"::int;
 alter table test_mod alter column a set default "d"::int + 1;
 drop table test_mod;
 
---simulate A and postgresql, ALTER TABLE IF EXISTS table_name ADD( { element_list_clause } [, ...] )
---simulate A and postgresql, ALTER TABLE IF EXISTS table_name MODIFY( { element_list_clause } [, ...] )
+--simulate A db and postgresql, ALTER TABLE IF EXISTS table_name ADD( { element_list_clause } [, ...] )
+--simulate A db and postgresql, ALTER TABLE IF EXISTS table_name MODIFY( { element_list_clause } [, ...] )
 create schema  columnar_storage;
 create table columnar_storage.create_columnar_add_common_008 (c_tinyint  tinyint,c_smallint smallint,c_int integer,c_bigint   bigint,c_money    money,c_numeric   numeric,c_real      real,c_double    double precision,c_decimal   decimal,c_varchar   varchar,c_char   char(30),c_nvarchar2  nvarchar2,c_text text,c_timestamp   timestamp with time zone,c_timestamptz timestamp without time zone,c_date     date,c_time     time without time zone,c_timetz   time with time zone,c_interval  interval,c_tinterval   tinterval,c_smalldatetime   smalldatetime,c_bytea   bytea,c_boolean  boolean,c_inet inet,c_cidr cidr,c_bit bit(10),c_varbit varbit(10),c_oid oid) with (orientation=column);
 alter table if exists columnar_storage.create_columnar_add_common_007 modify (c_int varchar(20));

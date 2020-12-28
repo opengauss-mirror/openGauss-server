@@ -65,7 +65,7 @@ bool TrySaveImportError(DistImportExecutionState *importState, ForeignScanState 
         }
 
         // clear error state
-        // 
+        //
         FlushErrorStateWithoutDeleteChildrenContext();
         return true;
     }
@@ -77,7 +77,7 @@ bool TrySaveImportError(CopyState cstate)
     if ((ERRCODE_TO_CATEGORY((unsigned int)geterrcode()) == ERRCODE_DATA_EXCEPTION) && DoAcceptOneError(cstate)) {
         FormAndSaveImportError(cstate, cstate->err_table, cstate->copy_beginTime, cstate->logger);
         // clear error state
-        // 
+        //
         FlushErrorStateWithoutDeleteChildrenContext();
         return true;
     }
@@ -124,7 +124,7 @@ VectorBatch *distExecVecImport(VecForeignScanState *node)
     oldMemoryContext = MemoryContextSwitchTo(scanMcxt);
     SetObsMemoryContext(((CopyState)importState)->copycontext);
     for (batch->m_rows = 0; batch->m_rows < BatchMaxSize; batch->m_rows++) {
-    retry:
+retry:
         PG_TRY();
         {
             /*

@@ -31,10 +31,10 @@
 template <bool import>
 extern bool getNextRoach(CopyState cstate);
 
-extern int copyGetRoachData(CopyState cstate, void *databuf, int minread, int maxread);
+extern int copyGetRoachData(CopyState cstate, void* databuf, int minread, int maxread);
 
 template <bool import>
-extern void initRoachState(CopyState cstate, const char *filename, List *totalTask);
+extern void initRoachState(CopyState cstate, const char* filename, List* totalTask);
 
 extern void endRoachBulkLoad(CopyState cstate);
 
@@ -42,6 +42,6 @@ extern void exportRoach(CopyState cstate);
 
 extern void exportRoachFlushOut(CopyState cstate, bool isWholeLineAtEnd);
 
-extern RoachRoutine *initRoachRoutine();
+extern RoachRoutine* initRoachRoutine();
 
 #endif

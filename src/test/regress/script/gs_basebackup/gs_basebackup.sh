@@ -13,7 +13,7 @@ else
     $abs_bindir/gs_basebackup -D $abs_bindir/../$dataNode -p $abs_port -X$x_option -F$format > $abs_bindir/../$dataNode.log 2>&1
 fi
 
-for gs_basebackup_port in {4000..60000}; 
+for gs_basebackup_port in {40000..60000};
 do 
     if [ 'x'`netstat -an | grep -v STREAM | grep -v DGRAM | grep $gs_basebackup_port | head -n1 | awk '{print $1}'` == 'x' ]; 
     then  

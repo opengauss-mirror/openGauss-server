@@ -1,0 +1,4 @@
+-- init setup to test drop table cancel redistribution transaction
+-- create function to set/reset proc as redistribution one
+CREATE OR REPLACE FUNCTION pg_set_proc_redis() RETURNS bool AS '/home/ptadm/work/br_Gauss200_OLAP_V100R007C10_OnlineExpansion/install/lib/postgresql/gsredistribute.so', 'pg_set_proc_redis' LANGUAGE C IMMUTABLE;
+CREATE OR REPLACE FUNCTION pg_reset_proc_redis() RETURNS bool AS '/home/ptadm/work/br_Gauss200_OLAP_V100R007C10_OnlineExpansion/install/lib/postgresql/gsredistribute.so', 'pg_reset_proc_redis' LANGUAGE C IMMUTABLE;

@@ -1,0 +1,120 @@
+execute direct on (datanode1)'SELECT ''init'' FROM pg_create_logical_replication_slot(''regression_slot'', ''mppdb_decoding'');';
+ ?column? 
+----------
+ init
+(1 row)
+
+create table a (a int, b int);
+insert into a values(generate_series(1, 10), 1);
+update a set b = b+1 where b = 1;
+delete a where b = 2;
+execute direct on (datanode1)'SELECT * FROM pg_logical_slot_get_changes(''regression_slot'', NULL, NULL);';
+ location  |  xid  |                                                                                            data                                                                                             
+-----------+-------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 0/3F4EB08 | 10278 | BEGIN
+ 0/3F522F8 | 10278 | COMMIT 10278
+ 0/3F522F8 | 10279 | BEGIN
+ 0/3F522F8 | 10279 | {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["1","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52348 | 10279 | {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["2","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52390 | 10279 | {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["3","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F523D8 | 10279 | {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["4","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52420 | 10279 | {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["5","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52468 | 10279 | {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["6","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F524B0 | 10279 | {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["7","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F524F8 | 10279 | {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["8","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52540 | 10279 | {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["9","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52588 | 10279 | {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["10","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52628 | 10279 | COMMIT 10279
+ 0/3F52628 | 10280 | BEGIN
+ 0/3F52628 | 10280 | {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["1","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52678 | 10280 | {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["2","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F526C8 | 10280 | {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["3","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52718 | 10280 | {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["4","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52768 | 10280 | {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["5","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F527B8 | 10280 | {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["6","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52808 | 10280 | {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["7","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52858 | 10280 | {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["8","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F528A8 | 10280 | {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["9","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F528F8 | 10280 | {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["10","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F529A0 | 10280 | COMMIT 10280
+ 0/3F529A0 | 10281 | BEGIN
+ 0/3F529A0 | 10281 | {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F529E0 | 10281 | {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52A20 | 10281 | {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52A60 | 10281 | {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52AA0 | 10281 | {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52AE0 | 10281 | {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52B20 | 10281 | {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52B60 | 10281 | {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52BA0 | 10281 | {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52BE0 | 10281 | {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F52C78 | 10281 | COMMIT 10281
+(38 rows)
+
+set reporiginid = 1;
+insert into a values(generate_series(1, 10), 1);
+update a set b = b+1 where b = 1;
+delete a where b = 2;
+execute direct on (datanode1)'SELECT * FROM pg_logical_slot_get_changes(''regression_slot'', NULL, NULL);';
+ location | xid | data 
+----------+-----+------
+(0 rows)
+
+insert into a values(generate_series(1, 10), 1);
+update a set b = b+1 where b = 1;
+delete a where b = 2;
+execute direct on (datanode1)'SELECT * FROM pg_logical_slot_get_changes(''regression_slot'', NULL, NULL, ''only-local'', ''0'');';
+ location  |  xid  |                                                                                            data                                                                                             
+-----------+-------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 0/3F53640 | 10285 | BEGIN 10285
+ 0/3F53640 | 10285 | {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["1","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53690 | 10285 | {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["2","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F536E0 | 10285 | {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["3","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53730 | 10285 | {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["4","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53780 | 10285 | {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["5","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F537D0 | 10285 | {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["6","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53820 | 10285 | {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["7","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53870 | 10285 | {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["8","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F538C0 | 10285 | {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["9","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53910 | 10285 | {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["10","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F539B8 | 10285 | COMMIT 10285
+ 0/3F539B8 | 10286 | BEGIN 10286
+ 0/3F539B8 | 10286 | {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["1","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53A08 | 10286 | {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["2","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53A58 | 10286 | {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["3","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53AA8 | 10286 | {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["4","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53AF8 | 10286 | {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["5","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53B48 | 10286 | {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["6","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53B98 | 10286 | {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["7","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53BE8 | 10286 | {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["8","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53C38 | 10286 | {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["9","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53C88 | 10286 | {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["10","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53D30 | 10286 | COMMIT 10286
+ 0/3F53D30 | 10287 | BEGIN 10287
+ 0/3F53D30 | 10287 | {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53D70 | 10287 | {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53DB0 | 10287 | {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53DF0 | 10287 | {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53E30 | 10287 | {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53E70 | 10287 | {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53EB0 | 10287 | {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53EF0 | 10287 | {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53F30 | 10287 | {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F53F70 | 10287 | {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ 0/3F54020 | 10287 | COMMIT 10287
+(36 rows)
+
+insert into a values(generate_series(1, 10), 1);
+update a set b = b+1 where b = 1;
+delete a where b = 2;
+execute direct on (datanode1)'SELECT * FROM pg_logical_slot_get_changes(''regression_slot'', NULL, NULL, ''only-local'', ''1'');';
+ location | xid | data 
+----------+-----+------
+(0 rows)
+
+execute direct on (datanode1)'SELECT pg_drop_replication_slot(''regression_slot'');';
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+

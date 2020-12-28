@@ -47,7 +47,9 @@ typedef struct FixedParamState {
 typedef struct VarParamState {
     Oid** paramTypes; /* array of parameter type OIDs */
     int* numParams;   /* number of array entries */
+#ifndef ENABLE_MULTIPLE_NODES	
     char **paramTypeNames;
+#endif	
 } VarParamState;
 
 static Node* fixed_paramref_hook(ParseState* pstate, ParamRef* pref);
@@ -55,8 +57,9 @@ static Node* variable_paramref_hook(ParseState* pstate, ParamRef* pref);
 static Node* variable_coerce_param_hook(
     ParseState* pstate, Param* param, Oid targetTypeId, int32 targetTypeMod, int location);
 static bool check_parameter_resolution_walker(Node* node, ParseState* pstate);
+#ifndef ENABLE_MULTIPLE_NODES
 static Node *variable_post_column_ref_hook(ParseState *pstate, ColumnRef *cref, Node *var);
-static bool query_contains_extern_params_walker(Node* node, void* context);
+#endif
 
 /*
  * Set up to process a query containing references to fixed parameters.
@@ -75,19 +78,27 @@ void parse_fixed_parameters(ParseState* pstate, Oid* paramTypes, int numParams)
 /*
  * Set up to process a query containing references to variable parameters.
  */
-void parse_variable_parameters(ParseState* pstate, Oid** paramTypes, int* numParams, char** paramTypeNames)
+#ifdef ENABLE_MULTIPLE_NODES
+void parse_variable_parameters(ParseState* pstate, Oid** paramTypes, int* numParams)
+#else
+void parse_variable_parameters(ParseState* pstate, Oid** paramTypes, int* numParams,
+     char** paramTypeNames)
+#endif
 {
     VarParamState* parstate = (VarParamState*)palloc(sizeof(VarParamState));
 
     parstate->paramTypes = paramTypes;
     parstate->numParams = numParams;
+#ifndef ENABLE_MULTIPLE_NODES
     parstate->paramTypeNames = paramTypeNames;
     pstate->p_post_columnref_hook = variable_post_column_ref_hook;
+#endif
     pstate->p_ref_hook_state = (void*)parstate;
     pstate->p_paramref_hook = variable_paramref_hook;
     pstate->p_coerce_param_hook = variable_coerce_param_hook;
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
 static Node *variable_post_column_ref_hook(ParseState *pstate, ColumnRef *cref, Node *var)
 {
     VarParamState *parstate = (VarParamState *) pstate->p_ref_hook_state;
@@ -124,7 +135,7 @@ static Node *variable_post_column_ref_hook(ParseState *pstate, ColumnRef *cref, 
     }
     return NULL;
 }
-
+#endif
 /*
  * Transform a ParamRef using fixed parameter types.
  */
@@ -329,31 +340,4 @@ static bool check_parameter_resolution_walker(Node* node, ParseState* pstate)
         return query_tree_walker((Query*)node, (bool (*)())check_parameter_resolution_walker, (void*)pstate, 0);
     }
     return expression_tree_walker(node, (bool (*)())check_parameter_resolution_walker, (void*)pstate);
-}
-
-
-/*
- * Check to see if a fully-parsed query tree contains any PARAM_EXTERN Params.
- */
-bool query_contains_extern_params(Query* query)
-{
-    return query_tree_walker(query, (bool (*)())query_contains_extern_params_walker, NULL, 0);
-}
-
-static bool query_contains_extern_params_walker(Node* node, void* context)
-{
-    if (node == NULL)
-        return false;
-    if (IsA(node, Param)) {
-        Param* param = (Param*)node;
-
-        if (param->paramkind == PARAM_EXTERN)
-            return true;
-        return false;
-    }
-    if (IsA(node, Query)) {
-        /* Recurse into RTE subquery or not-yet-planned sublink subquery */
-        return query_tree_walker((Query*)node, (bool(*)())query_contains_extern_params_walker, context, 0);
-    }
-    return expression_tree_walker(node, (bool(*)())query_contains_extern_params_walker, context);
 }

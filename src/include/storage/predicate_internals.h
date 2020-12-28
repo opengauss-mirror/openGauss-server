@@ -14,7 +14,7 @@
 #ifndef PREDICATE_INTERNALS_H
 #define PREDICATE_INTERNALS_H
 
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 
 /*
  * Commit number.
@@ -442,4 +442,3 @@ typedef struct TwoPhasePredicateRecord {
 extern PredicateLockData* GetPredicateLockStatusData(void);
 
 #endif /* PREDICATE_INTERNALS_H */
-

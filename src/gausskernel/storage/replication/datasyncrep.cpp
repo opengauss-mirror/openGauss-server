@@ -23,9 +23,6 @@
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
-
-#include <unistd.h>
-
 #include "access/xact.h"
 #include "miscadmin.h"
 #include "pgstat.h"
@@ -70,13 +67,17 @@ void WaitForDataSync(void)
         ResetBCMArray();
         return;
     }
+    if (!SHMQueueIsDetached(&(t_thrd.proc->dataSyncRepLinks))) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("shm queue should be detached")));
+    }
+    if (t_thrd.datasender_cxt.DataSndCtl == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("DataSndCtl should not be null")));
+    }
 
-    AssertEreport(SHMQueueIsDetached(&(t_thrd.proc->dataSyncRepLinks)), MOD_FUNCTION, "shm queue should be detached");
-    AssertEreport(t_thrd.datasender_cxt.DataSndCtl != nullptr, MOD_FUNCTION, "DataSndCtl should not be null");
-
-    (void)LWLockAcquire(DataSyncRepLock, LW_EXCLUSIVE);
-    AssertEreport(t_thrd.proc->dataSyncRepState == SYNC_REP_NOT_WAITING, MOD_FUNCTION,
-        "dataSyncRepState should be SYNC_REP_NOT_WAITING");
+    LWLockAcquire(DataSyncRepLock, LW_EXCLUSIVE);
+    if (t_thrd.proc->dataSyncRepState != SYNC_REP_NOT_WAITING) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("dataSyncRepState should be SYNC_REP_NOT_WAITING")));
+    }
 
     if (DQByteLE(t_thrd.proc->waitDataSyncPoint, t_thrd.datasender_cxt.DataSndCtl->queue_offset)) {
         LWLockRelease(DataSyncRepLock);
@@ -91,16 +92,14 @@ void WaitForDataSync(void)
     DataSyncRepQueueInsert();
     LWLockRelease(DataSyncRepLock);
 
-    ereport(DEBUG5,
-        (errmsg("WaitForDataSync:head2:%u/%u, tail1:%u/%u,tail2:%u/%u,wait:%u/%u",
-            t_thrd.dataqueue_cxt.DataSenderQueue->use_head2.queueid,
-            t_thrd.dataqueue_cxt.DataSenderQueue->use_head2.queueoff,
-            t_thrd.dataqueue_cxt.DataSenderQueue->use_tail1.queueid,
-            t_thrd.dataqueue_cxt.DataSenderQueue->use_tail1.queueoff,
-            t_thrd.dataqueue_cxt.DataSenderQueue->use_tail2.queueid,
-            t_thrd.dataqueue_cxt.DataSenderQueue->use_tail2.queueoff,
-            t_thrd.proc->waitDataSyncPoint.queueid,
-            t_thrd.proc->waitDataSyncPoint.queueoff)));
+    ereport(DEBUG5, (errmsg("WaitForDataSync:head2:%u/%u, tail1:%u/%u,tail2:%u/%u,wait:%u/%u",
+                            t_thrd.dataqueue_cxt.DataSenderQueue->use_head2.queueid,
+                            t_thrd.dataqueue_cxt.DataSenderQueue->use_head2.queueoff,
+                            t_thrd.dataqueue_cxt.DataSenderQueue->use_tail1.queueid,
+                            t_thrd.dataqueue_cxt.DataSenderQueue->use_tail1.queueoff,
+                            t_thrd.dataqueue_cxt.DataSenderQueue->use_tail2.queueid,
+                            t_thrd.dataqueue_cxt.DataSenderQueue->use_tail2.queueoff,
+                            t_thrd.proc->waitDataSyncPoint.queueid, t_thrd.proc->waitDataSyncPoint.queueoff)));
     WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_DATASYNC);
 
     /*
@@ -123,10 +122,8 @@ void WaitForDataSync(void)
 
         if (dataSyncRepState == SYNC_REP_WAIT_COMPLETE) {
             if (u_sess->attr.attr_storage.HaModuleDebug) {
-                ereport(LOG,
-                    (errmsg("HA-WaitForDataSync: waitpoint %u/%u done",
-                        t_thrd.proc->waitDataSyncPoint.queueid,
-                        t_thrd.proc->waitDataSyncPoint.queueoff)));
+                ereport(LOG, (errmsg("HA-WaitForDataSync: waitpoint %u/%u done", t_thrd.proc->waitDataSyncPoint.queueid,
+                                     t_thrd.proc->waitDataSyncPoint.queueoff)));
             }
             break;
         }
@@ -145,11 +142,11 @@ void WaitForDataSync(void)
          */
         if (t_thrd.int_cxt.ProcDiePending || t_thrd.proc_cxt.proc_exit_inprogress) {
             ereport(WARNING,
-                (errcode(ERRCODE_ADMIN_SHUTDOWN),
-                    errmsg("canceling the wait for synchronous replication and terminating connection due to "
-                           "administrator command"),
-                    errdetail("The transaction has already committed locally, but might not have been replicated to "
-                              "the standby.")));
+                    (errcode(ERRCODE_ADMIN_SHUTDOWN),
+                     errmsg("canceling the wait for synchronous replication and terminating connection due to "
+                            "administrator command"),
+                     errdetail("The transaction has already committed locally, but might not have been replicated to "
+                               "the standby.")));
             t_thrd.postgres_cxt.whereToSendOutput = DestNone;
             DataSyncRepCancelWait();
             break;
@@ -164,9 +161,9 @@ void WaitForDataSync(void)
         if (t_thrd.int_cxt.QueryCancelPending) {
             t_thrd.int_cxt.QueryCancelPending = false;
             ereport(WARNING,
-                (errmsg("canceling wait for synchronous replication due to user request"),
-                    errdetail("The transaction has already committed locally, but might not have been replicated to "
-                              "the standby.")));
+                    (errmsg("canceling wait for synchronous replication due to user request"),
+                     errdetail("The transaction has already committed locally, but might not have been replicated to "
+                               "the standby.")));
             DataSyncRepCancelWait();
             break;
         }
@@ -189,9 +186,9 @@ void WaitForDataSync(void)
         if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone ||
             synchronous_commit <= SYNCHRONOUS_COMMIT_LOCAL_FLUSH) {
             ereport(WARNING,
-                (errmsg("canceling wait for synchronous replication due to syncmaster standalone."),
-                    errdetail("The transaction has already committed locally, but might not have been replicated to "
-                              "the standby.")));
+                    (errmsg("canceling wait for synchronous replication due to syncmaster standalone."),
+                     errdetail("The transaction has already committed locally, but might not have been replicated to "
+                               "the standby.")));
             DataSyncRepCancelWait();
             break;
         }
@@ -247,11 +244,11 @@ void WaitForDataSync(void)
  */
 static void DataSyncRepQueueInsert(void)
 {
-    PGPROC* proc = NULL;
+    PGPROC *proc = NULL;
 
-    proc = (PGPROC*)SHMQueuePrev(&(t_thrd.datasender_cxt.DataSndCtl->SyncRepQueue),
-        &(t_thrd.datasender_cxt.DataSndCtl->SyncRepQueue),
-        offsetof(PGPROC, dataSyncRepLinks));
+    proc = (PGPROC *)SHMQueuePrev(&(t_thrd.datasender_cxt.DataSndCtl->SyncRepQueue),
+                                  &(t_thrd.datasender_cxt.DataSndCtl->SyncRepQueue),
+                                  offsetof(PGPROC, dataSyncRepLinks));
     while (proc != NULL) {
         /*
          * Stop at the queue element that we should after to ensure the queue
@@ -260,9 +257,8 @@ static void DataSyncRepQueueInsert(void)
         if (DQByteLT(proc->waitDataSyncPoint, t_thrd.proc->waitDataSyncPoint))
             break;
 
-        proc = (PGPROC*)SHMQueuePrev(&(t_thrd.datasender_cxt.DataSndCtl->SyncRepQueue),
-            &(proc->dataSyncRepLinks),
-            offsetof(PGPROC, dataSyncRepLinks));
+        proc = (PGPROC *)SHMQueuePrev(&(t_thrd.datasender_cxt.DataSndCtl->SyncRepQueue), &(proc->dataSyncRepLinks),
+                                      offsetof(PGPROC, dataSyncRepLinks));
     }
 
     if (proc != NULL)
@@ -292,7 +288,7 @@ static void DataSyncRepCancelWait(void)
  */
 void DataSyncRepReleaseWaiters(void)
 {
-    volatile DataSndCtlData* datasndctl = t_thrd.datasender_cxt.DataSndCtl;
+    volatile DataSndCtlData *datasndctl = t_thrd.datasender_cxt.DataSndCtl;
     DataQueuePtr minOffSet;
     int numreceive = 0;
 
@@ -306,7 +302,7 @@ void DataSyncRepReleaseWaiters(void)
         datasndctl->queue_offset.queueoff = minOffSet.queueoff;
         SpinLockRelease(&datasndctl->mutex);
 
-        PopFromDataQueue(((DataSndCtlData*)datasndctl)->queue_offset, t_thrd.dataqueue_cxt.DataSenderQueue);
+        PopFromDataQueue(((DataSndCtlData *)datasndctl)->queue_offset, t_thrd.dataqueue_cxt.DataSenderQueue);
 
         numreceive = DataSyncRepWakeQueue();
     } else
@@ -314,11 +310,9 @@ void DataSyncRepReleaseWaiters(void)
 
     LWLockRelease(DataSyncRepLock);
 
-    ereport(DEBUG3,
-        (errmsg("released %d procs up to receive %u/%u",
-            numreceive,
-            t_thrd.datasender_cxt.MyDataSnd->receivePosition.queueid,
-            t_thrd.datasender_cxt.MyDataSnd->receivePosition.queueoff)));
+    ereport(DEBUG3, (errmsg("released %d procs up to receive %u/%u", numreceive,
+                            t_thrd.datasender_cxt.MyDataSnd->receivePosition.queueid,
+                            t_thrd.datasender_cxt.MyDataSnd->receivePosition.queueoff)));
 }
 
 /*
@@ -326,14 +320,14 @@ void DataSyncRepReleaseWaiters(void)
  */
 static DataQueuePtr GetMinReplyOffset(void)
 {
-    volatile DataSndCtlData* datasndctl = t_thrd.datasender_cxt.DataSndCtl;
-    DataQueuePtr slow = (DataQueuePtr){0, 0};
+    volatile DataSndCtlData *datasndctl = t_thrd.datasender_cxt.DataSndCtl;
+    DataQueuePtr slow = (DataQueuePtr){ 0, 0 };
     int i;
     bool sender_has_invaild_position = false;
 
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
-        volatile DataSnd* datasnd = &datasndctl->datasnds[i];
+        volatile DataSnd *datasnd = &datasndctl->datasnds[i];
 
         SpinLockAcquire(&datasnd->mutex);
 
@@ -356,7 +350,7 @@ static DataQueuePtr GetMinReplyOffset(void)
     }
 
     if (sender_has_invaild_position)
-        slow = (DataQueuePtr){0, 0};
+        slow = (DataQueuePtr){ 0, 0 };
 
     return slow;
 }
@@ -369,16 +363,16 @@ static DataQueuePtr GetMinReplyOffset(void)
  */
 static int DataSyncRepWakeQueue(void)
 {
-    volatile DataSndCtlData* datasndctl = t_thrd.datasender_cxt.DataSndCtl;
-    PGPROC* proc = NULL;
-    PGPROC* thisproc = NULL;
+    volatile DataSndCtlData *datasndctl = t_thrd.datasender_cxt.DataSndCtl;
+    PGPROC *proc = NULL;
+    PGPROC *thisproc = NULL;
     int numprocs = 0;
 
     Assert(SyncRepQueueIsOrderedByOffset());
 
-    proc = (PGPROC*)SHMQueueNext(&(t_thrd.datasender_cxt.DataSndCtl->SyncRepQueue),
-        &(t_thrd.datasender_cxt.DataSndCtl->SyncRepQueue),
-        offsetof(PGPROC, dataSyncRepLinks));
+    proc = (PGPROC *)SHMQueueNext(&(t_thrd.datasender_cxt.DataSndCtl->SyncRepQueue),
+                                  &(t_thrd.datasender_cxt.DataSndCtl->SyncRepQueue),
+                                  offsetof(PGPROC, dataSyncRepLinks));
 
     while (proc != NULL) {
         /*
@@ -392,9 +386,8 @@ static int DataSyncRepWakeQueue(void)
          * thisproc is valid, proc may be NULL after this.
          */
         thisproc = proc;
-        proc = (PGPROC*)SHMQueueNext(&(t_thrd.datasender_cxt.DataSndCtl->SyncRepQueue),
-            &(proc->dataSyncRepLinks),
-            offsetof(PGPROC, dataSyncRepLinks));
+        proc = (PGPROC *)SHMQueueNext(&(t_thrd.datasender_cxt.DataSndCtl->SyncRepQueue), &(proc->dataSyncRepLinks),
+                                      offsetof(PGPROC, dataSyncRepLinks));
         /*
          * Remove thisproc from queue.
          */
@@ -427,15 +420,15 @@ static int DataSyncRepWakeQueue(void)
 #ifdef USE_ASSERT_CHECKING
 static bool SyncRepQueueIsOrderedByOffset(void)
 {
-    PGPROC* proc = NULL;
+    PGPROC *proc = NULL;
     DataQueuePtr queueptr;
 
     queueptr.queueid = 0;
     queueptr.queueoff = 0;
 
-    proc = (PGPROC*)SHMQueueNext(&(t_thrd.datasender_cxt.DataSndCtl->SyncRepQueue),
-        &(t_thrd.datasender_cxt.DataSndCtl->SyncRepQueue),
-        offsetof(PGPROC, dataSyncRepLinks));
+    proc = (PGPROC *)SHMQueueNext(&(t_thrd.datasender_cxt.DataSndCtl->SyncRepQueue),
+                                  &(t_thrd.datasender_cxt.DataSndCtl->SyncRepQueue),
+                                  offsetof(PGPROC, dataSyncRepLinks));
 
     while (proc != NULL) {
         /*
@@ -446,9 +439,8 @@ static bool SyncRepQueueIsOrderedByOffset(void)
 
         queueptr = proc->waitDataSyncPoint;
 
-        proc = (PGPROC*)SHMQueueNext(&(t_thrd.datasender_cxt.DataSndCtl->SyncRepQueue),
-            &(proc->dataSyncRepLinks),
-            offsetof(PGPROC, dataSyncRepLinks));
+        proc = (PGPROC *)SHMQueueNext(&(t_thrd.datasender_cxt.DataSndCtl->SyncRepQueue), &(proc->dataSyncRepLinks),
+                                      offsetof(PGPROC, dataSyncRepLinks));
     }
 
     return true;

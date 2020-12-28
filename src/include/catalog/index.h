@@ -4,6 +4,7 @@
  *	  prototypes for catalog/index.c.
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -15,7 +16,7 @@
 #define INDEX_H
 
 #include "nodes/execnodes.h"
-
+#include "utils/tuplesort.h"
 
 #define DEFAULT_INDEX_TYPE	"btree"
 #define DEFAULT_CSTORE_INDEX_TYPE "psort"
@@ -48,7 +49,16 @@ typedef enum
 #define REINDEX_CGIN_INDEX (1<<5)
 #define	REINDEX_ALL_INDEX   (REINDEX_BTREE_INDEX|REINDEX_HASH_INDEX|REINDEX_GIN_INDEX|REINDEX_GIST_INDEX|REINDEX_CGIN_INDEX)
 
-typedef enum CheckWaitMode
+
+/* state info for validate_index bulkdelete callback */
+typedef struct {
+    Tuplesortstate* tuplesort; /* for sorting the index TIDs */
+    /* statistics (for debug purposes only): */
+    double htups, itups, tups_inserted;
+} v_i_state;
+
+
+typedef enum CheckWaitMode 
 {
     CHECK_WAIT,
     CHECK_NOWAIT,
@@ -58,7 +68,7 @@ extern void index_check_primary_key(Relation heapRel, IndexInfo *indexInfo, bool
 
 /*
  * Parameter isPartitionedIndex indicates whether the index is a partition index.
- * Parameter isGlobalPartitionedIndex indicates whether the index is a global partition index
+ * Parameter isGlobalPartitionedIndex indicates whether the index is a global partition index.
  * -------------------------------------------------------------------------
  * | isPartitionedIndex | isGlobalPartitionedIndex |      Description       |
  * -------------------------------------------------------------------------
@@ -78,8 +88,7 @@ typedef struct
     bool isGlobalPartitionedIndex;
 } IndexCreateExtraArgs;
 
-typedef enum
-{
+typedef enum {
     INDEX_CREATE_NONE_PARTITION,
     INDEX_CREATE_LOCAL_PARTITION,
     INDEX_CREATE_GLOBAL_PARTITION
@@ -87,9 +96,11 @@ typedef enum
 
 typedef enum { ALL_KIND, GLOBAL_INDEX, LOCAL_INDEX } IndexKind;
 
-#define PARTITION_TYPE(extra)   \
-    (extra->isPartitionedIndex == false ? INDEX_CREATE_NONE_PARTITION : \
-    (extra->isGlobalPartitionedIndex == false ? INDEX_CREATE_LOCAL_PARTITION : INDEX_CREATE_GLOBAL_PARTITION))
+#define PARTITION_TYPE(extra)                                                                                      \
+    (extra->isPartitionedIndex == false ? INDEX_CREATE_NONE_PARTITION                                              \
+                                        : (extra->isGlobalPartitionedIndex == false ? INDEX_CREATE_LOCAL_PARTITION \
+                                                                                    : INDEX_CREATE_GLOBAL_PARTITION))
+
 
 extern Oid index_create(Relation heapRelation, const char *indexRelationName, Oid indexRelationId,
                         Oid relFileNode, IndexInfo *indexInfo, List *indexColNames, Oid accessMethodObjectId,
@@ -110,16 +121,26 @@ extern IndexInfo *BuildDummyIndexInfo(Relation index);
 
 extern void BuildSpeculativeIndexInfo(Relation index, IndexInfo* ii);
 
-extern void FormIndexDatum(IndexInfo *indexInfo, TupleTableSlot *slot, EState *estate, Datum *values, bool *isnull);
-extern void index_build(Relation heapRelation, Partition heapPartition, Relation indexRelation,
-                        Partition indexPartition, IndexInfo *indexInfo, bool isprimary,
-                        bool isreindex, bool parallel, IndexCreatePartitionType partitionType);
+extern void FormIndexDatumForRedis(const TupleTableSlot* slot, Datum* values, bool* isnull);
+
+extern void FormIndexDatum(IndexInfo *indexInfo,
+			   TupleTableSlot *slot,
+			   EState *estate,
+			   Datum *values,
+			   bool *isnull);
+extern void index_build(Relation heapRelation,
+			Partition heapPartition,
+			Relation indexRelation,
+			Partition indexPartition,
+			IndexInfo *indexInfo,
+			bool isprimary,
+			bool isreindex,
+			IndexCreatePartitionType partitionType);
 
 extern double IndexBuildHeapScan(Relation heapRelation, Relation indexRelation, IndexInfo *indexInfo,
-                                 bool allow_sync, IndexBuildCallback callback, void *callback_state, HeapScanDesc scan);
+                                 bool allow_sync, IndexBuildCallback callback, void *callback_state);
 extern double* GlobalIndexBuildHeapScan(Relation heapRelation, Relation indexRelation, IndexInfo* indexInfo,
                                  IndexBuildCallback callback, void* callbackState);
-
 extern double IndexBuildVectorBatchScan(Relation heapRelation, Relation indexRelation, IndexInfo *indexInfo,
                                         VectorBatch *vecScanBatch, Snapshot snapshot,
                                         IndexBuildVecBatchScanCallback callback, void *callback_state, 
@@ -127,6 +148,8 @@ extern double IndexBuildVectorBatchScan(Relation heapRelation, Relation indexRel
 
 
 extern void validate_index(Oid heapId, Oid indexId, Snapshot snapshot);
+extern void validate_index_heapscan(
+    Relation heapRelation, Relation indexRelation, IndexInfo* indexInfo, Snapshot snapshot, v_i_state* state);
 
 extern void index_set_state_flags(Oid indexId, IndexStateFlagsAction action);
 extern void reindex_indexpart_internal(Relation heapRelation, 
@@ -135,22 +158,19 @@ extern void reindex_indexpart_internal(Relation heapRelation,
                                        Oid indexPartId);
 extern void reindex_index(Oid indexId, Oid indexPartId,
                           bool skip_constraint_checks, AdaptMem *memInfo,
-                          bool dbWide, char persistence);
+                          bool dbWide);
 extern void ReindexGlobalIndexInternal(Relation heapRelation, Relation iRel, IndexInfo* indexInfo);
-
 
 /* Flag bits for reindex_relation(): */
 #define REINDEX_REL_PROCESS_TOAST		0x01
 #define REINDEX_REL_SUPPRESS_INDEX_USE	0x02
 #define REINDEX_REL_CHECK_CONSTRAINTS	0x04
 
-extern bool reindex_relation(Oid relid, int flags, int reindexType,
-                             AdaptMem *memInfo = NULL, bool dbWide = false,
-                             IndexKind indexKind = ALL_KIND);
-
+extern bool reindex_relation(Oid relid, int flags, int reindexType, AdaptMem* memInfo = NULL, bool dbWide = false,
+    IndexKind indexKind = ALL_KIND);
 extern bool ReindexIsProcessingHeap(Oid heapOid);
 extern bool ReindexIsProcessingIndex(Oid indexOid);
-extern Oid  IndexGetRelation(Oid indexId, bool missing_ok);
+extern Oid IndexGetRelation(Oid indexId, bool missing_ok);
 
 typedef struct
 {
@@ -182,6 +202,7 @@ extern void PartitionNameCallbackForIndexPartition(Oid partitionedRelationOid,
                                                    LOCKMODE callbackobj_lockMode);
 extern void reindex_partIndex(Relation heapRel,  Partition heapPart, Relation indexRel , Partition indexPart);
 extern bool reindexPartition(Oid relid, Oid partOid, int flags, int reindexType);
+extern void AddGPIForPartition(Oid partTableOid, Oid partOid);
 extern void mergeBTreeIndexes(List* mergingBtreeIndexes, List* srcPartMergeOffset);
 extern void SetIndexCreateExtraArgs(IndexCreateExtraArgs* extra, Oid psortOid, bool isPartition, bool isGlobal);
 #endif   /* INDEX_H */

@@ -21,6 +21,31 @@
 #include <netdb.h>
 #endif
 
+/*
+ * GetEnvStr
+ *
+ * Note: malloc space for get the return of getenv() function, then return the malloc space.
+ *         so, this space need be free.
+ */
+static char* GetEnvStr(const char* env)
+{
+    char* tmpvar = NULL;
+    const char* temp = getenv(env);
+    errno_t rc = 0;
+    if (temp != NULL) {
+        size_t len = strlen(temp);
+        if (0 == len)
+            return NULL;
+        tmpvar = (char*)malloc(len + 1);
+        if (tmpvar != NULL) {
+            rc = strcpy_s(tmpvar, len + 1, temp);
+            securec_check_c(rc, "\0", "\0");
+            return tmpvar;
+        }
+    }
+    return NULL;
+}
+
 /* --------------------------
  * get_prompt
  *
@@ -138,42 +163,32 @@ char* get_prompt(promptStatus_t status)
 
                         /* INET socket */
                         if (NULL != host && host[0] && !is_absolute_path(host)) {
-                            rc = strncpy_s(buf, sizeof(buf), host, strlen(host));
-                            securec_check_c(rc, "", "");
+                            strlcpy(buf, host, sizeof(buf));
                             if (*p == 'm')
                                 buf[strcspn(buf, ".")] = '\0';
                         }
 #ifdef HAVE_UNIX_SOCKETS
                         /* UNIX socket */
                         else {
-                            if ((host == NULL) || strcmp(host, DEFAULT_PGSOCKET_DIR) == 0 || *p == 'm') {
-                                rc = strncpy_s(buf, sizeof(buf), "[local]", strlen("[local]"));
-                                securec_check_c(rc, "", "");
-                            } else {
+                            if ((host == NULL) || strcmp(host, DEFAULT_PGSOCKET_DIR) == 0 || *p == 'm')
+                                strlcpy(buf, "[local]", sizeof(buf));
+                            else
                                 check_sprintf_s(sprintf_s(buf, sizeof(buf), "[local:%s]", host));
-                            }
                         }
 #endif
                     }
                     break;
                     /* DB server port number */
-                case '>': {
-                    char *port = PQport(pset.db);
-                    if (port != NULL) {
-                        rc = strncpy_s(buf, sizeof(buf), port, strlen(port));
-                        securec_check_c(rc, "", "");
-                    }
+                case '>':
+                    if ((pset.db != NULL) && (PQport(pset.db) != NULL))
+                        strlcpy(buf, PQport(pset.db), sizeof(buf));
                     break;
-                }
                     /* DB server user name */
-                case 'n': {
-                    const char *userName = session_username();
-                    if (userName != NULL) {
-                        rc = strncpy_s(buf, sizeof(buf), userName, strlen(userName));
-                        securec_check_c(rc, "", "");
-                    }
+                case 'n':
+                    if (pset.db != NULL)
+                        strlcpy(buf, session_username(), sizeof(buf));
                     break;
-                }
+
                 case '0':
                 case '1':
                 case '2':
@@ -284,10 +299,8 @@ char* get_prompt(promptStatus_t status)
                     nameend = (int)strcspn(name, ":");
                     name[nameend] = '\0';
                     val = GetVariable(pset.vars, name);
-                    if (val != NULL) {
-                        rc = strncpy_s(buf, sizeof(buf), val, strlen(val));
-                        securec_check_c(rc, "", "");
-                    }
+                    if (NULL != val)
+                        strlcpy(buf, val, sizeof(buf));
                     free(name);
                     name = NULL;
                     p += nameend + 1;
@@ -322,12 +335,9 @@ char* get_prompt(promptStatus_t status)
             esc = false;
         }
 
-        if (!esc) {
-            rc = strncat_s(destination, sizeof(destination), buf, strlen(buf));
-            securec_check_c(rc, "", "");
-        }
+        if (!esc)
+            strlcat(destination, buf, sizeof(destination));
     }
 
     return destination;
 }
-

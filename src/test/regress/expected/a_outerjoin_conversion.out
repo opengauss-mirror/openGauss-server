@@ -34,7 +34,7 @@ select * from t11, t12 where t11.c1    = t12.c2(+) order by 1,2,3,4,5,6;
  15 | 15 | 15 |    |    |   
 (15 rows)
 
-explain(costs off, nodes off)
+explain(costs off)
 select * from t11, t12 where t11.c1    = t12.c2(+) order by 1,2,3,4,5,6;
                          QUERY PLAN                         
 ------------------------------------------------------------
@@ -67,7 +67,7 @@ select * from t11, t12 where t11.c1(+) = t12.c2 order by 1,2,3,4,5,6;
     |    |    | 20 | 20 | 20
 (15 rows)
 
-explain(costs off, nodes off)
+explain(costs off)
 select * from t11, t12 where t11.c1(+) = t12.c2 order by 1,2,3,4,5,6;
                          QUERY PLAN                         
 ------------------------------------------------------------
@@ -90,7 +90,7 @@ select * from t11, t12 where t11.c1 = t12.c1(+) and t11.c1 > 10 order by 1,2,3,4
  15 | 15 | 15 |    |    |   
 (5 rows)
 
-explain(costs off, nodes off)
+explain(costs off)
 select * from t11, t12 where t11.c1 = t12.c1(+) and t11.c1 > 10 order by 1,2,3,4,5,6;
                          QUERY PLAN                         
 ------------------------------------------------------------
@@ -112,7 +112,7 @@ select * from t11, t12 where t11.c1 = t12.c1(+) and t11.c1 in (select c3 from t1
  10 | 10 | 10 | 10 | 10 | 10
 (2 rows)
 
-explain(costs off, nodes off)
+explain(costs off)
 select * from t11, t12 where t11.c1 = t12.c1(+) and t11.c1 in (select c3 from t13 where c1 > 8) order by 1,2,3,4,5,6;
                          QUERY PLAN                         
 ------------------------------------------------------------
@@ -139,7 +139,7 @@ select * from t11, t12 where t11.c1 = t12.c1(+) and t12.c1 in (select c3 from t1
  10 | 10 | 10 | 10 | 10 | 10
 (2 rows)
 
-explain(costs off, nodes off)
+explain(costs off)
 select * from t11, t12 where t11.c1 = t12.c1(+) and t12.c1 in (select c3 from t13 where c1 > 8) order by 1,2,3,4,5,6;
                        QUERY PLAN                       
 --------------------------------------------------------
@@ -180,7 +180,7 @@ select * from t11, t12 where t11.c1(+) = t12.c1 and t11.c2(+) = t12.c2    order 
     |    |    | 20 | 20 | 20
 (15 rows)
 
-explain(costs off, nodes off)
+explain(costs off)
 select * from t11, t12 where t11.c1(+) = t12.c1 and t11.c2(+) = t12.c2    order by 1,2,3,4,5,6;
                           QUERY PLAN                          
 --------------------------------------------------------------
@@ -213,7 +213,7 @@ select * from t11, t12 where t11.c1 = t12.c1(+) and t11.c2 = t12.c2(+) order by 
  15 | 15 | 15 |    |    |   
 (15 rows)
 
-explain(costs off, nodes off)
+explain(costs off)
 select * from t11, t12 where t11.c1 = t12.c1(+) and t11.c2 = t12.c2(+) order by 1,2,3,4,5,6;
                           QUERY PLAN                          
 --------------------------------------------------------------
@@ -261,7 +261,7 @@ order by t14.c4,t11.c1, t12.c2, t13.c3;
  30 |    |    |   
 (23 rows)
 
-explain(costs off, nodes off)
+explain(costs off)
 select t14.c4, t11.c1, t12.c2, t13.c3
 from t11,t12,t13,t14
 where t11.c1(+) = t14.a4 and
@@ -323,7 +323,7 @@ order by t14.c4;
  30 |    |    |   
 (23 rows)
 
-explain(costs off, nodes off)
+explain(costs off)
 select t14.c4, t11.c1, t12.c2, t13.c3
 from t11,t12,t13,t14
 where t11.c1(+) = t14.a4 and
@@ -372,7 +372,7 @@ select * from t14, (select t12.c1 as dt_col1, t13.c2 as dt_col2 from t12,t13 whe
  20 | 20 | 20 |      20 |        
 (15 rows)
 
-explain(costs off, nodes off)
+explain(costs off)
 select * from t14, (select t12.c1 as dt_col1, t13.c2 as dt_col2 from t12,t13 where t12.c1 = t13.c1(+)) dt where t14.a4 = dt.dt_col1 order by 1,2,3,4,5;
                  QUERY PLAN                 
 --------------------------------------------
@@ -411,7 +411,7 @@ where t11.c1 = t12.c1(+) and t11.c2 in (
  10 | 10 | 10 | 10
 (10 rows)
 
-explain (costs off, nodes off)
+explain (costs off)
 select t11.c1,t11.c2, t12.c1, t12.c2
 from t11, t12
 where t11.c1 = t12.c1(+) and t11.c2 in (
@@ -466,7 +466,7 @@ where t11.c1 = t12.c1(+) and t11.c2 in (
  15 | 15 |    |   
 (15 rows)
 
-explain (costs off, nodes off)
+explain (costs off)
 select t11.c1,t11.c2, t12.c1, t12.c2
 from t11, t12
 where t11.c1 = t12.c1(+) and t11.c2 in (
@@ -516,7 +516,7 @@ where t11.c1 = t12.c1(+) and t11.c2 in (
  10 | 10 | 10 | 10
 (10 rows)
 
-explain (costs off, nodes off)
+explain (costs off)
 select t11.c1,t11.c2, t12.c1, t12.c2
 from t11, t12
 where t11.c1 = t12.c1(+) and t11.c2 in (
@@ -586,7 +586,7 @@ from t14, (
  30 | 30 | 30 |         |        
 (30 rows)
 
-explain (costs off, nodes off)
+explain (costs off)
 select *
 from t14, (
 	select t12.c1 as dt_col1, t13.c2 as dt_col2
@@ -633,7 +633,7 @@ from t14, (
  20 | 20 | 20 |      20 |        
 (15 rows)
 
-explain (costs off, nodes off)
+explain (costs off)
 select *
 from t14, (
 	select t12.c1 as dt_col1, t13.c2 as dt_col2
@@ -697,7 +697,7 @@ from
     |   
 (30 rows)
 
-explain (costs off, nodes off)
+explain (costs off)
 select *
 from
 (
@@ -750,7 +750,7 @@ from
     |   
 (16 rows)
 
-explain  (costs off, nodes off)
+explain  (costs off)
 select *
 from
 (
@@ -804,7 +804,7 @@ select t11.c1, t11.c1, (select t12.c2 from t12 where t11.c1 = t12.c1(+)) from t1
  15 | 15 |   
 (10 rows)
 
-explain (costs off, nodes off)
+explain (costs off)
 select t11.c1, t11.c1 from t11 where t11.c1 > 5 and t11.c2 in (select t12.c2 from t12 where t11.c1 = t12.c1(+)) order by 1,2;
                  QUERY PLAN                 
 --------------------------------------------
@@ -1226,7 +1226,7 @@ ERROR:  Operator "(+)" can only be used in WhereClause of Select-Statement or Su
 LINE 5:   update set t15.c1 = t11.c2 where t11.c3 = t15.c3(+)
                                                     ^
 --support subquery in update/delete/merge-into whereclause--
-explain(costs off, nodes off)
+explain(costs off)
 update t15 set c2 = 1 where t15.c1 = (select t11.c2 from t11, t15 where t15.c2(+) = t11.c3);
                       QUERY PLAN                       
 -------------------------------------------------------
@@ -1241,7 +1241,7 @@ update t15 set c2 = 1 where t15.c1 = (select t11.c2 from t11, t15 where t15.c2(+
          Filter: (c1 = $0)
 (9 rows)
 
-explain(costs off, nodes off)
+explain(costs off)
 delete from t15 using t11 where exists (select t11.c2 from t11, t15 where t15.c2(+) = t11.c3);
                                QUERY PLAN                               
 ------------------------------------------------------------------------
@@ -1352,7 +1352,7 @@ select * from (select t11.c1 a from t11 left join t12 on t11.c1 = t12.c2) inner 
  10 | 10 | 10 | 10
 (10 rows)
 
-explain (verbose on, costs off, nodes off, analyze on, timing off, detail off, NUM_NODES off, buffers off, cpu off)
+explain (verbose on, costs off, analyze on, timing off, detail off, cpu off)
 select * from (select t11.c1 a from t11 left join t12 on t11.c1 = t12.c2) inner join t13 on (a = c3) order by 1,2,3,4;
                                    QUERY PLAN                                    
 ---------------------------------------------------------------------------------
@@ -1381,7 +1381,7 @@ select * from (select t11.c1 a from t11 left join t12 on t11.c1 = t12.c2) inner 
 --? Total runtime: .* ms
 (23 rows)
 
-explain(verbose on, costs off, nodes off)
+explain(verbose on, costs off)
 select * from (select t11.c1 a from t11,t12 where t11.c1 = t12.c2(+)) inner join t13 on (a = c3) order by 1,2,3,4;
                        QUERY PLAN                       
 --------------------------------------------------------

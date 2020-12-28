@@ -1,4 +1,6 @@
 #include "access/dfs/dfs_query.h"
+#include "access/dfs/dfs_query_reader.h"
+#include "access/dfs/dfs_wrapper.h"
 #include "hdfs_fdw.h"
 #include "scheduler.h"
 #include "access/reloptions.h"
@@ -76,18 +78,11 @@ static const HdfsValidOption ValidDFSOptionArray[] = {{OPTION_NAME_LOCATION, T_F
 static const HdfsValidOption ValidServerTypeOptionArray[] = {
     {OBS_SERVER, T_SERVER_TYPE_OPTION}, {HDFS_SERVER, T_SERVER_TYPE_OPTION}, {DUMMY_SERVER, T_SERVER_TYPE_OPTION}};
 
-#define HDFS_FORMAT_ORC "orc"
-#define HDFS_FORMAT_TEXT "text"
-#define HDFS_FORMAT_CSV "csv"
-#define HDFS_FORMAT_PARQUET "parquet"
-
 #define DELIM_MAX_LEN (10)
 #define INVALID_DELIM_CHAR ("\\.abcdefghijklmnopqrstuvwxyz0123456789")
 #define NULL_STR_MAX_LEN (100)
 
 #define ESTIMATION_ITEM "EstimationItem"
-
-typedef enum { ORCFORMAT, TEXTFORMAT, CSVFORMAT, PARQUETFORMAT, UNKNOWNFORMAT } DfsFileFormat;
 
 struct OptionsFound {
     DefElem* optionDef;
@@ -150,7 +145,6 @@ void checkObsPath(char* foldername, char* printName, const char* delimiter);
 static Oid HdfsInsertForeignPartitionEntry(
     CreateForeignTableStmt* stmt, Oid relid, Relation pg_partition, int2vector* pkey);
 static StringInfo HdfsGetOptionNames(uint32 checkOptionBit);
-static DFSFileType CheckFormat(DefElem* defel, uint32 whichOption);
 static void CheckCheckEncoding(DefElem* defel);
 static void CheckFilenamesForPartitionFt(List* OptList);
 extern bool CodeGenThreadObjectReady();
@@ -162,6 +156,8 @@ static bool CheckTextCsvOptionsFound(DefElem* optionDef, TextCsvOptionsFound* te
 static void CheckTextCsvOptions(
     const TextCsvOptionsFound* textOptionsFound, const char* checkEncodingLevel, DFSFileType formatType);
 static bool IsHdfsFormat(List* OptList);
+static DFSFileType getFormatByDefElem(DefElem* opt);
+static DFSFileType getFormatByName(char* format);
 static bool CheckExtOption(List* extOptList, const char* str);
 static uint32 getOptionBitmapForFt(DFSFileType fileFormat, uint32 ftTypeBitmap);
 static char* checkLocationOption(char* location);
@@ -299,14 +295,54 @@ void checkOptionNameValidity(List* OptionList, uint32 whichOption)
  * @in ServerOptionList: The given foreign server option list.
  * @return None.
  */
-void serverOptionValidator(List* ServerOptionList)
+void ServerOptionCheckSet(List* ServerOptionList, ServerTypeOption serverType, 
+                            bool& addressFound, bool& cfgPathFound, bool& akFound, bool& sakFound, bool& encrypt,
+                            bool& userNameFound, bool& passWordFound, bool& regionFound, char*& hostName,
+                            char*& ak, char*& sk, char*& regionStr)
 {
     ListCell* optionCell = NULL;
+
+    foreach (optionCell, ServerOptionList) {
+
+        DefElem* optionDef = (DefElem*)lfirst(optionCell);
+        char* optionName = optionDef->defname;
+        if (0 == pg_strcasecmp(optionName, OPTION_NAME_ADDRESS)) {
+            addressFound = true;
+            if (T_HDFS_SERVER == serverType) {
+                CheckGetServerIpAndPort(defGetString(optionDef), NULL, true, -1);
+            } else {
+                hostName = defGetString(optionDef);
+            }
+
+        } else if (0 == pg_strcasecmp(optionName, OPTION_NAME_CFGPATH)) {
+            cfgPathFound = true;
+            CheckFoldernameOrFilenamesOrCfgPtah(defGetString(optionDef), OPTION_NAME_CFGPATH);
+        } else if (0 == pg_strcasecmp(optionName, OPTION_NAME_SERVER_ENCRYPT)) {
+            encrypt = defGetBoolean(optionDef);
+        } else if (0 == pg_strcasecmp(optionName, OPTION_NAME_SERVER_AK)) {
+            ak = defGetString(optionDef);
+            akFound = true;
+        } else if (0 == pg_strcasecmp(optionName, OPTION_NAME_SERVER_SAK)) {
+            sk = defGetString(optionDef);
+            sakFound = true;
+        } else if (0 == pg_strcasecmp(optionName, OPTION_NAME_USER_NAME)) {
+            userNameFound = true;
+        } else if (0 == pg_strcasecmp(optionName, OPTION_NAME_PASSWD)) {
+            passWordFound = true;
+        } else if (0 == pg_strcasecmp(optionName, OPTION_NAME_REGION)) {
+            regionFound = true;
+            regionStr = defGetString(optionDef);
+        }
+    }
+}
+
+void serverOptionValidator(List* ServerOptionList)
+{
     bool addressFound = false;
     bool cfgPathFound = false;
     bool akFound = false;
     bool sakFound = false;
-    bool encrypt = false;
+    bool encrypt = true;
     bool userNameFound = false;
     bool passWordFound = false;
     bool regionFound = false;
@@ -366,38 +402,8 @@ void serverOptionValidator(List* ServerOptionList)
     /*
      * Thirdly, check the validity of all option values.
      */
-    foreach (optionCell, ServerOptionList) {
-
-        DefElem* optionDef = (DefElem*)lfirst(optionCell);
-        char* optionName = optionDef->defname;
-        if (0 == pg_strcasecmp(optionName, OPTION_NAME_ADDRESS)) {
-            addressFound = true;
-            if (T_HDFS_SERVER == serverType) {
-                CheckGetServerIpAndPort(defGetString(optionDef), NULL, true, -1);
-            } else {
-                hostName = defGetString(optionDef);
-            }
-
-        } else if (0 == pg_strcasecmp(optionName, OPTION_NAME_CFGPATH)) {
-            cfgPathFound = true;
-            CheckFoldernameOrFilenamesOrCfgPtah(defGetString(optionDef), OPTION_NAME_CFGPATH);
-        } else if (0 == pg_strcasecmp(optionName, OPTION_NAME_SERVER_ENCRYPT)) {
-            encrypt = defGetBoolean(optionDef);
-        } else if (0 == pg_strcasecmp(optionName, OPTION_NAME_SERVER_AK)) {
-            ak = defGetString(optionDef);
-            akFound = true;
-        } else if (0 == pg_strcasecmp(optionName, OPTION_NAME_SERVER_SAK)) {
-            sk = defGetString(optionDef);
-            sakFound = true;
-        } else if (0 == pg_strcasecmp(optionName, OPTION_NAME_USER_NAME)) {
-            userNameFound = true;
-        } else if (0 == pg_strcasecmp(optionName, OPTION_NAME_PASSWD)) {
-            passWordFound = true;
-        } else if (0 == pg_strcasecmp(optionName, OPTION_NAME_REGION)) {
-            regionFound = true;
-            regionStr = defGetString(optionDef);
-        }
-    }
+    ServerOptionCheckSet(ServerOptionList, serverType, addressFound, cfgPathFound, akFound, sakFound, 
+                         encrypt, userNameFound, passWordFound, regionFound, hostName, ak, sk, regionStr);
 
     if (T_OBS_SERVER == serverType) {
         if (addressFound && regionFound) {
@@ -488,26 +494,25 @@ static uint32 getOptionBitmapForFt(DFSFileType fileFormat, uint32 ftTypeBitmap)
              * to delete T_FOREIGN_TABLE_HDFS_ORC_OPTION option.
              * Only the HDFS_FOREIGN_TABLE_OPTION need to delete this option bitmap.
              */
-            optBitmap = optBitmap & (~T_FOREIGN_TABLE_HDFS_ORC_OPTION);
-            optBitmap = optBitmap & (~T_FOREIGN_TABLE_HDFS_PARQUET_OPTION);
             break;
         }
         case DFS_CSV: {
             optBitmap = optBitmap & (~T_FOREIGN_TABLE_TEXT_OPTION);
-            optBitmap = optBitmap & (~T_FOREIGN_TABLE_HDFS_ORC_OPTION);
-            optBitmap = optBitmap & (~T_FOREIGN_TABLE_HDFS_PARQUET_OPTION);
             break;
         }
         case DFS_ORC: {
             optBitmap = optBitmap & (~T_FOREIGN_TABLE_TEXT_OPTION);
             optBitmap = optBitmap & (~T_FOREIGN_TABLE_CSV_OPTION);
-            optBitmap = optBitmap & (~T_FOREIGN_TABLE_HDFS_PARQUET_OPTION);
             break;
         }
         case DFS_PARQUET: {
             optBitmap = optBitmap & (~T_FOREIGN_TABLE_TEXT_OPTION);
             optBitmap = optBitmap & (~T_FOREIGN_TABLE_CSV_OPTION);
-            optBitmap = optBitmap & (~T_FOREIGN_TABLE_HDFS_ORC_OPTION);
+            break;
+        }
+        case DFS_CARBONDATA: {
+            optBitmap = optBitmap & (~T_FOREIGN_TABLE_TEXT_OPTION);
+            optBitmap = optBitmap & (~T_FOREIGN_TABLE_CSV_OPTION);
             break;
         }
         default: {
@@ -515,7 +520,7 @@ static uint32 getOptionBitmapForFt(DFSFileType fileFormat, uint32 ftTypeBitmap)
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmodule(MOD_DFS),
-                    errmsg("Supported formats for the foreign table are: orc, parquet, text, csv.")));
+                    errmsg("Supported formats for the foreign table are: orc, parquet, carbondata, text, csv.")));
             Assert(0);
         }
     }
@@ -528,43 +533,20 @@ static uint32 getOptionBitmapForFt(DFSFileType fileFormat, uint32 ftTypeBitmap)
  * @in tabelOptionList: The given foreign table option list.
  * @return None.
  */
-void foreignTableOptionValidator(List* tabelOptionList, uint32 whichOption)
+static DFSFileType CheckOptionFormat(List* tabelOptionList)
 {
     ListCell* optionCell = NULL;
-    bool filenameFound = false;
-    bool foldernameFound = false;
     bool formatFound = false;
-    bool encodingFound = false;
-    bool totalrowsFound = false;
-    bool locationFound = false;
-
     DFSFileType formatType = DFS_INVALID;
-    char* checkEncodingLevel = NULL;
 
-    /* text parser options */
-    TextCsvOptionsFound textOptionsFoundDetail;
-    bool textOptionsFound = false;
-
-    /* option bit for option name validity */
-    uint32 name_validity_option = whichOption;
-
-#ifndef ENABLE_MULTIPLE_NODES
-    if (whichOption == HDFS_FOREIGN_TABLE_OPTION) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Un-supported feature"),
-                errdetail("HDFS foreign tables are no longer supported.")));
-    }
-#endif
-
-    /* check format */
     foreach (optionCell, tabelOptionList) {
         DefElem* optionDef = (DefElem*)lfirst(optionCell);
         char* optionName = optionDef->defname;
 
         if (0 == pg_strcasecmp(optionName, OPTION_NAME_FORMAT)) {
             formatFound = true;
-            formatType = CheckFormat(optionDef, whichOption);
+            char* format = defGetString(optionDef);
+            formatType = getFormatByName(format);
         }
     }
 
@@ -575,16 +557,15 @@ void foreignTableOptionValidator(List* tabelOptionList, uint32 whichOption)
                 errmsg("Need format option for the foreign table.")));
     }
 
-    name_validity_option = getOptionBitmapForFt(formatType, whichOption);
+    return formatType;
+}
 
-    /*
-     * Firstly, check validity of all option names.
-     */
-    checkOptionNameValidity(tabelOptionList, name_validity_option);
-
-    /*
-     * Secondly, check the validity of all option values.
-     */
+static void CheckOptionSet(List* tabelOptionList, uint32 whichOption, DFSFileType formatType,
+                        bool& filenameFound, bool& foldernameFound, bool& encodingFound, char*& checkEncodingLevel,
+                        bool& totalrowsFound, bool& locationFound, bool& textOptionsFound, 
+                        TextCsvOptionsFound& textOptionsFoundDetail)
+{
+    ListCell* optionCell = NULL;
     foreach (optionCell, tabelOptionList) {
 
         DefElem* optionDef = (DefElem*)lfirst(optionCell);
@@ -615,6 +596,50 @@ void foreignTableOptionValidator(List* tabelOptionList, uint32 whichOption)
             textOptionsFound = true;
         }
     }
+}
+
+void foreignTableOptionValidator(List* tabelOptionList, uint32 whichOption)
+{
+    bool filenameFound = false;
+    bool foldernameFound = false;
+    bool encodingFound = false;
+    bool totalrowsFound = false;
+    bool locationFound = false;
+
+    DFSFileType formatType = DFS_INVALID;
+    char* checkEncodingLevel = NULL;
+
+    /* text parser options */
+    TextCsvOptionsFound textOptionsFoundDetail;
+    bool textOptionsFound = false;
+
+    /* option bit for option name validity */
+    uint32 name_validity_option = whichOption;
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (whichOption == HDFS_FOREIGN_TABLE_OPTION) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Un-supported feature"),
+                errdetail("HDFS foreign tables are no longer supported.")));
+    }
+#endif
+
+    /* check format */
+    formatType = CheckOptionFormat(tabelOptionList);
+
+    name_validity_option = getOptionBitmapForFt(formatType, whichOption);
+
+    /*
+     * Firstly, check validity of all option names.
+     */
+    checkOptionNameValidity(tabelOptionList, name_validity_option);
+
+    /*
+     * Secondly, check the validity of all option values.
+     */
+    CheckOptionSet(tabelOptionList, whichOption, formatType, filenameFound, foldernameFound, encodingFound, 
+                    checkEncodingLevel, totalrowsFound, locationFound, textOptionsFound, textOptionsFoundDetail);
 
     if (textOptionsFound) {
         CheckTextCsvOptions(&textOptionsFoundDetail, checkEncodingLevel, formatType);
@@ -923,13 +948,16 @@ static ForeignScan* HdfsGetForeignPlan(
         partList,
         bestPath->path.locator_type,
         false,
+        columnList,
+        rel->max_attr,
         &fileNum);
     /*
-     * We parse quals which is needed and can be pushed down to orc reader from
-     * scanClauses for each column.
+     * We parse quals which is needed and can be pushed down to orc, parquet and carbondata
+     * reader from scanClauses for each column.
      */
     if (u_sess->attr.attr_sql.enable_hdfs_predicate_pushdown &&
-        (0 == pg_strcasecmp(format, HDFS_FORMAT_ORC) || 0 == pg_strcasecmp(format, HDFS_FORMAT_PARQUET))) {
+        (0 == pg_strcasecmp(format, DFS_FORMAT_PARQUET) || 0 == pg_strcasecmp(format, DFS_FORMAT_CARBONDATA) ||
+            0 == pg_strcasecmp(format, DFS_FORMAT_CARBONDATA))) {
         columnCount = rel->max_attr;
         hdfsQualColumn = fix_pushdown_qual(&hdfsQual, &scanClauses, partList);
         selectivity = (double*)palloc0(sizeof(double) * columnCount);
@@ -1021,14 +1049,15 @@ static void HdfsExplainForeignScan(ForeignScanState* scanState, ExplainState* ex
     const char* fileFormant = "File";
     char* format = HdfsGetOptionValue(foreignTableId, OPTION_NAME_FORMAT);
     if (format != NULL) {
-        if (0 == pg_strcasecmp(format, HDFS_FORMAT_ORC)) {
+        if (0 == pg_strcasecmp(format, DFS_FORMAT_ORC)) {
             fileFormant = "Orc File";
-        }
-        if (0 == pg_strcasecmp(format, HDFS_FORMAT_PARQUET)) {
+        } else if (0 == pg_strcasecmp(format, DFS_FORMAT_PARQUET)) {
             fileFormant = "Parquet File";
-        } else if (0 == pg_strcasecmp(format, HDFS_FORMAT_TEXT)) {
+        } else if (0 == pg_strcasecmp(format, DFS_FORMAT_CARBONDATA)) {
+            fileFormant = "Carbondata File";
+        } else if (0 == pg_strcasecmp(format, DFS_FORMAT_TEXT)) {
             fileFormant = "Text File";
-        } else if (0 == pg_strcasecmp(format, HDFS_FORMAT_CSV)) {
+        } else if (0 == pg_strcasecmp(format, DFS_FORMAT_CSV)) {
             fileFormant = "Csv File";
         }
     }
@@ -1080,6 +1109,7 @@ static void HdfsExplainForeignScan(ForeignScanState* scanState, ExplainState* ex
         }
 
         (void)ExplainPropertyList("Partition pruning", stringList, explainState);
+        list_free_deep(stringList);
     }
 
     /* show estimation details whether push down the plan to the compute pool.*/
@@ -1149,26 +1179,32 @@ static void HdfsBeginForeignScan(ForeignScanState* scanState, int eflags)
     Oid foreignTableId = RelationGetRelid(scanState->ss.ss_currentRelation);
     DfsPrivateItem* item = (DfsPrivateItem*)((DefElem*)linitial(foreignPrivateList))->arg;
 
-    /* Here we need to adjust the plan qual to avoid double filtering for ORC. */
+    /* Here we need to adjust the plan qual to avoid double filtering for ORC/Parquet/Carbondata. */
     char* format = NULL;
     if (options != NULL && foreignScan->rel && true == foreignScan->in_compute_pool)
         format = getFTOptionValue(foreignScan->options->fOptions, OPTION_NAME_FORMAT);
     else
         format = HdfsGetOptionValue(foreignTableId, OPTION_NAME_FORMAT);
 
-    if (format && (!pg_strcasecmp(format, HDFS_FORMAT_ORC) || !pg_strcasecmp(format, HDFS_FORMAT_PARQUET)))
+    if (format && (0 == pg_strcasecmp(format, DFS_FORMAT_ORC) || 0 == pg_strcasecmp(format, DFS_FORMAT_PARQUET) ||
+                      0 == pg_strcasecmp(format, DFS_FORMAT_CARBONDATA)))
         list_delete_list(&foreignScan->scan.plan.qual, item->hdfsQual);
-
-    if (!pg_strcasecmp(format, HDFS_FORMAT_ORC)) {
-        u_sess->contrib_cxt.file_format = ORCFORMAT;
-    } else if (!pg_strcasecmp(format, HDFS_FORMAT_PARQUET)) {
-        u_sess->contrib_cxt.file_format = PARQUETFORMAT;
-    } else if (!pg_strcasecmp(format, HDFS_FORMAT_CSV)) {
-        u_sess->contrib_cxt.file_format = CSVFORMAT;
-    } else if (!pg_strcasecmp(format, HDFS_FORMAT_TEXT)) {
-        u_sess->contrib_cxt.file_format = TEXTFORMAT;
+    if (format != NULL) {
+        if (0 == pg_strcasecmp(format, DFS_FORMAT_ORC)) {
+            u_sess->contrib_cxt.file_format = DFS_ORC;
+        } else if (0 == pg_strcasecmp(format, DFS_FORMAT_PARQUET)) {
+            u_sess->contrib_cxt.file_format = DFS_PARQUET;
+        } else if (0 == pg_strcasecmp(format, DFS_FORMAT_CSV)) {
+            u_sess->contrib_cxt.file_format = DFS_CSV;
+        } else if (0 == pg_strcasecmp(format, DFS_FORMAT_TEXT)) {
+            u_sess->contrib_cxt.file_format = DFS_TEXT;
+        } else if (0 == pg_strcasecmp(format, DFS_FORMAT_CARBONDATA)) {
+            u_sess->contrib_cxt.file_format = DFS_CARBONDATA;
+        } else {
+            u_sess->contrib_cxt.file_format = DFS_INVALID;
+        }
     } else {
-        u_sess->contrib_cxt.file_format = UNKNOWNFORMAT;
+        u_sess->contrib_cxt.file_format = DFS_INVALID;
     }
 
     /* if Explain with no Analyze or execute on CN, do nothing */
@@ -1512,9 +1548,10 @@ static void HdfsEndForeignScan(ForeignScanState* scanState)
         Relation rel = scanState->ss.ss_currentRelation;
 
         int fnumber;
-        if (ORCFORMAT == u_sess->contrib_cxt.file_format || PARQUETFORMAT == u_sess->contrib_cxt.file_format) {
+        if (DFS_ORC == u_sess->contrib_cxt.file_format || DFS_PARQUET == u_sess->contrib_cxt.file_format ||
+            DFS_CARBONDATA == u_sess->contrib_cxt.file_format) {
             fnumber = readerState->minmaxCheckFiles;
-        } else if (TEXTFORMAT == u_sess->contrib_cxt.file_format || CSVFORMAT == u_sess->contrib_cxt.file_format) {
+        } else if (DFS_TEXT == u_sess->contrib_cxt.file_format || DFS_CSV == u_sess->contrib_cxt.file_format) {
             fnumber = u_sess->contrib_cxt.file_number;
         } else
             fnumber = 0;
@@ -1887,24 +1924,35 @@ static void HdfsPartitionTblProcess(Node* obj, Oid relid, HDFS_PARTTBL_OPERATOR 
  */
 static void HdfsValidateTableDef(Node* Obj)
 {
+    DFSFileType format_type = DFS_INVALID;
+
     if (NULL == Obj)
         return;
 
     switch (nodeTag(Obj)) {
         case T_AlterTableStmt: {
-            List* cmds = ((AlterTableStmt*)Obj)->cmds;
+            AlterTableStmt* stmt = (AlterTableStmt*)Obj;
+            List* cmds = stmt->cmds;
             ListCell* lcmd = NULL;
+            Oid relid = InvalidOid;
+            LOCKMODE lockmode_getrelid = AccessShareLock;
 
             foreach (lcmd, cmds) {
                 AlterTableCmd* cmd = (AlterTableCmd*)lfirst(lcmd);
 
                 if (AT_AddColumn == cmd->subtype || AT_AlterColumnType == cmd->subtype) {
                     ColumnDef* colDef = (ColumnDef*)cmd->def;
-
+                    if (stmt->relation) {
+                        relid = RangeVarGetRelid(stmt->relation, lockmode_getrelid, true);
+                        if (OidIsValid(relid)) {
+                            char* format = HdfsGetOptionValue(relid, OPTION_NAME_FORMAT);
+                            format_type = getFormatByName(format);
+                        }
+                    }
                     if (AT_AddColumn == cmd->subtype) {
-                        OrcCheckDataType(colDef->typname, colDef->colname);
+                        DFSCheckDataType(colDef->typname, colDef->colname, format_type);
                     } else {
-                        OrcCheckDataType(colDef->typname, cmd->name);
+                        DFSCheckDataType(colDef->typname, cmd->name, format_type);
                     }
                 }
 
@@ -1959,15 +2007,17 @@ static void HdfsValidateTableDef(Node* Obj)
                     }
 
                     if (((CreateForeignTableStmt*)Obj)->part_state) {
-                        /* as for obs foreign table, unsupport parition table for text, csv format. */
+                        /* as for obs foreign table, unsupport parition table for text, csv, carbondata format. */
                         List* options = ((CreateForeignTableStmt*)Obj)->options;
                         char* fileType = getFTOptionValue(options, OPTION_NAME_FORMAT);
                         /* if the fileType is NULL, the foreignTableOptionValidator will throw error.*/
-                        if (NULL != fileType && (0 == pg_strcasecmp(fileType, HDFS_FORMAT_TEXT) ||
-                                                    0 == pg_strcasecmp(fileType, HDFS_FORMAT_CSV))) {
+                        if (NULL != fileType && (0 == pg_strcasecmp(fileType, DFS_FORMAT_TEXT) ||
+                                                    0 == pg_strcasecmp(fileType, DFS_FORMAT_CSV) ||
+                                                    0 == pg_strcasecmp(fileType, DFS_FORMAT_CARBONDATA))) {
                             ereport(ERROR,
                                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                    errmsg("The obs partition foreign table is not supported on text, csv format.")));
+                                    errmsg("The obs partition foreign table is not supported on text, csv, carbondata "
+                                           "format.")));
                         }
                     }
                 }
@@ -1988,8 +2038,16 @@ static void HdfsValidateTableDef(Node* Obj)
             if (IsHdfsFormat(((CreateForeignTableStmt*)Obj)->options)) {
                 ListCell* cell = NULL;
                 List* tableElts = ((CreateStmt*)Obj)->tableElts;
-                List* options = ((CreateForeignTableStmt*)Obj)->options;
-                char* fileType = getFTOptionValue(options, OPTION_NAME_FORMAT);
+                List* OptList = ((CreateForeignTableStmt*)Obj)->options;
+                DefElem* Opt = NULL;
+
+                foreach (cell, OptList) {
+                    Opt = (DefElem*)lfirst(cell);
+                    format_type = getFormatByDefElem(Opt);
+                    if (DFS_INVALID != format_type) {
+                        break;
+                    }
+                }
 
                 foreach (cell, tableElts) {
                     TypeName* typName = NULL;
@@ -2000,7 +2058,7 @@ static void HdfsValidateTableDef(Node* Obj)
                     }
 
                     typName = colDef->typname;
-                    OrcCheckDataType(typName, colDef->colname, fileType);
+                    DFSCheckDataType(typName, colDef->colname, format_type);
                 }
             }
 
@@ -2184,40 +2242,6 @@ static StringInfo HdfsGetOptionNames(uint32 checkOptionBit)
     return names;
 }
 
-/*
- *brief: Check format option.
- *input param @Defel: the option information struct pointer
- */
-static DFSFileType CheckFormat(DefElem* defel, uint32 whichOption)
-{
-    /*
-     * Currently, the orc format is supported for hdfs foreign table, but
-     * the parquet and csv formats will be supported in the future.
-     */
-    char* format = defGetString(defel);
-    DFSFileType format_type = DFS_INVALID;
-
-    if (format != NULL) {
-        if (0 == pg_strcasecmp(format, HDFS_FORMAT_ORC)) {
-            format_type = DFS_ORC;
-        } else if (0 == pg_strcasecmp(format, HDFS_FORMAT_TEXT)) {
-            format_type = DFS_TEXT;
-        } else if (0 == pg_strcasecmp(format, HDFS_FORMAT_CSV)) {
-            format_type = DFS_CSV;
-        } else if (0 == pg_strcasecmp(format, HDFS_FORMAT_PARQUET)) {
-            format_type = DFS_PARQUET;
-        } else {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmodule(MOD_DFS),
-                    errmsg("Invalid option \"%s\"", format),
-                    errhint("Valid options in this context are: orc, parquet, text, csv")));
-        }
-    }
-
-    return format_type;
-}
-
 static void checkSingleByteOption(const char* quoteStr, const char* optionName)
 {
     if (1 != strlen(quoteStr)) {
@@ -2350,13 +2374,64 @@ static bool IsHdfsFormat(List* OptList)
 
         if (0 == pg_strcasecmp(Opt->defname, OPTION_NAME_FORMAT)) {
             char* format = defGetString(Opt);
-            if (0 == pg_strcasecmp(format, HDFS_FORMAT_ORC) || 0 == pg_strcasecmp(format, HDFS_FORMAT_PARQUET)) {
+            if (0 == pg_strcasecmp(format, DFS_FORMAT_ORC) || 0 == pg_strcasecmp(format, DFS_FORMAT_PARQUET) ||
+                0 == pg_strcasecmp(format, DFS_FORMAT_CARBONDATA)) {
                 return true;
             }
         }
     }
 
     return false;
+}
+
+/*
+ *brief: Get format option.
+ *input param @DefElem: the option information struct pointer
+ */
+static DFSFileType getFormatByDefElem(DefElem* opt)
+{
+    char* format = NULL;
+
+    if (0 == pg_strcasecmp(opt->defname, OPTION_NAME_FORMAT)) {
+        format = defGetString(opt);
+        return getFormatByName(format);
+    }
+    return DFS_INVALID;
+}
+
+/*
+ *brief: Get format option.
+ *input param @format: the format(ORC/TEXT/CSV/Parquet/Carbondata)
+ */
+static DFSFileType getFormatByName(char* format)
+{
+    /*
+     * Currently, the orc format is supported for hdfs foreign table, but
+     * the parquet and csv formats will be supported in the future.
+     */
+    DFSFileType format_type = DFS_INVALID;
+
+    if (format != NULL) {
+        if (0 == pg_strcasecmp(format, DFS_FORMAT_ORC)) {
+            format_type = DFS_ORC;
+        } else if (0 == pg_strcasecmp(format, DFS_FORMAT_TEXT)) {
+            format_type = DFS_TEXT;
+        } else if (0 == pg_strcasecmp(format, DFS_FORMAT_CSV)) {
+            format_type = DFS_CSV;
+        } else if (0 == pg_strcasecmp(format, DFS_FORMAT_PARQUET)) {
+            format_type = DFS_PARQUET;
+        } else if (0 == pg_strcasecmp(format, DFS_FORMAT_CARBONDATA)) {
+            format_type = DFS_CARBONDATA;
+        } else {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmodule(MOD_DFS),
+                    errmsg("Invalid option \"%s\"", format),
+                    errhint("Valid options in this context are: orc, parquet, carbondata, text, csv")));
+        }
+    }
+
+    return format_type;
 }
 
 /*
@@ -2526,6 +2601,38 @@ static bool CheckTextCsvOptionsFound(DefElem* optionDef, TextCsvOptionsFound* te
  * @IN checkEncodingLevel: check encoding level
  * @See also:
  */
+static void CheckCsvOptions(const TextCsvOptionsFound* textOptionsFound, const char* checkEncodingLevel, 
+                            const char* delimiter, const char* nullstr, DFSFileType formatType, bool compatible_illegal_chars)
+{
+    const char* quoteStr = NULL;
+    const char* escapeStr = NULL;
+    quoteStr = textOptionsFound->quotestr.found ? defGetString(textOptionsFound->quotestr.optionDef) : "\"";
+    
+    if (NULL != strchr(delimiter, *quoteStr)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmodule(MOD_DFS),
+                errmsg("delimiter cannot contain quote character")));
+    }
+    
+    if (NULL != strstr(nullstr, quoteStr)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmodule(MOD_DFS),
+                errmsg("quote character must not appear in the NULL specification")));
+    }
+    
+    escapeStr = textOptionsFound->escapestr.found ? defGetString(textOptionsFound->escapestr.optionDef) : "\"";
+    if (textOptionsFound->quotestr.found && textOptionsFound->escapestr.found && quoteStr[0] == escapeStr[0]) {
+        escapeStr = "\0";
+    }
+    
+    if (compatible_illegal_chars) {
+        checkIllegalChr(quoteStr, OPTION_NAME_QUOTE);
+        checkIllegalChr(escapeStr, OPTION_NAME_ESCAPE);
+    }
+}
+
 static void CheckTextCsvOptions(
     const TextCsvOptionsFound* textOptionsFound, const char* checkEncodingLevel, DFSFileType formatType)
 {
@@ -2579,33 +2686,7 @@ static void CheckTextCsvOptions(
     }
 
     if (DFS_CSV == formatType) {
-        const char* quoteStr = NULL;
-        const char* escapeStr = NULL;
-        quoteStr = textOptionsFound->quotestr.found ? defGetString(textOptionsFound->quotestr.optionDef) : "\"";
-
-        if (NULL != strchr(delimiter, *quoteStr)) {
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmodule(MOD_DFS),
-                    errmsg("delimiter cannot contain quote character")));
-        }
-
-        if (NULL != strstr(nullstr, quoteStr)) {
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmodule(MOD_DFS),
-                    errmsg("quote character must not appear in the NULL specification")));
-        }
-
-        escapeStr = textOptionsFound->escapestr.found ? defGetString(textOptionsFound->escapestr.optionDef) : "\"";
-        if (textOptionsFound->quotestr.found && textOptionsFound->escapestr.found && quoteStr[0] == escapeStr[0]) {
-            escapeStr = "\0";
-        }
-
-        if (compatible_illegal_chars) {
-            checkIllegalChr(quoteStr, OPTION_NAME_QUOTE);
-            checkIllegalChr(escapeStr, OPTION_NAME_ESCAPE);
-        }
+        CheckCsvOptions(textOptionsFound, checkEncodingLevel, delimiter, nullstr, formatType, compatible_illegal_chars);
     }
 }
 
@@ -2632,13 +2713,16 @@ dfs::reader::Reader* getReader(
     Oid foreignTableId, dfs::reader::ReaderState* readerState, dfs::DFSConnector* conn, const char* format)
 {
     Assert(NULL != format);
-    if (!pg_strcasecmp(format, HDFS_FORMAT_ORC)) {
+    if (!pg_strcasecmp(format, DFS_FORMAT_ORC)) {
         return dfs::reader::createOrcReader(readerState, conn, true);
-    }
-    if (!pg_strcasecmp(format, HDFS_FORMAT_PARQUET)) {
+    } else if (!pg_strcasecmp(format, DFS_FORMAT_PARQUET)) {
         return dfs::reader::createParquetReader(readerState, conn, true);
-    } else if (!pg_strcasecmp(format, HDFS_FORMAT_TEXT)) {
+    } else if (!pg_strcasecmp(format, DFS_FORMAT_TEXT)) {
         return dfs::reader::createTextReader(readerState, conn, true);
+#ifdef ENABLE_MULTIPLE_NODES
+    } else if (!pg_strcasecmp(format, DFS_FORMAT_CARBONDATA)) {
+        return dfs::reader::createCarbondataReader(readerState, conn, true);
+#endif
     } else {
         return dfs::reader::createCsvReader(readerState, conn, true);
     }

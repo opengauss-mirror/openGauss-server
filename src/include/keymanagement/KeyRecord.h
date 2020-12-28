@@ -33,6 +33,7 @@ const int TDE_IV_LEN = 16;
 enum TDE_ALGO { TDE_ALGO_SM4_CTR_128, TDE_ALGO_AES_CTR_128, TDE_ALGO_NULL };
 
 class KeyRecord {
+
 public:
     KeyRecord();
     virtual ~KeyRecord() = default;

@@ -1,6 +1,23 @@
 -- clean up last work
-\! rm -rf @abs_srcdir@/data/parallel_export >/dev/null 2>&1
+\! rm -rf @abs_srcdir@/data/parallel_export/* >/dev/null 2>&1
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds_error_tbl.log -s ./tmp_check/status -e @abs_srcdir@/data/parallel_export
 -----Error table name longer than 64 chars
+create foreign table  ERROR_LOADING_TABLE_011
+(
+C_CHAR_3 CHAR(102400),  
+C_VARCHAR_3 VARCHAR(1024), 
+C_INT TINYINT,  
+C_NUMERIC numeric(10,5),  
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE
+)
+SERVER gsmpp_server
+OPTIONS(location '@abs_srcdir@/data/ERROR_LOADING_TABLE_011',
+format 'text',
+delimiter ',', 
+mode 'shared',
+reject_limit '1'
+) with error_loading_table_011_0123456789_0123456789_0123456789_0123456789;
+NOTICE:  identifier "error_loading_table_011_0123456789_0123456789_0123456789_0123456789" will be truncated to "error_loading_table_011_0123456789_0123456789_0123456789_012345"
 create table  LOADING_TABLE_011
 (
 C_CHAR_3 CHAR(512),  
@@ -9,6 +26,44 @@ C_INT TINYINT,
 C_NUMERIC numeric(10,5),  
 C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE
 );
+insert into LOADING_TABLE_011 select trim(C_CHAR_3),trim(C_VARCHAR_3),c_int,C_NUMERIC,C_TS_WITHOUT from 	ERROR_LOADING_TABLE_011;
+select rownum, rawrecord, detail from error_loading_table_011_0123456789_0123456789_0123456789_0123456789;
+NOTICE:  identifier "error_loading_table_011_0123456789_0123456789_0123456789_0123456789" will be truncated to "error_loading_table_011_0123456789_0123456789_0123456789_012345"
+ rownum |        rawrecord        |                 detail                 
+--------+-------------------------+----------------------------------------
+      2 | ABCDEFG,abcdefg,25,10.2 | missing data for column "c_ts_without"
+(1 row)
+
+CREATE FOREIGN TABLE error_data_1
+(
+c varchar(2),
+id int, 
+num float,  
+time timestamp without time zone,
+memo text
+)
+SERVER gsmpp_server
+OPTIONS(location '@abs_srcdir@/data/error_data_1.txt',
+format 'text',
+delimiter ',', 
+mode 'private',
+reject_limit '100'
+) WITH error_table_1;
+CREATE FOREIGN TABLE error_data_1_1
+(
+c varchar(2),
+id int, 
+num float,  
+time timestamp without time zone,
+memo text
+)
+SERVER gsmpp_server
+OPTIONS(location '@abs_srcdir@/data/error_data_1.txt',
+format 'text',
+delimiter ',', 
+mode 'private',
+reject_limit '1'
+) WITH error_table_1_1;
 create table  data_1_1
 (
 c varchar(2),
@@ -17,25 +72,146 @@ num float,
 time timestamp without time zone,
 memo text
 );
+SELECT * FROM error_data_1;
+ c | id | num | time | memo 
+---+----+-----+------+------
+ a |  1 |  .5 |      | abcd
+ b |  2 |  .5 |      | efgh
+ c |  3 |  .5 |      | ijkl
+ d |  4 |  .5 |      | mnop
+ d |  5 |  .5 |      | qrst
+ f |  6 |  .5 |      | uvwx
+ g |  7 |  .5 |      | yzab
+ h |  8 |  .5 |      | cdef
+ i |  9 |  .5 |      | ghij
+ g | 10 |  .5 |      | klmn
+(10 rows)
+
+INSERT INTO data_1_1 SELECT * FROM error_data_1;
+SELECT rownum, rawrecord, detail FROM error_table_1;
+ rownum | rawrecord | detail 
+--------+-----------+--------
+(0 rows)
+
 DELETE FROM data_1_1;
+INSERT INTO data_1_1 SELECT * FROM error_data_1_1;
+SELECT filename, rownum, rawrecord, detail FROM error_table_1_1;
+ filename | rownum | rawrecord | detail 
+----------+--------+-----------+--------
+(0 rows)
+
+explain insert into data_1_1 select * from error_data_1 limit 1;
+ERROR:  Un-support feature
+DETAIL:  subquery contains LIMIT clause
 --complex statement to foreign table
 ---
 create table data_1_2 (c1 int);
+insert into data_1_2(c1) select (select id from error_data_1);
+ERROR:  Un-support feature
+DETAIL:  too complex statement to foreign table
+insert into data_1_2(c1) select (select id from error_data_1) limit 1;
+ERROR:  Un-support feature
+DETAIL:  too complex statement to foreign table
 --statment contains agg
+-----
+insert into data_1_2 select count(*) from error_data_1;
 select * from data_1_2;
  c1 
 ----
-(0 rows)
+ 10
+(1 row)
 
 --statment contains ORDER BY
 create table  LOADING_TABLE_000(C_CHAR_3 CHAR(10),C_VARCHAR_3 VARCHAR(10),C_INT int,C_NUMERIC numeric(10,5),C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE);
+insert into LOADING_TABLE_000 select trim(C_CHAR_3),trim(C_VARCHAR_3),c_int,C_NUMERIC,C_TS_WITHOUT from ERROR_LOADING_TABLE_011 order by c_int;
 select * from LOADING_TABLE_000 order by c_int;
- c_char_3 | c_varchar_3 | c_int | c_numeric | c_ts_without 
-----------+-------------+-------+-----------+--------------
-(0 rows)
+  c_char_3  | c_varchar_3 | c_int | c_numeric |       c_ts_without       
+------------+-------------+-------+-----------+--------------------------
+ ABCDEFG    | abcdefg     |     3 |  10.20000 | Sun Dec 02 00:00:00 2012
+ ABCDEFG    | abcdefg     |    19 |  10.20000 | Tue Jan 01 00:00:00 2013
+ ABCDEFG    | abcdefg     |    25 |  10.20000 | Thu Sep 01 00:00:00 2011
+ ABCDEFG    | abcdefg     |   121 |  10.20000 | Mon Sep 01 00:00:00 2014
+(4 rows)
 
+--alter error table
+---
+alter table error_table_1_1 add column c1 int;
+ERROR:  Un-support feature
+DETAIL:  internal relation doesn't allow ALTER
+alter table error_table_1_1 rename nodeid to node_id;
+ERROR:  Un-support feature
+DETAIL:  internal relation doesn't allow ALTER
+--insert into error table
+---
+insert into error_table_1_1 values(11);
+ERROR:  Un-support feature
+DETAIL:  internal relation doesn't allow INSERT
+--update error table
+---
+update error_table_1_1 set nodeid = 0;
+ERROR:  Un-support feature
+DETAIL:  internal relation doesn't allow UPDATE
+---
+--Log error to remote
+---
+create foreign table ft_remote_log(c1 int, c2 varchar) server gsmpp_server options(location 'gsfs://127.0.0.1:8900/error_data_2.data', delimiter '|')
+remote log 'ft_remote_log' per node reject limit '100';
 create table t_remote(c1 int, c2 varchar);
+insert into t_remote select * from ft_remote_log;
+---
+--Log error to remote and local
+---
+create foreign table ft_log_both(c1 int, c2 varchar) server gsmpp_server options(location 'gsfs://127.0.0.1:8900/error_data_2.data', delimiter '|')
+log into err_ft_remote_log remote log 'err_ft_remote_log' per node reject limit '100';
+insert into t_remote select * from ft_log_both;
+select rownum, rawrecord, detail from err_ft_remote_log order by rownum;
+ rownum | rawrecord |                  detail                   
+--------+-----------+-------------------------------------------
+      1 | 1b|aa     | invalid input syntax for integer: "1b"
+      2 | a         | invalid input syntax for integer: "a"
+      3 | 2bbbb|bbb | invalid input syntax for integer: "2bbbb"
+(3 rows)
+
+CREATE NODE GROUP group_storage WITH (datanode1,datanode3);
+set default_storage_nodegroup = group_storage;
+show default_storage_nodegroup;
+ default_storage_nodegroup 
+---------------------------
+ group_storage
+(1 row)
+
+drop foreign table if exists f_s_latin1_utf8_001_01;
+NOTICE:  foreign table "f_s_latin1_utf8_001_01" does not exist, skipping
+CREATE FOREIGN TABLE f_s_latin1_utf8_001_01
+(
+    C_BIGINT BIGINT,
+    C_CHAR_1 CHAR(100),
+    C_CHAR_2 CHAR(100),
+    C_VARCHAR VARCHAR(1024),
+    C_TEXT TEXT,
+    C_CLOB CLOB,
+    C_NUMERIC NUMERIC(20,5),
+    C_DP DOUBLE PRECISION
+) SERVER gsmpp_server
+ OPTIONS (LOCATION '@abs_srcdir@/data/UTF8.txt',
+ COMPATIBLE_ILLEGAL_CHARS 'off',FORMAT 'text',DELIMITER '|',mode 'private',ENCODING 'UTF8')
+ WITH err_f_s_latin1_utf8_001_01
+ PER NODE REJECT LIMIT '10000';
 \d+ err_f_s_latin1_utf8_001_01
+                        Table "public.err_f_s_latin1_utf8_001_01"
+  Column   |           Type           | Modifiers | Storage  | Stats target | Description 
+-----------+--------------------------+-----------+----------+--------------+-------------
+ nodeid    | integer                  |           | plain    |              | 
+ begintime | timestamp with time zone |           | plain    |              | 
+ filename  | character varying        |           | extended |              | 
+ rownum    | bigint                   |           | plain    |              | 
+ rawrecord | text                     |           | extended |              | 
+ detail    | text                     |           | extended |              | 
+Has OIDs: no
+Distribute By: ROUND ROBIN
+Location Nodes: ALL DATANODES
+Options: orientation=row, internal_mask=33029, ignore_enable_hadoop_env=1, compression=no
+
 drop table if exists s_latin1_utf8_001_01;
 NOTICE:  table "s_latin1_utf8_001_01" does not exist, skipping
 CREATE TABLE s_latin1_utf8_001_01
@@ -48,7 +224,7 @@ CREATE TABLE s_latin1_utf8_001_01
     C_CLOB CLOB,
     C_NUMERIC NUMERIC(20,5),
     C_DP DOUBLE PRECISION
-) ;
+) DISTRIBUTE BY HASH(C_BIGINT);
 \d+ s_latin1_utf8_001_01
                            Table "public.s_latin1_utf8_001_01"
   Column   |          Type           | Modifiers | Storage  | Stats target | Description 
@@ -62,39 +238,43 @@ CREATE TABLE s_latin1_utf8_001_01
  c_numeric | numeric(20,5)           |           | main     |              | 
  c_dp      | double precision        |           | plain    |              | 
 Has OIDs: no
+Distribute By: HASH(c_bigint)
+Location Nodes: datanode1, datanode3
 Options: orientation=row, compression=no
 
+insert into s_latin1_utf8_001_01 select * from f_s_latin1_utf8_001_01;
 select count(*) from s_latin1_utf8_001_01;
  count 
 -------
-     0
+  1034
 (1 row)
 
 drop table if exists s_latin1_utf8_001_01;
+drop foreign table if exists f_s_latin1_utf8_001_01;
+drop node group group_storage;
+reset default_storage_nodegroup;
+show default_storage_nodegroup;
+ default_storage_nodegroup 
+---------------------------
+ installation
+(1 row)
+
 \! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 34
-
-Usage:
- kill [options] <pid|name> [...]
-
-Options:
- -a, --all              do not restrict the name-to-pid conversion to processes
-                        with the same uid as the present process
- -s, --signal <sig>     send specified signal
- -q, --queue <sig>      use sigqueue(2) rather than kill(2)
- -p, --pid              print pids without signaling them
- -l, --list [=<signal>] list signal names, or convert one to a name
- -L, --table            list signal names and numbers
-
- -h, --help     display this help and exit
- -V, --version  output version information and exit
-
-For more details see kill(1).
 ---
 -- dead circle check gds exit status
 ---
 \! gds_num=`ps ux | grep -w gds | grep -v grep | awk '{print $2}'|wc -l`; while(($gds_num>0)); do sleep 1; gds_num=`ps ux | grep -w gds | grep -v grep | awk '{print $2}'|wc -l`; done
+DROP FOREIGN TABLE ft_log_both;
+DROP FOREIGN TABLE ft_remote_log;
+DROP FOREIGN TABLE ERROR_LOADING_TABLE_011;
+DROP FOREIGN TABLE error_data_1;
+DROP FOREIGN TABLE error_data_1_1;
 DROP TABLE t_remote;
 DROP TABLE LOADING_TABLE_000;
 DROP TABLE data_1_2;
 DROP TABLE data_1_1;
 DROP TABLE LOADING_TABLE_011;
+\! wc -l @abs_srcdir@/data/parallel_export/ft_remote_log.0 | awk '{print $1}'
+3
+\! wc -l @abs_srcdir@/data/parallel_export/err_ft_remote_log.0 | awk '{print $1}'
+3

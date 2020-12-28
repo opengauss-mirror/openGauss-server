@@ -4,7 +4,6 @@
 --
 
 --dynamic smp+random plan, plan should be same
-set max_parallel_workers_per_gather=0;
 set plan_mode_seed = 1485495508;
 explain (costs off) select count(node_name) as dncnt
 	from pgxc_node where node_type='D'
@@ -137,7 +136,7 @@ partition p8 values less than (maxvalue)
 );
 
 set enable_hashagg = off;
-explain (nodes off, costs off)
+explain (costs off)
 with s1 as(
 	select a1, sum(b1) total from smp_mergeappend1 join smp_mergeappend2 on a1 = a2 group by a1
 ),
@@ -178,7 +177,7 @@ create table store_sales_extend_max_1t(ss_item_sk int,
 )
 with (orientation = column)  ;
 
-explain (nodes off, costs off)
+explain (costs off)
 select min((select max(ss_date) from store_sales_extend_min_1t) +
 		(select min(ss_time) from store_sales_extend_max_1t))
 		from store_sales_extend_min_1t;
@@ -203,7 +202,7 @@ create  table item_store_sold
     location_id number(28,0)
 )with (orientation=column)  ;
 
-explain (nodes off, costs off)
+explain (costs off)
 select (54 - 9) c1
 from
     item_store_sold t1,
@@ -227,13 +226,13 @@ set enable_seqscan=off;
 --update
 create table t(c1 int, c2 int, c3 int);
 
-explain (nodes off, costs off) update t set c2=2;
+explain (costs off) update t set c2=2;
 
 -- update column store
 create table tc(c1 int, c2 int, c3 int)
 WITH (ORIENTATION = COLUMN);
 
-explain (nodes off, costs off) update tc set c2=2;
+explain (costs off) update tc set c2=2;
 
 
 
@@ -243,9 +242,9 @@ create index t_bitmapor_c1 on t_bitmapor (c1);
 create index t_bitmapor_c2 on t_bitmapor (c2);
 create index t_bitmapor_c3 on t_bitmapor (c3);
 
-explain (nodes off, costs off) select * from t_bitmapor where c1=1 and c2=1 or c3=1;
+explain (costs off) select * from t_bitmapor where c1=1 and c2=1 or c3=1;
 
-explain (nodes off, costs off) select /*+ rows(t_bitmapor #2000000) */ * from t_bitmapor where c1=1 and c2=1 or c3=1;
+explain (costs off) select /*+ rows(t_bitmapor #2000000) */ * from t_bitmapor where c1=1 and c2=1 or c3=1;
 
 
 -- T_BitmapOr   column store
@@ -254,9 +253,9 @@ create index tc_bitmapor_c1 on tc_bitmapor (c1);
 create index tc_bitmapor_c2 on tc_bitmapor (c2);
 create index tc_bitmapor_c3 on tc_bitmapor (c3);
 
-explain (nodes off, costs off) select * from tc_bitmapor where c1=1 and c2=1 or c3=1;
+explain (costs off) select * from tc_bitmapor where c1=1 and c2=1 or c3=1;
 
-explain (nodes off, costs off) select /*+ rows(tc_bitmapor #2000000) */ * from tc_bitmapor where c1=1 and c2=1 or c3=1;
+explain (costs off) select /*+ rows(tc_bitmapor #2000000) */ * from tc_bitmapor where c1=1 and c2=1 or c3=1;
 
 
 create table replication_06 (c_id int, c_d_id character(20));
@@ -287,4 +286,3 @@ drop table if exists replication_02;
 drop table if exists replication_06;
 
 drop schema hw_smp cascade;
-reset max_parallel_workers_per_gather;

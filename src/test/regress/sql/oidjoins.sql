@@ -137,6 +137,18 @@ SELECT	ctid, attcollation
 FROM	pg_catalog.pg_attribute fk
 WHERE	attcollation != 0 AND
 	NOT EXISTS(SELECT 1 FROM pg_catalog.pg_collation pk WHERE pk.oid = fk.attcollation);
+SELECT	ctid, castsource
+FROM	pg_catalog.pg_cast fk
+WHERE	castsource != 0 AND
+	NOT EXISTS(SELECT 1 FROM pg_catalog.pg_type pk WHERE pk.oid = fk.castsource);
+SELECT	ctid, casttarget
+FROM	pg_catalog.pg_cast fk
+WHERE	casttarget != 0 AND
+	NOT EXISTS(SELECT 1 FROM pg_catalog.pg_type pk WHERE pk.oid = fk.casttarget);
+SELECT	ctid, castfunc
+FROM	pg_catalog.pg_cast fk
+WHERE	castfunc != 0 AND
+	NOT EXISTS(SELECT 1 FROM pg_catalog.pg_proc pk WHERE pk.oid = fk.castfunc);
 SELECT	ctid, relnamespace
 FROM	pg_catalog.pg_class fk
 WHERE	relnamespace != 0 AND

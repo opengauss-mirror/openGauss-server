@@ -78,9 +78,6 @@ ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE lseg;
 ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE path;
 ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE box;
 ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE polygon;
-ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE float8[];
-ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE float4[];
-ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE int2[];
 -- test: cannot change data type of DISTRIBUTE column.
 ALTER TABLE alter_addcols_58 ALTER COLUMN a SET DATA TYPE varchar(100);
 DROP TABLE alter_addcols_58;

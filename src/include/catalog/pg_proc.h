@@ -47,7 +47,8 @@ CATALOG(pg_proc,1255) BKI_BOOTSTRAP BKI_ROWTYPE_OID(81) BKI_SCHEMA_MACRO
     float4      prorows;         /* estimated # of rows out (if proretset) */
     Oid         provariadic;     /* element type of variadic array, or 0 */
     regproc     protransform;    /* transforms calls to it during planning */
-    char        prokind;         /* see PROKIND_ categories below */
+	bool		proisagg;		/* is it an aggregate? */
+	bool		proiswindow;	/* is it a window function? */
     bool        prosecdef;       /* security definer */
     bool        proleakproof;    /* is it a leak-proof function? */
     bool        proisstrict;     /* strict with respect to NULLs? */
@@ -75,8 +76,9 @@ CATALOG(pg_proc,1255) BKI_BOOTSTRAP BKI_ROWTYPE_OID(81) BKI_SCHEMA_MACRO
     aclitem     proacl[1];                /* access permissions */
     int2vector  prodefaultargpos;
     bool        fencedmode;
-    bool        proshippable;   /* if provolatile is not 'i', proshippable will determine if the func can be shipped */
+    bool        proshippable;    /* if provolatile is not 'i', proshippable will determine if the func can be shipped */
     bool        propackage;
+    char        prokind;         /* see PROKIND_ categories below */
 #endif
 } FormData_pg_proc;
 
@@ -91,7 +93,7 @@ typedef FormData_pg_proc *Form_pg_proc;
  *        compiler constants for pg_proc
  * ----------------
  */
-#define Natts_pg_proc 30
+#define Natts_pg_proc 32
 #define Anum_pg_proc_proname 1
 #define Anum_pg_proc_pronamespace 2
 #define Anum_pg_proc_proowner 3
@@ -100,33 +102,35 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define Anum_pg_proc_prorows 6
 #define Anum_pg_proc_provariadic 7
 #define Anum_pg_proc_protransform 8
-#define Anum_pg_proc_prokind 9
-#define Anum_pg_proc_prosecdef 10
-#define Anum_pg_proc_proleakproof 11
-#define Anum_pg_proc_proisstrict 12
-#define Anum_pg_proc_proretset 13
-#define Anum_pg_proc_provolatile 14
-#define Anum_pg_proc_pronargs 15
-#define Anum_pg_proc_pronargdefaults 16
-#define Anum_pg_proc_prorettype 17
-#define Anum_pg_proc_proargtypes 18
-#define Anum_pg_proc_proallargtypes 19
-#define Anum_pg_proc_proargmodes 20
-#define Anum_pg_proc_proargnames 21
-#define Anum_pg_proc_proargdefaults 22
-#define Anum_pg_proc_prosrc 23
-#define Anum_pg_proc_probin 24
-#define Anum_pg_proc_proconfig 25
-#define Anum_pg_proc_proacl 26
-#define Anum_pg_proc_prodefaultargpos 27
-#define Anum_pg_proc_fenced 28
-#define Anum_pg_proc_shippable 29
-#define Anum_pg_proc_package 30
+#define Anum_pg_proc_proisagg 9
+#define Anum_pg_proc_proiswindow 10
+#define Anum_pg_proc_prosecdef 11
+#define Anum_pg_proc_proleakproof 12
+#define Anum_pg_proc_proisstrict 13
+#define Anum_pg_proc_proretset 14
+#define Anum_pg_proc_provolatile 15
+#define Anum_pg_proc_pronargs 16
+#define Anum_pg_proc_pronargdefaults 17
+#define Anum_pg_proc_prorettype 18
+#define Anum_pg_proc_proargtypes 19
+#define Anum_pg_proc_proallargtypes 20
+#define Anum_pg_proc_proargmodes 21
+#define Anum_pg_proc_proargnames 22
+#define Anum_pg_proc_proargdefaults 23
+#define Anum_pg_proc_prosrc 24
+#define Anum_pg_proc_probin 25
+#define Anum_pg_proc_proconfig 26
+#define Anum_pg_proc_proacl 27
+#define Anum_pg_proc_prodefaultargpos 28
+#define Anum_pg_proc_fenced 29
+#define Anum_pg_proc_shippable 30
+#define Anum_pg_proc_package 31
+#define Anum_pg_proc_prokind 32
 
 /* proc_oid is only for builitin
  * func view shouldn't be included in Natts_pg_proc
  */
-#define Anum_pg_proc_oid 31
+#define Anum_pg_proc_oid 33
 
 /* ----------------
  *        initial contents of pg_proc
@@ -167,6 +171,7 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define INT4TOFLOAT8FUNCOID 316
 #define BTINT4CMP_OID 351
 #define RTRIM1FUNCOID 401
+#define NAME2TEXTFUNCOID 406
 #define HASHINT4OID 450
 #define HASHINT8OID 949
 #define HASHTEXTOID 400
@@ -233,6 +238,9 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define CURRVALFUNCOID 1575
 #define SETVAL1FUNCOID 1576
 #define SETVAL3FUNCOID 1765
+#define INT4NUMERICFUNCOID 1740
+#define INT8NUMERICFUNCOID 1781
+#define VARCHARINT8FUNCOID 4176
 #define RANDOMFUNCOID 1598
 #define ECEXTENSIONFUNCOID 4244
 #define ECHADOOPFUNCOID 4255
@@ -386,6 +394,7 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define GSENCRYPTAES128FUNCOID 3464
 #define TESTSKEWNESSRETURNTYPE 4048
 #define PERCENTILECONTAGGFUNCOID 4452
+#define MODEAGGFUNCOID 4461
 #define PGCHECKAUTHIDFUNCOID 3228
 
 /*
@@ -414,15 +423,6 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define PROVOLATILE_VOLATILE    'v'        /* can change even within a scan */
 
 /*
- * Symbolic values for proparallel column: these indicate whether a function
- * can be safely be run in a parallel backend, during parallelism but
- * necessarily in the master, or only in non-parallel mode.
- */
-#define PROPARALLEL_SAFE        's' /* can run in worker or master */
-#define PROPARALLEL_RESTRICTED  'r' /* can run in parallel master only */
-#define PROPARALLEL_UNSAFE      'u' /* banned while in parallel mode */
-
-/*
  * Symbolic values for proargmodes column.    Note that these must agree with
  * the FunctionParameterMode enum in parsenodes.h; we declare them here to
  * be accessible from either header.
@@ -432,6 +432,10 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define PROARGMODE_INOUT    'b'
 #define PROARGMODE_VARIADIC 'v'
 #define PROARGMODE_TABLE    't'
+
+#define PROC_LIB_PATH           "$libdir/"
+#define PORC_PLUGIN_LIB_PATH    "$libdir/pg_plugin/"
+#define PORC_SRC_LIB_PATH       "$libdir/proc_srclib/"
 
 #define OID_REGEXP_SPLIT_TO_TABLE 2765
 #define OID_REGEXP_SPLIT_TO_TABLE_NO_FLAG 2766

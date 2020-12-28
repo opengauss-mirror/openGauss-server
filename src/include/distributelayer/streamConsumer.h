@@ -47,7 +47,7 @@ class StreamConsumer : public StreamObj {
 public:
     StreamConsumer(MemoryContext context);
 
-    virtual ~StreamConsumer();
+    ~StreamConsumer();
 
     /* Init the consumer object. */
     void init(StreamKey key, List* execProducerNodes, ParallelDesc desc, StreamTransType transType,
@@ -65,14 +65,11 @@ public:
     /* Get nodeIdx of producer which is waited for. */
     int getFirstUnconnectedProducerNodeIdx();
 
-    /* Wake up consumer and let it work, for TCP. */
-    static bool wakeUpConsumer(StreamKey key, StreamConnInfo connInfo);
+    /* Wake up consumer and let it work. */
+    static bool wakeUpConsumerCallBack(CommStreamKey commKey, StreamConnInfo connInfo);
 
-    /* Wake up consumer and let it work, for SCTP. */
-    static bool wakeUpConsumerCallBack(SctpStreamKey key, StreamConnInfo connInfo);
-
-    /* Release sctp mode stream. */
-    void releaseSctpStream();
+    /* Release comm mode stream. */
+    void releaseCommStream();
 
     /* Get nodeIdx of producer by nodename. */
     int getNodeIdx(const char* nodename);
@@ -91,15 +88,14 @@ public:
     List* m_originProducerNodeList;
 
 private:
-    /* Update the stream info, for TCP. */
-    bool updateStreamInfo(StreamConnInfo* connInfo);
 
-    /* Update the stream info, for SCTP. */
-    bool updateStreamSctpInfo(StreamConnInfo* connInfo);
+    /* Update the stream info. */
+    bool updateStreamCommInfo(StreamConnInfo* connInfo);
 
     /* Update the transport info. */
     void updateTransportInfo(StreamValue* val);
 
+private:
     /* Current producer number. */
     int m_currentProducerNum;
 
@@ -118,4 +114,3 @@ private:
 };
 
 #endif /* SRC_INCLUDE_DISTRIBUTELAYER_STREAMCONSUMER_H_ */
-

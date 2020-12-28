@@ -1,0 +1,1182 @@
+--==========================================================
+--==========================================================
+\set ECHO all
+drop schema if exists hw_es_multi_column_stats cascade;
+NOTICE:  schema "hw_es_multi_column_stats" does not exist, skipping
+create schema hw_es_multi_column_stats;
+set current_schema = hw_es_multi_column_stats;
+set default_statistics_target=-2;
+--========================================================== create table
+create table t1 (a int, b int, c int, d int) distribute by hash(a);
+create table t1r (a int, b int, c int, d int) distribute by replication;
+--========================================================== empty table : analyze
+analyze t1 ((a, c));
+analyze t1 ((b, c));
+analyze t1r ((a, c));
+analyze t1r ((b, c));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1        | m[1,3]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[2,3]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+(2 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1r' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1r       | m[1,3]   | f         |         0 |         0 |          0 |            1 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,3]   | f         |         0 |         0 |          0 |            1 |                  |                   | 
+(2 rows)
+
+alter table t1 add statistics ((a, b));
+alter table t1 add statistics ((b, c));
+WARNING:  Some of extended statistics have already been defined.
+alter table t1 add statistics ((a, d));
+alter table t1 add statistics ((b, d));
+alter table t1 add statistics ((b, c, d));
+alter table t1 add statistics ((a, b, c, d));
+alter table t1r add statistics ((a, b));
+alter table t1r add statistics ((b, c));
+WARNING:  Some of extended statistics have already been defined.
+alter table t1r add statistics ((a, d));
+alter table t1r add statistics ((b, d));
+alter table t1r add statistics ((b, c, d));
+alter table t1r add statistics ((a, b, c, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1        | m[1,2]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[1,3]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[1,4]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[2,3]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[2,4]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+(7 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1r' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1r       | m[1,2]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[1,3]     | f         |         0 |         0 |          0 |            1 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[1,4]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,3]     | f         |         0 |         0 |          0 |            1 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,4]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+(7 rows)
+
+analyze t1 ((b, d));
+analyze t1 ((c, d));
+analyze t1r ((b, d));
+analyze t1r ((c, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1        | m[1,2]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[1,3]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[1,4]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[2,3]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[2,4]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[3,4]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+(8 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1r' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1r       | m[1,2]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[1,3]     | f         |         0 |         0 |          0 |            1 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[1,4]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,3]     | f         |         0 |         0 |          0 |            1 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,4]     | f         |         0 |         0 |          0 |            1 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[3,4]     | f         |         0 |         0 |          0 |            1 |                  |                   | 
+(8 rows)
+
+analyze t1;
+analyze t1r;
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1        | m[1,2]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[1,3]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[1,4]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[2,3]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[2,4]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[3,4]     | f         |         0 |         0 |          0 |            0 |                  |                   | 
+(8 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1r' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1r       | m[1,2]     | f         |         0 |         0 |          0 |            1 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[1,2,3,4] | f         |         0 |         0 |          0 |            1 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[1,3]     | f         |         0 |         0 |          0 |            1 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[1,4]     | f         |         0 |         0 |          0 |            1 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,3]     | f         |         0 |         0 |          0 |            1 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,3,4]   | f         |         0 |         0 |          0 |            1 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,4]     | f         |         0 |         0 |          0 |            1 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[3,4]     | f         |         0 |         0 |          0 |            1 |                  |                   | 
+(8 rows)
+
+alter table t1 delete statistics ((a, c));
+alter table t1 delete statistics ((a, b));
+alter table t1 delete statistics ((b, c));
+alter table t1 delete statistics ((a, d));
+alter table t1 delete statistics ((b, d));
+alter table t1 delete statistics ((c, d));
+alter table t1 delete statistics ((b, c, d));
+alter table t1 delete statistics ((a, b, c, d));
+alter table t1r delete statistics ((a, c));
+alter table t1r delete statistics ((a, b));
+alter table t1r delete statistics ((b, c));
+alter table t1r delete statistics ((a, d));
+alter table t1r delete statistics ((b, d));
+alter table t1r delete statistics ((c, d));
+alter table t1r delete statistics ((b, c, d));
+alter table t1r delete statistics ((a, b, c, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1' order by ext_info;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1r' order by ext_info;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+--========================================================== insert normal data
+insert into t1 values (1, 1, 1, 1);
+insert into t1 values (2, 1, 1, 1);
+insert into t1 values (3, 2, 1, 1);
+insert into t1 values (4, 2, 1, 1);
+insert into t1 values (5, 3, 2, 1);
+insert into t1 values (6, 3, 2, 1);
+insert into t1 values (7, 4, 2, 1);
+insert into t1 values (8, 4, 2, 1);
+insert into t1r select * from t1;
+--========================================================== analyze t ((a, b))
+analyze t1 ((a, b));
+analyze t1 ((b, c));
+analyze t1 ((a, d));
+analyze t1 ((b, d));
+analyze t1 ((c, d));
+analyze t1 ((b, c, d));
+analyze t1 ((a, b, c, d));
+analyze t1r ((a, b));
+analyze t1r ((b, c));
+analyze t1r ((a, d));
+analyze t1r ((b, d));
+analyze t1r ((c, d));
+analyze t1r ((b, c, d));
+analyze t1r ((a, b, c, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1        | m[1,2]     | f         |         0 |         8 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t1        | m[1,2,3,4] | f         |         0 |        16 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t1        | m[1,4]     | f         |         0 |         8 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t1        | m[2,3]     | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1        | m[2,3,4]   | f         |         0 |        12 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1        | m[2,4]     | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,1,1}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1        | m[3,4]     | f         |         0 |         8 |       -.25 |            1 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+(7 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1r' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1r       | m[1,2]     | f         |         0 |         8 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t1r       | m[1,2,3,4] | f         |         0 |        16 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t1r       | m[1,4]     | f         |         0 |         8 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,3]     | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1r       | m[2,3,4]   | f         |         0 |        12 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1r       | m[2,4]     | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,1,1}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1r       | m[3,4]     | f         |         0 |         8 |       -.25 |         -.25 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+(7 rows)
+
+alter table t1 delete statistics ((a, b));
+alter table t1 delete statistics ((b, c));
+alter table t1 delete statistics ((a, d));
+alter table t1 delete statistics ((b, d));
+alter table t1 delete statistics ((c, d));
+alter table t1 delete statistics ((b, c, d));
+alter table t1 delete statistics ((a, b, c, d));
+alter table t1r delete statistics ((a, b));
+alter table t1r delete statistics ((b, c));
+alter table t1r delete statistics ((a, d));
+alter table t1r delete statistics ((b, d));
+alter table t1r delete statistics ((c, d));
+alter table t1r delete statistics ((b, c, d));
+alter table t1r delete statistics ((a, b, c, d));
+--========================================================== alter table
+analyze t1;
+analyze t1r;
+alter table t1 add statistics ((a, b));
+alter table t1 add statistics ((b, c));
+alter table t1 add statistics ((a, d));
+alter table t1 add statistics ((b, d));
+alter table t1 add statistics ((c, d));
+alter table t1 add statistics ((b, c, d));
+alter table t1r add statistics ((a, b));
+alter table t1r add statistics ((b, c));
+alter table t1r add statistics ((a, d));
+alter table t1r add statistics ((b, d));
+alter table t1r add statistics ((c, d));
+alter table t1r add statistics ((b, c, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1        | m[1,2]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[1,4]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[2,3]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[2,3,4] | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[2,4]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[3,4]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+(6 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1r' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1r       | m[1,2]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[1,4]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,3]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,3,4] | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,4]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[3,4]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+(6 rows)
+
+analyze t1;
+analyze t1r;
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1        | m[1,2]   | f         |         0 |         8 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t1        | m[1,4]   | f         |         0 |         8 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t1        | m[2,3]   | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1        | m[2,3,4] | f         |         0 |        12 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1        | m[2,4]   | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,1,1}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1        | m[3,4]   | f         |         0 |         8 |       -.25 |            1 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+(6 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1r' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1r       | m[1,2]   | f         |         0 |         8 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t1r       | m[1,4]   | f         |         0 |         8 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,3]   | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1r       | m[2,3,4] | f         |         0 |        12 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1r       | m[2,4]   | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,1,1}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1r       | m[3,4]   | f         |         0 |         8 |       -.25 |         -.25 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+(6 rows)
+
+alter table t1 delete statistics ((a, b));
+alter table t1 delete statistics ((b, c));
+alter table t1 delete statistics ((a, d));
+alter table t1 delete statistics ((b, d));
+alter table t1 delete statistics ((c, d));
+alter table t1 delete statistics ((b, c, d));
+alter table t1r delete statistics ((a, b));
+alter table t1r delete statistics ((b, c));
+alter table t1r delete statistics ((a, d));
+alter table t1r delete statistics ((b, d));
+alter table t1r delete statistics ((c, d));
+alter table t1r delete statistics ((b, c, d));
+--========================================================== analyze with alter table
+alter table t1 add statistics ((a, b));
+alter table t1 add statistics ((b, c));
+alter table t1 add statistics ((a, d));
+alter table t1 add statistics ((b, d));
+alter table t1 add statistics ((b, c, d));
+alter table t1r add statistics ((a, b));
+alter table t1r add statistics ((b, c));
+alter table t1r add statistics ((a, d));
+alter table t1r add statistics ((b, d));
+alter table t1r add statistics ((b, c, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1        | m[1,2]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[1,4]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[2,3]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[2,3,4] | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1        | m[2,4]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+(5 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1r' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1r       | m[1,2]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[1,4]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,3]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,3,4] | f         |         0 |         0 |          0 |            0 |                  |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,4]   | f         |         0 |         0 |          0 |            0 |                  |                   | 
+(5 rows)
+
+analyze t1 ((b, d));
+analyze t1 ((c, d));
+analyze t1r ((b, d));
+analyze t1r ((c, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1        | m[1,2]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t1        | m[1,4]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t1        | m[2,3]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t1        | m[2,3,4] | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t1        | m[2,4]   | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1        | m[3,4]   | f         |         0 |         8 |       -.25 |            1 | {"{1,2}","{1,1}"}         | {.5,.5}           | 
+(6 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1r' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1r       | m[1,2]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t1r       | m[1,4]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,3]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,3,4] | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,4]   | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1r       | m[3,4]   | f         |         0 |         8 |       -.25 |         -.25 | {"{1,2}","{1,1}"}         | {.5,.5}           | 
+(6 rows)
+
+analyze t1;
+analyze t1r;
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1        | m[1,2]   | f         |         0 |         8 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t1        | m[1,4]   | f         |         0 |         8 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t1        | m[2,3]   | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1        | m[2,3,4] | f         |         0 |        12 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1        | m[2,4]   | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,1,1}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1        | m[3,4]   | f         |         0 |         8 |       -.25 |            1 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+(6 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1r' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1r       | m[1,2]   | f         |         0 |         8 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t1r       | m[1,4]   | f         |         0 |         8 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,3]   | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1r       | m[2,3,4] | f         |         0 |        12 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1r       | m[2,4]   | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,1,1}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1r       | m[3,4]   | f         |         0 |         8 |       -.25 |         -.25 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+(6 rows)
+
+alter table t1 delete statistics ((a, b));
+alter table t1 delete statistics ((b, c));
+alter table t1 delete statistics ((a, d));
+alter table t1 delete statistics ((b, d));
+alter table t1 delete statistics ((c, d));
+alter table t1 delete statistics ((b, c, d));
+alter table t1r delete statistics ((a, b));
+alter table t1r delete statistics ((b, c));
+alter table t1r delete statistics ((a, d));
+alter table t1r delete statistics ((b, d));
+alter table t1r delete statistics ((c, d));
+alter table t1r delete statistics ((b, c, d));
+--========================================================== column orders
+analyze t1 ((b, a));
+analyze t1 ((c, b));
+analyze t1 ((d, a));
+analyze t1 ((d, b));
+analyze t1 ((d, c));
+analyze t1 ((c, b, d));
+analyze t1r ((b, a));
+analyze t1r ((c, b));
+analyze t1r ((d, a));
+analyze t1r ((d, b));
+analyze t1r ((d, c));
+analyze t1r ((c, b, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1        | m[1,2]   | f         |         0 |         8 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t1        | m[1,4]   | f         |         0 |         8 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t1        | m[2,3]   | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1        | m[2,3,4] | f         |         0 |        12 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1        | m[2,4]   | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,1,1}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1        | m[3,4]   | f         |         0 |         8 |       -.25 |            1 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+(6 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1r' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1r       | m[1,2]   | f         |         0 |         8 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t1r       | m[1,4]   | f         |         0 |         8 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t1r       | m[2,3]   | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1r       | m[2,3,4] | f         |         0 |        12 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1r       | m[2,4]   | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,1,1}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1r       | m[3,4]   | f         |         0 |         8 |       -.25 |         -.25 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+(6 rows)
+
+alter table t1 delete statistics ((a, b));
+alter table t1 delete statistics ((b, c));
+alter table t1 delete statistics ((a, d));
+alter table t1 delete statistics ((b, d));
+alter table t1 delete statistics ((c, d));
+alter table t1 delete statistics ((b, c, d));
+alter table t1r delete statistics ((a, b));
+alter table t1r delete statistics ((b, c));
+alter table t1r delete statistics ((a, d));
+alter table t1r delete statistics ((b, d));
+alter table t1r delete statistics ((c, d));
+alter table t1r delete statistics ((b, c, d));
+--========================================================== system column and system table
+analyze t1 ((xmax, xmin));
+ERROR:  column "xmax" of relation "t1" does not exist
+analyze t1r ((xmax, xmin));
+ERROR:  column "xmax" of relation "t1r" does not exist
+alter table t1 add statistics ((xmax, xmin));
+ERROR:  column "xmax" of relation "t1" does not exist
+alter table t1r add statistics ((xmax, xmin));
+ERROR:  column "xmax" of relation "t1r" does not exist
+alter table t1 delete statistics ((xmax, xmin));
+ERROR:  column "xmax" of relation "t1" does not exist
+alter table t1r delete statistics ((xmax, xmin));
+ERROR:  column "xmax" of relation "t1r" does not exist
+analyze pg_class ((relname, relnamespace));
+ERROR:  System catalog is not supported by extended statistic.
+analyze pg_class (abc);
+ERROR:  column "abc" of relation "pg_class" does not exist
+analyze pg_class ((relname, abc));
+ERROR:  System catalog is not supported by extended statistic.
+alter table pg_class add statistics ((relname, relnamespace));
+ERROR:  permission denied: "pg_class" is a system catalog
+alter table pg_class add statistics (abc);
+ERROR:  syntax error at or near "abc"
+LINE 1: alter table pg_class add statistics (abc);
+                                             ^
+alter table pg_class add statistics ((relname, abc));
+ERROR:  permission denied: "pg_class" is a system catalog
+alter table pg_class delete statistics ((relname, relnamespace));
+ERROR:  permission denied: "pg_class" is a system catalog
+alter table pg_class delete statistics (abc);
+ERROR:  syntax error at or near "abc"
+LINE 1: alter table pg_class delete statistics (abc);
+                                                ^
+alter table pg_class delete statistics ((relname, abc));
+ERROR:  permission denied: "pg_class" is a system catalog
+--========================================================== syntax error
+analyze t1 (());
+ERROR:  syntax error at or near ")"
+LINE 1: analyze t1 (());
+                     ^
+analyze t1 ((b));
+ERROR:  Multi-column statistic needs at least two columns.
+analyze t1 ((a, a));
+ERROR:  Multi-column statistic needs at least two columns.
+analyze t1 ((c, c, d));
+analyze t1 ((b, d, b));
+analyze t1 ((a, b), (b, c));
+ERROR:  syntax error at or near ","
+LINE 1: analyze t1 ((a, b), (b, c));
+                          ^
+analyze t1 (a, (b, c));
+ERROR:  syntax error at or near "("
+LINE 1: analyze t1 (a, (b, c));
+                       ^
+analyze t1 ((b, c), a);
+ERROR:  syntax error at or near ","
+LINE 1: analyze t1 ((b, c), a);
+                          ^
+analyze t1 ((c, e));
+ERROR:  column "e" of relation "t1" does not exist
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1        | m[2,4]   | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1        | m[3,4]   | f         |         0 |         8 |       -.25 |            1 | {"{1,2}","{1,1}"}         | {.5,.5}           | 
+(2 rows)
+
+alter table t1 add statistics (());
+ERROR:  syntax error at or near ")"
+LINE 1: alter table t1 add statistics (());
+                                        ^
+alter table t1 add statistics ((b));
+ERROR:  Multi-column statistic needs at least two columns.
+alter table t1 add statistics ((a, a));
+ERROR:  Multi-column statistic needs at least two columns.
+alter table t1 add statistics ((c, c, d));
+WARNING:  Some of extended statistics have already been defined.
+alter table t1 add statistics ((b, d, b));
+WARNING:  Some of extended statistics have already been defined.
+alter table t1 add statistics ((a, b), (b, c));
+ERROR:  syntax error at or near ","
+LINE 1: alter table t1 add statistics ((a, b), (b, c));
+                                             ^
+alter table t1 add statistics (a, (b, c));
+ERROR:  syntax error at or near "a"
+LINE 1: alter table t1 add statistics (a, (b, c));
+                                       ^
+alter table t1 add statistics ((b, c), a);
+ERROR:  syntax error at or near ","
+LINE 1: alter table t1 add statistics ((b, c), a);
+                                             ^
+alter table t1 add statistics ((c, e));
+ERROR:  column "e" of relation "t1" does not exist
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t1        | m[2,4]   | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t1        | m[3,4]   | f         |         0 |         8 |       -.25 |            1 | {"{1,2}","{1,1}"}         | {.5,.5}           | 
+(2 rows)
+
+alter table t1 delete statistics (());
+ERROR:  syntax error at or near ")"
+LINE 1: alter table t1 delete statistics (());
+                                           ^
+alter table t1 delete statistics ((b));
+ERROR:  Multi-column statistic needs at least two columns.
+alter table t1 delete statistics ((a, a));
+ERROR:  Multi-column statistic needs at least two columns.
+alter table t1 delete statistics ((c, c, d));
+alter table t1 delete statistics ((b, d, b));
+alter table t1 delete statistics ((a, b), (b, c));
+ERROR:  syntax error at or near ","
+LINE 1: alter table t1 delete statistics ((a, b), (b, c));
+                                                ^
+alter table t1 delete statistics (a, (b, c));
+ERROR:  syntax error at or near "a"
+LINE 1: alter table t1 delete statistics (a, (b, c));
+                                          ^
+alter table t1 delete statistics ((b, c), a);
+ERROR:  syntax error at or near ","
+LINE 1: alter table t1 delete statistics ((b, c), a);
+                                                ^
+alter table t1 delete statistics ((c, e));
+ERROR:  column "e" of relation "t1" does not exist
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1' order by ext_info;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+--========================================================== data feature : data with NULL
+create table t2 (a int, b int, c int, d int) distribute by hash(a);
+create table t2r (a int, b int, c int, d int) distribute by replication;
+insert into t2 values (1, 1, 1, 1);
+insert into t2 values (NULL, 1, 1, 1);
+insert into t2 values (3, NULL, 1, 1);
+insert into t2 values (4, NULL, 1, 1);
+insert into t2 values (5, 3, NULL, 1);
+insert into t2 values (6, 3, NULL, 1);
+insert into t2 values (7, 4, NULL, 1);
+insert into t2 values (8, 4, NULL, 1);
+insert into t2r select * from t2;
+analyze t2 ((a, b));
+analyze t2 ((b, c));
+analyze t2 ((a, d));
+analyze t2 ((b, d));
+analyze t2 ((c, d));
+analyze t2 ((b, c, d));
+analyze t2r ((a, b));
+analyze t2r ((b, c));
+analyze t2r ((a, d));
+analyze t2r ((b, d));
+analyze t2r ((c, d));
+analyze t2r ((b, c, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t2' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |   most_common_vals    | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+-----------------------+-------------------+------------------
+ hw_es_multi_column_stats | t2        | m[1,2]   | f         |      .375 |         8 |      -.625 |           -1 |                       |                   | 
+ hw_es_multi_column_stats | t2        | m[1,4]   | f         |      .125 |         8 |      -.875 |           -1 |                       |                   | 
+ hw_es_multi_column_stats | t2        | m[2,3]   | f         |       .75 |         8 |      -.125 |           -1 | {"{1}","{1}"}         | {.25}             | 
+ hw_es_multi_column_stats | t2        | m[2,3,4] | f         |       .75 |        12 |      -.125 |           -1 | {"{1}","{1}","{1}"}   | {.25}             | 
+ hw_es_multi_column_stats | t2        | m[2,4]   | f         |       .25 |         8 |      -.375 |           -1 | {"{1,3,4}","{1,1,1}"} | {.25,.25,.25}     | 
+ hw_es_multi_column_stats | t2        | m[3,4]   | f         |        .5 |         8 |      -.125 |           -1 | {"{1}","{1}"}         | {.5}              | 
+(6 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t2r' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |   most_common_vals    | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+-----------------------+-------------------+------------------
+ hw_es_multi_column_stats | t2r       | m[1,2]   | f         |      .375 |         8 |      -.625 |        -.625 |                       |                   | 
+ hw_es_multi_column_stats | t2r       | m[1,4]   | f         |      .125 |         8 |      -.875 |        -.875 |                       |                   | 
+ hw_es_multi_column_stats | t2r       | m[2,3]   | f         |       .75 |         8 |      -.125 |        -.125 | {"{1}","{1}"}         | {.25}             | 
+ hw_es_multi_column_stats | t2r       | m[2,3,4] | f         |       .75 |        12 |      -.125 |        -.125 | {"{1}","{1}","{1}"}   | {.25}             | 
+ hw_es_multi_column_stats | t2r       | m[2,4]   | f         |       .25 |         8 |      -.375 |        -.375 | {"{1,3,4}","{1,1,1}"} | {.25,.25,.25}     | 
+ hw_es_multi_column_stats | t2r       | m[3,4]   | f         |        .5 |         8 |      -.125 |        -.125 | {"{1}","{1}"}         | {.5}              | 
+(6 rows)
+
+drop table t2;
+drop table t2r;
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t2' order by ext_info;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t2r' order by ext_info;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+--========================================================== data feature : data with string
+create table t3 (a int, b varchar(255), c text, d char) distribute by hash(a);
+create table t3r (a int, b varchar(255), c text, d char) distribute by replication;
+insert into t3 values (1, 'b1b1', 'c1c1c1c1c1c1', 'd');
+insert into t3 values (2, 'b1b1', 'c1c1c1c1c1c1', 'd');
+insert into t3 values (3, 'b2b2b2', 'c1c1c1c1c1c1', 'd');
+insert into t3 values (4, 'b2b2b2', 'c1c1c1c1c1c1', 'd');
+insert into t3 values (5, 'b3b3b3b3b3', 'c2c2c2c2c2c2', 'd');
+insert into t3 values (6, 'b3b3b3b3b3', 'c2c2c2c2c2c2', 'd');
+insert into t3 values (7, 'b4b4b4b4b4b4', 'c2c2c2c2c2c2', 'd');
+insert into t3 values (8, 'b4b4b4b4b4b4', 'c2c2c2c2c2c2', 'd');
+insert into t3r select * from t3;
+analyze t3 ((a, b));
+analyze t3 ((b, c));
+analyze t3 ((a, d));
+analyze t3 ((b, d));
+analyze t3 ((c, d));
+analyze t3 ((b, c, d));
+analyze t3r ((a, b));
+analyze t3r ((b, c));
+analyze t3r ((a, d));
+analyze t3r ((b, d));
+analyze t3r ((c, d));
+analyze t3r ((b, c, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t3' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |                                               most_common_vals                                                | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------------------------------------------------------------------------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t3        | m[1,2]   | f         |         0 |        15 |         -1 |            1 |                                                                                                               |                   | 
+ hw_es_multi_column_stats | t3        | m[1,4]   | f         |         0 |         6 |         -1 |            1 |                                                                                                               |                   | 
+ hw_es_multi_column_stats | t3        | m[2,3]   | f         |         0 |        22 |        -.5 |            1 | {"{b1b1,b2b2b2,b3b3b3b3b3,b4b4b4b4b4b4}","{c1c1c1c1c1c1,c1c1c1c1c1c1,c2c2c2c2c2c2,c2c2c2c2c2c2}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t3        | m[2,3,4] | f         |         0 |        26 |        -.5 |            1 | {"{b1b1,b2b2b2,b3b3b3b3b3,b4b4b4b4b4b4}","{c1c1c1c1c1c1,c1c1c1c1c1c1,c2c2c2c2c2c2,c2c2c2c2c2c2}","{d,d,d,d}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t3        | m[2,4]   | f         |         0 |        11 |        -.5 |            1 | {"{b1b1,b2b2b2,b3b3b3b3b3,b4b4b4b4b4b4}","{d,d,d,d}"}                                                         | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t3        | m[3,4]   | f         |         0 |        15 |       -.25 |            1 | {"{c1c1c1c1c1c1,c2c2c2c2c2c2}","{d,d}"}                                                                       | {.5,.5}           | 
+(6 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t3r' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |                                               most_common_vals                                                | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------------------------------------------------------------------------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t3r       | m[1,2]   | f         |         0 |        16 |         -1 |           -1 |                                                                                                               |                   | 
+ hw_es_multi_column_stats | t3r       | m[1,4]   | f         |         0 |         6 |         -1 |           -1 |                                                                                                               |                   | 
+ hw_es_multi_column_stats | t3r       | m[2,3]   | f         |         0 |        28 |        -.5 |          -.5 | {"{b1b1,b2b2b2,b3b3b3b3b3,b4b4b4b4b4b4}","{c1c1c1c1c1c1,c1c1c1c1c1c1,c2c2c2c2c2c2,c2c2c2c2c2c2}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t3r       | m[2,3,4] | f         |         0 |        30 |        -.5 |          -.5 | {"{b1b1,b2b2b2,b3b3b3b3b3,b4b4b4b4b4b4}","{c1c1c1c1c1c1,c1c1c1c1c1c1,c2c2c2c2c2c2,c2c2c2c2c2c2}","{d,d,d,d}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t3r       | m[2,4]   | f         |         0 |        14 |        -.5 |          -.5 | {"{b1b1,b2b2b2,b3b3b3b3b3,b4b4b4b4b4b4}","{d,d,d,d}"}                                                         | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t3r       | m[3,4]   | f         |         0 |        18 |       -.25 |         -.25 | {"{c1c1c1c1c1c1,c2c2c2c2c2c2}","{d,d}"}                                                                       | {.5,.5}           | 
+(6 rows)
+
+drop table t3;
+drop table t3r;
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t3' order by ext_info;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t3r' order by ext_info;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+--========================================================== table type : partition table
+create table t5 (a int, b int, c int, d int) distribute by hash(a)
+partition by range (b)
+(
+partition p1 values less than (1),
+partition p2 values less than (2),
+partition p3 values less than (3),
+partition p4 values less than (4),
+partition p5 values less than (5),
+partition p6 values less than (maxvalue)
+);
+create table t5r (a int, b int, c int, d int) distribute by replication
+partition by range (b)
+(
+partition p1 values less than (1),
+partition p2 values less than (2),
+partition p3 values less than (3),
+partition p4 values less than (4),
+partition p5 values less than (5),
+partition p6 values less than (maxvalue)
+);
+insert into t5 values (1, 1, 1, 1);
+insert into t5 values (2, 1, 1, 1);
+insert into t5 values (3, 2, 1, 1);
+insert into t5 values (4, 2, 1, 1);
+insert into t5 values (5, 3, 2, 1);
+insert into t5 values (6, 3, 2, 1);
+insert into t5 values (7, 4, 2, 1);
+insert into t5 values (8, 4, 2, 1);
+insert into t5r select * from t5;
+analyze t5 ((a, c));
+analyze t5 ((b, c));
+analyze t5r ((a, c));
+analyze t5r ((b, c));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t5' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t5        | m[1,3]   | f         |         0 |         8 |         -1 |            1 |                           |                   | 
+ hw_es_multi_column_stats | t5        | m[2,3]   | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+(2 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t5r' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t5r       | m[1,3]   | f         |         0 |         8 |         -1 |           -1 |                           |                   | 
+ hw_es_multi_column_stats | t5r       | m[2,3]   | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+(2 rows)
+
+alter table t5 add statistics ((a, b));
+alter table t5 add statistics ((b, c));
+WARNING:  Some of extended statistics have already been defined.
+alter table t5 add statistics ((a, d));
+alter table t5 add statistics ((b, d));
+alter table t5 add statistics ((b, c, d));
+alter table t5 add statistics ((a, b, c, d));
+alter table t5r add statistics ((a, b));
+alter table t5r add statistics ((b, c));
+WARNING:  Some of extended statistics have already been defined.
+alter table t5r add statistics ((a, d));
+alter table t5r add statistics ((b, d));
+alter table t5r add statistics ((b, c, d));
+alter table t5r add statistics ((a, b, c, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t5' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t5        | m[1,2]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t5        | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t5        | m[1,3]     | f         |         0 |         8 |         -1 |            1 |                           |                   | 
+ hw_es_multi_column_stats | t5        | m[1,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t5        | m[2,3]     | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t5        | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t5        | m[2,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+(7 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t5r' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t5r       | m[1,2]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t5r       | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t5r       | m[1,3]     | f         |         0 |         8 |         -1 |           -1 |                           |                   | 
+ hw_es_multi_column_stats | t5r       | m[1,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t5r       | m[2,3]     | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t5r       | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t5r       | m[2,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+(7 rows)
+
+analyze t5 ((b, d));
+analyze t5 ((c, d));
+analyze t5r ((b, d));
+analyze t5r ((c, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t5' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t5        | m[1,2]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t5        | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t5        | m[1,3]     | f         |         0 |         8 |         -1 |            1 |                           |                   | 
+ hw_es_multi_column_stats | t5        | m[1,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t5        | m[2,3]     | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t5        | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t5        | m[2,4]     | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t5        | m[3,4]     | f         |         0 |         8 |       -.25 |            1 | {"{1,2}","{1,1}"}         | {.5,.5}           | 
+(8 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t5r' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t5r       | m[1,2]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t5r       | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t5r       | m[1,3]     | f         |         0 |         8 |         -1 |           -1 |                           |                   | 
+ hw_es_multi_column_stats | t5r       | m[1,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t5r       | m[2,3]     | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t5r       | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t5r       | m[2,4]     | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t5r       | m[3,4]     | f         |         0 |         8 |       -.25 |         -.25 | {"{1,2}","{1,1}"}         | {.5,.5}           | 
+(8 rows)
+
+analyze t5;
+analyze t5r;
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t5' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t5        | m[1,2]     | f         |         0 |         8 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t5        | m[1,2,3,4] | f         |         0 |        16 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t5        | m[1,3]     | f         |         0 |         8 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t5        | m[1,4]     | f         |         0 |         8 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t5        | m[2,3]     | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t5        | m[2,3,4]   | f         |         0 |        12 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t5        | m[2,4]     | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,1,1}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t5        | m[3,4]     | f         |         0 |         8 |       -.25 |            1 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+(8 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t5r' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t5r       | m[1,2]     | f         |         0 |         8 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t5r       | m[1,2,3,4] | f         |         0 |        16 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t5r       | m[1,3]     | f         |         0 |         8 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t5r       | m[1,4]     | f         |         0 |         8 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t5r       | m[2,3]     | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t5r       | m[2,3,4]   | f         |         0 |        12 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t5r       | m[2,4]     | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,1,1}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t5r       | m[3,4]     | f         |         0 |         8 |       -.25 |         -.25 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+(8 rows)
+
+drop table t5;
+drop table t5r;
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t5' order by ext_info;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t5r' order by ext_info;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+--========================================================== table with index
+create table t6 (a int, b int, c int, d int) distribute by hash(a);
+create table t6r (a int, b int, c int, d int) distribute by replication;
+create index i1_t6 on t6 (b);
+create index i1_t6r on t6r (b);
+create index i2_t6 on t6 (c, a);
+create index i2_t6r on t6r (c, a);
+insert into t6 values (1, 1, 1, 1);
+insert into t6 values (2, 1, 1, 1);
+insert into t6 values (3, 2, 1, 1);
+insert into t6 values (4, 2, 1, 1);
+insert into t6 values (5, 3, 2, 1);
+insert into t6 values (6, 3, 2, 1);
+insert into t6 values (7, 4, 2, 1);
+insert into t6 values (8, 4, 2, 1);
+insert into t6r select * from t6;
+analyze t6 ((a, c));
+analyze t6 ((b, c));
+analyze t6r ((a, c));
+analyze t6r ((b, c));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t6' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t6        | m[1,3]   | f         |         0 |         8 |         -1 |            1 |                           |                   | 
+ hw_es_multi_column_stats | t6        | m[2,3]   | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+(2 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t6r' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t6r       | m[1,3]   | f         |         0 |         8 |         -1 |           -1 |                           |                   | 
+ hw_es_multi_column_stats | t6r       | m[2,3]   | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+(2 rows)
+
+alter table t6 add statistics ((a, b));
+alter table t6 add statistics ((b, c));
+WARNING:  Some of extended statistics have already been defined.
+alter table t6 add statistics ((a, d));
+alter table t6 add statistics ((b, d));
+alter table t6 add statistics ((b, c, d));
+alter table t6 add statistics ((a, b, c, d));
+alter table t6r add statistics ((a, b));
+alter table t6r add statistics ((b, c));
+WARNING:  Some of extended statistics have already been defined.
+alter table t6r add statistics ((a, d));
+alter table t6r add statistics ((b, d));
+alter table t6r add statistics ((b, c, d));
+alter table t6r add statistics ((a, b, c, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t6' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t6        | m[1,2]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t6        | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t6        | m[1,3]     | f         |         0 |         8 |         -1 |            1 |                           |                   | 
+ hw_es_multi_column_stats | t6        | m[1,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t6        | m[2,3]     | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t6        | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t6        | m[2,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+(7 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t6r' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t6r       | m[1,2]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t6r       | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t6r       | m[1,3]     | f         |         0 |         8 |         -1 |           -1 |                           |                   | 
+ hw_es_multi_column_stats | t6r       | m[1,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t6r       | m[2,3]     | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t6r       | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t6r       | m[2,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+(7 rows)
+
+analyze t6 ((b, d));
+analyze t6 ((c, d));
+analyze t6r ((b, d));
+analyze t6r ((c, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t6' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t6        | m[1,2]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t6        | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t6        | m[1,3]     | f         |         0 |         8 |         -1 |            1 |                           |                   | 
+ hw_es_multi_column_stats | t6        | m[1,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t6        | m[2,3]     | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t6        | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t6        | m[2,4]     | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t6        | m[3,4]     | f         |         0 |         8 |       -.25 |            1 | {"{1,2}","{1,1}"}         | {.5,.5}           | 
+(8 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t6r' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t6r       | m[1,2]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t6r       | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t6r       | m[1,3]     | f         |         0 |         8 |         -1 |           -1 |                           |                   | 
+ hw_es_multi_column_stats | t6r       | m[1,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t6r       | m[2,3]     | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t6r       | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ hw_es_multi_column_stats | t6r       | m[2,4]     | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t6r       | m[3,4]     | f         |         0 |         8 |       -.25 |         -.25 | {"{1,2}","{1,1}"}         | {.5,.5}           | 
+(8 rows)
+
+analyze t6;
+analyze t6r;
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t6' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t6        | m[1,2]     | f         |         0 |         8 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t6        | m[1,2,3,4] | f         |         0 |        16 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t6        | m[1,3]     | f         |         0 |         8 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t6        | m[1,4]     | f         |         0 |         8 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t6        | m[2,3]     | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t6        | m[2,3,4]   | f         |         0 |        12 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t6        | m[2,4]     | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,1,1}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t6        | m[3,4]     | f         |         0 |         8 |       -.25 |            1 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+(8 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t6r' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t6r       | m[1,2]     | f         |         0 |         8 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t6r       | m[1,2,3,4] | f         |         0 |        16 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t6r       | m[1,3]     | f         |         0 |         8 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t6r       | m[1,4]     | f         |         0 |         8 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t6r       | m[2,3]     | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t6r       | m[2,3,4]   | f         |         0 |        12 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t6r       | m[2,4]     | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,1,1}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t6r       | m[3,4]     | f         |         0 |         8 |       -.25 |         -.25 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+(8 rows)
+
+drop table t6 cascade;
+drop table t6r cascade;
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t6' order by ext_info;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t6r' order by ext_info;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+--========================================================== drop column, modify column
+create table t7 (a int, b int, c int, d int) distribute by hash(a);
+create table t7r (a int, b int, c int, d int) distribute by replication;
+insert into t7 values (1, 1, 1, 1);
+insert into t7 values (2, 1, 1, 1);
+insert into t7 values (3, 2, 1, 1);
+insert into t7 values (4, 2, 1, 1);
+insert into t7 values (5, 3, 2, 1);
+insert into t7 values (6, 3, 2, 1);
+insert into t7 values (7, 4, 2, 1);
+insert into t7 values (8, 4, 2, 1);
+insert into t7r select * from t7;
+analyze t7;
+analyze t7r;
+analyze t7 ((a, b));
+analyze t7 ((b, c));
+analyze t7 ((a, d));
+analyze t7 ((b, d));
+analyze t7 ((c, d));
+analyze t7 ((b, c, d));
+analyze t7 ((a, b, c, d));
+analyze t7r ((a, b));
+analyze t7r ((b, c));
+analyze t7r ((a, d));
+analyze t7r ((b, d));
+analyze t7r ((c, d));
+analyze t7r ((b, c, d));
+analyze t7r ((a, b, c, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t7' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t7        | m[1,2]     | f         |         0 |         8 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t7        | m[1,2,3,4] | f         |         0 |        16 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t7        | m[1,4]     | f         |         0 |         8 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t7        | m[2,3]     | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t7        | m[2,3,4]   | f         |         0 |        12 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t7        | m[2,4]     | f         |         0 |         8 |        -.5 |            1 | {"{1,2,3,4}","{1,1,1,1}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t7        | m[3,4]     | f         |         0 |         8 |       -.25 |            1 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+(7 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t7r' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t7r       | m[1,2]     | f         |         0 |         8 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t7r       | m[1,2,3,4] | f         |         0 |        16 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t7r       | m[1,4]     | f         |         0 |         8 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t7r       | m[2,3]     | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t7r       | m[2,3,4]   | f         |         0 |        12 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t7r       | m[2,4]     | f         |         0 |         8 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,1,1}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t7r       | m[3,4]     | f         |         0 |         8 |       -.25 |         -.25 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+(7 rows)
+
+-- drop column
+alter table t7 drop column b;
+alter table t7r drop column b;
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t7' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals  | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+-------------------+-------------------+------------------
+ hw_es_multi_column_stats | t7        | m[1,4]   | f         |         0 |         8 |         -1 |            1 |                   |                   | 
+ hw_es_multi_column_stats | t7        | m[3,4]   | f         |         0 |         8 |       -.25 |            1 | {"{1,2}","{1,1}"} | {.5,.5}           | 
+(2 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t7r' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals  | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+-------------------+-------------------+------------------
+ hw_es_multi_column_stats | t7r       | m[1,4]   | f         |         0 |         8 |         -1 |           -1 |                   |                   | 
+ hw_es_multi_column_stats | t7r       | m[3,4]   | f         |         0 |         8 |       -.25 |         -.25 | {"{1,2}","{1,1}"} | {.5,.5}           | 
+(2 rows)
+
+alter table t7 add column b int;
+alter table t7r add column b int;
+update t7 set b = 5 where a = 1;
+update t7 set b = 5 where a = 2;
+update t7 set b = 6 where a = 3;
+update t7 set b = 6 where a = 4;
+update t7 set b = 7 where a = 5;
+update t7 set b = 7 where a = 6;
+update t7 set b = 8 where a = 7;
+update t7 set b = 8 where a = 8;
+update t7r set b = 5 where a = 1;
+update t7r set b = 5 where a = 2;
+update t7r set b = 6 where a = 3;
+update t7r set b = 6 where a = 4;
+update t7r set b = 7 where a = 5;
+update t7r set b = 7 where a = 6;
+update t7r set b = 8 where a = 7;
+update t7r set b = 8 where a = 8;
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t7' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals  | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+-------------------+-------------------+------------------
+ hw_es_multi_column_stats | t7        | m[1,4]   | f         |         0 |         8 |         -1 |            1 |                   |                   | 
+ hw_es_multi_column_stats | t7        | m[3,4]   | f         |         0 |         8 |       -.25 |            1 | {"{1,2}","{1,1}"} | {.5,.5}           | 
+(2 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t7r' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals  | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+-------------------+-------------------+------------------
+ hw_es_multi_column_stats | t7r       | m[1,4]   | f         |         0 |         8 |         -1 |           -1 |                   |                   | 
+ hw_es_multi_column_stats | t7r       | m[3,4]   | f         |         0 |         8 |       -.25 |         -.25 | {"{1,2}","{1,1}"} | {.5,.5}           | 
+(2 rows)
+
+analyze t7 ((a, b));
+analyze t7 ((b, c));
+analyze t7 ((a, d));
+analyze t7 ((b, d));
+analyze t7 ((c, d));
+analyze t7 ((b, c, d));
+analyze t7 ((a, b, c, d));
+analyze t7r ((a, b));
+analyze t7r ((b, c));
+analyze t7r ((a, d));
+analyze t7r ((b, d));
+analyze t7r ((c, d));
+analyze t7r ((b, c, d));
+analyze t7r ((a, b, c, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t7' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t7        | m[1,3,4,5] | f         |         0 |        16 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t7        | m[1,4]     | f         |         0 |         8 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t7        | m[1,5]     | f         |         0 |         8 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t7        | m[3,4]     | f         |         0 |         8 |       -.25 |            1 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+ hw_es_multi_column_stats | t7        | m[3,4,5]   | f         |         0 |        12 |        -.5 |            1 | {"{1,1,2,2}","{1,1,1,1}","{5,6,7,8}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t7        | m[3,5]     | f         |         0 |         8 |        -.5 |            1 | {"{1,1,2,2}","{5,6,7,8}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t7        | m[4,5]     | f         |         0 |         8 |        -.5 |            1 | {"{1,1,1,1}","{5,6,7,8}"}             | {.25,.25,.25,.25} | 
+(7 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t7r' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t7r       | m[1,3,4,5] | f         |         0 |        16 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t7r       | m[1,4]     | f         |         0 |         8 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t7r       | m[1,5]     | f         |         0 |         8 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t7r       | m[3,4]     | f         |         0 |         8 |       -.25 |         -.25 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+ hw_es_multi_column_stats | t7r       | m[3,4,5]   | f         |         0 |        12 |        -.5 |          -.5 | {"{1,1,2,2}","{1,1,1,1}","{5,6,7,8}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t7r       | m[3,5]     | f         |         0 |         8 |        -.5 |          -.5 | {"{1,1,2,2}","{5,6,7,8}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t7r       | m[4,5]     | f         |         0 |         8 |        -.5 |          -.5 | {"{1,1,1,1}","{5,6,7,8}"}             | {.25,.25,.25,.25} | 
+(7 rows)
+
+-- modify type
+alter table t7 modify d int2;
+alter table t7r modify d text;
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t7' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t7        | m[1,5]   | f         |         0 |         8 |         -1 |            1 |                           |                   | 
+ hw_es_multi_column_stats | t7        | m[3,5]   | f         |         0 |         8 |        -.5 |            1 | {"{1,1,2,2}","{5,6,7,8}"} | {.25,.25,.25,.25} | 
+(2 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t7r' order by ext_info;
+        schemaname        | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+--------------------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t7r       | m[1,5]   | f         |         0 |         8 |         -1 |           -1 |                           |                   | 
+ hw_es_multi_column_stats | t7r       | m[3,5]   | f         |         0 |         8 |        -.5 |          -.5 | {"{1,1,2,2}","{5,6,7,8}"} | {.25,.25,.25,.25} | 
+(2 rows)
+
+analyze t7 ((a, d));
+analyze t7 ((b, d));
+analyze t7 ((c, d));
+analyze t7 ((b, c, d));
+analyze t7 ((a, b, c, d));
+analyze t7r ((a, d));
+analyze t7r ((b, d));
+analyze t7r ((c, d));
+analyze t7r ((b, c, d));
+analyze t7r ((a, b, c, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t7' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t7        | m[1,3,4,5] | f         |         0 |        14 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t7        | m[1,4]     | f         |         0 |         6 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t7        | m[1,5]     | f         |         0 |         8 |         -1 |            1 |                                       |                   | 
+ hw_es_multi_column_stats | t7        | m[3,4]     | f         |         0 |         6 |       -.25 |            1 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+ hw_es_multi_column_stats | t7        | m[3,4,5]   | f         |         0 |        10 |        -.5 |            1 | {"{1,1,2,2}","{1,1,1,1}","{5,6,7,8}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t7        | m[3,5]     | f         |         0 |         8 |        -.5 |            1 | {"{1,1,2,2}","{5,6,7,8}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t7        | m[4,5]     | f         |         0 |         6 |        -.5 |            1 | {"{1,1,1,1}","{5,6,7,8}"}             | {.25,.25,.25,.25} | 
+(7 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t7r' order by ext_info;
+        schemaname        | tablename |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            | most_common_freqs | histogram_bounds 
+--------------------------+-----------+------------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-------------------+------------------
+ hw_es_multi_column_stats | t7r       | m[1,3,4,5] | f         |         0 |        14 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t7r       | m[1,4]     | f         |         0 |         6 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t7r       | m[1,5]     | f         |         0 |         8 |         -1 |           -1 |                                       |                   | 
+ hw_es_multi_column_stats | t7r       | m[3,4]     | f         |         0 |         6 |       -.25 |         -.25 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+ hw_es_multi_column_stats | t7r       | m[3,4,5]   | f         |         0 |        10 |        -.5 |          -.5 | {"{1,1,2,2}","{1,1,1,1}","{5,6,7,8}"} | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t7r       | m[3,5]     | f         |         0 |         8 |        -.5 |          -.5 | {"{1,1,2,2}","{5,6,7,8}"}             | {.25,.25,.25,.25} | 
+ hw_es_multi_column_stats | t7r       | m[4,5]     | f         |         0 |         6 |        -.5 |          -.5 | {"{1,1,1,1}","{5,6,7,8}"}             | {.25,.25,.25,.25} | 
+(7 rows)
+
+drop table t7;
+drop table t7r;
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t7' order by ext_info;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t7r' order by ext_info;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+--==========================================================
+--==========================================================
+--==========================================================
+--==========================================================
+drop schema hw_es_multi_column_stats cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table t1
+drop cascades to table t1r
+reset default_statistics_target;

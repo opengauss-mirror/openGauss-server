@@ -27,10 +27,11 @@
 #include "pgxc/pgxc.h"
 #include "nodes/nodes.h"
 #include "pgxc/pgxcnode.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 #include "tcop/dest.h"
 #include "securec_check.h"
 #include "utils/elog.h"
+#include "replication/walreceiver.h"
 
 #ifdef ENABLE_MULTIPLE_NODES
 static const char* generate_barrier_id(const char* id);
@@ -59,7 +60,6 @@ static void WriteBarrierLSNFile(XLogRecPtr barrierLSN);
 void ProcessCreateBarrierPrepare(const char* id)
 {
 #ifndef ENABLE_MULTIPLE_NODES
-    Assert(false);
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return;
 #else
@@ -93,7 +93,6 @@ void ProcessCreateBarrierPrepare(const char* id)
 void ProcessCreateBarrierEnd(const char* id)
 {
 #ifndef ENABLE_MULTIPLE_NODES
-    Assert(false);
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return;
 #else
@@ -127,7 +126,6 @@ void ProcessCreateBarrierEnd(const char* id)
 void ProcessCreateBarrierExecute(const char* id)
 {
 #ifndef ENABLE_MULTIPLE_NODES
-    Assert(false);
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return;
 #else
@@ -149,7 +147,7 @@ void ProcessCreateBarrierExecute(const char* id)
         rdata[0].next = NULL;
 
         recptr = XLogInsert(RM_BARRIER_ID, XLOG_BARRIER_CREATE, rdata);
-        XLogWaitFlush(recptr);
+        XLogFlush(recptr);
     }
 
     pq_beginmessage(&buf, 'b');
@@ -162,13 +160,12 @@ void ProcessCreateBarrierExecute(const char* id)
 void RequestBarrier(const char* id, char* completionTag)
 {
 #ifndef ENABLE_MULTIPLE_NODES
-    Assert(false);
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return;
 #else
 
-    PGXCNodeAllHandles* prepared_handles;
-    const char* barrier_id;
+    PGXCNodeAllHandles* prepared_handles = NULL;
+    const char* barrier_id = NULL;
 
     elog(DEBUG1, "CREATE BARRIER request received");
     /*
@@ -220,17 +217,85 @@ void RequestBarrier(const char* id, char* completionTag)
 #endif
 }
 
+static void WaitBarrierArchived()
+{
+    if (getObsReplicationSlot() == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED), errmsg("Current dataNode is not start archived")));
+    }
+
+    ereport(LOG,
+            (errmsg("Query barrier lsn: 0x%lx", g_instance.archive_obs_cxt.barrierLsn)));
+    do {
+        if (XLByteLE(pg_atomic_read_u64(&g_instance.archive_obs_cxt.barrierLsn),
+            pg_atomic_read_u64(&g_instance.archive_obs_cxt.archive_task.targetLsn))) {
+            break;
+        }
+        CHECK_FOR_INTERRUPTS();
+        pg_usleep(100000L);
+    } while (1);
+    ereport(LOG,
+            (errmsg("Query archive lsn: 0x%lx", g_instance.archive_obs_cxt.archive_task.targetLsn)));
+}
+
+
+void DisasterRecoveryRequestBarrier(const char* id)
+{
+    XLogRecPtr recptr;
+    ereport(LOG, (errmsg("DISASTER RECOVERY CREATE BARRIER <%s> request received", id)));
+    /*
+     * Ensure that we are a DataNode 
+     */
+    if (!IS_PGXC_DATANODE)
+        ereport(ERROR,
+            (errcode(ERRCODE_OPERATE_NOT_SUPPORTED), 
+                errmsg("DISASTER RECOVERY CREATE BARRIER command must be sent to a DataNode")));
+
+    ereport(DEBUG1, (errmsg("DISASTER RECOVERY CREATE BARRIER <%s>", id)));
+
+    LWLockAcquire(BarrierLock, LW_EXCLUSIVE);
+
+    XLogBeginInsert();
+    XLogRegisterData((char*)id, strlen(id) + 1);
+
+    recptr = XLogInsert(RM_BARRIER_ID, XLOG_BARRIER_CREATE);
+    XLogFlush(recptr);
+
+    pg_atomic_init_u64(&g_instance.archive_obs_cxt.barrierLsn, recptr);
+
+    LWLockRelease(BarrierLock);
+
+    WaitBarrierArchived();
+}
+
+
+static void barrier_redo_pause()
+{
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+
+    while (IS_DISASTER_RECOVER_MODE) {
+        RedoInterruptCallBack();
+        if (strcmp((char *)walrcv->lastRecoveredBarrierId, (char *)walrcv->recoveryTargetBarrierId) < 0) {
+            break;
+        } else {
+            pg_usleep(1000L);
+            update_recovery_barrier();
+        }
+    }
+}
+
 void barrier_redo(XLogReaderState* record)
 {
-#ifndef ENABLE_MULTIPLE_NODES
-    Assert(false);
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-    return;
-#else
-
+    ereport(LOG, (errmsg("barrier_redo begin.")));
+    int rc = 0;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     /* Nothing to do */
+    XLogRecPtr barrierLSN = record->EndRecPtr;
+    char* barrierId = XLogRecGetData(record);
+    walrcv->lastRecoveredBarrierLSN = barrierLSN;
+    rc = strncpy_s((char *)walrcv->lastRecoveredBarrierId, MAX_BARRIER_ID_LENGTH, barrierId, MAX_BARRIER_ID_LENGTH - 1);
+    securec_check_ss(rc, "\0", "\0");
+    barrier_redo_pause();
     return;
-#endif
 }
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -238,9 +303,9 @@ void barrier_redo(XLogReaderState* record)
 
 static const char* generate_barrier_id(const char* id)
 {
-    char genid[1024];
+    static const int LEN_GEN_ID = 1024;
+    char genid[LEN_GEN_ID];
     TimestampTz ts;
-    int rc = 0;
 
     /*
      * If the caller can passed a NULL value, generate an id which is
@@ -253,9 +318,9 @@ static const char* generate_barrier_id(const char* id)
 
     ts = GetCurrentTimestamp();
 #ifdef HAVE_INT64_TIMESTAMP
-    rc = snprintf_s(genid, sizeof(genid), sizeof(genid) - 1, "%s_" INT64_FORMAT, PGXCNodeName, ts);
+    int rc = snprintf_s(genid, LEN_GEN_ID, LEN_GEN_ID - 1, "%s_" INT64_FORMAT, PGXCNodeName, ts);
 #else
-    rc = snprintf_s(genid, sizeof(genid), sizeof(genid) - 1, "%s_%.0f", PGXCNodeName, ts);
+    int rc = snprintf_s(genid, LEN_GEN_ID, LEN_GEN_ID - 1, "%s_%.0f", PGXCNodeName, ts);
 #endif
     securec_check_ss(rc, "", "");
     return pstrdup(genid);
@@ -273,7 +338,6 @@ static PGXCNodeAllHandles* SendBarrierPrepareRequest(List* coords, const char* i
     int conn;
     int msglen;
     int barrier_idlen;
-    int ret = 0;
 
     coord_handles = get_handles(NIL, coords, true);
 
@@ -300,14 +364,14 @@ static PGXCNodeAllHandles* SendBarrierPrepareRequest(List* coords, const char* i
 
         handle->outBuffer[handle->outEnd++] = 'b';
         msglen = htonl(msglen);
-        ret = memcpy_s(handle->outBuffer + handle->outEnd, 4, &msglen, 4);
-        securec_check(ret, "\0", "\0");
+        int rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &msglen, 4);
+        securec_check(rc, "\0", "\0");
         handle->outEnd += 4;
 
         handle->outBuffer[handle->outEnd++] = CREATE_BARRIER_PREPARE;
 
-        ret = memcpy_s(handle->outBuffer + handle->outEnd, barrier_idlen, id, barrier_idlen);
-        securec_check(ret, "\0", "\0");
+        rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, id, barrier_idlen);
+        securec_check(rc, "\0", "\0");
         handle->outEnd += barrier_idlen;
 
         handle->state = DN_CONNECTION_STATE_QUERY;
@@ -326,7 +390,7 @@ static void CheckBarrierCommandStatus(PGXCNodeAllHandles* conn_handles, const ch
     elog(DEBUG1, "Check CREATE BARRIER <%s> %s command status", id, command);
 
     for (conn = 0; conn < count; conn++) {
-        PGXCNodeHandle* handle;
+        PGXCNodeHandle* handle = NULL;
 
         if (conn < conn_handles->co_conn_count)
             handle = conn_handles->coord_handles[conn];
@@ -357,7 +421,6 @@ static void SendBarrierEndRequest(PGXCNodeAllHandles* coord_handles, const char*
     int conn;
     int msglen;
     int barrier_idlen;
-    int ret = 0;
 
     elog(DEBUG1, "Sending CREATE BARRIER <%s> END command to all Coordinators", id);
 
@@ -384,14 +447,14 @@ static void SendBarrierEndRequest(PGXCNodeAllHandles* coord_handles, const char*
 
         handle->outBuffer[handle->outEnd++] = 'b';
         msglen = htonl(msglen);
-        ret = memcpy_s(handle->outBuffer + handle->outEnd, 4, &msglen, 4);
-        securec_check(ret, "\0", "\0");
+        int rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &msglen, 4);
+        securec_check(rc, "\0", "\0");
         handle->outEnd += 4;
 
         handle->outBuffer[handle->outEnd++] = CREATE_BARRIER_END;
 
-        ret = memcpy_s(handle->outBuffer + handle->outEnd, barrier_idlen, id, barrier_idlen);
-        securec_check(ret, "\0", "\0");
+        rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, id, barrier_idlen);
+        securec_check(rc, "\0", "\0");
         handle->outEnd += barrier_idlen;
 
         handle->state = DN_CONNECTION_STATE_QUERY;
@@ -412,7 +475,7 @@ static void SendBarrierEndRequest(PGXCNodeAllHandles* coord_handles, const char*
  */
 static PGXCNodeAllHandles* PrepareBarrier(const char* id)
 {
-    PGXCNodeAllHandles* coord_handles;
+    PGXCNodeAllHandles* coord_handles = NULL;
 
     elog(DEBUG1, "Preparing Coordinators for BARRIER");
 
@@ -455,7 +518,6 @@ static void ExecuteBarrier(const char* id)
     int conn;
     int msglen;
     int barrier_idlen;
-    int ret = 0;
 
     conn_handles = get_handles(barrierDataNodeList, barrierCoordList, false);
 
@@ -467,7 +529,7 @@ static void ExecuteBarrier(const char* id)
      * Send a CREATE BARRIER request to all the Datanodes and the Coordinators
      */
     for (conn = 0; conn < conn_handles->co_conn_count + conn_handles->dn_conn_count; conn++) {
-        PGXCNodeHandle* handle;
+        PGXCNodeHandle* handle = NULL;
 
         if (conn < conn_handles->co_conn_count)
             handle = conn_handles->coord_handles[conn];
@@ -494,14 +556,14 @@ static void ExecuteBarrier(const char* id)
 
         handle->outBuffer[handle->outEnd++] = 'b';
         msglen = htonl(msglen);
-        ret = memcpy_s(handle->outBuffer + handle->outEnd, 4, &msglen, 4);
-        securec_check(ret, "\0", "\0");
+        int rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &msglen, 4);
+        securec_check(rc, "\0", "\0");
         handle->outEnd += 4;
 
         handle->outBuffer[handle->outEnd++] = CREATE_BARRIER_EXECUTE;
 
-        ret = memcpy_s(handle->outBuffer + handle->outEnd, barrier_idlen, id, barrier_idlen);
-        securec_check(ret, "\0", "\0");
+        rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, id, barrier_idlen);
+        securec_check(rc, "\0", "\0");
         handle->outEnd += barrier_idlen;
 
         handle->state = DN_CONNECTION_STATE_QUERY;
@@ -525,7 +587,7 @@ static void ExecuteBarrier(const char* id)
         rdata[0].next = NULL;
 
         recptr = XLogInsert(RM_BARRIER_ID, XLOG_BARRIER_CREATE, rdata);
-        XLogWaitFlush(recptr);
+        XLogFlush(recptr);
     }
 }
 
@@ -556,3 +618,4 @@ static void WriteBarrierLSNFile(XLogRecPtr barrierLSN)
 }
 
 #endif
+

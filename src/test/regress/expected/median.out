@@ -9,7 +9,6 @@ INSERT INTO MEDTEST VALUES(5, 'NAN', NULL, 3), (5, 30, NULL, 3);
 INSERT INTO MEDTEST VALUES(6, 'NAN', 100, 100), (6, 'NAN', 100, 200);
 INSERT INTO MEDTEST VALUES(7, 'NAN', 123, 6666), (7, 'NAN', NULL, NULL), (7, 'NAN', NULL, 3333);
 INSERT INTO MEDTEST VALUES(8, 'NAN', 99, 9999), (8, 888, 32, NULL), (8, 889, 123, NULL);
-
 SELECT ID, MEDIAN(NUMVAL), MEDIAN(IVAL), MEDIAN(BVAL) FROM MEDTEST GROUP BY ID ORDER BY 1;
  id | median | median |   median   
 ----+--------+--------+------------
@@ -22,7 +21,6 @@ SELECT ID, MEDIAN(NUMVAL), MEDIAN(IVAL), MEDIAN(BVAL) FROM MEDTEST GROUP BY ID O
   7 |    NaN |    123 |     4999.5
   8 |    889 |     99 |       9999
 (8 rows)
-
 
 -- the median function is equivalent to percentile_cont(0.5) within group (order by column)
 SELECT ID, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY NUMVAL) = MEDIAN(NUMVAL) AS MUST_TRUE1,
@@ -40,7 +38,6 @@ FROM MEDTEST GROUP BY ID ORDER BY 1;
   7 | t          | t          | t
   8 | t          | t          | t
 (8 rows)
-
 
 -- the test case for median with window function
 SELECT ID, NUMVAL, MEDIAN(NUMVAL) OVER(PARTITION BY ID) FROM MEDTEST GROUP BY ID, NUMVAL ORDER BY 1, 2;
@@ -114,7 +111,6 @@ SELECT ID, BVAL, MEDIAN(BVAL) OVER(PARTITION BY ID) FROM MEDTEST GROUP BY ID, BV
   8 |          |       9999
 (20 rows)
 
-
 -- the test cases for median(extension)
 SELECT ID, MEDIAN(NUMVAL + IVAL) FROM MEDTEST GROUP BY ID ORDER BY 1;
  id | median 
@@ -153,7 +149,6 @@ SELECT ID, BVAL + IVAL, MEDIAN(BVAL + IVAL) OVER(PARTITION BY ID) FROM MEDTEST G
   8 |          |      10098
 (19 rows)
 
-
 --
 -- The test cases for INTERVAL type
 CREATE TABLE MEDTEST2(ID INT, ITVL INTERVAL, TS TIMESTAMP);
@@ -166,7 +161,6 @@ INSERT INTO MEDTEST2 VALUES(3, INTERVAL '7 YEAR 2 MONTHS 1 DAYS', NOW());
 INSERT INTO MEDTEST2 VALUES(4, NULL, NULL);
 INSERT INTO MEDTEST2 VALUES(5, NULL, NULL);
 INSERT INTO MEDTEST2 VALUES(5, INTERVAL '7 YEAR 2 MONTHS 1 DAYS', NULL);
-
 SELECT ID, MEDIAN(ITVL) FROM MEDTEST2 GROUP BY ID;
  id |             median              
 ----+---------------------------------
@@ -177,7 +171,6 @@ SELECT ID, MEDIAN(ITVL) FROM MEDTEST2 GROUP BY ID;
   2 | @ 11 years 2 mons 4 days
 (5 rows)
 
-
 -- unsupported datatype
 SELECT ID, MEDIAN(TS) FROM MEDTEST2 GROUP BY ID;
 ERROR:  function median(timestamp without time zone) does not exist
@@ -185,7 +178,6 @@ LINE 1: SELECT ID, MEDIAN(TS) FROM MEDTEST2 GROUP BY ID;
                    ^
 HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 CONTEXT:  referenced column: median
-
 -- median & percentile_cont(0.5)
 SELECT ID, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ITVL) = MEDIAN(ITVL) AS MUST_TRUE
 FROM MEDTEST2 GROUP BY ID ORDER BY 1;
@@ -197,7 +189,6 @@ FROM MEDTEST2 GROUP BY ID ORDER BY 1;
   4 | 
   5 | t
 (5 rows)
-
 
 -- the window function
 SELECT ID, ITVL, MEDIAN(ITVL) OVER(PARTITION BY ID) FROM MEDTEST2 GROUP BY ID, ITVL ORDER BY 1, 2;

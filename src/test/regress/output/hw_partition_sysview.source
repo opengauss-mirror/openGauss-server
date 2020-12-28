@@ -1,0 +1,369 @@
+--01--------------------------------------------------------------------
+select TABLE_NAME ,PARTITIONING_TYPE,PARTITION_COUNT  ,DEF_TABLESPACE_NAME    ,PARTITIONING_KEY_COUNT  from dba_part_tables order by 1, 2, 3;
+ table_name | partitioning_type | partition_count | def_tablespace_name | partitioning_key_count 
+------------+-------------------+-----------------+---------------------+------------------------
+(0 rows)
+
+select TABLE_NAME ,PARTITIONING_TYPE,PARTITION_COUNT  ,DEF_TABLESPACE_NAME    ,PARTITIONING_KEY_COUNT  from SYS.dba_part_tables order by 1, 2, 3;
+ table_name | partitioning_type | partition_count | def_tablespace_name | partitioning_key_count 
+------------+-------------------+-----------------+---------------------+------------------------
+(0 rows)
+
+select TABLE_NAME ,PARTITION_NAME,HIGH_VALUE,TABLESPACE_NAME from DBA_TAB_PARTITIONS order by 1, 2, 3;
+ table_name | partition_name | high_value | tablespace_name 
+------------+----------------+------------+-----------------
+(0 rows)
+
+select TABLE_NAME ,PARTITION_NAME,HIGH_VALUE,TABLESPACE_NAME from SYS.DBA_TAB_PARTITIONS order by 1, 2, 3;
+ table_name | partition_name | high_value | tablespace_name 
+------------+----------------+------------+-----------------
+(0 rows)
+
+--0 rows
+\d dba_part_tables
+             View "pg_catalog.dba_part_tables"
+         Column         |         Type          | Modifiers 
+------------------------+-----------------------+-----------
+ table_owner            | character varying(64) | 
+ schema                 | character varying(64) | 
+ table_name             | character varying(64) | 
+ partitioning_type      | text                  | 
+ partition_count        | bigint                | 
+ def_tablespace_name    | name                  | 
+ partitioning_key_count | integer               | 
+
+--02--------------------------------------------------------------------
+--diffenent partition type
+create table part_table_range_type
+(
+	c1 int
+)partition by range  (c1)
+(
+	partition part_table_range_type_p0 values less than (100)
+);
+create index part_table_range_type_index_c1 on part_table_range_type (c1) local
+(
+	partition part_table_range_type_index_c1_p0
+);
+--03--------------------------------------------------------------------
+--different partiton count
+--tablespace name
+\! rm -fr '@testtablespace@/partitoin_spc100'
+\! mkdir '@testtablespace@/partitoin_spc100'
+CREATE TABLESPACE hw_partition_sysview_testspace LOCATION '@testtablespace@/partitoin_spc100';
+create table part_table_one_partition
+(
+	c1 int
+)
+tablespace hw_partition_sysview_testspace 
+partition by range  (c1)
+(
+	partition part_table_one_partition_p0 values less than (100)
+);
+create index part_table_one_partition_index_c1 on part_table_one_partition (c1) local
+(
+	partition part_table_one_partition_index_c1_p0 tablespace hw_partition_sysview_testspace
+)tablespace hw_partition_sysview_testspace;
+create table part_table_two_partition
+(
+	c1 int
+)partition by range  (c1)
+(
+	partition part_table_two_partition_p0 values less than (100),
+	partition part_table_two_partition_p1 values less than (200)
+);
+create index part_table_two_partition_index_c1 on part_table_two_partition (c1) local
+(
+	partition part_table_two_partition_index_c1_p0,
+	partition part_table_two_partition_index_c1_p1
+);
+create table part_table_three_partition
+(
+	c1 int
+)partition by range  (c1)
+(
+	partition part_table_three_partition_p0 values less than (100),
+	partition part_table_three_partition_p1 values less than (200),
+	partition part_table_three_partition_p2 values less than (300)
+);
+create index part_table_three_partition_index_c1 on part_table_three_partition (c1) local;
+select TABLE_NAME ,PARTITIONING_TYPE,PARTITION_COUNT  ,DEF_TABLESPACE_NAME    ,PARTITIONING_KEY_COUNT  from dba_part_tables order by 1, 2, 3;
+         table_name         | partitioning_type | partition_count |      def_tablespace_name       | partitioning_key_count 
+----------------------------+-------------------+-----------------+--------------------------------+------------------------
+ part_table_one_partition   | RANGE             |               1 | hw_partition_sysview_testspace |                      1
+ part_table_range_type      | RANGE             |               1 | DEFAULT TABLESPACE             |                      1
+ part_table_three_partition | RANGE             |               3 | DEFAULT TABLESPACE             |                      1
+ part_table_two_partition   | RANGE             |               2 | DEFAULT TABLESPACE             |                      1
+(4 rows)
+
+--05--------------------------------------------------------------------
+--partition key count
+create table part_table_two_partkey
+(
+	c1 INT ,
+	c2 INT not null,
+	c3 int
+)
+partition by range (c1,C2)
+(
+	partition part_table_two_partkey_p0 values less than (10,MAXVALUE),
+	partition part_table_two_partkey_p1 values less than (MAXVALUE,MAXVALUE)
+);
+create index part_table_two_partkey_index_c1 on part_table_two_partkey (c1)   local;
+--06--------------------------------------------------------------------
+--schema
+create schema test_schema;
+create table test_schema.part_table_test_schema
+(
+	c1 INT ,
+	c2 INT not null,
+	c3 int
+)
+partition by range (c1,C2)
+(
+	partition part_table_test_schema_p0 values less than (10,MAXVALUE)
+);
+create index part_table_test_schema_index_c1 on test_schema.part_table_test_schema (c1)   local;
+--07--------------------------------------------------------------------
+select SCHEMA,TABLE_NAME ,PARTITIONING_TYPE,PARTITION_COUNT  ,DEF_TABLESPACE_NAME    ,PARTITIONING_KEY_COUNT  from dba_part_tables order by 1, 2, 3;
+   schema    |         table_name         | partitioning_type | partition_count |      def_tablespace_name       | partitioning_key_count 
+-------------+----------------------------+-------------------+-----------------+--------------------------------+------------------------
+ public      | part_table_one_partition   | RANGE             |               1 | hw_partition_sysview_testspace |                      1
+ public      | part_table_range_type      | RANGE             |               1 | DEFAULT TABLESPACE             |                      1
+ public      | part_table_three_partition | RANGE             |               3 | DEFAULT TABLESPACE             |                      1
+ public      | part_table_two_partition   | RANGE             |               2 | DEFAULT TABLESPACE             |                      1
+ public      | part_table_two_partkey     | RANGE             |               2 | DEFAULT TABLESPACE             |                      2
+ test_schema | part_table_test_schema     | RANGE             |               1 | DEFAULT TABLESPACE             |                      2
+(6 rows)
+
+select SCHEMA,TABLE_NAME ,PARTITIONING_TYPE,PARTITION_COUNT  ,DEF_TABLESPACE_NAME    ,PARTITIONING_KEY_COUNT  from SYS.dba_part_tables order by 1, 2, 3;
+   schema    |         table_name         | partitioning_type | partition_count |      def_tablespace_name       | partitioning_key_count 
+-------------+----------------------------+-------------------+-----------------+--------------------------------+------------------------
+ public      | part_table_one_partition   | RANGE             |               1 | hw_partition_sysview_testspace |                      1
+ public      | part_table_range_type      | RANGE             |               1 | DEFAULT TABLESPACE             |                      1
+ public      | part_table_three_partition | RANGE             |               3 | DEFAULT TABLESPACE             |                      1
+ public      | part_table_two_partition   | RANGE             |               2 | DEFAULT TABLESPACE             |                      1
+ public      | part_table_two_partkey     | RANGE             |               2 | DEFAULT TABLESPACE             |                      2
+ test_schema | part_table_test_schema     | RANGE             |               1 | DEFAULT TABLESPACE             |                      2
+(6 rows)
+
+select SCHEMA,TABLE_NAME ,PARTITION_NAME,HIGH_VALUE,TABLESPACE_NAME from DBA_TAB_PARTITIONS order by 1, 2, 3;
+   schema    |         table_name         |        partition_name         |    high_value     |        tablespace_name         
+-------------+----------------------------+-------------------------------+-------------------+--------------------------------
+ public      | part_table_one_partition   | part_table_one_partition_p0   | 100               | hw_partition_sysview_testspace
+ public      | part_table_range_type      | part_table_range_type_p0      | 100               | DEFAULT TABLESPACE
+ public      | part_table_three_partition | part_table_three_partition_p0 | 100               | DEFAULT TABLESPACE
+ public      | part_table_three_partition | part_table_three_partition_p1 | 200               | DEFAULT TABLESPACE
+ public      | part_table_three_partition | part_table_three_partition_p2 | 300               | DEFAULT TABLESPACE
+ public      | part_table_two_partition   | part_table_two_partition_p0   | 100               | DEFAULT TABLESPACE
+ public      | part_table_two_partition   | part_table_two_partition_p1   | 200               | DEFAULT TABLESPACE
+ public      | part_table_two_partkey     | part_table_two_partkey_p0     | 10,MAXVALUE       | DEFAULT TABLESPACE
+ public      | part_table_two_partkey     | part_table_two_partkey_p1     | MAXVALUE,MAXVALUE | DEFAULT TABLESPACE
+ test_schema | part_table_test_schema     | part_table_test_schema_p0     | 10,MAXVALUE       | DEFAULT TABLESPACE
+(10 rows)
+
+select SCHEMA,TABLE_NAME ,PARTITION_NAME,HIGH_VALUE,TABLESPACE_NAME from SYS.DBA_TAB_PARTITIONS order by 1, 2, 3;
+   schema    |         table_name         |        partition_name         |    high_value     |        tablespace_name         
+-------------+----------------------------+-------------------------------+-------------------+--------------------------------
+ public      | part_table_one_partition   | part_table_one_partition_p0   | 100               | hw_partition_sysview_testspace
+ public      | part_table_range_type      | part_table_range_type_p0      | 100               | DEFAULT TABLESPACE
+ public      | part_table_three_partition | part_table_three_partition_p0 | 100               | DEFAULT TABLESPACE
+ public      | part_table_three_partition | part_table_three_partition_p1 | 200               | DEFAULT TABLESPACE
+ public      | part_table_three_partition | part_table_three_partition_p2 | 300               | DEFAULT TABLESPACE
+ public      | part_table_two_partition   | part_table_two_partition_p0   | 100               | DEFAULT TABLESPACE
+ public      | part_table_two_partition   | part_table_two_partition_p1   | 200               | DEFAULT TABLESPACE
+ public      | part_table_two_partkey     | part_table_two_partkey_p0     | 10,MAXVALUE       | DEFAULT TABLESPACE
+ public      | part_table_two_partkey     | part_table_two_partkey_p1     | MAXVALUE,MAXVALUE | DEFAULT TABLESPACE
+ test_schema | part_table_test_schema     | part_table_test_schema_p0     | 10,MAXVALUE       | DEFAULT TABLESPACE
+(10 rows)
+
+select SCHEMA,INDEX_NAME ,TABLE_NAME,PARTITIONING_TYPE,PARTITION_COUNT,DEF_TABLESPACE_NAME,PARTITIONING_KEY_COUNT from SYS.dba_part_indexes order by 1, 2, 3;
+   schema    |             index_name              |         table_name         | partitioning_type | partition_count |      def_tablespace_name       | partitioning_key_count 
+-------------+-------------------------------------+----------------------------+-------------------+-----------------+--------------------------------+------------------------
+ public      | part_table_one_partition_index_c1   | part_table_one_partition   | RANGE             |               1 | hw_partition_sysview_testspace |                      1
+ public      | part_table_range_type_index_c1      | part_table_range_type      | RANGE             |               1 | DEFAULT TABLESPACE             |                      1
+ public      | part_table_three_partition_index_c1 | part_table_three_partition | RANGE             |               3 | DEFAULT TABLESPACE             |                      1
+ public      | part_table_two_partition_index_c1   | part_table_two_partition   | RANGE             |               2 | DEFAULT TABLESPACE             |                      1
+ public      | part_table_two_partkey_index_c1     | part_table_two_partkey     | RANGE             |               2 | DEFAULT TABLESPACE             |                      2
+ test_schema | part_table_test_schema_index_c1     | part_table_test_schema     | RANGE             |               1 | DEFAULT TABLESPACE             |                      2
+(6 rows)
+
+select SCHEMA,INDEX_NAME ,TABLE_NAME,PARTITIONING_TYPE,PARTITION_COUNT,DEF_TABLESPACE_NAME,PARTITIONING_KEY_COUNT from dba_part_indexes order by 1, 2, 3;
+   schema    |             index_name              |         table_name         | partitioning_type | partition_count |      def_tablespace_name       | partitioning_key_count 
+-------------+-------------------------------------+----------------------------+-------------------+-----------------+--------------------------------+------------------------
+ public      | part_table_one_partition_index_c1   | part_table_one_partition   | RANGE             |               1 | hw_partition_sysview_testspace |                      1
+ public      | part_table_range_type_index_c1      | part_table_range_type      | RANGE             |               1 | DEFAULT TABLESPACE             |                      1
+ public      | part_table_three_partition_index_c1 | part_table_three_partition | RANGE             |               3 | DEFAULT TABLESPACE             |                      1
+ public      | part_table_two_partition_index_c1   | part_table_two_partition   | RANGE             |               2 | DEFAULT TABLESPACE             |                      1
+ public      | part_table_two_partkey_index_c1     | part_table_two_partkey     | RANGE             |               2 | DEFAULT TABLESPACE             |                      2
+ test_schema | part_table_test_schema_index_c1     | part_table_test_schema     | RANGE             |               1 | DEFAULT TABLESPACE             |                      2
+(6 rows)
+
+select SCHEMA,INDEX_NAME,PARTITION_NAME,HIGH_VALUE,DEF_TABLESPACE_NAME from SYS.DBA_IND_PARTITIONS order by 1, 2, 3;
+   schema    |             index_name              |            partition_name            |    high_value     |      def_tablespace_name       
+-------------+-------------------------------------+--------------------------------------+-------------------+--------------------------------
+ public      | part_table_one_partition_index_c1   | part_table_one_partition_index_c1_p0 | 100               | hw_partition_sysview_testspace
+ public      | part_table_range_type_index_c1      | part_table_range_type_index_c1_p0    | 100               | DEFAULT TABLESPACE
+ public      | part_table_three_partition_index_c1 | part_table_three_partition_p0_c1_idx | 100               | DEFAULT TABLESPACE
+ public      | part_table_three_partition_index_c1 | part_table_three_partition_p1_c1_idx | 200               | DEFAULT TABLESPACE
+ public      | part_table_three_partition_index_c1 | part_table_three_partition_p2_c1_idx | 300               | DEFAULT TABLESPACE
+ public      | part_table_two_partition_index_c1   | part_table_two_partition_index_c1_p0 | 100               | DEFAULT TABLESPACE
+ public      | part_table_two_partition_index_c1   | part_table_two_partition_index_c1_p1 | 200               | DEFAULT TABLESPACE
+ public      | part_table_two_partkey_index_c1     | part_table_two_partkey_p0_c1_idx     | 10,MAXVALUE       | DEFAULT TABLESPACE
+ public      | part_table_two_partkey_index_c1     | part_table_two_partkey_p1_c1_idx     | MAXVALUE,MAXVALUE | DEFAULT TABLESPACE
+ test_schema | part_table_test_schema_index_c1     | part_table_test_schema_p0_c1_idx     | 10,MAXVALUE       | DEFAULT TABLESPACE
+(10 rows)
+
+select SCHEMA,INDEX_NAME,PARTITION_NAME,HIGH_VALUE,DEF_TABLESPACE_NAME from DBA_IND_PARTITIONS order by 1, 2, 3;
+   schema    |             index_name              |            partition_name            |    high_value     |      def_tablespace_name       
+-------------+-------------------------------------+--------------------------------------+-------------------+--------------------------------
+ public      | part_table_one_partition_index_c1   | part_table_one_partition_index_c1_p0 | 100               | hw_partition_sysview_testspace
+ public      | part_table_range_type_index_c1      | part_table_range_type_index_c1_p0    | 100               | DEFAULT TABLESPACE
+ public      | part_table_three_partition_index_c1 | part_table_three_partition_p0_c1_idx | 100               | DEFAULT TABLESPACE
+ public      | part_table_three_partition_index_c1 | part_table_three_partition_p1_c1_idx | 200               | DEFAULT TABLESPACE
+ public      | part_table_three_partition_index_c1 | part_table_three_partition_p2_c1_idx | 300               | DEFAULT TABLESPACE
+ public      | part_table_two_partition_index_c1   | part_table_two_partition_index_c1_p0 | 100               | DEFAULT TABLESPACE
+ public      | part_table_two_partition_index_c1   | part_table_two_partition_index_c1_p1 | 200               | DEFAULT TABLESPACE
+ public      | part_table_two_partkey_index_c1     | part_table_two_partkey_p0_c1_idx     | 10,MAXVALUE       | DEFAULT TABLESPACE
+ public      | part_table_two_partkey_index_c1     | part_table_two_partkey_p1_c1_idx     | MAXVALUE,MAXVALUE | DEFAULT TABLESPACE
+ test_schema | part_table_test_schema_index_c1     | part_table_test_schema_p0_c1_idx     | 10,MAXVALUE       | DEFAULT TABLESPACE
+(10 rows)
+
+drop table PART_TABLE_RANGE_TYPE                    ;
+drop table PART_TABLE_ONE_PARTITION                 ;
+drop table PART_TABLE_TWO_PARTITION                 ;
+drop table PART_TABLE_TWO_PARTKEY                   ;
+drop table PART_TABLE_THREE_PARTITION               ;
+drop table test_schema.part_table_test_schema;
+drop schema test_schema;
+--08--------------------------------------------------------------------
+--test user_xxx view
+create user psys password 'Gauss@123';
+set role psys password 'Gauss@123';
+create table part_table_range_type
+(
+	c1 int
+)partition by range  (c1)
+(
+	partition part_table_range_type_p0 values less than (100)
+);
+create index part_table_range_type_index_c1 on part_table_range_type (c1) local
+(
+	partition part_table_range_type_index_c1_p0
+);
+select SCHEMA,TABLE_NAME ,PARTITIONING_TYPE,PARTITION_COUNT  ,DEF_TABLESPACE_NAME    ,PARTITIONING_KEY_COUNT  from user_part_tables order by 1, 2, 3;
+ schema |      table_name       | partitioning_type | partition_count | def_tablespace_name | partitioning_key_count 
+--------+-----------------------+-------------------+-----------------+---------------------+------------------------
+ psys   | part_table_range_type | RANGE             |               1 | DEFAULT TABLESPACE  |                      1
+(1 row)
+
+select SCHEMA,TABLE_NAME ,PARTITION_NAME,HIGH_VALUE,TABLESPACE_NAME from DBA_TAB_PARTITIONS order by 1, 2, 3;
+ERROR:  permission denied for relation dba_tab_partitions
+select SCHEMA,INDEX_NAME ,TABLE_NAME,PARTITIONING_TYPE,PARTITION_COUNT,DEF_TABLESPACE_NAME,PARTITIONING_KEY_COUNT from user_part_indexes order by 1, 2, 3;
+ schema |           index_name           |      table_name       | partitioning_type | partition_count | def_tablespace_name | partitioning_key_count 
+--------+--------------------------------+-----------------------+-------------------+-----------------+---------------------+------------------------
+ psys   | part_table_range_type_index_c1 | part_table_range_type | RANGE             |               1 | DEFAULT TABLESPACE  |                      1
+(1 row)
+
+select SCHEMA,INDEX_NAME,PARTITION_NAME,HIGH_VALUE,DEF_TABLESPACE_NAME from USER_IND_PARTITIONS;
+ schema |           index_name           |          partition_name           | high_value | def_tablespace_name 
+--------+--------------------------------+-----------------------------------+------------+---------------------
+ psys   | part_table_range_type_index_c1 | part_table_range_type_index_c1_p0 | 100        | DEFAULT TABLESPACE
+(1 row)
+
+reset role;
+select SCHEMA,TABLE_NAME ,PARTITIONING_TYPE,PARTITION_COUNT  ,DEF_TABLESPACE_NAME    ,PARTITIONING_KEY_COUNT  from user_part_tables order by 1, 2, 3;
+ schema | table_name | partitioning_type | partition_count | def_tablespace_name | partitioning_key_count 
+--------+------------+-------------------+-----------------+---------------------+------------------------
+(0 rows)
+
+--0 row
+select SCHEMA,TABLE_NAME ,PARTITION_NAME,HIGH_VALUE,TABLESPACE_NAME from USER_TAB_PARTITIONS order by 1, 2, 3;
+ schema | table_name | partition_name | high_value | tablespace_name 
+--------+------------+----------------+------------+-----------------
+(0 rows)
+
+--0 row
+select SCHEMA,INDEX_NAME ,TABLE_NAME,PARTITIONING_TYPE,PARTITION_COUNT,DEF_TABLESPACE_NAME,PARTITIONING_KEY_COUNT from user_part_indexes order by 1, 2, 3;
+ schema | index_name | table_name | partitioning_type | partition_count | def_tablespace_name | partitioning_key_count 
+--------+------------+------------+-------------------+-----------------+---------------------+------------------------
+(0 rows)
+
+--0 row
+select SCHEMA,INDEX_NAME,PARTITION_NAME,HIGH_VALUE,DEF_TABLESPACE_NAME from USER_IND_PARTITIONS order by 1, 2, 3;
+ schema | index_name | partition_name | high_value | def_tablespace_name 
+--------+------------+----------------+------------+---------------------
+(0 rows)
+
+--0 row
+select SCHEMA,TABLE_NAME ,PARTITIONING_TYPE,PARTITION_COUNT  ,DEF_TABLESPACE_NAME    ,PARTITIONING_KEY_COUNT  from dba_part_tables order by 1, 2, 3;
+ schema |      table_name       | partitioning_type | partition_count | def_tablespace_name | partitioning_key_count 
+--------+-----------------------+-------------------+-----------------+---------------------+------------------------
+ psys   | part_table_range_type | RANGE             |               1 | DEFAULT TABLESPACE  |                      1
+(1 row)
+
+select SCHEMA,TABLE_NAME ,PARTITION_NAME,HIGH_VALUE,TABLESPACE_NAME from DBA_TAB_PARTITIONS order by 1, 2, 3;
+ schema |      table_name       |      partition_name      | high_value |  tablespace_name   
+--------+-----------------------+--------------------------+------------+--------------------
+ psys   | part_table_range_type | part_table_range_type_p0 | 100        | DEFAULT TABLESPACE
+(1 row)
+
+select SCHEMA,INDEX_NAME ,TABLE_NAME,PARTITIONING_TYPE,PARTITION_COUNT,DEF_TABLESPACE_NAME,PARTITIONING_KEY_COUNT from dba_part_indexes order by 1, 2, 3;
+ schema |           index_name           |      table_name       | partitioning_type | partition_count | def_tablespace_name | partitioning_key_count 
+--------+--------------------------------+-----------------------+-------------------+-----------------+---------------------+------------------------
+ psys   | part_table_range_type_index_c1 | part_table_range_type | RANGE             |               1 | DEFAULT TABLESPACE  |                      1
+(1 row)
+
+select SCHEMA,INDEX_NAME,PARTITION_NAME,HIGH_VALUE,DEF_TABLESPACE_NAME from DBA_IND_PARTITIONS order by 1, 2, 3;
+ schema |           index_name           |          partition_name           | high_value | def_tablespace_name 
+--------+--------------------------------+-----------------------------------+------------+---------------------
+ psys   | part_table_range_type_index_c1 | part_table_range_type_index_c1_p0 | 100        | DEFAULT TABLESPACE
+(1 row)
+
+drop table psys.part_table_range_type; 
+drop schema psys;
+drop role psys;
+drop tablespace hw_partition_sysview_testspace;
+create table autovacuum_partition_table
+(
+	a int,
+	b int
+)partition by range (b)
+(
+	partition p1 values less than (10),
+	partition p2 values less than (20),
+	partition p3 values less than (30)
+);
+insert into autovacuum_partition_table values (-1, generate_series(0, 29));
+update autovacuum_partition_table set b=-1 where b=5;
+update autovacuum_partition_table set b=-2 where b=6;
+delete from autovacuum_partition_table where b=-2;
+-- test function pg_partition_filenode()
+CREATE OR REPLACE FUNCTION testfunc_pgpartition_relfilenode() RETURNS integer AS $$
+DECLARE
+    tid  Oid;
+    rfn  Oid;
+    rfn2 Oid;
+BEGIN
+    FOR tid IN SELECT oid FROM pg_partition LOOP
+    IF tid <> 0 THEN
+        SELECT INTO rfn  relfilenode FROM pg_partition WHERE oid = tid;
+        SELECT INTO rfn2 pg_partition_filenode(tid);
+        IF rfn = 0 and rfn2 IS NULL THEN
+          CONTINUE;
+        ELSIF rfn <> 0 and rfn2 IS NOT NULL and rfn = rfn2 THEN
+          CONTINUE;
+        ELSE
+          RETURN 0;
+        END IF;
+      END IF;
+    END LOOP;
+    RETURN 1;
+END
+$$ LANGUAGE plpgsql;
+EXECUTE DIRECT ON (datanode1) 'call testfunc_pgpartition_relfilenode()';
+ testfunc_pgpartition_relfilenode 
+----------------------------------
+                                1
+(1 row)
+

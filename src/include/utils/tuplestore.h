@@ -48,7 +48,7 @@ extern Tuplestorestate* tuplestore_begin_heap(bool randomAccess, bool interXact,
 
 extern void tuplestore_set_eflags(Tuplestorestate* state, int eflags);
 
-extern void tuplestore_puttupleslot(Tuplestorestate* state, TupleTableSlot* slot);
+extern void tuplestore_puttupleslot(Tuplestorestate* state, TupleTableSlot* slot, bool need_transform_anyarray = false);
 extern void tuplestore_puttuple(Tuplestorestate* state, HeapTuple tuple);
 extern void tuplestore_putvalues(Tuplestorestate* state, TupleDesc tdesc, Datum* values, const bool* isnull);
 

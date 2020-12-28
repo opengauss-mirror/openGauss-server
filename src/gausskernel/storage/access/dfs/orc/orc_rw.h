@@ -21,7 +21,6 @@
  * -------------------------------------------------------------------------
  */
 
-
 #ifndef ORC_RW_H
 #define ORC_RW_H
 
@@ -52,7 +51,6 @@ extern char *pg_to_server_withfailure(char *src, int64 length, int32 encoding, i
 #define FOREIGNTABLEFILEID (-1)
 
 namespace dfs {
-
 /* timestamp related values */
 #define SECONDS_PER_DAY 86400                   // the number of seconds in a day
 #define MICROSECONDS_PER_SECOND 1000000L        // the number of microseconds in a second
@@ -220,8 +218,8 @@ Datum convertToDatumT(orc::ColumnVectorBatch *primitiveBatch, uint64 rowId, int3
             char *tmpValue = static_cast<orc::StringVectorBatch *>(primitiveBatch)->data[rowId];
             int64_t length = static_cast<orc::StringVectorBatch *>(primitiveBatch)->length[rowId];
 
-            /* Check compatibility and convert '' into null if the db is ORA_FORMAT. */
-            if (DB_IS_CMPT(DB_CMPT_A) && length == 0) {
+            /* Check compatibility and convert '' into null if the db is A_FORMAT. */
+            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && length == 0) {
                 isNull = true;
                 break;
             }
@@ -251,7 +249,7 @@ Datum convertToDatumT(orc::ColumnVectorBatch *primitiveBatch, uint64 rowId, int3
             int64_t length = static_cast<orc::StringVectorBatch *>(primitiveBatch)->length[rowId];
 
             /* Check compatibility and convert '' into null if the db is A_FORMAT. */
-            if (DB_IS_CMPT(DB_CMPT_A) && length == 0) {
+            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && length == 0) {
                 isNull = true;
                 break;
             }
@@ -281,7 +279,7 @@ Datum convertToDatumT(orc::ColumnVectorBatch *primitiveBatch, uint64 rowId, int3
             int64_t length = static_cast<orc::StringVectorBatch *>(primitiveBatch)->length[rowId];
 
             /* Check compatibility and convert '' into null if the db is A_FORMAT. */
-            if (DB_IS_CMPT(DB_CMPT_A) && length == 0) {
+            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && length == 0) {
                 isNull = true;
                 break;
             }
@@ -364,7 +362,6 @@ Datum convertToDatumT(orc::ColumnVectorBatch *primitiveBatch, uint64 rowId, int3
 }
 
 namespace reader {
-
 /* The restriction types of ORC file:file, stripe, stride. */
 enum RestrictionType {
     FILE = 0,
@@ -950,7 +947,7 @@ private:
      * @in nulls, The output nulls.
      * @return None.
      */
-    void setNullIntoDroppedCol(Datum *values, bool *nulls) const;
+    void setNullIntoDroppedCol(Datum *values, bool *nulls);
 
     /*
      * @Description: Insert the datums into the m_idxBatchRow

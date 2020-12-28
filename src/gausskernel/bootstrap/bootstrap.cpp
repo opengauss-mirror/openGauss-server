@@ -24,6 +24,7 @@
 #include <getopt.h>
 #endif
 
+#include "access/tableam.h"
 #include "bootstrap/bootstrap.h"
 #include "catalog/index.h"
 #include "catalog/pg_collation.h"
@@ -45,7 +46,7 @@
 #include "postmaster/lwlockmonitor.h"
 #include "replication/walreceiver.h"
 #include "replication/datareceiver.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
 #include "storage/proc.h"
 #include "tcop/tcopprot.h"
@@ -59,7 +60,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/relmapper.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 #include "access/parallel_recovery/page_redo.h"
 
 #ifdef PGXC
@@ -73,10 +74,10 @@
 
 static void CheckerModeMain(void);
 static void BootstrapModeMain(void);
-static void BootStrapSignals(void);
+static void bootstrap_signals(void);
 static Form_pg_attribute AllocateAttribute(void);
-static Oid GetType(char* type);
-static void Cleanup(void);
+static Oid gettype(char* type);
+static void cleanup(void);
 
 /*
  * Basic information associated with each type.  This is used before
@@ -199,7 +200,7 @@ void BootStrapProcessMain(int argc, char* argv[])
      */
     srandom((unsigned int)(t_thrd.proc_cxt.MyProcPid ^ (unsigned int)t_thrd.proc_cxt.MyStartTime));
 
-    knl_thread_set_name("BootStrap");
+    t_thrd.proc_cxt.MyProgName = "BootStrap";
     /*
      * Fire up essential subsystems: error and memory management
      *
@@ -242,7 +243,7 @@ void BootStrapProcessMain(int argc, char* argv[])
                 userDoption = optCtxt.optarg;
                 break;
             case 'd': {
-                size_t debugStrLen = strlen("debug") + strlen(optCtxt.optarg) + 1;
+                int debugStrLen = strlen("debug") + strlen(optCtxt.optarg) + 1;
                 /* Turn on debugging for the bootstrap process. */
                 char* debugstr = (char*)palloc(debugStrLen);
 
@@ -257,7 +258,7 @@ void BootStrapProcessMain(int argc, char* argv[])
                 break;
             case 'r':
                 errorno = strcpy_s(t_thrd.proc_cxt.OutputFileName, MAXPGPATH, optCtxt.optarg);
-                securec_check_c(errorno, "", "");
+                securec_check(errorno, "\0", "\0");
                 break;
             case 'x':
                 t_thrd.bootstrap_cxt.MyAuxProcType = (AuxProcType)atoi(optCtxt.optarg);
@@ -332,9 +333,11 @@ void BootStrapProcessMain(int argc, char* argv[])
             proc_exit(1); /* should never return */
 
         case BootstrapProcess:
-            BootStrapSignals();
+            bootstrap_signals();
             BootStrapXLOG();
+            MemoryContextUnSeal(t_thrd.top_mem_cxt);
             BootstrapModeMain();
+            MemoryContextSeal(t_thrd.top_mem_cxt);
             proc_exit(1); /* should never return */
 
         default:
@@ -386,7 +389,7 @@ static void BootstrapModeMain(void)
     /*
      * Process bootstrap input.
      */
-    (void)boot_yyparse();
+    boot_yyparse();
 
     /*
      * We should now know about all mapped relations, so it's okay to write
@@ -395,7 +398,7 @@ static void BootstrapModeMain(void)
     RelationMapFinishBootstrap();
 
     /* Clean up and exit */
-    Cleanup();
+    cleanup();
     proc_exit(0);
 }
 
@@ -406,7 +409,7 @@ static void BootstrapModeMain(void)
 /*
  * Set up signal handling for a bootstrap process
  */
-static void BootStrapSignals(void)
+static void bootstrap_signals(void)
 {
     if (IsUnderPostmaster) {
         /*
@@ -459,7 +462,7 @@ void boot_openrel(char* relname)
     int i;
     struct typmap** app;
     Relation rel;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tup;
     errno_t rc;
 
@@ -469,25 +472,25 @@ void boot_openrel(char* relname)
     if (t_thrd.bootstrap_cxt.Typ == NULL) {
         /* We can now load the pg_type data */
         rel = heap_open(TypeRelationId, NoLock);
-        scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
+        scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
         i = 0;
-        while ((tup = heap_getnext(scan, ForwardScanDirection)) != NULL)
+		while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL)
             ++i;
-        heap_endscan(scan);
+        tableam_scan_end(scan);
         app = t_thrd.bootstrap_cxt.Typ = ALLOC(struct typmap*, i + 1);
         while (i-- > 0)
             *app++ = ALLOC(struct typmap, 1);
         *app = NULL;
-        scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
+        scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
         app = t_thrd.bootstrap_cxt.Typ;
-        while ((tup = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+        while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
             (*app)->am_oid = HeapTupleGetOid(tup);
             rc =
                 memcpy_s((char*)&(*app)->am_typ, sizeof((*app)->am_typ), (char*)GETSTRUCT(tup), sizeof((*app)->am_typ));
             securec_check(rc, "\0", "\0");
             app++;
         }
-        heap_endscan(scan);
+        tableam_scan_end(scan);
         heap_close(rel, NoLock);
     }
 
@@ -550,6 +553,26 @@ void closerel(char* name)
     }
 }
 
+/*
+* fix roluseft ,rolmonitoradmin, roloperatoradmin and rolpolicyadmin column of pg_authid to notnull
+*/
+static void fix_attr_notnull(const char* name, int attnum)
+{
+    if (strncmp(name, "roluseft", strlen("roluseft")) == 0 && strlen(name) == strlen("roluseft")) {
+        t_thrd.bootstrap_cxt.attrtypes[attnum]->attnotnull = true;
+    }
+    if (strncmp(name, "rolmonitoradmin", strlen("rolmonitoradmin")) == 0 && strlen(name) == strlen("rolmonitoradmin")) {
+        t_thrd.bootstrap_cxt.attrtypes[attnum]->attnotnull = true;
+    }
+    if (strncmp(name, "roloperatoradmin", strlen("roloperatoradmin")) == 0 &&
+        strlen(name) == strlen("roloperatoradmin")) {
+        t_thrd.bootstrap_cxt.attrtypes[attnum]->attnotnull = true;
+    }
+    if (strncmp(name, "rolpolicyadmin", strlen("rolpolicyadmin")) == 0 && strlen(name) == strlen("rolpolicyadmin")) {
+        t_thrd.bootstrap_cxt.attrtypes[attnum]->attnotnull = true;
+    }
+}
+
 /* ----------------
  * DEFINEATTR()
  *
@@ -561,7 +584,6 @@ void closerel(char* name)
 void DefineAttr(const char* name, char* type, int attnum)
 {
     Oid typeoid;
-    int rc  = 0;
 
     if (t_thrd.bootstrap_cxt.boot_reldesc != NULL) {
         ereport(WARNING, (errmsg("no open relations allowed with CREATE command")));
@@ -570,14 +592,13 @@ void DefineAttr(const char* name, char* type, int attnum)
 
     if (t_thrd.bootstrap_cxt.attrtypes[attnum] == NULL)
         t_thrd.bootstrap_cxt.attrtypes[attnum] = AllocateAttribute();
-    rc = memset_s(t_thrd.bootstrap_cxt.attrtypes[attnum], ATTRIBUTE_FIXED_PART_SIZE, 0, ATTRIBUTE_FIXED_PART_SIZE);
-    securec_check(rc, "", "");
+    MemSet(t_thrd.bootstrap_cxt.attrtypes[attnum], 0, ATTRIBUTE_FIXED_PART_SIZE);
 
     (void)namestrcpy(&t_thrd.bootstrap_cxt.attrtypes[attnum]->attname, name);
     ereport(DEBUG4, (errmsg("column %s %s", NameStr(t_thrd.bootstrap_cxt.attrtypes[attnum]->attname), type)));
     t_thrd.bootstrap_cxt.attrtypes[attnum]->attnum = attnum + 1; /* fillatt */
 
-    typeoid = GetType(type);
+    typeoid = gettype(type);
 
     if (t_thrd.bootstrap_cxt.Typ != NULL) {
         t_thrd.bootstrap_cxt.attrtypes[attnum]->atttypid = t_thrd.bootstrap_cxt.Ap->am_oid;
@@ -636,10 +657,9 @@ void DefineAttr(const char* name, char* type, int attnum)
         t_thrd.bootstrap_cxt.attrtypes[attnum]->attnotnull = false;
     }
 
-    // fix roluseft column of pg_authid to notnull
-    if (strncmp(name, "roluseft", strlen("roluseft")) == 0 && strlen(name) == strlen("roluseft")) {
-        t_thrd.bootstrap_cxt.attrtypes[attnum]->attnotnull = true;
-    }
+    // fix roluseft ,rolmonitoradmin, roloperatoradmin and rolpolicyadmin column of pg_authid to notnull
+    fix_attr_notnull(name, attnum);
+
 }
 
 /* ----------------
@@ -662,14 +682,15 @@ void InsertOneTuple(Oid objectid)
     }
     tupDesc = CreateTupleDesc(t_thrd.bootstrap_cxt.numattr,
         RelationGetForm(t_thrd.bootstrap_cxt.boot_reldesc)->relhasoids,
-        t_thrd.bootstrap_cxt.attrtypes);
-    tuple = heap_form_tuple(tupDesc, values, Nulls);
+        t_thrd.bootstrap_cxt.attrtypes,
+        t_thrd.bootstrap_cxt.boot_reldesc->rd_tam_type);
+	tuple =  (HeapTuple) tableam_tops_form_tuple(tupDesc, values, Nulls, HEAP_TUPLE);
     if (objectid != (Oid)0)
         HeapTupleSetOid(tuple, objectid);
     pfree(tupDesc); /* just free's tupDesc, not the attrtypes */
 
     (void)simple_heap_insert(t_thrd.bootstrap_cxt.boot_reldesc, tuple);
-    heap_freetuple(tuple);
+    tableam_tops_free_tuple(tuple);
     ereport(DEBUG4, (errmsg("row inserted")));
 
     /*
@@ -725,7 +746,7 @@ void InsertOneNull(int i)
  *		cleanup
  * ----------------
  */
-static void Cleanup(void)
+static void cleanup(void)
 {
     if (t_thrd.bootstrap_cxt.boot_reldesc != NULL)
         closerel(NULL);
@@ -742,11 +763,11 @@ static void Cleanup(void)
  * still NULL to determine what the return value is!
  * ----------------
  */
-static Oid GetType(char* type)
+static Oid gettype(char* type)
 {
-    unsigned int i;
+    int i;
     Relation rel;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tup;
     struct typmap** app;
     errno_t rc;
@@ -765,26 +786,26 @@ static Oid GetType(char* type)
         }
         ereport(DEBUG4, (errmsg("external type: %s", type)));
         rel = heap_open(TypeRelationId, NoLock);
-        scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
+        scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
         i = 0;
-        while ((tup = heap_getnext(scan, ForwardScanDirection)) != NULL)
+        while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL)
             ++i;
-        heap_endscan(scan);
+        tableam_scan_end(scan);
         app = t_thrd.bootstrap_cxt.Typ = ALLOC(struct typmap*, i + 1);
         while (i-- > 0)
             *app++ = ALLOC(struct typmap, 1);
         *app = NULL;
-        scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
+        scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
         app = t_thrd.bootstrap_cxt.Typ;
-        while ((tup = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+        while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
             (*app)->am_oid = HeapTupleGetOid(tup);
             rc = memmove_s(
                 (char*)&(*app++)->am_typ, sizeof((*app)->am_typ), (char*)GETSTRUCT(tup), sizeof((*app)->am_typ));
             securec_check(rc, "\0", "\0");
         }
-        heap_endscan(scan);
+        tableam_scan_end(scan);
         heap_close(rel, NoLock);
-        return GetType(type);
+        return gettype(type);
     }
     ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("unrecognized type \"%s\"", type)));
     /* not reached, here to make compiler happy */
@@ -868,15 +889,12 @@ void boot_get_type_io_data(Oid typid, int16* typlen, bool* typbyval, char* typal
  */
 static Form_pg_attribute AllocateAttribute(void)
 {
-    Form_pg_attribute attribute = (Form_pg_attribute)MemoryContextAlloc(u_sess->top_mem_cxt, ATTRIBUTE_FIXED_PART_SIZE);
-    int rc  = 0;
+    Form_pg_attribute attribute = (Form_pg_attribute)MemoryContextAlloc(
+        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), ATTRIBUTE_FIXED_PART_SIZE);
 
-    if (!PointerIsValid(attribute)) {
+    if (!PointerIsValid(attribute))
         ereport(FATAL, (errmsg("out of memory")));
-        return NULL;
-    }
-    rc = memset_s(attribute, ATTRIBUTE_FIXED_PART_SIZE, 0, ATTRIBUTE_FIXED_PART_SIZE);
-    securec_check(rc, "", "");
+    MemSet(attribute, 0, ATTRIBUTE_FIXED_PART_SIZE);
 
     return attribute;
 }
@@ -977,8 +995,8 @@ void build_indices(void)
         /* need not bother with locks during bootstrap */
         heap = heap_open(t_thrd.bootstrap_cxt.ILHead->il_heap, NoLock);
         ind = index_open(t_thrd.bootstrap_cxt.ILHead->il_ind, NoLock);
-        index_build(heap, NULL, ind, NULL, t_thrd.bootstrap_cxt.ILHead->il_info,
-            false, false, false, INDEX_CREATE_NONE_PARTITION);
+        index_build(
+            heap, NULL, ind, NULL, t_thrd.bootstrap_cxt.ILHead->il_info, false, false, INDEX_CREATE_NONE_PARTITION);
 
         index_close(ind, NoLock);
         heap_close(heap, NoLock);

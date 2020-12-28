@@ -1,0 +1,46 @@
+set current_schema='shipping_schema';
+set enable_sort = off;
+set enable_hashagg = on;
+explain (num_costs off)
+select count(distinct(b)) from shipping_test_row group by d;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ HashAggregate
+   Group By Key: d
+   ->  Streaming (type: GATHER)
+         ->  HashAggregate
+               Group By Key: d
+               ->  HashAggregate
+                     Group By Key: d, b
+                     ->  Streaming(type: REDISTRIBUTE)
+                           ->  Seq Scan on shipping_test_row
+(9 rows)
+
+set enable_sort = on;
+set enable_hashagg = on;
+explain (num_costs off)
+select count(distinct(b)) from shipping_test_row group by d;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ HashAggregate
+   Group By Key: d
+   ->  Streaming (type: GATHER)
+         ->  HashAggregate
+               Group By Key: d
+               ->  HashAggregate
+                     Group By Key: d, b
+                     ->  Streaming(type: REDISTRIBUTE)
+                           ->  Seq Scan on shipping_test_row
+(9 rows)
+
+explain (num_costs off)
+select count(distinct(d)) from shipping_test_row group by d;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ GroupAggregate
+   Group By Key: shipping_test_row.d
+   ->  Sort
+         Sort Key: shipping_test_row.d
+         ->  Data Node Scan on shipping_test_row "_REMOTE_TABLE_QUERY_"
+(5 rows)
+

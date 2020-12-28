@@ -507,9 +507,9 @@ select min(c1),max(c3) from cstore_part_table;
 
 --copy 
 alter table coltable drop column c1;
-COPY coltable to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/coltable_out.data';
+COPY coltable to '@abs_srcdir@/data/coltable_out.data';
 create table coltable_new (like coltable);
-COPY coltable_new FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/coltable_out.data';
+COPY coltable_new FROM '@abs_srcdir@/data/coltable_out.data';
 select * from coltable
 minus 
 select * from coltable_new;

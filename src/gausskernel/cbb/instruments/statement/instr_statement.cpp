@@ -1,0 +1,1641 @@
+/*
+ * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ *
+ * openGauss is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+ * -------------------------------------------------------------------------
+ *
+ * instr_statement.cpp
+ *   functions for full/slow SQL
+ *
+ * IDENTIFICATION
+ *    src/gausskernel/cbb/instruments/statement/instr_statement.cpp
+ *
+ * -------------------------------------------------------------------------
+ */
+
+#include "postgres.h"
+#include "instruments/instr_statement.h"
+#include "instruments/instr_handle_mgr.h"
+#include "instruments/instr_unique_sql.h"
+#include "instruments/instr_slow_query.h"
+#include "postgres.h"
+#include "pgxc/pgxc.h"
+#include "pgstat.h"
+#include "pgxc/poolutils.h"
+#include "fmgr.h"
+#include "miscadmin.h"
+#include "utils/memutils.h"
+#include "storage/proc.h"
+#include "storage/latch.h"
+#include "storage/ipc.h"
+#include "catalog/pg_database.h"
+#include "gssignal/gs_signal.h"
+#include "utils/guc.h"
+#include "utils/ps_status.h"
+#include "utils/elog.h"
+#include "utils/memprot.h"
+#include "tcop/dest.h"
+#include "tcop/tcopprot.h"
+#include "gs_thread.h"
+#include "access/heapam.h"
+#include "utils/rel.h"
+#include "utils/postinit.h"
+#include "utils/snapmgr.h"
+#include "workload/gscgroup.h"
+#include "libpq/pqsignal.h"
+#include "pgxc/groupmgr.h"
+#include "funcapi.h"
+#include "libpq/ip.h"
+#include "storage/lock/lock.h"
+#include "nodes/makefuncs.h"
+#include "catalog/indexing.h"
+#include "commands/dbcommands.h"
+#include "utils/builtins.h"
+#include "commands/explain.h"
+#include "utils/fmgroids.h"
+#include "utils/relcache.h"
+#include "commands/copy.h"
+
+#define MAX_SLOW_QUERY_RETENSION_DAYS 604800
+#define MAX_FULL_SQL_RETENSION_SEC 86400
+#define IS_NULL_STR(str) ((str) == NULL || (str)[0] == '\0')
+#define STRING_MAX_LEN 256
+
+#define STATEMENT_DETAILS_HEAD_SIZE (1 + 1)     /* [VERSION] + [TRUNCATED] */
+#define INSTR_STMT_UNIX_DOMAIN_PORT (-1)
+
+static List* split_levels_into_list(const char* levels)
+{
+    List *result = NIL;
+    char *str = pstrdup(levels);
+    char *first_ch = str;
+    int len = (int)strlen(str) + 1;
+
+    for (int i = 0; i < len; i++) {
+        if (str[i] == ',' || str[i] == '\0') {
+            /* replace ',' with '\0'. */
+            str[i] = '\0';
+
+            /* copy this into result. */
+            result = lappend(result, pstrdup(first_ch));
+
+            /* move to the head of next string. */
+            first_ch = str + i + 1;
+        }
+    }
+    pfree(str);
+
+    return result;
+}
+
+static StatLevel name2level(const char *name)
+{
+    if (pg_strcasecmp(name, "OFF") == 0) {
+        return STMT_TRACK_OFF;
+    } else if (pg_strcasecmp(name, "L0") == 0) {
+        return STMT_TRACK_L0;
+    } else if (pg_strcasecmp(name, "L1") == 0) {
+        return STMT_TRACK_L1;
+    } else if (pg_strcasecmp(name, "L2") == 0) {
+        return STMT_TRACK_L2;
+    } else {
+        return LEVEL_INVALID;
+    }
+}
+
+bool check_statement_stat_level(char** newval, void** extra, GucSource source)
+{
+    /* parse level */
+    List *l = split_levels_into_list(*newval);
+
+    if (list_length(l) != STATEMENT_SQL_KIND) {
+        list_free_deep(l);
+        GUC_check_errdetail("attr num:%d is error,track_stmt_stat_level attr is 2", l->length);
+        return false;
+    }
+
+    int full_level = name2level((char*)linitial(l));
+    int slow_level = name2level((char*)lsecond(l));
+
+    list_free_deep(l);
+    if (full_level == LEVEL_INVALID || slow_level == LEVEL_INVALID) {
+        GUC_check_errdetail("invalid input syntax");
+        return false;
+    }
+
+    *extra = MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX), STATEMENT_SQL_KIND * sizeof(int));
+    ((int*)(*extra))[0] = full_level;
+    ((int*)(*extra))[1] = slow_level;
+
+    return true;
+}
+
+void assign_statement_stat_level(const char* newval, void* extra)
+{
+    int *level = (int*) extra;
+
+    u_sess->statement_cxt.statement_level[0] = level[0];
+    u_sess->statement_cxt.statement_level[1] = level[1];
+}
+
+
+void JobStatementIAm(void)
+{
+    t_thrd.role = TRACK_STMT_WORKER;
+}
+
+bool IsStatementFlushProcess(void)
+{
+    return t_thrd.role == TRACK_STMT_WORKER;
+}
+
+/* SIGHUP handler for statement flush thread */
+static void statement_sighup_handler(SIGNAL_ARGS)
+{
+    t_thrd.statement_cxt.got_SIGHUP = true;
+}
+
+static void statement_exit(SIGNAL_ARGS)
+{
+    t_thrd.statement_cxt.need_exit = true;
+    die(postgres_signal_arg);
+}
+
+static void SetThrdCxt(void)
+{
+    t_thrd.mem_cxt.msg_mem_cxt = AllocSetContextCreate(TopMemoryContext,
+        "MessageContext",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE);
+
+    /* Create the memory context we will use in the main loop. */
+    t_thrd.mem_cxt.mask_password_mem_cxt = AllocSetContextCreate(TopMemoryContext,
+        "MaskPasswordCtx",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE);
+}
+
+static void ReloadInfo()
+{
+    /* Reload configuration if we got SIGHUP from the postmaster. */
+    if (t_thrd.statement_cxt.got_SIGHUP) {
+        t_thrd.statement_cxt.got_SIGHUP = false;
+        ProcessConfigFile(PGC_SIGHUP);
+    }
+
+    if (u_sess->sig_cxt.got_PoolReload) {
+        processPoolerReload();
+        u_sess->sig_cxt.got_PoolReload = false;
+    }
+}
+
+static void ProcessSignal(void)
+{
+    /*
+     * Ignore all signals usually bound to some action in the postmaster,
+     * except SIGHUP, SIGTERM and SIGQUIT.
+     */
+    (void)gspqsignal(SIGHUP, statement_sighup_handler);
+    (void)gspqsignal(SIGINT, SIG_IGN);
+    (void)gspqsignal(SIGTERM, statement_exit); /* cancel current query and exit */
+    (void)gspqsignal(SIGQUIT, quickdie);
+    (void)gspqsignal(SIGUSR1, procsignal_sigusr1_handler);
+    (void)gspqsignal(SIGALRM, SIG_IGN);
+    (void)gspqsignal(SIGPIPE, SIG_IGN);
+    (void)gspqsignal(SIGUSR2, SIG_IGN);
+    (void)gspqsignal(SIGCHLD, SIG_DFL);
+    (void)gspqsignal(SIGTTIN, SIG_DFL);
+    (void)gspqsignal(SIGTTOU, SIG_DFL);
+    (void)gspqsignal(SIGCONT, SIG_DFL);
+    (void)gspqsignal(SIGWINCH, SIG_DFL);
+
+    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
+    (void)gs_signal_unblock_sigusr2();
+    if (u_sess->proc_cxt.MyProcPort->remote_host)
+        pfree(u_sess->proc_cxt.MyProcPort->remote_host);
+    u_sess->proc_cxt.MyProcPort->remote_host = pstrdup("localhost");
+
+    t_thrd.wlm_cxt.thread_node_group = &g_instance.wlm_cxt->MyDefaultNodeGroup;  // initialize the default value
+    t_thrd.wlm_cxt.thread_climgr = &t_thrd.wlm_cxt.thread_node_group->climgr;
+    t_thrd.wlm_cxt.thread_srvmgr = &t_thrd.wlm_cxt.thread_node_group->srvmgr;
+}
+
+#define SET_NAME_VALUES(str, attr)                                             \
+    do {                                                                       \
+        if (str == NULL) {                                                     \
+            nulls[attr] = true;                                                \
+        } else {                                                               \
+            values[attr] = DirectFunctionCall1(namein, CStringGetDatum(str));  \
+        }                                                                      \
+    } while (0)
+
+#define SET_TEXT_VALUES(str, attr)                    \
+    do {                                              \
+        if (str == NULL) {                            \
+            nulls[attr] = true;                       \
+        } else {                                      \
+            values[attr] = CStringGetTextDatum(str);  \
+        }                                             \
+    } while (0)
+
+bytea *get_statement_detail(StatementDetail *detail);
+
+static void set_stmt_row_activity_cache_io(StatementStatContext* statementInfo, Datum values[], int* i)
+{
+    /* row activity */
+    values[(*i)++] = Int64GetDatum(statementInfo->row_activity.returned_rows);
+    values[(*i)++] = Int64GetDatum(statementInfo->row_activity.tuples_fetched);
+    values[(*i)++] = Int64GetDatum(statementInfo->row_activity.tuples_returned);
+    values[(*i)++] = Int64GetDatum(statementInfo->row_activity.tuples_inserted);
+    values[(*i)++] = Int64GetDatum(statementInfo->row_activity.tuples_updated);
+    values[(*i)++] = Int64GetDatum(statementInfo->row_activity.tuples_deleted);
+
+    /* cache IO */
+    values[(*i)++] = Int64GetDatum(statementInfo->cache_io.blocks_fetched);
+    values[(*i)++] = Int64GetDatum(statementInfo->cache_io.blocks_hit);
+}
+
+static void set_stmt_basic_info(const knl_u_statement_context* statementCxt, StatementStatContext* statementInfo,
+    Datum values[], bool nulls[], int* i)
+{
+    /* query basic info */
+    values[(*i)++] = Int64GetDatum(statementInfo->unique_query_id);
+    values[(*i)++] = Int64GetDatum(statementInfo->debug_query_id);
+    SET_TEXT_VALUES(statementInfo->query, (*i)++);
+    values[(*i)++] = TimestampTzGetDatum(statementInfo->start_time);
+    values[(*i)++] = TimestampTzGetDatum(statementInfo->finish_time);
+    values[(*i)++] = Int32GetDatum(statementInfo->slow_query_threshold);
+    values[(*i)++] = Int64GetDatum(statementInfo->txn_id);
+    values[(*i)++] = Int64GetDatum(statementInfo->tid);
+    values[(*i)++] = Int64GetDatum(statementCxt->session_id);
+
+    /* parse info */
+    values[(*i)++] = Int64GetDatum(statementInfo->parse.soft_parse);
+    values[(*i)++] = Int64GetDatum(statementInfo->parse.hard_parse);
+
+    SET_TEXT_VALUES(statementInfo->query_plan, (*i)++);
+}
+
+static void set_stmt_lock_summary(const LockSummaryStat *lock_summary, Datum values[], int* i)
+{
+    values[(*i)++] = Int64GetDatum(lock_summary->lock_cnt);
+    values[(*i)++] = Int64GetDatum(lock_summary->lock_time);
+    values[(*i)++] = Int64GetDatum(lock_summary->lock_wait_cnt);
+    values[(*i)++] = Int64GetDatum(lock_summary->lock_wait_time);
+    values[(*i)++] = Int64GetDatum(lock_summary->lock_max_cnt);
+    values[(*i)++] = Int64GetDatum(lock_summary->lwlock_cnt);
+    values[(*i)++] = Int64GetDatum(lock_summary->lwlock_wait_cnt);
+    values[(*i)++] = Int64GetDatum(lock_summary->lwlock_time);
+    values[(*i)++] = Int64GetDatum(lock_summary->lwlock_wait_time);
+}
+
+static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statementInfo,
+    const knl_u_statement_context* statementCxt)
+{
+    int i = 0;
+    Datum values[51];
+    bool nulls[51] = {false};
+    errno_t rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+
+    /* get statment tuple */
+    SET_NAME_VALUES(statementCxt->db_name, i++);
+    SET_NAME_VALUES(statementInfo->schema_name, i++);
+    values[i++] = UInt32GetDatum(statementInfo->unique_sql_cn_id);
+    SET_NAME_VALUES(statementCxt->user_name, i++);
+
+    /* client info */
+    SET_TEXT_VALUES(statementInfo->application_name, i++);
+    SET_TEXT_VALUES(statementCxt->client_addr, i++);
+
+    if (statementCxt->client_port != INSTR_STMT_NULL_PORT)
+        values[i++] = Int32GetDatum(statementCxt->client_port);
+    else
+        nulls[i++] = true;
+
+    set_stmt_basic_info(statementCxt, statementInfo, values, nulls, &i);
+    set_stmt_row_activity_cache_io(statementInfo, values, &i);
+
+    /* time info */
+    for (int num = 0; num < TOTAL_TIME_INFO_TYPES; num++) {
+        if (num == NET_SEND_TIME)
+            continue;
+        values[i++] = Int64GetDatum(statementInfo->timeModel[num]);
+    }
+
+    /* net info */
+    int idx = 0;
+    while (idx < TOTAL_NET_INFO_TYPES) {
+        char netInfo[STRING_MAX_LEN];
+        uint64 time = (uint64)statementInfo->networkInfo[idx++];
+        uint64 n_calls = (uint64)statementInfo->networkInfo[idx++];
+        uint64 size = (uint64)statementInfo->networkInfo[idx++];
+        rc = sprintf_s(netInfo, sizeof(netInfo), "{\"time\":%lu, \"n_calls\":%lu, \"size\":%lu}",
+            time, n_calls, size);
+        securec_check_ss(rc, "\0", "\0");
+        values[i++] = CStringGetTextDatum(netInfo);
+    }
+
+    /* lock summary */
+    set_stmt_lock_summary(&statementInfo->lock_summary, values, &i);
+
+    /* lock detail */
+    if (statementInfo->details.n_items == 0) {
+        nulls[i++] = true;
+    } else {
+        bytea *details = get_statement_detail(&statementInfo->details);
+        if (details == NULL) {
+            nulls[i++] = true;
+        } else {
+            values[i++] = PointerGetDatum(details);
+        }
+    }
+
+    /* is slow sql */
+    values[i++] = BoolGetDatum(
+        (statementInfo->finish_time - statementInfo->start_time >= statementInfo->slow_query_threshold) ? true : false);
+    return heap_form_tuple(RelationGetDescr(rel), values, nulls);
+}
+
+static RangeVar* InitStatementRel()
+{
+    RangeVar* relrv = makeRangeVar(NULL, NULL, -1);
+    relrv->relname = pstrdup("statement_history");
+    relrv->schemaname = pstrdup("pg_catalog");
+    relrv->catalogname = pstrdup("postgres");
+    relrv->relpersistence = RELPERSISTENCE_UNLOGGED;
+    return relrv;
+}
+
+static bool StrToInt32(const char* s, int *val)
+{
+    int base = 10;
+    const char* ptr = s;
+    /* process digits */
+    while (*ptr != '\0') {
+        if (isdigit((unsigned char)*ptr) == 0)
+            return false;
+        int8 digit = (*ptr++ - '0');
+        *val = *val * base + digit;
+        if (*val > PG_INT32_MAX || *val < PG_INT32_MIN) { 
+            return false;
+        }
+    }
+    return true;
+}
+
+
+bool check_statement_retention_time(char** newval, void** extra, GucSource source)
+{
+    /* Do str copy and remove space. */
+    char* strs = TrimStr(*newval);
+    if (IS_NULL_STR(strs))
+        return false;
+    const char* delim = ",";
+    List *res = NULL;
+    char* next_token = NULL;
+
+    /* Get slow query retention days */
+    char* token = strtok_s(strs, delim, &next_token);
+    while (token != NULL) {
+        res = lappend(res, TrimStr(token));
+        token = strtok_s(NULL, delim, &next_token);
+    }
+    pfree(strs);
+    if (res->length != STATEMENT_SQL_KIND) {
+        GUC_check_errdetail("attr num:%d is error,track_stmt_retention_time attr is 2", res->length);
+        return false;
+    }
+
+    int full_sql_retention_sec = 0;
+    int slow_query_retention_days = 0;
+    /* get full sql retention sec */
+    if (!StrToInt32((char*)linitial(res), &full_sql_retention_sec) ||
+        !StrToInt32((char*)lsecond(res), &slow_query_retention_days)) {
+        GUC_check_errdetail("invalid input syntax");
+        return false;
+    }
+
+    if (slow_query_retention_days < 0 || slow_query_retention_days > MAX_SLOW_QUERY_RETENSION_DAYS) {
+        GUC_check_errdetail("slow_query_retention_days:%d is out of range [%d, %d].",
+            slow_query_retention_days, 0, MAX_SLOW_QUERY_RETENSION_DAYS);
+        return false;
+    }
+    if (full_sql_retention_sec < 0 || full_sql_retention_sec > MAX_FULL_SQL_RETENSION_SEC) {
+        GUC_check_errdetail("full_sql_retention_sec:%d is out of range [%d, %d].",
+            full_sql_retention_sec, 0, MAX_FULL_SQL_RETENSION_SEC);
+        return false;
+    }
+    list_free_deep(res);
+
+    *extra = MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX), STATEMENT_SQL_KIND * sizeof(int));
+    ((int*)(*extra))[0] = full_sql_retention_sec;
+    ((int*)(*extra))[1] = slow_query_retention_days;
+    return true;
+}
+
+void assign_statement_retention_time(const char* newval, void* extra)
+{
+    int *level = (int*) extra;
+    t_thrd.statement_cxt.full_sql_retention_time = level[0];
+    t_thrd.statement_cxt.slow_sql_retention_time = level[1];
+}
+
+static void CleanStatementByIdx(Relation rel, Oid statementTimeIndexId,
+    int retentionTime, bool isSlowSQL)
+{
+    int index_num = 2;
+    AttrNumber Anum_statement_history_indrelid = 11;
+    AttrNumber Anum_statement_history_slow_sql_id = 51;
+    ScanKeyData key[index_num];
+    SysScanDesc indesc = NULL;
+    HeapTuple tup = NULL;
+    TimestampTz minTimestamp = (int64)GetCurrentTimestamp() - retentionTime * USECS_PER_SEC;
+    ScanKeyInit(&key[0], Anum_statement_history_indrelid, BTLessStrategyNumber,
+        F_TIMESTAMP_LE, TimestampGetDatum(minTimestamp));
+    ScanKeyInit(&key[1], Anum_statement_history_slow_sql_id, BTEqualStrategyNumber,
+        F_BOOLEQ, BoolGetDatum(isSlowSQL));
+    indesc = systable_beginscan(rel, statementTimeIndexId, true, SnapshotSelf, index_num, key);
+    while (HeapTupleIsValid(tup = systable_getnext(indesc))) {
+        simple_heap_delete(rel, &tup->t_self);
+    }
+    systable_endscan(indesc);
+}
+
+static void StartCleanWorker(int* count)
+{
+    int maxCleanInterval = 600; // 600 * 100ms = 1min
+    if (*count < maxCleanInterval || g_instance.stat_cxt.instr_stmt_is_cleaning) {
+        return;
+    }
+    SendPostmasterSignal(PMSIGNAL_START_CLEAN_STATEMENT);
+    g_instance.stat_cxt.instr_stmt_is_cleaning = true;
+    *count = 0;
+}
+/*
+ * The statement_history table should be cleaned up twice
+ * In the first time, all records less than minStatementTimestamp are cleared,
+ * and the last time is based on whether the records are slow query or full sql
+ * If the retention time of slow SQL is longer than that of full SQL,
+ * we only need to clean up the full SQL record on the last clean-up
+ */
+static void CleanStatementTable()
+{
+    List* statement_index = NULL;
+    MemoryContext oldcxt = CurrentMemoryContext;
+    PG_TRY();
+    {
+        StartTransactionCommand();
+        /* get statement_history relation and index oid  */
+        RangeVar* relrv = InitStatementRel();
+        Relation rel = heap_openrv(relrv, RowExclusiveLock);
+        if (rel == NULL || (statement_index = RelationGetIndexList(rel)) == NULL) {
+            heap_close(rel, RowExclusiveLock);
+            ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+                    errmsg("get statement_history relation failed")));
+        }
+        Oid statementTimeIndexId = linitial_oid(statement_index);
+        /* clean up statement_history table */
+        CleanStatementByIdx(rel, statementTimeIndexId, t_thrd.statement_cxt.slow_sql_retention_time, true);
+        CleanStatementByIdx(rel, statementTimeIndexId, t_thrd.statement_cxt.full_sql_retention_time, false);
+        heap_close(rel, RowExclusiveLock);
+        CommitTransactionCommand();
+    }
+    PG_CATCH();
+    {
+        (void)MemoryContextSwitchTo(oldcxt);
+        ErrorData *edata = CopyErrorData();
+        ereport(WARNING, (errcode(ERRCODE_WARNING),
+            errmsg("[Statement] delete statement_history table failed, cause: %s", edata->message)));
+        FlushErrorState();
+        FreeErrorData(edata);
+        AbortCurrentTransaction();
+    }
+    PG_END_TRY();
+}
+
+static void FlushStatementToTable(StatementStatContext* suspendList, const knl_u_statement_context* statementCxt)
+{
+    Assert (suspendList != NULL);
+    RangeVar* relrv = InitStatementRel();
+    HeapTuple tuple = NULL;
+    StatementStatContext *flushItem = suspendList;
+
+    MemoryContext oldcxt = CurrentMemoryContext;
+    uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
+    PG_TRY();
+    {
+        StartTransactionCommand();
+        Relation rel = heap_openrv(relrv, RowExclusiveLock);
+        while (flushItem != NULL) {
+            tuple = GetStatementTuple(rel, flushItem, statementCxt);
+            (void)simple_heap_insert(rel, tuple);
+            CatalogUpdateIndexes(rel, tuple);
+            heap_freetuple_ext(tuple);
+            flushItem = (StatementStatContext *)flushItem->next;
+        }
+        heap_close(rel, RowExclusiveLock);
+        CommitTransactionCommand();
+    }
+    PG_CATCH();
+    {
+        t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
+        (void)MemoryContextSwitchTo(oldcxt);
+        ErrorData* edata = NULL;
+        edata = CopyErrorData();
+        FlushErrorState();
+
+        ereport(WARNING, (errmodule(MOD_INSTR),
+            errmsg("[Statement] flush suspend list to statement_history failed, reason: '%s'", edata->message)));
+        FreeErrorData(edata);
+        AbortCurrentTransaction();
+    }
+    PG_END_TRY();
+}
+
+static void FlushAllStatement()
+{
+    PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.BackendStatusArray;
+    for (int i = 1; i <= BackendStatusArray_size; i++) {
+        StatementStatContext *suspendList = NULL;
+        int suspendCnt = 0;
+
+        /* Prevent the release of statementcxt memory when the session exits */
+        (void)syscalllockAcquire(&beentry->statement_cxt_lock);
+
+        knl_u_statement_context* statementCxt = (knl_u_statement_context*)beentry->statement_cxt;
+        if (statementCxt != NULL) {
+            /* read suspend statement list head to local */
+            (void)syscalllockAcquire(&statementCxt->list_protect);
+            suspendList = (StatementStatContext*)statementCxt->suspendStatementList;
+            suspendCnt = statementCxt->suspend_count;
+            statementCxt->suspendStatementList = NULL;
+            statementCxt->suspend_count = 0;
+            (void)syscalllockRelease(&statementCxt->list_protect);
+        }
+
+        if (suspendList != NULL) {
+            /* flush statement list info to statement_history table */
+            FlushStatementToTable(suspendList, statementCxt);
+
+            /* append list to free list */
+            (void)syscalllockAcquire(&statementCxt->list_protect);
+            void *freeList = statementCxt->toFreeStatementList;
+            statementCxt->toFreeStatementList = suspendList;
+            while (suspendList->next != NULL) {
+                suspendList = (StatementStatContext *)suspendList->next;
+            }
+            suspendList->next = freeList;
+            statementCxt->free_count += suspendCnt;
+            (void)syscalllockRelease(&statementCxt->list_protect);
+        }
+
+        (void)syscalllockRelease(&beentry->statement_cxt_lock);
+        beentry++;
+    }
+}
+
+static void StatementFlush()
+{
+    const int flush_usleep_interval = 100000;
+    int count = 0;
+
+    while (!t_thrd.statement_cxt.need_exit && ENABLE_STATEMENT_TRACK) {
+        ReloadInfo();
+        ereport(DEBUG1, (errmodule(MOD_INSTR), errmsg("[Statement] start to flush statemnts.")));
+        StartCleanWorker(&count);
+
+        HOLD_INTERRUPTS();
+        /* flush all session's statement info to statement_history table */
+        FlushAllStatement();
+        RESUME_INTERRUPTS();
+
+        count++;
+        ereport(DEBUG1, (errmodule(MOD_INSTR), errmsg("[Statement] flush statemnts finished.")));
+        /* report statement_history state to pgstat */
+        if (OidIsValid(u_sess->proc_cxt.MyDatabaseId))
+            pgstat_report_stat(true);
+        pg_usleep(flush_usleep_interval);
+    }
+}
+
+NON_EXEC_STATIC void StatementFlushMain()
+{
+    char username[NAMEDATALEN] = {'\0'};
+
+    /* we are a postmaster subprocess now */
+    IsUnderPostmaster = true;
+    JobStatementIAm();
+    /* reset MyProcPid */
+    t_thrd.proc_cxt.MyProcPid = gs_thread_self();
+    /* record Start Time for logging */
+    t_thrd.proc_cxt.MyStartTime = time(NULL);
+
+    t_thrd.proc_cxt.MyProgName = "Statement flush thread";
+    u_sess->attr.attr_common.application_name = pstrdup("Statement flush thread");
+    SetProcessingMode(InitProcessing);
+    ProcessSignal();
+
+    /* Early initialization */
+    BaseInit();
+#ifndef EXEC_BACKEND
+    InitProcess();
+#endif
+    t_thrd.proc_cxt.PostInit->SetDatabaseAndUser((char*)pstrdup(DEFAULT_DATABASE), InvalidOid, username);
+    t_thrd.proc_cxt.PostInit->InitStatementWorker();
+    SetProcessingMode(NormalProcessing);
+    on_shmem_exit(PGXCNodeCleanAndRelease, 0);
+
+    /* Identify myself via ps */
+    init_ps_display("statement flush process", "", "", "");
+    SetThrdCxt();
+    /* Create a resource owner to keep track of our resources. */
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Statement Flush", MEMORY_CONTEXT_DFX);
+    u_sess->proc_cxt.MyProcPort->SessionStartTime = GetCurrentTimestamp();
+    Reset_Pseudo_CurrentUserId();
+
+    /* initialize current pool handles, it's also only once */
+    exec_init_poolhandles();
+    pgstat_bestart();
+    pgstat_report_appname("statement flush thread");
+    ereport(LOG, (errmsg("statement flush thread start")));
+    pgstat_report_activity(STATE_IDLE, NULL);
+
+    /* flush statement into statement_history table */
+    StatementFlush();
+    gs_thread_exit(0);
+}
+
+
+static void SetupSignal(void)
+{
+    (void)gspqsignal(SIGHUP, SIG_IGN);
+    (void)gspqsignal(SIGINT, SIG_IGN);
+    (void)gspqsignal(SIGTERM, die); /* cancel current query and exit */
+    (void)gspqsignal(SIGQUIT, quickdie);
+    (void)gspqsignal(SIGUSR1, procsignal_sigusr1_handler);
+    (void)gspqsignal(SIGALRM, SIG_IGN);
+    (void)gspqsignal(SIGPIPE, SIG_IGN);
+    (void)gspqsignal(SIGUSR2, SIG_IGN);
+    (void)gspqsignal(SIGCHLD, SIG_DFL);
+    (void)gspqsignal(SIGTTIN, SIG_DFL);
+    (void)gspqsignal(SIGTTOU, SIG_DFL);
+    (void)gspqsignal(SIGCONT, SIG_DFL);
+    (void)gspqsignal(SIGWINCH, SIG_DFL);
+
+    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
+    (void)gs_signal_unblock_sigusr2();
+    if (u_sess->proc_cxt.MyProcPort->remote_host)
+        pfree(u_sess->proc_cxt.MyProcPort->remote_host);
+    u_sess->proc_cxt.MyProcPort->remote_host = pstrdup("localhost");
+
+    t_thrd.wlm_cxt.thread_node_group = &g_instance.wlm_cxt->MyDefaultNodeGroup;  // initialize the default value
+    t_thrd.wlm_cxt.thread_climgr = &t_thrd.wlm_cxt.thread_node_group->climgr;
+    t_thrd.wlm_cxt.thread_srvmgr = &t_thrd.wlm_cxt.thread_node_group->srvmgr;
+}
+
+NON_EXEC_STATIC void CleanStatementMain()
+{
+    char username[NAMEDATALEN] = {'\0'};
+
+    /* we are a postmaster subprocess now */
+    IsUnderPostmaster = true;
+    t_thrd.role = TRACK_STMT_CLEANER;
+    /* reset MyProcPid */
+    t_thrd.proc_cxt.MyProcPid = gs_thread_self();
+    /* record Start Time for logging */
+    t_thrd.proc_cxt.MyStartTime = time(NULL);
+
+    t_thrd.proc_cxt.MyProgName = "Clean Statement thread";
+    u_sess->attr.attr_common.application_name = pstrdup("Clean Statement thread");
+    SetProcessingMode(InitProcessing);
+    SetupSignal();
+
+    /* Early initialization */
+    BaseInit();
+#ifndef EXEC_BACKEND
+    InitProcess();
+#endif
+    t_thrd.proc_cxt.PostInit->SetDatabaseAndUser((char*)pstrdup(DEFAULT_DATABASE), InvalidOid, username);
+    t_thrd.proc_cxt.PostInit->InitStatementWorker();
+    SetProcessingMode(NormalProcessing);
+    on_shmem_exit(PGXCNodeCleanAndRelease, 0);
+
+    /* Identify myself via ps */
+    init_ps_display("clean statement process", "", "", "");
+    SetThrdCxt();
+    /* Create a resource owner to keep track of our resources. */
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "clean Statement", MEMORY_CONTEXT_DFX);
+    u_sess->proc_cxt.MyProcPort->SessionStartTime = GetCurrentTimestamp();
+    Reset_Pseudo_CurrentUserId();
+
+    /* initialize current pool handles, it's also only once */
+    exec_init_poolhandles();
+    pgstat_bestart();
+    pgstat_report_appname("clean statement thread");
+    ereport(LOG, (errmsg("clean statement thread start")));
+    pgstat_report_activity(STATE_IDLE, NULL);
+
+    /* clean statement_history table */
+    CleanStatementTable();
+    g_instance.stat_cxt.instr_stmt_is_cleaning = false;
+    proc_exit(0);
+}
+
+
+size_t get_statement_detail_size(StatementDetailType type)
+{
+    switch (type) {
+        case LOCK_START:
+            return LOCK_START_DETAIL_BUFSIZE;
+        case LOCK_END:
+            return LOCK_END_DETAIL_BUFSIZE;
+        case LOCK_WAIT_START:
+            return LOCK_WAIT_START_DETAIL_BUFSIZE;
+        case LOCK_WAIT_END:
+            return LOCK_WAIT_END_DETAIL_BUFSIZE;
+        case LOCK_RELEASE:
+            return LOCK_RELEASE_START_DETAIL_BUFSIZE;
+        case LWLOCK_START:
+            return LWLOCK_START_DETAIL_BUFSIZE;
+        case LWLOCK_END:
+            return LWLOCK_END_DETAIL_BUFSIZE;
+        case LWLOCK_WAIT_START:
+            return LWLOCK_WAIT_START_DETAIL_BUFSIZE;
+        case LWLOCK_WAIT_END:
+            return LWLOCK_WAIT_END_DETAIL_BUFSIZE;
+        case LWLOCK_RELEASE:
+            return LWLOCK_RELEASE_START_DETAIL_BUFSIZE;
+        case TYPE_INVALID:
+        default:
+            return INVALID_DETAIL_BUFSIZE;
+    }
+}
+
+void* get_statement_detail_struct(StatementDetailType type,
+    int lockmode = -1, const LOCKTAG *locktag = NULL, uint16 lwlockId = 0)
+{
+    void *info = NULL;
+
+    switch (type) {
+        case LOCK_START:
+        case LOCK_WAIT_START:
+        case LOCK_RELEASE:
+            info = (LockEventStartInfo *)palloc0_noexcept(sizeof(LockEventStartInfo));
+            if (info == NULL) {
+                break;
+            }
+            ((LockEventStartInfo *)info)->eventType = (char)type;
+            ((LockEventStartInfo *)info)->timestamp = GetCurrentTimestamp();
+            ((LockEventStartInfo *)info)->tag = *locktag;
+            ((LockEventStartInfo *)info)->mode = (LOCKMODE)lockmode;
+            break;
+        case LWLOCK_START:
+        case LWLOCK_WAIT_START:
+        case LWLOCK_RELEASE:
+            info = (LWLockEventStartInfo *)palloc0_noexcept(sizeof(LWLockEventStartInfo));
+            if (info == NULL) {
+                break;
+            }
+            ((LWLockEventStartInfo *)info)->eventType = (char)type;
+            ((LWLockEventStartInfo *)info)->timestamp = GetCurrentTimestamp();
+            ((LWLockEventStartInfo *)info)->id = lwlockId;
+            ((LWLockEventStartInfo *)info)->mode = (LWLockMode)lockmode;
+            break;
+        case LOCK_END:
+        case LOCK_WAIT_END:
+        case LWLOCK_END:
+        case LWLOCK_WAIT_END:
+            info = (LockEventEndInfo *)palloc0_noexcept(sizeof(LockEventEndInfo));
+            if (info == NULL) {
+                break;
+            }
+            ((LockEventEndInfo *)info)->eventType = (char)type;
+            ((LockEventEndInfo *)info)->timestamp = GetCurrentTimestamp();
+            break;
+        case TYPE_INVALID:
+        default:
+            break;
+    }
+
+    return info;
+}
+
+bool statement_extend_detail_item(StatementStatContext *ssctx, bool first)
+{
+    MemoryContext oldcontext = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+    StatementDetailItem *item = (StatementDetailItem *)palloc0_noexcept(sizeof(StatementDetailItem));
+    (void)MemoryContextSwitchTo(oldcontext);
+
+    if (item == NULL) {
+        ereport(LOG, (errmodule(MOD_INSTR), errmsg("[Statement] detail is lost due to OOM.")));
+        return false;
+    }
+
+    if (first) {
+        ssctx->details.head = item;
+        ssctx->details.tail = item;
+        // update list info
+        ssctx->details.n_items = 1;
+        ssctx->details.head->buf[0] = (char)STATEMENT_DETAIL_VERSION;
+        ssctx->details.head->buf[1] = (char)STATEMENT_DETAIL_NOT_TRUNCATED;
+        ssctx->details.cur_pos = STATEMENT_DETAILS_HEAD_SIZE;
+    } else {
+        ssctx->details.tail->next = item;
+        ssctx->details.tail = item;
+        // update list info
+        ssctx->details.n_items++;
+        ssctx->details.cur_pos = 0;
+    }
+
+    return true;
+}
+
+void *palloc_statement_detail(StatementDetailType type)
+{
+    void *info = NULL;
+    switch (type) {
+        case LOCK_START:
+        case LOCK_WAIT_START:
+        case LOCK_RELEASE:
+            info = (LockEventStartInfo *)palloc0_noexcept(sizeof(LockEventStartInfo));
+            break;
+        case LWLOCK_START:
+        case LWLOCK_WAIT_START:
+        case LWLOCK_RELEASE:
+            info = (LWLockEventStartInfo *)palloc0_noexcept(sizeof(LWLockEventStartInfo));
+            break;
+        case LOCK_END:
+        case LOCK_WAIT_END:
+        case LWLOCK_END:
+        case LWLOCK_WAIT_END:
+            info = (LockEventEndInfo *)palloc0_noexcept(sizeof(LockEventEndInfo));
+            break;
+        case TYPE_INVALID:
+        default:
+            break;
+    }
+    return info;
+}
+
+const char* get_statement_event_type(StatementDetailType type)
+{
+    switch (type) {
+        case LOCK_START:
+            return "LOCK_START";
+        case LOCK_WAIT_START:
+            return "LOCK_WAIT_START";
+        case LOCK_RELEASE:
+            return "LOCK_RELEASE";
+        case LWLOCK_START:
+            return "LWLOCK_START";
+        case LWLOCK_WAIT_START:
+            return "LWLOCK_WAIT_START";
+        case LWLOCK_RELEASE:
+            return "LWLOCK_RELEASE";
+        case LOCK_END:
+            return "LOCK_END";
+        case LOCK_WAIT_END:
+            return "LOCK_WAIT_END";
+        case LWLOCK_END:
+            return "LWLOCK_END";
+        case LWLOCK_WAIT_END:
+            return "LWLOCK_WAIT_END";
+        case TYPE_INVALID:
+        default:
+            return "TYPE_INVALID";
+    }
+}
+
+void *check_statement_detail_info_record(StatementStatContext *ssctx, StatementDetailType type,
+    int lockmode, const LOCKTAG *locktag, uint16 lwlockId)
+{
+    if (u_sess->attr.attr_common.track_stmt_details_size == 0) {
+        return NULL;
+    }
+
+    if (ssctx->details.n_items > 0 && u_sess->attr.attr_common.track_stmt_details_size <
+        (ssctx->details.n_items - 1) * STATEMENT_DETAIL_BUFSIZE + ssctx->details.cur_pos) {
+        ssctx->details.head->buf[1] = (char)STATEMENT_DETAIL_TRUNCATED;
+        return NULL;
+    }
+
+    return get_statement_detail_struct(type, lockmode, locktag, lwlockId);
+}
+
+void statement_detail_info_record(StatementStatContext *ssctx, StatementDetailType type,
+    int lockmode, const LOCKTAG *locktag, uint16 lwlockId)
+{
+    void *info = check_statement_detail_info_record(ssctx, type, lockmode, locktag, lwlockId);
+    if (info == NULL) {
+        return;
+    }
+
+    size_t detailSize = get_statement_detail_size(type);
+    Assert(detailSize < STATEMENT_DETAIL_BUFSIZE);
+
+    errno_t rc;
+    if (ssctx->details.n_items <= 0) {
+        if (statement_extend_detail_item(ssctx, true)) {
+            rc = memcpy_s(ssctx->details.tail->buf + ssctx->details.cur_pos,
+                STATEMENT_DETAIL_BUFSIZE - ssctx->details.cur_pos, info, detailSize);
+            securec_check(rc, "", "");
+            ssctx->details.cur_pos += detailSize;
+        }
+    } else if (ssctx->details.cur_pos + detailSize <= STATEMENT_DETAIL_BUFSIZE) {
+        rc = memcpy_s(ssctx->details.tail->buf + ssctx->details.cur_pos,
+            STATEMENT_DETAIL_BUFSIZE - ssctx->details.cur_pos, info, detailSize);
+        securec_check(rc, "", "");
+        ssctx->details.cur_pos += detailSize;
+    } else {
+        size_t last = STATEMENT_DETAIL_BUFSIZE - ssctx->details.cur_pos;
+
+        if (last > 0) {
+            rc = memcpy_s(ssctx->details.tail->buf + ssctx->details.cur_pos, last, info, last);
+            securec_check(rc, "", "");
+        }
+
+        if (statement_extend_detail_item(ssctx, false)) {
+            rc = memcpy_s(ssctx->details.tail->buf,
+                STATEMENT_DETAIL_BUFSIZE, (char *)info + last, detailSize - last);
+            securec_check(rc, "", "");
+            ssctx->details.cur_pos += detailSize - last;
+        }
+    }
+
+    pfree(info);
+}
+
+void update_statement_lock_cnt(StatementStatContext *ssctx, StatementDetailType type, int lockmode)
+{
+    switch (type) {
+        case LOCK_START:
+            ssctx->lock_summary.lock_cnt++;
+            break;
+        case LOCK_WAIT_START:
+            ssctx->lock_summary.lock_wait_cnt++;
+            break;
+        case LWLOCK_START:
+            ssctx->lock_summary.lwlock_cnt++;
+            break;
+        case LWLOCK_WAIT_START:
+            ssctx->lock_summary.lwlock_wait_cnt++;
+            break;
+        case LOCK_RELEASE:
+            ssctx->lock_summary.lock_hold_cnt--;
+            break;
+        case LOCK_END:
+            if (lockmode != NoLock) {
+                ssctx->lock_summary.lock_hold_cnt++;
+                ssctx->lock_summary.lock_max_cnt =
+                    Max(ssctx->lock_summary.lock_max_cnt, ssctx->lock_summary.lock_hold_cnt);
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+void update_statement_time(StatementStatContext *ssctx, StatementDetailType type)
+{
+    switch (type) {
+        case LOCK_START:
+            ssctx->lock_summary.lock_start_time = GetCurrentTimestamp();
+            break;
+        case LOCK_END:
+            ssctx->lock_summary.lock_time += GetCurrentTimestamp() - ssctx->lock_summary.lock_start_time;
+            break;
+        case LOCK_WAIT_START:
+            ssctx->lock_summary.lock_wait_start_time = GetCurrentTimestamp();
+            break;
+        case LOCK_WAIT_END:
+            ssctx->lock_summary.lock_wait_time += GetCurrentTimestamp() - ssctx->lock_summary.lock_wait_start_time;
+            break;
+        case LWLOCK_START:
+            ssctx->lock_summary.lwlock_start_time = GetCurrentTimestamp();
+            break;
+        case LWLOCK_END:
+            ssctx->lock_summary.lwlock_time += GetCurrentTimestamp() - ssctx->lock_summary.lwlock_start_time;
+            break;
+        case LWLOCK_WAIT_START:
+            ssctx->lock_summary.lwlock_wait_start_time = GetCurrentTimestamp();
+            break;
+        case LWLOCK_WAIT_END:
+            ssctx->lock_summary.lwlock_wait_time += GetCurrentTimestamp() - ssctx->lock_summary.lwlock_wait_start_time;
+            break;
+        default:
+            break;
+    }
+}
+
+void statement_full_info_record(StatementDetailType type, int lockmode, const LOCKTAG *locktag, uint16 lwlockId)
+{
+    StatementStatContext *ssctx = (StatementStatContext *)u_sess->statement_cxt.curStatementMetrics;
+    if (ssctx == NULL) {
+        return;
+    }
+
+    switch (ssctx->level) {
+        case STMT_TRACK_L2:
+            statement_detail_info_record(ssctx, type, lockmode, locktag, lwlockId);
+            /* fall-through */
+        case STMT_TRACK_L1:
+            update_statement_time(ssctx, type);
+            /* fall-through */
+        case STMT_TRACK_L0:
+            /* always capture the lock count */
+            update_statement_lock_cnt(ssctx, type, lockmode);
+            break;
+        case LEVEL_INVALID:
+        default:
+            break;
+    }
+}
+
+char *get_lock_mode_name(LOCKMODE mode)
+{
+    switch (mode) {
+        case AccessShareLock:
+            return "AccessShareLock";
+        case RowShareLock:
+            return "RowShareLock";
+        case RowExclusiveLock:
+            return "RowExclusiveLock";
+        case ShareUpdateExclusiveLock:
+            return "ShareUpdateExclusiveLock";
+        case ShareLock:
+            return "ShareLock";
+        case ShareRowExclusiveLock:
+            return "ShareRowExclusiveLock";
+        case ExclusiveLock:
+            return "ExclusiveLock";
+        case AccessExclusiveLock:
+            return "AccessExclusiveLock";
+        case NoLock:
+        default:
+            return "INVALID";
+    }
+}
+
+void write_state_detail_lock_start(void *info, size_t *detailsCnt, char *details, size_t *detailsLen, bool pretty)
+{
+    char tmp[STATEMENT_DETAIL_BUF] = { 0 };
+    errno_t ret = 0;
+    char formatStr[STATEMENT_DETAIL_BUF] = { 0 };
+    if (pretty) {
+        ret = strcpy_s(formatStr, STATEMENT_DETAIL_BUF, "'%lu'\t'%s'\t'%s'\t'%s'\t'%s'\n");
+    } else {
+        ret = strcpy_s(formatStr, STATEMENT_DETAIL_BUF, "'%lu'\t'%s'\t'%s'\t'%s'\t'%s',");
+    }
+    securec_check(ret, "\0", "\0");
+    ret = sprintf_s(tmp,
+        sizeof(tmp),
+        formatStr,
+        *detailsCnt,
+        get_statement_event_type((StatementDetailType)((LockEventStartInfo *)info)->eventType),
+        timestamptz_to_str(((LockEventStartInfo *)info)->timestamp),
+        LocktagToString(((LockEventStartInfo *)info)->tag),
+        get_lock_mode_name(((LockEventStartInfo *)info)->mode));
+    securec_check_ss(ret, "\0", "\0");
+    if (*detailsLen < strlen(tmp)) {
+        return;
+    }
+    ret = strcat_s(details, *detailsLen, tmp);
+    securec_check(ret, "\0", "\0");
+    *detailsLen -= strlen(tmp);
+    (*detailsCnt)++;
+}
+
+char *get_lwlock_mode_name(LWLockMode mode)
+{
+    switch (mode) {
+        case LW_EXCLUSIVE:
+            return "LW_EXCLUSIVE";
+        case LW_SHARED:
+            return "LW_SHARED";
+        case LW_WAIT_UNTIL_FREE:
+            return "LW_WAIT_UNTIL_FREE";
+        default:
+            return "INVALID";
+    }
+}
+
+void write_state_detail_lwlock_start(void *info, size_t *detailsCnt, char *details, size_t *detailsLen, bool pretty)
+{
+    char tmp[STATEMENT_DETAIL_BUF] = { 0 };
+    errno_t ret = 0;
+    char formatStr[STATEMENT_DETAIL_BUF] = { 0 };
+    if (pretty) {
+        ret = strcpy_s(formatStr, STATEMENT_DETAIL_BUF, "'%lu'\t'%s'\t'%s'\t'%s'\t'%s'\n");
+    } else {
+        ret = strcpy_s(formatStr, STATEMENT_DETAIL_BUF, "'%lu'\t'%s'\t'%s'\t'%s'\t'%s',");
+    }
+    securec_check(ret, "\0", "\0");
+    ret = sprintf_s(tmp,
+        sizeof(tmp),
+        formatStr,
+        *detailsCnt,
+        get_statement_event_type((StatementDetailType)((LWLockEventStartInfo *)info)->eventType),
+        timestamptz_to_str(((LWLockEventStartInfo *)info)->timestamp),
+        GetLWLockIdentifier(PG_WAIT_LWLOCK, ((LWLockEventStartInfo *)info)->id),
+        get_lwlock_mode_name(((LWLockEventStartInfo *)info)->mode));
+    securec_check_ss(ret, "\0", "\0");
+    if (*detailsLen < strlen(tmp)) {
+        return;
+    }
+    ret = strcat_s(details, *detailsLen, tmp);
+    securec_check(ret, "\0", "\0");
+    *detailsLen -= strlen(tmp);
+    (*detailsCnt)++;
+}
+
+void write_state_detail_end_event(void *info, size_t *detailsCnt, char *details, size_t *detailsLen, bool pretty)
+{
+    char tmp[STATEMENT_DETAIL_BUF] = { 0 };
+    errno_t ret = 0;
+    char formatStr[STATEMENT_DETAIL_BUF] = { 0 };
+    if (pretty) {
+        ret = strcpy_s(formatStr, STATEMENT_DETAIL_BUF, "'%lu'\t'%s'\t'%s'\n");
+    } else {
+        ret = strcpy_s(formatStr, STATEMENT_DETAIL_BUF, "'%lu'\t'%s'\t'%s',");
+    }
+    securec_check(ret, "\0", "\0");
+    ret = sprintf_s(tmp,
+        sizeof(tmp),
+        formatStr,
+        *detailsCnt,
+        get_statement_event_type((StatementDetailType)((LockEventEndInfo *)info)->eventType),
+        timestamptz_to_str(((LockEventEndInfo *)info)->timestamp));
+    securec_check_ss(ret, "\0", "\0");
+    if (*detailsLen < strlen(tmp)) {
+        return;
+    }
+    ret = strcat_s(details, strlen(details) + *detailsLen, tmp);
+    securec_check(ret, "\0", "\0");
+    *detailsLen -= strlen(tmp);
+    (*detailsCnt)++;
+}
+
+void write_statement_detail_text(void *info, StatementDetailType type, char *details, size_t *detailsLen, bool pretty)
+{
+    static size_t detailsCnt = 1;
+    if (strcmp(get_statement_event_type(type), "TYPE_INVALID") == 0) {
+        return;
+    }
+    if (strlen(details) == 0) {
+        detailsCnt = 1;
+    }
+    switch (type) {
+        case LOCK_START:
+        case LOCK_WAIT_START:
+        case LOCK_RELEASE:
+            write_state_detail_lock_start(info, &detailsCnt, details, detailsLen, pretty);
+            break;
+        case LWLOCK_START:
+        case LWLOCK_WAIT_START:
+        case LWLOCK_RELEASE:
+            write_state_detail_lwlock_start(info, &detailsCnt, details, detailsLen, pretty);
+            break;
+        case LOCK_END:
+        case LOCK_WAIT_END:
+        case LWLOCK_END:
+        case LWLOCK_WAIT_END:
+            write_state_detail_end_event(info, &detailsCnt, details, detailsLen, pretty);
+            break;
+        case TYPE_INVALID:
+        default:
+            break;
+    }
+}
+
+char *palloc_statement_detail_string(uint32 nums)
+{
+    char *info = NULL;
+    info = (char *)palloc0_noexcept(nums);
+    errno_t rc = memset_s(info, nums, 0, nums);
+    securec_check(rc, "\0", "\0");
+    return info;
+}
+
+bytea *palloc_statement_detail_text(const char* s, uint32 len)
+{
+    text *info = NULL;
+    info = (text *)palloc0_noexcept(len + VARHDRSZ);
+    SET_VARSIZE(info, len + VARHDRSZ);
+    if (len > 0) {
+        int rc = memcpy_s(VARDATA(info), len, s, len);
+        securec_check(rc, "\0", "\0");
+    }
+    return info;
+}
+
+bytea *get_statement_detail(StatementDetail *detail)
+{
+    if (detail == NULL || detail->n_items <= 0) {
+        return NULL;
+    }
+
+    uint32 detailsLen = sizeof(uint32) + (uint32)((detail->n_items - 1) * STATEMENT_DETAIL_BUFSIZE) + detail->cur_pos;
+    char *details = (char *)palloc_statement_detail_string(detailsLen);
+    int itemCnt = 0;
+    int rc = memcpy_s(details, detailsLen, &detailsLen, sizeof(uint32));
+    securec_check(rc, "\0", "\0");
+
+    uint32 pos = sizeof(uint32);
+    for (StatementDetailItem *item = (StatementDetailItem *)(detail->head); item != NULL;
+            item = (StatementDetailItem *)(item->next)) {
+        itemCnt++;
+
+        size_t itemSize = STATEMENT_DETAIL_BUFSIZE;
+        // the last item of list
+        if (itemCnt == detail->n_items) {
+            itemSize = detail->cur_pos;
+        }
+
+        if (pos + itemSize > detailsLen) {
+            break;
+        }
+        rc = memcpy_s(details + pos, detailsLen - pos, item->buf, itemSize);
+        securec_check(rc, "\0", "\0");
+
+        pos += itemSize;
+    }
+
+    bytea *result = (bytea*)palloc_statement_detail_text(details, detailsLen);
+    pfree_ext(details);
+    return result;
+}
+
+char *decode_statement_detail_text(bytea *detail, const char *format, bool pretty)
+{
+    if (strcmp(format, STATEMENT_DETAIL_FORMAT_STRING) != 0) {
+        ereport(WARNING, ((errmodule(MOD_INSTR), errmsg("decode format should be 'plaintext'!"))));
+        return NULL;
+    }
+
+    if (VARSIZE(detail) - VARHDRSZ == 0) {
+        return NULL;
+    }
+
+    char *details = (char *)VARDATA(detail);
+    uint32 detailsLen = 0;
+    int rc = memcpy_s(&detailsLen, sizeof(uint32), details, sizeof(uint32));
+    securec_check(rc, "\0", "\0");
+    if (detailsLen == 0) {
+        return NULL;
+    }
+
+    size_t resultLen = detailsLen * STATEMENT_DETAIL_BUF_MULTI;
+    char *result = (char *)palloc_statement_detail_string(resultLen + 1);
+    bool truncatedFlag = (details[sizeof(uint32) + 1] == (char)STATEMENT_DETAIL_TRUNCATED);
+
+    size_t pos = sizeof(uint32) + STATEMENT_DETAILS_HEAD_SIZE;
+    while (pos < detailsLen) {
+        StatementDetailType itemType = (StatementDetailType)details[pos];
+        size_t size = get_statement_detail_size(itemType);
+        if (size == INVALID_DETAIL_BUFSIZE) {
+            break;
+        }
+        if (pos + size > detailsLen) {
+            // invalid buf
+            break;
+        }
+        void *info = palloc_statement_detail(itemType);
+        if (info == NULL) {
+            break;
+        }
+        rc = memcpy_s(info, size, details + pos, size);
+        securec_check(rc, "", "");
+        pos += size;
+
+        // write to string
+        write_statement_detail_text(info, itemType, result, &resultLen, pretty);
+        pfree(info);
+    }
+
+    result[strlen(result) - 1] = '\0';
+    if (truncatedFlag) {
+        rc = strcat_s(result, detailsLen * STATEMENT_DETAIL_BUF_MULTI, " Truncated...");
+        securec_check(rc, "", "");
+    }
+    return result;
+}
+
+Datum statement_detail_decode(PG_FUNCTION_ARGS)
+{
+    if (PG_ARGISNULL(0) || PG_ARGISNULL(1) || PG_ARGISNULL(2)) {
+        PG_RETURN_NULL();
+    }
+    bytea *detailText = DatumGetByteaP(PG_GETARG_DATUM(0));
+    char *format = TextDatumGetCString(PG_GETARG_DATUM(1));
+    bool pretty = PG_GETARG_BOOL(2);
+
+    char *detailStr = decode_statement_detail_text(detailText, format, pretty);
+    if (detailStr == NULL) {
+        PG_RETURN_NULL();
+    }
+
+    text* result = cstring_to_text(detailStr);
+    pfree(detailStr);
+    PG_RETURN_TEXT_P(result);
+}
+
+static void instr_stmt_check_need_update(bool* to_update_db_name,
+    bool* to_update_user_name, bool* to_update_client_addr)
+{
+    PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+
+    if (u_sess->statement_cxt.db_name == NULL && OidIsValid(beentry->st_databaseid)) {
+        *to_update_db_name = true;
+    }
+
+    if (u_sess->statement_cxt.user_name == NULL && OidIsValid(beentry->st_userid)) {
+        *to_update_user_name = true;
+    }
+
+    if ((u_sess->statement_cxt.client_addr == NULL && u_sess->statement_cxt.client_port == INSTR_STMT_NULL_PORT) &&
+        (beentry->st_clientaddr.addr.ss_family == AF_INET || beentry->st_clientaddr.addr.ss_family == AF_INET6 ||
+        beentry->st_clientaddr.addr.ss_family == AF_UNIX)) {
+        *to_update_client_addr = true;
+    }
+}
+
+static void instr_stmt_update_client_info(const PgBackendStatus* beentry)
+{
+    SockAddr zero_clientaddr;
+    errno_t rc = memset_s(&zero_clientaddr, sizeof(SockAddr), 0, sizeof(SockAddr));
+    securec_check(rc, "\0", "\0");
+
+    u_sess->statement_cxt.client_port = INSTR_STMT_NULL_PORT;
+    if (memcmp(&(beentry->st_clientaddr), &zero_clientaddr, sizeof(SockAddr)) != 0) {
+        if (beentry->st_clientaddr.addr.ss_family == AF_INET
+#ifdef HAVE_IPV6
+            || beentry->st_clientaddr.addr.ss_family == AF_INET6
+#endif
+        ) {
+            char client_host[NI_MAXHOST] = {0};
+            char client_port[NI_MAXSERV] = {0};
+
+            int ret = pg_getnameinfo_all(&beentry->st_clientaddr.addr, beentry->st_clientaddr.salen,
+                client_host, sizeof(client_host), client_port, sizeof(client_port),
+                NI_NUMERICHOST | NI_NUMERICSERV);
+            if (ret == 0) {
+                clean_ipv6_addr(beentry->st_clientaddr.addr.ss_family, client_host);
+                u_sess->statement_cxt.client_addr = pstrdup(client_host);
+                u_sess->statement_cxt.client_port = atoi(client_port);
+            }
+        } else if (beentry->st_clientaddr.addr.ss_family == AF_UNIX) {
+            u_sess->statement_cxt.client_port = INSTR_STMT_UNIX_DOMAIN_PORT;
+        }
+    }
+}
+
+/* Report basic information of statement, including:
+ * - database name
+ * - node name
+ * - user name
+ * - client connection
+ * - session ID
+ */
+void instr_stmt_report_basic_info()
+{
+    if (t_thrd.shemem_ptr_cxt.MyBEEntry == NULL || u_sess->statement_cxt.stmt_stat_cxt == NULL) {
+        return;
+    }
+
+    bool to_update_db_name = false;
+    bool to_update_user_name = false;
+    bool to_update_client_addr = false;
+    instr_stmt_check_need_update(&to_update_db_name, &to_update_user_name, &to_update_client_addr);
+
+    PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+    if (u_sess->statement_cxt.session_id == 0) {
+        u_sess->statement_cxt.session_id = ENABLE_THREAD_POOL ? beentry->st_sessionid : beentry->st_procpid;
+    }
+    if (to_update_db_name || to_update_user_name || to_update_client_addr) {
+        ResourceOwner old_cur_owner = t_thrd.utils_cxt.CurrentResourceOwner;
+        MemoryContext old_ctx = MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
+        t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Full/Slow SQL", MEMORY_CONTEXT_DFX);
+        (void)MemoryContextSwitchTo(old_ctx);
+
+        old_ctx = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+        if (to_update_db_name) {
+            u_sess->statement_cxt.db_name = get_database_name(beentry->st_databaseid);
+        }
+        if (to_update_user_name) {
+            u_sess->statement_cxt.user_name = GetUserNameById(beentry->st_userid);
+        }
+        if (to_update_client_addr) {
+            instr_stmt_update_client_info(beentry);
+        }
+        (void)MemoryContextSwitchTo(old_ctx);
+
+        ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_BEFORE_LOCKS, true, true);
+        ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_LOCKS, true, true);
+        ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_AFTER_LOCKS, true, true);
+        ResourceOwner tmpOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+        t_thrd.utils_cxt.CurrentResourceOwner = old_cur_owner;
+        ResourceOwnerDelete(tmpOwner);
+    }
+}
+
+void instr_stmt_report_start_time()
+{
+    CHECK_STMT_HANDLE();
+    CURRENT_STMT_METRIC_HANDLE->start_time = GetCurrentTimestamp();
+}
+
+void instr_stmt_report_finish_time()
+{
+    CHECK_STMT_HANDLE();
+    CURRENT_STMT_METRIC_HANDLE->finish_time = GetCurrentTimestamp();
+}
+
+void instr_stmt_report_debug_query_id(uint64 debug_query_id)
+{
+    CHECK_STMT_HANDLE();
+    CURRENT_STMT_METRIC_HANDLE->debug_query_id = debug_query_id;
+}
+
+/* using unique query */
+void instr_stmt_report_query(uint64 unique_query_id)
+{
+    CHECK_STMT_HANDLE();
+    CURRENT_STMT_METRIC_HANDLE->unique_query_id = unique_query_id;
+    CURRENT_STMT_METRIC_HANDLE->unique_sql_cn_id = u_sess->unique_sql_cxt.unique_sql_cn_id;
+
+    if (is_local_unique_sql()) {
+        MemoryContext old_ctx = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+        if (CURRENT_STMT_METRIC_HANDLE->query == NULL) {
+            CURRENT_STMT_METRIC_HANDLE->query = FindCurrentUniqueSQL();
+        }
+        (void)MemoryContextSwitchTo(old_ctx);
+    }
+}
+
+void instr_stmt_report_txid(uint64 txid)
+{
+    CHECK_STMT_HANDLE();
+    CURRENT_STMT_METRIC_HANDLE->txn_id = txid;
+}
+
+/*
+ * Entry method to report stat at handle init stage
+ * - txn_id/basic info/debug query id
+ */
+void instr_stmt_report_stat_at_handle_init()
+{
+    CHECK_STMT_HANDLE();
+    /* report transaction id */
+    if (CURRENT_STMT_METRIC_HANDLE->txn_id == InvalidTransactionId) {
+        instr_stmt_report_txid(GetCurrentTransactionIdIfAny());
+    }
+
+    /* save current statement stat level */
+    CURRENT_STMT_METRIC_HANDLE->level =
+        (StatLevel)Max(u_sess->statement_cxt.statement_level[0], u_sess->statement_cxt.statement_level[1]);
+
+    /* fill basic information */
+    instr_stmt_report_basic_info();
+
+    /* fill debug_query_id */
+    instr_stmt_report_debug_query_id(u_sess->debug_query_id);
+
+    /* when sql execute error on remote node, unique sql id will be reset,
+     * update unique sql info at commit stage will be late
+     */
+    if (IsConnFromCoord() && CURRENT_STMT_METRIC_HANDLE->unique_query_id == 0 &&
+        u_sess->unique_sql_cxt.unique_sql_id != 0) {
+        instr_stmt_report_query(u_sess->unique_sql_cxt.unique_sql_id);
+    }
+}
+
+/*
+ * Entry method to report stat at handle commit stage
+ * - schema name/application name
+ */
+void instr_stmt_report_stat_at_handle_commit()
+{
+    CHECK_STMT_HANDLE();
+
+    MemoryContext old_ctx = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+    CURRENT_STMT_METRIC_HANDLE->schema_name = pstrdup(u_sess->attr.attr_common.namespace_search_path);
+    CURRENT_STMT_METRIC_HANDLE->application_name = pstrdup(u_sess->attr.attr_common.application_name);
+
+    /* unit: microseconds */
+    CURRENT_STMT_METRIC_HANDLE->slow_query_threshold = u_sess->attr.attr_storage.log_min_duration_statement * 1000;
+
+    CURRENT_STMT_METRIC_HANDLE->tid = t_thrd.proc_cxt.MyProcPid;
+
+    /* sql from remote node */
+    if (IsConnFromCoord() && CURRENT_STMT_METRIC_HANDLE->unique_query_id == 0 &&
+        u_sess->unique_sql_cxt.unique_sql_id != 0) {
+        instr_stmt_report_query(u_sess->unique_sql_cxt.unique_sql_id);
+    }
+
+    if (CURRENT_STMT_METRIC_HANDLE->txn_id == InvalidTransactionId) {
+        instr_stmt_report_txid(GetCurrentTransactionIdIfAny());
+    }
+
+    instr_stmt_report_finish_time();
+    (void)MemoryContextSwitchTo(old_ctx);
+}
+
+void instr_stmt_report_soft_parse(uint64 soft_parse)
+{
+    CHECK_STMT_HANDLE();
+    CURRENT_STMT_METRIC_HANDLE->parse.soft_parse += soft_parse;
+}
+
+void instr_stmt_report_hard_parse(uint64 hard_parse)
+{
+    CHECK_STMT_HANDLE();
+    CURRENT_STMT_METRIC_HANDLE->parse.hard_parse += hard_parse;
+}
+
+void instr_stmt_report_returned_rows(uint64 returned_rows)
+{
+    CHECK_STMT_HANDLE();
+    CURRENT_STMT_METRIC_HANDLE->row_activity.returned_rows += returned_rows;
+}
+
+void instr_stmt_report_unique_sql_info(const PgStat_TableCounts *agg_table_stat,
+    const int64 timeInfo[], const uint64 *netInfo)
+{
+    if (u_sess->unique_sql_cxt.unique_sql_id == 0 || u_sess->statement_cxt.curStatementMetrics == NULL) {
+        return;
+    }
+
+    StatementStatContext *ssctx = (StatementStatContext *)u_sess->statement_cxt.curStatementMetrics;
+    if (agg_table_stat != NULL) {
+        // row activity
+        (void)pg_atomic_fetch_add_u64(&ssctx->row_activity.tuples_fetched, (uint64)agg_table_stat->t_tuples_fetched);
+        (void)pg_atomic_fetch_add_u64(&ssctx->row_activity.tuples_returned, (uint64)agg_table_stat->t_tuples_returned);
+
+        (void)pg_atomic_fetch_add_u64(&ssctx->row_activity.tuples_inserted, (uint64)agg_table_stat->t_tuples_inserted);
+        (void)pg_atomic_fetch_add_u64(&ssctx->row_activity.tuples_updated, (uint64)agg_table_stat->t_tuples_updated);
+        (void)pg_atomic_fetch_add_u64(&ssctx->row_activity.tuples_deleted, (uint64)agg_table_stat->t_tuples_deleted);
+
+        // cache_io
+        (void)pg_atomic_fetch_add_u64(&ssctx->cache_io.blocks_fetched, (uint64)agg_table_stat->t_blocks_fetched);
+        (void)pg_atomic_fetch_add_u64(&ssctx->cache_io.blocks_hit, (uint64)agg_table_stat->t_blocks_hit);
+    }
+
+    if (timeInfo != NULL) {
+        for (int idx = 0; idx < TOTAL_TIME_INFO_TYPES; idx++) {
+            ssctx->timeModel[idx] += timeInfo[idx];
+        }
+    }
+
+    if (netInfo != NULL) {
+        for (int i = 0; i < TOTAL_NET_INFO_TYPES; i++) {
+            ssctx->networkInfo[i] += netInfo[i];
+        }
+    }
+}
+
+bool instr_stmt_need_track_plan()
+{
+    if (CURRENT_STMT_METRIC_HANDLE == NULL || CURRENT_STMT_METRIC_HANDLE->level <= STMT_TRACK_L0 ||
+        CURRENT_STMT_METRIC_HANDLE->level > STMT_TRACK_L2)
+        return false;
+
+    return true;
+}
+
+void instr_stmt_report_query_plan(QueryDesc *queryDesc)
+{
+    StatementStatContext *ssctx = (StatementStatContext *)u_sess->statement_cxt.curStatementMetrics;
+    if (queryDesc == NULL || ssctx == NULL || ssctx->level <= STMT_TRACK_L0
+        || ssctx->level > STMT_TRACK_L2 || ssctx->plan_size != 0) {
+        return;
+    }
+
+    ExplainState es;
+    explain_querydesc(&es, queryDesc);
+
+    MemoryContext oldcontext = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+    ssctx->query_plan = (char*)palloc0((Size)es.str->len + 1);
+    errno_t rc =
+        memcpy_s(ssctx->query_plan, (size_t)es.str->len, es.str->data, (size_t)es.str->len);
+    securec_check(rc, "\0", "\0");
+    ssctx->query_plan[es.str->len] = '\0';
+    ssctx->plan_size = (uint64)es.str->len + 1;
+    (void)MemoryContextSwitchTo(oldcontext);
+
+    ereport(DEBUG1,
+        (errmodule(MOD_INSTR), errmsg("exec_auto_explain %s %s to %lu",
+            ssctx->query_plan, queryDesc->sourceText, u_sess->unique_sql_cxt.unique_sql_id)));
+    pfree(es.str->data);
+}

@@ -1,0 +1,8 @@
+python-dateutil
+pandas
+flask
+flask_sqlalchemy
+flask_restful
+configparse
+prettytable
+pmdarima

@@ -65,21 +65,21 @@ typedef FormData_pg_database *Form_pg_database;
  *        compiler constants for pg_database
  * ----------------
  */
-#define Natts_pg_database                14
-#define Anum_pg_database_datname        1
-#define Anum_pg_database_datdba            2
-#define Anum_pg_database_encoding        3
-#define Anum_pg_database_datcollate        4
-#define Anum_pg_database_datctype        5
-#define Anum_pg_database_datistemplate    6
-#define Anum_pg_database_datallowconn    7
-#define Anum_pg_database_datconnlimit    8
-#define Anum_pg_database_datlastsysoid    9
-#define Anum_pg_database_datfrozenxid    10
-#define Anum_pg_database_dattablespace    11
-#define Anum_pg_database_compatibility    12
-#define Anum_pg_database_datacl            13
-#define Anum_pg_database_datfrozenxid64    14
+#define Natts_pg_database				14
+#define Anum_pg_database_datname		1
+#define Anum_pg_database_datdba			2
+#define Anum_pg_database_encoding		3
+#define Anum_pg_database_datcollate		4
+#define Anum_pg_database_datctype		5
+#define Anum_pg_database_datistemplate	6
+#define Anum_pg_database_datallowconn	7
+#define Anum_pg_database_datconnlimit	8
+#define Anum_pg_database_datlastsysoid	9
+#define Anum_pg_database_datfrozenxid	10
+#define Anum_pg_database_dattablespace	11
+#define Anum_pg_database_compatibility	12
+#define Anum_pg_database_datacl			13
+#define Anum_pg_database_datfrozenxid64	14
 
 DATA(insert OID = 1 (  template1 PGUID ENCODING "LC_COLLATE" "LC_CTYPE" t t -1 0 0 1663 "DB_COMPATIBILITY" _null_ 3));
 SHDESCR("default template for new databases");

@@ -1,0 +1,26 @@
+--
+--gs_encrypt
+--
+\! rm -f @abs_bindir@/test_gs_encrypt.log
+\! @abs_bindir@/gs_encrypt --help > @abs_bindir@/test_gs_encrypt.log 2>&1
+\! @abs_bindir@/gs_encrypt -V > @abs_bindir@/test_gs_encrypt.log 2>&1
+\! @abs_bindir@/gs_encrypt plaintext > @abs_bindir@/test_gs_encrypt.log 2>&1 ; echo $?
+\! rm -f @abs_bindir@/tde.key.cipher
+\! rm -f @abs_bindir@/tde.key.rand
+\! @abs_bindir@/gs_encrypt plaintext plaintext > @abs_bindir@/test_gs_encrypt.log 2>&1 ; echo $?
+\! @abs_bindir@/gs_encrypt -f '' plaintext > @abs_bindir@/test_gs_encrypt.log 2>&1 ; echo $?
+\! @abs_bindir@/gs_encrypt -f tde plaintext > @abs_bindir@/test_gs_encrypt.log 2>&1 ; echo $?
+\! @abs_bindir@/gs_guc generate -o tde -S default -D @abs_bindir@ > @abs_bindir@/test_gs_encrypt.log 2>&1 ; echo $?
+\! @abs_bindir@/gs_encrypt -f tde plaintext > @abs_bindir@/test_gs_encrypt.log 2>&1 ; echo $?
+\! @abs_bindir@/gs_encrypt -f tde -k key plaintext > @abs_bindir@/test_gs_encrypt.log 2>&1 ; echo $?
+\! @abs_bindir@/gs_encrypt -k key plaintext > @abs_bindir@/test_gs_encrypt.log 2>&1 ; echo $?
+\! @abs_bindir@/gs_encrypt -k key -v 0123456789abcdef > @abs_bindir@/test_gs_encrypt.log 2>&1 ; echo $?
+\! @abs_bindir@/gs_encrypt -k '' -v 0123456789abcdef plaintext > @abs_bindir@/test_gs_encrypt.log 2>&1 ; echo $?
+\! @abs_bindir@/gs_encrypt -k key -v 0123456789abc plaintext > @abs_bindir@/test_gs_encrypt.log 2>&1 ; echo $?
+\! @abs_bindir@/gs_encrypt -k ABCdef@123 -v 0123456789abcdef plaintext > @abs_bindir@/test_gs_encrypt.log 2>&1 ; echo $?
+\! @abs_bindir@/gs_encrypt -k 1234567890ABCdef -v 0123456789abcdef plaintext 
+\! @abs_bindir@/gs_encrypt -k 1234567890ABCdef -v 1234567890abcdef plaintext 
+\! @abs_bindir@/gs_encrypt -B MTIzNDU2Nzg5MGFiY2RlZg== -v 0123456789abcdef plaintext 
+\! @abs_bindir@/gs_encrypt -B MTIzNDU2Nzg5MGFiY2RlZg== -D MTIzNDU2Nzg5MGFiY2RlZg== plaintext 
+\! rm -f @abs_bindir@/tde.key.cipher
+\! rm -f @abs_bindir@/tde.key.rand

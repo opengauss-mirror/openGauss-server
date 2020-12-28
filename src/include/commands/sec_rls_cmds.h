@@ -41,4 +41,3 @@ extern void CreateRlsPolicyForSystem(
     char* schemaName, char* relName, char* policyName, char* funcName, char* relColname, char* privType);
 
 #endif /* SEC_RLS_CMDS_H */
-

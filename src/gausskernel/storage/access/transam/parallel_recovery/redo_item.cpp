@@ -43,16 +43,11 @@ namespace parallel_recovery {
 
 static const uint32 LSN_MARKER = 0;
 
-inline RedoItem* GetRedoItemPtr(XLogReaderState* record)
-{
-    return (RedoItem*)(((char*)record) - offsetof(RedoItem, record));
-}
-
 /* Run from the dispatcher thread. */
-RedoItem* CreateRedoItem(XLogReaderState* record, uint32 shareCount, uint32 designatedWorker, List* expectedTLIs,
-    TimestampTz recordXTime, bool buseoriginal)
+RedoItem *CreateRedoItem(XLogReaderState *record, uint32 shareCount, uint32 designatedWorker, List *expectedTLIs,
+                         TimestampTz recordXTime, bool buseoriginal)
 {
-    RedoItem* item = GetRedoItemPtr(record);
+    RedoItem *item = GetRedoItemPtr(record);
     if (t_thrd.xlog_cxt.redoItemIdx == 0) {
         /*
          * Some blocks are optional and redo functions rely on the correct
@@ -87,15 +82,15 @@ RedoItem* CreateRedoItem(XLogReaderState* record, uint32 shareCount, uint32 desi
     item->syncServerMode = GetServerMode();
     pg_atomic_init_u32(&item->refCount, 0);
     pg_atomic_init_u32(&item->replayed, 0);
-    item->nextByWorker = (RedoItem**)(((uintptr_t)item) + MAXALIGN(sizeof(RedoItem)));
-
+    item->nextByWorker = (RedoItem **)(((uintptr_t)item) + MAXALIGN(sizeof(RedoItem)));
+    pg_atomic_init_u32(&item->freed, 0);
     return item;
 }
 
 /* Run from the dispatcher thread. */
-RedoItem* CreateLSNMarker(XLogReaderState* record, List* expectedTLIs, bool buseoriginal)
+RedoItem *CreateLSNMarker(XLogReaderState *record, List *expectedTLIs, bool buseoriginal)
 {
-    RedoItem* item = NULL;
+    RedoItem *item = NULL;
 
     if (buseoriginal && (t_thrd.xlog_cxt.redoItemIdx == 0)) {
         item = GetRedoItemPtr(record);
@@ -117,23 +112,23 @@ RedoItem* CreateLSNMarker(XLogReaderState* record, List* expectedTLIs, bool buse
     item->RecentXmin = u_sess->utils_cxt.RecentXmin;
     item->syncServerMode = GetServerMode();
 
-    item->nextByWorker = (RedoItem**)(((uintptr_t)item) + MAXALIGN(sizeof(RedoItem)));
-
+    item->nextByWorker = (RedoItem **)(((uintptr_t)item) + MAXALIGN(sizeof(RedoItem)));
+    pg_atomic_init_u32(&item->freed, 0);
     return item;
 }
 
 /* Run from each page worker thread. */
-bool IsLSNMarker(const RedoItem* item)
+bool IsLSNMarker(const RedoItem *item)
 {
     return item->shareCount == LSN_MARKER;
 }
 
-void ApplyRedoRecord(XLogReaderState* record, bool bOld)
+void ApplyRedoRecord(XLogReaderState *record, bool bOld)
 {
     t_thrd.xlog_cxt.redo_oldversion_xlog = bOld;
     ErrorContextCallback errContext;
     errContext.callback = rm_redo_error_callback;
-    errContext.arg = (void*)record;
+    errContext.arg = (void *)record;
     errContext.previous = t_thrd.log_cxt.error_context_stack;
     t_thrd.log_cxt.error_context_stack = &errContext;
     if (module_logging_is_on(MOD_REDO)) {

@@ -35,7 +35,7 @@ extern volatile int log_min_messages;
 extern volatile int maxLogFileSize;
 extern volatile int curLogFileNum;
 extern volatile bool logInitFlag;
-/*unify log style*/
+/* unify log style */
 extern THR_LOCAL const char* thread_name;
 
 /* Error level codes */
@@ -102,6 +102,7 @@ extern THR_LOCAL const char* thread_name;
 #define CM_SERVER_BIN_NAME "cm_server"
 #define CM_AGENT_NAME "cm_agent"
 #define FENCED_MASTER_BIN_NAME "gaussdb"
+#define KERBEROS_BIN_NAME "krb5kdc"
 
 #define CM_AUTH_REJECT (0)
 #define CM_AUTH_TRUST (1)
@@ -117,7 +118,7 @@ void write_log_file(const char* buffer, int count);
 
 #define curLogFileMark ("-current.log")
 
-int logfile_init(char* log_path);
+int logfile_init();
 void openLogFile(void);
 void switchLogFile(void);
 
@@ -128,6 +129,7 @@ void get_build_mode(const char* config_file);
 char* trim(char* src);
 int is_comment_line(const char* str);
 int is_digit_string(char* str);
+int SetFdCloseExecFlag(FILE* fp);
 
 /*
  * @Description:  get value of paramater from configuration file
@@ -142,7 +144,7 @@ int get_int_value_from_config(const char* config_file, const char* key, int defa
 int64 get_int64_value_from_config(const char* config_file, const char* key, int64 defaultValue);
 uint32 get_uint32_value_from_config(const char* config_file, const char* key, uint32 defaultValue);
 extern int get_authentication_type(const char* config_file);
-extern int get_krb_server_keyfile(const char* config_file);
+extern void get_krb_server_keyfile(const char* config_file);
 
 extern const char* prefix_name;
 

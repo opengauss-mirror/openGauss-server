@@ -27,6 +27,7 @@
  */
 #ifndef PALLOC_H
 #define PALLOC_H
+#ifndef FRONTEND_PARSER
 
 /*
  * Type MemoryContextData is declared in nodes/memnodes.h.	Most users
@@ -57,6 +58,9 @@ extern THR_LOCAL PGDLLIMPORT MemoryContext TopMemoryContext;
 #define MCXT_ALLOC_NO_OOM 0x02 /* no failure if out-of-memory */
 #define MCXT_ALLOC_ZERO 0x04   /* zero allocated memory */
 
+#define ENABLE_MEMORY_PROTECT() (t_thrd.utils_cxt.memNeedProtect = true)
+#define DISABLE_MEMORY_PROTECT() (t_thrd.utils_cxt.memNeedProtect = false)
+
 /* Definition for the unchanged interfaces */
 #define MemoryContextAlloc(context, size) MemoryContextAllocDebug(context, size, __FILE__, __LINE__)
 #define MemoryContextAllocZero(context, size) MemoryContextAllocZeroDebug(context, size, __FILE__, __LINE__)
@@ -66,6 +70,10 @@ extern THR_LOCAL PGDLLIMPORT MemoryContext TopMemoryContext;
 #define repalloc(pointer, size) repallocDebug(pointer, size, __FILE__, __LINE__)
 #define repalloc_noexcept(pointer, size) repalloc_noexcept_Debug(pointer, size, __FILE__, __LINE__)
 #define pnstrdup(in, len) pnstrdupDebug(in, len, __FILE__, __LINE__)
+
+#define INSTANCE_GET_MEM_CXT_GROUP  g_instance.mcxt_group->GetMemCxtGroup
+#define THREAD_GET_MEM_CXT_GROUP    t_thrd.mcxt_group->GetMemCxtGroup
+#define SESS_GET_MEM_CXT_GROUP      u_sess->mcxt_group->GetMemCxtGroup
 
 /*
  * Fundamental memory-allocation operations (more are in utils/memutils.h)
@@ -175,6 +183,9 @@ extern char* MemoryContextStrdupDebug(MemoryContext context, const char* string,
 
 #define pstrdup(str) MemoryContextStrdup(CurrentMemoryContext, (str))
 
+#define pstrdup_ext(str) \
+    (((str) == NULL) ? NULL : (pstrdup((const char*)(str))))
+
 extern char* pnstrdupDebug(const char* in, Size len, const char* file, int line);
 
 extern void AllocSetCheckPointer(void* pointer);
@@ -238,4 +249,13 @@ public:
         (_objptr) = NULL;               \
     } while (0)
 
+#define DELETE_EX2(_objptr)   \
+    do {                      \
+        if ((_objptr) != nullptr) {    \
+            delete (_objptr);          \
+            (_objptr) = NULL;          \
+        }                              \
+    } while (0)
+
+#endif /* !FRONTEND_PARSER */
 #endif /* PALLOC_H */

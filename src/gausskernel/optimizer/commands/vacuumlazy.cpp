@@ -43,13 +43,13 @@
 #include "access/cstore_insert.h"
 #include "access/genam.h"
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "access/transam.h"
 #include "access/visibilitymap.h"
 #include "access/xlog.h"
 #include "catalog/catalog.h"
 #include "catalog/storage.h"
 #include "catalog/pg_hashbucket_fn.h"
-#include "catalog/storage_gtt.h"
 #include "commands/dbcommands.h"
 #include "commands/vacuum.h"
 #include "miscadmin.h"
@@ -57,7 +57,7 @@
 #include "portability/instr_time.h"
 #include "postmaster/autovacuum.h"
 #include "postmaster/bgwriter.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/freespace.h"
 #include "storage/lmgr.h"
 #include "utils/lsyscache.h"
@@ -65,7 +65,6 @@
 #include "utils/pg_rusage.h"
 #include "utils/snapmgr.h"
 #include "utils/timestamp.h"
-#include "utils/tqual.h"
 #include "utils/syscache.h"
 #include "utils/partcache.h"
 #include "gstrace/gstrace_infra.h"
@@ -214,7 +213,7 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
 
         if (RelationIsCUFormat(onerel)) {
             /* initialize the delta insert */
-            HeapScanDesc deltaScanDesc = heap_beginscan(deltaRel, GetActiveSnapshot(), 0, NULL);
+            TableScanDesc deltaScanDesc = tableam_scan_begin(deltaRel, GetActiveSnapshot(), 0, NULL);
 
             InsertArg args;
             HeapTuple deltaTup = NULL;
@@ -236,8 +235,8 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
             bool* null = (bool*)palloc(sizeof(bool) * tupDesc->natts);
             bulkload_rows batchRow(tupDesc, RelationGetMaxBatchRows(onerel), true);
 
-            while ((deltaTup = heap_getnext(deltaScanDesc, ForwardScanDirection)) != NULL) {
-                heap_deform_tuple(deltaTup, tupDesc, val, null);
+            while ((deltaTup = (HeapTuple) tableam_scan_getnexttuple(deltaScanDesc, ForwardScanDirection)) != NULL) {
+                tableam_tops_deform_tuple(deltaTup, tupDesc, val, null);
 
                 /* ignore returned value because only one tuple is appended into */
                 (void)batchRow.append_one_tuple(val, null, tupDesc);
@@ -253,7 +252,7 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
             }
             cstoreInsert.SetEndFlag();
             cstoreInsert.BatchInsert(&batchRow, 0);
-            heap_endscan(deltaScanDesc);
+            tableam_scan_end(deltaScanDesc);
 
             /* clean cstore insert */
             pfree(val);
@@ -344,7 +343,7 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
                     errmsg("cache lookup failed for relation %u", RelationGetRelid(onerel))));
         }
 
-        xid64datum = heap_getattr(tup, Anum_pg_partition_relfrozenxid64, RelationGetDescr(rel), &isNull);
+        xid64datum = tableam_tops_tuple_getattr(tup, Anum_pg_partition_relfrozenxid64, RelationGetDescr(rel), &isNull);
         heap_close(rel, AccessShareLock);
 
         if (isNull) {
@@ -366,7 +365,7 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
                 (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                     errmsg("cache lookup failed for relation %u", RelationGetRelid(onerel))));
         }
-        xid64datum = heap_getattr(tup, Anum_pg_class_relfrozenxid64, RelationGetDescr(rel), &isNull);
+        xid64datum = tableam_tops_tuple_getattr(tup, Anum_pg_class_relfrozenxid64, RelationGetDescr(rel), &isNull);
         heap_close(rel, AccessShareLock);
 
         if (isNull) {
@@ -555,12 +554,6 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
                 write_rate =
                     (double)BLCKSZ * t_thrd.vacuum_cxt.VacuumPageDirty / (PAGE_SIZE) / (secs + usecs / 1000000.0);
             }
-            char* dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-            if (dbname == NULL) {
-                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE),
-                            errmsg("database with OID %u does not exist",
-                                u_sess->proc_cxt.MyDatabaseId)));
-            }
             ereport(LOG,
                 (errmsg("automatic vacuum of table \"%s.%s.%s\": index scans: %d\n"
                         "pages: %u removed, %u remain\n"
@@ -568,8 +561,8 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
                         "buffer usage: %d hits, %d misses, %d dirtied\n"
                         "avg read rate: %.3f MiB/s, avg write rate: %.3f MiB/s\n"
                         "system usage: %s",
-                    dbname,
-                    get_namespace_name(RelationGetNamespace(onerel), true),
+                    get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId),
+                    get_namespace_name(RelationGetNamespace(onerel)),
                     RelationGetRelationName(onerel),
                     vacrelstats->num_index_scans,
                     vacrelstats->pages_removed,
@@ -779,6 +772,7 @@ static void lazy_scan_bucket(Relation onerel, LVRelStats* vacrelstats, VacuumStm
             vacrelstats->lock_waiter_detected = true;
         }
         *deleteTupleNum += deleteTupletemp;
+		pfree_ext(vacbucketstats->dead_tuples);
     }
 
     pfree_ext(ibuckRel);
@@ -823,7 +817,7 @@ static IndexBulkDeleteResult** lazy_scan_heap(
     pg_rusage_init(&ru0);
 
     relname = RelationGetRelationName(onerel);
-    ereport(elevel, (errmsg("vacuuming \"%s.%s\"", get_namespace_name(RelationGetNamespace(onerel), true), relname)));
+    ereport(elevel, (errmsg("vacuuming \"%s.%s\"", get_namespace_name(RelationGetNamespace(onerel)), relname)));
 
     empty_pages = vacuumed_pages = 0;
     num_tuples = tups_vacuumed = nkeep = nunused = 0;
@@ -1519,8 +1513,10 @@ static void lazy_vacuum_heap(Relation onerel, LVRelStats* vacrelstats)
         npages++;
     }
 
-    ereport(elevel,
-        (errmsg("\"%s\": removed %d row versions in %d pages", RelationGetRelationName(onerel), tupindex, npages),
+    ereport(LOG,
+        (errmsg("vacuum %u/%u/%u, \"%s\": removed %d row versions in %d pages",
+            onerel->rd_node.spcNode, onerel->rd_node.dbNode, onerel->rd_node.relNode,
+            RelationGetRelationName(onerel), tupindex, npages),
             errdetail("%s.", pg_rusage_show(&ru0))));
     gstrace_exit(GS_TRC_ID_lazy_vacuum_heap);
 }

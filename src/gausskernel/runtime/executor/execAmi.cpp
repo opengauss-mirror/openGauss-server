@@ -26,7 +26,7 @@
 #include "executor/nodeExtensible.h"
 #include "executor/nodeForeignscan.h"
 #include "executor/nodeFunctionscan.h"
-#include "executor/nodeGather.h"
+#include "executor/nodeGroup.h"
 #include "executor/nodeGroup.h"
 #include "executor/nodeHash.h"
 #include "executor/nodeHashjoin.h"
@@ -129,10 +129,6 @@ void ExecReScanByType(PlanState* node)
 
         case T_SeqScanState:
             ExecReScanSeqScan((SeqScanState*)node);
-            break;
-
-        case T_GatherState:
-            ExecReScanGather((GatherState*)node);
             break;
 
         case T_IndexScanState:
@@ -496,19 +492,8 @@ bool ExecSupportsMarkRestore(NodeTag plantype)
  */
 bool ExecSupportsBackwardScan(Plan* node)
 {
-    if (node == NULL) {
+    if (node == NULL)
         return false;
-    }
-
-    /*
-     * Parallel-aware nodes return a subset of the tuples in each worker,
-     * and in general we can't expect to have enough bookkeeping state to
-     * know which ones we returned in this worker as opposed to some other
-     * worker.
-     */
-    if (node->parallel_aware) {
-        return false;
-    }
 
     switch (nodeTag(node)) {
         case T_BaseResult:
@@ -535,15 +520,12 @@ bool ExecSupportsBackwardScan(Plan* node)
             if (((SeqScan*)node)->tablesample) {
                 return false;
             }
-            /* fall-through */
+            /* fall through */
         case T_TidScan:
         case T_FunctionScan:
         case T_ValuesScan:
         case T_CteScan:
             return target_list_supports_backward_scan(node->targetlist);
-
-        case T_Gather:
-            return false;
 
         case T_IndexScan:
             return index_supports_backward_scan(((IndexScan*)node)->indexid) &&

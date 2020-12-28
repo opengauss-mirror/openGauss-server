@@ -18,33 +18,33 @@ insert into t13 select v,v,v from generate_series(21,25) as v;
 
 /* "(+)" used in simple case: single join condition, two relation */
 select * from t11, t12 where t11.c1    = t12.c2(+) order by 1,2,3,4,5,6;
-explain(costs off, nodes off)
+explain(costs off)
 select * from t11, t12 where t11.c1    = t12.c2(+) order by 1,2,3,4,5,6;
 
 select * from t11, t12 where t11.c1(+) = t12.c2 order by 1,2,3,4,5,6;
-explain(costs off, nodes off)
+explain(costs off)
 select * from t11, t12 where t11.c1(+) = t12.c2 order by 1,2,3,4,5,6;
 
 select * from t11, t12 where t11.c1 = t12.c1(+) and t11.c1 > 10 order by 1,2,3,4,5,6;
-explain(costs off, nodes off)
+explain(costs off)
 select * from t11, t12 where t11.c1 = t12.c1(+) and t11.c1 > 10 order by 1,2,3,4,5,6;
 
 -- with "in" operator together--
 select * from t11, t12 where t11.c1 = t12.c1(+) and t11.c1 in (select c3 from t13 where c1 > 8) order by 1,2,3,4,5,6;
-explain(costs off, nodes off)
+explain(costs off)
 select * from t11, t12 where t11.c1 = t12.c1(+) and t11.c1 in (select c3 from t13 where c1 > 8) order by 1,2,3,4,5,6;
 
 select * from t11, t12 where t11.c1 = t12.c1(+) and t12.c1 in (select c3 from t13 where c1 > 8) order by 1,2,3,4,5,6;
-explain(costs off, nodes off)
+explain(costs off)
 select * from t11, t12 where t11.c1 = t12.c1(+) and t12.c1 in (select c3 from t13 where c1 > 8) order by 1,2,3,4,5,6;
 
 /* multi-join-condition */
 select * from t11, t12 where t11.c1(+) = t12.c1 and t11.c2(+) = t12.c2    order by 1,2,3,4,5,6;
-explain(costs off, nodes off)
+explain(costs off)
 select * from t11, t12 where t11.c1(+) = t12.c1 and t11.c2(+) = t12.c2    order by 1,2,3,4,5,6;
 
 select * from t11, t12 where t11.c1 = t12.c1(+) and t11.c2 = t12.c2(+) order by 1,2,3,4,5,6;
-explain(costs off, nodes off)
+explain(costs off)
 select * from t11, t12 where t11.c1 = t12.c1(+) and t11.c2 = t12.c2(+) order by 1,2,3,4,5,6;
 
 /* (+) used in multi-relation join with multi-join-condition */
@@ -56,7 +56,7 @@ where t11.c1(+) = t14.a4 and
       t14.b4 >= 8
 order by t14.c4,t11.c1, t12.c2, t13.c3;
 
-explain(costs off, nodes off)
+explain(costs off)
 select t14.c4, t11.c1, t12.c2, t13.c3
 from t11,t12,t13,t14
 where t11.c1(+) = t14.a4 and
@@ -73,7 +73,7 @@ where t11.c1(+) = t14.a4 and
       t14.b4 >= 8
 order by t14.c4;
 
-explain(costs off, nodes off)
+explain(costs off)
 select t14.c4, t11.c1, t12.c2, t13.c3
 from t11,t12,t13,t14
 where t11.c1(+) = t14.a4 and
@@ -85,7 +85,7 @@ order by t14.c4,t11.c1, t12.c2, t13.c3;
 /* (+) used in subquery */
 select * from t14, (select t12.c1 as dt_col1, t13.c2 as dt_col2 from t12,t13 where t12.c1 = t13.c1(+)) dt where t14.a4 = dt.dt_col1 order by 1,2,3,4,5;
 
-explain(costs off, nodes off)
+explain(costs off)
 select * from t14, (select t12.c1 as dt_col1, t13.c2 as dt_col2 from t12,t13 where t12.c1 = t13.c1(+)) dt where t14.a4 = dt.dt_col1 order by 1,2,3,4,5;
 
 /* (+) used in subLink */
@@ -97,7 +97,7 @@ where t11.c1 = t12.c1(+) and t11.c2 in (
     where t14.b4(+) = t13.c2
 ) order by 1,2,3,4;
 
-explain (costs off, nodes off)
+explain (costs off)
 select t11.c1,t11.c2, t12.c1, t12.c2
 from t11, t12
 where t11.c1 = t12.c1(+) and t11.c2 in (
@@ -114,7 +114,7 @@ where t11.c1 = t12.c1(+) and t11.c2 in (
     where t14.b4 = t13.c2(+)
 ) order by 1,2,3,4;
 
-explain (costs off, nodes off)
+explain (costs off)
 select t11.c1,t11.c2, t12.c1, t12.c2
 from t11, t12
 where t11.c1 = t12.c1(+) and t11.c2 in (
@@ -131,7 +131,7 @@ where t11.c1 = t12.c1(+) and t11.c2 in (
     where t14.b4 = t13.c2
 ) order by 1,2,3,4;
 
-explain (costs off, nodes off)
+explain (costs off)
 select t11.c1,t11.c2, t12.c1, t12.c2
 from t11, t12
 where t11.c1 = t12.c1(+) and t11.c2 in (
@@ -148,7 +148,7 @@ from t14, (
 	where t12.c1 = t13.c1(+)
 ) dt where t14.a4 = dt.dt_col1(+) order by 1,2,3,4;
 
-explain (costs off, nodes off)
+explain (costs off)
 select *
 from t14, (
 	select t12.c1 as dt_col1, t13.c2 as dt_col2
@@ -163,7 +163,7 @@ from t14, (
 	where t12.c1 = t13.c1(+)
 ) dt where t14.a4(+) = dt.dt_col1 order by 1,2,3,4;
 
-explain (costs off, nodes off)
+explain (costs off)
 select *
 from t14, (
 	select t12.c1 as dt_col1, t13.c2 as dt_col2
@@ -180,7 +180,7 @@ from
 	select t11.c1,t11.c2 from t11, t12 where t11.c1(+) = t12.c1
 ) order by 1,2;
 
-explain (costs off, nodes off)
+explain (costs off)
 select *
 from
 (
@@ -198,7 +198,7 @@ from
     select t11.c1,t11.c2 from t11, t12 where t11.c1(+) = t12.c1
 ) order by 1,2;
 
-explain  (costs off, nodes off)
+explain  (costs off)
 select *
 from
 (
@@ -211,7 +211,7 @@ from
 --treated as inner join when outer relation is in outer query--
 select t11.c1, t11.c1 from t11 where t11.c1 > 5 and t11.c2 in (select t12.c2 from t12 where t11.c1 = t12.c1(+)) order by 1,2;
 select t11.c1, t11.c1, (select t12.c2 from t12 where t11.c1 = t12.c1(+)) from t11 where t11.c1 > 5 order by 1,2,3;
-explain (costs off, nodes off)
+explain (costs off)
 select t11.c1, t11.c1 from t11 where t11.c1 > 5 and t11.c2 in (select t12.c2 from t12 where t11.c1 = t12.c1(+)) order by 1,2;
 
 --report error, (+)can only be used in the relation in current query level --
@@ -309,9 +309,9 @@ when not matched then
   insert values(2,3,5);
 
 --support subquery in update/delete/merge-into whereclause--
-explain(costs off, nodes off)
+explain(costs off)
 update t15 set c2 = 1 where t15.c1 = (select t11.c2 from t11, t15 where t15.c2(+) = t11.c3);
-explain(costs off, nodes off)
+explain(costs off)
 delete from t15 using t11 where exists (select t11.c2 from t11, t15 where t15.c2(+) = t11.c3);
 
 -----used in procedure------
@@ -340,9 +340,9 @@ select * from t11, t12 where  t12.c2   = (select min(1) from t11) + t11.c1(+) or
 ------JoinExpr and (+) not in same query level is  valid---
 --select * from (select t11.c1 a from t11,t12 where t11.c1 = t12.c2(+)) inner join t13 on (a = c3) order by 1,2,3,4;
 select * from (select t11.c1 a from t11 left join t12 on t11.c1 = t12.c2) inner join t13 on (a = c3) order by 1,2,3,4;
-explain (verbose on, costs off, nodes off, analyze on, timing off, detail off, NUM_NODES off, buffers off, cpu off)
+explain (verbose on, costs off, analyze on, timing off, detail off, cpu off)
 select * from (select t11.c1 a from t11 left join t12 on t11.c1 = t12.c2) inner join t13 on (a = c3) order by 1,2,3,4;
-explain(verbose on, costs off, nodes off)
+explain(verbose on, costs off)
 select * from (select t11.c1 a from t11,t12 where t11.c1 = t12.c2(+)) inner join t13 on (a = c3) order by 1,2,3,4;
 
 ----used in create view ---------

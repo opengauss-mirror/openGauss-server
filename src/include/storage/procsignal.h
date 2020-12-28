@@ -55,7 +55,6 @@ typedef enum {
     PROCSIG_RECOVERY_CONFLICT_STARTUP_DEADLOCK,
     PROCSIG_EXECUTOR_FLAG,
 
-    PROCSIG_PARALLEL_MESSAGE,   /* message from cooperating parallel backend */
     NUM_PROCSIGNALS /* Must be last! */
 } ProcSignalReason;
 
@@ -69,6 +68,6 @@ extern void ProcSignalInit(int pss_idx);
 extern int SendProcSignal(ThreadId pid, ProcSignalReason reason, BackendId backendId);
 
 extern void procsignal_sigusr1_handler(SIGNAL_ARGS);
+extern int SendProcSignalForLibcomm(ThreadId pid, ProcSignalReason reason, BackendId backendId);
 
 #endif /* PROCSIGNAL_H */
-

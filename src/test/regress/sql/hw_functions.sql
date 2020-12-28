@@ -197,8 +197,6 @@ select * from test_numeric order by id;
 -- drop table at last
 drop table test_null_repeat;
 drop table test_numeric;
-
-
 --test function pg_partition_filepath
 CREATE TABLE test_func_partition_filepath_table
 (
@@ -230,5 +228,4 @@ select func_get_partition_filepath('p2_partition_filepath_table1');
 select func_get_partition_filepath('p3_partition_filepath_table1');
 drop function func_get_partition_filepath;
 drop table test_func_partition_filepath_table;
-
 drop schema basefunc cascade;

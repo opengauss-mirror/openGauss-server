@@ -101,10 +101,10 @@ select * from pgxc_pool_connection_status();
  t
 (1 row)
 
-create user jack with password 'ttest@123';
-set role jack password 'ttest@123';
+create user jack with password 'gauss@123';
+set role jack password 'gauss@123';
 select * from pgxc_pool_connection_status();
-ERROR:  must be system admin to manage pooler
+ERROR:  must be system admin or operator admin in operation mode to manage pooler
 reset role;
 drop user jack;
 -- retry the query at the end of file without a semicolon

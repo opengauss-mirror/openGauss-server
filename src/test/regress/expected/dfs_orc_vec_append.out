@@ -1,0 +1,671 @@
+set enable_global_stats = true;
+/*
+ * This file is used to test the function of ExecVecAppend
+ */
+----
+--- Create Table and Insert Data
+----
+create schema vector_append_engine;
+set current_schema=vector_append_engine;
+create table vector_append_engine.VECTOR_APPEND_TABLE_01
+(
+   col_int	int
+  ,col_int2	int
+  ,col_num	numeric(10,4)
+  ,col_char	char
+  ,col_varchar	varchar(20)
+  ,col_date	date
+  ,col_interval	interval
+) with(orientation = orc) tablespace hdfs_ts distribute by hash(col_int);
+COPY VECTOR_APPEND_TABLE_01(col_int, col_int2, col_num, col_char, col_varchar, col_date, col_interval) FROM stdin;
+create table vector_append_engine.VECTOR_APPEND_TABLE_02
+(
+   col_int	int
+  ,col_int2	int
+  ,col_num	numeric(10,4)
+  ,col_char	char
+  ,col_varchar	varchar(20)
+  ,col_date	date
+  ,col_interval	interval
+) with(orientation = orc) tablespace hdfs_ts distribute by hash(col_int);
+COPY VECTOR_APPEND_TABLE_02(col_int, col_int2, col_num, col_char, col_varchar, col_date, col_interval) FROM stdin;
+analyze vector_append_table_01;
+analyze vector_append_table_02;
+----
+--- test 1: Basic Test
+----
+explain (verbose on, costs off)
+(select col_interval from vector_append_table_01 where col_int > 11) union (select col_interval from vector_append_table_02 where col_int > 12) order by col_interval;
+                                                                      QUERY PLAN                                                                      
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: vector_append_engine.vector_append_table_01.col_interval
+   ->  Vector Streaming (type: GATHER)
+         Output: vector_append_engine.vector_append_table_01.col_interval
+         Merge Sort Key: vector_append_engine.vector_append_table_01.col_interval
+         Node/s: All datanodes
+         ->  Vector Sort
+               Output: vector_append_engine.vector_append_table_01.col_interval
+               Sort Key: vector_append_engine.vector_append_table_01.col_interval
+               ->  Vector Sonic Hash Aggregate
+                     Output: vector_append_engine.vector_append_table_01.col_interval
+                     Group By Key: vector_append_engine.vector_append_table_01.col_interval
+                     ->  Vector Append
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 Output: vector_append_engine.vector_append_table_01.col_interval
+                                 Distribute Key: vector_append_engine.vector_append_table_01.col_interval
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Vector Result
+                                       Output: vector_append_engine.vector_append_table_01.col_interval
+                                       ->  Vector Append
+                                             ->  Dfs Scan on vector_append_engine.vector_append_table_01
+                                                   Output: vector_append_engine.vector_append_table_01.col_interval
+                                                   Distribute Key: vector_append_engine.vector_append_table_01.col_int
+                                                   Pushdown Predicate Filter: (vector_append_engine.vector_append_table_01.col_int > 11)
+                                             ->  Vector Adapter
+                                                   Output: cstore.vector_append_table_01.col_interval
+                                                   ->  Seq Scan on cstore.pg_delta_vector_append_engine_vector_append_table_01 vector_append_table_01
+                                                         Output: cstore.vector_append_table_01.col_interval
+                                                         Distribute Key: cstore.vector_append_table_01.col_int
+                                                         Filter: (cstore.vector_append_table_01.col_int > 11)
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 Output: vector_append_engine.vector_append_table_02.col_interval
+                                 Distribute Key: vector_append_engine.vector_append_table_02.col_interval
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Vector Result
+                                       Output: vector_append_engine.vector_append_table_02.col_interval
+                                       ->  Vector Append
+                                             ->  Dfs Scan on vector_append_engine.vector_append_table_02
+                                                   Output: vector_append_engine.vector_append_table_02.col_interval
+                                                   Distribute Key: vector_append_engine.vector_append_table_02.col_int
+                                                   Pushdown Predicate Filter: (vector_append_engine.vector_append_table_02.col_int > 12)
+                                             ->  Vector Adapter
+                                                   Output: cstore.vector_append_table_02.col_interval
+                                                   ->  Seq Scan on cstore.pg_delta_vector_append_engine_vector_append_table_02 vector_append_table_02
+                                                         Output: cstore.vector_append_table_02.col_interval
+                                                         Distribute Key: cstore.vector_append_table_02.col_int
+                                                         Filter: (cstore.vector_append_table_02.col_int > 12)
+(49 rows)
+
+(select col_interval from vector_append_table_01 where col_int > 11) union (select col_interval from vector_append_table_02 where col_int > 12) order by col_interval;
+           col_interval            
+-----------------------------------
+ @ 2 days 13 hours 24 mins 56 secs
+ @ 4 days 13 hours 25 mins 25 secs
+ @ 8 days 13 hours 28 mins 56 secs
+(3 rows)
+
+(select col_int, col_int2, col_num from vector_append_table_01 where col_int > 11) union (select col_int, col_int2, col_num from vector_append_table_02 where col_int > 12) order by 1, 2, 3;
+ col_int | col_int2 | col_num 
+---------+----------+---------
+      12 |       12 |  1.2500
+      12 |       12 |  2.2500
+      12 |       22 |  2.2500
+      13 |       14 |  1.2500
+      13 |       23 |  1.2500
+      15 |       15 |  2.2500
+      15 |       25 |  2.2500
+      16 |       16 |  2.3600
+      16 |       26 |  2.3600
+      17 |       27 |  2.2700
+      18 |       27 |  2.2500
+      18 |       28 |  2.2500
+(12 rows)
+
+(select col_int, col_int2, col_num from vector_append_table_01 where col_date > '2005-02-14') union (select col_int, col_int2, col_num from vector_append_table_02 where col_num < 2.25) order by 1, 2, 3;
+ col_int | col_int2 | col_num 
+---------+----------+---------
+      11 |       13 |  1.2500
+      12 |       12 |  2.2500
+      12 |       15 |  1.2500
+      12 |       22 |  2.2500
+      13 |       14 |  1.2500
+      13 |       23 |  1.2500
+      15 |       25 |  2.2500
+      16 |       16 |  2.3600
+      16 |       26 |  2.3600
+      17 |       27 |  2.2700
+      18 |       27 |  2.2500
+      18 |       28 |  2.2500
+(12 rows)
+
+----
+--- test 2: cased summarizd from user requirements(With Union and Using agg or unique node)
+----
+explain (verbose, costs off) 
+(select distinct col_int, col_int2, col_num from vector_append_table_01 where col_int<13) 
+union
+(select distinct col_int, col_int2, col_num from vector_append_table_01 where col_int>=13);
+                                                                                                     QUERY PLAN                                                                                                     
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+   ->  Vector Streaming (type: GATHER)
+         Output: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+         ->  Vector Sonic Hash Aggregate
+               Output: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+               Group By Key: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+               ->  Vector Append
+                     ->  Vector Sonic Hash Aggregate
+                           Output: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                           Group By Key: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                           ->  Vector Result
+                                 Output: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                 ->  Vector Append
+                                       ->  Dfs Scan on vector_append_engine.vector_append_table_01
+                                             Output: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                             Distribute Key: vector_append_engine.vector_append_table_01.col_int
+                                             Pushdown Predicate Filter: (vector_append_engine.vector_append_table_01.col_int < 13)
+                                       ->  Vector Adapter
+                                             Output: cstore.vector_append_table_01.col_int, cstore.vector_append_table_01.col_int2, cstore.vector_append_table_01.col_num
+                                             ->  Seq Scan on cstore.pg_delta_vector_append_engine_vector_append_table_01 vector_append_table_01
+                                                   Output: cstore.vector_append_table_01.col_int, cstore.vector_append_table_01.col_int2, cstore.vector_append_table_01.col_num
+                                                   Distribute Key: cstore.vector_append_table_01.col_int
+                                                   Filter: (cstore.vector_append_table_01.col_int < 13)
+                     ->  Vector Sonic Hash Aggregate
+                           Output: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                           Group By Key: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                           ->  Vector Result
+                                 Output: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                 ->  Vector Append
+                                       ->  Dfs Scan on vector_append_engine.vector_append_table_01
+                                             Output: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                             Distribute Key: vector_append_engine.vector_append_table_01.col_int
+                                             Pushdown Predicate Filter: (vector_append_engine.vector_append_table_01.col_int >= 13)
+                                       ->  Vector Adapter
+                                             Output: cstore.vector_append_table_01.col_int, cstore.vector_append_table_01.col_int2, cstore.vector_append_table_01.col_num
+                                             ->  Seq Scan on cstore.pg_delta_vector_append_engine_vector_append_table_01 vector_append_table_01
+                                                   Output: cstore.vector_append_table_01.col_int, cstore.vector_append_table_01.col_int2, cstore.vector_append_table_01.col_num
+                                                   Distribute Key: cstore.vector_append_table_01.col_int
+                                                   Filter: (cstore.vector_append_table_01.col_int >= 13)
+(40 rows)
+
+explain (verbose, costs off) 
+(select distinct col_int2, col_num from vector_append_table_01 where col_int2<23) 
+union
+(select distinct col_int2, col_num from vector_append_table_01 where col_int2>=23);
+                                                                                QUERY PLAN                                                                                 
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+   ->  Vector Streaming (type: GATHER)
+         Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+         ->  Vector Sonic Hash Aggregate
+               Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+               Group By Key: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+               ->  Vector Append
+                     ->  Vector Sonic Hash Aggregate
+                           Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                           Group By Key: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                           Skew Agg Optimized by Statistic
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                 Distribute Key: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                 ->  Vector Sonic Hash Aggregate
+                                       Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                       Group By Key: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                       ->  Vector Result
+                                             Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                             ->  Vector Append
+                                                   ->  Dfs Scan on vector_append_engine.vector_append_table_01
+                                                         Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                                         Distribute Key: vector_append_engine.vector_append_table_01.col_int
+                                                         Pushdown Predicate Filter: (vector_append_engine.vector_append_table_01.col_int2 < 23)
+                                                   ->  Vector Adapter
+                                                         Output: cstore.vector_append_table_01.col_int2, cstore.vector_append_table_01.col_num
+                                                         ->  Seq Scan on cstore.pg_delta_vector_append_engine_vector_append_table_01 vector_append_table_01
+                                                               Output: cstore.vector_append_table_01.col_int2, cstore.vector_append_table_01.col_num
+                                                               Distribute Key: cstore.vector_append_table_01.col_int
+                                                               Filter: (cstore.vector_append_table_01.col_int2 < 23)
+                     ->  Vector Sonic Hash Aggregate
+                           Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                           Group By Key: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                           Skew Agg Optimized by Statistic
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                 Distribute Key: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                 ->  Vector Sonic Hash Aggregate
+                                       Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                       Group By Key: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                       ->  Vector Result
+                                             Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                             ->  Vector Append
+                                                   ->  Dfs Scan on vector_append_engine.vector_append_table_01
+                                                         Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                                         Distribute Key: vector_append_engine.vector_append_table_01.col_int
+                                                         Pushdown Predicate Filter: (vector_append_engine.vector_append_table_01.col_int2 >= 23)
+                                                   ->  Vector Adapter
+                                                         Output: cstore.vector_append_table_01.col_int2, cstore.vector_append_table_01.col_num
+                                                         ->  Seq Scan on cstore.pg_delta_vector_append_engine_vector_append_table_01 vector_append_table_01
+                                                               Output: cstore.vector_append_table_01.col_int2, cstore.vector_append_table_01.col_num
+                                                               Distribute Key: cstore.vector_append_table_01.col_int
+                                                               Filter: (cstore.vector_append_table_01.col_int2 >= 23)
+(54 rows)
+
+explain (verbose, costs off) 
+(select distinct col_int, col_int2, col_num from vector_append_table_01 where col_int<13 order by col_int) 
+union
+(select distinct col_int, col_int2, col_num from vector_append_table_01 where col_int>=13);
+                                                                                                     QUERY PLAN                                                                                                     
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+   ->  Vector Streaming (type: GATHER)
+         Output: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+         ->  Vector Sonic Hash Aggregate
+               Output: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+               Group By Key: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+               ->  Vector Append
+                     ->  Vector Sonic Hash Aggregate
+                           Output: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                           Group By Key: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                           ->  Vector Result
+                                 Output: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                 ->  Vector Append
+                                       ->  Dfs Scan on vector_append_engine.vector_append_table_01
+                                             Output: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                             Distribute Key: vector_append_engine.vector_append_table_01.col_int
+                                             Pushdown Predicate Filter: (vector_append_engine.vector_append_table_01.col_int < 13)
+                                       ->  Vector Adapter
+                                             Output: cstore.vector_append_table_01.col_int, cstore.vector_append_table_01.col_int2, cstore.vector_append_table_01.col_num
+                                             ->  Seq Scan on cstore.pg_delta_vector_append_engine_vector_append_table_01 vector_append_table_01
+                                                   Output: cstore.vector_append_table_01.col_int, cstore.vector_append_table_01.col_int2, cstore.vector_append_table_01.col_num
+                                                   Distribute Key: cstore.vector_append_table_01.col_int
+                                                   Filter: (cstore.vector_append_table_01.col_int < 13)
+                     ->  Vector Sonic Hash Aggregate
+                           Output: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                           Group By Key: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                           ->  Vector Result
+                                 Output: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                 ->  Vector Append
+                                       ->  Dfs Scan on vector_append_engine.vector_append_table_01
+                                             Output: vector_append_engine.vector_append_table_01.col_int, vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                             Distribute Key: vector_append_engine.vector_append_table_01.col_int
+                                             Pushdown Predicate Filter: (vector_append_engine.vector_append_table_01.col_int >= 13)
+                                       ->  Vector Adapter
+                                             Output: cstore.vector_append_table_01.col_int, cstore.vector_append_table_01.col_int2, cstore.vector_append_table_01.col_num
+                                             ->  Seq Scan on cstore.pg_delta_vector_append_engine_vector_append_table_01 vector_append_table_01
+                                                   Output: cstore.vector_append_table_01.col_int, cstore.vector_append_table_01.col_int2, cstore.vector_append_table_01.col_num
+                                                   Distribute Key: cstore.vector_append_table_01.col_int
+                                                   Filter: (cstore.vector_append_table_01.col_int >= 13)
+(40 rows)
+
+explain (verbose, costs off) 
+(select distinct col_int2, col_num from vector_append_table_01 where col_int2<23 order by col_int2) 
+union
+(select distinct col_int2, col_num from vector_append_table_01 where col_int2>=23);
+                                                                                QUERY PLAN                                                                                 
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+   ->  Vector Streaming (type: GATHER)
+         Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+         ->  Vector Sonic Hash Aggregate
+               Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+               Group By Key: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+               ->  Vector Append
+                     ->  Vector Sonic Hash Aggregate
+                           Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                           Group By Key: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                           Skew Agg Optimized by Statistic
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                 Distribute Key: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                 ->  Vector Sonic Hash Aggregate
+                                       Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                       Group By Key: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                       ->  Vector Result
+                                             Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                             ->  Vector Append
+                                                   ->  Dfs Scan on vector_append_engine.vector_append_table_01
+                                                         Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                                         Distribute Key: vector_append_engine.vector_append_table_01.col_int
+                                                         Pushdown Predicate Filter: (vector_append_engine.vector_append_table_01.col_int2 < 23)
+                                                   ->  Vector Adapter
+                                                         Output: cstore.vector_append_table_01.col_int2, cstore.vector_append_table_01.col_num
+                                                         ->  Seq Scan on cstore.pg_delta_vector_append_engine_vector_append_table_01 vector_append_table_01
+                                                               Output: cstore.vector_append_table_01.col_int2, cstore.vector_append_table_01.col_num
+                                                               Distribute Key: cstore.vector_append_table_01.col_int
+                                                               Filter: (cstore.vector_append_table_01.col_int2 < 23)
+                     ->  Vector Sonic Hash Aggregate
+                           Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                           Group By Key: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                           Skew Agg Optimized by Statistic
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                 Distribute Key: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                 ->  Vector Sonic Hash Aggregate
+                                       Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                       Group By Key: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                       ->  Vector Result
+                                             Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                             ->  Vector Append
+                                                   ->  Dfs Scan on vector_append_engine.vector_append_table_01
+                                                         Output: vector_append_engine.vector_append_table_01.col_int2, vector_append_engine.vector_append_table_01.col_num
+                                                         Distribute Key: vector_append_engine.vector_append_table_01.col_int
+                                                         Pushdown Predicate Filter: (vector_append_engine.vector_append_table_01.col_int2 >= 23)
+                                                   ->  Vector Adapter
+                                                         Output: cstore.vector_append_table_01.col_int2, cstore.vector_append_table_01.col_num
+                                                         ->  Seq Scan on cstore.pg_delta_vector_append_engine_vector_append_table_01 vector_append_table_01
+                                                               Output: cstore.vector_append_table_01.col_int2, cstore.vector_append_table_01.col_num
+                                                               Distribute Key: cstore.vector_append_table_01.col_int
+                                                               Filter: (cstore.vector_append_table_01.col_int2 >= 23)
+(54 rows)
+
+explain (verbose, costs off) 
+(select distinct col_char, col_varchar from vector_append_table_01 where col_int2<23 order by col_char) 
+union
+(select distinct col_char, col_varchar from vector_append_table_01 where col_int2>=23)
+union
+(select distinct col_char, col_varchar from vector_append_table_01 where col_int2 = 26) order by col_char, col_varchar;
+                                                                                     QUERY PLAN                                                                                      
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+   ->  Vector Streaming (type: GATHER)
+         Output: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+         Merge Sort Key: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+         ->  Vector Sort
+               Output: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+               Sort Key: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+               ->  Vector Sonic Hash Aggregate
+                     Output: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                     Group By Key: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                     ->  Vector Append
+                           ->  Vector Sonic Hash Aggregate
+                                 Output: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                 Group By Key: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                 Skew Agg Optimized by Statistic
+                                 ->  Vector Streaming(type: REDISTRIBUTE)
+                                       Output: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                       Distribute Key: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                       ->  Vector Sonic Hash Aggregate
+                                             Output: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                             Group By Key: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                             ->  Vector Result
+                                                   Output: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                                   ->  Vector Append
+                                                         ->  Dfs Scan on vector_append_engine.vector_append_table_01
+                                                               Output: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                                               Distribute Key: vector_append_engine.vector_append_table_01.col_int
+                                                               Pushdown Predicate Filter: (vector_append_engine.vector_append_table_01.col_int2 < 23)
+                                                         ->  Vector Adapter
+                                                               Output: cstore.vector_append_table_01.col_char, cstore.vector_append_table_01.col_varchar
+                                                               ->  Seq Scan on cstore.pg_delta_vector_append_engine_vector_append_table_01 vector_append_table_01
+                                                                     Output: cstore.vector_append_table_01.col_char, cstore.vector_append_table_01.col_varchar
+                                                                     Distribute Key: cstore.vector_append_table_01.col_int
+                                                                     Filter: (cstore.vector_append_table_01.col_int2 < 23)
+                           ->  Vector Sonic Hash Aggregate
+                                 Output: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                 Group By Key: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                 Skew Agg Optimized by Statistic
+                                 ->  Vector Streaming(type: REDISTRIBUTE)
+                                       Output: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                       Distribute Key: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                       ->  Vector Sonic Hash Aggregate
+                                             Output: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                             Group By Key: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                             ->  Vector Result
+                                                   Output: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                                   ->  Vector Append
+                                                         ->  Dfs Scan on vector_append_engine.vector_append_table_01
+                                                               Output: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                                               Distribute Key: vector_append_engine.vector_append_table_01.col_int
+                                                               Pushdown Predicate Filter: (vector_append_engine.vector_append_table_01.col_int2 >= 23)
+                                                         ->  Vector Adapter
+                                                               Output: cstore.vector_append_table_01.col_char, cstore.vector_append_table_01.col_varchar
+                                                               ->  Seq Scan on cstore.pg_delta_vector_append_engine_vector_append_table_01 vector_append_table_01
+                                                                     Output: cstore.vector_append_table_01.col_char, cstore.vector_append_table_01.col_varchar
+                                                                     Distribute Key: cstore.vector_append_table_01.col_int
+                                                                     Filter: (cstore.vector_append_table_01.col_int2 >= 23)
+                           ->  Vector Sonic Hash Aggregate
+                                 Output: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                 Group By Key: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                 Skew Agg Optimized by Statistic
+                                 ->  Vector Streaming(type: REDISTRIBUTE)
+                                       Output: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                       Distribute Key: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                       ->  Vector Sonic Hash Aggregate
+                                             Output: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                             Group By Key: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                             ->  Vector Result
+                                                   Output: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                                   ->  Vector Append
+                                                         ->  Dfs Scan on vector_append_engine.vector_append_table_01
+                                                               Output: vector_append_engine.vector_append_table_01.col_char, vector_append_engine.vector_append_table_01.col_varchar
+                                                               Distribute Key: vector_append_engine.vector_append_table_01.col_int
+                                                               Pushdown Predicate Filter: (vector_append_engine.vector_append_table_01.col_int2 = 26)
+                                                         ->  Vector Adapter
+                                                               Output: cstore.vector_append_table_01.col_char, cstore.vector_append_table_01.col_varchar
+                                                               ->  Seq Scan on cstore.pg_delta_vector_append_engine_vector_append_table_01 vector_append_table_01
+                                                                     Output: cstore.vector_append_table_01.col_char, cstore.vector_append_table_01.col_varchar
+                                                                     Distribute Key: cstore.vector_append_table_01.col_int
+                                                                     Filter: (cstore.vector_append_table_01.col_int2 = 26)
+(81 rows)
+
+((select distinct col_int, col_int2, col_num from vector_append_table_01 where col_int<13) 
+union
+(select distinct col_int, col_int2, col_num from vector_append_table_01 where col_int>=13)) order by col_int, col_int2, col_num;
+ col_int | col_int2 | col_num 
+---------+----------+---------
+      11 |       21 |  1.2500
+      12 |       12 |  1.2500
+      12 |       12 |  2.2500
+      12 |       22 |  2.2500
+      13 |       23 |  1.2500
+      15 |       25 |  2.2500
+      16 |       16 |  2.3600
+      16 |       26 |  2.3600
+      17 |       27 |  2.2700
+      18 |       27 |  2.2500
+      18 |       28 |  2.2500
+(11 rows)
+
+((select distinct col_int2, col_num from vector_append_table_01 where col_int2<23) 
+union
+(select distinct col_int2, col_num from vector_append_table_01 where col_int2>=23)) order by col_int2, col_num;
+ col_int2 | col_num 
+----------+---------
+       12 |  1.2500
+       12 |  2.2500
+       16 |  2.3600
+       21 |  1.2500
+       22 |  2.2500
+       23 |  1.2500
+       25 |  2.2500
+       26 |  2.3600
+       27 |  2.2500
+       27 |  2.2700
+       28 |  2.2500
+(11 rows)
+
+((select distinct col_int, col_int2, col_num from vector_append_table_01 where col_int<13 order by col_int) 
+union
+(select distinct col_int, col_int2, col_num from vector_append_table_01 where col_int>=13)) order by col_int, col_int2, col_num;
+ col_int | col_int2 | col_num 
+---------+----------+---------
+      11 |       21 |  1.2500
+      12 |       12 |  1.2500
+      12 |       12 |  2.2500
+      12 |       22 |  2.2500
+      13 |       23 |  1.2500
+      15 |       25 |  2.2500
+      16 |       16 |  2.3600
+      16 |       26 |  2.3600
+      17 |       27 |  2.2700
+      18 |       27 |  2.2500
+      18 |       28 |  2.2500
+(11 rows)
+
+((select distinct col_int2, col_num from vector_append_table_01 where col_int2<23 order by col_int2) 
+union
+(select distinct col_int2, col_num from vector_append_table_01 where col_int2>=23)) order by col_int2, col_num;
+ col_int2 | col_num 
+----------+---------
+       12 |  1.2500
+       12 |  2.2500
+       16 |  2.3600
+       21 |  1.2500
+       22 |  2.2500
+       23 |  1.2500
+       25 |  2.2500
+       26 |  2.3600
+       27 |  2.2500
+       27 |  2.2700
+       28 |  2.2500
+(11 rows)
+
+(select distinct col_char, col_varchar from vector_append_table_01 where col_int2<23 order by col_char) 
+union
+(select distinct col_char, col_varchar from vector_append_table_01 where col_int2>=23)
+union
+(select distinct col_char, col_varchar from vector_append_table_01 where col_int2 = 26) order by col_char, col_varchar;
+ col_char | col_varchar 
+----------+-------------
+ C        | beijing
+ C        | tianjing
+ C        | xian
+ F        | beijing
+ F        | tianjing
+ F        | xian
+ T        | beijing
+ T        | xian
+(8 rows)
+
+----
+--- test 3: Intersect
+----
+explain (verbose, costs off)
+select col_int2 from vector_append_table_01 INTERSECT select col_int from vector_append_table_01 order by 1;
+                                                                         QUERY PLAN                                                                         
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: "*SELECT* 2".col_int, (1)
+   ->  Vector Streaming (type: GATHER)
+         Output: "*SELECT* 2".col_int, (1)
+         Merge Sort Key: "*SELECT* 2".col_int
+         ->  Vector Sort
+               Output: "*SELECT* 2".col_int, (1)
+               Sort Key: "*SELECT* 2".col_int
+               ->  Vector HashSetOp Intersect
+                     Output: "*SELECT* 2".col_int, (1)
+                     ->  Vector Append
+                           ->  Vector Subquery Scan on "*SELECT* 2"
+                                 Output: "*SELECT* 2".col_int, 1
+                                 ->  Vector Result
+                                       Output: vector_append_engine.vector_append_table_01.col_int
+                                       ->  Vector Append
+                                             ->  Dfs Scan on vector_append_engine.vector_append_table_01
+                                                   Output: vector_append_engine.vector_append_table_01.col_int
+                                                   Distribute Key: vector_append_engine.vector_append_table_01.col_int
+                                             ->  Vector Adapter
+                                                   Output: cstore.vector_append_table_01.col_int
+                                                   ->  Seq Scan on cstore.pg_delta_vector_append_engine_vector_append_table_01 vector_append_table_01
+                                                         Output: cstore.vector_append_table_01.col_int
+                                                         Distribute Key: cstore.vector_append_table_01.col_int
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 Output: "*SELECT* 1".col_int2, (0)
+                                 Distribute Key: "*SELECT* 1".col_int2
+                                 ->  Vector Subquery Scan on "*SELECT* 1"
+                                       Output: "*SELECT* 1".col_int2, 0
+                                       ->  Vector Result
+                                             Output: vector_append_engine.vector_append_table_01.col_int2
+                                             ->  Vector Append
+                                                   ->  Dfs Scan on vector_append_engine.vector_append_table_01
+                                                         Output: vector_append_engine.vector_append_table_01.col_int2
+                                                         Distribute Key: vector_append_engine.vector_append_table_01.col_int
+                                                   ->  Vector Adapter
+                                                         Output: cstore.vector_append_table_01.col_int2
+                                                         ->  Seq Scan on cstore.pg_delta_vector_append_engine_vector_append_table_01 vector_append_table_01
+                                                               Output: cstore.vector_append_table_01.col_int2
+                                                               Distribute Key: cstore.vector_append_table_01.col_int
+(40 rows)
+
+--add for llt
+\o hw_explain_open_group.txt
+explain (analyze on, format YAML) 
+select col_int2 from vector_append_table_01 INTERSECT select col_int from vector_append_table_01 order by 1;
+\o
+\! rm hw_explain_open_group.txt
+select col_int2 from vector_append_table_01 INTERSECT select col_int from vector_append_table_01 order by 1;
+ col_int2 
+----------
+       12
+       16
+(2 rows)
+
+select col_int2 from vector_append_table_01 INTERSECT ALL select col_int from vector_append_table_01 order by 1;
+ col_int2 
+----------
+       12
+       12
+       16
+(3 rows)
+
+select col_interval from vector_append_table_01 INTERSECT select col_interval from vector_append_table_01 order by 1;
+           col_interval            
+-----------------------------------
+ @ 2 days 13 hours 24 mins 56 secs
+ @ 4 days 13 hours 25 mins 25 secs
+ @ 8 days 13 hours 28 mins 56 secs
+(3 rows)
+
+select col_int2 from vector_append_table_01 EXCEPT select col_int from vector_append_table_01 order by 1;
+ col_int2 
+----------
+       21
+       22
+       23
+       25
+       26
+       27
+       28
+(7 rows)
+
+select col_int2 from vector_append_table_01 EXCEPT ALL select col_int from vector_append_table_01 order by 1;
+ col_int2 
+----------
+       21
+       22
+       23
+       25
+       26
+       27
+       27
+       28
+       28
+(9 rows)
+
+select col_int * 3 as int1 from vector_append_table_01 EXCEPT select col_int2 * 2 from vector_append_table_01 order by 1;
+ int1 
+------
+   33
+   36
+   39
+   45
+   48
+   51
+(6 rows)
+
+select col_char, col_num from vector_append_table_01 INTERSECT select col_varchar, col_num from vector_append_table_01 order by col_num;
+ col_char | col_num 
+----------+---------
+(0 rows)
+
+SELECT col_int2-1 as q2, col_int FROM vector_append_table_01 INTERSECT ALL SELECT col_int-1, col_int FROM vector_append_table_01 ORDER BY 1;
+ q2 | col_int 
+----+---------
+ 11 |      12
+ 11 |      12
+ 15 |      16
+(3 rows)
+
+----
+--- Clean Resource and Tables
+----
+drop schema vector_append_engine cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table vector_append_table_01
+drop cascades to table vector_append_table_02

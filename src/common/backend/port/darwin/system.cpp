@@ -42,7 +42,6 @@ static char sccsid[] = "@(#)system.c	8.1 (Berkeley) 6/4/93";
 
 #include <sys/wait.h>
 #include <signal.h>
-#include <unistd.h>
 #include <paths.h>
 #include <errno.h>
 
@@ -55,8 +54,10 @@ int system(const char* command)
     struct sigaction ign, intact, quitact;
     sigset_t newsigblock, oldsigblock;
 
-    if (command == NULL) /* just checking... */
+    if (command == NULL) {
+        /* just checking... */
         return (1);
+    }
 
     /*
      * Ignore SIGINT and SIGQUIT, block SIGCHLD. Remember to save existing
@@ -92,7 +93,7 @@ int system(const char* command)
     (void)sigaction(SIGINT, &intact, NULL);
     (void)sigaction(SIGQUIT, &quitact, NULL);
     (void)sigprocmask(SIG_SETMASK, &oldsigblock, NULL);
-    return (pid == -1 ? -1 : pstat);
+    return ((pid == -1) ? -1 : pstat);
 }
 
 #endif /* OS X < 10.3 */

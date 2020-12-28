@@ -7,7 +7,7 @@ function test_1()
 check_instance
 
 #set ha_module_debug
-gs_guc reload -D $data_dir/datanode1 -c "ha_module_debug=on"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "ha_module_debug=on"
 
 #create table
 gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_test1; CREATE TABLE mpp_test1(id INT,name VARCHAR(15) NOT NULL) with (orientation = column);" 
@@ -25,7 +25,7 @@ start_standby
 sleep 5
 
 #reset ha_module_debug
-gs_guc reload -D $data_dir/datanode1 -c "ha_module_debug=off"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "ha_module_debug=off"
 
 #kill the standby again
 kill_standby

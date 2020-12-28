@@ -51,25 +51,25 @@ DROP TABLE tmp;
 --
 -- copy
 --
-COPY onek TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/onek.data';
+COPY onek TO '@abs_builddir@/results/onek.data';
 
 DELETE FROM onek;
 
-COPY onek FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/onek.data';
+COPY onek FROM '@abs_builddir@/results/onek.data';
 
 SELECT unique1 FROM onek WHERE unique1 < 2 ORDER BY unique1;
 
 DELETE FROM onek2;
 
-COPY onek2 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/onek.data';
+COPY onek2 FROM '@abs_builddir@/results/onek.data';
 
 SELECT unique1 FROM onek2 WHERE unique1 < 2 ORDER BY unique1;
 
-COPY BINARY stud_emp TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/stud_emp.data';
+COPY BINARY stud_emp TO '@abs_builddir@/results/stud_emp.data';
 
 DELETE FROM stud_emp;
 
-COPY BINARY stud_emp FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/stud_emp.data';
+COPY BINARY stud_emp FROM '@abs_builddir@/results/stud_emp.data';
 
 SELECT * FROM stud_emp ORDER BY 1,2;
 
@@ -270,6 +270,8 @@ select pg_terminate_backend(9999999999);
 select pg_terminate_session(0, 0);
 
 select pg_terminate_session(9999999999, 99999999999998);
+
+select pg_terminate_session(9999999999, 0);
 
 select pg_partition_filenode(9999999999);
 

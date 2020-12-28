@@ -432,10 +432,7 @@ void VecHashAggCodeGen::HashAggCodeGen(VecAggState* node)
      * values is very large, we meet cachemiss during batch aggregation, so
      * consider prefetch in this case.
      */
-    VecAgg* vagg = (VecAgg*)node->ss.ps.plan;
-    Plan* outerplan = outerPlan(vagg);
-    bool use_prefetch = vagg->plan.plan_rows / ((Plan*)outerplan)->plan_rows > AGG_ECONOMY_RATION;
-    if (use_prefetch) {
+    if (0) {
         jitted_vechashing = AgghashingWithPrefetchCodeGenorSglTbl<false>(node);
         jitted_vecsglhashing = AgghashingWithPrefetchCodeGenorSglTbl<true>(node);
     } else {
@@ -450,7 +447,7 @@ void VecHashAggCodeGen::HashAggCodeGen(VecAggState* node)
         llvmCodeGen->addFunctionToMCJit(jitted_vecsglhashing, reinterpret_cast<void**>(&(node->jitted_sglhashing)));
 
     /* Codegeneration for BatchAggregation in buildAggTbl */
-    jitted_vecbatchagg = dorado::VecHashAggCodeGen::BatchAggregationCodeGen(node, use_prefetch);
+    jitted_vecbatchagg = dorado::VecHashAggCodeGen::BatchAggregationCodeGen(node, false);
     if (NULL != jitted_vecbatchagg)
         llvmCodeGen->addFunctionToMCJit(jitted_vecbatchagg, reinterpret_cast<void**>(&(node->jitted_batchagg)));
 
@@ -1808,7 +1805,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         /* check overflow */
                         llvm::Type* Intrinsic_Tys[] = {int64Type};
                         llvm::Function* func_sadd_overflow =
-                            llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::sadd_with_overflow, Intrinsic_Tys);
+                            llvm::Intrinsic::getDeclaration(mod, llvm_sadd_with_overflow, Intrinsic_Tys);
                         if (func_sadd_overflow == NULL) {
                             ereport(ERROR,
                                 (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),
@@ -1928,7 +1925,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         /* check overflow */
                         llvm::Type* Intrinsic_Tys[] = {int64Type};
                         llvm::Function* func_sadd_overflow =
-                            llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::sadd_with_overflow, Intrinsic_Tys);
+                            llvm::Intrinsic::getDeclaration(mod, llvm_sadd_with_overflow, Intrinsic_Tys);
                         if (func_sadd_overflow == NULL) {
                             ereport(ERROR,
                                 (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),
@@ -2084,7 +2081,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         /* check overflow */
                         llvm::Type* Intrinsic_Tys[] = {int64Type};
                         llvm::Function* func_sadd_overflow =
-                            llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::sadd_with_overflow, Intrinsic_Tys);
+                            llvm::Intrinsic::getDeclaration(mod, llvm_sadd_with_overflow, Intrinsic_Tys);
                         if (func_sadd_overflow == NULL) {
                             ereport(ERROR,
                                 (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),
@@ -2213,7 +2210,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         /* check overflow */
                         llvm::Type* Intrinsic_Tys[] = {int64Type};
                         llvm::Function* func_sadd_overflow =
-                            llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::sadd_with_overflow, Intrinsic_Tys);
+                            llvm::Intrinsic::getDeclaration(mod, llvm_sadd_with_overflow, Intrinsic_Tys);
                         if (func_sadd_overflow == NULL) {
                             ereport(ERROR,
                                 (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),
@@ -2295,10 +2292,10 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
     /* codegen in for_end basic block: just return void */
     builder.SetInsertPoint(for_end);
     (void)VecExprCodeGen::MemCxtSwitToCodeGen(&builder, agg_oldcontext);
-    WrapResetEContextCodeGen(&builder, mecontext);
+    (void)WrapResetEContextCodeGen(&builder, mecontext);
     for (i = 0; i < numaggs; i++) {
         if (econtext[i])
-            WrapResetEContextCodeGen(&builder, econtext[i]);
+            (void)WrapResetEContextCodeGen(&builder, econtext[i]);
     }
     builder.CreateRetVoid();
 
@@ -3064,7 +3061,7 @@ llvm::Value* VecHashAggCodeGen::EvalFastExprInBatchAgg(ExprState* state, GsCodeG
                     case NUMERICADDOID: {
                         /* do bi64 add bi64, need to check if there is any overflow */
                         llvm::Function* func_sadd_overflow =
-                            llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::sadd_with_overflow, Intrinsic_Tys);
+                            llvm::Intrinsic::getDeclaration(mod, llvm_sadd_with_overflow, Intrinsic_Tys);
                         if (func_sadd_overflow == NULL) {
                             ereport(ERROR,
                                 (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),
@@ -3093,7 +3090,7 @@ llvm::Value* VecHashAggCodeGen::EvalFastExprInBatchAgg(ExprState* state, GsCodeG
                     case NUMERICSUBOID: {
                         /* do bi64 add bi64, need to check if there is any overflow */
                         llvm::Function* func_ssub_overflow =
-                            llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::ssub_with_overflow, Intrinsic_Tys);
+                            llvm::Intrinsic::getDeclaration(mod, llvm_ssub_with_overflow, Intrinsic_Tys);
                         if (func_ssub_overflow == NULL) {
                             ereport(ERROR,
                                 (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),
@@ -3134,7 +3131,7 @@ llvm::Value* VecHashAggCodeGen::EvalFastExprInBatchAgg(ExprState* state, GsCodeG
 
                 /* do bi64 mul bi64, need to check if there is any overflow */
                 llvm::Function* func_smul_overflow =
-                    llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::smul_with_overflow, Intrinsic_Tys);
+                    llvm::Intrinsic::getDeclaration(mod, llvm_smul_with_overflow, Intrinsic_Tys);
                 if (func_smul_overflow == NULL) {
                     ereport(ERROR,
                         (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),
@@ -3873,7 +3870,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         /* check overflow */
                         llvm::Type* Intrinsic_Tys[] = {int64Type};
                         llvm::Function* func_sonicadd_overflow =
-                            llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::sadd_with_overflow, Intrinsic_Tys);
+                            llvm::Intrinsic::getDeclaration(mod, llvm_sadd_with_overflow, Intrinsic_Tys);
                         if (func_sonicadd_overflow == NULL) {
                             ereport(ERROR,
                                 (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),
@@ -4023,7 +4020,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         /* check overflow */
                         llvm::Type* Intrinsic_Tys[] = {int64Type};
                         llvm::Function* func_sonicadd_overflow =
-                            llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::sadd_with_overflow, Intrinsic_Tys);
+                            llvm::Intrinsic::getDeclaration(mod, llvm_sadd_with_overflow, Intrinsic_Tys);
                         if (func_sonicadd_overflow == NULL) {
                             ereport(ERROR,
                                 (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),
@@ -4219,7 +4216,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         /* check overflow */
                         llvm::Type* Intrinsic_Tys[] = {int64Type};
                         llvm::Function* func_sonicadd_overflow =
-                            llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::sadd_with_overflow, Intrinsic_Tys);
+                            llvm::Intrinsic::getDeclaration(mod, llvm_sadd_with_overflow, Intrinsic_Tys);
                         if (func_sonicadd_overflow == NULL) {
                             ereport(ERROR,
                                 (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),
@@ -4386,7 +4383,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         /* check overflow */
                         llvm::Type* Intrinsic_Tys[] = {int64Type};
                         llvm::Function* func_sonicadd_overflow =
-                            llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::sadd_with_overflow, Intrinsic_Tys);
+                            llvm::Intrinsic::getDeclaration(mod, llvm_sadd_with_overflow, Intrinsic_Tys);
                         if (func_sonicadd_overflow == NULL) {
                             ereport(ERROR,
                                 (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),
@@ -4472,8 +4469,8 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
     /* codegen in for_end basic block: just return void */
     builder.SetInsertPoint(for_end);
     (void)VecExprCodeGen::MemCxtSwitToCodeGen(&builder, agg_oldcontext);
-    WrapResetEContextCodeGen(&builder, mecontext);
-    WrapResetEContextCodeGen(&builder, econtext);
+    (void)WrapResetEContextCodeGen(&builder, mecontext);
+    (void)WrapResetEContextCodeGen(&builder, econtext);
     builder.CreateRetVoid();
 
     pfree_ext(aggIdxList);
@@ -4615,7 +4612,8 @@ llvm::Function* prefetchBatchAggregationCodeGen()
     builder.CreateCondBr(tmpval, prefetch_bb, ret_bb);
 
     builder.SetInsertPoint(prefetch_bb);
-    llvm::Function* fn_prefetch = llvm::Intrinsic::getDeclaration(llvmCodeGen->module(), llvm::Intrinsic::prefetch);
+    /* in llvm10 llvm::Intrinsic::prefetch is define as uint value 217 */
+    llvm::Function* fn_prefetch = llvm::Intrinsic::getDeclaration(llvmCodeGen->module(), llvm_prefetch);
     if (fn_prefetch == NULL) {
         ereport(ERROR,
             (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),
@@ -4738,7 +4736,7 @@ llvm::Function* prefetchAggHashingCodeGen()
     tbldata = builder.CreateAlignedLoad(tbldata, 8, "tbl_data");
     llvm::Value* next_hashData_addr = builder.CreateInBoundsGEP(tbldata, pos);
 
-    llvm::Function* fn_prefetch = llvm::Intrinsic::getDeclaration(llvmCodeGen->module(), llvm::Intrinsic::prefetch);
+    llvm::Function* fn_prefetch = llvm::Intrinsic::getDeclaration(llvmCodeGen->module(), llvm_prefetch);
     if (fn_prefetch == NULL) {
         ereport(ERROR,
             (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),
@@ -4876,7 +4874,7 @@ llvm::Function* prefetchAggSglTblHashingCodeGen()
     tbldata = builder.CreateAlignedLoad(tbldata, 8, "tbl_data");
     llvm::Value* next_hashData_addr = builder.CreateInBoundsGEP(tbldata, cacheLocVal);
 
-    llvm::Function* fn_prefetch = llvm::Intrinsic::getDeclaration(llvmCodeGen->module(), llvm::Intrinsic::prefetch);
+    llvm::Function* fn_prefetch = llvm::Intrinsic::getDeclaration(llvmCodeGen->module(), llvm_prefetch);
     if (fn_prefetch == NULL) {
         ereport(ERROR,
             (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),

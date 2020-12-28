@@ -15,7 +15,7 @@ CREATE TABLE colcmpr_delta_int00
 	R8_ID int NOT NULL,
 	R9_ID int NOT NULL
 )  with (orientation = column)  ;
-COPY colcmpr_delta_int00 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/colcmpr_delta_int00.data';
+COPY colcmpr_delta_int00 FROM '@abs_srcdir@/data/colcmpr_delta_int00.data';
 SELECT * FROM colcmpr_delta_int00;
  rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id 
 -------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------
@@ -191,7 +191,7 @@ CREATE TABLE colcmpr_delta_int01
 	R8_ID int NOT NULL,
 	R9_ID int NOT NULL
 )  with (orientation = column)  ;
-COPY colcmpr_delta_int01 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/colcmpr_delta_int01.data';
+COPY colcmpr_delta_int01 FROM '@abs_srcdir@/data/colcmpr_delta_int01.data';
 SELECT * FROM colcmpr_delta_int01;
  rs_id | r0_id | r1_id | r2_id | r3_id |  r4_id   | r5_id | r6_id | r7_id | r8_id | r9_id 
 -------+-------+-------+-------+-------+----------+-------+-------+-------+-------+-------

@@ -29,6 +29,7 @@
 #include <ctype.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <time.h>
 #include <unistd.h>
 #include "securec.h"
 #include "securec_check.h"
@@ -52,6 +53,7 @@ ThreadFlow::~ThreadFlow()
 {
     if (fpOut != NULL) {
         trace_fclose(fpOut);
+        fpOut = NULL;
     }
 }
 
@@ -405,6 +407,7 @@ DumpFileFlowVisitor::~DumpFileFlowVisitor()
     funcFlowsStep.clear();
 
     trace_fclose(fpStepOut);
+    fpStepOut = NULL;
 }
 
 void DumpFileFlowVisitor::flushThreadFlows()
@@ -605,14 +608,15 @@ DumpFileParser::DumpFileParser(const char* inputFile, size_t len)
 
 // Dynamically accept a visitor as the logic used for processing records
 // during parsing.
-void DumpFileParser::acceptVisitor(DumpFileVisitor* pVisitor)
+void DumpFileParser::acceptVisitor(DumpFileVisitor* visitor)
 {
-    this->pVisitor = pVisitor;
+    this->pVisitor = visitor;
 }
 
 DumpFileParser::~DumpFileParser()
 {
     close(fdInput);
+    pVisitor = NULL;
 }
 
 trace_msg_code DumpFileParser::parseCfg(trace_config* pCfg)
@@ -875,7 +879,7 @@ trace_msg_code DumpFileParser::parse()
         return ret;
     }
 
-    maxSeq = (uint64_t)trc_infra.g_Counter;
+    maxSeq = (uint64_t)trc_infra.g_slot_count;
     if (maxSeq == 0) {
         return TRACE_NO_RECORDS_ERR;
     }
@@ -892,7 +896,7 @@ trace_msg_code DumpFileParser::parse()
         return TRACE_STATR_SLOT_ERR;
     }
     slotNumberBeforeReverse = maxSlots - startSlot;
-    ret = readAndParseDump(MIN(slotNumberBeforeReverse, maxSeq), &totNumRecsFormatted);
+    ret = readAndParseDump(MIN(slotNumberBeforeReverse, (uint64_t)trc_infra.g_Counter), &totNumRecsFormatted);
     if (startSlot != 0 && (ret == TRACE_OK)) {
         /* if reverse happen this part will parse first record to the first not overlaped slot */
         /* if totNumRecsFormatted is 0, means header or data is invalid, we just handle records before invalid */
@@ -903,7 +907,8 @@ trace_msg_code DumpFileParser::parse()
         ret = readAndParseDump(startSlot, &reversedNumRecsFormatted);
         totNumRecsFormatted += reversedNumRecsFormatted;
     }
-    printf("Found %lu trace records and formatted %lu of them\n", (maxSeq % maxSlots), totNumRecsFormatted);
+    printf("Found %lu trace records and formatted %lu of them(most recent)\n",
+           (uint64_t)trc_infra.g_Counter, totNumRecsFormatted);
 
     return ret;
 }
@@ -915,15 +920,14 @@ static void gsTrcHexDumpLine(char* out_buf, size_t buf_size, const void* in_ptr,
     int bytes_written = 0;
     size_t offset = 0;
     const unsigned char* pc = (const unsigned char*)in_ptr;
-    int ret;
+
+    int ret = memset_s(out_buf, buf_size, '\0', HEX_DUMP_BUF_SZ);
+    securec_check(ret, "\0", "\0");
 
     if (buf_size < HEX_DUMP_BUF_SZ || len > HEX_DUMP_PER_LINE) {
         perror("internal error: illegal parameter for dumpLine");
         exit(TRACE_COMMON_ERROR);
     }
-
-    ret = memset_s(out_buf, buf_size, '\0', HEX_DUMP_BUF_SZ);
-    securec_check(ret, "\0", "\0");
 
     if (flags & HEX_DUMP_INCLUDE_ADDRESS) {
         bytes_written = snprintf_s(out_buf + offset, buf_size, buf_size - 1, "%p: ", in_ptr);
@@ -1259,7 +1263,7 @@ static trace_msg_code formatTrcDumpFile(const char* inputPath, const char* outpu
         }
 
         uint64_t maxSlots = trc_cfg.size / SLOT_SIZE;
-        if (trc_infra.g_Counter > maxSlots) {
+        if (trc_infra.g_slot_count > maxSlots) {
             printf("Trace has wrapped.Dumped and formatted files contain only the most recent %lu records\n", maxSlots);
         }
 
@@ -1388,16 +1392,10 @@ static char* getOutputFile(int argc, char** argv)
 static void printUsage(int argc, char** argv)
 {
     printf("Usage:\n");
-#ifdef ENABLE_MULTIPLE_NODES
     printf("%s start -m <mask> -s <buffer size> -p <pid>\n", argv[0]);
-#else
-    printf("%s start -s <buffer size> -p <pid>\n", argv[0]);
-#endif
     printf("\tStart trace against process.\n");
     printf("\t-p  pid\n");
-#ifdef ENABLE_MULTIPLE_NODES
     printf("\t-m  [comp1,comp2,…][ALL].[func1,func2,…][ALL].Default is ALL\n");
-#endif
     printf("\t-s  the size of the shared memory for recording tracing.Default is 1073741824 bytes(1GB)\n");
 
     printf("%s stop -p <pid>\n", argv[0]);
@@ -1503,7 +1501,6 @@ int main(int argc, char** argv)
     int stepSize;
     const int two_paras = 6;
     const int three_paras = 8;
-    char* mask = NULL;
 
     if (argc < 2) {
         rc = TRACE_PARAMETER_ERR;
@@ -1518,9 +1515,7 @@ int main(int argc, char** argv)
     if (0 == strcmp(argv[1], "start") && pid != -1) {
         trcFile = getTraceFile(argc, argv);
         uint64_t uBufferSize = getBufferSize(argc, argv);
-#ifdef ENABLE_MULTIPLE_NODES          
-        mask = getCmdOption(argc, argv, "-m", sizeof("-m"));
-#endif
+        char* mask = getCmdOption(argc, argv, "-m", sizeof("-m"));
         rc = gstrace_start(pid, mask, uBufferSize, trcFile);
     } else if (0 == strcmp(argv[1], "stop") && pid != -1) {
         // Stop will disable tracing and delete the shared memory buffer

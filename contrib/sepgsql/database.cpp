@@ -20,7 +20,7 @@
 #include "commands/dbcommands.h"
 #include "commands/seclabel.h"
 #include "utils/fmgroids.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "sepgsql.h"
 
 /*

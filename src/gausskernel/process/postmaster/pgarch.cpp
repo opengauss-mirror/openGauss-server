@@ -52,18 +52,25 @@
 
 #include "gssignal/gs_signal.h"
 #include "alarm/alarm.h"
-
+#include "replication/syncrep.h"
+#include "replication/slot.h"
+#include "replication/walsender_private.h"
+#include "replication/walsender.h"
+#include "pgxc/pgxc.h"
+#include "replication/obswalreceiver.h"
+#include "replication/walreceiver.h"
 /* ----------
  * Timer definitions.
  * ----------
  */
 #define PGARCH_AUTOWAKE_INTERVAL           \
-    60 /* How often to force a poll of the \
+    (60 * 1000) /* How often to force a poll of the \
         * archive status directory; in     \
-        * seconds. */
+        * millseconds. */
 #define PGARCH_RESTART_INTERVAL             \
     10 /* How often to attempt to restart a \
         * failed archiver; in seconds. */
+#define TIME_GET_MILLISEC(t) (((long)(t).tv_sec * 1000) + ((long)(t).tv_usec) / 1000)
 
 /* ----------
  * Archiver control info.
@@ -93,6 +100,14 @@ static void pgarch_ArchiverCopyLoop(void);
 static bool pgarch_archiveXlog(char* xlog);
 static bool pgarch_readyXlog(char* xlog, int xlog_length);
 static void pgarch_archiveDone(const char* xlog);
+static void pgarch_archiveRoachForPitrStandby();
+static bool pgarch_archiveRoachForPitrMaster(XLogRecPtr targetLsn);
+static bool pgarch_archiveRoachForCoordinator(XLogRecPtr targetLsn);
+static WalSnd* pgarch_chooseWalsnd(XLogRecPtr targetLsn);
+typedef bool(*doArchive)(XLogRecPtr);
+static void pgarch_ArchiverObsCopyLoop(XLogRecPtr flushPtr, doArchive fun);
+static void archKill(int code, Datum arg);
+static void initLastTaskLsn();
 
 AlarmCheckResult DataInstArchChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam)
 {
@@ -137,7 +152,6 @@ ThreadId pgarch_start(void)
      */
     if (!XLogArchivingActive())
         return 0;
-
     /*
      * Do nothing if too soon since last archiver start.  This is a safety
      * valve to protect against continuous respawn attempts if the archiver is
@@ -170,13 +184,11 @@ NON_EXEC_STATIC void PgArchiverMain()
 
     t_thrd.proc_cxt.MyStartTime = time(NULL); /* record Start Time for logging */
 
-    knl_thread_set_name("Archiver");
+    t_thrd.proc_cxt.MyProgName = "PgArchiver";
 
     t_thrd.myLogicTid = noProcLogicTid + PGARCH_LID;
 
-    ereport(LOG, (errmsg("Archiver started")));
-
-    InitializeLatchSupport(); /* needed for latch waits */
+    ereport(LOG, (errmsg("PgArchiver started")));
 
     InitLatch(&t_thrd.arch.mainloop_latch); /* initialize latch used in main loop */
     /*
@@ -200,12 +212,14 @@ NON_EXEC_STATIC void PgArchiverMain()
 
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
+    on_shmem_exit(archKill, 0);
 
     /*
      * Identify myself via ps
      */
-    init_ps_display("Archiver process", "", "", "");
-
+    init_ps_display("archiver process", "", "", "");
+    setObsArchLatch(&t_thrd.arch.mainloop_latch);
+    initLastTaskLsn();
     pgarch_MainLoop();
 
     gs_thread_exit(0);
@@ -255,7 +269,7 @@ static void pgarch_waken(SIGNAL_ARGS)
     /* set flag that there is work to be done */
     t_thrd.arch.wakened = true;
     SetLatch(&t_thrd.arch.mainloop_latch);
-
+    ereport(DEBUG1, (errmsg("pgarch_waken")));
     errno = save_errno;
 }
 
@@ -285,7 +299,7 @@ static void VerifyDestDirIsEmptyOrCreate(char* dirname)
         default: /* Nothing */
             break;
     }
-
+    
     return;
 }
 
@@ -296,8 +310,10 @@ static void VerifyDestDirIsEmptyOrCreate(char* dirname)
  */
 static void pgarch_MainLoop(void)
 {
-    pg_time_t last_copy_time = 0;
+    struct timeval last_copy_time;
+    gettimeofday(&last_copy_time, NULL);
     bool time_to_stop = false;
+    doArchive fun = NULL;
 
     /*
      * We run the copy loop immediately upon entry, in case there are
@@ -306,10 +322,12 @@ static void pgarch_MainLoop(void)
      * timeout before doing more.
      */
     t_thrd.arch.wakened = true;
+    ReplicationSlot *obs_archive_slot = NULL;
 
     if (XLogArchiveDestSet()) {
         VerifyDestDirIsEmptyOrCreate(u_sess->attr.attr_storage.XLogArchiveDest);
     }
+
     /*
      * There shouldn't be anything for the archiver to do except to wait for a
      * signal ... however, the archiver exists to protect our data, so she
@@ -317,6 +335,7 @@ static void pgarch_MainLoop(void)
      */
     do {
         ResetLatch(&t_thrd.arch.mainloop_latch);
+        struct timeval curtime;
 
         /* When we get SIGUSR2, we do one more archive cycle, then exit */
         time_to_stop = t_thrd.arch.ready_to_stop;
@@ -339,19 +358,59 @@ static void pgarch_MainLoop(void)
          * that the postmaster can start a new archiver if needed.
          */
         if (t_thrd.arch.got_SIGTERM) {
-            time_t curtime = time(NULL);
+            time_t icurtime = time(NULL);
 
             if (t_thrd.arch.last_sigterm_time == 0)
-                t_thrd.arch.last_sigterm_time = curtime;
-            else if ((unsigned int)(curtime - t_thrd.arch.last_sigterm_time) >= (unsigned int)60)
+                t_thrd.arch.last_sigterm_time = icurtime;
+            else if ((unsigned int)(icurtime - t_thrd.arch.last_sigterm_time) >= (unsigned int)60)
                 break;
+        }
+        load_server_mode();
+        if (IsServerModeStandby()) {
+            /* if we should do pitr archive, for standby */
+            volatile unsigned int *pitr_task_status = &g_instance.archive_obs_cxt.pitr_task_status;
+            if (unlikely(pg_atomic_read_u32(pitr_task_status) == PITR_TASK_GET)) {
+                pgarch_archiveRoachForPitrStandby();
+                pg_atomic_write_u32(pitr_task_status, PITR_TASK_DONE);
+            }
         }
 
         /* Do what we're here for */
         if (t_thrd.arch.wakened || time_to_stop) {
             t_thrd.arch.wakened = false;
-            pgarch_ArchiverCopyLoop();
-            last_copy_time = time(NULL);
+            obs_archive_slot = getObsReplicationSlot();
+            if (obs_archive_slot != NULL && !IsServerModeStandby()) {
+                gettimeofday(&curtime, NULL);
+                const long time_diff = TIME_GET_MILLISEC(curtime) -  t_thrd.arch.last_arch_time;
+                XLogRecPtr receivePtr;
+                XLogRecPtr writePtr;
+                XLogRecPtr flushPtr;
+                XLogRecPtr replayPtr;
+                bool got_recptr = false;
+                bool amSync = false;
+                if (IS_PGXC_COORDINATOR) {
+                    flushPtr = GetFlushRecPtr();
+                } else {
+                    got_recptr = SyncRepGetSyncRecPtr(&receivePtr, &writePtr, &flushPtr, &replayPtr, &amSync, false);
+                    if (got_recptr != true) {
+                        ereport(ERROR,
+                            (errmsg("pgarch_ArchiverObsCopyLoop failed when call SyncRepGetSyncRecPtr")));
+                    }
+                }
+                if (time_diff >= t_thrd.arch.task_wait_interval 
+                    || XLByteDifference(flushPtr, t_thrd.arch.pitr_task_last_lsn) >= OBS_XLOG_SLICE_BLOCK_SIZE) {
+                    if (IS_PGXC_COORDINATOR) {
+                        fun = &pgarch_archiveRoachForCoordinator;
+                    } else {
+                        fun = &pgarch_archiveRoachForPitrMaster;
+                    }
+                    pgarch_ArchiverObsCopyLoop(flushPtr, fun);
+                    advanceObsSlot(flushPtr);
+                }
+            } else {
+                pgarch_ArchiverCopyLoop();
+                gettimeofday(&last_copy_time, NULL);
+            }
         }
 
         /*
@@ -360,27 +419,40 @@ static void pgarch_MainLoop(void)
          * until postmaster dies.
          */
         if (!time_to_stop) {
+            long wait_interval;
+            long last_time;
             /* Don't wait during last iteration */
-            pg_time_t curtime = (pg_time_t)time(NULL);
-            int64 timeout;
-            /*
-             * if curtime less than last_copy_time, set timeout to PGARCH_AUTOWAKE_INTERVAL.
-             * Otherwise the timeout may be a large number.
-             */
-            if (curtime > last_copy_time) {
-                timeout = PGARCH_AUTOWAKE_INTERVAL - (curtime - last_copy_time);
+            if (obs_archive_slot != NULL) {
+                wait_interval = t_thrd.arch.task_wait_interval;
+                last_time = t_thrd.arch.last_arch_time;
             } else {
-                timeout = PGARCH_AUTOWAKE_INTERVAL;
+                wait_interval = PGARCH_AUTOWAKE_INTERVAL;
+                last_time = TIME_GET_MILLISEC(last_copy_time);
+            }
+            gettimeofday(&curtime, NULL);
+            const long time_diff = (long)TIME_GET_MILLISEC(curtime) -  t_thrd.arch.last_arch_time;
+            long timeout = wait_interval - time_diff;
+            if (timeout < 0 && IsServerModeStandby()) {
+                /* sleep 100ms for check next task */
+                timeout = 100;
             }
             if (timeout > 0) {
                 int rc;
-
                 rc = WaitLatch(
-                    &t_thrd.arch.mainloop_latch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, timeout * 1000L);
-                if (rc & WL_TIMEOUT)
+                    &t_thrd.arch.mainloop_latch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, timeout);
+                if (rc & WL_TIMEOUT) {
                     t_thrd.arch.wakened = true;
-            } else
+                    ereport(DEBUG1, (errmsg("mainloop_latch end for timeout")));
+                }
+                if (rc & WL_LATCH_SET) {
+                    ereport(DEBUG1, (errmsg("mainloop_latch end for set")));
+                }
+            } else {
                 t_thrd.arch.wakened = true;
+            }
+            ereport(DEBUG1,
+                (errmsg("pgarch_MainLoop cur time: %ld, last_time:%ld, time_diff:%ld, timeout:%ld",
+                    (long)TIME_GET_MILLISEC(curtime), (long)t_thrd.arch.last_arch_time, time_diff, timeout)));
         }
 
         /*
@@ -388,7 +460,7 @@ static void pgarch_MainLoop(void)
          * or after completing one more archiving cycle after receiving
          * SIGUSR2.
          */
-    } while (PostmasterIsAlive() && !time_to_stop);
+    } while (PostmasterIsAlive() && XLogArchivingActive() && !time_to_stop);
 }
 
 /*
@@ -466,23 +538,33 @@ static bool PgarchArchiveXlogToDest(const char* xlog)
 {
     int fdSrc = -1;
     int fdDest = -1;
-    char srcPath[MAXPGPATH] = {0};
-    char destPath[MAXPGPATH] = {0};
+    char srcPath[PATH_MAX + 1] = {0};
+    char destPath[PATH_MAX + 1] = {0};
     char activitymsg[MAXFNAMELEN + 16];
     long int fileBytes = 0;
     int rc = 0;
+    char tempPath[PATH_MAX] = {0};
+    char* retVal = NULL;
 
     if (xlog == NULL) {
         return false;
     }
-
-    rc = snprintf_s(srcPath, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%s", xlog);
+    
+    rc = snprintf_s(tempPath, PATH_MAX, PATH_MAX - 1, XLOGDIR "/%s", xlog);
     securec_check_ss(rc, "\0", "\0");
-    rc = snprintf_s(destPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", u_sess->attr.attr_storage.XLogArchiveDest, xlog);
+    retVal = realpath(tempPath, srcPath);
+    if (retVal == NULL) {
+        ereport(FATAL, (errmsg_internal("realpath src %s failed:%m\n", tempPath)));
+    }
+    retVal = realpath(u_sess->attr.attr_storage.XLogArchiveDest, destPath);
+    if (retVal == NULL) {
+        ereport(FATAL, (errmsg_internal("realpath dest %s failed:%m\n", u_sess->attr.attr_storage.XLogArchiveDest)));
+    }
+    rc = snprintf_s(destPath, PATH_MAX, PATH_MAX - 1, "%s/%s", destPath, xlog);
     securec_check_ss(rc, "\0", "\0");
 
-    if ((fdSrc = open(srcPath, O_RDONLY)) >= 0) {
-        if ((fdDest = open(destPath, O_WRONLY|O_CREAT, S_IRUSR | S_IWUSR)) >= 0) {
+    if ((fdSrc = open(srcPath, O_RDONLY)) >= 0) {                
+        if ((fdDest = open(destPath, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR)) >= 0) {
             char pbuff[ARCHIVE_BUF_SIZE] = {0};
 
             while ((fileBytes = read(fdSrc, pbuff, sizeof(pbuff))) > 0) {
@@ -502,21 +584,94 @@ static bool PgarchArchiveXlogToDest(const char* xlog)
 
             g_instance.WalSegmentArchSucceed = true;
             ereport(DEBUG1, (errmsg("archived transaction log file \"%s\"", xlog)));
-
+            
             rc = snprintf_s(activitymsg, sizeof(activitymsg), sizeof(activitymsg) - 1, "last was %s", xlog);
             securec_check_ss(rc, "\0", "\0");
             set_ps_display(activitymsg, false);
-
+            
             return true;
         } else {
             close(fdSrc);
-            ereport(FATAL, (errmsg_internal("could not open dest file \"%s\":%m\n", destPath)));
+            ereport(FATAL, (errmsg_internal("could not open archive dest file \"%s\":%m\n", destPath)));
         }
     } else {
-        ereport(FATAL, (errmsg_internal("could not open src file \"%s\":%m\n", srcPath)));
+        ereport(FATAL, (errmsg_internal("could not open archive src file \"%s\":%m\n", srcPath)));
     }
 
     return false;
+}
+
+
+/*
+ * pgarch_ArchiverObsCopyLoop
+ *
+ * Archives all outstanding xlogs then returns
+ */
+static void pgarch_ArchiverObsCopyLoop(XLogRecPtr flushPtr, doArchive fun)
+{
+    ereport(LOG,
+        (errmsg("pgarch_ArchiverObsCopyLoop")));
+    struct timeval tv;
+    bool time_to_stop = false;
+
+    /*
+     * loop through all xlogs with archive_status of .ready and archive
+     * them...mostly we expect this to be a single file, though it is possible
+     * some backend will add files onto the list of those that need archiving
+     * while we are still copying earlier archives
+     */
+    do {
+        XLogRecPtr targetLsn;
+        time_to_stop = t_thrd.arch.ready_to_stop;
+
+        /*
+         * Do not initiate any more archive commands after receiving
+         * SIGTERM, nor after the postmaster has died unexpectedly. The
+         * first condition is to try to keep from having init SIGKILL the
+         * command, and the second is to avoid conflicts with another
+         * archiver spawned by a newer postmaster.
+         */
+        if (t_thrd.arch.got_SIGTERM || !PostmasterIsAlive() || time_to_stop) {
+            return;
+        }
+
+        /*
+         * Check for config update.  This is so that we'll adopt a new
+         * setting for archive_command as soon as possible, even if there
+         * is a backlog of files to be archived.
+         */
+        if (t_thrd.arch.got_SIGHUP) {
+            ProcessConfigFile(PGC_SIGHUP);
+            if (!XLogArchivingActive()) {
+                return;
+            }
+            t_thrd.arch.got_SIGHUP = false;
+        }
+        targetLsn = Min(t_thrd.arch.pitr_task_last_lsn + OBS_XLOG_SLICE_BLOCK_SIZE -
+                        (t_thrd.arch.pitr_task_last_lsn % OBS_XLOG_SLICE_BLOCK_SIZE) - 1,
+                        flushPtr);
+
+        /* The previous slice has been archived, switch to the next. */
+        if (t_thrd.arch.pitr_task_last_lsn == targetLsn) {
+            targetLsn = Min(targetLsn + OBS_XLOG_SLICE_BLOCK_SIZE, flushPtr);
+        }
+
+        if (fun(targetLsn) == false) {
+            ereport(WARNING,
+                (errmsg("transaction log file \"%X/%X\" could not be archived: try again", 
+                    (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
+            pg_usleep(1000000L); /* wait a bit before retrying */
+        } else {
+            gettimeofday(&tv, NULL);
+            t_thrd.arch.last_arch_time = TIME_GET_MILLISEC(tv);
+            t_thrd.arch.pitr_task_last_lsn = targetLsn;
+            ResetLatch(&t_thrd.arch.mainloop_latch);
+            ereport(LOG,
+                (errmsg("pgarch_ArchiverObsCopyLoop time change to %ld", t_thrd.arch.last_arch_time)));
+        }
+        /* reset result flag */
+        g_instance.archive_obs_cxt.pitr_finish_result = false;
+    } while (XLByteLT(t_thrd.arch.pitr_task_last_lsn, flushPtr));
 }
 
 /*
@@ -539,9 +694,11 @@ static bool pgarch_archiveXlog(char* xlog)
     rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%s", xlog);
     securec_check_ss(rc, "\0", "\0");
 
+    /* archive_dest is preferred over archive_command */
     if (XLogArchiveDestSet()) {
         return PgarchArchiveXlogToDest(xlog);
     }
+
     /*
      * construct the command to be executed
      */
@@ -753,3 +910,182 @@ static void pgarch_archiveDone(const char* xlog)
     StatusFilePath(rlogdone, xlog, ".done");
     (void)durable_rename(rlogready, rlogdone, WARNING);
 }
+
+/*
+ * pgarch_archiveRoachForPitrStandby
+ * get signal from walreceiver, fork a roach process to archive xlog
+*/
+static void pgarch_archiveRoachForPitrStandby()
+{
+    ereport(LOG,
+        (errmsg("pgarch_archiveRoachForPitrStandby %X/%X, term:%d, subterm:%d", 
+            (uint32)(g_instance.archive_obs_cxt.archive_task.targetLsn >> 32), (uint32)(g_instance.archive_obs_cxt.archive_task.targetLsn), 
+            g_instance.archive_obs_cxt.archive_task.term, g_instance.archive_obs_cxt.archive_task.sub_term)));
+    if (obs_replication_archive(&g_instance.archive_obs_cxt.archive_task) == 0) {
+        g_instance.archive_obs_cxt.pitr_finish_result = true;
+    } else {
+        ereport(WARNING,
+            (errmsg("error when pgarch_archiveRoachForPitrStandby %X/%X, term:%d, subterm:%d", 
+                (uint32)(g_instance.archive_obs_cxt.archive_task.targetLsn >> 32), (uint32)(g_instance.archive_obs_cxt.archive_task.targetLsn), 
+                g_instance.archive_obs_cxt.archive_task.term, g_instance.archive_obs_cxt.archive_task.sub_term)));
+        g_instance.archive_obs_cxt.pitr_finish_result = false;
+    }
+}
+
+/*
+ * pgarch_archiveRoachForPitrMaster
+ * choose a walsender to send archive command
+*/
+static bool pgarch_archiveRoachForPitrMaster(XLogRecPtr targetLsn)
+{
+    ResetLatch(&t_thrd.arch.mainloop_latch);
+    ereport(LOG,
+        (errmsg("pgarch_archiveRoachForPitrMaster %X/%X", (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
+    int rc;
+    WalSnd* walsnd = pgarch_chooseWalsnd(targetLsn);
+    if (walsnd == NULL) {
+        ereport(WARNING,
+            (errmsg("pgarch_archiveRoachForPitrMaster failed for no health standby %X/%X", 
+                (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
+        return false;
+    }
+    walsnd->arch_latch = &t_thrd.arch.mainloop_latch;
+    pg_atomic_write_u32(&walsnd->archive_flag, 1);
+    SetLatch(&walsnd->latch);
+    rc = WaitLatch(&t_thrd.arch.mainloop_latch,
+        WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+        (long)t_thrd.arch.task_wait_interval);
+
+    if (rc & WL_POSTMASTER_DEATH) {
+        gs_thread_exit(1);
+    }
+    if (rc & WL_TIMEOUT) {
+        return false;
+    }
+    /*
+    * check targetLsn and g_instance.archive_obs_cxt.archive_task.targetLsn for deal message with wrong order
+    */
+    if (g_instance.archive_obs_cxt.pitr_finish_result == true 
+        && XLByteEQ(g_instance.archive_obs_cxt.archive_task.targetLsn, targetLsn)) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+/*
+ * pgarch_archiveRoachForPitrMaster
+ * choose a walsender to send archive command
+*/
+static bool pgarch_archiveRoachForCoordinator(XLogRecPtr targetLsn)
+{
+    ArchiveXlogMessage archive_xlog_info;
+    archive_xlog_info.targetLsn = targetLsn;
+    archive_xlog_info.term = 0;
+    archive_xlog_info.sub_term = 0;
+    if (obs_replication_archive(&archive_xlog_info) != 0) {
+        g_instance.archive_obs_cxt.pitr_finish_result = false;
+        ereport(WARNING,
+            (errmsg("error when pgarch_archiveRoachForCoordinator %X/%X, term:%d, subterm:%d", 
+                (uint32)(g_instance.archive_obs_cxt.archive_task.targetLsn >> 32), (uint32)(g_instance.archive_obs_cxt.archive_task.targetLsn), 
+                g_instance.archive_obs_cxt.archive_task.term, g_instance.archive_obs_cxt.archive_task.sub_term)));
+        ResetLatch(&t_thrd.arch.mainloop_latch);
+        int rc;
+        /* wait and try again */
+        rc = WaitLatch(&t_thrd.arch.mainloop_latch,
+            WL_TIMEOUT | WL_POSTMASTER_DEATH, 500);
+        return false;
+
+    } else {
+        g_instance.archive_obs_cxt.pitr_finish_result = true;
+        g_instance.archive_obs_cxt.archive_task.targetLsn = targetLsn;
+    }
+    ereport(LOG,
+        (errmsg("pgarch_archiveRoachForPitrMaster %X/%X", (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
+    
+    return g_instance.archive_obs_cxt.pitr_finish_result;
+}
+
+/* check if there is any wal sender alive. */
+static WalSnd* pgarch_chooseWalsnd(XLogRecPtr targetLsn)
+{
+    int i;
+    volatile WalSnd* walsnd = NULL;
+    if (t_thrd.arch.sync_walsender_idx >= 0) {
+        walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[t_thrd.arch.sync_walsender_idx];
+        SpinLockAcquire(&walsnd->mutex);
+        if (walsnd->pid != 0 && ((walsnd->sendRole & SNDROLE_PRIMARY_STANDBY) == walsnd->sendRole) 
+            && !XLogRecPtrIsInvalid(walsnd->flush) && XLByteLE(targetLsn, walsnd->flush)) {
+            walsnd->arch_task_lsn = targetLsn;
+            walsnd->archive_obs_subterm = t_thrd.arch.sync_walsender_term;
+            SpinLockRelease(&walsnd->mutex);
+            return (WalSnd*)walsnd;
+        }
+        SpinLockRelease(&walsnd->mutex);
+    }
+
+    for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
+        /* use volatile pointer to prevent code rearrangement */
+        walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+
+        SpinLockAcquire(&walsnd->mutex);
+
+        if (walsnd->pid != 0 && ((walsnd->sendRole & SNDROLE_PRIMARY_STANDBY) == walsnd->sendRole)) {
+            if (XLByteLE(targetLsn, walsnd->flush)) {
+                SpinLockRelease(&walsnd->mutex);
+                ereport(LOG,
+                    (errmsg("pgarch_chooseWalsnd has change from %d to %d , sub_term:%d", 
+                        t_thrd.arch.sync_walsender_idx, i, t_thrd.arch.sync_walsender_term)));
+                walsnd->arch_task_lsn = targetLsn;
+                t_thrd.arch.sync_walsender_idx = i;
+                t_thrd.arch.sync_walsender_term++;
+                walsnd->archive_obs_subterm = t_thrd.arch.sync_walsender_term;
+                return (WalSnd*)walsnd;
+            }
+        }
+        SpinLockRelease(&walsnd->mutex);
+    }
+    return NULL;
+}
+
+
+static void archKill(int code, Datum arg)
+{
+    setObsArchLatch(NULL);
+    ereport(LOG, (errmsg("arch thread shut down")));
+}
+
+static void initLastTaskLsn()
+{
+    struct timeval tv;
+    load_server_mode();
+    gettimeofday(&tv,NULL);
+    XLogRecPtr targetLsn;
+    t_thrd.arch.last_arch_time = TIME_GET_MILLISEC(tv);
+    ReplicationSlot* obs_archive_slot = getObsReplicationSlot();
+    if (obs_archive_slot != NULL && !IsServerModeStandby()) {
+        ArchiveXlogMessage obs_archive_info;
+        if (obs_replication_get_last_xlog(&obs_archive_info) == 0) {
+            t_thrd.arch.pitr_task_last_lsn = obs_archive_info.targetLsn;
+            advanceObsSlot(t_thrd.arch.pitr_task_last_lsn);
+            ereport(LOG,
+                (errmsg("initLastTaskLsn update lsn to  %X/%X from obs", (uint32)(t_thrd.arch.pitr_task_last_lsn >> 32), 
+                    (uint32)(t_thrd.arch.pitr_task_last_lsn))));
+        } else {
+            targetLsn = GetFlushRecPtr();
+            t_thrd.arch.pitr_task_last_lsn = targetLsn - (targetLsn % XLogSegSize);
+            advanceObsSlot(t_thrd.arch.pitr_task_last_lsn);
+            ereport(LOG,
+                (errmsg("initLastTaskLsn update lsn to  %X/%X from local", (uint32)(t_thrd.arch.pitr_task_last_lsn >> 32), 
+                    (uint32)(t_thrd.arch.pitr_task_last_lsn))));
+        }
+    } else {
+        targetLsn = GetFlushRecPtr();
+        t_thrd.arch.pitr_task_last_lsn = targetLsn - (targetLsn % XLogSegSize);
+        advanceObsSlot(t_thrd.arch.pitr_task_last_lsn);
+        ereport(LOG,
+            (errmsg("initLastTaskLsn update lsn to  %X/%X from local with not obs slot", (uint32)(t_thrd.arch.pitr_task_last_lsn >> 32), 
+                (uint32)(t_thrd.arch.pitr_task_last_lsn))));
+    }
+}
+

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 Huawei Technologies Co.,Ltd. 
+ * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -41,14 +41,18 @@
 #include "utils/memutils.h"
 #include "utils/palloc.h"
 #include "workload/workload.h"
+#include "utils/globalpreparestmt.h"
 #include "instruments/instr_waitevent.h"
 #include "pgstat.h"
 #include "access/multi_redo_api.h"
+#include "utils/hotkey.h"
+#include "lib/lrucache.h"
 
 const int SIZE_OF_TWO_UINT64 = 16;
 
 knl_instance_context g_instance;
 
+extern void InitGlobalSeq();
 extern void InitGlobalVecFuncMap();
 
 static void knl_g_cost_init(knl_g_cost_context* cost_cxt)
@@ -94,6 +98,7 @@ static void knl_g_ckpt_init(knl_g_ckpt_context* ckpt_cxt)
     Assert(ckpt_cxt != NULL);
     errno_t rc = memset_s(ckpt_cxt, sizeof(knl_g_ckpt_context), 0, sizeof(knl_g_ckpt_context));
     securec_check(rc, "\0", "\0");
+    SpinLockInit(&(ckpt_cxt->queue_lock));
 }
 
 static void knl_g_bgwriter_init(knl_g_bgwriter_context *bgwriter_cxt)
@@ -161,6 +166,7 @@ static void knl_g_commutil_init(knl_g_commutil_context* commutil_cxt)
     commutil_cxt->g_total_usable_memory = 0;
     commutil_cxt->g_memory_pool_size = 0;
     commutil_cxt->ut_libcomm_test = false;
+    commutil_cxt->g_comm_sender_buffer_size = 0;
 }
 
 static void knl_g_parallel_redo_init(knl_g_parallel_redo_context* predo_cxt)
@@ -173,7 +179,6 @@ static void knl_g_parallel_redo_init(knl_g_parallel_redo_context* predo_cxt)
         predo_cxt->pageRedoThreadStatusList[i].threadState = PAGE_REDO_WORKER_INVALID;
     }
     predo_cxt->totalNum = 0;
-	predo_cxt->endRecPtr = (XLogRecPtr)0xFFFFFFFFFFFFFFFF;
     SpinLockInit(&(predo_cxt->rwlock));
     predo_cxt->redoPf.redo_start_ptr = 0;
     predo_cxt->redoPf.redo_start_time = 0;
@@ -181,32 +186,34 @@ static void knl_g_parallel_redo_init(knl_g_parallel_redo_context* predo_cxt)
     predo_cxt->redoPf.current_time = 0;
     predo_cxt->redoPf.min_recovery_point = 0;
     predo_cxt->redoPf.read_ptr = 0;
-    predo_cxt->redoPf.last_replayed_read_ptr = 0;
+    predo_cxt->redoPf.last_replayed_end_ptr = 0;
     predo_cxt->redoPf.recovery_done_ptr = 0;
     predo_cxt->redoPf.speed_according_seg = 0;
     predo_cxt->redoPf.local_max_lsn = 0;
-    knl_g_set_is_local_redo_finish(false);
+    predo_cxt->redoPf.oldest_segment = 0;
+    knl_g_set_redo_finish_status(0);
     predo_cxt->redoType = DEFAULT_REDO;
+    predo_cxt->pre_enable_switch = 0;
     SpinLockInit(&(predo_cxt->destroy_lock));
+    for (int i = 0; i < NUM_MAX_PAGE_FLUSH_LSN_PARTITIONS; ++i) {
+        pg_atomic_write_u64(&(predo_cxt->max_page_flush_lsn[i]), 0);
+    }
+    predo_cxt->permitFinishRedo = 0;
+    predo_cxt->hotStdby = 0;
+    predo_cxt->unali_buf = (char*)MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE),
+        NUM_MAX_PAGE_FLUSH_LSN_PARTITIONS * BLCKSZ + BLCKSZ);
+    predo_cxt->ali_buf = (char*)TYPEALIGN(BLCKSZ, predo_cxt->unali_buf);
 }
 
 static void knl_g_cache_init(knl_g_cache_context* cache_cxt)
 {
-    cache_cxt->global_cache_mem = AllocSetContextCreate(g_instance.instance_context,
-                                                        "GlobalCacheMemory",
-                                                        ALLOCSET_DEFAULT_MINSIZE,
-                                                        ALLOCSET_DEFAULT_INITSIZE,
-                                                        ALLOCSET_DEFAULT_MAXSIZE,
-                                                        SHARED_CONTEXT,
-                                                        DEFAULT_MEMORY_CONTEXT_MAX_SIZE,
-                                                        false);
+    cache_cxt->global_cache_mem = NULL;
 }
 
 static void knl_g_comm_init(knl_g_comm_context* comm_cxt)
 {
     Assert(comm_cxt != NULL);
     comm_cxt->gs_wakeup_consumer = NULL;
-    comm_cxt->g_comm_tcp_mode = true;
     comm_cxt->g_receivers = NULL;
     comm_cxt->g_senders = NULL;
     comm_cxt->g_delay_survey_switch = false;
@@ -221,6 +228,7 @@ static void knl_g_comm_init(knl_g_comm_context* comm_cxt)
     comm_cxt->libcomm_log_timezone = NULL;
     comm_cxt->force_cal_space_info = false;
     comm_cxt->cal_all_space_info_in_progress = false;
+    comm_cxt->current_gsrewind_count = 0;
     comm_cxt->usedDnSpace = NULL;
 
     knl_g_quota_init(&g_instance.comm_cxt.quota_cxt);
@@ -234,15 +242,27 @@ static void knl_g_comm_init(knl_g_comm_context* comm_cxt)
     knl_g_parallel_redo_init(&g_instance.comm_cxt.predo_cxt);
 }
 
+static void knl_g_conn_init(knl_g_conn_context* conn_cxt)
+{
+    conn_cxt->CurConnCount = 0;
+    conn_cxt->CurCMAConnCount = 0;
+    SpinLockInit(&conn_cxt->ConnCountLock);
+}
+
 static void knl_g_executor_init(knl_g_executor_context* exec_cxt)
 {
     exec_cxt->function_id_hashtbl = NULL;
+#ifndef ENABLE_MULTIPLE_NODES
+    exec_cxt->nodeName = "Local Node";
+#endif
 }
 
 static void knl_g_xlog_init(knl_g_xlog_context *xlog_cxt)
 {
     xlog_cxt->num_locks_in_group = 0;
+#ifdef ENABLE_MOT
     xlog_cxt->redoCommitCallback = NULL;
+#endif
 }
 
 static void knl_g_libpq_init(knl_g_libpq_context* libpq_cxt)
@@ -253,14 +273,31 @@ static void knl_g_libpq_init(knl_g_libpq_context* libpq_cxt)
     libpq_cxt->comm_parsed_hba_lines = NIL;
 }
 
+static void InitHotkeyResources(knl_g_stat_context* stat_cxt)
+{
+    if (stat_cxt->hotkeysCxt == NULL) {
+        stat_cxt->hotkeysCxt = AllocSetContextCreate(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER),
+            "HotkeysMemory",
+            ALLOCSET_DEFAULT_MINSIZE,
+            ALLOCSET_DEFAULT_INITSIZE,
+            ALLOCSET_DEFAULT_MAXSIZE,
+            SHARED_CONTEXT);
+    }
+    stat_cxt->hotkeysCollectList = New(stat_cxt->hotkeysCxt) CircularQueue(HOTKEYS_QUEUE_LENGTH, stat_cxt->hotkeysCxt);
+    stat_cxt->hotkeysCollectList->Init();
+    stat_cxt->lru = New(stat_cxt->hotkeysCxt) LRUCache(LRU_QUEUE_LENGTH, stat_cxt->hotkeysCxt);
+    stat_cxt->lru->Init();
+    stat_cxt->fifo = NIL;
+}
+
 static void knl_g_stat_init(knl_g_stat_context* stat_cxt)
 {
     stat_cxt->WaitCountHashTbl = NULL;
     stat_cxt->WaitCountStatusList = NULL;
     stat_cxt->pgStatSock = PGINVALID_SOCKET;
-    stat_cxt->need_exit = false;
     stat_cxt->got_SIGHUP = false;
 
+    stat_cxt->UniqueSqlContext = NULL;
     stat_cxt->UniqueSQLHashtbl = NULL;
     stat_cxt->InstrUserHTAB = NULL;
     stat_cxt->calculate_on_other_cn = false;
@@ -270,7 +307,8 @@ static void knl_g_stat_init(knl_g_stat_context* stat_cxt)
     stat_cxt->NodeStatResetTime = 0;
     stat_cxt->sql_rt_info_array = NULL;
 
-    stat_cxt->gInstanceTimeInfo = (int64*)palloc0(TOTAL_TIME_INFO_TYPES * sizeof(int64));
+    stat_cxt->gInstanceTimeInfo = (int64*)MemoryContextAllocZero(
+        INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX), TOTAL_TIME_INFO_TYPES * sizeof(int64));
     errno_t rc;
     rc = memset_s(
         stat_cxt->gInstanceTimeInfo, TOTAL_TIME_INFO_TYPES * sizeof(int64), 0, TOTAL_TIME_INFO_TYPES * sizeof(int64));
@@ -278,9 +316,23 @@ static void knl_g_stat_init(knl_g_stat_context* stat_cxt)
 
     stat_cxt->snapshot_thread_counter = 0;
 
-    stat_cxt->fileIOStat = (FileIOStat*)palloc0(sizeof(FileIOStat));
+    stat_cxt->fileIOStat = (FileIOStat*)MemoryContextAllocZero(
+        INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX), sizeof(FileIOStat));
     rc = memset_s(stat_cxt->fileIOStat, sizeof(FileIOStat), 0, sizeof(FileIOStat));
     securec_check(rc, "\0", "\0");
+    stat_cxt->active_sess_hist_arrary = NULL;
+    stat_cxt->ash_appname = NULL;
+    stat_cxt->instr_stmt_is_cleaning = false;
+    stat_cxt->ash_clienthostname = NULL;
+    stat_cxt->ASHUniqueSQLHashtbl = NULL;
+    stat_cxt->track_context_hash = NULL;
+    stat_cxt->track_memory_info_hash = NULL;
+    pthread_rwlockattr_t attr;
+    /* set write-first lock for rwlock to avoid hunger of wrlock */
+    (void)pthread_rwlockattr_setkind_np(&attr, PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
+    (void)pthread_rwlock_init(&(stat_cxt->track_memory_lock), &attr);
+    
+    InitHotkeyResources(stat_cxt);
 }
 
 static void knl_g_pid_init(knl_g_pid_context* pid_cxt)
@@ -306,7 +358,6 @@ static void knl_g_wlm_init(knl_g_wlm_context* wlm_cxt)
 
 static void knl_g_shmem_init(knl_g_shmem_context* shmem_cxt)
 {
-    shmem_cxt->max_parallel_workers = 8;
     shmem_cxt->MaxBackends = 100;
     shmem_cxt->MaxReserveBackendId = (AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS);
     shmem_cxt->ThreadPoolGroupNum = 0;
@@ -319,51 +370,79 @@ static void knl_g_heartbeat_init(knl_g_heartbeat_context* hb_cxt)
     hb_cxt->heartbeat_running = false;
 }
 
+static void knl_g_compaction_init(knl_g_ts_compaction_context* tsc_cxt)
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    Assert(tsc_cxt != NULL);
+    tsc_cxt->totalNum = 0;
+    tsc_cxt->state = Compaction::COMPACTION_INIT;
+    tsc_cxt->drop_db_count = 0;
+    tsc_cxt->origin_id = (int*)palloc0(sizeof(int) * Compaction::MAX_TSCOMPATION_NUM);
+    tsc_cxt->compaction_rest = false;
+    tsc_cxt->dropdb_id = InvalidOid;
+    for (int i = 0; i < Compaction::MAX_TSCOMPATION_NUM; i++) {
+        tsc_cxt->compaction_worker_status_list[i].thread_id = 0;
+        tsc_cxt->compaction_worker_status_list[i].thread_state = Compaction::COMPACTION_WORKER_INVALID;
+    }
+#endif
+}
+
+static void knl_g_csnminsync_init(knl_g_csnminsync_context* cms_cxt)
+{
+    Assert(cms_cxt != NULL);
+    cms_cxt->stop = false;
+    cms_cxt->is_fcn_ccn = true;
+}
+
 static void knl_g_dw_init(knl_g_dw_context *dw_cxt)
 {
     Assert(dw_cxt != NULL);
-    dw_cxt->flush_lock = NULL;
+    errno_t rc = memset_s(dw_cxt, sizeof(knl_g_dw_context), 0, sizeof(knl_g_dw_context));
+    securec_check(rc, "\0", "\0");
+    dw_cxt->closed = 1;
 }
 
 static void knl_g_numa_init(knl_g_numa_context* numa_cxt)
 {
     numa_cxt->inheritThreadPool = false;
     numa_cxt->maxLength = INIT_NUMA_ALLOC_COUNT;
-    numa_cxt->numaAllocInfos = (NumaMemAllocInfo*)palloc0(numa_cxt->maxLength * sizeof(NumaMemAllocInfo));
+    numa_cxt->numaAllocInfos = (NumaMemAllocInfo*)MemoryContextAllocZero(
+        INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_NUMA), numa_cxt->maxLength * sizeof(NumaMemAllocInfo));
     numa_cxt->allocIndex = 0;
 }
 
-static void knl_g_bgworker_init(knl_g_bgworker_context* bgworker_cxt)
+static void knl_g_oid_nodename_cache_init(knl_g_oid_nodename_mapping_cache *cache)
 {
-    bgworker_cxt->start_worker_needed = true;
-    bgworker_cxt->have_crashed_worker = false;
+    Assert(cache != NULL);
+    cache->s_mapping_hash = NULL;
+    cache->s_valid = false;
 }
 
-static void knl_g_wal_init(knl_g_wal_context *wal_cxt)
+
+static void knl_g_archive_obs_init(knl_g_archive_obs_context *archive_obs_cxt)
 {
-    wal_cxt->walInsertStatusTable = NULL;
-    wal_cxt->walFlushWaitLock = NULL;
-    wal_cxt->walBufferInitWaitLock = NULL;
-    wal_cxt->walInitSegLock = NULL;
-    wal_cxt->isWalWriterUp = false;
-    wal_cxt->flushResult = InvalidXLogRecPtr;
-    wal_cxt->sentResult = InvalidXLogRecPtr;
-    wal_cxt->flushResultMutex = PTHREAD_MUTEX_INITIALIZER;
-    wal_cxt->flushResultCV = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
-    wal_cxt->XLogFlusherCPU = 0;
-    wal_cxt->isWalWriterSleeping = false;
-    wal_cxt->criticalEntryMutex = PTHREAD_MUTEX_INITIALIZER;
-    wal_cxt->criticalEntryCV = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
-    wal_cxt->globalEndPosSegNo = InvalidXLogSegPtr;
-    wal_cxt->walWaitFlushCount = 0;
-    wal_cxt->lastWalStatusEntryFlushed = -1;
-    wal_cxt->lastLRCScanned = WAL_SCANNED_LRC_INIT;
+    errno_t rc = memset_s(archive_obs_cxt, sizeof(knl_g_archive_obs_context), 0, sizeof(knl_g_archive_obs_context));
+    securec_check(rc, "\0", "\0");
+    Assert(archive_obs_cxt != NULL);
+    archive_obs_cxt->pitr_finish_result = false;
+    archive_obs_cxt->pitr_task_status = PITR_TASK_NONE;
+    archive_obs_cxt->archive_task.sub_term = -1;
+    archive_obs_cxt->archive_task.term = 0;
+    archive_obs_cxt->archive_task.targetLsn = 0;
+    archive_obs_cxt->barrierLsn = 0;
+    archive_obs_cxt->obs_slot_idx = -1;
+    archive_obs_cxt->obs_slot_num = 0;
+    archive_obs_cxt->archive_slot = (ReplicationSlot*)MemoryContextAllocZero(
+        INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(ReplicationSlot));
 }
 
+#ifdef ENABLE_MOT
 static void knl_g_mot_init(knl_g_mot_context* mot_cxt)
 {
     mot_cxt->jitExecMode = JitExec::JIT_EXEC_MODE_INVALID;
 }
+#endif
+
 
 void knl_instance_init()
 {
@@ -377,6 +456,8 @@ void knl_instance_init()
     g_instance.WalSegmentArchSucceed = true;
     g_instance.flush_buf_requested = 0;
     g_instance.codegen_IRload_process_count = 0;
+    g_instance.t_thrd = &t_thrd;
+    g_instance.stat_cxt.track_memory_inited = false;
 
     /*
      * Set up the process wise memory context. The memory allocated from this
@@ -390,14 +471,22 @@ void knl_instance_init()
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE,
         SHARED_CONTEXT);
-    MemoryContext old_cxt = MemoryContextSwitchTo(g_instance.instance_context);
 
+    g_instance.mcxt_group = New(g_instance.instance_context) MemoryContextGroup();
+    g_instance.mcxt_group->Init(g_instance.instance_context, true);
+    MemoryContextSeal(g_instance.instance_context);
+    MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
+
+    InitGlobalSeq();
     InitGlobalVecFuncMap();
-
-    g_instance.signal_base = (struct GsSignalBase*)palloc0(sizeof(GsSignalBase));
-    g_instance.wlm_cxt = (struct knl_g_wlm_context*)palloc0(sizeof(struct knl_g_wlm_context));
+    pthread_mutex_init(&g_instance.gpc_reset_lock, NULL);
+    g_instance.signal_base = (struct GsSignalBase*)MemoryContextAllocZero(
+        INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), sizeof(GsSignalBase));
+    g_instance.wlm_cxt = (struct knl_g_wlm_context*)MemoryContextAllocZero(
+        INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), sizeof(struct knl_g_wlm_context));
     knl_g_cache_init(&g_instance.cache_cxt);
     knl_g_comm_init(&g_instance.comm_cxt);
+    knl_g_conn_init(&g_instance.conn_cxt);
     knl_g_cost_init(&g_instance.cost_cxt);
     knl_g_executor_init(&g_instance.exec_cxt);
     knl_g_libpq_init(&g_instance.libpq_cxt);
@@ -410,23 +499,26 @@ void knl_instance_init()
     g_instance.ckpt_cxt_ctl = &g_instance.ckpt_cxt;
     g_instance.ckpt_cxt_ctl = (knl_g_ckpt_context*)TYPEALIGN(SIZE_OF_TWO_UINT64, g_instance.ckpt_cxt_ctl);
     knl_g_heartbeat_init(&g_instance.heartbeat_cxt);
-    knl_g_dw_init(&g_instance.dw_cxt);
+    knl_g_csnminsync_init(&g_instance.csnminsync_cxt);
+    knl_g_dw_init(&g_instance.dw_batch_cxt);
+    knl_g_dw_init(&g_instance.dw_single_cxt);
     knl_g_xlog_init(&g_instance.xlog_cxt);
+    knl_g_compaction_init(&g_instance.ts_compaction_cxt);
     knl_g_numa_init(&g_instance.numa_cxt);
+
+#ifdef ENABLE_MOT
     knl_g_mot_init(&g_instance.mot_cxt);
-    knl_g_bgworker_init(&g_instance.bgworker_cxt);
-    knl_g_wal_init(&g_instance.wal_cxt);
+#endif
 
-    MemoryContextSwitchTo(old_cxt);
-
-    GPC = New(g_instance.instance_context) GlobalPlanCache();
+    knl_g_oid_nodename_cache_init(&g_instance.oid_nodename_cache);
+    knl_g_archive_obs_init(&g_instance.archive_obs_cxt);
 }
 
 void add_numa_alloc_info(void* numaAddr, size_t length)
 {
     if (g_instance.numa_cxt.allocIndex >= g_instance.numa_cxt.maxLength) {
         size_t newLength = g_instance.numa_cxt.maxLength * 2;
-        g_instance.numa_cxt.numaAllocInfos = 
+        g_instance.numa_cxt.numaAllocInfos =
             (NumaMemAllocInfo*)repalloc(g_instance.numa_cxt.numaAllocInfos, newLength * sizeof(NumaMemAllocInfo));
         g_instance.numa_cxt.maxLength = newLength;
     }
@@ -435,20 +527,29 @@ void add_numa_alloc_info(void* numaAddr, size_t length)
     ++g_instance.numa_cxt.allocIndex;
 }
 
-void knl_g_set_is_local_redo_finish(bool status)
+void knl_g_set_redo_finish_status(uint32 status)
 {
 #if defined(__arm__) || defined(__arm) || defined(__aarch64__) || defined(__aarch64)
-    pg_memory_barrier();
+        pg_memory_barrier();
 #endif
-    status ? pg_atomic_write_u32(&(g_instance.comm_cxt.predo_cxt.isLocalRedoFinish), 1) :
-        pg_atomic_write_u32(&(g_instance.comm_cxt.predo_cxt.isLocalRedoFinish), 0);
+    pg_atomic_write_u32(&(g_instance.comm_cxt.predo_cxt.isRedoFinish), status);
 }
 
-bool knl_g_get_is_local_redo()
+bool knl_g_get_local_redo_finish_status()
 {
 #if defined(__arm__) || defined(__arm) || defined(__aarch64__) || defined(__aarch64)
-    pg_memory_barrier();
+        pg_memory_barrier();
 #endif
-    uint32 isLocalRedo = pg_atomic_read_u32(&(g_instance.comm_cxt.predo_cxt.isLocalRedoFinish));
-    return (isLocalRedo != 0);
+    uint32 isRedoFinish = pg_atomic_read_u32(&(g_instance.comm_cxt.predo_cxt.isRedoFinish));
+    return (isRedoFinish & REDO_FINISH_STATUS_LOCAL) == REDO_FINISH_STATUS_LOCAL;
 }
+
+bool knl_g_get_redo_finish_status()
+{
+#if defined(__arm__) || defined(__arm) || defined(__aarch64__) || defined(__aarch64)
+        pg_memory_barrier();
+#endif
+    uint32 isRedoFinish = pg_atomic_read_u32(&(g_instance.comm_cxt.predo_cxt.isRedoFinish));
+    return (isRedoFinish & REDO_FINISH_STATUS_CM) == REDO_FINISH_STATUS_CM;
+}
+

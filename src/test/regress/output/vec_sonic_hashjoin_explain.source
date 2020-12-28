@@ -1,0 +1,619 @@
+-- test explain performance
+create schema sonic_hashjoin_test_explain;
+set current_schema = sonic_hashjoin_test_explain;
+create node group group_expr with (datanode1);
+CREATE TABLE sonic_hashjoin_test_explain.VEC_HASHJOIN_TABLE_01_EXP (
+C_INT INT,
+C_BIGINT BIGINT,
+C_SMALLINT SMALLINT,
+a FLOAT,
+b FLOAT4,
+c FLOAT8,
+d numeric,
+e numeric(20,2),
+f decimal,
+g decimal(40,2),
+h real,
+i double precision,
+j boolean
+) with(orientation = column) to group group_expr;
+copy VEC_HASHJOIN_TABLE_01_EXP from '@abs_srcdir@/data/vec_sonic_hashjoin_number_1.data' delimiter as '|';
+analyze VEC_HASHJOIN_TABLE_01_EXP;
+-- test no spill
+set explain_perf_mode = normal;
+explain performance
+select * from VEC_HASHJOIN_TABLE_01_EXP t1 join VEC_HASHJOIN_TABLE_01_EXP t2 on t1.c_int = t2.c_int and t2.c_bigint=t2.c_bigint and t1.c_smallint = t2.c_smallint where t1.a is not null order by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 limit 1000;
+--?
+--?--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--? Row Adapter  (cost=4236.37..4236.37 rows=1000 width=158) (actual time=180.165..180.382 rows=1000 loops=1)
+   Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+   Exec Nodes: (GenGroup) datanode1
+--?   (CPU: ex c/r=1548, ex row=1000, ex cyc=1548604, inc cyc=467818548)
+--?   ->  Vector Limit  (cost=4160.72..4236.37 rows=1000 width=158) (actual time=179.749..179.749 rows=1000 loops=1)
+         Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+         Exec Nodes: (GenGroup) datanode1
+--?         (CPU: ex c/r=27, ex row=1000, ex cyc=27992, inc cyc=466269944)
+--?         ->  Vector Streaming (type: GATHER) (primary node count=0, node count=1)  (cost=4160.72..4236.37 rows=1000 width=158) (actual time=179.739..179.739 rows=1000 loops=1)
+               Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+               Merge Sort Key: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_bigint
+               Node/s: (GenGroup) datanode1
+--?               (Buffers: shared hit=18)
+--?               (CPU: ex c/r=466241, ex row=1000, ex cyc=466241952, inc cyc=466241952)
+--?               ->  Vector Limit  (cost=4156.72..4159.22 rows=1000 width=158)
+--?                      datanode1 (actual time=138.631..138.632 rows=1000 loops=1)
+                     Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+                     Exec Nodes: (group_expr) datanode1
+--?                      datanode1 (CPU: ex c/r=28, ex row=1000, ex cyc=28408, inc cyc=359608536)
+--?                     ->  Vector Sort  (cost=4156.72..4229.76 rows=29215 width=158)
+--?                            datanode1 (actual time=138.620..138.620 rows=1000 loops=1)
+                           Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+                           Exec Nodes: (group_expr) datanode1
+                           Sort Key: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_bigint
+--?
+--?                            datanode1 (Buffers: shared hit=118)
+--?                            datanode1 (CPU: ex c/r=6206, ex row=33004, ex cyc=204831516, inc cyc=359580128)
+--?                           ->  Vector Sonic Hash Join  (cost=1166.67..2554.90 rows=29215 width=158)
+--?                                  datanode1 (actual time=31.209..59.657 rows=33004 loops=1)
+                                 Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+                                 Exec Nodes: (group_expr) datanode1
+                                 Hash Cond: ((t2.c_int = t1.c_int) AND (t2.c_smallint = t1.c_smallint))
+--?
+--?                                  datanode1 (Buffers: shared hit=100)
+--?                                  datanode1 (CPU: ex c/r=1003, ex row=67007, ex cyc=67269580, inc cyc=154748612)
+--?                                 ->  CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t2  (cost=0.00..671.01 rows=34006 width=79)
+--?                                        datanode1 (actual time=0.730..16.957 rows=34006 loops=1)
+                                       Output: t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+                                       Distribute Key: t2.c_int
+                                       Exec Nodes: (group_expr) datanode1
+                                       Filter: (t2.c_bigint IS NOT NULL)
+                                        datanode1 (LLVM Optimized)
+--?                                        datanode1 (Buffers: shared hit=41)
+--?                                        datanode1 (CPU: ex c/r=1293, ex row=34006, ex cyc=43984612, inc cyc=43984612)
+--?                                 ->  CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t1  (cost=0.00..671.01 rows=33044 width=79)
+--?                                        datanode1 (actual time=0.746..16.769 rows=33001 loops=1)
+                                       Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j
+                                       Distribute Key: t1.c_int
+                                       Exec Nodes: (group_expr) datanode1
+                                       Filter: (t1.a IS NOT NULL)
+                                       Rows Removed by Filter: 1005
+                                        datanode1 (LLVM Optimized)
+--?                                        datanode1 (Buffers: shared hit=41)
+--?                                        datanode1 (CPU: ex c/r=1279, ex row=34006, ex cyc=43494420, inc cyc=43494420)
+--? Total runtime: 185.883 ms
+(55 rows)
+
+-- test spill
+set explain_perf_mode = pretty;
+set query_mem = 0;
+set work_mem = '5MB';
+explain performance select * from VEC_HASHJOIN_TABLE_01_EXP t1 join VEC_HASHJOIN_TABLE_01_EXP t2 on t1.c_int = t2.c_int and t2.c_bigint=t2.c_bigint and t1.c_smallint = t2.c_smallint where t1.a is not null order by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 limit 1000;
+--?
+--?
+--?  1 | ->  Row Adapter                                                                               | 419.219           |   1000 |   1000 | 234KB        |           |     160 | 13674.17
+--?  2 |    ->  Vector Limit                                                                           | 418.630           |   1000 |   1000 | 5KB          |           |     160 | 13674.17
+--?  3 |       ->  Vector Streaming (type: GATHER)                                                     | 418.621           |   1000 |   1000 | 1796KB       |           |     160 | 13674.17
+--?  4 |          ->  Vector Limit                                                                     | [378.601,378.601] |   1000 |   1000 | [5KB, 5KB]   |           |     160 | 13596.05
+--?  5 |             ->  Vector Sort                                                                   | [378.591,378.591] |   1000 |  29175 | [1MB, 1MB]   | [337,337] |     160 | 13666.48
+--?  6 |                ->  Vector Sonic Hash Join (7,8)                                               | [302.239,302.239] |  33004 |  29175 | [36MB, 36MB] |           |     160 | 11993.91
+--?  7 |                   ->  CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t2 | [17.225,17.225]   |  34006 |  34006 | [1MB, 1MB]   |           |      80 | 678.01
+--?  8 |                   ->  CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t1 | [16.928,16.928]   |  33001 |  33005 | [1MB, 1MB]   |           |      80 | 678.01
+(8 rows)
+
+                 Predicate Information (identified by plan id)                  
+--------------------------------------------------------------------------------
+   6 --Vector Sonic Hash Join (7,8)
+         Hash Cond: ((t2.c_int = t1.c_int) AND (t2.c_smallint = t1.c_smallint))
+   7 --CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t2
+         Filter: (t2.c_bigint IS NOT NULL)
+   8 --CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t1
+         Filter: (t1.a IS NOT NULL)
+         Rows Removed by Filter: 1005
+(7 rows)
+
+--?
+--?------------------------------------------------------------------------------------------------------------
+ Coordinator Query Peak Memory:
+--?
+ DataNode Query Peak Memory
+--?
+   1 --Row Adapter
+--?
+   2 --Vector Limit
+--?
+   3 --Vector Streaming (type: GATHER)
+--?.*
+   4 --Vector Limit
+--?
+--?         datanode1 Stream Send time: 0.081, OS Kernel Send time: 0.076; Data Serialize time: 2.211
+   5 --Vector Sort
+--?
+--?
+   6 --Vector Sonic Hash Join (7,8)
+--?
+         datanode1 Partition Num: 32
+         datanode1 Inner Partition Spill Num: 32, Temp File Num: 64, Written Disk IO: 3318KB [102KB 106KB]
+         datanode1 Outer Partition Spill Num: 1, Temp File Num: 2, Written Disk IO: 109KB [109KB 109KB]
+--?         datanode1 Hashjoin Build time: 200.481, Probe time: 43.576
+   7 --CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t2
+--?
+   8 --CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t1
+--?
+(26 rows)
+
+                                                                                   Targetlist Information (identified by plan id)                                                                                   
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+   1 --Row Adapter
+         Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+         Exec Nodes: (GenGroup) datanode1
+   2 --Vector Limit
+         Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+         Exec Nodes: (GenGroup) datanode1
+   3 --Vector Streaming (type: GATHER)
+         Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+         Merge Sort Key: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_bigint
+         Node/s: (GenGroup) datanode1
+   4 --Vector Limit
+         Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+         Exec Nodes: (group_expr) datanode1
+   5 --Vector Sort
+         Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+         Exec Nodes: (group_expr) datanode1
+         Sort Key: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_bigint
+   6 --Vector Sonic Hash Join (7,8)
+         Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+         Exec Nodes: (group_expr) datanode1
+   7 --CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t2
+         Output: t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+         Distribute Key: t2.c_int
+         Exec Nodes: (group_expr) datanode1
+   8 --CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t1
+         Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j
+         Distribute Key: t1.c_int
+         Exec Nodes: (group_expr) datanode1
+(28 rows)
+
+--?
+--?------------------------------------------------------------------------------------------
+   1 --Row Adapter
+--?         (actual time=433.017..433.255 rows=1000 loops=1)
+--?         (CPU: ex c/r=1548, ex row=1000, ex cyc=1548360, inc cyc=1123719664)
+   2 --Vector Limit
+--?         (actual time=432.602..432.603 rows=1000 loops=1)
+--?         (CPU: ex c/r=25, ex row=1000, ex cyc=25096, inc cyc=1122171304)
+   3 --Vector Streaming (type: GATHER)
+--?         (actual time=432.593..432.593 rows=1000 loops=1)
+--?         (Buffers: 0)
+--?         (CPU: ex c/r=1122146, ex row=1000, ex cyc=1122146208, inc cyc=1122146208)
+   4 --Vector Limit
+--?         datanode1 (actual time=391.804..391.805 rows=1000 loops=1)
+--?         datanode1 (CPU: ex c/r=28, ex row=1000, ex cyc=28080, inc cyc=1016340584)
+   5 --Vector Sort
+--?         datanode1 (actual time=391.794..391.794 rows=1000 loops=1)
+--?         datanode1 (Buffers: shared hit=82 temp read=429 written=858)
+--?         datanode1 (CPU: ex c/r=5962, ex row=33004, ex cyc=196792848, inc cyc=1016312504)
+   6 --Vector Sonic Hash Join (7,8)
+--?         datanode1 (actual time=273.654..315.933 rows=33004 loops=1)
+--?         datanode1 (Buffers: shared hit=82 temp read=429 written=858)
+--?         datanode1 (CPU: ex c/r=10816, ex row=67007, ex cyc=724783672, inc cyc=819519656)
+   7 --CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t2
+--?         datanode1 (actual time=0.774..17.077 rows=34006 loops=1)
+         datanode1 (LLVM Optimized)
+--?         datanode1 (Buffers: shared hit=41)
+--?         datanode1 (CPU: ex c/r=1302, ex row=34006, ex cyc=44297672, inc cyc=44297672)
+   8 --CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t1
+--?         datanode1 (actual time=0.707..19.448 rows=33001 loops=1)
+         datanode1 (LLVM Optimized)
+--?         datanode1 (Buffers: shared hit=41)
+--?         datanode1 (CPU: ex c/r=1483, ex row=34006, ex cyc=50438312, inc cyc=50438312)
+(31 rows)
+
+--?
+--?------------------------------------------------------------------
+ Plan Node id: 3  Track name: coordinator get datanode connection
+--?
+ Plan Node id: 7  Track name: load CU description
+--?        datanode1 (time=0.347 total_calls=36 loops=1)
+ Plan Node id: 7  Track name: min/max check
+--?        datanode1 (time=0.002 total_calls=36 loops=1)
+ Plan Node id: 7  Track name: fill vector batch
+--?        datanode1 (time=0.426 total_calls=35 loops=1)
+ Plan Node id: 7  Track name: get CU data
+--?        datanode1 (time=0.046 total_calls=35 loops=1)
+ Plan Node id: 7  Track name: apply projection and filter
+--?        datanode1 (time=16.182 total_calls=35 loops=1)
+ Plan Node id: 7  Track name: fill later vector batch
+--?        datanode1 (time=17.588 total_calls=35 loops=1)
+ Plan Node id: 7  Track name: get cu data for later read
+--?        datanode1 (time=0.288 total_calls=420 loops=1)
+ Plan Node id: 8  Track name: load CU description
+--?        datanode1 (time=0.365 total_calls=36 loops=1)
+ Plan Node id: 8  Track name: min/max check
+--?        datanode1 (time=0.002 total_calls=36 loops=1)
+ Plan Node id: 8  Track name: fill vector batch
+--?        datanode1 (time=0.656 total_calls=35 loops=1)
+ Plan Node id: 8  Track name: get CU data
+--?        datanode1 (time=0.051 total_calls=35 loops=1)
+ Plan Node id: 8  Track name: apply projection and filter
+--?        datanode1 (time=18.314 total_calls=35 loops=1)
+ Plan Node id: 8  Track name: fill later vector batch
+--?        datanode1 (time=25.730 total_calls=35 loops=1)
+ Plan Node id: 8  Track name: get cu data for later read
+--?        datanode1 (time=0.266 total_calls=420 loops=1)
+(30 rows)
+
+--?
+--?--------------------------------------------------------------------------
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+(9 rows)
+
+set enable_compress_spill = off;
+explain performance select * from VEC_HASHJOIN_TABLE_01_EXP t1 join VEC_HASHJOIN_TABLE_01_EXP t2 on t1.c_int = t2.c_int and t2.c_bigint=t2.c_bigint and t1.c_smallint = t2.c_smallint where t1.a is not null order by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 limit 1000;
+--?
+--?
+--?  1 | ->  Row Adapter                                                                               | 292.554           |   1000 |   1000 | 234KB        |           |     158 | 13668.37
+--?  2 |    ->  Vector Limit                                                                           | 291.948           |   1000 |   1000 | 5KB          |           |     158 | 13668.37
+--?  3 |       ->  Vector Streaming (type: GATHER)                                                     | 291.939           |   1000 |   1000 | 1796KB       |           |     158 | 13668.37
+--?  4 |          ->  Vector Limit                                                                     | [252.059,252.059] |   1000 |   1000 | [5KB, 5KB]   |           |     158 | 13591.22
+--?  5 |             ->  Vector Sort                                                                   | [252.047,252.047] |   1000 |  29215 | [1MB, 1MB]   | [337,337] |     158 | 13661.76
+--?  6 |                ->  Vector Sonic Hash Join (7,8)                                               | [175.656,175.656] |  33004 |  29215 | [10MB, 10MB] |           |     158 | 11986.90
+--?  7 |                   ->  CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t2 | [16.941,16.941]   |  34006 |  34006 | [1MB, 1MB]   |           |      79 | 671.01
+--?  8 |                   ->  CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t1 | [16.771,16.771]   |  33001 |  33044 | [1MB, 1MB]   |           |      79 | 671.01
+(8 rows)
+
+                 Predicate Information (identified by plan id)                  
+--------------------------------------------------------------------------------
+   6 --Vector Sonic Hash Join (7,8)
+         Hash Cond: ((t2.c_int = t1.c_int) AND (t2.c_smallint = t1.c_smallint))
+   7 --CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t2
+         Filter: (t2.c_bigint IS NOT NULL)
+   8 --CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t1
+         Filter: (t1.a IS NOT NULL)
+         Rows Removed by Filter: 1005
+(7 rows)
+
+--?
+--?------------------------------------------------------------------------------------------------------------
+ Coordinator Query Peak Memory:
+--?
+ DataNode Query Peak Memory
+--?
+   1 --Row Adapter
+--?
+   2 --Vector Limit
+--?
+   3 --Vector Streaming (type: GATHER)
+--?
+   4 --Vector Limit
+--?
+--?         datanode1 Stream Send time: 0.071, OS Kernel Send time: 0.067; Data Serialize time: 2.291
+   5 --Vector Sort
+--?
+--?
+   6 --Vector Sonic Hash Join (7,8)
+--?
+         datanode1 Partition Num: 32
+         datanode1 Inner Partition Spill Num: 32, Temp File Num: 64, Written Disk IO: 3318KB [102KB 106KB]
+         datanode1 Outer Partition Spill Num: 1, Temp File Num: 2, Written Disk IO: 109KB [109KB 109KB]
+--?         datanode1 Hashjoin Build time: 120.509, Probe time: 37.605
+   7 --CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t2
+--?
+   8 --CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t1
+--?
+(26 rows)
+
+                                                                                   Targetlist Information (identified by plan id)                                                                                   
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+   1 --Row Adapter
+         Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+         Exec Nodes: (GenGroup) datanode1
+   2 --Vector Limit
+         Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+         Exec Nodes: (GenGroup) datanode1
+   3 --Vector Streaming (type: GATHER)
+         Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+         Merge Sort Key: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_bigint
+         Node/s: (GenGroup) datanode1
+   4 --Vector Limit
+         Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+         Exec Nodes: (group_expr) datanode1
+   5 --Vector Sort
+         Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+         Exec Nodes: (group_expr) datanode1
+         Sort Key: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_bigint
+   6 --Vector Sonic Hash Join (7,8)
+         Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+         Exec Nodes: (group_expr) datanode1
+   7 --CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t2
+         Output: t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+         Distribute Key: t2.c_int
+         Exec Nodes: (group_expr) datanode1
+   8 --CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t1
+         Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j
+         Distribute Key: t1.c_int
+         Exec Nodes: (group_expr) datanode1
+(28 rows)
+
+--?
+--?-----------------------------------------------------------------------------------------
+   1 --Row Adapter
+--?         (actual time=292.323..292.554 rows=1000 loops=1)
+--?         (CPU: ex c/r=1446, ex row=1000, ex cyc=1446896, inc cyc=758759832)
+   2 --Vector Limit
+--?         (actual time=291.948..291.948 rows=1000 loops=1)
+--?         (CPU: ex c/r=24, ex row=1000, ex cyc=24840, inc cyc=757312936)
+   3 --Vector Streaming (type: GATHER)
+--?         (actual time=291.939..291.939 rows=1000 loops=1)
+--?         (Buffers: 0)
+--?         (CPU: ex c/r=757288, ex row=1000, ex cyc=757288096, inc cyc=757288096)
+   4 --Vector Limit
+--?         datanode1 (actual time=252.058..252.059 rows=1000 loops=1)
+--?         datanode1 (CPU: ex c/r=27, ex row=1000, ex cyc=27240, inc cyc=653837912)
+   5 --Vector Sort
+--?         datanode1 (actual time=252.047..252.047 rows=1000 loops=1)
+--?         datanode1 (Buffers: shared hit=82 temp read=693 written=693)
+--?         datanode1 (CPU: ex c/r=6003, ex row=33004, ex cyc=198155740, inc cyc=653810672)
+   6 --Vector Sonic Hash Join (7,8)
+--?         datanode1 (actual time=139.313..175.656 rows=33004 loops=1)
+--?         datanode1 (Buffers: shared hit=82 temp read=693 written=693)
+--?         datanode1 (CPU: ex c/r=5495, ex row=67007, ex cyc=368219384, inc cyc=455654932)
+   7 --CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t2
+--?         datanode1 (actual time=0.745..16.941 rows=34006 loops=1)
+         datanode1 (LLVM Optimized)
+--?         datanode1 (Buffers: shared hit=41)
+--?         datanode1 (CPU: ex c/r=1291, ex row=34006, ex cyc=43934524, inc cyc=43934524)
+   8 --CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t1
+--?         datanode1 (actual time=0.718..16.771 rows=33001 loops=1)
+         datanode1 (LLVM Optimized)
+--?         datanode1 (Buffers: shared hit=41)
+--?         datanode1 (CPU: ex c/r=1279, ex row=34006, ex cyc=43501024, inc cyc=43501024)
+(31 rows)
+
+--?
+--?------------------------------------------------------------------
+ Plan Node id: 3  Track name: coordinator get datanode connection
+--?
+ Plan Node id: 7  Track name: load CU description
+--?        datanode1 (time=0.335 total_calls=36 loops=1)
+ Plan Node id: 7  Track name: min/max check
+--?        datanode1 (time=0.002 total_calls=36 loops=1)
+ Plan Node id: 7  Track name: fill vector batch
+--?        datanode1 (time=0.397 total_calls=35 loops=1)
+ Plan Node id: 7  Track name: get CU data
+--?        datanode1 (time=0.053 total_calls=35 loops=1)
+ Plan Node id: 7  Track name: apply projection and filter
+--?        datanode1 (time=16.085 total_calls=35 loops=1)
+ Plan Node id: 7  Track name: fill later vector batch
+--?        datanode1 (time=18.304 total_calls=35 loops=1)
+ Plan Node id: 7  Track name: get cu data for later read
+--?        datanode1 (time=0.275 total_calls=420 loops=1)
+ Plan Node id: 8  Track name: load CU description
+--?        datanode1 (time=0.349 total_calls=36 loops=1)
+ Plan Node id: 8  Track name: min/max check
+--?        datanode1 (time=0.005 total_calls=36 loops=1)
+ Plan Node id: 8  Track name: fill vector batch
+--?        datanode1 (time=0.652 total_calls=35 loops=1)
+ Plan Node id: 8  Track name: get CU data
+--?        datanode1 (time=0.048 total_calls=35 loops=1)
+ Plan Node id: 8  Track name: apply projection and filter
+--?        datanode1 (time=15.667 total_calls=35 loops=1)
+ Plan Node id: 8  Track name: fill later vector batch
+--?        datanode1 (time=28.699 total_calls=35 loops=1)
+ Plan Node id: 8  Track name: get cu data for later read
+--?        datanode1 (time=0.264 total_calls=420 loops=1)
+(30 rows)
+
+--?
+--?--------------------------------------------------------------------------
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+(9 rows)
+
+reset explain_perf_mode;
+-- test respill
+set work_mem = '1MB';
+explain (format xml) select * from VEC_HASHJOIN_TABLE_01_EXP t1 join VEC_HASHJOIN_TABLE_01_EXP t2 on t1.c_int = t2.c_int and t2.c_bigint=t2.c_bigint and t1.c_smallint = t2.c_smallint where t1.a is not null order by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 limit 1000;
+--?
+--?--------------------------------------------------------------------------------------------------------------
+ <explain xmlns="http://www.postgresql.org/2009/explain">                                                    +
+   <Query>                                                                                                   +
+     <Plan>                                                                                                  +
+       <Node-Type>Row Adapter</Node-Type>                                                                    +
+--?
+--?
+       <Plan-Rows>1000</Plan-Rows>                                                                           +
+--?
+       <Plans>                                                                                               +
+         <Plan>                                                                                              +
+           <Node-Type>Vector Limit</Node-Type>                                                               +
+           <Parent-Relationship>Outer</Parent-Relationship>                                                  +
+--?
+--?
+           <Plan-Rows>1000</Plan-Rows>                                                                       +
+--?
+           <Plans>                                                                                           +
+             <Plan>                                                                                          +
+               <Node-Type>Vector Streaming (type: GATHER)</Node-Type>                                        +
+               <Parent-Relationship>Outer</Parent-Relationship>                                              +
+--?
+--?
+               <Plan-Rows>1000</Plan-Rows>                                                                   +
+--?
+               <Merge-Sort-Key>                                                                              +
+                 <Item>t1.c_int</Item>                                                                       +
+                 <Item>t1.c_bigint</Item>                                                                    +
+                 <Item>t1.c_smallint</Item>                                                                  +
+                 <Item>t1.a</Item>                                                                           +
+                 <Item>t1.b</Item>                                                                           +
+                 <Item>t1.c</Item>                                                                           +
+                 <Item>t1.d</Item>                                                                           +
+                 <Item>t1.e</Item>                                                                           +
+                 <Item>t1.f</Item>                                                                           +
+                 <Item>t1.g</Item>                                                                           +
+                 <Item>t1.h</Item>                                                                           +
+                 <Item>t1.i</Item>                                                                           +
+                 <Item>t1.j</Item>                                                                           +
+                 <Item>t2.c_bigint</Item>                                                                    +
+               </Merge-Sort-Key>                                                                             +
+               <Nodes>(GenGroup) datanode1</Nodes>                                                           +
+               <Plans>                                                                                       +
+                 <Plan>                                                                                      +
+                   <Node-Type>Vector Limit</Node-Type>                                                       +
+                   <Parent-Relationship>Outer</Parent-Relationship>                                          +
+--?
+--?
+                   <Plan-Rows>1000</Plan-Rows>                                                               +
+--?
+                   <Plans>                                                                                   +
+                     <Plan>                                                                                  +
+                       <Node-Type>Vector Sort</Node-Type>                                                    +
+                       <Parent-Relationship>Outer</Parent-Relationship>                                      +
+--?
+--?
+--?
+--?
+                       <Sort-Key>                                                                            +
+                         <Item>t1.c_int</Item>                                                               +
+                         <Item>t1.c_bigint</Item>                                                            +
+                         <Item>t1.c_smallint</Item>                                                          +
+                         <Item>t1.a</Item>                                                                   +
+                         <Item>t1.b</Item>                                                                   +
+                         <Item>t1.c</Item>                                                                   +
+                         <Item>t1.d</Item>                                                                   +
+                         <Item>t1.e</Item>                                                                   +
+                         <Item>t1.f</Item>                                                                   +
+                         <Item>t1.g</Item>                                                                   +
+                         <Item>t1.h</Item>                                                                   +
+                         <Item>t1.i</Item>                                                                   +
+                         <Item>t1.j</Item>                                                                   +
+                         <Item>t2.c_bigint</Item>                                                            +
+                       </Sort-Key>                                                                           +
+                       <Plans>                                                                               +
+                         <Plan>                                                                              +
+                           <Node-Type>Vector Sonic Hash Join</Node-Type>                                     +
+                           <Parent-Relationship>Outer</Parent-Relationship>                                  +
+                           <Join-Type>Inner</Join-Type>                                                      +
+--?
+--?
+--?
+--?
+                           <Hash-Cond>((t2.c_int = t1.c_int) AND (t2.c_smallint = t1.c_smallint))</Hash-Cond>+
+                           <Plans>                                                                           +
+                             <Plan>                                                                          +
+                               <Node-Type>CStore Scan</Node-Type>                                            +
+                               <Parent-Relationship>Outer</Parent-Relationship>                              +
+                               <Relation-Name>vec_hashjoin_table_01_exp</Relation-Name>                      +
+                               <Alias>t2</Alias>                                                             +
+                               <Startup-Cost>0.00</Startup-Cost>                                             +
+--?
+                               <Plan-Rows>34006</Plan-Rows>                                                  +
+--?
+                               <Filter>(c_bigint IS NOT NULL)</Filter>                                       +
+                             </Plan>                                                                         +
+                             <Plan>                                                                          +
+                               <Node-Type>CStore Scan</Node-Type>                                            +
+                               <Parent-Relationship>Inner</Parent-Relationship>                              +
+                               <Relation-Name>vec_hashjoin_table_01_exp</Relation-Name>                      +
+                               <Alias>t1</Alias>                                                             +
+                               <Startup-Cost>0.00</Startup-Cost>                                             +
+--?
+--?
+--?
+                               <Filter>(a IS NOT NULL)</Filter>                                              +
+                             </Plan>                                                                         +
+                           </Plans>                                                                          +
+                         </Plan>                                                                             +
+                       </Plans>                                                                              +
+                     </Plan>                                                                                 +
+                   </Plans>                                                                                  +
+                 </Plan>                                                                                     +
+               </Plans>                                                                                      +
+             </Plan>                                                                                         +
+           </Plans>                                                                                          +
+         </Plan>                                                                                             +
+       </Plans>                                                                                              +
+     </Plan>                                                                                                 +
+   </Query>                                                                                                  +
+ </explain>
+(1 row)
+
+explain performance select * from VEC_HASHJOIN_TABLE_01_EXP t1 join VEC_HASHJOIN_TABLE_01_EXP t2 on t1.c_int = t2.c_int and t2.c_bigint=t2.c_bigint and t1.c_smallint = t2.c_smallint where t1.a is not null order by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 limit 1000;
+--?
+--?--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--? Row Adapter  (cost=13668.37..13668.37 rows=1000 width=158) (actual time=4133.972..4134.196 rows=1000 loops=1)
+   Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+   Exec Nodes: (GenGroup) datanode1
+--?   (CPU: ex c/r=1645, ex row=1000, ex cyc=1645272, inc cyc=10724003160)
+--?   ->  Vector Limit  (cost=13592.72..13668.37 rows=1000 width=158) (actual time=4133.520..4133.521 rows=1000 loops=1)
+         Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+         Exec Nodes: (GenGroup) datanode1
+--?         (CPU: ex c/r=29, ex row=1000, ex cyc=29236, inc cyc=10722357888)
+--?         ->  Vector Streaming (type: GATHER) (primary node count=0, node count=1)  (cost=13592.72..13668.37 rows=1000 width=158) (actual time=4133.509..4133.509 rows=1000 loops=1)
+               Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+               Merge Sort Key: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_bigint
+               Node/s: (GenGroup) datanode1
+--?               (CPU: ex c/r=10722328, ex row=1000, ex cyc=10722328652, inc cyc=10722328652)
+--?               ->  Vector Limit  (cost=13588.72..13591.22 rows=1000 width=158)
+--?                      datanode1 (actual time=4093.093..4093.094 rows=1000 loops=1)
+                     Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+                     Exec Nodes: (group_expr) datanode1
+--?                      datanode1 (CPU: ex c/r=31, ex row=1000, ex cyc=31536, inc cyc=10617489088)
+--?                     ->  Vector Sort  (cost=13588.72..13661.76 rows=29215 width=158)
+--?                            datanode1 (actual time=4093.081..4093.081 rows=1000 loops=1)
+                           Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+                           Exec Nodes: (group_expr) datanode1
+                           Sort Key: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_bigint
+--?
+--?                            datanode1 (Buffers: shared hit=82 temp read=9920 written=9920)
+--?                            datanode1 (CPU: ex c/r=6587, ex row=33004, ex cyc=217411640, inc cyc=10617457552)
+--?                           ->  Vector Sonic Hash Join  (cost=3490.67..11986.90 rows=29215 width=158)
+--?                                  datanode1 (actual time=2536.246..4009.284 rows=33004 loops=1)
+                                 Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j, t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+                                 Exec Nodes: (group_expr) datanode1
+                                 Hash Cond: ((t2.c_int = t1.c_int) AND (t2.c_smallint = t1.c_smallint))
+                                  datanode1 Partition Num: 480, Spill Times: 3
+--?                                  datanode1 Inner Partition Spill Num: 480, Temp File Num: 960, Written Disk IO: 13222KB [0KB 105KB]
+--?                                  datanode1 Outer Partition Spill Num: 480, Temp File Num: 960, Written Disk IO: 13615KB [0KB 109KB]
+--?                                  datanode1 (Buffers: shared hit=82 temp read=9920 written=9920)
+--?                                  datanode1 (CPU: ex c/r=153905, ex row=67007, ex cyc=10312743896, inc cyc=10400045912)
+--?                                 ->  CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t2  (cost=0.00..671.01 rows=34006 width=79)
+--?                                        datanode1 (actual time=0.736..16.913 rows=34006 loops=1)
+                                       Output: t2.c_int, t2.c_bigint, t2.c_smallint, t2.a, t2.b, t2.c, t2.d, t2.e, t2.f, t2.g, t2.h, t2.i, t2.j
+                                       Distribute Key: t2.c_int
+                                       Exec Nodes: (group_expr) datanode1
+                                       Filter: (t2.c_bigint IS NOT NULL)
+                                        datanode1 (LLVM Optimized)
+--?                                        datanode1 (Buffers: shared hit=41)
+--?                                        datanode1 (CPU: ex c/r=1289, ex row=34006, ex cyc=43861504, inc cyc=43861504)
+--?                                 ->  CStore Scan on sonic_hashjoin_test_explain.vec_hashjoin_table_01_exp t1  (cost=0.00..671.01 rows=33044 width=79)
+--?                                        datanode1 (actual time=0.712..16.749 rows=33001 loops=1)
+                                       Output: t1.c_int, t1.c_bigint, t1.c_smallint, t1.a, t1.b, t1.c, t1.d, t1.e, t1.f, t1.g, t1.h, t1.i, t1.j
+                                       Distribute Key: t1.c_int
+                                       Exec Nodes: (group_expr) datanode1
+                                       Filter: (t1.a IS NOT NULL)
+                                       Rows Removed by Filter: 1005
+                                        datanode1 (LLVM Optimized)
+--?                                        datanode1 (Buffers: shared hit=41)
+--?                                        datanode1 (CPU: ex c/r=1277, ex row=34006, ex cyc=43440512, inc cyc=43440512)
+--? Total runtime: 4139.553 ms
+(56 rows)
+
+reset query_mem;
+reset work_mem;
+drop schema sonic_hashjoin_test_explain cascade;
+NOTICE:  drop cascades to table vec_hashjoin_table_01_exp
+drop node group group_expr;

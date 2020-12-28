@@ -1,0 +1,626 @@
+-- test syntax
+vacuum full verbose compact;
+ERROR:  COMPACT can only be used with VACUUM FULL
+vacuum full freeze  compact;
+ERROR:  COMPACT can not be used with FREEZE
+vacuum full verbose freeze compact;
+ERROR:  syntax error at or near "freeze"
+LINE 1: vacuum full verbose freeze compact;
+                            ^
+vacuum compact;
+ERROR:  COMPACT can only be used with VACUUM FULL
+vacuum compact full;
+ERROR:  COMPACT can only be used with VACUUM FULL
+vacuum compact verbose;
+ERROR:  COMPACT can only be used with VACUUM FULL
+vacuum compact freeze;
+ERROR:  COMPACT can only be used with VACUUM FULL
+vacuum compact verbose freeze;
+ERROR:  COMPACT can only be used with VACUUM FULL
+vacuum compact full verbose;
+ERROR:  COMPACT can only be used with VACUUM FULL
+vacuum compact full freeze;
+ERROR:  COMPACT can only be used with VACUUM FULL
+vacuum compact full verbose freeze;
+ERROR:  COMPACT can only be used with VACUUM FULL
+vacuum;
+vacuum t1;
+ERROR:  relation "t1" does not exist
+vacuum full;
+vacuum full t1;
+ERROR:  relation "t1" does not exist
+-- start ...
+set enable_global_stats = true;
+drop function print_desc;
+ERROR:  function print_desc does not exist
+CREATE OR REPLACE FUNCTION print_desc()
+  RETURNS TABLE (relativefilename text) AS
+$$
+declare tblname text;
+BEGIN
+    select a.relname into tblname from pg_class a, pg_class b where a.oid=b.relcudescrelid and b.relname='t1';
+
+    RETURN QUERY execute format('select substr(relativefilename,-2) from cstore.%I', tblname);
+END;
+$$ LANGUAGE plpgsql;
+-- test
+set cstore_insert_mode=main;
+-- not run in transaction
+start transaction;
+vacuum full compact;
+ERROR:  VACUUM cannot run inside a transaction block
+rollback;
+-- no table in some schema
+create schema vacuumfull_schema;
+vacuum full compact vacuumfull_schema.t1;
+ERROR:  relation "vacuumfull_schema.t1" does not exist
+drop schema vacuumfull_schema;
+-- no table in current schema
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+vacuum full compact t1;
+ERROR:  relation "t1" does not exist
+-- prep data to create orc files
+drop table if exists file1;
+NOTICE:  table "file1" does not exist, skipping
+create table file1(c1 int, c2 int, c3 int, c4 int);
+insert into file1 values(13, generate_series(1,10),generate_series(1,10),generate_series(1,10));
+drop table if exists file2;
+NOTICE:  table "file2" does not exist, skipping
+create table file2(c1 int, c2 int, c3 int, c4 int);
+insert into file2 values(13, generate_series(11,20),generate_series(11,20),generate_series(11,20));
+drop table if exists file3;
+NOTICE:  table "file3" does not exist, skipping
+create table file3(c1 int, c2 int, c3 int, c4 int);
+insert into file3 values(13, generate_series(21,30),generate_series(21,30),generate_series(21,30));
+-- empty table
+-- non-empty table without invalid data
+-- all data deleted in the table
+create table t1(c1 int, c2 int, c3 int, c4 int) tablespace hdfs_ts;
+vacuum full compact t1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+(0 rows)
+
+insert into t1 select * from file1;
+insert into t1 select * from file2;
+insert into t1 select * from file3;
+vacuum full compact t1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+(1 row)
+
+delete from t1;
+vacuum full compact t1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+(0 rows)
+
+-- 1 row deleted in one file
+drop table if exists t1;
+create table t1(c1 int, c2 int, c3 int, c4 int) tablespace hdfs_ts;
+insert into t1 select * from file1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+(1 row)
+
+delete from t1 where c2=5;
+vacuum full compact t1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+(1 row)
+
+-- 2 rows deleted in 2 of 3 files;
+drop table if exists t1;
+create table t1(c1 int, c2 int, c3 int, c4 int) tablespace hdfs_ts;
+insert into t1 select * from file1;
+insert into t1 select * from file2;
+insert into t1 select * from file3;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+ .2
+ .3
+(3 rows)
+
+delete from t1 where c2=5 or c2=25;
+vacuum full compact t1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+(1 row)
+
+-- 3 rows deleted in all 3 files;
+drop table if exists t1;
+create table t1(c1 int, c2 int, c3 int, c4 int) tablespace hdfs_ts;
+insert into t1 select * from file1;
+insert into t1 select * from file2;
+insert into t1 select * from file3;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+ .2
+ .3
+(3 rows)
+
+delete from t1 where c2=5 or c2=15 or c2=25;
+vacuum full compact t1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+(1 row)
+
+-- all data in one file deleted, and others files has no invalid data
+drop table if exists t1;
+create table t1(c1 int, c2 int, c3 int, c4 int) tablespace hdfs_ts;
+insert into t1 select * from file1;
+insert into t1 select * from file2;
+insert into t1 select * from file3;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+ .2
+ .3
+(3 rows)
+
+delete from t1 where c2>=11 and c2<=20;
+vacuum full compact t1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+(1 row)
+
+-- multi column value partition
+-- prepare data for patition table
+drop table if exists file1;
+create table file1(c1 int, c2 int, c3 int, c4 int);
+insert into file1 values(13, 1, 1, generate_series(1,10));
+drop table if exists file2;
+create table file2(c1 int, c2 int, c3 int, c4 int);
+insert into file2 values(13, 1, 2, generate_series(11,20));
+drop table if exists file3;
+create table file3(c1 int, c2 int, c3 int, c4 int);
+insert into file3 values(13, 2, 1, generate_series(21,30));
+drop table if exists file4;
+NOTICE:  table "file4" does not exist, skipping
+create table file4(c1 int, c2 int, c3 int, c4 int);
+insert into file4 values(13, 2, 2, generate_series(31,40));
+-- empty table
+-- non-empty table without invalid data
+-- all data deleted in the table
+drop table if exists t1;
+create table t1(c1 int, c2 int, c3 int, c4 int) tablespace hdfs_ts partition by values(c2,c3);
+vacuum full compact t1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+(0 rows)
+
+insert into t1 select * from file1;
+insert into t1 select * from file2;
+insert into t1 select * from file3;
+insert into t1 select * from file4;
+vacuum full compact t1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+ .2
+ .3
+ .4
+(4 rows)
+
+delete from t1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+ .2
+ .3
+ .4
+(4 rows)
+
+vacuum full compact t1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+(0 rows)
+
+-- 1 row deleted in one file
+drop table if exists t1;
+create table t1(c1 int, c2 int, c3 int, c4 int) tablespace hdfs_ts partition by values(c2,c3);
+insert into t1 select * from file1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+(1 row)
+
+delete from t1 where c4=5;
+vacuum full compact t1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+(1 row)
+
+-- 2 rows deleted in 2 of 4 files;
+drop table if exists t1;
+create table t1(c1 int, c2 int, c3 int, c4 int) tablespace hdfs_ts partition by values(c2,c3);
+insert into t1 select * from file1;
+insert into t1 select * from file2;
+insert into t1 select * from file3;
+insert into t1 select * from file4;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+ .2
+ .3
+ .4
+(4 rows)
+
+delete from t1 where c4=5 or c4=25;
+vacuum full compact t1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+ .2
+ .3
+ .4
+(4 rows)
+
+-- 4 rows deleted in all 4 files;
+drop table if exists t1;
+create table t1(c1 int, c2 int, c3 int, c4 int) tablespace hdfs_ts partition by values(c2,c3);
+insert into t1 select * from file1;
+insert into t1 select * from file2;
+insert into t1 select * from file3;
+insert into t1 select * from file4;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+ .2
+ .3
+ .4
+(4 rows)
+
+delete from t1 where c4=5 or c4=15 or c4=25 or c4=35;
+vacuum full compact t1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+ .2
+ .3
+ .4
+(4 rows)
+
+-- all data in one file deleted, and others files has no invalid data
+drop table if exists t1;
+create table t1(c1 int, c2 int, c3 int, c4 int) tablespace hdfs_ts partition by values(c2,c3);
+insert into t1 select * from file1;
+insert into t1 select * from file2;
+insert into t1 select * from file3;
+insert into t1 select * from file4;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+ .2
+ .3
+ .4
+(4 rows)
+
+delete from t1 where c4>=11 and c4<=20;
+vacuum full compact t1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+ .2
+ .3
+(3 rows)
+
+----data type
+drop table if exists t1;
+create table t1(
+        c_tinyint         tinyint,
+        c_smallint        smallint,
+        c_int             integer,
+        c_bigint          bigint,
+        c_money           money,
+        c_numeric         numeric,
+        c_real            real,
+        c_double          double precision,
+        c_decimal         decimal,
+        c_varchar         varchar,
+        c_char            char(30),
+        c_nvarchar2       nvarchar2,
+        c_text            text,
+        c_timestamp       timestamp with time zone,
+        c_timestamptz     timestamp without time zone,
+        c_date            date,
+        c_time            time without time zone,
+        c_timetz          time with time zone,
+        c_interval        interval,
+        c_tinterval       tinterval,
+        c_smalldatetime   smalldatetime,
+        c_bytea           varchar,
+        c_boolean         boolean,
+        c_inet            varchar2,
+        c_cidr            nvarchar2,
+        c_bit             clob,
+        c_varbit          char,
+        c_oid             oid
+) tablespace hdfs_ts
+partition by values(
+        c_tinyint,
+        c_smallint,
+        c_int,
+        c_bigint
+);
+insert into t1 values (13, 13768, 115026, -9457, '$561.32', 561.322815379585,
+		1682.67, 1682.1, 61032419699811781, 'asdfasfas', 'asdasfasfasffsf432423424234', 
+		'sdadasdads', 'ss', '1974-10-02 12:18:35.454199+08', '1971-03-20 11:13:50', 
+		'1972-05-30 11:05:28', '11:13:50', '12:18:35.454199+08', '26 years 3 mons 21 days 11:41:24.545801',
+		'["1947-05-10 23:59:12+08" "1973-01-14 03:14:21+08"]', '1974-10-02 12:19:00', 
+		'\x2f2f31323435313234343534', 'true', '10.1.1.1', '10.2.0.5/32', '0101101010', 'a', 136);
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+(1 row)
+
+delete from t1;
+vacuum full compact t1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+(0 rows)
+
+drop table if exists t1;
+create table t1(
+        c_tinyint         tinyint,
+        c_smallint        smallint,
+        c_int             integer,
+        c_bigint          bigint,
+        c_money           money,
+        c_numeric         numeric,
+        c_real            real,
+        c_double          double precision,
+        c_decimal         decimal,
+        c_varchar         varchar,
+        c_char            char(30),
+        c_nvarchar2       nvarchar2,
+        c_text            text,
+        c_timestamp       timestamp with time zone,
+        c_timestamptz     timestamp without time zone,
+        c_date            date,
+        c_time            time without time zone,
+        c_timetz          time with time zone,
+        c_interval        interval,
+        c_tinterval       tinterval,
+        c_smalldatetime   smalldatetime,
+        c_bytea           varchar,
+        c_boolean         boolean,
+        c_inet            varchar2,
+        c_cidr            nvarchar2,
+        c_bit             clob,
+        c_varbit          char,
+        c_oid             oid
+) tablespace hdfs_ts
+partition by values(
+        c_numeric,
+        c_char,
+        c_varchar,
+        c_cidr
+);
+insert into t1 values (13, 13768, 115026, -9457, '$561.32', 561.322815379585,
+		1682.67, 1682.1, 61032419699811781, 'asdfasfas', 'asdasfasfasffsf432423424234', 
+		'sdadasdads', 'ss', '1974-10-02 12:18:35.454199+08', '1971-03-20 11:13:50', 
+		'1972-05-30 11:05:28', '11:13:50', '12:18:35.454199+08', '26 years 3 mons 21 days 11:41:24.545801',
+		'["1947-05-10 23:59:12+08" "1973-01-14 03:14:21+08"]', '1974-10-02 12:19:00', 
+		'\x2f2f31323435313234343534', 'true', '10.1.1.1', '10.2.0.5/32', '0101101010', 'a', 136);
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+(1 row)
+
+delete from t1;
+vacuum full compact t1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+(0 rows)
+
+drop table if exists t1;
+create table t1(
+        c_tinyint         tinyint,
+        c_smallint        smallint,
+        c_int             integer,
+        c_bigint          bigint,
+        c_money           money,
+        c_numeric         numeric,
+        c_real            real,
+        c_double          double precision,
+        c_decimal         decimal,
+        c_varchar         varchar,
+        c_char            char(30),
+        c_nvarchar2       nvarchar2,
+        c_text            text,
+        c_timestamp       timestamp with time zone,
+        c_timestamptz     timestamp without time zone,
+        c_date            date,
+        c_time            time without time zone,
+        c_timetz          time with time zone,
+        c_interval        interval,
+        c_tinterval       tinterval,
+        c_smalldatetime   smalldatetime,
+        c_bytea           varchar,
+        c_boolean         boolean,
+        c_inet            varchar2,
+        c_cidr            nvarchar2,
+        c_bit             clob,
+        c_varbit          char,
+        c_oid             oid
+) tablespace hdfs_ts
+partition by values(
+        c_timestamp,
+        c_timestamptz,
+        c_interval,
+        c_smalldatetime
+);
+insert into t1 values (13, 13768, 115026, -9457, '$561.32', 561.322815379585,
+		1682.67, 1682.1, 61032419699811781, 'asdfasfas', 'asdasfasfasffsf432423424234', 
+		'sdadasdads', 'ss', '1974-10-02 12:18:35.454199+08', '1971-03-20 11:13:50', 
+		'1972-05-30 11:05:28', '11:13:50', '12:18:35.454199+08', '26 years 3 mons 21 days 11:41:24.545801',
+		'["1947-05-10 23:59:12+08" "1973-01-14 03:14:21+08"]', '1974-10-02 12:19:00', 
+		'\x2f2f31323435313234343534', 'true', '10.1.1.1', '10.2.0.5/32', '0101101010', 'a', 136);
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+(1 row)
+
+delete from t1;
+vacuum full compact t1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+(0 rows)
+
+drop table if exists t1;
+create table t1(
+        c_tinyint         tinyint,
+        c_smallint        smallint,
+        c_int             integer,
+        c_bigint          bigint,
+        c_money           money,
+        c_numeric         numeric,
+        c_real            real,
+        c_double          double precision,
+        c_decimal         decimal,
+        c_varchar         varchar,
+        c_char            char(30),
+        c_nvarchar2       nvarchar2,
+        c_text            text,
+        c_timestamp       timestamp with time zone,
+        c_timestamptz     timestamp without time zone,
+        c_date            date,
+        c_time            time without time zone,
+        c_timetz          time with time zone,
+        c_interval        interval,
+        c_tinterval       tinterval,
+        c_smalldatetime   smalldatetime,
+        c_bytea           varchar,
+        c_boolean         boolean,
+        c_inet            varchar2,
+        c_cidr            nvarchar2,
+        c_bit             clob,
+        c_varbit          char,
+        c_oid             oid
+) tablespace hdfs_ts
+partition by values(
+        c_date,
+        c_time,
+        c_timetz,
+        c_text
+);
+insert into t1 values (13, 13768, 115026, -9457, '$561.32', 561.322815379585,
+		1682.67, 1682.1, 61032419699811781, 'asdfasfas', 'asdasfasfasffsf432423424234', 
+		'sdadasdads', 'ss', '1974-10-02 12:18:35.454199+08', '1971-03-20 11:13:50', 
+		'1972-05-30 11:05:28', '11:13:50', '12:18:35.454199+08', '26 years 3 mons 21 days 11:41:24.545801',
+		'["1947-05-10 23:59:12+08" "1973-01-14 03:14:21+08"]', '1974-10-02 12:19:00', 
+		'\x2f2f31323435313234343534', 'true', '10.1.1.1', '10.2.0.5/32', '0101101010', 'a', 136);
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+ .1
+(1 row)
+
+delete from t1;
+vacuum full compact t1;
+execute direct on(datanode1) 'select print_desc()';
+ print_desc 
+------------
+(0 rows)
+
+-- clean test enviroment
+drop table if exists t1;
+drop table if exists file1;
+drop table if exists file2;
+drop table if exists file3;
+drop table if exists file4;
+-- vacuum full compact without table name;
+create schema vacuum_full_schema;
+set current_schema=vacuum_full_schema;
+drop function print_desc_t2;
+ERROR:  function print_desc_t2 does not exist
+CREATE OR REPLACE FUNCTION print_desc_t2()
+  RETURNS TABLE (relativefilename text) AS
+$$
+declare tblname text;
+BEGIN
+    select a.relname into tblname from pg_class a, pg_class b where a.oid=b.relcudescrelid and b.relname='t2';
+
+    RETURN QUERY
+    execute format('select substr(relativefilename,-2) from cstore.%I', tblname);
+END;
+$$ LANGUAGE plpgsql;
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+drop table if exists t2;
+NOTICE:  table "t2" does not exist, skipping
+create table t1(c1 int, c2 int, c3 int, c4 int) tablespace hdfs_ts;
+create table t2(c1 int, c2 int, c3 int, c4 int) tablespace hdfs_ts partition by values(c2,c3);
+insert into t1 values (13, 1,1,1);
+insert into t2 values (13, 2,2,2);
+execute direct on(datanode1) 'select public.print_desc()';
+ print_desc 
+------------
+ .1
+(1 row)
+
+execute direct on(datanode1) 'select print_desc_t2()';
+ print_desc_t2 
+---------------
+ .1
+(1 row)
+
+delete from t1 where c4=1;
+delete from t2 where c2=2;
+vacuum full compact;
+execute direct on(datanode1) 'select public.print_desc()';
+ print_desc 
+------------
+(0 rows)
+
+execute direct on(datanode1) 'select print_desc_t2()';
+ print_desc_t2 
+---------------
+(0 rows)
+
+drop table if exists t1;
+drop table if exists t2;
+drop function print_desc_t2;
+set current_schema=public;
+drop schema vacuum_full_schema;
+drop function print_desc;

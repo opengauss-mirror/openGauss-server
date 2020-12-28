@@ -54,7 +54,6 @@ PG_MODULE_MAGIC;
 #define NAME_PASSWORD "password"
 #define NAME_ENCODING "encoding"
 
-#ifdef ENABLE_MULTIPLE_NODES
 /* Local functions */
 static void init_key_value(void);
 static void set_default_if_not_given(void);
@@ -411,6 +410,10 @@ static void init_ec(FuncCallContext* funcctx, FunctionCallInfo fcinfo)
 
         delete_ec_ctrl();
         t_thrd.conn_cxt.ecCtrl = new ECControlODBC(funcctx, fcinfo);
+        if (unlikely(t_thrd.conn_cxt.ecCtrl == NULL)) {
+            ereport(ERROR, (errmodule(MOD_EC), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                errmsg("Initialize ODBC Connector failed due to insufficient memory.")));
+        }
     }
 
     MemoryContextSwitchTo(oldcontext);
@@ -531,7 +534,6 @@ void record_ec_info(FunctionScanState* node)
         (node->ss.ps.instrument->ec_fetch_count)++;
     }
 }
-#endif
 
 /*
  * exec_hadoop_sql:
@@ -548,12 +550,19 @@ void record_ec_info(FunctionScanState* node)
  */
 Datum exec_hadoop_sql(PG_FUNCTION_ARGS)
 {
-#ifndef ENABLE_MULTIPLE_NODES
-    FuncCallContext* funcctx = NULL;
+    if (!superuser()) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("must be system admin to use this function"),
+                errhint("This function may have security risk, please use exec_on_extension instead.")));
+    }
 
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-    SRF_RETURN_DONE(funcctx);
-#else 
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Un-support feature in B compatibility")));
+    }
+
     FuncCallContext* funcctx = NULL;
     Datum result;
     bool isend = false;
@@ -628,7 +637,6 @@ Datum exec_hadoop_sql(PG_FUNCTION_ARGS)
 
         SRF_RETURN_DONE(funcctx);
     }
-#endif
 }
 
 /*
@@ -644,12 +652,11 @@ Datum exec_hadoop_sql(PG_FUNCTION_ARGS)
  */
 Datum exec_on_extension(PG_FUNCTION_ARGS)
 {
-#ifndef ENABLE_MULTIPLE_NODES
-    FuncCallContext* funcctx = NULL;
-
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-    SRF_RETURN_DONE(funcctx);
-#else
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Un-support feature in B compatibility")));
+    }
     FuncCallContext* funcctx = NULL;
     Datum result;
     bool isEnd = false;
@@ -722,5 +729,4 @@ Datum exec_on_extension(PG_FUNCTION_ARGS)
 
         SRF_RETURN_DONE(funcctx);
     }
-#endif
 }

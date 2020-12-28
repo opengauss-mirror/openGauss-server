@@ -21,7 +21,7 @@ insert into cmpr_nulls_prefix_raw(R00, R01, R02, R03, R04, R05, R06, R07, R08, R
 insert into cmpr_nulls_prefix_raw(R00, R01, R02, R03, R04, R06, R07, R08, R09) select generate_series(1,600),
 	'aaaaaaaaaaaaa', 'aaaaaaaaaaaaa', 'aaaaaaaaaaaaa', 'aaaaaaaaaaaaa',
 	'aaaaaaaaaaaaa', 'aaaaaaaaaaaaa', 'aaaaaaaaaaaaa', 'aaaaaaaaaaaaa';
-COPY cmpr_nulls_prefix_raw TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_nulls_prefix.data';
+COPY cmpr_nulls_prefix_raw TO '@abs_srcdir@/data/cmpr_nulls_prefix.data';
 CREATE TABLE cmpr_nulls_prefix
 (
 	R00 int,
@@ -34,8 +34,8 @@ CREATE TABLE cmpr_nulls_prefix
 	R07 varchar(20) PREFIX,
 	R08 varchar(20) PREFIX,
 	R09 varchar(20) PREFIX
-) COMPRESS;
-COPY cmpr_nulls_prefix FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_nulls_prefix.data';
+) ;
+COPY cmpr_nulls_prefix FROM '@abs_srcdir@/data/cmpr_nulls_prefix.data';
 SELECT (SELECT COUNT(*) FROM cmpr_nulls_prefix) - (SELECT COUNT(*) FROM cmpr_nulls_prefix_raw);
  ?column? 
 ----------
@@ -54,4 +54,4 @@ SELECT (SELECT COUNT(*) FROM cmpr_nulls_prefix) - (SELECT COUNT(*) FROM cmpr_nul
 
 DROP TABLE cmpr_nulls_prefix;
 DROP TABLE cmpr_nulls_prefix_raw;
-\! rm '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_nulls_prefix.data';
+\! rm '@abs_srcdir@/data/cmpr_nulls_prefix.data';

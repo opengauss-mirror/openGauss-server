@@ -1,0 +1,741 @@
+---- create required databases with different encoding for compatibility test.
+CREATE DATABASE DB_ASCII_BULKLOAD_COMPATIBILITY_TEST WITH ENCODING 'SQL_ASCII' LC_COLLATE='C' LC_CTYPE='C' TEMPLATE=template0;
+CREATE DATABASE DB_LATIN1_BULKLOAD_COMPATIBILITY_TEST WITH ENCODING 'Latin1' LC_COLLATE='C' LC_CTYPE='C' TEMPLATE=template0;
+CREATE DATABASE DB_GBK_BULKLOAD_COMPATIBILITY_TEST WITH ENCODING 'GBK' LC_COLLATE='C' LC_CTYPE='C' TEMPLATE=template0;
+CREATE DATABASE DB_EUCJIS2004_BULKLOAD_COMPATIBILITY_TEST WITH ENCODING 'EUCJIS2004' LC_COLLATE='C' LC_CTYPE='C' TEMPLATE=template0;
+CREATE DATABASE TD_FORMAT_DB DBCOMPATIBILITY 'TD' template template0 lc_ctype 'C' lc_collate 'C';
+----
+---- load with bulkload compatible_illegal_chars
+----
+----smartcare case
+CREATE TABLE SC_INVALID_ENCODING_TEST (
+   batchno              numeric(12,0)                  null,
+   starttime            numeric(18,0)                  null,
+   rat                  numeric(1,0)                   null,
+   apn                  varchar(64)                    null,
+   prot_category        numeric(5,0)                   null,
+   prot_type            numeric(5,0)                   null,
+   host                 varchar(64)                    null,
+   l4_ul_throughput     numeric(20,0)                  null,
+   l4_dw_throughput     numeric(20,0)                  null,
+   l4_ul_packets        numeric(18,0)                  null,
+   l4_dw_packets        numeric(18,0)                  null,
+   tcpconncount         numeric(10,0)                  null,
+   tcpconnsucccount     numeric(10,0)                  null,
+   carrier_id           numeric(5,0)                   null,
+   tcp_rtt              numeric(20,0)                  null,
+   app_id               numeric(18,0)                  null
+   )   
+with(orientation=column, compression=low)
+distribute by hash(carrier_id,app_id);
+CREATE FOREIGN TABLE EXT_SC_INVALID_ENCODING_TEST (
+   batchno              numeric(12,0)                  null,
+   starttime            numeric(18,0)                  null,
+   rat                  numeric(1,0)                   null,
+   apn                  varchar(64)                    null,
+   prot_category        numeric(5,0)                   null,
+   prot_type            numeric(5,0)                   null,
+   host                 varchar(64)                    null,
+   l4_ul_throughput     numeric(20,0)                  null,
+   l4_dw_throughput     numeric(20,0)                  null,
+   l4_ul_packets        numeric(18,0)                  null,
+   l4_dw_packets        numeric(18,0)                  null,
+   tcpconncount         numeric(10,0)                  null,
+   tcpconnsucccount     numeric(10,0)                  null,
+   carrier_id           numeric(5,0)                   null,
+   tcp_rtt              numeric(20,0)                  null,
+   app_id               numeric(18,0)                  null
+)SERVER gsmpp_server OPTIONS(format 'text', location 'gsfs://127.0.0.1:8900/bulkload_compatible_illegal_chars_test_data/smartcare_test.data', encoding 'sql_ascii', delimiter '|', mode 'normal', compatible_illegal_chars 'true', ignore_extra_data 'true');
+INSERT INTO SC_INVALID_ENCODING_TEST SELECT * FROM EXT_SC_INVALID_ENCODING_TEST;
+SELECT * FROM SC_INVALID_ENCODING_TEST;
+   batchno    | starttime  | rat |  apn  | prot_category | prot_type | host | l4_ul_throughput | l4_dw_throughput | l4_ul_packets | l4_dw_packets | tcpconncount | tcpconnsucccount | carrier_id | tcp_rtt | app_id 
+--------------+------------+-----+-------+---------------+-----------+------+------------------+------------------+---------------+---------------+--------------+------------------+------------+---------+--------
+ 201604230200 | 1461340800 |   2 | CMNET |             2 |      3104 |     +|              580 |              722 |             2 |             4 |            2 |                2 |            |       0 |   1422
+              |            |     |       |               |           |   ?  |                  |                  |               |               |              |                  |            |         | 
+(1 row)
+
+DROP TABLE SC_INVALID_ENCODING_TEST;
+DROP FOREIGN TABLE EXT_SC_INVALID_ENCODING_TEST;
+----invalid chars for server_encoding=UTF8
+----(1)local2utf8 test
+----(1.1)only char type test
+CREATE TABLE COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE (
+		COL1_CHAR		CHAR(100) NOT NULL,
+		COL2_VARCHAR	VARCHAR(100) NOT NULL,
+		COL3_VARCHAR2	VARCHAR2(100) NOT NULL,
+		COL4_NVARCHAR2	NVARCHAR2(100) NOT NULL,
+		COL5_CLOB		CLOB NOT NULL,
+		COL6_TEXT		TEXT NOT NULL
+);
+----(1.1.1)for text format
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE (
+		COL1_CHAR		CHAR(100) NOT NULL,
+		COL2_VARCHAR	VARCHAR(100) NOT NULL,
+		COL3_VARCHAR2	VARCHAR2(100) NOT NULL,
+		COL4_NVARCHAR2	NVARCHAR2(100) NOT NULL,
+		COL5_CLOB		CLOB NOT NULL,
+		COL6_TEXT		TEXT NOT NULL
+)SERVER gsmpp_server OPTIONS(format 'text', location 'gsfs://127.0.0.1:8900/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_text_format.data', encoding 'utf8', delimiter '|', mode 'normal', compatible_illegal_chars 'true');
+INSERT INTO COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+SELECT TRIM(COL1_CHAR), TRIM(COL2_VARCHAR), TRIM(COL3_VARCHAR2), TRIM(COL4_NVARCHAR2), COL5_CLOB, COL6_TEXT FROM COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE ORDER BY TRIM(COL1_CHAR);
+   btrim   |    btrim     |     btrim     |     btrim      | col5_clob | col6_text 
+-----------+--------------+---------------+----------------+-----------+-----------
+ col1 cha? | col2 varcha? | col3 varchar? | col4 nvarchar? | col5 clo? | col6 text
+ col1 char | col2 varchar | col3 varchar2 | col4 nvarchar2 | col5 clob | col6 text
+ col1 ?har | col2 varc?ar | col3 varcha?2 | col4?nvarchar2 | col5 clob | col6 text
+(3 rows)
+
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE OPTIONS (SET compatible_illegal_chars 'false');
+SELECT TRIM(COL1_CHAR), TRIM(COL2_VARCHAR), TRIM(COL3_VARCHAR2), TRIM(COL4_NVARCHAR2), COL5_CLOB, COL6_TEXT FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE ORDER BY TRIM(COL1_CHAR);
+ERROR:  invalid byte sequence for encoding "UTF8": 0x00
+CONTEXT:  LOAD ext_compatible_illegal_chars_test_just_char_type, line 1
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+TRUNCATE COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+----(1.1.2)for csv format
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE (
+		COL1_CHAR		CHAR(100) NOT NULL,
+		COL2_VARCHAR	VARCHAR(100) NOT NULL,
+		COL3_VARCHAR2	VARCHAR2(100) NOT NULL,
+		COL4_NVARCHAR2	NVARCHAR2(100) NOT NULL,
+		COL5_CLOB		CLOB NOT NULL,
+		COL6_TEXT		TEXT NOT NULL
+)SERVER gsmpp_server OPTIONS(format 'csv', location 'gsfs://127.0.0.1:8900/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_csv_format.data', encoding 'utf8', delimiter '|', mode 'normal', compatible_illegal_chars 'true');
+INSERT INTO COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+SELECT TRIM(COL1_CHAR), TRIM(COL2_VARCHAR), TRIM(COL3_VARCHAR2), TRIM(COL4_NVARCHAR2), COL5_CLOB, COL6_TEXT FROM COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE ORDER BY TRIM(COL1_CHAR);
+   btrim   |    btrim     |     btrim     |     btrim      | col5_clob | col6_text 
+-----------+--------------+---------------+----------------+-----------+-----------
+ col1 cha? | col2 varcha? | col3 varchar? | col4 nvarchar? | col5 clo? | col6 text
+ col1 char | col2 varchar | col3 varchar2 | col4 nvarchar2 | col5 clob | col6 text
+ col1 ?har | col2 varc?ar | col3 varcha?2 | col4?nvarchar2 | col5 clob | col6 text
+(3 rows)
+
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE OPTIONS (SET compatible_illegal_chars 'false');
+SELECT TRIM(COL1_CHAR), TRIM(COL2_VARCHAR), TRIM(COL3_VARCHAR2), TRIM(COL4_NVARCHAR2), COL5_CLOB, COL6_TEXT FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE ORDER BY TRIM(COL1_CHAR);
+ERROR:  invalid byte sequence for encoding "UTF8": 0x00
+CONTEXT:  LOAD ext_compatible_illegal_chars_test_just_char_type, line 1
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+TRUNCATE COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+----(1.1.3)for fixed format
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE (
+		COL1_CHAR		CHAR(20) POSITION(0, 20) NOT NULL,
+		COL2_VARCHAR	VARCHAR(20) POSITION(20, 20) NOT NULL,
+		COL3_VARCHAR2	VARCHAR2(20) POSITION(40, 20) NOT NULL,
+		COL4_NVARCHAR2	NVARCHAR2(20) POSITION(60, 20) NOT NULL,
+		COL5_CLOB		CLOB POSITION(80, 20) NOT NULL,
+		COL6_TEXT		TEXT POSITION(100, 20) NOT NULL
+)SERVER gsmpp_server OPTIONS(format 'fixed', fix '120', location 'gsfs://127.0.0.1:8900/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_fixed_format.data', encoding 'utf8', mode 'normal', compatible_illegal_chars 'true');
+INSERT INTO COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+SELECT TRIM(COL1_CHAR), TRIM(COL2_VARCHAR), TRIM(COL3_VARCHAR2), TRIM(COL4_NVARCHAR2), COL5_CLOB, COL6_TEXT FROM COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE ORDER BY TRIM(COL1_CHAR);
+   btrim    |     btrim     |     btrim      |      btrim      | col5_clob  | col6_text 
+------------+---------------+----------------+-----------------+------------+-----------
+ col1 cha?| | col2 varcha?| | col3 varchar?| | col4 nvarchar?| | col5 clo?| | col6 text
+ col1 char  | col2 varchar  | col3 varchar2  | col4 nvarchar2  | col5 clob  | col6 text
+ col1 ?har  | col2 varc?ar  | col3 varcha?2  | col4?nvarchar2  | col5 clob  | col6 text
+(3 rows)
+
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE OPTIONS (SET compatible_illegal_chars 'false');
+SELECT TRIM(COL1_CHAR), TRIM(COL2_VARCHAR), TRIM(COL3_VARCHAR2), TRIM(COL4_NVARCHAR2), COL5_CLOB, COL6_TEXT FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE ORDER BY TRIM(COL1_CHAR);
+ERROR:  invalid byte sequence for encoding "UTF8": 0xfc
+CONTEXT:  LOAD ext_compatible_illegal_chars_test_just_char_type, line 2
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE
+(
+	C_CHAR CHAR(50) POSITION(0,30),
+	C_NULL BIGINT POSITION(30,0),
+	C_VARCHAR VARCHAR(50) POSITION(30,30),
+	C_NUMERIC NUMERIC(20,5) POSITION(60,10)
+)SERVER gsmpp_server OPTIONS (LOCATION 'gsfs://127.0.0.1:8900/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_fixed_format_DTS2016060600832.data',FORMAT 'FIXED',MODE 'Normal',COMPATIBLE_ILLEGAL_CHARS 'TRUE',ENCODING 'UTF8');
+WARNING:  The above Read-Only foreign table is using FIXED mode without specifying 'fix' option.
+HINT:  Please use 'fix' option to specify expected fixed record length in order to parser the data file correctly.
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+                       c_char                       | c_null |  c_varchar   |   c_numeric    
+----------------------------------------------------+--------+--------------+----------------
+ 0x00 >> " "                                        |        |  0x00 >> " " | 20160426.00000
+(1 row)
+
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+DROP TABLE COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+CREATE TABLE COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE
+(
+    C_BIGINT BIGINT,
+    C_CHAR_1 CHAR(100),
+    C_CHAR_2 CHAR(100),
+    C_VARCHAR VARCHAR(1024),
+    C_TEXT TEXT,
+    C_CLOB CLOB,
+    C_NUMERIC NUMERIC(20,5),
+    C_DP DOUBLE PRECISION
+) DISTRIBUTE BY HASH(C_BIGINT);
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE
+(
+	C_BIGINT BIGINT POSITION(0,5),
+	C_CHAR_1 CHAR(100) POSITION(5,10),
+	C_CHAR_2 CHAR(100) POSITION(15,29),
+	C_VARCHAR VARCHAR(1024) POSITION(44,29),
+	C_TEXT TEXT POSITION(73,29),
+	C_CLOB CLOB POSITION(102,29),
+	C_NUMERIC NUMERIC(20,5) POSITION(131,14),
+	C_DP DOUBLE PRECISION POSITION(145,14)
+)SERVER gsmpp_server OPTIONS (LOCATION 'gsfs://127.0.0.1:8900/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_fixed_format_DTS2016060600832_all.data',FORMAT 'FIXED',MODE 'Normal',COMPATIBLE_ILLEGAL_CHARS 'TRUE',ENCODING 'UTF8');
+WARNING:  The above Read-Only foreign table is using FIXED mode without specifying 'fix' option.
+HINT:  Please use 'fix' option to specify expected fixed record length in order to parser the data file correctly.
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+ count 
+-------
+  1192
+(1 row)
+
+INSERT INTO COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+SELECT COUNT(*) FROM COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+ count 
+-------
+  1192
+(1 row)
+
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+DROP TABLE COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+----(1.2)mixed type test
+CREATE TABLE COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		COL1_INT		BIGINT NOT NULL,
+		COL2_CHAR		CHAR(100) NOT NULL,
+		COL3_VARCHAR	VARCHAR(100) NOT NULL,
+		COL4_VARCHAR2	VARCHAR2(100) NOT NULL,
+		COL5_RAW		RAW NOT NULL,	
+		COL6_NVARCHAR2	NVARCHAR2(100) NOT NULL,
+		COL7_CLOB		CLOB NOT NULL,
+		COL8_TEXT		TEXT NOT NULL,
+		COL9_TIMESTAMP	TIMESTAMP NOT NULL
+);
+----(1.2.1)for text format
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		COL1_INT		BIGINT NOT NULL,
+		COL2_CHAR		CHAR(100) NOT NULL,
+		COL3_VARCHAR	VARCHAR(100) NOT NULL,
+		COL4_VARCHAR2	VARCHAR2(100) NOT NULL,
+		COL5_RAW		RAW NOT NULL,	
+		COL6_NVARCHAR2	NVARCHAR2(100) NOT NULL,
+		COL7_CLOB		CLOB NOT NULL,
+		COL8_TEXT		TEXT NOT NULL,
+		COL9_TIMESTAMP	TIMESTAMP NOT NULL
+)SERVER gsmpp_server OPTIONS(format 'text', location 'gsfs://127.0.0.1:8900/bulkload_compatible_illegal_chars_test_data/invalid_char_for_mixed_type_text_format.data', delimiter '|', mode 'normal', compatible_illegal_chars 'true', reject_limit 'unlimited')with err_cic_test;
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+ERROR:  invalid input syntax for type bigint: "12 45"
+CONTEXT:  LOAD ext_compatible_illegal_chars_test_mixed_type, line 1, column col1_int: "12 45", line:"12 45|col1 char|col2 varchar|col3 varchar2|E'\x01020304'|col4 nvarchar2|col5 clob|col6 text|2016-6-1 15:10"
+INSERT INTO COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+SELECT COUNT(*) FROM err_cic_test;
+ count 
+-------
+     9
+(1 row)
+
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+----(1.2.1.1)gbk2utf8
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		C_BIGINT BIGINT,
+		C_CHAR_1 CHAR(100),
+		C_CHAR_2 CHAR(100),
+		C_VARCHAR VARCHAR(1024),
+		C_TEXT TEXT,
+		C_CLOB CLOB,
+		C_DP1 DOUBLE PRECISION,
+		C_DP2 DOUBLE PRECISION
+)SERVER gsmpp_server OPTIONS(format 'text', encoding 'gbk', location 'gsfs://127.0.0.1:8900/bulkload_compatible_illegal_chars_test_data/invalid_char_for_mixed_type_text_format_gbk.data', delimiter '|', mode 'normal', compatible_illegal_chars 'true', reject_limit 'unlimited')with err_cic_test;
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+ count 
+-------
+   517
+(1 row)
+
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE OPTIONS(SET compatible_illegal_chars 'false');
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+ERROR:  invalid byte sequence for encoding "GBK": 0x00
+CONTEXT:  LOAD ext_compatible_illegal_chars_test_mixed_type, line 1
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+CREATE TABLE gbk2utf8_test(a varchar(4));
+COPY gbk2utf8_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_gbk2utf8_1.data' (format 'text', encoding 'GBK', delimiter '|', compatible_illegal_chars 'false');
+ERROR:  invalid byte sequence for encoding "GBK": 0x00
+CONTEXT:  COPY gbk2utf8_test, line 1
+COPY gbk2utf8_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_gbk2utf8_1.data' (format 'text', encoding 'GBK', delimiter '|', compatible_illegal_chars 'true');
+COPY gbk2utf8_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_gbk2utf8_2.data' (format 'text', encoding 'GBK', delimiter '|', compatible_illegal_chars 'false');
+ERROR:  invalid byte sequence for encoding "GBK": 0x80 0xee
+CONTEXT:  COPY gbk2utf8_test, line 1
+COPY gbk2utf8_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_gbk2utf8_2.data' (format 'text', encoding 'GBK', delimiter '|', compatible_illegal_chars 'true');
+SELECT * FROM gbk2utf8_test ORDER BY a;
+ a  
+----
+  
+ ??
+(2 rows)
+
+DROP TABLE gbk2utf8_test;
+----(1.2.1.2)utf82gbk
+\c DB_GBK_BULKLOAD_COMPATIBILITY_TEST;
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		C_BIGINT BIGINT,
+		C_CHAR_1 CHAR(100),
+		C_CHAR_2 CHAR(100),
+		C_VARCHAR VARCHAR(1024),
+		C_TEXT TEXT,
+		C_CLOB CLOB,
+		C_DP1 DOUBLE PRECISION,
+		C_DP2 DOUBLE PRECISION
+)SERVER gsmpp_server OPTIONS(format 'text', encoding 'utf8', location 'gsfs://127.0.0.1:8900/bulkload_compatible_illegal_chars_test_data/invalid_char_for_mixed_type_text_format_gbk.data', delimiter '|', mode 'normal', compatible_illegal_chars 'true', reject_limit 'unlimited')with err_cic_test;
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+ count 
+-------
+   517
+(1 row)
+
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE OPTIONS(SET compatible_illegal_chars 'false');
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+ERROR:  invalid byte sequence for encoding "UTF8": 0x00
+CONTEXT:  LOAD ext_compatible_illegal_chars_test_mixed_type, line 1
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+CREATE TABLE utf82gbk_test(a varchar(4));
+COPY utf82gbk_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_utf82gbk_1.data' (format 'text', encoding 'utf8', delimiter '|', compatible_illegal_chars 'false');
+ERROR:  invalid byte sequence for encoding "UTF8": 0x00
+CONTEXT:  COPY utf82gbk_test, line 1
+COPY utf82gbk_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_utf82gbk_1.data' (format 'text', encoding 'utf8', delimiter '|', compatible_illegal_chars 'true');
+COPY utf82gbk_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_utf82gbk_2.data' (format 'text', encoding 'utf8', delimiter '|', compatible_illegal_chars 'false');
+ERROR:  invalid byte sequence for encoding "UTF8": 0xfc
+CONTEXT:  COPY utf82gbk_test, line 1
+COPY utf82gbk_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_utf82gbk_2.data' (format 'text', encoding 'utf8', delimiter '|', compatible_illegal_chars 'true');
+SELECT * FROM utf82gbk_test ORDER BY a;
+ a  
+----
+  
+ ?e
+(2 rows)
+
+DROP TABLE utf82gbk_test;
+\c regression;
+----(1.2.1.3)latin12utf8
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		C_BIGINT BIGINT,
+		C_CHAR_1 CHAR(100),
+		C_CHAR_2 CHAR(100),
+		C_VARCHAR VARCHAR(1024),
+		C_TEXT TEXT,
+		C_CLOB CLOB,
+		C_DP1 DOUBLE PRECISION,
+		C_DP2 DOUBLE PRECISION
+)SERVER gsmpp_server OPTIONS(format 'text', encoding 'latin1', location 'gsfs://127.0.0.1:8900/bulkload_compatible_illegal_chars_test_data/invalid_char_for_mixed_type_text_format_latin1.data', delimiter '|', mode 'normal', compatible_illegal_chars 'true', reject_limit 'unlimited')with err_cic_test;
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+ count 
+-------
+     1
+(1 row)
+
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE OPTIONS(SET compatible_illegal_chars 'false');
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+ERROR:  invalid byte sequence for encoding "LATIN1": 0x00
+CONTEXT:  LOAD ext_compatible_illegal_chars_test_mixed_type, line 1
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+----(1.2.1.4)utf82latin1
+\c DB_LATIN1_BULKLOAD_COMPATIBILITY_TEST;
+SHOW server_encoding;
+ server_encoding 
+-----------------
+ LATIN1
+(1 row)
+
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		C_BIGINT BIGINT,
+		C_CHAR_1 CHAR(100),
+		C_CHAR_2 CHAR(100),
+		C_VARCHAR VARCHAR(1024),
+		C_TEXT TEXT,
+		C_CLOB CLOB,
+		C_DP1 DOUBLE PRECISION,
+		C_DP2 DOUBLE PRECISION
+)SERVER gsmpp_server OPTIONS(format 'text', encoding 'utf8', location 'gsfs://127.0.0.1:8900/bulkload_compatible_illegal_chars_test_data/invalid_char_for_mixed_type_text_format_latin1.data', delimiter '|', mode 'normal', compatible_illegal_chars 'true', reject_limit 'unlimited')with err_cic_test;
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+ count 
+-------
+     1
+(1 row)
+
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE OPTIONS(SET compatible_illegal_chars 'false');
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+ERROR:  invalid byte sequence for encoding "UTF8": 0x00
+CONTEXT:  LOAD ext_compatible_illegal_chars_test_mixed_type, line 1
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+CREATE TABLE utf82latin1_test(a varchar(4));
+COPY utf82latin1_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_utf82latin1_1.data' (format 'text', encoding 'utf8', delimiter '|', compatible_illegal_chars 'false');
+ERROR:  invalid byte sequence for encoding "UTF8": 0xfc
+CONTEXT:  COPY utf82latin1_test, line 1
+COPY utf82latin1_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_utf82latin1_1.data' (format 'text', encoding 'utf8', delimiter '|', compatible_illegal_chars 'true');
+COPY utf82latin1_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_utf82latin1_2.data' (format 'text', encoding 'utf8', delimiter '|', compatible_illegal_chars 'false');
+ERROR:  character with byte sequence 0xe2 0x80 0x90 in encoding "UTF8" has no equivalent in encoding "LATIN1"
+CONTEXT:  COPY utf82latin1_test, line 1
+COPY utf82latin1_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_utf82latin1_2.data' (format 'text', encoding 'utf8', delimiter '|', compatible_illegal_chars 'true');
+COPY utf82latin1_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_utf82latin1_3.data' (format 'text', encoding 'utf8', delimiter '|', compatible_illegal_chars 'false');
+ERROR:  character with byte sequence 0xcc 0x80 in encoding "UTF8" has no equivalent in encoding "LATIN1"
+CONTEXT:  COPY utf82latin1_test, line 1
+COPY utf82latin1_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_utf82latin1_3.data' (format 'text', encoding 'utf8', delimiter '|', compatible_illegal_chars 'true');
+SELECT * FROM utf82latin1_test ORDER BY a;
+ a  
+----
+ ?
+ ?
+ ??
+(3 rows)
+
+DROP TABLE utf82latin1_test;
+----(1.2.1.5)mic2latin1
+SHOW server_encoding;
+ server_encoding 
+-----------------
+ LATIN1
+(1 row)
+
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		C_BIGINT BIGINT,
+		C_CHAR_1 CHAR(100),
+		C_CHAR_2 CHAR(100),
+		C_VARCHAR VARCHAR(1024),
+		C_TEXT TEXT,
+		C_CLOB CLOB,
+		C_DP1 DOUBLE PRECISION,
+		C_DP2 DOUBLE PRECISION
+)SERVER gsmpp_server OPTIONS(format 'text', encoding 'MULE_INTERNAL', location 'gsfs://127.0.0.1:8900/bulkload_compatible_illegal_chars_test_data/invalid_char_for_mixed_type_text_format_mic.data', delimiter '|', mode 'normal', compatible_illegal_chars 'true', reject_limit 'unlimited')with err_cic_test;
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+ count 
+-------
+   913
+(1 row)
+
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE OPTIONS(SET compatible_illegal_chars 'false');
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+ERROR:  invalid byte sequence for encoding "MULE_INTERNAL": 0x00
+CONTEXT:  LOAD ext_compatible_illegal_chars_test_mixed_type, line 1
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+CREATE TABLE mic2latin_test(a varchar(4));
+COPY mic2latin_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_mic2latin_1.data' (format 'text', encoding 'MULE_INTERNAL', delimiter '|', compatible_illegal_chars 'false');
+ERROR:  invalid byte sequence for encoding "MULE_INTERNAL": 0x00
+CONTEXT:  COPY mic2latin_test, line 1
+COPY mic2latin_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_mic2latin_1.data' (format 'text', encoding 'MULE_INTERNAL', delimiter '|', compatible_illegal_chars 'true');
+COPY mic2latin_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_mic2latin_2.data' (format 'text', encoding 'MULE_INTERNAL', delimiter '|', compatible_illegal_chars 'false');
+ERROR:  invalid byte sequence for encoding "MULE_INTERNAL": 0x9c 0x65
+CONTEXT:  COPY mic2latin_test, line 1
+COPY mic2latin_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_mic2latin_2.data' (format 'text', encoding 'MULE_INTERNAL', delimiter '|', compatible_illegal_chars 'true');
+COPY mic2latin_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_mic2latin_3.data' (format 'text', encoding 'MULE_INTERNAL', delimiter '|', compatible_illegal_chars 'false');
+ERROR:  character with byte sequence 0xc2 in encoding "MULE_INTERNAL" has no equivalent in encoding "LATIN1"
+CONTEXT:  COPY mic2latin_test, line 1
+COPY mic2latin_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_mic2latin_3.data' (format 'text', encoding 'MULE_INTERNAL', delimiter '|', compatible_illegal_chars 'true');
+SELECT * FROM mic2latin_test ORDER BY a;
+ a  
+----
+  
+ ??
+ ?e
+(3 rows)
+
+DROP TABLE mic2latin_test;
+----(1.2.1.6)latin12latin1
+SHOW server_encoding;
+ server_encoding 
+-----------------
+ LATIN1
+(1 row)
+
+CREATE TABLE LAIN1_TO_LATIN1
+(
+	C_BIGINT BIGINT,
+    C_CHAR_1 CHAR(100),
+    C_CHAR_2 CHAR(100),
+    C_VARCHAR VARCHAR(1024),
+    C_TEXT TEXT,
+    C_CLOB CLOB,
+    C_NUMERIC NUMERIC(20,5),
+    C_DP DOUBLE PRECISION
+);
+CREATE FOREIGN TABLE FT_LAIN1_TO_LATIN1
+(
+	C_BIGINT BIGINT,
+    C_CHAR_1 CHAR(100),
+    C_CHAR_2 CHAR(100),
+    C_VARCHAR VARCHAR(1024),
+    C_TEXT TEXT,
+    C_CLOB CLOB,
+    C_NUMERIC NUMERIC(20,5),
+    C_DP DOUBLE PRECISION
+) SERVER gsmpp_server OPTIONS(format 'text', encoding 'latin1', location 'gsfs://127.0.0.1:8900/bulkload_compatible_illegal_chars_test_data/invalid_char_for_single_byte_encoding.data', delimiter '|', mode 'normal', compatible_illegal_chars 'true');
+SELECT * FROM FT_LAIN1_TO_LATIN1;
+ c_bigint |                                               c_char_1                                               |                                               c_char_2                                               | c_varchar |  c_text   |  c_clob   |   c_numeric    |      c_dp      
+----------+------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------+-----------+-----------+-----------+----------------+----------------
+    10001 | illegal                                                                                              | 0x00 >> '                                                                                            | 0x00 >> ' | 0x00 >> ' | 0x00 >> ' | 20160426.99999 | 20160426.99999
+(1 row)
+
+ALTER FOREIGN TABLE FT_LAIN1_TO_LATIN1 OPTIONS(SET compatible_illegal_chars 'false');
+SELECT * FROM FT_LAIN1_TO_LATIN1;
+ c_bigint |                                               c_char_1                                               |                                               c_char_2                                               | c_varchar |  c_text   |  c_clob   |   c_numeric    |      c_dp      
+----------+------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------+-----------+-----------+-----------+----------------+----------------
+    10001 | illegal                                                                                              | 0x00 >> '                                                                                            | 0x00 >> ' | 0x00 >> ' | 0x00 >> ' | 20160426.99999 | 20160426.99999
+(1 row)
+
+COPY LAIN1_TO_LATIN1 FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_single_byte_encoding.data' (format 'text', encoding 'latin1', delimiter '|', compatible_illegal_chars 'true');
+SELECT * FROM LAIN1_TO_LATIN1;
+ c_bigint |                                               c_char_1                                               |                                               c_char_2                                               | c_varchar |  c_text   |  c_clob   |   c_numeric    |      c_dp      
+----------+------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------+-----------+-----------+-----------+----------------+----------------
+    10001 | illegal                                                                                              | 0x00 >> '                                                                                            | 0x00 >> ' | 0x00 >> ' | 0x00 >> ' | 20160426.99999 | 20160426.99999
+(1 row)
+
+TRUNCATE LAIN1_TO_LATIN1;
+COPY LAIN1_TO_LATIN1 FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_single_byte_encoding.data' (format 'text', encoding 'latin1', delimiter '|', compatible_illegal_chars 'true');
+DROP TABLE LAIN1_TO_LATIN1;
+DROP FOREIGN TABLE FT_LAIN1_TO_LATIN1;
+----(1.2.1.7)ascii2ascii
+\c DB_ASCII_BULKLOAD_COMPATIBILITY_TEST;
+SHOW server_encoding;
+ server_encoding 
+-----------------
+ SQL_ASCII
+(1 row)
+
+CREATE TABLE ASCII_TO_ASCII
+(
+	C_BIGINT BIGINT,
+    C_CHAR_1 CHAR(100),
+    C_CHAR_2 CHAR(100),
+    C_VARCHAR VARCHAR(1024),
+    C_TEXT TEXT,
+    C_CLOB CLOB,
+    C_NUMERIC NUMERIC(20,5),
+    C_DP DOUBLE PRECISION
+);
+CREATE FOREIGN TABLE FT_ASCII_TO_ASCII
+(
+	C_BIGINT BIGINT,
+    C_CHAR_1 CHAR(100),
+    C_CHAR_2 CHAR(100),
+    C_VARCHAR VARCHAR(1024),
+    C_TEXT TEXT,
+    C_CLOB CLOB,
+    C_NUMERIC NUMERIC(20,5),
+    C_DP DOUBLE PRECISION
+) SERVER gsmpp_server OPTIONS(format 'text', encoding 'SQL_ASCII', location 'gsfs://127.0.0.1:8900/bulkload_compatible_illegal_chars_test_data/invalid_char_for_single_byte_encoding.data', delimiter '|', mode 'normal', compatible_illegal_chars 'true');
+SELECT * FROM FT_ASCII_TO_ASCII;
+ c_bigint |                                               c_char_1                                               |                                               c_char_2                                               | c_varchar |  c_text   |  c_clob   |   c_numeric    |      c_dp      
+----------+------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------+-----------+-----------+-----------+----------------+----------------
+    10001 | illegal                                                                                              | 0x00 >> '                                                                                            | 0x00 >> ' | 0x00 >> ' | 0x00 >> ' | 20160426.99999 | 20160426.99999
+(1 row)
+
+ALTER FOREIGN TABLE FT_ASCII_TO_ASCII OPTIONS(SET compatible_illegal_chars 'false');
+SELECT * FROM FT_ASCII_TO_ASCII;
+ c_bigint |                                               c_char_1                                               |                                               c_char_2                                               | c_varchar |  c_text   |  c_clob   |   c_numeric    |      c_dp      
+----------+------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------+-----------+-----------+-----------+----------------+----------------
+    10001 | illegal                                                                                              | 0x00 >> '                                                                                            | 0x00 >> ' | 0x00 >> ' | 0x00 >> ' | 20160426.99999 | 20160426.99999
+(1 row)
+
+COPY ASCII_TO_ASCII FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_single_byte_encoding.data' (format 'text', encoding 'latin1', delimiter '|', compatible_illegal_chars 'true');
+SELECT * FROM ASCII_TO_ASCII;
+ c_bigint |                                               c_char_1                                               |                                               c_char_2                                               |   c_varchar    |     c_text     |     c_clob     |   c_numeric    |      c_dp      
+----------+------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------+----------------+----------------+----------------+----------------+----------------
+    10001 | illegal                                                                                              | 0x00 >> ' '                                                                                          | 0x00 >> ' '    | 0x00 >> ' '    | 0x00 >> ' '    | 20160426.99999 | 20160426.99999
+(1 row)
+
+TRUNCATE ASCII_TO_ASCII;
+COPY ASCII_TO_ASCII FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_single_byte_encoding.data' (format 'text', encoding 'latin1', delimiter '|', compatible_illegal_chars 'false');
+ERROR:  invalid byte sequence for encoding "LATIN1": 0x00
+CONTEXT:  COPY ascii_to_ascii, line 1
+DROP TABLE ASCII_TO_ASCII;
+DROP FOREIGN TABLE FT_ASCII_TO_ASCII;
+----(1.2.1.8)utf82eucjis2004
+\c DB_EUCJIS2004_BULKLOAD_COMPATIBILITY_TEST;
+SHOW server_encoding;
+ server_encoding 
+-----------------
+ EUC_JIS_2004
+(1 row)
+
+CREATE TABLE utf82eucjis2004_test(a varchar(8));
+COPY utf82eucjis2004_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_utf82eucjis2004_1.data' (format 'text', encoding 'utf8', delimiter '|', compatible_illegal_chars 'false');
+ERROR:  invalid byte sequence for encoding "UTF8": 0xe0
+CONTEXT:  COPY utf82eucjis2004_test, line 1
+COPY utf82eucjis2004_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_utf82eucjis2004_1.data' (format 'text', encoding 'utf8', delimiter '|', compatible_illegal_chars 'true');
+COPY utf82eucjis2004_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_utf82eucjis2004_2.data' (format 'text', encoding 'utf8', delimiter '|', compatible_illegal_chars 'false');
+ERROR:  character with byte sequence 0xc4 0x94 in encoding "UTF8" has no equivalent in encoding "EUC_JIS_2004"
+CONTEXT:  COPY utf82eucjis2004_test, line 1
+COPY utf82eucjis2004_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_utf82eucjis2004_2.data' (format 'text', encoding 'utf8', delimiter '|', compatible_illegal_chars 'true');
+COPY utf82eucjis2004_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_utf82eucjis2004_3.data' (format 'text', encoding 'utf8', delimiter '|', compatible_illegal_chars 'false');
+ERROR:  character with byte sequence 0xc4 0x94 in encoding "UTF8" has no equivalent in encoding "EUC_JIS_2004"
+CONTEXT:  COPY utf82eucjis2004_test, line 1
+COPY utf82eucjis2004_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_utf82eucjis2004_3.data' (format 'text', encoding 'utf8', delimiter '|', compatible_illegal_chars 'true');
+COPY utf82eucjis2004_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_utf82eucjis2004_4.data' (format 'text', encoding 'utf8', delimiter '|', compatible_illegal_chars 'false');
+ERROR:  character with byte sequence 0xc4 0x94 in encoding "UTF8" has no equivalent in encoding "EUC_JIS_2004"
+CONTEXT:  COPY utf82eucjis2004_test, line 1
+COPY utf82eucjis2004_test FROM '@abs_srcdir@/data/datanode1/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_utf82eucjis2004_4.data' (format 'text', encoding 'utf8', delimiter '|', compatible_illegal_chars 'true');
+SELECT COUNT(*) FROM utf82eucjis2004_test;
+ count 
+-------
+     4
+(1 row)
+
+DROP TABLE utf82eucjis2004_test;
+\c regression;
+----(1.2.2)for csv format
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		COL1_INT		BIGINT NOT NULL,
+		COL2_CHAR		CHAR(100) NOT NULL,
+		COL3_VARCHAR	VARCHAR(100) NOT NULL,
+		COL4_VARCHAR2	VARCHAR2(100) NOT NULL,
+		COL5_RAW		RAW NOT NULL,	
+		COL6_NVARCHAR2	NVARCHAR2(100) NOT NULL,
+		COL7_CLOB		CLOB NOT NULL,
+		COL8_TEXT		TEXT NOT NULL,
+		COL9_TIMESTAMP	TIMESTAMP NOT NULL
+)SERVER gsmpp_server OPTIONS(format 'csv', location 'gsfs://127.0.0.1:8900/bulkload_compatible_illegal_chars_test_data/invalid_char_for_mixed_type_csv_format.data', delimiter '|', mode 'normal', compatible_illegal_chars 'true', reject_limit 'unlimited')with err_cic_test;
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+ERROR:  invalid input syntax for type bigint: "12 45"
+CONTEXT:  LOAD ext_compatible_illegal_chars_test_mixed_type, line 1, column col1_int: "12 45", line:""12 45"|"col1 char"|"col2 varchar"|"col3 varchar2"|"E'\x01020304'"|"col4 nvarchar2"|"col5 clob"|"col6 text"|"2016-6-1 15:10""
+INSERT INTO COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+SELECT COUNT(*) FROM err_cic_test;
+ count 
+-------
+     9
+(1 row)
+
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+----(1.2.3)for fixed format
+----(2)exception test
+CREATE TABLE COMPATIBLE_ILLEGAL_CHARS_TEST_EXCEPTION
+(
+	A VARCHAR(100),
+	B VARCHAR(100)
+);
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_EXCEPTION
+(
+	A VARCHAR(100),
+	B VARCHAR(100)
+)SERVER gsmpp_server OPTIONS (LOCATION 'gsfs://127.0.0.1:8900/bulkload_compatible_illegal_chars_test_data/invalid_char_for_execption.data',FORMAT 'CSV',MODE 'Normal',COMPATIBLE_ILLEGAL_CHARS 'TRUE',ENCODING 'UTF8')with err_cic_test PER NODE REJECT LIMIT '1000';
+INSERT INTO COMPATIBLE_ILLEGAL_CHARS_TEST_EXCEPTION SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_EXCEPTION;
+SELECT COUNT(*) FROM err_cic_test;
+ count 
+-------
+     1
+(1 row)
+
+SELECT COUNT(*) FROM COMPATIBLE_ILLEGAL_CHARS_TEST_EXCEPTION;
+ count 
+-------
+     0
+(1 row)
+
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_EXCEPTION;
+DROP TABLE COMPATIBLE_ILLEGAL_CHARS_TEST_EXCEPTION;
+---
+--- bulkload datetime format test
+---
+CREATE TABLE DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+);
+--- (1)invalid datetime format test
+--- (1.1)invalid date format test
+CREATE FOREIGN TABLE FT_DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+)
+server gsmpp_server options
+(location 'gsfs://127.0.0.1:8900/bulkload_datetime_format_test_data/datetime_valid.data', format 'text', mode 'normal', date_format 'YEAR-MM-DD', time_format 'HH24:MI:SS', timestamp_format 'YYYY-MM-DD HH24:MI:SS', smalldatetime_format 'YYYY-MM-DD HH24:MI:SS');
+ERROR:  invalid data for match in format string
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_1.data' (format 'text', delimiter '|', time_format 'HH24:MI:SS', timestamp_format 'YYYY-MM-DD HH24:MI:SS', smalldatetime_format 'YYYY-MM-DD HH24:MI:SS');
+--- (1.2)invalid time format test
+CREATE FOREIGN TABLE FT_DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+)
+server gsmpp_server options
+(location 'gsfs://127.0.0.1:8900/bulkload_datetime_format_test_data/datetime_valid.data', format 'text', mode 'normal', date_format 'YYYY-MM-DD', time_format 'HH23:MI:SS', timestamp_format 'YYYY-MM-DD HH24:MI:SS', smalldatetime_format 'YYYY-MM-DD HH24:MI:SS');
+ERROR:  invalid data for match in format string
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_1.data' (format 'text', delimiter '|', date_format 'YYYY-MM-DD', time_format 'HH23:MI:SS', timestamp_format 'YYYY-MM-DD HH24:MI:SS', smalldatetime_format 'YYYY-MM-DD HH24:MI:SS');
+ERROR:  invalid data for match in format string
+--- (1.3)invalid timestamp format test
+CREATE FOREIGN TABLE FT_DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+)
+server gsmpp_server options
+(location 'gsfs://127.0.0.1:8900/bulkload_datetime_format_test_data/datetime_valid.data', format 'text', mode 'normal', date_format 'YYYY-MM-DD', time_format 'HH24:MI:SS', timestamp_format 'YYYY-MM-DD HH24:MIN:SS', smalldatetime_format 'YYYY-MM-DD HH24:MI:SS');
+ERROR:  invalid data for match in format string
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_1.data' (format 'text', delimiter '|', date_format 'YYYY-MM-DD', time_format 'HH24:MI:SS', timestamp_format 'YYYY-MM-DD HH24:MIN:SS', smalldatetime_format 'YYYY-MM-DD HH24:MI:SS');
+ERROR:  invalid data for match in format string
+--- (1.4)invalid smalldatetime format test
+CREATE FOREIGN TABLE FT_DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+)
+server gsmpp_server options
+(location 'gsfs://127.0.0.1:8900/bulkload_datetime_format_test_data/datetime_valid.data', format 'text', mode 'normal', date_format 'YYYY-MM-DD', time_format 'HH24:MI:SS', timestamp_format 'YYYY-MM-DD HH24:MI:SS', smalldatetime_format 'YYYY-MM-DD HH24:MI:SEC');
+ERROR:  invalid data for match in format string
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_1.data' (format 'text', delimiter '|', date_format 'YYYY-MM-DD', time_format 'HH24:MI:SS', timestamp_format 'YYYY-MM-DD HH24:MI:SS', smalldatetime_format 'YYYY-MM-DD HH24:MI:SEC');
+ERROR:  invalid data for match in format string
+--- (1.5)datetime format isn't allowed for exporting test
+CREATE FOREIGN TABLE FT_DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+)
+server gsmpp_server options
+(location 'gsfs://127.0.0.1:8900/bulkload_datetime_format_test_data/datetime_valid.data', format 'text', mode 'normal', date_format 'YYYY-MM-DD')WRITE ONLY;
+ERROR:  DATE_FORMAT only available on READ ONLY foreign table
+COPY DATETIME_TEST TO '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_out.data' (format 'text', delimiter '|', date_format 'YYYY-MM-DD');
+ERROR:  DATE_FORMAT specification only available using COPY FROM or READ ONLY foreign table
+CREATE FOREIGN TABLE FT_DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+)
+server gsmpp_server options
+(location 'gsfs://127.0.0.1:8900/bulkload_datetime_format_test_data/datetime_valid.data', format 'text', mode 'normal', time_format 'HH24:MI:SS')WRITE ONLY;
+ERROR:  TIME_FORMAT only available on READ ONLY foreign table
+COPY DATETIME_TEST TO '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_out.data' (format 'text', delimiter '|', time_format 'HH24:MI:SS');
+ERROR:  TIME_FORMAT specification only available using COPY FROM or READ ONLY foreign table
+CREATE FOREIGN TABLE FT_DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+)
+server gsmpp_server options
+(location 'gsfs://127.0.0.1:8900/bulkload_datetime_format_test_data/datetime_valid.data', format 'text', mode 'normal', timestamp_format 'YYYY-MM-DD HH24:MI:SS')WRITE ONLY;
+ERROR:  TIMESTAMP_FORMAT only available on READ ONLY foreign table
+COPY DATETIME_TEST TO '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_out.data' (format 'text', delimiter '|', timestamp_format 'YYYY-MM-DD HH24:MI:SS');
+ERROR:  TIMESTAMP_FORMAT specification only available using COPY FROM or READ ONLY foreign table
+CREATE FOREIGN TABLE FT_DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+)
+server gsmpp_server options
+(location 'gsfs://127.0.0.1:8900/bulkload_datetime_format_test_data/datetime_valid.data', format 'text', mode 'normal', smalldatetime_format 'YYYY-MM-DD HH24:MI:SS')WRITE ONLY;
+ERROR:  SMALLDATETIME_FORMAT only available on READ ONLY foreign table
+COPY DATETIME_TEST TO '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_out.data' (format 'text', delimiter '|', smalldatetime_format 'YYYY-MM-DD HH24:MI:SS');
+ERROR:  SMALLDATETIME_FORMAT specification only available using COPY FROM or READ ONLY foreign table
+--- (2)valid datetime format test
+SHOW NLS_TIMESTAMP_FORMAT;
+    nls_timestamp_format    
+----------------------------
+ DD-Mon-YYYY HH:MI:SS.FF AM
+(1 row)
+
+SHOW DATESTYLE;
+   DateStyle   
+---------------
+ Postgres, MDY
+(1 row)
+

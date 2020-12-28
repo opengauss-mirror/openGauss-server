@@ -29,7 +29,7 @@
 #include "datatype/timestamp.h"
 #include "nodes/pg_list.h"
 #include "utils/atomic.h"
-#include "storage/block.h"
+#include "storage/buf/block.h"
 #include "storage/relfilenode.h"
 
 #include "access/parallel_recovery/posix_semaphore.h"
@@ -128,6 +128,7 @@ typedef struct RedoItem {
     int syncXLogReceiptSource;
     TransactionId RecentXmin;
     ServerMode syncServerMode;
+    pg_atomic_uint32 freed;
 } RedoItem;
 
 static const int32 ANY_BLOCK_ID = -1;
@@ -142,6 +143,12 @@ RedoItem* CreateLSNMarker(XLogReaderState* record, List* expectedTLIs, bool buse
 bool IsLSNMarker(const RedoItem* item);
 
 void ApplyRedoRecord(XLogReaderState* record, bool bOld);
+
+static inline RedoItem* GetRedoItemPtr(XLogReaderState* record)
+{
+    return (RedoItem*)(((char*)record) - offsetof(RedoItem, record));
+}
+
 
 }
 

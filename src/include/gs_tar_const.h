@@ -45,6 +45,18 @@ static const int FILE_PERMISSION = 16832;
 
 #define PADDING_LEFT(current_len_left) (((current_len_left + TAR_FILE_PADDING) & ~TAR_FILE_PADDING) - current_len_left);
 
+#define CLOSE_AND_RETURN(tarfile) \
+    do {                          \
+        fclose(tarfile);          \
+        return -1;                \
+    } while (0)
+
+#define CLOSE_AND_SET_NULL(file) \
+    do {                         \
+        fclose(file);            \
+        file = NULL;             \
+    } while (0)
+
 #ifdef HAVE_LIBZ
 static const char* get_gz_error(gzFile gzf)
 {

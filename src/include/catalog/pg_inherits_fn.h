@@ -15,7 +15,7 @@
 #define PG_INHERITS_FN_H
 
 #include "nodes/pg_list.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 
 extern List *find_inheritance_children(Oid parentrelId, LOCKMODE lockmode);
 extern List *find_all_inheritors(Oid parentrelId, LOCKMODE lockmode, List **parents);

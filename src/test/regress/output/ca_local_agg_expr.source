@@ -1,0 +1,50 @@
+set explain_perf_mode=normal;
+-- aggregate express
+select avg(c1 order by c6), sum(c2 order by c2), min(c3 order by c3), max(c4 order by c4), count(c5 order by c5), regr_count(c4,c7 order by c7,c4) from aggtable1 group by c8 order by c8;
+         avg         |  sum   | min | max | count | regr_count 
+---------------------+--------+-----+-----+-------+------------
+ 10.3333333333333333 |  69632 |   3 |  32 |  6144 |       6144
+ 17.3333333333333333 | 112640 |  10 |  39 |  6144 |       6144
+(2 rows)
+
+select avg(distinct c1 order by c1), sum(distinct c2 order by c2), min(distinct c3 order by c3), max(distinct c4 order by c4), count(distinct c5 order by c5), regr_count(distinct c4,c7 order by c7,c4) from aggtable1 group by c8 order by c8;
+         avg         | sum | min | max | count | regr_count 
+---------------------+-----+-----+-----+-------+------------
+ 15.0000000000000000 |  32 |   3 |  32 |     2 |          2
+ 22.0000000000000000 |  46 |  10 |  39 |     2 |          2
+(2 rows)
+
+explain (verbose on, costs off) select avg(c1 order by c6), sum(c2 order by c2), min(c3 order by c3), max(c4 order by c4), count(c5 order by c5), regr_count(c4,c7 order by c7,c4) from aggtable1 group by c8 order by c8;
+                                                                                                                                                                                            QUERY PLAN                                                                                                                                                                                             
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Output: avg(aggtable1.c1 ORDER BY aggtable1.c6), sum((aggtable1.c2)::double precision ORDER BY (aggtable1.c2)::double precision), min(aggtable1.c3 ORDER BY aggtable1.c3), max(aggtable1.c4 ORDER BY aggtable1.c4), count(aggtable1.c5 ORDER BY aggtable1.c5), regr_count((aggtable1.c4)::double precision, aggtable1.c7 ORDER BY aggtable1.c7, (aggtable1.c4)::double precision), aggtable1.c8
+   Group By Key: aggtable1.c8
+   ->  Sort
+         Output: aggtable1.c8, aggtable1.c1, aggtable1.c6, aggtable1.c2, aggtable1.c3, aggtable1.c4, aggtable1.c5, aggtable1.c7
+         Sort Key: aggtable1.c8
+         ->  Streaming (type: GATHER) on aggtable1 "_REMOTE_TABLE_QUERY_"
+               Output: aggtable1.c8, aggtable1.c1, aggtable1.c6, aggtable1.c2, aggtable1.c3, aggtable1.c4, aggtable1.c5, aggtable1.c7
+               Node/s: All datanodes
+               ->  Foreign Scan on public.aggtable1
+                     Output: aggtable1.c8, aggtable1.c1, aggtable1.c6, aggtable1.c2, aggtable1.c3, aggtable1.c4, aggtable1.c5, aggtable1.c7
+                     Remote SQL: SELECT c1, c2, c3, c4, c5, c6, c7, c8 FROM public.aggtable1
+(12 rows)
+
+explain (verbose on, costs off) select avg(distinct c1 order by c1), sum(distinct c2 order by c2), min(distinct c3 order by c3), max(distinct c4 order by c4), count(distinct c5 order by c5), regr_count(distinct c4,c7 order by c7,c4) from aggtable1 group by c8 order by c8;
+                                                                                                                                                                                                                       QUERY PLAN                                                                                                                                                                                                                        
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Output: avg(DISTINCT aggtable1.c1 ORDER BY aggtable1.c1), sum(DISTINCT (aggtable1.c2)::double precision ORDER BY (aggtable1.c2)::double precision), min(DISTINCT aggtable1.c3 ORDER BY aggtable1.c3), max(DISTINCT aggtable1.c4 ORDER BY aggtable1.c4), count(DISTINCT aggtable1.c5 ORDER BY aggtable1.c5), regr_count(DISTINCT (aggtable1.c4)::double precision, aggtable1.c7 ORDER BY aggtable1.c7, (aggtable1.c4)::double precision), aggtable1.c8
+   Group By Key: aggtable1.c8
+   ->  Sort
+         Output: aggtable1.c8, aggtable1.c1, aggtable1.c2, aggtable1.c3, aggtable1.c4, aggtable1.c5, aggtable1.c7
+         Sort Key: aggtable1.c8
+         ->  Streaming (type: GATHER) on aggtable1 "_REMOTE_TABLE_QUERY_"
+               Output: aggtable1.c8, aggtable1.c1, aggtable1.c2, aggtable1.c3, aggtable1.c4, aggtable1.c5, aggtable1.c7
+               Node/s: All datanodes
+               ->  Foreign Scan on public.aggtable1
+                     Output: aggtable1.c8, aggtable1.c1, aggtable1.c2, aggtable1.c3, aggtable1.c4, aggtable1.c5, aggtable1.c7
+                     Remote SQL: SELECT c1, c2, c3, c4, c5, c7, c8 FROM public.aggtable1
+(12 rows)
+

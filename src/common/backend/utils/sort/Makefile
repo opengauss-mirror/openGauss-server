@@ -12,7 +12,7 @@ subdir = src/common/backend/utils/sort
 top_builddir = ../../../../..
 include $(top_builddir)/src/Makefile.global
 
-override CPPFLAGS := -I. -I$(srcdir) $(CPPFLAGS)
+override CPPFLAGS := -I. -I$(srcdir) $(CPPFLAGS) -I$(LZ4_INCLUDE_PATH)
 
 ifneq "$(MAKECMDGOALS)" "clean"
   ifneq "$(MAKECMDGOALS)" "distclean"
@@ -21,7 +21,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = logtape.o sharedtuplestore.o sortsupport.o tuplesort.o tuplestore.o batchsort.o batchstore.o rowstore.o
+OBJS = logtape.o sortsupport.o tuplesort.o tuplestore.o batchsort.o batchstore.o rowstore.o
 
 tuplesort.o: qsort_tuple.cpp
 

@@ -7,31 +7,24 @@
 #include "remote_read.pb.h"
 
 #include <functional>
+#include <grpc/impl/codegen/port_platform.h>
 #include <grpcpp/impl/codegen/async_generic_service.h>
 #include <grpcpp/impl/codegen/async_stream.h>
 #include <grpcpp/impl/codegen/async_unary_call.h>
 #include <grpcpp/impl/codegen/client_callback.h>
-#include <grpcpp/impl/codegen/method_handler_impl.h>
+#include <grpcpp/impl/codegen/client_context.h>
+#include <grpcpp/impl/codegen/completion_queue.h>
+#include <grpcpp/impl/codegen/message_allocator.h>
+#include <grpcpp/impl/codegen/method_handler.h>
 #include <grpcpp/impl/codegen/proto_utils.h>
 #include <grpcpp/impl/codegen/rpc_method.h>
 #include <grpcpp/impl/codegen/server_callback.h>
+#include <grpcpp/impl/codegen/server_callback_handlers.h>
+#include <grpcpp/impl/codegen/server_context.h>
 #include <grpcpp/impl/codegen/service_type.h>
 #include <grpcpp/impl/codegen/status.h>
 #include <grpcpp/impl/codegen/stub_options.h>
 #include <grpcpp/impl/codegen/sync_stream.h>
-
-namespace grpc_impl {
-class CompletionQueue;
-class ServerCompletionQueue;
-class ServerContext;
-}  // namespace grpc_impl
-
-namespace grpc {
-namespace experimental {
-template <typename RequestT, typename ResponseT>
-class MessageAllocator;
-}  // namespace experimental
-}  // namespace grpc
 
 namespace gauss {
 
@@ -62,13 +55,35 @@ class RemoteRead final {
       virtual ~experimental_async_interface() {}
       virtual void GetCU(::grpc::ClientContext* context, const ::gauss::CURequest* request, ::gauss::CUResponse* response, std::function<void(::grpc::Status)>) = 0;
       virtual void GetCU(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::gauss::CUResponse* response, std::function<void(::grpc::Status)>) = 0;
+      #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+      virtual void GetCU(::grpc::ClientContext* context, const ::gauss::CURequest* request, ::gauss::CUResponse* response, ::grpc::ClientUnaryReactor* reactor) = 0;
+      #else
       virtual void GetCU(::grpc::ClientContext* context, const ::gauss::CURequest* request, ::gauss::CUResponse* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      #endif
+      #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+      virtual void GetCU(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::gauss::CUResponse* response, ::grpc::ClientUnaryReactor* reactor) = 0;
+      #else
       virtual void GetCU(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::gauss::CUResponse* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      #endif
       virtual void GetPage(::grpc::ClientContext* context, const ::gauss::PageRequest* request, ::gauss::PageResponse* response, std::function<void(::grpc::Status)>) = 0;
       virtual void GetPage(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::gauss::PageResponse* response, std::function<void(::grpc::Status)>) = 0;
+      #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+      virtual void GetPage(::grpc::ClientContext* context, const ::gauss::PageRequest* request, ::gauss::PageResponse* response, ::grpc::ClientUnaryReactor* reactor) = 0;
+      #else
       virtual void GetPage(::grpc::ClientContext* context, const ::gauss::PageRequest* request, ::gauss::PageResponse* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      #endif
+      #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+      virtual void GetPage(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::gauss::PageResponse* response, ::grpc::ClientUnaryReactor* reactor) = 0;
+      #else
       virtual void GetPage(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::gauss::PageResponse* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      #endif
     };
+    #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+    typedef class experimental_async_interface async_interface;
+    #endif
+    #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+    async_interface* async() { return experimental_async(); }
+    #endif
     virtual class experimental_async_interface* experimental_async() { return nullptr; }
   private:
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::gauss::CUResponse>* AsyncGetCURaw(::grpc::ClientContext* context, const ::gauss::CURequest& request, ::grpc::CompletionQueue* cq) = 0;
@@ -98,12 +113,28 @@ class RemoteRead final {
      public:
       void GetCU(::grpc::ClientContext* context, const ::gauss::CURequest* request, ::gauss::CUResponse* response, std::function<void(::grpc::Status)>) override;
       void GetCU(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::gauss::CUResponse* response, std::function<void(::grpc::Status)>) override;
+      #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+      void GetCU(::grpc::ClientContext* context, const ::gauss::CURequest* request, ::gauss::CUResponse* response, ::grpc::ClientUnaryReactor* reactor) override;
+      #else
       void GetCU(::grpc::ClientContext* context, const ::gauss::CURequest* request, ::gauss::CUResponse* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      #endif
+      #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+      void GetCU(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::gauss::CUResponse* response, ::grpc::ClientUnaryReactor* reactor) override;
+      #else
       void GetCU(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::gauss::CUResponse* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      #endif
       void GetPage(::grpc::ClientContext* context, const ::gauss::PageRequest* request, ::gauss::PageResponse* response, std::function<void(::grpc::Status)>) override;
       void GetPage(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::gauss::PageResponse* response, std::function<void(::grpc::Status)>) override;
+      #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+      void GetPage(::grpc::ClientContext* context, const ::gauss::PageRequest* request, ::gauss::PageResponse* response, ::grpc::ClientUnaryReactor* reactor) override;
+      #else
       void GetPage(::grpc::ClientContext* context, const ::gauss::PageRequest* request, ::gauss::PageResponse* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      #endif
+      #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+      void GetPage(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::gauss::PageResponse* response, ::grpc::ClientUnaryReactor* reactor) override;
+      #else
       void GetPage(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::gauss::PageResponse* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      #endif
      private:
       friend class Stub;
       explicit experimental_async(Stub* stub): stub_(stub) { }
@@ -134,7 +165,7 @@ class RemoteRead final {
   template <class BaseClass>
   class WithAsyncMethod_GetCU : public BaseClass {
    private:
-    void BaseClassMustBeDerivedFromService(const Service *service) {}
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     WithAsyncMethod_GetCU() {
       ::grpc::Service::MarkMethodAsync(0);
@@ -143,7 +174,7 @@ class RemoteRead final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status GetCU(::grpc::ServerContext* context, const ::gauss::CURequest* request, ::gauss::CUResponse* response) override {
+    ::grpc::Status GetCU(::grpc::ServerContext* /*context*/, const ::gauss::CURequest* /*request*/, ::gauss::CUResponse* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -154,7 +185,7 @@ class RemoteRead final {
   template <class BaseClass>
   class WithAsyncMethod_GetPage : public BaseClass {
    private:
-    void BaseClassMustBeDerivedFromService(const Service *service) {}
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     WithAsyncMethod_GetPage() {
       ::grpc::Service::MarkMethodAsync(1);
@@ -163,7 +194,7 @@ class RemoteRead final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status GetPage(::grpc::ServerContext* context, const ::gauss::PageRequest* request, ::gauss::PageResponse* response) override {
+    ::grpc::Status GetPage(::grpc::ServerContext* /*context*/, const ::gauss::PageRequest* /*request*/, ::gauss::PageResponse* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -175,70 +206,106 @@ class RemoteRead final {
   template <class BaseClass>
   class ExperimentalWithCallbackMethod_GetCU : public BaseClass {
    private:
-    void BaseClassMustBeDerivedFromService(const Service *service) {}
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     ExperimentalWithCallbackMethod_GetCU() {
-      ::grpc::Service::experimental().MarkMethodCallback(0,
-        new ::grpc::internal::CallbackUnaryHandler< ::gauss::CURequest, ::gauss::CUResponse>(
-          [this](::grpc::ServerContext* context,
-                 const ::gauss::CURequest* request,
-                 ::gauss::CUResponse* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   return this->GetCU(context, request, response, controller);
-                 }));
-    }
+    #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+      ::grpc::Service::
+    #else
+      ::grpc::Service::experimental().
+    #endif
+        MarkMethodCallback(0,
+          new ::grpc_impl::internal::CallbackUnaryHandler< ::gauss::CURequest, ::gauss::CUResponse>(
+            [this](
+    #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+                   ::grpc::CallbackServerContext*
+    #else
+                   ::grpc::experimental::CallbackServerContext*
+    #endif
+                     context, const ::gauss::CURequest* request, ::gauss::CUResponse* response) { return this->GetCU(context, request, response); }));}
     void SetMessageAllocatorFor_GetCU(
         ::grpc::experimental::MessageAllocator< ::gauss::CURequest, ::gauss::CUResponse>* allocator) {
-      static_cast<::grpc::internal::CallbackUnaryHandler< ::gauss::CURequest, ::gauss::CUResponse>*>(
-          ::grpc::Service::experimental().GetHandler(0))
+    #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+      ::grpc::internal::MethodHandler* const handler = ::grpc::Service::GetHandler(0);
+    #else
+      ::grpc::internal::MethodHandler* const handler = ::grpc::Service::experimental().GetHandler(0);
+    #endif
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::gauss::CURequest, ::gauss::CUResponse>*>(handler)
               ->SetMessageAllocator(allocator);
     }
     ~ExperimentalWithCallbackMethod_GetCU() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status GetCU(::grpc::ServerContext* context, const ::gauss::CURequest* request, ::gauss::CUResponse* response) override {
+    ::grpc::Status GetCU(::grpc::ServerContext* /*context*/, const ::gauss::CURequest* /*request*/, ::gauss::CUResponse* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    virtual void GetCU(::grpc::ServerContext* context, const ::gauss::CURequest* request, ::gauss::CUResponse* response, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+    #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+    virtual ::grpc::ServerUnaryReactor* GetCU(
+      ::grpc::CallbackServerContext* /*context*/, const ::gauss::CURequest* /*request*/, ::gauss::CUResponse* /*response*/)
+    #else
+    virtual ::grpc::experimental::ServerUnaryReactor* GetCU(
+      ::grpc::experimental::CallbackServerContext* /*context*/, const ::gauss::CURequest* /*request*/, ::gauss::CUResponse* /*response*/)
+    #endif
+      { return nullptr; }
   };
   template <class BaseClass>
   class ExperimentalWithCallbackMethod_GetPage : public BaseClass {
    private:
-    void BaseClassMustBeDerivedFromService(const Service *service) {}
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     ExperimentalWithCallbackMethod_GetPage() {
-      ::grpc::Service::experimental().MarkMethodCallback(1,
-        new ::grpc::internal::CallbackUnaryHandler< ::gauss::PageRequest, ::gauss::PageResponse>(
-          [this](::grpc::ServerContext* context,
-                 const ::gauss::PageRequest* request,
-                 ::gauss::PageResponse* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   return this->GetPage(context, request, response, controller);
-                 }));
-    }
+    #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+      ::grpc::Service::
+    #else
+      ::grpc::Service::experimental().
+    #endif
+        MarkMethodCallback(1,
+          new ::grpc_impl::internal::CallbackUnaryHandler< ::gauss::PageRequest, ::gauss::PageResponse>(
+            [this](
+    #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+                   ::grpc::CallbackServerContext*
+    #else
+                   ::grpc::experimental::CallbackServerContext*
+    #endif
+                     context, const ::gauss::PageRequest* request, ::gauss::PageResponse* response) { return this->GetPage(context, request, response); }));}
     void SetMessageAllocatorFor_GetPage(
         ::grpc::experimental::MessageAllocator< ::gauss::PageRequest, ::gauss::PageResponse>* allocator) {
-      static_cast<::grpc::internal::CallbackUnaryHandler< ::gauss::PageRequest, ::gauss::PageResponse>*>(
-          ::grpc::Service::experimental().GetHandler(1))
+    #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+      ::grpc::internal::MethodHandler* const handler = ::grpc::Service::GetHandler(1);
+    #else
+      ::grpc::internal::MethodHandler* const handler = ::grpc::Service::experimental().GetHandler(1);
+    #endif
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::gauss::PageRequest, ::gauss::PageResponse>*>(handler)
               ->SetMessageAllocator(allocator);
     }
     ~ExperimentalWithCallbackMethod_GetPage() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status GetPage(::grpc::ServerContext* context, const ::gauss::PageRequest* request, ::gauss::PageResponse* response) override {
+    ::grpc::Status GetPage(::grpc::ServerContext* /*context*/, const ::gauss::PageRequest* /*request*/, ::gauss::PageResponse* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    virtual void GetPage(::grpc::ServerContext* context, const ::gauss::PageRequest* request, ::gauss::PageResponse* response, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+    #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+    virtual ::grpc::ServerUnaryReactor* GetPage(
+      ::grpc::CallbackServerContext* /*context*/, const ::gauss::PageRequest* /*request*/, ::gauss::PageResponse* /*response*/)
+    #else
+    virtual ::grpc::experimental::ServerUnaryReactor* GetPage(
+      ::grpc::experimental::CallbackServerContext* /*context*/, const ::gauss::PageRequest* /*request*/, ::gauss::PageResponse* /*response*/)
+    #endif
+      { return nullptr; }
   };
+  #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+  typedef ExperimentalWithCallbackMethod_GetCU<ExperimentalWithCallbackMethod_GetPage<Service > > CallbackService;
+  #endif
+
   typedef ExperimentalWithCallbackMethod_GetCU<ExperimentalWithCallbackMethod_GetPage<Service > > ExperimentalCallbackService;
   template <class BaseClass>
   class WithGenericMethod_GetCU : public BaseClass {
    private:
-    void BaseClassMustBeDerivedFromService(const Service *service) {}
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     WithGenericMethod_GetCU() {
       ::grpc::Service::MarkMethodGeneric(0);
@@ -247,7 +314,7 @@ class RemoteRead final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status GetCU(::grpc::ServerContext* context, const ::gauss::CURequest* request, ::gauss::CUResponse* response) override {
+    ::grpc::Status GetCU(::grpc::ServerContext* /*context*/, const ::gauss::CURequest* /*request*/, ::gauss::CUResponse* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -255,7 +322,7 @@ class RemoteRead final {
   template <class BaseClass>
   class WithGenericMethod_GetPage : public BaseClass {
    private:
-    void BaseClassMustBeDerivedFromService(const Service *service) {}
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     WithGenericMethod_GetPage() {
       ::grpc::Service::MarkMethodGeneric(1);
@@ -264,7 +331,7 @@ class RemoteRead final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status GetPage(::grpc::ServerContext* context, const ::gauss::PageRequest* request, ::gauss::PageResponse* response) override {
+    ::grpc::Status GetPage(::grpc::ServerContext* /*context*/, const ::gauss::PageRequest* /*request*/, ::gauss::PageResponse* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -272,7 +339,7 @@ class RemoteRead final {
   template <class BaseClass>
   class WithRawMethod_GetCU : public BaseClass {
    private:
-    void BaseClassMustBeDerivedFromService(const Service *service) {}
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     WithRawMethod_GetCU() {
       ::grpc::Service::MarkMethodRaw(0);
@@ -281,7 +348,7 @@ class RemoteRead final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status GetCU(::grpc::ServerContext* context, const ::gauss::CURequest* request, ::gauss::CUResponse* response) override {
+    ::grpc::Status GetCU(::grpc::ServerContext* /*context*/, const ::gauss::CURequest* /*request*/, ::gauss::CUResponse* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -292,7 +359,7 @@ class RemoteRead final {
   template <class BaseClass>
   class WithRawMethod_GetPage : public BaseClass {
    private:
-    void BaseClassMustBeDerivedFromService(const Service *service) {}
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     WithRawMethod_GetPage() {
       ::grpc::Service::MarkMethodRaw(1);
@@ -301,7 +368,7 @@ class RemoteRead final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status GetPage(::grpc::ServerContext* context, const ::gauss::PageRequest* request, ::gauss::PageResponse* response) override {
+    ::grpc::Status GetPage(::grpc::ServerContext* /*context*/, const ::gauss::PageRequest* /*request*/, ::gauss::PageResponse* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -312,57 +379,83 @@ class RemoteRead final {
   template <class BaseClass>
   class ExperimentalWithRawCallbackMethod_GetCU : public BaseClass {
    private:
-    void BaseClassMustBeDerivedFromService(const Service *service) {}
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     ExperimentalWithRawCallbackMethod_GetCU() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(0,
-        new ::grpc::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->GetCU(context, request, response, controller);
-                 }));
+    #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+      ::grpc::Service::
+    #else
+      ::grpc::Service::experimental().
+    #endif
+        MarkMethodRawCallback(0,
+          new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
+            [this](
+    #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+                   ::grpc::CallbackServerContext*
+    #else
+                   ::grpc::experimental::CallbackServerContext*
+    #endif
+                     context, const ::grpc::ByteBuffer* request, ::grpc::ByteBuffer* response) { return this->GetCU(context, request, response); }));
     }
     ~ExperimentalWithRawCallbackMethod_GetCU() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status GetCU(::grpc::ServerContext* context, const ::gauss::CURequest* request, ::gauss::CUResponse* response) override {
+    ::grpc::Status GetCU(::grpc::ServerContext* /*context*/, const ::gauss::CURequest* /*request*/, ::gauss::CUResponse* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    virtual void GetCU(::grpc::ServerContext* context, const ::grpc::ByteBuffer* request, ::grpc::ByteBuffer* response, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+    #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+    virtual ::grpc::ServerUnaryReactor* GetCU(
+      ::grpc::CallbackServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/)
+    #else
+    virtual ::grpc::experimental::ServerUnaryReactor* GetCU(
+      ::grpc::experimental::CallbackServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/)
+    #endif
+      { return nullptr; }
   };
   template <class BaseClass>
   class ExperimentalWithRawCallbackMethod_GetPage : public BaseClass {
    private:
-    void BaseClassMustBeDerivedFromService(const Service *service) {}
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     ExperimentalWithRawCallbackMethod_GetPage() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(1,
-        new ::grpc::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->GetPage(context, request, response, controller);
-                 }));
+    #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+      ::grpc::Service::
+    #else
+      ::grpc::Service::experimental().
+    #endif
+        MarkMethodRawCallback(1,
+          new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
+            [this](
+    #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+                   ::grpc::CallbackServerContext*
+    #else
+                   ::grpc::experimental::CallbackServerContext*
+    #endif
+                     context, const ::grpc::ByteBuffer* request, ::grpc::ByteBuffer* response) { return this->GetPage(context, request, response); }));
     }
     ~ExperimentalWithRawCallbackMethod_GetPage() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status GetPage(::grpc::ServerContext* context, const ::gauss::PageRequest* request, ::gauss::PageResponse* response) override {
+    ::grpc::Status GetPage(::grpc::ServerContext* /*context*/, const ::gauss::PageRequest* /*request*/, ::gauss::PageResponse* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    virtual void GetPage(::grpc::ServerContext* context, const ::grpc::ByteBuffer* request, ::grpc::ByteBuffer* response, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+    #ifdef GRPC_CALLBACK_API_NONEXPERIMENTAL
+    virtual ::grpc::ServerUnaryReactor* GetPage(
+      ::grpc::CallbackServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/)
+    #else
+    virtual ::grpc::experimental::ServerUnaryReactor* GetPage(
+      ::grpc::experimental::CallbackServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/)
+    #endif
+      { return nullptr; }
   };
   template <class BaseClass>
   class WithStreamedUnaryMethod_GetCU : public BaseClass {
    private:
-    void BaseClassMustBeDerivedFromService(const Service *service) {}
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     WithStreamedUnaryMethod_GetCU() {
       ::grpc::Service::MarkMethodStreamed(0,
@@ -372,7 +465,7 @@ class RemoteRead final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable regular version of this method
-    ::grpc::Status GetCU(::grpc::ServerContext* context, const ::gauss::CURequest* request, ::gauss::CUResponse* response) override {
+    ::grpc::Status GetCU(::grpc::ServerContext* /*context*/, const ::gauss::CURequest* /*request*/, ::gauss::CUResponse* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -382,7 +475,7 @@ class RemoteRead final {
   template <class BaseClass>
   class WithStreamedUnaryMethod_GetPage : public BaseClass {
    private:
-    void BaseClassMustBeDerivedFromService(const Service *service) {}
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     WithStreamedUnaryMethod_GetPage() {
       ::grpc::Service::MarkMethodStreamed(1,
@@ -392,7 +485,7 @@ class RemoteRead final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable regular version of this method
-    ::grpc::Status GetPage(::grpc::ServerContext* context, const ::gauss::PageRequest* request, ::gauss::PageResponse* response) override {
+    ::grpc::Status GetPage(::grpc::ServerContext* /*context*/, const ::gauss::PageRequest* /*request*/, ::gauss::PageResponse* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }

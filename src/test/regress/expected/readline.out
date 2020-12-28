@@ -1,8 +1,8 @@
 --include chinese
-create table 测试(f int);
-insert into 测试 values (1);
-select * from 测试;
- f
+create table 华为(f int);
+insert into 华为 values (1);
+select * from 华为;
+ f 
 ---
  1
 (1 row)

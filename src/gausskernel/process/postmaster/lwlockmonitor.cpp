@@ -1,18 +1,7 @@
-/*
+/* -------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
  *
  * lwlockmonitor.cpp
  *	 Automatically detect lwlock deadlock
@@ -42,7 +31,7 @@
 #include "access/hash.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "storage/proc.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
@@ -308,7 +297,6 @@ static bool find_lock_cycle_recurse(thread_entry* check_thread, HTAB* lock_map, 
 
     entry = (lock_entry*)hash_search(lock_map, &(check_thread->want_lwlock), HASH_FIND, &found);
     AssertEreport(found && entry != NULL, MOD_ALL, "the wanted lock is not found in cache");
-
     const int holder_num = entry->holders_curnum;
     if (holder_num == 0) {
         /* there is no any holder, so no deadlock loop */
@@ -362,7 +350,7 @@ static bool find_cycle_start_point(lwm_deadlock* deadlock)
     for (curr = last; curr >= first; --curr) {
         if (last->blocker.thread_id == curr->waiter.thread_id &&
             last->blocker.st_sessionid == curr->waiter.st_sessionid) {
-            deadlock->start = (int)(curr - first);
+            deadlock->start = (curr - first);
             return true;
         }
     }
@@ -547,7 +535,7 @@ static int choose_one_victim(lwm_deadlock* deadlock, int* out_idx)
                 *out_idx = i;
 #ifdef HAVE_INT64_TIMESTAMP
                 ereport(LOG,
-                    (errmsg("choose_one_victim,lock_mode is %d,tran time is %ld,out index is %d,backend index is %d",
+                    (errmsg("choose_one_victim,lock_mode is %d,tran time is %lu,out index is %d,backend index is %d",
                         deadlock->info[i].block_xmode,
                         nearest_xact_tm,
                         *out_idx,
@@ -609,9 +597,7 @@ NON_EXEC_STATIC void FaultMonitorMain()
 
     t_thrd.proc_cxt.MyProcPid = gs_thread_self();
 
-    knl_thread_set_name("LWLockMonitor");
-
-    ereport(DEBUG5, (errmsg("LWLockMonitor process is started: %lu", t_thrd.proc_cxt.MyProcPid)));
+    ereport(DEBUG5, (errmsg("lwlockmonitor process is started: %lu", t_thrd.proc_cxt.MyProcPid)));
 
     (void)gspqsignal(SIGHUP, LWLockMonitorSigHupHandler);    /* set flag to read config file */
     (void)gspqsignal(SIGINT, LWLockMonitorShutdownHandler);  /* request shutdown */
@@ -747,6 +733,13 @@ NON_EXEC_STATIC void FaultMonitorMain()
                         pgstat_read_diagnosis_data(curr_snapshot, candidates_pos, candidates_num);
                     pfree_ext(candidates_pos);
                     continue_next = lwm_heavy_diagnosis(&deadlock, backend_locks, candidates_num);
+
+                    /* clean up. */
+                    for (int i = 0; i < candidates_num; i++) {
+                        lwm_lwlocks* lwlock = backend_locks + i;
+                        pfree_ext(lwlock->held_lwlocks);
+                    }
+                    pfree_ext(backend_locks);
                 }
 
                 if (continue_next) {
@@ -826,7 +819,7 @@ static void ut_test_deadlock00(lwm_lwlocks* locks, int* nlocks)
 
     /* holding lwlock 1 and acquiring lwlock 1 */
     locks->be_idx = 1;
-    locks->be_tid = 1;
+    locks->be_tid.thread_id = 1;
     locks->want_lwlock.lock = GetMainLWLockByIndex(1);
     locks->lwlocks_num = 1;
     locks->held_lwlocks = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode));
@@ -842,7 +835,7 @@ static lwm_lwlocks* ut_test_deadlock01(int* nlocks)
 
     /* holding lwlock 2, and acquiring lwlock 1 */
     locks_array[0].be_idx = 1;
-    locks_array[0].be_tid = 1;
+    locks_array[0].be_tid.thread_id = 1;
     locks_array[0].want_lwlock.lock = GetMainLWLockByIndex(1);
     locks_array[0].lwlocks_num = nholders;
     locks_array[0].held_lwlocks = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode) * (nholders));
@@ -851,7 +844,7 @@ static lwm_lwlocks* ut_test_deadlock01(int* nlocks)
 
     /* holding lwlock 1, and acquiring lwlock 2 */
     locks_array[1].be_idx = 2;
-    locks_array[1].be_tid = 2;
+    locks_array[1].be_tid.thread_id = 2;
     locks_array[1].want_lwlock.lock = GetMainLWLockByIndex(2);
     locks_array[1].lwlocks_num = nholders;
     locks_array[1].held_lwlocks = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode) * (nholders));
@@ -869,7 +862,7 @@ static lwm_lwlocks* ut_test_deadlock02(int* nlocks)
 
     /* holding lwlock 1, and acquiring lwlock 2 */
     locks_array[0].be_idx = 1;
-    locks_array[0].be_tid = 1;
+    locks_array[0].be_tid.thread_id = 1;
     locks_array[0].held_lwlocks = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode) * (nholders));
     locks_array[0].held_lwlocks[0].lock_addr.lock = GetMainLWLockByIndex(1);
     locks_array[0].held_lwlocks[0].lock_sx = (LWLockMode)0;
@@ -878,7 +871,7 @@ static lwm_lwlocks* ut_test_deadlock02(int* nlocks)
 
     /* holding lwlock 2, and acquiring lwlock 3 */
     locks_array[1].be_idx = 2;
-    locks_array[1].be_tid = 2;
+    locks_array[1].be_tid.thread_id = 2;
     locks_array[1].held_lwlocks = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode) * (nholders));
     locks_array[1].held_lwlocks[0].lock_addr.lock = GetMainLWLockByIndex(2);
     locks_array[1].held_lwlocks[0].lock_sx = (LWLockMode)0;
@@ -888,7 +881,7 @@ static lwm_lwlocks* ut_test_deadlock02(int* nlocks)
 
     /* holding lwlock 3, and acquiring lwlock 4 */
     locks_array[2].be_idx = 3;
-    locks_array[2].be_tid = 3;
+    locks_array[2].be_tid.thread_id = 3;
     locks_array[2].held_lwlocks = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode) * (nholders));
     locks_array[2].held_lwlocks[0].lock_addr.lock = GetMainLWLockByIndex(3);
     locks_array[2].held_lwlocks[0].lock_sx = (LWLockMode)0;
@@ -898,7 +891,7 @@ static lwm_lwlocks* ut_test_deadlock02(int* nlocks)
 
     /* holding lwlock 4, and acquiring lwlock 5 */
     locks_array[3].be_idx = 4;
-    locks_array[3].be_tid = 4;
+    locks_array[3].be_tid.thread_id = 4;
     locks_array[3].held_lwlocks = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode) * (nholders));
     locks_array[3].held_lwlocks[0].lock_addr.lock = GetMainLWLockByIndex(4);
     locks_array[3].held_lwlocks[0].lock_sx = (LWLockMode)1;
@@ -908,7 +901,7 @@ static lwm_lwlocks* ut_test_deadlock02(int* nlocks)
 
     /* holding lwlock 5, and acquiring lwlock 1 */
     locks_array[4].be_idx = 5;
-    locks_array[4].be_tid = 5;
+    locks_array[4].be_tid.thread_id = 5;
     locks_array[4].held_lwlocks = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode) * (nholders));
     locks_array[4].held_lwlocks[0].lock_addr.lock = GetMainLWLockByIndex(5);
     locks_array[4].held_lwlocks[0].lock_sx = (LWLockMode)0;

@@ -1,0 +1,94 @@
+--Test LLVM optimization operator about FLOAT8 data type
+DROP FOREIGN TABLE IF EXISTS lineitem CASCADE;
+Create foreign table lineitem (
+ L_ORDERKEY    INT,
+ L_PARTKEY     INT,
+ L_SUPPKEY     INT,
+ L_LINENUMBER  INT,
+ L_QUANTITY    DECIMAL(15,2),
+ L_EXTENDEDPRICE  DECIMAL(15,2),
+ L_DISCOUNT    DECIMAL(15,2),
+ L_TAX         DECIMAL(15,2),
+ L_RETURNFLAG  CHAR(1),
+ L_LINESTATUS  CHAR(1),
+ L_SHIPDATE    DATE,
+ L_COMMITDATE  DATE,
+ L_RECEIPTDATE DATE,
+ L_SHIPINSTRUCT CHAR(25),
+ L_SHIPMODE     CHAR(10),
+ L_COMMENT      VARCHAR(44)
+)
+SERVER hdfs_server OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb_small.db/tpch_lineitem_small_parquet_compressed/')
+distribute by roundrobin;
+
+--test "=" operator
+set enable_codegen = off;
+select * from lineitem where  38 = L_QUANTITY order by 1 limit 5;
+set enable_codegen = on;
+select * from lineitem where  38 = L_QUANTITY order by 1 limit 5;
+set enable_codegen = off;
+select * from lineitem where  L_QUANTITY = 38 order by 1 limit 5;
+set enable_codegen = on;
+select * from lineitem where  L_QUANTITY = 38 order by 1 limit 5;
+select * from lineitem where  L_QUANTITY = 38::float4 order by 1 limit 5;
+--test ">" operator
+set enable_codegen = off;
+select * from lineitem where  38 > L_QUANTITY order by 1 limit 5;
+set enable_codegen = on;
+select * from lineitem where  38 > L_QUANTITY order by 1 limit 5;
+set enable_codegen = off;
+select * from lineitem where  L_QUANTITY > 38 order by 1 limit 5;
+set enable_codegen = on;
+select * from lineitem where  L_QUANTITY > 38 order by 1 limit 5;
+select * from lineitem where  L_QUANTITY > 38::float4 order by 1 limit 5;
+--test ">=" operator
+set enable_codegen = off;
+select * from lineitem where  38 >= L_QUANTITY order by 1 limit 5;
+set enable_codegen = on;
+select * from lineitem where  38 >= L_QUANTITY order by 1 limit 5;
+set enable_codegen = off;
+select * from lineitem where  L_QUANTITY >= 38 order by 1 limit 5;
+set enable_codegen = on;
+select * from lineitem where  L_QUANTITY >= 38 order by 1 limit 5;
+select * from lineitem where  L_QUANTITY >= 38::float4 order by 1 limit 5;
+--test "<" operator
+set enable_codegen = off;
+select * from lineitem where  38 < L_QUANTITY order by 1 limit 5;
+set enable_codegen = on;
+select * from lineitem where  38 < L_QUANTITY order by 1 limit 5;
+set enable_codegen = off;
+select * from lineitem where  L_QUANTITY < 38 order by 1 limit 5;
+set enable_codegen = on;
+select * from lineitem where  L_QUANTITY < 38 order by 1 limit 5;
+select * from lineitem where  L_QUANTITY < 38::float4 order by 1 limit 5;
+--test "<=" operator
+set enable_codegen = off;
+select * from lineitem where  38 <= L_QUANTITY order by 1 limit 5;
+set enable_codegen = on;
+select * from lineitem where  38 <= L_QUANTITY order by 1 limit 5;
+set enable_codegen = off;
+select * from lineitem where  L_QUANTITY <= 38 order by 1 limit 5;
+set enable_codegen = on;
+select * from lineitem where  L_QUANTITY <= 38 order by 1 limit 5;
+select * from lineitem where  L_QUANTITY <= 38::float4 order by 1 limit 5;
+--test "<>" operator
+set enable_codegen = off;
+select * from lineitem where  38 <> L_QUANTITY order by 1 limit 5;
+set enable_codegen = on;
+select * from lineitem where  38 <> L_QUANTITY order by 1 limit 5;
+set enable_codegen = off;
+select * from lineitem where  L_QUANTITY <> 38 order by 1 limit 5;
+set enable_codegen = on;
+select * from lineitem where  L_QUANTITY <> 38 order by 1 limit 5;
+select * from lineitem where  L_QUANTITY <> 38::float4 order by 1 limit 5;
+--test "!=" operator
+set enable_codegen = off;
+select * from lineitem where  38 != L_QUANTITY order by 1 limit 5;
+set enable_codegen = on;
+select * from lineitem where  38 != L_QUANTITY order by 1 limit 5;
+set enable_codegen = off;
+select * from lineitem where  L_QUANTITY != 38 order by 1 limit 5;
+set enable_codegen = on;
+select * from lineitem where  L_QUANTITY != 38 order by 1 limit 5;
+--add llt
+explain performance select * from lineitem where  L_QUANTITY != 38 order by 1 limit 5;

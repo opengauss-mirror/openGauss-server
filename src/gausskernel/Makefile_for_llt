@@ -1,0 +1,635 @@
+#-------------------------------------------------------------------------
+#
+# Makefile for the postgres backend
+#
+# Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
+# Portions Copyright (c) 1994, Regents of the University of California
+#
+# src/backend/Makefile
+#
+#-------------------------------------------------------------------------
+
+PGFILEDESC = "PostgreSQL Server"
+# This is a daemon process, which is why it is not labeled as an executable
+#PGAPPICON=win32
+
+
+subdir = src/backend
+top_builddir = ../..
+include $(top_builddir)/src/Makefile.global
+
+ifneq ($(PORTNAME), win32)
+override CXXFLAGS += $(PTHREAD_CFLAGS)
+endif
+
+ifeq ($(enable_llt), yes)
+SUBDIRS = access bootstrap catalog parser commands gs_policy executor distributelayer vectorsonic vecexecutor foreign job lib libpq libcomm\
+	pgxc main nodes optimizer port postmaster iprange regex replication rewrite extension datasource \
+	service storage tcop tsearch keymanagement utils $(top_builddir)/src/timezone $(top_builddir)/src/interfaces/libpq \
+	bulkload $(top_builddir)/contrib/file_fdw workload $(top_builddir)/contrib/hdfs_fdw $(top_builddir)/contrib/gc_fdw codegen \
+	$(top_builddir)/contrib/roach_api $(top_builddir)/contrib/bbox $(top_builddir)/contrib/log_fdw $(top_builddir)/contrib/dimsearch/main
+else
+SUBDIRS = access bootstrap catalog parser commands gs_policy executor distributelayer vectorsonic vecexecutor foreign job lib libpq libcomm\
+	pgxc main nodes optimizer port postmaster iprange regex replication rewrite extension datasource \
+	service storage tcop tsearch keymanagement utils $(top_builddir)/src/timezone $(top_builddir)/src/interfaces/libpq \
+	bulkload $(top_builddir)/contrib/file_fdw workload $(top_builddir)/contrib/hdfs_fdw $(top_builddir)/contrib/gc_fdw codegen \
+	$(top_builddir)/contrib/roach_api $(top_builddir)/contrib/bbox $(top_builddir)/contrib/log_fdw $(top_builddir)/contrib/dimsearch/main
+endif
+
+ifeq ($(enable_qunit), yes)
+SUBDIRS += $(top_builddir)/src/test/QUnit/test/wrapper
+endif
+
+include $(srcdir)/common.mk
+
+# As of 1/2010:
+# The probes.o file is necessary for dtrace support on Solaris, and on recent
+# versions of systemtap.  (Older systemtap releases just produce an empty
+# file, but that's okay.)  However, OS X's dtrace doesn't use it and doesn't
+# even recognize the -G option.  So, build probes.o except on Darwin.
+# This might need adjustment as other platforms add dtrace support.
+ifneq ($(PORTNAME), darwin)
+ifeq ($(enable_dtrace), yes)
+LOCALOBJS += utils/probes.o
+endif
+endif
+
+OBJS = $(SUBDIROBJS) $(LOCALOBJS) \
+	$(top_builddir)/src/interfaces/libpq/fe-connect.o \
+	$(top_builddir)/src/interfaces/libpq/fe-secure.o \
+	$(top_builddir)/src/interfaces/libpq/fe-misc.o \
+	$(top_builddir)/src/interfaces/libpq/fe-protocol3.o \
+	$(top_builddir)/src/interfaces/libpq/fe-protocol2.o \
+	$(top_builddir)/src/interfaces/libpq/fe-exec.o \
+	$(top_builddir)/src/interfaces/libpq/fe-auth.o \
+	$(top_builddir)/src/interfaces/libpq/pqexpbuffer.o \
+	$(top_builddir)/src/port/libpgport_srv.a \
+	$(top_builddir)/src/alarm/client/alarmclient.a \
+	$(top_builddir)/src/gtm/client/libgtmclient.a \
+	$(top_builddir)/src/gtm/common/libgtmcommon.a \
+	$(top_builddir)/src/interfaces/libpq/libpq.a \
+	$(top_builddir)/src/pl/plpgsql/src/libplpgsql.a
+
+# We put libpgport into OBJS, so remove it from LIBS; also add libldap
+LIBS := $(filter-out -lpgport, $(LIBS)) $(LDAP_LIBS_BE)
+
+# the link options for llvm
+LLVM_ZLIB_NAME=z
+LLVMLIBS :=  -L$(LIBLLVM_LIB_PATH) -L$(LIBTINFO_LIB_PATH) -l$(LLVM_ZLIB_NAME) -pthread -lncurses -lrt -ldl -lm  -lLLVMInstrumentation -lLLVMIRReader -lLLVMAsmParser -lLLVMDebugInfo -lLLVMOption -lLLVMLTO -lLLVMLinker -lLLVMipo -lLLVMVectorize -lLLVMBitWriter -lLLVMBitReader -lLLVMTableGen -lLLVMR600CodeGen -lLLVMR600Desc -lLLVMR600Info -lLLVMR600AsmPrinter -lLLVMSystemZDisassembler -lLLVMSystemZCodeGen -lLLVMSystemZAsmParser -lLLVMSystemZDesc -lLLVMSystemZInfo -lLLVMSystemZAsmPrinter -lLLVMHexagonCodeGen -lLLVMHexagonAsmPrinter -lLLVMHexagonDesc -lLLVMHexagonInfo -lLLVMNVPTXCodeGen -lLLVMNVPTXDesc -lLLVMNVPTXInfo -lLLVMNVPTXAsmPrinter -lLLVMCppBackendCodeGen -lLLVMCppBackendInfo -lLLVMMSP430CodeGen -lLLVMMSP430Desc -lLLVMMSP430Info -lLLVMMSP430AsmPrinter -lLLVMXCoreDisassembler -lLLVMXCoreCodeGen -lLLVMXCoreDesc -lLLVMXCoreInfo -lLLVMXCoreAsmPrinter -lLLVMMipsDisassembler -lLLVMMipsCodeGen -lLLVMMipsAsmParser -lLLVMMipsDesc -lLLVMMipsInfo -lLLVMMipsAsmPrinter -lLLVMARMDisassembler -lLLVMARMCodeGen -lLLVMARMAsmParser -lLLVMARMDesc -lLLVMARMInfo -lLLVMARMAsmPrinter -lLLVMAArch64Disassembler -lLLVMAArch64CodeGen -lLLVMAArch64AsmParser -lLLVMAArch64Desc -lLLVMAArch64Info -lLLVMAArch64AsmPrinter -lLLVMAArch64Utils -lLLVMPowerPCCodeGen -lLLVMPowerPCAsmParser -lLLVMPowerPCDesc -lLLVMPowerPCInfo -lLLVMPowerPCAsmPrinter -lLLVMSparcCodeGen -lLLVMSparcDesc -lLLVMSparcInfo -lLLVMX86Disassembler -lLLVMX86AsmParser -lLLVMX86CodeGen -lLLVMSelectionDAG -lLLVMAsmPrinter -lLLVMX86Desc -lLLVMX86Info -lLLVMX86AsmPrinter -lLLVMX86Utils -lLLVMMCDisassembler -lLLVMMCParser -lLLVMInterpreter -lLLVMMCJIT -lLLVMJIT -lLLVMCodeGen -lLLVMObjCARCOpts -lLLVMScalarOpts -lLLVMInstCombine -lLLVMTransformUtils -lLLVMipa -lLLVMAnalysis -lLLVMRuntimeDyld -lLLVMExecutionEngine -lLLVMTarget -lLLVMMC -lLLVMObject -lLLVMCore -lLLVMSupport -ltinfo
+
+# The backend doesn't need everything that's in LIBS, however
+LIBS := $(filter-out -lreadline -ledit -ltermcap -lncurses -lcurses, $(LIBS))
+
+##############################################################################
+# libobs component
+###############################################################################
+LIBS += -L$(LIBCURL_LIB_PATH) -L$(LIBOPENSSL_LIB_PATH)
+LIBS += -leSDKOBS -leSDKLogAPI -lssl -lcrypto -lpcre -liconv -lnghttp2 -llog4cpp -lsecurec -lcurl
+LDFLAGS += -L$(LIBOBS_LIB_PATH)
+CXXFLAGS += -I$(LIBOBS_INCLUDE_PATH)
+
+##############################################################################
+# liblz4 component
+###############################################################################
+LIBS += -llz4
+LDFLAGS += -L$(LZ4_LIB_PATH)
+CXXFLAGS += -I$(LZ4_INCLUDE_PATH)
+
+##############################################################################
+# libcjson component
+###############################################################################
+LIBS += -lcjson
+LDFLAGS += -L$(CJSON_LIB_PATH)
+CXXFLAGS += -I$(CJSON_INCLUDE_PATH)
+
+##############################################################################
+# libhll component
+###############################################################################
+LIBS += -lhll
+LDFLAGS += -L$(HLL_LIB_PATH)
+CXXFLAGS += -I$(HLL_INCLUDE_PATH)
+
+#############################################################################
+# PLJava component
+###############################################################################
+PLJAVA_LIB_PATH = $(PLJAVA_HOME)/lib
+PLJAVA_JAR_PATH = $(PLJAVA_HOME)/java
+LIBPLJAVA = libpljava.so
+JARPLJAVA = pljava.jar
+
+##############################################################################
+# jemalloc component
+###############################################################################
+LIBS += -l$(JEMALLOC_LIB_NAME)
+LDFLAGS += -L$(JEMALLOC_LIB_PATH)
+CXXFLAGS += -I$(JEMALLOC_INCLUDE_PATH)
+
+#############################################################################
+# cgroup library
+##############################################################################
+LDFLAGS += -L$(LIBCGROUP_LIB_PATH)
+LIBS += -lcgroup
+LIBCGROUP=libcgroup.so
+
+############################################################################
+# link orc for gaussdb
+############################################################################
+LDFLAGS += -L$(LIBORC_LIB_PATH)
+ORC_LIB_NAME=
+ifeq ($(enable_llt), yes)
+ ORC_LIB_NAME=orc_pic
+else
+ ifeq ($(enable_ut), yes)
+  ORC_LIB_NAME=orc_pic
+ else
+  ORC_LIB_NAME=orc	
+ endif
+endif
+LIBS += -l${ORC_LIB_NAME}
+
+############################################################################
+# link snappy for gaussdb
+############################################################################
+LDFLAGS += -L$(SNAPPY_LIB_PATH)
+SNAPPY_LIB_NAME=
+ifeq ($(enable_llt), yes)
+ SNAPPY_LIB_NAME=snappy_pic
+else
+ ifeq ($(enable_ut), yes)
+  SNAPPY_LIB_NAME=snappy_pic
+ else
+  SNAPPY_LIB_NAME=snappy	
+ endif
+endif
+LIBS += -l${SNAPPY_LIB_NAME}
+
+################################################################################
+# protobuf
+################################################################################
+LDFLAGS += -L$(PROTOBUF_LIB_PATH)
+PROTOBUF_LIB_NAME=
+ifeq ($(enable_llt), yes)
+ PROTOBUF_LIB_NAME=protobuf_pic
+else
+ ifeq ($(enable_ut), yes)
+  PROTOBUF_LIB_NAME=protobuf_pic
+ else
+  PROTOBUF_LIB_NAME=protobuf
+ endif
+endif
+LIBS += -l${PROTOBUF_LIB_NAME}
+
+##################################################################################
+# kerberos
+##################################################################################
+LDFLAGS += -L$(KERBEROS_LIB_PATH)
+LIBS += -lcom_err_gauss -lgssapi_krb5_gauss -lkrb5_gauss -lgssrpc_gauss -lk5crypto_gauss -lkadm5clnt_mit -lkadm5srv_mit -lkdb5 -lkrb5support_gauss -lverto
+
+##################################################################################
+# libstd
+#################################################################################
+LDFLAGS += -L$(LIBSTD_LIB_PATH)
+LIBSTD_LIB_NAME=stdc++
+LIBS += -l${LIBSTD_LIB_NAME}
+
+##################################################################################
+# boost
+###################################################################################
+LDFLAGS += -L$(BOOST_LIB_PATH)
+ifeq ($(enable_llt), yes)
+ LIBS += -lboost_thread_pic -lboost_chrono_pic  -lboost_system_pic -lboost_atomic
+else
+ ifeq ($(enable_ut), yes)
+  LIBS += -lboost_thread_pic -lboost_chrono_pic  -lboost_system_pic -lboost_atomic
+ else
+  LIBS += -lboost_thread -lboost_chrono  -lboost_system -lboost_atomic
+ endif
+endif
+
+################################################################################
+# libxml2
+################################################################################
+LDFLAGS += -L$(LIBXML_LIB_PATH)
+ifeq ($(enable_llt), yes)
+ LIBS += -lxml2_pic
+else
+ ifeq ($(enable_ut), yes)
+  LIBS += -lxml2_pic
+ else
+  LIBS += -lxml2
+ endif
+endif
+
+################################################################################
+#openssl
+###############################################################################
+LDFLAGS += -L$(LIBOPENSSL_LIB_PATH)
+LIBS += -lssl -lcrypto
+
+#for ADIO
+LIBS += -laio
+
+
+# LIBS := $(LIBS) -lpqcomm
+# LDFLAGS += -L$(top_builddir)/src/gtm/libpg
+
+################################################################################
+# grpc
+################################################################################
+LDFLAGS += -L$(GRPC_LIB_PATH)
+LIBS += -lgrpc++ -lgrpc
+
+##########################################################################
+
+all: submake-libpgport submake-schemapg gaussdb $(POSTGRES_IMP)
+
+ifneq ($(PORTNAME), cygwin)
+ifneq ($(PORTNAME), win32)
+ifneq ($(PORTNAME), aix)
+
+gaussdb: $(OBJS) |
+	$(CC) $(CXXFLAGS) $(LDFLAGS) $(LDFLAGS_EX) -L$(top_builddir)/src/gtm/libpg $(export_dynamic) $(call expand_subsys,$^) $(LIBS) $(LLVMLIBS) -o $@
+
+db: $(OBJS)
+	$(CC) -fPIC -shared $(CXXFLAGS) $(LDFLAGS) $(LDFLAGS_EX) -L$(top_builddir)/src/gtm/libpg $(export_dynamic) $(call expand_subsys,$^) $(LIBS) $(LLVMLIBS) -o libdb.so
+	mv libdb.so $(top_builddir)/src/distribute/test/ut/lib
+
+endif
+endif
+endif
+
+ifeq ($(PORTNAME), cygwin)
+
+postgres: $(OBJS) postgres.def libpostgres.a
+	$(DLLTOOL) --dllname $@$(X) --output-exp $@.exp --def postgres.def
+	$(CC) $(CXXFLAGS) $(LDFLAGS) $(LDFLAGS_EX) -o $@$(X) -Wl,--base-file,$@.base $@.exp $(call expand_subsys,$(OBJS)) $(LIBS)
+	$(DLLTOOL) --dllname $@$(X) --base-file $@.base --output-exp $@.exp --def postgres.def
+	$(CC) $(CXXFLAGS) $(LDFLAGS) $(LDFLAGS_EX) -Wl,--stack,$(WIN32_STACK_RLIMIT) -o $@$(X) $@.exp $(call expand_subsys,$(OBJS)) $(LIBS)
+	rm -f $@.exp $@.base
+
+postgres.def: $(OBJS)
+	$(DLLTOOL) --export-all --output-def $@ $(call expand_subsys,$^)
+
+libpostgres.a: postgres.def
+	$(DLLTOOL) --dllname postgres.exe --def postgres.def --output-lib $@
+
+endif # cygwin
+
+ifeq ($(PORTNAME), win32)
+LIBS += -lsecur32
+
+postgres: $(OBJS) postgres.def libpostgres.a $(WIN32RES)
+	$(DLLTOOL) --dllname $@$(X) --output-exp $@.exp --def postgres.def
+	$(CC) $(CXXFLAGS) $(LDFLAGS) $(LDFLAGS_EX) -o $@$(X) -Wl,--base-file,$@.base $@.exp $(call expand_subsys,$(OBJS)) $(WIN32RES) $(LIBS)
+	$(DLLTOOL) --dllname $@$(X) --base-file $@.base --output-exp $@.exp --def postgres.def
+	$(CC) $(CXXFLAGS) $(LDFLAGS) $(LDFLAGS_EX) -Wl,--stack=$(WIN32_STACK_RLIMIT) -o $@$(X) $@.exp $(call expand_subsys,$(OBJS)) $(WIN32RES) $(LIBS)
+	rm -f $@.exp $@.base
+
+postgres.def: $(OBJS)
+	$(DLLTOOL) --export-all --output-def $@ $(call expand_subsys,$^)
+
+libpostgres.a: postgres.def
+	$(DLLTOOL) --dllname postgres.exe --def postgres.def --output-lib $@
+
+endif # win32
+
+ifeq ($(PORTNAME), aix)
+
+postgres: $(POSTGRES_IMP)
+	$(CC) $(CXXFLAGS) $(LDFLAGS) $(LDFLAGS_EX) $(call expand_subsys,$(OBJS)) -Wl,-bE:$(top_builddir)/src/backend/$(POSTGRES_IMP) $(LIBS) -o $@
+
+$(POSTGRES_IMP): $(OBJS)
+	$(LD) $(LDREL) $(LDOUT) SUBSYS.o $(call expand_subsys,$^)
+ifeq ($(host_os), aix3.2.5)
+	$(MKLDEXPORT) SUBSYS.o $(bindir)/postgres > $@
+else
+ifneq (,$(findstring aix4.1, $(host_os)))
+	$(MKLDEXPORT) SUBSYS.o $(bindir)/postgres > $@
+else
+	$(MKLDEXPORT) SUBSYS.o . > $@
+endif
+endif
+	@rm -f SUBSYS.o
+
+endif # aix
+
+# Update the commonly used headers before building the subdirectories
+$(SUBDIRS:%=%-recursive): $(top_builddir)/src/include/parser/gram.hpp $(top_builddir)/src/include/catalog/schemapg.h $(top_builddir)/src/include/utils/fmgroids.h $(top_builddir)/src/include/utils/errcodes.h $(top_builddir)/src/include/utils/probes.h $(top_builddir)/src/include/parser/hint_gram.hpp $(top_builddir)/src/include/storage/lwlocknames.h $(top_builddir)/contrib/carbondata/libcarbondata.a
+
+# run this unconditionally to avoid needing to know its dependencies here:
+submake-schemapg:
+	$(MAKE) -C catalog schemapg.h
+
+# src/port needs a convenient way to force errcodes.h to get built
+submake-errcodes: $(top_builddir)/src/include/utils/errcodes.h
+
+# src/port needs lwlocknames.h
+submake-lwlocknames: $(top_builddir)/src/include/storage/lwlocknames.h
+
+# run this to build pljava
+submake-libpljava:
+	$(top_builddir)/../open_source/pljava/build.sh -m only_so
+
+# run this to build carbondata-sdk
+$(top_builddir)/contrib/carbondata/libcarbondata.a: 
+	$(MAKE) -C $(top_builddir)/contrib/carbondata all
+
+.PHONY: submake-schemapg submake-errcodes
+
+catalog/schemapg.h: | submake-schemapg
+
+$(top_builddir)/src/port/libpgport_srv.a: | submake-libpgport
+
+$(top_builddir)/src/pl/plpgsql/src/libplpgsql.a: | submake-libplpgsql
+
+# Those are rules to create dependent GTM libraries automatically
+$(top_builddir)/src/interfaces/libpq/libpq.a:
+	$(MAKE) -C $(top_builddir)/src/interfaces/libpq libpq.a
+
+$(top_builddir)/src/gtm/common/libgtmcommon.a:
+	$(MAKE) -C $(top_builddir)/src/gtm/common libgtmcommon.a
+
+$(top_builddir)/src/gtm/client/libgtmclient.a:
+	$(MAKE) -C $(top_builddir)/src/gtm/client libgtmclient.a
+
+# The postgres.o target is needed by the rule in Makefile.global that
+# creates the exports file when MAKE_EXPORTS = true.
+gaussdb.o: $(OBJS)
+	$(CC) $(LDREL) $(LDFLAGS) $(LDFLAGS_EX) $(call expand_subsys,$^) $(LIBS) -o $@
+
+
+# The following targets are specified in make commands that appear in
+# the make files in our subdirectories. Note that it's important we
+# match the dependencies shown in the subdirectory makefiles!
+
+parser/gram.hpp: parser/gram.y
+	$(MAKE) -C parser gram.hpp
+
+parser/hint_gram.hpp: parser/hint_gram.y
+	$(MAKE) -C parser hint_gram.hpp
+
+utils/fmgroids.h: $(top_srcdir)/src/backend/catalog/pg_builtin_proc.cpp
+	$(MAKE) -C utils fmgroids.h
+
+utils/errcodes.h: utils/generate-errcodes.pl utils/errcodes.txt
+	$(MAKE) -C utils errcodes.h
+
+utils/probes.h: utils/probes.d
+	$(MAKE) -C utils probes.h
+
+storage/lmgr/lwlocknames.h: storage/lmgr/generate-lwlocknames.pl storage/lmgr/lwlocknames.txt
+	$(MAKE) -C storage/lmgr lwlocknames.h lwlocknames.cpp
+
+# Make symlinks for these headers in the include directory. That way
+# we can cut down on the -I options. Also, a symlink is automatically
+# up to date when we update the base file.
+#
+# The point of the prereqdir incantation in some of the rules below is to
+# force the symlink to use an absolute path rather than a relative path.
+# For headers which are generated by make distprep, the actual header within
+# src/backend will be in the source tree, while the symlink in src/include
+# will be in the build tree, so a simple ../.. reference won't work.
+# For headers generated during regular builds, we prefer a relative symlink.
+
+$(top_builddir)/src/include/parser/gram.hpp: parser/gram.hpp
+	prereqdir=`cd '$(dir $<)' >/dev/null && pwd` && \
+	  cd '$(dir $@)' && rm -f $(notdir $@) && \
+	  $(LN_S) "$$prereqdir/$(notdir $<)" .
+
+$(top_builddir)/src/include/parser/hint_gram.hpp: parser/hint_gram.hpp
+	prereqdir=`cd '$(dir $<)' >/dev/null && pwd` && \
+	  cd '$(dir $@)' && rm -f $(notdir $@) && \
+	  $(LN_S) "$$prereqdir/$(notdir $<)" .
+
+$(top_builddir)/src/include/catalog/schemapg.h: catalog/schemapg.h
+	prereqdir=`cd '$(dir $<)' >/dev/null && pwd` && \
+	  cd '$(dir $@)' && rm -f $(notdir $@) && \
+	  $(LN_S) "$$prereqdir/$(notdir $<)" .
+
+$(top_builddir)/src/include/utils/errcodes.h: utils/errcodes.h
+	prereqdir=`cd '$(dir $<)' >/dev/null && pwd` && \
+	  cd '$(dir $@)' && rm -f $(notdir $@) && \
+	  $(LN_S) "$$prereqdir/$(notdir $<)" .
+
+$(top_builddir)/src/include/utils/fmgroids.h: utils/fmgroids.h
+	prereqdir=`cd '$(dir $<)' >/dev/null && pwd` && \
+	  cd '$(dir $@)' && rm -f $(notdir $@) && \
+	  $(LN_S) "$$prereqdir/$(notdir $<)" .
+
+$(top_builddir)/src/include/utils/probes.h: utils/probes.h
+	cd '$(dir $@)' && rm -f $(notdir $@) && \
+	    $(LN_S) "../../../$(subdir)/utils/probes.h" .
+
+$(top_builddir)/src/include/storage/lwlocknames.h: storage/lmgr/lwlocknames.h
+	prereqdir=`cd '$(dir $<)' >/dev/null && pwd` && \
+	  cd '$(dir $@)' && rm -f $(notdir $@) && \
+	  $(LN_S) "$$prereqdir/$(notdir $<)" .
+
+utils/probes.o: utils/probes.d $(SUBDIROBJS)
+	$(DTRACE) $(DTRACEFLAGS) -C -G -s $(call expand_subsys,$^) -o $@
+
+
+##########################################################################
+
+# Be sure that these files get removed by the maintainer-clean target
+distprep:
+	$(MAKE) -C parser	gram.cpp gram.hpp scan.cpp hint_gram.cpp hint_gram.hpp hint_scan.cpp
+	$(MAKE) -C bootstrap	bootparse.cpp bootscanner.cpp
+	$(MAKE) -C catalog	schemapg.h postgres.bki postgres.description postgres.shdescription
+	$(MAKE) -C replication	repl_gram.cpp repl_scanner.cpp
+	$(MAKE) -C storage/lmgr	lwlocknames.h lwlocknames.cpp
+	$(MAKE) -C utils	fmgrtab.cpp fmgroids.h errcodes.h
+	$(MAKE) -C utils/misc	guc-file.cpp
+
+
+##########################################################################
+
+install: all installdirs install-bin
+ifeq ($(PORTNAME), cygwin)
+ifeq ($(MAKE_DLL), true)
+	$(INSTALL_DATA) libpostgres.a '$(DESTDIR)$(libdir)/libpostgres.a'
+endif
+endif
+ifeq ($(PORTNAME), win32)
+ifeq ($(MAKE_DLL), true)
+	$(INSTALL_DATA) libpostgres.a '$(DESTDIR)$(libdir)/libpostgres.a'
+endif
+endif
+	$(MAKE) -C catalog install-data
+	$(MAKE) -C codegen install-data
+	$(MAKE) -C tsearch install-data
+	$(MAKE) -C bulkload install-data
+	$(MAKE) -C $(top_builddir)/contrib/file_fdw install
+	$(MAKE) -C $(top_builddir)/contrib/hdfs_fdw install
+	$(MAKE) -C $(top_builddir)/contrib/log_fdw install
+	$(MAKE) -C $(top_builddir)/contrib/pg_upgrade_support install
+	$(MAKE) -C $(top_builddir)/contrib/roach_api install
+	$(MAKE) -C $(top_builddir)/contrib/dimsearch install
+	$(MAKE) -C $(top_builddir)/contrib/security_plugin install
+	$(INSTALL_DATA) $(srcdir)/libpq/pg_hba.conf.sample '$(DESTDIR)$(datadir)/pg_hba.conf.sample'
+	$(INSTALL_DATA) $(srcdir)/libpq/pg_ident.conf.sample '$(DESTDIR)$(datadir)/pg_ident.conf.sample'
+	$(INSTALL_DATA) $(srcdir)/utils/misc/postgresql.conf.sample '$(DESTDIR)$(datadir)/postgresql.conf.sample'
+	$(INSTALL_DATA) $(srcdir)/access/transam/recovery.conf.sample '$(DESTDIR)$(datadir)/recovery.conf.sample'
+	cd $(KERBEROS_LIB_PATH) && tar -cpf - ./* | ( cd $(DESTDIR)$(libdir); tar -xpf -  )
+	cp $(LIBOBS_LIB_PATH)/libpcre* '$(DESTDIR)$(libdir)/'
+	cp $(LIBOBS_LIB_PATH)/libsecurec* '$(DESTDIR)$(libdir)/'
+	cp $(LIBOBS_LIB_PATH)/liblog4* '$(DESTDIR)$(libdir)/'
+	cp $(LIBOBS_LIB_PATH)/libeSDK* '$(DESTDIR)$(libdir)/'
+	cp $(LIBOBS_LIB_PATH)/libxml2* '$(DESTDIR)$(libdir)/'
+	cp $(LIBOBS_LIB_PATH)/libcharset* '$(DESTDIR)$(libdir)/'
+	cp $(LIBOBS_LIB_PATH)/libiconv* '$(DESTDIR)$(libdir)/'
+	cp $(LIBOBS_LIB_PATH)/OBS* '$(DESTDIR)$(libdir)/'
+	cp $(LIBOBS_LIB_PATH)/libnghttp* '$(DESTDIR)$(libdir)/'
+	cp -d $(ZLIB_LIB_PATH)/libz* '$(DESTDIR)$(libdir)/'
+	cp -d $(LZ4_LIB_PATH)/liblz4* '$(DESTDIR)$(libdir)/'
+	cp -d $(CJSON_LIB_PATH)/libcjson* '$(DESTDIR)$(libdir)/'
+	cp -d $(HLL_LIB_PATH)/libhll* '$(DESTDIR)$(libdir)/'
+	cp $(top_builddir)/../buildtools/server_key/* '$(DESTDIR)$(bindir)/'
+	cp $(PLJAVA_LIB_PATH)/* '$(DESTDIR)$(libdir)/'
+	cp $(PLJAVA_JAR_PATH)/$(JARPLJAVA) '$(DESTDIR)$(pkglibdir)/java/'
+	cp -r $(top_builddir)/../$(BUILD_TOOLS_PATH)/jdk8/jdk1.8.0_77/jre/* '$(DESTDIR)$(bindir)/../jre/'
+
+install-bin: gaussdb $(POSTGRES_IMP) installdirs libcgroup
+	$(INSTALL_PROGRAM) gaussdb$(X) '$(DESTDIR)$(bindir)/gaussdb$(X)'
+ifneq ($(PORTNAME), win32)
+	@rm -f '$(DESTDIR)$(bindir)/gaussmaster$(X)'
+	@rm -f '$(DESTDIR)$(bindir)/gs_encrypt$(X)'
+	ln -s gaussdb$(X) '$(DESTDIR)$(bindir)/gaussmaster$(X)'
+	ln -s gaussdb$(X) '$(DESTDIR)$(bindir)/gs_encrypt$(X)'
+	$(INSTALL_PROGRAM) ../bin/scripts/drop_caches$(X).sh '$(DESTDIR)$(bindir)/drop_caches$(X).sh'
+	$(INSTALL_PROGRAM) ../bin/scripts/run_drop_cache$(X).sh '$(DESTDIR)$(bindir)/run_drop_cache$(X).sh'
+else
+	$(INSTALL_PROGRAM) gaussdb$(X) '$(DESTDIR)$(bindir)/gaussmaster$(X)'
+	$(INSTALL_PROGRAM) gaussdb$(X) '$(DESTDIR)$(bindir)/gs_encrypt$(X)'
+endif
+ifeq ($(MAKE_EXPORTS), true)
+	$(INSTALL_DATA) $(POSTGRES_IMP) '$(DESTDIR)$(pkglibdir)/$(POSTGRES_IMP)'
+	$(INSTALL_PROGRAM) $(MKLDEXPORT) '$(DESTDIR)$(pgxsdir)/$(MKLDEXPORT_DIR)/mkldexport.sh'
+endif
+
+.PHONY: install-bin
+
+#todo: need to use pg_config to create etc directory
+installdirs:
+	$(MKDIR_P) '$(DESTDIR)$(bindir)' '$(DESTDIR)$(datadir)' '$(DESTDIR)$(bindir)/../etc'
+	cp '$(top_builddir)/src/backend/access/dfs/region_map'  '$(DESTDIR)$(bindir)/../etc/'
+	$(MKDIR_P) '$(DESTDIR)$(llvmirdir)'
+	$(MKDIR_P) '$(DESTDIR)$(libdir)/postgresql/pg_plugin'
+	$(MKDIR_P) '$(DESTDIR)$(libdir)/libsimsearch'
+	$(MKDIR_P) '$(DESTDIR)$(pkglibdir)/java'
+	$(MKDIR_P) '$(DESTDIR)$(bindir)/../jre'
+
+ifeq ($(PORTNAME), cygwin)
+ifeq ($(MAKE_DLL), true)
+	$(MKDIR_P) '$(DESTDIR)$(libdir)'
+endif
+endif
+ifeq ($(PORTNAME), win32)
+ifeq ($(MAKE_DLL), true)
+	$(MKDIR_P) '$(DESTDIR)$(libdir)'
+endif
+endif
+ifeq ($(MAKE_EXPORTS), true)
+	$(MKDIR_P) '$(DESTDIR)$(pkglibdir)'
+	$(MKDIR_P) '$(DESTDIR)$(pgxsdir)/$(MKLDEXPORT_DIR)'
+endif
+
+libcgroup:
+	cd $(DESTDIR)$(libdir) && rm -f libcgroup.*
+	cp $(LIBCGROUP_LIB_PATH)/$(LIBCGROUP) '$(DESTDIR)$(libdir)/$(LIBCGROUP)'
+	cd $(DESTDIR)$(libdir) && $(LN_S) $(LIBCGROUP) libcgroup.so.1
+
+##########################################################################
+
+uninstall:
+	rm -rf '$(DESTDIR)$(bindir)/../etc/region_map'
+	rm -f '$(DESTDIR)$(bindir)/gaussdb$(X)' '$(DESTDIR)$(bindir)/gaussmaster'
+	rm -f '$(DESTDIR)$(bindir)/gaussdb$(X)' '$(DESTDIR)$(bindir)/gs_encrypt'
+	rm -f $(DESTDIR)$(libdir)/libcgroup*
+	rm -f $(DESTDIR)$(libdir)/libsimsearch/*
+	rm -f '$(DESTDIR)$(libdir)/$(LIBPLJAVA)' '$(DESTDIR)$(pkglibdir)/java/$(JARPLJAVA)'
+
+ifeq ($(MAKE_EXPORTS), true)
+	rm -f '$(DESTDIR)$(pkglibdir)/$(POSTGRES_IMP)'
+	rm -f '$(DESTDIR)$(pgxsdir)/$(MKLDEXPORT_DIR)/mkldexport.sh'
+endif
+ifeq ($(PORTNAME), cygwin)
+ifeq ($(MAKE_DLL), true)
+	rm -f '$(DESTDIR)$(libdir)/libpostgres.a'
+endif
+endif
+ifeq ($(PORTNAME), win32)
+ifeq ($(MAKE_DLL), true)
+	rm -f '$(DESTDIR)$(libdir)/libpostgres.a'
+endif
+endif
+	$(MAKE) -C catalog uninstall-data
+	$(MAKE) -C codegen uninstall-data
+	$(MAKE) -C tsearch uninstall-data
+	$(MAKE) -C bulkload uninstall-data
+	$(MAKE) -C $(top_builddir)/contrib/file_fdw uninstall
+	$(MAKE) -C $(top_builddir)/contrib/hdfs_fdw uninstall
+	$(MAKE) -C $(top_builddir)/contrib/log_fdw uninstall
+	$(MAKE) -C $(top_builddir)/contrib/pg_upgrade_support clean
+	$(MAKE) -C $(top_builddir)/contrib/roach_api uninstall
+	$(MAKE) -C $(top_builddir)/contrib/dimsearch uninstall
+	$(MAKE) -C $(top_builddir)/contrib/security_plugin uninstall
+	rm -f '$(DESTDIR)$(datadir)/pg_hba.conf.sample' \
+	      '$(DESTDIR)$(datadir)/pg_ident.conf.sample' \
+	      '$(DESTDIR)$(datadir)/postgresql.conf.sample' \
+	      '$(DESTDIR)$(datadir)/recovery.conf.sample'
+
+##########################################################################
+
+clean:
+	$(top_builddir)/../open_source/pljava/build.sh -m clean
+	rm -f $(LOCALOBJS) gaussdb$(X) $(POSTGRES_IMP) \
+		$(top_builddir)/src/include/parser/gram.hpp \
+		$(top_builddir)/src/include/parser/hint_gram.hpp \
+		$(top_builddir)/src/include/catalog/schemapg.h \
+		$(top_builddir)/src/include/utils/fmgroids.h \
+		$(top_builddir)/src/include/utils/probes.h	\
+		$(top_builddir)/src/include/storage/lwlocknames.h
+ifeq ($(PORTNAME), cygwin)
+	rm -f postgres.dll postgres.def libpostgres.a
+endif
+ifeq ($(PORTNAME), win32)
+	rm -f postgres.dll postgres.def libpostgres.a $(WIN32RES)
+endif
+
+distclean: clean
+	rm -f port/tas.s port/dynloader.cpp port/pg_sema.cpp port/pg_shmem.cpp \
+	      port/pg_latch.cpp
+
+maintainer-clean: distclean
+	rm -f bootstrap/bootparse.cpp \
+	      bootstrap/bootscanner.cpp \
+	      parser/gram.cpp \
+	      parser/gram.hpp \
+	      parser/hint_gram.hpp \
+	      parser/scan.cpp \
+	      catalog/schemapg.h \
+	      catalog/postgres.bki \
+	      catalog/postgres.description \
+	      catalog/postgres.shdescription \
+	      replication/repl_gram.cpp \
+	      replication/repl_gram.hpp \
+	      replication/repl_scanner.cpp \
+	      storage/lmgr/lwlocknames.cpp \
+	      storage/lmgr/lwlocknames.h \
+	      utils/fmgroids.h \
+	      utils/fmgrtab.cpp \
+	      utils/errcodes.h \
+	      utils/misc/guc-file.cpp \
+	      utils/sort/qsort_tuple.cpp
+
+
+##########################################################################
+#
+# Support for code development.
+#
+# Use target "quick" to build "postgres" when you know all the subsystems
+# are up to date.  It saves the time of doing all the submakes.
+.PHONY: quick
+quick: $(OBJS)
+	$(CC) $(CXXFLAGS) $(LDFLAGS) $(LDFLAGS_EX) $(export_dynamic) $(call expand_subsys,$^) $(LIBS) -o gaussdb

@@ -14,11 +14,12 @@
  */
 
 #include "postgres_fe.h"
-
+#define _WINSOCKAPI_
 #include <windows.h>
 #include "pthread-win32.h"
 
-DWORD pthread_self(void)
+DWORD
+pthread_self(void)
 {
     return GetCurrentThreadId();
 }

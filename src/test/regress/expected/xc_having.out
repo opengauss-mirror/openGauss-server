@@ -19,7 +19,7 @@ select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_hav
      3 |  11 | 3.6666666666666667 | 3.66666666666667 |    3
 (1 row)
 
-explain (verbose true, costs false, nodes false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having val2 + 1 > 3;
+explain (verbose true, costs false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having val2 + 1 > 3;
                                                  QUERY PLAN                                                  
 -------------------------------------------------------------------------------------------------------------
  HashAggregate
@@ -37,7 +37,7 @@ select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_hav
      2 |   8 | 4.0000000000000000 |        4 |    2
 (1 row)
 
-explain (verbose true, costs false, nodes false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75;
+explain (verbose true, costs false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75;
                                                  QUERY PLAN                                                  
 -------------------------------------------------------------------------------------------------------------
  HashAggregate
@@ -55,7 +55,7 @@ select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_hav
      3 |  11 | 3.6666666666666667 | 3.66666666666667 |    3
 (2 rows)
 
-explain (verbose true, costs false, nodes false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75 or val2 > 2 order by val2;
+explain (verbose true, costs false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75 or val2 > 2 order by val2;
                                                      QUERY PLAN                                                      
 ---------------------------------------------------------------------------------------------------------------------
  Sort
@@ -74,7 +74,7 @@ select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_hav
 -------+-----+-----+----------+------
 (0 rows)
 
-explain (verbose true, costs false, nodes false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75 and val2 > 2;
+explain (verbose true, costs false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75 and val2 > 2;
                                                  QUERY PLAN                                                  
 -------------------------------------------------------------------------------------------------------------
  HashAggregate
@@ -93,7 +93,7 @@ select count(*), sum(xc_having_tab1.val * xc_having_tab2.val), avg(xc_having_tab
      6 |  96 | 16.0000000000000000 |       16 |    2 |    2
 (1 row)
 
-explain (verbose true, costs false, nodes false) select count(*), sum(xc_having_tab1.val * xc_having_tab2.val), avg(xc_having_tab1.val*xc_having_tab2.val), sum(xc_having_tab1.val*xc_having_tab2.val)::float8/count(*), xc_having_tab1.val2, xc_having_tab2.val2 from xc_having_tab1 full outer join xc_having_tab2 on xc_having_tab1.val2 = xc_having_tab2.val2 group by xc_having_tab1.val2, xc_having_tab2.val2 having xc_having_tab1.val2 + xc_having_tab2.val2 > 2;
+explain (verbose true, costs false) select count(*), sum(xc_having_tab1.val * xc_having_tab2.val), avg(xc_having_tab1.val*xc_having_tab2.val), sum(xc_having_tab1.val*xc_having_tab2.val)::float8/count(*), xc_having_tab1.val2, xc_having_tab2.val2 from xc_having_tab1 full outer join xc_having_tab2 on xc_having_tab1.val2 = xc_having_tab2.val2 group by xc_having_tab1.val2, xc_having_tab2.val2 having xc_having_tab1.val2 + xc_having_tab2.val2 > 2;
                                                                                                                             QUERY PLAN                                                                                                                             
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  HashAggregate
@@ -118,7 +118,7 @@ select val2 from xc_having_tab1 group by val2 having sum(val) > 8;
     3
 (1 row)
 
-explain (verbose true, costs false, nodes false) select val2 from xc_having_tab1 group by val2 having sum(val) > 8;
+explain (verbose true, costs false) select val2 from xc_having_tab1 group by val2 having sum(val) > 8;
                QUERY PLAN                
 -----------------------------------------
  HashAggregate
@@ -137,7 +137,7 @@ select val + val2 sum from xc_having_tab1 group by val + val2 having sum(val) > 
    9
 (3 rows)
 
-explain (verbose true, costs false, nodes false) select val + val2 sum from xc_having_tab1 group by val + val2 having sum(val) > 5 order by sum;
+explain (verbose true, costs false) select val + val2 sum from xc_having_tab1 group by val + val2 having sum(val) > 5 order by sum;
                             QUERY PLAN                            
 ------------------------------------------------------------------
  Sort
@@ -158,7 +158,7 @@ select count(*) + sum(val) + avg(val), val2 from xc_having_tab1 group by val2 ha
  17.6666666666666667 |    3
 (1 row)
 
-explain (verbose true, costs false, nodes false) select count(*) + sum(val) + avg(val), val2 from xc_having_tab1 group by val2 having min(val) < val2;
+explain (verbose true, costs false) select count(*) + sum(val) + avg(val), val2 from xc_having_tab1 group by val2 having min(val) < val2;
                           QUERY PLAN                           
 ---------------------------------------------------------------
  HashAggregate
@@ -185,7 +185,7 @@ select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_hav
      3 |  11 | 3.6666666666666667 | 3.66666666666667 |    3
 (1 row)
 
-explain (verbose true, costs false, nodes false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having val2 + 1 > 3;
+explain (verbose true, costs false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having val2 + 1 > 3;
                                                  QUERY PLAN                                                  
 -------------------------------------------------------------------------------------------------------------
  HashAggregate
@@ -203,7 +203,7 @@ select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_hav
      2 |   8 | 4.0000000000000000 |        4 |    2
 (1 row)
 
-explain (verbose true, costs false, nodes false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75;
+explain (verbose true, costs false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75;
                                                  QUERY PLAN                                                  
 -------------------------------------------------------------------------------------------------------------
  HashAggregate
@@ -221,7 +221,7 @@ select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_hav
      3 |  11 | 3.6666666666666667 | 3.66666666666667 |    3
 (2 rows)
 
-explain (verbose true, costs false, nodes false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75 or val2 > 2 order by val2;
+explain (verbose true, costs false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75 or val2 > 2 order by val2;
                                                      QUERY PLAN                                                      
 ---------------------------------------------------------------------------------------------------------------------
  Sort
@@ -240,7 +240,7 @@ select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_hav
 -------+-----+-----+----------+------
 (0 rows)
 
-explain (verbose true, costs false, nodes false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75 and val2 > 2;
+explain (verbose true, costs false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75 and val2 > 2;
                                                  QUERY PLAN                                                  
 -------------------------------------------------------------------------------------------------------------
  HashAggregate
@@ -259,7 +259,7 @@ select count(*), sum(xc_having_tab1.val * xc_having_tab2.val), avg(xc_having_tab
      6 |  96 | 16.0000000000000000 |       16 |    2 |    2
 (1 row)
 
-explain (verbose true, costs false, nodes false) select count(*), sum(xc_having_tab1.val * xc_having_tab2.val), avg(xc_having_tab1.val*xc_having_tab2.val), sum(xc_having_tab1.val*xc_having_tab2.val)::float8/count(*), xc_having_tab1.val2, xc_having_tab2.val2 from xc_having_tab1 full outer join xc_having_tab2 on xc_having_tab1.val2 = xc_having_tab2.val2 group by xc_having_tab1.val2, xc_having_tab2.val2 having xc_having_tab1.val2 + xc_having_tab2.val2 > 2;
+explain (verbose true, costs false) select count(*), sum(xc_having_tab1.val * xc_having_tab2.val), avg(xc_having_tab1.val*xc_having_tab2.val), sum(xc_having_tab1.val*xc_having_tab2.val)::float8/count(*), xc_having_tab1.val2, xc_having_tab2.val2 from xc_having_tab1 full outer join xc_having_tab2 on xc_having_tab1.val2 = xc_having_tab2.val2 group by xc_having_tab1.val2, xc_having_tab2.val2 having xc_having_tab1.val2 + xc_having_tab2.val2 > 2;
                                                                                                                             QUERY PLAN                                                                                                                             
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  HashAggregate
@@ -284,7 +284,7 @@ select val2 from xc_having_tab1 group by val2 having sum(val) > 8;
     3
 (1 row)
 
-explain (verbose true, costs false, nodes false) select val2 from xc_having_tab1 group by val2 having sum(val) > 8;
+explain (verbose true, costs false) select val2 from xc_having_tab1 group by val2 having sum(val) > 8;
                QUERY PLAN                
 -----------------------------------------
  HashAggregate
@@ -303,7 +303,7 @@ select val + val2 sum from xc_having_tab1 group by val + val2 having sum(val) > 
    9
 (3 rows)
 
-explain (verbose true, costs false, nodes false) select val + val2 sum from xc_having_tab1 group by val + val2 having sum(val) > 5 order by sum;
+explain (verbose true, costs false) select val + val2 sum from xc_having_tab1 group by val + val2 having sum(val) > 5 order by sum;
                             QUERY PLAN                            
 ------------------------------------------------------------------
  Sort
@@ -324,7 +324,7 @@ select count(*) + sum(val) + avg(val), val2 from xc_having_tab1 group by val2 ha
  17.6666666666666667 |    3
 (1 row)
 
-explain (verbose true, costs false, nodes false) select count(*) + sum(val) + avg(val), val2 from xc_having_tab1 group by val2 having min(val) < val2;
+explain (verbose true, costs false) select count(*) + sum(val) + avg(val), val2 from xc_having_tab1 group by val2 having min(val) < val2;
                           QUERY PLAN                           
 ---------------------------------------------------------------
  HashAggregate
@@ -351,7 +351,7 @@ select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_hav
      3 |  11 | 3.6666666666666667 | 3.66666666666667 |    3
 (1 row)
 
-explain (verbose true, costs false, nodes false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having val2 + 1 > 3;
+explain (verbose true, costs false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having val2 + 1 > 3;
                                                  QUERY PLAN                                                  
 -------------------------------------------------------------------------------------------------------------
  GroupAggregate
@@ -372,7 +372,7 @@ select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_hav
      2 |   8 | 4.0000000000000000 |        4 |    2
 (1 row)
 
-explain (verbose true, costs false, nodes false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75;
+explain (verbose true, costs false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75;
                                                  QUERY PLAN                                                  
 -------------------------------------------------------------------------------------------------------------
  GroupAggregate
@@ -393,7 +393,7 @@ select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_hav
      3 |  11 | 3.6666666666666667 | 3.66666666666667 |    3
 (2 rows)
 
-explain (verbose true, costs false, nodes false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75 or val2 > 2 order by val2;
+explain (verbose true, costs false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75 or val2 > 2 order by val2;
                                                  QUERY PLAN                                                  
 -------------------------------------------------------------------------------------------------------------
  GroupAggregate
@@ -412,7 +412,7 @@ select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_hav
 -------+-----+-----+----------+------
 (0 rows)
 
-explain (verbose true, costs false, nodes false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75 and val2 > 2;
+explain (verbose true, costs false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75 and val2 > 2;
                                                  QUERY PLAN                                                  
 -------------------------------------------------------------------------------------------------------------
  GroupAggregate
@@ -434,7 +434,7 @@ select count(*), sum(xc_having_tab1.val * xc_having_tab2.val), avg(xc_having_tab
      6 |  96 | 16.0000000000000000 |       16 |    2 |    2
 (1 row)
 
-explain (verbose true, costs false, nodes false) select count(*), sum(xc_having_tab1.val * xc_having_tab2.val), avg(xc_having_tab1.val*xc_having_tab2.val), sum(xc_having_tab1.val*xc_having_tab2.val)::float8/count(*), xc_having_tab1.val2, xc_having_tab2.val2 from xc_having_tab1 full outer join xc_having_tab2 on xc_having_tab1.val2 = xc_having_tab2.val2 group by xc_having_tab1.val2, xc_having_tab2.val2 having xc_having_tab1.val2 + xc_having_tab2.val2 > 2;
+explain (verbose true, costs false) select count(*), sum(xc_having_tab1.val * xc_having_tab2.val), avg(xc_having_tab1.val*xc_having_tab2.val), sum(xc_having_tab1.val*xc_having_tab2.val)::float8/count(*), xc_having_tab1.val2, xc_having_tab2.val2 from xc_having_tab1 full outer join xc_having_tab2 on xc_having_tab1.val2 = xc_having_tab2.val2 group by xc_having_tab1.val2, xc_having_tab2.val2 having xc_having_tab1.val2 + xc_having_tab2.val2 > 2;
                                                                                                                             QUERY PLAN                                                                                                                             
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  GroupAggregate
@@ -463,7 +463,7 @@ select val2 from xc_having_tab1 group by val2 having sum(val) > 8;
     3
 (1 row)
 
-explain (verbose true, costs false, nodes false) select val2 from xc_having_tab1 group by val2 having sum(val) > 8;
+explain (verbose true, costs false) select val2 from xc_having_tab1 group by val2 having sum(val) > 8;
                   QUERY PLAN                   
 -----------------------------------------------
  GroupAggregate
@@ -485,7 +485,7 @@ select val + val2 from xc_having_tab1 group by val + val2 having sum(val) > 5;
         9
 (3 rows)
 
-explain (verbose true, costs false, nodes false) select val + val2 from xc_having_tab1 group by val + val2 having sum(val) > 5;
+explain (verbose true, costs false) select val + val2 from xc_having_tab1 group by val + val2 having sum(val) > 5;
                            QUERY PLAN                           
 ----------------------------------------------------------------
  GroupAggregate
@@ -506,7 +506,7 @@ select count(*) + sum(val) + avg(val), val2 from xc_having_tab1 group by val2 ha
  17.6666666666666667 |    3
 (1 row)
 
-explain (verbose true, costs false, nodes false) select count(*) + sum(val) + avg(val), val2 from xc_having_tab1 group by val2 having min(val) < val2;
+explain (verbose true, costs false) select count(*) + sum(val) + avg(val), val2 from xc_having_tab1 group by val2 having min(val) < val2;
                           QUERY PLAN                           
 ---------------------------------------------------------------
  GroupAggregate
@@ -536,7 +536,7 @@ select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_hav
      3 |  11 | 3.6666666666666667 | 3.66666666666667 |    3
 (1 row)
 
-explain (verbose true, costs false, nodes false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having val2 + 1 > 3;
+explain (verbose true, costs false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having val2 + 1 > 3;
                                                  QUERY PLAN                                                  
 -------------------------------------------------------------------------------------------------------------
  GroupAggregate
@@ -557,7 +557,7 @@ select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_hav
      2 |   8 | 4.0000000000000000 |        4 |    2
 (1 row)
 
-explain (verbose true, costs false, nodes false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75;
+explain (verbose true, costs false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75;
                                                  QUERY PLAN                                                  
 -------------------------------------------------------------------------------------------------------------
  GroupAggregate
@@ -578,7 +578,7 @@ select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_hav
      3 |  11 | 3.6666666666666667 | 3.66666666666667 |    3
 (2 rows)
 
-explain (verbose true, costs false, nodes false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75 or val2 > 2 order by val2;
+explain (verbose true, costs false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75 or val2 > 2 order by val2;
                                                  QUERY PLAN                                                  
 -------------------------------------------------------------------------------------------------------------
  GroupAggregate
@@ -597,7 +597,7 @@ select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_hav
 -------+-----+-----+----------+------
 (0 rows)
 
-explain (verbose true, costs false, nodes false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75 and val2 > 2;
+explain (verbose true, costs false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_having_tab1 group by val2 having avg(val) > 3.75 and val2 > 2;
                                                  QUERY PLAN                                                  
 -------------------------------------------------------------------------------------------------------------
  GroupAggregate
@@ -619,7 +619,7 @@ select count(*), sum(xc_having_tab1.val * xc_having_tab2.val), avg(xc_having_tab
      6 |  96 | 16.0000000000000000 |       16 |    2 |    2
 (1 row)
 
-explain (verbose true, costs false, nodes false) select count(*), sum(xc_having_tab1.val * xc_having_tab2.val), avg(xc_having_tab1.val*xc_having_tab2.val), sum(xc_having_tab1.val*xc_having_tab2.val)::float8/count(*), xc_having_tab1.val2, xc_having_tab2.val2 from xc_having_tab1 full outer join xc_having_tab2 on xc_having_tab1.val2 = xc_having_tab2.val2 group by xc_having_tab1.val2, xc_having_tab2.val2 having xc_having_tab1.val2 + xc_having_tab2.val2 > 2;
+explain (verbose true, costs false) select count(*), sum(xc_having_tab1.val * xc_having_tab2.val), avg(xc_having_tab1.val*xc_having_tab2.val), sum(xc_having_tab1.val*xc_having_tab2.val)::float8/count(*), xc_having_tab1.val2, xc_having_tab2.val2 from xc_having_tab1 full outer join xc_having_tab2 on xc_having_tab1.val2 = xc_having_tab2.val2 group by xc_having_tab1.val2, xc_having_tab2.val2 having xc_having_tab1.val2 + xc_having_tab2.val2 > 2;
                                                                                                                             QUERY PLAN                                                                                                                             
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  GroupAggregate
@@ -648,7 +648,7 @@ select val2 from xc_having_tab1 group by val2 having sum(val) > 8;
     3
 (1 row)
 
-explain (verbose true, costs false, nodes false) select val2 from xc_having_tab1 group by val2 having sum(val) > 8;
+explain (verbose true, costs false) select val2 from xc_having_tab1 group by val2 having sum(val) > 8;
                   QUERY PLAN                   
 -----------------------------------------------
  GroupAggregate
@@ -670,7 +670,7 @@ select val + val2 from xc_having_tab1 group by val + val2 having sum(val) > 5;
         9
 (3 rows)
 
-explain (verbose true, costs false, nodes false) select val + val2 from xc_having_tab1 group by val + val2 having sum(val) > 5;
+explain (verbose true, costs false) select val + val2 from xc_having_tab1 group by val + val2 having sum(val) > 5;
                            QUERY PLAN                           
 ----------------------------------------------------------------
  GroupAggregate
@@ -691,7 +691,7 @@ select count(*) + sum(val) + avg(val), val2 from xc_having_tab1 group by val2 ha
  17.6666666666666667 |    3
 (1 row)
 
-explain (verbose true, costs false, nodes false) select count(*) + sum(val) + avg(val), val2 from xc_having_tab1 group by val2 having min(val) < val2;
+explain (verbose true, costs false) select count(*) + sum(val) + avg(val), val2 from xc_having_tab1 group by val2 having min(val) < val2;
                           QUERY PLAN                           
 ---------------------------------------------------------------
  GroupAggregate

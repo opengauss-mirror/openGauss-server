@@ -28,7 +28,7 @@
 #include "miscadmin.h"
 #include "optimizer/autoanalyzer.h"
 #include "postmaster/postmaster.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
@@ -64,7 +64,7 @@ AutoAnaProcess::AutoAnaProcess(Relation rel) : m_pgconn(NULL), m_res(NULL)
     initStringInfo(&str_analyze_command);
     appendStringInfo(&str_analyze_command,
         "analyze %s.%s ;",
-        quote_identifier(get_namespace_name(rel->rd_rel->relnamespace, true)),
+        quote_identifier(get_namespace_name(rel->rd_rel->relnamespace)),
         quote_identifier(NameStr(rel->rd_rel->relname)));
     m_query = lappend(m_query, str_analyze_command.data);
 }
@@ -117,18 +117,11 @@ bool AutoAnaProcess::run()
         elog(DEBUG2, "[AUTO-ANALYZE] autoanalyze start: %s", cmd);
     }
 
-    const char* dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-    if (dbname == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE),
-                    errmsg("database with OID %u does not exist",
-                        u_sess->proc_cxt.MyDatabaseId)));
-    }
-
     ret = snprintf_s(conninfo,
         sizeof(conninfo),
         sizeof(conninfo) - 1,
-        "dbname=%s port=%d application_name='auto_analyze' ",
-        dbname,
+        "dbname=%s port=%d application_name='auto_analyze' enable_ce=1 ",
+        get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId, true),
         g_instance.attr.attr_network.PostPortNumber);
     securec_check_ss_c(ret, "\0", "\0");
 
@@ -181,7 +174,8 @@ bool AutoAnaProcess::check_conditions(Relation rel)
     if (!u_sess->attr.attr_sql.enable_cluster_resize && RelationInClusterResizingReadOnly(rel))
         return false;
 
-    if (!(pg_class_ownercheck(RelationGetRelid(rel), GetUserId()) ||
+    AclResult aclresult = pg_class_aclcheck(RelationGetRelid(rel), GetUserId(), ACL_VACUUM);
+    if (aclresult != ACLCHECK_OK && !(pg_class_ownercheck(RelationGetRelid(rel), GetUserId()) ||
             (pg_database_ownercheck(u_sess->proc_cxt.MyDatabaseId, GetUserId()) && !rel->rd_rel->relisshared))) {
         return false;
     }
@@ -242,12 +236,14 @@ bool AutoAnaProcess::runAutoAnalyze(Relation rel)
         msecs = secs * 1000 + msecs;
         usecs = usecs % 1000;
 
+        MemoryContext oldcontext = MemoryContextSwitchTo(u_sess->temp_mem_cxt);
         appendStringInfo(u_sess->analyze_cxt.autoanalyze_timeinfo,
             "\"%s.%s\" %ld.%03dms ",
-            get_namespace_name(rel->rd_rel->relnamespace, true),
+            get_namespace_name(rel->rd_rel->relnamespace),
             NameStr(rel->rd_rel->relname),
             msecs,
             usecs);
+        (void)MemoryContextSwitchTo(oldcontext);
     }
 
     return result;

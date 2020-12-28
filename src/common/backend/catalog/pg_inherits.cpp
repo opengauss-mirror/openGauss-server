@@ -29,7 +29,7 @@
 #include "storage/lmgr.h"
 #include "utils/fmgroids.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 static int oid_cmp(const void* p1, const void* p2);
 
@@ -143,8 +143,7 @@ List* find_inheritance_children(Oid parentrelId, LOCKMODE lockmode)
  */
 List* find_all_inheritors(Oid parentrelId, LOCKMODE lockmode, List** numparents)
 {
-    List *rels_list = NIL;
-    List *rel_numparents = NIL;
+    List *rels_list = NIL, *rel_numparents = NIL;
     ListCell* l = NULL;
 
     /*

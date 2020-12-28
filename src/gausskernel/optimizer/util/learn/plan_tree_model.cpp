@@ -31,9 +31,9 @@
 
 static char* FormConfigureJson(const Form_gs_opt_model modelinfo, const char* labels);
 static char* FormSetupJson(const char* modelName);
-static void ConfigureModel(Form_gs_opt_model modelinfo, char* labels, char** filename);
+static void ConfigureModel(Form_gs_opt_model modelinfo, const char* labels, char** filename);
 static char* TrainModel(const Form_gs_opt_model modelinfo, char* filename);
-static void unlinkfile(char* filename);
+static void Unlinkfile(char* filename);
 
 /**
  * @Description: registered function for model plan tree model training procedure
@@ -138,40 +138,40 @@ char* TreeModelPredict(const char* modelName, char* filepath, const char* ip, in
 static char* FormConfigureJson(const Form_gs_opt_model modelinfo, const char* labels)
 {
     char* result = (char*)palloc0(sizeof(char) * MAX_LEN_JSON);
-    cJSON* json_obj = cJSON_CreateObject();
-    cJSON_AddStringToObject(json_obj, "template_name", modelinfo->template_name.data);
-    cJSON_AddStringToObject(json_obj, "model_name", modelinfo->model_name.data);
-    cJSON_AddNumberToObject(json_obj, "max_epoch", modelinfo->max_epoch);
-    cJSON_AddNumberToObject(json_obj, "learning_rate", modelinfo->learning_rate);
-    cJSON_AddNumberToObject(json_obj, "dim_red", modelinfo->dim_red);
-    cJSON_AddNumberToObject(json_obj, "hidden_units", modelinfo->hidden_units);
-    cJSON_AddNumberToObject(json_obj, "batch_size", modelinfo->batch_size);
-    cJSON_AddStringToObject(json_obj, "labels", labels);
-    char* buf = cJSON_Print(json_obj);
+    cJSON* jsonObj = cJSON_CreateObject();
+    cJSON_AddStringToObject(jsonObj, "template_name", modelinfo->template_name.data);
+    cJSON_AddStringToObject(jsonObj, "model_name", modelinfo->model_name.data);
+    cJSON_AddNumberToObject(jsonObj, "max_epoch", modelinfo->max_epoch);
+    cJSON_AddNumberToObject(jsonObj, "learning_rate", modelinfo->learning_rate);
+    cJSON_AddNumberToObject(jsonObj, "dim_red", modelinfo->dim_red);
+    cJSON_AddNumberToObject(jsonObj, "hidden_units", modelinfo->hidden_units);
+    cJSON_AddNumberToObject(jsonObj, "batch_size", modelinfo->batch_size);
+    cJSON_AddStringToObject(jsonObj, "labels", labels);
+    char* buf = cJSON_Print(jsonObj);
     if (buf != NULL) {
         result = pstrdup(buf);
         cJSON_free(buf);
     }
-    cJSON_Delete(json_obj);
+    cJSON_Delete(jsonObj);
     return result;
 }
 
 static char* FormSetupJson(const char* modelName)
 {
     char* result = (char*)palloc0(sizeof(char) * MAX_LEN_JSON);
-    cJSON* json_obj = cJSON_CreateObject();
-    cJSON_AddStringToObject(json_obj, "model_name", modelName);
-    char* buf = cJSON_Print(json_obj);
+    cJSON* jsonObj = cJSON_CreateObject();
+    cJSON_AddStringToObject(jsonObj, "model_name", modelName);
+    char* buf = cJSON_Print(jsonObj);
     if (buf != NULL) {
         result = pstrdup(buf);
         cJSON_free(buf);
     }
-    cJSON_Delete(json_obj);
+    cJSON_Delete(jsonObj);
     return result;
 }
 
 /* configure the remote server for training to see if the server is ready */
-static void ConfigureModel(Form_gs_opt_model modelinfo, char* labels, char** filename)
+static void ConfigureModel(Form_gs_opt_model modelinfo, const char* labels, char** filename)
 {
     char* buf = NULL;
     errno_t ret = sprintf_s(
@@ -243,7 +243,7 @@ static char* TrainModel(const Form_gs_opt_model modelinfo, char* filename)
     }
 
     DestroyConnInfo(conninfo);
-    unlinkfile(filename);
+    Unlinkfile(filename);
     switch (buf[0]) {
         case 'M': {
             pfree_ext(buf);
@@ -268,7 +268,7 @@ static char* TrainModel(const Form_gs_opt_model modelinfo, char* filename)
     return buf;
 }
 
-static void unlinkfile(char* filename)
+static void Unlinkfile(char* filename)
 {
     if (access(filename, F_OK) == 0) {
         if (unlink(filename) < 0) {

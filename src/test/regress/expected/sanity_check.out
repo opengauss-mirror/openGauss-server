@@ -46,12 +46,9 @@ SELECT relname, relhasindex
  float8_tbl                   | f
  func_index_heap              | t
  gs_obsscaninfo               | f
- gs_opt_model                 | t
  gs_wlm_ec_operator_info      | f
  gs_wlm_instance_history      | f
  gs_wlm_operator_info         | f
- gs_wlm_plan_encoding_table   | f
- gs_wlm_plan_operator_info    | f
  gs_wlm_session_info          | f
  gs_wlm_user_resource_history | f
  hash_f8_heap                 | t
@@ -61,6 +58,8 @@ SELECT relname, relhasindex
  hobbies_r                    | f
  ihighway                     | t
  inet_tbl                     | f
+ inhf                         | f
+ inhx                         | t
  insert_tbl                   | t
  int2_tbl                     | f
  int4_tbl                     | f
@@ -136,7 +135,6 @@ SELECT relname, relhasindex
  pg_foreign_data_wrapper      | t
  pg_foreign_server            | t
  pg_foreign_table             | t
- pg_hashbucket                | t
  pg_index                     | t
  pg_inherits                  | t
  pg_job                       | t

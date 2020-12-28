@@ -18,7 +18,6 @@
 #include "knl/knl_variable.h"
 
 #include <signal.h>
-#include <unistd.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #ifdef HAVE_SYS_IPC_H
@@ -356,8 +355,9 @@ PGShmemHeader* PGSharedMemoryCreate(Size size, bool makePrivate, int port)
 
         /* Try to create new segment */
         memAddress = InternalIpcMemoryCreate(NextShmemSegID, size);
-        if (memAddress != NULL)
+        if (memAddress != NULL) {
             break; /* successful create and attach */
+        }
 
         /* Check shared memory and possibly remove and recreate */
         if (makePrivate) { /* a standalone backend shouldn't do this */
@@ -378,9 +378,9 @@ PGShmemHeader* PGSharedMemoryCreate(Size size, bool makePrivate, int port)
         hdr = (PGShmemHeader*)memAddress;
         if (hdr->creatorPID != (ThreadId)getpid()) {
             if (kill(hdr->creatorPID, SIGKILL) == 0 || errno != ESRCH) {
-                elog(LOG, "shared memory that key is %d is owned by pid %lu ", NextShmemSegID, hdr->creatorPID);
+                elog(DEBUG3, "shared memory that key is %d is owned by pid %lu ", NextShmemSegID, hdr->creatorPID);
                 shmdt(memAddress);
-                retry_count = 0;
+                retry_count++;
                 NextShmemSegID--;
                 continue;
             }
@@ -395,7 +395,7 @@ PGShmemHeader* PGSharedMemoryCreate(Size size, bool makePrivate, int port)
         shmdt(memAddress);
         if (shmctl(shmid, IPC_RMID, NULL) < 0) {
             elog(LOG, "retry SHM key %d", NextShmemSegID);
-            retry_count = 0;
+            retry_count++;
             NextShmemSegID--;
             continue;
         }
@@ -404,16 +404,16 @@ PGShmemHeader* PGSharedMemoryCreate(Size size, bool makePrivate, int port)
          * Now try again to create the segment.
          */
         memAddress = InternalIpcMemoryCreate(NextShmemSegID, size);
-        if (memAddress != NULL)
+        if (memAddress != NULL) {
             break; /* successful create and attach */
-        else {
+        } else {
             /*
              * Can only get here if some other process managed to create the same
              * shmem key before we did.  Let him have that one, loop around to try
              * next key.
              */
             elog(LOG, "retry SHM key %d", NextShmemSegID);
-            retry_count = 0;
+            retry_count++;
             NextShmemSegID--;
         }
     }
@@ -505,7 +505,7 @@ void PGSharedMemoryDetach(void)
             && shmdt(NULL) < 0
 #endif
         )
-            ereport(LOG, (errmsg("shmdt failed: %m")));
+        ereport(LOG, (errmsg("shmdt failed: %m")));
         UsedShmemSegAddr = NULL;
     }
 }

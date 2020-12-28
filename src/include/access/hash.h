@@ -23,8 +23,8 @@
 #include "access/xlogreader.h"
 #include "fmgr.h"
 #include "lib/stringinfo.h"
-#include "storage/bufmgr.h"
-#include "storage/lock.h"
+#include "storage/buf/bufmgr.h"
+#include "storage/lock/lock.h"
 #include "utils/relcache.h"
 
 /*

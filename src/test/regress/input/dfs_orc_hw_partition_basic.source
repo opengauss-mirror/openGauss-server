@@ -1,0 +1,333 @@
+set enable_global_stats = true;
+--
+-- Function test cases value-partitioned HDFS table
+--
+create schema hdfs_valuepatition;
+set search_path = hdfs_valuepatition;
+
+-- Basic Test to focusing on partition related functionality, here using int for
+-- validation, other datatype will be see in datatype testing
+select '>>> Create table for unit test';
+drop table if exists t1;
+-- normal table to test result validation
+create table t1(
+    c1 int,
+    c2 int,
+    c3 int,
+    c4 int,
+    c5 int,
+    c6 int
+) distribute by hash(c1);
+
+drop table if exists t1p;
+-- partition table will be loaded with Row-Engine
+create table t1p(
+    c1 int,
+    c2 int,
+    c3 int,
+    c4 int,
+    c5 int,
+    c6 int
+)
+tablespace hdfs_ts
+distribute by hash (c1)
+partition by values (c3,c2,c4);
+
+drop table if exists t1pv;
+-- partition table will be loaded with Vector-Engine
+create table t1pv(
+    c1 int,
+    c2 int,
+    c3 int,
+    c4 int,
+    c5 int,
+    c6 int
+)
+tablespace hdfs_ts
+partition by values (c3,c2,c4);
+
+-- Verify whether system table pg_class is correctly populated
+select relname, parttype from pg_class where relname in ('t1', 't1p', 't1pv') order by 1,2;
+select relname, parttype, partstrategy, partkey from pg_partition where relname in ('t1', 't1p', 't1pv') order by 1,2;
+select name, setting, short_desc from pg_settings where name like '%valuepartition%';
+
+set cstore_insert_mode=main;
+select '>>> Polulate data';
+insert into t1 select v,v,v,v,v,v from generate_series(1,80) as v;
+insert into t1p select v,v,v,v,v,v from generate_series(1,80) as v;
+insert into t1pv select * from t1;
+
+select 'verify select * correct, cretaria: should NOT return results !!!!!';
+select * from t1 minus all select * from t1p;
+select * from t1 minus all select * from t1pv;
+
+--- basic partition pruning
+set enable_valuepartition_pruning=true;
+select 'Test partvition pruning(SPP-ON) cretaria: should have one row returned';
+select * from t1 where c1 = 3 and c4 = 3;
+select * from t1 where c1 = 3 and c4 = 3;
+select * from t1p where c1 = 3 and c4 = 3;
+select * from t1pv where c1 = 3 and c4 = 3;
+select * from t1p where c1 = 5 and c4 = 5;
+select * from t1pv where c1 = 5 and c4 = 5;
+
+select 'should be no row';
+select * from t1 where c1 < 10 minus all select * from t1p where c1 < 10;
+select * from t1 where c1 < 10 minus all select * from t1pv where c1 < 10;
+
+set enable_valuepartition_pruning=false;
+select 'Test partition pruning(SPP-OFF) cretaria: should have one row returned';
+select * from t1 where c1 = 3 and c4 = 3;
+select * from t1 where c1 = 3 and c4 = 3;
+select * from t1p where c1 = 3 and c4 = 3;
+select * from t1pv where c1 = 3 and c4 = 3;
+select * from t1p where c1 = 3 and c4 = 3;
+select * from t1pv where c1 = 3 and c4 = 3;
+
+select 'should be no row';
+select * from t1 where c1 < 10 minus all select * from t1p where c1 < 10;
+select * from t1 where c1 < 10 minus all select * from t1pv where c1 < 10;
+
+set enable_valuepartition_pruning=true;
+
+-- base update containing partition column that make new updated tuple goes into
+-- another partition directory
+update t1 set c6 = c6 * 10, c2 = c2 * 10 where c1 = 3 and c4 = 3;
+update t1p set c6 = c6 * 10, c2 = c2 * 10 where c1 = 3 and c4 = 3;
+update t1pv set c6 = c6 * 10, c2 = c2 * 10 where c1 = 3 and c4 = 3;
+select * from t1 minus all select * from t1p;
+select * from t1 minus all select * from t1pv;
+
+-- base delete
+select 'DELETE with equal condition';
+delete from t1 where c1 = 10 and c4 = 10;
+delete from t1p where c1 = 10 and c4 = 10;
+delete from t1pv where c1 = 10 and c4 = 10;
+select * from t1 minus all select * from t1p;
+select * from t1 minus all select * from t1pv;
+
+select 'DELETE with range condition';
+delete from t1 where c1 = 1 and c2 <= 5;
+delete from t1p where c1 = 1 and c2 <= 5;
+delete from t1pv where c1 = 1 and c2 <= 5;
+select * from t1 minus all select * from t1p;
+select * from t1 minus all select * from t1pv;
+
+delete from t1;
+delete from t1p;
+delete from t1pv;
+
+select 'DELETE ALL, so no row returns!';
+select * from t1;
+select * from t1p;
+select * from t1pv;
+
+drop table t1;
+drop table t1p;
+drop table t1pv;
+
+set cstore_insert_mode = main;
+
+/*
+ * Variant datatype test, here we only check the basic functionality is workable
+ */
+-- SMALLINT-INT2OID
+create table t_type_smallint(c1 int, c2 SMALLINT, c3 int)
+tablespace hdfs_ts
+partition by values (c2);
+
+insert into t_type_smallint values(1,1,1);
+insert into t_type_smallint values(2,2,2);
+select * from t_type_smallint;
+delete from t_type_smallint where c2 = 1;
+select * from t_type_smallint;
+update t_type_smallint set c2 = 20;
+select * from t_type_smallint;
+set partition_max_cache_size=4096;
+insert into t_type_smallint values(3,3,3);
+reset partition_max_cache_size;
+
+-- INTEGER-INT4OID
+create table t_type_integer(c1 int, c2 INTEGER, c3 int)
+tablespace hdfs_ts
+partition by values (c2);
+
+insert into t_type_integer values(1,1,1);
+insert into t_type_integer values(2,2,2);
+select * from t_type_integer;
+delete from t_type_integer where c2 = 1;
+select * from t_type_integer;
+update t_type_integer set c2 = 20;
+select * from t_type_integer;
+
+-- BIGINT-INT8OID
+create table t_type_bigint(c1 int, c2 BIGINT, c3 int)
+tablespace hdfs_ts
+partition by values (c2);
+
+insert into t_type_bigint values(1,1,1);
+insert into t_type_bigint values(2,2,2);
+select * from t_type_bigint;
+delete from t_type_bigint where c2 = 1;
+select * from t_type_bigint;
+update t_type_bigint set c2 = 20;
+select * from t_type_bigint;
+
+-- NUMERIC-NUMERIC8OID
+create table t_type_numeric(c1 int, c2 NUMERIC(20,10), c3 int)
+tablespace hdfs_ts
+partition by values (c2);
+
+insert into t_type_numeric values(1,1.123456,1);
+insert into t_type_numeric values(2,2.123456,2);
+select * from t_type_numeric;
+delete from t_type_numeric where c2 = 1.123456;
+select * from t_type_numeric;
+update t_type_numeric set c2 = 2.987654321;
+select * from t_type_numeric;
+
+-- VARCHAR
+create table t_type_varchar(c1 int, c2 VARCHAR(20), c3 int)
+tablespace hdfs_ts
+partition by values (c2);
+
+insert into t_type_varchar values(1,'row1', 1);
+insert into t_type_varchar values(2,'row2', 2);
+select * from t_type_varchar;
+delete from t_type_varchar where c2 = 'row1';
+select * from t_type_varchar;
+update t_type_varchar set c2 = 'row2updated';
+select * from t_type_varchar;
+
+-- CHAR
+create table t_type_char(c1 int, c2 CHAR(20), c3 int)
+tablespace hdfs_ts
+partition by values (c2);
+
+insert into t_type_char values(1,'row1', 1);
+insert into t_type_char values(2,'row2', 2);
+select * from t_type_char;
+delete from t_type_char where c2 = 'row1';
+select * from t_type_char;
+update t_type_char set c2 = 'row2updated';
+select * from t_type_char;
+
+-- TEXT
+create table t_type_text(c1 int, c2 TEXT, c3 int)
+tablespace hdfs_ts
+partition by values (c2);
+
+insert into t_type_text values(1,'row1', 1);
+insert into t_type_text values(2,'row2', 2);
+select * from t_type_text;
+delete from t_type_text where c2 = 'row1';
+select * from t_type_text;
+update t_type_text set c2 = 'row2updated';
+select * from t_type_text;
+
+-- Timeporal related type test
+-- DATE
+create table t_type_date(c1 int, c2 DATE, c3 int)
+tablespace hdfs_ts
+partition by values (c2);
+
+insert into t_type_date values(1, DATE'2015-05-01', 1);
+insert into t_type_date values(2, DATE'2015-05-02', 2);
+select * from t_type_date;
+delete from t_type_date where c2 = DATE'2015-05-01';
+select * from t_type_date;
+update t_type_date set c2 = DATE'2015-06-01';
+select * from t_type_date;
+
+-- TIMESTAMP
+create table t_type_tm(c1 int, c2 TIMESTAMP, c3 int)
+tablespace hdfs_ts
+partition by values (c2);
+
+insert into t_type_tm values(1, TIMESTAMP'2015-05-01 00:00:00', 1);
+insert into t_type_tm values(2, TIMESTAMP'2016-05-01 00:00:00', 2);
+select * from t_type_tm;
+delete from t_type_tm where c2 = TIMESTAMP'2015-05-01 00:00:00';
+select * from t_type_tm;
+update t_type_tm set c2 = TIMESTAMP'2015-06-01 00:00:00';
+select * from t_type_tm;
+
+-- TIMESTAMPTZ
+create table t_type_tmtz(c1 int, c2 TIMESTAMP, c3 int)
+tablespace hdfs_ts
+partition by values (c2);
+insert into t_type_tmtz values(1, TIMESTAMP'2015-05-01 00:00:00 PST', 1);
+insert into t_type_tmtz values(2, TIMESTAMP'2016-05-01 00:00:00 PST', 2);
+select * from t_type_tmtz;
+delete from t_type_tmtz where c2 = TIMESTAMP'2015-05-01 00:00:00 PST';
+select * from t_type_tmtz;
+update t_type_tmtz set c2 = TIMESTAMP'2015-06-01 00:00:00 EDT';
+select * from t_type_tmtz;
+
+-- Test special characters
+create table t_type_specialchars(c1 int, c2 varchar(30), c3 varchar(30), c4 text, c5 int)
+tablespace hdfs_ts
+partition by values (c2,c3,c4);
+insert into t_type_specialchars values(1, '&_+&%'   , '&_+&%<>', '&_+&%//', 1);
+insert into t_type_specialchars values(2, '&_+&%//' , '&_+&%<>', '&_+&%'  ,  2);
+select * from t_type_specialchars;
+select * from t_type_specialchars where c2 = '&_+&%//';
+select * from t_type_specialchars where c3 = '&_+&%<>';
+select * from t_type_specialchars where c4 = '&_+&%';
+delete from t_type_specialchars where c2 = '&_+&%//';
+select * from t_type_specialchars;
+update t_type_specialchars set c2 = '!@#$';
+select * from t_type_specialchars;
+
+-- Unsupported datatype on partitioning column
+-- FLOAT-FLOAT4OID
+create table t_type_float(c1 int, c2 FLOAT, c3 int)
+tablespace hdfs_ts
+partition by values (c2);
+
+-- DOUBLE-FLOAT8OID
+create table t_type_double(c1 int, c2 DOUBLE PRECISION, c3 int)
+tablespace hdfs_ts
+partition by values (c2);
+
+-- should report first (in partition list) invalid column
+create table t_type_mix(c1 int, c2 DOUBLE PRECISION, c3 FLOAT)
+tablespace hdfs_ts
+partition by values (c3,c2);
+
+create table t_verify_parsigs_overflow(c1 int, c2 text)
+tablespace hdfs_ts
+partition by values (c2);
+
+-- max allowed 512 (include attname plus attvalue within URI)
+-- can be inserted 2 + 508 + 1 + 1
+insert into t_verify_parsigs_overflow values (1, repeat('A', 508));
+
+-- can NOT be inserted 2 + 510 + 1 + 1
+insert into t_verify_parsigs_overflow values (1, repeat('A', 510));
+
+-- can NOT be inserted 2 + 256*3 + 1 + 1
+insert into t_verify_parsigs_overflow values (1, repeat('#', 256));
+drop table t_verify_parsigs_overflow;
+
+--multi partition columns with null
+create table multi_partition(a int ,b int, c int) tablespace hdfs_ts partition by values(b,c);
+set cstore_insert_mode='auto';
+insert into multi_partition values(1,2,NULL);
+insert into multi_partition values(1,NULL,3);
+drop table multi_partition;
+
+-- drop tables for "TYPE TESTS"
+drop table t_type_smallint;
+drop table t_type_integer;
+drop table t_type_bigint;
+drop table t_type_numeric;
+drop table t_type_varchar;
+drop table t_type_char;
+drop table t_type_text;
+drop table t_type_date;
+drop table t_type_tm;
+drop table t_type_tmtz;
+drop table t_type_specialchars;
+
+drop schema hdfs_valuepatition CASCADE;

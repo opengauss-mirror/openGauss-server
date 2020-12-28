@@ -1,0 +1,60 @@
+set enable_global_stats = true;
+--case 1: before insert, do coerce process in quallist and targetlist
+create schema colstore_engine;
+create table  colstore_engine.target(
+        c_id    varchar,
+        c_street_1      varchar(20),
+        c_city  text,
+        c_zip   varchar(9),
+        c_d_id  numeric,
+        c_w_id  text)
+with(orientation = orc) tablespace hdfs_ts ;
+create table  colstore_engine.source(
+        c_id    integer,
+        c_street_1      varchar(20),
+        c_city  character varying(20),
+        c_zip   varchar(9),
+        c_d_id  integer,
+        c_w_id  integer)
+with(orientation = orc) tablespace hdfs_ts ;
+COPY colstore_engine.source(c_id, c_street_1, c_city, c_zip, c_d_id, c_w_id) FROM stdin;
+explain (verbose, costs off) insert into colstore_engine.target select c_id,c_street_1,c_city,c_zip,c_d_id,c_w_id from colstore_engine.source where c_d_id != 9 and c_w_id != 8 and (c_street_1  like '%cyx%' or c_street_1 like '%ced%' or c_street_1 like '%fty%');
+                                                                                                                                        QUERY PLAN                                                                                                                                         
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Insert on colstore_engine.target
+               ->  Vector Streaming(type: REDISTRIBUTE)
+                     Output: ((colstore_engine.source.c_id)::character varying), colstore_engine.source.c_street_1, ((colstore_engine.source.c_city)::text), colstore_engine.source.c_zip, ((colstore_engine.source.c_d_id)::numeric), ((colstore_engine.source.c_w_id)::text)
+                     Distribute Key: ((colstore_engine.source.c_id)::character varying)
+                     ->  Vector Result
+                           Output: colstore_engine.source.c_id, colstore_engine.source.c_street_1, colstore_engine.source.c_city, colstore_engine.source.c_zip, colstore_engine.source.c_d_id, colstore_engine.source.c_w_id
+                           ->  Vector Append
+                                 ->  Dfs Scan on colstore_engine.source
+                                       Output: colstore_engine.source.c_id, colstore_engine.source.c_street_1, colstore_engine.source.c_city, colstore_engine.source.c_zip, colstore_engine.source.c_d_id, colstore_engine.source.c_w_id
+                                       Distribute Key: colstore_engine.source.c_id
+                                       Filter: (((colstore_engine.source.c_street_1)::text ~~ '%cyx%'::text) OR ((colstore_engine.source.c_street_1)::text ~~ '%ced%'::text) OR ((colstore_engine.source.c_street_1)::text ~~ '%fty%'::text))
+                                       Pushdown Predicate Filter: ((colstore_engine.source.c_d_id <> 9) AND (colstore_engine.source.c_w_id <> 8))
+                                 ->  Vector Adapter
+                                       Output: cstore.source.c_id, cstore.source.c_street_1, cstore.source.c_city, cstore.source.c_zip, cstore.source.c_d_id, cstore.source.c_w_id
+                                       ->  Seq Scan on cstore.pg_delta_colstore_engine_source source
+                                             Output: cstore.source.c_id, cstore.source.c_street_1, cstore.source.c_city, cstore.source.c_zip, cstore.source.c_d_id, cstore.source.c_w_id
+                                             Distribute Key: cstore.source.c_id
+                                             Filter: ((cstore.source.c_d_id <> 9) AND (cstore.source.c_w_id <> 8) AND (((cstore.source.c_street_1)::text ~~ '%cyx%'::text) OR ((cstore.source.c_street_1)::text ~~ '%ced%'::text) OR ((cstore.source.c_street_1)::text ~~ '%fty%'::text)))
+(20 rows)
+
+insert into colstore_engine.target select c_id,c_street_1,c_city,c_zip,c_d_id,c_w_id from colstore_engine.source where c_d_id != 9 and c_w_id != 8 and (c_street_1  like '%cyx%' or c_street_1 like '%ced%' or c_street_1 like '%fty%');
+select * from colstore_engine.target order by c_id;
+ c_id |   c_street_1    |       c_city        |   c_zip   | c_d_id | c_w_id 
+------+-----------------+---------------------+-----------+--------+--------
+ 15   | ftyjkjkdjkdjkgd |                     |           |     11 | 3
+ 3    | cyxkjkgdn       | ceddkjgakdgkjg      | 480211111 |      1 | 1
+ 5    | ftyjkjkdjkdjkgd | dyfaoptppzdfgjrvyqa | 480211111 |     11 | 3
+ 7    | cedjkjgdakj     | frgfptppzjcgjrvyqa  | 480211111 |      2 | 3
+ 9    | cyxjkjkgaj      | creoptppzjcgjrvyqa  | 480211111 |      1 | 1
+(5 rows)
+
+drop schema colstore_engine cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table colstore_engine.target
+drop cascades to table colstore_engine.source

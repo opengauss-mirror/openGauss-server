@@ -1,0 +1,5 @@
+prepare p2 as select * from hash_col order by 1;
+EXECUTE p2;
+
+prepare p4(int, int) as select * from hash_col where c2 >= $2 and c2 <= $1 order by 1;
+EXECUTE p4(30, 80);

@@ -20,7 +20,7 @@
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
- *	    src/gausskernel/storage/access/gist/gistsplit.cpp
+ *    src/gausskernel/storage/access/gist/gistsplit.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -114,7 +114,6 @@ static int findDontCares(Relation r, GISTSTATE *giststate, GISTENTRY *valvec, Gi
     for (i = 0; i < spl->splitVector.spl_nleft; i++) {
         int j = spl->splitVector.spl_left[i];
         float penalty = gistpenalty(giststate, attno, &entry, false, &valvec[j], false);
-
         if (penalty == 0.0) {
             spl->spl_dontcare[j] = true;
             NumDontCare++;
@@ -126,7 +125,6 @@ static int findDontCares(Relation r, GISTSTATE *giststate, GISTENTRY *valvec, Gi
     for (i = 0; i < spl->splitVector.spl_nright; i++) {
         int j = spl->splitVector.spl_right[i];
         float penalty = gistpenalty(giststate, attno, &entry, false, &valvec[j], false);
-
         if (penalty == 0.0) {
             spl->spl_dontcare[j] = true;
             NumDontCare++;
@@ -185,7 +183,6 @@ static void placeOne(Relation r, GISTSTATE *giststate, GistSplitVector *v, Index
         lpenalty = gistpenalty(giststate, attno, &entry, v->spl_lisnull[attno], identry + attno, isnull[attno]);
         gistentryinit(entry, v->spl_rattr[attno], r, NULL, 0, FALSE);
         rpenalty = gistpenalty(giststate, attno, &entry, v->spl_risnull[attno], identry + attno, isnull[attno]);
-
         if (lpenalty != rpenalty) {
             if (lpenalty > rpenalty) {
                 toLeft = false;
@@ -239,7 +236,6 @@ static void supportSecondarySplit(Relation r, GISTSTATE *giststate, int attno, G
                    gistpenalty(giststate, attno, &entryR, false, &entrySR, false);
         penalty2 = gistpenalty(giststate, attno, &entryL, false, &entrySR, false) +
                    gistpenalty(giststate, attno, &entryR, false, &entrySL, false);
-
         if (penalty1 > penalty2) {
             leaveOnLeft = false;
         }
@@ -259,7 +255,6 @@ static void supportSecondarySplit(Relation r, GISTSTATE *giststate, int attno, G
          */
         penalty1 = gistpenalty(giststate, attno, entry1, false, &entrySL, false);
         penalty2 = gistpenalty(giststate, attno, entry1, false, &entrySR, false);
-
         if (penalty1 < penalty2) {
             leaveOnLeft = sv->spl_ldatum_exists;
         } else {
@@ -445,7 +440,6 @@ static bool gistUserPicksplit(Relation r, GistEntryVector *entryvec, int attno, 
          */
         v->spl_dontcare = (bool *)palloc0(sizeof(bool) * (entryvec->n + 1));
         NumDontCare = findDontCares(r, giststate, entryvec->vector, v, attno);
-
         if (NumDontCare > 0) {
             /*
              * Remove don't-cares from spl_left[] and spl_right[].

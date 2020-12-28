@@ -1,0 +1,76 @@
+-- choose central node
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "alter node coordinator2 with (nodeis_central=true);"
+\! @abs_bindir@/gsql -r -p @cn2_portstring@ -d regression -c "alter node coordinator2 with (nodeis_central=true);"
+
+-- create resource pool and user for dynamic workload test
+CREATE RESOURCE POOL respool_temp_dywlm1 WITH (ACTIVE_STATEMENTS=5, MAX_DOP=3, MEM_PERCENT=50);
+CREATE ROLE test_dywlm_role1 WITH login resource pool 'respool_temp_dywlm1' password 'abc123ABC' perm space '100M';
+-- alter central node failed
+ALTER NODE coordinator1 WITH (nodeis_central=true);
+-- alter central node success
+ALTER NODE coordinator2 WITH (nodeis_central=false);
+ALTER NODE coordinator1 WITH (nodeis_central=true);
+-- recover the central node setting
+ALTER NODE coordinator1 WITH (nodeis_central=false);
+ALTER NODE coordinator2 WITH (nodeis_central=true);
+
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_dywlm_role1 -W 'abc123ABC' -c "create table t1 (id int) with (orientation = column);insert into t1 select generate_series(1,3000);" > /dev/null 2>&1 &
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_dywlm_role1 -W 'abc123ABC' -c "create table t2 (id int) with (orientation = column);insert into t2 select generate_series(1,3000);" > /dev/null 2>&1 &
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select gs_wlm_readjust_user_space(0);" > /dev/null 2>&1 &
+select * from pg_sleep(5);
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select gs_wlm_get_user_session_info('test_dywlm_role1');" > /dev/null 2>&1 &
+
+select * from pg_sleep(5);
+
+-- do node recover
+select gs_wlm_node_recover(false);
+
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_dywlm_role1 -W 'abc123ABC' -c "set query_mem='10GB';select * from t1 ,t2 where t1.id > t2.id;" > /dev/null 2>&1 &
+select * from pg_sleep(1);
+-- run sqls
+\! @abs_bindir@/gsql -r -p @cn2_portstring@ -d regression -U test_dywlm_role1 -W 'abc123ABC' -c "set query_mem='10GB';select * from t1 ,t2 where t1.id > t2.id;" > /dev/null 2>&1 &
+select * from pg_sleep(1);
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_dywlm_role1 -W 'abc123ABC' -c "set query_mem='1024MB';select * from t1 ,t2 where t1.id > t2.id;" > /dev/null 2>&1 &
+
+select * from pg_sleep(1);
+
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from pgxc_wlm_workload_records;" > /dev/null 2>&1 &
+
+select * from pg_sleep(15);
+
+-- alter centrol node
+ALTER NODE coordinator2 WITH (nodeis_central=false);
+ALTER NODE coordinator1 WITH (nodeis_central=true);
+\! @abs_bindir@/gsql -r -p @cn2_portstring@ -d regression -c "ALTER NODE coordinator2 WITH (nodeis_central=false);ALTER NODE coordinator1 WITH (nodeis_central=true);" > /dev/null 2>&1 &
+select * from pg_sleep(2);
+
+\! @abs_bindir@/gsql -r -p @cn2_portstring@ -d regression -U test_dywlm_role1 -W 'abc123ABC' -c "set query_mem='526MB';select * from t1 ,t2 where t1.id > t2.id;" > /dev/null 2>&1 &
+select * from pg_sleep(1);
+\! @abs_bindir@/gsql -r -p @cn2_portstring@ -d regression -U test_dywlm_role1 -W 'abc123ABC' -c "set query_mem='5GB';select * from t1 ,t2 where t1.id > t2.id;" > /dev/null 2>&1 &
+\! @abs_bindir@/gsql -r -p @cn2_portstring@ -d regression -U test_dywlm_role1 -W 'abc123ABC' -c "set query_mem='300MB';select * from t1 ,t2 where t1.id > t2.id;" > /dev/null 2>&1 &
+select * from pg_sleep(1);
+
+-- do node recover
+select gs_wlm_node_recover(false);
+
+select * from pg_sleep(15);
+
+ALTER RESOURCE POOL respool_temp_dywlm1 WITH (ACTIVE_STATEMENTS=1, MEM_PERCENT=10);
+
+-- run sql of tpch
+\! @abs_bindir@/gsql -r -p @cn2_portstring@ -d regression -U test_dywlm_role1 -W 'abc123ABC' -c "set query_mem='500MB';select * from t1 ,t2 where t1.id > t2.id;" > /dev/null 2>&1 &
+\! @abs_bindir@/gsql -r -p @cn2_portstring@ -d regression -U test_dywlm_role1 -W 'abc123ABC' -c "set query_mem='500MB';select * from t1 ,t2 where t1.id > t2.id;" > /dev/null 2>&1 &
+\! @abs_bindir@/gsql -r -p @cn2_portstring@ -d regression -U test_dywlm_role1 -W 'abc123ABC' -c "set query_mem='500MB';select * from t1 ,t2 where t1.id > t2.id;" > /dev/null 2>&1 &
+
+select * from pg_sleep(1);
+
+select * from gs_cluster_resource_info where min_mem_util=-1;
+
+select * from pg_sleep(15);
+
+select * from pg_sleep(15);
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_dywlm_role1 -W 'abc123ABC' -c "drop table t1;drop table t2;" > /dev/null 2>&1
+select * from pg_sleep(5);
+
+--drop role test_dywlm_role1;
+--drop resource pool respool_temp_dywlm1;

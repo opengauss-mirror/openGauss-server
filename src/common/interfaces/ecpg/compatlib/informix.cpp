@@ -408,7 +408,7 @@ int dectoint(decimal* np, int* ip)
     ret = PGTYPESnumeric_to_int(nres, ip);
     PGTYPESnumeric_free(nres);
 
-    if (ret == PGTYPES_NUM_OVERFLOW)
+    if (errno == PGTYPES_NUM_OVERFLOW)
         ret = ECPG_INFORMIX_NUM_OVERFLOW;
 
     return ret;

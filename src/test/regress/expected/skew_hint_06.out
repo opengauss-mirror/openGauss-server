@@ -1,0 +1,1754 @@
+/*
+################################################################################
+# TESTCASE NAME : skew_hint_06.py 
+# COMPONENT(S)  : skew hint功能测试: 重分布类型测试
+# PREREQUISITE  : skew_setup.py
+# PLATFORM      : all
+# DESCRIPTION   : skew hint
+# TAG           : hint
+# TC LEVEL      : Level 1
+################################################################################
+*/
+--I1.设置guc参数
+--S1.设置schema
+set current_schema = skew_hint;
+--S2.关闭sort agg
+set enable_sort = off;
+set enable_nestloop = off;
+--S3.关闭query下推
+--S4.关闭enable_broadcast
+set enable_broadcast = off;
+--S5.设置计划格式
+set explain_perf_mode=normal;
+--S6.设置query_dop使得explain中倾斜优化生效
+set query_dop = 1002;
+--S7.设置倾斜优化策略
+set skew_option=normal;
+--I2. INT8OID
+explain(verbose on, costs off) select t.col_bigint from typetest t, skew_t1 s where t.col_bigint = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_bigint
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_bigint
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_bigint
+               Hash Cond: (t.col_bigint = s.c)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: t.col_bigint
+                     Distribute Key: t.col_bigint
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Row Adapter
+                           Output: t.col_bigint
+                           ->  CStore Scan on skew_hint.typetest t
+                                 Output: t.col_bigint
+                                 Distribute Key: t.col_integer
+               ->  Hash
+                     Output: s.c
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: s.c
+                           Distribute Key: s.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.skew_t1 s
+                                 Output: s.c
+                                 Distribute Key: s.c
+(30 rows)
+
+explain(verbose on, costs off) select /*+ skew(t (col_bigint) (1)) */ t.col_bigint from typetest t, skew_t1 s where t.col_bigint = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_bigint
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_bigint
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_bigint
+               Hash Cond: (s.c = t.col_bigint)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                     Output: s.c
+                     Distribute Key: s.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.skew_t1 s
+                           Output: s.c
+                           Distribute Key: s.c
+               ->  Hash
+                     Output: t.col_bigint
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                           Output: t.col_bigint
+                           Distribute Key: t.col_bigint
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_bigint
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_bigint
+                                       Distribute Key: t.col_integer
+(31 rows)
+
+--I3. INT1OID
+explain(verbose on, costs off) select t.col_tinyint from typetest t, skew_t1 s where t.col_tinyint = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_tinyint
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_tinyint
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_tinyint
+               Hash Cond: ((t.col_tinyint)::bigint = s.c)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: t.col_tinyint
+                     Distribute Key: t.col_tinyint
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Row Adapter
+                           Output: t.col_tinyint
+                           ->  CStore Scan on skew_hint.typetest t
+                                 Output: t.col_tinyint
+                                 Distribute Key: t.col_integer
+               ->  Hash
+                     Output: s.c
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: s.c
+                           Distribute Key: s.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.skew_t1 s
+                                 Output: s.c
+                                 Distribute Key: s.c
+(30 rows)
+
+explain(verbose on, costs off) select /*+ skew(t (col_tinyint) (1)) */ t.col_tinyint from typetest t, skew_t1 s where t.col_tinyint = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_tinyint
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_tinyint
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_tinyint
+               Hash Cond: ((t.col_tinyint)::bigint = s.c)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                     Output: t.col_tinyint
+                     Distribute Key: t.col_tinyint
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Row Adapter
+                           Output: t.col_tinyint
+                           ->  CStore Scan on skew_hint.typetest t
+                                 Output: t.col_tinyint
+                                 Distribute Key: t.col_integer
+               ->  Hash
+                     Output: s.c
+                     ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                           Output: s.c
+                           Distribute Key: s.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.skew_t1 s
+                                 Output: s.c
+                                 Distribute Key: s.c
+(31 rows)
+
+--I4. INT2OID
+explain(verbose on, costs off) select t.col_smallint from typetest t, skew_t1 s where t.col_smallint = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_smallint
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_smallint
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_smallint
+               Hash Cond: (t.col_smallint = s.c)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: t.col_smallint
+                     Distribute Key: t.col_smallint
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Row Adapter
+                           Output: t.col_smallint
+                           ->  CStore Scan on skew_hint.typetest t
+                                 Output: t.col_smallint
+                                 Distribute Key: t.col_integer
+               ->  Hash
+                     Output: s.c
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: s.c
+                           Distribute Key: s.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.skew_t1 s
+                                 Output: s.c
+                                 Distribute Key: s.c
+(30 rows)
+
+explain(verbose on, costs off) select /*+ skew(t (col_smallint) (1)) */ t.col_smallint from typetest t, skew_t1 s where t.col_smallint = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_smallint
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_smallint
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_smallint
+               Hash Cond: (s.c = t.col_smallint)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                     Output: s.c
+                     Distribute Key: s.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.skew_t1 s
+                           Output: s.c
+                           Distribute Key: s.c
+               ->  Hash
+                     Output: t.col_smallint
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                           Output: t.col_smallint
+                           Distribute Key: t.col_smallint
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_smallint
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_smallint
+                                       Distribute Key: t.col_integer
+(31 rows)
+
+--I5. INT4OID
+explain(verbose on, costs off) select s.a from typetest t, skew_t1 s where t.col_integer = s.a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: s.a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: s.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: s.a
+               Hash Cond: (s.a = t.col_integer)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: s.a
+                     Distribute Key: s.a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.skew_t1 s
+                           Output: s.a
+                           Distribute Key: s.c
+               ->  Hash
+                     Output: t.col_integer
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: t.col_integer
+                           Distribute Key: t.col_integer
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_integer
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_integer
+                                       Distribute Key: t.col_integer
+(30 rows)
+
+explain(verbose on, costs off) select /*+ skew(s (a) (1)) */ s.a from typetest t, skew_t1 s where t.col_integer = s.a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: s.a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: s.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: s.a
+               Hash Cond: (s.a = t.col_integer)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                     Output: s.a
+                     Distribute Key: s.a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.skew_t1 s
+                           Output: s.a
+                           Distribute Key: s.c
+               ->  Hash
+                     Output: t.col_integer
+                     ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                           Output: t.col_integer
+                           Distribute Key: t.col_integer
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_integer
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_integer
+                                       Distribute Key: t.col_integer
+(31 rows)
+
+--I6. NUMERICOID
+explain(verbose on, costs off) select t.col_numeric from typetest t, skew_t1 s where t.col_numeric = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_numeric
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_numeric
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_numeric
+               Hash Cond: (((s.c)::numeric) = t.col_numeric)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: s.c, ((s.c)::numeric)
+                     Distribute Key: ((s.c)::numeric)
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.skew_t1 s
+                           Output: s.c, s.c
+                           Distribute Key: s.c
+               ->  Hash
+                     Output: t.col_numeric
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: t.col_numeric
+                           Distribute Key: t.col_numeric
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_numeric
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_numeric
+                                       Distribute Key: t.col_integer
+(30 rows)
+
+explain(verbose on, costs off) select /*+ skew(t (col_numeric) (564.322815379585)) */ t.col_numeric from typetest t, skew_t1 s where t.col_numeric = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_numeric
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_numeric
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_numeric
+               Hash Cond: (((s.c)::numeric) = t.col_numeric)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                     Output: s.c, ((s.c)::numeric)
+                     Distribute Key: ((s.c)::numeric)
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.skew_t1 s
+                           Output: s.c, s.c
+                           Distribute Key: s.c
+               ->  Hash
+                     Output: t.col_numeric
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                           Output: t.col_numeric
+                           Distribute Key: t.col_numeric
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_numeric
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_numeric
+                                       Distribute Key: t.col_integer
+(31 rows)
+
+--I7. CHAROID
+explain(verbose on, costs off) select t.col_char2 from typetest t, char_t s where t.col_char2 = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_char2
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_char2
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_char2
+               Hash Cond: (t.col_char2 = s.c)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: t.col_char2
+                     Distribute Key: t.col_char2
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Row Adapter
+                           Output: t.col_char2
+                           ->  CStore Scan on skew_hint.typetest t
+                                 Output: t.col_char2
+                                 Distribute Key: t.col_integer
+               ->  Hash
+                     Output: s.c
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: s.c
+                           Distribute Key: s.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.char_t s
+                                 Output: s.c
+                                 Distribute Key: s.c
+(30 rows)
+
+explain(verbose on, costs off) select /*+ skew(t (col_char2) ('F')) */ t.col_char2 from typetest t, char_t s where t.col_char2 = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_char2
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_char2
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_char2
+               Hash Cond: (s.c = t.col_char2)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                     Output: s.c
+                     Distribute Key: s.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.char_t s
+                           Output: s.c
+                           Distribute Key: s.c
+               ->  Hash
+                     Output: t.col_char2
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                           Output: t.col_char2
+                           Distribute Key: t.col_char2
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_char2
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_char2
+                                       Distribute Key: t.col_integer
+(31 rows)
+
+--I8. BPCHAROID
+explain(verbose on, costs off) select t.col_char from typetest t, bpchar_t s where t.col_char = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_char
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_char
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_char
+               Hash Cond: (t.col_char = s.c)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: t.col_char
+                     Distribute Key: t.col_char
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Row Adapter
+                           Output: t.col_char
+                           ->  CStore Scan on skew_hint.typetest t
+                                 Output: t.col_char
+                                 Distribute Key: t.col_integer
+               ->  Hash
+                     Output: s.c
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: s.c
+                           Distribute Key: s.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.bpchar_t s
+                                 Output: s.c
+                                 Distribute Key: s.c
+(30 rows)
+
+explain(verbose on, costs off) select /*+ skew(t (col_char) ('test_agg_1')) */ t.col_char from typetest t, bpchar_t s where t.col_char = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_char
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_char
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_char
+               Hash Cond: (s.c = t.col_char)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                     Output: s.c
+                     Distribute Key: s.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.bpchar_t s
+                           Output: s.c
+                           Distribute Key: s.c
+               ->  Hash
+                     Output: t.col_char
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                           Output: t.col_char
+                           Distribute Key: t.col_char
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_char
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_char
+                                       Distribute Key: t.col_integer
+(31 rows)
+
+--null字符串
+explain(verbose on, costs off) select /*+ skew(t (col_char) ('null')) */ t.col_char from typetest t, bpchar_t s where t.col_char = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_char
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_char
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_char
+               Hash Cond: (s.c = t.col_char)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                     Output: s.c
+                     Distribute Key: s.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.bpchar_t s
+                           Output: s.c
+                           Distribute Key: s.c
+               ->  Hash
+                     Output: t.col_char
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                           Output: t.col_char
+                           Distribute Key: t.col_char
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_char
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_char
+                                       Distribute Key: t.col_integer
+(31 rows)
+
+--I9. VARCHAROID
+explain(verbose on, costs off) select t.col_varchar from typetest t, varchar_t s where t.col_varchar = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_varchar
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_varchar
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_varchar
+               Hash Cond: ((t.col_varchar)::text = (s.c)::text)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: t.col_varchar
+                     Distribute Key: t.col_varchar
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Row Adapter
+                           Output: t.col_varchar
+                           ->  CStore Scan on skew_hint.typetest t
+                                 Output: t.col_varchar
+                                 Distribute Key: t.col_integer
+               ->  Hash
+                     Output: s.c
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: s.c
+                           Distribute Key: s.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.varchar_t s
+                                 Output: s.c
+                                 Distribute Key: s.c
+(30 rows)
+
+explain(verbose on, costs off) select /*+ skew(t (col_varchar) ('vector_agg_3')) */ t.col_varchar from typetest t, varchar_t s where t.col_varchar = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_varchar
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_varchar
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_varchar
+               Hash Cond: ((s.c)::text = (t.col_varchar)::text)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                     Output: s.c
+                     Distribute Key: s.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.varchar_t s
+                           Output: s.c
+                           Distribute Key: s.c
+               ->  Hash
+                     Output: t.col_varchar
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                           Output: t.col_varchar
+                           Distribute Key: t.col_varchar
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_varchar
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_varchar
+                                       Distribute Key: t.col_integer
+(31 rows)
+
+--I10. NVARCHAR2OID
+explain(verbose on, costs off) select t.col_varchar from typetest t, varchar_t s where t.col_char = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_varchar
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_varchar
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_varchar
+               Hash Cond: (t.col_char = ((s.c)::bpchar))
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: t.col_varchar, t.col_char
+                     Distribute Key: t.col_char
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Row Adapter
+                           Output: t.col_varchar, t.col_char
+                           ->  CStore Scan on skew_hint.typetest t
+                                 Output: t.col_varchar, t.col_char
+                                 Distribute Key: t.col_integer
+               ->  Hash
+                     Output: s.c, ((s.c)::bpchar)
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: s.c, ((s.c)::bpchar)
+                           Distribute Key: ((s.c)::bpchar)
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.varchar_t s
+                                 Output: s.c, s.c
+                                 Distribute Key: s.c
+(30 rows)
+
+explain(verbose on, costs off) select /*+ skew(t (col_varchar) ('vector_agg_3')) */ t.col_varchar from typetest t, varchar_t s where t.col_varchar = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_varchar
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_varchar
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_varchar
+               Hash Cond: ((s.c)::text = (t.col_varchar)::text)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                     Output: s.c
+                     Distribute Key: s.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.varchar_t s
+                           Output: s.c
+                           Distribute Key: s.c
+               ->  Hash
+                     Output: t.col_varchar
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                           Output: t.col_varchar
+                           Distribute Key: t.col_varchar
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_varchar
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_varchar
+                                       Distribute Key: t.col_integer
+(31 rows)
+
+--I11. DATEOID
+explain(verbose on, costs off) select t.col_date from typetest t, date_t s where t.col_date = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_date
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_date
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_date
+               Hash Cond: (t.col_date = s.c)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: t.col_date
+                     Distribute Key: t.col_date
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Row Adapter
+                           Output: t.col_date
+                           ->  CStore Scan on skew_hint.typetest t
+                                 Output: t.col_date
+                                 Distribute Key: t.col_integer
+               ->  Hash
+                     Output: s.c
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: s.c
+                           Distribute Key: s.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.date_t s
+                                 Output: s.c
+                                 Distribute Key: s.c
+(30 rows)
+
+explain(verbose on, costs off) select /*+ skew(t (col_date) ('2005-02-14')) */ t.col_date from typetest t, date_t s where t.col_date = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_date
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_date
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_date
+               Hash Cond: (s.c = t.col_date)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                     Output: s.c
+                     Distribute Key: s.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.date_t s
+                           Output: s.c
+                           Distribute Key: s.c
+               ->  Hash
+                     Output: t.col_date
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                           Output: t.col_date
+                           Distribute Key: t.col_date
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_date
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_date
+                                       Distribute Key: t.col_integer
+(31 rows)
+
+--I12. TIMEOID
+explain(verbose on, costs off) select t.col_time_without_time_zone from typetest t, time_t s where t.col_time_without_time_zone = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_time_without_time_zone
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_time_without_time_zone
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_time_without_time_zone
+               Hash Cond: (t.col_time_without_time_zone = s.c)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: t.col_time_without_time_zone
+                     Distribute Key: t.col_time_without_time_zone
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Row Adapter
+                           Output: t.col_time_without_time_zone
+                           ->  CStore Scan on skew_hint.typetest t
+                                 Output: t.col_time_without_time_zone
+                                 Distribute Key: t.col_integer
+               ->  Hash
+                     Output: s.c
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: s.c
+                           Distribute Key: s.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.time_t s
+                                 Output: s.c
+                                 Distribute Key: s.c
+(30 rows)
+
+explain(verbose on, costs off) select /*+ skew(t (t.col_time_without_time_zone) ('08:20:12'))*/ t.col_time_without_time_zone from typetest t, time_t s where t.col_time_without_time_zone = s.c;
+WARNING:  LINE 1: syntax error at '.'
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_time_without_time_zone
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_time_without_time_zone
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_time_without_time_zone
+               Hash Cond: (t.col_time_without_time_zone = s.c)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: t.col_time_without_time_zone
+                     Distribute Key: t.col_time_without_time_zone
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Row Adapter
+                           Output: t.col_time_without_time_zone
+                           ->  CStore Scan on skew_hint.typetest t
+                                 Output: t.col_time_without_time_zone
+                                 Distribute Key: t.col_integer
+               ->  Hash
+                     Output: s.c
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: s.c
+                           Distribute Key: s.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.time_t s
+                                 Output: s.c
+                                 Distribute Key: s.c
+(30 rows)
+
+--I13. TIMESTAMPOID
+explain(verbose on, costs off) select t.col_timestamp_without_timezone from typetest t, timestamp_t s where t.col_timestamp_without_timezone = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_timestamp_without_timezone
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_timestamp_without_timezone
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_timestamp_without_timezone
+               Hash Cond: (t.col_timestamp_without_timezone = s.c)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: t.col_timestamp_without_timezone
+                     Distribute Key: t.col_timestamp_without_timezone
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Row Adapter
+                           Output: t.col_timestamp_without_timezone
+                           ->  CStore Scan on skew_hint.typetest t
+                                 Output: t.col_timestamp_without_timezone
+                                 Distribute Key: t.col_integer
+               ->  Hash
+                     Output: s.c
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: s.c
+                           Distribute Key: s.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.timestamp_t s
+                                 Output: s.c
+                                 Distribute Key: s.c
+(30 rows)
+
+explain(verbose on, costs off) select /*+ skew(t (col_timestamp_without_timezone) ('1997-02-10 17:32:01.4'))*/ t.col_timestamp_without_timezone from typetest t, timestamp_t s where t.col_timestamp_without_timezone = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_timestamp_without_timezone
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_timestamp_without_timezone
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_timestamp_without_timezone
+               Hash Cond: (s.c = t.col_timestamp_without_timezone)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                     Output: s.c
+                     Distribute Key: s.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.timestamp_t s
+                           Output: s.c
+                           Distribute Key: s.c
+               ->  Hash
+                     Output: t.col_timestamp_without_timezone
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                           Output: t.col_timestamp_without_timezone
+                           Distribute Key: t.col_timestamp_without_timezone
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_timestamp_without_timezone
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_timestamp_without_timezone
+                                       Distribute Key: t.col_integer
+(31 rows)
+
+--I14. TIMESTAMPTZOID
+explain(verbose on, costs off) select t.col_timestamp_with_timezone from typetest t, timestampz_t s where t.col_timestamp_with_timezone = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_timestamp_with_timezone
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_timestamp_with_timezone
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_timestamp_with_timezone
+               Hash Cond: (t.col_timestamp_with_timezone = s.c)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: t.col_timestamp_with_timezone
+                     Distribute Key: t.col_timestamp_with_timezone
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Row Adapter
+                           Output: t.col_timestamp_with_timezone
+                           ->  CStore Scan on skew_hint.typetest t
+                                 Output: t.col_timestamp_with_timezone
+                                 Distribute Key: t.col_integer
+               ->  Hash
+                     Output: s.c
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: s.c
+                           Distribute Key: s.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.timestampz_t s
+                                 Output: s.c
+                                 Distribute Key: s.c
+(30 rows)
+
+explain(verbose on, costs off) select /*+ skew(t (col_timestamp_with_timezone) ('1971-03-23 11:14:05+08'))*/ t.col_timestamp_with_timezone from typetest t, timestampz_t s where t.col_timestamp_with_timezone = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_timestamp_with_timezone
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_timestamp_with_timezone
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_timestamp_with_timezone
+               Hash Cond: (s.c = t.col_timestamp_with_timezone)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                     Output: s.c
+                     Distribute Key: s.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.timestampz_t s
+                           Output: s.c
+                           Distribute Key: s.c
+               ->  Hash
+                     Output: t.col_timestamp_with_timezone
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                           Output: t.col_timestamp_with_timezone
+                           Distribute Key: t.col_timestamp_with_timezone
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_timestamp_with_timezone
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_timestamp_with_timezone
+                                       Distribute Key: t.col_integer
+(31 rows)
+
+--I15. INTERVALOID
+explain(verbose on, costs off) select t.col_interval from typetest t, interval_t s where t.col_interval = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_interval
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_interval
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_interval
+               Hash Cond: (t.col_interval = s.c)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: t.col_interval
+                     Distribute Key: t.col_interval
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Row Adapter
+                           Output: t.col_interval
+                           ->  CStore Scan on skew_hint.typetest t
+                                 Output: t.col_interval
+                                 Distribute Key: t.col_integer
+               ->  Hash
+                     Output: s.c
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: s.c
+                           Distribute Key: s.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.interval_t s
+                                 Output: s.c
+                                 Distribute Key: s.c
+(30 rows)
+
+explain(verbose on, costs off) select /*+ skew(t (col_interval) ('@ 1 minute')) */ t.col_interval from typetest t, interval_t s where t.col_interval = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_interval
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_interval
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_interval
+               Hash Cond: (s.c = t.col_interval)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                     Output: s.c
+                     Distribute Key: s.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.interval_t s
+                           Output: s.c
+                           Distribute Key: s.c
+               ->  Hash
+                     Output: t.col_interval
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                           Output: t.col_interval
+                           Distribute Key: t.col_interval
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_interval
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_interval
+                                       Distribute Key: t.col_integer
+(31 rows)
+
+--I16. TIMETZOID
+explain(verbose on, costs off) select t.col_time_with_time_zone from typetest t, timez_t s where t.col_time_with_time_zone = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_time_with_time_zone
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_time_with_time_zone
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_time_with_time_zone
+               Hash Cond: (t.col_time_with_time_zone = s.c)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: t.col_time_with_time_zone
+                     Distribute Key: t.col_time_with_time_zone
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Row Adapter
+                           Output: t.col_time_with_time_zone
+                           ->  CStore Scan on skew_hint.typetest t
+                                 Output: t.col_time_with_time_zone
+                                 Distribute Key: t.col_integer
+               ->  Hash
+                     Output: s.c
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: s.c
+                           Distribute Key: s.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.timez_t s
+                                 Output: s.c
+                                 Distribute Key: s.c
+(30 rows)
+
+explain(verbose on, costs off) select /*+ skew(t (t.col_time_with_time_zone) ('06:26:42+08'))*/ t.col_time_with_time_zone from typetest t, timez_t s where t.col_time_with_time_zone = s.c;
+WARNING:  LINE 1: syntax error at '.'
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_time_with_time_zone
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_time_with_time_zone
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_time_with_time_zone
+               Hash Cond: (t.col_time_with_time_zone = s.c)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: t.col_time_with_time_zone
+                     Distribute Key: t.col_time_with_time_zone
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Row Adapter
+                           Output: t.col_time_with_time_zone
+                           ->  CStore Scan on skew_hint.typetest t
+                                 Output: t.col_time_with_time_zone
+                                 Distribute Key: t.col_integer
+               ->  Hash
+                     Output: s.c
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: s.c
+                           Distribute Key: s.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.timez_t s
+                                 Output: s.c
+                                 Distribute Key: s.c
+(30 rows)
+
+--I17. SMALLDATETIMEOID
+explain(verbose on, costs off) select t.col_smalldatetime from typetest t, smalldatetime_t s where t.col_smalldatetime = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_smalldatetime
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_smalldatetime
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_smalldatetime
+               Hash Cond: (t.col_smalldatetime = s.c)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: t.col_smalldatetime
+                     Distribute Key: t.col_smalldatetime
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Row Adapter
+                           Output: t.col_smalldatetime
+                           ->  CStore Scan on skew_hint.typetest t
+                                 Output: t.col_smalldatetime
+                                 Distribute Key: t.col_integer
+               ->  Hash
+                     Output: s.c
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: s.c
+                           Distribute Key: s.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.smalldatetime_t s
+                                 Output: s.c
+                                 Distribute Key: s.c
+(30 rows)
+
+explain(verbose on, costs off) select /*+ skew(t (col_smalldatetime) ('1997-02-02 03:04:00'))*/ t.col_smalldatetime  from typetest t, smalldatetime_t s where t.col_smalldatetime = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_smalldatetime
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_smalldatetime
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_smalldatetime
+               Hash Cond: (s.c = t.col_smalldatetime)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                     Output: s.c
+                     Distribute Key: s.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.smalldatetime_t s
+                           Output: s.c
+                           Distribute Key: s.c
+               ->  Hash
+                     Output: t.col_smalldatetime
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                           Output: t.col_smalldatetime
+                           Distribute Key: t.col_smalldatetime
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_smalldatetime
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_smalldatetime
+                                       Distribute Key: t.col_integer
+(31 rows)
+
+--I18. TEXTOID
+explain(verbose on, costs off) select t.col_text from typetest t, text_t s where t.col_text = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_text
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_text
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_text
+               Hash Cond: (t.col_text = s.c)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: t.col_text
+                     Distribute Key: t.col_text
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Row Adapter
+                           Output: t.col_text
+                           ->  CStore Scan on skew_hint.typetest t
+                                 Output: t.col_text
+                                 Distribute Key: t.col_integer
+               ->  Hash
+                     Output: s.c
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: s.c
+                           Distribute Key: s.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.text_t s
+                                 Output: s.c
+                                 Distribute Key: s.c
+(30 rows)
+
+-- string must use single_quote
+explain(verbose on, costs off) select /*+ skew(t (col_text) (597b5b23f4aadf9513306bcd59afb6e4c9_3))*/ t.col_text from typetest t, text_t s where t.col_text = s.c;
+WARNING:  LINE 1: syntax error at 'b5b23f4aadf9513306bcd59afb6e4c9_3'
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_text
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_text
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_text
+               Hash Cond: (t.col_text = s.c)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: t.col_text
+                     Distribute Key: t.col_text
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Row Adapter
+                           Output: t.col_text
+                           ->  CStore Scan on skew_hint.typetest t
+                                 Output: t.col_text
+                                 Distribute Key: t.col_integer
+               ->  Hash
+                     Output: s.c
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: s.c
+                           Distribute Key: s.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.text_t s
+                                 Output: s.c
+                                 Distribute Key: s.c
+(30 rows)
+
+explain(verbose on, costs off) select /*+ skew(t (col_text) ('597b5b23f4aadf9513306bcd59afb6e4c9_3'))*/ t.col_text from typetest t, text_t s where t.col_text = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_text
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_text
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_text
+               Hash Cond: (s.c = t.col_text)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                     Output: s.c
+                     Distribute Key: s.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.text_t s
+                           Output: s.c
+                           Distribute Key: s.c
+               ->  Hash
+                     Output: t.col_text
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                           Output: t.col_text
+                           Distribute Key: t.col_text
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_text
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_text
+                                       Distribute Key: t.col_integer
+(31 rows)
+
+--I19. NULL值 under DBCOMPATIBILITY 'ORA'
+explain(verbose on, costs off) select t.col_integer from typetest t, null_t s where t.col_integer = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_integer
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_integer
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_integer
+               Hash Cond: (s.c = t.col_integer)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: s.c
+                     Distribute Key: s.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.null_t s
+                           Output: s.c
+                           Distribute Key: s.a
+               ->  Hash
+                     Output: t.col_integer
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: t.col_integer
+                           Distribute Key: t.col_integer
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_integer
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_integer
+                                       Distribute Key: t.col_integer
+(30 rows)
+
+explain(verbose on, costs off) select /*+ skew(s (c) (''))*/ t.col_integer from typetest t, null_t s where t.col_integer = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_integer
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_integer
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_integer
+               Hash Cond: (s.c = t.col_integer)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                     Output: s.c
+                     Distribute Key: s.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.null_t s
+                           Output: s.c
+                           Distribute Key: s.a
+               ->  Hash
+                     Output: t.col_integer
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: t.col_integer
+                           Distribute Key: t.col_integer
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_integer
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_integer
+                                       Distribute Key: t.col_integer
+(31 rows)
+
+explain(verbose on, costs off) select /*+ skew(s (c) (null))*/ t.col_integer from typetest t, null_t s where t.col_integer = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_integer
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_integer
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_integer
+               Hash Cond: (s.c = t.col_integer)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                     Output: s.c
+                     Distribute Key: s.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.null_t s
+                           Output: s.c
+                           Distribute Key: s.a
+               ->  Hash
+                     Output: t.col_integer
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: t.col_integer
+                           Distribute Key: t.col_integer
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_integer
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_integer
+                                       Distribute Key: t.col_integer
+(31 rows)
+
+explain(verbose on, costs off) select /*+ skew(s (c) (NULL))*/ t.col_integer from typetest t, null_t s where t.col_integer = s.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t.col_integer
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: t.col_integer
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: t.col_integer
+               Hash Cond: (s.c = t.col_integer)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                     Output: s.c
+                     Distribute Key: s.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.null_t s
+                           Output: s.c
+                           Distribute Key: s.a
+               ->  Hash
+                     Output: t.col_integer
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: t.col_integer
+                           Distribute Key: t.col_integer
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Row Adapter
+                                 Output: t.col_integer
+                                 ->  CStore Scan on skew_hint.typetest t
+                                       Output: t.col_integer
+                                       Distribute Key: t.col_integer
+(31 rows)
+
+--I20. Unicode for table identifier
+create table U&"\0441\043B\043E\043D"(a int, b text) distribute by hash(a);
+insert into U&"\0441\043B\043E\043D" values(generate_series(1,100),'乐观');
+insert into U&"\0441\043B\043E\043D" values(generate_series(1,10),'坚强'); 
+insert into U&"\0441\043B\043E\043D" values(generate_series(1,10),'勇敢');
+analyze U&"\0441\043B\043E\043D";
+analyze text_t;
+explain(verbose on, costs off) select /*+ skew(U&"\0441\043B\043E\043D"(b)('乐观'))*/ * from U&"\0441\043B\043E\043D" ,text_t where text_t.c=U&"\0441\043B\043E\043D".b; 
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: "слон".a, "слон".b, text_t.a, text_t.c
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: "слон".a, "слон".b, text_t.a, text_t.c
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: "слон".a, "слон".b, text_t.a, text_t.c
+               Hash Cond: (text_t.c = "слон".b)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                     Output: text_t.a, text_t.c
+                     Distribute Key: text_t.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.text_t
+                           Output: text_t.a, text_t.c
+                           Distribute Key: text_t.c
+               ->  Hash
+                     Output: "слон".a, "слон".b
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                           Output: "слон".a, "слон".b
+                           Distribute Key: "слон".b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint."слон"
+                                 Output: "слон".a, "слон".b
+                                 Distribute Key: "слон".a
+(29 rows)
+
+--I20. Unicode for value string
+delete from U&"\0441\043B\043E\043D";
+insert into U&"\0441\043B\043E\043D" values(generate_series(1,10),U&'\0441\043B\043E\043D');
+insert into U&"\0441\043B\043E\043D" values(generate_series(1,10),'слон');
+analyze U&"\0441\043B\043E\043D";
+select * from U&"\0441\043B\043E\043D" order by 1;
+ a  |  b   
+----+------
+  1 | слон
+  1 | слон
+  2 | слон
+  2 | слон
+  3 | слон
+  3 | слон
+  4 | слон
+  4 | слон
+  5 | слон
+  5 | слон
+  6 | слон
+  6 | слон
+  7 | слон
+  7 | слон
+  8 | слон
+  8 | слон
+  9 | слон
+  9 | слон
+ 10 | слон
+ 10 | слон
+(20 rows)
+
+select * from слон order by 1;
+ a  |  b   
+----+------
+  1 | слон
+  1 | слон
+  2 | слон
+  2 | слон
+  3 | слон
+  3 | слон
+  4 | слон
+  4 | слон
+  5 | слон
+  5 | слон
+  6 | слон
+  6 | слон
+  7 | слон
+  7 | слон
+  8 | слон
+  8 | слон
+  9 | слон
+  9 | слон
+ 10 | слон
+ 10 | слон
+(20 rows)
+
+explain(verbose on, costs off) select /*+ skew(U&"\0441\043B\043E\043D"(b)(U&'\0441\043B\043E\043D'))*/ * from U&"\0441\043B\043E\043D" ,text_t where text_t.c=U&"\0441\043B\043E\043D".b;
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: "слон".a, "слон".b, text_t.a, text_t.c
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: "слон".a, "слон".b, text_t.a, text_t.c
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: "слон".a, "слон".b, text_t.a, text_t.c
+               Hash Cond: (text_t.c = "слон".b)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                     Output: text_t.a, text_t.c
+                     Distribute Key: text_t.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.text_t
+                           Output: text_t.a, text_t.c
+                           Distribute Key: text_t.c
+               ->  Hash
+                     Output: "слон".a, "слон".b
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                           Output: "слон".a, "слон".b
+                           Distribute Key: "слон".b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint."слон"
+                                 Output: "слон".a, "слон".b
+                                 Distribute Key: "слон".a
+(29 rows)
+
+explain(verbose on, costs off) select /*+ skew(U&"\0441\043B\043E\043D"(b)('слон'))*/ * from U&"\0441\043B\043E\043D" ,text_t where text_t.c=U&"\0441\043B\043E\043D".b; 
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: "слон".a, "слон".b, text_t.a, text_t.c
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: "слон".a, "слон".b, text_t.a, text_t.c
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: "слон".a, "слон".b, text_t.a, text_t.c
+               Hash Cond: (text_t.c = "слон".b)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                     Output: text_t.a, text_t.c
+                     Distribute Key: text_t.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.text_t
+                           Output: text_t.a, text_t.c
+                           Distribute Key: text_t.c
+               ->  Hash
+                     Output: "слон".a, "слон".b
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                           Output: "слон".a, "слон".b
+                           Distribute Key: "слон".b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint."слон"
+                                 Output: "слон".a, "слон".b
+                                 Distribute Key: "слон".a
+(29 rows)
+
+--I21.修复指定hint时行数估算为负值
+set enable_broadcast = off;
+set explain_perf_mode = pretty;
+drop table if exists t2,t3;
+NOTICE:  table "t2" does not exist, skipping
+NOTICE:  table "t3" does not exist, skipping
+create table t2(c1 int, c2 char, c3 date)with(orientation=column);
+create table t3(c1 int, c2 char, c3 date)with(orientation=column);
+insert into t2 values(generate_series(1,1000),'a',date'2019-01-01');
+insert into t3 values(generate_series(1,100),'a',date'2019-01-01');
+analyze t2;
+analyze t3;
+explain select /*+ skew(t2(c3) ('2019-01-01'))*/ t3.c1, t2.c1 from t3 join t2 on t3.c3 = t2.c3;
+--?.*
+--?.*
+--?  1 | ->  Row Adapter                                                                 | 100000 |          |       8 | .*
+--?  2 |    ->  Vector Streaming (type: GATHER)                                          | 100000 |          |       8 | .*
+--?  3 |       ->  Vector Sonic Hash Join (4,6)                                          | 100000 | 16MB     |       8 | .*
+--?  4 |          ->  Vector Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 1/2) |   1000 | 4MB      |      12 | .*
+--?  5 |             ->  CStore Scan on t2                                               |   1000 | 1MB      |      12 | .*
+--?  6 |          ->  Vector Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 1/2)  |   1200 | 4MB      |      12 | .*
+--?  7 |             ->  CStore Scan on t3                                               |    100 | 1MB      |      12 | .*
+(7 rows)
+
+--?.*
+--?.*
+   3 --Vector Sonic Hash Join (4,6)
+         Hash Cond: (t2.c3 = t3.c3)
+         Skew Join Optimized by Hint, Statistic
+(3 rows)
+
+   ====== Query Summary =====   
+--------------------------------
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+drop table if exists t2,t3;
+--I22.还原设置
+--S1.还原query_dop
+set query_dop = 2002;

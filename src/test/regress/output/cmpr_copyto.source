@@ -13,9 +13,9 @@ CREATE TABLE cmpr_copyto_int (
 	R7_ID int NOT NULL,
 	R8_ID int NOT NULL,
 	R9_ID int NOT NULL
-)  COMPRESS;
-COPY cmpr_copyto_int FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
-COPY cmpr_copyto_int TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_copyto_int.data';
+)  ;
+COPY cmpr_copyto_int FROM '@abs_srcdir@/data/cmpr_int_raw.data';
+COPY cmpr_copyto_int TO '@abs_srcdir@/data/cmpr_copyto_int.data';
 CREATE TABLE cmpr_copyto_temp (
 	RS_ID int,
 	R0_ID int NOT NULL,
@@ -29,7 +29,7 @@ CREATE TABLE cmpr_copyto_temp (
 	R8_ID int NOT NULL,
 	R9_ID int NOT NULL
 ) ;
-COPY cmpr_copyto_temp FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_copyto_int.data';
+COPY cmpr_copyto_temp FROM '@abs_srcdir@/data/cmpr_copyto_int.data';
 SELECT (SELECT COUNT(*) FROM cmpr_copyto_temp) - (SELECT COUNT(*) FROM cmpr_copyto_int);
  ?column? 
 ----------
@@ -48,7 +48,7 @@ SELECT (SELECT COUNT(*) FROM cmpr_copyto_temp) - (SELECT COUNT(*) FROM cmpr_copy
 
 DROP TABLE cmpr_copyto_int;
 DROP TABLE cmpr_copyto_temp;
-\! rm '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_copyto_int.data'
+\! rm '@abs_srcdir@/data/cmpr_copyto_int.data'
 CREATE TABLE cmpr_copyto_numstr (
 	RS_ID int,
 	R0_ID varchar(30) numstr NOT NULL,
@@ -58,9 +58,9 @@ CREATE TABLE cmpr_copyto_numstr (
 	R4_ID varchar(30) numstr NOT NULL,
 	R5_ID varchar(30) numstr NOT NULL,
 	R6_ID varchar(30) numstr NOT NULL
-)  COMPRESS;
-COPY cmpr_copyto_numstr FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_numstr.data';
-COPY cmpr_copyto_numstr TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_copyto_numstr.data';
+)  ;
+COPY cmpr_copyto_numstr FROM '@abs_srcdir@/data/cmpr_numstr.data';
+COPY cmpr_copyto_numstr TO '@abs_srcdir@/data/cmpr_copyto_numstr.data';
 CREATE TABLE cmpr_copyto_temp (
 	RS_ID int,
 	R0_ID varchar(30) numstr NOT NULL,
@@ -71,7 +71,7 @@ CREATE TABLE cmpr_copyto_temp (
 	R5_ID varchar(30) numstr NOT NULL,
 	R6_ID varchar(30) numstr NOT NULL
 );
-COPY cmpr_copyto_temp FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_copyto_numstr.data';
+COPY cmpr_copyto_temp FROM '@abs_srcdir@/data/cmpr_copyto_numstr.data';
 SELECT (SELECT COUNT(*) FROM cmpr_copyto_temp) - (SELECT COUNT(*) FROM cmpr_copyto_numstr);
  ?column? 
 ----------
@@ -90,7 +90,7 @@ SELECT (SELECT COUNT(*) FROM cmpr_copyto_temp) - (SELECT COUNT(*) FROM cmpr_copy
 
 DROP TABLE cmpr_copyto_numstr;
 DROP TABLE cmpr_copyto_temp;
-\! rm '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_copyto_numstr.data'
+\! rm '@abs_srcdir@/data/cmpr_copyto_numstr.data'
 CREATE TABLE cmpr_copyto_datetime(
 	RR_ID int,
 	R0_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL,
@@ -106,9 +106,9 @@ CREATE TABLE cmpr_copyto_datetime(
 	R10_ID timestamp(3) WITHOUT TIME ZONE delta NOT NULL,
 	R11_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
 	R12_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL
-) COMPRESS;
-COPY cmpr_copyto_datetime FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_datetime.data';
-COPY cmpr_copyto_datetime TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_copyto_datetime.data';
+) ;
+COPY cmpr_copyto_datetime FROM '@abs_srcdir@/data/cmpr_datetime.data';
+COPY cmpr_copyto_datetime TO '@abs_srcdir@/data/cmpr_copyto_datetime.data';
 CREATE TABLE cmpr_copyto_temp(
 	RR_ID int,
 	R0_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL,
@@ -125,7 +125,7 @@ CREATE TABLE cmpr_copyto_temp(
 	R11_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
 	R12_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL
 ) ;
-COPY cmpr_copyto_temp FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_copyto_datetime.data';
+COPY cmpr_copyto_temp FROM '@abs_srcdir@/data/cmpr_copyto_datetime.data';
 SELECT (SELECT COUNT(*) FROM cmpr_copyto_temp) - (SELECT COUNT(*) FROM cmpr_copyto_datetime);
  ?column? 
 ----------
@@ -144,4 +144,4 @@ SELECT (SELECT COUNT(*) FROM cmpr_copyto_temp) - (SELECT COUNT(*) FROM cmpr_copy
 
 DROP TABLE cmpr_copyto_datetime;
 DROP TABLE cmpr_copyto_temp;
-\! rm '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_copyto_datetime.data'
+\! rm '@abs_srcdir@/data/cmpr_copyto_datetime.data'

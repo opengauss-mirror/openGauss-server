@@ -1,0 +1,235 @@
+create user user1 password 'gauss@13';
+create table user1.test1(id int);
+create user user2 password 'gauss@13';
+create table user2.test2(id int);
+create role supper_user with sysadmin password 'Gauss@123';
+\dt+ user1.test1
+\dt+ user1.test1
+ --change current role 
+set role user1 password 'gauss@13';
+select current_user;
+SELECT current_schema;
+--do not drop table user2.test2 in user1 schema
+drop table user2.test2;
+--do not create table temp for schema user2 in schema user1
+create table user2.temp (id int);
+--do not drop schema user2 int the schema user1
+drop schema user2;
+--do not drop current schema user1 in current schema user1
+drop user user1 cascade;
+--do grant user2 to user1 in the schema user1
+grant user2 to user1; 
+reset role;
+ --grant user2 to user1 in case supperuser
+set role user1 password 'gauss@13';
+ --success drop table user2.test2 in user1 
+drop table user2.test2;
+ 
+--test tablespace
+\! rm -fr '@testtablespace@/tbl_spc'
+\! mkdir '@testtablespace@/tbl_spc'
+-- failed, deny permission
+CREATE TABLESPACE testspace LOCATION '@testtablespace@/tbl_spc' MAXSIZE '1K';
+reset role;
+CREATE TABLESPACE testspace LOCATION '@testtablespace@/tbl_spc' MAXSIZE '1K';
+select * from pg_tablespace where spcname='testspace';
+set role user1 password 'gauss@13';
+--failed,deny permission
+drop tablespace testspace;
+reset role;
+alter tablespace testspace owner to user1;
+select spcname,pg_get_userbyid(spcowner)as spcowner from pg_tablespace where spcname='testspace';
+set role user1 password 'gauss@13';
+drop tablespace testspace;
+reset role;
+drop user user1 cascade;
+drop user user2 cascade;
+CREATE USER DFMM IDENTIFIED BY 'Gauss@123';
+CREATE ROLE CBY IDENTIFIED BY 'Gauss@123';
+CREATE SCHEMA CBY;
+CREATE SCHEMA TEST;
+set role supper_user password 'Gauss@123';
+SELECT CURRENT_USER;
+SELECT CURRENT_SCHEMA;
+--------------------function------------------------
+--ordinary function
+CREATE OR REPLACE FUNCTION DFMM.INC_DFM(i INTEGER)
+RETURNS INTEGER
+AS $$
+	BEGIN
+		RETURN i + 1;
+	END;
+$$ LANGUAGE PLPGSQL;
+CREATE OR REPLACE FUNCTION CBY.INC_CBY(i INTEGER)
+RETURNS INTEGER
+AS $$
+	BEGIN
+		RETURN i + 1;
+	END;
+$$ LANGUAGE PLPGSQL;
+CREATE OR REPLACE FUNCTION TEST.INC_TEST(i INTEGER)
+RETURNS INTEGER
+AS $$
+	BEGIN
+		RETURN i + 1;
+	END;
+$$ LANGUAGE PLPGSQL;
+SELECT PR.PRONAME,NS.NSPNAME,AU.ROLNAME,PR.PROISAGG
+	FROM PG_PROC PR
+	LEFT JOIN PG_NAMESPACE NS ON (PR.PRONAMESPACE = NS.OID)
+	LEFT JOIN PG_AUTHID AU ON(PR.PROOWNER=AU.OID)
+WHERE PRONAME IN ('inc_dfm','inc_cby','inc_test') ORDER BY PRONAME DESC;
+DROP FUNCTION DFMM.INC_DFM;
+DROP FUNCTION CBY.INC_CBY;
+DROP FUNCTION TEST.INC_TEST;
+--AGGREGATE 
+CREATE OR REPLACE FUNCTION INC(START INT4,STEP INT4, NUM INT4)
+RETURNS INTEGER
+AS $$
+	BEGIN
+		RETURN START + STEP * NUM;
+	END;
+$$ LANGUAGE PLPGSQL;
+CREATE AGGREGATE DFMM.INC_DFM(INT4,INT4)
+(
+	SFUNC = INC,
+	STYPE = INT4,
+	INITCOND = '0'
+);
+CREATE AGGREGATE CBY.INC_CBY(INT4,INT4)
+(
+	SFUNC = INC,
+	STYPE = INT4,
+	INITCOND = '0'
+);
+CREATE AGGREGATE TEST.INC_TEST(INT4,INT4)
+(
+	SFUNC = INC,
+	STYPE = INT4,
+	INITCOND = '0'
+);
+SELECT PR.PRONAME,NS.NSPNAME,AU.ROLNAME,PR.PROISAGG
+	FROM PG_PROC PR
+	LEFT JOIN PG_NAMESPACE NS ON (PR.PRONAMESPACE = NS.OID)
+	LEFT JOIN PG_AUTHID AU ON(PR.PROOWNER=AU.OID)
+WHERE PRONAME IN ('inc_dfm','inc_cby','inc_test') ORDER BY PRONAME DESC;
+DROP FUNCTION INC(INT4,INT4,INT4) CASCADE;
+--------------------type------------------------
+--pseudo type
+CREATE TYPE DFMM.TYPE_DFM_P;
+CREATE TYPE CBY.TYPE_CBY_P;
+CREATE TYPE TEST.TYPE_TEST_P;
+SELECT TY.TYPNAME,NS.NSPNAME,AU.ROLNAME,TY.TYPTYPE
+	FROM PG_TYPE TY
+	LEFT JOIN PG_NAMESPACE NS ON (TY.TYPNAMESPACE = NS.OID)
+	LEFT JOIN PG_AUTHID AU ON(TY.TYPOWNER=AU.OID)
+WHERE TY.TYPNAME IN ('type_dfm_p','type_cby_p','type_test_p') ORDER BY TY.TYPNAME DESC;
+
+DROP TYPE DFMM.TYPE_DFM_P;
+DROP TYPE CBY.TYPE_CBY_P;
+DROP TYPE TEST.TYPE_TEST_P;
+--enum type
+CREATE TYPE DFMM.TYPE_DFM_E AS ENUM('new', 'open', 'closed');
+CREATE TYPE CBY.TYPE_CBY_E AS ENUM('new', 'open', 'closed');
+CREATE TYPE TEST.TYPE_TEST_E AS ENUM('new', 'open', 'closed');
+SELECT TY.TYPNAME,NS.NSPNAME,AU.ROLNAME,TY.TYPTYPE
+	FROM PG_TYPE TY
+	LEFT JOIN PG_NAMESPACE NS ON (TY.TYPNAMESPACE = NS.OID)
+	LEFT JOIN PG_AUTHID AU ON(TY.TYPOWNER=AU.OID)
+WHERE TY.TYPNAME IN('type_dfm_e','type_cby_e','type_test_e','_type_dfm_e','_type_cby_e','_type_test_e') ORDER BY TY.TYPNAME DESC;
+
+DROP TYPE DFMM.TYPE_DFM_E;
+DROP TYPE CBY.TYPE_CBY_E;
+DROP TYPE TEST.TYPE_TEST_E;
+
+--range type
+CREATE TYPE DFMM.TYPE_R_DFM AS RANGE(SUBTYPE = INT4);
+CREATE TYPE CBY.TYPE_R_CBY AS RANGE(SUBTYPE = INT4);
+CREATE TYPE TEST.TYPE_R_TEST AS RANGE(SUBTYPE = INT4);
+SELECT TY.TYPNAME,NS.NSPNAME,AU.ROLNAME,TY.TYPTYPE
+	FROM PG_TYPE TY
+	LEFT JOIN PG_NAMESPACE NS ON (TY.TYPNAMESPACE = NS.OID)
+	LEFT JOIN PG_AUTHID AU ON(TY.TYPOWNER=AU.OID)
+WHERE TY.TYPNAME IN('type_r_dfm','type_r_cby','type_r_test','_type_r_dfm','_type_r_cby','_type_r_test') ORDER BY TY.TYPNAME DESC;
+
+DROP TYPE DFMM.TYPE_R_DFM;
+DROP TYPE CBY.TYPE_R_CBY;
+DROP TYPE TEST.TYPE_R_TEST;
+--domain type
+CREATE DOMAIN DFMM.TYPE_D_DFM AS INT4;
+CREATE DOMAIN CBY.TYPE_D_CBY AS INT4;
+CREATE DOMAIN TEST.TYPE_D_TEST AS INT4;
+SELECT TY.TYPNAME,NS.NSPNAME,AU.ROLNAME,TY.TYPTYPE
+	FROM PG_TYPE TY
+	LEFT JOIN PG_NAMESPACE NS ON (TY.TYPNAMESPACE = NS.OID)
+	LEFT JOIN PG_AUTHID AU ON(TY.TYPOWNER=AU.OID)
+WHERE TY.TYPNAME IN('type_d_dfm','type_d_cby','type_d_test') ORDER BY TY.TYPNAME DESC;
+
+DROP TYPE DFMM.TYPE_D_DFM;
+DROP TYPE CBY.TYPE_D_CBY;
+DROP TYPE TEST.TYPE_D_TEST;
+--composite type: invoke DefineRelation
+CREATE TYPE DFMM.TYPE_C_DFM AS (F1 INT, F2 TEXT);
+CREATE TYPE CBY.TYPE_C_CBY AS (F1 INT, F2 TEXT);
+CREATE TYPE TEST.TYPE_C_TEST AS (F1 INT, F2 TEXT);
+SELECT TY.TYPNAME,NS.NSPNAME,AU.ROLNAME,TY.TYPTYPE
+	FROM PG_TYPE TY
+	LEFT JOIN PG_NAMESPACE NS ON (TY.TYPNAMESPACE = NS.OID)
+	LEFT JOIN PG_AUTHID AU ON(TY.TYPOWNER=AU.OID)
+WHERE TY.TYPNAME IN ('type_c_dfm','type_c_cby','type_c_test') ORDER BY TY.TYPNAME DESC;
+
+DROP TYPE DFMM.TYPE_C_DFM;
+DROP TYPE CBY.TYPE_C_CBY;
+DROP TYPE TEST.TYPE_C_TEST;
+
+--base type
+--------------------operator------------------------
+CREATE FUNCTION NEQ(INT4, INT4) RETURNS BOOL
+	AS 'SELECT $1 <> $2;'
+	LANGUAGE SQL
+	IMMUTABLE
+	RETURNS NULL ON NULL INPUT;
+CREATE OPERATOR CBY.<<>> (
+	LEFTARG = INT4,
+	RIGHTARG = INT4,
+	PROCEDURE = Neq,
+	COMMUTATOR = =>>> ,
+	NEGATOR = =<<<
+);
+CREATE OPERATOR TEST.<<>> (
+	LEFTARG = INT4,
+	RIGHTARG = INT4,
+	PROCEDURE = Neq,
+	COMMUTATOR = =>>>>,
+	NEGATOR = =<<<<
+);
+SELECT OP.OPRNAME,NS.NSPNAME,AU.ROLNAME
+	FROM PG_OPERATOR OP
+	LEFT JOIN PG_NAMESPACE NS ON (OP.OPRNAMESPACE=NS.OID)
+	LEFT JOIN PG_AUTHID AU ON (OP.OPROWNER=AU.OID)
+WHERE OP.OPRNAME IN ('<<>>','=>>','=<<','=>>>','=<<<','=>>>>','=<<<<') ORDER BY OP.OPRNAME DESC;
+
+DROP OPERATOR CBY.<<>> ( INT4, INT4);
+DROP OPERATOR TEST.<<>> ( INT4, INT4);
+DROP OPERATOR =>> ( INT4, INT4);
+DROP OPERATOR =<< ( INT4, INT4);
+DROP OPERATOR =>>> ( INT4, INT4);
+DROP OPERATOR =<<< ( INT4, INT4);
+DROP OPERATOR =>>>> ( INT4, INT4);
+DROP OPERATOR =<<<< ( INT4, INT4);
+DROP FUNCTION NEQ(INT4, INT4);
+
+DROP SCHEMA CBY;
+DROP SCHEMA TEST;
+DROP USER CBY;
+DROP USER DFMM;
+reset role;
+drop user supper_user cascade;
+
+--cstore test
+create user cstore_user password 'Gauss@123';
+set role cstore_user password 'Gauss@123';
+create table test_user_cstore(id int) with(orientation = column);
+create index test_user_cstore_idx on test_user_cstore(id);
+\c
+drop user cstore_user cascade;

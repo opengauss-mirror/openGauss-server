@@ -32,6 +32,7 @@
 
 #include "miscadmin.h"
 #include "bulkload/dist_fdw.h"
+#include "catalog/gs_opt_model.h"
 #include "nodes/parsenodes.h"
 #include "foreign/fdwapi.h"
 #include "nodes/plannodes.h"
@@ -49,7 +50,9 @@
 #include "catalog/pg_synonym.h"
 #include "catalog/pg_type.h"
 #include "access/attnum.h"
+#include "pgxc/groupmgr.h"
 #include "pgxc/pgxc.h"
+#include "pgxc/pgFdwRemote.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "catalog/pg_enum.h"
@@ -274,11 +277,17 @@ THR_LOCAL bool skip_read_extern_fields = false;
     } while (0);
 
 /* Read a char field (ie, one ascii character) */
-#define READ_CHAR_FIELD(fldname)                          \
-    do {                                                  \
-        token = pg_strtok(&length); /* skip :fldname */   \
-        token = pg_strtok(&length); /* get field value */ \
-        local_node->fldname = token[0];                   \
+#define READ_CHAR_FIELD(fldname)                               \
+    do {                                                       \
+        token = pg_strtok(&length); /* skip :fldname */        \
+        token = pg_strtok(&length); /* get field value */      \
+        if (token == NULL) {                                   \
+            ereport(ERROR,                                     \
+                (errmodule(MOD_OPT),                           \
+                    errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),   \
+                    errmsg("token should not return NULL."))); \
+        }                                                      \
+        local_node->fldname = token[0];                        \
     } while (0);
 
 /* Read an enumerated-type field that was written as an integer code */
@@ -743,7 +752,22 @@ THR_LOCAL bool skip_read_extern_fields = false;
         READ_ENUM_FIELD(position, RemoteQueryType);                                               \
                                                                                                   \
         READ_TYPINFO_ARRAY(rq_param_types, rq_num_params);                                        \
-                                                                                                  \
+        IF_EXIST(is_remote_function_query)                                                        \
+        {                                                                                         \
+            READ_BOOL_FIELD(is_remote_function_query);                                            \
+        }                                                                                         \
+        IF_EXIST(isCustomPlan)                                                        \
+        {                                                                                         \
+            READ_BOOL_FIELD(isCustomPlan);                                            \
+        }                                                                                         \
+        IF_EXIST(isFQS)                                                        \
+        {                                                                                         \
+            READ_BOOL_FIELD(isFQS);                                            \
+        }                                                                                         \
+        IF_EXIST(relationOids)                                                                           \
+        {                                                                                         \
+            READ_NODE_FIELD(relationOids);                                                        \
+        }                                                                                         \
         READ_DONE();                                                                              \
     } while (0)
 
@@ -1025,6 +1049,39 @@ static JoinMethodHint* _readJoinHint(void)
 }
 
 /*
+ * @Description: Read string to join hint struct.
+ * @return: Join hint struct.
+ */
+static PredpushHint* _readPredpushHint(void)
+{
+    READ_LOCALS(PredpushHint);
+
+    _readBaseHint(&(local_node->base));
+    READ_BOOL_FIELD(negative);
+    READ_STRING_FIELD(dest_name);
+    READ_INT_FIELD(dest_id);
+    READ_BITMAPSET_FIELD(candidates);
+
+    READ_DONE();
+}
+
+/*
+ * @Description: Read string to rewrite hint struct.
+ * @return: rewrite hint struct.
+ */
+static RewriteHint* _readRewriteHint(void)
+{
+    READ_LOCALS(RewriteHint);
+
+    _readBaseHint(&(local_node->base));
+    READ_NODE_FIELD(param_names);
+    READ_UINT_FIELD(param_bits);
+
+    READ_DONE();
+}
+
+
+/*
  * @Description: Read string to leading hint struct.
  * @return: Leading hint struct.
  */
@@ -1202,6 +1259,11 @@ static HintState* _readHintState()
     READ_NODE_FIELD(block_name_hint);
     READ_NODE_FIELD(scan_hint);
     READ_NODE_FIELD(skew_hint);
+    IF_EXIST(predpush_hint)
+    {
+        READ_NODE_FIELD(predpush_hint);
+    }
+    READ_NODE_FIELD(rewrite_hint);
 
     READ_DONE();
 }
@@ -1316,6 +1378,16 @@ static Query* _readQuery(void)
     IF_EXIST(is_from_full_join_rewrite) {
         READ_BOOL_FIELD(use_star_targets);
     }
+    IF_EXIST(can_push)
+    {
+        READ_BOOL_FIELD(can_push);
+    }
+
+    IF_EXIST(unique_check)
+    {
+        READ_BOOL_FIELD(unique_check);
+    }
+
     READ_DONE();
 }
 
@@ -1342,6 +1414,22 @@ static DeclareCursorStmt* _readDeclareCursorStmt(void)
     READ_STRING_FIELD(portalname);
     READ_INT_FIELD(options);
     READ_NODE_FIELD(query);
+
+    READ_DONE();
+}
+
+static CopyStmt* _readCopyStmt(void)
+{
+    READ_LOCALS(CopyStmt);
+    READ_NODE_FIELD(relation);
+
+    READ_DONE();
+}
+
+static AlterTableStmt* _readAlterTableStmt(void)
+{
+    READ_LOCALS(AlterTableStmt);
+    READ_NODE_FIELD(relation);
 
     READ_DONE();
 }
@@ -1514,8 +1602,8 @@ static IntoClause* _readIntoClause(void)
     READ_ENUM_FIELD(onCommit, OnCommitAction);
     READ_ENUM_FIELD(row_compress, RelCompressType);
     READ_STRING_FIELD(tableSpaceName);
-    READ_NODE_FIELD(viewQuery);
     READ_BOOL_FIELD(skipData);
+    READ_CHAR_FIELD(relkind);
 
     READ_DONE();
 }
@@ -1650,8 +1738,64 @@ static Param* _readParam(void)
 static Aggref* _readAggref(void)
 {
     READ_LOCALS(Aggref);
-
     READ_OID_FIELD(aggfnoid);
+#ifdef ENABLE_MULTIPLE_NODES
+    token = pg_strtok(&length, false); /* name: pronamespace */
+    if (token != NULL && (0 == memcmp(token, ":pronamespace", strlen(":pronamespace")))) {
+        // shipping out for dn, oid will be different on dn, so proname and pronamespace string will be must.
+        char* proname = NULL;
+        char* pronamespace = NULL;
+        char* rettypenamespace = NULL;
+        char* rettypename = NULL;
+        Oid namespace_oid = 0;
+        Oid type_namespace_oid = 0;
+        Oid rettype = 0;
+        int nargs = 0;
+        Oid* argtypes = NULL;
+
+        token = pg_strtok(&length); /* skip name: pronamespace */
+        token = pg_strtok(&length); /* get pronamespace value */
+        pronamespace = nullable_string(token, length);
+        namespace_oid = get_namespace_oid(pronamespace, false);
+        token = pg_strtok(&length); /* skip name: proname */
+        token = pg_strtok(&length); /* get proname value */
+        proname = nullable_string(token, length);
+
+        token = pg_strtok(&length); /* skip name: rettypenamespace */
+        token = pg_strtok(&length); /* get rettypenamespace value */
+        rettypenamespace = nullable_string(token, length);
+        type_namespace_oid = get_namespace_oid(rettypenamespace, false);
+
+        token = pg_strtok(&length); /* skip name: rettypename */
+        token = pg_strtok(&length); /* get rettypename value */
+        rettypename = nullable_string(token, length);
+
+        rettype = get_typeoid(type_namespace_oid, rettypename);
+
+        token = pg_strtok(&length); /* skip name: pronargs */
+        token = pg_strtok(&length); /* get pronargs value */
+        nargs = atoi(token);
+
+        argtypes = (Oid*)palloc(nargs * sizeof(Oid));
+        token = pg_strtok(&length); /* skip name: proargs */
+        for (int i = 0; i < nargs; i++) {
+            char* argtypenamespace = NULL;
+            char* argtypename = NULL;
+            Oid arg_type_namespace_oid = 0;
+            Oid argtype = 0;
+            token = pg_strtok(&length); /* get argtypenamespace value */
+            argtypenamespace = nullable_string(token, length);
+            arg_type_namespace_oid = get_namespace_oid(argtypenamespace, false);
+
+            token = pg_strtok(&length); /* get argtypename value */
+            argtypename = nullable_string(token, length);
+
+            argtype = get_typeoid(arg_type_namespace_oid, argtypename);
+            argtypes[i] = argtype;
+        }
+        local_node->aggfnoid = get_func_oid_ext(proname, namespace_oid, rettype, nargs, argtypes);
+    }
+#endif /* ENABLE_MULTIPLE_NODES */
     READ_OID_FIELD(aggtype);
 #ifdef PGXC
     READ_OID_FIELD(aggtrantype);
@@ -1660,17 +1804,20 @@ static Aggref* _readAggref(void)
 #endif /* PGXC */
     READ_OID_FIELD(aggcollid);
     READ_OID_FIELD(inputcollid);
-    IF_EXIST(aggdirectargs) {
+    IF_EXIST(aggdirectargs)
+    {
         READ_NODE_FIELD(aggdirectargs);
     }
     READ_NODE_FIELD(args);
     READ_NODE_FIELD(aggorder);
     READ_NODE_FIELD(aggdistinct);
     READ_BOOL_FIELD(aggstar);
-    IF_EXIST(aggkind) {
+    IF_EXIST(aggkind)
+    {
         READ_CHAR_FIELD(aggkind);
     }
-    IF_EXIST(aggvariadic) {
+    IF_EXIST(aggvariadic)
+    {
         READ_BOOL_FIELD(aggvariadic);
     }
     READ_UINT_FIELD(agglevelsup);
@@ -2087,8 +2234,8 @@ static CollateExpr* _readCollateExpr(void)
                 local_node->collOid = get_collation_oid(collnameList, false);
                 list_free_ext(collnameList);
             }
-
-            pfree_ext(collname);
+            if (NULL != collname)
+                pfree_ext(collname);
         }
     }
 
@@ -2478,7 +2625,7 @@ static RangeTblEntry* _readRangeTblEntry(void)
         case RTE_RELATION:
             READ_OID_FIELD(relid);
             READ_CHAR_FIELD(relkind);
-
+            READ_BOOL_FIELD(isResultRel);
             token = pg_strtok(&length, false);
             if (token != NULL && (0 == memcmp(token, ":tablesample", strlen(":tablesample")))) {
                 READ_NODE_FIELD(tablesample);
@@ -2621,6 +2768,10 @@ static RangeTblEntry* _readRangeTblEntry(void)
             break;
     }
 
+    IF_EXIST(lateral)
+    {
+        READ_BOOL_FIELD(lateral);
+    }
     READ_BOOL_FIELD(inh);
     READ_BOOL_FIELD(inFromCl);
     READ_UINT_FIELD(requiredPerms);
@@ -2662,8 +2813,12 @@ static RangeTblEntry* _readRangeTblEntry(void)
         READ_NODE_FIELD(buckets);
     }
 
-    IF_EXIST(isexcluded) {
+    IF_EXIST(isexcluded){
         READ_BOOL_FIELD(isexcluded);
+    }
+
+    IF_EXIST(sublink_pull_up) {
+        READ_BOOL_FIELD(sublink_pull_up);
     }
 
     READ_DONE();
@@ -2684,8 +2839,6 @@ static Plan* _readPlan(Plan* local_node)
     READ_FLOAT_FIELD(plan_rows);
     READ_FLOAT_FIELD(multiple);
     READ_INT_FIELD(plan_width);
-    READ_BOOL_FIELD(parallel_aware);
-    READ_BOOL_FIELD(parallel_safe);
     READ_NODE_FIELD(targetlist);
     READ_NODE_FIELD(qual);
     READ_NODE_FIELD(lefttree);
@@ -2712,12 +2865,12 @@ static Plan* _readPlan(Plan* local_node)
     READ_BOOL_FIELD(recursive_union_controller);
     READ_INT_FIELD(control_plan_nodeid);
     READ_BOOL_FIELD(is_sync_plannode);
-
-    READ_FLOAT_FIELD(pred_rows);
-    READ_FLOAT_FIELD(pred_startup_time);
-    READ_FLOAT_FIELD(pred_total_time);
-    READ_LONG_FIELD(pred_max_memory);
-
+    if (t_thrd.proc->workingVersionNum >= ML_OPT_MODEL_VERSION_NUM) {
+        READ_FLOAT_FIELD(pred_rows);
+        READ_FLOAT_FIELD(pred_startup_time);
+        READ_FLOAT_FIELD(pred_total_time);
+        READ_LONG_FIELD(pred_max_memory);
+    }
     READ_DONE();
 }
 
@@ -2736,7 +2889,6 @@ static SubPlan* _readSubPlan(SubPlan* local_node)
     READ_OID_FIELD(firstColCollation);
     READ_BOOL_FIELD(useHashTable);
     READ_BOOL_FIELD(unknownEqFalse);
-    READ_BOOL_FIELD(parallel_safe);
     READ_NODE_FIELD(setParam);
     READ_NODE_FIELD(parParam);
     READ_NODE_FIELD(args);
@@ -2799,6 +2951,10 @@ static Agg* _readAgg(Agg* local_node)
     READ_BOOL_FIELD(is_dummy);
     READ_UINT_FIELD(skew_optimize);
 
+    IF_EXIST(unique_check) {
+        READ_BOOL_FIELD(unique_check);
+    }
+
     READ_DONE();
 }
 
@@ -2838,7 +2994,6 @@ static BitmapOr* _readBitmapOr(BitmapOr* local_node)
     READ_TEMP_LOCALS();
 
     _readPlan(&local_node->plan);
-    READ_BOOL_FIELD(isshared);
     READ_NODE_FIELD(bitmapplans);
 
     READ_DONE();
@@ -2879,6 +3034,7 @@ static CStoreIndexAnd* _readCStoreIndexAnd(CStoreIndexAnd* local_node)
 
 static PruningResult* _readPruningResult(PruningResult* local_node)
 {
+    const int num = 92267;
     READ_LOCALS_NULL(PruningResult);
     READ_TEMP_LOCALS();
 
@@ -2888,6 +3044,9 @@ static PruningResult* _readPruningResult(PruningResult* local_node)
     READ_INT_FIELD(intervalOffset);
     READ_BITMAPSET_FIELD(intervalSelectedPartitions);
     READ_NODE_FIELD(ls_rangeSelectedPartitions);
+    if (t_thrd.proc->workingVersionNum >= num) {
+        READ_NODE_FIELD(expr);
+    }
 
     READ_DONE();
 }
@@ -3060,7 +3219,6 @@ static BitmapIndexScan* _readBitmapIndexScan(BitmapIndexScan* local_node)
     _readScan(&local_node->scan);
 
     READ_OID_FIELD(indexid);
-    READ_BOOL_FIELD(isshared);
     READ_NODE_FIELD(indexqual);
     READ_NODE_FIELD(indexqualorig);
 #ifdef STREAMPLAN
@@ -3336,6 +3494,46 @@ static RemoteQuery* _readRemoteQuery(void)
     READ_REMOTEQUERY_FIELD();
 }
 
+static SliceBoundary* _readSliceBoundary(void)
+{
+    READ_LOCALS(SliceBoundary);
+    READ_INT_FIELD(nodeIdx);
+    READ_INT_FIELD(len);
+
+    
+    token = pg_strtok(&length); /* skip ":boundary" */
+    token = pg_strtok(&length); /* skip "(" */
+    for (int i = 0; i < local_node->len; i++) {
+        void *ptr = nodeRead(NULL, 0);
+        errno_t err = memcpy_s(&local_node->boundary[i], sizeof(void *), &ptr, sizeof(void *));
+        securec_check(err, "\0", "\0");
+    }
+    token = pg_strtok(&length); /* skip ")" */
+
+    READ_DONE();
+}
+
+static ExecBoundary* _readExecBoundary(void)
+{
+    READ_LOCALS(ExecBoundary);
+    READ_CHAR_FIELD(locatorType);
+    READ_INT_FIELD(count);
+
+    token = pg_strtok(&length); /* skip ":eles" */
+    token = pg_strtok(&length); /* skip "(" */
+    if (local_node->count > 0) {
+        local_node->eles = (SliceBoundary**)palloc0(sizeof(SliceBoundary*) * local_node->count);
+        for (int i = 0; i < local_node->count; i++) {
+            void *ptr = nodeRead(NULL, 0);
+            errno_t err = memcpy_s(&local_node->eles[i], sizeof(void *), &ptr, sizeof(void *));
+            securec_check(err, "\0", "\0");
+        }
+    }
+    token = pg_strtok(&length); /* skip ")" */
+
+    READ_DONE();
+}
+
 /*
  * _readExecNodes
  *     read information for a ExecNodes
@@ -3356,12 +3554,72 @@ static ExecNodes* _readExecNodes(void)
     READ_CHAR_FIELD(baselocatortype);
     READ_NODE_FIELD(en_expr);
     READ_OID_FIELD(en_relid);
+
+    IF_EXIST(boundaries) {
+        READ_NODE_FIELD(boundaries);
+    }
+
     READ_ENUM_FIELD(accesstype, RelationAccessType);
     READ_NODE_FIELD(en_dist_vars);
     READ_INT_FIELD(bucketmapIdx);
     READ_BOOL_FIELD(nodelist_is_nil);
     READ_NODE_FIELD(original_nodeList);
     READ_NODE_FIELD(dynamic_en_expr);
+
+    if (t_thrd.proc->workingVersionNum >= 92106) {
+        IF_EXIST(bucketid) {
+            READ_INT_FIELD(bucketid);
+        }
+        IF_EXIST(bucketexpr) {
+            READ_NODE_FIELD(bucketexpr);
+        }
+        IF_EXIST(bucketrelid) {
+            READ_OID_FIELD(bucketrelid);
+        }
+        /*
+         *  Note: The Oid shipped(in plan) is invalid here
+         *  We need to get the Oid on this node.
+         */
+        if (local_node->bucketrelid >= FirstBootstrapObjectId) {
+            char* relname = NULL;
+            char* relnamespace = NULL;
+
+            IF_EXIST(relname) {
+                token = pg_strtok(&length);
+                token = pg_strtok(&length);
+                relname = nullable_string(token, length);
+                if (relname == NULL) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                            errmsg("NULL relname for RTE %u found", local_node->bucketrelid)));
+                }
+            }
+            IF_EXIST(relnamespace) {
+                token = pg_strtok(&length);
+                token = pg_strtok(&length);
+                relnamespace = nullable_string(token, length);
+                if (relnamespace == NULL) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                            errmsg("NULL relnamespace for RTE %u found", local_node->bucketrelid)));
+                }
+            }
+#ifdef ENABLE_MULTIPLE_NODES
+            if (!IS_PGXC_COORDINATOR && !isRestoreMode) {
+                Oid bucketrelid = InvalidOid;
+                if (relname != NULL && relnamespace != NULL) {
+                    bucketrelid = get_valid_relname_relid(relnamespace, relname);
+                    pfree_ext(relname);
+                    pfree_ext(relnamespace);
+                }
+
+                if (OidIsValid(bucketrelid)) {
+                    local_node->bucketrelid = bucketrelid;
+                }
+            }
+#endif
+        }
+    }
     READ_DONE();
 }
 
@@ -3495,7 +3753,6 @@ static Append* _readAppend(Append* local_node)
     // Read Plan
     _readPlan(&local_node->plan);
     READ_NODE_FIELD(appendplans);
-    READ_INT_FIELD(first_partial_plan);
 
     READ_DONE();
 }
@@ -3576,7 +3833,6 @@ static Hash* _readHash(Hash* local_node)
 
     READ_INT_FIELD(skewColumn);
     READ_BOOL_FIELD(skewInherit);
-    READ_FLOAT_FIELD(rows_total);
     READ_OID_FIELD(skewColType);
     READ_INT_FIELD(skewColTypmod);
 
@@ -3678,21 +3934,23 @@ static PlannedStmt* _readPlannedStmt(void)
     }
     READ_INT_FIELD(num_nodes);
 
-    local_node->nodesDefinition = (NodeDefinition*)palloc0(sizeof(NodeDefinition) * local_node->num_nodes);
-    for (int i = 0; i < local_node->num_nodes; i++) {
-        READ_OID_FIELD(nodesDefinition[i].nodeoid);
-        READCOPY_STRING_FIELD_DIRECT(nodesDefinition[i].nodename.data);
-        READCOPY_STRING_FIELD_DIRECT(nodesDefinition[i].nodehost.data);
-        READ_INT_FIELD_DIRECT(nodesDefinition[i].nodeport);
-        READ_INT_FIELD_DIRECT(nodesDefinition[i].nodectlport);
-        READ_INT_FIELD_DIRECT(nodesDefinition[i].nodesctpport);
-        READCOPY_STRING_FIELD_DIRECT(nodesDefinition[i].nodehost1.data);
-        READ_INT_FIELD_DIRECT(nodesDefinition[i].nodeport1);
-        READ_INT_FIELD_DIRECT(nodesDefinition[i].nodectlport1);
-        READ_INT_FIELD_DIRECT(nodesDefinition[i].nodesctpport1);
-        READ_BOOL_FIELD_DIRECT(nodesDefinition[i].nodeisprimary);
-        READ_BOOL_FIELD_DIRECT(nodesDefinition[i].nodeispreferred);
-    }
+    if (t_thrd.proc->workingVersionNum < 92097 || local_node->num_streams > 0) {
+	    local_node->nodesDefinition = (NodeDefinition*)palloc0(sizeof(NodeDefinition) * local_node->num_nodes);
+	    for (int i = 0; i < local_node->num_nodes; i++) {
+	        READ_OID_FIELD(nodesDefinition[i].nodeoid);
+	        READCOPY_STRING_FIELD_DIRECT(nodesDefinition[i].nodename.data);
+	        READCOPY_STRING_FIELD_DIRECT(nodesDefinition[i].nodehost.data);
+	        READ_INT_FIELD_DIRECT(nodesDefinition[i].nodeport);
+	        READ_INT_FIELD_DIRECT(nodesDefinition[i].nodectlport);
+	        READ_INT_FIELD_DIRECT(nodesDefinition[i].nodesctpport);
+	        READCOPY_STRING_FIELD_DIRECT(nodesDefinition[i].nodehost1.data);
+	        READ_INT_FIELD_DIRECT(nodesDefinition[i].nodeport1);
+	        READ_INT_FIELD_DIRECT(nodesDefinition[i].nodectlport1);
+	        READ_INT_FIELD_DIRECT(nodesDefinition[i].nodesctpport1);
+	        READ_BOOL_FIELD_DIRECT(nodesDefinition[i].nodeisprimary);
+	        READ_BOOL_FIELD_DIRECT(nodesDefinition[i].nodeispreferred);
+	    }
+	}
 
     READ_INT_FIELD(instrument_option);
     READ_INT_FIELD(num_plannodes);
@@ -3702,6 +3960,9 @@ static PlannedStmt* _readPlannedStmt(void)
     READ_INT_FIELD(assigned_query_mem[1]);
 
     READ_INT_FIELD(num_bucketmaps);
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     const int size = BUCKETDATALEN;
     for (int j = 0; j < local_node->num_bucketmaps; j++) {
         READ_UINT2_ARRAY_LEN(bucketMap[j]);
@@ -3729,7 +3990,6 @@ static PlannedStmt* _readPlannedStmt(void)
     }
     READ_BOOL_FIELD(isRowTriggerShippable);
     READ_BOOL_FIELD(is_stream_plan);
-    READ_BOOL_FIELD(parallelModeNeeded);
 
     READ_DONE();
 }
@@ -4103,6 +4363,7 @@ static DfsScan* _readDfsScan(DfsScan* local_node)
     READ_DONE();
 }
 
+#ifdef ENABLE_MULTIPLE_NODES
 static TsStoreScan* _readTsStoreScan(TsStoreScan *local_node)
 {
     READ_LOCALS_NULL(TsStoreScan);
@@ -4114,9 +4375,15 @@ static TsStoreScan* _readTsStoreScan(TsStoreScan *local_node)
     READ_NODE_FIELD(minMaxInfo);
     READ_ENUM_FIELD(relStoreLocation, RelstoreType);
     READ_BOOL_FIELD(is_replica_table);
-
+    READ_INT_FIELD(sort_by_time_colidx);
+    READ_INT_FIELD(limit);
+    READ_BOOL_FIELD(is_simple_scan);
+    READ_BOOL_FIELD(has_sort);
+    READ_INT_FIELD(series_func_calls);
+    READ_INT_FIELD(top_key_func_arg);
     READ_DONE();
 }
+#endif   /* ENABLE_MULTIPLE_NODES */
 
 static VecSubqueryScan* _readVecSubqueryScan(VecSubqueryScan* local_node)
 {
@@ -4189,6 +4456,10 @@ static VecAgg* _readVecAgg(VecAgg* local_node)
     read_mem_info(&local_node->mem_info);
     READ_BOOL_FIELD(is_sonichash);
     READ_UINT_FIELD(skew_optimize);
+
+    IF_EXIST(unique_check) {
+        READ_BOOL_FIELD(unique_check);
+    }
 
     READ_DONE();
 }
@@ -4547,7 +4818,7 @@ static ColumnDef* _readColumnDef()
     READ_OID_FIELD(collOid);
     READ_NODE_FIELD(constraints);
     READ_NODE_FIELD(fdwoptions);
-
+    READ_NODE_FIELD(clientLogicColumnRef);
     if (local_node->storage == '0') {
         local_node->storage = 0;
     }
@@ -4627,7 +4898,10 @@ static IndexStmt* _readIndexStmt()
     READ_STRING_FIELD(accessMethod);
     READ_STRING_FIELD(tableSpace);
     READ_NODE_FIELD(indexParams);
-    READ_NODE_FIELD(indexIncludingParams);
+    if (t_thrd.proc->workingVersionNum >= SUPPORT_GPI_VERSION_NUM) {
+        READ_NODE_FIELD(indexIncludingParams);
+        READ_BOOL_FIELD(isGlobal);
+    }
     READ_NODE_FIELD(options);
     READ_NODE_FIELD(whereClause);
     READ_NODE_FIELD(excludeOpNames);
@@ -4636,7 +4910,6 @@ static IndexStmt* _readIndexStmt()
     READ_OID_FIELD(oldNode);
     READ_NODE_FIELD(partClause);
     READ_BOOL_FIELD(isPartitioned);
-    READ_BOOL_FIELD(isGlobal);
     READ_BOOL_FIELD(unique);
     READ_BOOL_FIELD(primary);
     READ_BOOL_FIELD(isconstraint);
@@ -4683,21 +4956,27 @@ static Constraint* _readConstraint()
     } else if (MATCH_TYPE("PRIMARY_KEY")) {
         local_node->contype = CONSTR_PRIMARY;
         READ_NODE_FIELD(keys);
-        READ_NODE_FIELD(including);
+        if (t_thrd.proc->workingVersionNum >= SUPPORT_GPI_VERSION_NUM) {
+            READ_NODE_FIELD(including);
+        }
         READ_NODE_FIELD(options);
         READ_STRING_FIELD(indexname);
         READ_STRING_FIELD(indexspace);
     } else if (MATCH_TYPE("UNIQUE")) {
         local_node->contype = CONSTR_UNIQUE;
         READ_NODE_FIELD(keys);
-        READ_NODE_FIELD(including);
+        if (t_thrd.proc->workingVersionNum >= SUPPORT_GPI_VERSION_NUM) {
+            READ_NODE_FIELD(including);
+        }
         READ_NODE_FIELD(options);
         READ_STRING_FIELD(indexname);
         READ_STRING_FIELD(indexspace);
     } else if (MATCH_TYPE("EXCLUSION")) {
         local_node->contype = CONSTR_EXCLUSION;
         READ_NODE_FIELD(exclusions);
-        READ_NODE_FIELD(including);
+        if (t_thrd.proc->workingVersionNum >= SUPPORT_GPI_VERSION_NUM) {
+            READ_NODE_FIELD(including);
+        }
         READ_NODE_FIELD(options);
         READ_STRING_FIELD(indexname);
         READ_STRING_FIELD(indexspace);
@@ -4734,6 +5013,59 @@ static Constraint* _readConstraint()
     READ_DONE();
 }
 
+static ClientLogicColumnParam* _readColumnParam ()
+{
+    READ_LOCALS(ClientLogicColumnParam);
+    READ_ENUM_FIELD(key, ClientLogicColumnProperty);
+    READ_STRING_FIELD(value);
+    READ_UINT_FIELD(len);
+    READ_LOCATION_FIELD(location);
+    READ_DONE();
+}
+
+static ClientLogicGlobalParam* _readGlobalParam ()
+{
+    READ_LOCALS(ClientLogicGlobalParam);
+    READ_ENUM_FIELD(key, ClientLogicGlobalProperty);
+    READ_STRING_FIELD(value);
+    READ_UINT_FIELD(len);
+    READ_LOCATION_FIELD(location);
+    READ_DONE();
+}
+
+static CreateClientLogicGlobal* _readGlobalSetting ()
+{
+    READ_LOCALS(CreateClientLogicGlobal);
+    READ_NODE_FIELD(global_key_name);
+    READ_NODE_FIELD(global_setting_params);
+    READ_DONE();
+}
+
+static CreateClientLogicColumn* _readColumnSetting ()
+{
+    READ_LOCALS(CreateClientLogicColumn);
+    READ_NODE_FIELD(column_key_name);
+    READ_NODE_FIELD(column_setting_params);
+    READ_DONE();
+}
+
+/**
+ * @Description: deserialize the ClientLogicColumnRef struct.
+ * @in str, deserialized string.
+ * @return clientLogicColumnRef struct.
+ */
+static ClientLogicColumnRef* _readClientLogicColumnRef()
+{
+    READ_LOCALS(ClientLogicColumnRef);
+
+    READ_NODE_FIELD(column_key_name);
+    READ_NODE_FIELD(orig_typname);
+    READ_NODE_FIELD(dest_typname);
+    READ_LOCATION_FIELD(location);
+
+    READ_DONE();
+}
+
 /**
  * @Description: deserialize the RangePartitionDefState struct.
  * @in str, deserialized string.
@@ -4742,6 +5074,28 @@ static Constraint* _readConstraint()
 static RangePartitionDefState* _readRangePartitionDefState()
 {
     READ_LOCALS(RangePartitionDefState);
+
+    READ_STRING_FIELD(partitionName);
+    READ_NODE_FIELD(boundary);
+    READ_STRING_FIELD(tablespacename);
+
+    READ_DONE();
+}
+
+static ListPartitionDefState* _readListPartitionDefState()
+{
+    READ_LOCALS(ListPartitionDefState);
+
+    READ_STRING_FIELD(partitionName);
+    READ_NODE_FIELD(boundary);
+    READ_STRING_FIELD(tablespacename);
+
+    READ_DONE();
+}
+
+static HashPartitionDefState* _readHashPartitionDefState()
+{
+    READ_LOCALS(HashPartitionDefState);
 
     READ_STRING_FIELD(partitionName);
     READ_NODE_FIELD(boundary);
@@ -4863,18 +5217,6 @@ static QualSkewInfo* _readQualSkewInfo()
     READ_FLOAT_FIELD(qual_cost.per_tuple);
     READ_FLOAT_FIELD(broadcast_ratio);
 
-    READ_DONE();
-}
-
-static Gather* _readGather(void)
-{
-    READ_LOCALS(Gather);
-
-    _readPlan(&local_node->plan);
-
-    READ_INT_FIELD(num_workers);
-    READ_INT_FIELD(rescan_param);
-    READ_BOOL_FIELD(single_copy);
     READ_DONE();
 }
 
@@ -5051,6 +5393,10 @@ Node* parseNodeString(void)
         return_value = _readRemoteQuery();
     } else if (MATCH("EXEC_NODES", 10)) {
         return_value = _readExecNodes();
+    } else if (MATCH("SLICEBOUNDARY", 13)) {
+        return_value = _readSliceBoundary();
+    } else if (MATCH("EXECBOUNDARY", 12)) {
+        return_value = _readExecBoundary();
     } else if (MATCH("PLAN", 4)) {
         return_value = _readPlan(NULL);
     } else if (MATCH("MATERIAL", 8)) {
@@ -5103,7 +5449,7 @@ Node* parseNodeString(void)
         return_value = _readWindowAgg(NULL);
     } else if (MATCH("FOREIGNSCAN", 11)) {
         return_value = _readForeignScan(NULL);
-    } else if (MATCH("EXTENSIBLEPLAN", 10)) {
+    } else if (MATCH("EXTENSIBLEPLAN", 14)) {
         return_value = _readExtensiblePlan(NULL);
     } else if (MATCH("FOREIGNPARTSTATE", 16)) {
         return_value = _readForeignPartState(NULL);
@@ -5159,8 +5505,10 @@ Node* parseNodeString(void)
         return_value = _readCStoreScan(NULL);
     } else if (MATCH("DFSSCAN", 7)) {
         return_value = _readDfsScan(NULL);
+#ifdef ENABLE_MULTIPLE_NODES
     } else if (MATCH("TSSTORESCAN",11)) {
         return_value = _readTsStoreScan(NULL);
+#endif
     } else if (MATCH("VECSUBQUERYSCAN", 15)) {
         return_value = _readVecSubqueryScan(NULL);
     } else if (MATCH("VECHASHJOIN", 11)) {
@@ -5255,6 +5603,10 @@ Node* parseNodeString(void)
         return_value = _readPartitionState();
     } else if (MATCH("RANGEPARTITIONDEFSTATE", 22)) {
         return_value = _readRangePartitionDefState();
+    } else if (MATCH("LISTPARTITIONDEFSTATE", 21)) {
+        return_value = _readListPartitionDefState();
+    } else if (MATCH("HASHPARTITIONDEFSTATE", 21)) {
+        return_value = _readHashPartitionDefState();
     } else if (MATCH("INTERVALPARTITIONDEFSTATE", 25)) {
         return_value = _readIntervalPartitionDefState();
     } else if (MATCH("RANGEPARTITIONINDEXDEFSTATE", 27)) {
@@ -5265,14 +5617,30 @@ Node* parseNodeString(void)
         return_value = _readSplitPartitionState();
     } else if (MATCH("ADDPARTITIONSTATE", 17)) {
         return_value = _readAddPartitionState();
-    } else if (MATCH("ROWNUM", 6)) {
-        return_value = _readRownum();
+    } else if (MATCH("CLIENTLOGICCOLUMNREF", 20)) {
+        return_value = _readClientLogicColumnRef();
+    } else if (MATCH("GLOBALPARAM", 11)) {
+        return_value = _readGlobalParam();
+    } else if (MATCH("COLUMNPARAM", 11)) {
+        return_value = _readColumnParam();
+    } else if (MATCH("GLOBALSETTING", 13)) {
+        return_value = _readGlobalSetting();
+    } else if (MATCH("COLUMNSETTING", 13)) {
+        return_value = _readColumnSetting();
     } else if (MATCH("UPSERTEXPR", 10)) {
         return_value = _readUpsertExpr();
     } else if (MATCH("UPSERTCLAUSE", 12)) {
         return_value = _readUpsertClause();
-    } else if (MATCH("GATHER", 6)) {
-        return_value = _readGather();
+    } else if (MATCH("PREDPUSHHINT", 12)) {
+        return_value = _readPredpushHint();
+    } else if (MATCH("REWRITEHINT", 11)) {
+        return_value = _readRewriteHint();
+    } else if (MATCH("ROWNUM", 6)) {
+        return_value = _readRownum();
+    } else if (MATCH("COPY", 4)) {
+        return_value = _readCopyStmt();
+    } else if (MATCH("ALTERTABLE", 10)) {
+        return_value = _readAlterTableStmt();
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),

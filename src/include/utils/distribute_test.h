@@ -26,6 +26,7 @@
 
 #define MAX_GID_STR_LEN (1024)
 #define MAX_NAME_STR_LEN (256)
+#define DEFAULT_PROBABILITY (0.004)
 
 /* white-box log handle */
 #define ereport_whitebox_domain(elevel, file, line, func, domain, rest) \
@@ -135,6 +136,7 @@ extern void stub_sleep_emit(void);
 #define DN_COMMIT_PREPARED_SLEEP "DN_COMMIT_PREPARED_SLEEP"
 
 /* Exception during subTransaction process */
+#define NON_EXEC_CN_IS_DOWN "NON_EXEC_CN_IS_DOWN"
 #define CN_SAVEPOINT_SEND_ALL_FAILED "CN_SAVEPOINT_SEND_ALL_FAILED"
 #define CN_SAVEPOINT_SEND_PART_FAILED "CN_SAVEPOINT_SEND_PART_FAILED"
 #define CN_SAVEPOINT_RESPONSE_ALL_FAILED "CN_SAVEPOINT_RESPONSE_ALL_FAILED"

@@ -1,19 +1,7 @@
-/*
+/* ---------------------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
- *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
  *
  *  vecagg.cpp
  *       Routines to handle vector aggregae nodes.
@@ -68,7 +56,7 @@
 #include "vecexecutor/vecsortagg.h"
 #include "vecexecutor/vechashagg.h"
 
-static void dispatch_agg_function(AggStatePerAgg agg_state, VecAggInfo* agg_info, bool use_sonichash = false);
+static void DispatchAggFunction(AggStatePerAgg agg_state, VecAggInfo* agg_info, bool use_sonichash = false);
 
 extern bool CodeGenThreadObjectReady();
 extern bool CodeGenPassThreshold(double rows, int dn_num, int dop);
@@ -76,7 +64,7 @@ extern bool CodeGenPassThreshold(double rows, int dn_num, int dop);
 /*
  * @Description: set vector agg function.
  */
-static void dispatch_agg_function(AggStatePerAgg agg_state, VecAggInfo* agg_info, bool use_sonichash)
+static void DispatchAggFunction(AggStatePerAgg agg_state, VecAggInfo* agg_info, bool use_sonichash)
 {
     VecFuncCacheEntry* entry = NULL;
     Oid aggfnoid = agg_state->aggref->aggfnoid;
@@ -225,8 +213,11 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
 
     /*
      * Initialize result tuple type and projection info.
+     * Result tuple slot of Aggregation always contains a virtual tuple,
+     * Default tableAMtype for this slot is Heap.
      */
-    ExecAssignResultTypeFromTL(&aggstate->ss.ps);
+    ExecAssignResultTypeFromTL(&aggstate->ss.ps, TAM_HEAP);
+
     aggstate->ss.ps.ps_ProjInfo = ExecBuildVecProjectionInfo(aggstate->ss.ps.targetlist,
         node->plan.qual,
         aggstate->ss.ps.ps_ExprContext,
@@ -669,7 +660,7 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
             DBG_ASSERT(idx >= 0);
             bool use_sonichash = (node->aggstrategy == AGG_HASHED && node->is_sonichash);
 
-            dispatch_agg_function(&aggstate->peragg[aggno], &aggstate->aggInfo[idx], use_sonichash);
+            DispatchAggFunction(&aggstate->peragg[aggno], &aggstate->aggInfo[idx], use_sonichash);
 
             /* Initialize the function call parameter struct as well */
             InitFunctionCallInfoData(aggstate->aggInfo[idx].vec_agg_function,
@@ -1118,12 +1109,22 @@ BaseAggRunner::BaseAggRunner(VecAggState* runtime, bool is_hash_agg = false)
     m_keyDesc = NULL;
     m_hashTbl = NULL;
     m_innerHashFuncs = NULL;
-    VecAgg* node = NULL;
-
-    node = (VecAgg*)(runtime->ss.ps.plan);
-
+    m_aggCount = NULL;
+    m_finalAggInfo = NULL;
+    m_keyIdxInCell = NULL;
+    m_outerBatch = NULL;
+    m_scanBatch = NULL;
+    m_cols = 0;
+    m_aggNum = 0;
+    m_outerHashFuncs = NULL;
     m_key = 0;
+    m_proBatch = NULL;
+    m_finalAggNum = 0;
+    m_cellBatchMap = NULL;
+    m_eqfunctions = NULL;
+    m_keyIdx = NULL;
 
+    VecAgg* node = (VecAgg*)(runtime->ss.ps.plan);
     if (node->groupingSets && node->aggstrategy == AGG_SORTED) {
         /* This is Ap function operate, we achieve it only use sortAgg. we will set this values in sortAgg */
     } else {
@@ -1181,12 +1182,12 @@ void BaseAggRunner::BatchAggregation(VectorBatch* batch)
         VectorBatch* p_batch = NULL;
         ScalarVector* p_vector = NULL;
         AggStatePerAgg per_agg_state = &m_runtime->peragg[m_aggNum - 1 - i];
-        ExprContext* expr_ctx = NULL;
+        ExprContext* econtext = NULL;
 
         /* count(*) per_agg_state->evalproj is null. */
         if (per_agg_state->evalproj != NULL) {
-            expr_ctx = per_agg_state->evalproj->pi_exprContext;
-            expr_ctx->ecxt_outerbatch = batch;
+            econtext = per_agg_state->evalproj->pi_exprContext;
+            econtext->ecxt_outerbatch = batch;
             p_batch = ExecVecProject(per_agg_state->evalproj);
             Assert(!per_agg_state->evalproj || p_batch->m_cols == 1);
             p_vector = &p_batch->m_arr[0];
@@ -1197,8 +1198,8 @@ void BaseAggRunner::BatchAggregation(VectorBatch* batch)
 
         AggregationOnScalar(&m_runtime->aggInfo[i], p_vector, m_aggIdx[i], &m_Loc[0]);
 
-        if (expr_ctx != NULL)
-            ResetExprContext(expr_ctx);
+        if (econtext != NULL)
+            ResetExprContext(econtext);
     }
 }
 
@@ -1249,8 +1250,8 @@ void BaseAggRunner::BuildScanBatchFinal(hashCell* cell)
     ScalarVector* p_vector = NULL;
     int colIdx = 0;
 
-    ExprContext* expr_ctx = m_runtime->ss.ps.ps_ExprContext;
-    AutoContextSwitch mem_guard(expr_ctx->ecxt_per_tuple_memory);
+    ExprContext* econtext = m_runtime->ss.ps.ps_ExprContext;
+    AutoContextSwitch mem_guard(econtext->ecxt_per_tuple_memory);
 
     j = 0;
 
@@ -1259,17 +1260,17 @@ void BaseAggRunner::BuildScanBatchFinal(hashCell* cell)
 
         if (i == m_finalAggInfo[j].idx) {
             /* to invoke function */
-            FunctionCallInfo fc_info = &m_finalAggInfo[j].info->vec_final_function;
-            fc_info->arg[0] = (Datum)cell;
-            fc_info->arg[1] = (Datum)i;
-            fc_info->arg[2] = (Datum)(&p_vector->m_vals[nrows]);
-            fc_info->arg[3] = (Datum)(&p_vector->m_flag[nrows]);
+            FunctionCallInfo fcinfo = &m_finalAggInfo[j].info->vec_final_function;
+            fcinfo->arg[0] = (Datum)cell;
+            fcinfo->arg[1] = (Datum)i;
+            fcinfo->arg[2] = (Datum)(&p_vector->m_vals[nrows]);
+            fcinfo->arg[3] = (Datum)(&p_vector->m_flag[nrows]);
 
             /*
              * for var final function , we must make sure the return val
              * has added pointer val header.
              */
-            FunctionCallInvoke(fc_info);
+            FunctionCallInvoke(fcinfo);
 
             p_vector->m_rows++;
             j++;
@@ -1294,7 +1295,7 @@ void BaseAggRunner::BuildScanBatchFinal(hashCell* cell)
  */
 VectorBatch* BaseAggRunner::ProducerBatch()
 {
-    ExprContext* expr_ctx = NULL;
+    ExprContext* econtext = NULL;
     VectorBatch* p_res = NULL;
 
     /* Guard when there is no input rows */
@@ -1312,30 +1313,30 @@ VectorBatch* BaseAggRunner::ProducerBatch()
     if (list_length(m_runtime->ss.ps.qual) != 0) {
         ScalarVector* p_vector = NULL;
 
-        expr_ctx = m_runtime->ss.ps.ps_ExprContext;
-        expr_ctx->ecxt_scanbatch = m_scanBatch;
-        expr_ctx->ecxt_aggbatch = m_scanBatch;
-        expr_ctx->ecxt_outerbatch = m_outerBatch;
-        p_vector = ExecVecQual(m_runtime->ss.ps.qual, expr_ctx, false);
+        econtext = m_runtime->ss.ps.ps_ExprContext;
+        econtext->ecxt_scanbatch = m_scanBatch;
+        econtext->ecxt_aggbatch = m_scanBatch;
+        econtext->ecxt_outerbatch = m_outerBatch;
+        p_vector = ExecVecQual(m_runtime->ss.ps.qual, econtext, false);
 
         if (p_vector == NULL) {
             return NULL;
         }
 
-        m_scanBatch->Pack(expr_ctx->ecxt_scanbatch->m_sel);
+        m_scanBatch->Pack(econtext->ecxt_scanbatch->m_sel);
     }
 
     for (int i = 0; i < m_cellVarLen; i++) {
         m_proBatch->m_arr[m_cellBatchMap[i]] = m_scanBatch->m_arr[i];
     }
 
-    /* Do the copy out projection. */
+    /* Do the copy out projection.*/
     m_proBatch->m_rows = m_scanBatch->m_rows;
 
-    expr_ctx = m_runtime->ss.ps.ps_ExprContext;
-    expr_ctx->ecxt_outerbatch = m_proBatch;
-    expr_ctx->ecxt_aggbatch = m_scanBatch;
-    expr_ctx->m_fUseSelection = m_runtime->ss.ps.ps_ExprContext->m_fUseSelection;
+    econtext = m_runtime->ss.ps.ps_ExprContext;
+    econtext->ecxt_outerbatch = m_proBatch;
+    econtext->ecxt_aggbatch = m_scanBatch;
+    econtext->m_fUseSelection = m_runtime->ss.ps.ps_ExprContext->m_fUseSelection;
     p_res = ExecVecProject(m_runtime->ss.ps.ps_ProjInfo);
     return p_res;
 }
@@ -1351,7 +1352,7 @@ void BaseAggRunner::initialize_sortstate(int work_mem, int max_mem, int plan_id,
 
     for (agg_no = 0; agg_no < m_aggNum; agg_no++) {
         per_agg_state = &per_agg[agg_no];
-        if (per_agg_state->numSortCols > 0) {
+        if (per_agg_state->numDistinctCols > 0) {
             m_hasDistinct = true;
             break;
         }
@@ -1543,13 +1544,13 @@ void BaseAggRunner::AppendBatchForSortAgg(VectorBatch* batch, int start, int end
         AggStatePerAgg peragg_stat = &m_runtime->peragg[aggno];
 
         if (peragg_stat->numSortCols > 0) {
-            ExprContext* expr_ctx = NULL;
+            ExprContext* econtext = NULL;
 
             Assert(peragg_stat->evalproj != NULL);
 
-            expr_ctx = peragg_stat->evalproj->pi_exprContext;
-            expr_ctx->ecxt_outerbatch = batch;
-            expr_ctx->m_fUseSelection = true;
+            econtext = peragg_stat->evalproj->pi_exprContext;
+            econtext->ecxt_outerbatch = batch;
+            econtext->m_fUseSelection = true;
 
             VectorBatch* p_proj_batch = peragg_stat->evalproj->pi_batch;
 
@@ -1572,9 +1573,9 @@ void BaseAggRunner::AppendBatchForSortAgg(VectorBatch* batch, int start, int end
             m_sortDistinct[curr_set].batchsortstate[aggno]->sort_putbatch(
                 m_sortDistinct[curr_set].batchsortstate[aggno], p_batch, start, end);
 
-            /* Reset this expr_ctx, it's memory can be used in ExecVecProject. */
-            ResetExprContext(expr_ctx);
-            expr_ctx->m_fUseSelection = false;
+            /* Reset this econtext, it's memory can be used in ExecVecProject. */
+            ResetExprContext(econtext);
+            econtext->m_fUseSelection = false;
         }
     }
 }
@@ -1625,11 +1626,11 @@ void BaseAggRunner::BatchNoSortAgg(VectorBatch* batch)
         if (peragg_stat->numSortCols <= 0) {
             VectorBatch* p_batch = NULL;
             ScalarVector* p_vector = NULL;
-            ExprContext* expr_ctx = NULL;
+            ExprContext* econtext = NULL;
 
             if (peragg_stat->evalproj != NULL) {
-                expr_ctx = peragg_stat->evalproj->pi_exprContext;
-                expr_ctx->ecxt_outerbatch = batch;
+                econtext = peragg_stat->evalproj->pi_exprContext;
+                econtext->ecxt_outerbatch = batch;
                 p_batch = ExecVecProject(peragg_stat->evalproj);
 
                 Assert(!peragg_stat->evalproj || p_batch->m_cols == 1);
@@ -1643,8 +1644,8 @@ void BaseAggRunner::BatchNoSortAgg(VectorBatch* batch)
 
             AggregationOnScalar(&m_runtime->aggInfo[i], p_vector, m_aggIdx[i], &m_Loc[0]);
 
-            if (expr_ctx != NULL)
-                ResetExprContext(expr_ctx);
+            if (econtext != NULL)
+                ResetExprContext(econtext);
         }
     }
 }

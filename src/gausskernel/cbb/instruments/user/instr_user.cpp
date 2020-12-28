@@ -26,7 +26,7 @@
 #include "utils/atomic.h"
 #include "access/hash.h"
 #include "utils/memutils.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 #include "utils/acl.h"
 #include "miscadmin.h"
 #include "funcapi.h"
@@ -162,7 +162,7 @@ void InstrUpdateUserLogCounter(bool is_login)
     InstrUser* entry = NULL;
     uint32 hash_code = instr_user_hash_code(&u_sess->user_login_cxt.CurrentInstrLoginUserOid, sizeof(Oid));
 
-    lock_instr_user_hash_partition(hash_code, LW_SHARED);
+    (void)lock_instr_user_hash_partition(hash_code, LW_SHARED);
     entry = (InstrUser*)hash_search(
         g_instance.stat_cxt.InstrUserHTAB, &u_sess->user_login_cxt.CurrentInstrLoginUserOid, HASH_FIND, NULL);
     if (entry == NULL) {
@@ -171,7 +171,7 @@ void InstrUpdateUserLogCounter(bool is_login)
 
         /* insert entry */
         bool is_found = false;
-        lock_instr_user_hash_partition(hash_code, LW_EXCLUSIVE);
+        (void)lock_instr_user_hash_partition(hash_code, LW_EXCLUSIVE);
         entry = (InstrUser*)hash_search(
             g_instance.stat_cxt.InstrUserHTAB, &u_sess->user_login_cxt.CurrentInstrLoginUserOid, HASH_ENTER, &is_found);
         if (entry == NULL) {
@@ -212,7 +212,7 @@ bool get_instr_user_by_oid(Oid oid, InstrUser* user)
     InstrUser* entry = NULL;
     uint32 hash_code = instr_user_hash_code(&oid, sizeof(Oid));
 
-    lock_instr_user_hash_partition(hash_code, LW_SHARED);
+    (void)lock_instr_user_hash_partition(hash_code, LW_SHARED);
     entry = (InstrUser*)hash_search(g_instance.stat_cxt.InstrUserHTAB, &oid, HASH_FIND, NULL);
 
     /* so far we don't have purge operation for instr user hash table */
@@ -330,9 +330,9 @@ Datum get_instr_user_login(PG_FUNCTION_ARGS)
     long num = 0;
     const int INSTRUMENTS_USER_ATTRNUM = 5;
 
-    if (!superuser()) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("only system admin can get user statistics info"))));
+    if (!superuser() && !isMonitoradmin(GetUserId())) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            (errmsg("only system/monitor admin can get user statistics info"))));
     }
 
     if (SRF_IS_FIRSTCALL()) {
@@ -342,7 +342,7 @@ Datum get_instr_user_login(PG_FUNCTION_ARGS)
         funcctx = SRF_FIRSTCALL_INIT();
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(INSTRUMENTS_USER_ATTRNUM, false);
+        tupdesc = CreateTemplateTupleDesc(INSTRUMENTS_USER_ATTRNUM, false, TAM_HEAP);
         create_instr_user_tuple(tupdesc, &i);
 
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);

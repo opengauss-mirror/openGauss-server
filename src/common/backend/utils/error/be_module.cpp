@@ -29,6 +29,7 @@
 
 const module_data module_map[] = {{MOD_ALL, "ALL"},
     /* add your module name following */
+
     {MOD_DFS, "DFS"},
     {MOD_GUC, "GUC"},
     {MOD_HDFS, "HDFS"},
@@ -61,8 +62,9 @@ const module_data module_map[] = {{MOD_ALL, "ALL"},
     {MOD_WLM_CP, "WLMCP"},
     {MOD_ACCELERATE, "ACCELERATE"},
     {MOD_MOT, "MOT"},
-    {MOD_PARQUET, "PARQUET"},
     {MOD_PLANHINT, "PLANHINT"},
+    {MOD_PARQUET, "PARQUET"},
+    {MOD_CARBONDATA, "CARBONDATA"},
     {MOD_TRANS_SNAPSHOT, "SNAPSHOT"},
     {MOD_TRANS_XACT, "XACT"},
     {MOD_TRANS_HANDLE, "HANDLE"},
@@ -80,10 +82,15 @@ const module_data module_map[] = {{MOD_ALL, "ALL"},
     {MOD_INCRE_CKPT, "INCRE_CKPT"},
     {MOD_INCRE_BG, "INCRE_BG_WRITER"},
     {MOD_DW, "DBL_WRT"},
-    {MOD_RTO, "RTO"},
+    {MOD_RTO_RPO, "RTO_RPO"},
     {MOD_HEARTBEAT, "HEARTBEAT"},
     {MOD_COMM_IPC, "COMM_IPC"},
     {MOD_COMM_PARAM, "COMM_PARAM"},
+    {MOD_TIMESERIES, "TIMESERIES"},
+    {MOD_SCHEMA, "SCHEMA"},
+    {MOD_LIGHTPROXY, "LIGHTPROXY"},
+    {MOD_HOTKEY, "HOTKEY"},
+    {MOD_THREAD_POOL, "THREAD_POOL"},
     {MOD_OPT_AI, "OPT_AI"},
 
     /* add your module name above */
@@ -213,7 +220,8 @@ void module_logging_batch_set(ModuleId* mods, int nmods, bool turn_on, bool appl
  * @IN module_id: module id
  * @See also:
  */
-void module_logging_enable_comm(ModuleId module_id)
+void
+module_logging_enable_comm(ModuleId module_id)
 {
     enable_module_logging(module_id);
 }

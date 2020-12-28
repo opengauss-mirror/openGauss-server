@@ -14,8 +14,8 @@ CREATE TABLE cmpr_mode_none00
 	R7_ID float NOT NULL,
 	R8_ID float NOT NULL,
 	R9_ID float NOT NULL
-) COMPRESS;
-COPY cmpr_mode_none00 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_mode_none00.data';
+) ;
+COPY cmpr_mode_none00 FROM '@abs_srcdir@/data/cmpr_mode_none00.data';
 CREATE TABLE cmpr_mode_none00_raw
 (
 	RS_ID int,
@@ -30,7 +30,7 @@ CREATE TABLE cmpr_mode_none00_raw
 	R8_ID float NOT NULL,
 	R9_ID float NOT NULL
 );
-COPY cmpr_mode_none00_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_mode_none00.data';
+COPY cmpr_mode_none00_raw FROM '@abs_srcdir@/data/cmpr_mode_none00.data';
 
 SELECT (SELECT COUNT(*) FROM cmpr_mode_none00_raw) - (SELECT COUNT(*) FROM cmpr_mode_none00);
 (SELECT * FROM cmpr_mode_none00_raw) MINUS ALL (SELECT * FROM cmpr_mode_none00);

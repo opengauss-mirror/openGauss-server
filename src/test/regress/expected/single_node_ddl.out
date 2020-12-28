@@ -39,6 +39,9 @@ DETAIL:  The distributed capability is not supported currently.
 clean connection to node (dn2);
 ERROR:  Un-support feature
 DETAIL:  The distributed capability is not supported currently.
+execute direct on (dn2) 'select * from table1';
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
 create table table_neg_tmp (id int);
 create table table1 (id int) to node (dn2);
 ERROR:  Un-support feature
@@ -56,19 +59,3 @@ DETAIL:  The distributed capability is not supported currently.
 drop node group group1_90;
 ERROR:  Un-support feature
 DETAIL:  The distributed capability is not supported currently.
-create table t1 (id int, value char(3));
-explain plan for select * from t1;
-select id, operation, options, object_name, object_type, projection from plan_table;
- id |  operation   | options  | object_name | object_type | projection 
-----+--------------+----------+-------------+-------------+------------
-  1 | TABLE ACCESS | SEQ SCAN | t1          | TABLE       | id, value
-(1 row)
-
-delete from plan_table where id=1;
-drop table t1;
--- add userid field in audit file
-select * from pg_query_audit('1970-1-1', '9999-12-31') limit 0;
- time | type | result | userid | username | database | client_conninfo | object_name | detail_info | node_name | thread_id | local_port | remote_port 
-------+------+--------+--------+----------+----------+-----------------+-------------+-------------+-----------+-----------+------------+-------------
-(0 rows)
-

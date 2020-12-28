@@ -15,6 +15,7 @@
 
 #include "access/hash.h"
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
 #include "catalog/indexing.h"
@@ -28,7 +29,7 @@
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
 #include "utils/lsyscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 #include "utils/inval.h"
 #include "pgxc/locator.h"
 #include "pgxc/nodemgr.h"
@@ -188,7 +189,9 @@ static void check_node_options(const char* node_name, List* options, char* node_
             char* type_loc = NULL;
 
             type_loc = defGetString(defel);
-
+            if (unlikely(type_loc == NULL)) {
+                ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("null type_loc is invalid")));
+            }
             if (strcmp(type_loc, "coordinator") != 0 && strcmp(type_loc, "datanode") != 0)
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -324,7 +327,7 @@ static int cmp_nodes_name(const void* p1, const void* p2)
 void PgxcNodeListAndCount(void)
 {
     Relation rel;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tuple;
 
     /*
@@ -355,8 +358,8 @@ void PgxcNodeListAndCount(void)
          * 2) Then extract the node Oid
          * 3) Complete primary/preferred node information
          */
-        scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
-        while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+        scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
+        while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
             Form_pgxc_node nodeForm = (Form_pgxc_node)GETSTRUCT(tuple);
             NodeDefinition* node = NULL;
             NodeDefinition* nodeInCluster = NULL;
@@ -435,7 +438,7 @@ void PgxcNodeListAndCount(void)
                 nodeInCluster->nodeis_active = nodeForm->nodeis_active;
             }
         }
-        heap_endscan(scan);
+        tableam_scan_end(scan);
     }
     PG_CATCH();
     {
@@ -492,12 +495,22 @@ void PgxcNodeInitDnMatric(void)
         *t_thrd.pgxc_cxt.shmemNumDataStandbyNodes < 1)
         return;
 
-    u_sess->pgxc_cxt.dn_matrics = (Oid**)palloc0(*t_thrd.pgxc_cxt.shmemNumDataNodes * sizeof(Oid*));
+    u_sess->pgxc_cxt.dn_matrics = (Oid**)palloc0_noexcept(*t_thrd.pgxc_cxt.shmemNumDataNodes * sizeof(Oid*));
+    if (u_sess->pgxc_cxt.dn_matrics == NULL) {
+        ereport(PANIC,
+            (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+            errmsg("DN matric cannot alloc memory.")));
+    }
 
     standby_num = (*t_thrd.pgxc_cxt.shmemNumDataStandbyNodes) / (*t_thrd.pgxc_cxt.shmemNumDataNodes);
 
     for (i = 0; i < *t_thrd.pgxc_cxt.shmemNumDataNodes; i++) {
-        u_sess->pgxc_cxt.dn_matrics[i] = (Oid*)palloc0((standby_num + 1) * sizeof(Oid));
+        u_sess->pgxc_cxt.dn_matrics[i] = (Oid*)palloc0_noexcept((standby_num + 1) * sizeof(Oid));
+        if (u_sess->pgxc_cxt.dn_matrics[i] == NULL) {
+            ereport(PANIC,
+                (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                errmsg("DN matric cannot alloc memory.")));
+        }
 
         u_sess->pgxc_cxt.dn_matrics[i][0] = t_thrd.pgxc_cxt.dnDefs[i].nodeoid;
         for (j = 0, k = 1; j < *t_thrd.pgxc_cxt.shmemNumDataStandbyNodes && k < standby_num + 1; j++) {
@@ -638,14 +651,14 @@ Oid PgxcNodeGetPrimaryDNFromMatric(Oid oid1)
 void PgxcNodeCount(int* numCoords, int* numDns)
 {
     Relation rel;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tuple;
     int num_coords = 0;
     int num_datanodes = 0;
 
     rel = heap_open(PgxcNodeRelationId, AccessShareLock);
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         Form_pgxc_node nodeForm = (Form_pgxc_node)GETSTRUCT(tuple);
 
         /* Take definition for given node type */
@@ -663,7 +676,7 @@ void PgxcNodeCount(int* numCoords, int* numDns)
                 break;
         }
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
 
     *numCoords = num_coords;
@@ -711,17 +724,17 @@ void PgxcNodeGetOids(Oid** coOids, Oid** dnOids, int* num_coords, int* num_dns, 
         int i;
 
         /* Initialize primary and preferred node information */
-        t_thrd.pgxc_cxt.primary_data_node = InvalidOid;
-        t_thrd.pgxc_cxt.num_preferred_data_nodes = 0;
+        u_sess->pgxc_cxt.primary_data_node = InvalidOid;
+        u_sess->pgxc_cxt.num_preferred_data_nodes = 0;
 
         for (i = 0; i < *t_thrd.pgxc_cxt.shmemNumDataNodes; i++) {
             if (t_thrd.pgxc_cxt.dnDefs[i].nodeisprimary)
-                t_thrd.pgxc_cxt.primary_data_node = t_thrd.pgxc_cxt.dnDefs[i].nodeoid;
+                u_sess->pgxc_cxt.primary_data_node = t_thrd.pgxc_cxt.dnDefs[i].nodeoid;
 
             if (t_thrd.pgxc_cxt.dnDefs[i].nodeispreferred) {
-                t_thrd.pgxc_cxt.preferred_data_node[t_thrd.pgxc_cxt.num_preferred_data_nodes] =
+                u_sess->pgxc_cxt.preferred_data_node[u_sess->pgxc_cxt.num_preferred_data_nodes] =
                     t_thrd.pgxc_cxt.dnDefs[i].nodeoid;
-                t_thrd.pgxc_cxt.num_preferred_data_nodes++;
+                u_sess->pgxc_cxt.num_preferred_data_nodes++;
             }
         }
     }
@@ -904,7 +917,7 @@ void PgxcNodeCreate(CreateNodeStmt* stmt)
      * Check that this node is not created as a primary if one already
      * exists.
      */
-    if (is_primary && OidIsValid(t_thrd.pgxc_cxt.primary_data_node))
+    if (is_primary && OidIsValid(u_sess->pgxc_cxt.primary_data_node))
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("PGXC node %s: two nodes cannot be primary", node_name)));
 
     /*
@@ -1103,7 +1116,7 @@ void PgxcNodeAlter(AlterNodeStmt* stmt)
      * node is this node itself, well there is no point in having an
      * error.
      */
-    if (is_primary && OidIsValid(t_thrd.pgxc_cxt.primary_data_node) && nodeOid != t_thrd.pgxc_cxt.primary_data_node)
+    if (is_primary && OidIsValid(u_sess->pgxc_cxt.primary_data_node) && nodeOid != u_sess->pgxc_cxt.primary_data_node)
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("PGXC node %s: two nodes cannot be primary", node_name)));
 
     /* Check type dependency */
@@ -1287,7 +1300,7 @@ char PgxcNodeRemove(DropNodeStmt* stmt)
 {
     Relation relation;
     HeapTuple tup;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     Form_pgxc_node nform;
     char ntype = PGXC_NODE_NONE;
     const char* node_name = stmt->node_name;
@@ -1337,9 +1350,9 @@ char PgxcNodeRemove(DropNodeStmt* stmt)
      */
     /* Delete the pgxc_node tuple(s) */
     relation = heap_open(PgxcNodeRelationId, RowExclusiveLock);
-    scan = heap_beginscan(relation, SnapshotNow, 0, NULL);
+    scan = tableam_scan_begin(relation, SnapshotNow, 0, NULL);
     /* primary and standby DNs may have the same name */
-    while ((tup = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         nform = (Form_pgxc_node)GETSTRUCT(tup);
 
         if (pg_strcasecmp(NameStr(nform->node_name), node_name) == 0) {
@@ -1354,13 +1367,13 @@ char PgxcNodeRemove(DropNodeStmt* stmt)
             } else if (my_type == PGXC_NODE_DATANODE) {
                 ntype = my_type;
                 /* primary and standby DNs can have the same name */
-                if (g_instance.attr.attr_storage.replication_type != RT_WITH_MULTI_STNADBY)
+                if (g_instance.attr.attr_storage.replication_type != RT_WITH_MULTI_STANDBY)
                     break;
             }
         }
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(relation, RowExclusiveLock);
 
     if (ntype == PGXC_NODE_NONE) { /* should not happen */

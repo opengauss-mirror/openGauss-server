@@ -163,16 +163,16 @@ create table ctltestg(a1 int, a2 int, constraint firstkey primary key(oid))with 
 \d+ ctltestg
 drop table if exists ctltestf, ctltestg;
 
-create schema openGauss1301301;
-CREATE OR REPLACE FUNCTION openGauss1301301.func_increment_plsql(i integer) RETURNS integer AS $$
+create schema DTS2019071912119;
+CREATE OR REPLACE FUNCTION DTS2019071912119.func_increment_plsql(i integer) RETURNS integer AS $$
         BEGIN
                 RETURN i + 1;
         END;
 $$ LANGUAGE plpgsql IMMUTABLE  ;
-create table openGauss1301301.test1 (a int , b int default openGauss1301301.func_increment_plsql(1));
-alter schema openGauss1301301 rename to openGauss1301301_bak;
-create table openGauss1301301_bak.test2 (like openGauss1301301_bak.test1 including all);
+create table DTS2019071912119.test1 (a int , b int default DTS2019071912119.func_increment_plsql(1));
+alter schema DTS2019071912119 rename to DTS2019071912119_bak;
+create table DTS2019071912119_bak.test2 (like DTS2019071912119_bak.test1 including all);
 
-drop table openGauss1301301_bak.test2;
-drop table openGauss1301301_bak.test1;
-drop function openGauss1301301_bak.func_increment_plsql();
+drop table DTS2019071912119_bak.test2;
+drop table DTS2019071912119_bak.test1;
+drop function DTS2019071912119_bak.func_increment_plsql();

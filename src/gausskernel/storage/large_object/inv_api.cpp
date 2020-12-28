@@ -32,6 +32,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/tableam.h"
 #include "access/genam.h"
 #include "access/heapam.h"
 #include "access/sysattr.h"
@@ -49,7 +50,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/snapmgr.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 
 /*
  * Open pg_largeobject and its index, if not already done in current xact
@@ -168,11 +169,11 @@ static void getdatafield(Form_pg_largeobject tuple, bytea** pdatafield, int* ple
     len = VARSIZE(datafield) - VARHDRSZ;
     if (len < 0 || len > LOBLKSIZE)
         ereport(ERROR,
-            (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("pg_largeobject entry for OID %u, page %d has invalid data field size %d",
-                    tuple->loid,
-                    tuple->pageno,
-                    len)));
+                (errcode(ERRCODE_DATA_CORRUPTED),
+                 errmsg("pg_largeobject entry for OID %u, page %d has invalid data field size %d",
+                        tuple->loid,
+                        tuple->pageno,
+                        len)));
     *pdatafield = datafield;
     *plen = len;
     *pfreeit = freeit;
@@ -320,7 +321,7 @@ static uint32 inv_getsize(LargeObjectDesc* obj_desc)
     ScanKeyInit(&skey[0], Anum_pg_largeobject_loid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(obj_desc->id));
 
     sd = systable_beginscan_ordered(
-        t_thrd.storage_cxt.lo_heap_r, t_thrd.storage_cxt.lo_index_r, obj_desc->snapshot, 1, skey);
+             t_thrd.storage_cxt.lo_heap_r, t_thrd.storage_cxt.lo_index_r, obj_desc->snapshot, 1, skey);
 
     /*
      * Because the pg_largeobject index is on both loid and pageno, but we
@@ -410,7 +411,7 @@ int inv_read(LargeObjectDesc* obj_desc, char* buf, int nbytes)
     ScanKeyInit(&skey[1], Anum_pg_largeobject_pageno, BTGreaterEqualStrategyNumber, F_INT4GE, Int32GetDatum(pageno));
 
     sd = systable_beginscan_ordered(
-        t_thrd.storage_cxt.lo_heap_r, t_thrd.storage_cxt.lo_index_r, obj_desc->snapshot, 2, skey);
+             t_thrd.storage_cxt.lo_heap_r, t_thrd.storage_cxt.lo_index_r, obj_desc->snapshot, 2, skey);
 
     while ((tuple = systable_getnext_ordered(sd, ForwardScanDirection)) != NULL) {
         Form_pg_largeobject data;
@@ -438,9 +439,9 @@ int inv_read(LargeObjectDesc* obj_desc, char* buf, int nbytes)
 
         if (nread < nbytes) {
             off = (int)(obj_desc->offset - pageoff);
-            if (unlikely(off < 0 || off >= LOBLKSIZE)) {
+            if (off < 0 || off >= LOBLKSIZE) {
                 ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
-                    errmsg("invalid offset num:%d", off)));
+                                errmsg("invalid offset num:%d", off)));
             }
 
             getdatafield(data, &datafield, &len, &pfreeit);
@@ -465,17 +466,30 @@ int inv_read(LargeObjectDesc* obj_desc, char* buf, int nbytes)
     return nread;
 }
 
+void check_obj_desc(const LargeObjectDesc* obj_desc)
+{
+    /* enforce writability because snapshot is probably wrong otherwise */
+    if ((obj_desc->flags & IFS_WRLOCK) == 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("large object %u was not opened for writing", obj_desc->id)));
+
+    /* check existence of the target largeobject */
+    if (!LargeObjectExists(obj_desc->id))
+        ereport(
+            ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("large object %u was already dropped", obj_desc->id)));
+}
+
 int inv_write(LargeObjectDesc* obj_desc, const char* buf, int nbytes)
 {
     if (nbytes <= 0) {
         return 0;
     }
-    Assert(PointerIsValid(obj_desc));
     int nwritten = 0;
     int n;
     int off;
     int len;
-    int32 pageno = (int32)(obj_desc->offset / LOBLKSIZE);
+    int32 pageno;
     ScanKeyData skey[2];
     SysScanDesc sd;
     HeapTuple oldtuple = NULL;
@@ -495,21 +509,17 @@ int inv_write(LargeObjectDesc* obj_desc, const char* buf, int nbytes)
     bool replace[Natts_pg_largeobject];
     CatalogIndexState indstate;
     errno_t rc;
+
+    if (unlikely(!PointerIsValid(obj_desc))) {
+        return 0;
+    }
+    pageno = (int32)(obj_desc->offset / LOBLKSIZE);
+
     rc = memset_s(&workbuf, sizeof(workbuf), 0, sizeof(workbuf));
     securec_check(rc, "\0", "\0");
     Assert(buf != NULL);
 
-    /* enforce writability because snapshot is probably wrong otherwise */
-    if ((obj_desc->flags & IFS_WRLOCK) == 0)
-        ereport(ERROR,
-            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg("large object %u was not opened for writing", obj_desc->id)));
-
-    /* check existence of the target largeobject */
-    if (!LargeObjectExists(obj_desc->id))
-        ereport(
-            ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("large object %u was already dropped", obj_desc->id)));
-
+    check_obj_desc(obj_desc);
     open_lo_relation();
 
     indstate = CatalogOpenIndexes(t_thrd.storage_cxt.lo_heap_r);
@@ -519,7 +529,7 @@ int inv_write(LargeObjectDesc* obj_desc, const char* buf, int nbytes)
     ScanKeyInit(&skey[1], Anum_pg_largeobject_pageno, BTGreaterEqualStrategyNumber, F_INT4GE, Int32GetDatum(pageno));
 
     sd = systable_beginscan_ordered(
-        t_thrd.storage_cxt.lo_heap_r, t_thrd.storage_cxt.lo_index_r, obj_desc->snapshot, 2, skey);
+             t_thrd.storage_cxt.lo_heap_r, t_thrd.storage_cxt.lo_index_r, obj_desc->snapshot, 2, skey);
 
     while (nwritten < nbytes) {
         /*
@@ -580,9 +590,9 @@ int inv_write(LargeObjectDesc* obj_desc, const char* buf, int nbytes)
              */
             rc = memset_s(values, sizeof(values), 0, sizeof(values));
             securec_check(rc, "", "");
-            rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+            rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
             securec_check(rc, "", "");
-            rc = memset_s(replace, sizeof(replace), 0, sizeof(replace));
+            rc = memset_s(replace, sizeof(replace), false, sizeof(replace));
             securec_check(rc, "", "");
             values[Anum_pg_largeobject_data - 1] = PointerGetDatum(&workbuf);
             replace[Anum_pg_largeobject_data - 1] = true;
@@ -628,7 +638,7 @@ int inv_write(LargeObjectDesc* obj_desc, const char* buf, int nbytes)
              */
             rc = memset_s(values, sizeof(values), 0, sizeof(values));
             securec_check(rc, "", "");
-            rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+            rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
             securec_check(rc, "", "");
             values[Anum_pg_largeobject_loid - 1] = ObjectIdGetDatum(obj_desc->id);
             values[Anum_pg_largeobject_pageno - 1] = Int32GetDatum(pageno);
@@ -679,17 +689,7 @@ void inv_truncate(LargeObjectDesc* obj_desc, int len)
     securec_check(rc, "\0", "\0");
     Assert(PointerIsValid(obj_desc));
 
-    /* enforce writability because snapshot is probably wrong otherwise */
-    if ((obj_desc->flags & IFS_WRLOCK) == 0)
-        ereport(ERROR,
-            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg("large object %u was not opened for writing", obj_desc->id)));
-
-    /* check existence of the target largeobject */
-    if (!LargeObjectExists(obj_desc->id))
-        ereport(
-            ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("large object %u was already dropped", obj_desc->id)));
-
+    check_obj_desc(obj_desc);
     open_lo_relation();
 
     indstate = CatalogOpenIndexes(t_thrd.storage_cxt.lo_heap_r);
@@ -702,7 +702,7 @@ void inv_truncate(LargeObjectDesc* obj_desc, int len)
     ScanKeyInit(&skey[1], Anum_pg_largeobject_pageno, BTGreaterEqualStrategyNumber, F_INT4GE, Int32GetDatum(pageno));
 
     sd = systable_beginscan_ordered(
-        t_thrd.storage_cxt.lo_heap_r, t_thrd.storage_cxt.lo_index_r, obj_desc->snapshot, 2, skey);
+             t_thrd.storage_cxt.lo_heap_r, t_thrd.storage_cxt.lo_index_r, obj_desc->snapshot, 2, skey);
 
     /*
      * If possible, get the page the truncation point is in. The truncation

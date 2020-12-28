@@ -21,25 +21,28 @@ CREATE DATA SOURCE llt_mppdb_8 TYPE 'MPPDB' VERSION NULL OPTIONS (dsn 'mppdb', e
 CREATE DATA SOURCE llt_mppdb_9 OPTIONS (username '', dsn 'mppdb');
 \! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} rm -f {}/bin/datasource.key.cipher
 \! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} rm -f {}/bin/datasource.key.rand
-\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} @abs_bindir@/gs_guc generate -S 456pwd -D {}/bin -o datasource
-gs_guc encrypt -S *** 
+\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} @abs_bindir@/gs_guc generate -S 123456@pwd -D {}/bin -o datasource > /dev/null 2>&1
+gs_guc generate -S *** 
 CREATE DATA SOURCE llt_mppdb_10 TYPE 'MPPDB' VERSION 'V1R7C10' OPTIONS (dsn 'mppdb', password 'pwd@123456789');
 CREATE DATA SOURCE llt_mppdb_11 TYPE 'MPPDB' VERSION 'V1R7C10' OPTIONS (dsn 'mppdb', password 'pwd');
 SELECT query FROM DBE_PERF.statement WHERE query LIKE 'CREATE DATA SOURCE llt_mppdb_7%';
---?.*
---?.*
---?.*
---?.*
+                                                   query                                                   
+-----------------------------------------------------------------------------------------------------------
+ CREATE DATA SOURCE llt_mppdb_7 TYPE 'MPPDB' VERSION 'V1R7C10' OPTIONS (dsn 'mppdb', password '********');
+(1 row)
+
 SELECT query FROM DBE_PERF.statement WHERE query LIKE 'CREATE DATA SOURCE llt_mppdb_10%';
---?.*
---?.*
---?.*
---?.*
+                                                   query                                                    
+------------------------------------------------------------------------------------------------------------
+ CREATE DATA SOURCE llt_mppdb_10 TYPE 'MPPDB' VERSION 'V1R7C10' OPTIONS (dsn 'mppdb', password '********');
+(1 row)
+
 SELECT query FROM DBE_PERF.statement WHERE query LIKE 'CREATE DATA SOURCE llt_mppdb_11%';
---?.*
---?.*
---?.*
---?.*
+                                                   query                                                    
+------------------------------------------------------------------------------------------------------------
+ CREATE DATA SOURCE llt_mppdb_11 TYPE 'MPPDB' VERSION 'V1R7C10' OPTIONS (dsn 'mppdb', password '********');
+(1 row)
+
 select reset_unique_sql('GLOBAL','ALL',0);
  reset_unique_sql 
 ------------------
@@ -251,18 +254,18 @@ SELECT * FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME='llt_mppdb_31';
 
 \! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} rm -f {}/bin/datasource.key.cipher
 \! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} rm -f {}/bin/datasource.key.rand
-ALTER DATA SOURCE llt_mppdb_31 TYPE 'MPPDB3' VERSION 'V1R7C20' OPTIONS (DROP encoding, username '123user', SET password '456pwd');
+ALTER DATA SOURCE llt_mppdb_31 TYPE 'MPPDB3' VERSION 'V1R7C20' OPTIONS (DROP encoding, username '123user', SET password '123456@pwd');
 --?.*
 --?.*
-\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} @abs_bindir@/gs_guc generate -S 456pwd -D {}/bin -o datasource
-gs_guc encrypt -S *** 
+\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} @abs_bindir@/gs_guc generate -S 123456@pwd -D {}/bin -o datasource > /dev/null 2>&1
+gs_guc generate -S *** 
 SELECT PG_SLEEP(1);
  pg_sleep 
 ----------
  
 (1 row)
 
-ALTER DATA SOURCE llt_mppdb_31 TYPE 'MPPDB3' VERSION 'V1R7C20' OPTIONS (DROP encoding, username '123user', SET password '456pwd');
+ALTER DATA SOURCE llt_mppdb_31 TYPE 'MPPDB3' VERSION 'V1R7C20' OPTIONS (DROP encoding, username '123user', SET password '123456@pwd');
 \! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} rm -f {}/bin/datasource.key.cipher
 \! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} rm -f {}/bin/datasource.key.rand
 SELECT * FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME='llt_mppdb_31';
@@ -401,50 +404,70 @@ drop user ds_user_llt_02;
 create data source myself options (dsn 'myself');
 create table ds_s2_tbl_001 (c1 int);
 explain (costs off) select * from exec_on_extension('myself', 'select * from a') as (c1 int);
-             QUERY PLAN             
-------------------------------------
- Function Scan on exec_on_extension
-(1 row)
-
-explain (costs off) select * from exec_hadoop_sql('myself', 'select * from a', '') as (c1 int);
-            QUERY PLAN            
-----------------------------------
- Function Scan on exec_hadoop_sql
-(1 row)
-
-explain (costs off) insert into ds_s2_tbl_001 select * from exec_on_extension('myself', 'select * from a') as (c1 int);
                 QUERY PLAN                
 ------------------------------------------
- Insert on ds_s2_tbl_001
+ Streaming (type: GATHER)
+--?   Node/s: datanode.*
    ->  Function Scan on exec_on_extension
-(2 rows)
+(3 rows)
 
-explain (costs off) insert into ds_s2_tbl_001 select * from exec_hadoop_sql('myself', 'select * from a', '') as (c1 int);
+explain (costs off) select * from exec_hadoop_sql('myself', 'select * from a', '') as (c1 int);
                QUERY PLAN               
 ----------------------------------------
- Insert on ds_s2_tbl_001
+ Streaming (type: GATHER)
+--?   Node/s: datanode.*
    ->  Function Scan on exec_hadoop_sql
-(2 rows)
+(3 rows)
+
+explain (costs off) insert into ds_s2_tbl_001 select * from exec_on_extension('myself', 'select * from a') as (c1 int);
+                      QUERY PLAN                      
+------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Insert on ds_s2_tbl_001
+         ->  Streaming(type: REDISTRIBUTE)
+--?               Spawn on: datanode.*
+               ->  Function Scan on exec_on_extension
+(6 rows)
+
+explain (costs off) insert into ds_s2_tbl_001 select * from exec_hadoop_sql('myself', 'select * from a', '') as (c1 int);
+                     QUERY PLAN                     
+----------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Insert on ds_s2_tbl_001
+         ->  Streaming(type: REDISTRIBUTE)
+--?               Spawn on: datanode.*
+               ->  Function Scan on exec_hadoop_sql
+(6 rows)
 
 explain (costs off) select * from (select * from exec_on_extension('myself', 'select * from a') as (c1 int)) a inner join ds_s2_tbl_001 b on a.c1=b.c1;
-                   QUERY PLAN                   
-------------------------------------------------
- Hash Join
-   Hash Cond: (b.c1 = exec_on_extension.c1)
-   ->  Seq Scan on ds_s2_tbl_001 b
-   ->  Hash
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Hash Join
+         Hash Cond: (exec_on_extension.c1 = b.c1)
          ->  Function Scan on exec_on_extension
-(5 rows)
+         ->  Hash
+               ->  Streaming(type: BROADCAST)
+                     Spawn on: All datanodes
+                     ->  Seq Scan on ds_s2_tbl_001 b
+(9 rows)
 
 explain (costs off) select * from (select * from exec_hadoop_sql('myself', 'select * from a', '') as (c1 int)) a inner join ds_s2_tbl_001 b on a.c1=b.c1;
-                  QUERY PLAN                  
-----------------------------------------------
- Hash Join
-   Hash Cond: (b.c1 = exec_hadoop_sql.c1)
-   ->  Seq Scan on ds_s2_tbl_001 b
-   ->  Hash
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Hash Join
+         Hash Cond: (exec_hadoop_sql.c1 = b.c1)
          ->  Function Scan on exec_hadoop_sql
-(5 rows)
+         ->  Hash
+               ->  Streaming(type: BROADCAST)
+                     Spawn on: All datanodes
+                     ->  Seq Scan on ds_s2_tbl_001 b
+(9 rows)
 
 explain (costs off) select * from
         ds_s2_tbl_001,
@@ -453,20 +476,28 @@ where
         ds_s2_tbl_001.c1 = b.c1 and
         b.c1 in
                 (select * from exec_on_extension('myself', 'select * from a') as (c1 int));
-                               QUERY PLAN                               
-------------------------------------------------------------------------
- Hash Join
-   Hash Cond: (ds_s2_tbl_001.c1 = exec_on_extension.c1)
-   ->  Seq Scan on ds_s2_tbl_001
-   ->  Hash
-         ->  Hash Join
-               Hash Cond: (exec_on_extension.c1 = exec_on_extension.c1)
-               ->  Function Scan on exec_on_extension
-               ->  Hash
-                     ->  HashAggregate
-                           Group By Key: exec_on_extension.c1
-                           ->  Function Scan on exec_on_extension
-(11 rows)
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Hash Join
+         Hash Cond: (exec_on_extension.c1 = ds_s2_tbl_001.c1)
+         ->  Function Scan on exec_on_extension
+         ->  Hash
+               ->  Streaming(type: BROADCAST)
+                     Spawn on: All datanodes
+                     ->  Hash Join
+                           Hash Cond: (ds_s2_tbl_001.c1 = exec_on_extension.c1)
+                           ->  Seq Scan on ds_s2_tbl_001
+                           ->  Hash
+                                 ->  HashAggregate
+                                       Group By Key: exec_on_extension.c1
+                                       ->  Streaming(type: REDISTRIBUTE)
+--?                                             Spawn on: datanode.*
+                                             ->  HashAggregate
+                                                   Group By Key: exec_on_extension.c1
+                                                   ->  Function Scan on exec_on_extension
+(19 rows)
 
 explain (costs off) select * from
         ds_s2_tbl_001,
@@ -475,20 +506,28 @@ where
         ds_s2_tbl_001.c1 = b.c1 and
         b.c1 in
                 (select * from exec_hadoop_sql('myself', 'select * from a', '') as (c1 int));
-                             QUERY PLAN                             
---------------------------------------------------------------------
- Hash Join
-   Hash Cond: (ds_s2_tbl_001.c1 = exec_hadoop_sql.c1)
-   ->  Seq Scan on ds_s2_tbl_001
-   ->  Hash
-         ->  Hash Join
-               Hash Cond: (exec_hadoop_sql.c1 = exec_hadoop_sql.c1)
-               ->  Function Scan on exec_hadoop_sql
-               ->  Hash
-                     ->  HashAggregate
-                           Group By Key: exec_hadoop_sql.c1
-                           ->  Function Scan on exec_hadoop_sql
-(11 rows)
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Hash Join
+         Hash Cond: (exec_hadoop_sql.c1 = ds_s2_tbl_001.c1)
+         ->  Function Scan on exec_hadoop_sql
+         ->  Hash
+               ->  Streaming(type: BROADCAST)
+                     Spawn on: All datanodes
+                     ->  Hash Join
+                           Hash Cond: (ds_s2_tbl_001.c1 = exec_hadoop_sql.c1)
+                           ->  Seq Scan on ds_s2_tbl_001
+                           ->  Hash
+                                 ->  HashAggregate
+                                       Group By Key: exec_hadoop_sql.c1
+                                       ->  Streaming(type: REDISTRIBUTE)
+--?                                             Spawn on: datanode.*
+                                             ->  HashAggregate
+                                                   Group By Key: exec_hadoop_sql.c1
+                                                   ->  Function Scan on exec_hadoop_sql
+(19 rows)
 
 explain (costs off) select * from
         ds_s2_tbl_001,
@@ -497,20 +536,28 @@ where
         ds_s2_tbl_001.c1 = b.c1 and
         b.c1 in
                 (select * from exec_hadoop_sql('myself', 'select * from a', '') as (c1 int));
-                              QUERY PLAN                              
-----------------------------------------------------------------------
- Hash Join
-   Hash Cond: (ds_s2_tbl_001.c1 = exec_on_extension.c1)
-   ->  Seq Scan on ds_s2_tbl_001
-   ->  Hash
-         ->  Hash Join
-               Hash Cond: (exec_on_extension.c1 = exec_hadoop_sql.c1)
-               ->  Function Scan on exec_on_extension
-               ->  Hash
-                     ->  HashAggregate
-                           Group By Key: exec_hadoop_sql.c1
-                           ->  Function Scan on exec_hadoop_sql
-(11 rows)
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Hash Join
+         Hash Cond: (exec_on_extension.c1 = ds_s2_tbl_001.c1)
+         ->  Function Scan on exec_on_extension
+         ->  Hash
+               ->  Streaming(type: BROADCAST)
+                     Spawn on: All datanodes
+                     ->  Hash Join
+                           Hash Cond: (ds_s2_tbl_001.c1 = exec_hadoop_sql.c1)
+                           ->  Seq Scan on ds_s2_tbl_001
+                           ->  Hash
+                                 ->  HashAggregate
+                                       Group By Key: exec_hadoop_sql.c1
+                                       ->  Streaming(type: REDISTRIBUTE)
+--?                                             Spawn on: datanode.*
+                                             ->  HashAggregate
+                                                   Group By Key: exec_hadoop_sql.c1
+                                                   ->  Function Scan on exec_hadoop_sql
+(19 rows)
 
 explain (costs off) select * from
         ds_s2_tbl_001,
@@ -519,20 +566,28 @@ where
         ds_s2_tbl_001.c1 = b.c1 and
         b.c1 in
                 (select * from exec_on_extension('myself', 'select * from a') as (c1 int));
-                              QUERY PLAN                              
-----------------------------------------------------------------------
- Hash Join
-   Hash Cond: (ds_s2_tbl_001.c1 = exec_hadoop_sql.c1)
-   ->  Seq Scan on ds_s2_tbl_001
-   ->  Hash
-         ->  Hash Join
-               Hash Cond: (exec_hadoop_sql.c1 = exec_on_extension.c1)
-               ->  Function Scan on exec_hadoop_sql
-               ->  Hash
-                     ->  HashAggregate
-                           Group By Key: exec_on_extension.c1
-                           ->  Function Scan on exec_on_extension
-(11 rows)
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Hash Join
+         Hash Cond: (exec_hadoop_sql.c1 = ds_s2_tbl_001.c1)
+         ->  Function Scan on exec_hadoop_sql
+         ->  Hash
+               ->  Streaming(type: BROADCAST)
+                     Spawn on: All datanodes
+                     ->  Hash Join
+                           Hash Cond: (ds_s2_tbl_001.c1 = exec_on_extension.c1)
+                           ->  Seq Scan on ds_s2_tbl_001
+                           ->  Hash
+                                 ->  HashAggregate
+                                       Group By Key: exec_on_extension.c1
+                                       ->  Streaming(type: REDISTRIBUTE)
+--?                                             Spawn on: datanode.*
+                                             ->  HashAggregate
+                                                   Group By Key: exec_on_extension.c1
+                                                   ->  Function Scan on exec_on_extension
+(19 rows)
 
                 
 drop table ds_s2_tbl_001;

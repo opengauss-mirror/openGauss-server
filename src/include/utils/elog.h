@@ -132,7 +132,7 @@
 
 #else
 #define ereport(elevel, rest) ereport_domain(elevel, TEXTDOMAIN, rest)
-#endif
+#endif /*PCLINT_CHECK*/
 
 #define TEXTDOMAIN NULL
 
@@ -218,6 +218,8 @@ extern int errcontext(const char* fmt, ...)
 
 extern int errhidestmt(bool hide_stmt);
 
+extern int errhideprefix(bool hide_prefix);
+
 extern int errposition(int cursorpos);
 
 extern int internalerrposition(int cursorpos);
@@ -246,7 +248,7 @@ extern int ignore_interrupt(bool ignore);
     } while (0)
 #else
 #define elog elog_start(__FILE__, __LINE__, PG_FUNCNAME_MACRO), elog_finish
-#endif
+#endif /* PCLINT_CHECK */
 
 extern void elog_start(const char* filename, int lineno, const char* funcname);
 extern void elog_finish(int elevel, const char* fmt, ...)
@@ -456,6 +458,7 @@ typedef struct ErrorData {
     bool handle_in_client; /* true to report to client and also handle in client */
     bool show_funcname;    /* true to force funcname inclusion */
     bool hide_stmt;        /* true to prevent STATEMENT: inclusion */
+    bool hide_prefix;      /* true to prevent line prefix inclusion */
     char* filename;        /* __FILE__ of ereport() call */
     int lineno;            /* __LINE__ of ereport() call */
     char* funcname;        /* __func__ of ereport() call */
@@ -495,7 +498,6 @@ extern void UpdateErrorData(ErrorData* edata, ErrorData* newData);
 extern void FreeErrorData(ErrorData* edata);
 extern void FlushErrorState(void);
 extern void FlushErrorStateWithoutDeleteChildrenContext(void);
-extern void ThrowErrorData(ErrorData *edata);
 extern void ReThrowError(ErrorData* edata) __attribute__((noreturn));
 extern void pg_re_throw(void) __attribute__((noreturn));
 
@@ -512,6 +514,8 @@ typedef enum {
 #define LOG_DESTINATION_SYSLOG 2
 #define LOG_DESTINATION_EVENTLOG 4
 #define LOG_DESTINATION_CSVLOG 8
+#define LOG_DESTINATION_QUERYLOG 16
+#define LOG_DESTINATION_ASPLOG	 32
 
 /* Other exported functions */
 extern void DebugFileOpen(void);
@@ -544,7 +548,8 @@ extern inline int defence_errlevel(void)
     return ERROR;
 #endif
 }
-#endif   
+
+#endif
 
 /*
  * Write errors to stderr (or by equal means when stderr is
@@ -598,5 +603,12 @@ extern void SimpleLogToServer(int elevel, bool silent, const char* fmt, ...)
             msgLog = gs_comm_ipc_performance(msgLog, buffer, bufferLen, remoteNode, fd, msgOpr); \
         } \
     while (0)
+
+#define MODULE_LOG_TRACE(trace_mode, ...)                                                                          \
+    do \
+        if (module_logging_is_on(trace_mode)) {                                                                    \
+            ereport(LOG, (errmodule(trace_mode), errmsg(__VA_ARGS__)));                                            \
+        }                                                                                                          \
+    while (0)                                                                                                      \
 
 #endif /* ELOG_H */

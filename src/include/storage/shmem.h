@@ -76,4 +76,3 @@ extern HTAB* HeapMemInitHash(const char* name, long init_size, long max_size, HA
 extern void HeapMemResetHash(HTAB* hashtbl, const char* tabname);
 
 #endif /* SHMEM_H */
-

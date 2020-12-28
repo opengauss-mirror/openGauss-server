@@ -1,0 +1,343 @@
+set enable_global_stats = true;
+drop function print_delta_count;
+CREATE OR REPLACE FUNCTION print_delta_count()
+  RETURNS TABLE (rowcount bigint) AS
+$$
+declare tblname text;
+BEGIN
+    select a.relname into tblname from pg_class a, pg_class b where a.oid=b.reldeltarelid and b.relname='t1';
+
+    RETURN QUERY execute format('select count(*) from cstore.%I where val=5', tblname);
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION print_delta_count_10000()
+  RETURNS TABLE (rowcount bigint) AS
+$$
+declare tblname text;
+BEGIN
+    select a.relname into tblname from pg_class a, pg_class b where a.oid=b.reldeltarelid and b.relname='t1';
+
+    RETURN QUERY execute format('select count(*) from cstore.%I where val=10000', tblname);
+END;
+$$ LANGUAGE plpgsql;
+
+-- create foreign table
+create schema dfs;
+set current_schema = dfs;
+drop table if exists sales;                           
+create   table sales(s_id int,customer_name text,expense int,item text) tablespace hdfs_ts;
+set cstore_insert_mode = main;
+set cstore_insert_mode = main;
+insert into sales values(1, 'zhangsan', 20 , 'book'     );
+insert into sales values(2, 'ngyi', 100, 'photo'    );
+insert into sales values(3, 'lun', 43 , 'sigurates');
+insert into sales values(4, 'ojian', 25 , 'food'     );
+set current_schema=public;
+
+CREATE SERVER hdfs_server_update FOREIGN DATA WRAPPER HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+create foreign table sales(s_id int,customer_name text,expense int,item text)
+    server hdfs_server_update options(format 'orc',foldername '/dfs_init_004/@hdfsstoreplus@_ts/regression/dfs.sales')
+    distribute by roundrobin;
+
+-- create column table
+create table col_table(id int, val int) with (orientation=column);
+insert into col_table values (1, 1);
+
+-- create row table
+create table row_table(id int, val int);
+insert into row_table values (1, 2);
+
+-- create HDFS table
+create table hdfs_table(id int, val int) tablespace hdfs_ts;
+insert into hdfs_table values (1, 3);
+
+-- empty table 
+drop table if exists t1;
+create table t1(id int, val int) tablespace hdfs_ts;
+
+-- don't support "returning"
+update t1 set val=2 returning *;
+select count(*) from t1;
+
+-- don't support update distributed key
+update t1 set id=2;
+
+-- as clause
+update t1 as t set t.val=2;
+select count(*) from t1;
+
+-- update just on delta table
+set cstore_insert_mode=delta;
+insert into t1 values (1, 1);
+update t1 set val=2;
+select count(*) from t1 where val=2;
+
+-- update just on hdfs
+set cstore_insert_mode=main;
+insert into t1 values (1, 1);
+update t1 set val=2;
+select count(*) from t1 where val=2;
+
+-- update on delta and hdfs
+set cstore_insert_mode=auto;
+insert into t1 values (1, generate_series(1,6001));
+
+update t1 set val=10000 from t1 as t where t.val = 1000 or t.val = 6000;
+select count(*) from t1 where val=10000;
+execute direct on(datanode1) 'select print_delta_count_10000()';
+
+
+-- from clause
+set cstore_insert_mode=auto;
+insert into t1 values (1, generate_series(1,6001));
+
+update t1 set val=5 from row_table as rt where t1.val = rt.val;
+update t1 set val=5 from col_table as ct where t1.val = ct.val;
+update t1 set val=5 from hdfs_table as ht where t1.val = ht.val;
+update t1 set val=5 from sales as ft where t1.val = ft.val;
+update t1 set val=5 from row_table as rt, col_table as ct where t1.val=rt.val or t1.val=ct.val;
+
+-- data type test
+drop table if exists rowt;
+create table rowt(
+        c_tinyint         tinyint,
+        c_smallint        smallint,
+        c_int             integer,
+        c_bigint          bigint,
+        c_money           money,
+        c_numeric         numeric,
+        c_real            real,
+        c_double          double precision,
+        c_decimal         decimal,
+        c_varchar         varchar,
+        c_char            char(30),
+        c_nvarchar2       nvarchar2,
+        c_text            text,
+        c_timestamp       timestamp with time zone,
+        c_timestamptz     timestamp without time zone,
+        c_date            date,
+        c_time            time without time zone,
+        c_timetz          time with time zone,
+        c_interval        interval,
+        c_tinterval       tinterval,
+        c_smalldatetime   smalldatetime,
+        c_bytea           varchar,
+        c_boolean         boolean,
+        c_inet            varchar2,
+        c_cidr            nvarchar2,
+        c_bit             clob,
+        c_varbit          char,
+        c_oid             oid
+);
+
+drop table if exists t1;
+create table t1(
+        c_tinyint         tinyint,
+        c_smallint        smallint,
+        c_int             integer,
+        c_bigint          bigint,
+        c_money           money,
+        c_numeric         numeric,
+        c_real            real,
+        c_double          double precision,
+        c_decimal         decimal,
+        c_varchar         varchar,
+        c_char            char(30),
+        c_nvarchar2       nvarchar2,
+        c_text            text,
+        c_timestamp       timestamp with time zone,
+        c_timestamptz     timestamp without time zone,
+        c_date            date,
+        c_time            time without time zone,
+        c_timetz          time with time zone,
+        c_interval        interval,
+        c_tinterval       tinterval,
+        c_smalldatetime   smalldatetime,
+        c_bytea           varchar,
+        c_boolean         boolean,
+        c_inet            varchar2,
+        c_cidr            nvarchar2,
+        c_bit             clob,
+        c_varbit          char,
+        c_oid             oid
+) tablespace hdfs_ts;
+
+insert into rowt values (13, 13768, 115026, -9457, '$561.32', 561.322815379585,
+		1682.67, 1682.1, 61032419699811781, 'asdfasfas', 'asdasfasfasffsf432423424234', 
+		'sdadasdads', 'ss', '1974-10-02 12:18:35.454199+08', '1971-03-20 11:13:50', 
+		'1972-05-30 11:05:28', '11:13:50', '12:18:35.454199+08', '26 years 3 mons 21 days 11:41:24.545801',
+		'["1947-05-10 23:59:12+08" "1973-01-14 03:14:21+08"]', '1974-10-02 12:19:00', 
+		'\x2f2f31323435313234343534', 'true', '10.1.1.1', '10.2.0.5/32', '0101101010', 'a', 136);
+
+set cstore_insert_mode=main;
+insert into t1 select * from rowt;
+
+-- data from rowt
+update t1 as t set  t.c_smallint=rt.c_smallint and
+	t.c_int=rt.c_int and t.c_bigint=rt.c_bigint and t.c_money=rt.c_money and t.c_numeric=rt.c_numeric and
+	t.c_real=rt.c_real and t.c_double=rt.c_double and t.c_decimal=rt.c_decimal and
+	t.c_varchar=rt.c_varchar and t.c_char=rt.c_char and t.c_nvarchar2=rt.c_nvarchar2 and
+	t.c_text=rt.c_text and t.c_timestamp=rt.c_timestamp and t.c_timestamptz=rt.c_timestamptz and
+	t.c_date=rt.c_date and t.c_time=rt.c_time and t.c_timetz=rt.c_timetz and t.c_interval=rt.c_interval and
+	t.c_tinterval=rt.c_tinterval and t.c_smalldatetime=rt.c_smalldatetime and t.c_bytea=rt.c_bytea and
+	t.c_boolean=rt.c_boolean and t.c_oid=rt.c_oid
+from rowt rt
+where t.c_tinyint=rt.c_tinyint and t.c_smallint=rt.c_smallint and
+	t.c_int=rt.c_int and t.c_bigint=rt.c_bigint and t.c_money=rt.c_money and t.c_numeric=rt.c_numeric and
+	t.c_real=rt.c_real and t.c_double=rt.c_double and t.c_decimal=rt.c_decimal and
+	t.c_varchar=rt.c_varchar and t.c_char=rt.c_char and t.c_nvarchar2=rt.c_nvarchar2 and
+	t.c_text=rt.c_text and t.c_timestamp=rt.c_timestamp and t.c_timestamptz=rt.c_timestamptz and
+	t.c_date=rt.c_date and t.c_time=rt.c_time and t.c_timetz=rt.c_timetz and t.c_interval=rt.c_interval and
+	t.c_tinterval=rt.c_tinterval and t.c_smalldatetime=rt.c_smalldatetime and t.c_bytea=rt.c_bytea and
+	t.c_boolean=rt.c_boolean and t.c_oid=rt.c_oid;
+select count(*) from t1;
+
+-- data from string
+insert into t1 select * from rowt;
+update t1 as t set t.c_smallint=13768 and
+	t.c_int=115026 and t.c_bigint=-9457 and t.c_money='$561.32' and t.c_numeric=561.322815379585 and
+	t.c_real=1682.67::float4 and t.c_double=1682.1 and t.c_decimal=61032419699811781 and
+	t.c_varchar='asdfasfas' and t.c_char='asdasfasfasffsf432423424234' and t.c_nvarchar2='sdadasdads' and
+	t.c_text='ss' and t.c_timestamp='1974-10-02 12:18:35.454199+08' and t.c_timestamptz='1971-03-20 11:13:50' and
+	t.c_date='1972-05-30 11:05:28' and t.c_time='11:13:50' and t.c_timetz='12:18:35.454199+08' and t.c_interval='26 years 3 mons 21 days 11:41:24.545801' and
+	t.c_tinterval='["1947-05-10 23:59:12+08" "1973-01-14 03:14:21+08"]' and t.c_smalldatetime='1974-10-02 12:19:00' and t.c_bytea='\x2f2f31323435313234343534' and
+	t.c_boolean=true and t.c_oid=136
+where t.c_tinyint=13 and t.c_smallint=13768 and
+	t.c_int=115026 and t.c_bigint=-9457 and t.c_money='$561.32' and t.c_numeric=561.322815379585 and
+	t.c_real=1682.67::float4 and t.c_double=1682.1 and t.c_decimal=61032419699811781 and
+	t.c_varchar='asdfasfas' and t.c_char='asdasfasfasffsf432423424234' and t.c_nvarchar2='sdadasdads' and
+	t.c_text='ss' and t.c_timestamp='1974-10-02 12:18:35.454199+08' and t.c_timestamptz='1971-03-20 11:13:50' and
+	t.c_date='1972-05-30 11:05:28' and t.c_time='11:13:50' and t.c_timetz='12:18:35.454199+08' and t.c_interval='26 years 3 mons 21 days 11:41:24.545801' and
+	t.c_tinterval='["1947-05-10 23:59:12+08" "1973-01-14 03:14:21+08"]' and t.c_smalldatetime='1974-10-02 12:19:00' and t.c_bytea='\x2f2f31323435313234343534' and
+	t.c_boolean=true and t.c_oid=136;
+select count(*) from t1;
+
+-- test cursor
+drop table if exists t1;
+create table t1(id int, val int) tablespace hdfs_ts;
+insert into t1 values (1,1);
+
+start transaction;
+cursor del_cursor for select * from t1;
+update t1 set val = 3 where current of del_cursor;
+rollback;
+
+-- test rollback, data is in both of delta table and hdfs
+delete from t1;
+set cstore_insert_mode=auto;
+insert into t1 values (1, generate_series(1, 6001));
+select count(*) from t1 where val=5;
+execute direct on(datanode1) 'select print_delta_count()';
+
+start transaction;
+update t1 set val=5 where t1.val=1000 or t1.val=6000;
+select count(*) from t1 where t1.val=5;
+execute direct on(datanode1) 'select print_delta_count()';
+rollback;
+select count(*) from t1 where val=5;
+execute direct on(datanode1) 'select print_delta_count()';
+
+-- test tid
+drop table if exists rowt;
+create table rowt(id int, val int);
+insert into rowt values (1,1),(1,2);
+
+drop table if exists colt;
+create table colt(id int, val int) with (orientation=column);
+insert into t1 values (1,1), (1, 2);
+
+drop table if exists t1;
+create table t1(id int, val int) tablespace hdfs_ts;
+set cstore_insert_mode=delta;
+insert into t1 values (1,1);
+set cstore_insert_mode=main;
+insert into t1 values (1,2);
+
+update t1 set val=5 from rowt where t1.ctid=rowt.ctid;
+select count(*) from t1 where val=5;
+execute direct on(datanode1) 'select print_delta_count()';
+
+update t1 set val=5 from colt where t1.ctid=colt.ctid;
+select count(*) from t1 where val=5;
+execute direct on(datanode1) 'select print_delta_count()';
+
+-- where includes sub-select
+drop table if exists t1;
+create table t1(id int, val int) tablespace hdfs_ts;
+set cstore_insert_mode=delta;
+insert into t1 values (1,1);
+set cstore_insert_mode=main;
+insert into t1 values (1,2);
+
+update t1 set val=5 from rowt where t1.val not in (select val from rowt);
+select count(*) from t1 where val=5;
+
+update t1 set val=5 from rowt where not exists (select val from rowt);
+select count(*) from t1 where val=5;
+
+update t1 set val=5 from rowt where exists (select val from rowt);
+select count(*) from t1 where val=5;
+set cstore_insert_mode=delta;
+insert into t1 values (1,1);
+set cstore_insert_mode=main;
+insert into t1 values (1,2);
+update t1 set val=5 from rowt where t1.val in (select val from rowt);
+select count(*) from t1 where val=5;
+
+--  Non-deterministic UPDATE
+set cstore_insert_mode=main;
+create table student1
+(
+   stuno     int,
+   classno   int 
+) tablespace hdfs_ts;
+
+create table student2
+(
+   stuno     int,
+   classno   int 
+) tablespace hdfs_ts;
+
+insert into student1 values(1,1);
+insert into student1 values(2,2);
+insert into student1 values(3,3);
+insert into student2 values(2,1);
+insert into student2 values(2,2);
+insert into student2 values(6,2);
+
+update student1 set classno = student2.classno from student2 where student1.stuno=student2.stuno;
+
+set cstore_insert_mode=delta;
+delete from student1;
+delete from student2;
+
+insert into student1 values(1,1);
+insert into student1 values(2,2);
+insert into student1 values(3,3);
+insert into student2 values(2,1);
+insert into student2 values(2,2);
+insert into student2 values(6,2);
+
+update student1 set classno = student2.classno from student2 where student1.stuno=student2.stuno;
+
+-- test "not null" constraint
+set cstore_insert_mode=delta;
+drop table if exists t1;
+create table t1(c1 int, c2 int not null) tablespace hdfs_ts;
+insert into t1 values (1,1);
+update t1 set c2=null;
+
+-- clean enviroment;
+drop table if exists t1;
+drop table if exists student1;
+drop table if exists student2;
+drop table if exists colt;
+drop table if exists rowt;
+drop table if exists row_table;
+drop table if exists col_table;
+drop table if exists hdfs_table;
+drop table if exists dfs.sales;
+drop schema dfs;
+drop foreign table if exists sales;
+drop server if exists  hdfs_server_update cascade;

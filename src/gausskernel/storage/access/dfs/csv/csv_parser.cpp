@@ -15,9 +15,8 @@
  *
  * csv_parser.cpp
  *
- *
  * IDENTIFICATION
- *         src/gausskernel/storage/access/dfs/csv/csv_parser.cpp
+ *    src/gausskernel/storage/access/dfs/csv/csv_parser.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -31,7 +30,6 @@
 #include "mb/pg_wchar.h"
 
 namespace dfs {
-
 void CsvParserImpl::Destroy()
 {
 }
@@ -139,7 +137,7 @@ int CsvParserImpl::getFields(char *buf, int len, char **raw_fields, int max_fiel
  * @See also:
  */
 template <bool skip_data>
-ParserResult CsvParserImpl::splitLine(LineBuffer *line_buf)
+int CsvParserImpl::splitLine(LineBuffer *line_buf)
 {
     bool need_data = false;
     char cur_char;
@@ -163,7 +161,7 @@ ParserResult CsvParserImpl::splitLine(LineBuffer *line_buf)
 
     while (true) {
         if (need_data) {
-            uint64 read_len = fillReadBuffer(m_options->chunk_size);
+            int read_len = fillReadBuffer(m_options->chunk_size);
             if (read_len == 0) {
                 return RESULT_EOF;
             } else {
@@ -210,7 +208,6 @@ ParserResult CsvParserImpl::splitLine(LineBuffer *line_buf)
 
             /* find line end, break it. */
             break;
-
         } else if (*temp_buffer_pos == '\n' && !read_in_quote) {
             /* fine line end, break it. */
             break;
@@ -257,7 +254,6 @@ ParserResult CsvParserImpl::splitLine(LineBuffer *line_buf)
          */
         m_buffer_len = 0;
         m_buffer_pos = m_buffer;
-
     } else {
         m_buffer_pos = temp_buffer_pos + 1;
     }
@@ -416,5 +412,4 @@ int CsvParserImpl::splitFields(char *buf, int len, char **raw_fields, int max_fi
 
     return fieldno;
 }
-
 }  // namespace dfs

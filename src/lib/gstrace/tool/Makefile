@@ -36,11 +36,11 @@ endif
 # memory checking component
 ###############################################################################
 ifeq ($(enable_memory_check), yes)
-  LDFLAGS += -L$(MEMCHECK_LIB_PATH)
-else
-  ifeq ($(enable_thread_check), yes)
     LDFLAGS += -L$(MEMCHECK_LIB_PATH)
-  endif
+  else
+    ifeq ($(enable_thread_check), yes)
+      LDFLAGS += -L$(MEMCHECK_LIB_PATH)
+    endif
 endif
 
 ifeq ($(enable_memory_check), yes)
@@ -65,13 +65,8 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 
-ifeq ($(enable_profiling), no)
-  override CXXFLAGS += -fPIE
-  LDFLAGS += -pie
-else
-  override CXXFLAGS += -fPIC
-  LDFLAGS += -fPIC
-endif
+override CXXFLAGS += -fPIE
+LDFLAGS += -pie
 
 OBJS = gstrace_tool.o $(top_builddir)/src/lib/gstrace/common/libgstrace.a
 

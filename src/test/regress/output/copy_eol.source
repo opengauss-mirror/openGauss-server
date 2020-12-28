@@ -12,9 +12,9 @@ select * from test_ud_eol order by id;
   3 | wangwu                                                                                              
 (3 rows)
 
-copy test_ud_eol to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt';
+copy test_ud_eol to '@abs_srcdir@/data/test_ud_eol.txt';
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt';
 select * from test_ud_eol order by id;
  id |                                                 name                                                 
 ----+------------------------------------------------------------------------------------------------------
@@ -24,9 +24,9 @@ select * from test_ud_eol order by id;
 (3 rows)
 
 --1 test 0x0d0a
-copy test_ud_eol to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0d0a';
+copy test_ud_eol to '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0d0a';
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt';
 select * from test_ud_eol order by id;
  id |                                                 name                                                 
 ----+------------------------------------------------------------------------------------------------------
@@ -36,7 +36,7 @@ select * from test_ud_eol order by id;
 (3 rows)
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0d';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0d';
 ERROR:  invalid input syntax for integer: "
 "
 CONTEXT:  COPY test_ud_eol, line 4, column id: "
@@ -47,16 +47,17 @@ select * from test_ud_eol order by id;
 (0 rows)
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0a';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0a';
 ERROR:  value too long for type character(100)
-CONTEXT:  COPY test_ud_eol, line 1, column name: "zhangsan                                                                                            "
+CONTEXT:  COPY test_ud_eol, line 1, column name: "zhangsan                                                                                            
+"
 select * from test_ud_eol order by id;
  id | name 
 ----+------
 (0 rows)
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0d0a';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0d0a';
 select * from test_ud_eol order by id;
  id |                                                 name                                                 
 ----+------------------------------------------------------------------------------------------------------
@@ -66,9 +67,9 @@ select * from test_ud_eol order by id;
 (3 rows)
 
 --2 test 0x0d
-copy test_ud_eol to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0d';
+copy test_ud_eol to '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0d';
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt';
 select * from test_ud_eol order by id;
  id |                                                 name                                                 
 ----+------------------------------------------------------------------------------------------------------
@@ -78,47 +79,7 @@ select * from test_ud_eol order by id;
 (3 rows)
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0a';
-ERROR:  extra data after last expected column
-CONTEXT:  COPY test_ud_eol, line 1: "1	zhangsan                                                                                            2	lisi                                                                                                3	wangwu                                                                                              "
-select * from test_ud_eol order by id;
- id | name 
-----+------
-(0 rows)
-
-truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0d0a';
-ERROR:  extra data after last expected column
-CONTEXT:  COPY test_ud_eol, line 1: "1	zhangsan                                                                                            2	lisi                                                                                                3	wangwu                                                                                              "
-select * from test_ud_eol order by id;
- id | name 
-----+------
-(0 rows)
-
-truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0d';
-select * from test_ud_eol order by id;
- id |                                                 name                                                 
-----+------------------------------------------------------------------------------------------------------
-  1 | zhangsan                                                                                            
-  2 | lisi                                                                                                
-  3 | wangwu                                                                                              
-(3 rows)
-
---3 test 0x0a
-copy test_ud_eol to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0a';
-truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt';
-select * from test_ud_eol order by id;
- id |                                                 name                                                 
-----+------------------------------------------------------------------------------------------------------
-  1 | zhangsan                                                                                            
-  2 | lisi                                                                                                
-  3 | wangwu                                                                                              
-(3 rows)
-
-truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0d0a';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0a';
 ERROR:  extra data after last expected column
 CONTEXT:  COPY test_ud_eol, line 1: "1	zhangsan                                                                                            
 2	lisi                                                                                                
@@ -130,7 +91,53 @@ select * from test_ud_eol order by id;
 (0 rows)
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0d';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0d0a';
+ERROR:  extra data after last expected column
+CONTEXT:  COPY test_ud_eol, line 1: "1	zhangsan                                                                                            
+2	lisi                                                                                                
+3	wangwu                                                                                              
+"
+select * from test_ud_eol order by id;
+ id | name 
+----+------
+(0 rows)
+
+truncate table test_ud_eol;
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0d';
+select * from test_ud_eol order by id;
+ id |                                                 name                                                 
+----+------------------------------------------------------------------------------------------------------
+  1 | zhangsan                                                                                            
+  2 | lisi                                                                                                
+  3 | wangwu                                                                                              
+(3 rows)
+
+--3 test 0x0a
+copy test_ud_eol to '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0a';
+truncate table test_ud_eol;
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt';
+select * from test_ud_eol order by id;
+ id |                                                 name                                                 
+----+------------------------------------------------------------------------------------------------------
+  1 | zhangsan                                                                                            
+  2 | lisi                                                                                                
+  3 | wangwu                                                                                              
+(3 rows)
+
+truncate table test_ud_eol;
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0d0a';
+ERROR:  extra data after last expected column
+CONTEXT:  COPY test_ud_eol, line 1: "1	zhangsan                                                                                            
+2	lisi                                                                                                
+3	wangwu                                                                                              
+"
+select * from test_ud_eol order by id;
+ id | name 
+----+------
+(0 rows)
+
+truncate table test_ud_eol;
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0d';
 ERROR:  extra data after last expected column
 CONTEXT:  COPY test_ud_eol, line 1: "1	zhangsan                                                                                            
 2	lisi                                                                                                
@@ -164,7 +171,7 @@ select * from test_ud_eol order by id;
 (3 rows)
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '\r';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '\r';
 ERROR:  invalid input syntax for integer: "
 "
 CONTEXT:  COPY test_ud_eol, line 4, column id: "
@@ -177,7 +184,8 @@ select * from test_ud_eol order by id;
 truncate table test_ud_eol;
 copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '\n';
 ERROR:  value too long for type character(100)
-CONTEXT:  COPY test_ud_eol, line 1, column name: "zhangsan                                                                                            "
+CONTEXT:  COPY test_ud_eol, line 1, column name: "zhangsan                                                                                            
+"
 select * from test_ud_eol order by id;
  id | name 
 ----+------
@@ -208,7 +216,10 @@ select * from test_ud_eol order by id;
 truncate table test_ud_eol;
 copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '\n';
 ERROR:  extra data after last expected column
-CONTEXT:  COPY test_ud_eol, line 1: "1	zhangsan                                                                                            2	lisi                                                                                                3	wangwu                                                                                              "
+CONTEXT:  COPY test_ud_eol, line 1: "1	zhangsan                                                                                            
+2	lisi                                                                                                
+3	wangwu                                                                                              
+"
 select * from test_ud_eol order by id;
  id | name 
 ----+------
@@ -217,7 +228,10 @@ select * from test_ud_eol order by id;
 truncate table test_ud_eol;
 copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '\r\n';
 ERROR:  extra data after last expected column
-CONTEXT:  COPY test_ud_eol, line 1: "1	zhangsan                                                                                            2	lisi                                                                                                3	wangwu                                                                                              "
+CONTEXT:  COPY test_ud_eol, line 1: "1	zhangsan                                                                                            
+2	lisi                                                                                                
+3	wangwu                                                                                              
+"
 select * from test_ud_eol order by id;
  id | name 
 ----+------
@@ -280,9 +294,9 @@ select * from test_ud_eol order by id;
 (3 rows)
 
 --7 test $
-copy test_ud_eol to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '$';
+copy test_ud_eol to '@abs_srcdir@/data/test_ud_eol.txt' eol '$';
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt';
 ERROR:  extra data after last expected column
 CONTEXT:  COPY test_ud_eol, line 1: "1	zhangsan                                                                                            $2	lisi                                                                                                $3	wangwu                                                                                              $"
 select * from test_ud_eol order by id;
@@ -291,7 +305,7 @@ select * from test_ud_eol order by id;
 (0 rows)
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '$';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '$';
 select * from test_ud_eol order by id;
  id |                                                 name                                                 
 ----+------------------------------------------------------------------------------------------------------

@@ -21,6 +21,7 @@
 
 #include "postgres.h"
 #include "knl/knl_variable.h"
+#include "nodes/parsenodes.h"
 
 #include "parser/gramparse.h"
 #include "parser/parser.h"

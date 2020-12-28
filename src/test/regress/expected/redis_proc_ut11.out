@@ -1,0 +1,47 @@
+/*
+ *  UT11:  1)redis_proc get the access share lock
+ *         2)Alter table truncate partition *can* cancel redis_proc
+ */
+START TRANSACTION;
+	select pg_enable_redis_proc_cancelable();
+ pg_enable_redis_proc_cancelable 
+---------------------------------
+ t
+(1 row)
+
+	select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+	LOCK TABLE ptx IN ACCESS SHARE MODE;
+	insert into data_redis.data_redis_tmp_12345 select * from ptx partition (p0); insert into data_redis.data_redis_tmp_12345 select * from ptx partition (p1);insert into data_redis.data_redis_tmp_12345 select * from ptx partition (p2); 
+	select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+	select pg_sleep(10);
+ERROR:  canceling data redistribution task
+CONTEXT:  referenced column: pg_sleep
+END;
+select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select count(*) from ptx partition (p0);
+ count 
+-------
+     0
+(1 row)
+

@@ -1065,7 +1065,7 @@ SET CONSTRAINTS ALL IMMEDIATE;
 ERROR:  insert or update on table "fktable" violates foreign key constraint "fktable_fk_fkey"
 DETAIL:  Key (fk)=(2000) is not present in table "pktable".
 INSERT INTO pktable VALUES (2000, 3); -- too late
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+--?ERROR:  current transaction is aborted, commands ignored until end of transaction block.*
 COMMIT;
 DROP TABLE fktable, pktable;
 -- deferrable, initially deferred

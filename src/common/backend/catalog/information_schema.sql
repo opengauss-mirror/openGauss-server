@@ -601,7 +601,7 @@ CREATE VIEW column_privileges AS
     WHERE x.relnamespace = nc.oid
           AND x.grantee = grantee.oid
           AND x.grantor = u_grantor.oid
-          AND x.prtype IN ('INSERT', 'SELECT', 'UPDATE', 'REFERENCES')
+          AND x.prtype IN ('INSERT', 'SELECT', 'UPDATE', 'REFERENCES', 'COMMENT')
           AND (pg_has_role(u_grantor.oid, 'USAGE')
                OR pg_has_role(grantee.oid, 'USAGE')
                OR grantee.rolname = 'PUBLIC');
@@ -1277,7 +1277,7 @@ CREATE VIEW routine_privileges AS
            CAST(current_database() AS sql_identifier) AS routine_catalog,
            CAST(n.nspname AS sql_identifier) AS routine_schema,
            CAST(p.proname AS sql_identifier) AS routine_name,
-           CAST('EXECUTE' AS character_data) AS privilege_type,
+           CAST(p.prtype AS character_data) AS privilege_type,
            CAST(
              CASE WHEN
                   -- object owner always has grant options
@@ -1299,7 +1299,7 @@ CREATE VIEW routine_privileges AS
     WHERE p.pronamespace = n.oid
           AND grantee.oid = p.grantee
           AND u_grantor.oid = p.grantor
-          AND p.prtype IN ('EXECUTE')
+          AND p.prtype IN ('EXECUTE', 'ALTER', 'DROP', 'COMMENT')
           AND (pg_has_role(u_grantor.oid, 'USAGE')
                OR pg_has_role(grantee.oid, 'USAGE')
                OR grantee.rolname = 'PUBLIC');
@@ -1821,7 +1821,8 @@ CREATE VIEW table_privileges AS
           AND c.relkind IN ('r', 'v')
           AND c.grantee = grantee.oid
           AND c.grantor = u_grantor.oid
-          AND c.prtype IN ('INSERT', 'SELECT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER')
+          AND c.prtype IN ('INSERT', 'SELECT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER' ,
+                           'ALTER', 'DROP', 'COMMENT', 'INDEX', 'VACUUM')
           AND (pg_has_role(u_grantor.oid, 'USAGE')
                OR pg_has_role(grantee.oid, 'USAGE')
                OR grantee.rolname = 'PUBLIC');
@@ -2044,7 +2045,7 @@ CREATE VIEW udt_privileges AS
            CAST(current_database() AS sql_identifier) AS udt_catalog,
            CAST(n.nspname AS sql_identifier) AS udt_schema,
            CAST(t.typname AS sql_identifier) AS udt_name,
-           CAST('TYPE USAGE' AS character_data) AS privilege_type, -- sic
+           CAST(t.prtype AS character_data) AS privilege_type, -- sic
            CAST(
              CASE WHEN
                   -- object owner always has grant options
@@ -2067,7 +2068,7 @@ CREATE VIEW udt_privileges AS
           AND t.typtype = 'c'
           AND t.grantee = grantee.oid
           AND t.grantor = u_grantor.oid
-          AND t.prtype IN ('USAGE')
+          AND t.prtype IN ('USAGE', 'ALTER', 'DROP', 'COMMENT')
           AND (pg_has_role(u_grantor.oid, 'USAGE')
                OR pg_has_role(grantee.oid, 'USAGE')
                OR grantee.rolname = 'PUBLIC');

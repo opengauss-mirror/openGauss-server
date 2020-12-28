@@ -30,7 +30,7 @@
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 static bool isObjectPinned(const ObjectAddress* object, Relation rel);
 
@@ -264,6 +264,8 @@ long deleteDependencyRecordsFor(Oid classId, Oid objectId, bool skipExtensionDep
 
     heap_close(depRel, RowExclusiveLock);
 
+    CommandCounterIncrement();
+
     return count;
 }
 
@@ -410,7 +412,7 @@ static bool isObjectPinned(const ObjectAddress* object, Relation rel)
     /* we need to handle the builtin functions in pg_depend here,if the object is builtin function,we treat it as it
      * pinned in pg_proc because we delete them from pg_proc
      */
-    if (object->classId == ProcedureRelationId && IsBuiltinFuncOid(object->objectId)) {
+    if (object->classId == ProcedureRelationId && IsSystemObjOid(object->objectId)) {
         return true;
     }
 

@@ -14,7 +14,7 @@ function test_1()
   
   #create mot data
   gsql -d $db -p $dn1_primary_port -c "DROP FOREIGN TABLE if exists mot_switch1; CREATE FOREIGN TABLE mot_switch1(id INT,name VARCHAR(15) NOT NULL) SERVER mot_server;"
-  gsql -d $db -p $dn1_primary_port -c "copy mot_switch1 from '$g_data_path/datanode1/pg_copydir/data5';"
+  gsql -d $db -p $dn1_primary_port -c "copy mot_switch1 from '$scripts_dir/data/data5';"
   
   inc_build_pattern="dn incremental build completed"
   kill_standby2
@@ -22,7 +22,7 @@ function test_1()
   echo "primary killed"
   failover_to_standby
   echo "failover_to_standby"
-  build_result=`gs_ctl build -D ${standby2_data_dir}`
+  build_result=`gs_ctl build -Z single_node -D ${standby2_data_dir}`
   if [[ $build_result =~ $inc_build_pattern ]]
   then
     echo "inc build success"

@@ -1,0 +1,251 @@
+--test incorrect oid assignment guc settings
+set local inplace_upgrade_next_system_object_oids = iuo_catalog,false,true,1,1,2,0;
+WARNING:  Can't set next object oids while not performing upgrade.
+begin;
+set isinplaceupgrade=on;
+set local inplace_upgrade_next_system_object_oids = iuo_catalog,,,,,,;
+ERROR:  syntax error at or near ","
+LINE 1: ...inplace_upgrade_next_system_object_oids = iuo_catalog,,,,,,;
+                                                                 ^
+commit;
+begin;
+set isinplaceupgrade=on;
+set local inplace_upgrade_next_system_object_oids = iuo_fake,false,true,1,1,2,0;
+ERROR:  invalid value for parameter "inplace_upgrade_next_system_object_oids": "iuo_fake, false, true, 1, 1, 2, 0"
+DETAIL:  String of object kind is invalid.
+commit;
+begin;
+set isinplaceupgrade=on;
+set local inplace_upgrade_next_system_object_oids = iuo_catalog,fake,false,1,1,2,0;
+ERROR:  invalid value for parameter "inplace_upgrade_next_system_object_oids": "iuo_catalog, fake, false, 1, 1, 2, 0"
+DETAIL:  Format of object oid assignment is invalid.
+commit;
+begin;
+set isinplaceupgrade=on;
+set local inplace_upgrade_next_system_object_oids = iuo_catalog,false,true,10000,1,2,0;
+ERROR:  invalid value for parameter "inplace_upgrade_next_system_object_oids": "iuo_catalog, false, true, 10000, 1, 2, 0"
+DETAIL:  Format of object oid assignment is invalid.
+commit;
+begin;
+set isinplaceupgrade=on;
+set local inplace_upgrade_next_system_object_oids = iuo_proc,2,2;
+ERROR:  invalid value for parameter "inplace_upgrade_next_system_object_oids": "iuo_proc, 2, 2"
+DETAIL:  Format of object oid assignment is invalid.
+commit;
+begin;
+set isinplaceupgrade=on;
+set local inplace_upgrade_next_system_object_oids = iuo_proc,10000;
+ERROR:  invalid value for parameter "inplace_upgrade_next_system_object_oids": "iuo_proc, 10000"
+DETAIL:  Format of object oid assignment is invalid.
+commit;
+begin;
+set isinplaceupgrade=on;
+set local inplace_upgrade_next_system_object_oids = iuo_namespace,2,2;
+ERROR:  invalid value for parameter "inplace_upgrade_next_system_object_oids": "iuo_namespace, 2, 2"
+DETAIL:  Format of object oid assignment is invalid.
+commit;
+begin;
+set isinplaceupgrade=on;
+set local inplace_upgrade_next_system_object_oids = iuo_namespace,10000;
+ERROR:  invalid value for parameter "inplace_upgrade_next_system_object_oids": "iuo_namespace, 10000"
+DETAIL:  Format of object oid assignment is invalid.
+commit;
+begin;
+set isinplaceupgrade=on;
+set local inplace_upgrade_next_system_object_oids = iuo_general,2,2;
+ERROR:  invalid value for parameter "inplace_upgrade_next_system_object_oids": "iuo_general, 2, 2"
+DETAIL:  Format of object oid assignment is invalid.
+commit;
+begin;
+set isinplaceupgrade=on;
+set local inplace_upgrade_next_system_object_oids = iuo_general,10000;
+ERROR:  invalid value for parameter "inplace_upgrade_next_system_object_oids": "iuo_general, 10000"
+DETAIL:  Format of object oid assignment is invalid.
+commit;
+begin;
+set isinplaceupgrade=on;
+set local inplace_upgrade_next_system_object_oids = iuo_type,2,2,c;
+ERROR:  invalid value for parameter "inplace_upgrade_next_system_object_oids": "iuo_type, 2, 2, c"
+DETAIL:  Format of object oid assignment is invalid.
+commit;
+begin;
+set isinplaceupgrade=on;
+set local inplace_upgrade_next_system_object_oids = iuo_type,10000,2,b;
+ERROR:  invalid value for parameter "inplace_upgrade_next_system_object_oids": "iuo_type, 10000, 2, b"
+DETAIL:  Format of object oid assignment is invalid.
+commit;
+--test object creation
+begin;
+set isinplaceupgrade=on;
+--1.new system table with toast and index
+set local inplace_upgrade_next_system_object_oids = iuo_catalog,false,true,1,1,2,3;
+create table pg_catalog.pg_inplace_table1
+(
+a int nocompress not null
+) with oids;
+set local inplace_upgrade_next_system_object_oids = iuo_catalog,false,true,0,0,0,4;
+create unique index pg_inplace_table1_oid_index on pg_inplace_table1 using btree(oid oid_ops);
+--2.new system table attribute
+alter table pg_catalog.pg_inplace_table1 add column b int nocompress not null default 0;
+--3.new system function
+set local inplace_upgrade_next_system_object_oids = iuo_proc,1;
+create function pg_catalog.pg_inplace_func1(oid) returns void as 'set_working_grand_version_num_manually' language internal;
+--4.new system namespace
+set local inplace_upgrade_next_system_object_oids = iuo_namespace,1;
+create schema pg_inplace_schema1;
+--5.new system type
+drop type if exists pg_catalog.trigger;
+set local inplace_upgrade_next_system_object_oids = iuo_type,2279,0,p;
+create type pg_catalog.trigger (input=trigger_in,output=trigger_out,internallength=4,passedbyvalue,category=p);
+--6.new system view attribute
+create or replace view pg_catalog.moc_pg_class as select relname from pg_class;
+create or replace view pg_catalog.moc_pg_class as select relname,relfilenode from pg_class;
+--7.new system tuple that do not support DDL
+create or replace function insert_pg_opfamily()
+returns void
+as $$
+declare
+row_name record;
+query_str text;
+query_str_nodes text;
+begin
+query_str_nodes := 'select node_name,node_host,node_port from pgxc_node';
+for row_name in execute(query_str_nodes) loop
+query_str := 'execute direct on (' || row_name.node_name || ') ''insert into pg_opfamily values (1,''''inplace_op'''',1,1)''';
+execute(query_str);
+end loop;
+return;
+end; $$
+language 'plpgsql';
+set local inplace_upgrade_next_system_object_oids = iuo_general, 1;
+select insert_pg_opfamily();
+ insert_pg_opfamily 
+--------------------
+ 
+(1 row)
+
+drop function if exists insert_pg_opfamily();
+commit;
+--check new catalog information
+select oid,relname,relnamespace,relfilenode,reltoastrelid,reltoastidxid,relkind,relnatts,relhasoids from pg_class where oid>=1 and oid<=4 order by oid;
+ oid |           relname           | relnamespace | relfilenode | reltoastrelid | reltoastidxid | relkind | relnatts | relhasoids 
+-----+-----------------------------+--------------+-------------+---------------+---------------+---------+----------+------------
+   1 | pg_inplace_table1           |           11 |           1 |             2 |             0 | r       |        2 | t
+   2 | pg_toast_1                  |           99 |           2 |             0 |             3 | t       |        3 | f
+   3 | pg_toast_1_index            |           99 |           3 |             0 |             0 | i       |        2 | f
+   4 | pg_inplace_table1_oid_index |           11 |           4 |             0 |             0 | i       |        1 | f
+(4 rows)
+
+select t.oid,t.typname,t.typnamespace,t.typrelid,c.relname,c.reltype from pg_type as t, pg_class as c where t.typrelid=c.oid and c.relname='pg_inplace_table1';
+ oid |      typname      | typnamespace | typrelid |      relname      | reltype 
+-----+-------------------+--------------+----------+-------------------+---------
+   1 | pg_inplace_table1 |           11 |        1 | pg_inplace_table1 |       1
+(1 row)
+
+select refclassid,deptype from pg_depend where refobjid>=1 and refobjid<=4 order by refclassid;
+ refclassid | deptype 
+------------+---------
+       1247 | p
+       1255 | p
+       1259 | p
+       1259 | p
+       1259 | p
+       1259 | p
+       2615 | p
+(7 rows)
+
+select * from pg_depend where objid>=1 and objid<=4 order by objid;
+ classid | objid | objsubid | refclassid | refobjid | refobjsubid | deptype 
+---------+-------+----------+------------+----------+-------------+---------
+(0 rows)
+
+select relnatts from pg_class where oid=1;
+ relnatts 
+----------
+        2
+(1 row)
+
+select attrelid,attname,atttypid,attlen,attnum,attnotnull,atthasdef,attisdropped,attcmprmode,attinitdefval from pg_attribute where attrelid=1 and attnum>0 order by attnum;
+ attrelid | attname | atttypid | attlen | attnum | attnotnull | atthasdef | attisdropped | attcmprmode | attinitdefval 
+----------+---------+----------+--------+--------+------------+-----------+--------------+-------------+---------------
+        1 | a       |       23 |      4 |      1 | t          | f         | f            | 0           | 
+        1 | b       |       23 |      4 |      2 | t          | t         | f            | 0           | \x00000000
+(2 rows)
+
+select oid,proname,prosrc,prolang from pg_proc where prosrc='set_working_grand_version_num_manually' order by oid;
+ oid  |                proname                 |                 prosrc                 | prolang 
+------+----------------------------------------+----------------------------------------+---------
+    1 | pg_inplace_func1                       | set_working_grand_version_num_manually |      12
+ 7998 | set_working_grand_version_num_manually | set_working_grand_version_num_manually |      12
+(2 rows)
+
+select oid,nspname from pg_namespace where oid=1;
+ oid |      nspname       
+-----+--------------------
+   1 | pg_inplace_schema1
+(1 row)
+
+select oid,typname,typnamespace,typlen,typbyval,typtype,typcategory,typisdefined,typrelid,typinput,typoutput from pg_type where typname='trigger';
+ oid  | typname | typnamespace | typlen | typbyval | typtype | typcategory | typisdefined | typrelid |  typinput  |  typoutput  
+------+---------+--------------+--------+----------+---------+-------------+--------------+----------+------------+-------------
+ 2279 | trigger |           11 |      4 | t        | p       | p           | t            |        0 | trigger_in | trigger_out
+(1 row)
+
+select oid<16384 as oid_is_bootstrap,relnatts from pg_class where relname='moc_pg_class';
+ oid_is_bootstrap | relnatts 
+------------------+----------
+ t                |        2
+(1 row)
+
+select oid,* from pg_opfamily where oid=1;
+ oid | opfmethod |  opfname   | opfnamespace | opfowner 
+-----+-----------+------------+--------------+----------
+   1 |         1 | inplace_op |            1 |        1
+(1 row)
+
+--test view and function cascade drop notice
+begin;
+set isinplaceupgrade=on;
+set local client_min_messages=notice;
+drop table inplace_upgrade_cas cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  Sorry that we have to drop view inplace_upgrade_cas_v1 due to system catalog upgrade. You may rebuild it with the following sql after upgrade:
+CREATE view inplace_upgrade_cas_v1 AS SELECT  * FROM inplace_upgrade_cas;
+drop cascades to view inplace_upgrade_cas_v1
+Sorry that we have to drop function inplace_upgrade_cas_f1() due to system catalog upgrade. You may rebuild it with the following sql after upgrade:
+CREATE OR REPLACE FUNCTION public.inplace_upgrade_cas_f1()
+ RETURNS SETOF inplace_upgrade_cas
+ LANGUAGE plpgsql
+ NOT FENCED
+AS $function$
+declare
+r inplace_upgrade_cas%rowtype;
+begin
+for r in select * from inplace_upgrade_cas
+loop
+return next r;
+end loop;
+return;
+end; $function$
+
+drop cascades to function inplace_upgrade_cas_f1()
+commit;
+--test relcache invalidation
+begin;
+set isinplaceupgrade=on;
+set local inplace_upgrade_next_system_object_oids = IUO_CATALOG,false,true,20,0,0,0;
+create table pg_catalog.pg_inplace_table2 (a int);
+set isinplaceupgrade=off;
+commit;
+vacuum full pg_inplace_table2;
+begin;
+set isinplaceupgrade=on;
+drop type if exists pg_catalog.pg_inplace_table2;
+drop table if exists pg_catalog.pg_inplace_table2;
+commit;
+select pg_clean_region_info();
+ pg_clean_region_info 
+----------------------
+ success
+(1 row)
+

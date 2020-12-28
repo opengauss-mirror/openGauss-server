@@ -30,7 +30,7 @@
 #include "lib/dllist.h"
 #include "port/pg_crc32c.h"
 #include "securec_check.h"
-#include "storage/block.h"
+#include "storage/buf/block.h"
 #include "storage/relfilenode.h"
 #include "utils/hsearch.h"
 
@@ -95,6 +95,11 @@ typedef struct XLogPageReadPrivateCbm {
 #define PAGETYPE_CREATE 0x02
 #define PAGETYPE_TRUNCATE 0x01
 #define PAGETYPE_MODIFY 0x00
+
+/* a segment of data file shared a list */
+#define BLOCK_NUM_PER_CBMLIST 131072
+
+#define GET_SEG_INDEX_FROM_BLOCK_NUM(block_num) ((block_num)/(BLOCK_NUM_PER_CBMLIST))
 
 /* Max size of each bitmap file, in bytes. */
 #define MAXCBMFILESIZE (128 * 1024 * 1024)
@@ -161,14 +166,19 @@ typedef struct cbmpagetag {
 
 typedef struct cbmhashentry {
     CBMPageTag cbmTag;
-    Dllist pageDllist;
+    Dllist cbmSegPageList;
     int pageNum;
 } CbmHashEntry;
+
+typedef struct cbmsegpagelist {
+    int segIndex;
+    Dllist pageDllist;
+} CbmSegPageList;
 
 #define INIT_CBMPAGEENTRY(a)            \
     do {                                \
         (a)->pageNum = 0;               \
-        DLInitList(&((a)->pageDllist)); \
+        DLInitList(&((a)->cbmSegPageList)); \
     } while (0)
 
 #define INIT_CBMPAGEHEADER(a, xx_pagetag, xx_firstblkno) \
@@ -178,7 +188,7 @@ typedef struct cbmhashentry {
         (a)->pageType = PAGETYPE_MODIFY,                 \
         (a)->truncBlkNo = InvalidBlockNumber)
 
-#define CBM_PAGE_IS_DUMMY(a) ((RelFileNodeEquals((a)->rNode, InvalidRelFileNode)) && ((a)->forkNum = InvalidForkNumber))
+#define CBM_PAGE_IS_DUMMY(a) ((RelFileNodeEquals((a)->rNode, InvalidRelFileNode)) && ((a)->forkNum == InvalidForkNumber))
 
 #define INITCBMPAGEHASHSIZE 400
 
@@ -257,6 +267,10 @@ typedef struct cbmbitmapiterator {
     BlockNumber endBlkNo;
 } CBMBitmapIterator;
 
+/* for block number printed in tuple */
+#define MAX_STRLEN_PER_BLOCKNO 12
+#define MAX_BLOCKNO_PER_TUPLE ((MaxAllocSize - 1) / MAX_STRLEN_PER_BLOCKNO)
+
 #define INIT_CBMBITMAPITERATOR(a, xx_bitmap, xx_start, xx_end) \
     ((a).bitmap = (xx_bitmap), (a).nextBlkNo = (xx_start), (a).startBlkNo = (xx_start), (a).endBlkNo = (xx_end))
 
@@ -266,9 +280,10 @@ extern void CBMFollowXlog(void);
 extern void CBMGetMergedFile(XLogRecPtr startLSN, XLogRecPtr endLSN, char* mergedFileName);
 extern CBMArray* CBMGetMergedArray(XLogRecPtr startLSN, XLogRecPtr endLSN);
 extern void FreeCBMArray(CBMArray* cbmArray);
+extern CBMArray *SplitCBMArray(CBMArray **orgCBMArrayPtr);
 extern void CBMRecycleFile(XLogRecPtr targetLSN, XLogRecPtr* endLSN);
-extern void FreeCBMArray(CBMArray* cbmArray);
 extern XLogRecPtr ForceTrackCBMOnce(XLogRecPtr targetLSN, int timeOut, bool wait, bool lockHeld, bool isRecEnd = true);
 extern void advanceXlogPtrToNextPageIfNeeded(XLogRecPtr* recPtr);
+extern void cbm_rotate_file(XLogRecPtr rotateLsn);
 
 #endif

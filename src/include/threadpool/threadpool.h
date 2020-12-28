@@ -32,15 +32,20 @@
 #include "threadpool/threadpool_sessctl.h"
 #include "threadpool/threadpool_worker.h"
 #include "threadpool/threadpool_scheduler.h"
+#include "threadpool/threadpool_stream.h"
 
 #define ENABLE_THREAD_POOL (g_threadPoolControler != NULL)
 #define IS_THREAD_POOL_WORKER (t_thrd.role == THREADPOOL_WORKER)
+#define IS_THREAD_POOL_LISTENER (t_thrd.role == THREADPOOL_LISTENER)
+#define IS_THREAD_POOL_SCHEDULER (t_thrd.role == THREADPOOL_SCHEDULER)
+#define IS_THREAD_POOL_STREAM (t_thrd.role == THREADPOOL_STREAM)
 #define IS_THREAD_POOL_SESSION (u_sess->session_id > 0)
 #define BackendIdForTempRelations (ENABLE_THREAD_POOL ? (BackendId)u_sess->session_ctr_index : t_thrd.proc_cxt.MyBackendId)
 #define THREAD_CORE_RATIO 1
 #define DEFAULT_THREAD_POOL_SIZE 16
 #define DEFAULT_THREAD_POOL_GROUPS 2
 #define MAX_THREAD_POOL_SIZE 4096
+#define MAX_STREAM_POOL_SIZE 16384
 #define MAX_THREAD_POOL_GROUPS 64
 
 extern ThreadPoolControler* g_threadPoolControler;
@@ -50,5 +55,8 @@ extern void BackendWorkerIAm();
 /* Interface for thread pool listener */
 extern void TpoolListenerMain(ThreadPoolListener* listener);
 extern void ThreadPoolListenerIAm();
+
+extern void PreventSignal();
+extern void AllowSignal();
 
 #endif /* THREAD_POOL_H */

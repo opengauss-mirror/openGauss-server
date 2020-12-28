@@ -28,8 +28,6 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
-#include <time.h>
-#include <unistd.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 
@@ -72,52 +70,6 @@
 
 #define ERROR_BUF_SIZE 1024
 
-const uint64 PROTO_HEADER_MAGICNUM = 0x123456789ABCDEF0;
-typedef struct {
-    bool inited;
-    uint16 ver;
-
-    /* rotation request */
-    volatile sig_atomic_t rotation_requested;
-
-    /* to flush buffer request */
-    volatile sig_atomic_t flush_requested;
-
-    /* log directory */
-    char* log_dir;
-
-    /* pattern of log file name */
-    char* filename_pattern;
-    char* file_suffix;
-
-    /* current log file name and its fd */
-    char* now_file_name;
-    FILE* now_file_fd;
-
-    /* log chunk buffer */
-    char* log_buf;
-    int cur_len;
-    int max_len;
-} LogControlData;
-
-/*
- * they are accessed only by syslogger thread.
- * so THR_LOCAL modifier is not needed.
- */
-static LogControlData pLogCtl = {false, /* inited */
-    PROFILE_LOG_VERSION,                /* current version */
-    false,                              /* rotation_requested */
-    false,                              /* request to flush buffered data, but not to rotate log file */
-    NULL,                               /* log_dir */
-    NULL,                               /* filename_pattern */
-    NULL,                               /* filename suffix */
-    NULL,                               /* now_file_name */
-    NULL,                               /* now_file_fd */
-
-    /* log chunk buffer */
-    NULL,
-    0,
-    0};
 static char logCtlTimeZone[TZ_STRLEN_MAX + 1] = {0};
 static char logCtlHostName[LOG_MAX_NODENAME_LEN] = {0};
 static char logCtlNodeName[LOG_MAX_NODENAME_LEN] = {0};
@@ -126,6 +78,8 @@ static char logCtlNodeName[LOG_MAX_NODENAME_LEN] = {0};
 static LogControlData* allLogCtl[LOG_TYPE_MAXVALID + 1] = {
     NULL, /* LOG_TYPE_ELOG */
     NULL, /* LOG_TYPE_PLOG */
+    NULL, /* LOG_TYPE_PLAN_LOG */
+    NULL, /* LOG_TYPE_ASP_LOG */
     NULL  /* LOG_TYPE_MAXVALID */
 };
 
@@ -172,7 +126,9 @@ static void open_csvlogfile(void);
 #ifdef ENABLE_UT
 #define static
 #endif
+
 static FILE* logfile_open(const char* filename, const char* mode, bool allow_errors);
+
 #if defined(ENABLE_UT) && defined(static)
 #undef static
 #endif
@@ -196,6 +152,8 @@ static void LogCtlFlushBuf(LogControlData* logctl);
 static char* LogCtlGetFilenamePattern(const char* post_suffix);
 static void LogCtlProcessInput(LogControlData* logctl, const char* msg, int len);
 static void PLogCtlInit(void);
+static void slow_query_logfile_rotate(bool time_based_rotation, int size_rotation_for);
+static void asp_logfile_rotate(bool time_based_rotation, int size_rotation_for);
 
 /*
  * Main entry point for syslogger process
@@ -213,6 +171,8 @@ NON_EXEC_STATIC void SysLoggerMain(int fd)
     int currentLogRotationAge;
     pg_time_t now;
 
+    DISABLE_MEMORY_PROTECT();
+
     IsUnderPostmaster = true; /* we are a postmaster subprocess now */
 
     t_thrd.proc_cxt.MyProcPid = gs_thread_self(); /* reset t_thrd.proc_cxt.MyProcPid */
@@ -220,7 +180,7 @@ NON_EXEC_STATIC void SysLoggerMain(int fd)
     t_thrd.proc_cxt.MyStartTime = time(NULL); /* set our start time in case we call elog */
     now = t_thrd.proc_cxt.MyStartTime;
 
-    knl_thread_set_name("SysLogger");
+    t_thrd.proc_cxt.MyProgName = "syslogger";
 
     t_thrd.myLogicTid = noProcLogicTid + SYSLOGGER_LID;
 
@@ -228,32 +188,7 @@ NON_EXEC_STATIC void SysLoggerMain(int fd)
 
     t_thrd.role = SYSLOGGER;
 
-    init_ps_display("SysLogger process", "", "", "");
-
-    /*
-     * If we restarted, our stderr is already redirected into our own input
-     * pipe.  This is of course pretty useless, not to mention that it
-     * interferes with detecting pipe EOF.	Point stderr to /dev/null. This
-     * assumes that all interesting messages generated in the syslogger will
-     * come through elog.c and will be sent to write_syslogger_file.
-     */
-    if (t_thrd.postmaster_cxt.redirection_done) {
-        int fd = open(DEVNULL, O_WRONLY, 0);
-
-        /*
-         * The closes might look redundant, but they are not: we want to be
-         * darn sure the pipe gets closed even if the open failed.	We can
-         * survive running with stderr pointing nowhere, but we can't afford
-         * to have extra pipe input descriptors hanging around.
-         */
-        close(fileno(stdout));
-        close(fileno(stderr));
-        if (fd != -1) {
-            dup2(fd, fileno(stdout));
-            dup2(fd, fileno(stderr));
-            close(fd);
-        }
-    }
+    init_ps_display("logger process", "", "", "");
 
     /*
      * Syslogger's own stderr can't be the syslogPipe, so set it back to text
@@ -323,6 +258,20 @@ NON_EXEC_STATIC void SysLoggerMain(int fd)
 #endif /* WIN32 */
 
     PLogCtlInit();
+    /* create slow query directory */
+    if (g_instance.attr.attr_common.query_log_directory == NULL) {
+        init_instr_log_directory(true, SLOWQUERY_LOG_TAG);
+    } else {
+        (void)pg_mkdir_p(g_instance.attr.attr_common.query_log_directory, S_IRWXU);
+    }
+
+    /* create asp directory */
+    if (g_instance.attr.attr_common.asp_log_directory == NULL) {
+        init_instr_log_directory(true, ASP_LOG_TAG);
+    } else {
+        (void)pg_mkdir_p(g_instance.attr.attr_common.asp_log_directory, S_IRWXU);
+    }
+
     /* init the other logs */
     /*
      * Remember active logfile's name.  We recompute this from the reference
@@ -340,10 +289,8 @@ NON_EXEC_STATIC void SysLoggerMain(int fd)
          * fd leaking maybe happens when syslogger thread is
          * restarted repeated by postmaster thread if exception occurs.
          * maybe include switch over case.
+         * if the thread restarted, the original memory context must be deleted and need not free the memory 
          */
-        if (logctl->now_file_name != NULL) {
-            pfree_ext(logctl->now_file_name);
-        }
         logctl->now_file_name =
             logfile_getname(t_thrd.logger.first_syslogger_file_time, NULL, logctl->log_dir, logctl->filename_pattern);
 
@@ -449,6 +396,7 @@ NON_EXEC_STATIC void SysLoggerMain(int fd)
 
         if (!t_thrd.logger.rotation_requested && u_sess->attr.attr_common.Log_RotationSize > 0 &&
             !t_thrd.logger.rotation_disabled) {
+            
             /* Do a rotation if file is too big */
             if (ftell(t_thrd.logger.syslogFile) >= u_sess->attr.attr_common.Log_RotationSize * 1024L) {
                 t_thrd.logger.rotation_requested = true;
@@ -458,6 +406,16 @@ NON_EXEC_STATIC void SysLoggerMain(int fd)
                 ftell(t_thrd.logger.csvlogFile) >= u_sess->attr.attr_common.Log_RotationSize * 1024L) {
                 t_thrd.logger.rotation_requested = true;
                 size_rotation_for |= LOG_DESTINATION_CSVLOG;
+            }
+            if (t_thrd.logger.querylogFile != NULL &&
+                ftell(t_thrd.logger.querylogFile) >= u_sess->attr.attr_common.Log_RotationSize * 1024L) {
+                t_thrd.logger.rotation_requested = true;
+                size_rotation_for |= LOG_DESTINATION_QUERYLOG;
+            }
+            if (t_thrd.logger.asplogFile != NULL &&
+                ftell(t_thrd.logger.asplogFile) >= u_sess->attr.attr_common.Log_RotationSize * 1024L) {
+                t_thrd.logger.rotation_requested = true;
+                size_rotation_for |= LOG_DESTINATION_ASPLOG;
             }
         }
 
@@ -475,7 +433,12 @@ NON_EXEC_STATIC void SysLoggerMain(int fd)
              * was sent by pg_rotate_logfile.
              */
             if (!time_based_rotation && size_rotation_for == 0)
-                size_rotation_for = LOG_DESTINATION_STDERR | LOG_DESTINATION_CSVLOG;
+                size_rotation_for = LOG_DESTINATION_STDERR | LOG_DESTINATION_CSVLOG |
+                    LOG_DESTINATION_QUERYLOG | LOG_DESTINATION_ASPLOG;
+            asp_logfile_rotate(time_based_rotation, size_rotation_for);
+            slow_query_logfile_rotate(time_based_rotation, size_rotation_for);
+            
+            /* only last one can recalculate next_rotation_time */
             logfile_rotate(time_based_rotation, size_rotation_for);
         }
 
@@ -567,7 +530,7 @@ NON_EXEC_STATIC void SysLoggerMain(int fd)
              * seeing this message on the real stderr is annoying - so we make
              * it DEBUG1 to suppress in normal use.
              */
-            ereport(DEBUG1, (errmsg("SysLogger shutting down")));
+            ereport(DEBUG1, (errmsg("logger shutting down")));
 
             /*
              * Normal exit from the syslogger is here.	Note that we
@@ -628,7 +591,6 @@ ThreadId SysLogger_Start(void)
      * Create log directory if not present; ignore errors
      */
     (void)pg_mkdir_p(u_sess->attr.attr_common.Log_directory, S_IRWXU);
-
     /* create log directory */
     LogCtlCreateLogParentDirectory();
     /* set global names from postmaster */
@@ -781,7 +743,6 @@ static bool CheckPipeProtoHeader(const LogPipeProtoHeader p)
         return true;
     return false;
 }
-
 /* --------------------------------
  *		pipe protocol handling
  * --------------------------------
@@ -823,6 +784,7 @@ static void process_pipe_input(char* logbuffer, int* bytes_in_logbuffer)
         /* Do we have a valid header? */
         errno_t rcs = memcpy_s(&p, sizeof(LogPipeProtoHeader), cursor, sizeof(LogPipeProtoHeader));
         securec_check(rcs, "\0", "\0");
+
         if (CheckPipeProtoHeader(p) == true) {
             List* buffer_list = NULL;
             ListCell* cell = NULL;
@@ -836,8 +798,13 @@ static void process_pipe_input(char* logbuffer, int* bytes_in_logbuffer)
             if (count < chunklen)
                 break;
 
-            if (p.logtype == LOG_TYPE_ELOG) {
-                dest = (p.is_last == 'T' || p.is_last == 'F') ? LOG_DESTINATION_CSVLOG : LOG_DESTINATION_STDERR;
+            if (p.logtype == LOG_TYPE_ELOG || p.logtype == LOG_TYPE_PLAN_LOG || p.logtype == LOG_TYPE_ASP_LOG) {
+                if (p.logtype == LOG_TYPE_PLAN_LOG)
+                    dest = LOG_DESTINATION_QUERYLOG;
+                else if (p.logtype == LOG_TYPE_ASP_LOG)
+                    dest = LOG_DESTINATION_ASPLOG;
+                else
+                    dest = (p.is_last == 'T' || p.is_last == 'F') ? LOG_DESTINATION_CSVLOG : LOG_DESTINATION_STDERR;
 
                 /* Locate any existing buffer for this source pid */
                 buffer_list = t_thrd.logger.buffer_lists[p.pid % NBUFFER_LISTS];
@@ -986,11 +953,17 @@ void write_syslogger_file(char* buffer, int count, int destination)
 {
     int rc;
     FILE* logfile = NULL;
+    bool            doOpen = false;
 
     if (destination == LOG_DESTINATION_CSVLOG && t_thrd.logger.csvlogFile == NULL)
         open_csvlogfile();
 
-    logfile = destination == LOG_DESTINATION_CSVLOG ? t_thrd.logger.csvlogFile : t_thrd.logger.syslogFile;
+    if (destination == LOG_DESTINATION_QUERYLOG)
+        logfile = (FILE *)SQMOpenLogFile(&doOpen);
+    else if (destination == LOG_DESTINATION_ASPLOG)
+        logfile = (FILE *)ASPOpenLogFile(&doOpen);
+    else
+        logfile = (destination == LOG_DESTINATION_CSVLOG) ? t_thrd.logger.csvlogFile : t_thrd.logger.syslogFile;
 
     errno = 0;
 retry1:
@@ -1062,6 +1035,10 @@ static unsigned int __stdcall pipeThread(void* arg)
          */
         if (u_sess->attr.attr_common.Log_RotationSize > 0) {
             if (ftell(t_thrd.logger.syslogFile) >= u_sess->attr.attr_common.Log_RotationSize * 1024L ||
+                (t_thrd.logger.querylogFile != NULL &&
+                    ftell(t_thrd.logger.querylogFile) >= u_sess->attr.attr_common.Log_RotationSize * 1024L) ||
+                (t_thrd.logger.asplogFile != NULL &&
+                    ftell(t_thrd.logger.asplogFile) >= u_sess->attr.attr_common.Log_RotationSize * 1024L) ||
                 (t_thrd.logger.csvlogFile != NULL &&
                     ftell(t_thrd.logger.csvlogFile) >= u_sess->attr.attr_common.Log_RotationSize * 1024L))
                 SetLatch(&t_thrd.logger.sysLoggerLatch);
@@ -1130,8 +1107,9 @@ static FILE* logfile_open(const char* filename, const char* mode, bool allow_err
         ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("group_name can not be NULL ")));
     }
 
-    if (stat(filename, &checkdir) == 0)
+    if (stat(filename, &checkdir) == 0) {
         dirIsExist = true;
+    }
 
     fh = fopen(filename, mode);
 
@@ -1356,8 +1334,9 @@ static void set_next_rotation_time(void)
     rotinterval = u_sess->attr.attr_common.Log_RotationAge * SECS_PER_MINUTE; /* convert to seconds */
     now = (pg_time_t)time(NULL);
     tm_t = pg_localtime(&now, log_timezone);
-    if (NULL == tm_t)
+    if (NULL == tm_t) {
         return;
+    }
     now += tm_t->tm_gmtoff;
     now -= now % rotinterval;
     now += rotinterval;
@@ -1757,44 +1736,43 @@ static char* LogCtlGetFilenamePattern(const char* post_suffix)
  */
 static void PLogCtlInit(void)
 {
-    if (NULL == allLogCtl[LOG_TYPE_PLOG]) {
-        pLogCtl.ver = PROFILE_LOG_VERSION;
-        pLogCtl.rotation_requested = false;
-        pLogCtl.flush_requested = false;
+    t_thrd.log_cxt.pLogCtl = (LogControlData*)palloc0(sizeof(LogControlData));
+    t_thrd.log_cxt.pLogCtl->ver = PROFILE_LOG_VERSION;
+    t_thrd.log_cxt.pLogCtl->rotation_requested = false;
+    t_thrd.log_cxt.pLogCtl->flush_requested = false;
 
-        if (NULL == pLogCtl.log_dir) {
-            pLogCtl.log_dir = LogCtlGetLogDirectory(PROFILE_LOG_TAG, true);
-            if (0 == mkdir(pLogCtl.log_dir, S_IRWXU) || (EEXIST == errno)) {
-                /* make sure dir permition is 750 */
-                (void)chmod(pLogCtl.log_dir, S_IRWXU | S_IRGRP | S_IXGRP);
-            } else {
-                /* this directory may be created already, don't care this case */
-                if (EEXIST != errno) {
-                    ereport(FATAL,
-                        (errmsg(
-                            "ERROR: could not create directory \"%s\": %s\n", PROFILE_LOG_TAG, gs_strerror(errno))));
-                }
+    if (NULL == t_thrd.log_cxt.pLogCtl->log_dir) {
+        t_thrd.log_cxt.pLogCtl->log_dir = LogCtlGetLogDirectory(PROFILE_LOG_TAG, true);
+        if (0 == mkdir(t_thrd.log_cxt.pLogCtl->log_dir, S_IRWXU) || (EEXIST == errno)) {
+            /* make sure dir permition is 700 */
+            (void)chmod(t_thrd.log_cxt.pLogCtl->log_dir, S_IRWXU);
+        } else {
+            /* this directory may be created already, don't care this case */
+            if (EEXIST != errno) {
+                ereport(FATAL,
+                    (errmsg(
+                        "ERROR: could not create directory \"%s\": %s\n", PROFILE_LOG_TAG, gs_strerror(errno))));
             }
         }
-
-        if (NULL == pLogCtl.filename_pattern) {
-            pLogCtl.file_suffix = PROFILE_LOG_SUFFIX;
-            /* plog file pattern should be the same with error log, but post suffix */
-            pLogCtl.filename_pattern = LogCtlGetFilenamePattern(PROFILE_LOG_SUFFIX);
-            pLogCtl.now_file_name = NULL;
-            pLogCtl.now_file_fd = NULL;
-        }
-
-        if (NULL == pLogCtl.log_buf) {
-            pLogCtl.log_buf = (char*)palloc(READ_BUF_SIZE);
-            pLogCtl.max_len = READ_BUF_SIZE;
-            pLogCtl.cur_len = 0;
-        }
-
-        /* do the last two steps */
-        pLogCtl.inited = true;
-        allLogCtl[LOG_TYPE_PLOG] = &pLogCtl;
     }
+
+    if (NULL == t_thrd.log_cxt.pLogCtl->filename_pattern) {
+        t_thrd.log_cxt.pLogCtl->file_suffix = PROFILE_LOG_SUFFIX;
+        /* plog file pattern should be the same with error log, but post suffix */
+        t_thrd.log_cxt.pLogCtl->filename_pattern = LogCtlGetFilenamePattern(PROFILE_LOG_SUFFIX);
+        t_thrd.log_cxt.pLogCtl->now_file_name = NULL;
+        t_thrd.log_cxt.pLogCtl->now_file_fd = NULL;
+    }
+
+    if (NULL == t_thrd.log_cxt.pLogCtl->log_buf) {
+        t_thrd.log_cxt.pLogCtl->log_buf = (char*)palloc(READ_BUF_SIZE);
+        t_thrd.log_cxt.pLogCtl->max_len = READ_BUF_SIZE;
+        t_thrd.log_cxt.pLogCtl->cur_len = 0;
+    }
+
+    /* do the last two steps */
+    t_thrd.log_cxt.pLogCtl->inited = true;
+    allLogCtl[LOG_TYPE_PLOG] = t_thrd.log_cxt.pLogCtl;
 }
 
 /*
@@ -1811,19 +1789,13 @@ static void LogCtlCreateLogParentDirectory(void)
     logdir = LogCtlGetLogDirectory(PROFILE_LOG_TAG, false);
     if (0 == mkdir(logdir, S_IRWXU) || (EEXIST == errno)) {
         /*
-         * make sure dir permition is 750.
+         * make sure dir permition is 700.
          * parent directory may be created by OM tool. if not so
          * chmod() may be called by many process, and it maybe failed.
          * ignore its returned value of this case.
          */
-        (void)chmod(logdir, S_IRWXU | S_IRGRP | S_IXGRP);
-    }  else if (EEXIST != errno) {
-        /* this directory may be created already, don't care this case */
-        ereport(FATAL,
-                (errmsg(
-                "could not create directory \"%s\": %s\n", logdir, gs_strerror(errno))));
+        (void)chmod(logdir, S_IRWXU);
     }
-
     pfree(logdir);
 
     /* for the other log types */
@@ -1859,5 +1831,240 @@ void LogCtlLastFlushBeforePMExit(void)
          * memory and fd will be released because
          * the whole process is exiting.
          */
+    }
+}
+
+void* ASPOpenLogFile(bool *doOpen)
+{
+    if (doOpen != NULL) {
+        *doOpen = false;
+    }
+
+    if (t_thrd.logger.asplogFile == NULL) {
+        char *filename = logfile_getname(time(NULL), ".log",
+            g_instance.attr.attr_common.asp_log_directory, u_sess->attr.attr_common.asp_log_filename);
+        t_thrd.logger.asplogFile = logfile_open(filename, "a", false);
+
+        if (t_thrd.logger.last_asp_file_name != NULL) /* probably shouldn't happen */
+            pfree(t_thrd.logger.last_asp_file_name);
+        t_thrd.logger.last_asp_file_name = filename;
+        if (doOpen != NULL) {
+            *doOpen = true;
+        }
+    }
+    return (void *)t_thrd.logger.asplogFile;
+}
+
+void ASPCloseLogFile()
+{
+    if (t_thrd.logger.asplogFile != NULL) {
+        fclose(t_thrd.logger.asplogFile);
+        t_thrd.logger.asplogFile = NULL;
+    }
+}
+
+/*
+ *  * perform logfile rotation
+ *   */
+static void asp_logfile_rotate(bool time_based_rotation, int size_rotation_for)
+{
+    char* aspFilename = NULL;
+    pg_time_t fntime;
+    FILE* fh = NULL;
+
+    t_thrd.logger.rotation_requested = false;
+
+    /*
+     * When doing a time-based rotation, invent the new logfile name based on
+     * the planned rotation time, not current time, to avoid "slippage" in the
+     * file name when we don't do the rotation immediately.
+     */
+    if (time_based_rotation)
+        fntime = t_thrd.logger.next_rotation_time;
+    else
+        fntime = time(NULL);
+    aspFilename =
+        logfile_getname(time(NULL), ".log",
+            g_instance.attr.attr_common.asp_log_directory,
+            u_sess->attr.attr_common.asp_log_filename);
+    /*
+     * Decide whether to overwrite or append.  We can overwrite if (a)
+     * Log_truncate_on_rotation is set, (b) the rotation was triggered by
+     * elapsed time and not something else, and (c) the computed file name is
+     * different from what we were previously logging into.
+     *
+     * Note: t_thrd.logger.last_file_name should never be NULL here, but if it is, append.
+     */
+    if ((time_based_rotation || (size_rotation_for & LOG_DESTINATION_ASPLOG)) && pmState == PM_RUN) {
+        if (u_sess->attr.attr_common.Log_truncate_on_rotation && time_based_rotation &&
+            t_thrd.logger.asplogFile != NULL && strcmp(aspFilename, t_thrd.logger.last_asp_file_name) != 0) {
+            fh = logfile_open(aspFilename, "w", true);
+        } else {
+            fh = logfile_open(aspFilename, "a", true);
+        }
+        if (fh == NULL) {
+            /*
+             * ENFILE/EMFILE are not too surprising on a busy system; just
+             * keep using the old file till we manage to get a new one.
+             * Otherwise, assume something's wrong with Log_directory and stop
+             * trying to create files.
+             */
+            if (errno != ENFILE && errno != EMFILE) {
+                ereport(LOG, (errmsg("disabling automatic rotation (use SIGHUP to re-enable)")));
+                t_thrd.logger.rotation_disabled = true;
+            }
+
+            if (aspFilename != NULL)
+                pfree(aspFilename);
+            return;
+        }
+
+        if (t_thrd.logger.asplogFile != NULL) {
+            fclose(t_thrd.logger.asplogFile);
+        }
+
+        t_thrd.logger.asplogFile = fh;
+
+        /* instead of pfree'ing filename, remember it for next time */
+        if (t_thrd.logger.last_asp_file_name != NULL)
+            pfree(t_thrd.logger.last_asp_file_name);
+        t_thrd.logger.last_asp_file_name = aspFilename;
+        aspFilename = NULL;
+    }
+
+    if (aspFilename != NULL) {
+        pfree(aspFilename);
+    }
+}
+
+void* SQMOpenLogFile(bool *doOpen)
+{
+    if (doOpen != NULL)
+        *doOpen = false;
+
+    if (t_thrd.logger.querylogFile == NULL) {
+        char *filename = logfile_getname(time(NULL), ".log",
+                                         g_instance.attr.attr_common.query_log_directory,
+                                         u_sess->attr.attr_common.query_log_file);
+        t_thrd.logger.querylogFile = logfile_open(filename, "a", false);
+        pfree(filename);
+        if (doOpen != NULL) {
+            *doOpen = true;
+        }
+    }
+    return (void *)t_thrd.logger.querylogFile;
+}
+
+void SQMCloseLogFile()
+{
+    if (t_thrd.logger.querylogFile != NULL) {
+        fclose(t_thrd.logger.querylogFile);
+        t_thrd.logger.querylogFile = NULL;
+    }
+}
+
+static void slow_query_logfile_rotate(bool time_based_rotation, int size_rotation_for)
+{
+    char* queryFilename = NULL;
+    pg_time_t fntime;
+    FILE* fh = NULL;
+
+    t_thrd.logger.rotation_requested = false;
+
+    /*
+     * When doing a time-based rotation, invent the new logfile name based on
+     * the planned rotation time, not current time, to avoid "slippage" in the
+     * file name when we don't do the rotation immediately.
+     */
+    if (time_based_rotation)
+        fntime = t_thrd.logger.next_rotation_time;
+    else
+        fntime = time(NULL);
+    queryFilename =
+        logfile_getname(time(NULL), ".log", g_instance.attr.attr_common.query_log_directory, u_sess->attr.attr_common.query_log_file);
+    /*
+     * Decide whether to overwrite or append.  We can overwrite if (a)
+     * Log_truncate_on_rotation is set, (b) the rotation was triggered by
+     * elapsed time and not something else, and (c) the computed file name is
+     * different from what we were previously logging into.
+     *
+     * Note: t_thrd.logger.last_file_name should never be NULL here, but if it is, append.
+     */
+    if ((time_based_rotation || (size_rotation_for & LOG_DESTINATION_QUERYLOG)) && pmState == PM_RUN) {
+        if (u_sess->attr.attr_common.Log_truncate_on_rotation && time_based_rotation &&
+            t_thrd.logger.querylogFile != NULL && strcmp(queryFilename, t_thrd.logger.last_query_log_file_name) != 0) {
+            fh = logfile_open(queryFilename, "w", true);
+        } else {
+            fh = logfile_open(queryFilename, "a", true);
+        }
+
+        if (fh == NULL) {
+            /*
+             * ENFILE/EMFILE are not too surprising on a busy system; just
+             * keep using the old file till we manage to get a new one.
+             * Otherwise, assume something's wrong with Log_directory and stop
+             * trying to create files.
+             */
+            if (errno != ENFILE && errno != EMFILE) {
+                ereport(LOG, (errmsg("disabling automatic rotation (use SIGHUP to re-enable)")));
+                t_thrd.logger.rotation_disabled = true;
+            }
+
+            if (queryFilename != NULL)
+                pfree(queryFilename);
+            return;
+        }
+
+        if (t_thrd.logger.querylogFile != NULL) {
+            fclose(t_thrd.logger.querylogFile);
+        }
+
+        t_thrd.logger.querylogFile = fh;
+
+        /* instead of pfree'ing filename, remember it for next time */
+        if (t_thrd.logger.last_query_log_file_name != NULL)
+            pfree(t_thrd.logger.last_query_log_file_name);
+        t_thrd.logger.last_query_log_file_name = queryFilename;
+        queryFilename = NULL;
+    }
+
+    if (queryFilename != NULL)
+        pfree(queryFilename);
+}
+
+void init_instr_log_directory(bool include_nodename, const char* logid)
+{
+    /* create directory for aspy & slow query log */
+    char* logdir = NULL;
+    logdir = LogCtlGetLogDirectory(logid, include_nodename);
+
+    if (pg_mkdir_p(logdir, S_IRWXU) == 0 || (errno == EEXIST)) {
+        /*
+         * make sure dir permition is 700.
+         * parent directory may be created by OM tool. if not so
+         * chmod() may be called by many process, and it maybe failed.
+         * ignore its returned value of this case.
+         */
+        (void)chmod(logdir, S_IRWXU);
+    } else {
+        /* this directory may be created already, don't care this case */
+        if (errno != EEXIST) {
+            pfree(logdir);
+            ereport(FATAL,
+                (errmsg(
+                    "ERROR: could not create instr log directory \"%s\": %s\n", logid, gs_strerror(errno))));
+        }
+    }
+
+    if (include_nodename) {
+        if (strcmp(logid, ASP_LOG_TAG) == 0) {
+            g_instance.attr.attr_common.asp_log_directory = logdir;
+        } else if (strcmp(logid, SLOWQUERY_LOG_TAG) == 0) {
+            g_instance.attr.attr_common.query_log_directory = logdir;
+        } else if (strcmp(logid, PERF_JOB_TAG) == 0) {
+            g_instance.attr.attr_common.Perf_directory = logdir;
+        }
+    } else {
+        pfree(logdir);
     }
 }

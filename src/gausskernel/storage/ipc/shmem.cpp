@@ -67,7 +67,7 @@
 
 #include "access/transam.h"
 #include "miscadmin.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 #include "storage/pg_shmem.h"
 #include "storage/shmem.h"
 #include "storage/spin.h"
@@ -122,9 +122,9 @@ void InitShmemAllocation(void)
      */
     t_thrd.xact_cxt.ShmemVariableCache = (VariableCache)ShmemAlloc(sizeof(*t_thrd.xact_cxt.ShmemVariableCache));
     errno_t rc = memset_s(t_thrd.xact_cxt.ShmemVariableCache,
-        sizeof(*t_thrd.xact_cxt.ShmemVariableCache),
-        0,
-        sizeof(*t_thrd.xact_cxt.ShmemVariableCache));
+                          sizeof(*t_thrd.xact_cxt.ShmemVariableCache),
+                          0,
+                          sizeof(*t_thrd.xact_cxt.ShmemVariableCache));
     securec_check(rc, "\0", "\0");
 }
 
@@ -279,10 +279,10 @@ void InitShmemIndex(void)
  * for NULL.
  */
 HTAB* ShmemInitHash(const char* name, /* table string name for shmem index */
-    long init_size,                   /* initial table size */
-    long max_size,                    /* max size of the table */
-    HASHCTL* infoP,                   /* info about key and bucket size */
-    int hash_flags)                   /* info about infoP */
+                    long init_size,                   /* initial table size */
+                    long max_size,                    /* max size of the table */
+                    HASHCTL* infoP,                   /* info about key and bucket size */
+                    int hash_flags)                   /* info about infoP */
 {
     bool found = false;
     void* location = NULL;
@@ -343,10 +343,10 @@ static void InitHeapmemIndex(void)
     if (structPtr == NULL) {
         LWLockRelease(ShmemIndexLock);
         ereport(ERROR,
-            (errcode(ERRCODE_OUT_OF_MEMORY),
-                errmsg("can not malloc memory for HeapmemIndex"
-                       "HeapmemIndex (%lu bytes requested)",
-                    (unsigned long)size)));
+                (errcode(ERRCODE_OUT_OF_MEMORY),
+                 errmsg("can not malloc memory for HeapmemIndex"
+                        "HeapmemIndex (%lu bytes requested)",
+                        (unsigned long)size)));
     }
 
     /* Pass location of hashtable header to hash_create */
@@ -373,8 +373,8 @@ void* HeapmemInitStruct(const char* name, Size size, bool* foundPtr)
     if (result == NULL) {
         LWLockRelease(ShmemIndexLock);
         ereport(ERROR,
-            (errcode(ERRCODE_OUT_OF_MEMORY),
-                errmsg("could not create HeapMemIndex entry for data structure \"%s\"", name)));
+                (errcode(ERRCODE_OUT_OF_MEMORY),
+                 errmsg("could not create HeapMemIndex entry for data structure \"%s\"", name)));
     }
 
     if (*foundPtr) {
@@ -386,12 +386,12 @@ void* HeapmemInitStruct(const char* name, Size size, bool* foundPtr)
         if (result->size != size) {
             LWLockRelease(ShmemIndexLock);
             ereport(ERROR,
-                (errcode(ERRCODE_STRING_DATA_LENGTH_MISMATCH),
-                    errmsg("HeapMemIndex entry size is wrong for data structure"
-                           " \"%s\": expected %lu, actual %lu",
-                        name,
-                        (unsigned long)size,
-                        (unsigned long)result->size)));
+                    (errcode(ERRCODE_STRING_DATA_LENGTH_MISMATCH),
+                     errmsg("HeapMemIndex entry size is wrong for data structure"
+                            " \"%s\": expected %lu, actual %lu",
+                            name,
+                            (unsigned long)size,
+                            (unsigned long)result->size)));
         }
 
         structPtr = result->location;
@@ -403,11 +403,11 @@ void* HeapmemInitStruct(const char* name, Size size, bool* foundPtr)
             hash_search(HeapmemIndex, name, HASH_REMOVE, NULL);
             LWLockRelease(ShmemIndexLock);
             ereport(ERROR,
-                (errcode(ERRCODE_OUT_OF_MEMORY),
-                    errmsg("not enough heap memory for data structure"
-                           " \"%s\" (%lu bytes requested)",
-                        name,
-                        (unsigned long)size)));
+                    (errcode(ERRCODE_OUT_OF_MEMORY),
+                     errmsg("not enough heap memory for data structure"
+                            " \"%s\" (%lu bytes requested)",
+                            name,
+                            (unsigned long)size)));
         }
 
         result->size = size;
@@ -420,10 +420,10 @@ void* HeapmemInitStruct(const char* name, Size size, bool* foundPtr)
 }
 
 HTAB* HeapMemInitHash(const char* name, /* table string name for shmem index */
-    long init_size,                     /* initial table size */
-    long max_size,                      /* max size of the table */
-    HASHCTL* infoP,                     /* info about key and bucket size */
-    int hash_flags)                     /* info about infoP */
+                      long init_size,                     /* initial table size */
+                      long max_size,                      /* max size of the table */
+                      HASHCTL* infoP,                     /* info about key and bucket size */
+                      int hash_flags)                     /* info about infoP */
 {
     bool found = false;
     void* location = NULL;
@@ -521,11 +521,11 @@ void* ShmemInitStruct(const char* name, Size size, bool* foundPtr)
             if (structPtr == NULL) {
                 LWLockRelease(ShmemIndexLock);
                 ereport(ERROR,
-                    (errcode(ERRCODE_OUT_OF_MEMORY),
-                        errmsg("not enough shared memory for data structure"
-                               " \"%s\" (%lu bytes requested)",
-                            name,
-                            (unsigned long)size)));
+                        (errcode(ERRCODE_OUT_OF_MEMORY),
+                         errmsg("not enough shared memory for data structure"
+                                " \"%s\" (%lu bytes requested)",
+                                name,
+                                (unsigned long)size)));
             }
 
             shmemseghdr->index = structPtr;
@@ -541,8 +541,8 @@ void* ShmemInitStruct(const char* name, Size size, bool* foundPtr)
     if (result == NULL) {
         LWLockRelease(ShmemIndexLock);
         ereport(ERROR,
-            (errcode(ERRCODE_OUT_OF_MEMORY),
-                errmsg("could not create ShmemIndex entry for data structure \"%s\"", name)));
+                (errcode(ERRCODE_OUT_OF_MEMORY),
+                 errmsg("could not create ShmemIndex entry for data structure \"%s\"", name)));
     }
 
     if (*foundPtr) {
@@ -554,12 +554,12 @@ void* ShmemInitStruct(const char* name, Size size, bool* foundPtr)
         if (result->size != size) {
             LWLockRelease(ShmemIndexLock);
             ereport(ERROR,
-                (errcode(ERRCODE_STRING_DATA_LENGTH_MISMATCH),
-                    errmsg("ShmemIndex entry size is wrong for data structure"
-                           " \"%s\": expected %lu, actual %lu",
-                        name,
-                        (unsigned long)size,
-                        (unsigned long)result->size)));
+                    (errcode(ERRCODE_STRING_DATA_LENGTH_MISMATCH),
+                     errmsg("ShmemIndex entry size is wrong for data structure"
+                            " \"%s\": expected %lu, actual %lu",
+                            name,
+                            (unsigned long)size,
+                            (unsigned long)result->size)));
         }
 
         structPtr = result->location;
@@ -571,11 +571,11 @@ void* ShmemInitStruct(const char* name, Size size, bool* foundPtr)
             hash_search(t_thrd.shemem_ptr_cxt.ShmemIndex, name, HASH_REMOVE, NULL);
             LWLockRelease(ShmemIndexLock);
             ereport(ERROR,
-                (errcode(ERRCODE_OUT_OF_MEMORY),
-                    errmsg("not enough shared memory for data structure"
-                           " \"%s\" (%lu bytes requested)",
-                        name,
-                        (unsigned long)size)));
+                    (errcode(ERRCODE_OUT_OF_MEMORY),
+                     errmsg("not enough shared memory for data structure"
+                            " \"%s\" (%lu bytes requested)",
+                            name,
+                            (unsigned long)size)));
         }
 
         result->size = size;

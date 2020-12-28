@@ -70,6 +70,8 @@ typedef enum /* bits returned by set_dump_section */
     DUMP_POST_DATA = 0x04,
     DUMP_UNSECTIONED = 0xff } DumpSections;
 
+/* dump and restore version string*/
+#define GS_DUMP_RESTORE_VERSION "Gauss MPPDB Tools V100R003C00B540"
 #define GS_FREE(ptr)            \
     do {                        \
         if (NULL != (ptr)) {    \

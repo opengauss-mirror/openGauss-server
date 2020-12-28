@@ -961,7 +961,11 @@ static void make_oper_cache_entry(OprCacheKey* key, Oid opr_oid)
 {
     OprCacheEntry* oprentry = NULL;
 
-    AssertEreport(u_sess->parser_cxt.opr_cache_hash != NULL, MOD_OPT, "");
+    if (unlikely(u_sess->parser_cxt.opr_cache_hash == NULL)) {
+        ereport(ERROR, 
+            (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
+                errmsg("u_sess->parser_cxt.opr_cache_hash should not be null")));
+    }
 
     oprentry = (OprCacheEntry*)hash_search(u_sess->parser_cxt.opr_cache_hash, (void*)key, HASH_ENTER, NULL);
     oprentry->opr_oid = opr_oid;

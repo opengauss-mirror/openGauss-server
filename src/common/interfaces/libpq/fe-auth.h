@@ -23,4 +23,3 @@ extern char* pg_fe_getauthname(PQExpBuffer errorMessage);
 extern const char* check_client_env(const char* input_env_value);
 
 #endif /* FE_AUTH_H */
-

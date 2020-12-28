@@ -74,6 +74,7 @@
 #define ROOT_CRL_FILE ".postgresql/root.crl"
 #else
 /* On Windows, the "home" directory is already PostgreSQL-specific */
+
 #define USER_CERT_FILE "postgresql.crt"
 #define USER_KEY_FILE "postgresql.key"
 #define ROOT_CERT_FILE "root.crt"
@@ -114,9 +115,9 @@ static int SSL_CTX_set_cipher_list_ex(SSL_CTX* ctx, const char* ciphers[], const
 static THR_LOCAL bool pq_init_ssl_lib = true;
 static THR_LOCAL bool pq_init_crypto_lib = true;
 #ifndef ENABLE_UT
-static bool set_client_ssl_ciphers(); /* set client security cipherslist */
+static bool set_client_ssl_ciphers(); /* set client security cipherslist*/
 #else
-bool set_client_ssl_ciphers(); /* set client security cipherslist */
+bool set_client_ssl_ciphers(); /* set client security cipherslist*/
 #endif  // ENABLE_UT
 
 /*
@@ -153,6 +154,7 @@ static const char* ssl_ciphers_map[] = {
  * Macros to handle disabling and then restoring the state of SIGPIPE handling.
  * On Windows, these are all no-ops since there's no SIGPIPEs.
  */
+
 #ifndef WIN32
 
 #define SIGPIPE_MASKED(conn) ((conn)->sigpipe_so || (conn)->sigpipe_flag)
@@ -218,6 +220,7 @@ struct sigpipe_info {
 /* ------------------------------------------------------------ */
 /*           Procedures common to all secure sessions           */
 /* ------------------------------------------------------------ */
+
 /*
  *  Exported function to allow application to tell us it's already
  *  initialized OpenSSL.
@@ -1018,6 +1021,7 @@ static bool verify_peer_name_matches_certificate(PGconn* conn)
 /*
  *  Callback functions for OpenSSL internal locking
  */
+
 static GS_UINT32 pq_threadidcallback(void)
 {
     /*
@@ -1114,6 +1118,7 @@ static int init_ssl_system(PGconn* conn)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-value"
         if (ssl_open_connections++ == 0 && !is_gc_fdw_client) {
+
             /* These are only required for threaded libcrypto applications */
             CRYPTO_THREADID_set_callback(pq_threadidcallback);
         }
@@ -1202,45 +1207,28 @@ static
 #else
 static
 #endif
-int initialize_SSL(PGconn* conn)
-{
-#define MAX_CERTIFICATE_DEPTH_SUPPORTED 20 /* The max certificate depth supported. */
 
+/* Read the client certificate file */
+int LoadSslCertFile(PGconn* conn, bool have_homedir, const PathData *homedir, bool *have_cert)
+{
     struct stat buf;
-    char homedir[MAXPGPATH];
     char fnbuf[MAXPGPATH] = {0};
     char sebuf[256];
-    bool have_homedir = false;
-    bool have_cert = false;
     errno_t rc = 0;
     int nRet = 0;
-
-    /*
-     * We'll need the home directory if any of the relevant parameters are
-     * defaulted.  If pqGetHomeDirectory fails, act as though none of the
-     * files could be found.
-     */
-    if (!((conn->sslcert != NULL) && strlen(conn->sslcert) > 0) ||
-        !((conn->sslkey != NULL) && strlen(conn->sslkey) > 0) ||
-        !((conn->sslrootcert != NULL) && strlen(conn->sslrootcert) > 0) ||
-        !((conn->sslcrl != NULL) && strlen(conn->sslcrl) > 0))
-        have_homedir = pqGetHomeDirectory(homedir, sizeof(homedir));
-    else /* won't need it */
-        have_homedir = false;
-
-    /* Read the client certificate file */
+    
     if ((conn->sslcert != NULL) && strlen(conn->sslcert) > 0) {
         rc = strncpy_s(fnbuf, MAXPGPATH, conn->sslcert, strlen(conn->sslcert));
         securec_check_c(rc, "\0", "\0");
         fnbuf[MAXPGPATH - 1] = '\0';
     } else if (have_homedir) {
-        nRet = snprintf_s(fnbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", homedir, USER_CERT_FILE);
+        nRet = snprintf_s(fnbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", homedir->data, USER_CERT_FILE);
         securec_check_ss_c(nRet, "\0", "\0");
     } else
         fnbuf[0] = '\0';
     if (fnbuf[0] == '\0') {
         /* no home directory, proceed without a client cert */
-        have_cert = false;
+        *have_cert = false;
     } else if (stat(fnbuf, &buf) != 0) {
         /*
          * If file is not present, just go on without a client cert; server
@@ -1254,7 +1242,7 @@ int initialize_SSL(PGconn* conn)
                 pqStrerror(errno, sebuf, sizeof(sebuf)));
             return -1;
         }
-        have_cert = false;
+        *have_cert = false;
     } else {
         /*
          * Cert file exists, so load it.  Since the ssl lib doesn't provide the
@@ -1279,7 +1267,6 @@ int initialize_SSL(PGconn* conn)
             return -1;
         }
 #endif
-
         /* set the default password for certificate/private key loading */
         if (init_client_ssl_passwd(conn->ssl, fnbuf, conn->pguser, conn) != 0) {
 #ifdef ENABLE_THREAD_SAFETY
@@ -1289,12 +1276,12 @@ int initialize_SSL(PGconn* conn)
         }
         /* check certificate file permission */
 #ifndef WIN32
-        if (!S_ISREG(buf.st_mode) || buf.st_mode & (S_IRWXG | S_IRWXO)) {
+        if (!S_ISREG(buf.st_mode) || (buf.st_mode & (S_IRWXG | S_IRWXO)) || ((buf.st_mode & S_IRWXU) == S_IRWXU)) {
 #ifdef ENABLE_THREAD_SAFETY
             (void)pthread_mutex_unlock(&ssl_config_mutex);
 #endif
             printfPQExpBuffer(
-                &conn->errorMessage, libpq_gettext("The file \"%s\" permission should be u=rw(600).\n"), fnbuf);
+                &conn->errorMessage, libpq_gettext("The file \"%s\" permission should be u=rw(600) or less.\n"), fnbuf);
             return -1;
         }
 #endif
@@ -1322,12 +1309,20 @@ int initialize_SSL(PGconn* conn)
         }
 
         /* need to load the associated private key, too */
-        have_cert = true;
+        *have_cert = true;
 #ifdef ENABLE_THREAD_SAFETY
         (void)pthread_mutex_unlock(&ssl_config_mutex);
 #endif
     }
+    return 0;
+}
 
+int LoadSslKeyFile(PGconn* conn, bool have_homedir, const PathData *homedir, bool have_cert)
+{
+    struct stat buf;
+    char fnbuf[MAXPGPATH] = {0};
+    errno_t rc = 0;
+    int nRet = 0;
     /*
      * Read the SSL key. If a key is specified, treat it as an engine:key
      * combination if there is colon present - we don't support files with
@@ -1340,7 +1335,7 @@ int initialize_SSL(PGconn* conn)
         fnbuf[MAXPGPATH - 1] = '\0';
     } else if (have_homedir) {
         /* No PGSSLKEY specified, load default file */
-        nRet = snprintf_s(fnbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", homedir, USER_KEY_FILE);
+        nRet = snprintf_s(fnbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", homedir->data, USER_KEY_FILE);
         securec_check_ss_c(nRet, "\0", "\0");
     } else
         fnbuf[0] = '\0';
@@ -1354,9 +1349,9 @@ int initialize_SSL(PGconn* conn)
         }
         /* check key file permission */
 #ifndef WIN32
-        if (!S_ISREG(buf.st_mode) || buf.st_mode & (S_IRWXG | S_IRWXO)) {
+        if (!S_ISREG(buf.st_mode) || (buf.st_mode & (S_IRWXG | S_IRWXO)) || ((buf.st_mode & S_IRWXU) == S_IRWXU)) {
             printfPQExpBuffer(
-                &conn->errorMessage, libpq_gettext("The file \"%s\" permission should be u=rw(600).\n"), fnbuf);
+                &conn->errorMessage, libpq_gettext("The file \"%s\" permission should be u=rw(600) or less.\n"), fnbuf);
             return -1;
         }
 #endif
@@ -1369,8 +1364,7 @@ int initialize_SSL(PGconn* conn)
             return -1;
         }
     }
-
-    /* verify that the cert and key go together */
+        /* verify that the cert and key go together */
     if (have_cert && SSL_check_private_key(conn->ssl) != 1) {
         char* err = SSLerrmessage();
 
@@ -1387,7 +1381,16 @@ int initialize_SSL(PGconn* conn)
         SSLerrfree(err);
         return -1;
     }
+    return 0;
+}
 
+#define MAX_CERTIFICATE_DEPTH_SUPPORTED 20 /* The max certificate depth supported. */
+int LoadRootCertFile(PGconn* conn, bool have_homedir, const PathData *homedir)
+{
+    struct stat buf;
+    char fnbuf[MAXPGPATH] = {0};
+    errno_t rc = 0;
+    int nRet = 0;
     /*
      * If the root cert file exists, load it so we can perform certificate
      * verification. If sslmode is "verify-full" we will also do further
@@ -1398,7 +1401,7 @@ int initialize_SSL(PGconn* conn)
         securec_check_c(rc, "\0", "\0");
         fnbuf[MAXPGPATH - 1] = '\0';
     } else if (have_homedir) {
-        nRet = snprintf_s(fnbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", homedir, ROOT_CERT_FILE);
+        nRet = snprintf_s(fnbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", homedir->data, ROOT_CERT_FILE);
         securec_check_ss_c(nRet, "\0", "\0");
     } else
         fnbuf[0] = '\0';
@@ -1413,9 +1416,9 @@ int initialize_SSL(PGconn* conn)
         }
         /* check root cert file permission */ 
 #ifndef WIN32
-        if (!S_ISREG(buf.st_mode) || buf.st_mode & (S_IRWXG | S_IRWXO)) {
+        if (!S_ISREG(buf.st_mode) || (buf.st_mode & (S_IRWXG | S_IRWXO)) || ((buf.st_mode & S_IRWXU) == S_IRWXU)) {
             printfPQExpBuffer(
-                &conn->errorMessage, libpq_gettext("The ca file \"%s\" permission should be u=rw(600).\n"), fnbuf);
+                &conn->errorMessage, libpq_gettext("The ca file \"%s\" permission should be u=rw(600) or less.\n"), fnbuf);
             return -1;
         }
 #endif
@@ -1425,7 +1428,7 @@ int initialize_SSL(PGconn* conn)
                 securec_check_c(rc, "\0", "\0");
                 fnbuf[MAXPGPATH - 1] = '\0';
             } else if (have_homedir) {
-                nRet = snprintf_s(fnbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", homedir, ROOT_CRL_FILE);
+                nRet = snprintf_s(fnbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", homedir->data, ROOT_CRL_FILE);
                 securec_check_ss_c(nRet, "\0", "\0");
             } else
                 fnbuf[0] = '\0';
@@ -1458,7 +1461,8 @@ int initialize_SSL(PGconn* conn)
          * verify-ca or verify-full, this is an error.  Otherwise, continue
          * without performing any server cert verification.
          */
-        if (conn->sslmode[0] == 'v') { /* "verify-ca" or "verify-full" */
+        if (conn->sslmode[0] == 'v') /* "verify-ca" or "verify-full" */
+        {
             /*
              * The only way to reach here with an empty filename is if
              * pqGetHomeDirectory failed.  That's a sufficiently unusual case
@@ -1478,7 +1482,43 @@ int initialize_SSL(PGconn* conn)
             return -1;
         }
     }
+    return 0;
+}
 
+int initialize_SSL(PGconn* conn)
+{
+    PathData homedir = {{0}};
+    bool have_homedir = false;
+    bool have_cert = false;
+    errno_t rc = 0;
+    int retval = 0;
+
+    /*
+     * We'll need the home directory if any of the relevant parameters are
+     * defaulted.  If pqGetHomeDirectory fails, act as though none of the
+     * files could be found.
+     */
+    if (!((conn->sslcert != NULL) && strlen(conn->sslcert) > 0) ||
+        !((conn->sslkey != NULL) && strlen(conn->sslkey) > 0) ||
+        !((conn->sslrootcert != NULL) && strlen(conn->sslrootcert) > 0) ||
+        !((conn->sslcrl != NULL) && strlen(conn->sslcrl) > 0))
+        have_homedir = pqGetHomeDirectory(homedir.data, MAXPGPATH);
+    else /* won't need it */
+        have_homedir = false;
+    
+    retval = LoadSslCertFile(conn, have_homedir, &homedir, &have_cert);
+    if (retval == -1) {
+        return retval;
+    }
+    retval = LoadSslKeyFile(conn, have_homedir, &homedir, have_cert);
+    if (retval == -1) {
+        return retval;
+    }
+    retval = LoadRootCertFile(conn, have_homedir, &homedir);
+    if (retval == -1) {
+        return retval;
+    }
+    
     /*
      * Check the signature algorithm.
      * NOTICE : Since the client errorMessage is only output in the error exit scene, the function fprintf is used here.
@@ -1488,8 +1528,9 @@ int initialize_SSL(PGconn* conn)
         fprintf(stdout, "Warning: The client certificate contain a Low-intensity signature algorithm.\n");
     }
 
-    /* Check the certificate expires time. */
-    long leftspan = check_certificate_time(SSL_context);
+    /* Check the certificate expires time, default alarm_days = 90d. */
+    const int alarm_days = 90;
+    long leftspan = check_certificate_time(SSL_context, alarm_days);
     if (leftspan > 0) {
         int leftdays = leftspan / 86400 > 0 ? leftspan / 86400 : 1;
         if (leftdays > 1) {
@@ -1498,7 +1539,7 @@ int initialize_SSL(PGconn* conn)
             fprintf(stdout, "Warning: The client certificate will expire in %d day.\n", leftdays);
         }
     }
-    /* clear the sensitive info in server_key */
+    /*clear the sensitive info in server_key*/
     rc = memset_s(conn->cipher_passwd, CIPHER_LEN, 0, CIPHER_LEN);
     securec_check_c(rc, "\0", "\0");
     return 0;
@@ -1519,7 +1560,8 @@ static void destroySSL(PGconn* conn)
 #ifndef ENABLE_UT
 static
 #endif
-PostgresPollingStatusType open_client_SSL(PGconn* conn)
+    PostgresPollingStatusType
+    open_client_SSL(PGconn* conn)
 {
     int r;
 
@@ -1567,6 +1609,7 @@ PostgresPollingStatusType open_client_SSL(PGconn* conn)
      * We already checked the server certificate in initialize_SSL() using
      * SSL_CTX_set_verify(), if root.crt exists.
      */
+
     /* get server certificate */
     conn->peer = SSL_get_peer_certificate(conn->ssl);
     if (conn->peer == NULL) {
@@ -1644,7 +1687,8 @@ static char ssl_nomem[] = "out of memory allocating error description";
 #ifndef ENABLE_UT
 static
 #endif
-    char *SSLerrmessage(void)
+    char*
+    SSLerrmessage(void)
 {
     unsigned long errcode;
     const char* errreason = NULL;
@@ -1786,7 +1830,7 @@ static
     KeyMode mode = CLIENT_MODE;
     int nRet = 0;
 
-    if (path == NULL || '\0' == path[0]) {
+    if (NULL == path || '\0' == path[0]) {
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("invalid cert file path\n"));
         return -1;
     }
@@ -1797,30 +1841,27 @@ static
     CertFilesDir = CertFilesPath;
     get_parent_directory(CertFilesDir);
 
-    /* check whether the cipher and rand files begins with username exist.
+    /*check whether the cipher and rand files begins with username exist.
     if exist, decrypt it.
     if not,decrypt the default cipher and rand files begins with client%.
-    Because,for every client user mayown certification and private key */
-    if (username == NULL) {
+    Because,for every client user mayown certification and private key*/
+    if (NULL == username) {
         retval = check_permission_cipher_file(CertFilesDir, conn, NULL);
-        if (retval != 1) {
+        if (retval != 1)
             return retval;
-        }
         decode_cipher_files(mode, NULL, CertFilesDir, conn->cipher_passwd);
     } else {
         nRet = snprintf_s(CipherFileName, MAXPGPATH, MAXPGPATH - 1, "%s/%s%s", CertFilesDir, username, CIPHER_KEY_FILE);
         securec_check_ss_c(nRet, "\0", "\0");
         if (lstat(CipherFileName, &st) < 0) {
             retval = check_permission_cipher_file(CertFilesDir, conn, NULL);
-            if (retval != 1) {
+            if (retval != 1)
                 return retval;
-            }
             decode_cipher_files(mode, NULL, CertFilesDir, conn->cipher_passwd);
         } else {
             retval = check_permission_cipher_file(CertFilesDir, conn, username);
-            if (retval != 1) {
+            if (retval != 1)
                 return retval;
-            }
             decode_cipher_files(mode, username, CertFilesDir, conn->cipher_passwd);
         }
     }
@@ -1849,7 +1890,7 @@ int check_permission_cipher_file(const char* parent_dir, PGconn* conn, const cha
     struct stat cipherbuf;
     struct stat randbuf;
     int nRet = 0;
-    if (username == NULL) {
+    if (NULL == username) {
         nRet = snprintf_s(cipher_file, MAXPGPATH, MAXPGPATH - 1, "%s/client%s", parent_dir, CIPHER_KEY_FILE);
         securec_check_ss_c(nRet, "\0", "\0");
         nRet = snprintf_s(rand_file, MAXPGPATH, MAXPGPATH - 1, "%s/client%s", parent_dir, RAN_KEY_FILE);
@@ -1860,25 +1901,25 @@ int check_permission_cipher_file(const char* parent_dir, PGconn* conn, const cha
         nRet = snprintf_s(rand_file, MAXPGPATH, MAXPGPATH - 1, "%s/%s%s", parent_dir, username, RAN_KEY_FILE);
         securec_check_ss_c(nRet, "\0", "\0");
     }
-    /* cipher file or rand file do not exist,skip check the permission.
-    For key and certications without password,it is also ok */
+    /*cipher file or rand file do not exist,skip check the permission.
+    For key and certications without password,it is also ok*/
     if (lstat(cipher_file, &cipherbuf) != 0 || lstat(rand_file, &randbuf) != 0)
         return 0;
 
-        /* cipher file and rand file exist,so check whether permissions meets the requirements */
+        /*cipher file and rand file exist,so check whether permissions meets the requirements */
 #ifndef WIN32
-    if (!S_ISREG(cipherbuf.st_mode) || cipherbuf.st_mode & (S_IRWXG | S_IRWXO)) {
+    if (!S_ISREG(cipherbuf.st_mode) || (cipherbuf.st_mode & (S_IRWXG | S_IRWXO)) || ((cipherbuf.st_mode & S_IRWXU) == S_IRWXU)) {
         printfPQExpBuffer(
-            &conn->errorMessage, libpq_gettext("The file \"%s\" permission should be u=rw(600).\n"), cipher_file);
+            &conn->errorMessage, libpq_gettext("The file \"%s\" permission should be u=rw(600) or less.\n"), cipher_file);
         return -1;
     }
-    if (!S_ISREG(randbuf.st_mode) || randbuf.st_mode & (S_IRWXG | S_IRWXO)) {
+    if (!S_ISREG(randbuf.st_mode) || (randbuf.st_mode & (S_IRWXG | S_IRWXO)) || ((randbuf.st_mode & S_IRWXU) == S_IRWXU)) {
         printfPQExpBuffer(
-            &conn->errorMessage, libpq_gettext("The file \"%s\" permission should be u=rw(600).\n"), rand_file);
+            &conn->errorMessage, libpq_gettext("The file \"%s\" permission should be u=rw(600) or less.\n"), rand_file);
         return -1;
     }
 #endif
-    /* files exist,and permission is ok! */
+    /*files exist,and permission is ok!*/
     return 1;
 }
 
@@ -1915,13 +1956,13 @@ static char* ssl_cipher_list2string(const char* ciphers[], const int num)
     }
 
     for (i = 0; i < num; i++) {
-        errorno = strncpy_s(cipher_buf + catlen, CIPHER_BUF_SIZE - catlen, ciphers[i], strlen(ciphers[i]));
+        errorno = strncpy_s(cipher_buf + catlen, strlen(ciphers[i]) + 1, ciphers[i], strlen(ciphers[i]));
         securec_check_c(errorno, "\0", "\0");
 
         catlen += strlen(ciphers[i]);
 
         if (i < num - 1) {
-            errorno = strncpy_s(cipher_buf + catlen, CIPHER_BUF_SIZE - catlen, ":", 1);
+            errorno = strncpy_s(cipher_buf + catlen, 2, ":", 1);
             securec_check_c(errorno, "\0", "\0");
 
             catlen += 1;

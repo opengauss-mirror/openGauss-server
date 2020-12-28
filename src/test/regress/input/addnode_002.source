@@ -1,0 +1,11 @@
+---add node
+
+\! python @abs_srcdir@/addnode.py -t addnode -s @abs_srcdir@ -b @abs_bindir@ -g new_group_002 -n 2
+
+---select to verify
+start transaction;
+update pgxc_group set is_installation = true where group_name = 'new_group_002';
+update pgxc_group set is_installation = false where group_name = 'new_group_007';
+update pgxc_group set in_redistribution = 'n' where group_name = 'new_group_002';
+update pgxc_group set in_redistribution = 'y' where group_name = 'new_group_007';
+commit;

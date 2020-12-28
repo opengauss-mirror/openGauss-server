@@ -21,4 +21,3 @@
 void LogicalDecodingProcessRecord(LogicalDecodingContext* ctx, XLogReaderState* record);
 
 #endif
-

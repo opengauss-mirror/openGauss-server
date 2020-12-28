@@ -9,10 +9,10 @@ function test_1()
   set_default
   kill_cluster
   switch_xlog_num=250
-  #gs_guc set -D $standby_data_dir -c "distribute_test_param='0,DN_SLAVE_CHECKPOINT_KEEPXLOG,NOTICE,1'"
-  #gs_guc set -D $primary_data_dir -c "distribute_test_param='0,DN_SLAVE_CHECKPOINT_KEEPXLOG,NOTICE,1'"
-  gs_guc set -D  $primary_data_dir -c "wal_keep_segments = 16"
-  gs_guc set -D  $standby_data_dir -c "wal_keep_segments = 16"
+  #gs_guc set -Z datanode -D $standby_data_dir -c "distribute_test_param='0,DN_SLAVE_CHECKPOINT_KEEPXLOG,NOTICE,1'"
+  #gs_guc set -Z datanode -D $primary_data_dir -c "distribute_test_param='0,DN_SLAVE_CHECKPOINT_KEEPXLOG,NOTICE,1'"
+  gs_guc set -Z datanode -D  $primary_data_dir -c "wal_keep_segments = 16"
+  gs_guc set -Z datanode -D  $standby_data_dir -c "wal_keep_segments = 16"
   start_cluster
   echo "start cluter success!"
   for((integer = 1; integer <= $switch_xlog_num; integer++))
@@ -41,8 +41,8 @@ function test_1()
 }
 
 function tear_down() {
-  #gs_guc reload -D $standby_data_dir -c "distribute_test_param='0,NOT_EXIST,NOTICE,1'"
-  #gs_guc reload -D $primary_data_dir -c "distribute_test_param='0,NOT_EXIST,NOTICE,1'"
+  #gs_guc reload -Z datanode -D $standby_data_dir -c "distribute_test_param='0,NOT_EXIST,NOTICE,1'"
+  #gs_guc reload -Z datanode -D $primary_data_dir -c "distribute_test_param='0,NOT_EXIST,NOTICE,1'"
   sleep 1
 }
 

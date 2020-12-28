@@ -33,7 +33,7 @@
 #include "catalog/pg_type.h"
 // Scalar data type
 //
-typedef uint64 ScalarValue;
+typedef uintptr_t ScalarValue;
 
 #define V_NULL_MASK 0b00000001
 #define V_NOTNULL_MASK 0b00000000
@@ -91,11 +91,12 @@ inline bool COL_IS_ENCODE(int typeId)
         case REGDICTIONARYOID:
         case ANYENUMOID:
         case FDW_HANDLEROID:
+        case HLL_HASHVAL_OID:
         case SMGROID:
             return false;
+        default:
+            return true;
     }
-
-    return true;
 }
 
 template <int typeId>
@@ -244,6 +245,10 @@ public:
     // init the ScalarVector.
     //
     void init(MemoryContext cxt, ScalarDesc desc);
+    
+    // used in tsdb. init with another ScalarVector object.
+    //
+    void init(MemoryContext cxt, ScalarVector* vec, const int batchSize);
 
     // serialize the Scalar vector
     //
@@ -480,7 +485,7 @@ template <bool deep, bool add>
 void VectorBatch::Copy(VectorBatch* batch, int start_idx, int endIdx)
 {
     int copy_end_idx;
-    copy_end_idx = endIdx == -1 ? batch->m_rows : endIdx;
+    copy_end_idx = (endIdx == -1) ? batch->m_rows : endIdx;
     for (int i = 0; i < m_cols; i++) {
         if (false == add)
             m_arr[i].m_rows = 0;

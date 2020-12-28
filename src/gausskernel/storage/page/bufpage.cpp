@@ -129,6 +129,12 @@ bool PageIsVerified(Page page, BlockNumber blkno)
     return false;
 }
 
+static inline bool CheckPageZeroCases(const PageHeader page)
+{
+    return page->pd_lsn.xlogid != 0 || page->pd_lsn.xrecoff != 0 || (page->pd_flags & ~PD_LOGICAL_PAGE) != 0 ||
+        page->pd_lower != 0 || page->pd_upper != 0 || page->pd_special != 0 || page->pd_pagesize_version != 0;
+}
+
 /*
  * PageHeaderIsValid
  *		Check that the header fields of a page appear valid.
@@ -155,8 +161,7 @@ bool PageHeaderIsValid(PageHeader page)
         return true;
 
     /* Check all-zeroes case */
-    if (page->pd_lsn.xlogid != 0 || page->pd_lsn.xrecoff != 0 || (page->pd_flags & ~PD_LOGICAL_PAGE) != 0 ||
-        page->pd_lower != 0 || page->pd_upper != 0 || page->pd_special != 0 || page->pd_pagesize_version != 0)
+    if (CheckPageZeroCases(page))
         return false;
 
     pagebytes = (char*)page;
@@ -168,8 +173,6 @@ bool PageHeaderIsValid(PageHeader page)
     }
     return true;
 }
-
-
 
 /*
  * PageGetTempPage
@@ -202,7 +205,7 @@ Page PageGetTempPageCopy(Page page)
     temp = (Page)palloc(pageSize);
 
     rc = memcpy_s(temp, pageSize, page, pageSize);
-    securec_check(rc, "", "");
+    securec_check(rc, "\0", "\0");
     return temp;
 }
 
@@ -228,7 +231,6 @@ Size PageGetExactFreeSpace(Page page)
 
     return (Size)(uint32)space;
 }
-
 
 
 static void upgrade_page_ver_4_to_5(Page page)
@@ -275,7 +277,8 @@ static inline void AllocPageCopyMem()
         }
         ADIO_ELSE()
         {
-            t_thrd.storage_cxt.pageCopy = (char*)MemoryContextAlloc(t_thrd.top_mem_cxt, BLCKSZ);
+            t_thrd.storage_cxt.pageCopy = (char*)MemoryContextAlloc(
+                THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), BLCKSZ);
         }
         ADIO_END();
     }

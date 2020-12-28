@@ -1,0 +1,281 @@
+--
+-- BULK LOAD END
+--
+----
+--4. INSERT INTO NORMAL TABLE AND PARTITIONED TABLE
+----
+CREATE TABLE LINEITEM_C
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+compress distribute by hash(L_ORDERKEY);
+CREATE TABLE LINEITEM_CP
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+compress
+distribute by hash(L_ORDERKEY)
+partition by range(L_ORDERKEY)
+(
+	partition p1 values less than (500),
+	partition p2 values less than (90000000)
+);
+CREATE FOREIGN TABLE EXT_LINEITEM (
+	L_ORDERKEY    BIGINT ,        
+	L_PARTKEY     BIGINT ,        
+	L_SUPPKEY     BIGINT ,        
+	L_LINENUMBER  BIGINT ,        
+	L_QUANTITY    DECIMAL(15,2) ,        
+	L_EXTENDEDPRICE  DECIMAL(15,2) ,        
+	L_DISCOUNT    DECIMAL(15,2) ,        
+	L_TAX     DECIMAL(15,2) ,        
+	L_RETURNFLAG  CHAR(1) ,        
+	L_LINESTATUS  CHAR(1) ,        
+	L_SHIPDATE    DATE ,        
+	L_COMMITDATE  DATE ,        
+	L_RECEIPTDATE DATE ,        
+	L_SHIPINSTRUCT CHAR(25) ,        
+	L_SHIPMODE     CHAR(10) ,        
+	L_COMMENT      VARCHAR(44) 
+)SERVER hdfs_server OPTIONS(format 'text', filenames '/user/hive/warehouse/text_on_hdfs/lineitem.data', delimiter '|')
+distribute by roundrobin;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+SELECT COUNT(*) FROM LINEITEM;
+ count 
+-------
+ 50000
+(1 row)
+
+TRUNCATE LINEITEM;
+----
+--4. INSERT INTO COMPRESS TABLE
+----
+INSERT INTO LINEITEM_C SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_C SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_C SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_C SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_C SELECT * FROM EXT_LINEITEM;
+SELECT COUNT(*) FROM LINEITEM_C;
+ count 
+-------
+ 50000
+(1 row)
+
+----
+--5. INSERT INTO COMPRESS PARTITION TABLE
+----
+INSERT INTO LINEITEM_CP SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_CP SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_CP SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_CP SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_CP SELECT * FROM EXT_LINEITEM;
+SELECT COUNT(*) FROM LINEITEM_CP;
+ count 
+-------
+ 50000
+(1 row)
+
+DROP FOREIGN TABLE EXT_LINEITEM;
+----
+--14. Foreign table with SUBQUERY
+----
+create  table LOAD_PARTITION_TABLE_001_2
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double  double precision,
+c_character_1 character varying(100), 
+c_varchar varchar(100),
+c_character_2 character(100), 
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_nvarchar2 nvarchar2,
+c_name name,
+c_timestamp_1 timestamp with time zone,
+c_timestamp_2 timestamp without time zone,
+c_date date
+)
+partition by range (c_smallint,c_integer,c_bigint,c_decimal)
+(
+partition LOAD_PARTITION_TABLE_001_2_1  values less than (0,0,0,0),
+partition LOAD_PARTITION_TABLE_001_2_2  values less than (3,30,300,400.3),
+partition LOAD_PARTITION_TABLE_001_2_3  values less than (6,60,600,800.6),
+partition LOAD_PARTITION_TABLE_001_2_4  values less than (10,100,1000,1100.2)
+);
+create foreign table  LOAD_PARTITION_TABLE_001_1
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double  double precision,
+c_character_1 character varying(100), 
+c_varchar varchar(100),
+c_character_2 character(100), 
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_nvarchar2 nvarchar2,
+c_name name,
+c_timestamp_1 timestamp with time zone,
+c_timestamp_2 timestamp without time zone,
+c_date date
+)
+SERVER hdfs_server
+OPTIONS(filenames '/user/hive/warehouse/text_on_hdfs/LOAD_PARTITION_TABLE_001',
+format 'text',
+delimiter ','
+)
+distribute by roundrobin;
+DELETE FROM LOAD_PARTITION_TABLE_001_1;
+ERROR:  cannot delete from foreign table "load_partition_table_001_1"
+insert into  LOAD_PARTITION_TABLE_001_2 
+    select 
+	c_smallint,
+	c_integer,
+	c_bigint ,
+	c_decimal ,
+	c_numeric ,
+	c_real ,
+	c_double ,
+	c_character_1 ,
+	c_varchar ,
+	trim(c_character_2) , 
+	trim(c_char_1) ,
+	c_character_3 ,
+	c_char_2 ,
+	c_text ,
+	c_nvarchar2 ,
+	c_name ,
+	c_timestamp_1 ,
+	c_timestamp_2 ,
+	c_date  
+    from LOAD_PARTITION_TABLE_001_1 order by 1,2,3,4,5,6,7,8,9,10;
+SELECT * FROM LOAD_PARTITION_TABLE_001_2 ORDER BY c_smallint;
+ c_smallint | c_integer | c_bigint | c_decimal | c_numeric | c_real | c_double | c_character_1 | c_varchar |                                            c_character_2                                             |                                               c_char_1                                               | c_character_3 | c_char_2 | c_text | c_nvarchar2 | c_name |        c_timestamp_1         |         c_timestamp_2         |          c_date          
+------------+-----------+----------+-----------+-----------+--------+----------+---------------+-----------+------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------+---------------+----------+--------+-------------+--------+------------------------------+-------------------------------+--------------------------
+          0 |         0 |        0 |         0 |         0 |      0 |       20 | jklm          | JKLM      | JKL                                                                                                  | MNO                                                                                                  | J             | J        | RK     | kkkk        | l      | Fri Feb 05 08:00:30 2044 PST | Sat Feb 06 23:12:12.2356 2044 | Sat Feb 06 13:12:12 2044
+          1 |        10 |      100 |     100.3 |      10.3 |   10.2 |  1000.25 | abcd          | ABCD      | ABC                                                                                                  | DEF                                                                                                  | A             | A        | HK     | aaaa        | b      | Fri Feb 05 08:00:30 1954 PST | Sat Feb 06 23:12:12.2356 1954 | Sat Feb 06 13:12:12 1954
+          2 |        20 |      200 |     200.3 |      20.3 |   20.2 |  2000.25 | bcde          | BCDE      | BCD                                                                                                  | EFG                                                                                                  | B             | B        | IK     | bbbb        | d      | Wed Feb 05 08:00:30 1964 PST | Thu Feb 06 23:12:12.2356 1964 | Thu Feb 06 13:12:12 1964
+          3 |        30 |      300 |     300.3 |      30.3 |   30.2 |  3000.25 | cdef          | CDEF      | CDE                                                                                                  | FGH                                                                                                  | C             | C        | JK     | cccc        | e      | Tue Feb 05 09:00:30 1974 PDT | Wed Feb 06 23:12:12.2356 1974 | Wed Feb 06 13:12:12 1974
+          4 |        40 |      400 |     400.3 |      40.3 |   40.2 |  4000.25 | defg          | DEFG      | DEF                                                                                                  | GHI                                                                                                  | D             | D        | LK     | dddd        | f      | Sun Feb 05 08:00:30 1984 PST | Mon Feb 06 23:12:12.2356 1984 | Mon Feb 06 13:12:12 1984
+          5 |        50 |      500 |     500.3 |      50.3 |   50.2 |  5000.25 | efgh          | EFGH      | EFG                                                                                                  | HIJ                                                                                                  | E             | E        | MK     | eeee        | g      | Sat Feb 05 08:00:30 1994 PST | Sun Feb 06 23:12:12.2356 1994 | Sun Feb 06 13:12:12 1994
+          6 |        60 |      600 |     600.3 |      60.3 |   60.2 |  6000.25 | fghi          | FGHI      | FGH                                                                                                  | IJK                                                                                                  | F             | F        | NK     | ffff        | h      | Thu Feb 05 08:00:30 2004 PST | Fri Feb 06 23:12:12.2356 2004 | Fri Feb 06 13:12:12 2004
+          7 |        70 |      700 |     700.3 |      70.3 |   70.2 |  7000.25 | ghij          | GHIJ      | GHI                                                                                                  | JKL                                                                                                  | G             | G        | OK     | hhhh        | i      | Wed Feb 05 08:00:30 2014 PST | Thu Feb 06 23:12:12.2356 2014 | Thu Feb 06 13:12:12 2014
+          8 |        80 |      800 |     800.3 |      80.3 |   80.2 |  8000.25 | hijk          | HIJK      | HIJ                                                                                                  | KLM                                                                                                  | H             | H        | PK     | iiii        | j      | Mon Feb 05 08:00:30 2024 PST | Tue Feb 06 23:12:12.2356 2024 | Tue Feb 06 13:12:12 2024
+          9 |        90 |      900 |     900.3 |      90.3 |   90.2 |  9000.25 | ijkl          | IJKL      | IJK                                                                                                  | LMN                                                                                                  | I             | I        | QK     | jjjj        | k      | Sun Feb 05 08:00:30 2034 PST | Mon Feb 06 23:12:12.2356 2034 | Mon Feb 06 13:12:12 2034
+(10 rows)
+
+DROP TABLE LINEITEM;
+DROP TABLE LINEITEM_C;
+DROP TABLE LINEITEM_CP;
+DROP FOREIGN TABLE LOAD_PARTITION_TABLE_001_1;
+DROP TABLE LOAD_PARTITION_TABLE_001_2;
+----
+--15. Notice from Stream
+----
+create foreign table FULL_TEXT_TABLE_010
+(
+C_CHAR_3 CHAR(102400),  
+C_VARCHAR_3 VARCHAR(1024),  
+C_INT INTEGER,  
+C_NUMERIC numeric(10,5),  
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+C_TEXT  TEXT
+)
+SERVER hdfs_server
+OPTIONS(filenames '/user/hive/warehouse/text_on_hdfs/FULL_TEXT_TABLE_010',
+format 'text',
+delimiter ','
+)
+distribute by roundrobin;
+create table FULL_TEXT_TABLE_010_2 
+(
+C_CHAR_3 CHAR(102400),  
+C_VARCHAR_3 VARCHAR(1024),  
+C_INT INTEGER,  
+C_NUMERIC numeric(10,5),  
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+C_tsvector  tsvector
+);
+insert into FULL_TEXT_TABLE_010_2 select C_CHAR_3,C_VARCHAR_3,C_INT,C_NUMERIC,C_TS_WITHOUT,to_tsvector_for_batch(C_TEXT) from FULL_TEXT_TABLE_010;
+NOTICE:  word is too long to be indexed
+DETAIL:  Words longer than 2047 characters are ignored.
+select trim(C_CHAR_3),trim(C_VARCHAR_3),c_int,C_NUMERIC,C_TS_WITHOUT,C_text from FULL_TEXT_TABLE_010 order by 1,2,3,4,5;
+  btrim  |  btrim  | c_int | c_numeric  |       c_ts_without       |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     c_text                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      
+---------+---------+-------+------------+--------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ ABCDEFG | abcdefg | 10000 | 2013.25600 | Thu Feb 04 10:12:59 1802 | 'abc def ghi jklabc012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012'
+(1 row)
+
+select trim(C_CHAR_3),trim(C_VARCHAR_3),c_int,C_NUMERIC,C_TS_WITHOUT,C_tsvector from FULL_TEXT_TABLE_010_2 order by 1,2,3,4,5;
+  btrim  |  btrim  | c_int | c_numeric  |       c_ts_without       |       c_tsvector        
+---------+---------+-------+------------+--------------------------+-------------------------
+ ABCDEFG | abcdefg | 10000 | 2013.25600 | Thu Feb 04 10:12:59 1802 | 'abc':1 'def':2 'ghi':3
+(1 row)
+
+DROP FOREIGN TABLE FULL_TEXT_TABLE_010;
+DROP TABLE FULL_TEXT_TABLE_010_2;
+\c regression
+---
+--29. Alter Foreign Table
+---
+CREATE FOREIGN TABLE FT_ALTER
+(
+c1 int,
+c2 varchar(10)
+)
+SERVER hdfs_server
+OPTIONS(filenames '/user/hive/warehouse/text_on_hdfs/*', format 'text', delimiter ',')
+distribute by roundrobin;
+ALTER FOREIGN TABLE FT_ALTER OPTIONS(set filenames '/user/hive/warehouse/text_on_hdfs/*');
+ALTER FOREIGN TABLE FT_ALTER OPTIONS(set format 'orc');
+ERROR:  Invalid option "delimiter"
+HINT:  Valid options in this context are: format, encoding, filenames, foldername, checkencoding
+ALTER FOREIGN TABLE FT_ALTER OPTIONS(drop delimiter);
+ALTER FOREIGN TABLE FT_ALTER OPTIONS(set format 'orc');
+ALTER FOREIGN TABLE FT_ALTER OPTIONS(set format 'csv');
+DROP FOREIGN TABLE FT_ALTER;
+DROP SERVER hdfs_server CASCADE;

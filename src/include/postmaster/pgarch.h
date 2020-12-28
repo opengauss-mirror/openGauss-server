@@ -18,7 +18,6 @@
  * ----------
  */
 extern ThreadId pgarch_start(void);
-
 #ifdef EXEC_BACKEND
 extern void PgArchiverMain();
 #endif

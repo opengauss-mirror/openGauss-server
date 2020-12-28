@@ -33,7 +33,7 @@
 #include "catalog/namespace.h"
 #include "funcapi.h"
 #include "miscadmin.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "utils/builtins.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
@@ -93,6 +93,19 @@ Datum pgstatindex(PG_FUNCTION_ARGS)
     BTIndexStat indexStat;
     BufferAccessStrategy bstrategy = GetAccessStrategy(BAS_BULKREAD);
 
+    /* -- init counters -- */
+    indexStat.version = 0;
+    indexStat.level = 0;
+    indexStat.root_blkno = 0;
+    indexStat.root_pages = 0;
+    indexStat.internal_pages = 0;
+    indexStat.leaf_pages = 0;
+    indexStat.empty_pages = 0;
+    indexStat.deleted_pages = 0;
+    indexStat.max_avail = 0;
+    indexStat.free_space = 0;
+    indexStat.fragments = 0;
+
     if (!superuser())
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("must be system admin to use pgstattuple functions"))));
@@ -127,17 +140,6 @@ Datum pgstatindex(PG_FUNCTION_ARGS)
         ReleaseBuffer(buffer);
     }
 
-    /* -- init counters -- */
-    indexStat.root_pages = 0;
-    indexStat.internal_pages = 0;
-    indexStat.leaf_pages = 0;
-    indexStat.empty_pages = 0;
-    indexStat.deleted_pages = 0;
-
-    indexStat.max_avail = 0;
-    indexStat.free_space = 0;
-
-    indexStat.fragments = 0;
 
     /*
      * Scan all blocks except the metapage

@@ -41,10 +41,10 @@
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_type.h"
 #include "nodes/parsenodes.h"
-#include "storage/buf.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/buf.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/cu.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "storage/remote_read.h"
 #include "utils/relcache.h"
 

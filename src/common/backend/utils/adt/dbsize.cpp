@@ -16,10 +16,12 @@
 
 #include "access/cstore_am.h"
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "access/htup.h"
 #include "access/reloptions.h"
 #include "catalog/catalog.h"
 #include "catalog/dfsstore_ctlg.h"
+#include "catalog/gs_matview.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_tablespace.h"
@@ -27,16 +29,24 @@
 #include "catalog/pg_hashbucket_fn.h"
 #include "commands/defrem.h"
 #include "commands/dbcommands.h"
+#include "commands/matview.h"
 #include "commands/tablespace.h"
 #include "executor/spi.h"
 #include "miscadmin.h"
+#ifdef ENABLE_MOT
 #include "foreign/fdwapi.h"
+#endif
 #ifdef PGXC
 #include "catalog/pgxc_node.h"
 #include "pgxc/nodemgr.h"
 #include "pgxc/pgxc.h"
 #include "pgxc/pgxcnode.h"
 #include "pgxc/execRemote.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "tsdb/cache/partid_cachemgr.h"
+#include "tsdb/utils/ts_relcache.h"
+#include "tsdb/common/ts_tablecmds.h"
+#endif
 #endif
 #include "storage/fd.h"
 #include "threadpool/threadpool.h"
@@ -51,33 +61,40 @@
 #include "utils/relmapper.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 #include "catalog/pg_partition_fn.h"
 #include "utils/partitionmap.h"
 #include "utils/partitionmap_gs.h"
 #include "storage/cu.h"
 #include "storage/custorage.h"
-#include "storage/cstore_compress.h"
+#include "storage/cstore/cstore_compress.h"
 #include "vecexecutor/vecnodes.h"
 
 #ifdef PGXC
-static Datum pgxc_database_size(Oid db_oid);
+static Datum pgxc_database_size(Oid dbOid);
 static Datum pgxc_source_database_size();
-static Datum pgxc_tablespace_size(Oid ts_oid);
-static int64 pgxc_exec_sizefunc(Oid rel_oid, char* funcname, char* extra_arg);
-static int64 pgxc_exec_partition_sizefunc(Oid part_table_oid, Oid part_oid, char* func_name);
-static int64 calculate_partition_size(Oid part_table_oid, Oid part_oid);
-int64 calculate_CStore_relation_size(Relation rel, ForkNumber fork_num);
-int64 calculate_CStore_partitioned_relation_size(Relation rel, ForkNumber fork_num);
-static int64 calculate_partition_indexes_size(Oid part_table_oid, Oid part_oid);
-Oid pg_toast_get_baseid(Oid rel_oid, bool* is_part_toast);
-bool IsToastRelationbyOid(Oid rel_oid);
-static bool IsIndexRelationbyOid(Oid rel_oid);
-static int64 calculate_toast_table_size(Oid toast_rel_oid);
-static int64 calculate_dir_size_on_dfs(Oid tbl_spc_oid, StringInfo dir_path);
-static int64 calculate_dbsize_on_dfs(Oid db_oid);
-static int64 calculate_tablespace_size_on_dfs(Oid tbl_spc_oid);
-
+static Datum pgxc_tablespace_size(Oid tbOid);
+static int64 pgxc_exec_sizefunc(Oid relOid, char* funcname, char* extra_arg);
+static int64 pgxc_exec_partition_sizefunc(Oid partTableOid, Oid partOid, char* funcName);
+static int64 calculate_partition_size(Oid partTableOid, Oid partOid);
+int64 CalculateCStoreRelationSize(Relation rel, ForkNumber forknum);
+int64 CalculateCStorePartitionedRelationSize(Relation rel, ForkNumber forknum);
+#ifdef ENABLE_MULTIPLE_NODES
+int64 CalculateTStorePartitionedRelationSize(Relation rel, ForkNumber forknum);
+#endif
+static int64 calculate_partition_indexes_size(Oid partTableOid, Oid partOid);
+Oid pg_toast_get_baseid(Oid relOid, bool* isPartToast);
+bool IsToastRelationbyOid(Oid relid);
+static bool IsIndexRelationbyOid(Oid relid);
+static int64 calculate_toast_table_size(Oid toastrelid);
+static int64 calculate_dir_size_on_dfs(Oid tblSpcOid, StringInfo dirPath);
+static int64 calculate_dbsize_on_dfs(Oid dbOid);
+static int64 calculate_tablespace_size_on_dfs(Oid tblSpcOid);
+static int64 calculate_table_file_size(Relation rel, bool isCStore, int forkNumOption);
+static void AddRemoteToastBuf(bool isPartToast, Relation rel, char* funcname, char* extra_arg,
+                              Relation partTableRel, Partition part, StringInfo buf);
+static void AddRemoteMatviewBuf(Relation rel, char* funcname, char* extra_arg,
+                                MvRelationType matviewRelationType, StringInfo buf);
 #define DEFAULT_FORKNUM -1
 
 /*
@@ -87,7 +104,7 @@ static int64 calculate_tablespace_size_on_dfs(Oid tbl_spc_oid);
  * locator info, that means it is a Coordinator-only table.
  */
 #define COLLECT_FROM_DATANODES(relid)              \
-    ((IS_PGXC_COORDINATOR && !IsConnFromCoord() && \
+    ((IS_PGXC_COORDINATOR && !IsConnFromCoord() && !is_sys_table(relid) && \
         ((GetRelationLocInfo((relid)) != NULL) || IsToastRelationbyOid(relid) || IsIndexRelationbyOid(relid))))
 #endif
 
@@ -98,28 +115,28 @@ static int64 db_dir_size(const char* path)
     struct dirent* direntry = NULL;
     DIR* dirdesc = NULL;
     char filename[MAXPGPATH] = {'\0'};
+
     dirdesc = AllocateDir(path);
 
-    if (unlikely(NULL == dirdesc)) {
+    if (unlikely(NULL == dirdesc))
         return 0;
-    }
+
     while ((direntry = ReadDir(dirdesc, path)) != NULL) {
         struct stat fst;
 
         CHECK_FOR_INTERRUPTS();
 
-        if (unlikely(strcmp(direntry->d_name, ".") == 0 || strcmp(direntry->d_name, "..") == 0)) {
+        if (unlikely(strcmp(direntry->d_name, ".") == 0 || strcmp(direntry->d_name, "..") == 0))
             continue;
-        }
+
         errno_t rc = snprintf_s(filename, MAXPGPATH, MAXPGPATH - 1, "%s/%s", path, direntry->d_name);
         securec_check_ss(rc, "\0", "\0");
 
         if (unlikely(stat(filename, &fst) < 0)) {
-            if (errno == ENOENT) {
+            if (errno == ENOENT)
                 continue;
-            } else {
+            else
                 ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", filename)));
-            }
         }
         dirsize += fst.st_size;
     }
@@ -130,74 +147,70 @@ static int64 db_dir_size(const char* path)
 
 /**
  * @Description: calculate tablespace size on DFS.
- * @in tbl_spc_oid, the tablespace oid.
+ * @in tblSpcOid, the tablespace oid.
  * @out none.
  * @return If the type of specified tablespace is HDFS, return
  * real size, otherwise return 0.
  */
-static int64 calculate_tablespace_size_on_dfs(Oid tbl_spc_oid)
+static int64 calculate_tablespace_size_on_dfs(Oid tblSpcOid)
 {
-    int64 dir_size = 0;
-    StringInfo store_path;
+    int64 dirSize = 0;
+    StringInfo StorePath;
 
-    if (!IsSpecifiedTblspc(tbl_spc_oid, FILESYSTEM_HDFS)) {
-        return dir_size;
+    if (!IsSpecifiedTblspc(tblSpcOid, FILESYSTEM_HDFS)) {
+        return dirSize;
     }
-    store_path = getHDFSTblSpcStorePath(tbl_spc_oid);
+    StorePath = getHDFSTblSpcStorePath(tblSpcOid);
 
-    dir_size = calculate_dir_size_on_dfs(tbl_spc_oid, store_path);
+    dirSize = calculate_dir_size_on_dfs(tblSpcOid, StorePath);
 
-    pfree_ext(store_path->data);
-    pfree_ext(store_path);
-    return dir_size;
+    pfree_ext(StorePath->data);
+    pfree_ext(StorePath);
+    return dirSize;
 }
 
 /**
  * @Description: calculate database size on DFS.
- * @in db_oid, the database oid.
+ * @in dbOid, the database oid.
  * @out none.
  * @return If the database exists on DFS, return real size,
  * otherwise return 0.
  */
-static int64 calculate_dbsize_on_dfs(Oid db_oid)
+static int64 calculate_dbsize_on_dfs(Oid dbOid)
 {
-    List* tbl_spc_list = HDFSTablespaceDirExistDatabase(db_oid);
+    List* tblSpcList = HDFSTablespaceDirExistDatabase(dbOid);
     ListCell* lc = NULL;
-    int64 dir_size = 0;
+    int64 dirSize = 0;
 
-    if (NIL == tbl_spc_list) {
-        return dir_size;
+    if (NIL == tblSpcList) {
+        return dirSize;
     }
 
-    char* dbname = NULL;
-    foreach (lc, tbl_spc_list) {
-        StringInfo tbl_spc_info = (StringInfo)lfirst(lc);
-        Oid tbl_spc_oid = get_tablespace_oid(tbl_spc_info->data, false);
-        StringInfo store_path = getHDFSTblSpcStorePath(tbl_spc_oid);
+    foreach (lc, tblSpcList) {
+        StringInfo tblspcInfo = (StringInfo)lfirst(lc);
+        Oid tblSpcOid = get_tablespace_oid(tblspcInfo->data, false);
 
-        dbname = get_database_name(db_oid);
-        if (dbname == NULL) {
-            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE),
-                        errmsg("database with OID %u does not exist", db_oid)));
-        }
-        appendStringInfo(store_path, "/%s", dbname);
-        dir_size += calculate_dir_size_on_dfs(tbl_spc_oid, store_path);
+        StringInfo StorePath = getHDFSTblSpcStorePath(tblSpcOid);
 
-        pfree_ext(store_path->data);
-        pfree_ext(store_path);
-        pfree_ext(tbl_spc_info);
+        appendStringInfo(StorePath, "/%s", get_and_check_db_name(dbOid, true));
+
+        dirSize += calculate_dir_size_on_dfs(tblSpcOid, StorePath);
+
+        pfree_ext(StorePath->data);
+        pfree_ext(StorePath);
+        pfree_ext(tblspcInfo);
     }
-    list_free_ext(tbl_spc_list);
-    return dir_size;
+    list_free_ext(tblSpcList);
+    return dirSize;
 }
 
 /**
  * @Description: calculate DFS directory size.
- * @in tbl_spc_oid, the specified tablespace oid.
- * @out dir_path, the directory to be calculated.
+ * @in tblSpcOid, the specified tablespace oid.
+ * @out dirPath, the directory to be calculated.
  * @return return the directory size.
  */
-static int64 calculate_dir_size_on_dfs(Oid tbl_spc_oid, StringInfo dir_path)
+static int64 calculate_dir_size_on_dfs(Oid tblSpcOid, StringInfo dirPath)
 {
     FEATURE_NOT_PUBLIC_ERROR("HDFS is not yet supported.");
     return 0;
@@ -206,45 +219,37 @@ static int64 calculate_dir_size_on_dfs(Oid tbl_spc_oid, StringInfo dir_path)
 /*
  * calculate size of database in all tablespaces
  */
-static int64 calculate_database_size(Oid db_oid)
+static int64 calculate_database_size(Oid dbOid)
 {
     int64 totalsize;
     DIR* dirdesc = NULL;
     struct dirent* direntry = NULL;
     char dirpath[MAXPGPATH] = {'\0'};
     char pathname[MAXPGPATH] = {'\0'};
-    char* dbname;
-    AclResult acl_result;
-    List* exist_tblspc_list = NIL;
+    AclResult aclresult;
+    List* existTblSpcList = NIL;
     errno_t rc = EOK;
 
-    dbname = get_database_name(db_oid);
-    if (dbname == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE),
-                    errmsg("database with OID %u does not exist", db_oid)));
-    }
-
     /* User must have connect privilege for target database */
-    acl_result = pg_database_aclcheck(db_oid, GetUserId(), ACL_CONNECT);
-    if (acl_result != ACLCHECK_OK) {
-        aclcheck_error(acl_result, ACL_KIND_DATABASE, dbname);
-    }
-    exist_tblspc_list = HDFSTablespaceDirExistDatabase(db_oid);
-    if (IS_PGXC_DATANODE && IsConnFromApp() && exist_tblspc_list != NIL) {
-        StringInfo exist_tbl_spc = (StringInfo)linitial(exist_tblspc_list);
+    aclresult = pg_database_aclcheck(dbOid, GetUserId(), ACL_CONNECT);
+    if (aclresult != ACLCHECK_OK)
+        aclcheck_error(aclresult, ACL_KIND_DATABASE, get_and_check_db_name(dbOid));
+    existTblSpcList = HDFSTablespaceDirExistDatabase(dbOid);
+    if (IS_PGXC_DATANODE && IsConnFromApp() && NIL != existTblSpcList) {
+        StringInfo existTblspc = (StringInfo)linitial(existTblSpcList);
         ereport(ERROR,
             (errcode(ERRCODE_OBJECT_IN_USE),
                 errmsg("It is unsupported to calculate size of database \"%s\""
                        " under the DFS tablespace \"%s\" on data node.",
-                    dbname,
-                    exist_tbl_spc->data),
-                errdetail("Please calculate size of database \"%s\" on coordinator node.", dbname)));
+                    get_and_check_db_name(dbOid),
+                    existTblspc->data),
+                errdetail("Please calculate size of database \"%s\" on coordinator node.", get_and_check_db_name(dbOid))));
     }
 
     /* Shared storage in pg_global is not counted */
 
     /* Include pg_default storage */
-    rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, "base/%u", db_oid);
+    rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, "base/%u", dbOid);
     securec_check_ss(rc, "\0", "\0");
     totalsize = db_dir_size(pathname);
 
@@ -252,15 +257,15 @@ static int64 calculate_database_size(Oid db_oid)
     rc = snprintf_s(dirpath, MAXPGPATH, MAXPGPATH - 1, "pg_tblspc");
     securec_check_ss(rc, "\0", "\0");
     dirdesc = AllocateDir(dirpath);
-    if (dirdesc == NULL) {
+    if (NULL == dirdesc)
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not open tablespace directory \"%s\": %m", dirpath)));
-    }
+
     while ((direntry = ReadDir(dirdesc, dirpath)) != NULL) {
         CHECK_FOR_INTERRUPTS();
 
-        if (strcmp(direntry->d_name, ".") == 0 || strcmp(direntry->d_name, "..") == 0) {
+        if (strcmp(direntry->d_name, ".") == 0 || strcmp(direntry->d_name, "..") == 0)
             continue;
-        }
+
 #ifdef PGXC
         /* Postgres-XC tablespaces include node name in path */
         rc = snprintf_s(pathname,
@@ -270,7 +275,7 @@ static int64 calculate_database_size(Oid db_oid)
             direntry->d_name,
             TABLESPACE_VERSION_DIRECTORY,
             g_instance.attr.attr_common.PGXCNodeName,
-            db_oid);
+            dbOid);
         securec_check_ss(rc, "\0", "\0");
 
 #else
@@ -280,7 +285,7 @@ static int64 calculate_database_size(Oid db_oid)
             "pg_tblspc/%s/%s/%u",
             direntry->d_name,
             TABLESPACE_VERSION_DIRECTORY,
-            db_oid);
+            dbOid);
         securec_check_ss(rc, "\0", "\0");
 #endif
         totalsize += db_dir_size(pathname);
@@ -298,88 +303,88 @@ static int64 calculate_database_size(Oid db_oid)
  */
 static double calculate_coltable_compress_ratio(Relation onerel)
 {
-    CStoreScanDesc cstore_scan_desc = NULL;
+    CStoreScanDesc cstoreScanDesc = NULL;
     TupleDesc tupdesc = onerel->rd_att;
-    int att_num = tupdesc->natts;
+    int attrNum = tupdesc->natts;
     Form_pg_attribute* attrs = tupdesc->attrs;
-    CUDesc cu_desc;
-    CU* cu_ptr = NULL;
+    CUDesc cuDesc;
+    CU* cuPtr = NULL;
     double total_source_size = 0;
     double total_cu_size = 0;
     BlockNumber targetblock = FirstCUID + 1;
 
-    AttrNumber* col_idx = (AttrNumber*)palloc0(sizeof(AttrNumber) * att_num);
-    int* slot_id_list = (int*)palloc0(sizeof(int) * att_num);
+    AttrNumber* colIdx = (AttrNumber*)palloc0(sizeof(AttrNumber) * attrNum);
+    int* slotIdList = (int*)palloc0(sizeof(int) * attrNum);
 
-    double numeric_expand_ratio = 0;
-    double numeric_src_data_size = 0;
-    double numeric_data_size = 0;
+    double numericExpandRatio = 0;
+    double numericSrcDataSize = 0;
+    double numericDataSize = 0;
 
-    for (int i = 0; i < att_num; i++) {
-        col_idx[i] = attrs[i]->attnum;
-        slot_id_list[i] = CACHE_BLOCK_INVALID_IDX;
+    for (int i = 0; i < attrNum; i++) {
+        colIdx[i] = attrs[i]->attnum;
+        slotIdList[i] = CACHE_BLOCK_INVALID_IDX;
     }
 
-    cstore_scan_desc = CStoreBeginScan(onerel, att_num, col_idx, NULL, false);
-    CStore* cstore = cstore_scan_desc->m_CStore;
-    uint32 max_cu_id = cstore->GetMaxCUID(onerel->rd_rel->relcudescrelid, onerel->rd_att, SnapshotNow);
+    cstoreScanDesc = CStoreBeginScan(onerel, attrNum, colIdx, NULL, false);
+    CStore* cstore = cstoreScanDesc->m_CStore;
+    uint32 maxCuId = cstore->GetMaxCUID(onerel->rd_rel->relcudescrelid, onerel->rd_att, SnapshotNow);
 
-    /* do not fetch the last CuID. */
-    if (max_cu_id > FirstCUID + 1) {
-        targetblock = FirstCUID + 1 + (gs_random() % (max_cu_id - FirstCUID - 1));
+    /*do not fetch the last CuID.*/
+    if (maxCuId > FirstCUID + 1) {
+        targetblock = FirstCUID + 1 + (gs_random() % (maxCuId - FirstCUID - 1));
     } else {
         targetblock = FirstCUID + 1;
     }
 
-    /* sample the first CU of each column, and calculate the compression ratio of this table. */
-    for (int col = 0; col < att_num; col++) {
+    /*sample the first CU of each column, and calculate the compression ratio of this table.*/
+    for (int col = 0; col < attrNum; col++) {
         // skip dropped column
         if (attrs[col]->attisdropped) {
             continue;
         }
 
-        bool found = cstore->GetCUDesc(col, targetblock, &cu_desc, SnapshotNow);
-        if (found && cu_desc.cu_size != 0) {
-            cu_ptr = cstore->GetCUData(&cu_desc, col, attrs[col]->attlen, slot_id_list[col]);
-            if ((cu_ptr->m_infoMode & CU_IntLikeCompressed) && ATT_IS_NUMERIC_TYPE(cu_ptr->m_atttypid)) {
-                numeric_expand_ratio = 1.5; /* default expand ratio */
-                numeric_data_size = 0;
-                numeric_src_data_size = 0;
-                for (uint32 row_id = 0; row_id < (uint32)cu_desc.row_count; row_id++) {
-                    if (cu_ptr->IsNull(row_id)) {
+        bool found = cstore->GetCUDesc(col, targetblock, &cuDesc, SnapshotNow);
+        if (found && cuDesc.cu_size != 0) {
+            cuPtr = cstore->GetCUData(&cuDesc, col, attrs[col]->attlen, slotIdList[col]);
+            if ((cuPtr->m_infoMode & CU_IntLikeCompressed) && ATT_IS_NUMERIC_TYPE(cuPtr->m_atttypid)) {
+                numericExpandRatio = 1.5; /* default expand ratio */
+                numericDataSize = 0;
+                numericSrcDataSize = 0;
+                for (int rowId = 0; rowId < cuDesc.row_count; rowId++) {
+                    if (cuPtr->IsNull(rowId)) {
                         continue;
                     }
-                    char* srcData = cu_ptr->m_srcData + cu_ptr->m_offset[row_id];
+                    char* srcData = cuPtr->m_srcData + cuPtr->m_offset[rowId];
                     Numeric nx = DatumGetNumeric(CStringGetDatum(srcData));
                     if (NUMERIC_IS_BI(nx)) {
                         Numeric srcNx = makeNumericNormal(nx);
-                        numeric_src_data_size += VARSIZE_ANY(srcNx);
-                        numeric_data_size += cu_ptr->m_offset[row_id + 1] - cu_ptr->m_offset[row_id];
+                        numericSrcDataSize += VARSIZE_ANY(srcNx);
+                        numericDataSize += cuPtr->m_offset[rowId + 1] - cuPtr->m_offset[rowId];
                         pfree_ext(srcNx);
                     }
                 }
-                if (numeric_src_data_size != 0 && numeric_data_size != 0) {
-                    numeric_expand_ratio = numeric_data_size / numeric_src_data_size;
+                if (numericSrcDataSize != 0 && numericDataSize != 0) {
+                    numericExpandRatio = numericDataSize / numericSrcDataSize;
                 }
 
-                total_source_size += (double)(cu_ptr->m_srcBufSize / numeric_expand_ratio);
-                total_cu_size += (double)cu_ptr->m_cuSize;
+                total_source_size += (double)(cuPtr->m_srcBufSize / numericExpandRatio);
+                total_cu_size += (double)cuPtr->m_cuSize;
             } else {
-                total_source_size += (double)cu_ptr->m_srcDataSize;
-                total_cu_size += (double)(cu_ptr->m_cuSize - cu_ptr->GetCUHeaderSize());
+                total_source_size += (double)cuPtr->m_srcDataSize;
+                total_cu_size += (double)(cuPtr->m_cuSize - cuPtr->GetCUHeaderSize());
             }
 
-            if (IsValidCacheSlotID(slot_id_list[col])) {
-                CUCache->UnPinDataBlock(slot_id_list[col]);
+            if (IsValidCacheSlotID(slotIdList[col])) {
+                CUCache->UnPinDataBlock(slotIdList[col]);
             }
         }
     }
 
-    pfree_ext(col_idx);
-    pfree_ext(slot_id_list);
-    CStoreEndScan(cstore_scan_desc);
+    pfree_ext(colIdx);
+    pfree_ext(slotIdList);
+    CStoreEndScan(cstoreScanDesc);
 
-    return total_cu_size > 0 ? total_source_size / total_cu_size : 0;
+    return (total_cu_size > 0) ? (total_source_size / total_cu_size) : 0;
 }
 
 /*
@@ -396,67 +401,63 @@ static double calculate_parttable_compress_ratio(Relation onerel)
     List* partitions = NIL;
     ListCell* cell = NULL;
     Partition partition = NULL;
-    Relation part_rel = NULL;
+    Relation partRel = NULL;
 
-    /* fetch the compressed ratio of each partition, and get the average value. */
+    /*fetch the compressed ratio of each partition, and get the average value.*/
     partitions = relationGetPartitionList(onerel, AccessShareLock);
     foreach (cell, partitions) {
         partition = (Partition)lfirst(cell);
-        part_rel = partitionGetRelation(onerel, partition);
-        sample_ratio = calculate_coltable_compress_ratio(part_rel);
-        if (sample_ratio != 0) {
+        partRel = partitionGetRelation(onerel, partition);
+        sample_ratio = calculate_coltable_compress_ratio(partRel);
+        if (0 != sample_ratio) {
             compress_ratio += sample_ratio;
             partition_num++;
         }
-        releaseDummyRelation(&part_rel);
+
+        releaseDummyRelation(&partRel);
     }
 
     releasePartitionList(onerel, &partitions, AccessShareLock);
 
-    return partition_num > 0 ? compress_ratio / partition_num : 0;
+    return (partition_num > 0) ? (compress_ratio / partition_num) : 0;
 }
 
 Datum pg_database_size_oid(PG_FUNCTION_ARGS)
 {
-    Oid db_oid = PG_GETARG_OID(0);
+    Oid dbOid = PG_GETARG_OID(0);
     int64 size;
 
 #ifdef PGXC
-    if ((IS_PGXC_COORDINATOR && !IsConnFromCoord())) {
-        PG_RETURN_DATUM(pgxc_database_size(db_oid));
-    }
+    if ((IS_PGXC_COORDINATOR && !IsConnFromCoord()))
+        PG_RETURN_DATUM(pgxc_database_size(dbOid));
 #endif
 
-    /* Normally, check the validation of db_oid */
-    char* dbname = get_database_name(db_oid);
-    if (dbname == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE),
-                    errmsg("database with OID %u does not exist", db_oid)));
-    }
-    size = calculate_database_size(db_oid);
+    /* Normally, check the validation of dbOid */
+    (void)get_and_check_db_name(dbOid, true);
+    size = calculate_database_size(dbOid);
 
-    if (size == 0) {
+    if (size == 0)
         PG_RETURN_NULL();
-    }
+
     PG_RETURN_INT64(size);
 }
 
 Datum pg_database_size_name(PG_FUNCTION_ARGS)
 {
     Name dbName = PG_GETARG_NAME(0);
-    Oid db_oid = get_database_oid(NameStr(*dbName), false);
+    Oid dbOid = get_database_oid(NameStr(*dbName), false);
     int64 size;
 
 #ifdef PGXC
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        PG_RETURN_DATUM(pgxc_database_size(db_oid));
-    }
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
+        PG_RETURN_DATUM(pgxc_database_size(dbOid));
 #endif
 
-    size = calculate_database_size(db_oid);
-    if (size == 0) {
+    size = calculate_database_size(dbOid);
+
+    if (size == 0)
         PG_RETURN_NULL();
-    }
+
     PG_RETURN_INT64(size);
 }
 
@@ -465,36 +466,16 @@ typedef struct SampleTuplesInfo {
     double tuples;
 } SampleTuplesInfo;
 
-static int compare_relation_tuples(const void* a, const void* b, void* arg)
+static int compareRelationTuples(const void* a, const void* b, void* arg)
 {
     const SampleTuplesInfo* aa = (const SampleTuplesInfo*)a;
     const SampleTuplesInfo* bb = (const SampleTuplesInfo*)b;
-    if (aa->tuples > bb->tuples) {
+    if (aa->tuples > bb->tuples)
         return -1;
-    } else if (aa->tuples < bb->tuples) {
+    else if (aa->tuples < bb->tuples)
         return 1;
-    } else {
+    else
         return 0;
-    }
-}
-
-bool rel_is_CU_format(HeapTuple tuple, TupleDesc tupdesc)
-{
-    bool ret = false;
-    bytea* options = NULL;
-
-    options = extractRelOptions(tuple, tupdesc, InvalidOid);
-    if (options != NULL) {
-        const char* format = ((options) && (((StdRdOptions*)(options))->orientation))
-            ? ((char*)(options) + *(int*)&(((StdRdOptions*)(options))->orientation))
-            : ORIENTATION_ROW;
-        if (pg_strcasecmp(format, ORIENTATION_COLUMN) == 0) {
-            ret = true;
-        }
-        pfree_ext(options);
-    }
-
-    return ret;
 }
 
 /*
@@ -515,22 +496,22 @@ static double calculate_source_database_size()
     double sample_ratio = 0;
     int64 sample_relation_size = 0;
     double sample_relations_total_size = 0;
-    /* we think the compress ratio less than 0.5 is abnormal */
+    /*we think the compress ratio less than 0.5 is abnormal*/
     const double abnormal_compress_ratio = 0.5;
     double compress_ratio = 0;
     double compress_ratio_weight = 0;
 
     int64 size = 0;
     int64 dbsize = 0;
-    uint idx = 0;
+    int idx = 0;
 
-    /* fetch the most 128 relations to calculate compressed ratio. */
-    uint sample_relation_num = 128;
+    /*fetch the most 128 relations to calculate compressed ratio.*/
+    int sample_relation_num = 128;
     const int tmp_num = 1024;
 
-    SampleTuplesInfo* tuple_info = (SampleTuplesInfo*)palloc0(tmp_num * sizeof(SampleTuplesInfo));
+    SampleTuplesInfo* tupleInfo = (SampleTuplesInfo*)palloc0(tmp_num * sizeof(SampleTuplesInfo));
 
-    /* scan the pg_class to fetch the reltuples of every relation. */
+    /*scan the pg_class to fetch the reltuples of every relation.*/
     class_rel = heap_open(RelationRelationId, AccessShareLock);
     pg_class_tuple_desc = class_rel->rd_att;
     scan = systable_beginscan(class_rel, InvalidOid, false, SnapshotNow, 0, NULL);
@@ -538,30 +519,34 @@ static double calculate_source_database_size()
         tuple_class = (Form_pg_class)GETSTRUCT(tuple);
         Oid relid = HeapTupleHeaderGetOid(tuple->t_data);
 
-        /* skip the table with zero retuples. */
-        if (tuple_class->reltuples == 0) {
+        /* skip the table with zero retuples.*/
+        if (0 == tuple_class->reltuples) {
             continue;
         }
 
-        /* process the column tables. */
-        if (rel_is_CU_format(tuple, pg_class_tuple_desc)) {
+        /*process the column tables.*/
+        if ((tuple_class->relkind != RELKIND_INDEX && tuple_class->relkind != RELKIND_GLOBAL_INDEX) &&
+            CheckRelOrientationByPgClassTuple(tuple, pg_class_tuple_desc, ORIENTATION_COLUMN)) {
             col_tuples += tuple_class->reltuples;
             if (idx < tmp_num) {
-                tuple_info[idx].relid = relid;
-                tuple_info[idx].tuples = tuple_class->reltuples;
+                tupleInfo[idx].relid = relid;
+                tupleInfo[idx].tuples = tuple_class->reltuples;
                 idx++;
             } else {
-                /* sort the tables with reltuples. */
-                qsort_arg(tuple_info, tmp_num, sizeof(SampleTuplesInfo), compare_relation_tuples, NULL);
+                /*sort the tables with reltuples.*/
+                qsort_arg(tupleInfo, tmp_num, sizeof(SampleTuplesInfo), compareRelationTuples, NULL);
                 idx = sample_relation_num;
             }
-        } else if (rel_is_pax_format(tuple, pg_class_tuple_desc) && tuple_class->relkind == RELKIND_RELATION) {
+        } else if (tuple_class->relkind == RELKIND_RELATION &&
+            CheckRelOrientationByPgClassTuple(tuple, pg_class_tuple_desc, ORIENTATION_ORC)) {
             continue;
-        } else if (tuple_class->relkind == RELKIND_FOREIGN_TABLE) {
-            /* skip the foreign tables. */
+        }
+        /*skip the foreign tables.*/
+        else if (tuple_class->relkind == RELKIND_FOREIGN_TABLE || tuple_class->relkind == RELKIND_STREAM) {
             continue;
-        } else {
-            /* other tables are processed as row tables. */
+        }
+        /*other tables are processed as row tables.*/
+        else {
             row_tuples += tuple_class->reltuples;
         }
     }
@@ -569,36 +554,37 @@ static double calculate_source_database_size()
     heap_close(class_rel, AccessShareLock);
 
     if (idx != sample_relation_num) {
-        qsort_arg(tuple_info, idx, sizeof(SampleTuplesInfo), compare_relation_tuples, NULL);
+        qsort_arg(tupleInfo, idx, sizeof(SampleTuplesInfo), compareRelationTuples, NULL);
     }
-    sample_relation_num = idx > sample_relation_num ? sample_relation_num : idx;
+    sample_relation_num = (idx > sample_relation_num) ? sample_relation_num : idx;
 
-    /* calculate the compress ratio of each sample column table. */
-    for (uint i = 0; i < sample_relation_num; i++) {
-        sample_rel = try_relation_open(tuple_info[i].relid, AccessShareLock);
-        if (sample_rel == NULL) {
+    /*calculate the compress ratio of each sample column table.*/
+    for (int i = 0; i < sample_relation_num; i++) {
+        sample_rel = try_relation_open(tupleInfo[i].relid, AccessShareLock);
+        if (NULL == sample_rel) {
             continue;
         }
 
-        /* non-partition column tables */
+        /*non-partition column tables*/
         if (!RelationIsPartitioned(sample_rel)) {
             sample_ratio = calculate_coltable_compress_ratio(sample_rel);
             if (sample_ratio < abnormal_compress_ratio) {
                 relation_close(sample_rel, AccessShareLock);
                 continue;
             }
-            /* calculate the weight average ratio. */
-            sample_relation_size = calculate_CStore_relation_size(sample_rel, 0);
+            /*calculate the weight average ratio.*/
+            sample_relation_size = CalculateCStoreRelationSize(sample_rel, 0);
             compress_ratio_weight += sample_ratio * sample_relation_size;
             sample_relations_total_size += sample_relation_size;
-        } else {
-            /* partition column tables */
+        }
+        /*partition column tables*/
+        else {
             sample_ratio = calculate_parttable_compress_ratio(sample_rel);
             if (sample_ratio < abnormal_compress_ratio) {
                 relation_close(sample_rel, AccessShareLock);
                 continue;
             }
-            sample_relation_size = calculate_CStore_partitioned_relation_size(sample_rel, 0);
+            sample_relation_size = CalculateCStorePartitionedRelationSize(sample_rel, 0);
             compress_ratio_weight += sample_ratio * sample_relation_size;
             sample_relations_total_size += sample_relation_size;
         }
@@ -607,22 +593,23 @@ static double calculate_source_database_size()
     }
 
     compress_ratio = (compress_ratio_weight / sample_relations_total_size) > 1
-        ? (compress_ratio_weight / sample_relations_total_size)
-        : 1;
+                         ? (compress_ratio_weight / sample_relations_total_size)
+                         : 1;
 
-    /* calculate the size of current database. */
+    /*calculate the size of current database.*/
     dbsize = calculate_database_size(u_sess->proc_cxt.MyDatabaseId);
 
-    if ((col_tuples + row_tuples) == 0) {
+    if (0 == (col_tuples + row_tuples)) {
         size = 0;
         ereport(WARNING,
             (errmsg("The reltuples in pg_class is equal to zero."),
                 errhint("Do analyze for the current database first.")));
+
     } else {
         size = dbsize + dbsize * (col_tuples / (col_tuples + row_tuples)) * (compress_ratio - 1);
     }
 
-    pfree_ext(tuple_info);
+    pfree_ext(tupleInfo);
     return size;
 }
 
@@ -635,17 +622,16 @@ Datum get_db_source_datasize(PG_FUNCTION_ARGS)
     double size = 0;
 
 #ifdef PGXC
-    /* the size of database on all DNs */
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+    /* the size of database on all DNs*/
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
         PG_RETURN_DATUM(pgxc_source_database_size());
-    }
 #endif
 
     size = calculate_source_database_size();
 
     if (size == 0)
         PG_RETURN_NULL();
-    /* the size of database on one DN */
+    /* the size of database on one DN*/
     PG_RETURN_INT64(size);
 }
 
@@ -653,14 +639,14 @@ Datum get_db_source_datasize(PG_FUNCTION_ARGS)
  * Calculate total size of tablespace. Returns -1 if the tablespace directory
  * cannot be found.
  */
-static int64 calculate_tablespace_size(Oid tbl_spc_oid)
+static int64 calculate_tablespace_size(Oid tblspcOid)
 {
-    char tbl_spc_path[MAXPGPATH] = {'\0'};
+    char tblspcPath[MAXPGPATH] = {'\0'};
     char pathname[MAXPGPATH] = {'\0'};
     int64 totalsize = 0;
     DIR* dirdesc = NULL;
     struct dirent* direntry = NULL;
-    AclResult acl_result;
+    AclResult aclresult;
     errno_t rc = EOK;
 
     /*
@@ -668,66 +654,66 @@ static int64 calculate_tablespace_size(Oid tbl_spc_oid)
      * explicitly granted or implicitly because it is default for current
      * database.
      */
-    if (tbl_spc_oid != u_sess->proc_cxt.MyDatabaseTableSpace) {
-        acl_result = pg_tablespace_aclcheck(tbl_spc_oid, GetUserId(), ACL_CREATE);
-        if (acl_result != ACLCHECK_OK)
-            aclcheck_error(acl_result, ACL_KIND_TABLESPACE, get_tablespace_name(tbl_spc_oid));
+    if (tblspcOid != u_sess->proc_cxt.MyDatabaseTableSpace) {
+        aclresult = pg_tablespace_aclcheck(tblspcOid, GetUserId(), ACL_CREATE);
+        if (aclresult != ACLCHECK_OK)
+            aclcheck_error(aclresult, ACL_KIND_TABLESPACE, get_tablespace_name(tblspcOid));
     }
 
-    if (IS_PGXC_DATANODE && IsConnFromApp() && IsSpecifiedTblspc(tbl_spc_oid, FILESYSTEM_HDFS)) {
+    if (IS_PGXC_DATANODE && IsConnFromApp() && IsSpecifiedTblspc(tblspcOid, FILESYSTEM_HDFS)) {
         ereport(ERROR,
             (errcode(ERRCODE_OBJECT_IN_USE),
                 errmsg("It is unsupported to calculate size of DFS tablespace \"%s\" on data node.",
-                    get_tablespace_name(tbl_spc_oid)),
+                    get_tablespace_name(tblspcOid)),
                 errdetail("Please calculate size of DFS tablespace \"%s\" on coordinator node.",
-                    get_tablespace_name(tbl_spc_oid))));
+                    get_tablespace_name(tblspcOid))));
     }
-    if (tbl_spc_oid == DEFAULTTABLESPACE_OID) {
-        rc = snprintf_s(tbl_spc_path, MAXPGPATH, MAXPGPATH - 1, "base");
-    } else if (tbl_spc_oid == GLOBALTABLESPACE_OID) {
-        rc = snprintf_s(tbl_spc_path, MAXPGPATH, MAXPGPATH - 1, "global");
-    } else {
+    if (tblspcOid == DEFAULTTABLESPACE_OID)
+        rc = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH - 1, "base");
+
+    else if (tblspcOid == GLOBALTABLESPACE_OID)
+        rc = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH - 1, "global");
+    else
 #ifdef PGXC
         /* Postgres-XC tablespaces include node name in path */
-        rc = snprintf_s(tbl_spc_path,
+        rc = snprintf_s(tblspcPath,
             MAXPGPATH,
             MAXPGPATH - 1,
             "pg_tblspc/%u/%s_%s",
-            tbl_spc_oid,
+            tblspcOid,
             TABLESPACE_VERSION_DIRECTORY,
             g_instance.attr.attr_common.PGXCNodeName);
 #else
         rc = snprintf_s(
-            tbl_spc_path, MAXPGPATH, MAXPGPATH - 1, "pg_tblspc/%u/%s", tbl_spc_oid, TABLESPACE_VERSION_DIRECTORY);
+            tblspcPath, MAXPGPATH, MAXPGPATH - 1, "pg_tblspc/%u/%s", tblspcOid, TABLESPACE_VERSION_DIRECTORY);
 #endif
-    }
     securec_check_ss(rc, "\0", "\0");
-    dirdesc = AllocateDir(tbl_spc_path);
+    dirdesc = AllocateDir(tblspcPath);
 
-    if (dirdesc == NULL) {
+    if (NULL == dirdesc)
         return -1;
-    }
-    while ((direntry = ReadDir(dirdesc, tbl_spc_path)) != NULL) {
+
+    while ((direntry = ReadDir(dirdesc, tblspcPath)) != NULL) {
         struct stat fst;
+
         CHECK_FOR_INTERRUPTS();
 
-        if (unlikely(strcmp(direntry->d_name, ".") == 0 || strcmp(direntry->d_name, "..") == 0)) {
+        if (unlikely(strcmp(direntry->d_name, ".") == 0 || strcmp(direntry->d_name, "..") == 0))
             continue;
-        }
-        rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, "%s/%s", tbl_spc_path, direntry->d_name);
+
+        rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, "%s/%s", tblspcPath, direntry->d_name);
         securec_check_ss(rc, "\0", "\0");
 
         if (unlikely(stat(pathname, &fst) < 0)) {
-            if (errno == ENOENT) {
+            if (errno == ENOENT)
                 continue;
-            } else {
+            else
                 ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", pathname)));
-            }
         }
 
-        if (S_ISDIR(fst.st_mode)) {
+        if (S_ISDIR(fst.st_mode))
             totalsize += db_dir_size(pathname);
-        }
+
         totalsize += fst.st_size;
     }
 
@@ -736,47 +722,45 @@ static int64 calculate_tablespace_size(Oid tbl_spc_oid)
     return totalsize;
 }
 
-uint64 pg_cal_tablespace_size_oid(Oid tbl_spc_oid)
+uint64 pg_cal_tablespace_size_oid(Oid tblspcOid)
 {
-    return (uint64)(calculate_tablespace_size(tbl_spc_oid));
+    return (uint64)(calculate_tablespace_size(tblspcOid));
 }
 
 Datum pg_tablespace_size_oid(PG_FUNCTION_ARGS)
 {
-    Oid tbl_spc_oid = PG_GETARG_OID(0);
+    Oid tblspcOid = PG_GETARG_OID(0);
     int64 size;
 
 #ifdef PGXC
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        PG_RETURN_DATUM(pgxc_tablespace_size(tbl_spc_oid));
-    }
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
+        PG_RETURN_DATUM(pgxc_tablespace_size(tblspcOid));
 #endif
 
-    size = calculate_tablespace_size(tbl_spc_oid);
+    size = calculate_tablespace_size(tblspcOid);
 
-    if (size < 0) {
+    if (size < 0)
         PG_RETURN_NULL();
-    }
+
     PG_RETURN_INT64(size);
 }
 
 Datum pg_tablespace_size_name(PG_FUNCTION_ARGS)
 {
-    Name tbl_spc_name = PG_GETARG_NAME(0);
-    Oid tbl_spc_oid = get_tablespace_oid(NameStr(*tbl_spc_name), false);
+    Name tblspcName = PG_GETARG_NAME(0);
+    Oid tblspcOid = get_tablespace_oid(NameStr(*tblspcName), false);
     int64 size;
 
 #ifdef PGXC
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        PG_RETURN_DATUM(pgxc_tablespace_size(tbl_spc_oid));
-    }
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
+        PG_RETURN_DATUM(pgxc_tablespace_size(tblspcOid));
 #endif
 
-    size = calculate_tablespace_size(tbl_spc_oid);
+    size = calculate_tablespace_size(tblspcOid);
 
-    if (size < 0) {
+    if (size < 0)
         PG_RETURN_NULL();
-    }
+
     PG_RETURN_INT64(size);
 }
 
@@ -786,7 +770,7 @@ Datum pg_tablespace_size_name(PG_FUNCTION_ARGS)
  * Note: we can safely apply this to temp tables of other sessions, so there
  * is no check here or at the call sites for that.
  */
-int64 calculate_relation_size(RelFileNode* rfn, BackendId backend, ForkNumber fork_num)
+int64 calculate_relation_size(RelFileNode* rfn, BackendId backend, ForkNumber forknum)
 {
     int64 totalsize = 0;
     char* relationpath = NULL;
@@ -794,24 +778,23 @@ int64 calculate_relation_size(RelFileNode* rfn, BackendId backend, ForkNumber fo
     unsigned int segcount = 0;
     errno_t rc = EOK;
 
-    relationpath = relpathbackend(*rfn, backend, fork_num);
+    relationpath = relpathbackend(*rfn, backend, forknum);
 
     for (segcount = 0;; segcount++) {
         struct stat fst;
+
         CHECK_FOR_INTERRUPTS();
 
-        if (segcount == 0) {
+        if (segcount == 0)
             rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, "%s", relationpath);
-        } else {
+        else
             rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, "%s.%u", relationpath, segcount);
-        }
         securec_check_ss(rc, "\0", "\0");
         if (stat(pathname, &fst) < 0) {
-            if (errno == ENOENT) {
+            if (errno == ENOENT)
                 break;
-            } else {
+            else
                 ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", pathname)));
-            }
         }
         totalsize += fst.st_size;
     }
@@ -821,6 +804,66 @@ int64 calculate_relation_size(RelFileNode* rfn, BackendId backend, ForkNumber fo
     return totalsize;
 }
 
+/*
+ * calculate size of a bucket relation directory
+ *
+ * Note: we can safely apply this to temp tables of other sessions, so there
+ * is no check here or at the call sites for that.
+ */
+int64 calculate_relation_bucket_dir_size(RelFileNode *rfn, BackendId backend, ForkNumber forknum)
+{
+    int64 total_size = 0;
+    char *bucket_dir = NULL;
+    struct stat path_st;
+    char pathbuf[MAXPGPATH];
+    
+    bucket_dir = relpathbackend(*rfn, backend, forknum);
+    if (stat(bucket_dir, &path_st) != 0) {
+        if (errno == ENOENT) {
+            pfree_ext(bucket_dir);
+            return total_size;
+        } else {
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat bucket dir \"%s\": %m", bucket_dir)));
+        }
+    }
+
+    if (!S_ISDIR(path_st.st_mode)) {
+        ereport(ERROR, (errcode_for_file_access(), errmsg("rel path is not a dir \"%s\": %m", bucket_dir)));
+    }
+
+    char **filenames = pgfnames(bucket_dir);
+    if (filenames == NULL) {
+        return 0;
+    }
+
+    for (char **filename = filenames; *filename != NULL; filename++) {
+        errno_t rc = snprintf_s(pathbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", bucket_dir, *filename);
+        if (rc == -1) {
+            ereport(WARNING, (errmsg("pathbuf is not enough. bucket dir is %s, and file name is %s.\n",
+                bucket_dir, *filename)));
+            continue;
+        }
+
+        if (stat(pathbuf, &path_st) != 0 && errno != ENOENT) {
+            ereport(ERROR, (errcode_for_file_access(), 
+                errmsg("could not stat file under bucket dir \"%s\": %m", pathbuf)));
+        }
+
+        if (S_ISDIR(path_st.st_mode)) {
+            ereport(WARNING, (errmsg("Bucket dir should contain sub dir \"%s\": %m", pathbuf)));
+            continue;
+        }
+        total_size += path_st.st_size;
+    }
+
+    pgfnames_cleanup(filenames);
+    
+    pfree_ext(bucket_dir);
+    
+    return total_size;
+}
+
+#ifdef ENABLE_MOT
 uint64 CalculateMotRelationSize(Relation rel, Oid idxOid)
 {
     uint64  totalSize = 0;
@@ -831,15 +874,16 @@ uint64 CalculateMotRelationSize(Relation rel, Oid idxOid)
 
     return totalSize;
 }
+#endif
 
-int64 calculate_CStore_relation_size(Relation rel, ForkNumber fork_num)
+int64 CalculateCStoreRelationSize(Relation rel, ForkNumber forknum)
 {
     int64 totalsize = 0;
     int64 size = 0;
     uint64 segcount = 0;
     char pathname[MAXPGPATH] = {'\0'};
 
-    if (fork_num == MAIN_FORKNUM) {
+    if (forknum == MAIN_FORKNUM) {
         /*
          * Calcuate date files.
          */
@@ -865,12 +909,11 @@ int64 calculate_CStore_relation_size(Relation rel, ForkNumber fork_num)
                     custore.GetFileName(pathname, MAXPGPATH, segcount);
 
                     if (stat(pathname, &fst) < 0) {
-                        if (errno == ENOENT) {
+                        if (errno == ENOENT)
                             break;
-                        } else {
+                        else
                             ereport(
                                 ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", pathname)));
-                        }
                     }
                     totalsize += fst.st_size;
                 }
@@ -880,59 +923,60 @@ int64 calculate_CStore_relation_size(Relation rel, ForkNumber fork_num)
     }
 
     // Add delta table's size
-    Relation delta_rel = try_relation_open(rel->rd_rel->reldeltarelid, AccessShareLock);
-    if (delta_rel != NULL) {
-        totalsize += calculate_relation_size(&(delta_rel->rd_node), delta_rel->rd_backend, fork_num);
+    Relation deltaRel = try_relation_open(rel->rd_rel->reldeltarelid, AccessShareLock);
+    if (deltaRel != NULL) {
+        totalsize += calculate_relation_size(&(deltaRel->rd_node), deltaRel->rd_backend, forknum);
 
         // Add CUDesc Toast table's size only when forkno is MAIN forkno.
-        if (fork_num == MAIN_FORKNUM && OidIsValid(delta_rel->rd_rel->reltoastrelid)) {
-            totalsize += calculate_toast_table_size(delta_rel->rd_rel->reltoastrelid);
+        if (MAIN_FORKNUM == forknum && OidIsValid(deltaRel->rd_rel->reltoastrelid)) {
+            totalsize += calculate_toast_table_size(deltaRel->rd_rel->reltoastrelid);
         }
 
-        relation_close(delta_rel, AccessShareLock);
+        relation_close(deltaRel, AccessShareLock);
     }
 
     // Add CUDesc table's size
-    Relation cudesc_rel = try_relation_open(rel->rd_rel->relcudescrelid, AccessShareLock);
-    if (cudesc_rel != NULL) {
-        totalsize += calculate_relation_size(&(cudesc_rel->rd_node), cudesc_rel->rd_backend, fork_num);
+    Relation cudescRel = try_relation_open(rel->rd_rel->relcudescrelid, AccessShareLock);
+    if (cudescRel != NULL) {
+        totalsize += calculate_relation_size(&(cudescRel->rd_node), cudescRel->rd_backend, forknum);
 
         // Add CUDesc Toast table's size only when forkno is MAIN forkno.
-        if (fork_num == MAIN_FORKNUM && OidIsValid(cudesc_rel->rd_rel->reltoastrelid)) {
-            totalsize += calculate_toast_table_size(cudesc_rel->rd_rel->reltoastrelid);
+        if (MAIN_FORKNUM == forknum && OidIsValid(cudescRel->rd_rel->reltoastrelid)) {
+            totalsize += calculate_toast_table_size(cudescRel->rd_rel->reltoastrelid);
         }
 
         // Add CUDesc Index's size
-        Relation cudescIdx = try_relation_open(cudesc_rel->rd_rel->relcudescidx, AccessShareLock);
+        Relation cudescIdx = try_relation_open(cudescRel->rd_rel->relcudescidx, AccessShareLock);
         if (cudescIdx != NULL) {
-            totalsize += calculate_relation_size(&(cudescIdx->rd_node), cudescIdx->rd_backend, fork_num);
+            totalsize += calculate_relation_size(&(cudescIdx->rd_node), cudescIdx->rd_backend, forknum);
             // ignore toast relation size because CUDesc Index
             // doesn't have any toast sub-relation.
             relation_close(cudescIdx, AccessShareLock);
         }
 
-        relation_close(cudesc_rel, AccessShareLock);
+        relation_close(cudescRel, AccessShareLock);
     }
 
     return totalsize;
 }
 
-int64 calculate_CStore_partitioned_relation_size(Relation rel, ForkNumber fork_num)
+int64 CalculateCStorePartitionedRelationSize(Relation rel, ForkNumber forknum)
 {
     int64 size = 0;
 
     List* partitions = NIL;
     ListCell* cell = NULL;
     Partition partition = NULL;
-    Relation part_rel = NULL;
+    Relation partRel = NULL;
 
     partitions = relationGetPartitionList(rel, AccessShareLock);
 
     foreach (cell, partitions) {
         partition = (Partition)lfirst(cell);
-        part_rel = partitionGetRelation(rel, partition);
-        size += calculate_CStore_relation_size(part_rel, fork_num);
-        releaseDummyRelation(&part_rel);
+        partRel = partitionGetRelation(rel, partition);
+        size += CalculateCStoreRelationSize(partRel, forknum);
+
+        releaseDummyRelation(&partRel);
     }
 
     releasePartitionList(rel, &partitions, AccessShareLock);
@@ -940,81 +984,257 @@ int64 calculate_CStore_partitioned_relation_size(Relation rel, ForkNumber fork_n
     return size;
 }
 
+#ifdef ENABLE_MULTIPLE_NODES 
+/* 
+ * @description: Calcute timeseries cudesc relation size. 
+ * @param {rel}: partition relation
+ * @param {forknum} : forknum of file name
+ * @return {int64} : relation size
+ */
+int64 CalculateTsCudescRelationSize(const Relation rel, ForkNumber forknum)
+{
+    int64 totalsize = 0;
+    // Add CUDesc table's size
+    List* cudesc_oids = search_cudesc(rel->rd_id, false);
+    if (list_length(cudesc_oids) == 0) {
+        list_free_ext(cudesc_oids);
+        return totalsize;
+    }
+    ListCell *cell = NULL;
+    foreach(cell, cudesc_oids) {
+        Oid cudesc_oid = lfirst_oid(cell);
+        Relation cudescRel = try_relation_open(cudesc_oid, AccessShareLock);
+        if (cudescRel != NULL) {
+            totalsize += calculate_relation_size(&(cudescRel->rd_node), cudescRel->rd_backend, forknum);
+        } else {
+            continue;
+        }
+
+        // Add TsCudesc Toast table's size only when forkno is MAIN forkno
+        if (MAIN_FORKNUM == forknum && OidIsValid(cudescRel->rd_rel->reltoastrelid)) {
+            totalsize += calculate_toast_table_size(cudescRel->rd_rel->reltoastrelid);
+        }
+
+        // Add TsCUDesc Index's size
+        Relation cudescIdx = try_relation_open(cudescRel->rd_rel->relcudescidx, AccessShareLock);
+        if (cudescIdx != NULL) {
+            totalsize += calculate_relation_size(&(cudescIdx->rd_node), cudescIdx->rd_backend, forknum);
+            // ignore toast relation size because CUDesc Index
+            // doesn't have any toast sub-relation.
+            relation_close(cudescIdx, AccessShareLock);
+        }
+        relation_close(cudescRel, AccessShareLock);
+    }
+    list_free_ext(cudesc_oids);
+    return totalsize;
+}
+
+/* 
+ * @description: Calcute timeseries tag relation size. 
+ * @param {rel}: partition relation
+ * @param {forknum} : forknum of file name
+ * @return {int64} : relation size
+ */
+int64 CalculateTsTagRelationSize(const Relation rel, ForkNumber forknum)
+{
+    int64 totalsize = 0;
+
+    Oid tstag_oid = get_tag_relid(RelationGetRelationName(rel), rel->rd_rel->relnamespace);
+    Relation tstag_rel = try_relation_open(tstag_oid, AccessShareLock);
+    if (tstag_rel != NULL) {
+        totalsize += calculate_relation_size(&(tstag_rel->rd_node), tstag_rel->rd_backend, forknum);
+        // Add TsTag Toast table's size only when forkno is MAIN forkno
+        if (MAIN_FORKNUM == forknum && OidIsValid(tstag_rel->rd_rel->reltoastrelid)) {
+            totalsize += calculate_toast_table_size(tstag_rel->rd_rel->reltoastrelid);
+        }
+        relation_close(tstag_rel, AccessShareLock);
+
+        // Add TsTag Index's size(todo, add more index) 
+        Oid tstag_idx_oid = get_tag_index_relid(RelationGetRelationName(tstag_rel));
+        Relation tstag_idx_rel = try_relation_open(tstag_idx_oid, AccessShareLock);
+        if (tstag_idx_rel != NULL) {
+            totalsize += calculate_relation_size(&(tstag_idx_rel->rd_node), tstag_idx_rel->rd_backend, forknum);
+            relation_close(tstag_idx_rel, AccessShareLock);
+        }
+    }
+    return totalsize;
+}
+
+/* 
+ * @description: Calcute timeseries column file size. Relation size includs:
+ *               1.pg_tags_*** relation size
+ *               2.pg_cudesc_*** relation size
+ *               4.column file size: 16395(partition_oid)_c2002(partid).0
+ * @param {rel}: partition relation
+ * @param {forknum} : forknum of file name
+ * @return {int64} : relation size
+ */
+int64 CalculateTStoreRelationSize(Relation rel, ForkNumber forknum)
+{
+    int64 totalsize = 0;
+
+    // Add delta table's size
+    
+    int64 file_size = CalculateTsCudescRelationSize(rel, forknum);
+    if (file_size == 0) {
+        // No part exist in this partition
+        return totalsize;
+    }
+    totalsize += file_size;
+
+    uint64 segcount = 0;
+    char pathname[MAXPGPATH];
+    errno_t rc = memset_s(pathname, MAXPGPATH, 0, MAXPGPATH);
+    securec_check(rc, "", "");
+    if (forknum == MAIN_FORKNUM) {
+        // Calcuate date files.
+        for (uint16 partid = TsConf::FIRST_PARTID; partid < TsConf::MAX_PART_NUM; partid++) {
+            /*
+             * In timeseries relation, froknum is partid when calculate ts column file size because:
+             * Timeseries column name is like : 16391_C2002.0, 16391 is partition oid, 2002 is forknum.
+             */
+            int64 col_file_size = calculate_relation_size(&rel->rd_node, rel->rd_backend, ColumnId2ColForkNum(partid));
+            totalsize += col_file_size;
+            CFileNode tmpNode(rel->rd_node, partid, MAIN_FORKNUM);
+            CUStorage custore(tmpNode);
+            for (segcount = 0;; segcount++) {
+                struct stat fst;
+
+                CHECK_FOR_INTERRUPTS();
+
+                custore.GetFileName(pathname, MAXPGPATH, segcount);
+
+                if (stat(pathname, &fst) < 0) {
+                    if (errno == ENOENT)
+                        break;
+                    else
+                        ereport(
+                            LOG, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", pathname)));
+                }
+                totalsize += fst.st_size;
+            }
+            custore.Destroy();
+        }
+    }
+    
+    return totalsize;
+}
+
+/* 
+ * @description: Calcute timeseries column file size by partition. 
+ * @param {rel}: relation
+ * @param {forknum}
+ * @return {int64} : relation size
+ */
+int64 CalculateTStorePartitionedRelationSize(Relation rel, ForkNumber forknum)
+{
+    int64 size = 0;
+
+    List* partitions = NIL;
+    ListCell* cell = NULL;
+    Partition partition = NULL;
+    Relation partRel = NULL;
+
+    size += CalculateTsTagRelationSize(rel, forknum);
+
+    partitions = relationGetPartitionList(rel, AccessShareLock);
+
+    foreach (cell, partitions) {
+        partition = (Partition)lfirst(cell);
+        partRel = partitionGetRelation(rel, partition);
+        size += CalculateTStoreRelationSize(partRel, forknum);
+
+        releaseDummyRelation(&partRel);
+    }
+
+    releasePartitionList(rel, &partitions, AccessShareLock);
+
+    return size;
+}
+#endif
+
 /*
  * Calculate total on-disk size of a TOAST relation, including its index.
  * Must not be applied to non-TOAST relations.
  */
-static int64 calculate_toast_table_size(Oid toast_rel_oid)
+static int64 calculate_toast_table_size(Oid toastrelid)
 {
     int64 size = 0;
-    Relation toast_rel;
-    Relation toast_idx_rel;
-    ForkNumber fork_num;
+    Relation toastRel;
+    Relation toastIdxRel;
+    ForkNumber forkNum;
 
-    toast_rel = relation_open(toast_rel_oid, AccessShareLock);
+    toastRel = relation_open(toastrelid, AccessShareLock);
 
     /* toast heap size, including FSM and VM size */
     for (int ifork = 0; ifork <= MAX_FORKNUM; ifork++) {
-        fork_num = (ForkNumber)ifork;
-        size += calculate_relation_size(&(toast_rel->rd_node), toast_rel->rd_backend, fork_num);
+        forkNum = (ForkNumber)ifork;
+        size += calculate_table_file_size(toastRel, false, forkNum);
     }
 
     /* toast index size, including FSM and VM size */
-    toast_idx_rel = relation_open(toast_rel->rd_rel->reltoastidxid, AccessShareLock);
+    toastIdxRel = relation_open(toastRel->rd_rel->reltoastidxid, AccessShareLock);
     for (int ifork = 0; ifork <= MAX_FORKNUM; ifork++) {
-        fork_num = (ForkNumber)ifork;
-        size += calculate_relation_size(&(toast_idx_rel->rd_node), toast_idx_rel->rd_backend, fork_num);
+        forkNum = (ForkNumber)ifork;
+        size += calculate_table_file_size(toastIdxRel, false, forkNum);
     }
 
-    relation_close(toast_idx_rel, AccessShareLock);
-    relation_close(toast_rel, AccessShareLock);
+    relation_close(toastIdxRel, AccessShareLock);
+    relation_close(toastRel, AccessShareLock);
 
     return size;
 }
 
-static int64 calculate_table_file_size(Relation rel, bool isCStore, int fork_num_option)
+static int64 calculate_table_file_size(Relation rel, bool isCStore, int forkNumOption)
 {
     int64 size = 0;
-    ForkNumber fork_num = (ForkNumber)0;
+    ForkNumber forkNum = (ForkNumber)0;
 
     if (RELATION_CREATE_BUCKET(rel)) {
-        Relation heap_bucket_rel = NULL;
+        Relation heapBucketRel = NULL;
         oidvector* bucketlist = searchHashBucketByOid(rel->rd_bucketoid);
 
         for (int i = 0; i < bucketlist->dim1; i++) {
-            heap_bucket_rel = bucketGetRelation(rel, NULL, bucketlist->values[i]);
-            if (fork_num_option == DEFAULT_FORKNUM) {
+            heapBucketRel = bucketGetRelation(rel, NULL, bucketlist->values[i]);
+            if (forkNumOption == DEFAULT_FORKNUM) {
                 /*
                  * heap size, including FSM and VM
                  */
                 for (int ifork = 0; ifork <= MAX_FORKNUM; ifork++) {
-                    fork_num = (ForkNumber)ifork;
+                    forkNum = (ForkNumber)ifork;
 
-                    size += calculate_relation_size(&(heap_bucket_rel->rd_node), InvalidBackendId, fork_num);
-                }
-                /*
-                 * Size of toast relation
-                 */
-                if (OidIsValid(heap_bucket_rel->rd_rel->reltoastrelid)) {
-                    size += calculate_toast_table_size(heap_bucket_rel->rd_rel->reltoastrelid);
+                    size += calculate_relation_size(&(heapBucketRel->rd_node), InvalidBackendId, forkNum);
                 }
             } else {
-                size += calculate_relation_size(&(heap_bucket_rel->rd_node), InvalidBackendId, fork_num_option);
+                size += calculate_relation_size(&(heapBucketRel->rd_node), InvalidBackendId, forkNumOption);
             }
-            bucketCloseRelation(heap_bucket_rel);
+            bucketCloseRelation(heapBucketRel);
+        }
+        /*
+         * Size of toast relation
+         */
+        if (OidIsValid(rel->rd_rel->reltoastrelid)) {
+            size += calculate_toast_table_size(rel->rd_rel->reltoastrelid);
         }
     } else {
-        if (fork_num_option == DEFAULT_FORKNUM) {
+        if (forkNumOption == DEFAULT_FORKNUM) {
             /*
              * heap size, including FSM and VM
              */
             for (int ifork = 0; ifork <= MAX_FORKNUM; ifork++) {
-                fork_num = (ForkNumber)ifork;
+                forkNum = (ForkNumber)ifork;
 
-                if (isCStore)
-                    size += calculate_CStore_relation_size(rel, fork_num);
-                else
-                    size += calculate_relation_size(&(rel->rd_node), rel->rd_backend, fork_num);
+                if (isCStore) {
+                    size += CalculateCStoreRelationSize(rel, forkNum);
+                }
+#ifdef ENABLE_MULTIPLE_NODES
+                else if (RelationIsTsStore(rel)) {
+                    size += CalculateTStoreRelationSize(rel, forkNum);
+                }
+#endif
+                else {
+                    size += calculate_relation_size(&(rel->rd_node), rel->rd_backend, forkNum);
+                }
             }
             /*
              * Size of toast relation
@@ -1024,14 +1244,20 @@ static int64 calculate_table_file_size(Relation rel, bool isCStore, int fork_num
             }
         } else {
             if (isCStore) {
-                size += calculate_CStore_relation_size(rel, fork_num_option);
+                size += CalculateCStoreRelationSize(rel, forkNumOption);
+            } else if (RelationIsTsStore(rel)) {
+#ifdef ENABLE_MULTIPLE_NODES
+                size += CalculateTStoreRelationSize(rel, forkNumOption);
+#endif
             } else {
-                size += calculate_relation_size(&(rel->rd_node), rel->rd_backend, fork_num_option);
+                size += calculate_relation_size(&(rel->rd_node), rel->rd_backend, forkNumOption);
             }
         }
     }
     return size;
 }
+
+
 
 /*
  * Calculate total on-disk size of a given table,
@@ -1041,79 +1267,98 @@ static int64 calculate_table_file_size(Relation rel, bool isCStore, int fork_num
  * Note that this also behaves sanely if applied to an index or toast table;
  * those won't have attached toast tables, but they can have multiple forks.
  */
-static int64 calculate_table_size(Relation rel, int fork_num_option)
+static int64 calculate_table_size(Relation rel, int forkNumOption)
 {
     int64 size = 0;
 
     if (!RelationIsIndex(rel)) {
+#ifdef ENABLE_MOT
         if (RelationIsForeignTable(rel) && RelationIsMOTTableByOid(RelationGetRelid(rel))) {
             size = CalculateMotRelationSize(rel, InvalidOid);
         } else if (!RelationIsPartitioned(rel)) {
-            size = calculate_table_file_size(rel, RelationIsColStore(rel), fork_num_option);
+#else
+        if (!RelationIsPartitioned(rel)) {
+#endif
+            size = calculate_table_file_size(rel, RelationIsColStore(rel), forkNumOption);
         } else {
             List* partitions = NIL;
             ListCell* cell = NULL;
             Partition partition = NULL;
-            Relation part_rel = NULL;
+            Relation partRel = NULL;
             partitions = relationGetPartitionList(rel, AccessShareLock);
 
             foreach (cell, partitions) {
                 partition = (Partition)lfirst(cell);
-                part_rel = partitionGetRelation(rel, partition);
+                partRel = partitionGetRelation(rel, partition);
 
-                size += calculate_table_file_size(part_rel, RelationIsColStore(rel), fork_num_option);
+                size += calculate_table_file_size(partRel, RelationIsColStore(rel), forkNumOption);
 
-                releaseDummyRelation(&part_rel);
+                releaseDummyRelation(&partRel);
             }
 
             releasePartitionList(rel, &partitions, AccessShareLock);
+#ifdef ENABLE_MULTIPLE_NODES
+            if (RelationIsTsStore(rel)) {
+                size += CalculateTsTagRelationSize(rel, forkNumOption);
+            }
+#endif
         }
     } else {
-        Relation base_rel = relation_open(rel->rd_index->indrelid, AccessShareLock);
-        bool b_cstore = RelationIsColStore(base_rel) && (rel->rd_rel->relam == PSORT_AM_OID);
+        Relation baseRel = relation_open(rel->rd_index->indrelid, AccessShareLock);
+        bool bCstore = RelationIsColStore(baseRel) && (rel->rd_rel->relam == PSORT_AM_OID);
 
-        if (RelationIsForeignTable(base_rel) && RelationIsMOTTableByOid(RelationGetRelid(base_rel))) {
-            size = CalculateMotRelationSize(base_rel, RelationGetRelid(rel));
+#ifdef ENABLE_MOT
+        if (RelationIsForeignTable(baseRel) && RelationIsMOTTableByOid(RelationGetRelid(baseRel))) {
+            size = CalculateMotRelationSize(baseRel, RelationGetRelid(rel));
         } else if (!RelationIsPartitioned(rel)) {
-            if (!b_cstore)
-                size = calculate_table_file_size(rel, false, fork_num_option);
+#else
+        if (!RelationIsPartitioned(rel)) {
+#endif
+            if (!bCstore)
+                size = calculate_table_file_size(rel, false, forkNumOption);
             else {
                 Relation cstoreIdxRel = relation_open(rel->rd_rel->relcudescrelid, AccessShareLock);
                 if (cstoreIdxRel != NULL) {
-                    size = calculate_table_file_size(cstoreIdxRel, true, fork_num_option);
+                    size = calculate_table_file_size(cstoreIdxRel, true, forkNumOption);
                     relation_close(cstoreIdxRel, AccessShareLock);
                 }
             }
         } else {
-            List* part_oid_list = NIL;
+            List* partOids = NIL;
             ListCell* cell = NULL;
-            Oid part_oid = InvalidOid;
-            Oid part_index_oid = InvalidOid;
-            Partition part_index = NULL;
-            Relation part_index_rel = NULL;
-            Relation cstore_part_index_rel = NULL;
+            Oid partOid = InvalidOid;
+            Oid partIndexOid = InvalidOid;
+            Partition partIndex = NULL;
+            Relation partIndexRel = NULL;
+            Relation cstorePartIndexRel = NULL;
 
-            part_oid_list = relationGetPartitionOidList(base_rel);
+            partOids = relationGetPartitionOidList(baseRel);
 
-            foreach (cell, part_oid_list) {
-                part_oid = lfirst_oid(cell);
-                part_index_oid = getPartitionIndexOid(RelationGetRelid(rel), part_oid);
-                part_index = partitionOpen(rel, part_index_oid, AccessShareLock);
-                part_index_rel = partitionGetRelation(rel, part_index);
+            foreach (cell, partOids) {
+                partOid = lfirst_oid(cell);
+                partIndexOid = getPartitionIndexOid(RelationGetRelid(rel), partOid);
+                partIndex = partitionOpen(rel, partIndexOid, AccessShareLock);
+                partIndexRel = partitionGetRelation(rel, partIndex);
 
-                if (b_cstore) {
-                    cstore_part_index_rel = relation_open(part_index_rel->rd_rel->relcudescrelid, AccessShareLock);
-                    size += calculate_table_file_size(cstore_part_index_rel, true, fork_num_option);
-                    relation_close(cstore_part_index_rel, AccessShareLock);
-                } else {
-                    size += calculate_table_file_size(part_index_rel, false, fork_num_option);
-                }
-                partitionClose(rel, part_index, AccessShareLock);
-                releaseDummyRelation(&part_index_rel);
+                if (bCstore) {
+                    cstorePartIndexRel = relation_open(partIndexRel->rd_rel->relcudescrelid, AccessShareLock);
+                    size += calculate_table_file_size(cstorePartIndexRel, true, forkNumOption);
+                    relation_close(cstorePartIndexRel, AccessShareLock);
+                } else
+                    size += calculate_table_file_size(partIndexRel, false, forkNumOption);
+
+                partitionClose(rel, partIndex, AccessShareLock);
+                releaseDummyRelation(&partIndexRel);
             }
-            releasePartitionOidList(&part_oid_list);
+
+            releasePartitionOidList(&partOids);
+#ifdef ENABLE_MULTIPLE_NODES
+            if (RelationIsTsStore(rel)) {
+                size += CalculateTsTagRelationSize(rel, forkNumOption);
+            }
+#endif
         }
-        relation_close(base_rel, AccessShareLock);
+        relation_close(baseRel, AccessShareLock);
     }
     return size;
 }
@@ -1135,13 +1380,16 @@ static int64 calculate_indexes_size(Relation rel)
         ListCell* cell = NULL;
 
         foreach (cell, index_oids) {
-            Oid idx_oid = lfirst_oid(cell);
-            Relation idx_rel = NULL;
+            Oid idxOid = lfirst_oid(cell);
+            Relation idxRel = NULL;
 
-            idx_rel = relation_open(idx_oid, AccessShareLock);
-            size += calculate_table_size(idx_rel, DEFAULT_FORKNUM);
-            relation_close(idx_rel, AccessShareLock);
+            idxRel = relation_open(idxOid, AccessShareLock);
+
+            size += calculate_table_size(idxRel, DEFAULT_FORKNUM);
+
+            relation_close(idxRel, AccessShareLock);
         }
+
         list_free_ext(index_oids);
     }
 
@@ -1150,19 +1398,19 @@ static int64 calculate_indexes_size(Relation rel)
 
 Datum pg_relation_size(PG_FUNCTION_ARGS)
 {
-    Oid rel_oid = PG_GETARG_OID(0);
-    text* fork_name = PG_GETARG_TEXT_P(1);
+    Oid relOid = PG_GETARG_OID(0);
+    text* forkName = PG_GETARG_TEXT_P(1);
     Relation rel;
     int64 size = 0;
 
 #ifdef PGXC
-    if (COLLECT_FROM_DATANODES(rel_oid)) {
-        size = pgxc_exec_sizefunc(rel_oid, "pg_relation_size", text_to_cstring(fork_name));
+    if (COLLECT_FROM_DATANODES(relOid)) {
+        size = pgxc_exec_sizefunc(relOid, "pg_relation_size", text_to_cstring(forkName));
         PG_RETURN_INT64(size);
     }
 #endif /* PGXC */
 
-    rel = try_relation_open(rel_oid, AccessShareLock);
+    rel = try_relation_open(relOid, AccessShareLock);
 
     /*
      * Before 9.2, we used to throw an error if the relation didn't exist, but
@@ -1171,11 +1419,13 @@ Datum pg_relation_size(PG_FUNCTION_ARGS)
      * someone else might drop the table. It's better to return NULL for
      * already-dropped tables than throw an error and abort the whole query.
      */
-    if (rel == NULL) {
+    if (rel == NULL)
         PG_RETURN_NULL();
-    }
-    ForkNumber forknumber = forkname_to_number(text_to_cstring(fork_name));
+
+    ForkNumber forknumber = forkname_to_number(text_to_cstring(forkName));
+
     size = calculate_table_size(rel, forknumber);
+
     relation_close(rel, AccessShareLock);
 
     PG_RETURN_INT64(size);
@@ -1183,220 +1433,202 @@ Datum pg_relation_size(PG_FUNCTION_ARGS)
 
 Datum pg_table_size(PG_FUNCTION_ARGS)
 {
-    Oid rel_oid = PG_GETARG_OID(0);
+    Oid relOid = PG_GETARG_OID(0);
     Relation rel = NULL;
-    bool isnull = false;
     int64 size;
 
-    MemoryContext oldcxt = CurrentMemoryContext;
-    ErrorData* edata = NULL;
+    /* acquire lock to prevent relation drop in other parallel */
+    rel = try_relation_open(relOid, AccessShareLock);
 
-    PG_TRY();
-    {
-        if (COLLECT_FROM_DATANODES(rel_oid)) {
-            size = pgxc_exec_sizefunc(rel_oid, "pg_table_size", NULL);
-        } else {
-            rel = try_relation_open(rel_oid, AccessShareLock);
-            if (likely(RelationIsValid(rel))) {
-                size = calculate_table_size(rel, DEFAULT_FORKNUM);
-            } else {
-                isnull = true;
-            }
-        }
-    }
-    PG_CATCH();
-    {
-        isnull = true;
-
-        MemoryContextSwitchTo(oldcxt);
-        edata = CopyErrorData();
-        FlushErrorState();
-    }
-    PG_END_TRY();
-
-    if (edata != NULL) {
-        ereport(LOG, (errmsg("Caught error and ignored it in pg_table_size: %s", edata->message)));
-        FreeErrorData(edata);
-        edata = NULL;
-    }
-
-    if (likely(RelationIsValid(rel))) {
-        relation_close(rel, AccessShareLock);
-        rel = NULL;
-    }
-
-    if (isnull) {
+    if (!RelationIsValid(rel)) {
         PG_RETURN_NULL();
-    } else {
-        PG_RETURN_INT64(size);
     }
+
+#ifdef PGXC
+    if (COLLECT_FROM_DATANODES(relOid)) {
+        size = pgxc_exec_sizefunc(relOid, "pg_table_size", NULL);
+    } else {
+#else
+    if (true) {
+#endif
+        size = calculate_table_size(rel, DEFAULT_FORKNUM);
+    }
+
+    relation_close(rel, AccessShareLock);
+    rel = NULL;
+
+    PG_RETURN_INT64(size);
 }
 
 Datum pg_partition_size_oid(PG_FUNCTION_ARGS)
 {
-    Oid part_table_oid = PG_GETARG_OID(0);
-    Oid part_oid = PG_GETARG_OID(1);
+    Oid partTableOid = PG_GETARG_OID(0);
+    Oid partOid = PG_GETARG_OID(1);
     int64 size = 0;
 
 #ifdef PGXC
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && (GetRelationLocInfo((part_table_oid)) != NULL)) {
-        PG_RETURN_INT64(pgxc_exec_partition_sizefunc(part_table_oid, part_oid, "pg_partition_size"));
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && (GetRelationLocInfo((partTableOid)) != NULL)) {
+        PG_RETURN_INT64(pgxc_exec_partition_sizefunc(partTableOid, partOid, "pg_partition_size"));
     }
 #endif
 
-    size = calculate_partition_size(part_table_oid, part_oid);
+    size = calculate_partition_size(partTableOid, partOid);
 
     PG_RETURN_INT64(size);
 }
 
 Datum pg_partition_size_name(PG_FUNCTION_ARGS)
 {
-    char* part_table_name = text_to_cstring(PG_GETARG_TEXT_PP(0));
-    char* part_name = text_to_cstring(PG_GETARG_TEXT_PP(1));
-    Oid part_table_oid = InvalidOid;
-    Oid part_oid = InvalidOid;
+    char* partTableName = text_to_cstring(PG_GETARG_TEXT_PP(0));
+    char* partName = text_to_cstring(PG_GETARG_TEXT_PP(1));
+    Oid partTableOid = InvalidOid;
+    Oid partOid = InvalidOid;
     List* names = NIL;
     int64 size = 0;
 
-    names = stringToQualifiedNameList(part_table_name);
-    part_table_oid = RangeVarGetRelid(makeRangeVarFromNameList(names), NoLock, false);
+    names = stringToQualifiedNameList(partTableName);
+    partTableOid = RangeVarGetRelid(makeRangeVarFromNameList(names), NoLock, false);
 
-    part_oid = partitionNameGetPartitionOid(
-        part_table_oid, part_name, PART_OBJ_TYPE_TABLE_PARTITION, NoLock, false, false, NULL, NULL, NoLock);
+    partOid = partitionNameGetPartitionOid(
+        partTableOid, partName, PART_OBJ_TYPE_TABLE_PARTITION, NoLock, false, false, NULL, NULL, NoLock);
 
 #ifdef PGXC
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && (GetRelationLocInfo((part_table_oid)) != NULL)) {
-        PG_RETURN_INT64(pgxc_exec_partition_sizefunc(part_table_oid, part_oid, "pg_partition_size"));
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && (GetRelationLocInfo((partTableOid)) != NULL)) {
+        PG_RETURN_INT64(pgxc_exec_partition_sizefunc(partTableOid, partOid, "pg_partition_size"));
     }
 #endif
 
-    size = calculate_partition_size(part_table_oid, part_oid);
+    size = calculate_partition_size(partTableOid, partOid);
 
     PG_RETURN_INT64(size);
 }
 
-static int64 calculate_partition_size(Oid part_table_oid, Oid part_oid)
+static int64 calculate_partition_size(Oid partTableOid, Oid partOid)
 {
-    Relation part_table_rel = NULL;
+    Relation partTableRel = NULL;
     Partition partition = NULL;
-    Relation part_rel = NULL;
+    Relation partRel = NULL;
     int64 size = 0;
 
-    part_table_rel = try_relation_open(part_table_oid, AccessShareLock);
+    partTableRel = try_relation_open(partTableOid, AccessShareLock);
 
-    if (part_table_rel == NULL) {
+    if (partTableRel == NULL) {
         return 0;
     }
-    partition = partitionOpen(part_table_rel, part_oid, AccessShareLock);
-    part_rel = partitionGetRelation(part_table_rel, partition);
-    size = calculate_table_file_size(part_rel, RelationIsColStore(part_rel), DEFAULT_FORKNUM);
 
-    partitionClose(part_table_rel, partition, AccessShareLock);
-    releaseDummyRelation(&part_rel);
-    relation_close(part_table_rel, AccessShareLock);
+    partition = partitionOpen(partTableRel, partOid, AccessShareLock);
+    partRel = partitionGetRelation(partTableRel, partition);
+
+    size = calculate_table_file_size(partRel, RelationIsColStore(partRel), DEFAULT_FORKNUM);
+
+    partitionClose(partTableRel, partition, AccessShareLock);
+    releaseDummyRelation(&partRel);
+    relation_close(partTableRel, AccessShareLock);
 
     return size;
 }
 
 Datum pg_partition_indexes_size_oid(PG_FUNCTION_ARGS)
 {
-    Oid part_table_oid = PG_GETARG_OID(0);
-    Oid part_oid = PG_GETARG_OID(1);
+    Oid partTableOid = PG_GETARG_OID(0);
+    Oid partOid = PG_GETARG_OID(1);
     int64 size = 0;
 
 #ifdef PGXC
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && (GetRelationLocInfo((part_table_oid)) != NULL)) {
-        PG_RETURN_INT64(pgxc_exec_partition_sizefunc(part_table_oid, part_oid, "pg_partition_indexes_size"));
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && (GetRelationLocInfo((partTableOid)) != NULL)) {
+        PG_RETURN_INT64(pgxc_exec_partition_sizefunc(partTableOid, partOid, "pg_partition_indexes_size"));
     }
 #endif
 
-    size = calculate_partition_indexes_size(part_table_oid, part_oid);
+    size = calculate_partition_indexes_size(partTableOid, partOid);
 
     PG_RETURN_INT64(size);
 }
 
 Datum pg_partition_indexes_size_name(PG_FUNCTION_ARGS)
 {
-    char* part_table_name = text_to_cstring(PG_GETARG_TEXT_PP(0));
-    char* part_name = text_to_cstring(PG_GETARG_TEXT_PP(1));
-    Oid part_table_oid = InvalidOid;
-    Oid part_oid = InvalidOid;
+    char* partTableName = text_to_cstring(PG_GETARG_TEXT_PP(0));
+    char* partName = text_to_cstring(PG_GETARG_TEXT_PP(1));
+    Oid partTableOid = InvalidOid;
+    Oid partOid = InvalidOid;
     List* names = NIL;
     int64 size = 0;
 
-    names = stringToQualifiedNameList(part_table_name);
-    part_table_oid = RangeVarGetRelid(makeRangeVarFromNameList(names), NoLock, false);
+    names = stringToQualifiedNameList(partTableName);
+    partTableOid = RangeVarGetRelid(makeRangeVarFromNameList(names), NoLock, false);
 
-    part_oid = partitionNameGetPartitionOid(
-        part_table_oid, part_name, PART_OBJ_TYPE_TABLE_PARTITION, NoLock, false, false, NULL, NULL, NoLock);
+    partOid = partitionNameGetPartitionOid(
+        partTableOid, partName, PART_OBJ_TYPE_TABLE_PARTITION, NoLock, false, false, NULL, NULL, NoLock);
 
 #ifdef PGXC
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && (GetRelationLocInfo((part_table_oid)) != NULL)) {
-        PG_RETURN_INT64(pgxc_exec_partition_sizefunc(part_table_oid, part_oid, "pg_partition_indexes_size"));
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && (GetRelationLocInfo((partTableOid)) != NULL)) {
+        PG_RETURN_INT64(pgxc_exec_partition_sizefunc(partTableOid, partOid, "pg_partition_indexes_size"));
     }
 #endif
 
-    size = calculate_partition_indexes_size(part_table_oid, part_oid);
+    size = calculate_partition_indexes_size(partTableOid, partOid);
 
     PG_RETURN_INT64(size);
 }
 
-static int64 calculate_partition_indexes_size(Oid part_table_oid, Oid part_oid)
+static int64 calculate_partition_indexes_size(Oid partTableOid, Oid partOid)
 {
-    Relation part_table_rel = NULL;
+    Relation partTableRel = NULL;
     List* indexOids = NIL;
     ListCell* cell = NULL;
     int64 size = 0;
 
-    part_table_rel = try_relation_open(part_table_oid, AccessShareLock);
+    partTableRel = try_relation_open(partTableOid, AccessShareLock);
 
-    if (part_table_rel == NULL) {
+    if (partTableRel == NULL) {
         return 0;
     }
 
-    indexOids = RelationGetIndexList(part_table_rel);
+    indexOids = RelationGetIndexList(partTableRel);
 
     foreach (cell, indexOids) {
         Oid indexOid = lfirst_oid(cell);
-        Relation index_rel = NULL;
-        Oid part_index_oid = InvalidOid;
-        Partition part_index = NULL;
-        Relation part_index_rel = NULL;
+        Relation indexRel = NULL;
+        Oid partIndexOid = InvalidOid;
+        Partition partIndex = NULL;
+        Relation partIndexRel = NULL;
 
-        index_rel = relation_open(indexOid, AccessShareLock);
-        part_index_oid = getPartitionIndexOid(indexOid, part_oid);
-        part_index = partitionOpen(index_rel, part_index_oid, AccessShareLock);
-        part_index_rel = partitionGetRelation(index_rel, part_index);
-        size += calculate_table_size(part_index_rel, DEFAULT_FORKNUM);
+        indexRel = relation_open(indexOid, AccessShareLock);
+        partIndexOid = getPartitionIndexOid(indexOid, partOid);
+        partIndex = partitionOpen(indexRel, partIndexOid, AccessShareLock);
+        partIndexRel = partitionGetRelation(indexRel, partIndex);
 
-        partitionClose(index_rel, part_index, AccessShareLock);
-        releaseDummyRelation(&part_index_rel);
-        relation_close(index_rel, AccessShareLock);
+        size += calculate_table_size(partIndexRel, DEFAULT_FORKNUM);
+
+        partitionClose(indexRel, partIndex, AccessShareLock);
+        releaseDummyRelation(&partIndexRel);
+        relation_close(indexRel, AccessShareLock);
     }
 
     list_free_ext(indexOids);
-    relation_close(part_table_rel, AccessShareLock);
+    relation_close(partTableRel, AccessShareLock);
 
     return size;
 }
 
 Datum pg_indexes_size(PG_FUNCTION_ARGS)
 {
-    Oid rel_oid = PG_GETARG_OID(0);
+    Oid relOid = PG_GETARG_OID(0);
     Relation rel;
     int64 size;
 
 #ifdef PGXC
-    if (COLLECT_FROM_DATANODES(rel_oid)) {
-        PG_RETURN_INT64(pgxc_exec_sizefunc(rel_oid, "pg_indexes_size", NULL));
-    }
+    if (COLLECT_FROM_DATANODES(relOid))
+        PG_RETURN_INT64(pgxc_exec_sizefunc(relOid, "pg_indexes_size", NULL));
 #endif /* PGXC */
 
-    rel = try_relation_open(rel_oid, AccessShareLock);
-    if (rel == NULL) {
+    rel = try_relation_open(relOid, AccessShareLock);
+
+    if (rel == NULL)
         PG_RETURN_NULL();
-    }
+
     size = calculate_indexes_size(rel);
+
     relation_close(rel, AccessShareLock);
 
     PG_RETURN_INT64(size);
@@ -1409,6 +1641,7 @@ Datum pg_indexes_size(PG_FUNCTION_ARGS)
 static int64 calculate_total_relation_size(Relation rel)
 {
     int64 size;
+
     /*
      * Aggregate the table size, this includes size of the heap, toast and
      * toast index with free space and visibility map
@@ -1425,22 +1658,24 @@ static int64 calculate_total_relation_size(Relation rel)
 
 Datum pg_total_relation_size(PG_FUNCTION_ARGS)
 {
-    Oid rel_oid = PG_GETARG_OID(0);
+    Oid relOid = PG_GETARG_OID(0);
     Relation rel;
     int64 size;
 
 #ifdef PGXC
-    if (COLLECT_FROM_DATANODES(rel_oid)) {
-        PG_RETURN_INT64(pgxc_exec_sizefunc(rel_oid, "pg_total_relation_size", NULL));
-    }
+    if (COLLECT_FROM_DATANODES(relOid))
+        PG_RETURN_INT64(pgxc_exec_sizefunc(relOid, "pg_total_relation_size", NULL));
 #endif /* PGXC */
 
-    rel = try_relation_open(rel_oid, AccessShareLock);
-    if (rel == NULL) {
+    rel = try_relation_open(relOid, AccessShareLock);
+
+    if (rel == NULL)
         PG_RETURN_NULL();
-    }
+
     size = calculate_total_relation_size(rel);
+
     relation_close(rel, AccessShareLock);
+
     PG_RETURN_INT64(size);
 }
 
@@ -1459,21 +1694,23 @@ Datum pg_size_pretty(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Parameter value should not be negative.")));
         return (Datum)0;
     }
-    if (size < limit) {
+    if (size < limit)
         rc = snprintf_s(buf, sizeof(buf), sizeof(buf) - 1, INT64_FORMAT " bytes", size);
-    } else {
+    else {
         size >>= 9; /* keep one extra bit for rounding */
-        if (size < limit2) {
+        if (size < limit2)
             rc = snprintf_s(buf, sizeof(buf), sizeof(buf) - 1, INT64_FORMAT " kB", (size + 1) / 2);
-        } else {
+
+        else {
             size >>= 10;
-            if (size < limit2) {
+            if (size < limit2)
                 rc = snprintf_s(buf, sizeof(buf), sizeof(buf) - 1, INT64_FORMAT " MB", (size + 1) / 2);
-            } else {
+            else {
                 size >>= 10;
-                if (size < limit2) {
+                if (size < limit2)
                     rc = snprintf_s(buf, sizeof(buf), sizeof(buf) - 1, INT64_FORMAT " GB", (size + 1) / 2);
-                } else {
+
+                else {
                     size >>= 10;
                     rc = snprintf_s(buf, sizeof(buf), sizeof(buf) - 1, INT64_FORMAT " TB", (size + 1) / 2);
                 }
@@ -1506,7 +1743,7 @@ static bool numeric_is_less(Numeric a, Numeric b)
     return DatumGetBool(DirectFunctionCall2(numeric_lt, da, db));
 }
 
-static Numeric numeric_plus_one_over_two(const Numeric n)
+static Numeric numeric_plus_one_over_two(Numeric n)
 {
     Datum d = NumericGetDatum(n);
     Datum one;
@@ -1527,7 +1764,7 @@ static Numeric numeric_shift_right(Numeric n, unsigned count)
     Datum divisor_numeric;
     Datum result;
 
-    divisor_int64 = Int64GetDatum((int64)(1 << count));
+    divisor_int64 = Int64GetDatum((int64)((uint64)1 << count));
     divisor_numeric = DirectFunctionCall1(int8_numeric, divisor_int64);
     result = DirectFunctionCall2(numeric_div_trunc, d, divisor_numeric);
     return DatumGetNumeric(result);
@@ -1537,10 +1774,9 @@ Datum pg_size_pretty_numeric(PG_FUNCTION_ARGS)
 {
     Numeric size = PG_GETARG_NUMERIC(0);
     Numeric limit, limit2;
-    char *buf = NULL;
-    char *result = NULL;
+    char *buf = NULL, *result = NULL;
     errno_t rc = EOK;
-    uint32 result_size;
+    int result_size;
 
     if (numeric_is_less(size, int64_to_numeric(0))) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Parameter value should not be negative.")));
@@ -1641,9 +1877,8 @@ Datum pg_relation_filenode(PG_FUNCTION_ARGS)
     Form_pg_class relform;
 
     tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
-    if (!HeapTupleIsValid(tuple)) {
+    if (!HeapTupleIsValid(tuple))
         PG_RETURN_NULL();
-    }
     relform = (Form_pg_class)GETSTRUCT(tuple);
 
     switch (relform->relkind) {
@@ -1654,12 +1889,10 @@ Datum pg_relation_filenode(PG_FUNCTION_ARGS)
         case RELKIND_SEQUENCE:
         case RELKIND_TOASTVALUE:
             /* okay, these have storage */
-            if (relform->relfilenode) {
+            if (relform->relfilenode)
                 result = relform->relfilenode;
-            } else { 
-                /* Consult the relation mapper */
+            else /* Consult the relation mapper */
                 result = RelationMapOidToFilenode(relid, relform->relisshared);
-            }
             break;
 
         default:
@@ -1670,9 +1903,9 @@ Datum pg_relation_filenode(PG_FUNCTION_ARGS)
 
     ReleaseSysCache(tuple);
 
-    if (!OidIsValid(result)) {
+    if (!OidIsValid(result))
         PG_RETURN_NULL();
-    }
+
     PG_RETURN_OID(result);
 }
 
@@ -1696,11 +1929,10 @@ Datum pg_filenode_relation(PG_FUNCTION_ARGS)
 
     heaprel = RelidByRelfilenode(reltablespace, relfilenode);
 
-    if (!OidIsValid(heaprel)) {
+    if (!OidIsValid(heaprel))
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_OID(heaprel);
-    }
 }
 
 /*
@@ -1710,27 +1942,26 @@ Datum pg_filenode_relation(PG_FUNCTION_ARGS)
  */
 Datum pg_partition_filenode(PG_FUNCTION_ARGS)
 {
-    Oid part_rel_id = PG_GETARG_OID(0);
+    Oid partRelId = PG_GETARG_OID(0);
     Oid result;
     HeapTuple tuple;
-    Form_pg_partition part_rel_form;
+    Form_pg_partition partRelForm;
 
-    tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(part_rel_id));
-    if (!HeapTupleIsValid(tuple)) {
+    tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partRelId));
+    if (!HeapTupleIsValid(tuple))
         PG_RETURN_NULL();
-    }
-    part_rel_form = (Form_pg_partition)GETSTRUCT(tuple);
-    switch (part_rel_form->parttype) {
+
+    partRelForm = (Form_pg_partition)GETSTRUCT(tuple);
+    switch (partRelForm->parttype) {
         case PART_OBJ_TYPE_PARTED_TABLE:
         case PART_OBJ_TYPE_TABLE_PARTITION:
         case PART_OBJ_TYPE_INDEX_PARTITION:
         case PART_OBJ_TYPE_TOAST_TABLE:
             // okay, these have storage
-            if (part_rel_form->relfilenode) {
-                result = part_rel_form->relfilenode;
-            } else {
-                result = RelationMapOidToFilenode(part_rel_id, false);
-            }
+            if (partRelForm->relfilenode)
+                result = partRelForm->relfilenode;
+            else
+                result = RelationMapOidToFilenode(partRelId, false);
             break;
 
         default:
@@ -1741,16 +1972,16 @@ Datum pg_partition_filenode(PG_FUNCTION_ARGS)
 
     ReleaseSysCache(tuple);
 
-    if (!OidIsValid(result)) {
+    if (!OidIsValid(result))
         PG_RETURN_NULL();
-    }
+
     PG_RETURN_OID(result);
 }
 
 /*
- * Get the pathname (relative to $PGDATA) of a partition
- *
- */
+ *  * Get the pathname (relative to $PGDATA) of a partition
+ *   *
+ *    */
 Datum pg_partition_filepath(PG_FUNCTION_ARGS)
 {
     Oid partRelId = PG_GETARG_OID(0);
@@ -1833,17 +2064,14 @@ Datum pg_relation_filepath(PG_FUNCTION_ARGS)
 
             /* This logic should match RelationInitPhysicalAddr */
             rnode.spcNode = ConvertToRelfilenodeTblspcOid(relform->reltablespace);
-            if (rnode.spcNode == GLOBALTABLESPACE_OID) {
+            if (rnode.spcNode == GLOBALTABLESPACE_OID)
                 rnode.dbNode = InvalidOid;
-            } else {
+            else
                 rnode.dbNode = u_sess->proc_cxt.MyDatabaseId;
-            }
-            if (relform->relfilenode) {
+            if (relform->relfilenode)
                 rnode.relNode = relform->relfilenode;
-            } else {
-                /* Consult the relation mapper */
+            else /* Consult the relation mapper */
                 rnode.relNode = RelationMapOidToFilenode(relid, relform->relisshared);
-            }
             rnode.bucketNode = InvalidBktId;
             break;
 
@@ -1873,6 +2101,7 @@ Datum pg_relation_filepath(PG_FUNCTION_ARGS)
         case RELPERSISTENCE_GLOBAL_TEMP:
             backend = BackendIdForTempRelations;
             break;
+
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -1894,16 +2123,16 @@ Datum pg_relation_filepath(PG_FUNCTION_ARGS)
  * pgxc_tablespace_size
  * Given a tablespace oid, return sum of pg_tablespace_size() executed on all the Datanodes
  */
-static Datum pgxc_tablespace_size(Oid ts_oid)
+static Datum pgxc_tablespace_size(Oid tsOid)
 {
     StringInfoData buf;
-    char* tsname = get_tablespace_name(ts_oid);
+    char* tsname = get_tablespace_name(tsOid);
     ParallelFunctionState* state = NULL;
     int64 size = 0;
 
-    if (NULL == tsname) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("tablespace with OID %u does not exist", ts_oid)));
-    }
+    if (NULL == tsname)
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("tablespace with OID %u does not exist", tsOid)));
+
     initStringInfo(&buf);
     appendStringInfo(&buf, "SELECT pg_catalog.pg_tablespace_size('%s')", tsname);
 
@@ -1914,7 +2143,7 @@ static Datum pgxc_tablespace_size(Oid ts_oid)
     /*
      * If the type of specific tablespace is HDFS , calculate size of database on HDFS.
      */
-    size += calculate_tablespace_size_on_dfs(ts_oid);
+    size += calculate_tablespace_size_on_dfs(tsOid);
 
     PG_RETURN_INT64(size);
 }
@@ -1928,7 +2157,7 @@ static Datum pgxc_source_database_size()
     StringInfoData buf;
     ParallelFunctionState* state = NULL;
     int64 size = 0;
-    /* the default compressed ratio of hdfs tabls is 3 now. */
+    /*the default compressed ratio of hdfs tabls is 3 now.*/
     const double hdfs_ratio = 3;
 
     initStringInfo(&buf);
@@ -1951,19 +2180,15 @@ static Datum pgxc_source_database_size()
 
 /*
  * pgxc_database_size
- * Given a db_oid, return sum of pg_database_size() executed on all the Datanodes
+ * Given a dboid, return sum of pg_database_size() executed on all the Datanodes
  */
-static Datum pgxc_database_size(Oid db_oid)
+static Datum pgxc_database_size(Oid dbOid)
 {
     StringInfoData buf;
-    char* dbname = get_database_name(db_oid);
+    char* dbname = get_and_check_db_name(dbOid, true);
     ParallelFunctionState* state = NULL;
     int64 size = 0;
 
-    if (dbname == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE),
-                    errmsg("database with OID %u does not exist", db_oid)));
-    }
     initStringInfo(&buf);
     appendStringInfo(&buf, "SELECT pg_catalog.pg_database_size('%s')", dbname);
 
@@ -1975,7 +2200,7 @@ static Datum pgxc_database_size(Oid db_oid)
     /*
      * If the specified database exists on HDFS, calculate size of database on HDFS.
      */
-    size += calculate_dbsize_on_dfs(db_oid);
+    size += calculate_dbsize_on_dfs(dbOid);
 
     PG_RETURN_INT64(size);
 }
@@ -2003,10 +2228,10 @@ Datum pgxc_execute_on_nodes(int numnodes, Oid* nodelist, char* query)
     /*
      * Connect to SPI manager
      */
-    if ((ret = SPI_connect()) < 0) {
+    if ((ret = SPI_connect()) < 0)
         /* internal error */
         ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI connect failure - returned %d", ret)));
-    }
+
     initStringInfo(&buf);
 
     /* Get pg_***_size function results from all Datanodes */
@@ -2036,20 +2261,19 @@ Datum pgxc_execute_on_nodes(int numnodes, Oid* nodelist, char* query)
         datum = SPI_getbinval(SPI_tuptable->vals[0], spi_tupdesc, 1, &isnull);
 
         /* For single node, don't assume the type of datum. It can be bool also. */
-        if (numnodes == 1) {
+        if (numnodes == 1)
             break;
-        }
+
         size = DatumGetInt64(datum);
         total_size += size;
     }
 
     SPI_finish();
 
-    if (numnodes == 1) {
+    if (numnodes == 1)
         PG_RETURN_DATUM(datum);
-    } else {
+    else
         PG_RETURN_INT64(total_size);
-    }
 }
 
 /*
@@ -2062,16 +2286,18 @@ Datum pgxc_execute_on_nodes(int numnodes, Oid* nodelist, char* query)
  * Output	:
  * Notes		:
  */
-Oid pg_toast_get_baseid(Oid rel_oid, bool* is_part_toast)
+Oid pg_toast_get_baseid(Oid relOid, bool* isPartToast)
 {
     Oid base_table_oid;
     const char* table_oid_str = NULL;
     Datum toast_len = Int32GetDatum(10);
     Relation rel;
 
-    rel = relation_open(rel_oid, AccessShareLock);
+    rel = relation_open(relOid, AccessShareLock);
+
     if (strstr(RelationGetRelationName(rel), "part") != NULL) {
-        *is_part_toast = true;
+        *isPartToast = true;
+
         toast_len = Int32GetDatum(15);
     }
 
@@ -2083,34 +2309,111 @@ Oid pg_toast_get_baseid(Oid rel_oid, bool* is_part_toast)
     return base_table_oid;
 }
 
-bool IsToastRelationbyOid(Oid rel_oid)
+bool IsToastRelationbyOid(Oid tbl_oid)
 {
     Relation rel;
     bool result = false;
-    rel = relation_open(rel_oid, AccessShareLock);
+    rel = relation_open(tbl_oid, AccessShareLock);
     result = IsToastNamespace(RelationGetNamespace(rel));
     relation_close(rel, AccessShareLock);
     return result;
 }
 
-static bool IsIndexRelationbyOid(Oid rel_oid)
+static bool IsIndexRelationbyOid(Oid tbl_oid)
 {
     Relation rel;
     bool result = false;
-    rel = relation_open(rel_oid, AccessShareLock);
+    rel = relation_open(tbl_oid, AccessShareLock);
     result = RelationIsIndex(rel);
     relation_close(rel, AccessShareLock);
     return result;
 }
 
+static void AddRemoteToastBuf(bool isPartToast, Relation rel, char* funcname, char* extra_arg,
+                              Relation partTableRel, Partition part, StringInfo buf)
+{
+
+    // toast table is belog to a ordinary table
+    if (!isPartToast) {
+        char *relname = RelationGetRelationName(rel);
+        relname = repairObjectName(relname);
+        if (NULL == extra_arg) {
+            appendStringInfo(buf,
+                "SELECT pg_catalog.%s(a.oid)  from  pg_class a,pg_class b where a.oid = b.reltoastrelid and "
+                "b.relname='%s'",
+                funcname,
+                relname);
+        } else {
+            appendStringInfo(buf,
+                "SELECT pg_catalog.%s(a.oid, '%s') from  pg_class a,pg_class b where a.oid = b.reltoastrelid and "
+                "b.relname='%s'",
+                funcname,
+                extra_arg,
+                relname);
+        }
+    }
+    // toast table is belog to a partitoin
+    else {
+        char* partTableName = RelationGetRelationName(partTableRel);
+        char* partName = PartitionGetPartitionName(part);
+
+        partTableName = repairObjectName(partTableName);
+        partName = repairObjectName(partName);
+
+        if (NULL == extra_arg) {
+            appendStringInfo(buf,
+                "SELECT pg_catalog.%s(toast_table.oid) from pg_class toast_table, pg_class part_table, "
+                "pg_partition part where toast_table.oid = part.reltoastrelid and part_table.oid=part.parentid and "
+                "part_table.relname='%s' and part.relname='%s'",
+                funcname,
+                partTableName,
+                partName);
+        } else {
+            appendStringInfo(buf,
+                "SELECT pg_catalog.%s(toast_table.oid, '%s') from pg_class toast_table, pg_class part_table, "
+                "pg_partition part where toast_table.oid = part.reltoastrelid and part_table.oid=part.parentid and "
+                "part_table.relname='%s' and part.relname='%s'",
+                funcname,
+                extra_arg,
+                partTableName,
+                partName);
+        }
+    }
+}
+
+static void AddRemoteMatviewBuf(Relation rel, char* funcname, char* extra_arg,
+                                MvRelationType matviewRelationType, StringInfo buf)
+{
+    char* relname = RelationGetRelationName(rel);
+    relname = repairObjectName(relname);
+    if (NULL == extra_arg) {
+        appendStringInfo(buf,
+            "SELECT pg_catalog.%s(a.oid) from pg_class a, "
+            "(select oid from pg_class b where b.relname='%s') c "
+            "where a.relname = (select concat('%s', CAST(c.oid as varchar)))",
+            funcname,
+            relname,
+            matviewRelationType == MATVIEW_MAP ? MATMAPNAME : MLOGNAME);
+    } else {
+        appendStringInfo(buf,
+            "SELECT pg_catalog.%s(a.oid, '%s') from pg_class a, "
+            "(select oid from pg_class b where b.relname='%s') c "
+            "where a.relname = (select concat('%s', CAST(c.oid as varchar)))",
+            funcname,
+            extra_arg,
+            relname,
+            matviewRelationType == MATVIEW_MAP ? MATMAPNAME : MLOGNAME);
+    }
+}
+
 /*
  * pgxc_exec_sizefunc
  * Execute the given object size system function on all the Datanodes associated
- * with rel_oid, and return the sum of all.
+ * with relOid, and return the sum of all.
  *
  * Args:
  *
- * rel_oid: Oid of the table for which the object size function is to be executed.
+ * relOid: Oid of the table for which the object size function is to be executed.
  *
  * funcname: Name of the system function.
  *
@@ -2119,7 +2422,7 @@ static bool IsIndexRelationbyOid(Oid rel_oid)
  * is used. Currently only pg_relation_size() is the only one that requires
  * a 2nd argument: fork text.
  */
-static int64 pgxc_exec_sizefunc(Oid rel_oid, char* funcname, char* extra_arg)
+static int64 pgxc_exec_sizefunc(Oid relOid, char* funcname, char* extra_arg)
 {
     int numnodes;
     Oid* nodelist = NULL;
@@ -2127,103 +2430,57 @@ static int64 pgxc_exec_sizefunc(Oid rel_oid, char* funcname, char* extra_arg)
     char* relname = NULL;
     StringInfoData buf;
     Relation rel = NULL;
-    bool is_part_toast = false;
-    Oid part_table_oid = InvalidOid;
-    Relation part_table_rel = NULL;
+    bool isPartToast = false;
+    Oid partTableOid = InvalidOid;
+    Relation partTableRel = NULL;
     Partition part = NULL;
     ExecNodes* exec_nodes = makeNode(ExecNodes);
     int i = 0;
     ParallelFunctionState* state = NULL;
     int64 size = 0;
+    MvRelationType matviewRelationType = MATVIEW_NOT;
 
-    if (IsToastRelationbyOid(rel_oid)) {
-        tbl_oid = pg_toast_get_baseid(rel_oid, &is_part_toast);
+    if (IsToastRelationbyOid(relOid)) {
+        tbl_oid = pg_toast_get_baseid(relOid, &isPartToast);
+    } else if (IsMatviewRelationbyOid(relOid, &matviewRelationType)) {
+        tbl_oid = MatviewRelationGetBaseid(relOid, matviewRelationType);
     } else {
-        tbl_oid = rel_oid;
+        tbl_oid = relOid;
     }
-    if (!is_part_toast) {
+
+    if (!isPartToast) {
         rel = relation_open(tbl_oid, AccessShareLock);
     } else {
-        part_table_oid = partid_get_parentid(tbl_oid);
-        part_table_rel = relation_open(part_table_oid, AccessShareLock);
-        part = partitionOpen(part_table_rel, tbl_oid, AccessShareLock);
+        partTableOid = partid_get_parentid(tbl_oid);
+        partTableRel = relation_open(partTableOid, AccessShareLock);
+        part = partitionOpen(partTableRel, tbl_oid, AccessShareLock);
     }
 
     initStringInfo(&buf);
 
-    if (!IsToastRelationbyOid(rel_oid)) {
+    if (IsToastRelationbyOid(relOid)) {
+        AddRemoteToastBuf(isPartToast, rel, funcname, extra_arg, partTableRel, part, &buf);
+    } else if (IsMatviewRelationbyOid(relOid, &matviewRelationType)) {
+        AddRemoteMatviewBuf(rel, funcname, extra_arg, matviewRelationType, &buf);
+    } else {
         /* get relation name including any needed schema prefix and quoting */
         relname =
             quote_qualified_identifier(get_namespace_name(rel->rd_rel->relnamespace), RelationGetRelationName(rel));
         relname = repairObjectName(relname);
-        if (extra_arg == NULL) {
-            appendStringInfo(&buf, "SELECT pg_catalog.%s('%s')", funcname, relname);
-        } else {
+        NULL == extra_arg ? appendStringInfo(&buf, "SELECT pg_catalog.%s('%s')", funcname, relname) :
             appendStringInfo(&buf, "SELECT pg_catalog.%s('%s', '%s')", funcname, relname, extra_arg);
-        }
-    } else {
-        // toast table is belog to a ordinary table
-        if (!is_part_toast) {
-            relname = RelationGetRelationName(rel);
-            relname = repairObjectName(relname);
-            if (extra_arg == NULL) {
-                appendStringInfo(&buf,
-                    "SELECT pg_catalog.%s(a.oid)  from  pg_class a,pg_class b where a.oid = b.reltoastrelid and "
-                    "b.relname='%s'",
-                    funcname,
-                    relname);
-            } else {
-                appendStringInfo(&buf,
-                    "SELECT pg_catalog.%s(a.oid, '%s') from  pg_class a,pg_class b where a.oid = b.reltoastrelid and "
-                    "b.relname='%s'",
-                    funcname,
-                    extra_arg,
-                    relname);
-            }
-        } else {
-            // toast table is belog to a partitoin
-            char* part_table_name = RelationGetRelationName(part_table_rel);
-            char* part_name = PartitionGetPartitionName(part);
-
-            part_table_name = repairObjectName(part_table_name);
-            part_name = repairObjectName(part_name);
-
-            if (extra_arg == NULL) {
-                appendStringInfo(&buf,
-                    "SELECT pg_catalog.%s(toast_table.oid) from pg_class toast_table, pg_class part_table, "
-                    "pg_partition part where toast_table.oid = part.reltoastrelid and part_table.oid=part.parentid and "
-                    "part_table.relname='%s' and part.relname='%s'",
-                    funcname,
-                    part_table_name,
-                    part_name);
-            } else {
-                appendStringInfo(&buf,
-                    "SELECT pg_catalog.%s(toast_table.oid, '%s') from pg_class toast_table, pg_class part_table, "
-                    "pg_partition part where toast_table.oid = part.reltoastrelid and part_table.oid=part.parentid and "
-                    "part_table.relname='%s' and part.relname='%s'",
-                    funcname,
-                    extra_arg,
-                    part_table_name,
-                    part_name);
-            }
-        }
     }
 
-    if (!is_part_toast) {
-        Oid tab_rel_oid = InvalidOid;
+    if (!isPartToast) {
+        Oid tabRelOid = InvalidOid;
+        RelationIsIndex(rel) ? tabRelOid = rel->rd_index->indrelid : tabRelOid = RelationGetRelid(rel);
 
-        if (RelationIsIndex(rel)) {
-            tab_rel_oid = rel->rd_index->indrelid;
-        } else {
-            tab_rel_oid = RelationGetRelid(rel);
-        }
-
-        numnodes = get_pgxc_classnodes(tab_rel_oid, &nodelist);
+        numnodes = get_pgxc_classnodes(tabRelOid, &nodelist);
         relation_close(rel, AccessShareLock);
     } else {
-        numnodes = get_pgxc_classnodes(RelationGetRelid(part_table_rel), &nodelist);
-        partitionClose(part_table_rel, part, AccessShareLock);
-        relation_close(part_table_rel, AccessShareLock);
+        numnodes = get_pgxc_classnodes(RelationGetRelid(partTableRel), &nodelist);
+        partitionClose(partTableRel, part, AccessShareLock);
+        relation_close(partTableRel, AccessShareLock);
     }
 
     // Build nodes to execute on
@@ -2238,23 +2495,23 @@ static int64 pgxc_exec_sizefunc(Oid rel_oid, char* funcname, char* extra_arg)
     /*
      * If the relation is DFS table, must calculate data size on hdfs.
      */
-    if (RelationIsPaxFormatByOid(rel_oid)) {
-        Relation rel = relation_open(rel_oid, AccessShareLock);
-        StringInfo dfs_store_path = getDfsStorePath(rel);
-        Oid tbl_spc_oid = rel->rd_rel->reltablespace;
-        size += calculate_dir_size_on_dfs(tbl_spc_oid, dfs_store_path);
+    if (RelationIsPaxFormatByOid(relOid)) {
+        Relation rel = relation_open(relOid, AccessShareLock);
+        StringInfo dfsStorePath = getDfsStorePath(rel);
+        Oid tblSpcOid = rel->rd_rel->reltablespace;
+        size += calculate_dir_size_on_dfs(tblSpcOid, dfsStorePath);
         relation_close(rel, NoLock);
     }
     return size;
 }
 
-static int64 pgxc_exec_partition_sizefunc(Oid part_table_oid, Oid part_oid, char* func_name)
+static int64 pgxc_exec_partition_sizefunc(Oid partTableOid, Oid partOid, char* funcName)
 {
     int numnodes = 0;
     Oid* nodelist = NULL;
-    char* part_table_name = NULL;
-    char* part_name = NULL;
-    Relation part_table_rel = NULL;
+    char* partTableName = NULL;
+    char* partName = NULL;
+    Relation partTableRel = NULL;
     Partition partition = NULL;
     StringInfoData buf;
     ExecNodes* exec_nodes = makeNode(ExecNodes);
@@ -2262,32 +2519,32 @@ static int64 pgxc_exec_partition_sizefunc(Oid part_table_oid, Oid part_oid, char
     ParallelFunctionState* state = NULL;
     int64 size = 0;
 
-    part_table_rel = relation_open(part_table_oid, AccessShareLock);
-    partition = partitionOpen(part_table_rel, part_oid, AccessShareLock);
+    partTableRel = relation_open(partTableOid, AccessShareLock);
+    partition = partitionOpen(partTableRel, partOid, AccessShareLock);
 
     initStringInfo(&buf);
 
-    if (part_table_rel->rd_locator_info) {
+    if (partTableRel->rd_locator_info) {
         // get relation name including any needed schema prefix and quoting
-        part_table_name = quote_qualified_identifier(
-            get_namespace_name(part_table_rel->rd_rel->relnamespace), RelationGetRelationName(part_table_rel));
-        part_table_name = repairObjectName(part_table_name);
+        partTableName = quote_qualified_identifier(
+            get_namespace_name(partTableRel->rd_rel->relnamespace), RelationGetRelationName(partTableRel));
+        partTableName = repairObjectName(partTableName);
     }
-    part_name = partition->pd_part->relname.data;
-    part_name = repairObjectName(part_name);
+    partName = partition->pd_part->relname.data;
+    partName = repairObjectName(partName);
 
-    appendStringInfo(&buf, "SELECT pg_catalog.%s('%s', '%s')", func_name, part_table_name, part_name);
+    appendStringInfo(&buf, "SELECT pg_catalog.%s('%s', '%s')", funcName, partTableName, partName);
 
-    numnodes = get_pgxc_classnodes(RelationGetRelid(part_table_rel), &nodelist);
+    numnodes = get_pgxc_classnodes(RelationGetRelid(partTableRel), &nodelist);
 
-    partitionClose(part_table_rel, partition, AccessShareLock);
-    relation_close(part_table_rel, AccessShareLock);
+    partitionClose(partTableRel, partition, AccessShareLock);
+    relation_close(partTableRel, AccessShareLock);
 
     // Build nodes to execute on
     //
-    for (i = 0; i < numnodes; i++) {
+    for (i = 0; i < numnodes; i++)
         exec_nodes->nodeList = lappend_int(exec_nodes->nodeList, PGXCNodeGetNodeId(nodelist[i], PGXC_NODE_DATANODE));
-    }
+
     state = RemoteFunctionResultHandler(buf.data, exec_nodes, StrategyFuncSum);
     size = state->result;
     FreeParallelFunctionState(state);
@@ -2300,19 +2557,20 @@ static int64 pgxc_exec_partition_sizefunc(Oid part_table_oid, Oid part_oid, char
 Datum pg_relation_with_compression(PG_FUNCTION_ARGS)
 {
     text* relname = PG_GETARG_TEXT_P(0);
-    RangeVar* relrv = makeRangeVarFromNameList(textToQualifiedNameList(relname));
+    List* name = textToQualifiedNameList(relname);
+    RangeVar* relrv = makeRangeVarFromNameList(name);
     Relation rel = relation_openrv(relrv, AccessShareLock);
 
-    if (rel == NULL) {
+    if (rel == NULL)
         PG_RETURN_NULL();
-    }
+
     bool compressed = false;
-    if (RelationIsColStore(rel)) {
+    if (RelationIsColStore(rel))
         compressed = (0 != pg_strcasecmp(COMPRESSION_NO, RelationGetCompression(rel)));
-    } else {
+    else
         compressed = RowRelationIsCompressed(rel);
-    }
     relation_close(rel, AccessShareLock);
+    list_free_ext(name);
     PG_RETURN_BOOL(compressed);
 }
 
@@ -2370,29 +2628,30 @@ Datum pgxc_max_datanode_size_name(PG_FUNCTION_ARGS)
     group_name = str->data;
 
     /* Only a DB administrator can remove cluster node groups */
-    if (!superuser()) {
+    if (!superuser())
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be system admin to call gs_get_max_dbsize_name.")));
-    }
+
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         StringInfoData buf;
         ParallelFunctionState* state = NULL;
 
         group_oid = get_pgxc_groupoid(group_name);
 
-        if (!OidIsValid(group_oid)) {
+        if (!OidIsValid(group_oid))
             ereport(ERROR, (errcode(ERRCODE_DUPLICATE_OBJECT), errmsg("PGXC Group %s: group not defined", group_name)));
-        }
+
         nmembers = get_pgxc_groupmembers(group_oid, &members);
-        if (nmembers == 0) {
+        if (nmembers == 0)
             PG_RETURN_INT64(0);
-        }
+
         exec_nodes = makeNode(ExecNodes);
 
         for (int i = 0; i < nmembers; i++) {
             int nodeId = PGXCNodeGetNodeId(members[i], PGXC_NODE_DATANODE);
             exec_nodes->nodeList = lappend_int(exec_nodes->nodeList, nodeId);
         }
+
         initStringInfo(&buf);
         appendStringInfo(&buf, "SELECT SUM(pg_database_size(oid))::bigint FROM pg_database;");
 
@@ -2403,14 +2662,15 @@ Datum pgxc_max_datanode_size_name(PG_FUNCTION_ARGS)
 
         for (;;) {
             bool isnull = false;
-            if (!tuplestore_gettupleslot(state->tupstore, true, false, slot)) {
+
+            if (!tuplestore_gettupleslot(state->tupstore, true, false, slot))
                 break;
-            }
-            size = DatumGetInt64(slot_getattr(slot, 1, &isnull));
-            if (!isnull && max_size < size) {
+
+            size = DatumGetInt64(tableam_tslot_getattr(slot, 1, &isnull));
+            if (!isnull && max_size < size)
                 max_size = size;
-            }
-            (void)ExecClearTuple(slot);
+
+            ExecClearTuple(slot);
         }
 
         ExecDropSingleTupleTableSlot(slot);
@@ -2419,6 +2679,27 @@ Datum pgxc_max_datanode_size_name(PG_FUNCTION_ARGS)
     }
 
     PG_RETURN_INT64(max_size);
+}
+
+/*
+ * Indicate whether a relation is scannable.
+ *
+ * Currently, this is always true except for a materialized view which has not
+ * been populated.
+ */
+Datum
+pg_relation_is_scannable(PG_FUNCTION_ARGS)
+{
+   Oid         relid;
+   Relation    relation;
+   bool        result;
+
+   relid = PG_GETARG_OID(0);
+   relation = RelationIdGetRelation(relid);
+   result = relation->rd_isscannable;
+   RelationClose(relation);
+
+   PG_RETURN_BOOL(result);
 }
 
 #endif /* PGXC */

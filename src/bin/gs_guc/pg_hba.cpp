@@ -276,6 +276,7 @@ extern int do_hba_set(const char *action_type);
 HbaSortLine* sort_hba_lines(const char** optlines, int reserve_num_lines);
 void insert_into_sorted_hbalines(HbaSortLine* sortedHbalines, int inpos);
 static void free_hba_line(HbaLine* parsedline);
+extern void free_hba_params();
 extern int check_config_file_status();
 extern char** backup_config_file(const char* read_file, char* write_file, FileLock filelock, int reserve_num_lines);
 extern int do_parameter_value_write(char** opt_lines, UpdateOrAddParameter updateoradd);
@@ -813,12 +814,12 @@ int cmp_lists(List* list1, List* list2)
         return list2->length - list1->length;
     }
 
-    /* If HBA Line use "all", let it in front */
+    /* If HBA Line use "all", let it in the back */
     if (list1_has_all) {
-        return 1;
+        return -1;
     }
 
-    return -1;
+    return 1;
 }
 
 int cmp_hba_line(HbaLine* hbaline1, HbaLine* hbaline2)
@@ -1096,6 +1097,14 @@ static void free_hba_line(HbaLine* parsedline)
     securec_check_c(rc, "\0", "\0");
 
     return;
+}
+
+void free_hba_params()
+{
+    int i;
+    for (i = 0; i < config_param_number; i++) {
+        free_hba_line((HbaLine*)config_param[i]);
+    }
 }
 
 static bool verify_ip(const char* compare_ip)
@@ -1773,17 +1782,17 @@ obtain_parameter_list_array_for_hba(const char *flag, char *key, const char *val
     for(i = 0; i < config_param_number; i++)
     {
         if (0 == strncmp(hba_param[i], flag,
-                         strlen(hba_param[i]) > strlen(flag) ? strlen(hba_param[i]) : strlen(flag))){
-
+                         strlen(hba_param[i]) > strlen(flag) ? strlen(hba_param[i]) : strlen(flag))) {
             GS_FREE(hba_param[i]);
+            free_hba_line((HbaLine*)config_param[i]);
             GS_FREE(config_param[i]);
             GS_FREE(config_value[i]);
 
             hba_param[i] = xstrdup(flag);
             config_param[i] = key;
-            if (NULL != value){
+            if (NULL != value) {
                 config_value[i] = xstrdup(value);
-            }else{
+            } else {
                 config_value[i] = NULL;
             }
 
@@ -1793,9 +1802,9 @@ obtain_parameter_list_array_for_hba(const char *flag, char *key, const char *val
 
     hba_param[i] = xstrdup(flag);
     config_param[config_param_number++] = key;
-    if (NULL != value){
+    if (NULL != value) {
         config_value[config_value_number++] = xstrdup(value);
-    }else{
+    } else {
         config_value[config_value_number++] = NULL;
     }
 }
@@ -1833,7 +1842,7 @@ void do_hba_analysis(const char* strcmd)
         hbaContext = (char *)pg_malloc_zero(sizeof(char)*(len + 1));
         nRet = snprintf_s(hbaContext, len + 1, len, "%s%s%s%s",
                           (NULL != g_hbaType ? g_hbaType : ""),
-                          (NULL !=  g_hbaDatabase ? g_hbaDatabase : ""),
+                          (NULL != g_hbaDatabase ? g_hbaDatabase : ""),
                           (NULL != g_hbaUser ? g_hbaUser : ""),
                           (NULL != g_hbaAddr ? g_hbaAddr : ""));
         securec_check_ss_c(nRet, hbaContext, "\0");
@@ -1872,7 +1881,7 @@ int do_hba_set(const char *action_type)
 {
     char** opt_lines = NULL;
     char** new_lines = NULL;
-    bool    update_required = false;
+    bool update_required = false;
     struct stat statbuf;
     struct stat tempbuf;
     int i = 0;
@@ -1910,6 +1919,7 @@ int do_hba_set(const char *action_type)
         if (((HbaLine*)config_param[i] == NULL) || (config_value[i] == NULL)){
             release_file_lock(&filelock);
             freefile(opt_lines);
+	    freefile(new_lines);
             (void)write_stderr( _("%s: invalid input parameters\n"), progname);
             return FAILURE;
         }

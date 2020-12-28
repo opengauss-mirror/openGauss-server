@@ -2,8 +2,8 @@ CREATE DATABASE test_sort TEMPLATE=template0 ENCODING='sql_ascii' LC_COLLATE='C'
 \c test_sort
 CREATE TABLE sort_row(id numeric, num numeric, str char(10)); 
 CREATE TABLE sort_col(id numeric, num numeric, str char(10)) with(orientation=column);
-COPY sort_col FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/sort_num.data';
-COPY sort_row FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/sort_num.data';
+COPY sort_col FROM '@abs_srcdir@/data/sort_num.data';
+COPY sort_row FROM '@abs_srcdir@/data/sort_num.data';
 set work_mem='128MB';
 set enable_hashagg=off;
 select id, count(str) from sort_row group by id order by 1,2 limit 1;

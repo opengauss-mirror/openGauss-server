@@ -1,18 +1,7 @@
-/*
+/* -------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
  *
  * datareceiver.cpp
  *
@@ -58,7 +47,6 @@
 
 #include "libpq/libpq-fe.h"
 #include "flock.h"
-#include "funcapi.h"
 #include "gssignal/gs_signal.h"
 #include "nodes/execnodes.h"
 #include "libpq/pqsignal.h"
@@ -80,6 +68,11 @@
 #include "utils/ps_status.h"
 #include "utils/resowner.h"
 #include "utils/timestamp.h"
+#include "gs_bbox.h"
+
+#ifdef ENABLE_UT
+#define static
+#endif
 
 /* max sleep time between cycles (1ms) */
 #define NAPTIME_PER_CYCLE 1
@@ -120,13 +113,13 @@ static void SetDataRcvConninfo(ReplConnTarget conn_target);
 static void ShutDownDataRcvWriter(void);
 
 /* Message */
-static void DataRcvProcessMsg(unsigned char type, char* buf, Size len);
-static void DataRcvReceive(char* buf, Size nbytes);
+static void DataRcvProcessMsg(unsigned char type, char *buf, Size len);
+static void DataRcvReceive(char *buf, Size nbytes);
 
-static void ProcessKeepaliveMessage(DataSndKeepaliveMessage* keepalive);
-static void ProcessDataHeaderMessage(DataPageMessageHeader* msghdr);
-static void ProcessEndDataMessage(EndDataMessage* endDataMessage);
-static void ProcessRmDataMessage(RmDataMessage* rmDataMessage);
+static void ProcessKeepaliveMessage(DataSndKeepaliveMessage *keepalive);
+static void ProcessDataHeaderMessage(DataPageMessageHeader *msghdr);
+static void ProcessEndDataMessage(EndDataMessage *endDataMessage);
+static void ProcessRmDataMessage(RmDataMessage *rmDataMessage);
 static void ProcessRmData(void);
 
 /* Signal handlers */
@@ -135,22 +128,22 @@ static void DataRcvShutdownHandler(SIGNAL_ARGS);
 static void DataRcvQuickDieHandler(SIGNAL_ARGS);
 
 /* Stream connection */
-static void DataRcvStreamConnect(char* conninfo);
-static void DataRcvStreamSend(const char* buffer, int nbytes);
-static void DataRcvStreamSendFiles(const char* buffer, int nbytes);
+static void DataRcvStreamConnect(char *conninfo);
+static void DataRcvStreamSend(const char *buffer, int nbytes);
+static void DataRcvStreamSendFiles(const char *buffer, int nbytes);
 
 static void DataRcvStreamDisconnect(void);
-static bool DataRcvStreamReceive(int timeout, unsigned char* type, char** buffer, int* len);
+static bool DataRcvStreamReceive(int timeout, unsigned char *type, char **buffer, int *len);
 static bool DataRcvStreamSelect(int timeout_ms);
 
 /* Data process handlers */
-static void InitDummyFileNum(uint* readFileNum, uint* writerFileNum);
+static void InitDummyFileNum(uint *readFileNum, uint *writerFileNum);
 static void ParseDummyFile();
-static void ReadDummyFile(HTAB* relFileNodeTab, uint32 readFileNum, int* bufferSize);
-static bool ReadDummySlice(FILE* readFileFd, char* buf, uint32 length, char* path);
-static int ParseDataHeader(HTAB* relFileNodeTab, char* bufPtr, uint32 nbytes);
+static void ReadDummyFile(HTAB *relFileNodeTab, uint32 readFileNum, int *bufferSize);
+static bool ReadDummySlice(FILE *readFileFd, char *buf, uint32 length, char *path);
+static int ParseDataHeader(HTAB *relFileNodeTab, char *bufPtr, uint32 nbytes);
 
-void DataReceiverPing(bool* ping_ptr, TimestampTz* last_recv_timestamp_ptr)
+void DataReceiverPing(bool *ping_ptr, TimestampTz *last_recv_timestamp_ptr)
 {
     /*
      * We didn't receive anything new. If we haven't heard anything
@@ -170,8 +163,8 @@ void DataReceiverPing(bool* ping_ptr, TimestampTz* last_recv_timestamp_ptr)
         TimestampTz nowtime = GetCurrentTimestamp();
         TimestampTz timeout = 0;
 
-        timeout = TimestampTzPlusMilliseconds(
-            *last_recv_timestamp_ptr, u_sess->attr.attr_storage.wal_receiver_timeout / 2);
+        timeout = TimestampTzPlusMilliseconds(*last_recv_timestamp_ptr,
+                                              u_sess->attr.attr_storage.wal_receiver_timeout / 2);
 
         /*
          * We didn't receive anything new, for half of receiver
@@ -183,8 +176,7 @@ void DataReceiverPing(bool* ping_ptr, TimestampTz* last_recv_timestamp_ptr)
                 *ping_ptr = true;
                 *last_recv_timestamp_ptr = nowtime;
             } else {
-                ereport(ERROR,
-                    (errcode(ERRCODE_ADMIN_SHUTDOWN), errmsg("terminating datareceiver due to timeout")));
+                ereport(ERROR, (errcode(ERRCODE_ADMIN_SHUTDOWN), errmsg("terminating datareceiver due to timeout")));
             }
         }
     }
@@ -197,16 +189,16 @@ void DataReceiverMain(void)
     char conninfo[MAXCONNINFO];
     TimestampTz last_recv_timestamp;
     bool ping_sent = false;
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
     errno_t rc = 0;
 
     t_thrd.xlog_cxt.InRecovery = true;
 
-    AssertEreport(datarcv != nullptr, MOD_FUNCTION, "datarcv should not be null");
+    if (datarcv == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("datarcv should not be null")));
+    }
 
-    knl_thread_set_name("DataReceiver");
-
-    ereport(LOG, (errmsg("DataReceiver thread started")));
+    ereport(LOG, (errmsg("datareceiver thread started")));
     /*
      * Mark datareceiver as running in shared memory.
      *
@@ -215,12 +207,14 @@ void DataReceiverMain(void)
      * waiting for us to start up, until it times out.
      */
     SpinLockAcquire(&datarcv->mutex);
-    AssertEreport(datarcv->pid == 0, MOD_FUNCTION, "datarcv pid should be zero");
+    if (datarcv->pid != 0) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("datarcv already in use")));
+    }
     switch (datarcv->dataRcvState) {
         case DATARCV_STOPPING:
             /* If we've already been requested to stop, don't start up. */
             datarcv->dataRcvState = DATARCV_STOPPED;
-            // lint -fallthrough
+            /* fall through */
         case DATARCV_STOPPED:
             SpinLockRelease(&datarcv->mutex);
             ereport(WARNING, (errmsg("datareceiver requested to stop when starting up.")));
@@ -246,13 +240,14 @@ void DataReceiverMain(void)
     datarcv->dataRcvState = DATARCV_RUNNING;
 
     /* Fetch information required to start streaming */
-    rc = strncpy_s(conninfo, MAXCONNINFO, (char*)datarcv->conninfo, MAXCONNINFO - 1);
+    rc = strncpy_s(conninfo, MAXCONNINFO, (char *)datarcv->conninfo, MAXCONNINFO - 1);
     securec_check(rc, "", "");
 
     /* Initialise to a sanish value */
     datarcv->lastMsgSendTime = datarcv->lastMsgReceiptTime = GetCurrentTimestamp();
-    t_thrd.datareceiver_cxt.AmDataReceiverForDummyStandby =
-        (datarcv->conn_target == REPCONNTARGET_DUMMYSTANDBY) ? true : false;
+    t_thrd.datareceiver_cxt.AmDataReceiverForDummyStandby = (datarcv->conn_target == REPCONNTARGET_DUMMYSTANDBY)
+                                                                ? true
+                                                                : false;
     SpinLockRelease(&datarcv->mutex);
 
     /* Arrange to clean up at datareceiver exit */
@@ -282,7 +277,7 @@ void DataReceiverMain(void)
      * Create a resource owner to keep track of our resources (not clear that
      * we need this, but may as well have one).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Data Receiver");
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Data Receiver", MEMORY_CONTEXT_STORAGE);
 
     /* Unblock signals (they were blocked when the postmaster forked us) */
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
@@ -298,12 +293,12 @@ void DataReceiverMain(void)
     if (GetDataRcvDummyStandbySyncPercent() == SYNC_DUMMY_STANDBY_END) {
         Assert(t_thrd.datareceiver_cxt.AmDataReceiverForDummyStandby == true);
         /* thread exit */
-        ereport(ERROR,
-            (errcode(ERRCODE_DATA_EXCEPTION), errmsg("terminating datareceiver due to Secondary Standby has no data")));
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                        errmsg("terminating datareceiver due to Secondary Standby has no data")));
     }
 
-    rc = memset_s(
-        t_thrd.datareceiver_cxt.reply_message, sizeof(StandbyDataReplyMessage), 0, sizeof(StandbyDataReplyMessage));
+    rc = memset_s(t_thrd.datareceiver_cxt.reply_message, sizeof(StandbyDataReplyMessage), 0,
+                  sizeof(StandbyDataReplyMessage));
     securec_check(rc, "", "");
 
     last_recv_timestamp = GetCurrentTimestamp();
@@ -318,7 +313,7 @@ void DataReceiverMain(void)
     /* Loop until end-of-streaming or error */
     for (;;) {
         unsigned char type;
-        char* buf = NULL;
+        char *buf = NULL;
         int len = 0;
 
         /*
@@ -356,6 +351,7 @@ void DataReceiverMain(void)
             /* Receive any more data we can without sleeping */
             while (DataRcvStreamReceive(0, &type, &buf, &len)) {
                 last_recv_timestamp = GetCurrentTimestamp();
+                ping_sent = false;
                 DataRcvProcessMsg(type, buf, len);
             }
 
@@ -373,7 +369,7 @@ void DataReceiverMain(void)
 static void DataRcvDie(int code, Datum arg)
 {
     /* Use volatile pointer to prevent code rearrangement */
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
 
     /*
      * Shutdown DataRcvWriter thread, clear the data receive buffer.
@@ -474,8 +470,8 @@ void ProcessDataRcvInterrupts(void)
 
     if (t_thrd.datareceiver_cxt.got_SIGTERM) {
         t_thrd.datareceiver_cxt.DataRcvImmediateInterruptOK = false;
-        ereport(FATAL,
-            (errcode(ERRCODE_ADMIN_SHUTDOWN), errmsg("terminating datareceiver process due to administrator command")));
+        ereport(FATAL, (errcode(ERRCODE_ADMIN_SHUTDOWN),
+                        errmsg("terminating datareceiver process due to administrator command")));
     }
 }
 
@@ -507,7 +503,7 @@ void DataRcvShmemInit(void)
     bool found = false;
     errno_t rc = 0;
 
-    t_thrd.datareceiver_cxt.DataRcv = (DataRcvData*)ShmemInitStruct("Data Receiver Ctl", DataRcvShmemSize(), &found);
+    t_thrd.datareceiver_cxt.DataRcv = (DataRcvData *)ShmemInitStruct("Data Receiver Ctl", DataRcvShmemSize(), &found);
 
     if (!found) {
         /* First time through, so initialize */
@@ -520,7 +516,7 @@ void DataRcvShmemInit(void)
 int GetDataRcvDummyStandbySyncPercent(void)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
     int percent = 0;
 
     SpinLockAcquire(&datarcv->mutex);
@@ -533,7 +529,7 @@ int GetDataRcvDummyStandbySyncPercent(void)
 void SetDataRcvDummyStandbySyncPercent(int percent)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
 
     SpinLockAcquire(&datarcv->mutex);
     datarcv->dummyStandbySyncPercent = percent;
@@ -543,7 +539,7 @@ void SetDataRcvDummyStandbySyncPercent(int percent)
 void WakeupDataRcvWriter(void)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
     SpinLockAcquire(&datarcv->mutex);
     if (datarcv->datarcvWriterLatch != NULL)
         SetLatch(datarcv->datarcvWriterLatch);
@@ -556,7 +552,7 @@ void WakeupDataRcvWriter(void)
 bool DataRcvInProgress(void)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
     DataRcvState state;
     pg_time_t startTime;
 
@@ -599,7 +595,7 @@ bool DataRcvInProgress(void)
 void ShutdownDataRcv(void)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
     ThreadId datarcvpid = 0;
     int i = 1;
 
@@ -617,7 +613,7 @@ void ShutdownDataRcv(void)
             break;
         case DATARCV_RUNNING:
             datarcv->dataRcvState = DATARCV_STOPPING;
-            // lint -fallthrough
+            /* fall through */
         case DATARCV_STOPPING:
             datarcvpid = datarcv->pid;
             break;
@@ -640,7 +636,7 @@ void ShutdownDataRcv(void)
          * This possibly-long loop needs to handle interrupts of startup
          * process.
          */
-        HandleStartupProcInterrupts();
+        RedoInterruptCallBack();
         pg_usleep(100000); /* 100ms */
 
         SpinLockAcquire(&datarcv->mutex);
@@ -658,10 +654,10 @@ void ShutdownDataRcv(void)
 /*
  * Request postmaster to start datareceiver.
  */
-void RequestDataStreaming(const char* conninfo, ReplConnTarget conn_target)
+void RequestDataStreaming(const char *conninfo, ReplConnTarget conn_target)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
     pg_time_t now = (pg_time_t)time(NULL);
     errno_t retcode = EOK;
 
@@ -675,7 +671,7 @@ void RequestDataStreaming(const char* conninfo, ReplConnTarget conn_target)
     Assert(datarcv->dataRcvState == DATARCV_STOPPED);
 
     if (conninfo != NULL) {
-        retcode = strncpy_s((char*)datarcv->conninfo, MAXCONNINFO, conninfo, MAXCONNINFO - 1);
+        retcode = strncpy_s((char *)datarcv->conninfo, MAXCONNINFO, conninfo, MAXCONNINFO - 1);
         securec_check(retcode, "", "");
     } else {
         SpinLockRelease(&datarcv->mutex);
@@ -693,16 +689,14 @@ void RequestDataStreaming(const char* conninfo, ReplConnTarget conn_target)
 
 static void SetDataRcvConninfo(ReplConnTarget conn_target)
 {
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
-    ReplConnInfo* replConnArray = NULL;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    ReplConnInfo *replConnArray = NULL;
 
     /* 1. if we are in primary, standby, dummystandby mode. */
     if ((t_thrd.postmaster_cxt.ReplConnArray[1] == NULL && conn_target == REPCONNTARGET_PRIMARY) ||
         (t_thrd.postmaster_cxt.ReplConnArray[2] == NULL && conn_target == REPCONNTARGET_DUMMYSTANDBY)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_CONFIG_FILE_ERROR),
-                errmsg("no replication connection config information."),
-                errhint("please check your configuration in postgresql.conf.")));
+        ereport(ERROR, (errcode(ERRCODE_CONFIG_FILE_ERROR), errmsg("no replication connection config information."),
+                        errhint("please check your configuration in postgresql.conf.")));
     }
 
     /* 2. get conninfo array */
@@ -723,14 +717,9 @@ static void SetDataRcvConninfo(ReplConnTarget conn_target)
         int rc = EOK;
 
         SpinLockAcquire(&datarcv->mutex);
-        rc = snprintf_s((char*)datarcv->conninfo,
-            MAXCONNINFO,
-            MAXCONNINFO - 1,
-            "host=%s port=%d localhost=%s localport=%d",
-            replConnArray->remotehost,
-            replConnArray->remoteport,
-            replConnArray->localhost,
-            replConnArray->localport);
+        rc = snprintf_s((char *)datarcv->conninfo, MAXCONNINFO, MAXCONNINFO - 1,
+                        "host=%s port=%d localhost=%s localport=%d", replConnArray->remotehost,
+                        replConnArray->remoteport, replConnArray->localhost, replConnArray->localport);
 
         securec_check_ss(rc, "", "");
         datarcv->conninfo[MAXCONNINFO - 1] = '\0';
@@ -746,14 +735,13 @@ static void SetDataRcvConninfo(ReplConnTarget conn_target)
  * Send a message to DATA stream.
  * ereports on error.
  */
-static void DataRcvStreamSendFiles(const char* buffer, int nbytes)
+static void DataRcvStreamSendFiles(const char *buffer, int nbytes)
 {
     if (PQputCopyData(t_thrd.datareceiver_cxt.dataStreamingConn, buffer, nbytes) <= 0 ||
         PQflush(t_thrd.datareceiver_cxt.dataStreamingConn))
         ereport(ERROR,
-            (errcode(ERRCODE_INVALID_STATUS),
-                errmsg("could not send data to DATA stream: %s",
-                    PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
+                (errcode(ERRCODE_INVALID_STATUS), errmsg("could not send data to DATA stream: %s",
+                                                         PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
 }
 
 /*
@@ -762,14 +750,14 @@ static void DataRcvStreamSendFiles(const char* buffer, int nbytes)
  * writer_file_num : total file number
  * read_file_num   : start serial number
  */
-static void InitDummyFileNum(uint32* readFileNum, uint32* writerFileNum)
+static void InitDummyFileNum(uint32 *readFileNum, uint32 *writerFileNum)
 {
     /* Get the read_file_num and  writer_file_num stored in dummy */
-    DIR* dir = NULL;
-    struct dirent* de = NULL;
+    DIR *dir = NULL;
+    struct dirent *de = NULL;
     int maxNumFile = 0;
     int minNumFile = 0;
-    char* dirPath = DUMMY_STANDBY_DATADIR;
+    char *dirPath = DUMMY_STANDBY_DATADIR;
 
     /* open the dir of base/dummy_standby */
     errno = 0;
@@ -807,11 +795,8 @@ static void InitDummyFileNum(uint32* readFileNum, uint32* writerFileNum)
         /* search the max num file */
         maxNumFile = Max(atoi(de->d_name), maxNumFile);
         minNumFile = Min(atoi(de->d_name), minNumFile);
-        ereport(DEBUG5,
-            (errmsg("InitDummyDataNum de->d_name=%s;   max_num_path=%d; min_num_file=%d.",
-                de->d_name,
-                maxNumFile,
-                minNumFile)));
+        ereport(DEBUG5, (errmsg("InitDummyDataNum de->d_name=%s;   max_num_path=%d; min_num_file=%d.", de->d_name,
+                                maxNumFile, minNumFile)));
     }
 
     *writerFileNum = maxNumFile;
@@ -824,11 +809,11 @@ static void InitDummyFileNum(uint32* readFileNum, uint32* writerFileNum)
 static void ParseDummyFile()
 {
     /* Hash indicates */
-    HTAB* relFileNodeTab = NULL;
+    HTAB *relFileNodeTab = NULL;
     errno_t rc;
     /* Total size we need to palloc the buffer */
     int bufferSize = 0;
-    char* replyBcmFileListInfo = NULL;
+    char *replyBcmFileListInfo = NULL;
     /* Page info init */
     uint32 readFileNum = 1;
     uint32 writerFileNum = 0;
@@ -854,15 +839,18 @@ static void ParseDummyFile()
     }
 
     /* Send all data at once */
-    replyBcmFileListInfo = (char*)palloc(bufferSize + 1);
+    if (bufferSize == INT_MAX) {
+        ereport(ERROR, (errmsg("bufferSize reaches the limit of INT_MAX")));
+    }
+    replyBcmFileListInfo = (char *)palloc(bufferSize + 1);
     replyBcmFileListInfo[0] = 'x';
-    char* tempPtr = replyBcmFileListInfo + 1;
+    char *tempPtr = replyBcmFileListInfo + 1;
 
     HASH_SEQ_STATUS hash_seq;
     hash_seq_init(&hash_seq, relFileNodeTab);
-    RelFileNodeKeyEntry* entry = NULL;
+    RelFileNodeKeyEntry *entry = NULL;
 
-    while ((entry = (RelFileNodeKeyEntry*)hash_seq_search(&hash_seq)) != NULL) {
+    while ((entry = (RelFileNodeKeyEntry *)hash_seq_search(&hash_seq)) != NULL) {
         rc = memcpy_s(tempPtr, sizeof(RelFileNodeKey), &(entry->key), sizeof(RelFileNodeKey));
         securec_check(rc, "", "");
         tempPtr += sizeof(RelFileNodeKey);
@@ -876,12 +864,12 @@ static void ParseDummyFile()
     ereport(LOG, (errmsg("read files serial number now is : %u", readFileNum)));
 }
 
-static void ReadDummyFile(HTAB* relFileNodeTab, uint32 readFileNum, int* bufferSize)
+static void ReadDummyFile(HTAB *relFileNodeTab, uint32 readFileNum, int *bufferSize)
 {
     uint32 nbytes = 0;
     int nRet = 0;
     char path[MAXPGPATH] = {0};
-    FILE* readFileFd = NULL;
+    FILE *readFileFd = NULL;
     TimestampTz lastDummyPingTime;
     /* record ping time when we are searching */
     lastDummyPingTime = GetCurrentTimestamp();
@@ -903,7 +891,7 @@ static void ReadDummyFile(HTAB* relFileNodeTab, uint32 readFileNum, int* bufferS
          * OK to read the data:
          * 1. first, read nbytes of the FD;
          */
-        if (!ReadDummySlice(readFileFd, (char*)&nbytes, (uint32)sizeof(nbytes), path)) {
+        if (!ReadDummySlice(readFileFd, (char *)&nbytes, (uint32)sizeof(nbytes), path)) {
             /*
              * if we receive the eof when reading nbytes, the file maybe
              * interrupted when writting. So we break and return to read the next file.
@@ -911,8 +899,8 @@ static void ReadDummyFile(HTAB* relFileNodeTab, uint32 readFileNum, int* bufferS
             ereport(LOG, (errmsg("step1: data file num %u, read file fd %d", readFileNum, readFileFd->_fileno)));
             break;
         }
-        char* elementBuf = NULL;
-        elementBuf = (char*)palloc(nbytes);
+        char *elementBuf = NULL;
+        elementBuf = (char *)palloc(nbytes);
         /*
          * 2. then, read the data which according to nbytes;
          */
@@ -935,19 +923,17 @@ static void ReadDummyFile(HTAB* relFileNodeTab, uint32 readFileNum, int* bufferS
     return;
 }
 
-static bool ReadDummySlice(FILE* readFileFd, char* buf, uint32 length, char* path)
+static bool ReadDummySlice(FILE *readFileFd, char *buf, uint32 length, char *path)
 {
     uint32 readBytes = 0;
     readBytes = fread(buf, 1, length, readFileFd);
     if (readBytes != length) {
         if (ferror(readFileFd)) {
             fclose(readFileFd);
-            ereport(FATAL,
-                (errcode_for_file_access(),
-                    errmsg("could not read to data file slice %s "
-                           "length %u: %m",
-                        path,
-                        length)));
+            readFileFd = NULL;
+            ereport(FATAL, (errcode_for_file_access(), errmsg("could not read to data file slice %s "
+                                                              "length %u: %m",
+                                                              path, length)));
         }
         if (feof(readFileFd)) {
             return false;
@@ -956,41 +942,41 @@ static bool ReadDummySlice(FILE* readFileFd, char* buf, uint32 length, char* pat
     return true;
 }
 
-static int ParseDataHeader(HTAB* relFileNodeTab, char* bufPtr, uint32 nbytes)
+static int ParseDataHeader(HTAB *relFileNodeTab, char *bufPtr, uint32 nbytes)
 {
     uint32 currentLen = 0;
     int bufferSize = 0;
-    int headerLen = sizeof(DataElementHeaderData);
+    size_t headerLen = sizeof(DataElementHeaderData);
     DataElementHeaderData dataInfo;
-    RelFileNodeKey* elementKey = NULL;
-    RelFileNodeKeyEntry* rel = NULL;
+    RelFileNodeKey *elementKey = NULL;
+    RelFileNodeKeyEntry *rel = NULL;
     bool found = false;
     errno_t errorno = EOK;
     while (nbytes > 0) {
         /* parse total_len for this slice of data */
+        if ((size_t)nbytes < sizeof(uint32) + headerLen) {
+            ereport(ERROR, (errmsg("ParseDataHeader failed due to insufficient buffer.")));
+        }
         errorno = memcpy_s(&currentLen, sizeof(uint32), bufPtr, sizeof(uint32));
         securec_check(errorno, "", "");
         bufPtr += sizeof(uint32);
         /* parse data element header, and skip the payload then parse next one */
-        errorno = memcpy_s((void*)&dataInfo, headerLen, bufPtr, headerLen);
+        errorno = memcpy_s((void *)&dataInfo, headerLen, bufPtr, headerLen);
         securec_check(errorno, "", "");
         bufPtr += headerLen;
 
-        elementKey = (RelFileNodeKey*)palloc(sizeof(RelFileNodeKey));
+        elementKey = (RelFileNodeKey *)palloc(sizeof(RelFileNodeKey));
         /* Fill the key during this read */
         RelFileNodeCopy(elementKey->relfilenode, dataInfo.rnode, GETBUCKETID(dataInfo.attid));
         elementKey->columnid = (int)GETATTID((uint)dataInfo.attid);
 
         if (u_sess->attr.attr_storage.HaModuleDebug) {
-            ereport(LOG,
-                (errmsg("Parse each relfilenode or CU info: dbNode %u, spcNode %u, relNode %u, columnid %d  ",
-                    elementKey->relfilenode.dbNode,
-                    elementKey->relfilenode.spcNode,
-                    elementKey->relfilenode.relNode,
-                    elementKey->columnid)));
+            ereport(LOG, (errmsg("Parse each relfilenode or CU info: dbNode %u, spcNode %u, relNode %u, columnid %d  ",
+                                 elementKey->relfilenode.dbNode, elementKey->relfilenode.spcNode,
+                                 elementKey->relfilenode.relNode, elementKey->columnid)));
         }
         /* Hash table used for removing duplicated files */
-        rel = (RelFileNodeKeyEntry*)hash_search(relFileNodeTab, elementKey, HASH_ENTER, &found);
+        rel = (RelFileNodeKeyEntry *)hash_search(relFileNodeTab, elementKey, HASH_ENTER, &found);
 
         if (!found) {
             rel->number = 1;
@@ -999,6 +985,9 @@ static int ParseDataHeader(HTAB* relFileNodeTab, char* bufPtr, uint32 nbytes)
         } else {
             found = false;
             pfree(elementKey);
+        }
+        if ((size_t)currentLen < sizeof(uint32) + headerLen || currentLen > nbytes) {
+            ereport(ERROR, (errmsg("ParseDataHeader failed due to illegal currentLen %u.", currentLen)));
         }
         nbytes -= currentLen;
         bufPtr += dataInfo.data_size;
@@ -1009,7 +998,7 @@ static int ParseDataHeader(HTAB* relFileNodeTab, char* bufPtr, uint32 nbytes)
 /*
  * Accept the message from replication stream, and process it.
  */
-static void DataRcvProcessMsg(unsigned char type, char* buf, Size len)
+static void DataRcvProcessMsg(unsigned char type, char *buf, Size len)
 {
     errno_t errorno = EOK;
     switch (type) {
@@ -1020,15 +1009,14 @@ static void DataRcvProcessMsg(unsigned char type, char* buf, Size len)
                 break;
             }
         }
-        // lint -fallthrough
+        /* fall through */
         case 'd': /* Data page */
         {
             DataPageMessageHeader msghdr;
 
             if (len < sizeof(DataPageMessageHeader))
-                ereport(ERROR,
-                    (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                        errmsg_internal("invalid data page message received from primary")));
+                ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                                errmsg_internal("invalid data page message received from primary")));
             /* memcpy is required here for alignment reasons */
             errorno = memcpy_s(&msghdr, sizeof(DataPageMessageHeader), buf, sizeof(DataPageMessageHeader));
             securec_check(errorno, "", "");
@@ -1037,16 +1025,15 @@ static void DataRcvProcessMsg(unsigned char type, char* buf, Size len)
             buf += sizeof(DataPageMessageHeader);
             len -= sizeof(DataPageMessageHeader);
 
-            volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+            volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
 
             if (datarcv->conn_target != REPCONNTARGET_DUMMYSTANDBY) {
                 DQByteAdvance(msghdr.dataStart, len);
                 if (!DQByteEQ(msghdr.dataStart, msghdr.dataEnd))
-                    ereport(PANIC,
-                        (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                            errmsg("invalid message header, maybe the parameter of"
-                                   " \"data_replicate_buffer_size\" on the master has been changed"),
-                            errhint("You might need to restart the instance.")));
+                    ereport(PANIC, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                                    errmsg("invalid message header, maybe the parameter of"
+                                           " \"data_replicate_buffer_size\" on the master has been changed"),
+                                    errhint("You might need to restart the instance.")));
             } else if (unlikely(!DataQueuePtrIsInvalid(msghdr.dataEnd))) {
                 ereport(PANIC, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("invalid message end")));
             }
@@ -1059,9 +1046,8 @@ static void DataRcvProcessMsg(unsigned char type, char* buf, Size len)
             DataSndKeepaliveMessage keepalive;
 
             if (len != sizeof(DataSndKeepaliveMessage))
-                ereport(ERROR,
-                    (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                        errmsg_internal("invalid keepalive message received from primary")));
+                ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                                errmsg_internal("invalid keepalive message received from primary")));
             /* memcpy is required here for alignment reasons */
             errorno = memcpy_s(&keepalive, sizeof(DataSndKeepaliveMessage), buf, sizeof(DataSndKeepaliveMessage));
             securec_check(errorno, "", "");
@@ -1077,9 +1063,8 @@ static void DataRcvProcessMsg(unsigned char type, char* buf, Size len)
             EndDataMessage endDataMessage;
 
             if (len != sizeof(EndDataMessage))
-                ereport(ERROR,
-                    (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                        errmsg_internal("invalid EndDataMessage message received from Secondary Standby")));
+                ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                                errmsg_internal("invalid EndDataMessage message received from Secondary Standby")));
             /* memcpy is required here for alignment reasons */
             errorno = memcpy_s(&endDataMessage, sizeof(EndDataMessage), buf, sizeof(EndDataMessage));
             securec_check(errorno, "", "");
@@ -1091,9 +1076,8 @@ static void DataRcvProcessMsg(unsigned char type, char* buf, Size len)
             RmDataMessage rmDataMessage;
 
             if (len != sizeof(RmDataMessage))
-                ereport(ERROR,
-                    (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                        errmsg_internal("invalid RmData message received from primary")));
+                ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                                errmsg_internal("invalid RmData message received from primary")));
             /* memcpy is required here for alignment reasons */
             errorno = memcpy_s(&rmDataMessage, sizeof(RmDataMessage), buf, sizeof(RmDataMessage));
             securec_check(errorno, "", "");
@@ -1101,9 +1085,8 @@ static void DataRcvProcessMsg(unsigned char type, char* buf, Size len)
             break;
         }
         default:
-            ereport(ERROR,
-                (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                    errmsg_internal("invalid data replication message type %d", type)));
+            ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                            errmsg_internal("invalid data replication message type %d", type)));
     }
 }
 
@@ -1111,10 +1094,10 @@ static void DataRcvProcessMsg(unsigned char type, char* buf, Size len)
  * Process dataHeaderMessage received from sender
  * message type is 'd'.
  */
-static void ProcessDataHeaderMessage(DataPageMessageHeader* msghdr)
+static void ProcessDataHeaderMessage(DataPageMessageHeader *msghdr)
 {
     /* Use volatile pointer to prevent code rearrangement */
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
     TimestampTz lastMsgReceiptTime = GetCurrentTimestamp();
 
     /* Update shared-memory status */
@@ -1137,10 +1120,10 @@ static void ProcessDataHeaderMessage(DataPageMessageHeader* msghdr)
  * Process ProcessKeepaliveMessage received from datasender,
  * message type is 'k'.
  */
-static void ProcessKeepaliveMessage(DataSndKeepaliveMessage* keepalive)
+static void ProcessKeepaliveMessage(DataSndKeepaliveMessage *keepalive)
 {
     /* Use volatile pointer to prevent code rearrangement */
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
     TimestampTz lastMsgReceiptTime = GetCurrentTimestamp();
 
     /* Update shared-memory status */
@@ -1162,7 +1145,7 @@ static void ProcessKeepaliveMessage(DataSndKeepaliveMessage* keepalive)
  * Process RmDataMessage received from (primary? and dummystandby?) sender,
  * message type is 'e'. Refence searchBCMFiles
  */
-static void ProcessEndDataMessage(EndDataMessage* endDataMessage)
+static void ProcessEndDataMessage(EndDataMessage *endDataMessage)
 {
     ereport(dummyStandbyMode ? DEBUG2 : LOG, (errmsg("sync Secondary Standby data done")));
 
@@ -1195,13 +1178,13 @@ static void ProcessEndDataMessage(EndDataMessage* endDataMessage)
 
 static void ProcessRmData(void)
 {
-    DIR* dir = NULL;
-    struct dirent* de = NULL;
+    DIR *dir = NULL;
+    struct dirent *de = NULL;
     char data_path[MAXPGPATH] = {0};
     int nRet = 0;
 
-    nRet = snprintf_s(
-        data_path, sizeof(data_path), MAXPGPATH - 1, "%s/%s", t_thrd.proc_cxt.DataDir, DUMMY_STANDBY_DATADIR);
+    nRet = snprintf_s(data_path, sizeof(data_path), MAXPGPATH - 1, "%s/%s", t_thrd.proc_cxt.DataDir,
+                      DUMMY_STANDBY_DATADIR);
     securec_check_ss(nRet, "", "");
 
     dir = AllocateDir(data_path);
@@ -1222,15 +1205,14 @@ static void ProcessRmData(void)
  * Process RmDataMessage received from primary sender, message type is 'x'.
  * Refence searchBCMFiles
  */
-static void ProcessRmDataMessage(RmDataMessage* rmDataMessage)
+static void ProcessRmDataMessage(RmDataMessage *rmDataMessage)
 {
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
 
     /* check command source */
     if (rmDataMessage->peer_role != PRIMARY_MODE) {
-        ereport(ERROR,
-            (errcode(ERRCODE_CASE_NOT_FOUND),
-                errmsg("rm data comand is not from primary, peer_role=%d", rmDataMessage->peer_role)));
+        ereport(ERROR, (errcode(ERRCODE_CASE_NOT_FOUND),
+                        errmsg("rm data comand is not from primary, peer_role=%d", rmDataMessage->peer_role)));
     }
 
     ereport(DEBUG2, (errmsg("received rm data message")));
@@ -1257,7 +1239,7 @@ static void ProcessRmDataMessage(RmDataMessage* rmDataMessage)
 /*
  * Receive data from remote server, then push to writer queue.
  */
-static void DataRcvReceive(char* buf, Size nbytes)
+static void DataRcvReceive(char *buf, Size nbytes)
 {
     BlockNumber cursegno = InvalidBlockNumber;
     DataElementHeaderData dataelemheader;
@@ -1270,47 +1252,35 @@ static void DataRcvReceive(char* buf, Size nbytes)
 #endif
 
     while (nbytes >= sizeof(uint32) + sizeof(DataElementHeaderData)) {
-        rc = memcpy_s((void*)&currentlen, sizeof(uint32), buf, sizeof(uint32));
+        rc = memcpy_s((void *)&currentlen, sizeof(uint32), buf, sizeof(uint32));
         securec_check(rc, "", "");
         buf += sizeof(uint32);
 
-        rc = memcpy_s((void*)&dataelemheader, headerlen, buf, headerlen);
+        rc = memcpy_s((void *)&dataelemheader, headerlen, buf, headerlen);
         securec_check(rc, "", "");
         buf += headerlen;
         if (u_sess->attr.attr_storage.HaModuleDebug) {
-            ereport(LOG,
-                (errmsg("DataRcvReceive element info: %u, %u, %u, %u  ",
-                    dataelemheader.rnode.dbNode,
-                    dataelemheader.rnode.spcNode,
-                    dataelemheader.rnode.relNode,
-                    GETATTID((uint)dataelemheader.attid))));
+            ereport(LOG, (errmsg("DataRcvReceive element info: %u, %u, %u, %u  ", dataelemheader.rnode.dbNode,
+                                 dataelemheader.rnode.spcNode, dataelemheader.rnode.relNode,
+                                 GETATTID((uint)dataelemheader.attid))));
         }
 
         cursegno = dataelemheader.blocknum / ((BlockNumber)RELSEG_SIZE);
 
         if (currentlen != (sizeof(uint32) + (uint32)headerlen + (uint32)dataelemheader.data_size)) {
-            ereport(ERROR,
-                (errmsg("Current length is illegal, the dataRcvReceiveelement info is : %u, %u, %u, %d  ",
-                    dataelemheader.rnode.dbNode,
-                    dataelemheader.rnode.spcNode,
-                    dataelemheader.rnode.relNode,
-                    GETATTID(dataelemheader.attid))));
+            ereport(ERROR, (errmsg("Current length is illegal, the dataRcvReceiveelement info is : %u, %u, %u, %u  ",
+                                   dataelemheader.rnode.dbNode, dataelemheader.rnode.spcNode,
+                                   dataelemheader.rnode.relNode, GETATTID((uint)dataelemheader.attid))));
         }
 
         if (u_sess->attr.attr_storage.HaModuleDebug) {
             /* now BLCKSZ is equal to ALIGNOF_CUSIZE, so either one is used */
             ereport(LOG,
-                (errmsg("HA-DataRcvReceive: rnode %u/%u/%u, blockno %u, segno %u, "
-                        "pageoffset2blockno %lu, size %u, queueoffset %u/%u",
-                    dataelemheader.rnode.spcNode,
-                    dataelemheader.rnode.dbNode,
-                    dataelemheader.rnode.relNode,
-                    dataelemheader.blocknum,
-                    cursegno,
-                    dataelemheader.offset / BLCKSZ,
-                    dataelemheader.data_size,
-                    dataelemheader.queue_offset.queueid,
-                    dataelemheader.queue_offset.queueoff)));
+                    (errmsg("HA-DataRcvReceive: rnode %u/%u/%u, blockno %u, segno %u, "
+                            "pageoffset2blockno %lu, size %u, queueoffset %u/%u",
+                            dataelemheader.rnode.spcNode, dataelemheader.rnode.dbNode, dataelemheader.rnode.relNode,
+                            dataelemheader.blocknum, cursegno, dataelemheader.offset / BLCKSZ, dataelemheader.data_size,
+                            dataelemheader.queue_offset.queueid, dataelemheader.queue_offset.queueoff)));
         }
 
         /* Add hearbeat */
@@ -1323,18 +1293,12 @@ static void DataRcvReceive(char* buf, Size nbytes)
 
         if (!EQ_CRC32(dataelemheader.data_crc, crc)) {
             ereport(PANIC,
-                (errmsg("received incorrect data page checksum at: "
-                        "rnode[%u,%u,%u], blockno[%u], segno[%u], "
-                        "pageoffset[%u], size[%u], queueoffset[%u/%u]",
-                    dataelemheader.rnode.spcNode,
-                    dataelemheader.rnode.dbNode,
-                    dataelemheader.rnode.relNode,
-                    dataelemheader.blocknum,
-                    cursegno,
-                    dataelemheader.offset,
-                    dataelemheader.data_size,
-                    dataelemheader.queue_offset.queueid,
-                    dataelemheader.queue_offset.queueoff)));
+                    (errmsg("received incorrect data page checksum at: "
+                            "rnode[%u,%u,%u], blockno[%u], segno[%u], "
+                            "pageoffset[%u], size[%u], queueoffset[%u/%u]",
+                            dataelemheader.rnode.spcNode, dataelemheader.rnode.dbNode, dataelemheader.rnode.relNode,
+                            dataelemheader.blocknum, cursegno, dataelemheader.offset, dataelemheader.data_size,
+                            dataelemheader.queue_offset.queueid, dataelemheader.queue_offset.queueoff)));
         }
 #endif
 
@@ -1380,7 +1344,7 @@ void DataRcvDataCleanup(void)
  */
 void DataRcvSendReply(bool force, bool requestReply)
 {
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
     char buf[sizeof(StandbyDataReplyMessage) + 1] = {0};
     TimestampTz now;
     DataQueuePtr receivePosition;
@@ -1403,9 +1367,9 @@ void DataRcvSendReply(bool force, bool requestReply)
 
     if (!force && (DQByteEQ(t_thrd.datareceiver_cxt.reply_message->receivePosition, receivePosition)) &&
         !(TimestampDifferenceExceeds(t_thrd.datareceiver_cxt.reply_message->sendTime, now,
-        u_sess->attr.attr_storage.wal_receiver_status_interval * 1000) ||
-        TimestampDifferenceExceeds(now, t_thrd.datareceiver_cxt.reply_message->sendTime,
-        u_sess->attr.attr_storage.wal_receiver_status_interval * 1000))) {
+                                     u_sess->attr.attr_storage.wal_receiver_status_interval * 1000) ||
+          TimestampDifferenceExceeds(now, t_thrd.datareceiver_cxt.reply_message->sendTime,
+                                     u_sess->attr.attr_storage.wal_receiver_status_interval * 1000))) {
         return;
     }
 
@@ -1414,30 +1378,27 @@ void DataRcvSendReply(bool force, bool requestReply)
     t_thrd.datareceiver_cxt.reply_message->sendTime = now;
     t_thrd.datareceiver_cxt.reply_message->replyRequested = requestReply;
 
-    ereport(DEBUG2,
-        (errmsg("sending data receive queue position %u/%u",
-            t_thrd.datareceiver_cxt.reply_message->receivePosition.queueid,
-            t_thrd.datareceiver_cxt.reply_message->receivePosition.queueoff)));
+    ereport(DEBUG2, (errmsg("sending data receive queue position %u/%u",
+                            t_thrd.datareceiver_cxt.reply_message->receivePosition.queueid,
+                            t_thrd.datareceiver_cxt.reply_message->receivePosition.queueoff)));
 
     /* Prepend with the message type and send it. */
     buf[0] = 'r';
-    errorno = memcpy_s(&buf[1],
-        sizeof(StandbyDataReplyMessage),
-        t_thrd.datareceiver_cxt.reply_message,
-        sizeof(StandbyDataReplyMessage));
+    errorno = memcpy_s(&buf[1], sizeof(StandbyDataReplyMessage), t_thrd.datareceiver_cxt.reply_message,
+                       sizeof(StandbyDataReplyMessage));
     securec_check(errorno, "", "");
     DataRcvStreamSend(buf, sizeof(StandbyDataReplyMessage) + 1);
 }
 
-static void DataRcvStreamConnect(char* conninfo)
+static void DataRcvStreamConnect(char *conninfo)
 {
     char conninfo_repl[MAXCONNINFO + 75] = {0};
 
-    char* primary_sysid = NULL;
+    char *primary_sysid = NULL;
     char standby_sysid[32];
     TimeLineID primary_tli;
     TimeLineID standby_tli;
-    PGresult* res = NULL;
+    PGresult *res = NULL;
     ServerMode primary_mode;
     int rc = EOK;
 
@@ -1445,26 +1406,22 @@ static void DataRcvStreamConnect(char* conninfo)
      * Connect the primary server in data replication.
      */
     if (dummyStandbyMode) {
-        rc = snprintf_s(conninfo_repl,
-            sizeof(conninfo_repl),
-            sizeof(conninfo_repl) - 1,
-            "%s dbname=replication replication=data "
-            "fallback_application_name=dummystandby "
-            "connect_timeout=%d",
-            conninfo,
-            u_sess->attr.attr_storage.wal_receiver_connect_timeout);
+        rc = snprintf_s(conninfo_repl, sizeof(conninfo_repl), sizeof(conninfo_repl) - 1,
+                        "%s dbname=replication replication=data "
+                        "fallback_application_name=dummystandby "
+                        "connect_timeout=%d",
+                        conninfo, u_sess->attr.attr_storage.wal_receiver_connect_timeout);
     } else {
-        rc = snprintf_s(conninfo_repl,
-            sizeof(conninfo_repl),
-            sizeof(conninfo_repl) - 1,
-            "%s dbname=replication replication=data "
-            "fallback_application_name=%s "
-            "connect_timeout=%d",
-            conninfo,
-            (u_sess->attr.attr_common.application_name && strlen(u_sess->attr.attr_common.application_name) > 0)
-                ? u_sess->attr.attr_common.application_name
-                : "datareceiver",
-            u_sess->attr.attr_storage.wal_receiver_connect_timeout);
+        rc = snprintf_s(conninfo_repl, sizeof(conninfo_repl), sizeof(conninfo_repl) - 1,
+                        "%s dbname=replication replication=data "
+                        "fallback_application_name=%s "
+                        "connect_timeout=%d enable_ce=1",
+                        conninfo,
+                        (u_sess->attr.attr_common.application_name &&
+                         strlen(u_sess->attr.attr_common.application_name) > 0)
+                            ? u_sess->attr.attr_common.application_name
+                            : "datareceiver",
+                        u_sess->attr.attr_storage.wal_receiver_connect_timeout);
     }
     securec_check_ss(rc, "", "");
 
@@ -1472,10 +1429,9 @@ static void DataRcvStreamConnect(char* conninfo)
 
     t_thrd.datareceiver_cxt.dataStreamingConn = PQconnectdb(conninfo_repl);
     if (PQstatus(t_thrd.datareceiver_cxt.dataStreamingConn) != CONNECTION_OK)
-        ereport(ERROR,
-            (errcode(ERRCODE_CONNECTION_TIMED_OUT),
-                errmsg("data receiver could not connect to the primary server: %s",
-                    PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
+        ereport(ERROR, (errcode(ERRCODE_CONNECTION_TIMED_OUT),
+                        errmsg("data receiver could not connect to the primary server: %s",
+                               PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
     ereport(LOG, (errmsg("data streaming replication connected to primary :%s success.", conninfo)));
 
     if (!dummyStandbyMode) {
@@ -1484,11 +1440,10 @@ static void DataRcvStreamConnect(char* conninfo)
             res = PQexec(t_thrd.datareceiver_cxt.dataStreamingConn, "IDENTIFY_MODE");
             if (PQresultStatus(res) != PGRES_TUPLES_OK) {
                 PQclear(res);
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_STATUS),
-                        errmsg("could not receive the ongoing mode infomation from "
-                               "the primary server: %s",
-                            PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
+                ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                                errmsg("could not receive the ongoing mode infomation from "
+                                       "the primary server: %s",
+                                       PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
             }
             if (PQnfields(res) != 1 || PQntuples(res) != 1) {
                 int ntuples = PQntuples(res);
@@ -1496,17 +1451,15 @@ static void DataRcvStreamConnect(char* conninfo)
 
                 PQclear(res);
                 ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_STATUS),
-                        errmsg("invalid response from primary server"),
-                        errdetail("Expected 1 tuple with 1 fields, got %d tuples with %d fields.", ntuples, nfields)));
+                        (errcode(ERRCODE_INVALID_STATUS), errmsg("invalid response from primary server"),
+                         errdetail("Expected 1 tuple with 1 fields, got %d tuples with %d fields.", ntuples, nfields)));
             }
             primary_mode = (ServerMode)pg_strtoint32(PQgetvalue(res, 0, 0));
             if (primary_mode != PRIMARY_MODE) {
                 PQclear(res);
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_STATUS),
-                        errmsg("the mode of the remote server must be primary, current is %s",
-                            wal_get_role_string(primary_mode))));
+                ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                                errmsg("the mode of the remote server must be primary, current is %s",
+                                       wal_get_role_string(primary_mode))));
             }
             PQclear(res);
         }
@@ -1517,26 +1470,22 @@ static void DataRcvStreamConnect(char* conninfo)
         res = PQexec(t_thrd.datareceiver_cxt.dataStreamingConn, "IDENTIFY_SYSTEM");
         if (PQresultStatus(res) != PGRES_TUPLES_OK) {
             PQclear(res);
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_STATUS),
-                    errmsg("could not receive database system identifier and timeline ID from "
-                           "the primary server: %s",
-                        PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                            errmsg("could not receive database system identifier and timeline ID from "
+                                   "the primary server: %s",
+                                   PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
         }
-        if (PQnfields(res) < 2 || PQntuples(res) != 1) {
+        if (PQnfields(res) != 2 || PQntuples(res) != 1) {
             int ntuples = PQntuples(res);
             int nfields = PQnfields(res);
 
             PQclear(res);
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_STATUS),
-                    errmsg("invalid response from primary server"),
-                    errdetail(
-                        "Could not identify system: got %d rows and %d fields, expected %d rows and %d or more fields.",
-                        ntuples,
-                        nfields,
-                        2,
-                        1)));
+            ereport(
+                ERROR,
+                (errcode(ERRCODE_INVALID_STATUS), errmsg("invalid response from primary server"),
+                 errdetail(
+                     "Could not identify system: got %d rows and %d fields, expected %d rows and %d or more fields.",
+                     ntuples, nfields, 2, 1)));
         }
         primary_sysid = PQgetvalue(res, 0, 0);
         primary_tli = pg_strtoint32(PQgetvalue(res, 0, 1));
@@ -1544,19 +1493,17 @@ static void DataRcvStreamConnect(char* conninfo)
         /*
          * Confirm that the system identifier of the primary is the same as ours.
          */
-        rc = snprintf_s(
-            standby_sysid, sizeof(standby_sysid), sizeof(standby_sysid) - 1, UINT64_FORMAT, GetSystemIdentifier());
+        rc = snprintf_s(standby_sysid, sizeof(standby_sysid), sizeof(standby_sysid) - 1, UINT64_FORMAT,
+                        GetSystemIdentifier());
         securec_check_ss(rc, "", "");
 
         if (strcmp(primary_sysid, standby_sysid) != 0) {
             primary_sysid = pstrdup(primary_sysid);
             PQclear(res);
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_STATUS),
-                    errmsg("database system identifier differs between the primary and standby"),
-                    errdetail("The primary's identifier is %s, the standby's identifier is %s.",
-                        primary_sysid,
-                        standby_sysid)));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                            errmsg("database system identifier differs between the primary and standby"),
+                            errdetail("The primary's identifier is %s, the standby's identifier is %s.", primary_sysid,
+                                      standby_sysid)));
         }
         /*
          * Confirm that the current timeline of the primary is the same as the
@@ -1566,11 +1513,9 @@ static void DataRcvStreamConnect(char* conninfo)
         PQclear(res);
 
         if (primary_tli != standby_tli) {
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_STATUS),
-                    errmsg("timeline %u of the primary does not match recovery target timeline %u",
-                        primary_tli,
-                        standby_tli)));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                            errmsg("timeline %u of the primary does not match recovery target timeline %u", primary_tli,
+                                   standby_tli)));
         }
         t_thrd.xlog_cxt.ThisTimeLineID = primary_tli;
     }
@@ -1581,16 +1526,15 @@ static void DataRcvStreamConnect(char* conninfo)
     if (PQresultStatus(res) != PGRES_COPY_BOTH) {
         PQclear(res);
         ereport(ERROR,
-            (errcode(ERRCODE_INVALID_STATUS),
-                errmsg(
-                    "could not start DATA streaming: %s", PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
+                (errcode(ERRCODE_INVALID_STATUS), errmsg("could not start DATA streaming: %s",
+                                                         PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
     }
     PQclear(res);
 
     ereport(LOG, (errmsg("data streaming replication successfully connected to primary.")));
 }
 
-static bool DataRcvStreamReceive(int timeout, unsigned char* type, char** buffer, int* len)
+static bool DataRcvStreamReceive(int timeout, unsigned char *type, char **buffer, int *len)
 {
     int rawlen;
 
@@ -1613,10 +1557,9 @@ static bool DataRcvStreamReceive(int timeout, unsigned char* type, char** buffer
         }
 
         if (PQconsumeInput(t_thrd.datareceiver_cxt.dataStreamingConn) == 0) {
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_STATUS),
-                    errmsg("could not receive data from DATA stream: %s",
-                        PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                            errmsg("could not receive data from DATA stream: %s",
+                                   PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
         }
 
         /* Now that we've consumed some input, try again */
@@ -1626,32 +1569,29 @@ static bool DataRcvStreamReceive(int timeout, unsigned char* type, char** buffer
         }
     }
     if (rawlen == -1) { /* end-of-streaming or error */
-        PGresult* res = NULL;
+        PGresult *res = NULL;
 
         res = PQgetResult(t_thrd.datareceiver_cxt.dataStreamingConn);
         if (PQresultStatus(res) == PGRES_COMMAND_OK || PQresultStatus(res) == PGRES_COPY_IN) {
             PQclear(res);
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_STATUS),
-                    errmsg("data replication terminated by primary server :%s",
-                        PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                            errmsg("data replication terminated by primary server :%s",
+                                   PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
         } else {
             PQclear(res);
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_STATUS),
-                    errmsg("could not receive data from DATA stream: %s",
-                        PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                            errmsg("could not receive data from DATA stream: %s",
+                                   PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
         }
     }
     if (rawlen < -1) {
         ereport(ERROR,
-            (errcode(ERRCODE_INVALID_STATUS),
-                errmsg("could not receive data from DATA stream: %s",
-                    PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
+                (errcode(ERRCODE_INVALID_STATUS), errmsg("could not receive data from DATA stream: %s",
+                                                         PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
     }
 
     /* Return received messages to caller */
-    *type = *((unsigned char*)t_thrd.datareceiver_cxt.recvBuf);
+    *type = *((unsigned char *)t_thrd.datareceiver_cxt.recvBuf);
     *buffer = t_thrd.datareceiver_cxt.recvBuf + sizeof(*type);
     *len = rawlen - sizeof(*type);
     return true;
@@ -1661,14 +1601,13 @@ static bool DataRcvStreamReceive(int timeout, unsigned char* type, char** buffer
  * Send a message to DATA stream.
  * ereports on error.
  */
-static void DataRcvStreamSend(const char* buffer, int nbytes)
+static void DataRcvStreamSend(const char *buffer, int nbytes)
 {
     if (PQputCopyData(t_thrd.datareceiver_cxt.dataStreamingConn, buffer, nbytes) <= 0 ||
         PQflush(t_thrd.datareceiver_cxt.dataStreamingConn)) {
         ereport(ERROR,
-            (errcode(ERRCODE_INVALID_STATUS),
-                errmsg("could not send data to DATA stream: %s",
-                    PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
+                (errcode(ERRCODE_INVALID_STATUS), errmsg("could not send data to DATA stream: %s",
+                                                         PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
     }
 }
 
@@ -1712,7 +1651,7 @@ static bool DataRcvStreamSelect(int timeout_ms)
 
         fd_set input_mask;
         struct timeval timeout;
-        struct timeval* ptr_timeout = NULL;
+        struct timeval *ptr_timeout = NULL;
 
         FD_ZERO(&input_mask);
         FD_SET(PQsocket(t_thrd.datareceiver_cxt.dataStreamingConn), &input_mask);
@@ -1744,7 +1683,7 @@ static bool DataRcvStreamSelect(int timeout_ms)
 static void ShutDownDataRcvWriter(void)
 {
     /* Use volatile pointer to prevent code rearrangement */
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
     ThreadId writerPid;
     int i = 1;
 

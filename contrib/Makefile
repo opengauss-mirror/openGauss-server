@@ -39,7 +39,6 @@ SUBDIRS = \
 		pg_test_fsync	\
 		pg_test_timing	\
 		pg_trgm		\
-		pg_upgrade	\
 		pg_upgrade_support \
 		pg_xlogdump	\
 		pgbench		\
@@ -56,7 +55,8 @@ SUBDIRS = \
 		tsearch2	\
 		unaccent	\
 		vacuumlo	\
-		gsredistribute
+		gsredistribute \
+		security_plugin
 
 ifeq ($(with_openssl),yes)
 SUBDIRS += sslinfo
@@ -76,8 +76,9 @@ else
 ALWAYS_SUBDIRS += sepgsql
 endif
 
-# Missing:
-#		start-scripts	\ (does not have a makefile)
+ifeq ($(enable_multiple_nodes), yes)
+SUBDIRS += carbondata
+endif
 
 
 $(recurse)

@@ -1,6 +1,7 @@
 /*
  * src/test/regress/regress.c
  */
+
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
@@ -1063,7 +1064,7 @@ Datum make_tuple_indirect(PG_FUNCTION_ARGS)
     pfree(nulls);
     ReleaseTupleDesc(tupdesc);
 
-    (void)MemoryContextSwitchTo(old_context);
+    MemoryContextSwitchTo(old_context);
 
     PG_RETURN_HEAPTUPLEHEADER(newtup->t_data);
 }
@@ -1418,7 +1419,7 @@ static int64 to_int64(Datum dm, int64 ml)
 }
 
 #define TmpVar -999999999
-/* logic here is the same as TD, only used for decimal(18,4) */
+/* logic here is the same as C, only used for decimal(18,4) */
 
 Datum truncInt1(PG_FUNCTION_ARGS)
 {

@@ -37,11 +37,11 @@ select relname, parttype, partstrategy, boundaries from pg_partition
 
 analyze partition_reindex_table3;
 select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesgtzero,i.indisunique, i.indisvalid, i.indcheckxmin, i.indisready from pg_index i, pg_class c where c.relname = 'partition_reindex_table3_ind1' and c.oid = i.indexrelid;
-explain (costs off, nodes off) select * from partition_reindex_table3 where c3 = TO_DATE('2020-04-21', 'YYYY-MM-DD') and c2 = 8;
+explain (costs off) select * from partition_reindex_table3 where c3 = TO_DATE('2020-04-21', 'YYYY-MM-DD') and c2 = 8;
 select * from partition_reindex_table3 where c3 = TO_DATE('2020-04-21', 'YYYY-MM-DD') and c2 = 8;
 reindex index partition_reindex_table3_ind1;
 select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesgtzero,i.indisunique, i.indisvalid, i.indcheckxmin, i.indisready from pg_index i, pg_class c where c.relname = 'partition_reindex_table3_ind1' and c.oid = i.indexrelid;
-explain (costs off, nodes off) select * from partition_reindex_table3 where c3 = TO_DATE('2020-04-21', 'YYYY-MM-DD') and c2 = 8;
+explain (costs off) select * from partition_reindex_table3 where c3 = TO_DATE('2020-04-21', 'YYYY-MM-DD') and c2 = 8;
 --the plan before reindex and after reindex should be same
 select * from partition_reindex_table3 where c3 = TO_DATE('2020-04-21', 'YYYY-MM-DD') and c2 = 8;
 
@@ -53,11 +53,11 @@ truncate table partition_reindex_table3;
 insert into partition_reindex_table3 values (generate_series(1,10), generate_series(1,10), generate_series(TO_DATE('2020-01-01', 'YYYY-MM-DD'),TO_DATE('2020-07-01', 'YYYY-MM-DD'),'1, day'));
 analyze partition_reindex_table3;
 select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesgtzero,i.indisunique, i.indisvalid, i.indcheckxmin, i.indisready from pg_index i, pg_class c where c.relname = 'partition_reindex_table3_ind1' and c.oid = i.indexrelid;
-explain (costs off, nodes off) select * from partition_reindex_table3 where c3 = TO_DATE('2020-04-21', 'YYYY-MM-DD') and c2 = 8;
+explain (costs off) select * from partition_reindex_table3 where c3 = TO_DATE('2020-04-21', 'YYYY-MM-DD') and c2 = 8;
 select * from partition_reindex_table3 where c3 = TO_DATE('2020-04-21', 'YYYY-MM-DD') and c2 = 8;
 reindex index partition_reindex_table3_ind1;
 select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesgtzero,i.indisunique, i.indisvalid, i.indcheckxmin, i.indisready from pg_index i, pg_class c where c.relname = 'partition_reindex_table3_ind1' and c.oid = i.indexrelid;
-explain (costs off, nodes off) select * from partition_reindex_table3 where c3 = TO_DATE('2020-04-21', 'YYYY-MM-DD') and c2 = 8;
+explain (costs off) select * from partition_reindex_table3 where c3 = TO_DATE('2020-04-21', 'YYYY-MM-DD') and c2 = 8;
 --the plan before reindex and after reindex should be same
 select * from partition_reindex_table3 where c3 = TO_DATE('2020-04-21', 'YYYY-MM-DD') and c2 = 8;
 

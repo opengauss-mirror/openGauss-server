@@ -40,7 +40,7 @@
 #include "nodes/primnodes.h"
 #include "storage/freespace.h"
 #include "storage/ipc.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
 #include "storage/shmem.h"
@@ -184,7 +184,7 @@ static void gtt_storage_checkin(Oid relid)
 {
     gtt_shared_hash_entry* entry;
     bool found;
-    gtt_fnode fnode;
+    gtt_fnode fnode = {0};
 
     if (u_sess->attr.attr_storage.max_active_gtt <= 0)
         return;
@@ -194,7 +194,6 @@ static void gtt_storage_checkin(Oid relid)
     (void)LWLockAcquire(&t_thrd.shemem_ptr_cxt.gtt_shared_ctl->lock, LW_EXCLUSIVE);
     entry = (gtt_shared_hash_entry*)hash_search(
         t_thrd.shemem_ptr_cxt.active_gtt_shared_hash, &fnode, HASH_ENTER_NULL, &found);
-
     if (entry == NULL) {
         LWLockRelease(&t_thrd.shemem_ptr_cxt.gtt_shared_ctl->lock);
         ereport(ERROR,
@@ -220,7 +219,7 @@ static void gtt_storage_checkin(Oid relid)
 static void gtt_storage_checkout(Oid relid, bool skiplock, bool isCommit)
 {
     gtt_shared_hash_entry* entry;
-    gtt_fnode fnode;
+    gtt_fnode fnode = {0};
 
     if (u_sess->attr.attr_storage.max_active_gtt <= 0)
         return;
@@ -232,7 +231,6 @@ static void gtt_storage_checkout(Oid relid, bool skiplock, bool isCommit)
     }
 
     entry = (gtt_shared_hash_entry*)hash_search(t_thrd.shemem_ptr_cxt.active_gtt_shared_hash, &fnode, HASH_FIND, NULL);
-
     if (entry == NULL) {
         if (!skiplock) {
             LWLockRelease(&t_thrd.shemem_ptr_cxt.gtt_shared_ctl->lock);
@@ -262,7 +260,7 @@ Bitmapset* copy_active_gtt_bitmap(Oid relid)
 {
     gtt_shared_hash_entry* entry;
     Bitmapset* mapCopy = NULL;
-    gtt_fnode fnode;
+    gtt_fnode fnode = {0};
 
     if (u_sess->attr.attr_storage.max_active_gtt <= 0)
         return NULL;
@@ -271,7 +269,6 @@ Bitmapset* copy_active_gtt_bitmap(Oid relid)
     fnode.relNode = relid;
     (void)LWLockAcquire(&t_thrd.shemem_ptr_cxt.gtt_shared_ctl->lock, LW_SHARED);
     entry = (gtt_shared_hash_entry*)hash_search(t_thrd.shemem_ptr_cxt.active_gtt_shared_hash, &fnode, HASH_FIND, NULL);
-
     if (entry == NULL) {
         LWLockRelease(&t_thrd.shemem_ptr_cxt.gtt_shared_ctl->lock);
         return NULL;
@@ -290,7 +287,7 @@ bool is_other_backend_use_gtt(Oid relid)
 {
     gtt_shared_hash_entry* entry;
     bool inUse = false;
-    gtt_fnode fnode;
+    gtt_fnode fnode = {0};
 
     if (u_sess->attr.attr_storage.max_active_gtt <= 0)
         return false;
@@ -299,7 +296,6 @@ bool is_other_backend_use_gtt(Oid relid)
     fnode.relNode = relid;
     (void)LWLockAcquire(&t_thrd.shemem_ptr_cxt.gtt_shared_ctl->lock, LW_SHARED);
     entry = (gtt_shared_hash_entry*)hash_search(t_thrd.shemem_ptr_cxt.active_gtt_shared_hash, &fnode, HASH_FIND, NULL);
-
     if (entry == NULL) {
         LWLockRelease(&t_thrd.shemem_ptr_cxt.gtt_shared_ctl->lock);
         return false;
@@ -378,7 +374,7 @@ void remember_gtt_storage_info(const RelFileNode rnode, Relation rel)
 
         /* Look up or create an entry */
         entry = (gtt_local_hash_entry*)hash_search(
-            u_sess->gtt_ctx.gtt_storage_local_hash, (void*)&relid, HASH_ENTER, &found);
+            u_sess->gtt_ctx.gtt_storage_local_hash, &relid, HASH_ENTER, &found);
 
         if (found) {
             (void)MemoryContextSwitchTo(oldcontext);
@@ -936,7 +932,7 @@ Datum pg_get_gtt_statistics(PG_FUNCTION_ARGS)
         bool isnull[Natts_pg_statistic];
         HeapTuple res = NULL;
 
-        errno_t rc = memset_s(&values, sizeof(values), 0, sizeof(values));
+        errno_t rc = memset_s(values, sizeof(values), 0, sizeof(values));
         securec_check(rc, "", "");
         rc = memset_s(isnull, sizeof(isnull), 0, sizeof(isnull));
         securec_check(rc, "", "");
@@ -1152,8 +1148,15 @@ Datum pg_list_gtt_relfrozenxids(PG_FUNCTION_ARGS)
 
     pids = (ThreadId*)palloc0(sizeof(ThreadId) * numXid);
     xids = (TransactionId*)palloc0(sizeof(TransactionId) * numXid);
-    TransactionId oldest = ENABLE_THREAD_POOL ? ListAllSessionGttFrozenxids(numXid, pids, xids, &i)
-                                              : ListAllThreadGttFrozenxids(numXid, pids, xids, &i);
+
+    TransactionId oldest = InvalidTransactionId;
+    if (ENABLE_THREAD_POOL) {
+        ThreadPoolSessControl* sessCtl = g_threadPoolControler->GetSessionCtrl();
+        oldest = sessCtl->ListAllSessionGttFrozenxids(numXid, pids, xids, &i);
+    } else {
+        oldest = ListAllThreadGttFrozenxids(numXid, pids, xids, &i);
+    }
+
     if (i > 0) {
         pids[i] = 0;
         xids[i] = oldest;
@@ -1239,14 +1242,13 @@ void init_gtt_storage(CmdType operation, ResultRelInfo* resultRelInfo)
     }
 
     RelationCreateStorage(
-        relation->rd_node, RELPERSISTENCE_GLOBAL_TEMP, relation->rd_rel->relowner, InvalidOid, relation);
+        relation->rd_node, RELPERSISTENCE_GLOBAL_TEMP, relation->rd_rel->relowner, InvalidOid, InvalidOid, relation);
     for (i = 0; i < resultRelInfo->ri_NumIndices; i++) {
         Relation index = resultRelInfo->ri_IndexRelationDescs[i];
         IndexInfo* info = resultRelInfo->ri_IndexRelationInfo[i];
         Assert(index->rd_index->indisvalid);
         Assert(index->rd_index->indisready);
-        index_build(relation, NULL, index, NULL, info, index->rd_index->indisprimary, false, false,
-            INDEX_CREATE_NONE_PARTITION);
+        index_build(relation, NULL, index, NULL, info, index->rd_index->indisprimary, false, INDEX_CREATE_NONE_PARTITION);
     }
 
     toastrelid = relation->rd_rel->reltoastrelid;
@@ -1256,7 +1258,7 @@ void init_gtt_storage(CmdType operation, ResultRelInfo* resultRelInfo)
 
         toastrel = relation_open(toastrelid, RowExclusiveLock);
         RelationCreateStorage(
-            toastrel->rd_node, RELPERSISTENCE_GLOBAL_TEMP, toastrel->rd_rel->relowner, InvalidOid, toastrel);
+            toastrel->rd_node, RELPERSISTENCE_GLOBAL_TEMP, toastrel->rd_rel->relowner, InvalidOid, InvalidOid, toastrel);
 
         foreach (indlist, RelationGetIndexList(toastrel)) {
             Oid indexId = lfirst_oid(indlist);
@@ -1266,15 +1268,8 @@ void init_gtt_storage(CmdType operation, ResultRelInfo* resultRelInfo)
             currentIndex = index_open(indexId, RowExclusiveLock);
 
             indexInfo = BuildDummyIndexInfo(currentIndex);
-            index_build(toastrel,
-                NULL,
-                currentIndex,
-                NULL,
-                indexInfo,
-                currentIndex->rd_index->indisprimary,
-                false,
-                false,
-                INDEX_CREATE_NONE_PARTITION);
+            index_build(
+                toastrel, NULL, currentIndex, NULL, indexInfo, currentIndex->rd_index->indisprimary, false, INDEX_CREATE_NONE_PARTITION);
             index_close(currentIndex, NoLock);
         }
 
@@ -1442,5 +1437,22 @@ void gtt_create_storage_files(Oid relid)
     ExecCloseIndices(resultRelInfo);
     (void)MemoryContextSwitchTo(oldcontext);
     MemoryContextDelete(ctxAlterGtt);
+}
+
+
+void CheckGttTableInUse(Relation rel)
+{
+    /* We allow to alter/drop global temp table/index only this session use it */
+    if (RELATION_IS_GLOBAL_TEMP(rel)) {
+        Oid relid = (rel->rd_rel->relkind == RELKIND_INDEX) ?
+            rel->rd_index->indrelid :
+            rel->rd_id;
+        if (is_other_backend_use_gtt(relid)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("can not alter/drop table %s when other backend attached this global temp table",
+                        get_rel_name(relid))));
+        }
+    }
 }
 

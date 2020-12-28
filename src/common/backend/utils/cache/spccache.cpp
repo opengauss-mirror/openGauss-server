@@ -35,7 +35,7 @@ typedef struct {
 } TableSpaceCacheEntry;
 
 /*
- * invalidate_table_space_cache_callback
+ * InvalidateTableSpaceCacheCallback
  *		Flush all cache entries when pg_tablespace is updated.
  *
  * When pg_tablespace is updated, we must flush the cache entry at least
@@ -43,27 +43,25 @@ typedef struct {
  * and easy and doesn't cost much, since there shouldn't be terribly many
  * tablespaces, nor do we expect them to be frequently modified.
  */
-static void invalidate_table_space_cache_callback(Datum arg, int cacheid, uint32 hashvalue)
+static void InvalidateTableSpaceCacheCallback(Datum arg, int cacheid, uint32 hashvalue)
 {
     HASH_SEQ_STATUS status;
     TableSpaceCacheEntry* spc = NULL;
 
     hash_seq_init(&status, u_sess->cache_cxt.TableSpaceCacheHash);
     while ((spc = (TableSpaceCacheEntry*)hash_seq_search(&status)) != NULL) {
-        if (spc->opts != NULL) {
+        if (spc->opts != NULL)
             pfree_ext(spc->opts);
-        }
-        if (hash_search(u_sess->cache_cxt.TableSpaceCacheHash, (void*)&spc->oid, HASH_REMOVE, NULL) == NULL) {
+        if (hash_search(u_sess->cache_cxt.TableSpaceCacheHash, (void*)&spc->oid, HASH_REMOVE, NULL) == NULL)
             ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("hash table corrupted")));
-        }
     }
 }
 
 /*
- * initialize_table_space_cache
+ * InitializeTableSpaceCache
  *		Initialize the tablespace cache.
  */
-static void initialize_table_space_cache(void)
+static void InitializeTableSpaceCache(void)
 {
     HASHCTL ctl;
     errno_t rc;
@@ -79,7 +77,7 @@ static void initialize_table_space_cache(void)
         hash_create("TableSpace cache", 16, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 
     /* Watch for invalidation events. */
-    CacheRegisterSyscacheCallback(TABLESPACEOID, invalidate_table_space_cache_callback, (Datum)0);
+    CacheRegisterSyscacheCallback(TABLESPACEOID, InvalidateTableSpaceCacheCallback, (Datum)0);
 }
 
 /*
@@ -102,13 +100,11 @@ static TableSpaceCacheEntry* get_tablespace(Oid spcid)
     spcid = ConvertToRelfilenodeTblspcOid(spcid);
 
     /* Find existing cache entry, if any. */
-    if (!u_sess->cache_cxt.TableSpaceCacheHash) {
-        initialize_table_space_cache();
-    }
+    if (!u_sess->cache_cxt.TableSpaceCacheHash)
+        InitializeTableSpaceCache();
     spc = (TableSpaceCacheEntry*)hash_search(u_sess->cache_cxt.TableSpaceCacheHash, (void*)&spcid, HASH_FIND, NULL);
-    if (spc != NULL) {
+    if (spc != NULL)
         return spc;
-    }
 
     /*
      * Not found in TableSpace cache.  Check catcache.	If we don't find a
@@ -117,17 +113,17 @@ static TableSpaceCacheEntry* get_tablespace(Oid spcid)
      * if no options were specified.
      */
     tp = SearchSysCache1(TABLESPACEOID, ObjectIdGetDatum(spcid));
-    if (!HeapTupleIsValid(tp)) {
+    if (!HeapTupleIsValid(tp))
         opts = NULL;
-    } else {
+    else {
         Datum datum;
         bool isNull = false;
         errno_t rc;
 
         datum = SysCacheGetAttr(TABLESPACEOID, tp, Anum_pg_tablespace_spcoptions, &isNull);
-        if (isNull) {
+        if (isNull)
             opts = NULL;
-        } else {
+        else {
             bytea* bytea_opts = tablespace_reloptions(datum, false);
             if (bytea_opts == NULL) {
                 ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION), errmsg("Invalid tablespace relation option.")));
@@ -161,18 +157,16 @@ void get_tablespace_page_costs(Oid spcid, double* spc_random_page_cost, double* 
     Assert(spc != NULL);
 
     if (spc_random_page_cost != NULL) {
-        if (spc->opts == NULL || spc->opts->random_page_cost < 0) {
+        if (spc->opts == NULL || spc->opts->random_page_cost < 0)
             *spc_random_page_cost = u_sess->attr.attr_sql.random_page_cost;
-        } else {
+        else
             *spc_random_page_cost = spc->opts->random_page_cost;
-        }
     }
 
     if (spc_seq_page_cost != NULL) {
-        if (spc->opts == NULL || spc->opts->seq_page_cost < 0) {
+        if (spc->opts == NULL || spc->opts->seq_page_cost < 0)
             *spc_seq_page_cost = u_sess->attr.attr_sql.seq_page_cost;
-        } else {
+        else
             *spc_seq_page_cost = spc->opts->seq_page_cost;
-        }
     }
 }

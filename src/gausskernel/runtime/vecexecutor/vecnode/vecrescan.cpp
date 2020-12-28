@@ -29,7 +29,7 @@
 #include "executor/nodeSubplan.h"
 #include "vecexecutor/vecnodecstorescan.h"
 #include "vecexecutor/vecpartiterator.h"
-#include "storage/cstore_compress.h"
+#include "storage/cstore/cstore_compress.h"
 #include "access/cstore_am.h"
 #include "executor/nodeModifyTable.h"
 #include "vecexecutor/vecnoderowtovector.h"
@@ -55,6 +55,9 @@
 #include "vecexecutor/vecnodecstoreindexor.h"
 #include "vecexecutor/vecnodevectorow.h"
 #include "vecexecutor/vecnodedfsindexscan.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "vecexecutor/vectsstorescan.h"
+#endif   /* ENABLE_MULTIPLE_NODES */
 #include "vecexecutor/vecwindowagg.h"
 
 /*
@@ -105,7 +108,6 @@ void VecExecReScan(PlanState* node)
 
         if (node->righttree != NULL) { 
             UpdateChangedParamSet(node->righttree, node->chgParam);
-
         }
     }
 
@@ -134,6 +136,11 @@ void VecExecReScan(PlanState* node)
         case T_DfsScanState:
             ExecReScanDfsScan((DfsScanState*)node);
             break;
+#ifdef ENABLE_MULTIPLE_NODES
+        case T_TsStoreScanState:
+            ExecReScanTsStoreScan((TsStoreScanState*)node);
+            break;
+#endif   /* ENABLE_MULTIPLE_NODES */
         /*
          * partition iterator node
          */

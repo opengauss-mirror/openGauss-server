@@ -1,0 +1,23 @@
+---atomic ops tests
+\df locktag_decode();
+                                            List of functions
+   Schema   |      Name      | Result data type | Argument data types |  Type  | fencedmode | propackage 
+------------+----------------+------------------+---------------------+--------+------------+------------
+ pg_catalog | locktag_decode | text             | text                | normal | f          | f
+(1 row)
+
+select locktag_decode('');
+ locktag_decode 
+----------------
+ 
+(1 row)
+
+select locktag_decode('271b:0:0:0:6');
+ERROR:  The input parameter is invalid!
+CONTEXT:  referenced column: locktag_decode
+select locktag_decode('271b:0:0:0:0:6');
+               locktag_decode                
+---------------------------------------------
+ locktype:transactionid, transactionid:10011
+(1 row)
+

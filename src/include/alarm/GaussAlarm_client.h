@@ -40,6 +40,7 @@ typedef enum tagCM_ALARM_TYPE {
     ALM_ALARM_TYPE_OPLOG = 3,  /* 操作日志 */
     ALM_ALARM_TYPE_EVENT = 4,  /* 事件--> 运行日志 */
     ALM_ALARM_TYPE_DELETE = 5, /* 删除 */
+
 } CM_ALARM_TYPE;
 #define CM_ALARM_TYPE_MACRO
 #endif /* #ifndef CM_ALARM_TYPE_MACRO */
@@ -52,8 +53,8 @@ typedef enum tagCM_SUBSYSTEM_ID {
     SUBSYSID_TS = 2,      /* TS模块 */
     SUBSYSID_CA = 3,      /* CA */
     SUBSYSID_MDS = 4,     /* MDS */
-    SUBSYSID_DS = 5,      /* DS */
-    SUBSYSID_DLM = 6,     /* BASE DLM */
+    SUBSYSID_DS = 5,      /* DS*/
+    SUBSYSID_DLM = 6,     /* BASE DLM*/
     SUBSYSID_MONC = 7,    /* MONC */
     SUBSYSID_TRNS = 8,    /* TRNS */
     SUBSYSID_NVCACHE = 9, /* NVCACHE */

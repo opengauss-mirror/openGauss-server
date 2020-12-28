@@ -11,7 +11,7 @@ CREATE TABLE cstore_cmpr_rle_bound
 	a8 bigint,
 	a9 bigint
 ) with ( orientation = column, compression = low );
-COPY cstore_cmpr_rle_bound FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_cmpr_rle_bound.data';
+COPY cstore_cmpr_rle_bound FROM '@abs_srcdir@/data/cstore_cmpr_rle_bound.data';
 SELECT COUNT(*) FROM cstore_cmpr_rle_bound;
 
 SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a2 = 0;
@@ -63,7 +63,7 @@ CREATE TABLE cstore_cmpr_rle_bound
 	a8 bigint,
 	a9 bigint
 ) with ( orientation = column, compression = middle);
-COPY cstore_cmpr_rle_bound FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_cmpr_rle_bound.data';
+COPY cstore_cmpr_rle_bound FROM '@abs_srcdir@/data/cstore_cmpr_rle_bound.data';
 SELECT COUNT(*) FROM cstore_cmpr_rle_bound;
 
 SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a2 = 0;

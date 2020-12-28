@@ -254,8 +254,12 @@ CteScanState* ExecInitCteScan(CteScan* node, EState* estate, int eflags)
     /*
      * Initialize result tuple type and projection info.
      */
-    ExecAssignResultTypeFromTL(&scanstate->ss.ps);
+    ExecAssignResultTypeFromTL(
+            &scanstate->ss.ps,
+            scanstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
     ExecAssignScanProjectionInfo(&scanstate->ss);
+
+    Assert(scanstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
 
     scanstate->ss.ps.ps_TupFromTlist = false;
 

@@ -177,9 +177,8 @@ Datum xid_age(PG_FUNCTION_ARGS)
     TransactionId now = GetStableLatestTransactionId();
 
     /* Permanent XIDs are always infinitely old */
-    if (!TransactionIdIsNormal(xid)) {
+    if (!TransactionIdIsNormal(xid))
         PG_RETURN_INT64(INT64_MAX);
-    }
 
     PG_RETURN_INT64((int64)(now - xid));
 }
@@ -193,30 +192,26 @@ int xidComparator(const void* arg1, const void* arg2)
     TransactionId xid1 = *(const TransactionId*)arg1;
     TransactionId xid2 = *(const TransactionId*)arg2;
 
-    if (xid1 > xid2) {
+    if (xid1 > xid2)
         return 1;
-    } else if (xid1 < xid2) {
+    if (xid1 < xid2)
         return -1;
-    } else {
-        return 0;
-    }
+    return 0;
 }
 
 // return the number after removing repetitive xids.
 int RemoveRepetitiveXids(TransactionId* xids, int nxid)
 {
-    if (nxid <= 1) {
+    if (nxid <= 1)
         return nxid;
-    }
 
     // step1:sort, and make the same xids continual
-    qsort(xids, (uint32)nxid, sizeof(TransactionId), xidComparator);
+    qsort(xids, nxid, sizeof(TransactionId), xidComparator);
 
     // step2: find the first same pair.
     int i = 1;
-    while ((i < nxid) && (xids[i] != xids[i - 1])) {
+    while (i < nxid && xids[i] != xids[i - 1])
         ++i;
-    }
 
     // it's known that xids[i] is equal to xids[i-1], so that:
     // 1. xids[i-1] is used to be compared with the other xid.
@@ -227,9 +222,8 @@ int RemoveRepetitiveXids(TransactionId* xids, int nxid)
 
     // step3: remove the continual same values.
     for (; i < nxid; ++i) {
-        if (xids[i] == xids[cmp]) {
+        if (xids[i] == xids[cmp])
             continue;
-        }
 
         xids[++cmp] = xids[i];
     }
@@ -240,8 +234,9 @@ int RemoveRepetitiveXids(TransactionId* xids, int nxid)
 
 /*****************************************************************************
  *	 COMMAND IDENTIFIER ROUTINES											 *
- *****************************************************************************
- *
+ *****************************************************************************/
+
+/*
  *		cidin	- converts CommandId to internal representation.
  */
 Datum cidin(PG_FUNCTION_ARGS)
@@ -249,7 +244,7 @@ Datum cidin(PG_FUNCTION_ARGS)
     char* s = PG_GETARG_CSTRING(0);
     CommandId c;
 
-    c = (uint32)(atoi(s));
+    c = atoi(s);
 
     PG_RETURN_COMMANDID(c);
 }
@@ -297,6 +292,6 @@ Datum cideq(PG_FUNCTION_ARGS)
 {
     CommandId arg1 = PG_GETARG_COMMANDID(0);
     CommandId arg2 = PG_GETARG_COMMANDID(1);
+
     PG_RETURN_BOOL(arg1 == arg2);
 }
-

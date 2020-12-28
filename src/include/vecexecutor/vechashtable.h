@@ -12,10 +12,10 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- *
+ * 
  * vechashtable.h
- *
- *
+ * 
+ * 
  * IDENTIFICATION
  *        src/include/vecexecutor/vechashtable.h
  *
@@ -28,7 +28,7 @@
 #include "vecexecutor/vectorbatch.h"
 #include "nodes/execnodes.h"
 #include "access/hash.h"
-#include "storage/buffile.h"
+#include "storage/buf/buffile.h"
 #include "utils/memutils.h"
 #include "utils/batchsort.h"
 #include "utils/memprot.h"
@@ -157,15 +157,15 @@ private:
 
 class hashFileSource : public hashSource {
 public:
-    hashFileSource(VectorBatch* batch, MemoryContext context, int cell_size, hashCell* cell_array, bool complicate_join,
-        int m_write_cols, int file_num, TupleDesc tuple_desc);
+    hashFileSource(VectorBatch* batch, MemoryContext context, int cellSize, hashCell* cellArray, bool complicateJoin,
+        int m_write_cols, int fileNum, TupleDesc tupleDescritor);
 
-    hashFileSource(TupleTableSlot* hash_slot, int file_num);
+    hashFileSource(TupleTableSlot* hashslot, int fileNum);
     ~hashFileSource(){};
 
     TupleTableSlot* getTup();
 
-    void writeTup(MinimalTupleData* tup, int idx);
+    void writeTup(MinimalTupleData* Tup, int idx);
 
     void rewind(int idx);
 
@@ -183,18 +183,18 @@ public:
 
     bool next();
 
-    void enlargeFileSource(int file_num);
+    void enlargeFileSource(int fileNum);
 
     void writeCell(hashCell* cell, HashKey key);
     void writeBatch(VectorBatch* batch, int idx, HashKey key);
-    void writeBatchToFile(VectorBatch* batch, int idx, int file_idx);
+    void writeBatchToFile(VectorBatch* batch, int idx, int fileIdx);
 
     void writeBatchWithHashval(VectorBatch* batch, int idx, HashKey key);
-    void writeBatchWithHashval(VectorBatch* batch, int idx, HashKey key, int file_idx);
+    void writeBatchWithHashval(VectorBatch* batch, int idx, HashKey key, int fileIdx);
 
     void resetFileSource();
 
-    void initFileSource(int file_num);
+    void initFileSource(int fileNum);
 
     VectorBatch* getBatch();
 
@@ -202,14 +202,14 @@ public:
 
     hashCell* getCell();
 
-    void resetVariableMemberIfNecessary(int file_num);
+    void resetVariableMemberIfNecessary(int fileNum);
 
     /* release the buffer in file handler if necessary */
-    void ReleaseFileHandlerBuffer(int file_idx);
+    void ReleaseFileHandlerBuffer(int fileIdx);
     void ReleaseAllFileHandlerBuffer();
 
     /* prepare the buffer in file handler if necessary */
-    void PrepareFileHandlerBuffer(int file_idx);
+    void PrepareFileHandlerBuffer(int fileIdx);
 
 public:
     int m_cellSize;
@@ -269,18 +269,18 @@ public:
 
     size_t (hashFileSource::*m_writeCell)(hashCell* cell, int idx);
 
-    size_t (hashFileSource::*m_writeBatch)(VectorBatch* batch, int idx, int file_idx);
+    size_t (hashFileSource::*m_writeBatch)(VectorBatch* batch, int idx, int fileIdx);
 
     VectorBatch* (hashFileSource::*m_getBatch)();
 
-    size_t (hashFileSource::*m_writeBatchWithHashval)(VectorBatch* batch, int idx, HashKey key, int file_idx);
+    size_t (hashFileSource::*m_writeBatchWithHashval)(VectorBatch* batch, int idx, HashKey key, int fileIdx);
 
 private:
     // write the value from the file.
     template <bool compress_spill>
-    size_t writeScalar(ScalarValue val, uint8 flag, int file_idx);
+    size_t writeScalar(ScalarValue val, uint8 flag, int fileIdx);
     template <bool compress_spill>
-    size_t writeVar(ScalarValue val, uint8 flag, int file_idx);
+    size_t writeVar(ScalarValue val, uint8 flag, int fileIdx);
 
     // read the value from the file.
     template <bool compress_spill>
@@ -288,9 +288,9 @@ private:
     template <bool compress_spill>
     size_t readVar(ScalarValue* val, uint8* flag);
 
-    size_t writeBatchNoCompress(VectorBatch* batch, int idx, int file_idx);
+    size_t writeBatchNoCompress(VectorBatch* batch, int idx, int fileIdx);
 
-    size_t writeBatchCompress(VectorBatch* batch, int idx, int file_idx);
+    size_t writeBatchCompress(VectorBatch* batch, int idx, int fileIdx);
 
     void assembleBatch(TupleTableSlot* slot, int idx);
 
@@ -306,10 +306,10 @@ private:
     void closeNoCompress(int idx);
 
     template <bool write_hashval>
-    size_t writeCellNoCompress(hashCell* cell, int file_idx);
+    size_t writeCellNoCompress(hashCell* cell, int fileIdx);
 
     template <bool write_hashval>
-    size_t writeCellCompress(hashCell* cell, int file_idx);
+    size_t writeCellCompress(hashCell* cell, int fileIdx);
 
     template <bool write_hashval>
     hashCell* getCellNoCompress();
@@ -324,12 +324,12 @@ private:
     TupleTableSlot* getTupCompress();
 
     template <bool compress_spill>
-    size_t writeBatchWithHashvalCompress(VectorBatch* batch, int idx, HashKey key, int file_idx);
+    size_t writeBatchWithHashvalCompress(VectorBatch* batch, int idx, HashKey key, int fileIdx);
 };
 
 class hashSortSource : public hashSource {
 public:
-    hashSortSource(Batchsortstate* batch_sort_stat, VectorBatch* sort_batch);
+    hashSortSource(Batchsortstate* batchSortState, VectorBatch* sortBatch);
     ~hashSortSource(){};
 
     VectorBatch* getBatch();
@@ -382,7 +382,31 @@ inline int getPower2NextNum(int num)
 class hashBasedOperator : public BaseObject {
 public:
     hashBasedOperator() : m_spillToDisk(false), m_rows(0), m_totalMem(0), m_availmems(0)
-    {}
+    {
+        m_filesource = NULL;
+        m_innerHashFuncs = NULL;
+        m_key = 0;
+        m_cols = 0;
+        m_sysBusy = false;
+        m_outerHashFuncs = NULL;
+        m_overflowsource = NULL;
+        m_hashContext = NULL;
+        m_keyDesc = NULL;
+        m_tupleCount = 0;
+        m_hashTbl = NULL;
+        m_colWidth = 0;
+        m_cellSize = 0;
+        m_tmpContext = NULL;
+        m_colDesc = NULL;
+        m_spreadNum = 0;
+        m_okeyIdx = NULL;
+        m_fill_table_rows = 0;
+        m_keyIdx = NULL;
+        m_keySimple = false;
+        m_eqfunctions = NULL;
+        m_strategy = 0;
+        m_maxMem = 0;
+    }
 
     virtual ~hashBasedOperator()
     {}
@@ -394,7 +418,7 @@ public:
     virtual VectorBatch* Probe() = 0;
 
     // create temprorary file.
-    hashFileSource* CreateTempFile(VectorBatch* batch, int file_num, PlanState* plan_stat);
+    hashFileSource* CreateTempFile(VectorBatch* batch, int fileNum, PlanState* planstate);
 
     // close temprorary file.
     void closeFile();
@@ -419,7 +443,7 @@ public:
     void ReplaceEqfunc();
 
     // judge memory over flow.
-    void JudgeMemoryOverflow(char* op_name, int plan_id, int dop, Instrumentation* instrument = NULL);
+    void JudgeMemoryOverflow(char* opname, int planid, int dop, Instrumentation* instrument = NULL);
 
     /* judge memory allow table expnd */
     bool JudgeMemoryAllowExpand();
@@ -429,16 +453,16 @@ public:
 
     // simple hash function without string type in the key
     template <bool reHash>
-    void hashCellT(hashCell* cell, int key_idx, PGFunction func, int nval, ScalarValue* hash_res);
+    void hashCellT(hashCell* cell, int keyIdx, FmgrInfo* hashFmgr, int nval, ScalarValue* hashRes);
 
     template <bool reHash>
-    void hashColT(ScalarVector* val, PGFunction func, int nval, ScalarValue* hash_res);
+    void hashColT(ScalarVector* val, FmgrInfo* hashFmgr, int nval, ScalarValue* hashRes);
 
     inline void hashBatch(
-        VectorBatch* batch, int* key_idx, ScalarValue* hash_res, FmgrInfo* hash_funcs, bool need_spill = false);
+        VectorBatch* batch, int* keyIdx, ScalarValue* hashRes, FmgrInfo* hashFmgr, bool needSpill = false);
 
     inline void hashCellArray(
-        hashCell* cell, int nrows, int* key_idx, ScalarValue* hash_res, FmgrInfo* hash_funcs, bool need_spill = false);
+        hashCell* cell, int nrows, int* keyIdx, ScalarValue* hashRes, FmgrInfo* hashFmgr, bool needSpill = false);
 
 public:
     vechashtable* m_hashTbl;
@@ -555,30 +579,32 @@ public:
 #define GET_HASH_TABLE(node) (((vechashtable*)(node->hashTbl)))
 
 // simple hash function without string type in the key
-template <bool rehash>
-inline void hashBasedOperator::hashCellT(hashCell* cell, int key_idx, PGFunction func, int nval, ScalarValue* hash_res)
+template <bool reHash>
+inline void hashBasedOperator::hashCellT(hashCell* cell, int keyIdx, FmgrInfo* hashFmgr, int nval, ScalarValue* hashRes)
 {
     hashVal val;
-    ScalarValue hash_val;
-    FunctionCallInfoData fc_info;
+    ScalarValue hashV;
+    FunctionCallInfoData fcinfo;
     Datum args[2];
-    fc_info.arg = &args[0];
+    fcinfo.arg = &args[0];
+    fcinfo.flinfo = hashFmgr;
+    PGFunction func = hashFmgr->fn_addr;
 
     for (int j = 0; j < nval; j++) {
-        val = cell->m_val[key_idx];
+        val = cell->m_val[keyIdx];
         if (likely(NOT_NULL(val.flag))) {
-            fc_info.arg[0] = val.val;
-            if (rehash) {
+            fcinfo.arg[0] = val.val;
+            if (reHash) {
                 /* rotate hashkey left 1 bit at each rehash step */
-                hash_val = hash_res[j];
-                hash_val = (hash_val << 1) | ((hash_val & 0x80000000) ? 1 : 0);
-                hash_val ^= func(&fc_info);
-                hash_res[j] = hash_val;
+                hashV = hashRes[j];
+                hashV = (hashV << 1) | ((hashV & 0x80000000) ? 1 : 0);
+                hashV ^= func(&fcinfo);
+                hashRes[j] = hashV;
             } else
-                hash_res[j] = func(&fc_info);
+                hashRes[j] = func(&fcinfo);
         } else {
-            if (!rehash)
-                hash_res[j] = 0;  // give the init value;
+            if (!reHash)
+                hashRes[j] = 0;  // give the init value;
         }
 
         cell = (hashCell*)((char*)cell + m_cellSize);
@@ -586,84 +612,86 @@ inline void hashBasedOperator::hashCellT(hashCell* cell, int key_idx, PGFunction
 }
 
 // simple hash function without string type in the key
-template <bool rehash>
-inline void hashBasedOperator::hashColT(ScalarVector* val, PGFunction func, int nval, ScalarValue* hash_res)
+template <bool reHash>
+inline void hashBasedOperator::hashColT(ScalarVector* val, FmgrInfo* hashFmgr, int nval, ScalarValue* hashRes)
 {
     ScalarValue* value = val->m_vals;
     uint8* flag = val->m_flag;
-    FunctionCallInfoData fc_info;
+    FunctionCallInfoData fcinfo;
     Datum args[2];
-    fc_info.arg = &args[0];
-    ScalarValue hash_val;
+    fcinfo.arg = &args[0];
+    fcinfo.flinfo = hashFmgr;
+    PGFunction func = hashFmgr->fn_addr;
+    ScalarValue hashV;
 
     for (int j = 0; j < nval; j++) {
         if (likely(NOT_NULL(flag[j]))) {
-            fc_info.arg[0] = value[j];
-            if (rehash) {
+            fcinfo.arg[0] = value[j];
+            if (reHash) {
                 /* rotate hashkey left 1 bit at each rehash step */
-                hash_val = hash_res[j];
-                hash_val = (hash_val << 1) | ((hash_val & 0x80000000) ? 1 : 0);
-                hash_val ^= func(&fc_info);
-                hash_res[j] = hash_val;
+                hashV = hashRes[j];
+                hashV = (hashV << 1) | ((hashV & 0x80000000) ? 1 : 0);
+                hashV ^= func(&fcinfo);
+                hashRes[j] = hashV;
             } else
-                hash_res[j] = func(&fc_info);
+                hashRes[j] = func(&fcinfo);
         } else {
-            if (!rehash)
-                hash_res[j] = 0;  // give the init value;
+            if (!reHash)
+                hashRes[j] = 0;  // give the init value;
         }
     }
 }
 
 inline void hashBasedOperator::hashBatch(
-    VectorBatch* batch, int* keyIdx, ScalarValue* hash_res, FmgrInfo* hash_funcs, bool need_spill)
+    VectorBatch* batch, int* keyIdx, ScalarValue* hashRes, FmgrInfo* hashFmgr, bool needSpill)
 {
     int i;
     int nrows = batch->m_rows;
-    ScalarVector* p_vector = batch->m_arr;
-    AutoContextSwitch mem_guard(m_tmpContext);
+    ScalarVector* pVector = batch->m_arr;
+    AutoContextSwitch memGuard(m_tmpContext);
 
-    hashColT<false>(&p_vector[keyIdx[0]], hash_funcs[0].fn_addr, nrows, hash_res);
+    hashColT<false>(&pVector[keyIdx[0]], hashFmgr, nrows, hashRes);
 
     for (i = 1; i < m_key; i++)
-        hashColT<true>(&p_vector[keyIdx[i]], hash_funcs[i].fn_addr, nrows, hash_res);
+        hashColT<true>(&pVector[keyIdx[i]], (hashFmgr + i), nrows, hashRes);
 
     /* Rehash the hash value for avoiding the key and distribute key using the same hash function. */
     for (i = 0; i < nrows; i++) {
-        if (need_spill)
-            hash_res[i] = hash_new_uint32(DatumGetUInt32(hash_res[i]));
+        if (needSpill)
+            hashRes[i] = hash_new_uint32(DatumGetUInt32(hashRes[i]));
         else
-            hash_res[i] = hash_uint32(DatumGetUInt32(hash_res[i]));
+            hashRes[i] = hash_uint32(DatumGetUInt32(hashRes[i]));
     }
 
     MemoryContextReset(m_tmpContext);
 }
 
 inline void hashBasedOperator::hashCellArray(
-    hashCell* cell, int nrows, int* key_idx, ScalarValue* hash_res, FmgrInfo* hash_funcs, bool need_spill)
+    hashCell* cell, int nrows, int* keyIdx, ScalarValue* hashRes, FmgrInfo* hashFmgr, bool needSpill)
 {
     int i;
-    AutoContextSwitch mem_guard(m_tmpContext);
+    AutoContextSwitch memGuard(m_tmpContext);
 
-    hashCellT<false>(cell, key_idx[0], hash_funcs[0].fn_addr, nrows, hash_res);
+    hashCellT<false>(cell, keyIdx[0], hashFmgr, nrows, hashRes);
 
     for (i = 1; i < m_key; i++)
-        hashCellT<true>(cell, key_idx[i], hash_funcs[i].fn_addr, nrows, hash_res);
+        hashCellT<true>(cell, keyIdx[i], (hashFmgr + i), nrows, hashRes);
 
     /* Rehash the hash value for avoiding the key and distribute key using the same hash function. */
     for (i = 0; i < nrows; i++) {
-        if (need_spill)
-            hash_res[i] = hash_new_uint32(DatumGetUInt32(hash_res[i]));
+        if (needSpill)
+            hashRes[i] = hash_new_uint32(DatumGetUInt32(hashRes[i]));
         else
-            hash_res[i] = hash_uint32(DatumGetUInt32(hash_res[i]));
+            hashRes[i] = hash_uint32(DatumGetUInt32(hashRes[i]));
     }
 
     MemoryContextReset(m_tmpContext);
 }
 
 extern ScalarValue addVariable(MemoryContext context, ScalarValue val);
-extern ScalarValue replaceVariable(MemoryContext context, ScalarValue old_val, ScalarValue val);
+extern ScalarValue replaceVariable(MemoryContext context, ScalarValue oldVal, ScalarValue val);
 extern ScalarValue addToVarBuffer(VarBuf* buf, ScalarValue value);
 extern void* TempFileCreate();
-extern ScalarValue DatumToScalarInContext(MemoryContext context, Datum datum_val, Oid datum_type);
+extern ScalarValue DatumToScalarInContext(MemoryContext context, Datum datumVal, Oid datumType);
 
 #endif /* VECHASHTABLE_H_ */

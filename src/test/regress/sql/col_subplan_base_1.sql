@@ -10,7 +10,7 @@ insert into t_subplan1 select generate_series(1, 100)%98, generate_series(1, 100
 insert into t_subplan2 select generate_series(1, 50)%48, generate_series(1, 50)%28, generate_series(1, 50)%12, generate_series(1, 50)%9 from public.src;
 
 -- 1. initplan
-explain (costs off, nodes off)
+explain (costs off)
 select case when (select count(*)
                   from t_subplan2
                   where a2 between 1 and 20) > 15
@@ -55,7 +55,7 @@ from t_subplan1
 where a1 = 5 or a1 = 6
 ;
 
-explain (costs off, nodes off)
+explain (costs off)
 select  a1, count(*) cnt
  from t_subplan1
  ,t_subplan2
@@ -84,7 +84,7 @@ select  a1, count(*) cnt
  order by a1, cnt
  limit 10;
 
-explain (costs off, nodes off)
+explain (costs off)
 select  a1, count(*) cnt
  from t_subplan1
  ,t_subplan2
@@ -114,7 +114,7 @@ select  a1, count(*) cnt
  offset (select avg(d2) from t_subplan2);
 
 -- 2. subplan
-explain (costs off, nodes off)
+explain (costs off)
 with t as
 (select d1
 ,d2
@@ -149,7 +149,7 @@ where ctr1.d2 = ctr2.d2)
 order by 1
 limit 10;
 
-explain (costs off, nodes off)
+explain (costs off)
 with t as
 (select d1
 ,d2
@@ -190,7 +190,7 @@ where ctr2.d2=ctr3.d2))
 order by 1
 limit 10;
 
-explain (costs off, nodes off)
+explain (costs off)
 with t as
 (select d1
 ,d2
@@ -233,7 +233,7 @@ and ctr1.d1 = ctr3.d1))
 order by 1
 limit 10;
 
-explain (costs off, nodes off)
+explain (costs off)
 select * from t_subplan1 t1
 where
  exists (select * from t_subplan2 t2
@@ -257,7 +257,7 @@ order by 1,2,3,4;
 ;
 
 -- 3. initplan & subplan
-explain (costs off, nodes off)
+explain (costs off)
 select  a1, count(*) cnt
  from t_subplan1
  ,t_subplan2
@@ -290,7 +290,7 @@ select  a1, count(*) cnt
  order by a1, cnt
  limit 10;
  
-explain (costs off, nodes off)
+explain (costs off)
 select  a1, count(*) cnt
  from t_subplan1
  ,t_subplan2
@@ -325,7 +325,7 @@ select  a1, count(*) cnt
  order by a1, cnt
  limit 10;
 
-explain (costs off, nodes off)
+explain (costs off)
 select  a1, count(*) cnt
  from t_subplan1
  ,t_subplan2
@@ -360,7 +360,7 @@ select  a1, count(*) cnt
  order by a1, cnt
  limit 10;
 
-explain (costs off, nodes off)
+explain (costs off)
 select  a1, count(*) cnt
  from t_subplan1
  ,t_subplan2
@@ -394,7 +394,7 @@ select  a1, count(*) cnt
 --test sonicagg rescan
 set enable_sonic_hashagg=on;
 
-explain (costs off, nodes off)
+explain (costs off)
 with t as
 (select d1
 ,d2

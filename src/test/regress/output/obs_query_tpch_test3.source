@@ -1,0 +1,40 @@
+--
+--orders
+--
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/tpch_orders_out/ address=@obshostname@ ak=@ak@ sk=@sk@
+DROP FOREIGN TABLE if exists EXTORDERS;
+NOTICE:  foreign table "extorders" does not exist, skipping
+CREATE FOREIGN TABLE EXTORDERS (
+  O_ORDERKEY    BIGINT,
+  O_CUSTKEY   INTEGER NOT NULL, -- references C_CUSTKEY
+  O_ORDERSTATUS CHAR(1),
+  O_TOTALPRICE  DECIMAL,
+  O_ORDERDATE   DATE,
+  O_ORDERPRIORITY CHAR(15),
+  O_CLERK     CHAR(15),
+  O_SHIPPRIORITY  INTEGER,
+  O_COMMENT   VARCHAR(79)
+)SERVER obs_server OPTIONS (
+    location 'obs://@obsbucket@/obscheck/tpch_orders/',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '32') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+DROP TABLE if exists ORDERS;
+NOTICE:  table "orders" does not exist, skipping
+CREATE TABLE ORDERS (
+  O_ORDERKEY    BIGINT,
+  O_CUSTKEY   INTEGER NOT NULL, -- references C_CUSTKEY
+  O_ORDERSTATUS CHAR(1),
+  O_TOTALPRICE  DECIMAL,
+  O_ORDERDATE   DATE,
+  O_ORDERPRIORITY CHAR(15),
+  O_CLERK     CHAR(15),
+  O_SHIPPRIORITY  INTEGER,
+  O_COMMENT   VARCHAR(79)
+);
+insert into ORDERS select * from EXTORDERS;
+drop table ORDERS;
+drop foreign table EXTORDERS;
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/tpch_orders_out/ address=@obshostname@ ak=@ak@ sk=@sk@

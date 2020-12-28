@@ -94,14 +94,15 @@ int PrepareClientEncoding(int encoding)
         /*
          * Load the fmgr info into t_thrd.top_mem_cxt (could still fail here)
          */
-        conv_info = (ConvProcInfo*)MemoryContextAlloc(u_sess->top_mem_cxt, sizeof(ConvProcInfo));
+        MemoryContext executorCxt = SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR);
+        conv_info = (ConvProcInfo*)MemoryContextAlloc(executorCxt, sizeof(ConvProcInfo));
         conv_info->s_encoding = current_server_encoding;
         conv_info->c_encoding = encoding;
-        fmgr_info_cxt(to_server_proc, &conv_info->to_server_info, u_sess->top_mem_cxt);
-        fmgr_info_cxt(to_client_proc, &conv_info->to_client_info, u_sess->top_mem_cxt);
+        fmgr_info_cxt(to_server_proc, &conv_info->to_server_info, executorCxt);
+        fmgr_info_cxt(to_client_proc, &conv_info->to_client_info, executorCxt);
 
         /* Attach new info to head of list */
-        old_context = MemoryContextSwitchTo(u_sess->top_mem_cxt);
+        old_context = MemoryContextSwitchTo(executorCxt);
         u_sess->mb_cxt.ConvProcList = lcons(conv_info, u_sess->mb_cxt.ConvProcList);
         (void)MemoryContextSwitchTo(old_context);
 
@@ -861,11 +862,15 @@ int pg_encoding_mbcliplen(int encoding, const char* mbstr, int len, int limit)
     return clen;
 }
 
-/*
- * Similar to pg_mbcliplen except the limit parameter specifies the
- * byte length, not the character length.
+/**
+ * calculate the length of mbstr
+ * @tparam calCharLength true for the character length, false for the byte length
+ * @param mbstr mbstr
+ * @param len length of mbstr
+ * @param limit limit of mbstr
+ * @return the length of mbstr  
  */
-int pg_mbcharcliplen(const char* mbstr, int len, int limit)
+template<bool calCharLength> int MbCharClipLen(const char* mbstr, int len, int limit)
 {
     int clen = 0;
     int nch = 0;
@@ -877,7 +882,7 @@ int pg_mbcharcliplen(const char* mbstr, int len, int limit)
     }
     while (len > 0 && *mbstr) {
         l = pg_mblen(mbstr);
-        if (DB_IS_CMPT(DB_CMPT_PG)) {
+        if (calCharLength) {
             nch++;
         } else {
             nch += l;
@@ -891,6 +896,20 @@ int pg_mbcharcliplen(const char* mbstr, int len, int limit)
     }
     return clen;
 }
+
+/*
+ * Similar to pg_mbcliplen except the limit parameter specifies the
+ * byte length, not the character length.
+ */
+int pg_mbcharcliplen(const char* mbstr, int len, int limit)
+{
+    bool pgFormat = DB_IS_CMPT(PG_FORMAT);
+    if (pgFormat) {
+        return MbCharClipLen<true>(mbstr, len, limit);
+    } else {
+        return MbCharClipLen<false>(mbstr, len, limit);
+    }
+}
 /*
  * Description	: Similar to pg_mbcliplen except the limit parameter specifies
  * 				  the character length, not the byte length.
@@ -898,25 +917,7 @@ int pg_mbcharcliplen(const char* mbstr, int len, int limit)
  */
 int pg_mbcharcliplen_orig(const char* mbstr, int len, int limit)
 {
-    int clen = 0;
-    int nch = 0;
-    int l;
-
-    /* optimization for single byte encoding */
-    if (pg_database_encoding_max_length() == 1) {
-        return cliplen(mbstr, len, limit);
-    }
-    while (len > 0 && *mbstr) {
-        l = pg_mblen(mbstr);
-        nch++;
-        if (nch > limit) {
-            break;
-        }
-        clen += l;
-        len -= l;
-        mbstr += l;
-    }
-    return clen;
+    return MbCharClipLen<true>(mbstr, len, limit);
 }
 
 /* mbcliplen for any single-byte encoding */

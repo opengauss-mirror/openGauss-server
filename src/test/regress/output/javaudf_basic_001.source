@@ -1,0 +1,70 @@
+---test: nest call
+START TRANSACTION;
+CREATE FUNCTION java_addOne_Integer(int)
+	RETURNS int
+	AS 'huawei.javaudf.basic.BasicJavaUDF.addOne(java.lang.Integer)'
+	IMMUTABLE LANGUAGE java;
+CREATE FUNCTION nullOnEven(int)
+	RETURNS int
+	AS 'huawei.javaudf.basic.BasicJavaUDF.nullOnEven'
+	IMMUTABLE LANGUAGE java;
+SELECT nullOnEven(java_addOne_Integer(1));
+ nulloneven 
+------------
+           
+(1 row)
+
+SELECT nullOnEven(java_addOne_Integer(2));
+ nulloneven 
+------------
+          3
+(1 row)
+
+SELECT nullOnEven(java_addOne_Integer(java_addOne_Integer(java_addOne_Integer(java_addOne_Integer(java_addOne_Integer(1))))));
+ nulloneven 
+------------
+           
+(1 row)
+
+CREATE FUNCTION oldstyle_length(int4, text)
+	RETURNS int4
+	AS '@libdir@/regress@DLSUFFIX@'
+	LANGUAGE C;
+SELECT nullOnEven(oldstyle_length(10, 'abc'));
+ nulloneven 
+------------
+         13
+(1 row)
+
+SELECT nullOnEven(java_addOne_Integer(oldstyle_length(10, 'abc')));
+ nulloneven 
+------------
+           
+(1 row)
+
+SELECT oldstyle_length(java_addOne_Integer(9), 'abc');
+ oldstyle_length 
+-----------------
+              13
+(1 row)
+
+SET FencedUDFMemoryLimit='200MB';
+SET pljava_vmoptions='-Xmx10M -Xmx10m -Xmx10K -Xmx10k -Xmx10G -Xmx10g -Dhadoop.home.dir=/data1 -Dtest9=9 -Dtest10=10 -Dtest11=11 "\\a';
+SELECT java_addOne_Integer(oldstyle_length(java_addOne_Integer(9), 'abc'));
+ java_addone_integer 
+---------------------
+                  14
+(1 row)
+
+DROP FUNCTION java_addOne_Integer;
+DROP FUNCTION nullOnEven;
+DROP FUNCTION oldstyle_length;
+ROLLBACK;
+-- test: JDK system properties
+-- Result should be consistant with your $GAUSSHOME/lib/postgresql/java
+CREATE FUNCTION java_getSystemProperty(VARCHAR)
+	RETURNS VARCHAR
+	AS 'java.lang.System.getProperty'
+	LANGUAGE java;
+--SELECT java_getSystemProperty('javaudf.file.path');
+DROP FUNCTION java_getSystemProperty(VARCHAR);

@@ -59,7 +59,6 @@ void initStringInfo(StringInfo str)
  */
 void resetStringInfo(StringInfo str)
 {
-
     str->data[0] = '\0';
     str->len = 0;
     str->cursor = 0;
@@ -248,13 +247,12 @@ void copyStringInfo(StringInfo to, StringInfo from)
  * initStringInfo was called, even if another context is now current.
  * This is the desired and indeed critical behavior!
  */
-template <class T>
-void enlargeBuffer(_in_ int needed,  // needed more bytes
-    _in_ int len,                    // current used buffer length in bytes
-    __inout T* maxlen,               // original/new allocated buffer length
-    __inout char** data)             // pointer to original/new buffer
+void enlargeBuffer(int needed,  // needed more bytes
+    int len,                    // current used buffer length in bytes
+    int* maxlen,               // original/new allocated buffer length
+    char** data)             // pointer to original/new buffer
 {
-    int new_len;
+    int newlen;
 
     /*
      * Guard against out-of-range "needed" values.	Without this, we can get
@@ -284,26 +282,79 @@ void enlargeBuffer(_in_ int needed,  // needed more bytes
      * for efficiency, double the buffer size each time it overflows.
      * Actually, we might need to more than double it if 'needed' is big...
      */
-    new_len = 2 * *maxlen;
-    while (needed > new_len) {
-        new_len = 2 * new_len;
+    newlen = 2 * *maxlen;
+    while (needed > newlen) {
+        newlen = 2 * newlen;
     }
 
     /*
      * Clamp to MaxAllocSize in case we went past it.  Note we are assuming
      * here that MaxAllocSize <= INT_MAX/2, else the above loop could
-     * overflow.  We will still have new_len >= needed.
+     * overflow.  We will still have newlen >= needed.
      */
-    if (new_len > (int)MaxAllocSize) {
-        new_len = (int)MaxAllocSize;
+    if (newlen > (int)MaxAllocSize) {
+        newlen = (int)MaxAllocSize;
     }
 
-    *data = (char*)repalloc(*data, new_len);
-    *maxlen = new_len;
+    *data = (char*)repalloc(*data, newlen);
+    *maxlen = newlen;
 }
 
-template void enlargeBuffer<int>(int, int, int*, char** data);
-template void enlargeBuffer<size_t>(int, int, size_t*, char** data);
+void enlargeBufferSize(int needed,  // needed more bytes
+    int len,                    // current used buffer length in bytes
+    size_t* maxlen,               // original/new allocated buffer length
+    char** data)             // pointer to original/new buffer
+{
+    int newlen;
+
+    /*
+     * Guard against out-of-range "needed" values.	Without this, we can get
+     * an overflow or infinite loop in the following.
+     */
+    /* should not happen */
+    if (needed < 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid string enlargement request size: %d", needed)));
+    }
+    if (((Size)len > MaxAllocSize) || ((Size)needed) >= (MaxAllocSize - (Size)len)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                errmsg("out of memory"),
+                errdetail("Cannot enlarge buffer containing %d bytes by %d more bytes.", len, needed)));
+    }
+
+    needed += len + 1; /* total space required now */
+
+    /* Because of the above test, we now have needed <= MaxAllocSize */
+    if (needed <= (int)*maxlen) {
+        return; /* got enough space already */
+    }
+
+    /*
+     * We don't want to allocate just a little more space with each append;
+     * for efficiency, double the buffer size each time it overflows.
+     * Actually, we might need to more than double it if 'needed' is big...
+     */
+    newlen = 2 * *maxlen;
+    while (needed > newlen) {
+        newlen = 2 * newlen;
+    }
+
+    /*
+     * Clamp to MaxAllocSize in case we went past it.  Note we are assuming
+     * here that MaxAllocSize <= INT_MAX/2, else the above loop could
+     * overflow.  We will still have newlen >= needed.
+     */
+    if (newlen > (int)MaxAllocSize) {
+        newlen = (int)MaxAllocSize;
+    }
+
+    *data = (char*)repalloc(*data, newlen);
+    *maxlen = newlen;
+}
+
+// template void enlargeBuffer<int>(int, int, int*, char** data);
+// template void enlargeBuffer<size_t>(int, int, size_t*, char** data);
 
 /*
  * enlargeStringInfo

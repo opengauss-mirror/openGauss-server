@@ -17,7 +17,6 @@
 
 #include <sys/file.h>
 #include <sys/stat.h>
-#include <unistd.h>
 #include <dirent.h>
 
 #include "catalog/pg_authid.h"
@@ -97,8 +96,8 @@ bytea* read_binary_file(const char* filename, int64 seek_offset, int64 bytes_to_
     size_t nbytes;
     FILE* file = NULL;
     int64 offset = 0;
-    bool is_need_check = false;
-    int seg_no = 0;
+    bool isNeedCheck = false;
+    int segNo = 0;
     const int MAX_RETRY_LIMIT = 60;
     int retryCnt = 0;
     errno_t rc = 0;
@@ -121,9 +120,8 @@ bytea* read_binary_file(const char* filename, int64 seek_offset, int64 bytes_to_
     }
 
     /* not sure why anyone thought that int64 length was a good idea */
-    if ((unsigned int)(bytes_to_read) > (MaxAllocSize - VARHDRSZ)) {
+    if ((unsigned int)(bytes_to_read) > (MaxAllocSize - VARHDRSZ))
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("requested length too large")));
-    }
 
     if ((file = AllocateFile(filename, PG_BINARY_R)) == NULL) {
         if (missing_ok && errno == ENOENT)
@@ -132,15 +130,14 @@ bytea* read_binary_file(const char* filename, int64 seek_offset, int64 bytes_to_
             ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\" for reading: %m", filename)));
     }
 
-    is_need_check = is_row_data_file(filename, &seg_no);
-    ereport(DEBUG1, (errmsg("read_binary_file, filename is %s, isNeedCheck is %d", filename, is_need_check)));
+    isNeedCheck = is_row_data_file(filename, &segNo);
+    ereport(DEBUG1, (errmsg("read_binary_file, filename is %s, isNeedCheck is %d", filename, isNeedCheck)));
 
     buf = (bytea*)palloc((Size)bytes_to_read + VARHDRSZ);
 
 recheck:
-    if (fseeko(file, (off_t)seek_offset, (seek_offset >= 0) ? SEEK_SET : SEEK_END) != 0) {
+    if (fseeko(file, (off_t)seek_offset, (seek_offset >= 0) ? SEEK_SET : SEEK_END) != 0)
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not seek in file \"%s\": %m", filename)));
-    }
 
     nbytes = fread(VARDATA(buf), 1, (size_t)bytes_to_read, file);
     if (nbytes != (size_t) bytes_to_read) {
@@ -150,7 +147,7 @@ recheck:
                 errmsg("could not read file \"%s\": %m", filename)));
     }
 
-    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint && is_need_check && need_check) {
+    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint && isNeedCheck && need_check) {
         uint32 check_loc = 0;
         BlockNumber blkno = 0;
         uint16 checksum = 0;
@@ -172,16 +169,16 @@ recheck:
             offset = seek_offset;
         }
 
-        /* offset and nbytes must be integer multiple of BLCKSZ. */
+        /*offset and nbytes must be integer multiple of BLCKSZ.*/
         if (offset % BLCKSZ != 0 || nbytes % BLCKSZ != 0) {
             ereport(ERROR,
                (errcode_for_file_access(),
-               errmsg("file length cannot be divisibed by 8k: file %s, offset %ld, nbytes %ld",
+               errmsg("file length cannot be divisibed by 8k: file %s, offset %ld, nbytes %lu",
                filename, offset, nbytes)));
         }
 
         for (check_loc = 0; check_loc < nbytes; check_loc += BLCKSZ) {
-            blkno = offset / BLCKSZ + check_loc / BLCKSZ + (seg_no * ((BlockNumber)RELSEG_SIZE));
+            blkno = offset / BLCKSZ + check_loc / BLCKSZ + (segNo * ((BlockNumber)RELSEG_SIZE));
             phdr = PageHeader((char*)VARDATA(buf) + check_loc);
             if (PageIsNew(phdr)) {
                 continue;
@@ -208,7 +205,7 @@ recheck:
 
     SET_VARSIZE(buf, nbytes + VARHDRSZ);
 
-    (void)FreeFile(file);
+    FreeFile(file);
 
     return buf;
 }
@@ -240,15 +237,13 @@ Datum pg_read_file(PG_FUNCTION_ARGS)
     int64 bytes_to_read = PG_GETARG_INT64(2);
     char* filename = NULL;
 
-    if (GetUserId() != BOOTSTRAP_SUPERUSERID) {
+    if (GetUserId() != BOOTSTRAP_SUPERUSERID)
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("must be initial account to read files"))));
-    }
 
     filename = convert_and_check_filename(filename_t);
 
-    if (bytes_to_read < 0) {
+    if (bytes_to_read < 0)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("requested length cannot be negative")));
-    }
 
     PG_RETURN_TEXT_P(read_text_file(filename, seek_offset, bytes_to_read));
 }
@@ -261,9 +256,8 @@ Datum pg_read_file_all(PG_FUNCTION_ARGS)
     text* filename_t = PG_GETARG_TEXT_P(0);
     char* filename = NULL;
 
-    if (GetUserId() != BOOTSTRAP_SUPERUSERID) {
+    if (GetUserId() != BOOTSTRAP_SUPERUSERID)
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("must be initial account to read files"))));
-    }
 
     filename = convert_and_check_filename(filename_t);
 
@@ -283,11 +277,8 @@ Datum pg_read_binary_file(PG_FUNCTION_ARGS)
     bytea* result = NULL;
 
     if (GetUserId() != BOOTSTRAP_SUPERUSERID) {
-        ereport(ERROR, 
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), 
-                (errmsg("must be initial account to read files"))));
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("must be initial account to read files"))));
     }
-
     /* handle optional arguments */
     if (PG_NARGS() >= 3) {
         seek_offset = PG_GETARG_INT64(1);
@@ -295,12 +286,12 @@ Datum pg_read_binary_file(PG_FUNCTION_ARGS)
         if (bytes_to_read < 0)
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("requested length cannot be negative")));
     }
-    if (PG_NARGS() >= 4) {
+    if (PG_NARGS() >= 4)
         missing_ok = PG_GETARG_BOOL(3);
-    }
 
     filename = convert_and_check_filename(filename_t);
     result = read_binary_file(filename, seek_offset, bytes_to_read, missing_ok, true);
+
     if (NULL != result)
         PG_RETURN_BYTEA_P(result);
     else
@@ -337,21 +328,19 @@ Datum pg_stat_file(PG_FUNCTION_ARGS)
     TupleDesc tupdesc;
     errno_t rc;
 
-    if (GetUserId() != BOOTSTRAP_SUPERUSERID) {
+    if (GetUserId() != BOOTSTRAP_SUPERUSERID)
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("must be initial account to get file information"))));
-    }
 
     filename = convert_and_check_filename(filename_t);
-    if (stat(filename, &fst) < 0) {
+    if (stat(filename, &fst) < 0)
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", filename)));
-    }
 
     /*
      * This record type had better match the output parameters declared for me
      * in pg_proc.h.
      */
-    tupdesc = CreateTemplateTupleDesc(6, false);
+    tupdesc = CreateTemplateTupleDesc(6, false, TAM_HEAP);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "size", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "access", TIMESTAMPTZOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "modification", TIMESTAMPTZOID, -1, 0);
@@ -392,10 +381,9 @@ Datum pg_ls_dir(PG_FUNCTION_ARGS)
     struct dirent* de = NULL;
     directory_fctx* fctx = NULL;
 
-    if (GetUserId() != BOOTSTRAP_SUPERUSERID) {
+    if (GetUserId() != BOOTSTRAP_SUPERUSERID)
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("must be initial account to get directory listings"))));
-    }
 
     if (SRF_IS_FIRSTCALL()) {
         MemoryContext oldcontext;
@@ -408,9 +396,8 @@ Datum pg_ls_dir(PG_FUNCTION_ARGS)
 
         fctx->dirdesc = AllocateDir(fctx->location);
 
-        if (fctx->dirdesc == NULL) {
+        if (NULL == fctx->dirdesc)
             ereport(ERROR, (errcode_for_file_access(), errmsg("could not open directory \"%s\": %m", fctx->location)));
-        }
 
         funcctx->user_fctx = fctx;
         MemoryContextSwitchTo(oldcontext);
@@ -420,9 +407,8 @@ Datum pg_ls_dir(PG_FUNCTION_ARGS)
     fctx = (directory_fctx*)funcctx->user_fctx;
 
     while ((de = ReadDir(fctx->dirdesc, fctx->location)) != NULL) {
-        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) {
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
             continue;
-        }
 
         SRF_RETURN_NEXT(funcctx, CStringGetTextDatum(de->d_name));
     }
@@ -447,28 +433,27 @@ static stated_file* pg_ls_dir_recursive(const char* location, stated_file* sd_fi
     dirdesc = AllocateDir(location);
 
     while ((de = ReadDir(dirdesc, location)) != NULL) {
-        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) {
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
             continue;
-        }
 
-        int max_path_len = strlen(location) + strlen(de->d_name) + 2;
-        sd_file->path = (char*)palloc0(max_path_len);
+        int maxPathLen = strlen(location) + strlen(de->d_name) + 2;
+        sd_file->path = (char*)palloc0(maxPathLen);
 
-        int file_name_len = strlen(de->d_name) + 1;
-        sd_file->filename = (char*)palloc0(file_name_len);
+        int filenameLen = strlen(de->d_name) + 1;
+        sd_file->filename = (char*)palloc0(filenameLen);
 
-        char* tmp_dir = (char*)palloc0(max_path_len);
+        char* tmp_dir = (char*)palloc0(maxPathLen);
 
         if (*location != '.') {
-            rc = strcpy_s(sd_file->path, max_path_len, location);
+            rc = strcpy_s(sd_file->path, maxPathLen, location);
             securec_check(rc, "\0", "\0");
-            rc = snprintf_s(tmp_dir, max_path_len, max_path_len - 1, "%s/", sd_file->path);
+            rc = snprintf_s(tmp_dir, maxPathLen, maxPathLen - 1, "%s/", sd_file->path);
             securec_check_ss(rc, "\0", "\0");
         }
 
-        rc = strcpy_s(sd_file->filename, file_name_len, de->d_name);
+        rc = strcpy_s(sd_file->filename, filenameLen, de->d_name);
         securec_check(rc, "\0", "\0");
-        rc = strcat_s(tmp_dir, max_path_len, sd_file->filename);
+        rc = strcat_s(tmp_dir, maxPathLen, sd_file->filename);
         securec_check(rc, "\0", "\0");
 
         struct stated_file* next_file = (stated_file*)palloc0(sizeof(stated_file));
@@ -501,10 +486,9 @@ Datum pg_stat_file_recursive(PG_FUNCTION_ARGS)
     FuncCallContext* funcctx = NULL;
     StatFile_State* status = NULL;
 
-    if (GetUserId() != BOOTSTRAP_SUPERUSERID) {
+    if (GetUserId() != BOOTSTRAP_SUPERUSERID)
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("must be initial account to get file information"))));
-    }
 
     if (SRF_IS_FIRSTCALL()) {
         MemoryContext oldcontext;
@@ -525,7 +509,7 @@ Datum pg_stat_file_recursive(PG_FUNCTION_ARGS)
          * This record type had better match the output parameters declared for me
          * in pg_proc.h.
          */
-        tupdesc = CreateTemplateTupleDesc(4, false);
+        tupdesc = CreateTemplateTupleDesc(4, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "path", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "filename", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "size", INT8OID, -1, 0);
@@ -534,7 +518,7 @@ Datum pg_stat_file_recursive(PG_FUNCTION_ARGS)
 
         (void)pg_ls_dir_recursive(fctx->location, sd_file);
 
-        if (fctx->dirdesc == NULL) {
+        if (NULL == fctx->dirdesc) {
             ereport(ERROR, (errcode_for_file_access(), errmsg("could not open directory \"%s\": %m", fctx->location)));
         }
 
@@ -545,7 +529,7 @@ Datum pg_stat_file_recursive(PG_FUNCTION_ARGS)
     status = (StatFile_State*)funcctx->user_fctx;
 
     while (status->cur_file != NULL) {
-        /* Only for the last cur_file, palloced but not assigned yet. */
+        /*Only for the last cur_file, palloced but not assigned yet.*/
         if (status->cur_file->path == NULL || status->cur_file->filename == NULL) {
             status->cur_file = status->cur_file->next;
             continue;

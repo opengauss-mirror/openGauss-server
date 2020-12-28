@@ -15,20 +15,53 @@
 
 #ifndef POOLMGR_H
 #define POOLMGR_H
+
 #include <sys/time.h>
-#include "nodes/nodes.h"
+#include "pool_comm.h"
 #include "pgxcnode.h"
-#include "poolcomm.h"
 #include "storage/pmsignal.h"
 #include "utils/hsearch.h"
-#include "executor/execStream.h"
+
+#ifdef ENABLE_MULTIPLE_NODES
+#include "postgres.h"
+#include "knl/knl_variable.h"
+#include "miscadmin.h"
+#include "access/xact.h"
+#include "catalog/pgxc_node.h"
+#include "commands/dbcommands.h"
+#include "nodes/nodes.h"
+#include "threadpool/threadpool.h"
+#include "utils/guc.h"
+#include "utils/memutils.h"
+#include "utils/resowner.h"
+#include "utils/snapmgr.h"
+#include "utils/syscache.h"
+#include "pgxc/pgxc.h"
+#include "pgxc/nodemgr.h"
+#include "postmaster/postmaster.h" /* For UnixSocketDir */
+#include "postmaster/autovacuum.h"
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/epoll.h>
+#include "gssignal/gs_signal.h"
+#include "libcomm/libcomm.h"
+#include "tcop/utility.h"
+#include "postmaster/postmaster.h"
+#include "portability/instr_time.h"
+#endif
 
 #define MAX_IDLE_TIME 60
-
-// The handle status is normal, send back socket to the pool
+#define ENABLE_STATELESS_REUSE g_instance.attr.attr_network.PoolerStatelessReuse
+/* The handle status is normal, send back socket to the pool */
 #define CONN_STATE_NORMAL 'n'
-// The handle status has an error, drop the socket
+/* The handle status has an error, drop the socket */
 #define CONN_STATE_ERROR 'e'
+/* param number */
+#define FOUR_ARGS (4)
+#define FIVE_ARGS (5)
+#define SIX_ARGS (6)
 
 /*
  * List of flags related to pooler connection clean up when disconnecting
@@ -74,19 +107,6 @@ typedef enum {
     POOL_NODE_STANDBY   /* node mode: standby */
 } PoolNodeMode;
 
-/* Connection pool entry */
-typedef struct {
-    /* In pooler stateless reuse mode, user_name and pgoptions save in slot to check whether to send params */
-    char* user_name;
-    char* pgoptions; /* Connection options */
-    bool hava_session_params;
-    bool need_validate;
-    Oid userid;
-    struct timeval released;
-    NODE_CONNECTION* conn;
-    NODE_CANCEL* xc_cancelConn;
-} PGXCNodePoolSlot;
-
 /* Pool of connections to specified pgxc node */
 typedef struct {
     Oid nodeoid; /* Node Oid related to this pool, Hash key (must be first!) */
@@ -96,19 +116,9 @@ typedef struct {
     int size;     /* total pool size */
     bool valid;   /* ensure atom initialization of node pool */
     pthread_mutex_t lock;
-    PGXCNodePoolSlot** slot;
+    PGXCNodePoolSlot** slot; /* use in not ENABLE_STATELESS_REUSE */
+    HTAB* useridSlotsHash; /* hash table: key(userid), value(PGXCNodePoolSlot*), use in ENABLE_STATELESS_REUSE */
 } PGXCNodePool;
-
-/* All pools for specified database */
-typedef struct databasepool {
-    char* database;
-    char* user_name;
-    Oid userId;
-    char* pgoptions; /* Connection options */
-    HTAB* nodePools; /* Hashtable of PGXCNodePool, one entry for each Coordinator or DataNode */
-    MemoryContext mcxt;
-    struct databasepool* next; /* Reference to next to organize linked list */
-} DatabasePool;
 
 typedef struct PoolerCleanParams {
     DatabasePool **dbPool;
@@ -135,45 +145,21 @@ typedef struct {
     PoolNodeMode* node_mode;        /* node mode: primary, standby or none */
     PoolConnDef* conndef;           /* pool conn def */
     bool is_retry;                  /* retry to connect */
+    PoolAgent* agent;               /* reference to local PoolAgent struct */
 } PoolGeneralInfo;
 
 /*
- * Agent of client session (Pool Manager side)
- * Acts as a session manager, grouping connections together
- * and managing session parameters
+ * The number of conn slots is recorded based on the number of connSlotNums
+ * So we bind the two values together to maintain integrity
  */
-typedef struct PoolAgent {
-    /* Process ID of postmaster child process associated to pool agent */
-    ThreadId pid;
-    /* communication channel */
-    PoolPort port;
-    DatabasePool* pool;
+typedef struct PoolSlotGroup {
+    PGXCNodePoolSlot** connSlots;
+    Oid* connOids;
+    uint32 connSlotNums;
 
-    /* In pooler stateless reuse mode, user_name and pgoptions save in PoolAgent */
-    char* user_name;
-    char* pgoptions;              /* Connection options */
-    bool has_check_params;        // Deal with the situations where SET GUC commands are run within a Transaction block
-    bool is_thread_pool_session;  // use for thread pool
-    uint64 session_id;            /* user session id(when thread pool disabled, equal to pid) */
-
-    MemoryContext mcxt;
-    int num_dn_connections;
-    int num_coord_connections;
-    int params_set;                       /* param is set */
-    int reuse;                            /* connection reuse flag */
-    Oid* dn_conn_oids;                    /* one for each Datanode */
-    Oid* coord_conn_oids;                 /* one for each Coordinator */
-    Oid* dn_connecting_oids;              /* current connection dn oids */
-    int dn_connecting_cnt;                /* current connection dn count */
-    Oid* coord_connecting_oids;           /* current connection cn oids */
-    int coord_connecting_cnt;             /* current connection cn count */
-    PGXCNodePoolSlot** dn_connections;    /* one for each Datanode */
-    PGXCNodePoolSlot** coord_connections; /* one for each Coordinator */
-    char* session_params;
-    char* local_params;
-    char* temp_namespace; /* @Temp table. temp namespace name of session related to this agent. */
-    List* params_list;    /* session params list */
-} PoolAgent;
+    /* dn and cn slots often process together, so need offset to indicate real postion */
+    uint32 offset;
+} PoolSlotGroup;
 
 /*
  * Invalid backend entry
@@ -208,9 +194,21 @@ typedef struct {
     bool in_use;
     Oid nodeOid;
     char *session_params;
-	int fdsock;
-	ThreadId remote_pid;
+    int fdsock;
+    ThreadId remote_pid;
+    uint32 used_count; /*counting the times of the slot be used*/
 } PoolConnectionInfo;
+
+/*
+ * ConnectionStatus entry for pg_conn_status view
+ */
+typedef struct {
+    char *remote_name;
+    char *remote_host;
+    int remote_port;
+    bool is_connected;
+    int sock;
+} ConnectionStatus;
 
 /* Connection information cached */
 typedef struct PGXCNodeConnectionInfo {
@@ -231,7 +229,13 @@ typedef struct {
     int nodepool_count;
 } PoolConnStat;
 
-typedef PoolAgent PoolHandle;
+typedef struct DatanodeShardInfo
+{
+    Oid      s_nodeoid;
+    NameData s_data_shardname;
+    Oid      s_primary_nodeoid;
+    NameData s_primary_nodename;
+} DatanodeShardInfo;
 
 /* Status inquiry functions */
 extern void PGXCPoolerProcessIam(void);
@@ -285,7 +289,7 @@ extern void PoolManagerReconnect(void);
  * and stored in pooler agent to be replayed when new connections
  * are requested.
  */
-extern int PoolManagerSetCommand(PoolCommandType command_type, const char* set_command);
+extern int PoolManagerSetCommand(PoolCommandType command_type, const char* set_command, const char* name = NULL);
 
 /* Get pooled connection status */
 extern bool PoolManagerConnectionStatus(List* datanodelist, List* coordlist);
@@ -308,7 +312,7 @@ extern int PoolManagerAbortTransactions(
     const char* dbname, const char* username, ThreadId** proc_pids, bool** isthreadpool);
 
 /* Return connections back to the pool, for both Coordinator and Datanode connections */
-extern void PoolManagerReleaseConnections(const char* status_array, bool has_error);
+extern void PoolManagerReleaseConnections(const char* status_array, int array_size, bool has_error);
 
 /* return (canceled) invalid backend entry */
 extern InvalidBackendEntry* PoolManagerValidateConnection(bool clear, const char* co_node_name, uint32& count);
@@ -324,29 +328,111 @@ extern bool IsPoolHandle(void);
 
 extern bool test_conn(PGXCNodePoolSlot* slot, Oid nodeid);
 extern PoolAgent* get_poolagent(void);
-extern void release_connection(DatabasePool* dbPool, PGXCNodePoolSlot* slot, Oid node, bool force_destroy);
-extern int agent_release_free_slots(PoolAgent* agent, Oid nodeoid);
+
+extern void release_connection(PoolAgent* agent, PGXCNodePoolSlot** ptrSlot, Oid node, bool force_destroy);
+
 /* Send commands to alter the behavior of current transaction */
 extern int PoolManagerSendLocalCommand(int dn_count, const int* dn_list, int co_count, const int* co_list);
-
-extern int* StreamConnectNodes(List* datanodelist, int consumerDop, int distrType, NodeDefinition* nodeDef,
-    struct addrinfo** addrArray, StreamKey key, Oid nodeoid);
-extern int* StreamConnectNodes(libcommaddrinfo** addrArray, int connNum);
-
 extern void PoolManagerInitPoolerAgent();
-extern int register_pooler_session_param(const char* name, const char* queryString);
-extern void unregister_pooler_session_param(const char* name);
-
 extern int get_pool_connection_info(PoolConnectionInfo** connectionEntry);
+extern int check_connection_status(ConnectionStatus **connectionEntry);
 extern void set_pooler_ping(bool mod);
 extern void pooler_get_connection_statinfo(PoolConnStat* conn_stat);
-extern int register_pooler_session_param(const char* name, const char* queryString);
+extern int register_pooler_session_param(const char* name, const char* queryString, PoolCommandType command_type);
+extern int delete_pooler_session_params(const char* name);
+extern void agent_reset_session(PoolAgent* agent, bool need_reset);
+extern const char* GetNodeNameByOid(Oid nodeOid);
+extern void InitOidNodeNameMappingCache();
+extern void CleanOidNodeNameMappingCache();
+extern int* StreamConnectNodes(libcommaddrinfo** addrArray, int connNum);
+
+extern int CommInitMutex(pthread_mutex_t* mutex, CommLockStatus* status);
+extern int CommLockMutex(pthread_mutex_t* mutex, CommLockStatus* status);
+extern int CommUnlockMutex(pthread_mutex_t* mutex, CommLockStatus* status);
+extern void CommFreeMutex(pthread_mutex_t* mutex, CommLockStatus* status);
+extern int CommDestroyMutex(pthread_mutex_t* mutex, CommLockStatus* status);
+extern void CommReleasePoolerLock();
+
+#ifdef ENABLE_MULTIPLE_NODES
+extern void free_agent(PoolAgent* agent);
+void destroy_slots(List* slots);
+extern int get_connection(DatabasePool* dbPool, Oid nodeid, PGXCNodePoolSlot** slot, PoolNodeType node_type);
+extern void decrease_node_size(DatabasePool* dbpool, Oid nodeid);
+extern PGXCNodePool* acquire_nodepool(DatabasePool* dbPool, Oid nodeid, PoolNodeType node_type);
+extern int node_info_check(PoolAgent* agent);
+extern int node_info_check_pooler_stateless(PoolAgent* agent);
+extern void agent_init(PoolAgent* agent, const char* database, const char* user_name, const char* pgoptions);
+extern void agent_destroy(PoolAgent* agent);
+extern PoolAgent* agent_create(void);
+extern int agent_session_command(PoolAgent* agent, const char* set_command,
+    PoolCommandType command_type, bool append_sess_param);
+extern int agent_set_command(PoolAgent* agent, const char* set_command,
+    PoolCommandType command_type, bool append_sess_param);
+extern int agent_temp_command(PoolAgent* agent, const char* namespace_name);
+extern DatabasePool* create_database_pool(const char* database, const char* user_name, const char* pgoptions);
+extern void reload_database_pools(PoolAgent* agent);
+extern DatabasePool* find_database_pool(const char* database, const char* user_name, const char* pgoptions);
+extern int send_local_commands(PoolAgent* agent, int dn_count, const int* dn_list, int co_count, const int* co_list);
+extern int cancel_query_on_connections(
+    PoolAgent* agent, int dn_count, const int* dn_list, int co_count, const int* co_list);
+extern int stop_query_on_connections(PoolAgent* agent, int dn_count, const int* dn_list);
+extern void agent_release_connections(PoolAgent* agent, bool force_destroy, const char* status_array = NULL);
+void release_connection(PoolAgent* agent, PGXCNodePoolSlot** slot, Oid node, bool force_destroy);
+extern void destroy_slot(PGXCNodePoolSlot* slot);
+extern List* destroy_node_pool(PGXCNodePool* node_pool, List* slots);
+extern int clean_connection(List* nodelist, const char* database, const char* user_name);
+extern ThreadId* abort_pids(int* count, ThreadId pid, const char* database, const char* user_name, bool** isthreadpool);
+extern char* build_node_conn_str(Oid nodeid, DatabasePool* dbPool, bool isNeedSlave);
+
+/* acquire connections with parallel */
+extern void agent_acquire_connections_parallel(
+    PoolAgent* agent, PoolConnDef* result, List* datanodelist, List* coordlist);
+extern void agent_acquire_connections_start(PoolAgent* agent, List* datanodelist, List* coordlist);
+extern void agent_acquire_connections_end(PoolAgent* agent);
+extern bool is_current_node_during_connecting(PoolAgent* agent, Oid node_oid, char node_type);
+extern void reset_params_htab(HTAB* htab, bool);
+extern int PGXCNodeSendSetParallel(PoolAgent* agent, const char* set_command);
+extern char* MakePoolerSessionParams(PoolCommandType commandType);
+extern int get_nodeinfo_from_matric(
+    PoolGeneralInfo *info, int needCreateArrayLen, NodeRelationInfo *needCreateNodeArray);
+extern void pooler_sleep_interval_time(bool *poolValidateCancel);
+extern HTAB* create_user_slothash(const char* tabname, long nelem);
+extern void agent_verify_node_size(PGXCNodePool* nodePool);
+extern PGXCNodePoolSlot* alloc_slot_mem(DatabasePool* dbpool);
+extern char* GenerateSqlCommand(int argCount, ...);
+extern void reload_user_name_pgoptions(PoolGeneralInfo* info, PoolAgent* agent, PGXCNodePoolSlot* slot);
+extern bool release_slot_to_nodepool(PGXCNodePool* nodePool, bool force_destroy, PGXCNodePoolSlot* slot);
+
+/* The root memory context */
+extern MemoryContext PoolerMemoryContext;
+
+/*
+ * Allocations of core objects: Datanode connections, upper level structures,
+ * connection strings, etc.
+ */
+extern MemoryContext PoolerCoreContext;
+/*
+ * Memory to store Agents
+ */
+extern MemoryContext PoolerAgentContext;
+
+/* Pool to all the databases (linked list) */
+extern DatabasePool* databasePools;
+
+/* PoolAgents */
+extern int agentCount;
+extern PoolAgent** poolAgents;
+extern pthread_mutex_t g_poolAgentsLock;
+extern int MaxAgentCount;
+
+#define PROTO_TCP 1
+#define get_agent(handle) ((PoolAgent*)(handle))
 #endif
 
 #ifdef ENABLE_UT
 extern THR_LOCAL PoolHandle* poolHandle;
 extern void free_user_name_pgoptions(PGXCNodePoolSlot* slot);
-extern void reload_user_name_pgoptions(PoolGeneralInfo* info, PoolAgent* agent, PGXCNodePoolSlot* slot);
-extern PGXCNodePoolSlot* alloc_slot_mem(DatabasePool* dbpool);
 extern int agent_wait_send_connection_params_pooler_reuse(NODE_CONNECTION* conn);
+#endif
+
 #endif

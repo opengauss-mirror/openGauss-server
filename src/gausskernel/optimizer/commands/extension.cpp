@@ -32,6 +32,7 @@
 #include "access/sysattr.h"
 #include "access/xact.h"
 #include "access/hash.h"
+#include "access/tableam.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
@@ -55,7 +56,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/snapmgr.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 
 /* Globally visible state variables */
 THR_LOCAL bool creating_extension = false;
@@ -118,6 +119,7 @@ Oid get_extension_oid(const char* extname, bool missing_ok)
     scandesc = systable_beginscan(rel, ExtensionNameIndexId, true, SnapshotNow, 1, entry);
 
     tuple = systable_getnext(scandesc);
+
     /* We assume that there can be at most one matching tuple */
     if (HeapTupleIsValid(tuple))
         result = HeapTupleGetOid(tuple);
@@ -154,6 +156,7 @@ char* get_extension_name(Oid ext_oid)
     scandesc = systable_beginscan(rel, ExtensionOidIndexId, true, SnapshotNow, 1, entry);
 
     tuple = systable_getnext(scandesc);
+
     /* We assume that there can be at most one matching tuple */
     if (HeapTupleIsValid(tuple))
         result = pstrdup(NameStr(((Form_pg_extension)GETSTRUCT(tuple))->extname));
@@ -181,15 +184,21 @@ static Oid get_extension_schema(Oid ext_oid)
     ScanKeyData entry[1];
 
     rel = heap_open(ExtensionRelationId, AccessShareLock);
+
     ScanKeyInit(&entry[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(ext_oid));
+
     scandesc = systable_beginscan(rel, ExtensionOidIndexId, true, SnapshotNow, 1, entry);
+
     tuple = systable_getnext(scandesc);
+
     /* We assume that there can be at most one matching tuple */
     if (HeapTupleIsValid(tuple))
         result = ((Form_pg_extension)GETSTRUCT(tuple))->extnamespace;
     else
         result = InvalidOid;
+
     systable_endscan(scandesc);
+
     heap_close(rel, AccessShareLock);
 
     return result;
@@ -201,6 +210,7 @@ static Oid get_extension_schema(Oid ext_oid)
 static void check_valid_extension_name(const char* extensionname)
 {
     int namelen = strlen(extensionname);
+
     /*
      * Disallow empty names (the parser rejects empty identifiers anyway, but
      * let's check).
@@ -256,6 +266,7 @@ static void check_valid_version_name(const char* versionname)
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("invalid extension version name: \"%s\"", versionname),
                 errdetail("Version names must not be empty.")));
+
     /*
      * No double dashes, since that would make script filenames ambiguous.
      */
@@ -264,6 +275,7 @@ static void check_valid_version_name(const char* versionname)
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("invalid extension version name: \"%s\"", versionname),
                 errdetail("Version names must not contain \"--\".")));
+
     /*
      * No leading or trailing dash either.
      */
@@ -272,6 +284,7 @@ static void check_valid_version_name(const char* versionname)
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("invalid extension version name: \"%s\"", versionname),
                 errdetail("Version names must not begin or end with \"-\".")));
+
     /*
      * No directory separators either (this is sufficient to prevent ".."
      * style attacks).
@@ -281,6 +294,76 @@ static void check_valid_version_name(const char* versionname)
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("invalid extension version name: \"%s\"", versionname),
                 errdetail("Version names must not contain directory separator characters.")));
+}
+
+/*
+ * KMP matching algorithm
+ */
+static void compute_LPS(const char* pattern, int pattern_len, int* lps)
+{
+    int len = 0;    /* previous lps length */
+    lps[0] = 0;
+
+    int idx = 1;    /* start from 1, since lps[0] = 0 always */
+    while (idx < pattern_len) {
+        if (pattern[idx] == pattern[len]) {
+            len++;
+            lps[idx] = len;
+            idx++;
+        } else {
+            if (len > 0) {
+                len = lps[len - 1];
+            } else {
+                lps[idx] = 0;
+                idx++;
+            }
+        }
+    }
+}
+
+/*
+ * The num_of_result here does not nessesarily be the final number of results.
+ * It is more of a reference/guidance/trigger than a hard limit.
+ */
+static List* KMP_search(const char* pattern, const char* input, int num_of_result)
+{
+    List* result = NIL;
+    if (num_of_result <= 0 || pattern == NULL || input == NULL) {
+        return result;  /* return NIL list on null */
+    }
+
+    int pattern_len = strlen(pattern);
+    int input_len = strlen(input);
+
+    /* compute longest proper prefix */
+    int* lps = (int*)palloc0(pattern_len);
+    compute_LPS(pattern, pattern_len, lps);
+
+    int input_idx = 0;
+    int pattern_idx = 0;
+    while (input_idx < input_len) {
+        if (pattern[pattern_idx] == input[input_idx]) {
+            pattern_idx++;
+            input_idx++;
+        }
+
+        if (pattern_idx == pattern_len) {
+            lappend_int(result, input_idx - pattern_idx);
+            if (list_length(result) >= num_of_result) {
+                pfree_ext(lps); /* free lps */
+                return result;
+            }
+            pattern_idx = lps[pattern_idx - 1];     /* idx update */
+        } else if (input_idx < input_len && pattern[pattern_idx] != input[input_idx]) {
+            if (pattern_idx > 0) {
+                pattern_idx = lps[pattern_idx - 1];     /* idx update */
+            } else {
+                input_idx++;
+            }
+        }
+    }
+    pfree_ext(lps); /* free lps */
+    return result;
 }
 
 /*
@@ -304,10 +387,11 @@ static char* get_extension_control_directory(void)
 {
     char sharepath[MAXPGPATH];
     char* result = NULL;
+    int rc = 0;
 
     get_share_path(my_exec_path, sharepath);
     result = (char*)palloc(MAXPGPATH);
-    int rc = snprintf_s(result, MAXPGPATH, MAXPGPATH - 1, "%s/extension", sharepath);
+    rc = snprintf_s(result, MAXPGPATH, MAXPGPATH - 1, "%s/extension", sharepath);
     securec_check_ss(rc, "", "");
 
     return result;
@@ -317,10 +401,11 @@ static char* get_extension_control_filename(const char* extname)
 {
     char sharepath[MAXPGPATH];
     char* result = NULL;
+    int rc = 0;
 
     get_share_path(my_exec_path, sharepath);
     result = (char*)palloc(MAXPGPATH);
-    int rc = snprintf_s(result, MAXPGPATH, MAXPGPATH - 1, "%s/extension/%s.control", sharepath, extname);
+    rc = snprintf_s(result, MAXPGPATH, MAXPGPATH - 1, "%s/extension/%s.control", sharepath, extname);
     securec_check_ss(rc, "", "");
 
     return result;
@@ -330,6 +415,7 @@ static char* get_extension_script_directory(ExtensionControlFile* control)
 {
     char sharepath[MAXPGPATH];
     char* result = NULL;
+    int rc = 0;
 
     /*
      * The directory parameter can be omitted, absolute, or relative to the
@@ -338,12 +424,12 @@ static char* get_extension_script_directory(ExtensionControlFile* control)
     if (control->directory == NULL)
         return get_extension_control_directory();
 
-    if (is_absolute_path(control->directory))
+    if (is_absolute_path(control->directory) && KMP_search(control->directory, "../", 1) == NIL)
         return pstrdup(control->directory);
 
     get_share_path(my_exec_path, sharepath);
     result = (char*)palloc(MAXPGPATH);
-    int rc = snprintf_s(result, MAXPGPATH, MAXPGPATH - 1, "%s/%s", sharepath, control->directory);
+    rc = snprintf_s(result, MAXPGPATH, MAXPGPATH - 1, "%s/%s", sharepath, control->directory);
     securec_check_ss(rc, "", "");
 
     return result;
@@ -353,11 +439,12 @@ static char* get_extension_aux_control_filename(ExtensionControlFile* control, c
 {
     char* result = NULL;
     char* scriptdir = NULL;
+    int rc = 0;
 
     scriptdir = get_extension_script_directory(control);
 
     result = (char*)palloc(MAXPGPATH);
-    int rc = snprintf_s(result, MAXPGPATH, MAXPGPATH - 1, "%s/%s--%s.control", scriptdir, control->name, version);
+    rc = snprintf_s(result, MAXPGPATH, MAXPGPATH - 1, "%s/%s--%s.control", scriptdir, control->name, version);
     securec_check_ss(rc, "", "");
     pfree_ext(scriptdir);
 
@@ -602,12 +689,15 @@ static void execute_sql_string(const char* sql, const char* filename)
     List* raw_parsetree_list = NIL;
     DestReceiver* dest = NULL;
     ListCell* lc1 = NULL;
+
     /*
      * Parse the SQL string into a list of raw parse trees.
      */
     raw_parsetree_list = pg_parse_query(sql);
+
     /* All output from SELECTs goes to the bit bucket */
     dest = CreateDestReceiver(DestNone);
+
     /*
      * Do parse analysis, rule rewrite, planning, and execution for each raw
      * parsetree.  We must fully execute each query before beginning parse
@@ -618,6 +708,7 @@ static void execute_sql_string(const char* sql, const char* filename)
         List* stmt_list = NIL;
         ListCell* lc2 = NULL;
         const char* query_string = " ";
+
         /*
          * For the following statements, we use "query_string" instead of "sql".
          * As the original "sql" is copied in qdesc->sourceText for each statement,
@@ -625,7 +716,9 @@ static void execute_sql_string(const char* sql, const char* filename)
          * We use a null string query_string here to avoid this.
          */
         stmt_list = pg_analyze_and_rewrite(parsetree, query_string, NULL, 0);
-        stmt_list = pg_plan_queries(stmt_list, CURSOR_OPT_PARALLEL_OK, NULL);
+
+        stmt_list = pg_plan_queries(stmt_list, 0, NULL);
+
         foreach (lc2, stmt_list) {
             Node* stmt = (Node*)lfirst(lc2);
 
@@ -635,9 +728,12 @@ static void execute_sql_string(const char* sql, const char* filename)
                         errmsg("transaction control statements are not allowed within an extension script")));
 
             CommandCounterIncrement();
+
             PushActiveSnapshot(GetTransactionSnapshot());
+
             if (IsA(stmt, PlannedStmt) && ((PlannedStmt*)stmt)->utilityStmt == NULL) {
                 QueryDesc* qdesc = NULL;
+
                 qdesc = CreateQueryDesc((PlannedStmt*)stmt, query_string, GetActiveSnapshot(), NULL, dest, NULL, 0);
                 /*
                  * Only supported for Insert statement and only can be executed by datanodes. As all of
@@ -650,6 +746,7 @@ static void execute_sql_string(const char* sql, const char* filename)
                     ExecutorFinish(qdesc);
                     ExecutorEnd(qdesc);
                 }
+
                 FreeQueryDesc(qdesc);
             } else {
                 ProcessUtility(stmt,
@@ -703,6 +800,7 @@ static void execute_extension_script(Oid extensionOid, ExtensionControlFile* con
     }
 
     filename = get_extension_script_filename(control, from_version, version);
+
     /*
      * Force client_min_messages and log_min_messages to be at least WARNING,
      * so that we won't spam the user with useless NOTICE messages from common
@@ -713,6 +811,7 @@ static void execute_extension_script(Oid extensionOid, ExtensionControlFile* con
      * takes care of undoing the setting on error.
      */
     save_nestlevel = NewGUCNestLevel();
+
     if (client_min_messages < WARNING)
         (void)set_config_option("client_min_messages", "warning", PGC_USERSET, PGC_S_SESSION, GUC_ACTION_SAVE, true, 0);
     if (log_min_messages < WARNING)
@@ -961,6 +1060,8 @@ static List* identify_update_path(ExtensionControlFile* control, const char* old
                     control->name,
                     oldVersion,
                     newVersion)));
+
+    list_free(evi_list);
     return result;
 }
 
@@ -975,8 +1076,8 @@ static List* identify_update_path(ExtensionControlFile* control, const char* old
  * Result is a List of names of versions to transition through (the initial
  * version is *not* included).	Returns NIL if no such path.
  */
-static List* find_update_path(List* evi_list, ExtensionVersionInfo* evi_start, 
-    ExtensionVersionInfo* evi_target, bool reinitialize)
+static List* find_update_path(
+    List* evi_list, ExtensionVersionInfo* evi_start, ExtensionVersionInfo* evi_target, bool reinitialize)
 {
     List* result = NIL;
     ExtensionVersionInfo* evi = NULL;
@@ -1079,7 +1180,7 @@ void CreateExtension(CreateExtensionStmt* stmt)
      */
     if (get_extension_oid(stmt->extname, true) != InvalidOid) {
         schemaOid = get_extension_schema(get_extension_oid(stmt->extname, true));
-        schemaName = get_namespace_name(schemaOid, true);
+        schemaName = get_namespace_name(schemaOid);
 
         if (stmt->if_not_exists) {
             ereport(NOTICE,
@@ -1087,9 +1188,21 @@ void CreateExtension(CreateExtensionStmt* stmt)
                     errmsg("extension \"%s\" already exists in schema \"%s\", skipping", stmt->extname, schemaName)));
             return;
         } else {
+#ifndef ENABLE_MULTIPLE_NODES		
             ereport(ERROR,
                 (errcode(ERRCODE_DUPLICATE_OBJECT),
                     errmsg("extension \"%s\" already exists in schema \"%s\"", stmt->extname, schemaName)));
+#else					
+            /*
+             * Currently extension only support postgis.
+             */
+            if (strstr(stmt->extname, "postgis"))
+                ereport(ERROR,
+                    (errcode(ERRCODE_DUPLICATE_OBJECT),
+                        errmsg("extension \"%s\" already exists in schema \"%s\"", stmt->extname, schemaName)));
+            else
+                FEATURE_NOT_PUBLIC_ERROR("EXTENSION is not yet supported.");
+#endif				
         }
     }
 
@@ -1178,10 +1291,12 @@ void CreateExtension(CreateExtensionStmt* stmt)
         oldVersionName = NULL;
         updateVersions = NIL;
     }
+
     /*
      * Fetch control parameters for installation target version
      */
     control = read_extension_aux_control_file(pcontrol, versionName);
+
     /*
      * Determine the target schema to install the extension into
      */
@@ -1193,6 +1308,7 @@ void CreateExtension(CreateExtensionStmt* stmt)
          * control->schema is specified.
          */
         schemaName = strVal(d_schema->arg);
+
         if (control->schema != NULL && strcmp(control->schema, schemaName) != 0)
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1207,6 +1323,7 @@ void CreateExtension(CreateExtensionStmt* stmt)
          */
         schemaName = control->schema;
         schemaOid = get_namespace_oid(schemaName, true);
+
         if (schemaOid == InvalidOid) {
             CreateSchemaStmt* csstmt = makeNode(CreateSchemaStmt);
 
@@ -1218,6 +1335,7 @@ void CreateExtension(CreateExtensionStmt* stmt)
 #else
             CreateSchemaCommand(csstmt, NULL);
 #endif
+
             /*
              * CreateSchemaCommand includes CommandCounterIncrement, so new
              * schema is now visible
@@ -1230,12 +1348,14 @@ void CreateExtension(CreateExtensionStmt* stmt)
          * first explicit entry in the search_path.
          */
         List* search_path = fetch_search_path(false);
+
         if (search_path == NIL) /* probably can't happen */
             ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("there is no default creation target")));
         schemaOid = linitial_oid(search_path);
         schemaName = get_namespace_name(schemaOid);
         if (schemaName == NULL) /* recently-deleted namespace? */
             ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("there is no default creation target")));
+
         list_free_ext(search_path);
     }
 
@@ -1378,7 +1498,7 @@ Oid InsertExtensionTuple(const char* extName, Oid extOwner, Oid schemaOid, bool 
     extensionOid = simple_heap_insert(rel, tuple);
     CatalogUpdateIndexes(rel, tuple);
 
-    heap_freetuple_ext(tuple);
+    tableam_tops_free_tuple(tuple);
     heap_close(rel, RowExclusiveLock);
 
     /*
@@ -1453,6 +1573,7 @@ void RemoveExtensionById(Oid extId)
         simple_heap_delete(rel, &tuple->t_self);
 
     systable_endscan(scandesc);
+
     heap_close(rel, RowExclusiveLock);
 }
 
@@ -1481,7 +1602,7 @@ Datum pg_available_extensions(PG_FUNCTION_ARGS)
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("set-valued function called in context that cannot accept a set")));
-    if (!(rsinfo->allowedModes & SFRM_Materialize))
+    if (!((uint32)rsinfo->allowedModes & SFRM_Materialize))
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("materialize mode required, but it is not "
@@ -1587,7 +1708,7 @@ Datum pg_available_extension_versions(PG_FUNCTION_ARGS)
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("set-valued function called in context that cannot accept a set")));
-    if (!(rsinfo->allowedModes & SFRM_Materialize))
+    if (!((uint32)rsinfo->allowedModes & SFRM_Materialize))
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("materialize mode required, but it is not "
@@ -1621,8 +1742,10 @@ Datum pg_available_extension_versions(PG_FUNCTION_ARGS)
         while ((de = ReadDir(dir, location)) != NULL) {
             ExtensionControlFile* control = NULL;
             char* extname = NULL;
+
             if (!is_extension_control_filename(de->d_name))
                 continue;
+
             /* extract extension name from 'name.control' filename */
             extname = pstrdup(de->d_name);
             *strrchr(extname, '.') = '\0';
@@ -1747,6 +1870,11 @@ static void get_available_versions_for_extension(
  */
 Datum pg_extension_update_paths(PG_FUNCTION_ARGS)
 {
+    if (!superuser()) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("must be system admin to use this function")));
+    }
     Name extname = PG_GETARG_NAME(0);
     ReturnSetInfo* rsinfo = (ReturnSetInfo*)fcinfo->resultinfo;
     TupleDesc tupdesc;
@@ -1765,7 +1893,7 @@ Datum pg_extension_update_paths(PG_FUNCTION_ARGS)
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("set-valued function called in context that cannot accept a set")));
-    if (!(rsinfo->allowedModes & SFRM_Materialize))
+    if (!((uint32)rsinfo->allowedModes & SFRM_Materialize))
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("materialize mode required, but it is not "
@@ -1846,6 +1974,7 @@ Datum pg_extension_update_paths(PG_FUNCTION_ARGS)
 
     /* clean up and return the tuplestore */
     tuplestore_donestoring(tupstore);
+    list_free_deep(evi_list);
 
     return (Datum)0;
 }
@@ -1935,7 +2064,7 @@ Datum pg_extension_config_dump(PG_FUNCTION_ARGS)
     /* Build or modify the extconfig value */
     elementDatum = ObjectIdGetDatum(tableoid);
 
-    arrayDatum = heap_getattr(extTup, Anum_pg_extension_extconfig, RelationGetDescr(extRel), &isnull);
+    arrayDatum = tableam_tops_tuple_getattr(extTup, Anum_pg_extension_extconfig, RelationGetDescr(extRel), &isnull);
     if (isnull) {
         /* Previously empty extconfig, so build 1-element array */
         arrayLength = 0;
@@ -1953,6 +2082,7 @@ Datum pg_extension_config_dump(PG_FUNCTION_ARGS)
         if (ARR_NDIM(a) != 1 || ARR_LBOUND(a)[0] != 1 || arrayLength < 0 || ARR_HASNULL(a) || ARR_ELEMTYPE(a) != OIDOID)
             ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("extconfig is not a 1-D Oid array")));
         arrayData = (Oid*)ARR_DATA_PTR(a);
+
         arrayIndex = arrayLength + 1; /* set up to add after end */
 
         for (i = 0; i < arrayLength; i++) {
@@ -1961,6 +2091,7 @@ Datum pg_extension_config_dump(PG_FUNCTION_ARGS)
                 break;
             }
         }
+
         a = array_set(a,
             1,
             &arrayIndex,
@@ -1973,19 +2104,24 @@ Datum pg_extension_config_dump(PG_FUNCTION_ARGS)
     }
     repl_val[Anum_pg_extension_extconfig - 1] = PointerGetDatum(a);
     repl_repl[Anum_pg_extension_extconfig - 1] = true;
+
     /* Build or modify the extcondition value */
     elementDatum = PointerGetDatum(wherecond);
-    arrayDatum = heap_getattr(extTup, Anum_pg_extension_extcondition, RelationGetDescr(extRel), &isnull);
+
+    arrayDatum = tableam_tops_tuple_getattr(extTup, Anum_pg_extension_extcondition, RelationGetDescr(extRel), &isnull);
     if (isnull) {
         if (arrayLength != 0)
             ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("extconfig and extcondition arrays do not match")));
+
         a = construct_array(&elementDatum, 1, TEXTOID, -1, false, 'i');
     } else {
         a = DatumGetArrayTypeP(arrayDatum);
+
         if (ARR_NDIM(a) != 1 || ARR_LBOUND(a)[0] != 1 || ARR_HASNULL(a) || ARR_ELEMTYPE(a) != TEXTOID)
             ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("extcondition is not a 1-D Oid array")));
         if (ARR_DIMS(a)[0] != arrayLength)
             ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("extconfig and extcondition arrays do not match")));
+
         /* Add or replace at same index as in extconfig */
         a = array_set(a,
             1,
@@ -2000,7 +2136,7 @@ Datum pg_extension_config_dump(PG_FUNCTION_ARGS)
     repl_val[Anum_pg_extension_extcondition - 1] = PointerGetDatum(a);
     repl_repl[Anum_pg_extension_extcondition - 1] = true;
 
-    extTup = heap_modify_tuple(extTup, RelationGetDescr(extRel), repl_val, repl_null, repl_repl);
+    extTup = (HeapTuple) tableam_tops_modify_tuple(extTup, RelationGetDescr(extRel), repl_val, repl_null, repl_repl);
 
     simple_heap_update(extRel, &extTup->t_self, extTup);
     CatalogUpdateIndexes(extRel, extTup);
@@ -2049,7 +2185,7 @@ static void extension_config_remove(Oid extensionoid, Oid tableoid)
             ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("extension with oid %u does not exist", extensionoid)));
 
     /* Search extconfig for the tableoid */
-    arrayDatum = heap_getattr(extTup, Anum_pg_extension_extconfig, RelationGetDescr(extRel), &isnull);
+    arrayDatum = tableam_tops_tuple_getattr(extTup, Anum_pg_extension_extconfig, RelationGetDescr(extRel), &isnull);
     if (isnull) {
         /* nothing to do */
         a = NULL;
@@ -2102,17 +2238,19 @@ static void extension_config_remove(Oid extensionoid, Oid tableoid)
         int i;
 
         deconstruct_array(a, OIDOID, sizeof(Oid), true, 'i', &dvalues, &dnulls, &nelems);
+
         /* We already checked there are no nulls, so ignore dnulls */
         for (i = arrayIndex; i < arrayLength - 1; i++)
             dvalues[i] = dvalues[i + 1];
 
         a = construct_array(dvalues, arrayLength - 1, OIDOID, sizeof(Oid), true, 'i');
+
         repl_val[Anum_pg_extension_extconfig - 1] = PointerGetDatum(a);
     }
     repl_repl[Anum_pg_extension_extconfig - 1] = true;
 
     /* Modify or delete the extcondition value */
-    arrayDatum = heap_getattr(extTup, Anum_pg_extension_extcondition, RelationGetDescr(extRel), &isnull);
+    arrayDatum = tableam_tops_tuple_getattr(extTup, Anum_pg_extension_extcondition, RelationGetDescr(extRel), &isnull);
     if (isnull) {
         ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("extconfig and extcondition arrays do not match")));
     } else {
@@ -2135,17 +2273,24 @@ static void extension_config_remove(Oid extensionoid, Oid tableoid)
         int i;
 
         deconstruct_array(a, TEXTOID, -1, false, 'i', &dvalues, &dnulls, &nelems);
+
         /* We already checked there are no nulls, so ignore dnulls */
         for (i = arrayIndex; i < arrayLength - 1; i++)
             dvalues[i] = dvalues[i + 1];
+
         a = construct_array(dvalues, arrayLength - 1, TEXTOID, -1, false, 'i');
+
         repl_val[Anum_pg_extension_extcondition - 1] = PointerGetDatum(a);
     }
     repl_repl[Anum_pg_extension_extcondition - 1] = true;
-    extTup = heap_modify_tuple(extTup, RelationGetDescr(extRel), repl_val, repl_null, repl_repl);
+
+    extTup = (HeapTuple) tableam_tops_modify_tuple(extTup, RelationGetDescr(extRel), repl_val, repl_null, repl_repl);
+
     simple_heap_update(extRel, &extTup->t_self, extTup);
     CatalogUpdateIndexes(extRel, extTup);
+
     systable_endscan(extScan);
+
     heap_close(extRel, RowExclusiveLock);
 }
 
@@ -2215,7 +2360,7 @@ void AlterExtensionNamespace(List* names, const char* newschema)
             ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("extension with oid %u does not exist", extensionOid)));
 
     /* Copy tuple so we can modify it below */
-    extTup = heap_copytuple(extTup);
+    extTup = (HeapTuple)tableam_tops_copy_tuple(extTup);
     extForm = (Form_pg_extension)GETSTRUCT(extTup);
 
     systable_endscan(extScan);
@@ -2236,19 +2381,24 @@ void AlterExtensionNamespace(List* names, const char* newschema)
                 errmsg("extension \"%s\" does not support SET SCHEMA", NameStr(extForm->extname))));
 
     objsMoved = new_object_addresses();
+
     /*
      * Scan pg_depend to find objects that depend directly on the extension,
      * and alter each one's schema.
      */
     depRel = heap_open(DependRelationId, AccessShareLock);
+
     ScanKeyInit(
         &key[0], Anum_pg_depend_refclassid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(ExtensionRelationId));
     ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(extensionOid));
+
     depScan = systable_beginscan(depRel, DependReferenceIndexId, true, SnapshotNow, 2, key);
+
     while (HeapTupleIsValid(depTup = systable_getnext(depScan))) {
         Form_pg_depend pg_depend = (Form_pg_depend)GETSTRUCT(depTup);
         ObjectAddress dep;
         Oid dep_oldNspOid;
+
         /*
          * Ignore non-membership dependencies.	(Currently, the only other
          * case we could see here is a normal dependency from another
@@ -2284,7 +2434,7 @@ void AlterExtensionNamespace(List* names, const char* newschema)
                     errmsg("extension \"%s\" does not support SET SCHEMA", NameStr(extForm->extname)),
                     errdetail("%s is not in the extension's schema \"%s\"",
                         getObjectDescription(&dep),
-                        get_namespace_name(oldNspOid, true))));
+                        get_namespace_name(oldNspOid))));
     }
 
     systable_endscan(depScan);
@@ -2298,6 +2448,7 @@ void AlterExtensionNamespace(List* names, const char* newschema)
     CatalogUpdateIndexes(extRel, extTup);
 
     heap_close(extRel, RowExclusiveLock);
+
     /* update dependencies to point to the new schema */
     changeDependencyFor(ExtensionRelationId, extensionOid, NamespaceRelationId, oldNspOid, nspOid);
 }
@@ -2347,7 +2498,7 @@ void ExecAlterExtensionStmt(AlterExtensionStmt* stmt)
     /*
      * Determine the existing version we are updating from
      */
-    datum = heap_getattr(extTup, Anum_pg_extension_extversion, RelationGetDescr(extRel), &isnull);
+    datum = tableam_tops_tuple_getattr(extTup, Anum_pg_extension_extversion, RelationGetDescr(extRel), &isnull);
     if (isnull)
         ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("extension is null")));
     oldVersionName = text_to_cstring(DatumGetTextPP(datum));
@@ -2381,6 +2532,7 @@ void ExecAlterExtensionStmt(AlterExtensionStmt* stmt)
             ereport(ERROR,
                 (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmsg("unrecognized option: %s", defel->defname)));
     }
+
     /*
      * Determine the version to update to
      */
@@ -2393,6 +2545,7 @@ void ExecAlterExtensionStmt(AlterExtensionStmt* stmt)
         versionName = NULL; /* keep compiler quiet */
     }
     check_valid_version_name(versionName);
+
     /*
      * If we're already at that version, just say so
      */
@@ -2401,10 +2554,12 @@ void ExecAlterExtensionStmt(AlterExtensionStmt* stmt)
             NOTICE, (errmsg("version \"%s\" of extension \"%s\" is already installed", versionName, stmt->extname)));
         return;
     }
+
     /*
      * Identify the series of update script files we need to execute
      */
     updateVersions = identify_update_path(control, oldVersionName, versionName);
+
     /*
      * Update the pg_extension row and execute the update scripts, one at a
      * time
@@ -2469,7 +2624,7 @@ static void ApplyExtensionUpdates(
          * Determine the target schema (set by original install)
          */
         schemaOid = extForm->extnamespace;
-        schemaName = get_namespace_name(schemaOid, true);
+        schemaName = get_namespace_name(schemaOid);
 
         /*
          * Modify extrelocatable and extversion in the pg_extension tuple
@@ -2486,7 +2641,7 @@ static void ApplyExtensionUpdates(
         values[Anum_pg_extension_extversion - 1] = CStringGetTextDatum(versionName);
         repl[Anum_pg_extension_extversion - 1] = true;
 
-        extTup = heap_modify_tuple(extTup, RelationGetDescr(extRel), values, nulls, repl);
+        extTup = (HeapTuple) tableam_tops_modify_tuple(extTup, RelationGetDescr(extRel), values, nulls, repl);
 
         simple_heap_update(extRel, &extTup->t_self, extTup);
         CatalogUpdateIndexes(extRel, extTup);
@@ -2505,6 +2660,7 @@ static void ApplyExtensionUpdates(
             char* curreq = (char*)lfirst(lc);
             Oid reqext;
             Oid reqschema;
+
             /*
              * We intentionally don't use get_extension_oid's default error
              * message here, because it would be confusing in this context.
@@ -2527,11 +2683,13 @@ static void ApplyExtensionUpdates(
         myself.classId = ExtensionRelationId;
         myself.objectId = extensionOid;
         myself.objectSubId = 0;
+
         foreach (lc, requiredExtensions) {
+            Oid reqext = lfirst_oid(lc);
             ObjectAddress otherext;
 
             otherext.classId = ExtensionRelationId;
-            otherext.objectId = lfirst_oid(lc);
+            otherext.objectId = reqext;
             otherext.objectSubId = 0;
 
             recordDependencyOn(&myself, &otherext, DEPENDENCY_NORMAL);
@@ -2607,7 +2765,7 @@ void ExecAlterExtensionContentsStmt(AlterExtensionContentsStmt* stmt)
                 (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                     errmsg("cannot add schema \"%s\" to extension \"%s\" "
                            "because the schema contains the extension",
-                        get_namespace_name(object.objectId, true),
+                        get_namespace_name(object.objectId),
                         stmt->extname)));
 
         /*
@@ -2680,7 +2838,7 @@ static void AlterExtensionOwner_internal(Relation rel, Oid extensionOid, Oid new
         ereport(ERROR,
             (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for extension %u", extensionOid)));
 
-    tup = heap_copytuple(tup);
+    tup = (HeapTuple)tableam_tops_copy_tuple(tup);
     systable_endscan(scandesc);
 
     extForm = (Form_pg_extension)GETSTRUCT(tup);
@@ -2715,7 +2873,7 @@ static void AlterExtensionOwner_internal(Relation rel, Oid extensionOid, Oid new
         changeDependencyOnOwner(ExtensionRelationId, extensionOid, newOwnerId);
     }
 
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 }
 
 /*
@@ -2726,6 +2884,8 @@ void AlterExtensionOwner_oid(Oid extensionOid, Oid newOwnerId)
     Relation rel;
 
     rel = heap_open(ExtensionRelationId, RowExclusiveLock);
+
     AlterExtensionOwner_internal(rel, extensionOid, newOwnerId);
+
     heap_close(rel, NoLock);
 }

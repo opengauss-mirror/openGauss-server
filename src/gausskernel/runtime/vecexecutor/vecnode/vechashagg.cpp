@@ -140,9 +140,17 @@ HashAggRunner::HashAggRunner(VecAggState* runtime) : BaseAggRunner(runtime, true
 void HashAggRunner::BindingFp()
 {
     if (m_keySimple) {
-        m_buildFun = &HashAggRunner::buildAggTbl<true>;
+        if (((Agg *) m_runtime->ss.ps.plan)->unique_check) {
+            m_buildFun = &HashAggRunner::buildAggTbl<true, true>;
+        } else {
+            m_buildFun = &HashAggRunner::buildAggTbl<true, false>;
+        }
     } else {
-        m_buildFun = &HashAggRunner::buildAggTbl<false>;
+        if (((Agg *) m_runtime->ss.ps.plan)->unique_check) {
+            m_buildFun = &HashAggRunner::buildAggTbl<false, true>;
+        } else {
+            m_buildFun = &HashAggRunner::buildAggTbl<false, false>;
+        }
     }
 }
 
@@ -668,7 +676,7 @@ void HashAggRunner::GetPosbyLoc(uint64 idx, int* segs, int64* pos)
  * or keep to disk if size of use memory exceed work_mem.
  * @in batch - current batch.
  */
-template <bool simple>
+template <bool simple, bool unique_check>
 void HashAggRunner::buildAggTbl(VectorBatch* batch)
 {
     int i;
@@ -761,6 +769,10 @@ void HashAggRunner::buildAggTbl(VectorBatch* batch)
                     AllocHashSlot<simple, true>(batch, i);
                 else
                     AllocHashSlot<simple, false>(batch, i);
+            } else if (unique_check) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_CARDINALITY_VIOLATION),
+                         errmsg("more than one row returned by a subquery used as an expression")));
             }
         }
     }

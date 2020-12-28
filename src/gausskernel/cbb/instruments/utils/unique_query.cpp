@@ -45,6 +45,7 @@
 #include "parser/scanner.h"
 #include "mb/pg_wchar.h"
 #include "instruments/unique_query.h"
+#include "instruments/instr_slow_query.h"
 #include "pgstat.h"
 
 const int JUMBLE_SIZE = 1024; /* query serialization buffer size */

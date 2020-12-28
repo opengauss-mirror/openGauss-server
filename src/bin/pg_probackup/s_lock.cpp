@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * s_lock.c
- *	   Hardware-dependent implementation of spinlocks.
+ *       Hardware-dependent implementation of spinlocks.
  *
  * When waiting for a contended spinlock we loop tightly for awhile, then
  * delay using pg_usleep() and try again.  Preferably, "awhile" should be a
@@ -42,7 +42,7 @@
  *
  *
  * IDENTIFICATION
- *	  src/backend/storage/lmgr/s_lock.c
+ *      src/backend/storage/lmgr/s_lock.c
  *
  *-------------------------------------------------------------------------
  */
@@ -51,7 +51,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "storage/s_lock.h"
+#include "storage/lock/s_lock.h"
 #ifdef FRONTEND
 #undef FRONTEND
 #include "atomics.h"
@@ -63,15 +63,15 @@
 
 #define MIN_SPINS_PER_DELAY 10
 #define MAX_SPINS_PER_DELAY 1000
-#define NUM_DELAYS			1000
-#define MIN_DELAY_USEC		1000L
-#define MAX_DELAY_USEC		1000000L
+#define NUM_DELAYS            1000
+#define MIN_DELAY_USEC        1000L
+#define MAX_DELAY_USEC        1000000L
 
 
-slock_t		dummy_spinlock;
+slock_t        dummy_spinlock;
 
-static int	spins_per_delay = DEFAULT_SPINS_PER_DELAY;
-extern int tas_sema(volatile slock_t *lock);
+static int    spins_per_delay = DEFAULT_SPINS_PER_DELAY;
+
 
 
 /*
@@ -81,13 +81,13 @@ static void
 s_lock_stuck(const char *file, int line)
 {
 #if defined(S_LOCK_TEST)
-	fprintf(stderr,
-			"\nStuck spinlock detected at %s:%d.\n",
-			file, line);
-	exit(1);
+    fprintf(stderr,
+            "\nStuck spinlock detected at %s:%d.\n",
+            file, line);
+    exit(1);
 #else
-	elog(FATAL, "stuck spinlock detected at  %s:%d",
-		 file, line);
+    elog(FATAL, "stuck spinlock detected at  %s:%d",
+         file, line);
 #endif
 }
 
@@ -98,11 +98,11 @@ s_lock_stuck(const char *file, int line)
 static void
 init_spin_delay(SpinDelayStatus *status,const char *file, int line)
 {
-	status->spins = 0;
-	status->delays = 0;
-	status->cur_delay = 0;
-	status->file = file;
-	status->line = line;
+    status->spins = 0;
+    status->delays = 0;
+    status->cur_delay = 0;
+    status->file = file;
+    status->line = line;
 }
 
 /*
@@ -111,18 +111,18 @@ init_spin_delay(SpinDelayStatus *status,const char *file, int line)
 int
 s_lock(volatile slock_t *lock, const char *file, int line)
 {
-	SpinDelayStatus delayStatus;
+    SpinDelayStatus delayStatus;
 
-	init_spin_delay(&delayStatus, file, line);
+    init_spin_delay(&delayStatus, file, line);
 
-	while (TAS_SPIN(lock))
-	{
-		perform_spin_delay(&delayStatus);
-	}
+    while (TAS_SPIN(lock))
+    {
+        perform_spin_delay(&delayStatus);
+    }
 
-	finish_spin_delay(&delayStatus);
+    finish_spin_delay(&delayStatus);
 
-	return delayStatus.delays;
+    return delayStatus.delays;
 }
 
 #ifdef USE_DEFAULT_S_UNLOCK
@@ -130,10 +130,10 @@ void
 s_unlock(volatile slock_t *lock)
 {
 #ifdef TAS_ACTIVE_WORD
-	/* HP's PA-RISC */
-	*TAS_ACTIVE_WORD(lock) = -1;
+    /* HP's PA-RISC */
+    *TAS_ACTIVE_WORD(lock) = -1;
 #else
-	*lock = 0;
+    *lock = 0;
 #endif
 }
 #endif
@@ -144,34 +144,34 @@ s_unlock(volatile slock_t *lock)
 void
 perform_spin_delay(SpinDelayStatus *status)
 {
-	/* CPU-specific delay each time through the loop */
-	SPIN_DELAY();
+    /* CPU-specific delay each time through the loop */
+    SPIN_DELAY();
 
-	/* Block the process every spins_per_delay tries */
-	if (++(status->spins) >= spins_per_delay)
-	{
-		if (++(status->delays) > NUM_DELAYS)
-			s_lock_stuck(status->file, status->line);
+    /* Block the process every spins_per_delay tries */
+    if (++(status->spins) >= spins_per_delay)
+    {
+        if (++(status->delays) > NUM_DELAYS)
+            s_lock_stuck(status->file, status->line);
 
-		if (status->cur_delay == 0) /* first time to delay? */
-			status->cur_delay = MIN_DELAY_USEC;
+        if (status->cur_delay == 0) /* first time to delay? */
+            status->cur_delay = MIN_DELAY_USEC;
 
-		pg_usleep(status->cur_delay);
+        pg_usleep(status->cur_delay);
 
 #if defined(S_LOCK_TEST)
-		fprintf(stdout, "*");
-		fflush(stdout);
+        fprintf(stdout, "*");
+        fflush(stdout);
 #endif
 
-		/* increase delay by a random fraction between 1X and 2X */
-		status->cur_delay += (int) (status->cur_delay *
-									((double) random() / (double) MAX_RANDOM_VALUE) + 0.5);
-		/* wrap back to minimum delay when max is exceeded */
-		if (status->cur_delay > MAX_DELAY_USEC)
-			status->cur_delay = MIN_DELAY_USEC;
+        /* increase delay by a random fraction between 1X and 2X */
+        status->cur_delay += (int) (status->cur_delay *
+                                    ((double) random() / (double) MAX_RANDOM_VALUE) + 0.5);
+        /* wrap back to minimum delay when max is exceeded */
+        if (status->cur_delay > MAX_DELAY_USEC)
+            status->cur_delay = MIN_DELAY_USEC;
 
-		status->spins = 0;
-	}
+        status->spins = 0;
+    }
 }
 
 /*
@@ -194,17 +194,17 @@ perform_spin_delay(SpinDelayStatus *status)
 void
 finish_spin_delay(SpinDelayStatus *status)
 {
-	if (status->cur_delay == 0)
-	{
-		/* we never had to delay */
-		if (spins_per_delay < MAX_SPINS_PER_DELAY)
-			spins_per_delay = Min(spins_per_delay + 100, MAX_SPINS_PER_DELAY);
-	}
-	else
-	{
-		if (spins_per_delay > MIN_SPINS_PER_DELAY)
-			spins_per_delay = Max(spins_per_delay - 1, MIN_SPINS_PER_DELAY);
-	}
+    if (status->cur_delay == 0)
+    {
+        /* we never had to delay */
+        if (spins_per_delay < MAX_SPINS_PER_DELAY)
+            spins_per_delay = Min(spins_per_delay + 100, MAX_SPINS_PER_DELAY);
+    }
+    else
+    {
+        if (spins_per_delay > MIN_SPINS_PER_DELAY)
+            spins_per_delay = Max(spins_per_delay - 1, MIN_SPINS_PER_DELAY);
+    }
 }
 
 /*
@@ -215,7 +215,7 @@ finish_spin_delay(SpinDelayStatus *status)
 void
 set_spins_per_delay(int shared_spins_per_delay)
 {
-	spins_per_delay = shared_spins_per_delay;
+    spins_per_delay = shared_spins_per_delay;
 }
 
 /*
@@ -226,17 +226,17 @@ set_spins_per_delay(int shared_spins_per_delay)
 int
 update_spins_per_delay(int shared_spins_per_delay)
 {
-	/*
-	 * We use an exponential moving average with a relatively slow adaption
-	 * rate, so that noise in any one backend's result won't affect the shared
-	 * value too much.  As long as both inputs are within the allowed range,
-	 * the result must be too, so we need not worry about clamping the result.
-	 *
-	 * We deliberately truncate rather than rounding; this is so that single
-	 * adjustments inside a backend can affect the shared estimate (see the
-	 * asymmetric adjustment rules above).
-	 */
-	return (shared_spins_per_delay * 15 + spins_per_delay) / 16;
+    /*
+     * We use an exponential moving average with a relatively slow adaption
+     * rate, so that noise in any one backend's result won't affect the shared
+     * value too much.  As long as both inputs are within the allowed range,
+     * the result must be too, so we need not worry about clamping the result.
+     *
+     * We deliberately truncate rather than rounding; this is so that single
+     * adjustments inside a backend can affect the shared estimate (see the
+     * asymmetric adjustment rules above).
+     */
+    return (shared_spins_per_delay * 15 + spins_per_delay) / 16;
 }
 
 
@@ -250,7 +250,7 @@ update_spins_per_delay(int shared_spins_per_delay)
  */
 
 
-#ifdef HAVE_SPINLOCKS			/* skip spinlocks if requested */
+#ifdef HAVE_SPINLOCKS            /* skip spinlocks if requested */
 
 
 #if defined(__GNUC__)
@@ -266,42 +266,42 @@ update_spins_per_delay(int shared_spins_per_delay)
  * write.  Ideally we'd flush all this in favor of the inline version.
  */
 #if defined(__m68k__) && !defined(__linux__)
-/* really means: extern int tas(slock_t* **lock); */
+
 static void
 tas_dummy()
 {
-	__asm__ __volatile__(
+    __asm__ __volatile__(
 #if (defined(__NetBSD__) || defined(__OpenBSD__)) && defined(__ELF__)
 /* no underscore for label and % for registers */
-						 "\
-.global		tas 				\n\
-tas:							\n\
-			movel	%sp@(0x4),%a0	\n\
-			tas 	%a0@		\n\
-			beq 	_success	\n\
-			moveq	#-128,%d0	\n\
-			rts 				\n\
-_success:						\n\
-			moveq	#0,%d0		\n\
-			rts 				\n"
+                         "\
+.global        tas                 \n\
+tas:                            \n\
+            movel    %sp@(0x4),%a0    \n\
+            tas     %a0@        \n\
+            beq     _success    \n\
+            moveq    #-128,%d0    \n\
+            rts                 \n\
+_success:                        \n\
+            moveq    #0,%d0        \n\
+            rts                 \n"
 #else
-						 "\
-.global		_tas				\n\
-_tas:							\n\
-			movel	sp@(0x4),a0	\n\
-			tas 	a0@			\n\
-			beq 	_success	\n\
-			moveq 	#-128,d0	\n\
-			rts					\n\
-_success:						\n\
-			moveq 	#0,d0		\n\
-			rts					\n"
-#endif							/* (__NetBSD__ || __OpenBSD__) && __ELF__ */
-		);
+                         "\
+.global        _tas                \n\
+_tas:                            \n\
+            movel    sp@(0x4),a0    \n\
+            tas     a0@            \n\
+            beq     _success    \n\
+            moveq     #-128,d0    \n\
+            rts                    \n\
+_success:                        \n\
+            moveq     #0,d0        \n\
+            rts                    \n"
+#endif                            /* (__NetBSD__ || __OpenBSD__) && __ELF__ */
+        );
 }
-#endif							/* __m68k__ && !__linux__ */
-#endif							/* not __GNUC__ */
-#endif							/* HAVE_SPINLOCKS */
+#endif                            /* __m68k__ && !__linux__ */
+#endif                            /* not __GNUC__ */
+#endif                            /* HAVE_SPINLOCKS */
 
 
 
@@ -314,9 +314,9 @@ _success:						\n\
 
 struct test_lock_struct
 {
-	char		pad1;
-	slock_t		lock;
-	char		pad2;
+    char        pad1;
+    slock_t        lock;
+    char        pad2;
 };
 
 volatile struct test_lock_struct test_lock;
@@ -324,75 +324,75 @@ volatile struct test_lock_struct test_lock;
 int
 main()
 {
-	srandom((unsigned int) time(NULL));
+    srandom((unsigned int) time(NULL));
 
-	test_lock.pad1 = test_lock.pad2 = 0x44;
+    test_lock.pad1 = test_lock.pad2 = 0x44;
 
-	S_INIT_LOCK(&test_lock.lock);
+    S_INIT_LOCK(&test_lock.lock);
 
-	if (test_lock.pad1 != 0x44 || test_lock.pad2 != 0x44)
-	{
-		printf("S_LOCK_TEST: failed, declared datatype is wrong size\n");
-		return 1;
-	}
+    if (test_lock.pad1 != 0x44 || test_lock.pad2 != 0x44)
+    {
+        printf("S_LOCK_TEST: failed, declared datatype is wrong size\n");
+        return 1;
+    }
 
-	if (!S_LOCK_FREE(&test_lock.lock))
-	{
-		printf("S_LOCK_TEST: failed, lock not initialized\n");
-		return 1;
-	}
+    if (!S_LOCK_FREE(&test_lock.lock))
+    {
+        printf("S_LOCK_TEST: failed, lock not initialized\n");
+        return 1;
+    }
 
-	S_LOCK(&test_lock.lock);
+    S_LOCK(&test_lock.lock);
 
-	if (test_lock.pad1 != 0x44 || test_lock.pad2 != 0x44)
-	{
-		printf("S_LOCK_TEST: failed, declared datatype is wrong size\n");
-		return 1;
-	}
+    if (test_lock.pad1 != 0x44 || test_lock.pad2 != 0x44)
+    {
+        printf("S_LOCK_TEST: failed, declared datatype is wrong size\n");
+        return 1;
+    }
 
-	if (S_LOCK_FREE(&test_lock.lock))
-	{
-		printf("S_LOCK_TEST: failed, lock not locked\n");
-		return 1;
-	}
+    if (S_LOCK_FREE(&test_lock.lock))
+    {
+        printf("S_LOCK_TEST: failed, lock not locked\n");
+        return 1;
+    }
 
-	S_UNLOCK(&test_lock.lock);
+    S_UNLOCK(&test_lock.lock);
 
-	if (test_lock.pad1 != 0x44 || test_lock.pad2 != 0x44)
-	{
-		printf("S_LOCK_TEST: failed, declared datatype is wrong size\n");
-		return 1;
-	}
+    if (test_lock.pad1 != 0x44 || test_lock.pad2 != 0x44)
+    {
+        printf("S_LOCK_TEST: failed, declared datatype is wrong size\n");
+        return 1;
+    }
 
-	if (!S_LOCK_FREE(&test_lock.lock))
-	{
-		printf("S_LOCK_TEST: failed, lock not unlocked\n");
-		return 1;
-	}
+    if (!S_LOCK_FREE(&test_lock.lock))
+    {
+        printf("S_LOCK_TEST: failed, lock not unlocked\n");
+        return 1;
+    }
 
-	S_LOCK(&test_lock.lock);
+    S_LOCK(&test_lock.lock);
 
-	if (test_lock.pad1 != 0x44 || test_lock.pad2 != 0x44)
-	{
-		printf("S_LOCK_TEST: failed, declared datatype is wrong size\n");
-		return 1;
-	}
+    if (test_lock.pad1 != 0x44 || test_lock.pad2 != 0x44)
+    {
+        printf("S_LOCK_TEST: failed, declared datatype is wrong size\n");
+        return 1;
+    }
 
-	if (S_LOCK_FREE(&test_lock.lock))
-	{
-		printf("S_LOCK_TEST: failed, lock not re-locked\n");
-		return 1;
-	}
+    if (S_LOCK_FREE(&test_lock.lock))
+    {
+        printf("S_LOCK_TEST: failed, lock not re-locked\n");
+        return 1;
+    }
 
-	printf("S_LOCK_TEST: this will print %d stars and then\n", NUM_DELAYS);
-	printf("             exit with a 'stuck spinlock' message\n");
-	printf("             if S_LOCK() and TAS() are working.\n");
-	fflush(stdout);
+    printf("S_LOCK_TEST: this will print %d stars and then\n", NUM_DELAYS);
+    printf("             exit with a 'stuck spinlock' message\n");
+    printf("             if S_LOCK() and TAS() are working.\n");
+    fflush(stdout);
 
-	s_lock(&test_lock.lock, __FILE__, __LINE__);
+    s_lock(&test_lock.lock, __FILE__, __LINE__);
 
-	printf("S_LOCK_TEST: failed, lock not locked\n");
-	return 1;
+    printf("S_LOCK_TEST: failed, lock not locked\n");
+    return 1;
 }
 
-#endif							/* S_LOCK_TEST */
+#endif                            /* S_LOCK_TEST */

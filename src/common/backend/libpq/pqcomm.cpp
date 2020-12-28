@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *
- * pqcomm.cpp
+ * pqcomm.c
  *	  Communication functions between the Frontend and the Backend
  *
  * These routines handle the low-level details of communication between
@@ -108,7 +108,6 @@
 #define IP_LEN 64
 #define CRC_HEADER 12  // uint32 sequence number + uint32 data length + uint32 crc checksum.
 
-extern bool StreamThreadAmI();
 extern GlobalNodeDefinition* global_node_definition;
 
 /*
@@ -144,31 +143,6 @@ static size_t pq_disk_read_data_block(
 static int Lock_AF_UNIX(unsigned short portNumber, const char* unixSocketName, bool is_create_psql_sock);
 static int Setup_AF_UNIX(bool is_create_psql_sock);
 #endif /* HAVE_UNIX_SOCKETS */
-
-static void socket_comm_reset(void);
-static int  socket_flush(void);
-static int  socket_flush_if_writable(void);
-static bool socket_is_send_pending(void);
-static int  socket_putmessage(char msgtype, const char *s, size_t len);
-static int socket_putmessage_noblock(char msgtype, const char *s, size_t len);
-static void socket_startcopyout(void);
-static void socket_endcopyout(bool errorAbort);
-
-static const PQcommMethods PqCommSocketMethods = {
-    socket_comm_reset,
-    socket_flush,
-    socket_flush_if_writable,
-    socket_is_send_pending,
-    socket_putmessage,
-    socket_putmessage_noblock,
-    socket_startcopyout,
-    socket_endcopyout	
-};
-
-void PqCommMethods_init()
-{
-    t_thrd.msqueue_cxt.PqCommMethods = &PqCommSocketMethods;
-}
 
 extern bool FencedUDFMasterMode;
 
@@ -231,7 +205,7 @@ bool pq_disk_is_temp_file_created(void)
 static inline void pq_disk_create_tempfile(void)
 {
     MemoryContext oldcontext;
-    oldcontext = MemoryContextSwitchTo(u_sess->top_mem_cxt);
+    oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION));
 
     t_thrd.libpq_cxt.PqTempFileContextInfo->file_handle = LZ4FileCreate(true);
     t_thrd.libpq_cxt.PqTempFileContextInfo->file_state = TEMPFILE_CREATED;
@@ -261,7 +235,7 @@ static size_t pq_disk_write_tempfile(const void* data, size_t size)
     }
 
     MemoryContext oldcontext;
-    oldcontext = MemoryContextSwitchTo(u_sess->top_mem_cxt);
+    oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION));
 
     /* generate a crc header and append data after it */
     pq_disk_generate_checking_header((char*)data,
@@ -461,9 +435,11 @@ void pq_init(void)
 #ifdef USE_RETRY_STUB
     t_thrd.libpq_cxt.PqSendBufferSize = 64;
 #endif
-    t_thrd.libpq_cxt.PqSendBuffer = (char*)MemoryContextAlloc(t_thrd.top_mem_cxt, t_thrd.libpq_cxt.PqSendBufferSize);
+    t_thrd.libpq_cxt.PqSendBuffer = (char*)MemoryContextAlloc(
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION), t_thrd.libpq_cxt.PqSendBufferSize);
 
-    t_thrd.libpq_cxt.PqRecvBuffer = (char*)MemoryContextAlloc(t_thrd.top_mem_cxt, PQ_RECV_BUFFER_SIZE);
+    t_thrd.libpq_cxt.PqRecvBuffer = (char*)MemoryContextAlloc(
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION), PQ_RECV_BUFFER_SIZE);
     t_thrd.libpq_cxt.PqRecvBufferSize = PQ_RECV_BUFFER_SIZE;
     t_thrd.libpq_cxt.PqSendPointer = t_thrd.libpq_cxt.PqSendStart = t_thrd.libpq_cxt.PqRecvPointer =
         t_thrd.libpq_cxt.PqRecvLength = 0;
@@ -483,7 +459,7 @@ void pq_init(void)
  * inside a pqcomm.c routine (which ideally will never happen, but...)
  * --------------------------------
  */
-static void socket_comm_reset(void)
+void pq_comm_reset(void)
 {
     /* Do not throw away pending data, but do reset the busy flag */
     t_thrd.libpq_cxt.PqCommBusy = false;
@@ -538,9 +514,9 @@ void pq_close(int code, Datum arg)
          * We do set sock to PGINVALID_SOCKET to prevent any further I/O,
          * though.
          */
-        if (u_sess->proc_cxt.MyProcPort && u_sess->proc_cxt.MyProcPort->is_logic_conn) {
+        if (u_sess->proc_cxt.MyProcPort->is_logic_conn) {
             gs_close_gsocket(&(u_sess->proc_cxt.MyProcPort->gs_sock));
-        } else if (u_sess->proc_cxt.MyProcPort) {
+        } else {
             if (u_sess->proc_cxt.MyProcPort->sock != PGINVALID_SOCKET) {
                 closesocket(u_sess->proc_cxt.MyProcPort->sock);
             }
@@ -581,12 +557,11 @@ static void StreamDoUnlink(int code, Datum arg)
  * RETURNS: STATUS_OK or STATUS_ERROR
  */
 int StreamServerPort(int family, char* hostName, unsigned short portNumber, const char* unixSocketName,
-    pgsocket ListenSocket[], pgsocket SctpListenSocket[], int MaxListen, bool add_localaddr_flag,
+    pgsocket ListenSocket[], int MaxListen, bool add_localaddr_flag,
     bool is_create_psql_sock, bool is_create_libcomm_sock)
 {
 #define RETRY_SLEEP_TIME 1000000L
     pgsocket fd = PGINVALID_SOCKET;
-    pgsocket fd_sctp = PGINVALID_SOCKET;
     int err;
     int maxconn;
     int ret;
@@ -598,7 +573,6 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
     struct addrinfo* addr = NULL;
     struct addrinfo hint;
     int listen_index = 0;
-    int sctp_listen_index = 0;
     int added = 0;
     const int tryBindNum = 3;
     int i = 0;
@@ -650,7 +624,6 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
     for (addr = addrs; addr; addr = addr->ai_next) {
         /* init value of fd */
         fd = PGINVALID_SOCKET;
-        fd_sctp = PGINVALID_SOCKET;
 
         if (!IS_AF_UNIX(family) && IS_AF_UNIX(addr->ai_family)) {
             /*
@@ -669,19 +642,6 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
         if (listen_index >= MaxListen) {
             ereport(LOG, (errmsg("could not bind to all requested addresses: MAXLISTEN (%d) exceeded", MaxListen)));
             break;
-        }
-        if (SCTP_CN_DN_CONN) {
-
-            for (; sctp_listen_index < MaxListen; sctp_listen_index++) {
-                if (SctpListenSocket[sctp_listen_index] == PGINVALID_SOCKET) {
-                    break;
-                }
-            }
-            if (sctp_listen_index >= MaxListen) {
-                ereport(LOG,
-                    (errmsg("sctp could not bind to all requested addresses: MAXLISTEN (%d) exceeded", MaxListen)));
-                break;
-            }
         }
 
         /* set up family name for possible error messages */
@@ -717,20 +677,12 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
                     errmsg("could not create %s socket: %m", familyDesc)));
             goto errhandle;
         }
-        if (!IS_AF_UNIX(addr->ai_family)) {
-            if (SCTP_CN_DN_CONN && !(addr->ai_family == AF_INET6)) {
-                if ((fd_sctp = socket(addr->ai_family, SOCK_STREAM, IPPROTO_SCTP)) < 0) {
-                    ereport(LOG,
-                        (errcode_for_socket_access(),
-                            /* translator: %s is IPv4, IPv6, or Unix */
-                            errmsg("could not create SCTP %s socket: %m", familyDesc)));
-                    goto errhandle;
-                }
-            }
-        }
+        
         /*
-         * save unix domain sock, thus we will know when
-         * rece flow ctrl thread send the libcomm addr to server loop
+         * save unix domain sock,
+         * thus we will know when
+         * rece flow ctrl thread
+         * send the libcomm addr to server loop
          */
         if (is_create_libcomm_sock) {
             t_thrd.libpq_cxt.listen_fd_for_recv_flow_ctrl = fd;
@@ -740,14 +692,6 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
         if (fcntl(fd, F_SETFD, FD_CLOEXEC) == -1) {
             ereport(LOG, (errcode_for_socket_access(), errmsg("setsockopt(FD_CLOEXEC) failed: %m")));
             goto errhandle;
-        }
-        if (!IS_AF_UNIX(addr->ai_family)) {
-            if (SCTP_CN_DN_CONN && !(addr->ai_family == AF_INET6)) {
-                if (fcntl(fd_sctp, F_SETFD, FD_CLOEXEC) == -1) {
-                    ereport(LOG, (errcode_for_socket_access(), errmsg("sctp setsockopt(FD_CLOEXEC) failed: %m")));
-                    goto errhandle;
-                }
-            }
         }
 #endif /* F_SETFD */
 
@@ -768,12 +712,6 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
             if ((setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char*)&one, sizeof(one))) == -1) {
                 ereport(LOG, (errcode_for_socket_access(), errmsg("setsockopt(SO_REUSEADDR) failed: %m")));
                 goto errhandle;
-            }
-            if (SCTP_CN_DN_CONN && !(addr->ai_family == AF_INET6)) {
-                if ((setsockopt(fd_sctp, SOL_SOCKET, SO_REUSEADDR, (char*)&one, sizeof(one))) == -1) {
-                    ereport(LOG, (errcode_for_socket_access(), errmsg("sctp setsockopt(SO_REUSEADDR) failed: %m")));
-                    goto errhandle;
-                }
             }
         }
 #endif
@@ -809,10 +747,13 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
                         (IS_AF_UNIX(addr->ai_family))
                             ? errhint("Is another postmaster already running on port %d?"
                                       " If not, remove socket file \"%s\" and retry.",
-                                      (int)portNumber, service)
+                                  (int)portNumber,
+                                  service)
                             : errhint("Port %u is used, run 'netstat -anop|grep %u' or "
                                       "'lsof -i:%u'(need root) to see who is using this port.",
-                                      portNumber, portNumber, portNumber)));
+                                  portNumber,
+                                  portNumber,
+                                  portNumber)));
                 pg_usleep(RETRY_SLEEP_TIME);
                 continue;
             } else {
@@ -823,37 +764,6 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
             goto errhandle;
         }
 
-        if (!IS_AF_UNIX(addr->ai_family)) {
-            if (SCTP_CN_DN_CONN && !(addr->ai_family == AF_INET6)) {
-                for (i = 0; i != tryBindNum; ++i) {
-                    err = bind(fd_sctp, addr->ai_addr, addr->ai_addrlen);
-                    if (err < 0) {
-                        /* need not retry when a addr is added before */
-                        if (added != 0) {
-                            i = tryBindNum;
-                            break;
-                        }
-                        ereport(LOG,
-                            (errcode_for_socket_access(),
-                                // translator: %s is IPv4, IPv6, or Unix
-                                errmsg("sctp could not bind %s socket at the %d time: %m", familyDesc, i),
-                                (IS_AF_UNIX(addr->ai_family))
-                                    ? errhint("sctp Is another postmaster already running on port %d?"
-                                              " If not, remove socket file \"%s\" and retry.",
-                                              (int)portNumber, service)
-                                    : errhint("sctp Is another postmaster already running on port %d?"
-                                              " If not, wait a few seconds and retry.", (int)portNumber)));
-                        pg_usleep(RETRY_SLEEP_TIME);
-                        continue;
-                    } else {
-                        break;
-                    }
-                }
-                if (i == tryBindNum) {
-                    goto errhandle;
-                }
-            }
-        }
 #ifdef HAVE_UNIX_SOCKETS
         if (addr->ai_family == AF_UNIX) {
             if (Setup_AF_UNIX(is_create_psql_sock) != STATUS_OK) {
@@ -880,20 +790,6 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
             goto errhandle;
         }
         ListenSocket[listen_index] = fd;
-        if (!IS_AF_UNIX(addr->ai_family)) {
-            if (SCTP_CN_DN_CONN && !(addr->ai_family == AF_INET6)) {
-                err = listen(fd_sctp, maxconn);
-                if (err < 0) {
-                    ereport(LOG,
-                        (errcode_for_socket_access(),
-                            /* translator: %s is IPv4, IPv6, or Unix */
-                            errmsg("sctp could not listen on %s socket: %m", familyDesc)));
-                    closesocket(fd_sctp);
-                    continue;
-                }
-                SctpListenSocket[sctp_listen_index] = fd_sctp;
-            }
-        }
         added++;
         if (add_localaddr_flag == true) {
             struct sockaddr* sinp = NULL;
@@ -930,9 +826,6 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
     errhandle:
         if (fd != PGINVALID_SOCKET) {
             closesocket(fd);
-        }
-        if (fd_sctp != PGINVALID_SOCKET) {
-            closesocket(fd_sctp);
         }
     }
 
@@ -1004,7 +897,7 @@ static int Setup_AF_UNIX(bool is_create_psql_sock)
      * before we listen() to avoid a window where unwanted connections could
      * get accepted.
      */
-    AssertEreport(g_instance.attr.attr_network.Unix_socket_group, MOD_OPT, "");
+    Assert(g_instance.attr.attr_network.Unix_socket_group);
     if (g_instance.attr.attr_network.Unix_socket_group[0] != '\0') {
 #ifdef WIN32
         ereport(WARNING, (errmsg("configuration item unix_socket_group is not supported on this platform")));
@@ -1098,7 +991,7 @@ int StreamConnection(pgsocket server_fd, Port* port)
         return STATUS_ERROR;
     }
 
-    /* select NODELAY, KEEPALIVE and SO_RCVTIMEO options if it's a TCP connection */
+    /* select NODELAY and KEEPALIVE options if it's a TCP connection */
     if (!IS_AF_UNIX(port->laddr.addr.ss_family)) {
         int on;
         int opval = 0;
@@ -1108,25 +1001,13 @@ int StreamConnection(pgsocket server_fd, Port* port)
             ereport(LOG, (errmsg("getsockopt(SO_PROTOCOL) failed: %m")));
             return STATUS_ERROR;
         }
-        if (opval != IPPROTO_SCTP) {
-            if (setsockopt(port->sock, IPPROTO_TCP, TCP_NODELAY, (char*)&on, sizeof(on)) < 0) {
-                ereport(LOG, (errmsg("setsockopt(TCP_NODELAY) failed: %m")));
-                return STATUS_ERROR;
-            }
-            if (setsockopt(port->sock, SOL_SOCKET, SO_KEEPALIVE, (char*)&on, sizeof(on)) < 0) {
-                ereport(LOG, (errmsg("setsockopt(SO_KEEPALIVE) failed: %m")));
-                return STATUS_ERROR;
-            }
-            struct timeval tv = {u_sess->attr.attr_common.tcpRecvTimeout, 0};
-            if (setsockopt(port->sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(struct timeval)) < 0) {
-                ereport(LOG, (errmsg("setsockopt(SO_RCVTIMEO) failed: %m")));
-                return STATUS_ERROR;
-            }
-        } else {
-            if (setsockopt(port->sock, IPPROTO_SCTP, COMM_NO_DELAY, (char*)&on, sizeof(on)) < 0) {
-                ereport(LOG, (errmsg("setsockopt(COMM_NO_DELAY) failed: %m")));
-                return STATUS_ERROR;
-            }
+        if (setsockopt(port->sock, IPPROTO_TCP, TCP_NODELAY, (char*)&on, sizeof(on)) < 0) {
+            ereport(LOG, (errmsg("setsockopt(TCP_NODELAY) failed: %m")));
+            return STATUS_ERROR;
+        }
+        if (setsockopt(port->sock, SOL_SOCKET, SO_KEEPALIVE, (char*)&on, sizeof(on)) < 0) {
+            ereport(LOG, (errmsg("setsockopt(SO_KEEPALIVE) failed: %m")));
+            return STATUS_ERROR;
         }
 #ifdef WIN32
 
@@ -1637,7 +1518,7 @@ static int internal_putbytes(const char* s, size_t len)
  *		returns 0 if OK, EOF if trouble
  * --------------------------------
  */
-static int socket_flush(void)
+int pq_flush(void)
 {
     int res = 0;
 
@@ -1652,7 +1533,7 @@ static int socket_flush(void)
         (t_thrd.libpq_cxt.PqTempFileContextInfo->file_state == TEMPFILE_FLUSHED)) {
         if (!u_sess->wlm_cxt->spill_limit_error) {
             MemoryContext oldMemory;
-            oldMemory = MemoryContextSwitchTo(u_sess->top_mem_cxt);
+            oldMemory = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION));
 
             /*
              * read query result from temp file, then flush to client.
@@ -1753,13 +1634,15 @@ static int internal_flush(void)
                 last_reported_send_errno = errno;
                 ereport(COMMERROR,
                     (errcode_for_socket_access(),
-                        errmsg("could not send data to client [ Remote IP: %s PORT: %s]. Detail: %m",
+                        errmsg("could not send data to client [ Remote IP: %s PORT: %s FD: %d BLOCK: %d]. Detail: %m",
                             u_sess->proc_cxt.MyProcPort->remote_host,
                             (u_sess->proc_cxt.MyProcPort->remote_port != NULL &&
-                                u_sess->proc_cxt.MyProcPort->remote_port[0] != '\0')
-                                ? u_sess->proc_cxt.MyProcPort->remote_port
-                                : "")));
+                             u_sess->proc_cxt.MyProcPort->remote_port[0] != '\0')
+                            ? u_sess->proc_cxt.MyProcPort->remote_port : "",
+                            u_sess->proc_cxt.MyProcPort->sock,
+                            u_sess->proc_cxt.MyProcPort->noblock)));
             }
+
 
             /*
              * We drop the buffered data anyway so that processing can
@@ -1794,7 +1677,7 @@ static int internal_flush(void)
  * Returns 0 if OK, or EOF if trouble.
  * --------------------------------
  */
-static int socket_flush_if_writable(void)
+int pq_flush_if_writable(void)
 {
     int res;
 
@@ -1893,7 +1776,7 @@ void pq_flush_timedwait(int timeout)
  *		pq_is_send_pending	- is there any pending data in the output buffer?
  * --------------------------------
  */
-static bool socket_is_send_pending(void)
+bool pq_is_send_pending(void)
 {
     return (t_thrd.libpq_cxt.PqSendStart < t_thrd.libpq_cxt.PqSendPointer);
 }
@@ -1930,7 +1813,7 @@ static bool socket_is_send_pending(void)
  *		returns 0 if OK, EOF if trouble
  * --------------------------------
  */
-static int socket_putmessage(char msgtype, const char* s, size_t len)
+int pq_putmessage(char msgtype, const char* s, size_t len)
 {
     if (t_thrd.libpq_cxt.DoingCopyOut || t_thrd.libpq_cxt.PqCommBusy) {
         return 0;
@@ -1966,7 +1849,7 @@ fail:
  *		If the output buffer is too small to hold the message, the buffer
  *		is enlarged.
  */
-static int socket_putmessage_noblock(char msgtype, const char* s, size_t len)
+int pq_putmessage_noblock(char msgtype, const char* s, size_t len)
 {
     int res;
     int required;
@@ -1992,7 +1875,7 @@ static int socket_putmessage_noblock(char msgtype, const char* s, size_t len)
  *			is beginning
  * --------------------------------
  */
-static void socket_startcopyout(void)
+void pq_startcopyout(void)
 {
     t_thrd.libpq_cxt.DoingCopyOut = true;
 }
@@ -2007,7 +1890,7 @@ static void socket_startcopyout(void)
  *		not allow binary transfers, so a textual terminator is always correct.
  * --------------------------------
  */
-static void socket_endcopyout(bool errorAbort)
+void pq_endcopyout(bool errorAbort)
 {
     if (!t_thrd.libpq_cxt.DoingCopyOut) {
         return;
@@ -2379,7 +2262,8 @@ void pq_resize_recvbuffer(int size)
         size);
 #endif
 
-    char* enlarged_buffer = (char*)MemoryContextAlloc(t_thrd.top_mem_cxt, size);
+    char* enlarged_buffer = (char*)MemoryContextAlloc(
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION), size);
     if (t_thrd.libpq_cxt.PqRecvBuffer != NULL) {
         /* since MemoryContextAlloc may fail, so alloc new memory first, then free old memory */
         pfree(t_thrd.libpq_cxt.PqRecvBuffer); 

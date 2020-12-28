@@ -1,0 +1,600 @@
+set enable_global_stats = true;
+--float4
+CREATE TABLE vfloat4_test(a INT4, b float4, c float4) with (orientation = orc) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+copy vfloat4_test from '@abs_srcdir@/data/vfloat4_normal.data' delimiter '|' NULL '';
+--test vfloat4_sop
+select b,c from vfloat4_test where b=c order by a;
+     b     |     c     
+-----------+-----------
+       NaN |       NaN
+  Infinity |  Infinity
+ -Infinity | -Infinity
+ -Infinity | -Infinity
+(4 rows)
+
+select b,c from vfloat4_test where b<>c order by a;
+      b      |      c      
+-------------+-------------
+           2 |           0
+      1004.3 |         100
+       1e+38 |       3e+38
+ 1.23457e-20 |           3
+         -.1 |        -100
+         NaN |        -200
+       1e+38 |      -3e+38
+         NaN |           0
+    Infinity |         -23
+       1e+38 |   -Infinity
+          -4 |      -14.86
+ 1.23457e+20 | 1.23457e-20
+       1e+38 |          10
+    Infinity |   -Infinity
+         NaN |    Infinity
+         NaN |   -Infinity
+(16 rows)
+
+select b,c from vfloat4_test where b>c order by a;
+      b      |      c      
+-------------+-------------
+           2 |           0
+      1004.3 |         100
+         -.1 |        -100
+         NaN |        -200
+       1e+38 |      -3e+38
+         NaN |           0
+    Infinity |         -23
+       1e+38 |   -Infinity
+          -4 |      -14.86
+ 1.23457e+20 | 1.23457e-20
+       1e+38 |          10
+    Infinity |   -Infinity
+         NaN |    Infinity
+         NaN |   -Infinity
+(14 rows)
+
+select b,c from vfloat4_test where b>=c order by a;
+      b      |      c      
+-------------+-------------
+           2 |           0
+      1004.3 |         100
+         -.1 |        -100
+         NaN |        -200
+       1e+38 |      -3e+38
+         NaN |           0
+    Infinity |         -23
+       1e+38 |   -Infinity
+          -4 |      -14.86
+ 1.23457e+20 | 1.23457e-20
+       1e+38 |          10
+         NaN |         NaN
+    Infinity |    Infinity
+    Infinity |   -Infinity
+   -Infinity |   -Infinity
+   -Infinity |   -Infinity
+         NaN |    Infinity
+         NaN |   -Infinity
+(18 rows)
+
+select b,c from vfloat4_test where b<c order by a;
+      b      |   c   
+-------------+-------
+       1e+38 | 3e+38
+ 1.23457e-20 |     3
+(2 rows)
+
+select b,c from vfloat4_test where b<=c order by a;
+      b      |     c     
+-------------+-----------
+       1e+38 |     3e+38
+ 1.23457e-20 |         3
+         NaN |       NaN
+    Infinity |  Infinity
+   -Infinity | -Infinity
+   -Infinity | -Infinity
+(6 rows)
+
+select b,c from vfloat4_test where b=c and a > 0 order by a ;
+     b     |     c     
+-----------+-----------
+       NaN |       NaN
+  Infinity |  Infinity
+ -Infinity | -Infinity
+ -Infinity | -Infinity
+(4 rows)
+
+select b,c from vfloat4_test where b<>c and a > 0 order by a;
+      b      |      c      
+-------------+-------------
+           2 |           0
+      1004.3 |         100
+       1e+38 |       3e+38
+ 1.23457e-20 |           3
+         -.1 |        -100
+         NaN |        -200
+       1e+38 |      -3e+38
+         NaN |           0
+    Infinity |         -23
+       1e+38 |   -Infinity
+          -4 |      -14.86
+ 1.23457e+20 | 1.23457e-20
+       1e+38 |          10
+    Infinity |   -Infinity
+         NaN |    Infinity
+         NaN |   -Infinity
+(16 rows)
+
+select b,c from vfloat4_test where b>c and a > 0 order by a;
+      b      |      c      
+-------------+-------------
+           2 |           0
+      1004.3 |         100
+         -.1 |        -100
+         NaN |        -200
+       1e+38 |      -3e+38
+         NaN |           0
+    Infinity |         -23
+       1e+38 |   -Infinity
+          -4 |      -14.86
+ 1.23457e+20 | 1.23457e-20
+       1e+38 |          10
+    Infinity |   -Infinity
+         NaN |    Infinity
+         NaN |   -Infinity
+(14 rows)
+
+select b,c from vfloat4_test where b>=c and a > 0 order by a;
+      b      |      c      
+-------------+-------------
+           2 |           0
+      1004.3 |         100
+         -.1 |        -100
+         NaN |        -200
+       1e+38 |      -3e+38
+         NaN |           0
+    Infinity |         -23
+       1e+38 |   -Infinity
+          -4 |      -14.86
+ 1.23457e+20 | 1.23457e-20
+       1e+38 |          10
+         NaN |         NaN
+    Infinity |    Infinity
+    Infinity |   -Infinity
+   -Infinity |   -Infinity
+   -Infinity |   -Infinity
+         NaN |    Infinity
+         NaN |   -Infinity
+(18 rows)
+
+select b,c from vfloat4_test where b<c and a > 0 order by a;
+      b      |   c   
+-------------+-------
+       1e+38 | 3e+38
+ 1.23457e-20 |     3
+(2 rows)
+
+select b,c from vfloat4_test where b<=c and a > 0 order by a;
+      b      |     c     
+-------------+-----------
+       1e+38 |     3e+38
+ 1.23457e-20 |         3
+         NaN |       NaN
+    Infinity |  Infinity
+   -Infinity | -Infinity
+   -Infinity | -Infinity
+(6 rows)
+
+select b+c from vfloat4_test where b=c order by a;
+ ?column?  
+-----------
+       NaN
+  Infinity
+ -Infinity
+ -Infinity
+(4 rows)
+
+select b+c from vfloat4_test where b<>c order by a;
+ERROR:  value out of range: overflow
+select b+c from vfloat4_test where b>c order by a;
+  ?column?   
+-------------
+           2
+      1104.3
+      -100.1
+         NaN
+      -2e+38
+         NaN
+    Infinity
+   -Infinity
+      -18.86
+ 1.23457e+20
+       1e+38
+         NaN
+         NaN
+         NaN
+(14 rows)
+
+select b+c from vfloat4_test where b>=c order by a;
+  ?column?   
+-------------
+           2
+      1104.3
+      -100.1
+         NaN
+      -2e+38
+         NaN
+    Infinity
+   -Infinity
+      -18.86
+ 1.23457e+20
+       1e+38
+         NaN
+    Infinity
+         NaN
+   -Infinity
+   -Infinity
+         NaN
+         NaN
+(18 rows)
+
+select b+c from vfloat4_test where b<c order by a;
+ERROR:  value out of range: overflow
+select b+c from vfloat4_test where b<=c order by a;
+ERROR:  value out of range: overflow
+select b+c from vfloat4_test where b=c and a > 0 order by a ;
+ ?column?  
+-----------
+       NaN
+  Infinity
+ -Infinity
+ -Infinity
+(4 rows)
+
+select b+c from vfloat4_test where b<>c and a > 0 order by a;
+ERROR:  value out of range: overflow
+select b+c from vfloat4_test where b>c and a > 0 order by a;
+  ?column?   
+-------------
+           2
+      1104.3
+      -100.1
+         NaN
+      -2e+38
+         NaN
+    Infinity
+   -Infinity
+      -18.86
+ 1.23457e+20
+       1e+38
+         NaN
+         NaN
+         NaN
+(14 rows)
+
+select b+c from vfloat4_test where b>=c and a > 0 order by a;
+  ?column?   
+-------------
+           2
+      1104.3
+      -100.1
+         NaN
+      -2e+38
+         NaN
+    Infinity
+   -Infinity
+      -18.86
+ 1.23457e+20
+       1e+38
+         NaN
+    Infinity
+         NaN
+   -Infinity
+   -Infinity
+         NaN
+         NaN
+(18 rows)
+
+select b+c from vfloat4_test where b<c and a > 0 order by a;
+ERROR:  value out of range: overflow
+select b+c from vfloat4_test where b<=c and a > 0 order by a;
+ERROR:  value out of range: overflow
+        
+--float8
+CREATE TABLE vfloat8_test(a INT4, b float8, c float8) with (orientation = orc) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+copy vfloat8_test from '@abs_srcdir@/data/vfloat8_normal.data' delimiter '|' NULL '';
+--test vfloat_sop
+select b,c from vfloat8_test where b=c order by a;
+     b     |     c     
+-----------+-----------
+    1e+308 |    1e+308
+       NaN |       NaN
+  Infinity |  Infinity
+ -Infinity | -Infinity
+ -Infinity | -Infinity
+(5 rows)
+
+select b,c from vfloat8_test where b<>c order by a;
+          b           |          c           
+----------------------+----------------------
+                    2 |                    0
+               1004.3 |                  100
+                1e+38 |                3e+38
+  1.2345678901234e-20 |                    3
+                  -.1 |                 -100
+                  NaN |                 -200
+               1e+308 |              -1e+308
+                  NaN |                    0
+                 -200 |                  NaN
+             Infinity |                  -23
+                   -4 |               -14.86
+ 1.2345678901234e+200 | 1.2345678901234e-200
+               1e+308 |                   10
+             Infinity |            -Infinity
+                  NaN |             Infinity
+                  NaN |            -Infinity
+(16 rows)
+
+select b,c from vfloat8_test where b>c order by a;
+          b           |          c           
+----------------------+----------------------
+                    2 |                    0
+               1004.3 |                  100
+                  -.1 |                 -100
+                  NaN |                 -200
+               1e+308 |              -1e+308
+                  NaN |                    0
+             Infinity |                  -23
+                   -4 |               -14.86
+ 1.2345678901234e+200 | 1.2345678901234e-200
+               1e+308 |                   10
+             Infinity |            -Infinity
+                  NaN |             Infinity
+                  NaN |            -Infinity
+(13 rows)
+
+select b,c from vfloat8_test where b>=c order by a;
+          b           |          c           
+----------------------+----------------------
+                    2 |                    0
+               1004.3 |                  100
+               1e+308 |               1e+308
+                  -.1 |                 -100
+                  NaN |                 -200
+               1e+308 |              -1e+308
+                  NaN |                    0
+             Infinity |                  -23
+                   -4 |               -14.86
+ 1.2345678901234e+200 | 1.2345678901234e-200
+               1e+308 |                   10
+                  NaN |                  NaN
+             Infinity |             Infinity
+             Infinity |            -Infinity
+            -Infinity |            -Infinity
+            -Infinity |            -Infinity
+                  NaN |             Infinity
+                  NaN |            -Infinity
+(18 rows)
+
+select b,c from vfloat8_test where b<c order by a;
+          b          |   c   
+---------------------+-------
+               1e+38 | 3e+38
+ 1.2345678901234e-20 |     3
+                -200 |   NaN
+(3 rows)
+
+select b,c from vfloat8_test where b<=c order by a;
+          b          |     c     
+---------------------+-----------
+               1e+38 |     3e+38
+              1e+308 |    1e+308
+ 1.2345678901234e-20 |         3
+                -200 |       NaN
+                 NaN |       NaN
+            Infinity |  Infinity
+           -Infinity | -Infinity
+           -Infinity | -Infinity
+(8 rows)
+
+select b,c from vfloat8_test where b=c and a > 0 order by a;
+     b     |     c     
+-----------+-----------
+    1e+308 |    1e+308
+       NaN |       NaN
+  Infinity |  Infinity
+ -Infinity | -Infinity
+ -Infinity | -Infinity
+(5 rows)
+
+select b,c from vfloat8_test where b<>c and a > 0 order by a;
+          b           |          c           
+----------------------+----------------------
+                    2 |                    0
+               1004.3 |                  100
+                1e+38 |                3e+38
+  1.2345678901234e-20 |                    3
+                  -.1 |                 -100
+                  NaN |                 -200
+               1e+308 |              -1e+308
+                  NaN |                    0
+                 -200 |                  NaN
+             Infinity |                  -23
+                   -4 |               -14.86
+ 1.2345678901234e+200 | 1.2345678901234e-200
+               1e+308 |                   10
+             Infinity |            -Infinity
+                  NaN |             Infinity
+                  NaN |            -Infinity
+(16 rows)
+
+select b,c from vfloat8_test where b>c and a > 0 order by a;
+          b           |          c           
+----------------------+----------------------
+                    2 |                    0
+               1004.3 |                  100
+                  -.1 |                 -100
+                  NaN |                 -200
+               1e+308 |              -1e+308
+                  NaN |                    0
+             Infinity |                  -23
+                   -4 |               -14.86
+ 1.2345678901234e+200 | 1.2345678901234e-200
+               1e+308 |                   10
+             Infinity |            -Infinity
+                  NaN |             Infinity
+                  NaN |            -Infinity
+(13 rows)
+
+select b,c from vfloat8_test where b>=c and a > 0 order by a;
+          b           |          c           
+----------------------+----------------------
+                    2 |                    0
+               1004.3 |                  100
+               1e+308 |               1e+308
+                  -.1 |                 -100
+                  NaN |                 -200
+               1e+308 |              -1e+308
+                  NaN |                    0
+             Infinity |                  -23
+                   -4 |               -14.86
+ 1.2345678901234e+200 | 1.2345678901234e-200
+               1e+308 |                   10
+                  NaN |                  NaN
+             Infinity |             Infinity
+             Infinity |            -Infinity
+            -Infinity |            -Infinity
+            -Infinity |            -Infinity
+                  NaN |             Infinity
+                  NaN |            -Infinity
+(18 rows)
+
+select b,c from vfloat8_test where b<c and a > 0 order by a;
+          b          |   c   
+---------------------+-------
+               1e+38 | 3e+38
+ 1.2345678901234e-20 |     3
+                -200 |   NaN
+(3 rows)
+
+select b,c from vfloat8_test where b<=c and a > 0 order by a;
+          b          |     c     
+---------------------+-----------
+               1e+38 |     3e+38
+              1e+308 |    1e+308
+ 1.2345678901234e-20 |         3
+                -200 |       NaN
+                 NaN |       NaN
+            Infinity |  Infinity
+           -Infinity | -Infinity
+           -Infinity | -Infinity
+(8 rows)
+
+select b+c from vfloat8_test where b=c order by a;
+ERROR:  value out of range: overflow
+select b+c from vfloat8_test where b<>c order by a;
+       ?column?       
+----------------------
+                    2
+               1104.3
+                4e+38
+                    3
+               -100.1
+                  NaN
+                    0
+                  NaN
+                  NaN
+             Infinity
+               -18.86
+ 1.2345678901234e+200
+               1e+308
+                  NaN
+                  NaN
+                  NaN
+(16 rows)
+
+select b+c from vfloat8_test where b>c order by a;
+       ?column?       
+----------------------
+                    2
+               1104.3
+               -100.1
+                  NaN
+                    0
+                  NaN
+             Infinity
+               -18.86
+ 1.2345678901234e+200
+               1e+308
+                  NaN
+                  NaN
+                  NaN
+(13 rows)
+
+select b+c from vfloat8_test where b>=c order by a;
+ERROR:  value out of range: overflow
+select b+c from vfloat8_test where b<c order by a;
+ ?column? 
+----------
+    4e+38
+        3
+      NaN
+(3 rows)
+
+select b+c from vfloat8_test where b<=c order by a;
+ERROR:  value out of range: overflow
+        
+select b+c from vfloat8_test where b=c and a > 0 order by a;
+ERROR:  value out of range: overflow
+select b+c from vfloat8_test where b<>c and a > 0 order by a;
+       ?column?       
+----------------------
+                    2
+               1104.3
+                4e+38
+                    3
+               -100.1
+                  NaN
+                    0
+                  NaN
+                  NaN
+             Infinity
+               -18.86
+ 1.2345678901234e+200
+               1e+308
+                  NaN
+                  NaN
+                  NaN
+(16 rows)
+
+select b+c from vfloat8_test where b>c and a > 0 order by a;
+       ?column?       
+----------------------
+                    2
+               1104.3
+               -100.1
+                  NaN
+                    0
+                  NaN
+             Infinity
+               -18.86
+ 1.2345678901234e+200
+               1e+308
+                  NaN
+                  NaN
+                  NaN
+(13 rows)
+
+select b+c from vfloat8_test where b>=c and a > 0 order by a;
+ERROR:  value out of range: overflow
+select b+c from vfloat8_test where b<c and a > 0 order by a;
+ ?column? 
+----------
+    4e+38
+        3
+      NaN
+(3 rows)
+
+select b+c from vfloat8_test where b<=c and a > 0 order by a;		
+ERROR:  value out of range: overflow
+--clean table
+drop table vfloat4_test;
+drop table vfloat8_test;

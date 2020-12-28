@@ -1,0 +1,725 @@
+---- create required databases with different encoding for compatibility test.
+CREATE DATABASE DB_ASCII_BULKLOAD_COMPATIBILITY_TEST WITH ENCODING 'SQL_ASCII' LC_COLLATE='C' LC_CTYPE='C' TEMPLATE=template0;
+CREATE DATABASE DB_LATIN1_BULKLOAD_COMPATIBILITY_TEST WITH ENCODING 'Latin1' LC_COLLATE='C' LC_CTYPE='C' TEMPLATE=template0;
+CREATE DATABASE DB_GBK_BULKLOAD_COMPATIBILITY_TEST WITH ENCODING 'GBK' LC_COLLATE='C' LC_CTYPE='C' TEMPLATE=template0;
+CREATE DATABASE DB_EUCJIS2004_BULKLOAD_COMPATIBILITY_TEST WITH ENCODING 'EUCJIS2004' LC_COLLATE='C' LC_CTYPE='C' TEMPLATE=template0;
+CREATE DATABASE TD_FORMAT_DB DBCOMPATIBILITY 'TD' template template0 lc_ctype 'C' lc_collate 'C';
+----
+---- load with bulkload compatible_illegal_chars
+----
+----smartcare case
+CREATE TABLE SC_INVALID_ENCODING_TEST (
+   batchno              numeric(12,0)                  null,
+   starttime            numeric(18,0)                  null,
+   rat                  numeric(1,0)                   null,
+   apn                  varchar(64)                    null,
+   prot_category        numeric(5,0)                   null,
+   prot_type            numeric(5,0)                   null,
+   host                 varchar(64)                    null,
+   l4_ul_throughput     numeric(20,0)                  null,
+   l4_dw_throughput     numeric(20,0)                  null,
+   l4_ul_packets        numeric(18,0)                  null,
+   l4_dw_packets        numeric(18,0)                  null,
+   tcpconncount         numeric(10,0)                  null,
+   tcpconnsucccount     numeric(10,0)                  null,
+   carrier_id           numeric(5,0)                   null,
+   tcp_rtt              numeric(20,0)                  null,
+   app_id               numeric(18,0)                  null
+   )   
+with(orientation=column, compression=low)
+distribute by hash(carrier_id,app_id);
+CREATE FOREIGN TABLE EXT_SC_INVALID_ENCODING_TEST (
+   batchno              numeric(12,0)                  null,
+   starttime            numeric(18,0)                  null,
+   rat                  numeric(1,0)                   null,
+   apn                  varchar(64)                    null,
+   prot_category        numeric(5,0)                   null,
+   prot_type            numeric(5,0)                   null,
+   host                 varchar(64)                    null,
+   l4_ul_throughput     numeric(20,0)                  null,
+   l4_dw_throughput     numeric(20,0)                  null,
+   l4_ul_packets        numeric(18,0)                  null,
+   l4_dw_packets        numeric(18,0)                  null,
+   tcpconncount         numeric(10,0)                  null,
+   tcpconnsucccount     numeric(10,0)                  null,
+   carrier_id           numeric(5,0)                   null,
+   tcp_rtt              numeric(20,0)                  null,
+   app_id               numeric(18,0)                  null
+)SERVER hdfs_server OPTIONS(format 'text', filenames '/user/hive/warehouse/text_on_hdfs/smartcare_test.data', encoding 'sql_ascii', delimiter '|', checkencoding 'low', ignore_extra_data 'true')distribute by roundrobin;
+INSERT INTO SC_INVALID_ENCODING_TEST SELECT * FROM EXT_SC_INVALID_ENCODING_TEST;
+SELECT * FROM SC_INVALID_ENCODING_TEST;
+DROP TABLE SC_INVALID_ENCODING_TEST;
+DROP FOREIGN TABLE EXT_SC_INVALID_ENCODING_TEST;
+----invalid chars for server_encoding=UTF8
+----(1)local2utf8 test
+----(1.1)only char type test
+CREATE TABLE COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE (
+		COL1_CHAR		CHAR(100) NOT NULL,
+		COL2_VARCHAR	VARCHAR(100) NOT NULL,
+		COL3_VARCHAR2	VARCHAR2(100) NOT NULL,
+		COL4_NVARCHAR2	NVARCHAR2(100) NOT NULL,
+		COL5_CLOB		CLOB NOT NULL,
+		COL6_TEXT		TEXT NOT NULL
+);
+----(1.1.1)for text format
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE (
+		COL1_CHAR		CHAR(100) NOT NULL,
+		COL2_VARCHAR	VARCHAR(100) NOT NULL,
+		COL3_VARCHAR2	VARCHAR2(100) NOT NULL,
+		COL4_NVARCHAR2	NVARCHAR2(100) NOT NULL,
+		COL5_CLOB		CLOB NOT NULL,
+		COL6_TEXT		TEXT NOT NULL
+)SERVER hdfs_server OPTIONS(format 'text', filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_just_char_type_text_format.data', encoding 'utf8', delimiter '|', checkencoding 'low')distribute by roundrobin;
+INSERT INTO COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+SELECT TRIM(COL1_CHAR), TRIM(COL2_VARCHAR), TRIM(COL3_VARCHAR2), TRIM(COL4_NVARCHAR2), COL5_CLOB, COL6_TEXT FROM COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE ORDER BY TRIM(COL1_CHAR);
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE OPTIONS (SET checkencoding 'high');
+SELECT TRIM(COL1_CHAR), TRIM(COL2_VARCHAR), TRIM(COL3_VARCHAR2), TRIM(COL4_NVARCHAR2), COL5_CLOB, COL6_TEXT FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE ORDER BY TRIM(COL1_CHAR);
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+DROP TABLE COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+----(1.2)mixed type test
+CREATE TABLE COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		COL1_INT		BIGINT NOT NULL,
+		COL2_CHAR		CHAR(100) NOT NULL,
+		COL3_VARCHAR	VARCHAR(100) NOT NULL,
+		COL4_VARCHAR2	VARCHAR2(100) NOT NULL,
+		COL5_RAW		RAW NOT NULL,	
+		COL6_NVARCHAR2	NVARCHAR2(100) NOT NULL,
+		COL7_CLOB		CLOB NOT NULL,
+		COL8_TEXT		TEXT NOT NULL,
+		COL9_TIMESTAMP	TIMESTAMP NOT NULL
+);
+----(1.2.1)for text format
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		COL1_INT		BIGINT NOT NULL,
+		COL2_CHAR		CHAR(100) NOT NULL,
+		COL3_VARCHAR	VARCHAR(100) NOT NULL,
+		COL4_VARCHAR2	VARCHAR2(100) NOT NULL,
+		COL5_RAW		RAW NOT NULL,	
+		COL6_NVARCHAR2	NVARCHAR2(100) NOT NULL,
+		COL7_CLOB		CLOB NOT NULL,
+		COL8_TEXT		TEXT NOT NULL,
+		COL9_TIMESTAMP	TIMESTAMP NOT NULL
+)SERVER hdfs_server OPTIONS(format 'text', filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_mixed_type_text_format.data', delimiter '|', checkencoding 'low') distribute by roundrobin;
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+INSERT INTO COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+----(1.2.1.1)gbk2utf8
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		C_BIGINT BIGINT,
+		C_CHAR_1 CHAR(100),
+		C_CHAR_2 CHAR(100),
+		C_VARCHAR VARCHAR(1024),
+		C_TEXT TEXT,
+		C_CLOB CLOB,
+		C_DP1 DOUBLE PRECISION,
+		C_DP2 DOUBLE PRECISION
+)SERVER hdfs_server OPTIONS(format 'text', encoding 'gbk', filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_mixed_type_text_format_gbk.data', delimiter '|', checkencoding 'low') distribute by roundrobin;
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE LIMIT 1;
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE OPTIONS(SET checkencoding 'high');
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE LIMIT 1;
+
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+CREATE TABLE gbk2utf8_test(a varchar(4));
+CREATE FOREIGN TABLE ft_gbk2utf8_test_1(a varchar(4))
+SERVER hdfs_server OPTIONS
+(filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_just_char_type_gbk2utf8_1.data',
+format 'text', encoding 'GBK', delimiter '|', checkencoding 'high')
+distribute by roundrobin;
+insert into gbk2utf8_test select * from ft_gbk2utf8_test_1;
+ALTER FOREIGN TABLE ft_gbk2utf8_test_1 OPTIONS(SET checkencoding 'low');
+insert into gbk2utf8_test select * from ft_gbk2utf8_test_1;
+SELECT * FROM gbk2utf8_test ORDER BY a;
+
+CREATE FOREIGN TABLE ft_gbk2utf8_test_2(a varchar(4))
+SERVER hdfs_server OPTIONS
+(filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_just_char_type_gbk2utf8_2.data',
+format 'text', encoding 'GBK', delimiter '|', checkencoding 'high')
+distribute by roundrobin;
+insert into gbk2utf8_test select * from ft_gbk2utf8_test_2;
+ALTER FOREIGN TABLE ft_gbk2utf8_test_2 OPTIONS(SET checkencoding 'low');
+insert into gbk2utf8_test select * from ft_gbk2utf8_test_2;
+
+SELECT * FROM gbk2utf8_test ORDER BY a;
+DROP TABLE gbk2utf8_test;
+DROP FOREIGN TABLE ft_gbk2utf8_test_1;
+DROP FOREIGN TABLE ft_gbk2utf8_test_2;
+
+----(1.2.1.2)utf82gbk
+\c DB_GBK_BULKLOAD_COMPATIBILITY_TEST;
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER HDFS_FDW OPTIONS 
+(address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@', type 'hdfs');
+
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		C_BIGINT BIGINT,
+		C_CHAR_1 CHAR(100),
+		C_CHAR_2 CHAR(100),
+		C_VARCHAR VARCHAR(1024),
+		C_TEXT TEXT,
+		C_CLOB CLOB,
+		C_DP1 DOUBLE PRECISION,
+		C_DP2 DOUBLE PRECISION
+)SERVER hdfs_server OPTIONS(format 'text', encoding 'utf8', filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_mixed_type_text_format_gbk.data', delimiter '|', checkencoding 'low') distribute by roundrobin;
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE LIMIT 1;
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE OPTIONS(SET checkencoding 'high');
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE LIMIT 1;
+
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+CREATE TABLE utf82gbk_test(a varchar(4));
+
+CREATE FOREIGN TABLE ft_utf82gbk_test_1(a varchar(4))
+SERVER hdfs_server OPTIONS
+(filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_just_char_type_utf82gbk_1.data',
+format 'text', encoding 'utf8', delimiter '|', checkencoding 'high')
+distribute by roundrobin;
+insert into utf82gbk_test select * from ft_utf82gbk_test_1;
+ALTER FOREIGN TABLE ft_utf82gbk_test_1 OPTIONS(SET checkencoding 'low');
+insert into utf82gbk_test select * from ft_utf82gbk_test_1;
+SELECT * FROM utf82gbk_test ORDER BY a;
+CREATE FOREIGN TABLE ft_utf82gbk_test_2(a varchar(4))
+SERVER hdfs_server OPTIONS
+(filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_just_char_type_utf82gbk_2.data',
+format 'text', encoding 'utf8', delimiter '|', checkencoding 'high')
+distribute by roundrobin;
+insert into utf82gbk_test select * from ft_utf82gbk_test_2;
+ALTER FOREIGN TABLE ft_utf82gbk_test_2 OPTIONS(SET checkencoding 'low');
+insert into utf82gbk_test select * from ft_utf82gbk_test_2;
+SELECT * FROM utf82gbk_test ORDER BY a;
+DROP TABLE utf82gbk_test;
+DROP FOREIGN TABLE ft_utf82gbk_test_1;
+DROP FOREIGN TABLE ft_utf82gbk_test_2;
+\c regression;
+----(1.2.1.3)latin12utf8
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		C_BIGINT BIGINT,
+		C_CHAR_1 CHAR(100),
+		C_CHAR_2 CHAR(100),
+		C_VARCHAR VARCHAR(1024),
+		C_TEXT TEXT,
+		C_CLOB CLOB,
+		C_DP1 DOUBLE PRECISION,
+		C_DP2 DOUBLE PRECISION
+)SERVER hdfs_server OPTIONS(format 'text', encoding 'latin1', filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_mixed_type_text_format_latin1.data', delimiter '|', checkencoding 'low') distribute by roundrobin;
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE LIMIT 1;
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE OPTIONS(SET checkencoding 'high');
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE LIMIT 1;
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+----(1.2.1.4)utf82latin1
+\c DB_LATIN1_BULKLOAD_COMPATIBILITY_TEST;
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER HDFS_FDW OPTIONS 
+(address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@', type 'hdfs');
+
+SHOW server_encoding;
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		C_BIGINT BIGINT,
+		C_CHAR_1 CHAR(100),
+		C_CHAR_2 CHAR(100),
+		C_VARCHAR VARCHAR(1024),
+		C_TEXT TEXT,
+		C_CLOB CLOB,
+		C_DP1 DOUBLE PRECISION,
+		C_DP2 DOUBLE PRECISION
+)SERVER hdfs_server OPTIONS(format 'text', encoding 'utf8', filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_mixed_type_text_format_latin1.data', delimiter '|', checkencoding 'low') distribute by roundrobin;
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE LIMIT 1;
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE OPTIONS(SET checkencoding 'high');
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE LIMIT 1;
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+CREATE TABLE utf82latin1_test(a varchar(4));
+
+CREATE FOREIGN TABLE ft_utf82latin1_test_1(a varchar(4))
+SERVER hdfs_server OPTIONS
+(filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_just_char_type_utf82latin1_1.data',
+format 'text', encoding 'utf8', delimiter '|', checkencoding 'high')
+distribute by roundrobin;
+insert into utf82latin1_test select * from ft_utf82latin1_test_1;
+ALTER FOREIGN TABLE ft_utf82latin1_test_1 OPTIONS(SET checkencoding 'low');
+insert into utf82latin1_test select * from ft_utf82latin1_test_1;
+SELECT * FROM utf82latin1_test ORDER BY a;
+CREATE FOREIGN TABLE ft_utf82latin1_test_2(a varchar(4))
+SERVER hdfs_server OPTIONS
+(filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_just_char_type_utf82latin1_2.data',
+format 'text', encoding 'utf8', delimiter '|', checkencoding 'high')
+distribute by roundrobin;
+insert into utf82latin1_test select * from ft_utf82latin1_test_2;
+ALTER FOREIGN TABLE ft_utf82latin1_test_2 OPTIONS(SET checkencoding 'low');
+insert into utf82latin1_test select * from ft_utf82latin1_test_2;
+SELECT * FROM utf82latin1_test ORDER BY a;
+CREATE FOREIGN TABLE ft_utf82latin1_test_3(a varchar(4))
+SERVER hdfs_server OPTIONS
+(filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_just_char_type_utf82latin1_3.data',
+format 'text', encoding 'utf8', delimiter '|', checkencoding 'high')
+distribute by roundrobin;
+insert into utf82latin1_test select * from ft_utf82latin1_test_3;
+ALTER FOREIGN TABLE ft_utf82latin1_test_3 OPTIONS(SET checkencoding 'low');
+insert into utf82latin1_test select * from ft_utf82latin1_test_3;
+SELECT * FROM utf82latin1_test ORDER BY a;
+DROP TABLE utf82latin1_test;
+----(1.2.1.5)mic2latin1
+SHOW server_encoding;
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		C_BIGINT BIGINT,
+		C_CHAR_1 CHAR(100),
+		C_CHAR_2 CHAR(100),
+		C_VARCHAR VARCHAR(1024),
+		C_TEXT TEXT,
+		C_CLOB CLOB,
+		C_DP1 DOUBLE PRECISION,
+		C_DP2 DOUBLE PRECISION
+)SERVER hdfs_server OPTIONS(format 'text', encoding 'MULE_INTERNAL', filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_mixed_type_text_format_mic.data', delimiter '|'
+, checkencoding 'low'
+) distribute by roundrobin;
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE LIMIT 1;
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE OPTIONS(SET checkencoding 'high');
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE LIMIT 1;
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+CREATE TABLE mic2latin_test(a varchar(4));
+CREATE FOREIGN TABLE ft_mic2latin_test_1(a varchar(4))
+SERVER hdfs_server OPTIONS
+(filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_just_char_type_mic2latin_1.data',
+format 'text', encoding 'MULE_INTERNAL', delimiter '|', checkencoding 'high')
+distribute by roundrobin;
+insert into mic2latin_test select * from ft_mic2latin_test_1;
+ALTER FOREIGN TABLE ft_mic2latin_test_1 OPTIONS(SET checkencoding 'low');
+insert into mic2latin_test select * from ft_mic2latin_test_1;
+SELECT * FROM mic2latin_test ORDER BY a;
+
+CREATE FOREIGN TABLE ft_mic2latin_test_2(a varchar(4))
+SERVER hdfs_server OPTIONS
+(filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_just_char_type_mic2latin_2.data',
+format 'text', encoding 'MULE_INTERNAL', delimiter '|', checkencoding 'high')
+distribute by roundrobin;
+insert into mic2latin_test select * from ft_mic2latin_test_2;
+ALTER FOREIGN TABLE ft_mic2latin_test_2 OPTIONS(SET checkencoding 'low');
+insert into mic2latin_test select * from ft_mic2latin_test_2;
+SELECT * FROM mic2latin_test ORDER BY a;
+
+CREATE FOREIGN TABLE ft_mic2latin_test_3(a varchar(4))
+SERVER hdfs_server OPTIONS
+(filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_just_char_type_mic2latin_3.data',
+format 'text', encoding 'MULE_INTERNAL', delimiter '|', checkencoding 'high')
+distribute by roundrobin;
+insert into mic2latin_test select * from ft_mic2latin_test_3;
+ALTER FOREIGN TABLE ft_mic2latin_test_3 OPTIONS(SET checkencoding 'low');
+insert into mic2latin_test select * from ft_mic2latin_test_3;
+SELECT * FROM mic2latin_test ORDER BY a;
+DROP TABLE mic2latin_test;
+----(1.2.1.6)latin12latin1
+SHOW server_encoding;
+CREATE TABLE LAIN1_TO_LATIN1
+(
+	C_BIGINT BIGINT,
+    C_CHAR_1 CHAR(100),
+    C_CHAR_2 CHAR(100),
+    C_VARCHAR VARCHAR(1024),
+    C_TEXT TEXT,
+    C_CLOB CLOB,
+    C_NUMERIC NUMERIC(20,5),
+    C_DP DOUBLE PRECISION
+);
+CREATE FOREIGN TABLE FT_LAIN1_TO_LATIN1
+(
+	C_BIGINT BIGINT,
+    C_CHAR_1 CHAR(100),
+    C_CHAR_2 CHAR(100),
+    C_VARCHAR VARCHAR(1024),
+    C_TEXT TEXT,
+    C_CLOB CLOB,
+    C_NUMERIC NUMERIC(20,5),
+    C_DP DOUBLE PRECISION
+) SERVER hdfs_server OPTIONS(format 'text', encoding 'latin1', filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_single_byte_encoding.data', delimiter '|'
+, checkencoding 'low'
+) distribute by roundrobin;
+SELECT * FROM FT_LAIN1_TO_LATIN1;
+ALTER FOREIGN TABLE FT_LAIN1_TO_LATIN1 OPTIONS(SET checkencoding 'high');
+SELECT * FROM FT_LAIN1_TO_LATIN1;
+CREATE FOREIGN TABLE FT_LAIN1_TO_LATIN1_1
+(
+	C_BIGINT BIGINT,
+    C_CHAR_1 CHAR(100),
+    C_CHAR_2 CHAR(100),
+    C_VARCHAR VARCHAR(1024),
+    C_TEXT TEXT,
+    C_CLOB CLOB,
+    C_NUMERIC NUMERIC(20,5),
+    C_DP DOUBLE PRECISION
+)
+SERVER hdfs_server OPTIONS
+(filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_single_byte_encoding.data',
+format 'text', encoding 'latin1', delimiter '|', checkencoding 'low')
+distribute by roundrobin;
+insert into LAIN1_TO_LATIN1 select * from FT_LAIN1_TO_LATIN1_1;
+SELECT * FROM LAIN1_TO_LATIN1;
+TRUNCATE LAIN1_TO_LATIN1;
+insert into LAIN1_TO_LATIN1 select * from FT_LAIN1_TO_LATIN1_1;
+DROP TABLE LAIN1_TO_LATIN1;
+DROP FOREIGN TABLE FT_LAIN1_TO_LATIN1;
+DROP FOREIGN TABLE FT_LAIN1_TO_LATIN1_1;
+----(1.2.1.7)ascii2ascii
+\c DB_ASCII_BULKLOAD_COMPATIBILITY_TEST;
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER HDFS_FDW OPTIONS 
+(address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@', type 'hdfs');
+
+SHOW server_encoding;
+CREATE TABLE ASCII_TO_ASCII
+(
+	C_BIGINT BIGINT,
+    C_CHAR_1 CHAR(100),
+    C_CHAR_2 CHAR(100),
+    C_VARCHAR VARCHAR(1024),
+    C_TEXT TEXT,
+    C_CLOB CLOB,
+    C_NUMERIC NUMERIC(20,5),
+    C_DP DOUBLE PRECISION
+);
+CREATE FOREIGN TABLE FT_ASCII_TO_ASCII
+(
+	C_BIGINT BIGINT,
+    C_CHAR_1 CHAR(100),
+    C_CHAR_2 CHAR(100),
+    C_VARCHAR VARCHAR(1024),
+    C_TEXT TEXT,
+    C_CLOB CLOB,
+    C_NUMERIC NUMERIC(20,5),
+    C_DP DOUBLE PRECISION
+) SERVER hdfs_server OPTIONS(format 'text', encoding 'SQL_ASCII', filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_single_byte_encoding.data', delimiter '|'
+, checkencoding 'low'
+) distribute by roundrobin;
+SELECT * FROM FT_ASCII_TO_ASCII;
+ALTER FOREIGN TABLE FT_ASCII_TO_ASCII OPTIONS(SET checkencoding 'high');
+SELECT * FROM FT_ASCII_TO_ASCII;
+CREATE FOREIGN TABLE FT_LATIN1_TO_ASCII
+(
+	C_BIGINT BIGINT,
+    C_CHAR_1 CHAR(100),
+    C_CHAR_2 CHAR(100),
+    C_VARCHAR VARCHAR(1024),
+    C_TEXT TEXT,
+    C_CLOB CLOB,
+    C_NUMERIC NUMERIC(20,5),
+    C_DP DOUBLE PRECISION
+) SERVER hdfs_server OPTIONS(format 'text', encoding 'latin1', filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_single_byte_encoding.data', delimiter '|'
+, checkencoding 'low'
+) distribute by roundrobin;
+insert into ASCII_TO_ASCII select * from FT_LATIN1_TO_ASCII;
+SELECT * FROM ASCII_TO_ASCII;
+TRUNCATE ASCII_TO_ASCII;
+
+ALTER FOREIGN TABLE FT_LATIN1_TO_ASCII OPTIONS(SET checkencoding 'high');
+insert into ASCII_TO_ASCII select * from FT_LATIN1_TO_ASCII;
+DROP TABLE ASCII_TO_ASCII;
+DROP FOREIGN TABLE FT_ASCII_TO_ASCII;
+DROP FOREIGN TABLE FT_LATIN1_TO_ASCII;
+
+----(1.2.1.8)utf82eucjis2004
+\c DB_EUCJIS2004_BULKLOAD_COMPATIBILITY_TEST;
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER HDFS_FDW OPTIONS 
+(address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@', type 'hdfs');
+
+SHOW server_encoding;
+CREATE TABLE utf82eucjis2004_test(a varchar(8));
+CREATE FOREIGN TABLE ft_utf82eucjis2004_test_1 (a varchar(8))
+SERVER hdfs_server OPTIONS(format 'text', encoding 'utf8', filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_just_char_type_utf82eucjis2004_1.data', delimiter '|'
+, checkencoding 'high'
+) distribute by roundrobin;
+insert into utf82eucjis2004_test select * from ft_utf82eucjis2004_test_1;
+ALTER FOREIGN TABLE ft_utf82eucjis2004_test_1 OPTIONS(SET checkencoding 'low');
+insert into utf82eucjis2004_test select * from ft_utf82eucjis2004_test_1;
+
+CREATE FOREIGN TABLE ft_utf82eucjis2004_test_2 (a varchar(8))
+SERVER hdfs_server OPTIONS(format 'text', encoding 'utf8', filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_just_char_type_utf82eucjis2004_2.data', delimiter '|'
+, checkencoding 'high'
+) distribute by roundrobin;
+insert into utf82eucjis2004_test select * from ft_utf82eucjis2004_test_2;
+ALTER FOREIGN TABLE ft_utf82eucjis2004_test_2 OPTIONS(SET checkencoding 'low');
+insert into utf82eucjis2004_test select * from ft_utf82eucjis2004_test_2;
+
+CREATE FOREIGN TABLE ft_utf82eucjis2004_test_3 (a varchar(8))
+SERVER hdfs_server OPTIONS(format 'text', encoding 'utf8', filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_just_char_type_utf82eucjis2004_3.data', delimiter '|'
+, checkencoding 'high'
+) distribute by roundrobin;
+insert into utf82eucjis2004_test select * from ft_utf82eucjis2004_test_3;
+ALTER FOREIGN TABLE ft_utf82eucjis2004_test_3 OPTIONS(SET checkencoding 'low');
+insert into utf82eucjis2004_test select * from ft_utf82eucjis2004_test_3;
+
+CREATE FOREIGN TABLE ft_utf82eucjis2004_test_4 (a varchar(8))
+SERVER hdfs_server OPTIONS(format 'text', encoding 'utf8', filenames '/user/hive/warehouse/text_on_hdfs/invalid_char_for_just_char_type_utf82eucjis2004_4.data', delimiter '|'
+, checkencoding 'high'
+) distribute by roundrobin;
+insert into utf82eucjis2004_test select * from ft_utf82eucjis2004_test_4;
+ALTER FOREIGN TABLE ft_utf82eucjis2004_test_4 OPTIONS(SET checkencoding 'low');
+insert into utf82eucjis2004_test select * from ft_utf82eucjis2004_test_4;
+SELECT COUNT(*) FROM utf82eucjis2004_test;
+DROP TABLE utf82eucjis2004_test;
+\c regression;
+
+---
+--- bulkload datetime format test
+---
+CREATE TABLE DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+);
+--- (1)invalid datetime format test
+--- (1.1)invalid date format test
+CREATE FOREIGN TABLE FT_DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+)
+server hdfs_server options
+(filenames '/user/hive/warehouse/text_on_hdfs/datetime_valid.data', format 'text', date_format 'YEAR-MM-DD', time_format 'HH24:MI:SS', timestamp_format 'YYYY-MM-DD HH24:MI:SS', smalldatetime_format 'YYYY-MM-DD HH24:MI:SS')distribute by roundrobin;
+--- (1.2)invalid time format test
+CREATE FOREIGN TABLE FT_DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+)
+server hdfs_server options
+(filenames '/user/hive/warehouse/text_on_hdfs/datetime_valid.data', format 'text', date_format 'YYYY-MM-DD', time_format 'HH23:MI:SS', timestamp_format 'YYYY-MM-DD HH24:MI:SS', smalldatetime_format 'YYYY-MM-DD HH24:MI:SS') distribute by roundrobin;
+--- (1.3)invalid timestamp format test
+CREATE FOREIGN TABLE FT_DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+)
+server hdfs_server options
+(filenames '/user/hive/warehouse/text_on_hdfs/datetime_valid.data', format 'text', date_format 'YYYY-MM-DD', time_format 'HH24:MI:SS', timestamp_format 'YYYY-MM-DD HH24:MIN:SS', smalldatetime_format 'YYYY-MM-DD HH24:MI:SS') distribute by roundrobin;
+--- (1.4)invalid smalldatetime format test
+CREATE FOREIGN TABLE FT_DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+)
+server hdfs_server options
+(filenames '/user/hive/warehouse/text_on_hdfs/datetime_valid.data', format 'text', date_format 'YYYY-MM-DD', time_format 'HH24:MI:SS', timestamp_format 'YYYY-MM-DD HH24:MI:SS', smalldatetime_format 'YYYY-MM-DD HH24:MI:SEC') distribute by roundrobin;
+--- (1.5)datetime format isn't allowed for exporting test
+
+--- (2)valid datetime format test
+SHOW NLS_TIMESTAMP_FORMAT;
+SHOW DATESTYLE;
+--- (2.1)for sql_compatibility = A_FORMAT
+--- (2.1.1)no bulkload datetime format specified
+CREATE FOREIGN TABLE FT_DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+)
+server hdfs_server options
+(filenames '/user/hive/warehouse/text_on_hdfs/datetime_valid_format_1.data', format 'text', delimiter '|') distribute by roundrobin;
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+
+TRUNCATE DATETIME_TEST;
+
+--- (2.1.2)bulkload datetime format 1 test
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(ADD date_format 'YYYY-MM-DD', time_format 'HH24:MI:SS', ignore_extra_data 'true', timestamp_format 'YYYY-MM-DD HH24:MI:SS', noescaping 'true', smalldatetime_format 'YYYY-MM-DD HH24:MI:SS', checkencoding 'high');
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+
+TRUNCATE DATETIME_TEST;
+
+--- (2.1.3)bulkload datetime format 2 test
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(SET filenames '/user/hive/warehouse/text_on_hdfs/datetime_valid_format_2.data');
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(SET date_format 'YYYYMMDD', SET time_format 'HHMISS', SET timestamp_format 'YYYYMMDDHHMISS', SET smalldatetime_format 'YYYYMMDDHH24MISS');
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+
+TRUNCATE DATETIME_TEST;
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(DROP date_format, DROP time_format, DROP timestamp_format, DROP smalldatetime_format);
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+
+--- (2.1.4)bulkload datetime format mixed with TO_DATE()/TO_TIMESTAMP() test
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT TO_DATE(COL_DATE, 'YYYYMMDD'), COL_TIME, TO_TIMESTAMP(COL_TIMESTAMP, 'YYYYMMDDHHMISS'), COL_SMALLDATETIME FROM FT_DATETIME_TEST;
+--- (2.1.5)bulkload datetime format 3 test
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(SET filenames '/user/hive/warehouse/text_on_hdfs/datetime_valid_format_3.data');
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(ADD date_format 'DD/MM/YYYY', time_format 'HHMISS', timestamp_format 'DD/MM/YYYYHHMISS', smalldatetime_format 'DD/MM/YYYYHHMISS');
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+
+TRUNCATE DATETIME_TEST;
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(DROP date_format, DROP time_format, DROP timestamp_format, DROP smalldatetime_format);
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+
+TRUNCATE DATETIME_TEST;
+
+--- (2.1.6)bulkload datetime format 4 test
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(SET filenames '/user/hive/warehouse/text_on_hdfs/datetime_valid_format_4.data');
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(ADD date_format 'MONTH DD, YYYY AD', time_format 'HHMISS', timestamp_format 'MONTH DD, YYYY ADHHMISS', smalldatetime_format 'MONTH DD, YYYY ADHHMISS');
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+
+TRUNCATE DATETIME_TEST;
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(DROP date_format, DROP time_format, DROP timestamp_format, DROP smalldatetime_format);
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+
+TRUNCATE DATETIME_TEST;
+DROP FOREIGN TABLE FT_DATETIME_TEST;
+
+DROP TABLE DATETIME_TEST;
+--- (2.2)for sql_compatibility = C_FORMAT
+--- (2.2.1)no bulkload datetime format specified
+\c TD_FORMAT_DB;
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER HDFS_FDW OPTIONS 
+(address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@', type 'hdfs');
+
+CREATE TABLE DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+);
+CREATE FOREIGN TABLE FT_DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+)
+server hdfs_server options
+(filenames '/user/hive/warehouse/text_on_hdfs/datetime_valid_format_1.data', format 'text', delimiter '|') distribute by roundrobin;
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+TRUNCATE DATETIME_TEST;
+
+--- (2.2.2)bulkload datetime format 1 test
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(ADD date_format 'YYYY-MM-DD', time_format 'HH24:MI:SS', timestamp_format 'YYYY-MM-DD HH24:MI:SS', smalldatetime_format 'YYYY-MM-DD HH24:MI:SS');
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+
+TRUNCATE DATETIME_TEST;
+
+--- (2.2.3)bulkload datetime format 2 test
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(SET filenames '/user/hive/warehouse/text_on_hdfs/datetime_valid_format_2.data');
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(SET date_format 'YYYYMMDD', SET time_format 'HHMISS', SET timestamp_format 'YYYYMMDDHHMISS', SET smalldatetime_format 'YYYYMMDDHH24MISS');
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+TRUNCATE DATETIME_TEST;
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(DROP date_format, DROP time_format, DROP timestamp_format, DROP smalldatetime_format);
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+--- (2.2.4)bulkload datetime format mixed with TO_DATE()/TO_TIMESTAMP() test
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT TO_DATE(COL_DATE, 'YYYYMMDD'), COL_TIME, TO_TIMESTAMP(COL_TIMESTAMP, 'YYYYMMDDHHMISS'), COL_SMALLDATETIME FROM FT_DATETIME_TEST;
+--- (2.2.5)bulkload datetime format 3 test
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(SET filenames '/user/hive/warehouse/text_on_hdfs/datetime_valid_format_3.data');
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(ADD date_format 'DD/MM/YYYY', time_format 'HHMISS', timestamp_format 'DD/MM/YYYYHHMISS', smalldatetime_format 'DD/MM/YYYYHH24MISS');
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+TRUNCATE DATETIME_TEST;
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(DROP date_format, DROP time_format, DROP timestamp_format, DROP smalldatetime_format);
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+TRUNCATE DATETIME_TEST;
+
+--- (2.2.6)bulkload datetime format 4 test
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(SET filenames '/user/hive/warehouse/text_on_hdfs/datetime_valid_format_4.data');
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(ADD date_format 'FXMONTH DD, YYYY AD', time_format 'HHMISS', timestamp_format 'FXMONTH DD, YYYY ADHHMISS', smalldatetime_format 'FXMONTH DD, YYYY ADHH24MISS');
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+TRUNCATE DATETIME_TEST;
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(DROP date_format, DROP time_format, DROP timestamp_format, DROP smalldatetime_format);
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+TRUNCATE DATETIME_TEST;
+DROP TABLE DATETIME_TEST;
+DROP FOREIGN TABLE FT_DATETIME_TEST;
+\c regression;
+---
+--	bulkload compatible illegal chars test
+---
+--- create foreign table
+CREATE FOREIGN TABLE EXT_LINEITEM_COMPATIBLE_ILLEGAL_CHARS_NORMAL (
+        L_ORDERKEY    BIGINT NOT NULL,
+        L_PARTKEY     BIGINT NOT NULL,
+        L_SUPPKEY     BIGINT NOT NULL,
+        L_LINENUMBER  BIGINT NOT NULL,
+        L_QUANTITY    DECIMAL(15,2) NOT NULL,
+        L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,
+        L_DISCOUNT    DECIMAL(15,2) NOT NULL,
+        L_TAX     DECIMAL(15,2) NOT NULL,
+        L_RETURNFLAG  CHAR(1) NOT NULL,
+        L_LINESTATUS  CHAR(1) NOT NULL,
+        L_SHIPDATE    DATE NOT NULL,
+        L_COMMITDATE  DATE NOT NULL,
+        L_RECEIPTDATE DATE NOT NULL,
+        L_SHIPINSTRUCT CHAR(25) NOT NULL,
+        L_SHIPMODE     CHAR(10) NOT NULL,
+        L_COMMENT      VARCHAR(44) NOT NULL
+)SERVER hdfs_server OPTIONS(format 'text', filenames '/user/hive/warehouse/text_on_hdfs/lineitem.data', delimiter '|', checkencoding 'high', checkencoding 'low') distribute by roundrobin;
+CREATE FOREIGN TABLE EXT_LINEITEM_COMPATIBLE_ILLEGAL_CHARS_NORMAL (
+        L_ORDERKEY    BIGINT NOT NULL,
+        L_PARTKEY     BIGINT NOT NULL,
+        L_SUPPKEY     BIGINT NOT NULL,
+        L_LINENUMBER  BIGINT NOT NULL,
+        L_QUANTITY    DECIMAL(15,2) NOT NULL,
+        L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,
+        L_DISCOUNT    DECIMAL(15,2) NOT NULL,
+        L_TAX     DECIMAL(15,2) NOT NULL,
+        L_RETURNFLAG  CHAR(1) NOT NULL,
+        L_LINESTATUS  CHAR(1) NOT NULL,
+        L_SHIPDATE    DATE NOT NULL,
+        L_COMMITDATE  DATE NOT NULL,
+        L_RECEIPTDATE DATE NOT NULL,
+        L_SHIPINSTRUCT CHAR(25) NOT NULL,
+        L_SHIPMODE     CHAR(10) NOT NULL,
+        L_COMMENT      VARCHAR(44) NOT NULL
+)SERVER hdfs_server OPTIONS(format 'text', filenames '/user/hive/warehouse/text_on_hdfs/lineitem.data', delimiter '|'
+, checkencoding 'low'
+) distribute by roundrobin;
+SELECT ftoptions FROM pg_foreign_table WHERE ftrelid = (select oid from pg_class where relname = 'ext_lineitem_compatible_illegal_chars_normal');
+--- alter foreign table
+ALTER FOREIGN TABLE EXT_LINEITEM_COMPATIBLE_ILLEGAL_CHARS_NORMAL OPTIONS(DROP checkencoding);
+SELECT ftoptions FROM pg_foreign_table WHERE ftrelid = (select oid from pg_class where relname = 'ext_lineitem_compatible_illegal_chars_normal');
+ALTER FOREIGN TABLE EXT_LINEITEM_COMPATIBLE_ILLEGAL_CHARS_NORMAL OPTIONS(ADD checkencoding 'high', checkencoding 'low');
+ALTER FOREIGN TABLE EXT_LINEITEM_COMPATIBLE_ILLEGAL_CHARS_NORMAL OPTIONS(ADD checkencoding 'high');
+SELECT ftoptions FROM pg_foreign_table WHERE ftrelid = (select oid from pg_class where relname = 'ext_lineitem_compatible_illegal_chars_normal');
+ALTER FOREIGN TABLE EXT_LINEITEM_COMPATIBLE_ILLEGAL_CHARS_NORMAL OPTIONS(SET checkencoding 'low');
+SELECT ftoptions FROM pg_foreign_table WHERE ftrelid = (select oid from pg_class where relname = 'ext_lineitem_compatible_illegal_chars_normal');
+--- drop foreign tables
+DROP FOREIGN TABLE EXT_LINEITEM_COMPATIBLE_ILLEGAL_CHARS_NORMAL;
+--- foreign table options conflict
+CREATE FOREIGN TABLE EXT_TABLE_CONFLICT (
+        A INT
+)SERVER hdfs_server OPTIONS(format 'text', filenames '/user/hive/warehouse/text_on_hdfs/conflict.data', null ' '
+, checkencoding 'low'
+) distribute by roundrobin;
+CREATE FOREIGN TABLE EXT_TABLE_CONFLICT (
+        A INT
+)SERVER hdfs_server OPTIONS(format 'text', filenames '/user/hive/warehouse/text_on_hdfs/conflict.data', null '?', checkencoding 'low') distribute by roundrobin;
+CREATE FOREIGN TABLE EXT_TABLE_CONFLICT (
+        A INT
+)SERVER hdfs_server OPTIONS(format 'text', filenames '/user/hive/warehouse/text_on_hdfs/conflict.data', delimiter ' ', checkencoding 'low') distribute by roundrobin;
+CREATE FOREIGN TABLE EXT_TABLE_CONFLICT (
+        A INT
+)SERVER hdfs_server OPTIONS(format 'text', filenames '/user/hive/warehouse/text_on_hdfs/conflict.data', delimiter '?', checkencoding 'low') distribute by roundrobin;

@@ -4,6 +4,7 @@
  *	  header file for postgres btree access method implementation.
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -20,7 +21,7 @@
 #include "access/xlogreader.h"
 #include "catalog/pg_index.h"
 #include "lib/stringinfo.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 
 /* There's room for a 16-bit vacuum cycle ID in BTPageOpaqueData */
 typedef uint16 BTCycleId;
@@ -112,6 +113,11 @@ typedef struct BTMetaPageData {
 #define BTREE_MAGIC 0x053162 /* magic number of btree pages */
 #define BTREE_VERSION 2      /* current version number */
 
+/* Upgrade support for btree split/delete optimization. */
+#define BTREE_SPLIT_DELETE_UPGRADE_VERSION 92136
+#define BTREE_SPLIT_UPGRADE_FLAG 0x01
+#define BTREE_DELETE_UPGRADE_FLAG 0x02
+
 /*
  * Maximum size of a btree index entry, including its tuple header.
  *
@@ -133,6 +139,29 @@ typedef struct BTMetaPageData {
 #define BTREE_MIN_FILLFACTOR 10
 #define BTREE_DEFAULT_FILLFACTOR 90
 #define BTREE_NONLEAF_FILLFACTOR 70
+
+/*
+ *	Test whether two btree entries are "the same".
+ *
+ *	Old comments:
+ *	In addition, we must guarantee that all tuples in the index are unique,
+ *	in order to satisfy some assumptions in Lehman and Yao.  The way that we
+ *	do this is by generating a new OID for every insertion that we do in the
+ *	tree.  This adds eight bytes to the size of btree index tuples.  Note
+ *	that we do not use the OID as part of a composite key; the OID only
+ *	serves as a unique identifier for a given index tuple (logical position
+ *	within a page).
+ *
+ *	New comments:
+ *	actually, we must guarantee that all tuples in A LEVEL
+ *	are unique, not in ALL INDEX. So, we can use the t_tid
+ *	as unique identifier for a given index tuple (logical position
+ *	within a level). - vadim 04/09/97
+ */
+#define BTTidSame(i1, i2)                                                                        \
+    ((i1).ip_blkid.bi_hi == (i2).ip_blkid.bi_hi && (i1).ip_blkid.bi_lo == (i2).ip_blkid.bi_lo && \
+        (i1).ip_posid == (i2).ip_posid)
+#define BTEntrySame(i1, i2) BTTidSame((i1)->t_tid, (i2)->t_tid)
 
 /*
  *	In general, the btree code tries to localize its knowledge about
@@ -194,10 +223,10 @@ typedef struct BTMetaPageData {
 #define XLOG_BTREE_SPLIT_L_ROOT 0x50     /* add tuple with split of root */
 #define XLOG_BTREE_SPLIT_R_ROOT 0x60     /* as above, new item on right */
 #define XLOG_BTREE_DELETE 0x70           /* delete leaf index tuples for a page */
-#define XLOG_BTREE_DELETE_PAGE 0x80      /* delete an entire page */
-#define XLOG_BTREE_DELETE_PAGE_META 0x90 /* same, and update metapage */
+#define XLOG_BTREE_UNLINK_PAGE 0x80      /* delete an entire page */
+#define XLOG_BTREE_UNLINK_PAGE_META 0x90 /* same, and update metapage */
 #define XLOG_BTREE_NEWROOT 0xA0          /* new root page */
-#define XLOG_BTREE_DELETE_PAGE_HALF  \
+#define XLOG_BTREE_MARK_PAGE_HALFDEAD  \
     0xB0 /* page deletion that makes \
           * parent half-dead */
 #define XLOG_BTREE_VACUUM                   \
@@ -206,6 +235,48 @@ typedef struct BTMetaPageData {
 #define XLOG_BTREE_REUSE_PAGE                   \
     0xD0 /* old page is about to be reused from \
           * FSM */
+
+
+enum {
+    BTREE_INSERT_ORIG_BLOCK_NUM = 0,
+    BTREE_INSERT_CHILD_BLOCK_NUM,
+    BTREE_INSERT_META_BLOCK_NUM,
+};
+
+enum {
+    BTREE_SPLIT_LEFT_BLOCK_NUM = 0,
+    BTREE_SPLIT_RIGHT_BLOCK_NUM,
+    BTREE_SPLIT_RIGHTNEXT_BLOCK_NUM,
+    BTREE_SPLIT_CHILD_BLOCK_NUM
+};
+
+enum {
+    BTREE_VACUUM_ORIG_BLOCK_NUM = 0,
+};
+
+enum {
+    BTREE_DELETE_ORIG_BLOCK_NUM = 0,
+};
+
+enum {
+    BTREE_HALF_DEAD_LEAF_PAGE_NUM = 0,
+    BTREE_HALF_DEAD_PARENT_PAGE_NUM,
+};
+
+enum {
+    BTREE_UNLINK_PAGE_CUR_PAGE_NUM = 0,
+    BTREE_UNLINK_PAGE_LEFT_NUM,
+    BTREE_UNLINK_PAGE_RIGHT_NUM,
+    BTREE_UNLINK_PAGE_CHILD_NUM,
+    BTREE_UNLINK_PAGE_META_NUM,
+};
+
+
+enum {
+    BTREE_NEWROOT_ORIG_BLOCK_NUM = 0,
+    BTREE_NEWROOT_LEFT_BLOCK_NUM,
+    BTREE_NEWROOT_META_BLOCK_NUM
+};
 
 /*
  * All that we need to regenerate the meta-data page
@@ -351,6 +422,60 @@ typedef struct xl_btree_delete_page {
 } xl_btree_delete_page;
 
 #define SizeOfBtreeDeletePage (offsetof(xl_btree_delete_page, btpo_xact) + sizeof(TransactionId))
+
+
+/*
+ * This is what we need to know about marking an empty branch for deletion.
+ * The target identifies the tuple removed from the parent page (note that we
+ * remove this tuple's downlink and the *following* tuple's key).  Note that
+ * the leaf page is empty, so we don't need to store its content --- it is
+ * just reinitialized during recovery using the rest of the fields.
+ *
+ * Backup Blk 0: leaf block
+ * Backup Blk 1: top parent
+ */
+typedef struct xl_btree_mark_page_halfdead
+{
+	OffsetNumber poffset;		/* deleted tuple id in parent page */
+
+	/* information needed to recreate the leaf page: */
+	BlockNumber leafblk;		/* leaf block ultimately being deleted */
+	BlockNumber leftblk;		/* leaf block's left sibling, if any */
+	BlockNumber rightblk;		/* leaf block's right sibling */
+	BlockNumber topparent;		/* topmost internal page in the branch */
+} xl_btree_mark_page_halfdead;
+
+#define SizeOfBtreeMarkPageHalfDead (offsetof(xl_btree_mark_page_halfdead, topparent) + sizeof(BlockNumber))
+
+/*
+ * This is what we need to know about deletion of a btree page.  Note we do
+ * not store any content for the deleted page --- it is just rewritten as empty
+ * during recovery, apart from resetting the btpo.xact.
+ *
+ * Backup Blk 0: target block being deleted
+ * Backup Blk 1: target block's left sibling, if any
+ * Backup Blk 2: target block's right sibling
+ * Backup Blk 3: leaf block (if different from target)
+ * Backup Blk 4: metapage (if rightsib becomes new fast root)
+ */
+typedef struct xl_btree_unlink_page
+{
+	BlockNumber leftsib;		/* target block's left sibling, if any */
+	BlockNumber rightsib;		/* target block's right sibling */
+
+	/*
+	 * Information needed to recreate the leaf page, when target is an
+	 * internal page.
+	 */
+	BlockNumber leafleftsib;
+	BlockNumber leafrightsib;
+	BlockNumber topparent;		/* next child down in the branch */
+
+	TransactionId btpo_xact;	/* value of btpo.xact for use in recovery */
+	/* xl_btree_metadata FOLLOWS IF XLOG_BTREE_UNLINK_PAGE_META */
+} xl_btree_unlink_page;
+
+#define SizeOfBtreeUnlinkPage	(offsetof(xl_btree_unlink_page, btpo_xact) + sizeof(TransactionId))
 
 /*
  * New root log record.  There are zero tuples if this is to establish an
@@ -525,7 +650,6 @@ typedef struct BTScanPosItem { /* what we remember about each match */
 typedef struct BTScanPosData {
     Buffer buf; /* if valid, the buffer is pinned */
 
-    BlockNumber currPage; /* page referenced by items array */
     BlockNumber nextPage; /* page's right link when we scanned it */
 
     /*
@@ -580,8 +704,6 @@ typedef struct BTScanOpaqueData {
     ScanKey arrayKeyData;       /* modified copy of scan->keyData */
     int numArrayKeys;           /* number of equality-type array keys (-1 if
                                  * there are any unsatisfiable array keys) */
-    int arrayKeyCount; /* count indicating number of array scan keys
-                        * processed */
     BTArrayKeyInfo* arrayKeys;  /* info about each equality-type array key */
     MemoryContext arrayContext; /* scan-lifespan context for array data */
 
@@ -666,8 +788,9 @@ typedef struct BTOrderedIndexListElement {
 } BTOrderedIndexListElement;
 
 /*
- * external entry points for btree, in nbtree.c
+ * prototypes for functions in nbtree.c (external entry points for btree)
  */
+extern Datum btbuild(PG_FUNCTION_ARGS);
 extern Datum btbuildempty(PG_FUNCTION_ARGS);
 extern Datum btinsert(PG_FUNCTION_ARGS);
 extern Datum btbeginscan(PG_FUNCTION_ARGS);
@@ -682,19 +805,6 @@ extern Datum btbulkdelete(PG_FUNCTION_ARGS);
 extern Datum btvacuumcleanup(PG_FUNCTION_ARGS);
 extern Datum btcanreturn(PG_FUNCTION_ARGS);
 extern Datum btoptions(PG_FUNCTION_ARGS);
-
-extern Size btestimateparallelscan(void);
-extern void btinitparallelscan(void* bt_target);
-extern void btparallelrescan(IndexScanDesc scan);
-
-/*
- * prototypes for internal functions in nbtree.c
- */
-extern bool _bt_parallel_seize(IndexScanDesc scan, BlockNumber *pageno);
-extern void _bt_parallel_release(IndexScanDesc scan, BlockNumber scan_page);
-extern void _bt_parallel_done(IndexScanDesc scan);
-extern void _bt_parallel_advance_array_keys(IndexScanDesc scan);
-
 /* 
  * this is the interface of merge 2 or more index for btree index
  * we also have similar interfaces for other kind of indexes, like hash/gist/gin
@@ -706,7 +816,10 @@ extern Datum btmerge(PG_FUNCTION_ARGS);
  * prototypes for functions in nbtinsert.c
  */
 extern bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel);
-extern Buffer _bt_getstackbuf(Relation rel, BTStack stack, int access);
+extern Buffer _bt_getstackbuf(Relation rel, BTStack stack);
+extern void _bt_insert_parent(Relation rel, Buffer buf, Buffer rbuf, BTStack stack, bool is_root, bool is_only);
+extern void _bt_finish_split(Relation rel, Buffer bbuf, BTStack stack);
+extern IndexTuple _bt_nonkey_truncate(Relation idxrel, IndexTuple olditup);
 
 /*
  * prototypes for functions in nbtpage.c
@@ -746,6 +859,8 @@ extern ScanKey _bt_mkscankey(Relation rel, IndexTuple itup);
 extern ScanKey _bt_mkscankey_nodata(Relation rel);
 extern void _bt_freeskey(ScanKey skey);
 extern void _bt_freestack(BTStack stack);
+extern int _bt_sort_array_elements(
+    IndexScanDesc scan, ScanKey skey, bool reverse, Datum* elems, int nelems);
 extern void _bt_preprocess_array_keys(IndexScanDesc scan);
 extern void _bt_start_array_keys(IndexScanDesc scan, ScanDirection dir);
 extern bool _bt_advance_array_keys(IndexScanDesc scan, ScanDirection dir);
@@ -761,23 +876,13 @@ extern void _bt_end_vacuum(Relation rel);
 extern void _bt_end_vacuum_callback(int code, Datum arg);
 extern Size BTreeShmemSize(void);
 extern void BTreeShmemInit(void);
-extern void _bt_finish_split(Relation rel, Buffer lbuf, BTStack stack);
-extern IndexTuple _bt_nonkey_truncate(Relation idxrel, IndexTuple olditup);
 
 /*
  * prototypes for functions in nbtsort.c
  */
-extern Datum btbuild(PG_FUNCTION_ARGS);
-extern void _bt_parallel_build_main(void *seg);
+typedef struct BTSpool BTSpool; /* opaque type known only within nbtsort.c */
 
-/*
- * Working state for btbuild and its callback.
- *
- * When parallel CREATE INDEX is used, there is a BTBuildState for each
- * participant.
- */
-struct BTLeader;
-struct BTSpool;
+/* Working state for btbuild and its callback */
 typedef struct {
     bool isUnique;
     bool haveDead;
@@ -791,20 +896,13 @@ typedef struct {
      */
     BTSpool* spool2;
     double indtuples;
-
-    /*
-     * btleader is only present when a parallel index build is performed, and
-     * only in the leader process. (Actually, only the leader has a
-     * BTBuildState.  Workers have their own spool and spool2, though.)
-     */
-    BTLeader *btleader;
 } BTBuildState;
 
-extern BTSpool* _bt_spoolinit(Relation heap, Relation index, bool isunique, bool isdead, void* meminfo);
+extern BTSpool* _bt_spoolinit(Relation index, bool isunique, bool isdead, void* meminfo);
 extern void _bt_spooldestroy(BTSpool* btspool);
 extern void _bt_spool(BTSpool* btspool, ItemPointer self, Datum* values, const bool* isnull);
-extern void _bt_leafbuild(BTSpool* btspool, BTSpool* btspool2);
-/* these 4 functions are move here from nbtsearch.cpp(static functions) */
+extern void _bt_leafbuild(BTSpool* btspool, BTSpool* spool2);
+// these 4 functions are move here from nbtsearch.cpp(static functions)
 extern void _bt_buildadd(BTWriteState* wstate, BTPageState* state, IndexTuple itup);
 extern void _bt_uppershutdown(BTWriteState* wstate, BTPageState* state);
 BTPageState* _bt_pagestate(BTWriteState* wstate, uint32 level);
@@ -817,7 +915,10 @@ extern List* insert_ordered_index(List* list, TupleDesc tupdes, ScanKey indexSca
 extern void btree_redo(XLogReaderState* record);
 extern void btree_desc(StringInfo buf, XLogReaderState* record);
 extern void btree_xlog_startup(void);
-extern void* BTreeGetIncompleteActions();
+extern void btree_xlog_cleanup(void);
+extern bool btree_safe_restartpoint(void);
+extern void* btree_get_incomplete_actions();
+extern void btree_clear_imcompleteAction();
 extern bool IsBtreeVacuum(const XLogReaderState* record);
 extern void _bt_restore_page(Page page, char* from, int len);
 extern void DumpBtreeDeleteInfo(XLogRecPtr lsn, OffsetNumber offsetList[], uint64 offsetNum);

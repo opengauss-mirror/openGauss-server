@@ -1,0 +1,813 @@
+--check dfs_fdw exists
+select fdwname from pg_foreign_data_wrapper where fdwname = 'dfs_fdw';
+ fdwname 
+---------
+ dfs_fdw
+(1 row)
+
+--check pg_foreign_server,not exists orc_fdw
+SELECT srvname FROM pg_foreign_server;
+        srvname         
+------------------------
+ gsmpp_server
+ gsmpp_errorinfo_server
+ log_srv
+(3 rows)
+
+--test create server
+CREATE SERVER obs_server001 FOREIGN DATA WRAPPER 	dfs_fdw OPTIONS (type 'obs', address '@obshostname@', access_key '@ak@', secret_access_key '@sk@');
+CREATE SERVER obs_server004 FOREIGN DATA WRAPPER 	dfs_fdw;
+ERROR:  Need type option for the server.
+HINT:  Valid options in this context are: obs, hdfs, dummy
+CREATE SERVER obs_server002 FOREIGN DATA WRAPPER 	dfs_fdw OPTIONS (type 'obs');
+ERROR:  Need access_key option for the OBS server.
+CREATE SERVER not_obs_server003 FOREIGN DATA WRAPPER 	dist_fdw ;
+--error create server
+--error create server
+create server server_005 foreign data wrapper dfs_fdw options(type 'obs', address '10.67.128.36h');
+ERROR:  Need access_key option for the OBS server.
+create server server_005 foreign data wrapper dfs_fdw options(type 'obs', address '10.67.128.36:25000h');
+ERROR:  Need access_key option for the OBS server.
+create server server_005 foreign data wrapper dfs_fdw options(type 'obs', address '10.67.128.36,25000');
+ERROR:  Need access_key option for the OBS server.
+create server server_005 foreign data wrapper dfs_fdw options(type 'obs', address '10.67.128.36 ');
+ERROR:  Need access_key option for the OBS server.
+create server server_005 foreign data wrapper dfs_fdw options(type 'obs', address '10.67.128.36,');
+ERROR:  Need access_key option for the OBS server.
+create server server_005 foreign data wrapper dfs_fdw options(type 'obs', address '10.67.128.36, ');
+ERROR:  Need access_key option for the OBS server.
+--test no address
+create server server_005 foreign data wrapper dfs_fdw options(type 'obs');
+ERROR:  Need access_key option for the OBS server.
+--test alter server
+ALTER SERVER obs_server001 OPTIONS (SET address '10.67.128.36');
+--?ERROR:  Fail to connect OBS host 10.67.128.36 in node:coordinator1 with error code: .*
+ALTER SERVER obs_server001 OPTIONS (SET address '@obshostname@');
+ALTER SERVER obs_server001 OPTIONS (add hdfscfgpath '/home/hanfeng');
+ERROR:  Invalid option "hdfscfgpath"
+HINT:  Valid options in this context are: region, address, encrypt, access_key, secret_access_key, type
+--ALTER SERVER obs_server001 OPTIONS (drop hdfscfgpath );
+ALTER SERVER obs_server001 OPTIONS (drop address );
+--test create foreign table
+create foreign table ForeignTbl001 ( 
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT) server obs_server001 options (encoding 'utf-8', format 'orc',foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', totalrows '5000') distribute by roundrobin;
+--test need orc format
+create foreign table ForeignTbl002 (
+id int) server obs_server001 options (encoding 'utf-8', format 'abc',foldername '/@obsbucket@/obsorccheck/mppdb/address_orc11_64stripe/', totalrows '5000') distribute by roundrobin;
+ERROR:  Invalid option "abc"
+HINT:  Valid options in this context are: orc, parquet, carbondata, text, csv
+--test need  format
+create foreign table ForeignTbl002 (
+id int) server obs_server001 options (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb/address_orc11_64stripe/', totalrows '5000') distribute by roundrobin;
+ERROR:  Need format option for the foreign table.
+--test need roundrobin
+create foreign table ForeignTbl002 (
+id  int) server obs_server001 options (encoding 'utf-8', format 'orc',foldername '/@obsbucket@/obsorccheck/mppdb/address_orc11_63stripe/', totalrows '5000') distribute by hash (id);
+ERROR:  Only support ROUNDROBIN distribution type for this foreign table.
+create foreign table ForeignTbl003 (
+id int) server obs_server001 options (encoding 'utf-8', format 'orc',foldername '/@obsbucket@/obsorccheck/mppdb/address_orc11_63stripe/', totalrows '5000') ;
+ERROR:  Need DISTRIBUTE BY clause for the foreign table.
+--test need not filenames option
+create foreign table ForeignTbl003 (
+id int) server obs_server001 options (encoding 'utf-8', format 'orc',filenames '/@obsbucket@/obsorccheck/mppdb/address_orc11_63stripe/',foldername '/@obsbucket@/obsorccheck/mppdb/', totalrows '5000')  distribute by roundrobin;
+ERROR:  Invalid option "filenames"
+HINT:  Valid options in this context are: location, format, encoding, foldername, checkencoding, totalrows
+--test not need address option
+create foreign table ForeignTbl003 (
+id int) server obs_server001 options (address '10.145.130.26:25000',foldername '/@obsbucket@/obsorccheck/mppdb/address_orc11_63stripe/', totalrows '5000') distribute by roundrobin;
+ERROR:  Need format option for the foreign table.
+-- not need disribute by roundrobin for not hdfs server foreign table
+CREATE FOREIGN TABLE ForeignTbl004 (
+name text, 
+street text, 
+city text, 
+state text, 
+zip int) SERVER not_obs_server003 options (location 'gsfs://192.168.20.199:10001');
+--alter foreign table 
+ALTER FOREIGN TABLE ForeignTbl001 OPTIONS (set  filenames '/@obsbucket@/obsorccheck/mppdb.db');
+ERROR:  option "filenames" not found
+ALTER FOREIGN TABLE ForeignTbl001 OPTIONS (DROP format);
+ERROR:  Need format option for the foreign table.
+ALTER FOREIGN TABLE ForeignTbl001 OPTIONS (DROP filenames);
+ERROR:  option "filenames" not found
+ALTER FOREIGN TABLE ForeignTbl001 OPTIONS (DROP foldername);
+ERROR:  Either location option or foldername option is specified for the foreign table.
+ALTER FOREIGN TABLE ForeignTbl001 OPTIONS (SET totalrows '9000');
+ALTER FOREIGN TABLE ForeignTbl001 OPTIONS (ADD totalrows '9000');
+ERROR:  option "totalrows" provided more than once
+ALTER FOREIGN TABLE ForeignTbl001 OPTIONS (DROP totalrows);
+WARNING:  It is not specified totalrows option for the foreign table.
+ALTER FOREIGN TABLE ForeignTbl001 OPTIONS (SET totalrows '9000');
+ERROR:  option "totalrows" not found
+ALTER FOREIGN TABLE ForeignTbl001 ADD time TIMESTAMP;
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+ALTER FOREIGN TABLE ForeignTbl001 ALTER time TYPE TIME;
+ERROR:  Column time is unsupported data type.
+--test dml
+delete from ForeignTbl004;
+ERROR:  cannot delete from foreign table "foreigntbl004"
+truncate ForeignTbl004;
+ERROR:  It is not supported to truncate foreign table "foreigntbl004".
+vacuum ForeignTbl004;
+WARNING:  skipping "foreigntbl004" --- cannot vacuum non-tables or special system tables
+update ForeignTbl004 set name = 'Gauss';
+ERROR:  cannot update foreign table "foreigntbl004"
+insert into ForeignTbl004 values ('Gauss', 'tang', 'xian', 'centreslidepeopletotalandcountry', 0000);
+ERROR:  Un-support feature
+DETAIL:  insert statement is an INSERT INTO VALUES(...)
+--drop table
+drop FOREIGN TABLE ForeignTbl004 CASCADE;
+--drop server 
+DROP SERVER not_obs_server003;
+DROP SERVER obs_server001;
+ERROR:  cannot drop server obs_server001 because other objects depend on it
+DETAIL:  foreign table foreigntbl001 depends on server obs_server001
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+DROP SERVER obs_server001 CASCADE;
+NOTICE:  drop cascades to foreign table foreigntbl001
+create schema  fvt_data_query_hive;
+create server orc_server foreign data wrapper dfs_fdw options (address '@obshostname@', type 'obs', encrypt 'off', access_key '@ak@', secret_access_key '@sk@');
+create foreign table fvt_data_query_hive.elk_create_foreign_table_022_1
+(
+ c_id1 int ,
+ c_first varchar(16) ,
+c_since timestamp 
+)
+server orc_server OPTIONS(encoding 'utf-8',format 'orc', foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table_022/000000_0/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+select s.srvname,c.relname  from  pg_class c,pg_foreign_table f ,pg_foreign_server s  where s.oid=f.ftserver  and f.ftrelid=c.oid and c.relname ='elk_create_foreign_table_022_1';
+  srvname   |            relname             
+------------+--------------------------------
+ orc_server | elk_create_foreign_table_022_1
+(1 row)
+
+create  table fvt_data_query_hive.elk_create_foreign_table_022_2
+(
+ c_id1 int
+)inherits (fvt_data_query_hive.elk_create_foreign_table_022_1);
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+create temporary table elk_create_foreign_table_022_2( c_id1 int)inherits (fvt_data_query_hive.elk_create_foreign_table_022_1);
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+drop server orc_server cascade;
+NOTICE:  drop cascades to foreign table fvt_data_query_hive.elk_create_foreign_table_022_1
+create server elk_create_foreign_table_server foreign data wrapper dfs_fdw options (address '@obshostname@', type 'obs', encrypt 'off', access_key '@ak@', secret_access_key '@sk@');
+create foreign table fvt_data_query_hive.elk_create_foreign_table_012_1
+(
+ c_id int ,
+ c_first varchar(16),
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_012/,/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/')distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+drop foreign table fvt_data_query_hive.elk_create_foreign_table_012_1;
+create foreign table fvt_data_query_hive.elk_create_foreign_table_012_1
+(
+ c_id int ,
+ c_first varchar(16),
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',foldername  '/')distribute by roundrobin;
+ERROR:  Unsupport any empy foldername for the foreign table.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_029_1
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_029/000000_0/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+--alter
+alter  foreign table fvt_data_query_hive.elk_create_foreign_table_029_1 drop column c_since;
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table fvt_data_query_hive.elk_create_foreign_table_029_1 add column c_name text;                                               ---alter sucess
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table fvt_data_query_hive.elk_create_foreign_table_029_1 add constraint constraint_029 primary key(c_id);         -----alter error
+ERROR:  The foreign table only support "NOT ENFORCED" informational constraint.
+alter foreign table fvt_data_query_hive.elk_create_foreign_table_029_1 set without cluster;                               -----alter error                  
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table fvt_data_query_hive.elk_create_foreign_table_029_1 rename to elk_create_foreign_table_029_1_1;               -----alter error
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table  fvt_data_query_hive.elk_create_foreign_table_029_1 rename c_first to c_first1;                                               
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table  fvt_data_query_hive.elk_create_foreign_table_029_1 set schema public;  
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+create  table fvt_data_query_hive.elk_create_foreign_table_019_1
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp ,
+primary key(c_id)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "elk_create_foreign_table_019_1_pkey" for table "elk_create_foreign_table_019_1"
+create foreign table fvt_data_query_hive.elk_create_foreign_table_019_3
+(
+ c_id int  REFERENCES fvt_data_query_hive.elk_create_foreign_table_019_1(c_id) ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_019/000000_0/')distribute by roundrobin;
+ERROR:  REFERENCES constraint is not yet supported.
+--error format option
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_1
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format ' orc',foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/elk_create_foreign_table_053/') distribute by roundrobin;
+ERROR:  Invalid option " orc"
+HINT:  Valid options in this context are: orc, parquet, carbondata, text, csv
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_2
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc ',foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0/') distribute by roundrobin;
+ERROR:  Invalid option "orc "
+HINT:  Valid options in this context are: orc, parquet, carbondata, text, csv
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_2
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'or',foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0/') distribute by roundrobin;
+ERROR:  Invalid option "or"
+HINT:  Valid options in this context are: orc, parquet, carbondata, text, csv
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_2
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orce',foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0/') distribute by roundrobin;
+ERROR:  Invalid option "orce"
+HINT:  Valid options in this context are: orc, parquet, carbondata, text, csv
+--error foldername
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_3
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0/, /') distribute by roundrobin;
+ERROR:  Unsupport any empy foldername for the foreign table.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0 ') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string "/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0 ".
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername  ',') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string ",".
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername  ',/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0/') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string ",/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0/".
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0/,') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string "/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0/,".
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername  '') distribute by roundrobin;
+ERROR:  No foldername is specified for the foreign table.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername  '/han,usr/,') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string "/han,usr/,".
+--error foldername option
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername   ' /@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string " /@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/".
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername   '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/,/elk_create_foreign_orc_table_053/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+drop foreign table fvt_data_query_hive.elk_create_foreign_table_053_6;
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername   '') distribute by roundrobin;
+ERROR:  No foldername is specified for the foreign table.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername   ',') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string ",".
+create foreign table fvt_data_query_hive.elk_create_foreign_table_013_1
+(
+ c_id int ,
+ c_first varchar(16),
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table',foldername '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_013/000000_1/')distribute by roundrobin;
+ERROR:  option "foldername" provided more than once
+--error format option
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_1
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format ' orc',foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/elk_create_foreign_table_053/') distribute by roundrobin;
+ERROR:  Invalid option " orc"
+HINT:  Valid options in this context are: orc, parquet, carbondata, text, csv
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_2
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc ',foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0/') distribute by roundrobin;
+ERROR:  Invalid option "orc "
+HINT:  Valid options in this context are: orc, parquet, carbondata, text, csv
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_2
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'or',foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0/') distribute by roundrobin;
+ERROR:  Invalid option "or"
+HINT:  Valid options in this context are: orc, parquet, carbondata, text, csv
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_2
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orce',foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0/') distribute by roundrobin;
+ERROR:  Invalid option "orce"
+HINT:  Valid options in this context are: orc, parquet, carbondata, text, csv
+--error foldername
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_3
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername  ' /@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0/') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string " /@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0/".
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0 ') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string "/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0 ".
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername  ',') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string ",".
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername  ',/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0/') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string ",/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0/".
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0/,') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string "/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0/,".
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername  '') distribute by roundrobin;
+ERROR:  No foldername is specified for the foreign table.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername  '/han,usr/,') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string "/han,usr/,".
+--error foldername option
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername   ' /@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string " /@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/".
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername   '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/,/elk_create_foreign_orc_table_053/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+drop foreign table fvt_data_query_hive.elk_create_foreign_table_053_6;
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername   '') distribute by roundrobin;
+ERROR:  No foldername is specified for the foreign table.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',
+foldername   ',') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string ",".
+create foreign table fvt_data_query_hive.elk_create_foreign_table_013_1
+(
+ c_id int ,
+ c_first varchar(16),
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table',foldername '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_013/000000_1/')distribute by roundrobin;
+ERROR:  option "foldername" provided more than once
+drop schema fvt_data_query_hive cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to foreign table fvt_data_query_hive.elk_create_foreign_table_029_1
+drop cascades to table fvt_data_query_hive.elk_create_foreign_table_019_1
+drop  server elk_create_foreign_table_server;
+--check error syntax for format option
+create server foreigntbl_server foreign data wrapper dfs_fdw options(type 'obs', address '@obshostname@', encrypt 'off', access_key '@ak@', secret_access_key '@sk@');
+create foreign table foreigntbl (id int) server foreigntbl_server options(format ' orc',foldername '/home/') distribute by roundrobin;
+ERROR:  Invalid option " orc"
+HINT:  Valid options in this context are: orc, parquet, carbondata, text, csv
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc ',foldername '/home/') distribute by roundrobin;
+ERROR:  Invalid option "orc "
+HINT:  Valid options in this context are: orc, parquet, carbondata, text, csv
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'or',foldername '/home/') distribute by roundrobin;
+ERROR:  Invalid option "or"
+HINT:  Valid options in this context are: orc, parquet, carbondata, text, csv
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orch',foldername '/home/') distribute by roundrobin;
+ERROR:  Invalid option "orch"
+HINT:  Valid options in this context are: orc, parquet, carbondata, text, csv
+--check error syntax for foldername option
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername ' /home/') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string " /home/".
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername '/home/ ') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string "/home/ ".
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername '/home/,') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string "/home/,".
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername ',/home/') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string ",/home/".
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername '/home/, /user/') distribute by roundrobin;
+ERROR:  Need encoding option for the foreign table.
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername '') distribute by roundrobin;
+ERROR:  No foldername is specified for the foreign table.
+--check error syntax for foldername option
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername '/home', foldername '/home/123/') distribute by roundrobin;
+ERROR:  option "foldername" provided more than once
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername ' /home/123/') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string " /home/123/".
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername '/home/123/ ') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string "/home/123/ ".
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername ',/home/123/') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string ",/home/123/".
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername '/home/123/,') distribute by roundrobin;
+ERROR:  The first character and the end character of each foldername must be a '/' in string "/home/123/,".
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername '/home/123/,/user/123/') distribute by roundrobin;
+ERROR:  Need encoding option for the foreign table.
+--check value error for totalrows option
+create foreign table foreigntbl (id int) server foreigntbl_server options(encoding 'utf-8', format 'orc',foldername '/home/123/', totalrows   '-10000') distribute by roundrobin;
+ERROR:  totalrows is invalid
+create foreign table foreigntbl (id int) server foreigntbl_server options(encoding 'utf-8', format 'orc',foldername '/home/123/', totalrows   '0') distribute by roundrobin;
+ERROR:  totalrows is invalid
+create foreign table foreigntbl (id int) server foreigntbl_server options(encoding 'utf-8', format 'orc',foldername '/home/123/', totalrows   '10000.19') distribute by roundrobin;
+ERROR:  totalrows is invalid
+create foreign table foreigntbl (id int) server foreigntbl_server options(encoding 'utf-8', format 'orc',foldername '/home/123/', totalrows   '10000a00') distribute by roundrobin;
+ERROR:  totalrows is invalid
+create foreign table foreigntbl (id int) server foreigntbl_server options(encoding 'utf-8', format 'orc',foldername '/home/123/', totalrows   '9000000000000000001') distribute by roundrobin;
+drop foreign table foreigntbl;
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername '') distribute by roundrobin;
+ERROR:  No foldername is specified for the foreign table.
+create foreign table foreigntbl (id int) server foreigntbl_server options(encoding 'utf-8', format 'orc',foldername '/han\ jk/', totalrows '5000') distribute by roundrobin;
+drop foreign table foreigntbl;
+drop server foreigntbl_server;
+create server elk_create_foreign_partition_server_005 foreign data wrapper dfs_fdw options (address '@obshostname@', type 'obs', encrypt 'off', access_key '@ak@', secret_access_key '@sk@');
+create schema fvt_data_query_hive;
+create foreign table fvt_data_query_hive.elk_create_foreign_partition_table_005
+(
+ c_first text,
+ c_since timestamp ,
+ c_id int 
+)
+server elk_create_foreign_partition_server_005 OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=1/000000_0/,/@obsbucket@/obsorccheck/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=2/000000_0/,/@obsbucket@/obsorccheck/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=3/000000_0/,/@obsbucket@/obsorccheck/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=4/000000_0/')
+distribute by roundrobin 
+partition by (c_id) automapped;  --error msg for foldername option
+WARNING:  It is not specified totalrows option for the foreign table.
+drop schema fvt_data_query_hive cascade;
+NOTICE:  drop cascades to foreign table fvt_data_query_hive.elk_create_foreign_partition_table_005
+drop server elk_create_foreign_partition_server_005;
+create server elk_create_foreign_partition_server_005 foreign data wrapper dfs_fdw options (address '@obshostname@', type 'obs', encrypt 'off', access_key '@ak@', secret_access_key '@sk@');
+create schema fvt_data_query_hive;
+create foreign table fvt_data_query_hive.elk_create_foreign_partition_table_005
+(
+ c_first text,
+ c_since timestamp ,
+ c_id int
+)
+server elk_create_foreign_partition_server_005 OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=1/000000_0/,/@obsbucket@/obsorccheck/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=2/000000_0/,/@obsbucket@/obsorccheck/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=3/000000_0/,/@obsbucket@/obsorccheck/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=4/000000_0/')
+distribute by roundrobin
+partition by (c_id) automapped;
+WARNING:  It is not specified totalrows option for the foreign table.
+drop foreign table fvt_data_query_hive.elk_create_foreign_partition_table_005;
+create foreign table fvt_data_query_hive.elk_create_foreign_partition_table_005
+(
+ c_first text,
+ c_since timestamp ,
+ c_id int
+)
+server elk_create_foreign_partition_server_005 OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=1/000000_0/')
+distribute by roundrobin
+partition by (c_id) automapped;
+WARNING:  It is not specified totalrows option for the foreign table.
+drop foreign table fvt_data_query_hive.elk_create_foreign_partition_table_056;
+ERROR:  foreign table "elk_create_foreign_partition_table_056" does not exist
+create foreign table fvt_data_query_hive.elk_create_foreign_partition_table_056
+(
+c_first text,
+c_since timestamp ,
+c_id    int
+)
+server elk_create_foreign_partition_server_056 OPTIONS(encoding 'utf-8',format 'orc',foldername  '/@obsbucket@/obsorccheck/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_056/')
+ distribute by roundrobin
+(c_id) automapped;
+ERROR:  unrecognized distribution option "roundrobin"
+create foreign table fvt_data_query_hive.elk_create_foreign_table_054_1
+(
+c_id int ,
+c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_partition_server_005 OPTIONS(encoding 'utf-8',format 'orc',foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_054/000000_0/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_054_4
+(
+c_id int ,
+c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_partition_server_005 OPTIONS(encoding 'utf-8',format 'orc',foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_054/000000_0/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+select count(*) from fvt_data_query_hive.elk_create_foreign_table_054_4;
+ count 
+-------
+ 20000
+(1 row)
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_054_5
+(
+c_id int ,
+c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_partition_server_005 OPTIONS(encoding 'utf-8',format 'orc',foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_054/000000_0/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+select count(*) from fvt_data_query_hive.elk_create_foreign_table_054_5;
+ count 
+-------
+ 20000
+(1 row)
+
+create server elk_create_server_013 foreign data wrapper options (address '@obshostname@:@hdfsport@',hdfscfgpath '/home/mpply/hadoop_client/HDFS/hadoop/etc/hadoop');
+ERROR:  syntax error at or near "options"
+LINE 1: ...server elk_create_server_013 foreign data wrapper options (a...
+                                                             ^
+create foreign table fvt_data_query_hive.error_data_type_tbl(r_time time) 
+server elk_create_foreign_partition_server_005  OPTIONS(encoding 'utf-8',format 'orc',foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_054/000000_0/') distribute by roundrobin;
+ERROR:  Column r_time is unsupported data type.
+--Only the HDFS foreign table support roundrobin distirbute type, the guc support_extended_features is true in pg_regress mode, so the following two tables can be created.
+create table test007(id int) distribute by roundrobin;
+create foreign table redis_table_000(c_int8 int8) server gsmpp_server options(location 'gsfs://10.67.234.234:9101/*') distribute by roundrobin;
+ERROR:  For foreign table ROUNDROBIN distribution type is built-in support.
+--add llt
+Drop server obs_server cascade;
+ERROR:  server "obs_server" does not exist
+CREATE SERVER obs_server FOREIGN DATA WRAPPER 	dfs_fdw OPTIONS (type 'obs', address '@obshostname@', access_key '@ak@', secret_access_key '@sk@');
+create foreign table region  (
+ R_REGIONKEY  INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT )
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+select * from region;
+ r_regionkey |   r_name    |                                                      r_comment                                                      
+-------------+-------------+---------------------------------------------------------------------------------------------------------------------
+           0 | AFRICA      | lar deposits. blithely final packages cajole. regular waters are final requests. regular accounts are according to 
+           1 | AMERICA     | hs use ironic, even requests. s
+           2 | ASIA        | ges. thinly even pinto beans ca
+           3 | EUROPE      | ly final courts cajole furiously final excuse
+           4 | MIDDLE EAST | uickly special accounts cajole carefully blithely close requests. carefully final asymptotes haggle furiousl
+(5 rows)
+
+Drop server obs_server cascade;
+NOTICE:  drop cascades to foreign table region
+--check alter foreign table add node statment
+create foreign table fvt_data_query_hive.error_data_type_tbl(r_time int) 
+server elk_create_foreign_partition_server_005  OPTIONS(encoding 'utf-8',format 'orc',foldername  '/@obsbucket@/obsorccheck/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_054/000000_0/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+alter foreign table fvt_data_query_hive.error_data_type_tbl add node (newnode);
+ERROR:  PGXC Node newnode: object not defined
+alter foreign table fvt_data_query_hive.error_data_type_tbl delete node (newnode);
+ERROR:  PGXC Node newnode: object not defined
+drop schema fvt_data_query_hive cascade;
+NOTICE:  drop cascades to 5 other objects
+DETAIL:  drop cascades to foreign table fvt_data_query_hive.elk_create_foreign_partition_table_005
+drop cascades to foreign table fvt_data_query_hive.elk_create_foreign_table_054_1
+drop cascades to foreign table fvt_data_query_hive.elk_create_foreign_table_054_4
+drop cascades to foreign table fvt_data_query_hive.elk_create_foreign_table_054_5
+drop cascades to foreign table fvt_data_query_hive.error_data_type_tbl
+drop server elk_create_foreign_partition_server_005;
+--support SET STATISTICS feature
+CREATE SERVER obs_server FOREIGN DATA WRAPPER 	dfs_fdw OPTIONS (type 'obs', address '@obshostname@', access_key '@ak@', secret_access_key '@sk@');
+create foreign table region  (
+ R_REGIONKEY  INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT )
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+ALTER FOREIGN TABLE region ALTER COLUMN r_name SET STATISTICS 1000;
+select attstattarget from pg_attribute where attrelid = ( select oid from pg_class where relname = 'region' ) and attnum = 2;
+ attstattarget 
+---------------
+          1000
+(1 row)
+
+ALTER FOREIGN TABLE region ALTER COLUMN r_name SET STATISTICS PERCENT 80;
+select attstattarget from pg_attribute where attrelid = ( select oid from pg_class where relname = 'region' ) and attnum = 2;
+ attstattarget 
+---------------
+           -81
+(1 row)
+
+--skip temp folder and file
+CREATE FOREIGN TABLE tmp_dir_check_1
+(
+a int,
+b int
+)
+SERVER obs_server OPTIONS (
+    foldername '/@obsbucket@/obsorccheck/tmp_dir_check/',
+    format 'ORC',
+    encoding 'utf8'
+)
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+CREATE FOREIGN TABLE tmp_dir_check_2
+(
+a int,
+b int
+)
+SERVER obs_server OPTIONS (
+    foldername '/@obsbucket@/obsorccheck/tmp_dir_check/.hive_1234/',
+    format 'ORC',
+    encoding 'utf8'
+)
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+CREATE FOREIGN TABLE tmp_dir_check_3
+(
+a int,
+b int
+)
+SERVER obs_server OPTIONS (
+    foldername '/@obsbucket@/obsorccheck/tmp_dir_check/#hive_1234/',
+    format 'ORC',
+    encoding 'utf8'
+)
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+CREATE FOREIGN TABLE tmp_dir_check_4
+(
+a int,
+b int
+)
+SERVER obs_server OPTIONS (
+    foldername '/@obsbucket@/obsorccheck/tmp_dir_check/_hive_1234/',
+    format 'ORC',
+    encoding 'utf8'
+)
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+select count(*) from tmp_dir_check_1;
+ count 
+-------
+ 60000
+(1 row)
+
+select count(*) from tmp_dir_check_2;
+ count 
+-------
+ 60000
+(1 row)
+
+select count(*) from tmp_dir_check_3;
+ count 
+-------
+ 60000
+(1 row)
+
+select count(*) from tmp_dir_check_4;
+ count 
+-------
+ 60000
+(1 row)
+
+drop foreign table tmp_dir_check_1;
+drop foreign table tmp_dir_check_2;
+drop foreign table tmp_dir_check_3;
+drop foreign table tmp_dir_check_4;
+Drop server obs_server cascade;
+NOTICE:  drop cascades to foreign table region

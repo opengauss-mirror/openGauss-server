@@ -111,42 +111,42 @@
  */
 #define VARATT_EXTERNAL_GET_POINTER(toast_pointer, attr) \
 do { \
-    varattrib_1b_e *attre = (varattrib_1b_e *) (attr); \
-    errno_t rcs; \
-    Assert(VARATT_IS_EXTERNAL(attre)); \
-    if (VARATT_IS_EXTERNAL_BUCKET(attre)) \
-    { \
-        Assert(VARSIZE_EXTERNAL(attre) == sizeof(toast_pointer) + VARHDRSZ_EXTERNAL + sizeof(int2)); \
-    }\
-    else\
-    { \
-        Assert(VARSIZE_EXTERNAL(attre) == sizeof(toast_pointer) + VARHDRSZ_EXTERNAL); \
-    }\
-    rcs = memcpy_s(&(toast_pointer), sizeof(toast_pointer), VARDATA_EXTERNAL(attre), sizeof(toast_pointer)); \
-    securec_check(rcs, "", ""); \
+   varattrib_1b_e *attre = (varattrib_1b_e *) (attr); \
+   errno_t rcs; \
+   Assert(VARATT_IS_EXTERNAL(attre)); \
+   if (VARATT_IS_EXTERNAL_BUCKET(attre)) \
+   { \
+       Assert(VARSIZE_EXTERNAL(attre) == sizeof(toast_pointer) + VARHDRSZ_EXTERNAL + sizeof(int2)); \
+   }\
+   else\
+   { \
+       Assert(VARSIZE_EXTERNAL(attre) == sizeof(toast_pointer) + VARHDRSZ_EXTERNAL); \
+   }\
+   rcs = memcpy_s(&(toast_pointer), sizeof(toast_pointer), VARDATA_EXTERNAL(attre), sizeof(toast_pointer)); \
+   securec_check(rcs, "", ""); \
 } while (0)
 
 
 #define VARATT_EXTERNAL_GET_POINTER_B(toast_pointer, attr, bucketid) \
 do { \
-    varattrib_1b_e *_attre = (varattrib_1b_e *) (attr); \
-    errno_t _rc; \
-    Assert(VARATT_IS_EXTERNAL(_attre)); \
-    if (VARATT_IS_EXTERNAL_BUCKET(_attre)) \
-    { \
-        Assert(VARSIZE_EXTERNAL(_attre) == sizeof(toast_pointer) + VARHDRSZ_EXTERNAL + sizeof(int2)); \
-        _rc = memcpy_s(&(toast_pointer), sizeof(toast_pointer), VARDATA_EXTERNAL(_attre), sizeof(toast_pointer)); \
-        securec_check(_rc, "", ""); \
-        _rc= memcpy_s(&(bucketid), sizeof(int2), VARDATA_EXTERNAL(_attre) + sizeof(toast_pointer), sizeof(int2)); \
-        securec_check(_rc, "", ""); \
-    } \
-    else \
-    { \
-        Assert(VARSIZE_EXTERNAL(_attre) == sizeof(toast_pointer) + VARHDRSZ_EXTERNAL); \
-        _rc = memcpy_s(&(toast_pointer), sizeof(toast_pointer), VARDATA_EXTERNAL(_attre), sizeof(toast_pointer)); \
-        securec_check(_rc, "", ""); \
-        bucketid = -1;  \
-    } \
+   varattrib_1b_e *_attre = (varattrib_1b_e *) (attr); \
+   errno_t _rc; \
+   Assert(VARATT_IS_EXTERNAL(_attre)); \
+   if (VARATT_IS_EXTERNAL_BUCKET(_attre)) \
+   { \
+       Assert(VARSIZE_EXTERNAL(_attre) == sizeof(toast_pointer) + VARHDRSZ_EXTERNAL + sizeof(int2)); \
+       _rc = memcpy_s(&(toast_pointer), sizeof(toast_pointer), VARDATA_EXTERNAL(_attre), sizeof(toast_pointer)); \
+       securec_check(_rc, "", ""); \
+       _rc= memcpy_s(&(bucketid), sizeof(int2), VARDATA_EXTERNAL(_attre)+sizeof(toast_pointer), sizeof(int2)); \
+       securec_check(_rc, "", ""); \
+   } \
+   else \
+   { \
+       Assert(VARSIZE_EXTERNAL(_attre) == sizeof(toast_pointer) + VARHDRSZ_EXTERNAL); \
+       _rc = memcpy_s(&(toast_pointer), sizeof(toast_pointer), VARDATA_EXTERNAL(_attre), sizeof(toast_pointer)); \
+       securec_check(_rc, "", ""); \
+       bucketid = -1;  \
+   } \
 } while (0)
 
 

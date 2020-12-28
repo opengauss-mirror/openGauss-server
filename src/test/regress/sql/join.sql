@@ -722,10 +722,6 @@ order by c.name;
 
 rollback;
 
-analyse int4_tbl;
-analyse int8_tbl;
-analyse tenk1;
-analyse text_tbl;
 --
 -- test incorrect handling of placeholders that only appear in targetlists,
 -- per bug #6154
@@ -788,7 +784,7 @@ SELECT qq, unique1
 -- test case where a PlaceHolderVar is propagated into a subquery
 --
 
-explain (num_nodes off, nodes off, costs off)
+explain (num_costs off)
 select * from
   int8_tbl t1 left join
   (select q1 as x, 42 as y from int8_tbl t2) ss
@@ -815,35 +811,19 @@ select * from int4_tbl a full join int4_tbl b on false order by 1,2;
 -- test for ability to use a cartesian join when necessary
 --
 
-explain (num_nodes off, nodes off, costs off)
+explain (num_costs off)
 select * from
   tenk1 join int4_tbl on f1 = twothousand,
   int4(sin(1)) q1,
   int4(sin(0)) q2
 where q1 = thousand or q2 = thousand;
 
-explain (num_nodes off, nodes off, costs off)
+explain (num_costs off)
 select * from
   tenk1 join int4_tbl on f1 = twothousand,
   int4(sin(1)) q1,
   int4(sin(0)) q2
 where thousand = (q1 + q2);
-
---
--- test extraction of restriction OR clauses from join OR clause
--- (we used to only do this for indexable clauses)
---
-
-explain (costs off)
-select * from tenk1 a join tenk1 b on
-        (a.unique1 = 1 and b.unique1 = 2) or (a.unique2 = 3 and b.hundred = 4);
-explain (costs off)
-select * from tenk1 a join tenk1 b on
-        (a.unique1 = 1 and b.unique1 = 2) or (a.unique2 = 3 and b.ten = 4);
-explain (costs off)
-select * from tenk1 a join tenk1 b on
-        (a.unique1 = 1 and b.unique1 = 2) or
-        ((a.unique2 = 3 or a.unique2 = 7) and b.hundred = 4);
 
 --
 -- test ability to generate a suitable plan for a star-schema query
@@ -887,19 +867,19 @@ where t1.unique2 < 42 and t1.stringu1 > t2.stringu2;
 -- test placement of movable quals in a parameterized join tree
 --
 
-explain (num_nodes off, nodes off, costs off)
+explain (num_costs off)
 select * from tenk1 t1 left join
   (tenk1 t2 join tenk1 t3 on t2.thousand = t3.unique2)
   on t1.hundred = t2.hundred and t1.ten = t3.ten
 where t1.unique1 = 1;
 
-explain (num_nodes off, nodes off, costs off)
+explain (num_costs off)
 select * from tenk1 t1 left join
   (tenk1 t2 join tenk1 t3 on t2.thousand = t3.unique2)
   on t1.hundred = t2.hundred and t1.ten + t2.ten = t3.ten
 where t1.unique1 = 1;
 
-explain (num_nodes off, nodes off, costs off)
+explain (num_costs off)
 select count(*) from
   tenk1 a join tenk1 b on a.unique1 = b.unique2
   left join tenk1 c on a.unique2 = b.unique1 and c.thousand = a.thousand
@@ -910,7 +890,7 @@ select count(*) from
   left join tenk1 c on a.unique2 = b.unique1 and c.thousand = a.thousand
   join int4_tbl on b.thousand = f1;
 
-explain (num_nodes off, nodes off, costs off)
+explain (num_costs off)
 select b.unique1 from
   tenk1 a join tenk1 b on a.unique1 = b.unique2
   left join tenk1 c on b.unique1 = 42 and c.thousand = a.thousand
@@ -929,7 +909,7 @@ select b.unique1 from
 -- test handling of potential equivalence clauses above outer joins
 --
 
-explain (num_nodes off, nodes off, costs off)
+explain (num_costs off)
 select q1, unique2, thousand, hundred
   from int8_tbl a left join tenk1 b on q1 = unique2
   where coalesce(thousand,123) = q1 and q1 = coalesce(hundred,123);
@@ -938,7 +918,7 @@ select q1, unique2, thousand, hundred
   from int8_tbl a left join tenk1 b on q1 = unique2
   where coalesce(thousand,123) = q1 and q1 = coalesce(hundred,123);
 
-explain (num_nodes off, nodes off, costs off)
+explain (num_costs off)
 select f1, unique2, case when unique2 is null then f1 else 0 end
   from int4_tbl a left join tenk1 b on f1 = unique2
   where (case when unique2 is null then f1 else 0 end) = 0;
@@ -968,10 +948,10 @@ select * from
 -- test ability to push constants through outer join clauses
 --
 
-explain (num_nodes off, nodes off, costs off)
+explain (num_costs off)
   select * from int4_tbl a left join tenk1 b on f1 = unique2 where f1 = 0;
 
-explain (num_nodes off, nodes off, costs off)
+explain (num_costs off)
   select * from tenk1 a full join tenk1 b using(unique2) where unique2 = 42;
 
 --
@@ -990,48 +970,48 @@ INSERT INTO c VALUES (0), (1);
 INSERT INTO d VALUES (1,3), (2,2), (3,1);
 
 -- all three cases should be optimizable into a simple seqscan
-explain (verbose on, costs off, nodes off) SELECT a.* FROM a LEFT JOIN b ON a.b_id = b.id;
-explain (verbose on, costs off, nodes off) SELECT b.* FROM b LEFT JOIN c ON b.c_id = c.id;
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off) SELECT a.* FROM a LEFT JOIN b ON a.b_id = b.id;
+explain (verbose on, costs off) SELECT b.* FROM b LEFT JOIN c ON b.c_id = c.id;
+explain (verbose on, costs off)
   SELECT a.* FROM a LEFT JOIN (b left join c on b.c_id = c.id)
   ON (a.b_id = b.id);
 
 -- check optimization of outer join within another special join
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select id from a where id in (
 	select b.id from b left join c on b.id = c.id
 );
 
 -- check that join removal works for a left join when joining a subquery
 -- that is guaranteed to be unique by its GROUP BY clause
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select d.* from d left join (select * from b group by b.id, b.c_id) s
   on d.a = s.id and d.b = s.c_id;
 
 -- similarly, but keying off a DISTINCT clause
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select d.* from d left join (select distinct * from b) s
   on d.a = s.id and d.b = s.c_id;
 
 -- join removal is not possible when the GROUP BY contains a column that is
 -- not in the join condition
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select d.* from d left join (select * from b group by b.id, b.c_id) s
   on d.a = s.id;
 
 -- similarly, but keying off a DISTINCT clause
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select d.* from d left join (select distinct * from b) s
   on d.a = s.id;
 
 -- check join removal works when uniqueness of the join condition is enforced
 -- by a UNION
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select d.* from d left join (select id from a union select id from b) s
   on d.a = s.id;
 
 -- check join removal with a cross-type comparison operator
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select i8.* from int8_tbl i8 left join (select f1 from int4_tbl group by f1) i4
   on i8.q1 = i4.f1;
 
@@ -1045,14 +1025,14 @@ insert into child values (1, 100), (4, 400);
 
 -- this case is optimizable
 select p.* from parent p left join child c on (p.k = c.k) order by 1,2;
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
   select p.* from parent p left join child c on (p.k = c.k) order by 1,2;
 
 -- this case is not
 select p.*, linked from parent p
   left join (select c.*, true as linked from child c) as ss
   on (p.k = ss.k) order by p.k;
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
   select p.*, linked from parent p
     left join (select c.*, true as linked from child c) as ss
     on (p.k = ss.k) order by p.k;
@@ -1061,7 +1041,7 @@ explain (verbose on, costs off, nodes off)
 select p.* from
   parent p left join child c on (p.k = c.k)
   where p.k = 1 and p.k = 2;
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select p.* from
   parent p left join child c on (p.k = c.k)
   where p.k = 1 and p.k = 2;
@@ -1069,7 +1049,7 @@ select p.* from
 select p.* from
   (parent p left join child c on (p.k = c.k)) join parent x on p.k = x.k
   where p.k = 1 and p.k = 2;
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select p.* from
   (parent p left join child c on (p.k = c.k)) join parent x on p.k = x.k
   where p.k = 1 and p.k = 2;
@@ -1192,12 +1172,12 @@ insert into mj_t1 values(11,'efghi');
 CREATE TABLE mj_t2 (a int,c char(10));
 insert into mj_t2 values(12,'abcde');
 insert into mj_t2 values(12,'efghi');
-explain (nodes off, costs off) select * from mj_t1 full outer join mj_t2 on 1=1;
+explain (costs off) select * from mj_t1 full outer join mj_t2 on 1=1;
 create table mj_t3 (a int, b char(10))  ;
 create table mj_t4 (a int, b char(10))  ;
 insert into mj_t3 select * from mj_t1;
 insert into mj_t4 select * from mj_t2;
-explain (nodes off, costs off) select * from mj_t3 full outer join mj_t4 on 1=1; 
+explain (costs off) select * from mj_t3 full outer join mj_t4 on 1=1; 
 drop table mj_t1;
 drop table mj_t2;
 drop table mj_t3;
@@ -1210,7 +1190,7 @@ insert into aaa values ('3','c');
 insert into bbb values ('1','a');
 insert into bbb values ('2','b');
 insert into bbb values ('4','d');
-explain (verbose on, costs off, nodes off) select * from aaa inner join bbb on (aaa.id = bbb.id);
+explain (verbose on, costs off) select * from aaa inner join bbb on (aaa.id = bbb.id);
 drop table aaa;
 drop table bbb;
 
@@ -1228,27 +1208,3 @@ select * from hash_right_anti_y where not exists (select hash_right_anti_x.y fro
 
 drop table hash_right_anti_x;
 drop table hash_right_anti_y;
-
--- test rownum in outer join
-create table t_a (id int, name varchar(10), code int);
-create table t_b (id int, name varchar(10), code int);
-insert into t_a values (1, 'tom', 3);
-insert into t_b values (1, 'bat', 6);
-select * from t_a a, t_b b where a.id(+) = b.id and rownum = 1;
-drop table t_a;
-drop table t_b;
-
--- test datatype varchar in left join
-create table testa (id varchar);
-create table testb (id varchar);
-
-insert into testa values('1');
-insert into testa values('2');
-
-insert into testb values('1');
-insert into testb values('2');
-
-select a.id from testa as a left join (select distinct id from testb) as b on a.id = b.id;
-
-drop table testa;
-drop table testb;

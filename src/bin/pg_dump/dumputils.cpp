@@ -640,10 +640,10 @@ bool buildACLCommands(const char* name, const char* subname, const char* type, c
             (void)destroyPQExpBuffer(privswgo);
             (void)destroyPQExpBuffer(firstsql);
             (void)destroyPQExpBuffer(secondsql);
-            free(newname);
-            newname = NULL;
             free(aclitems);
             aclitems = NULL;
+            free(newname);
+            newname = NULL;
             return false;
         }
 
@@ -888,11 +888,19 @@ static bool parseAclItem(const char* item, const char* type, const char* name, c
     if (strcmp(type, "TABLE") == 0 || strcmp(type, "SEQUENCE") == 0 || strcmp(type, "TABLES") == 0 ||
         strcmp(type, "SEQUENCES") == 0) {
         CONVERT_PRIV('r', "SELECT");
+        if (remoteVersion >= 90200) {
+            CONVERT_PRIV('m', "COMMENT");
+        }
 
-        if (strcmp(type, "SEQUENCE") == 0 || strcmp(type, "SEQUENCES") == 0)
+        if (strcmp(type, "SEQUENCE") == 0 || strcmp(type, "SEQUENCES") == 0) {
             /* sequence only */
             CONVERT_PRIV('U', "USAGE");
-        else {
+
+            if (remoteVersion >= 90200) {
+                CONVERT_PRIV('A', "ALTER");
+                CONVERT_PRIV('P', "DROP");
+            }
+        } else {
             /* table only */
             CONVERT_PRIV('a', "INSERT");
             if (remoteVersion >= 70200) {
@@ -907,6 +915,12 @@ static bool parseAclItem(const char* item, const char* type, const char* name, c
                 if (remoteVersion >= 80400) {
                     CONVERT_PRIV('D', "TRUNCATE");
                 }
+                if (remoteVersion >= 90200) {
+                    CONVERT_PRIV('A', "ALTER");
+                    CONVERT_PRIV('P', "DROP");
+                    CONVERT_PRIV('i', "INDEX");
+                    CONVERT_PRIV('v', "VACUUM");
+                }
             }
         }
 
@@ -916,39 +930,86 @@ static bool parseAclItem(const char* item, const char* type, const char* name, c
         else
             /* 7.0 and 7.1 have a simpler worldview */
             CONVERT_PRIV('w', "UPDATE,DELETE");
-    } else if (strcmp(type, "FUNCTION") == 0 || strcmp(type, "FUNCTIONS") == 0)
+    } else if (strcmp(type, "FUNCTION") == 0 
+                   || strcmp(type, "FUNCTIONS") == 0
+                   || strcmp(type, "PROCEDURE") == 0 
+                   || strcmp(type, "PROCEDURES") == 0) {
         CONVERT_PRIV('X', "EXECUTE");
-    else if (strcmp(type, "LANGUAGE") == 0)
+        if (remoteVersion >= 90200) {
+            CONVERT_PRIV('A', "ALTER");
+            CONVERT_PRIV('P', "DROP");
+            CONVERT_PRIV('m', "COMMENT");
+        }
+    } else if (strcmp(type, "LANGUAGE") == 0) {
         CONVERT_PRIV('U', "USAGE");
-    else if (strcmp(type, "SCHEMA") == 0) {
+    } else if (strcmp(type, "SCHEMA") == 0) {
         CONVERT_PRIV('C', "CREATE");
         CONVERT_PRIV('U', "USAGE");
+        if (remoteVersion >= 90200) {
+            CONVERT_PRIV('A', "ALTER");
+            CONVERT_PRIV('P', "DROP");
+            CONVERT_PRIV('m', "COMMENT");
+        }
     } else if (strcmp(type, "DATABASE") == 0) {
         CONVERT_PRIV('C', "CREATE");
         CONVERT_PRIV('c', "CONNECT");
         CONVERT_PRIV('T', "TEMPORARY");
-    } else if (strcmp(type, "TABLESPACE") == 0)
+        if (remoteVersion >= 90200) {
+            CONVERT_PRIV('A', "ALTER");
+            CONVERT_PRIV('P', "DROP");
+            CONVERT_PRIV('m', "COMMENT");
+        }
+    } else if (strcmp(type, "TABLESPACE") == 0) {
         CONVERT_PRIV('C', "CREATE");
-    else if (strcmp(type, "TYPE") == 0 || strcmp(type, "TYPES") == 0)
+        if (remoteVersion >= 90200) {
+            CONVERT_PRIV('A', "ALTER");
+            CONVERT_PRIV('P', "DROP");
+            CONVERT_PRIV('m', "COMMENT");
+        }
+    } else if (strcmp(type, "TYPE") == 0 || strcmp(type, "TYPES") == 0) {
         CONVERT_PRIV('U', "USAGE");
-    else if (strcmp(type, "FOREIGN DATA WRAPPER") == 0)
+        if (remoteVersion >= 90200) {
+            CONVERT_PRIV('A', "ALTER");
+            CONVERT_PRIV('P', "DROP");
+            CONVERT_PRIV('m', "COMMENT");
+        }
+    } else if (strcmp(type, "FOREIGN DATA WRAPPER") == 0) {
         CONVERT_PRIV('U', "USAGE");
-    else if (strcmp(type, "FOREIGN SERVER") == 0)
+    } else if (strcmp(type, "FOREIGN SERVER") == 0) {
         CONVERT_PRIV('U', "USAGE");
-    else if (strcmp(type, "FOREIGN TABLE") == 0)
+        if (remoteVersion >= 90200) {
+            CONVERT_PRIV('A', "ALTER");
+            CONVERT_PRIV('P', "DROP");
+            CONVERT_PRIV('m', "COMMENT");
+        }
+    } else if (strcmp(type, "FOREIGN TABLE") == 0) {
         CONVERT_PRIV('r', "SELECT");
-    else if (strcmp(type, "LARGE OBJECT") == 0) {
+        if (remoteVersion >= 90200) {
+            CONVERT_PRIV('A', "ALTER");
+            CONVERT_PRIV('P', "DROP");
+            CONVERT_PRIV('m', "COMMENT");
+            CONVERT_PRIV('i', "INDEX");
+            CONVERT_PRIV('v', "VACUUM");
+        }
+    } else if (strcmp(type, "LARGE OBJECT") == 0) {
         CONVERT_PRIV('r', "SELECT");
         CONVERT_PRIV('w', "UPDATE");
     } else if (strcmp(type, "NODE GROUP") == 0) {
         CONVERT_PRIV('C', "CREATE");
         CONVERT_PRIV('U', "USAGE");
         CONVERT_PRIV('p', "COMPUTE");
+        if (remoteVersion >= 90200) {
+            CONVERT_PRIV('A', "ALTER");
+            CONVERT_PRIV('P', "DROP");
+        }
     } else if (strcmp(type, "DATA SOURCE") == 0) {
         CONVERT_PRIV('U', "USAGE");
     } else if (strcmp(type, "DIRECTORY") == 0) {
         CONVERT_PRIV('X', "EXECUTE");
         CONVERT_PRIV('C', "CREATE");
+    } else if (strcmp(type, "GLOBAL SETTINGS") == 0 || strcmp(type, "COLUMN SETTINGS") == 0) {
+        CONVERT_PRIV('U', "USAGE");
+        CONVERT_PRIV('P', "DROP");
     } else {
         abort();
     }
@@ -1574,6 +1635,32 @@ int dump_flock(int fd, uint32 operation)
 #endif
 }
 
+#ifdef WIN32_PG_DUMP
+/*
+ * GetEnvStr
+ *
+ * Note: malloc space for get the return of getenv() function, then return the malloc space.
+ *         so, this space need be free.
+ */
+static char* GetEnvStr(const char* env)
+{
+    char* tmpvar = NULL;
+    const char* temp = getenv(env);
+    errno_t rc = 0;
+    if (temp != NULL) {
+        size_t len = strlen(temp);
+        if (0 >= len)
+            return NULL;
+        tmpvar = (char*)malloc(len + 1);
+        if (tmpvar != NULL) {
+            rc = strcpy_s(tmpvar, len + 1, temp);
+            securec_check_c(rc, "\0", "\0");
+            return tmpvar;
+        }
+    }
+    return NULL;
+}
+#endif
 /*
  * Return true if the path is a existing regular file.
  */

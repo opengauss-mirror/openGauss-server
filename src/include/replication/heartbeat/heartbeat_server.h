@@ -59,4 +59,3 @@ private:
 };
 
 #endif /* _HEARTBEAT_SERVER_H */
-

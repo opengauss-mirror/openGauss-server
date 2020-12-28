@@ -5,6 +5,7 @@
  *	  along with the relation's initial contents.
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -116,11 +117,15 @@ DATA(insert ( 2101	int4_avg_accum	int8_avg_collect	int8_avg		0	1016	"{0,0}" "{0,
 DATA(insert ( 2102	int2_avg_accum	int8_avg_collect	int8_avg		0	1016	"{0,0}" "{0,0}" 	n	0));
 #define INT2AVGFUNCOID 2102
 DATA(insert ( 5537	int1_avg_accum	int8_avg_collect	int8_avg		0	1016	"{0,0}" "{0,0}" 	n	0));
+#define INT1AVGFUNCOID 5537
 DATA(insert ( 2103	numeric_avg_accum	numeric_avg_collect	numeric_avg		0	1231	"{0,0}" "{0,0}" 	n	0));
 #define NUMERICAVGFUNCOID 2103
 DATA(insert ( 2104	float4_accum	float8_collect	float8_avg		0	1022	"{0,0,0}" "{0,0,0}" 	n	0));
+#define FLOAT4AVGFUNCOID 2104
 DATA(insert ( 2105	float8_accum	float8_collect	float8_avg		0	1022	"{0,0,0}" "{0,0,0}" 	n	0));
+#define FLOAT8AVGFUNCOID 2105
 DATA(insert ( 2106	interval_accum	interval_collect	interval_avg	0	1187	"{0 second,0 second}" "{0 second,0 second}" 	n	0));
+#define INTERVALAGGAVGFUNCOID 2106
 #endif
 
 /* sum */
@@ -327,6 +332,20 @@ DATA(insert ( 4600	checksumtext_agg_transfn		  numeric_add		  -				0	1700	_null_
 DATA(insert ( 3545	bytea_string_agg_transfn	-	bytea_string_agg_finalfn		0	2281	_null_ _null_ 	n	0));
 #endif
 
+/* hll distribute agg */
+DATA(insert ( 4366		hll_add_trans0 hll_union_collect hll_pack 0 4370 _null_ _null_ 	n	0));
+#define HLL_ADD_TRANS0_OID 4366
+DATA(insert ( 4380		hll_add_trans1 hll_union_collect hll_pack 0 4370 _null_ _null_ 	n	0));
+#define HLL_ADD_TRANS1_OID 4380
+DATA(insert ( 4381		hll_add_trans2 hll_union_collect hll_pack 0 4370 _null_ _null_ 	n	0));
+#define HLL_ADD_TRANS2_OID 4381
+DATA(insert ( 4382		hll_add_trans3 hll_union_collect hll_pack 0 4370 _null_ _null_ 	n	0));
+#define HLL_ADD_TRANS3_OID 4382
+DATA(insert ( 4383		hll_add_trans4 hll_union_collect hll_pack 0 4370 _null_ _null_ 	n	0));
+#define HLL_ADD_TRANS4_OID 4383
+DATA(insert ( 4367		hll_union_trans hll_union_collect hll_pack 0 4370 _null_ _null_ 	n	0));
+#define HLL_UNION_TRANS_OID 4367
+
 /* list */
 #ifdef PGXC
 DATA(insert ( 3552	list_agg_transfn			-	list_agg_finalfn			0	2281	_null_ _null_	n	0));
@@ -412,7 +431,7 @@ DATA(insert ( 3582	date_list_agg_noarg2_transfn			-	list_agg_finalfn			0	2281	_n
 DATA(insert ( 3584	timestamp_list_agg_transfn			-	list_agg_finalfn			0	2281	_null_ _null_	n	0));
 #endif
 
-/* list without delimiter (timestamptz)  */
+/* list without delimiter (timestamptz) */
 #ifdef PGXC
 DATA(insert ( 3586	timestamp_list_agg_noarg2_transfn			-	list_agg_finalfn			0	2281	_null_ _null_	n	0));
 #endif
@@ -440,16 +459,17 @@ DATA(insert ( 4508	interval_list_agg_noarg2_transfn			-	list_agg_finalfn			0	228
 /* ordered-set aggregates XXX shall we add collect funcs? */
 DATA(insert ( 4452 ordered_set_transition      -    percentile_cont_float8_final            0   2281    _null_   _null_ 	 o 1));
 DATA(insert ( 4454 ordered_set_transition      -    percentile_cont_interval_final          0   2281    _null_   _null_ 	 o 1));
+DATA(insert (4461 ordered_set_transition - mode_final 0 2281 _null_ _null_ o 0));
 
 DATA(insert (5555 median_transfn      -    median_float8_finalfn            0   2281    _null_   _null_ 	 n 0));
 DATA(insert (5556 median_transfn      -    median_interval_finalfn          0   2281    _null_   _null_ 	 n 0));
-
 
 /*
  * prototypes for functions in pg_aggregate.c
  */
 extern void AggregateCreate(const char *aggName,
 				Oid aggNamespace,
+				char aggKind,
 				Oid *aggArgTypes,
 				int numArgs,
 				List *aggtransfnName,

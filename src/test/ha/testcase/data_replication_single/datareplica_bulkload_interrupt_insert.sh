@@ -9,7 +9,7 @@ function test_bulkload()
 check_instance
 
 stop_primary
-gs_guc set -D $data_dir/datanode1 -c "shared_buffers=512MB"
+gs_guc set -Z datanode -D $data_dir/datanode1 -c "shared_buffers=512MB"
 start_primary
 
 #prepare data
@@ -46,7 +46,7 @@ fi
 function tear_down()
 {
 stop_primary
-gs_guc set -D $data_dir/datanode1 -c "shared_buffers=2GB"
+gs_guc set -Z datanode -D $data_dir/datanode1 -c "shared_buffers=2GB"
 start_primary
 gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_bulkload1;"
 gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_bulkload2;"

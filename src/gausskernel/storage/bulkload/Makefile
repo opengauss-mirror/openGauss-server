@@ -10,7 +10,7 @@ subdir = src/gausskernel/storage/bulkload
 top_builddir = ../../../..
 include $(top_builddir)/src/Makefile.global
 
-override CPPFLAGS := -I $(top_builddir)/src/include/event/suse -I. -I$(srcdir) $(CPPFLAGS) -DOBS_SERVER
+override CPPFLAGS := -I$(srcdir) $(CPPFLAGS)
 
 ifneq "$(MAKECMDGOALS)" "clean"
   ifneq "$(MAKECMDGOALS)" "distclean"
@@ -19,6 +19,9 @@ ifneq "$(MAKECMDGOALS)" "clean"
      endif
   endif
 endif
+
+parser.o:
+	$(CC) $(CPPFLAGS) -DOBS_SERVER $(CXXFLAGS) -c parser.cpp -o parser.o
 
 OBJS = dist_fdw.o foreignroutine.o vecforeignroutine.o importerror.o roach_adpter.o parser.o
 

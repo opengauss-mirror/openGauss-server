@@ -37,6 +37,7 @@
 #include "catalog/pg_app_workloadgroup_mapping.h"
 #include "catalog/pg_authid.h"
 #include "catalog/pg_tablespace.h"
+#include "catalog/pg_user_status.h"
 #include "catalog/pgxc_group.h"
 #include "catalog/pgxc_node.h"
 #include "catalog/pg_database.h"
@@ -145,8 +146,8 @@ static char* parallel_jobs = NULL;
 GS_UCHAR init_rand[RANDOM_LEN + 1] = {0};
 
 /* Database Security: Data importing/dumping support AES128. */
-const char* encrypt_mode;
-const char* encrypt_key;
+const char* encrypt_mode = NULL;
+const char* encrypt_key = NULL;
 
 #ifdef ENABLE_MULTIPLE_NODES
 static int include_nodes = 0;
@@ -231,9 +232,7 @@ int main(int argc, char* argv[])
         {"dump-wrm", no_argument, &dump_wrm, 1},
 #endif
         {"binary-upgrade-usermap", required_argument, NULL, 9},
-#ifdef ENABLE_MULTIPLE_NODES
         {"include-extensions", no_argument, NULL, 10},
-#endif
         {"include-templatedb", no_argument, NULL, 11},
         {"parallel-jobs", required_argument, NULL, 12},
         {NULL, 0, NULL, 0}};
@@ -296,6 +295,7 @@ int main(int argc, char* argv[])
      */
     if (pgdb != NULL) {
         conn = connectDatabase(pgdb, pghost, pgport, pguser, passwd, prompt_password, false);
+
         if (conn == NULL) {
             write_stderr(_("%s: could not connect to database \"%s\"\n"), progname, pgdb);
 
@@ -318,8 +318,10 @@ int main(int argc, char* argv[])
         }
     } else {
         conn = connectDatabase("postgres", pghost, pgport, pguser, passwd, prompt_password, false);
-        if (conn == NULL)
+
+        if (conn == NULL) {
             conn = connectDatabase("template1", pghost, pgport, pguser, passwd, prompt_password, true);
+        }
 
         if (conn == NULL) {
             write_stderr(_("%s: could not connect to databases \"postgres\" or \"template1\"\n"
@@ -440,6 +442,7 @@ int main(int argc, char* argv[])
         res = PQexec(conn, query->data);
         if (PQresultStatus(res) != PGRES_COMMAND_OK) {
             fprintf(stderr, _("%s: query failed: %s"), progname, PQerrorMessage(conn));
+            printf(_("%s: query failed: %s"), progname, PQerrorMessage(conn));
 
             /* Clear password related memory to avoid leaks when core. */
             char* pqpass = PQpass(conn);
@@ -547,6 +550,7 @@ static void free_dumpall()
     GS_FREE(encrypt_mode);
     GS_FREE(encrypt_key);
     GS_FREE(parallel_jobs);
+    GS_FREE(filename);
 }
 
 /**
@@ -747,6 +751,7 @@ static void getopt_dumpall(int argc, char** argv, struct option options[], int* 
 
             case 'f':
                 GS_FREE(filepath);
+		GS_FREE(filename);
                 check_env_value_c(optarg);
                 filepath = gs_strdup(optarg);
                 filename = make_absolute_path(filepath);
@@ -810,7 +815,6 @@ static void getopt_dumpall(int argc, char** argv, struct option options[], int* 
             case 'T':
                 GS_FREE(tablespaces_postfix_path);
                 tablespaces_postfix_path = gs_strdup(optarg);
-                ;
                 break;
 
             case 'U':
@@ -896,7 +900,7 @@ static void getopt_dumpall(int argc, char** argv, struct option options[], int* 
                  * Especially hand --with-salt
                  */
                 /* Get a random values as salt for encrypt */
-                retval = RAND_bytes(init_rand, RANDOM_LEN);
+                retval = RAND_priv_bytes(init_rand, RANDOM_LEN);
                 if (retval != 1)
                     exit_horribly(NULL, "Generate random key failed\n");
                 appendPQExpBuffer(pgdumpopts, " --with-salt ");
@@ -1117,9 +1121,7 @@ void help(void)
              "                                              ALTER OWNER commands to set ownership\n"));
     printf(_("  --with-encryption=AES128                    dump data is encrypted using AES128\n"));
     printf(_("  --with-key=KEY                              AES128 encryption key ,must be 16 bytes in length\n"));
-#ifdef ENABLE_MULTIPLE_NODES
     printf(_("  --include-extensions                        include extensions in dumpall \n"));
-#endif
     printf(_("  --include-templatedb                        include dumping of template database also \n"));
 #ifdef ENABLE_MULTIPLE_NODES
     printf(_("  --dump-nodes                                include nodes and node groups in the dump\n"));
@@ -1182,6 +1184,9 @@ static void dropRoles(PGconn* conn)
         const char* rolename = NULL;
 
         rolename = PQgetvalue(res, i, i_rolname);
+        if (rolename == NULL) {
+            continue;
+        }
 
         dumpall_printf(OPF, "DROP ROLE IF EXISTS %s;\n", fmtId(rolename));
     }
@@ -1228,12 +1233,20 @@ static void dumpAlterRolesForNodeGroup(PGconn* conn)
 
         rolename = PQgetvalue(res, i, i_rolname);
         nodegroupname = PQgetvalue(res, i, i_rolnodegroup);
+        if (rolename == NULL || nodegroupname == NULL) {
+            continue;
+        }
+
         if (!PQgetisnull(res, i, i_rolnodegroup) && strcmp(nodegroupname, "") != 0) {
             resetPQExpBuffer(query);
             appendPQExpBuffer(query, "ALTER ROLE %s WITH", fmtId(rolename));
             appendPQExpBuffer(query, " NODE GROUP %s", fmtId(nodegroupname));
 
             rolkind = PQgetvalue(res, i, i_rolkind);
+            if (rolkind == NULL) {
+                continue;
+            }
+
             len = strlen(rolkind);
             if (!PQgetisnull(res, i, i_rolkind) && (int(len) - 1) == 0 && strcmp(rolkind, "v") == 0) {
                 appendPQExpBuffer(query, " VCADMIN LOGIN;\n");
@@ -1352,13 +1365,18 @@ static void dumpRoles(PGconn* conn)
     int i_rolkind = 0;
     int i_rolnodegroup = 0;
     int i_roluseft = 0; /* add foreign table operation privilege */
+    int i_rolpwdexp = 0;
     int i = 0;
     bool has_parent = false;
+    /* add monadmin, opradmin and poladmin privileges */
+    int i_rolmonitoradmin = 0;
+    int i_roloperatoradmin = 0;
+    int i_rolpolicyadmin = 0;
 
     /* note: rolconfig is dumped later */
     if (server_version >= 90100) {
         printfPQExpBuffer(buf,
-            "SELECT oid, rolname, rolinherit, "
+            "SELECT A.oid, rolname, rolinherit, "
             "rolcreaterole, rolcreatedb, rolsystemadmin, "
             "rolcanlogin, rolconnlimit, rolpassword, "
             "rolvaliduntil, rolreplication, rolauditadmin, "); /* add audit admin privilege */
@@ -1406,9 +1424,32 @@ static void dumpRoles(PGconn* conn)
             appendPQExpBuffer(buf, "NULL as nodegroupname, ");
         }
 
+        /* add monadmin, opradmin and poladmin privileges */
+        if (is_column_exists(conn, AuthIdRelationId, "rolmonitoradmin") == true) {
+            appendPQExpBuffer(buf, "rolmonitoradmin, ");
+        } else {
+            appendPQExpBuffer(buf, "NULL as rolmonitoradmin, ");
+        }
+        if (is_column_exists(conn, AuthIdRelationId, "roloperatoradmin") == true) {
+            appendPQExpBuffer(buf, "roloperatoradmin, ");
+        } else {
+            appendPQExpBuffer(buf, "NULL as roloperatoradmin, ");
+        }
+        if (is_column_exists(conn, AuthIdRelationId, "rolpolicyadmin") == true) {
+            appendPQExpBuffer(buf, "rolpolicyadmin, ");
+        } else {
+            appendPQExpBuffer(buf, "NULL as rolpolicyadmin, ");
+        }
+        if (is_column_exists(conn, UserStatusRelationId, "passwordexpired") == true) {
+            appendPQExpBuffer(buf, "passwordexpired, ");
+        } else {
+            appendPQExpBuffer(buf, "NULL as passwordexpired, ");
+        }
+
         appendPQExpBuffer(buf,
             "pg_catalog.shobj_description(oid, 'pg_authid') as rolcomment "
-            "FROM pg_authid ORDER BY ");
+            "FROM pg_authid A left join pg_user_status on A.oid = pg_user_status.roloid "
+            "ORDER BY ");
 
         if (has_parent)
             appendPQExpBuffer(buf, "rolparentid,");
@@ -1487,6 +1528,12 @@ static void dumpRoles(PGconn* conn)
     i_rolauditadmin = PQfnumber(res, "rolauditadmin"); /* add audit admin privilege */
     i_rolcomment = PQfnumber(res, "rolcomment");
     i_roluseft = PQfnumber(res, "roluseft");
+    /* add monadmin, opradmin and poladmin privileges */
+    i_rolmonitoradmin = PQfnumber(res, "rolmonitoradmin");
+    i_roloperatoradmin = PQfnumber(res, "roloperatoradmin");
+    i_rolpolicyadmin = PQfnumber(res, "rolpolicyadmin");
+    /* add passwordexpired */
+    i_rolpwdexp = PQfnumber(res, "passwordexpired");
 
     if (PQntuples(res) > 0)
         dumpall_printf(OPF, "--\n-- Roles\n--\n\n");
@@ -1574,6 +1621,20 @@ static void dumpRoles(PGconn* conn)
         else
             appendPQExpBuffer(buf, " NOAUDITADMIN");
 
+        /* add monadmin, opradmin and poladmin privilege */
+        if (!PQgetisnull(res, i, i_rolmonitoradmin) && strcmp(PQgetvalue(res, i, i_rolmonitoradmin), "t") == 0) {
+            appendPQExpBuffer(buf, " MONADMIN");
+        }
+        if (!PQgetisnull(res, i, i_roloperatoradmin) && strcmp(PQgetvalue(res, i, i_roloperatoradmin), "t") == 0) {
+            appendPQExpBuffer(buf, " OPRADMIN");
+        }
+        if (!PQgetisnull(res, i, i_rolpolicyadmin) && strcmp(PQgetvalue(res, i, i_rolpolicyadmin), "t") == 0) {
+            appendPQExpBuffer(buf, " POLADMIN");
+        }
+        if (!PQgetisnull(res, i, i_rolpwdexp) && strcmp(PQgetvalue(res, i, i_rolpwdexp), "1") == 0) {
+            appendPQExpBuffer(buf, " PASSWORD EXPIRED");
+        }
+
         if (strcmp(PQgetvalue(res, i, i_rolconnlimit), "-1") != 0)
             appendPQExpBuffer(buf, " CONNECTION LIMIT %s", PQgetvalue(res, i, i_rolconnlimit));
         if (!PQgetisnull(res, i, i_rolvalidbegin))
@@ -1647,6 +1708,10 @@ static void dumpRoles(PGconn* conn)
         len = strlen(roltype);
         if (!PQgetisnull(res, i, i_rolkind) && (int(len) - 1) == 0 && strcmp(roltype, "i") == 0) {
             appendPQExpBuffer(buf, " INDEPENDENT");
+        }
+        /* PERSISTENCE */
+        if (!PQgetisnull(res, i, i_rolkind) && (int(len) - 1) == 0 && strcmp(roltype, "p") == 0) {
+            appendPQExpBuffer(buf, " PERSISTENCE");
         }
 
         appendPQExpBuffer(buf, ";\n");
@@ -1780,6 +1845,16 @@ static void dumpGroups(PGconn* conn)
         grolist = gs_strdup(grolist);
         grolist[0] = '(';
         grolist[strlen(grolist) - 1] = ')';
+        for (j = 0; j < (int)strlen(grolist); j++) {
+            if (!(grolist[j] >= '0' && grolist[j] <= '9')
+                    && grolist[j] != '('
+                    && grolist[j] != ')'
+                    && grolist[j] != ',') {
+                write_stderr(_("grolist maybe exist sql injection: %s.\n"), grolist);
+                PQfinish(conn);
+                exit_nicely(1);
+            }
+        }
         printfPQExpBuffer(buf,
             "SELECT usename FROM pg_shadow "
             "WHERE usesysid IN %s ORDER BY 1",
@@ -1853,7 +1928,7 @@ static void dropTablespaces(PGconn* conn)
 /*
  * Handle the tablespace option. If every option value is not double
  * quotes, option value will be handled as a lowercase string. For example, the following
- * string "filesystem=hDfs, address=xx.xx.xx.xx:xxxx,xx.xx.xx.xx:xxxx"
+ * string "filesystem=hDfs, address=10.185.178.241:25000,10.185.178.239:25000,
  * cfgpath=/opt/config, storepath=/hanfeng/Hdfs_ts505". we need add double quotes for
  * the option, otherwise storepath name is processed as lowercase, it is not storepath with expectation.
  * @_in_param spcoptions: The options to be handled.
@@ -3600,7 +3675,7 @@ static void dumpResourcePools(PGconn* conn)
                 }
 
                 // cgroup_name is as a buffer for control_group
-                rc = strncpy_s(cgroup_name, sizeof(cgroup_name), control_group, strlen(control_group));
+                rc = strncpy_s(cgroup_name, sizeof(cgroup_name) / sizeof(char), control_group, strlen(control_group));
                 securec_check_c(rc, "\0", "\0");
 
                 tmp1 = strchr(cgroup_name, ':');
@@ -3608,12 +3683,12 @@ static void dumpResourcePools(PGconn* conn)
                 if (tmp1 != NULL && tmp2 != NULL) {
                     if (tmp1 == tmp2) {
                         *tmp1++ = '\0';
-                        rc = strncpy_s(workload_name, sizeof(workload_name), tmp1, strlen(tmp1));
+                        rc = strncpy_s(workload_name, sizeof(workload_name) / sizeof(char), tmp1, strlen(tmp1));
                         securec_check_c(rc, "\0", "\0");
                     } else {
                         *tmp1++ = '\0';
                         *tmp2++ = '\0';
-                        rc = strncpy_s(workload_name, sizeof(workload_name), tmp1, strlen(tmp1));
+                        rc = strncpy_s(workload_name, sizeof(workload_name) / sizeof(char), tmp1, strlen(tmp1));
                         securec_check_c(rc, "\0", "\0");
                     }
 
@@ -3926,6 +4001,9 @@ static void dumpDataSource(PGconn* conn)
             int i_sysadmin = PQfnumber(bufres, "rolsystemadmin");
             char* su = PQgetvalue(bufres, 0, i_su);
             char* sysadmin = PQgetvalue(bufres, 0, i_sysadmin);
+            if (su == NULL || sysadmin == NULL) {
+                continue;
+            }
 
             if (*su == 't' || *sysadmin == 't') {
                 /*

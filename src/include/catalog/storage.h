@@ -15,7 +15,7 @@
 #define STORAGE_H
 #include "dfsdesc.h"
 #include "storage/dfs/dfs_connector.h"
-#include "storage/block.h"
+#include "storage/buf/block.h"
 #include "storage/relfilenode.h"
 #include "storage/lmgr.h"
 #include "utils/relcache.h"
@@ -26,14 +26,23 @@
 #define DFS_STOR_FLAG  -1
 
 extern void RelationCreateStorage(RelFileNode rnode, char relpersistence, Oid ownerid, Oid bucketOid = InvalidOid,
-                                  Relation rel = NULL);
+                                  Oid relfilenode=InvalidOid, Relation rel = NULL);
 extern void RelationDropStorage(Relation rel, bool isDfsTruncate = false);
 extern void RelationPreserveStorage(RelFileNode rnode, bool atCommit);
 extern void RelationTruncate(Relation rel, BlockNumber nblocks);
 extern void PartitionTruncate(Relation parent, Partition  part, BlockNumber nblocks);
 extern void PartitionDropStorage(Relation rel, Partition part);
-extern void BucketCreateStorage(RelFileNode rnode, Oid bucketOid, Oid ownerid);
+extern void BucketCreateStorage(RelFileNode rnode, Oid bucketOid, Oid ownerid, Oid relfilenode);
 extern void BucketDropStorage(Relation relation, Partition partition);
+
+#ifdef ENABLE_MULTIPLE_NODES
+namespace Tsdb {
+extern void DropPartStorage(
+    Oid partition_id, RelFileNode* partition_rnode, BackendId backend, Oid ownerid, List* target_cudesc_relids);
+extern void InsertPartStorageIntoPendingList(_in_ RelFileNode* partition_rnode, _in_ AttrNumber part_id,
+        _in_ BackendId backend, _in_ Oid ownerid, _in_ bool atCommit);
+}
+#endif   /* ENABLE_MULTIPLE_NODES */
 
 // column-storage relation api
 extern void CStoreRelCreateStorage(RelFileNode* rnode, AttrNumber attrnum, char relpersistence, Oid ownerid);
@@ -60,6 +69,7 @@ extern void ColMainFileNodesAppend(RelFileNode* bcmFileNode, BackendId backend);
 extern void ColumnRelationDoDeleteFiles(RelFileNode* bcmFileNode, ForkNumber forknum, BackendId backend, Oid ownerid);
 extern void RowRelationDoDeleteFiles(RelFileNode rnode, BackendId backend, Oid ownerid, Oid relOid = InvalidOid,
                                      bool isCommit = false);
+
 extern uint64 GetSMgrRelSize(RelFileNode* relfilenode, BackendId backend, ForkNumber forkNum);
 
 /*
@@ -77,8 +87,8 @@ extern void DropDfsFilelist(RelFileNode fNode);
 extern int  ReadDfsFilelist(RelFileNode fNode, Oid ownerid, List** pendingList);
 extern void SaveDfsFilelist(Relation rel, DFSDescHandler *handler);
 extern uint64 GetDfsDelFileSize(List *dfsfilelist, bool isCommit);
-extern bool IsSmgrTruncate(XLogReaderState *record);
-extern bool IsSmgrCreate(XLogReaderState* record);
+extern bool IsSmgrTruncate(const XLogReaderState *record);
+extern bool IsSmgrCreate(const XLogReaderState* record);
 
 extern void smgrApplyXLogTruncateRelation(XLogReaderState *record);
 extern void XLogBlockSmgrRedoTruncate(RelFileNode rnode, BlockNumber blkno);

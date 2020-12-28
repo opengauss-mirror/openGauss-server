@@ -90,18 +90,19 @@ VecAppendState* ExecInitVecAppend(VecAppend* node, EState* estate, int eflags)
         i++;
     }
 
-    ExecAssignResultTypeFromTL(&appendstate->ps);
+    /*
+     * initialize output tuple type
+     * Result tuple slot of Append always contains a virtual tuple,
+     * Default tableAMtype for this slot is Heap.
+     */
+    ExecAssignResultTypeFromTL(&appendstate->ps, TAM_HEAP);
     appendstate->ps.ps_ProjInfo = NULL;
 
     /*
-     * Parallel-aware append plans must choose the first subplan to execute by
-     * looking at shared memory, but non-parallel-aware append plans can
-     * always start with the first subplan.
+     * initialize to scan first subplan
      */
-    appendstate->as_whichplan = appendstate->ps.plan->parallel_aware ? INVALID_SUBPLAN_INDEX : 0;
-
-    /* If parallel-aware, this will be overridden later. */
-    appendstate->choose_next_subplan = choose_next_subplan_locally;
+    appendstate->as_whichplan = 0;
+    (void)exec_append_initialize_next(appendstate);
 
     return appendstate;
 }
@@ -114,10 +115,6 @@ VecAppendState* ExecInitVecAppend(VecAppend* node, EState* estate, int eflags)
  */
 VectorBatch* ExecVecAppend(VecAppendState* node)
 {
-    /* If no subplan has been chosen, we must choose one before proceeding. */
-    if (node->as_whichplan == INVALID_SUBPLAN_INDEX && !node->choose_next_subplan(node))
-        return NULL;
-
     for (;;) {
         PlanState* subnode = NULL;
         VectorBatch* result = NULL;
@@ -125,7 +122,6 @@ VectorBatch* ExecVecAppend(VecAppendState* node)
         /*
          * figure out which subplan we are currently processing
          */
-        Assert(node->as_whichplan >= 0 && node->as_whichplan < node->as_nplans);
         subnode = node->appendplans[node->as_whichplan];
 
         /*
@@ -145,9 +141,19 @@ VectorBatch* ExecVecAppend(VecAppendState* node)
         /* Early free each of subplans after finishing execution */
         ExecEarlyFree(subnode);
 
-        /* choose new subplan; if none, we're done */
-        if (!node->choose_next_subplan(node))
+        /*
+         * Go on to the "next" subplan in the appropriate direction. If no
+         * more subplans, return the empty slot set up for us by
+         * ExecInitAppend.
+         */
+        if (ScanDirectionIsForward(node->ps.state->es_direction))
+            node->as_whichplan++;
+        else
+            node->as_whichplan--;
+        if (!exec_append_initialize_next(node))
             return NULL;
+
+        /* Else loop back and try to get a tuple from the new subplan */
     }
 }
 
@@ -192,5 +198,6 @@ void ExecReScanVecAppend(VecAppendState* node)
         if (subnode->chgParam == NULL)
             VecExecReScan(subnode);
     }
-    node->as_whichplan = node->ps.plan->parallel_aware ? INVALID_SUBPLAN_INDEX : 0;
+    node->as_whichplan = 0;
+    (void)exec_append_initialize_next(node);
 }

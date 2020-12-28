@@ -34,7 +34,8 @@ using namespace PureLibpq;
 const int MAX_CONN_INFO = 1024;
 
 HeartbeatClient::HeartbeatClient(int epollfd) : epollfd_(epollfd), isConnect_(false), hbConn_(NULL)
-{}
+{
+}
 
 HeartbeatClient::~HeartbeatClient()
 {
@@ -48,8 +49,8 @@ bool HeartbeatClient::Connect()
     }
 
     char connstr[MAX_CONN_INFO];
-    struct replconninfo* conninfo = NULL;
-    PurePort* port = NULL;
+    struct replconninfo *conninfo = NULL;
+    PurePort *port = NULL;
     int rcs = 0;
     int remotePort = -1;
     for (int i = START_REPLNODE_NUM; i < MAX_REPLNODE_NUM; i++) {
@@ -58,14 +59,9 @@ bool HeartbeatClient::Connect()
             continue;
         }
 
-        rcs = snprintf_s(connstr,
-            MAX_CONN_INFO,
-            MAX_CONN_INFO - 1,
-            "host=%s port=%d localhost=%s localport=%d",
-            conninfo->remotehost,
-            conninfo->remoteheartbeatport,
-            conninfo->localhost,
-            conninfo->localheartbeatport);
+        rcs = snprintf_s(connstr, MAX_CONN_INFO, MAX_CONN_INFO - 1, "host=%s port=%d localhost=%s localport=%d",
+                         conninfo->remotehost, conninfo->remoteheartbeatport, conninfo->localhost,
+                         conninfo->localheartbeatport);
         securec_check_ss(rcs, "", "");
         port = PQconnect(connstr);
         if (port != NULL) {
@@ -77,7 +73,7 @@ bool HeartbeatClient::Connect()
 
     if (port != NULL) {
         /* newCon takeover port */
-        HeartbeatConnection* newCon = MakeConnection(port->sock, port);
+        HeartbeatConnection *newCon = MakeConnection(port->sock, port);
         if (newCon == NULL) {
             ereport(COMMERROR, (errmsg("makeConnection failed.")));
             CloseAndFreePort(port);
@@ -94,16 +90,16 @@ bool HeartbeatClient::Connect()
     return isConnect_;
 }
 
-static void ProcessHeartbeatPacketClient(int epollFd, int events, void* arg, void** releasedConnPtr)
+static void ProcessHeartbeatPacketClient(int epollFd, int events, void *arg, void **releasedConnPtr)
 {
     ereport(DEBUG2, (errmsg("[client] process heartbeat.")));
 
     *releasedConnPtr = NULL;
-    HeartbeatConnection* con = (HeartbeatConnection*)arg;
+    HeartbeatConnection *con = (HeartbeatConnection *)arg;
     HeartbeatPacket inPacket;
-    if (pq_getbytes(con->port, (char*)(&inPacket), sizeof(HeartbeatPacket)) != 0) {
+    if (pq_getbytes(con->port, (char *)(&inPacket), sizeof(HeartbeatPacket)) != 0) {
         ereport(LOG, (errmsg("connection closed by peer, disconnect.")));
-        HeartbeatClient* client = (HeartbeatClient*)con->arg;
+        HeartbeatClient *client = (HeartbeatClient *)con->arg;
         client->DisConnect();
         *releasedConnPtr = con;
         return;
@@ -113,7 +109,7 @@ static void ProcessHeartbeatPacketClient(int epollFd, int events, void* arg, voi
     UpdateLastHeartbeatTime(con->remoteHost, con->channelIdentifier, con->lastActiveTime);
 }
 
-bool HeartbeatClient::InitConnection(HeartbeatConnection* con, int remotePort)
+bool HeartbeatClient::InitConnection(HeartbeatConnection *con, int remotePort)
 {
     int ret = SetSocketNoBlock(con->fd);
     if (ret != STATUS_OK) {
@@ -124,7 +120,7 @@ bool HeartbeatClient::InitConnection(HeartbeatConnection* con, int remotePort)
     con->callback = ProcessHeartbeatPacketClient;
     con->epHandle = epollfd_;
     con->channelIdentifier = remotePort;
-    con->arg = (void*)this;
+    con->arg = (void *)this;
 
     if (EventAdd(epollfd_, EPOLLIN, con)) {
         ereport(COMMERROR, (errmsg("Add listen socket failed[fd=%d].", con->fd)));
@@ -143,7 +139,7 @@ bool HeartbeatClient::InitConnection(HeartbeatConnection* con, int remotePort)
 
 static int GetChannelId(char remotehost[IP_LEN], int remoteheartbeatport)
 {
-    struct replconninfo* replconninfo = NULL;
+    struct replconninfo *replconninfo = NULL;
 
     for (int i = 0; i < MAX_REPLNODE_NUM; i++) {
         replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
@@ -151,24 +147,24 @@ static int GetChannelId(char remotehost[IP_LEN], int remoteheartbeatport)
             continue;
         }
 
-        if (strncmp((char*)replconninfo->remotehost, (char*)remotehost, IP_LEN) == 0 &&
+        if (strncmp((char *)replconninfo->remotehost, (char *)remotehost, IP_LEN) == 0 &&
             replconninfo->remoteheartbeatport == remoteheartbeatport) {
             return replconninfo->localheartbeatport;
         }
     }
     ereport(COMMERROR,
-        (errmsg("Failed to get channel id, remote host: %s, remote port:%d", remotehost, remoteheartbeatport)));
+            (errmsg("Failed to get channel id, remote host: %s, remote port:%d", remotehost, remoteheartbeatport)));
     return -1;
 }
 
-bool HeartbeatClient::SendStartupPacket(const HeartbeatConnection* con) const
+bool HeartbeatClient::SendStartupPacket(const HeartbeatConnection *con) const
 {
     ereport(DEBUG2, (errmsg("[client] send statup packet")));
     HeartbeatStartupPacket packet;
     packet.channelIdentifier = GetChannelId(con->remoteHost, con->channelIdentifier);
     packet.sendTime = GetCurrentTimestamp();
 
-    return SendPacket(con, (char*)(&packet), sizeof(HeartbeatStartupPacket));
+    return SendPacket(con, (char *)(&packet), sizeof(HeartbeatStartupPacket));
 }
 
 bool HeartbeatClient::SendBeatHeartPacket()

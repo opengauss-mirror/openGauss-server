@@ -161,10 +161,10 @@ DROP SEQUENCE seq2;
 -- should fail
 SELECT lastval();
 
-CREATE USER seq_user PASSWORD 'ttest@123';
+CREATE USER seq_user PASSWORD 'gauss@123';
 
 BEGIN;
-SET LOCAL SESSION AUTHORIZATION seq_user PASSWORD 'ttest@123';
+SET LOCAL SESSION AUTHORIZATION seq_user PASSWORD 'gauss@123';
 CREATE SEQUENCE seq3;
 SELECT nextval('seq3');
 REVOKE ALL ON seq3 FROM seq_user;

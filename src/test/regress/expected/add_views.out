@@ -1,5 +1,5 @@
-create user "user1" with sysadmin password 'Test@Mpp';
-set role "user1" password 'Test@Mpp';
+create user "user1" with sysadmin password 'Gaussdba@Mpp';
+set role "user1" password 'Gaussdba@Mpp';
 create table t1 (a int ,b int);
 select * from DBA_TABLES where table_name = 't1';
  owner | table_name | tablespace_name | status | temporary | dropped | num_rows 
@@ -155,8 +155,8 @@ select * from DBA_TAB_COMMENTS where table_name = 't5';
  user1 | t5         | 
 (1 row)
 
-create user "user2" with sysadmin password 'Test@Mpp';
-set role "user2" password 'Test@Mpp';
+create user "user2" with sysadmin password 'Gaussdba@Mpp';
+set role "user2" password 'Gaussdba@Mpp';
 select * from USER_TABLES where table_name = 't1';
  owner | table_name | tablespace_name | status | temporary | dropped | num_rows 
 -------+------------+-----------------+--------+-----------+---------+----------
@@ -197,7 +197,7 @@ select * from USER_TAB_COMMENTS where table_name = 't6';
 -------+------------+----------
 (0 rows)
 
-set role "user1" password 'Test@Mpp';
+set role "user1" password 'Gaussdba@Mpp';
 drop table t1;
 drop table t2;
 drop table t3;

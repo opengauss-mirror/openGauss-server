@@ -1,0 +1,197 @@
+--
+-- BULK LOAD PARALLEL TEST 1
+--
+----
+-- 1. Load data in normal mode wiht CSV format
+----
+CREATE TABLE LINEITEM
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+distribute by hash(L_ORDERKEY);
+CREATE FOREIGN TABLE EXT_LINEITEM (
+	L_ORDERKEY    BIGINT NOT NULL,        
+	L_PARTKEY     BIGINT NOT NULL,        
+	L_SUPPKEY     BIGINT NOT NULL,        
+	L_LINENUMBER  BIGINT NOT NULL,        
+	L_QUANTITY    DECIMAL(15,2) NOT NULL,        
+	L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,        
+	L_DISCOUNT    DECIMAL(15,2) NOT NULL,        
+	L_TAX     DECIMAL(15,2) NOT NULL,        
+	L_RETURNFLAG  CHAR(1) NOT NULL,        
+	L_LINESTATUS  CHAR(1) NOT NULL,        
+	L_SHIPDATE    DATE NOT NULL,        
+	L_COMMITDATE  DATE NOT NULL,        
+	L_RECEIPTDATE DATE NOT NULL,        
+	L_SHIPINSTRUCT CHAR(25) NOT NULL,        
+	L_SHIPMODE     CHAR(10) NOT NULL,        
+	L_COMMENT      VARCHAR(44) NOT NULL
+)SERVER gsmpp_server OPTIONS(format 'csv', location 'gsobs://@obshostname@/@obsbucket@/obscheck/lineitem.data', delimiter '|',
+access_key '@ak@',
+secret_access_key '@sk@');
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+SELECT COUNT(*) FROM LINEITEM;
+ count 
+-------
+ 20000
+(1 row)
+
+TRUNCATE LINEITEM;
+DROP FOREIGN TABLE EXT_LINEITEM;
+----
+--2. Load data in normal mode with TEXT format
+----
+CREATE FOREIGN TABLE EXT_LINEITEM (
+        L_ORDERKEY    BIGINT NOT NULL,
+        L_PARTKEY     BIGINT NOT NULL,
+        L_SUPPKEY     BIGINT NOT NULL,
+        L_LINENUMBER  BIGINT NOT NULL,
+        L_QUANTITY    DECIMAL(15,2) NOT NULL,
+        L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,
+        L_DISCOUNT    DECIMAL(15,2) NOT NULL,
+        L_TAX     DECIMAL(15,2) NOT NULL,
+        L_RETURNFLAG  CHAR(1) NOT NULL,
+        L_LINESTATUS  CHAR(1) NOT NULL,
+        L_SHIPDATE    DATE NOT NULL,
+        L_COMMITDATE  DATE NOT NULL,
+        L_RECEIPTDATE DATE NOT NULL,
+        L_SHIPINSTRUCT CHAR(25) NOT NULL,
+        L_SHIPMODE     CHAR(10) NOT NULL,
+        L_COMMENT      VARCHAR(44) NOT NULL
+)SERVER gsmpp_server OPTIONS(format 'text', location 'gsobs://@obshostname@/@obsbucket@/obscheck/lineitem.data', delimiter '|',
+access_key '@ak@',
+secret_access_key '@sk@');
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+SELECT COUNT(*) FROM LINEITEM;
+ count 
+-------
+ 20000
+(1 row)
+
+TRUNCATE LINEITEM;
+DROP FOREIGN TABLE EXT_LINEITEM;
+----
+---- linebuffer case test
+----
+---- (1)Load data in normal mode for overloaded buffer support
+CREATE FOREIGN TABLE OVERLOAD_TEST_FT(
+col1 text,
+col2 text)
+SERVER gsmpp_server
+OPTIONS(location
+'gsobs://@obshostname@/@obsbucket@/obscheck/overload.txt',
+format 'csv',
+delimiter ',',
+encoding 'utf8',
+access_key '@ak@',
+secret_access_key '@sk@'
+);
+CREATE TABLE OVERLOAD_TEST(col1 text,col2 text);
+INSERT INTO OVERLOAD_TEST SELECT * FROM OVERLOAD_TEST_FT;
+SELECT char_length(col1),char_length(col2) FROM OVERLOAD_TEST ORDER BY col1;
+ char_length | char_length 
+-------------+-------------
+      531701 |           1
+      461233 |           1
+(2 rows)
+
+DROP FOREIGN TABLE OVERLOAD_TEST_FT;
+DROP TABLE OVERLOAD_TEST;
+---- (2)Load data in normal mode for 'in_cr' flag parsing exception for CSV file
+CREATE FOREIGN TABLE FT_CSV_PARSE_EXCEPTION
+(
+    C_BIGINT BIGINT,
+    C_CHAR_1 CHAR(100),
+    C_CHAR_2 CHAR(100),
+    C_VARCHAR VARCHAR(1024),
+    C_TEXT TEXT,
+    C_CLOB CLOB,
+    C_NUMERIC NUMERIC(20,5),
+    C_DP DOUBLE PRECISION
+) SERVER gsmpp_server OPTIONS (LOCATION 'gsobs://@obshostname@/@obsbucket@/obscheck/in_cr_flag_test.data', FORMAT 'CSV', COMPATIBLE_ILLEGAL_CHARS 'TRUE', ENCODING 'UTF8',
+access_key '@ak@',
+secret_access_key '@sk@');
+SELECT COUNT(*) FROM FT_CSV_PARSE_EXCEPTION;
+ count 
+-------
+  2852
+(1 row)
+
+DROP FOREIGN TABLE FT_CSV_PARSE_EXCEPTION;
+----
+---- gds foreign table join
+----
+CREATE FOREIGN TABLE EXT_LINEITEM (
+        L_ORDERKEY    BIGINT NOT NULL,
+        L_PARTKEY     BIGINT NOT NULL,
+        L_SUPPKEY     BIGINT NOT NULL,
+        L_LINENUMBER  BIGINT NOT NULL,
+        L_QUANTITY    DECIMAL(15,2) NOT NULL,
+        L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,
+        L_DISCOUNT    DECIMAL(15,2) NOT NULL,
+        L_TAX     DECIMAL(15,2) NOT NULL,
+        L_RETURNFLAG  CHAR(1) NOT NULL,
+        L_LINESTATUS  CHAR(1) NOT NULL,
+        L_SHIPDATE    DATE NOT NULL,
+        L_COMMITDATE  DATE NOT NULL,
+        L_RECEIPTDATE DATE NOT NULL,
+        L_SHIPINSTRUCT CHAR(25) NOT NULL,
+        L_SHIPMODE     CHAR(10) NOT NULL,
+        L_COMMENT      VARCHAR(44) NOT NULL
+)SERVER gsmpp_server OPTIONS(format 'text', location 'gsobs://@obshostname@/@obsbucket@/obscheck/lineitem.data', delimiter '|', compatible_illegal_chars 'true',
+access_key '@ak@',
+secret_access_key '@sk@');
+SELECT  FT_1.L_ORDERKEY FROM EXT_LINEITEM FT_1 JOIN EXT_LINEITEM FT_2 ON FT_1.L_ORDERKEY = FT_2.L_ORDERKEY GROUP BY FT_1.L_ORDERKEY ORDER BY FT_1.L_ORDERKEY LIMIT 1;
+ l_orderkey 
+------------
+          1
+(1 row)
+
+SELECT * FROM EXT_LINEITEM, LINEITEM;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate | l_shipinstruct | l_shipmode | l_comment | l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate | l_shipinstruct | l_shipmode | l_comment 
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+----------------+------------+-----------+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+----------------+------------+-----------
+(0 rows)
+
+DROP FOREIGN TABLE EXT_LINEITEM;
+----
+---- load data to oversize row/column table
+----
+CREATE FOREIGN TABLE EXT_LINEITEM (
+        L_ORDERKEY    BIGINT NOT NULL,
+        L_PARTKEY     BIGINT NOT NULL,
+        L_SUPPKEY     BIGINT NOT NULL,
+        L_LINENUMBER  BIGINT NOT NULL,
+        L_QUANTITY    DECIMAL(15,2) NOT NULL,
+        L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,
+        L_DISCOUNT    DECIMAL(15,2) NOT NULL,
+        L_TAX     DECIMAL(15,2) NOT NULL,
+        L_RETURNFLAG  CHAR(1) NOT NULL,
+        L_LINESTATUS  CHAR(1) NOT NULL,
+        L_SHIPDATE    DATE NOT NULL,
+        L_COMMITDATE  DATE NOT NULL,
+        L_RECEIPTDATE DATE NOT NULL,
+        L_SHIPINSTRUCT CHAR(25) NOT NULL,
+        L_SHIPMODE     CHAR(10) NOT NULL,
+        L_COMMENT      VARCHAR(44) NOT NULL
+)SERVER gsmpp_server OPTIONS(format 'text', location 'gsobs://@obshostname@/@obsbucket@/obscheck/insert_oversize_tuple.data', delimiter '|',
+access_key '@ak@',
+secret_access_key '@sk@');
+DROP FOREIGN TABLE EXT_LINEITEM;
+DROP TABLE LINEITEM;

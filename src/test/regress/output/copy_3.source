@@ -1,0 +1,165 @@
+----
+---- check ignore_extra_data option
+----
+create table ignore_extra_data_test(a int, b int);
+copy ignore_extra_data_test from '@abs_srcdir@/data/ignore_extra_data_test.data'  DELIMITER as '|' ignore_extra_data;
+select * from ignore_extra_data_test;
+ a | b 
+---+---
+ 1 | 2
+(1 row)
+
+drop table ignore_extra_data_test;
+----
+---- load data to oversize row/column table
+----
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -f @abs_srcdir@/data/create_oversize_row_table.sql > /dev/null 2>&1;
+copy lineitem_large_row from '@abs_srcdir@/data/copy_oversize_tuple.data' delimiter '|';
+ERROR:  row is too big: size 13128, maximum size 8144
+CONTEXT:  COPY lineitem_large_row, line 2: ""
+DROP TABLE lineitem_large_row;
+----
+---- set noescaping to be 'true' for copy to
+----
+CREATE TABLE NOESCAPING_TEST(id int,name text);
+COPY NOESCAPING_TEST FROM '@abs_srcdir@/data/datanode1/noescaping_for_exporting_test.data' WITH(FORMAT 'csv', delimiter '|', ignore_extra_data 'true', noescaping 'true');
+ERROR:  without escaping available only in TEXT mode
+COPY NOESCAPING_TEST FROM '@abs_srcdir@/data/datanode1/noescaping_for_exporting_test.data' WITH(FORMAT 'binary', ignore_extra_data 'true', noescaping 'true');
+ERROR:  without escaping available only in TEXT mode
+COPY NOESCAPING_TEST FROM '@abs_srcdir@/data/datanode1/noescaping_for_exporting_test.data' WITHOUT ESCAPING FIXED FORMATTER(id (0, 10), name (10, 30));
+ERROR:  without escaping available only in TEXT mode
+COPY NOESCAPING_TEST FROM '@abs_srcdir@/data/datanode1/noescaping_for_exporting_test.data' WITH(FORMAT 'text', delimiter '|', ignore_extra_data 'true', noescaping 'true');
+SELECT * FROM NOESCAPING_TEST;
+ id |                               name                               
+----+------------------------------------------------------------------
+  1 | a71.photo.store.qq.\343\78\233\346\377\377\377\377\377\377\377\3
+(1 row)
+
+COPY NOESCAPING_TEST TO '@abs_srcdir@/data/datanode1/noescaping_true_exporting.data'  WITH(FORMAT 'text', delimiter '|', noescaping 'true');
+\! cat @abs_srcdir@/data/datanode1/noescaping_true_exporting.data
+1|a71.photo.store.qq.\343\78\233\346\377\377\377\377\377\377\377\3
+\! rm -f @abs_srcdir@/data/datanode1/noescaping_true_exporting.data
+COPY NOESCAPING_TEST TO '@abs_srcdir@/data/datanode1/noescaping_false_exporting.data'  WITH(FORMAT 'csv', delimiter '|', noescaping 'false');
+ERROR:  without escaping available only in TEXT mode
+COPY NOESCAPING_TEST TO '@abs_srcdir@/data/datanode1/noescaping_false_exporting.data'  WITH(FORMAT 'binary', noescaping 'false');
+ERROR:  without escaping available only in TEXT mode
+COPY NOESCAPING_TEST TO '@abs_srcdir@/data/datanode1/noescaping_false_exporting.data'  WITH(FORMAT 'text', delimiter '|', noescaping 'false');
+\! cat @abs_srcdir@/data/datanode1/noescaping_false_exporting.data
+1|a71.photo.store.qq.\\343\\78\\233\\346\\377\\377\\377\\377\\377\\377\\377\\3
+\! rm -f @abs_srcdir@/data/datanode1/noescaping_false_exporting.data
+DROP TABLE NOESCAPING_TEST;
+----
+---- copy bulkload backslash correct escaping
+----
+create table time_format_his_010_05
+(
+C_INT INT,
+c_time time ,
+c_time_w time without time zone,
+c_char varchar(1024)
+) partition by range(c_int)
+(
+partition c_int_1 values less than (5),
+partition c_int_2 values less than (maxvalue)
+);
+copy time_format_his_010_05 from '@abs_srcdir@/data/datanode1/copy_backslash_escape.data' WITHOUT ESCAPING with( delimiter ',',time_format 'hh24\miss\');
+select * from time_format_his_010_05 order by C_INT;
+ c_int |  c_time  | c_time_w |   c_char    
+-------+----------+----------+-------------
+     1 | 23:59:01 | 00:00:00 | 00\0000\
+     2 | 23:59:01 | 00:00:00 | 00\0000\\.
+     3 | 00:00:00 | 00:00:00 | 00\0001\\\.
+     4 | 00:00:01 | 00:00:01 | 00\0001\'
+     5 | 00:00:01 | 00:00:31 | 00\0031\"
+     6 | 00:00:01 | 00:00:31 | 00\0001\n
+     7 | 00:00:01 | 00:00:31 | 00\0000\\
+(7 rows)
+
+drop table time_format_his_010_05;
+----
+----
+create table DTS2016111106370_tbl
+(
+dp_demo_sk                integer               not null,
+dp_gender                 char(3)                       ,
+dp_marital_status         char(3)                       ,
+dp_education_status       char(20)                      ,
+dp_purchase_estimate      integer                       ,
+dp_credit_rating          char(10)                      ,
+dp_dep_count              integer                       ,
+dp_dep_employed_count     integer                       ,
+dp_dep_college_count      integer                       ,
+dp_date                   integer                          ,
+dp_phone				  varchar(20)				     ,
+dp_id			          varchar(20)                    ,
+dp_num                    varchar(20)                    ,	
+dp_text                    varchar(20000)                    ,
+dp_text_tv tsvector,
+dp_text_ts tsquery
+)
+distribute by  replication
+partition by range (dp_date)
+(
+partition DTS2016111106370_tbl_1 values less than(1950),
+partition DTS2016111106370_tbl_2 values less than(2000),
+partition DTS2016111106370_tbl_3 values less than(2050),
+partition DTS2016111106370_tbl_4 values less than(2100),
+partition DTS2016111106370_tbl_5 values less than(3000),
+partition DTS2016111106370_tbl_6 values less than(maxvalue)
+)
+;
+insert into DTS2016111106370_tbl values(1,'M','M','Primary'             ,500,'Good'      ,0,0,0,1950,'13033333333','440900197702065080','桂D IIUQ6','2015年11月4日，张家口市公安局、。·ˉˇ¨〃々—～‖…‘“”〔〕〈〉《》°′″℃＄¤￠￡成功破获一起拉杆箱式伪基站诈骗案件。该局民警在排查安全「」『』〖〗【】±≡≌≈∽' ,null,null);
+insert into DTS2016111106370_tbl values(2,'F','M','Primary'             ,500,'Good'      ,0,0,0,2000,'13044444444','321282198903046569','云N ESBH7','∝≠≮≯≤≥∞∶∵∴∷♂♀隐患时，发现一嫌疑人正在以中国建设银行客服',null,null); 
+insert into DTS2016111106370_tbl values(3,'M','S','Primary'             ,500,'Good'      ,0,0,0,2050,'13055555555','450400198802202694','贵A Y2OM0','号码“95533”名义，利用短信群发器向不⊿▲▼◣◤◢特定人群大量发送关于“银行账户积分兑换现金活动”的诈骗短信，办', null,null);
+insert into DTS2016111106370_tbl values(4,'F','S','Primary'             ,500,'Good'      ,0,0,0,2100,'13066666666','371722198810125946','川T B6KS3','案民警随即将犯罪嫌疑人周某成功抓获■△▽⊿▲▼◣◤◢◥▁▂▃▄▅▆▇█▉▊▋，当场收缴作案工具短信', null,null);
+insert into DTS2016111106370_tbl values(5,'M','D','Primary'             ,500,'Good'      ,0,0,0,3000,'13077777777','150100199204056110','藏E NVDG5','群发器一套。经查，周某多次在张家口市区利用囧⊙●○⊕◎Θ⊙¤㈱㊣★☆♀◆ ▅ ▆ ▇ █ █ ■ ▓ 回 □⊥﹃﹄┌ ┐└ ┘∟「」↑↓→短信群发器累计发送约7万余条诈骗短信。', null,null);
+insert into DTS2016111106370_tbl values(6,'F','D','Primary'             ,500,'Good'      ,0,0,0,3100,'13088888888','130684198503211498','陕K PV806','　　2015年10月16日，保定市公安局端掉一涉嫌诈骗窝点，查获◇◣◢◥▲▼△▽⊿◤ ◥ ', null,null);
+insert into DTS2016111106370_tbl values(7,'M','W','Primary'             ,500,'Good'      ,0,0,0,1950,'13099999999','320800198505033823','甘D 3CK27','▂ ▃ ▄私刻的公司、发票专用章、纪念币、纪念银条、客户资料、发货单、电话等物，抓获嫌疑人6名。经查，自2015年3月以来，犯罪嫌疑人赵',null,null); 
+insert into DTS2016111106370_tbl values(8,'F','W','Primary'             ,500,'Good'      ,0,0,0,2000,'13012345678','350603197710270827','宁C Q8AO5','某与冯某从网上购买假的纪念币、银条、‰§№☆★〇○●◎◇◆ 回□▌▍▎▏▓※→←↑↓↖' ,null,null);
+insert into DTS2016111106370_tbl values(9,'M','U','Primary'             ,500,'Good'      ,0,0,0,2050,'13087654321','431281198203182139','青E 1P4V4','化妆品及全国各地的个人信息，雇佣张某:?;.﹛﹏﹊︽︻〗▄ ▅ ✄@㊨→↔囍某等四人，冒充北京藏品有限公司及电视购物买卖宝工作人员，用假名字和自编工号向' ,null,null);
+insert into DTS2016111106370_tbl values(10,'F','U','Primary'            ,500,'Good'     ,0,0,0,2100,'13023456789','440601198011301931','新Q 05245','全国各地人群打电话推销假纪念币及化妆品，涉案10万余元。', null,null);
+insert into DTS2016111106370_tbl values(11,'M','M','Secondary'          ,500,'Good'     ,0,0,0,3000,'13100000000','63250019881115391X','军T CIMP5','　　2015年5月30日，沧州市沧县公安局成功抓获一名涉嫌利用QQ聊天诈骗的犯罪 〓≡ ╝╚╔ ╗╬ ═ ╓ ╩ ┠ ┨┯ ┷┏ ┓┗ ┛┳嫌疑人刘某某。经查，', null,null);
+insert into DTS2016111106370_tbl values(12,'F','M','Secondary'          ,500,'Good'     ,0,0,0,3100,'13111111111','350782198903130244','北M D8OC9','自2015年1月份以来，刘某某化名“刘某”通过QQ聊天、打电话等方式以做生意缺钱为由先后五次诈骗杨某某1.22万元。', null,null);
+insert into DTS2016111106370_tbl values(13,'M','S','Secondary'          ,500,'Good'     ,0,0,0,1950,'13122222222','542125199104061520','南A 2ER97','　　2015年5月12日，冀中公安局成功破获一起利用QQ聊天进行诈骗的案件，抓获', null,null);
+insert into DTS2016111106370_tbl values(14,'F','S','Secondary'          ,500,'Good'     ,0,0,0,2000,'13133333333','530326197803047984','广U 006T9','犯罪嫌疑人1名。经查，犯罪＋－×÷∧∨∑∏∪∩∈√⊥∥∠⌒⊙∫∮嫌疑人殷某某在5月1', null,null);
+insert into DTS2016111106370_tbl values(15,'M','D','Secondary'          ,500,'Good'     ,0,0,0,2050,'13144444444','341225199204262781','沈R 6TCH7','日至6日期间，在QQ上自称韩俊，以帮助受害人朱某破解命中情劫⑶⑷⑸、稳定姻缘、改变命运等一系列迷信说法，诈骗朱某4.6万元。', null,null);
+insert into DTS2016111106370_tbl values(16,'F','D','Secondary'          ,500,'Good'     ,0,0,0,2100,'13155555555','450223198706295636','成Y LRFL5','　　2015年8月8日，石家庄市公安局抓获犯罪嫌疑人罗某、罗某某、黎某，成功破获“6·16”QQ诈', null,null);
+insert into DTS2016111106370_tbl values(17,'M','W','Secondary'          ,500,'Good'     ,0,0,0,3000,'13166666666','141128198604215986','兰M Y6WZ2','骗案。经查，罗某、罗某某于6月16日，ⅰⅱ⒈⒉⒊⒋ ⒌⑴⑵⑹⑺⑿在QQ上冒充长安区某公司老板通过QQ指令公司会计转账，诈骗该公司124万元。', null,null);
+insert into DTS2016111106370_tbl values(18,'F','W','Secondary'          ,500,'Good'     ,0,0,0,3100,'13177777777','610103198203159498','济C WDPF9','1、对于犯罪分子决定刑罚的时候，应当根据犯罪的事实、犯罪的性质、情节和对于社会的', null,null);
+insert into DTS2016111106370_tbl values(19,'M','U','Secondary'          ,500,'Good'     ,0,0,0,1950,'13188888888','430523198403027119','空U EWWG0','危害程度，依照《刑法》的有关规定判处；', null,null);
+insert into DTS2016111106370_tbl values(20,'F','U','Secondary'          ,500,'Good'     ,0,0,0,2000,'13199999999','420525198009025685','海O 03SM4','　　2、法律依据：1）《刑法》　　第二百六十六条　【诈骗罪】诈骗公私财物，数额较大的', null,null);
+insert into DTS2016111106370_tbl values(21,'M','M','College'             ,500,'Good'     ,0,0,0,2050,'13112345678','230714198011139338','京G HVT11','，http://www.hanzify.org/software/12299.html）处三年以下', null,null);
+insert into DTS2016111106370_tbl values(22,'F','M','College'             ,500,'Good'     ,0,0,0,2100,'13187654321','430300197612109014','津C 83BH0','有期徒刑、拘役或者管制，并处或者单处罚金；数额巨大或者有其他严重情节的，处三年以上十年以〗★●', null,null);
+insert into DTS2016111106370_tbl values(23,'M','S','College'             ,500,'Good'     ,0,0,0,3000,'13123456789','210781198002130012','沪B5HBK8' ,'△♢♦♂下有期徒刑，并处罚金；数额特别巨大或者有其他特别严重情节的，处十年以上有期徒刑或者无期徒刑⒁⒂⒃⒄⒅⒆⒇，并处罚金或者没收财产。本法另有规定的，依照规定。', null,null);
+insert into DTS2016111106370_tbl values(24,'F','S','College'             ,500,'Good'     ,0,0,0,3100,'13200000000','32132219801114113X','渝AZ2FT2' ,'　　2）《关于办理诈骗刑事案件具体应用法律若干问题的解释》 第一条　诈骗公私财物价值三千元ⅲⅳⅴⅵⅶ', null,null);
+insert into DTS2016111106370_tbl values(25,'M','D','College'             ,500,'Good'     ,0,0,0,1950,'13211111111','370502199010193059','冀ADEYZ7' ,'ⅷⅸⅹ①②③⑨⑩至一万元以上、三万元至十万元以上、五十万元以上的，应当分别认定为刑法第二百', null,null);
+insert into DTS2016111106370_tbl values(26,'F','D','College'             ,500,'Good'     ,0,0,0,2000,'13222222222','210682198302018541','豫LAA0C2' ,'六十六条规定的“数额较大↗↘↙〓”⒍⒎⒏⒐⒚⒛、“数额巨大”、“数额特别巨大”。', null,null);
+insert into DTS2016111106370_tbl values(27,'M','W','College'             ,500,'Good'     ,0,0,0,2050,'13233333333','532925198410018974','鲁A95P23' ,'　　各省、自治区、直辖市高级人民法院、人民检察院可以结合⒑⒒⒓⒔⒕⒖⒗⒘⒙本地区经济社会⑻⑼⑽⑾发展状况，在前款规', null,null);
+insert into DTS2016111106370_tbl values(28,'F','W','College'             ,500,'Good'     ,0,0,0,2100,'13244444444','42030119750519262X','晋J4Y158' ,'定的数额幅度内，共同研究确定本地区执行的具体数额标准，报最高人民法院、最高人民检察院备案', null,null);
+insert into DTS2016111106370_tbl values(29,'M','U','College'             ,500,'Good'     ,0,0,0,3000,'13255555555','210102199412021827','蒙KMSYB9' ,'←↘↙♀♂┇┅ ﹉﹊﹍﹎╭ ╮╰ ╯ *^_^* ^*^ ^-^ ^执行的具体数额标准，', null,null);
+insert into DTS2016111106370_tbl values(30,'F','U','College'             ,500,'Good'     ,0,0,0,3100,'13266666666','120105198208259208','辽V53UR9' ,'_^ ^︵^ ∵∴‖︱ ︳︴高级人民法院、﹏﹋﹌︵︶︹︺ 【', null,null);
+update DTS2016111106370_tbl set dp_text_tv=to_tsvector('ngram',coalesce(dp_text,''));
+---- compressed row relation
+alter table DTS2016111106370_tbl set  compress ;
+select count(*) from DTS2016111106370_tbl;
+ count 
+-------
+    30
+(1 row)
+
+---- create compressed pages and compressed tuples 
+vacuum full DTS2016111106370_tbl;
+---- copy to 1B/4B varlen values
+copy DTS2016111106370_tbl (dp_text_ts) to  '@abs_srcdir@/data/datanode1/DTS2016111106370_tbl.txt'  with (encoding 'utf8');
+drop table DTS2016111106370_tbl;
+----
+----
+CREATE TABLE DTS2016112411747_tbl( c int, d date) distribute by hash(c);
+COPY DTS2016112411747_tbl FROM STDIN with(delimiter ',',timestamp_format 'yyyymondd');
+SELECT * FROM DTS2016112411747_tbl;
+ c |            d             
+---+--------------------------
+ 1 | Sat Jan 01 00:00:00 2000
+(1 row)
+
+DROP TABLE DTS2016112411747_tbl;

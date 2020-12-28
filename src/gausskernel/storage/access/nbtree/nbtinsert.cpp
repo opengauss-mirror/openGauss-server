@@ -21,7 +21,6 @@
 #include "access/transam.h"
 #include "access/xlog.h"
 #include "access/xloginsert.h"
-#include "access/nbtree.h"
 #include "access/genam.h"
 
 #include "miscadmin.h"
@@ -29,7 +28,7 @@
 #include "storage/predicate.h"
 #include "storage/proc.h"
 #include "utils/inval.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 typedef struct {
     /* context data for _bt_checksplitloc */
@@ -51,22 +50,21 @@ typedef struct {
 } FindSplitData;
 
 static Buffer _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf);
-static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, Buffer buf, OffsetNumber offset,
-    ScanKey itup_scankey, IndexUniqueCheck checkUnique, bool* is_unique, GPIScanDesc gpiDesc);
-static void _bt_findinsertloc(Relation rel, Buffer* bufptr, OffsetNumber* offsetptr, int keysz, ScanKey scankey,
-    IndexTuple newtup, BTStack stack, Relation heapRel);
-static void _bt_insertonpg(
-    Relation rel, Buffer buf, Buffer cbuf, BTStack stack, IndexTuple itup, OffsetNumber newitemoff, bool split_only_page);
-static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstright, OffsetNumber newitemoff, Size newitemsz,
-    IndexTuple newitem, bool newitemonleft);
-static OffsetNumber _bt_findsplitloc(
-    Relation rel, Page page, OffsetNumber newitemoff, Size newitemsz, bool* newitemonleft);
-static void _bt_checksplitloc(FindSplitData* state, OffsetNumber firstoldonright, bool newitemonleft,
-    int dataitemstoleft, Size firstoldonrightsz);
+static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, Buffer buf,
+    OffsetNumber offset, ScanKey itup_scankey, IndexUniqueCheck checkUnique, bool *is_unique, GPIScanDesc gpiDesc);
+static void _bt_findinsertloc(Relation rel, Buffer *bufptr, OffsetNumber *offsetptr, int keysz, ScanKey scankey,
+                              IndexTuple newtup, BTStack stack, Relation heapRel);
+static void _bt_insertonpg(Relation rel, Buffer buf, Buffer cbuf, BTStack stack, IndexTuple itup,
+                           OffsetNumber newitemoff, bool split_only_page);
+static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstright, OffsetNumber newitemoff,
+                        Size newitemsz, IndexTuple newitem, bool newitemonleft);
+static OffsetNumber _bt_findsplitloc(Relation rel, Page page, OffsetNumber newitemoff, Size newitemsz,
+                                     bool *newitemonleft);
+static void _bt_checksplitloc(FindSplitData *state, OffsetNumber firstoldonright, bool newitemonleft,
+                              int dataitemstoleft, Size firstoldonrightsz);
 static bool _bt_pgaddtup(Page page, Size itemsize, IndexTuple itup, OffsetNumber itup_off);
 static bool _bt_isequal(Relation idxrel, Page page, OffsetNumber offnum, int keysz, ScanKey scankey);
 static void _bt_vacuum_one_page(Relation rel, Buffer buffer, Relation heapRel);
-static void _bt_insert_parent(Relation rel, Buffer buf, Buffer rbuf, BTStack stack, bool is_root, bool is_only);
 
 /*
  *	_bt_doinsert() -- Handle insertion of a single index tuple in the tree.
@@ -219,6 +217,7 @@ static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation he
     Buffer nbuf = InvalidBuffer;
     bool found = false;
     Relation tarRel = heapRel;
+
     /* Assume unique until we find a duplicate */
     *is_unique = true;
 
@@ -274,7 +273,7 @@ static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation he
                 htid = curitup->t_tid;
                 Oid curPartOid = InvalidOid;
                 Datum datum;
-                bool isNull = false;
+                bool isNull;
                 if (RelationIsGlobalIndex(rel)) {
                     datum =
                         index_getattr(curitup, IndexRelationGetNumberOfAttributes(rel), RelationGetDescr(rel), &isNull);
@@ -388,7 +387,7 @@ static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation he
                     {
                         Datum values[INDEX_MAX_KEYS];
                         bool isnull[INDEX_MAX_KEYS];
-                        char* key_desc = NULL;
+                        char *key_desc = NULL;
 
                         index_deform_tuple(itup, RelationGetDescr(rel), values, isnull);
 
@@ -399,11 +398,10 @@ static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation he
                          */
                         Assert(0 != memcmp(NameStr(rel->rd_rel->relname), "pg_cudesc_", strlen("pg_cudesc_")));
 
-                        ereport(ERROR,
-                            (errcode(ERRCODE_UNIQUE_VIOLATION),
-                                errmsg("duplicate key value violates unique constraint \"%s\"",
-                                    RelationGetRelationName(rel)),
-                                key_desc ? errdetail("Key %s already exists.", key_desc) : 0));
+                        ereport(ERROR, (errcode(ERRCODE_UNIQUE_VIOLATION),
+                                        errmsg("duplicate key value violates unique constraint \"%s\"",
+                                               RelationGetRelationName(rel)),
+                                        key_desc ? errdetail("Key %s already exists.", key_desc) : 0));
                     }
                 } else if (all_dead) {
                     /*
@@ -447,9 +445,8 @@ next:
                 if (!P_IGNORE(opaque))
                     break;
                 if (P_RIGHTMOST(opaque))
-                    ereport(ERROR,
-                        (errcode(ERRCODE_INDEX_CORRUPTED),
-                            errmsg("fell off the end of index \"%s\"", RelationGetRelationName(rel))));
+                    ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                                    errmsg("fell off the end of index \"%s\"", RelationGetRelationName(rel))));
             }
             maxoff = PageGetMaxOffsetNumber(page);
             offset = P_FIRSTDATAKEY(opaque);
@@ -462,10 +459,9 @@ next:
      * index is on a non-immutable expression.
      */
     if (checkUnique == UNIQUE_CHECK_EXISTING && !found)
-        ereport(ERROR,
-            (errcode(ERRCODE_INDEX_CORRUPTED),
-                errmsg("failed to re-find tuple within index \"%s\"", RelationGetRelationName(rel)),
-                errhint("This may be because of a non-immutable index expression.")));
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                        errmsg("failed to re-find tuple within index \"%s\"", RelationGetRelationName(rel)),
+                        errhint("This may be because of a non-immutable index expression.")));
 
     if (nbuf != InvalidBuffer)
         _bt_relbuf(rel, nbuf);
@@ -502,8 +498,8 @@ next:
  *		newtup is the new tuple we're inserting, and scankey is an insertion
  *		type scan key for it.
  */
-static void _bt_findinsertloc(Relation rel, Buffer* bufptr, OffsetNumber* offsetptr, int keysz, ScanKey scankey,
-    IndexTuple newtup, BTStack stack, Relation heapRel)
+static void _bt_findinsertloc(Relation rel, Buffer *bufptr, OffsetNumber *offsetptr, int keysz, ScanKey scankey,
+                              IndexTuple newtup, BTStack stack, Relation heapRel)
 {
     Buffer buf = *bufptr;
     Page page = BufferGetPage(buf);
@@ -527,15 +523,12 @@ static void _bt_findinsertloc(Relation rel, Buffer* bufptr, OffsetNumber* offset
      * include the ItemId.
      */
     if (itemsz > (Size)BTMaxItemSize(page))
-        ereport(ERROR,
-            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                errmsg("index row size %lu exceeds maximum %lu for index \"%s\"",
-                    (unsigned long)itemsz,
-                    (unsigned long)BTMaxItemSize(page),
-                    RelationGetRelationName(rel)),
-                errhint("Values larger than 1/3 of a buffer page cannot be indexed.\n"
-                        "Consider a function index of an MD5 hash of the value, "
-                        "or use full text indexing.")));
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                        errmsg("index row size %lu exceeds maximum %lu for index \"%s\"", (unsigned long)itemsz,
+                               (unsigned long)BTMaxItemSize(page), RelationGetRelationName(rel)),
+                        errhint("Values larger than 1/3 of a buffer page cannot be indexed.\n"
+                                "Consider a function index of an MD5 hash of the value, "
+                                "or use full text indexing.")));
 
     /*
      * If we will need to split the page to put the item on this page,
@@ -605,18 +598,18 @@ static void _bt_findinsertloc(Relation rel, Buffer* bufptr, OffsetNumber* offset
              * is not good because finishing the split could be a fairly
              * lengthy operation.  But this should happen very seldom.
              */
-            if (P_INCOMPLETE_SPLIT(lpageop)) {
-                _bt_finish_split(rel, rbuf, stack);
-                rbuf = InvalidBuffer;
-                continue;
+            if (t_thrd.proc->workingVersionNum >= BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+                if (P_INCOMPLETE_SPLIT(lpageop)) {
+                    _bt_finish_split(rel, rbuf, stack);
+                    rbuf = InvalidBuffer;
+                    continue;
+                }
             }
-
             if (!P_IGNORE(lpageop))
                 break;
             if (P_RIGHTMOST(lpageop))
-                ereport(ERROR,
-                    (errcode(ERRCODE_INDEX_CORRUPTED),
-                        errmsg("fell off the end of index \"%s\"", RelationGetRelationName(rel))));
+                ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                                errmsg("fell off the end of index \"%s\"", RelationGetRelationName(rel))));
 
             rblkno = lpageop->btpo_next;
         }
@@ -667,8 +660,8 @@ static void _bt_findinsertloc(Relation rel, Buffer* bufptr, OffsetNumber* offset
  * 'afteritem' parameter to position ourselves correctly for the
  * insertion on internal pages.
  */
-static void _bt_insertonpg(
-    Relation rel, Buffer buf, Buffer cbuf, BTStack stack, IndexTuple itup, OffsetNumber newitemoff, bool split_only_page)
+static void _bt_insertonpg(Relation rel, Buffer buf, Buffer cbuf, BTStack stack, IndexTuple itup,
+                           OffsetNumber newitemoff, bool split_only_page)
 {
     Page page;
     BTPageOpaqueInternal lpageop;
@@ -678,13 +671,14 @@ static void _bt_insertonpg(
     page = BufferGetPage(buf);
     lpageop = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
 
-    /* child buffer must be given iff inserting on an internal page */
-    Assert(P_ISLEAF(lpageop) == !BufferIsValid(cbuf));
+    if (t_thrd.proc->workingVersionNum >= BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+        /* child buffer must be given iff inserting on an internal page */
+        Assert(P_ISLEAF(lpageop) == !BufferIsValid(cbuf));
 
-    /* The caller should've finished any incomplete splits already. */
-    if (P_INCOMPLETE_SPLIT(lpageop)) {
-        elog(ERROR, "cannot insert to incompletely split page %u",
-             BufferGetBlockNumber(buf));
+        /* The caller should've finished any incomplete splits already. */
+        if (P_INCOMPLETE_SPLIT(lpageop)) {
+            elog(ERROR, "cannot insert to incompletely split page %u", BufferGetBlockNumber(buf));
+        }
     }
 
     itemsz = IndexTupleDSize(*itup);
@@ -729,7 +723,7 @@ static void _bt_insertonpg(
     } else {
         Buffer metabuf = InvalidBuffer;
         Page metapg = NULL;
-        BTMetaPageData* metad = NULL;
+        BTMetaPageData *metad = NULL;
         OffsetNumber itup_off;
         BlockNumber itup_blkno;
 
@@ -761,10 +755,8 @@ static void _bt_insertonpg(
 
         if (!_bt_pgaddtup(page, itemsz, itup, newitemoff))
             ereport(PANIC,
-                (errcode(ERRCODE_INDEX_CORRUPTED),
-                    errmsg("failed to add new item to block %u in index \"%s\"",
-                        itup_blkno,
-                        RelationGetRelationName(rel))));
+                    (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("failed to add new item to block %u in index \"%s\"",
+                                                              itup_blkno, RelationGetRelationName(rel))));
 
         MarkBufferDirty(buf);
 
@@ -774,19 +766,21 @@ static void _bt_insertonpg(
             MarkBufferDirty(metabuf);
         }
 
-        /* clear INCOMPLETE_SPLIT flag on child if inserting a downlink */
-        if (BufferIsValid(cbuf)) {
-            Page cpage = BufferGetPage(cbuf);
-            BTPageOpaqueInternal cpageop = (BTPageOpaqueInternal) PageGetSpecialPointer(cpage);
-
-            Assert(P_INCOMPLETE_SPLIT(cpageop));
-            cpageop->btpo_flags &= ~BTP_INCOMPLETE_SPLIT;
-            MarkBufferDirty(cbuf);
+        if (t_thrd.proc->workingVersionNum >= BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+            /* clear INCOMPLETE_SPLIT flag on child if inserting a downlink */
+            if (BufferIsValid(cbuf)) {
+                Page cpage = BufferGetPage(cbuf);
+                BTPageOpaqueInternal cpageop = (BTPageOpaqueInternal)PageGetSpecialPointer(cpage);
+                Assert(P_INCOMPLETE_SPLIT(cpageop));
+                cpageop->btpo_flags &= ~BTP_INCOMPLETE_SPLIT;
+                MarkBufferDirty(cbuf);
+            }
         }
 
         /* XLOG stuff */
         if (RelationNeedsWAL(rel)) {
             xl_btree_insert xlrec;
+            BlockNumber xldownlink;
             xl_btree_metadata xlmeta;
             uint8 xlinfo;
             XLogRecPtr recptr;
@@ -795,16 +789,21 @@ static void _bt_insertonpg(
             xlrec.offnum = itup_off;
 
             XLogBeginInsert();
-            XLogRegisterData((char*)&xlrec, SizeOfBtreeInsert);
+            XLogRegisterData((char *)&xlrec, SizeOfBtreeInsert);
 
             if (P_ISLEAF(lpageop))
                 xlinfo = XLOG_BTREE_INSERT_LEAF;
             else {
-                /*
-                 * Register the left child whose INCOMPLETE_SPLIT flag was
-                 * cleared.
-                 */
-                XLogRegisterBuffer(1, cbuf, REGBUF_STANDARD);
+                if (t_thrd.proc->workingVersionNum < BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+                    xldownlink = ItemPointerGetBlockNumber(&(itup->t_tid));
+                    XLogRegisterData((char*)&xldownlink, sizeof(BlockNumber));
+                } else {
+                    /*
+                     * Register the left child whose INCOMPLETE_SPLIT flag was
+                     * cleared.
+                     */
+                    XLogRegisterBuffer(1, cbuf, REGBUF_STANDARD);
+                }
                 xlinfo = XLOG_BTREE_INSERT_UPPER;
             }
 
@@ -814,8 +813,13 @@ static void _bt_insertonpg(
                 xlmeta.fastroot = metad->btm_fastroot;
                 xlmeta.fastlevel = metad->btm_fastlevel;
 
-                XLogRegisterBuffer(2, metabuf, REGBUF_WILL_INIT | REGBUF_STANDARD);
-                XLogRegisterBufData(2, (char*)&xlmeta, sizeof(xl_btree_metadata));
+                if (t_thrd.proc->workingVersionNum < BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+                    XLogRegisterBuffer(1, metabuf, REGBUF_WILL_INIT);
+                    XLogRegisterBufData(1, (char *)&xlmeta, sizeof(xl_btree_metadata));
+                } else {
+                    XLogRegisterBuffer(2, metabuf, REGBUF_WILL_INIT | REGBUF_STANDARD);
+                    XLogRegisterBufData(2, (char *)&xlmeta, sizeof(xl_btree_metadata));
+                }
                 xlinfo = XLOG_BTREE_INSERT_META;
             }
 
@@ -824,17 +828,23 @@ static void _bt_insertonpg(
             if (!P_ISLEAF(lpageop) && newitemoff == P_FIRSTDATAKEY(lpageop)) {
                 trunctuple = *itup;
                 trunctuple.t_info = sizeof(IndexTupleData);
-                XLogRegisterBufData(0, (char*)&trunctuple, sizeof(IndexTupleData));
+                XLogRegisterBufData(0, (char *)&trunctuple, sizeof(IndexTupleData));
             } else
-                XLogRegisterBufData(0, (char*)itup, IndexTupleDSize(*itup));
+                XLogRegisterBufData(0, (char *)itup, IndexTupleDSize(*itup));
 
-            recptr = XLogInsert(RM_BTREE_ID, xlinfo);
+            if (t_thrd.proc->workingVersionNum < BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+                recptr = XLogInsert(RM_BTREE_ID, xlinfo);
+            } else {
+                recptr = XLogInsert(RM_BTREE_ID, xlinfo | BTREE_SPLIT_UPGRADE_FLAG);
+            }
 
             if (BufferIsValid(metabuf)) {
                 PageSetLSN(metapg, recptr);
             }
-            if (BufferIsValid(cbuf)) {
-                PageSetLSN(BufferGetPage(cbuf), recptr);
+            if (t_thrd.proc->workingVersionNum >= BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+                if (BufferIsValid(cbuf)) {
+                    PageSetLSN(BufferGetPage(cbuf), recptr);
+                }
             }
             PageSetLSN(page, recptr);
         }
@@ -845,8 +855,10 @@ static void _bt_insertonpg(
         if (BufferIsValid(metabuf)) {
             _bt_relbuf(rel, metabuf);
         }
-        if (BufferIsValid(cbuf)) {
-            _bt_relbuf(rel, cbuf);
+        if (t_thrd.proc->workingVersionNum >= BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+            if (BufferIsValid(cbuf)) {
+                _bt_relbuf(rel, cbuf);
+            }
         }
         _bt_relbuf(rel, buf);
     }
@@ -867,8 +879,8 @@ static void _bt_insertonpg(
  *		Returns the new right sibling of buf, pinned and write-locked.
  *		The pin and lock on buf are maintained.
  */
-static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstright, OffsetNumber newitemoff, Size newitemsz,
-    IndexTuple newitem, bool newitemonleft)
+static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstright, OffsetNumber newitemoff,
+                        Size newitemsz, IndexTuple newitem, bool newitemonleft)
 {
     Buffer rbuf;
     Page origpage;
@@ -934,7 +946,9 @@ static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firs
     lopaque->btpo_flags &= ~(BTP_ROOT | BTP_SPLIT_END | BTP_HAS_GARBAGE);
     ropaque->btpo_flags = lopaque->btpo_flags;
     /* set flag in left page indicating that the right page has no downlink */
-    lopaque->btpo_flags |= BTP_INCOMPLETE_SPLIT;
+    if (t_thrd.proc->workingVersionNum >= BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+        lopaque->btpo_flags |= BTP_INCOMPLETE_SPLIT;
+    }
     lopaque->btpo_prev = oopaque->btpo_prev;
     lopaque->btpo_next = rightpagenumber;
     ropaque->btpo_prev = origpagenumber;
@@ -961,11 +975,9 @@ static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firs
         if (PageAddItem(rightpage, (Item)item, itemsz, rightoff, false, false) == InvalidOffsetNumber) {
             rc = memset_s(rightpage, BLCKSZ, 0, BufferGetPageSize(rbuf));
             securec_check(rc, "", "");
-            ereport(ERROR,
-                (errcode(ERRCODE_INDEX_CORRUPTED),
-                    errmsg("failed to add hikey to the right sibling while splitting block %u of index \"%s\"",
-                        origpagenumber,
-                        RelationGetRelationName(rel))));
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                            errmsg("failed to add hikey to the right sibling while splitting block %u of index \"%s\"",
+                                   origpagenumber, RelationGetRelationName(rel))));
         }
         rightoff = OffsetNumberNext(rightoff);
     }
@@ -1001,15 +1013,12 @@ static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firs
         lefthikey = item;
     }
 
-    Assert(BTreeTupleGetNAtts(lefthikey, rel) == indnkeyatts);
     if (PageAddItem(leftpage, (Item)lefthikey, itemsz, leftoff, false, false) == InvalidOffsetNumber) {
         rc = memset_s(rightpage, BLCKSZ, 0, BufferGetPageSize(rbuf));
         securec_check(rc, "", "");
-        ereport(ERROR,
-            (errcode(ERRCODE_INDEX_CORRUPTED),
-                errmsg("failed to add hikey to the left sibling while splitting block %u of index \"%s\"",
-                    origpagenumber,
-                    RelationGetRelationName(rel))));
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                        errmsg("failed to add hikey to the left sibling while splitting block %u of index \"%s\"",
+                               origpagenumber, RelationGetRelationName(rel))));
     }
     leftoff = OffsetNumberNext(leftoff);
 
@@ -1037,24 +1046,22 @@ static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firs
                 if (!_bt_pgaddtup(leftpage, newitemsz, newitem, leftoff)) {
                     rc = memset_s(rightpage, BLCKSZ, 0, BufferGetPageSize(rbuf));
                     securec_check(rc, "", "");
-                    ereport(ERROR,
+                    ereport(
+                        ERROR,
                         (errcode(ERRCODE_INDEX_CORRUPTED),
-                            errmsg(
-                                "failed to add new item to the left sibling while splitting block %u of index \"%s\"",
-                                origpagenumber,
-                                RelationGetRelationName(rel))));
+                         errmsg("failed to add new item to the left sibling while splitting block %u of index \"%s\"",
+                                origpagenumber, RelationGetRelationName(rel))));
                 }
                 leftoff = OffsetNumberNext(leftoff);
             } else {
                 if (!_bt_pgaddtup(rightpage, newitemsz, newitem, rightoff)) {
                     rc = memset_s(rightpage, BLCKSZ, 0, BufferGetPageSize(rbuf));
                     securec_check(rc, "", "");
-                    ereport(ERROR,
+                    ereport(
+                        ERROR,
                         (errcode(ERRCODE_INDEX_CORRUPTED),
-                            errmsg(
-                                "failed to add new item to the right sibling while splitting block %u of index \"%s\"",
-                                origpagenumber,
-                                RelationGetRelationName(rel))));
+                         errmsg("failed to add new item to the right sibling while splitting block %u of index \"%s\"",
+                                origpagenumber, RelationGetRelationName(rel))));
                 }
                 rightoff = OffsetNumberNext(rightoff);
             }
@@ -1066,10 +1073,9 @@ static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firs
                 rc = memset_s(rightpage, BLCKSZ, 0, BufferGetPageSize(rbuf));
                 securec_check(rc, "", "");
                 ereport(ERROR,
-                    (errcode(ERRCODE_INDEX_CORRUPTED),
-                        errmsg("failed to add old item to the left sibling while splitting block %u of index \"%s\"",
-                            origpagenumber,
-                            RelationGetRelationName(rel))));
+                        (errcode(ERRCODE_INDEX_CORRUPTED),
+                         errmsg("failed to add old item to the left sibling while splitting block %u of index \"%s\"",
+                                origpagenumber, RelationGetRelationName(rel))));
             }
             leftoff = OffsetNumberNext(leftoff);
         } else {
@@ -1077,10 +1083,9 @@ static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firs
                 rc = memset_s(rightpage, BLCKSZ, 0, BufferGetPageSize(rbuf));
                 securec_check(rc, "", "");
                 ereport(ERROR,
-                    (errcode(ERRCODE_INDEX_CORRUPTED),
-                        errmsg("failed to add old item to the right sibling while splitting block %u of index \"%s\"",
-                            origpagenumber,
-                            RelationGetRelationName(rel))));
+                        (errcode(ERRCODE_INDEX_CORRUPTED),
+                         errmsg("failed to add old item to the right sibling while splitting block %u of index \"%s\"",
+                                origpagenumber, RelationGetRelationName(rel))));
             }
             rightoff = OffsetNumberNext(rightoff);
         }
@@ -1098,10 +1103,9 @@ static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firs
             rc = memset_s(rightpage, BLCKSZ, 0, BufferGetPageSize(rbuf));
             securec_check(rc, "", "");
             ereport(ERROR,
-                (errcode(ERRCODE_INDEX_CORRUPTED),
-                    errmsg("failed to add new item to the right sibling while splitting block %u of index \"%s\"",
-                        origpagenumber,
-                        RelationGetRelationName(rel))));
+                    (errcode(ERRCODE_INDEX_CORRUPTED),
+                     errmsg("failed to add new item to the right sibling while splitting block %u of index \"%s\"",
+                            origpagenumber, RelationGetRelationName(rel))));
         }
         rightoff = OffsetNumberNext(rightoff);
     }
@@ -1122,13 +1126,10 @@ static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firs
             securec_check(rc, "", "");
 
             ereport(ERROR,
-                (errcode(ERRCODE_INDEX_CORRUPTED),
-                    errmsg("right sibling's left-link doesn't match: block %u links to %u instead of expected %u in "
-                           "index \"%s\"",
-                        oopaque->btpo_next,
-                        sopaque->btpo_prev,
-                        origpagenumber,
-                        RelationGetRelationName(rel))));
+                    (errcode(ERRCODE_INDEX_CORRUPTED),
+                     errmsg("right sibling's left-link doesn't match: block %u links to %u instead of expected %u in "
+                            "index \"%s\"",
+                            oopaque->btpo_next, sopaque->btpo_prev, origpagenumber, RelationGetRelationName(rel))));
         }
 
         /*
@@ -1186,12 +1187,14 @@ static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firs
      * Clear INCOMPLETE_SPLIT flag on child if inserting the new item finishes
      * a split.
      */
-    if (!isleaf) {
-        Page cpage = BufferGetPage(cbuf);
-        BTPageOpaqueInternal cpageop = (BTPageOpaqueInternal) PageGetSpecialPointer(cpage);
+    if (t_thrd.proc->workingVersionNum >= BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+        if (!isleaf) {
+            Page cpage = BufferGetPage(cbuf);
+            BTPageOpaqueInternal cpageop = (BTPageOpaqueInternal)PageGetSpecialPointer(cpage);
 
-        cpageop->btpo_flags &= ~BTP_INCOMPLETE_SPLIT;
-        MarkBufferDirty(cbuf);
+            cpageop->btpo_flags &= ~BTP_INCOMPLETE_SPLIT;
+            MarkBufferDirty(cbuf);
+        }
     }
 
     /* XLOG stuff */
@@ -1205,15 +1208,34 @@ static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firs
         xlrec.newitemoff = newitemoff;
 
         XLogBeginInsert();
-        XLogRegisterData((char*)&xlrec, SizeOfBtreeSplit);
+        XLogRegisterData((char *)&xlrec, SizeOfBtreeSplit);
         XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
         XLogRegisterBuffer(1, rbuf, REGBUF_WILL_INIT);
         /* Log the right sibling, because we've changed its' prev-pointer. */
         if (!P_RIGHTMOST(ropaque)) {
             XLogRegisterBuffer(2, sbuf, REGBUF_STANDARD);
         }
-        if (BufferIsValid(cbuf)) {
-            XLogRegisterBuffer(3, cbuf, REGBUF_STANDARD);
+
+        if (t_thrd.proc->workingVersionNum < BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+            if (ropaque->btpo.level > 0) {
+                /* Log downlink on non-leaf pages */
+                XLogRegisterData((char *)&newitem->t_tid.ip_blkid, sizeof(BlockIdData));
+
+                /*
+                 * We must also log the left page's high key, because the right
+                 * page's leftmost key is suppressed on non-leaf levels.  Show it
+                 * as belonging to the left page buffer, so that it is not stored
+                 * if XLogInsert decides it needs a full-page image of the left
+                 * page.
+                 */
+                itemid = PageGetItemId(origpage, P_HIKEY);
+                item = (IndexTuple)PageGetItem(origpage, itemid);
+                XLogRegisterBufData(0, (char *)item, MAXALIGN(IndexTupleSize(item)));
+            }
+        } else {
+            if (BufferIsValid(cbuf)) {
+                XLogRegisterBuffer(3, cbuf, REGBUF_STANDARD);
+            }
         }
 
         /*
@@ -1226,12 +1248,14 @@ static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firs
          * archive compression of these records.
          */
         if (newitemonleft)
-            XLogRegisterBufData(0, (char*)newitem, MAXALIGN(newitemsz));
+            XLogRegisterBufData(0, (char *)newitem, MAXALIGN(newitemsz));
 
-        /* Log the left page's new high key */
-        itemid = PageGetItemId(origpage, P_HIKEY);
-        item = (IndexTuple) PageGetItem(origpage, itemid);
-        XLogRegisterBufData(0, (char *) item, MAXALIGN(IndexTupleSize(item)));
+        if (t_thrd.proc->workingVersionNum >= BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+            /* Log the left page's new high key */
+            itemid = PageGetItemId(origpage, P_HIKEY);
+            item = (IndexTuple)PageGetItem(origpage, itemid);
+            XLogRegisterBufData(0, (char *)item, MAXALIGN(IndexTupleSize(item)));
+        }
 
         /*
          * Log the contents of the right page in the format understood by
@@ -1245,25 +1269,29 @@ static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firs
          * and so the item pointers can be reconstructed.
          * See comments for _bt_restore_page().
          */
-        XLogRegisterBufData(1,
-            (char*)rightpage + ((PageHeader)rightpage)->pd_upper,
-            ((PageHeader)rightpage)->pd_special - ((PageHeader)rightpage)->pd_upper);
+        XLogRegisterBufData(1, (char *)rightpage + ((PageHeader)rightpage)->pd_upper,
+                            ((PageHeader)rightpage)->pd_special - ((PageHeader)rightpage)->pd_upper);
 
         if (isroot) {
             xlinfo = newitemonleft ? XLOG_BTREE_SPLIT_L_ROOT : XLOG_BTREE_SPLIT_R_ROOT;
         } else {
             xlinfo = newitemonleft ? XLOG_BTREE_SPLIT_L : XLOG_BTREE_SPLIT_R;
         }
-
-        recptr = XLogInsert(RM_BTREE_ID, xlinfo);
+        if (t_thrd.proc->workingVersionNum < BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+            recptr = XLogInsert(RM_BTREE_ID, xlinfo);
+        } else {
+            recptr = XLogInsert(RM_BTREE_ID, xlinfo | BTREE_SPLIT_UPGRADE_FLAG);
+        }
 
         PageSetLSN(origpage, recptr);
         PageSetLSN(rightpage, recptr);
         if (!P_RIGHTMOST(ropaque)) {
             PageSetLSN(spage, recptr);
         }
-        if (!isleaf) {
-            PageSetLSN(BufferGetPage(cbuf), recptr);
+        if (t_thrd.proc->workingVersionNum >= BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+            if (!isleaf) {
+                PageSetLSN(BufferGetPage(cbuf), recptr);
+            }
         }
     }
 
@@ -1273,9 +1301,11 @@ static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firs
     if (!P_RIGHTMOST(ropaque)) {
         _bt_relbuf(rel, sbuf);
     }
-    /* release the child */
-    if (!isleaf) {
-        _bt_relbuf(rel, cbuf);
+    if (t_thrd.proc->workingVersionNum >= BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+        /* release the child */
+        if (!isleaf) {
+            _bt_relbuf(rel, cbuf);
+        }
     }
 
     /* split's done */
@@ -1306,10 +1336,9 @@ static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firs
  * righthand page, plus a boolean indicating whether the new tuple goes on
  * the left or right page. The bool is necessary to disambiguate the case
  * where firstright == newitemoff.
- *
  */
-static OffsetNumber _bt_findsplitloc(
-    Relation rel, Page page, OffsetNumber newitemoff, Size newitemsz, bool* newitemonleft)
+static OffsetNumber _bt_findsplitloc(Relation rel, Page page, OffsetNumber newitemoff, Size newitemsz,
+                                     bool *newitemonleft)
 {
     BTPageOpaqueInternal opaque;
     OffsetNumber offnum;
@@ -1415,8 +1444,8 @@ static OffsetNumber _bt_findsplitloc(
      */
     if (!state.have_split) {
         ereport(ERROR,
-            (errcode(ERRCODE_INDEX_CORRUPTED),
-             errmsg("could not find a feasible split point for index \"%s\"", RelationGetRelationName(rel))));
+                (errcode(ERRCODE_INDEX_CORRUPTED),
+                 errmsg("could not find a feasible split point for index \"%s\"", RelationGetRelationName(rel))));
     }
 
     *newitemonleft = state.newitemonleft;
@@ -1436,8 +1465,8 @@ static OffsetNumber _bt_findsplitloc(
  * olddataitemstoleft is the total size of all old items to the left of
  * firstoldonright.
  */
-static void _bt_checksplitloc(FindSplitData* state, OffsetNumber firstoldonright, bool newitemonleft,
-    int olddataitemstoleft, Size firstoldonrightsz)
+static void _bt_checksplitloc(FindSplitData *state, OffsetNumber firstoldonright, bool newitemonleft,
+                              int olddataitemstoleft, Size firstoldonrightsz)
 {
     int leftfree, rightfree;
     Size firstrightitemsz;
@@ -1524,7 +1553,7 @@ static void _bt_checksplitloc(FindSplitData* state, OffsetNumber firstoldonright
  * is_root - we split the true root
  * is_only - we split a page alone on its level (might have been fast root)
  */
-static void _bt_insert_parent(Relation rel, Buffer buf, Buffer rbuf, BTStack stack, bool is_root, bool is_only)
+void _bt_insert_parent(Relation rel, Buffer buf, Buffer rbuf, BTStack stack, bool is_root, bool is_only)
 {
     /*
      * Here we have to do something Lehman and Yao don't talk about: deal with
@@ -1585,7 +1614,11 @@ static void _bt_insert_parent(Relation rel, Buffer buf, Buffer rbuf, BTStack sta
          * assure that memory is properly allocated, prevent from missing log of insert parent */
         START_CRIT_SECTION();
         new_item = CopyIndexTuple(ritem);
-        BTreeInnerTupleSetDownLink(new_item, rbknum);
+        if (t_thrd.proc->workingVersionNum < SUPPORT_GPI_VERSION_NUM) {
+            ItemPointerSet(&(new_item->t_tid), rbknum, P_HIKEY);
+        } else {
+            BTreeInnerTupleSetDownLink(new_item, rbknum);
+        }
         END_CRIT_SECTION();
 
         /*
@@ -1596,22 +1629,22 @@ static void _bt_insert_parent(Relation rel, Buffer buf, Buffer rbuf, BTStack sta
          * 05/27/97
          */
         stack->bts_btentry = bknum;
-        pbuf = _bt_getstackbuf(rel, stack, BT_WRITE);
+        pbuf = _bt_getstackbuf(rel, stack);
 
         /* Now we can unlock the right child. The left child will be unlocked
          * by _bt_insertonpg()
          */
         _bt_relbuf(rel, rbuf);
+        if (t_thrd.proc->workingVersionNum < BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+            _bt_relbuf(rel, buf);
+        }
 
         /* Check for error only after writing children */
         if (pbuf == InvalidBuffer) {
-            XLogWaitFlush(t_thrd.xlog_cxt.LogwrtResult->Write);
-            ereport(ERROR,
-                (errcode(ERRCODE_INDEX_CORRUPTED),
-                    errmsg("failed to re-find parent key in index \"%s\" for split pages %u/%u",
-                        RelationGetRelationName(rel),
-                        bknum,
-                        rbknum)));
+            XLogFlush(t_thrd.xlog_cxt.LogwrtResult->Write);
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                            errmsg("failed to re-find parent key in index \"%s\" for split pages %u/%u",
+                                   RelationGetRelationName(rel), bknum, rbknum)));
         }
         /* Recursively update the parent */
         _bt_insertonpg(rel, pbuf, buf, stack->bts_parent, new_item, stack->bts_offset + 1, is_only);
@@ -1631,11 +1664,10 @@ static void _bt_insert_parent(Relation rel, Buffer buf, Buffer rbuf, BTStack sta
  * On entry, 'lbuf' must be locked in write-mode. On exit, it is unlocked
  * and unpinned.
  */
-void
-_bt_finish_split(Relation rel, Buffer lbuf, BTStack stack)
+void _bt_finish_split(Relation rel, Buffer lbuf, BTStack stack)
 {
     Page lpage = BufferGetPage(lbuf);
-    BTPageOpaqueInternal lpageop = (BTPageOpaqueInternal) PageGetSpecialPointer(lpage);
+    BTPageOpaqueInternal lpageop = (BTPageOpaqueInternal)PageGetSpecialPointer(lpage);
     Buffer rbuf;
     Page rpage;
     BTPageOpaqueInternal rpageop;
@@ -1646,7 +1678,7 @@ _bt_finish_split(Relation rel, Buffer lbuf, BTStack stack)
     /* Lock right sibling, the one missing the downlink */
     rbuf = _bt_getbuf(rel, lpageop->btpo_next, BT_WRITE);
     rpage = BufferGetPage(rbuf);
-    rpageop = (BTPageOpaqueInternal) PageGetSpecialPointer(rpage);
+    rpageop = (BTPageOpaqueInternal)PageGetSpecialPointer(rpage);
 
     /* Could this be a root split? */
     if (!stack) {
@@ -1662,13 +1694,14 @@ _bt_finish_split(Relation rel, Buffer lbuf, BTStack stack)
         was_root = (metad->btm_root == BufferGetBlockNumber(lbuf));
 
         _bt_relbuf(rel, metabuf);
+    } else {
+        was_root = false;
     }
 
     /* Was this the only page on the level before split? */
     bool was_only = (P_LEFTMOST(lpageop) && P_RIGHTMOST(rpageop));
 
-    elog(DEBUG1, "finishing incomplete split of %u/%u",
-        BufferGetBlockNumber(lbuf), BufferGetBlockNumber(rbuf));
+    elog(DEBUG1, "finishing incomplete split of %u/%u", BufferGetBlockNumber(lbuf), BufferGetBlockNumber(rbuf));
 
     _bt_insert_parent(rel, lbuf, rbuf, stack, was_root, was_only);
 }
@@ -1686,7 +1719,7 @@ _bt_finish_split(Relation rel, Buffer lbuf, BTStack stack)
  *
  *		Returns InvalidBuffer if item not found (should not happen).
  */
-Buffer _bt_getstackbuf(Relation rel, BTStack stack, int access)
+Buffer _bt_getstackbuf(Relation rel, BTStack stack)
 {
     BlockNumber blkno;
     OffsetNumber start;
@@ -1699,11 +1732,10 @@ Buffer _bt_getstackbuf(Relation rel, BTStack stack, int access)
         Page page;
         BTPageOpaqueInternal opaque;
 
-        buf = _bt_getbuf(rel, blkno, access);
+        buf = _bt_getbuf(rel, blkno, BT_WRITE);
         page = BufferGetPage(buf);
         opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
-
-        if (access == BT_WRITE && P_INCOMPLETE_SPLIT(opaque)) {
+        if (P_INCOMPLETE_SPLIT(opaque)) {
             _bt_finish_split(rel, buf, stack->bts_parent);
             continue;
         }
@@ -1739,7 +1771,9 @@ Buffer _bt_getstackbuf(Relation rel, BTStack stack, int access)
             for (offnum = start; offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
                 itemid = PageGetItemId(page, offnum);
                 item = (IndexTuple)PageGetItem(page, itemid);
-                if (BTreeInnerTupleGetDownLink(item) == stack->bts_btentry) {
+                bool getRightItem = false;
+                getRightItem = BTreeInnerTupleGetDownLink(item) == stack->bts_btentry;
+                if (getRightItem) {
                     /* Return accurate pointer to where link is now */
                     stack->bts_blkno = blkno;
                     stack->bts_offset = offnum;
@@ -1751,7 +1785,9 @@ Buffer _bt_getstackbuf(Relation rel, BTStack stack, int access)
             for (offnum = OffsetNumberPrev(start); offnum >= minoff; offnum = OffsetNumberPrev(offnum)) {
                 itemid = PageGetItemId(page, offnum);
                 item = (IndexTuple)PageGetItem(page, itemid);
-                if (BTreeInnerTupleGetDownLink(item) == stack->bts_btentry) {
+                bool getRightItem = false;
+                getRightItem = BTreeInnerTupleGetDownLink(item) == stack->bts_btentry;
+                if (getRightItem) {
                     /* Return accurate pointer to where link is now */
                     stack->bts_blkno = blkno;
                     stack->bts_offset = offnum;
@@ -1809,12 +1845,12 @@ static Buffer _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf)
     Size right_item_sz;
     Buffer metabuf;
     Page metapg;
-    BTMetaPageData* metad = NULL;
+    BTMetaPageData *metad = NULL;
 
     lbkno = BufferGetBlockNumber(lbuf);
     rbkno = BufferGetBlockNumber(rbuf);
     lpage = BufferGetPage(lbuf);
-    lopaque = (BTPageOpaqueInternal) PageGetSpecialPointer(lpage);
+    lopaque = (BTPageOpaqueInternal)PageGetSpecialPointer(lpage);
 
     /*
      *	We have split the old root page and need to create a new one.
@@ -1855,8 +1891,13 @@ static Buffer _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf)
     left_item_sz = sizeof(IndexTupleData);
     left_item = (IndexTuple)palloc(left_item_sz);
     left_item->t_info = (unsigned short)left_item_sz;
-    BTreeInnerTupleSetDownLink(left_item, lbkno);
-    BTreeTupleSetNAtts(left_item, 0);
+    
+    if (t_thrd.proc->workingVersionNum < SUPPORT_GPI_VERSION_NUM) {
+        ItemPointerSet(&(left_item->t_tid), lbkno, P_HIKEY);
+    } else {
+        BTreeInnerTupleSetDownLink(left_item, lbkno);
+        BTreeTupleSetNAtts(left_item, 0);
+    }
 
     /*
      * Create downlink item for right page.  The key for it is obtained from
@@ -1866,8 +1907,12 @@ static Buffer _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf)
     right_item_sz = ItemIdGetLength(itemid);
     item = (IndexTuple)PageGetItem(lpage, itemid);
     right_item = CopyIndexTuple(item);
-    BTreeInnerTupleSetDownLink(right_item, rbkno);
-
+    
+    if (t_thrd.proc->workingVersionNum < SUPPORT_GPI_VERSION_NUM) {
+        ItemPointerSet(&(right_item->t_tid), rbkno, P_HIKEY);
+    } else {
+        BTreeInnerTupleSetDownLink(right_item, rbkno);
+    }
     /* set btree special data */
     rootopaque = (BTPageOpaqueInternal)PageGetSpecialPointer(rootpage);
     rootopaque->btpo_prev = rootopaque->btpo_next = P_NONE;
@@ -1890,26 +1935,24 @@ static Buffer _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf)
      * benefit of _bt_restore_page().
      */
     if (PageAddItem(rootpage, (Item)left_item, left_item_sz, P_HIKEY, false, false) == InvalidOffsetNumber)
-        ereport(PANIC,
-            (errcode(ERRCODE_INDEX_CORRUPTED),
-                errmsg("failed to add leftkey to new root page while splitting block %u of index \"%s\"",
-                    BufferGetBlockNumber(lbuf),
-                    RelationGetRelationName(rel))));
+        ereport(PANIC, (errcode(ERRCODE_INDEX_CORRUPTED),
+                        errmsg("failed to add leftkey to new root page while splitting block %u of index \"%s\"",
+                               BufferGetBlockNumber(lbuf), RelationGetRelationName(rel))));
 
     /*
      * insert the right page pointer into the new root page.
      */
     if (PageAddItem(rootpage, (Item)right_item, right_item_sz, P_FIRSTKEY, false, false) == InvalidOffsetNumber)
-        ereport(PANIC,
-            (errcode(ERRCODE_INDEX_CORRUPTED),
-                errmsg("failed to add rightkey to new root page while splitting block %u of index \"%s\"",
-                    BufferGetBlockNumber(lbuf),
-                    RelationGetRelationName(rel))));
+        ereport(PANIC, (errcode(ERRCODE_INDEX_CORRUPTED),
+                        errmsg("failed to add rightkey to new root page while splitting block %u of index \"%s\"",
+                               BufferGetBlockNumber(lbuf), RelationGetRelationName(rel))));
 
-    /* Clear the incomplete-split flag in the left child */
-    Assert(P_INCOMPLETE_SPLIT(lopaque));
-    lopaque->btpo_flags &= ~BTP_INCOMPLETE_SPLIT;
-    MarkBufferDirty(lbuf);
+    if (t_thrd.proc->workingVersionNum >= BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+        /* Clear the incomplete-split flag in the left child */
+        Assert(P_INCOMPLETE_SPLIT(lopaque));
+        lopaque->btpo_flags &= ~BTP_INCOMPLETE_SPLIT;
+        MarkBufferDirty(lbuf);
+    }
     MarkBufferDirty(rootbuf);
     MarkBufferDirty(metabuf);
 
@@ -1923,30 +1966,43 @@ static Buffer _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf)
         xlrec.level = metad->btm_level;
 
         XLogBeginInsert();
-        XLogRegisterData((char*)&xlrec, SizeOfBtreeNewroot);
+        XLogRegisterData((char *)&xlrec, SizeOfBtreeNewroot);
 
         XLogRegisterBuffer(0, rootbuf, REGBUF_WILL_INIT);
-        XLogRegisterBuffer(1, lbuf, REGBUF_STANDARD);
-        XLogRegisterBuffer(2, metabuf, REGBUF_WILL_INIT | REGBUF_STANDARD);
+        if (t_thrd.proc->workingVersionNum < BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+            XLogRegisterBuffer(1, metabuf, REGBUF_WILL_INIT);
+        } else {
+            XLogRegisterBuffer(1, lbuf, REGBUF_STANDARD);
+            XLogRegisterBuffer(2, metabuf, REGBUF_WILL_INIT | REGBUF_STANDARD);
+        }
 
         md.root = rootblknum;
         md.level = metad->btm_level;
         md.fastroot = rootblknum;
         md.fastlevel = metad->btm_level;
 
-        XLogRegisterBufData(2, (char*)&md, sizeof(xl_btree_metadata));
+        if (t_thrd.proc->workingVersionNum < BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+            XLogRegisterBufData(1, (char *)&md, sizeof(xl_btree_metadata));
+        } else {
+            XLogRegisterBufData(2, (char *)&md, sizeof(xl_btree_metadata));
+        }
 
         /*
          * Direct access to page is not good but faster - we should implement
          * some new func in page API.
          */
-        XLogRegisterBufData(0,
-            (char*)rootpage + ((PageHeader)rootpage)->pd_upper,
-            ((PageHeader)rootpage)->pd_special - ((PageHeader)rootpage)->pd_upper);
+        XLogRegisterBufData(0, (char *)rootpage + ((PageHeader)rootpage)->pd_upper,
+                            ((PageHeader)rootpage)->pd_special - ((PageHeader)rootpage)->pd_upper);
 
-        recptr = XLogInsert(RM_BTREE_ID, XLOG_BTREE_NEWROOT);
+        if (t_thrd.proc->workingVersionNum < BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+            recptr = XLogInsert(RM_BTREE_ID, XLOG_BTREE_NEWROOT);
+        } else {
+            recptr = XLogInsert(RM_BTREE_ID, XLOG_BTREE_NEWROOT | BTREE_SPLIT_UPGRADE_FLAG);
+        }
 
-        PageSetLSN(lpage, recptr);
+        if (t_thrd.proc->workingVersionNum >= BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+            PageSetLSN(lpage, recptr);
+        }
         PageSetLSN(rootpage, recptr);
         PageSetLSN(metapg, recptr);
     }
@@ -1985,7 +2041,9 @@ static bool _bt_pgaddtup(Page page, Size itemsize, IndexTuple itup, OffsetNumber
     if (!P_ISLEAF(opaque) && itup_off == P_FIRSTDATAKEY(opaque)) {
         trunctuple = *itup;
         trunctuple.t_info = sizeof(IndexTupleData);
-        BTreeTupleSetNAtts(&trunctuple, 0);
+        if (t_thrd.proc->workingVersionNum >= SUPPORT_GPI_VERSION_NUM) {
+            BTreeTupleSetNAtts(&trunctuple, 0);
+        }
         itup = &trunctuple;
         itemsize = sizeof(IndexTupleData);
     }
@@ -2034,7 +2092,6 @@ static bool _bt_isequal(Relation idxrel, Page page, OffsetNumber offnum, int key
 
         result =
             DatumGetInt32(FunctionCall2Coll(&scankey->sk_func, scankey->sk_collation, datum, scankey->sk_argument));
-
         if (result != 0)
             return false;
         scankey++;
@@ -2067,7 +2124,6 @@ static void _bt_vacuum_one_page(Relation rel, Buffer buffer, Relation heapRel)
     maxoff = PageGetMaxOffsetNumber(page);
     for (offnum = minoff; offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
         ItemId itemId = PageGetItemId(page, offnum);
-
         if (ItemIdIsDead(itemId))
             deletable[ndeletable++] = offnum;
     }

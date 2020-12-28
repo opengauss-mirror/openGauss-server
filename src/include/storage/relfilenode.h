@@ -15,7 +15,7 @@
 #define RELFILENODE_H
 
 #include "storage/backendid.h"
-#include "storage/block.h"
+#include "storage/buf/block.h"
 
 /*
  * The physical storage of a relation consists of one or more forks. The
@@ -85,10 +85,12 @@ typedef struct RelFileNode {
 } RelFileNode;
 
 /*RelFileNodeOld: Old version relfilenode. Compatible with older versions of relfilenode.*/
-typedef struct RelFileNodeOld {
-	Oid	spcNode;		/* tablespace */
-	Oid	dbNode;			/* database */
-	Oid	relNode;		/* relation */
+
+typedef struct RelFileNodeOld
+{
+	Oid			spcNode;		/* tablespace */
+	Oid			dbNode;			/* database */
+	Oid			relNode;		/* relation */
 } RelFileNodeOld;
 
 #define RelFileNodeRelCopy(relFileNodeRel, relFileNode) \
@@ -96,7 +98,7 @@ typedef struct RelFileNodeOld {
         (relFileNodeRel).spcNode = (relFileNode).spcNode; \
         (relFileNodeRel).dbNode = (relFileNode).dbNode; \
         (relFileNodeRel).relNode = (relFileNode).relNode; \
-    } while (0)
+    } while(0)
 
 #define RelFileNodeCopy(relFileNode, relFileNodeRel, bucketid) \
     do { \
@@ -104,7 +106,7 @@ typedef struct RelFileNodeOld {
         (relFileNode).dbNode = (relFileNodeRel).dbNode; \
         (relFileNode).relNode = (relFileNodeRel).relNode; \
         (relFileNode).bucketNode = bucketid; \
-    } while (0)
+    } while(0)
 
 /*This struct used for remove duplicated file list where we scan part of BCM files*/
 typedef struct RelFileNodeKey {
@@ -156,6 +158,10 @@ typedef struct RelFileNodeForkNum {
     ((node1).relNode == (node2).relNode && (node1).dbNode == (node2).dbNode && (node1).spcNode == (node2).spcNode && \
     (node1).bucketNode == (node2).bucketNode)
 
+#define BucketRelFileNodeEquals(tarnode, srcnode) \
+            ((tarnode).relNode == (srcnode).relNode && (tarnode).dbNode == (srcnode).dbNode && (tarnode).spcNode == (srcnode).spcNode && \
+            (((tarnode).bucketNode == DIR_BUCKET_ID) || ((tarnode).bucketNode == (srcnode).bucketNode)))
+
 #define RelFileNodeRelEquals(node1, node2) \
         ((node1).relNode == (node2).relNode && \
         (node1).dbNode == (node2).dbNode && \
@@ -205,19 +211,43 @@ typedef struct {
     Oid ownerid;
 } ColFileNodeRel;
 
-#define FORKNUM_ADD_BUCKETID(forknum, bucketid) (forknum = forknum + ((bucketid + 1) << 16))
-#define FORKNUM_GET_BUCKETID(forknum) ((((uint)forknum >> 16) & 0xffff) - 1)
-#define FORKNUM_GET_FORKNUM(forknum) ((uint)forknum & 0xffff)
+/*
+ *  1) ForkNumber type should be must be 32-bit;
+ *  2) forknum value occupies the lower 16-bit;
+ *  3) bucketid value occupies the upper 16-bit;
+ *  If the upper three condition changes, please consider this function again.
+ */
+static inline void forknum_add_bucketid(ForkNumber& forknum, int4 bucketid)
+{
+    forknum = (ForkNumber)(((uint2)forknum) | (((uint2)(bucketid + 1)) << 16));
+}
+
+/*
+ *  1) converse ForkNumber to uint to make sure logic right-shift
+ *  2) converse the logic-right-shift result to int2 to ensure the negative bucketid value
+ */
+static inline int4 forknum_get_bucketid(const ForkNumber& forknum)
+{
+    return (int2)((((uint)forknum >> 16) & 0xffff) - 1);
+}
+
+/*
+ *  1) converse ForkNumber to uint to make sure the bit-operation safe
+ *  2) converse the lower 16-bit to int2 to ensure the negative forknum
+ */
+static inline ForkNumber forknum_get_forknum(const ForkNumber& forknum)
+{
+    return (int2)((uint)forknum & 0xffff);
+}
 
 #define ColFileNodeCopy(colFileNode, colFileNodeRel) \
 	do { \
         (colFileNode)->filenode.spcNode = (colFileNodeRel)->filenode.spcNode; \
         (colFileNode)->filenode.dbNode = (colFileNodeRel)->filenode.dbNode; \
         (colFileNode)->filenode.relNode = (colFileNodeRel)->filenode.relNode; \
-        (colFileNode)->filenode.bucketNode = FORKNUM_GET_BUCKETID((colFileNodeRel)->forknum); \
-        (colFileNode)->forknum = FORKNUM_GET_FORKNUM((colFileNodeRel)->forknum); \
-        (colFileNode)->ownerid = (colFileNodeRel)->ownerid; \
-	} while (0)
+        (colFileNode)->filenode.bucketNode = forknum_get_bucketid((colFileNodeRel)->forknum); \
+        (colFileNode)->forknum = forknum_get_forknum((colFileNodeRel)->forknum); \
+        (colFileNode)->ownerid= (colFileNodeRel)->ownerid; \
+   } while(0)
 
 #endif /* RELFILENODE_H */
-

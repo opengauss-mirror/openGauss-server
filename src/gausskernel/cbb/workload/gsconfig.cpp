@@ -229,4 +229,3 @@ char* gscgroup_get_relative_path(int cnt, gscgroup_grp_t* vaddr[GSCGROUP_ALLNUM]
 
     return relpath;
 }
-

@@ -24,9 +24,6 @@ top_builddir=../../..
 include $(top_builddir)/src/Makefile.global
 subdir=src/bin/license_checker
 
-override CPPFLAGS := -I$(LICENSE_INCLUDE_PATH) -L$(LICENSE_LIB_PATH) $(CPPFLAGS)
-override LDFLAGS := -L$(LICENSE_LIB_PATH) $(LDFLAGS)
-
 LIBS := $(filter-out -lpgport -lz -ledit -lssl -lcrypto, $(LIBS))
 
 ifneq "$(MAKECMDGOALS)" "clean"

@@ -237,8 +237,9 @@ static void gistScanPage(IndexScanDesc scan, const GISTSearchItem *pageItem, con
         GISTSearchItem *item = NULL;
 
         /* This can't happen when starting at the root */
-        Assert(myDistances != NULL);
-
+        if (myDistances == NULL) {
+            ereport(PANIC, (errmsg("myDistances is NULL!")));
+        }
         oldcxt = MemoryContextSwitchTo(so->queueCxt);
 
         /* Create new GISTSearchItem for the right sibling index page */
@@ -251,8 +252,8 @@ static void gistScanPage(IndexScanDesc scan, const GISTSearchItem *pageItem, con
         tmpItem->head = item;
         tmpItem->lastHeap = NULL;
         if (scan->numberOfOrderBys > 0) {
-            ret = memcpy_s(tmpItem->distances, sizeof(double) * scan->numberOfOrderBys,
-                myDistances, sizeof(double) * scan->numberOfOrderBys);
+            ret = memcpy_s(tmpItem->distances, sizeof(double) * scan->numberOfOrderBys, myDistances,
+                           sizeof(double) * scan->numberOfOrderBys);
             securec_check(ret, "", "");
         }
         (void)rb_insert(so->queue, (RBNode *)tmpItem, &isNew);
@@ -336,8 +337,8 @@ static void gistScanPage(IndexScanDesc scan, const GISTSearchItem *pageItem, con
             tmpItem->lastHeap = GISTSearchItemIsHeap(*item) ? item : NULL;
 
             if (scan->numberOfOrderBys > 0) {
-                ret = memcpy_s(tmpItem->distances, sizeof(double) * scan->numberOfOrderBys, 
-                    so->distances, sizeof(double) * scan->numberOfOrderBys);
+                ret = memcpy_s(tmpItem->distances, sizeof(double) * scan->numberOfOrderBys, so->distances,
+                               sizeof(double) * scan->numberOfOrderBys);
                 securec_check(ret, "", "");
             }
             (void)rb_insert(so->queue, (RBNode *)tmpItem, &isNew);
@@ -537,4 +538,3 @@ Datum gistgetbitmap(PG_FUNCTION_ARGS)
 
     PG_RETURN_INT64(ntids);
 }
-

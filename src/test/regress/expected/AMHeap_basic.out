@@ -1,0 +1,99 @@
+create table Heap_TAB_TEST1(id int, val varchar(200)) with (hashbucket = off); 
+insert into Heap_TAB_TEST1 values(11, 'Heap_TAB_TEST1'); 
+insert into Heap_TAB_TEST1 values(12, 'hello hash table'); 
+insert into Heap_TAB_TEST1 values(1, 'hello world'), (2, 'hello c/c++'), (3,'abc');
+insert into Heap_TAB_TEST1 select v, 'CHAR-'||v from generate_series(1, 10) as v;
+select * from Heap_TAB_TEST1 order by id;
+ id |       val        
+----+------------------
+  1 | hello world
+  1 | CHAR-1
+  2 | CHAR-2
+  2 | hello c/c++
+  3 | CHAR-3
+  3 | abc
+  4 | CHAR-4
+  5 | CHAR-5
+  6 | CHAR-6
+  7 | CHAR-7
+  8 | CHAR-8
+  9 | CHAR-9
+ 10 | CHAR-10
+ 11 | Heap_TAB_TEST1
+ 12 | hello hash table
+(15 rows)
+
+select count(*) from Heap_TAB_TEST1;
+ count 
+-------
+    15
+(1 row)
+
+select * from Heap_TAB_TEST1 where val like 'hello%' order by id, val;
+ id |       val        
+----+------------------
+  1 | hello world
+  2 | hello c/c++
+ 12 | hello hash table
+(3 rows)
+
+select * from Heap_TAB_TEST1 where val = 'CHAR-5' order by id, val;
+ id |  val   
+----+--------
+  5 | CHAR-5
+(1 row)
+
+select * from Heap_TAB_TEST1 where id = 1 order by val;
+ id |     val     
+----+-------------
+  1 | CHAR-1
+  1 | hello world
+(2 rows)
+
+select * from Heap_TAB_TEST1 where id = 2 order by val;
+ id |     val     
+----+-------------
+  2 | CHAR-2
+  2 | hello c/c++
+(2 rows)
+
+insert into Heap_TAB_TEST1 select id + 100, val from Heap_TAB_TEST1;
+select count(*) from Heap_TAB_TEST1;
+ count 
+-------
+    30
+(1 row)
+
+select * from Heap_TAB_TEST1 where val like 'hello%' order by id, val;
+ id  |       val        
+-----+------------------
+   1 | hello world
+   2 | hello c/c++
+  12 | hello hash table
+ 101 | hello world
+ 102 | hello c/c++
+ 112 | hello hash table
+(6 rows)
+
+select * from Heap_TAB_TEST1 where val = 'CHAR-5' order by id, val;
+ id  |  val   
+-----+--------
+   5 | CHAR-5
+ 105 | CHAR-5
+(2 rows)
+
+select * from Heap_TAB_TEST1 where id = 1 order by val;
+ id |     val     
+----+-------------
+  1 | CHAR-1
+  1 | hello world
+(2 rows)
+
+select * from Heap_TAB_TEST1 where id = 2 order by val;
+ id |     val     
+----+-------------
+  2 | CHAR-2
+  2 | hello c/c++
+(2 rows)
+
+drop table Heap_TAB_TEST1;

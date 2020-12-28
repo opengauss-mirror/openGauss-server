@@ -33,7 +33,7 @@
 #include "pgstat.h"
 #include "executor/executor.h"
 #include "access/cstore_vector.h"
-#include "storage/itemptr.h"
+#include "storage/item/itemptr.h"
 #include "utils/gs_bitmap.h"
 #include "utils/memutils.h"
 #include "utils/memprot.h"
@@ -179,7 +179,6 @@ void bulkload_block_list::configure(int attlen)
          */
         if (attlen == 4)
             m_block_size = 8192;
-
     } else {
         /* = bulkload_var_base_blocksize * 1, default 8K */
         m_block_size = BULKLOAD_VAR_BASE_BLOCKSZIE * 1024;
@@ -1006,9 +1005,9 @@ void bulkload_indexbatch_copy(bulkload_rows* index_batch, int dest_idx, bulkload
 {
     /* copy simple struct */
     errno_t rc = memcpy_s((char*)(index_batch->m_vectors + dest_idx),
-        sizeof(bulkload_vector),
-        (char*)(src->m_vectors + src_idx),
-        sizeof(bulkload_vector));
+                          sizeof(bulkload_vector),
+                          (char*)(src->m_vectors + src_idx),
+                          sizeof(bulkload_vector));
     securec_check(rc, "", "");
 }
 
@@ -1035,7 +1034,7 @@ void bulkload_indexbatch_set_tids(bulkload_rows* index_batch, uint32 cuid, int n
      */
     for (int offset = 1; offset <= num; ++offset) {
         Datum tid = 0;
-        ItemPointer itemPtr = (ItemPointer)&tid;
+        ItemPointer itemPtr = (ItemPointer) & tid;
         ItemPointerSet(itemPtr, cuid, offset);
 
         /* append this TID into its vector */
@@ -1054,9 +1053,9 @@ void bulkload_indexbatch_copy_tids(bulkload_rows* index_batch, int dest_idx)
 {
     /* copy simple struct */
     errno_t rc = memcpy_s((char*)(index_batch->m_vectors + dest_idx),
-        sizeof(bulkload_vector),
-        (char*)bulkload_indexbatch_get_tid_vector(index_batch),
-        sizeof(bulkload_vector));
+                          sizeof(bulkload_vector),
+                          (char*)bulkload_indexbatch_get_tid_vector(index_batch),
+                          sizeof(bulkload_vector));
     securec_check(rc, "", "");
 }
 
@@ -1290,10 +1289,10 @@ void bulkload_rows::init(TupleDesc tup_desc, int rows_maxnum)
          * and then initialize these batch buffers.
          */
         m_context = AllocSetContextCreate(CurrentMemoryContext,
-            "CSTORE BULKLOAD_ROWS",
-            ALLOCSET_DEFAULT_MINSIZE,
-            ALLOCSET_DEFAULT_INITSIZE,
-            ALLOCSET_DEFAULT_MAXSIZE);
+                                          "CSTORE BULKLOAD_ROWS",
+                                          ALLOCSET_DEFAULT_MINSIZE,
+                                          ALLOCSET_DEFAULT_INITSIZE,
+                                          ALLOCSET_DEFAULT_MAXSIZE);
 
         old_context = MemoryContextSwitchTo(m_context);
 
@@ -1416,10 +1415,10 @@ bool bulkload_rows::append_one_tuple(Datum* values, const bool* isnull, TupleDes
 
             /* compare for min/max values */
             vector->m_minmax.m_compare(vector->m_minmax.m_min_buf,
-                vector->m_minmax.m_max_buf,
-                v,
-                &(vector->m_minmax.m_first_compare),
-                &(vector->m_minmax.m_varstr_maxlen));
+                                       vector->m_minmax.m_max_buf,
+                                       v,
+                                       &(vector->m_minmax.m_first_compare),
+                                       &(vector->m_minmax.m_varstr_maxlen));
         }
 
         /* advance to the next attribute */
@@ -1463,15 +1462,15 @@ bool bulkload_rows::append_one_vector(TupleDesc tup_desc, VectorBatch* p_batch, 
                 context->maxSpaceSize += spreadMem * 1024L;
 
                 MEMCTL_LOG(DEBUG2,
-                    "CStoreInsert(Batch) auto mem spread %ldKB succeed, and work mem is %dKB, spreadNum is %d.",
-                    spreadMem,
-                    m_memInfo->MemInsert,
-                    m_memInfo->spreadNum);
+                           "CStoreInsert(Batch) auto mem spread %ldKB succeed, and work mem is %dKB, spreadNum is %d.",
+                           spreadMem,
+                           m_memInfo->MemInsert,
+                           m_memInfo->spreadNum);
             } else {
                 MEMCTL_LOG(LOG,
-                    "CStoreInsert(Batch) auto mem spread %ldKB failed, and work mem is %dKB.",
-                    spreadMem,
-                    m_memInfo->MemInsert);
+                           "CStoreInsert(Batch) auto mem spread %ldKB failed, and work mem is %dKB.",
+                           spreadMem,
+                           m_memInfo->MemInsert);
                 return true;
             }
         }
@@ -1482,7 +1481,6 @@ bool bulkload_rows::append_one_vector(TupleDesc tup_desc, VectorBatch* p_batch, 
         } else {
             return append_in_row_orientation(tup_desc, p_batch, start_idx);
         }
-
     } else {
         /* fast-path to judge whether p_batch is handled over */
         return full_rownum() || full_rowsize();
@@ -1520,10 +1518,10 @@ void bulkload_rows::append_one_column(Datum* values, const bool* isnull, int row
 
                 /* compare for min/max values */
                 vector->m_minmax.m_compare(vector->m_minmax.m_min_buf,
-                    vector->m_minmax.m_max_buf,
-                    v,
-                    &(vector->m_minmax.m_first_compare),
-                    &(vector->m_minmax.m_varstr_maxlen));
+                                           vector->m_minmax.m_max_buf,
+                                           v,
+                                           &(vector->m_minmax.m_first_compare),
+                                           &(vector->m_minmax.m_varstr_maxlen));
             }
         }
     } else {
@@ -1671,10 +1669,10 @@ bool bulkload_rows::append_in_row_orientation(TupleDesc tup_desc, VectorBatch* p
 
                 /* compare for min/max values */
                 vector->m_minmax.m_compare(vector->m_minmax.m_min_buf,
-                    vector->m_minmax.m_max_buf,
-                    vector_value,
-                    &(vector->m_minmax.m_first_compare),
-                    &(vector->m_minmax.m_varstr_maxlen));
+                                           vector->m_minmax.m_max_buf,
+                                           vector_value,
+                                           &(vector->m_minmax.m_first_compare),
+                                           &(vector->m_minmax.m_varstr_maxlen));
             } else {
                 /* append a NULL */
                 vector->m_values_nulls.set_null(destRowIdx);
@@ -1755,10 +1753,10 @@ bool bulkload_rows::append_in_column_orientation(TupleDesc tup_desc, VectorBatch
 
                 /* compare for min/max values */
                 vector->m_minmax.m_compare(vector->m_minmax.m_min_buf,
-                    vector->m_minmax.m_max_buf,
-                    value,
-                    &(vector->m_minmax.m_first_compare),
-                    &(vector->m_minmax.m_varstr_maxlen));
+                                           vector->m_minmax.m_max_buf,
+                                           value,
+                                           &(vector->m_minmax.m_first_compare),
+                                           &(vector->m_minmax.m_varstr_maxlen));
             }
 
             /* move to the next value for this attribute */

@@ -388,8 +388,8 @@ ORDER BY TABLE_01.W_NAME,
           TABLE_02.C_CITY,
           TABLE_03.D_W_ID,
           TABLE_04.W_NAME; 
-                                                        QUERY PLAN                                                         
----------------------------------------------------------------------------------------------------------------------------
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
  Row Adapter
    ->  Vector Sort
          Sort Key: table_01.w_name, ((table_02.c_d_id < 8::numeric)), table_02.c_city, table_03.d_w_id, table_04.w_name
@@ -404,7 +404,7 @@ ORDER BY TABLE_01.W_NAME,
                      ->  Vector Sort
                            Sort Key: table_01.w_id
                            ->  Vector Nest Loop Left Join
-                                 Join Filter: (NULL::boolean AND (COALESCE(table_01.w_id, 1) = (table_02.c_w_id)::bigint))
+                                 Join Filter: false
                                  ->  Vector Partition Iterator
                                        Iterations: 3
                                        ->  Partitioned CStore Scan on fvt_distribute_query_tables_01 table_01

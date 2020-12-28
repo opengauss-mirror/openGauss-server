@@ -137,6 +137,7 @@ typedef struct {
     PGFunction func_addr;
 } RegExternFunc;
 
+/* notice: order by ascii code */
 static RegExternFunc plpgsql_function_table[] = {
     {"intervaltonum", intervaltonum},
     {"plpgsql_call_handler", plpgsql_call_handler},
@@ -144,6 +145,7 @@ static RegExternFunc plpgsql_function_table[] = {
     {"plpgsql_validator", plpgsql_validator},
     {"rawtohex", rawtohex},
     {"regexp_substr", regexp_substr},
+    {"report_application_error", report_application_error},
 };
 
 static HTAB* CFuncHash = NULL;
@@ -162,6 +164,7 @@ extern bool RPCInitFencedUDFIfNeed(Oid functionId, FmgrInfo* finfo, HeapTuple pr
  * Lookup routines for builtin-function table.	We can search by either Oid
  * or name, but search by Oid is much faster.
  */
+
 const FmgrBuiltin* fmgr_isbuiltin(Oid id)
 {
     int low = 0;
@@ -177,7 +180,7 @@ const FmgrBuiltin* fmgr_isbuiltin(Oid id)
         const Builtin_func* ptr = g_sorted_funcs[i];
 
         if (id == ptr->foid) {
-            return ptr->prolang != INTERNALlanguageId ? NULL : (const FmgrBuiltin*)ptr;
+            return (ptr->prolang != INTERNALlanguageId) ? NULL : (const FmgrBuiltin*)ptr;
         } else if (id > ptr->foid) {
             low = i + 1;
         } else {
@@ -247,11 +250,11 @@ void fmgr_info_cxt(Oid functionId, FmgrInfo* finfo, MemoryContext mcxt)
 static void fmgr_info_cxt_security(Oid functionId, FmgrInfo* finfo, MemoryContext mcxt, bool ignore_security)
 {
     const FmgrBuiltin* fbp = NULL;
-    HeapTuple procedure_tuple;
-    Form_pg_proc procedure_struct;
-    Datum pro_src_datum;
-    bool is_null = false;
-    char* pro_src = NULL;
+    HeapTuple procedureTuple;
+    Form_pg_proc procedureStruct;
+    Datum prosrcdatum;
+    bool isnull = false;
+    char* prosrc = NULL;
 
     /*
      * fn_oid *must* be filled in last.  Some code assumes that if fn_oid is
@@ -280,22 +283,20 @@ static void fmgr_info_cxt_security(Oid functionId, FmgrInfo* finfo, MemoryContex
     }
 
     /* Otherwise we need the pg_proc entry */
-    procedure_tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(functionId));
-    if (!HeapTupleIsValid(procedure_tuple)) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+    procedureTuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(functionId));
+
+    if (!HeapTupleIsValid(procedureTuple))
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                 errmsg("cache lookup failed for function %u", functionId)));
-    }
 
-    procedure_struct = (Form_pg_proc)GETSTRUCT(procedure_tuple);
+    procedureStruct = (Form_pg_proc)GETSTRUCT(procedureTuple);
 
-    finfo->fn_nargs = procedure_struct->pronargs;
-    finfo->fn_strict = procedure_struct->proisstrict;
-    finfo->fn_retset = procedure_struct->proretset;
-    finfo->fn_rettype = procedure_struct->prorettype;
-    finfo->fn_languageId = procedure_struct->prolang;
-    finfo->fn_volatile = procedure_struct->provolatile;
+    finfo->fn_nargs = procedureStruct->pronargs;
+    finfo->fn_strict = procedureStruct->proisstrict;
+    finfo->fn_retset = procedureStruct->proretset;
+    finfo->fn_rettype = procedureStruct->prorettype;
+    finfo->fn_languageId = procedureStruct->prolang;
+    finfo->fn_volatile = procedureStruct->provolatile;
     /*
      * If it has prosecdef set, non-null proconfig, or if a plugin wants to
      * hook function entry/exit, use fmgr_security_definer call handler ---
@@ -310,19 +311,19 @@ static void fmgr_info_cxt_security(Oid functionId, FmgrInfo* finfo, MemoryContex
      * ability to set the track_functions GUC as a local GUC parameter of an
      * interesting function and have the right things happen.
      */
-    if (!ignore_security && (procedure_struct->prosecdef || 
-            !heap_attisnull(procedure_tuple, Anum_pg_proc_proconfig, NULL) || FmgrHookIsNeeded(functionId))) {
-        Datum procFenced = SysCacheGetAttr(PROCOID, procedure_tuple, Anum_pg_proc_fenced, &is_null);
+    if (!ignore_security && (procedureStruct->prosecdef || !heap_attisnull(procedureTuple, Anum_pg_proc_proconfig, NULL) ||
+                                FmgrHookIsNeeded(functionId))) {
+        Datum procFenced = SysCacheGetAttr(PROCOID, procedureTuple, Anum_pg_proc_fenced, &isnull);
         /* fmgr_security_definer invoke fmgr_info_cxt_security to initialize again */
-        finfo->fn_fenced = !is_null && DatumGetBool(procFenced);
+        finfo->fn_fenced = !isnull && DatumGetBool(procFenced);
         finfo->fn_addr = fmgr_security_definer;
         finfo->fn_stats = TRACK_FUNC_ALL; /* ie, never track */
         finfo->fn_oid = functionId;
-        ReleaseSysCache(procedure_tuple);
+        ReleaseSysCache(procedureTuple);
         return;
     }
 
-    switch (procedure_struct->prolang) {
+    switch (procedureStruct->prolang) {
         case INTERNALlanguageId:
 
             /*
@@ -330,26 +331,23 @@ static void fmgr_info_cxt_security(Oid functionId, FmgrInfo* finfo, MemoryContex
              * because the isbuiltin() search above will have succeeded.
              * However, if the user has done a CREATE FUNCTION to create an
              * alias for a builtin function, we can end up here.  In that case  * we have to look up the function by
-             * name.  The name of the internal function is stored in pro_src (it doesn't have to be the same as the name
+             * name.  The name of the internal function is stored in prosrc (it doesn't have to be the same as the name
              * of the alias!)
              */
-            pro_src_datum = SysCacheGetAttr(PROCOID, procedure_tuple, Anum_pg_proc_prosrc, &is_null);
+            prosrcdatum = SysCacheGetAttr(PROCOID, procedureTuple, Anum_pg_proc_prosrc, &isnull);
 
-            if (is_null) {
+            if (isnull)
                 ereport(
-                    ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("null pro_src")));
-            }
+                    ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("null prosrc")));
 
-            pro_src = TextDatumGetCString(pro_src_datum);
-            fbp = fmgr_lookupByName(pro_src);
-            if (fbp == NULL) {
-                ereport(ERROR,
-                    (errmodule(MOD_EXECUTOR),
-                        errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
-                        errmsg("internal function \"%s\" is not in internal lookup table", pro_src)));
-            }
+            prosrc = TextDatumGetCString(prosrcdatum);
+            fbp = fmgr_lookupByName(prosrc);
 
-            pfree_ext(pro_src);
+            if (fbp == NULL)
+                ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                        errmsg("internal function \"%s\" is not in internal lookup table", prosrc)));
+
+            pfree_ext(prosrc);
             /* Should we check that nargs, strict, retset match the table? */
             finfo->fn_addr = fbp->func;
             /* note this policy is also assumed in fast path above */
@@ -357,7 +355,7 @@ static void fmgr_info_cxt_security(Oid functionId, FmgrInfo* finfo, MemoryContex
             break;
 
         case ClanguageId:
-            fmgr_info_C_lang(functionId, finfo, procedure_tuple);
+            fmgr_info_C_lang(functionId, finfo, procedureTuple);
             finfo->fn_stats = TRACK_FUNC_PL; /* ie, track if ALL */
             break;
 
@@ -367,19 +365,19 @@ static void fmgr_info_cxt_security(Oid functionId, FmgrInfo* finfo, MemoryContex
             break;
 
         default:
-            fmgr_info_other_lang(functionId, finfo, procedure_tuple);
+            fmgr_info_other_lang(functionId, finfo, procedureTuple);
             finfo->fn_stats = TRACK_FUNC_OFF; /* ie, track if not OFF */
             break;
     }
 
     finfo->fn_oid = functionId;
-    ReleaseSysCache(procedure_tuple);
+    ReleaseSysCache(procedureTuple);
 }
 
 static int ExternFuncComp(const void* m1, const void* m2)
 {
-    auto mi1 = (RegExternFunc*)m1;
-    auto mi2 = (RegExternFunc*)m2;
+    RegExternFunc* mi1 = (RegExternFunc*)m1;
+    RegExternFunc* mi2 = (RegExternFunc*)m2;
 
     return strncmp(mi1->func_name, mi2->func_name, 64);
 }
@@ -416,10 +414,12 @@ static PGFunction load_plpgsql_function(char* funcname)
         retval = &hdfs_fdw_validator;
     } else if (!strcmp(funcname, "hdfs_fdw_handler")) {
         retval = &hdfs_fdw_handler;
+#ifdef ENABLE_MOT
     } else if (!strcmp(funcname, "mot_fdw_validator")) {
         retval = &mot_fdw_validator;
     } else if (!strcmp(funcname, "mot_fdw_handler")) {
         retval = &mot_fdw_handler;
+#endif
     } else if (!strcmp(funcname, "log_fdw_handler")) {
         retval = &log_fdw_handler;
     } else if (!strcmp(funcname, "log_fdw_validator")) {
@@ -439,15 +439,15 @@ static PGFunction load_plpgsql_function(char* funcname)
  */
 static void fmgr_info_C_lang(Oid functionId, FmgrInfo* finfo, HeapTuple procedureTuple)
 {
-    CFuncHashTabEntry* hash_entry = NULL;
+    CFuncHashTabEntry* hashentry = NULL;
     PGFunction user_fn;
     const Pg_finfo_record* inforec = NULL;
     bool isnull = false;
     CFunInfo funInfo;
 
-    Datum pro_src_attr, pro_bin_attr;
-    char* pro_src_string = NULL;
-    char* pro_bin_string = NULL;
+    Datum prosrcattr, probinattr;
+    char* prosrcstring = NULL;
+    char* probinstring = NULL;
 
     Pg_finfo_record default_inforec_1 = {1};
     inforec = &default_inforec_1;
@@ -459,32 +459,27 @@ static void fmgr_info_C_lang(Oid functionId, FmgrInfo* finfo, HeapTuple procedur
      * While in general these columns might be null, that's not allowed
      * for C-language functions.
      */
-    pro_src_attr = SysCacheGetAttr(PROCOID, procedureTuple, Anum_pg_proc_prosrc, &isnull);
+    prosrcattr = SysCacheGetAttr(PROCOID, procedureTuple, Anum_pg_proc_prosrc, &isnull);
 
-    if (isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+    if (isnull)
+        ereport(ERROR,  (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("null prosrc for C function %u", functionId)));
-    }
 
-    pro_src_string = TextDatumGetCString(pro_src_attr);
-    check_backend_env(pro_src_string);
+    prosrcstring = TextDatumGetCString(prosrcattr);
+    check_backend_env(prosrcstring);
 
-    pro_bin_attr = SysCacheGetAttr(PROCOID, procedureTuple, Anum_pg_proc_probin, &isnull);
+    probinattr = SysCacheGetAttr(PROCOID, procedureTuple, Anum_pg_proc_probin, &isnull);
 
-    if (isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+    if (isnull)
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("null probin for C function %u", functionId)));
-    }
 
-    pro_bin_string = TextDatumGetCString(pro_bin_attr);
+    probinstring = TextDatumGetCString(probinattr);
 
-    if (strncmp(pro_bin_string, "$libdir/pg_plugin/", strlen("$libdir/pg_plugin/")) == 0) {
+    if (strncmp(probinstring, "$libdir/pg_plugin/", strlen("$libdir/pg_plugin/")) == 0) {
         user_defined_func = true;
-        /* Lock to this function, ensure is is not droped. */
+
+        /* Lock to this function, ensure is is not droped.*/
         LockDatabaseObject(ProcedureRelationId, functionId, 0, AccessShareLock);
     }
 
@@ -496,30 +491,37 @@ static void fmgr_info_C_lang(Oid functionId, FmgrInfo* finfo, HeapTuple procedur
      * We use function RunUdFFencedMode to replace if this UDF
      * is defined in fencedMode
      */
-    if (RPCInitFencedUDFIfNeed(functionId, finfo, procedureTuple)) {
+    if (RPCInitFencedUDFIfNeed(functionId, finfo, procedureTuple))
         return;
-    }
 
     /*
      * See if we have the function address cached already
      */
-    hash_entry = lookup_C_func(procedureTuple);
-    if (hash_entry != NULL) {
-        user_fn = hash_entry->user_fn;
-        inforec = hash_entry->inforec;
+    hashentry = lookup_C_func(procedureTuple);
+
+    if (hashentry != NULL) {
+        user_fn = hashentry->user_fn;
+        inforec = hashentry->inforec;
     } else {
         /* Look up the function itself */
-        if (strcmp(pro_bin_string, "$libdir/plpgsql") && strcmp(pro_bin_string, "$libdir/dist_fdw") &&
-            strcmp(pro_bin_string, "$libdir/file_fdw") && strcmp(pro_bin_string, "$libdir/mot_fdw") &&
-            strcmp(pro_bin_string, "$libdir/log_fdw") && strcmp(pro_bin_string, "$libdir/hdfs_fdw")) {
-            funInfo = load_external_function(pro_bin_string, pro_src_string, true, false);
+        if (strcmp(probinstring, "$libdir/plpgsql") && strcmp(probinstring, "$libdir/dist_fdw") &&
+            strcmp(probinstring, "$libdir/file_fdw") && strcmp(probinstring, "$libdir/log_fdw") &&
+            strcmp(probinstring, "$libdir/hdfs_fdw") &&
+#ifdef ENABLE_MULTIPLE_NODES
+            strcmp(probinstring, "$libdir/postgres_fdw")
+#else
+            strcmp(probinstring, "$libdir/mot_fdw")
+#endif
+            ) {
+            funInfo = load_external_function(probinstring, prosrcstring, true, false);
             user_fn = funInfo.user_fn;
             inforec = funInfo.inforec;
+
             /* Cache the addresses for later calls */
             record_C_func(procedureTuple, user_fn, inforec);
         } else {
-            /* These function define in system codes, their version must be 1. */
-            user_fn = load_plpgsql_function(pro_src_string);
+            /* These function define in system codes, their version must be 1.*/
+            user_fn = load_plpgsql_function(prosrcstring);
         }
     }
 
@@ -532,15 +534,13 @@ static void fmgr_info_C_lang(Oid functionId, FmgrInfo* finfo, HeapTuple procedur
 
         default:
             /* Shouldn't get here if fetch_finfo_record did its job */
-            ereport(ERROR,
-                (errmodule(MOD_EXECUTOR),
-                    errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+            ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                     errmsg("unrecognized function API version: %d", inforec->api_version)));
             break;
     }
 
-    pfree_ext(pro_bin_string);
-    pfree_ext(pro_src_string);
+    pfree_ext(probinstring);
+    pfree_ext(prosrcstring);
 
     libraryLock.unLock();
 }
@@ -551,10 +551,10 @@ static void fmgr_info_C_lang(Oid functionId, FmgrInfo* finfo, HeapTuple procedur
  */
 static void fmgr_info_other_lang(Oid functionId, FmgrInfo* finfo, HeapTuple procedureTuple)
 {
-    Form_pg_proc procedure_struct = (Form_pg_proc)GETSTRUCT(procedureTuple);
-    Oid language = procedure_struct->prolang;
-    HeapTuple language_tuple;
-    Form_pg_language language_struct;
+    Form_pg_proc procedureStruct = (Form_pg_proc)GETSTRUCT(procedureTuple);
+    Oid language = procedureStruct->prolang;
+    HeapTuple languageTuple;
+    Form_pg_language languageStruct;
     FmgrInfo plfinfo;
 
     /*
@@ -565,22 +565,20 @@ static void fmgr_info_other_lang(Oid functionId, FmgrInfo* finfo, HeapTuple proc
         return;
     }
 
-    language_tuple = SearchSysCache1(LANGOID, ObjectIdGetDatum(language));
-    if (!HeapTupleIsValid(language_tuple)) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                errmsg("cache lookup failed for language %u", functionId)));
-    }
+    languageTuple = SearchSysCache1(LANGOID, ObjectIdGetDatum(language));
 
-    language_struct = (Form_pg_language)GETSTRUCT(language_tuple);
+    if (!HeapTupleIsValid(languageTuple))
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for language %u", functionId)));
+
+    languageStruct = (Form_pg_language)GETSTRUCT(languageTuple);
 
     /*
      * Look up the language's call handler function, ignoring any attributes
      * that would normally cause insertion of fmgr_security_definer.  We need
      * to get back a bare pointer to the actual C-language function.
      */
-    fmgr_info_cxt_security(language_struct->lanplcallfoid, &plfinfo, CurrentMemoryContext, true);
+    fmgr_info_cxt_security(languageStruct->lanplcallfoid, &plfinfo, CurrentMemoryContext, true);
     finfo->fn_addr = plfinfo.fn_addr;
 
     /*
@@ -588,14 +586,11 @@ static void fmgr_info_other_lang(Oid functionId, FmgrInfo* finfo, HeapTuple proc
      * complain --- it must be an oldstyle function! We no longer support
      * oldstyle PL handlers.
      */
-    if (plfinfo.fn_extra != NULL) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+    if (plfinfo.fn_extra != NULL)
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("language %u has old-style handler", language)));
-    }
 
-    ReleaseSysCache(language_tuple);
+    ReleaseSysCache(languageTuple);
 }
 
 /*
@@ -630,14 +625,15 @@ const Pg_finfo_record* fetch_finfo_record(void* filehandle, char* funcname, bool
 
     /* Try to look up the info function */
     infofunc = (PGFInfoFunction)lookup_external_function(filehandle, infofuncname);
+
     if (infofunc == NULL) {
         /* Not found --- assume version 0 */
-        /* isValidate is TRUE only if calling comes from function fmgr_c_validator, 
-         * and it indicates the SQL is DDL (such as create) operation. */
-        /* In version 0, DDL will cause warning, while DML(such as select) will not. */
+
+        /*isValidate is TRUE only if calling comes from function fmgr_c_validator, and it indicates the SQL is DDL (such
+         * as create) operation.*/
+        /*In version 0, DDL will cause warning, while DML(such as select) will not.*/
         if (isValidate) {
-            ereport(WARNING,
-                (errcode(ERRCODE_UNDEFINED_FUNCTION),
+            ereport(WARNING, (errcode(ERRCODE_UNDEFINED_FUNCTION),
                     errmsg("Function \"%s\" is not declared as PG_FUNCTION_INFO_V1()", funcname),
                     errhint("SQL-callable C-functions recommends accompanying PG_FUNCTION_INFO_V1(%s).", funcname)));
         }
@@ -647,11 +643,10 @@ const Pg_finfo_record* fetch_finfo_record(void* filehandle, char* funcname, bool
 
     /* Found, so call it */
     inforec = (*infofunc)();
+
     /* Validate result as best we can */
     if (inforec == NULL) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("null result from info function \"%s\"", infofuncname)));
     }
 
@@ -661,11 +656,9 @@ const Pg_finfo_record* fetch_finfo_record(void* filehandle, char* funcname, bool
             break;
 
         default:
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("unrecognized API version %d reported by info function \"%s\"",
-                        inforec->api_version,
-                        infofuncname)));
+                        inforec->api_version, infofuncname)));
             break;
     }
 
@@ -816,12 +809,10 @@ static Datum fmgr_oldstyle(PG_FUNCTION_ARGS)
     int i;
     bool isnull = false;
     func_ptr user_fn;
-    char* return_value = NULL;
+    char* returnValue = NULL;
 
     if (fcinfo->flinfo == NULL || fcinfo->flinfo->fn_extra == NULL) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("fmgr_oldstyle received NULL pointer")));
     }
 
@@ -852,7 +843,7 @@ static Datum fmgr_oldstyle(PG_FUNCTION_ARGS)
 
     switch (n_arguments) {
         case 0:
-            return_value = (char*)(*user_fn)();
+            returnValue = (char*)(*user_fn)();
             break;
 
         case 1:
@@ -863,41 +854,41 @@ static Datum fmgr_oldstyle(PG_FUNCTION_ARGS)
              * this undocumented hack?
              */
             {
-                auto fn_p = (func_ptr_pp)user_fn;
-                return_value = (char*)(*fn_p)(fcinfo->arg[0], &fcinfo->isnull);
+                func_ptr_pp fn_p = (func_ptr_pp)user_fn;
+                returnValue = (char*)(*fn_p)(fcinfo->arg[0], &fcinfo->isnull);
             }
             break;
 
         case 2: {
-            auto fn_p = (func_ptr_p2)user_fn;
-            return_value = (char*)(*fn_p)(fcinfo->arg[0], fcinfo->arg[1]);
+            func_ptr_p2 fn_p = (func_ptr_p2)user_fn;
+            returnValue = (char*)(*fn_p)(fcinfo->arg[0], fcinfo->arg[1]);
         } break;
 
         case 3: {
-            auto fn_p = (func_ptr_p3)user_fn;
-            return_value = (char*)(*fn_p)(fcinfo->arg[0], fcinfo->arg[1], fcinfo->arg[2]);
+            func_ptr_p3 fn_p = (func_ptr_p3)user_fn;
+            returnValue = (char*)(*fn_p)(fcinfo->arg[0], fcinfo->arg[1], fcinfo->arg[2]);
         } break;
 
         case 4: {
-            auto fn_p = (func_ptr_p4)user_fn;
-            return_value = (char*)(*fn_p)(fcinfo->arg[0], fcinfo->arg[1], fcinfo->arg[2], fcinfo->arg[3]);
+            func_ptr_p4 fn_p = (func_ptr_p4)user_fn;
+            returnValue = (char*)(*fn_p)(fcinfo->arg[0], fcinfo->arg[1], fcinfo->arg[2], fcinfo->arg[3]);
         } break;
 
         case 5: {
-            auto fn_p = (func_ptr_p5)user_fn;
-            return_value =
+            func_ptr_p5 fn_p = (func_ptr_p5)user_fn;
+            returnValue =
                 (char*)(*fn_p)(fcinfo->arg[0], fcinfo->arg[1], fcinfo->arg[2], fcinfo->arg[3], fcinfo->arg[4]);
         } break;
 
         case 6: {
-            auto fn_p = (func_ptr_p6)user_fn;
-            return_value = (char*)(*fn_p)(
+            func_ptr_p6 fn_p = (func_ptr_p6)user_fn;
+            returnValue = (char*)(*fn_p)(
                 fcinfo->arg[0], fcinfo->arg[1], fcinfo->arg[2], fcinfo->arg[3], fcinfo->arg[4], fcinfo->arg[5]);
         } break;
 
         case 7: {
-            auto fn_p = (func_ptr_p7)user_fn;
-            return_value = (char*)(*fn_p)(fcinfo->arg[0],
+            func_ptr_p7 fn_p = (func_ptr_p7)user_fn;
+            returnValue = (char*)(*fn_p)(fcinfo->arg[0],
                 fcinfo->arg[1],
                 fcinfo->arg[2],
                 fcinfo->arg[3],
@@ -907,8 +898,8 @@ static Datum fmgr_oldstyle(PG_FUNCTION_ARGS)
         } break;
 
         case 8: {
-            auto fn_p = (func_ptr_p8)user_fn;
-            return_value = (char*)(*fn_p)(fcinfo->arg[0],
+            func_ptr_p8 fn_p = (func_ptr_p8)user_fn;
+            returnValue = (char*)(*fn_p)(fcinfo->arg[0],
                 fcinfo->arg[1],
                 fcinfo->arg[2],
                 fcinfo->arg[3],
@@ -919,8 +910,8 @@ static Datum fmgr_oldstyle(PG_FUNCTION_ARGS)
         } break;
 
         case 9: {
-            auto fn_p = (func_ptr_p9)user_fn;
-            return_value = (char*)(*fn_p)(fcinfo->arg[0],
+            func_ptr_p9 fn_p = (func_ptr_p9)user_fn;
+            returnValue = (char*)(*fn_p)(fcinfo->arg[0],
                 fcinfo->arg[1],
                 fcinfo->arg[2],
                 fcinfo->arg[3],
@@ -932,8 +923,8 @@ static Datum fmgr_oldstyle(PG_FUNCTION_ARGS)
         } break;
 
         case 10: {
-            auto fn_p = (func_ptr_p10)user_fn;
-            return_value = (char*)(*fn_p)(fcinfo->arg[0],
+            func_ptr_p10 fn_p = (func_ptr_p10)user_fn;
+            returnValue = (char*)(*fn_p)(fcinfo->arg[0],
                 fcinfo->arg[1],
                 fcinfo->arg[2],
                 fcinfo->arg[3],
@@ -946,8 +937,8 @@ static Datum fmgr_oldstyle(PG_FUNCTION_ARGS)
         } break;
 
         case 11: {
-            auto fn_p = (func_ptr_p11)user_fn;
-            return_value = (char*)(*fn_p)(fcinfo->arg[0],
+            func_ptr_p11 fn_p = (func_ptr_p11)user_fn;
+            returnValue = (char*)(*fn_p)(fcinfo->arg[0],
                 fcinfo->arg[1],
                 fcinfo->arg[2],
                 fcinfo->arg[3],
@@ -961,8 +952,8 @@ static Datum fmgr_oldstyle(PG_FUNCTION_ARGS)
         } break;
 
         case 12: {
-            auto fn_p = (func_ptr_p12)user_fn;
-            return_value = (char*)(*fn_p)(fcinfo->arg[0],
+            func_ptr_p12 fn_p = (func_ptr_p12)user_fn;
+            returnValue = (char*)(*fn_p)(fcinfo->arg[0],
                 fcinfo->arg[1],
                 fcinfo->arg[2],
                 fcinfo->arg[3],
@@ -977,8 +968,8 @@ static Datum fmgr_oldstyle(PG_FUNCTION_ARGS)
         } break;
 
         case 13: {
-            auto fn_p = (func_ptr_p13)user_fn;
-            return_value = (char*)(*fn_p)(fcinfo->arg[0],
+            func_ptr_p13 fn_p = (func_ptr_p13)user_fn;
+            returnValue = (char*)(*fn_p)(fcinfo->arg[0],
                 fcinfo->arg[1],
                 fcinfo->arg[2],
                 fcinfo->arg[3],
@@ -994,8 +985,8 @@ static Datum fmgr_oldstyle(PG_FUNCTION_ARGS)
         } break;
 
         case 14: {
-            auto fn_p = (func_ptr_p14)user_fn;
-            return_value = (char*)(*fn_p)(fcinfo->arg[0],
+            func_ptr_p14 fn_p = (func_ptr_p14)user_fn;
+            returnValue = (char*)(*fn_p)(fcinfo->arg[0],
                 fcinfo->arg[1],
                 fcinfo->arg[2],
                 fcinfo->arg[3],
@@ -1012,8 +1003,8 @@ static Datum fmgr_oldstyle(PG_FUNCTION_ARGS)
         } break;
 
         case 15: {
-            auto fn_p = (func_ptr_p15)user_fn;
-            return_value = (char*)(*fn_p)(fcinfo->arg[0],
+            func_ptr_p15 fn_p = (func_ptr_p15)user_fn;
+            returnValue = (char*)(*fn_p)(fcinfo->arg[0],
                 fcinfo->arg[1],
                 fcinfo->arg[2],
                 fcinfo->arg[3],
@@ -1031,8 +1022,8 @@ static Datum fmgr_oldstyle(PG_FUNCTION_ARGS)
         } break;
 
         case 16: {
-            auto fn_p = (func_ptr_p16)user_fn;
-            return_value = (char*)(*fn_p)(fcinfo->arg[0],
+            func_ptr_p16 fn_p = (func_ptr_p16)user_fn;
+            returnValue = (char*)(*fn_p)(fcinfo->arg[0],
                 fcinfo->arg[1],
                 fcinfo->arg[2],
                 fcinfo->arg[3],
@@ -1059,17 +1050,14 @@ static Datum fmgr_oldstyle(PG_FUNCTION_ARGS)
              * to support old-style functions with many arguments, but making
              * 'em be new-style is probably a better idea.
              */
-            ereport(ERROR,
-                (errcode(ERRCODE_TOO_MANY_ARGUMENTS),
+            ereport(ERROR, (errcode(ERRCODE_TOO_MANY_ARGUMENTS),
                     errmsg("function %u has too many arguments (%d, maximum is %d)",
-                        fcinfo->flinfo->fn_oid,
-                        n_arguments,
-                        16)));
-            return_value = NULL; /* keep compiler quiet */
+                        fcinfo->flinfo->fn_oid, n_arguments, 16)));
+            returnValue = NULL; /* keep compiler quiet */
             break;
     }
 
-    return PointerGetDatum(return_value);
+    return PointerGetDatum(returnValue);
 }
 
 /*
@@ -1105,9 +1093,10 @@ static Datum fmgr_security_definer(PG_FUNCTION_ARGS)
     volatile int save_nestlevel;
     PgStat_FunctionCallUsage fcusage;
 
-    /* Does not allow commit in pre setting scenary */
-    bool savedisTopLevelForSTP = u_sess->SPI_cxt.is_toplevel_stp;
-    u_sess->SPI_cxt.is_toplevel_stp = false;
+    /* Does not allow commit in pre setting scenario */
+    bool savedisAllowCommitRollback = false;
+    bool needResetErrMsg = false;
+    needResetErrMsg = stp_disable_xact_and_set_err_msg(&savedisAllowCommitRollback, STP_XACT_OF_SECURE_DEFINER);
 
     if (!fcinfo->flinfo->fn_extra) {
         HeapTuple tuple;
@@ -1123,9 +1112,7 @@ static Datum fmgr_security_definer(PG_FUNCTION_ARGS)
 
         tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(fcinfo->flinfo->fn_oid));
         if (!HeapTupleIsValid(tuple)) {
-            ereport(ERROR,
-                (errmodule(MOD_EXECUTOR),
-                    errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+            ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                     errmsg("cache lookup failed for function %u", fcinfo->flinfo->fn_oid)));
         }
 
@@ -1202,6 +1189,8 @@ static Datum fmgr_security_definer(PG_FUNCTION_ARGS)
             (*fmgr_hook)(FHET_ABORT, &(fcache->flinfo), &(fcache->arg));
         }
 
+        /* restore is_allow_commit_rollback */
+        stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -1220,9 +1209,8 @@ static Datum fmgr_security_definer(PG_FUNCTION_ARGS)
         (*fmgr_hook)(FHET_END, &(fcache->flinfo), &(fcache->arg));
     }
 
-    /* restore is_toplevel_stp */
-    u_sess->SPI_cxt.is_toplevel_stp = savedisTopLevelForSTP;
-
+    /* restore is_allow_commit_rollback */
+    stp_reset_xact_state_and_err_msg(savedisAllowCommitRollback, needResetErrMsg);
     return result;
 }
 
@@ -1251,9 +1239,7 @@ Datum DirectFunctionCall1Coll(PGFunction func, Oid collation, Datum arg1)
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function returned NULL")));
     }
 
@@ -1276,9 +1262,7 @@ Datum DirectFunctionCall2Coll(PGFunction func, Oid collation, Datum arg1, Datum 
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function returned NULL")));
     }
 
@@ -1303,9 +1287,7 @@ Datum DirectFunctionCall3Coll(PGFunction func, Oid collation, Datum arg1, Datum 
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function returned NULL")));
     }
 
@@ -1332,9 +1314,7 @@ Datum DirectFunctionCall4Coll(PGFunction func, Oid collation, Datum arg1, Datum 
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function returned NULL")));
     }
 
@@ -1364,9 +1344,7 @@ Datum DirectFunctionCall5Coll(
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function returned NULL")));
     }
 
@@ -1398,9 +1376,7 @@ Datum DirectFunctionCall6Coll(
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function returned NULL")));
     }
 
@@ -1434,9 +1410,7 @@ Datum DirectFunctionCall7Coll(
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function returned NULL")));
     }
 
@@ -1472,9 +1446,7 @@ Datum DirectFunctionCall8Coll(PGFunction func, Oid collation, Datum arg1, Datum 
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function returned NULL")));
     }
 
@@ -1512,9 +1484,7 @@ Datum DirectFunctionCall9Coll(PGFunction func, Oid collation, Datum arg1, Datum 
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function returned NULL")));
     }
 
@@ -1540,9 +1510,7 @@ Datum FunctionCall1Coll(FmgrInfo* flinfo, Oid collation, Datum arg1)
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function %u returned NULL", fcinfo.flinfo->fn_oid)));
     }
     return result;
@@ -1568,9 +1536,7 @@ Datum FunctionCall2Coll(FmgrInfo* flinfo, Oid collation, Datum arg1, Datum arg2)
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function %u returned NULL", fcinfo.flinfo->fn_oid)));
     }
 
@@ -1595,9 +1561,7 @@ Datum FunctionCall3Coll(FmgrInfo* flinfo, Oid collation, Datum arg1, Datum arg2,
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function %u returned NULL", fcinfo.flinfo->fn_oid)));
     }
 
@@ -1624,9 +1588,7 @@ Datum FunctionCall4Coll(FmgrInfo* flinfo, Oid collation, Datum arg1, Datum arg2,
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function %u returned NULL", fcinfo.flinfo->fn_oid)));
     }
 
@@ -1655,9 +1617,7 @@ Datum FunctionCall5Coll(FmgrInfo* flinfo, Oid collation, Datum arg1, Datum arg2,
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function %u returned NULL", fcinfo.flinfo->fn_oid)));
     }
 
@@ -1689,9 +1649,7 @@ Datum FunctionCall6Coll(
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function %u returned NULL", fcinfo.flinfo->fn_oid)));
     }
 
@@ -1725,9 +1683,7 @@ Datum FunctionCall7Coll(
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function %u returned NULL", fcinfo.flinfo->fn_oid)));
     }
 
@@ -1763,9 +1719,7 @@ Datum FunctionCall8Coll(FmgrInfo* flinfo, Oid collation, Datum arg1, Datum arg2,
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function %u returned NULL", fcinfo.flinfo->fn_oid)));
     }
 
@@ -1803,9 +1757,7 @@ Datum FunctionCall9Coll(FmgrInfo* flinfo, Oid collation, Datum arg1, Datum arg2,
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function %u returned NULL", fcinfo.flinfo->fn_oid)));
     }
 
@@ -1833,9 +1785,7 @@ Datum OidFunctionCall0Coll(Oid functionId, Oid collation)
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function %u returned NULL", flinfo.fn_oid)));
     }
 
@@ -1859,9 +1809,7 @@ Datum OidFunctionCall1Coll(Oid functionId, Oid collation, Datum arg1)
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function %u returned NULL", flinfo.fn_oid)));
     }
 
@@ -1887,9 +1835,7 @@ Datum OidFunctionCall2Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function %u returned NULL", flinfo.fn_oid)));
     }
 
@@ -1917,9 +1863,7 @@ Datum OidFunctionCall3Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function %u returned NULL", flinfo.fn_oid)));
     }
 
@@ -1949,9 +1893,7 @@ Datum OidFunctionCall4Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function %u returned NULL", flinfo.fn_oid)));
     }
 
@@ -1983,9 +1925,7 @@ Datum OidFunctionCall5Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function %u returned NULL", flinfo.fn_oid)));
     }
 
@@ -2020,9 +1960,7 @@ Datum OidFunctionCall6Coll(
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function %u returned NULL", flinfo.fn_oid)));
     }
 
@@ -2059,9 +1997,7 @@ Datum OidFunctionCall7Coll(
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function %u returned NULL", flinfo.fn_oid)));
     }
 
@@ -2100,9 +2036,7 @@ Datum OidFunctionCall8Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function %u returned NULL", flinfo.fn_oid)));
     }
 
@@ -2143,9 +2077,7 @@ Datum OidFunctionCall9Coll(Oid functionId, Oid collation, Datum arg1, Datum arg2
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function %u returned NULL", flinfo.fn_oid)));
     }
 
@@ -2156,16 +2088,12 @@ void CheckNullResult(Oid oid, bool isnull, char* str)
 {
     if (str == NULL) {
         if (!isnull) {
-            ereport(ERROR,
-                (errmodule(MOD_EXECUTOR),
-                    errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+            ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                     errmsg("input function %u returned non-NULL", oid)));
         }
     } else {
         if (isnull) {
-            ereport(ERROR,
-                (errmodule(MOD_EXECUTOR),
-                    errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+            ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                     errmsg("input function %u returned NULL", oid)));
         }
     }
@@ -2320,16 +2248,12 @@ Datum ReceiveFunctionCall(FmgrInfo* flinfo, StringInfo buf, Oid typioparam, int3
     /* Should get null result if and only if buf is NULL */
     if (buf == NULL) {
         if (!fcinfo.isnull) {
-            ereport(ERROR,
-                (errmodule(MOD_EXECUTOR),
-                    errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("receive function %u returned non-NULL", fcinfo.flinfo->fn_oid)));
         }
     } else {
         if (fcinfo.isnull) {
-            ereport(ERROR,
-                (errmodule(MOD_EXECUTOR),
-                    errcode(ERRCODE_DATA_EXCEPTION),
+            ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_DATA_EXCEPTION),
                     errmsg("receive function %u returned NULL", fcinfo.flinfo->fn_oid)));
         }
     }
@@ -2429,12 +2353,9 @@ char* fmgr(Oid procedureId, ...)
         if (n_arguments > FUNC_MAX_ARGS) {
             /* free args memory as soon as possible */
             FreeFunctionCallInfoData(fcinfo);
-            ereport(ERROR,
-                (errcode(ERRCODE_TOO_MANY_ARGUMENTS),
+            ereport(ERROR, (errcode(ERRCODE_TOO_MANY_ARGUMENTS),
                     errmsg("function %u has too many arguments (%d, maximum is %d)",
-                        flinfo.fn_oid,
-                        n_arguments,
-                        FUNC_MAX_ARGS)));
+                        flinfo.fn_oid, n_arguments, FUNC_MAX_ARGS)));
         }
         va_start(pvar, procedureId);
 
@@ -2451,9 +2372,7 @@ char* fmgr(Oid procedureId, ...)
 
     /* Check for null result, since caller is clearly not expecting one */
     if (fcinfo.isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("function %u returned NULL", flinfo.fn_oid)));
     }
 
@@ -2556,7 +2475,11 @@ float8 DatumGetFloat8(Datum X)
  */
 struct varlena* pg_detoast_datum(struct varlena* datum)
 {
-    Assert(datum != NULL);
+    if (unlikely(datum == NULL)) {
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("NULL input for detoast datum")));
+    }
+	
     if (VARATT_IS_EXTENDED(datum)) {
         return heap_tuple_untoast_attr(datum);
     } else {
@@ -2588,6 +2511,11 @@ struct varlena* pg_detoast_datum_slice(struct varlena* datum, int32 first, int32
 
 struct varlena* pg_detoast_datum_packed(struct varlena* datum)
 {
+	if (unlikely(datum == NULL)) {
+		ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				errmsg("NULL input for detoast datum packed")));
+	}
+
     if (VARATT_IS_COMPRESSED(datum) || VARATT_IS_EXTERNAL(datum)) {
         return heap_tuple_untoast_attr(datum);
     } else {
@@ -2832,9 +2760,7 @@ bool CheckFunctionValidatorAccess(Oid validatorOid, Oid functionOid)
     /* Get the function's pg_proc entry */
     procTup = SearchSysCache1(PROCOID, ObjectIdGetDatum(functionOid));
     if (!HeapTupleIsValid(procTup)) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                 errmsg("cache lookup failed for function %u", functionOid)));
     }
 
@@ -2846,20 +2772,15 @@ bool CheckFunctionValidatorAccess(Oid validatorOid, Oid functionOid)
      */
     langTup = SearchSysCache1(LANGOID, ObjectIdGetDatum(procStruct->prolang));
     if (!HeapTupleIsValid(langTup)) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                 errmsg("cache lookup failed for language %u", procStruct->prolang)));
     }
 
     langStruct = (Form_pg_language)GETSTRUCT(langTup);
     if (langStruct->lanvalidator != validatorOid) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("language validation function %u called for language %u instead of %u",
-                    validatorOid,
-                    procStruct->prolang,
-                    langStruct->lanvalidator)));
+                    validatorOid, procStruct->prolang, langStruct->lanvalidator)));
     }
 
     /* first validate that we have permissions to use the language */

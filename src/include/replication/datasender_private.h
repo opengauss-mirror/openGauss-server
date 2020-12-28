@@ -82,4 +82,3 @@ typedef struct DataSndCtlData {
 extern void DataSndSetState(DataSndState state);
 
 #endif /* _DATASENDER_PRIVATE_H */
-

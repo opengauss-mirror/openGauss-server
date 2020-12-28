@@ -1,0 +1,403 @@
+set enable_global_stats = true;
+---
+--case 1: 
+---
+create table cstore_copy_t1(c1 int2, c2 int4, c3 int8, c4 char(10), c5 varchar(12),c6 numeric(10,2)) with (orientation = orc) tablespace hdfs_ts;
+COPY cstore_copy_t1 FROM '@abs_srcdir@/data/cstore_copy_t1.data' delimiter '|';
+COPY cstore_copy_t1 FROM '@abs_srcdir@/data/cstore_copy_t1.data' delimiter '|';
+COPY cstore_copy_t1 FROM '@abs_srcdir@/data/cstore_copy_t1.data' delimiter '|';
+drop table cstore_copy_t1;
+---
+--case 2: 
+---
+create table cstore_copy_t2_1(c1 int, c2 float, c3 text, partial cluster key(c1)) with (orientation = orc) tablespace hdfs_ts;
+create table cstore_copy_t2_2(c1 int, c2 float, c3 text, partial cluster key(c2)) with (orientation = orc) tablespace hdfs_ts;
+create table cstore_copy_t2_3(c1 int, c2 float, c3 text, partial cluster key(c3)) with (orientation = orc) tablespace hdfs_ts;
+create table cstore_copy_t2_4(c1 int, c2 float, c3 text, partial cluster key(c1, c2)) with (orientation = orc) tablespace hdfs_ts;
+create table cstore_copy_t2_5(c1 int, c2 float, c3 text, partial cluster key(c2, c3)) with (orientation = orc) tablespace hdfs_ts;
+COPY cstore_copy_t2_1 FROM '@abs_srcdir@/data/cstore_copy_t2.data' DELIMITER ',';
+COPY cstore_copy_t2_2 FROM '@abs_srcdir@/data/cstore_copy_t2.data' DELIMITER ',';
+COPY cstore_copy_t2_3 FROM '@abs_srcdir@/data/cstore_copy_t2.data' DELIMITER ',';
+COPY cstore_copy_t2_4 FROM '@abs_srcdir@/data/cstore_copy_t2.data' DELIMITER ',';
+COPY cstore_copy_t2_5 FROM '@abs_srcdir@/data/cstore_copy_t2.data' DELIMITER ',';
+drop table cstore_copy_t2_1;
+drop table cstore_copy_t2_2;
+drop table cstore_copy_t2_3;
+drop table cstore_copy_t2_4;
+drop table cstore_copy_t2_5;
+create table cstore_copy_t2_1(c1 int, c2 float, c3 text, partial cluster key(c1, c1, c1)) with (orientation = orc) tablespace hdfs_ts;
+ERROR:  column "c1" appears twice in partial cluster key constraint
+LINE 1: ...table cstore_copy_t2_1(c1 int, c2 float, c3 text, partial cl...
+                                                             ^
+create table cstore_copy_t2_1(c1 int, c2 float, c3 text, partial cluster key(c1, c3)) with (orientation = orc) tablespace hdfs_ts;
+alter table cstore_copy_t2_1 drop constraint cstore_copy_t2_1_cluster;
+alter table cstore_copy_t2_1 add partial cluster key(c1);
+alter table cstore_copy_t2_1 add partial cluster key(c1);
+ERROR:  cluster key for relation "cstore_copy_t2_1" already exists
+alter table cstore_copy_t2_1 drop constraint cstore_copy_t2_1_cluster;
+alter table cstore_copy_t2_1 drop constraint cstore_copy_t2_1_cluster;
+ERROR:  constraint "cstore_copy_t2_1_cluster" of relation "cstore_copy_t2_1" does not exist
+COPY cstore_copy_t2_1 FROM '@abs_srcdir@/data/cstore_copy_t2.data' DELIMITER ',';
+drop table cstore_copy_t2_1;
+create table cstore_copy_t2_2(c1 int, c2 float, c3 text, constraint c1 partial cluster key(c1)) with (orientation = orc) tablespace hdfs_ts;
+alter table cstore_copy_t2_2 drop constraint c1;
+alter table cstore_copy_t2_2 add constraint c2 partial cluster key(c2);
+drop table cstore_copy_t2_2;
+---
+--case 3:
+---
+drop table if exists lineitem;
+NOTICE:  table "lineitem" does not exist, skipping
+CREATE TABLE LINEITEM
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+with (orientation = orc) tablespace hdfs_ts
+distribute by hash(L_ORDERKEY);
+COPY LINEITEM FROM '@abs_srcdir@/data/lineitem.data' DELIMITER '|';
+DELETE FROM LINEITEM;
+COPY LINEITEM FROM '@abs_srcdir@/data/lineitem.data' DELIMITER '|';
+drop table lineitem;
+------
+--case 4:
+------
+drop table if exists t;
+NOTICE:  table "t" does not exist, skipping
+create table t(c1 int, c2 varchar(64), c3 char(20), c4 char(64), c5 time with time zone) 
+with (orientation = orc)  tablespace hdfs_ts distribute by hash(c1);
+copy t from '@abs_srcdir@/data/cstore_copy_t.data' DELIMITER '|' NULL as 'NULL';
+select * from t order by c1;
+ c1  |   c2    |          c3          |                                c4                                |     c5      
+-----+---------+----------------------+------------------------------------------------------------------+-------------
+ 112 | 'hello' | 'world'              | 'ok'                                                             | 10:23:54+02
+ 112 | 'hello' | 'world'              | 'ok'                                                             | 10:23:54+02
+ 112 | 'hello' | 'world'              | 'ok'                                                             | 10:23:54+02
+ 112 | 'hello' | 'world'              | 'ok'                                                             | 10:26:54+02
+ 112 | 'hello' | 'world'              | 'ok'                                                             | 11:25:54+02
+ 112 | 'hello' | 'world'              | 'ok'                                                             | 12:21:54+02
+ 112 | 'hello' | 'world'              | 'ok'                                                             | 13:24:54+02
+ 112 | 'hello' | 'world'              | 'ok'                                                             | 
+ 112 | 'hello' | 'world'              | 'ok'                                                             | 13:23:54+02
+(9 rows)
+
+drop table t;
+-------
+--case 5:
+------
+CREATE TABLE OOrder ( 
+                        o_id int NOT NULL, 
+                        o_d_id int NOT NULL, 
+                        o_w_id int NOT NULL, 
+                        o_c_id int NOT NULL, 
+                        o_entry_d timestamp NOT NULL, 
+                        o_carrier_id int NULL, 
+                        o_ol_cnt int NOT NULL, 
+                        o_all_local int NOT NULL)  with (orientation = orc)
+                         tablespace hdfs_ts;   
+copy oorder  from '@abs_srcdir@/data/oorder.data' with csv null ''; 
+copy oorder  from '@abs_srcdir@/data/oorder1_0' with csv null ''; 
+copy oorder  from '@abs_srcdir@/data/oorder2_0' with csv null ''; 
+select * from oorder where o_d_id=1 and o_c_id=1 order by 1,2,3;
+ o_id | o_d_id | o_w_id | o_c_id |        o_entry_d         | o_carrier_id | o_ol_cnt | o_all_local 
+------+--------+--------+--------+--------------------------+--------------+----------+-------------
+  203 |      1 |      3 |      1 | Thu Oct 24 11:17:35 2013 |            3 |        9 |           1
+ 1395 |      1 |      1 |      1 | Thu Oct 24 11:17:41 2013 |            2 |       14 |           1
+ 2313 |      1 |      2 |      1 | Thu Oct 24 11:17:37 2013 |              |       10 |           1
+(3 rows)
+
+select count('ABC') from oorder;
+ count 
+-------
+ 90000
+(1 row)
+
+delete from oorder where o_d_id = 1 and o_c_id = 1;
+select count('ABC') from oorder;
+ count 
+-------
+ 89997
+(1 row)
+
+-----
+--case 6
+---
+copy oorder to '@abs_srcdir@/results/oorder.data' with csv null '';
+----
+--case 7
+----
+create table cstore_part_tbl(c1 int, c2 int) with (orientation = column)
+partition by range(c2)
+(
+	partition p1 values less than (10),
+	partition p2 values less than (20),
+	partition p3 values less than (30),
+	partition p4 values less than (40),
+	partition p5 values less than (50),
+	partition p6 values less than (60),
+	partition p7 values less than (70),
+	partition p8 values less than (80),
+	partition p9 values less than (90),
+	partition p10 values less than (100),
+	partition p11 values less than (110),
+	partition p12 values less than (120),
+	partition p13 values less than (130),
+	partition p14 values less than (140),
+	partition p15 values less than (150),
+	partition p16 values less than (160),
+	partition p17 values less than (170),
+	partition p18 values less than (180),
+	partition p19 values less than (190),
+	partition p20 values less than (200),
+	partition p21 values less than (210),
+	partition p22 values less than (220),
+	partition p23 values less than (230),
+	partition p24 values less than (240)
+);
+copy cstore_part_tbl from '@abs_srcdir@/data/cs_large_part.data' delimiter '|';
+--
+-- fix bug
+--
+CREATE TABLE hw_cstore_copy_batchrows
+(
+	c_int1 int,
+	c_int2 int,
+	PARTIAL CLUSTER KEY(c_int2)
+) WITH (orientation = column, MAX_BATCHROW=10000)
+partition by range (c_int2)
+(
+	partition p1 values less than (50),
+	partition p2 values less than (100)
+);
+CREATE TABLE hw_row_copy_batchrows
+(
+	c_int1 int,
+	c_int2 int
+)
+partition by range (c_int2)
+(
+	partition p1 values less than (50),
+	partition p2 values less than (100)
+);
+-- make sure that the loops number is equal to MAX_BATCHROW defined by hw_cstore_copy_batchrows
+CREATE OR REPLACE PROCEDURE hwproc_row_copy_batchrows()
+AS
+BEGIN
+       FOR I IN 1..10000 LOOP
+         INSERT INTO hw_row_copy_batchrows VALUES(1, 2);
+       END LOOP;
+END;
+/
+CALL hwproc_row_copy_batchrows();
+ hwproc_row_copy_batchrows 
+---------------------------
+ 
+(1 row)
+
+INSERT INTO hw_cstore_copy_batchrows SELECT * FROM hw_row_copy_batchrows;
+-- 10000 expected, but the result is 0
+SELECT COUNT(*) FROM hw_cstore_copy_batchrows;
+ count 
+-------
+ 10000
+(1 row)
+
+----
+--COPY FROM/TO DATA IN FIXED FORMAT
+----
+CREATE TABLE tmp_nation (
+    n_nationkey integer NOT NULL,
+    n_name character(25),
+    n_regionkey integer NOT NULL,
+    n_comment character varying(152)
+)with (orientation = orc) tablespace hdfs_ts 
+DISTRIBUTE BY HASH (n_nationkey);
+COPY tmp_nation FROM '@abs_srcdir@/data/datanode1/nation.fixed' FORMATTER(n_nationkey(0,2), n_name(2,25),n_regionkey(28,2),n_comment(30,152)) fixed;
+SELECT * FROM tmp_nation ORDER BY n_nationkey;
+ n_nationkey |          n_name           | n_regionkey |                                                                        n_comment                                                                         
+-------------+---------------------------+-------------+----------------------------------------------------------------------------------------------------------------------------------------------------------
+           0 |                   ALGERIA |           0 |                                                                                                       haggle. carefully final deposits detect slyly agai
+           1 |                 ARGENTINA |           1 |                                                                             al foxes promise slyly according to the regular accounts. bold requests alon
+           2 |                    BRAZIL |           1 |                                               y alongside of the pending deposits. carefully special packages are about the ironic forges. slyly special
+           3 |                    CANADA |           1 |                                                    eas hang ironic, silent packages. slyly regular packages are furiously over the tithes. fluffily bold
+           4 |                     EGYPT |           4 |                                                      y above the carefully unusual theodolites. final dugouts are quickly across the furiously regular d
+           5 |                  ETHIOPIA |           0 |                                                                                                                          ven packages wake quickly. regu
+           6 |                    FRANCE |           3 |                                                                                                                   refully final requests. regular, ironi
+           7 |                   GERMANY |           3 |                                                                                               l platelets. regular accounts x-ray: unusual, regular acco
+           8 |                     INDIA |           2 |                                                                                        ss excuses cajole slyly across the packages. deposits print aroun
+           9 |                 INDONESIA |           2 |                                        slyly express asymptotes. regular deposits haggle slyly. carefully ironic hockey players sleep blithely. carefull
+          10 |                      IRAN |           4 |                                                                                                        efully alongside of the slyly final dependencies.
+          11 |                      IRAQ |           4 |                                                                                       nic deposits boost atop the quickly final requests? quickly regula
+          12 |                     JAPAN |           2 |                                                                                                                     ously. final, express gifts cajole a
+          13 |                    JORDAN |           4 |                                                                                                  ic deposits are blithely about the carefully regular pa
+          14 |                     KENYA |           0 |                                                             pending excuses haggle furiously deposits. pending, express pinto beans wake fluffily past t
+          15 |                   MOROCCO |           0 |                                                               rns. blithely bold courts among the closely regular packages use furiously bold platelets?
+          16 |                MOZAMBIQUE |           0 |                                                                                                            s. ironic, unusual asymptotes wake blithely r
+          17 |                      PERU |           1 |                                               platelets. blithely pending dependencies use fluffily across the even pinto beans. carefully silent accoun
+          18 |                     CHINA |           2 |                                                              c dependencies. furiously express notornis sleep slyly regular accounts. ideas sleep. depos
+          19 |                   ROMANIA |           3 |                                          ular asymptotes are about the furious multipliers. express dependencies nag above the ironically ironic account
+          20 |              SAUDI ARABIA |           4 |                                                                           ts. silent requests haggle. closely express packages sleep across the blithely
+          21 |                   VIETNAM |           2 |                                                                                                            hely enticingly express accounts. even, final
+          22 |                    RUSSIA |           3 |                                                                           requests against the platelets use never according to the quickly regular pint
+          23 |            UNITED KINGDOM |           3 |                                                                                            eans boost carefully special requests. accounts are. carefull
+          24 |             UNITED STATES |           1 |                                           y final packages. slow foxes cajole quickly. quickly silent platelets breach ironic accounts. unusual pinto be
+(25 rows)
+
+COPY tmp_nation TO '@abs_srcdir@/results/nation.fixed' FORMATTER(n_nationkey(0,2), n_name(2,25),n_regionkey(28,2),n_comment(30,152)) fixed;
+delete from tmp_nation;
+--TRUNCATE tmp_nation;
+COPY tmp_nation FROM '@abs_srcdir@/data/datanode1/nation.fixed' FORMATTER(n_nationkey(0,2),n_regionkey(28,2),n_comment(30,152)) fixed;
+SELECT * FROM tmp_nation ORDER BY n_nationkey;
+ n_nationkey | n_name | n_regionkey |                                                                        n_comment                                                                         
+-------------+--------+-------------+----------------------------------------------------------------------------------------------------------------------------------------------------------
+           0 |        |           0 |                                                                                                       haggle. carefully final deposits detect slyly agai
+           1 |        |           1 |                                                                             al foxes promise slyly according to the regular accounts. bold requests alon
+           2 |        |           1 |                                               y alongside of the pending deposits. carefully special packages are about the ironic forges. slyly special
+           3 |        |           1 |                                                    eas hang ironic, silent packages. slyly regular packages are furiously over the tithes. fluffily bold
+           4 |        |           4 |                                                      y above the carefully unusual theodolites. final dugouts are quickly across the furiously regular d
+           5 |        |           0 |                                                                                                                          ven packages wake quickly. regu
+           6 |        |           3 |                                                                                                                   refully final requests. regular, ironi
+           7 |        |           3 |                                                                                               l platelets. regular accounts x-ray: unusual, regular acco
+           8 |        |           2 |                                                                                        ss excuses cajole slyly across the packages. deposits print aroun
+           9 |        |           2 |                                        slyly express asymptotes. regular deposits haggle slyly. carefully ironic hockey players sleep blithely. carefull
+          10 |        |           4 |                                                                                                        efully alongside of the slyly final dependencies.
+          11 |        |           4 |                                                                                       nic deposits boost atop the quickly final requests? quickly regula
+          12 |        |           2 |                                                                                                                     ously. final, express gifts cajole a
+          13 |        |           4 |                                                                                                  ic deposits are blithely about the carefully regular pa
+          14 |        |           0 |                                                             pending excuses haggle furiously deposits. pending, express pinto beans wake fluffily past t
+          15 |        |           0 |                                                               rns. blithely bold courts among the closely regular packages use furiously bold platelets?
+          16 |        |           0 |                                                                                                            s. ironic, unusual asymptotes wake blithely r
+          17 |        |           1 |                                               platelets. blithely pending dependencies use fluffily across the even pinto beans. carefully silent accoun
+          18 |        |           2 |                                                              c dependencies. furiously express notornis sleep slyly regular accounts. ideas sleep. depos
+          19 |        |           3 |                                          ular asymptotes are about the furious multipliers. express dependencies nag above the ironically ironic account
+          20 |        |           4 |                                                                           ts. silent requests haggle. closely express packages sleep across the blithely
+          21 |        |           2 |                                                                                                            hely enticingly express accounts. even, final
+          22 |        |           3 |                                                                           requests against the platelets use never according to the quickly regular pint
+          23 |        |           3 |                                                                                            eans boost carefully special requests. accounts are. carefull
+          24 |        |           1 |                                           y final packages. slow foxes cajole quickly. quickly silent platelets breach ironic accounts. unusual pinto be
+(25 rows)
+
+COPY tmp_nation TO '@abs_srcdir@/results/nation.fixed' FORMATTER(n_nationkey(0,2),n_regionkey(28,2),n_comment(30,152)) fixed;
+ERROR:  "n_comment" missing POSITION
+----
+--COPY FROM/TO DATA WITH MULTIPLE BYTES DELIMITER
+----
+COPY tmp_nation TO '@abs_srcdir@/results/nation.mult' delimiter ',,,,,]]]]]]';
+ERROR:  COPY delimiter must be less than 10 bytes
+COPY tmp_nation TO '@abs_srcdir@/results/nation.mult' delimiter ',,,[]';
+delete from tmp_nation;
+--truncate tmp_nation;
+COPY tmp_nation FROM '@abs_srcdir@/results/nation.mult' delimiter ',,,[]';
+SELECT * FROM tmp_nation ORDER BY n_nationkey;
+ n_nationkey | n_name | n_regionkey |                                                                        n_comment                                                                         
+-------------+--------+-------------+----------------------------------------------------------------------------------------------------------------------------------------------------------
+           0 |        |           0 |                                                                                                       haggle. carefully final deposits detect slyly agai
+           1 |        |           1 |                                                                             al foxes promise slyly according to the regular accounts. bold requests alon
+           2 |        |           1 |                                               y alongside of the pending deposits. carefully special packages are about the ironic forges. slyly special
+           3 |        |           1 |                                                    eas hang ironic, silent packages. slyly regular packages are furiously over the tithes. fluffily bold
+           4 |        |           4 |                                                      y above the carefully unusual theodolites. final dugouts are quickly across the furiously regular d
+           5 |        |           0 |                                                                                                                          ven packages wake quickly. regu
+           6 |        |           3 |                                                                                                                   refully final requests. regular, ironi
+           7 |        |           3 |                                                                                               l platelets. regular accounts x-ray: unusual, regular acco
+           8 |        |           2 |                                                                                        ss excuses cajole slyly across the packages. deposits print aroun
+           9 |        |           2 |                                        slyly express asymptotes. regular deposits haggle slyly. carefully ironic hockey players sleep blithely. carefull
+          10 |        |           4 |                                                                                                        efully alongside of the slyly final dependencies.
+          11 |        |           4 |                                                                                       nic deposits boost atop the quickly final requests? quickly regula
+          12 |        |           2 |                                                                                                                     ously. final, express gifts cajole a
+          13 |        |           4 |                                                                                                  ic deposits are blithely about the carefully regular pa
+          14 |        |           0 |                                                             pending excuses haggle furiously deposits. pending, express pinto beans wake fluffily past t
+          15 |        |           0 |                                                               rns. blithely bold courts among the closely regular packages use furiously bold platelets?
+          16 |        |           0 |                                                                                                            s. ironic, unusual asymptotes wake blithely r
+          17 |        |           1 |                                               platelets. blithely pending dependencies use fluffily across the even pinto beans. carefully silent accoun
+          18 |        |           2 |                                                              c dependencies. furiously express notornis sleep slyly regular accounts. ideas sleep. depos
+          19 |        |           3 |                                          ular asymptotes are about the furious multipliers. express dependencies nag above the ironically ironic account
+          20 |        |           4 |                                                                           ts. silent requests haggle. closely express packages sleep across the blithely
+          21 |        |           2 |                                                                                                            hely enticingly express accounts. even, final
+          22 |        |           3 |                                                                           requests against the platelets use never according to the quickly regular pint
+          23 |        |           3 |                                                                                            eans boost carefully special requests. accounts are. carefull
+          24 |        |           1 |                                           y final packages. slow foxes cajole quickly. quickly silent platelets breach ironic accounts. unusual pinto be
+(25 rows)
+
+COPY tmp_nation TO '@abs_srcdir@/results/nation.mult' delimiter '(),,,' csv;
+delete from tmp_nation;
+--truncate tmp_nation;
+COPY tmp_nation FROM '@abs_srcdir@/results/nation.mult' delimiter '(),,,' csv;
+SELECT * FROM tmp_nation ORDER BY n_nationkey;
+ n_nationkey | n_name | n_regionkey |                                                                        n_comment                                                                         
+-------------+--------+-------------+----------------------------------------------------------------------------------------------------------------------------------------------------------
+           0 |        |           0 |                                                                                                       haggle. carefully final deposits detect slyly agai
+           1 |        |           1 |                                                                             al foxes promise slyly according to the regular accounts. bold requests alon
+           2 |        |           1 |                                               y alongside of the pending deposits. carefully special packages are about the ironic forges. slyly special
+           3 |        |           1 |                                                    eas hang ironic, silent packages. slyly regular packages are furiously over the tithes. fluffily bold
+           4 |        |           4 |                                                      y above the carefully unusual theodolites. final dugouts are quickly across the furiously regular d
+           5 |        |           0 |                                                                                                                          ven packages wake quickly. regu
+           6 |        |           3 |                                                                                                                   refully final requests. regular, ironi
+           7 |        |           3 |                                                                                               l platelets. regular accounts x-ray: unusual, regular acco
+           8 |        |           2 |                                                                                        ss excuses cajole slyly across the packages. deposits print aroun
+           9 |        |           2 |                                        slyly express asymptotes. regular deposits haggle slyly. carefully ironic hockey players sleep blithely. carefull
+          10 |        |           4 |                                                                                                        efully alongside of the slyly final dependencies.
+          11 |        |           4 |                                                                                       nic deposits boost atop the quickly final requests? quickly regula
+          12 |        |           2 |                                                                                                                     ously. final, express gifts cajole a
+          13 |        |           4 |                                                                                                  ic deposits are blithely about the carefully regular pa
+          14 |        |           0 |                                                             pending excuses haggle furiously deposits. pending, express pinto beans wake fluffily past t
+          15 |        |           0 |                                                               rns. blithely bold courts among the closely regular packages use furiously bold platelets?
+          16 |        |           0 |                                                                                                            s. ironic, unusual asymptotes wake blithely r
+          17 |        |           1 |                                               platelets. blithely pending dependencies use fluffily across the even pinto beans. carefully silent accoun
+          18 |        |           2 |                                                              c dependencies. furiously express notornis sleep slyly regular accounts. ideas sleep. depos
+          19 |        |           3 |                                          ular asymptotes are about the furious multipliers. express dependencies nag above the ironically ironic account
+          20 |        |           4 |                                                                           ts. silent requests haggle. closely express packages sleep across the blithely
+          21 |        |           2 |                                                                                                            hely enticingly express accounts. even, final
+          22 |        |           3 |                                                                           requests against the platelets use never according to the quickly regular pint
+          23 |        |           3 |                                                                                            eans boost carefully special requests. accounts are. carefull
+          24 |        |           1 |                                           y final packages. slow foxes cajole quickly. quickly silent platelets breach ironic accounts. unusual pinto be
+(25 rows)
+
+create table tmp_mult_delim
+(c1 int, c2 varchar)with (orientation = orc) tablespace hdfs_ts 
+DISTRIBUTE BY HASH (c1);
+insert into tmp_mult_delim 
+values(1, '"fewf"sttt'),
+(2, '"fewf"sttt'),
+(3, 'fstes\\fwt');
+select * from tmp_mult_delim order by c1;
+ c1 |     c2     
+----+------------
+  1 | "fewf"sttt
+  2 | "fewf"sttt
+  3 | fstes\\fwt
+(3 rows)
+
+COPY tmp_mult_delim TO '@abs_srcdir@/results/mult_delim.mult' delimiter 'few^fw"' csv;
+ERROR:  delimiter cannot contain quote character
+COPY tmp_mult_delim TO '@abs_srcdir@/results/mult_delim.mult' delimiter 'few^fw/' csv;
+delete from tmp_mult_delim;
+--truncate tmp_mult_delim;
+COPY tmp_mult_delim FROM '@abs_srcdir@/results/mult_delim.mult' delimiter 'few^fw/' csv;
+select * from tmp_mult_delim order by c1;
+ c1 |     c2     
+----+------------
+  1 | "fewf"sttt
+  2 | "fewf"sttt
+  3 | fstes\\fwt
+(3 rows)
+
+drop table tmp_mult_delim;
+DROP TABLE tmp_nation;
+drop table hw_cstore_copy_batchrows;
+drop table hw_row_copy_batchrows;
+drop table OOrder;
+drop table cstore_part_tbl;

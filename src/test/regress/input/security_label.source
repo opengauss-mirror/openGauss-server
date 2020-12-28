@@ -12,8 +12,8 @@ DROP TABLE IF EXISTS seclabel_tbl1;
 DROP TABLE IF EXISTS seclabel_tbl2;
 DROP TABLE IF EXISTS seclabel_tbl3;
 
-CREATE USER seclabel_user1 WITH CREATEROLE PASSWORD 'ttest@123';
-CREATE USER seclabel_user2 PASSWORD 'ttest@123';
+CREATE USER seclabel_user1 WITH CREATEROLE PASSWORD 'gauss@123';
+CREATE USER seclabel_user2 PASSWORD 'gauss@123';
 
 CREATE TABLE seclabel_tbl1 (a int, b text);
 CREATE TABLE seclabel_tbl2 (x int, y text);
@@ -45,7 +45,7 @@ LOAD '@libdir@/dummy_seclabel@DLSUFFIX@';
 --
 -- Test of SECURITY LABEL statement with a plugin
 --
-SET SESSION AUTHORIZATION seclabel_user1 PASSWORD 'ttest@123';
+SET SESSION AUTHORIZATION seclabel_user1 PASSWORD 'gauss@123';
 
 SECURITY LABEL ON TABLE seclabel_tbl1 IS 'classified';			-- OK
 SECURITY LABEL ON COLUMN seclabel_tbl1.a IS 'unclassified';		-- OK
@@ -57,14 +57,14 @@ SECURITY LABEL ON TABLE seclabel_tbl2 IS 'unclassified';	-- fail (not owner)
 SECURITY LABEL ON TABLE seclabel_tbl1 IS 'secret';		-- fail (not superuser)
 SECURITY LABEL ON TABLE seclabel_tbl3 IS 'unclassified';	-- fail (not found)
 
-SET SESSION AUTHORIZATION seclabel_user2 PASSWORD 'ttest@123';
+SET SESSION AUTHORIZATION seclabel_user2 PASSWORD 'gauss@123';
 SECURITY LABEL ON TABLE seclabel_tbl1 IS 'unclassified';		-- fail
 SECURITY LABEL ON TABLE seclabel_tbl2 IS 'classified';			-- OK
 
 --
 -- Test for shared database object
 --
-SET SESSION AUTHORIZATION seclabel_user1 PASSWORD 'ttest@123';
+SET SESSION AUTHORIZATION seclabel_user1 PASSWORD 'gauss@123';
 
 SECURITY LABEL ON ROLE seclabel_user1 IS 'classified';			-- OK
 SECURITY LABEL ON ROLE seclabel_user1 IS '...invalid label...';	-- fail
@@ -73,7 +73,7 @@ SECURITY LABEL FOR 'unknown_seclabel' ON ROLE seclabel_user1 IS 'unclassified';	
 SECURITY LABEL ON ROLE seclabel_user1 IS 'secret';	-- fail (not superuser)
 SECURITY LABEL ON ROLE seclabel_user3 IS 'unclassified';	-- fail (not found)
 
-SET SESSION AUTHORIZATION seclabel_user2 PASSWORD 'ttest@123';
+SET SESSION AUTHORIZATION seclabel_user2 PASSWORD 'gauss@123';
 SECURITY LABEL ON ROLE seclabel_user2 IS 'unclassified';	-- fail (not privileged)
 
 RESET SESSION AUTHORIZATION;

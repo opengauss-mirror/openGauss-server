@@ -456,7 +456,7 @@ RecursiveUnionState* ExecInitRecursiveUnion(RecursiveUnion* node, EState* estate
      * set up the result type before initializing child nodes, because
      * nodeWorktablescan.c expects it to be valid.)
      */
-    ExecAssignResultTypeFromTL(&rustate->ps);
+    ExecAssignResultTypeFromTL(&rustate->ps, TAM_HEAP);
     rustate->ps.ps_ProjInfo = NULL;
 
     /*
@@ -787,6 +787,7 @@ static void FindSyncUpStream(RecursiveUnionController* controller, PlanState* st
         FindSyncUpStream(controller, substate, initplans);
     }
 
+    list_free_ext(subplan_list);
     return;
 }
 #endif
@@ -1400,7 +1401,11 @@ void ExecSyncStreamProducer(StreamController* controller, bool* need_rescan, int
     stream_node_group->ProducerFinishRUIteration(0);
 
     int loop_count = 0;
-    Assert(need_rescan != NULL);
+    if (need_rescan == NULL) {
+        ereport(ERROR,
+                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                 errmsg("need_rescan should not be NULL")));
+    }
     *need_rescan = false;
 
     /*
@@ -1417,7 +1422,7 @@ void ExecSyncStreamProducer(StreamController* controller, bool* need_rescan, int
         if (controller->stream_finish) {
             RECURSIVE_LOG(LOG,
                 "MPP with-recursive stream-step(P) recursive union iteration[%d] finish with loop:%d %s",
-                global_iteration,
+                u_sess->exec_cxt.global_iteration,
                 loop_count,
                 producer_top_plannode_str);
             break;
@@ -1433,7 +1438,7 @@ void ExecSyncStreamProducer(StreamController* controller, bool* need_rescan, int
             *need_rescan = true;
             RECURSIVE_LOG(LOG,
                 "MPP with-recursive stream-step(P) recursive step on iteration %d with loop:%d %s",
-                global_iteration,
+                u_sess->exec_cxt.global_iteration,
                 loop_count,
                 producer_top_plannode_str);
             break;
@@ -1980,7 +1985,7 @@ bool ExecutePlanSyncProducer(PlanState* planstate, int step, bool* recursive_ear
                 WITH_RECURSIVE_SYNC_NONERQ,
                 *current_tuple_count,
                 NULL,
-                global_iteration);
+                u_sess->exec_cxt.global_iteration);
         } break;
 
         case WITH_RECURSIVE_SYNC_RQSTEP: {
@@ -1988,7 +1993,7 @@ bool ExecutePlanSyncProducer(PlanState* planstate, int step, bool* recursive_ear
 
             RECURSIVE_LOG(LOG,
                 "MPP with-recursive (P) producer thread to check need rescan iteration[%d] %s",
-                global_iteration,
+                u_sess->exec_cxt.global_iteration,
                 producer_top_plannode_str);
 
             /* 1. Send current iteration finished 'R' */
@@ -1997,7 +2002,7 @@ bool ExecutePlanSyncProducer(PlanState* planstate, int step, bool* recursive_ear
                 WITH_RECURSIVE_SYNC_RQSTEP,
                 *current_tuple_count,
                 &need_rescan,
-                global_iteration);
+                u_sess->exec_cxt.global_iteration);
 
             if (need_rescan) {
                 /*
@@ -2008,13 +2013,13 @@ bool ExecutePlanSyncProducer(PlanState* planstate, int step, bool* recursive_ear
                     "MPP with-recursive step%d (P) Start to ReScan from iteration[%d] on DN %s with (%ld) rows "
                     "produced in last iteration, thread-top:%s",
                     WITH_RECURSIVE_SYNC_RQSTEP,
-                    global_iteration,
+                    u_sess->exec_cxt.global_iteration,
                     g_instance.attr.attr_common.PGXCNodeName,
                     *current_tuple_count,
                     producer_top_plannode_str);
 
                 *current_tuple_count = 0;
-                global_iteration++;
+                u_sess->exec_cxt.global_iteration++;
 
                 /* Reset recursive plan tree */
                 ExecReScanRecursivePlanTree(planstate);
@@ -2026,7 +2031,7 @@ bool ExecutePlanSyncProducer(PlanState* planstate, int step, bool* recursive_ear
                     "MPP with-recursive step%d (P) on DN %s finished, total (%d)times",
                     WITH_RECURSIVE_SYNC_DONE,
                     g_instance.attr.attr_common.PGXCNodeName,
-                    ++global_iteration);
+                    ++u_sess->exec_cxt.global_iteration);
             }
         } break;
         default:

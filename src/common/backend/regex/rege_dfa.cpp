@@ -42,7 +42,7 @@ static chr* longest(struct vars* v,        /* used only for debug and exec flags
     int* hitstopp)             /* record whether hit v->stop, if non-NULL */
 {
     chr* cp = NULL;
-    chr* realstop = (stop == v->stop) ? stop : stop + 1;
+    chr* realstop = (stop == v->stop) ? stop : (stop + 1);
     color co;
     struct sset* css = NULL;
     struct sset* ss = NULL;
@@ -137,8 +137,8 @@ static chr* shortest(struct vars* v, struct dfa* d, chr* start, /* where the mat
     int* hitstopp) /* record whether hit v->stop, if non-NULL */
 {
     chr* cp = NULL;
-    chr* realmin = (min == v->stop) ? min : min + 1;
-    chr* realmax = (max == v->stop) ? max : max + 1;
+    chr* realmin = (min == v->stop) ? min : (min + 1);
+    chr* realmax = (max == v->stop) ? max : (max + 1);
     color co;
     struct sset* css = NULL;
     struct sset* ss = NULL;
@@ -482,9 +482,9 @@ static struct sset* initialize(struct vars* v, /* used only for debug flags */
     int i;
 
     /* is previous one still there? */
-    if (d->nssused > 0 && (d->ssets[0].flags & STARTER))
+    if (d->nssused > 0 && (d->ssets[0].flags & STARTER)) {
         ss = &d->ssets[0];
-    else { /* no, must (re)build it */
+    } else { /* no, must (re)build it */
         ss = getvacant(v, d, start, start);
         for (i = 0; i < d->wordsper; i++)
             ss->states[i] = 0;
@@ -530,48 +530,62 @@ static struct sset* miss(struct vars* v,  /* used only for debug flags */
     FDEBUG(("miss\n"));
 
     /* first, what set of states would we end up in? */
-    for (i = 0; i < d->wordsper; i++)
+    for (i = 0; i < d->wordsper; i++) {
         d->work[i] = 0;
+    }
     ispost = 0;
     noprogress = 1;
     gotstate = 0;
-    for (i = 0; i < d->nstates; i++)
-        if (ISBSET(css->states, i))
-            for (ca = cnfa->states[i]; ca->co != COLORLESS; ca++)
+    for (i = 0; i < d->nstates; i++) {
+        if (ISBSET(css->states, i)) {
+            for (ca = cnfa->states[i]; ca->co != COLORLESS; ca++) {
                 if (ca->co == co) {
                     BSET(d->work, ca->to);
                     gotstate = 1;
-                    if (ca->to == cnfa->post)
+                    if (ca->to == cnfa->post) {
                         ispost = 1;
-                    if (!(cnfa->stflags[ca->to] & CNFA_NOPROGRESS))
+                    }
+                    if (!(cnfa->stflags[ca->to] & CNFA_NOPROGRESS)) {
                         noprogress = 0;
+                    }
                     FDEBUG(("%d -> %d\n", i, ca->to));
                 }
+            }
+        }
+    }
     dolacons = (gotstate) ? (cnfa->flags & HASLACONS) : 0;
     sawlacons = 0;
     while (dolacons) { /* transitive closure */
         dolacons = 0;
-        for (i = 0; i < d->nstates; i++)
-            if (ISBSET(d->work, i))
+        for (i = 0; i < d->nstates; i++) {
+            if (ISBSET(d->work, i)) {
                 for (ca = cnfa->states[i]; ca->co != COLORLESS; ca++) {
-                    if (ca->co < cnfa->ncolors)
+                    if (ca->co < cnfa->ncolors) {
                         continue; /* NOTE CONTINUE */
+                    }
                     sawlacons = 1;
-                    if (ISBSET(d->work, ca->to))
+                    if (ISBSET(d->work, ca->to)) {
                         continue; /* NOTE CONTINUE */
-                    if (!lacon(v, cnfa, cp, ca->co))
+                    }
+                    if (!lacon(v, cnfa, cp, ca->co)) {
                         continue; /* NOTE CONTINUE */
+                    }
                     BSET(d->work, ca->to);
                     dolacons = 1;
-                    if (ca->to == cnfa->post)
+                    if (ca->to == cnfa->post) {
                         ispost = 1;
-                    if (!(cnfa->stflags[ca->to] & CNFA_NOPROGRESS))
+                    }
+                    if (!(cnfa->stflags[ca->to] & CNFA_NOPROGRESS)) {
                         noprogress = 0;
+                    }
                     FDEBUG(("%d :> %d\n", i, ca->to));
                 }
+            }
+        }
     }
-    if (!gotstate)
+    if (!gotstate) {
         return NULL;
+    }
     h = HASH(d->work, d->wordsper);
 
     /* next, is that in the cache? */
@@ -584,12 +598,14 @@ static struct sset* miss(struct vars* v,  /* used only for debug flags */
     if (i == 0) { /* nope, need a new cache entry */
         p = getvacant(v, d, cp, start);
         Assert(p != css);
-        for (i = 0; i < d->wordsper; i++)
+        for (i = 0; i < d->wordsper; i++) {
             p->states[i] = d->work[i];
+        }
         p->hash = h;
         p->flags = (ispost) ? POSTSTATE : 0;
-        if (noprogress)
+        if (noprogress) {
             p->flags |= NOPROGRESS;
+        }
         /* lastseen to be dealt with by caller */
     }
 

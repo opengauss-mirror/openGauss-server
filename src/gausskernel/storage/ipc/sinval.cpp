@@ -48,8 +48,8 @@ void SendSharedInvalidMessages(const SharedInvalidationMessage* msgs, int n)
 {
     SIInsertDataEntries(msgs, n);
 
-    if (ENABLE_DN_GPC) {
-        GPC->InvalMsg(msgs, n);
+    if (ENABLE_GPC && g_instance.plan_cache != NULL) {
+        g_instance.plan_cache->InvalMsg(msgs, n);
     }
 }
 

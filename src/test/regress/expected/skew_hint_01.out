@@ -1,0 +1,1535 @@
+/*
+################################################################################
+# TESTCASE NAME : skew_hint_01.py 
+# COMPONENT(S)  : skew hint功能测试: skew hint DFX测试
+# PREREQUISITE  : skew_setup.py
+# PLATFORM      : all
+# DESCRIPTION   : skew hint
+# TAG           : hint
+# TC LEVEL      : Level 1
+################################################################################
+*/
+--I1.设置guc参数
+--S1.设置schema
+set current_schema = skew_hint;
+--S1.关闭sort agg和nestloop
+set enable_sort = off;
+set enable_nestloop = off;
+--S2.关闭query下推
+--S3.设置计划格式
+set explain_perf_mode = normal;
+--S3.设置query_dop使得explain中倾斜优化生效
+set query_dop = 1002;
+--I2.完整性测试
+--S1.正确示例
+explain(verbose on, costs off) select /*+ skew(skew_t1 (b) (10)) */count(*) from skew_t1, skew_t2 t2 where skew_t1.b  = t2.a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (skew_t1.b = t2.a)
+                           Skew Join Optimized by Hint
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 Output: skew_t1.b
+                                 Distribute Key: skew_t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1
+                                       Output: skew_t1.b
+                                       Distribute Key: skew_t1.c
+                           ->  Hash
+                                 Output: t2.a
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       Output: t2.a
+                                       Distribute Key: t2.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t2 t2
+                                             Output: t2.a
+                                             Distribute Key: t2.c
+(32 rows)
+
+--S2.表缺省
+explain(verbose on, costs off) select /*+ skew(b (10)) */count(*) from skew_t1, skew_t2 t2 where skew_t1.b  = t2.a;
+WARNING:  LINE 1: syntax error at '10'
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (skew_t1.b = t2.a)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: skew_t1.b
+                                 Distribute Key: skew_t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1
+                                       Output: skew_t1.b
+                                       Distribute Key: skew_t1.c
+                           ->  Hash
+                                 Output: t2.a
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: t2.a
+                                       Distribute Key: t2.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t2 t2
+                                             Output: t2.a
+                                             Distribute Key: t2.c
+(31 rows)
+
+--S3.列缺省
+explain(verbose on, costs off) select /*+ skew(skew_t1 (10)) */count(*) from skew_t1, skew_t2 t2 where skew_t1.b  = t2.a;
+WARNING:  LINE 1: syntax error at '10'
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (skew_t1.b = t2.a)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: skew_t1.b
+                                 Distribute Key: skew_t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1
+                                       Output: skew_t1.b
+                                       Distribute Key: skew_t1.c
+                           ->  Hash
+                                 Output: t2.a
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: t2.a
+                                       Distribute Key: t2.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t2 t2
+                                             Output: t2.a
+                                             Distribute Key: t2.c
+(31 rows)
+
+--S3.值缺省
+explain(verbose on, costs off) select /*+ skew(skew_t1 (b)) */count(*) from skew_t1, skew_t2 t2 where skew_t1.b  = t2.a;
+WARNING:  unused hint: Skew(skew_t1 (b))
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (skew_t1.b = t2.a)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: skew_t1.b
+                                 Distribute Key: skew_t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1
+                                       Output: skew_t1.b
+                                       Distribute Key: skew_t1.c
+                           ->  Hash
+                                 Output: t2.a
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: t2.a
+                                       Distribute Key: t2.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t2 t2
+                                             Output: t2.a
+                                             Distribute Key: t2.c
+(31 rows)
+
+--I3.格式错误测试
+--S1.正确示例
+explain(verbose on, costs off) select /*+ skew(skew_t1 (b) (10)) */count(*) from skew_t1, skew_t2 t2 where skew_t1.b  = t2.a;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (skew_t1.b = t2.a)
+                           Skew Join Optimized by Hint
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 Output: skew_t1.b
+                                 Distribute Key: skew_t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1
+                                       Output: skew_t1.b
+                                       Distribute Key: skew_t1.c
+                           ->  Hash
+                                 Output: t2.a
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       Output: t2.a
+                                       Distribute Key: t2.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t2 t2
+                                             Output: t2.a
+                                             Distribute Key: t2.c
+(32 rows)
+
+--S2.多表无括号
+explain(verbose on, costs off) select /*+ skew(skew_t1 t2 (b) (10)) */count(*) from skew_t1, skew_t2 t2 where skew_t1.b  = t2.a;
+WARNING:  LINE 1: syntax error at 't2'
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (skew_t1.b = t2.a)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: skew_t1.b
+                                 Distribute Key: skew_t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1
+                                       Output: skew_t1.b
+                                       Distribute Key: skew_t1.c
+                           ->  Hash
+                                 Output: t2.a
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: t2.a
+                                       Distribute Key: t2.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t2 t2
+                                             Output: t2.a
+                                             Distribute Key: t2.c
+(31 rows)
+
+--S3.列无括号
+explain(verbose on, costs off) select /*+ skew(skew_t1 b (10)) */count(*) from skew_t1, skew_t2 t2 where skew_t1.b  = t2.a;
+WARNING:  LINE 1: syntax error at 'b'
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (skew_t1.b = t2.a)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: skew_t1.b
+                                 Distribute Key: skew_t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1
+                                       Output: skew_t1.b
+                                       Distribute Key: skew_t1.c
+                           ->  Hash
+                                 Output: t2.a
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: t2.a
+                                       Distribute Key: t2.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t2 t2
+                                             Output: t2.a
+                                             Distribute Key: t2.c
+(31 rows)
+
+--S4.值无括号
+explain(verbose on, costs off) select /*+ skew(skew_t1 (b) 10) */count(*) from skew_t1, skew_t2 t2 where skew_t1.b  = t2.a;
+WARNING:  LINE 1: syntax error at '10'
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (skew_t1.b = t2.a)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: skew_t1.b
+                                 Distribute Key: skew_t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1
+                                       Output: skew_t1.b
+                                       Distribute Key: skew_t1.c
+                           ->  Hash
+                                 Output: t2.a
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: t2.a
+                                       Distribute Key: t2.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t2 t2
+                                             Output: t2.a
+                                             Distribute Key: t2.c
+(31 rows)
+
+--I4.重复hint测试
+--S1.完全相同
+explain(verbose on, costs off) select /*+ skew(skew_t1 (a) (10)) skew(skew_t1 (a) (10))*/ * from  skew_t1 join hint.hint_t1 on skew_t1.a =  hint.hint_t1.a;
+WARNING:  Duplicated or conflict hint: Skew(skew_t1 (a) (10)), will be discarded.
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: skew_t1.a, skew_t1.b, skew_t1.c, hint_t1.a, hint_t1.b, hint_t1.c
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: skew_t1.a, skew_t1.b, skew_t1.c, hint_t1.a, hint_t1.b, hint_t1.c
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: skew_t1.a, skew_t1.b, skew_t1.c, hint_t1.a, hint_t1.b, hint_t1.c
+               Hash Cond: (skew_t1.a = hint_t1.a)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                     Output: skew_t1.a, skew_t1.b, skew_t1.c
+                     Distribute Key: skew_t1.a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.skew_t1
+                           Output: skew_t1.a, skew_t1.b, skew_t1.c
+                           Distribute Key: skew_t1.c
+               ->  Hash
+                     Output: hint_t1.a, hint_t1.b, hint_t1.c
+                     ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                           Output: hint_t1.a, hint_t1.b, hint_t1.c
+                           Distribute Key: hint_t1.a
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on hint.hint_t1
+                                 Output: hint_t1.a, hint_t1.b, hint_t1.c
+                                 Distribute Key: hint_t1.a
+(29 rows)
+
+--S2.表相同，列存在包含情况
+explain(verbose on, costs off) select /*+ skew(skew_t1 (a) (10)) skew(skew_t1 (a b) (10 10))*/ * from  skew_t1 join hint.hint_t1 on skew_t1.a =  hint.hint_t1.a;
+WARNING:  Duplicated or conflict hint: Skew(skew_t1 (a) (10)), will be discarded.
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: skew_t1.a, skew_t1.b, skew_t1.c, hint_t1.a, hint_t1.b, hint_t1.c
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: skew_t1.a, skew_t1.b, skew_t1.c, hint_t1.a, hint_t1.b, hint_t1.c
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: skew_t1.a, skew_t1.b, skew_t1.c, hint_t1.a, hint_t1.b, hint_t1.c
+               Hash Cond: (skew_t1.a = hint_t1.a)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                     Output: skew_t1.a, skew_t1.b, skew_t1.c
+                     Distribute Key: skew_t1.a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.skew_t1
+                           Output: skew_t1.a, skew_t1.b, skew_t1.c
+                           Distribute Key: skew_t1.c
+               ->  Hash
+                     Output: hint_t1.a, hint_t1.b, hint_t1.c
+                     ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                           Output: hint_t1.a, hint_t1.b, hint_t1.c
+                           Distribute Key: hint_t1.a
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on hint.hint_t1
+                                 Output: hint_t1.a, hint_t1.b, hint_t1.c
+                                 Distribute Key: hint_t1.a
+(29 rows)
+
+--S3.不同层则不算重复:不提升可能出现hint未使用
+explain(verbose on, costs off) select /*+ skew(s (b) (10))*/ * from  skew_t1 s join (select /*+ skew(s (b) (10)) */count(*) as a from skew_t1 s, skew_t2 t2 where s.b = t2.c)tp(a) on s.b = tp.a; 
+WARNING:  unused hint: Skew(s (b) (10))
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: s.a, s.b, s.c, (pg_catalog.count(*))
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: s.a, s.b, s.c, (pg_catalog.count(*))
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: s.a, s.b, s.c, (pg_catalog.count(*))
+               Hash Cond: (s.b = (pg_catalog.count(*)))
+               ->  Seq Scan on skew_hint.skew_t1 s
+                     Output: s.a, s.b, s.c
+                     Distribute Key: s.c
+               ->  Hash
+                     Output: (pg_catalog.count(*))
+                     ->  Streaming(type: LOCAL BROADCAST dop: 2/1)
+                           Output: (pg_catalog.count(*))
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Aggregate
+                                 Output: pg_catalog.count(*)
+                                 ->  Streaming(type: BROADCAST dop: 1/2)
+                                       Output: (count(*))
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Aggregate
+                                             Output: count(*)
+                                             ->  Hash Join
+                                                   Hash Cond: (s.b = t2.c)
+                                                   Skew Join Optimized by Hint
+                                                   ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                                         Output: s.b
+                                                         Distribute Key: s.b
+                                                         Spawn on: All datanodes
+                                                         Consumer Nodes: All datanodes
+                                                         ->  Seq Scan on skew_hint.skew_t1 s
+                                                               Output: s.b
+                                                               Distribute Key: s.c
+                                                   ->  Hash
+                                                         Output: t2.c
+                                                         ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                                               Output: t2.c
+                                                               Distribute Key: t2.c
+                                                               Spawn on: All datanodes
+                                                               Consumer Nodes: All datanodes
+                                                               ->  Seq Scan on skew_hint.skew_t2 t2
+                                                                     Output: t2.c
+                                                                     Distribute Key: t2.c
+(48 rows)
+
+--S4.不同层，不提升出现同名hint未用时，可以通过修改别名判断是哪个未用
+explain(verbose on, costs off) select /*+ skew(s (b) (10))*/ * from  skew_t1 s join (select /*+ skew(ss (b) (10)) */count(*) as a from skew_t1 ss, skew_t2 t2 where ss.b = t2.c)tp(a) on s.b = tp.a;
+WARNING:  unused hint: Skew(s (b) (10))
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: s.a, s.b, s.c, (pg_catalog.count(*))
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: s.a, s.b, s.c, (pg_catalog.count(*))
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: s.a, s.b, s.c, (pg_catalog.count(*))
+               Hash Cond: (s.b = (pg_catalog.count(*)))
+               ->  Seq Scan on skew_hint.skew_t1 s
+                     Output: s.a, s.b, s.c
+                     Distribute Key: s.c
+               ->  Hash
+                     Output: (pg_catalog.count(*))
+                     ->  Streaming(type: LOCAL BROADCAST dop: 2/1)
+                           Output: (pg_catalog.count(*))
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Aggregate
+                                 Output: pg_catalog.count(*)
+                                 ->  Streaming(type: BROADCAST dop: 1/2)
+                                       Output: (count(*))
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Aggregate
+                                             Output: count(*)
+                                             ->  Hash Join
+                                                   Hash Cond: (ss.b = t2.c)
+                                                   Skew Join Optimized by Hint
+                                                   ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                                         Output: ss.b
+                                                         Distribute Key: ss.b
+                                                         Spawn on: All datanodes
+                                                         Consumer Nodes: All datanodes
+                                                         ->  Seq Scan on skew_hint.skew_t1 ss
+                                                               Output: ss.b
+                                                               Distribute Key: ss.c
+                                                   ->  Hash
+                                                         Output: t2.c
+                                                         ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                                               Output: t2.c
+                                                               Distribute Key: t2.c
+                                                               Spawn on: All datanodes
+                                                               Consumer Nodes: All datanodes
+                                                               ->  Seq Scan on skew_hint.skew_t2 t2
+                                                                     Output: t2.c
+                                                                     Distribute Key: t2.c
+(48 rows)
+
+--S5.不同层，提升后，无论hint指定的别名表实际上是否相同，都会出现：relation name "xx" is ambiguous的提示
+--实际表相同
+explain(verbose on, costs off) select /*+ skew(s (b) (10))*/ * from  skew_t1 s join (select /*+ skew(s (b) (10)) */s.a as sa from skew_t1 s, skew_t2 t2 where s.b = t2.c)tp(a) on s.b = tp.a;
+WARNING:  Error hint: Skew(s (b) (10)), relation name "s" is ambiguous.
+WARNING:  Error hint: Skew(s (b) (10)), relation name "s" is ambiguous.
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: s.a, s.b, s.c, s.a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: s.a, s.b, s.c, s.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: s.a, s.b, s.c, s.a
+               Hash Cond: (s.b = t2.c)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: s.a, s.b, s.c, s.a, s.b
+                     Distribute Key: s.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Hash Join
+                           Output: s.a, s.b, s.c, s.a, s.b
+                           Hash Cond: (s.b = s.a)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: s.a, s.b, s.c
+                                 Distribute Key: s.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1 s
+                                       Output: s.a, s.b, s.c
+                                       Distribute Key: s.c
+                           ->  Hash
+                                 Output: s.a, s.b
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: s.a, s.b
+                                       Distribute Key: s.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t1 s
+                                             Output: s.a, s.b
+                                             Distribute Key: s.c
+               ->  Hash
+                     Output: t2.c
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: t2.c
+                           Distribute Key: t2.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.skew_t2 t2
+                                 Output: t2.c
+                                 Distribute Key: t2.c
+(46 rows)
+
+--实际表不同
+explain(verbose on, costs off) select /*+ skew(s (b) (10))*/ * from  skew_t1 s join (select /*+ skew(s (b) (10)) */s.a as sa from skew_t2 s, skew_t3 t3 where s.b = t3.c)tp(a) on s.b = tp.a;
+WARNING:  Error hint: Skew(s (b) (10)), relation name "s" is ambiguous.
+WARNING:  Error hint: Skew(s (b) (10)), relation name "s" is ambiguous.
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: s.a, s.b, s.c, s.a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: s.a, s.b, s.c, s.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: s.a, s.b, s.c, s.a
+               Hash Cond: (s.b = t3.c)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: s.a, s.b, s.c, s.a, s.b
+                     Distribute Key: s.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Hash Join
+                           Output: s.a, s.b, s.c, s.a, s.b
+                           Hash Cond: (s.b = s.a)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: s.a, s.b, s.c
+                                 Distribute Key: s.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1 s
+                                       Output: s.a, s.b, s.c
+                                       Distribute Key: s.c
+                           ->  Hash
+                                 Output: s.a, s.b
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: s.a, s.b
+                                       Distribute Key: s.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t2 s
+                                             Output: s.a, s.b
+                                             Distribute Key: s.c
+               ->  Hash
+                     Output: t3.c
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: t3.c
+                           Distribute Key: t3.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.skew_t3 t3
+                                 Output: t3.c
+                                 Distribute Key: t3.c
+(46 rows)
+
+--S6.不同层，提升后，可以通过修改别名避免出现S5中的错误
+explain(verbose on, costs off) select /*+ skew(s (b) (10))*/ * from  skew_t1 s join (select /*+ skew(ss (b) (10)) */ss.a as sa from skew_t1 ss, skew_t2 t2 where ss.b = t2.c)tp(a) on s.b = tp.a; 
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: s.a, s.b, s.c, ss.a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: s.a, s.b, s.c, ss.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: s.a, s.b, s.c, ss.a
+               Hash Cond: (ss.b = t2.c)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                     Output: s.a, s.b, s.c, ss.a, ss.b
+                     Distribute Key: ss.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Hash Join
+                           Output: s.a, s.b, s.c, ss.a, ss.b
+                           Hash Cond: (s.b = ss.a)
+                           Skew Join Optimized by Hint
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 Output: s.a, s.b, s.c
+                                 Distribute Key: s.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1 s
+                                       Output: s.a, s.b, s.c
+                                       Distribute Key: s.c
+                           ->  Hash
+                                 Output: ss.a, ss.b
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       Output: ss.a, ss.b
+                                       Distribute Key: ss.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t1 ss
+                                             Output: ss.a, ss.b
+                                             Distribute Key: ss.c
+               ->  Hash
+                     Output: t2.c
+                     ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                           Output: t2.c
+                           Distribute Key: t2.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.skew_t2 t2
+                                 Output: t2.c
+                                 Distribute Key: t2.c
+(48 rows)
+
+explain(verbose on, costs off) select /*+ skew(s (b) (10))*/ * from  skew_t1 s join (select /*+ skew(ss (b) (10)) */ss.a as sa from skew_t2 ss, skew_t3 t3 where ss.b = t3.c)tp(a) on s.b = tp.a; 
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: s.a, s.b, s.c, ss.a
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: s.a, s.b, s.c, ss.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: s.a, s.b, s.c, ss.a
+               Hash Cond: (ss.a = s.b)
+               Skew Join Optimized by Hint
+               ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                     Output: ss.a
+                     Distribute Key: ss.a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Hash Join
+                           Output: ss.a
+                           Hash Cond: (ss.b = t3.c)
+                           Skew Join Optimized by Hint
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 Output: ss.a, ss.b
+                                 Distribute Key: ss.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t2 ss
+                                       Output: ss.a, ss.b
+                                       Distribute Key: ss.c
+                           ->  Hash
+                                 Output: t3.c
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       Output: t3.c
+                                       Distribute Key: t3.c
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t3 t3
+                                             Output: t3.c
+                                             Distribute Key: t3.c
+               ->  Hash
+                     Output: s.a, s.b, s.c
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                           Output: s.a, s.b, s.c
+                           Distribute Key: s.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.skew_t1 s
+                                 Output: s.a, s.b, s.c
+                                 Distribute Key: s.c
+(48 rows)
+
+--I5.表提示测试
+--S1.表未使用别名
+explain(verbose on, costs off) select /*+ skew(skew_t2 (b) (10)) */count(*) from skew_t1, skew_t2 t2 where skew_t1.b  = t2.a;
+WARNING:  Error hint: Skew(skew_t2 (b) (10)), relation name "skew_t2" is not found.
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (skew_t1.b = t2.a)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: skew_t1.b
+                                 Distribute Key: skew_t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1
+                                       Output: skew_t1.b
+                                       Distribute Key: skew_t1.c
+                           ->  Hash
+                                 Output: t2.a
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: t2.a
+                                       Distribute Key: t2.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t2 t2
+                                             Output: t2.a
+                                             Distribute Key: t2.c
+(31 rows)
+
+--S2.表在query中不存在
+explain(verbose on, costs off) select /*+ skew(skew_t3 (b) (10)) */count(*) from skew_t1, skew_t2 t2 where skew_t1.b  = t2.a;
+WARNING:  Error hint: Skew(skew_t3 (b) (10)), relation name "skew_t3" is not found.
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (skew_t1.b = t2.a)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: skew_t1.b
+                                 Distribute Key: skew_t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1
+                                       Output: skew_t1.b
+                                       Distribute Key: skew_t1.c
+                           ->  Hash
+                                 Output: t2.a
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: t2.a
+                                       Distribute Key: t2.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t2 t2
+                                             Output: t2.a
+                                             Distribute Key: t2.c
+(31 rows)
+
+--S3.表名存在歧义
+explain(verbose on, costs off) select /*+ skew(skew_t1 (b) (10)) */count(*) from skew_hint.skew_t1, hint.skew_t1 where skew_hint.skew_t1.b  = hint.skew_t1.a;
+WARNING:  Error hint: Skew(skew_t1 (b) (10)), relation name "skew_t1" is ambiguous.
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (skew_hint.skew_t1.b = hint.skew_t1.a)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: skew_hint.skew_t1.b
+                                 Distribute Key: skew_hint.skew_t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1
+                                       Output: skew_hint.skew_t1.b
+                                       Distribute Key: skew_hint.skew_t1.c
+                           ->  Hash
+                                 Output: hint.skew_t1.a
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: hint.skew_t1.a
+                                       Distribute Key: hint.skew_t1.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on hint.skew_t1
+                                             Output: hint.skew_t1.a
+                                             Distribute Key: hint.skew_t1.c
+(31 rows)
+
+--S4.表为不支持类型
+--I6.列提示测试
+--S1.列找不到
+explain(verbose on, costs off) select /*+ skew(skew_t1 (aa) (10)) */count(*) from skew_t1, skew_t2 t2 where skew_t1.b  = t2.a;
+WARNING:  Error hint: Skew(skew_t1 (aa) (10)), reference column "aa" in skew hint is not found.
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (skew_t1.b = t2.a)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: skew_t1.b
+                                 Distribute Key: skew_t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1
+                                       Output: skew_t1.b
+                                       Distribute Key: skew_t1.c
+                           ->  Hash
+                                 Output: t2.a
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: t2.a
+                                       Distribute Key: t2.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t2 t2
+                                             Output: t2.a
+                                             Distribute Key: t2.c
+(31 rows)
+
+--S2.列名存在歧义
+explain(verbose on, costs off) select /*+ skew((skew_t1 t2) (a) (10)) */count(*) from skew_t1, skew_t2 t2 where skew_t1.b  = t2.a;
+WARNING:  Error hint: Skew((skew_t1 t2) (a) (10)), reference column "a" in skew hint is ambiguous.
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (skew_t1.b = t2.a)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: skew_t1.b
+                                 Distribute Key: skew_t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1
+                                       Output: skew_t1.b
+                                       Distribute Key: skew_t1.c
+                           ->  Hash
+                                 Output: t2.a
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: t2.a
+                                       Distribute Key: t2.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t2 t2
+                                             Output: t2.a
+                                             Distribute Key: t2.c
+(31 rows)
+
+--I7.不支持重分布类型测试
+--对于不支持重分布的类型，在hint中，应支持输入（不报语法错误），不支持解析（提示不能支持重分布）
+--S1.money类型
+explain(verbose on, costs off) select /*+ skew(typetest (col_money) ('59'))*/ * from  typetest join skew_t1 on col_integer = 10;
+WARNING:  Error hint: Skew(typetest (col_money) ('59')), reference column "col_money"(typeoid: 790) can not support redistribution
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                                                                                                                                                                                                                                 QUERY PLAN                                                                                                                                                                                                                                                                                                                  
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: typetest.col_tinyint, typetest.col_nvarchar2, typetest.col_interval, typetest.col_smallint, typetest.col_integer, typetest.col_bigint, typetest.col_real, typetest.col_numeric, typetest.col_numeric2, typetest.col_double_precision, typetest.col_decimal, typetest.col_char, typetest.col_char2, typetest.col_varchar, typetest.col_text, typetest.col_varchar2, typetest.col_time_without_time_zone, typetest.col_time_with_time_zone, typetest.col_timestamp_without_timezone, typetest.col_timestamp_with_timezone, typetest.col_smalldatetime, typetest.col_money, typetest.col_date, skew_t1.a, skew_t1.b, skew_t1.c
+   Node/s: All datanodes
+   ->  Nested Loop
+         Output: typetest.col_tinyint, typetest.col_nvarchar2, typetest.col_interval, typetest.col_smallint, typetest.col_integer, typetest.col_bigint, typetest.col_real, typetest.col_numeric, typetest.col_numeric2, typetest.col_double_precision, typetest.col_decimal, typetest.col_char, typetest.col_char2, typetest.col_varchar, typetest.col_text, typetest.col_varchar2, typetest.col_time_without_time_zone, typetest.col_time_with_time_zone, typetest.col_timestamp_without_timezone, typetest.col_timestamp_with_timezone, typetest.col_smalldatetime, typetest.col_money, typetest.col_date, skew_t1.a, skew_t1.b, skew_t1.c
+         ->  Streaming(type: BROADCAST dop: 1/2)
+               Output: typetest.col_tinyint, typetest.col_nvarchar2, typetest.col_interval, typetest.col_smallint, typetest.col_integer, typetest.col_bigint, typetest.col_real, typetest.col_numeric, typetest.col_numeric2, typetest.col_double_precision, typetest.col_decimal, typetest.col_char, typetest.col_char2, typetest.col_varchar, typetest.col_text, typetest.col_varchar2, typetest.col_time_without_time_zone, typetest.col_time_with_time_zone, typetest.col_timestamp_without_timezone, typetest.col_timestamp_with_timezone, typetest.col_smalldatetime, typetest.col_money, typetest.col_date
+               Spawn on: datanode10
+               Consumer Nodes: All datanodes
+               ->  Row Adapter
+                     Output: typetest.col_tinyint, typetest.col_nvarchar2, typetest.col_interval, typetest.col_smallint, typetest.col_integer, typetest.col_bigint, typetest.col_real, typetest.col_numeric, typetest.col_numeric2, typetest.col_double_precision, typetest.col_decimal, typetest.col_char, typetest.col_char2, typetest.col_varchar, typetest.col_text, typetest.col_varchar2, typetest.col_time_without_time_zone, typetest.col_time_with_time_zone, typetest.col_timestamp_without_timezone, typetest.col_timestamp_with_timezone, typetest.col_smalldatetime, typetest.col_money, typetest.col_date
+                     ->  CStore Scan on skew_hint.typetest
+                           Output: typetest.col_tinyint, typetest.col_nvarchar2, typetest.col_interval, typetest.col_smallint, typetest.col_integer, typetest.col_bigint, typetest.col_real, typetest.col_numeric, typetest.col_numeric2, typetest.col_double_precision, typetest.col_decimal, typetest.col_char, typetest.col_char2, typetest.col_varchar, typetest.col_text, typetest.col_varchar2, typetest.col_time_without_time_zone, typetest.col_time_with_time_zone, typetest.col_timestamp_without_timezone, typetest.col_timestamp_with_timezone, typetest.col_smalldatetime, typetest.col_money, typetest.col_date
+                           Distribute Key: typetest.col_integer
+                           Filter: (typetest.col_integer = 10)
+         ->  Materialize
+               Output: skew_t1.a, skew_t1.b, skew_t1.c
+               ->  Streaming(type: LOCAL GATHER dop: 1/2)
+                     Output: skew_t1.a, skew_t1.b, skew_t1.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.skew_t1
+                           Output: skew_t1.a, skew_t1.b, skew_t1.c
+                           Distribute Key: skew_t1.c
+(24 rows)
+
+--S2.十六进制
+create table hex_t(a int, b raw) distribute by hash(a);
+insert into hex_t values(1,'7fffffff');
+select * from hex_t;
+ a |    b     
+---+----------
+ 1 | 7FFFFFFF
+(1 row)
+
+analyze hex_t;
+explain(verbose on, costs off) select /*+skew(hex_t(b)('7fffffff'))*/ * from hex_t, text_t where hex_t.a=text_t.a;
+WARNING:  Error hint: Skew(hex_t (b) ('7fffffff')), reference column "b"(typeoid: 86) can not support redistribution
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: hex_t.a, hex_t.b, text_t.a, text_t.c
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: hex_t.a, hex_t.b, text_t.a, text_t.c
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: hex_t.a, hex_t.b, text_t.a, text_t.c
+               Hash Cond: (text_t.a = hex_t.a)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: text_t.a, text_t.c
+                     Distribute Key: text_t.a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.text_t
+                           Output: text_t.a, text_t.c
+                           Distribute Key: text_t.c
+               ->  Hash
+                     Output: hex_t.a, hex_t.b
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: hex_t.a, hex_t.b
+                           Distribute Key: hex_t.a
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.hex_t
+                                 Output: hex_t.a, hex_t.b
+                                 Distribute Key: hex_t.a
+(28 rows)
+
+--S3.bool型
+create table bool_t(a int,b bool) distribute by hash(a);
+insert into bool_t values(1,true);
+explain(verbose on, costs off) select /*+skew(bool_t(b)(false))*/ * from bool_t, text_t where text_t.a=text_t.a; 
+WARNING:  Error hint: Skew(bool_t (b) ('f')), reference column "b"(typeoid: 16) can not support redistribution
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: bool_t.a, bool_t.b, text_t.a, text_t.c
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: bool_t.a, bool_t.b, text_t.a, text_t.c
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Nested Loop
+               Output: bool_t.a, bool_t.b, text_t.a, text_t.c
+               ->  Streaming(type: SPLIT BROADCAST dop: 2/2)
+                     Output: text_t.a, text_t.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.text_t
+                           Output: text_t.a, text_t.c
+                           Distribute Key: text_t.c
+                           Filter: (text_t.a IS NOT NULL)
+               ->  Materialize
+                     Output: bool_t.a, bool_t.b
+                     ->  Seq Scan on skew_hint.bool_t
+                           Output: bool_t.a, bool_t.b
+                           Distribute Key: bool_t.a
+(22 rows)
+
+--S4.位串
+create table bit_t(a int, b bit(3)) distribute by hash(a);
+insert into bit_t values(1,B'101');
+select * from bit_t;
+ a |  b  
+---+-----
+ 1 | 101
+(1 row)
+
+explain(verbose on, costs off) select /*+skew(bit_t(b)(B'101'))*/ * from bit_t, text_t where bit_t.a=text_t.a;
+WARNING:  Error hint: Skew(bit_t (b) ('b101')), reference column "b"(typeoid: 1560) can not support redistribution
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: bit_t.a, bit_t.b, text_t.a, text_t.c
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: bit_t.a, bit_t.b, text_t.a, text_t.c
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  Hash Join
+               Output: bit_t.a, bit_t.b, text_t.a, text_t.c
+               Hash Cond: (text_t.a = bit_t.a)
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: text_t.a, text_t.c
+                     Distribute Key: text_t.a
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on skew_hint.text_t
+                           Output: text_t.a, text_t.c
+                           Distribute Key: text_t.c
+               ->  Hash
+                     Output: bit_t.a, bit_t.b
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                           Output: bit_t.a, bit_t.b
+                           Distribute Key: bit_t.a
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.bit_t
+                                 Output: bit_t.a, bit_t.b
+                                 Distribute Key: bit_t.a
+(28 rows)
+
+--I8.值无法转换为datum：通常出现在string类型的值未使用单引号场景或者值越界无法转换的场景
+create table c_t(a int, b char) distribute by hash(a);
+insert into c_t values(generate_series(1,10),1);
+--S1.错误场景
+explain(verbose on, costs off) select /*+ skew(c_t (b) (1)) */count(*) from char_t, c_t where char_t.c  = c_t.b;
+WARNING:  Error hint: Skew(c_t (b) (1)) fail to convert skew value to datum. Details: "Unsupported typeoid: 1042 for T_Integer value, please add single quota and try again."
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (c_t.b = char_t.c)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: c_t.b
+                                 Distribute Key: c_t.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.c_t
+                                       Output: c_t.b
+                                       Distribute Key: c_t.a
+                           ->  Hash
+                                 Output: char_t.c
+                                 ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                       Output: char_t.c
+                                       Distribute Key: char_t.c
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.char_t
+                                             Output: char_t.c
+                                             Distribute Key: char_t.c
+(31 rows)
+
+--S2.正确场景
+explain(verbose on, costs off) select /*+ skew(c_t (b) ('1')) */count(*) from char_t, c_t where char_t.c  = c_t.b;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (char_t.c = c_t.b)
+                           Skew Join Optimized by Hint
+                           ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                 Output: char_t.c
+                                 Distribute Key: char_t.c
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.char_t
+                                       Output: char_t.c
+                                       Distribute Key: char_t.c
+                           ->  Hash
+                                 Output: c_t.b
+                                 ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                       Output: c_t.b
+                                       Distribute Key: c_t.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.c_t
+                                             Output: c_t.b
+                                             Distribute Key: c_t.a
+(32 rows)
+
+--S3.值范围问题
+explain(verbose on, costs off) select /*+ skew(c_t (a) (111111111111111111111111111111)) */count(*) from char_t, c_t where char_t.c  = c_t.b;
+WARNING:  Error hint: Skew(c_t (a) ('111111111111111111111111111111')) fail to convert skew value to datum. Details: "value "111111111111111111111111111111" is out of range for type integer"
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (c_t.b = char_t.c)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: c_t.b
+                                 Distribute Key: c_t.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.c_t
+                                       Output: c_t.b
+                                       Distribute Key: c_t.a
+                           ->  Hash
+                                 Output: char_t.c
+                                 ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                       Output: char_t.c
+                                       Distribute Key: char_t.c
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.char_t
+                                             Output: char_t.c
+                                             Distribute Key: char_t.c
+(31 rows)
+
+--S4.值与column数量不符
+explain(verbose on, costs off) select /*+ skew(c_t (a b) (1 'a' 2)) */count(*) from char_t, c_t where char_t.c  = c_t.b;
+WARNING:  Error hint: Skew(c_t (a b) ((1 'a') (2))) missing value. Please input enough skew values for every column.
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (c_t.b = char_t.c)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: c_t.b
+                                 Distribute Key: c_t.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.c_t
+                                       Output: c_t.b
+                                       Distribute Key: c_t.a
+                           ->  Hash
+                                 Output: char_t.c
+                                 ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                       Output: char_t.c
+                                       Distribute Key: char_t.c
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.char_t
+                                             Output: char_t.c
+                                             Distribute Key: char_t.c
+(31 rows)
+
+--S5.单列倾斜值超过10个
+explain(verbose on, costs off) select /*+ skew(c_t (a) (1 2 3 4 5 6 7 8 9 10 11)) */count(*) from char_t, c_t where char_t.c  = c_t.b;
+WARNING:  Error hint: Skew(c_t (a) (1 2 3 4 5 6 7 8 9 10 11)), do not support more than 10 skew values for each column.
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (c_t.b = char_t.c)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: c_t.b
+                                 Distribute Key: c_t.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.c_t
+                                       Output: c_t.b
+                                       Distribute Key: c_t.a
+                           ->  Hash
+                                 Output: char_t.c
+                                 ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                       Output: char_t.c
+                                       Distribute Key: char_t.c
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.char_t
+                                             Output: char_t.c
+                                             Distribute Key: char_t.c
+(31 rows)
+
+--I9.Hint没有被使用时提示测试:unused hint
+--S1.正确hint的指定
+explain(verbose on, costs off) select /*+ skew(s (b) (10)) */count(*) from skew_t1 s, skew_t2 t2 where s.b  = t2.c;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (s.b = t2.c)
+                           Skew Join Optimized by Hint
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 Output: s.b
+                                 Distribute Key: s.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1 s
+                                       Output: s.b
+                                       Distribute Key: s.c
+                           ->  Hash
+                                 Output: t2.c
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       Output: t2.c
+                                       Distribute Key: t2.c
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t2 t2
+                                             Output: t2.c
+                                             Distribute Key: t2.c
+(32 rows)
+
+--S2.列没有包含分布键
+explain(verbose on, costs off) select /*+ skew(skew_t2 (a c) (1 1)) */ count(distinct a) from skew_t2 group by a,b;
+WARNING:  unused hint: Skew(skew_t2 (a c) (1 1))
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(a)), a, b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(a)), a, b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(a), a, b
+               Group By Key: skew_t2.a, skew_t2.b
+               ->  HashAggregate
+                     Output: a, b, a
+                     Group By Key: skew_t2.a, skew_t2.b
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: a, b
+                           Distribute Key: a, b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.skew_t2
+                                 Output: a, b
+                                 Distribute Key: c
+(21 rows)
+
+--S3.hint指定有误:skew_t1表倾斜，却指定了skew_t2表。
+explain(verbose on, costs off) select /*+ skew(t2 (b) (10)) */count(*) from skew_t1 s, skew_t2 t2 where s.b  = t2.c;
+WARNING:  unused hint: Skew(t2 (b) (10))
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (s.b = t2.c)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: s.b
+                                 Distribute Key: s.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1 s
+                                       Output: s.b
+                                       Distribute Key: s.c
+                           ->  Hash
+                                 Output: t2.c
+                                 ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                       Output: t2.c
+                                       Distribute Key: t2.c
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t2 t2
+                                             Output: t2.c
+                                             Distribute Key: t2.c
+(31 rows)
+
+--I7.还原设置
+--S1.还原query_dop
+set query_dop = 2002;
+drop table if exists warehouse;
+NOTICE:  table "warehouse" does not exist, skipping
+create table warehouse
+(
+    w_warehouse_sk            numeric(100,4)                null,
+    w_warehouse_id            char(16)              not null,
+    w_warehouse_name          varchar(20)                   ,
+    w_warehouse_sq_ft         integer                       ,
+    w_street_number           char(10)                      ,
+    w_street_name             varchar(60)                   ,
+    w_street_type             char(15)                      ,
+    w_suite_number            char(10)                      ,
+    w_city                    varchar(60)                   ,
+    w_county                  varchar(30)                   ,
+    w_state                   char(2)                       ,
+    w_zip                     char(10)                      ,
+    w_country                 varchar(20)                   ,
+    w_gmt_offset              decimal(5,2)
+ )with(orientation = row,compression=no)  distribute by replication
+ partition by range(w_warehouse_sk)
+ (partition p1 values less than(maxvalue));
+drop table if exists store_returns;
+NOTICE:  table "store_returns" does not exist, skipping
+create table store_returns
+(
+    sr_returned_date_sk       integer(1000,99)  null ,
+    sr_return_time_sk         integer                       ,
+    sr_item_sk                integer               not null,
+    sr_customer_sk            integer                       ,
+    sr_cdemo_sk               integer                       ,
+    sr_hdemo_sk               integer                       ,
+    sr_addr_sk                integer                       ,
+    sr_store_sk               integer                       ,
+    sr_reason_sk              integer                       ,
+    sr_ticket_number          bigint               not null,
+    sr_return_quantity        integer                       ,
+    sr_return_amt             decimal(7,2)                  ,
+    sr_return_tax             decimal(7,2)                  ,
+    sr_return_amt_inc_tax     decimal(7,2)                  ,
+    sr_fee                    decimal(7,2)                  ,
+    sr_return_ship_cost       decimal(7,2)                  ,
+    sr_refunded_cash          decimal(7,2)                  ,
+    sr_reversed_charge        decimal(7,2)                  ,
+    sr_store_credit           decimal(7,2)                  ,
+    sr_net_loss               decimal(7,2)
+ )with(orientation = row  ,compression=yes)
+ distribute by hash (sr_returned_date_sk);
+create index ss on store_returns(sr_returned_date_sk);
+explain  select/*+hashjoin(warehouse store_returns) indexscan(store_returns ss)*/
+ min( case when sr_return_time_sk-sr_item_sk>sr_item_sk
+                 then sr_return_time_sk
+                  when sr_return_time_sk-sr_item_sk <> sr_item_sk
+                   then (case when sr_return_time_sk>sr_item_sk then sr_return_time_sk else sr_return_time_sk-1 end)
+                    else  sr_item_sk end), count(distinct sr_item_sk )
+from warehouse
+ RIGHT join store_returns on sr_returned_date_sk=w_warehouse_sk
+ group by  sr_returned_date_sk having
+ count(distinct case when sr_returned_date_sk>sr_returned_date_sk-sr_item_sk then sr_item_sk else sr_item_sk+2 END)<>avg(sr_item_sk)
+ and count(distinct sr_item_sk )<3;
+--?.*
+--?.*
+ Streaming (type: GATHER)  (cost=388.62..396.65 rows=120 width=283)
+   Node/s: All datanodes
+   ->  Hash Join  (cost=387.24..387.66 rows=120 width=283)
+         Hash Cond: (skew_hint.store_returns.sr_returned_date_sk = subquery."?column?")
+         ->  HashAggregate  (cost=193.94..194.14 rows=120 width=447)
+               Group By Key: skew_hint.store_returns.sr_returned_date_sk
+               Filter: ((count((CASE WHEN (skew_hint.store_returns.sr_returned_date_sk > (skew_hint.store_returns.sr_returned_date_sk - (skew_hint.store_returns.sr_item_sk)::numeric)) THEN skew_hint.store_returns.sr_item_sk ELSE (skew_hint.store_returns.sr_item_sk + 2) END)))::numeric <> pg_catalog.avg((avg(skew_hint.store_returns.sr_item_sk))))
+               ->  HashAggregate  (cost=193.19..193.44 rows=120 width=363)
+                     Group By Key: skew_hint.store_returns.sr_returned_date_sk, CASE WHEN (skew_hint.store_returns.sr_returned_date_sk > (skew_hint.store_returns.sr_returned_date_sk - (skew_hint.store_returns.sr_item_sk)::numeric)) THEN skew_hint.store_returns.sr_item_sk ELSE (skew_hint.store_returns.sr_item_sk + 2) END
+                     ->  Hash Right Join  (cost=68.88..192.67 rows=120 width=279)
+                           Hash Cond: (skew_hint.warehouse.w_warehouse_sk = skew_hint.store_returns.sr_returned_date_sk)
+                           ->  Partition Iterator  (cost=0.00..123.60 rows=1440 width=46)
+                                 Iterations: 1
+                                 ->  Partitioned Seq Scan on warehouse  (cost=0.00..121.20 rows=120 width=46)
+                                       Filter: (Hash By w_warehouse_sk)
+                                       Selected Partitions:  1
+                           ->  Hash  (cost=68.60..68.60 rows=121 width=279)
+                                 ->  Index Scan using ss on store_returns  (cost=0.00..68.60 rows=120 width=279)
+         ->  Hash  (cost=193.17..193.17 rows=120 width=279)
+               ->  Subquery Scan on subquery  (cost=192.94..193.17 rows=120 width=279)
+                     ->  HashAggregate  (cost=192.94..193.07 rows=120 width=307)
+                           Group By Key: skew_hint.store_returns.sr_returned_date_sk
+                           Filter: (count(skew_hint.store_returns.sr_item_sk) < 3)
+                           ->  HashAggregate  (cost=192.77..192.87 rows=120 width=291)
+                                 Group By Key: skew_hint.store_returns.sr_returned_date_sk, skew_hint.store_returns.sr_item_sk
+                                 ->  Hash Right Join  (cost=68.88..192.67 rows=120 width=275)
+                                       Hash Cond: (skew_hint.warehouse.w_warehouse_sk = skew_hint.store_returns.sr_returned_date_sk)
+                                       ->  Partition Iterator  (cost=0.00..123.60 rows=1440 width=46)
+                                             Iterations: 1
+                                             ->  Partitioned Seq Scan on warehouse  (cost=0.00..121.20 rows=120 width=46)
+                                                   Filter: (Hash By w_warehouse_sk)
+                                                   Selected Partitions:  1
+                                       ->  Hash  (cost=68.60..68.60 rows=121 width=275)
+                                             ->  Index Scan using ss on store_returns  (cost=0.00..68.60 rows=120 width=275)
+(34 rows)
+

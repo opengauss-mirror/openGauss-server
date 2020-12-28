@@ -1,0 +1,330 @@
+set current_schema = sonic_hashjoin_test_date;
+set enable_nestloop to off;
+set enable_mergejoin to off;
+set enable_hashjoin to on;
+set enable_sonic_hashjoin to on;
+set enable_sonic_hashagg to on;
+set analysis_options='on(HASH_CONFLICT)';
+set work_mem = 64;
+select sum(t1.c_int),avg(t1.c_bigint) from VEC_HASHJOIN_TABLE_01_DATE t1 where t1.a is not null group by t1.c_smallint order by 1,2 limit 10;
+--?
+-----+------------------------
+   2 |   540.0000000000000000
+   8 |  6384.0000000000000000
+  12 |  7992.0000000000000000
+  18 | 11970.0000000000000000
+  20 |  6380.0000000000000000
+  22 | 17358.0000000000000000
+  30 | 16590.0000000000000000
+  32 |  7712.0000000000000000
+  38 |     23598.000000000000
+  50 |     49800.000000000000
+(10 rows)
+
+-- test data number of single DN > 16k.
+select sum(t1.c_int),avg(t1.c_bigint) from VEC_HASHJOIN_TABLE_02_DATE t1 where t1.a is not null group by t1.c_smallint, t1.d order by 1,2 limit 10;
+--?
+-----+------------------------
+   1 | 0.00000000000000000000
+   1 | 0.00000000000000000000
+   1 | 0.00000000000000000000
+   1 | 0.00000000000000000000
+   1 | 0.00000000000000000000
+   1 | 0.00000000000000000000
+   1 | 0.00000000000000000000
+   1 |     5.0000000000000000
+   1 |     5.0000000000000000
+   1 |     6.0000000000000000
+(10 rows)
+
+reset work_mem;
+reset analysis_options;
+set current_schema = sonic_hashjoin_test_number;
+set enable_nestloop to off;
+set enable_mergejoin to off;
+set enable_hashjoin to on;
+set enable_sonic_hashjoin to on;
+set enable_sonic_hashagg to on;
+set analysis_options='on(HASH_CONFLICT)';
+set query_mem=0;
+set work_mem = 64;
+select sum(t1.c_int),avg(t1.c_bigint) from VEC_HASHJOIN_TABLE_01_NUM t1 where t1.a is not null group by t1.c_smallint order by 1,2 limit 10;
+ sum |         avg          
+-----+----------------------
+   2 |   4.0000000000000000
+   5 |  25.0000000000000000
+   8 |  48.0000000000000000
+  12 |  24.0000000000000000
+  15 |  75.0000000000000000
+  18 | 108.0000000000000000
+  22 |  44.0000000000000000
+  25 | 125.0000000000000000
+  28 | 168.0000000000000000
+  32 |  64.0000000000000000
+(10 rows)
+
+create table VEC_HASHAGG_TABLE_03_NUM (
+C_BIGINT BIGINT,
+C_SMALLINT SMALLINT,
+d numeric) with (orientation = column);
+insert into VEC_HASHAGG_TABLE_03_NUM select C_BIGINT,C_SMALLINT,d from VEC_HASHJOIN_TABLE_02_NUM;
+insert into VEC_HASHAGG_TABLE_03_NUM select C_BIGINT,C_SMALLINT,d+1000000 from VEC_HASHJOIN_TABLE_02_NUM;
+insert into VEC_HASHAGG_TABLE_03_NUM select C_BIGINT,C_SMALLINT,d+3000000 from VEC_HASHJOIN_TABLE_02_NUM;
+explain performance
+select max(t1.c_bigint) from VEC_HASHAGG_TABLE_03_NUM t1 group by t1.c_smallint, t1.d order by 1 limit 10;
+WARNING:  Statistics in some tables or columns(sonic_hashjoin_test_number.vec_hashagg_table_03_num.c_bigint, sonic_hashjoin_test_number.vec_hashagg_table_03_num.c_smallint, sonic_hashjoin_test_number.vec_hashagg_table_03_num.d) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+                                 Output: max(c_bigint), c_smallint, d
+                                 Group By Key: t1.c_smallint, t1.d
+                                  datanode1 Temp File Num: 144
+                                  datanode10 Temp File Num: 144
+                                  datanode11 Temp File Num: 144
+                                  datanode12 Temp File Num: 144
+                                  datanode2 Temp File Num: 144
+                                  datanode3 Temp File Num: 144
+                                  datanode4 Temp File Num: 144
+                                  datanode5 Temp File Num: 144
+                                  datanode6 Temp File Num: 144
+                                  datanode7 Temp File Num: 144
+                                  datanode8 Temp File Num: 144
+                                  datanode9 Temp File Num: 144
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+(232 rows)
+
+select max(t1.c_bigint) from VEC_HASHAGG_TABLE_03_NUM t1 group by t1.c_smallint, t1.d order by 1 limit 10;
+         max          
+----------------------
+ -9223372036854775808
+                    1
+                    1
+                    1
+                    2
+                    2
+                    2
+                    3
+                    3
+                    3
+(10 rows)
+
+reset work_mem;
+reset analysis_options;
+drop table VEC_HASHAGG_TABLE_03_NUM;

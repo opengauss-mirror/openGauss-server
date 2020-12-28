@@ -24,7 +24,8 @@
 top_builddir=../../..
 include $(top_builddir)/src/Makefile.global
 subdir = src/alarm/client
-override CPPFLAGS := -I. -I../common/ $(CPPFLAGS) -g3 -ggdb3  -O0 -lsecurec
+override CPPFLAGS := -I. -I../common/ -I$(top_srcdir)/../Platform/N9000_RPC_Lib/ $(CPPFLAGS) -g3 -ggdb3  -O3 -lsecurec
+LDFLAGS += $(top_srcdir)/../Platform/N9000_RPC_Lib/
 
 include $(top_srcdir)/src/gausskernel/common.mk
 
@@ -45,7 +46,7 @@ alarmclient.a: $(OBJS)
 	
 utalarm: $(OBJS)
 	$(CC) -fPIC -shared $(CXXFLAGS) $(OBJS) -o libutalarm.so
-	mv libutalarm.so $(top_builddir)/src/test/ut/lib
+	mv libutalarm.so $(top_builddir)/src/distribute/test/ut/lib
 	
 install: all installdirs
 	$(INSTALL_DATA) alarmItem.conf '$(DESTDIR)$(bindir)/alarmItem.conf'

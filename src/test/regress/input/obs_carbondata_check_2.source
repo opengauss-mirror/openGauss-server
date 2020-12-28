@@ -1,0 +1,48 @@
+\c carbondata
+SET DATESTYLE='ISO, MDY';
+--boundary data
+--BYTE
+SELECT * FROM data_filter WHERE c_byte >= 127 LIMIT 20;
+SELECT * FROM data_filter WHERE c_byte <= -128 LIMIT 20;
+SELECT * FROM data_filter WHERE c_byte = 127 LIMIT 20;
+SELECT * FROM data_filter WHERE c_byte = -128 LIMIT 20;
+--SHORT
+SELECT * FROM data_filter WHERE c_short >= 32767 LIMIT 20;
+SELECT * FROM data_filter WHERE c_short <= -32768 LIMIT 20;
+SELECT * FROM data_filter WHERE c_short = 32767 LIMIT 20;
+SELECT * FROM data_filter WHERE c_short = -32768 LIMIT 20;
+--INT
+SELECT * FROM data_filter WHERE c_int >= 2147483647 LIMIT 20;
+SELECT * FROM data_filter WHERE c_int <= -2147483648 LIMIT 20;
+SELECT * FROM data_filter WHERE c_int = 2147483647 LIMIT 20;
+SELECT * FROM data_filter WHERE c_int = -2147483648 LIMIT 20;
+--LONG
+SELECT * FROM data_filter WHERE c_long >= 9223372036854775807 LIMIT 20;
+SELECT * FROM data_filter WHERE c_long <= -9223372036854775808 LIMIT 20;
+SELECT * FROM data_filter WHERE c_long = 9223372036854775807 LIMIT 20;
+SELECT * FROM data_filter WHERE c_long = -9223372036854775808 LIMIT 20;
+--FLOAT
+SELECT * FROM data_filter WHERE c_float >= 3.40282e+38 LIMIT 20;
+SELECT * FROM data_filter WHERE c_float <= 1.4013e-45 LIMIT 20;
+SELECT * FROM data_filter WHERE c_float = 3.40282e+38 LIMIT 20;
+SELECT * FROM data_filter WHERE c_float = 1.4013e-45 LIMIT 20;
+--DOUBLE
+SELECT * FROM data_filter WHERE c_double >= 1.79769313486232e+308 LIMIT 20;
+SELECT * FROM data_filter WHERE c_double <= 4.94065645841247e-324 LIMIT 20;
+SELECT * FROM data_filter WHERE c_double = 1.79769313486232e+308 LIMIT 20;
+SELECT * FROM data_filter WHERE c_double = 4.94065645841247e-324 LIMIT 20;
+--BOOLEAN
+SELECT * FROM data_filter WHERE c_bool >= 'f' LIMIT 20;
+SELECT * FROM data_filter WHERE c_bool <= 't' LIMIT 20;
+SELECT * FROM data_filter WHERE c_bool = 'f' LIMIT 20;
+SELECT * FROM data_filter WHERE c_bool = 't' LIMIT 20;
+--DATE
+SELECT * FROM data_filter WHERE c_date >= '9999-12-31' LIMIT 20;
+SELECT * FROM data_filter WHERE c_date <= '0001-01-01' LIMIT 20;
+SELECT * FROM data_filter WHERE c_date = '9999-12-31' LIMIT 20;
+SELECT * FROM data_filter WHERE c_date = '0001-01-01' LIMIT 20;
+--TIMESTAMP
+SELECT * FROM data_filter WHERE c_timestamp >= '2040-01-19 03:14:07 UTC' LIMIT 20;
+SELECT * FROM data_filter WHERE c_timestamp <= '1980-01-01 00:00:01 UTC' LIMIT 20;
+SELECT * FROM data_filter WHERE c_timestamp = '2040-01-19 03:14:07 UTC' LIMIT 20;
+SELECT * FROM data_filter WHERE c_timestamp = '1980-01-01 00:00:01 UTC' LIMIT 20;

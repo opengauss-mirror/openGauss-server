@@ -35,8 +35,9 @@ int mask_single_passwd(char* spasswd)
 
     if (spasswd != NULL) {
         len = strlen(spasswd);
-    } else
+    } else {
         return 0;
+    }
 
     if (len >= 8) {
         len = 8;

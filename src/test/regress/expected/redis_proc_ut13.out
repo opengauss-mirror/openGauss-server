@@ -1,0 +1,44 @@
+/*
+ *  UT13:  1)redis_proc get access exclusive lock (swap table phase)
+ *         2)AT Trancate partition wait until swap done
+ */
+start transaction;
+	select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+	lock table ptx in ACCESS EXCLUSIVE mode;
+	select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+	select pg_sleep(5);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+	select count(*) from ptx;
+ count 
+-------
+    30
+(1 row)
+
+	insert into cmpts values(1,current_timestamp);
+END;
+select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+select count(*) from ptx partition (p0);
+ count 
+-------
+     9
+(1 row)
+

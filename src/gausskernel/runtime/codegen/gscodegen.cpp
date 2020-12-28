@@ -846,17 +846,6 @@ static bool getCpuInfo(
     Assert(0 && "This method is defined only for x86.");
 #endif
 #elif defined(_MSC_VER)
-    /*
-     * the below is for future adaption on _MSC_VER
-     * The MSVC intrinsic is portable across x86 and x64.
-     *
-     * int registers[4];
-     * __cpuid(registers, value);
-     * *rEAX = registers[0];
-     * *rEBX = registers[1];
-     * *rECX = registers[2];
-     * *rEDX = registers[3];
-     */
 #endif
     return false;
 #else
@@ -869,6 +858,7 @@ static bool isCPUFeatureSupportCodegen()
 #ifdef __aarch64__
     return true;
 #endif
+
     bool isSupportSSE42 = false;
     unsigned EAX = 0;
     unsigned EBX = 0;

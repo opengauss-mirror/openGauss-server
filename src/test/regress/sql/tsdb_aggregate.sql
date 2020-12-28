@@ -1058,3 +1058,30 @@ SELECT
   top_k(v, 0.5)
 FROM (VALUES (1),(2),(-3),(-1.1),(5),(6.6),(0)) v(v);
 
+-- delta agg
+
+select delta(idle) over (rows 1 preceding) from (values('2020-04-17T17:00:03Z',1),('2020-04-17T17:00:03Z',2),('2020-04-17T17:00:03Z',3)) v(time, idle);
+
+select delta(idle) over (rows 1 preceding) from (values('2020-04-17T17:00:03Z','a'),('2020-04-17T17:00:03Z','a'),('2020-04-17T17:00:03Z','a')) v(time, idle);
+
+select delta(avg(idle)) over (rows 1 preceding) from (values('2020-04-17T17:00:03Z','a'),('2020-04-17T17:00:03Z','a'),('2020-04-17T17:00:03Z','a')) v(time, idle);
+
+select delta(NULL::int) from (values('2020-04-17T17:00:03Z',1),('2020-04-17T17:00:03Z',2),('2020-04-17T17:00:03Z',3)) v(time, idle);
+
+select delta(idle) over (rows 1 preceding) from (values('2020-04-17T17:00:03Z',1),('2020-04-17T17:00:03Z',1),('2020-04-17T17:00:03Z',3),('2020-04-17T17:00:03Z',3)) v(time, idle) group by time;
+
+select delta(idle) over (rows 1 preceding) from (values('2020-04-17T17:00:03Z',1),('2020-04-17T17:00:03Z',1),('2020-04-17T17:00:03Z',3),('2020-04-17T17:00:03Z',3)) v(time, idle);
+
+-- spread agg
+
+select spread(idle)  from (values('2020-04-17T17:00:03Z',1),('2020-04-17T17:00:03Z',2),('2020-04-17T17:00:03Z',3)) v(time, idle);
+
+select spread(idle)  from (values('2020-04-17T17:00:03Z','a'),('2020-04-17T17:00:03Z','b'),('2020-04-17T17:00:03Z','c')) v(time, idle);
+
+select spread(idle)  from (values('2020-04-17T17:00:03Z',1),('2020-04-17T17:00:02Z',2),('2020-04-17T17:00:03Z',5),('2020-04-17T17:00:03Z',9),('2020-04-17T17:00:02Z',8),('2020-04-17T17:00:03Z',2)) v(time, idle) group by time;
+
+select spread(avg(idle))  from (values('2020-04-17T17:00:03Z',1),('2020-04-17T17:00:02Z',2),('2020-04-17T17:00:03Z',5),('2020-04-17T17:00:03Z',9),('2020-04-17T17:00:02Z',8),('2020-04-17T17:00:03Z',2)) v(time, idle) group by time;
+
+select spread(NULL)   from (values('2020-04-17T17:00:03Z',1),('2020-04-17T17:00:03Z',2),('2020-04-17T17:00:03Z',3)) v(time, idle);
+
+select spread(idle)  over (partition by time)  from (values('2020-04-17T17:00:03Z',1),('2020-04-17T17:00:02Z',2),('2020-04-17T17:00:03Z',5),('2020-04-17T17:00:03Z',9),('2020-04-17T17:00:02Z',8),('2020-04-17T17:00:03Z',2)) v(time, idle) group by idle;

@@ -13,14 +13,22 @@
  *
  * -------------------------------------------------------------------------
  */
+#ifndef FRONTEND_PARSER
 #include "postgres.h"
 #include "knl/knl_variable.h"
+#else
+#include "postgres_fe.h"
+#endif /* FRONTEND_PARSER */
 
 #include "catalog/pg_class.h"
 #include "catalog/pg_type.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
+#include "storage/item/itemptr.h"
+
+#ifndef FRONTEND_PARSER
 #include "utils/lsyscache.h"
+#endif /* FRONTEND_PARSER */
 
 extern TypeName* SystemTypeName(char* name);
 
@@ -86,6 +94,8 @@ Var* makeVar(Index varno, AttrNumber varattno, Oid vartype, int32 vartypmod, Oid
     return var;
 }
 
+
+#ifndef FRONTEND_PARSER
 /*
  * makeVarFromTargetEntry -
  *		convenience function to create a same-level Var node from a
@@ -210,6 +220,7 @@ TargetEntry* flatCopyTargetEntry(TargetEntry* src_tle)
     securec_check(rc, "\0", "\0");
     return tle;
 }
+#endif /* !FRONTEND_PARSER */
 
 /*
  * makeFromExpr -
@@ -254,13 +265,13 @@ Const* makeConst(Oid consttype, int32 consttypmod, Oid constcollid, int constlen
     cnst->constbyval = constbyval;
     cnst->location = -1; /* "unknown" */
     cnst->ismaxvalue = false;
-
+#ifndef FRONTEND_PARSER
     if (cur != NULL) {
         CopyCursorInfoData(&cnst->cursor_data, cur);
     } else {
         cnst->cursor_data.cur_dno = -1;
     }
-
+#endif
     return cnst;
 }
 /*
@@ -287,6 +298,7 @@ Node* makeNullAConst(int location)
     return (Node*)n;
 }
 
+#ifndef FRONTEND_PARSER
 /*
  * makeNullConst -
  *	  creates a Const node representing a NULL of the specified type/typmod
@@ -302,6 +314,7 @@ Const* makeNullConst(Oid consttype, int32 consttypmod, Oid constcollid)
     get_typlenbyval(consttype, &typLen, &typByVal);
     return makeConst(consttype, consttypmod, constcollid, (int)typLen, (Datum)0, true, typByVal);
 }
+#endif /* FRONTEND_PARSER */
 
 /*
  * makeBoolConst -
@@ -313,6 +326,7 @@ Node* makeBoolConst(bool value, bool isnull)
     return (Node*)makeConst(BOOLOID, -1, InvalidOid, 1, BoolGetDatum(value), isnull, true);
 }
 
+#ifndef FRONTEND_PARSER
 /*
  * @@GaussDB@@
  * Target		: data partition
@@ -337,6 +351,7 @@ Const* makeMaxConst(Oid consttype, int32 consttypmod, Oid constcollid)
 
     return cnst;
 }
+#endif /* FRONTEND_PARSER */
 
 /*
  * makeBoolExpr -
@@ -390,7 +405,11 @@ Alias* makeAlias(const char* aliasname, List* colnames)
 {
     Alias* a = makeNode(Alias);
 
+#ifndef FRONTEND_PARSER
     a->aliasname = pstrdup(aliasname);
+#else
+    a->aliasname = strdup(aliasname);
+#endif
     a->colnames = colnames;
 
     return a;
@@ -434,7 +453,7 @@ RangeVar* makeRangeVar(char* schemaname, char* relname, int location)
     r->partitionKeyValuesList = NIL;
     r->isbucket = false;
     r->buckets = NIL;
-
+    r->length = 0;
     return r;
 }
 
@@ -615,36 +634,9 @@ Param* makeParam(ParamKind paramkind, int paramid, Oid paramtype, int32 paramtyp
 
     return argp;
 }
-
+#ifndef FRONTEND_PARSER
 /*
- * makeColumnDef -
- * build a ColumnDef node to represent a simple column definition.
- *
- * Type and collation are specified by OID.
- * Other properties are all basic to start with.
- */
-ColumnDef* makeColumnDef(const char* colname, Oid typeOid, int32 typmod, Oid collOid)
-{
-    ColumnDef* n = makeNode(ColumnDef);
-
-    n->colname = pstrdup(colname);
-    n->typname = makeTypeNameFromOid(typeOid, typmod);
-    n->inhcount = 0;
-    n->is_local = true;
-    n->is_not_null = false;
-    n->is_from_type = false;
-    n->storage = 0;
-    n->raw_default = NULL;
-    n->cooked_default = NULL;
-    n->collClause = NULL;
-    n->collOid = collOid;
-    n->constraints = NIL;
-    n->fdwoptions = NIL;
-
-    return n;
-}
-
-/* makeIndexInfo
+ * makeIndexInfo
  *	  create an IndexInfo node
  */
 IndexInfo* makeIndexInfo(int numattrs, List* expressions, List* predicates, bool unique, bool isready, bool concurrent)
@@ -675,3 +667,4 @@ IndexInfo* makeIndexInfo(int numattrs, List* expressions, List* predicates, bool
 
     return n;
 }
+#endif

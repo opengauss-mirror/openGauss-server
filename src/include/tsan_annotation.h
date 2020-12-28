@@ -10,6 +10,8 @@ extern "C" {
     void AnnotateRWLockAcquired(char *f, int l, uintptr_t m, uintptr_t is_w);
     void AnnotateRWLockReleased(char *f, int l, uintptr_t m, uintptr_t is_w);
     void AnnotateBenignRaceSized(char *f, int l, uintptr_t m, uintptr_t size, char *desc);
+    void AnnotateReadBarrier();
+    void AnnotateWriteBarrier();
 }
 #define TsAnnotateHappensBefore(addr)      AnnotateHappensBefore(__FILE__, __LINE__, (uintptr_t)addr)
 #define TsAnnotateHappensAfter(addr)       AnnotateHappensAfter(__FILE__, __LINE__, (uintptr_t)addr)
@@ -18,6 +20,8 @@ extern "C" {
 #define TsAnnotateRWLockAcquired(m, is_w)  AnnotateRWLockAcquired(__FILE__, __LINE__, (uintptr_t)m, is_w)
 #define TsAnnotateRWLockReleased(m, is_w)  AnnotateRWLockReleased(__FILE__, __LINE__, (uintptr_t)m, is_w)
 #define TsAnnotateBenignRaceSized(m, size) AnnotateBenignRaceSized(__FILE__, __LINE__, (uintptr_t)m, size, NULL)
+#define TsAnnotateWriteBarrier()           AnnotateWriteBarrier()
+#define TsAnnotateReadBarrier()            AnnotateReadBarrier()
 #else
 #define TsAnnotateHappensBefore(addr)
 #define TsAnnotateHappensAfter(addr)
@@ -26,6 +30,8 @@ extern "C" {
 #define TsAnnotateRWLockAcquired(m, is_w)
 #define TsAnnotateRWLockReleased(m, is_w)
 #define TsAnnotateBenignRaceSized(m, size)
+#define TsAnnotateWriteBarrier()
+#define TsAnnotateReadBarrier()
 
 #endif /* endif ENABLE_THREAD_CHECK */
 

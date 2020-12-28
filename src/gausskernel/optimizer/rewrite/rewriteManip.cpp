@@ -324,8 +324,8 @@ static bool OffsetVarNodes_walker(Node* node, OffsetVarNodes_context* context)
         Var* var = (Var*)node;
 
         if (var->varlevelsup == (unsigned int)(context->sublevels_up)) {
-            var->varno += (unsigned int)(context->offset);
-            var->varnoold += (unsigned int)(context->offset);
+            var->varno += context->offset;
+            var->varnoold += context->offset;
         }
         return false;
     }
@@ -333,7 +333,7 @@ static bool OffsetVarNodes_walker(Node* node, OffsetVarNodes_context* context)
         CurrentOfExpr* cexpr = (CurrentOfExpr*)node;
 
         if (context->sublevels_up == 0)
-            cexpr->cvarno += (unsigned int)(context->offset);
+            cexpr->cvarno += context->offset;
         return false;
     }
     if (IsA(node, RangeTblRef)) {
@@ -363,14 +363,15 @@ static bool OffsetVarNodes_walker(Node* node, OffsetVarNodes_context* context)
         AppendRelInfo* appinfo = (AppendRelInfo*)node;
 
         if (context->sublevels_up == 0) {
-            appinfo->parent_relid += (unsigned int)(context->offset);
-            appinfo->child_relid += (unsigned int)(context->offset);
+            appinfo->parent_relid += context->offset;
+            appinfo->child_relid += context->offset;
         }
         /* fall through to examine children */
     }
     /* Shouldn't need to handle other planner auxiliary nodes here */
     AssertEreport(!IsA(node, PlanRowMark), MOD_OPT, "could not be planrowmark.");
     AssertEreport(!IsA(node, SpecialJoinInfo), MOD_OPT, "could not be SpecialJoinInfo.");
+    Assert(!IsA(node, LateralJoinInfo));
     AssertEreport(!IsA(node, PlaceHolderInfo), MOD_OPT, "could not be PlaceHolderInfo.");
     AssertEreport(!IsA(node, MinMaxAggInfo), MOD_OPT, "could not be MinMaxAggInfo.");
 
@@ -416,7 +417,7 @@ void OffsetVarNodes(Node* node, int offset, int sublevels_up)
             foreach (l, qry->rowMarks) {
                 RowMarkClause* rc = (RowMarkClause*)lfirst(l);
 
-                rc->rti += (unsigned int)(offset);
+                rc->rti += offset;
             }
         }
         (void)query_tree_walker(qry, (bool (*)())OffsetVarNodes_walker, (void*)&context, 0);
@@ -464,8 +465,8 @@ static bool ChangeVarNodes_walker(Node* node, ChangeVarNodes_context* context)
 
         if (var->varlevelsup == (unsigned int)(context->sublevels_up) &&
             var->varno == (unsigned int)(context->rt_index)) {
-            var->varno = (unsigned int)(context->new_index);
-            var->varnoold = (unsigned int)(context->new_index);
+            var->varno = context->new_index;
+            var->varnoold = context->new_index;
         }
         return false;
     }
@@ -473,7 +474,7 @@ static bool ChangeVarNodes_walker(Node* node, ChangeVarNodes_context* context)
         CurrentOfExpr* cexpr = (CurrentOfExpr*)node;
 
         if (context->sublevels_up == 0 && cexpr->cvarno == (unsigned int)(context->rt_index))
-            cexpr->cvarno = (unsigned int)(context->new_index);
+            cexpr->cvarno = context->new_index;
         return false;
     }
     if (IsA(node, RangeTblRef)) {
@@ -504,9 +505,9 @@ static bool ChangeVarNodes_walker(Node* node, ChangeVarNodes_context* context)
 
         if (context->sublevels_up == 0) {
             if (rowmark->rti == (unsigned int)(context->rt_index))
-                rowmark->rti = (unsigned int)(context->new_index);
+                rowmark->rti = context->new_index;
             if (rowmark->prti == (unsigned int)(context->rt_index))
-                rowmark->prti = (unsigned int)(context->new_index);
+                rowmark->prti = context->new_index;
         }
         return false;
     }
@@ -515,14 +516,15 @@ static bool ChangeVarNodes_walker(Node* node, ChangeVarNodes_context* context)
 
         if (context->sublevels_up == 0) {
             if (appinfo->parent_relid == (unsigned int)(context->rt_index))
-                appinfo->parent_relid = (unsigned int)(context->new_index);
+                appinfo->parent_relid = context->new_index;
             if (appinfo->child_relid == (unsigned int)(context->rt_index))
-                appinfo->child_relid = (unsigned int)(context->new_index);
+                appinfo->child_relid = context->new_index;
         }
         /* fall through to examine children */
     }
     /* Shouldn't need to handle other planner auxiliary nodes here */
     AssertEreport(!IsA(node, SpecialJoinInfo), MOD_OPT, "could not be SpecialJoinInfo.");
+    Assert(!IsA(node, LateralJoinInfo));
     AssertEreport(!IsA(node, PlaceHolderInfo), MOD_OPT, "could not be PlaceHolderInfo.");
     AssertEreport(!IsA(node, MinMaxAggInfo), MOD_OPT, "could not be MinMaxAggInfo.");
 
@@ -570,7 +572,7 @@ void ChangeVarNodes(Node* node, int rt_index, int new_index, int sublevels_up)
                 RowMarkClause* rc = (RowMarkClause*)lfirst(l);
 
                 if (rc->rti == (unsigned int)(rt_index))
-                    rc->rti = (unsigned int)(new_index);
+                    rc->rti = new_index;
             }
         }
         (void)query_tree_walker(qry, (bool (*)())ChangeVarNodes_walker, (void*)&context, 0);
@@ -624,7 +626,7 @@ static bool IncrementVarSublevelsUp_walker(Node* node, IncrementVarSublevelsUp_c
         Var* var = (Var*)node;
 
         if (var->varlevelsup >= (unsigned int)(context->min_sublevels_up))
-            var->varlevelsup += (unsigned int)(context->delta_sublevels_up);
+            var->varlevelsup += context->delta_sublevels_up;
         return false; /* done here */
     }
     if (IsA(node, CurrentOfExpr)) {
@@ -639,7 +641,7 @@ static bool IncrementVarSublevelsUp_walker(Node* node, IncrementVarSublevelsUp_c
         Aggref* agg = (Aggref*)node;
 
         if (agg->agglevelsup >= (unsigned int)(context->min_sublevels_up))
-            agg->agglevelsup += (unsigned int)(context->delta_sublevels_up);
+            agg->agglevelsup += context->delta_sublevels_up;
         /* fall through to recurse into argument */
     }
     if (IsA(node, GroupingFunc)) {
@@ -653,7 +655,7 @@ static bool IncrementVarSublevelsUp_walker(Node* node, IncrementVarSublevelsUp_c
         PlaceHolderVar* phv = (PlaceHolderVar*)node;
 
         if (phv->phlevelsup >= (unsigned int)(context->min_sublevels_up))
-            phv->phlevelsup += (unsigned int)(context->delta_sublevels_up);
+            phv->phlevelsup += context->delta_sublevels_up;
         /* fall through to recurse into argument */
     }
     if (IsA(node, RangeTblEntry)) {
@@ -661,7 +663,7 @@ static bool IncrementVarSublevelsUp_walker(Node* node, IncrementVarSublevelsUp_c
 
         if (rte->rtekind == RTE_CTE) {
             if (rte->ctelevelsup >= (unsigned int)(context->min_sublevels_up))
-                rte->ctelevelsup += (unsigned int)(context->delta_sublevels_up);
+                rte->ctelevelsup += context->delta_sublevels_up;
         }
         return false; /* allow range_table_walker to continue */
     }
@@ -754,6 +756,7 @@ static bool rangeTableEntry_used_walker(Node* node, rangeTableEntry_used_context
     AssertEreport(!IsA(node, PlaceHolderVar), MOD_OPT, "could not be PlaceHolderVar.");
     AssertEreport(!IsA(node, PlanRowMark), MOD_OPT, "could not be planrowmark.");
     AssertEreport(!IsA(node, SpecialJoinInfo), MOD_OPT, "could not be SpecialJoinInfo.");
+    Assert(!IsA(node, LateralJoinInfo));
     AssertEreport(!IsA(node, AppendRelInfo), MOD_OPT, "could not be AppendRelInfo.");
     AssertEreport(!IsA(node, PlaceHolderInfo), MOD_OPT, "could not be PlaceHolderInfo.");
     AssertEreport(!IsA(node, MinMaxAggInfo), MOD_OPT, "could not be MinMaxAggInfo.");
@@ -1049,8 +1052,7 @@ Node* replace_rte_variables_mutator(Node* node, replace_rte_variables_context* c
     if (IsA(node, Var)) {
         Var* var = (Var*)node;
 
-        if (var->varno == (unsigned int)context->target_varno
-            && var->varlevelsup == (unsigned int)context->sublevels_up) {
+        if (var->varno == (uint32)context->target_varno && var->varlevelsup == (uint32)context->sublevels_up) {
             /* Found a matching variable, make the substitution */
             Node* newnode = NULL;
 
@@ -1264,8 +1266,8 @@ static Node* ResolveNew_callback(Var* var, replace_rte_variables_context* contex
         if (rcon->event == CMD_UPDATE) {
             /* For update, just change unmatched var's varno */
             var = (Var*)copyObject(var);
-            var->varno = (unsigned int)(rcon->update_varno);
-            var->varnoold = (unsigned int)(rcon->update_varno);
+            var->varno = rcon->update_varno;
+            var->varnoold = rcon->update_varno;
             return (Node*)var;
         } else {
             /* Otherwise replace unmatched var with a null */
@@ -1285,7 +1287,7 @@ static Node* ResolveNew_callback(Var* var, replace_rte_variables_context* contex
 
         /* Must adjust varlevelsup if tlist item is from higher query */
         if (var->varlevelsup > 0)
-            IncrementVarSublevelsUp(newnode, (int)(var->varlevelsup), 0);
+            IncrementVarSublevelsUp(newnode, var->varlevelsup, 0);
 
         return newnode;
     }

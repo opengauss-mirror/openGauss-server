@@ -38,27 +38,27 @@ analyze vector_append_table_01;
 ----
 --- test 2: cased summarizd from user requirements(With Union and Using agg or unique node)
 ----
-explain (verbose, costs off, nodes off) 
+explain (verbose, costs off) 
 (select distinct col_int, col_int2, col_num from vector_append_table_01 where col_int<13) 
 union
 (select distinct col_int, col_int2, col_num from vector_append_table_01 where col_int>=13);
 
-explain (verbose, costs off, nodes off) 
+explain (verbose, costs off) 
 (select distinct col_int2, col_num from vector_append_table_01 where col_int2<23) 
 union
 (select distinct col_int2, col_num from vector_append_table_01 where col_int2>=23);
 
-explain (verbose, costs off, nodes off) 
+explain (verbose, costs off) 
 (select distinct col_int, col_int2, col_num from vector_append_table_01 where col_int<13 order by col_int) 
 union
 (select distinct col_int, col_int2, col_num from vector_append_table_01 where col_int>=13);
 
-explain (verbose, costs off, nodes off) 
+explain (verbose, costs off) 
 (select distinct col_int2, col_num from vector_append_table_01 where col_int2<23 order by col_int2) 
 union
 (select distinct col_int2, col_num from vector_append_table_01 where col_int2>=23);
 
-explain (verbose, costs off, nodes off) 
+explain (verbose, costs off) 
 (select distinct col_char, col_varchar from vector_append_table_01 where col_int2<23 order by col_char) 
 union
 (select distinct col_char, col_varchar from vector_append_table_01 where col_int2>=23)

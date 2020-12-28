@@ -249,7 +249,6 @@ Datum plpython_call_handler(PG_FUNCTION_ARGS)
     ErrorContextCallback plerrcontext;
 
     PyLock pyLock(&(g_plpy_t_context.Ply_LockLevel));
-    u_sess->deepsql_cxt.enable_ai_env = true;
 
     PG_TRY();
     {
@@ -278,7 +277,6 @@ Datum plpython_call_handler(PG_FUNCTION_ARGS)
     {
         pyLock.Reset();
         plpythonLock.unLock();
-        u_sess->deepsql_cxt.enable_ai_env = false;
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -306,14 +304,12 @@ Datum plpython_call_handler(PG_FUNCTION_ARGS)
                 AuditPlpythonFunction(funcoid, proc->proname, AUDIT_OK);
             }
         }
-        u_sess->deepsql_cxt.enable_ai_env = false;
     }
     PG_CATCH();
     {
         if (AUDIT_EXEC_ENABLED) {
             AuditPlpythonFunction(funcoid, proc->proname, AUDIT_FAILED);
         }
-        u_sess->deepsql_cxt.enable_ai_env = false;
         PLy_pop_execution_context();
         PyErr_Clear();
         pyLock.Reset();
@@ -333,11 +329,9 @@ Datum plpython_call_handler(PG_FUNCTION_ARGS)
     {
         pyLock.Reset();
         plpythonLock.unLock();
-        u_sess->deepsql_cxt.enable_ai_env = false;
         PG_RE_THROW();
     }
     PG_END_TRY();
-    u_sess->deepsql_cxt.enable_ai_env = false;
 
     return retval;
 }

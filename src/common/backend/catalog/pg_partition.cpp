@@ -27,9 +27,9 @@
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_partition.h"
 #include "pgxc/redistrib.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/lmgr.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "storage/sinval.h"
 #include "tcop/utility.h"
 #include "utils/acl.h"
@@ -37,7 +37,7 @@
 #include "utils/syscache.h"
 #include "access/genam.h"
 #include "utils/fmgroids.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "utils/snapmgr.h"
 
 void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, Oid new_part_id, int2vector* pkey,
@@ -592,9 +592,9 @@ static Oid getPartitionIndexFormData(Oid indexid, Oid partitionid, Form_pg_parti
     systable_endscan(scan);
     heap_close(pg_partition, AccessShareLock);
 
-    /* If drop index occur before this function and after pg_get_indexdef_partitions, */
-    /* the index has been deleted now. Ext. If drop patition occur, the partition might be deleted.
-     * Drop partition just use RowExclusiveLock for parellel performance. */
+    /*If drop index occur before this function and after pg_get_indexdef_partitions, the index has been deleted now. */
+    /*Ext. If drop patition occur, the partition might be deleted. Drop partition just use RowExclusiveLock for parellel
+     * performance.*/
     if (!found) {
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_OBJECT),

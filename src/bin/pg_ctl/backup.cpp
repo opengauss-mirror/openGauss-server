@@ -43,8 +43,11 @@
 
 #include "bin/elog.h"
 #include "file_ops.h"
+#include "catalog/catalog.h"
 
+#ifdef ENABLE_MOT
 #include "fetchmot.h"
+#endif
 
 /* Maximum number of digit in integer. Used to allocate memory to copy int to string */
 #define MAX_INT_SIZE 20
@@ -95,11 +98,11 @@ static uint64 totaldone = 0;
 
 /* Pipe to communicate with background wal receiver process */
 #ifndef WIN32
-static int bgpipe[2] = {-1, -1};
+int bgpipe[2] = {-1, -1};
 #endif
 
 /* Handle to child process */
-static pid_t bgchild = -1;
+pid_t bgchild = -1;
 
 volatile sig_atomic_t build_interrupted = false;
 
@@ -128,7 +131,7 @@ static XLogRecPtr read_full_backup_label(
 static int replace_node_name(char* sSrc, const char* sMatchStr, const char* sReplaceStr);
 static void show_full_build_process(const char* errmg);
 static void backup_dw_file(const char* target_dir);
-static void get_xlog_location(char (&xlog_location)[MAXPGPATH]);
+void get_xlog_location(char (&xlog_location)[MAXPGPATH]);
 
 /*
  * tblspaceDirectory is used for saving the table space directory created by
@@ -273,6 +276,7 @@ static int tblspaceIndex = 0;
         disconnect_and_exit(1);                                                      \
     }                                                                                \
     rcm = strncpy_s(remotenodename, MAXPGPATH, rname, MAXPGPATH - 1);                \
+    remotenodename[MAXPGPATH - 1] = '\0';                                          \
     securec_check_c(rcm, "", "");
 
 /* get LSN from remote node */
@@ -485,8 +489,8 @@ static int LogStreamerMain(logstreamer_param* param)
  * The background stream will use its own database connection so we can
  * stream the logfile in parallel with the backups.
  */
-static void StartLogStreamer(
-    char* startpos, uint32 timeline, char* sysidentifier, const char* xloglocation, uint primaryTerm = 0)
+void StartLogStreamer(
+    char* startpos, uint32 timeline, char* sysidentifier, const char* xloglocation, uint primaryTerm)
 {
     logstreamer_param* param = NULL;
 
@@ -501,6 +505,8 @@ static void StartLogStreamer(
     /* Convert the starting position */
     if (sscanf_s(startpos, "%X/%X", &hi, &lo) != 2) {
         pg_log(PG_WARNING, _(" invalid format of xlog location: %s.\n"), startpos);
+        free(param);
+        param = NULL;
         disconnect_and_exit(1);
     }
     param->startptr = (((uint64)hi) << 32) | lo;
@@ -513,6 +519,8 @@ static void StartLogStreamer(
     /* Create our background pipe */
     if (pipe(bgpipe) < 0) {
         pg_log(PG_WARNING, _(" invalid format of xlog location: %s.\n"), startpos);
+        PQfreemem(param);
+        param = NULL;
         disconnect_and_exit(1);
     }
 #endif
@@ -542,6 +550,8 @@ static void StartLogStreamer(
         exit(LogStreamerMain(param));
     } else if (bgchild < 0) {
         pg_log(PG_WARNING, _(" could not create background process: %s.\n"), strerror(errno));
+        PQfreemem(param);
+        param = NULL;
         disconnect_and_exit(1);
     }
 
@@ -552,12 +562,14 @@ static void StartLogStreamer(
     bgchild = _beginthreadex(NULL, 0, (void*)LogStreamerMain, param, 0, NULL);
     if (bgchild == 0) {
         pg_log(PG_WARNING, _(" could not create background thread: %s.\n"), strerror(errno));
+        PQfreemem(param);
+        param = NULL;
         disconnect_and_exit(1);
     }
 #endif
 
     if (param->bgconn != NULL) {
-        free(param->bgconn);
+        PQfinish(param->bgconn);
         param->bgconn = NULL;
     }
     free(param);
@@ -593,6 +605,10 @@ static void verify_dir_is_empty_or_create(char* dirname)
             /*
              * Exists, not empty
              */
+            if (strcmp(progname, "gs_rewind") == 0) {
+                pg_log(PG_WARNING, _("in gs_rewind proecess,so no need remove.\n"));
+                return;
+            }
             pg_log(PG_WARNING, _("directory \"%s\" exists but is not empty,so remove and recreate it\n"), dirname);
 
             if (!rmtree(dirname, true)) {
@@ -798,6 +814,10 @@ static void ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             /*
              * All files are padded up to 512 bytes
              */
+            if (current_len_left < 0 || current_len_left > INT_MAX - 511) {
+                pg_log(PG_WARNING, _("current_len_left is invalid\n"));
+                disconnect_and_exit(1);
+            }
             current_padding = ((current_len_left + 511) & ~511) - current_len_left;
 
             /*
@@ -1035,19 +1055,6 @@ static void BaseBackup(const char* dirname, uint32 term)
     /* save connection info from command line or postgresql file */
     get_conninfo(conf_file);
 
-    /* for CN Build operation the following checking WOULD BE bypassed. */
-    if (conn_str == NULL) {
-        /* check all the required build parameters */
-        CheckBuildParamters(standby_connect_timeout, standby_recv_timeout, term);
-    }
-
-    show_full_build_process("check connect to server success");
-
-    /* delete data/ and  pg_tblspc/, but keep .config */
-    delete_datadir(dirname);
-
-    show_full_build_process("clear old target dir success");
-
     /* find a available conn */
     streamConn = check_and_conn(standby_connect_timeout, standby_recv_timeout, term);
     if (streamConn == NULL) {
@@ -1065,6 +1072,21 @@ static void BaseBackup(const char* dirname, uint32 term)
     }
 
     show_full_build_process("create build tag file success");
+
+    /* delete data/ and  pg_tblspc/, but keep .config */
+    delete_datadir(dirname);
+
+    show_full_build_process("clear old target dir success");
+
+    /* create  build tag file again*/
+    ret = CreateBuildtagFile(buildstart_file);
+    if (ret == FALSE) {
+        pg_log(PG_WARNING, _("could not create file again %s.\n"), buildstart_file);
+
+        disconnect_and_exit(1);
+    }
+
+    show_full_build_process("create build tag file again success");
 
     /*
      * Run IDENTIFY_SYSTEM so we can get the timeline
@@ -1295,7 +1317,6 @@ static void BaseBackup(const char* dirname, uint32 term)
     get_value = PQgetvalue(res, 0, 0);
     if (get_value == NULL) {
         pg_log(PG_WARNING, _("get xlog end point failed\n"));
-        disconnect_and_exit(1);
     }
     rc = strncpy_s(xlogend, sizeof(xlogend), get_value, strlen(get_value));
     securec_check_c(rc, "", "");
@@ -1317,6 +1338,7 @@ static void BaseBackup(const char* dirname, uint32 term)
      */
     PQclear(res);
 
+#ifdef ENABLE_MOT
     res = PQgetResult(streamConn);
     if (res != NULL) {
         /*
@@ -1335,6 +1357,7 @@ static void BaseBackup(const char* dirname, uint32 term)
     if (motChkptDir) {
         free(motChkptDir);
     }
+#endif
 
     if (bgchild > 0) {
 #ifndef WIN32
@@ -1583,7 +1606,6 @@ static XLogRecPtr read_full_backup_label(
     retVal = realpath(backup_file, Lrealpath);
     if (retVal == NULL && Lrealpath[0] == '\0') {
         pg_log(PG_WARNING, _(" realpath failed!\n"));
-        disconnect_and_exit(1);
     }
     lfp = fopen(Lrealpath, "r");
     if (lfp == NULL) {
@@ -1591,7 +1613,7 @@ static XLogRecPtr read_full_backup_label(
         disconnect_and_exit(1);
     }
 
-    if (fscanf_s(lfp, "START SYSIDENTIFER: %19s\n", sysid, sysid_len) != 1) {
+    if (fscanf_s(lfp, "START SYSIDENTIFER: %20s\n", sysid, sysid_len) != 1) {
         pg_log(PG_WARNING, _(" invalid sysidentifier data in file \"%s\"\n"), FULL_BACKUP_LABEL_FILE);
         fclose(lfp);
         lfp = NULL;
@@ -1599,7 +1621,7 @@ static XLogRecPtr read_full_backup_label(
     }
     sysid[sysid_len - 1] = '\0';
 
-    if (fscanf_s(lfp, "START TIMELINE: %19s\n", tline, tline_len) != 1) {
+    if (fscanf_s(lfp, "START TIMELINE: %20s\n", tline, tline_len) != 1) {
         pg_log(PG_WARNING, _(" invalid timeline data in file \"%s\"\n"), FULL_BACKUP_LABEL_FILE);
         fclose(lfp);
         lfp = NULL;
@@ -1823,17 +1845,15 @@ static void show_full_build_process(const char* errmg)
  */
 static void backup_dw_file(const char* target_dir)
 {
-/* the max real path length in linux is 4096, adapt this for realpath func */
-#define MAX_REALPATH_LEN 4096
     int rc;
     int fd = -1;
-    char dw_file_path[MAXPGPATH];
-    char real_file_path[MAX_REALPATH_LEN + 1] = {0};
+    char dw_file_path[PATH_MAX];
+    char real_file_path[PATH_MAX + 1] = {0};
     char* buf = NULL;
     char* unaligned_buf = NULL;
 
     /* Delete the dw file, if it exists. */
-    rc = snprintf_s(dw_file_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", target_dir, DW_FILE_NAME);
+    rc = snprintf_s(dw_file_path, PATH_MAX, PATH_MAX - 1, "%s/%s", target_dir, DW_FILE_NAME);
     securec_check_ss_c(rc, "\0", "\0");
     if (realpath(dw_file_path, real_file_path) == NULL) {
         if (real_file_path[0] == '\0') {
@@ -1843,11 +1863,11 @@ static void backup_dw_file(const char* target_dir)
     }
     delete_target_file(real_file_path);
 
-    rc = memset_s(real_file_path, (MAX_REALPATH_LEN + 1), 0, (MAX_REALPATH_LEN + 1));
+    rc = memset_s(real_file_path, (PATH_MAX + 1), 0, (PATH_MAX + 1));
     securec_check_c(rc, "\0", "\0");
 
     /* Delete the dw build file, if it exists. */
-    rc = snprintf_s(dw_file_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", target_dir, DW_BUILD_FILE_NAME);
+    rc = snprintf_s(dw_file_path, PATH_MAX, PATH_MAX - 1, "%s/%s", target_dir, DW_BUILD_FILE_NAME);
     securec_check_ss_c(rc, "\0", "\0");
     if (realpath(dw_file_path, real_file_path) == NULL) {
         if (real_file_path[0] == '\0') {
@@ -1885,7 +1905,7 @@ static void backup_dw_file(const char* target_dir)
     close(fd);
 }
 
-static void get_xlog_location(char (&xlog_location)[MAXPGPATH])
+void get_xlog_location(char (&xlog_location)[MAXPGPATH])
 {
     /*
      * check if user define xlog dir using symbolic link,

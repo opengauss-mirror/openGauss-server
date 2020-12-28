@@ -1,0 +1,529 @@
+set enable_global_stats = false;
+set enable_nestloop=off;
+set enable_mergejoin=off;
+set cstore_insert_mode='main'; --保证数据进入HDFS
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+\o explain_result.txt
+--构造HDFS外表，对应数据生成如下：
+/*create table bf(i2 int2, i4 int4, i8 int8, f4 float4, f8 float8, v1 varchar(10), v2 varchar, c1 char(10), c2 char, t1 text, t2 clob, dec decimal);
+stride1: 包含1-1000（重复）和9001~10000的数据
+insert into bf values(generate_series(1,1000), generate_series(1,1000), generate_series(1,1000), 0.01+generate_series(1,1000), 0.5+generate_series(1,1000), 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), '1', 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), 0.95+generate_series(1,1000));
+insert into bf values(generate_series(1,1000), generate_series(1,1000), generate_series(1,1000), 0.01+generate_series(1,1000), 0.5+generate_series(1,1000), 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), '1', 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), 0.95+generate_series(1,1000));
+insert into bf values(generate_series(1,1000), generate_series(1,1000), generate_series(1,1000), 0.01+generate_series(1,1000), 0.5+generate_series(1,1000), 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), '1', 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), 0.95+generate_series(1,1000));
+insert into bf values(generate_series(1,1000), generate_series(1,1000), generate_series(1,1000), 0.01+generate_series(1,1000), 0.5+generate_series(1,1000), 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), '1', 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), 0.95+generate_series(1,1000));
+insert into bf values(generate_series(1,1000), generate_series(1,1000), generate_series(1,1000), 0.01+generate_series(1,1000), 0.5+generate_series(1,1000), 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), '1', 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), 0.95+generate_series(1,1000));
+insert into bf values(generate_series(9001,10000), generate_series(9001,10000), generate_series(9001,10000), 0.01+generate_series(9001,10000), 0.5+generate_series(9001,10000), 'b'||generate_series(9001,10000), 'b'||generate_series(9001,10000), 'b'||generate_series(9001,10000), '9', 'b'||generate_series(9001,10000), 'b'||generate_series(9001,10000), 0.95+generate_series(9001,10000));
+insert into bf values(generate_series(1,1000), generate_series(1,1000), generate_series(1,1000), 0.01+generate_series(1,1000), 0.5+generate_series(1,1000), 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), '1', 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), 0.95+generate_series(1,1000));
+insert into bf values(generate_series(1,1000), generate_series(1,1000), generate_series(1,1000), 0.01+generate_series(1,1000), 0.5+generate_series(1,1000), 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), '1', 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), 0.95+generate_series(1,1000));
+insert into bf values(generate_series(1,1000), generate_series(1,1000), generate_series(1,1000), 0.01+generate_series(1,1000), 0.5+generate_series(1,1000), 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), '1', 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), 0.95+generate_series(1,1000));
+insert into bf values(generate_series(1,1000), generate_series(1,1000), generate_series(1,1000), 0.01+generate_series(1,1000), 0.5+generate_series(1,1000), 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), '1', 'a'||generate_series(1,1000), 'a'||generate_series(1,1000), 0.95+generate_series(1,1000));
+
+stride2:包含1001-2000（重复）和9001~10000的数据
+insert into bf values(generate_series(1001,2000), generate_series(1001,2000), generate_series(1001,2000), 0.01+generate_series(1001,2000), 0.5+generate_series(1001,2000), 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), '2', 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), 0.95+generate_series(1001,2000));
+insert into bf values(generate_series(1001,2000), generate_series(1001,2000), generate_series(1001,2000), 0.01+generate_series(1001,2000), 0.5+generate_series(1001,2000), 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), '2', 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), 0.95+generate_series(1001,2000));
+insert into bf values(generate_series(1001,2000), generate_series(1001,2000), generate_series(1001,2000), 0.01+generate_series(1001,2000), 0.5+generate_series(1001,2000), 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), '2', 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), 0.95+generate_series(1001,2000));
+insert into bf values(generate_series(1001,2000), generate_series(1001,2000), generate_series(1001,2000), 0.01+generate_series(1001,2000), 0.5+generate_series(1001,2000), 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), '2', 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), 0.95+generate_series(1001,2000));
+insert into bf values(generate_series(1001,2000), generate_series(1001,2000), generate_series(1001,2000), 0.01+generate_series(1001,2000), 0.5+generate_series(1001,2000), 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), '2', 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), 0.95+generate_series(1001,2000));
+insert into bf values(generate_series(1001,2000), generate_series(1001,2000), generate_series(1001,2000), 0.01+generate_series(1001,2000), 0.5+generate_series(1001,2000), 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), '2', 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), 0.95+generate_series(1001,2000));
+insert into bf values(generate_series(1001,2000), generate_series(1001,2000), generate_series(1001,2000), 0.01+generate_series(1001,2000), 0.5+generate_series(1001,2000), 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), '2', 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), 0.95+generate_series(1001,2000));
+insert into bf values(generate_series(1001,2000), generate_series(1001,2000), generate_series(1001,2000), 0.01+generate_series(1001,2000), 0.5+generate_series(1001,2000), 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), '2', 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), 0.95+generate_series(1001,2000));
+insert into bf values(generate_series(1001,2000), generate_series(1001,2000), generate_series(1001,2000), 0.01+generate_series(1001,2000), 0.5+generate_series(1001,2000), 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), '2', 'a'||generate_series(1001,2000), 'a'||generate_series(1001,2000), 0.95+generate_series(1001,2000));
+insert into bf values(generate_series(9001,10000), generate_series(9001,10000), generate_series(9001,10000), 0.01+generate_series(9001,10000), 0.5+generate_series(9001,10000), 'b'||generate_series(9001,10000), 'b'||generate_series(9001,10000), 'b'||generate_series(9001,10000), '9', 'b'||generate_series(9001,10000), 'b'||generate_series(9001,10000), 0.95+generate_series(9001,10000));
+
+stride3:包含2001-3000（重复）和9001~10000的数据
+insert into bf values(generate_series(9001,10000), generate_series(9001,10000), generate_series(9001,10000), 0.01+generate_series(9001,10000), 0.5+generate_series(9001,10000), 'b'||generate_series(9001,10000), 'b'||generate_series(9001,10000), 'b'||generate_series(9001,10000), '9', 'b'||generate_series(9001,10000), 'b'||generate_series(9001,10000), 0.95+generate_series(9001,10000));
+insert into bf values(generate_series(2001,3000), generate_series(2001,3000), generate_series(2001,3000), 0.01+generate_series(2001,3000), 0.5+generate_series(2001,3000), 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), '3', 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), 0.95+generate_series(2001,3000));
+insert into bf values(generate_series(2001,3000), generate_series(2001,3000), generate_series(2001,3000), 0.01+generate_series(2001,3000), 0.5+generate_series(2001,3000), 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), '3', 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), 0.95+generate_series(2001,3000));
+insert into bf values(generate_series(2001,3000), generate_series(2001,3000), generate_series(2001,3000), 0.01+generate_series(2001,3000), 0.5+generate_series(2001,3000), 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), '3', 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), 0.95+generate_series(2001,3000));
+insert into bf values(generate_series(2001,3000), generate_series(2001,3000), generate_series(2001,3000), 0.01+generate_series(2001,3000), 0.5+generate_series(2001,3000), 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), '3', 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), 0.95+generate_series(2001,3000));
+insert into bf values(generate_series(2001,3000), generate_series(2001,3000), generate_series(2001,3000), 0.01+generate_series(2001,3000), 0.5+generate_series(2001,3000), 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), '3', 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), 0.95+generate_series(2001,3000));
+insert into bf values(generate_series(2001,3000), generate_series(2001,3000), generate_series(2001,3000), 0.01+generate_series(2001,3000), 0.5+generate_series(2001,3000), 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), '3', 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), 0.95+generate_series(2001,3000));
+insert into bf values(generate_series(2001,3000), generate_series(2001,3000), generate_series(2001,3000), 0.01+generate_series(2001,3000), 0.5+generate_series(2001,3000), 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), '3', 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), 0.95+generate_series(2001,3000));
+insert into bf values(generate_series(2001,3000), generate_series(2001,3000), generate_series(2001,3000), 0.01+generate_series(2001,3000), 0.5+generate_series(2001,3000), 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), '3', 'a'||generate_series(2001,3000), 'a'||generate_series(2001,3000), 0.95+generate_series(2001,3000));
+insert into bf values(generate_series(2001,2997), generate_series(2001,2997), generate_series(2001,2997), 0.01+generate_series(2001,2997), 0.5+generate_series(2001,2997), 'a'||generate_series(2001,2997), 'a'||generate_series(2001,2997), 'a'||generate_series(2001,2997), '3', 'a'||generate_series(2001,2997), 'a'||generate_series(2001,2997), 0.95+generate_series(2001,2997));
+
+insert into bf values(null, null, null, null, null, null, null, null, null, null, null, null);
+insert into bf values(null, null, null, null, null, null, null, null, null, null, null, null);
+insert into bf values(null, null, null, null, null, null, null, null, null, null, null, null);
+
+copy bf to '/mpp/hoholy/bf' with delimiter '|';
+analyze bf;
+
+hadoop fs -copyFromLocal /mpp/hoholy/bf /lhl/;
+
+hive:
+drop table bf_text;
+create table bf_text(i2 smallint, i4 int, i8 bigint, f4 float, f8 double, v1 varchar(10), v2 string, c1 char(10), c2 char(1), t1 string, t2 string, dec decimal)row format delimited
+fields terminated by '|' lines terminated by '\n'
+stored as textfile;
+load data inpath '/lhl/bf' into table bf_text;
+
+drop table bf;
+create table bf(i2 smallint, i4 int, i8 bigint, f4 float, f8 double, v1 varchar(10), v2 string, c1 char(10), c2 char(1), t1 string, t2 string, dec decimal)
+stored as orc tblproperties ("orc.compress"="NONE","orc.stripe.size"="64000000","orc.bloom.filter.columns"="i2,i4,i8,f4,f8,v1,v2,c1,c2,t1,t2,dec");
+insert into bf select * from bf_text;*/
+--构造HDFS外表，包含所有bf支持类型的列，也包括一个bf不支持类型的列
+drop foreign table if exists bf_fdw;
+ERROR:  invalid byte sequence for encoding "UTF8": 0xb0
+create foreign table bf_fdw(i2 int2, i4 int4, i8 int8, f4 float4, f8 float8, v1 varchar(10), v2 varchar, c1 char(10), c2 char, t1 text, t2 clob, dec decimal)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/bf')
+distribute by roundrobin;
+drop foreign table if exists bf_fdw1;
+NOTICE:  foreign table "bf_fdw1" does not exist, skipping
+create foreign table bf_fdw1(i2 int2, i4 int4, i8 int8, f4 float4, f8 float8, v1 varchar(10), v2 varchar, c1 char(10), c2 char, t1 text, t2 clob, dec decimal(10,0))
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/bf')
+distribute by roundrobin;
+select count(*) from bf_fdw1 where dec<10;
+drop foreign table bf_fdw1;
+--构造HDFS表
+drop table if exists bf_dfs;
+NOTICE:  table "bf_dfs" does not exist, skipping
+create table bf_dfs(h1 int, i2 int2, i4 int4, i8 int8, f4 float4, f8 float8, v1 varchar(10), v2 varchar, c1 char(10), c2 char, t1 text, t2 clob, dec decimal) tablespace hdfs_ts;
+insert into bf_dfs select 1,* from bf_fdw;
+analyze bf_fdw;
+analyze bf_dfs;
+--构造列存复制表，用于和HDFS(外)表join，验证bf在vechashjoin中的作用
+drop table if exists bf_col;
+NOTICE:  table "bf_col" does not exist, skipping
+create table bf_col(h1 int, i2 int2, i4 int4, i8 int8, f4 float4, f8 float8, v1 varchar(10), v2 varchar, c1 char(10), c2 char, t1 text, dec decimal)  with(orientation=column, autovacuum_enabled = off) distribute by replication;
+insert into bf_col values(1, 9002, 9002, 9002, 9002.01, 9002.5, 'b9002', 'b9002', 'b9002', '9', 'b9002', 9002.95);
+insert into bf_col values(2, 1002, 1002, 1002, 1002.01, 1002.5, 'a1002', 'a1002', 'a1002', '1', 'a1002', 1002.95);
+insert into bf_col values(3, 2002, 2002, 2002, 2002.01, 2002.5, 'a2002', 'a2002', 'a2002', '3', 'a2002', 2002.95);
+insert into bf_col values(4, 902, 902, 902, 902.01, 902.5, 'a902', 'a902', 'a902', '2', 'a902', 902.95);
+insert into bf_col values(5, 3002, 3002, 3002, 3002.01, 3002.5, 'a3002', 'a3002', 'a3002', '4', 'a3002', 3002.95);
+--bf生效，inner侧产生的bloomfilter有多条记录
+/*set explain_perf_mode='pretty';
+set enable_codegen=off;
+set work_mem='100MB';
+explain performance select count(*) from bf_col,bf_fdw where bf_col.i4=bf_fdw.i4 and bf_col.h1<3;
+reset explain_perf_mode;
+reset enable_codegen;
+reset work_mem;*/
+select count(*) from bf_col,bf_fdw where bf_col.i4=bf_fdw.i4 and bf_col.h1<3;
+--构造HDFS分区外表
+drop foreign table if exists part_1;
+NOTICE:  foreign table "part_1" does not exist, skipping
+create foreign table part_1 (a int, b varchar(20), c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_1')
+distribute by roundrobin
+partition by (b) automapped;
+set explain_perf_mode='pretty';
+explain (costs off) select * from part_1 where b is null;
+reset explain_perf_mode;
+--构造列存复制表，用于和HDFS分区外表join,验证动态分区剪枝
+drop table if exists bf_part_col;
+NOTICE:  table "bf_part_col" does not exist, skipping
+create table bf_part_col(p1 int, p2 varchar(20)) with(orientation=column) distribute by replication;
+insert into bf_part_col values(1, '123');
+insert into bf_part_col values(2, null);
+insert into bf_part_col values(3, '456');
+--构造列存复制表，数据量大于1w条，小于5w条，用于和HDFS外表join，验证bf不生效场景
+drop table if exists bf_row2;
+NOTICE:  table "bf_row2" does not exist, skipping
+drop table if exists bf_col2;
+NOTICE:  table "bf_col2" does not exist, skipping
+create table bf_row2(a int) distribute by replication;
+insert into bf_row2 values(generate_series(1001,1500));
+insert into bf_row2 values(generate_series(10501,20001));
+create table bf_col2(a int) with(orientation=column) distribute by replication;
+insert into bf_col2 select * from bf_row2;
+--构造列存复制表，数据量大于5w条，用于和HDFS表join，验证bf不生效场景
+drop table if exists bf_row3;
+NOTICE:  table "bf_row3" does not exist, skipping
+drop table if exists bf_col3;
+NOTICE:  table "bf_col3" does not exist, skipping
+create table bf_row3(a int) distribute by replication;
+insert into bf_row3 values(generate_series(1001,1500));
+insert into bf_row3 values(generate_series(10501,60001));
+create table bf_col3(a int) with(orientation=column) distribute by replication;
+insert into bf_col3 select * from bf_row3;
+--点查测试用例
+--不生效场景：
+--存储中无BloomFilter信息，BloomFilter无法生效
+explain performance select * from bf_dfs where t1='a3002';
+--外表，带bloomfilter，不带等值where条件
+explain performance select * from bf_fdw;
+--外表，带bloomfilter，带非等值where条件
+explain performance select * from bf_fdw where i2>10;
+--外表，带bloomfilter，带等值where条件，虽然clob类型支持bloomfitler，但是由于clob类型谓词条件包含textout表达式，故无法下推，导致bf无法生效
+explain performance select * from bf_fdw where t2='a1002';
+--外表，带bloomfilter，带等值where条件，由于目前decimal不支持bloomfitler，故bf无法生效
+explain performance select * from bf_fdw where dec=9002.95;
+--正常场景：
+--int2类型
+--外表，带bloomfilter，带等值where条件，bf无法过滤stride，min/max也无法过滤stride
+explain performance select * from bf_fdw where i2=9002;
+--外表，带bloomfilter，带等值where条件，bf过滤中间位置的1个stride（由于数据离散型，中间这个stride无法被min/max过滤），min/max过滤掉最后的一个stride
+explain performance select * from bf_fdw where i2=1002;
+--外表，带bloomfilter，带等值where条件，bf过滤从起始位置开始的2个stride，min/max无法过滤
+explain performance select * from bf_fdw where i2=2002;
+--外表，带bloomfilter，带等值where条件，由于min/max在bf之前过滤掉两个stride
+explain performance select * from bf_fdw where i2=902;
+--外表，带bloomfilter，带等值where条件，bf过滤掉所有的stride，min/max无法过滤
+explain performance select * from bf_fdw where i2=3002;
+--int4类型
+--外表，带bloomfilter，带等值where条件，bf无法过滤stride，min/max也无法过滤stride
+explain performance select * from bf_fdw where i4=9002;
+--外表，带bloomfilter，带等值where条件，bf过滤中间位置的1个stride（由于数据离散型，中间这个stride无法被min/max过滤），min/max过滤掉最后的一个stride
+explain performance select * from bf_fdw where i4=1002;
+--外表，带bloomfilter，带等值where条件，bf过滤从起始位置开始的2个stride，min/max无法过滤
+explain performance select * from bf_fdw where i4=2002;
+--外表，带bloomfilter，带等值where条件，由于min/max在bf之前过滤掉两个stride
+explain performance select * from bf_fdw where i4=902;
+--外表，带bloomfilter，带等值where条件，bf过滤掉所有的stride，min/max无法过滤
+explain performance select * from bf_fdw where i4=3002;
+--int8类型
+--外表，带bloomfilter，带等值where条件，bf无法过滤stride，min/max也无法过滤stride
+explain performance select * from bf_fdw where i8=9002;
+--外表，带bloomfilter，带等值where条件，bf过滤中间位置的1个stride（由于数据离散型，中间这个stride无法被min/max过滤），min/max过滤掉最后的一个stride
+explain performance select * from bf_fdw where i8=1002;
+--外表，带bloomfilter，带等值where条件，bf过滤从起始位置开始的2个stride，min/max无法过滤
+explain performance select * from bf_fdw where i8=2002;
+--外表，带bloomfilter，带等值where条件，由于min/max在bf之前过滤掉两个stride
+explain performance select * from bf_fdw where i8=902;
+--外表，带bloomfilter，带等值where条件，bf过滤掉所有的stride，min/max无法过滤
+explain performance select * from bf_fdw where i8=3002;
+--float类型
+--外表，带bloomfilter，带等值where条件，bf无法过滤stride，min/max也无法过滤stride
+explain performance select * from bf_fdw where f4=9002.01::float4;
+--外表，带bloomfilter，带等值where条件，bf过滤中间位置的1个stride（由于数据离散型，中间这个stride无法被min/max过滤），min/max过滤掉最后的一个stride
+explain performance select * from bf_fdw where f4=1002.01::float4;
+--外表，带bloomfilter，带等值where条件，bf过滤从起始位置开始的2个stride，min/max无法过滤
+explain performance select * from bf_fdw where f4=2002.01::float4;
+--外表，带bloomfilter，带等值where条件，由于min/max在bf之前过滤掉两个stride
+explain performance select * from bf_fdw where f4=902.01::float4;
+--外表，带bloomfilter，带等值where条件，bf过滤掉所有的stride，min/max无法过滤
+explain performance select * from bf_fdw where f4=3002.01::float4;
+--double类型
+--外表，带bloomfilter，带等值where条件，bf无法过滤stride，min/max也无法过滤stride
+explain performance select * from bf_fdw where f8=9002.5;
+--外表，带bloomfilter，带等值where条件，bf过滤中间位置的1个stride（由于数据离散型，中间这个stride无法被min/max过滤），min/max过滤掉最后的一个stride
+explain performance select * from bf_fdw where f8=1002.5;
+--外表，带bloomfilter，带等值where条件，bf过滤从起始位置开始的2个stride，min/max无法过滤
+explain performance select * from bf_fdw where f8=2002.5;
+--外表，带bloomfilter，带等值where条件，由于min/max在bf之前过滤掉两个stride
+explain performance select * from bf_fdw where f8=902.5;
+--外表，带bloomfilter，带等值where条件，bf过滤掉所有的stride，min/max无法过滤
+explain performance select * from bf_fdw where f8=3002.5;
+--varchar(10)类型
+--外表，带bloomfilter，带等值where条件，每个stride中都有9002，bf无法过滤stride，min/max也无法过滤stride
+explain performance select * from bf_fdw where v1='b9002';
+--外表，带bloomfilter，带等值where条件，bf过滤中间位置的1个stride（由于数据离散型，中间这个stride无法被min/max过滤），min/max过滤掉最后的一个stride
+explain performance select * from bf_fdw where v1='a1002';
+--外表，带bloomfilter，带等值where条件，bf过滤从起始位置开始的2个stride，min/max无法过滤
+explain performance select * from bf_fdw where v1='a2002';
+--外表，带bloomfilter，带等值where条件，bf过滤掉最后2个stride，对于字符串类型，min/max过滤失败（字符串比较截取长度取小的那个）；
+explain performance select * from bf_fdw where v1='a902';
+--外表，带bloomfilter，带等值where条件，bf过滤掉所有的stride，min/max无法过滤
+explain performance select * from bf_fdw where v1='a3002';
+--varchar类型（不带精度）
+--外表，带bloomfilter，带等值where条件，每个stride中都有9002，bf无法过滤stride，min/max也无法过滤stride
+explain performance select * from bf_fdw where v2='b9002';
+--外表，带bloomfilter，带等值where条件，bf过滤中间位置的1个stride（由于数据离散型，中间这个stride无法被min/max过滤），min/max过滤掉最后的一个stride
+explain performance select * from bf_fdw where v2='a1002';
+--外表，带bloomfilter，带等值where条件，bf过滤从起始位置开始的2个stride，min/max无法过滤
+explain performance select * from bf_fdw where v2='a2002';
+--外表，带bloomfilter，带等值where条件，bf过滤掉最后2个stride，对于字符串类型，min/max过滤失败（字符串比较截取长度取小的那个）；
+explain performance select * from bf_fdw where v2='a902';
+--外表，带bloomfilter，带等值where条件，bf过滤掉所有的stride，min/max无法过滤
+explain performance select * from bf_fdw where v2='a3002';
+--char(10)类型
+--外表，带bloomfilter，带等值where条件，每个stride中都有9002，bf无法过滤stride，min/max也无法过滤stride
+explain performance select * from bf_fdw where c1='b9002';
+--外表，带bloomfilter，带等值where条件，bf过滤中间位置的1个stride（由于数据离散型，中间这个stride无法被min/max过滤），min/max过滤掉最后的一个stride
+explain performance select * from bf_fdw where c1='a1002';
+--外表，带bloomfilter，带等值where条件，bf过滤从起始位置开始的2个stride，min/max无法过滤
+explain performance select * from bf_fdw where c1='a2002';
+--外表，带bloomfilter，带等值where条件，bf过滤掉最后2个stride，对于字符串类型，min/max过滤失败（字符串比较截取长度取小的那个）；
+explain performance select * from bf_fdw where c1='a902';
+--外表，带bloomfilter，带等值where条件，bf过滤掉所有的stride，min/max无法过滤
+explain performance select * from bf_fdw where c1='a3002';
+--char类型
+--外表，带bloomfilter，带等值where条件，每个stride中都有9002，bf无法过滤stride，min/max也无法过滤stride
+explain performance select * from bf_fdw where c2='9';
+--外表，带bloomfilter，带等值where条件，min/max过滤掉最后两个stride
+explain performance select * from bf_fdw where c2='1';
+--外表，带bloomfilter，带等值where条件，bf过滤从起始位置开始的2个stride，min/max无法过滤
+explain performance select * from bf_fdw where c2='3';
+--外表，带bloomfilter，带等值where条件，bf过滤掉第1个stride，min/max过滤掉最后一个stride
+explain performance select * from bf_fdw where c2='2';
+--外表，带bloomfilter，带等值where条件，bf过滤掉所有的stride，min/max无法过滤
+explain performance select * from bf_fdw where c2='4';
+--text类型
+--外表，带bloomfilter，带等值where条件，每个stride中都有9002，bf无法过滤stride，min/max也无法过滤stride
+explain performance select * from bf_fdw where t1='b9002';
+--外表，带bloomfilter，带等值where条件，bf过滤中间位置的1个stride（由于数据离散型，中间这个stride无法被min/max过滤），min/max过滤掉最后的一个stride
+explain performance select * from bf_fdw where t1='a1002';
+--外表，带bloomfilter，带等值where条件，bf过滤从起始位置开始的2个stride，min/max无法过滤
+explain performance select * from bf_fdw where t1='a2002';
+--外表，带bloomfilter，带等值where条件，bf过滤掉最后2个stride，对于字符串类型，min/max过滤失败（字符串比较截取长度取小的那个）；
+explain performance select * from bf_fdw where t1='a902';
+--外表，带bloomfilter，带等值where条件，bf过滤掉所有的stride，min/max无法过滤
+explain performance select * from bf_fdw where t1='a3002';
+--hashjoin测试用例
+--不生效场景
+--join类型不匹配，bf不生效
+explain performance select * from bf_fdw, bf_col where h1=1 and bf_fdw.i2=bf_col.i4;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--join类型不支持bf
+explain performance select * from bf_fdw, bf_col where h1=1 and bf_fdw.dec=bf_col.dec;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--vechashjoin中outer侧有stream算子，bf不生效
+explain performance select * from bf_fdw, bf_dfs where h1=1 and bf_fdw.dec=bf_dfs.dec;
+--join列上有等值谓词条件，bf对vechahsjoin不生效（因为谓词条件会被下推到两侧，产生点查的bf）
+explain performance select * from bf_fdw, bf_col where bf_fdw.i2=1002 and bf_fdw.i2=bf_col.i2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--复制内表和hdfs外表join，复制内表产生的hash表元素数量超过1w(不超过1w的情况见正常场景)
+explain performance select * from bf_fdw, bf_col2 where bf_col2.a=bf_fdw.i4;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--复制内表和hdfs表join，复制内表产生的hash表元素数量超过5w(不超过5w的情况见正常场景)
+set work_mem='100MB';
+explain performance select * from bf_dfs, bf_col3 where bf_col3.a=bf_dfs.i4;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+reset work_mem;
+--正常场景
+--分区剪枝
+--动态分区剪枝生效，剪掉一个分区
+explain performance select * from bf_part_col, part_1 where part_1.b=bf_part_col.p2 and p1=1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--动态分区剪枝生效，由于在空值上做连接，所有分区被剪掉（尽管part_1中b有空值）
+explain performance select * from bf_part_col, part_1 where part_1.b=bf_part_col.p2 and p1=2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--动态分区剪枝生效，剪掉所有分区
+explain performance select * from bf_part_col, part_1 where part_1.b=bf_part_col.p2 and p1=3;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--连接列不在分区列上，动态分区剪枝不生效, 但bf仍然可以过滤数据
+explain performance select * from bf_part_col, part_1 where part_1.a=bf_part_col.p1 and p2='123';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--int2类型
+--bf生效，bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=1 and bf_fdw.i2=bf_col.i2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤 + min/max 过滤
+explain performance select * from bf_fdw, bf_col where h1=2 and bf_fdw.i2=bf_col.i2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=3 and bf_fdw.i2=bf_col.i2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf行过滤 + min/max过滤
+explain performance select * from bf_fdw, bf_col where h1=4 and bf_fdw.i2=bf_col.i2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤掉所有数据
+explain performance select * from bf_fdw, bf_col where h1=5 and bf_fdw.i2=bf_col.i2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--int4类型
+--bf生效，bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=1 and bf_fdw.i4=bf_col.i4;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤 + min/max 过滤
+explain performance select * from bf_fdw, bf_col where h1=2 and bf_fdw.i4=bf_col.i4;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=3 and bf_fdw.i4=bf_col.i4;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf行过滤 + min/max过滤
+explain performance select * from bf_fdw, bf_col where h1=4 and bf_fdw.i4=bf_col.i4;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤掉所有数据
+explain performance select * from bf_fdw, bf_col where h1=5 and bf_fdw.i4=bf_col.i4;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--int8类型
+--bf生效，bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=1 and bf_fdw.i8=bf_col.i8;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤 + min/max 过滤
+explain performance select * from bf_fdw, bf_col where h1=2 and bf_fdw.i8=bf_col.i8;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=3 and bf_fdw.i8=bf_col.i8;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf行过滤 + min/max过滤
+explain performance select * from bf_fdw, bf_col where h1=4 and bf_fdw.i8=bf_col.i8;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤掉所有数据
+explain performance select * from bf_fdw, bf_col where h1=5 and bf_fdw.i8=bf_col.i8;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--float4类型
+--bf生效，bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=1 and bf_fdw.f4=bf_col.f4;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤 + min/max 过滤
+explain performance select * from bf_fdw, bf_col where h1=2 and bf_fdw.f4=bf_col.f4;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=3 and bf_fdw.f4=bf_col.f4;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf行过滤 + min/max过滤
+explain performance select * from bf_fdw, bf_col where h1=4 and bf_fdw.f4=bf_col.f4;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤掉所有数据
+explain performance select * from bf_fdw, bf_col where h1=5 and bf_fdw.f4=bf_col.f4;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--float8类型
+--bf生效，bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=1 and bf_fdw.f8=bf_col.f8;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤 + min/max 过滤
+explain performance select * from bf_fdw, bf_col where h1=2 and bf_fdw.f8=bf_col.f8;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=3 and bf_fdw.f8=bf_col.f8;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf行过滤 + min/max过滤
+explain performance select * from bf_fdw, bf_col where h1=4 and bf_fdw.f8=bf_col.f8;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤掉所有数据
+explain performance select * from bf_fdw, bf_col where h1=5 and bf_fdw.f8=bf_col.f8;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--varchar(10)类型
+--bf生效，bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=1 and bf_fdw.v1=bf_col.v1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤 + min/max 过滤
+explain performance select * from bf_fdw, bf_col where h1=2 and bf_fdw.v1=bf_col.v1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=3 and bf_fdw.v1=bf_col.v1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=4 and bf_fdw.v1=bf_col.v1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤掉所有数据
+explain performance select * from bf_fdw, bf_col where h1=5 and bf_fdw.v1=bf_col.v1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--varchar类型
+--bf生效，bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=1 and bf_fdw.v2=bf_col.v2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤 + min/max 过滤
+explain performance select * from bf_fdw, bf_col where h1=2 and bf_fdw.v2=bf_col.v2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=3 and bf_fdw.v2=bf_col.v2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=4 and bf_fdw.v2=bf_col.v2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤掉所有数据
+explain performance select * from bf_fdw, bf_col where h1=5 and bf_fdw.v2=bf_col.v2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--char(10)类型
+--bf生效，bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=1 and bf_fdw.c1=bf_col.c1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤 + min/max 过滤
+explain performance select * from bf_fdw, bf_col where h1=2 and bf_fdw.c1=bf_col.c1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=3 and bf_fdw.c1=bf_col.c1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=4 and bf_fdw.c1=bf_col.c1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤掉所有数据
+explain performance select * from bf_fdw, bf_col where h1=5 and bf_fdw.c1=bf_col.c1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--char类型
+--bf生效，bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=1 and bf_fdw.c2=bf_col.c2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf行过滤 + min/max 过滤
+explain performance select * from bf_fdw, bf_col where h1=2 and bf_fdw.c2=bf_col.c2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=3 and bf_fdw.c2=bf_col.c2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤 + min/max过滤
+explain performance select * from bf_fdw, bf_col where h1=4 and bf_fdw.c2=bf_col.c2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤掉所有数据
+explain performance select * from bf_fdw, bf_col where h1=5 and bf_fdw.c2=bf_col.c2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--text类型
+--bf生效，bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=1 and bf_fdw.t1=bf_col.t1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤 + min/max 过滤
+explain performance select * from bf_fdw, bf_col where h1=2 and bf_fdw.t1=bf_col.t1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=3 and bf_fdw.t1=bf_col.t1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤 + bf行过滤
+explain performance select * from bf_fdw, bf_col where h1=4 and bf_fdw.t1=bf_col.t1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--bf生效，bf粗过滤掉所有数据
+explain performance select * from bf_fdw, bf_col where h1=5 and bf_fdw.t1=bf_col.t1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--clean
+drop foreign table if exists bf_fdw;
+drop table if exists bf_dfs;
+drop table if exists bf_col;
+drop foreign table if exists part_1;
+drop table if exists bf_part_col;
+drop table if exists bf_row2;
+drop table if exists bf_col2;
+drop table if exists bf_row3;
+drop table if exists bf_col3;
+drop server hdfs_server cascade;
+reset cstore_insert_mode;
+\o

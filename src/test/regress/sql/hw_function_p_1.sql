@@ -150,7 +150,7 @@ select to_char(5, 'FMRN') as result from dual;
 select to_char(485, 'RN') as result from dual;
 select to_char(485, 'FMRN') as result from dual;
 
-/* adapt a's date/time format 'FF'/'ff' */
+/* adapt A db's date/time format 'FF'/'ff' */
 select to_char('2012-08-10 15:09:40.123456789'::timestamp without time zone,'HH24:MI:SS.FF') from dual;
 select to_char('2012-08-10 15:09:40.123456789'::timestamp without time zone,'HH24:MI:SS.ff') from dual;
 select to_char('2012-08-10 15:09:40.123456789'::timestamp with time zone,'HH24:MI:SS.FF') from dual;
@@ -206,7 +206,7 @@ select nvl(123::float8,321::float8) from dual;
 select nvl('2001-01-01 01:01:01.3654'::date,'2012-08-02 15:57:54.6365'::date) from dual;
 select nvl('2001-01-01 01:01:01.3654'::timestamp,'2012-08-02 15:57:54.6365'::timestamp) from dual;
 
--- modify NVL display to a's style "NVL" instead of "coalesce"
+-- modify NVL display to A db's style "NVL" instead of "coalesce"
 CREATE TABLE NVL_01(COL_INTEGER1 INTEGER,COL_INTEGER2 INTEGER);
 INSERT INTO NVL_01 VALUES(1,2);
 SELECT NVL(COL_INTEGER1,COL_INTEGER2) FROM NVL_01;

@@ -55,10 +55,11 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/tableam.h"
 #include "commands/tablespace.h"
 #include "executor/executor.h"
 #include "pgstat.h"
-#include "storage/buffile.h"
+#include "storage/buf/buffile.h"
 #include "utils/memprot.h"
 #include "utils/memutils.h"
 #include "utils/resowner.h"
@@ -426,8 +427,17 @@ void tuplestore_set_eflags(Tuplestorestate* state, int eflags)
     }        
 
     state->readptrs[0].eflags = eflags;
-    for (i = 1; i < state->readptrcount; i++)
-        eflags |= state->readptrs[i].eflags;
+    if (state->readptrs[0].eflags < 0) {
+        ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), 
+                        errmsg("number need be a positive number in bitwise operation")));
+    }
+    for (i = 1; i < state->readptrcount; i++) {
+        if (state->readptrs[i].eflags < 0) {
+            ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), 
+                            errmsg("number need be a positive number in bitwise operation")));
+        }
+        eflags = (unsigned int)eflags | (unsigned int)state->readptrs[i].eflags;
+    }
     state->eflags = eflags;
 }
 
@@ -445,7 +455,7 @@ int tuplestore_alloc_read_pointer(Tuplestorestate* state, int eflags)
 {
     /* Check for possible increase of requirements */
     if (state->status != TSS_INMEM || state->memtupcount != 0) {
-        if ((state->eflags | eflags) != state->eflags)
+        if ((int)((unsigned int)state->eflags | (unsigned int)eflags) != state->eflags)
             ereport(ERROR,
                 (errmodule(MOD_EXECUTOR),
                     (errcode(ERRCODE_CHECK_VIOLATION), errmsg("too late to require new tuplestore eflags"))));
@@ -463,7 +473,13 @@ int tuplestore_alloc_read_pointer(Tuplestorestate* state, int eflags)
     state->readptrs[state->readptrcount] = state->readptrs[0];
     state->readptrs[state->readptrcount].eflags = eflags;
 
-    state->eflags |= eflags;
+    if (state->eflags < 0)
+        ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                        errmsg("number need be a positive number in bitwise operation")));
+    if (eflags < 0)
+        ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                        errmsg("number need be a positive number in bitwise operation")));
+    state->eflags = (unsigned int)state->eflags | (unsigned int)eflags;
 
     return state->readptrcount++;
 }
@@ -750,7 +766,7 @@ noalloc:
  * tuplestore_puttupleslot() is a convenience routine to collect data from
  * a TupleTableSlot without an extra copy operation.
  */
-void tuplestore_puttupleslot(Tuplestorestate* state, TupleTableSlot* slot)
+void tuplestore_puttupleslot(Tuplestorestate* state, TupleTableSlot* slot, bool need_transform_anyarray)
 {
     MinimalTuple tuple;
     MemoryContext oldcxt = MemoryContextSwitchTo(state->context);
@@ -758,7 +774,7 @@ void tuplestore_puttupleslot(Tuplestorestate* state, TupleTableSlot* slot)
     /*
      * Form a MinimalTuple in working memory
      */
-    tuple = ExecCopySlotMinimalTuple(slot);
+    tuple = ExecCopySlotMinimalTuple(slot, need_transform_anyarray);
     if (tuplestore_in_memory(state))
         state->width += tuple->t_len;
     USEMEM(state, GetMemoryChunkSpace(tuple));
@@ -796,7 +812,7 @@ void tuplestore_putvalues(Tuplestorestate* state, TupleDesc tdesc, Datum* values
     MinimalTuple tuple;
     MemoryContext oldcxt = MemoryContextSwitchTo(state->context);
 
-    tuple = heap_form_minimal_tuple(tdesc, values, isnull);
+    tuple = tableam_tops_form_minimal_tuple(tdesc, values, isnull, NULL, HEAP_TUPLE);
     if (tuplestore_in_memory(state))
         state->width += tuple->t_len;
     USEMEM(state, GetMemoryChunkSpace(tuple));
@@ -1104,7 +1120,7 @@ bool tuplestore_gettupleslot(Tuplestorestate* state, bool forward, bool copy, Tu
 
     if (tuple) {
         if (copy && !should_free) {
-            tuple = heap_copy_minimal_tuple(tuple);
+            tuple = tableam_tops_copy_minimal_tuple(tuple);
             should_free = true;
         }
         ExecStoreMinimalTuple(tuple, slot, should_free);
@@ -1224,8 +1240,15 @@ void tuplestore_copy_read_pointer(Tuplestorestate* state, int srcptr, int destpt
 
         *dptr = *sptr;
         eflags = state->readptrs[0].eflags;
-        for (i = 1; i < state->readptrcount; i++)
-            eflags |= state->readptrs[i].eflags;
+        if (eflags < 0)
+            ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                            errmsg("number need be a positive number in bitwise operation")));
+        for (i = 1; i < state->readptrcount; i++) {
+            if (state->readptrs[i].eflags < 0)
+                ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                                errmsg("number need be a positive number in bitwise operation")));
+            eflags = (unsigned int)eflags | (unsigned int)state->readptrs[i].eflags;
+        }
         state->eflags = eflags;
     } else
         *dptr = *sptr;
@@ -1385,7 +1408,7 @@ bool tuplestore_in_memory(Tuplestorestate* state)
 
 static unsigned int getlen(Tuplestorestate* state, bool eofOK)
 {
-    unsigned int len;
+    unsigned int len = 0;
     size_t nbytes;
 
     nbytes = BufFileRead(state->myfile, (void*)&len, sizeof(len));

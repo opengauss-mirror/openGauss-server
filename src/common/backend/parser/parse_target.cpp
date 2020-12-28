@@ -477,6 +477,18 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, char* colname, int a
         }
 
         if (expr == NULL) {
+            bool invalid_encrypted_column = 
+                ((attrtype == BYTEAWITHOUTORDERWITHEQUALCOLOID || attrtype == BYTEAWITHOUTORDERCOLOID) &&
+                coerce_to_target_type(pstate, orig_expr, type_id, attrtypmod, -1, COERCION_ASSIGNMENT,
+                    COERCE_IMPLICIT_CAST, -1));
+            if (invalid_encrypted_column) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_ENCRYPTED_COLUMN_DATA),
+                    errmsg("column \"%s\" is of type %s"
+                    " but expression is of type %s",
+                    colname, format_type_be(attrtype), format_type_be(type_id)),
+                    errhint("You will need to rewrite or cast the expression."),
+                    parser_errposition(pstate, exprLocation(orig_expr))));
+            }
             ereport(ERROR,
                 (errcode(ERRCODE_DATATYPE_MISMATCH),
                     errmsg("column \"%s\" is of type %s"
@@ -486,7 +498,7 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, char* colname, int a
                         format_type_be(type_id)),
                     errhint("You will need to rewrite or cast the expression."),
                     parser_errposition(pstate, exprLocation(orig_expr))));
-        }
+		}
     }
 
     ELOG_FIELD_NAME_END;
@@ -684,6 +696,7 @@ static Node* transformAssignmentIndirection(ParseState* pstate, Node* basenode, 
     }
 
     /* base case: just coerce RHS to match target type ID */
+
     result = coerce_to_target_type(
         pstate, rhs, exprType(rhs), targetTypeId, targetTypMod, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
     if (result == NULL) {
@@ -807,6 +820,11 @@ List* checkInsertTargets(ParseState* pstate, List* cols, List** attrnos)
             if (attr[i]->attisdropped) {
                 continue;
             }
+            /* If the hidden column in timeseries relation, skip it */
+            if (TsRelWithImplDistColumn(attr, i) && RelationIsTsStore(pstate->p_target_relation)) {
+                continue;
+            }
+
             col = makeNode(ResTarget);
             col->name = pstrdup(NameStr(attr[i]->attname));
             col->indirection = NIL;
@@ -947,8 +965,7 @@ static List* ExpandColumnRefStar(ParseState* pstate, ColumnRef* cref, bool targe
                 /*
                  * We check the catalog name and then ignore it.
                  */
-                const char* dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-                if (!dbname || strcmp(catname, dbname) != 0) {
+                if (strcmp(catname, get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId, false)) != 0) {
                     crserr = CRSERR_WRONG_DB;
                     break;
                 }
@@ -971,6 +988,7 @@ static List* ExpandColumnRefStar(ParseState* pstate, ColumnRef* cref, bool targe
          */
         if (pstate->p_post_columnref_hook != NULL) {
             Node* node = NULL;
+
             node = (*pstate->p_post_columnref_hook)(pstate, cref, (Node*)rte);
             if (node != NULL) {
                 if (rte != NULL) {
@@ -1042,8 +1060,12 @@ static List* ExpandAllTables(ParseState* pstate, int location)
     pstate->p_star_start = lappend_int(pstate->p_star_start, pstate->p_next_resno);
     pstate->p_star_only = lappend_int(pstate->p_star_only, 1);
     foreach (l, pstate->p_varnamespace) {
-        RangeTblEntry* rte = (RangeTblEntry*)lfirst(l);
+        ParseNamespaceItem *nsitem = (ParseNamespaceItem *)lfirst(l);
+        RangeTblEntry *rte = nsitem->p_rte;
         int rtindex = RTERangeTablePosn(pstate, rte, NULL);
+
+        /* Should not have any lateral-only items when parsing targetlist */
+        Assert(!nsitem->p_lateral_only);
 
         target = list_concat(target, expandRelAttrs(pstate, rte, rtindex, 0, location));
     }
@@ -1095,7 +1117,7 @@ static List* ExpandSingleTable(ParseState* pstate, RangeTblEntry* rte, int locat
     if (targetlist) {
         List* te_list = NIL;
 
-        /* mark flags for single table just like  foo.* */
+        /*mark flags for single table just like  foo.* */
         pstate->p_star_start = lappend_int(pstate->p_star_start, pstate->p_next_resno);
         pstate->p_star_only = lappend_int(pstate->p_star_only, -1);
 
@@ -1179,8 +1201,13 @@ static List* ExpandRowReference(ParseState* pstate, Node* expr, bool targetlist)
         tupleDesc = expandRecordVariable(pstate, (Var*)expr, 0);
     } else if (get_expr_result_type(expr, NULL, &tupleDesc) != TYPEFUNC_COMPOSITE) {
         tupleDesc = lookup_rowtype_tupdesc_copy(exprType(expr), exprTypmod(expr));
+	}
+
+    if (unlikely(tupleDesc == NULL)) {
+        ereport(ERROR, 
+            (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
+                errmsg("tupleDesc should not be null")));
     }
-    AssertEreport(tupleDesc, MOD_OPT, "");
 
     /* Generate a list of references to the individual fields */
     numAttrs = tupleDesc->natts;
@@ -1355,6 +1382,7 @@ TupleDesc expandRecordVariable(ParseState* pstate, Var* var, int levelsup)
                     mypstate.parentParseState = pstate;
                     mypstate.p_rtable = ((Query*)cte->ctequery)->rtable;
                     /* don't bother filling the rest of the fake pstate */
+
                     return expandRecordVariable(&mypstate, (Var*)expr, 0);
                 }
                 /* else fall through to inspect the expression */
@@ -1539,7 +1567,7 @@ static int FigureColnameInternal(Node* node, char** name)
             return 2;
         case T_CoalesceExpr:
             /* make coalesce() act like a regular function */
-            // modify NVL display to a's style "NVL" instead of "COALESCE"
+            // modify NVL display to A db's style "NVL" instead of "COALESCE"
             if (((CoalesceExpr*)node)->isnvl) {
                 *name = "nvl";
             } else {

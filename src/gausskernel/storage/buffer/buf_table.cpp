@@ -23,13 +23,13 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "storage/bufmgr.h"
-#include "storage/buf_internals.h"
+#include "storage/buf/bufmgr.h"
+#include "storage/buf/buf_internals.h"
 #include "utils/dynahash.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/storage_gstrace.h"
 
-extern uint32 hashquickany(uint32 seed, register const unsigned char* data, register int len);
+extern uint32 hashquickany(uint32 seed, register const unsigned char *data, register int len);
 /* entry for buffer lookup hashtable */
 typedef struct {
     BufferTag key; /* Tag of a disk page */
@@ -55,15 +55,15 @@ void InitBufTable(int size)
 
     /* assume no locking is needed yet
      *
-     * BufferTag maps to Buffer 
+     * BufferTag maps to Buffer
      */
     info.keysize = sizeof(BufferTag);
     info.entrysize = sizeof(BufferLookupEnt);
     info.hash = tag_hash;
     info.num_partitions = NUM_BUFFER_PARTITIONS;
 
-    t_thrd.storage_cxt.SharedBufHash =
-        ShmemInitHash("Shared Buffer Lookup Table", size, size, &info, HASH_ELEM | HASH_FUNCTION | HASH_PARTITION);
+    t_thrd.storage_cxt.SharedBufHash = ShmemInitHash("Shared Buffer Lookup Table", size, size, &info,
+                                                     HASH_ELEM | HASH_FUNCTION | HASH_PARTITION);
 }
 
 /*
@@ -75,9 +75,9 @@ void InitBufTable(int size)
  * in order to determine which buffer partition to lock, and we don't want
  * to do the hash computation twice (hash_any is a bit slow).
  */
-uint32 BufTableHashCode(BufferTag* tagPtr)
+uint32 BufTableHashCode(BufferTag *tagPtr)
 {
-    return hashquickany(0xFFFFFFFF, (unsigned char*)tagPtr, sizeof(BufferTag));
+    return hashquickany(0xFFFFFFFF, (unsigned char *)tagPtr, sizeof(BufferTag));
 }
 
 /*
@@ -86,13 +86,11 @@ uint32 BufTableHashCode(BufferTag* tagPtr)
  *
  * Caller must hold at least share lock on BufMappingLock for tag's partition
  */
-int BufTableLookup(BufferTag* tag, uint32 hashcode)
+int BufTableLookup(BufferTag *tag, uint32 hashcode)
 {
-    BufferLookupEnt* result = NULL;
+    BufferLookupEnt *result = NULL;
 
-    gstrace_entry(GS_TRC_ID_BufTableLookup);
-    result = (BufferLookupEnt*)buf_hash_operate<HASH_FIND>(t_thrd.storage_cxt.SharedBufHash, tag, hashcode, NULL);
-    gstrace_exit(GS_TRC_ID_BufTableLookup);
+    result = (BufferLookupEnt *)buf_hash_operate<HASH_FIND>(t_thrd.storage_cxt.SharedBufHash, tag, hashcode, NULL);
 
     if (SECUREC_UNLIKELY(result == NULL)) {
         return -1;
@@ -111,15 +109,15 @@ int BufTableLookup(BufferTag* tag, uint32 hashcode)
  *
  * Caller must hold exclusive lock on BufMappingLock for tag's partition
  */
-int BufTableInsert(BufferTag* tag, uint32 hashcode, int buf_id)
+int BufTableInsert(BufferTag *tag, uint32 hashcode, int buf_id)
 {
-    BufferLookupEnt* result = NULL;
+    BufferLookupEnt *result = NULL;
     bool found = false;
 
-    Assert(buf_id >= 0);               /* -1 is reserved for not-in-table */
+    Assert(buf_id >= 0);            /* -1 is reserved for not-in-table */
     Assert(tag->blockNum != P_NEW); /* invalid tag */
 
-    result = (BufferLookupEnt*)buf_hash_operate<HASH_ENTER>(t_thrd.storage_cxt.SharedBufHash, tag, hashcode, &found);
+    result = (BufferLookupEnt *)buf_hash_operate<HASH_ENTER>(t_thrd.storage_cxt.SharedBufHash, tag, hashcode, &found);
 
     if (found) { /* found something already in the table */
         return result->id;
@@ -136,14 +134,13 @@ int BufTableInsert(BufferTag* tag, uint32 hashcode, int buf_id)
  *
  * Caller must hold exclusive lock on BufMappingLock for tag's partition
  */
-void BufTableDelete(BufferTag* tag, uint32 hashcode)
+void BufTableDelete(BufferTag *tag, uint32 hashcode)
 {
-    BufferLookupEnt* result = NULL;
+    BufferLookupEnt *result = NULL;
 
-    result = (BufferLookupEnt*)buf_hash_operate<HASH_REMOVE>(t_thrd.storage_cxt.SharedBufHash, tag, hashcode, NULL);
+    result = (BufferLookupEnt *)buf_hash_operate<HASH_REMOVE>(t_thrd.storage_cxt.SharedBufHash, tag, hashcode, NULL);
 
     if (result == NULL) { /* shouldn't happen */
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), (errmsg("shared buffer hash table corrupted."))));
     }
 }
-

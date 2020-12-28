@@ -21,7 +21,7 @@
  *
  * -------------------------------------------------------------------------
  */
-#include "storage/lwlock_be.h"
+#include "storage/lock/lwlock_be.h"
 #include "pgstat.h"
 
 /*

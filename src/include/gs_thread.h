@@ -12,11 +12,11 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- * 
+ *
  * gs_thread.h
  *        Exports from src/port/gs_thread.c.
- * 
- * 
+ *
+ *
  * IDENTIFICATION
  *        src/include/gs_thread.h
  *
@@ -30,6 +30,7 @@
 
 #ifdef WIN32
 #include <winsock2.h>
+#define _WINSOCKAPI_
 #include <windows.h>
 #else
 #include <pthread.h>
@@ -53,11 +54,12 @@ typedef struct gs_thread_t {
 #endif
 
 typedef enum knl_thread_role {
-    MASTER = 0,
+    MASTER_THREAD = 0,
     WORKER = 1,
     THREADPOOL_WORKER = 2,
     THREADPOOL_LISTENER,
     THREADPOOL_SCHEDULER,
+    THREADPOOL_STREAM,
     STREAM_WORKER,
     AUTOVACUUM_LAUNCHER,
     AUTOVACUUM_WORKER,
@@ -67,7 +69,7 @@ typedef enum knl_thread_role {
     WLM_MONITOR,
     WLM_ARBITER,
     WLM_CPMONITOR,
-    AUDIT,
+    AUDITOR,
     PGSTAT,
     SYSLOGGER,
     RPC_WORKER,
@@ -83,9 +85,11 @@ typedef enum knl_thread_role {
     BGWRITER,
     PERCENTILE_WORKER,
     SNAPSHOT_WORKER,
+    ASH_WORKER,
+    TRACK_STMT_WORKER,
+    TRACK_STMT_CLEANER,
     CHECKPOINT_THREAD,
     WALWRITER,
-    WALWRITERAUXILIARY,
     WALRECEIVER,
     WALRECWRITE,
     DATARECIVER,
@@ -98,8 +102,18 @@ typedef enum knl_thread_role {
     COMM_RECEIVER,
     COMM_AUXILIARY,
     COMM_POOLER_CLEAN,
-    BACKGROUND_WORKER,
-    // should be last valid thread.
+    CSNMIN_SYNC,
+    BARRIER_CREATOR,
+    TS_COMPACTION,
+    TS_COMPACTION_CONSUMER,
+    TS_COMPACTION_AUXILIAY,
+    STREAMING_BACKEND,
+    STREAMING_ROUTER_BACKEND,
+    STREAMING_WORKER_BACKEND,
+    STREAMING_COLLECTOR_BACKEND,
+    STREAMING_QUEUE_BACKEND,
+    STREAMING_REAPER_BACKEND,
+    /* should be last valid thread. */
     THREAD_ENTRY_BOUND,
 
     NO_SUBROLE,
@@ -108,7 +122,6 @@ typedef enum knl_thread_role {
     WAL_STANDBY_SENDER, /* Am I cascading WAL to another standby ? */
     WAL_DB_SENDER,
     TOP_CONSUMER,
-    BACKGROUND_LEADER,
 } knl_thread_role;
 
 /*
@@ -123,6 +136,7 @@ typedef struct knl_thread_arg {
     knl_thread_role role;
     char* save_para;
     void* payload;
+    void* t_thrd;
     union {
         struct syslog_thread {
             int syslog_handle;
@@ -131,6 +145,13 @@ typedef struct knl_thread_arg {
 } knl_thread_arg;
 
 typedef int (*GaussdbThreadEntry)(knl_thread_arg* arg);
+
+typedef struct ThreadMetaData {
+    GaussdbThreadEntry func;
+    knl_thread_role    role;
+    const char*        thr_name; /* keep strlen(thr_name) < 16 */
+    const char*        thr_long_name;
+} ThreadMetaData;
 
 /*
  * A generic holder to keep all necessary arguments passed to generic
@@ -168,9 +189,9 @@ extern ThreadArg* gs_thread_get_args_slot(void);
 extern void gs_thread_get_name(char** name_thread, char** argv, int argc);
 
 extern void ThreadExitCXX(int code);
+extern int ShowThreadName(const char* name);
 
 typedef void (*uuid_struct_destroy_hook_type)(int which);
 extern THR_LOCAL uuid_struct_destroy_hook_type uuid_struct_destroy_hook;
 
 #endif /*GS_THREAD_H_ */
-

@@ -1,0 +1,443 @@
+--1.do not forbid 'like table' for partitioned table anymore
+--2.'like table including partition' clause can not appear with 'partition by' clause
+--3.'like table including partition': src table is a table, but a non-partitioned table
+--4.'like table including partition': 2 src tablles, and they are partitioned table
+--5.'like table including partition': 2 src tablles, and one is partitioned table, the other is non-partitioned table
+--6.'like table including partition': all leggal range partition key data type
+--1.do not forbid 'like table' for partitioned table anymore
+create table partition_table_like_non_part_table (c1 int);
+create table partition_table_like_part_table (like partition_table_like_non_part_table, c2 text)
+partition by range (c1)
+(
+	partition p1_partition_table_like_part_table values less than (10),
+	partition p2_partition_table_like_part_table values less than (20),
+	partition p3_partition_table_like_part_table values less than (30)
+);
+--examine the resulting table
+select relname, parttype, rangenum, partstrategy, partkey, boundaries, reltablespace from pg_partition
+where parentid = (select oid from pg_class where relname = 'partition_table_like_part_table') order by 1;
+              relname               | parttype | rangenum | partstrategy | partkey | boundaries | reltablespace 
+------------------------------------+----------+----------+--------------+---------+------------+---------------
+ p1_partition_table_like_part_table | p        |        0 | r            |         | {10}       |             0
+ p2_partition_table_like_part_table | p        |        0 | r            |         | {20}       |             0
+ p3_partition_table_like_part_table | p        |        0 | r            |         | {30}       |             0
+ partition_table_like_part_table    | r        |        0 | r            | 1       |            |             0
+(4 rows)
+
+--clean up
+drop table partition_table_like_non_part_table;
+drop table partition_table_like_part_table;
+--2.'like table including partition' clause can not appear with 'partition by' clause
+create table partition_table_like_src_part_table (c1 int)
+partition by range (c1)
+(
+	partition p1_partition_table_like_src_part_table values less than (10),
+	partition p2_partition_table_like_src_part_table values less than (20),
+	partition p3_partition_table_like_src_part_table values less than (30)
+);
+-- if specify 'including partition', create failed
+create table partition_table_like_target_part_table (like partition_table_like_src_part_table including partition, c2 text)
+partition by range (c1)
+(
+	partition p1_partition_table_like_target_part_table values less than (10),
+	partition p2_partition_table_like_target_part_table values less than (20),
+	partition p3_partition_table_like_target_part_table values less than (30)
+);
+ERROR:  unsupport "like clause including partition" for partitioned table
+DETAIL:  use either "like clause including partition" or "partition by" clause
+-- if not specify 'including partition', create ok
+create table partition_table_like_target_part_table (like partition_table_like_src_part_table, c2 text)
+partition by range (c1)
+(
+	partition p1_partition_table_like_target_part_table values less than (10),
+	partition p2_partition_table_like_target_part_table values less than (20),
+	partition p3_partition_table_like_target_part_table values less than (30)
+);
+--examine the resulting table
+select relname, parttype, rangenum, partstrategy, partkey, boundaries, reltablespace from pg_partition
+where parentid = (select oid from pg_class where relname = 'partition_table_like_target_part_table') order by 1;
+                  relname                  | parttype | rangenum | partstrategy | partkey | boundaries | reltablespace 
+-------------------------------------------+----------+----------+--------------+---------+------------+---------------
+ p1_partition_table_like_target_part_table | p        |        0 | r            |         | {10}       |             0
+ p2_partition_table_like_target_part_table | p        |        0 | r            |         | {20}       |             0
+ p3_partition_table_like_target_part_table | p        |        0 | r            |         | {30}       |             0
+ partition_table_like_target_part_table    | r        |        0 | r            | 1       |            |             0
+(4 rows)
+
+--clean up
+drop table partition_table_like_src_part_table;
+drop table partition_table_like_target_part_table;
+--3.'like table including partition': src table is a table, but a non-partitioned table
+create table partition_table_like_non_part_table (c1 int);
+-- fail, the 'including partition' src is a plain table, not a partitioned table
+create table partition_table_like_part_table (like partition_table_like_non_part_table including partition, c2 text);
+ERROR:  could not specify "INCLUDING PARTITION" for non-partitioned-table relation:"partition_table_like_non_part_table"
+-- cleanup
+drop table partition_table_like_non_part_table;
+drop table partition_table_like_part_table;
+ERROR:  table "partition_table_like_part_table" does not exist
+--4.'like table including partition': 2 src tables, and they are partitioned table
+create table partition_table_like_src_part_table_1 (src1_c1 int)
+partition by range (src1_c1)
+(
+	partition p1_partition_table_like_src_part_table_1 values less than (10),
+	partition p2_partition_table_like_src_part_table_1 values less than (20),
+	partition p3_partition_table_like_src_part_table_1 values less than (30)
+);
+create table partition_table_like_src_part_table_2 (src2_c1 int)
+partition by range (src2_c1)
+(
+	partition p1_partition_table_like_src_part_table_2 values less than (100),
+	partition p2_partition_table_like_src_part_table_2 values less than (200),
+	partition p3_partition_table_like_src_part_table_2 values less than (300)
+);
+-- fail, two 'like table including partition'.
+create table partition_table_like_part_table (
+	like partition_table_like_src_part_table_1 including partition, 
+	like partition_table_like_src_part_table_2 including partition,
+	c2 text);
+ERROR:  could not specify 2 or more "INCLUDING PARTITION" clauses, only one is allowed
+--examine the resulting table
+select relname, parttype, rangenum, partstrategy, partkey, boundaries, reltablespace from pg_partition
+where parentid = (select oid from pg_class where relname = 'partition_table_like_src_part_table_1') order by 1;
+                 relname                  | parttype | rangenum | partstrategy | partkey | boundaries | reltablespace 
+------------------------------------------+----------+----------+--------------+---------+------------+---------------
+ p1_partition_table_like_src_part_table_1 | p        |        0 | r            |         | {10}       |             0
+ p2_partition_table_like_src_part_table_1 | p        |        0 | r            |         | {20}       |             0
+ p3_partition_table_like_src_part_table_1 | p        |        0 | r            |         | {30}       |             0
+ partition_table_like_src_part_table_1    | r        |        0 | r            | 1       |            |             0
+(4 rows)
+
+select relname, parttype, rangenum, partstrategy, partkey, boundaries, reltablespace from pg_partition
+where parentid = (select oid from pg_class where relname = 'partition_table_like_part_table') order by 1;
+ relname | parttype | rangenum | partstrategy | partkey | boundaries | reltablespace 
+---------+----------+----------+--------------+---------+------------+---------------
+(0 rows)
+
+--clean up
+drop table partition_table_like_src_part_table_1;
+drop table partition_table_like_src_part_table_2;
+drop table partition_table_like_part_table;
+ERROR:  table "partition_table_like_part_table" does not exist
+	
+--5.'like table including partition': 2 src tables, and one is partitioned table, the other is non-partitioned table
+\! rm -fr '@testtablespace@/hw_partition_table_like_spc'
+\! mkdir '@testtablespace@/hw_partition_table_like_spc'
+create tablespace hw_partition_table_like_spc location '@testtablespace@/hw_partition_table_like_spc';
+create table partition_table_like_src_part_table_1 (src1_c1 int)
+partition by range (src1_c1)
+(
+	partition p1_partition_table_like_src_part_table_1 values less than (10) tablespace hw_partition_table_like_spc,
+	partition p2_partition_table_like_src_part_table_1 values less than (20),
+	partition p3_partition_table_like_src_part_table_1 values less than (30)
+);
+create table partition_table_like_src_nonpart_table_2 (src2_c1 int);
+-- one 'like table including partition', one 'like table'.
+create table partition_table_like_part_table (
+	like partition_table_like_src_part_table_1 including partition, 
+	like partition_table_like_src_nonpart_table_2,
+	c2 text);
+-- select the partition with tablespace specified
+select c.relname as tablename, p.relname as partitionname, p.parttype, p.rangenum, p.partstrategy, p.partkey, p.boundaries, t.spcname 
+	from pg_class as c, pg_partition as p, pg_tablespace as t
+	where p.parentid = c.oid and c.relname = 'partition_table_like_src_part_table_1'
+		and p.reltablespace = t.oid	order by 1;
+               tablename               |              partitionname               | parttype | rangenum | partstrategy | partkey | boundaries |           spcname           
+---------------------------------------+------------------------------------------+----------+----------+--------------+---------+------------+-----------------------------
+ partition_table_like_src_part_table_1 | p1_partition_table_like_src_part_table_1 | p        |        0 | r            |         | {10}       | hw_partition_table_like_spc
+(1 row)
+
+select c.relname as tablename, p.relname as partitionname, p.parttype, p.rangenum, p.partstrategy, p.partkey, p.boundaries, t.spcname 
+	from pg_class as c, pg_partition as p, pg_tablespace as t
+	where p.parentid = c.oid and c.relname = 'partition_table_like_part_table' 
+		and p.reltablespace = t.oid	order by 1;
+            tablename            |              partitionname               | parttype | rangenum | partstrategy | partkey | boundaries |           spcname           
+---------------------------------+------------------------------------------+----------+----------+--------------+---------+------------+-----------------------------
+ partition_table_like_part_table | p1_partition_table_like_src_part_table_1 | p        |        0 | r            |         | {10}       | hw_partition_table_like_spc
+(1 row)
+
+--examine the resulting table
+select relname, parttype, rangenum, partstrategy, partkey, boundaries from pg_partition
+where parentid = (select oid from pg_class where relname = 'partition_table_like_src_part_table_1') order by 1;
+                 relname                  | parttype | rangenum | partstrategy | partkey | boundaries 
+------------------------------------------+----------+----------+--------------+---------+------------
+ p1_partition_table_like_src_part_table_1 | p        |        0 | r            |         | {10}
+ p2_partition_table_like_src_part_table_1 | p        |        0 | r            |         | {20}
+ p3_partition_table_like_src_part_table_1 | p        |        0 | r            |         | {30}
+ partition_table_like_src_part_table_1    | r        |        0 | r            | 1       | 
+(4 rows)
+
+select relname, parttype, rangenum, partstrategy, partkey, boundaries from pg_partition
+where parentid = (select oid from pg_class where relname = 'partition_table_like_part_table') order by 1;
+                 relname                  | parttype | rangenum | partstrategy | partkey | boundaries 
+------------------------------------------+----------+----------+--------------+---------+------------
+ p1_partition_table_like_src_part_table_1 | p        |        0 | r            |         | {10}
+ p2_partition_table_like_src_part_table_1 | p        |        0 | r            |         | {20}
+ p3_partition_table_like_src_part_table_1 | p        |        0 | r            |         | {30}
+ partition_table_like_part_table          | r        |        0 | r            | 1       | 
+(4 rows)
+
+--clean up
+drop table partition_table_like_src_part_table_1;
+drop table partition_table_like_src_nonpart_table_2;
+drop table partition_table_like_part_table;
+drop tablespace hw_partition_table_like_spc;
+--6.'like table including partition': all leggal range partition key data type
+--6.1 int types
+create table partition_table_like_src_int (c1 int2, c2 int, c3 int8)
+partition by range (c1, c2, c3)
+(
+	partition p1_partition_table_like_src_int values less than (10, 10, 10),
+	partition p2_partition_table_like_src_int values less than (20, 20, 20),
+	partition p3_partition_table_like_src_int values less than (30, 30, 30)
+);
+-- ok
+create table partition_table_like_target (like partition_table_like_src_int including partition);
+--examine the resulting table
+select relname, parttype, rangenum, partstrategy, partkey, boundaries, reltablespace from pg_partition
+where parentid = (select oid from pg_class where relname = 'partition_table_like_src_int') order by 1;
+             relname             | parttype | rangenum | partstrategy | partkey | boundaries | reltablespace 
+---------------------------------+----------+----------+--------------+---------+------------+---------------
+ p1_partition_table_like_src_int | p        |        0 | r            |         | {10,10,10} |             0
+ p2_partition_table_like_src_int | p        |        0 | r            |         | {20,20,20} |             0
+ p3_partition_table_like_src_int | p        |        0 | r            |         | {30,30,30} |             0
+ partition_table_like_src_int    | r        |        0 | r            | 1 2 3   |            |             0
+(4 rows)
+
+select relname, parttype, rangenum, partstrategy, partkey, boundaries, reltablespace from pg_partition
+where parentid = (select oid from pg_class where relname = 'partition_table_like_target') order by 1;
+             relname             | parttype | rangenum | partstrategy | partkey | boundaries | reltablespace 
+---------------------------------+----------+----------+--------------+---------+------------+---------------
+ p1_partition_table_like_src_int | p        |        0 | r            |         | {10,10,10} |             0
+ p2_partition_table_like_src_int | p        |        0 | r            |         | {20,20,20} |             0
+ p3_partition_table_like_src_int | p        |        0 | r            |         | {30,30,30} |             0
+ partition_table_like_target     | r        |        0 | r            | 1 2 3   |            |             0
+(4 rows)
+
+--clean up
+drop table partition_table_like_src_int;
+drop table partition_table_like_target;
+--6.2 decimal and floate types
+create table partition_table_like_src_float (c1 decimal, c2 numeric(9,2), c3 real, c4 double precision)
+partition by range (c1, c2, c3, c4)
+(
+	partition p1_partition_table_like_src_float values less than (7.1, 7.1, 7.1, 7.1),
+	partition p2_partition_table_like_src_float values less than (8.4, 8.4, 8.4, 8.4)
+);
+-- ok
+create table partition_table_like_target (like partition_table_like_src_float including partition);
+--examine the resulting table
+select relname, parttype, rangenum, partstrategy, partkey, boundaries, reltablespace from pg_partition
+where parentid = (select oid from pg_class where relname = 'partition_table_like_src_float') order by 1;
+              relname              | parttype | rangenum | partstrategy | partkey |    boundaries     | reltablespace 
+-----------------------------------+----------+----------+--------------+---------+-------------------+---------------
+ p1_partition_table_like_src_float | p        |        0 | r            |         | {7.1,7.1,7.1,7.1} |             0
+ p2_partition_table_like_src_float | p        |        0 | r            |         | {8.4,8.4,8.4,8.4} |             0
+ partition_table_like_src_float    | r        |        0 | r            | 1 2 3 4 |                   |             0
+(3 rows)
+
+select relname, parttype, rangenum, partstrategy, partkey, boundaries, reltablespace from pg_partition
+where parentid = (select oid from pg_class where relname = 'partition_table_like_target') order by 1;
+              relname              | parttype | rangenum | partstrategy | partkey |     boundaries     | reltablespace 
+-----------------------------------+----------+----------+--------------+---------+--------------------+---------------
+ p1_partition_table_like_src_float | p        |        0 | r            |         | {7.1,7.10,7.1,7.1} |             0
+ p2_partition_table_like_src_float | p        |        0 | r            |         | {8.4,8.40,8.4,8.4} |             0
+ partition_table_like_target       | r        |        0 | r            | 1 2 3 4 |                    |             0
+(3 rows)
+
+--clean up
+drop table partition_table_like_src_float;
+drop table partition_table_like_target;
+--6.3 string types-1
+create table partition_table_like_src_str1 (c1 char, c2 varchar(3), c3 varchar, c4 char(3))
+partition by range (c1, c2, c3, c4)
+(
+	partition p1_partition_table_like_src_str1 values less than ('A', 'B', 'C', 'D'),
+	partition p2_partition_table_like_src_str1 values less than ('O', 'P', 'Q', 'R '),
+	partition p3_partition_table_like_src_str2 values less than ('U', 'V', 'W', 'Y  ')
+);
+-- ok
+create table partition_table_like_target (like partition_table_like_src_str1 including partition);
+--examine the resulting table
+select relname, parttype, rangenum, partstrategy, partkey, boundaries, reltablespace from pg_partition
+where parentid = (select oid from pg_class where relname = 'partition_table_like_src_str1') order by 1;
+             relname              | parttype | rangenum | partstrategy | partkey |  boundaries   | reltablespace 
+----------------------------------+----------+----------+--------------+---------+---------------+---------------
+ p1_partition_table_like_src_str1 | p        |        0 | r            |         | {A,B,C,D}     |             0
+ p2_partition_table_like_src_str1 | p        |        0 | r            |         | {O,P,Q,"R "}  |             0
+ p3_partition_table_like_src_str2 | p        |        0 | r            |         | {U,V,W,"Y  "} |             0
+ partition_table_like_src_str1    | r        |        0 | r            | 1 2 3 4 |               |             0
+(4 rows)
+
+select relname, parttype, rangenum, partstrategy, partkey, boundaries, reltablespace from pg_partition
+where parentid = (select oid from pg_class where relname = 'partition_table_like_target') order by 1;
+             relname              | parttype | rangenum | partstrategy | partkey |  boundaries   | reltablespace 
+----------------------------------+----------+----------+--------------+---------+---------------+---------------
+ p1_partition_table_like_src_str1 | p        |        0 | r            |         | {A,B,C,"D  "} |             0
+ p2_partition_table_like_src_str1 | p        |        0 | r            |         | {O,P,Q,"R  "} |             0
+ p3_partition_table_like_src_str2 | p        |        0 | r            |         | {U,V,W,"Y  "} |             0
+ partition_table_like_target      | r        |        0 | r            | 1 2 3 4 |               |             0
+(4 rows)
+
+--clean up
+drop table partition_table_like_src_str1;
+drop table partition_table_like_target;
+--6.4 string types-2
+create table partition_table_like_src_str2 (c1 character(3), c2 text, c3 nvarchar2, c4 bpchar)
+partition by range (c1, c2, c3, c4)
+(
+	partition p1_partition_table_like_src_str2 values less than ('A', 'B', 'C', 'D'),
+	partition p2_partition_table_like_src_str2 values less than ('O ', 'P', 'Q', 'R'),
+	partition p3_partition_table_like_src_str2 values less than ('U  ', 'V', 'W', 'Y')
+);
+-- ok
+create table partition_table_like_target (like partition_table_like_src_str2 including partition);
+--examine the resulting table
+select relname, parttype, rangenum, partstrategy, partkey, boundaries, reltablespace from pg_partition
+where parentid = (select oid from pg_class where relname = 'partition_table_like_src_str2') order by 1;
+             relname              | parttype | rangenum | partstrategy | partkey |  boundaries   | reltablespace 
+----------------------------------+----------+----------+--------------+---------+---------------+---------------
+ p1_partition_table_like_src_str2 | p        |        0 | r            |         | {A,B,C,D}     |             0
+ p2_partition_table_like_src_str2 | p        |        0 | r            |         | {"O ",P,Q,R}  |             0
+ p3_partition_table_like_src_str2 | p        |        0 | r            |         | {"U  ",V,W,Y} |             0
+ partition_table_like_src_str2    | r        |        0 | r            | 1 2 3 4 |               |             0
+(4 rows)
+
+select relname, parttype, rangenum, partstrategy, partkey, boundaries, reltablespace from pg_partition
+where parentid = (select oid from pg_class where relname = 'partition_table_like_target') order by 1;
+             relname              | parttype | rangenum | partstrategy | partkey |  boundaries   | reltablespace 
+----------------------------------+----------+----------+--------------+---------+---------------+---------------
+ p1_partition_table_like_src_str2 | p        |        0 | r            |         | {"A  ",B,C,D} |             0
+ p2_partition_table_like_src_str2 | p        |        0 | r            |         | {"O  ",P,Q,R} |             0
+ p3_partition_table_like_src_str2 | p        |        0 | r            |         | {"U  ",V,W,Y} |             0
+ partition_table_like_target      | r        |        0 | r            | 1 2 3 4 |               |             0
+(4 rows)
+
+--clean up
+drop table partition_table_like_src_str2;
+drop table partition_table_like_target;
+--6.5 date types
+create table partition_table_like_src_date (c1 date, c2 timestamp, c3 timestamptz, c4 bpchar)
+partition by range (c1, c2, c3, c4)
+(
+	partition p1_partition_table_like_src_date values less than (to_date('2012-11-11','YYYY-MM-DD'), to_timestamp('2012-11-12','YYYY-MM-DD'), '2012-11-16', 'CBY'),
+	partition p2_partition_table_like_src_date values less than (to_date('2012-12-11','YYYY-MM-DD'), to_timestamp('2012-12-13','YYYY-MM-DD'), '2012-12-26', 'JYH'),
+	partition p3_partition_table_like_src_date values less than ('2013-01-11', '2013-01-13', to_timestamp('2013-01-26', 'YYYY-MM-DD'), 'XZ')
+);
+-- ok
+create table partition_table_like_target (like partition_table_like_src_date including partition);
+--examine the resulting table
+select relname, parttype, rangenum, partstrategy, partkey, boundaries, reltablespace from pg_partition
+where parentid = (select oid from pg_class where relname = 'partition_table_like_src_date') order by 1;
+             relname              | parttype | rangenum | partstrategy | partkey |                                      boundaries                                      | reltablespace 
+----------------------------------+----------+----------+--------------+---------+--------------------------------------------------------------------------------------+---------------
+ p1_partition_table_like_src_date | p        |        0 | r            |         | {"Sun Nov 11 00:00:00 2012","Mon Nov 12 00:00:00 2012","2012-11-16 00:00:00-08",CBY} |             0
+ p2_partition_table_like_src_date | p        |        0 | r            |         | {"Tue Dec 11 00:00:00 2012","Thu Dec 13 00:00:00 2012","2012-12-26 00:00:00-08",JYH} |             0
+ p3_partition_table_like_src_date | p        |        0 | r            |         | {2013-01-11,2013-01-13,"2013-01-26 00:00:00-08",XZ}                                  |             0
+ partition_table_like_src_date    | r        |        0 | r            | 1 2 3 4 |                                                                                      |             0
+(4 rows)
+
+select relname, parttype, rangenum, partstrategy, partkey, boundaries, reltablespace from pg_partition
+where parentid = (select oid from pg_class where relname = 'partition_table_like_target') order by 1;
+             relname              | parttype | rangenum | partstrategy | partkey |                                      boundaries                                      | reltablespace 
+----------------------------------+----------+----------+--------------+---------+--------------------------------------------------------------------------------------+---------------
+ p1_partition_table_like_src_date | p        |        0 | r            |         | {"Sun Nov 11 00:00:00 2012","Mon Nov 12 00:00:00 2012","2012-11-16 00:00:00-08",CBY} |             0
+ p2_partition_table_like_src_date | p        |        0 | r            |         | {"Tue Dec 11 00:00:00 2012","Thu Dec 13 00:00:00 2012","2012-12-26 00:00:00-08",JYH} |             0
+ p3_partition_table_like_src_date | p        |        0 | r            |         | {"Fri Jan 11 00:00:00 2013","Sun Jan 13 00:00:00 2013","2013-01-26 00:00:00-08",XZ}  |             0
+ partition_table_like_target      | r        |        0 | r            | 1 2 3 4 |                                                                                      |             0
+(4 rows)
+
+--clean up
+drop table partition_table_like_src_date;
+drop table partition_table_like_target;
+-- add INCLUDING RELOPTIONS and INCLUDING DISTRIBUTION
+create table like_partition_src (c1 int, c2 int, c3 text)
+WITH 
+(
+	orientation=column
+--	fillfactor =85, 
+--	autovacuum_enabled = ON,
+--	toast.autovacuum_enabled = ON, 
+--	autovacuum_vacuum_threshold = 100,
+--	toast.autovacuum_vacuum_threshold = 100,
+--	autovacuum_vacuum_scale_factor = 10, 
+--	toast.autovacuum_vacuum_scale_factor = 10,
+--	autovacuum_analyze_threshold = 8,
+--	autovacuum_analyze_scale_factor = 9,
+--  autovacuum_vacuum_cost_delay: Valid values are between "0" and "100".
+--	autovacuum_vacuum_cost_delay = 90, 
+--	toast.autovacuum_vacuum_cost_delay = 92,
+--	autovacuum_vacuum_cost_limit: Valid values are between "1" and "10000".
+--	autovacuum_vacuum_cost_limit = 567, 
+--	toast.autovacuum_vacuum_cost_limit = 789,
+--	autovacuum_freeze_min_age = 5000, 
+--	toast.autovacuum_freeze_min_age = 6000,
+--	autovacuum_freeze_max_age: Valid values are between "100000000" and "2000000000".
+--	autovacuum_freeze_max_age = 300000000, 
+--	toast.autovacuum_freeze_max_age = 250000000,
+--	autovacuum_freeze_table_age = 170000000, 
+--	toast.autovacuum_freeze_table_age = 180000000
+)
+distribute by hash (c2)
+partition by range (c2)
+(
+	partition like_partition_src_p1 values less than (10),
+	partition like_partition_src_p2 values less than (20),
+	partition like_partition_src_p3 values less than (100)
+);
+create table like_partition_src2 (c21 int, c22 int, c23 text);
+-- ng case: both 'including reloption' and 'with' clause
+create table like_partition_new_a (like like_partition_src including all)
+	with (orientation=column);
+ERROR:  unsupport "like clause including reloptions" together with "with"
+DETAIL:  use either "like clause including reloptions" or "with" clause
+-- ng case: both 'including distribution' and 'distribute by'
+create table like_partition_new_a (like like_partition_src including all)
+	distribute by hash (c1);
+ERROR:  unsupport "like clause including distribution" together with "distribute by"
+DETAIL:  use either "like clause including distribution" or "distribute by" clause
+-- ng case: 2 'including reloption'
+create table like_partition_new_a 
+	(like like_partition_src including all excluding distribution, 
+	like like_partition_src2 including all excluding partition excluding distribution);
+ERROR:  could not specify 2 or more "INCLUDING RELOPTIONS" clauses, only one is allowed
+-- ng case: 2 'including distribution'
+create table like_partition_new_a 
+	(like like_partition_src including all excluding reloptions, 
+	like like_partition_src2 including all excluding partition excluding reloptions);
+ERROR:  could not specify 2 or more "INCLUDING DISTRIBUTION" clauses, only one is allowed
+-- ok cases
+create table like_partition_new_a (like like_partition_src including all excluding reloptions excluding distribution);
+create table like_partition_new_b (like like_partition_src including all excluding distribution);
+create table like_partition_new_c (like like_partition_src including all);
+-- result checking
+select relname, reloptions from pg_class 
+	where relname in ('like_partition_src', 'like_partition_new_a', 'like_partition_new_b', 'like_partition_new_c')
+	order by relname;
+       relname        |              reloptions              
+----------------------+--------------------------------------
+ like_partition_new_a | {orientation=row,compression=no}
+ like_partition_new_b | {orientation=column,compression=low}
+ like_partition_new_c | {orientation=column,compression=low}
+ like_partition_src   | {orientation=column,compression=low}
+(4 rows)
+
+select c.relname, xc.pclocatortype, xc.pcattnum 
+	from pg_class as c inner join pgxc_class as xc 
+	on c.oid = xc.pcrelid
+	where c.relname in ('like_partition_src', 'like_partition_new_a', 'like_partition_new_b', 'like_partition_new_c')
+	order by c.relname;
+       relname        | pclocatortype | pcattnum 
+----------------------+---------------+----------
+ like_partition_new_a | H             | 1
+ like_partition_new_b | H             | 1
+ like_partition_new_c | H             | 2
+ like_partition_src   | H             | 2
+(4 rows)
+
+--clean up
+drop table like_partition_src;
+drop table like_partition_src2;
+drop table like_partition_new_a;
+drop table like_partition_new_b;
+drop table like_partition_new_c;

@@ -142,7 +142,8 @@ PGconn *GetConnection(ForeignServer *server, UserMapping *user, bool will_prep_s
         (void)MemoryContextSwitchTo(oldcontext);
 
         HASHCTL ctl;
-        MemSet(&ctl, 0, sizeof(ctl));
+        errno_t rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+        securec_check(rc, "\0", "\0");
         ctl.keysize = sizeof(ConnCacheKey);
         ctl.entrysize = sizeof(ConnCacheEntry);
         ctl.hash = tag_hash;
@@ -237,7 +238,7 @@ PGconn *GetConnection(ForeignServer *server, UserMapping *user, bool will_prep_s
     begin_remote_xact(entry);
 
     /* Remember if caller will prepare statements */
-    entry->have_prep_stmt |= will_prep_stmt;
+    entry->have_prep_stmt = entry->have_prep_stmt || will_prep_stmt;
 
     return entry->conn;
 }
@@ -656,6 +657,101 @@ void pgfdw_report_error(int elevel, PGresult *res, PGconn *conn, bool clear, con
 /*
  * pgfdw_xact_callback --- cleanup at main-transaction end.
  */
+static void pgfdw_xact_callback_commit(ConnCacheEntry *entry)
+{
+    /*
+     * If abort cleanup previously failed for this connection,
+     * we can't issue any more commands against it.
+     */
+    pgfdw_reject_incomplete_xact_state_change(entry);
+
+    /* Commit all remote transactions during pre-commit */
+    entry->changing_xact_state = true;
+    do_sql_command(entry->conn, "COMMIT TRANSACTION");
+    entry->changing_xact_state = false;
+
+    /*
+     * If there were any errors in subtransactions, and we
+     * made prepared statements, do a DEALLOCATE ALL to make
+     * sure we get rid of all prepared statements. This is
+     * annoying and not terribly bulletproof, but it's
+     * probably not worth trying harder.
+     *
+     * DEALLOCATE ALL only exists in 8.3 and later, so this
+     * constrains how old a server postgres_fdw can
+     * communicate with.  We intentionally ignore errors in
+     * the DEALLOCATE, so that we can hobble along to some
+     * extent with older servers (leaking prepared statements
+     * as we go; but we don't really support update operations
+     * pre-8.3 anyway).
+     */
+    if (entry->have_prep_stmt && entry->have_error) {
+        PGresult* res = PQexec(entry->conn, "DEALLOCATE ALL");
+        PQclear(res);
+    }
+    entry->have_prep_stmt = false;
+    entry->have_error = false;
+
+}
+
+
+static void pgfdw_xact_callback_abort(ConnCacheEntry *entry)
+{
+    bool abort_cleanup_failure = false;
+
+     /*
+     * Don't try to clean up the connection if we're already
+     * in error recursion trouble.
+     */
+    if (in_error_recursion_trouble()) {
+        entry->changing_xact_state = true;
+    }
+
+    /*
+     * If connection is already unsalvageable, don't touch it
+     * further.
+     */
+    if (entry->changing_xact_state) {
+        return;
+    }
+
+    /*
+     * Mark this connection as in the process of changing
+     * transaction state.
+     */
+    entry->changing_xact_state = true;
+
+    /* Assume we might have lost track of prepared statements */
+    entry->have_error = true;
+
+    /*
+     * If a command has been submitted to the remote server by
+     * using an asynchronous execution function, the command
+     * might not have yet completed.  Check to see if a command
+     * is still being processed by the remote server, and if so,
+     * request cancellation of the command.
+     */
+    if (PQtransactionStatus(entry->conn) == PQTRANS_ACTIVE && !pgfdw_cancel_query(entry->conn)) {
+        /* Unable to cancel running query. */
+        abort_cleanup_failure = true;
+    } else if (!pgfdw_exec_cleanup_query(entry->conn, "ABORT TRANSACTION", false)) {
+        /* Unable to abort remote transaction. */
+        abort_cleanup_failure = true;
+    } else if (entry->have_prep_stmt && entry->have_error &&
+        !pgfdw_exec_cleanup_query(entry->conn, "DEALLOCATE ALL", true)) {
+        /* Trouble clearing prepared statements. */
+        abort_cleanup_failure = true;
+    } else {
+        entry->have_prep_stmt = false;
+        entry->have_error = false;
+    }
+
+    /* Disarm changing_xact_state if it all worked. */
+    entry->changing_xact_state = abort_cleanup_failure;
+}
+/*
+ * pgfdw_xact_callback --- cleanup at main-transaction end.
+ */
 static void pgfdw_xact_callback(XactEvent event, void *arg)
 {
     HASH_SEQ_STATUS scan;
@@ -679,101 +775,19 @@ static void pgfdw_xact_callback(XactEvent event, void *arg)
 
         /* If it has an open remote transaction, try to close it */
         if (entry->xact_depth > 0) {
-            bool abort_cleanup_failure = false;
-
+            
             elog(DEBUG3, "closing remote transaction on connection %p", entry->conn);
 
             switch (event) {
                 case XACT_EVENT_COMMIT:
-
-                    /*
-                     * If abort cleanup previously failed for this connection,
-                     * we can't issue any more commands against it.
-                     */
-                    pgfdw_reject_incomplete_xact_state_change(entry);
-
-                    /* Commit all remote transactions during pre-commit */
-                    entry->changing_xact_state = true;
-                    do_sql_command(entry->conn, "COMMIT TRANSACTION");
-                    entry->changing_xact_state = false;
-
-                    /*
-                     * If there were any errors in subtransactions, and we
-                     * made prepared statements, do a DEALLOCATE ALL to make
-                     * sure we get rid of all prepared statements. This is
-                     * annoying and not terribly bulletproof, but it's
-                     * probably not worth trying harder.
-                     *
-                     * DEALLOCATE ALL only exists in 8.3 and later, so this
-                     * constrains how old a server postgres_fdw can
-                     * communicate with.  We intentionally ignore errors in
-                     * the DEALLOCATE, so that we can hobble along to some
-                     * extent with older servers (leaking prepared statements
-                     * as we go; but we don't really support update operations
-                     * pre-8.3 anyway).
-                     */
-                    if (entry->have_prep_stmt && entry->have_error) {
-                        PGresult* res = PQexec(entry->conn, "DEALLOCATE ALL");
-                        PQclear(res);
-                    }
-                    entry->have_prep_stmt = false;
-                    entry->have_error = false;
+                    pgfdw_xact_callback_commit(entry);
                     break;
                 case XACT_EVENT_PREPARE:
                     /* Pre-commit should have closed the open transaction */
                     elog(ERROR, "missed cleaning up connection during pre-commit");
                     break;
                 case XACT_EVENT_ABORT:
-
-                    /*
-                     * Don't try to clean up the connection if we're already
-                     * in error recursion trouble.
-                     */
-                    if (in_error_recursion_trouble()) {
-                        entry->changing_xact_state = true;
-                    }
-
-                    /*
-                     * If connection is already unsalvageable, don't touch it
-                     * further.
-                     */
-                    if (entry->changing_xact_state) {
-                        break;
-                    }
-
-                    /*
-                     * Mark this connection as in the process of changing
-                     * transaction state.
-                     */
-                    entry->changing_xact_state = true;
-
-                    /* Assume we might have lost track of prepared statements */
-                    entry->have_error = true;
-
-                    /*
-                     * If a command has been submitted to the remote server by
-                     * using an asynchronous execution function, the command
-                     * might not have yet completed.  Check to see if a command
-                     * is still being processed by the remote server, and if so,
-                     * request cancellation of the command.
-                     */
-                    if (PQtransactionStatus(entry->conn) == PQTRANS_ACTIVE && !pgfdw_cancel_query(entry->conn)) {
-                        /* Unable to cancel running query. */
-                        abort_cleanup_failure = true;
-                    } else if (!pgfdw_exec_cleanup_query(entry->conn, "ABORT TRANSACTION", false)) {
-                        /* Unable to abort remote transaction. */
-                        abort_cleanup_failure = true;
-                    } else if (entry->have_prep_stmt && entry->have_error &&
-                        !pgfdw_exec_cleanup_query(entry->conn, "DEALLOCATE ALL", true)) {
-                        /* Trouble clearing prepared statements. */
-                        abort_cleanup_failure = true;
-                    } else {
-                        entry->have_prep_stmt = false;
-                        entry->have_error = false;
-                    }
-
-                    /* Disarm changing_xact_state if it all worked. */
-                    entry->changing_xact_state = abort_cleanup_failure;
+                    pgfdw_xact_callback_abort(entry);
                     break;
                 default:
                     break;

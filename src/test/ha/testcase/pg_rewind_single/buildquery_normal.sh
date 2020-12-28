@@ -14,7 +14,7 @@ dd if=/dev/zero of=$bigdata_dir/bigdata2 bs=1M count=1024
 gs_ctl querybuild -D $data_dir/datanode1_standby
 
 stop_standby
-gs_ctl build -D $data_dir/datanode1_standby 1>"./results/pg_rewind/buildquery_normal.result" 2>&1 &
+gs_ctl build -Z single_node -D $data_dir/datanode1_standby -b full 1>"./results/pg_rewind/buildquery_normal.result" 2>&1 &
 
 #wait build start
 sleep 3
@@ -36,7 +36,7 @@ function tear_down()
 sleep 1
 rm $bigdata_dir -rf
 
-gs_ctl build -D $data_dir/datanode1_standby > /dev/null 2>&1
+gs_ctl build -Z single_node -D $data_dir/datanode1_standby > /dev/null 2>&1
 check_replication_setup
 }
 

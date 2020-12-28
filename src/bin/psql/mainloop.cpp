@@ -84,6 +84,7 @@ static void SetSessionTimeout(const char* session_timeout)
     if (StRes == NULL) {
         psql_error("Failed to set session_timeout "
                    "and no error details received from backend. Please check the log files of backend.\n");
+        PQclear(StRes);
         exit(EXIT_FAILURE);
     }
 
@@ -373,7 +374,17 @@ int MainLoop(FILE* source, char* querystring)
 
                     /* malloc memory for parallel query with MAX_STMTS once. */
                     if (query_count % MAX_STMTS == 0) {
-                        query_stmts = (char**)pg_realloc(query_stmts, sizeof(char*) * (unsigned long)(query_count + MAX_STMTS));
+                        if(NULL != query_stmts) {
+                            char** temp = (char**)pg_calloc(1, sizeof(char*) * (query_count + MAX_STMTS));
+                            rc = memcpy_s(temp, sizeof(char*) * query_count, query_stmts, sizeof(char*) * query_count);
+                            securec_check_c(rc, "\0", "\0");
+
+                            free(query_stmts);
+                            query_stmts = temp;
+                        }
+                        else {
+                            query_stmts = (char**)pg_calloc(1, sizeof(char*) * (query_count + MAX_STMTS));
+                        }
                     }
 
                     query_stmts[query_count] = (char*)pg_malloc(sizeof(char) * (strlen(query_buf->data) + 1));

@@ -245,8 +245,11 @@ ResultState* ExecInitResult(BaseResult* node, EState* estate, int eflags)
 
     /*
      * initialize tuple type and projection info
+     * no relations are involved in nodeResult, set the default
+     * tableAm type to HEAP
      */
-    ExecAssignResultTypeFromTL(&resstate->ps);
+    ExecAssignResultTypeFromTL(&resstate->ps, TAM_HEAP);
+
     ExecAssignProjectionInfo(&resstate->ps, NULL);
 
     return resstate;
@@ -286,7 +289,7 @@ void ExecReScanResult(ResultState* node)
      * If chgParam of subnode is not null then plan will be re-scanned by
      * first ExecProcNode.
      */
-    if (node->ps.lefttree && node->ps.lefttree->chgParam == NULL){
+    if (node->ps.lefttree && node->ps.lefttree->chgParam == NULL) {
         ExecReScan(node->ps.lefttree);
     }
 }

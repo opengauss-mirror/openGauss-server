@@ -40,19 +40,25 @@
 #include "securec_check.h"
 
 #ifdef PC_LINT
+#ifndef Assert
 #define Assert(condition)       \
     do {                        \
         if (!(bool)(condition)) \
             exit(1);            \
     } while (0)
+#endif /* Assert */
 #else
 #ifndef USE_ASSERT_CHECKING
+#ifndef Assert
 #define Assert(condition)
+#endif /* Assert */
 #else
 #ifdef Assert
 #undef Assert
 #endif
+#ifndef Assert
 #define Assert(condition) assert(condition)
+#endif /* Assert */
 #endif
 #endif
 /* Possible type of nodes for registration */

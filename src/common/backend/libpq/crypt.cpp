@@ -47,12 +47,6 @@ typedef struct password_info {
 #define DWS_IAMAUTH_CONFIG_PATH "/opt/dws/iamauth/"
 #define CLUSTERID_LEN 36 //clusterid example:36cessba-ec3d-478f-a5b7-561a9a5f463f
 #define TENANTID_LEN 32 //tenantid example:9e57dcaa89164a149f1b5f7130c49c52
-#define CLEAR_AND_FREE_TOKEN(token, len) \
-    do {\
-        int _rc = memset_s(token, len, 0, len);\
-        securec_check(_rc, "", "");\
-        pfree_ext(token);\
-    } while (0)
 
 
 
@@ -511,7 +505,7 @@ char* read_auth_file(const char* file_path)
     }
 
     /* the operate file must be less than 600 for security. */
-    if (!S_ISREG(statbuf.st_mode) || statbuf.st_mode & (S_IRWXG | S_IRWXO)) {
+    if (!S_ISREG(statbuf.st_mode) || (statbuf.st_mode & (S_IRWXG | S_IRWXO))) {
         (void)close(fd);
         ereport(LOG, (errmsg("file permissions can't be more than 600.")));
         return NULL;
@@ -582,7 +576,9 @@ char* convert_cms_token(const char* token_string)
     /* create the cms file for write. */
     if ((fp = fopen(cms_file, "w")) == NULL) {
         ereport(LOG, (errmsg("create cms file failed.")));
-        CLEAR_AND_FREE_TOKEN(source_string, token_length);
+        rc = memset_s(source_string, strlen(source_string), 0, strlen(source_string));
+        securec_check(rc, "\0", "\0");
+        pfree_ext(source_string);
         pfree_ext(cms_file);
         return NULL;
     }
@@ -594,7 +590,9 @@ char* convert_cms_token(const char* token_string)
 #endif
     if (rc != 0) {
         ereport(LOG, (errmsg("could not set permissions of file.")));
-        CLEAR_AND_FREE_TOKEN(source_string, token_length);
+        rc = memset_s(source_string, strlen(source_string), 0, strlen(source_string));
+        securec_check(rc, "\0", "\0");
+        pfree_ext(source_string);
         pfree_ext(cms_file);
         (void)fclose(fp);
         return NULL;
@@ -603,7 +601,9 @@ char* convert_cms_token(const char* token_string)
     /* convert-2 : add '-----BEGIN CMS-----' at the head. */
     if (fputs("-----BEGIN CMS-----\n", fp) < 0) {
         ereport(LOG, (errmsg("add cms head failed.")));
-        CLEAR_AND_FREE_TOKEN(source_string, token_length);
+        rc = memset_s(source_string, strlen(source_string), 0, strlen(source_string));
+        securec_check(rc, "\0", "\0");
+        pfree_ext(source_string);
         pfree_ext(cms_file);
         (void)fclose(fp);
         return NULL;
@@ -622,7 +622,9 @@ char* convert_cms_token(const char* token_string)
         }
         if (fwrite(source_string + ROW_LENGTH * i, data_size, 1, fp) != 1) {
             ereport(LOG, (errmsg("add cms body failed.")));
-            CLEAR_AND_FREE_TOKEN(source_string, token_length);
+            rc = memset_s(source_string, strlen(source_string), 0, strlen(source_string));
+            securec_check(rc, "\0", "\0");
+            pfree_ext(source_string);
             pfree_ext(cms_file);
             (void)fclose(fp);
             return NULL;
@@ -633,13 +635,17 @@ char* convert_cms_token(const char* token_string)
     /* convert-4 : add '-----END CMS-----' at the end. */
     if (fputs("-----END CMS-----\n", fp) < 0) {
         ereport(LOG, (errmsg("add cms end failed.")));
-        CLEAR_AND_FREE_TOKEN(source_string, token_length);
+        rc = memset_s(source_string, strlen(source_string), 0, strlen(source_string));
+        securec_check(rc, "\0", "\0");
+        pfree_ext(source_string);
         pfree_ext(cms_file);
         (void)fclose(fp);
         return NULL;
     }
 
-    CLEAR_AND_FREE_TOKEN(source_string, token_length);
+    rc = memset_s(source_string, strlen(source_string), 0, strlen(source_string));
+    securec_check(rc, "\0", "\0");
+    pfree_ext(source_string);
     (void)fclose(fp);
     return cms_file;
 }
@@ -787,8 +793,9 @@ bool parse_token(const char* token_string, iam_token* token)
     /* verify the token for check token's info. */
     verified_token_file = verify_cms_token(real_token);
     pfree_ext(real_token);
-    if (verified_token_file == NULL)
+    if (verified_token_file == NULL) {
         return false;
+    }
 
     /* read the verified token messages. */
     json_string = read_auth_file(verified_token_file);

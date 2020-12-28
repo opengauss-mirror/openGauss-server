@@ -30,7 +30,7 @@
 #include "optimizer/encoding.h"
 #include "optimizer/learn.h"
 #include "optimizer/streamplan.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 static inline void AppendStringInfoWithSpace(StringInfo buf, const char* fmt, ...);
 static inline bool IsScan(Plan* plan);
@@ -48,9 +48,9 @@ typedef struct {
     char* strategy;
 } OperationInfo;
 
-const unsigned int g_max_operation_number = 65;
+const unsigned int G_MAX_OPERATION_NUMBER = 65;
 
-const OperationInfo g_operation_info_table[g_max_operation_number] = {
+const OperationInfo G_OPERATION_INFO_TABLE[G_MAX_OPERATION_NUMBER] = {
     {T_BaseResult,          TEXT_OPTNAME_RESULT,            ""},
     {T_VecResult,           TEXT_OPTNAME_RESULT,            ""},
     {T_ModifyTable,         TEXT_OPTNAME_MODIFY_TABLE,      ""},
@@ -87,10 +87,8 @@ const OperationInfo g_operation_info_table[g_max_operation_number] = {
     {T_ValuesScan,          TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_VALUES},
     {T_CteScan,             TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_CTE},
     {T_WorkTableScan,       TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_WORK_TABLE},
-#ifdef PGXC
-    {T_VecRemoteQuery,      "",                             ""},
-    {T_RemoteQuery,         "",                             ""},
-#endif
+    {T_VecRemoteQuery,      TEXT_OPTNAME_STREAM,            ""},
+    {T_RemoteQuery,         TEXT_OPTNAME_STREAM,            ""},
     {T_Stream,              TEXT_OPTNAME_STREAM,            ""},
     {T_VecStream,           TEXT_OPTNAME_STREAM,            ""},
     {T_ForeignScan,         TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_FOREIGN},
@@ -248,7 +246,7 @@ void SaveDataToFile(const char* filename)
  * initialize text arrays which determines the encoding
  * for new items please append to the rear of the list.
  */
-const OptText optTextArr[LEN_ENCODE_OPTNAME] = {
+const OptText OPT_TEXT_ARR[LEN_ENCODE_OPTNAME] = {
     {TEXT_OPTNAME_ADAPTOR, LEN_ENCODE_STRATEGY_ADAPTOR, {}, LEN_ENCODE_OPTION_ADAPTOR, {}},
     {TEXT_OPTNAME_AGG,
         LEN_ENCODE_STRATEGY_AGG,
@@ -327,10 +325,11 @@ const OptText optTextArr[LEN_ENCODE_OPTNAME] = {
             TEXT_STRATEGY_STREAM_HYBRID},
         LEN_ENCODE_OPTION_STREAM,
         {TEXT_OPTION_STREAM_LOCAL, TEXT_OPTION_STREAM_SPLIT}},
-    {TEXT_OPTNAME_UNIQUE, LEN_ENCODE_STRATEGY_UNIQUE, {}, LEN_ENCODE_OPTION_UNIQUE, {}}};
+    {TEXT_OPTNAME_UNIQUE, LEN_ENCODE_STRATEGY_UNIQUE, {}, LEN_ENCODE_OPTION_UNIQUE, {}}
+};
 
-static inline void EncodeToBitamp(
-    char* strategy, char* options, char* optname, int* bitmapOptname, int* bitmapStrategy, int* bitmapOption)
+static void EncodeToBitamp(const char* strategy, const char* options, const char* optname, int* bitmapOptname,
+    int* bitmapStrategy, int* bitmapOption)
 {
     int i, j;
     errno_t ret = EOK;
@@ -345,28 +344,28 @@ static inline void EncodeToBitamp(
 
     /* encode the given text */
     for (i = 0; i < LEN_ENCODE_OPTNAME; i++) {
-        if (strcmp(optname, optTextArr[i].optname) == 0) {
+        if (strcmp(optname, OPT_TEXT_ARR[i].optname) == 0) {
             bitmapOptname[i] = 1;
-            for (j = 0; j < optTextArr[i].len_strategy; j++) {
-                if (strcmp(strategy, optTextArr[i].strategy[j]) == 0) {
+            for (j = 0; j < OPT_TEXT_ARR[i].len_strategy; j++) {
+                if (strcmp(strategy, OPT_TEXT_ARR[i].strategy[j]) == 0) {
                     bitmapStrategy[j] = 1;
                     break;
                 }
             }
-            for (j = 0; j < optTextArr[i].len_option; j++) {
-                if (strcmp(options, optTextArr[i].options[j]) == 0)
+            for (j = 0; j < OPT_TEXT_ARR[i].len_option; j++) {
+                if (strcmp(options, OPT_TEXT_ARR[i].options[j]) == 0)
                     bitmapOption[j] = 1;
             }
         }
     }
 }
 
-static inline void AppendEncodedInfo(StringInfo des, int dop, int* bitmapOrientation, int* bitmapOptname,
-    int* bitmapStrategy, int* bitmapOption, int* bitmapCondition, int* bitmapProjection)
+static void AppendEncodedInfo(StringInfo des, int dop, const int* bitmapOrientation, const int* bitmapOptname,
+    const int* bitmapStrategy, const int* bitmapOption, const int* bitmapCondition, const int* bitmapProjection)
 {
     int i;
-    float dop_inverse = 1.0 / ((float)dop);
-    appendStringInfo(des, "%.3f ", dop_inverse);
+    float dopInverse = 1.0 / ((float)dop);
+    appendStringInfo(des, "%.3f ", dopInverse);
 
     /* append orientation encoding */
     for (i = 0; i < LEN_ENCODE_ORIENTATION; i++) {
@@ -458,11 +457,11 @@ static void GetOPTEncoding(StringInfo des, char* optname, char* orientation, cha
      */
     uint32 hashcodeCondition = DatumGetUInt32(hash_any((const unsigned char*)conditions, strlen(conditions)));
     uint32 hashcodeProjection = DatumGetUInt32(hash_any((const unsigned char*)projections, strlen(projections)));
-    static const int BINARY_BASE = 2;
+    static const int binaryBase = 2;
     for (i = 0; i < LEN_ENCODE_PROJECTION; i++) {
-        bitmapCondition[i] = hashcodeCondition % BINARY_BASE;
+        bitmapCondition[i] = hashcodeCondition % binaryBase;
         hashcodeCondition = hashcodeCondition >> 1;
-        bitmapProjection[i] = hashcodeProjection % BINARY_BASE;
+        bitmapProjection[i] = hashcodeProjection % binaryBase;
         hashcodeProjection = hashcodeProjection >> 1;
     }
 
@@ -515,9 +514,9 @@ static char* GetOperationName(Plan* plan)
     char* operationName = NULL;
     bool found = false;
     NodeTag nodeTag = nodeTag(plan);
-    for (unsigned int i = 0; i < g_max_operation_number; i++) {
-        if (nodeTag == g_operation_info_table[i].nodeTag) {
-            operationName = pstrdup(g_operation_info_table[i].name);
+    for (unsigned int i = 0; i < G_MAX_OPERATION_NUMBER; i++) {
+        if (nodeTag == G_OPERATION_INFO_TABLE[i].nodeTag) {
+            operationName = pstrdup(G_OPERATION_INFO_TABLE[i].name);
             found = true;
             break;
         }
@@ -667,9 +666,9 @@ static char* GetStrategy(Plan* plan)
     NodeTag nodeTag = nodeTag(plan);
     char* strategy = NULL;
     bool found = false;
-    for (unsigned int i = 0; i < g_max_operation_number; i++) {
-        if (nodeTag == g_operation_info_table[i].nodeTag) {
-            strategy = pstrdup(g_operation_info_table[i].strategy);
+    for (unsigned int i = 0; i < G_MAX_OPERATION_NUMBER; i++) {
+        if (nodeTag == G_OPERATION_INFO_TABLE[i].nodeTag) {
+            strategy = pstrdup(G_OPERATION_INFO_TABLE[i].strategy);
             found = true;
             break;
         }
@@ -858,6 +857,7 @@ static void GetPlanOptProjection(PlanState* planstate, StringInfo projection, in
         appendStringInfoString(projection, (const char*)lfirst(lc));
         first = false;
     }
+    list_free_deep(result);
 }
 
 /* *
@@ -996,19 +996,19 @@ static void GetPlanOptCondition(PlanState* planstate, StringInfo condition, int 
     }
 }
 
-static inline void ExactPlanOptStmt(PlanState* result_plan, PlannedStmt* pstmt, OperatorPlanInfo* optPlanInfo)
+static inline void ExactPlanOptStmt(PlanState* resultPlan, PlannedStmt* pstmt, OperatorPlanInfo* optPlanInfo)
 {
     /* extract projection */
     StringInfo projection = makeStringInfo();
     appendStringInfoChar(projection, ' ');
     int pjMaxLen = 3999;
-    GetPlanOptProjection(result_plan, projection, pjMaxLen, pstmt->rtable);
+    GetPlanOptProjection(resultPlan, projection, pjMaxLen, pstmt->rtable);
 
     /* extract conditions */
     StringInfo condition = makeStringInfo();
     appendStringInfoChar(condition, ' ');
     int cdMaxLen = 3999;
-    GetPlanOptCondition(result_plan, condition, cdMaxLen, pstmt->rtable);
+    GetPlanOptCondition(resultPlan, condition, cdMaxLen, pstmt->rtable);
 
     optPlanInfo->condition = condition->data;
     optPlanInfo->projection = projection->data;
@@ -1017,7 +1017,7 @@ static inline void ExactPlanOptStmt(PlanState* result_plan, PlannedStmt* pstmt, 
 /*
  * main entrance to extract Plan for each operator after the entire plan is finished.
  */
-OperatorPlanInfo* ExtractOperatorPlanInfo(PlanState* result_plan, PlannedStmt* pstmt)
+OperatorPlanInfo* ExtractOperatorPlanInfo(PlanState* resultPlan, PlannedStmt* pstmt)
 {
     OperatorPlanInfo* optPlanInfo = (OperatorPlanInfo*)palloc0(sizeof(OperatorPlanInfo));
 
@@ -1027,7 +1027,7 @@ OperatorPlanInfo* ExtractOperatorPlanInfo(PlanState* result_plan, PlannedStmt* p
     char* orientation = NULL;
     char* strategy = NULL;
     char* options = NULL;
-    Plan* node = result_plan->plan;
+    Plan* node = resultPlan->plan;
     PHGetPlanNodeText(node, &operation, &isRow, &strategy, &options);
     if (isRow == false) {
         orientation = pstrdup("COL");
@@ -1035,7 +1035,7 @@ OperatorPlanInfo* ExtractOperatorPlanInfo(PlanState* result_plan, PlannedStmt* p
         orientation = pstrdup("ROW");
     }
 
-    ExactPlanOptStmt(result_plan, pstmt, optPlanInfo);
+    ExactPlanOptStmt(resultPlan, pstmt, optPlanInfo);
 
     /* extract child id (0 if not exist) */
     int leftChildId = 0;

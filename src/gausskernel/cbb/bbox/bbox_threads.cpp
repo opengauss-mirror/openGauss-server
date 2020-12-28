@@ -242,7 +242,7 @@ s32 BBOX_PtraceAttachPid(struct TASK_ATTACH_INFO* pstTaskInfo, s32 iPidCount, s3
         /* check that if the thread state is normal. */
         while (sys_waitpid(pid, (int*)0, __WALL) < 0) {
             if (errno != EINTR) {
-                bbox_print(PRINT_ERR, "wait for %d failed,\n", pid);
+                bbox_print(PRINT_ERR, "wait for %d failed, errno = %d\n", pid, errno);
 
                 sys_ptrace(PTRACE_DETACH, pid, 0, 0);
                 break;
@@ -256,13 +256,13 @@ s32 BBOX_PtraceAttachPid(struct TASK_ATTACH_INFO* pstTaskInfo, s32 iPidCount, s3
             if (ret || (m != n)) {
                 sys_ptrace(PTRACE_DETACH, pid, 0, 0);
 
-                bbox_print(PRINT_ERR, "ptrace peek data failed, pid = %d, ret = %d,m = %lu, n = %lu\n", pid, ret, m, n);
+                bbox_print(PRINT_ERR, "ptrace peek data failed, pid = %d, ret = %d,m = %lu, n = %lu, errno = %d\n", pid, ret, m, n, errno);
 
                 continue;
             }
         }
 
-        bbox_print(PRINT_TIP, "ptrace attach %d\n", pid);
+        bbox_print(PRINT_LOG, "ptrace attach %d\n", pid);
         pstTaskInfo[i].cIsAttached = 1;
     }
 
@@ -291,7 +291,7 @@ void BBOX_DetachAllThread(struct TASK_ATTACH_INFO* pstTaskInfo, s32 iPidCount)
         if (!pstTaskInfo[i].cIsAttached) {
             continue;
         }
-        bbox_print(PRINT_TIP, "ptrace detach %d\n", pid);
+        bbox_print(PRINT_LOG, "ptrace detach %d\n", pid);
 
         /* cancel track. */
         sys_sched_yield();
@@ -371,7 +371,6 @@ s32 BBOX_PtraceAndRun(struct BBOX_ListParams* pstArgs, s32 iMaxThreadCount, char
     iRet = BBOX_PtraceAttachPid(stTaskInfo, iThreadCount, iDoPtraceCheck);
     if (iRet != RET_OK) {
         bbox_print(PRINT_ERR, "Ptrace attache failed.\n");
-
         goto errout;
     }
 
@@ -433,7 +432,6 @@ void BBOX_PrintFailedLog(const char* pFileName)
     }
 
     sys_close(iBboxLogFd);
-    return;
 }
 
 /*
@@ -463,18 +461,23 @@ void BBOX_ListThread(struct BBOX_ListParams* pstArgs)
     iMaker = sys_socket(PF_LOCAL, SOCK_DGRAM, 0);
     if (iMaker < 0) {
         bbox_print(PRINT_ERR, "sys_socket error, errno = %d\n", errno);
-
         goto errout;
     }
 
     if (sys_fcntl(iMaker, F_SETFD, FD_CLOEXEC) < 0) {
         bbox_print(PRINT_ERR, "sys_fcntl error, errno = %d\n", errno);
-
         goto errout;
     }
 
-    bbox_snprintf(szProcSelfTask, BBOX_PROC_PATH_LEN, "/proc/%d/task", ppid);
-    bbox_snprintf(pszMarkPath, BBOX_PROC_PATH_LEN, "/proc/%d/fd/%d", ppid, iMaker);
+    if (bbox_snprintf(szProcSelfTask, BBOX_PROC_PATH_LEN, "/proc/%d/task", ppid) <= 0) {
+        bbox_print(PRINT_ERR, "bbox_snprintf is failed, errno = %d.\n", errno);
+        goto errout;
+    }
+
+    if (bbox_snprintf(pszMarkPath, BBOX_PROC_PATH_LEN, "/proc/%d/fd/%d", ppid, iMaker) <= 0) {
+        bbox_print(PRINT_ERR, "bbox_snprintf is failed, errno = %d.\n", errno);
+        goto errout;
+    }
 
     bbox_print(PRINT_TIP, "Get information for pid %d:\n", ppid);
 
@@ -483,7 +486,6 @@ void BBOX_ListThread(struct BBOX_ListParams* pstArgs)
 
     if (sys_stat(pszMarkPath, &stMarkerSB) < 0) {
         bbox_print(PRINT_ERR, "sys_stat error, errno = %d, path = %s\n", errno, pszMarkPath);
-
         goto errout;
     }
 
@@ -499,7 +501,6 @@ void BBOX_ListThread(struct BBOX_ListParams* pstArgs)
     iMaxThreadCount = BBOX_GetTaskNumber(szProcSelfTask);
     if (iMaxThreadCount <= 0) {
         bbox_print(PRINT_ERR, "Get task number failed.\n");
-
         goto errout;
     }
 
@@ -507,7 +508,6 @@ void BBOX_ListThread(struct BBOX_ListParams* pstArgs)
     iRet = BBOX_PtraceAndRun(pstArgs, iMaxThreadCount, szProcSelfTask);
     if (iRet != RET_OK) {
         bbox_print(PRINT_ERR, "ptrace task and run failed.\n");
-
         goto errout;
     }
 
@@ -540,7 +540,6 @@ errout:
     }
 
     sys_exit(1);
-    return;
 }
 
 /*

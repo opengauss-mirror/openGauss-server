@@ -1,0 +1,10 @@
+set datestyle = 'iso, ymd';set intervalstyle to postgres;set time zone prc;
+create table redistable.redis_table_1051_column_normal(c1 int, c2 text);
+create table redistable.redis_table_1052_column_partition(c1 int, c2 text) partition by range (c1)
+(
+partition col_partition_p1 values less than (10),
+partition col_partition_p2 values less than (20),
+partition col_partition_p3 values less than (100)
+);
+insert into redistable.redis_table_1051_column_normal values(generate_series(0,99), 'hello ' || generate_series(0,99));
+insert into redistable.redis_table_1052_column_partition values(generate_series(0,99), 'hello ' || generate_series(0,99));

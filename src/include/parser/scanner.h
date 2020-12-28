@@ -19,7 +19,13 @@
 #ifndef SCANNER_H
 #define SCANNER_H
 
+#include "nodes/parsenodes_common.h"
 #include "parser/keywords.h"
+
+#ifdef FRONTEND_PARSER
+#include <setjmp.h>
+#define ereport(a, b) fe_rethrow(yyscanner)
+#endif
 
 /*
  * The scanner returns extra data about scanned tokens in this union type.
@@ -107,6 +113,18 @@ typedef struct core_yy_extra_type {
     List* parameter_list;            /* placeholder parameter list */
 } core_yy_extra_type;
 
+#ifdef FRONTEND_PARSER
+
+class PGClientLogic;
+
+void fe_rethrow(void *yyscanner);
+struct fe_core_yy_extra_type : public core_yy_extra_type {
+public:
+    jmp_buf jump_buffer;
+    PGClientLogic *m_clientLogic;
+};
+#endif /* FRONTEND_PARSER */
+
 /*
  * The type of yyscanner is opaque outside scan.l.
  */
@@ -116,6 +134,12 @@ typedef void* yyscan_t;
 /* Entry points in parser/scan.l */
 extern core_yyscan_t scanner_init(
     const char* str, core_yy_extra_type* yyext, const ScanKeyword* keywords, int num_keywords);
+
+#ifdef FRONTEND_PARSER
+extern core_yyscan_t fe_scanner_init(const char *str, fe_core_yy_extra_type *yyext, 
+    const ScanKeyword *keywords, int num_keywords);
+#endif /* FRONTEND_PARSER */
+
 extern void scanner_finish(core_yyscan_t yyscanner);
 extern int core_yylex(core_YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner);
 extern int scanner_errposition(int location, core_yyscan_t yyscanner);

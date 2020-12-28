@@ -1,0 +1,75 @@
+CREATE DATABASE db_gin_utf8 TEMPLATE template0 encoding 'UTF8';
+\c db_gin_utf8
+
+SET ENABLE_SEQSCAN=OFF;
+SET ENABLE_INDEXSCAN=OFF;
+SET ENABLE_BITMAPSCAN=ON;
+SET ENABLE_FAST_QUERY_SHIPPING=OFF;
+
+--- import data
+create table import_data(id int, chepai varchar(10), shenfenzheng varchar(20), duanxin text) distribute by hash (id);
+copy import_data from '@abs_srcdir@/data/gin_data_1000.txt';
+
+--- import data then create index
+create table gin_test_data(id int, chepai varchar(10), shenfenzheng varchar(20), duanxin text) distribute by hash (id);
+insert into gin_test_data select 1, chepai, shenfenzheng, duanxin from import_data;
+--- 6 times
+insert into gin_test_data select * from gin_test_data;
+--insert into gin_test_data select * from gin_test_data;
+--insert into gin_test_data select * from gin_test_data;
+--insert into gin_test_data select * from gin_test_data;
+--insert into gin_test_data select * from gin_test_data;
+--insert into gin_test_data select * from gin_test_data;
+--- create index
+create index chepai_idx on gin_test_data using gin(to_tsvector('ngram', chepai)) with (fastupdate=on);
+create index shenfenzheng_idx on gin_test_data using gin(to_tsvector('ngram', shenfenzheng)) with (fastupdate=on);
+create index duanxin_idx on gin_test_data using gin(to_tsvector('ngram', duanxin)) with (fastupdate=on);
+--- select
+select count(*) from gin_test_data where to_tsvector('ngram', chepai) @@ to_tsquery('ngram', 'LIU');
+select count(*) from gin_test_data where to_tsvector('ngram', chepai) @@ to_tsquery('ngram', '湘F');
+select count(*) from gin_test_data where to_tsvector('ngram', duanxin) @@ to_tsquery('ngram', '苏文');
+select count(*) from gin_test_data where to_tsvector('ngram', shenfenzheng) @@ to_tsquery('ngram', '58');
+select count(*) from gin_test_data where to_tsvector('ngram', shenfenzheng) @@ to_tsquery('ngram', '!58');
+select count(*) from gin_test_data where to_tsvector('ngram', shenfenzheng) @@ to_tsquery('ngram', '325682195604186793');
+
+--- gin data page split
+create table gin_test_data_1(id int, shenfenzheng varchar(20)) distribute by hash (id);
+insert into gin_test_data_1 select id, shenfenzheng from gin_test_data;
+--- 7 times
+insert into gin_test_data_1 select * from gin_test_data_1;
+--insert into gin_test_data_1 select * from gin_test_data_1;
+--insert into gin_test_data_1 select * from gin_test_data_1;
+--insert into gin_test_data_1 select * from gin_test_data_1;
+--insert into gin_test_data_1 select * from gin_test_data_1;
+--insert into gin_test_data_1 select * from gin_test_data_1;
+--insert into gin_test_data_1 select * from gin_test_data_1;
+vacuum freeze gin_test_data_1;
+create index shenfenzheng_idx_1 on gin_test_data_1 using gin(to_tsvector('ngram', shenfenzheng)) with (fastupdate=on);
+delete from gin_test_data_1;
+vacuum gin_test_data_1;
+
+--- import data with index
+truncate gin_test_data;
+vacuum full gin_test_data;
+insert into gin_test_data select 1, chepai, shenfenzheng, duanxin from import_data;
+--- 6 times
+insert into gin_test_data select * from gin_test_data;
+--insert into gin_test_data select * from gin_test_data;
+--insert into gin_test_data select * from gin_test_data;
+--insert into gin_test_data select * from gin_test_data;
+--insert into gin_test_data select * from gin_test_data;
+--insert into gin_test_data select * from gin_test_data;
+--- select
+select count(*) from gin_test_data where to_tsvector('ngram', chepai) @@ to_tsquery('ngram', 'LIU');
+select count(*) from gin_test_data where to_tsvector('ngram', chepai) @@ to_tsquery('ngram', '湘F');
+select count(*) from gin_test_data where to_tsvector('ngram', duanxin) @@ to_tsquery('ngram', '苏文');
+select count(*) from gin_test_data where to_tsvector('ngram', shenfenzheng) @@ to_tsquery('ngram', '58');
+select count(*) from gin_test_data where to_tsvector('ngram', shenfenzheng) @@ to_tsquery('ngram', '!58');
+select count(*) from gin_test_data where to_tsvector('ngram', shenfenzheng) @@ to_tsquery('ngram', '325682195604186793');
+
+--- vacuum
+vacuum gin_test_data;
+delete from gin_test_data;
+vacuum gin_test_data;
+truncate gin_test_data;
+vacuum full gin_test_data;

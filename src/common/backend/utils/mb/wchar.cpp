@@ -7,7 +7,9 @@
 /* can be used in either frontend or backend */
 #ifdef FRONTEND
 #include "postgres_fe.h"
+#ifndef Assert
 #define Assert(condition)
+#endif
 #else
 #include "postgres.h"
 #include "knl/knl_variable.h"
@@ -699,7 +701,7 @@ static int ucs_wcwidth(pg_wchar ucs)
      */
 
     return 1 +
-           (ucs >= 0x1100 &&
+           (int)(ucs >= 0x1100 &&
                (ucs <= 0x115f || // Hangul Jamo init. consonants
                    (ucs >= 0x2e80 && ucs <= 0xa4cf && (ucs & ~0x0011) != 0x300a && ucs != 0x303f) || // CJK ... Yi
                    (ucs >= 0xac00 && ucs <= 0xd7a3) || // Hangul Syllables
@@ -1746,22 +1748,22 @@ static bool pg_eucjp_increment(unsigned char* charptr, int length)
  * -------------------------------------------------------------------
  */
 pg_wchar_tbl pg_wchar_table[] = {
-    // PG_SQL_ASCII
-    {pg_ascii2wchar_with_len, pg_wchar2single_with_len, pg_ascii_mblen, pg_ascii_dsplen, pg_ascii_verifier, 1},
-    // PG_EUC_JP
-    {pg_eucjp2wchar_with_len, pg_wchar2euc_with_len, pg_eucjp_mblen, pg_eucjp_dsplen, pg_eucjp_verifier, 3},
-    // PG_EUC_CN
-    {pg_euccn2wchar_with_len, pg_wchar2euc_with_len, pg_euccn_mblen, pg_euccn_dsplen, pg_euccn_verifier, 2},
-    // PG_EUC_KR
-    {pg_euckr2wchar_with_len, pg_wchar2euc_with_len, pg_euckr_mblen, pg_euckr_dsplen, pg_euckr_verifier, 3},
-    // PG_EUC_TW
-    {pg_euctw2wchar_with_len, pg_wchar2euc_with_len, pg_euctw_mblen, pg_euctw_dsplen, pg_euctw_verifier, 4},
-    // PG_EUC_JIS_2004
-    {pg_eucjp2wchar_with_len, pg_wchar2euc_with_len, pg_eucjp_mblen, pg_eucjp_dsplen, pg_eucjp_verifier, 3},
-    {pg_gbk2wchar_with_len, pg_wchar2gbk_with_len, pg_gbk_mblen, pg_gbk_dsplen, pg_gbk_verifier, 2}, // PG_GBK
-    {pg_utf2wchar_with_len, pg_wchar2utf_with_len, pg_utf_mblen, pg_utf_dsplen, pg_utf8_verifier, 4}, // PG_UTF8
-    // PG_MULE_INTERNAL
-    {pg_mule2wchar_with_len, pg_wchar2mule_with_len, pg_mule_mblen, pg_mule_dsplen, pg_mule_verifier, 4},
+    {pg_ascii2wchar_with_len, pg_wchar2single_with_len, pg_ascii_mblen, pg_ascii_dsplen, pg_ascii_verifier, 1}, /* PG_SQL_ASCII
+                                                                                                                 */
+    {pg_eucjp2wchar_with_len, pg_wchar2euc_with_len, pg_eucjp_mblen, pg_eucjp_dsplen, pg_eucjp_verifier, 3}, /* PG_EUC_JP
+                                                                                                              */
+    {pg_euccn2wchar_with_len, pg_wchar2euc_with_len, pg_euccn_mblen, pg_euccn_dsplen, pg_euccn_verifier, 2}, /* PG_EUC_CN
+                                                                                                              */
+    {pg_euckr2wchar_with_len, pg_wchar2euc_with_len, pg_euckr_mblen, pg_euckr_dsplen, pg_euckr_verifier, 3}, /* PG_EUC_KR
+                                                                                                              */
+    {pg_euctw2wchar_with_len, pg_wchar2euc_with_len, pg_euctw_mblen, pg_euctw_dsplen, pg_euctw_verifier, 4}, /* PG_EUC_TW
+                                                                                                              */
+    {pg_eucjp2wchar_with_len, pg_wchar2euc_with_len, pg_eucjp_mblen, pg_eucjp_dsplen, pg_eucjp_verifier, 3}, /* PG_EUC_JIS_2004
+                                                                                                              */
+    {pg_gbk2wchar_with_len, pg_wchar2gbk_with_len, pg_gbk_mblen, pg_gbk_dsplen, pg_gbk_verifier, 2},  /* PG_GBK */
+    {pg_utf2wchar_with_len, pg_wchar2utf_with_len, pg_utf_mblen, pg_utf_dsplen, pg_utf8_verifier, 4}, /* PG_UTF8 */
+    {pg_mule2wchar_with_len, pg_wchar2mule_with_len, pg_mule_mblen, pg_mule_dsplen, pg_mule_verifier, 4}, /* PG_MULE_INTERNAL
+                                                                                                           */
     {pg_latin12wchar_with_len,
         pg_wchar2single_with_len,
         pg_latin1_mblen,
@@ -1986,6 +1988,7 @@ int pg_encoding_max_length(int encoding)
     return pg_wchar_table[encoding].maxmblen;
 }
 
+#ifdef WIN32
 #ifndef FRONTEND
 
 /*
@@ -1996,6 +1999,32 @@ int pg_database_encoding_max_length(void)
     return pg_wchar_table[GetDatabaseEncoding()].maxmblen;
 }
 
+/*
+ * Verify mbstr to make sure that it is validly encoded in the current
+ * database encoding.  Otherwise same as pg_verify_mbstr().
+ */
+bool pg_verifymbstr(const char* mbstr, int len, bool noError)
+{
+    return pg_verify_mbstr_len(GetDatabaseEncoding(), mbstr, len, noError) >= 0;
+}
+#endif
+#else
+int pg_database_encoding_max_length(void)
+{
+    return pg_wchar_table[GetDatabaseEncoding()].maxmblen;
+}
+
+/*
+ * Verify mbstr to make sure that it is validly encoded in the current
+ * database encoding.  Otherwise same as pg_verify_mbstr().
+ */
+bool pg_verifymbstr(const char* mbstr, int len, bool noError)
+{
+    return pg_verify_mbstr_len(GetDatabaseEncoding(), mbstr, len, noError) >= 0;
+}
+#endif
+
+#ifndef FRONTEND
 /*
  * get the character incrementer for the encoding for the current database
  */
@@ -2018,15 +2047,6 @@ mbcharacter_incrementer pg_database_encoding_character_incrementer(void)
 }
 
 /*
- * Verify mbstr to make sure that it is validly encoded in the current
- * database encoding.  Otherwise same as pg_verify_mbstr().
- */
-bool pg_verifymbstr(const char* mbstr, int len, bool noError)
-{
-    return pg_verify_mbstr_len(GetDatabaseEncoding(), mbstr, len, noError) >= 0;
-}
-
-/*
  * Verify mbstr to make sure that it is validly encoded in the specified
  * encoding.
  */
@@ -2034,6 +2054,8 @@ bool pg_verify_mbstr(int encoding, const char* mbstr, int len, bool noError)
 {
     return pg_verify_mbstr_len(encoding, mbstr, len, noError) >= 0;
 }
+
+#endif // FRONTEND
 
 /*
  * Verify mbstr to make sure that it is validly encoded in the specified
@@ -2054,10 +2076,7 @@ int pg_verify_mbstr_len(int encoding, const char* mbstr, int len, bool noError)
     bool bulkload_illegal_chars_conversion = false;
 #endif
 
-    if (!PG_VALID_ENCODING(encoding)) {
-        ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR),
-            errmsg("invalid source encoding ID: %d", encoding)));
-    }
+    Assert(PG_VALID_ENCODING(encoding));
 
 #ifndef FRONTEND
     if (u_sess->cmd_cxt.bulkload_compatible_illegal_chars) {
@@ -2171,6 +2190,15 @@ int pg_verify_mbstr_len(int encoding, const char* mbstr, int len, bool noError)
     return mb_len;
 }
 
+#ifdef FRONTEND
+void report_invalid_encoding(int, const char*, int)
+{
+
+}
+#endif // FRONTEND
+
+#ifndef FRONTEND
+
 /*
  * check_encoding_conversion_args: check arguments of a conversion function
  *
@@ -2225,19 +2253,22 @@ void report_invalid_encoding(int encoding, const char* mbstr, int len)
     char buf[8 * 5 + 1];
     char* p = buf;
     int j, jlimit;
-    int rc = 0;
-
+    int rc = -1;
+    int bufLen = sizeof(buf);
+    
     jlimit = Min(l, len);
     jlimit = Min(jlimit, 8); /* prevent buffer overrun */
 
     for (j = 0; j < jlimit; j++) {
-        rc = sprintf_s(p, sizeof(buf), "0x%02x", (unsigned char)mbstr[j]);
-        securec_check_ss(rc, "", "");
+        rc = sprintf_s(p, bufLen, "0x%02x", (unsigned char)mbstr[j]);
+        securec_check_ss(rc, "\0", "\0");
         p += rc;
+        bufLen -= rc;
         if (j < jlimit - 1) {
-            rc = sprintf_s(p, sizeof(buf), " ");
-            securec_check_ss(rc, "", "");
+            rc = sprintf_s(p, bufLen, " ");
+            securec_check_ss(rc, "\0", "\0");
             p += rc;
+            bufLen -= rc;
         }
     }
 

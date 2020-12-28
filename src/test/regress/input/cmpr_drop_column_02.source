@@ -27,7 +27,7 @@ CREATE TABLE cmpr_drop_varlen_col_03(
         c_ts_1 TIMESTAMP WITH TIME ZONE NOT NULL,
         c_ts_2 TIMESTAMP WITH TIME ZONE NOT NULL,
         c_date_1 DATE NOT NULL,
-        c_date_2 DATE NOT NULL)WITH (FILLFACTOR=90) COMPRESS;
+        c_date_2 DATE NOT NULL)WITH (FILLFACTOR=90) ;
 
 CREATE OR REPLACE FUNCTION FUNC_COMPRESS_INSERT_042_1(rownums int) RETURN boolean IS
 i INTEGER;
@@ -75,8 +75,8 @@ END;
 /
 CALL FUNC_COMPRESS_INSERT_042_2(1000);
 
-COPY cmpr_drop_varlen_col_02 TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_varlen_col_02.out';
-COPY cmpr_drop_varlen_col_03 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_varlen_col_02.out';
+COPY cmpr_drop_varlen_col_02 TO '@abs_srcdir@/data/cmpr_drop_varlen_col_02.out';
+COPY cmpr_drop_varlen_col_03 FROM '@abs_srcdir@/data/cmpr_drop_varlen_col_02.out';
 
 ALTER TABLE cmpr_drop_varlen_col_03 ALTER c_int_2 TYPE NUMBER(20,4);
 ALTER TABLE cmpr_drop_varlen_col_03 ADD CHECK(c_date_1 > '2011-12-20');
@@ -87,8 +87,8 @@ ALTER TABLE cmpr_drop_varlen_col_02 DROP COLUMN c_dec_1;
 DELETE FROM cmpr_drop_varlen_col_02;
 ALTER TABLE cmpr_drop_varlen_col_02 ALTER c_int_2 TYPE NUMBER(20,4);
 
-COPY cmpr_drop_varlen_col_03 TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_varlen_col_03.out';
-COPY cmpr_drop_varlen_col_02 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_varlen_col_03.out';
+COPY cmpr_drop_varlen_col_03 TO '@abs_srcdir@/data/cmpr_drop_varlen_col_03.out';
+COPY cmpr_drop_varlen_col_02 FROM '@abs_srcdir@/data/cmpr_drop_varlen_col_03.out';
 
 ALTER TABLE cmpr_drop_varlen_col_02 ADD CHECK(c_date_1 > '2011-12-20');
 ALTER TABLE cmpr_drop_varlen_col_02 DROP COLUMN c_int_2;
@@ -101,5 +101,5 @@ MINUS ALL
 
 DROP TABLE cmpr_drop_varlen_col_03;
 DROP TABLE cmpr_drop_varlen_col_02;
-\! rm @abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_varlen_col_02.out
-\! rm @abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_varlen_col_03.out
+\! rm @abs_srcdir@/data/cmpr_drop_varlen_col_02.out
+\! rm @abs_srcdir@/data/cmpr_drop_varlen_col_03.out

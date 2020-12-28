@@ -10,8 +10,8 @@ CREATE TABLE cmpr_toast_update(
 	R4_ID varchar(5000) NOT NULL,
 	R5_ID varchar(5000) NOT NULL,
 	R6_ID varchar(5000) NOT NULL
-) COMPRESS;
-COPY cmpr_toast_update FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_numstr.data';
+) ;
+COPY cmpr_toast_update FROM '@abs_srcdir@/data/cmpr_numstr.data';
 CREATE TABLE cmpr_toast_update_raw(
 	RS_ID int,
 	R0_ID varchar(5000) NOT NULL,
@@ -22,7 +22,7 @@ CREATE TABLE cmpr_toast_update_raw(
 	R5_ID varchar(5000) NOT NULL,
 	R6_ID varchar(5000) NOT NULL
 );
-COPY cmpr_toast_update_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_numstr.data';
+COPY cmpr_toast_update_raw FROM '@abs_srcdir@/data/cmpr_numstr.data';
 
 UPDATE cmpr_toast_update SET R5_ID=repeat('a', 2570) WHERE R3_ID='203000000000030345';
 UPDATE cmpr_toast_update_raw SET R5_ID=repeat('a', 2570) WHERE R3_ID='203000000000030345';

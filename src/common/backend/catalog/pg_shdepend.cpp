@@ -57,8 +57,10 @@
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
+#ifdef ENABLE_MOT
 #include "foreign/fdwapi.h"
+#endif
 
 typedef enum { LOCAL_OBJECT, SHARED_OBJECT, REMOTE_OBJECT } objectType;
 
@@ -97,7 +99,11 @@ void recordSharedDependencyOn(
     /*
      * Objects in pg_shdepend can't have SubIds.
      */
+#ifdef ENABLE_MOT
     Assert(deptype == SHARED_DEPENDENCY_MOT_TABLE || depender->objectSubId == 0);
+#else
+    Assert(depender->objectSubId == 0);
+#endif
     Assert(referenced->objectSubId == 0);
 
     /*
@@ -147,6 +153,7 @@ void recordDependencyOnOwner(Oid classId, Oid objectId, Oid owner, const char* o
     recordSharedDependencyOn(&myself, &referenced, SHARED_DEPENDENCY_OWNER, objfile);
 }
 
+#ifdef ENABLE_MOT
 void recordDependencyOnDatabase(Oid classId, Oid objectId, Oid serverId, Oid database, const char* objfile)
 {
     ObjectAddress myself, referenced;
@@ -161,6 +168,7 @@ void recordDependencyOnDatabase(Oid classId, Oid objectId, Oid serverId, Oid dat
 
     recordSharedDependencyOn(&myself, &referenced, SHARED_DEPENDENCY_MOT_TABLE, objfile);
 }
+#endif
 
 /*
  * shdepChangeDep
@@ -738,6 +746,7 @@ void copyTemplateDependencies(Oid templateDbId, Oid newDbId)
     heap_close(sdepRel, RowExclusiveLock);
 }
 
+#ifdef ENABLE_MOT
 static void MotFdwDropDatabaseDependency(HeapTuple tup)
 {
     Form_pg_shdepend shdepForm = (Form_pg_shdepend)GETSTRUCT(tup);
@@ -756,6 +765,7 @@ static void MotFdwDropDatabaseDependency(HeapTuple tup)
         }
     }
 }
+#endif
 
 /*
  * dropDatabaseDependencies
@@ -781,8 +791,10 @@ void dropDatabaseDependencies(Oid databaseId)
     scan = systable_beginscan(sdepRel, SharedDependDependerIndexId, true, SnapshotNow, 1, key);
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
+#ifdef ENABLE_MOT
         /* Forward drop stmt to MOT FDW. */
         MotFdwDropDatabaseDependency(tup);
+#endif
         simple_heap_delete(sdepRel, &tup->t_self);
     }
 
@@ -985,11 +997,7 @@ void shdepLockAndCheckObject(Oid classId, Oid objectId)
 
         case DatabaseRelationId: {
             /* For lack of a syscache on pg_database, do this: */
-            char* database = get_database_name(objectId);
-
-            if (database == NULL)
-                ereport(ERROR,
-                    (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("database %u was concurrently dropped", objectId)));
+            char* database = get_and_check_db_name(objectId, true);
             pfree_ext(database);
             break;
         }
@@ -1002,7 +1010,7 @@ void shdepLockAndCheckObject(Oid classId, Oid objectId)
                     (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("resource pool %u was concurrently dropped", objectId)));
             pfree_ext(pool_name);
             break;
-        } break;
+        }
 
         default:
             ereport(
@@ -1492,7 +1500,7 @@ void deleteDictionaryTSFile(Oid dictId)
     const int32 objsubId = 0;
     SharedDependencyType deptype = SHARED_DEPENDENCY_OWNER;
 
-    ereport(DEBUG2, (errmodule(MOD_TS), errmsg("Delete tsfile for dictionary %d", objectId)));
+    ereport(DEBUG2, (errmodule(MOD_TS), errmsg("Delete tsfile for dictionary %u", objectId)));
 
     sdepRel = heap_open(SharedDependRelationId, RowExclusiveLock);
 
@@ -1543,7 +1551,7 @@ void deleteDatabaseTSFile(Oid databaseId)
     bool isNull = true;
     List* objfiles = NIL;
 
-    ereport(DEBUG2, (errmodule(MOD_TS), errmsg("Delete tsfile for database %d", databaseId)));
+    ereport(DEBUG2, (errmodule(MOD_TS), errmsg("Delete tsfile for database %u", databaseId)));
 
     sdepRel = heap_open(SharedDependRelationId, RowExclusiveLock);
 

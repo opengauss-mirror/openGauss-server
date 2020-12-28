@@ -1,8 +1,8 @@
-CREATE ROLE dfm PASSWORD 'Ttest@123';
+CREATE ROLE dfm PASSWORD 'Gauss@123';
 SELECT a.rolname, n.nspname FROM pg_authid a JOIN pg_namespace n ON (a.oid = n.nspowner AND a.rolname='dfm');
 DROP ROLE dfm;
 
-CREATE USER dfm PASSWORD 'Ttest@123';
+CREATE USER dfm PASSWORD 'Gauss@123';
 SELECT a.rolname, n.nspname FROM pg_authid a JOIN pg_namespace n ON (a.oid = n.nspowner AND a.rolname='dfm');
 CREATE TABLESPACE dfm LOCATION '@testtablespace@';
 SHOW search_path;
@@ -31,9 +31,9 @@ SELECT nspname from pg_namespace where nspname='dfm';
 RESET search_path;
 RESET default_tablespace;
 
-CREATE USER dfm PASSWORD 'Ttest@123';
+CREATE USER dfm PASSWORD 'Gauss@123';
 
-SET SESSION AUTHORIZATION dfm PASSWORD 'Ttest@123';
+SET SESSION AUTHORIZATION dfm PASSWORD 'Gauss@123';
 
 SHOW search_path;
 SHOW default_tablespace;

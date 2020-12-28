@@ -3,8 +3,8 @@ set current_schema=setop_writefile;
 create table setop_hash_table_01( a int, b int ,c text) ;
 create table setop_hash_table_02( a int, b numeric ,c text) ;
 
-copy setop_hash_table_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/hw_setop_writefile_data1.txt' delimiter as ' ';
-copy setop_hash_table_02 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/hw_setop_writefile_data2.txt' delimiter as ' ';
+copy setop_hash_table_01 from '@abs_srcdir@/data/hw_setop_writefile_data1.txt' delimiter as ' ';
+copy setop_hash_table_02 from '@abs_srcdir@/data/hw_setop_writefile_data2.txt' delimiter as ' ';
 
 analyze setop_hash_table_01;
 analyze setop_hash_table_02;

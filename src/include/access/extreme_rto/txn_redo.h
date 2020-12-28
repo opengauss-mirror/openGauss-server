@@ -29,16 +29,8 @@
 #include "access/parallel_recovery/redo_item.h"
 
 namespace extreme_rto {
-
-typedef struct TxnRedoWorker TxnRedoWorker;
-
-TxnRedoWorker* StartTxnRedoWorker();
-void DestroyTxnRedoWorker(TxnRedoWorker* worker);
-
-void AddTxnRedoItem(PageRedoWorker* worker, void* item);
-void TrxnMngProc(RedoItem* item, PageRedoWorker* wk);
-void TrxnWorkerProc(RedoItem* item);
-XLogRecPtr TrxnStageGetReplayedRecPtrFromWorkers();
-XLogRecPtr TestStageGetReplayedRecPtrFromWorkers();
+void AddTxnRedoItem(PageRedoWorker *worker, void *item);
+void TrxnMngProc(RedoItem *item, PageRedoWorker *wk);
+void TrxnWorkerProc(RedoItem *item);
 }  // namespace extreme_rto
 #endif

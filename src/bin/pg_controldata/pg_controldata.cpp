@@ -136,7 +136,7 @@ int main(int argc, char* argv[])
 #ifdef ENABLE_MULTIPLE_NODES
             puts("pg_controldata (PostgreSQL) " PG_VERSION);
 #else
-            puts("pg_controldata " DEF_GS_VERSION);
+            puts("pg_controldata (openGauss) " PG_VERSION);
 #endif
             if (progname != NULL) {
                 free((char*)progname);
@@ -244,7 +244,7 @@ int main(int argc, char* argv[])
     printf(_("Latest checkpoint's NextXID:          " XID_FMT "\n"), ControlFile.checkPointCopy.nextXid);
     printf(_("Latest checkpoint's NextOID:          %u\n"), ControlFile.checkPointCopy.nextOid);
     printf(_("Latest checkpoint's NextMultiXactId:  " XID_FMT "\n"), ControlFile.checkPointCopy.nextMulti);
-    printf(_("Latest checkpoint's NextMultiOffset:  " UINT64_FORMAT "\n"), ControlFile.checkPointCopy.nextMultiOffset);
+    printf(_("Latest checkpoint's NextMultiOffset:  " XID_FMT "\n"), ControlFile.checkPointCopy.nextMultiOffset);
     printf(_("Latest checkpoint's oldestXID:        " XID_FMT "\n"), ControlFile.checkPointCopy.oldestXid);
     printf(_("Latest checkpoint's oldestXID's DB:   %u\n"), ControlFile.checkPointCopy.oldestXidDB);
     printf(_("Latest checkpoint's oldestActiveXID:  " XID_FMT "\n"), ControlFile.checkPointCopy.oldestActiveXid);

@@ -107,7 +107,6 @@ bool ConditionalLockRelationOid(Oid relid, LOCKMODE lockmode)
     SetLocktagRelationOid(&tag, relid);
 
     res = LockAcquire(&tag, lockmode, false, true);
-
     if (res == LOCKACQUIRE_NOT_AVAIL) {
         return false;
     }
@@ -250,7 +249,6 @@ bool ConditionalLockCStoreFreeSpace(Relation relation)
     SET_LOCKTAG_CSTORE_FREESPACE(tag, relation->rd_lockInfo.lockRelId.dbId, relation->rd_lockInfo.lockRelId.relId);
 
     res = LockAcquire(&tag, AccessExclusiveLock, false, true);
-
     if (res == LOCKACQUIRE_NOT_AVAIL) {
         return false;
     }
@@ -336,7 +334,9 @@ void LockRelationForExtension(Relation relation, LOCKMODE lockmode)
 {
     LOCKTAG tag;
 
-    SET_LOCKTAG_RELATION_EXTEND(tag, relation->rd_lockInfo.lockRelId.dbId, relation->rd_lockInfo.lockRelId.relId,
+    SET_LOCKTAG_RELATION_EXTEND(tag,
+                                relation->rd_lockInfo.lockRelId.dbId,
+                                relation->rd_lockInfo.lockRelId.relId,
                                 relation->rd_lockInfo.lockRelId.bktId);
 
     (void)LockAcquire(&tag, lockmode, false, false);
@@ -352,7 +352,9 @@ bool ConditionalLockRelationForExtension(Relation relation, LOCKMODE lockmode)
 {
     LOCKTAG tag;
 
-    SET_LOCKTAG_RELATION_EXTEND(tag, relation->rd_lockInfo.lockRelId.dbId, relation->rd_lockInfo.lockRelId.relId,
+    SET_LOCKTAG_RELATION_EXTEND(tag,
+                                relation->rd_lockInfo.lockRelId.dbId,
+                                relation->rd_lockInfo.lockRelId.relId,
                                 relation->rd_lockInfo.lockRelId.bktId);
 
     return (LockAcquire(&tag, lockmode, false, true) != LOCKACQUIRE_NOT_AVAIL);
@@ -367,7 +369,9 @@ int RelationExtensionLockWaiterCount(Relation relation)
 {
     LOCKTAG tag;
 
-    SET_LOCKTAG_RELATION_EXTEND(tag, relation->rd_lockInfo.lockRelId.dbId, relation->rd_lockInfo.lockRelId.relId,
+    SET_LOCKTAG_RELATION_EXTEND(tag,
+                                relation->rd_lockInfo.lockRelId.dbId,
+                                relation->rd_lockInfo.lockRelId.relId,
                                 relation->rd_lockInfo.lockRelId.bktId);
 
     return LockWaiterCount(&tag);
@@ -380,7 +384,9 @@ void UnlockRelationForExtension(Relation relation, LOCKMODE lockmode)
 {
     LOCKTAG tag;
 
-    SET_LOCKTAG_RELATION_EXTEND(tag, relation->rd_lockInfo.lockRelId.dbId, relation->rd_lockInfo.lockRelId.relId,
+    SET_LOCKTAG_RELATION_EXTEND(tag,
+                                relation->rd_lockInfo.lockRelId.dbId,
+                                relation->rd_lockInfo.lockRelId.relId,
                                 relation->rd_lockInfo.lockRelId.bktId);
 
     (void)LockRelease(&tag, lockmode, false);
@@ -414,8 +420,11 @@ void LockPage(Relation relation, BlockNumber blkno, LOCKMODE lockmode)
 {
     LOCKTAG tag;
 
-    SET_LOCKTAG_PAGE(tag, relation->rd_lockInfo.lockRelId.dbId, relation->rd_lockInfo.lockRelId.relId,
-                     relation->rd_lockInfo.lockRelId.bktId, blkno);
+    SET_LOCKTAG_PAGE(tag,
+                     relation->rd_lockInfo.lockRelId.dbId,
+                     relation->rd_lockInfo.lockRelId.relId,
+                     relation->rd_lockInfo.lockRelId.bktId,
+                     blkno);
 
     (void)LockAcquire(&tag, lockmode, false, false);
 }
@@ -430,8 +439,11 @@ bool ConditionalLockPage(Relation relation, BlockNumber blkno, LOCKMODE lockmode
 {
     LOCKTAG tag;
 
-    SET_LOCKTAG_PAGE(tag, relation->rd_lockInfo.lockRelId.dbId, relation->rd_lockInfo.lockRelId.relId,
-                     relation->rd_lockInfo.lockRelId.bktId, blkno);
+    SET_LOCKTAG_PAGE(tag,
+                     relation->rd_lockInfo.lockRelId.dbId,
+                     relation->rd_lockInfo.lockRelId.relId,
+                     relation->rd_lockInfo.lockRelId.bktId,
+                     blkno);
 
     return (LockAcquire(&tag, lockmode, false, true) != LOCKACQUIRE_NOT_AVAIL);
 }
@@ -443,8 +455,11 @@ void UnlockPage(Relation relation, BlockNumber blkno, LOCKMODE lockmode)
 {
     LOCKTAG tag;
 
-    SET_LOCKTAG_PAGE(tag, relation->rd_lockInfo.lockRelId.dbId, relation->rd_lockInfo.lockRelId.relId,
-                     relation->rd_lockInfo.lockRelId.bktId, blkno);
+    SET_LOCKTAG_PAGE(tag,
+                     relation->rd_lockInfo.lockRelId.dbId,
+                     relation->rd_lockInfo.lockRelId.relId,
+                     relation->rd_lockInfo.lockRelId.bktId,
+                     blkno);
 
     (void)LockRelease(&tag, lockmode, false);
 }
@@ -460,8 +475,11 @@ void LockTuple(Relation relation, ItemPointer tid, LOCKMODE lockmode, bool allow
 {
     LOCKTAG tag;
 
-    SET_LOCKTAG_TUPLE(tag, relation->rd_lockInfo.lockRelId.dbId, relation->rd_lockInfo.lockRelId.relId,
-                      relation->rd_lockInfo.lockRelId.bktId, ItemPointerGetBlockNumber(tid),
+    SET_LOCKTAG_TUPLE(tag,
+                      relation->rd_lockInfo.lockRelId.dbId,
+                      relation->rd_lockInfo.lockRelId.relId,
+                      relation->rd_lockInfo.lockRelId.bktId,
+                      ItemPointerGetBlockNumber(tid),
                       ItemPointerGetOffsetNumber(tid));
 
     (void)LockAcquire(&tag, lockmode, false, false, allow_con_update);
@@ -477,8 +495,11 @@ bool ConditionalLockTuple(Relation relation, ItemPointer tid, LOCKMODE lockmode)
 {
     LOCKTAG tag;
 
-    SET_LOCKTAG_TUPLE(tag, relation->rd_lockInfo.lockRelId.dbId, relation->rd_lockInfo.lockRelId.relId,
-                      relation->rd_lockInfo.lockRelId.bktId, ItemPointerGetBlockNumber(tid),
+    SET_LOCKTAG_TUPLE(tag,
+                      relation->rd_lockInfo.lockRelId.dbId,
+                      relation->rd_lockInfo.lockRelId.relId,
+                      relation->rd_lockInfo.lockRelId.bktId,
+                      ItemPointerGetBlockNumber(tid),
                       ItemPointerGetOffsetNumber(tid));
 
     return (LockAcquire(&tag, lockmode, false, true) != LOCKACQUIRE_NOT_AVAIL);
@@ -491,8 +512,11 @@ void UnlockTuple(Relation relation, ItemPointer tid, LOCKMODE lockmode)
 {
     LOCKTAG tag;
 
-    SET_LOCKTAG_TUPLE(tag, relation->rd_lockInfo.lockRelId.dbId, relation->rd_lockInfo.lockRelId.relId,
-                      relation->rd_lockInfo.lockRelId.bktId, ItemPointerGetBlockNumber(tid),
+    SET_LOCKTAG_TUPLE(tag,
+                      relation->rd_lockInfo.lockRelId.dbId,
+                      relation->rd_lockInfo.lockRelId.relId,
+                      relation->rd_lockInfo.lockRelId.bktId,
+                      ItemPointerGetBlockNumber(tid),
                       ItemPointerGetOffsetNumber(tid));
 
     (void)LockRelease(&tag, lockmode, false);
@@ -720,12 +744,20 @@ void DescribeLockTag(StringInfo buf, const LOCKTAG *tag)
                              tag->locktag_field1);
             break;
         case LOCKTAG_PAGE:
-            appendStringInfo(buf, _("page %u of relation %u of database %u"), tag->locktag_field3, tag->locktag_field2,
+            appendStringInfo(buf,
+                             _("page %u of relation %u of database %u"),
+                             tag->locktag_field3,
+                             tag->locktag_field2,
                              tag->locktag_field1);
             break;
         case LOCKTAG_TUPLE:
-            appendStringInfo(buf, _("tuple (%u,%u) of (relation %u, bucket %hu) of database %u"), tag->locktag_field3,
-                             tag->locktag_field4, tag->locktag_field2, tag->locktag_field5, tag->locktag_field1);
+            appendStringInfo(buf,
+                             _("tuple (%u,%hu) of (relation %u, bucket %u) of database %u"),
+                             tag->locktag_field3,
+                             tag->locktag_field4,
+                             tag->locktag_field2,
+                             tag->locktag_field5,
+                             tag->locktag_field1);
             break;
         case LOCKTAG_TRANSACTION:
             appendStringInfo(buf, _("transaction %u"), tag->locktag_field1);
@@ -734,25 +766,38 @@ void DescribeLockTag(StringInfo buf, const LOCKTAG *tag)
             appendStringInfo(buf, _("virtual transaction %u/%u"), tag->locktag_field1, tag->locktag_field2);
             break;
         case LOCKTAG_OBJECT:
-            appendStringInfo(buf, _("object %u of class %u of database %u"), tag->locktag_field3, tag->locktag_field2,
+            appendStringInfo(buf,
+                             _("object %u of class %u of database %u"),
+                             tag->locktag_field3,
+                             tag->locktag_field2,
                              tag->locktag_field1);
             break;
         case LOCKTAG_USERLOCK:
             /* reserved for old contrib code, now on pgfoundry */
-            appendStringInfo(buf, _("user lock [%u,%u,%u]"), tag->locktag_field1, tag->locktag_field2,
-                             tag->locktag_field3);
+            appendStringInfo(
+                buf, _("user lock [%u,%u,%u]"), tag->locktag_field1, tag->locktag_field2, tag->locktag_field3);
             break;
         case LOCKTAG_ADVISORY:
-            appendStringInfo(buf, _("advisory lock [%u,%u,%u,%u]"), tag->locktag_field1, tag->locktag_field2,
-                             tag->locktag_field3, tag->locktag_field4);
+            appendStringInfo(buf,
+                             _("advisory lock [%u,%u,%u,%hu]"),
+                             tag->locktag_field1,
+                             tag->locktag_field2,
+                             tag->locktag_field3,
+                             tag->locktag_field4);
             break;
         case LOCKTAG_PARTITION:
-            appendStringInfo(buf, _("part %u of partitioned table %u of database %u"), tag->locktag_field3,
-                             tag->locktag_field2, tag->locktag_field1);
+            appendStringInfo(buf,
+                             _("part %u of partitioned table %u of database %u"),
+                             tag->locktag_field3,
+                             tag->locktag_field2,
+                             tag->locktag_field1);
             break;
         case LOCKTAG_PARTITION_SEQUENCE:
-            appendStringInfo(buf, _("sequence %u of partitioned table %u of database %u"), tag->locktag_field3,
-                             tag->locktag_field2, tag->locktag_field1);
+            appendStringInfo(buf,
+                             _("sequence %u of partitioned table %u of database %u"),
+                             tag->locktag_field3,
+                             tag->locktag_field2,
+                             tag->locktag_field1);
             break;
         default:
             appendStringInfo(buf, _("unrecognized locktag type %d"), (int)tag->locktag_type);
@@ -824,7 +869,6 @@ void LockPartitionOid(Oid relid, uint32 seq, LOCKMODE lockmode)
     SetLocktagPartitionOid(&tag, relid, seq);
 
     res = LockAcquire(&tag, lockmode, false, false);
-
     /*
      * Now that we have the lock, check for invalidation messages, so that we
      * will update or flush any stale relcache entry before we try to use it.
@@ -847,7 +891,6 @@ bool ConditionalLockPartitionOid(Oid relid, uint32 seq, LOCKMODE lockmode)
     SetLocktagPartitionOid(&tag, relid, seq);
 
     res = LockAcquire(&tag, lockmode, false, true);
-
     if (res == LOCKACQUIRE_NOT_AVAIL)
         return false;
 
@@ -889,7 +932,6 @@ void LockPartitionSeq(Oid relid, uint32 seq, LOCKMODE lockmode)
     SetLocktagPartitionSeq(&tag, relid, seq);
 
     res = LockAcquire(&tag, lockmode, false, false);
-
     /*
      * Now that we have the lock, check for invalidation messages, so that we
      * will update or flush any stale relcache entry before we try to use it.
@@ -912,7 +954,6 @@ bool ConditionalLockPartitionSeq(Oid relid, uint32 seq, LOCKMODE lockmode)
     SetLocktagPartitionSeq(&tag, relid, seq);
 
     res = LockAcquire(&tag, lockmode, false, true);
-
     if (res == LOCKACQUIRE_NOT_AVAIL)
         return false;
 
@@ -937,11 +978,15 @@ void UnlockPartitionSeq(Oid relid, uint32 seq, LOCKMODE lockmode)
 
 void LockPartitionVacuum(Relation prel, Oid partId, LOCKMODE lockmode)
 {
-    PartitionIdentifier *partIdentifier = NULL;
+    PartitionIdentifier* partIdentifier = NULL;
+
     Assert(PointerIsValid(prel) && prel->rd_rel->relkind == RELKIND_RELATION);
     partIdentifier = partOidGetPartID(prel, partId);
 
-    if (partIdentifier->partArea == PART_AREA_RANGE || partIdentifier->partArea == PART_AREA_INTERVAL) {
+    if (partIdentifier->partArea == PART_AREA_RANGE ||
+        partIdentifier->partArea == PART_AREA_INTERVAL ||
+        partIdentifier->partArea == PART_AREA_LIST ||
+        partIdentifier->partArea == PART_AREA_HASH) {
         LockPartition(prel->rd_id, partId, lockmode, PARTITION_LOCK);
     }
 
@@ -952,15 +997,15 @@ bool ConditionalLockPartitionWithRetry(Relation relation, Oid partitionId, LOCKM
 {
     Oid relationId = relation->rd_id;
     int lock_retry = 0;
-    int lock_retry_limit = u_sess->attr.attr_storage.partition_lock_upgrade_timeout *
-                           (1000000 / PARTITION_RETRY_LOCK_WAIT_INTERVAL);
+    int lock_retry_limit =
+        u_sess->attr.attr_storage.partition_lock_upgrade_timeout * (1000000 / PARTITION_RETRY_LOCK_WAIT_INTERVAL);
 
     while (true) {
         /* step 1.1:  try to lock partition */
         if (ConditionalLockPartition(relationId, partitionId, lockmode, PARTITION_LOCK)) {
             break;
         }
-        
+
         /* step 1.2: examine the try count */
         if (lock_retry_limit < 0) {
             /* do nothing, infinite loop */
@@ -975,19 +1020,21 @@ bool ConditionalLockPartitionWithRetry(Relation relation, Oid partitionId, LOCKM
         /* step 1.3: just sleep for a while, then re-enter this loop */
         pg_usleep(PARTITION_RETRY_LOCK_WAIT_INTERVAL);
     }
-
     return true;
 }
 
 bool ConditionalLockPartitionVacuum(Relation prel, Oid partId, LOCKMODE lockmode)
 {
-    PartitionIdentifier *partIdentifier = NULL;
+    PartitionIdentifier* partIdentifier = NULL;
     bool getLock = false;
 
     Assert(PointerIsValid(prel) && prel->rd_rel->relkind == RELKIND_RELATION);
     partIdentifier = partOidGetPartID(prel, partId);
 
-    if (partIdentifier->partArea == PART_AREA_RANGE || partIdentifier->partArea == PART_AREA_INTERVAL) {
+    if (partIdentifier->partArea == PART_AREA_RANGE ||
+        partIdentifier->partArea == PART_AREA_INTERVAL ||
+        partIdentifier->partArea == PART_AREA_LIST ||
+        partIdentifier->partArea == PART_AREA_HASH) {
         if (ConditionalLockPartition(prel->rd_id, partId, lockmode, PARTITION_LOCK)) {
             getLock = true;
         }
@@ -1004,6 +1051,8 @@ void UnLockPartitionVacuum(Relation prel, Oid partId, LOCKMODE lockmode)
 
     switch (partIdentifier->partArea) {
         case PART_AREA_RANGE:
+        case PART_AREA_LIST:
+        case PART_AREA_HASH:
             UnlockPartition(prel->rd_id, partId, lockmode, PARTITION_LOCK);
             break;
         case PART_AREA_INTERVAL:
@@ -1029,24 +1078,31 @@ void UnLockPartitionVacuum(Relation prel, Oid partId, LOCKMODE lockmode)
  * in any transaction that actually uses the rel, to ensure that the
  * relcache entry is up to date.
  */
-void LockPartitionVacuumForSession(PartitionIdentifier *partIdtf, Oid partrelid, Oid partid, LOCKMODE lockmode)
+void LockPartitionVacuumForSession(PartitionIdentifier* partIdtf, Oid partrelid, Oid partid, LOCKMODE lockmode)
 {
     LOCKTAG tag;
 
-    if (partIdtf->partArea == PART_AREA_RANGE || partIdtf->partArea == PART_AREA_INTERVAL) {
+    if (partIdtf->partArea == PART_AREA_RANGE ||
+        partIdtf->partArea == PART_AREA_INTERVAL ||
+        partIdtf->partArea == PART_AREA_LIST ||
+        partIdtf->partArea == PART_AREA_HASH) {
         SetLocktagPartitionOid(&tag, partrelid, partid);
     }
 
     (void)LockAcquire(&tag, lockmode, true, false);
 }
+
 /*
  * UnLockPartitionVacuumForSession
  */
-void UnLockPartitionVacuumForSession(PartitionIdentifier *partIdtf, Oid partrelid, Oid partid, LOCKMODE lockmode)
+void UnLockPartitionVacuumForSession(PartitionIdentifier* partIdtf, Oid partrelid, Oid partid, LOCKMODE lockmode)
 {
     LOCKTAG tag;
 
-    if (partIdtf->partArea == PART_AREA_RANGE || partIdtf->partArea == PART_AREA_INTERVAL) {
+    if (partIdtf->partArea == PART_AREA_RANGE ||
+        partIdtf->partArea == PART_AREA_INTERVAL ||
+        partIdtf->partArea == PART_AREA_LIST ||
+        partIdtf->partArea == PART_AREA_HASH) {
         SetLocktagPartitionOid(&tag, partrelid, partid);
     }
 

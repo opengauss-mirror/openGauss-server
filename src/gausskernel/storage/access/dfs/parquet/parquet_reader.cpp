@@ -17,7 +17,7 @@
  *
  *
  * IDENTIFICATION
- *         src/gausskernel/storage/access/dfs/parquet/parquet_reader.cpp
+ *    src/gausskernel/storage/access/dfs/parquet/parquet_reader.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -28,12 +28,12 @@
 #include "knl/knl_variable.h"
 #include "utils/memutils.h"
 #include "optimizer/predtest.h"
+#include "access/dfs/dfs_common.h"
 #include "access/dfs/dfs_query.h"
 #include "access/dfs/dfs_stream_factory.h"
 
 namespace dfs {
 namespace reader {
-
 // ParquetReaderImpl
 class ParquetReaderImpl {
 public:
@@ -382,9 +382,10 @@ void ParquetReaderImpl::buildStructReader()
     }
     DFS_CATCH();
 
-    DFS_ERRREPORT_WITHARGS("Error occurs while creating an parquet reader for file %s because of %s, "
-                           "detail can be found in dn log of %s.",
-                           MOD_PARQUET, m_currentFilePath);
+    DFS_ERRREPORT_WITHARGS(
+        "Error occurs while creating an parquet reader for file %s because of %s, "
+        "detail can be found in dn log of %s.",
+        MOD_PARQUET, m_currentFilePath);
 
     Assert(m_fileReader != NULL);
 

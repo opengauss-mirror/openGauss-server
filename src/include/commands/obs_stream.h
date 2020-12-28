@@ -32,7 +32,7 @@
 #include "storage/parser.h"
 #include "commands/copy.h"
 #include "commands/gds_stream.h"
-#include "storage/buffile.h"
+#include "storage/buf/buffile.h"
 
 class OBSStream : public BulkLoadStream {
 public:
@@ -58,7 +58,7 @@ public:
     void VerifyAddr();
 
     /* Getter & Setter */
-    inline GDS::Parser* GetOBSParser()
+    inline GDS::Parser* GetOBSParser() const
     {
         Assert(m_parser != NULL);
         return this->m_parser;
@@ -67,7 +67,7 @@ public:
     void set_parser_chunksize(uint32_t chunksize);
     void set_source_obs_copy_options(ObsCopyOptions* options);
 
-    const ObsCopyOptions* get_obs_copy_options(void) const;
+    const ObsCopyOptions* get_obs_copy_options(void);
     void set_obs_copy_options(ObsCopyOptions* options);
 
     const char* StartNewSegment(void);

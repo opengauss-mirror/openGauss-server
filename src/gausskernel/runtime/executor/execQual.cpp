@@ -39,6 +39,7 @@
 
 #include "access/nbtree.h"
 #include "access/tupconvert.h"
+#include "access/tableam.h"
 #include "catalog/pg_type.h"
 #include "commands/typecmds.h"
 #include "executor/execdebug.h"
@@ -60,11 +61,13 @@
 #include "access/hash.h"
 #include "access/transam.h"
 #ifdef PGXC
+#include "pgxc/groupmgr.h"
 #include "pgxc/pgxc.h"
 #endif
 #include "optimizer/streamplan.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/executer_gstrace.h"
+#include "commands/trigger.h"
 
 /* static function decls */
 static Datum ExecEvalArrayRef(ArrayRefExprState* astate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
@@ -528,6 +531,8 @@ static Datum ExecEvalScalarVar(ExprState* exprstate, ExprContext* econtext, bool
             break;
     }
 
+    Assert(slot != NULL);
+
     attnum = variable->varattno;
 
     /* This was checked by ExecInitExpr */
@@ -535,13 +540,13 @@ static Datum ExecEvalScalarVar(ExprState* exprstate, ExprContext* econtext, bool
 
     /*
      * If it's a user attribute, check validity (bogus system attnums will be
-     * caught inside slot_getattr).  What we have to check for here is the
+     * caught inside table's getattr).  What we have to check for here is the
      * possibility of an attribute having been changed in type since the plan
      * tree was created.  Ideally the plan will get invalidated and not
      * re-used, but just in case, we keep these defenses.  Fortunately it's
      * sufficient to check once on the first time through.
      *
-     * Note: we allow a reference to a dropped attribute.  slot_getattr will
+     * Note: we allow a reference to a dropped attribute.  table's getattr will
      * force a NULL result in such cases.
      *
      * Note: ideally we'd check typmod as well as typid, but that seems
@@ -579,7 +584,7 @@ static Datum ExecEvalScalarVar(ExprState* exprstate, ExprContext* econtext, bool
     exprstate->evalfunc = ExecEvalScalarVarFast;
 
     /* Fetch the value from the slot */
-    return slot_getattr(slot, attnum, isNull);
+    return tableam_tslot_getattr(slot, attnum, isNull);
 }
 
 /* ----------------------------------------------------------------
@@ -615,8 +620,9 @@ static Datum ExecEvalScalarVarFast(ExprState* exprstate, ExprContext* econtext, 
 
     attnum = variable->varattno;
 
+    Assert(slot != NULL);
     /* Fetch the value from the slot */
-    return slot_getattr(slot, attnum, isNull);
+    return tableam_tslot_getattr(slot, attnum, isNull);
 }
 
 /* ----------------------------------------------------------------
@@ -915,11 +921,10 @@ static Datum ExecEvalWholeRowSlow(
 
         if (!vattr->attisdropped)
             continue; /* already checked non-dropped cols */
-        if (heap_attisnull(tuple, i + 1, tupleDesc))
+        if (tableam_tops_tuple_attisnull(tuple, i + 1, tupleDesc))
             continue; /* null is always okay */
         if (vattr->attlen != sattr->attlen || vattr->attalign != sattr->attalign)
-            ereport(ERROR,
-                (errcode(ERRCODE_DATATYPE_MISMATCH),
+            ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
                     errmsg("table row type and query-specified row type do not match"),
                     errdetail("Physical storage mismatch on dropped attribute at ordinal position %d.", i + 1)));
     }
@@ -1124,7 +1129,7 @@ Datum GetAttributeByNum(HeapTupleHeader tuple, AttrNumber attrno, bool* isNull)
     if (attrno == -3 || attrno == -5) {
         elog(WARNING, "system attribute xmin or xmax,  the results about this attribute are untrustworthy.");
     }
-    result = heap_getattr(&tmptup, attrno, tupDesc, isNull);
+    result = tableam_tops_tuple_getattr(&tmptup, attrno, tupDesc, isNull);
 
     ReleaseTupleDesc(tupDesc);
 
@@ -1191,7 +1196,7 @@ Datum GetAttributeByName(HeapTupleHeader tuple, const char* attname, bool* isNul
     if (attrno == -3 || attrno == -5) {
         elog(WARNING, "system attribute \"%s\",  the results about this attribute are untrustworthy.", attname);
     }
-    result = heap_getattr(&tmptup, attrno, tupDesc, isNull);
+    result = tableam_tops_tuple_getattr(&tmptup, attrno, tupDesc, isNull);
 
     ReleaseTupleDesc(tupDesc);
 
@@ -1389,7 +1394,7 @@ static void init_fcache(
                 fcache->funcReturnsTuple = true;
             } else if (functypclass == TYPEFUNC_SCALAR) {
                 /* Base data type, i.e. scalar */
-                tupdesc = CreateTemplateTupleDesc(1, false);
+                tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
                 TupleDescInitEntry(tupdesc, (AttrNumber)1, NULL, funcrettype, -1, 0);
                 fcache->funcResultDesc = tupdesc;
                 fcache->funcReturnsTuple = false;
@@ -1693,8 +1698,7 @@ restart:
     if (fcache->funcResultStore) {
         /* it was provided before ... */
         if (unlikely(isDone == NULL)) {
-            ereport(ERROR,
-                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+            ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
                     errmsg("set-valued function called in context that cannot accept a set")));
         }
         if (tuplestore_gettupleslot(fcache->funcResultStore, true, false, fcache->funcResultSlot)) {
@@ -1705,7 +1709,9 @@ restart:
                 return ExecFetchSlotTupleDatum(fcache->funcResultSlot);
             } else {
                 /* Extract the first column and return it as a scalar. */
-                return slot_getattr(fcache->funcResultSlot, 1, isNull);
+                Assert(fcache->funcResultSlot != NULL);
+                /* Get the Table Accessor Method*/
+                return tableam_tslot_getattr(fcache->funcResultSlot, 1, isNull);
             }
         }
         /* Exhausted the tuplestore, so clean up */
@@ -1741,8 +1747,9 @@ restart:
         /* init argCursor to store in-args cursor info on ExprContext*/
         fcinfo->refcursor_data.argCursor = (Cursor_Data*)palloc0(sizeof(Cursor_Data) * fcinfo->nargs);
         var_dno = (int*)palloc0(sizeof(int) * fcinfo->nargs);
-        int rc = memset_s(var_dno, sizeof(int) * fcinfo->nargs, -1, sizeof(int) * fcinfo->nargs);
-        securec_check(rc, "\0", "\0");
+        for (i = 0; i < fcinfo->nargs; i++) {
+            var_dno[i] = -1;
+        }
     }
 
     arguments = fcache->args;
@@ -1757,8 +1764,7 @@ restart:
             if (isDone != NULL)
                 *isDone = ExprEndResult;
             else
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("set-valued function called in context that cannot accept a set")));
             return (Datum)0;
         }
@@ -1779,8 +1785,7 @@ restart:
          * accept one.
          */
         if (isDone == NULL)
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("set-valued function called in context that cannot accept a set")));
 
         /*
@@ -1888,10 +1893,8 @@ restart:
 
                     if (estate->cursor_return_data != NULL) {
                         for (i = 0; i < fcinfo->refcursor_data.return_number; i++) {
-                            int rc = memcpy_s(&estate->cursor_return_data[i],
-                                sizeof(Cursor_Data),
-                                &fcinfo->refcursor_data.returnCursor[i],
-                                sizeof(Cursor_Data));
+                            int rc = memcpy_s(&estate->cursor_return_data[i], sizeof(Cursor_Data),
+                                &fcinfo->refcursor_data.returnCursor[i], sizeof(Cursor_Data));
                             securec_check(rc, "\0", "\0");
                         }
                     }
@@ -1928,8 +1931,7 @@ restart:
             } else if (rsinfo.returnMode == SFRM_Materialize) {
                 /* check we're on the same page as the function author */
                 if (rsinfo.isDone != ExprSingleResult)
-                    ereport(ERROR,
-                        (errcode(ERRCODE_E_R_I_E_SRF_PROTOCOL_VIOLATED),
+                    ereport(ERROR,  (errcode(ERRCODE_E_R_I_E_SRF_PROTOCOL_VIOLATED),
                             errmsg("table-function protocol for materialize mode was not followed")));
                 if (rsinfo.setResult != NULL) {
                     /* prepare to return values from the tuplestore */
@@ -1944,8 +1946,7 @@ restart:
                 *isNull = true;
                 result = (Datum)0;
             } else {
-                ereport(ERROR,
-                    (errcode(ERRCODE_E_R_I_E_SRF_PROTOCOL_VIOLATED),
+                ereport(ERROR, (errcode(ERRCODE_E_R_I_E_SRF_PROTOCOL_VIOLATED),
                         errmsg("unrecognized table-function returnMode: %d", (int)rsinfo.returnMode)));
             }
 
@@ -2010,10 +2011,8 @@ restart:
     }
 
     if (has_refcursor) {
-        if (fcinfo->refcursor_data.argCursor != NULL)
-            pfree_ext(fcinfo->refcursor_data.argCursor);
-        if (var_dno != NULL)
-            pfree_ext(var_dno);
+        pfree_ext(fcinfo->refcursor_data.argCursor);
+        pfree_ext(var_dno);
     }
 
     return result;
@@ -2042,51 +2041,66 @@ static Datum ExecMakeFunctionResultNoSets(
     PgStat_FunctionCallUsage fcusage;
     int i;
     int* var_dno = NULL;
-    FunctionScanState* node = NULL;
-    HeapTuple tup;
-    FuncExpr* fexpr = NULL;
-    bool savedIsStp = u_sess->SPI_cxt.is_stp;
+
+    FunctionScanState *node = NULL;
+    HeapTuple tp;
+    FuncExpr *fexpr = NULL;
+
+    bool savedIsSTP = u_sess->SPI_cxt.is_stp;
     bool savedProConfigIsSet = u_sess->SPI_cxt.is_proconfig_set;
+    bool isNullSTP = true;
     bool proIsProcedure = false;
-    bool supportTransaction = false;
+    bool supportTranaction = false;
 
 #ifdef ENABLE_MULTIPLE_NODES
-    if (IS_PGXC_COORDINATOR) {
-        supportTransaction = true;
+    if (IS_PGXC_COORDINATOR && (t_thrd.proc->workingVersionNum  >= STP_SUPPORT_COMMIT_ROLLBACK)) {
+        supportTranaction = true;
     }
 #else
-    supportTransaction = true;
+    supportTranaction = true;
 #endif
+    bool needResetErrMsg = (u_sess->SPI_cxt.forbidden_commit_rollback_err_msg[0] == '\0');
 
-    if (supportTransaction && IsA(fcache->xprstate.expr, FuncExpr)) {
-        fexpr = (FuncExpr*)(fcache->xprstate.expr);
+    /* Only allow commit at CN, therefore only need to set atomic and
+     * relevant check at CN level.
+     */
+    if (supportTranaction && IsA(fcache->xprstate.expr, FuncExpr)) {
+        fexpr = (FuncExpr *) fcache->xprstate.expr;
         node = makeNode(FunctionScanState);
-        node->atomic = (!u_sess->SPI_cxt.is_toplevel_stp || IsTransactionBlock());
+        if (!u_sess->SPI_cxt.is_allow_commit_rollback) {
+            node->atomic = true;
+        }
+        else if (IsAfterTriggerBegin()) {
+            node->atomic = true;
+            stp_set_commit_rollback_err_msg(STP_XACT_AFTER_TRIGGER_BEGIN);
+        }
 
         /*
          * If proconfig is set we can't allow transaction commands because of the
-         * way the GUC stacking works. The transaction boundary would have to pop
-         * the proconfig setting off the stack. That restriction could be lefted
+         * way the GUC stacking works: The transaction boundary would have to pop
+         * the proconfig setting off the stack.  That restriction could be lifted
          * by redesigning the GUC nesting mechanism a bit.
          */
         Relation relation = heap_open(ProcedureRelationId, AccessShareLock);
-        tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(fexpr->funcid));
-        if (!HeapTupleIsValid(tup)) {
-            elog(ERROR, "cache lookup failed for function %u", fexpr->funcid);
+        tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(fexpr->funcid));
+        if (!HeapTupleIsValid(tp)) {
+            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                            errmsg("cache lookup failed for function %u", fexpr->funcid)));
         }
 
-        if (!heap_attisnull(tup, Anum_pg_proc_proconfig, NULL) || u_sess->SPI_cxt.is_proconfig_set) {
+        if (!heap_attisnull(tp, Anum_pg_proc_proconfig, NULL) || u_sess->SPI_cxt.is_proconfig_set) {
             u_sess->SPI_cxt.is_proconfig_set = true;
             node->atomic = true;
+            stp_set_commit_rollback_err_msg(STP_XACT_GUC_IN_OPT_CLAUSE);
         }
 
-        proIsProcedure = PROC_IS_PRO(((Form_pg_proc)GETSTRUCT(tup))->prokind);
-
+        Datum datum = heap_getattr(tp, Anum_pg_proc_prokind, RelationGetDescr(relation), &isNullSTP);
+        proIsProcedure = PROC_IS_PRO(CharGetDatum(datum));
         heap_close(relation, AccessShareLock);
 
-        /* If proisprocedure is true means it was a stored procedure. */
-        u_sess->SPI_cxt.is_stp = savedIsStp && proIsProcedure;
-        ReleaseSysCache(tup);
+        /* if proIsProcedure is ture means it was a stored procedure */
+        u_sess->SPI_cxt.is_stp = savedIsSTP && proIsProcedure;
+        ReleaseSysCache(tp);
     }
 
     /* Guard against stack overflow due to overly complex expressions */
@@ -2104,8 +2118,9 @@ static Datum ExecMakeFunctionResultNoSets(
     /* init the number of arguments to a function*/
     InitFunctionCallInfoArgs(*fcinfo, list_length(fcache->args), 1);
 
-    if (supportTransaction) {
-        fcinfo->context = (Node*)node;
+    /* Only allow commit at CN, therefore need to set callcontext in CN only */
+    if (supportTranaction) {
+        fcinfo->context = (Node *)node;
     }
 
     if (has_cursor_return) {
@@ -2120,8 +2135,9 @@ static Datum ExecMakeFunctionResultNoSets(
         /* init argCursor to store in-args cursor info on ExprContext */
         fcinfo->refcursor_data.argCursor = (Cursor_Data*)palloc0(sizeof(Cursor_Data) * fcinfo->nargs);
         var_dno = (int*)palloc0(sizeof(int) * fcinfo->nargs);
-        int rc = memset_s(var_dno, sizeof(int) * fcinfo->nargs, -1, sizeof(int) * fcinfo->nargs);
-        securec_check(rc, "\0", "\0");
+        for (i = 0; i < fcinfo->nargs; i++) {
+            var_dno[i] = -1;
+        }
     }
 
     i = 0;
@@ -2149,6 +2165,11 @@ static Datum ExecMakeFunctionResultNoSets(
         while (--i >= 0) {
             if (fcinfo->argnull[i]) {
                 *isNull = true;
+                u_sess->SPI_cxt.is_stp = savedIsSTP;
+                u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
+                if (needResetErrMsg) {
+                    stp_reset_commit_rolback_err_msg();
+                }
                 return (Datum)0;
             }
         }
@@ -2157,7 +2178,15 @@ static Datum ExecMakeFunctionResultNoSets(
     pgstat_init_function_usage(fcinfo, &fcusage);
 
     fcinfo->isnull = false;
-    result = FunctionCallInvoke(fcinfo);
+    if (u_sess->instr_cxt.global_instr != NULL && fcinfo->flinfo->fn_addr == plpgsql_call_handler) {
+        StreamInstrumentation* save_global_instr = u_sess->instr_cxt.global_instr;
+        u_sess->instr_cxt.global_instr = NULL;
+        result = FunctionCallInvoke(fcinfo);
+        u_sess->instr_cxt.global_instr = save_global_instr;
+    }
+    else {
+        result = FunctionCallInvoke(fcinfo);
+    }
     *isNull = fcinfo->isnull;
 
     if (has_refcursor && econtext->plpgsql_estate != NULL) {
@@ -2202,9 +2231,11 @@ static Datum ExecMakeFunctionResultNoSets(
             pfree_ext(var_dno);
     }
 
-    u_sess->SPI_cxt.is_stp = savedIsStp;
+    u_sess->SPI_cxt.is_stp = savedIsSTP;
     u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
-
+    if (needResetErrMsg) {
+        stp_reset_commit_rolback_err_msg();
+    }
     return result;
 }
 
@@ -2287,52 +2318,62 @@ Tuplestorestate* ExecMakeTableFunctionResult(
     bool first_time = true;
     int* var_dno = NULL;
     bool has_refcursor = false;
-    HeapTuple tup;
-    FuncExpr* fexpr = NULL;
-    bool savedIsStp = u_sess->SPI_cxt.is_stp;
-    bool savedProConfigIsSet = u_sess->SPI_cxt.is_proconfig_set;
-    bool proIsProcedure = false;
-    bool supportTransaction = false;
 
-    callerContext = CurrentMemoryContext;
+    HeapTuple tp;
+    FuncExpr *fexpr = NULL;
+    bool savedIsSTP = u_sess->SPI_cxt.is_stp;
+    bool savedProConfigIsSet = u_sess->SPI_cxt.is_proconfig_set;
+    bool isNull = true;
+    bool proIsProcedure = false;
+    bool supportTranaction = false;
 
 #ifdef ENABLE_MULTIPLE_NODES
-    if (IS_PGXC_COORDINATOR) {
-        supportTransaction = true;
+    if (IS_PGXC_COORDINATOR && (t_thrd.proc->workingVersionNum  >= STP_SUPPORT_COMMIT_ROLLBACK)) {
+        supportTranaction = true;
     }
 #else
-    supportTransaction = true;
+    supportTranaction = true;
 #endif
+    bool needResetErrMsg = (u_sess->SPI_cxt.forbidden_commit_rollback_err_msg[0] == '\0');
 
-    if (supportTransaction && IsA(funcexpr->expr, FuncExpr)) {
-        fexpr = (FuncExpr*)(funcexpr->expr);
-        node->atomic = (!u_sess->SPI_cxt.is_toplevel_stp || IsTransactionBlock());
+    /* Only allow commit at CN, therefore only need to set atomic and relevant check at CN level. */
+    if (supportTranaction && IsA(funcexpr->expr, FuncExpr)) {
+        fexpr = (FuncExpr*)funcexpr->expr;
+        if (!u_sess->SPI_cxt.is_allow_commit_rollback) {
+            node->atomic = true;
+        }
+        else if (IsAfterTriggerBegin()) {
+            node->atomic = true;
+            stp_set_commit_rollback_err_msg(STP_XACT_AFTER_TRIGGER_BEGIN);
+        }
 
         /*
          * If proconfig is set we can't allow transaction commands because of the
-         * way the GUC stacking works. The transaction boundary would have to pop
-         * the proconfig setting off the stack. That restriction could be lefted
+         * way the GUC stacking works: The transaction boundary would have to pop
+         * the proconfig setting off the stack.  That restriction could be lifted
          * by redesigning the GUC nesting mechanism a bit.
          */
         Relation relation = heap_open(ProcedureRelationId, AccessShareLock);
-        tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(fexpr->funcid));
-        if (!HeapTupleIsValid(tup)) {
+        tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(fexpr->funcid));
+        if (!HeapTupleIsValid(tp)) {
             elog(ERROR, "cache lookup failed for function %u", fexpr->funcid);
         }
-
-        if (!heap_attisnull(tup, Anum_pg_proc_proconfig, NULL) || u_sess->SPI_cxt.is_proconfig_set) {
-            u_sess->SPI_cxt.is_proconfig_set = true;
-            node->atomic = true;
-        }
-
-        proIsProcedure = PROC_IS_PRO(((Form_pg_proc)GETSTRUCT(tup))->prokind);
-
+		
+        Datum datum = heap_getattr(tp, Anum_pg_proc_prokind, RelationGetDescr(relation), &isNull);
+        proIsProcedure = PROC_IS_PRO(CharGetDatum(datum));
         heap_close(relation, AccessShareLock);
 
-        /* If proisprocedure is true means it was a stored procedure. */
-        u_sess->SPI_cxt.is_stp = savedIsStp && proIsProcedure;
-        ReleaseSysCache(tup);
-    } 
+        /* if proIsProcedure means it was a stored procedure */
+        u_sess->SPI_cxt.is_stp = savedIsSTP && proIsProcedure;
+        if (!heap_attisnull(tp, Anum_pg_proc_proconfig, NULL) || u_sess->SPI_cxt.is_proconfig_set) {
+            u_sess->SPI_cxt.is_proconfig_set = true;
+            node->atomic = true;
+            stp_set_commit_rollback_err_msg(STP_XACT_GUC_IN_OPT_CLAUSE);
+        }
+        ReleaseSysCache(tp);
+    }
+
+    callerContext = CurrentMemoryContext;
 
     if (unlikely(funcexpr == NULL)) {
         ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("The input function expression is NULL.")));
@@ -2448,11 +2489,7 @@ Tuplestorestate* ExecMakeTableFunctionResult(
     } else {
         /* Treat funcexpr as a generic expression */
         direct_function_call = false;
-        if (supportTransaction) {
-            InitFunctionCallInfoData(fcinfo, NULL, 0, InvalidOid, (Node*)node, NULL);
-        } else {
-            InitFunctionCallInfoData(fcinfo, NULL, 0, InvalidOid, NULL, NULL);
-        }
+        InitFunctionCallInfoData(fcinfo, NULL, 0, InvalidOid, (Node*)node, NULL);
     }
 
     /*
@@ -2567,7 +2604,7 @@ Tuplestorestate* ExecMakeTableFunctionResult(
                     /*
                      * Scalar type, so make a single-column descriptor
                      */
-                    tupdesc = CreateTemplateTupleDesc(1, false);
+                    tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
                     TupleDescInitEntry(tupdesc, (AttrNumber)1, "column", funcrettype, -1, 0);
                 }
                 tupstore = tuplestore_begin_heap(randomAccess, false, u_sess->attr.attr_memory.work_mem);
@@ -2693,8 +2730,13 @@ no_function_result:
             pfree_ext(var_dno);
     }
 
-    u_sess->SPI_cxt.is_stp = savedIsStp;
+    /* reset the u_sess->SPI_cxt.is_stp, u_sess->SPI_cxt.is_proconfig_set 
+       and error message value */
+    u_sess->SPI_cxt.is_stp = savedIsSTP;
     u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
+    if (needResetErrMsg) {
+        stp_reset_commit_rolback_err_msg();
+    }
 
     /* All done, pass back the tuplestore */
     return rsinfo.setResult;
@@ -3654,7 +3696,7 @@ static Datum ExecEvalRow(RowExprState* rstate, ExprContext* econtext, bool* isNu
         i++;
     }
 
-    tuple = heap_form_tuple(rstate->tupdesc, values, isnull);
+    tuple = (HeapTuple)tableam_tops_form_tuple(rstate->tupdesc, values, isnull, HEAP_TUPLE);
 
     pfree_ext(values);
     pfree_ext(isnull);
@@ -4094,7 +4136,7 @@ static Datum ExecEvalNullTest(NullTestState* nstate, ExprContext* econtext, bool
             /* ignore dropped columns */
             if (tupDesc->attrs[att - 1]->attisdropped)
                 continue;
-            if (heap_attisnull(&tmptup, att, tupDesc)) {
+            if (tableam_tops_tuple_attisnull(&tmptup, att, tupDesc)) {
                 /* null field disproves IS NOT NULL */
                 if (ntest->nulltesttype == IS_NOT_NULL)
                     return BoolGetDatum(false);
@@ -4183,6 +4225,10 @@ static Datum ExecEvalHashFilter(HashFilterState* hstate, ExprContext* econtext, 
             hasNonNullValue = true;
         }
     }
+
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
 
     /* If has non null value, it should get nodeId and deside if need filter the value or not. */
     if (hasNonNullValue) {
@@ -4428,7 +4474,7 @@ static Datum ExecEvalFieldSelect(FieldSelectState* fstate, ExprContext* econtext
     tmptup.t_len = HeapTupleHeaderGetDatumLength(tuple);
     tmptup.t_data = tuple;
 
-    result = heap_getattr(&tmptup, fieldnum, tupDesc, isNull);
+    result = tableam_tops_tuple_getattr(&tmptup, fieldnum, tupDesc, isNull);
     return result;
 }
 
@@ -4483,7 +4529,7 @@ static Datum ExecEvalFieldStore(FieldStoreState* fstate, ExprContext* econtext, 
         HeapTupleSetZeroBase(&tmptup);
         tmptup.t_data = tuphdr;
 
-        heap_deform_tuple(&tmptup, tupDesc, values, isnull);
+        tableam_tops_deform_tuple(&tmptup, tupDesc, values, isnull);
     } else {
         /* Convert null input tuple into an all-nulls row */
         rc = memset_s(isnull, tupDesc->natts * sizeof(bool), true, tupDesc->natts * sizeof(bool));
@@ -4521,7 +4567,7 @@ static Datum ExecEvalFieldStore(FieldStoreState* fstate, ExprContext* econtext, 
     econtext->caseValue_datum = save_datum;
     econtext->caseValue_isNull = save_isNull;
 
-    tuple = heap_form_tuple(tupDesc, values, isnull);
+    tuple = (HeapTuple)tableam_tops_form_tuple(tupDesc, values, isnull, HEAP_TUPLE);
 
     pfree_ext(values);
     pfree_ext(isnull);
@@ -5093,7 +5139,7 @@ ExprState* ExecInitExpr(Expr* node, PlanState* parent)
             /* Build tupdesc to describe result tuples */
             if (rowexpr->row_typeid == RECORDOID) {
                 /* generic record, use runtime type assignment */
-                rstate->tupdesc = ExecTypeFromExprList(rowexpr->args, rowexpr->colnames);
+                rstate->tupdesc = ExecTypeFromExprList(rowexpr->args, rowexpr->colnames, TAM_HEAP);
                 BlessTupleDesc(rstate->tupdesc);
                 /* we won't need to redo this at runtime */
             } else {
@@ -5656,10 +5702,6 @@ static bool ExecTargetList(List* targetlist, ExprContext* econtext, Datum* value
  */
 TupleTableSlot* ExecProject(ProjectionInfo* projInfo, ExprDoneCond* isDone)
 {
-    TupleTableSlot* slot = NULL;
-    ExprContext* econtext = NULL;
-    int numSimpleVars;
-
     /*
      * sanity checks
      */
@@ -5668,8 +5710,8 @@ TupleTableSlot* ExecProject(ProjectionInfo* projInfo, ExprDoneCond* isDone)
     /*
      * get the projection info we want
      */
-    slot = projInfo->pi_slot;
-    econtext = projInfo->pi_exprContext;
+    TupleTableSlot *slot = projInfo->pi_slot;
+    ExprContext *econtext = projInfo->pi_exprContext;
 
     /* Assume single result row until proven otherwise */
     if (isDone != NULL)
@@ -5687,18 +5729,23 @@ TupleTableSlot* ExecProject(ProjectionInfo* projInfo, ExprDoneCond* isDone)
      * Var-extraction loops below depend on this, and we are also prefetching
      * all attributes that will be referenced in the generic expressions.
      */
-    if (projInfo->pi_lastInnerVar > 0)
-        slot_getsomeattrs(econtext->ecxt_innertuple, projInfo->pi_lastInnerVar);
-    if (projInfo->pi_lastOuterVar > 0)
-        slot_getsomeattrs(econtext->ecxt_outertuple, projInfo->pi_lastOuterVar);
-    if (projInfo->pi_lastScanVar > 0)
-        slot_getsomeattrs(econtext->ecxt_scantuple, projInfo->pi_lastScanVar);
+    if (projInfo->pi_lastInnerVar > 0) {
+        tableam_tslot_getsomeattrs(econtext->ecxt_innertuple, projInfo->pi_lastInnerVar);
+    }
+
+    if (projInfo->pi_lastOuterVar > 0) {
+        tableam_tslot_getsomeattrs(econtext->ecxt_outertuple, projInfo->pi_lastOuterVar);
+    }
+
+    if (projInfo->pi_lastScanVar > 0) {
+    	tableam_tslot_getsomeattrs(econtext->ecxt_scantuple, projInfo->pi_lastScanVar);
+    }
 
     /*
      * Assign simple Vars to result by direct extraction of fields from source
      * slots ... a mite ugly, but fast ...
      */
-    numSimpleVars = projInfo->pi_numSimpleVars;
+    int numSimpleVars = projInfo->pi_numSimpleVars;
     if (numSimpleVars > 0) {
         Datum* values = slot->tts_values;
         bool* isnull = slot->tts_isnull;
@@ -5729,6 +5776,7 @@ TupleTableSlot* ExecProject(ProjectionInfo* projInfo, ExprDoneCond* isDone)
                 int varOutputCol = varOutputCols[i] - 1;
 
                 Assert (varNumber < varSlot->tts_tupleDescriptor->natts);
+                Assert (varOutputCol < slot->tts_tupleDescriptor->natts);
                 values[varOutputCol] = varSlot->tts_values[varNumber];
                 isnull[varOutputCol] = varSlot->tts_isnull[varNumber];
             }

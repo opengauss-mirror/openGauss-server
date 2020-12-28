@@ -1,0 +1,103 @@
+CREATE DATABASE wlm_test_logic_cluster;
+\c wlm_test_logic_cluster
+set resource_track_duration=0;
+set query_band='wlm_test_logic_cluster_test';
+ALTER NODE GROUP group1 SET DEFAULT;
+\! gs_cgroup -c -N vc1 > /dev/null 2>&1
+\! gs_cgroup -c -N vc2 > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "CREATE NODE GROUP vc1 WITH (datanode1,datanode2) VCGROUP;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "CREATE NODE GROUP vc2 WITH (datanode4,datanode3) VCGROUP;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "CREATE RESOURCE POOL rp1 WITH (nodegroup="vc3");"
+ERROR:  The node group vc3 is not exist.
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "select count(*) from pgxc_group where group_name like 'vc_';"
+ count 
+-------
+     2
+(1 row)
+
+--output
+CREATE USER vc1 password 'gauss@123' node group vc1 vcadmin;
+CREATE USER u1 password 'gauss@123' node group vc1;
+CREATE USER u2 password 'gauss@123' node group vc1;
+CREATE USER u3 password 'gauss@123';
+CREATE USER vc2 password 'gauss@123';
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "ALTER USER  vc2 vcadmin;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "GRANT vc2 TO u3;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "ALTER USER  vc2 node group vc2 vcadmin;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "REVOKE vc2 FROM u3;"
+REVOKE ROLE
+--output
+ALTER USER  vc2 node group vc2 vcadmin;
+ALTER USER  vc2 node group vc2 novcadmin;
+GRANT u1 TO vc1;
+GRANT u2 TO vc1;
+GRANT u3 TO vc1;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "GRANT vc1 TO vc2;"
+ERROR:  Role "vc2" can only attach to one node group.
+--output
+GRANT usage on node group vc1 TO u3;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "create table t1 (a int);"
+CREATE TABLE
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "create table t2 (a int);"
+CREATE TABLE
+--output
+GRANT all on t1 TO u3;
+GRANT all on t2 TO u1;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "ALTER USER vc1 RESOURCE POOL 'rp3';"
+ERROR:  Resource Pool "rp3": object not defined.
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "ALTER USER vc1 RESOURCE POOL 'default_pool';" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "SET default_storage_nodegroup='group1';" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "CREATE TABLE tmp1 (a int);" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "DROP TABLE tmp1;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "SET default_storage_nodegroup='installation';" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "CREATE FOREIGN TABLE gds_ft_1(id integer,name varchar2(20)) server gsmpp_server options (location 'gsfs://127.0.0.1:10000/*', format 'csv', delimiter ',');" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "CREATE FOREIGN TABLE IF NOT EXISTS gds_ft_1(id integer,name varchar2(20)) server gsmpp_server options (location 'gsfs://127.0.0.1:10000/*', format 'csv', delimiter ',');" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "DROP FOREIGN TABLE gds_ft_1;" > /dev/null 2>&1
+--clear
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "drop table t1;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "drop node group vc1;"
+ERROR:  cannot drop 'vc1' because other objects depend on it
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "drop user u1;"
+ERROR:  role "u1" cannot be dropped because some objects depend on it
+DETAIL:  privileges for table t2
+--output
+drop table t2;
+drop user u1;
+drop user u2;
+drop user u3 cascade;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "select count(1) from all_users where username='u3';"
+ count 
+-------
+     0
+(1 row)
+
+--output
+drop user vc1;
+drop user vc2;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "select count(1) from all_users where username='vc1';"
+ count 
+-------
+     0
+(1 row)
+
+--output
+drop node group vc1;
+drop node group vc2;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_logic_cluster -c "select count(*) from pgxc_group where group_name like 'vc_';"
+ count 
+-------
+     0
+(1 row)
+
+--output
+drop node group elastic_group;
+\! gs_cgroup -d -N vc1 > /dev/null 2>&1
+\! gs_cgroup -d -N vc2 > /dev/null 2>&1
+\c postgres
+drop database wlm_test_logic_cluster;
+\c regression
+--end of file

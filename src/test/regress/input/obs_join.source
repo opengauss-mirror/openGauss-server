@@ -1,0 +1,236 @@
+CREATE SERVER obs_server_info FOREIGN DATA WRAPPER dfs_fdw OPTIONS (address '@obshostname@', type 'obs', encrypt 'off', access_key '@ak@', secret_access_key '@sk@');
+
+--informational primary key
+CREATE FOREIGN TABLE obs_tbl_1 (a int primary key not enforced, b text, c text) 
+SERVER obs_server_info
+OPTIONS (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+distribute by roundrobin;
+
+--informational unique
+CREATE FOREIGN TABLE obs_tbl_2 (a int unique not enforced, b text, c text) 
+SERVER obs_server_info
+OPTIONS (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+distribute by roundrobin;
+
+--multi-unique
+CREATE FOREIGN TABLE obs_tbl_3 (a int unique not enforced, b text unique not enforced, c text) 
+SERVER obs_server_info 
+OPTIONS (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+distribute by roundrobin;
+
+CREATE FOREIGN TABLE obs_tbl_4 (a int, b text, c text) 
+SERVER obs_server_info 
+OPTIONS (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+distribute by roundrobin;
+
+alter foreign table obs_tbl_4 add constraint unique_a unique (a) not enforced;
+\d+ obs_tbl_4
+
+alter foreign table obs_tbl_4 drop constraint unique_a;
+\d+ obs_tbl_4
+
+alter foreign table obs_tbl_4 add  unique (a) not enforced;
+alter foreign table obs_tbl_4 add  unique (b) not enforced;
+
+alter foreign table obs_tbl_4 add  unique (a) not enforced DISABLE QUERY OPTIMIZATION;
+alter foreign table obs_tbl_4 add  unique (b) not enforced DISABLE QUERY OPTIMIZATION;
+--unsupport Multi-column 
+alter foreign table obs_tbl_4 add  unique (a, b) not enforced;
+alter foreign table obs_tbl_4 add  primary key (a, b) not enforced;
+--unsupport enforced
+alter foreign table obs_tbl_4 add unique (a);
+
+--unsupport Multi primary key
+CREATE FOREIGN TABLE obs_tbl_5(a int primary key not enforced, b text primary key not enforced, c text) 
+SERVER obs_server_info 
+OPTIONS (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+distribute by roundrobin;
+
+--unsupport primary key include Multi column
+CREATE FOREIGN TABLE obs_tbl_5(a int, b int, primary key(a, b) not enforced) 
+SERVER obs_server_info 
+OPTIONS (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+distribute by roundrobin;
+
+--not null
+CREATE FOREIGN TABLE obs_tbl_6 (a int not null, b text, c text) 
+SERVER obs_server_info 
+OPTIONS (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+distribute by roundrobin;
+\d obs_tbl_6
+alter foreign table obs_tbl_6 alter b set not null;
+\d obs_tbl_6
+alter foreign table obs_tbl_6 alter b drop not null;
+\d obs_tbl_6
+
+--error:
+--unsupport enforced
+CREATE FOREIGN TABLE obs_tbl_7 (a int unique, b text, c text) 
+SERVER obs_server_info 
+OPTIONS (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+distribute by roundrobin;
+
+CREATE FOREIGN TABLE obs_tbl_8 (a int primary key, b text, c text) 
+SERVER obs_server_info 
+OPTIONS (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+distribute by roundrobin;
+
+--common table unsupport not enforced constraint
+CREATE TABLE plain_tbl_1 (a int primary key not enforced, b int);
+
+--delete not null, table include primary key
+--not in 
+explain (costs off)select * from obs_tbl_1 as t1 where t1.a not in (select t2.a from obs_tbl_1 as t2 join obs_tbl_1 as t3 on (1 = 1));
+explain (costs off)select * from obs_tbl_1 as t1 where t1.a not in (select a from obs_tbl_1);
+--base relation is not null
+explain (costs off)select * from obs_tbl_1 as t1 where t1.a is not null;
+explain (costs off)select * from obs_tbl_1 as t1 where t1.a is not null and t1.b < 10;
+explain (costs off)select * from obs_tbl_1 as t1 where (t1.a is not null and t1.b > 1) and t1.b < 10;
+explain (costs off)select * from obs_tbl_1 as t1 where (t1.a is not null or t1.b > 1) and t1.b < 10;
+explain (costs off)select * from obs_tbl_1 as t1 where (t1.a is not null or t1.b > 1) or t1.b < 10;
+explain (costs off)select * from obs_tbl_1 as t1 where (t1.a is not null or t1.b > 1) or (t1.b < 10 and t1.b > 2);
+explain (costs off)select * from obs_tbl_1 as t1 where (t1.a is not null or t1.b > 1) and (t1.b < 10 and t1.b > 2);
+
+--not in,  table include not null
+explain (costs off)select * from obs_tbl_6 as t1 where t1.a not in (select t2.a from obs_tbl_6 as t2 join obs_tbl_6 as t3 on (1 = 1));
+explain (costs off)select * from obs_tbl_6 as t1 where t1.a not in (select a from obs_tbl_6);
+--base relation is not null
+explain (costs off)select * from obs_tbl_6 as t1 where t1.a is not null;
+explain (costs off)select * from obs_tbl_6 as t1 where t1.a is not null and t1.b < 10;
+explain (costs off)select * from obs_tbl_6 as t1 where (t1.a is not null and t1.b > 1) and t1.b < 10;
+explain (costs off)select * from obs_tbl_6 as t1 where (t1.a is not null or t1.b > 1) and t1.b < 10;
+explain (costs off)select * from obs_tbl_6 as t1 where (t1.a is not null or t1.b > 1) or t1.b < 10;
+explain (costs off)select * from obs_tbl_6 as t1 where (t1.a is not null or t1.b > 1) or (t1.b < 10 and t1.b > 2);
+explain (costs off)select * from obs_tbl_6 as t1 where (t1.a is not null or t1.b > 1) and (t1.b < 10 and t1.b > 2);
+
+--scan optimize
+explain (costs off)select * from obs_tbl_1 as t1 where t1.a = 10 and t1.b < 20;
+  
+explain (costs off)select * from obs_tbl_1 as t1 where t1.a + 1 = 10 and t1.b < 20;
+  
+explain (costs off)select * from obs_tbl_1 as t1 where (1 + t1.a - 10) + 1 = 10 and t1.b < 20;
+  
+explain (costs off)select * from obs_tbl_1 as t1 where (2 * t1.a - 10) + 1 = 10 and t1.b < 20;
+  
+explain (costs off)select * from obs_tbl_1 as t1 where (2 * (t1.a - 10)) + 1 = 10 and t1.b < 20;
+  
+explain (costs off)select * from obs_tbl_1 as t1 where ((2 * 0) + (t1.a - 10)) + 1 = 10 and t1.b < 20;
+  
+--can not optimize
+explain (costs off)select * from obs_tbl_1 as t1 where (0 * t1.a) + 1 = 10 and t1.b < 20;
+  
+explain (costs off)select * from obs_tbl_1 as t1 where t1.a * 0 = 10 and t1.b < 20;
+  
+explain (costs off)select * from obs_tbl_1 as t1 where t1.a + t1.b = 10 and t1.b < 20;
+  
+explain (costs off)select * from obs_tbl_1 as t1 where t1.a + t1.a = 10 and t1.b < 20;
+  
+explain (costs off)select * from obs_tbl_1 as t1 where t1.a = t1.b and t1.b < 20;
+
+--join optimize
+
+set enable_hashjoin = off;
+
+explain (costs off)select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a + 1= t2.a and t1.b < 20;
+
+explain (costs off)select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a * 2 = t2.a and t1.b < 20;
+explain (costs off)select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a * 2 = t2.a * 2 and t1.b < 20;
+explain (costs off)select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a * 2 = t2.a * 2 and t1.b < 20;
+explain (costs off)select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a * 2 = t2.a * 0 and t1.b < 20;
+explain (costs off)select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a * 2 = (1 + t2.a + 10) and t1.b < 20;
+explain (costs off)select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a * 2 = ((10 * 0) + t2.a + 10) and t1.b < 20;
+explain (costs off) select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a * 2 = (t2.a * (0 + 1)) and t1.b < 20;
+	
+--can not optimize
+--t2.b have not unique
+explain (costs off) select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a = t2.a * 2  and t1.b < 20;
+--substr not optimize
+explain (costs off) select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on substr(t1.a, 1, 1) = t2.a and t1.b < 20;
+--convert
+explain (costs off) select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a = t2.a::numeric and t1.b < 20;
+
+--no stream plan unsupport
+explain (costs off) select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a = t2.a * 2  and t1.b < 20;
+
+create foreign table obs_t1 (a INT4, b TEXT, c TEXT) 
+server obs_server_info 
+options (encoding 'utf-8', format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/')
+distribute by roundrobin;
+create table t1(a int, b int)with(orientation = column) distribute by hash(a);
+create table t1_r(a int, b int)distribute by replication;
+
+explain (costs off)select 1 from obs_t1 as t1 join obs_t1 as t2 on (t1.a = t2.a);
+explain (costs off)select 1 from obs_t1 as t1 join t1 as t2 on (t1.a = t2.a);
+explain (costs off)select 1 from obs_t1 as t1 join t1_r as t2 on (t1.a = t2.a);		
+	
+	
+explain (costs off)select t1.a, t1.b from obs_t1 as t1 join t1 as t2 on (t1.a = t2.a) group by t1.a, t1.b;
+	
+explain (costs off)select a from obs_t1 union select a from t1;
+explain (costs off)select a from obs_t1 union select a from obs_t1;	
+explain (costs off)select a from obs_t1 union all select a from obs_t1;
+explain (costs off)select a, b from obs_t1 group by a, b;
+explain (costs off)select a, sum(b) from obs_t1 group by a;
+explain (costs off)select a, count(distinct b), count(distinct c) from obs_t1 group by a;
+explain (costs off)update t1 set b = 10 where t1.a in (select a from obs_t1);
+explain (costs off)delete t1 where t1.a in (select a from obs_t1);
+explain (costs off)insert into t1 select a, b from obs_t1;
+
+explain (costs off)select a from obs_t1 intersect select a from t1;
+explain (costs off)select a from obs_t1 union select a from t1;
+explain (costs off)select a from obs_t1 union select a from obs_t1;	
+explain (costs off)select a from obs_t1 union select a from t1_r;	
+
+explain (costs off)select a from obs_t1 union all select a from obs_t1;
+explain (costs off)select a from obs_t1 union all select a from t1;
+explain (costs off)select a from obs_t1 union all select a from t1_r;
+explain (costs off)select a from obs_t1 group by rollup(a, b);
+
+drop foreign table if exists    tbl_csv_header;
+create foreign table tbl_csv_header
+(
+a int,
+b int
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obs_ddl/test_case_data/tbl_csv_header',
+    format 'csv',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+	header 'true'
+) read only;
+
+
+select * from tbl_csv_header;
+
+drop FOREIGN TABLE obs_tbl_1;
+drop FOREIGN TABLE obs_tbl_2;
+drop FOREIGN TABLE obs_tbl_3; 
+drop FOREIGN TABLE obs_tbl_4;
+drop FOREIGN TABLE obs_tbl_6; 
+drop foreign table obs_t1;
+drop table t1;
+drop table t1_r;
+
+--add llt
+drop foreign table if exists t1_analyze;
+create foreign table t1_analyze
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/test/t1.txt',
+    format 'text',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+);
+analyze t1_analyze;
+drop foreign table t1_analyze;
+drop SERVER obs_server_info;

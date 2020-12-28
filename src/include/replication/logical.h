@@ -103,4 +103,3 @@ extern void LogicalIncreaseRestartDecodingForSlot(XLogRecPtr current_lsn, XLogRe
 extern void LogicalConfirmReceivedLocation(XLogRecPtr lsn);
 extern bool filter_by_origin_cb_wrapper(LogicalDecodingContext* ctx, RepOriginId origin_id);
 #endif
-

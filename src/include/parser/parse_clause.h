@@ -20,14 +20,14 @@
 extern void transformFromClause(ParseState* pstate, List* frmList, bool isFirstNode = true, bool isCreateView = false);
 extern int setTargetTable(ParseState* pstate, RangeVar* relation, bool inh, bool alsoSource, AclMode requiredPerms);
 extern bool interpretInhOption(InhOption inhOpt);
-extern bool interpretOidsOption(List* defList, bool allowOids);
+extern bool interpretOidsOption(List* defList);
 
 extern Node* transformFromClauseItem(ParseState* pstate, Node* n, RangeTblEntry** top_rte, int* top_rti,
-    RangeTblEntry** right_rte, int* right_rti, List** relnamespace, Relids* containedRels, bool isFirstNode = true,
+    RangeTblEntry** right_rte, int* right_rti, List** relnamespace, bool isFirstNode = true,
     bool isCreateView = false, bool isMergeInto = false);
 
 extern Node* transformJoinOnClause(ParseState* pstate, JoinExpr* j, RangeTblEntry* l_rte, RangeTblEntry* r_rte,
-    List* relnamespace, Relids containedRels);
+    List* relnamespace);
 extern Node* transformWhereClause(ParseState* pstate, Node* clause, const char* constructName);
 extern Node* transformLimitClause(ParseState* pstate, Node* clause, const char* constructName);
 extern List* transformGroupClause(
@@ -45,5 +45,6 @@ extern bool targetIsInSortList(TargetEntry* tle, Oid sortop, List* sortList);
 
 extern List* addTargetToSortList(
     ParseState* pstate, TargetEntry* tle, List* sortlist, List* targetlist, SortBy* sortby, bool resolveUnknown);
+extern ParseNamespaceItem *makeNamespaceItem(RangeTblEntry *rte, bool lateral_only, bool lateral_ok);
 
 #endif /* PARSE_CLAUSE_H */

@@ -6,13 +6,13 @@ LANGUAGE SQL strict IMMUTABLE;
 DROP FUNCTION IF EXISTS PUBLIC.trunc(int, int);
 CREATE OR REPLACE FUNCTION PUBLIC.trunc(int, int)
 RETURNS int
-AS '@abs_srcdir@/regress.so','truncInt'
+AS '@libdir@/regress@DLSUFFIX@','truncInt'
 LANGUAGE c IMMUTABLE;
 
 DROP FUNCTION IF EXISTS PUBLIC.trunc(float4, int);
 CREATE OR REPLACE FUNCTION PUBLIC.trunc(float4, int)
 RETURNS float8
-AS '@abs_srcdir@/regress.so','truncFloat'
+AS '@libdir@/regress@DLSUFFIX@','truncFloat'
 LANGUAGE c IMMUTABLE;
 
 DROP FUNCTION IF EXISTS public.trunc(numeric, int);
@@ -24,37 +24,37 @@ LANGUAGE SQL strict IMMUTABLE;
 DROP FUNCTION IF EXISTS PUBLIC.TransDate(varchar(50), int, varchar(50));
 CREATE OR REPLACE FUNCTION PUBLIC.TransDate(varchar(50), int, varchar(50))
 RETURNS varchar(50)
-AS '@abs_srcdir@/regress.so','TransDate'
+AS '@libdir@/regress@DLSUFFIX@','TransDate'
 LANGUAGE c IMMUTABLE;
 
 DROP FUNCTION IF EXISTS PUBLIC.TransTimestamp(varchar(50), int, varchar(50));
 CREATE OR REPLACE FUNCTION PUBLIC.TransTimestamp(varchar(50), int, varchar(50))
 RETURNS varchar(50)
-AS '@abs_srcdir@/regress.so','TransTimestamp'
+AS '@libdir@/regress@DLSUFFIX@','TransTimestamp'
 LANGUAGE c IMMUTABLE;
 
 DROP FUNCTION IF EXISTS PUBLIC.sign(float4);
 CREATE OR REPLACE FUNCTION PUBLIC.sign(float4)
 RETURNS int
-AS '@abs_srcdir@/regress.so','signf'
+AS '@libdir@/regress@DLSUFFIX@','signf'
 LANGUAGE c strict IMMUTABLE;
 
 DROP FUNCTION IF EXISTS PUBLIC.sign(int);
 CREATE OR REPLACE FUNCTION PUBLIC.sign(int)
 RETURNS int
-AS '@abs_srcdir@/regress.so','signi'
+AS '@libdir@/regress@DLSUFFIX@','signi'
 LANGUAGE c strict IMMUTABLE;
 
 DROP FUNCTION IF EXISTS PUBLIC.rpad(text, numeric, text);
 CREATE OR REPLACE FUNCTION PUBLIC.rpad(text, numeric, text default ' ')
 RETURNS text
-AS '@abs_srcdir@/regress.so','rpad_f'
+AS '@libdir@/regress@DLSUFFIX@','rpad_f'
 LANGUAGE c strict IMMUTABLE;
 
 DROP FUNCTION IF EXISTS PUBLIC.round(int, int);
 CREATE OR REPLACE FUNCTION PUBLIC.round(int, int default 0)
 RETURNS int
-AS '@abs_srcdir@/regress.so','RoundInt'
+AS '@libdir@/regress@DLSUFFIX@','RoundInt'
 LANGUAGE c strict IMMUTABLE;
 
 DROP FUNCTION IF EXISTS PUBLIC.round(float, int);
@@ -77,7 +77,7 @@ LANGUAGE SQL IMMUTABLE;
 DROP FUNCTION IF EXISTS PUBLIC.NormsDistInner;
 CREATE OR REPLACE FUNCTION PUBLIC.NormsDistInner(NUMERIC)
 RETURNS NUMERIC
-AS '@abs_srcdir@/regress.so','normsdist'
+AS '@libdir@/regress@DLSUFFIX@','normsdist'
 LANGUAGE c strict IMMUTABLE;
 
 DROP FUNCTION IF EXISTS PUBLIC.NormsDist;
@@ -90,7 +90,7 @@ LANGUAGE SQL strict IMMUTABLE;
 DROP FUNCTION IF EXISTS PUBLIC.months_between_inner(date, date);
 CREATE OR REPLACE FUNCTION PUBLIC.months_between_inner(date, date)
 RETURNS FLOAT4
-AS '@abs_srcdir@/regress.so','months_between_dd'
+AS '@libdir@/regress@DLSUFFIX@','months_between_dd'
 LANGUAGE c strict IMMUTABLE;
 
 DROP FUNCTION IF EXISTS PUBLIC.months_between(date, date);
@@ -102,7 +102,7 @@ LANGUAGE SQL strict IMMUTABLE;
 DROP FUNCTION IF EXISTS PUBLIC.months_between_inner(date, timestamp);
 CREATE OR REPLACE FUNCTION PUBLIC.months_between_inner(date, timestamp)
 RETURNS FLOAT4
-AS '@abs_srcdir@/regress.so','months_between_dt'
+AS '@libdir@/regress@DLSUFFIX@','months_between_dt'
 LANGUAGE c strict IMMUTABLE;
 
 DROP FUNCTION IF EXISTS PUBLIC.months_between(date, timestamp);
@@ -114,7 +114,7 @@ LANGUAGE SQL strict IMMUTABLE;
 DROP FUNCTION IF EXISTS PUBLIC.months_between_inner(timestamp, date);
 CREATE OR REPLACE FUNCTION PUBLIC.months_between_inner(timestamp, date)
 RETURNS FLOAT4
-AS '@abs_srcdir@/regress.so','months_between_td'
+AS '@libdir@/regress@DLSUFFIX@','months_between_td'
 LANGUAGE c strict IMMUTABLE;
 
 DROP FUNCTION IF EXISTS PUBLIC.months_between(timestamp, date);
@@ -126,7 +126,7 @@ LANGUAGE SQL strict IMMUTABLE;
 DROP FUNCTION IF EXISTS PUBLIC.months_between_inner(timestamp, timestamp);
 CREATE OR REPLACE FUNCTION PUBLIC.months_between_inner(timestamp, timestamp)
 RETURNS FLOAT4
-AS '@abs_srcdir@/regress.so','months_between_tt'
+AS '@libdir@/regress@DLSUFFIX@','months_between_tt'
 LANGUAGE c strict IMMUTABLE;
 
 DROP FUNCTION IF EXISTS PUBLIC.months_between(timestamp, timestamp);
@@ -138,7 +138,7 @@ LANGUAGE SQL strict IMMUTABLE;
 DROP FUNCTION IF EXISTS PUBLIC.lpad(text, numeric, text);
 CREATE OR REPLACE FUNCTION PUBLIC.lpad(text, numeric, text default ' ')
 RETURNS text
-AS '@abs_srcdir@/regress.so','lpad_f'
+AS '@libdir@/regress@DLSUFFIX@','lpad_f'
 LANGUAGE c strict IMMUTABLE;
 
 
@@ -146,19 +146,19 @@ LANGUAGE c strict IMMUTABLE;
 DROP FUNCTION IF EXISTS public.FUNC_III_CS0507_3;
 CREATE  FUNCTION FUNC_III_CS0507_3(in NUMERIC(18,4))
 returns text
-as '@abs_srcdir@/regress.so','FUNC_III_CS0507_3'
+as '@libdir@/regress@DLSUFFIX@','FUNC_III_CS0507_3'
 language c IMMUTABLE;
 
 DROP FUNCTION IF EXISTS public.FUNC_III_CS0507;
 CREATE  FUNCTION FUNC_III_CS0507(in NUMERIC(18,4))
 returns text
-as '@abs_srcdir@/regress.so','FUNC_III_CS0507'
+as '@libdir@/regress@DLSUFFIX@','FUNC_III_CS0507'
 language c IMMUTABLE;
 
 DROP FUNCTION IF EXISTS public.FUNC_II_JUDGE_DF_AGE;
 CREATE  FUNCTION FUNC_II_JUDGE_DF_AGE(in NUMERIC(18,4), in NUMERIC(18,4), in NUMERIC(18,4), in NUMERIC(18,4), in NUMERIC(18,4), in NUMERIC(18,4), in NUMERIC(18,4), in NUMERIC(18,4), in NUMERIC(18,4), in NUMERIC(18,4), in NUMERIC(18,4), in NUMERIC(18,4))
 returns int
-as '@abs_srcdir@/regress.so','FUNC_II_JUDGE_DF_AGE'
+as '@libdir@/regress@DLSUFFIX@','FUNC_II_JUDGE_DF_AGE'
 language c IMMUTABLE;
 
 
@@ -166,28 +166,28 @@ language c IMMUTABLE;
 DROP FUNCTION IF EXISTS public.FUNC_TRANS_MOBCODE;
 CREATE  FUNCTION FUNC_TRANS_MOBCODE(in NUMERIC(18,4))
 returns text
-as '@abs_srcdir@/regress.so','FUNC_TRANS_MOBCODE'
+as '@libdir@/regress@DLSUFFIX@','FUNC_TRANS_MOBCODE'
 language c IMMUTABLE;
 
 -- FUNC_TRANS_RISKCODE
 DROP FUNCTION IF EXISTS public.FUNC_TRANS_RISKCODE;
 CREATE  FUNCTION FUNC_TRANS_RISKCODE(in text, in NUMERIC(18,4))
 returns text
-as '@abs_srcdir@/regress.so','FUNC_TRANS_RISKCODE'
+as '@libdir@/regress@DLSUFFIX@','FUNC_TRANS_RISKCODE'
 language c IMMUTABLE;
 
 -- FUNC_XW_FIX_DPD
 DROP FUNCTION IF EXISTS public.FUNC_XW_FIX_DPD;
 CREATE  FUNCTION FUNC_XW_FIX_DPD(in text, in NUMERIC(18,4))
 returns int
-as '@abs_srcdir@/regress.so','FUNC_XW_FIX_DPD'
+as '@libdir@/regress@DLSUFFIX@','FUNC_XW_FIX_DPD'
 language c IMMUTABLE;
 
 -- FUNC_ZERO_NULL
 DROP FUNCTION IF EXISTS public.FUNC_ZERO_NULL;
 CREATE  FUNCTION FUNC_ZERO_NULL(in NUMERIC(18,4))
 returns NUMERIC(18,4)
-as '@abs_srcdir@/regress.so','FUNC_ZERO_NULL'
+as '@libdir@/regress@DLSUFFIX@','FUNC_ZERO_NULL'
 language c strict IMMUTABLE;
 
 

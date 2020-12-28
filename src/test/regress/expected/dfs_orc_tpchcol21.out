@@ -1,0 +1,155 @@
+set enable_global_stats = true;
+set current_schema=vector_engine;
+set enable_vector_engine=on;
+set enable_nestloop=off;
+explain (costs off) select
+	s_name,
+	count(*) as numwait
+from
+	supplier,
+	lineitem l1,
+	orders,
+	nation
+where
+	s_suppkey = l1.l_suppkey
+	and o_orderkey = l1.l_orderkey
+	and o_orderstatus = 'F'
+	and l1.l_receiptdate > l1.l_commitdate
+	and exists (
+		select
+			*
+		from
+			lineitem l2
+		where
+			l2.l_orderkey = l1.l_orderkey
+			and l2.l_suppkey <> l1.l_suppkey
+	)
+	and not exists (
+		select
+			*
+		from
+			lineitem l3
+		where
+			l3.l_orderkey = l1.l_orderkey
+			and l3.l_suppkey <> l1.l_suppkey
+			and l3.l_receiptdate > l3.l_commitdate
+	)
+	and s_nationkey = n_nationkey
+	and n_name = 'SAUDI ARABIA'
+group by
+	s_name
+order by
+	numwait desc,
+	s_name
+limit 100;
+                                                                   QUERY PLAN                                                                   
+------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Limit
+         ->  Vector Streaming (type: GATHER)
+               Merge Sort Key: (count(*)) DESC, vector_engine.supplier.s_name
+               Node/s: All datanodes
+               ->  Vector Limit
+                     ->  Vector Sort
+                           Sort Key: (count(*)) DESC, vector_engine.supplier.s_name
+                           ->  Vector Sonic Hash Aggregate
+                                 Group By Key: vector_engine.supplier.s_name
+                                 ->  Vector Streaming(type: REDISTRIBUTE)
+                                       Spawn on: All datanodes
+                                       ->  Vector Sonic Hash Join
+                                             Hash Cond: (nation.n_nationkey = vector_engine.supplier.s_nationkey)
+                                             ->  CStore Scan on nation
+                                                   Filter: (n_name = 'SAUDI ARABIA'::bpchar)
+                                             ->  Vector Sonic Hash Join
+                                                   Hash Cond: (vector_engine.supplier.s_suppkey = l1.l_suppkey)
+                                                   Generate Bloom Filter On Expr: l1.l_suppkey
+                                                   Generate Bloom Filter On Index: 1
+                                                   ->  Vector Append
+                                                         ->  Dfs Scan on supplier
+                                                               Filter By Bloom Filter On Expr: vector_engine.supplier.s_suppkey
+                                                               Filter By Bloom Filter On Index: 1
+                                                         ->  Vector Adapter
+                                                               ->  Seq Scan on pg_delta_vector_engine_supplier supplier
+                                                   ->  Vector Streaming(type: REDISTRIBUTE)
+                                                         Spawn on: All datanodes
+                                                         ->  Vector Hash Right Anti Join
+                                                               Hash Cond: (l3.l_orderkey = l1.l_orderkey)
+                                                               Join Filter: (l3.l_suppkey <> l1.l_suppkey)
+                                                               ->  Vector Append
+                                                                     ->  Dfs Scan on lineitem l3
+                                                                           Filter: (l_receiptdate > l_commitdate)
+                                                                     ->  Vector Adapter
+                                                                           ->  Seq Scan on pg_delta_vector_engine_lineitem l3
+                                                                                 Filter: (l_receiptdate > l_commitdate)
+                                                               ->  Vector Hash Right Semi Join
+                                                                     Hash Cond: (l2.l_orderkey = vector_engine.orders.o_orderkey)
+                                                                     Join Filter: (l2.l_suppkey <> l1.l_suppkey)
+                                                                     ->  Vector Append
+                                                                           ->  Dfs Scan on lineitem l2
+                                                                           ->  Vector Adapter
+                                                                                 ->  Seq Scan on pg_delta_vector_engine_lineitem l2
+                                                                     ->  Vector Sonic Hash Join
+                                                                           Hash Cond: (l1.l_orderkey = vector_engine.orders.o_orderkey)
+                                                                           Generate Bloom Filter On Expr: vector_engine.orders.o_orderkey
+                                                                           Generate Bloom Filter On Index: 0
+                                                                           ->  Vector Append
+                                                                                 ->  Dfs Scan on lineitem l1
+                                                                                       Filter: (l_receiptdate > l_commitdate)
+                                                                                       Filter By Bloom Filter On Expr: l1.l_orderkey
+                                                                                       Filter By Bloom Filter On Index: 0
+                                                                                 ->  Vector Adapter
+                                                                                       ->  Seq Scan on pg_delta_vector_engine_lineitem l1
+                                                                                             Filter: (l_receiptdate > l_commitdate)
+                                                                           ->  Vector Append
+                                                                                 ->  Dfs Scan on orders
+                                                                                       Pushdown Predicate Filter: (o_orderstatus = 'F'::bpchar)
+                                                                                 ->  Vector Adapter
+                                                                                       ->  Seq Scan on pg_delta_vector_engine_orders orders
+                                                                                             Filter: (o_orderstatus = 'F'::bpchar)
+(62 rows)
+
+select
+	s_name,
+	count(*) as numwait
+from
+	supplier,
+	lineitem l1,
+	orders,
+	nation
+where
+	s_suppkey = l1.l_suppkey
+	and o_orderkey = l1.l_orderkey
+	and o_orderstatus = 'F'
+	and l1.l_receiptdate > l1.l_commitdate
+	and exists (
+		select
+			*
+		from
+			lineitem l2
+		where
+			l2.l_orderkey = l1.l_orderkey
+			and l2.l_suppkey <> l1.l_suppkey
+	)
+	and not exists (
+		select
+			*
+		from
+			lineitem l3
+		where
+			l3.l_orderkey = l1.l_orderkey
+			and l3.l_suppkey <> l1.l_suppkey
+			and l3.l_receiptdate > l3.l_commitdate
+	)
+	and s_nationkey = n_nationkey
+	and n_name = 'SAUDI ARABIA'
+group by
+	s_name
+order by
+	numwait desc,
+	s_name
+limit 100;
+          s_name           | numwait 
+---------------------------+---------
+ Supplier#000000074        |       9
+(1 row)
+

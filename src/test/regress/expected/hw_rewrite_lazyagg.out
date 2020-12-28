@@ -38,7 +38,7 @@ analyze t3;
 -- basic single sub-query
 ------------------------------------------------------------------------------------
 -- valid for lazy agg
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                      QUERY PLAN                     
 ----------------------------------------------------
  Sort
@@ -69,7 +69,7 @@ select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where
  7 |    
 (6 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, count(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, count(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                      QUERY PLAN                     
 ----------------------------------------------------
  Sort
@@ -100,7 +100,7 @@ select t.b, sum(cc) from (select b, count(c) as cc from t1 group by b) s1, t whe
  7 |   0
 (6 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, count(*) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, count(*) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                      QUERY PLAN                     
 ----------------------------------------------------
  Sort
@@ -132,7 +132,7 @@ select t.b, sum(cc) from (select b, count(*) as cc from t1 group by b) s1, t whe
 (6 rows)
 
 -- invalid for lazy agg
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, min(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, min(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                          QUERY PLAN                         
 ------------------------------------------------------------
  Sort
@@ -168,7 +168,7 @@ select t.b, sum(cc) from (select b, min(c) as cc from t1 group by b) s1, t where
  7 |    
 (6 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, avg(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, avg(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                          QUERY PLAN                         
 ------------------------------------------------------------
  Sort
@@ -208,7 +208,7 @@ select t.b, avg(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where
 -- basic setop
 ------------------------------------------------------------------------------------
 -- same functions
-explain (costs off, nodes off, verbose on) select t.b, min(cc) from (select b, min(c) as cc from t1 group by b union all select b, min(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, min(cc) from (select b, min(c) as cc from t1 group by b union all select b, min(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                    QUERY PLAN                   
 ------------------------------------------------
  Sort
@@ -232,7 +232,7 @@ explain (costs off, nodes off, verbose on) select t.b, min(cc) from (select b, m
 (18 rows)
 
 -- different functions: f(f union all g) or f(g union all f)
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b union all select b, min(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b union all select b, min(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                             QUERY PLAN                             
 -------------------------------------------------------------------
  Sort
@@ -260,7 +260,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, s
                            Output: t.b
 (23 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b union all select b, count(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b union all select b, count(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                             QUERY PLAN                             
 -------------------------------------------------------------------
  Sort
@@ -288,7 +288,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, s
                            Output: t.b
 (23 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, min(cc) from (select b, sum(c) as cc from t1 group by b union all select b, min(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, min(cc) from (select b, sum(c) as cc from t1 group by b union all select b, min(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                             QUERY PLAN                             
 -------------------------------------------------------------------
  Sort
@@ -317,7 +317,7 @@ explain (costs off, nodes off, verbose on) select t.b, min(cc) from (select b, s
 (23 rows)
 
 -- different functions: f(g union all g)
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, max(c) as cc from t1 group by b union all select b, max(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, max(c) as cc from t1 group by b union all select b, max(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                                QUERY PLAN                                
 -------------------------------------------------------------------------
  Sort
@@ -350,7 +350,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, m
                                              Output: t2.b, t2.c
 (28 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, count(c) as cc from t1 group by b union all select b, count(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, count(c) as cc from t1 group by b union all select b, count(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                    QUERY PLAN                   
 ------------------------------------------------
  Sort
@@ -374,7 +374,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, c
 (18 rows)
 
 -- different functions: f(g union all h)
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, min(c) as cc from t1 group by b union all select b, max(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, min(c) as cc from t1 group by b union all select b, max(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                                QUERY PLAN                                
 -------------------------------------------------------------------------
  Sort
@@ -408,7 +408,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, m
 (28 rows)
 
 -- other set op
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b union select b, sum(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b union select b, sum(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                                QUERY PLAN                               
 ------------------------------------------------------------------------
  Sort
@@ -442,7 +442,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, s
                                                    Output: t2.b, t2.c
 (29 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b intersect all select b, sum(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b intersect all select b, sum(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                                        QUERY PLAN                                       
 ----------------------------------------------------------------------------------------
  Sort
@@ -483,7 +483,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, s
 -- complex setop (single super agg)
 ------------------------------------------------------------------------------------
 -- uncomplete agg in setop branch
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, c as cc from t1 union all select b, sum(c) as cc from t2 group by b union all select b, sum(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, c as cc from t1 union all select b, sum(c) as cc from t2 group by b union all select b, sum(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                             QUERY PLAN                             
 -------------------------------------------------------------------
  Sort
@@ -511,7 +511,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, c
 (22 rows)
 
 -- over-complete agg in setop branch, agg number not match
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc, sum(d) as dd from t1 group by b union all select b, sum(c) as cc, count(d) as dd from t2 group by b union all select b, sum(c) as cc, count(*) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc, sum(d) as dd from t1 group by b union all select b, sum(c) as cc, count(d) as dd from t2 group by b union all select b, sum(c) as cc, count(*) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                    QUERY PLAN                   
 ------------------------------------------------
  Sort
@@ -537,7 +537,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, s
 (20 rows)
 
 -- three items, all setop are union all, item(s) have same function
-explain (costs off, nodes off, verbose on) select t.b, min(cc) from (select b, min(c) as cc from t1 group by b union all select b, min(c) as cc from t2 group by b union all select b, min(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, min(cc) from (select b, min(c) as cc from t1 group by b union all select b, min(c) as cc from t2 group by b union all select b, min(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                    QUERY PLAN                   
 ------------------------------------------------
  Sort
@@ -562,7 +562,7 @@ explain (costs off, nodes off, verbose on) select t.b, min(cc) from (select b, m
                            Output: t.b
 (20 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, count(c) as cc from t1 group by b union all select b, count(c) as cc from t2 group by b union all select b, count(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, count(c) as cc from t1 group by b union all select b, count(c) as cc from t2 group by b union all select b, count(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                    QUERY PLAN                   
 ------------------------------------------------
  Sort
@@ -588,7 +588,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, c
 (20 rows)
 
 -- three items, all setop are union all, item(s) have different function, non-delay rewrite
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b union all select b, sum(c) as cc from t2 group by b union all select b, max(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b union all select b, sum(c) as cc from t2 group by b union all select b, max(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                             QUERY PLAN                             
 -------------------------------------------------------------------
  Sort
@@ -619,7 +619,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, s
 (25 rows)
 
 -- three items, all setop are union all, item(s) have different function, delay rewrite
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b union all select b, sum(c) as cc from t2 group by b union all select b, count(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b union all select b, sum(c) as cc from t2 group by b union all select b, count(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                             QUERY PLAN                             
 -------------------------------------------------------------------
  Sort
@@ -649,7 +649,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, s
                            Output: t.b
 (25 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, count(*) as cc from t1 group by b union all select b, sum(c) as cc from t2 group by b union all select b, sum(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, count(*) as cc from t1 group by b union all select b, sum(c) as cc from t2 group by b union all select b, sum(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                             QUERY PLAN                             
 -------------------------------------------------------------------
  Sort
@@ -679,7 +679,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, c
                            Output: t.b
 (25 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b union all select b, count(*) as cc from t2 group by b union all select b, count(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b union all select b, count(*) as cc from t2 group by b union all select b, count(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                             QUERY PLAN                             
 -------------------------------------------------------------------
  Sort
@@ -715,7 +715,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, s
 (30 rows)
 
 -- three items, not all setop(s) are union all, item(s) have same function
-explain (costs off, nodes off, verbose on) select t.b, min(cc) from (select b, min(c) as cc from t1 group by b intersect (select b, min(c) as cc from t2 group by b union all select b, min(c) as cc from t3 group by b)) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, min(cc) from (select b, min(c) as cc from t1 group by b intersect (select b, min(c) as cc from t2 group by b union all select b, min(c) as cc from t3 group by b)) s1, t where s1.b=t.b group by t.b order by 1,2;
                                        QUERY PLAN                                       
 ----------------------------------------------------------------------------------------
  Sort
@@ -762,7 +762,7 @@ explain (costs off, nodes off, verbose on) select t.b, min(cc) from (select b, m
 -- parent-query check
 ------------------------------------------------------------------------------------
 -- no agg func OR no group by
-explain (costs off, nodes off, verbose on) select t.b from (select b, max(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1;
+explain (costs off, verbose on) select t.b from (select b, max(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1;
                      QUERY PLAN                     
 ----------------------------------------------------
  Sort
@@ -782,7 +782,7 @@ explain (costs off, nodes off, verbose on) select t.b from (select b, max(c) as 
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) select t.b from (select b, count(*) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1;
+explain (costs off, verbose on) select t.b from (select b, count(*) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1;
                      QUERY PLAN                     
 ----------------------------------------------------
  Sort
@@ -802,7 +802,7 @@ explain (costs off, nodes off, verbose on) select t.b from (select b, count(*) a
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) select t.b from (select b, sum(c) as cc from t1 group by b) s1, (select b, count(c) as cc from t1 group by b) s2, t where s1.b=t.b and s2.b=t.b group by t.b order by 1;
+explain (costs off, verbose on) select t.b from (select b, sum(c) as cc from t1 group by b) s1, (select b, count(c) as cc from t1 group by b) s2, t where s1.b=t.b and s2.b=t.b group by t.b order by 1;
                                         QUERY PLAN                                        
 ------------------------------------------------------------------------------------------
  Sort
@@ -829,7 +829,7 @@ explain (costs off, nodes off, verbose on) select t.b from (select b, sum(c) as 
                            Output: t.b
 (22 rows)
 
-explain (costs off, nodes off, verbose on) select b from (select b from t1 group by b) group by b;
+explain (costs off, verbose on) select b from (select b from t1 group by b) group by b;
           QUERY PLAN          
 ------------------------------
  HashAggregate
@@ -839,7 +839,7 @@ explain (costs off, nodes off, verbose on) select b from (select b from t1 group
          Output: t1.b
 (5 rows)
 
-explain (costs off, nodes off, verbose on) select sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b order by 1;
+explain (costs off, verbose on) select sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b order by 1;
                      QUERY PLAN                     
 ----------------------------------------------------
  Sort
@@ -858,7 +858,7 @@ explain (costs off, nodes off, verbose on) select sum(cc) from (select b, sum(c)
                            Output: t.b
 (14 rows)
 
-explain (costs off, nodes off, verbose on) select sum(cc) from (select b, count(*) as cc from t1 group by b) s1, t where s1.b=t.b order by 1;
+explain (costs off, verbose on) select sum(cc) from (select b, count(*) as cc from t1 group by b) s1, t where s1.b=t.b order by 1;
                          QUERY PLAN                         
 ------------------------------------------------------------
  Sort
@@ -882,7 +882,7 @@ explain (costs off, nodes off, verbose on) select sum(cc) from (select b, count(
                                        Output: t1.b
 (19 rows)
 
-explain (costs off, nodes off, verbose on) select sum(b) from (select b from t1 group by b);
+explain (costs off, verbose on) select sum(b) from (select b from t1 group by b);
              QUERY PLAN             
 ------------------------------------
  Aggregate
@@ -895,7 +895,7 @@ explain (costs off, nodes off, verbose on) select sum(b) from (select b from t1 
 (7 rows)
 
 -- agg param is not in subquery, in subquery and super table, OR in multiple subquery
-explain (costs off, nodes off, verbose on) select t.b, sum(t.d) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(t.d) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                          QUERY PLAN                         
 ------------------------------------------------------------
  Sort
@@ -920,7 +920,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(t.d) from (select b, 
                                        Output: t1.b, t1.c
 (20 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(t.d) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+explain (costs off, verbose on) select t.b, sum(cc), sum(t.d) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
                          QUERY PLAN                         
 ------------------------------------------------------------
  Sort
@@ -945,7 +945,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(t.d) from (s
                                        Output: t1.b, t1.c
 (20 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(t.d) from (select b, sum(c) as cc, a, sum(d) as dd from t1 group by b,a) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+explain (costs off, verbose on) select t.b, sum(cc), sum(t.d) from (select b, sum(c) as cc, a, sum(d) as dd from t1 group by b,a) s1, t where s1.b=t.b group by t.b order by 1,2,3;
                                 QUERY PLAN                                
 --------------------------------------------------------------------------
  Sort
@@ -970,7 +970,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(t.d) from (s
                                        Output: t1.b, t1.a, t1.c, t1.d
 (20 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(s1.cc) from (select b, sum(c) as cc from t1 group by b) s1, (select b, sum(c) as cc from t2 group by b) s2, t where s1.b=t.b and s2.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(s1.cc) from (select b, sum(c) as cc from t1 group by b) s1, (select b, sum(c) as cc from t2 group by b) s2, t where s1.b=t.b and s2.b=t.b group by t.b order by 1,2;
                                QUERY PLAN                               
 ------------------------------------------------------------------------
  Sort
@@ -1002,7 +1002,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(s1.cc) from (select b
                                                    Output: t2.b, t2.c
 (27 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, max(s1.cc), max(s2.cc) from (select b, max(c) as cc from t1 group by b) s1, (select b, max(c) as cc from t2 group by b) s2, t where s1.b=t.b and s2.b=t.b group by t.b order by 1,2,3;
+explain (costs off, verbose on) select t.b, max(s1.cc), max(s2.cc) from (select b, max(c) as cc from t1 group by b) s1, (select b, max(c) as cc from t2 group by b) s2, t where s1.b=t.b and s2.b=t.b group by t.b order by 1,2,3;
                                QUERY PLAN                               
 ------------------------------------------------------------------------
  Sort
@@ -1037,7 +1037,7 @@ explain (costs off, nodes off, verbose on) select t.b, max(s1.cc), max(s2.cc) fr
                                                    Output: t2.b, t2.c
 (30 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, min(cc), min(t.d) from (select b, min(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+explain (costs off, verbose on) select t.b, min(cc), min(t.d) from (select b, min(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
                          QUERY PLAN                         
 ------------------------------------------------------------
  Sort
@@ -1063,7 +1063,7 @@ explain (costs off, nodes off, verbose on) select t.b, min(cc), min(t.d) from (s
 (20 rows)
 
 -- expr on agg param
-explain (costs off, nodes off, verbose on) select t.b, sum(cc+cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc+cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                          QUERY PLAN                         
 ------------------------------------------------------------
  Sort
@@ -1088,7 +1088,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc+cc) from (select b
                                        Output: t1.b, t1.c
 (20 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc*random()) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc*random()) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                             QUERY PLAN                            
 ------------------------------------------------------------------
  Sort
@@ -1113,7 +1113,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc*random()) from (se
                                        Output: t1.b, t1.c
 (20 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc)*2.3 from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc)*2.3 from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                      QUERY PLAN                     
 ----------------------------------------------------
  Sort
@@ -1134,7 +1134,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc)*2.3 from (select 
 (15 rows)
 
 -- volatile
-explain (costs off, nodes off, verbose on) select t.b, sum(cc)*random() from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc)*random() from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                                 QUERY PLAN                                 
 ---------------------------------------------------------------------------
  Sort
@@ -1155,7 +1155,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc)*random() from (se
 (15 rows)
 
 -- no subquery
-explain (costs off, nodes off, verbose on) select t.b, sum(t1.c) from t1, t where t1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(t1.c) from t1, t where t1.b=t.b group by t.b order by 1,2;
                      QUERY PLAN                     
 ----------------------------------------------------
  Sort
@@ -1179,7 +1179,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(t1.c) from t1, t wher
 -- child-query check
 ------------------------------------------------------------------------------------
 -- no setop no agg
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, c as cc from t1) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, c as cc from t1) s1, t where s1.b=t.b group by t.b order by 1,2;
                      QUERY PLAN                     
 ----------------------------------------------------
  Sort
@@ -1200,7 +1200,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, c
 (15 rows)
 
 -- has agg, but no group by
-explain (costs off, nodes off, verbose on) select t.b from (select max(b) as b, max(c) as cc from t1) s1, t where s1.b=t.b group by t.b order by 1;
+explain (costs off, verbose on) select t.b from (select max(b) as b, max(c) as cc from t1) s1, t where s1.b=t.b group by t.b order by 1;
                               QUERY PLAN                              
 ----------------------------------------------------------------------
  Group
@@ -1225,7 +1225,7 @@ explain (costs off, nodes off, verbose on) select t.b from (select max(b) as b, 
 (19 rows)
 
 -- no agg function, but have group by
-explain (costs off, nodes off, verbose on) select count(*) from (select b,c from t1 group by b,c) s1, t where s1.b=t.b group by s1.c order by 1;
+explain (costs off, verbose on) select count(*) from (select b,c from t1 group by b,c) s1, t where s1.b=t.b group by s1.c order by 1;
                          QUERY PLAN                         
 ------------------------------------------------------------
  Sort
@@ -1251,7 +1251,7 @@ explain (costs off, nodes off, verbose on) select count(*) from (select b,c from
 (20 rows)
 
 -- expr out of agg function
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c)*2 as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, sum(c)*2 as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                           QUERY PLAN                           
 ---------------------------------------------------------------
  Sort
@@ -1276,7 +1276,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, s
                                        Output: t1.b, t1.c
 (20 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c)+sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, sum(c)+sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                               QUERY PLAN                               
 -----------------------------------------------------------------------
  Sort
@@ -1301,7 +1301,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, s
                                        Output: t1.b, t1.c
 (20 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, cast(sum(c) as int8) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, cast(sum(c) as int8) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                      QUERY PLAN                     
 ----------------------------------------------------
  Sort
@@ -1321,7 +1321,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, c
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c+d) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, sum(c+d) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                      QUERY PLAN                     
 ----------------------------------------------------
  Sort
@@ -1342,7 +1342,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, s
 (15 rows)
 
 -- normal function in child-query's target list
-explain (costs off, nodes off, verbose on) select aa from (select a, PG_CLIENT_ENCODING() aa from t group by 1) group by 1 order by 1;
+explain (costs off, verbose on) select aa from (select a, PG_CLIENT_ENCODING() aa from t group by 1) group by 1 order by 1;
           QUERY PLAN          
 ------------------------------
  Group
@@ -1356,7 +1356,7 @@ explain (costs off, nodes off, verbose on) select aa from (select a, PG_CLIENT_E
 -- joint check
 ------------------------------------------------------------------------------------
 -- agg func column in super query join/group by/where
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.cc>t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.cc>t.b group by t.b order by 1,2;
                          QUERY PLAN                         
 ------------------------------------------------------------
  Sort
@@ -1381,7 +1381,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, s
                                        Output: t1.b, t1.c
 (20 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b and s1.cc>9000 group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b and s1.cc>9000 group by t.b order by 1,2;
                          QUERY PLAN                         
 ------------------------------------------------------------
  Sort
@@ -1407,7 +1407,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, s
                                        Output: t1.b, t1.c
 (21 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, cc, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b, s1.cc order by 1,2,3;
+explain (costs off, verbose on) select t.b, cc, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b, s1.cc order by 1,2,3;
                          QUERY PLAN                         
 ------------------------------------------------------------
  Sort
@@ -1433,7 +1433,7 @@ explain (costs off, nodes off, verbose on) select t.b, cc, sum(cc) from (select 
 (20 rows)
 
 -- join type, normal
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1 left join t on s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1 left join t on s1.b=t.b group by t.b order by 1,2;
                      QUERY PLAN                     
 ----------------------------------------------------
  Sort
@@ -1453,7 +1453,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, s
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) select s1.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1 where s1.b not in (select t.b from t) group by s1.b order by 1,2;
+explain (costs off, verbose on) select s1.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1 where s1.b not in (select t.b from t) group by s1.b order by 1,2;
                                   QUERY PLAN                                  
 ------------------------------------------------------------------------------
  Sort
@@ -1474,7 +1474,7 @@ explain (costs off, nodes off, verbose on) select s1.b, sum(cc) from (select b, 
 (15 rows)
 
 -- join type, delay rewrite
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, count(c) as cc from t1 group by b) s1 left join t on s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, count(c) as cc from t1 group by b) s1 left join t on s1.b=t.b group by t.b order by 1,2;
                      QUERY PLAN                     
 ----------------------------------------------------
  Sort
@@ -1494,7 +1494,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, c
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from t right join (select b, count(c) as cc from t1 group by b) s1 on s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from t right join (select b, count(c) as cc from t1 group by b) s1 on s1.b=t.b group by t.b order by 1,2;
                      QUERY PLAN                     
 ----------------------------------------------------
  Sort
@@ -1514,7 +1514,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from t right join
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from t full join (select b, count(c) as cc from t1 group by b) s1 on s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from t full join (select b, count(c) as cc from t1 group by b) s1 on s1.b=t.b group by t.b order by 1,2;
                          QUERY PLAN                         
 ------------------------------------------------------------
  Sort
@@ -1540,7 +1540,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from t full join 
 (20 rows)
 
 -- join type, multiple join, with SUM(COUNT)
-explain (costs off, nodes off, verbose on) select s1.b, sum(cc2) from (select b, sum(c) as cc1 from t1 group by b) s1 left join (select b, sum(c) as cc2 from t2 group by b) s2 on s1.b=s2.b left join (select b, sum(c) as cc3 from t3 group by b) s3 on s2.b=s3.b group by s1.b order by 1,2;
+explain (costs off, verbose on) select s1.b, sum(cc2) from (select b, sum(c) as cc1 from t1 group by b) s1 left join (select b, sum(c) as cc2 from t2 group by b) s2 on s1.b=s2.b left join (select b, sum(c) as cc3 from t3 group by b) s3 on s2.b=s3.b group by s1.b order by 1,2;
                          QUERY PLAN                         
 ------------------------------------------------------------
  Sort
@@ -1565,7 +1565,7 @@ explain (costs off, nodes off, verbose on) select s1.b, sum(cc2) from (select b,
                                        Output: t1.b, t1.c
 (20 rows)
 
-explain (costs off, nodes off, verbose on) select s1.b, sum(cc2) from (select b, sum(c) as cc1 from t1 group by b) s1 left join (select b, count(c) as cc2 from t2 group by b) s2 on s1.b=s2.b left join (select b, sum(c) as cc3 from t3 group by b) s3 on s2.b=s3.b group by s1.b order by 1,2;
+explain (costs off, verbose on) select s1.b, sum(cc2) from (select b, sum(c) as cc1 from t1 group by b) s1 left join (select b, count(c) as cc2 from t2 group by b) s2 on s1.b=s2.b left join (select b, sum(c) as cc3 from t3 group by b) s3 on s2.b=s3.b group by s1.b order by 1,2;
                          QUERY PLAN                         
 ------------------------------------------------------------
  Sort
@@ -1593,7 +1593,7 @@ explain (costs off, nodes off, verbose on) select s1.b, sum(cc2) from (select b,
                                        Output: t2.b, t2.c
 (23 rows)
 
-explain (costs off, nodes off, verbose on) select s1.b, sum(cc3) from (select b, sum(c) as cc1 from t1 group by b) s1 left join ((select b, sum(c) as cc2 from t2 group by b) s2 right join (select b, count(c) as cc3 from t3 group by b) s3 on s2.b=s3.b) on s1.b=s2.b group by s1.b order by 1,2;
+explain (costs off, verbose on) select s1.b, sum(cc3) from (select b, sum(c) as cc1 from t1 group by b) s1 left join ((select b, sum(c) as cc2 from t2 group by b) s2 right join (select b, count(c) as cc3 from t3 group by b) s3 on s2.b=s3.b) on s1.b=s2.b group by s1.b order by 1,2;
                             QUERY PLAN                            
 ------------------------------------------------------------------
  Sort
@@ -1633,7 +1633,7 @@ explain (costs off, nodes off, verbose on) select s1.b, sum(cc3) from (select b,
                                        Output: t1.b, t1.c
 (35 rows)
 
-explain (costs off, nodes off, verbose on) select s1.b, sum(cc1) from ((select b, count(c) as cc1 from t1 group by b) s1 left join (select b, sum(c) as cc2 from t2 group by b) s2 on s1.b=s2.b) right join (select b, sum(c) as cc3 from t3 group by b) s3 on s2.b=s3.b group by s1.b order by 1,2;
+explain (costs off, verbose on) select s1.b, sum(cc1) from ((select b, count(c) as cc1 from t1 group by b) s1 left join (select b, sum(c) as cc2 from t2 group by b) s2 on s1.b=s2.b) right join (select b, sum(c) as cc3 from t3 group by b) s3 on s2.b=s3.b group by s1.b order by 1,2;
                             QUERY PLAN                            
 ------------------------------------------------------------------
  Sort
@@ -1673,7 +1673,7 @@ explain (costs off, nodes off, verbose on) select s1.b, sum(cc1) from ((select b
                                        Output: t3.b, t3.c
 (35 rows)
 
-explain (costs off, nodes off, verbose on) select s1.b, sum(cc3) from (select b, sum(c) as cc1 from t1 group by b) s1 right join (select b, sum(c) as cc2 from t2 group by b) s2 on s1.b=s2.b left join (select b, count(c) as cc3 from t3 group by b) s3 on s2.b=s3.b group by s1.b order by 1,2;
+explain (costs off, verbose on) select s1.b, sum(cc3) from (select b, sum(c) as cc1 from t1 group by b) s1 right join (select b, sum(c) as cc2 from t2 group by b) s2 on s1.b=s2.b left join (select b, count(c) as cc3 from t3 group by b) s3 on s2.b=s3.b group by s1.b order by 1,2;
                             QUERY PLAN                            
 ------------------------------------------------------------------
  Sort
@@ -1713,7 +1713,7 @@ explain (costs off, nodes off, verbose on) select s1.b, sum(cc3) from (select b,
                                        Output: t3.b, t3.c
 (35 rows)
 
-explain (costs off, nodes off, verbose on) select s1.b, sum(cc2) from (select b, sum(c) as cc1 from t1 group by b) s1 right join (select b, count(c) as cc2 from t2 group by b) s2 on s1.b=s2.b right join (select b, sum(c) as cc3 from t3 group by b) s3 on s2.b=s3.b group by s1.b order by 1,2;
+explain (costs off, verbose on) select s1.b, sum(cc2) from (select b, sum(c) as cc1 from t1 group by b) s1 right join (select b, count(c) as cc2 from t2 group by b) s2 on s1.b=s2.b right join (select b, sum(c) as cc3 from t3 group by b) s3 on s2.b=s3.b group by s1.b order by 1,2;
                             QUERY PLAN                            
 ------------------------------------------------------------------
  Sort
@@ -1754,7 +1754,7 @@ explain (costs off, nodes off, verbose on) select s1.b, sum(cc2) from (select b,
 (35 rows)
 
 -- super agg func param come from non-agg func column of sub-query
-explain (costs off, nodes off, verbose on) select t.b, sum(s1.d) from (select b, d, sum(c) as cc from t1 group by b, d) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(s1.d) from (select b, d, sum(c) as cc from t1 group by b, d) s1, t where s1.b=t.b group by t.b order by 1,2;
                            QUERY PLAN                           
 ----------------------------------------------------------------
  Sort
@@ -1783,7 +1783,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(s1.d) from (select b,
 -- multi-agg functions
 ------------------------------------------------------------------------------------
 -- single subquery, different order of super-agg and sub-agg
-explain (costs off, nodes off, verbose on) select t.b, sum(cc), max(dd) from (select b, sum(c) as cc, max(d) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+explain (costs off, verbose on) select t.b, sum(cc), max(dd) from (select b, sum(c) as cc, max(d) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
                      QUERY PLAN                      
 -----------------------------------------------------
  Sort
@@ -1803,7 +1803,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc), max(dd) from (se
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(dd), sum(cc) from (select b, sum(c) as cc, count(*) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+explain (costs off, verbose on) select t.b, sum(dd), sum(cc) from (select b, sum(c) as cc, count(*) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
                               QUERY PLAN                               
 -----------------------------------------------------------------------
  Sort
@@ -1823,7 +1823,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(dd), sum(cc) from (se
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) select max(dd), t.b, sum(cc) from (select b, sum(c) as cc, max(d) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+explain (costs off, verbose on) select max(dd), t.b, sum(cc) from (select b, sum(c) as cc, max(d) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
                      QUERY PLAN                      
 -----------------------------------------------------
  Sort
@@ -1843,7 +1843,7 @@ explain (costs off, nodes off, verbose on) select max(dd), t.b, sum(cc) from (se
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, min(cc), sum(dd) from (select b, min(c) as cc, count(d) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+explain (costs off, verbose on) select t.b, min(cc), sum(dd) from (select b, min(c) as cc, count(d) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
                        QUERY PLAN                       
 --------------------------------------------------------
  Sort
@@ -1863,7 +1863,7 @@ explain (costs off, nodes off, verbose on) select t.b, min(cc), sum(dd) from (se
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (select b, count(c) as cc, count(*) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+explain (costs off, verbose on) select t.b, sum(cc), sum(dd) from (select b, count(c) as cc, count(*) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
                                 QUERY PLAN                                
 --------------------------------------------------------------------------
  Sort
@@ -1884,7 +1884,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (se
 (15 rows)
 
 -- simple setop
-explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (select b, sum(c) as cc, sum(d) as dd from t1 group by b union all select b, sum(c) as cc, sum(d) as dd from t2 group by b union all select b, sum(c) as cc, sum(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+explain (costs off, verbose on) select t.b, sum(cc), sum(dd) from (select b, sum(c) as cc, sum(d) as dd from t1 group by b union all select b, sum(c) as cc, sum(d) as dd from t2 group by b union all select b, sum(c) as cc, sum(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
                             QUERY PLAN                             
 -------------------------------------------------------------------
  Sort
@@ -1909,7 +1909,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (se
                            Output: t.b
 (20 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc), max(dd) from (select b, count(c) as cc, max(d) as dd from t1 group by b union all select b, count(c) as cc, max(d) as dd from t2 group by b union all select b, count(c) as cc, max(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+explain (costs off, verbose on) select t.b, sum(cc), max(dd) from (select b, count(c) as cc, max(d) as dd from t1 group by b union all select b, count(c) as cc, max(d) as dd from t2 group by b union all select b, count(c) as cc, max(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
                        QUERY PLAN                       
 --------------------------------------------------------
  Sort
@@ -1935,7 +1935,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc), max(dd) from (se
 (20 rows)
 
 -- complex setop, one is valid and another is invalid
-explain (costs off, nodes off, verbose on) select t.b, sum(cc), min(dd) from (select b, sum(c) as cc, min(d) as dd from t1 group by b union all select b, sum(c) as cc, sum(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+explain (costs off, verbose on) select t.b, sum(cc), min(dd) from (select b, sum(c) as cc, min(d) as dd from t1 group by b union all select b, sum(c) as cc, sum(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
                                      QUERY PLAN                                     
 ------------------------------------------------------------------------------------
  Sort
@@ -1963,7 +1963,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc), min(dd) from (se
                            Output: t.b
 (23 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (select b, sum(c) as cc, sum(d) as dd from t1 group by b union all select b, sum(c) as cc, count(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+explain (costs off, verbose on) select t.b, sum(cc), sum(dd) from (select b, sum(c) as cc, sum(d) as dd from t1 group by b union all select b, sum(c) as cc, count(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
                                      QUERY PLAN                                     
 ------------------------------------------------------------------------------------
  Sort
@@ -1991,7 +1991,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (se
                            Output: t.b
 (23 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (select b, count(c) as cc, sum(d) as dd from t1 group by b union all select b, count(c) as cc, count(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+explain (costs off, verbose on) select t.b, sum(cc), sum(dd) from (select b, count(c) as cc, sum(d) as dd from t1 group by b union all select b, count(c) as cc, count(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
                                         QUERY PLAN                                        
 ------------------------------------------------------------------------------------------
  Sort
@@ -2024,7 +2024,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (se
                                              Output: t3.b, t3.c, t3.d
 (28 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (select b, count(c) as cc, count(d) as dd from t1 group by b union all select b, count(c) as cc, count(*) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+explain (costs off, verbose on) select t.b, sum(cc), sum(dd) from (select b, count(c) as cc, count(d) as dd from t1 group by b union all select b, count(c) as cc, count(*) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
                                         QUERY PLAN                                        
 ------------------------------------------------------------------------------------------
  Sort
@@ -2058,7 +2058,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (se
 (28 rows)
 
 -- complex setop: agg func number not match in setop branch
-explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (select b, sum(c) as cc, d as dd from t1 group by b,d union all select b, sum(c) as cc, sum(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+explain (costs off, verbose on) select t.b, sum(cc), sum(dd) from (select b, sum(c) as cc, d as dd from t1 group by b,d union all select b, sum(c) as cc, sum(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
                                      QUERY PLAN                                     
 ------------------------------------------------------------------------------------
  Sort
@@ -2086,7 +2086,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (se
                            Output: t.b
 (23 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (select b, sum(c) as cc, d as dd from t1 group by b,d union all select b, c as cc, sum(d) as dd from t2 group by b,c union all select b, sum(c) as cc, sum(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+explain (costs off, verbose on) select t.b, sum(cc), sum(dd) from (select b, sum(c) as cc, d as dd from t1 group by b,d union all select b, c as cc, sum(d) as dd from t2 group by b,c union all select b, sum(c) as cc, sum(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
                                      QUERY PLAN                                     
 ------------------------------------------------------------------------------------
  Sort
@@ -2122,7 +2122,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (se
 (30 rows)
 
 -- 1--n
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc, min(d) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc, min(d) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                      QUERY PLAN                     
 ----------------------------------------------------
  Sort
@@ -2142,7 +2142,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, s
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc, avg(d)+1 as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc, avg(d)+1 as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                      QUERY PLAN                     
 ----------------------------------------------------
  Sort
@@ -2162,7 +2162,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, s
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, count(c) as cc, sum(d) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, count(c) as cc, sum(d) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                      QUERY PLAN                     
 ----------------------------------------------------
  Sort
@@ -2182,7 +2182,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, c
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, count(c) as cc, avg(d) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) from (select b, count(c) as cc, avg(d) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                      QUERY PLAN                     
 ----------------------------------------------------
  Sort
@@ -2203,7 +2203,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, c
 (15 rows)
 
 -- n--1
-explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+explain (costs off, verbose on) select t.b, sum(cc), sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
                           QUERY PLAN                           
 ---------------------------------------------------------------
  Sort
@@ -2223,7 +2223,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(cc) from (se
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(cc) from (select b, count(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+explain (costs off, verbose on) select t.b, sum(cc), sum(cc) from (select b, count(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
                             QUERY PLAN                             
 -------------------------------------------------------------------
  Sort
@@ -2243,7 +2243,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(cc) from (se
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(cc), sum(cc), sum(cc) from (select b, count(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3,4,5;
+explain (costs off, verbose on) select t.b, sum(cc), sum(cc), sum(cc), sum(cc) from (select b, count(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3,4,5;
                                                       QUERY PLAN                                                       
 -----------------------------------------------------------------------------------------------------------------------
  Sort
@@ -2264,7 +2264,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(cc), sum(cc)
 (15 rows)
 
 -- n--1, expr
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) + sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) + sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                             QUERY PLAN                            
 ------------------------------------------------------------------
  Sort
@@ -2284,7 +2284,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) + sum(cc) from (s
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) select t.b, sum(cc) + sum(cc) from (select b, count(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) select t.b, sum(cc) + sum(cc) from (select b, count(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
                                QUERY PLAN                               
 ------------------------------------------------------------------------
  Sort
@@ -2308,7 +2308,7 @@ explain (costs off, nodes off, verbose on) select t.b, sum(cc) + sum(cc) from (s
 -- CTE
 ------------------------------------------------------------------------------------
 -- basic with as
-explain (costs off, nodes off, verbose on) with s as (select b, sum(c) as cc from t1 group by b) select t.b, sum(cc) from s, t where s.b=t.b group by t.b order by 1,2;
+explain (costs off, verbose on) with s as (select b, sum(c) as cc from t1 group by b) select t.b, sum(cc) from s, t where s.b=t.b group by t.b order by 1,2;
                    QUERY PLAN                   
 ------------------------------------------------
  Sort
@@ -2335,7 +2335,7 @@ explain (costs off, nodes off, verbose on) with s as (select b, sum(c) as cc fro
 (21 rows)
 
 -- multi-usage
-explain (costs off, nodes off, verbose on) with s1(b, cc) as (select b, sum(c) from t1 group by b) select count(*) from s1 where cc > (select sum(cc)/100 from s1) order by 1;
+explain (costs off, verbose on) with s1(b, cc) as (select b, sum(c) from t1 group by b) select count(*) from s1 where cc > (select sum(cc)/100 from s1) order by 1;
                   QUERY PLAN                   
 -----------------------------------------------
  Sort
@@ -2360,7 +2360,7 @@ explain (costs off, nodes off, verbose on) with s1(b, cc) as (select b, sum(c) f
 (19 rows)
 
 -- pull up
-explain (costs off, nodes off, verbose on) with s as (select b, sum(c) as cc from t1 group by b) select a, b, c, d from t where b not in (select sum(cc) from s group by b) order by 1,2,3,4;
+explain (costs off, verbose on) with s as (select b, sum(c) as cc from t1 group by b) select a, b, c, d from t where b not in (select sum(cc) from s group by b) order by 1,2,3,4;
                                                         QUERY PLAN                                                        
 --------------------------------------------------------------------------------------------------------------------------
  Sort
@@ -2389,7 +2389,7 @@ explain (costs off, nodes off, verbose on) with s as (select b, sum(c) as cc fro
 (23 rows)
 
 -- not pull up
-explain (costs off, nodes off, verbose on) with s as (select b, sum(c) as cc from t1 group by b) select 1 from t where exists (select b, sum(cc) from s where s.b=t.b group by b);
+explain (costs off, verbose on) with s as (select b, sum(c) as cc from t1 group by b) select 1 from t where exists (select b, sum(cc) from s where s.b=t.b group by b);
               QUERY PLAN              
 --------------------------------------
  Seq Scan on lazyagg.t
@@ -2411,7 +2411,7 @@ explain (costs off, nodes off, verbose on) with s as (select b, sum(c) as cc fro
 (16 rows)
 
 -- multi-cte
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 with s as
 (select a,b from t1 group by a,b)
 select max(b) from
@@ -2461,7 +2461,7 @@ select max(b) from
 ------------------------------------------------------------------------------------
 -- In, Exists
 ------------------------------------------------------------------------------------
-explain (costs off, nodes off, verbose on) select t.b from t where exists (select b, sum(c) as cc from t1 where b > 100 group by b) group by t.b order by 1;
+explain (costs off, verbose on) select t.b from t where exists (select b, sum(c) as cc from t1 where b > 100 group by b) group by t.b order by 1;
                    QUERY PLAN                   
 ------------------------------------------------
  Sort
@@ -2484,7 +2484,7 @@ explain (costs off, nodes off, verbose on) select t.b from t where exists (selec
                      Output: t.a, t.b, t.c, t.d
 (18 rows)
 
-explain (costs off, nodes off, verbose on) select b from t where b in (select b from t1 group by b) group by b order by 1;
+explain (costs off, verbose on) select b from t where b in (select b from t1 group by b) group by b order by 1;
                       QUERY PLAN                      
 ------------------------------------------------------
  Sort
@@ -2507,7 +2507,7 @@ explain (costs off, nodes off, verbose on) select b from t where b in (select b 
                                  Output: t1.b
 (18 rows)
 
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select a,b,c,d from t2 where exists
 (select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2) order by 1,2,3,4;
                          QUERY PLAN                         
@@ -2542,7 +2542,7 @@ select a,b,c,d from t2 where exists
 -- multi-layer lazy agg
 ------------------------------------------------------------------------------------
 -- a chain
-explain (costs off, nodes off, verbose on) select * from (select s1.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1 group by s1.b) order by 1,2;
+explain (costs off, verbose on) select * from (select s1.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1 group by s1.b) order by 1,2;
                 QUERY PLAN                 
 -------------------------------------------
  Sort
@@ -2567,7 +2567,7 @@ select * from (select s1.b, sum(cc) from (select b, sum(c) as cc from t1 group b
    |  13
 (7 rows)
 
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select b, sum(ccc) as cccc from(
 select b, sum(cc) as ccc from (
 select b, sum(c) as cc from t1 group by b
@@ -2586,7 +2586,7 @@ select b, sum(c) as cc from t1 group by b
 (8 rows)
 
 -- with setop
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select b, sum(ccc) as cccc from(
 select b, sum(cc) as ccc from (
 select b, sum(c) as cc from t1 group by b
@@ -2619,7 +2619,7 @@ select b, sum(c) as cc from t2 group by b
                                        Output: t2.b, t2.c
 (19 rows)
 
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select b, sum(ccc) as cccc from(
 select b, sum(cc) as ccc from (
 select b, count(c) as cc from t1 group by b
@@ -2647,7 +2647,7 @@ select b, sum(c) as cc from t2 group by b
                            Output: t2.b, t2.c
 (14 rows)
 
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 (select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2)
 union all
 (select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2) order by 1,2;
@@ -2689,7 +2689,7 @@ union all
 -- empty table
 ------------------------------------------------------------------------------------
 create table t_empty (a int, b int, c int, d int);
-explain (costs off, nodes off, verbose on) select t_empty.b, sum(cc) from (select b, count(c) as cc from t_empty group by b) s, t_empty where s.b=t_empty.b group by t_empty.b;
+explain (costs off, verbose on) select t_empty.b, sum(cc) from (select b, count(c) as cc from t_empty group by b) s, t_empty where s.b=t_empty.b group by t_empty.b;
                                             QUERY PLAN                                            
 --------------------------------------------------------------------------------------------------
  HashAggregate
@@ -2706,7 +2706,7 @@ explain (costs off, nodes off, verbose on) select t_empty.b, sum(cc) from (selec
                      Output: lazyagg.t_empty.b
 (12 rows)
 
-explain (costs off, nodes off, verbose on) select sum(cc) from (select b, count(c) as cc from t_empty group by b) s, t_empty where s.b=t_empty.b;
+explain (costs off, verbose on) select sum(cc) from (select b, count(c) as cc from t_empty group by b) s, t_empty where s.b=t_empty.b;
                                             QUERY PLAN                                            
 --------------------------------------------------------------------------------------------------
  Aggregate
@@ -2727,7 +2727,7 @@ explain (costs off, nodes off, verbose on) select sum(cc) from (select b, count(
                                  Output: lazyagg.t_empty.b, lazyagg.t_empty.c
 (16 rows)
 
-explain (costs off, nodes off, verbose on) select t_empty.b, sum(cc) from (select b, count(*) as cc from t_empty group by b) s, t_empty where s.b=t_empty.b group by t_empty.b;
+explain (costs off, verbose on) select t_empty.b, sum(cc) from (select b, count(*) as cc from t_empty group by b) s, t_empty where s.b=t_empty.b group by t_empty.b;
                                             QUERY PLAN                                            
 --------------------------------------------------------------------------------------------------
  HashAggregate
@@ -2744,7 +2744,7 @@ explain (costs off, nodes off, verbose on) select t_empty.b, sum(cc) from (selec
                      Output: lazyagg.t_empty.b
 (12 rows)
 
-explain (costs off, nodes off, verbose on) select sum(cc) from (select b, count(*) as cc from t_empty group by b) s, t_empty where s.b=t_empty.b;
+explain (costs off, verbose on) select sum(cc) from (select b, count(*) as cc from t_empty group by b) s, t_empty where s.b=t_empty.b;
                                             QUERY PLAN                                            
 --------------------------------------------------------------------------------------------------
  Aggregate
@@ -2765,7 +2765,7 @@ explain (costs off, nodes off, verbose on) select sum(cc) from (select b, count(
                                  Output: lazyagg.t_empty.b
 (16 rows)
 
-explain (costs off, nodes off, verbose on) select t_empty.b, sum(cc), sum(dd) from (select b, count(c) as cc, sum(d) as dd from t_empty group by b) s, t_empty where s.b=t_empty.b group by t_empty.b;
+explain (costs off, verbose on) select t_empty.b, sum(cc), sum(dd) from (select b, count(c) as cc, sum(d) as dd from t_empty group by b) s, t_empty where s.b=t_empty.b group by t_empty.b;
                                             QUERY PLAN                                            
 --------------------------------------------------------------------------------------------------
  HashAggregate
@@ -2782,7 +2782,7 @@ explain (costs off, nodes off, verbose on) select t_empty.b, sum(cc), sum(dd) fr
                      Output: lazyagg.t_empty.b
 (12 rows)
 
-explain (costs off, nodes off, verbose on) select sum(cc), sum(dd) from (select b, count(c) as cc, sum(d) as dd from t_empty group by b) s, t_empty where s.b=t_empty.b;
+explain (costs off, verbose on) select sum(cc), sum(dd) from (select b, count(c) as cc, sum(d) as dd from t_empty group by b) s, t_empty where s.b=t_empty.b;
                                               QUERY PLAN                                               
 -------------------------------------------------------------------------------------------------------
  Aggregate
@@ -2808,7 +2808,7 @@ explain (costs off, nodes off, verbose on) select sum(cc), sum(dd) from (select 
 ------------------------------------------------------------------------------------
 create table t_type (a int2, b int8, c varchar(10), d char(5), e text, f date, g timestamp, h interval);
 insert into t_type values (1, 2, 'CCC', 'DDD', 'EEE', date '5-4-2017', '4-17-2017', interval '3' day);
-explain (costs off, nodes off, verbose on) select t_type.c, sum(dd) from (select c, count(d) as dd from t_type group by c) s, t_type where s.c=t_type.c group by t_type.c;
+explain (costs off, verbose on) select t_type.c, sum(dd) from (select c, count(d) as dd from t_type group by c) s, t_type where s.c=t_type.c group by t_type.c;
                                                                               QUERY PLAN                                                                              
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------
  HashAggregate
@@ -2825,7 +2825,7 @@ explain (costs off, nodes off, verbose on) select t_type.c, sum(dd) from (select
                      Output: lazyagg.t_type.c
 (12 rows)
 
-explain (costs off, nodes off, verbose on) select t_type.c, sum(dd) from (select c, count(d) as dd from t_type group by c union all select c, count(d) as dd from t_type group by c) s, t_type where s.c=t_type.c group by t_type.c order by 1,2;
+explain (costs off, verbose on) select t_type.c, sum(dd) from (select c, count(d) as dd from t_type group by c union all select c, count(d) as dd from t_type group by c) s, t_type where s.c=t_type.c group by t_type.c order by 1,2;
                                    QUERY PLAN                                   
 --------------------------------------------------------------------------------
  Sort
@@ -2848,7 +2848,7 @@ explain (costs off, nodes off, verbose on) select t_type.c, sum(dd) from (select
                            Output: lazyagg.t_type.c
 (18 rows)
 
-explain (costs off, nodes off, verbose on) select sum(a1), sum(a2), sum(a3) from (select a, sum(b) a1, count(c) a2, count(f) a3 from t_type group by a union all select a, sum(a), count(e), count(g) from t_type group by a) s, t_type where s.a=t_type.a group by t_type.a;
+explain (costs off, verbose on) select sum(a1), sum(a2), sum(a3) from (select a, sum(b) a1, count(c) a2, count(f) a3 from t_type group by a union all select a, sum(a), count(e), count(g) from t_type group by a) s, t_type where s.a=t_type.a group by t_type.a;
                                                          QUERY PLAN                                                          
 -----------------------------------------------------------------------------------------------------------------------------
  HashAggregate
@@ -2872,7 +2872,7 @@ explain (costs off, nodes off, verbose on) select sum(a1), sum(a2), sum(a3) from
                      Output: lazyagg.t_type.a
 (19 rows)
 
-explain (costs off, nodes off, verbose on) select sum(a1), sum(a2), sum(a3) from (select a, sum(b) a1, count(c) a2, count(*) a3 from t_type group by a union all select a, sum(a), count(e), count(*) from t_type group by a) s, t_type where s.a=t_type.a group by t_type.a;
+explain (costs off, verbose on) select sum(a1), sum(a2), sum(a3) from (select a, sum(b) a1, count(c) a2, count(*) a3 from t_type group by a union all select a, sum(a), count(e), count(*) from t_type group by a) s, t_type where s.a=t_type.a group by t_type.a;
                                                        QUERY PLAN                                                        
 -------------------------------------------------------------------------------------------------------------------------
  HashAggregate
@@ -2900,7 +2900,7 @@ explain (costs off, nodes off, verbose on) select sum(a1), sum(a2), sum(a3) from
 -- CoalesceExpr
 ------------------------------------------------------------------------------------
 create view v as select * from t;
-explain (costs off, nodes off, verbose on)  
+explain (costs off, verbose on)  
 select t1.a, sum(cc)
 from t1 full join v using(a) full join (select a, sum(c) as cc from t2 group by a) using(a)
 where t1.a>5
@@ -2934,7 +2934,7 @@ order by 1;
 (23 rows)
 
 create view v1 as select a from t1 group by a;
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select t2.b
 from t2 full join v1 using(a) full join t3 using(a)
 group by t2.b order by 1;
@@ -2967,7 +2967,7 @@ group by t2.b order by 1;
 ------------------------------------------------------------------------------------
 -- Unused column
 ------------------------------------------------------------------------------------
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select t.b from (select b, max(c) as cc from t1 group by b) s1 inner join t on s1.b=t.b group by t.b order by 1;
                      QUERY PLAN                     
 ----------------------------------------------------
@@ -2988,7 +2988,7 @@ select t.b from (select b, max(c) as cc from t1 group by b) s1 inner join t on s
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select t.b from (select b, count(c) as cc from t1 group by b) s1 inner join t on s1.b=t.b group by t.b order by 1;
                      QUERY PLAN                     
 ----------------------------------------------------
@@ -3009,7 +3009,7 @@ select t.b from (select b, count(c) as cc from t1 group by b) s1 inner join t on
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select t.b from (select b, count(c) as cc, count(d) as dd from t1 group by b) s1 inner join t on s1.b=t.b group by t.b order by 1;
                      QUERY PLAN                     
 ----------------------------------------------------
@@ -3030,7 +3030,7 @@ select t.b from (select b, count(c) as cc, count(d) as dd from t1 group by b) s1
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select t.b from (select b, count(c) as cc from t1 group by b) s1 left join t on s1.b=t.b group by t.b order by 1;
                      QUERY PLAN                     
 ----------------------------------------------------
@@ -3051,7 +3051,7 @@ select t.b from (select b, count(c) as cc from t1 group by b) s1 left join t on 
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select t.b from (select b, count(*) as cc from t1 group by b) s1 inner join t on s1.b=t.b group by t.b order by 1;
                      QUERY PLAN                     
 ----------------------------------------------------
@@ -3072,7 +3072,7 @@ select t.b from (select b, count(*) as cc from t1 group by b) s1 inner join t on
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select t.b from (select b, count(*) as cc from t1 group by b) s1 left join t on s1.b=t.b group by t.b order by 1;
                      QUERY PLAN                     
 ----------------------------------------------------
@@ -3093,7 +3093,7 @@ select t.b from (select b, count(*) as cc from t1 group by b) s1 left join t on 
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select t.b from (select b, avg(c) as cc from t1 group by b) s1 full join t on s1.b=t.b group by t.b order by 1;
                      QUERY PLAN                     
 ----------------------------------------------------
@@ -3114,7 +3114,7 @@ select t.b from (select b, avg(c) as cc from t1 group by b) s1 full join t on s1
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select t.b from (select b, count(c) as cc from t1 group by b) s1 inner join t on s1.b=t.b inner join (select b, count(d) as dd from t2 group by b) s2 on s2.b=t.b group by t.b order by 1;
                         QUERY PLAN                        
 ----------------------------------------------------------
@@ -3142,7 +3142,7 @@ select t.b from (select b, count(c) as cc from t1 group by b) s1 inner join t on
                            Output: t2.b
 (22 rows)
 
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select t.b, sum(dd) from (select b, count(c) as cc, count(d) as dd from t1 group by b) s1 inner join t on s1.b=t.b group by t.b order by 1,2;
                      QUERY PLAN                     
 ----------------------------------------------------
@@ -3163,7 +3163,7 @@ select t.b, sum(dd) from (select b, count(c) as cc, count(d) as dd from t1 group
                            Output: t.b
 (15 rows)
 
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select t.b from (select b, count(c) as cc from t1 group by b union all select b, sum(c) as cc from t2 group by b) s1 inner join t on s1.b=t.b group by t.b order by 1;
                    QUERY PLAN                   
 ------------------------------------------------
@@ -3187,7 +3187,7 @@ select t.b from (select b, count(c) as cc from t1 group by b union all select b,
                            Output: t.b
 (18 rows)
 
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select t.b from (select b, c as cc from t1 group by b,c union all select b, count(c) as cc from t2 group by b) s1 inner join t on s1.b=t.b group by t.b order by 1;
                            QUERY PLAN                            
 -----------------------------------------------------------------
@@ -3213,7 +3213,7 @@ select t.b from (select b, c as cc from t1 group by b,c union all select b, coun
                            Output: t.b
 (20 rows)
 
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select t.b from (select b, avg(c) as cc from t1 group by b union all select b, avg(c) as cc from t2 group by b) s1 inner join t on s1.b=t.b group by t.b order by 1;
                    QUERY PLAN                   
 ------------------------------------------------
@@ -3237,7 +3237,7 @@ select t.b from (select b, avg(c) as cc from t1 group by b union all select b, a
                            Output: t.b
 (18 rows)
 
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select b from(
 select b, sum(cc) as ccc from (
 select b, count(c) as cc from t1 group by b
@@ -3255,7 +3255,7 @@ select b, count(c) as cc from t1 group by b
                Output: t1.b
 (8 rows)
 
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select * from(
 select b from(
 select b, sum(cc) as ccc from (
@@ -3275,7 +3275,7 @@ select b, count(c) as cc from t1 group by b
                Output: t1.b
 (8 rows)
 
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select b, sum(dd) from(
 select b, sum(cc) as ccc, count(d) as dd from (
 select b, count(c) as cc, d from t1 group by b, d
@@ -3298,7 +3298,7 @@ select b, count(c) as cc, d from t1 group by b, d
                            Output: t1.b, t1.d, t1.c
 (13 rows)
 
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select b, sum(dd) as ddd from (
 select b, count(d) as dd from (
 select b, d from (
@@ -3323,7 +3323,7 @@ select b, d, count(c) as cc from t1 group by b, d
                      Output: t1.b, t1.d
 (11 rows)
 
-explain (costs off, nodes off, verbose on) 
+explain (costs off, verbose on) 
 select b from(
 select b, sum(cc) as ccc from (
 select b, count(c) as cc from t1 group by b
@@ -3355,7 +3355,7 @@ CREATE  TABLE sales_transaction (
          tran_type_cd text,
          mkb_cost_amt bigint  NOT NULL
  );
-explain  (costs off, nodes off, verbose on)
+explain  (costs off, verbose on)
 SELECT length('l') c1
     FROM (
  select s.sales_tran_id,(1 + (select (select sum(s.mkb_cost_amt)))) promo

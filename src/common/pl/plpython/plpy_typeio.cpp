@@ -572,11 +572,11 @@ static PyObject* PLyList_FromArray(PLyDatumToOb* arg, Datum d)
 {
     ArrayType* array = DatumGetArrayTypeP(d);
     PLyDatumToOb* elm = arg->elm;
-    int ndim;
-    int* dims;
-    char* dataptr;
-    bits8* bitmap;
-    int bitmask;
+    int ndim = 0;
+    int* dims = NULL;
+    char* dataptr = NULL;
+    bits8* bitmap = NULL;
+    int bitmask = 0;
 
     if (ARR_NDIM(array) == 0) {
         return PyList_New(0);
@@ -1121,11 +1121,12 @@ static Datum PLyGenericObject_ToComposite(PLyTypeInfo* info, TupleDesc desc, PyO
  * data structures such as fmgr info records therefore must live forever
  * as well.  A better implementation would store all this stuff in a per-
  * function memory context that could be reclaimed at need.  In the meantime,
- * fmgr_info_cxt must be called specifying t_thrd.top_mem_cxt so that whatever
+ * fmgr_info_cxt must be called specifying
+ * THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB) so that whatever
  * it might allocate, and whatever the eventual function might allocate using
  * fn_mcxt, will live forever too.
  */
 static void perm_fmgr_info(Oid functionId, FmgrInfo* finfo)
 {
-    fmgr_info_cxt(functionId, finfo, t_thrd.top_mem_cxt);
+    fmgr_info_cxt(functionId, finfo, THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
 }

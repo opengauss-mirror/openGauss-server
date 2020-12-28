@@ -757,12 +757,10 @@ static int getAnotherTuple(PGconn* conn, bool binary)
         else if (pqGetInt(&vlen, 4, conn))
             goto EOFexit;
         else {
-            if (!binary) {
+            if (!binary)
                 vlen = vlen - 4;
-            }
-            if (vlen < 0) {
+            if (vlen < 0)
                 vlen = 0;
-            }
         }
         rowbuf[i].len = vlen;
 
@@ -827,11 +825,12 @@ set_error_result:
      * freeing the old result first greatly improves the odds that gettext()
      * will succeed in providing a translation.
      */
-    if (errmsg == NULL) {
+    if (errmsg == NULL)
         errmsg = libpq_gettext("out of memory for query result");
-    }
+
     printfPQExpBuffer(
         &conn->errorMessage,"%s, remote datanode %s, errno: %s\n", errmsg, conn->remote_nodename, strerror(errno));
+
     /*
      * XXX: if PQmakeEmptyPGresult() fails, there's probably not much we can
      * do to recover...
@@ -916,8 +915,9 @@ static int pqGetErrorNotice2(PGconn* conn, bool isError)
         *splitp++ = '\0';
         pqSaveMessageField(res, PG_DIAG_MESSAGE_PRIMARY, startp);
         /* the rest is detail; strip any leading whitespace */
-        while (*splitp && isspace((unsigned char)*splitp))
+        while (*splitp && isspace((unsigned char)*splitp)) {
             splitp++;
+        }
         pqSaveMessageField(res, PG_DIAG_MESSAGE_DETAIL, splitp);
     } else {
         /* single-line message, so all primary */
@@ -1054,9 +1054,8 @@ int pqGetCopyData2(PGconn* conn, char** buffer, int async)
                 break;
             }
         }
-        if (!found) {
+        if (!found)
             goto nodata;
-        }
         msgLength = conn->inCursor - conn->inStart;
 
         /*
@@ -1087,9 +1086,8 @@ int pqGetCopyData2(PGconn* conn, char** buffer, int async)
 
     nodata:
         /* Don't block if async read requested */
-        if (async) {
+        if (async)
             return 0;
-        }
         /* Need to load more data */
         if (pqWait(TRUE, FALSE, conn) || pqReadData(conn) < 0)
             return -2;

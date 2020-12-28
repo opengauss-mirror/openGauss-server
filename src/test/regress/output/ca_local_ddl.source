@@ -1,0 +1,411 @@
+/*---------------------------------------------------------------------------------------
+ *
+ * Test cooperation analysis ddl
+ *        #1-#3 create server
+ *        #4.	alter server
+ *        #5.	drop server
+ *        #6.	create foreign table
+ *		  #7.	alter foreign table
+ *		  #8.	analyze
+ *		  #9.	other ddl
+ *		  #10.	create foreign table ... like
+ *		  #11.  acl
+ *
+ * Portions Copyright (c) 2018, Huawei
+ *---------------------------------------------------------------------------------------
+ */
+drop server server_remote cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to foreign table hash_row
+drop cascades to foreign table hash_col
+drop cascades to foreign table rep_row
+drop cascades to foreign table rep_col
+/* 
+	I.
+	create server: one options are missing. 
+*/
+create server server_remote
+foreign data wrapper gc_fdw
+options(dbname 'test', username 'test', password 'Gauss@123');
+ERROR:  the following options are necessary: address, dbname, username, password
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', username 'test', password 'Gauss@123');
+ERROR:  the following options are necessary: address, dbname, username, password
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', password 'Gauss@123');
+ERROR:  the following options are necessary: address, dbname, username, password
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username 'test');
+ERROR:  the following options are necessary: address, dbname, username, password
+/* 
+	II.
+	create server: use worong option
+*/
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username 'test', xue 'xue');
+ERROR:  invalid option "xue"
+HINT:  Valid options in this context are: dbname, username, password, address
+/* 
+	III.
+	create server: one options value are wrong. 
+*/
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname '', username 'test', password 'Gauss@123');
+ERROR:  dbname requires a not-null string value
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username '', password 'Gauss@123');
+ERROR:  username requires a not-null string value
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username 'test', password '');
+ERROR:  password requires a not-null string value
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '', dbname 'test', username 'test', password 'Gauss@123');
+ERROR:  No address is specified for the server.
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1.0:@portstring@', dbname 'test', username 'test', password 'Gauss@123');
+ERROR:  invalid input syntax for type inet: "127.0.0.1.0"
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500', dbname 'test', username 'test', password 'Gauss@123');
+ERROR:  The count of address "10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500" must be not greater than 100.
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500', dbname 'test', username 'test', password 'Gauss@123');
+drop server server_remote;
+/* 
+	IV.
+	alter server
+*/
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username 'test', password 'Gauss@123');
+alter server server_remote options (set dbname 'test');
+alter server server_remote options (drop dbname);
+ERROR:  the following options are necessary: address, dbname, username, password
+alter server server_remote owner to test;
+alter server server_remote options (add fetch_size '1000');
+ERROR:  invalid option "fetch_size"
+HINT:  Valid options in this context are: dbname, username, password, address
+alter server server_remote options (add dbname 'test');
+ERROR:  option "dbname" provided more than once
+alter server server_remote rename to server_xue;
+drop server server_xue;
+/* 
+	V.
+	drop server
+*/
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username 'test', password 'Gauss@123');
+CREATE FOREIGN TABLE t1(x int, y int, z int) server server_remote;
+drop server server_remote;
+ERROR:  cannot drop server server_remote because other objects depend on it
+DETAIL:  foreign table t1 depends on server server_remote
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+drop server server_remote cascade;
+NOTICE:  drop cascades to foreign table t1
+/* 
+	VI.
+	create foreign table
+*/
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username 'test', password 'Gauss@123');
+CREATE FOREIGN TABLE t1(c1 int, c2 int NULL, c3 int) server server_remote options (table_name 't1');
+ERROR:  column constraint on postgres foreign tables are not supported
+CREATE FOREIGN TABLE t1(c1 int, c2 int NOT NULL, c3 int) server server_remote options (table_name 't1');
+ERROR:  column constraint on postgres foreign tables are not supported
+CREATE FOREIGN TABLE t1(c1 int, c2 int default 3, c3 int) server server_remote options (table_name 't1');
+ERROR:  column constraint on postgres foreign tables are not supported
+CREATE FOREIGN TABLE t1(c1 int, c2 serial, c3 int) server server_remote options (table_name 't1');
+NOTICE:  CREATE FOREIGN TABLE will create implicit sequence "t1_c2_seq" for serial column "t1.c2"
+ERROR:  column constraint on postgres foreign tables are not supported
+create table t2(c4 int, c5 int);
+CREATE FOREIGN TABLE t1(x int, y t2, z int) server server_remote options (table_name 't1');
+ERROR:  relation type column on postgres foreign tables are not supported
+drop table t2;
+create sequence s1
+    increment by 1
+    minvalue 1 maxvalue 30
+    start 1
+    cache 5;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+CREATE FOREIGN TABLE t1(c1 int, c2 s1, c3 int) server server_remote options (table_name 't1');
+ERROR:  relation type column on postgres foreign tables are not supported
+drop sequence s1;
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1', xue 'xue');
+ERROR:  invalid option "xue"
+HINT:  Valid options in this context are: schema_name, table_name, encoding
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1', schema_name 'xue') distribute by replication;
+ERROR:  Unsupport distribute type.
+DETAIL:  Supported option values are "roundrobin".
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1', schema_name 'xue') distribute by hash(x);
+ERROR:  Invalid distribution column specified
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1', schema_name 'xue') write only;
+ERROR:  Unsupport write only.
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1', schema_name 'xue') with error_table;
+ERROR:  The error_relation of the foreign table is not support.
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1', schema_name 'xue') log into error_table;
+ERROR:  The error_relation of the foreign table is not support.
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1', schema_name 'xue') remote log 'log';
+ERROR:  The REMOTE LOG of gc_fdw foreign table is not support.
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1', schema_name 'xue') PER NODE REJECT LIMIT '100';
+ERROR:  The PER NODE REJECT LIMIT of gc_fdw foreign table is not support.
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1', schema_name 'xue')
+PARTITION BY (x);
+ERROR:  The gc_fdw partition foreign table is not supported.
+/* 
+	VII.
+	alter foreign table
+*/
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1');
+alter foreign table t1 options (add xue 'xue');
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table t1 options (add schema_name 'public');
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table t1 options (drop table_name);
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table t1 options (set table_name '');
+ERROR:  table_name requires a not-null string value
+alter foreign table t1 options (set table_name 't1');
+alter foreign table t1 add column c1 int;
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table t1 drop column z;
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table t1 alter c2 type int;
+alter foreign table t1 alter c2 set not null;
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table t1 alter c2 drop not null;
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table t1 alter c2 set statistics 50;
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table t1 alter c2 set statistics percent 5;
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table t1 owner to test;
+drop foreign table t1;
+drop server server_remote;
+/* 
+	VIII.
+	analyze
+*/
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username 'test', password 'Gauss@123');
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't1');
+CREATE FOREIGN TABLE t2(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't2');
+CREATE FOREIGN TABLE t3(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't3');
+analyze t1(c1);
+ERROR:  This relation doesn't support analyze with column.
+analyze t1((c1, c2));
+ERROR:  This relation doesn't support analyze with column.
+analyze t1;
+select staattnum from pg_statistic where starelid = 't1'::regclass::oid order by 1;
+ staattnum 
+-----------
+         1
+         2
+         3
+(3 rows)
+
+select stakey from pg_statistic_ext where starelid = 't1'::regclass::oid;
+ stakey 
+--------
+ 2 3
+(1 row)
+
+analyze t2;
+select staattnum from pg_statistic where starelid = 't2'::regclass::oid order by 1;
+ staattnum 
+-----------
+         1
+         2
+         3
+(3 rows)
+
+analyze t3;
+WARNING:  Statistics of remote tables are not collected.
+select staattnum from pg_statistic where starelid = 't3'::regclass::oid;
+ staattnum 
+-----------
+(0 rows)
+
+CREATE FOREIGN TABLE t4(c3 int, c1 int) server server_remote options (schema_name 'public', table_name 't1');
+analyze t4;
+select staattnum from pg_statistic where starelid = 't4'::regclass::oid order by 1;
+ staattnum 
+-----------
+         1
+         2
+(2 rows)
+
+select stakey from pg_statistic_ext where starelid = 't4'::regclass::oid;
+ stakey 
+--------
+(0 rows)
+
+execute direct on (coordinator2) 'select staattnum from pg_statistic where starelid = ''t1''::regclass::oid order by 1';
+ staattnum 
+-----------
+         1
+         2
+         3
+(3 rows)
+
+execute direct on (coordinator2) 'select stakey from pg_statistic_ext where starelid = ''t1''::regclass::oid';
+ stakey 
+--------
+ 2 3
+(1 row)
+
+execute direct on (coordinator2) 'select staattnum from pg_statistic where starelid = ''t2''::regclass::oid order by 1';
+ staattnum 
+-----------
+         1
+         2
+         3
+(3 rows)
+
+execute direct on (coordinator2) 'select staattnum from pg_statistic where starelid = ''t3''::regclass::oid';
+ staattnum 
+-----------
+(0 rows)
+
+drop foreign table t1, t2, t3, t4;
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't1');
+CREATE FOREIGN TABLE t2(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't2');
+CREATE FOREIGN TABLE t3(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't3');
+analyze foreign tables;
+select staattnum from pg_statistic where starelid = 't1'::regclass::oid order by 1;
+ staattnum 
+-----------
+         1
+         2
+         3
+(3 rows)
+
+select stakey from pg_statistic_ext where starelid = 't1'::regclass::oid;
+ stakey 
+--------
+ 2 3
+(1 row)
+
+select staattnum from pg_statistic where starelid = 't2'::regclass::oid order by 1;
+ staattnum 
+-----------
+         1
+         2
+         3
+(3 rows)
+
+select staattnum from pg_statistic where starelid = 't3'::regclass::oid;
+ staattnum 
+-----------
+(0 rows)
+
+execute direct on (coordinator2) 'select staattnum from pg_statistic where starelid = ''t1''::regclass::oid order by 1';
+ staattnum 
+-----------
+         1
+         2
+         3
+(3 rows)
+
+execute direct on (coordinator2) 'select stakey from pg_statistic_ext where starelid = ''t1''::regclass::oid';
+ stakey 
+--------
+ 2 3
+(1 row)
+
+execute direct on (coordinator2) 'select staattnum from pg_statistic where starelid = ''t2''::regclass::oid order by 1';
+ staattnum 
+-----------
+         1
+         2
+         3
+(3 rows)
+
+execute direct on (coordinator2) 'select staattnum from pg_statistic where starelid = ''t3''::regclass::oid';
+ staattnum 
+-----------
+(0 rows)
+
+drop foreign table t1, t2, t3;
+/* 
+	IX.
+	other ddl
+*/
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't1');
+create index ix1 on t1(c1);
+ERROR:  cannot create index on foreign table "t1"
+cluster t1;
+ERROR:  "t1" is not a table
+vacuum t1;
+WARNING:  skipping "t1" --- cannot vacuum a foreign table
+vacuum full t1;
+WARNING:  skipping "t1" --- cannot vacuum a foreign table
+grant all on t1 to public;
+revoke all on t1 from public;
+start transaction;
+lock table t1 in access share mode;
+ERROR:  "t1" is not a table
+end transaction;
+truncate t1;
+ERROR:  It is not supported to truncate foreign table "t1".
+create sequence s1
+    increment by 1
+    minvalue 1 maxvalue 30
+    start 1
+    cache 5
+    owned by t1.c1;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+ERROR:  referenced relation "t1" is not a table
+drop foreign table t1;
+drop server server_remote;
+/* 
+	X.
+	create foreign table ... like
+*/
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username 'test', password 'Gauss@123');
+create table t2(x int, y int);
+CREATE FOREIGN TABLE t1(like t2) server server_remote;
+drop foreign table t1;
+drop table t2;
+create table t2(x int, y int NOT NULL);
+CREATE FOREIGN TABLE t1(like t2) server server_remote;
+ERROR:  column constraint on postgres foreign tables are not supported
+drop table t2;
+drop server server_remote;
+/*
+    XI.
+    acl
+*/
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username 'test2', password 'Gauss@123');
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't1');
+select * from t1;
+ERROR:  from remote cluster: permission denied for relation t1
+drop foreign table t1;
+drop server server_remote;

@@ -19,7 +19,7 @@ create unlogged table data_redis.pg_delete_delta_12345
 	block_number bigint,
 	block_offset int
 )
- ;
+distribute by hash(xcnodeid,dnrelid,block_number,block_offset);
 --ut1 UT2 TEST empty table
 ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);   
 select count(*) from ctid_view;
@@ -154,7 +154,7 @@ select count(*) from data_redis.data_redis_tmp_12345;
  truncate data_redis.pg_delete_delta_12345;
  truncate t1;
  ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
- COPY t1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/ft1.data';
+ COPY t1 FROM '@abs_srcdir@/data/ft1.data';
  ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
  select min(c1),max(c1),count(*) from ctid_view;
  min | max | count 

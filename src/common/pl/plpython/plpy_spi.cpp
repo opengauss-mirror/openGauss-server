@@ -136,6 +136,7 @@ PyObject* PLy_spi_prepare(PyObject* self, PyObject* args)
         if (plan->plan == NULL) {
             elog(ERROR, "SPI_prepare failed: %s", SPI_result_code_string(SPI_result));
         }
+        Assert (u_sess->SPI_cxt._current->spi_hash_key == INVALID_SPI_KEY);
 
         /* transfer plan from procCxt to topCxt */
         if (SPI_keepplan(plan->plan)) {
@@ -385,7 +386,7 @@ static PyObject* PLy_spi_execute_fetch_result(SPITupleTable* tuptable, int rows,
              * outside of an SPI context.  We trust that PLy_result_dealloc()
              * will clean it up when the time is right.
              */
-            oldcontext2 = MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+            oldcontext2 = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
             result->tupdesc = CreateTupleDescCopy(tuptable->tupdesc);
             MemoryContextSwitchTo(oldcontext2);
 

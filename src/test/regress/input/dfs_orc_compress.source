@@ -1,0 +1,84 @@
+set enable_global_stats = true;
+\! rm -rf @abs_srcdir@/gds_19999.log
+\! ps -ef|grep @abs_srcdir@/results|grep -v grep|awk '{print $2}'|xargs kill -9 
+\! @abs_bindir@/gds -d @abs_srcdir@/results -p 0.0.0.0:29999 -D -l @abs_srcdir@/gds_19999.log -H 0.0.0.0/0
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+--prepare the data
+drop table if exists row_tbl_001;
+drop table if exists dfs_tbl_001;
+drop table if exists col_tbl_001;
+drop foreign table if exists gds_tbl_001;
+drop foreign table if exists gds_tbl_002;
+
+create foreign table gds_tbl_001(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/gds_tbl_*', format 'text', mode 'normal', delimiter ',');
+
+create foreign table gds_tbl_002(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/', format 'text', delimiter ',') write only;
+
+create table row_tbl_001(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money);
+
+create table col_tbl_001(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) with(orientation=column);
+
+create table dfs_tbl_001(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money)tablespace hdfs_ts partition by values(a4);
+
+create table dfs_tbl_002(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) with(compression='zlib') tablespace hdfs_ts partition by values(a4);
+
+create table dfs_tbl_003(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) with(compression='snappy') tablespace hdfs_ts partition by values(a4);
+
+insert into row_tbl_001 values(true, 2, 3, 4, 5, 6.66, 7.77, 8.88, 9.99999, 10.45, 10.45, 'a', 'a2', '333', '444', '55555', '6666', '777', '888', '9999', '10101010', date '12-10-2010', '21:21:21 pst', '21:21:21', '2010-12-12', '2010-12-12', '2013-12-11 pst', '2003-04-12 04:05:06', interval '2' year, 234, '100'::money);
+insert into row_tbl_001 values(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+insert into row_tbl_001 values(false, 1, -3, -4, -5, -6.66, -7.77, -8.88, -9.99999, -10.45, -10.45, 'b', '我', '哎被', '禁', '天安', '门', '“1”', '\?', '9999', '/\/', date '12-10-2010', '21:21:21 pst', '21:21:21', '2010-12-12', '2010-12-12', '2013-12-11 pst', '2003-04-12 04:05:06', interval '2' year, 234, '100'::money);
+set cstore_insert_mode=main;
+insert into dfs_tbl_001 select * from row_tbl_001;
+insert into dfs_tbl_002 select * from row_tbl_001;
+insert into dfs_tbl_003 select * from row_tbl_001;
+reset cstore_insert_mode;
+
+--test compression result
+select * from dfs_tbl_001 minus all select * from row_tbl_001;
+select * from dfs_tbl_002 minus all select * from row_tbl_001;
+select * from dfs_tbl_003 minus all select * from row_tbl_001;
+
+--test copy to for partition table
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001';
+copy col_tbl_001 from '@abs_srcdir@/results/dfs_tbl_001';
+select * from dfs_tbl_001 minus all select * from col_tbl_001;
+delete from col_tbl_001;
+
+copy dfs_tbl_002 to '@abs_srcdir@/results/dfs_tbl_001';
+copy col_tbl_001 from '@abs_srcdir@/results/dfs_tbl_001';
+select * from dfs_tbl_002 minus all select * from col_tbl_001;
+delete from col_tbl_001;
+
+copy dfs_tbl_003 to '@abs_srcdir@/results/dfs_tbl_001';
+copy col_tbl_001 from '@abs_srcdir@/results/dfs_tbl_001';
+select * from dfs_tbl_003 minus all select * from col_tbl_001;
+delete from col_tbl_001;
+
+--test gds for partition table
+insert into gds_tbl_002 select * from dfs_tbl_001;
+insert into col_tbl_001 select * from gds_tbl_001;
+select * from dfs_tbl_001 minus all select * from col_tbl_001;
+delete from col_tbl_001;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+insert into gds_tbl_002 select * from dfs_tbl_002;
+insert into col_tbl_001 select * from gds_tbl_001;
+select * from dfs_tbl_002 minus all select * from col_tbl_001;
+delete from col_tbl_001;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+insert into gds_tbl_002 select * from dfs_tbl_003;
+insert into col_tbl_001 select * from gds_tbl_001;
+select * from dfs_tbl_003 minus all select * from col_tbl_001;
+delete from col_tbl_001;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+drop table row_tbl_001;
+drop table col_tbl_001;
+drop table dfs_tbl_001;
+drop table dfs_tbl_002;
+drop table dfs_tbl_003;
+drop foreign table if exists gds_tbl_001;
+drop foreign table if exists gds_tbl_002;
+\! ps -ef|grep @abs_srcdir@/results|grep -v grep|awk '{print $2}'|xargs kill -9

@@ -30,7 +30,7 @@ CREATE TABLE import_src0
   c_varbit varbit(10),
   c_oid oid
 )
-   
+distribute by hash(c_hashid)  
 ;
 CREATE TABLE import_src1
 (
@@ -65,11 +65,11 @@ CREATE TABLE import_src1
   c_oid oid
 )
 WITH (ORIENTATION = COLUMN)
- 
+distribute by hash(c_hashid)
 ;
 CREATE TABLESPACE ts location '@testtablespace@/tablespace_limit';
-COPY import_src0 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_alter_change_plus_update.dat';
-COPY import_src1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_alter_change_plus_update.dat';
+COPY import_src0 FROM '@abs_srcdir@/data/cstore_alter_change_plus_update.dat';
+COPY import_src1 FROM '@abs_srcdir@/data/cstore_alter_change_plus_update.dat';
 CREATE TABLE import_0
 (
   c_hashid int,
@@ -103,7 +103,7 @@ CREATE TABLE import_0
   c_oid oid
 )
 TABLESPACE ts
- 
+distribute by hash(c_hashid)
 ;
 CREATE TABLE import_1
 (
@@ -139,7 +139,7 @@ CREATE TABLE import_1
 )
 WITH (ORIENTATION = COLUMN)
 TABLESPACE ts
- 
+distribute by hash(c_hashid)
 ;
 ALTER TABLESPACE ts RESIZE MAXSIZE '5M';
 INSERT INTO import_0 SELECT * FROM import_src0;
@@ -309,6 +309,8 @@ PARTITION BY RANGE (id)
 );
 INSERT INTO tbs_alter_table_012 VALUES (1, 'abcdefghijklmnopqrstuvwxyz10233456789');
 INSERT INTO tbs_alter_table_012 SELECT * FROM tbs_alter_table_012;
+ERROR:  Insufficient storage space for tablespace "tbs_002"
+--?.*
 ALTER TABLE tbs_alter_table_012 MERGE PARTITIONS p0, p1 INTO PARTITION p2;
 ERROR:  Insufficient storage space for tablespace "tbs_002"
 --?.*

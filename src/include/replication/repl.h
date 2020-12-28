@@ -35,4 +35,3 @@ extern int replication_scanner_yylex(
 extern void replication_scanner_yyerror(const char* message, replication_scanner_yyscan_t yyscanner);
 
 #endif /* _REPLICA_INTERNAL_H */
-

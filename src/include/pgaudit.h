@@ -32,6 +32,7 @@ extern THR_LOCAL bool Audit_delete;
 #define AUDIT_EXEC_ENABLED (u_sess->attr.attr_security.Audit_enabled && u_sess->attr.attr_security.Audit_Exec)
 #define AUDIT_COPY_ENABLED (u_sess->attr.attr_security.Audit_enabled && u_sess->attr.attr_security.Audit_Copy)
 #define CHECK_AUDIT_DDL(type) ((unsigned int)u_sess->attr.attr_security.Audit_DDL & (1 << (type)))
+#define CHECK_AUDIT_LOGIN(type) (unsigned int)u_sess->attr.attr_security.Audit_Session & (1 << (type));
 #define PG_QUERY_AUDIT_ARGS_MAX 3
 
 extern THR_LOCAL bool am_sysauditor;
@@ -50,7 +51,7 @@ extern void PgAuditorMain();
 #endif
 
 /* ----------
- * Functions called from backends
+ * Functions called from backends, the sequence is relevent to struct AuditTypeDescs which should be changed in the same time
  * ----------
  */
 
@@ -93,9 +94,15 @@ typedef enum {
     AUDIT_FUNCTION_EXEC,
     AUDIT_COPY_TO,
     AUDIT_COPY_FROM,
-    AUDIT_SET_PARAMETER
+    AUDIT_SET_PARAMETER,
+    AUDIT_POLICY_EVENT,
+    MASKING_POLICY_EVENT,
+	SECURITY_EVENT,
+	AUDIT_DDL_SEQUENCE,   
+    AUDIT_DDL_KEY           // ddl_sequence in struct AuditTypeDescs
 } AuditType;
 
+/* keep the same sequence with parameter audit_system_object */
 typedef enum {
     DDL_DATABASE = 0,
     DDL_SCHEMA,
@@ -115,14 +122,17 @@ typedef enum {
     DDL_TYPE,
     DDL_TEXTSEARCH,
     DDL_DIRECTORY,
-    DDL_SYNONYM
+    DDL_SYNONYM,
+    DDL_SEQUENCE,
+    DDL_KEY
 } DDLType;
 
 typedef enum { AUDIT_UNKNOWN = 0, AUDIT_OK, AUDIT_FAILED } AuditResult;
 
 typedef enum { AUDIT_FUNC_QUERY = 0, AUDIT_FUNC_DELETE } AuditFuncType;
 
-extern void audit_report(AuditType type, AuditResult result, const char* object_name, const char* detail_info);
+typedef enum { STD_AUDIT_TYPE = 0, UNIFIED_AUDIT_TYPE } AuditClassType;
+extern void audit_report(AuditType type, AuditResult result, const char* object_name, const char* detail_info, AuditClassType ctype = STD_AUDIT_TYPE);
 
 extern Datum pg_query_audit(PG_FUNCTION_ARGS);
 

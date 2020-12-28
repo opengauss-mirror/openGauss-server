@@ -1,0 +1,488 @@
+---- test ALTER TABLE SPLIT PARTITION
+-- 0. Syntax
+-- 1. Function Test
+-- 2. Table has tablespace
+-- 3. Table has toast
+-- 4. Table has index
+-- 0.Syntax
+create table test_split_syntax(a int, b int)
+partition by range (a, b)
+(
+	partition test_split_syntax_p1 values less than (10, 10),
+	partition test_split_syntax_p2 values less than (20, 20),
+	partition test_split_syntax_p3 values less than (MAXVALUE, MAXVALUE)
+);
+--ERROR
+alter table test_split_syntax split partition test_split_syntax_p1 at (5) into
+(
+	partition test_split_syntax_p1_1,
+	partition test_split_syntax_p1_2
+);
+ERROR:  number of boundary items NOT EQUAL to number of partition keys
+--ERROR
+alter table test_split_syntax split partition test_split_syntax_p1 at (5, 5) into
+(
+	partition test_split_syntax_p1_1
+);
+ERROR:  syntax error at or near ")"
+LINE 4: );
+        ^
+--ERROR
+alter table test_split_syntax split partition test_split_syntax_p1 at (15, 15) into
+(
+	partition test_split_syntax_p1_1,
+	partition test_split_syntax_p1_2
+);
+ERROR:  split point is too high
+--ERROR
+alter table test_split_syntax split partition test_split_syntax_p2 at (5, 5) into
+(
+	partition test_split_syntax_p2_1,
+	partition test_split_syntax_p2_2
+);
+ERROR:  split point is too low
+alter table test_split_syntax split partition test_split_syntax_p1 at (5, 5) into
+(
+	partition test_split_syntax_p1_1,
+	partition test_split_syntax_p1_2
+);
+select * from test_split_syntax partition (test_split_syntax_p1);
+ERROR:  partition "test_split_syntax_p1" of relation "test_split_syntax" does not exist
+select * from test_split_syntax partition (test_split_syntax_p1_1);
+ a | b 
+---+---
+(0 rows)
+
+select * from test_split_syntax partition (test_split_syntax_p1_2);
+ a | b 
+---+---
+(0 rows)
+
+--ERROR
+alter table test_split_syntax split partition test_split_syntax_p2 into ();
+ERROR:  syntax error at or near ")"
+LINE 1: ...t_split_syntax split partition test_split_syntax_p2 into ();
+                                                                     ^
+--ERROR
+alter table test_split_syntax split partition test_split_syntax_p2 into
+(
+	partition test_split_syntax_p2_1 values less than (10, 10)
+);
+ERROR:  the number of resulting partitions must be more than one
+--ERROR
+alter table test_split_syntax split partition test_split_syntax_p2 into
+(
+	partition test_split_syntax_p2_1 values less than (15, 15),
+	partition test_split_syntax_p2_1 values less than (20, 20)
+);
+ERROR:  duplicate partition name: "test_split_syntax_p2_1"
+--ERROR
+alter table test_split_syntax split partition test_split_syntax_p2 into
+(
+	partition test_split_syntax_p3 values less than (15, 15),
+	partition test_split_syntax_p2_1 values less than (20, 20)
+);
+ERROR:  resulting partition "test_split_syntax_p3" name conflicts with that of an existing partition
+--ERROR
+alter table test_split_syntax split partition test_split_syntax_p2 into
+(
+	partition test_split_syntax_p2_1 values less than (5, 5),
+	partition test_split_syntax_p2_2 values less than (20, 20)
+);
+ERROR:  the bound of the first resulting partition is too low
+--ERROR
+alter table test_split_syntax split partition test_split_syntax_p2 into
+(
+	partition test_split_syntax_p2_1 values less than (10, 10),
+	partition test_split_syntax_p2_2 values less than (20, 20)
+);
+ERROR:  the bound of the first resulting partition is too low
+--ERROR
+alter table test_split_syntax split partition test_split_syntax_p2 into
+(
+	partition test_split_syntax_p2_1 values less than (13, 13),
+	partition test_split_syntax_p2_2 values less than (12, 12),
+	partition test_split_syntax_p2_3 values less than (20, 20)
+);
+ERROR:  the bound of resulting partition "test_split_syntax_p2_2" is too low
+--ERROR
+alter table test_split_syntax split partition test_split_syntax_p2 into
+(
+	partition test_split_syntax_p2_1 values less than (13, 13),
+	partition test_split_syntax_p2_2 values less than (16, 16),
+	partition test_split_syntax_p2_3 values less than (19, 19)
+);
+ERROR:  the bound of the last resulting partition is not equal with specified partition bound
+--ERROR
+alter table test_split_syntax split partition test_split_syntax_p2 into
+(
+	partition test_split_syntax_p2_1 values less than (13, 13),
+	partition test_split_syntax_p2_2 values less than (16, 16),
+	partition test_split_syntax_p2_3 values less than (21, 21)
+);
+ERROR:  the bound of the last resulting partition is not equal with specified partition bound
+alter table test_split_syntax split partition test_split_syntax_p2 into
+(
+	partition test_split_syntax_p2_1 values less than (13, 13),
+	partition test_split_syntax_p2_2 values less than (16, 16),
+	partition test_split_syntax_p2_3 values less than (20, 20)
+);
+--ERROR
+alter table test_split_syntax split partition test_split_syntax_p3 into
+(
+	partition test_split_syntax_p3_1 values less than (25, 25),
+	partition test_split_syntax_p3_2 values less than (50, 50)
+);
+ERROR:  the bound of the last resulting partition is not equal with specified partition bound
+--ERROR
+alter table test_split_syntax split partition test_split_syntax_p3 into
+(
+	partition test_split_syntax_p3_1 values less than (25, 25),
+	partition test_split_syntax_p3_2 values less than (MAXVALUE, 50)
+);
+ERROR:  the bound of the last resulting partition is not equal with specified partition bound
+alter table test_split_syntax split partition test_split_syntax_p3 into
+(
+	partition test_split_syntax_p3_1 values less than (25, 25),
+	partition test_split_syntax_p3_2 values less than (MAXVALUE, MAXVALUE)
+);
+drop table test_split_syntax;
+-- 1. Function Test
+create table test_split_function(a int, b int)
+partition by range (a, b)
+(
+	partition test_split_function_p1 values less than (10, 10),
+	partition test_split_function_p2 values less than (20, 20),
+	partition test_split_function_p3 values less than (MAXVALUE, MAXVALUE)
+);
+insert into test_split_function values (generate_series(0, 29), generate_series(0, 29));
+alter table test_split_function split partition for (5, 5) at (5, 5) into
+(
+	partition test_split_function_p1_1,
+	partition test_split_function_p1_2
+);
+select * from test_split_function partition (test_split_function_p1) order by 1, 2;
+ERROR:  partition "test_split_function_p1" of relation "test_split_function" does not exist
+select * from test_split_function partition (test_split_function_p1_1) order by 1, 2;
+ a | b 
+---+---
+ 0 | 0
+ 1 | 1
+ 2 | 2
+ 3 | 3
+ 4 | 4
+(5 rows)
+
+select * from test_split_function partition (test_split_function_p1_2) order by 1, 2;
+ a | b 
+---+---
+ 5 | 5
+ 6 | 6
+ 7 | 7
+ 8 | 8
+ 9 | 9
+(5 rows)
+
+drop table test_split_function;
+-- 2. Table has tablespace
+\! rm -fr '@testtablespace@/partition_split_ts0'
+\! mkdir '@testtablespace@/partition_split_ts0'
+\! rm -fr '@testtablespace@/partition_split_ts1'
+\! mkdir '@testtablespace@/partition_split_ts1'
+\! rm -fr '@testtablespace@/partition_split_ts2'
+\! mkdir '@testtablespace@/partition_split_ts2'
+create tablespace partition_split_ts0 location '@testtablespace@/partition_split_ts0';
+create tablespace partition_split_ts1 location '@testtablespace@/partition_split_ts1';
+create tablespace partition_split_ts2 location '@testtablespace@/partition_split_ts2';
+create table test_split_table_tablespace (a int)
+tablespace partition_split_ts0
+partition by range (a)
+(
+	partition test_split_table_tablespace_p1 values less than (10) tablespace partition_split_ts1,
+	partition test_split_table_tablespace_p2 values less than (20) tablespace partition_split_ts2,
+	partition test_split_table_tablespace_p3 values less than (30)
+);
+select relname, boundaries, spcname from pg_partition, pg_tablespace where parentid in (select oid from pg_class where relname = 'test_split_table_tablespace') and pg_partition.reltablespace = pg_tablespace.oid order by 2;
+            relname             | boundaries |       spcname       
+--------------------------------+------------+---------------------
+ test_split_table_tablespace_p1 | {10}       | partition_split_ts1
+ test_split_table_tablespace_p2 | {20}       | partition_split_ts2
+ test_split_table_tablespace_p3 | {30}       | partition_split_ts0
+ test_split_table_tablespace    |            | partition_split_ts0
+(4 rows)
+
+alter table test_split_table_tablespace split partition test_split_table_tablespace_p1 into
+(
+	partition test_split_table_tablespace_p1_1 values less than (2),
+	partition test_split_table_tablespace_p1_2 values less than (4) tablespace partition_split_ts0,
+	partition test_split_table_tablespace_p1_3 values less than (6) tablespace partition_split_ts1,
+	partition test_split_table_tablespace_p1_4 values less than (10) tablespace partition_split_ts2
+);
+select relname, boundaries, spcname from pg_partition, pg_tablespace where parentid in (select oid from pg_class where relname = 'test_split_table_tablespace') and pg_partition.reltablespace = pg_tablespace.oid order by 2;
+             relname              | boundaries |       spcname       
+----------------------------------+------------+---------------------
+ test_split_table_tablespace_p1_4 | {10}       | partition_split_ts2
+ test_split_table_tablespace_p1_1 | {2}        | partition_split_ts0
+ test_split_table_tablespace_p2   | {20}       | partition_split_ts2
+ test_split_table_tablespace_p3   | {30}       | partition_split_ts0
+ test_split_table_tablespace_p1_2 | {4}        | partition_split_ts0
+ test_split_table_tablespace_p1_3 | {6}        | partition_split_ts1
+ test_split_table_tablespace      |            | partition_split_ts0
+(7 rows)
+
+alter table test_split_table_tablespace split partition test_split_table_tablespace_p1_1 into
+(
+	partition test_split_table_tablespace_p1_1_1 values less than (1) tablespace partition_split_ts1,
+	partition test_split_table_tablespace_p1_1_2 values less than (2) tablespace partition_split_ts2
+);
+select relname, boundaries, spcname from pg_partition, pg_tablespace where parentid in (select oid from pg_class where relname = 'test_split_table_tablespace') and pg_partition.reltablespace = pg_tablespace.oid order by 2;
+              relname               | boundaries |       spcname       
+------------------------------------+------------+---------------------
+ test_split_table_tablespace_p1_1_1 | {1}        | partition_split_ts1
+ test_split_table_tablespace_p1_4   | {10}       | partition_split_ts2
+ test_split_table_tablespace_p1_1_2 | {2}        | partition_split_ts2
+ test_split_table_tablespace_p2     | {20}       | partition_split_ts2
+ test_split_table_tablespace_p3     | {30}       | partition_split_ts0
+ test_split_table_tablespace_p1_2   | {4}        | partition_split_ts0
+ test_split_table_tablespace_p1_3   | {6}        | partition_split_ts1
+ test_split_table_tablespace        |            | partition_split_ts0
+(8 rows)
+
+--ERROR
+alter table test_split_table_tablespace split partition test_split_table_tablespace_p3 into
+(
+	partition test_split_table_tablespace_p3_1 values less than (25) tablespace partition_split_ts3,
+	partition test_split_table_tablespace_p3_2 values less than (30) tablespace partition_split_ts4
+);
+ERROR:  tablespace "partition_split_ts3" does not exist
+drop table test_split_table_tablespace;
+drop tablespace partition_split_ts0;
+drop tablespace partition_split_ts1;
+drop tablespace partition_split_ts2;
+\! rm -fr '@testtablespace@/partition_split_ts0'
+\! rm -fr '@testtablespace@/partition_split_ts1'
+\! rm -fr '@testtablespace@/partition_split_ts2'
+-- 3. Table has toast
+create table test_split_toast (a int, b text)
+partition by range (a)
+(
+	partition test_split_toast_p1 values less than (10),
+	partition test_split_toast_p2 values less than (20),
+	partition test_split_toast_p3 values less than (30)
+);
+insert into test_split_toast values (1, lpad('a',409600,'b'));
+insert into test_split_toast values (8, lpad('a',409600,'b'));
+alter table test_split_toast split partition test_split_toast_p1 at (5) into
+(
+	partition test_split_toast_p1_1,
+	partition test_split_toast_p1_2
+);
+select count(b) from test_split_toast partition (test_split_toast_p1_1) where a=1;
+ count 
+-------
+     1
+(1 row)
+
+select count(b) from test_split_toast partition (test_split_toast_p1_2) where a=8;
+ count 
+-------
+     1
+(1 row)
+
+drop table test_split_toast;
+-- 4. Table has index
+create table test_split_index (a int, b int)
+partition by range (a)
+(
+	partition test_split_index_p1 values less than (10),
+	partition test_split_index_p2 values less than (20),
+	partition test_split_index_p3 values less than (30)
+);
+create index test_split_index_a on test_split_index (a) local;
+create index test_split_index_b on test_split_index (b) local;
+create index test_split_index_a_b on test_split_index (a, b) local;
+insert into test_split_index values (generate_series(0, 29), generate_series(0, 29));
+set enable_seqscan=off;
+explain(ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false) select a from test_split_index where a=5;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Index Only Scan using test_split_index_a_b on test_split_index
+               Index Cond: (a = 5)
+               Selected Partitions:  1
+(6 rows)
+
+select a from test_split_index where a=5;
+ a 
+---
+ 5
+(1 row)
+
+alter table test_split_index split partition test_split_index_p1 at (5) into
+(
+	partition test_split_index_p1_1,
+	partition test_split_index_p1_2
+);
+explain(ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false) select a from test_split_index where a=5;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Index Only Scan using test_split_index_a_b on test_split_index
+               Index Cond: (a = 5)
+               Selected Partitions:  2
+(6 rows)
+
+select a from test_split_index where a=5;
+ a 
+---
+ 5
+(1 row)
+
+drop table test_split_index;
+create table SPLIT_AT_PARTITION_TABLE_033
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double  double precision,
+c_character_1 character varying(100), 
+c_varchar varchar(100),
+c_character_2 character(100), 
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_nvarchar2 nvarchar2,
+c_name name,
+c_timestamp_1 timestamp without time zone ,
+c_timestamp_2 timestamp with time zone,
+c_date date,
+c_tsvector tsvector,
+c_tsquery tsquery 
+)
+partition by range (c_smallint,c_integer,c_bigint,c_decimal)
+(
+partition SPLIT_AT_PARTITION_TABLE_033_1  values less than (0,0,0,0) , 
+partition SPLIT_AT_PARTITION_TABLE_033_2  values less than (30,30,300,400.3),
+partition SPLIT_AT_PARTITION_TABLE_033_3  values less than (60,60,600,800.6),
+partition SPLIT_AT_PARTITION_TABLE_033_4  values less than (100,100,1000,1000.2) 
+);
+create index index_SPLIT_AT_PARTITION_TABLE_033_1 on SPLIT_AT_PARTITION_TABLE_033(c_smallint) local
+(
+partition SPLIT_AT_PARTITION_TABLE_033_1   ,
+partition SPLIT_AT_PARTITION_TABLE_033_2   ,
+partition SPLIT_AT_PARTITION_TABLE_033_3   ,
+partition SPLIT_AT_PARTITION_TABLE_033_4   
+);
+--I2
+insert into SPLIT_AT_PARTITION_TABLE_033 values(generate_series(-10,99),-10,100,100.3,10.3,10.2,1000.25,'xy','ABCD','ABC','DEF','A','A','HK','FVT_DATA_PARTITIONFVT_DATA_PARTITION','b','1954-2-6 00:00:30+8','1954-2-6 23:12:12.2356','1954-2-6 13:12:12.2356','abc db','ege');
+--I3. merge
+alter table SPLIT_AT_PARTITION_TABLE_033 merge partitions SPLIT_AT_PARTITION_TABLE_033_1,SPLIT_AT_PARTITION_TABLE_033_2 into partition SPLIT_AT_PARTITION_TABLE_033_2;
+select count(*) from SPLIT_AT_PARTITION_TABLE_033;
+ count 
+-------
+   110
+(1 row)
+
+--I5.split
+alter table SPLIT_AT_PARTITION_TABLE_033 split partition SPLIT_AT_PARTITION_TABLE_033_2 at (20,20,200,200.6) 
+into (
+partition SPLIT_AT_PARTITION_TABLE_033_2_1,
+partition SPLIT_AT_PARTITION_TABLE_033_2_2  
+);
+select count(*) from SPLIT_AT_PARTITION_TABLE_033;
+ count 
+-------
+   110
+(1 row)
+
+drop table SPLIT_AT_PARTITION_TABLE_033;
+--I1
+create table SPLIT_PARTITION_TABLE_041
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double  double precision,
+c_character_1 character varying(100), 
+c_varchar varchar(100),
+c_character_2 character(100), 
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_nvarchar2 nvarchar2,
+c_name name,
+c_timestamp_1 timestamp without time zone ,
+c_timestamp_2 timestamp with time zone,
+c_date date,
+c_tsvector tsvector,
+c_tsquery tsquery 
+)
+partition by range (c_integer,c_bigint)
+(
+partition SPLIT_PARTITION_TABLE_041_1  values less than (0,0) ,
+partition SPLIT_PARTITION_TABLE_041_2  values less than (20,20) ,
+partition SPLIT_PARTITION_TABLE_041_3  values less than (50,50) 
+);
+insert into SPLIT_PARTITION_TABLE_041 values(1,generate_series(-10,49),100,100.3,10.3,10.2,1000.25,'xy','ABCD','ABC','DEF','A','A','HK','FVT_DATA_PARTITIONFVT_DATA_PARTITION','b','1954-2-6 00:00:30+8','1954-2-6 23:12:12.2356','1954-2-6 13:12:12.2356','abc db','ege');
+--I5.split
+alter table SPLIT_PARTITION_TABLE_041 split partition SPLIT_PARTITION_TABLE_041_2   
+into (
+partition SPLIT_PARTITION_TABLE_041_2_1 values less than (1,1),
+partition SPLIT_PARTITION_TABLE_041_2_2 values less than (2,2),
+partition SPLIT_PARTITION_TABLE_041_2_3 values less than (3,3),
+partition SPLIT_PARTITION_TABLE_041_2_4 values less than (4,4),
+partition SPLIT_PARTITION_TABLE_041_2_5 values less than (5,5),
+partition SPLIT_PARTITION_TABLE_041_2_6 values less than (6,6),
+partition SPLIT_PARTITION_TABLE_041_2_7 values less than (7,7),
+partition SPLIT_PARTITION_TABLE_041_2_8 values less than (8,8),
+partition SPLIT_PARTITION_TABLE_041_2_9 values less than (9,9),
+partition SPLIT_PARTITION_TABLE_041_2_10 values less than (20,20)
+);
+select count(*) from SPLIT_PARTITION_TABLE_041;
+ count 
+-------
+    60
+(1 row)
+
+drop table SPLIT_PARTITION_TABLE_041;
+create table partitiontest
+(
+c_int integer,
+c_time TIMESTAMP WITHOUT TIME ZONE
+) partition by range (c_int)
+(
+partition p1 start(10)end(20),
+partition p2 start(20)end(30),
+partition p3 start(30)end(40)
+);
+alter table partitiontest merge partitions p2,p3 into partition p4, split partition p4 into(partition p4_1 start(20) end(40) every(5));
+ERROR:  split partition "p4" does not exist.
+alter table partitiontest merge partitions p2,p3 into partition p4, split partition p4 into(partition p4_1 values less than(25),partition p4_2 values less than(40));
+drop table partitiontest;
+create table partitiontest
+(
+c_int integer,
+c_time TIMESTAMP WITHOUT TIME ZONE
+) partition by range (c_int)
+(
+partition p1 start(10)end(20),
+partition p2 start(20)end(30),
+partition p3 start(30)end(40)
+);
+alter table partitiontest split partition p3 into(partition p4 start(30) end(40) every(5)),drop partition p3;
+ERROR:  split partition "p3" does not exist.
+alter table partitiontest split partition for(41) AT (35) into (partition p4_1, partition p4_2);
+ERROR:  split partition does not exist.
+drop table partitiontest;

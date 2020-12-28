@@ -14,7 +14,7 @@
 #define CLUSTER_H
 
 #include "nodes/parsenodes.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "utils/relcache.h"
 
 extern void cluster(ClusterStmt* stmt, bool isTopLevel);
@@ -28,6 +28,8 @@ extern Oid make_new_heap(Oid OIDOldHeap, Oid NewTableSpace, int lockMode = Acces
 
 extern Oid makePartitionNewHeap(Relation partitionedTableRel, TupleDesc partTabHeapDesc, Datum partTabRelOptions,
     Oid oldPartOid, Oid partToastOid, Oid NewTableSpace, bool isCStore = false);
+extern double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relation NewHeap, TransactionId OldestXmin,
+    TransactionId FreezeXid, bool verbose, bool use_sort, AdaptMem* memUsage);
 extern TransactionId getPartitionRelfrozenxid(Relation ordTableRel);
 extern TransactionId getRelationRelfrozenxid(Relation ordTableRel);
 extern void  setRelationRelfrozenxid(Oid relid, TransactionId frozenXid);

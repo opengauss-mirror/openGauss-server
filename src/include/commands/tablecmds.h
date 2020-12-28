@@ -19,7 +19,7 @@
 #include "nodes/parsenodes.h"
 #include "nodes/plannodes.h"
 #include "rewrite/rewriteRlsPolicy.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "utils/relcache.h"
 #include "utils/partcache.h"
 #include "utils/partitionmap.h"
@@ -111,6 +111,7 @@ extern void RangeVarCallbackOwnsRelation(
     const RangeVar* relation, Oid relId, Oid oldRelId, bool target_is_partition, void* noCatalogs);
 extern void checkPartNotInUse(Partition part, const char* stmt);
 extern List* transformConstIntoTargetType(Form_pg_attribute* attrs, int2vector* partitionKey, List* boundary);
+extern List* transformIntoTargetType(Form_pg_attribute* attrs, int2 pos, List* boundary);
 
 extern void renamePartitionedTable(Oid partitionedTableOid, const char* partitionedTableNewName);
 extern void renamePartition(RenameStmt* stmt);
@@ -124,9 +125,11 @@ extern bool checkPartitionLocalIndexesUsable(Oid partitionOid);
 extern bool checkRelationLocalIndexesUsable(Relation relation);
 extern List* GetPartitionkeyPos(List* partitionkeys, List* schema);
 
+extern void ComparePartitionValue(List* pos, Form_pg_attribute* attrs, List *partitionList, bool isPartition = true);
 extern void clearAttrInitDefVal(Oid relid);
 
 extern void AlterDfsCreateTables(Oid relOid, Datum toast_options, CreateStmt* mainTblStmt);
+extern void ATMatviewGroup(List* stmts, Oid mvid, LOCKMODE lockmode);
 /**
  * @Description: Whether judge the column is partition column.
  * @in rel, A relation.
@@ -134,12 +137,10 @@ extern void AlterDfsCreateTables(Oid relOid, Datum toast_options, CreateStmt* ma
  * @return If the the column is partition column, return true, otherwise return false.
  */
 extern bool is_partition_column(Relation rel, AttrNumber att_no);
-extern Const* GetPartitionValue(List* pos, Form_pg_attribute* attrs, List* value, bool isinterval);
+extern Const* GetPartitionValue(List* pos, Form_pg_attribute* attrs, List* value, bool isinterval, bool isPartition);
 extern Node* GetTargetValue(Form_pg_attribute attrs, Const* src, bool isinterval);
 extern void ATExecEnableDisableRls(Relation rel, RelationRlsStatus changeType, LOCKMODE lockmode);
-extern void create_part_policy_if_needed(CreateStmt *stmt, char relkind);
-
+extern bool isQueryUsingTempRelation(Query *query);
 extern void addToastTableForNewPartition(Relation relation, Oid newPartId);
 extern void fastDropPartition(Relation rel, Oid partOid, const char* stmt, Oid intervalPartOid = InvalidOid);
 #endif /* TABLECMDS_H */
-

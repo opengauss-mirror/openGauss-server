@@ -27,6 +27,8 @@
 
 extern Oid insertHashBucketEntry(oidvector *bucketlist, Oid bucketid);
 extern Oid searchHashBucketByBucketid(oidvector *bucketlist, Oid bucketid);
+extern text* searchMergeListByRelid(Oid reloid, bool *find, bool retresult = true);
+
 extern oidvector *searchHashBucketByOid(Oid bucketOid);
 extern List *relationGetBucketRelList(Relation rel, Partition part);
 extern void BucketCacheInitialize(void);

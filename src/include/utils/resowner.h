@@ -59,13 +59,13 @@ typedef void (*ResourceReleaseCallback)(ResourceReleasePhase phase, bool isCommi
  */
 
 /* generic routines */
-extern ResourceOwner ResourceOwnerCreate(ResourceOwner parent, const char* name);
+extern ResourceOwner ResourceOwnerCreate(ResourceOwner parent, const char* name, MemoryGroupType memGroup);
 extern void ResourceOwnerRelease(ResourceOwner owner, ResourceReleasePhase phase, bool isCommit, bool isTopLevel);
 extern void ResourceOwnerDelete(ResourceOwner owner);
 extern ResourceOwner ResourceOwnerGetParent(ResourceOwner owner);
 extern ResourceOwner ResourceOwnerGetNextChild(ResourceOwner owner);
+extern const char * ResourceOwnerGetName(ResourceOwner owner);
 extern ResourceOwner ResourceOwnerGetFirstChild(ResourceOwner owner);
-extern const char* ResourceOwnerGetName(ResourceOwner owner);
 extern void ResourceOwnerNewParent(ResourceOwner owner, ResourceOwner newparent);
 extern void RegisterResourceReleaseCallback(ResourceReleaseCallback callback, void* arg);
 extern void UnregisterResourceReleaseCallback(ResourceReleaseCallback callback, const void* arg);
@@ -78,10 +78,10 @@ extern void ResourceOwnerForgetBuffer(ResourceOwner owner, Buffer buffer);
 /* support for catcache refcount management */
 extern void ResourceOwnerEnlargeCatCacheRefs(ResourceOwner owner);
 extern void ResourceOwnerRememberCatCacheRef(ResourceOwner owner, HeapTuple tuple);
-extern void ResourceOwnerForgetCatCacheRef(ResourceOwner owner, const HeapTuple tuple);
+extern void ResourceOwnerForgetCatCacheRef(ResourceOwner owner, HeapTuple tuple);
 extern void ResourceOwnerEnlargeCatCacheListRefs(ResourceOwner owner);
 extern void ResourceOwnerRememberCatCacheListRef(ResourceOwner owner, CatCList* list);
-extern void ResourceOwnerForgetCatCacheListRef(ResourceOwner owner, const CatCList* list);
+extern void ResourceOwnerForgetCatCacheListRef(ResourceOwner owner, CatCList* list);
 
 /* support for relcache refcount management */
 extern void ResourceOwnerEnlargeRelationRefs(ResourceOwner owner);
@@ -108,17 +108,17 @@ extern void ResourceOwnerForgetFakepartRef(ResourceOwner owner,
 /* support for plancache refcount management */
 extern void ResourceOwnerEnlargePlanCacheRefs(ResourceOwner owner);
 extern void ResourceOwnerRememberPlanCacheRef(ResourceOwner owner, CachedPlan* plan);
-extern void ResourceOwnerForgetPlanCacheRef(ResourceOwner owner, const CachedPlan* plan);
+extern void ResourceOwnerForgetPlanCacheRef(ResourceOwner owner, CachedPlan* plan);
 
 /* support for tupledesc refcount management */
 extern void ResourceOwnerEnlargeTupleDescs(ResourceOwner owner);
 extern void ResourceOwnerRememberTupleDesc(ResourceOwner owner, TupleDesc tupdesc);
-extern void ResourceOwnerForgetTupleDesc(ResourceOwner owner, const TupleDesc tupdesc);
+extern void ResourceOwnerForgetTupleDesc(ResourceOwner owner, TupleDesc tupdesc);
 
 /* support for snapshot refcount management */
 extern void ResourceOwnerEnlargeSnapshots(ResourceOwner owner);
 extern void ResourceOwnerRememberSnapshot(ResourceOwner owner, Snapshot snapshot);
-extern void ResourceOwnerForgetSnapshot(ResourceOwner owner, const Snapshot snapshot);
+extern void ResourceOwnerForgetSnapshot(ResourceOwner owner, Snapshot snapshot);
 extern void ResourceOwnerDecrementNsnapshots(ResourceOwner owner, void* queryDesc);
 extern void ResourceOwnerDecrementNPlanRefs(ResourceOwner owner, bool useResOwner);
 
@@ -139,13 +139,13 @@ extern void ResourceOwnerForgetMetaCacheSlot(ResourceOwner owner, CacheSlotId_t 
 
 // support for pthread mutex
 //
-extern void ResourceOwnerForgetPthreadMutex(ResourceOwner owner, const pthread_mutex_t* pMutex);
+extern void ResourceOwnerForgetPthreadMutex(ResourceOwner owner, pthread_mutex_t* pMutex);
 
 extern void ResourceOwnerRememberPthreadMutex(ResourceOwner owner, pthread_mutex_t* pMutex);
 
 extern void ResourceOwnerEnlargePthreadMutex(ResourceOwner owner);
 
-extern void PrintPthreadMutexLeakWarning();
+extern void PrintPthreadMutexLeakWarning(pthread_mutex_t* pMutex);
 extern void PrintResourceOwnerLeakWarning();
 extern void ResourceOwnerReleasePthreadMutex();
 

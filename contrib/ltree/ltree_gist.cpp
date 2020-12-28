@@ -531,7 +531,6 @@ Datum ltree_consistent(PG_FUNCTION_ARGS)
     GISTENTRY* entry = (GISTENTRY*)PG_GETARG_POINTER(0);
     StrategyNumber strategy = (StrategyNumber)PG_GETARG_UINT16(2);
 
-    /* Oid		subtype = PG_GETARG_OID(3); */
     bool* recheck = (bool*)PG_GETARG_POINTER(4);
     ltree_gist* key = (ltree_gist*)DatumGetPointer(entry->key);
     void* query = NULL;

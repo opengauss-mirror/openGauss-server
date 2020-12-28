@@ -1,4 +1,4 @@
-create schema recursive_ref_recursive;
+﻿create schema recursive_ref_recursive;
 set search_path to recursive_ref_recursive;
 
 drop table if exists rec_tb1;
@@ -96,7 +96,7 @@ insert into rec_tb4 values(18,17,'正阳县');
 --
 ----case: 1
 --
-explain(costs off, nodes off)
+explain(costs off)
 with recursive cte as
 (
     select id, parentID, substr(name, 1) as name from (with tmp as (select * from rec_tb1 where id<4) select *from tmp)
@@ -163,7 +163,7 @@ order by 1, 2;
 --
 ----case: 2
 --
-explain(costs off, nodes off)
+explain(costs off)
 with recursive cte as
 (
     select id, parentID, substr(name, 1) as name from (with tmp as (select * from rec_tb1 where id<4) select *from tmp)
@@ -229,7 +229,7 @@ order by 1, 2;
 --
 ---- case:3
 --
-explain(costs off, nodes off)
+explain(costs off)
 with recursive cte as
 (
     select id, parentID, substr(name, 1) as name from (with tmp as (select * from rec_tb1 where id<4) select *from tmp)
@@ -279,7 +279,7 @@ order by 1, 2;
 --
 ---- case:4
 --
-explain(costs off, nodes off)
+explain(costs off)
 with recursive cte as
 (
     select id, parentID, substr(name, 1) as name from (with tmp as (select * from rec_tb1 where id<4) select *from tmp)
@@ -327,7 +327,7 @@ order by 1, 2;
 --
 ---- case:5
 --
-explain(costs off, nodes off)
+explain(costs off)
 with recursive cte as
 (
     select id, parentID, substr(name, 1) as name from (with tmp as (select * from rec_tb1 where id<4) select *from tmp)
@@ -377,7 +377,7 @@ order by 1, 2;
 --
 ---- case6
 --
-explain(costs off, nodes off)
+explain(costs off)
 WITH RECURSIVE cte AS
 (
     SELECT id, parentID, substr(name, 1) AS name 
@@ -413,7 +413,7 @@ select * from cte t1 join cte t2 on t1.id = t2.id order by 1, 2;
 --
 ---- case6
 --
-explain(costs off, nodes off)
+explain(costs off)
 WITH RECURSIVE cte AS
 (
     SELECT id, parentID, substr(name, 1) AS name 
@@ -497,7 +497,7 @@ ORDER BY 1, 2;
 --
 ---- case7
 --
-explain(costs off, nodes off)
+explain(costs off)
 WITH RECURSIVE cte as (
      SELECT distinct a.* FROM rec_tb1 a  JOIN rec_tb2 b ON a.id=b.parentID AND b.name not in (SELECT name FROM rec_tb3 c WHERE c.id=a.parentID AND 
      c.name is not null  ) AND a.id<4
@@ -512,7 +512,7 @@ WITH RECURSIVE cte as (
      SELECT d.* FROM cte e JOIN rec_tb3 d ON d.id=e.parentID AND d.parentID in (SELECT id FROM rec_tb1 WHERE e.id=rec_tb1.id)  AND e.name like '%市%'
  ) SELECT * FROM cte ORDER BY 1,2,3;
  
-explain(costs off, nodes off)
+explain(costs off)
 WITH RECURSIVE tmp as                                                                                               
 (
 	SELECT id, parentid, name, substr(name, 5) FROM (SELECT id,parentid ,name FROM rec_tb1)                                                                    
@@ -585,7 +585,7 @@ insert into rec_tb2 values(16,15,'方城县');
 insert into rec_tb2 values(17,1,'驻马店市');
 insert into rec_tb2 values(18,17,'正阳县');
 
-explain(verbose on, costs off, nodes off)
+explain(verbose on, costs off)
 with recursive tmp as  (
 	select id, parentid, name, substr(name, 5) 
 		from rec_tb1 where id>4   
@@ -609,7 +609,7 @@ with recursive tmp as  (
                         AS (select id, parentid, name, substr(name, 5) name1     from tmp)
         select count(*) from tmp,tmp2     where  tmp.parentid = tmp2.parentid  and tmp2.id not in (select parentid from tmp2);
 
-explain(verbose on, costs off, nodes off)
+explain(verbose on, costs off)
 with recursive tmp as  (
         select id, parentid, name, substr(name, 5)
                 from rec_tb1 where id>4
@@ -675,7 +675,7 @@ insert into rec_tb2 values(16,15,'方城县');
 insert into rec_tb2 values(17,1,'驻马店市');
 insert into rec_tb2 values(18,17,'正阳县');
 
-explain(verbose on, costs off, nodes off)
+explain(verbose on, costs off)
 with recursive tmp as  (
         select id, parentid, name, substr(name, 5)
                 from rec_tb1 where id>4
@@ -699,7 +699,7 @@ with recursive tmp as  (
                         AS (select id, parentid, name, substr(name, 5) name1     from tmp)
         select count(*) from tmp,tmp2     where  tmp.parentid = tmp2.parentid  and tmp2.id not in (select parentid from tmp2);
 
-explain(verbose on, costs off, nodes off)
+explain(verbose on, costs off)
 with recursive tmp as  (
         select id, parentid, name, substr(name, 5)
                 from rec_tb1 where id>4

@@ -1,0 +1,5 @@
+# roach_stub extension
+comment = 'roach api stub'
+default_version = '1.0'
+module_pathname = '$libdir/roach_api_stub'
+relocatable = true

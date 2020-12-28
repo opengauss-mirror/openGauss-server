@@ -1,0 +1,377 @@
+/*
+################################################################################
+# TESTCASE NAME : skew_statistic_multi_col.py 
+# COMPONENT(S)  : 测试多列分布键的倾斜场景
+# PREREQUISITE  : setup.py
+# PLATFORM      : all
+# DESCRIPTION   : multi columns' skew
+# TAG           : multi columns
+# TC LEVEL      : Level 1
+################################################################################
+*/
+--I1.设置guc参数
+set current_schema to skew_join;
+--S1.skew_option=normal
+set skew_option=normal;
+--S2.设置计划格式
+set explain_perf_mode=normal;
+--S3.设置计划生成参数
+set enable_broadcast = off;
+--S4.设置计划生成参数
+set enable_mergejoin = off;
+--S5.设置计划生成参数
+set enable_nestloop = off;
+set query_dop = 1002;
+--I2.多列重分布，无多列统计信息
+--S1.多列重分布，无多列统计信息，多值倾斜，带有NULL值，执行计划
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.c = t.c;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: ((s.b = t.b) AND (s.c = t.c))
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                           ->  Hash
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+(12 rows)
+
+--S2.多列重分布，无多列统计信息，多值倾斜，带有NULL值，执行查询
+select count(*) from skew_scol s, test_scol t where s.b = t.b and s.c = t.c;
+ count 
+-------
+   100
+(1 row)
+
+--S3.多列重分布，无多列统计信息，单值双侧倾斜，倾斜值不同，执行计划
+explain (costs off) select count(*) from skew_scol s, skew_scol1 s1 where s.b = s1.b and s.c = s1.c and s.c is not null;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: ((s1.b = s.b) AND (s1.c = s.c))
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 ->  Seq Scan on skew_scol1 s1
+                                       Filter: (c IS NOT NULL)
+                           ->  Hash
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       ->  Seq Scan on skew_scol s
+                                             Filter: (c IS NOT NULL)
+(14 rows)
+
+--I3.多列重分布，无多列统计信息，倾斜列带有过滤条件
+--S1.倾斜列的某一列上带有简单表达式，不生成倾斜优化
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.c = t.c and s.b > 1;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: ((s.b = t.b) AND (s.c = t.c))
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                                       Filter: (b > 1)
+                           ->  Hash
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+                                             Filter: (b > 1)
+(13 rows)
+
+--S2.倾斜列的某一列上带有简单表达式，生成倾斜优化
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.c = t.c and s.c is null;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: ((s.b = t.b) AND (s.c = t.c))
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                                       Filter: (c IS NULL)
+                           ->  Hash
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+                                             Filter: (c IS NULL)
+(14 rows)
+
+--S3.倾斜列的某一列上带有简单表达式，不生成倾斜优化
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.c = t.c and s.c is not null;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: ((s.b = t.b) AND (s.c = t.c))
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                                       Filter: (c IS NOT NULL)
+                           ->  Hash
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+                                             Filter: (c IS NOT NULL)
+(13 rows)
+
+--S4.倾斜列的某几列上带有简单表达式，不生成倾斜优化
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.c = t.c and s.b = 1 and s.c = 1;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Nested Loop
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                                       Filter: ((c = 1) AND (b = 1))
+                           ->  Materialize
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+                                             Filter: ((c = 1) AND (b = 1))
+(12 rows)
+
+--S5.倾斜列的某几列上带有简单表达式，不生成倾斜优化
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.c = t.c and s.a != 1 and s.b = 1 and s.c = 1;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Nested Loop
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                                       Filter: ((a <> 1) AND (c = 1) AND (b = 1))
+                           ->  Materialize
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+                                             Filter: ((c = 1) AND (b = 1))
+(12 rows)
+
+--S6.倾斜列的某几列上带有简单表达式，生成倾斜优化
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.b + s.c > 0;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (s.b = t.b)
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                                       Filter: ((b + c) > 0)
+                           ->  Hash
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+(13 rows)
+
+--S7.倾斜列的某几列上带有简单表达式，生成倾斜优化
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.b + s.c < 1;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (s.b = t.b)
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                                       Filter: ((b + c) < 1)
+                           ->  Hash
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+(13 rows)
+
+--I4.收集多列统计信息
+--S1.设置参数
+set default_statistics_target = -2;
+--S2.收集统计信息
+analyze skew_scol(b, c);
+analyze skew_scol1(b, c);
+--I5.多列重分布，带多列统计信息，多值倾斜，带有NULL值
+--S1.执行计划，生成倾斜优化
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.c = t.c;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Aggregate
+               ->  Hash Join
+                     Hash Cond: ((s.b = t.b) AND (s.c = t.c))
+                     Skew Join Optimized by Statistic
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN)
+                           ->  Seq Scan on skew_scol s
+                     ->  Hash
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 ->  Seq Scan on test_scol t
+(11 rows)
+
+--S2.执行查询
+select count(*) from skew_scol s, test_scol t where s.b = t.b and s.c = t.c;
+ count 
+-------
+   100
+(1 row)
+
+explain (costs off) select count(*) from skew_scol s, skew_scol1 s1 where s.b = s1.b and s.c = s1.c;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Aggregate
+               ->  Hash Join
+                     Hash Cond: ((s1.b = s.b) AND (s1.c = s.c))
+                     Skew Join Optimized by Statistic
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN)
+                           ->  Seq Scan on skew_scol1 s1
+                     ->  Hash
+                           ->  Streaming(type: HYBRID)
+                                 ->  Seq Scan on skew_scol s
+(11 rows)
+
+--I6.多列重分布，带多列统计信息，倾斜列带有过滤条件
+--S1.倾斜列的某一列上带有简单表达式，不生成倾斜优化
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.c = t.c and s.b > 1;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Aggregate
+               ->  Hash Join
+                     Hash Cond: ((s.b = t.b) AND (s.c = t.c))
+                     ->  Streaming(type: REDISTRIBUTE)
+                           ->  Seq Scan on skew_scol s
+                                 Filter: (b > 1)
+                     ->  Hash
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 ->  Seq Scan on test_scol t
+                                       Filter: (b > 1)
+(12 rows)
+
+--S2.倾斜列的某一列上带有简单表达式，生成倾斜优化
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.c = t.c and s.c is null;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Aggregate
+               ->  Hash Join
+                     Hash Cond: ((s.b = t.b) AND (s.c = t.c))
+                     Skew Join Optimized by Statistic
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN)
+                           ->  Seq Scan on skew_scol s
+                                 Filter: (c IS NULL)
+                     ->  Hash
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 ->  Seq Scan on test_scol t
+                                       Filter: (c IS NULL)
+(13 rows)
+
+--S3.倾斜列的某一列上带有简单表达式，不生成倾斜优化
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.c = t.c and s.c is not null;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Aggregate
+               ->  Hash Join
+                     Hash Cond: ((s.b = t.b) AND (s.c = t.c))
+                     ->  Streaming(type: REDISTRIBUTE)
+                           ->  Seq Scan on skew_scol s
+                                 Filter: (c IS NOT NULL)
+                     ->  Hash
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 ->  Seq Scan on test_scol t
+                                       Filter: (c IS NOT NULL)
+(12 rows)
+
+--S4.倾斜列的某几列上带有简单表达式，不生成倾斜优化
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.c = t.c and s.b = 1 and s.c = 1;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Aggregate
+               ->  Nested Loop
+                     ->  Streaming(type: REDISTRIBUTE)
+                           ->  Seq Scan on skew_scol s
+                                 Filter: ((c = 1) AND (b = 1))
+                     ->  Materialize
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 ->  Seq Scan on test_scol t
+                                       Filter: ((c = 1) AND (b = 1))
+(11 rows)
+
+--S5.倾斜列的某几列上带有简单表达式，不生成倾斜优化
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.c = t.c and s.a != 1 and s.b = 1 and s.c = 1;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Aggregate
+               ->  Nested Loop
+                     ->  Streaming(type: REDISTRIBUTE)
+                           ->  Seq Scan on skew_scol s
+                                 Filter: ((a <> 1) AND (c = 1) AND (b = 1))
+                     ->  Materialize
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 ->  Seq Scan on test_scol t
+                                       Filter: ((c = 1) AND (b = 1))
+(11 rows)
+
+--S6.倾斜列的某几列上带有简单表达式，生成倾斜优化
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.b + s.c > 0;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Aggregate
+               ->  Hash Join
+                     Hash Cond: (s.b = t.b)
+                     Skew Join Optimized by Statistic
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN)
+                           ->  Seq Scan on skew_scol s
+                                 Filter: ((b + c) > 0)
+                     ->  Hash
+                           ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST)
+                                 ->  Seq Scan on test_scol t
+(12 rows)
+
+--S7.倾斜列的某几列上带有简单表达式，生成倾斜优化
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.b + s.c < 1;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Aggregate
+               ->  Hash Join
+                     Hash Cond: (s.b = t.b)
+                     Skew Join Optimized by Statistic
+                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN)
+                           ->  Seq Scan on skew_scol s
+                                 Filter: ((b + c) < 1)
+                     ->  Hash
+                           ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST)
+                                 ->  Seq Scan on test_scol t
+(12 rows)
+
+set query_dop = 2002;

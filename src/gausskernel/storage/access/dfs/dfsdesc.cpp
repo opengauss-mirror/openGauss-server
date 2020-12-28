@@ -13,11 +13,11 @@
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
  *
- *  dfsdesc.cpp
- *        routines to support DFSStore
+ * dfsdesc.cpp
+ *    routines to support DFSStore
  *
  * IDENTIFICATION
- *        src/gausskernel/storage/access/dfs/dfsdesc.cpp
+ *    src/gausskernel/storage/access/dfs/dfsdesc.cpp
  *
  * ---------------------------------------------------------------------------------------
  */
@@ -33,6 +33,7 @@
 #include "access/htup.h"
 #include "access/nbtree.h"
 #include "access/sysattr.h"
+#include "access/tableam.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
 #include "catalog/dfsstore_ctlg.h"
@@ -56,7 +57,7 @@
 #include "utils/relcache.h"
 #include "utils/snapmgr.h"
 #include "utils/snapshot.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 
 #ifdef PGXC
 #include "pgxc/pgxc.h"
@@ -209,7 +210,6 @@ int DFSDesc::MaskDelMap(const char *pDelMap, uint32 Size, bool ChkDelHasDone)
             if ((((unsigned char)pDelMap[Loop]) & ((unsigned char)m_DelMap[Loop])) != (unsigned char)0) {
                 ereport(ERROR, (errcode(ERRCODE_CARDINALITY_VIOLATION), errmodule(MOD_DFS),
                                 errmsg("These rows have been deleted or updated")));
-
             } else {
                 m_DelMap[Loop] = (((unsigned char)pDelMap[Loop]) | ((unsigned char)m_DelMap[Loop]));
             }
@@ -474,11 +474,11 @@ int DFSDescHandler::Add(DFSDesc *pDFSDescArray, uint32 Cnt, CommandId CmdId, int
         Tup = DfsDescToTuple(&pDFSDescArray[Loop], Values, Nulls, DfsDescTupDesc);
 
         /* We always generate xlog for cudesc tuple */
-        Options = (unsigned int)Options & (~HEAP_INSERT_SKIP_WAL);
+        Options = (unsigned int)Options & (~TABLE_INSERT_SKIP_WAL);
 
-        heap_insert(DfsDescRel, Tup, CmdId, Options, NULL);
-        (void)index_insert(IdxRel, Values, Nulls, &(Tup->t_self), DfsDescRel,
-            IdxRel->rd_index->indisunique ? UNIQUE_CHECK_YES : UNIQUE_CHECK_NO);
+        (void)heap_insert(DfsDescRel, Tup, CmdId, Options, NULL);
+        index_insert(IdxRel, Values, Nulls, &(Tup->t_self), DfsDescRel,
+                     IdxRel->rd_index->indisunique ? UNIQUE_CHECK_YES : UNIQUE_CHECK_NO);
 
         heap_freetuple(Tup);
         Tup = NULL;
@@ -538,7 +538,6 @@ HeapTuple DFSDescHandler::DfsDescToTuple(DFSDesc *pDFSDesc, Datum *pTupVals, boo
 
     for (int Loop = 0; Loop < ColNum; Loop++) {
         pstMinMaxTmp = pDFSDesc->GetMinVal(Loop);
-
         if (pstMinMaxTmp == NULL) {
             pMin[MinDataLen] = NULL_MAGIC;
             MinDataLen += 1;
@@ -557,7 +556,6 @@ HeapTuple DFSDescHandler::DfsDescToTuple(DFSDesc *pDFSDesc, Datum *pTupVals, boo
         }
 
         pstMinMaxTmp = pDFSDesc->GetMaxVal(Loop);
-
         if (pstMinMaxTmp == NULL) {
             pMax[MaxDataLen] = NULL_MAGIC;
             MaxDataLen += 1;
@@ -720,7 +718,7 @@ void DFSDescHandler::setMinMaxByHeapTuple(HeapTuple pCudescTup, TupleDesc DfsDes
         default: {
             /* Never occur here. */
             ereport(FATAL, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_DFS),
-                errmsg("Invalid column attribute:%d", columnAttr)));
+                            errmsg("Invalid column attribute:%d", columnAttr)));
             break;
         }
     }
@@ -777,8 +775,8 @@ void DFSDescHandler::setMapColumnByHeapTuple(HeapTuple pCudescTup, TupleDesc Dfs
         }
         default: {
             /* Never occur here. */
-            ereport(FATAL, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_DFS),
-                errmsg("Invalid column attribute:%d", columnAttr)));
+            ereport(ERROR, (errcode(ERRCODE_CASE_NOT_FOUND), errmodule(MOD_DFS), errmsg("setMinMaxByHeapTuple"),
+                            errdetail("run into default code")));
             break;
         }
     }
@@ -898,30 +896,30 @@ void DFSDescHandler::FlushDelMap()
     HeapTuple NewTup = DfsDescToTuple(&DFSDescTmp, Values, Nulls, DfsDescTupDesc);
 
     /* Step 2: update del_bitmap */
-    HTSU_Result Result = HeapTupleInvisible;
-    ItemPointerData UpdateCtid;
-    TransactionId UpdateXmax = 0;
+    TM_Result Result = TM_Invisible;
+    TM_FailureData tmfd;
 
     Assert(NewTup);
     if (NewTup) {
-        Result = heap_update(DfsDescRel, NULL, &OldTupCtid, NewTup, &UpdateCtid, &UpdateXmax, GetCurrentCommandId(true),
-                             InvalidSnapshot, true);
+        Result = tableam_tuple_update(DfsDescRel, NULL, &OldTupCtid, NewTup, GetCurrentCommandId(true),
+                                      InvalidSnapshot, InvalidSnapshot, true, &tmfd, NULL, false);
 
         switch (Result) {
-            case HeapTupleSelfUpdated: {
+            case TM_SelfModified: {
                 /* description: this transaction delete different rows in the same CU
                  * Now It is HeapTupleSelfUpdated */
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_DFS),
                                 errmsg("delete or update failed because lock conflict")));
                 break;
             }
-            case HeapTupleMayBeUpdated: {
+            case TM_Ok: {
                 /* description: Is OK? update the index */
                 CatalogUpdateIndexes(DfsDescRel, NewTup);
                 break;
             }
 
-            case HeapTupleUpdated: {
+            case TM_Updated:
+            case TM_Deleted: {
                 /* description: how to fix this case that two transaction
                  * delete different rows in the same DfsDesc */
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_DFS),
@@ -970,7 +968,7 @@ List *DFSDescHandler::GetDescTuples(Snapshot _snapshot, bool only_tuples_with_in
 {
     List *rs = NIL;
     Snapshot snapshot;
-    HeapScanDesc scandesc;
+    TableScanDesc scandesc;
 
     Relation descrel;
     HeapTuple tuple;
@@ -984,9 +982,9 @@ List *DFSDescHandler::GetDescTuples(Snapshot _snapshot, bool only_tuples_with_in
     tupdesc = descrel->rd_att;
 
     snapshot = _snapshot ? _snapshot : GetActiveSnapshot();
-    scandesc = heap_beginscan(descrel, snapshot, 0, NULL);
+    scandesc = tableam_scan_begin(descrel, snapshot, 0, NULL);
 
-    while ((tuple = heap_getnext(scandesc, ForwardScanDirection)) != NULL) {
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scandesc, ForwardScanDirection)) != NULL) {
         /* Deconstruct the tuple ... faster than repeated heap_getattr */
         DFSDesc *desc = (DFSDesc *)New(CurrentMemoryContext) DFSDesc();
         TupleToDfsDesc(tuple, tupdesc, desc);
@@ -1007,7 +1005,7 @@ List *DFSDescHandler::GetDescTuples(Snapshot _snapshot, bool only_tuples_with_in
 
     pfree_ext(delete_bitmap);
 
-    heap_endscan(scandesc);
+    tableam_scan_end(scandesc);
     heap_close(descrel, NoLock);
 
     return rs;

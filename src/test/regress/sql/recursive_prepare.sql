@@ -1,0 +1,403 @@
+drop schema IF EXISTS rq_cstore cascade;
+
+create schema rq_cstore;
+set current_schema=rq_cstore;
+DROP TABLE IF EXISTS a_rep;
+DROP TABLE IF EXISTS b_rep;
+DROP TABLE IF EXISTS a;
+DROP TABLE IF EXISTS b;
+DROP TABLE IF EXISTS t1;
+DROP TABLE IF EXISTS t2;
+DROP TABLE IF EXISTS chinamap;
+DROP TABLE IF EXISTS chinamap2;
+DROP TABLE IF EXISTS chinamap3;
+DROP TABLE IF EXISTS chinamap4;
+DROP TABLE IF EXISTS area;
+    
+CREATE TABLE a
+(  
+ID  numeric,  
+PID   numeric  DEFAULT 0,
+NAME text
+)
+with (orientation=column)
+;
+
+INSERT INTO a(ID,PID,NAME) VALUES('1','0','a');  
+INSERT INTO a(ID,PID,NAME) VALUES('2','1','b');  
+INSERT INTO a(ID,PID,NAME) VALUES('3','1','c');  
+INSERT INTO a(ID,PID,NAME) VALUES('4','2','d');  
+INSERT INTO a(ID,PID,NAME) VALUES('5','2','e');  
+INSERT INTO a(ID,PID,NAME) VALUES('6','3','f');  
+INSERT INTO a(ID,PID,NAME) VALUES('7','3','g');  
+INSERT INTO a(ID,PID,NAME) VALUES('8','4','h');  
+INSERT INTO a(ID,PID,NAME) VALUES('9','7','i');  
+INSERT INTO a(ID,PID,NAME) VALUES('10','8','j');  
+INSERT INTO a(ID,PID,NAME) VALUES('11','9','k');  
+INSERT INTO a(ID,PID,NAME) VALUES('12','11','l');  
+INSERT INTO a(ID,PID,NAME) VALUES('13','12','m');  
+
+CREATE TABLE b
+(  
+ID    numeric,  
+PID   numeric  DEFAULT 0,
+NAME text
+)with (orientation=column)
+ ;
+
+INSERT INTO b(ID,PID,NAME) VALUES('1','0','A'); 
+INSERT INTO b(ID,PID,NAME) VALUES('2','1','B'); 
+INSERT INTO b(ID,PID,NAME) VALUES('3','1','C'); 
+INSERT INTO b(ID,PID,NAME) VALUES('4','2','D'); 
+INSERT INTO b(ID,PID,NAME) VALUES('5','2','E'); 
+INSERT INTO b(ID,PID,NAME) VALUES('6','3','F'); 
+INSERT INTO b(ID,PID,NAME) VALUES('7','6','G'); 
+INSERT INTO b(ID,PID,NAME) VALUES('8','7','H'); 
+INSERT INTO b(ID,PID,NAME) VALUES('9','8','I'); 
+INSERT INTO b(ID,PID,NAME) VALUES('10','9','J'); 
+INSERT INTO b(ID,PID,NAME) VALUES('11','10','K'); 
+INSERT INTO b(ID,PID,NAME) VALUES('12','11','L'); 
+INSERT INTO b(ID,PID,NAME) VALUES('13','12','M'); 
+
+CREATE TABLE a_rep
+(
+ID  numeric,
+PID   numeric  DEFAULT 0,
+NAME text
+) with (orientation=column) ;
+
+CREATE TABLE b_rep
+(
+ID    numeric,
+PID   numeric DEFAULT 0,
+NAME text
+) with (orientation=column) ;
+
+
+insert into a_rep select * from a;
+insert into b_rep select * from b;
+create table t1(c1 int, c2 int);
+create table t2(c1 int, c2 int);
+insert into t1 select v,v from generate_series(1,11) as v;
+insert into t2 select * from t1;
+
+
+create table area
+(
+area_code text,
+belong_area_code text,
+name text,
+rnk int
+) with (orientation=column);
+
+
+insert into area values('1000000','0000000','总行',1);
+insert into area values('1100000','1000000','北京分行',2);
+insert into area values('1200000','1000000','上海分行',2);
+insert into area values('1300000','1000000','深圳分行',2);
+insert into area values('1110000','1100000','朝阳区支行',3);
+insert into area values('1120000','1100000','海淀区支行',3);
+insert into area values('1111000','1110000','三里屯支行',4);
+insert into area values('1112000','1110000','酒仙桥支行',4);
+insert into area values('1121000','1120000','西三旗支行',4);
+insert into area values('1210000','1200000','虹桥区支行',3);
+insert into area values('1220000','1200000','浦东区支行',3);
+
+CREATE TABLE chinamap
+(
+  id INTEGER,
+  pid INTEGER,
+  name TEXT
+) with (orientation=column) ;
+
+CREATE TABLE chinamap2
+(
+  id INTEGER,
+  pid INTEGER,
+  name TEXT
+) with (orientation=column) ;
+
+insert into chinamap values (11, null, '湖北省');
+insert into chinamap values (110, 11, '武汉市');
+insert into chinamap values (120, 11, '孝感市');
+insert into chinamap values (130, 11, '宜昌市');
+insert into chinamap values (140, 11, '随州市');
+insert into chinamap values (150, 11, '仙桃市');
+insert into chinamap values (160, 11, '荆门市');
+insert into chinamap values (170, 11, '枝江市');
+insert into chinamap values (180, 11, '神农架市');
+insert into chinamap values (111, 110, '武昌区');
+insert into chinamap values (112, 110, '下城区');
+insert into chinamap values (113, 110, '江岸区');
+insert into chinamap values (114, 110, '江汉区');
+insert into chinamap values (115, 110, '汉阳区');
+insert into chinamap values (116, 110, '洪山区');
+insert into chinamap values (117, 110, '青山区');
+
+insert into chinamap2 select * from chinamap;
+CREATE TABLE chinamap3
+(
+  id INTEGER,
+  pid INTEGER,
+  mapid INTEGER,
+  name TEXT
+) with (orientation=column) ;
+
+insert into chinamap3 values (100, null, null, '景点');
+insert into chinamap3 values (200, null, null, '美食');
+insert into chinamap3 values (300, null, null, '教育');
+insert into chinamap3 values (110, 100, 111, '黄鹤楼');
+insert into chinamap3 values (310, 300, 111, '武汉大学');
+insert into chinamap3 values (320, 300, null, '武汉科技大学');
+insert into chinamap3 values (321, 320, 117, '武汉科技大学青山校区');
+insert into chinamap3 values (321, 320, 116, '武汉科技大学洪山校区');
+insert into chinamap3 values (210, 200, 11, '热干面');
+
+CREATE TABLE chinamap4
+(
+  id INTEGER,
+  pid INTEGER,
+  mapid INTEGER,
+  name TEXT
+) with (orientation=column) ;
+
+insert into chinamap4 values (100, null, null, '景点');
+insert into chinamap4 values (200, null, null, '美食');
+insert into chinamap4 values (300, null, null, '教育');
+insert into chinamap4 values (110, 100, 111, '黄鹤楼');
+insert into chinamap4 values (310, 300, 111, '武汉大学');
+insert into chinamap4 values (320, 300, null, '武汉科技大学');
+insert into chinamap4 values (321, 320, 117, '武汉科技大学青山校区');
+insert into chinamap4 values (321, 320, 116, '武汉科技大学洪山校区');
+insert into chinamap4 values (210, 200, 11, '热干面');
+reset current_schema;
+
+DROP TABLE IF EXISTS test_rec;
+DROP TABLE IF EXISTS test_rec_1;
+
+create table test_rec(dm int, sj_dm int, name text) with(orientation=column);
+insert into test_rec values(1,2,'gauss poc');
+insert into test_rec values(2,3,'soft gauss');
+insert into test_rec values(3,4,'2012 soft');
+insert into test_rec values(4,5,'huawei 2012');
+insert into test_rec values(5,6,'China huawei');
+insert into test_rec values(6,7,'world China');
+
+create table test_rec_1(dm int, sj_dm int, name text) with(orientation=column) ;
+insert into test_rec_1 values(1,2,'gauss poc');
+insert into test_rec_1 values(2,3,'soft gauss');
+insert into test_rec_1 values(3,4,'2012 soft');
+insert into test_rec_1 values(4,5,'huawei 2012');
+insert into test_rec_1 values(5,6,'China huawei');
+insert into test_rec_1 values(6,7,'world China');
+
+drop schema IF EXISTS gcms cascade;
+create schema gcms;
+set current_schema = gcms;
+DROP TABLE IF EXISTS gcm_mag_area_h;
+DROP TABLE IF EXISTS gcc_mag_district_h;
+
+create table gcm_mag_area_h
+(
+etl_tx_dt varchar2(8),
+area_code varchar2(30) primary key,
+area_name varchar2(360),
+area_short_name varchar2(360),
+local_name varchar2(240),
+belong_area_code varchar2(30),
+bank_level varchar2(24),
+country_code varchar2(15),
+part_code varchar2(15),
+time_zone varchar2(27),
+bank_code varchar2(30),
+group_code varchar2(15),
+mag_area_status varchar2(3),
+mag_area_broad varchar2(3),
+mag_area_grade varchar2(9)
+)
+;
+
+create table gcc_mag_district_h
+(
+etl_tx_dt varchar2(8),
+district_code varchar2(24),
+district_name varchar2(450),
+district_flag varchar2(6),
+belong_district varchar2(24),
+center_flag varchar2(3),
+country_code varchar2(15)
+)
+;
+
+
+copy gcm_mag_area_h from '/home/zhangyao/openGauss/openGauss-server_clean/openGauss-server/src/test/regress/tmp_check/datanode1/pg_copydir/gcm_mag_area_h.dat' with(delimiter '|', encoding 'utf8');
+copy gcc_mag_district_h from '/home/zhangyao/openGauss/openGauss-server_clean/openGauss-server/src/test/regress/tmp_check/datanode1/pg_copydir/gcc_mag_district_h.dat' with(delimiter '|', encoding 'utf8');
+reset current_schema;
+
+set current_schema=public;
+DROP TABLE IF EXISTS a_rep;
+DROP TABLE IF EXISTS b_rep;
+DROP TABLE IF EXISTS a;
+DROP TABLE IF EXISTS b;
+DROP TABLE IF EXISTS t1;
+DROP TABLE IF EXISTS t2;
+DROP TABLE IF EXISTS chinamap;
+DROP TABLE IF EXISTS chinamap2;
+DROP TABLE IF EXISTS chinamap3;
+DROP TABLE IF EXISTS chinamap4;
+DROP TABLE IF EXISTS area;
+    
+CREATE TABLE a
+(  
+ID  numeric,  
+PID   numeric  DEFAULT 0,
+NAME text
+) ;
+
+INSERT INTO a(ID,PID,NAME) VALUES('1','0','a');  
+INSERT INTO a(ID,PID,NAME) VALUES('2','1','b');  
+INSERT INTO a(ID,PID,NAME) VALUES('3','1','c');  
+INSERT INTO a(ID,PID,NAME) VALUES('4','2','d');  
+INSERT INTO a(ID,PID,NAME) VALUES('5','2','e');  
+INSERT INTO a(ID,PID,NAME) VALUES('6','3','f');  
+INSERT INTO a(ID,PID,NAME) VALUES('7','3','g');  
+INSERT INTO a(ID,PID,NAME) VALUES('8','4','h');  
+INSERT INTO a(ID,PID,NAME) VALUES('9','7','i');  
+INSERT INTO a(ID,PID,NAME) VALUES('10','8','j');  
+INSERT INTO a(ID,PID,NAME) VALUES('11','9','k');  
+INSERT INTO a(ID,PID,NAME) VALUES('12','11','l');  
+INSERT INTO a(ID,PID,NAME) VALUES('13','12','m');  
+
+CREATE TABLE b
+(  
+ID    numeric,  
+PID   numeric  DEFAULT 0,
+NAME text
+) ;
+
+INSERT INTO b(ID,PID,NAME) VALUES('1','0','A'); 
+INSERT INTO b(ID,PID,NAME) VALUES('2','1','B'); 
+INSERT INTO b(ID,PID,NAME) VALUES('3','1','C'); 
+INSERT INTO b(ID,PID,NAME) VALUES('4','2','D'); 
+INSERT INTO b(ID,PID,NAME) VALUES('5','2','E'); 
+INSERT INTO b(ID,PID,NAME) VALUES('6','3','F'); 
+INSERT INTO b(ID,PID,NAME) VALUES('7','6','G'); 
+INSERT INTO b(ID,PID,NAME) VALUES('8','7','H'); 
+INSERT INTO b(ID,PID,NAME) VALUES('9','8','I'); 
+INSERT INTO b(ID,PID,NAME) VALUES('10','9','J'); 
+INSERT INTO b(ID,PID,NAME) VALUES('11','10','K'); 
+INSERT INTO b(ID,PID,NAME) VALUES('12','11','L'); 
+INSERT INTO b(ID,PID,NAME) VALUES('13','12','M'); 
+
+CREATE TABLE a_rep
+(
+ID  numeric,
+PID   numeric  DEFAULT 0,
+NAME text
+) ;
+
+CREATE TABLE b_rep
+(
+ID    numeric,
+PID   numeric DEFAULT 0,
+NAME text
+) ;
+
+
+insert into a_rep select * from a;
+insert into b_rep select * from b;
+create table t1(c1 int, c2 int);
+create table t2(c1 int, c2 int);
+insert into t1 select v,v from generate_series(1,11) as v;
+insert into t2 select * from t1;
+
+
+create table area
+(
+area_code text,
+belong_area_code text,
+name text,
+rnk int
+);
+
+
+insert into area values('1000000','0000000','总行',1);
+insert into area values('1100000','1000000','北京分行',2);
+insert into area values('1200000','1000000','上海分行',2);
+insert into area values('1300000','1000000','深圳分行',2);
+insert into area values('1110000','1100000','朝阳区支行',3);
+insert into area values('1120000','1100000','海淀区支行',3);
+insert into area values('1111000','1110000','三里屯支行',4);
+insert into area values('1112000','1110000','酒仙桥支行',4);
+insert into area values('1121000','1120000','西三旗支行',4);
+insert into area values('1210000','1200000','虹桥区支行',3);
+insert into area values('1220000','1200000','浦东区支行',3);
+
+CREATE TABLE chinamap
+(
+  id INTEGER,
+  pid INTEGER,
+  name TEXT
+) ;
+
+CREATE TABLE chinamap2
+(
+  id INTEGER,
+  pid INTEGER,
+  name TEXT
+) ;
+
+insert into chinamap values (11, null, '湖北省');
+insert into chinamap values (110, 11, '武汉市');
+insert into chinamap values (120, 11, '孝感市');
+insert into chinamap values (130, 11, '宜昌市');
+insert into chinamap values (140, 11, '随州市');
+insert into chinamap values (150, 11, '仙桃市');
+insert into chinamap values (160, 11, '荆门市');
+insert into chinamap values (170, 11, '枝江市');
+insert into chinamap values (180, 11, '神农架市');
+insert into chinamap values (111, 110, '武昌区');
+insert into chinamap values (112, 110, '下城区');
+insert into chinamap values (113, 110, '江岸区');
+insert into chinamap values (114, 110, '江汉区');
+insert into chinamap values (115, 110, '汉阳区');
+insert into chinamap values (116, 110, '洪山区');
+insert into chinamap values (117, 110, '青山区');
+
+insert into chinamap2 select * from chinamap;
+CREATE TABLE chinamap3
+(
+  id INTEGER,
+  pid INTEGER,
+  mapid INTEGER,
+  name TEXT
+) ;
+
+insert into chinamap3 values (100, null, null, '景点');
+insert into chinamap3 values (200, null, null, '美食');
+insert into chinamap3 values (300, null, null, '教育');
+insert into chinamap3 values (110, 100, 111, '黄鹤楼');
+insert into chinamap3 values (310, 300, 111, '武汉大学');
+insert into chinamap3 values (320, 300, null, '武汉科技大学');
+insert into chinamap3 values (321, 320, 117, '武汉科技大学青山校区');
+insert into chinamap3 values (321, 320, 116, '武汉科技大学洪山校区');
+insert into chinamap3 values (210, 200, 11, '热干面');
+
+CREATE TABLE chinamap4
+(
+  id INTEGER,
+  pid INTEGER,
+  mapid INTEGER,
+  name TEXT
+) ;
+
+insert into chinamap4 values (100, null, null, '景点');
+insert into chinamap4 values (200, null, null, '美食');
+insert into chinamap4 values (300, null, null, '教育');
+insert into chinamap4 values (110, 100, 111, '黄鹤楼');
+insert into chinamap4 values (310, 300, 111, '武汉大学');
+insert into chinamap4 values (320, 300, null, '武汉科技大学');
+insert into chinamap4 values (321, 320, 117, '武汉科技大学青山校区');
+insert into chinamap4 values (321, 320, 116, '武汉科技大学洪山校区');
+insert into chinamap4 values (210, 200, 11, '热干面');
+reset current_schema;

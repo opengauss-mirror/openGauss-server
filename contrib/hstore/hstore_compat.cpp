@@ -302,10 +302,10 @@ HStore* hstoreUpgrade(Datum orig)
         hs = (HStore*)PG_DETOAST_DATUM_COPY(orig);
 
     {
-        int count = hs->size_;
+        uint32 count = hs->size_;
         HEntry* new_entries = ARRPTR(hs);
         HOldEntry* old_entries = (HOldEntry*)ARRPTR(hs);
-        int i;
+        uint32 i;
 
         for (i = 0; i < count; ++i) {
             uint32 pos = old_entries[i].pos;

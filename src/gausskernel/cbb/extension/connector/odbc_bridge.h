@@ -23,7 +23,6 @@
 #ifndef ODBC_BRIDGE_H
 #define ODBC_BRIDGE_H
 
-#ifdef ENABLE_MULTIPLE_NODES
 #include <sql.h>
 
 /* handle definition for class connection and result */
@@ -92,5 +91,4 @@ extern __thread SQLNumResultColsAPI pSQLNumResultCols;
 extern __thread SQLDescribeColAPI pSQLDescribeCol;
 extern __thread SQLBindColAPI pSQLBindCol;
 
-#endif
 #endif /* ODBC_BRIDGE_H */

@@ -43,12 +43,12 @@
 
 #include "access/htup.h"
 #include "access/sysattr.h"
+#include "access/tableam.h"
 #include "access/transam.h"
 #include "access/xact.h"
 #include "catalog/pg_statistic.h"
 #include "catalog/pg_statistic_ext.h"
 #include "catalog/namespace.h"
-#include "commands/matview.h"
 #include "commands/trigger.h"
 #include "executor/execdebug.h"
 #include "executor/nodeRecursiveunion.h"
@@ -61,14 +61,14 @@
 #include "optimizer/clauses.h"
 #include "parser/parsetree.h"
 #include "pgstat.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/lmgr.h"
 #include "tcop/utility.h"
 #include "utils/acl.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #include "commands/copy.h"
@@ -85,7 +85,11 @@
 #include "instruments/instr_unique_sql.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/executer_gstrace.h"
+#include "instruments/instr_slow_query.h"
+#include "instruments/instr_statement.h"
+#ifdef ENABLE_MOT
 #include "storage/mot/jit_exec.h"
+#endif
 
 /* Hooks for plugins to get control in ExecutorStart/Run/Finish/End */
 THR_LOCAL ExecutorStart_hook_type ExecutorStart_hook = NULL;
@@ -102,14 +106,18 @@ THR_LOCAL char *producer_top_plannode_str = NULL;
 THR_LOCAL bool is_syncup_producer = false;
 
 /* decls for local routines only used within this module */
-static void InitPlan(QueryDesc *queryDesc, int eflags);
+void InitPlan(QueryDesc *queryDesc, int eflags);
 static void CheckValidRowMarkRel(Relation rel, RowMarkType markType);
 static void ExecPostprocessPlan(EState *estate);
 static void ExecEndPlan(PlanState *planstate, EState *estate);
 static void ExecCollectMaterialForSubplan(EState *estate);
-static void ExecutePlan(EState *estate, PlanState *planstate, bool use_parallel_mode,
-    CmdType operation, bool sendTuples, long numberTuples, ScanDirection direction,
-    DestReceiver *dest, JitExec::JitContext* mot_jit_context);
+#ifdef ENABLE_MOT
+static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation, bool sendTuples, long numberTuples,
+    ScanDirection direction, DestReceiver *dest, JitExec::JitContext* mot_jit_context);
+#else
+static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation, bool sendTuples, long numberTuples,
+    ScanDirection direction, DestReceiver *dest);
+#endif
 static void ExecuteVectorizedPlan(EState *estate, PlanState *planstate, CmdType operation, bool sendTuples,
     long numberTuples, ScanDirection direction, DestReceiver *dest);
 static bool ExecCheckRTEPerms(RangeTblEntry *rte);
@@ -117,13 +125,11 @@ static bool ExecCheckRTEPermsModified(Oid relOid, Oid userid, Bitmapset *modifie
 void ExecCheckXactReadOnly(PlannedStmt *plannedstmt);
 static void EvalPlanQualStart(EPQState *epqstate, EState *parentestate, Plan *planTree);
 
-extern bool StreamTopConsumerAmI();
-extern bool StreamThreadAmI();
-
-extern char *ExecBuildSlotValueDescription(Oid reloid, TupleTableSlot *slot, TupleDesc tupdesc, Bitmapset *modifiedCols,
-    int maxfieldlen);
+extern char* ExecBuildSlotValueDescription(
+    Oid reloid, TupleTableSlot *slot, TupleDesc tupdesc, Bitmapset *modifiedCols, int maxfieldlen);
 
 extern void BuildStreamFlow(PlannedStmt *plan);
+extern void StartUpStreamInParallel(PlannedStmt* pstmt, EState* estate);
 
 extern void CodeGenThreadRuntimeSetup();
 extern bool CodeGenThreadObjectReady();
@@ -151,6 +157,7 @@ extern bool anls_opt_is_on(AnalysisOpt dfx_opt);
 static void report_iud_time(QueryDesc *query)
 {
     ListCell *lc = NULL;
+    Oid rid;
     if (u_sess->attr.attr_sql.enable_save_datachanged_timestamp == false) {
         return;
     }
@@ -159,7 +166,7 @@ static void report_iud_time(QueryDesc *query)
 
     foreach (lc, plannedstmt->resultRelations) {
         Index idx = lfirst_int(lc);
-        Oid rid = getrelid(idx, plannedstmt->rtable);
+        rid = getrelid(idx, plannedstmt->rtable);
         if (OidIsValid(rid) == false || rid < FirstNormalObjectId) {
             continue;
         }
@@ -212,14 +219,16 @@ static void report_iud_time(QueryDesc *query)
  * normally call standard_ExecutorStart().
  * ----------------------------------------------------------------
  */
-void ExecutorStart(QueryDesc *queryDesc, int eflags)
+void ExecutorStart(QueryDesc* queryDesc, int eflags)
 {
     gstrace_entry(GS_TRC_ID_ExecutorStart);
-    if (ExecutorStart_hook) {
+
+    /* it's unsafe to deal with plugins hooks as dynamic lib may be released */
+    if (ExecutorStart_hook && !(g_instance.status > NoShutdown))
         (*ExecutorStart_hook)(queryDesc, eflags);
-    } else {
+    else
         standard_ExecutorStart(queryDesc, eflags);
-    }
+
     gstrace_exit(GS_TRC_ID_ExecutorStart);
 }
 
@@ -242,20 +251,8 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
     /*
      * If the transaction is read-only, we need to check if any writes are
      * planned to non-temporary tables.  EXPLAIN is considered read-only.
-     *
-     * Don't allow writes in parallel mode.  Supporting UPDATE and DELETE
-     * would require (a) storing the combocid hash in shared memory, rather
-     * than synchronizing it just once at the start of parallelism, and (b) an
-     * alternative to heap_update()'s reliance on xmax for mutual exclusion.
-     * INSERT may have no such troubles, but we forbid it to simplify the
-     * checks.
-     *
-     * We have lower-level defenses in CommandCounterIncrement and elsewhere
-     * against performing unsafe operations in parallel mode, but this gives a
-     * more user-friendly error message.
      */
-    if ((u_sess->attr.attr_common.XactReadOnly || IsInParallelMode()) &&
-        !(eflags & EXEC_FLAG_EXPLAIN_ONLY)) {
+    if (u_sess->attr.attr_common.XactReadOnly && !(eflags & EXEC_FLAG_EXPLAIN_ONLY)) {
         ExecCheckXactReadOnly(queryDesc->plannedstmt);
     }
 
@@ -366,9 +363,9 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
 
     /* Apply BloomFilter array space. */
     if (queryDesc->plannedstmt->MaxBloomFilterNum > 0) {
-        int boom_size = queryDesc->plannedstmt->MaxBloomFilterNum;
-        estate->es_bloom_filter.array_size = boom_size;
-        estate->es_bloom_filter.bfarray = (filter::BloomFilter **)palloc0(boom_size * sizeof(filter::BloomFilter *));
+        int bloom_size = queryDesc->plannedstmt->MaxBloomFilterNum;
+        estate->es_bloom_filter.array_size = bloom_size;
+        estate->es_bloom_filter.bfarray = (filter::BloomFilter **)palloc0(bloom_size * sizeof(filter::BloomFilter *));
     }
 
     /* statement always start from CN */
@@ -442,10 +439,15 @@ void ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
     /* sql active feature, opeartor history statistics */
     int instrument_option = 0;
     bool has_track_operator = false;
+    char* old_stmt_name = u_sess->pcache_cxt.cur_stmt_name;
+    if (u_sess->SPI_cxt._connected >= 0) {
+        u_sess->pcache_cxt.cur_stmt_name = NULL;
+    }
+    exec_explain_plan(queryDesc);
     if (u_sess->attr.attr_resource.use_workload_manager &&
-        u_sess->attr.attr_resource.resource_track_level == RESOURCE_TRACK_OPERATOR && queryDesc != NULL &&
-        queryDesc->plannedstmt != NULL && queryDesc->plannedstmt->is_stream_plan &&
-        u_sess->exec_cxt.need_track_resource) {
+        u_sess->attr.attr_resource.resource_track_level == RESOURCE_TRACK_OPERATOR && 
+        queryDesc != NULL && queryDesc->plannedstmt != NULL &&
+        queryDesc->plannedstmt->is_stream_plan && u_sess->exec_cxt.need_track_resource) {
 #ifdef STREAMPLAN
         if (queryDesc->instrument_options) {
             instrument_option = queryDesc->instrument_options;
@@ -501,18 +503,26 @@ void ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
             RecordQueryPlanIssues(issue_results);
         }
     }
+    print_duration(queryDesc);
+    instr_stmt_report_query_plan(queryDesc);
 
     /* sql active feature, opeartor history statistics */
     if (can_operator_history_statistics) {
         u_sess->instr_cxt.can_record_to_table = true;
         ExplainNodeFinish(queryDesc->planstate, queryDesc->plannedstmt, GetCurrentTimestamp(), false);
 
-        if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && u_sess->instr_cxt.global_instr != NULL) {
+#ifdef ENABLE_MULTIPLE_NODES
+        if ((IS_PGXC_COORDINATOR) && u_sess->instr_cxt.global_instr != NULL) {
+#else
+        if (StreamTopConsumerAmI() && u_sess->instr_cxt.global_instr != NULL) {
+#endif
             delete u_sess->instr_cxt.global_instr;
             u_sess->instr_cxt.thread_instr = NULL;
             u_sess->instr_cxt.global_instr = NULL;
         }
     }
+
+    u_sess->pcache_cxt.cur_stmt_name = old_stmt_name;
 }
 
 void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
@@ -522,6 +532,8 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
     DestReceiver *dest = NULL;
     bool send_tuples = false;
     MemoryContext old_context;
+    instr_time starttime;
+    double totaltime = 0;
 
     /* sanity checks */
     Assert(queryDesc != NULL);
@@ -572,12 +584,16 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
      * In order to ensure the integrity of the message(T-C-Z), regardless of the value of
      * u_sess->exec_cxt.executor_stop_flag, the 'T' message should be sent.
      */
-    if (send_tuples) {
+    if (send_tuples)
         (*dest->rStartup)(dest, operation, queryDesc->tupDesc);
+
+    if (queryDesc->plannedstmt->bucketMap != NULL) {
+        u_sess->exec_cxt.global_bucket_map = queryDesc->plannedstmt->bucketMap[0];
+    } else {
+        u_sess->exec_cxt.global_bucket_map = NULL;
     }
 
-    u_sess->exec_cxt.global_bucket_map = queryDesc->plannedstmt->bucketMap[0];
-
+    (void)INSTR_TIME_SET_CURRENT(starttime);
     /*
      * run plan
      */
@@ -585,12 +601,29 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
         if (queryDesc->planstate->vectorized) {
             ExecuteVectorizedPlan(estate, queryDesc->planstate, operation, send_tuples, count, direction, dest);
         } else {
-            ExecutePlan(estate, queryDesc->planstate, queryDesc->plannedstmt->parallelModeNeeded, operation,
-                send_tuples, count, direction, dest, queryDesc->mot_jit_context);
+#ifdef ENABLE_MOT
+            ExecutePlan(estate, queryDesc->planstate, operation, send_tuples,
+                count, direction, dest, queryDesc->mot_jit_context);
+#else
+            ExecutePlan(estate, queryDesc->planstate, operation, send_tuples, count, direction, dest);
+#endif
         }
     }
+    totaltime += elapsed_time(&starttime);
 
     queryDesc->executed = true;
+
+    /*
+    *  if current plan is working for expression, no need to collect instrumentation.
+    */
+    if (estate->es_instrument != INSTRUMENT_NONE && StreamTopConsumerAmI() && u_sess->instr_cxt.global_instr &&
+        u_sess->instr_cxt.thread_instr) {
+        int node_id = queryDesc->plannedstmt->planTree->plan_node_id - 1;
+        int* m_instrArrayMap = u_sess->instr_cxt.thread_instr->m_instrArrayMap;
+
+        u_sess->instr_cxt.thread_instr->m_instrArray[m_instrArrayMap[node_id]].instr.instruPlanData.run_time =
+            totaltime;
+    }
 
     /*
      * shutdown tuple receiver, if we started it
@@ -823,14 +856,24 @@ bool ExecCheckRTPerms(List *rangeTable, bool ereport_on_violation)
     ListCell *l = NULL;
     bool result = true;
     gstrace_entry(GS_TRC_ID_ExecCheckRTPerms);
+#ifdef ENABLE_MULTIPLE_NODES
+    bool with_ts_rel = false;
+    char* ts_relname = NULL;
+#endif
     foreach (l, rangeTable) {
         RangeTblEntry *rte = (RangeTblEntry *)lfirst(l);
-
-        /*  pg_obsscaninfo saves runtime info from the compute pool. */
-        if (rte->relkind == RELKIND_RELATION && rte->relname) {
-            if (!pg_strcasecmp(rte->relname, "pg_obsscaninfo") || !pg_strcasecmp(rte->relname, "gs_obsscaninfo"))
+#ifdef ENABLE_MULTIPLE_NODES
+        /* As the inner table of timeseries table that the tag rel can be skipped */
+        if (with_ts_rel && rte->relname != NULL &&
+            strncmp(rte->relname, TsConf::TAG_TABLE_NAME_PREFIX, strlen(TsConf::TAG_TABLE_NAME_PREFIX)) == 0) {
+            /* check from the next position after ts# */
+            if (strncmp(strchr(rte->relname + strlen(TsConf::TAG_TABLE_NAME_PREFIX), '#') + 1,
+                        ts_relname, strlen(ts_relname)) == 0) {
+                with_ts_rel = false;
                 continue;
+            }
         }
+#endif
         result = ExecCheckRTEPerms(rte);
         if (!result) {
             Assert(rte->rtekind == RTE_RELATION);
@@ -839,6 +882,16 @@ bool ExecCheckRTPerms(List *rangeTable, bool ereport_on_violation)
             }
             gstrace_exit(GS_TRC_ID_ExecCheckRTPerms);
             return false;
+#ifdef ENABLE_MULTIPLE_NODES
+        } else {
+            /* check whether the timeseries table */
+            if (rte->rtekind == RTE_RELATION && list_length(rangeTable) > 1 &&
+                with_ts_rel == false && rte->orientation == REL_TIMESERIES_ORIENTED) {
+                with_ts_rel = true;
+                ts_relname = rte->relname;
+                continue;
+            }
+#endif
         }
     }
 
@@ -1014,7 +1067,6 @@ static bool ExecCheckRTEPermsModified(Oid relOid, Oid userid, Bitmapset *modifie
     if (bms_is_empty(modifiedCols)) {
         if (pg_attribute_aclcheck_all(relOid, userid, requiredPerms, ACLMASK_ANY) != ACLCHECK_OK) {
             return false;
-
         }
     }
 
@@ -1071,10 +1123,6 @@ void ExecCheckXactReadOnly(PlannedStmt *plannedstmt)
 
         PreventCommandIfReadOnly(CreateCommandTag((Node *)plannedstmt));
     }
-
-    if (plannedstmt->commandType != CMD_SELECT || plannedstmt->hasModifyingCTE) {
-        PreventCommandIfParallelMode(CreateCommandTag((Node*)plannedstmt));
-    }
 }
 
 /* ----------------------------------------------------------------
@@ -1084,7 +1132,7 @@ void ExecCheckXactReadOnly(PlannedStmt *plannedstmt)
  * 		and start up the rule manager
  * ----------------------------------------------------------------
  */
-static void InitPlan(QueryDesc *queryDesc, int eflags)
+void InitPlan(QueryDesc *queryDesc, int eflags)
 {
     CmdType operation = queryDesc->operation;
     PlannedStmt *plannedstmt = queryDesc->plannedstmt;
@@ -1096,12 +1144,18 @@ static void InitPlan(QueryDesc *queryDesc, int eflags)
     ListCell *l = NULL;
     int i;
     bool check = false;
-
+#ifndef ENABLE_MULTIPLE_NODES
+    plannedstmt->queryId = u_sess->debug_query_id;
+#endif
     gstrace_entry(GS_TRC_ID_InitPlan);
     /*
      * Do permissions checks
      */
     if (!(IS_PGXC_DATANODE && (IsConnFromCoord() || IsConnFromDatanode()))) {
+        check = true;
+    }
+
+    if (u_sess->exec_cxt.is_exec_trigger_func) {
         check = true;
     }
 
@@ -1122,7 +1176,9 @@ static void InitPlan(QueryDesc *queryDesc, int eflags)
      */
     estate->es_range_table = rangeTable;
     estate->es_plannedstmt = plannedstmt;
+#ifdef ENABLE_MOT
     estate->mot_jit_context = queryDesc->mot_jit_context;
+#endif
 
     /*
      * initialize result relation stuff, and open/lock the result rels.
@@ -1136,7 +1192,11 @@ static void InitPlan(QueryDesc *queryDesc, int eflags)
      * case happens on a target table's node group not matching the nodes that we
      * are shipping plan to.
      */
+#ifdef EANBLE_MULTIPLE_NODES
     if (plannedstmt->resultRelations && (!IS_PGXC_DATANODE || NeedExecute(plan))) {
+#else
+    if (plannedstmt->resultRelations && (!StreamThreadAmI()|| NeedExecute(plan))) {
+#endif
         List *resultRelations = plannedstmt->resultRelations;
         int numResultRelations = list_length(resultRelations);
         ResultRelInfo *resultRelInfos = NULL;
@@ -1336,7 +1396,7 @@ static void InitPlan(QueryDesc *queryDesc, int eflags)
          * it is a parameterless subplan (not initplan), we suggest that it be
          * prepared to handle REWIND efficiently; otherwise there is no need.
          */
-        sp_eflags = eflags & (EXEC_FLAG_EXPLAIN_ONLY | EXEC_FLAG_WITH_NO_DATA);
+        sp_eflags = eflags & EXEC_FLAG_EXPLAIN_ONLY;
         if (bms_is_member(i, plannedstmt->rewindPlanIDs)) {
             sp_eflags |= EXEC_FLAG_REWIND;
         }
@@ -1398,16 +1458,18 @@ static void InitPlan(QueryDesc *queryDesc, int eflags)
             }
         }
 
-#ifdef STREAMPLAN
+#ifdef ENABLE_MULTIPLE_NODES
         if (StreamTopConsumerAmI() || StreamThreadAmI()) {
+#else
+        if (StreamThreadAmI()) {
+#endif
             junk_filter_needed = false;
         }
-#endif
 
         if (junk_filter_needed) {
             JunkFilter *j = NULL;
 
-            j = ExecInitJunkFilter(planstate->plan->targetlist, tupType->tdhasoid, ExecInitExtraTupleSlot(estate));
+            j = ExecInitJunkFilter(planstate->plan->targetlist, tupType->tdhasoid, ExecInitExtraTupleSlot(estate), tupType->tdTableAmType);
             estate->es_junkFilter = j;
 
             /* Want to return the cleaned tuple type */
@@ -1417,6 +1479,11 @@ static void InitPlan(QueryDesc *queryDesc, int eflags)
 
     queryDesc->tupDesc = tupType;
     queryDesc->planstate = planstate;
+
+    if (StreamTopConsumerAmI() && !(eflags & EXEC_FLAG_EXPLAIN_ONLY)) {
+        /* init stream thread in parallel */
+        StartUpStreamInParallel(plannedstmt, estate);
+    }
 
     gstrace_exit(GS_TRC_ID_InitPlan);
 }
@@ -1449,6 +1516,7 @@ void CheckValidResultRel(Relation resultRel, CmdType operation)
                 errmsg("cannot change TOAST relation \"%s\"", RelationGetRelationName(resultRel))));
             break;
         case RELKIND_VIEW:
+        case RELKIND_CONTQUERY:
             switch (operation) {
                 case CMD_INSERT:
                     if (trigDesc == NULL || !trigDesc->trig_insert_instead_row) {
@@ -1482,10 +1550,8 @@ void CheckValidResultRel(Relation resultRel, CmdType operation)
             }
             break;
         case RELKIND_MATVIEW:
-            if (!MatViewIncrementalMaintenanceIsEnabled())
-                    ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), 
-                        errmsg("cannot change materialized view \"%s\"", RelationGetRelationName(resultRel))));
             break;
+        case RELKIND_STREAM:
         case RELKIND_FOREIGN_TABLE:
             /* Okay only if the FDW supports it */
             fdwroutine = GetFdwRoutineForRelation(resultRel, false);
@@ -1559,22 +1625,31 @@ static void CheckValidRowMarkRel(Relation rel, RowMarkType markType)
                 errmsg("cannot lock rows in TOAST relation \"%s\"", RelationGetRelationName(rel))));
             break;
         case RELKIND_VIEW:
-            /* Allow referencing a matview, but not actual locking clauses */
-            if (markType != ROW_MARK_REFERENCE)
-                ereport(ERROR,
-                        (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                       errmsg("cannot lock rows in materialized view \"%s\"",
-                              RelationGetRelationName(rel))));
+            /* Should not get here */
+            ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("cannot lock rows in view \"%s\"", RelationGetRelationName(rel))));
+            break;
+        case RELKIND_CONTQUERY:
+            /* Should not get here */
+            ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("cannot lock rows in contquery \"%s\"", RelationGetRelationName(rel))));
             break;
         case RELKIND_MATVIEW:
-            /* Should not get here; planner should have used ROW_MARK_COPY */
-            ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                errmsg("cannot lock rows in materialized view \"%s\"", RelationGetRelationName(rel))));
+            /* Should not get here */
+            ereport(ERROR,
+                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                     errmsg("cannot lock rows in materialized view \"%s\"",
+                            RelationGetRelationName(rel))));
             break;
         case RELKIND_FOREIGN_TABLE:
             /* Should not get here; planner should have used ROW_MARK_COPY */
             ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("cannot lock rows in foreign table \"%s\"", RelationGetRelationName(rel))));
+            break;
+        case RELKIND_STREAM:
+            /* Should not get here; planner should have used ROW_MARK_COPY */
+            ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("cannot lock rows in stream \"%s\"", RelationGetRelationName(rel))));
             break;
         default:
             ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
@@ -1617,7 +1692,8 @@ void InitResultRelInfo(ResultRelInfo *resultRelInfo, Relation resultRelationDesc
         resultRelInfo->ri_TrigWhenExprs = NULL;
         resultRelInfo->ri_TrigInstrument = NULL;
     }
-    if (resultRelationDesc->rd_rel->relkind == RELKIND_FOREIGN_TABLE) {
+    if (resultRelationDesc->rd_rel->relkind == RELKIND_FOREIGN_TABLE
+        || resultRelationDesc->rd_rel->relkind == RELKIND_STREAM) {
         resultRelInfo->ri_FdwRoutine = GetFdwRoutineForRelation(resultRelationDesc, true);
     } else {
         resultRelInfo->ri_FdwRoutine = NULL;
@@ -1957,16 +2033,22 @@ static void ExecCollectMaterialForSubplan(EState *estate)
  * user can see it
  * ----------------------------------------------------------------
  */
-static void ExecutePlan(EState *estate, PlanState *planstate, bool use_parallel_mode,
-    CmdType operation, bool sendTuples, long numberTuples, ScanDirection direction,
-    DestReceiver *dest, JitExec::JitContext* motJitContext)
+#ifdef ENABLE_MOT
+static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation, bool sendTuples, long numberTuples,
+    ScanDirection direction, DestReceiver *dest, JitExec::JitContext* motJitContext)
+#else
+static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation, bool sendTuples, long numberTuples,
+    ScanDirection direction, DestReceiver *dest)
+#endif
 {
     TupleTableSlot *slot = NULL;
     long current_tuple_count = 0;
     bool stream_instrument = false;
     bool need_sync_step = false;
     bool recursive_early_stop = false;
+#ifdef ENABLE_MOT
     bool motFinishedExecution = false;
+#endif
 
     /* Mark sync-up step is required */
     if (NeedSyncUpProducerStep(planstate->plan)) {
@@ -1977,30 +2059,15 @@ static void ExecutePlan(EState *estate, PlanState *planstate, bool use_parallel_
          * If current producer thread is under a recursive cte plan node, we need do
          * step sync-up across the whole cluster
          */
+        u_sess->exec_cxt.global_iteration = 0;
         ExecutePlanSyncProducer(planstate, WITH_RECURSIVE_SYNC_NONERQ, &recursive_early_stop, &current_tuple_count);
-        global_iteration = 1;
+        u_sess->exec_cxt.global_iteration = 1;
     }
 
     /*
      * Set the direction.
      */
     estate->es_direction = direction;
-
-    /*
-     * If a tuple count was supplied, we must force the plan to run without
-     * parallelism, because we might exit early.
-     */
-    if (numberTuples != 0) {
-        use_parallel_mode = false;
-    }
-
-    /*
-     * If a tuple count was supplied, we must force the plan to run without
-     * parallelism, because we might exit early.
-     */
-    if (use_parallel_mode) {
-        EnterParallelMode();
-    }
 
     if (IS_PGXC_DATANODE) {
         /* Collect Material for Subplan first */
@@ -2015,6 +2082,12 @@ static void ExecutePlan(EState *estate, PlanState *planstate, bool use_parallel_
         }
     }
 
+    /* Change DestReceiver's tmpContext to PerTupleMemoryContext to avoid memory leak. */
+    dest->tmpContext = GetPerTupleMemoryContext(estate);
+
+    // planstate->plan will be release if rollback excuted
+    bool is_saved_recursive_union_plan_nodeid = EXEC_IN_RECURSIVE_MODE(planstate->plan);
+
     /*
      * Loop until we've processed the proper number of tuples from the plan.
      */
@@ -2025,6 +2098,7 @@ static void ExecutePlan(EState *estate, PlanState *planstate, bool use_parallel_
         /*
          * Execute the plan and obtain a tuple
          */
+#ifdef ENABLE_MOT
         if (unlikely(recursive_early_stop)) {
             slot = NULL;
         } else if (motJitContext && !IS_PGXC_COORDINATOR && JitExec::IsMotCodegenEnabled()) {
@@ -2046,6 +2120,9 @@ static void ExecutePlan(EState *estate, PlanState *planstate, bool use_parallel_
         } else {
             slot = ExecProcNode(planstate);
         }
+#else
+        slot = unlikely(recursive_early_stop) ? NULL : ExecProcNode(planstate);
+#endif
 
         /*
          * ------------------------------------------------------------------------------
@@ -2066,7 +2143,10 @@ static void ExecutePlan(EState *estate, PlanState *planstate, bool use_parallel_
          * process so we just end the loop...
          */
         if (TupIsNull(slot)) {
-            ExecEarlyFree(planstate);
+            if(!is_saved_recursive_union_plan_nodeid) {
+                break;
+            }
+            ExecEarlyFreeBody(planstate);
             break;
         }
 
@@ -2078,7 +2158,11 @@ static void ExecutePlan(EState *estate, PlanState *planstate, bool use_parallel_
          * (Formerly, we stored it back over the "dirty" tuple, which is WRONG
          * because that tuple slot has the wrong descriptor.)
          */
+#ifdef ENABLE_MULTIPLE_NDOES
         if (estate->es_junkFilter != NULL && !StreamTopConsumerAmI() && !StreamThreadAmI()) {
+#else
+        if (estate->es_junkFilter != NULL && !StreamThreadAmI()) {
+#endif
             /* If junkfilter->jf_resultSlot->tts_tupleDescriptor is different from slot->tts_tupleDescriptor,
              * and the datatype is not Compatible,
              * we  reset junkfilter->jf_resultSlot->tts_tupleDescriptor by slot->tts_tupleDescriptor.
@@ -2133,18 +2217,6 @@ static void ExecutePlan(EState *estate, PlanState *planstate, bool use_parallel_
             t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->initMemInChunks)
             << (chunkSizeInBits - BITS_IN_MB);
         u_sess->instr_cxt.global_instr->SetPeakNodeMemory(planstate->plan->plan_node_id, peak_memory);
-    }
-
-    /*
-     * If we know we won't need to back up, we can release resources at this
-     * point.
-     */
-    if (!(estate->es_top_eflags & EXEC_FLAG_BACKWARD)) {
-        (void)ExecShutdownNode(planstate);
-    }
-
-    if (use_parallel_mode) {
-        ExitParallelMode();
     }
 }
 
@@ -2218,7 +2290,11 @@ static void ExecuteVectorizedPlan(EState *estate, PlanState *planstate, CmdType 
          * (Formerly, we stored it back over the "dirty" tuple, which is WRONG
          * because that tuple slot has the wrong descriptor.)
          */
+#ifdef ENABLE_MULTIPLE_NDOES
         if (estate->es_junkFilter != NULL && !StreamTopConsumerAmI() && !StreamThreadAmI()) {
+#else
+        if (estate->es_junkFilter != NULL && !StreamThreadAmI()) {
+#endif
             BatchExecFilterJunk(estate->es_junkFilter, batch);
         }
 
@@ -2336,12 +2412,14 @@ void ExecConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState 
 
     Assert(constr);
 
+    /* Get the Table Accessor Method*/
+    Assert(slot != NULL && slot->tts_tupleDescriptor != NULL);
     if (constr->has_not_null) {
         int natts = tupdesc->natts;
         int attrChk;
 
         for (attrChk = 1; attrChk <= natts; attrChk++) {
-            if (tupdesc->attrs[attrChk - 1]->attnotnull && slot_attisnull(slot, attrChk)) {
+            if (tupdesc->attrs[attrChk - 1]->attnotnull && tableam_tslot_attisnull(slot, attrChk)) {
                 char *val_desc = NULL;
 
                 insertedCols = GetInsertedColumns(resultRelInfo, estate);
@@ -2430,7 +2508,10 @@ char *ExecBuildSlotValueDescription(Oid reloid, TupleTableSlot *slot, TupleDesc 
     }
 
     /* Make sure the tuple is fully deconstructed */
-    slot_getallattrs(slot);
+
+    /* Get the Table Accessor Method*/
+    Assert(slot != NULL && slot->tts_tupleDescriptor != NULL);
+    tableam_tslot_getallattrs(slot);
 
     for (i = 0; i < tupdesc->natts; i++) {
         bool column_perm = false;
@@ -2627,7 +2708,8 @@ TupleTableSlot *EvalPlanQual(EState *estate, EPQState *epqstate, Relation relati
     /*
      * Get and lock the updated version of the row; if fail, return NULL.
      */
-    copyTuple = EvalPlanQualFetch(estate, relation, LockTupleExclusive, tid, priorXmax);
+    copyTuple = heap_lock_updated(estate->es_output_cid, 
+        relation, LockTupleExclusive, tid, priorXmax);
 
     if (copyTuple == NULL) {
         return NULL;
@@ -2684,7 +2766,7 @@ TupleTableSlot *EvalPlanQual(EState *estate, EPQState *epqstate, Relation relati
 /*
  * Fetch a copy of the newest version of an outdated tuple
  *
- * 	estate - executor state data
+ *  cid - command ID
  * 	relation - table containing tuple
  * 	lockmode - requested tuple lock mode
  * 	*tid - t_ctid from the outdated tuple (ie, next updated version)
@@ -2698,7 +2780,7 @@ TupleTableSlot *EvalPlanQual(EState *estate, EPQState *epqstate, Relation relati
  * Note: properly, lockmode should be declared as enum LockTupleMode,
  * but we use "int" to avoid having to include heapam.h in executor.h.
  */
-HeapTuple EvalPlanQualFetch(EState *estate, Relation relation, int lockmode, ItemPointer tid, TransactionId priorXmax)
+HeapTuple heap_lock_updated(CommandId cid, Relation relation, int lockmode, ItemPointer tid, TransactionId priorXmax)
 {
     HeapTuple copyTuple = NULL;
     HeapTupleData tuple;
@@ -2721,12 +2803,11 @@ HeapTuple EvalPlanQualFetch(EState *estate, Relation relation, int lockmode, Ite
     tuple.t_data = &(tbuf.hdr);
     for (;;) {
         Buffer buffer;
-        bool fetched = heap_fetch(relation, &SnapshotDirty, &tuple, &buffer, true, NULL);
+        bool fetched = tableam_tuple_fetch(relation, &SnapshotDirty, &tuple, &buffer, true, NULL);
 
         if (fetched) {
-            HTSU_Result test;
-            ItemPointerData update_ctid;
-            TransactionId update_xmax;
+            TM_Result test;
+            TM_FailureData tmfd;
 
             HeapTupleCopyBaseFromPage(&tuple, BufferGetPage(buffer));
 
@@ -2760,8 +2841,9 @@ HeapTuple EvalPlanQualFetch(EState *estate, Relation relation, int lockmode, Ite
                         SnapshotDirty.xmin);
                     SnapshotDirty.xmin = InvalidTransactionId;
                 } else {
-                    ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                        errmsg("t_xmin is uncommitted in tuple to be updated")));
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                            errmsg("t_xmin is uncommitted in tuple to be updated")));
                 }
             }
 
@@ -2792,7 +2874,7 @@ HeapTuple EvalPlanQualFetch(EState *estate, Relation relation, int lockmode, Ite
              * doing HeapTupleHeaderGetXmin again.
              */
             if (TransactionIdIsCurrentTransactionId(priorXmax) &&
-                HeapTupleHeaderGetCmin(tuple.t_data, BufferGetPage(buffer)) >= estate->es_output_cid) {
+                HeapTupleHeaderGetCmin(tuple.t_data, BufferGetPage(buffer)) >= cid) {
                 ReleaseBuffer(buffer);
                 return NULL;
             }
@@ -2800,39 +2882,50 @@ HeapTuple EvalPlanQualFetch(EState *estate, Relation relation, int lockmode, Ite
             /*
              * This is a live tuple, so now try to lock it.
              */
-            test = heap_lock_tuple(relation, &tuple, &buffer, &update_ctid, &update_xmax, estate->es_output_cid,
-                (LockTupleMode)lockmode, false);
+            test = tableam_tuple_lock(relation, &tuple, &buffer, 
+                                      cid, (LockTupleMode)lockmode, false, &tmfd,
+                                      false, false, false,InvalidSnapshot, NULL, false);
             /* We now have two pins on the buffer, get rid of one */
             ReleaseBuffer(buffer);
 
             switch (test) {
-                case HeapTupleSelfCreated:
+                case TM_SelfCreated:
                     ReleaseBuffer(buffer);
                     ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                         errmsg("attempted to lock invisible tuple")));
                     break;
-                case HeapTupleSelfUpdated:
+                case TM_SelfModified:
                     /* treat it as deleted; do not process */
                     ReleaseBuffer(buffer);
                     return NULL;
 
-                case HeapTupleMayBeUpdated:
+                case TM_Ok:
                     /* successfully locked */
                     break;
 
-                case HeapTupleUpdated:
+                case TM_Updated:
                     ReleaseBuffer(buffer);
                     if (IsolationUsesXactSnapshot()) {
                         ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                             errmsg("could not serialize access due to concurrent update")));
                     }
-                    if (!ItemPointerEquals(&update_ctid, &tuple.t_self)) {
-                        /* it was updated, so look at the updated version */
-                        tuple.t_self = update_ctid;
-                        /* updated row should have xmin matching this xmax */
-                        priorXmax = update_xmax;
-                        continue;
+
+                    Assert(!ItemPointerEquals(&tmfd.ctid, &tuple.t_self));
+                    /* it was updated, so look at the updated version */
+                    tuple.t_self = tmfd.ctid;
+                    /* updated row should have xmin matching this xmax */
+                    priorXmax = tmfd.xmax;
+                    continue;
+                    break; /* keep compiler quiet */
+
+                case TM_Deleted:
+                    ReleaseBuffer(buffer);
+                    if (IsolationUsesXactSnapshot()) {
+                        ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                            errmsg("could not serialize access due to concurrent update")));
                     }
+
+                    Assert(ItemPointerEquals(&tmfd.ctid, &tuple.t_self));
                     /* tuple was deleted, so give up */
                     return NULL;
 
@@ -2846,7 +2939,7 @@ HeapTuple EvalPlanQualFetch(EState *estate, Relation relation, int lockmode, Ite
             /*
              * We got tuple - now copy it for use by recheck query.
              */
-            copyTuple = heap_copytuple(&tuple);
+            copyTuple = (HeapTuple)tableam_tops_copy_tuple(&tuple);
             ReleaseBuffer(buffer);
             break;
         }
@@ -2855,19 +2948,9 @@ HeapTuple EvalPlanQualFetch(EState *estate, Relation relation, int lockmode, Ite
          * If the referenced slot was actually empty, the latest version of
          * the row must have been deleted, so we need do nothing.
          */
-        if (tuple.t_data == NULL) {
-            ReleaseBuffer(buffer);
-            return NULL;
-        }
-
         /*
          * As above, if xmin isn't what we're expecting, do nothing.
          */
-        if (!TransactionIdEquals(HeapTupleGetRawXmin(&tuple), priorXmax)) {
-            ReleaseBuffer(buffer);
-            return NULL;
-        }
-
         /*
          * If we get here, the tuple was found but failed SnapshotDirty.
          * Assuming the xmin is either a committed xact or our own xact (as it
@@ -2880,7 +2963,10 @@ HeapTuple EvalPlanQualFetch(EState *estate, Relation relation, int lockmode, Ite
          * As above, it should be safe to examine xmax and t_ctid without the
          * buffer content lock, because they can't be changing.
          */
-        if (ItemPointerEquals(&tuple.t_self, &tuple.t_data->t_ctid)) {
+        bool is_null = tuple.t_data == NULL ||
+            !TransactionIdEquals(HeapTupleGetRawXmin(&tuple), priorXmax) ||
+            ItemPointerEquals(&tuple.t_self, &tuple.t_data->t_ctid);
+        if (is_null) {
             /* deleted, so forget about it */
             ReleaseBuffer(buffer);
             return NULL;
@@ -2949,7 +3035,7 @@ void EvalPlanQualSetTuple(EPQState *epqstate, Index rti, HeapTuple tuple)
      * node will see it
      */
     if (estate->es_epqTuple[rti - 1] != NULL) {
-        heap_freetuple_ext(estate->es_epqTuple[rti - 1]);
+        tableam_tops_free_tuple(estate->es_epqTuple[rti - 1]);
     }
     estate->es_epqTuple[rti - 1] = tuple;
     estate->es_epqTupleSet[rti - 1] = true;
@@ -3054,7 +3140,7 @@ void EvalPlanQualFetchRowMarks(EPQState *epqstate)
                 Relation fakeRelation = partitionGetRelation(erm->relation, p);
 
                 /* okay, fetch the tuple */
-                if (!heap_fetch(fakeRelation, SnapshotAny, &tuple, &buffer, false, NULL)) {
+                if (!tableam_tuple_fetch(fakeRelation, SnapshotAny, &tuple, &buffer, false, NULL)) {
                     ereport(ERROR, (errcode(ERRCODE_FETCH_DATA_FAILED),
                         errmsg("failed to fetch tuple for EvalPlanQual recheck from partition relation.")));
                 }
@@ -3067,7 +3153,7 @@ void EvalPlanQualFetchRowMarks(EPQState *epqstate)
                     Assert(bucketid != InvalidBktId);
                     fakeRelation = bucketGetRelation(erm->relation, NULL, bucketid);
                 }
-                if (!heap_fetch(fakeRelation, SnapshotAny, &tuple, &buffer, false, NULL)) {
+                if (!tableam_tuple_fetch(fakeRelation, SnapshotAny, &tuple, &buffer, false, NULL)) {
                     ereport(ERROR,
                         (errcode(ERRCODE_FETCH_DATA_FAILED), errmsg("failed to fetch tuple for EvalPlanQual recheck")));
                 }
@@ -3078,7 +3164,7 @@ void EvalPlanQualFetchRowMarks(EPQState *epqstate)
             }
 
             /* successful, copy and store tuple */
-            EvalPlanQualSetTuple(epqstate, erm->rti, heap_copytuple(&tuple));
+            EvalPlanQualSetTuple(epqstate, erm->rti, (HeapTuple)tableam_tops_copy_tuple(&tuple));
             ReleaseBuffer(buffer);
         } else {
             HeapTupleHeader td;
@@ -3123,7 +3209,7 @@ void EvalPlanQualFetchRowMarks(EPQState *epqstate)
             tuple.t_data = td;
 
             /* copy and store tuple */
-            EvalPlanQualSetTuple(epqstate, erm->rti, heap_copytuple(&tuple));
+            EvalPlanQualSetTuple(epqstate, erm->rti, (HeapTuple)tableam_tops_copy_tuple(&tuple));
         }
     }
 }

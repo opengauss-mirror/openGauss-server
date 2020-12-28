@@ -1,10 +1,6 @@
-test: gsql
-test: gs_dump
-test: gs_dumpall
-test: gs_restore
-test: pg_config
-test: pg_controldata
-test: pg_resetxlog
-test: gstrace
-test: gs_guc
+test: delete_limit
+test: hw_partition_hash_ddl
+test: hw_partition_list_ddl
 
+test: sqlbypass_partition
+test: sqlbypass_partition_prepare

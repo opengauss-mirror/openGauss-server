@@ -1,0 +1,607 @@
+--
+---- TEST FOR CLUSTER PARTITIONED TABLE
+--
+
+--  ALTER TABLE CLUSTER ON index_name
+--  ALTER TABLE SET WITHOUT CLUSTER
+--  CLUSTER [VERBOSE] table_name [ USING index_name ]
+
+
+
+
+--
+----  ALTER TABLE CLUSTER ON index_name
+--
+-- 1. test function
+-- 2. test toast and tablespace
+
+-- 1. test function
+create table test_alter_table_cluster_on(a int, b int, c text)
+partition by range (a)
+(
+	partition p1_test_alter_table_cluster_on values less than (1),
+	partition p2_test_alter_table_cluster_on values less than (4),
+	partition p3_test_alter_table_cluster_on values less than (7)
+);
+
+create index test_alter_table_cluster_on_a_index on test_alter_table_cluster_on (a) local;
+create index test_alter_table_cluster_on_b_index on test_alter_table_cluster_on (b) local;
+create index test_alter_table_cluster_on_c_index on test_alter_table_cluster_on (c) local;
+create index test_alter_table_cluster_on_a_c_index on test_alter_table_cluster_on (a, c) local;
+create index test_alter_table_cluster_on_b_c_index on test_alter_table_cluster_on (b, c) local;
+
+insert into test_alter_table_cluster_on values (0, 0, 'd');
+insert into test_alter_table_cluster_on values (0, 0, 'c');
+insert into test_alter_table_cluster_on values (0, 5, 'a');
+insert into test_alter_table_cluster_on values (0, 3, 'b');
+insert into test_alter_table_cluster_on values (0, 6, 'e');
+insert into test_alter_table_cluster_on values (0, 6, 'd');
+insert into test_alter_table_cluster_on values (0, 1, 'ab');
+insert into test_alter_table_cluster_on values (0, 2, 'bd');
+insert into test_alter_table_cluster_on values (0, 4, 'fg');
+
+insert into test_alter_table_cluster_on values (2, 0, 'd');
+insert into test_alter_table_cluster_on values (2, 0, 'c');
+insert into test_alter_table_cluster_on values (2, 5, 'a');
+insert into test_alter_table_cluster_on values (2, 3, 'b');
+insert into test_alter_table_cluster_on values (2, 6, 'e');
+insert into test_alter_table_cluster_on values (2, 6, 'd');
+insert into test_alter_table_cluster_on values (2, 1, 'ab');
+insert into test_alter_table_cluster_on values (2, 2, 'bd');
+insert into test_alter_table_cluster_on values (2, 4, 'fg');
+
+
+-- cluster on test_alter_table_cluster_on_a_index
+cluster test_alter_table_cluster_on using test_alter_table_cluster_on_a_index;
+select * from test_alter_table_cluster_on order by 1, 2, 3;
+select * from test_alter_table_cluster_on partition (p1_test_alter_table_cluster_on) order by 1, 2, 3;
+-- Verify that indisclustered is correctly set
+SELECT pg_class.relname FROM pg_index, pg_class, pg_class AS pg_class_2
+WHERE pg_class.oid=indexrelid
+	AND indrelid=pg_class_2.oid
+	AND pg_class_2.relname = 'test_alter_table_cluster_on'
+	AND indisclustered;
+
+-- cluster on test_alter_table_cluster_on_b_index
+alter table test_alter_table_cluster_on cluster on test_alter_table_cluster_on_b_index;
+cluster test_alter_table_cluster_on;
+select * from test_alter_table_cluster_on order by 1, 2, 3;
+select * from test_alter_table_cluster_on partition (p1_test_alter_table_cluster_on) order by 1, 2, 3;
+-- Verify that indisclustered is correctly set
+SELECT pg_class.relname FROM pg_index, pg_class, pg_class AS pg_class_2
+WHERE pg_class.oid=indexrelid
+	AND indrelid=pg_class_2.oid
+	AND pg_class_2.relname = 'test_alter_table_cluster_on'
+	AND indisclustered;
+	
+-- cluster on test_alter_table_cluster_on_a_c_index
+alter table test_alter_table_cluster_on cluster on test_alter_table_cluster_on_a_c_index;
+cluster test_alter_table_cluster_on;
+select * from test_alter_table_cluster_on order by 1, 2, 3;
+select * from test_alter_table_cluster_on partition (p1_test_alter_table_cluster_on) order by 1, 2, 3;
+-- Verify that indisclustered is correctly set
+SELECT pg_class.relname FROM pg_index, pg_class, pg_class AS pg_class_2
+WHERE pg_class.oid=indexrelid
+	AND indrelid=pg_class_2.oid
+	AND pg_class_2.relname = 'test_alter_table_cluster_on'
+	AND indisclustered;
+
+
+-- clean
+drop table test_alter_table_cluster_on;
+
+
+
+-- 2. test toast and tablespace
+\! rm -fr '@testtablespace@/ts_one'
+\! mkdir '@testtablespace@/ts_one'
+create tablespace ts_one location '@testtablespace@/ts_one';
+
+create table test_alter_table_cluster_on_toast_tablespace(a int, b int, c text)
+tablespace ts_one
+partition by range (a)
+(
+	partition p1_test_alter_table_cluster_on_toast_tablespace values less than (1),
+	partition p2_test_alter_table_cluster_on_toast_tablespace values less than (4) tablespace ts_one,
+	partition p3_test_alter_table_cluster_on_toast_tablespace values less than (7)
+);
+
+create index test_alter_table_cluster_on_toast_tablespace_a_index on test_alter_table_cluster_on_toast_tablespace (a) local;
+create index test_alter_table_cluster_on_toast_tablespace_b_index on test_alter_table_cluster_on_toast_tablespace (b) local;
+create index test_alter_table_cluster_on_toast_tablespace_c_index on test_alter_table_cluster_on_toast_tablespace (c) local;
+create index test_alter_table_cluster_on_toast_tablespace_a_c_index on test_alter_table_cluster_on_toast_tablespace (a, c) local;
+create index test_alter_table_cluster_on_toast_tablespace_b_c_index on test_alter_table_cluster_on_toast_tablespace (b, c) local;
+
+insert into test_alter_table_cluster_on_toast_tablespace values (0, 0, 'd');
+insert into test_alter_table_cluster_on_toast_tablespace values (0, 0, 'c');
+insert into test_alter_table_cluster_on_toast_tablespace values (0, 5, 'a');
+insert into test_alter_table_cluster_on_toast_tablespace values (0, 3, 'b');
+insert into test_alter_table_cluster_on_toast_tablespace values (0, 6, 'e');
+insert into test_alter_table_cluster_on_toast_tablespace values (0, 6, 'd');
+insert into test_alter_table_cluster_on_toast_tablespace values (0, 1, 'ab');
+insert into test_alter_table_cluster_on_toast_tablespace values (0, 2, 'bd');
+insert into test_alter_table_cluster_on_toast_tablespace values (0, 4, 'fg');
+
+insert into test_alter_table_cluster_on_toast_tablespace values (2, 0, 'd');
+insert into test_alter_table_cluster_on_toast_tablespace values (2, 0, 'c');
+insert into test_alter_table_cluster_on_toast_tablespace values (2, 5, 'a');
+insert into test_alter_table_cluster_on_toast_tablespace values (2, 3, 'b');
+insert into test_alter_table_cluster_on_toast_tablespace values (2, 6, 'e');
+insert into test_alter_table_cluster_on_toast_tablespace values (2, 6, 'd');
+insert into test_alter_table_cluster_on_toast_tablespace values (2, 1, 'ab');
+insert into test_alter_table_cluster_on_toast_tablespace values (2, 2, 'bd');
+insert into test_alter_table_cluster_on_toast_tablespace values (2, 4, 'fg');
+
+-- look up tablespace of every partition
+select p.relname, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid) where p.relname='p1_test_alter_table_cluster_on_toast_tablespace' or p.relname='p2_test_alter_table_cluster_on_toast_tablespace'or p.relname='p3_test_alter_table_cluster_on_toast_tablespace'  or p.relname='test_alter_table_cluster_on_toast_tablespace' order by p.relname;
+-- look up toast of every partition
+select count(*) from pg_class where relname= 'pg_toast_part_'||(select oid from pg_partition where relname='p1_test_alter_table_cluster_on_toast_tablespace');
+select count(*) from pg_class where relname= 'pg_toast_part_'||(select oid from pg_partition where relname='p2_test_alter_table_cluster_on_toast_tablespace');
+select count(*) from pg_class where relname= 'pg_toast_part_'||(select oid from pg_partition where relname='p3_test_alter_table_cluster_on_toast_tablespace');
+
+-- cluster on test_alter_table_cluster_on_toast_tablespace_a_index
+cluster test_alter_table_cluster_on_toast_tablespace using test_alter_table_cluster_on_toast_tablespace_a_index;
+
+-- look up tablespace of every partition
+select p.relname, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid) where p.relname='p1_test_alter_table_cluster_on_toast_tablespace' or p.relname='p2_test_alter_table_cluster_on_toast_tablespace'or p.relname='p3_test_alter_table_cluster_on_toast_tablespace'  or p.relname='test_alter_table_cluster_on_toast_tablespace' order by p.relname;
+-- look up toast of every partition
+select count(*) from pg_class where relname= 'pg_toast_part_'||(select oid from pg_partition where relname='p1_test_alter_table_cluster_on_toast_tablespace');
+select count(*) from pg_class where relname= 'pg_toast_part_'||(select oid from pg_partition where relname='p2_test_alter_table_cluster_on_toast_tablespace');
+select count(*) from pg_class where relname= 'pg_toast_part_'||(select oid from pg_partition where relname='p3_test_alter_table_cluster_on_toast_tablespace');
+
+
+-- cluster on test_alter_table_cluster_on_toast_tablespace_b_c_index
+cluster test_alter_table_cluster_on_toast_tablespace using test_alter_table_cluster_on_toast_tablespace_b_c_index;
+
+-- look up tablespace of every partition
+select p.relname, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid) where p.relname='p1_test_alter_table_cluster_on_toast_tablespace' or p.relname='p2_test_alter_table_cluster_on_toast_tablespace'or p.relname='p3_test_alter_table_cluster_on_toast_tablespace'  or p.relname='test_alter_table_cluster_on_toast_tablespace' order by p.relname;
+-- look up toast of every partition
+select count(*) from pg_class where relname= 'pg_toast_part_'||(select oid from pg_partition where relname='p1_test_alter_table_cluster_on_toast_tablespace');
+select count(*) from pg_class where relname= 'pg_toast_part_'||(select oid from pg_partition where relname='p2_test_alter_table_cluster_on_toast_tablespace');
+select count(*) from pg_class where relname= 'pg_toast_part_'||(select oid from pg_partition where relname='p3_test_alter_table_cluster_on_toast_tablespace');
+
+
+-- clean
+drop table test_alter_table_cluster_on_toast_tablespace;
+drop tablespace ts_one;
+
+
+
+
+
+
+
+--
+----  ALTER TABLE SET WITHOUT CLUSTER
+--
+create table test_alter_table_set_without_cluster(a int, b int, c text)
+partition by range (a)
+(
+	partition p1_test_alter_table_set_without_cluster values less than (1),
+	partition p2_test_alter_table_set_without_cluster values less than (4),
+	partition p3_test_alter_table_set_without_cluster values less than (7)
+);
+
+create index test_alter_table_set_without_cluster_a_index on test_alter_table_set_without_cluster (a) local;
+create index test_alter_table_set_without_cluster_b_index on test_alter_table_set_without_cluster (b) local;
+create index test_alter_table_set_without_cluster_c_index on test_alter_table_set_without_cluster (c) local;
+create index test_alter_table_set_without_cluster_a_c_index on test_alter_table_set_without_cluster (a, c) local;
+create index test_alter_table_set_without_cluster_b_c_index on test_alter_table_set_without_cluster (b, c) local;
+
+insert into test_alter_table_set_without_cluster values (0, 0, 'd');
+insert into test_alter_table_set_without_cluster values (0, 0, 'c');
+insert into test_alter_table_set_without_cluster values (0, 5, 'a');
+insert into test_alter_table_set_without_cluster values (0, 3, 'b');
+insert into test_alter_table_set_without_cluster values (0, 6, 'e');
+insert into test_alter_table_set_without_cluster values (0, 6, 'd');
+insert into test_alter_table_set_without_cluster values (0, 1, 'ab');
+insert into test_alter_table_set_without_cluster values (0, 2, 'bd');
+insert into test_alter_table_set_without_cluster values (0, 4, 'fg');
+
+insert into test_alter_table_set_without_cluster values (2, 0, 'd');
+insert into test_alter_table_set_without_cluster values (2, 0, 'c');
+insert into test_alter_table_set_without_cluster values (2, 5, 'a');
+insert into test_alter_table_set_without_cluster values (2, 3, 'b');
+insert into test_alter_table_set_without_cluster values (2, 6, 'e');
+insert into test_alter_table_set_without_cluster values (2, 6, 'd');
+insert into test_alter_table_set_without_cluster values (2, 1, 'ab');
+insert into test_alter_table_set_without_cluster values (2, 2, 'bd');
+insert into test_alter_table_set_without_cluster values (2, 4, 'fg');
+
+
+cluster test_alter_table_set_without_cluster using test_alter_table_set_without_cluster_b_index;
+-- Verify that indisclustered is correctly set
+SELECT pg_class.relname FROM pg_index, pg_class, pg_class AS pg_class_2
+WHERE pg_class.oid=indexrelid
+	AND indrelid=pg_class_2.oid
+	AND pg_class_2.relname = 'test_alter_table_set_without_cluster'
+	AND indisclustered;
+
+alter table test_alter_table_set_without_cluster set without cluster;
+-- Verify that indisclustered is correctly set
+SELECT pg_class.relname FROM pg_index, pg_class, pg_class AS pg_class_2
+WHERE pg_class.oid=indexrelid
+	AND indrelid=pg_class_2.oid
+	AND pg_class_2.relname = 'test_alter_table_set_without_cluster'
+	AND indisclustered;
+
+insert into test_alter_table_set_without_cluster values(0, -1, 'A');
+cluster test_alter_table_set_without_cluster;
+select * from test_alter_table_set_without_cluster order by 1, 2, 3;
+
+
+-- clean
+drop table test_alter_table_set_without_cluster;
+
+
+
+
+
+
+
+
+--
+----  CLUSTER [VERBOSE] table_name [ USING index_name ]
+--
+
+-- 1. test cluster table using index
+-- 2. test cluster table without using index
+-- 3. test cluster without table
+-- 4. test interval partitioned table
+
+-- 1. test cluster table using index
+create table test_cluster_using (a int, b int, c text)
+partition by range (a)
+(
+	partition p1_test_cluster_using values less than (1),
+	partition p2_test_cluster_using values less than (4),
+	partition p3_test_cluster_using values less than (7)
+);
+
+create index test_cluster_using_a_index on test_cluster_using (a) local;
+create index test_cluster_using_b_index on test_cluster_using (b) local;
+create index test_cluster_using_c_index on test_cluster_using (c) local;
+create index test_cluster_using_a_c_index on test_cluster_using (a, c) local;
+create index test_cluster_using_b_c_index on test_cluster_using (b, c) local;
+
+insert into test_cluster_using values (0, 0, 'd');
+insert into test_cluster_using values (0, 0, 'c');
+insert into test_cluster_using values (0, 5, 'a');
+insert into test_cluster_using values (0, 3, 'b');
+insert into test_cluster_using values (0, 6, 'e');
+insert into test_cluster_using values (0, 6, 'd');
+insert into test_cluster_using values (0, 1, 'ab');
+insert into test_cluster_using values (0, 2, 'bd');
+insert into test_cluster_using values (0, 4, 'fg');
+
+insert into test_cluster_using values (2, 0, 'd');
+insert into test_cluster_using values (2, 0, 'c');
+insert into test_cluster_using values (2, 5, 'a');
+insert into test_cluster_using values (2, 3, 'b');
+insert into test_cluster_using values (2, 6, 'e');
+insert into test_cluster_using values (2, 6, 'd');
+insert into test_cluster_using values (2, 1, 'ab');
+insert into test_cluster_using values (2, 2, 'bd');
+insert into test_cluster_using values (2, 4, 'fg');
+
+
+cluster test_cluster_using using test_cluster_using_a_index;
+select * from test_cluster_using order by 1, 2, 3;
+select * from test_cluster_using partition (p1_test_cluster_using) order by 1, 2, 3;
+-- Verify that indisclustered is correctly set
+SELECT pg_class.relname FROM pg_index, pg_class, pg_class AS pg_class_2
+WHERE pg_class.oid=indexrelid
+	AND indrelid=pg_class_2.oid
+	AND pg_class_2.relname = 'test_cluster_using'
+	AND indisclustered;
+
+cluster test_cluster_using using test_cluster_using_c_index;
+select * from test_cluster_using order by 1, 2, 3;
+select * from test_cluster_using partition (p1_test_cluster_using) order by 1, 2, 3;
+-- Verify that indisclustered is correctly set
+SELECT pg_class.relname FROM pg_index, pg_class, pg_class AS pg_class_2
+WHERE pg_class.oid=indexrelid
+	AND indrelid=pg_class_2.oid
+	AND pg_class_2.relname = 'test_cluster_using'
+	AND indisclustered;
+
+cluster test_cluster_using using test_cluster_using_b_c_index;
+select * from test_cluster_using order by 1, 2, 3;
+select * from test_cluster_using partition (p1_test_cluster_using) order by 1, 2, 3;
+-- Verify that indisclustered is correctly set
+SELECT pg_class.relname FROM pg_index, pg_class, pg_class AS pg_class_2
+WHERE pg_class.oid=indexrelid
+	AND indrelid=pg_class_2.oid
+	AND pg_class_2.relname = 'test_cluster_using'
+	AND indisclustered;
+	
+
+-- clean
+drop table test_cluster_using;
+
+
+
+-- 2. test cluster table without using index
+create table test_cluster_without_using (a int, b int, c text)
+partition by range (a)
+(
+	partition p1_test_cluster_without_using values less than (1),
+	partition p2_test_cluster_without_using values less than (4),
+	partition p3_test_cluster_without_using values less than (7)
+);
+
+create index test_cluster_without_using_a_index on test_cluster_without_using (a) local;
+create index test_cluster_without_using_b_index on test_cluster_without_using (b) local;
+create index test_cluster_without_using_c_index on test_cluster_without_using (c) local;
+create index test_cluster_without_using_a_c_index on test_cluster_without_using (a, c) local;
+create index test_cluster_without_using_b_c_index on test_cluster_without_using (b, c) local;
+
+insert into test_cluster_without_using values (0, 0, 'd');
+insert into test_cluster_without_using values (0, 0, 'c');
+insert into test_cluster_without_using values (0, 5, 'a');
+insert into test_cluster_without_using values (0, 3, 'b');
+insert into test_cluster_without_using values (0, 6, 'e');
+insert into test_cluster_without_using values (0, 6, 'd');
+insert into test_cluster_without_using values (0, 1, 'ab');
+insert into test_cluster_without_using values (0, 2, 'bd');
+insert into test_cluster_without_using values (0, 4, 'fg');
+
+insert into test_cluster_without_using values (2, 0, 'd');
+insert into test_cluster_without_using values (2, 0, 'c');
+insert into test_cluster_without_using values (2, 5, 'a');
+insert into test_cluster_without_using values (2, 3, 'b');
+insert into test_cluster_without_using values (2, 6, 'e');
+insert into test_cluster_without_using values (2, 6, 'd');
+insert into test_cluster_without_using values (2, 1, 'ab');
+insert into test_cluster_without_using values (2, 2, 'bd');
+insert into test_cluster_without_using values (2, 4, 'fg');
+
+-- failed
+cluster test_cluster_without_using;
+
+cluster test_cluster_without_using using test_cluster_without_using_a_index;
+-- success
+cluster test_cluster_without_using;
+
+select * from test_cluster_without_using order by 1, 2, 3;
+
+alter table test_cluster_without_using cluster on test_cluster_without_using_b_index;
+-- Verify that indisclustered is correctly set
+SELECT pg_class.relname FROM pg_index, pg_class, pg_class AS pg_class_2
+WHERE pg_class.oid=indexrelid
+	AND indrelid=pg_class_2.oid
+	AND pg_class_2.relname = 'test_cluster_without_using'
+	AND indisclustered;
+	
+-- success
+cluster test_cluster_without_using;
+
+select * from test_cluster_without_using order by 1, 2, 3;
+
+
+-- clean
+drop table test_cluster_without_using;
+
+
+
+-- 3. test cluster without table
+create table test_cluster_without_table (a int, b int, c text)
+partition by range (a)
+(
+	partition p1_test_cluster_without_table values less than (1),
+	partition p2_test_cluster_without_table values less than (4),
+	partition p3_test_cluster_without_table values less than (7)
+);
+
+create index test_cluster_without_table_a_index on test_cluster_without_table (a) local;
+create index test_cluster_without_table_b_index on test_cluster_without_table (b) local;
+create index test_cluster_without_table_c_index on test_cluster_without_table (c) local;
+create index test_cluster_without_talbe_a_c_index on test_cluster_without_table (a, c) local;
+create index test_cluster_without_table_b_c_index on test_cluster_without_table (b, c) local;
+
+insert into test_cluster_without_table values (0, 0, 'd');
+insert into test_cluster_without_table values (0, 0, 'c');
+insert into test_cluster_without_table values (0, 5, 'a');
+insert into test_cluster_without_table values (0, 3, 'b');
+insert into test_cluster_without_table values (0, 6, 'e');
+insert into test_cluster_without_table values (0, 6, 'd');
+insert into test_cluster_without_table values (0, 1, 'ab');
+insert into test_cluster_without_table values (0, 2, 'bd');
+insert into test_cluster_without_table values (0, 4, 'fg');
+
+insert into test_cluster_without_table values (2, 0, 'd');
+insert into test_cluster_without_table values (2, 0, 'c');
+insert into test_cluster_without_table values (2, 5, 'a');
+insert into test_cluster_without_table values (2, 3, 'b');
+insert into test_cluster_without_table values (2, 6, 'e');
+insert into test_cluster_without_table values (2, 6, 'd');
+insert into test_cluster_without_table values (2, 1, 'ab');
+insert into test_cluster_without_table values (2, 2, 'bd');
+insert into test_cluster_without_table values (2, 4, 'fg');
+
+-- create ordinary table
+create table test_ordinary_table (a int, b text);
+create index test_ordinary_table_a_index on test_ordinary_table(a);
+create index test_ordinary_table_b_index on test_ordinary_table(b);
+
+insert into test_ordinary_table values (0, 'd');
+insert into test_ordinary_table values (5, 'a');
+insert into test_ordinary_table values (3, 'b');
+insert into test_ordinary_table values (4, 'e');
+insert into test_ordinary_table values (1, 'c');
+insert into test_ordinary_table values (2, 'f');
+
+
+
+-- failed
+cluster test_cluster_without_table;
+cluster test_ordinary_table;
+
+cluster test_cluster_without_table using test_cluster_without_table_a_index;
+cluster test_ordinary_table using test_ordinary_table_a_index;
+-- success
+cluster test_cluster_without_table;
+cluster test_ordinary_table;
+
+select * from test_cluster_without_table order by 1, 2, 3;
+select * from test_ordinary_table order by 1, 2;
+
+alter table test_cluster_without_table cluster on test_cluster_without_table_b_index;
+-- Verify that indisclustered is correctly set
+SELECT pg_class.relname FROM pg_index, pg_class, pg_class AS pg_class_2
+WHERE pg_class.oid=indexrelid
+	AND indrelid=pg_class_2.oid
+	AND pg_class_2.relname = 'test_cluster_without_table'
+	AND indisclustered;
+	
+alter table test_ordinary_table cluster on test_ordinary_table_b_index;
+-- Verify that indisclustered is correctly set
+SELECT pg_class.relname FROM pg_index, pg_class, pg_class AS pg_class_2
+WHERE pg_class.oid=indexrelid
+	AND indrelid=pg_class_2.oid
+	AND pg_class_2.relname = 'test_ordinary_table'
+	AND indisclustered;
+	
+	
+-- success
+cluster;
+
+select * from test_cluster_without_table order by 1, 2, 3;
+select * from test_ordinary_table order by 1, 2;
+
+
+-- clean
+drop table test_cluster_without_table;
+drop table test_ordinary_table;
+
+
+
+
+----------------------------- Cluster Partition ------------------------------
+create table test_cluster_partition (a int, b int, c text)
+distribute by replication 
+partition by range (a)
+(
+	partition test_cluster_partition_p1 values less than (1),
+	partition test_cluster_partition_p2 values less than (4),
+	partition test_cluster_partition_p3 values less than (7)
+);
+
+create index test_cluster_partition_a_index on test_cluster_partition (a) local;
+create index test_cluster_partition_b_index on test_cluster_partition (b) local;
+create index test_cluster_partition_c_index on test_cluster_partition (c) local;
+create index test_cluster_partition_a_c_index on test_cluster_partition (a, c) local;
+create index test_cluster_partition_b_c_index on test_cluster_partition (b, c) local;
+
+insert into test_cluster_partition values (0, 0, 'd');
+insert into test_cluster_partition values (0, 0, 'c');
+insert into test_cluster_partition values (0, 5, 'a');
+insert into test_cluster_partition values (0, 3, 'b');
+insert into test_cluster_partition values (0, 6, 'e');
+insert into test_cluster_partition values (0, 6, 'd');
+insert into test_cluster_partition values (0, 1, 'ab');
+insert into test_cluster_partition values (0, 2, 'bd');
+insert into test_cluster_partition values (0, 4, 'fg');
+insert into test_cluster_partition values (2, 0, 'd');
+insert into test_cluster_partition values (2, 0, 'c');
+insert into test_cluster_partition values (2, 5, 'a');
+insert into test_cluster_partition values (2, 3, 'b');
+insert into test_cluster_partition values (2, 6, 'e');
+insert into test_cluster_partition values (2, 6, 'd');
+insert into test_cluster_partition values (2, 1, 'ab');
+insert into test_cluster_partition values (2, 2, 'bd');
+insert into test_cluster_partition values (2, 4, 'fg');
+
+select * from test_cluster_partition partition (test_cluster_partition_p1);
+
+--cluster partition p1
+cluster test_cluster_partition partition (test_cluster_partition_p1) using test_cluster_partition_b_index;
+select * from test_cluster_partition partition (test_cluster_partition_p1);
+
+cluster test_cluster_partition partition (test_cluster_partition_p1) using test_cluster_partition_c_index;
+select * from test_cluster_partition partition (test_cluster_partition_p1);
+
+cluster test_cluster_partition partition (test_cluster_partition_p1) using test_cluster_partition_b_c_index;
+select * from test_cluster_partition partition (test_cluster_partition_p1);
+
+--cluster partition p2
+cluster test_cluster_partition partition (test_cluster_partition_p2) using test_cluster_partition_b_index;
+select * from test_cluster_partition partition (test_cluster_partition_p2);
+
+cluster test_cluster_partition partition (test_cluster_partition_p2) using test_cluster_partition_c_index;
+select * from test_cluster_partition partition (test_cluster_partition_p2);
+
+cluster test_cluster_partition partition (test_cluster_partition_p2) using test_cluster_partition_b_c_index;
+select * from test_cluster_partition partition (test_cluster_partition_p2);
+
+--cluster partitioned table
+cluster test_cluster_partition using test_cluster_partition_b_index;
+select * from test_cluster_partition;
+
+cluster test_cluster_partition using test_cluster_partition_c_index;
+select * from test_cluster_partition;
+
+cluster test_cluster_partition using test_cluster_partition_b_c_index;
+select * from test_cluster_partition;
+
+--cluster
+cluster;
+select * from test_cluster_partition;
+
+-- cluster sync using index info
+create table test_sync_using_index(a int, b int);
+create index idx_sync on test_sync_using_index(a);
+
+cluster test_sync_using_index using idx_sync;
+cluster test_sync_using_index;
+\d+ test_sync_using_index
+
+\! @abs_bindir@/gsql -r -p @cn2_portstring@ -d regression -c "cluster test_sync_using_index;"
+
+drop table test_sync_using_index;
+drop table test_cluster_partition;
+
+-- vacuum full + partial cluster key
+CREATE TABLE hw_pck_tbl_00
+(
+a int,
+b int
+) with (orientation = column);
+COPY hw_pck_tbl_00 FROM STDIN;
+1	10
+1	9
+1	8
+\.
+alter table hw_pck_tbl_00 add partial cluster key(b);
+select * from hw_pck_tbl_00 ;
+vacuum full hw_pck_tbl_00 ;
+select * from hw_pck_tbl_00 ;
+DROP TABLE hw_pck_tbl_00;
+CREATE TABLE hw_pck_tbl_01
+(
+a int,
+b int,
+c int
+) with (orientation = column)
+partition by range (b)
+(
+partition p1 values less than (5),
+partition p2 values less than (10),
+partition p3 values less than (15)
+);
+COPY hw_pck_tbl_01 FROM STDIN;
+101	2	10
+101	3	9
+101	4	8
+100	6	7
+100	7	6
+100	8	5
+102	11	4
+102	12	3
+102	13	2
+\.
+alter table hw_pck_tbl_01 add partial cluster key(c);
+SELECT c FROM hw_pck_tbl_01 WHERE b < 5;
+VACUUM FULL hw_pck_tbl_01;
+SELECT c FROM hw_pck_tbl_01 WHERE b < 5;
+DROP TABLE hw_pck_tbl_01;

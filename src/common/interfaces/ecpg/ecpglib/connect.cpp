@@ -230,7 +230,7 @@ static void ECPGnoticeReceiver(void* arg, const PGresult* result)
     sqlca->sqlwarn[2] = 'W';
     sqlca->sqlwarn[0] = 'W';
 
-    strncpy(sqlca->sqlerrm.sqlerrmc, message, sizeof(sqlca->sqlerrm.sqlerrmc));
+    strncpy(sqlca->sqlerrm.sqlerrmc, message, sizeof(sqlca->sqlerrm.sqlerrmc) - 1);
     sqlca->sqlerrm.sqlerrmc[sizeof(sqlca->sqlerrm.sqlerrmc) - 1] = 0;
     sqlca->sqlerrm.sqlerrml = strlen(sqlca->sqlerrm.sqlerrmc);
 

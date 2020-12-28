@@ -17,7 +17,7 @@ stop_standby
 gsql -d $db -p $dn1_primary_port -c "set enable_data_replicate=on; copy cstore_copy_t1 from '$scripts_dir/data/cstore_copy_t1.data' delimiter '|';"
 
 #build standby
-gs_ctl build -D $data_dir/datanode1_standby
+gs_ctl build -Z single_node -D $data_dir/datanode1_standby
 
 sleep 10
 

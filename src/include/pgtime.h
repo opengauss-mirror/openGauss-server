@@ -20,6 +20,7 @@
  * C library functions, except that we use pg_time_t which (we hope) is
  * 64 bits wide, and which is most definitely signed not unsigned.
  */
+
 typedef int64 pg_time_t;
 
 struct pg_tm {
@@ -43,6 +44,7 @@ typedef struct pg_tzenum pg_tzenum;
 #define TZ_STRLEN_MAX 255
 
 /* these functions are in localtime.c */
+
 extern struct pg_tm* pg_localtime(const pg_time_t* timep, const pg_tz* tz);
 extern struct pg_tm* pg_gmtime(const pg_time_t* timep);
 extern int pg_next_dst_boundary(const pg_time_t* timep, long int* before_gmtoff, int* before_isdst, pg_time_t* boundary,
@@ -56,6 +58,7 @@ extern const char* pg_get_abbrevs_name(pg_time_t* timep, pg_tz* tz);
 extern bool pg_tz_acceptable(pg_tz* tz);
 
 /* these functions and variables are in pgtz.c */
+
 extern THR_LOCAL pg_tz* session_timezone;
 extern THR_LOCAL pg_tz* log_timezone;
 

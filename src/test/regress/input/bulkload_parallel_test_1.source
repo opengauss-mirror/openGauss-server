@@ -50,8 +50,8 @@ TRUNCATE LINEITEM;
 
 
 
-\! @abs_bindir@/gsql -r -p 0 -d regression -f @abs_srcdir@/data/create_oversize_row_table.sql > /dev/null 2>&1
-\! @abs_bindir@/gsql -r -p 0 -d regression -f @abs_srcdir@/data/insert_select_large_row.sql > /dev/null 2>insert_err
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -f @abs_srcdir@/data/create_oversize_row_table.sql > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -f @abs_srcdir@/data/insert_select_large_row.sql > /dev/null 2>insert_err
 \! cat insert_err | awk '{split($0, a, ":");print a[4],":", a[5], a[6]}'
 \! rm -f insert_err
 

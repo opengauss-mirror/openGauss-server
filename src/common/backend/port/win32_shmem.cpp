@@ -361,7 +361,7 @@ int pgwin32_ReserveSharedMemoryRegion(HANDLE hChild)
          *
          * Don't use FATAL since we're running in the postmaster.
          */
-        elog(LOG, "reserved shared memory region got incorrect address ");
+        elog(LOG, "reserved shared memory region got incorrect address");
         VirtualFreeEx(hChild, address, 0, MEM_RELEASE);
         return false;
     }

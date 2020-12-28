@@ -56,7 +56,7 @@ DIR* opendir(const char* dirname)
     d = malloc(sizeof(DIR));
 #endif /* WIN32 */
 #else
-    d = MemoryContextAlloc(u_sess->top_mem_cxt, sizeof(DIR));
+    d = MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), sizeof(DIR));
 #endif
     if (d == NULL) {
         errno = ENOMEM;
@@ -70,7 +70,7 @@ DIR* opendir(const char* dirname)
     d->dirname = malloc(strlen(dirname) + 4);
 #endif /*WIN32*/
 #else
-    d->dirname = MemoryContextAlloc(u_sess->top_mem_cxt, strlen(dirname) + 4);
+    d->dirname = MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), strlen(dirname) + 4);
 #endif
     if (d->dirname == NULL) {
         errno = ENOMEM;

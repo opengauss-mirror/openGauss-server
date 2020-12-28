@@ -53,6 +53,12 @@
  */
 #define NG_FORBIDDEN_COST -100.0
 
+typedef struct NGroupInfo
+{
+    Oid         oid;
+    Bitmapset*  bms_nodeids;
+}NGroupInfo;
+
 /*
  * Modes for computing node group
  *     (1) optimal : the optimal mode in compute permission scale
@@ -95,11 +101,13 @@ typedef enum ComputingNodeGroupMode {
  */
 extern void ng_init_nodegroup_optimizer(Query* query);
 extern void ng_backup_nodegroup_options(bool* p_is_multiple_nodegroup_scenario,
-    bool* p_is_all_in_installation_nodegroup_scenario, Distribution** p_in_redistribution_group_distribution,
-    Distribution** p_compute_permission_group_distribution, Distribution** p_query_union_set_group_distribution);
+    int* p_different_nodegroup_count, Distribution** p_in_redistribution_group_distribution,
+    Distribution** p_compute_permission_group_distribution, Distribution** p_query_union_set_group_distribution,
+    Distribution** p_single_node_distribution);
 extern void ng_restore_nodegroup_options(bool p_is_multiple_nodegroup_scenario,
-    bool p_is_all_in_installation_nodegroup_scenario, Distribution* p_in_redistribution_group_distribution,
-    Distribution* p_compute_permission_group_distribution, Distribution* p_query_union_set_group_distribution);
+    int p_different_nodegroup_count, Distribution* p_in_redistribution_group_distribution,
+    Distribution* p_compute_permission_group_distribution, Distribution* p_query_union_set_group_distribution,
+    Distribution* p_single_node_distribution);
 extern ComputingNodeGroupMode ng_get_computing_nodegroup_mode();
 
 /* ----------
@@ -128,13 +136,14 @@ extern Distribution* ng_get_default_computing_group_distribution();
 extern ExecNodes* ng_get_default_computing_group_exec_node();
 extern Distribution* ng_get_correlated_subplan_group_distribution();
 extern Distribution* ng_get_max_computable_group_distribution();
-
+extern Distribution* ng_get_single_node_distribution();
 /* ----------
  * Get distribution information of a node group
  * ----------
  */
 extern Oid ng_get_group_groupoid(const char* group_name);
 extern char* ng_get_group_group_name(Oid group_oid);
+extern char* ng_get_dist_group_name(Distribution *distribution);
 extern Bitmapset* ng_get_group_nodeids(const Oid groupoid);
 extern Distribution* ng_get_group_distribution(const Oid groupoid);
 extern Distribution* ng_get_group_distribution(const char* group_name);
@@ -177,6 +186,8 @@ extern void ng_copy_distribution(Distribution* dest_distribution, const Distribu
 extern void ng_set_distribution(Distribution* dest_distribution, Distribution* src_distribution);
 extern Distribution* ng_get_overlap_distribution(Distribution* distribution_1, Distribution* distribution_2);
 extern Distribution* ng_get_union_distribution(Distribution* distribution_1, Distribution* distribution_2);
+extern Distribution* ng_get_union_distribution_recycle(Distribution* distribution_1,
+                                                                Distribution* distribution_2);
 extern Distribution* ng_get_random_single_dn_distribution(Distribution* distribution);
 
 /* ----------
@@ -198,16 +209,27 @@ extern Distribution* ng_convert_to_distribution(ExecNodes* exec_nodes);
 extern ExecNodes* ng_convert_to_exec_nodes(
     Distribution* distribution, char locator_type, RelationAccessType access_type);
 
+
+/* For geting suited candidate distributions to reduce search spaces. example:
+ * Single node distribution is not good for big data computing.
+ * Multi node distribution is not good for small data computing.
+ */
+enum DistrbutionPreferenceType {
+	DPT_ALL,
+	DPT_SHUFFLE,
+	DPT_SINGLE
+};
+
 /*
  * Heuristic methods
  */
 /* Join */
-extern List* ng_get_candidate_distribution_list(Path* outer_path, Path* inner_path);
-extern List* ng_get_candidate_distribution_list(Path* outer_path, Path* inner_path, bool is_correlated);
+extern List* ng_get_join_candidate_distribution_list(Path* outer_path, Path* inner_path, DistrbutionPreferenceType type);
+extern List* ng_get_join_candidate_distribution_list(Path* outer_path, Path* inner_path, bool is_correlated, DistrbutionPreferenceType type);
 /* Agg */
-extern List* ng_get_candidate_distribution_list(Plan* plan, bool is_correlated);
+extern List* ng_get_agg_candidate_distribution_list(Plan* plan, bool is_correlated, DistrbutionPreferenceType type);
 /* SetOp */
-extern List* ng_get_candidate_distribution_list(List* subPlans, bool is_correlated);
+extern List* ng_get_setop_candidate_distribution_list(List* subPlans, bool is_correlated);
 
 /*
  * Cost based algorithms
@@ -253,10 +275,21 @@ extern bool ng_is_shuffle_needed(PlannerInfo* root, Path* path, Distribution* ta
 extern bool ng_is_distribute_key_valid(PlannerInfo* root, List* distribute_key, List* target_list);
 
 /*
+ * node group cache hash table interface
+ */
+extern void ngroup_info_hash_create();
+extern Bitmapset*  ngroup_info_hash_search(Oid ngroup_oid);
+extern void  ngroup_info_hash_insert(Oid ngroup_oid, Bitmapset * bms_node_ids);
+extern void ngroup_info_hash_delete(Oid ngroup_oid);
+
+/*
  * Other functions
  */
 extern Bitmapset* ng_get_single_node_group_nodeids();
 extern Distribution* ng_get_single_node_group_distribution();
 extern ExecNodes* ng_get_single_node_group_exec_node();
-
+extern char* dist_to_str(Distribution *distribution);
+extern void _outBitmapset(StringInfo str, Bitmapset* bms);
+extern bool ng_is_single_node_group_distribution(Distribution* distribution);
+extern int ng_get_different_nodegroup_count();
 #endif /* NODEGROUPS_H */

@@ -1,14 +1,4 @@
 --
--- Check max string length of enum type
---
-SELECT char_length('createcshksjdbnskjcbnskjcbnsjcbncbsxkcbscbKHWEIDHBIWFHBSBCISAZDQ');
-CREATE TYPE over_enum AS ENUM('createcshksjdbnskjcbnskjcbnsjcbncbsxkcbscbKHWEIDHBIWFHBSBCISAZDQ');
-DROP TYPE IF EXISTS over_enum;
-SELECT char_length('createcshksjdbnskjcbnskjcbnsjcbncbsxkcbscbKHWEIDHBIWFHBSBCISAZD');
-CREATE TYPE max_eunm AS ENUM('createcshksjdbnskjcbnskjcbnsjcbncbsxkcbscbKHWEIDHBIWFHBSBCISAZD');
-DROP TYPE IF EXISTS max_eunm;
-
---
 -- Enum tests
 --
 

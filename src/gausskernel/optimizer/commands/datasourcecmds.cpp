@@ -25,6 +25,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "access/xact.h"
 #include "access/reloptions.h"
 #include "catalog/dependency.h"
@@ -76,7 +77,7 @@ static void check_source_generic_options(const List* src_options)
     errno_t ret;
 
     isgiven = (bool*)palloc(NumValidOptions);
-    ret = memset_s(isgiven, NumValidOptions, 0, NumValidOptions);
+    ret = memset_s(isgiven, NumValidOptions, false, NumValidOptions);
     securec_check(ret, "\0", "\0");
 
     foreach (cell, src_options) {
@@ -118,7 +119,6 @@ static void encrypt_source_generic_options(List* src_options)
     int i;
     int NumSensitiveOptions = sizeof(SensitiveOptionsArray) / sizeof(SensitiveOptionsArray[0]);
     char* srcString = NULL;
-	GS_UINT32 srcStringLen = 0;
     char encryptString[EC_CIPHER_TEXT_LENGTH];
     errno_t ret;
     ListCell* cell = NULL;
@@ -166,8 +166,7 @@ static void encrypt_source_generic_options(List* src_options)
                 securec_check(ret, "\0", "\0");
 
                 /* Clear the src string */
-                srcStringLen = strlen(srcString);
-                ret = memset_s(srcString, srcStringLen, 0, srcStringLen);
+                ret = memset_s(srcString, strlen(srcString), 0, strlen(srcString));
                 securec_check(ret, "\0", "\0");
                 pfree_ext(srcString);
                 pfree_ext(arg);
@@ -224,7 +223,7 @@ void CreateDataSource(CreateDataSourceStmt* stmt)
      */
     ret = memset_s(values, sizeof(values), 0, sizeof(values));
     securec_check(ret, "\0", "\0");
-    ret = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    ret = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
     securec_check(ret, "\0", "\0");
 
     /* Add source name and owner */
@@ -247,13 +246,14 @@ void CreateDataSource(CreateDataSourceStmt* stmt)
     nulls[Anum_pg_extension_data_source_srcacl - 1] = true;
 
     /* Check the source options */
-    check_source_generic_options((const List*)stmt->options);
+    check_source_generic_options(stmt->options);
 
     /* Encrypt sensitive options before any operations */
     encrypt_source_generic_options(stmt->options);
 
     /* Add source options */
     srcoptions = transformGenericOptions(DataSourceRelationId, PointerGetDatum(NULL), stmt->options, InvalidOid);
+
     if (PointerIsValid(DatumGetPointer(srcoptions)))
         values[Anum_pg_extension_data_source_srcoptions - 1] = srcoptions;
     else
@@ -265,7 +265,7 @@ void CreateDataSource(CreateDataSourceStmt* stmt)
 
     CatalogUpdateIndexes(rel, tuple);
 
-    heap_freetuple_ext(tuple);
+    tableam_tops_free_tuple(tuple);
 
     /* record dependencies */
     myself.classId = DataSourceRelationId;
@@ -320,9 +320,9 @@ void AlterDataSource(AlterDataSourceStmt* stmt)
 
     ret = memset_s(repl_val, sizeof(repl_val), 0, sizeof(repl_val));
     securec_check(ret, "\0", "\0");
-    ret = memset_s(repl_null, sizeof(repl_null), 0, sizeof(repl_null));
+    ret = memset_s(repl_null, sizeof(repl_null), false, sizeof(repl_null));
     securec_check(ret, "\0", "\0");
-    ret = memset_s(repl_repl, sizeof(repl_repl), 0, sizeof(repl_repl));
+    ret = memset_s(repl_repl, sizeof(repl_repl), false, sizeof(repl_repl));
     securec_check(ret, "\0", "\0");
 
     /*
@@ -376,12 +376,12 @@ void AlterDataSource(AlterDataSourceStmt* stmt)
     /*
      * Everything looks good - update the tuple
      */
-    tp = heap_modify_tuple(tp, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
+    tp = (HeapTuple) tableam_tops_modify_tuple(tp, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
 
     simple_heap_update(rel, &tp->t_self, tp);
     CatalogUpdateIndexes(rel, tp);
 
-    heap_freetuple_ext(tp);
+    tableam_tops_free_tuple(tp);
     heap_close(rel, RowExclusiveLock);
 }
 
@@ -451,7 +451,7 @@ void RenameDataSource(const char* oldname, const char* newname)
     simple_heap_update(rel, &tup->t_self, tup);
     CatalogUpdateIndexes(rel, tup);
 
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
     heap_close(rel, RowExclusiveLock);
 }
 
@@ -519,7 +519,6 @@ void AlterDataSourceOwner(const char* name, Oid newOwnerId)
             (errmodule(MOD_EC), errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("data source \"%s\" does not exist", name)));
 
     AlterDataSourceOwner_Internal(rel, tup, newOwnerId);
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
     heap_close(rel, RowExclusiveLock);
 }
-

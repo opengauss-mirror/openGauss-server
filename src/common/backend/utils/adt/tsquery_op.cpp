@@ -164,8 +164,10 @@ Datum tsquery_cmp(PG_FUNCTION_ARGS)
         TSQuery a = PG_GETARG_TSQUERY_COPY(0); \
         TSQuery b = PG_GETARG_TSQUERY_COPY(1); \
         int res = CompareTSQ(a, b);            \
+                                               \
         PG_FREE_IF_COPY(a, 0);                 \
         PG_FREE_IF_COPY(b, 1);                 \
+                                               \
         PG_RETURN_BOOL(CONDITION);             \
     }                                          \
     /* keep compiler quiet - no extra ; */     \
@@ -211,6 +213,7 @@ Datum tsq_mcontains(PG_FUNCTION_ARGS)
 
     sq = makeTSQuerySign(query);
     se = makeTSQuerySign(ex);
+
     if ((sq & se) != se) {
         PG_FREE_IF_COPY(query, 0);
         PG_FREE_IF_COPY(ex, 1);

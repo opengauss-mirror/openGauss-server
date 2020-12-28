@@ -300,11 +300,11 @@ CREATE SERVER s8 FOREIGN DATA WRAPPER postgresql OPTIONS (host 'localhost', dbna
 ------+-------------------+----------------------+-------------------+--------+---------+-----------------------------------+-------------
  s1   | foreign_data_user | foo                  |                   |        |         |                                   | 
  s2   | foreign_data_user | foo                  |                   |        |         | (host 'a', dbname 'b')            | 
- s3   | foreign_data_user | foo                  |                   | a      |         |                                   | 
- s4   | foreign_data_user | foo                  |                   | a      |         | (host 'a', dbname 'b')            | 
+ s3   | foreign_data_user | foo                  |                   | a |         |                                   | 
+ s4   | foreign_data_user | foo                  |                   | a |         | (host 'a', dbname 'b')            | 
  s5   | foreign_data_user | foo                  |                   |        | 15.0    |                                   | 
  s6   | foreign_data_user | foo                  |                   |        | 16.0    | (host 'a', dbname 'b')            | 
- s7   | foreign_data_user | foo                  |                   | a      | 17.0    | (host 'a', dbname 'b')            | 
+ s7   | foreign_data_user | foo                  |                   | a | 17.0    | (host 'a', dbname 'b')            | 
  s8   | foreign_data_user | postgresql           |                   |        |         | (host 'localhost', dbname 's8db') | 
 (8 rows)
 
@@ -322,11 +322,11 @@ RESET ROLE;
 ------+-------------------+----------------------+-------------------+--------+---------+-----------------------------------+-------------
  s1   | foreign_data_user | foo                  |                   |        |         |                                   | 
  s2   | foreign_data_user | foo                  |                   |        |         | (host 'a', dbname 'b')            | 
- s3   | foreign_data_user | foo                  |                   | a      |         |                                   | 
- s4   | foreign_data_user | foo                  |                   | a      |         | (host 'a', dbname 'b')            | 
+ s3   | foreign_data_user | foo                  |                   | a |         |                                   | 
+ s4   | foreign_data_user | foo                  |                   | a |         | (host 'a', dbname 'b')            | 
  s5   | foreign_data_user | foo                  |                   |        | 15.0    |                                   | 
  s6   | foreign_data_user | foo                  |                   |        | 16.0    | (host 'a', dbname 'b')            | 
- s7   | foreign_data_user | foo                  |                   | a      | 17.0    | (host 'a', dbname 'b')            | 
+ s7   | foreign_data_user | foo                  |                   | a | 17.0    | (host 'a', dbname 'b')            | 
  s8   | foreign_data_user | postgresql           |                   |        |         | (host 'localhost', dbname 's8db') | 
  t1   | regress_test_role | foo                  |                   |        |         |                                   | 
 (9 rows)
@@ -346,11 +346,11 @@ CREATE SERVER t2 FOREIGN DATA WRAPPER foo;
 ------+-------------------+----------------------+-------------------+--------+---------+-----------------------------------+-------------
  s1   | foreign_data_user | foo                  |                   |        |         |                                   | 
  s2   | foreign_data_user | foo                  |                   |        |         | (host 'a', dbname 'b')            | 
- s3   | foreign_data_user | foo                  |                   | a      |         |                                   | 
- s4   | foreign_data_user | foo                  |                   | a      |         | (host 'a', dbname 'b')            | 
+ s3   | foreign_data_user | foo                  |                   | a |         |                                   | 
+ s4   | foreign_data_user | foo                  |                   | a |         | (host 'a', dbname 'b')            | 
  s5   | foreign_data_user | foo                  |                   |        | 15.0    |                                   | 
  s6   | foreign_data_user | foo                  |                   |        | 16.0    | (host 'a', dbname 'b')            | 
- s7   | foreign_data_user | foo                  |                   | a      | 17.0    | (host 'a', dbname 'b')            | 
+ s7   | foreign_data_user | foo                  |                   | a | 17.0    | (host 'a', dbname 'b')            | 
  s8   | foreign_data_user | postgresql           |                   |        |         | (host 'localhost', dbname 's8db') | 
  t1   | regress_test_role | foo                  |                   |        |         |                                   | 
  t2   | regress_test_role | foo                  |                   |        |         |                                   | 
@@ -377,12 +377,12 @@ GRANT USAGE ON FOREIGN SERVER s6 TO regress_test_role2 WITH GRANT OPTION;
  s1   | foreign_data_user | foo                  | foreign_data_user=U/foreign_data_user  +|        | 1.0     | (servername 's1')                 | 
       |                   |                      | regress_test_role=U/foreign_data_user   |        |         |                                   | 
  s2   | foreign_data_user | foo                  |                                         |        | 1.1     | (host 'a', dbname 'b')            | 
- s3   | foreign_data_user | foo                  |                                         | a      |         | ("tns name" 'orcl', port '1521')  | 
- s4   | foreign_data_user | foo                  |                                         | a      |         | (host 'a', dbname 'b')            | 
+ s3   | foreign_data_user | foo                  |                                         | a |         | ("tns name" 'orcl', port '1521')  | 
+ s4   | foreign_data_user | foo                  |                                         | a |         | (host 'a', dbname 'b')            | 
  s5   | foreign_data_user | foo                  |                                         |        | 15.0    |                                   | 
  s6   | foreign_data_user | foo                  | foreign_data_user=U/foreign_data_user  +|        | 16.0    | (host 'a', dbname 'b')            | 
       |                   |                      | regress_test_role2=U*/foreign_data_user |        |         |                                   | 
- s7   | foreign_data_user | foo                  |                                         | a      | 17.0    | (host 'a', dbname 'b')            | 
+ s7   | foreign_data_user | foo                  |                                         | a | 17.0    | (host 'a', dbname 'b')            | 
  s8   | foreign_data_user | postgresql           |                                         |        |         | (host 'localhost', dbname 's8db') | 
  t1   | regress_test_role | foo                  |                                         |        |         |                                   | 
  t2   | regress_test_role | foo                  |                                         |        |         |                                   | 
@@ -427,12 +427,12 @@ privileges for foreign-data wrapper foo
 ------+-----------------------+----------------------+-----------------------------------------------+--------+---------+--------------------------------------+-------------
  s1   | regress_test_indirect | foo                  | regress_test_indirect=U/regress_test_indirect |        | 1.1     | (servername 's1')                    | 
  s2   | foreign_data_user     | foo                  |                                               |        | 1.1     | (host 'a', dbname 'b')               | 
- s3   | foreign_data_user     | foo                  |                                               | a      |         | ("tns name" 'orcl', port '1521')     | 
- s4   | foreign_data_user     | foo                  |                                               | a      |         | (host 'a', dbname 'b')               | 
+ s3   | foreign_data_user     | foo                  |                                               | a |         | ("tns name" 'orcl', port '1521')     | 
+ s4   | foreign_data_user     | foo                  |                                               | a |         | (host 'a', dbname 'b')               | 
  s5   | foreign_data_user     | foo                  |                                               |        | 15.0    |                                      | 
  s6   | foreign_data_user     | foo                  | foreign_data_user=U/foreign_data_user        +|        | 16.0    | (host 'a', dbname 'b')               | 
       |                       |                      | regress_test_role2=U*/foreign_data_user       |        |         |                                      | 
- s7   | foreign_data_user     | foo                  |                                               | a      | 17.0    | (host 'a', dbname 'b')               | 
+ s7   | foreign_data_user     | foo                  |                                               | a | 17.0    | (host 'a', dbname 'b')               | 
  s8   | foreign_data_user     | postgresql           |                                               |        |         | (dbname 'db1', connect_timeout '30') | 
  t1   | regress_test_role     | foo                  |                                               |        |         |                                      | 
  t2   | regress_test_role     | foo                  |                                               |        |         |                                      | 
@@ -445,12 +445,12 @@ ALTER SERVER s8 RENAME to s8new;
 -------+-----------------------+----------------------+-----------------------------------------------+--------+---------+--------------------------------------+-------------
  s1    | regress_test_indirect | foo                  | regress_test_indirect=U/regress_test_indirect |        | 1.1     | (servername 's1')                    | 
  s2    | foreign_data_user     | foo                  |                                               |        | 1.1     | (host 'a', dbname 'b')               | 
- s3    | foreign_data_user     | foo                  |                                               | oracle |         | ("tns name" 'orcl', port '1521')     | 
- s4    | foreign_data_user     | foo                  |                                               | oracle |         | (host 'a', dbname 'b')               | 
+ s3    | foreign_data_user     | foo                  |                                               | a |         | ("tns name" 'orcl', port '1521')     | 
+ s4    | foreign_data_user     | foo                  |                                               | a |         | (host 'a', dbname 'b')               | 
  s5    | foreign_data_user     | foo                  |                                               |        | 15.0    |                                      | 
  s6    | foreign_data_user     | foo                  | foreign_data_user=U/foreign_data_user        +|        | 16.0    | (host 'a', dbname 'b')               | 
        |                       |                      | regress_test_role2=U*/foreign_data_user       |        |         |                                      | 
- s7    | foreign_data_user     | foo                  |                                               | oracle | 17.0    | (host 'a', dbname 'b')               | 
+ s7    | foreign_data_user     | foo                  |                                               | a | 17.0    | (host 'a', dbname 'b')               | 
  s8new | foreign_data_user     | postgresql           |                                               |        |         | (dbname 'db1', connect_timeout '30') | 
  t1    | regress_test_role     | foo                  |                                               |        |         |                                      | 
  t2    | regress_test_role     | foo                  |                                               |        |         |                                      | 
@@ -853,7 +853,7 @@ SELECT * FROM information_schema.foreign_servers ORDER BY 1, 2;
  foreign_server_catalog | foreign_server_name | foreign_data_wrapper_catalog | foreign_data_wrapper_name | foreign_server_type | foreign_server_version | authorization_identifier 
 ------------------------+---------------------+------------------------------+---------------------------+---------------------+------------------------+--------------------------
  regression             | s0                  | regression                   | dummy                     |                     |                        | foreign_data_user
- regression             | s4                  | regression                   | foo                       | oracle              |                        | foreign_data_user
+ regression             | s4                  | regression                   | foo                       | a              |                        | foreign_data_user
  regression             | s5                  | regression                   | foo                       |                     | 15.0                   | regress_test_role
  regression             | s6                  | regression                   | foo                       |                     | 16.0                   | regress_test_indirect
  regression             | s8                  | regression                   | postgresql                |                     |                        | foreign_data_user

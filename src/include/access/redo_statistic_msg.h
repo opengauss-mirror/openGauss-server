@@ -27,7 +27,7 @@
 #include "access/multi_redo_settings.h"
 
 
-const static uint32 REDO_WORKER_INFO_BUFFER_SIZE = 64 * (1 + MAX_RECOVERY_THREAD_NUM);
+const static uint32 REDO_WORKER_INFO_BUFFER_SIZE = 64 * (1 + MOST_FAST_RECOVERY_LIMIT);
 const static uint32 VIEW_NAME_SIZE = 32;
 const static uint32 REDO_VIEW_COL_SIZE = 23;
 

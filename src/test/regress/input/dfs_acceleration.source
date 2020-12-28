@@ -1,0 +1,59 @@
+-- prepare test enviroment for the compute pool.
+
+-- create user
+CREATE USER omm password 'Gauss@123';
+grant all privileges to omm;
+
+drop server if exists hdfs_server cascade;
+CREATE SERVER dummy_server FOREIGN DATA WRAPPER DFS_FDW  OPTIONS (address 'localhost:@portstring@', username 'omm', password 'Gauss@123', type 'dummy');
+CREATE SERVER hdfs_server  FOREIGN DATA WRAPPER HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+
+drop table if exists acce_sales;
+create   table acce_sales(s_id int, b int1, c int2, d int8, e float4, f float8, option1 varchar(10), option2 clob, option3 bpchar(10), time2 timestamp,  customer_name text,expense int,item text) tablespace hdfs_ts;
+set cstore_insert_mode = main;
+insert into acce_sales values(1, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54','zhangsan', 20 , 'book'     );
+insert into acce_sales values(2, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54','ngyi', 100, 'photo'    );
+insert into acce_sales values(3, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'lun', 43 , 'sigurates');
+insert into acce_sales values(1, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54','zhangsan', 20 , 'book'     );
+insert into acce_sales values(2, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54','ngyi', 100, 'photo'    );
+insert into acce_sales values(3, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'lun', 43 , 'sigurates');
+insert into acce_sales values(4, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'ojian', 25 , 'food'     );
+insert into acce_sales values(4, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'ojian', 25 , 'food'     );
+insert into acce_sales values(1, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54','zhangsan', 20 , 'book'     );
+insert into acce_sales values(2, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54','ngyi', 100, 'photo'    );
+insert into acce_sales values(3, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'lun', 43 , 'sigurates');
+insert into acce_sales values(1, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54','zhangsan', 20 , 'book'     );
+insert into acce_sales values(2, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54','ngyi', 100, 'photo'    );
+insert into acce_sales values(3, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'lun', 43 , 'sigurates');
+insert into acce_sales values(4, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'ojian', 25 , 'food'     );
+insert into acce_sales values(4, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'ojian', 25 , 'food'     );
+insert into acce_sales values(1, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54','zhangsan', 20 , 'book'     );
+insert into acce_sales values(2, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54','ngyi', 100, 'photo'    );
+insert into acce_sales values(3, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'lun', 43 , 'sigurates');
+insert into acce_sales values(1, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54','zhangsan', 20 , 'book'     );
+insert into acce_sales values(2, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54','ngyi', 100, 'photo'    );
+insert into acce_sales values(3, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'lun', 43 , 'sigurates');
+insert into acce_sales values(4, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'ojian', 25 , 'food'     );
+insert into acce_sales values(4, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'ojian', 25 , 'food'     );
+insert into acce_sales values(1, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54','zhangsan', 20 , 'book'     );
+insert into acce_sales values(2, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54','ngyi', 100, 'photo'    );
+insert into acce_sales values(3, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'lun', 43 , 'sigurates');
+insert into acce_sales values(1, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54','zhangsan', 20 , 'book'     );
+insert into acce_sales values(2, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54','ngyi', 100, 'photo'    );
+insert into acce_sales values(3, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'lun', 43 , 'sigurates');
+insert into acce_sales values(4, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'ojian', 25 , 'food'     );
+insert into acce_sales values(4, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'ojian', 25 , 'food'     );
+
+create foreign table f_sales(s_id int, b int1, c int2, d int8, e float4, f float8, option1 varchar(10), option2 clob, option3 bpchar(10), time2 timestamp,  customer_name text,expense int,item text)
+server hdfs_server options(format 'orc', foldername '/@hdfsstoreplus@/dfs_init_004/tablespace_secondary/regression/public.acce_sales')
+distribute by roundrobin;
+
+set acceleration_with_compute_pool=on;
+set acce_min_datasize_per_thread=0;
+set explain_perf_mode=summary;
+--analyze f_sales;
+--explain select count(*) from f_sales;
+--select count(*) from f_sales;
+drop table if exists acce_sales;
+drop server dummy_server cascade;
+drop server hdfs_server cascade;

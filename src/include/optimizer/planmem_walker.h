@@ -157,6 +157,12 @@ typedef struct MethodPlanWalkerContext {
     QueryMemKB* ng_queryMemKBArray; /* query memory for each nodegroup */
 } MethodPlanWalkerContext;
 
+typedef struct PredpushPlanWalkerContext {
+    MethodPlanWalkerContext mpwc;
+
+    bool predpush_stream; /* is predpush meet a stream */
+} PredpushPlanWalkerContext;
+
 extern void exec_init_plan_tree_base(plan_tree_base_prefix* base, PlannedStmt* stmt);
 
 extern Plan* plan_tree_base_subplan_get_plan(plan_tree_base_prefix* base, SubPlan* subplan);

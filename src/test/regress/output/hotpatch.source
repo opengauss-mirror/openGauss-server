@@ -1,0 +1,76 @@
+--remove patchfile
+--?.*
+--no patch file ,load failed
+--?.*
+--?.*
+
+--?.*
+--generate patch file, load succeed
+--?.*
+--?.*
+
+--info, should show info, status is deactive
+--?.*
+--?.*
+PATCH STATE:DEACTIVE
+PATCH COMMIT NUMBER :b4a4e2e7da3e9be0b59027ff6ed9bf1
+PATCH COMMIT COMMENTS: modification for improve performance
+--?.*
+PATCH BIN VERSION:GAUSSDBV300R002C00
+[PATCH-SUCCESS] INFO PATCH
+
+--?.*
+PATCH: GAUSSDBV300R002C00KERNELHP0001.pat STATE: DEACTIVE 
+[PATCH-SUCCESS] LIST PATCH
+--load twice, return already loaded
+--?.*
+--?.*
+
+--active succeed
+--?.*
+--?.*
+
+--info, should show info, status is active
+--?.*
+--?.*
+PATCH STATE:ACTIVE
+PATCH COMMIT NUMBER :b4a4e2e7da3e9be0b59027ff6ed9bf1
+PATCH COMMIT COMMENTS: modification for improve performance
+--?.*
+PATCH BIN VERSION:GAUSSDBV300R002C00
+[PATCH-SUCCESS] INFO PATCH
+
+--?.*
+PATCH: GAUSSDBV300R002C00KERNELHP0001.pat STATE: ACTIVE 
+[PATCH-SUCCESS] LIST PATCH
+--active twice, return already active
+--?.*
+--?.*
+
+--unload when active, return status not correct
+--?.*
+--?.*
+
+--deactive
+--?.*
+--?.* 
+
+--info, should show info, status is deactive
+--?.*
+--?.*
+PATCH STATE:DEACTIVE
+PATCH COMMIT NUMBER :b4a4e2e7da3e9be0b59027ff6ed9bf1
+PATCH COMMIT COMMENTS: modification for improve performance
+--?.*
+PATCH BIN VERSION:GAUSSDBV300R002C00
+[PATCH-SUCCESS] INFO PATCH
+
+--?.*
+PATCH: GAUSSDBV300R002C00KERNELHP0001.pat STATE: DEACTIVE 
+[PATCH-SUCCESS] LIST PATCH
+--unload when deactive
+--?.*
+--?.*
+
+--remove patchfile
+--?.*

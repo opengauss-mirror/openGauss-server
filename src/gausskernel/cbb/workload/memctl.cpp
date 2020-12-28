@@ -1514,7 +1514,7 @@ static void GroupAddMemory(int* baseArray, const int* memArray, bool check)
 static void GroupSetMaxMemory(int* baseArray, const int* memArray)
 {
     if (baseArray[1] > 0) {
-        baseArray[1] = Max(baseArray[1], memArray[1] > 0 ? memArray[1] : memArray[0]);
+        baseArray[1] = Max(baseArray[1], (memArray[1] > 0) ? memArray[1] : memArray[0]);
     } else if (memArray[1] != 0) {
         baseArray[1] = Max(baseArray[0], memArray[1]);
     }
@@ -1999,7 +1999,7 @@ static void CalculateGroupMemFromChild(
             opMem[0] = GetGroupMemKB(childGroup, j, firstTime ? &opMem[1] : NULL);
             opMem[0] -= belowStreamMem[0];
             if (opMem[1] > 0) {
-                opMem[1] -= belowStreamMem[1] > 0 ? belowStreamMem[1] : belowStreamMem[0];
+                opMem[1] -= (belowStreamMem[1] > 0) ? belowStreamMem[1] : belowStreamMem[0];
             } else if (belowStreamMem[1] > 0) {
                 opMem[1] = opMem[0] - belowStreamMem[1];
             }
@@ -3331,7 +3331,8 @@ static int CalOpSpreadMem(Plan* node, MethodPlanWalkerContext* context)
             const double decreaseRatio = 1.0 - (1.0 - ratio) * (1.0 - ratio);
             Assert((int)(node->operatorMemKB[0] + spreadMem * decreaseRatio) >= 0);
             return Max(
-                (int)(node->operatorMemKB[0] + spreadMem * decreaseRatio), STATEMENT_MIN_MEM * HALF_AMOUNT * 1024L);
+                (int)(node->operatorMemKB[0] + spreadMem * decreaseRatio),
+                (int)(STATEMENT_MIN_MEM * HALF_AMOUNT * 1024L));
         } else {
             return node->operatorMemKB[0] + spreadMem;
         }

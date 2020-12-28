@@ -25,7 +25,7 @@ CREATE TABLE cmpr_nulls_raw
 );
 insert into cmpr_nulls_raw(R00, R01, R02, R03, R04, R06, R07, R08, R09, R10, R11, R12, R13, R14, R15, R16, R17, R18, R19) select generate_series(1,300),
 						     1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,  16,  17,  18;
-COPY cmpr_nulls_raw TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_nulls.data';
+COPY cmpr_nulls_raw TO '@abs_srcdir@/data/cmpr_nulls.data';
 CREATE TABLE cmpr_nulls
 (
 	R00 int DELTA,
@@ -48,8 +48,8 @@ CREATE TABLE cmpr_nulls
 	R17 int DELTA,
 	R18 int DELTA,
 	R19 int DELTA
-) COMPRESS;
-COPY cmpr_nulls FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_nulls.data';
+) ;
+COPY cmpr_nulls FROM '@abs_srcdir@/data/cmpr_nulls.data';
 SELECT (SELECT COUNT(*) FROM cmpr_nulls) - (SELECT COUNT(*) FROM cmpr_nulls_raw);
  ?column? 
 ----------
@@ -68,4 +68,4 @@ SELECT (SELECT COUNT(*) FROM cmpr_nulls) - (SELECT COUNT(*) FROM cmpr_nulls_raw)
 
 DROP TABLE cmpr_nulls;
 DROP TABLE cmpr_nulls_raw;
-\! rm '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_nulls.data';
+\! rm '@abs_srcdir@/data/cmpr_nulls.data';

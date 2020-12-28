@@ -20,6 +20,7 @@
 #include "access/sysattr.h"
 #include "access/xact.h"
 #include "catalog/dependency.h"
+#include "catalog/gs_matview.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
 #include "catalog/namespace.h"
@@ -65,6 +66,7 @@
 #ifdef PGXC
 #include "catalog/pgxc_group.h"
 #include "catalog/pgxc_class.h"
+#include "catalog/pgxc_slice.h"
 #include "pgxc/execRemote.h"
 #include "pgxc/pgxc.h"
 #include "commands/sequence.h"
@@ -73,10 +75,12 @@
 #include "gtm/gtm_c.h"
 #include "access/gtm.h"
 #endif
+#include "client_logic/client_logic.h"
 #include "commands/comment.h"
 #include "commands/dbcommands.h"
 #include "commands/defrem.h"
 #include "commands/extension.h"
+#include "commands/matview.h"
 #include "commands/proclang.h"
 #include "commands/schemacmds.h"
 #include "commands/seclabel.h"
@@ -97,31 +101,8 @@
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 #include "datasource/datasource.h"
-
-/* ObjectAddressExtra flag bits */
-#define DEPFLAG_ORIGINAL 0x0001  /* an original deletion target */
-#define DEPFLAG_NORMAL 0x0002    /* reached via normal dependency */
-#define DEPFLAG_AUTO 0x0004      /* reached via auto dependency */
-#define DEPFLAG_INTERNAL 0x0008  /* reached via internal dependency */
-#define DEPFLAG_EXTENSION 0x0010 /* reached via extension dependency */
-#define DEPFLAG_REVERSE 0x0020   /* reverse internal/extension link */
-
-/* typedef ObjectAddresses appears in dependency.h */
-
-/* threaded list of ObjectAddresses, for recursion detection */
-typedef struct ObjectAddressStack {
-    const ObjectAddress* object;     /* object being visited */
-    int flags;                       /* its current flag bits */
-    struct ObjectAddressStack* next; /* next outer stack level */
-} ObjectAddressStack;
-
-/* for find_expr_references_walker */
-typedef struct {
-    ObjectAddresses* addrs; /* addresses being accumulated */
-    List* rtables;          /* list of rangetables to resolve Vars */
-} find_expr_references_context;
 
 /*
  * This constant table maps ObjectClasses to the corresponding catalog OIDs.
@@ -172,6 +153,11 @@ static void findDependentObjects(const ObjectAddress* object, int flags, ObjectA
     ObjectAddresses* targetObjects, const ObjectAddresses* pendingObjects, Relation* depRel);
 static void reportDependentObjects(
     const ObjectAddresses* targetObjects, DropBehavior behavior, int msglevel, const ObjectAddress* origObject);
+#ifdef ENABLE_MULTIPLE_NODES
+namespace Tsdb {
+static void findTsDependentObjects(ObjectAddresses* targetObjects, Relation depRel);
+}
+#endif   /* ENABLE_MULTIPLE_NODES */
 static void deleteOneObject(const ObjectAddress* object, Relation* depRel, int32 flags);
 static void doDeletion(const ObjectAddress* object, int flags);
 static void AcquireDeletionLock(const ObjectAddress* object, int flags);
@@ -187,7 +173,6 @@ static bool stack_address_present_add_flags(const ObjectAddress* object, int fla
 static void getRelationDescription(StringInfo buffer, Oid relid);
 static void getOpFamilyDescription(StringInfo buffer, Oid opfid);
 static void PreCheckForDfsTable(ObjectAddresses* targetObjects);
-
 extern char* pg_get_viewdef_worker(Oid viewoid, int prettyFlags, int wrapColumn);
 extern char* pg_get_functiondef_worker(Oid funcid, int* headerlines);
 
@@ -241,18 +226,22 @@ void performDeletion(const ObjectAddress* object, DropBehavior behavior, int fla
         NULL, /* no pendingObjects */
         &depRel);
 
+    bool has_encrypted_column = false;
+    has_encrypted_column = is_exist_encrypted_column(targetObjects);
     /*
      * Check if deletion is allowed, and report about cascaded deletes.
      */
     reportDependentObjects(targetObjects, behavior, NOTICE, object);
 
-    /*
-     * Delete all the objects in the proper order.
-     */
-    for (i = 0; i < targetObjects->numrefs; i++) {
-        ObjectAddress* thisobj = targetObjects->refs + i;
+    if (!has_encrypted_column || behavior != DROP_CASCADE) {
+        /*
+        * Delete all the objects in the proper order.
+        */
+        for (i = 0; i < targetObjects->numrefs; i++) {
+            ObjectAddress *thisobj = targetObjects->refs + i;
 
-        deleteOneObject(thisobj, &depRel, flags);
+            deleteOneObject(thisobj, &depRel, flags);
+        }
     }
 
     /* And clean up */
@@ -400,13 +389,21 @@ void performMultipleDeletions(const ObjectAddresses* objects, DropBehavior behav
      */
     PreDropForDfsTable(targetObjects);
 
+    MemoryContext oldCxt = CurrentMemoryContext;
+    MemoryContext objDelCxt = AllocSetContextCreate(CurrentMemoryContext, "ObjectDeleteContext", ALLOCSET_SMALL_MINSIZE,
+                                                    ALLOCSET_SMALL_INITSIZE, ALLOCSET_SMALL_MAXSIZE);
     /*
      * Delete all the objects in the proper order.
      */
     for (i = 0; i < targetObjects->numrefs; i++) {
+        (void)MemoryContextSwitchTo(objDelCxt);
         ObjectAddress* thisobj = targetObjects->refs + i;
         deleteOneObject(thisobj, &depRel, flags);
+        MemoryContextReset(objDelCxt);
     }
+
+    (void)MemoryContextSwitchTo(oldCxt);
+    MemoryContextDelete(objDelCxt);
 
     /* And clean up */
     free_object_addresses(targetObjects);
@@ -447,11 +444,8 @@ void deleteWhatDependsOn(const ObjectAddress* object, bool showNotices)
      */
     targetObjects = new_object_addresses();
 
-    findDependentObjects(object,
-        DEPFLAG_ORIGINAL,
-        NULL, /* empty stack */
-        targetObjects,
-        NULL, /* no pendingObjects */
+    findDependentObjects(object, DEPFLAG_ORIGINAL, NULL, /* empty stack */
+        targetObjects, NULL, /* no pendingObjects */ 
         &depRel);
 
     /*
@@ -632,8 +626,7 @@ static void findDependentObjects(const ObjectAddress* object, int flags, ObjectA
 
                     /* No exception applies, so throw the error */
                     otherObjDesc = getObjectDescription(&otherObject);
-                    ereport(ERROR,
-                        (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                    ereport(ERROR, (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
                             errmsg("cannot drop %s because %s requires it", getObjectDescription(object), otherObjDesc),
                             errhint("You can drop %s instead.", otherObjDesc)));
                 }
@@ -695,18 +688,13 @@ static void findDependentObjects(const ObjectAddress* object, int flags, ObjectA
                  * Should not happen; PIN dependencies should have zeroes in
                  * the depender fields...
                  */
-                ereport(ERROR,
-                    (errmodule(MOD_OPT),
-                        errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_WRONG_OBJECT_TYPE),
                         errmsg("incorrect use of PIN dependency with %s", getObjectDescription(object))));
                 break;
             default:
-                ereport(ERROR,
-                    (errmodule(MOD_OPT),
-                        errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                        errmsg("unrecognized dependency type '%c' for %s",
-                            foundDep->deptype,
-                            getObjectDescription(object))));
+                ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                        errmsg("unrecognized dependency type '%c' for %s", foundDep->deptype,
+                                getObjectDescription(object))));
                 break;
         }
     }
@@ -783,8 +771,7 @@ static void findDependentObjects(const ObjectAddress* object, int flags, ObjectA
                  * drop of pinned system catalogs during inplace upgrade.
                  */
                 if (!u_sess->attr.attr_common.IsInplaceUpgrade) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                    ereport(ERROR, (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
                             errmsg("cannot drop %s because it is required by the database system",
                                 getObjectDescription(object))));
                     subflags = 0; /* keep compiler quiet */
@@ -792,12 +779,9 @@ static void findDependentObjects(const ObjectAddress* object, int flags, ObjectA
                     continue;
                 break;
             default:
-                ereport(ERROR,
-                    (errmodule(MOD_OPT),
-                        errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                        errmsg("unrecognized dependency type '%c' for %s",
-                            foundDep->deptype,
-                            getObjectDescription(object))));
+                ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                        errmsg("unrecognized dependency type '%c' for %s", foundDep->deptype,
+                                getObjectDescription(object))));
                 subflags = 0; /* keep compiler quiet */
                 break;
         }
@@ -921,24 +905,16 @@ static void reportDependentObjects(
                     /* separate entries with a newline */
                     if (clientdetail.len != 0)
                         appendStringInfoChar(&clientdetail, '\n');
-                    appendStringInfo(&clientdetail,
-                        _("Sorry that we have to drop %s due to "
+                    appendStringInfo(&clientdetail, _("Sorry that we have to drop %s due to "
                           "system catalog upgrade. You may rebuild it with the following sql after upgrade:\n"
-                          "CREATE %s AS %s"),
-                        objDesc,
-                        objDesc,
-                        viewdef);
+                          "CREATE %s AS %s"), objDesc, objDesc, viewdef);
 
                     /* separate entries with a newline */
                     if (logdetail.len != 0)
                         appendStringInfoChar(&logdetail, '\n');
-                    appendStringInfo(&logdetail,
-                        _("Sorry that we have to drop %s due to "
+                    appendStringInfo(&logdetail, _("Sorry that we have to drop %s due to "
                           "system catalog upgrade. You may rebuild it with the following sql after upgrade:\n"
-                          "CREATE %s AS %s"),
-                        objDesc,
-                        objDesc,
-                        viewdef);
+                          "CREATE %s AS %s"), objDesc, objDesc, viewdef);
 
                     pfree_ext(viewdef);
                 } else if (strstr(objDesc, "function") != NULL) {
@@ -948,20 +924,16 @@ static void reportDependentObjects(
                     /* separate entries with a newline */
                     if (clientdetail.len != 0)
                         appendStringInfoChar(&clientdetail, '\n');
-                    appendStringInfo(&clientdetail,
-                        _("Sorry that we have to drop %s due to "
+                    appendStringInfo(&clientdetail, _("Sorry that we have to drop %s due to "
                           "system catalog upgrade. You may rebuild it with the following sql after upgrade:\n%s"),
-                        objDesc,
-                        funcdef);
+                        objDesc, funcdef);
 
                     /* separate entries with a newline */
                     if (logdetail.len != 0)
                         appendStringInfoChar(&logdetail, '\n');
-                    appendStringInfo(&logdetail,
-                        _("Sorry that we have to drop %s due to "
+                    appendStringInfo(&logdetail, _("Sorry that we have to drop %s due to "
                           "system catalog upgrade. You may rebuild it with the following sql after upgrade:\n%s"),
-                        objDesc,
-                        funcdef);
+                        objDesc, funcdef);
 
                     pfree_ext(funcdef);
                 } else if (strstr(objDesc, "cast from") != NULL) {
@@ -977,10 +949,16 @@ static void reportDependentObjects(
                     appendStringInfo(
                         &logdetail, _("Sorry that we have to drop %s due to system catalog upgrade.\n"), objDesc);
                 } else
-                    ereport(ERROR,
-                        (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                    ereport(ERROR, (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
                             errmsg(
                                 "cannot drop %s cascadely during upgrade because it may contain user data", objDesc)));
+            }
+            if (strstr(objDesc, "encrypted column") != NULL) {
+                ereport(ERROR, (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                    errmsg("cannot drop %s cascadely because encrypted column depend on it.",
+                    getObjectDescription(origObject)),
+                    errhint("we have to drop %s, ... before drop %s cascadely.", objDesc,
+                    getObjectDescription(origObject))));
             }
 
             if (numReportedClient < MAX_REPORTED_DEPS || u_sess->attr.attr_common.IsInplaceUpgrade) {
@@ -1014,25 +992,20 @@ static void reportDependentObjects(
             ereport(ERROR,
                 (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
                     errmsg("cannot drop %s because other objects depend on it", getObjectDescription(origObject)),
-                    errdetail("%s", clientdetail.data),
-                    errdetail_log("%s", logdetail.data),
+                    errdetail("%s", clientdetail.data), errdetail_log("%s", logdetail.data),
                     errhint("Use DROP ... CASCADE to drop the dependent objects too.")));
         else
             ereport(ERROR,
                 (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
                     errmsg("cannot drop desired object(s) because other objects depend on them"),
-                    errdetail("%s", clientdetail.data),
-                    errdetail_log("%s", logdetail.data),
+                    errdetail("%s", clientdetail.data), errdetail_log("%s", logdetail.data),
                     errhint("Use DROP ... CASCADE to drop the dependent objects too.")));
     } else if (numReportedClient > 1) {
         ereport(msglevel,
             /* translator: %d always has a value larger than 1 */
-            (errmsg_plural("drop cascades to %d other object",
-                 "drop cascades to %d other objects",
-                 numReportedClient + numNotReportedClient,
-                 numReportedClient + numNotReportedClient),
-                errdetail("%s", clientdetail.data),
-                errdetail_log("%s", logdetail.data)));
+            (errmsg_plural("drop cascades to %d other object", "drop cascades to %d other objects",
+                 numReportedClient + numNotReportedClient, numReportedClient + numNotReportedClient),
+                errdetail("%s", clientdetail.data), errdetail_log("%s", logdetail.data)));
     } else if (numReportedClient == 1) {
         /* we just use the single item as-is */
         ereport(msglevel, (errmsg_internal("%s", clientdetail.data)));
@@ -1121,10 +1094,7 @@ static void deleteOneObject(const ObjectAddress* object, Relation* depRel, int f
         ScanKeyInit(
             &key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(object->objectId));
         if (object->objectSubId != 0) {
-            ScanKeyInit(&key[2],
-                Anum_pg_depend_refobjsubid,
-                BTEqualStrategyNumber,
-                F_INT4EQ,
+            ScanKeyInit(&key[2], Anum_pg_depend_refobjsubid, BTEqualStrategyNumber, F_INT4EQ,
                 Int32GetDatum(object->objectSubId));
             nkeys = 3;
         } else
@@ -1203,6 +1173,9 @@ static void doDeletion(const ObjectAddress* object, int flags)
 
                     /* Then close the relation opened previously */
                     relation_close(relseq, AccessShareLock);
+                } else if (relKind == RELKIND_MATVIEW) {
+                    delete_matview_tuple(object->objectId);
+                    delete_matviewdep_tuple(object->objectId);
                 }
 
                 if (object->objectSubId != 0)
@@ -1215,6 +1188,11 @@ static void doDeletion(const ObjectAddress* object, int flags)
                  * is executed to drop this relation.If you reload relation after drop, it may
                  * cause other exceptions during the drop process
                  */
+            }
+
+            Oid mlogid = find_matview_mlog_table(object->objectId);
+            if (mlogid != 0 && !u_sess->attr.attr_sql.enable_cluster_resize) {
+                delete_matdep_table(mlogid);
             }
 
 #ifdef PGXC
@@ -1258,11 +1236,15 @@ static void doDeletion(const ObjectAddress* object, int flags)
                          */
                         register_sequence_cb(seq_uuid, GTM_DROP_SEQ);
 
+                        /* Delete global sequence */
+                        delete_global_seq(object->objectId, relseq);
+
                         /* Then close the relation opened previously */
                         relation_close(relseq, AccessShareLock);
                     }
                     break;
                 case RELKIND_RELATION:
+                case RELKIND_CONTQUERY:
                 case RELKIND_VIEW:
                     /*
                      * Flag temporary objects in use in case a temporary table or view
@@ -1388,6 +1370,11 @@ static void doDeletion(const ObjectAddress* object, int flags)
 #ifdef PGXC
         case OCLASS_PGXC_CLASS:
             RemovePgxcClass(object->objectId);
+            /* 
+             * pgxc_slice is the extended information for pgxc_class,
+             * so need to delete the related tuples in pgxc_slice.
+             */
+            RemovePgxcSlice(object->objectId);
             break;
 #endif
 
@@ -1399,6 +1386,26 @@ static void doDeletion(const ObjectAddress* object, int flags)
             RemoveDataSourceById(object->objectId);
             break;
 
+        case OCLASS_GLOBAL_SETTING:
+            remove_cmk_by_id(object->objectId);
+            break;
+
+        case OCLASS_COLUMN_SETTING:
+            remove_cek_by_id(object->objectId);
+            break;
+
+        case OCLASS_CL_CACHED_COLUMN:
+            remove_encrypted_col_by_id(object->objectId);
+            break;
+
+        case OCLASS_GLOBAL_SETTING_ARGS:
+            remove_cmk_args_by_id(object->objectId);
+            break;
+
+        case OCLASS_COLUMN_SETTING_ARGS:
+            remove_cek_args_by_id(object->objectId);
+            break;
+
         case OCLASS_DIRECTORY:
             RemoveDirectoryById(object->objectId);
             break;
@@ -1408,8 +1415,7 @@ static void doDeletion(const ObjectAddress* object, int flags)
             break;
 
         case OCLASS_PG_JOB:
-            if ((IS_PGXC_COORDINATOR && !IsConnFromCoord()) || IS_SINGLE_NODE)
-                RemoveJobById(object->objectId);
+            remove_job_by_oid(NULL, RelOid, true, object->objectId);
             break;
 
         case OCLASS_SYNONYM:
@@ -1601,14 +1607,12 @@ static bool find_expr_references_walker(Node* node, find_expr_references_context
 
         /* Find matching rtable entry, or complain if not found */
         if (var->varlevelsup >= (Index)list_length(context->rtables))
-            ereport(ERROR,
-                (errmodule(MOD_OPT),
-                    errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("invalid varlevelsup %d", var->varlevelsup)));
+            ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("invalid varlevelsup %u", var->varlevelsup)));
         rtable = (List*)list_nth(context->rtables, var->varlevelsup);
         if (var->varno <= 0 || var->varno > (Index)list_length(rtable))
             ereport(ERROR,
-                (errmodule(MOD_OPT), errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid varno %d", var->varno)));
+                (errmodule(MOD_OPT), errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid varno %u", var->varno)));
 
         rte = rt_fetch(var->varno, rtable);
 
@@ -1876,9 +1880,7 @@ static bool find_expr_references_walker(Node* node, find_expr_references_context
             RangeTblEntry* rte = NULL;
 
             if (query->resultRelation <= 0 || query->resultRelation > list_length(query->rtable))
-                ereport(ERROR,
-                    (errmodule(MOD_OPT),
-                        errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                         errmsg("invalid resultRelation %d", query->resultRelation)));
 
             rte = rt_fetch(query->resultRelation, query->rtable);
@@ -1905,6 +1907,7 @@ static bool find_expr_references_walker(Node* node, find_expr_references_context
         find_expr_references_walker((Node*)query->groupClause, context);
         find_expr_references_walker((Node*)query->windowClause, context);
         find_expr_references_walker((Node*)query->distinctClause, context);
+        (void)find_expr_references_walker((Node*)query->utilityStmt, context);
 
         /* Examine substructure of query */
         context->rtables = lcons(query->rtable, context->rtables);
@@ -1918,6 +1921,28 @@ static bool find_expr_references_walker(Node* node, find_expr_references_context
         /* we need to look at the groupClauses for operator references */
         find_expr_references_walker((Node*)setop->groupClauses, context);
         /* fall through to examine child nodes */
+    } else if (IsA(node, CopyStmt)) {
+        CopyStmt* stmt = (CopyStmt*)node;
+        Assert(stmt->relation);
+        Assert(!stmt->query);
+        bool is_from = stmt->is_from;
+
+        Oid rel_id = RangeVarGetRelid(stmt->relation, (is_from ? RowExclusiveLock : AccessShareLock), false);
+        /* not consider the synonym, copy not support */
+        add_object_address(OCLASS_CLASS, rel_id, 0, context->addrs);
+        UnlockRelationOid(rel_id, (is_from ? RowExclusiveLock : AccessShareLock));
+        return false;
+    } else if (IsA(node, AlterTableStmt)) {
+        AlterTableStmt* stmt = (AlterTableStmt*)node;
+        Assert(stmt->relation);
+        Assert(!stmt->cmds);
+
+        /* Open and lock the relation, using the appropriate lock type. */
+        Oid rel_id = RangeVarGetRelid(stmt->relation, AccessShareLock, false);
+        /* not consider the synonym, alter not support */
+        add_object_address(OCLASS_CLASS, rel_id, 0, context->addrs);
+        UnlockRelationOid(rel_id, AccessShareLock);
+        return false;
     }
 
     return expression_tree_walker(node, (bool (*)())find_expr_references_walker, (void*)context);
@@ -2009,14 +2034,14 @@ static int object_address_comparator(const void* a, const void* b)
  *
  * new_object_addresses: create a new ObjectAddresses array.
  */
-ObjectAddresses* new_object_addresses(void)
+ObjectAddresses* new_object_addresses(const int maxRefs)
 {
     ObjectAddresses* addrs = NULL;
 
     addrs = (ObjectAddresses*)palloc(sizeof(ObjectAddresses));
 
     addrs->numrefs = 0;
-    addrs->maxrefs = 32;
+    addrs->maxrefs = maxRefs;
     addrs->refs = (ObjectAddress*)palloc(addrs->maxrefs * sizeof(ObjectAddress));
     addrs->extras = NULL; /* until/unless needed */
 
@@ -2213,9 +2238,7 @@ ObjectClass getObjectClass(const ObjectAddress* object)
 {
     /* only pg_class entries can have nonzero objectSubId */
     if (object->classId != RelationRelationId && object->objectSubId != 0)
-        ereport(ERROR,
-            (errmodule(MOD_OPT),
-                errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+        ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("invalid objectSubId 0 for object class %u", object->classId)));
 
     switch (object->classId) {
@@ -2327,6 +2350,16 @@ ObjectClass getObjectClass(const ObjectAddress* object)
             Assert(object->objectSubId == 0);
             return OCLASS_PGXC_CLASS;
 #endif
+        case ClientLogicGlobalSettingsId:
+            return OCLASS_GLOBAL_SETTING;
+        case ClientLogicColumnSettingsId:
+            return OCLASS_COLUMN_SETTING;
+        case ClientLogicCachedColumnsId:
+            return OCLASS_CL_CACHED_COLUMN;
+        case ClientLogicGlobalSettingsArgsId:
+            return OCLASS_GLOBAL_SETTING_ARGS;
+        case ClientLogicColumnSettingsArgsId:
+            return OCLASS_COLUMN_SETTING_ARGS;
         default:
             break;
     }
@@ -2380,8 +2413,7 @@ char* getObjectDescription(const ObjectAddress* object)
             tup = systable_getnext(rcscan);
 
             if (!HeapTupleIsValid(tup))
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("could not find tuple for cast %u", object->objectId)));
 
             castForm = (Form_pg_cast)GETSTRUCT(tup);
@@ -2402,8 +2434,7 @@ char* getObjectDescription(const ObjectAddress* object)
 
             collTup = SearchSysCache1(COLLOID, ObjectIdGetDatum(object->objectId));
             if (!HeapTupleIsValid(collTup))
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("cache lookup failed for collation %u", object->objectId)));
             coll = (Form_pg_collation)GETSTRUCT(collTup);
             appendStringInfo(&buffer, _("collation %s"), NameStr(coll->collname));
@@ -2417,8 +2448,7 @@ char* getObjectDescription(const ObjectAddress* object)
 
             conTup = SearchSysCache1(CONSTROID, ObjectIdGetDatum(object->objectId));
             if (!HeapTupleIsValid(conTup))
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("cache lookup failed for constraint %u", object->objectId)));
             con = (Form_pg_constraint)GETSTRUCT(conTup);
 
@@ -2442,8 +2472,7 @@ char* getObjectDescription(const ObjectAddress* object)
 
             conTup = SearchSysCache1(CONVOID, ObjectIdGetDatum(object->objectId));
             if (!HeapTupleIsValid(conTup))
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("cache lookup failed for conversion %u", object->objectId)));
             appendStringInfo(&buffer, _("conversion %s"), NameStr(((Form_pg_conversion)GETSTRUCT(conTup))->conname));
             ReleaseSysCache(conTup);
@@ -2468,8 +2497,7 @@ char* getObjectDescription(const ObjectAddress* object)
             tup = systable_getnext(adscan);
 
             if (!HeapTupleIsValid(tup))
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("could not find tuple for attrdef %u", object->objectId)));
 
             attrdef = (Form_pg_attrdef)GETSTRUCT(tup);
@@ -2490,8 +2518,7 @@ char* getObjectDescription(const ObjectAddress* object)
 
             langTup = SearchSysCache1(LANGOID, ObjectIdGetDatum(object->objectId));
             if (!HeapTupleIsValid(langTup))
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("cache lookup failed for language %u", object->objectId)));
             appendStringInfo(&buffer, _("language %s"), NameStr(((Form_pg_language)GETSTRUCT(langTup))->lanname));
             ReleaseSysCache(langTup);
@@ -2514,15 +2541,13 @@ char* getObjectDescription(const ObjectAddress* object)
 
             opcTup = SearchSysCache1(CLAOID, ObjectIdGetDatum(object->objectId));
             if (!HeapTupleIsValid(opcTup))
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("cache lookup failed for opclass %u", object->objectId)));
             opcForm = (Form_pg_opclass)GETSTRUCT(opcTup);
 
             amTup = SearchSysCache1(AMOID, ObjectIdGetDatum(opcForm->opcmethod));
             if (!HeapTupleIsValid(amTup))
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("cache lookup failed for access method %u", opcForm->opcmethod)));
             amForm = (Form_pg_am)GETSTRUCT(amTup);
 
@@ -2611,8 +2636,7 @@ char* getObjectDescription(const ObjectAddress* object)
             tup = systable_getnext(amscan);
 
             if (!HeapTupleIsValid(tup))
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("could not find tuple for amproc entry %u", object->objectId)));
 
             amprocForm = (Form_pg_amproc)GETSTRUCT(tup);
@@ -2657,9 +2681,7 @@ char* getObjectDescription(const ObjectAddress* object)
             tup = systable_getnext(rcscan);
 
             if (!HeapTupleIsValid(tup))
-                ereport(ERROR,
-                    (errmodule(MOD_OPT),
-                        errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                         errmsg("could not find tuple for rule %u", object->objectId)));
 
             rule = (Form_pg_rewrite)GETSTRUCT(tup);
@@ -2689,8 +2711,7 @@ char* getObjectDescription(const ObjectAddress* object)
             tup = systable_getnext(tgscan);
 
             if (!HeapTupleIsValid(tup))
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR,  (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("could not find tuple for trigger %u", object->objectId)));
 
             trig = (Form_pg_trigger)GETSTRUCT(tup);
@@ -2720,8 +2741,7 @@ char* getObjectDescription(const ObjectAddress* object)
 
             tup = SearchSysCache1(TSPARSEROID, ObjectIdGetDatum(object->objectId));
             if (!HeapTupleIsValid(tup))
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("cache lookup failed for text search parser %u", object->objectId)));
             appendStringInfo(
                 &buffer, _("text search parser %s"), NameStr(((Form_pg_ts_parser)GETSTRUCT(tup))->prsname));
@@ -2734,8 +2754,7 @@ char* getObjectDescription(const ObjectAddress* object)
 
             tup = SearchSysCache1(TSDICTOID, ObjectIdGetDatum(object->objectId));
             if (!HeapTupleIsValid(tup))
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("cache lookup failed for text search dictionary %u", object->objectId)));
             appendStringInfo(
                 &buffer, _("text search dictionary %s"), NameStr(((Form_pg_ts_dict)GETSTRUCT(tup))->dictname));
@@ -2748,8 +2767,7 @@ char* getObjectDescription(const ObjectAddress* object)
 
             tup = SearchSysCache1(TSTEMPLATEOID, ObjectIdGetDatum(object->objectId));
             if (!HeapTupleIsValid(tup))
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("cache lookup failed for text search template %u", object->objectId)));
             appendStringInfo(
                 &buffer, _("text search template %s"), NameStr(((Form_pg_ts_template)GETSTRUCT(tup))->tmplname));
@@ -2762,8 +2780,7 @@ char* getObjectDescription(const ObjectAddress* object)
 
             tup = SearchSysCache1(TSCONFIGOID, ObjectIdGetDatum(object->objectId));
             if (!HeapTupleIsValid(tup))
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("cache lookup failed for text search configuration %u", object->objectId)));
             appendStringInfo(
                 &buffer, _("text search configuration %s"), NameStr(((Form_pg_ts_config)GETSTRUCT(tup))->cfgname));
@@ -2782,8 +2799,7 @@ char* getObjectDescription(const ObjectAddress* object)
             datname = get_database_name(object->objectId);
 
             if (datname == NULL)
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("cache lookup failed for database %u", object->objectId)));
             appendStringInfo(&buffer, _("database %s"), datname);
             break;
@@ -2824,8 +2840,7 @@ char* getObjectDescription(const ObjectAddress* object)
 
             tup = SearchSysCache1(USERMAPPINGOID, ObjectIdGetDatum(object->objectId));
             if (!HeapTupleIsValid(tup))
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("cache lookup failed for user mapping %u", object->objectId)));
 
             useid = ((Form_pg_user_mapping)GETSTRUCT(tup))->umuser;
@@ -2864,8 +2879,7 @@ char* getObjectDescription(const ObjectAddress* object)
             tup = systable_getnext(rcscan);
 
             if (!HeapTupleIsValid(tup))
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("could not find tuple for default ACL %u", object->objectId)));
 
             defacl = (Form_pg_default_acl)GETSTRUCT(tup);
@@ -2899,7 +2913,7 @@ char* getObjectDescription(const ObjectAddress* object)
             }
 
             if (OidIsValid(defacl->defaclnamespace)) {
-                appendStringInfo(&buffer, _(" in schema %s"), get_namespace_name(defacl->defaclnamespace, true));
+                appendStringInfo(&buffer, _(" in schema %s"), get_namespace_name(defacl->defaclnamespace));
             }
 
             systable_endscan(rcscan);
@@ -2912,20 +2926,38 @@ char* getObjectDescription(const ObjectAddress* object)
 
             extname = get_extension_name(object->objectId);
             if (extname == NULL)
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("cache lookup failed for extension %u", object->objectId)));
             appendStringInfo(&buffer, _("extension %s"), extname);
             break;
         }
+
+        case OCLASS_GLOBAL_SETTING:
+            get_global_setting_description(&buffer, object);
+            break;
+
+        case OCLASS_COLUMN_SETTING:
+            get_column_setting_description(&buffer, object);
+            break;
+
+        case OCLASS_CL_CACHED_COLUMN:
+            get_cached_column_description(&buffer, object);
+            break;
+
+        case OCLASS_GLOBAL_SETTING_ARGS:
+            get_global_setting_args_description(&buffer, object);
+            break;
+
+        case OCLASS_COLUMN_SETTING_ARGS:
+            get_column_setting_args_description(&buffer, object);
+            break;
 
         case OCLASS_DIRECTORY: {
             char* directory;
 
             directory = get_directory_name(object->objectId);
             if (directory == NULL)
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("cache lookup failed for directory %u", object->objectId)));
             appendStringInfo(&buffer, _("directory %s"), directory);
             break;
@@ -2945,8 +2977,7 @@ char* getObjectDescription(const ObjectAddress* object)
 
             HeapTuple tuple = systable_getnext(scanDesc);
             if (HeapTupleIsValid(tuple) == false) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_UNDEFINED_OBJECT),
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
                         errmsg("could not find tuple for policy %u", object->objectId)));
             }
             Form_pg_rlspolicy rlspolicy = (Form_pg_rlspolicy)GETSTRUCT(tuple);
@@ -2963,8 +2994,7 @@ char* getObjectDescription(const ObjectAddress* object)
             qualifiedSynname = GetQualifiedSynonymName(object->objectId, true);
 
             if (qualifiedSynname == NULL) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("cache lookup failed for synonym %u", object->objectId)));
             }
 
@@ -3035,14 +3065,20 @@ static void getRelationDescription(StringInfo buffer, Oid relid)
         case RELKIND_VIEW:
             appendStringInfo(buffer, _("view %s"), relname);
             break;
+        case RELKIND_CONTQUERY:
+            appendStringInfo(buffer, _("contquery %s"), relname);
+            break;
         case RELKIND_MATVIEW:
-            appendStringInfo(buffer, _("materialized view %s"), relname);
+            appendStringInfo(buffer, _("materialized view %s"),relname);
             break;
         case RELKIND_COMPOSITE_TYPE:
             appendStringInfo(buffer, _("composite type %s"), relname);
             break;
         case RELKIND_FOREIGN_TABLE:
             appendStringInfo(buffer, _("foreign table %s"), relname);
+            break;
+        case RELKIND_STREAM:
+            appendStringInfo(buffer, _("stream %s"), relname);
             break;
         default:
             /* shouldn't get here */
@@ -3152,3 +3188,124 @@ Datum pg_describe_object(PG_FUNCTION_ARGS)
     description = getObjectDescription(&address);
     PG_RETURN_TEXT_P(cstring_to_text(description));
 }
+
+#ifdef ENABLE_MULTIPLE_NODES
+
+namespace Tsdb {
+/**
+ * Used in tsdb. Find dependents for an cudesc table.
+ * After calling this function, targetObjects will hold the cudesc table and
+ * all the objects that depends on the cudesc table, in proper order.
+ * proper order: the deletion order should from the end to the beginning.
+ * Parameters:
+ *  - targetObjects: holds one cudesc table at first
+ *  - depRel: already opened pg_depend relation
+ */
+static void findTsDependentObjects(ObjectAddresses* targetObjects, Relation depRel)
+{
+    ScanKeyData key[2];
+    SysScanDesc scan;
+    HeapTuple tup;
+    ObjectAddress otherObj;
+    ObjectAddressExtra otherExtra;
+
+    int i = 0;
+    while (i < targetObjects->numrefs) {
+        ObjectAddress* cur = targetObjects->refs + i;
+        otherExtra.dependee = *cur;
+
+        ScanKeyInit(&key[0], Anum_pg_depend_refclassid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(cur->classId));
+        ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(cur->objectId));
+        scan = systable_beginscan(depRel, DependReferenceIndexId, true, SnapshotNow, 2, key);
+        while(HeapTupleIsValid(tup = systable_getnext(scan))) {
+            Form_pg_depend foundDep = (Form_pg_depend)GETSTRUCT(tup);
+            otherObj.classId = foundDep->classid;
+            otherObj.objectId = foundDep->objid;
+            otherObj.objectSubId = foundDep->objsubid;
+            /*
+             * Must lock the dependent object before recursing to it.
+             */
+            AcquireDeletionLock(&otherObj, 0);
+            /*
+            * The dependent object might have been deleted while we waited to
+            * lock it; if so, we don't need to do anything more with it. We can
+            * test this cheaply and independently of the object's type by seeing
+            * if the pg_depend tuple we are looking at is still live. (If the
+            * object got deleted, the tuple would have been deleted too.)
+            */
+            if ((!systable_recheck_tuple(scan, tup))
+                || object_address_present(&otherObj, targetObjects)) {
+                /* release the now-useless lock */
+                ReleaseDeletionLock(&otherObj);
+                /* and continue scanning for dependencies */
+                continue;
+            }
+            switch (foundDep->deptype) {
+                case DEPENDENCY_AUTO:
+                    otherExtra.flags |= DEPFLAG_AUTO;
+                    break;
+                case DEPENDENCY_INTERNAL:
+                    otherExtra.flags |= DEPFLAG_INTERNAL;
+                    break;
+                default:
+                    ereport(LOG, (errmsg(
+                        "During findTsDependentObjects, found an dependent with deptype %c. " \
+                        "classId|objectId|objectSubId of parent: %u|%u|%d, of dependent: %u|%u|%d.",
+                        foundDep->deptype, cur->classId, cur->objectId, cur->objectSubId,
+                        otherObj.classId, otherObj.objectId, otherObj.objectSubId)));
+                    otherExtra.flags |= DEPFLAG_INTERNAL;
+            }
+            add_exact_object_address_extra(&otherObj, &otherExtra, targetObjects);
+        }
+        systable_endscan(scan);
+        i++;
+    }
+}
+
+/**
+ * Used in tsdb. Delete cudesc tables and their dependents
+ * First, lookup the pg_depend table to find all the dependents,
+ * add all the objects into ObjectAddresses.
+ * Then, drop objects in proper order by calling deleteOneObject()
+ */
+void performTsCudescDeletion(List* cudesc_oids)
+{
+    /**
+     * Normally, to delete one cudesc table is to delete 7 objects:
+     * cudesc, cudesc_index, toast, toast index in pg_class, and 3 objects in pg_type
+     */
+    static const int estimate_target_num = 7;
+    int n_cudesc = list_length(cudesc_oids);
+    Assert(n_cudesc > 0);
+    ObjectAddresses* targetObjects = new_object_addresses(estimate_target_num * n_cudesc);
+
+    Relation depRel;
+    depRel = heap_open(DependRelationId, RowExclusiveLock);
+
+    ObjectAddress cudescObj;
+    ObjectAddressExtra extra;
+
+    cudescObj.classId = RelationRelationId;
+    cudescObj.objectSubId = 0;
+    extra.flags = DEPFLAG_ORIGINAL;
+    ListCell* cell = NULL;
+    foreach(cell, cudesc_oids) {
+        Oid cudesc_oid = lfirst_oid(cell);
+        cudescObj.objectId = cudesc_oid;
+        add_exact_object_address_extra(&cudescObj, &extra, targetObjects);
+        AcquireDeletionLock(&cudescObj, 0);
+    }
+    findTsDependentObjects(targetObjects, depRel);
+
+    reportDependentObjects(targetObjects, DROP_CASCADE, DEBUG2, &cudescObj);
+
+    for (int i = targetObjects->numrefs - 1; i >= 0; i--) {
+        deleteOneObject(targetObjects->refs + i, &depRel, PERFORM_DELETION_INTERNAL);
+    }
+
+    /* clean up */
+    free_object_addresses(targetObjects);
+    heap_close(depRel, RowExclusiveLock);
+}
+}
+#endif   /* ENABLE_MULTIPLE_NODES */

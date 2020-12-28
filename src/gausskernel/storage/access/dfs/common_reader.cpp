@@ -18,7 +18,7 @@
  *    we extract these funtions and put them into class.
  *
  * IDENTIFICATION
- *        src/gausskernel/storage/access/dfs/common_reader.cpp
+ *    src/gausskernel/storage/access/dfs/common_reader.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -33,7 +33,6 @@
 
 namespace dfs {
 namespace reader {
-
 CommonReader::CommonReader(ReaderState *reader_state, dfs::DFSConnector *conn, DFSFileType fileFormat)
     : m_reader_state(reader_state),
       m_conn(conn),
@@ -84,7 +83,7 @@ void CommonReader::Destroy()
 {
     /* Clear conn handle */
     if (m_conn != NULL) {
-        delete(m_conn);
+        delete (m_conn);
         m_conn = NULL;
     }
 
@@ -433,7 +432,7 @@ void CommonReader::parserFields(char **raw_fields, int fields)
              * 1. A db SQL compatibility requires; or
              * 2. This column donesn't accept any empty string.
              */
-            if ((DB_IS_CMPT(DB_CMPT_A) || !m_accept_empty_str[i]) &&
+            if ((u_sess->attr.attr_sql.sql_compatibility == A_FORMAT || !m_accept_empty_str[i]) &&
                 (field_str != NULL && field_str[0] == '\0')) {
                 /* for any type, '' = null */
                 field_str = NULL;
@@ -615,6 +614,5 @@ void CommonReader::ErrorCallback(void *arg)
     pfree(error_info);
     error_info = NULL;
 }
-
 }  // namespace reader
 }  // namespace dfs

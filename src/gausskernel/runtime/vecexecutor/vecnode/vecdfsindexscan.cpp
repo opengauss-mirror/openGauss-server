@@ -45,9 +45,9 @@
 #include "vecexecutor/vecnodecstorescan.h"
 #include "vecexecutor/vecnodedfsindexscan.h"
 
-inline static VectorBatch* scan_by_tids(DfsIndexScanState* node);
-static List* build_dfs_prepared_cols(List* scan_target_list, List* index_list);
-static void dfs_prepare_btree_index(AbsIdxScanDesc& scan_desc, List*& index_list, DfsIndexScanState* node);
+inline static VectorBatch* ScanByTids(DfsIndexScanState* node);
+static List* BuildDfsPreparedCols(List* scan_target_list, List* index_list);
+static void DfsPrepareBtreeIndex(IndexScanDesc& scan_desc, List*& index_list, DfsIndexScanState* node);
 
 template <IndexType type>
 void ExecDfsIndexScanT(DfsIndexScanState* node)
@@ -106,10 +106,10 @@ void ExecDfsIndexScanT<BTREE_INDEX>(DfsIndexScanState* node)
 {
     VectorBatch* tids = NULL;
     IndexSortState* sort = node->m_sort;
-    AbsIdxScanDesc scan_desc = NULL;
+    IndexScanDesc scan_desc = NULL;
     List* index_list = NIL;
 
-    dfs_prepare_btree_index(scan_desc, index_list, node);
+    DfsPrepareBtreeIndex(scan_desc, index_list, node);
 
     /* step 1: sort all tids */
     if (!sort->m_tidEnd) {
@@ -134,10 +134,10 @@ template <>
 void ExecDfsIndexScanT<BTREE_INDEX_ONLY>(DfsIndexScanState* node)
 {
     IndexSortState* sort = node->m_sort;
-    AbsIdxScanDesc scan_desc = NULL;
+    IndexScanDesc scan_desc = NULL;
     List* index_list = NIL;
 
-    dfs_prepare_btree_index(scan_desc, index_list, node);
+    DfsPrepareBtreeIndex(scan_desc, index_list, node);
 
     /* reset the tids vector batch */
     sort->m_tids->Reset(true);
@@ -167,7 +167,7 @@ VectorBatch* ExecDfsIndexScan(DfsIndexScanState* node)
         }
 
         /* Scan base relation by tids. */
-        out_batch = scan_by_tids(node);
+        out_batch = ScanByTids(node);
         if (!BatchIsNull(out_batch)) {
             break;
         }
@@ -226,7 +226,7 @@ DfsIndexScanState* ExecInitDfsIndexScan(DfsIndexScan* node, EState* estate, int 
      * here. This allows an index-advisor plugin to EXPLAIN a plan containing
      * references to nonexistent indexes.
      */
-    if (eflags & EXEC_FLAG_EXPLAIN_ONLY)
+    if ((uint32)eflags & EXEC_FLAG_EXPLAIN_ONLY)
         return index_state;
 
     bool rel_is_target = ExecRelationIsTargetRelation(estate, node->scan.scanrelid);
@@ -325,8 +325,12 @@ DfsIndexScanState* ExecInitDfsIndexScan(DfsIndexScan* node, EState* estate, int 
     }
 
     /* Build the list of columns which need not to be read by dfs scan. */
-    index_state->m_dfsPreparedCols = build_dfs_prepared_cols(node->indexScantlist, node->indextlist);
+    index_state->m_dfsPreparedCols = BuildDfsPreparedCols(node->indexScantlist, node->indextlist);
 
+    // add partition nums
+    if (index_state->m_indexScan) {
+        index_state->part_id = index_state->m_indexScan->part_id;
+    }
     return index_state;
 }
 
@@ -460,7 +464,7 @@ static VectorBatch* dfs_index_tid_scan_next(DfsIndexScanState* node)
  * @Return: the batch
  * @See also:
  */
-inline static VectorBatch* scan_by_tids(DfsIndexScanState* node)
+inline static VectorBatch* ScanByTids(DfsIndexScanState* node)
 {
     return ExecVecScan(node, (ExecVecScanAccessMtd)dfs_index_tid_scan_next, (ExecVecScanRecheckMtd)ExecRecheckDfsIndex);
 }
@@ -472,7 +476,7 @@ inline static VectorBatch* scan_by_tids(DfsIndexScanState* node)
  * @Return: the prepared column list
  * @See also:
  */
-static List* build_dfs_prepared_cols(List* scan_target_list, List* index_list)
+static List* BuildDfsPreparedCols(List* scan_target_list, List* index_list)
 {
     ListCell* cell = NULL;
     int index_var_no = 0;
@@ -494,7 +498,7 @@ static List* build_dfs_prepared_cols(List* scan_target_list, List* index_list)
     return prepared_cols;
 }
 
-static void dfs_prepare_btree_index(AbsIdxScanDesc& scan_desc, List*& index_list, DfsIndexScanState* node)
+static void DfsPrepareBtreeIndex(IndexScanDesc& scan_desc, List*& index_list, DfsIndexScanState* node)
 {
     if (node->m_indexonly) {
         CBTreeOnlyScanState* btree_Index_only_scan_state = node->m_btreeIndexOnlyScan;

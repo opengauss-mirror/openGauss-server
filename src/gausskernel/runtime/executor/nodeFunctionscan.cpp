@@ -155,7 +155,7 @@ FunctionScanState* ExecInitFunctionScan(FunctionScan* node, EState* estate, int 
         /* Base data type, i.e. scalar */
         char* attname = strVal(linitial(node->funccolnames));
 
-        tupdesc = CreateTemplateTupleDesc(1, false);
+        tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, attname, funcrettype, -1, 0);
         TupleDescInitEntryCollation(tupdesc, (AttrNumber)1, exprCollation(node->funcexpr));
     } else if (functypclass == TYPEFUNC_RECORD) {
@@ -188,8 +188,13 @@ FunctionScanState* ExecInitFunctionScan(FunctionScan* node, EState* estate, int 
     /*
      * Initialize result tuple type and projection info.
      */
-    ExecAssignResultTypeFromTL(&scanstate->ss.ps);
+    ExecAssignResultTypeFromTL(
+            &scanstate->ss.ps,
+            scanstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+
     ExecAssignScanProjectionInfo(&scanstate->ss);
+
+    Assert(scanstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
 
     return scanstate;
 }

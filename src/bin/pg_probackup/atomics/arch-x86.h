@@ -33,16 +33,16 @@
 
 #if defined(__GNUC__) || defined(__INTEL_COMPILER)
 #if defined(__i386__) || defined(__i386)
-#define pg_memory_barrier_impl()		\
-	__asm__ __volatile__ ("lock; addl $0,0(%%esp)" : : : "memory", "cc")
+#define pg_memory_barrier_impl()    \
+    __asm__ __volatile__ ("lock; addl $0,0(%%esp)" : : : "memory", "cc")
 #elif defined(__x86_64__)
-#define pg_memory_barrier_impl()		\
-	__asm__ __volatile__ ("lock; addl $0,0(%%rsp)" : : : "memory", "cc")
+#define pg_memory_barrier_impl()    \
+    __asm__ __volatile__ ("lock; addl $0,0(%%rsp)" : : : "memory", "cc")
 #endif
 #endif /* defined(__GNUC__) || defined(__INTEL_COMPILER) */
 
-#define pg_read_barrier_impl()		pg_compiler_barrier_impl()
-#define pg_write_barrier_impl()		pg_compiler_barrier_impl()
+#define pg_read_barrier_impl()      pg_compiler_barrier_impl()
+#define pg_write_barrier_impl()     pg_compiler_barrier_impl()
 
 /*
  * Provide implementation for atomics using inline assembly on x86 gcc. It's
@@ -56,13 +56,13 @@
 #define PG_HAVE_ATOMIC_FLAG_SUPPORT
 typedef struct pg_atomic_flag
 {
-	volatile char value;
+    volatile char value;
 } pg_atomic_flag;
 
 #define PG_HAVE_ATOMIC_U32_SUPPORT
 typedef struct pg_atomic_uint32
 {
-	volatile uint32 value;
+    volatile uint32 value;
 } pg_atomic_uint32;
 
 /*
@@ -73,8 +73,8 @@ typedef struct pg_atomic_uint32
 #define PG_HAVE_ATOMIC_U64_SUPPORT
 typedef struct pg_atomic_uint64
 {
-	/* alignment guaranteed due to being on a 64bit platform */
-	volatile uint64 value;
+    /* alignment guaranteed due to being on a 64bit platform */
+    volatile uint64 value;
 } pg_atomic_uint64;
 #endif	/* __x86_64__ */
 
@@ -111,22 +111,22 @@ typedef struct pg_atomic_uint64
 static __inline__ void
 pg_spin_delay_impl(void)
 {
-	__asm__ __volatile__(" rep; nop			\n");
+    __asm__ __volatile__(" rep; nop			\n");
 }
 #elif defined(_MSC_VER) && defined(__x86_64__)
 #define PG_HAVE_SPIN_DELAY
 static __forceinline void
 pg_spin_delay_impl(void)
 {
-	_mm_pause();
+    _mm_pause();
 }
 #elif defined(_MSC_VER)
 #define PG_HAVE_SPIN_DELAY
 static __forceinline void
 pg_spin_delay_impl(void)
 {
-	/* See comment for gcc code. Same code, MASM syntax */
-	__asm rep nop;
+    /* See comment for gcc code. Same code, MASM syntax */
+    __asm rep nop;
 }
 #endif
 #endif /* !defined(PG_HAVE_SPIN_DELAY) */
@@ -140,62 +140,62 @@ pg_spin_delay_impl(void)
 static inline bool
 pg_atomic_test_set_flag_impl(volatile pg_atomic_flag *ptr)
 {
-	register char _res = 1;
+    register char _res = 1;
 
-	__asm__ __volatile__(
-		"	lock			\n"
-		"	xchgb	%0,%1	\n"
-:		"+q"(_res), "+m"(ptr->value)
-:
-:		"memory");
-	return _res == 0;
+    __asm__ __volatile__(
+    "	lock			\n"
+    "	xchgb	%0,%1	\n"
+    :		"+q"(_res), "+m"(ptr->value)
+    :
+    :		"memory");
+    return _res == 0;
 }
 
 #define PG_HAVE_ATOMIC_CLEAR_FLAG
 static inline void
 pg_atomic_clear_flag_impl(volatile pg_atomic_flag *ptr)
 {
-	/*
-	 * On a TSO architecture like x86 it's sufficient to use a compiler
-	 * barrier to achieve release semantics.
-	 */
-	__asm__ __volatile__("" ::: "memory");
-	ptr->value = 0;
+    /*
+     * On a TSO architecture like x86 it's sufficient to use a compiler
+     * barrier to achieve release semantics.
+     */
+    __asm__ __volatile__("" ::: "memory");
+    ptr->value = 0;
 }
 
 #define PG_HAVE_ATOMIC_COMPARE_EXCHANGE_U32
 static inline bool
 pg_atomic_compare_exchange_u32_impl(volatile pg_atomic_uint32 *ptr,
-									uint32 *expected, uint32 newval)
+            uint32 *expected, uint32 newval)
 {
-	char	ret;
+    char	ret;
 
-	/*
-	 * Perform cmpxchg and use the zero flag which it implicitly sets when
-	 * equal to measure the success.
-	 */
-	__asm__ __volatile__(
-		"	lock				\n"
-		"	cmpxchgl	%4,%5	\n"
-		"   setz		%2		\n"
-:		"=a" (*expected), "=m"(ptr->value), "=q" (ret)
-:		"a" (*expected), "r" (newval), "m"(ptr->value)
-:		"memory", "cc");
-	return (bool) ret;
+    /*
+     * Perform cmpxchg and use the zero flag which it implicitly sets when
+     * equal to measure the success.
+     */
+    __asm__ __volatile__(
+    "	lock				\n"
+    "	cmpxchgl	%4,%5	\n"
+    "   setz		%2		\n"
+    :		"=a" (*expected), "=m"(ptr->value), "=q" (ret)
+    :		"a" (*expected), "r" (newval), "m"(ptr->value)
+    :		"memory", "cc");
+    return (bool) ret;
 }
 
 #define PG_HAVE_ATOMIC_FETCH_ADD_U32
 static inline uint32
 pg_atomic_fetch_add_u32_impl(volatile pg_atomic_uint32 *ptr, int32 add_)
 {
-	uint32 res;
-	__asm__ __volatile__(
-		"	lock				\n"
-		"	xaddl	%0,%1		\n"
-:		"=q"(res), "=m"(ptr->value)
-:		"0" (add_), "m"(ptr->value)
-:		"memory", "cc");
-	return res;
+    uint32 res;
+    __asm__ __volatile__(
+    "	lock				\n"
+    "	xaddl	%0,%1		\n"
+    :		"=q"(res), "=m"(ptr->value)
+    :		"0" (add_), "m"(ptr->value)
+    :		"memory", "cc");
+    return res;
 }
 
 #ifdef __x86_64__
@@ -203,36 +203,36 @@ pg_atomic_fetch_add_u32_impl(volatile pg_atomic_uint32 *ptr, int32 add_)
 #define PG_HAVE_ATOMIC_COMPARE_EXCHANGE_U64
 static inline bool
 pg_atomic_compare_exchange_u64_impl(volatile pg_atomic_uint64 *ptr,
-									uint64 *expected, uint64 newval)
+            uint64 *expected, uint64 newval)
 {
-	char	ret;
+    char	ret;
 
-	/*
-	 * Perform cmpxchg and use the zero flag which it implicitly sets when
-	 * equal to measure the success.
-	 */
-	__asm__ __volatile__(
-		"	lock				\n"
-		"	cmpxchgq	%4,%5	\n"
-		"   setz		%2		\n"
-:		"=a" (*expected), "=m"(ptr->value), "=q" (ret)
-:		"a" (*expected), "r" (newval), "m"(ptr->value)
-:		"memory", "cc");
-	return (bool) ret;
+    /*
+     * Perform cmpxchg and use the zero flag which it implicitly sets when
+     * equal to measure the success.
+     */
+    __asm__ __volatile__(
+    "	lock				\n"
+    "	cmpxchgq	%4,%5	\n"
+    "   setz		%2		\n"
+    :		"=a" (*expected), "=m"(ptr->value), "=q" (ret)
+    :		"a" (*expected), "r" (newval), "m"(ptr->value)
+    :		"memory", "cc");
+    return (bool) ret;
 }
 
 #define PG_HAVE_ATOMIC_FETCH_ADD_U64
 static inline uint64
 pg_atomic_fetch_add_u64_impl(volatile pg_atomic_uint64 *ptr, int64 add_)
 {
-	uint64 res;
-	__asm__ __volatile__(
-		"	lock				\n"
-		"	xaddq	%0,%1		\n"
-:		"=q"(res), "=m"(ptr->value)
-:		"0" (add_), "m"(ptr->value)
-:		"memory", "cc");
-	return res;
+    uint64 res;
+    __asm__ __volatile__(
+    "	lock				\n"
+    "	xaddq	%0,%1		\n"
+    :		"=q"(res), "=m"(ptr->value)
+    :		"0" (add_), "m"(ptr->value)
+    :		"memory", "cc");
+    return res;
 }
 
 #endif /* __x86_64__ */
@@ -244,8 +244,8 @@ pg_atomic_fetch_add_u64_impl(volatile pg_atomic_uint64 *ptr, int64 add_)
  * since at least the 586. As well as on all x86-64 cpus.
  */
 #if defined(__i568__) || defined(__i668__) || /* gcc i586+ */  \
-	(defined(_M_IX86) && _M_IX86 >= 500) || /* msvc i586+ */ \
-	defined(__x86_64__) || defined(__x86_64) || defined(_M_X64) /* gcc, sunpro, msvc */
+    (defined(_M_IX86) && _M_IX86 >= 500) || /* msvc i586+ */ \
+    defined(__x86_64__) || defined(__x86_64) || defined(_M_X64) /* gcc, sunpro, msvc */
 #define PG_HAVE_8BYTE_SINGLE_COPY_ATOMICITY
 #endif /* 8 byte single-copy atomicity */
 

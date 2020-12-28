@@ -1,0 +1,609 @@
+drop server hdfs_server cascade;
+--check hdfs_fdw exists
+explain (verbose, costs off, nodes off) select fdwname from pg_foreign_data_wrapper where fdwname = 'hdfs_fdw';
+--check pg_foreign_server,not exists orc_fdw
+explain (verbose, costs off, nodes off) SELECT srvname FROM pg_foreign_server;
+--test create server
+CREATE SERVER hdfs_server001 FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+CREATE SERVER hdfs_server004 FOREIGN DATA WRAPPER 	HDFS_FDW;
+CREATE SERVER hdfs_server002 FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (hdfscfgpath '/home/hanfeng');
+CREATE SERVER not_hdfs_server003 FOREIGN DATA WRAPPER 	dist_fdw ;
+--error create server
+--error create server
+create server server_005 foreign data wrapper hdfs_fdw options(hdfscfgpath '/home/hanfeng',address '10.67.128.36h:25000');
+create server server_005 foreign data wrapper hdfs_fdw options(hdfscfgpath '/home/hanfeng',address '10.67.128.36:25000h');
+create server server_005 foreign data wrapper hdfs_fdw options(hdfscfgpath '/home/hanfeng',address '10.67.128.36,25000');
+create server server_005 foreign data wrapper hdfs_fdw options(hdfscfgpath '/home/hanfeng',address '10.67.128.36:25000 ');
+create server server_005 foreign data wrapper hdfs_fdw options(hdfscfgpath '/home/hanfeng',address '10.67.128.36:25000,');
+create server server_005 foreign data wrapper hdfs_fdw options(hdfscfgpath '/home/hanfeng',address '10.67.128.36:25000, ');
+create server server_005 foreign data wrapper hdfs_fdw options(hdfscfgpath '/home/hanfeng',address '10.67.128.36:25000,10');
+create server server_005 foreign data wrapper hdfs_fdw options(hdfscfgpath '/home/hanfeng',address '10.67.128.356:25000');
+create server server_005 foreign data wrapper hdfs_fdw options(hdfscfgpath '/home/hanfeng',address '10.67.128.36:25000:10.67.128.376:596');
+create server server_005 foreign data wrapper hdfs_fdw options(hdfscfgpath '/home/hanfeng',address '10.67.128.36:25000,10.67.128.376:56, ');
+create server server_005 foreign data wrapper hdfs_fdw options(hdfscfgpath '/home/hanfeng',address '10.67.128.36:25000,10.67.128.37:56, ');
+
+--test alter server
+ALTER SERVER hdfs_server001 OPTIONS (SET address '10.67.128.36:25000');
+ALTER SERVER hdfs_server001 OPTIONS (SET address '@hdfshostname@:@hdfsport@');
+
+ALTER SERVER hdfs_server001 OPTIONS (add hdfscfgpath '/home/hanfeng');
+
+ALTER SERVER hdfs_server001 OPTIONS (drop hdfscfgpath );
+ALTER SERVER hdfs_server001 OPTIONS (drop address );
+
+--test create foreign table
+create foreign table ForeignTbl001 ( 
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT) server hdfs_server001 options (format 'orc',filenames '/user/hive/warehouse/mppdb.db/region_orc11_64stripe') distribute by roundrobin;
+--test need orc format
+create foreign table ForeignTbl002 (
+id int) server hdfs_server001 options (format 'csv',filenames '/user/hive/warehouse/mppdb/address_orc11_64stripe') distribute by roundrobin;
+--test need  format
+create foreign table ForeignTbl002 (
+id int) server hdfs_server001 options (filenames '/user/hive/warehouse/mppdb/address_orc11_64stripe') distribute by roundrobin;
+--test need roundrobin
+create foreign table ForeignTbl002 (
+id  int) server hdfs_server001 options (format 'orc',filenames '/user/hive/warehouse/mppdb/address_orc11_63stripe') distribute by hash (id);
+create foreign table ForeignTbl003 (
+id int) server hdfs_server001 options (format 'orc',filenames '/user/hive/warehouse/mppdb/address_orc11_63stripe') ;
+--test need either filenames or foldername, but not both
+create foreign table ForeignTbl003 (
+id int) server hdfs_server001 options (format 'orc',filenames '/user/hive/warehouse/mppdb/address_orc11_63stripe',foldername '/user/hive/warehouse/mppdb/')  distribute by roundrobin;
+--test not need address option
+create foreign table ForeignTbl003 (
+id int) server hdfs_server001 options (address '10.145.130.26:25000',filenames '/user/hive/warehouse/mppdb/address_orc11_63stripe') distribute by roundrobin;
+-- not need disribute by roundrobin for not hdfs server foreign table
+CREATE FOREIGN TABLE ForeignTbl004 (
+name text, 
+street text, 
+city text, 
+state text, 
+zip int) SERVER not_hdfs_server003 options (location 'gsfs://192.168.20.199:10001');
+--alter foreign table 
+ALTER FOREIGN TABLE ForeignTbl001 OPTIONS (set  filenames '/user/hive/warehouse/mppdb.db');
+ALTER FOREIGN TABLE ForeignTbl001 OPTIONS (DROP format);
+ALTER FOREIGN TABLE ForeignTbl001 OPTIONS (DROP filenames);
+ALTER FOREIGN TABLE ForeignTbl001 OPTIONS (DROP foldername);
+ALTER FOREIGN TABLE ForeignTbl001 ADD time TIMESTAMP;
+ALTER FOREIGN TABLE ForeignTbl001 ALTER time TYPE TIME;
+
+--test dml
+delete from ForeignTbl004;
+truncate ForeignTbl004;
+vacuum ForeignTbl004;
+update ForeignTbl004 set name = 'Gauss';
+insert into ForeignTbl004 values ('Gauss', 'tang', 'xian', 'centreslidepeopletotalandcountry', 0000);
+--drop table
+drop FOREIGN TABLE ForeignTbl004 CASCADE;
+
+--drop server 
+DROP SERVER not_hdfs_server003;
+DROP SERVER hdfs_server001;
+DROP SERVER hdfs_server001 CASCADE;
+
+create schema  fvt_data_query_hive;
+create server orc_server foreign data wrapper hdfs_fdw options (address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+create foreign table fvt_data_query_hive.elk_create_foreign_table_022_1
+(
+ c_id1 int ,
+ c_first varchar(16) ,
+c_since timestamp 
+)
+server orc_server OPTIONS(format 'orc', filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table_022/000000_0') distribute by roundrobin;
+create  table fvt_data_query_hive.elk_create_foreign_table_022_2
+(
+ c_id1 int
+)inherits (fvt_data_query_hive.elk_create_foreign_table_022_1);
+
+create temporary table elk_create_foreign_table_022_2( c_id1 int)inherits (fvt_data_query_hive.elk_create_foreign_table_022_1);
+
+drop server orc_server cascade;
+
+create server elk_create_foreign_table_server foreign data wrapper hdfs_fdw options (address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+create foreign table fvt_data_query_hive.elk_create_foreign_table_012_1
+(
+ c_id int ,
+ c_first varchar(16),
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',foldername  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_012,/user/hive/warehouse/hive/elk_create_foreign_orc_table')distribute by roundrobin;
+create foreign table fvt_data_query_hive.elk_create_foreign_table_012_1
+(
+ c_id int ,
+ c_first varchar(16),
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',foldername  '')distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_029_1
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_029/000000_0') distribute by roundrobin;
+--alter
+alter  foreign table fvt_data_query_hive.elk_create_foreign_table_029_1 drop column c_since;
+alter foreign table fvt_data_query_hive.elk_create_foreign_table_029_1 add column c_name text;                                               ---alter sucess
+alter foreign table fvt_data_query_hive.elk_create_foreign_table_029_1 add constraint constraint_029 primary key(c_id);         -----alter error
+
+alter foreign table fvt_data_query_hive.elk_create_foreign_table_029_1 set without cluster;                               -----alter error                  
+alter foreign table fvt_data_query_hive.elk_create_foreign_table_029_1 rename to elk_create_foreign_table_029_1_1;               -----alter error
+
+alter foreign table  fvt_data_query_hive.elk_create_foreign_table_029_1 rename c_first to c_first1;                                               
+
+alter foreign table  fvt_data_query_hive.elk_create_foreign_table_029_1 set schema public;  
+
+create  table fvt_data_query_hive.elk_create_foreign_table_019_1
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp ,
+primary key(c_id)
+);
+create foreign table fvt_data_query_hive.elk_create_foreign_table_019_3
+(
+ c_id int  REFERENCES fvt_data_query_hive.elk_create_foreign_table_019_1(c_id) ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_019/000000_0')distribute by roundrobin;
+
+--error format option
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_1
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format ' orc',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/elk_create_foreign_table_053') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_2
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc ',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_2
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'or',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_2
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orce',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0') distribute by roundrobin;
+
+--error filenames
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_3
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  ' /user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0 ') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  ',') distribute by roundrobin;
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  ',/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0') distribute by roundrobin;
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0,') distribute by roundrobin;
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  '') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  '/han,usr/,') distribute by roundrobin;
+
+--error foldername option
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+foldername   ' /user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+foldername   '/user/hive/warehouse/hive/elk_create_foreign_orc_table,/elk_create_foreign_orc_table_053/') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+foldername   '') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+foldername   ',') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_013_1
+(
+ c_id int ,
+ c_first varchar(16),
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',foldername '/user/hive/warehouse/hive/elk_create_foreign_orc_table',filenames '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_013/000000_1')distribute by roundrobin;
+
+--error format option
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_1
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format ' orc',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/elk_create_foreign_table_053') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_2
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc ',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_2
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'or',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_2
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orce',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0') distribute by roundrobin;
+
+--error filenames
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_3
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  ' /user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0 ') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  ',') distribute by roundrobin;
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  ',/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0') distribute by roundrobin;
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0,') distribute by roundrobin;
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  '') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  '/han,usr/,') distribute by roundrobin;
+
+--error foldername option
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+foldername   ' /user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+foldername   '/user/hive/warehouse/hive/elk_create_foreign_orc_table,/elk_create_foreign_orc_table_053/') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+foldername   '') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+foldername   ',') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_013_1
+(
+ c_id int ,
+ c_first varchar(16),
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',foldername '/user/hive/warehouse/hive/elk_create_foreign_orc_table',filenames '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_013/000000_1')distribute by roundrobin;
+
+drop schema fvt_data_query_hive cascade;
+drop  server elk_create_foreign_table_server;
+
+--chack error syntax for hdfscfgpath option
+create server error_server foreign data wrapper HDFS_FDW options(address '10.135.140.45:5689',hdfscfgpath ' /user');
+
+create server error_server foreign data wrapper HDFS_FDW options(address '10.135.140.45:5689',hdfscfgpath '/user ');
+
+create server error_server foreign data wrapper HDFS_FDW options(address '10.135.140.45:5689',hdfscfgpath '/user,/home');
+
+create server error_server foreign data wrapper HDFS_FDW options(address '10.135.140.45:5689',hdfscfgpath '/user,');
+
+create server error_server foreign data wrapper HDFS_FDW options(address '10.135.140.45:5689',hdfscfgpath ',/user');
+
+create server error_server foreign data wrapper HDFS_FDW options(address '10.135.140.45:5689',hdfscfgpath '');
+
+--check error syntax for address option
+create server error_server foreign data wrapper HDFS_FDW options(hdfscfgpath '/home/hanfeng',address '10.135.140.45:5689 ');
+
+create server error_server foreign data wrapper HDFS_FDW options(hdfscfgpath '/home/hanfeng',address ' 10.135.140.45:5689');
+
+create server error_server foreign data wrapper HDFS_FDW options(hdfscfgpath '/home/hanfeng',address '');
+
+create server error_server foreign data wrapper HDFS_FDW options(hdfscfgpath '/home/hanfeng',address '10.135.140.45::5689');
+
+create server error_server foreign data wrapper HDFS_FDW options(hdfscfgpath '/home/hanfeng',address '10.135.140:5689');
+
+create server error_server foreign data wrapper HDFS_FDW options(hdfscfgpath '/home/hanfeng',address '10.135.140:');
+
+create server error_server foreign data wrapper HDFS_FDW options(hdfscfgpath '/home/hanfeng',address '10.135.140');
+
+create server error_server foreign data wrapper HDFS_FDW options(hdfscfgpath '/home/hanfeng',address '10.135.140.45:45, 10.135.140:568');
+
+create server error_server foreign data wrapper HDFS_FDW options(hdfscfgpath '/home/hanfeng',address '10.135.140.45:45,10.135.140:568');
+
+create server error_server foreign data wrapper HDFS_FDW options(hdfscfgpath '/home/hanfeng',address '10.135.140.45:45 ,10.135.140.89:568,');
+
+create server error_server foreign data wrapper HDFS_FDW options(hdfscfgpath '/home/hanfeng',address '10.135.140.45:45,10.135.140.89:568,');
+
+create server error_server foreign data wrapper HDFS_FDW options(hdfscfgpath '/home/hanfeng',address ',10.135.140.45:45,10.135.140.89:568');
+
+create server error_server foreign data wrapper HDFS_FDW options(hdfscfgpath '/home/hanfeng',address '10.135.140.45:45,10.135.140.89');
+
+create server error_server foreign data wrapper HDFS_FDW options(hdfscfgpath '/home/hanfeng',address '10.135.140.45:45,10.h135.140.89:45');
+
+create server error_server foreign data wrapper HDFS_FDW options(hdfscfgpath '/home/hanfeng',address '10.135.140.45:45,10.135.140.89:45h');
+
+--check error syntax for format option
+create server foreigntbl_server foreign data wrapper HDFS_FDW options(address '10.135.140.45:45',hdfscfgpath '@hdfscfgpath@');
+create foreign table foreigntbl (id int) server foreigntbl_server options(format ' orc',filenames '/home') distribute by roundrobin;
+
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc ',filenames '/home') distribute by roundrobin;
+
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'or',filenames '/home') distribute by roundrobin;
+
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orch',filenames '/home') distribute by roundrobin;
+
+--check error syntax for filenames option
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',filenames ' /home') distribute by roundrobin;
+
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',filenames '/home ') distribute by roundrobin;
+
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',filenames '/home,') distribute by roundrobin;
+
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',filenames ',/home') distribute by roundrobin;
+
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',filenames '/home, /user') distribute by roundrobin;
+
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',filenames '') distribute by roundrobin;
+
+--check error syntax for foldername option
+
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',filenames '/home', foldername '/home/123') distribute by roundrobin;
+
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername ' /home/123') distribute by roundrobin;
+
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername '/home/123 ') distribute by roundrobin;
+
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername ',/home/123') distribute by roundrobin;
+
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername '/home/123,') distribute by roundrobin;
+
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername '/home/123,/user/123') distribute by roundrobin;
+
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername '') distribute by roundrobin;
+
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername '/han\ jk') distribute by roundrobin;
+
+drop foreign table foreigntbl;
+
+drop server foreigntbl_server;
+create server elk_create_foreign_partition_server_005 foreign data wrapper hdfs_fdw options (address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+create schema fvt_data_query_hive;
+create foreign table fvt_data_query_hive.elk_create_foreign_partition_table_005
+(
+ c_first text,
+ c_since timestamp ,
+ c_id int 
+)
+server elk_create_foreign_partition_server_005 OPTIONS(format 'orc',filenames '/user/hive/warehouse/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=1/000000_0,/user/hive/warehouse/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=2/000000_0,/user/hive/warehouse/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=3/000000_0,/user/hive/warehouse/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=4/000000_0')
+distribute by roundrobin 
+partition by (c_id) automapped;  --error msg for filenames option
+drop schema fvt_data_query_hive cascade;
+drop server elk_create_foreign_partition_server_005;
+create server elk_create_foreign_partition_server_005 foreign data wrapper hdfs_fdw options (address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+create schema fvt_data_query_hive;
+create foreign table fvt_data_query_hive.elk_create_foreign_partition_table_005
+(
+ c_first text,
+ c_since timestamp ,
+ c_id int
+)
+server elk_create_foreign_partition_server_005 OPTIONS(format 'orc',filenames '/user/hive/warehouse/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=1/000000_0,/user/hive/warehouse/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=2/000000_0,/user/hive/warehouse/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=3/000000_0,/user/hive/warehouse/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=4/000000_0')
+distribute by roundrobin
+partition by (c_id) automapped;
+create foreign table fvt_data_query_hive.elk_create_foreign_partition_table_005
+(
+ c_first text,
+ c_since timestamp ,
+ c_id int
+)
+server elk_create_foreign_partition_server_005 OPTIONS(format 'orc',filenames '/user/hive/warehouse/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=1/000000_0')
+distribute by roundrobin
+partition by (c_id) automapped;
+create foreign table fvt_data_query_hive.elk_create_foreign_partition_table_056
+(
+c_first text,
+c_since timestamp ,
+c_id    int
+)
+server elk_create_foreign_partition_server_056 OPTIONS(format 'orc',foldername  '/user/hive/warehouse/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_056')
+ distribute by roundrobin
+(c_id) automapped;
+drop schema fvt_data_query_hive cascade;
+create schema fvt_data_query_hive;
+create foreign table fvt_data_query_hive.elk_create_foreign_table_054_6
+(
+c_id int ,
+c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_partition_server_005 OPTIONS(format 'orc',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_054') distribute by roundrobin;
+explain (verbose, costs off, nodes off) select count(*) from fvt_data_query_hive.elk_create_foreign_table_054_6;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_054_1
+(
+c_id int ,
+c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_partition_server_005 OPTIONS(format 'orc',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_054/000000_0/') distribute by roundrobin;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_054_4
+(
+c_id int ,
+c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_partition_server_005 OPTIONS(format 'orc',foldername  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_054/000000_0/') distribute by roundrobin;
+explain (verbose, costs off, nodes off) select count(*) from fvt_data_query_hive.elk_create_foreign_table_054_4;
+
+create foreign table fvt_data_query_hive.elk_create_foreign_table_054_5
+(
+c_id int ,
+c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_partition_server_005 OPTIONS(format 'orc',foldername  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_054/000000_0') distribute by roundrobin;
+explain (verbose, costs off, nodes off) select count(*) from fvt_data_query_hive.elk_create_foreign_table_054_5;
+create server elk_create_server_013 foreign data wrapper options (address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+create foreign table fvt_data_query_hive.error_data_type_tbl(r_time time) 
+server elk_create_foreign_partition_server_005  OPTIONS(format 'orc',foldername  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_054/000000_0') distribute by roundrobin;
+--check alter foreign table add node statment
+create foreign table fvt_data_query_hive.error_data_type_tbl(r_time int) 
+server elk_create_foreign_partition_server_005  OPTIONS(format 'orc',foldername  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_054/000000_0') distribute by roundrobin;
+alter foreign table fvt_data_query_hive.error_data_type_tbl add node (newnode);
+alter foreign table fvt_data_query_hive.error_data_type_tbl delete node (newnode);
+drop schema fvt_data_query_hive cascade;
+drop server elk_create_foreign_partition_server_005;

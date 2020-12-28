@@ -1,0 +1,5 @@
+-- nodegroup is only supported on multiple_nodes mode
+select has_nodegroup_privilege('11111','create');
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+CONTEXT:  referenced column: has_nodegroup_privilege

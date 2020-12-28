@@ -1,0 +1,4186 @@
+DROP FOREIGN TABLE IF EXISTS part_1 CASCADE;
+NOTICE:  foreign table "part_1" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS part_2 CASCADE;
+NOTICE:  foreign table "part_2" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS part_3 CASCADE;
+NOTICE:  foreign table "part_3" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS part_4 CASCADE;
+NOTICE:  foreign table "part_4" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS part_5 CASCADE;
+NOTICE:  foreign table "part_5" does not exist, skipping
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+--all table is partitioned table.
+--test predicate push on vector engine.
+set enable_hdfs_predicate_pushdown=true;
+create foreign table part_1 (a int, b varchar(20), c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_1')
+distribute by roundrobin
+partition by (b) automapped;
+create table part_1_test1 (like part_1 including partition) with(orientation=column);
+ERROR:  Value partitioned table can only be created on DFS tablespace.
+create foreign table part_1_test2 (like part_1 including partition) SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_1')
+distribute by roundrobin;
+ERROR:  syntax error at or near "including partition"
+LINE 1: create foreign table part_1_test2 (like part_1 including par...
+                                                       ^
+create foreign table part_1_test2 (like part_1) SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_1')
+distribute by roundrobin;
+drop table part_1_test1;
+ERROR:  table "part_1_test1" does not exist
+drop foreign table part_1_test2;
+create or replace function llt_extern_param(int) returns TABLE(a int, b varchar(20), c date)
+as
+$$
+select * from part_1 where a = $1 order by 1,2,3;
+$$
+LANGUAGE SQL;
+call llt_extern_param(1);
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 | 123 | Fri Jan 04 00:00:00 2013
+ 1 |     | Fri Jan 04 00:00:00 2013
+(2 rows)
+
+explain (verbose, costs off) select * from part_1 where a = 2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_1
+               Output: a, b, c
+               Pushdown Predicate Filter: (part_1.a = 2)
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_1
+(9 rows)
+
+select * from part_1 where 2 = a order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+ 2 |     | Sat Jan 04 00:00:00 2014
+(2 rows)
+
+explain (verbose, costs off) select * from part_1 where b is null;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_1
+               Output: a, b, c
+               Filter: (part_1.b IS NULL)
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_1
+               Partition pruning: b(total 2; left 1)
+(10 rows)
+
+select * from part_1 where b::text is null order by 1, 2, 3;
+ a | b |            c             
+---+---+--------------------------
+ 1 |   | Fri Jan 04 00:00:00 2013
+ 2 |   | Sat Jan 04 00:00:00 2014
+(2 rows)
+
+explain (verbose, costs off) select * from part_1 where b is not null;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_1
+               Output: a, b, c
+               Filter: (part_1.b IS NOT NULL)
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_1
+               Partition pruning: b(total 2; left 1)
+(10 rows)
+
+select * from part_1 where b is not null order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 | 123 | Fri Jan 04 00:00:00 2013
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+(2 rows)
+
+explain (verbose, costs off) select * from part_1 where b = null;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Vector Result
+               Output: a, b, c
+               One-Time Filter: NULL::boolean
+               ->  Partitioned Vector Foreign Scan on public.part_1
+                     Output: a, b, c
+                     Server Type: hdfs
+                     Orc File: /user/hive/warehouse/partition.db/part_1
+(11 rows)
+
+select * from part_1 where b = null order by 1, 2, 3;
+ a | b | c 
+---+---+---
+(0 rows)
+
+explain (verbose, costs off) select * from part_1 where b is not null and a = 1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_1
+               Output: a, b, c
+               Filter: (part_1.b IS NOT NULL)
+               Pushdown Predicate Filter: (part_1.a = 1)
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_1
+               Partition pruning: b(total 2; left 1)
+(11 rows)
+
+select * from part_1 where b is not null and a = 1 order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 | 123 | Fri Jan 04 00:00:00 2013
+(1 row)
+
+explain (verbose, costs off) select * from part_1 where b is null and c <> '2013-01-04';
+--?.*
+--?.*
+                                                   QUERY PLAN                                                   
+----------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_1
+               Output: a, b, c
+               Filter: (part_1.b IS NULL)
+               Pushdown Predicate Filter: (part_1.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone)
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_1
+               Partition pruning: b(total 2; left 1)
+(11 rows)
+
+select * from part_1 where b is null and c <> '2013-01-04' order by 1, 2, 3;
+ a | b |            c             
+---+---+--------------------------
+ 2 |   | Sat Jan 04 00:00:00 2014
+(1 row)
+
+explain (verbose, costs off) select * from part_1 where b is null or c != '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_1
+               Output: a, b, c
+               Filter: ((part_1.b IS NULL) OR (part_1.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone))
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_1
+               Partition pruning: b(total 2; left 2)
+(10 rows)
+
+select * from part_1 where b is null or c != '2013-01-04' order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 |     | Fri Jan 04 00:00:00 2013
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+ 2 |     | Sat Jan 04 00:00:00 2014
+(3 rows)
+
+drop foreign table part_1;
+create foreign table part_2 (a int, b text, c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_2')
+distribute by roundrobin
+partition by (c) automapped;
+explain (verbose, costs off) select c from part_2 where a = 2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: c
+   ->  Vector Streaming (type: GATHER)
+         Output: c
+         ->  Partitioned Vector Foreign Scan on public.part_2
+               Output: c
+               Pushdown Predicate Filter: (part_2.a = 2)
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_2
+(9 rows)
+
+select c from part_2 where a = 2 order by 1;
+            c             
+--------------------------
+ Wed Jan 04 00:00:00 2012
+ Sat Jan 04 00:00:00 2014
+(2 rows)
+
+explain (verbose, costs off) select count(*) from part_2 where c = '2013-01-04';
+WARNING:  Statistics in some tables or columns(public.part_2.c) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (pg_catalog.count(*))
+   ->  Vector Aggregate
+         Output: pg_catalog.count(*)
+         ->  Vector Streaming (type: GATHER)
+               Output: (count(*))
+               ->  Vector Aggregate
+                     Output: count(*)
+                     ->  Partitioned Vector Foreign Scan on public.part_2
+                           Output: 'Dummy'
+                           Filter: (part_2.c = 'Fri Jan 04 00:00:00 2013'::timestamp without time zone)
+                           Server Type: hdfs
+                           Orc File: /user/hive/warehouse/partition.db/part_2
+                           Partition pruning: c(total 3; left 1)
+(14 rows)
+
+select count(*) from part_2 where c = '2013-01-04';
+ count 
+-------
+     2
+(1 row)
+
+explain (verbose, costs off) select * from part_2 where b is not null;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_2
+               Output: a, b, c
+               Pushdown Predicate Filter: (part_2.b IS NOT NULL)
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_2
+(9 rows)
+
+select * from part_2 where b is not null order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 | 123 | Fri Jan 04 00:00:00 2013
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+(2 rows)
+
+explain (verbose, costs off) select * from part_2 where b = null;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Vector Result
+               Output: a, b, c
+               One-Time Filter: NULL::boolean
+               ->  Partitioned Vector Foreign Scan on public.part_2
+                     Output: a, b, c
+                     Server Type: hdfs
+                     Orc File: /user/hive/warehouse/partition.db/part_2
+(11 rows)
+
+select * from part_2 where b = null order by 1, 2, 3;
+ a | b | c 
+---+---+---
+(0 rows)
+
+explain (verbose, costs off) select * from part_2 where b is not null and c = '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_2
+               Output: a, b, c
+               Filter: (part_2.c = 'Fri Jan 04 00:00:00 2013'::timestamp without time zone)
+               Pushdown Predicate Filter: (part_2.b IS NOT NULL)
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_2
+               Partition pruning: c(total 3; left 1)
+(11 rows)
+
+select * from part_2 where b is not null and c = '2013-01-04' order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 | 123 | Fri Jan 04 00:00:00 2013
+(1 row)
+
+explain (verbose, costs off) select * from part_2 where b is null and c != '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_2
+               Output: a, b, c
+               Filter: (part_2.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone)
+               Pushdown Predicate Filter: (part_2.b IS NULL)
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_2
+               Partition pruning: c(total 3; left 2)
+(11 rows)
+
+select * from part_2 where b is null and c != '2013-01-04' order by 1, 2, 3;
+ a | b |            c             
+---+---+--------------------------
+ 2 |   | Sat Jan 04 00:00:00 2014
+(1 row)
+
+explain (verbose, costs off) select * from part_2 where b is null or c != '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_2
+               Output: a, b, c
+               Filter: ((part_2.b IS NULL) OR (part_2.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone))
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_2
+               Partition pruning: c(total 3; left 3)
+(10 rows)
+
+select * from part_2 where b is null or c != '2013-01-04' order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 |     | Fri Jan 04 00:00:00 2013
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+ 2 |     | Sat Jan 04 00:00:00 2014
+(3 rows)
+
+drop foreign table part_2;
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_3')
+distribute by roundrobin
+partition by (c, b) automapped;
+select * from part_3 where b is null;
+ a | b | c 
+---+---+---
+(0 rows)
+
+select * from part_3 where b = '123';
+ a | b | c 
+---+---+---
+(0 rows)
+
+drop foreign table part_3;
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_3')
+distribute by roundrobin
+partition by (b, c) automapped;
+explain (verbose, costs off) select * from part_3 where b is not null and a = 1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b, c
+               Filter: (part_3.b IS NOT NULL)
+               Pushdown Predicate Filter: (part_3.a = 1)
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: b(total 2; left 1)
+(11 rows)
+
+select * from part_3 where b is not null and a = 1 order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 | 123 | Fri Jan 04 00:00:00 2013
+(1 row)
+
+explain (verbose, costs off) select * from part_3 where b is null and c != '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b, c
+               Filter: ((part_3.b IS NULL) AND (part_3.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone))
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: b(total 2; left 1), c(total 2; left 1)
+(10 rows)
+
+select * from part_3 where b is null and c != '2013-01-04' order by 1, 2, 3;
+ a | b |            c             
+---+---+--------------------------
+ 2 |   | Sat Jan 04 00:00:00 2014
+(1 row)
+
+explain (verbose, costs off) select * from part_3 where b is null or c != '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b, c
+               Filter: ((part_3.b IS NULL) OR (part_3.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone))
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: b(total 2; left 2), c(total 4; left 4)
+(10 rows)
+
+select * from part_3 where b is null or c != '2013-01-04' order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 |     | Fri Jan 04 00:00:00 2013
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+ 2 |     | Sat Jan 04 00:00:00 2014
+(3 rows)
+
+explain (verbose, costs off) select * from part_3 where c = '2013-05-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b, c
+               Filter: (part_3.c = 'Sat May 04 00:00:00 2013'::timestamp without time zone)
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: c(total 4; left 0)
+(10 rows)
+
+select * from part_3 where c = '2013-05-04' order by 1, 2, 3;
+ a | b | c 
+---+---+---
+(0 rows)
+
+explain (verbose, costs off) select * from part_3 where b = '123' and c = '2013-05-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                            QUERY PLAN                                                             
+-----------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b, c
+               Filter: (((part_3.b)::text = '123'::text) AND (part_3.c = 'Sat May 04 00:00:00 2013'::timestamp without time zone))
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: b(total 2; left 1), c(total 2; left 0)
+(10 rows)
+
+select * from part_3 where b = '123' and c = '2013-05-04' order by 1, 2, 3;
+ a | b | c 
+---+---+---
+(0 rows)
+
+explain (verbose, costs off) select * from part_3 where b = '123' and c != '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                             QUERY PLAN                                                             
+------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b, c
+               Filter: ((part_3.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone) AND ((part_3.b)::text = '123'::text))
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: b(total 2; left 1), c(total 2; left 1)
+(10 rows)
+
+select * from part_3 where b = '123' and c != '2013-01-04' order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+(1 row)
+
+drop foreign table part_3;
+create foreign table part_3 (a int, b varchar(20))
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_3')
+distribute by roundrobin
+partition by (b) automapped;
+explain (verbose, costs off) select * from part_3 where b is null;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: a, b
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b
+               Filter: (part_3.b IS NULL)
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: b(total 2; left 1)
+(10 rows)
+
+select * from part_3 where b is null order by 1, 2;
+ a | b 
+---+---
+ 1 | 
+ 2 | 
+(2 rows)
+
+drop foreign table part_3;
+create foreign table part_4 (p_partkey int, p_name text, p_mfgr text, p_brand text, p_type text, p_size int, p_container text, p_retailprice float8, p_comment text) 
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_4')
+distribute by roundrobin
+partition by (p_mfgr) automapped;
+explain (verbose, costs off) select distinct p_mfgr, p_partkey, p_name from part_4 where p_mfgr='Manufacturer#1';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Row Adapter
+   Output: p_mfgr, p_partkey, p_name
+   ->  Vector Sonic Hash Aggregate
+         Output: p_mfgr, p_partkey, p_name
+         Group By Key: part_4.p_mfgr, part_4.p_partkey, part_4.p_name
+         ->  Vector Streaming (type: GATHER)
+               Output: p_mfgr, p_partkey, p_name
+               ->  Vector Sonic Hash Aggregate
+                     Output: p_mfgr, p_partkey, p_name
+                     Group By Key: part_4.p_mfgr, part_4.p_partkey, part_4.p_name
+                     ->  Partitioned Vector Foreign Scan on public.part_4
+                           Output: p_mfgr, p_partkey, p_name
+                           Filter: (part_4.p_mfgr = 'Manufacturer#1'::text)
+                           Server Type: hdfs
+                           Orc File: /user/hive/warehouse/partition.db/part_4
+                           Partition pruning: p_mfgr(total 5; left 1)
+(16 rows)
+
+select distinct p_mfgr, p_partkey, p_name from part_4 where p_mfgr='Manufacturer#1' order by 1,2,3 limit 20 ;
+     p_mfgr     | p_partkey |                  p_name                  
+----------------+-----------+------------------------------------------
+ Manufacturer#1 |         1 | goldenrod lavender spring chocolate lace
+ Manufacturer#1 |         2 | blush thistle blue yellow saddle
+ Manufacturer#1 |         7 | moccasin green thistle khaki floral
+ Manufacturer#1 |        14 | khaki seashell rose cornsilk navajo
+ Manufacturer#1 |        15 | blanched honeydew sky turquoise medium
+ Manufacturer#1 |        18 | turquoise indian lemon lavender misty
+ Manufacturer#1 |        20 | ivory navy honeydew sandy midnight
+ Manufacturer#1 |        27 | saddle puff beige linen yellow
+ Manufacturer#1 |        34 | khaki steel rose ghost salmon
+ Manufacturer#1 |        46 | honeydew turquoise aquamarine spring tan
+ Manufacturer#1 |        56 | antique beige brown deep dodger
+ Manufacturer#1 |        60 | snow spring sandy olive tomato
+ Manufacturer#1 |        68 | bisque ivory mint purple almond
+ Manufacturer#1 |        70 | violet seashell firebrick dark navajo
+ Manufacturer#1 |        78 | blush forest slate seashell puff
+ Manufacturer#1 |        82 | khaki tomato purple almond tan
+ Manufacturer#1 |        83 | blush green dim lawn peru
+ Manufacturer#1 |       104 | plum cyan cornflower midnight royal
+ Manufacturer#1 |       105 | dodger slate pale mint navajo
+ Manufacturer#1 |       108 | bisque peach magenta tomato yellow
+(20 rows)
+
+explain (verbose, costs off) select distinct p_mfgr, p_partkey, p_name from part_4 where p_mfgr='Manufacturer#1' and p_partkey < 20000;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Row Adapter
+   Output: p_mfgr, p_partkey, p_name
+   ->  Vector Sonic Hash Aggregate
+         Output: p_mfgr, p_partkey, p_name
+         Group By Key: part_4.p_mfgr, part_4.p_partkey, part_4.p_name
+         ->  Vector Streaming (type: GATHER)
+               Output: p_mfgr, p_partkey, p_name
+               ->  Vector Sonic Hash Aggregate
+                     Output: p_mfgr, p_partkey, p_name
+                     Group By Key: part_4.p_mfgr, part_4.p_partkey, part_4.p_name
+                     ->  Partitioned Vector Foreign Scan on public.part_4
+                           Output: p_mfgr, p_partkey, p_name
+                           Filter: (part_4.p_mfgr = 'Manufacturer#1'::text)
+                           Pushdown Predicate Filter: (part_4.p_partkey < 20000)
+                           Server Type: hdfs
+                           Orc File: /user/hive/warehouse/partition.db/part_4
+                           Partition pruning: p_mfgr(total 5; left 1)
+(17 rows)
+
+select distinct p_mfgr, p_partkey, p_name from part_4 where p_mfgr='Manufacturer#1' and p_partkey < 20000 order by 1,2,3 limit 20 ;
+     p_mfgr     | p_partkey |                  p_name                  
+----------------+-----------+------------------------------------------
+ Manufacturer#1 |         1 | goldenrod lavender spring chocolate lace
+ Manufacturer#1 |         2 | blush thistle blue yellow saddle
+ Manufacturer#1 |         7 | moccasin green thistle khaki floral
+ Manufacturer#1 |        14 | khaki seashell rose cornsilk navajo
+ Manufacturer#1 |        15 | blanched honeydew sky turquoise medium
+ Manufacturer#1 |        18 | turquoise indian lemon lavender misty
+ Manufacturer#1 |        20 | ivory navy honeydew sandy midnight
+ Manufacturer#1 |        27 | saddle puff beige linen yellow
+ Manufacturer#1 |        34 | khaki steel rose ghost salmon
+ Manufacturer#1 |        46 | honeydew turquoise aquamarine spring tan
+ Manufacturer#1 |        56 | antique beige brown deep dodger
+ Manufacturer#1 |        60 | snow spring sandy olive tomato
+ Manufacturer#1 |        68 | bisque ivory mint purple almond
+ Manufacturer#1 |        70 | violet seashell firebrick dark navajo
+ Manufacturer#1 |        78 | blush forest slate seashell puff
+ Manufacturer#1 |        82 | khaki tomato purple almond tan
+ Manufacturer#1 |        83 | blush green dim lawn peru
+ Manufacturer#1 |       104 | plum cyan cornflower midnight royal
+ Manufacturer#1 |       105 | dodger slate pale mint navajo
+ Manufacturer#1 |       108 | bisque peach magenta tomato yellow
+(20 rows)
+
+select count(*) from part_4 where p_mfgr='Manufacturer#1';
+ count 
+-------
+ 40084
+(1 row)
+
+drop foreign table part_4;
+reset enable_hdfs_predicate_pushdown;
+--test no predicate push down in vector engine.
+set enable_hdfs_predicate_pushdown=false;
+create foreign table part_1 (a int, b varchar(20), c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_1')
+distribute by roundrobin
+partition by (b) automapped;
+explain (verbose, costs off) select * from part_1 where a = 2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_1
+               Output: a, b, c
+               Filter: (part_1.a = 2)
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_1
+(9 rows)
+
+select * from part_1 where a = 2 order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+ 2 |     | Sat Jan 04 00:00:00 2014
+(2 rows)
+
+explain (verbose, costs off) select * from part_1 where b is null;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_1
+               Output: a, b, c
+               Filter: (part_1.b IS NULL)
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_1
+               Partition pruning: b(total 2; left 1)
+(10 rows)
+
+select * from part_1 where b is null order by 1, 2, 3;
+ a | b |            c             
+---+---+--------------------------
+ 1 |   | Fri Jan 04 00:00:00 2013
+ 2 |   | Sat Jan 04 00:00:00 2014
+(2 rows)
+
+explain (verbose, costs off) select * from part_1 where b is not null;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_1
+               Output: a, b, c
+               Filter: (part_1.b IS NOT NULL)
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_1
+               Partition pruning: b(total 2; left 1)
+(10 rows)
+
+select * from part_1 where b is not null order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 | 123 | Fri Jan 04 00:00:00 2013
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+(2 rows)
+
+explain (verbose, costs off) select * from part_1 where b = null;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Vector Result
+               Output: a, b, c
+               One-Time Filter: NULL::boolean
+               ->  Partitioned Vector Foreign Scan on public.part_1
+                     Output: a, b, c
+                     Server Type: hdfs
+                     Orc File: /user/hive/warehouse/partition.db/part_1
+(11 rows)
+
+select * from part_1 where b = null order by 1, 2, 3;
+ a | b | c 
+---+---+---
+(0 rows)
+
+explain (verbose, costs off) select * from part_1 where b is not null and a = 1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_1
+               Output: a, b, c
+               Filter: ((part_1.b IS NOT NULL) AND (part_1.a = 1))
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_1
+               Partition pruning: b(total 2; left 1)
+(10 rows)
+
+select * from part_1 where b is not null and a = 1 order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 | 123 | Fri Jan 04 00:00:00 2013
+(1 row)
+
+explain (verbose, costs off) select * from part_1 where b is null and c <> '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_1
+               Output: a, b, c
+               Filter: ((part_1.b IS NULL) AND (part_1.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone))
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_1
+               Partition pruning: b(total 2; left 1)
+(10 rows)
+
+select * from part_1 where b is null and c <> '2013-01-04' order by 1, 2, 3;
+ a | b |            c             
+---+---+--------------------------
+ 2 |   | Sat Jan 04 00:00:00 2014
+(1 row)
+
+explain (verbose, costs off) select * from part_1 where b is null or c != '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_1
+               Output: a, b, c
+               Filter: ((part_1.b IS NULL) OR (part_1.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone))
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_1
+               Partition pruning: b(total 2; left 2)
+(10 rows)
+
+select * from part_1 where b is null or c != '2013-01-04' order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 |     | Fri Jan 04 00:00:00 2013
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+ 2 |     | Sat Jan 04 00:00:00 2014
+(3 rows)
+
+drop foreign table part_1;
+create foreign table part_2 (a int, b text, c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_2')
+distribute by roundrobin
+partition by (c) automapped;
+explain (verbose, costs off) select c from part_2 where a = 2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: c
+   ->  Vector Streaming (type: GATHER)
+         Output: c
+         ->  Partitioned Vector Foreign Scan on public.part_2
+               Output: c
+               Filter: (part_2.a = 2)
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_2
+(9 rows)
+
+select c from part_2 where a = 2 order by 1;
+            c             
+--------------------------
+ Wed Jan 04 00:00:00 2012
+ Sat Jan 04 00:00:00 2014
+(2 rows)
+
+explain (verbose, costs off) select count(*) from part_2 where c = '2013-01-04';
+WARNING:  Statistics in some tables or columns(public.part_2.c) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (pg_catalog.count(*))
+   ->  Vector Aggregate
+         Output: pg_catalog.count(*)
+         ->  Vector Streaming (type: GATHER)
+               Output: (count(*))
+               ->  Vector Aggregate
+                     Output: count(*)
+                     ->  Partitioned Vector Foreign Scan on public.part_2
+                           Output: 'Dummy'
+                           Filter: (part_2.c = 'Fri Jan 04 00:00:00 2013'::timestamp without time zone)
+                           Server Type: hdfs
+                           Orc File: /user/hive/warehouse/partition.db/part_2
+                           Partition pruning: c(total 3; left 1)
+(14 rows)
+
+select count(*) from part_2 where c = '2013-01-04';
+ count 
+-------
+     2
+(1 row)
+
+explain (verbose, costs off) select * from part_2 where b is not null;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_2
+               Output: a, b, c
+               Filter: (part_2.b IS NOT NULL)
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_2
+(9 rows)
+
+select * from part_2 where b is not null order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 | 123 | Fri Jan 04 00:00:00 2013
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+(2 rows)
+
+explain (verbose, costs off) select * from part_2 where b = null;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Vector Result
+               Output: a, b, c
+               One-Time Filter: NULL::boolean
+               ->  Partitioned Vector Foreign Scan on public.part_2
+                     Output: a, b, c
+                     Server Type: hdfs
+                     Orc File: /user/hive/warehouse/partition.db/part_2
+(11 rows)
+
+select * from part_2 where b = null order by 1, 2, 3;
+ a | b | c 
+---+---+---
+(0 rows)
+
+explain (verbose, costs off) select * from part_2 where b is not null and c = '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                       QUERY PLAN                                                        
+-------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_2
+               Output: a, b, c
+               Filter: ((part_2.b IS NOT NULL) AND (part_2.c = 'Fri Jan 04 00:00:00 2013'::timestamp without time zone))
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_2
+               Partition pruning: c(total 3; left 1)
+(10 rows)
+
+select * from part_2 where b is not null and c = '2013-01-04' order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 | 123 | Fri Jan 04 00:00:00 2013
+(1 row)
+
+explain (verbose, costs off) select * from part_2 where b is null and c != '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_2
+               Output: a, b, c
+               Filter: ((part_2.b IS NULL) AND (part_2.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone))
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_2
+               Partition pruning: c(total 3; left 2)
+(10 rows)
+
+select * from part_2 where b is null and c != '2013-01-04' order by 1, 2, 3;
+ a | b |            c             
+---+---+--------------------------
+ 2 |   | Sat Jan 04 00:00:00 2014
+(1 row)
+
+explain (verbose, costs off) select * from part_2 where b is null or c != '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_2
+               Output: a, b, c
+               Filter: ((part_2.b IS NULL) OR (part_2.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone))
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_2
+               Partition pruning: c(total 3; left 3)
+(10 rows)
+
+select * from part_2 where b is null or c != '2013-01-04' order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 |     | Fri Jan 04 00:00:00 2013
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+ 2 |     | Sat Jan 04 00:00:00 2014
+(3 rows)
+
+drop foreign table part_2;
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_3')
+distribute by roundrobin
+partition by (c, b) automapped;
+select * from part_3 where c is null;
+ERROR:  invalid input syntax for type timestamp: "123"
+drop foreign table part_3;
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_3')
+distribute by roundrobin
+partition by (b, c) automapped;
+explain (verbose, costs off) select * from part_3 where b is not null and a = 1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b, c
+               Filter: ((part_3.b IS NOT NULL) AND (part_3.a = 1))
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: b(total 2; left 1)
+(10 rows)
+
+select * from part_3 where b is not null and a = 1 order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 | 123 | Fri Jan 04 00:00:00 2013
+(1 row)
+
+explain (verbose, costs off) select * from part_3 where b is null and c != '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b, c
+               Filter: ((part_3.b IS NULL) AND (part_3.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone))
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: b(total 2; left 1), c(total 2; left 1)
+(10 rows)
+
+select * from part_3 where b is null and c != '2013-01-04' order by 1, 2, 3;
+ a | b |            c             
+---+---+--------------------------
+ 2 |   | Sat Jan 04 00:00:00 2014
+(1 row)
+
+explain (verbose, costs off) select * from part_3 where b is null or c != '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b, c
+               Filter: ((part_3.b IS NULL) OR (part_3.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone))
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: b(total 2; left 2), c(total 4; left 4)
+(10 rows)
+
+select * from part_3 where b is null or c != '2013-01-04' order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 |     | Fri Jan 04 00:00:00 2013
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+ 2 |     | Sat Jan 04 00:00:00 2014
+(3 rows)
+
+explain (verbose, costs off) select * from part_3 where c = '2013-05-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b, c
+               Filter: (part_3.c = 'Sat May 04 00:00:00 2013'::timestamp without time zone)
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: c(total 4; left 0)
+(10 rows)
+
+select * from part_3 where c = '2013-05-04' order by 1, 2, 3;
+ a | b | c 
+---+---+---
+(0 rows)
+
+explain (verbose, costs off) select * from part_3 where b = '123' and c = '2013-05-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                            QUERY PLAN                                                             
+-----------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b, c
+               Filter: (((part_3.b)::text = '123'::text) AND (part_3.c = 'Sat May 04 00:00:00 2013'::timestamp without time zone))
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: b(total 2; left 1), c(total 2; left 0)
+(10 rows)
+
+select * from part_3 where b = '123' and c = '2013-05-04' order by 1, 2, 3;
+ a | b | c 
+---+---+---
+(0 rows)
+
+explain (verbose, costs off) select * from part_3 where b = '123' and c != '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                             QUERY PLAN                                                             
+------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b, c
+               Filter: ((part_3.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone) AND ((part_3.b)::text = '123'::text))
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: b(total 2; left 1), c(total 2; left 1)
+(10 rows)
+
+select * from part_3 where b = '123' and c != '2013-01-04' order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+(1 row)
+
+drop foreign table part_3;
+create foreign table part_3 (a int, b varchar(20))
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_3')
+distribute by roundrobin
+partition by (b) automapped;
+explain (verbose, costs off) select * from part_3 where b is null;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: a, b
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b
+               Filter: (part_3.b IS NULL)
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: b(total 2; left 1)
+(10 rows)
+
+select * from part_3 where b is null order by 1, 2;
+ a | b 
+---+---
+ 1 | 
+ 2 | 
+(2 rows)
+
+drop foreign table part_3;
+create foreign table part_4 (p_partkey int, p_name text, p_mfgr text, p_brand text, p_type text, p_size int, p_container text, p_retailprice float8, p_comment text) 
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_4')
+distribute by roundrobin
+partition by (p_mfgr) automapped;
+explain (verbose, costs off) select distinct p_mfgr, p_partkey, p_name from part_4 where p_mfgr='Manufacturer#1';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Row Adapter
+   Output: p_mfgr, p_partkey, p_name
+   ->  Vector Sonic Hash Aggregate
+         Output: p_mfgr, p_partkey, p_name
+         Group By Key: part_4.p_mfgr, part_4.p_partkey, part_4.p_name
+         ->  Vector Streaming (type: GATHER)
+               Output: p_mfgr, p_partkey, p_name
+               ->  Vector Sonic Hash Aggregate
+                     Output: p_mfgr, p_partkey, p_name
+                     Group By Key: part_4.p_mfgr, part_4.p_partkey, part_4.p_name
+                     ->  Partitioned Vector Foreign Scan on public.part_4
+                           Output: p_mfgr, p_partkey, p_name
+                           Filter: (part_4.p_mfgr = 'Manufacturer#1'::text)
+                           Server Type: hdfs
+                           Orc File: /user/hive/warehouse/partition.db/part_4
+                           Partition pruning: p_mfgr(total 5; left 1)
+(16 rows)
+
+select distinct p_mfgr, p_partkey, p_name from part_4 where p_mfgr='Manufacturer#1' order by 1,2,3 limit 20 ;
+     p_mfgr     | p_partkey |                  p_name                  
+----------------+-----------+------------------------------------------
+ Manufacturer#1 |         1 | goldenrod lavender spring chocolate lace
+ Manufacturer#1 |         2 | blush thistle blue yellow saddle
+ Manufacturer#1 |         7 | moccasin green thistle khaki floral
+ Manufacturer#1 |        14 | khaki seashell rose cornsilk navajo
+ Manufacturer#1 |        15 | blanched honeydew sky turquoise medium
+ Manufacturer#1 |        18 | turquoise indian lemon lavender misty
+ Manufacturer#1 |        20 | ivory navy honeydew sandy midnight
+ Manufacturer#1 |        27 | saddle puff beige linen yellow
+ Manufacturer#1 |        34 | khaki steel rose ghost salmon
+ Manufacturer#1 |        46 | honeydew turquoise aquamarine spring tan
+ Manufacturer#1 |        56 | antique beige brown deep dodger
+ Manufacturer#1 |        60 | snow spring sandy olive tomato
+ Manufacturer#1 |        68 | bisque ivory mint purple almond
+ Manufacturer#1 |        70 | violet seashell firebrick dark navajo
+ Manufacturer#1 |        78 | blush forest slate seashell puff
+ Manufacturer#1 |        82 | khaki tomato purple almond tan
+ Manufacturer#1 |        83 | blush green dim lawn peru
+ Manufacturer#1 |       104 | plum cyan cornflower midnight royal
+ Manufacturer#1 |       105 | dodger slate pale mint navajo
+ Manufacturer#1 |       108 | bisque peach magenta tomato yellow
+(20 rows)
+
+explain (verbose, costs off) select distinct p_mfgr, p_partkey, p_name from part_4 where p_mfgr='Manufacturer#1' and p_partkey < 20000;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: p_mfgr, p_partkey, p_name
+   ->  Vector Sonic Hash Aggregate
+         Output: p_mfgr, p_partkey, p_name
+         Group By Key: part_4.p_mfgr, part_4.p_partkey, part_4.p_name
+         ->  Vector Streaming (type: GATHER)
+               Output: p_mfgr, p_partkey, p_name
+               ->  Vector Sonic Hash Aggregate
+                     Output: p_mfgr, p_partkey, p_name
+                     Group By Key: part_4.p_mfgr, part_4.p_partkey, part_4.p_name
+                     ->  Partitioned Vector Foreign Scan on public.part_4
+                           Output: p_mfgr, p_partkey, p_name
+                           Filter: ((part_4.p_partkey < 20000) AND (part_4.p_mfgr = 'Manufacturer#1'::text))
+                           Server Type: hdfs
+                           Orc File: /user/hive/warehouse/partition.db/part_4
+                           Partition pruning: p_mfgr(total 5; left 1)
+(16 rows)
+
+select distinct p_mfgr, p_partkey, p_name from part_4 where p_mfgr='Manufacturer#1' and p_partkey < 20000 order by 1,2,3 limit 20 ;
+     p_mfgr     | p_partkey |                  p_name                  
+----------------+-----------+------------------------------------------
+ Manufacturer#1 |         1 | goldenrod lavender spring chocolate lace
+ Manufacturer#1 |         2 | blush thistle blue yellow saddle
+ Manufacturer#1 |         7 | moccasin green thistle khaki floral
+ Manufacturer#1 |        14 | khaki seashell rose cornsilk navajo
+ Manufacturer#1 |        15 | blanched honeydew sky turquoise medium
+ Manufacturer#1 |        18 | turquoise indian lemon lavender misty
+ Manufacturer#1 |        20 | ivory navy honeydew sandy midnight
+ Manufacturer#1 |        27 | saddle puff beige linen yellow
+ Manufacturer#1 |        34 | khaki steel rose ghost salmon
+ Manufacturer#1 |        46 | honeydew turquoise aquamarine spring tan
+ Manufacturer#1 |        56 | antique beige brown deep dodger
+ Manufacturer#1 |        60 | snow spring sandy olive tomato
+ Manufacturer#1 |        68 | bisque ivory mint purple almond
+ Manufacturer#1 |        70 | violet seashell firebrick dark navajo
+ Manufacturer#1 |        78 | blush forest slate seashell puff
+ Manufacturer#1 |        82 | khaki tomato purple almond tan
+ Manufacturer#1 |        83 | blush green dim lawn peru
+ Manufacturer#1 |       104 | plum cyan cornflower midnight royal
+ Manufacturer#1 |       105 | dodger slate pale mint navajo
+ Manufacturer#1 |       108 | bisque peach magenta tomato yellow
+(20 rows)
+
+select count(*) from part_4 where p_mfgr='Manufacturer#1';
+ count 
+-------
+ 40084
+(1 row)
+
+drop foreign table part_4;
+reset enable_hdfs_predicate_pushdown;
+--test row engine with predicate on
+set enable_vector_engine=false;
+create foreign table part_1 (a int, b varchar(20), c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_1')
+distribute by roundrobin
+partition by (b) automapped;
+explain (verbose, costs off) select * from part_1 where a = 2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, c
+   ->  Partitioned Foreign Scan on public.part_1
+         Output: a, b, c
+         Pushdown Predicate Filter: (part_1.a = 2)
+         Server Type: hdfs
+         Orc File: /user/hive/warehouse/partition.db/part_1
+(7 rows)
+
+select * from part_1 where a = 2 order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+ 2 |     | Sat Jan 04 00:00:00 2014
+(2 rows)
+
+explain (verbose, costs off) select * from part_1 where b is null;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, c
+   ->  Partitioned Foreign Scan on public.part_1
+         Output: a, b, c
+         Filter: (part_1.b IS NULL)
+         Server Type: hdfs
+         Orc File: /user/hive/warehouse/partition.db/part_1
+         Partition pruning: b(total 2; left 1)
+(8 rows)
+
+select * from part_1 where b is null order by 1, 2, 3;
+ a | b |            c             
+---+---+--------------------------
+ 1 |   | Fri Jan 04 00:00:00 2013
+ 2 |   | Sat Jan 04 00:00:00 2014
+(2 rows)
+
+explain (verbose, costs off) select * from part_1 where b is not null;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, c
+   ->  Partitioned Foreign Scan on public.part_1
+         Output: a, b, c
+         Filter: (part_1.b IS NOT NULL)
+         Server Type: hdfs
+         Orc File: /user/hive/warehouse/partition.db/part_1
+         Partition pruning: b(total 2; left 1)
+(8 rows)
+
+select * from part_1 where b is not null order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 | 123 | Fri Jan 04 00:00:00 2013
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+(2 rows)
+
+explain (verbose, costs off) select * from part_1 where b = null;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, c
+   ->  Result
+         Output: a, b, c
+         One-Time Filter: NULL::boolean
+         ->  Partitioned Foreign Scan on public.part_1
+               Output: a, b, c
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_1
+(9 rows)
+
+select * from part_1 where b = null order by 1, 2, 3;
+ a | b | c 
+---+---+---
+(0 rows)
+
+explain (verbose, costs off) select * from part_1 where b is not null and a = 1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, c
+   ->  Partitioned Foreign Scan on public.part_1
+         Output: a, b, c
+         Filter: (part_1.b IS NOT NULL)
+         Pushdown Predicate Filter: (part_1.a = 1)
+         Server Type: hdfs
+         Orc File: /user/hive/warehouse/partition.db/part_1
+         Partition pruning: b(total 2; left 1)
+(9 rows)
+
+select * from part_1 where b is not null and a = 1 order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 | 123 | Fri Jan 04 00:00:00 2013
+(1 row)
+
+explain (verbose, costs off) select * from part_1 where b is null and c <> '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, c
+   ->  Partitioned Foreign Scan on public.part_1
+         Output: a, b, c
+         Filter: (part_1.b IS NULL)
+         Pushdown Predicate Filter: (part_1.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone)
+         Server Type: hdfs
+         Orc File: /user/hive/warehouse/partition.db/part_1
+         Partition pruning: b(total 2; left 1)
+(9 rows)
+
+select * from part_1 where b is null and c <> '2013-01-04' order by 1, 2, 3;
+ a | b |            c             
+---+---+--------------------------
+ 2 |   | Sat Jan 04 00:00:00 2014
+(1 row)
+
+explain (verbose, costs off) select * from part_1 where b is null or c != '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, c
+   ->  Partitioned Foreign Scan on public.part_1
+         Output: a, b, c
+         Filter: ((part_1.b IS NULL) OR (part_1.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone))
+         Server Type: hdfs
+         Orc File: /user/hive/warehouse/partition.db/part_1
+         Partition pruning: b(total 2; left 2)
+(8 rows)
+
+select * from part_1 where b is null or c != '2013-01-04' order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 |     | Fri Jan 04 00:00:00 2013
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+ 2 |     | Sat Jan 04 00:00:00 2014
+(3 rows)
+
+drop foreign table part_1;
+create foreign table part_2 (a int, b text, c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_2')
+distribute by roundrobin
+partition by (c) automapped;
+explain (verbose, costs off) select c from part_2 where a = 2;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: c
+   ->  Partitioned Foreign Scan on public.part_2
+         Output: c
+         Pushdown Predicate Filter: (part_2.a = 2)
+         Server Type: hdfs
+         Orc File: /user/hive/warehouse/partition.db/part_2
+(7 rows)
+
+select c from part_2 where a = 2 order by 1;
+            c             
+--------------------------
+ Wed Jan 04 00:00:00 2012
+ Sat Jan 04 00:00:00 2014
+(2 rows)
+
+explain (verbose, costs off) select count(*) from part_2 where c = '2013-01-04';
+WARNING:  Statistics in some tables or columns(public.part_2.c) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         ->  Aggregate
+               Output: count(*)
+               ->  Partitioned Foreign Scan on public.part_2
+                     Filter: (part_2.c = 'Fri Jan 04 00:00:00 2013'::timestamp without time zone)
+                     Server Type: hdfs
+                     Orc File: /user/hive/warehouse/partition.db/part_2
+                     Partition pruning: c(total 3; left 1)
+(11 rows)
+
+select count(*) from part_2 where c = '2013-01-04';
+ count 
+-------
+     2
+(1 row)
+
+explain (verbose, costs off) select * from part_2 where b is not null;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, c
+   ->  Partitioned Foreign Scan on public.part_2
+         Output: a, b, c
+         Pushdown Predicate Filter: (part_2.b IS NOT NULL)
+         Server Type: hdfs
+         Orc File: /user/hive/warehouse/partition.db/part_2
+(7 rows)
+
+select * from part_2 where b is not null order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 | 123 | Fri Jan 04 00:00:00 2013
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+(2 rows)
+
+explain (verbose, costs off) select * from part_2 where b = null;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, c
+   ->  Result
+         Output: a, b, c
+         One-Time Filter: NULL::boolean
+         ->  Partitioned Foreign Scan on public.part_2
+               Output: a, b, c
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_2
+(9 rows)
+
+select * from part_2 where b = null order by 1, 2, 3;
+ a | b | c 
+---+---+---
+(0 rows)
+
+explain (verbose, costs off) select * from part_2 where b is not null and c = '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, c
+   ->  Partitioned Foreign Scan on public.part_2
+         Output: a, b, c
+         Filter: (part_2.c = 'Fri Jan 04 00:00:00 2013'::timestamp without time zone)
+         Pushdown Predicate Filter: (part_2.b IS NOT NULL)
+         Server Type: hdfs
+         Orc File: /user/hive/warehouse/partition.db/part_2
+         Partition pruning: c(total 3; left 1)
+(9 rows)
+
+select * from part_2 where b is not null and c = '2013-01-04' order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 | 123 | Fri Jan 04 00:00:00 2013
+(1 row)
+
+explain (verbose, costs off) select * from part_2 where b is null and c != '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, c
+   ->  Partitioned Foreign Scan on public.part_2
+         Output: a, b, c
+         Filter: (part_2.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone)
+         Pushdown Predicate Filter: (part_2.b IS NULL)
+         Server Type: hdfs
+         Orc File: /user/hive/warehouse/partition.db/part_2
+         Partition pruning: c(total 3; left 2)
+(9 rows)
+
+select * from part_2 where b is null and c != '2013-01-04' order by 1, 2, 3;
+ a | b |            c             
+---+---+--------------------------
+ 2 |   | Sat Jan 04 00:00:00 2014
+(1 row)
+
+explain (verbose, costs off) select * from part_2 where b is null or c != '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, c
+   ->  Partitioned Foreign Scan on public.part_2
+         Output: a, b, c
+         Filter: ((part_2.b IS NULL) OR (part_2.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone))
+         Server Type: hdfs
+         Orc File: /user/hive/warehouse/partition.db/part_2
+         Partition pruning: c(total 3; left 3)
+(8 rows)
+
+select * from part_2 where b is null or c != '2013-01-04' order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 |     | Fri Jan 04 00:00:00 2013
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+ 2 |     | Sat Jan 04 00:00:00 2014
+(3 rows)
+
+drop foreign table part_2;
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_3')
+distribute by roundrobin
+partition by (c, b) automapped;
+select * from part_3 where b is null;
+ a | b | c 
+---+---+---
+(0 rows)
+
+drop foreign table part_3;
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_3')
+distribute by roundrobin
+partition by (b, c) automapped;
+explain (verbose, costs off) select * from part_3 where b is not null and a = 1;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, c
+   ->  Partitioned Foreign Scan on public.part_3
+         Output: a, b, c
+         Filter: (part_3.b IS NOT NULL)
+         Pushdown Predicate Filter: (part_3.a = 1)
+         Server Type: hdfs
+         Orc File: /user/hive/warehouse/partition.db/part_3
+         Partition pruning: b(total 2; left 1)
+(9 rows)
+
+select * from part_3 where b is not null and a = 1 order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 | 123 | Fri Jan 04 00:00:00 2013
+(1 row)
+
+explain (verbose, costs off) select * from part_3 where b is null and c != '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                   QUERY PLAN                                                   
+----------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, c
+   ->  Partitioned Foreign Scan on public.part_3
+         Output: a, b, c
+         Filter: ((part_3.b IS NULL) AND (part_3.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone))
+         Server Type: hdfs
+         Orc File: /user/hive/warehouse/partition.db/part_3
+         Partition pruning: b(total 2; left 1), c(total 2; left 1)
+(8 rows)
+
+select * from part_3 where b is null and c != '2013-01-04' order by 1, 2, 3;
+ a | b |            c             
+---+---+--------------------------
+ 2 |   | Sat Jan 04 00:00:00 2014
+(1 row)
+
+explain (verbose, costs off) select * from part_3 where b is null or c != '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, c
+   ->  Partitioned Foreign Scan on public.part_3
+         Output: a, b, c
+         Filter: ((part_3.b IS NULL) OR (part_3.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone))
+         Server Type: hdfs
+         Orc File: /user/hive/warehouse/partition.db/part_3
+         Partition pruning: b(total 2; left 2), c(total 4; left 4)
+(8 rows)
+
+select * from part_3 where b is null or c != '2013-01-04' order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 |     | Fri Jan 04 00:00:00 2013
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+ 2 |     | Sat Jan 04 00:00:00 2014
+(3 rows)
+
+explain (verbose, costs off) select * from part_3 where c = '2013-05-04' order by 1, 2, 3;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, c
+   Merge Sort Key: part_3.a, part_3.b
+   ->  Sort
+         Output: a, b, c
+         Sort Key: part_3.a, part_3.b
+         ->  Partitioned Foreign Scan on public.part_3
+               Output: a, b, c
+               Filter: (part_3.c = 'Sat May 04 00:00:00 2013'::timestamp without time zone)
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: c(total 4; left 0)
+(12 rows)
+
+select * from part_3 where c = '2013-05-04' order by 1, 2, 3;
+ a | b | c 
+---+---+---
+(0 rows)
+
+explain (verbose, costs off) select * from part_3 where b = '123' and c = '2013-05-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                         QUERY PLAN                                                          
+-----------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, c
+   ->  Partitioned Foreign Scan on public.part_3
+         Output: a, b, c
+         Filter: (((part_3.b)::text = '123'::text) AND (part_3.c = 'Sat May 04 00:00:00 2013'::timestamp without time zone))
+         Server Type: hdfs
+         Orc File: /user/hive/warehouse/partition.db/part_3
+         Partition pruning: b(total 2; left 1), c(total 2; left 0)
+(8 rows)
+
+select * from part_3 where b = '123' and c = '2013-05-04' order by 1, 2, 3;
+ a | b | c 
+---+---+---
+(0 rows)
+
+explain (verbose, costs off) select * from part_3 where b = '123' and c != '2013-01-04';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, c
+   ->  Partitioned Foreign Scan on public.part_3
+         Output: a, b, c
+         Filter: ((part_3.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone) AND ((part_3.b)::text = '123'::text))
+         Server Type: hdfs
+         Orc File: /user/hive/warehouse/partition.db/part_3
+         Partition pruning: b(total 2; left 1), c(total 2; left 1)
+(8 rows)
+
+select * from part_3 where b = '123' and c != '2013-01-04' order by 1, 2, 3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+(1 row)
+
+drop foreign table part_3;
+create foreign table part_3 (a int, b varchar(20))
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_3')
+distribute by roundrobin
+partition by (b) automapped;
+explain (verbose, costs off) select * from part_3 where b is null;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b
+   ->  Partitioned Foreign Scan on public.part_3
+         Output: a, b
+         Filter: (part_3.b IS NULL)
+         Server Type: hdfs
+         Orc File: /user/hive/warehouse/partition.db/part_3
+         Partition pruning: b(total 2; left 1)
+(8 rows)
+
+select * from part_3 where b is null order by 1, 2;
+ a | b 
+---+---
+ 1 | 
+ 2 | 
+(2 rows)
+
+drop foreign table part_3;
+create foreign table part_4 (p_partkey int, p_name text, p_mfgr text, p_brand text, p_type text, p_size int, p_container text, p_retailprice float8, p_comment text) 
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_4')
+distribute by roundrobin
+partition by (p_mfgr) automapped;
+select p_name,p_mfgr,p_type from part_4 where p_partkey < 10 and p_size < 10 order by 1,2,3;
+                  p_name                  |     p_mfgr     |         p_type         
+------------------------------------------+----------------+------------------------
+ bisque cornflower lawn forest magenta    | Manufacturer#2 | PROMO PLATED STEEL
+ blush thistle blue yellow saddle         | Manufacturer#1 | LARGE BRUSHED BRASS
+ goldenrod lavender spring chocolate lace | Manufacturer#1 | PROMO BURNISHED COPPER
+(3 rows)
+
+explain (verbose, costs off) select distinct p_mfgr, p_partkey, p_name from part_4 where p_mfgr='Manufacturer#1';
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ HashAggregate
+   Output: p_mfgr, p_partkey, p_name
+   Group By Key: part_4.p_mfgr, part_4.p_partkey, part_4.p_name
+   ->  Streaming (type: GATHER)
+         Output: p_mfgr, p_partkey, p_name
+         ->  HashAggregate
+               Output: p_mfgr, p_partkey, p_name
+               Group By Key: part_4.p_mfgr, part_4.p_partkey, part_4.p_name
+               ->  Partitioned Foreign Scan on public.part_4
+                     Output: p_mfgr, p_partkey, p_name
+                     Filter: (part_4.p_mfgr = 'Manufacturer#1'::text)
+                     Server Type: hdfs
+                     Orc File: /user/hive/warehouse/partition.db/part_4
+                     Partition pruning: p_mfgr(total 5; left 1)
+(14 rows)
+
+select distinct p_mfgr, p_partkey, p_name from part_4 where p_mfgr='Manufacturer#1' order by 1,2,3 limit 20 ;
+     p_mfgr     | p_partkey |                  p_name                  
+----------------+-----------+------------------------------------------
+ Manufacturer#1 |         1 | goldenrod lavender spring chocolate lace
+ Manufacturer#1 |         2 | blush thistle blue yellow saddle
+ Manufacturer#1 |         7 | moccasin green thistle khaki floral
+ Manufacturer#1 |        14 | khaki seashell rose cornsilk navajo
+ Manufacturer#1 |        15 | blanched honeydew sky turquoise medium
+ Manufacturer#1 |        18 | turquoise indian lemon lavender misty
+ Manufacturer#1 |        20 | ivory navy honeydew sandy midnight
+ Manufacturer#1 |        27 | saddle puff beige linen yellow
+ Manufacturer#1 |        34 | khaki steel rose ghost salmon
+ Manufacturer#1 |        46 | honeydew turquoise aquamarine spring tan
+ Manufacturer#1 |        56 | antique beige brown deep dodger
+ Manufacturer#1 |        60 | snow spring sandy olive tomato
+ Manufacturer#1 |        68 | bisque ivory mint purple almond
+ Manufacturer#1 |        70 | violet seashell firebrick dark navajo
+ Manufacturer#1 |        78 | blush forest slate seashell puff
+ Manufacturer#1 |        82 | khaki tomato purple almond tan
+ Manufacturer#1 |        83 | blush green dim lawn peru
+ Manufacturer#1 |       104 | plum cyan cornflower midnight royal
+ Manufacturer#1 |       105 | dodger slate pale mint navajo
+ Manufacturer#1 |       108 | bisque peach magenta tomato yellow
+(20 rows)
+
+explain (verbose, costs off) select distinct p_mfgr, p_partkey, p_name from part_4 where p_mfgr='Manufacturer#1' and p_partkey < 20000;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ HashAggregate
+   Output: p_mfgr, p_partkey, p_name
+   Group By Key: part_4.p_mfgr, part_4.p_partkey, part_4.p_name
+   ->  Streaming (type: GATHER)
+         Output: p_mfgr, p_partkey, p_name
+         ->  HashAggregate
+               Output: p_mfgr, p_partkey, p_name
+               Group By Key: part_4.p_mfgr, part_4.p_partkey, part_4.p_name
+               ->  Partitioned Foreign Scan on public.part_4
+                     Output: p_mfgr, p_partkey, p_name
+                     Filter: (part_4.p_mfgr = 'Manufacturer#1'::text)
+                     Pushdown Predicate Filter: (part_4.p_partkey < 20000)
+                     Server Type: hdfs
+                     Orc File: /user/hive/warehouse/partition.db/part_4
+                     Partition pruning: p_mfgr(total 5; left 1)
+(15 rows)
+
+select distinct p_mfgr, p_partkey, p_name from part_4 where p_mfgr='Manufacturer#1' and p_partkey < 20000 order by 1,2,3 limit 20 ;
+     p_mfgr     | p_partkey |                  p_name                  
+----------------+-----------+------------------------------------------
+ Manufacturer#1 |         1 | goldenrod lavender spring chocolate lace
+ Manufacturer#1 |         2 | blush thistle blue yellow saddle
+ Manufacturer#1 |         7 | moccasin green thistle khaki floral
+ Manufacturer#1 |        14 | khaki seashell rose cornsilk navajo
+ Manufacturer#1 |        15 | blanched honeydew sky turquoise medium
+ Manufacturer#1 |        18 | turquoise indian lemon lavender misty
+ Manufacturer#1 |        20 | ivory navy honeydew sandy midnight
+ Manufacturer#1 |        27 | saddle puff beige linen yellow
+ Manufacturer#1 |        34 | khaki steel rose ghost salmon
+ Manufacturer#1 |        46 | honeydew turquoise aquamarine spring tan
+ Manufacturer#1 |        56 | antique beige brown deep dodger
+ Manufacturer#1 |        60 | snow spring sandy olive tomato
+ Manufacturer#1 |        68 | bisque ivory mint purple almond
+ Manufacturer#1 |        70 | violet seashell firebrick dark navajo
+ Manufacturer#1 |        78 | blush forest slate seashell puff
+ Manufacturer#1 |        82 | khaki tomato purple almond tan
+ Manufacturer#1 |        83 | blush green dim lawn peru
+ Manufacturer#1 |       104 | plum cyan cornflower midnight royal
+ Manufacturer#1 |       105 | dodger slate pale mint navajo
+ Manufacturer#1 |       108 | bisque peach magenta tomato yellow
+(20 rows)
+
+select count(*) from part_4 where p_mfgr='Manufacturer#1';
+ count 
+-------
+ 40084
+(1 row)
+
+drop foreign table part_4;
+reset enable_vector_engine;
+--test special case:
+create foreign table spe_test1 (a int, b text)
+SERVER hdfs_server OPTIONS(format 'orc', filenames '/user/hive/warehouse/partition.db/part_2/c=2012-01-04/000000_0,/user/hive/warehouse/partition.db/part_2/c=2013-01-04/000000_0')
+distribute by roundrobin;
+select * from spe_test1 order by 1;
+ a |  b  
+---+-----
+ 1 | 123
+ 1 | 
+ 2 | 123
+(3 rows)
+
+drop foreign table spe_test1;
+create foreign table spe_test2 (a int, b varchar(20))
+SERVER hdfs_server OPTIONS(format 'orc', filenames '/user/hive/warehouse/partition.db/part_2/c=2012-01-04,/user/hive/warehouse/partition.db/part_2/c=2013-01-04')
+distribute by roundrobin;
+select * from spe_test2 order by 1;
+ERROR:  The entries in the options fileNames must be file!
+drop foreign table spe_test2;
+create foreign table spe_test3 (a int, b text)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_2')
+distribute by roundrobin;
+select * from spe_test3 order by 1;
+ a |  b  
+---+-----
+ 1 | 123
+ 1 | 
+ 2 | 123
+ 2 | 
+(4 rows)
+
+drop foreign table spe_test3;
+create foreign table spe_test4 (a int)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_3')
+distribute by roundrobin;
+select * from spe_test4 order by 1;
+ a 
+---
+ 1
+ 1
+ 2
+ 2
+(4 rows)
+
+drop foreign table spe_test4;
+CREATE foreign TABLE PARTITION_SELECT_PICT_TABLE_000_1(
+ C_CHAR_3 text,
+ C_VARCHAR_3 text,
+ C_INT INTEGER,
+ C_NUMERIC double precision,
+ C_TS_WITHOUT TIMESTAMP )
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/fvt_data_query_hive.db/foreign_partition_select_pict_table_000_1')
+distribute by roundrobin
+partition by (C_INT) automapped;
+CREATE foreign TABLE PARTITION_SELECT_PICT_TABLE_000_2(
+ C_CHAR_3 text,
+ C_VARCHAR_3 text,
+ C_INT INTEGER,
+ C_NUMERIC double precision,
+ C_TS_WITHOUT TIMESTAMP )
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/fvt_data_query_hive.db/foreign_partition_select_pict_table_000_2')
+distribute by roundrobin
+partition by (C_INT) automapped;
+SELECT trim(C_CHAR_3) , trim(C_VARCHAR_3) , C_INT , C_NUMERIC , C_TS_WITHOUT , lower(trim(C_CHAR_3)) , initcap(trim(C_VARCHAR_3)) , abs(C_INT) , abs(C_NUMERIC) , extract(year from C_TS_WITHOUT) FROM PARTITION_SELECT_PICT_TABLE_000_2 where ('abcdefg' <= C_VARCHAR_3 and 'ijklmno' >= C_VARCHAR_3) or C_INT >= 111 or C_NUMERIC in (111.1 , 222.2 , 333.3 , 444.4 , 555.5 , 666.6 , 777.7 , 888.8 , 999.9) ORDER BY 1 , 2 , 3 , 4 , 5;
+  btrim   |  btrim   | c_int | c_numeric |       c_ts_without       |  lower   | initcap  | abs |   abs   | date_part 
+----------+----------+-------+-----------+--------------------------+----------+----------+-----+---------+-----------
+ A1       | a1       |   444 |     1.111 | Sat Jan 01 12:12:12 2000 | a1       | A1       | 444 |   1.111 |      2000
+ A10      | a10      |   444 |    10.111 | Mon Jan 10 12:12:12 2000 | a10      | A10      | 444 |  10.111 |      2000
+ A11      | a11      |   444 |    11.111 | Tue Jan 11 12:12:12 2000 | a11      | A11      | 444 |  11.111 |      2000
+ A12      | a12      |   444 |    12.111 | Wed Jan 12 12:12:12 2000 | a12      | A12      | 444 |  12.111 |      2000
+ A13      | a13      |   444 |    13.111 | Thu Jan 13 12:12:12 2000 | a13      | A13      | 444 |  13.111 |      2000
+ A14      | a14      |   444 |    14.111 | Fri Jan 14 12:12:12 2000 | a14      | A14      | 444 |  14.111 |      2000
+ A15      | a15      |   444 |    15.111 | Sat Jan 15 12:12:12 2000 | a15      | A15      | 444 |  15.111 |      2000
+ A16      | a16      |   444 |    16.111 | Sun Jan 16 12:12:12 2000 | a16      | A16      | 444 |  16.111 |      2000
+ A17      | a17      |   444 |    17.111 | Mon Jan 17 12:12:12 2000 | a17      | A17      | 444 |  17.111 |      2000
+ A18      | a18      |   444 |    18.111 | Tue Jan 18 12:12:12 2000 | a18      | A18      | 444 |  18.111 |      2000
+ A19      | a19      |   444 |    19.111 | Wed Jan 19 12:12:12 2000 | a19      | A19      | 444 |  19.111 |      2000
+ A2       | a2       |   444 |     2.111 | Sun Jan 02 12:12:12 2000 | a2       | A2       | 444 |   2.111 |      2000
+ A20      | a20      |   444 |    20.111 | Thu Jan 20 12:12:12 2000 | a20      | A20      | 444 |  20.111 |      2000
+ A21      | a21      |   444 |    21.111 | Fri Jan 21 12:12:12 2000 | a21      | A21      | 444 |  21.111 |      2000
+ A22      | a22      |   444 |    22.111 | Sat Jan 22 12:12:12 2000 | a22      | A22      | 444 |  22.111 |      2000
+ A23      | a23      |   444 |    23.111 | Sun Jan 23 12:12:12 2000 | a23      | A23      | 444 |  23.111 |      2000
+ A24      | a24      |   444 |    24.111 | Mon Jan 24 12:12:12 2000 | a24      | A24      | 444 |  24.111 |      2000
+ A25      | a25      |   444 |    25.111 | Tue Jan 25 12:12:12 2000 | a25      | A25      | 444 |  25.111 |      2000
+ A26      | a26      |   444 |    26.111 | Wed Jan 26 12:12:12 2000 | a26      | A26      | 444 |  26.111 |      2000
+ A27      | a27      |   444 |    27.111 | Thu Jan 27 12:12:12 2000 | a27      | A27      | 444 |  27.111 |      2000
+ A28      | a28      |   444 |    28.111 | Fri Jan 28 12:12:12 2000 | a28      | A28      | 444 |  28.111 |      2000
+ A29      | a29      |   444 |    29.111 | Sat Jan 29 12:12:12 2000 | a29      | A29      | 444 |  29.111 |      2000
+ A3       | a3       |   444 |     3.111 | Mon Jan 03 12:12:12 2000 | a3       | A3       | 444 |   3.111 |      2000
+ A30      | a30      |   444 |    30.111 | Sun Jan 30 12:12:12 2000 | a30      | A30      | 444 |  30.111 |      2000
+ A31      | a31      |   444 |    31.111 | Mon Jan 31 12:12:12 2000 | a31      | A31      | 444 |  31.111 |      2000
+ A4       | a4       |   444 |     4.111 | Tue Jan 04 12:12:12 2000 | a4       | A4       | 444 |   4.111 |      2000
+ A5       | a5       |   444 |     5.111 | Wed Jan 05 12:12:12 2000 | a5       | A5       | 444 |   5.111 |      2000
+ A6       | a6       |   444 |     6.111 | Thu Jan 06 12:12:12 2000 | a6       | A6       | 444 |   6.111 |      2000
+ A7       | a7       |   444 |     7.111 | Fri Jan 07 12:12:12 2000 | a7       | A7       | 444 |   7.111 |      2000
+ A8       | a8       |   444 |     8.111 | Sat Jan 08 12:12:12 2000 | a8       | A8       | 444 |   8.111 |      2000
+ A9       | a9       |   444 |     9.111 | Sun Jan 09 12:12:12 2000 | a9       | A9       | 444 |   9.111 |      2000
+ ABCDEFG  | abcdefg  |   444 |     111.1 | Sat Jan 01 01:01:01 2000 | abcdefg  | Abcdefg  | 444 |   111.1 |      2000
+ ABCDEFG  | abcdefg  |   999 |     111.1 | Sat Jan 01 01:01:01 2000 | abcdefg  | Abcdefg  | 999 |   111.1 |      2000
+ ABCDEFG  |          |   444 |     111.1 | Sat Jan 01 01:01:01 2000 | abcdefg  |          | 444 |   111.1 |      2000
+ ABCDEFG  |          |   999 |           |                          | abcdefg  |          | 999 |         |          
+ B101     | b101     |   444 |   101.111 | Tue Feb 01 12:12:12 2000 | b101     | B101     | 444 | 101.111 |      2000
+ B102     | b102     |   444 |   102.111 | Wed Feb 02 12:12:12 2000 | b102     | B102     | 444 | 102.111 |      2000
+ B103     | b103     |   444 |   103.111 | Thu Feb 03 12:12:12 2000 | b103     | B103     | 444 | 103.111 |      2000
+ B104     | b104     |   444 |   104.111 | Fri Feb 04 12:12:12 2000 | b104     | B104     | 444 | 104.111 |      2000
+ B105     | b105     |   444 |   105.111 | Sat Feb 05 12:12:12 2000 | b105     | B105     | 444 | 105.111 |      2000
+ B106     | b106     |   444 |   106.111 | Sun Feb 06 12:12:12 2000 | b106     | B106     | 444 | 106.111 |      2000
+ B107     | b107     |   444 |   107.111 | Mon Feb 07 12:12:12 2000 | b107     | B107     | 444 | 107.111 |      2000
+ B108     | b108     |   444 |   108.111 | Tue Feb 08 12:12:12 2000 | b108     | B108     | 444 | 108.111 |      2000
+ B109     | b109     |   444 |   109.111 | Wed Feb 09 12:12:12 2000 | b109     | B109     | 444 | 109.111 |      2000
+ B110     | b110     |   444 |   110.111 | Thu Feb 10 12:12:12 2000 | b110     | B110     | 444 | 110.111 |      2000
+ B111     | b111     |   444 |   111.111 | Fri Feb 11 12:12:12 2000 | b111     | B111     | 444 | 111.111 |      2000
+ B112     | b112     |   444 |   112.111 | Sat Feb 12 12:12:12 2000 | b112     | B112     | 444 | 112.111 |      2000
+ B113     | b113     |   444 |   113.111 | Sun Feb 13 12:12:12 2000 | b113     | B113     | 444 | 113.111 |      2000
+ B114     | b114     |   444 |   114.111 | Mon Feb 14 12:12:12 2000 | b114     | B114     | 444 | 114.111 |      2000
+ B115     | b115     |   444 |   115.111 | Tue Feb 15 12:12:12 2000 | b115     | B115     | 444 | 115.111 |      2000
+ B116     | b116     |   444 |   116.111 | Wed Feb 16 12:12:12 2000 | b116     | B116     | 444 | 116.111 |      2000
+ B117     | b117     |   444 |   117.111 | Thu Feb 17 12:12:12 2000 | b117     | B117     | 444 | 117.111 |      2000
+ B118     | b118     |   444 |   118.111 | Fri Feb 18 12:12:12 2000 | b118     | B118     | 444 | 118.111 |      2000
+ B119     | b119     |   444 |   119.111 | Sat Feb 19 12:12:12 2000 | b119     | B119     | 444 | 119.111 |      2000
+ B120     | b120     |   444 |   120.111 | Sun Feb 20 12:12:12 2000 | b120     | B120     | 444 | 120.111 |      2000
+ B121     | b121     |   444 |   121.111 | Mon Feb 21 12:12:12 2000 | b121     | B121     | 444 | 121.111 |      2000
+ B122     | b122     |   444 |   122.111 | Tue Feb 22 12:12:12 2000 | b122     | B122     | 444 | 122.111 |      2000
+ B123     | b123     |   444 |   123.111 | Wed Feb 23 12:12:12 2000 | b123     | B123     | 444 | 123.111 |      2000
+ B124     | b124     |   444 |   124.111 | Thu Feb 24 12:12:12 2000 | b124     | B124     | 444 | 124.111 |      2000
+ B125     | b125     |   444 |   125.111 | Fri Feb 25 12:12:12 2000 | b125     | B125     | 444 | 125.111 |      2000
+ B126     | b126     |   444 |   126.111 | Sat Feb 26 12:12:12 2000 | b126     | B126     | 444 | 126.111 |      2000
+ B127     | b127     |   444 |   127.111 | Sun Feb 27 12:12:12 2000 | b127     | B127     | 444 | 127.111 |      2000
+ B128     | b128     |   444 |   128.111 | Mon Feb 28 12:12:12 2000 | b128     | B128     | 444 | 128.111 |      2000
+ BCDEFGH  | bcdefgh  |   444 |     222.2 | Wed Feb 02 02:02:02 2000 | bcdefgh  | Bcdefgh  | 444 |   222.2 |      2000
+ BCDEFGH  | bcdefgh  |   999 |           | Wed Feb 02 02:02:02 2000 | bcdefgh  | Bcdefgh  | 999 |         |      2000
+ BCDEFGH  |          |   444 |           | Wed Feb 02 02:02:02 2000 | bcdefgh  |          | 444 |         |      2000
+ C201     | c201     |   444 |   201.111 | Wed Mar 01 12:12:12 2000 | c201     | C201     | 444 | 201.111 |      2000
+ C202     | c202     |   444 |   202.111 | Thu Mar 02 12:12:12 2000 | c202     | C202     | 444 | 202.111 |      2000
+ C203     | c203     |   444 |   203.111 | Fri Mar 03 12:12:12 2000 | c203     | C203     | 444 | 203.111 |      2000
+ C204     | c204     |   444 |   204.111 | Sat Mar 04 12:12:12 2000 | c204     | C204     | 444 | 204.111 |      2000
+ C205     | c205     |   444 |   205.111 | Sun Mar 05 12:12:12 2000 | c205     | C205     | 444 | 205.111 |      2000
+ C206     | c206     |   444 |   206.111 | Mon Mar 06 12:12:12 2000 | c206     | C206     | 444 | 206.111 |      2000
+ C207     | c207     |   444 |   207.111 | Tue Mar 07 12:12:12 2000 | c207     | C207     | 444 | 207.111 |      2000
+ C208     | c208     |   444 |   208.111 | Wed Mar 08 12:12:12 2000 | c208     | C208     | 444 | 208.111 |      2000
+ C209     | c209     |   444 |   209.111 | Thu Mar 09 12:12:12 2000 | c209     | C209     | 444 | 209.111 |      2000
+ C210     | c210     |   444 |   210.111 | Fri Mar 10 12:12:12 2000 | c210     | C210     | 444 | 210.111 |      2000
+ C211     | c211     |   444 |   211.111 | Sat Mar 11 12:12:12 2000 | c211     | C211     | 444 | 211.111 |      2000
+ C212     | c212     |   444 |   212.111 | Sun Mar 12 12:12:12 2000 | c212     | C212     | 444 | 212.111 |      2000
+ C213     | c213     |   444 |   213.111 | Mon Mar 13 12:12:12 2000 | c213     | C213     | 444 | 213.111 |      2000
+ C214     | c214     |   444 |   214.111 | Tue Mar 14 12:12:12 2000 | c214     | C214     | 444 | 214.111 |      2000
+ C215     | c215     |   444 |   215.111 | Wed Mar 15 12:12:12 2000 | c215     | C215     | 444 | 215.111 |      2000
+ C216     | c216     |   444 |   216.111 | Thu Mar 16 12:12:12 2000 | c216     | C216     | 444 | 216.111 |      2000
+ C217     | c217     |   444 |   217.111 | Fri Mar 17 12:12:12 2000 | c217     | C217     | 444 | 217.111 |      2000
+ C218     | c218     |   444 |   218.111 | Sat Mar 18 12:12:12 2000 | c218     | C218     | 444 | 218.111 |      2000
+ C219     | c219     |   444 |   219.111 | Sun Mar 19 12:12:12 2000 | c219     | C219     | 444 | 219.111 |      2000
+ C220     | c220     |   444 |   220.111 | Mon Mar 20 12:12:12 2000 | c220     | C220     | 444 | 220.111 |      2000
+ C221     | c221     |   444 |   221.111 | Tue Mar 21 12:12:12 2000 | c221     | C221     | 444 | 221.111 |      2000
+ C222     | c222     |   444 |   222.111 | Wed Mar 22 12:12:12 2000 | c222     | C222     | 444 | 222.111 |      2000
+ C223     | c223     |   444 |   223.111 | Thu Mar 23 12:12:12 2000 | c223     | C223     | 444 | 223.111 |      2000
+ C224     | c224     |   444 |   224.111 | Fri Mar 24 12:12:12 2000 | c224     | C224     | 444 | 224.111 |      2000
+ C225     | c225     |   444 |   225.111 | Sat Mar 25 12:12:12 2000 | c225     | C225     | 444 | 225.111 |      2000
+ C226     | c226     |   444 |   226.111 | Sun Mar 26 12:12:12 2000 | c226     | C226     | 444 | 226.111 |      2000
+ C227     | c227     |   444 |   227.111 | Mon Mar 27 12:12:12 2000 | c227     | C227     | 444 | 227.111 |      2000
+ C228     | c228     |   444 |   228.111 | Tue Mar 28 12:12:12 2000 | c228     | C228     | 444 | 228.111 |      2000
+ C229     | c229     |   444 |   229.111 | Wed Mar 29 12:12:12 2000 | c229     | C229     | 444 | 229.111 |      2000
+ C230     | c230     |   444 |   230.111 | Thu Mar 30 12:12:12 2000 | c230     | C230     | 444 | 230.111 |      2000
+ C231     | c231     |   444 |   231.111 | Fri Mar 31 12:12:12 2000 | c231     | C231     | 444 | 231.111 |      2000
+ CDEFGHI  | cdefghi  |   444 |     333.3 | Fri Mar 03 03:03:03 2000 | cdefghi  | Cdefghi  | 444 |   333.3 |      2000
+ CDEFGHI  | cdefghi  |   444 |           | Fri Mar 03 03:03:03 2000 | cdefghi  | Cdefghi  | 444 |         |      2000
+ D301     | d301     |   444 |   301.111 | Sat Apr 01 12:12:12 2000 | d301     | D301     | 444 | 301.111 |      2000
+ D302     | d302     |   444 |   302.111 | Sun Apr 02 12:12:12 2000 | d302     | D302     | 444 | 302.111 |      2000
+ D303     | d303     |   444 |   303.111 | Mon Apr 03 12:12:12 2000 | d303     | D303     | 444 | 303.111 |      2000
+ D304     | d304     |   444 |   304.111 | Tue Apr 04 12:12:12 2000 | d304     | D304     | 444 | 304.111 |      2000
+ D305     | d305     |   444 |   305.111 | Wed Apr 05 12:12:12 2000 | d305     | D305     | 444 | 305.111 |      2000
+ D306     | d306     |   444 |   306.111 | Thu Apr 06 12:12:12 2000 | d306     | D306     | 444 | 306.111 |      2000
+ D307     | d307     |   444 |   307.111 | Fri Apr 07 12:12:12 2000 | d307     | D307     | 444 | 307.111 |      2000
+ D308     | d308     |   444 |   308.111 | Sat Apr 08 12:12:12 2000 | d308     | D308     | 444 | 308.111 |      2000
+ D309     | d309     |   444 |   309.111 | Sun Apr 09 12:12:12 2000 | d309     | D309     | 444 | 309.111 |      2000
+ D310     | d310     |   444 |   310.111 | Mon Apr 10 12:12:12 2000 | d310     | D310     | 444 | 310.111 |      2000
+ D311     | d311     |   444 |   311.111 | Tue Apr 11 12:12:12 2000 | d311     | D311     | 444 | 311.111 |      2000
+ D312     | d312     |   444 |   312.111 | Wed Apr 12 12:12:12 2000 | d312     | D312     | 444 | 312.111 |      2000
+ D313     | d313     |   444 |   313.111 | Thu Apr 13 12:12:12 2000 | d313     | D313     | 444 | 313.111 |      2000
+ D314     | d314     |   444 |   314.111 | Fri Apr 14 12:12:12 2000 | d314     | D314     | 444 | 314.111 |      2000
+ D315     | d315     |   444 |   315.111 | Sat Apr 15 12:12:12 2000 | d315     | D315     | 444 | 315.111 |      2000
+ D316     | d316     |   444 |   316.111 | Sun Apr 16 12:12:12 2000 | d316     | D316     | 444 | 316.111 |      2000
+ D317     | d317     |   444 |   317.111 | Mon Apr 17 12:12:12 2000 | d317     | D317     | 444 | 317.111 |      2000
+ D318     | d318     |   444 |   318.111 | Tue Apr 18 12:12:12 2000 | d318     | D318     | 444 | 318.111 |      2000
+ D319     | d319     |   444 |   319.111 | Wed Apr 19 12:12:12 2000 | d319     | D319     | 444 | 319.111 |      2000
+ D320     | d320     |   444 |   320.111 | Thu Apr 20 12:12:12 2000 | d320     | D320     | 444 | 320.111 |      2000
+ D321     | d321     |   444 |   321.111 | Fri Apr 21 12:12:12 2000 | d321     | D321     | 444 | 321.111 |      2000
+ D322     | d322     |   444 |   322.111 | Sat Apr 22 12:12:12 2000 | d322     | D322     | 444 | 322.111 |      2000
+ D323     | d323     |   444 |   323.111 | Sun Apr 23 12:12:12 2000 | d323     | D323     | 444 | 323.111 |      2000
+ D324     | d324     |   444 |   324.111 | Mon Apr 24 12:12:12 2000 | d324     | D324     | 444 | 324.111 |      2000
+ D325     | d325     |   444 |   325.111 | Tue Apr 25 12:12:12 2000 | d325     | D325     | 444 | 325.111 |      2000
+ D326     | d326     |   444 |   326.111 | Wed Apr 26 12:12:12 2000 | d326     | D326     | 444 | 326.111 |      2000
+ D327     | d327     |   444 |   327.111 | Thu Apr 27 12:12:12 2000 | d327     | D327     | 444 | 327.111 |      2000
+ D328     | d328     |   444 |   328.111 | Fri Apr 28 12:12:12 2000 | d328     | D328     | 444 | 328.111 |      2000
+ D329     | d329     |   444 |   329.111 | Sat Apr 29 12:12:12 2000 | d329     | D329     | 444 | 329.111 |      2000
+ D330     | d330     |   444 |   330.111 | Sun Apr 30 12:12:12 2000 | d330     | D330     | 444 | 330.111 |      2000
+ DE401    | de401    |   444 |   401.111 | Mon May 01 12:12:12 2000 | de401    | De401    | 444 | 401.111 |      2000
+ DE402    | de402    |   444 |   402.111 | Tue May 02 12:12:12 2000 | de402    | De402    | 444 | 402.111 |      2000
+ DE403    | de403    |   444 |   403.111 | Wed May 03 12:12:12 2000 | de403    | De403    | 444 | 403.111 |      2000
+ DE404    | de404    |   444 |   404.111 | Thu May 04 12:12:12 2000 | de404    | De404    | 444 | 404.111 |      2000
+ DE405    | de405    |   444 |   405.111 | Fri May 05 12:12:12 2000 | de405    | De405    | 444 | 405.111 |      2000
+ DE406    | de406    |   444 |   406.111 | Sat May 06 12:12:12 2000 | de406    | De406    | 444 | 406.111 |      2000
+ DE407    | de407    |   444 |   407.111 | Sun May 07 12:12:12 2000 | de407    | De407    | 444 | 407.111 |      2000
+ DE408    | de408    |   444 |   408.111 | Mon May 08 12:12:12 2000 | de408    | De408    | 444 | 408.111 |      2000
+ DE409    | de409    |   444 |   409.111 | Tue May 09 12:12:12 2000 | de409    | De409    | 444 | 409.111 |      2000
+ DE410    | de410    |   444 |   410.111 | Wed May 10 12:12:12 2000 | de410    | De410    | 444 | 410.111 |      2000
+ DE411    | de411    |   444 |   411.111 | Thu May 11 12:12:12 2000 | de411    | De411    | 444 | 411.111 |      2000
+ DE412    | de412    |   444 |   412.111 | Fri May 12 12:12:12 2000 | de412    | De412    | 444 | 412.111 |      2000
+ DE413    | de413    |   444 |   413.111 | Sat May 13 12:12:12 2000 | de413    | De413    | 444 | 413.111 |      2000
+ DE414    | de414    |   444 |   414.111 | Sun May 14 12:12:12 2000 | de414    | De414    | 444 | 414.111 |      2000
+ DE415    | de415    |   444 |   415.111 | Mon May 15 12:12:12 2000 | de415    | De415    | 444 | 415.111 |      2000
+ DE416    | de416    |   444 |   416.111 | Tue May 16 12:12:12 2000 | de416    | De416    | 444 | 416.111 |      2000
+ DE417    | de417    |   444 |   417.111 | Wed May 17 12:12:12 2000 | de417    | De417    | 444 | 417.111 |      2000
+ DE418    | de418    |   444 |   418.111 | Thu May 18 12:12:12 2000 | de418    | De418    | 444 | 418.111 |      2000
+ DE419    | de419    |   444 |   419.111 | Fri May 19 12:12:12 2000 | de419    | De419    | 444 | 419.111 |      2000
+ DE420    | de420    |   444 |   420.111 | Sat May 20 12:12:12 2000 | de420    | De420    | 444 | 420.111 |      2000
+ DE421    | de421    |   444 |   421.111 | Sun May 21 12:12:12 2000 | de421    | De421    | 444 | 421.111 |      2000
+ DE422    | de422    |   444 |   422.111 | Mon May 22 12:12:12 2000 | de422    | De422    | 444 | 422.111 |      2000
+ DE423    | de423    |   444 |   423.111 | Tue May 23 12:12:12 2000 | de423    | De423    | 444 | 423.111 |      2000
+ DE424    | de424    |   444 |   424.111 | Wed May 24 12:12:12 2000 | de424    | De424    | 444 | 424.111 |      2000
+ DE425    | de425    |   444 |   425.111 | Thu May 25 12:12:12 2000 | de425    | De425    | 444 | 425.111 |      2000
+ DE426    | de426    |   444 |   426.111 | Fri May 26 12:12:12 2000 | de426    | De426    | 444 | 426.111 |      2000
+ DE427    | de427    |   444 |   427.111 | Sat May 27 12:12:12 2000 | de427    | De427    | 444 | 427.111 |      2000
+ DE428    | de428    |   444 |   428.111 | Sun May 28 12:12:12 2000 | de428    | De428    | 444 | 428.111 |      2000
+ DE429    | de429    |   444 |   429.111 | Mon May 29 12:12:12 2000 | de429    | De429    | 444 | 429.111 |      2000
+ DE430    | de430    |   444 |   430.111 | Tue May 30 12:12:12 2000 | de430    | De430    | 444 | 430.111 |      2000
+ DE431    | de431    |   444 |   431.111 | Wed May 31 12:12:12 2000 | de431    | De431    | 444 | 431.111 |      2000
+ DEFGHIJ  | defghij  |   444 |     444.4 | Tue Apr 04 04:04:04 2000 | defghij  | Defghij  | 444 |   444.4 |      2000
+ E501     | e501     |   777 |   501.222 | Sat Jan 01 13:13:13 2000 | e501     | E501     | 777 | 501.222 |      2000
+ E502     | e502     |   777 |   502.222 | Sun Jan 02 13:13:13 2000 | e502     | E502     | 777 | 502.222 |      2000
+ E503     | e503     |   777 |   503.222 | Mon Jan 03 13:13:13 2000 | e503     | E503     | 777 | 503.222 |      2000
+ E504     | e504     |   777 |   504.222 | Tue Jan 04 13:13:13 2000 | e504     | E504     | 777 | 504.222 |      2000
+ E505     | e505     |   777 |   505.222 | Wed Jan 05 13:13:13 2000 | e505     | E505     | 777 | 505.222 |      2000
+ E506     | e506     |   777 |   506.222 | Thu Jan 06 13:13:13 2000 | e506     | E506     | 777 | 506.222 |      2000
+ E507     | e507     |   777 |   507.222 | Fri Jan 07 13:13:13 2000 | e507     | E507     | 777 | 507.222 |      2000
+ E508     | e508     |   777 |   508.222 | Sat Jan 08 13:13:13 2000 | e508     | E508     | 777 | 508.222 |      2000
+ E509     | e509     |   777 |   509.222 | Sun Jan 09 13:13:13 2000 | e509     | E509     | 777 | 509.222 |      2000
+ E510     | e510     |   777 |   510.222 | Mon Jan 10 13:13:13 2000 | e510     | E510     | 777 | 510.222 |      2000
+ E511     | e511     |   777 |   511.222 | Tue Jan 11 13:13:13 2000 | e511     | E511     | 777 | 511.222 |      2000
+ E512     | e512     |   777 |   512.222 | Wed Jan 12 13:13:13 2000 | e512     | E512     | 777 | 512.222 |      2000
+ E513     | e513     |   777 |   513.222 | Thu Jan 13 13:13:13 2000 | e513     | E513     | 777 | 513.222 |      2000
+ E514     | e514     |   777 |   514.222 | Fri Jan 14 13:13:13 2000 | e514     | E514     | 777 | 514.222 |      2000
+ E515     | e515     |   777 |   515.222 | Sat Jan 15 13:13:13 2000 | e515     | E515     | 777 | 515.222 |      2000
+ E516     | e516     |   777 |   516.222 | Sun Jan 16 13:13:13 2000 | e516     | E516     | 777 | 516.222 |      2000
+ E517     | e517     |   777 |   517.222 | Mon Jan 17 13:13:13 2000 | e517     | E517     | 777 | 517.222 |      2000
+ E518     | e518     |   777 |   518.222 | Tue Jan 18 13:13:13 2000 | e518     | E518     | 777 | 518.222 |      2000
+ E519     | e519     |   777 |   519.222 | Wed Jan 19 13:13:13 2000 | e519     | E519     | 777 | 519.222 |      2000
+ E520     | e520     |   777 |   520.222 | Thu Jan 20 13:13:13 2000 | e520     | E520     | 777 | 520.222 |      2000
+ E521     | e521     |   777 |   521.222 | Fri Jan 21 13:13:13 2000 | e521     | E521     | 777 | 521.222 |      2000
+ E522     | e522     |   777 |   522.222 | Sat Jan 22 13:13:13 2000 | e522     | E522     | 777 | 522.222 |      2000
+ E523     | e523     |   777 |   523.222 | Sun Jan 23 13:13:13 2000 | e523     | E523     | 777 | 523.222 |      2000
+ E524     | e524     |   777 |   524.222 | Mon Jan 24 13:13:13 2000 | e524     | E524     | 777 | 524.222 |      2000
+ E525     | e525     |   777 |   525.222 | Tue Jan 25 13:13:13 2000 | e525     | E525     | 777 | 525.222 |      2000
+ E526     | e526     |   777 |   526.222 | Wed Jan 26 13:13:13 2000 | e526     | E526     | 777 | 526.222 |      2000
+ E527     | e527     |   777 |   527.222 | Thu Jan 27 13:13:13 2000 | e527     | E527     | 777 | 527.222 |      2000
+ E528     | e528     |   777 |   528.222 | Fri Jan 28 13:13:13 2000 | e528     | E528     | 777 | 528.222 |      2000
+ E529     | e529     |   777 |   529.222 | Sat Jan 29 13:13:13 2000 | e529     | E529     | 777 | 529.222 |      2000
+ E530     | e530     |   777 |   530.222 | Sun Jan 30 13:13:13 2000 | e530     | E530     | 777 | 530.222 |      2000
+ E531     | e531     |   777 |   531.222 | Mon Jan 31 13:13:13 2000 | e531     | E531     | 777 | 531.222 |      2000
+ EFGHIJK  | efghijk  |   777 |     555.5 | Fri May 05 05:05:05 2000 | efghijk  | Efghijk  | 777 |   555.5 |      2000
+ EFGHIJK  |          |   999 |     555.5 | Fri May 05 05:05:05 2000 | efghijk  |          | 999 |   555.5 |      2000
+ F601     | f601     |   777 |   601.222 | Tue Feb 01 13:13:13 2000 | f601     | F601     | 777 | 601.222 |      2000
+ F602     | f602     |   777 |   602.222 | Wed Feb 02 13:13:13 2000 | f602     | F602     | 777 | 602.222 |      2000
+ F603     | f603     |   777 |   603.222 | Thu Feb 03 13:13:13 2000 | f603     | F603     | 777 | 603.222 |      2000
+ F604     | f604     |   777 |   604.222 | Fri Feb 04 13:13:13 2000 | f604     | F604     | 777 | 604.222 |      2000
+ F605     | f605     |   777 |   605.222 | Sat Feb 05 13:13:13 2000 | f605     | F605     | 777 | 605.222 |      2000
+ F606     | f606     |   777 |   606.222 | Sun Feb 06 13:13:13 2000 | f606     | F606     | 777 | 606.222 |      2000
+ F607     | f607     |   777 |   607.222 | Mon Feb 07 13:13:13 2000 | f607     | F607     | 777 | 607.222 |      2000
+ F608     | f608     |   777 |   608.222 | Tue Feb 08 13:13:13 2000 | f608     | F608     | 777 | 608.222 |      2000
+ F609     | f609     |   777 |   609.222 | Wed Feb 09 13:13:13 2000 | f609     | F609     | 777 | 609.222 |      2000
+ F610     | f610     |   777 |   610.222 | Thu Feb 10 13:13:13 2000 | f610     | F610     | 777 | 610.222 |      2000
+ F611     | f611     |   777 |   611.222 | Fri Feb 11 13:13:13 2000 | f611     | F611     | 777 | 611.222 |      2000
+ F612     | f612     |   777 |   612.222 | Sat Feb 12 13:13:13 2000 | f612     | F612     | 777 | 612.222 |      2000
+ F613     | f613     |   777 |   613.222 | Sun Feb 13 13:13:13 2000 | f613     | F613     | 777 | 613.222 |      2000
+ F614     | f614     |   777 |   614.222 | Mon Feb 14 13:13:13 2000 | f614     | F614     | 777 | 614.222 |      2000
+ F615     | f615     |   777 |   615.222 | Tue Feb 15 13:13:13 2000 | f615     | F615     | 777 | 615.222 |      2000
+ F616     | f616     |   777 |   616.222 | Wed Feb 16 13:13:13 2000 | f616     | F616     | 777 | 616.222 |      2000
+ F617     | f617     |   777 |   617.222 | Thu Feb 17 13:13:13 2000 | f617     | F617     | 777 | 617.222 |      2000
+ F618     | f618     |   777 |   618.222 | Fri Feb 18 13:13:13 2000 | f618     | F618     | 777 | 618.222 |      2000
+ F619     | f619     |   777 |   619.222 | Sat Feb 19 13:13:13 2000 | f619     | F619     | 777 | 619.222 |      2000
+ F620     | f620     |   777 |   620.222 | Sun Feb 20 13:13:13 2000 | f620     | F620     | 777 | 620.222 |      2000
+ F621     | f621     |   777 |   621.222 | Mon Feb 21 13:13:13 2000 | f621     | F621     | 777 | 621.222 |      2000
+ F622     | f622     |   777 |   622.222 | Tue Feb 22 13:13:13 2000 | f622     | F622     | 777 | 622.222 |      2000
+ F623     | f623     |   777 |   623.222 | Wed Feb 23 13:13:13 2000 | f623     | F623     | 777 | 623.222 |      2000
+ F624     | f624     |   777 |   624.222 | Thu Feb 24 13:13:13 2000 | f624     | F624     | 777 | 624.222 |      2000
+ F625     | f625     |   777 |   625.222 | Fri Feb 25 13:13:13 2000 | f625     | F625     | 777 | 625.222 |      2000
+ F626     | f626     |   777 |   626.222 | Sat Feb 26 13:13:13 2000 | f626     | F626     | 777 | 626.222 |      2000
+ F627     | f627     |   777 |   627.222 | Sun Feb 27 13:13:13 2000 | f627     | F627     | 777 | 627.222 |      2000
+ F628     | f628     |   777 |   628.222 | Mon Feb 28 13:13:13 2000 | f628     | F628     | 777 | 628.222 |      2000
+ FGHIJKL  | fghijkl  |   777 |     666.6 | Tue Jun 06 06:06:06 2000 | fghijkl  | Fghijkl  | 777 |   666.6 |      2000
+ FGHIJKL  | fghijkl  |   999 |           |                          | fghijkl  | Fghijkl  | 999 |         |          
+ G701     | g701     |   777 |   701.222 | Wed Mar 01 13:13:13 2000 | g701     | G701     | 777 | 701.222 |      2000
+ G702     | g702     |   777 |   702.222 | Thu Mar 02 13:13:13 2000 | g702     | G702     | 777 | 702.222 |      2000
+ G703     | g703     |   777 |   703.222 | Fri Mar 03 13:13:13 2000 | g703     | G703     | 777 | 703.222 |      2000
+ G704     | g704     |   777 |   704.222 | Sat Mar 04 13:13:13 2000 | g704     | G704     | 777 | 704.222 |      2000
+ G705     | g705     |   777 |   705.222 | Sun Mar 05 13:13:13 2000 | g705     | G705     | 777 | 705.222 |      2000
+ G706     | g706     |   777 |   706.222 | Mon Mar 06 13:13:13 2000 | g706     | G706     | 777 | 706.222 |      2000
+ G707     | g707     |   777 |   707.222 | Tue Mar 07 13:13:13 2000 | g707     | G707     | 777 | 707.222 |      2000
+ G708     | g708     |   777 |   708.222 | Wed Mar 08 13:13:13 2000 | g708     | G708     | 777 | 708.222 |      2000
+ G709     | g709     |   777 |   709.222 | Thu Mar 09 13:13:13 2000 | g709     | G709     | 777 | 709.222 |      2000
+ G710     | g710     |   777 |   710.222 | Fri Mar 10 13:13:13 2000 | g710     | G710     | 777 | 710.222 |      2000
+ G711     | g711     |   777 |   711.222 | Sat Mar 11 13:13:13 2000 | g711     | G711     | 777 | 711.222 |      2000
+ G712     | g712     |   777 |   712.222 | Sun Mar 12 13:13:13 2000 | g712     | G712     | 777 | 712.222 |      2000
+ G713     | g713     |   777 |   713.222 | Mon Mar 13 13:13:13 2000 | g713     | G713     | 777 | 713.222 |      2000
+ G714     | g714     |   777 |   714.222 | Tue Mar 14 13:13:13 2000 | g714     | G714     | 777 | 714.222 |      2000
+ G715     | g715     |   777 |   715.222 | Wed Mar 15 13:13:13 2000 | g715     | G715     | 777 | 715.222 |      2000
+ G716     | g716     |   777 |   716.222 | Thu Mar 16 13:13:13 2000 | g716     | G716     | 777 | 716.222 |      2000
+ G717     | g717     |   777 |   717.222 | Fri Mar 17 13:13:13 2000 | g717     | G717     | 777 | 717.222 |      2000
+ G718     | g718     |   777 |   718.222 | Sat Mar 18 13:13:13 2000 | g718     | G718     | 777 | 718.222 |      2000
+ G719     | g719     |   777 |   719.222 | Sun Mar 19 13:13:13 2000 | g719     | G719     | 777 | 719.222 |      2000
+ G720     | g720     |   777 |   720.222 | Mon Mar 20 13:13:13 2000 | g720     | G720     | 777 | 720.222 |      2000
+ G721     | g721     |   777 |   721.222 | Tue Mar 21 13:13:13 2000 | g721     | G721     | 777 | 721.222 |      2000
+ G722     | g722     |   777 |   722.222 | Wed Mar 22 13:13:13 2000 | g722     | G722     | 777 | 722.222 |      2000
+ G723     | g723     |   777 |   723.222 | Thu Mar 23 13:13:13 2000 | g723     | G723     | 777 | 723.222 |      2000
+ G724     | g724     |   777 |   724.222 | Fri Mar 24 13:13:13 2000 | g724     | G724     | 777 | 724.222 |      2000
+ G725     | g725     |   777 |   725.222 | Sat Mar 25 13:13:13 2000 | g725     | G725     | 777 | 725.222 |      2000
+ G726     | g726     |   777 |   726.222 | Sun Mar 26 13:13:13 2000 | g726     | G726     | 777 | 726.222 |      2000
+ G727     | g727     |   777 |   727.222 | Mon Mar 27 13:13:13 2000 | g727     | G727     | 777 | 727.222 |      2000
+ G728     | g728     |   777 |   728.222 | Tue Mar 28 13:13:13 2000 | g728     | G728     | 777 | 728.222 |      2000
+ G729     | g729     |   777 |   729.222 | Wed Mar 29 13:13:13 2000 | g729     | G729     | 777 | 729.222 |      2000
+ G730     | g730     |   777 |   730.222 | Thu Mar 30 13:13:13 2000 | g730     | G730     | 777 | 730.222 |      2000
+ G731     | g731     |   777 |   731.222 | Fri Mar 31 13:13:13 2000 | g731     | G731     | 777 | 731.222 |      2000
+ GH801    | gh801    |   999 |   801.222 | Sat Apr 01 13:13:13 2000 | gh801    | Gh801    | 999 | 801.222 |      2000
+ GH802    | gh802    |   999 |   802.222 | Sun Apr 02 13:13:13 2000 | gh802    | Gh802    | 999 | 802.222 |      2000
+ GH803    | gh803    |   999 |   803.222 | Mon Apr 03 13:13:13 2000 | gh803    | Gh803    | 999 | 803.222 |      2000
+ GH804    | gh804    |   999 |   804.222 | Tue Apr 04 13:13:13 2000 | gh804    | Gh804    | 999 | 804.222 |      2000
+ GH805    | gh805    |   999 |   805.222 | Wed Apr 05 13:13:13 2000 | gh805    | Gh805    | 999 | 805.222 |      2000
+ GH806    | gh806    |   999 |   806.222 | Thu Apr 06 13:13:13 2000 | gh806    | Gh806    | 999 | 806.222 |      2000
+ GH807    | gh807    |   999 |   807.222 | Fri Apr 07 13:13:13 2000 | gh807    | Gh807    | 999 | 807.222 |      2000
+ GH808    | gh808    |   999 |   808.222 | Sat Apr 08 13:13:13 2000 | gh808    | Gh808    | 999 | 808.222 |      2000
+ GH809    | gh809    |   999 |   809.222 | Sun Apr 09 13:13:13 2000 | gh809    | Gh809    | 999 | 809.222 |      2000
+ GH810    | gh810    |   999 |   810.222 | Mon Apr 10 13:13:13 2000 | gh810    | Gh810    | 999 | 810.222 |      2000
+ GH811    | gh811    |   999 |   811.222 | Tue Apr 11 13:13:13 2000 | gh811    | Gh811    | 999 | 811.222 |      2000
+ GH812    | gh812    |   999 |   812.222 | Wed Apr 12 13:13:13 2000 | gh812    | Gh812    | 999 | 812.222 |      2000
+ GH813    | gh813    |   999 |   813.222 | Thu Apr 13 13:13:13 2000 | gh813    | Gh813    | 999 | 813.222 |      2000
+ GH814    | gh814    |   999 |   814.222 | Fri Apr 14 13:13:13 2000 | gh814    | Gh814    | 999 | 814.222 |      2000
+ GH815    | gh815    |   999 |   815.222 | Sat Apr 15 13:13:13 2000 | gh815    | Gh815    | 999 | 815.222 |      2000
+ GH816    | gh816    |   999 |   816.222 | Sun Apr 16 13:13:13 2000 | gh816    | Gh816    | 999 | 816.222 |      2000
+ GH817    | gh817    |   999 |   817.222 | Mon Apr 17 13:13:13 2000 | gh817    | Gh817    | 999 | 817.222 |      2000
+ GH818    | gh818    |   999 |   818.222 | Tue Apr 18 13:13:13 2000 | gh818    | Gh818    | 999 | 818.222 |      2000
+ GH819    | gh819    |   999 |   819.222 | Wed Apr 19 13:13:13 2000 | gh819    | Gh819    | 999 | 819.222 |      2000
+ GH820    | gh820    |   999 |   820.222 | Thu Apr 20 13:13:13 2000 | gh820    | Gh820    | 999 | 820.222 |      2000
+ GH821    | gh821    |   999 |   821.222 | Fri Apr 21 13:13:13 2000 | gh821    | Gh821    | 999 | 821.222 |      2000
+ GH822    | gh822    |   999 |   822.222 | Sat Apr 22 13:13:13 2000 | gh822    | Gh822    | 999 | 822.222 |      2000
+ GH823    | gh823    |   999 |   823.222 | Sun Apr 23 13:13:13 2000 | gh823    | Gh823    | 999 | 823.222 |      2000
+ GH824    | gh824    |   999 |   824.222 | Mon Apr 24 13:13:13 2000 | gh824    | Gh824    | 999 | 824.222 |      2000
+ GH825    | gh825    |   999 |   825.222 | Tue Apr 25 13:13:13 2000 | gh825    | Gh825    | 999 | 825.222 |      2000
+ GH826    | gh826    |   999 |   826.222 | Wed Apr 26 13:13:13 2000 | gh826    | Gh826    | 999 | 826.222 |      2000
+ GH827    | gh827    |   999 |   827.222 | Thu Apr 27 13:13:13 2000 | gh827    | Gh827    | 999 | 827.222 |      2000
+ GH828    | gh828    |   999 |   828.222 | Fri Apr 28 13:13:13 2000 | gh828    | Gh828    | 999 | 828.222 |      2000
+ GH829    | gh829    |   999 |   829.222 | Sat Apr 29 13:13:13 2000 | gh829    | Gh829    | 999 | 829.222 |      2000
+ GH830    | gh830    |   999 |   830.222 | Sun Apr 30 13:13:13 2000 | gh830    | Gh830    | 999 | 830.222 |      2000
+ GHI901   | ghi901   |   999 |   901.222 | Mon May 01 13:13:13 2000 | ghi901   | Ghi901   | 999 | 901.222 |      2000
+ GHI902   | ghi902   |   999 |   902.222 | Tue May 02 13:13:13 2000 | ghi902   | Ghi902   | 999 | 902.222 |      2000
+ GHI903   | ghi903   |   999 |   903.222 | Wed May 03 13:13:13 2000 | ghi903   | Ghi903   | 999 | 903.222 |      2000
+ GHI904   | ghi904   |   999 |   904.222 | Thu May 04 13:13:13 2000 | ghi904   | Ghi904   | 999 | 904.222 |      2000
+ GHI905   | ghi905   |   999 |   905.222 | Fri May 05 13:13:13 2000 | ghi905   | Ghi905   | 999 | 905.222 |      2000
+ GHI906   | ghi906   |   999 |   906.222 | Sat May 06 13:13:13 2000 | ghi906   | Ghi906   | 999 | 906.222 |      2000
+ GHI907   | ghi907   |   999 |   907.222 | Sun May 07 13:13:13 2000 | ghi907   | Ghi907   | 999 | 907.222 |      2000
+ GHI908   | ghi908   |   999 |   908.222 | Mon May 08 13:13:13 2000 | ghi908   | Ghi908   | 999 | 908.222 |      2000
+ GHI909   | ghi909   |   999 |   909.222 | Tue May 09 13:13:13 2000 | ghi909   | Ghi909   | 999 | 909.222 |      2000
+ GHI910   | ghi910   |   999 |   910.222 | Wed May 10 13:13:13 2000 | ghi910   | Ghi910   | 999 | 910.222 |      2000
+ GHI911   | ghi911   |   999 |   911.222 | Thu May 11 13:13:13 2000 | ghi911   | Ghi911   | 999 | 911.222 |      2000
+ GHI912   | ghi912   |   999 |   912.222 | Fri May 12 13:13:13 2000 | ghi912   | Ghi912   | 999 | 912.222 |      2000
+ GHI913   | ghi913   |   999 |   913.222 | Sat May 13 13:13:13 2000 | ghi913   | Ghi913   | 999 | 913.222 |      2000
+ GHI914   | ghi914   |   999 |   914.222 | Sun May 14 13:13:13 2000 | ghi914   | Ghi914   | 999 | 914.222 |      2000
+ GHI915   | ghi915   |   999 |   915.222 | Mon May 15 13:13:13 2000 | ghi915   | Ghi915   | 999 | 915.222 |      2000
+ GHI916   | ghi916   |   999 |   916.222 | Tue May 16 13:13:13 2000 | ghi916   | Ghi916   | 999 | 916.222 |      2000
+ GHI917   | ghi917   |   999 |   917.222 | Wed May 17 13:13:13 2000 | ghi917   | Ghi917   | 999 | 917.222 |      2000
+ GHI918   | ghi918   |   999 |   918.222 | Thu May 18 13:13:13 2000 | ghi918   | Ghi918   | 999 | 918.222 |      2000
+ GHI919   | ghi919   |   999 |   919.222 | Fri May 19 13:13:13 2000 | ghi919   | Ghi919   | 999 | 919.222 |      2000
+ GHI920   | ghi920   |   999 |   920.222 | Sat May 20 13:13:13 2000 | ghi920   | Ghi920   | 999 | 920.222 |      2000
+ GHI921   | ghi921   |   999 |   921.222 | Sun May 21 13:13:13 2000 | ghi921   | Ghi921   | 999 | 921.222 |      2000
+ GHI922   | ghi922   |   999 |   922.222 | Mon May 22 13:13:13 2000 | ghi922   | Ghi922   | 999 | 922.222 |      2000
+ GHI923   | ghi923   |   999 |   923.222 | Tue May 23 13:13:13 2000 | ghi923   | Ghi923   | 999 | 923.222 |      2000
+ GHI924   | ghi924   |   999 |   924.222 | Wed May 24 13:13:13 2000 | ghi924   | Ghi924   | 999 | 924.222 |      2000
+ GHI925   | ghi925   |   999 |   925.222 | Thu May 25 13:13:13 2000 | ghi925   | Ghi925   | 999 | 925.222 |      2000
+ GHI926   | ghi926   |   999 |   926.222 | Fri May 26 13:13:13 2000 | ghi926   | Ghi926   | 999 | 926.222 |      2000
+ GHI927   | ghi927   |   999 |   927.222 | Sat May 27 13:13:13 2000 | ghi927   | Ghi927   | 999 | 927.222 |      2000
+ GHI928   | ghi928   |   999 |   928.222 | Sun May 28 13:13:13 2000 | ghi928   | Ghi928   | 999 | 928.222 |      2000
+ GHI929   | ghi929   |   999 |   929.222 | Mon May 29 13:13:13 2000 | ghi929   | Ghi929   | 999 | 929.222 |      2000
+ GHI930   | ghi930   |   999 |   930.222 | Tue May 30 13:13:13 2000 | ghi930   | Ghi930   | 999 | 930.222 |      2000
+ GHI931   | ghi931   |   999 |   931.222 | Wed May 31 13:13:13 2000 | ghi931   | Ghi931   | 999 | 931.222 |      2000
+ GHIJ1001 | ghij1001 |   444 |    51.222 | Sat Jul 01 13:13:13 2000 | ghij1001 | Ghij1001 | 444 |  51.222 |      2000
+ GHIJ1002 | ghij1002 |   444 |    52.222 | Sun Jul 02 13:13:13 2000 | ghij1002 | Ghij1002 | 444 |  52.222 |      2000
+ GHIJ1003 | ghij1003 |   444 |    53.222 | Mon Jul 03 13:13:13 2000 | ghij1003 | Ghij1003 | 444 |  53.222 |      2000
+ GHIJ1004 | ghij1004 |   444 |    54.222 | Tue Jul 04 13:13:13 2000 | ghij1004 | Ghij1004 | 444 |  54.222 |      2000
+ GHIJ1005 | ghij1005 |   444 |    55.222 | Wed Jul 05 13:13:13 2000 | ghij1005 | Ghij1005 | 444 |  55.222 |      2000
+ GHIJ1006 | ghij1006 |   444 |    56.222 | Thu Jul 06 13:13:13 2000 | ghij1006 | Ghij1006 | 444 |  56.222 |      2000
+ GHIJ1007 | ghij1007 |   444 |    57.222 | Fri Jul 07 13:13:13 2000 | ghij1007 | Ghij1007 | 444 |  57.222 |      2000
+ GHIJ1008 | ghij1008 |   444 |    58.222 | Sat Jul 08 13:13:13 2000 | ghij1008 | Ghij1008 | 444 |  58.222 |      2000
+ GHIJ1009 | ghij1009 |   444 |    59.222 | Sun Jul 09 13:13:13 2000 | ghij1009 | Ghij1009 | 444 |  59.222 |      2000
+ GHIJ1010 | ghij1010 |   444 |    60.222 | Mon Jul 10 13:13:13 2000 | ghij1010 | Ghij1010 | 444 |  60.222 |      2000
+ GHIJ1011 | ghij1011 |   444 |    61.222 | Tue Jul 11 13:13:13 2000 | ghij1011 | Ghij1011 | 444 |  61.222 |      2000
+ GHIJ1012 | ghij1012 |   444 |    62.222 | Wed Jul 12 13:13:13 2000 | ghij1012 | Ghij1012 | 444 |  62.222 |      2000
+ GHIJ1013 | ghij1013 |   444 |    63.222 | Thu Jul 13 13:13:13 2000 | ghij1013 | Ghij1013 | 444 |  63.222 |      2000
+ GHIJ1014 | ghij1014 |   444 |    64.222 | Fri Jul 14 13:13:13 2000 | ghij1014 | Ghij1014 | 444 |  64.222 |      2000
+ GHIJ1015 | ghij1015 |   444 |    65.222 | Sat Jul 15 13:13:13 2000 | ghij1015 | Ghij1015 | 444 |  65.222 |      2000
+ GHIJ1016 | ghij1016 |   444 |    66.222 | Sun Jul 16 13:13:13 2000 | ghij1016 | Ghij1016 | 444 |  66.222 |      2000
+ GHIJ1017 | ghij1017 |   444 |    67.222 | Mon Jul 17 13:13:13 2000 | ghij1017 | Ghij1017 | 444 |  67.222 |      2000
+ GHIJ1018 | ghij1018 |   444 |    68.222 | Tue Jul 18 13:13:13 2000 | ghij1018 | Ghij1018 | 444 |  68.222 |      2000
+ GHIJ1019 | ghij1019 |   444 |    69.222 | Wed Jul 19 13:13:13 2000 | ghij1019 | Ghij1019 | 444 |  69.222 |      2000
+ GHIJ1020 | ghij1020 |   444 |    70.222 | Thu Jul 20 13:13:13 2000 | ghij1020 | Ghij1020 | 444 |  70.222 |      2000
+ GHIJ1021 | ghij1021 |   444 |    71.222 | Fri Jul 21 13:13:13 2000 | ghij1021 | Ghij1021 | 444 |  71.222 |      2000
+ GHIJ1022 | ghij1022 |   444 |    72.222 | Sat Jul 22 13:13:13 2000 | ghij1022 | Ghij1022 | 444 |  72.222 |      2000
+ GHIJ1023 | ghij1023 |   444 |    73.222 | Sun Jul 23 13:13:13 2000 | ghij1023 | Ghij1023 | 444 |  73.222 |      2000
+ GHIJ1024 | ghij1024 |   444 |    74.222 | Mon Jul 24 13:13:13 2000 | ghij1024 | Ghij1024 | 444 |  74.222 |      2000
+ GHIJ1025 | ghij1025 |   444 |    75.222 | Tue Jul 25 13:13:13 2000 | ghij1025 | Ghij1025 | 444 |  75.222 |      2000
+ GHIJ1026 | ghij1026 |   444 |    76.222 | Wed Jul 26 13:13:13 2000 | ghij1026 | Ghij1026 | 444 |  76.222 |      2000
+ GHIJ1027 | ghij1027 |   444 |    77.222 | Thu Jul 27 13:13:13 2000 | ghij1027 | Ghij1027 | 444 |  77.222 |      2000
+ GHIJ1028 | ghij1028 |   444 |    78.222 | Fri Jul 28 13:13:13 2000 | ghij1028 | Ghij1028 | 444 |  78.222 |      2000
+ GHIJ1029 | ghij1029 |   444 |    79.222 | Sat Jul 29 13:13:13 2000 | ghij1029 | Ghij1029 | 444 |  79.222 |      2000
+ GHIJ1030 | ghij1030 |   444 |    80.222 | Sun Jul 30 13:13:13 2000 | ghij1030 | Ghij1030 | 444 |  80.222 |      2000
+ GHIJ1031 | ghij1031 |   444 |    81.222 | Mon Jul 31 13:13:13 2000 | ghij1031 | Ghij1031 | 444 |  81.222 |      2000
+ GHIJKLM  | ghijklm  |   777 |     777.7 | Fri Jul 07 07:07:07 2000 | ghijklm  | Ghijklm  | 777 |   777.7 |      2000
+ GHIJKLM  |          |   777 |           | Fri Jul 07 07:07:07 2000 | ghijklm  |          | 777 |         |      2000
+ H1501    | h1501    |   444 |   151.333 | Sat Jan 01 14:14:14 2000 | h1501    | H1501    | 444 | 151.333 |      2000
+ H1502    | h1502    |   444 |   152.333 | Sun Jan 02 14:14:14 2000 | h1502    | H1502    | 444 | 152.333 |      2000
+ H1503    | h1503    |   444 |   153.333 | Mon Jan 03 14:14:14 2000 | h1503    | H1503    | 444 | 153.333 |      2000
+ H1504    | h1504    |   444 |   154.333 | Tue Jan 04 14:14:14 2000 | h1504    | H1504    | 444 | 154.333 |      2000
+ H1505    | h1505    |   444 |   155.333 | Wed Jan 05 14:14:14 2000 | h1505    | H1505    | 444 | 155.333 |      2000
+ H1506    | h1506    |   444 |   156.333 | Thu Jan 06 14:14:14 2000 | h1506    | H1506    | 444 | 156.333 |      2000
+ H1507    | h1507    |   444 |   157.333 | Fri Jan 07 14:14:14 2000 | h1507    | H1507    | 444 | 157.333 |      2000
+ H1508    | h1508    |   444 |   158.333 | Sat Jan 08 14:14:14 2000 | h1508    | H1508    | 444 | 158.333 |      2000
+ H1509    | h1509    |   444 |   159.333 | Sun Jan 09 14:14:14 2000 | h1509    | H1509    | 444 | 159.333 |      2000
+ H1510    | h1510    |   444 |   160.333 | Mon Jan 10 14:14:14 2000 | h1510    | H1510    | 444 | 160.333 |      2000
+ H1511    | h1511    |   444 |   161.333 | Tue Jan 11 14:14:14 2000 | h1511    | H1511    | 444 | 161.333 |      2000
+ H1512    | h1512    |   444 |   162.333 | Wed Jan 12 14:14:14 2000 | h1512    | H1512    | 444 | 162.333 |      2000
+ H1513    | h1513    |   444 |   163.333 | Thu Jan 13 14:14:14 2000 | h1513    | H1513    | 444 | 163.333 |      2000
+ H1514    | h1514    |   444 |   164.333 | Fri Jan 14 14:14:14 2000 | h1514    | H1514    | 444 | 164.333 |      2000
+ H1515    | h1515    |   444 |   165.333 | Sat Jan 15 14:14:14 2000 | h1515    | H1515    | 444 | 165.333 |      2000
+ H1516    | h1516    |   444 |   166.333 | Sun Jan 16 14:14:14 2000 | h1516    | H1516    | 444 | 166.333 |      2000
+ H1517    | h1517    |   444 |   167.333 | Mon Jan 17 14:14:14 2000 | h1517    | H1517    | 444 | 167.333 |      2000
+ H1518    | h1518    |   444 |   168.333 | Tue Jan 18 14:14:14 2000 | h1518    | H1518    | 444 | 168.333 |      2000
+ H1519    | h1519    |   444 |   169.333 | Wed Jan 19 14:14:14 2000 | h1519    | H1519    | 444 | 169.333 |      2000
+ H1520    | h1520    |   444 |   170.333 | Thu Jan 20 14:14:14 2000 | h1520    | H1520    | 444 | 170.333 |      2000
+ H1521    | h1521    |   444 |   171.333 | Fri Jan 21 14:14:14 2000 | h1521    | H1521    | 444 | 171.333 |      2000
+ H1522    | h1522    |   444 |   172.333 | Sat Jan 22 14:14:14 2000 | h1522    | H1522    | 444 | 172.333 |      2000
+ H1523    | h1523    |   444 |   173.333 | Sun Jan 23 14:14:14 2000 | h1523    | H1523    | 444 | 173.333 |      2000
+ H1524    | h1524    |   444 |   174.333 | Mon Jan 24 14:14:14 2000 | h1524    | H1524    | 444 | 174.333 |      2000
+ H1525    | h1525    |   444 |   175.333 | Tue Jan 25 14:14:14 2000 | h1525    | H1525    | 444 | 175.333 |      2000
+ H1526    | h1526    |   444 |   176.333 | Wed Jan 26 14:14:14 2000 | h1526    | H1526    | 444 | 176.333 |      2000
+ H1527    | h1527    |   444 |   177.333 | Thu Jan 27 14:14:14 2000 | h1527    | H1527    | 444 | 177.333 |      2000
+ H1528    | h1528    |   444 |   178.333 | Fri Jan 28 14:14:14 2000 | h1528    | H1528    | 444 | 178.333 |      2000
+ H1529    | h1529    |   444 |   179.333 | Sat Jan 29 14:14:14 2000 | h1529    | H1529    | 444 | 179.333 |      2000
+ H1530    | h1530    |   444 |   180.333 | Sun Jan 30 14:14:14 2000 | h1530    | H1530    | 444 | 180.333 |      2000
+ H1531    | h1531    |   444 |   181.333 | Mon Jan 31 14:14:14 2000 | h1531    | H1531    | 444 | 181.333 |      2000
+ HIJKLMN  | hijklmn  |   999 |     888.8 | Tue Aug 08 08:08:08 2000 | hijklmn  | Hijklmn  | 999 |   888.8 |      2000
+ HIJKLMN  |          |   999 |           | Tue Aug 08 08:08:08 2000 | hijklmn  |          | 999 |         |      2000
+ I1601    | i1601    |   444 |   251.333 | Tue Feb 01 14:14:14 2000 | i1601    | I1601    | 444 | 251.333 |      2000
+ I1602    | i1602    |   444 |   252.333 | Wed Feb 02 14:14:14 2000 | i1602    | I1602    | 444 | 252.333 |      2000
+ I1603    | i1603    |   444 |   253.333 | Thu Feb 03 14:14:14 2000 | i1603    | I1603    | 444 | 253.333 |      2000
+ I1604    | i1604    |   444 |   254.333 | Fri Feb 04 14:14:14 2000 | i1604    | I1604    | 444 | 254.333 |      2000
+ I1605    | i1605    |   444 |   255.333 | Sat Feb 05 14:14:14 2000 | i1605    | I1605    | 444 | 255.333 |      2000
+ I1606    | i1606    |   444 |   256.333 | Sun Feb 06 14:14:14 2000 | i1606    | I1606    | 444 | 256.333 |      2000
+ I1607    | i1607    |   444 |   257.333 | Mon Feb 07 14:14:14 2000 | i1607    | I1607    | 444 | 257.333 |      2000
+ I1608    | i1608    |   444 |   258.333 | Tue Feb 08 14:14:14 2000 | i1608    | I1608    | 444 | 258.333 |      2000
+ I1609    | i1609    |   444 |   259.333 | Wed Feb 09 14:14:14 2000 | i1609    | I1609    | 444 | 259.333 |      2000
+ I1610    | i1610    |   444 |   260.333 | Thu Feb 10 14:14:14 2000 | i1610    | I1610    | 444 | 260.333 |      2000
+ I1611    | i1611    |   444 |   261.333 | Fri Feb 11 14:14:14 2000 | i1611    | I1611    | 444 | 261.333 |      2000
+ I1612    | i1612    |   444 |   262.333 | Sat Feb 12 14:14:14 2000 | i1612    | I1612    | 444 | 262.333 |      2000
+ I1613    | i1613    |   444 |   263.333 | Sun Feb 13 14:14:14 2000 | i1613    | I1613    | 444 | 263.333 |      2000
+ I1614    | i1614    |   444 |   264.333 | Mon Feb 14 14:14:14 2000 | i1614    | I1614    | 444 | 264.333 |      2000
+ I1615    | i1615    |   444 |   265.333 | Tue Feb 15 14:14:14 2000 | i1615    | I1615    | 444 | 265.333 |      2000
+ I1616    | i1616    |   444 |   266.333 | Wed Feb 16 14:14:14 2000 | i1616    | I1616    | 444 | 266.333 |      2000
+ I1617    | i1617    |   444 |   267.333 | Thu Feb 17 14:14:14 2000 | i1617    | I1617    | 444 | 267.333 |      2000
+ I1618    | i1618    |   444 |   268.333 | Fri Feb 18 14:14:14 2000 | i1618    | I1618    | 444 | 268.333 |      2000
+ I1619    | i1619    |   444 |   269.333 | Sat Feb 19 14:14:14 2000 | i1619    | I1619    | 444 | 269.333 |      2000
+ I1620    | i1620    |   444 |   270.333 | Sun Feb 20 14:14:14 2000 | i1620    | I1620    | 444 | 270.333 |      2000
+ I1621    | i1621    |   444 |   271.333 | Mon Feb 21 14:14:14 2000 | i1621    | I1621    | 444 | 271.333 |      2000
+ I1622    | i1622    |   444 |   272.333 | Tue Feb 22 14:14:14 2000 | i1622    | I1622    | 444 | 272.333 |      2000
+ I1623    | i1623    |   444 |   273.333 | Wed Feb 23 14:14:14 2000 | i1623    | I1623    | 444 | 273.333 |      2000
+ I1624    | i1624    |   444 |   274.333 | Thu Feb 24 14:14:14 2000 | i1624    | I1624    | 444 | 274.333 |      2000
+ I1625    | i1625    |   444 |   275.333 | Fri Feb 25 14:14:14 2000 | i1625    | I1625    | 444 | 275.333 |      2000
+ I1626    | i1626    |   444 |   276.333 | Sat Feb 26 14:14:14 2000 | i1626    | I1626    | 444 | 276.333 |      2000
+ I1627    | i1627    |   444 |   277.333 | Sun Feb 27 14:14:14 2000 | i1627    | I1627    | 444 | 277.333 |      2000
+ I1628    | i1628    |   444 |   278.333 | Mon Feb 28 14:14:14 2000 | i1628    | I1628    | 444 | 278.333 |      2000
+ IJKLMNO  | ijklmno  |   999 |     999.9 | Sat Sep 09 09:09:09 2000 | ijklmno  | Ijklmno  | 999 |   999.9 |      2000
+ IJKLMNO  |          |   999 |     999.9 | Sat Sep 09 09:09:09 2000 | ijklmno  |          | 999 |   999.9 |      2000
+ J1701    | ij1701   |   444 |   351.333 | Wed Mar 01 14:14:14 2000 | j1701    | Ij1701   | 444 | 351.333 |      2000
+ J1702    | ij1702   |   444 |   352.333 | Thu Mar 02 14:14:14 2000 | j1702    | Ij1702   | 444 | 352.333 |      2000
+ J1703    | ij1703   |   444 |   353.333 | Fri Mar 03 14:14:14 2000 | j1703    | Ij1703   | 444 | 353.333 |      2000
+ J1704    | ij1704   |   444 |   354.333 | Sat Mar 04 14:14:14 2000 | j1704    | Ij1704   | 444 | 354.333 |      2000
+ J1705    | ij1705   |   444 |   355.333 | Sun Mar 05 14:14:14 2000 | j1705    | Ij1705   | 444 | 355.333 |      2000
+ J1706    | ij1706   |   444 |   356.333 | Mon Mar 06 14:14:14 2000 | j1706    | Ij1706   | 444 | 356.333 |      2000
+ J1707    | ij1707   |   444 |   357.333 | Tue Mar 07 14:14:14 2000 | j1707    | Ij1707   | 444 | 357.333 |      2000
+ J1708    | ij1708   |   444 |   358.333 | Wed Mar 08 14:14:14 2000 | j1708    | Ij1708   | 444 | 358.333 |      2000
+ J1709    | ij1709   |   444 |   359.333 | Thu Mar 09 14:14:14 2000 | j1709    | Ij1709   | 444 | 359.333 |      2000
+ J1710    | ij1710   |   444 |   360.333 | Fri Mar 10 14:14:14 2000 | j1710    | Ij1710   | 444 | 360.333 |      2000
+ J1711    | ij1711   |   444 |   361.333 | Sat Mar 11 14:14:14 2000 | j1711    | Ij1711   | 444 | 361.333 |      2000
+ J1712    | ij1712   |   444 |   362.333 | Sun Mar 12 14:14:14 2000 | j1712    | Ij1712   | 444 | 362.333 |      2000
+ J1713    | ij1713   |   444 |   363.333 | Mon Mar 13 14:14:14 2000 | j1713    | Ij1713   | 444 | 363.333 |      2000
+ J1714    | ij1714   |   444 |   364.333 | Tue Mar 14 14:14:14 2000 | j1714    | Ij1714   | 444 | 364.333 |      2000
+ J1715    | ij1715   |   444 |   365.333 | Wed Mar 15 14:14:14 2000 | j1715    | Ij1715   | 444 | 365.333 |      2000
+ J1716    | ij1716   |   444 |   366.333 | Thu Mar 16 14:14:14 2000 | j1716    | Ij1716   | 444 | 366.333 |      2000
+ J1717    | ij1717   |   444 |   367.333 | Fri Mar 17 14:14:14 2000 | j1717    | Ij1717   | 444 | 367.333 |      2000
+ J1718    | ij1718   |   444 |   368.333 | Sat Mar 18 14:14:14 2000 | j1718    | Ij1718   | 444 | 368.333 |      2000
+ J1719    | ij1719   |   444 |   369.333 | Sun Mar 19 14:14:14 2000 | j1719    | Ij1719   | 444 | 369.333 |      2000
+ J1720    | ij1720   |   444 |   370.333 | Mon Mar 20 14:14:14 2000 | j1720    | Ij1720   | 444 | 370.333 |      2000
+ J1721    | ij1721   |   444 |   371.333 | Tue Mar 21 14:14:14 2000 | j1721    | Ij1721   | 444 | 371.333 |      2000
+ J1722    | ij1722   |   444 |   372.333 | Wed Mar 22 14:14:14 2000 | j1722    | Ij1722   | 444 | 372.333 |      2000
+ J1723    | ij1723   |   444 |   373.333 | Thu Mar 23 14:14:14 2000 | j1723    | Ij1723   | 444 | 373.333 |      2000
+ J1724    | ij1724   |   444 |   374.333 | Fri Mar 24 14:14:14 2000 | j1724    | Ij1724   | 444 | 374.333 |      2000
+ J1725    | ij1725   |   444 |   375.333 | Sat Mar 25 14:14:14 2000 | j1725    | Ij1725   | 444 | 375.333 |      2000
+ J1726    | ij1726   |   444 |   376.333 | Sun Mar 26 14:14:14 2000 | j1726    | Ij1726   | 444 | 376.333 |      2000
+ J1727    | ij1727   |   444 |   377.333 | Mon Mar 27 14:14:14 2000 | j1727    | Ij1727   | 444 | 377.333 |      2000
+ J1728    | ij1728   |   444 |   378.333 | Tue Mar 28 14:14:14 2000 | j1728    | Ij1728   | 444 | 378.333 |      2000
+ J1729    | ij1729   |   444 |   379.333 | Wed Mar 29 14:14:14 2000 | j1729    | Ij1729   | 444 | 379.333 |      2000
+ J1730    | ij1730   |   444 |   380.333 | Thu Mar 30 14:14:14 2000 | j1730    | Ij1730   | 444 | 380.333 |      2000
+ J1731    | ij1731   |   444 |   381.333 | Fri Mar 31 14:14:14 2000 | j1731    | Ij1731   | 444 | 381.333 |      2000
+ K1801    | ijk1801  |   777 |   451.333 | Sat Apr 01 14:14:14 2000 | k1801    | Ijk1801  | 777 | 451.333 |      2000
+ K1802    | ijk1802  |   777 |   452.333 | Sun Apr 02 14:14:14 2000 | k1802    | Ijk1802  | 777 | 452.333 |      2000
+ K1803    | ijk1803  |   777 |   453.333 | Mon Apr 03 14:14:14 2000 | k1803    | Ijk1803  | 777 | 453.333 |      2000
+ K1804    | ijk1804  |   777 |   454.333 | Tue Apr 04 14:14:14 2000 | k1804    | Ijk1804  | 777 | 454.333 |      2000
+ K1805    | ijk1805  |   777 |   455.333 | Wed Apr 05 14:14:14 2000 | k1805    | Ijk1805  | 777 | 455.333 |      2000
+ K1806    | ijk1806  |   777 |   456.333 | Thu Apr 06 14:14:14 2000 | k1806    | Ijk1806  | 777 | 456.333 |      2000
+ K1807    | ijk1807  |   777 |   457.333 | Fri Apr 07 14:14:14 2000 | k1807    | Ijk1807  | 777 | 457.333 |      2000
+ K1808    | ijk1808  |   777 |   458.333 | Sat Apr 08 14:14:14 2000 | k1808    | Ijk1808  | 777 | 458.333 |      2000
+ K1809    | ijk1809  |   777 |   459.333 | Sun Apr 09 14:14:14 2000 | k1809    | Ijk1809  | 777 | 459.333 |      2000
+ K1810    | ijk1810  |   777 |   460.333 | Mon Apr 10 14:14:14 2000 | k1810    | Ijk1810  | 777 | 460.333 |      2000
+ K1811    | ijk1811  |   777 |   461.333 | Tue Apr 11 14:14:14 2000 | k1811    | Ijk1811  | 777 | 461.333 |      2000
+ K1812    | ijk1812  |   777 |   462.333 | Wed Apr 12 14:14:14 2000 | k1812    | Ijk1812  | 777 | 462.333 |      2000
+ K1813    | ijk1813  |   777 |   463.333 | Thu Apr 13 14:14:14 2000 | k1813    | Ijk1813  | 777 | 463.333 |      2000
+ K1814    | ijk1814  |   777 |   464.333 | Fri Apr 14 14:14:14 2000 | k1814    | Ijk1814  | 777 | 464.333 |      2000
+ K1815    | ijk1815  |   777 |   465.333 | Sat Apr 15 14:14:14 2000 | k1815    | Ijk1815  | 777 | 465.333 |      2000
+ K1816    | ijk1816  |   777 |   466.333 | Sun Apr 16 14:14:14 2000 | k1816    | Ijk1816  | 777 | 466.333 |      2000
+ K1817    | ijk1817  |   777 |   467.333 | Mon Apr 17 14:14:14 2000 | k1817    | Ijk1817  | 777 | 467.333 |      2000
+ K1818    | ijk1818  |   777 |   468.333 | Tue Apr 18 14:14:14 2000 | k1818    | Ijk1818  | 777 | 468.333 |      2000
+ K1819    | ijk1819  |   777 |   469.333 | Wed Apr 19 14:14:14 2000 | k1819    | Ijk1819  | 777 | 469.333 |      2000
+ K1820    | ijk1820  |   777 |   470.333 | Thu Apr 20 14:14:14 2000 | k1820    | Ijk1820  | 777 | 470.333 |      2000
+ K1821    | ijk1821  |   777 |   471.333 | Fri Apr 21 14:14:14 2000 | k1821    | Ijk1821  | 777 | 471.333 |      2000
+ K1822    | ijk1822  |   777 |   472.333 | Sat Apr 22 14:14:14 2000 | k1822    | Ijk1822  | 777 | 472.333 |      2000
+ K1823    | ijk1823  |   777 |   473.333 | Sun Apr 23 14:14:14 2000 | k1823    | Ijk1823  | 777 | 473.333 |      2000
+ K1824    | ijk1824  |   777 |   474.333 | Mon Apr 24 14:14:14 2000 | k1824    | Ijk1824  | 777 | 474.333 |      2000
+ K1825    | ijk1825  |   777 |   475.333 | Tue Apr 25 14:14:14 2000 | k1825    | Ijk1825  | 777 | 475.333 |      2000
+ K1826    | ijk1826  |   777 |   476.333 | Wed Apr 26 14:14:14 2000 | k1826    | Ijk1826  | 777 | 476.333 |      2000
+ K1827    | ijk1827  |   777 |   477.333 | Thu Apr 27 14:14:14 2000 | k1827    | Ijk1827  | 777 | 477.333 |      2000
+ K1828    | ijk1828  |   777 |   478.333 | Fri Apr 28 14:14:14 2000 | k1828    | Ijk1828  | 777 | 478.333 |      2000
+ K1829    | ijk1829  |   777 |   479.333 | Sat Apr 29 14:14:14 2000 | k1829    | Ijk1829  | 777 | 479.333 |      2000
+ K1830    | ijk1830  |   777 |   480.333 | Sun Apr 30 14:14:14 2000 | k1830    | Ijk1830  | 777 | 480.333 |      2000
+ L1901    | ijkl1901 |   777 |   551.333 | Mon May 01 14:14:14 2000 | l1901    | Ijkl1901 | 777 | 551.333 |      2000
+ L1902    | ijkl1902 |   777 |   552.333 | Tue May 02 14:14:14 2000 | l1902    | Ijkl1902 | 777 | 552.333 |      2000
+ L1903    | ijkl1903 |   777 |   553.333 | Wed May 03 14:14:14 2000 | l1903    | Ijkl1903 | 777 | 553.333 |      2000
+ L1904    | ijkl1904 |   777 |   554.333 | Thu May 04 14:14:14 2000 | l1904    | Ijkl1904 | 777 | 554.333 |      2000
+ L1905    | ijkl1905 |   777 |   555.333 | Fri May 05 14:14:14 2000 | l1905    | Ijkl1905 | 777 | 555.333 |      2000
+ L1906    | ijkl1906 |   777 |   556.333 | Sat May 06 14:14:14 2000 | l1906    | Ijkl1906 | 777 | 556.333 |      2000
+ L1907    | ijkl1907 |   777 |   557.333 | Sun May 07 14:14:14 2000 | l1907    | Ijkl1907 | 777 | 557.333 |      2000
+ L1908    | ijkl1908 |   777 |   558.333 | Mon May 08 14:14:14 2000 | l1908    | Ijkl1908 | 777 | 558.333 |      2000
+ L1909    | ijkl1909 |   777 |   559.333 | Tue May 09 14:14:14 2000 | l1909    | Ijkl1909 | 777 | 559.333 |      2000
+ L1910    | ijkl1910 |   777 |   560.333 | Wed May 10 14:14:14 2000 | l1910    | Ijkl1910 | 777 | 560.333 |      2000
+ L1911    | ijkl1911 |   777 |   561.333 | Thu May 11 14:14:14 2000 | l1911    | Ijkl1911 | 777 | 561.333 |      2000
+ L1912    | ijkl1912 |   777 |   562.333 | Fri May 12 14:14:14 2000 | l1912    | Ijkl1912 | 777 | 562.333 |      2000
+ L1913    | ijkl1913 |   777 |   563.333 | Sat May 13 14:14:14 2000 | l1913    | Ijkl1913 | 777 | 563.333 |      2000
+ L1914    | ijkl1914 |   777 |   564.333 | Sun May 14 14:14:14 2000 | l1914    | Ijkl1914 | 777 | 564.333 |      2000
+ L1915    | ijkl1915 |   777 |   565.333 | Mon May 15 14:14:14 2000 | l1915    | Ijkl1915 | 777 | 565.333 |      2000
+ L1916    | ijkl1916 |   777 |   566.333 | Tue May 16 14:14:14 2000 | l1916    | Ijkl1916 | 777 | 566.333 |      2000
+ L1917    | ijkl1917 |   777 |   567.333 | Wed May 17 14:14:14 2000 | l1917    | Ijkl1917 | 777 | 567.333 |      2000
+ L1918    | ijkl1918 |   777 |   568.333 | Thu May 18 14:14:14 2000 | l1918    | Ijkl1918 | 777 | 568.333 |      2000
+ L1919    | ijkl1919 |   777 |   569.333 | Fri May 19 14:14:14 2000 | l1919    | Ijkl1919 | 777 | 569.333 |      2000
+ L1920    | ijkl1920 |   777 |   570.333 | Sat May 20 14:14:14 2000 | l1920    | Ijkl1920 | 777 | 570.333 |      2000
+ L1921    | ijkl1921 |   777 |   571.333 | Sun May 21 14:14:14 2000 | l1921    | Ijkl1921 | 777 | 571.333 |      2000
+ L1922    | ijkl1922 |   777 |   572.333 | Mon May 22 14:14:14 2000 | l1922    | Ijkl1922 | 777 | 572.333 |      2000
+ L1923    | ijkl1923 |   777 |   573.333 | Tue May 23 14:14:14 2000 | l1923    | Ijkl1923 | 777 | 573.333 |      2000
+ L1924    | ijkl1924 |   777 |   574.333 | Wed May 24 14:14:14 2000 | l1924    | Ijkl1924 | 777 | 574.333 |      2000
+ L1925    | ijkl1925 |   777 |   575.333 | Thu May 25 14:14:14 2000 | l1925    | Ijkl1925 | 777 | 575.333 |      2000
+ L1926    | ijkl1926 |   777 |   576.333 | Fri May 26 14:14:14 2000 | l1926    | Ijkl1926 | 777 | 576.333 |      2000
+ L1927    | ijkl1927 |   777 |   577.333 | Sat May 27 14:14:14 2000 | l1927    | Ijkl1927 | 777 | 577.333 |      2000
+ L1928    | ijkl1928 |   777 |   578.333 | Sun May 28 14:14:14 2000 | l1928    | Ijkl1928 | 777 | 578.333 |      2000
+ L1929    | ijkl1929 |   777 |   579.333 | Mon May 29 14:14:14 2000 | l1929    | Ijkl1929 | 777 | 579.333 |      2000
+ L1930    | ijkl1930 |   777 |   580.333 | Tue May 30 14:14:14 2000 | l1930    | Ijkl1930 | 777 | 580.333 |      2000
+ L1931    | ijkl1931 |   777 |   581.333 | Wed May 31 14:14:14 2000 | l1931    | Ijkl1931 | 777 | 581.333 |      2000
+(504 rows)
+
+--SELECT trim(C_CHAR_3) , trim(C_VARCHAR_3) , C_INT , C_NUMERIC , C_TS_WITHOUT , lower(trim(C_CHAR_3)) , initcap(trim(C_VARCHAR_3)) , abs(C_INT) , abs(C_NUMERIC) , extract(year from C_TS_WITHOUT) FROM PARTITION_SELECT_PICT_TABLE_000_2 where ('abcdefg' <= C_VARCHAR_3 and 'ijklmno' >= C_VARCHAR_3) or C_INT >= 111 or C_NUMERIC in (111.1 , 222.2 , 333.3 , 444.4 , 555.5 , 666.6 , 777.7 , 888.8 , 999.9) and not exists (select C_TS_WITHOUT from PARTITION_SELECT_PICT_TABLE_000_1 where C_TS_WITHOUT > '2010-09-09 09:09:09') ORDER BY 1 , 2 , 3 , 4 , 5 ;
+drop foreign table PARTITION_SELECT_PICT_TABLE_000_1;
+drop foreign table PARTITION_SELECT_PICT_TABLE_000_2;
+create foreign table partition_coltype_1 (int2col int2, int8col int8, boolcol bool, float4col float4, float8col float8, clobcol clob, bpcharcol bpchar,datecol date, timestampcol timestamp, numericcol decimal(10, 5))
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/partition_coltype_1')
+distribute by roundrobin
+partition by (int2col, int8col, float4col, float8col, bpcharcol,datecol, timestampcol, numericcol) automapped;
+ERROR:  column "float4col" cannot be served as a value-partitioning column because of its datatype [real]
+select * from partition_coltype_1;
+ERROR:  relation "partition_coltype_1" does not exist
+LINE 1: select * from partition_coltype_1;
+                      ^
+drop foreign table partition_coltype_1;
+ERROR:  foreign table "partition_coltype_1" does not exist
+create foreign table part_5 (p_partkey int, p_name text, p_mfgr text, p_brand text, p_type text, p_size int, p_container text, p_retailprice float8, p_comment text) 
+SERVER hdfs_server 
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part3') 
+distribute by roundrobin 
+partition by (p_mfgr) automapped;
+analyze part_5;
+select p_mfgr, p_partkey,p_name from part_5 where p_mfgr='Manufacturer#1' and p_partkey < 195000 and p_size = 50 and p_type='MEDIUM PLATED BRASS' order by 1,2,3;
+     p_mfgr     | p_partkey |                 p_name                 
+----------------+-----------+----------------------------------------
+ Manufacturer#1 |     12266 | floral medium dodger drab rose
+ Manufacturer#1 |     16634 | saddle aquamarine mint lawn burlywood
+ Manufacturer#1 |     37314 | cornflower honeydew khaki white orange
+ Manufacturer#1 |     59866 | sky hot floral plum orchid
+ Manufacturer#1 |     62596 | navajo tomato peru light burlywood
+ Manufacturer#1 |     94488 | cyan linen lime peach navy
+ Manufacturer#1 |    136764 | seashell brown navy dodger beige
+(7 rows)
+
+select p_mfgr, p_partkey from part_5 where p_mfgr='Manufacturer#1' and p_partkey < 195000 and p_size > 45 and p_size < 48 order by 1,2;
+     p_mfgr     | p_partkey 
+----------------+-----------
+ Manufacturer#1 |        83
+ Manufacturer#1 |       224
+ Manufacturer#1 |       263
+ Manufacturer#1 |       356
+ Manufacturer#1 |       445
+ Manufacturer#1 |       784
+ Manufacturer#1 |       825
+ Manufacturer#1 |      1485
+ Manufacturer#1 |      1494
+ Manufacturer#1 |      1498
+ Manufacturer#1 |      1578
+ Manufacturer#1 |      1696
+ Manufacturer#1 |      1730
+ Manufacturer#1 |      1991
+ Manufacturer#1 |      2000
+ Manufacturer#1 |      2171
+ Manufacturer#1 |      2207
+ Manufacturer#1 |      2215
+ Manufacturer#1 |      2280
+ Manufacturer#1 |      2318
+ Manufacturer#1 |      2868
+ Manufacturer#1 |      2881
+ Manufacturer#1 |      2946
+ Manufacturer#1 |      2974
+ Manufacturer#1 |      2984
+ Manufacturer#1 |      3559
+ Manufacturer#1 |      3662
+ Manufacturer#1 |      3868
+ Manufacturer#1 |      4080
+ Manufacturer#1 |      4114
+ Manufacturer#1 |      4196
+ Manufacturer#1 |      4220
+ Manufacturer#1 |      4231
+ Manufacturer#1 |      4355
+ Manufacturer#1 |      4381
+ Manufacturer#1 |      4760
+ Manufacturer#1 |      4985
+ Manufacturer#1 |      5046
+ Manufacturer#1 |      5063
+ Manufacturer#1 |      5308
+ Manufacturer#1 |      5505
+ Manufacturer#1 |      5548
+ Manufacturer#1 |      6296
+ Manufacturer#1 |      6303
+ Manufacturer#1 |      6419
+ Manufacturer#1 |      6487
+ Manufacturer#1 |      6507
+ Manufacturer#1 |      6567
+ Manufacturer#1 |      6630
+ Manufacturer#1 |      6756
+ Manufacturer#1 |      6871
+ Manufacturer#1 |      7015
+ Manufacturer#1 |      7134
+ Manufacturer#1 |      7146
+ Manufacturer#1 |      7166
+ Manufacturer#1 |      7239
+ Manufacturer#1 |      7302
+ Manufacturer#1 |      7337
+ Manufacturer#1 |      7480
+ Manufacturer#1 |      7497
+ Manufacturer#1 |      7605
+ Manufacturer#1 |      7728
+ Manufacturer#1 |      7920
+ Manufacturer#1 |      7950
+ Manufacturer#1 |      8058
+ Manufacturer#1 |      8079
+ Manufacturer#1 |      8170
+ Manufacturer#1 |      8211
+ Manufacturer#1 |      8300
+ Manufacturer#1 |      8400
+ Manufacturer#1 |      8438
+ Manufacturer#1 |      8459
+ Manufacturer#1 |      8463
+ Manufacturer#1 |      8811
+ Manufacturer#1 |      9152
+ Manufacturer#1 |      9160
+ Manufacturer#1 |      9164
+ Manufacturer#1 |      9175
+ Manufacturer#1 |      9266
+ Manufacturer#1 |      9403
+ Manufacturer#1 |      9428
+ Manufacturer#1 |      9641
+ Manufacturer#1 |      9732
+ Manufacturer#1 |      9872
+ Manufacturer#1 |      9948
+ Manufacturer#1 |     10256
+ Manufacturer#1 |     10283
+ Manufacturer#1 |     10336
+ Manufacturer#1 |     10466
+ Manufacturer#1 |     10536
+ Manufacturer#1 |     10653
+ Manufacturer#1 |     10868
+ Manufacturer#1 |     10972
+ Manufacturer#1 |     11021
+ Manufacturer#1 |     11030
+ Manufacturer#1 |     11286
+ Manufacturer#1 |     11535
+ Manufacturer#1 |     11643
+ Manufacturer#1 |     11674
+ Manufacturer#1 |     11698
+ Manufacturer#1 |     11873
+ Manufacturer#1 |     11950
+ Manufacturer#1 |     12107
+ Manufacturer#1 |     12220
+ Manufacturer#1 |     12253
+ Manufacturer#1 |     12349
+ Manufacturer#1 |     12704
+ Manufacturer#1 |     12747
+ Manufacturer#1 |     12920
+ Manufacturer#1 |     13015
+ Manufacturer#1 |     13189
+ Manufacturer#1 |     13202
+ Manufacturer#1 |     13297
+ Manufacturer#1 |     13574
+ Manufacturer#1 |     13673
+ Manufacturer#1 |     13966
+ Manufacturer#1 |     14094
+ Manufacturer#1 |     14095
+ Manufacturer#1 |     14109
+ Manufacturer#1 |     14324
+ Manufacturer#1 |     14338
+ Manufacturer#1 |     14344
+ Manufacturer#1 |     14380
+ Manufacturer#1 |     14416
+ Manufacturer#1 |     14554
+ Manufacturer#1 |     14605
+ Manufacturer#1 |     14613
+ Manufacturer#1 |     14878
+ Manufacturer#1 |     15013
+ Manufacturer#1 |     15453
+ Manufacturer#1 |     15475
+ Manufacturer#1 |     15486
+ Manufacturer#1 |     15539
+ Manufacturer#1 |     15595
+ Manufacturer#1 |     15693
+ Manufacturer#1 |     16015
+ Manufacturer#1 |     16039
+ Manufacturer#1 |     16256
+ Manufacturer#1 |     16323
+ Manufacturer#1 |     16342
+ Manufacturer#1 |     16451
+ Manufacturer#1 |     16483
+ Manufacturer#1 |     16538
+ Manufacturer#1 |     16805
+ Manufacturer#1 |     16961
+ Manufacturer#1 |     17008
+ Manufacturer#1 |     17082
+ Manufacturer#1 |     17277
+ Manufacturer#1 |     17481
+ Manufacturer#1 |     17572
+ Manufacturer#1 |     17726
+ Manufacturer#1 |     17739
+ Manufacturer#1 |     18102
+ Manufacturer#1 |     18345
+ Manufacturer#1 |     18361
+ Manufacturer#1 |     18364
+ Manufacturer#1 |     18580
+ Manufacturer#1 |     18821
+ Manufacturer#1 |     18962
+ Manufacturer#1 |     19238
+ Manufacturer#1 |     19270
+ Manufacturer#1 |     19577
+ Manufacturer#1 |     19578
+ Manufacturer#1 |     19633
+ Manufacturer#1 |     19722
+ Manufacturer#1 |     19909
+ Manufacturer#1 |     20134
+ Manufacturer#1 |     20186
+ Manufacturer#1 |     20557
+ Manufacturer#1 |     20689
+ Manufacturer#1 |     20788
+ Manufacturer#1 |     20899
+ Manufacturer#1 |     20943
+ Manufacturer#1 |     21090
+ Manufacturer#1 |     21109
+ Manufacturer#1 |     21184
+ Manufacturer#1 |     21254
+ Manufacturer#1 |     21589
+ Manufacturer#1 |     21607
+ Manufacturer#1 |     21748
+ Manufacturer#1 |     21799
+ Manufacturer#1 |     21815
+ Manufacturer#1 |     21890
+ Manufacturer#1 |     22161
+ Manufacturer#1 |     22206
+ Manufacturer#1 |     22259
+ Manufacturer#1 |     22268
+ Manufacturer#1 |     22367
+ Manufacturer#1 |     22600
+ Manufacturer#1 |     22728
+ Manufacturer#1 |     22773
+ Manufacturer#1 |     22904
+ Manufacturer#1 |     22981
+ Manufacturer#1 |     22982
+ Manufacturer#1 |     23089
+ Manufacturer#1 |     23250
+ Manufacturer#1 |     23502
+ Manufacturer#1 |     23667
+ Manufacturer#1 |     23750
+ Manufacturer#1 |     23890
+ Manufacturer#1 |     23943
+ Manufacturer#1 |     24290
+ Manufacturer#1 |     24696
+ Manufacturer#1 |     24834
+ Manufacturer#1 |     24929
+ Manufacturer#1 |     25274
+ Manufacturer#1 |     25280
+ Manufacturer#1 |     25282
+ Manufacturer#1 |     25323
+ Manufacturer#1 |     25461
+ Manufacturer#1 |     25484
+ Manufacturer#1 |     25515
+ Manufacturer#1 |     25576
+ Manufacturer#1 |     25698
+ Manufacturer#1 |     25701
+ Manufacturer#1 |     25730
+ Manufacturer#1 |     25799
+ Manufacturer#1 |     25819
+ Manufacturer#1 |     25850
+ Manufacturer#1 |     26654
+ Manufacturer#1 |     26849
+ Manufacturer#1 |     26907
+ Manufacturer#1 |     27005
+ Manufacturer#1 |     27073
+ Manufacturer#1 |     27142
+ Manufacturer#1 |     27387
+ Manufacturer#1 |     27699
+ Manufacturer#1 |     27704
+ Manufacturer#1 |     27772
+ Manufacturer#1 |     27844
+ Manufacturer#1 |     27940
+ Manufacturer#1 |     28042
+ Manufacturer#1 |     28074
+ Manufacturer#1 |     28289
+ Manufacturer#1 |     28405
+ Manufacturer#1 |     28497
+ Manufacturer#1 |     28648
+ Manufacturer#1 |     29093
+ Manufacturer#1 |     29164
+ Manufacturer#1 |     29176
+ Manufacturer#1 |     29661
+ Manufacturer#1 |     29871
+ Manufacturer#1 |     29872
+ Manufacturer#1 |     30272
+ Manufacturer#1 |     30509
+ Manufacturer#1 |     30528
+ Manufacturer#1 |     30532
+ Manufacturer#1 |     30549
+ Manufacturer#1 |     30552
+ Manufacturer#1 |     30596
+ Manufacturer#1 |     30938
+ Manufacturer#1 |     31205
+ Manufacturer#1 |     31254
+ Manufacturer#1 |     31337
+ Manufacturer#1 |     31534
+ Manufacturer#1 |     32003
+ Manufacturer#1 |     32009
+ Manufacturer#1 |     32251
+ Manufacturer#1 |     32338
+ Manufacturer#1 |     32368
+ Manufacturer#1 |     32410
+ Manufacturer#1 |     32540
+ Manufacturer#1 |     32644
+ Manufacturer#1 |     32733
+ Manufacturer#1 |     32794
+ Manufacturer#1 |     33039
+ Manufacturer#1 |     33217
+ Manufacturer#1 |     33228
+ Manufacturer#1 |     33235
+ Manufacturer#1 |     33253
+ Manufacturer#1 |     33265
+ Manufacturer#1 |     33318
+ Manufacturer#1 |     33352
+ Manufacturer#1 |     33427
+ Manufacturer#1 |     33749
+ Manufacturer#1 |     33848
+ Manufacturer#1 |     34218
+ Manufacturer#1 |     34284
+ Manufacturer#1 |     34381
+ Manufacturer#1 |     34502
+ Manufacturer#1 |     34516
+ Manufacturer#1 |     34622
+ Manufacturer#1 |     34681
+ Manufacturer#1 |     34705
+ Manufacturer#1 |     34713
+ Manufacturer#1 |     34883
+ Manufacturer#1 |     34903
+ Manufacturer#1 |     35021
+ Manufacturer#1 |     35039
+ Manufacturer#1 |     35082
+ Manufacturer#1 |     35149
+ Manufacturer#1 |     35153
+ Manufacturer#1 |     35281
+ Manufacturer#1 |     35488
+ Manufacturer#1 |     35560
+ Manufacturer#1 |     35676
+ Manufacturer#1 |     35700
+ Manufacturer#1 |     35721
+ Manufacturer#1 |     35961
+ Manufacturer#1 |     35975
+ Manufacturer#1 |     36282
+ Manufacturer#1 |     36303
+ Manufacturer#1 |     36374
+ Manufacturer#1 |     36604
+ Manufacturer#1 |     36699
+ Manufacturer#1 |     36959
+ Manufacturer#1 |     36989
+ Manufacturer#1 |     37171
+ Manufacturer#1 |     37274
+ Manufacturer#1 |     37316
+ Manufacturer#1 |     37422
+ Manufacturer#1 |     37550
+ Manufacturer#1 |     37627
+ Manufacturer#1 |     37652
+ Manufacturer#1 |     37673
+ Manufacturer#1 |     37765
+ Manufacturer#1 |     38088
+ Manufacturer#1 |     38129
+ Manufacturer#1 |     38207
+ Manufacturer#1 |     38402
+ Manufacturer#1 |     38718
+ Manufacturer#1 |     39086
+ Manufacturer#1 |     39289
+ Manufacturer#1 |     39323
+ Manufacturer#1 |     39397
+ Manufacturer#1 |     39563
+ Manufacturer#1 |     39653
+ Manufacturer#1 |     39925
+ Manufacturer#1 |     40063
+ Manufacturer#1 |     40150
+ Manufacturer#1 |     40220
+ Manufacturer#1 |     40258
+ Manufacturer#1 |     40419
+ Manufacturer#1 |     40519
+ Manufacturer#1 |     40625
+ Manufacturer#1 |     40748
+ Manufacturer#1 |     40757
+ Manufacturer#1 |     40759
+ Manufacturer#1 |     40872
+ Manufacturer#1 |     41062
+ Manufacturer#1 |     41094
+ Manufacturer#1 |     41118
+ Manufacturer#1 |     41187
+ Manufacturer#1 |     41241
+ Manufacturer#1 |     41486
+ Manufacturer#1 |     41504
+ Manufacturer#1 |     41525
+ Manufacturer#1 |     41736
+ Manufacturer#1 |     41868
+ Manufacturer#1 |     42014
+ Manufacturer#1 |     42076
+ Manufacturer#1 |     42092
+ Manufacturer#1 |     42244
+ Manufacturer#1 |     42333
+ Manufacturer#1 |     42493
+ Manufacturer#1 |     42868
+ Manufacturer#1 |     42965
+ Manufacturer#1 |     43063
+ Manufacturer#1 |     43101
+ Manufacturer#1 |     43415
+ Manufacturer#1 |     43513
+ Manufacturer#1 |     43582
+ Manufacturer#1 |     43584
+ Manufacturer#1 |     43704
+ Manufacturer#1 |     43806
+ Manufacturer#1 |     43840
+ Manufacturer#1 |     44305
+ Manufacturer#1 |     44336
+ Manufacturer#1 |     44341
+ Manufacturer#1 |     44348
+ Manufacturer#1 |     44548
+ Manufacturer#1 |     44648
+ Manufacturer#1 |     44670
+ Manufacturer#1 |     44685
+ Manufacturer#1 |     44714
+ Manufacturer#1 |     44903
+ Manufacturer#1 |     45056
+ Manufacturer#1 |     45208
+ Manufacturer#1 |     45218
+ Manufacturer#1 |     45257
+ Manufacturer#1 |     45313
+ Manufacturer#1 |     45411
+ Manufacturer#1 |     45490
+ Manufacturer#1 |     45567
+ Manufacturer#1 |     45791
+ Manufacturer#1 |     45799
+ Manufacturer#1 |     45927
+ Manufacturer#1 |     46365
+ Manufacturer#1 |     46641
+ Manufacturer#1 |     46750
+ Manufacturer#1 |     46775
+ Manufacturer#1 |     46830
+ Manufacturer#1 |     46943
+ Manufacturer#1 |     46982
+ Manufacturer#1 |     47035
+ Manufacturer#1 |     47063
+ Manufacturer#1 |     47191
+ Manufacturer#1 |     47273
+ Manufacturer#1 |     47287
+ Manufacturer#1 |     47703
+ Manufacturer#1 |     47729
+ Manufacturer#1 |     47916
+ Manufacturer#1 |     47985
+ Manufacturer#1 |     48028
+ Manufacturer#1 |     48095
+ Manufacturer#1 |     48161
+ Manufacturer#1 |     48293
+ Manufacturer#1 |     48420
+ Manufacturer#1 |     48844
+ Manufacturer#1 |     48915
+ Manufacturer#1 |     48941
+ Manufacturer#1 |     49082
+ Manufacturer#1 |     49141
+ Manufacturer#1 |     49159
+ Manufacturer#1 |     49247
+ Manufacturer#1 |     49343
+ Manufacturer#1 |     49714
+ Manufacturer#1 |     49754
+ Manufacturer#1 |     49846
+ Manufacturer#1 |     49963
+ Manufacturer#1 |     50029
+ Manufacturer#1 |     50039
+ Manufacturer#1 |     50330
+ Manufacturer#1 |     50484
+ Manufacturer#1 |     50493
+ Manufacturer#1 |     50536
+ Manufacturer#1 |     50613
+ Manufacturer#1 |     50880
+ Manufacturer#1 |     50916
+ Manufacturer#1 |     50969
+ Manufacturer#1 |     51010
+ Manufacturer#1 |     51116
+ Manufacturer#1 |     51146
+ Manufacturer#1 |     51418
+ Manufacturer#1 |     51454
+ Manufacturer#1 |     51528
+ Manufacturer#1 |     52218
+ Manufacturer#1 |     52255
+ Manufacturer#1 |     52303
+ Manufacturer#1 |     52327
+ Manufacturer#1 |     52390
+ Manufacturer#1 |     52455
+ Manufacturer#1 |     52463
+ Manufacturer#1 |     52468
+ Manufacturer#1 |     52623
+ Manufacturer#1 |     52793
+ Manufacturer#1 |     52886
+ Manufacturer#1 |     52897
+ Manufacturer#1 |     52900
+ Manufacturer#1 |     52913
+ Manufacturer#1 |     52971
+ Manufacturer#1 |     53003
+ Manufacturer#1 |     53128
+ Manufacturer#1 |     53249
+ Manufacturer#1 |     53501
+ Manufacturer#1 |     53628
+ Manufacturer#1 |     53767
+ Manufacturer#1 |     53824
+ Manufacturer#1 |     53881
+ Manufacturer#1 |     53998
+ Manufacturer#1 |     54203
+ Manufacturer#1 |     54620
+ Manufacturer#1 |     55097
+ Manufacturer#1 |     55133
+ Manufacturer#1 |     55144
+ Manufacturer#1 |     55412
+ Manufacturer#1 |     55487
+ Manufacturer#1 |     55499
+ Manufacturer#1 |     55658
+ Manufacturer#1 |     55944
+ Manufacturer#1 |     56075
+ Manufacturer#1 |     56462
+ Manufacturer#1 |     56685
+ Manufacturer#1 |     56746
+ Manufacturer#1 |     57091
+ Manufacturer#1 |     57164
+ Manufacturer#1 |     57169
+ Manufacturer#1 |     57326
+ Manufacturer#1 |     57334
+ Manufacturer#1 |     57433
+ Manufacturer#1 |     57593
+ Manufacturer#1 |     57600
+ Manufacturer#1 |     57693
+ Manufacturer#1 |     58159
+ Manufacturer#1 |     58251
+ Manufacturer#1 |     58440
+ Manufacturer#1 |     58690
+ Manufacturer#1 |     58759
+ Manufacturer#1 |     58787
+ Manufacturer#1 |     58942
+ Manufacturer#1 |     58972
+ Manufacturer#1 |     59290
+ Manufacturer#1 |     59387
+ Manufacturer#1 |     59516
+ Manufacturer#1 |     59552
+ Manufacturer#1 |     59947
+ Manufacturer#1 |     60166
+ Manufacturer#1 |     60222
+ Manufacturer#1 |     60231
+ Manufacturer#1 |     60296
+ Manufacturer#1 |     60494
+ Manufacturer#1 |     60888
+ Manufacturer#1 |     61002
+ Manufacturer#1 |     61272
+ Manufacturer#1 |     61367
+ Manufacturer#1 |     61390
+ Manufacturer#1 |     61455
+ Manufacturer#1 |     61509
+ Manufacturer#1 |     61837
+ Manufacturer#1 |     62079
+ Manufacturer#1 |     62181
+ Manufacturer#1 |     62297
+ Manufacturer#1 |     62481
+ Manufacturer#1 |     62571
+ Manufacturer#1 |     63218
+ Manufacturer#1 |     63219
+ Manufacturer#1 |     63239
+ Manufacturer#1 |     63338
+ Manufacturer#1 |     63359
+ Manufacturer#1 |     63423
+ Manufacturer#1 |     63439
+ Manufacturer#1 |     63444
+ Manufacturer#1 |     63864
+ Manufacturer#1 |     64190
+ Manufacturer#1 |     64248
+ Manufacturer#1 |     64402
+ Manufacturer#1 |     64407
+ Manufacturer#1 |     64446
+ Manufacturer#1 |     64475
+ Manufacturer#1 |     64625
+ Manufacturer#1 |     65071
+ Manufacturer#1 |     65080
+ Manufacturer#1 |     65102
+ Manufacturer#1 |     65144
+ Manufacturer#1 |     65482
+ Manufacturer#1 |     65815
+ Manufacturer#1 |     65859
+ Manufacturer#1 |     65894
+ Manufacturer#1 |     65928
+ Manufacturer#1 |     65966
+ Manufacturer#1 |     66274
+ Manufacturer#1 |     66410
+ Manufacturer#1 |     66505
+ Manufacturer#1 |     66546
+ Manufacturer#1 |     66713
+ Manufacturer#1 |     66828
+ Manufacturer#1 |     66874
+ Manufacturer#1 |     67051
+ Manufacturer#1 |     67281
+ Manufacturer#1 |     67421
+ Manufacturer#1 |     67447
+ Manufacturer#1 |     67771
+ Manufacturer#1 |     68020
+ Manufacturer#1 |     68129
+ Manufacturer#1 |     68362
+ Manufacturer#1 |     68379
+ Manufacturer#1 |     68580
+ Manufacturer#1 |     68649
+ Manufacturer#1 |     68700
+ Manufacturer#1 |     69045
+ Manufacturer#1 |     69056
+ Manufacturer#1 |     69224
+ Manufacturer#1 |     69226
+ Manufacturer#1 |     69375
+ Manufacturer#1 |     69582
+ Manufacturer#1 |     69599
+ Manufacturer#1 |     69730
+ Manufacturer#1 |     69984
+ Manufacturer#1 |     70037
+ Manufacturer#1 |     70073
+ Manufacturer#1 |     70090
+ Manufacturer#1 |     70112
+ Manufacturer#1 |     70144
+ Manufacturer#1 |     70180
+ Manufacturer#1 |     70285
+ Manufacturer#1 |     70516
+ Manufacturer#1 |     71074
+ Manufacturer#1 |     71117
+ Manufacturer#1 |     71181
+ Manufacturer#1 |     71498
+ Manufacturer#1 |     71613
+ Manufacturer#1 |     71634
+ Manufacturer#1 |     71649
+ Manufacturer#1 |     71901
+ Manufacturer#1 |     72067
+ Manufacturer#1 |     72081
+ Manufacturer#1 |     72174
+ Manufacturer#1 |     72438
+ Manufacturer#1 |     72491
+ Manufacturer#1 |     72684
+ Manufacturer#1 |     73133
+ Manufacturer#1 |     73136
+ Manufacturer#1 |     73214
+ Manufacturer#1 |     73278
+ Manufacturer#1 |     73332
+ Manufacturer#1 |     73608
+ Manufacturer#1 |     73671
+ Manufacturer#1 |     73731
+ Manufacturer#1 |     73810
+ Manufacturer#1 |     74042
+ Manufacturer#1 |     74072
+ Manufacturer#1 |     74135
+ Manufacturer#1 |     74239
+ Manufacturer#1 |     74335
+ Manufacturer#1 |     74418
+ Manufacturer#1 |     74433
+ Manufacturer#1 |     74463
+ Manufacturer#1 |     74489
+ Manufacturer#1 |     74596
+ Manufacturer#1 |     74679
+ Manufacturer#1 |     75041
+ Manufacturer#1 |     75155
+ Manufacturer#1 |     75280
+ Manufacturer#1 |     75338
+ Manufacturer#1 |     75367
+ Manufacturer#1 |     75602
+ Manufacturer#1 |     75702
+ Manufacturer#1 |     75704
+ Manufacturer#1 |     75820
+ Manufacturer#1 |     75843
+ Manufacturer#1 |     75874
+ Manufacturer#1 |     75959
+ Manufacturer#1 |     76133
+ Manufacturer#1 |     76183
+ Manufacturer#1 |     76247
+ Manufacturer#1 |     76293
+ Manufacturer#1 |     76525
+ Manufacturer#1 |     76583
+ Manufacturer#1 |     76779
+ Manufacturer#1 |     76798
+ Manufacturer#1 |     76807
+ Manufacturer#1 |     76889
+ Manufacturer#1 |     76948
+ Manufacturer#1 |     76954
+ Manufacturer#1 |     77095
+ Manufacturer#1 |     77413
+ Manufacturer#1 |     77492
+ Manufacturer#1 |     77558
+ Manufacturer#1 |     77692
+ Manufacturer#1 |     77983
+ Manufacturer#1 |     78327
+ Manufacturer#1 |     78346
+ Manufacturer#1 |     78348
+ Manufacturer#1 |     78777
+ Manufacturer#1 |     78985
+ Manufacturer#1 |     79123
+ Manufacturer#1 |     79229
+ Manufacturer#1 |     79230
+ Manufacturer#1 |     79340
+ Manufacturer#1 |     79373
+ Manufacturer#1 |     79512
+ Manufacturer#1 |     79717
+ Manufacturer#1 |     79758
+ Manufacturer#1 |     79781
+ Manufacturer#1 |     79783
+ Manufacturer#1 |     79922
+ Manufacturer#1 |     80174
+ Manufacturer#1 |     80181
+ Manufacturer#1 |     80212
+ Manufacturer#1 |     80237
+ Manufacturer#1 |     80259
+ Manufacturer#1 |     80286
+ Manufacturer#1 |     80531
+ Manufacturer#1 |     80687
+ Manufacturer#1 |     80769
+ Manufacturer#1 |     80856
+ Manufacturer#1 |     81004
+ Manufacturer#1 |     81078
+ Manufacturer#1 |     81135
+ Manufacturer#1 |     81281
+ Manufacturer#1 |     81342
+ Manufacturer#1 |     81537
+ Manufacturer#1 |     81592
+ Manufacturer#1 |     81611
+ Manufacturer#1 |     81688
+ Manufacturer#1 |     81814
+ Manufacturer#1 |     81829
+ Manufacturer#1 |     81855
+ Manufacturer#1 |     81878
+ Manufacturer#1 |     81883
+ Manufacturer#1 |     81998
+ Manufacturer#1 |     82054
+ Manufacturer#1 |     82055
+ Manufacturer#1 |     82282
+ Manufacturer#1 |     82306
+ Manufacturer#1 |     82560
+ Manufacturer#1 |     82578
+ Manufacturer#1 |     82701
+ Manufacturer#1 |     82874
+ Manufacturer#1 |     82997
+ Manufacturer#1 |     83352
+ Manufacturer#1 |     83523
+ Manufacturer#1 |     83707
+ Manufacturer#1 |     83783
+ Manufacturer#1 |     83831
+ Manufacturer#1 |     84292
+ Manufacturer#1 |     84403
+ Manufacturer#1 |     84419
+ Manufacturer#1 |     84515
+ Manufacturer#1 |     84566
+ Manufacturer#1 |     84847
+ Manufacturer#1 |     84973
+ Manufacturer#1 |     85046
+ Manufacturer#1 |     85235
+ Manufacturer#1 |     85283
+ Manufacturer#1 |     85286
+ Manufacturer#1 |     85317
+ Manufacturer#1 |     85380
+ Manufacturer#1 |     85544
+ Manufacturer#1 |     85549
+ Manufacturer#1 |     85685
+ Manufacturer#1 |     85703
+ Manufacturer#1 |     85732
+ Manufacturer#1 |     85836
+ Manufacturer#1 |     85979
+ Manufacturer#1 |     85996
+ Manufacturer#1 |     86024
+ Manufacturer#1 |     86063
+ Manufacturer#1 |     86321
+ Manufacturer#1 |     86675
+ Manufacturer#1 |     86681
+ Manufacturer#1 |     86840
+ Manufacturer#1 |     87049
+ Manufacturer#1 |     87064
+ Manufacturer#1 |     87078
+ Manufacturer#1 |     87130
+ Manufacturer#1 |     87141
+ Manufacturer#1 |     87209
+ Manufacturer#1 |     87438
+ Manufacturer#1 |     87584
+ Manufacturer#1 |     87837
+ Manufacturer#1 |     88006
+ Manufacturer#1 |     88063
+ Manufacturer#1 |     88097
+ Manufacturer#1 |     88468
+ Manufacturer#1 |     88500
+ Manufacturer#1 |     88526
+ Manufacturer#1 |     88644
+ Manufacturer#1 |     88781
+ Manufacturer#1 |     88953
+ Manufacturer#1 |     89169
+ Manufacturer#1 |     89225
+ Manufacturer#1 |     89234
+ Manufacturer#1 |     89726
+ Manufacturer#1 |     89813
+ Manufacturer#1 |     90332
+ Manufacturer#1 |     90511
+ Manufacturer#1 |     90607
+ Manufacturer#1 |     90759
+ Manufacturer#1 |     90854
+ Manufacturer#1 |     90867
+ Manufacturer#1 |     90887
+ Manufacturer#1 |     90964
+ Manufacturer#1 |     91118
+ Manufacturer#1 |     91157
+ Manufacturer#1 |     91196
+ Manufacturer#1 |     91200
+ Manufacturer#1 |     91506
+ Manufacturer#1 |     91871
+ Manufacturer#1 |     91960
+ Manufacturer#1 |     92389
+ Manufacturer#1 |     92400
+ Manufacturer#1 |     92528
+ Manufacturer#1 |     92678
+ Manufacturer#1 |     92766
+ Manufacturer#1 |     92833
+ Manufacturer#1 |     92858
+ Manufacturer#1 |     92884
+ Manufacturer#1 |     93234
+ Manufacturer#1 |     93248
+ Manufacturer#1 |     93294
+ Manufacturer#1 |     93477
+ Manufacturer#1 |     93587
+ Manufacturer#1 |     93610
+ Manufacturer#1 |     93655
+ Manufacturer#1 |     93700
+ Manufacturer#1 |     93746
+ Manufacturer#1 |     93791
+ Manufacturer#1 |     94008
+ Manufacturer#1 |     94082
+ Manufacturer#1 |     94112
+ Manufacturer#1 |     94254
+ Manufacturer#1 |     94262
+ Manufacturer#1 |     94336
+ Manufacturer#1 |     94357
+ Manufacturer#1 |     94458
+ Manufacturer#1 |     94489
+ Manufacturer#1 |     94539
+ Manufacturer#1 |     94627
+ Manufacturer#1 |     94671
+ Manufacturer#1 |     94692
+ Manufacturer#1 |     94735
+ Manufacturer#1 |     94829
+ Manufacturer#1 |     94847
+ Manufacturer#1 |     94856
+ Manufacturer#1 |     95158
+ Manufacturer#1 |     95411
+ Manufacturer#1 |     95470
+ Manufacturer#1 |     95615
+ Manufacturer#1 |     95630
+ Manufacturer#1 |     95681
+ Manufacturer#1 |     95764
+ Manufacturer#1 |     95860
+ Manufacturer#1 |     96028
+ Manufacturer#1 |     96135
+ Manufacturer#1 |     96321
+ Manufacturer#1 |     96397
+ Manufacturer#1 |     96432
+ Manufacturer#1 |     96474
+ Manufacturer#1 |     96661
+ Manufacturer#1 |     96693
+ Manufacturer#1 |     96806
+ Manufacturer#1 |     97089
+ Manufacturer#1 |     97272
+ Manufacturer#1 |     97633
+ Manufacturer#1 |     97668
+ Manufacturer#1 |     97687
+ Manufacturer#1 |     97781
+ Manufacturer#1 |     97873
+ Manufacturer#1 |     98005
+ Manufacturer#1 |     98056
+ Manufacturer#1 |     98063
+ Manufacturer#1 |     98192
+ Manufacturer#1 |     98331
+ Manufacturer#1 |     98587
+ Manufacturer#1 |     98995
+ Manufacturer#1 |     99181
+ Manufacturer#1 |     99194
+ Manufacturer#1 |     99444
+ Manufacturer#1 |     99540
+ Manufacturer#1 |     99583
+ Manufacturer#1 |     99867
+ Manufacturer#1 |     99946
+ Manufacturer#1 |     99996
+ Manufacturer#1 |    100087
+ Manufacturer#1 |    100218
+ Manufacturer#1 |    100615
+ Manufacturer#1 |    100663
+ Manufacturer#1 |    100747
+ Manufacturer#1 |    101040
+ Manufacturer#1 |    101161
+ Manufacturer#1 |    101343
+ Manufacturer#1 |    101450
+ Manufacturer#1 |    101789
+ Manufacturer#1 |    102009
+ Manufacturer#1 |    102110
+ Manufacturer#1 |    102293
+ Manufacturer#1 |    102309
+ Manufacturer#1 |    102347
+ Manufacturer#1 |    102369
+ Manufacturer#1 |    102396
+ Manufacturer#1 |    102812
+ Manufacturer#1 |    103150
+ Manufacturer#1 |    103283
+ Manufacturer#1 |    103367
+ Manufacturer#1 |    103399
+ Manufacturer#1 |    103418
+ Manufacturer#1 |    103444
+ Manufacturer#1 |    103454
+ Manufacturer#1 |    103525
+ Manufacturer#1 |    103646
+ Manufacturer#1 |    103849
+ Manufacturer#1 |    103852
+ Manufacturer#1 |    103872
+ Manufacturer#1 |    103902
+ Manufacturer#1 |    103921
+ Manufacturer#1 |    104085
+ Manufacturer#1 |    104365
+ Manufacturer#1 |    104391
+ Manufacturer#1 |    104421
+ Manufacturer#1 |    104430
+ Manufacturer#1 |    104450
+ Manufacturer#1 |    104491
+ Manufacturer#1 |    104499
+ Manufacturer#1 |    104692
+ Manufacturer#1 |    104839
+ Manufacturer#1 |    104969
+ Manufacturer#1 |    105178
+ Manufacturer#1 |    105191
+ Manufacturer#1 |    105217
+ Manufacturer#1 |    105371
+ Manufacturer#1 |    105506
+ Manufacturer#1 |    105572
+ Manufacturer#1 |    105684
+ Manufacturer#1 |    105813
+ Manufacturer#1 |    105871
+ Manufacturer#1 |    105884
+ Manufacturer#1 |    106130
+ Manufacturer#1 |    106442
+ Manufacturer#1 |    106471
+ Manufacturer#1 |    106594
+ Manufacturer#1 |    106613
+ Manufacturer#1 |    106871
+ Manufacturer#1 |    106924
+ Manufacturer#1 |    106941
+ Manufacturer#1 |    107120
+ Manufacturer#1 |    107162
+ Manufacturer#1 |    107190
+ Manufacturer#1 |    107283
+ Manufacturer#1 |    107388
+ Manufacturer#1 |    107409
+ Manufacturer#1 |    107729
+ Manufacturer#1 |    107793
+ Manufacturer#1 |    107878
+ Manufacturer#1 |    108098
+ Manufacturer#1 |    108100
+ Manufacturer#1 |    108286
+ Manufacturer#1 |    108293
+ Manufacturer#1 |    108341
+ Manufacturer#1 |    108353
+ Manufacturer#1 |    108525
+ Manufacturer#1 |    108671
+ Manufacturer#1 |    108717
+ Manufacturer#1 |    109164
+ Manufacturer#1 |    109208
+ Manufacturer#1 |    109422
+ Manufacturer#1 |    109595
+ Manufacturer#1 |    109883
+ Manufacturer#1 |    109902
+ Manufacturer#1 |    109969
+ Manufacturer#1 |    109971
+ Manufacturer#1 |    110061
+ Manufacturer#1 |    110100
+ Manufacturer#1 |    110163
+ Manufacturer#1 |    110343
+ Manufacturer#1 |    110435
+ Manufacturer#1 |    110701
+ Manufacturer#1 |    110989
+ Manufacturer#1 |    111171
+ Manufacturer#1 |    111314
+ Manufacturer#1 |    111360
+ Manufacturer#1 |    111387
+ Manufacturer#1 |    111699
+ Manufacturer#1 |    111962
+ Manufacturer#1 |    111974
+ Manufacturer#1 |    112027
+ Manufacturer#1 |    112083
+ Manufacturer#1 |    112380
+ Manufacturer#1 |    112474
+ Manufacturer#1 |    112514
+ Manufacturer#1 |    112663
+ Manufacturer#1 |    112737
+ Manufacturer#1 |    112897
+ Manufacturer#1 |    112947
+ Manufacturer#1 |    113028
+ Manufacturer#1 |    113047
+ Manufacturer#1 |    113072
+ Manufacturer#1 |    113208
+ Manufacturer#1 |    113283
+ Manufacturer#1 |    113325
+ Manufacturer#1 |    113411
+ Manufacturer#1 |    113439
+ Manufacturer#1 |    113654
+ Manufacturer#1 |    113766
+ Manufacturer#1 |    113774
+ Manufacturer#1 |    113813
+ Manufacturer#1 |    113849
+ Manufacturer#1 |    113949
+ Manufacturer#1 |    114121
+ Manufacturer#1 |    114584
+ Manufacturer#1 |    114714
+ Manufacturer#1 |    114758
+ Manufacturer#1 |    114952
+ Manufacturer#1 |    114975
+ Manufacturer#1 |    114996
+ Manufacturer#1 |    115008
+ Manufacturer#1 |    115078
+ Manufacturer#1 |    115134
+ Manufacturer#1 |    115215
+ Manufacturer#1 |    115336
+ Manufacturer#1 |    115378
+ Manufacturer#1 |    115424
+ Manufacturer#1 |    115943
+ Manufacturer#1 |    116119
+ Manufacturer#1 |    116166
+ Manufacturer#1 |    116325
+ Manufacturer#1 |    116434
+ Manufacturer#1 |    116488
+ Manufacturer#1 |    116626
+ Manufacturer#1 |    116641
+ Manufacturer#1 |    116714
+ Manufacturer#1 |    116843
+ Manufacturer#1 |    116859
+ Manufacturer#1 |    116902
+ Manufacturer#1 |    116981
+ Manufacturer#1 |    117156
+ Manufacturer#1 |    117163
+ Manufacturer#1 |    117182
+ Manufacturer#1 |    117300
+ Manufacturer#1 |    117337
+ Manufacturer#1 |    117406
+ Manufacturer#1 |    117482
+ Manufacturer#1 |    117953
+ Manufacturer#1 |    118050
+ Manufacturer#1 |    118189
+ Manufacturer#1 |    118487
+ Manufacturer#1 |    118584
+ Manufacturer#1 |    118683
+ Manufacturer#1 |    118835
+ Manufacturer#1 |    118857
+ Manufacturer#1 |    118893
+ Manufacturer#1 |    118906
+ Manufacturer#1 |    118934
+ Manufacturer#1 |    119027
+ Manufacturer#1 |    119248
+ Manufacturer#1 |    119360
+ Manufacturer#1 |    119469
+ Manufacturer#1 |    119585
+ Manufacturer#1 |    119626
+ Manufacturer#1 |    119639
+ Manufacturer#1 |    119644
+ Manufacturer#1 |    119899
+ Manufacturer#1 |    120039
+ Manufacturer#1 |    120283
+ Manufacturer#1 |    120393
+ Manufacturer#1 |    120515
+ Manufacturer#1 |    120590
+ Manufacturer#1 |    120703
+ Manufacturer#1 |    120805
+ Manufacturer#1 |    120851
+ Manufacturer#1 |    120886
+ Manufacturer#1 |    121006
+ Manufacturer#1 |    121078
+ Manufacturer#1 |    121106
+ Manufacturer#1 |    121174
+ Manufacturer#1 |    121334
+ Manufacturer#1 |    121634
+ Manufacturer#1 |    121734
+ Manufacturer#1 |    121861
+ Manufacturer#1 |    121873
+ Manufacturer#1 |    121956
+ Manufacturer#1 |    121989
+ Manufacturer#1 |    121995
+ Manufacturer#1 |    122014
+ Manufacturer#1 |    122136
+ Manufacturer#1 |    122188
+ Manufacturer#1 |    122308
+ Manufacturer#1 |    122384
+ Manufacturer#1 |    122485
+ Manufacturer#1 |    122579
+ Manufacturer#1 |    122709
+ Manufacturer#1 |    122829
+ Manufacturer#1 |    122830
+ Manufacturer#1 |    122936
+ Manufacturer#1 |    122977
+ Manufacturer#1 |    123115
+ Manufacturer#1 |    123319
+ Manufacturer#1 |    123519
+ Manufacturer#1 |    123667
+ Manufacturer#1 |    123714
+ Manufacturer#1 |    123818
+ Manufacturer#1 |    123821
+ Manufacturer#1 |    123940
+ Manufacturer#1 |    123970
+ Manufacturer#1 |    124204
+ Manufacturer#1 |    124210
+ Manufacturer#1 |    124265
+ Manufacturer#1 |    124457
+ Manufacturer#1 |    124552
+ Manufacturer#1 |    124669
+ Manufacturer#1 |    124679
+ Manufacturer#1 |    124689
+ Manufacturer#1 |    124865
+ Manufacturer#1 |    125152
+ Manufacturer#1 |    125254
+ Manufacturer#1 |    125298
+ Manufacturer#1 |    125310
+ Manufacturer#1 |    125602
+ Manufacturer#1 |    125613
+ Manufacturer#1 |    125705
+ Manufacturer#1 |    126038
+ Manufacturer#1 |    126111
+ Manufacturer#1 |    126207
+ Manufacturer#1 |    126242
+ Manufacturer#1 |    126253
+ Manufacturer#1 |    126539
+ Manufacturer#1 |    126570
+ Manufacturer#1 |    126610
+ Manufacturer#1 |    126617
+ Manufacturer#1 |    126659
+ Manufacturer#1 |    126699
+ Manufacturer#1 |    126754
+ Manufacturer#1 |    127025
+ Manufacturer#1 |    127348
+ Manufacturer#1 |    127418
+ Manufacturer#1 |    127505
+ Manufacturer#1 |    127635
+ Manufacturer#1 |    127667
+ Manufacturer#1 |    127676
+ Manufacturer#1 |    127767
+ Manufacturer#1 |    127895
+ Manufacturer#1 |    127948
+ Manufacturer#1 |    127971
+ Manufacturer#1 |    128051
+ Manufacturer#1 |    128174
+ Manufacturer#1 |    128318
+ Manufacturer#1 |    128380
+ Manufacturer#1 |    128439
+ Manufacturer#1 |    128440
+ Manufacturer#1 |    128483
+ Manufacturer#1 |    128737
+ Manufacturer#1 |    128981
+ Manufacturer#1 |    128984
+ Manufacturer#1 |    129045
+ Manufacturer#1 |    129095
+ Manufacturer#1 |    129251
+ Manufacturer#1 |    129314
+ Manufacturer#1 |    129345
+ Manufacturer#1 |    129466
+ Manufacturer#1 |    129553
+ Manufacturer#1 |    129757
+ Manufacturer#1 |    129765
+ Manufacturer#1 |    129861
+ Manufacturer#1 |    129922
+ Manufacturer#1 |    129942
+ Manufacturer#1 |    130136
+ Manufacturer#1 |    130286
+ Manufacturer#1 |    130387
+ Manufacturer#1 |    130720
+ Manufacturer#1 |    130734
+ Manufacturer#1 |    130736
+ Manufacturer#1 |    130855
+ Manufacturer#1 |    131202
+ Manufacturer#1 |    131309
+ Manufacturer#1 |    131325
+ Manufacturer#1 |    131391
+ Manufacturer#1 |    131416
+ Manufacturer#1 |    131520
+ Manufacturer#1 |    131584
+ Manufacturer#1 |    131593
+ Manufacturer#1 |    131612
+ Manufacturer#1 |    131825
+ Manufacturer#1 |    132118
+ Manufacturer#1 |    132645
+ Manufacturer#1 |    132783
+ Manufacturer#1 |    133000
+ Manufacturer#1 |    133073
+ Manufacturer#1 |    133094
+ Manufacturer#1 |    133376
+ Manufacturer#1 |    133800
+ Manufacturer#1 |    133802
+ Manufacturer#1 |    133863
+ Manufacturer#1 |    133913
+ Manufacturer#1 |    134473
+ Manufacturer#1 |    134538
+ Manufacturer#1 |    134708
+ Manufacturer#1 |    134852
+ Manufacturer#1 |    135224
+ Manufacturer#1 |    135371
+ Manufacturer#1 |    135418
+ Manufacturer#1 |    135552
+ Manufacturer#1 |    135634
+ Manufacturer#1 |    135716
+ Manufacturer#1 |    135738
+ Manufacturer#1 |    135806
+ Manufacturer#1 |    135830
+ Manufacturer#1 |    135884
+ Manufacturer#1 |    135920
+ Manufacturer#1 |    135971
+ Manufacturer#1 |    136000
+ Manufacturer#1 |    136182
+ Manufacturer#1 |    136254
+ Manufacturer#1 |    136259
+ Manufacturer#1 |    136424
+ Manufacturer#1 |    136517
+ Manufacturer#1 |    136634
+ Manufacturer#1 |    136756
+ Manufacturer#1 |    136880
+ Manufacturer#1 |    137078
+ Manufacturer#1 |    137154
+ Manufacturer#1 |    137375
+ Manufacturer#1 |    137520
+ Manufacturer#1 |    137650
+ Manufacturer#1 |    137695
+ Manufacturer#1 |    137868
+ Manufacturer#1 |    138007
+ Manufacturer#1 |    138022
+ Manufacturer#1 |    138099
+ Manufacturer#1 |    138342
+ Manufacturer#1 |    138562
+ Manufacturer#1 |    138642
+ Manufacturer#1 |    138726
+ Manufacturer#1 |    138785
+ Manufacturer#1 |    138851
+ Manufacturer#1 |    138890
+ Manufacturer#1 |    138950
+ Manufacturer#1 |    139088
+ Manufacturer#1 |    139111
+ Manufacturer#1 |    139332
+ Manufacturer#1 |    139435
+ Manufacturer#1 |    139607
+ Manufacturer#1 |    139643
+ Manufacturer#1 |    139746
+ Manufacturer#1 |    139814
+ Manufacturer#1 |    139858
+ Manufacturer#1 |    140198
+ Manufacturer#1 |    140351
+ Manufacturer#1 |    140379
+ Manufacturer#1 |    140408
+ Manufacturer#1 |    140504
+ Manufacturer#1 |    140526
+ Manufacturer#1 |    140592
+ Manufacturer#1 |    140949
+ Manufacturer#1 |    141063
+ Manufacturer#1 |    141078
+ Manufacturer#1 |    141201
+ Manufacturer#1 |    141533
+ Manufacturer#1 |    141733
+ Manufacturer#1 |    141769
+ Manufacturer#1 |    141812
+ Manufacturer#1 |    142154
+ Manufacturer#1 |    142243
+ Manufacturer#1 |    142297
+ Manufacturer#1 |    142311
+ Manufacturer#1 |    142377
+ Manufacturer#1 |    142383
+ Manufacturer#1 |    142386
+ Manufacturer#1 |    142455
+ Manufacturer#1 |    142465
+ Manufacturer#1 |    142527
+ Manufacturer#1 |    142548
+ Manufacturer#1 |    142578
+ Manufacturer#1 |    142831
+ Manufacturer#1 |    142933
+ Manufacturer#1 |    143196
+ Manufacturer#1 |    143318
+ Manufacturer#1 |    143330
+ Manufacturer#1 |    143631
+ Manufacturer#1 |    143758
+ Manufacturer#1 |    143774
+ Manufacturer#1 |    143834
+ Manufacturer#1 |    143838
+ Manufacturer#1 |    143891
+ Manufacturer#1 |    143931
+ Manufacturer#1 |    144066
+ Manufacturer#1 |    144085
+ Manufacturer#1 |    144104
+ Manufacturer#1 |    144105
+ Manufacturer#1 |    144622
+ Manufacturer#1 |    144856
+ Manufacturer#1 |    145171
+ Manufacturer#1 |    145187
+ Manufacturer#1 |    145229
+ Manufacturer#1 |    145242
+ Manufacturer#1 |    145432
+ Manufacturer#1 |    145442
+ Manufacturer#1 |    145534
+ Manufacturer#1 |    145551
+ Manufacturer#1 |    146031
+ Manufacturer#1 |    146085
+ Manufacturer#1 |    146206
+ Manufacturer#1 |    146562
+ Manufacturer#1 |    146610
+ Manufacturer#1 |    146718
+ Manufacturer#1 |    146847
+ Manufacturer#1 |    146962
+ Manufacturer#1 |    147084
+ Manufacturer#1 |    147195
+ Manufacturer#1 |    147549
+ Manufacturer#1 |    147732
+ Manufacturer#1 |    147792
+ Manufacturer#1 |    147983
+ Manufacturer#1 |    148002
+ Manufacturer#1 |    148243
+ Manufacturer#1 |    148306
+ Manufacturer#1 |    148408
+ Manufacturer#1 |    148577
+ Manufacturer#1 |    148984
+ Manufacturer#1 |    149412
+ Manufacturer#1 |    149489
+ Manufacturer#1 |    149654
+ Manufacturer#1 |    149786
+ Manufacturer#1 |    149791
+ Manufacturer#1 |    149955
+ Manufacturer#1 |    150054
+ Manufacturer#1 |    150155
+ Manufacturer#1 |    150182
+ Manufacturer#1 |    150342
+ Manufacturer#1 |    150500
+ Manufacturer#1 |    150583
+ Manufacturer#1 |    150923
+ Manufacturer#1 |    151334
+ Manufacturer#1 |    151683
+ Manufacturer#1 |    151722
+ Manufacturer#1 |    151757
+ Manufacturer#1 |    151802
+ Manufacturer#1 |    151975
+ Manufacturer#1 |    151996
+ Manufacturer#1 |    152002
+ Manufacturer#1 |    152196
+ Manufacturer#1 |    152367
+ Manufacturer#1 |    152470
+ Manufacturer#1 |    152499
+ Manufacturer#1 |    152745
+ Manufacturer#1 |    152925
+ Manufacturer#1 |    153125
+ Manufacturer#1 |    153312
+ Manufacturer#1 |    153317
+ Manufacturer#1 |    153499
+ Manufacturer#1 |    153717
+ Manufacturer#1 |    153744
+ Manufacturer#1 |    153832
+ Manufacturer#1 |    153905
+ Manufacturer#1 |    153952
+ Manufacturer#1 |    154123
+ Manufacturer#1 |    154334
+ Manufacturer#1 |    154439
+ Manufacturer#1 |    154467
+ Manufacturer#1 |    154537
+ Manufacturer#1 |    154544
+ Manufacturer#1 |    154588
+ Manufacturer#1 |    154734
+ Manufacturer#1 |    154831
+ Manufacturer#1 |    154917
+ Manufacturer#1 |    155013
+ Manufacturer#1 |    155160
+ Manufacturer#1 |    155449
+ Manufacturer#1 |    155463
+ Manufacturer#1 |    155504
+ Manufacturer#1 |    155555
+ Manufacturer#1 |    155692
+ Manufacturer#1 |    155781
+ Manufacturer#1 |    156030
+ Manufacturer#1 |    156494
+ Manufacturer#1 |    156594
+ Manufacturer#1 |    156686
+ Manufacturer#1 |    156998
+ Manufacturer#1 |    157273
+ Manufacturer#1 |    157326
+ Manufacturer#1 |    157486
+ Manufacturer#1 |    157559
+ Manufacturer#1 |    157566
+ Manufacturer#1 |    157713
+ Manufacturer#1 |    157748
+ Manufacturer#1 |    157761
+ Manufacturer#1 |    158030
+ Manufacturer#1 |    158183
+ Manufacturer#1 |    158370
+ Manufacturer#1 |    158579
+ Manufacturer#1 |    158726
+ Manufacturer#1 |    158858
+ Manufacturer#1 |    159019
+ Manufacturer#1 |    159063
+ Manufacturer#1 |    159189
+ Manufacturer#1 |    159256
+ Manufacturer#1 |    159626
+ Manufacturer#1 |    159714
+ Manufacturer#1 |    159734
+ Manufacturer#1 |    159851
+ Manufacturer#1 |    159887
+ Manufacturer#1 |    160016
+ Manufacturer#1 |    160074
+ Manufacturer#1 |    160114
+ Manufacturer#1 |    160417
+ Manufacturer#1 |    160604
+ Manufacturer#1 |    160912
+ Manufacturer#1 |    160987
+ Manufacturer#1 |    161032
+ Manufacturer#1 |    161096
+ Manufacturer#1 |    161211
+ Manufacturer#1 |    161270
+ Manufacturer#1 |    161338
+ Manufacturer#1 |    161352
+ Manufacturer#1 |    161364
+ Manufacturer#1 |    161428
+ Manufacturer#1 |    161535
+ Manufacturer#1 |    161661
+ Manufacturer#1 |    161696
+ Manufacturer#1 |    161802
+ Manufacturer#1 |    161831
+ Manufacturer#1 |    161891
+ Manufacturer#1 |    162067
+ Manufacturer#1 |    162482
+ Manufacturer#1 |    162645
+ Manufacturer#1 |    162775
+ Manufacturer#1 |    162832
+ Manufacturer#1 |    162870
+ Manufacturer#1 |    163255
+ Manufacturer#1 |    163264
+ Manufacturer#1 |    163352
+ Manufacturer#1 |    163996
+ Manufacturer#1 |    164176
+ Manufacturer#1 |    164338
+ Manufacturer#1 |    164445
+ Manufacturer#1 |    164490
+ Manufacturer#1 |    164711
+ Manufacturer#1 |    165032
+ Manufacturer#1 |    165211
+ Manufacturer#1 |    165328
+ Manufacturer#1 |    165338
+ Manufacturer#1 |    165655
+ Manufacturer#1 |    165760
+ Manufacturer#1 |    166162
+ Manufacturer#1 |    166415
+ Manufacturer#1 |    166958
+ Manufacturer#1 |    167066
+ Manufacturer#1 |    167091
+ Manufacturer#1 |    167146
+ Manufacturer#1 |    167821
+ Manufacturer#1 |    167844
+ Manufacturer#1 |    168171
+ Manufacturer#1 |    168332
+ Manufacturer#1 |    168421
+ Manufacturer#1 |    168522
+ Manufacturer#1 |    168652
+ Manufacturer#1 |    168997
+ Manufacturer#1 |    169223
+ Manufacturer#1 |    169311
+ Manufacturer#1 |    169446
+ Manufacturer#1 |    169449
+ Manufacturer#1 |    169490
+ Manufacturer#1 |    169702
+ Manufacturer#1 |    169753
+ Manufacturer#1 |    169770
+ Manufacturer#1 |    169787
+ Manufacturer#1 |    169838
+ Manufacturer#1 |    169843
+ Manufacturer#1 |    169882
+ Manufacturer#1 |    169988
+ Manufacturer#1 |    170008
+ Manufacturer#1 |    170387
+ Manufacturer#1 |    170462
+ Manufacturer#1 |    170721
+ Manufacturer#1 |    170751
+ Manufacturer#1 |    170855
+ Manufacturer#1 |    170920
+ Manufacturer#1 |    171048
+ Manufacturer#1 |    171145
+ Manufacturer#1 |    171405
+ Manufacturer#1 |    171663
+ Manufacturer#1 |    171727
+ Manufacturer#1 |    171784
+ Manufacturer#1 |    171986
+ Manufacturer#1 |    172077
+ Manufacturer#1 |    172213
+ Manufacturer#1 |    172296
+ Manufacturer#1 |    172566
+ Manufacturer#1 |    172639
+ Manufacturer#1 |    172706
+ Manufacturer#1 |    172800
+ Manufacturer#1 |    172818
+ Manufacturer#1 |    172976
+ Manufacturer#1 |    173018
+ Manufacturer#1 |    173113
+ Manufacturer#1 |    173168
+ Manufacturer#1 |    173207
+ Manufacturer#1 |    173228
+ Manufacturer#1 |    173354
+ Manufacturer#1 |    173435
+ Manufacturer#1 |    173482
+ Manufacturer#1 |    173632
+ Manufacturer#1 |    173708
+ Manufacturer#1 |    174103
+ Manufacturer#1 |    174416
+ Manufacturer#1 |    174531
+ Manufacturer#1 |    174687
+ Manufacturer#1 |    174701
+ Manufacturer#1 |    174754
+ Manufacturer#1 |    174847
+ Manufacturer#1 |    174865
+ Manufacturer#1 |    174934
+ Manufacturer#1 |    174979
+ Manufacturer#1 |    175013
+ Manufacturer#1 |    175250
+ Manufacturer#1 |    175365
+ Manufacturer#1 |    175565
+ Manufacturer#1 |    175608
+ Manufacturer#1 |    175617
+ Manufacturer#1 |    175863
+ Manufacturer#1 |    175909
+ Manufacturer#1 |    175933
+ Manufacturer#1 |    175963
+ Manufacturer#1 |    176040
+ Manufacturer#1 |    176163
+ Manufacturer#1 |    176315
+ Manufacturer#1 |    176385
+ Manufacturer#1 |    176431
+ Manufacturer#1 |    176605
+ Manufacturer#1 |    176711
+ Manufacturer#1 |    176747
+ Manufacturer#1 |    176830
+ Manufacturer#1 |    176872
+ Manufacturer#1 |    177170
+ Manufacturer#1 |    177235
+ Manufacturer#1 |    177805
+ Manufacturer#1 |    177832
+ Manufacturer#1 |    178538
+ Manufacturer#1 |    178555
+ Manufacturer#1 |    178679
+ Manufacturer#1 |    178894
+ Manufacturer#1 |    178925
+ Manufacturer#1 |    178953
+ Manufacturer#1 |    179024
+ Manufacturer#1 |    179136
+ Manufacturer#1 |    179175
+ Manufacturer#1 |    179202
+ Manufacturer#1 |    179237
+ Manufacturer#1 |    179360
+ Manufacturer#1 |    179494
+ Manufacturer#1 |    179549
+ Manufacturer#1 |    179730
+ Manufacturer#1 |    179749
+ Manufacturer#1 |    179805
+ Manufacturer#1 |    179811
+ Manufacturer#1 |    179920
+ Manufacturer#1 |    180001
+ Manufacturer#1 |    180037
+ Manufacturer#1 |    180038
+ Manufacturer#1 |    180083
+ Manufacturer#1 |    180366
+ Manufacturer#1 |    180497
+ Manufacturer#1 |    180643
+ Manufacturer#1 |    180691
+ Manufacturer#1 |    181147
+ Manufacturer#1 |    181415
+ Manufacturer#1 |    181634
+ Manufacturer#1 |    181705
+ Manufacturer#1 |    181848
+ Manufacturer#1 |    182106
+ Manufacturer#1 |    182160
+ Manufacturer#1 |    182235
+ Manufacturer#1 |    182303
+ Manufacturer#1 |    182345
+ Manufacturer#1 |    182411
+ Manufacturer#1 |    182549
+ Manufacturer#1 |    182553
+ Manufacturer#1 |    182586
+ Manufacturer#1 |    182625
+ Manufacturer#1 |    182889
+ Manufacturer#1 |    183109
+ Manufacturer#1 |    183170
+ Manufacturer#1 |    183327
+ Manufacturer#1 |    183445
+ Manufacturer#1 |    183449
+ Manufacturer#1 |    183505
+ Manufacturer#1 |    183543
+ Manufacturer#1 |    183936
+ Manufacturer#1 |    184081
+ Manufacturer#1 |    184260
+ Manufacturer#1 |    184362
+ Manufacturer#1 |    184540
+ Manufacturer#1 |    184629
+ Manufacturer#1 |    184733
+ Manufacturer#1 |    184763
+ Manufacturer#1 |    185003
+ Manufacturer#1 |    185386
+ Manufacturer#1 |    185457
+ Manufacturer#1 |    185530
+ Manufacturer#1 |    185542
+ Manufacturer#1 |    185588
+ Manufacturer#1 |    185727
+ Manufacturer#1 |    185776
+ Manufacturer#1 |    185960
+ Manufacturer#1 |    186098
+ Manufacturer#1 |    186152
+ Manufacturer#1 |    186241
+ Manufacturer#1 |    186365
+ Manufacturer#1 |    186524
+ Manufacturer#1 |    186533
+ Manufacturer#1 |    186710
+ Manufacturer#1 |    186809
+ Manufacturer#1 |    186829
+ Manufacturer#1 |    187163
+ Manufacturer#1 |    187376
+ Manufacturer#1 |    187795
+ Manufacturer#1 |    187814
+ Manufacturer#1 |    187905
+ Manufacturer#1 |    187912
+ Manufacturer#1 |    188131
+ Manufacturer#1 |    188226
+ Manufacturer#1 |    188300
+ Manufacturer#1 |    188377
+ Manufacturer#1 |    188504
+ Manufacturer#1 |    188512
+ Manufacturer#1 |    188557
+ Manufacturer#1 |    188779
+ Manufacturer#1 |    188841
+ Manufacturer#1 |    188914
+ Manufacturer#1 |    189490
+ Manufacturer#1 |    189821
+ Manufacturer#1 |    189951
+ Manufacturer#1 |    190027
+ Manufacturer#1 |    190081
+ Manufacturer#1 |    190252
+ Manufacturer#1 |    190387
+ Manufacturer#1 |    190416
+ Manufacturer#1 |    190492
+ Manufacturer#1 |    190771
+ Manufacturer#1 |    190965
+ Manufacturer#1 |    191090
+ Manufacturer#1 |    191320
+ Manufacturer#1 |    191359
+ Manufacturer#1 |    191365
+ Manufacturer#1 |    191410
+ Manufacturer#1 |    191782
+ Manufacturer#1 |    191783
+ Manufacturer#1 |    191947
+ Manufacturer#1 |    192035
+ Manufacturer#1 |    192043
+ Manufacturer#1 |    192063
+ Manufacturer#1 |    192172
+ Manufacturer#1 |    192614
+ Manufacturer#1 |    192638
+ Manufacturer#1 |    192732
+ Manufacturer#1 |    193062
+ Manufacturer#1 |    193102
+ Manufacturer#1 |    193204
+ Manufacturer#1 |    193217
+ Manufacturer#1 |    193247
+ Manufacturer#1 |    193292
+ Manufacturer#1 |    193294
+ Manufacturer#1 |    193650
+ Manufacturer#1 |    193786
+ Manufacturer#1 |    194118
+ Manufacturer#1 |    194146
+ Manufacturer#1 |    194272
+ Manufacturer#1 |    194300
+ Manufacturer#1 |    194470
+ Manufacturer#1 |    194568
+ Manufacturer#1 |    194841
+ Manufacturer#1 |    194882
+(1621 rows)
+
+drop foreign table part_5;
+CREATE foreign TABLE append_01 (
+c_id int,
+c_d_id int,
+c_w_id int,
+c_first varchar(16),
+c_middle char(2),
+c_last varchar(16),
+c_street_1 text,
+c_street_2 varchar(60),
+c_city varchar(60),
+c_state char(2),
+c_zip char(9),
+c_phone char(16),
+c_since timestamp,
+c_credit char(2),
+c_credit_lim numeric(12,2),
+c_discount numeric(4,4),
+c_balance numeric(12,2),
+c_ytd_payment numeric(12,2),
+c_payment_cnt int,
+c_delivery_cnt int,
+c_data varchar(500)
+)
+server hdfs_server
+OPTIONS ( FORMAT 'orc',FOLDERNAME '/user/hive/warehouse/row_col.db/row_col_01_orc/')
+DISTRIBUTE BY roundrobin;
+select t1.c_discount from append_01 t1 where t1.c_discount<1  and t1.c_id = 800 order by 1 limit 10;
+ c_discount 
+------------
+      .0101
+      .0108
+      .0123
+      .0125
+      .0204
+      .0224
+      .0235
+      .0334
+      .0429
+      .0525
+(10 rows)
+
+drop foreign table append_01;
+DROP SERVER hdfs_server CASCADE;

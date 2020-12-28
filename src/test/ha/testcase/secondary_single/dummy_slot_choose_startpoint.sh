@@ -35,7 +35,7 @@ function test_1()
 check_instance
 
 #set wal_keep_segments to 2
-gs_guc reload -D $data_dir/datanode1 -c "wal_keep_segments=2"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "wal_keep_segments=2"
 sleep 2
 
 #stop all
@@ -82,7 +82,7 @@ function tear_down()
 start_standby
 
 #set wal_keep_segments back to 16
-gs_guc reload -D $data_dir/datanode1 -c "wal_keep_segments=16"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "wal_keep_segments=16"
 #drop table
 gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_wal1; "
 sleep 1

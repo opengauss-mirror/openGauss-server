@@ -58,7 +58,7 @@ const char* scheck(const char* string, const char* format)
     *(tp - 1) = '%';
     *tp++ = 'c';
     *tp = '\0';
-    if (sscanf_s(string, fbuf, &dummy) != 1) {
+    if (sscanf_s(string, fbuf, &dummy, 1) != 1) {
         result = (char*)format;
     }
     ifree(fbuf);

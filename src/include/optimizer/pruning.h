@@ -32,10 +32,25 @@
 #include "utils/partitionmap_gs.h"
 #include "utils/relcache.h"
 
+typedef PartitionMap* (*GetPartitionMapFunc)(Relation relation);
+
+typedef enum PruningType {
+    PruningPartition = 0,
+    PruningSlice,
+} PruningType;
+
 typedef struct PruningContext {
+    PruningType pruningType;
+    GetPartitionMapFunc GetPartitionMap;
+
     PlannerInfo* root;
     RangeTblEntry* rte;
+    EState* estate;
     Relation relation;
+
+    /* used for slice pruning */
+    Index varno;
+    ParamListInfo boundParams;
 } PruningContext;
 
 typedef enum PartKeyColumnRangeMode {
@@ -64,6 +79,10 @@ typedef struct PartKeyRange {
 extern IndexesUsableType eliminate_partition_index_unusable(Oid IndexOid, PruningResult* inputPruningResult,
     PruningResult** indexUsablePruningResult, PruningResult** indexUnusablePruningResult);
 PruningResult* getFullPruningResult(Relation relation);
+void destroyPruningResult(PruningResult* pruningResult);
+void partitionPruningFromBoundary(PruningContext *context, PruningResult* pruningResult);
+void generateListFromPruningBM(PruningResult* result);
+PruningResult* partitionPruningWalker(Expr* expr, PruningContext* pruningCtx);
 PruningResult* partitionPruningForExpr(PlannerInfo* root, RangeTblEntry* rte, Relation rel, Expr* expr);
 PruningResult* partitionPruningForRestrictInfo(
     PlannerInfo* root, RangeTblEntry* rte, Relation rel, List* restrictInfoList);
@@ -72,5 +91,11 @@ extern PruningResult* copyPruningResult(PruningResult* srcPruningResult);
 extern Oid getPartitionOidFromSequence(Relation relation, int partSeq);
 extern int varIsInPartitionKey(int attrNo, int2vector* partKeyAttrs, int partKeyNum);
 extern bool checkPartitionIndexUnusable(Oid indexOid, int partItrs, PruningResult* pruning_result);
+
+extern PruningResult* GetPartitionInfo(PruningResult* result, EState* estate, Relation current_relation);
+static inline PartitionMap* GetPartitionMap(PruningContext *context)
+{
+    return context->GetPartitionMap(context->relation);
+}
 
 #endif /* PRUNING_H_ */

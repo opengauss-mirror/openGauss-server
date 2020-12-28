@@ -1,0 +1,310 @@
+--
+-- Test orc foreign data wrapper.
+--
+-- Settings to make the result deterministic
+SET datestyle = "ISO, YMD";
+-- validator tests
+CREATE SERVER obs_server FOREIGN DATA WRAPPER 	dfs_fdw OPTIONS (address '@obshostname@', type 'obs', access_key '@ak@', secret_access_key '@sk@');
+CREATE FOREIGN TABLE test_validator_filename_missing (a int) 
+	SERVER obs_server distribute by roundrobin; -- ERROR
+ERROR:  Need format option for the foreign table.
+CREATE FOREIGN TABLE test_validator_invalid_option (a int) 
+	SERVER obs_server 
+	OPTIONS(encoding 'utf-8',format 'orc', filenames 'bigrow.orc', bad_option_name '1/') distribute by roundrobin; -- ERROR
+ERROR:  Invalid option "filenames"
+HINT:  Valid options in this context are: location, format, encoding, foldername, checkencoding, totalrows
+CREATE FOREIGN TABLE test_validator_tooMany_option (a int) 
+	SERVER obs_server 
+	OPTIONS(encoding 'utf-8',format 'orc', foldername 'bigrow.orc/') distribute by roundrobin; -- ERROR
+ERROR:  The first character and the end character of each foldername must be a '/' in string "bigrow.orc/".
+drop foreign table test_validator_filename_missing;
+ERROR:  foreign table "test_validator_filename_missing" does not exist
+drop foreign table test_validator_invalid_option;
+ERROR:  foreign table "test_validator_invalid_option" does not exist
+drop foreign table test_validator_tooMany_option;
+ERROR:  foreign table "test_validator_toomany_option" does not exist
+DROP FOREIGN TABLE IF EXISTS lineitem_twoStripes;
+NOTICE:  foreign table "lineitem_twostripes" does not exist, skipping
+Create foreign table lineitem_twoStripes (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/lineitem_twoStripes/000000_0/,/@obsbucket@/obsorccheck/mppdb.db/lineitem_twoStripes/000001_0/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+SELECT L_SHIPDATE FROM lineitem_twoStripes WHERE L_orderkey BETWEEN 509050 AND 509070 order by l_shipdate;
+ l_shipdate 
+------------
+ 1993-04-24
+ 1993-04-26
+ 1993-05-07
+ 1993-05-28
+ 1993-06-24
+ 1993-06-25
+ 1993-06-25
+ 1993-10-08
+ 1994-08-06
+ 1994-08-26
+ 1994-10-10
+ 1994-10-11
+ 1994-11-17
+ 1995-10-24
+ 1995-12-14
+ 1996-11-20
+ 1996-11-25
+ 1997-06-22
+ 1997-07-16
+ 1997-08-11
+ 1997-12-19
+ 1998-02-13
+ 1998-02-27
+ 1998-03-08
+ 1998-04-04
+ 1998-07-28
+ 1998-09-05
+ 1998-10-28
+ 1998-11-02
+(29 rows)
+
+select L_TAX from lineitem_twoStripes where L_LINESTATUS = 'V';
+ l_tax 
+-------
+(0 rows)
+
+select L_LINESTATUS from lineitem_twoStripes where L_RETURNFLAG = 'N' order by 1 desc offset 1000 limit 20;
+ l_linestatus 
+--------------
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+(20 rows)
+
+SELECT count(L_SHIPDATE) FROM lineitem_twoStripes WHERE L_orderkey BETWEEN 509050 AND 509070;
+ count 
+-------
+    29
+(1 row)
+
+drop foreign table lineitem_twoStripes;
+DROP FOREIGN TABLE IF EXISTS lineitem;
+NOTICE:  foreign table "lineitem" does not exist, skipping
+Create foreign table lineitem (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/lineitem_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+DROP FOREIGN TABLE IF EXISTS customer;
+NOTICE:  foreign table "customer" does not exist, skipping
+CREATE FOREIGN TABLE customer ( 
+ c_custkey BIGINT, 
+ c_name TEXT, 
+ c_address TEXT, 
+ c_nationkey INT4, 
+ c_phone TEXT, 
+ c_acctbal FLOAT4, 
+ c_mktsegment TEXT, 
+ c_comment TEXT) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+DROP FOREIGN TABLE IF EXISTS orders;
+NOTICE:  foreign table "orders" does not exist, skipping
+create foreign table orders (
+ O_ORDERKEY INT4, 
+ O_CUSTKEY INT4, 
+ O_ORDERSTATUS TEXT, 
+ O_TOTALPRICE FLOAT8,
+ O_ORDERDATE TEXT,
+ O_ORDERPRIORITY TEXT, 
+ O_CLERK TEXT,
+ O_SHIPPRIORITY INT4, 
+ O_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/orders_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+DROP FOREIGN TABLE IF EXISTS part;
+NOTICE:  foreign table "part" does not exist, skipping
+create foreign table part  (
+ P_PARTKEY INT4,
+ P_NAME TEXT, 
+ P_MFGR TEXT,
+ P_BRAND TEXT,
+ P_TYPE TEXT,
+ P_SIZE INT4,
+ P_CONTAINER TEXT,
+ P_RETAILPRICE FLOAT8,
+ P_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/part_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+DROP FOREIGN TABLE IF EXISTS supplier;
+NOTICE:  foreign table "supplier" does not exist, skipping
+create foreign table supplier  (
+ S_SUPPKEY INT4,
+ S_NAME TEXT,
+ S_ADDRESS TEXT,
+ S_NATIONKEY INT4,
+ S_PHONE TEXT,
+ S_ACCTBAL FLOAT8,
+ S_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/supplier_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+DROP FOREIGN TABLE IF EXISTS partsupp;
+NOTICE:  foreign table "partsupp" does not exist, skipping
+create foreign table partsupp (
+ PS_PARTKEY INT4,
+ PS_SUPPKEY INT4,
+ PS_AVAILQTY INT4,
+ PS_SUPPLYCOST FLOAT8,
+ PS_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/partsupp_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+DROP FOREIGN TABLE IF EXISTS nation;
+NOTICE:  foreign table "nation" does not exist, skipping
+create foreign table nation  (
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4,
+ N_COMMENT TEXT) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+DROP FOREIGN TABLE IF EXISTS region;
+NOTICE:  foreign table "region" does not exist, skipping
+create foreign table region  (
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+-- there are bugs for the following three queries. cause EOF error from datanode
+SELECT L_shipdate FROM lineitem WHERE L_orderkey between 2125190 and 2125200 order by l_shipdate;
+ l_shipdate 
+------------
+ 1994-12-05
+ 1994-12-13
+ 1995-01-03
+ 1995-01-22
+ 1995-02-28
+ 1995-12-26
+ 1995-12-26
+ 1996-02-07
+ 1996-02-15
+ 1996-02-28
+(10 rows)
+
+SELECT count(L_shipdate) FROM lineitem WHERE L_orderkey between 2125190 and 2125200;
+ count 
+-------
+    10
+(1 row)
+
+SELECT *  from lineitem WHERE L_orderkey between 2125190 and 2125200 order by l_orderkey, l_partkey;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct   | l_shipmode |                 l_comment                  
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+-------------------+------------+--------------------------------------------
+    2125190 |    120974 |      5999 |            3 |         24 |        47879.28 |        .06 |     0 | A            | F            | 1995-02-28 | 1995-02-05   | 1995-03-14    | NONE              | MAIL       | o beans. carefully special ideas solve a
+    2125190 |    138061 |      5601 |            1 |         14 |        15386.84 |          0 |   .03 | R            | F            | 1995-01-22 | 1995-01-23   | 1995-02-09    | TAKE BACK RETURN  | TRUCK      | usly unusua
+    2125190 |    138251 |      3278 |            5 |         20 |           25785 |        .06 |     0 | A            | F            | 1995-01-03 | 1994-12-23   | 1995-01-13    | DELIVER IN PERSON | MAIL       | al requests about the thinly special saute
+    2125190 |    185442 |      5443 |            2 |         24 |        36658.56 |        .07 |   .07 | A            | F            | 1994-12-05 | 1995-01-22   | 1994-12-09    | COLLECT COD       | REG AIR    | ans are. carefully pending ideas sleep. qu
+    2125190 |    193714 |      6234 |            4 |          7 |        12653.97 |        .02 |   .02 | R            | F            | 1994-12-13 | 1994-12-30   | 1994-12-16    | NONE              | FOB        | , pending requests sleep blithely acros
+    2125191 |     28041 |      5548 |            4 |          7 |         6783.28 |        .03 |   .03 | N            | O            | 1996-02-07 | 1996-01-11   | 1996-03-06    | COLLECT COD       | FOB        | longside of th
+    2125191 |     58589 |      6105 |            2 |          3 |         4642.74 |        .05 |     0 | N            | O            | 1995-12-26 | 1995-12-24   | 1996-01-14    | TAKE BACK RETURN  | SHIP       |  special accounts
+    2125191 |     70528 |      5543 |            5 |         35 |         52448.2 |        .09 |   .03 | N            | O            | 1996-02-28 | 1996-01-28   | 1996-03-25    | DELIVER IN PERSON | AIR        | carefully regular plate
+    2125191 |     99235 |      1745 |            3 |         36 |        44432.28 |        .01 |     0 | N            | O            | 1995-12-26 | 1996-01-08   | 1996-01-14    | COLLECT COD       | RAIL       | the carefully ironic mu
+    2125191 |    177347 |      4899 |            1 |         23 |        32759.82 |        .04 |   .03 | N            | O            | 1996-02-15 | 1996-01-01   | 1996-02-23    | NONE              | AIR        | ong the slyly express theodolites
+(10 rows)
+
+create foreign table bool_skip_1(i int, a smallint, b bool, c float4, d decimal(10,5))
+server obs_server
+options(encoding 'utf-8', format 'orc', foldername '/@obsbucket@/obsorccheck/bool_skip_1/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+select * from bool_skip_1 where b is null and i>15000 and i<15020 order by 1,2,3,4,5;
+   i   | a | b | c  |   d    
+-------+---+---+----+--------
+ 15001 | 5 |   | .5 | .80000
+ 15002 | 5 |   | .5 | .80000
+ 15003 | 5 |   | .5 | .80000
+ 15004 | 5 |   | .5 | .80000
+ 15005 | 5 |   | .5 | .80000
+ 15006 | 5 |   | .5 | .80000
+ 15007 | 5 |   | .5 | .80000
+ 15008 | 5 |   | .5 | .80000
+ 15009 | 5 |   | .5 | .80000
+ 15010 | 5 |   | .5 | .80000
+ 15011 | 5 |   | .5 | .80000
+ 15012 | 5 |   | .5 | .80000
+ 15013 | 5 |   | .5 | .80000
+ 15014 | 5 |   | .5 | .80000
+ 15015 | 5 |   | .5 | .80000
+ 15016 | 5 |   | .5 | .80000
+ 15017 | 5 |   | .5 | .80000
+ 15018 | 5 |   | .5 | .80000
+ 15019 | 5 |   | .5 | .80000
+(19 rows)
+
+DROP FOREIGN TABLE IF EXISTS bool_skip_1 CASCADE;
+DROP FOREIGN TABLE IF EXISTS lineitem CASCADE;
+DROP FOREIGN TABLE IF EXISTS customer CASCADE;
+DROP FOREIGN TABLE IF EXISTS orders CASCADE;
+DROP FOREIGN TABLE IF EXISTS part CASCADE;
+DROP FOREIGN TABLE IF EXISTS partsupp CASCADE;
+DROP FOREIGN TABLE IF EXISTS supplier CASCADE;
+DROP FOREIGN TABLE IF EXISTS nation CASCADE;
+DROP FOREIGN TABLE IF EXISTS region CASCADE;
+DROP SERVER obs_server CASCADE;

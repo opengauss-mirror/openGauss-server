@@ -1,0 +1,121 @@
+create schema cstore_btree_index;
+set current_schema = cstore_btree_index;
+---
+--case 1:  unsupported index test
+---
+CREATE TABLE cstore_insert_t1(c1 int, c2 float, c3 text) WITH (orientation = column);
+COPY cstore_insert_t1 FROM '@abs_srcdir@/data/cstore_copy_t2.data' DELIMITER ',';
+CREATE UNIQUE INDEX unsupport1_idx ON cstore_insert_t1 using btree(c1);
+ERROR:  access method "cbtree" does not support unique indexes
+CREATE INDEX CONCURRENTLY unsupport2_idx ON cstore_insert_t1 using btree(c1);
+ERROR:  PGXC does not support concurrent INDEX yet
+DETAIL:  The feature is not currently supported
+CREATE INDEX unsupport3_idx ON cstore_insert_t1 using btree(lower(c2));
+ERROR:  access method "cbtree" does not support index expressions
+CREATE INDEX unsupport4_idx ON cstore_insert_t1 using btree(c1) where c1 > 1;
+ERROR:  access method "cbtree" does not support WHERE clause
+CREATE INDEX unsupport5_idx ON cstore_insert_t1 using btree(c2 NULLS FIRST);
+ERROR:  access method "cbtree" does not support NULLS FIRST/LAST options
+CREATE INDEX unsupport6_idx ON cstore_insert_t1 USING hash (c1);
+ERROR:  access method "hash" does not support column store
+CREATE INDEX unsupport7_idx ON cstore_insert_t1 USING gist (c1);
+ERROR:  access method "gist" does not support column store
+CREATE INDEX unsupport9_idx ON cstore_insert_t1 USING spgist (c1);
+ERROR:  access method "spgist" does not support column store
+CREATE INDEX unsupport10_idx ON cstore_insert_t1 USING btree (c1);
+COPY cstore_insert_t1 FROM '@abs_srcdir@/data/cstore_copy_t2.data' DELIMITER ',';
+DROP TABLE cstore_insert_t1;
+CREATE TABLE row_table(c1 int, c2 float, c3 text);
+CREATE INDEX unsupport11_idx ON row_table USING psort (c1);
+ERROR:  access method "psort" does not support row store
+DROP TABLE row_table;
+-----------
+---case 2: partition table create index test
+-----------
+CREATE TABLE LINEITEM
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+  --, primary key (L_ORDERKEY, L_LINENUMBER)
+)
+with (orientation = column)
+distribute by hash(L_ORDERKEY)
+PARTITION BY RANGE(L_SHIPDATE)
+(
+    PARTITION p1 VALUES LESS THAN('1993-01-01 00:00:00'),
+    PARTITION p2 VALUES LESS THAN('1994-01-01 00:00:00'),
+    PARTITION p3 VALUES LESS THAN('1995-01-01 00:00:00'),
+        PARTITION p4 VALUES LESS THAN('1996-01-01 00:00:00'),
+        PARTITION p5 VALUES LESS THAN('1997-01-01 00:00:00'),
+        PARTITION p6 VALUES LESS THAN('1998-01-01 00:00:00'),
+        PARTITION p7 VALUES LESS THAN('2030-01-01 00:00:00')
+);
+COPY LINEITEM FROM '@abs_srcdir@/data/lineitem_index.data' DELIMITER '|';
+create index idx1 on lineitem using btree(L_ORDERKEY) local;
+create index idx2 on lineitem using btree(L_PARTKEY) local;
+create index idx3 on lineitem using btree(L_LINENUMBER, L_SHIPDATE) local;
+create index idx4 on lineitem using btree(L_RETURNFLAG) local;
+create index idx5 on lineitem using btree(L_LINESTATUS, L_SHIPINSTRUCT) local;
+COPY LINEITEM FROM '@abs_srcdir@/data/lineitem_index.data' DELIMITER '|';
+set enable_bitmapscan=off;
+set enable_seqscan=off;
+select count(*) from lineitem where L_ORDERKEY > 100 and L_ORDERKEY < 200;
+ count 
+-------
+   222
+(1 row)
+
+truncate table lineitem;
+drop index idx1;
+drop index idx2;
+drop index idx3;
+drop index idx4;
+drop index idx5;
+drop table lineitem;
+-------
+--- case 8: index scan with none partition hit
+-------
+CREATE TABLE partition_none (
+    a1 character varying(1000),
+    a2 integer,
+    a3 character varying(1000),
+    a4 integer,
+    a5 character varying(1000),
+    a6 integer,
+    a7 character varying(1000),
+    a8 integer,
+    a9 character varying(1000),
+    a10 integer
+)
+WITH (orientation=column)
+DISTRIBUTE BY HASH (a4)
+PARTITION BY RANGE (a2)
+(
+    PARTITION p1 VALUES LESS THAN (1),
+    PARTITION p50001 VALUES LESS THAN (50001),
+    PARTITION p100001 VALUES LESS THAN (100001),
+    PARTITION p150001 VALUES LESS THAN (150001),
+    PARTITION p200001 VALUES LESS THAN (200001),
+    PARTITION p250001 VALUES LESS THAN (250001));
+create index aii on partition_none using btree(a9) local;
+SELECT a1, a9 FROM /*TaRgET*/ partition_none  WHERE a5='ata l' AND 6793839=a2 AND a2=6159730 AND a9='da' ORDER BY a1, a9;
+ a1 | a9 
+----+----
+(0 rows)
+
+drop table partition_none;
+drop schema cstore_btree_index cascade;

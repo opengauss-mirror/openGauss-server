@@ -15,7 +15,7 @@
  * 
  * directory.h
  *        The declaration of directory operate function. The functions
- *        use to simulate a's directory.
+ *        use to simulate A db's directory.
  * 
  * 
  * IDENTIFICATION
@@ -37,4 +37,3 @@ extern void RemoveDirectoryById(Oid dirOid);
 extern void AlterDirectoryOwner(const char* dirname, Oid newOwnerId);
 
 #endif /* DIRECTORY_H*/
-

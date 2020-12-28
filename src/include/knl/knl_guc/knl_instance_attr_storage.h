@@ -53,7 +53,6 @@ typedef struct knl_instance_attr_storage {
     bool enable_double_write;
     bool enable_delta_store;
     bool enableWalLsnCheck;
-    bool gucMostAvailableSync;
     int WalReceiverBufSize;
     int DataQueueBufSize;
     int NBuffers;
@@ -62,17 +61,12 @@ typedef struct knl_instance_attr_storage {
     int max_prepared_xacts;
     int max_locks_per_xact;
     int max_predicate_locks_per_xact;
-    int64 xlog_idle_flushes_before_sleep;
     int num_xloginsert_locks;
-    int wal_writer_cpu;
-    int xlog_flush_uplimit;
-    int wal_file_init_num;
     int XLOGbuffers;
     int max_wal_senders;
     int max_replication_slots;
     int replication_type;
     int autovacuum_max_workers;
-    int max_background_workers;
     int64 autovacuum_freeze_max_age;
     int wal_level;
     /* User specified maximum number of recovery threads. */
@@ -82,16 +76,20 @@ typedef struct knl_instance_attr_storage {
     int pagewriter_thread_num;
     int bgwriter_thread_num;
     int real_recovery_parallelism;
-    int batch_redo_num;
+	int batch_redo_num;
     int remote_read_mode;
     int advance_xlog_file_num;
     int gtm_option;
+    int enable_update_max_page_flush_lsn;
     int max_keep_log_seg;
     int catchup2normal_wait_time;
 #ifdef EXTREME_RTO_DEBUG_AB
     int extreme_rto_ab_pos;
     int extreme_rto_ab_type;
     int extreme_rto_ab_count;
+#endif
+#ifndef ENABLE_MULTIPLE_NODES
+    int max_concurrent_autonomous_transactions;
 #endif
     char* available_zone;
 } knl_instance_attr_storage;

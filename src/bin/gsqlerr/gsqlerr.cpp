@@ -109,8 +109,9 @@ int gsqlerr_param_find(char* str, char** param, int num)
         if (NULL == param[i * 3])
             return GSQLERROR_NOT_FOUND;
 
-        if (0 == strcmp(str, param[i * 3]))
+        if (0 == strcmp(str, param[i * 3])) {
             return i;
+        }
     }
 
     return GSQLERROR_NOT_FOUND;

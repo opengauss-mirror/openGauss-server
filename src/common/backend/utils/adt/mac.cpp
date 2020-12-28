@@ -15,6 +15,7 @@
 /*
  *	Utility macros used for sorting and comparing:
  */
+
 #define hibits(addr) ((unsigned long)(((addr)->a << 16) | ((addr)->b << 8) | ((addr)->c)))
 
 #define lobits(addr) ((unsigned long)(((addr)->d << 16) | ((addr)->e << 8) | ((addr)->f)))
@@ -22,6 +23,7 @@
 /*
  *	MAC address reader.  Accepts several common notations.
  */
+
 Datum macaddr_in(PG_FUNCTION_ARGS)
 {
     char* str = PG_GETARG_CSTRING(0);
@@ -33,6 +35,7 @@ Datum macaddr_in(PG_FUNCTION_ARGS)
     int count;
 
     /* %1s matches iff there is trailing non-whitespace garbage */
+
     count = sscanf_s(str, "%x:%x:%x:%x:%x:%x%1s", &a, &b, &c, &d, &e, &f, junk, JUNK_LEN);
     if (count != EXPECT_PARA_NUMS)
         count = sscanf_s(str, "%x-%x-%x-%x-%x-%x%1s", &a, &b, &c, &d, &e, &f, junk, JUNK_LEN);
@@ -69,6 +72,7 @@ Datum macaddr_in(PG_FUNCTION_ARGS)
 /*
  *	MAC address output function.  Fixed format.
  */
+
 Datum macaddr_out(PG_FUNCTION_ARGS)
 {
     macaddr* addr = PG_GETARG_MACADDR_P(0);
@@ -128,19 +132,19 @@ Datum macaddr_send(PG_FUNCTION_ARGS)
 /*
  *	Comparison function for sorting:
  */
+
 static int32 macaddr_cmp_internal(macaddr* a1, macaddr* a2)
 {
-    if (hibits(a1) < hibits(a2)) {
+    if (hibits(a1) < hibits(a2))
         return -1;
-    } else if (hibits(a1) > hibits(a2)) {
+    else if (hibits(a1) > hibits(a2))
         return 1;
-    } else if (lobits(a1) < lobits(a2)) {
+    else if (lobits(a1) < lobits(a2))
         return -1;
-    } else if (lobits(a1) > lobits(a2)) {
+    else if (lobits(a1) > lobits(a2))
         return 1;
-    } else {
+    else
         return 0;
-    }
 }
 
 Datum macaddr_cmp(PG_FUNCTION_ARGS)
@@ -154,6 +158,7 @@ Datum macaddr_cmp(PG_FUNCTION_ARGS)
 /*
  *	Boolean comparisons.
  */
+
 Datum macaddr_lt(PG_FUNCTION_ARGS)
 {
     macaddr* a1 = PG_GETARG_MACADDR_P(0);

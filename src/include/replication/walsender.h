@@ -44,6 +44,8 @@ extern void WalSndWakeup(void);
 extern void WalSndRqstFileReload(void);
 extern bool WalSndInProgress(int type);
 extern void StandbyOrSecondaryIsAlive(void);
+extern void StopAliveBuildSender(void);
+extern bool IsAllBuildSenderExit();
 
 extern bool WalSegmemtRemovedhappened;
 extern AlarmCheckResult WalSegmentsRemovedChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam);
@@ -84,4 +86,3 @@ extern XLogSegNo WalGetSyncCountWindow(void);
 #define MAX_XLOG_RECORD(a, b) ((XLByteLT((a), (b))) ? (b) : (a))
 
 #endif /* _WALSENDER_H */
-

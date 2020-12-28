@@ -16,7 +16,6 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include <unistd.h>
 
 #include "utils/pg_rusage.h"
 

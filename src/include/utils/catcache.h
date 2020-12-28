@@ -174,11 +174,6 @@ typedef struct CatCacheHeader {
 
 extern void AtEOXact_CatCache(bool isCommit);
 
-/* this extern duplicates utils/memutils.h... */
-extern THR_LOCAL PGDLLIMPORT MemoryContext CacheMemoryContext;
-
-extern void CreateCacheMemoryContext(void);
-
 extern CatCache* InitCatCache(int id, Oid reloid, Oid indexoid, int nkeys, const int* key, int nbuckets);
 extern void InitCatCachePhase2(CatCache* cache, bool touch_index);
 
@@ -195,6 +190,8 @@ extern uint32 GetCatCacheHashValue(CatCache* cache, Datum v1, Datum v2, Datum v3
 extern CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Datum v3, Datum v4);
 extern void ReleaseCatCacheList(CatCList* list);
 
+extern void ReleaseTempCatList(const List* volatile ctlist, CatCache* cache);
+
 extern void ResetCatalogCaches(void);
 extern void CatalogCacheFlushCatalog(Oid catId);
 extern void CatalogCacheIdInvalidate(int cacheId, uint32 hashValue);
@@ -202,9 +199,8 @@ extern void PrepareToInvalidateCacheTuple(
     Relation relation, HeapTuple tuple, HeapTuple newtuple, void (*function)(int, uint32, Oid));
 
 extern void PrintCatCacheLeakWarning(HeapTuple tuple);
-extern void PrintCatCacheListLeakWarning(const CatCList* list);
+extern void PrintCatCacheListLeakWarning(CatCList* list);
 extern bool RelationInvalidatesSnapshotsOnly(Oid);
 extern bool RelationHasSysCache(Oid);
-extern void InsertHardCodeCatalogTupleIntoSyscache(CatCache* cache, Relation relation, Relation pg_attribute_relation);
 extern void InsertBuiltinFuncInBootstrap();
 #endif /* CATCACHE_H */

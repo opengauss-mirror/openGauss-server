@@ -392,9 +392,8 @@ static void XLogDumpCountRecord(XLogDumpConfig* config, XLogDumpStats* stats, XL
      */
     fpi_len = 0;
     for (block_id = 0; block_id <= record->max_block_id; block_id++) {
-        if (XLogRecHasBlockImage(record, block_id)) {
-            fpi_len += record->blocks[block_id].bimg_len;
-        }
+        if (XLogRecHasBlockImage(record, block_id))
+            fpi_len += BLCKSZ - record->blocks[block_id].hole_length;
     }
 
     /* Update per-rmgr statistics */
@@ -427,7 +426,7 @@ static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* recor
     ForkNumber forknum;
     BlockNumber blk;
     int block_id;
-    XLogRecPtr lastLsn;
+    XLogRecPtr lsn;
     XLogRecPtr xl_prev = XLogRecGetPrev(record);
 
     printf("REDO @ %X/%X; LSN %X/%X: prev %X/%X; xid " XID_FMT "; term %u; len %u; total %u; crc %u; "
@@ -454,8 +453,8 @@ static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* recor
             if (!XLogRecHasBlockRef(record, block_id))
                 continue;
 
-            XLogRecGetBlockLastLsn(record, block_id, &lastLsn);
             XLogRecGetBlockTag(record, block_id, &rnode, &forknum, &blk);
+            XLogRecGetBlockLastLsn(record, block_id, &lsn);
             if (forknum != MAIN_FORKNUM) {
                 if (rnode.bucketNode != -1) {
                     printf(", blkref #%u: rel %u/%u/%u/%d fork %s blk %u lastlsn %X/%X",
@@ -466,8 +465,8 @@ static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* recor
                         rnode.bucketNode,
                         forkNames[forknum],
                         blk,
-                        (uint32)(lastLsn >> 32),
-                        (uint32)lastLsn);
+                        (uint32)(lsn >> 32),
+                        (uint32)lsn);
                } else {
                     printf(", blkref #%u: rel %u/%u/%u fork %s blk %u lastlsn %X/%X",
                         block_id,
@@ -476,8 +475,8 @@ static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* recor
                         rnode.relNode,
                         forkNames[forknum],
                         blk,
-                        (uint32)(lastLsn >> 32),
-                        (uint32)lastLsn);
+                        (uint32)(lsn >> 32),
+                        (uint32)lsn);
                 }
             } else {
                 if (rnode.bucketNode != -1) {
@@ -488,8 +487,8 @@ static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* recor
                         rnode.relNode,
                         rnode.bucketNode,
                         blk,
-                        (uint32)(lastLsn >> 32),
-                        (uint32)lastLsn);
+                        (uint32)(lsn >> 32),
+                        (uint32)lsn);
                 } else {
                     printf(", blkref #%u: rel %u/%u/%u blk %u lastlsn %X/%X",
                         block_id,
@@ -497,8 +496,8 @@ static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* recor
                         rnode.dbNode,
                         rnode.relNode,
                         blk,
-                        (uint32)(lastLsn >> 32),
-                        (uint32)lastLsn);
+                        (uint32)(lsn >> 32),
+                        (uint32)lsn);
                 }
             }
             if (XLogRecHasBlockImage(record, block_id))
@@ -511,10 +510,10 @@ static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* recor
         for (block_id = 0; block_id <= record->max_block_id; block_id++) {
             if (!XLogRecHasBlockRef(record, block_id))
                 continue;
-            XLogRecGetBlockLastLsn(record, block_id, &lastLsn);
+
             XLogRecGetBlockTag(record, block_id, &rnode, &forknum, &blk);
-            if (rnode.bucketNode != -1)
-            {
+            XLogRecGetBlockLastLsn(record, block_id, &lsn);
+            if (rnode.bucketNode != -1) {
                 printf("\tblkref #%u: rel %u/%u/%u/%d fork %s blk %u lastlsn %X/%X",
                     block_id,
                     rnode.spcNode,
@@ -523,11 +522,9 @@ static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* recor
                     rnode.bucketNode,
                     forkNames[forknum],
                     blk,
-                    (uint32)(lastLsn >> 32),
-                    (uint32)lastLsn);
-            }
-            else
-            {
+                    (uint32)(lsn >> 32),
+                    (uint32)lsn);
+            } else {
                 printf("\tblkref #%u: rel %u/%u/%u fork %s blk %u lastlsn %X/%X",
                     block_id,
                     rnode.spcNode,
@@ -535,22 +532,13 @@ static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* recor
                     rnode.relNode,
                     forkNames[forknum],
                     blk,
-                    (uint32)(lastLsn >> 32),
-                    (uint32)lastLsn);
+                    (uint32)(lsn >> 32),
+                    (uint32)lsn);
             }
             if (XLogRecHasBlockImage(record, block_id)) {
-                if (record->blocks[block_id].is_compressed) {
-                    printf(" (FPW); hole: offset: %u, length: %u, compression saved: %u\n",
-                           record->blocks[block_id].hole_offset,
-                           record->blocks[block_id].hole_length,
-                           BLCKSZ -
-                           record->blocks[block_id].hole_length -
-                           record->blocks[block_id].bimg_len);
-                } else {
-                    printf(" (FPW); hole: offset: %u, length: %u\n",
-                           record->blocks[block_id].hole_offset,
-                           record->blocks[block_id].hole_length);
-                }
+                printf(" (FPW); hole: offset: %u, length: %u",
+                    record->blocks[block_id].hole_offset,
+                    record->blocks[block_id].hole_length);
 
                 if (config->write_fpw)
                     XLogDumpTablePage(record, block_id, rnode, blk);
@@ -836,7 +824,7 @@ int main(int argc, char** argv)
                     fprintf(stderr, "%s: could not parse end log position \"%s\"\n", progname, optarg);
                     goto bad_argument;
                 }
-                dumpprivate.endptr = ((uint64)hi) << 32 | lo;
+                dumpprivate.endptr = (((uint64)hi) << 32) | lo;
                 break;
             case 'f':
                 config.follow = true;
@@ -853,10 +841,6 @@ int main(int argc, char** argv)
                 break;
             case 'p':
                 dumpprivate.inpath = strdup(optarg);
-                if (dumpprivate.inpath == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    goto bad_argument;
-                }
                 break;
             case 'r': {
                 int i = 0;
@@ -883,7 +867,7 @@ int main(int argc, char** argv)
                     fprintf(stderr, "%s: could not parse start log position \"%s\"\n", progname, optarg);
                     goto bad_argument;
                 }
-                dumpprivate.startptr = ((uint64)hi) << 32 | lo;
+                dumpprivate.startptr = (((uint64)hi) << 32) | lo;
                 break;
             case 't':
                 if (sscanf(optarg, "%d", &dumpprivate.timeline) != 1) {

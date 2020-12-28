@@ -32,9 +32,9 @@ INSERT INTO gpi_pwj_table1 SELECT r, r, r FROM generate_series(0,40000) AS r;
 INSERT INTO gpi_pwj_table2 SELECT r, r, r FROM generate_series(0,40000) AS r;
 CREATE INDEX idx1_gpi_pwj_table1 ON gpi_pwj_table1 (c1) GLOBAL;
 CREATE INDEX idx1_gpi_pwj_table2 ON gpi_pwj_table2 (c2) GLOBAL;
-explain (costs off, nodes off)
+explain (costs off)
 SELECT count(*) FROM gpi_pwj_table1, gpi_pwj_table2 WHERE gpi_pwj_table1.c1 = gpi_pwj_table2.c1 AND gpi_pwj_table1.c2 < 15000;
-                           QUERY PLAN
+                           QUERY PLAN                           
 ----------------------------------------------------------------
  Aggregate
    ->  Hash Join
@@ -52,16 +52,17 @@ SELECT count(*) FROM gpi_pwj_table1, gpi_pwj_table2 WHERE gpi_pwj_table1.c1 = gp
 (13 rows)
 
 SELECT count(*) FROM gpi_pwj_table1, gpi_pwj_table2 WHERE gpi_pwj_table1.c1 = gpi_pwj_table2.c1 AND gpi_pwj_table1.c2 < 15000;
- count
+ count 
 -------
  15000
 (1 row)
 
-VACUUM analyze;
+VACUUM analyze gpi_pwj_table1;
+VACUUM analyze gpi_pwj_table2;
 SET enable_partitionwise=ON;
-explain (costs off, nodes off)
+explain (costs off)
 SELECT count(*) FROM gpi_pwj_table1, gpi_pwj_table2 WHERE gpi_pwj_table1.c1 = gpi_pwj_table2.c1 AND gpi_pwj_table1.c2 < 15000;
-                            QUERY PLAN
+                            QUERY PLAN                            
 ------------------------------------------------------------------
  Aggregate
    ->  Partition Iterator
@@ -77,7 +78,7 @@ SELECT count(*) FROM gpi_pwj_table1, gpi_pwj_table2 WHERE gpi_pwj_table1.c1 = gp
 (11 rows)
 
 SELECT count(*) FROM gpi_pwj_table1, gpi_pwj_table2 WHERE gpi_pwj_table1.c1 = gpi_pwj_table2.c1 AND gpi_pwj_table1.c2 < 15000;
- count
+ count 
 -------
  15000
 (1 row)

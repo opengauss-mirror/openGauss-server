@@ -29,7 +29,7 @@
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
- *			src/gausskernel/storage/access/gin/ginlogic.cpp
+ *    src/gausskernel/storage/access/gin/ginlogic.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -75,16 +75,10 @@ static bool directBoolConsistentFn(GinScanKey key)
      */
     key->recheckCurItem = true;
 
-    return DatumGetBool(FunctionCall8Coll(key->consistentFmgrInfo,
-        key->collation,
-        PointerGetDatum(key->entryRes),
-        UInt16GetDatum(key->strategy),
-        key->query,
-        UInt32GetDatum(key->nuserentries),
-        PointerGetDatum(key->extra_data),
-        PointerGetDatum(&key->recheckCurItem),
-        PointerGetDatum(key->queryValues),
-        PointerGetDatum(key->queryCategories)));
+    return DatumGetBool(FunctionCall8Coll(key->consistentFmgrInfo, key->collation, PointerGetDatum(key->entryRes),
+                                          UInt16GetDatum(key->strategy), key->query, UInt32GetDatum(key->nuserentries),
+                                          PointerGetDatum(key->extra_data), PointerGetDatum(&key->recheckCurItem),
+                                          PointerGetDatum(key->queryValues), PointerGetDatum(key->queryCategories)));
 }
 
 /*
@@ -92,15 +86,11 @@ static bool directBoolConsistentFn(GinScanKey key)
  */
 static GinTernaryValue directTriConsistentFn(GinScanKey key)
 {
-    return DatumGetGinTernaryValue(FunctionCall7Coll(key->triConsistentFmgrInfo,
-        key->collation,
-        PointerGetDatum(key->entryRes),
-        UInt16GetDatum(key->strategy),
-        key->query,
-        UInt32GetDatum(key->nuserentries),
-        PointerGetDatum(key->extra_data),
-        PointerGetDatum(key->queryValues),
-        PointerGetDatum(key->queryCategories)));
+    return DatumGetGinTernaryValue(
+        FunctionCall7Coll(key->triConsistentFmgrInfo, key->collation, PointerGetDatum(key->entryRes),
+                          UInt16GetDatum(key->strategy), key->query, UInt32GetDatum(key->nuserentries),
+                          PointerGetDatum(key->extra_data), PointerGetDatum(key->queryValues),
+                          PointerGetDatum(key->queryCategories)));
 }
 
 /*
@@ -111,15 +101,11 @@ static GinTernaryValue directTriConsistentFn(GinScanKey key)
 static bool shimBoolConsistentFn(GinScanKey key)
 {
     GinTernaryValue result;
-    result = DatumGetGinTernaryValue(FunctionCall7Coll(key->triConsistentFmgrInfo,
-        key->collation,
-        PointerGetDatum(key->entryRes),
-        UInt16GetDatum(key->strategy),
-        key->query,
-        UInt32GetDatum(key->nuserentries),
-        PointerGetDatum(key->extra_data),
-        PointerGetDatum(key->queryValues),
-        PointerGetDatum(key->queryCategories)));
+    result = DatumGetGinTernaryValue(
+        FunctionCall7Coll(key->triConsistentFmgrInfo, key->collation, PointerGetDatum(key->entryRes),
+                          UInt16GetDatum(key->strategy), key->query, UInt32GetDatum(key->nuserentries),
+                          PointerGetDatum(key->extra_data), PointerGetDatum(key->queryValues),
+                          PointerGetDatum(key->queryCategories)));
     if (result == GIN_MAYBE) {
         key->recheckCurItem = true;
         return true;
@@ -212,7 +198,7 @@ static GinTernaryValue shimTriConsistentFn(GinScanKey key)
 /*
  * Set up the implementation of the consistent functions for a scan key.
  */
-void ginInitConsistentFunction(GinState* ginstate, GinScanKey key)
+void ginInitConsistentFunction(GinState *ginstate, GinScanKey key)
 {
     if (key->searchMode == GIN_SEARCH_MODE_EVERYTHING) {
         key->boolConsistentFn = trueConsistentFn;

@@ -1,0 +1,499 @@
+/*
+ * This file is used to test the function of ExecVecMaterial()
+ */
+----
+--- Create Table and Insert Data
+----
+create schema vector_material_engine;
+set current_schema=vector_material_engine;
+SET TIME ZONE 'PRC';set datestyle to iso;
+SET ENABLE_HASHJOIN=FALSE;
+SET ENABLE_NESTLOOP=FALSE;
+SET log_min_messages=debug1;
+CREATE TABLE vector_material_engine.ROW_MATERIAL_TABLE_01(
+ C_CHAR_1 CHAR(1),
+ C_CHAR_2 CHAR(10),
+ C_CHAR_3 CHAR(100),
+ C_VARCHAR_1 VARCHAR(1),
+ C_VARCHAR_2 VARCHAR(10),
+ C_VARCHAR_3 VARCHAR(1024),
+ C_INT BIGINT,
+ C_BIGINT BIGINT,
+ C_SMALLINT BIGINT,
+ C_FLOAT FLOAT,
+ C_NUMERIC numeric(20,5),
+ C_DP double precision,
+ C_DATE DATE,
+ C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+ C_TS_WITH TIMESTAMP WITH TIME ZONE 
+)DISTRIBUTE BY HASH (C_INT); 
+ 
+ CREATE TABLE vector_material_engine.VECTOR_MATERIAL_TABLE_01(
+ C_CHAR_1 CHAR(1),
+ C_CHAR_2 CHAR(10),
+ C_CHAR_3 CHAR(100),
+ C_VARCHAR_1 VARCHAR(1),
+ C_VARCHAR_2 VARCHAR(10),
+ C_VARCHAR_3 VARCHAR(1024),
+ C_INT BIGINT,
+ C_BIGINT BIGINT,
+ C_SMALLINT BIGINT,
+ C_FLOAT FLOAT,
+ C_NUMERIC numeric(20,5),
+ C_DP double precision,
+ C_DATE DATE,
+ C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+ C_TS_WITH TIMESTAMP WITH TIME ZONE , PARTIAL CLUSTER KEY(C_INT)
+)WITH (ORIENTATION=COLUMN) DISTRIBUTE BY HASH (C_INT); 
+CREATE TABLE vector_material_engine.ROW_MATERIAL_TABLE_02(
+   C_INT INTEGER
+)DISTRIBUTE BY HASH (C_INT);
+CREATE TABLE vector_material_engine.VECTOR_MATERIAL_TABLE_02(
+   C_INT INTEGER, 
+   PARTIAL CLUSTER KEY(C_INT)
+)WITH (ORIENTATION=COLUMN) DISTRIBUTE BY HASH (C_INT);
+CREATE TABLE vector_material_engine.ROW_MATERIAL_TABLE_03(
+   C_INT INTEGER
+  ,C_CHAR_2 VARCHAR(1024)
+);
+CREATE TABLE vector_material_engine.VECTOR_MATERIAL_TABLE_03(
+   C_INT INTEGER
+  ,C_CHAR_2 VARCHAR(1024)
+  ,PARTIAL CLUSTER KEY(C_INT,C_CHAR_2)
+)WITH (ORIENTATION=COLUMN);
+CREATE INDEX MATERIAL_INDEX_023_1 ON vector_material_engine.VECTOR_MATERIAL_TABLE_01(C_CHAR_1,C_CHAR_2,C_CHAR_3,C_VARCHAR_1,C_VARCHAR_2,C_VARCHAR_3,C_INT,C_BIGINT,C_SMALLINT,C_FLOAT,C_NUMERIC,C_DP,C_DATE,C_TS_WITHOUT,C_TS_WITH);
+CREATE INDEX MATERIAL_INDEX_023_2 ON vector_material_engine.VECTOR_MATERIAL_TABLE_02(C_INT);
+CREATE INDEX MATERIAL_INDEX_023_3 ON vector_material_engine.VECTOR_MATERIAL_TABLE_03(C_INT,C_CHAR_2);
+CREATE TABLE src(a int);
+INSERT INTO src VALUES (1);
+INSERT INTO vector_material_engine.ROW_MATERIAL_TABLE_01 SELECT 'D', 'text_'|| generate_series(0, 98), 'VARCHAR_'||generate_series(0, 98),'d', 'textDA_'||generate_series(0, 98),'VARC_'||generate_series(0, 98),generate_series(0, 98),10000+generate_series(0, 98),generate_series(0, 98),1.012+generate_series(0, 98),2.01+generate_series(0, 98),3.01+generate_series(0, 98),'2010-10-10','2018-01-01 15:59:59','2030-10-01 15:59:59' FROM src;
+insert into VECTOR_MATERIAL_TABLE_01 select * from row_material_table_01;
+INSERT INTO vector_material_engine.VECTOR_MATERIAL_TABLE_02 SELECT generate_series(98, 150) FROM src;
+insert into vector_material_engine.VECTOR_MATERIAL_TABLE_02 select * from vector_material_engine.VECTOR_MATERIAL_TABLE_02;
+insert into vector_material_engine.VECTOR_MATERIAL_TABLE_02 select * from vector_material_engine.VECTOR_MATERIAL_TABLE_02;
+insert into vector_material_engine.VECTOR_MATERIAL_TABLE_02 select * from vector_material_engine.VECTOR_MATERIAL_TABLE_02;
+INSERT INTO vector_material_engine.VECTOR_MATERIAL_TABLE_03 VALUES(36,'nowbegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL0');
+INSERT INTO vector_material_engine.VECTOR_MATERIAL_TABLE_03 VALUES(36,'rightbegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL1');
+INSERT INTO vector_material_engine.VECTOR_MATERIAL_TABLE_03 VALUES(36,'keybegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL2');
+INSERT INTO vector_material_engine.VECTOR_MATERIAL_TABLE_03 VALUES(36,'truebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL3');
+INSERT INTO vector_material_engine.VECTOR_MATERIAL_TABLE_03 VALUES(36,'laterbegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL4');
+INSERT INTO vector_material_engine.VECTOR_MATERIAL_TABLE_03 VALUES(36,'falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5');
+INSERT INTO vector_material_engine.VECTOR_MATERIAL_TABLE_03 VALUES(36,'howbegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL6');
+INSERT INTO vector_material_engine.VECTOR_MATERIAL_TABLE_03 VALUES(36,'keybegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL7');
+INSERT INTO vector_material_engine.VECTOR_MATERIAL_TABLE_03 VALUES(36,'phonebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL8');
+INSERT INTO vector_material_engine.VECTOR_MATERIAL_TABLE_03 VALUES(36,'timebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL9');
+insert into vector_material_engine.VECTOR_MATERIAL_TABLE_03 select * from vector_material_engine.VECTOR_MATERIAL_TABLE_03;
+insert into vector_material_engine.VECTOR_MATERIAL_TABLE_03 select * from vector_material_engine.VECTOR_MATERIAL_TABLE_03;
+insert into vector_material_engine.VECTOR_MATERIAL_TABLE_03 select * from vector_material_engine.VECTOR_MATERIAL_TABLE_03;
+insert into vector_material_engine.VECTOR_MATERIAL_TABLE_03 select * from vector_material_engine.VECTOR_MATERIAL_TABLE_03;
+insert into vector_material_engine.VECTOR_MATERIAL_TABLE_03 select * from vector_material_engine.VECTOR_MATERIAL_TABLE_03;
+----
+--- case 1: Execute On Disk
+----
+set work_mem=64;
+SELECT * FROM vector_material_engine.VECTOR_MATERIAL_TABLE_01 JOIN vector_material_engine.VECTOR_MATERIAL_TABLE_02 ON vector_material_engine.VECTOR_MATERIAL_TABLE_02.C_INT=98 JOIN vector_material_engine.VECTOR_MATERIAL_TABLE_03 ON vector_material_engine.VECTOR_MATERIAL_TABLE_03.C_INT=36 order by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18 asc limit 10;
+ c_char_1 |  c_char_2  |                                               c_char_3                                               | c_varchar_1 | c_varchar_2 | c_varchar_3 | c_int | c_bigint | c_smallint | c_float | c_numeric | c_dp |       c_date        |    c_ts_without     |       c_ts_with        | c_int | c_int |                                            c_char_2                                             
+----------+------------+------------------------------------------------------------------------------------------------------+-------------+-------------+-------------+-------+----------+------------+---------+-----------+------+---------------------+---------------------+------------------------+-------+-------+-------------------------------------------------------------------------------------------------
+ D        | text_0     | VARCHAR_0                                                                                            | d           | textDA_0    | VARC_0      |     0 |    10000 |          0 |   1.012 |   2.01000 | 3.01 | 2010-10-10 00:00:00 | 2018-01-01 15:59:59 | 2030-10-01 15:59:59+08 |    98 |    36 | falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5
+ D        | text_0     | VARCHAR_0                                                                                            | d           | textDA_0    | VARC_0      |     0 |    10000 |          0 |   1.012 |   2.01000 | 3.01 | 2010-10-10 00:00:00 | 2018-01-01 15:59:59 | 2030-10-01 15:59:59+08 |    98 |    36 | falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5
+ D        | text_0     | VARCHAR_0                                                                                            | d           | textDA_0    | VARC_0      |     0 |    10000 |          0 |   1.012 |   2.01000 | 3.01 | 2010-10-10 00:00:00 | 2018-01-01 15:59:59 | 2030-10-01 15:59:59+08 |    98 |    36 | falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5
+ D        | text_0     | VARCHAR_0                                                                                            | d           | textDA_0    | VARC_0      |     0 |    10000 |          0 |   1.012 |   2.01000 | 3.01 | 2010-10-10 00:00:00 | 2018-01-01 15:59:59 | 2030-10-01 15:59:59+08 |    98 |    36 | falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5
+ D        | text_0     | VARCHAR_0                                                                                            | d           | textDA_0    | VARC_0      |     0 |    10000 |          0 |   1.012 |   2.01000 | 3.01 | 2010-10-10 00:00:00 | 2018-01-01 15:59:59 | 2030-10-01 15:59:59+08 |    98 |    36 | falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5
+ D        | text_0     | VARCHAR_0                                                                                            | d           | textDA_0    | VARC_0      |     0 |    10000 |          0 |   1.012 |   2.01000 | 3.01 | 2010-10-10 00:00:00 | 2018-01-01 15:59:59 | 2030-10-01 15:59:59+08 |    98 |    36 | falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5
+ D        | text_0     | VARCHAR_0                                                                                            | d           | textDA_0    | VARC_0      |     0 |    10000 |          0 |   1.012 |   2.01000 | 3.01 | 2010-10-10 00:00:00 | 2018-01-01 15:59:59 | 2030-10-01 15:59:59+08 |    98 |    36 | falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5
+ D        | text_0     | VARCHAR_0                                                                                            | d           | textDA_0    | VARC_0      |     0 |    10000 |          0 |   1.012 |   2.01000 | 3.01 | 2010-10-10 00:00:00 | 2018-01-01 15:59:59 | 2030-10-01 15:59:59+08 |    98 |    36 | falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5
+ D        | text_0     | VARCHAR_0                                                                                            | d           | textDA_0    | VARC_0      |     0 |    10000 |          0 |   1.012 |   2.01000 | 3.01 | 2010-10-10 00:00:00 | 2018-01-01 15:59:59 | 2030-10-01 15:59:59+08 |    98 |    36 | falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5
+ D        | text_0     | VARCHAR_0                                                                                            | d           | textDA_0    | VARC_0      |     0 |    10000 |          0 |   1.012 |   2.01000 | 3.01 | 2010-10-10 00:00:00 | 2018-01-01 15:59:59 | 2030-10-01 15:59:59+08 |    98 |    36 | falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5
+(10 rows)
+
+reset work_mem;
+----
+--- case 2: Execute In Memory
+----
+SELECT * FROM vector_material_engine.VECTOR_MATERIAL_TABLE_01 JOIN vector_material_engine.VECTOR_MATERIAL_TABLE_02 ON vector_material_engine.VECTOR_MATERIAL_TABLE_02.C_INT=98 JOIN vector_material_engine.VECTOR_MATERIAL_TABLE_03 ON vector_material_engine.VECTOR_MATERIAL_TABLE_03.C_INT=36 order by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18 asc limit 10;
+ c_char_1 |  c_char_2  |                                               c_char_3                                               | c_varchar_1 | c_varchar_2 | c_varchar_3 | c_int | c_bigint | c_smallint | c_float | c_numeric | c_dp |       c_date        |    c_ts_without     |       c_ts_with        | c_int | c_int |                                            c_char_2                                             
+----------+------------+------------------------------------------------------------------------------------------------------+-------------+-------------+-------------+-------+----------+------------+---------+-----------+------+---------------------+---------------------+------------------------+-------+-------+-------------------------------------------------------------------------------------------------
+ D        | text_0     | VARCHAR_0                                                                                            | d           | textDA_0    | VARC_0      |     0 |    10000 |          0 |   1.012 |   2.01000 | 3.01 | 2010-10-10 00:00:00 | 2018-01-01 15:59:59 | 2030-10-01 15:59:59+08 |    98 |    36 | falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5
+ D        | text_0     | VARCHAR_0                                                                                            | d           | textDA_0    | VARC_0      |     0 |    10000 |          0 |   1.012 |   2.01000 | 3.01 | 2010-10-10 00:00:00 | 2018-01-01 15:59:59 | 2030-10-01 15:59:59+08 |    98 |    36 | falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5
+ D        | text_0     | VARCHAR_0                                                                                            | d           | textDA_0    | VARC_0      |     0 |    10000 |          0 |   1.012 |   2.01000 | 3.01 | 2010-10-10 00:00:00 | 2018-01-01 15:59:59 | 2030-10-01 15:59:59+08 |    98 |    36 | falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5
+ D        | text_0     | VARCHAR_0                                                                                            | d           | textDA_0    | VARC_0      |     0 |    10000 |          0 |   1.012 |   2.01000 | 3.01 | 2010-10-10 00:00:00 | 2018-01-01 15:59:59 | 2030-10-01 15:59:59+08 |    98 |    36 | falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5
+ D        | text_0     | VARCHAR_0                                                                                            | d           | textDA_0    | VARC_0      |     0 |    10000 |          0 |   1.012 |   2.01000 | 3.01 | 2010-10-10 00:00:00 | 2018-01-01 15:59:59 | 2030-10-01 15:59:59+08 |    98 |    36 | falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5
+ D        | text_0     | VARCHAR_0                                                                                            | d           | textDA_0    | VARC_0      |     0 |    10000 |          0 |   1.012 |   2.01000 | 3.01 | 2010-10-10 00:00:00 | 2018-01-01 15:59:59 | 2030-10-01 15:59:59+08 |    98 |    36 | falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5
+ D        | text_0     | VARCHAR_0                                                                                            | d           | textDA_0    | VARC_0      |     0 |    10000 |          0 |   1.012 |   2.01000 | 3.01 | 2010-10-10 00:00:00 | 2018-01-01 15:59:59 | 2030-10-01 15:59:59+08 |    98 |    36 | falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5
+ D        | text_0     | VARCHAR_0                                                                                            | d           | textDA_0    | VARC_0      |     0 |    10000 |          0 |   1.012 |   2.01000 | 3.01 | 2010-10-10 00:00:00 | 2018-01-01 15:59:59 | 2030-10-01 15:59:59+08 |    98 |    36 | falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5
+ D        | text_0     | VARCHAR_0                                                                                            | d           | textDA_0    | VARC_0      |     0 |    10000 |          0 |   1.012 |   2.01000 | 3.01 | 2010-10-10 00:00:00 | 2018-01-01 15:59:59 | 2030-10-01 15:59:59+08 |    98 |    36 | falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5
+ D        | text_0     | VARCHAR_0                                                                                            | d           | textDA_0    | VARC_0      |     0 |    10000 |          0 |   1.012 |   2.01000 | 3.01 | 2010-10-10 00:00:00 | 2018-01-01 15:59:59 | 2030-10-01 15:59:59+08 |    98 |    36 | falsebegincostEXECVECMATERIALALLINCASEINEXECVECMATERIALALLEXECVECMATERIALALLEXECVECMATERIALALL5
+(10 rows)
+
+----
+---  case 3: coltpch03 for testing vecmaterialrescan
+----
+set current_schema=vector_engine;
+select
+        l_orderkey,
+        sum(l_extendedprice * (1 - l_discount)) as revenue,
+        o_orderdate,
+        o_shippriority
+from
+        customer,
+        orders,
+        lineitem
+where
+        c_mktsegment = 'BUILDING'
+        and c_custkey = o_custkey
+        and l_orderkey = o_orderkey
+        and o_orderdate < '1995-03-15'::date
+        and l_shipdate > '1995-03-15'::date
+group by
+        l_orderkey,
+        o_orderdate,
+        o_shippriority
+order by
+        revenue desc,
+        o_orderdate
+limit 10
+;
+ l_orderkey |   revenue   |     o_orderdate     | o_shippriority 
+------------+-------------+---------------------+----------------
+      47714 | 267010.5894 | 1995-03-11 00:00:00 |              0
+      22276 | 266351.5562 | 1995-01-29 00:00:00 |              0
+      32965 | 263768.3414 | 1995-02-25 00:00:00 |              0
+      21956 | 254541.1285 | 1995-02-02 00:00:00 |              0
+       1637 | 243512.7981 | 1995-02-08 00:00:00 |              0
+      10916 | 241320.0814 | 1995-03-11 00:00:00 |              0
+      30497 | 208566.6969 | 1995-02-07 00:00:00 |              0
+        450 | 205447.4232 | 1995-03-05 00:00:00 |              0
+      47204 | 204478.5213 | 1995-03-13 00:00:00 |              0
+       9696 | 201502.2188 | 1995-02-20 00:00:00 |              0
+(10 rows)
+
+set current_schema=vector_material_engine;
+-- add llt test for mergejoin + material
+set convert_string_to_digit =false;
+create table  vector_material_engine.fvt_distribute_query_tables_01(
+	w_name 	char(10),
+	w_street_1  	character varying(20),
+	w_zip	char(9),
+	w_id 	integer , partial cluster key(w_name)) with (orientation=column) distribute by hash(w_name)
+partition by range (w_id)
+(
+	partition fvt_distribute_query_tables_01_p1 values less than (6),
+	partition fvt_distribute_query_tables_01_p2 values less than (8),
+	partition fvt_distribute_query_tables_01_p3 values less than (maxvalue)
+);
+create index fvt_distribute_query_indexes_01 on vector_material_engine.fvt_distribute_query_tables_01(w_id) local;
+COPY fvt_distribute_query_tables_01 (w_name, w_street_1, w_zip, w_id) FROM stdin;
+;
+analyze fvt_distribute_query_tables_01;
+create table  vector_material_engine.fvt_distribute_query_tables_02(
+	c_id 	varchar,
+	c_street_1 	varchar(20),
+	c_city 	text,
+	c_zip 	varchar(9),
+	c_d_id 	numeric,
+	c_w_id 	text , partial cluster key(c_id)) with (orientation=column)
+distribute by hash(c_id);
+create index fvt_distribute_query_indexes_02 on vector_material_engine.fvt_distribute_query_tables_02(c_d_id,c_id);
+COPY fvt_distribute_query_tables_02 (c_id, c_street_1, c_city, c_zip, c_d_id, c_w_id) FROM stdin;
+;
+analyze fvt_distribute_query_tables_02;
+create table  vector_material_engine.fvt_distribute_query_tables_03(
+	d_w_id 	integer,
+	d_name 	character varying(10),
+	d_street_2 	character varying(20),
+	d_city	character varying(20),
+	d_id 	integer) with (orientation=column);
+create index fvt_distribute_query_indexes_03 on vector_material_engine.fvt_distribute_query_tables_03(d_w_id,d_id);
+COPY fvt_distribute_query_tables_03 (d_w_id, d_name, d_street_2, d_city, d_id) FROM stdin;
+;
+analyze fvt_distribute_query_tables_03;
+create table  vector_material_engine.fvt_distribute_query_tables_04(
+	w_id 	integer,
+	w_name 	varchar(20),
+	w_zip	integer, partial cluster key(w_id)) with (orientation=column) distribute by hash(w_id);
+create index fvt_distribute_query_indexes_04 on vector_material_engine.fvt_distribute_query_tables_04(w_id);
+create index fvt_distribute_query_indexes_04_02 on vector_material_engine.fvt_distribute_query_tables_04(w_zip);
+COPY fvt_distribute_query_tables_04 (w_id, w_name, w_zip) FROM stdin;
+;
+analyze fvt_distribute_query_tables_04;
+create table  vector_material_engine.fvt_distribute_query_tables_05(
+	c_w_id	integer,
+	c_street_1  	varchar(20),
+	c_city	varchar(20),
+	c_zip	char(9),
+	c_d_id	integer,
+      c_id    integer, partial cluster key(c_w_id,c_id,c_d_id)) with (orientation=column) distribute by hash(c_id)
+partition by range (c_w_id)
+(
+	partition fvt_distribute_query_tables_05_p1 values less than (6),
+	partition fvt_distribute_query_tables_05_p2 values less than (8),
+	partition fvt_distribute_query_tables_05_p3 values less than (maxvalue)
+);
+create index fvt_distribute_query_indexes_05 on vector_material_engine.fvt_distribute_query_tables_05(c_id,c_w_id) local;
+create index fvt_distribute_query_indexes_05_02 on vector_material_engine.fvt_distribute_query_tables_05(c_d_id,c_w_id,c_id) local;
+COPY fvt_distribute_query_tables_05 (c_w_id, c_street_1, c_city, c_zip, c_d_id, c_id) FROM stdin;
+;
+analyze fvt_distribute_query_tables_05;
+create table  vector_material_engine.fvt_distribute_query_tables_06(
+	d_id 	integer,
+	d_street_1	character varying(20),
+	d_street_2 	character varying(20),
+	d_name 	character varying(10),
+	d_w_id 	integer,
+	d_city	character varying(20)
+ ) with (orientation=column);
+create index fvt_distribute_query_indexes_06 on vector_material_engine.fvt_distribute_query_tables_06(d_id,d_w_id);
+COPY fvt_distribute_query_tables_06 (d_id, d_street_1, d_street_2, d_name, d_w_id, d_city) FROM stdin;
+;
+analyze fvt_distribute_query_tables_06;
+create table  vector_material_engine.fvt_distribute_query_tables_07(
+	c_id 	integer,
+	c_first 	varchar(20),
+	c_middle	character(2),
+	c_zip 	char(9),
+	c_d_id 	integer,
+	c_street_1 	character varying(20),
+	c_city	character varying(20),
+	c_w_id 	integer,
+	c_street_2	character varying(20)
+	) with (orientation=column)
+distribute by hash(c_id);
+create index fvt_distribute_query_indexes_07 on vector_material_engine.fvt_distribute_query_tables_07(c_id,c_d_id,c_w_id);
+COPY fvt_distribute_query_tables_07 (c_id, c_first, c_middle, c_zip, c_d_id, c_street_1, c_city, c_w_id, c_street_2) FROM stdin;
+;
+analyze fvt_distribute_query_tables_07;
+set enable_seqscan =  off   ;
+set enable_hashjoin =  off  ;
+set enable_nestloop =  off  ;
+set work_mem =  64        ;
+<<<<<<< HEAD
+=======
+explain (verbose on, costs off) 
+select all max(table_01.w_id),
+           min(table_02.c_d_id),
+           sum(table_03.d_w_id),
+           count(table_04.w_id),
+           min(table_05.c_id),
+           max(table_06.d_id),
+           table_07.c_d_id
+  from vector_material_engine.fvt_distribute_query_tables_01 as table_01
+  left outer join vector_material_engine.fvt_distribute_query_tables_02 as table_02 on coalesce(table_01.w_id,
+                                                                                          1) =
+                                                                                 table_02.c_w_id
+ right outer join vector_material_engine.fvt_distribute_query_tables_03 as table_03 on table_02.c_w_id =
+                                                                                 table_03.d_w_id
+                                                                             and table_02.c_d_id =
+                                                                                 table_03.d_id
+ right outer join vector_material_engine.fvt_distribute_query_tables_04 as table_04 on table_04.w_id =
+                                                                                 table_03.d_w_id
+                                                                             and table_04.w_id <
+                                                                                 table_02.c_id
+ right outer join vector_material_engine.fvt_distribute_query_tables_05 as table_05 on table_05.c_w_id =
+                                                                                 table_04.w_id
+  left outer join vector_material_engine.fvt_distribute_query_tables_06 as table_06 on table_06.d_id =
+                                                                                 table_05.c_d_id
+                                                                             and table_06.d_w_id =
+                                                                                 table_05.c_w_id
+                                                                             and table_05.c_id < 200
+  left outer join vector_material_engine.fvt_distribute_query_tables_07 as table_07 on table_07.c_w_id =
+                                                                                 table_04.w_id
+                                                                             and table_07.c_id < 20
+ group by table_07.c_d_id
+having table_07.c_d_id < 10 or table_07.c_d_id is null
+ order by max(table_01.w_id),
+          min(table_02.c_d_id),
+          sum(table_03.d_w_id),
+          count(table_04.w_id),
+          min(table_05.c_id),
+          max(table_06.d_id),
+          table_07.c_d_id NULLS FIRST;
+                                                                                                                      QUERY PLAN                                                                                                                      
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (max((max(table_01.w_id)))), (min((min(table_02.c_d_id)))), (pg_catalog.sum((sum(table_03.d_w_id)))), (count((count(table_04.w_id)))), (min((min(table_05.c_id)))), (max((max(table_06.d_id)))), table_07.c_d_id
+   ->  Vector Streaming (type: GATHER)
+         Output: (max((max(table_01.w_id)))), (min((min(table_02.c_d_id)))), (pg_catalog.sum((sum(table_03.d_w_id)))), (count((count(table_04.w_id)))), (min((min(table_05.c_id)))), (max((max(table_06.d_id)))), table_07.c_d_id
+         Merge Sort Key: (max((max(table_01.w_id)))), (min((min(table_02.c_d_id)))), (pg_catalog.sum((sum(table_03.d_w_id)))), (count((count(table_04.w_id)))), (min((min(table_05.c_id)))), (max((max(table_06.d_id)))), table_07.c_d_id NULLS FIRST
+         ->  Vector Sort
+               Output: (max((max(table_01.w_id)))), (min((min(table_02.c_d_id)))), (pg_catalog.sum((sum(table_03.d_w_id)))), (count((count(table_04.w_id)))), (min((min(table_05.c_id)))), (max((max(table_06.d_id)))), table_07.c_d_id
+               Sort Key: (max((max(table_01.w_id)))), (min((min(table_02.c_d_id)))), (pg_catalog.sum((sum(table_03.d_w_id)))), (count((count(table_04.w_id)))), (min((min(table_05.c_id)))), (max((max(table_06.d_id)))), table_07.c_d_id NULLS FIRST
+               ->  Vector Hash Aggregate
+                     Output: max((max(table_01.w_id))), min((min(table_02.c_d_id))), pg_catalog.sum((sum(table_03.d_w_id))), count((count(table_04.w_id))), min((min(table_05.c_id))), max((max(table_06.d_id))), table_07.c_d_id
+                     Group By Key: table_07.c_d_id
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           Output: (max(table_01.w_id)), (min(table_02.c_d_id)), (sum(table_03.d_w_id)), (count(table_04.w_id)), (min(table_05.c_id)), (max(table_06.d_id)), table_07.c_d_id
+                           Distribute Key: table_07.c_d_id
+                           ->  Vector Hash Aggregate
+                                 Output: max(table_01.w_id), min(table_02.c_d_id), sum(table_03.d_w_id), count(table_04.w_id), min(table_05.c_id), max(table_06.d_id), table_07.c_d_id
+                                 Group By Key: table_07.c_d_id
+                                 ->  Vector Merge Left Join
+                                       Output: table_05.c_id, table_04.w_id, table_01.w_id, table_02.c_d_id, table_03.d_w_id, table_06.d_id, table_07.c_d_id
+                                       Merge Cond: (table_05.c_w_id = table_04.w_id)
+                                       Filter: ((table_07.c_d_id < 10) OR (table_07.c_d_id IS NULL))
+                                       ->  Vector Sort
+                                             Output: table_05.c_id, table_05.c_w_id, table_06.d_id
+                                             Sort Key: table_05.c_w_id
+                                             ->  Vector Streaming(type: REDISTRIBUTE)
+                                                   Output: table_05.c_id, table_05.c_w_id, table_06.d_id
+                                                   Distribute Key: table_05.c_w_id
+                                                   ->  Vector Merge Left Join
+                                                         Output: table_05.c_id, table_05.c_w_id, table_06.d_id
+                                                         Merge Cond: ((table_05.c_w_id = table_06.d_w_id) AND (table_05.c_d_id = table_06.d_id))
+                                                         Join Filter: (table_05.c_id < 200)
+                                                         ->  Vector Sort
+                                                               Output: table_05.c_id, table_05.c_w_id, table_05.c_d_id
+                                                               Sort Key: table_05.c_w_id, table_05.c_d_id
+                                                               ->  Vector Streaming(type: REDISTRIBUTE)
+                                                                     Output: table_05.c_id, table_05.c_w_id, table_05.c_d_id
+                                                                     Distribute Key: table_05.c_d_id
+                                                                     ->  Vector Partition Iterator
+                                                                           Output: table_05.c_id, table_05.c_w_id, table_05.c_d_id
+                                                                           Iterations: 3
+                                                                           ->  Partitioned CStore Index Heap Scan on vector_material_engine.fvt_distribute_query_tables_05 table_05
+                                                                                 Output: table_05.c_id, table_05.c_w_id, table_05.c_d_id
+                                                                                 Selected Partitions:  1..3
+                                                                                 ->  Partitioned CStore Index Ctid Scan on fvt_distribute_query_indexes_05_02
+                                                         ->  Vector Sort
+                                                               Output: table_06.d_id, table_06.d_w_id
+                                                               Sort Key: table_06.d_w_id, table_06.d_id
+                                                               ->  CStore Index Only Scan using fvt_distribute_query_indexes_06 on vector_material_engine.fvt_distribute_query_tables_06 table_06
+                                                                     Output: table_06.d_id, table_06.d_w_id
+                                       ->  Vector Materialize
+                                             Output: table_04.w_id, table_01.w_id, table_02.c_d_id, table_03.d_w_id, table_07.c_d_id
+                                             ->  Vector Merge Left Join
+                                                   Output: table_04.w_id, table_01.w_id, table_02.c_d_id, table_03.d_w_id, table_07.c_d_id
+                                                   Merge Cond: (table_04.w_id = table_07.c_w_id)
+                                                   ->  Vector Merge Left Join
+                                                         Output: table_04.w_id, table_01.w_id, table_02.c_d_id, table_03.d_w_id
+                                                         Merge Cond: (table_04.w_id = table_03.d_w_id)
+                                                         Join Filter: (table_04.w_id < (table_02.c_id)::bigint)
+                                                         ->  Vector Sort
+                                                               Output: table_04.w_id
+                                                               Sort Key: table_04.w_id
+                                                               ->  CStore Index Only Scan using fvt_distribute_query_indexes_04 on vector_material_engine.fvt_distribute_query_tables_04 table_04
+                                                                     Output: table_04.w_id
+                                                         ->  Vector Sort
+                                                               Output: table_01.w_id, table_02.c_d_id, table_02.c_id, table_03.d_w_id
+                                                               Sort Key: table_03.d_w_id
+                                                               ->  Vector Streaming(type: REDISTRIBUTE)
+                                                                     Output: table_01.w_id, table_02.c_d_id, table_02.c_id, table_03.d_w_id
+                                                                     Distribute Key: table_03.d_w_id
+                                                                     ->  Vector Merge Join
+                                                                           Output: table_01.w_id, table_02.c_d_id, table_02.c_id, table_03.d_w_id
+                                                                           Merge Cond: (table_02.c_w_id = ((COALESCE(table_01.w_id, 1))::text))
+                                                                           ->  Vector Sort
+                                                                                 Output: table_02.c_d_id, table_02.c_w_id, table_02.c_id, table_03.d_w_id
+                                                                                 Sort Key: table_02.c_w_id
+                                                                                 ->  Vector Streaming(type: REDISTRIBUTE)
+                                                                                       Output: table_02.c_d_id, table_02.c_w_id, table_02.c_id, table_03.d_w_id
+                                                                                       Distribute Key: table_02.c_w_id
+                                                                                       ->  Vector Nest Loop
+                                                                                             Output: table_02.c_d_id, table_02.c_w_id, table_02.c_id, table_03.d_w_id
+                                                                                             ->  Vector Streaming(type: BROADCAST)
+                                                                                                   Output: table_03.d_w_id, table_03.d_id
+                                                                                                   ->  CStore Index Only Scan using fvt_distribute_query_indexes_03 on vector_material_engine.fvt_distribute_query_tables_03 table_03
+                                                                                                         Output: table_03.d_w_id, table_03.d_id
+                                                                                             ->  CStore Index Heap Scan on vector_material_engine.fvt_distribute_query_tables_02 table_02
+                                                                                                   Output: table_02.c_d_id, table_02.c_w_id, table_02.c_id
+                                                                                                   Recheck Cond: (table_02.c_d_id = ($1)::numeric)
+                                                                                                   Filter: (($2)::text = table_02.c_w_id)
+                                                                                                   ->  CStore Index Ctid Scan on fvt_distribute_query_indexes_02
+                                                                                                         Index Cond: (table_02.c_d_id = ($1)::numeric)
+                                                                           ->  Vector Sort
+                                                                                 Output: table_01.w_id, ((COALESCE(table_01.w_id, 1))::text)
+                                                                                 Sort Key: ((COALESCE(table_01.w_id, 1))::text)
+                                                                                 ->  Vector Streaming(type: REDISTRIBUTE)
+                                                                                       Output: table_01.w_id, ((COALESCE(table_01.w_id, 1))::text)
+                                                                                       Distribute Key: ((COALESCE(table_01.w_id, 1))::text)
+                                                                                       ->  Vector Partition Iterator
+                                                                                             Output: table_01.w_id, COALESCE(table_01.w_id, 1)
+                                                                                             Iterations: 3
+                                                                                             ->  Partitioned CStore Index Only Scan using fvt_distribute_query_indexes_01 on vector_material_engine.fvt_distribute_query_tables_01 table_01
+                                                                                                   Output: table_01.w_id, COALESCE(table_01.w_id, 1)
+                                                                                                   Selected Partitions:  1..3
+                                                   ->  Vector Sort
+                                                         Output: table_07.c_d_id, table_07.c_w_id
+                                                         Sort Key: table_07.c_w_id
+                                                         ->  Vector Streaming(type: REDISTRIBUTE)
+                                                               Output: table_07.c_d_id, table_07.c_w_id
+                                                               Distribute Key: table_07.c_w_id
+                                                               ->  CStore Index Heap Scan on vector_material_engine.fvt_distribute_query_tables_07 table_07
+                                                                     Output: table_07.c_d_id, table_07.c_w_id
+                                                                     Recheck Cond: (table_07.c_id < 20)
+                                                                     ->  CStore Index Ctid Scan on fvt_distribute_query_indexes_07
+                                                                           Index Cond: (table_07.c_id < 20)
+(113 rows)
+
+>>>>>>> 74b9aa1e9a... support dn mergesort
+select all max(table_01.w_id),
+           min(table_02.c_d_id),
+           sum(table_03.d_w_id),
+           count(table_04.w_id),
+           min(table_05.c_id),
+           max(table_06.d_id),
+           table_07.c_d_id
+  from vector_material_engine.fvt_distribute_query_tables_01 as table_01
+  left outer join vector_material_engine.fvt_distribute_query_tables_02 as table_02 on coalesce(table_01.w_id,
+                                                                                          1) =
+                                                                                 table_02.c_w_id
+ right outer join vector_material_engine.fvt_distribute_query_tables_03 as table_03 on table_02.c_w_id =
+                                                                                 table_03.d_w_id
+                                                                             and table_02.c_d_id =
+                                                                                 table_03.d_id
+ right outer join vector_material_engine.fvt_distribute_query_tables_04 as table_04 on table_04.w_id =
+                                                                                 table_03.d_w_id
+                                                                             and table_04.w_id <
+                                                                                 table_02.c_id
+ right outer join vector_material_engine.fvt_distribute_query_tables_05 as table_05 on table_05.c_w_id =
+                                                                                 table_04.w_id
+  left outer join vector_material_engine.fvt_distribute_query_tables_06 as table_06 on table_06.d_id =
+                                                                                 table_05.c_d_id
+                                                                             and table_06.d_w_id =
+                                                                                 table_05.c_w_id
+                                                                             and table_05.c_id < 200
+  left outer join vector_material_engine.fvt_distribute_query_tables_07 as table_07 on table_07.c_w_id =
+                                                                                 table_04.w_id
+                                                                             and table_07.c_id < 20
+ group by table_07.c_d_id
+having table_07.c_d_id < 10 or table_07.c_d_id is null
+ order by max(table_01.w_id),
+          min(table_02.c_d_id),
+          sum(table_03.d_w_id),
+          count(table_04.w_id),
+          min(table_05.c_id),
+          max(table_06.d_id),
+          table_07.c_d_id NULLS FIRST;
+ max | min |  sum   | count  | min | max | c_d_id 
+-----+-----+--------+--------+-----+-----+--------
+   7 |   1 | 166992 |  47140 |   4 |  10 |      1
+   7 |   1 | 571308 | 226286 |   4 |  10 |      2
+   7 |   1 | 571308 | 226286 |   4 |  10 |      3
+   7 |   1 | 571308 | 226286 |   4 |  10 |      4
+   7 |   1 | 571308 | 226286 |   4 |  10 |      5
+   7 |   1 | 571308 | 226286 |   4 |  10 |      6
+   7 |   1 | 571308 | 226286 |   4 |  10 |      7
+   7 |   1 | 571308 | 226286 |   4 |  10 |      8
+   7 |   1 | 571308 | 226286 |   4 |  10 |      9
+     |     |        |      0 |  29 |     |       
+(10 rows)
+
+----
+--- Clean Table and Resource 
+----
+RESET log_min_messages;
+drop schema vector_material_engine cascade;
+NOTICE:  drop cascades to 14 other objects
+DETAIL:  drop cascades to table row_material_table_01
+drop cascades to table vector_material_table_01
+drop cascades to table row_material_table_02
+drop cascades to table vector_material_table_02
+drop cascades to table row_material_table_03
+drop cascades to table vector_material_table_03
+drop cascades to table src
+drop cascades to table fvt_distribute_query_tables_01
+drop cascades to table fvt_distribute_query_tables_02
+drop cascades to table fvt_distribute_query_tables_03
+drop cascades to table fvt_distribute_query_tables_04
+drop cascades to table fvt_distribute_query_tables_05
+drop cascades to table fvt_distribute_query_tables_06
+drop cascades to table fvt_distribute_query_tables_07

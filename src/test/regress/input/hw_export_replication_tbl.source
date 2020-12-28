@@ -1,0 +1,83 @@
+-- clean up work
+\! rm -rf @abs_srcdir@/data/parallel_export/* >/dev/null 2>&1
+\! @abs_bindir@/gds -d @abs_srcdir@/data/parallel_export -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status
+-- sension env
+set datestyle to iso;
+SET IntervalStyle to postgres;
+set time zone PRC;
+-- test export feature for replication table
+CREATE TABLE hw_export_replication_srctbl
+(
+C_CHAR_3 CHAR(16),
+C_VARCHAR_3 VARCHAR(1024) ,
+C_INT INTEGER,
+C_NUMERIC numeric(10,5),
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE DEFAULT '1971-1-1',
+C_TSVECTOR TSVECTOR
+)
+distribute by replication
+partition by RANGE(C_TS_WITHOUT)
+(
+partition part0 VALUES LESS THAN('1971-2-1'),
+partition part1 VALUES LESS THAN('1971-3-1'),
+partition part2 VALUES LESS THAN('1971-4-1'),
+partition part3 VALUES LESS THAN('1971-5-1'),
+partition part4 VALUES LESS THAN('1971-6-1'),
+partition part5 VALUES LESS THAN('1971-7-1'),
+partition part6 VALUES LESS THAN('1971-8-1'),
+partition part7 VALUES LESS THAN('1971-9-1'),
+partition part8 VALUES LESS THAN('1971-10-1'),
+partition part9 VALUES LESS THAN('1971-11-1'),
+partition part10 VALUES LESS THAN('1971-12-1'),
+partition part11 VALUES LESS THAN('1972-1-1')
+);
+COPY hw_export_replication_srctbl FROM '@abs_srcdir@/data/hw_export_data.data';
+
+DROP TABLE IF EXISTS hw_export_replication_tbl;
+CREATE FOREIGN TABLE hw_export_replication_tbl 
+(
+C_CHAR_3 CHAR(16),
+C_VARCHAR_3 VARCHAR(1024),
+C_INT INTEGER,
+C_NUMERIC numeric(10,5),
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+C_TSVECTOR TSVECTOR 
+)
+SERVER Gsmpp_server
+Options(Location '@abs_srcdir@/data/parallel_export/',
+Format 'Text')
+Write Only;
+INSERT INTO hw_export_replication_tbl SELECT * FROM hw_export_replication_srctbl;
+
+-- test file size
+\! find @abs_srcdir@/data/parallel_export/ -name hw_export_replication_tbl* | xargs ls -l | awk '{print $5}'
+
+DROP FOREIGN TABLE hw_export_replication_tbl;
+
+---
+--export replication to remote
+---
+CREATE FOREIGN TABLE hw_export_remote_replication_tbl
+(
+C_CHAR_3 CHAR(16),
+C_VARCHAR_3 VARCHAR(1024),
+C_INT INTEGER,
+C_NUMERIC numeric(10,5),
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+C_TSVECTOR TSVECTOR 
+)
+SERVER Gsmpp_server
+Options(Location 'gsfs://127.0.0.1:8900/',
+Format 'Text')
+Write Only;
+INSERT INTO hw_export_remote_replication_tbl SELECT * FROM hw_export_replication_srctbl;
+\! sleep 2
+-- test file size
+\! find @abs_srcdir@/data/parallel_export/ -name hw_export_remote_replication_tbl* | xargs ls -l | awk '{print $5}'
+DROP FOREIGN TABLE hw_export_remote_replication_tbl;
+DROP TABLE hw_export_replication_srctbl;
+-- clean up work
+\! rm -rf @abs_srcdir@/data/parallel_export/* >/dev/null 2>&1
+\! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 34
+\! sleep 5
+\! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 9 > /dev/null 2>&1

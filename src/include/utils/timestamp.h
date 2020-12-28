@@ -13,6 +13,20 @@
 #ifndef TIMESTAMP_H
 #define TIMESTAMP_H
 
+#define TIMESTAMP_MASK(b) (1 << (b))
+#define INTERVAL_MASK(b) (1 << (b))
+
+/* Macros to handle packing and unpacking the typmod field for intervals */
+#define INTERVAL_FULL_RANGE (0x7FFF)
+#define INTERVAL_RANGE_MASK (0x7FFF)
+#define INTERVAL_FULL_PRECISION (0xFFFF)
+#define INTERVAL_PRECISION_MASK (0xFFFF)
+#define INTERVAL_TYPMOD(p, r) ((((r)&INTERVAL_RANGE_MASK) << 16) | ((p)&INTERVAL_PRECISION_MASK))
+#define INTERVAL_PRECISION(t) ((t) & INTERVAL_PRECISION_MASK)
+#define INTERVAL_RANGE(t) (((t) >> 16) & INTERVAL_RANGE_MASK)
+
+
+#ifndef FRONTEND_PARSER
 #include "datatype/timestamp.h"
 #include "fmgr.h"
 #include "pgtime.h"
@@ -60,18 +74,6 @@
 #define PG_RETURN_INTERVAL_P(x) return IntervalPGetDatum(x)
 #endif /* HAVE_INT64_TIMESTAMP */
 
-#define TIMESTAMP_MASK(b) (1 << (b))
-#define INTERVAL_MASK(b) (1 << (b))
-
-/* Macros to handle packing and unpacking the typmod field for intervals */
-#define INTERVAL_FULL_RANGE (0x7FFF)
-#define INTERVAL_RANGE_MASK (0x7FFF)
-#define INTERVAL_FULL_PRECISION (0xFFFF)
-#define INTERVAL_PRECISION_MASK (0xFFFF)
-#define INTERVAL_TYPMOD(p, r) ((((r)&INTERVAL_RANGE_MASK) << 16) | ((p)&INTERVAL_PRECISION_MASK))
-#define INTERVAL_PRECISION(t) ((t)&INTERVAL_PRECISION_MASK)
-#define INTERVAL_RANGE(t) (((t) >> 16) & INTERVAL_RANGE_MASK)
-
 #ifdef HAVE_INT64_TIMESTAMP
 #define TimestampTzPlusMilliseconds(tz, ms) ((tz) + ((ms) * (int64)1000))
 #else
@@ -81,6 +83,10 @@
 #ifdef PGXC
 #define InvalidGlobalTimestamp ((TimestampTz)0)
 #define GlobalTimestampIsValid(timestamp) ((TimestampTz)(timestamp)) != InvalidGlobalTimestamp
+#endif
+
+#ifndef MAX_INT32
+#define MAX_INT32 2147483600
 #endif
 
 /*
@@ -189,7 +195,7 @@ extern Datum timestamptz_timestamptz(PG_FUNCTION_ARGS);
 extern Datum interval_um(PG_FUNCTION_ARGS);
 extern Datum interval_pl(PG_FUNCTION_ARGS);
 extern Datum interval_mi(PG_FUNCTION_ARGS);
-extern Datum interval_mul(Interval* span, float8 factor);
+extern Datum interval_mul(const Interval* span, float8 factor);
 extern Datum interval_mul(PG_FUNCTION_ARGS);
 extern Datum mul_d_interval(PG_FUNCTION_ARGS);
 extern Datum interval_div(PG_FUNCTION_ARGS);
@@ -201,9 +207,9 @@ extern Datum interval_avg(PG_FUNCTION_ARGS);
 
 extern Datum timestamp_mi(Timestamp dt1, Timestamp dt2);
 extern Datum timestamp_mi(PG_FUNCTION_ARGS);
-extern Datum timestamp_pl_interval(Timestamp timestamp, Interval* span);
+extern Datum timestamp_pl_interval(Timestamp timestamp, const Interval* span);
 extern Datum timestamp_pl_interval(PG_FUNCTION_ARGS);
-extern Datum timestamp_mi_interval(Timestamp timestamp, Interval* span);
+extern Datum timestamp_mi_interval(Timestamp timestamp, const Interval* span);
 extern Datum timestamp_mi_interval(PG_FUNCTION_ARGS);
 extern Datum timestamp_age(PG_FUNCTION_ARGS);
 extern Datum timestamp_diff(PG_FUNCTION_ARGS);
@@ -230,22 +236,11 @@ extern Datum generate_series_timestamptz(PG_FUNCTION_ARGS);
 /* Internal routines (not fmgr-callable) */
 
 extern TimestampTz GetCurrentTimestamp(void);
+extern TimestampTz timestamp2timestamptz(Timestamp timestamp);
 
 extern void TimestampDifference(TimestampTz start_time, TimestampTz stop_time, long* secs, int* microsecs);
 extern int ComputeTimeStamp(TimestampTz start);
 extern bool TimestampDifferenceExceeds(TimestampTz start_time, TimestampTz stop_time, int msec);
-
-/*
- * Prototypes for functions to deal with integer timestamps, when the native
- * format is float timestamps.
- */
-#ifndef HAVE_INT64_TIMESTAMP
-extern int64 GetCurrentIntegerTimestamp(void);
-extern TimestampTz IntegerTimestampToTimestampTz(int64 timestamp);
-#else
-#define GetCurrentIntegerTimestamp() GetCurrentTimestamp()
-#define IntegerTimestampToTimestampTz(timestamp) (timestamp)
-#endif
 
 extern TimestampTz time_t_to_timestamptz(pg_time_t tm);
 extern pg_time_t timestamptz_to_time_t(TimestampTz t);
@@ -275,4 +270,5 @@ extern int date2isoweek(int year, int mon, int mday);
 extern int date2isoyear(int year, int mon, int mday);
 extern int date2isoyearday(int year, int mon, int mday);
 
+#endif // !FRONTEND_PARSER
 #endif /* TIMESTAMP_H */

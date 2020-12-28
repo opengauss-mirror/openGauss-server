@@ -13,10 +13,10 @@
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
  *
- *  slotdesc.cpp 
+ * slotdesc.cpp
  *
  * IDENTIFICATION
- *        src/gausskernel/storage/access/rmgrdesc/slotdesc.cpp
+ *    src/gausskernel/storage/access/rmgrdesc/slotdesc.cpp
  *
  * ---------------------------------------------------------------------------------------
  */
@@ -41,8 +41,7 @@
 #include "replication/walsender.h"
 #include "replication/syncrep.h"
 
-void slot_desc(StringInfo buf, XLogReaderState* record)
+void slot_desc(StringInfo buf, XLogReaderState *record)
 {
     appendStringInfo(buf, "slot info");
 }
-

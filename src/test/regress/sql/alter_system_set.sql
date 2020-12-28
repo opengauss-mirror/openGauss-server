@@ -30,8 +30,8 @@ SELECT pg_delete_audit('2000-01-01 ','9999-01-01');
 -- for POSTMASTER GUC
 --------------------------------------------------------
 SHOW enable_thread_pool;
-ALTER SYSTEM SET enable_thread_pool to on;
 ALTER SYSTEM SET enable_thread_pool to off;
+ALTER SYSTEM SET enable_thread_pool to on;
 
 ------------------------------------------------------
 -- for SIGHUP GUC
@@ -151,5 +151,4 @@ END;
 -- shoule be audited.
 ------------------------------------------------------
 SELECT type,result,userid,database,client_conninfo,object_name,detail_info FROM pg_query_audit('2000-01-01 08:00:00','9999-01-01 08:00:00');
-
 

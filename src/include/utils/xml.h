@@ -18,27 +18,7 @@
 #include "fmgr.h"
 #include "nodes/execnodes.h"
 #include "nodes/primnodes.h"
-
-typedef struct varlena xmltype;
-
-typedef enum {
-    XML_STANDALONE_YES,
-    XML_STANDALONE_NO,
-    XML_STANDALONE_NO_VALUE,
-    XML_STANDALONE_OMITTED
-} XmlStandaloneType;
-
-typedef enum { XMLBINARY_BASE64, XMLBINARY_HEX } XmlBinaryType;
-
-typedef enum {
-    PG_XML_STRICTNESS_LEGACY,     /* ignore errors unless function result
-                                   * indicates error condition */
-    PG_XML_STRICTNESS_WELLFORMED, /* ignore non-parser messages */
-    PG_XML_STRICTNESS_ALL         /* report all notices/warnings/errors */
-} PgXmlStrictness;
-
-/* struct PgXmlErrorContext is private to xml.c */
-typedef struct PgXmlErrorContext PgXmlErrorContext;
+#include "utils/xmltypes.h"
 
 #define DatumGetXmlP(X) ((xmltype*)PG_DETOAST_DATUM(X))
 #define XmlPGetDatum(X) PointerGetDatum(X)

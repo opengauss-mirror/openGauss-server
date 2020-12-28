@@ -1,0 +1,8 @@
+set explain_perf_mode=normal;
+
+-- aggregate express
+select avg(c1 order by c6), sum(c2 order by c2), min(c3 order by c3), max(c4 order by c4), count(c5 order by c5), regr_count(c4,c7 order by c7,c4) from aggtable1 group by c8 order by c8;
+select avg(distinct c1 order by c1), sum(distinct c2 order by c2), min(distinct c3 order by c3), max(distinct c4 order by c4), count(distinct c5 order by c5), regr_count(distinct c4,c7 order by c7,c4) from aggtable1 group by c8 order by c8;
+
+explain (verbose on, costs off) select avg(c1 order by c6), sum(c2 order by c2), min(c3 order by c3), max(c4 order by c4), count(c5 order by c5), regr_count(c4,c7 order by c7,c4) from aggtable1 group by c8 order by c8;
+explain (verbose on, costs off) select avg(distinct c1 order by c1), sum(distinct c2 order by c2), min(distinct c3 order by c3), max(distinct c4 order by c4), count(distinct c5 order by c5), regr_count(distinct c4,c7 order by c7,c4) from aggtable1 group by c8 order by c8;

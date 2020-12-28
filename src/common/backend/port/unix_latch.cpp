@@ -35,7 +35,6 @@
 
 #include <fcntl.h>
 #include <signal.h>
-#include <unistd.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #ifdef HAVE_POLL_H
@@ -526,9 +525,8 @@ void ResetLatch(volatile Latch* latch)
  */
 void latch_sigusr1_handler(void)
 {
-    if (waiting) {
+    if (waiting)
         sendSelfPipeByte();
-    }
 }
 
 /* Send one byte to the self-pipe, to wake up WaitLatch */

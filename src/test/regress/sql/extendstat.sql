@@ -7,17 +7,18 @@ CREATE TABLE es_test (
     b   int,
     c   int
 )
-;
+DISTRIBUTE BY hash(c);
 drop table if exists es_test_copy;
 CREATE TABLE es_test_copy (
     a   int,
     b   int
 )
-;
+DISTRIBUTE BY hash(a);
 INSERT INTO es_test values(generate_series(1,10000)/100, generate_series(1,10000)/500, 1);
 INSERT INTO es_test_copy SELECT a,b FROM es_test;
 set default_statistics_target = -2;
 set explain_perf_mode = normal;
+set query_dop = 1;
 ANALYZE es_test;
 ANALYZE es_test_copy;
 EXPLAIN SELECT * FROM es_test WHERE (a = 1) AND (b = 0);
@@ -69,7 +70,7 @@ create table item
     i_class_id                integer                       
 )
  with (orientation=column)
- ;
+ DISTRIBUTE by hash(i_item_sk);
 
  
 set resource_track_cost=10;   
@@ -81,4 +82,5 @@ i_rec_end_date is null and
 substr(i_brand_id,1,1)=i_class_id
 ;
 
+set query_dop = 2002;
 drop schema extendstat cascade;

@@ -124,9 +124,6 @@ ProcessConfigFile(GucContext context)
 				   *tail = NULL;
 	int			i;
 
-	int			min_length;
-	int			max_length;
-	bool		is_password_length_error = false;
 	/*
 	 * Config files are processed on startup (by the postmaster only)
 	 * and on SIGHUP (by the postmaster and its children)
@@ -331,9 +328,9 @@ ProcessConfigFile(GucContext context)
 									item->name, item->value)));
 
                 switch (t_thrd.role) {
-                    case MASTER: {
+                    case MASTER_THREAD: {
                         if (strcmp(item->name, "upgrade_mode") == 0) {
-                            if (strcmp(pre_value, "2") == 0 && strcmp(post_value, "0") == 0) {
+                            if (strcmp(pre_value, "0") != 0 && strcmp(post_value, "0") == 0) {
                                 pg_atomic_write_u32(&WorkingGrandVersionNum, GRAND_VERSION_NUM);
                             }
                         }
@@ -348,7 +345,7 @@ ProcessConfigFile(GucContext context)
 
                     default: {
                         if (strcmp(item->name, "upgrade_mode") == 0) {
-                            if (strcmp(pre_value, "2") == 0 && strcmp(post_value, "0") == 0) {
+                            if (strcmp(pre_value, "0") != 0 && strcmp(post_value, "0") == 0) {
                                 t_thrd.proc->workingVersionNum = pg_atomic_read_u32(&WorkingGrandVersionNum);
                             }
                         }
@@ -375,23 +372,9 @@ ProcessConfigFile(GucContext context)
 			pfree(pre_value);
 	}
 
-	/* We should ensure wal_keep_segments > CheckPointSegments. */
-	u_sess->attr.attr_storage.wal_keep_segments = Max(u_sess->attr.attr_storage.wal_keep_segments, u_sess->attr.attr_storage.CheckPointSegments+1);
-
 	/* Remember when we last successfully loaded the config file. */
 	t_thrd.time_cxt.pg_reload_time = GetCurrentTimestamp();
 
-	/*
-	 * This is the start-up phase, so we can let it set the parameters of session because we will stop the database if 
-	 * the password length error.
-	 */
-	min_length = u_sess->attr.attr_security.Password_min_length;
-	max_length = u_sess->attr.attr_security.Password_max_length;
-	if (min_length > max_length) {
-		error = true;
-		is_password_length_error = true;
-		goto cleanup_list;
-	}
  cleanup_list:
 	FreeConfigVariables(head);
 
@@ -403,10 +386,6 @@ ProcessConfigFile(GucContext context)
 					(errcode(ERRCODE_CONFIG_FILE_ERROR),
 					 errmsg("configuration file \"%s\" contains errors",
 							g_instance.attr.attr_common.ConfigFileName)));
-		else if (is_password_length_error)
-			ereport(elevel,
-					(errcode(ERRCODE_CONFIG_FILE_ERROR),
-					 errmsg("the parameter password_min_length cannot longer than password_max_length.\n")));
 		else if (apply)
 			ereport(elevel,
 					(errcode(ERRCODE_CONFIG_FILE_ERROR),
@@ -582,14 +561,15 @@ ParseConfigFp(FILE *fp, const char *config_file, int depth, int elevel,
 	t_thrd.utils_cxt.ConfigFileLineno = 1;
 	errorcount = 0;
 
-	if (yylex_init(&parse_scan) != 0) {
-		OK = false;
-		ereport(elevel, (errmsg("init parse scan failed, error code is: %d", errno)));
-		/* Each recursion level must save and restore these static variables. */
-		t_thrd.utils_cxt.ConfigFileLineno = save_ConfigFileLineno;
-		t_thrd.utils_cxt.GUC_flex_fatal_jmp = save_GUC_flex_fatal_jmp;
-		return OK;
-	}
+    if (yylex_init(&parse_scan) != 0)
+    {
+        OK = false;
+        ereport(elevel, (errmsg("init parse scan failed, error code is: %d", errno)));
+        /* Each recursion level must save and restore these static variables. */
+        t_thrd.utils_cxt.ConfigFileLineno = save_ConfigFileLineno;
+        t_thrd.utils_cxt.GUC_flex_fatal_jmp = save_GUC_flex_fatal_jmp;
+        return OK;
+    }
 
 	lex_buffer = yy_create_buffer(fp, YY_BUF_SIZE, parse_scan);
 	yy_switch_to_buffer(lex_buffer, parse_scan);

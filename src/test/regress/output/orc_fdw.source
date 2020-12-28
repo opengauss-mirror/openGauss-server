@@ -1,0 +1,461 @@
+--
+-- Test orc foreign data wrapper.
+--
+-- Settings to make the result deterministic
+SET datestyle = "ISO, YMD";
+set enable_vector_engine=false;
+-- validator tests
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',HDFSCFGPATH '@hdfscfgpath@');
+CREATE FOREIGN TABLE test_validator_filename_missing (a int) 
+	SERVER hdfs_server distribute by roundrobin; -- ERROR
+ERROR:  Need format option for the foreign table.
+CREATE FOREIGN TABLE test_validator_invalid_option (a int) 
+	SERVER hdfs_server 
+	OPTIONS(format 'orc', filenames 'bigrow.orc', bad_option_name '1') distribute by roundrobin; -- ERROR
+ERROR:  Invalid option "bad_option_name"
+HINT:  Valid options in this context are: format, encoding, filenames, foldername, checkencoding
+CREATE FOREIGN TABLE test_validator_tooMany_option (a int) 
+	SERVER hdfs_server 
+	OPTIONS(format 'orc', filenames 'bigrow.orc', foldername '/user/hdfs') distribute by roundrobin; -- ERROR
+ERROR:  The path "bigrow.orc" must be an absolute path.
+drop foreign table test_validator_filename_missing;
+ERROR:  foreign table "test_validator_filename_missing" does not exist
+drop foreign table test_validator_invalid_option;
+ERROR:  foreign table "test_validator_invalid_option" does not exist
+drop foreign table test_validator_tooMany_option;
+ERROR:  foreign table "test_validator_toomany_option" does not exist
+--basic distributed foreign table test
+-- error scenarios
+DROP FOREIGN TABLE IF EXISTS test_missing_file;
+NOTICE:  foreign table "test_missing_file" does not exist, skipping
+CREATE FOREIGN TABLE test_missing_file (a int) SERVER hdfs_server 
+	OPTIONS (format 'orc', filenames '/user/hive/warehouse/mppdb.db/missing_file.orc') distribute by roundrobin;
+SELECT * FROM test_missing_file limit 10; -- ERROR
+ERROR:  The hdfs file /user/hive/warehouse/mppdb.db/missing_file.orc does not exist.
+drop foreign table test_missing_file;
+DROP FOREIGN TABLE IF EXISTS test_table_definition_mismatch;
+NOTICE:  foreign table "test_table_definition_mismatch" does not exist, skipping
+CREATE FOREIGN TABLE test_table_definition_mismatch (type CHAR(6)) SERVER hdfs_server
+	OPTIONS (format 'orc', filenames '/user/hive/warehouse/mppdb.db/bigrow.orc') distribute by roundrobin;
+SELECT * FROM test_table_definition_mismatch limit 10; -- ERROR
+ERROR:  Error occurred while reading column 1: ORC and mpp types do not match, ORC type is boolean and mpp type is character(6).
+drop foreign table test_table_definition_mismatch;
+DROP FOREIGN TABLE IF EXISTS lineitem_twoStripes;
+NOTICE:  foreign table "lineitem_twostripes" does not exist, skipping
+Create foreign table lineitem_twoStripes (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000000_0,/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000001_0') distribute by roundrobin;
+SELECT L_SHIPDATE FROM lineitem_twoStripes WHERE L_orderkey BETWEEN 509050 AND 509070 order by l_shipdate;
+ l_shipdate 
+------------
+ 1993-04-24
+ 1993-04-26
+ 1993-05-07
+ 1993-05-28
+ 1993-06-24
+ 1993-06-25
+ 1993-06-25
+ 1993-10-08
+ 1994-08-06
+ 1994-08-26
+ 1994-10-10
+ 1994-10-11
+ 1994-11-17
+ 1995-10-24
+ 1995-12-14
+ 1996-11-20
+ 1996-11-25
+ 1997-06-22
+ 1997-07-16
+ 1997-08-11
+ 1997-12-19
+ 1998-02-13
+ 1998-02-27
+ 1998-03-08
+ 1998-04-04
+ 1998-07-28
+ 1998-09-05
+ 1998-10-28
+ 1998-11-02
+(29 rows)
+
+SELECT L_ORDERKEY, L_SHIPDATE FROM lineitem_twoStripes for update; -- ERROR
+ERROR:  Unsupported FOR UPDATE/SHARE of non-row table.
+select L_TAX from lineitem_twoStripes where L_LINESTATUS = 'V';
+ l_tax 
+-------
+(0 rows)
+
+select L_LINESTATUS from lineitem_twoStripes where L_RETURNFLAG = 'N' order by 1 desc offset 1000 limit 20;
+ l_linestatus 
+--------------
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+(20 rows)
+
+SELECT count(L_SHIPDATE) FROM lineitem_twoStripes WHERE L_orderkey BETWEEN 509050 AND 509070;
+ count 
+-------
+    29
+(1 row)
+
+drop foreign table lineitem_twoStripes;
+DROP FOREIGN TABLE IF EXISTS lineitem;
+NOTICE:  foreign table "lineitem" does not exist, skipping
+Create foreign table lineitem (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS customer;
+NOTICE:  foreign table "customer" does not exist, skipping
+CREATE FOREIGN TABLE customer ( 
+ c_custkey BIGINT, 
+ c_name TEXT, 
+ c_address TEXT, 
+ c_nationkey INT4, 
+ c_phone TEXT, 
+ c_acctbal FLOAT4, 
+ c_mktsegment TEXT, 
+ c_comment TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/customer_orc11_64stripe')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS orders;
+NOTICE:  foreign table "orders" does not exist, skipping
+create foreign table orders (
+ O_ORDERKEY INT4, 
+ O_CUSTKEY INT4, 
+ O_ORDERSTATUS TEXT, 
+ O_TOTALPRICE FLOAT8,
+ O_ORDERDATE TEXT,
+ O_ORDERPRIORITY TEXT, 
+ O_CLERK TEXT,
+ O_SHIPPRIORITY INT4, 
+ O_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/orders_orc11_64stripe')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS part;
+NOTICE:  foreign table "part" does not exist, skipping
+create foreign table part  (
+ P_PARTKEY INT4,
+ P_NAME TEXT, 
+ P_MFGR TEXT,
+ P_BRAND TEXT,
+ P_TYPE TEXT,
+ P_SIZE INT4,
+ P_CONTAINER TEXT,
+ P_RETAILPRICE FLOAT8,
+ P_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/part_orc11_64stripe')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS supplier;
+NOTICE:  foreign table "supplier" does not exist, skipping
+create foreign table supplier  (
+ S_SUPPKEY INT4,
+ S_NAME TEXT,
+ S_ADDRESS TEXT,
+ S_NATIONKEY INT4,
+ S_PHONE TEXT,
+ S_ACCTBAL FLOAT8,
+ S_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/supplier_orc11_64stripe')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS partsupp;
+NOTICE:  foreign table "partsupp" does not exist, skipping
+create foreign table partsupp (
+ PS_PARTKEY INT4,
+ PS_SUPPKEY INT4,
+ PS_AVAILQTY INT4,
+ PS_SUPPLYCOST FLOAT8,
+ PS_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/partsupp_orc11_64stripe')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS nation;
+NOTICE:  foreign table "nation" does not exist, skipping
+create foreign table nation  (
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4,
+ N_COMMENT TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/nation_orc11_64stripe')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS region;
+NOTICE:  foreign table "region" does not exist, skipping
+create foreign table region  (
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/region_orc11_64stripe')
+distribute by roundrobin;
+with recursive tmp1 as (select s_suppkey,s_nationkey,s_comment from supplier order by 1) select tmp1.s_nationkey, region.r_name from tmp1, region where tmp1.s_suppkey=region.r_regionkey  group by tmp1.s_nationkey,region.r_name order by 1,2;
+ s_nationkey |   r_name    
+-------------+-------------
+           1 | EUROPE
+           5 | ASIA
+          15 | MIDDLE EAST
+          17 | AMERICA
+(4 rows)
+
+-- there are bugs for the following three queries. cause EOF error from datanode
+SELECT L_shipdate FROM lineitem WHERE L_orderkey between 2125190 and 2125200 order by l_shipdate;
+ l_shipdate 
+------------
+ 1994-12-05
+ 1994-12-13
+ 1995-01-03
+ 1995-01-22
+ 1995-02-28
+ 1995-12-26
+ 1995-12-26
+ 1996-02-07
+ 1996-02-15
+ 1996-02-28
+(10 rows)
+
+SELECT count(L_shipdate) FROM lineitem WHERE L_orderkey between 2125190 and 2125200;
+ count 
+-------
+    10
+(1 row)
+
+SELECT *  from lineitem WHERE L_orderkey between 2125190 and 2125200 order by l_orderkey, l_partkey;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate |  l_shipinstruct   | l_shipmode |                 l_comment                  
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+-------------------+------------+--------------------------------------------
+    2125190 |    120974 |      5999 |            3 |         24 |        47879.28 |        .06 |     0 | A            | F            | 1995-02-28 | 1995-02-05   | 1995-03-14    | NONE              | MAIL       | o beans. carefully special ideas solve a
+    2125190 |    138061 |      5601 |            1 |         14 |        15386.84 |          0 |   .03 | R            | F            | 1995-01-22 | 1995-01-23   | 1995-02-09    | TAKE BACK RETURN  | TRUCK      | usly unusua
+    2125190 |    138251 |      3278 |            5 |         20 |           25785 |        .06 |     0 | A            | F            | 1995-01-03 | 1994-12-23   | 1995-01-13    | DELIVER IN PERSON | MAIL       | al requests about the thinly special saute
+    2125190 |    185442 |      5443 |            2 |         24 |        36658.56 |        .07 |   .07 | A            | F            | 1994-12-05 | 1995-01-22   | 1994-12-09    | COLLECT COD       | REG AIR    | ans are. carefully pending ideas sleep. qu
+    2125190 |    193714 |      6234 |            4 |          7 |        12653.97 |        .02 |   .02 | R            | F            | 1994-12-13 | 1994-12-30   | 1994-12-16    | NONE              | FOB        | , pending requests sleep blithely acros
+    2125191 |     28041 |      5548 |            4 |          7 |         6783.28 |        .03 |   .03 | N            | O            | 1996-02-07 | 1996-01-11   | 1996-03-06    | COLLECT COD       | FOB        | longside of th
+    2125191 |     58589 |      6105 |            2 |          3 |         4642.74 |        .05 |     0 | N            | O            | 1995-12-26 | 1995-12-24   | 1996-01-14    | TAKE BACK RETURN  | SHIP       |  special accounts
+    2125191 |     70528 |      5543 |            5 |         35 |         52448.2 |        .09 |   .03 | N            | O            | 1996-02-28 | 1996-01-28   | 1996-03-25    | DELIVER IN PERSON | AIR        | carefully regular plate
+    2125191 |     99235 |      1745 |            3 |         36 |        44432.28 |        .01 |     0 | N            | O            | 1995-12-26 | 1996-01-08   | 1996-01-14    | COLLECT COD       | RAIL       | the carefully ironic mu
+    2125191 |    177347 |      4899 |            1 |         23 |        32759.82 |        .04 |   .03 | N            | O            | 1996-02-15 | 1996-01-01   | 1996-02-23    | NONE              | AIR        | ong the slyly express theodolites
+(10 rows)
+
+create schema FVT_DATA_QUERY;
+create foreign table FVT_DATA_QUERY.TABLE_EXP_FROM_SUBQUERY_T1(
+D_ID int, D_W_ID int,
+D_NAME varchar(10),
+D_STREET_1 varchar(20))SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/subquery.db/table_exp_from_subquery_orc_t1')
+distribute by roundrobin;
+CREATE VIEW FVT_DATA_QUERY.TABLE_EXP_FROM_SUBQUERY_V1 as select * from FVT_DATA_QUERY.TABLE_EXP_FROM_SUBQUERY_T1;
+SELECT DISTINCT SUM(D_ID) as result1 FROM FVT_DATA_QUERY.TABLE_EXP_FROM_SUBQUERY_V1 group by D_ID order by 1;
+ result1 
+---------
+      10
+      20
+      30
+      40
+      50
+      60
+      70
+      80
+      90
+     100
+(10 rows)
+
+drop schema FVT_DATA_QUERY cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to foreign table fvt_data_query.table_exp_from_subquery_t1
+drop cascades to view fvt_data_query.table_exp_from_subquery_v1
+create foreign table tenk1(unique1 int,unique2 int,two int,four int,ten int,twenty int,hundred int,thousand int,twothousand int,
+fivethous int,tenthous int,odd int,even int,stringu1 varchar,stringu2 varchar,string4 varchar)SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/tenk1_orc')
+distribute by roundrobin;
+select count(distinct ss.ten) from (select ten from tenk1 a where unique1 IN (select hundred from tenk1 b)) ss;
+ count 
+-------
+    10
+(1 row)
+
+select r_name from region left join nation on n_nationkey < 5;
+   r_name    
+-------------
+ AFRICA
+ AFRICA
+ AFRICA
+ AFRICA
+ AFRICA
+ AMERICA
+ AMERICA
+ AMERICA
+ AMERICA
+ AMERICA
+ ASIA
+ ASIA
+ ASIA
+ ASIA
+ ASIA
+ EUROPE
+ EUROPE
+ EUROPE
+ EUROPE
+ EUROPE
+ MIDDLE EAST
+ MIDDLE EAST
+ MIDDLE EAST
+ MIDDLE EAST
+ MIDDLE EAST
+(25 rows)
+
+drop foreign table tenk1;
+create table region001 as select R_REGIONKEY+1 id, R_REGIONKEY from region;
+select * from region001 order by 1;
+ id | r_regionkey 
+----+-------------
+  1 |           0
+  2 |           1
+  3 |           2
+  4 |           3
+  5 |           4
+(5 rows)
+
+update region001 a set a.R_REGIONKEY=34 from customer where a.R_REGIONKEY = customer.c_custkey;
+select * from region001 order by 1;
+ id | r_regionkey 
+----+-------------
+  1 |           0
+  2 |          34
+  3 |          34
+  4 |          34
+  5 |          34
+(5 rows)
+
+drop table region001;
+create or replace PROCEDURE testcase1()
+AS
+RESULT1 integer;
+RESULT2 integer;
+BEGIN
+     select N_NATIONKEY from  nation limit 1 into RESULT1;
+     raise info'RESULT1 IS %',RESULT1;
+     return;
+END;
+/
+select testcase1();
+INFO:  RESULT1 IS 0
+CONTEXT:  referenced column: testcase1
+ testcase1 
+-----------
+ 
+(1 row)
+
+drop PROCEDURE testcase1;
+create foreign table  customer_demographics ( 
+        cd_demo_sk                int  ,
+        cd_gender                 char(1)  ,
+        cd_marital_status         char(1)  ,
+        cd_education_status       char(20) ,
+        cd_purchase_estimate      int  ,
+        cd_credit_rating          char(10) ,
+        cd_dep_count              int  ,
+        cd_dep_employed_count     int  ,
+        cd_dep_college_count      int   ) 
+server hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/customer_demographics')
+distribute by roundrobin;
+select count(1) from customer_demographics where cd_education_status = 'College';
+ count  
+--------
+ 274400
+(1 row)
+
+select count(1) from customer_demographics where cd_education_status = 'College ';
+ count  
+--------
+ 274400
+(1 row)
+
+select count(1) from customer_demographics where cd_education_status = 'College ';
+ count  
+--------
+ 274400
+(1 row)
+
+drop foreign table customer_demographics;
+CREATE FOREIGN TABLE region_errortable(
+a int,b varchar,pt_dt varchar
+)
+SERVER hdfs_server OPTIONS(FORMAT 'orc', FOLDERNAME '/user/hive/warehouse/fid.db/1234')
+log into err_normaltxt remote log 'err_normaltxt' per node reject limit 'unlimited'
+DISTRIBUTE BY roundrobin
+PARTITION BY (pt_dt) AUTOMAPPED;
+WARNING:  The error_relation of the foreign table is not support.
+WARNING:  The REMOTE LOG of hdfs foreign table is not support.
+WARNING:  The PER NODE REJECT LIMIT of hdfs foreign table is not support.
+drop foreign table region_errortable;
+CREATE FOREIGN TABLE region_errortable1(
+a int,b varchar,pt_dt varchar
+)
+SERVER hdfs_server OPTIONS(FORMAT 'orc', FOLDERNAME '/user/hive/warehouse/fid.db/1234')
+WITH err_normaltxt2
+DISTRIBUTE BY roundrobin
+PARTITION BY (pt_dt) AUTOMAPPED;
+WARNING:  The error_relation of the foreign table is not support.
+drop foreign table region_errortable1;
+reset enable_vector_engine;
+DROP FOREIGN TABLE IF EXISTS lineitem CASCADE;
+DROP FOREIGN TABLE IF EXISTS customer CASCADE;
+DROP FOREIGN TABLE IF EXISTS orders CASCADE;
+DROP FOREIGN TABLE IF EXISTS part CASCADE;
+DROP FOREIGN TABLE IF EXISTS partsupp CASCADE;
+DROP FOREIGN TABLE IF EXISTS supplier CASCADE;
+DROP FOREIGN TABLE IF EXISTS nation CASCADE;
+DROP FOREIGN TABLE IF EXISTS region CASCADE;
+DROP SERVER hdfs_server CASCADE;

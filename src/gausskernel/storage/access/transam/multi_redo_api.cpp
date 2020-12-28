@@ -36,7 +36,15 @@
 #include "access/extreme_rto/page_redo.h"
 #include "access/parallel_recovery/page_redo.h"
 
-void StartUpMultiRedo(XLogReaderState* xlogreader, uint32 privateLen)
+
+#ifdef ENABLE_MULTIPLE_NODES
+bool g_supportHotStandby = false;   /* don't support consistency view */
+#else
+bool g_supportHotStandby = true;   /* don't support consistency view */
+#endif
+
+
+void StartUpMultiRedo(XLogReaderState *xlogreader, uint32 privateLen)
 {
     if (IsExtremeRedo()) {
         extreme_rto::StartRecoveryWorkers(xlogreader, privateLen);
@@ -87,7 +95,7 @@ bool IsExtremeRtoReadWorkerRunning()
         return false;
     }
 
-    uint32 readWorkerState = pg_atomic_read_u32(&extreme_rto::g_dispatcher->recordstate.readWorkerState);
+    uint32 readWorkerState = pg_atomic_read_u32(&extreme_rto::g_dispatcher->rtoXlogBufState.readWorkerState);
     if (readWorkerState == extreme_rto::WORKER_STATE_STOP || readWorkerState == extreme_rto::WORKER_STATE_EXIT) {
         return false;
     }
@@ -95,7 +103,7 @@ bool IsExtremeRtoReadWorkerRunning()
     return true;
 }
 
-void DispatchRedoRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+void DispatchRedoRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     if (IsExtremeRedo()) {
         extreme_rto::DispatchRedoRecordToFile(record, expectedTLIs, recordXTime);
@@ -110,7 +118,7 @@ void DispatchRedoRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz
     }
 }
 
-void GetThreadNameIfMultiRedo(int argc, char* argv[], char** threadNamePtr)
+void GetThreadNameIfMultiRedo(int argc, char *argv[], char **threadNamePtr)
 {
     if (IsExtremeRedo()) {
         extreme_rto::GetThreadNameIfPageRedoWorker(argc, argv, threadNamePtr);
@@ -119,39 +127,12 @@ void GetThreadNameIfMultiRedo(int argc, char* argv[], char** threadNamePtr)
     }
 }
 
-PGPROC* MultiRedoThreadPidGetProc(ThreadId pid)
+PGPROC *MultiRedoThreadPidGetProc(ThreadId pid)
 {
     if (IsExtremeRedo()) {
         return extreme_rto::StartupPidGetProc(pid);
     } else {
         return parallel_recovery::StartupPidGetProc(pid);
-    }
-}
-
-void MultiRedoSetBufferPinWaitBufId(int bufid)
-{
-    if (IsExtremeRedo()) {
-        extreme_rto::SetStartupBufferPinWaitBufId(bufid);
-    } else {
-        parallel_recovery::SetStartupBufferPinWaitBufId(bufid);
-    }
-}
-
-uint32 MultiRedoGetBufferPinWaitBufLen()
-{
-    if (IsExtremeRedo()) {
-        return extreme_rto::GetStartupBufferPinWaitBufLen();
-    } else {
-        return parallel_recovery::GetStartupBufferPinWaitBufLen();
-    }
-}
-
-void MultiRedoGetBufferPinWaitBufId(int* bufids, uint32 len)
-{
-    if (IsExtremeRedo()) {
-        extreme_rto::GetStartupBufferPinWaitBufId(bufids, len);
-    } else {
-        parallel_recovery::GetStartupBufferPinWaitBufId(bufids, len);
     }
 }
 
@@ -187,8 +168,8 @@ bool IsAllPageWorkerExit()
         }
         g_instance.comm_cxt.predo_cxt.totalNum = 0;
     }
-    ereport(
-        LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG), errmsg("page workers all exit or not open parallel redo")));
+    ereport(LOG,
+            (errmodule(MOD_REDO), errcode(ERRCODE_LOG), errmsg("page workers all exit or not open parallel redo")));
 
     return true;
 }
@@ -221,15 +202,13 @@ PageRedoExitStatus CheckExitPageWorkers(ThreadId pid)
         if (g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadId == pid) {
             checkStatus = PAGE_REDO_THREAD_EXIT_NORMAL;
             uint32 state = pg_atomic_read_u32(&(g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadState));
-            ereport(LOG,
-                (errmodule(MOD_REDO),
-                    errcode(ERRCODE_LOG),
-                    errmsg("page worker thread %lu exit, state %u", pid, state)));
+            ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                          errmsg("page worker thread %lu exit, state %u", pid, state)));
             if (state == PAGE_REDO_WORKER_READY) {
                 checkStatus = PAGE_REDO_THREAD_EXIT_ABNORMAL;
             }
-            pg_atomic_write_u32(
-                &(g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadState), PAGE_REDO_WORKER_INVALID);
+            pg_atomic_write_u32(&(g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadState),
+                                PAGE_REDO_WORKER_INVALID);
             g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadId = 0;
             break;
         }
@@ -246,12 +225,12 @@ void ProcTxnWorkLoad(bool force)
 }
 
 /* Run from the worker thread. */
-void SetMyPageRedoWorker(knl_thread_arg* arg)
+void SetMyPageRedoWorker(knl_thread_arg *arg)
 {
     if (IsExtremeRedo()) {
-        extreme_rto::g_redoWorker = (extreme_rto::PageRedoWorker*)arg->payload;
+        extreme_rto::g_redoWorker = (extreme_rto::PageRedoWorker *)arg->payload;
     } else if (IsParallelRedo()) {
-        parallel_recovery::g_redoWorker = (parallel_recovery::PageRedoWorker*)arg->payload;
+        parallel_recovery::g_redoWorker = (parallel_recovery::PageRedoWorker *)arg->payload;
     }
 }
 
@@ -315,7 +294,7 @@ uint32 GetRedoWorkerCount()
     return 0;
 }
 
-void** GetXLogInvalidPagesFromWorkers()
+void **GetXLogInvalidPagesFromWorkers()
 {
     if (IsExtremeRedo()) {
         return extreme_rto::GetXLogInvalidPagesFromWorkers();
@@ -349,8 +328,8 @@ RedoWaitInfo GetRedoIoEvent(int32 event_id)
 void GetRedoWrokerStatistic(uint32 *realNum, RedoWorkerStatsData *worker, uint32 workerLen)
 {
     if (IsExtremeRedo()) {
-        extreme_rto::redo_get_wroker_statistic(realNum, worker, workerLen);
+        return extreme_rto::redo_get_wroker_statistic(realNum, worker, workerLen);
     } else {
-        parallel_recovery::redo_get_wroker_statistic(realNum, worker, workerLen);
+        return parallel_recovery::redo_get_wroker_statistic(realNum, worker, workerLen);
     }
 }

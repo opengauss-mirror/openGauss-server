@@ -1,0 +1,66 @@
+\c test
+create node group ng1 with(datanode3, datanode4, datanode5, datanode6);
+create table ng_t1(c1 int, c2 int, c3 int) to group ng1;
+insert into ng_t1 select v, v*10, v*100 from generate_series(1, 10) as v;
+\c regression
+CREATE FOREIGN TABLE ng_t1(c1 int, c2 int, c3 int) server server_remote;
+select * from ng_t1 order by 1;
+ c1 | c2  |  c3  
+----+-----+------
+  1 |  10 |  100
+  2 |  20 |  200
+  3 |  30 |  300
+  4 |  40 |  400
+  5 |  50 |  500
+  6 |  60 |  600
+  7 |  70 |  700
+  8 |  80 |  800
+  9 |  90 |  900
+ 10 | 100 | 1000
+(10 rows)
+
+create node group ng2 with(datanode7, datanode8);
+create table ng_t2(c1 int, c2 int, c3 int) to group ng2;
+create node group ng3 with(datanode1, datanode2, datanode3, datanode4, datanode5, datanode6, datanode7, datanode8);
+create table ng_t3(c1 int, c2 int, c3 int) to group ng3;
+insert into ng_t2 select *from ng_t1;
+select * from ng_t2 order by 1;
+ c1 | c2  |  c3  
+----+-----+------
+  1 |  10 |  100
+  2 |  20 |  200
+  3 |  30 |  300
+  4 |  40 |  400
+  5 |  50 |  500
+  6 |  60 |  600
+  7 |  70 |  700
+  8 |  80 |  800
+  9 |  90 |  900
+ 10 | 100 | 1000
+(10 rows)
+
+insert into ng_t3 select *from ng_t1;
+select * from ng_t3 order by 1;
+ c1 | c2  |  c3  
+----+-----+------
+  1 |  10 |  100
+  2 |  20 |  200
+  3 |  30 |  300
+  4 |  40 |  400
+  5 |  50 |  500
+  6 |  60 |  600
+  7 |  70 |  700
+  8 |  80 |  800
+  9 |  90 |  900
+ 10 | 100 | 1000
+(10 rows)
+
+drop table ng_t2;
+drop table ng_t3;
+drop foreign table ng_t1;
+drop node group ng2;
+drop node group ng3;
+\c test
+drop table ng_t1;
+drop node group ng1;
+\c regression

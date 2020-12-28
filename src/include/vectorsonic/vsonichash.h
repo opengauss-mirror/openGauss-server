@@ -42,7 +42,17 @@
 #define PROBE_PREPARE_PAIR 4
 #define PROBE_PARTITION_MEM 5
 
+#define USE_PRIME
+
+#ifdef USE_PRIME
+/*
+ * The prime calculated via hashfindrprime() with rows
+ * larger than SONIC_MAX_ROWS will be larger than UINT_MAX.
+ */
+#define SONIC_MAX_ROWS 4080218831
+#else
 #define SONIC_MAX_ROWS 4294950910
+#endif
 
 typedef enum { CALC_BASE = 0, CALC_SPILL, CALC_HASHTABLE } CalcBatchHashType;
 
@@ -122,27 +132,27 @@ public:
     /* Hash Functions */
     /* Specialized for int8, int16, int32 */
     template <bool rehash, typename containerType, typename realType>
-    void hashInteger(char* val, uint8* flag, int nval, uint32* res, PGFunction func = NULL);
+    void hashInteger(char* val, uint8* flag, int nval, uint32* res, FmgrInfo* hashFmgr = NULL);
 
     /* Specialized for int64 */
     template <bool rehash>
-    void hashInteger8(char* val, uint8* flag, int nval, uint32* res, PGFunction func = NULL);
+    void hashInteger8(char* val, uint8* flag, int nval, uint32* res, FmgrInfo* hashFmgr = NULL);
 
     template <bool rehash>
-    void hashbpchar(char* val, uint8* flag, int nval, uint32* res, PGFunction func = NULL);
+    void hashbpchar(char* val, uint8* flag, int nval, uint32* res, FmgrInfo* hashFmgr = NULL);
 
     template <bool rehash>
-    void hashtext(char* val, uint8* flag, int nval, uint32* res, PGFunction func = NULL);
+    void hashtext(char* val, uint8* flag, int nval, uint32* res, FmgrInfo* hashFmgr = NULL);
 
     template <bool rehash>
-    void hashtext_compatible(char* val, uint8* flag, int nval, uint32* res, PGFunction func = NULL);
+    void hashtext_compatible(char* val, uint8* flag, int nval, uint32* res, FmgrInfo* hashFmgr = NULL);
 
     template <bool rehash>
-    void hashnumeric(char* val, uint8* flag, int nval, uint32* res, PGFunction func = NULL);
+    void hashnumeric(char* val, uint8* flag, int nval, uint32* res, FmgrInfo* hashFmgr = NULL);
 
     /* General hash functions */
     template <bool rehash, typename containerType, typename realType>
-    void hashGeneralFunc(char* val, uint8* flag, int nval, uint32* res, PGFunction func);
+    void hashGeneralFunc(char* val, uint8* flag, int nval, uint32* res, FmgrInfo* hashFmgr);
 
     void freeMemoryContext();
 
@@ -165,7 +175,7 @@ public:
                 (uint8*)batch->m_arr[keyIndx[i]].m_flag,
                 batch->m_rows,
                 hashRes,
-                hashFmgr[i].fn_addr);
+                (hashFmgr + i));
 
         MemoryContextReset(m_memControl.tmpContext);
     }
@@ -181,7 +191,7 @@ public:
         for (i = 0; i < m_buildOp.keyNum; i++) {
             datum_arr = array[keyIndx[i]]->m_arr[arrIdx];
             RuntimeBinding(hashfun, i)(
-                (char*)datum_arr->data, (uint8*)datum_arr->nullFlag, nrows, hashRes, hashFmgr[i].fn_addr);
+                (char*)datum_arr->data, (uint8*)datum_arr->nullFlag, nrows, hashRes, (hashFmgr + i));
         }
 
         MemoryContextReset(m_memControl.tmpContext);
@@ -215,6 +225,7 @@ public:
 
                 fcinfo.arg[0] = val->m_vals[*loc1];
                 fcinfo.arg[1] = *data;
+                fcinfo.flinfo = (m_eqfunctions + keyNum);
                 *boolloc = *boolloc && (nullcheck || (notnullcheck && (bool)cmpfun(&fcinfo)));
             }
 
@@ -226,7 +237,7 @@ public:
     }
 
 public:
-    typedef void (SonicHash::*hashValFun)(char* val, uint8* flag, int nval, uint32* res, PGFunction func);
+    typedef void (SonicHash::*hashValFun)(char* val, uint8* flag, int nval, uint32* res, FmgrInfo* hashFmgr);
 
     typedef void (SonicHash::*matchFun)(ScalarVector* val, SonicDatumArray* array, int nrows, int keyNum);
 
@@ -257,6 +268,7 @@ public:
         {
             simple = false;
             keyIndx = NULL;
+            oKeyIndx = NULL;
             keyNum = 0;
             hashFunc = NULL;
             hashAtomFunc = NULL;
@@ -301,5 +313,5 @@ public:
 };
 
 extern uint64 hashfindprime(uint64 n);
-
+extern uint32 hashquickany(uint32 seed, register const unsigned char* data, register int len);
 #endif /* SRC_INCLUDE_VECTORSONIC_VSONICHASH_H_ */

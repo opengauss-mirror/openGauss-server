@@ -148,9 +148,6 @@ BTPageOpaque
 BTPageOpaqueData
 BTPageStat
 BTPageState
-BTParallelScanDesc
-BTParallelScanDescData
-BTPS_State
 BTScanOpaque
 BTScanOpaqueData
 BTScanPosData
@@ -1558,8 +1555,6 @@ SharedInvalRelcacheMsg
 SharedInvalRelmapMsg
 SharedInvalSmgrMsg
 SharedInvalidationMessage
-SharedTuplestore
-SharedTuplestoreAccessor
 ShellTypeInfo
 ShmemIndexEnt
 ShutdownInformation
@@ -1584,7 +1579,7 @@ SlruShared
 SlruSharedData
 Snapshot
 SnapshotData
-SnapshotSatisfiesFunc
+SnapshotType
 Snapstate
 SnapstateOnDisk
 SockAddr

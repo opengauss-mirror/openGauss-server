@@ -115,7 +115,6 @@
 #include <unistd.h>
 #include <signal.h>
 
-#include "access/parallel.h"
 #include "access/slru.h"
 #include "access/transam.h"
 #include "access/xact.h"
@@ -200,6 +199,8 @@ typedef struct QueueBackendStatus {
     ThreadId pid;      /* either a PID or InvalidPid */
     QueuePosition pos; /* backend has read queue up to here */
 } QueueBackendStatus;
+
+#define InvalidPid ((ThreadId)(-1))
 
 /*
  * Shared memory state for LISTEN/NOTIFY (excluding its SLRU stuff)
@@ -329,6 +330,7 @@ static void asyncQueueReadAllNotifications(void);
 static bool asyncQueueProcessPageEntries(QueuePosition* current, const QueuePosition &stop, char* page_buffer);
 static void asyncQueueAdvanceTail(void);
 static void ProcessIncomingNotify(void);
+static void NotifyMyFrontEnd(const char* channel, const char* payload, int32 srcPid);
 static bool AsyncExistsPendingNotify(const char* channel, const char* payload);
 static void ClearPendingActionsAndNotifies(void);
 
@@ -446,10 +448,6 @@ void Async_Notify(const char* channel, const char* payload)
 {
     Notification* n = NULL;
     MemoryContext oldcontext;
-
-    if (IsParallelWorker()) {
-        elog(ERROR, "cannot send notifications from a parallel worker");
-    }
 
     if (u_sess->attr.attr_common.Trace_notify) {
         elog(DEBUG1, "Async_Notify(%s)", channel);
@@ -869,7 +867,7 @@ static void Exec_ListenCommit(const char* channel)
      * doesn't seem worth trying to guard against that, but maybe improve this
      * later.
      */
-    oldcontext = MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+    oldcontext = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
     t_thrd.asy_cxt.listenChannels = lappend(t_thrd.asy_cxt.listenChannels, pstrdup(channel));
     (void)MemoryContextSwitchTo(oldcontext);
 }
@@ -1536,7 +1534,7 @@ static void asyncQueueReadAllNotifications(void)
     union {
         char buf[QUEUE_PAGESIZE];
         AsyncQueueEntry align;
-    } page_buffer = {0};
+    } page_buffer;
 
     /* Fetch current state */
     LWLockAcquire(AsyncQueueLock, LW_SHARED);
@@ -1839,7 +1837,7 @@ static void ProcessIncomingNotify(void)
 /*
  * Send NOTIFY message to my front end.
  */
-void NotifyMyFrontEnd(const char* channel, const char* payload, int32 srcPid)
+static void NotifyMyFrontEnd(const char* channel, const char* payload, int32 srcPid)
 {
     if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote) {
         StringInfoData buf;

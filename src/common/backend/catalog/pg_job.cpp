@@ -49,15 +49,16 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/snapmgr.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
+#include "access/tableam.h"
 #include "catalog/pg_job.h"
 #include "catalog/pg_job_proc.h"
 #include "catalog/pg_authid.h"
-#include "time.h"
 #include "catalog/pg_database.h"
 #include "fmgr.h"
 #include "utils/syscache.h"
 #include "utils/timestamp.h"
+#include "pgxc/execRemote.h"
 
 /* Mask of jobid and nodeid for generate mix jobid and nodeid. */
 #define JOBID_MASK 0xffff
@@ -67,16 +68,20 @@
 #define JOB_MAX_FAIL_COUNT 16
 #define InvalidJobId 0
 
-extern void syn_command_to_other_cn(int4 job_id, Pgjob_Command_Type command, Datum what = 0, Datum next_date = 0,
+extern void syn_command_to_other_node(int4 job_id, Pgjob_Command_Type command, Datum what = 0, Datum next_date = 0,
     Datum job_interval = 0, bool broken = 0);
-
-static int jobid_alloc(uint16* pusJobId);
-static void check_job_permission(HeapTuple tuple);
+extern void syn_command_to_other_node_internal(Datum node_name, Datum database, int4 job_id, Pgjob_Command_Type command,
+    Datum what, Datum next_date, Datum job_interval, bool broken);
 static void elog_job_detail(int4 job_id, char* what, Update_Pgjob_Status status, char* errmsg);
 static char* query_with_update_job(int4 job_id, Datum job_status, int64 pid, Datum last_start_date, Datum last_end_date,
-    Datum last_suc_date, Datum this_run_date, Datum next_run_date, int2 failure_count);
+    Datum last_suc_date, Datum this_run_date, Datum next_run_date, int2 failure_count, Datum node_name);
 static void get_interval_nextdate_by_spi(int4 job_id, bool ischeck, const char* job_interval, Datum start_date,
     Datum* next_date, MemoryContext current_context);
+static bool is_internal_perf_job(int64 job_id);
+static bool is_job_aborted(Datum job_status);
+static HeapTuple get_job_tup_from_rel(Relation job_rel, int job_id);
+static char* get_real_search_schema();
+static char* get_job_what(int4 job_id, bool throw_not_found_error = true);
 
 /*
  * @Description: Insert a new record to pg_job_proc.
@@ -112,7 +117,21 @@ static void insert_pg_job_proc(int4 job_id, Datum what)
 
     heap_close(rel, RowExclusiveLock);
 }
-
+/*
+ * Encapsulating a function with the job interface will cause the function's schema be 
+ * inserted into the pg_job system table. 
+ * In order to avoid the situation that the job function in the dbe_task schema can only
+ * call functions or procedures under the dbe_task schema, convert the dbe_task to public.
+ */
+static char* get_real_search_schema()
+{
+    char *cur_schema = get_namespace_name(SchemaNameGetSchemaOid(NULL));
+    if (strcmp(cur_schema, "dbe_task") == 0) {
+        pfree_ext(cur_schema);
+        cur_schema = "public";
+    }
+    return cur_schema;
+}
 /*
  * Description: Insert a new record to pg_job.
  *
@@ -124,10 +143,12 @@ static void insert_pg_job_proc(int4 job_id, Datum what)
  *	@in node_id: If local cn received isubmit from original cn, the node_id identify original cn.
  * Returns: void
  */
-static void insert_pg_job(Relation rel, int job_id, Datum next_date, Datum job_interval, int4 node_id)
+static void insert_pg_job(Relation rel, int job_id, Datum next_date, Datum job_interval, int4 node_id,
+    Datum database_name, Datum node_name)
 {
     /* just check in cluster mode */
-    if (!IS_SINGLE_NODE && !IS_PGXC_COORDINATOR) {
+    if (!(IsConnFromCoord() && IS_PGXC_DATANODE) && !IS_SINGLE_NODE && !IS_PGXC_COORDINATOR &&
+        !(isSingleMode && IS_PGXC_DATANODE)) {
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("Submit or Isubmit job only can be operate on coordinator.")));
     }
@@ -135,7 +156,6 @@ static void insert_pg_job(Relation rel, int job_id, Datum next_date, Datum job_i
     HeapTuple tuple = NULL;
     Datum values[Natts_pg_job];
     bool nulls[Natts_pg_job];
-    char* dbname = NULL;
     errno_t rc = 0;
 
     rc = memset_s(values, sizeof(values), 0, sizeof(values));
@@ -148,25 +168,32 @@ static void insert_pg_job(Relation rel, int job_id, Datum next_date, Datum job_i
     values[Anum_pg_job_log_user - 1] = DirectFunctionCall1(namein, CStringGetDatum(GetUserNameFromId(GetUserId())));
     values[Anum_pg_job_priv_user - 1] = DirectFunctionCall1(namein, CStringGetDatum(GetUserNameFromId(GetUserId())));
 
-    dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-    if (dbname == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE),
-                    errmsg("database with OID %u does not exist",
-                        u_sess->proc_cxt.MyDatabaseId)));
+    if (database_name == 0) {
+        values[Anum_pg_job_dbname - 1] =
+            DirectFunctionCall1(namein, CStringGetDatum(get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId, true)));
+    } else {
+        values[Anum_pg_job_dbname - 1] = database_name;
     }
 
-    values[Anum_pg_job_dbname - 1] =
-        DirectFunctionCall1(namein, CStringGetDatum(dbname));
     values[Anum_pg_job_nspname - 1] =
-        DirectFunctionCall1(namein, CStringGetDatum(get_namespace_name(SchemaNameGetSchemaOid(NULL), true)));
+        DirectFunctionCall1(namein, CStringGetDatum(get_real_search_schema()));
 
-    /* Set local g_instance.attr.attr_common.PGXCNodeName if call Submit or ISubmit by client. */
-    if (!IsConnFromCoord())
-        values[Anum_pg_job_node_name - 1] =
-            DirectFunctionCall1(namein, CStringGetDatum(g_instance.attr.attr_common.PGXCNodeName));
-    else /* Get node_name by node_id if come from original coordinator. */
-        values[Anum_pg_job_node_name - 1] =
-            DirectFunctionCall1(namein, CStringGetDatum(get_pgxc_node_name_by_node_id(node_id)));
+    if (node_name != 0) {
+        /* submit_job_on_nodes */
+        values[Anum_pg_job_node_name - 1] = node_name;
+    } else {
+        /* Set local g_instance.attr.attr_common.PGXCNodeName if call Submit or ISubmit by client. */
+        if (!IsConnFromCoord())
+            values[Anum_pg_job_node_name - 1] =
+                DirectFunctionCall1(namein, CStringGetDatum(g_instance.attr.attr_common.PGXCNodeName));
+        else if (IS_PGXC_COORDINATOR)/* Get node_name by node_id if come from original coordinator. */
+            values[Anum_pg_job_node_name - 1] =
+                DirectFunctionCall1(namein, CStringGetDatum(get_pgxc_node_name_by_node_id(node_id)));
+        else {
+            values[Anum_pg_job_node_name - 1] =
+                DirectFunctionCall1(namein, CStringGetDatum(""));
+        }
+    }
 
     values[Anum_pg_job_start_date - 1] = next_date;
     values[Anum_pg_job_job_status - 1] = CharGetDatum(PGJOB_SUCC_STATUS);
@@ -232,6 +259,10 @@ static HeapTuple get_job_tup(int job_id)
 
     tup = SearchSysCache1(PGJOBID, Int64GetDatum(job_id));
     if (!HeapTupleIsValid(tup)) {
+        /* in old version pg_job, job can be existed in CN, but not DN */
+        if (IS_PGXC_DATANODE && IsConnFromCoord())
+            return NULL;
+
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("Can not find job id %d in system table pg_job.", job_id)));
     }
@@ -288,7 +319,7 @@ static void delete_job_proc(int4 job_id)
  *	@in job_id: Job id.
  * Returns: char*
  */
-static char* get_job_what(int4 job_id)
+static char* get_job_what(int4 job_id, bool throw_not_found_error)
 {
     Relation job_proc_rel = NULL;
     HeapTuple proc_tup = NULL;
@@ -298,10 +329,15 @@ static char* get_job_what(int4 job_id)
 
     job_proc_rel = heap_open(PgJobProcRelationId, AccessShareLock);
     proc_tup = SearchSysCache1(PGJOBPROCID, Int32GetDatum(job_id));
+
     if (!HeapTupleIsValid(proc_tup)) {
         heap_close(job_proc_rel, AccessShareLock);
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("Can not find jobid %d in system table pg_job_proc.", job_id)));
+        if (throw_not_found_error) {
+            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("Can not find jobid %d in system table pg_job_proc.", job_id)));
+        } else {
+            return NULL;
+        }
     }
 
     what_datum = heap_getattr(proc_tup, Anum_pg_job_proc_what, job_proc_rel->rd_att, &isnull);
@@ -356,6 +392,9 @@ static void update_pg_job_info(int job_id, Update_Pgjob_Status status, Datum sta
     errno_t rc = 0;
     int2 failure_count;
     char* update_query = NULL;
+    /* aborted job can not change to 'r'/'f'/'s' */
+    bool is_job_abort = false;
+    bool is_perf_job = false;
     MemoryContext current_context = CurrentMemoryContext;
     ResourceOwner save = t_thrd.utils_cxt.CurrentResourceOwner;
 
@@ -368,6 +407,7 @@ static void update_pg_job_info(int job_id, Update_Pgjob_Status status, Datum sta
     }
 
     StartTransactionCommand();
+    is_perf_job = is_internal_perf_job(job_id);
     rc = memset_s(values, sizeof(values), 0, sizeof(values));
     securec_check(rc, "\0", "\0");
 
@@ -381,17 +421,18 @@ static void update_pg_job_info(int job_id, Update_Pgjob_Status status, Datum sta
     relation = heap_open(PgJobRelationId, RowExclusiveLock);
     tup = get_job_tup(job_id);
     get_job_values(job_id, tup, relation, old_value, visnull);
+    is_job_abort = is_job_aborted(old_value[Anum_pg_job_job_status - 1]);
 
     /* Get current timestamp. */
     curtime = DirectFunctionCall1(timestamptz_timestamp, GetCurrentTimestamp());
-    replaces[Anum_pg_job_job_status - 1] = true;
+    replaces[Anum_pg_job_job_status - 1] = !is_job_abort;
     replaces[Anum_pg_job_current_postgres_pid - 1] = true;
     failure_count = DatumGetInt16(old_value[Anum_pg_job_failure_count - 1]);
 
     switch (status) {
         case Pgjob_Run: {
             replaces[Anum_pg_job_this_run_date - 1] = true;
-            values[Anum_pg_job_job_status - 1] = CharGetDatum(PGJOB_RUN_STATUS);
+            values[Anum_pg_job_job_status - 1] = CharGetDatum(is_job_abort ? PGJOB_ABORT_STATUS : PGJOB_RUN_STATUS);
             values[Anum_pg_job_current_postgres_pid - 1] = Int64GetDatum(t_thrd.proc_cxt.MyProcPid);
             values[Anum_pg_job_this_run_date - 1] = start_date;
 
@@ -410,7 +451,8 @@ static void update_pg_job_info(int job_id, Update_Pgjob_Status status, Datum sta
                 visnull[Anum_pg_job_last_suc_date - 1] ? 0 : old_value[Anum_pg_job_last_suc_date - 1],
                 values[Anum_pg_job_this_run_date - 1],
                 old_value[Anum_pg_job_next_run_date - 1],
-                failure_count);
+                failure_count, 
+                values[Anum_pg_job_node_name - 1]);
             break;
         }
         case Pgjob_Succ: {
@@ -419,7 +461,7 @@ static void update_pg_job_info(int job_id, Update_Pgjob_Status status, Datum sta
             replaces[Anum_pg_job_last_suc_date - 1] = true;
             replaces[Anum_pg_job_failure_count - 1] = true;
             replaces[Anum_pg_job_next_run_date - 1] = true;
-            values[Anum_pg_job_job_status - 1] = CharGetDatum(PGJOB_SUCC_STATUS);
+            values[Anum_pg_job_job_status - 1] = CharGetDatum(is_job_abort ? PGJOB_ABORT_STATUS : PGJOB_SUCC_STATUS);
             values[Anum_pg_job_current_postgres_pid - 1] = Int64GetDatum(-1);
             values[Anum_pg_job_last_start_date - 1] = start_date;
             values[Anum_pg_job_last_end_date - 1] = curtime;
@@ -447,15 +489,17 @@ static void update_pg_job_info(int job_id, Update_Pgjob_Status status, Datum sta
                 values[Anum_pg_job_last_suc_date - 1],
                 visnull[Anum_pg_job_this_run_date - 1] ? 0 : old_value[Anum_pg_job_this_run_date - 1],
                 values[Anum_pg_job_next_run_date - 1],
-                failure_count);
+                failure_count,
+                values[Anum_pg_job_node_name - 1]);
             break;
         }
         case Pgjob_Fail: {
+
             replaces[Anum_pg_job_last_start_date - 1] = true;
             replaces[Anum_pg_job_last_end_date - 1] = true;
             replaces[Anum_pg_job_failure_count - 1] = true;
             replaces[Anum_pg_job_next_run_date - 1] = true;
-            values[Anum_pg_job_job_status - 1] = CharGetDatum(PGJOB_FAIL_STATUS);
+            values[Anum_pg_job_job_status - 1] = CharGetDatum(is_job_abort ? PGJOB_ABORT_STATUS : PGJOB_FAIL_STATUS);
             values[Anum_pg_job_current_postgres_pid - 1] = Int64GetDatum(-1);
             values[Anum_pg_job_last_start_date - 1] = start_date;
             values[Anum_pg_job_last_end_date - 1] = curtime;
@@ -490,12 +534,13 @@ static void update_pg_job_info(int job_id, Update_Pgjob_Status status, Datum sta
                 visnull[Anum_pg_job_last_suc_date - 1] ? 0 : old_value[Anum_pg_job_last_suc_date - 1],
                 visnull[Anum_pg_job_this_run_date - 1] ? 0 : old_value[Anum_pg_job_this_run_date - 1],
                 values[Anum_pg_job_next_run_date - 1],
-                failure_count);
+                failure_count,
+                values[Anum_pg_job_node_name - 1]);
             break;
         }
         default: {
             ReleaseSysCache(tup);
-            heap_close(relation, RowExclusiveLock);
+            heap_close(relation, is_perf_job ? NoLock : RowExclusiveLock);
             AbortOutOfAnyTransaction();
             ereport(ERROR, (errcode(ERRCODE_CASE_NOT_FOUND), errmsg("Invalid job status, job_id: %d.", job_id)));
         }
@@ -506,10 +551,11 @@ static void update_pg_job_info(int job_id, Update_Pgjob_Status status, Datum sta
     simple_heap_update(relation, &newtuple->t_self, newtuple);
 
     CatalogUpdateIndexes(relation, newtuple);
+
     ReleaseSysCache(tup);
     heap_freetuple_ext(newtuple);
 
-    if (IS_PGXC_COORDINATOR) {
+    if (IS_PGXC_COORDINATOR && update_query != NULL) {
         Assert(!IS_SINGLE_NODE);
 
         /*
@@ -522,9 +568,11 @@ static void update_pg_job_info(int job_id, Update_Pgjob_Status status, Datum sta
         pfree_ext(update_query);
     }
 
-    heap_close(relation, RowExclusiveLock);
+    /* avoid update concurrently between perf job management */
+    heap_close(relation, is_perf_job ? NoLock : RowExclusiveLock);
 
     CommitTransactionCommand();
+
     (void)MemoryContextSwitchTo(current_context);
     t_thrd.utils_cxt.CurrentResourceOwner = save;
 }
@@ -536,6 +584,21 @@ static void check_job_id(int64 job_id)
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("Invalid job_id: %ld", job_id),
                 errdetail("The scope of jobid should between 1 and %d", JOBID_MAX_NUMBER)));
+    }
+}
+
+static void check_job_status(Datum job_status)
+{
+    char status = DatumGetChar(job_status);
+
+    if (status != PGJOB_RUN_STATUS &&
+        status != PGJOB_ABORT_STATUS &&
+        status != PGJOB_FAIL_STATUS &&
+        status != PGJOB_SUCC_STATUS) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Invalid job_status: \'%c\' ", status),
+                errdetail("The job status should be 'r','f','s','d'.")));
     }
 }
 
@@ -566,7 +629,13 @@ void syn_update_pg_job(PG_FUNCTION_ARGS)
     errno_t rc = 0;
 
     check_job_id(job_id);
+    check_job_status(job_status);
     tup = get_job_tup(job_id);
+    if (!HeapTupleIsValid(tup)) {
+        return;
+    }
+
+    check_job_permission(tup);
 
     /* Update pg_job system table. */
     relation = heap_open(PgJobRelationId, RowExclusiveLock);
@@ -834,6 +903,7 @@ void execute_job(int4 job_id)
         (void)MemoryContextSwitchTo(ecxt);
 
         pfree_ext(job_interval);
+        pfree_ext(what);
 
         ereport(ERROR,
             (errcode(ERRCODE_OPERATE_FAILED),
@@ -845,6 +915,7 @@ void execute_job(int4 job_id)
     /* Update last_suc_date and  job_status='s' */
     update_pg_job_info(job_id, Pgjob_Succ, start_date, new_next_date);
     elog_job_detail(job_id, what, Pgjob_Succ, NULL);
+    pfree_ext(what);
 
     (void)MemoryContextSwitchTo(current_context);
 }
@@ -863,6 +934,7 @@ static void check_interval_valid(int4 job_id, Relation rel, Datum interval)
 {
     char* job_interval = text_to_cstring(DatumGetTextP(interval));
     MemoryContext current_context = CurrentMemoryContext;
+    ResourceOwner current_resource = t_thrd.utils_cxt.CurrentResourceOwner;
 
     /* Check if param interval is valid or not by execute 'select interval'. */
     PG_TRY();
@@ -873,6 +945,7 @@ static void check_interval_valid(int4 job_id, Relation rel, Datum interval)
     }
     PG_CATCH();
     {
+        t_thrd.utils_cxt.CurrentResourceOwner = current_resource;
         heap_close(rel, RowExclusiveLock);
 
         /* Save error info */
@@ -893,31 +966,24 @@ static void check_interval_valid(int4 job_id, Relation rel, Datum interval)
  * Description: Add an job to pg_job.
  *
  * Parameters:
- *	@in job_id: Job id.
  *	@in what: Task string.
  *	@in next_date: Next execute time.
- *	@in job_interval: Time interval.
- * Returns: void
+ *	@in interval_time: Time interval.
+ *	@in job_id: job id. default null.
+ * Returns: int
  */
-void isubmit_job(PG_FUNCTION_ARGS)
+
+Datum job_submit(PG_FUNCTION_ARGS)
 {
-    int64 job_id = PG_GETARG_INT64(0);
     Datum what = PG_GETARG_DATUM(1);
     Datum next_date = PG_GETARG_DATUM(2);
-    Datum job_interval = PG_GETARG_DATUM(3);
+    Datum interval_time = PG_GETARG_DATUM(3);
+    int64 job_id = 0;
     int4 real_job_id = 0;
     int4 node_id = 0;
     Relation rel = NULL;
-
-    /* If come from original cn, we should get real job_id and node_id. */
-    if (IS_PGXC_COORDINATOR && IsConnFromCoord()) {
-        real_job_id = (uint64)job_id & JOBID_MASK;
-        node_id = ((uint64)job_id >> 16) & NODEID_MASK;
-        job_id = real_job_id;
-    }
-
-    check_job_id(job_id);
-
+    char *c_what = NULL;
+    char *c_interval_time = NULL;
     if (PG_ARGISNULL(1)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Parameter what can not be null.")));
     }
@@ -927,62 +993,205 @@ void isubmit_job(PG_FUNCTION_ARGS)
     }
 
     rel = heap_open(PgJobRelationId, RowExclusiveLock);
-
+    if (PG_ARGISNULL(0)) {
+        uint16 id = 0;
+        /* Alloc valid job_id. */
+        int ret = jobid_alloc(&id);
+        if (JOBID_ALLOC_ERROR == ret) {
+            heap_close(rel, RowExclusiveLock);
+            ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                    errmsg("All 32768 jobids have alloc, and there is no free jobid")));
+        }
+        job_id = id;
+    } else {
+        job_id = PG_GETARG_INT64(0);
+        /* If come from original cn, we should get real job_id and node_id. */
+        if ((IS_PGXC_DATANODE || IS_PGXC_COORDINATOR) && IsConnFromCoord()) {
+            real_job_id = (uint64)job_id & JOBID_MASK;
+            node_id = ((uint64)job_id >> 16) & NODEID_MASK;
+            job_id = real_job_id;
+        }
+        check_job_id(job_id);
+    }
+    c_what = text_to_cstring(DatumGetTextP(what));
     if (PG_ARGISNULL(3)) {
         /* Set interval as "null" if it is null. */
-        job_interval = CStringGetTextDatum("null");
-    } else if (0 != pg_strcasecmp(text_to_cstring(DatumGetTextP(job_interval)), "null")) {
-        /* Check if param interval is valid or not by execute 'select interval'. */
-        check_interval_valid(job_id, rel, job_interval);
+        interval_time = CStringGetTextDatum("null");
     }
+    c_interval_time = text_to_cstring(DatumGetTextP(interval_time));
+    if (0 != pg_strcasecmp(c_interval_time, "null") && !IsConnFromCoord()) {
+        /* Check if param interval is valid or not by execute 'select interval'. */
+        check_interval_valid(job_id, rel, interval_time);
+    }
+    /* Insert a job to pg_job.*/
+    insert_pg_job(rel, job_id, next_date, interval_time, node_id, 0, 0);
 
-    insert_pg_job(rel, job_id, next_date, job_interval, node_id);
-
-    /* Insert job id and what into jog_proc system table. */
+    /* Insert job id and what into jog_proc system table.*/
     insert_pg_job_proc(job_id, what);
 
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        syn_command_to_other_cn(job_id, Job_ISubmit, what, next_date, job_interval);
+        syn_command_to_other_node(job_id, Job_ISubmit, what, next_date, interval_time);
     }
 #endif
 
     heap_close(rel, RowExclusiveLock);
-
     elog(LOG,
-        "Success to ISubmit job, job_id: %ld, what: %s, next_date: %s, job_interval: %s.",
+        "Success to Submit job, job_id: %ld, what: %s, next_date: %s, job_interval: %s.",
         job_id,
-        quote_literal_cstr(text_to_cstring(DatumGetTextP(what))),
+        quote_literal_cstr(c_what),
         quote_literal_cstr(DatumGetCString(DirectFunctionCall1(timestamp_out, DatumGetTimestamp(next_date)))),
-        quote_literal_cstr(text_to_cstring(DatumGetTextP(job_interval))));
+        quote_literal_cstr(c_interval_time));
+    pfree_ext(c_what);
+    pfree_ext(c_interval_time);
+    PG_RETURN_INT32(job_id);
+}
+
+
+static void check_parameter_for_nodes(PG_FUNCTION_ARGS, int node_name_idx, int database_idx, int what_idx,
+    int next_date_idx)
+{
+    if (!superuser() && !isMonitoradmin(GetUserId()))
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("only system/monitor admin can submit multi-node jobs!")));
+
+    if (PG_ARGISNULL(node_name_idx)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Parameter node_name can not be null.")));
+    }
+
+    /* now node name can only be 'ALL_NODE' */
+    if (strcmp(DatumGetCString(PG_GETARG_DATUM(node_name_idx)), PGJOB_TYPE_ALL) != 0 &&
+        strcmp(DatumGetCString(PG_GETARG_DATUM(node_name_idx)), PGJOB_TYPE_CCN) != 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("Parameter node_name can only be 'ALL_NODE' or 'CCN' for multi-node jobs.")));
+    }
+
+    if (PG_ARGISNULL(database_idx)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Parameter Database can not be null.")));
+    }
+
+    if (strcmp(DatumGetCString(PG_GETARG_DATUM(database_idx)), DEFAULT_DATABASE) != 0 &&
+        strcmp(DatumGetCString(PG_GETARG_DATUM(node_name_idx)), PGJOB_TYPE_CCN) != 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Parameter Database can only be 'postgres' except for jobs on CCN.")));
+    }
+
+    (void) get_database_oid(DatumGetCString(PG_GETARG_DATUM(database_idx)), false);
+
+    if (PG_ARGISNULL(what_idx)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Parameter what can not be null.")));
+    }
+
+    if (PG_ARGISNULL(next_date_idx)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Parameter next date can not be null.")));
+    }
+}
+
+static void check_job_interval(PG_FUNCTION_ARGS, Relation rel, int job_id, Datum *job_interval, int interval_idx)
+{
+    if (PG_ARGISNULL(4)) {
+        /* Set interval as "null" if it is null. */
+        *job_interval = CStringGetTextDatum("null");
+    } else {
+        if (0 != pg_strcasecmp(text_to_cstring(DatumGetTextP(*job_interval)), "null") && !IsConnFromCoord()) {
+            /* Check if param interval is valid or not by execute 'select interval'. */
+            check_interval_valid(job_id, rel, *job_interval);
+        }
+    }
 }
 
 /*
- * Description: Add an job to pg_job.
+ * support sumbit job with id on specific CN or DN/ALL_DN/ALL_CN/ALL,
+ * the job record will be inserted to the pg_job table on all Nodes,
+ */
+Datum isubmit_job_on_nodes(PG_FUNCTION_ARGS)
+{
+    Datum job_id = PG_GETARG_INT64(0);
+    Datum node_name = PG_GETARG_DATUM(1);
+    Datum database = PG_GETARG_DATUM(2);
+    Datum what = PG_GETARG_DATUM(3);
+    Datum next_date = PG_GETARG_DATUM(4);
+    Datum job_interval = PG_GETARG_DATUM(5);
+    Relation rel = NULL;
+
+    check_parameter_for_nodes(fcinfo, 1, 2, 3, 4);
+    check_job_id(job_id);
+
+    rel = heap_open(PgJobRelationId, RowExclusiveLock);
+    check_job_interval(fcinfo, rel, job_id, &job_interval, 5);
+
+    insert_pg_job(rel, job_id, next_date, job_interval, 0, database, node_name);
+    insert_pg_job_proc(job_id, what);
+
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+        syn_command_to_other_node_internal(node_name, database, job_id, Job_ISubmit_Node, what, next_date, job_interval,
+            false);
+    }
+#endif
+    heap_close(rel, RowExclusiveLock);
+    PG_RETURN_INT32(job_id);
+}
+
+
+/*
+ * support sumbit tsdb job with id on ALL NODE ,
+ * the job record will be inserted to the pg_job table on all Nodes,
+ */
+Datum isubmit_job_on_nodes_internal(PG_FUNCTION_ARGS)
+{
+    if (PG_ARGISNULL(1) || PG_ARGISNULL(2) || PG_ARGISNULL(3) || PG_ARGISNULL(4) || PG_ARGISNULL(5)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Parameter can not be null.")));
+    }
+    Datum job_id = PG_GETARG_INT64(0);
+    Datum node_name = PG_GETARG_DATUM(1);
+    Datum database = PG_GETARG_DATUM(2);
+    Datum what = PG_GETARG_DATUM(3);
+    Datum next_date = PG_GETARG_DATUM(4);
+    Datum job_interval = PG_GETARG_DATUM(5);
+    Relation rel = NULL;
+
+    check_job_id(job_id);
+
+    rel = heap_open(PgJobRelationId, RowExclusiveLock);
+    check_job_interval(fcinfo, rel, job_id, &job_interval, 5);
+
+    insert_pg_job(rel, job_id, next_date, job_interval, 0, database, node_name);
+    insert_pg_job_proc(job_id, what);
+
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+        syn_command_to_other_node_internal(node_name, database, job_id, Job_ISubmit_Node_Internal, 
+            what, next_date, job_interval, false);
+    }
+#endif
+    heap_close(rel, RowExclusiveLock);
+    PG_RETURN_INT32(job_id);
+}
+
+/*
+ * support sumbit job on specific CN or DN/ALL_DN/ALL_CN/ALL
  *
  * Parameters:
- *	@in what: Task string.
- *	@in next_date: Next execute time.
- *	@in job_interval: Time interval.
- * Returns: Int32
+ *  @in node: specifc node name/ALL_CN/ALL_DN/ALL
+ *  @in database: database name
+ *  @in what: task string
+ *  @in next_data: next execute time.
+ *  @in job_interval: Time interval(seconds)
  */
-Datum submit_job(PG_FUNCTION_ARGS)
+Datum submit_job_on_nodes(PG_FUNCTION_ARGS)
 {
-    Datum what = PG_GETARG_DATUM(0);
-    Datum next_date = PG_GETARG_DATUM(1);
-    Datum job_interval = PG_GETARG_DATUM(2);
+    Datum node_name = PG_GETARG_DATUM(0);
+    Datum database = PG_GETARG_DATUM(1);
+    Datum what = PG_GETARG_DATUM(2);
+    Datum next_date = PG_GETARG_DATUM(3);
+    Datum job_interval = PG_GETARG_DATUM(4);
     uint16 job_id = 0;
     int ret = 0;
     Relation rel = NULL;
 
-    if (PG_ARGISNULL(0)) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Parameter what can not be null.")));
-    }
-
-    if (PG_ARGISNULL(1)) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Parameter next date can not be null.")));
-    }
-
+    check_parameter_for_nodes(fcinfo, 0, 1, 2, 3);
     rel = heap_open(PgJobRelationId, RowExclusiveLock);
 
     /* Alloc valid job_id. */
@@ -993,37 +1202,18 @@ Datum submit_job(PG_FUNCTION_ARGS)
             (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                 errmsg("All 32768 jobids have alloc, and there is no free jobid")));
     }
+    check_job_interval(fcinfo, rel, job_id, &job_interval, 4);
 
-    if (PG_ARGISNULL(2)) {
-        /* Set interval as "null" if it is null. */
-        job_interval = CStringGetTextDatum("null");
-    } else {
-        if (0 != pg_strcasecmp(text_to_cstring(DatumGetTextP(job_interval)), "null")) {
-            /* Check if param interval is valid or not by execute 'select interval'. */
-            check_interval_valid(job_id, rel, job_interval);
-        }
-    }
-
-    /* Insert a job to pg_job. */
-    insert_pg_job(rel, job_id, next_date, job_interval, 0);
-
-    /* Insert job id and what into jog_proc system table. */
+    insert_pg_job(rel, job_id, next_date, job_interval, 0, database, node_name);
     insert_pg_job_proc(job_id, what);
 
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        syn_command_to_other_cn(job_id, Job_ISubmit, what, next_date, job_interval);
+        syn_command_to_other_node_internal(node_name, database, job_id, Job_ISubmit_Node, what,
+            next_date, job_interval, false);
     }
 #endif
-
     heap_close(rel, RowExclusiveLock);
-
-    elog(LOG,
-        "Success to Submit job, job_id: %d, what: %s, next_date: %s, job_interval: %s.",
-        job_id,
-        quote_literal_cstr(text_to_cstring(DatumGetTextP(what))),
-        quote_literal_cstr(DatumGetCString(DirectFunctionCall1(timestamp_out, DatumGetTimestamp(next_date)))),
-        quote_literal_cstr(text_to_cstring(DatumGetTextP(job_interval))));
 
     PG_RETURN_INT32(job_id);
 }
@@ -1034,9 +1224,10 @@ Datum submit_job(PG_FUNCTION_ARGS)
  * Parameters:
  *	@in pg_job: pg_job relation.
  *	@in job_id: Job id.
+ *  @in local: remove job locally if true
  * Returns: void
  */
-static void remove_job_internal(Relation pg_job, int4 job_id, bool ischeck)
+static void remove_job_internal(Relation pg_job, int4 job_id, bool ischeck, bool local)
 {
     HeapTuple tup = NULL;
 
@@ -1047,28 +1238,27 @@ static void remove_job_internal(Relation pg_job, int4 job_id, bool ischeck)
                 errdetail("The scope of jobid should between 1 and %d", JOBID_MAX_NUMBER)));
     }
 
-    tup = SearchSysCache1(PGJOBID, Int64GetDatum(job_id));
+    tup = get_job_tup_from_rel(pg_job, job_id);
     if (!HeapTupleIsValid(tup)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("Can not find job id %d in system table pg_job.", job_id)));
+        return;
     }
 
-    /* If remove job by function remove_job, we should check the permission. */
+    /* If remove job by function job_cancel, we should check the permission. */
     if (ischeck) {
-        check_job_permission(tup);
+        check_job_permission(tup, !is_internal_perf_job(job_id));
     }
 
     simple_heap_delete(pg_job, &tup->t_self);
 
-    ReleaseSysCache(tup);
+    heap_freetuple_ext(tup);
 
     /* Delete from pg_job_proc. */
     delete_job_proc(job_id);
 
 #ifdef ENABLE_MULTIPLE_NODES
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && !local) {
         /* Synchronize remove to other coordinater. */
-        syn_command_to_other_cn(job_id, Job_Remove);
+        syn_command_to_other_node(job_id, Job_Remove);
     }
 #endif
 
@@ -1081,12 +1271,13 @@ static void remove_job_internal(Relation pg_job, int4 job_id, bool ischeck)
  * Parameters:
  *	@in oid: Database Oid or User Oid.
  *	@in oidFlag: Identify Database Oid or User Oid.
+ *  @in local: remove job locally if true
  * Returns: void
  */
-void remove_job_by_oid(const char* objname, Delete_Pgjob_Oid oidFlag)
+void remove_job_by_oid(const char* objname, Delete_Pgjob_Oid oidFlag, bool local, Oid jobid)
 {
     Relation pg_job_tbl = NULL;
-    HeapScanDesc scan = NULL;
+    TableScanDesc scan = NULL;
     HeapTuple tuple = NULL;
 
     pg_job_tbl = heap_open(PgJobRelationId, ExclusiveLock);
@@ -1095,8 +1286,9 @@ void remove_job_by_oid(const char* objname, Delete_Pgjob_Oid oidFlag)
     while (HeapTupleIsValid(tuple = heap_getnext(scan, ForwardScanDirection))) {
         Form_pg_job pg_job = (Form_pg_job)GETSTRUCT(tuple);
         if ((oidFlag == DbOid && 0 == strcmp(NameStr(pg_job->dbname), objname)) ||
-            (oidFlag == UserOid && 0 == strcmp(NameStr(pg_job->log_user), objname))) {
-            remove_job_internal(pg_job_tbl, pg_job->job_id, false);
+            (oidFlag == UserOid && 0 == strcmp(NameStr(pg_job->log_user), objname)) ||
+            (oidFlag == RelOid && pg_job->job_id == jobid)) {
+            remove_job_internal(pg_job_tbl, pg_job->job_id, false, local);
         }
     }
 
@@ -1111,18 +1303,20 @@ void remove_job_by_oid(const char* objname, Delete_Pgjob_Oid oidFlag)
  *	@in job_id: Job id.
  * Returns: void
  */
-void remove_job(PG_FUNCTION_ARGS)
+Datum job_cancel(PG_FUNCTION_ARGS)
 {
     int64 job_id = PG_GETARG_INT64(0);
     Relation relation = NULL;
     MemoryContext current_context = CurrentMemoryContext;
     bool ischeck = (IS_PGXC_COORDINATOR && !IsConnFromCoord()) || IS_SINGLE_NODE;
+    bool is_perf_job = is_internal_perf_job(job_id);
+    LOCKMODE lock_mode = is_perf_job ? ExclusiveLock : RowExclusiveLock;
 
-    relation = heap_open(PgJobRelationId, RowExclusiveLock);
+    relation = heap_open(PgJobRelationId, lock_mode);
 
     PG_TRY();
     {
-        remove_job_internal(relation, job_id, ischeck);
+        remove_job_internal(relation, job_id, ischeck, false);
     }
     PG_CATCH();
     {
@@ -1133,7 +1327,7 @@ void remove_job(PG_FUNCTION_ARGS)
         edata = CopyErrorData();
         FlushErrorState();
 
-        heap_close(relation, RowExclusiveLock);
+        heap_close(relation, lock_mode);
 
         (void)MemoryContextSwitchTo(ecxt);
         ereport(ERROR,
@@ -1143,7 +1337,8 @@ void remove_job(PG_FUNCTION_ARGS)
     }
     PG_END_TRY();
 
-    heap_close(relation, RowExclusiveLock);
+    heap_close(relation, is_perf_job ? NoLock : lock_mode);
+    PG_RETURN_VOID();
 }
 
 /*
@@ -1157,10 +1352,57 @@ void RemoveJobById(Oid objectId)
     bool ischeck = (IS_PGXC_COORDINATOR && !IsConnFromCoord()) || IS_SINGLE_NODE;
 
     relation = heap_open(PgJobRelationId, RowExclusiveLock);
-
     PG_TRY();
     {
-        remove_job_internal(relation, job_id, ischeck);
+        if (job_id <= InvalidJobId || job_id > JOBID_MAX_NUMBER) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("Invalid job_id: %ld", job_id),
+                    errdetail("The scope of jobid should between 1 and %d", JOBID_MAX_NUMBER)));
+        }
+        TableScanDesc scan = NULL;
+        char* myrolename = NULL;
+        HeapTuple tuple = NULL;
+        HeapTuple cp_tuple = NULL;
+        scan = tableam_scan_begin(relation, SnapshotNow, 0, NULL);
+        while (HeapTupleIsValid(tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
+            Form_pg_job job = (Form_pg_job)GETSTRUCT(tuple);
+            if (job->job_id == job_id) {
+                myrolename = GetUserNameFromId(GetUserId());
+                /* Database Security:  Support separation of privilege.*/
+                if (!(superuser_arg(GetUserId()) || systemDBA_arg(GetUserId())) &&
+                    0 != strcmp(NameStr(job->log_user), myrolename)) {
+                    tableam_scan_end(scan);
+                    ereport(ERROR,
+                        (errcode(ERRCODE_UNDEFINED_OBJECT),
+                            errmsg("Permission for current user to get this job. current_user: %s, job_user: %s, job_id: %ld",
+                                myrolename, NameStr(job->log_user), job->job_id)));
+                }
+                cp_tuple = heap_copytuple(tuple);
+                break;
+            }
+        }
+        heap_endscan(scan);
+        if (!HeapTupleIsValid(cp_tuple)) {
+            heap_close(relation, RowExclusiveLock);
+            return;
+        }
+        /* If remove job by function remove_job, we should check the permission. */
+        if (ischeck) {
+            check_job_permission(cp_tuple, !is_internal_perf_job(job_id));
+        }
+        simple_heap_delete(relation, &cp_tuple->t_self);
+        heap_freetuple_ext(cp_tuple);
+        /* Delete from pg_job_proc.*/
+        delete_job_proc(job_id);
+
+    #ifdef ENABLE_MULTIPLE_NODES
+        if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+            /* Synchronize remove to other coordinater. */
+            syn_command_to_other_node(job_id, Job_Remove);
+        }
+    #endif
+        elog(LOG, "Success to remove job, job_id: %ld.", job_id);
     }
     PG_CATCH();
     {
@@ -1184,7 +1426,6 @@ void RemoveJobById(Oid objectId)
     heap_close(relation, RowExclusiveLock);
 }
 
-
 /*
  * Description: Update job status to aborted('d') or successfully('s').
  *
@@ -1193,11 +1434,14 @@ void RemoveJobById(Oid objectId)
  *	@in next_date: Next execute time.
  * Returns: void
  */
-void broken_job_state(PG_FUNCTION_ARGS)
+
+//int64 job_id, bool finish, Datum next_date
+void job_finish(PG_FUNCTION_ARGS)
 {
     int64 job_id = PG_GETARG_INT64(0);
-    bool broken = PG_GETARG_BOOL(1);
-    Datum next_date = PG_GETARG_DATUM(2);
+    bool finished = PG_GETARG_BOOL(1);
+    Datum next_time = PG_GETARG_DATUM(2);
+
     HeapTuple tup = NULL;
     HeapTuple newtuple = NULL;
     Datum values[Natts_pg_job], oldvalues[Natts_pg_job];
@@ -1205,14 +1449,21 @@ void broken_job_state(PG_FUNCTION_ARGS)
     bool replaces[Natts_pg_job];
     errno_t rc = 0;
     Relation relation = NULL;
+    bool is_perf_job = is_internal_perf_job(job_id);
+    /* using ExclusiveLock to avoid 'd' to be overwritten by Job Worker */
+    LOCKMODE lock_mode = is_perf_job ? ExclusiveLock : RowExclusiveLock;
 
     check_job_id(job_id);
-    tup = get_job_tup(job_id);
 
-    check_job_permission(tup);
+    /* Update pg_job system table.*/
+    relation = heap_open(PgJobRelationId, lock_mode);
 
-    /* Update pg_job system table. */
-    relation = heap_open(PgJobRelationId, RowExclusiveLock);
+    tup = get_job_tup_from_rel(relation, job_id);
+    if (!HeapTupleIsValid(tup)) {
+        heap_close(relation, lock_mode);
+        return;
+    }
+    check_job_permission(tup, !is_perf_job);
 
     get_job_values(job_id, tup, relation, oldvalues, oldvisnulls);
 
@@ -1228,10 +1479,10 @@ void broken_job_state(PG_FUNCTION_ARGS)
     if (!PG_ARGISNULL(1)) {
         replaces[Anum_pg_job_job_status - 1] = true;
     } else {
-        broken = (PGJOB_ABORT_STATUS == DatumGetChar(oldvalues[Anum_pg_job_job_status - 1]) ? true : false);
+        finished = (PGJOB_ABORT_STATUS == DatumGetChar(oldvalues[Anum_pg_job_job_status - 1]) ? true : false);
     }
 
-    if (broken) {
+    if (finished) {
         replaces[Anum_pg_job_next_run_date - 1] = true;
         values[Anum_pg_job_job_status - 1] = CharGetDatum(PGJOB_ABORT_STATUS);
         values[Anum_pg_job_next_run_date - 1] = DirectFunctionCall2(to_timestamp,
@@ -1239,9 +1490,9 @@ void broken_job_state(PG_FUNCTION_ARGS)
             DirectFunctionCall1(textin, CStringGetDatum("yyyy-mm-dd")));
     } else {
         values[Anum_pg_job_job_status - 1] = CharGetDatum(PGJOB_SUCC_STATUS);
-        if (!PG_ARGISNULL(2)) {
+        if (next_time != 0) {
             replaces[Anum_pg_job_next_run_date - 1] = true;
-            values[Anum_pg_job_next_run_date - 1] = next_date;
+            values[Anum_pg_job_next_run_date - 1] = next_time;
         }
     }
 
@@ -1250,23 +1501,23 @@ void broken_job_state(PG_FUNCTION_ARGS)
     simple_heap_update(relation, &newtuple->t_self, newtuple);
 
     CatalogUpdateIndexes(relation, newtuple);
-    ReleaseSysCache(tup);
+    heap_freetuple_ext(tup);
     heap_freetuple_ext(newtuple);
 
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        /* Synchronize broken to other coordinater. */
-        syn_command_to_other_cn(job_id, Job_Broken, 0, next_date, 0, broken);
+        /* Synchronize broken to other nodes. */
+        syn_command_to_other_node(job_id, Job_Finish, 0, next_time, 0, finished);
     }
 #endif
 
-    heap_close(relation, RowExclusiveLock);
+    heap_close(relation, is_perf_job ? NoLock : lock_mode);
 
     elog(LOG,
-        "Success to Broken job, job_id: %ld, broken: %s, next_date: %s.",
+        "Success to Finish job, job_id: %ld, finished: %s, next_time: %s.",
         job_id,
-        booltostr(broken),
-        quote_literal_cstr(DatumGetCString(DirectFunctionCall1(timestamp_out, DatumGetTimestamp(next_date)))));
+        booltostr(finished),
+        quote_literal_cstr(DatumGetCString(DirectFunctionCall1(timestamp_out, DatumGetTimestamp(next_time)))));
 }
 
 /*
@@ -1330,42 +1581,46 @@ static void update_job_proc_what(int4 job_id, Datum task)
  *	@in interval_time: Interval.
  * Returns: void
  */
-void change_job(PG_FUNCTION_ARGS)
+void job_update(PG_FUNCTION_ARGS)
 {
     int64 job_id = PG_GETARG_INT64(0);
-    Datum what = PG_GETARG_DATUM(1);
-    Datum next_date = PG_GETARG_DATUM(2);
-    Datum interval_time = PG_GETARG_DATUM(3);
+    Datum next_time = PG_GETARG_DATUM(1);
+    Datum interval_time = PG_GETARG_DATUM(2);
+    Datum content = PG_GETARG_DATUM(3);
+    if (PG_ARGISNULL(0)) {
+        // wrong input
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Parameter id for job_update is unexpected.")));
+    }
     Relation relation = NULL;
     HeapTuple tup = NULL;
-
-    if (job_id <= InvalidJobId || job_id > JOBID_MAX_NUMBER) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("Invalid job_id: %ld", job_id),
-                errdetail("The scope of jobid should between 1 and %d", JOBID_MAX_NUMBER)));
-    }
-
     /* Don't change any parameter if all are null. */
     if (PG_ARGISNULL(1) && PG_ARGISNULL(2) && PG_ARGISNULL(3)) {
         elog(LOG, "All parameters are NULL for Change, then leave the values.");
         return;
     }
 
+
+    check_job_id(job_id);
+
     tup = get_job_tup(job_id);
+    if (!HeapTupleIsValid(tup)) {
+        return;
+    }
 
     check_job_permission(tup);
 
-    /* Update pg_job system table. */
+    /* Update pg_job system table.*/
     relation = heap_open(PgJobRelationId, RowExclusiveLock);
 
-    if (!PG_ARGISNULL(1)) {
-        /* Update pg_job_proc if what is not null. */
-        update_job_proc_what(job_id, what);
+    if (!PG_ARGISNULL(3)) {
+        /* Update pg_job_proc if content is not null.*/
+        update_job_proc_what(job_id, content);
     }
 
-    /* Update next_date or interval if either of them is not NULL. */
-    if (!PG_ARGISNULL(2) || !PG_ARGISNULL(3)) {
+    /* Update next_time or interval_time if either of them is not NULL. */
+    if (!PG_ARGISNULL(1) || !PG_ARGISNULL(2)) {
         HeapTuple newtuple = NULL;
         Datum values[Natts_pg_job];
         bool nulls[Natts_pg_job];
@@ -1381,13 +1636,14 @@ void change_job(PG_FUNCTION_ARGS)
         rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
         securec_check_c(rc, "\0", "\0");
 
-        if (!PG_ARGISNULL(2)) {
+        if (!PG_ARGISNULL(1)) {
             replaces[Anum_pg_job_next_run_date - 1] = true;
-            values[Anum_pg_job_next_run_date - 1] = next_date;
+            values[Anum_pg_job_next_run_date - 1] = next_time;
         }
 
-        if (!PG_ARGISNULL(3)) {
-            if (0 != pg_strcasecmp(text_to_cstring(DatumGetTextP(interval_time)), "null")) {
+        if (!PG_ARGISNULL(2)) {
+            if (0 != pg_strcasecmp(text_to_cstring(DatumGetTextP(interval_time)), "null")
+                && !IsConnFromCoord()) {
                 /* Check if param interval is valid or not by execute 'select interval'. */
                 check_interval_valid(job_id, relation, interval_time);
             }
@@ -1403,204 +1659,28 @@ void change_job(PG_FUNCTION_ARGS)
         CatalogUpdateIndexes(relation, newtuple);
         ReleaseSysCache(tup);
         heap_freetuple_ext(newtuple);
-    }
-
-#ifdef ENABLE_MULTIPLE_NODES
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        /* Synchronize broken to other coordinater. */
-        syn_command_to_other_cn(job_id, Job_Change, what, next_date, interval_time);
-    }
-#endif
-
-    heap_close(relation, RowExclusiveLock);
-
-    elog(LOG,
-        "Success to Change job, job_id: %ld, what: %s, next_date: %s, interval_time: %s.",
-        job_id,
-        what == 0 ? "null" : quote_literal_cstr(text_to_cstring(DatumGetTextP(what))),
-        next_date == 0
-            ? "null"
-            : quote_literal_cstr(DatumGetCString(DirectFunctionCall1(timestamp_out, DatumGetTimestamp(next_date)))),
-        interval_time == 0 ? "null" : quote_literal_cstr(text_to_cstring(DatumGetTextP(interval_time))));
-}
-
-/*
- * Description: Update job what.
- *
- * Parameters:
- *	@in job_id: Job id.
- *	@in what: Task.
- * Returns: void
- */
-void update_what(PG_FUNCTION_ARGS)
-{
-    int64 job_id = PG_GETARG_INT64(0);
-    Datum what = PG_GETARG_DATUM(1);
-    HeapTuple tup = NULL;
-
-    check_job_id(job_id);
-
-    if (PG_ARGISNULL(1)) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Parameter what can not be null.")));
-    }
-
-    tup = get_job_tup(job_id);
-
-    check_job_permission(tup);
-
-    ReleaseSysCache(tup);
-
-    update_job_proc_what(job_id, what);
-
-#ifdef ENABLE_MULTIPLE_NODES
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        /* Synchronize broken to other coordinater. */
-        syn_command_to_other_cn(job_id, Job_What, what);
-    }
-#endif
-
-    elog(LOG,
-        "Success to Update what of job, job_id: %ld, what: %s.",
-        job_id,
-        quote_literal_cstr(text_to_cstring(DatumGetTextP(what))));
-}
-
-/*
- * Description: Update job next reun date.
- *
- * Parameters:
- *	@in job_id: Jon id.
- *	@in next_date: Next run time.
- * Returns: void
- */
-void update_next_date(PG_FUNCTION_ARGS)
-{
-    int64 job_id = PG_GETARG_INT64(0);
-    Datum next_date = PG_GETARG_DATUM(1);
-    Relation relation;
-    HeapTuple tup = NULL;
-    HeapTuple newtuple = NULL;
-    Datum values[Natts_pg_job];
-    bool nulls[Natts_pg_job];
-    bool replaces[Natts_pg_job];
-    errno_t rc = 0;
-
-    check_job_id(job_id);
-
-    if (PG_ARGISNULL(1)) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Parameter next date can not be null.")));
-    }
-
-    tup = get_job_tup(job_id);
-
-    check_job_permission(tup);
-
-    relation = heap_open(PgJobRelationId, RowExclusiveLock);
-
-    rc = memset_s(values, sizeof(values), 0, sizeof(values));
-    securec_check(rc, "\0", "\0");
-
-    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
-    securec_check_c(rc, "\0", "\0");
-
-    rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
-    securec_check_c(rc, "\0", "\0");
-
-    replaces[Anum_pg_job_next_run_date - 1] = true;
-    values[Anum_pg_job_next_run_date - 1] = next_date;
-
-    newtuple = heap_modify_tuple(tup, RelationGetDescr(relation), values, nulls, replaces);
-    simple_heap_update(relation, &newtuple->t_self, newtuple);
-
-    CatalogUpdateIndexes(relation, newtuple);
-    ReleaseSysCache(tup);
-    heap_freetuple_ext(newtuple);
-
-#ifdef ENABLE_MULTIPLE_NODES
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        /* Synchronize broken to other coordinater. */
-        syn_command_to_other_cn(job_id, Job_Next_date, 0, next_date);
-    }
-#endif
-
-    heap_close(relation, RowExclusiveLock);
-
-    elog(LOG,
-        "Success to Update next_date of job, job_id: %ld, next_date: %s.",
-        job_id,
-        quote_literal_cstr(DatumGetCString(DirectFunctionCall1(timestamp_out, DatumGetTimestamp(next_date)))));
-}
-
-/*
- * Description: Update job date interval.
- *
- * Parameters:
- *	@in job_id: Job id.
- *	@in interval_date: Date interval.
- * Returns: void
- */
-void update_interval_date(PG_FUNCTION_ARGS)
-{
-    int64 job_id = PG_GETARG_INT64(0);
-    Datum interval_date = PG_GETARG_DATUM(1);
-    Relation relation;
-    HeapTuple tup = NULL;
-    HeapTuple newtuple = NULL;
-    Datum values[Natts_pg_job];
-    bool nulls[Natts_pg_job];
-    bool replaces[Natts_pg_job];
-    errno_t rc = 0;
-
-    check_job_id(job_id);
-    tup = get_job_tup(job_id);
-
-    check_job_permission(tup);
-
-    relation = heap_open(PgJobRelationId, RowExclusiveLock);
-
-    if (PG_ARGISNULL(1)) {
-        /* Set interval as "null" if it is null. */
-        interval_date = CStringGetTextDatum("null");
     } else {
-        if (0 != pg_strcasecmp(text_to_cstring(DatumGetTextP(interval_date)), "null")) {
-            /* Check if param interval is valid or not by execute 'select interval'. */
-            check_interval_valid(job_id, relation, interval_date);
-        }
+        ReleaseSysCache(tup);
     }
-
-    rc = memset_s(values, sizeof(values), 0, sizeof(values));
-    securec_check(rc, "\0", "\0");
-
-    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
-    securec_check_c(rc, "\0", "\0");
-
-    rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
-    securec_check_c(rc, "\0", "\0");
-
-    replaces[Anum_pg_job_interval - 1] = true;
-    values[Anum_pg_job_interval - 1] = interval_date;
-
-    newtuple = heap_modify_tuple(tup, RelationGetDescr(relation), values, nulls, replaces);
-    simple_heap_update(relation, &newtuple->t_self, newtuple);
-
-    CatalogUpdateIndexes(relation, newtuple);
-    ReleaseSysCache(tup);
-    heap_freetuple_ext(newtuple);
 
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        /* Synchronize broken to other coordinater. */
-        syn_command_to_other_cn(job_id, Job_Interval, 0, 0, interval_date);
+        /* Synchronize broken to other nodes. */
+        syn_command_to_other_node(job_id, Job_Update, content, next_time, interval_time);
     }
 #endif
-
     heap_close(relation, RowExclusiveLock);
 
     elog(LOG,
-        "Success to Update interval of job, job_id: %ld, interval: %s.",
+        "Success to Update job, job_id: %ld, content: %s, next_time: %s, interval_time: %s.",
         job_id,
-        quote_literal_cstr(text_to_cstring(DatumGetTextP(interval_date))));
+        0 == content ? "null" : quote_literal_cstr(text_to_cstring(DatumGetTextP(content))),
+        0 == next_time
+            ? "null"
+            : quote_literal_cstr(DatumGetCString(DirectFunctionCall1(timestamp_out, DatumGetTimestamp(next_time)))),
+        0 == interval_time ? "null" : quote_literal_cstr(text_to_cstring(DatumGetTextP(interval_time))));
 }
+
 
 /*
  * Description: Check job status is 'r' and update to 'f' when start job scheduler thread
@@ -1610,7 +1690,7 @@ void update_interval_date(PG_FUNCTION_ARGS)
 void update_run_job_to_fail()
 {
     Relation pg_job_tbl = NULL;
-    HeapScanDesc scan = NULL;
+    TableScanDesc scan = NULL;
     HeapTuple tuple = NULL;
     HeapTuple newtuple = NULL;
     Datum values[Natts_pg_job], old_value[Natts_pg_job];
@@ -1670,20 +1750,55 @@ void update_run_job_to_fail()
                 visnull[Anum_pg_job_last_suc_date - 1] ? 0 : old_value[Anum_pg_job_last_suc_date - 1],
                 visnull[Anum_pg_job_this_run_date - 1] ? 0 : old_value[Anum_pg_job_this_run_date - 1],
                 values[Anum_pg_job_next_run_date - 1],
-                values[Anum_pg_job_failure_count - 1]);
+                values[Anum_pg_job_failure_count - 1],
+                values[Anum_pg_job_node_name - 1]);
 
             /*
              * If update job status in local success and only synchronize to other coordinator fail,
              * we should consider the worker success. Because it will result in job scheduler thread
              * start failed.
              */
-            update_pg_job_on_remote(update_query, pg_job->job_id, current_context);
-            pfree_ext(update_query);
+            if (update_query != NULL) {
+                update_pg_job_on_remote(update_query, pg_job->job_id, current_context);
+                pfree_ext(update_query);
+            }
         }
     }
 
     heap_endscan(scan);
     heap_close(pg_job_tbl, ExclusiveLock);
+}
+
+/*
+ * Used in tsdb. Generate a random job id. pg_job is checked to ensure the generated id is not conflicted.
+ * CAUTION: the function only tries JOBID_MAX_NUMBER times. So if there have been a lot of jobs in pg_job,
+ * the function is likely to fail, although there is still valid id to use.
+ */
+static int get_random_job_id() 
+{
+    int job_id = gs_random() % JOBID_MAX_NUMBER;
+    HeapTuple tup = NULL;
+    uint32 loop_count = 0;
+    while (loop_count < JOBID_MAX_NUMBER) {
+        if (likely(job_id > 0)) {
+            tup = SearchSysCache1(PGJOBID, Int64GetDatum(job_id));
+            /* Find a invalid jobid. */
+            if (!HeapTupleIsValid(tup)) {
+                break;
+            }
+            loop_count++;
+            ReleaseSysCache(tup);
+        }
+        job_id = gs_random() % JOBID_MAX_NUMBER;
+    }
+
+    if (loop_count == JOBID_MAX_NUMBER) {
+        ereport(LOG,
+            (errmodule(MOD_TIMESERIES), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Cannot find a valid job_id randomly, try to search one by one.")));
+        return 0;
+    }
+    return job_id;
 }
 
 /*
@@ -1693,8 +1808,13 @@ void update_run_job_to_fail()
  *	@in pusJobId: Return job id.
  * Returns: int
  */
-static int jobid_alloc(uint16* pusJobId)
+int jobid_alloc(uint16* pusJobId)
 {
+    int job_id = get_random_job_id();
+    if (job_id != 0) {
+        *pusJobId = job_id;
+        return JOBID_ALLOC_OK;
+    }
     HeapTuple tup = NULL;
 
     for (int job_id = 1; job_id <= JOBID_MAX_NUMBER; job_id++) {
@@ -1718,10 +1838,9 @@ static int jobid_alloc(uint16* pusJobId)
  *	@in tuple: pg_job tuple.
  * Returns: void
  */
-static void check_job_permission(HeapTuple tuple)
+void check_job_permission(HeapTuple tuple, bool check_running)
 {
-    char *mydbname = NULL;
-    char *myrolename = NULL;
+    char *mydbname = NULL, *myrolename = NULL;
     Form_pg_job job = NULL;
 
     job = (Form_pg_job)GETSTRUCT(tuple);
@@ -1729,7 +1848,6 @@ static void check_job_permission(HeapTuple tuple)
     myrolename = GetUserNameFromId(GetUserId());
     if (!(superuser_arg(GetUserId()) || systemDBA_arg(GetUserId())) &&
         0 != strcmp(NameStr(job->log_user), myrolename)) {
-        ReleaseSysCache(tuple);
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_OPERATION),
                 errmsg("Permission for current user to operate the job. current_user: %s, job_user: %s, job_id: %ld",
@@ -1738,20 +1856,25 @@ static void check_job_permission(HeapTuple tuple)
                     job->job_id)));
     }
 
-    mydbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-    if (mydbname && 0 != strcmp(NameStr(job->dbname), mydbname)) {
-        ReleaseSysCache(tuple);
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_OPERATION),
-                errmsg(
-                    "Permission for current database to operate the job. current_dboid: %s, job_dboid: %s, job_id: %ld",
-                    mydbname,
-                    NameStr(job->dbname),
-                    job->job_id)));
+    Oid dboid = get_database_oid(NameStr(job->dbname), true);
+    if (OidIsValid(dboid)) {
+        mydbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
+        if (mydbname && 0 != strcmp(NameStr(job->dbname), mydbname)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_OPERATION),
+                    errmsg(
+                        "Permission for current database to operate the job. current_dboid: %s, job_dboid: %s, job_id: %ld",
+                        mydbname,
+                        NameStr(job->dbname),
+                        job->job_id)));
+        }
+    } else {
+        /* skip permission check since the database of job does not exist */
+        ereport(LOG, (errcode(ERRCODE_UNDEFINED_DATABASE),
+                    errmsg("database \"%s\" of job %ld does not exist", NameStr(job->dbname), job->job_id)));
     }
 
-    if (job->job_status == PGJOB_RUN_STATUS) {
-        ReleaseSysCache(tuple);
+    if (check_running && job->job_status == PGJOB_RUN_STATUS) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_STATUS),
                 errmsg("Can not operate this job due to running status, job_id: %ld. ", job->job_id)));
@@ -1830,18 +1953,20 @@ static void elog_job_detail(int4 job_id, char* what, Update_Pgjob_Status status,
  * Returns: char*
  */
 static char* query_with_update_job(int4 job_id, Datum job_status, int64 pid, Datum last_start_date, Datum last_end_date,
-    Datum last_suc_date, Datum this_run_date, Datum next_run_date, int2 failure_count)
+    Datum last_suc_date, Datum this_run_date, Datum next_run_date, int2 failure_count, Datum node_name)
 {
     StringInfoData queryString;
 
-    if (!IS_PGXC_COORDINATOR) {
+    if (!IS_PGXC_COORDINATOR ||
+        node_name == 0 ||
+        strcmp(DatumGetName(node_name)->data, PGJOB_TYPE_ALL) == 0 ||
+        strcmp(DatumGetName(node_name)->data, PGJOB_TYPE_ALL_CN) == 0 ||
+        strcmp(DatumGetName(node_name)->data, PGJOB_TYPE_ALL_DN) == 0) {
         /*
-         * in cluster mode, we should sync job status to other coordinator, so
-         * we construct query with update the job info, and send to remote
-         * coordinator to execte. however in single node mode we skip this
-         * step, and just renturn null here
+         * ALL_NODE/ALL_CN/ALL_DN won't sync status to other,
+         * one CN only sync job status to other CNs(specfic job),
+         * DN won't sync job status to others.
          */
-        Assert(IS_SINGLE_NODE);
         return NULL;
     }
 
@@ -1871,3 +1996,65 @@ static char* query_with_update_job(int4 job_id, Datum job_status, int64 pid, Dat
     return queryString.data;
 }
 
+/*
+ * check the job is internal perf job or not.
+ */
+static bool is_internal_perf_job(int64 job_id)
+{
+    bool result = false;
+    const char *what = get_job_what(job_id, false);
+    if (what != NULL) {
+        result = strcasestr(what, " capture_view_to_json(") != NULL;
+        pfree_ext(what);
+    }
+
+    return result;
+}
+
+static bool is_job_aborted(Datum job_status)
+{
+    return (DatumGetChar(job_status) == PGJOB_ABORT_STATUS);
+}
+
+static HeapTuple get_job_tup_from_rel(Relation job_rel, int job_id)
+{
+    TableScanDesc scan = NULL;
+    char* myrolename = NULL;
+    HeapTuple tuple = NULL;
+    HeapTuple cp_tuple = NULL;
+
+    scan = tableam_scan_begin(job_rel, SnapshotNow, 0, NULL);
+    while (HeapTupleIsValid(tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
+        Form_pg_job job = (Form_pg_job)GETSTRUCT(tuple);
+
+        if (job->job_id == job_id) {
+            myrolename = GetUserNameFromId(GetUserId());
+            /* Database Security:  Support separation of privilege.*/
+            if (!(superuser_arg(GetUserId()) || systemDBA_arg(GetUserId())) &&
+                0 != strcmp(NameStr(job->log_user), myrolename)) {
+                heap_endscan(scan);
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_OBJECT),
+                        errmsg("Permission for current user to get this job. current_user: %s, job_user: %s, job_id: %ld",
+                            myrolename,
+                            NameStr(job->log_user),
+                            job->job_id)));
+            }
+            cp_tuple = heap_copytuple(tuple);
+            break;
+        }
+    }
+
+    tableam_scan_end(scan);
+    if (cp_tuple != NULL) {
+        return cp_tuple;
+    }
+
+    /* in old version pg_job, job can be existed in CN, but not DN */
+    if (IS_PGXC_DATANODE && IsConnFromCoord())
+        return NULL;
+
+    ereport(ERROR,
+        (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("Can not find job id %d in system table pg_job.", job_id)));
+    return NULL;
+}

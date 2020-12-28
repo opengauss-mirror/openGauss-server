@@ -6,13 +6,13 @@
 SET client_min_messages TO 'error';
 DROP ROLE IF EXISTS foreign_data_user, regress_test_role, regress_test_role2, regress_test_role_super, regress_test_indirect, unpriviled_role;
 RESET client_min_messages;
-CREATE ROLE foreign_data_user PASSWORD 'ttest@123' LOGIN SYSADMIN;
+CREATE ROLE foreign_data_user PASSWORD 'gauss@123' LOGIN SYSADMIN;
 SET SESSION AUTHORIZATION 'foreign_data_user';
-CREATE ROLE regress_test_role PASSWORD 'ttest@123';
-CREATE ROLE regress_test_role2 PASSWORD 'ttest@123';
-CREATE ROLE regress_test_role_super PASSWORD 'ttest@123' SYSADMIN;
-CREATE ROLE regress_test_indirect PASSWORD 'ttest@123';
-CREATE ROLE unprivileged_role PASSWORD 'ttest@123';
+CREATE ROLE regress_test_role PASSWORD 'gauss@123';
+CREATE ROLE regress_test_role2 PASSWORD 'gauss@123';
+CREATE ROLE regress_test_role_super PASSWORD 'gauss@123' SYSADMIN;
+CREATE ROLE regress_test_indirect PASSWORD 'gauss@123';
+CREATE ROLE unprivileged_role PASSWORD 'gauss@123';
 CREATE FOREIGN DATA WRAPPER dummy;
 COMMENT ON FOREIGN DATA WRAPPER dummy IS 'useless';
 CREATE FOREIGN DATA WRAPPER postgresql VALIDATOR postgresql_fdw_validator;
@@ -74,7 +74,7 @@ CREATE FOREIGN DATA WRAPPER foo OPTIONS (testing '1', another '2');
 (3 rows)
 
 DROP FOREIGN DATA WRAPPER foo;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 CREATE FOREIGN DATA WRAPPER foo; -- ERROR
 ERROR:  permission denied to create foreign-data wrapper "foo"
 HINT:  Must be superuser to create a foreign-data wrapper.
@@ -143,11 +143,11 @@ ERROR:  option "b" provided more than once
  postgresql | foreign_data_user | -       | postgresql_fdw_validator |                   |                       | 
 (3 rows)
 
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 ALTER FOREIGN DATA WRAPPER foo OPTIONS (ADD d '5');         -- ERROR
 ERROR:  permission denied to alter foreign-data wrapper "foo"
 HINT:  Must be superuser to alter a foreign-data wrapper.
-SET ROLE regress_test_role_super PASSWORD 'ttest@123';
+SET ROLE regress_test_role_super PASSWORD 'gauss@123';
 ALTER FOREIGN DATA WRAPPER foo OPTIONS (ADD d '5');
 \dew+
                                                     List of foreign-data wrappers
@@ -163,7 +163,7 @@ ERROR:  permission denied to change owner of foreign-data wrapper "foo"
 HINT:  The owner of a foreign-data wrapper must be a superuser.
 ALTER FOREIGN DATA WRAPPER foo OWNER TO regress_test_role_super;
 ALTER ROLE regress_test_role_super NOSYSADMIN;
-SET ROLE regress_test_role_super PASSWORD 'ttest@123';
+SET ROLE regress_test_role_super PASSWORD 'gauss@123';
 ALTER FOREIGN DATA WRAPPER foo OPTIONS (ADD e '6');         -- ERROR
 ERROR:  permission denied to alter foreign-data wrapper "foo"
 HINT:  Must be superuser to alter a foreign-data wrapper.
@@ -205,7 +205,7 @@ NOTICE:  foreign-data wrapper "nonexistent" does not exist, skipping
 DROP ROLE regress_test_role_super;                          -- ERROR
 ERROR:  role "regress_test_role_super" cannot be dropped because some objects depend on it
 DETAIL:  owner of foreign-data wrapper foo
-SET ROLE regress_test_role_super PASSWORD 'ttest@123';
+SET ROLE regress_test_role_super PASSWORD 'gauss@123';
 DROP FOREIGN DATA WRAPPER foo;
 RESET ROLE;
 DROP ROLE regress_test_role_super;
@@ -249,7 +249,7 @@ ERROR:  cannot drop foreign-data wrapper foo because other objects depend on it
 DETAIL:  server s1 depends on foreign-data wrapper foo
 user mapping for foreign_data_user depends on server s1
 HINT:  Use DROP ... CASCADE to drop the dependent objects too.
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 DROP FOREIGN DATA WRAPPER foo CASCADE;                      -- ERROR
 ERROR:  must be owner of foreign-data wrapper foo
 RESET ROLE;
@@ -308,12 +308,12 @@ CREATE SERVER s8 FOREIGN DATA WRAPPER postgresql OPTIONS (host 'localhost', dbna
  s8   | foreign_data_user | postgresql           |                   |        |         | (host 'localhost', dbname 's8db') | 
 (8 rows)
 
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 CREATE SERVER t1 FOREIGN DATA WRAPPER foo;                 -- ERROR: no usage on FDW
 ERROR:  permission denied for foreign-data wrapper foo
 RESET ROLE;
 GRANT USAGE ON FOREIGN DATA WRAPPER foo TO regress_test_role;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 CREATE SERVER t1 FOREIGN DATA WRAPPER foo;
 RESET ROLE;
 \des+
@@ -333,12 +333,12 @@ RESET ROLE;
 
 REVOKE USAGE ON FOREIGN DATA WRAPPER foo FROM regress_test_role;
 GRANT USAGE ON FOREIGN DATA WRAPPER foo TO regress_test_indirect;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 CREATE SERVER t2 FOREIGN DATA WRAPPER foo;                 -- ERROR
 ERROR:  permission denied for foreign-data wrapper foo
 RESET ROLE;
 GRANT regress_test_indirect TO regress_test_role;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 CREATE SERVER t2 FOREIGN DATA WRAPPER foo;
 \des+
                                                          List of foreign servers
@@ -388,7 +388,7 @@ GRANT USAGE ON FOREIGN SERVER s6 TO regress_test_role2 WITH GRANT OPTION;
  t2   | regress_test_role | foo                  |                                         |        |         |                                   | 
 (10 rows)
 
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 ALTER SERVER s1 VERSION '1.1';                              -- ERROR
 ERROR:  must be owner of foreign server s1
 ALTER SERVER s1 OWNER TO regress_test_role;                 -- ERROR
@@ -396,7 +396,7 @@ ERROR:  must be owner of foreign server s1
 RESET ROLE;
 ALTER SERVER s1 OWNER TO regress_test_role;
 GRANT regress_test_role2 TO regress_test_role;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 ALTER SERVER s1 VERSION '1.1';
 ALTER SERVER s1 OWNER TO regress_test_role2;                -- ERROR
 ERROR:  permission denied for foreign-data wrapper foo
@@ -405,16 +405,16 @@ ALTER SERVER s8 OPTIONS (foo '1');                          -- ERROR option vali
 ERROR:  invalid option "foo"
 HINT:  Valid options in this context are: authtype, service, connect_timeout, dbname, host, hostaddr, port, tty, options, requiressl, sslmode, gsslib
 ALTER SERVER s8 OPTIONS (connect_timeout '30', SET dbname 'db1', DROP host);
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 ALTER SERVER s1 OWNER TO regress_test_indirect;             -- ERROR
 ERROR:  must be member of role "regress_test_indirect"
 RESET ROLE;
 GRANT regress_test_indirect TO regress_test_role;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 ALTER SERVER s1 OWNER TO regress_test_indirect;
 RESET ROLE;
 GRANT USAGE ON FOREIGN DATA WRAPPER foo TO regress_test_indirect;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 ALTER SERVER s1 OWNER TO regress_test_indirect;
 RESET ROLE;
 DROP ROLE regress_test_indirect;                            -- ERROR
@@ -480,7 +480,7 @@ NOTICE:  server "nonexistent" does not exist, skipping
  t2   | regress_test_role     | foo
 (10 rows)
 
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 DROP SERVER s2;                                             -- ERROR
 ERROR:  must be owner of foreign server s2
 DROP SERVER s1;
@@ -501,7 +501,7 @@ RESET ROLE;
 (9 rows)
 
 ALTER SERVER s2 OWNER TO regress_test_role;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 DROP SERVER s2;
 RESET ROLE;
 \des
@@ -566,7 +566,7 @@ HINT:  Valid options in this context are: user, password
 CREATE USER MAPPING FOR user SERVER s8 OPTIONS (user 'test', password 'secret');
 ALTER SERVER s5 OWNER TO regress_test_role;
 ALTER SERVER s6 OWNER TO regress_test_indirect;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 CREATE USER MAPPING FOR current_user SERVER s5;
 CREATE USER MAPPING FOR current_user SERVER s6 OPTIONS (username 'test');
 CREATE USER MAPPING FOR current_user SERVER s7;             -- ERROR
@@ -575,7 +575,7 @@ CREATE USER MAPPING FOR public SERVER s8;                   -- ERROR
 ERROR:  must be owner of foreign server s8
 RESET ROLE;
 ALTER SERVER t1 OWNER TO regress_test_indirect;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 CREATE USER MAPPING FOR current_user SERVER t1 OPTIONS (username 'bob', password 'boo');
 CREATE USER MAPPING FOR public SERVER t1;
 RESET ROLE;
@@ -603,7 +603,7 @@ ALTER USER MAPPING FOR current_user SERVER s8 OPTIONS (username 'test');    -- E
 ERROR:  invalid option "username"
 HINT:  Valid options in this context are: user, password
 ALTER USER MAPPING FOR current_user SERVER s8 OPTIONS (DROP user, SET password 'public');
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 ALTER USER MAPPING FOR current_user SERVER s5 OPTIONS (ADD modified '1');
 ALTER USER MAPPING FOR public SERVER s4 OPTIONS (ADD modified '1'); -- ERROR
 ERROR:  must be owner of foreign server s4
@@ -636,7 +636,7 @@ NOTICE:  server does not exist, skipping
 DROP USER MAPPING IF EXISTS FOR public SERVER s7;
 NOTICE:  user mapping "public" does not exist for the server, skipping
 CREATE USER MAPPING FOR public SERVER s8;
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 DROP USER MAPPING FOR public SERVER s8;                     -- ERROR
 ERROR:  must be owner of foreign server s8
 RESET ROLE;
@@ -931,7 +931,7 @@ SELECT * FROM information_schema.foreign_table_options ORDER BY 1, 2, 3, 4;
  regression            | foreign_schema       | foreign_table_1    | quote       | ~
 (3 rows)
 
-SET ROLE regress_test_role PASSWORD 'ttest@123';
+SET ROLE regress_test_role PASSWORD 'gauss@123';
 SELECT * FROM information_schema.user_mapping_options ORDER BY 1, 2, 3, 4;
  authorization_identifier | foreign_server_catalog | foreign_server_name | option_name | option_value 
 --------------------------+------------------------+---------------------+-------------+--------------
@@ -957,7 +957,7 @@ SELECT * FROM information_schema.role_usage_grants WHERE object_type LIKE 'FOREI
 (2 rows)
 
 DROP USER MAPPING FOR current_user SERVER t1;
-SET ROLE regress_test_role2 PASSWORD 'ttest@123';
+SET ROLE regress_test_role2 PASSWORD 'gauss@123';
 SELECT * FROM information_schema.user_mapping_options ORDER BY 1, 2, 3, 4;
  authorization_identifier | foreign_server_catalog | foreign_server_name | option_name | option_value 
 --------------------------+------------------------+---------------------+-------------+--------------
@@ -1071,7 +1071,7 @@ ALTER USER MAPPING FOR regress_test_role SERVER s6 OPTIONS (DROP username);
 ALTER FOREIGN DATA WRAPPER foo VALIDATOR postgresql_fdw_validator;
 WARNING:  changing the foreign-data wrapper validator can cause the options for dependent objects to become invalid
 -- Privileges
-SET ROLE unprivileged_role PASSWORD 'ttest@123';
+SET ROLE unprivileged_role PASSWORD 'gauss@123';
 CREATE FOREIGN DATA WRAPPER foobar;                             -- ERROR
 ERROR:  permission denied to create foreign-data wrapper "foobar"
 HINT:  Must be superuser to create a foreign-data wrapper.
@@ -1104,7 +1104,7 @@ ERROR:  must be owner of foreign server s6
 RESET ROLE;
 GRANT USAGE ON FOREIGN DATA WRAPPER postgresql TO unprivileged_role;
 GRANT USAGE ON FOREIGN DATA WRAPPER foo TO unprivileged_role WITH GRANT OPTION;
-SET ROLE unprivileged_role PASSWORD 'ttest@123';
+SET ROLE unprivileged_role PASSWORD 'gauss@123';
 CREATE FOREIGN DATA WRAPPER foobar;                             -- ERROR
 ERROR:  permission denied to create foreign-data wrapper "foobar"
 HINT:  Must be superuser to create a foreign-data wrapper.
@@ -1136,7 +1136,7 @@ REVOKE USAGE ON FOREIGN DATA WRAPPER foo FROM unprivileged_role; -- ERROR
 ERROR:  dependent privileges exist
 HINT:  Use CASCADE to revoke them too.
 REVOKE USAGE ON FOREIGN DATA WRAPPER foo FROM unprivileged_role CASCADE;
-SET ROLE unprivileged_role PASSWORD 'ttest@123';
+SET ROLE unprivileged_role PASSWORD 'gauss@123';
 GRANT USAGE ON FOREIGN DATA WRAPPER foo TO regress_test_role;   -- ERROR
 ERROR:  permission denied for foreign-data wrapper foo
 CREATE SERVER s10 FOREIGN DATA WRAPPER foo;                     -- ERROR
@@ -1151,7 +1151,7 @@ drop cascades to user mapping for unprivileged_role
 RESET ROLE;
 CREATE SERVER s9 FOREIGN DATA WRAPPER foo;
 GRANT USAGE ON FOREIGN SERVER s9 TO unprivileged_role;
-SET ROLE unprivileged_role PASSWORD 'ttest@123';
+SET ROLE unprivileged_role PASSWORD 'gauss@123';
 ALTER SERVER s9 VERSION '1.2';                                  -- ERROR
 ERROR:  must be owner of foreign server s9
 GRANT USAGE ON FOREIGN SERVER s9 TO regress_test_role;          -- WARNING

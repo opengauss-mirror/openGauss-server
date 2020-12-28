@@ -460,7 +460,9 @@ static void convert_one_plus_outerjoin(const OperatorPlusProcessContext* ctx, Jo
     RangeTblEntry* l_rte = join_term->lrte;
     RangeTblEntry* r_rte = join_term->rrte;
 
-    my_relnamespace = list_make2(l_rte, r_rte);
+    bool lateral_ok = (j->jointype == JOIN_INNER || j->jointype == JOIN_LEFT);
+    my_relnamespace = list_make2(makeNamespaceItem(l_rte, false, lateral_ok),
+                                makeNamespaceItem(r_rte, false, true));
 
     Relids lcontainedRels = bms_make_singleton(lrtindex);
     Relids rcontainedRels = bms_make_singleton(rrtindex);
@@ -477,7 +479,7 @@ static void convert_one_plus_outerjoin(const OperatorPlusProcessContext* ctx, Jo
 
     /* No need record RTE info, Just avoid report error when handle operator "(+)" */
     setIgnorePlusFlag(pstate, true);
-    j->quals = transformJoinOnClause(pstate, j, l_rte, r_rte, my_relnamespace, my_containedRels);
+    j->quals = transformJoinOnClause(pstate, j, l_rte, r_rte, my_relnamespace);
     setIgnorePlusFlag(pstate, false);
 
     j->alias = NULL;

@@ -1,0 +1,62 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+\! gs_ktool -g
+GENERATE
+2
+CREATE SCHEMA drop_cmk_test;
+CREATE CLIENT MASTER KEY test_drop_cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE CLIENT MASTER KEY drop_cmk_test.test_drop_cmk2 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/2" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY test_drop_cek1 WITH VALUES (CLIENT_MASTER_KEY = test_drop_cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE COLUMN ENCRYPTION KEY drop_cmk_test.test_drop_cek2 WITH VALUES (CLIENT_MASTER_KEY = test_drop_cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+DROP COLUMN ENCRYPTION KEY test_drop_cek1;
+SELECT COUNT(*) FROM gs_column_keys;
+ count 
+-------
+     1
+(1 row)
+
+DROP COLUMN ENCRYPTION KEY test_drop_cek2;
+ERROR:  column setting "test_drop_cek2" does not exist
+SELECT COUNT(*) FROM gs_column_keys;
+ count 
+-------
+     1
+(1 row)
+
+DROP COLUMN ENCRYPTION KEY drop_cmk_test.test_drop_cek2;
+SELECT COUNT(*) FROM gs_column_keys;
+ count 
+-------
+     0
+(1 row)
+
+DROP CLIENT MASTER KEY test_drop_cmk1;
+SELECT COUNT(*) FROM gs_client_global_keys;
+ count 
+-------
+     1
+(1 row)
+
+DROP CLIENT MASTER KEY test_drop_cmk2;
+ERROR:  global setting "test_drop_cmk2" does not exist
+SELECT COUNT(*) FROM gs_client_global_keys;
+ count 
+-------
+     1
+(1 row)
+
+DROP CLIENT MASTER KEY drop_cmk_test.test_drop_cmk2;
+SELECT COUNT(*) FROM gs_client_global_keys;
+ count 
+-------
+     0
+(1 row)
+
+DROP SCHEMA drop_cmk_test;
+\! gs_ktool -d all
+DELETE ALL
+ 1 2

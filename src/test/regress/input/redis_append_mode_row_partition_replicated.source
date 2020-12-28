@@ -1,6 +1,6 @@
 --prepare
 create table t1(c1 int, c2 int) 
- 
+distribute by replication
 PARTITION BY RANGE (c2)
 (
 	partition p0 values less than (10),
@@ -27,7 +27,7 @@ create unlogged table data_redis.pg_delete_delta_12345
 	block_number bigint,
 	block_offset int
 )
- ;
+distribute by replication;
 
 create view ctid_view as 
 select * from t1 partition (p0)
@@ -105,7 +105,7 @@ select count(*) from ctid_view;
  truncate data_redis.pg_delete_delta_12345;
  truncate t1;
  ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
- COPY t1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/ft1.data';
+ COPY t1 FROM '@abs_srcdir@/data/ft1.data';
  ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
 
  select min(c1),max(c1),count(*) from ctid_view;

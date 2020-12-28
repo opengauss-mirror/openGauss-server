@@ -1,4 +1,4 @@
-export S3_HOSTNAME=0.0.0.0
+export S3_HOSTNAME=10.175.38.76
 export S3_ACCESS_KEY_ID=PXOCFVMGOMNOJSAWI2I0
 export S3_SECRET_ACCESS_KEY=FiqwtDDeUCtsieCbOCWzrQ3fwJHFJetzzXbdLHEh
 export LD_LIBRARY_PATH=../../../../Platform/suse11_sp1_x86_64/libobs/comm/lib/:$LD_LIBRARY_PATH 

@@ -563,5 +563,5 @@ begin;
 update y1 set a =1 where a in (select a from y4);
 ERROR:  Cross storage engine query is not supported
 update y4 set a =2;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 end;

@@ -35,15 +35,57 @@
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "tsdb/optimizer/planner.h"
+#endif
 
 const int EXTNODENAME_MAX_LEN = 64;
 static HTAB* g_extensible_plan_methods = NULL;
 const int HASHTABLE_LENGTH = 100;
+const char* EXTENSIBLE_PLAN_METHODS_LABEL = "Extensible Plan Methods";
 
 typedef struct {
     char extnodename[EXTNODENAME_MAX_LEN];
     void* extnodemethods;
 } ExtensibleNodeEntry;
+
+#ifdef ENABLE_MULTIPLE_NODES
+/*
+ * An internal function to register a new callback structure
+ */
+static void RegisterExtensibleNodeEntry(HTAB* p_htable, const char* ext_node_name, void* ext_node_methods)
+{
+    ExtensibleNodeEntry* entry = NULL;
+    bool found = true;
+    if (strlen(ext_node_name) >= EXTNODENAME_MAX_LEN)
+        elog(ERROR, "extensible node name is too long");
+
+    entry = (ExtensibleNodeEntry*)hash_search(p_htable, ext_node_name, HASH_ENTER, &found);
+    if (found)
+        ereport(ERROR,
+                (errcode(ERRCODE_DUPLICATE_OBJECT),
+                 errmsg("extensible node type \"%s\" already exists",
+                        ext_node_name)));
+
+    entry->extnodemethods = ext_node_methods;
+}
+
+void InitExtensiblePlanMethodsHashTable()
+{
+    HASHCTL ctl;
+    if (g_extensible_plan_methods == NULL) {
+        errno_t rc = memset_s(&ctl, sizeof(HASHCTL), 0, sizeof(HASHCTL));
+        securec_check(rc, "", "");
+        ctl.keysize = EXTNODENAME_MAX_LEN;
+        ctl.entrysize = sizeof(ExtensibleNodeEntry);
+        ctl.hash = string_hash;
+        g_extensible_plan_methods = hash_create(EXTENSIBLE_PLAN_METHODS_LABEL, HASHTABLE_LENGTH,
+            &ctl, HASH_ELEM | HASH_FUNCTION);
+    }
+    RegisterExtensibleNodeEntry(g_extensible_plan_methods, JOIN_TS_TAG_METHOD_NAME, &join_ts_tag_plan_methods);
+    RegisterExtensibleNodeEntry(g_extensible_plan_methods, JOIN_TS_DELTA_METHOD_NAME, &join_ts_delta_plan_methods);
+}
+#endif
 
 ExtensiblePlanState* ExecInitExtensiblePlan(ExtensiblePlan* eplan, EState* estate, int eflags)
 {
@@ -98,7 +140,7 @@ ExtensiblePlanState* ExecInitExtensiblePlan(ExtensiblePlan* eplan, EState* estat
     if (eplan->extensible_plan_tlist != NIL || scan_rel == NULL) {
         TupleDesc scan_tupdesc;
 
-        scan_tupdesc = ExecTypeFromTL(eplan->extensible_plan_tlist, false);
+        scan_tupdesc = ExecTypeFromTL(eplan->extensible_plan_tlist, false, false, TAM_HEAP);
         ExecAssignScanType(&extensionPlanState->ss, scan_tupdesc);
         /* Node's targetlist will contain Vars with varno = INDEX_VAR */
         tlistvarno = INDEX_VAR;
@@ -111,8 +153,11 @@ ExtensiblePlanState* ExecInitExtensiblePlan(ExtensiblePlan* eplan, EState* estat
     /*
      * Initialize result tuple type and projection info.
      */
-    ExecAssignResultTypeFromTL(&extensionPlanState->ss.ps);
+    ExecAssignResultTypeFromTL(
+            &extensionPlanState->ss.ps,
+            extensionPlanState->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
     ExecAssignScanProjectionInfoWithVarno(&extensionPlanState->ss, tlistvarno);
+    Assert(extensionPlanState->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
 
     /*
      * The callback of extensible-scan provider applies the final initialization
@@ -163,7 +208,7 @@ static void* GetExtensibleNodeEntry(HTAB* htable, const char* extnodename, bool 
     if (htable != NULL) {
         entry = (ExtensibleNodeEntry*)hash_search(htable, extnodename, HASH_FIND, NULL);
     }
-    if (entry != NULL) {
+    if (entry == NULL) {
         if (missing_ok) {
             return NULL;
         }

@@ -33,7 +33,7 @@
 #include "job/job_scheduler.h"
 #include "catalog/pg_resource_pool.h"
 #include "catalog/pg_authid.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 const int RESOURCE_POOL_HASH_SIZE = 32;
 
@@ -180,7 +180,7 @@ static WorkloadXactInfo* InstrWorkloadInfoGeneral(int* num)
         }
 
         /* only superuser could see all user transaction info */
-        if (!superuser() && info->user_id != GetCurrentUserId()) {
+        if (!superuser() && !isMonitoradmin(GetUserId()) && info->user_id != GetCurrentUserId()) {
             continue;
         }
 
@@ -260,7 +260,7 @@ static void InitInstrWorkloadTransactionUser(void)
 
     ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     ResourceOwner tmpOwner;
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForWorkloadTransaction");
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForWorkloadTransaction", MEMORY_CONTEXT_CBB);
 
     Relation relation = heap_open(AuthIdRelationId, AccessShareLock);
     SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, SnapshotNow, 0, NULL);
@@ -424,7 +424,7 @@ Datum get_instr_workload_info(PG_FUNCTION_ARGS)
 
         funcctx = SRF_FIRSTCALL_INIT();
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
-        tupdesc = CreateTemplateTupleDesc(INSTR_WORKLOAD_ATTRUM, false);
+        tupdesc = CreateTemplateTupleDesc(INSTR_WORKLOAD_ATTRUM, false, TAM_HEAP);
 
         create_tuple_entry(tupdesc);
 

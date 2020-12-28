@@ -54,7 +54,7 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 
 #include "dblink.h"
 
@@ -202,14 +202,15 @@ typedef struct remoteConnHashEnt {
             DBLINK_CONN_NOT_AVAIL;                       \
     } while (0)
 
-#define DBLINK_INIT                                                                          \
-    do {                                                                                     \
-        if (!pconn) {                                                                        \
-            pconn = (remoteConn*)MemoryContextAlloc(t_thrd.top_mem_cxt, sizeof(remoteConn)); \
-            pconn->conn = NULL;                                                              \
-            pconn->openCursorCount = 0;                                                      \
-            pconn->newXactForCursor = FALSE;                                                 \
-        }                                                                                    \
+#define DBLINK_INIT                                                                                   \
+    do {                                                                                              \
+        if (!pconn) {                                                                                 \
+            pconn = (remoteConn*)MemoryContextAlloc(                                                  \
+                THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION), sizeof(remoteConn));          \
+            pconn->conn = NULL;                                                                       \
+            pconn->openCursorCount = 0;                                                               \
+            pconn->newXactForCursor = FALSE;                                                          \
+        }                                                                                             \
     } while (0)
 
 /*
@@ -234,7 +235,8 @@ Datum dblink_connect(PG_FUNCTION_ARGS)
         conname_or_str = text_to_cstring(PG_GETARG_TEXT_PP(0));
 
     if (connname)
-        rconn = (remoteConn*)MemoryContextAlloc(t_thrd.top_mem_cxt, sizeof(remoteConn));
+        rconn = (remoteConn*)MemoryContextAlloc(
+            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION), sizeof(remoteConn));
 
     /* first check for valid foreign data server */
     connstr = get_connect_string(conname_or_str);
@@ -380,7 +382,6 @@ Datum dblink_open(PG_FUNCTION_ARGS)
     res = PQexec(conn, buf.data);
     if (!res || PQresultStatus(res) != PGRES_COMMAND_OK) {
         dblink_res_error(conname, res, "could not open cursor", fail);
-        PQclear(res);
         PG_RETURN_TEXT_P(cstring_to_text("ERROR"));
     }
 
@@ -597,43 +598,44 @@ static Datum dblink_record_internal(FunctionCallInfo fcinfo, bool is_async)
         char* conname = NULL;
         remoteConn* rconn = NULL;
         bool fail = true; /* default to backward compatible */
+        bool is_three = !is_async && PG_NARGS() == 3;
+        bool is_two = !is_async && PG_NARGS() == 2;
+        bool is_one = !is_async && PG_NARGS() == 1;
 
-        if (!is_async) {
-            if (PG_NARGS() == 3) {
-                /* text,text,bool */
-                DBLINK_GET_CONN;
-                sql = text_to_cstring(PG_GETARG_TEXT_PP(1));
-                fail = PG_GETARG_BOOL(2);
-            } else if (PG_NARGS() == 2) {
-                /* text,text or text,bool */
-                if (get_fn_expr_argtype(fcinfo->flinfo, 1) == BOOLOID) {
-                    conn = pconn->conn;
-                    sql = text_to_cstring(PG_GETARG_TEXT_PP(0));
-                    fail = PG_GETARG_BOOL(1);
-                } else {
-                    DBLINK_GET_CONN;
-                    sql = text_to_cstring(PG_GETARG_TEXT_PP(1));
-                }
-            } else if (PG_NARGS() == 1) {
-                /* text */
+        if (is_three) {
+            /* text,text,bool */
+            DBLINK_GET_CONN;
+            sql = text_to_cstring(PG_GETARG_TEXT_PP(1));
+            fail = PG_GETARG_BOOL(2);
+        } else if (is_two) {
+            /* text,text or text,bool */
+            if (get_fn_expr_argtype(fcinfo->flinfo, 1) == BOOLOID) {
                 conn = pconn->conn;
                 sql = text_to_cstring(PG_GETARG_TEXT_PP(0));
-            } else
-                /* shouldn't happen */
-                elog(ERROR, "wrong number of arguments");
-        } else /* is_async */
-        {
-            /* get async result */
-            if (PG_NARGS() == 2) {
-                /* text,bool */
-                DBLINK_GET_NAMED_CONN;
                 fail = PG_GETARG_BOOL(1);
-            } else if (PG_NARGS() == 1) {
-                /* text */
-                DBLINK_GET_NAMED_CONN;
-            } else
-                /* shouldn't happen */
-                elog(ERROR, "wrong number of arguments");
+            } else {
+                DBLINK_GET_CONN;
+                sql = text_to_cstring(PG_GETARG_TEXT_PP(1));
+            }
+        } else if (is_one) {
+            /* text */
+            conn = pconn->conn;
+            sql = text_to_cstring(PG_GETARG_TEXT_PP(0));
+        } else if (!is_async) {
+            /* shouldn't happen */
+            elog(ERROR, "wrong number of arguments");
+        } /* is_async */
+        /* get async result */
+        else if (PG_NARGS() == 2) {
+            /* text,bool */
+            DBLINK_GET_NAMED_CONN;
+            fail = PG_GETARG_BOOL(1);
+        } else if (PG_NARGS() == 1) {
+            /* text */
+            DBLINK_GET_NAMED_CONN;
+        } else {
+            /* shouldn't happen */
+            elog(ERROR, "wrong number of arguments");
         }
 
         if (!conn)
@@ -850,7 +852,7 @@ static void materializeQueryResult(
     Assert(rsinfo->returnMode == SFRM_Materialize);
 
     /* initialize storeInfo to empty */
-    memset(&sinfo, 0, sizeof(sinfo));
+    (void)memset_s(&sinfo, sizeof(sinfo), 0, sizeof(sinfo));
     sinfo.fcinfo = fcinfo;
 
     PG_TRY();
@@ -1385,11 +1387,13 @@ Datum dblink_get_pkey(PG_FUNCTION_ARGS)
         char** values;
         HeapTuple tuple;
         Datum result;
+        const int valLen = 12;
 
         values = (char**)palloc(2 * sizeof(char*));
-        values[0] = (char*)palloc(12); /* sign, 10 digits, '\0' */
+        values[0] = (char*)palloc(valLen); /* sign, 10 digits, '\0' */
 
-        sprintf(values[0], "%d", call_cntr + 1);
+        int rc = sprintf_s(values[0], valLen, "%d", call_cntr + 1);
+        securec_check_ss(rc, "\0", "\0");
 
         values[1] = results[call_cntr];
 
@@ -1721,11 +1725,8 @@ Datum dblink_get_notify(PG_FUNCTION_ARGS)
 
     PQconsumeInput(conn);
     while ((notify = PQnotifies(conn)) != NULL) {
-        Datum values[DBLINK_NOTIFY_COLS];
-        bool nulls[DBLINK_NOTIFY_COLS];
-
-        memset(values, 0, sizeof(values));
-        memset(nulls, 0, sizeof(nulls));
+        Datum values[DBLINK_NOTIFY_COLS] = {0};
+        bool nulls[DBLINK_NOTIFY_COLS] = {false};
 
         if (notify->relname != NULL)
             values[0] = CStringGetTextDatum(notify->relname);

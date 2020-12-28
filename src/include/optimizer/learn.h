@@ -226,6 +226,4 @@ typedef struct {
     double       peak_memory_accuracy;
 } ModelAccuracy;
 
-
-
 #endif  /* LEARN_H */

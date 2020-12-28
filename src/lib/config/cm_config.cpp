@@ -27,6 +27,7 @@
 #include "securec_check.h"
 #include <map>
 #include <algorithm>
+#include <string>
 
 using namespace std;
 
@@ -56,8 +57,10 @@ bool logic_cluster_restart = false;
 staticNodeConfig* g_currentNode = NULL;
 bool g_single_node_cluster = false;
 bool g_multi_az_cluster = false;
+bool g_one_master_multi_slave = false;
 bool g_only_dn_cluster = false;
 uint32 g_node_num = 0;
+uint32 g_cluster_total_instance_group_num = 0;
 uint32 g_coordinator_num = 0;
 uint32 g_etcd_num = 0;
 uint32 g_cm_server_num = 0;
@@ -71,9 +74,9 @@ uint32 max_gtmpath_len = 0;
 uint32 max_etcdpath_len = 0;
 uint32 max_cmpath_len = 0;
 
-// for datanode alarm
+/* for datanode alarm */
 uint32 g_datanodeid = 0;
-char* g_logicClusterName = NULL;
+char *g_logicClusterName = NULL;
 bool g_isCmRead = false;
 
 #define FREAD(ptr, nitems, size, stream)                \
@@ -124,13 +127,13 @@ int cmconfig_getenv(const char* env_var, char* output_env_value, uint32 env_valu
     char* env_value = NULL;
     int rc = 0;
 
-    if (NULL == env_var) {
+    if (env_var == NULL) {
         fprintf(stderr, "cmconfig_getenv: invalid env_var !\n");
         return -1;
     }
 
     env_value = getenv(env_var);
-    if (NULL == env_value || env_value[0] == '\0') {
+    if (env_value == NULL || env_value[0] == '\0') {
         fprintf(stderr,
             "cmconfig_getenv: failed to get environment variable:%s. Please check and make sure it is configured!\n",
             env_var);
@@ -139,7 +142,7 @@ int cmconfig_getenv(const char* env_var, char* output_env_value, uint32 env_valu
     check_input_for_security(env_value);
 
     rc = strcpy_s(output_env_value, env_value_len, env_value);
-    if (EOK != rc) {
+    if (rc != EOK) {
         fprintf(stderr,
             "cmconfig_getenv: failed to get environment variable:%s, variable length:%lu.\n",
             env_var,
@@ -157,12 +160,13 @@ int node_index_Comparator(const void* arg1, const void* arg2)
     uint32 index1 = *(const uint32*)arg1;
     uint32 index2 = *(const uint32*)arg2;
 
-    if (index1 > index2)
+    if (index1 > index2) {
         return 1;
-    else if (index1 < index2)
+    } else if (index1 < index2) {
         return -1;
-    else
+    } else {
         return 0;
+    }
 }
 
 int find_node_index_by_nodeid(uint32 nodeId, uint32* node_index)
@@ -216,8 +220,7 @@ void setAZPriority()
     }
 
     uint32 num;
-    for (it = nameAndPriority.begin(), num = 0; it != nameAndPriority.end() && num < azNumber; 
-         it++, num++) {
+    for (it = nameAndPriority.begin(), num = 0; it != nameAndPriority.end() && num < azNumber; it++, num++) {
         priorities[num] = it->second;
     }
 
@@ -237,12 +240,16 @@ int read_config_file(const char* file_path, int* err_no)
     bool datanodeMirrorIDInit = false;
     uint32 datanodeMirrorID = 0;
     int rcs = 0;
+    char configFilePath[MAX_PATH_LEN];
 
     header_size = sizeof(staticConfigHeader);
     header_aglinment_size =
         (header_size / AGLINMENT_SIZE + ((header_size % AGLINMENT_SIZE) == 0 ? 0 : 1)) * AGLINMENT_SIZE;
 
-    fd = fopen(file_path, "r");
+    rcs = strncpy_s(configFilePath, MAX_PATH_LEN, file_path, MAX_PATH_LEN - 1);
+    securec_check_c(rcs, "\0", "\0");
+    canonicalize_path(configFilePath);
+    fd = fopen(configFilePath, "r");
     if (fd == NULL) {
         *err_no = errno;
         return OPEN_FILE_ERROR;
@@ -256,28 +263,29 @@ int read_config_file(const char* file_path, int* err_no)
     securec_check_c(rcs, "\0", "\0");
 
     // read head info
-#ifdef ENABLE_MULTIPLE_NODES
     FREAD(&g_nodeHeader.crc, 1, sizeof(uint32), fd);
-#else
-    FREAD(&g_nodeHeader.crc, 1, sizeof(uint64), fd);
-#endif
     FREAD(&g_nodeHeader.len, 1, sizeof(uint32), fd);
     FREAD(&g_nodeHeader.version, 1, sizeof(uint32), fd);
-
-    
     // version in [101, 200] means single node cluster.
     if ((101 <= g_nodeHeader.version) && (g_nodeHeader.version <= 200)) {
         g_single_node_cluster = true;
     } else if ((201 <= g_nodeHeader.version) && (g_nodeHeader.version <= 300)) {
         g_multi_az_cluster = true;
+        g_one_master_multi_slave = true;
     } else if ((301 <= g_nodeHeader.version) && (g_nodeHeader.version <= 400)) {
         g_only_dn_cluster = true;
         //only dn is a subset for multi az
         g_multi_az_cluster = true;	
+        g_one_master_multi_slave = true;
     }
     FREAD(&g_nodeHeader.time, 1, sizeof(int64), fd);
     FREAD(&g_nodeHeader.nodeCount, 1, sizeof(uint32), fd);
     FREAD(&g_nodeHeader.node, 1, sizeof(uint32), fd);
+
+    if (g_node != NULL) {
+        free(g_node);
+        g_node = NULL;
+    }
 
     g_node_num = g_nodeHeader.nodeCount;
     if (g_node_num > CM_NODE_MAXNUM) {
@@ -285,34 +293,29 @@ int read_config_file(const char* file_path, int* err_no)
         return READ_FILE_ERROR;
     }
 
-    if (fseek(fd, (off_t)(header_aglinment_size), SEEK_SET) != 0) {
+    if (fseek(fd, (off_t)(header_aglinment_size), SEEK_SET) != 0)
         goto read_failed;
-    }
 
-    if (NULL != g_node) {
-        free(g_node);
-        g_node = NULL;
-    }
     g_node = (staticNodeConfig*)malloc(sizeof(staticNodeConfig) * g_node_num);
-    if (NULL == g_node) {
+    if (g_node == NULL) {
         fclose(fd);
         return OUT_OF_MEMORY;
     }
 
+    /* g_node size may be larger than SECUREC_STRING_MAX_LEN in large cluster.*/
     rcs = memset_s(g_node, sizeof(staticNodeConfig) * g_node_num, 0, sizeof(staticNodeConfig) * g_node_num);
-    securec_check_c(rcs, "\0", "\0");
+    if (rcs != EOK && rcs != ERANGE) {
+        printf("ERROR at %s : %d : Initialize is failed, error num is: %d.\n", __FILE__, __LINE__, rcs);
+        exit(1);
+    }
 
     for (ii = 0; ii < g_node_num; ii++) {
-        int jj = 0;
+        uint32 jj = 0;
         uint32 kk = 0;
         uint32 body_aglinment_size = 0;
 
-        // read node info
-#ifdef ENABLE_MULTIPLE_NODES
+        /* read node info */
         FREAD(&g_node[ii].crc, 1, sizeof(uint32), fd);
-#else
-        FREAD(&g_node[ii].crc, 1, sizeof(uint64), fd);
-#endif
         FREAD(&g_node[ii].node, 1, sizeof(uint32), fd);
         FREAD(g_node[ii].nodeName, 1, (CM_NODE_NAME - 1), fd);
         g_node[ii].nodeName[CM_NODE_NAME - 1] = '\0';
@@ -322,8 +325,8 @@ int read_config_file(const char* file_path, int* err_no)
             (max_node_name_len < strlen(g_node[ii].nodeName)) ? strlen(g_node[ii].nodeName) : max_node_name_len;
 
         if (g_multi_az_cluster) {
-            // read az info
-            FREAD(&g_node[ii].azName, 1, (CM_AZ_NAME - 1), fd);
+            /* read az info */
+            FREAD(g_node[ii].azName, 1, (CM_AZ_NAME - 1), fd);
             g_node[ii].azName[CM_AZ_NAME - 1] = '\0';
             check_input_for_security(g_node[ii].azName);
             FREAD(&g_node[ii].azPriority, 1, sizeof(uint32), fd);
@@ -332,19 +335,26 @@ int read_config_file(const char* file_path, int* err_no)
         }
 
         FREAD(&g_node[ii].backIpCount, 1, sizeof(uint32), fd);
+        if (g_node[ii].backIpCount > CM_IP_NUM) {
+            goto read_failed;
+        }
         for (jj = 0; jj < CM_IP_NUM; jj++) {
             FREAD(g_node[ii].backIps[jj], 1, CM_IP_LENGTH, fd);
             g_node[ii].backIps[jj][CM_IP_LENGTH - 1] = '\0';
             check_input_for_security(g_node[ii].backIps[jj]);
         }
+
         FREAD(&g_node[ii].sshCount, 1, sizeof(uint32), fd);
+        if (g_node[ii].sshCount > CM_IP_NUM) {
+            goto read_failed;
+        }
         for (jj = 0; jj < CM_IP_NUM; jj++) {
             FREAD(g_node[ii].sshChannel[jj], 1, CM_IP_LENGTH, fd);
             g_node[ii].sshChannel[jj][CM_IP_LENGTH - 1] = '\0';
             check_input_for_security(g_node[ii].sshChannel[jj]);
         }
 
-        // read CMServer info
+        /* read CMServer info */
         FREAD(&g_node[ii].cmServerId, 1, sizeof(uint32), fd);
         if (g_node[ii].cmServerId != 0) {
             g_cm_server_num++;
@@ -360,8 +370,12 @@ int read_config_file(const char* file_path, int* err_no)
         FREAD(&g_node[ii].cmServerLevel, 1, sizeof(uint32), fd);
         FREAD(g_node[ii].cmServerFloatIP, 1, CM_IP_LENGTH, fd);
         g_node[ii].cmServerFloatIP[CM_IP_LENGTH - 1] = '\0';
+
         check_input_for_security(g_node[ii].cmServerFloatIP);
         FREAD(&g_node[ii].cmServerListenCount, 1, sizeof(uint32), fd);
+        if (g_node[ii].cmServerListenCount > CM_IP_NUM) {
+            goto read_failed;
+        }
         for (jj = 0; jj < CM_IP_NUM; jj++) {
             FREAD(g_node[ii].cmServer[jj], 1, CM_IP_LENGTH, fd);
             g_node[ii].cmServer[jj][CM_IP_LENGTH - 1] = '\0';
@@ -369,6 +383,9 @@ int read_config_file(const char* file_path, int* err_no)
         }
         FREAD(&g_node[ii].port, 1, sizeof(uint32), fd);
         FREAD(&g_node[ii].cmServerLocalHAListenCount, 1, sizeof(uint32), fd);
+        if (g_node[ii].cmServerLocalHAListenCount > CM_IP_NUM) {
+            goto read_failed;
+        }
         for (jj = 0; jj < CM_IP_NUM; jj++) {
             FREAD(g_node[ii].cmServerLocalHAIP[jj], 1, CM_IP_LENGTH, fd);
             g_node[ii].cmServerLocalHAIP[jj][CM_IP_LENGTH - 1] = '\0';
@@ -378,6 +395,9 @@ int read_config_file(const char* file_path, int* err_no)
         FREAD(&g_node[ii].cmServerRole, 1, sizeof(uint32), fd);
 
         FREAD(&g_node[ii].cmServerPeerHAListenCount, 1, sizeof(uint32), fd);
+        if (g_node[ii].cmServerPeerHAListenCount > CM_IP_NUM) {
+            goto read_failed;
+        }
         for (jj = 0; jj < CM_IP_NUM; jj++) {
             FREAD(g_node[ii].cmServerPeerHAIP[jj], 1, CM_IP_LENGTH, fd);
             g_node[ii].cmServerPeerHAIP[jj][CM_IP_LENGTH - 1] = '\0';
@@ -385,10 +405,13 @@ int read_config_file(const char* file_path, int* err_no)
         }
         FREAD(&g_node[ii].cmServerPeerHAPort, 1, sizeof(uint32), fd);
 
-        // read GTM info
+        /* read GTM info */
         FREAD(&g_node[ii].gtmAgentId, 1, sizeof(uint32), fd);
         FREAD(&g_node[ii].cmAgentMirrorId, 1, sizeof(uint32), fd);
         FREAD(&g_node[ii].cmAgentListenCount, 1, sizeof(uint32), fd);
+        if (g_node[ii].cmAgentListenCount > CM_IP_NUM) {
+            goto read_failed;
+        }
         for (jj = 0; jj < CM_IP_NUM; jj++) {
             FREAD(g_node[ii].cmAgentIP[jj], 1, CM_IP_LENGTH, fd);
             g_node[ii].cmAgentIP[jj][CM_IP_LENGTH - 1] = '\0';
@@ -400,6 +423,13 @@ int read_config_file(const char* file_path, int* err_no)
         if (g_node[ii].gtm == 1) {
             g_gtm_num++;
         }
+
+        /* g_cluster_total_instance_group_num: current total instance number in cluster includeing cn dn and gtm */
+        /* calculate gtm group number */
+        if (g_node[ii].gtm == 1 && g_node[ii].gtmRole == PRIMARY_GTM) {
+            g_cluster_total_instance_group_num++;
+        }
+
         FREAD(g_node[ii].gtmLocalDataPath, 1, CM_PATH_LENGTH, fd);
         g_node[ii].gtmLocalDataPath[CM_PATH_LENGTH - 1] = '\0';
         check_input_for_security(g_node[ii].gtmLocalDataPath);
@@ -408,6 +438,9 @@ int read_config_file(const char* file_path, int* err_no)
                                                                                   : max_gtmpath_len;
 
         FREAD(&g_node[ii].gtmLocalListenCount, 1, sizeof(uint32), fd);
+        if (g_node[ii].gtmLocalListenCount > CM_IP_NUM) {
+            goto read_failed;
+        }
         for (jj = 0; jj < CM_IP_NUM; jj++) {
             FREAD(g_node[ii].gtmLocalListenIP[jj], 1, CM_IP_LENGTH, fd);
             g_node[ii].gtmLocalListenIP[jj][CM_IP_LENGTH - 1] = '\0';
@@ -416,6 +449,9 @@ int read_config_file(const char* file_path, int* err_no)
         FREAD(&g_node[ii].gtmLocalport, 1, sizeof(uint32), fd);
         FREAD(&g_node[ii].gtmRole, 1, sizeof(uint32), fd);
         FREAD(&g_node[ii].gtmLocalHAListenCount, 1, sizeof(uint32), fd);
+        if (g_node[ii].gtmLocalHAListenCount > CM_IP_NUM) {
+            goto read_failed;
+        }
         for (jj = 0; jj < CM_IP_NUM; jj++) {
             FREAD(g_node[ii].gtmLocalHAIP[jj], 1, CM_IP_LENGTH, fd);
             g_node[ii].gtmLocalHAIP[jj][CM_IP_LENGTH - 1] = '\0';
@@ -427,6 +463,7 @@ int read_config_file(const char* file_path, int* err_no)
         check_input_for_security(g_node[ii].gtmPeerDataPath);
 
         FREAD(&g_node[ii].gtmPeerHAListenCount, 1, sizeof(uint32), fd);
+
         for (jj = 0; jj < CM_IP_NUM; jj++) {
             FREAD(g_node[ii].gtmPeerHAIP[jj], 1, CM_IP_LENGTH, fd);
             g_node[ii].gtmPeerHAIP[jj][CM_IP_LENGTH - 1] = '\0';
@@ -437,6 +474,9 @@ int read_config_file(const char* file_path, int* err_no)
         FREAD(&g_node[ii].gtmProxyMirrorId, 1, sizeof(uint32), fd);
         FREAD(&g_node[ii].gtmProxy, 1, sizeof(uint32), fd);
         FREAD(&g_node[ii].gtmProxyListenCount, 1, sizeof(uint32), fd);
+        if (g_node[ii].gtmProxyListenCount > CM_IP_NUM) {
+            goto read_failed;
+        }
         for (jj = 0; jj < CM_IP_NUM; jj++) {
             FREAD(g_node[ii].gtmProxyListenIP[jj], 1, CM_IP_LENGTH, fd);
             g_node[ii].gtmProxyListenIP[jj][CM_IP_LENGTH - 1] = '\0';
@@ -444,7 +484,7 @@ int read_config_file(const char* file_path, int* err_no)
         }
         FREAD(&g_node[ii].gtmProxyPort, 1, sizeof(uint32), fd);
 
-        // read CN info
+        /* read CN info */
         FREAD(&g_node[ii].coordinateId, 1, sizeof(uint32), fd);
         FREAD(&g_node[ii].coordinateMirrorId, 1, sizeof(uint32), fd);
         FREAD(&g_node[ii].coordinate, 1, sizeof(uint32), fd);
@@ -459,6 +499,9 @@ int read_config_file(const char* file_path, int* err_no)
         max_cnpath_len = (max_cnpath_len < strlen(g_node[ii].DataPath)) ? strlen(g_node[ii].DataPath) : max_cnpath_len;
 
         FREAD(&g_node[ii].coordinateListenCount, 1, sizeof(uint32), fd);
+        if (g_node[ii].coordinateListenCount > CM_IP_NUM) {
+            goto read_failed;
+        }
         for (jj = 0; jj < CM_IP_NUM; jj++) {
             FREAD(g_node[ii].coordinateListenIP[jj], 1, CM_IP_LENGTH, fd);
             g_node[ii].coordinateListenIP[jj][CM_IP_LENGTH - 1] = '\0';
@@ -467,104 +510,128 @@ int read_config_file(const char* file_path, int* err_no)
         FREAD(&g_node[ii].coordinatePort, 1, sizeof(uint32), fd);
         FREAD(&g_node[ii].coordinateHAPort, 1, sizeof(uint32), fd);
 
-        // read DNs info
+        /* read DNs info */
         FREAD(&g_node[ii].datanodeCount, 1, sizeof(uint32), fd);
-        for (kk = 0; kk < g_node[ii].datanodeCount; kk++) {
-            int nn = 0;
+        /* check datacodeCount not overflow */
+        if (g_node[ii].datanodeCount < CM_MAX_DATANODE_PER_NODE) {
+            for (kk = 0; kk < g_node[ii].datanodeCount; kk++) {
+                uint32 nn = 0;
 
-            FREAD(&g_node[ii].datanode[kk].datanodeId, 1, sizeof(uint32), fd);
-            FREAD(&g_node[ii].datanode[kk].datanodeMirrorId, 1, sizeof(uint32), fd);
-            if (!datanodeMirrorIDInit) {
-                datanodeMirrorIDInit = true;
-                datanodeMirrorID = g_node[ii].datanode[kk].datanodeMirrorId;
-                g_dn_replication_num++;
-            } else if (datanodeMirrorID == g_node[ii].datanode[kk].datanodeMirrorId) {
-                g_dn_replication_num++;
-            }
-            FREAD(g_node[ii].datanode[kk].datanodeLocalDataPath, 1, CM_PATH_LENGTH, fd);
-            g_node[ii].datanode[kk].datanodeLocalDataPath[CM_PATH_LENGTH - 1] = '\0';
-            check_input_for_security(g_node[ii].datanode[kk].datanodeLocalDataPath);
+                /* calculate datanode group number */
+                if (g_node[ii].datanode[kk].datanodeRole == PRIMARY_DN) {
+                        g_cluster_total_instance_group_num++;
+                }
 
-            FREAD(g_node[ii].datanode[kk].datanodeXlogPath, 1, CM_PATH_LENGTH, fd);
-            g_node[ii].datanode[kk].datanodeXlogPath[CM_PATH_LENGTH - 1] = '\0';
-            check_input_for_security(g_node[ii].datanode[kk].datanodeXlogPath);
+                FREAD(&g_node[ii].datanode[kk].datanodeId, 1, sizeof(uint32), fd);
+                FREAD(&g_node[ii].datanode[kk].datanodeMirrorId, 1, sizeof(uint32), fd);
+                if (!datanodeMirrorIDInit) {
+                    datanodeMirrorIDInit = true;
+                    datanodeMirrorID = g_node[ii].datanode[kk].datanodeMirrorId;
+                    g_dn_replication_num++;
+                } else if (datanodeMirrorID == g_node[ii].datanode[kk].datanodeMirrorId) {
+                    g_dn_replication_num++;
+                }
+                FREAD(g_node[ii].datanode[kk].datanodeLocalDataPath, 1, CM_PATH_LENGTH, fd);
+                g_node[ii].datanode[kk].datanodeLocalDataPath[CM_PATH_LENGTH - 1] = '\0';
+                check_input_for_security(g_node[ii].datanode[kk].datanodeLocalDataPath);
 
-            FREAD(g_node[ii].datanode[kk].datanodeSSDDataPath, 1, CM_PATH_LENGTH, fd);
-            g_node[ii].datanode[kk].datanodeSSDDataPath[CM_PATH_LENGTH - 1] = '\0';
-            check_input_for_security(g_node[ii].datanode[kk].datanodeSSDDataPath);
+                FREAD(g_node[ii].datanode[kk].datanodeXlogPath, 1, CM_PATH_LENGTH, fd);
+                g_node[ii].datanode[kk].datanodeXlogPath[CM_PATH_LENGTH - 1] = '\0';
+                check_input_for_security(g_node[ii].datanode[kk].datanodeXlogPath);
 
-            max_datapath_len = (max_datapath_len < strlen(g_node[ii].datanode[kk].datanodeLocalDataPath))
-                                   ? strlen(g_node[ii].datanode[kk].datanodeLocalDataPath)
-                                   : max_datapath_len;
+                FREAD(g_node[ii].datanode[kk].datanodeSSDDataPath, 1, CM_PATH_LENGTH, fd);
+                g_node[ii].datanode[kk].datanodeSSDDataPath[CM_PATH_LENGTH - 1] = '\0';
+                check_input_for_security(g_node[ii].datanode[kk].datanodeSSDDataPath);
 
-            FREAD(&g_node[ii].datanode[kk].datanodeListenCount, 1, sizeof(uint32), fd);
-            for (nn = 0; nn < CM_IP_NUM; nn++) {
-                FREAD(g_node[ii].datanode[kk].datanodeListenIP[nn], 1, CM_IP_LENGTH, fd);
-                g_node[ii].datanode[kk].datanodeListenIP[nn][CM_IP_LENGTH - 1] = '\0';
-                check_input_for_security(g_node[ii].datanode[kk].datanodeListenIP[nn]);
-            }
-            FREAD(&g_node[ii].datanode[kk].datanodePort, 1, sizeof(uint32), fd);
-            FREAD(&g_node[ii].datanode[kk].datanodeRole, 1, sizeof(uint32), fd);
-            FREAD(&g_node[ii].datanode[kk].datanodeLocalHAListenCount, 1, sizeof(uint32), fd);
-            for (nn = 0; nn < CM_IP_NUM; nn++) {
-                FREAD(g_node[ii].datanode[kk].datanodeLocalHAIP[nn], 1, CM_IP_LENGTH, fd);
-                g_node[ii].datanode[kk].datanodeLocalHAIP[nn][CM_IP_LENGTH - 1] = '\0';
-                check_input_for_security(g_node[ii].datanode[kk].datanodeLocalHAIP[nn]);
-            }
-            FREAD(&g_node[ii].datanode[kk].datanodeLocalHAPort, 1, sizeof(uint32), fd);
-            if (g_multi_az_cluster) {
-                for (uint32 dnId = 0; dnId < CM_MAX_DATANODE_STANDBY_NUM; dnId++) {
-                    FREAD(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerDataPath, 1, CM_PATH_LENGTH, fd);
-                    g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerDataPath[CM_PATH_LENGTH - 1] = '\0';
-                    check_input_for_security(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerDataPath);
+                max_datapath_len = (max_datapath_len < strlen(g_node[ii].datanode[kk].datanodeLocalDataPath))
+                                    ? strlen(g_node[ii].datanode[kk].datanodeLocalDataPath)
+                                    : max_datapath_len;
 
-                    FREAD(
-                        &g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAListenCount, 1, sizeof(uint32), fd);
-                    for (nn = 0; nn < CM_IP_NUM; nn++) {
-                        FREAD(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAIP[nn], 1, CM_IP_LENGTH, fd);
-                        g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAIP[nn][CM_IP_LENGTH - 1] = '\0';
-                        check_input_for_security(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAIP[nn]);
+                FREAD(&g_node[ii].datanode[kk].datanodeListenCount, 1, sizeof(uint32), fd);
+                if (g_node[ii].datanode[kk].datanodeListenCount > CM_IP_NUM) {
+                    goto read_failed;
+                }
+                for (nn = 0; nn < CM_IP_NUM; nn++) {
+                    FREAD(g_node[ii].datanode[kk].datanodeListenIP[nn], 1, CM_IP_LENGTH, fd);
+                    g_node[ii].datanode[kk].datanodeListenIP[nn][CM_IP_LENGTH - 1] = '\0';
+                    check_input_for_security(g_node[ii].datanode[kk].datanodeListenIP[nn]);
+                }
+                FREAD(&g_node[ii].datanode[kk].datanodePort, 1, sizeof(uint32), fd);
+                FREAD(&g_node[ii].datanode[kk].datanodeRole, 1, sizeof(uint32), fd);
+                FREAD(&g_node[ii].datanode[kk].datanodeLocalHAListenCount, 1, sizeof(uint32), fd);
+                if (g_node[ii].datanode[kk].datanodeLocalHAListenCount > CM_IP_NUM) {
+                    goto read_failed;
+                }
+                for (nn = 0; nn < CM_IP_NUM; nn++) {
+                    FREAD(g_node[ii].datanode[kk].datanodeLocalHAIP[nn], 1, CM_IP_LENGTH, fd);
+                    g_node[ii].datanode[kk].datanodeLocalHAIP[nn][CM_IP_LENGTH - 1] = '\0';
+                    check_input_for_security(g_node[ii].datanode[kk].datanodeLocalHAIP[nn]);
+                }
+                FREAD(&g_node[ii].datanode[kk].datanodeLocalHAPort, 1, sizeof(uint32), fd);
+                if (g_multi_az_cluster) {
+                    for (uint32 dnId = 0; dnId < CM_MAX_DATANODE_STANDBY_NUM; dnId++) {
+                        FREAD(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerDataPath, 1, CM_PATH_LENGTH, fd);
+                        g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerDataPath[CM_PATH_LENGTH - 1] = '\0';
+                        check_input_for_security(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerDataPath);
+
+                        FREAD(&g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAListenCount,
+                            1, sizeof(uint32), fd);
+                        if (g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAListenCount > CM_IP_NUM) {
+                            goto read_failed;
+                        }
+                        for (nn = 0; nn < CM_IP_NUM; nn++) {
+                            FREAD(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAIP[nn], 1, CM_IP_LENGTH, fd);
+                            g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAIP[nn][CM_IP_LENGTH - 1] = '\0';
+                            check_input_for_security(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAIP[nn]);
+                        }
+                        FREAD(&g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAPort, 1, sizeof(uint32), fd);
+                        FREAD(&g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerRole, 1, sizeof(uint32), fd);
                     }
-                    FREAD(&g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAPort, 1, sizeof(uint32), fd);
-                    FREAD(&g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerRole, 1, sizeof(uint32), fd);
-                }
-            } else  // former cluster: single primary, single standby and single dummy standby
-            {
-                FREAD(g_node[ii].datanode[kk].datanodePeerDataPath, 1, CM_PATH_LENGTH, fd);
-                g_node[ii].datanode[kk].datanodePeerDataPath[CM_PATH_LENGTH - 1] = '\0';
-                check_input_for_security(g_node[ii].datanode[kk].datanodePeerDataPath);
+                } else {
+                    /* former cluster: single primary, single standby and single dummy standby */
+                    FREAD(g_node[ii].datanode[kk].datanodePeerDataPath, 1, CM_PATH_LENGTH, fd);
+                    g_node[ii].datanode[kk].datanodePeerDataPath[CM_PATH_LENGTH - 1] = '\0';
+                    check_input_for_security(g_node[ii].datanode[kk].datanodePeerDataPath);
 
-                FREAD(&g_node[ii].datanode[kk].datanodePeerHAListenCount, 1, sizeof(uint32), fd);
-                for (nn = 0; nn < CM_IP_NUM; nn++) {
-                    FREAD(g_node[ii].datanode[kk].datanodePeerHAIP[nn], 1, CM_IP_LENGTH, fd);
-                    g_node[ii].datanode[kk].datanodePeerHAIP[nn][CM_IP_LENGTH - 1] = '\0';
-                    check_input_for_security(g_node[ii].datanode[kk].datanodePeerHAIP[nn]);
-                }
-                FREAD(&g_node[ii].datanode[kk].datanodePeerHAPort, 1, sizeof(uint32), fd);
-                FREAD(&g_node[ii].datanode[kk].datanodePeerRole, 1, sizeof(uint32), fd);
-                FREAD(g_node[ii].datanode[kk].datanodePeer2DataPath, 1, CM_PATH_LENGTH, fd);
-                g_node[ii].datanode[kk].datanodePeer2DataPath[CM_PATH_LENGTH - 1] = '\0';
-                check_input_for_security(g_node[ii].datanode[kk].datanodePeer2DataPath);
+                    FREAD(&g_node[ii].datanode[kk].datanodePeerHAListenCount, 1, sizeof(uint32), fd);
+                    if (g_node[ii].datanode[kk].datanodePeerHAListenCount > CM_IP_NUM) {
+                            goto read_failed;
+                    }
+                    for (nn = 0; nn < CM_IP_NUM; nn++) {
+                        FREAD(g_node[ii].datanode[kk].datanodePeerHAIP[nn], 1, CM_IP_LENGTH, fd);
+                        g_node[ii].datanode[kk].datanodePeerHAIP[nn][CM_IP_LENGTH - 1] = '\0';
+                        check_input_for_security(g_node[ii].datanode[kk].datanodePeerHAIP[nn]);
+                    }
+                    FREAD(&g_node[ii].datanode[kk].datanodePeerHAPort, 1, sizeof(uint32), fd);
+                    FREAD(&g_node[ii].datanode[kk].datanodePeerRole, 1, sizeof(uint32), fd);
+                    FREAD(g_node[ii].datanode[kk].datanodePeer2DataPath, 1, CM_PATH_LENGTH, fd);
+                    g_node[ii].datanode[kk].datanodePeer2DataPath[CM_PATH_LENGTH - 1] = '\0';
+                    check_input_for_security(g_node[ii].datanode[kk].datanodePeer2DataPath);
 
-                FREAD(&g_node[ii].datanode[kk].datanodePeer2HAListenCount, 1, sizeof(uint32), fd);
-                for (nn = 0; nn < CM_IP_NUM; nn++) {
-                    FREAD(g_node[ii].datanode[kk].datanodePeer2HAIP[nn], 1, CM_IP_LENGTH, fd);
-                    g_node[ii].datanode[kk].datanodePeer2HAIP[nn][CM_IP_LENGTH - 1] = '\0';
-                    check_input_for_security(g_node[ii].datanode[kk].datanodePeer2HAIP[nn]);
+                    FREAD(&g_node[ii].datanode[kk].datanodePeer2HAListenCount, 1, sizeof(uint32), fd);
+                    if (g_node[ii].datanode[kk].datanodePeer2HAListenCount > CM_IP_NUM) {
+                            goto read_failed;
+                    }
+                    for (nn = 0; nn < CM_IP_NUM; nn++) {
+                        FREAD(g_node[ii].datanode[kk].datanodePeer2HAIP[nn], 1, CM_IP_LENGTH, fd);
+                        g_node[ii].datanode[kk].datanodePeer2HAIP[nn][CM_IP_LENGTH - 1] = '\0';
+                        check_input_for_security(g_node[ii].datanode[kk].datanodePeer2HAIP[nn]);
+                    }
+                    FREAD(&g_node[ii].datanode[kk].datanodePeer2HAPort, 1, sizeof(uint32), fd);
+                    FREAD(&g_node[ii].datanode[kk].datanodePeer2Role, 1, sizeof(uint32), fd);
                 }
-                FREAD(&g_node[ii].datanode[kk].datanodePeer2HAPort, 1, sizeof(uint32), fd);
-                FREAD(&g_node[ii].datanode[kk].datanodePeer2Role, 1, sizeof(uint32), fd);
             }
         }
-
         FREAD(&g_node[ii].etcd, 1, sizeof(uint32), fd);
 
         if (g_node[ii].etcd == 1) {
             g_etcd_num++;
         }
 
+        /* calculate coordinate group number */
         if (g_node[ii].coordinate == 1) {
             g_coordinator_num++;
+            g_cluster_total_instance_group_num++;
         }
 
         FREAD(&g_node[ii].etcdId, 1, sizeof(uint32), fd);
@@ -580,6 +647,9 @@ int read_config_file(const char* file_path, int* err_no)
             (max_etcdpath_len < strlen(g_node[ii].etcdDataPath)) ? strlen(g_node[ii].etcdDataPath) : max_etcdpath_len;
 
         FREAD(&g_node[ii].etcdClientListenIPCount, 1, sizeof(uint32), fd);
+        if (g_node[ii].etcdClientListenIPCount > CM_IP_NUM) {
+            goto read_failed;
+        }
         for (kk = 0; kk < CM_IP_NUM; kk++) {
             FREAD(g_node[ii].etcdClientListenIPs[kk], 1, CM_IP_LENGTH, fd);
             g_node[ii].etcdClientListenIPs[kk][CM_IP_LENGTH - 1] = '\0';
@@ -587,6 +657,9 @@ int read_config_file(const char* file_path, int* err_no)
         }
         FREAD(&g_node[ii].etcdClientListenPort, 1, sizeof(uint32), fd);
         FREAD(&g_node[ii].etcdHAListenIPCount, 1, sizeof(uint32), fd);
+        if (g_node[ii].etcdHAListenIPCount > CM_IP_NUM) {
+            goto read_failed;
+        }
         for (kk = 0; kk < CM_IP_NUM; kk++) {
             FREAD(g_node[ii].etcdHAListenIPs[kk], 1, CM_IP_LENGTH, fd);
             g_node[ii].etcdHAListenIPs[kk][CM_IP_LENGTH - 1] = '\0';
@@ -598,16 +671,14 @@ int read_config_file(const char* file_path, int* err_no)
         FREAD(&g_node[ii].sctpEndPort, 1, sizeof(uint32), fd);
 
         current_pos = ftell(fd);
-
         if (current_pos == -1L) {
-            goto read_failed;        
+            goto read_failed;
         }
-        
         body_aglinment_size =
             (current_pos / AGLINMENT_SIZE + ((current_pos % AGLINMENT_SIZE == 0) ? 0 : 1)) * AGLINMENT_SIZE;
 
         if (fseek(fd, (off_t)body_aglinment_size, SEEK_SET)) {
-            goto read_failed;        
+            goto read_failed;
         }
     }
 
@@ -615,7 +686,7 @@ int read_config_file(const char* file_path, int* err_no)
     fclose(fd);
     return 0;
 read_failed:
-    if (NULL != g_node) {
+    if (g_node != NULL) {
         free(g_node);
         g_node = NULL;
     }
@@ -626,15 +697,16 @@ read_failed:
     g_dn_replication_num = 0;
     g_gtm_num = 0;
     *err_no = errno;
-    //test only dn cluster
+    /* test only dn cluster */
     g_multi_az_cluster = false;
+    g_one_master_multi_slave = false;
     return READ_FILE_ERROR;
 }
 
 void set_para_for_cm_read(logicClusterList lcList)
 {
     int rcs = 0;
-    char* lcName = NULL;
+    char *lcName = NULL;
 
     max_logic_cluster_name_len = 0;
     rcs = memset_s(g_logicClusterStaticConfig,
@@ -661,12 +733,12 @@ int read_logic_cluster_config_files(const char* file_path, int* err_no)
     int rcs = memset_s(&lcList, sizeof(logicClusterList), 0, sizeof(logicClusterList));
     securec_check_c(rcs, "\0", "\0");
 
-    // g_node not null means cm read
+    /* g_node not null means cm read */
     if (g_node != NULL)
         g_isCmRead = true;
 
     status = read_logic_cluster_name(file_path, lcList, err_no);
-    if (0 == status) {
+    if (status == 0) {
         status = read_all_logic_config_file(lcList, err_no);
     }
 
@@ -675,7 +747,7 @@ int read_logic_cluster_config_files(const char* file_path, int* err_no)
 
 int read_lc_config_file(const char* file_path, int* err_no)
 {
-    FILE* fd = NULL;
+    FILE *fd = NULL;
     uint32 ii = 0;
     uint32 header_size = 0;
     uint32 header_aglinment_size = 0;
@@ -707,32 +779,30 @@ int read_lc_config_file(const char* file_path, int* err_no)
         goto read_failed;
     }
 
-    // The cluster must be primary_standby_salve
+    /* The cluster must be primary_standby_salve */
     g_node_num = g_nodeHeader.nodeCount;
-    if (unlikely(g_node_num > CM_NODE_MAXNUM)) {
+    if (g_node_num > CM_NODE_MAXNUM) {
         fclose(fd);
         return READ_FILE_ERROR;
     }
 
-    if (NULL != g_node) {
+    if (g_node != NULL) {
         free(g_node);
         g_node = NULL;
     }
 
-    if (NULL == g_node) {
-        g_node = (staticNodeConfig*)malloc(sizeof(staticNodeConfig) * g_node_num);
-        if (NULL == g_node) {
-            fclose(fd);
-            return OUT_OF_MEMORY;
-        }
+    g_node = (staticNodeConfig*)malloc(sizeof(staticNodeConfig) * g_node_num);
+    if (g_node == NULL) {
+        fclose(fd);
+        return OUT_OF_MEMORY;
     }
 
     for (ii = 0; ii < g_node_num; ii++) {
-        int jj = 0;
+        uint32 jj = 0;
         uint32 kk = 0;
         long body_aglinment_size = 0;
 
-        // read node info
+        /* read node info */
         FREAD(&g_node[ii].crc, 1, sizeof(uint32), fd);
         FREAD(&g_node[ii].node, 1, sizeof(uint32), fd);
         FREAD(g_node[ii].nodeName, 1, (CM_NODE_NAME - 1), fd);
@@ -743,19 +813,25 @@ int read_lc_config_file(const char* file_path, int* err_no)
             (max_node_name_len < strlen(g_node[ii].nodeName)) ? (uint32)strlen(g_node[ii].nodeName) : max_node_name_len;
 
         FREAD(&g_node[ii].backIpCount, 1, sizeof(uint32), fd);
+        if (g_node[ii].backIpCount > CM_IP_NUM) {
+            goto read_failed;
+        }
         for (jj = 0; jj < CM_IP_NUM; jj++) {
             FREAD(g_node[ii].backIps[jj], 1, CM_IP_LENGTH, fd);
             g_node[ii].backIps[jj][CM_IP_LENGTH - 1] = '\0';
             check_input_for_security(g_node[ii].backIps[jj]);
         }
         FREAD(&g_node[ii].sshCount, 1, sizeof(uint32), fd);
+        if (g_node[ii].sshCount > CM_IP_NUM) {
+            goto read_failed;
+        }
         for (jj = 0; jj < CM_IP_NUM; jj++) {
             FREAD(g_node[ii].sshChannel[jj], 1, CM_IP_LENGTH, fd);
             g_node[ii].sshChannel[jj][CM_IP_LENGTH - 1] = '\0';
             check_input_for_security(g_node[ii].sshChannel[jj]);
         }
 
-        // read DNs info
+        /* read DNs info */
         FREAD(&g_node[ii].datanodeCount, 1, sizeof(uint32), fd);
 
         if (g_node[ii].datanodeCount > CM_MAX_DATANODE_PER_NODE) {
@@ -763,7 +839,7 @@ int read_lc_config_file(const char* file_path, int* err_no)
         }
 
         for (kk = 0; kk < g_node[ii].datanodeCount; kk++) {
-            int nn = 0;
+            uint32 nn = 0;
 
             FREAD(&g_node[ii].datanode[kk].datanodeId, 1, sizeof(uint32), fd);
             FREAD(&g_node[ii].datanode[kk].datanodeMirrorId, 1, sizeof(uint32), fd);
@@ -780,6 +856,9 @@ int read_lc_config_file(const char* file_path, int* err_no)
                                    : max_datapath_len;
 
             FREAD(&g_node[ii].datanode[kk].datanodeListenCount, 1, sizeof(uint32), fd);
+            if (g_node[ii].datanode[kk].datanodeListenCount > CM_IP_NUM) {
+                    goto read_failed;
+            }
             for (nn = 0; nn < CM_IP_NUM; nn++) {
                 FREAD(g_node[ii].datanode[kk].datanodeListenIP[nn], 1, CM_IP_LENGTH, fd);
                 g_node[ii].datanode[kk].datanodeListenIP[nn][CM_IP_LENGTH - 1] = '\0';
@@ -788,6 +867,9 @@ int read_lc_config_file(const char* file_path, int* err_no)
             FREAD(&g_node[ii].datanode[kk].datanodePort, 1, sizeof(uint32), fd);
             FREAD(&g_node[ii].datanode[kk].datanodeRole, 1, sizeof(uint32), fd);
             FREAD(&g_node[ii].datanode[kk].datanodeLocalHAListenCount, 1, sizeof(uint32), fd);
+            if (g_node[ii].datanode[kk].datanodeLocalHAListenCount > CM_IP_NUM) {
+                    goto read_failed;
+            }
             for (nn = 0; nn < CM_IP_NUM; nn++) {
                 FREAD(g_node[ii].datanode[kk].datanodeLocalHAIP[nn], 1, CM_IP_LENGTH, fd);
                 g_node[ii].datanode[kk].datanodeLocalHAIP[nn][CM_IP_LENGTH - 1] = '\0';
@@ -799,6 +881,9 @@ int read_lc_config_file(const char* file_path, int* err_no)
             check_input_for_security(g_node[ii].datanode[kk].datanodePeerDataPath);
 
             FREAD(&g_node[ii].datanode[kk].datanodePeerHAListenCount, 1, sizeof(uint32), fd);
+            if (g_node[ii].datanode[kk].datanodePeerHAListenCount > CM_IP_NUM) {
+                    goto read_failed;
+            }
             for (nn = 0; nn < CM_IP_NUM; nn++) {
                 FREAD(g_node[ii].datanode[kk].datanodePeerHAIP[nn], 1, CM_IP_LENGTH, fd);
                 g_node[ii].datanode[kk].datanodePeerHAIP[nn][CM_IP_LENGTH - 1] = '\0';
@@ -811,6 +896,9 @@ int read_lc_config_file(const char* file_path, int* err_no)
             check_input_for_security(g_node[ii].datanode[kk].datanodePeer2DataPath);
 
             FREAD(&g_node[ii].datanode[kk].datanodePeer2HAListenCount, 1, sizeof(uint32), fd);
+            if (g_node[ii].datanode[kk].datanodePeer2HAListenCount > CM_IP_NUM) {
+                    goto read_failed;
+            }
             for (nn = 0; nn < CM_IP_NUM; nn++) {
                 FREAD(g_node[ii].datanode[kk].datanodePeer2HAIP[nn], 1, CM_IP_LENGTH, fd);
                 g_node[ii].datanode[kk].datanodePeer2HAIP[nn][CM_IP_LENGTH - 1] = '\0';
@@ -824,23 +912,20 @@ int read_lc_config_file(const char* file_path, int* err_no)
         FREAD(&g_node[ii].sctpEndPort, 1, sizeof(uint32), fd);
 
         current_pos = ftell(fd);
-        
         if (current_pos == -1L) {
-            goto read_failed;        
+            goto read_failed;
         }
-        
         body_aglinment_size =
             (current_pos / AGLINMENT_SIZE + ((current_pos % AGLINMENT_SIZE == 0) ? 0 : 1)) * AGLINMENT_SIZE;
 
-        if (fseek(fd, (off_t)body_aglinment_size, SEEK_SET)) {
+        if (fseek(fd, (off_t)body_aglinment_size, SEEK_SET))
             goto read_failed;
-        }
     }
 
     fclose(fd);
     return 0;
 read_failed:
-    if (NULL != g_node) {
+    if (g_node != NULL) {
         free(g_node);
         g_node = NULL;
     }
@@ -850,13 +935,13 @@ read_failed:
     return READ_FILE_ERROR;
 }
 
-// g_isCmRead means whether need save data in global var
+/* g_isCmRead means whether need save data in global var */
 void set_cm_read_flag(bool falg)
 {
     g_isCmRead = falg;
 }
 
-// read the logic_cluster_name.txt file
+/* read the logic_cluster_name.txt file */
 int read_logic_cluster_name(const char* file_path, logicClusterList& lcList, int* err_no)
 {
     FILE* fd = NULL;
@@ -888,28 +973,28 @@ int read_logic_cluster_name(const char* file_path, logicClusterList& lcList, int
     return 0;
 }
 
-int read_all_logic_config_file(logicClusterList lcList, int* err_no)
+static int read_all_logic_config_file(logicClusterList lcList, int* err_no)
 {
     uint32 logic_cluster_index = 0;
     int status = 0;
 
     for (logic_cluster_index = 0; logic_cluster_index < lcList.logicClusterCount; logic_cluster_index++) {
         status = read_logic_config_file(lcList.lcInfoArray[logic_cluster_index], err_no);
-        // means has found dn's logicCluster
+        /* means has found dn's logicCluster */
         if (!g_isCmRead && g_logicClusterName[0] != '\0') {
             return 0;
         }
-        if (0 == status && g_logicClusterStaticConfig[logic_cluster_index].logicClusterNodeHeader.node == 0) {
+        if (status == 0 && g_logicClusterStaticConfig[logic_cluster_index].logicClusterNodeHeader.node == 0) {
             *err_no = errno;
             return READ_FILE_ERROR;
-        } else if (0 != status) {
+        } else if (status != 0) {
             return status;
         }
     }
     return 0;
 }
 
-int read_logic_config_file(logicClusterInfo lcInfo, int* err_no)
+static int read_logic_config_file(logicClusterInfo lcInfo, int* err_no)
 {
     FILE* fd = NULL;
     int rcs = 0;
@@ -929,18 +1014,19 @@ int read_logic_config_file(logicClusterInfo lcInfo, int* err_no)
     logicClusterStaticConfig* LCStaticConfig = &g_logicClusterStaticConfig[lcInfo.logicClusterId];
 
     rcs = cmconfig_getenv("GAUSSHOME", exec_path, sizeof(exec_path));
-    if (EOK != rcs) {
+    if (rcs != EOK) {
         fprintf(stderr, "Get GAUSSHOME failed, please check.\n");
         return -1;
     } else {
-        rcs = snprintf_s(file_path,
+        rc = snprintf_s(file_path,
             MAX_PATH_LEN,
             MAX_PATH_LEN - 1,
             "%s/bin/%s.cluster_static_config",
             exec_path,
             lcInfo.logicClusterName);
-        securec_check_ss_c(rcs, "\0", "\0");
+        securec_check_ss_c(rc, "\0", "\0");
     }
+    canonicalize_path(file_path);
 
     fd = fopen(file_path, "r");
     if (fd == NULL) {
@@ -967,12 +1053,13 @@ int read_logic_config_file(logicClusterInfo lcInfo, int* err_no)
         READ_LOGICAL_CONFIG_FAILED;
 
     logicClusterNodeNum = LCStaticConfig->logicClusterNodeHeader.nodeCount;
-    /* Check whether the number of logic cluster nodes read from the configuration file is greater
-     *  than the maximum number limit of logic cluster nodes.
+    /*
+     * Check whether the number of logic cluster nodes read from the configuration file is greater
+     * than the maximum number limit of logic cluster nodes.
      */
     if (logicClusterNodeNum == 0 || logicClusterNodeNum > CM_NODE_MAXNUM) {
         fprintf(stderr,
-            "The logic cluster node number [count=%d] is greater than the max node number [max_num=%d].\n",
+            "The logic cluster node number [count=%u] is greater than the max node number [max_num=%d].\n",
             logicClusterNodeNum,
             CM_NODE_MAXNUM);
         fclose(fd);
@@ -980,32 +1067,32 @@ int read_logic_config_file(logicClusterInfo lcInfo, int* err_no)
     }
 
     if (g_isCmRead) {
-        /*initialize logic cluster node ptr to reread the node info*/
-        if (NULL != LCStaticConfig->logicClusterNode) {
+        /* initialize logic cluster node ptr to reread the node info */
+        if (LCStaticConfig->logicClusterNode != NULL) {
             free(LCStaticConfig->logicClusterNode);
             LCStaticConfig->logicClusterNode = NULL;
         }
         LCStaticConfig->logicClusterNode =
             (staticLogicNodeConfig*)malloc(sizeof(staticLogicNodeConfig) * logicClusterNodeNum);
-        if (NULL == LCStaticConfig->logicClusterNode) {
+        if (LCStaticConfig->logicClusterNode == NULL) {
             fclose(fd);
             return OUT_OF_MEMORY;
         } else {
-            rc = memset_s(LCStaticConfig->logicClusterNode,
+            rcs = memset_s(LCStaticConfig->logicClusterNode,
                 sizeof(staticLogicNodeConfig) * logicClusterNodeNum,
                 0,
                 sizeof(staticLogicNodeConfig) * logicClusterNodeNum);
-            securec_check_c(rc, "\0", "\0");
+            securec_check_c(rcs, "\0", "\0");
         }
     }
 
     for (ii = 0; ii < logicClusterNodeNum; ii++) {
-        int jj = 0;
+        uint32 jj = 0;
         uint32 kk = 0;
         long body_aglinment_size = 0;
         uint32 datanode_index = 0;
 
-        // read node header info
+        /* read node header info */
         if (g_isCmRead) {
             FREAD(&LCStaticConfig->logicClusterNode[ii].crc, 1, sizeof(uint32), fd);
             FREAD(&LCStaticConfig->logicClusterNode[ii].node, 1, sizeof(uint32), fd);
@@ -1013,26 +1100,32 @@ int read_logic_config_file(logicClusterInfo lcInfo, int* err_no)
             LCStaticConfig->logicClusterNode[ii].nodeName[CM_NODE_NAME - 1] = '\0';
             check_input_for_security(LCStaticConfig->logicClusterNode[ii].nodeName);
             FREAD(&LCStaticConfig->logicClusterNode[ii].backIpCount, 1, sizeof(uint32), fd);
+            if (LCStaticConfig->logicClusterNode[ii].backIpCount > CM_IP_NUM) {
+                goto read_failed;
+            }
             for (jj = 0; jj < CM_IP_NUM; jj++) {
                 FREAD(LCStaticConfig->logicClusterNode[ii].backIps[jj], 1, CM_IP_LENGTH, fd);
                 LCStaticConfig->logicClusterNode[ii].backIps[jj][CM_IP_LENGTH - 1] = '\0';
                 check_input_for_security(LCStaticConfig->logicClusterNode[ii].backIps[jj]);
             }
             FREAD(&LCStaticConfig->logicClusterNode[ii].sshCount, 1, sizeof(uint32), fd);
+            if (LCStaticConfig->logicClusterNode[ii].sshCount > CM_IP_NUM) {
+                goto read_failed;
+            }
             for (jj = 0; jj < CM_IP_NUM; jj++) {
                 FREAD(LCStaticConfig->logicClusterNode[ii].sshChannel[jj], 1, CM_IP_LENGTH, fd);
                 LCStaticConfig->logicClusterNode[ii].sshChannel[jj][CM_IP_LENGTH - 1] = '\0';
                 check_input_for_security(LCStaticConfig->logicClusterNode[ii].sshChannel[jj]);
             }
 
-            // find the correspond node in g_node
+            /* find the correspond node in g_node */
             for (node_index = 0; node_index < g_nodeHeader.nodeCount; node_index++) {
                 if (g_node[node_index].node == LCStaticConfig->logicClusterNode[ii].node) {
                     break;
                 }
             }
         } else {
-            /*seek to datanodeInfo*/
+            /* seek to datanodeInfo */
             current_pos = ftell(fd);
             int node_head_size = sizeof(uint32) * 4 + (CM_NODE_NAME - 1) + (CM_IP_NUM * CM_IP_LENGTH * 2);
             body_aglinment_size = current_pos + (long)node_head_size;
@@ -1041,10 +1134,11 @@ int read_logic_config_file(logicClusterInfo lcInfo, int* err_no)
             }
         }
 
-        // read DNs info, the datanodeCount is the num of datanode in logic cluster
+        /* read DNs info, the datanodeCount is the num of datanode in logic cluster */
         FREAD(&datanodeCount, 1, sizeof(uint32), fd);
-        /* Check whether the number of data nodes read from the configuration file is greater
-         *  than the maximum data node limit of a single node.
+        /*
+         * Check whether the number of data nodes read from the configuration file is greater
+         * than the maximum data node limit of a single node.
          */
         if (datanodeCount > CM_MAX_DATANODE_PER_NODE) {
             fprintf(stderr,
@@ -1064,7 +1158,7 @@ int read_logic_config_file(logicClusterInfo lcInfo, int* err_no)
 
             if (g_isCmRead) {
                 LCStaticConfig->logicClusterNode[ii].datanodeId[kk] = datanodeId;
-                // Traverse all nodes and find the corresponding datanodeid and assignment for LogicClusterName
+                /* Traverse all nodes and find the corresponding datanodeid and assignment for LogicClusterName */
                 for (datanode_index = 0; datanode_index < g_node[node_index].datanodeCount; datanode_index++) {
                     if (g_node[node_index].datanode[datanode_index].datanodeId ==
                         LCStaticConfig->logicClusterNode[ii].datanodeId[kk]) {
@@ -1082,7 +1176,7 @@ int read_logic_config_file(logicClusterInfo lcInfo, int* err_no)
                 return 0;
             }
 
-            /*seek to next datanode*/
+            /* seek to next datanode */
             current_pos = ftell(fd);
             body_aglinment_size = current_pos + sizeof(dataNodeInfo) - sizeof(uint32) -
                                   sizeof(peerDatanodeInfo) * CM_MAX_DATANODE_STANDBY_NUM - CM_LOGIC_CLUSTER_NAME_LEN;
@@ -1091,7 +1185,7 @@ int read_logic_config_file(logicClusterInfo lcInfo, int* err_no)
             }
         }
 
-        /*seek to next node*/
+        /* seek to next node */
         current_pos = ftell(fd) + (long)(sizeof(uint32) * 2);
         body_aglinment_size =
             (current_pos / AGLINMENT_SIZE + ((current_pos % AGLINMENT_SIZE == 0) ? 0 : 1)) * AGLINMENT_SIZE;
@@ -1099,7 +1193,7 @@ int read_logic_config_file(logicClusterInfo lcInfo, int* err_no)
             READ_LOGICAL_CONFIG_FAILED;
         }
     }
-    // means not found dn's logicCluster
+    /* means not found dn's logicCluster */
     if (!g_isCmRead) {
         g_logicClusterName[0] = '\0';
     }
@@ -1129,28 +1223,44 @@ bool read_single_file_local(uint32 node_index)
     bool isLocal = false;
     for(uint32 i = 0; i < g_node_num; i++) {
         find = false;
+        if (node_index >= CM_MAX_DATANODE_PER_NODE) {
+            break;
+        }
         for(uint32 j = 0; j < g_node[i].datanodeCount; j++) {
-            if(0 == strcmp(g_node[node_index].datanode[node_index].datanodeLocalDataPath, g_node[i].datanode[j].datanodeLocalDataPath) ) {
+            if(strcmp(g_node[node_index].datanode[node_index].datanodeLocalDataPath,
+                g_node[i].datanode[j].datanodeLocalDataPath) == 0) {
                 if(g_nodeHeader.node == g_node[i].node) {
                     isLocal = true;
                 }
                 find = true;
                 g_node[i].datanodeCount = 1;
                 if(j > 0) {
-                    ret = memcpy_s((void *)(&(g_node[i].datanode[0])), sizeof(dataNodeInfo), (void*)(&(g_node[i].datanode[j])),sizeof(dataNodeInfo));
+                    ret = memcpy_s((void *)(&(g_node[i].datanode[0])),
+                                  sizeof(dataNodeInfo),
+                                  (void*)(&(g_node[i].datanode[j])),
+                                  sizeof(dataNodeInfo));
                     securec_check_c(ret,"\0", "\0");
                 }
             }
             for(uint32 m = 0; (m < g_dn_replication_num - 1) && !find; m++) {
-                if(0 == strcmp(g_node[node_index].datanode[node_index].peerDatanodes[m].datanodePeerDataPath, g_node[i].datanode[j].datanodeLocalDataPath) 
-                    && 0 == strcmp(g_node[node_index].datanode[node_index].peerDatanodes[m].datanodePeerHAIP[0], g_node[i].datanode[j].datanodeListenIP[0])) {
+                if (m >= CM_MAX_DATANODE_STANDBY_NUM) {
+                    break;
+                }
+
+                if(strcmp(g_node[node_index].datanode[node_index].peerDatanodes[m].datanodePeerDataPath,
+                    g_node[i].datanode[j].datanodeLocalDataPath) == 0 
+                    && strcmp(g_node[node_index].datanode[node_index].peerDatanodes[m].datanodePeerHAIP[0],
+                        g_node[i].datanode[j].datanodeListenIP[0]) == 0) {
                     if(g_nodeHeader.node == g_node[i].node) {
                         isLocal = false;
                     }
                     find = true;
                     g_node[i].datanodeCount = 1;
                     if(j > 0) {
-                        ret = memcpy_s((void *)(&(g_node[i].datanode[0])), sizeof(dataNodeInfo), (void*)(&(g_node[i].datanode[j])),sizeof(dataNodeInfo));
+                        ret = memcpy_s((void *)(&(g_node[i].datanode[0])),
+                                      sizeof(dataNodeInfo),
+                                      (void *)(&(g_node[i].datanode[j])),
+                                      sizeof(dataNodeInfo));
                         securec_check_c(ret,"\0", "\0");
                     }
                     break;
@@ -1179,12 +1289,14 @@ int read_single_file(const char *file_path, int *err_no, uint32 nodeId, const ch
     bool find = false;
     bool isLocal = false;
     for(uint32 i = 0; i < g_node_num; i++) {
+        if(g_node[i].datanodeCount > CM_MAX_DATANODE_PER_NODE) {
+            break;
+        }
         if(g_node[i].node == nodeId) {
             for(uint32 j = 0; j < g_node[i].datanodeCount; j++) {
                 if(0 == strcmp(dataPath, g_node[i].datanode[j].datanodeLocalDataPath) ) {
                     node_index = i;
                     find = true;
-                    break;
                 }
             }
         }
@@ -1198,3 +1310,4 @@ int read_single_file(const char *file_path, int *err_no, uint32 nodeId, const ch
     }
     return 0;
 }
+

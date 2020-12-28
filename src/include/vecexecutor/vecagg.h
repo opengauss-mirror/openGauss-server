@@ -12,10 +12,10 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- *
+ * 
  * vecagg.h
- *
- *
+ * 
+ * 
  * IDENTIFICATION
  *        src/include/vecexecutor/vecagg.h
  *
@@ -57,10 +57,10 @@ typedef struct SortDistinct {
 
 class BaseAggRunner : public hashBasedOperator {
 public:
-    BaseAggRunner(VecAggState* runtime, bool is_hash_agg);
+    BaseAggRunner(VecAggState* runtime, bool isHashAgg);
     BaseAggRunner();
 
-    void init_aggInfo(int agg_num, VecAggInfo* agg_info);
+    void init_aggInfo(int agg_num, VecAggInfo* aggInfo);
 
     virtual bool ResetNecessary(VecAggState* node) = 0;
 
@@ -76,9 +76,9 @@ public:
     void BatchAggregation(VectorBatch* batch);
 
     template <bool simpleKey>
-    bool match_key(VectorBatch* batch, int batch_idx, hashCell* cell);
+    bool match_key(VectorBatch* batch, int batchIdx, hashCell* cell);
 
-    void AggregationOnScalar(VecAggInfo* agg_info, ScalarVector* p_vector, int idx, hashCell** location);
+    void AggregationOnScalar(VecAggInfo* aggInfo, ScalarVector* pVector, int idx, hashCell** location);
 
     // build scan batch
     void BuildScanBatchSimple(hashCell* cell);
@@ -89,21 +89,21 @@ public:
     VectorBatch* ProducerBatch();
 
     /* Filter repeat value which be used when agg need distinct.*/
-    bool FilterRepeatValue(FmgrInfo* equalfns, int curr_set, int aggno, bool first);
+    bool FilterRepeatValue(FmgrInfo* equalfns, int currentSet, int aggno, bool first);
 
     /*Add for sort agg*/
-    void BatchSortAggregation(int i, int work_mem, int max_mem, int plan_id, int dop);
+    void BatchSortAggregation(int i, int workMem, int maxMem, int planId, int dop);
 
-    void initialize_sortstate(int work_mem, int max_mem, int plan_id, int dop);
+    void initialize_sortstate(int workMem, int maxMem, int planId, int dop);
 
     void build_batch();
 
     /*keep last values, when need distinct operation. This value need compare with the values of next batch*/
-    void copyLastValues(Oid type_oid, ScalarValue m_vals, int aggno, int curr_set);
+    void copyLastValues(Oid typOid, ScalarValue m_vals, int aggno, int currentSet);
 
     void BatchNoSortAgg(VectorBatch* batch);
 
-    void AppendBatchForSortAgg(VectorBatch* batch, int start, int end, int curr_set);
+    void AppendBatchForSortAgg(VectorBatch* batch, int start, int end, int currentSet);
 
 public:
     VecAggState* m_runtime;
@@ -171,28 +171,28 @@ private:
 
 #define DO_AGGEGATION(tbl) (((BaseAggRunner*)tbl)->Run)()
 
-template <bool simple, bool sort_agg>
+template <bool simple, bool sortAgg>
 void BaseAggRunner::initCellValue(VectorBatch* batch, hashCell* cell, int idx)
 {
     int k;
-    ScalarVector* p_vector = NULL;
+    ScalarVector* pVector = NULL;
 
     for (k = 0; k < m_cellVarLen; k++) {
-        p_vector = &batch->m_arr[m_cellBatchMap[k]];
+        pVector = &batch->m_arr[m_cellBatchMap[k]];
 
-        if (simple || p_vector->m_desc.encoded == false) {
-            cell->m_val[k].val = p_vector->m_vals[idx];
-            cell->m_val[k].flag = p_vector->m_flag[idx];
+        if (simple || pVector->m_desc.encoded == false) {
+            cell->m_val[k].val = pVector->m_vals[idx];
+            cell->m_val[k].flag = pVector->m_flag[idx];
         } else {
-            if (likely(p_vector->IsNull(idx) == false)) {
+            if (likely(pVector->IsNull(idx) == false)) {
                 /* For hashagg, CurrentMemoryContext is hashcell context */
-                cell->m_val[k].val = sort_agg ? addToVarBuffer(m_sortCurrentBuf, p_vector->m_vals[idx])
-                                             : addVariable(CurrentMemoryContext, p_vector->m_vals[idx]);
-                if (!sort_agg && m_tupleCount >= 0)
-                    m_colWidth += VARSIZE_ANY(p_vector->m_vals[idx]);
+                cell->m_val[k].val = sortAgg ? addToVarBuffer(m_sortCurrentBuf, pVector->m_vals[idx])
+                                             : addVariable(CurrentMemoryContext, pVector->m_vals[idx]);
+                if (!sortAgg && m_tupleCount >= 0)
+                    m_colWidth += VARSIZE_ANY(pVector->m_vals[idx]);
             }
 
-            cell->m_val[k].flag = p_vector->m_flag[idx];
+            cell->m_val[k].flag = pVector->m_flag[idx];
         }
     }
 
@@ -206,38 +206,39 @@ void BaseAggRunner::initCellValue(VectorBatch* batch, hashCell* cell, int idx)
     }
 }
 
-template <bool simple_key>
-bool BaseAggRunner::match_key(VectorBatch* batch, int batch_idx, hashCell* cell)
+template <bool simpleKey>
+bool BaseAggRunner::match_key(VectorBatch* batch, int batchIdx, hashCell* cell)
 {
     bool match = true;
     int i;
-    ScalarVector* p_vector = NULL;
-    hashVal* hash_val = NULL;
+    ScalarVector* pVector = NULL;
+    hashVal* hashval = NULL;
     FunctionCallInfoData fcinfo;
     Datum args[2];
 
     fcinfo.arg = &args[0];
 
     for (i = 0; i < m_key; i++) {
-        p_vector = &batch->m_arr[m_keyIdx[i]];
-        hash_val = &cell->m_val[m_keyIdxInCell[i]];
+        pVector = &batch->m_arr[m_keyIdx[i]];
+        hashval = &cell->m_val[m_keyIdxInCell[i]];
 
-        if (BOTH_NOT_NULL(p_vector->m_flag[batch_idx], hash_val->flag)) {
-            if (simple_key || p_vector->m_desc.encoded == false) {
-                if (p_vector->m_vals[batch_idx] == hash_val->val)
+        if (BOTH_NOT_NULL(pVector->m_flag[batchIdx], hashval->flag)) {
+            if (simpleKey || pVector->m_desc.encoded == false) {
+                if (pVector->m_vals[batchIdx] == hashval->val)
                     continue;
                 else
                     return false;
             } else {
-                fcinfo.arg[0] = ScalarVector::Decode(p_vector->m_vals[batch_idx]);
-                fcinfo.arg[1] = ScalarVector::Decode(hash_val->val);
+                fcinfo.arg[0] = ScalarVector::Decode(pVector->m_vals[batchIdx]);
+                fcinfo.arg[1] = ScalarVector::Decode(hashval->val);
+                fcinfo.flinfo = (m_eqfunctions + i);
                 match = m_eqfunctions[i].fn_addr(&fcinfo);
                 if (match == false)
                     return false;
             }
-        } else if (IS_NULL(p_vector->m_flag[batch_idx]) && IS_NULL(hash_val->flag))  // both null is equal
+        } else if (IS_NULL(pVector->m_flag[batchIdx]) && IS_NULL(hashval->flag))  // both null is equal
             continue;
-        else if (IS_NULL(p_vector->m_flag[batch_idx]) || IS_NULL(hash_val->flag))
+        else if (IS_NULL(pVector->m_flag[batchIdx]) || IS_NULL(hashval->flag))
             return false;
     }
 

@@ -1,19 +1,8 @@
-/*
+/* ---------------------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2009, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * ---------------------------------------------------------------------------------------
  *
  * vecsubplan.cpp
  *
@@ -26,6 +15,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "access/sysattr.h"
+#include "access/tableam.h"
 #include "executor/executor.h"
 #include "executor/execStream.h"
 #include "vecexecutor/vectorbatch.h"
@@ -37,13 +27,13 @@
 #include "optimizer/clauses.h"
 #include "executor/nodeSubplan.h"
 
-static TupleTableSlot* get_slot_from_batch_row(TupleTableSlot* slot, VectorBatch* batch, int n_row);
+static TupleTableSlot* GetSlotfromBatchRow(TupleTableSlot* slot, VectorBatch* batch, int n_row);
 
 extern ScalarVector* ExecVectorExprEngineSwitchContext(
     ExprState* expr, ExprContext* econtext, bool* pSelection, ScalarVector* pVector, ExprDoneCond* isDone);
 
 /*
- * @Description: execVecHashSubplan
+ * @Description: ExecVecHashSubplan
  * store subselect result in an in-memory hash table
  * @Param[template] subType: subLink type
  * @param[IN] subPlanClause:  VecHash SubPlan state
@@ -127,7 +117,7 @@ static ScalarVector* ExecVecHashSubplan(
             continue;
         }
 
-        slot = get_slot_from_batch_row(slot, batch, i);
+        slot = GetSlotfromBatchRow(slot, batch, i);
         if (slotNoNulls(slot)) {
             if (subPlanClause->havehashrows &&
                     FindTupleHashEntry(subPlanClause->hashtable,
@@ -196,13 +186,13 @@ static ScalarVector* ExecVecHashSubplan(
 }
 
 /*
- * @Description: init_system_columns
+ * @Description: InitSystemColumns
  *    init system column from batch for col-related expression
  * @param[IN] subPlan_syscolumns: system columns of subplan batch
  * @param[IN] batch_syscolumns: system columns of vector batch to be used in expression evaluation
  * @return: void
  */
-static void init_system_columns(SysColContainer* subplan_syscolumns, SysColContainer* batch_syscolumns)
+static void InitSystemColumns(SysColContainer* subplan_syscolumns, SysColContainer* batch_syscolumns)
 {
     subplan_syscolumns->sysColumns = batch_syscolumns->sysColumns;
     subplan_syscolumns->m_ppColumns = New(CurrentMemoryContext) ScalarVector[subplan_syscolumns->sysColumns];
@@ -223,14 +213,14 @@ static void init_system_columns(SysColContainer* subplan_syscolumns, SysColConta
 }
 
 /*
- * @Description: fetch_one_system_column_row_by_idx
+ * @Description: FetchOneSystemColumnRowByIdx
  *    get one system column row from batch for col-related expression
  * @param[IN] subPlan_syscolumns: system columns of subplan batch
  * @param[IN] batch_syscolumns: system columns of vector batch to be used in expression evaluation
  * @param[IN] idx: the index of the outerbatch
  * @return: void
  */
-static void fetch_one_system_column_row_by_idx(
+static void FetchOneSystemColumnRowByIdx(
     SysColContainer* subplan_syscolumns, SysColContainer* batch_syscolumns, int idx)
 {
     ScalarValue val;
@@ -284,7 +274,7 @@ static void FetchOneRowByIdx(SubPlanState* subPlanClause, VectorBatch* batch, in
                 subPlanClause->outExprBatch->FixRowCount();
                 if (batch->m_sysColumns != NULL) {
                     subPlanClause->outExprBatch->m_sysColumns = (SysColContainer*)palloc(sizeof(SysColContainer));
-                    init_system_columns(subPlanClause->outExprBatch->m_sysColumns, batch->m_sysColumns);
+                    InitSystemColumns(subPlanClause->outExprBatch->m_sysColumns, batch->m_sysColumns);
                 }
             }
 
@@ -297,7 +287,7 @@ static void FetchOneRowByIdx(SubPlanState* subPlanClause, VectorBatch* batch, in
                 subPlanClause->innerExprBatch->FixRowCount();
                 if (batch->m_sysColumns != NULL) {
                     subPlanClause->innerExprBatch->m_sysColumns = (SysColContainer*)palloc(sizeof(SysColContainer));
-                    init_system_columns(subPlanClause->innerExprBatch->m_sysColumns, batch->m_sysColumns);
+                    InitSystemColumns(subPlanClause->innerExprBatch->m_sysColumns, batch->m_sysColumns);
                 }
             }
 
@@ -310,7 +300,7 @@ static void FetchOneRowByIdx(SubPlanState* subPlanClause, VectorBatch* batch, in
                 subPlanClause->scanExprBatch->FixRowCount();
                 if (batch->m_sysColumns != NULL) {
                     subPlanClause->scanExprBatch->m_sysColumns = (SysColContainer*)palloc(sizeof(SysColContainer));
-                    init_system_columns(subPlanClause->scanExprBatch->m_sysColumns, batch->m_sysColumns);
+                    InitSystemColumns(subPlanClause->scanExprBatch->m_sysColumns, batch->m_sysColumns);
                 }
             }
 
@@ -323,7 +313,7 @@ static void FetchOneRowByIdx(SubPlanState* subPlanClause, VectorBatch* batch, in
                 subPlanClause->aggExprBatch->FixRowCount();
                 if (batch->m_sysColumns != NULL) {
                     subPlanClause->aggExprBatch->m_sysColumns = (SysColContainer*)palloc(sizeof(SysColContainer));
-                    init_system_columns(subPlanClause->aggExprBatch->m_sysColumns, batch->m_sysColumns);
+                    InitSystemColumns(subPlanClause->aggExprBatch->m_sysColumns, batch->m_sysColumns);
                 }
             }
 
@@ -351,7 +341,7 @@ static void FetchOneRowByIdx(SubPlanState* subPlanClause, VectorBatch* batch, in
         }
 
         if (batch->m_sysColumns != NULL) {
-            fetch_one_system_column_row_by_idx(result_batch->m_sysColumns, batch->m_sysColumns, idx);
+            FetchOneSystemColumnRowByIdx(result_batch->m_sysColumns, batch->m_sysColumns, idx);
         }
     }
 }
@@ -678,7 +668,9 @@ static ScalarVector* ExecVecScanSubplan(
                     }
 
                     found = true;
-                    Datum res = slot_getattr(slot, 1, &is_null);
+                    /* Get the Table Accessor Method*/
+                    Assert(slot->tts_tupleDescriptor != NULL);
+                    Datum res = tableam_tslot_getattr(slot, 1, &is_null);
                     if (pVector->m_desc.typeId == 0) {
                         pVector->m_desc.typeId = slot->tts_tupleDescriptor->attrs[0]->atttypid;
                         pVector->m_desc.encoded = COL_IS_ENCODE(pVector->m_desc.typeId);
@@ -724,7 +716,9 @@ static ScalarVector* ExecVecScanSubplan(
 
                     found = true;
                     /* stash away current value */
-                    dvalue = slot_getattr(slot, 1, &disnull);
+                    /* Get the Table Accessor Method*/
+                    Assert(slot->tts_tupleDescriptor != NULL);
+                    dvalue = tableam_tslot_getattr(slot, 1, &disnull);
                     astate = accumArrayResult(astate, dvalue, disnull, sub_plan->firstColType, oldcontext);
                 } break;
                 case ANY_SUBLINK:
@@ -744,7 +738,9 @@ static ScalarVector* ExecVecScanSubplan(
 
                         prmdata = &(econtext->ecxt_param_exec_vals[paramid]);
                         Assert(prmdata->execPlan == NULL);
-                        prmdata->value = slot_getattr(slot, col, &(prmdata->isnull));
+                        /* Get the Table Accessor Method*/
+                        Assert(slot->tts_tupleDescriptor != NULL);
+                        prmdata->value = tableam_tslot_getattr(slot, col, &(prmdata->isnull));
                         prmdata->isChanged = true;
                         prmdata->valueType = slot->tts_tupleDescriptor->attrs[col - 1]->atttypid;
                         col++;
@@ -869,7 +865,6 @@ ScalarVector* ExecVecSubPlan(
     ScalarVector* retval = NULL;
 
     /* Sanity checks */
-    
     if (sub_plan->subLinkType == CTE_SUBLINK)
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("CTE subplans should not be executed via ExecSubPlan")));
@@ -1265,14 +1260,14 @@ SubPlanState* ExecInitVecSubPlan(SubPlan* subplan, PlanState* parent)
 }
 
 /*
- * @Description: get_slot_from_batch_row
+ * @Description: GetSlotfromBatchRow
  * convert  one row of a batch to a slot
  * @Param[OUT] slot: 	slot to store it in
  * @Param[IN] batch: the batch to be converted
  * @Param[IN] n_row:  the specified row to be converted
  * @return: return a slot
  */
-static TupleTableSlot* get_slot_from_batch_row(TupleTableSlot* slot, VectorBatch* batch, int n_row)
+static TupleTableSlot* GetSlotfromBatchRow(TupleTableSlot* slot, VectorBatch* batch, int n_row)
 {
     int ncols = slot->tts_tupleDescriptor->natts;
     (void)ExecClearTuple(slot);

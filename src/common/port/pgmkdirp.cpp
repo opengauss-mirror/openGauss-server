@@ -33,18 +33,19 @@
 #include "c.h"
 
 #include <sys/stat.h>
+#include <securec.h>
 
 /*
  * main function to make dir
  */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 int pg_mkdir_work(char* path, int omode, bool byGaussdb)
 {
     struct stat sb;
-    mode_t numask, oumask;
+    mode_t numask = 0;
+    mode_t oumask = 0;
     int last, retval;
     char* p = NULL;
+    errno_t rc;
 
     retval = 0;
     p = path;
@@ -98,6 +99,11 @@ int pg_mkdir_work(char* path, int omode, bool byGaussdb)
             (void)umask(oumask);
         }
         /* check for pre-existing directory */
+        rc = memset_s(&sb, sizeof(sb), 0, sizeof(sb));
+        if (rc != EOK) {
+            retval = -1;
+            break;
+        }
         if (stat(path, &sb) == 0) {
             if (!S_ISDIR(sb.st_mode)) {
                 if (last) {
@@ -108,7 +114,7 @@ int pg_mkdir_work(char* path, int omode, bool byGaussdb)
                 retval = -1;
                 break;
             }
-        } else if (mkdir(path, last ? omode : S_IRWXU | S_IRWXG | S_IRWXO) < 0) {
+        } else if (mkdir(path, last ? omode : (S_IRWXU | S_IRWXG | S_IRWXO)) < 0) {
             retval = -1;
             break;
         }
@@ -122,7 +128,6 @@ int pg_mkdir_work(char* path, int omode, bool byGaussdb)
     }
     return retval;
 }
-#pragma GCC diagnostic pop
 
 /*
  * pg_mkdir_p --- create a directory and, if necessary, parent directories

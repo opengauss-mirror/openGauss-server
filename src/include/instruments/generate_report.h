@@ -37,4 +37,3 @@ extern char* Datum_to_string(Datum value, Oid type, bool isnull);
 extern void DeepListFree(List* deepList, bool deep);
 
 #endif
-

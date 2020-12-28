@@ -15,9 +15,8 @@
  *
  * parquet_file_reader.cpp
  *
- *
  * IDENTIFICATION
- *         src/gausskernel/storage/access/dfs/parquet/parquet_file_reader.cpp
+ *    src/gausskernel/storage/access/dfs/parquet/parquet_file_reader.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -27,6 +26,7 @@
 #include "utils/elog.h"
 #include "utils/memutils.h"
 #include "utils/palloc.h"
+#include "access/dfs/dfs_common.h"
 #include "access/dfs/dfs_query.h"
 #include "optimizer/predtest.h"
 
@@ -138,7 +138,6 @@ int64_t ParquetFileReader::readRows(VectorBatch *batch, uint64_t maxRowsReadOnce
     rowsInFile = curRowsInFile + rowsCross;
 
     uint64_t numRowsToRead = calculateRowsToRead(maxRowsReadOnce);
-
     if (!readAndFilter(rowsSkip, numRowsToRead)) {
         fillVectorBatch(batch, numRowsToRead, fileOffset, rowsInFile);
     }
@@ -164,9 +163,10 @@ void ParquetFileReader::initializeColumnReaders(GSInputStream *gsInputStream)
             gsInputStreamCopy = gsInputStream->copy();
         }
         DFS_CATCH();
-        DFS_ERRREPORT_WITHARGS("Error occurs while opening hdfs file %s because of %s, "
-                               "detail can be found in dn log of %s.",
-                               MOD_PARQUET, m_readerState->currentSplit->filePath);
+        DFS_ERRREPORT_WITHARGS(
+            "Error occurs while opening hdfs file %s because of %s, "
+            "detail can be found in dn log of %s.",
+            MOD_PARQUET, m_readerState->currentSplit->filePath);
 
         const Var *var = GetVarFromColumnList(m_readerState->allColumnList, static_cast<int32_t>(i + 1));
 
@@ -283,7 +283,8 @@ List *ParquetFileReader::buildRestriction(RestrictionType type, uint64_t rowGrou
 
         if (restrictRequired[i] && isColumnRequiredToRead(i)) {
             baseRestriction = m_columnReaders[columnIndexInFile(i)]->buildColRestriction(type,
-                m_realParquetFileReader.get(), rowGroupIndex);
+                                                                                         m_realParquetFileReader.get(),
+                                                                                         rowGroupIndex);
             if (baseRestriction != NULL) {
                 fileRestrictionList = lappend(fileRestrictionList, baseRestriction);
             }
@@ -318,7 +319,6 @@ bool ParquetFileReader::readAndFilter(uint64_t rowsSkip, uint64_t numRowsToRead)
 
             /* Read or skip the column batch rows. */
             skipBatch = skipBatch ? true : (checkSkipBatch ? canSkipBatch(numRowsToRead) : false);
-
             if (skipBatch) {
                 m_columnReaders[fileColID]->skip(numRowsToRead);
             } else {
@@ -362,7 +362,8 @@ void ParquetFileReader::fillVectorBatch(VectorBatch *batch, uint64_t numRowsToRe
 
         if (readRequired[mppColID] && targetRequired[mppColID]) {
             ScalarVector *scalorVector = &batch->m_arr[mppColID];
-            (void)m_columnReaders[columnIndexInFile(mppColID)]->fillScalarVector(numRowsToRead, isSelected, scalorVector);
+            (void)m_columnReaders[columnIndexInFile(mppColID)]->fillScalarVector(numRowsToRead, isSelected,
+                                                                                 scalorVector);
         }
     }
 

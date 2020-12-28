@@ -27,6 +27,8 @@
 #ifndef SRC_INCLUDE_DISTRIBUTELAYER_STREAMCORE_H_
 #define SRC_INCLUDE_DISTRIBUTELAYER_STREAMCORE_H_
 
+#include <signal.h>
+
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
@@ -77,7 +79,7 @@ typedef union {
 
     struct {
         gsocket gsock; /* libcomm logic socket */
-    } sctpLayer;
+    } libcomm_layer;
 } StreamIdentity;
 
 typedef struct StreamConnInfo {
@@ -144,23 +146,30 @@ typedef struct TupleVector {
 } TupleVector;
 
 typedef struct StreamSharedContext {
-    MemoryContext localStreamMemoryCtx;
+    MemoryContext localStreamMemoryCtx; /**/
     VectorBatch*** sharedBatches;
     TupleVector*** sharedTuples;
     StringInfo** messages;
     DataStatus** dataStatus;
     bool** is_connect_end;
     int* scanLoc;
-    SctpStreamKey key_s;
+    TcpStreamKey key_s;
     bool vectorized;
     struct hash_entry** poll_entrys;
     struct hash_entry*** quota_entrys;
 } StreamSharedContext;
 
+typedef struct StreamSyncParam {
+    Oid TempNamespace;
+    Oid TempToastNamespace;
+    bool IsBinaryUpgrade;
+    bool CommIpcLog;
+} StreamSyncParam;
+
 class StreamObj : public BaseObject {
 public:
     StreamObj(MemoryContext context, StreamObjType type);
-    virtual ~StreamObj();
+    ~StreamObj();
 
     /* Initiliaze the stream environment. */
     static void startUp();
@@ -194,6 +203,9 @@ public:
 
     /* Get the stream pair. */
     StreamPair* getPair();
+
+    /* Get the stream plan node. */
+    const Stream* getStream();
 
     /* Get stream transport. */
     StreamTransport** getTransport();
@@ -256,6 +268,7 @@ protected:
     /* Parallel description. */
     ParallelDesc m_parallel_desc;
 
+protected:
     /* Global context stream object using. */
     static MemoryContext m_memoryGlobalCxt;
 
@@ -272,7 +285,7 @@ class StreamNodeGroup : public BaseObject {
 public:
     StreamNodeGroup();
 
-    virtual ~StreamNodeGroup();
+    ~StreamNodeGroup();
 
     /* Init stream node group. */
     void Init(int threadNum);
@@ -328,8 +341,11 @@ public:
     /* Pop a stream pair according to key. */
     StreamPair* popStreamPair(StreamKey key);
 
+    /* Get stream pair list */
+    const List* getStreamPairList();
+
     /* Start a stream thread. */
-    void initStreamThread(StreamObj* producer, uint8 smpIdentifier, StreamPair* pair);
+    void initStreamThread(StreamProducer* producer, uint8 smpIdentifier, StreamPair* pair);
 
     /* In the same node group? */
     bool inNodeGroup(ThreadId pid1, ThreadId pid2);
@@ -478,6 +494,6 @@ private:
 };
 
 extern bool IsThreadProcessStreamRecursive();
+extern bool InitStreamObject(PlannedStmt* planStmt);
 
 #endif /* SRC_INCLUDE_DISTRIBUTELAYER_STREAMCORE_H_ */
-

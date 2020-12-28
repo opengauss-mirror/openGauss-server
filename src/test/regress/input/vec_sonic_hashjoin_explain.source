@@ -1,0 +1,51 @@
+-- test explain performance
+create schema sonic_hashjoin_test_explain;
+set current_schema = sonic_hashjoin_test_explain;
+
+create node group group_expr with (datanode1);
+CREATE TABLE sonic_hashjoin_test_explain.VEC_HASHJOIN_TABLE_01_EXP (
+C_INT INT,
+C_BIGINT BIGINT,
+C_SMALLINT SMALLINT,
+a FLOAT,
+b FLOAT4,
+c FLOAT8,
+d numeric,
+e numeric(20,2),
+f decimal,
+g decimal(40,2),
+h real,
+i double precision,
+j boolean
+) with(orientation = column) to group group_expr;
+
+copy VEC_HASHJOIN_TABLE_01_EXP from '@abs_srcdir@/data/vec_sonic_hashjoin_number_1.data' delimiter as '|';
+
+analyze VEC_HASHJOIN_TABLE_01_EXP;
+
+-- test no spill
+set explain_perf_mode = normal;
+explain performance
+select * from VEC_HASHJOIN_TABLE_01_EXP t1 join VEC_HASHJOIN_TABLE_01_EXP t2 on t1.c_int = t2.c_int and t2.c_bigint=t2.c_bigint and t1.c_smallint = t2.c_smallint where t1.a is not null order by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 limit 1000;
+
+-- test spill
+set explain_perf_mode = pretty;
+set query_mem = 0;
+set work_mem = '5MB';
+explain performance select * from VEC_HASHJOIN_TABLE_01_EXP t1 join VEC_HASHJOIN_TABLE_01_EXP t2 on t1.c_int = t2.c_int and t2.c_bigint=t2.c_bigint and t1.c_smallint = t2.c_smallint where t1.a is not null order by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 limit 1000;
+
+set enable_compress_spill = off;
+explain performance select * from VEC_HASHJOIN_TABLE_01_EXP t1 join VEC_HASHJOIN_TABLE_01_EXP t2 on t1.c_int = t2.c_int and t2.c_bigint=t2.c_bigint and t1.c_smallint = t2.c_smallint where t1.a is not null order by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 limit 1000;
+
+reset explain_perf_mode;
+
+-- test respill
+set work_mem = '1MB';
+explain (format xml) select * from VEC_HASHJOIN_TABLE_01_EXP t1 join VEC_HASHJOIN_TABLE_01_EXP t2 on t1.c_int = t2.c_int and t2.c_bigint=t2.c_bigint and t1.c_smallint = t2.c_smallint where t1.a is not null order by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 limit 1000;
+
+explain performance select * from VEC_HASHJOIN_TABLE_01_EXP t1 join VEC_HASHJOIN_TABLE_01_EXP t2 on t1.c_int = t2.c_int and t2.c_bigint=t2.c_bigint and t1.c_smallint = t2.c_smallint where t1.a is not null order by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 limit 1000;
+
+reset query_mem;
+reset work_mem;
+drop schema sonic_hashjoin_test_explain cascade;
+drop node group group_expr;

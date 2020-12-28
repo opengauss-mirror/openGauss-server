@@ -1,0 +1,24 @@
+-- test advisory lock
+start transaction;
+
+select pg_advisory_xact_lock(1);
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "start transaction; select pg_advisory_xact_lock(1); commit;" > /dev/null 2>&1 &
+
+-- test wait event
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select 1 from pgxc_thread_wait_status where wait_event = 'advisory';"
+
+commit;
+
+-- test relation lock
+create table wait_event_tbl(a int, b int) distribute by hash(a);
+
+start transaction;
+
+lock table wait_event_tbl;
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "start transaction; lock table wait_event_tbl; commit;" > /dev/null 2>&1 &
+-- test wait event
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select 1 from pgxc_thread_wait_status where wait_event = 'relation';"
+
+commit;
+
+drop table wait_event_tbl;

@@ -256,15 +256,13 @@ BEGIN
 EXECUTE IMMEDIATE 'start transaction;insert into without_semi_end values(10);end';
 END;
 /
-ERROR:  cannot begin/end transactions in PL/pgSQL
-HINT:  Use a BEGIN block with an EXCEPTION clause instead.
+ERROR:  cannot call transaction commands in EXECUTE IMMEDIATE statement.
 CONTEXT:  PL/pgSQL function inline_code_block line 3 at EXECUTE statement
 BEGIN
 EXECUTE IMMEDIATE 'start transaction;insert into with_semi_end values(10);end;';
 END;
 /
-ERROR:  cannot begin/end transactions in PL/pgSQL
-HINT:  Use a BEGIN block with an EXCEPTION clause instead.
+ERROR:  cannot call transaction commands in EXECUTE IMMEDIATE statement.
 CONTEXT:  PL/pgSQL function inline_code_block line 3 at EXECUTE statement
 --add begin transaction back
 create table test_table(id int, name varchar2(20));

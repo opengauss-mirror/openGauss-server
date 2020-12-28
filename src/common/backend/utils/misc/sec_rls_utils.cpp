@@ -43,9 +43,9 @@
 static bool CheckBypassRlsPolicies(Oid roleid)
 {
     /* Superusers and systemadmin can bypass all RLS policies */
-    if (superuser_arg(roleid) || systemDBA_arg(roleid)) {
+    if (superuser_arg(roleid) || systemDBA_arg(roleid))
         return true;
-    }
+
     return false;
 }
 
@@ -60,7 +60,7 @@ static bool CheckBypassRlsPolicies(Oid roleid)
  */
 EnableRlsFeature CheckEnableRlsPolicies(const Relation relation, Oid roleid)
 {
-    if (RelationIsValid(relation) == false) {
+    if (false == RelationIsValid(relation)) {
         return RLS_DISABLED;
     }
 
@@ -69,12 +69,12 @@ EnableRlsFeature CheckEnableRlsPolicies(const Relation relation, Oid roleid)
     bool forceRlsPolicy = RelationForceRowSecurity(relation);
 
     /* If relation does not enable row-level-security, nothing to do here */
-    if (enableRlsPolicy == false) {
+    if (false == enableRlsPolicy) {
         return RLS_DISABLED;
     }
 
     /* Check whether this role can bypass the row-level-security policy */
-    if (CheckBypassRlsPolicies(roleid) == true) {
+    if (true == CheckBypassRlsPolicies(roleid)) {
         return RLS_DEPEND;
     }
 
@@ -82,7 +82,7 @@ EnableRlsFeature CheckEnableRlsPolicies(const Relation relation, Oid roleid)
      * If FORCE ROW LEVEL SECURITY has not been set on the relation then we
      * should bypass the owner of relation.
      */
-    if ((forceRlsPolicy == false) && (pg_class_ownercheck(RelationGetRelid(relation), roleid) == true)) {
+    if ((false == forceRlsPolicy) && (true == pg_class_ownercheck(RelationGetRelid(relation), roleid))) {
         return RLS_DEPEND;
     }
 
@@ -145,7 +145,7 @@ SelectStmt* MakeRlsSelectStmtForCopyTo(const Relation relation, const CopyStmt* 
             targetList = lappend(targetList, rt);
         }
     }
-    schemaname = get_namespace_name(RelationGetNamespace(relation), true);
+    schemaname = get_namespace_name(RelationGetNamespace(relation));
     relname = pstrdup(RelationGetRelationName(relation));
     rangevar = makeRangeVar(schemaname, relname, -1);
     selectStmt->targetList = targetList;

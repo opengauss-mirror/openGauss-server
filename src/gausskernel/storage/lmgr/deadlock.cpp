@@ -28,7 +28,7 @@
 #include "pgstat.h"
 #include "postmaster/autovacuum.h"
 #include "storage/lmgr.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "storage/proc.h"
 #include "utils/memutils.h"
 
@@ -69,12 +69,12 @@ static bool ExpandConstraints(EDGE *constraints, int nConstraints);
 static bool TopoSort(LOCK *lock, EDGE *constraints, int nConstraints, PGPROC **ordering);
 
 #ifdef DEBUG_DEADLOCK
-static void PrintLockQueue(LOCK *lock, const char *info);
+    static void PrintLockQueue(LOCK *lock, const char *info);
 #endif
 
 /* defence of deadlock checker: running too long */
 static void CheckDeadLockRunningTooLong(int depth)
-{	//check every 4 depth
+{
     if (depth > 0 && ((depth % 4) == 0)) {
         TimestampTz now = GetCurrentTimestamp();
         long secs = 0;
@@ -111,7 +111,7 @@ void InitDeadLockChecking(void)
     MemoryContext oldcxt;
 
     /* Make sure allocations are permanent */
-    oldcxt = MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+    oldcxt = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
     /*
      * FindLockCycle needs at most g_instance.shmem_cxt.MaxBackends entries in visitedProcs[] and
@@ -499,7 +499,7 @@ static bool FindLockCycleRecurse(PGPROC *checkProc, int depth, EDGE *softEdges, 
     }
     /* Mark proc as seen */
     if (t_thrd.storage_cxt.nVisitedProcs >= g_instance.shmem_cxt.MaxBackends) {
-        ereport(ERROR, (errcode(ERRCODE_TOO_MANY_CONNECTIONS),errmsg("Too many visited procs.")));
+        ereport(ERROR, (errcode(ERRCODE_TOO_MANY_CONNECTIONS), errmsg("Too many visited procs.")));
     }
     t_thrd.storage_cxt.visitedProcs[t_thrd.storage_cxt.nVisitedProcs++] = checkProc;
 
@@ -595,7 +595,7 @@ static bool FindLockCycleRecurse(PGPROC *checkProc, int depth, EDGE *softEdges, 
                             }
                             if (!found) {
                                 t_thrd.storage_cxt
-                                    .blocking_autovacuum_proc[t_thrd.storage_cxt.blocking_autovacuum_proc_num++] = proc;
+                                .blocking_autovacuum_proc[t_thrd.storage_cxt.blocking_autovacuum_proc_num++] = proc;
                                 Assert(t_thrd.storage_cxt.blocking_autovacuum_proc_num <=
                                        g_instance.attr.attr_storage.autovacuum_max_workers);
                             }
@@ -965,7 +965,7 @@ void DeadLockReport(void)
  * detects a trivial (two-way) deadlock.  proc1 wants to block for lockmode
  * on lock, but proc2 is already waiting and would be blocked by proc1.
  */
-void RememberSimpleDeadLock(const PGPROC *proc1, LOCKMODE lockmode, const LOCK *lock, const PGPROC *proc2)
+void RememberSimpleDeadLock(PGPROC* proc1, LOCKMODE lockmode, LOCK* lock, PGPROC* proc2)
 {
     DEADLOCK_INFO *info = &t_thrd.storage_cxt.deadlockDetails[0];
 

@@ -106,16 +106,18 @@ typedef FormData_pg_job* Form_pg_job;
 #define Anum_pg_job_this_run_date			15
 #define Anum_pg_job_nspname					16
 
+
+
 /* Type of pg job command. */
-typedef enum {
+typedef enum
+{
 	Job_Submit,
 	Job_ISubmit,
+	Job_ISubmit_Node,
+	Job_ISubmit_Node_Internal,
 	Job_Remove,
-	Job_Change,
-	Job_Broken,
-	Job_Interval,
-	Job_Next_date,
-	Job_What
+	Job_Update,
+	Job_Finish
 } Pgjob_Command_Type;
 
 /* Status of pg job. */
@@ -128,7 +130,8 @@ typedef enum {
 /* Oid of related for delete pg_job. */
 typedef enum {
 	DbOid,
-	UserOid
+	UserOid,
+	RelOid
 } Delete_Pgjob_Oid;
 
 /* Define job status. */
@@ -137,12 +140,18 @@ typedef enum {
 #define PGJOB_FAIL_STATUS   'f'
 #define PGJOB_ABORT_STATUS  'd'
 
+/* job run type */
+#define PGJOB_TYPE_ALL_CN   "ALL_CN"
+#define PGJOB_TYPE_ALL_DN   "ALL_DN"
+#define PGJOB_TYPE_ALL      "ALL_NODE"
+#define PGJOB_TYPE_CCN      "CCN"
+
 extern void update_run_job_to_fail();
-extern void remove_job_by_oid(const char *objname, Delete_Pgjob_Oid oidFlag);
+extern void remove_job_by_oid(const char *objname, Delete_Pgjob_Oid oidFlag, bool local, Oid job_id = InvalidOid);
 extern void execute_job(int4 job_id);
 extern void	get_job_values(int4 job_id, HeapTuple tup, Relation relation, Datum *values, bool *visnull);
-extern void RemoveJobById(Oid objectId);
-
+extern void check_job_permission(HeapTuple tuple, bool check_running = true);
+extern int jobid_alloc(uint16* pusJobId);
 #define JOBID_MAX_NUMBER  ((uint16)(32767))
 
 #define JOBID_ALLOC_OK         0                /* alloc jobid ok */

@@ -1,0 +1,267 @@
+set current_schema='shipping_schema';
+explain (num_costs off) 
+select count(distinct(c1::numeric(10,5))) , c1::numeric(10,5), count(distinct(t6.d)) from t6 , (select random() c1 from t6)b group by c1::numeric(10,5);
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  GroupAggregate
+         Group By Key: (((random()))::numeric(10,5))
+         ->  Sort
+               Sort Key: (((random()))::numeric(10,5))
+               ->  Streaming(type: REDISTRIBUTE)
+                     ->  Nested Loop
+                           ->  Streaming(type: BROADCAST)
+                                 ->  Seq Scan on t6
+                           ->  Materialize
+                                 ->  Seq Scan on t6
+(11 rows)
+
+------shipping in merge into----------
+create table target(a int, b int);
+insert into seq_t2 select generate_series(1,10), generate_series(1,10), generate_series(1,100);
+explain (costs off, verbose on)
+merge into seq_t1 using seq_t2
+           on (seq_t1.a = seq_t2.a)
+           when matched then update set b = 1
+           when not matched then insert (a) values (1);
+WARNING:  Statistics in some tables or columns(shipping_schema.seq_t2.a, shipping_schema.seq_t1.a) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                          QUERY PLAN                                                                                           
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge on shipping_schema.seq_t1
+         ->  Streaming(type: REDISTRIBUTE)
+               Output: seq_t2.a, seq_t2.b, seq_t2.c, seq_t1.a, seq_t1.b, seq_t1.c, seq_t1.ctid, seq_t1.xc_node_id, seq_t2.ctid, (CASE WHEN (seq_t1.ctid IS NULL) THEN 1 ELSE seq_t1.a END)
+               Distribute Key: (CASE WHEN (seq_t1.ctid IS NULL) THEN 1 ELSE seq_t1.a END)
+               ->  Hash Left Join
+                     Output: seq_t2.a, seq_t2.b, seq_t2.c, seq_t1.a, seq_t1.b, seq_t1.c, seq_t1.ctid, seq_t1.xc_node_id, seq_t2.ctid, CASE WHEN (seq_t1.ctid IS NULL) THEN 1 ELSE seq_t1.a END
+                     Hash Cond: (seq_t2.a = seq_t1.a)
+                     ->  Seq Scan on shipping_schema.seq_t2
+                           Output: seq_t2.a, seq_t2.b, seq_t2.c, seq_t2.ctid
+                           Distribute Key: seq_t2.a
+                     ->  Hash
+                           Output: seq_t1.a, seq_t1.b, seq_t1.c, seq_t1.ctid, seq_t1.xc_node_id
+                           ->  Seq Scan on shipping_schema.seq_t1
+                                 Output: seq_t1.a, seq_t1.b, seq_t1.c, seq_t1.ctid, seq_t1.xc_node_id
+                                 Distribute Key: seq_t1.a
+(16 rows)
+
+merge into seq_t1 using seq_t2
+           on (seq_t1.a = seq_t2.a)
+           when matched then update set b = 1
+           when not matched then insert (a) values (1);
+insert into target select 1, c from seq_t1;
+select count(*) from seq_t1 where c not in (select b from target);
+ count 
+-------
+     0
+(1 row)
+
+explain (costs off, verbose on)
+merge into seq_t3 using seq_t2
+           on (seq_t3.a = seq_t2.a)
+           when matched then update set b = 1
+           when not matched then insert (a) values (1);
+WARNING:  Statistics in some tables or columns(shipping_schema.seq_t2.a, shipping_schema.seq_t3.c, shipping_schema.seq_t3.a) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                      QUERY PLAN                                                                                                       
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge on shipping_schema.seq_t3
+         ->  Streaming(type: REDISTRIBUTE)
+               Output: seq_t2.a, seq_t2.b, seq_t2.c, seq_t3.a, seq_t3.b, seq_t3.c, seq_t3.ctid, seq_t3.xc_node_id, seq_t2.ctid, (CASE WHEN (seq_t3.ctid IS NULL) THEN nextval('seq1'::regclass) ELSE seq_t3.c END)
+               Distribute Key: (CASE WHEN (seq_t3.ctid IS NULL) THEN nextval('seq1'::regclass) ELSE seq_t3.c END)
+               ->  Hash Right Join
+                     Output: seq_t2.a, seq_t2.b, seq_t2.c, seq_t3.a, seq_t3.b, seq_t3.c, seq_t3.ctid, seq_t3.xc_node_id, seq_t2.ctid, CASE WHEN (seq_t3.ctid IS NULL) THEN nextval('seq1'::regclass) ELSE seq_t3.c END
+                     Hash Cond: (seq_t3.a = seq_t2.a)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: seq_t3.a, seq_t3.b, seq_t3.c, seq_t3.ctid, seq_t3.xc_node_id
+                           Distribute Key: seq_t3.a
+                           ->  Seq Scan on shipping_schema.seq_t3
+                                 Output: seq_t3.a, seq_t3.b, seq_t3.c, seq_t3.ctid, seq_t3.xc_node_id
+                                 Distribute Key: seq_t3.c
+                     ->  Hash
+                           Output: seq_t2.a, seq_t2.b, seq_t2.c, seq_t2.ctid
+                           ->  Seq Scan on shipping_schema.seq_t2
+                                 Output: seq_t2.a, seq_t2.b, seq_t2.c, seq_t2.ctid
+                                 Distribute Key: seq_t2.a
+(19 rows)
+
+merge into seq_t3 using seq_t2
+           on (seq_t3.a = seq_t2.a)
+           when matched then update set b = 1
+           when not matched then insert (a) values (1);
+truncate target;
+insert into target select 1, c from seq_t3;
+select count(*) from seq_t3 where c not in (select b from target);
+ count 
+-------
+     0
+(1 row)
+
+truncate seq_t1;
+truncate seq_t3;
+explain (costs off, verbose on)
+merge into seq_t1 using seq_t2
+           on (seq_t1.a = seq_t2.a)
+           when not matched then insert (a) values (1);
+WARNING:  Statistics in some tables or columns(shipping_schema.seq_t2.a, shipping_schema.seq_t1.a) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                               QUERY PLAN                                                               
+----------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge on shipping_schema.seq_t1
+         ->  Streaming(type: REDISTRIBUTE)
+               Output: seq_t2.a, seq_t2.b, seq_t2.c, seq_t1.a, seq_t1.b, seq_t1.c, seq_t1.ctid, seq_t1.xc_node_id, seq_t2.ctid, (1)
+               Distribute Key: (1)
+               ->  Hash Left Join
+                     Output: seq_t2.a, seq_t2.b, seq_t2.c, seq_t1.a, seq_t1.b, seq_t1.c, seq_t1.ctid, seq_t1.xc_node_id, seq_t2.ctid, 1
+                     Hash Cond: (seq_t2.a = seq_t1.a)
+                     ->  Seq Scan on shipping_schema.seq_t2
+                           Output: seq_t2.a, seq_t2.b, seq_t2.c, seq_t2.ctid
+                           Distribute Key: seq_t2.a
+                     ->  Hash
+                           Output: seq_t1.a, seq_t1.b, seq_t1.c, seq_t1.ctid, seq_t1.xc_node_id
+                           ->  Seq Scan on shipping_schema.seq_t1
+                                 Output: seq_t1.a, seq_t1.b, seq_t1.c, seq_t1.ctid, seq_t1.xc_node_id
+                                 Distribute Key: seq_t1.a
+(16 rows)
+
+merge into seq_t1 using seq_t2
+           on (seq_t1.a = seq_t2.a)
+           when not matched then insert (a) values (1);
+truncate target;
+insert into target select 1, c from seq_t1;
+select count(*) from seq_t1 where c not in (select b from target);
+ count 
+-------
+     0
+(1 row)
+
+explain (costs off, verbose on)
+merge into seq_t3 using seq_t2
+           on (seq_t3.a = seq_t2.a)
+           when not matched then insert (a) values (1);
+WARNING:  Statistics in some tables or columns(shipping_schema.seq_t2.a, shipping_schema.seq_t3.c, shipping_schema.seq_t3.a) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                           QUERY PLAN                                                                           
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge on shipping_schema.seq_t3
+         ->  Streaming(type: REDISTRIBUTE)
+               Output: seq_t2.a, seq_t2.b, seq_t2.c, seq_t3.a, seq_t3.b, seq_t3.c, seq_t3.ctid, seq_t3.xc_node_id, seq_t2.ctid, (nextval('seq1'::regclass))
+               Distribute Key: (nextval('seq1'::regclass))
+               ->  Hash Right Join
+                     Output: seq_t2.a, seq_t2.b, seq_t2.c, seq_t3.a, seq_t3.b, seq_t3.c, seq_t3.ctid, seq_t3.xc_node_id, seq_t2.ctid, nextval('seq1'::regclass)
+                     Hash Cond: (seq_t3.a = seq_t2.a)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: seq_t3.a, seq_t3.b, seq_t3.c, seq_t3.ctid, seq_t3.xc_node_id
+                           Distribute Key: seq_t3.a
+                           ->  Seq Scan on shipping_schema.seq_t3
+                                 Output: seq_t3.a, seq_t3.b, seq_t3.c, seq_t3.ctid, seq_t3.xc_node_id
+                                 Distribute Key: seq_t3.c
+                     ->  Hash
+                           Output: seq_t2.a, seq_t2.b, seq_t2.c, seq_t2.ctid
+                           ->  Seq Scan on shipping_schema.seq_t2
+                                 Output: seq_t2.a, seq_t2.b, seq_t2.c, seq_t2.ctid
+                                 Distribute Key: seq_t2.a
+(19 rows)
+
+merge into seq_t3 using seq_t2
+           on (seq_t3.a = seq_t2.a)
+           when not matched then insert (a) values (1);
+truncate target;
+insert into target select 1, c from seq_t3;
+select count(*) from seq_t3 where c not in (select b from target);
+ count 
+-------
+     0
+(1 row)
+
+truncate seq_t3;
+explain (costs off, verbose on)
+merge into seq_t3 using seq_t2
+           on (seq_t3.a = seq_t2.a)
+           when matched then update set b = 1
+           when not matched then insert (a) values (nextval('seq1'));
+WARNING:  Statistics in some tables or columns(shipping_schema.seq_t2.a, shipping_schema.seq_t3.c, shipping_schema.seq_t3.a) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                      QUERY PLAN                                                                                                       
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge on shipping_schema.seq_t3
+         ->  Streaming(type: REDISTRIBUTE)
+               Output: seq_t2.a, seq_t2.b, seq_t2.c, seq_t3.a, seq_t3.b, seq_t3.c, seq_t3.ctid, seq_t3.xc_node_id, seq_t2.ctid, (CASE WHEN (seq_t3.ctid IS NULL) THEN nextval('seq1'::regclass) ELSE seq_t3.c END)
+               Distribute Key: (CASE WHEN (seq_t3.ctid IS NULL) THEN nextval('seq1'::regclass) ELSE seq_t3.c END)
+               ->  Hash Right Join
+                     Output: seq_t2.a, seq_t2.b, seq_t2.c, seq_t3.a, seq_t3.b, seq_t3.c, seq_t3.ctid, seq_t3.xc_node_id, seq_t2.ctid, CASE WHEN (seq_t3.ctid IS NULL) THEN nextval('seq1'::regclass) ELSE seq_t3.c END
+                     Hash Cond: (seq_t3.a = seq_t2.a)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: seq_t3.a, seq_t3.b, seq_t3.c, seq_t3.ctid, seq_t3.xc_node_id
+                           Distribute Key: seq_t3.a
+                           ->  Seq Scan on shipping_schema.seq_t3
+                                 Output: seq_t3.a, seq_t3.b, seq_t3.c, seq_t3.ctid, seq_t3.xc_node_id
+                                 Distribute Key: seq_t3.c
+                     ->  Hash
+                           Output: seq_t2.a, seq_t2.b, seq_t2.c, seq_t2.ctid
+                           ->  Seq Scan on shipping_schema.seq_t2
+                                 Output: seq_t2.a, seq_t2.b, seq_t2.c, seq_t2.ctid
+                                 Distribute Key: seq_t2.a
+(19 rows)
+
+merge into seq_t3 using seq_t2
+           on (seq_t3.a = seq_t2.a)
+           when matched then update set b = 1
+           when not matched then insert (b) values (nextval('seq1'));
+truncate target;
+insert into target select 1, a from seq_t3;
+select count(*) from seq_t3 where a not in (select b from target);
+ count 
+-------
+     0
+(1 row)
+
+truncate target;
+insert into target select 1, b from seq_t3;
+select count(*) from seq_t3 where b not in (select b from target);
+ count 
+-------
+     0
+(1 row)
+
+truncate target;
+insert into target select 1, c from seq_t3;
+select count(*) from seq_t3 where c not in (select b from target);
+ count 
+-------
+     0
+(1 row)
+
+drop table target;
+create table test_random_shippable(id int, id2 int) ;
+explain verbose delete from test_random_shippable where id =(select (random() *10000)::int);
+WARNING:  Statistics in some tables or columns(shipping_schema.test_random_shippable.id) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+--?.*
+--?.*
+--?.*
+   Node/s: All datanodes
+   Remote query: DELETE FROM ONLY shipping_schema.test_random_shippable WHERE test_random_shippable.ctid = $1 AND test_random_shippable.xc_node_id = $2
+   InitPlan 1 (returns $0)
+--?.*
+           Output: ((random() * 10000::double precision))::integer
+--?.*
+         Output: test_random_shippable.id, test_random_shippable.ctid, test_random_shippable.xc_node_id
+         Node/s: All datanodes
+         Remote query: SELECT id, ctid, xc_node_id FROM ONLY shipping_schema.test_random_shippable WHERE true
+         Coordinator quals: (test_random_shippable.id = $0)
+(11 rows)
+
+create table test_random_rep ( a int ,b int) distribute by replication;
+insert into  test_random_rep values(1,2);
+explain update test_random_rep set b = ceil(random()*1000);
+ERROR:  Fail to do UPDATE/DELETE
+DETAIL:  UPDATE/DELETE action cannot be shipped to datanode
+HINT:  Proposed to rewrite query to remove unshippable factors or increase primary key constraint on "test_random_rep"
+drop table test_random_shippable;
+drop table test_random_rep;

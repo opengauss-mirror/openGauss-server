@@ -1,0 +1,596 @@
+-- problem:
+-- SQL clause about CREATE TABLE for compression
+-- case 1: default compress level
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+ pg_relation_with_compression 
+------------------------------
+ f
+(1 row)
+
+\dS+ cstore_create_clause_00
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=no, version=0.12
+
+DROP TABLE cstore_create_clause_00;
+-- case 2: no compress
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = no ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+ pg_relation_with_compression 
+------------------------------
+ f
+(1 row)
+
+\dS+ cstore_create_clause_00
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=no, version=0.12
+
+DROP TABLE cstore_create_clause_00;
+-- case 3: compress yes
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+ pg_relation_with_compression 
+------------------------------
+ t
+(1 row)
+
+\dS+ cstore_create_clause_00
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=zlib, version=0.12
+
+DROP TABLE cstore_create_clause_00;
+-- case 4: compress low
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+ pg_relation_with_compression 
+------------------------------
+ t
+(1 row)
+
+\dS+ cstore_create_clause_00
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=zlib, version=0.12
+
+DROP TABLE cstore_create_clause_00;
+-- case 5: compress middle
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+ pg_relation_with_compression 
+------------------------------
+ t
+(1 row)
+
+\dS+ cstore_create_clause_00
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=zlib, version=0.12
+
+DROP TABLE cstore_create_clause_00;
+-- case 4: compress high
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+ pg_relation_with_compression 
+------------------------------
+ t
+(1 row)
+
+\dS+ cstore_create_clause_00
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=zlib, version=0.12
+
+DROP TABLE cstore_create_clause_00;
+-- case 5: invalid compress type
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a) ;
+-- case 6: max_batchrow option test
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , max_batchrow = 10000) tablespace hdfs_ts DISTRIBUTE BY HASH(a) ;
+ERROR:  relation "cstore_create_clause_00" already exists
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+ pg_relation_with_compression 
+------------------------------
+ t
+(1 row)
+
+\dS+ cstore_create_clause_00
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=zlib, version=0.12, filesystem=hdfs
+
+DROP TABLE cstore_create_clause_00;
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , max_batchrow = 60000) tablespace hdfs_ts DISTRIBUTE BY HASH(a) ;
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+ pg_relation_with_compression 
+------------------------------
+ f
+(1 row)
+
+\dS+ cstore_create_clause_00
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, max_batchrow=60000, compression=no, version=0.12, filesystem=hdfs
+
+DROP TABLE cstore_create_clause_00;
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , max_batchrow = 65536) tablespace hdfs_ts DISTRIBUTE BY HASH(a) ;
+ERROR:  value 65536 out of bounds for option "max_batchrow"
+DETAIL:  Valid values are between "10000" and "60000".
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , max_batchrow = 9999) tablespace hdfs_ts DISTRIBUTE BY HASH(a) ;
+ERROR:  value 9999 out of bounds for option "max_batchrow"
+DETAIL:  Valid values are between "10000" and "60000".
+-- case 7: deltarow_threshold option test
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , deltarow_threshold = 10000) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+ERROR:  value 10000 out of bounds for option "deltarow_threshold"
+DETAIL:  Valid values are between "0" and "9999".
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , deltarow_threshold = -1) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+ERROR:  value -1 out of bounds for option "deltarow_threshold"
+DETAIL:  Valid values are between "0" and "9999".
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , deltarow_threshold = 0) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+ pg_relation_with_compression 
+------------------------------
+ f
+(1 row)
+
+\dS+ cstore_create_clause_00;
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, deltarow_threshold=0, compression=no, version=0.12, filesystem=hdfs
+
+DROP TABLE cstore_create_clause_00;
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , deltarow_threshold = 9999) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+ pg_relation_with_compression 
+------------------------------
+ f
+(1 row)
+
+\dS+ cstore_create_clause_00;
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, deltarow_threshold=9999, compression=no, version=0.12, filesystem=hdfs
+
+DROP TABLE cstore_create_clause_00;
+-- problem:
+-- SQL clause about CREATE TABLE for compression
+-- case 1: default compress level
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+ pg_relation_with_compression 
+------------------------------
+ f
+(1 row)
+
+\dS+ cstore_create_clause_00
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=no, version=0.12
+
+DROP TABLE cstore_create_clause_00;
+-- case 2: no compress
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = no ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+ pg_relation_with_compression 
+------------------------------
+ f
+(1 row)
+
+\dS+ cstore_create_clause_00
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=no, version=0.12
+
+DROP TABLE cstore_create_clause_00;
+-- case 3: compress yes
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+ pg_relation_with_compression 
+------------------------------
+ t
+(1 row)
+
+\dS+ cstore_create_clause_00
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=zlib, version=0.12
+
+DROP TABLE cstore_create_clause_00;
+-- case 4: compress low
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+ pg_relation_with_compression 
+------------------------------
+ t
+(1 row)
+
+\dS+ cstore_create_clause_00
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=zlib, version=0.12
+
+DROP TABLE cstore_create_clause_00;
+-- case 5: compress middle
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+ pg_relation_with_compression 
+------------------------------
+ t
+(1 row)
+
+\dS+ cstore_create_clause_00
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=zlib, version=0.12
+
+DROP TABLE cstore_create_clause_00;
+-- case 4: compress high
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+ pg_relation_with_compression 
+------------------------------
+ t
+(1 row)
+
+\dS+ cstore_create_clause_00
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=zlib, version=0.12
+
+DROP TABLE cstore_create_clause_00;
+-- case 5: invalid compress type
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+-- case 6: max_batchrow option test
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , max_batchrow = 10000) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+ERROR:  relation "cstore_create_clause_00" already exists
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+ pg_relation_with_compression 
+------------------------------
+ t
+(1 row)
+
+\dS+ cstore_create_clause_00
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=zlib, version=0.12, filesystem=hdfs
+
+DROP TABLE cstore_create_clause_00;
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , max_batchrow = 60000) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+ pg_relation_with_compression 
+------------------------------
+ f
+(1 row)
+
+\dS+ cstore_create_clause_00
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, max_batchrow=60000, compression=no, version=0.12, filesystem=hdfs
+
+DROP TABLE cstore_create_clause_00;
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , max_batchrow = 65536) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+ERROR:  value 65536 out of bounds for option "max_batchrow"
+DETAIL:  Valid values are between "10000" and "60000".
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , max_batchrow = 9999) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+ERROR:  value 9999 out of bounds for option "max_batchrow"
+DETAIL:  Valid values are between "10000" and "60000".
+-- case 7: deltarow_threshold option test
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , deltarow_threshold = 10000) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+ERROR:  value 10000 out of bounds for option "deltarow_threshold"
+DETAIL:  Valid values are between "0" and "9999".
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , deltarow_threshold = -1) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+ERROR:  value -1 out of bounds for option "deltarow_threshold"
+DETAIL:  Valid values are between "0" and "9999".
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , deltarow_threshold = 0) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+ pg_relation_with_compression 
+------------------------------
+ f
+(1 row)
+
+\dS+ cstore_create_clause_00;
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, deltarow_threshold=0, compression=no, version=0.12, filesystem=hdfs
+
+DROP TABLE cstore_create_clause_00;
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc , deltarow_threshold = 9999) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+SELECT pg_relation_with_compression('cstore_create_clause_00');
+ pg_relation_with_compression 
+------------------------------
+ f
+(1 row)
+
+\dS+ cstore_create_clause_00;
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, deltarow_threshold=9999, compression=no, version=0.12, filesystem=hdfs
+
+DROP TABLE cstore_create_clause_00;
+-- case 8: partial_cluster_rows
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc, partial_cluster_rows = 500000 ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+ERROR:  value 500000 out of bounds for option "partial_cluster_rows"
+DETAIL:  Valid values are between "600000" and "2147483647".
+CREATE TABLE cstore_create_clause_00
+(
+	a int,
+	b int
+) with ( orientation = orc, partial_cluster_rows = 600000 ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+\dS+ cstore_create_clause_00;
+               Table "public.cstore_create_clause_00"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, partial_cluster_rows=600000, compression=no, version=0.12, filesystem=hdfs
+
+DROP TABLE cstore_create_clause_00;

@@ -1,0 +1,52 @@
+CREATE DATABASE wlm_test_redis;
+\c wlm_test_redis
+set resource_track_duration=0;
+set query_band='wlm_test_redis_test';
+set xc_maintenance_mode = on;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_redis -c "create node group vc1 with(datanode1,datanode2) vcgroup;" > /dev/null 2>&1
+CREATE TABLE t1(a int, b int,c int) TO GROUP vc1;
+INSERT INTO t1 VALUES(1,1,1),(2,1,1),(3,2,1),(4,5,1),(3,9,7);
+CREATE TABLE t2(a int, b int,c int) TO GROUP vc1;
+\! @abs_bindir@/gsql -r -p$((@portstring@+20)) -d wlm_test_redis -c "SET xc_maintenance_mode = on;SET transaction_read_only = off;CREATE TABLE t1(a int, b int,c int);CREATE TABLE t2(a int, b int,c int);CREATE NODE GROUP vc1 with(localhost) VCGROUP;" > /dev/null 2>&1
+CREATE NODE GROUP dist_vc1 WITH (datanode1,datanode2,datanode3) VCGROUP distribute from vc1;
+CREATE INDEX t1_a ON t1(a);
+drop table t2;
+CREATE TABLE serial_t1(a int, b serial,c bigserial);
+CREATE TABLE like_serial_t1(like serial_t1 including all);
+CREATE OR REPLACE FUNCTION process(_source t1) RETURNS SETOF t1 AS  $BODY$   SELECT * FROM t1;  $BODY$   LANGUAGE SQL;
+CREATE TEMP TABLE temp1 (a int, b int) TO GROUP vc1;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_redis -c "drop table if exists redis_progress_detail;"
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_redis -c "drop table if exists redis_status;"
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_redis -c "\! gs_redis -d wlm_test_redis -p @portstring@ -r -c -f" > /dev/null 2>&1
+CREATE TABLE like_t1 (like t1 including all);
+ALTER NODE GROUP vc1 COPY BUCKETS FROM dist_vc1;
+ALTER NODE GROUP dist_vc1 SET TABLE GROUP vc1;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_redis -c "select count(*) from redis_status;" > /dev/null 2>&1
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_redis -c "drop table if exists redis_progress_detail;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_redis -c "drop table if exists redis_status;" > /dev/null 2>&1
+DROP NODE GROUP dist_vc1 distribute from vc1;
+SELECT * FROM gs_check_logic_cluster_consistency();
+SELECT * FROM gs_check_tables_distribution();
+DROP TABLE temp1;
+CREATE TEMP TABLE temp1 (a int, b int) TO GROUP vc1;
+DROP TABLE temp1;
+DROP FUNCTION process;
+CREATE OR REPLACE FUNCTION process(_source t1) RETURNS SETOF t1 AS  $BODY$   SELECT * FROM t1;  $BODY$   LANGUAGE SQL;
+DROP FUNCTION process;
+DROP TABLE t1;
+CREATE TABLE t1(a int);
+DROP TABLE t1;
+DROP TABLE like_t1;
+DROP TABLE serial_t1;
+DROP TABLE like_serial_t1;
+drop node group vc1;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_redis -c "select count(*) from pgxc_group where group_name = 'vc1';"
+--output
+drop node group elastic_group;
+\c postgres
+drop database wlm_test_redis;
+\c regression
+--end of file

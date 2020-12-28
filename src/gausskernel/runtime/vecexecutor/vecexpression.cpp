@@ -51,6 +51,7 @@
 #include "utils/syscache.h"
 #include "access/hash.h"
 #ifdef PGXC
+#include "pgxc/groupmgr.h"
 #include "pgxc/pgxc.h"
 #endif
 #include "postmaster/fencedudf.h"
@@ -318,23 +319,17 @@ ScalarVector* ExecEvalProcessAndOrLogic(
     return pVector;
 }
 
-// build a const vector via one of the array elements, as the second arg of EvalVecScalarArrayOp.
-//
-void buildVecConstViaArrayelem(ScalarVector* constElem, ScalarValue elem, Oid type)
+void buildOneRowVector(ScalarVector* oneRowVector, Datum elem, Oid type)
 {
-    ScalarValue val;
-
     Assert(OidIsValid(type));
 
-    val = ScalarVector::DatumToScalar(elem, type, false);
+    ScalarValue val = ScalarVector::DatumToScalar(elem, type, false);
 
-    for (int i = 0; i < BatchMaxSize; i++) {
-        constElem->m_vals[i] = val;
-        SET_NOTNULL(constElem->m_flag[i]);
-    }
+    oneRowVector->m_vals[0] = val;
+    SET_NOTNULL(oneRowVector->m_flag[0]);
 
-    constElem->m_rows = BatchMaxSize;
-    constElem->m_desc.typeId = type;
+    oneRowVector->m_rows = 1;
+    oneRowVector->m_desc.typeId = type;
 }
 
 /*
@@ -370,185 +365,194 @@ static ScalarVector* ExecEvalVecScalarArrayOp(ScalarArrayOpExprState* sstate, Ex
     ScalarVector* arg1 = NULL;
 
     bool* pSel = sstate->pSel;
-    ScalarVector* vecConstElem = sstate->vecConstElem;
     bool savedUseSelection = econtext->m_fUseSelection;
 
     Assert(pSelection != NULL);
-    if (sstate->fxprstate.func.fn_oid == InvalidOid)
+    if (sstate->fxprstate.func.fn_oid == InvalidOid) {
         DispatchVectorFunction(opexpr->opfuncid, opexpr->inputcollid, &sstate->fxprstate, econtext);
+    }
 
     fcinfo = &sstate->fxprstate.fcinfo_data;
     argDone = ExecEvalVecFuncArgs(fcinfo, sstate->fxprstate.args, pSelection, econtext);
     Assert(argDone == ExprSingleResult);
     arg0 = (ScalarVector*)fcinfo->arg[0];
     arg1 = (ScalarVector*)fcinfo->arg[1];
+
     /* We expect that eval expr result could be empty vector, but could not be null */
     Assert(arg0 != NULL && arg1 != NULL);
 
-    int rows = arg0->m_rows;
+    int rows = econtext->align_rows;
 
-    /*
-     * If the array is NULL then we return NULL --- it's not very meaningful
-     * to do anything else, even if the operator isn't strict.
-     */
-    if (IS_NULL(arg1->m_flag[0])) {
-        for (i = 0; i < rows; i++)
-            SET_NULL(pVector->m_flag[i]);
-
-        pVector->m_rows = rows;
-        return pVector;
+    for (i = 0; i < rows; i++) {
+        pVector->m_vals[i] = BoolGetDatum(!useOr);
+        SET_NOTNULL(pVector->m_flag[i]);
     }
 
-    for (i = 0; i < rows; i++)
-        pVector->m_vals[i] = !useOr;
+    for (i = 0; i < BatchMaxSize; i++) {
+        pSel[i] = true;
+    }
+
+    ScalarVector* argLeft = sstate->tmpVecLeft;
+    ScalarVector* argRight = sstate->tmpVecRight;
 
     pVector->m_rows = rows;
-    for (i = 0; i < arg1->m_rows; i++) {
-        if (pSelection[i]) {
-            arr = DatumGetArrayTypeP(arg1->m_vals[i]);
-            break;
+    for (i = 0; i < rows; i++) {
+        if (!pSelection[i]) {
+            continue;
         }
-    }
 
-    // no selection
-    if (arr == NULL)
-        return pVector;
-
-    nitems = ArrayGetNItems(ARR_NDIM(arr), ARR_DIMS(arr));
-    if (nitems <= 0)
-        return pVector;
-
-    for (i = 0; i < BatchMaxSize; i++)
-        pSel[i] = true;
-
-    /*
-     * If the scalar is NULL, and the function is strict, set NULL; no
-     * point in iterating the loop.
-     */
-    if (sstate->fxprstate.func.fn_strict) {
-        for (i = 0; i < rows; i++) {
-            if (IS_NULL(arg0->m_flag[i])) {
-                SET_NULL(pVector->m_flag[i]);
-                pSel[i] = false;
-            } else
-                SET_NOTNULL(pVector->m_flag[i]);
+        /*
+         * If the array is NULL then we return NULL --- it's not very meaningful
+         * to do anything else, even if the operator isn't strict.
+         */
+        if (IS_NULL(arg1->m_flag[i])) {
+            SET_NULL(pVector->m_flag[i]);
+            continue;
         }
-    }
 
-    /* Get array infomation */
-    if (sstate->element_type != ARR_ELEMTYPE(arr)) {
-        get_typlenbyvalalign(ARR_ELEMTYPE(arr), &sstate->typlen, &sstate->typbyval, &sstate->typalign);
-        sstate->element_type = ARR_ELEMTYPE(arr);
-    }
+        arr = DatumGetArrayTypeP(arg1->m_vals[i]);
+        if (arr == NULL) {
+            SET_NULL(pVector->m_flag[i]);
+            continue;
+        }
 
-    typlen = sstate->typlen;
-    typbyval = sstate->typbyval;
-    typalign = sstate->typalign;
-
-    /* Loop over the array elements */
-
-    fcinfo->arg[1] = (Datum)vecConstElem;
-
-    /* Loop over the array elements */
-    s = (char*)ARR_DATA_PTR(arr);
-    bitmap = ARR_NULLBITMAP(arr);
-    bitmask = 1;
-
-    if (nitems > 1)
-        econtext->m_fUseSelection = true;
-
-    for (i = 0; i < nitems; i++) {
-        Datum elt;
-
-        /* Get array element, checking for NULL */
-        if (bitmap && (*bitmap & bitmask) == 0) {
-            elemNull = true;
-            for (j = 0; j < BatchMaxSize; j++)
-                SET_NULL(vecConstElem->m_flag[j]);
+        nitems = ArrayGetNItems(ARR_NDIM(arr), ARR_DIMS(arr));
+        if (nitems <= 0) {
+            continue;
         } else {
-            elemNull = false;
-            elt = fetch_att(s, typbyval, typlen);
-            s = att_addlength_pointer(s, typlen, s);
-            s = (char*)att_align_nominal(s, typalign);
-            buildVecConstViaArrayelem(vecConstElem, elt, sstate->element_type);
+            econtext->m_fUseSelection = true;
         }
 
-        /* Call comparison function */
-        if (elemNull && sstate->fxprstate.func.fn_strict) {
-            fcinfo->isnull = true;
-        } else {
-            fcinfo->isnull = false;
-            if (econtext->m_fUseSelection) {
-                for (j = 0; j < rows; j++) {
-                    pSel[j] = pSel[j] && pSelection[j];
-                }
+        /*
+         * If the scalar is NULL, and the function is strict, return NULL; no
+         * point in iterating the loop.
+         */
+        if (IS_NULL(arg0->m_flag[i]) && sstate->fxprstate.func.fn_strict) {
+            SET_NULL(pVector->m_flag[i]);
+            pSel[i] = false;
+            continue;
+        }
+
+        /* Get array infomation */
+        if (sstate->element_type != ARR_ELEMTYPE(arr)) {
+            get_typlenbyvalalign(ARR_ELEMTYPE(arr), &sstate->typlen, &sstate->typbyval, &sstate->typalign);
+            sstate->element_type = ARR_ELEMTYPE(arr);
+        }
+
+        typlen = sstate->typlen;
+        typbyval = sstate->typbyval;
+        typalign = sstate->typalign;
+
+        /* left argument shallow copy one row from arg0 */
+        argLeft->m_flag[0] = arg0->m_flag[i];
+        argLeft->m_vals[0] = arg0->m_vals[i];
+        argLeft->m_rows = 1;
+        fcinfo->arg[0] = (Datum)argLeft;
+
+        /* Loop over the array elements */
+        s = (char*)ARR_DATA_PTR(arr);
+        bitmap = ARR_NULLBITMAP(arr);
+        bitmask = 1;
+
+        for (j = 0; j < nitems; j++) {
+            Datum elt;
+
+            /* Get array element, checking for NULL */
+            if (bitmap && (*bitmap & bitmask) == 0) {
+                elemNull = true;
+                SET_NULL(argRight->m_flag[0]);
+            } else {
+                elemNull = false;
+                elt = fetch_att(s, typbyval, typlen);
+                s = att_addlength_pointer(s, typlen, s);
+                s = (char*)att_align_nominal(s, typalign);
+                buildOneRowVector(argRight, elt, sstate->element_type);
             }
-            pgstat_init_function_usage(fcinfo, &fcusage);
-            fcinfo->arg[fcinfo->nargs] = rows;
-            fcinfo->arg[fcinfo->nargs + 1] = PointerGetDatum(sstate->tmpVec);
-            fcinfo->arg[fcinfo->nargs + 2] = econtext->m_fUseSelection ? PointerGetDatum(pSel) : (Datum)0;
-            fcinfo->nargs += EXTRA_NARGS;
 
-            thisResult = VecFunctionCallInvoke(fcinfo);
-            fcinfo->nargs -= EXTRA_NARGS;
-            pgstat_end_function_usage(&fcusage, true);
-        }
+            /* right argument build from array element */
+            fcinfo->arg[1] = (Datum)argRight;
 
-        if (fcinfo->isnull) {
-            if (econtext->m_fUseSelection) {
-                for (j = 0; j < rows; j++) {
-                    if (pSel[j])
-                        SET_NULL(pVector->m_flag[j]);
+            /* Call comparison function */
+            if (elemNull && sstate->fxprstate.func.fn_strict) {
+                fcinfo->isnull = true;
+            } else {
+                fcinfo->isnull = false;
+                if (econtext->m_fUseSelection) {
+                    if (!pSel[i]) {
+                        break;
+                    }
+                }
+                pgstat_init_function_usage(fcinfo, &fcusage);
+                fcinfo->arg[fcinfo->nargs] = 1;
+                fcinfo->arg[fcinfo->nargs + 1] = PointerGetDatum(sstate->tmpVec);
+                fcinfo->arg[fcinfo->nargs + 2] = (Datum)0;
+                fcinfo->nargs += EXTRA_NARGS;
+
+                thisResult = VecFunctionCallInvoke(fcinfo);
+                fcinfo->nargs -= EXTRA_NARGS;
+                pgstat_end_function_usage(&fcusage, true);
+            }
+
+            if (fcinfo->isnull) {
+                if (econtext->m_fUseSelection) {
+                    if (pSel[i])
+                        SET_NULL(pVector->m_flag[i]);
+                } else {
+                    SET_NULL(pVector->m_flag[i]);
                 }
             } else {
-                for (j = 0; j < rows; j++) {
-                    SET_NULL(pVector->m_flag[j]);
-                }
-            }
-        } else {
-            /* Do some short circuit operation for "AND" and "OR" */
-            vals = thisResult->m_vals;
-            if (econtext->m_fUseSelection) {
-                for (j = 0; j < rows; j++) {
+                /* Do some short circuit operation for "AND" and "OR" */
+                vals = thisResult->m_vals;
+                if (econtext->m_fUseSelection) {
                     if (useOr) {
-                        if (pSel[j] && DatumGetBool(vals[j])) {
-                            pVector->m_vals[j] = BoolGetDatum(true);
-                            SET_NOTNULL(pVector->m_flag[j]);
-                            pSel[j] = false;
+                        if (pSel[i] && DatumGetBool(vals[0])) {
+                            pVector->m_vals[i] = BoolGetDatum(true);
+                            SET_NOTNULL(pVector->m_flag[i]);
+                            pSel[i] = false;
+
+                            /* needn't look at any more elements */
+                            break;
                         }
                     } else {
-                        if (pSel[j] && !DatumGetBool(vals[j])) {
-                            pVector->m_vals[j] = BoolGetDatum(false);
-                            SET_NOTNULL(pVector->m_flag[j]);
-                            pSel[j] = false;
+                        if (pSel[i] && !DatumGetBool(vals[0])) {
+                            pVector->m_vals[i] = BoolGetDatum(false);
+                            SET_NOTNULL(pVector->m_flag[i]);
+                            pSel[i] = false;
+
+                            /* needn't look at any more elements */
+                            break;
+                        }
+                    }
+                } else {
+                    if (useOr) {
+                        if (DatumGetBool(vals[0])) {
+                            pVector->m_vals[i] = BoolGetDatum(true);
+                            SET_NOTNULL(pVector->m_flag[i]);
+                            pSel[i] = false;
+
+                            /* needn't look at any more elements */
+                            break;
+                        }
+                    } else {
+                        if (!DatumGetBool(vals[0])) {
+                            pVector->m_vals[i] = BoolGetDatum(false);
+                            SET_NOTNULL(pVector->m_flag[i]);
+                            pSel[i] = false;
+
+                            /* needn't look at any more elements */
+                            break;
                         }
                     }
                 }
-            } else {
-                for (j = 0; j < rows; j++) {
-                    if (useOr) {
-                        if (DatumGetBool(vals[j])) {
-                            pVector->m_vals[j] = BoolGetDatum(true);
-                            SET_NOTNULL(pVector->m_flag[j]);
-                            pSel[j] = false;
-                        }
-                    } else {
-                        if (!DatumGetBool(vals[j])) {
-                            pVector->m_vals[j] = BoolGetDatum(false);
-                            SET_NOTNULL(pVector->m_flag[j]);
-                            pSel[j] = false;
-                        }
-                    }
-                }
             }
-        }
 
-        /* advance bitmap pointer if any */
-        if (bitmap != NULL) {
-            bitmask <<= 1;
-            if (bitmask == 0x100) {
-                bitmap++;
-                bitmask = 1;
+            /* advance bitmap pointer if any */
+            if (bitmap != NULL) {
+                bitmask <<= 1;
+                if (bitmask == 0x100) {
+                    bitmap++;
+                    bitmask = 1;
+                }
             }
         }
     }
@@ -669,8 +673,9 @@ ScalarVector* ExecEvalVecCase(
         }
 
         vec = VectorExprEngine(wclause->result, econtext, sel, pVector, isDone);
-
-        if (vec != pVector) {
+        if (vec == NULL) {
+            pVector->m_rows = econtext->align_rows = 0;
+        } else if (vec != pVector) {
             pVector->m_rows = econtext->align_rows;
             pVector->copy(vec, sel);
         }
@@ -705,8 +710,9 @@ ScalarVector* ExecEvalVecCase(
     if (caseExpr->defresult) {
         if (not_all_select) {
             vec = VectorExprEngine(caseExpr->defresult, econtext, sel, pVector, isDone);
-
-            if (vec != pVector) {
+            if (vec == NULL) {
+                pVector->m_rows = econtext->align_rows = 0;
+            } else if (vec != pVector) {
                 pVector->m_rows = econtext->align_rows;
                 pVector->copy(vec, sel);
             }
@@ -1376,14 +1382,13 @@ static ScalarVector* ExecEvalVecNullTest(
             negativeFlag = true;
             break;
         default:
-            ereport(ERROR,
-                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+            ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                     errmodule(MOD_VEC_EXECUTOR),
                     errmsg("Unrecognized nulltesttype: %d", (int)ntest->nulltesttype)));
     }
 
     results = VectorExprEngine(nstate->arg, econtext, pSelection, pVector, isDone);
-    
+
     if (results == NULL) {
        econtext->align_rows = 0;
     }
@@ -1492,6 +1497,9 @@ static ScalarVector* ExecEvalVecHashFilter(
     int null_value_dn_index = (NULL != hfstate->nodelist) ? hfstate->nodelist[0]
                                                           : /* fetch first dn in group's dn list */
                                   0;                        /* fetch first dn index */
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
 
     /* Get hash value for each row, and deside whether it filter or not. */
     for (rowindex = 0; rowindex < econtext->align_rows; rowindex++) {
@@ -1506,7 +1514,7 @@ static ScalarVector* ExecEvalVecHashFilter(
             }
         } else {
             // pick up exec node based on bucket list in pgxc_group
-            modulo = hfstate->bucketMap[(unsigned int)abs((int)hashValue[rowindex]) & (BUCKETDATALEN - 1)];
+            modulo = hfstate->bucketMap[(unsigned int)abs((int)hashValue[rowindex]) & (uint32)(BUCKETDATALEN - 1)];
             nodeIndex = hfstate->nodelist[modulo];
 
             SET_NOTNULL(pVector->m_flag[rowindex]);
@@ -1667,7 +1675,10 @@ static ScalarVector* GenericFunctionT(PG_FUNCTION_ARGS)
     returnType = fcinfo->flinfo->fn_rettype;
 
     if (nvalues > BatchMaxSize) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_ATTRIBUTE), errmsg("nvalues is more than max size")));
+        ereport(ERROR,
+            (errmodule(MOD_UDF),
+                errcode(ERRCODE_INTERVAL_FIELD_OVERFLOW),
+                errmsg("nvalues: %d is invalid", nvalues)));
     }
 
     if (fnStrict) {
@@ -2552,11 +2563,12 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
             //
             parent->ps_ExprContext->m_fUseSelection = true;
         } break;
-        case T_ArrayRef:
+        case T_ArrayRef: {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmodule(MOD_VEC_EXECUTOR),
                     errmsg("Unsupported array reference expression in vector engine")));
+        }
         case T_FuncExpr: {
             FuncExpr* funcexpr = (FuncExpr*)node;
             FuncExprState* fstate = makeNode(FuncExprState);
@@ -2608,8 +2620,10 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
             sstate->fxprstate.func.fn_oid = InvalidOid; /* not initialized */
             sstate->element_type = InvalidOid;          /* ditto */
             sstate->pSel = (bool*)palloc(sizeof(bool) * BatchMaxSize);
-            sstate->vecConstElem = New(CurrentMemoryContext) ScalarVector;
-            sstate->vecConstElem->init(CurrentMemoryContext, desc);
+            sstate->tmpVecLeft = New(CurrentMemoryContext) ScalarVector;
+            sstate->tmpVecLeft->init(CurrentMemoryContext, desc);
+            sstate->tmpVecRight = New(CurrentMemoryContext) ScalarVector;
+            sstate->tmpVecRight->init(CurrentMemoryContext, desc);
             sstate->tmpVec = New(CurrentMemoryContext) ScalarVector;
             sstate->tmpVec->init(CurrentMemoryContext, desc);
             state = (ExprState*)sstate;
@@ -3003,7 +3017,7 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
             /* Build tupdesc to describe result tuples */
             if (rowexpr->row_typeid == RECORDOID) {
                 /* generic record, use runtime type assignment */
-                rstate->tupdesc = ExecTypeFromExprList(rowexpr->args, rowexpr->colnames);
+                rstate->tupdesc = ExecTypeFromExprList(rowexpr->args, rowexpr->colnames, TAM_HEAP);
                 BlessTupleDesc(rstate->tupdesc);
                 /* we won't need to redo this at runtime */
             } else {

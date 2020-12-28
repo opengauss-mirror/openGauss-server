@@ -1,18 +1,7 @@
-/*
+/* -------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 2010-2011, PostgreSQL Global Development Group
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
  *
  * datasender.cpp
  *
@@ -82,6 +71,7 @@
 #include "utils/resowner.h"
 #include "utils/timestamp.h"
 #include "gssignal/gs_signal.h"
+#include "gs_bbox.h"
 
 /* Flag indicates dummy are searching bcm files now */
 static bool dummySearching;
@@ -101,16 +91,16 @@ static void DataSndXLogSendHandler(SIGNAL_ARGS);
 static void DataSndLastCycleHandler(SIGNAL_ARGS);
 
 /* Prototypes for private functions */
-static bool HandleDataReplicationCommand(const char* cmd_string);
+static bool HandleDataReplicationCommand(const char *cmd_string);
 static int DataSndLoop(void);
 static void InitDataSnd(void);
 static void DataSndHandshake(void);
 static void DataSndKill(int code, Datum arg);
 static void DataSndShutdown(void) __attribute__((noreturn));
-static void DataSend(bool* caughtup);
+static void DataSend(bool *caughtup);
 
 static void IdentifySystem(void);
-static void StartDataReplication(StartDataReplicationCmd* cmd);
+static void StartDataReplication(StartDataReplicationCmd *cmd);
 static void DataSndNotifyCatchup(void);
 
 static void ProcessStandbyMessage(void);
@@ -124,22 +114,22 @@ static void DataSndRmData(bool requestReply);
 
 static long DataSndComputeSleeptime(TimestampTz now);
 static void DataSndCheckTimeOut(TimestampTz now);
-static uint32 DataSendReadData(char* buf, uint32 bufsize);
+static uint32 DataSendReadData(char *buf, uint32 bufsize);
 static bool DataSndCaughtup(void);
-static const char* DataSndGetStateString(DataSndState state);
+static const char *DataSndGetStateString(DataSndState state);
 
 /* Main entry point for datasender process */
 int DataSenderMain(void)
 {
     MemoryContext datasnd_context;
 
-    knl_thread_set_name("DataSender");
+    t_thrd.proc_cxt.MyProgName = "DataSender";
 
     /* Create a per-datasender data structure in shared memory */
     InitDataSnd();
     catchupDone = false;
 
-    ereport(LOG, (errmsg("DataSender thread started")));
+    ereport(LOG, (errmsg("datasender thread started")));
     /*
      * Create a memory context that we will do all our work in.  We do this so
      * that we can reset the context during error recovery and thereby avoid
@@ -149,15 +139,13 @@ int DataSenderMain(void)
      * XXX: we don't actually attempt error recovery in datasender, we just
      * close the connection and exit.
      */
-    datasnd_context = AllocSetContextCreate(t_thrd.top_mem_cxt,
-        "Data Sender",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    datasnd_context = AllocSetContextCreate(t_thrd.top_mem_cxt, "Data Sender", ALLOCSET_DEFAULT_MINSIZE,
+                                            ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     MemoryContextSwitchTo(datasnd_context);
 
     /* Set up resource owner */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "datasender top-level resource owner");
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL,
+        "datasender top-level resource owner", MEMORY_CONTEXT_STORAGE);
 
     /*
      * Let postmaster know that we're streaming. Once we've declared us as a
@@ -186,7 +174,7 @@ int DataSenderMain(void)
     /* Initialize shared memory status */
     {
         /* use volatile pointer to prevent code rearrangement */
-        volatile DataSnd* datasnd = t_thrd.datasender_cxt.MyDataSnd;
+        volatile DataSnd *datasnd = t_thrd.datasender_cxt.MyDataSnd;
 
         SpinLockAcquire(&datasnd->mutex);
         datasnd->pid = t_thrd.proc_cxt.MyProcPid;
@@ -245,8 +233,8 @@ static void DataSndHandshake(void)
              */
             if (u_sess->attr.attr_storage.wal_sender_timeout > 0 &&
                 sleep_time >= u_sess->attr.attr_storage.wal_sender_timeout) {
-                ereport(COMMERROR,
-                    (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("no message received from standby for maximum time")));
+                ereport(COMMERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                                    errmsg("no message received from standby for maximum time")));
                 proc_exit(0);
             }
             continue;
@@ -292,7 +280,7 @@ static void DataSndHandshake(void)
         switch (first_char) {
             case 'Q': /* Query message */
             {
-                const char* query_string = NULL;
+                const char *query_string = NULL;
 
                 query_string = pq_getmsgstring(&input_message);
                 pq_getmsgend(&input_message);
@@ -308,14 +296,13 @@ static void DataSndHandshake(void)
                 break;
             case EOF:
                 /* standby disconnected unexpectedly */
-                ereport(
-                    COMMERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("unexpected EOF on standby connection")));
+                ereport(COMMERROR,
+                        (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("unexpected EOF on standby connection")));
                 proc_exit(0);
                 break;
             default:
-                ereport(FATAL,
-                    (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                        errmsg("invalid standby handshake message type %d", first_char)));
+                ereport(FATAL, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                                errmsg("invalid standby handshake message type %d", first_char)));
         }
     }
 }
@@ -366,9 +353,9 @@ static void IdentifySystem(void)
     pq_beginmessage(&buf, 'D');
     pq_sendint16(&buf, 2);             /* # of columns */
     pq_sendint32(&buf, strlen(sysid)); /* col1 len */
-    pq_sendbytes(&buf, (char*)sysid, strlen(sysid));
+    pq_sendbytes(&buf, (char *)sysid, strlen(sysid));
     pq_sendint32(&buf, strlen(tli)); /* col2 len */
-    pq_sendbytes(&buf, (char*)tli, strlen(tli));
+    pq_sendbytes(&buf, (char *)tli, strlen(tli));
     pq_endmessage_noblock(&buf);
 
     /* Send CommandComplete and ReadyForQuery messages */
@@ -380,7 +367,7 @@ static void IdentifySystem(void)
 /*
  * START_REPLICATION(DATA)
  */
-static void StartDataReplication(StartDataReplicationCmd* cmd)
+static void StartDataReplication(StartDataReplicationCmd *cmd)
 {
     StringInfoData buf;
 
@@ -426,9 +413,8 @@ static void DataSndNotifyCatchup()
     /* Prepend with the message type and send it. */
     t_thrd.datasender_cxt.output_message[0] = 'b';
     errorno = memcpy_s(t_thrd.datasender_cxt.output_message + 1,
-        sizeof(DataPageMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024,
-        &dummyCatchupMessage,
-        sizeof(NotifyDummyCatchupMessage));
+                       sizeof(DataPageMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024,
+                       &dummyCatchupMessage, sizeof(NotifyDummyCatchupMessage));
     securec_check(errorno, "", "");
     (void)pq_putmessage_noblock('d', t_thrd.datasender_cxt.output_message, sizeof(NotifyDummyCatchupMessage) + 1);
 }
@@ -436,22 +422,19 @@ static void DataSndNotifyCatchup()
 /*
  * Execute an incoming replication command.
  */
-static bool HandleDataReplicationCommand(const char* cmd_string)
+static bool HandleDataReplicationCommand(const char *cmd_string)
 {
     bool replication_started = false;
     int parse_rc;
-    Node* cmd_node = NULL;
+    Node *cmd_node = NULL;
     MemoryContext cmd_context;
     MemoryContext old_context;
     replication_scanner_yyscan_t yyscanner = NULL;
 
     ereport(LOG, (errmsg("received data replication command: %s", cmd_string)));
 
-    cmd_context = AllocSetContextCreate(CurrentMemoryContext,
-        "Replication command context",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    cmd_context = AllocSetContextCreate(CurrentMemoryContext, "Replication command context", ALLOCSET_DEFAULT_MINSIZE,
+                                        ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
 
     yyscanner = replication_scanner_init(cmd_string);
     parse_rc = replication_yyparse(yyscanner);
@@ -459,7 +442,7 @@ static bool HandleDataReplicationCommand(const char* cmd_string)
 
     if (parse_rc != 0) {
         ereport(ERROR,
-            (errcode(ERRCODE_SYNTAX_ERROR), (errmsg_internal("replication command parser returned %d", parse_rc))));
+                (errcode(ERRCODE_SYNTAX_ERROR), (errmsg_internal("replication command parser returned %d", parse_rc))));
     }
 
     old_context = MemoryContextSwitchTo(cmd_context);
@@ -476,14 +459,14 @@ static bool HandleDataReplicationCommand(const char* cmd_string)
             break;
 
         case T_StartDataReplicationCmd:
-            StartDataReplication((StartDataReplicationCmd*)cmd_node);
+            StartDataReplication((StartDataReplicationCmd *)cmd_node);
             /* break out of the loop */
             replication_started = true;
             break;
 
         default:
-            ereport(
-                FATAL, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("invalid standby query string: %s", cmd_string)));
+            ereport(FATAL,
+                    (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("invalid standby query string: %s", cmd_string)));
     }
 
     /* done */
@@ -529,10 +512,10 @@ static void ProcessRepliesIfAny(void)
                  */
             case 'X':
                 proc_exit(0);
-                /* fall-through */
+                break;
             default:
-                ereport(FATAL,
-                    (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("invalid standby message type \"%c\"", firstchar)));
+                ereport(FATAL, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                                errmsg("invalid standby message type \"%c\"", firstchar)));
         }
     }
 
@@ -557,9 +540,9 @@ bool DataSndInSearching(void)
     return dummySearching;
 }
 
-void ReplaceOrFreeBcmFileListBuffer(char* fileList, int msgLength)
+void ReplaceOrFreeBcmFileListBuffer(char *fileList, int msgLength)
 {
-    char* oldFileList = NULL;
+    char *oldFileList = NULL;
     SpinLockAcquire(&g_incrementalBcmInfo.mutex);
     oldFileList = g_incrementalBcmInfo.receivedFileList;
     g_incrementalBcmInfo.msgLength = (fileList != NULL) ? msgLength : 0;
@@ -570,7 +553,7 @@ void ReplaceOrFreeBcmFileListBuffer(char* fileList, int msgLength)
 
 static void ProcessStandbySearchMessage(void)
 {
-    char* fileList = NULL;
+    char *fileList = NULL;
     int msgLength = 0;
 
     if (catchupState != CATCHUP_SEARCHING) {
@@ -586,7 +569,7 @@ static void ProcessStandbySearchMessage(void)
     }
 
     msgLength = t_thrd.datasender_cxt.reply_message->len - 1;
-    fileList = (char*)MemoryContextAllocZero(g_instance.instance_context, msgLength);
+    fileList = (char *)MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), msgLength);
     pq_copymsgbytes(t_thrd.datasender_cxt.reply_message, fileList, t_thrd.datasender_cxt.reply_message->len - 1);
     ReplaceOrFreeBcmFileListBuffer(fileList, msgLength);
     catchupState = RECEIVED_OK;
@@ -625,8 +608,8 @@ static void ProcessStandbyMessage(void)
             ProcessStandbySearchMessage();
             break;
         default:
-            ereport(
-                COMMERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("unexpected message type \"%c\"", msgtype)));
+            ereport(COMMERROR,
+                    (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("unexpected message type \"%c\"", msgtype)));
             proc_exit(0);
     }
 }
@@ -636,14 +619,14 @@ static void ProcessStandbyMessage(void)
  */
 static void ProcessStandbyReplyMessage(void)
 {
-    volatile DataSnd* datasnd = t_thrd.datasender_cxt.MyDataSnd;
+    volatile DataSnd *datasnd = t_thrd.datasender_cxt.MyDataSnd;
     StandbyDataReplyMessage reply;
     bool log_receivePosition = false;
 
-    pq_copymsgbytes(t_thrd.datasender_cxt.reply_message, (char*)&reply, sizeof(StandbyDataReplyMessage));
+    pq_copymsgbytes(t_thrd.datasender_cxt.reply_message, (char *)&reply, sizeof(StandbyDataReplyMessage));
 
     ereport(DEBUG2,
-        (errmsg("receive queue position %u/%u", reply.receivePosition.queueid, reply.receivePosition.queueoff)));
+            (errmsg("receive queue position %u/%u", reply.receivePosition.queueid, reply.receivePosition.queueoff)));
 
     /* send a reply if the standby requested one */
     if (reply.replyRequested)
@@ -671,14 +654,11 @@ static void ProcessStandbyReplyMessage(void)
 
     if (log_receivePosition)
         ereport(LOG,
-            (errmsg("receive position more than send position: receivePosition[%u/%u],"
-                    "sendPosition[%u/%u], use_head2[%u/%u]",
-                reply.receivePosition.queueid,
-                reply.receivePosition.queueoff,
-                datasnd->sendPosition.queueid,
-                datasnd->sendPosition.queueoff,
-                t_thrd.dataqueue_cxt.DataSenderQueue->use_head2.queueid,
-                t_thrd.dataqueue_cxt.DataSenderQueue->use_head2.queueoff)));
+                (errmsg("receive position more than send position: receivePosition[%u/%u],"
+                        "sendPosition[%u/%u], use_head2[%u/%u]",
+                        reply.receivePosition.queueid, reply.receivePosition.queueoff, datasnd->sendPosition.queueid,
+                        datasnd->sendPosition.queueoff, t_thrd.dataqueue_cxt.DataSenderQueue->use_head2.queueid,
+                        t_thrd.dataqueue_cxt.DataSenderQueue->use_head2.queueoff)));
 
     if (datasnd->sending)
         DataSyncRepReleaseWaiters();
@@ -692,7 +672,7 @@ static void ProcessStandbyReplyMessage(void)
 static void DataSndSyncStandbyDone(bool requestReply)
 {
     EndDataMessage endDataMessage;
-    volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
     errno_t errorno = EOK;
 
     /* Construct a new message */
@@ -708,9 +688,8 @@ static void DataSndSyncStandbyDone(bool requestReply)
     /* Prepend with the message type and send it. */
     t_thrd.datasender_cxt.output_message[0] = 'e';
     errorno = memcpy_s(t_thrd.datasender_cxt.output_message + 1,
-        sizeof(DataPageMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024,
-        &endDataMessage,
-        sizeof(EndDataMessage));
+                       sizeof(DataPageMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024, &endDataMessage,
+                       sizeof(EndDataMessage));
     securec_check(errorno, "", "");
     (void)pq_putmessage_noblock('d', t_thrd.datasender_cxt.output_message, sizeof(EndDataMessage) + 1);
 }
@@ -730,7 +709,13 @@ static int DataSndLoop(void)
      * enough for maximum-sized messages.
      */
     t_thrd.datasender_cxt.output_message =
-        (char*)palloc(1 + sizeof(DataPageMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024);
+        (char *)palloc(1 + sizeof(DataPageMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024);
+
+    if (BBOX_BLACKLIST_DATA_MESSAGE_SEND) {
+        bbox_blacklist_add(DATA_MESSAGE_SEND, t_thrd.datasender_cxt.output_message,
+                           (uint64)(1 + sizeof(DataPageMessageHeader) +
+                                    g_instance.attr.attr_storage.MaxSendSize * 1024));
+    }
 
     /*
      * Allocate buffer that will be used for processing reply messages.  As
@@ -785,8 +770,8 @@ static int DataSndLoop(void)
                 pg_memory_barrier();
 
                 if (catchup_online)
-                    ereport(
-                        ERROR, (errcode(ERRCODE_INVALID_STATUS), errmsg("catchup thread is online, wait it shutdown")));
+                    ereport(ERROR,
+                            (errcode(ERRCODE_INVALID_STATUS), errmsg("catchup thread is online, wait it shutdown")));
 
                 SendPostmasterSignal(PMSIGNAL_START_CATCHUP);
             }
@@ -860,18 +845,16 @@ static int DataSndLoop(void)
                 caughtup = false;
 
             if (caughtup && dummyStandbyMode) {
-                ereport(LOG,
-                    (errmsg("standby \"%s\" has now caught up with dummystandby",
-                        u_sess->attr.attr_common.application_name)));
+                ereport(LOG, (errmsg("standby \"%s\" has now caught up with dummystandby",
+                                     u_sess->attr.attr_common.application_name)));
 
                 if (!pq_is_send_pending()) {
                     DataSndSyncStandbyDone(false);
                     (void)pq_flush();
                     ereport(LOG, (errmsg("dummystandby data replication caughtup, ready to stop")));
                 } else
-                    ereport(DEBUG5,
-                        (errmsg("standby \"%s\" has now caught up with dummystandby, but pend on sending",
-                            u_sess->attr.attr_common.application_name)));
+                    ereport(DEBUG5, (errmsg("standby \"%s\" has now caught up with dummystandby, but pend on sending",
+                                            u_sess->attr.attr_common.application_name)));
             }
 
             if (!dummyStandbyMode && !catchupDone && !catchup_online) {
@@ -900,9 +883,8 @@ static int DataSndLoop(void)
              * started to wait at that point might wait for some time.
              */
             if (t_thrd.datasender_cxt.MyDataSnd->state == DATASNDSTATE_CATCHUP) {
-                ereport(DEBUG1,
-                    (errmsg(
-                        "standby \"%s\" has now caught up with primary", u_sess->attr.attr_common.application_name)));
+                ereport(DEBUG1, (errmsg("standby \"%s\" has now caught up with primary",
+                                        u_sess->attr.attr_common.application_name)));
 
                 /* sender to standby on primary */
                 if (t_thrd.datasender_cxt.MyDataSnd->sendRole == SNDROLE_PRIMARY_STANDBY) {
@@ -978,8 +960,8 @@ static int DataSndLoop(void)
             pgstat_report_activity(STATE_IDLE, NULL);
             t_thrd.int_cxt.ImmediateInterruptOK = true;
             CHECK_FOR_INTERRUPTS();
-            WaitLatchOrSocket(
-                &t_thrd.datasender_cxt.MyDataSnd->latch, wakeEvents, u_sess->proc_cxt.MyProcPort->sock, sleeptime);
+            WaitLatchOrSocket(&t_thrd.datasender_cxt.MyDataSnd->latch, wakeEvents, u_sess->proc_cxt.MyProcPort->sock,
+                              sleeptime);
             t_thrd.int_cxt.ImmediateInterruptOK = false;
         }
     }
@@ -1008,8 +990,8 @@ static long DataSndComputeSleeptime(TimestampTz now)
          * At the latest stop sleeping once wal_sender_timeout has been
          * reached.
          */
-        wakeup_time = TimestampTzPlusMilliseconds(
-            t_thrd.datasender_cxt.last_reply_timestamp, u_sess->attr.attr_storage.wal_sender_timeout);
+        wakeup_time = TimestampTzPlusMilliseconds(t_thrd.datasender_cxt.last_reply_timestamp,
+                                                  u_sess->attr.attr_storage.wal_sender_timeout);
 
         /*
          * If no ping has been sent yet, wakeup when it's time to do so.
@@ -1017,8 +999,8 @@ static long DataSndComputeSleeptime(TimestampTz now)
          * the timeout passed without a response.
          */
         if (!t_thrd.datasender_cxt.ping_sent)
-            wakeup_time = TimestampTzPlusMilliseconds(
-                t_thrd.datasender_cxt.last_reply_timestamp, u_sess->attr.attr_storage.wal_sender_timeout / 2);
+            wakeup_time = TimestampTzPlusMilliseconds(t_thrd.datasender_cxt.last_reply_timestamp,
+                                                      u_sess->attr.attr_storage.wal_sender_timeout / 2);
 
         /* Compute relative time until wakeup. */
         TimestampDifference(now, wakeup_time, &sec_to_timeout, &microsec_to_timeout);
@@ -1041,8 +1023,8 @@ static void DataSndCheckTimeOut(TimestampTz now)
     if (t_thrd.datasender_cxt.last_reply_timestamp <= 0)
         return;
 
-    timeout = TimestampTzPlusMilliseconds(
-        t_thrd.datasender_cxt.last_reply_timestamp, u_sess->attr.attr_storage.wal_sender_timeout);
+    timeout = TimestampTzPlusMilliseconds(t_thrd.datasender_cxt.last_reply_timestamp,
+                                          u_sess->attr.attr_storage.wal_sender_timeout);
     if (u_sess->attr.attr_storage.wal_sender_timeout > 0 && now >= timeout) {
         /*
          * Since typically expiration of replication timeout means
@@ -1063,8 +1045,12 @@ static void InitDataSnd(void)
      * WalSndCtl should be set up already (we inherit this by fork() or
      * EXEC_BACKEND mechanism from the postmaster).
      */
-    AssertEreport(t_thrd.datasender_cxt.DataSndCtl != nullptr, MOD_FUNCTION, "DataSndCtl should not be null");
-    AssertEreport(t_thrd.datasender_cxt.MyDataSnd == nullptr, MOD_FUNCTION, "MyDataSnd should be null");
+    if (t_thrd.datasender_cxt.DataSndCtl == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("DataSndCtl should not be null")));
+    }
+    if (t_thrd.datasender_cxt.MyDataSnd != NULL) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("MyDataSnd should be null")));
+    }
 
     /*
      * Find a free walsender slot and reserve it. If this fails, we must be
@@ -1072,7 +1058,7 @@ static void InitDataSnd(void)
      */
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
-        volatile DataSnd* datasnd = &t_thrd.datasender_cxt.DataSndCtl->datasnds[i];
+        volatile DataSnd *datasnd = &t_thrd.datasender_cxt.DataSndCtl->datasnds[i];
 
         SpinLockAcquire(&datasnd->mutex);
 
@@ -1105,17 +1091,15 @@ static void InitDataSnd(void)
 
             SpinLockRelease(&datasnd->mutex);
             /* don't need the lock anymore */
-            OwnLatch((Latch*)&datasnd->latch);
-            t_thrd.datasender_cxt.MyDataSnd = (DataSnd*)datasnd;
+            OwnLatch((Latch *)&datasnd->latch);
+            t_thrd.datasender_cxt.MyDataSnd = (DataSnd *)datasnd;
             break;
         }
     }
     if (t_thrd.datasender_cxt.MyDataSnd == NULL)
-        ereport(FATAL,
-            (errcode(ERRCODE_TOO_MANY_CONNECTIONS),
-                errmsg("number of requested standby connections "
-                       "exceeds max_wal_senders (currently %d)",
-                    g_instance.attr.attr_storage.max_wal_senders)));
+        ereport(FATAL, (errcode(ERRCODE_TOO_MANY_CONNECTIONS), errmsg("number of requested standby connections "
+                                                                      "exceeds max_wal_senders (currently %d)",
+                                                                      g_instance.attr.attr_storage.max_wal_senders)));
 
     /* Arrange to clean up at walsender exit */
     on_shmem_exit(DataSndKill, 0);
@@ -1124,7 +1108,7 @@ static void InitDataSnd(void)
 /* Destroy the per-datasender data structure for this datasender process */
 static void DataSndKill(int code, Datum arg)
 {
-    DataSnd* datasnd = t_thrd.datasender_cxt.MyDataSnd;
+    DataSnd *datasnd = t_thrd.datasender_cxt.MyDataSnd;
 
     Assert(t_thrd.datasender_cxt.MyDataSnd != NULL);
 
@@ -1143,6 +1127,10 @@ static void DataSndKill(int code, Datum arg)
     datasnd->pid = 0;
     SpinLockRelease(&datasnd->mutex);
     dummySearching = false;
+
+    if (BBOX_BLACKLIST_DATA_MESSAGE_SEND) {
+        bbox_blacklist_remove(DATA_MESSAGE_SEND, t_thrd.datasender_cxt.output_message);
+    }
 
     ereport(LOG, (errmsg("datasender thread shut down")));
 }
@@ -1163,11 +1151,11 @@ static void DataSndShutdown(void)
     abort(); /* keep the compiler quiet */
 }
 
-static void DataSend(bool* caughtup)
+static void DataSend(bool *caughtup)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile DataSnd* datasnd = t_thrd.datasender_cxt.MyDataSnd;
-    char* datasndbuf = NULL;
+    volatile DataSnd *datasnd = t_thrd.datasender_cxt.MyDataSnd;
+    char *datasndbuf = NULL;
     DataPageMessageHeader msghdr;
     DataQueuePtr startptr;
     DataQueuePtr endptr;
@@ -1190,19 +1178,10 @@ static void DataSend(bool* caughtup)
         sendsize = DataSendReadData(datasndbuf, g_instance.attr.attr_storage.MaxSendSize * 1024);
         ereport(DEBUG5, (errmsg("AmDataSenderOnDummyStandby is true: sendsize=%u", sendsize)));
     } else {
-        sendsize = GetFromDataQueue(datasndbuf,
-            g_instance.attr.attr_storage.MaxSendSize * 1024,
-            startptr,
-            endptr,
-            false,
-            t_thrd.dataqueue_cxt.DataSenderQueue);
-        ereport(DEBUG5,
-            (errmsg("AmDataSenderOnDummyStandby is false: sendsize=%u startpos=%u/%u endpos=%u/%u",
-                sendsize,
-                startptr.queueid,
-                startptr.queueoff,
-                endptr.queueid,
-                endptr.queueoff)));
+        sendsize = GetFromDataQueue(datasndbuf, g_instance.attr.attr_storage.MaxSendSize * 1024, startptr, endptr,
+                                    false, t_thrd.dataqueue_cxt.DataSenderQueue);
+        ereport(DEBUG5, (errmsg("AmDataSenderOnDummyStandby is false: sendsize=%u startpos=%u/%u endpos=%u/%u",
+                                sendsize, startptr.queueid, startptr.queueoff, endptr.queueid, endptr.queueoff)));
     }
 
     if (!u_sess->attr.attr_storage.enable_stream_replication || (sendsize == 0)) {
@@ -1223,10 +1202,8 @@ static void DataSend(bool* caughtup)
     msghdr.dataEnd = endptr;
     msghdr.sendTime = GetCurrentTimestamp();
     msghdr.catchup = (t_thrd.datasender_cxt.MyDataSnd->state == DATASNDSTATE_CATCHUP);
-    rc = memcpy_s(t_thrd.datasender_cxt.output_message + 1,
-        sizeof(DataPageMessageHeader),
-        &msghdr,
-        sizeof(DataPageMessageHeader));
+    rc = memcpy_s(t_thrd.datasender_cxt.output_message + 1, sizeof(DataPageMessageHeader), &msghdr,
+                  sizeof(DataPageMessageHeader));
     securec_check(rc, "", "");
 
     pq_putmessage_noblock('d', t_thrd.datasender_cxt.output_message, 1 + sizeof(DataPageMessageHeader) + sendsize);
@@ -1240,13 +1217,8 @@ static void DataSend(bool* caughtup)
     *caughtup = false;
 
     if (u_sess->attr.attr_storage.HaModuleDebug) {
-        ereport(LOG,
-            (errmsg("HA-DataSend done: send data from %u/%u to %u/%u, size %u",
-                startptr.queueid,
-                startptr.queueoff,
-                endptr.queueid,
-                endptr.queueoff,
-                sendsize)));
+        ereport(LOG, (errmsg("HA-DataSend done: send data from %u/%u to %u/%u, size %u", startptr.queueid,
+                             startptr.queueoff, endptr.queueid, endptr.queueoff, sendsize)));
     }
 
     return;
@@ -1341,7 +1313,7 @@ void DataSndSignals(void)
 {
     /* Set up signal handlers */
     (void)gspqsignal(SIGHUP, DataSndSigHupHandler);    /* set flag to read config
-                                                        * file */
+                                                     * file */
     (void)gspqsignal(SIGINT, SIG_IGN);                 /* not used */
     (void)gspqsignal(SIGTERM, DataSndShutdownHandler); /* request shutdown */
     (void)gspqsignal(SIGQUIT, DataSndQuickDieHandler); /* hard crash time */
@@ -1376,7 +1348,7 @@ void DataSndShmemInit(void)
     int i;
     errno_t rc = 0;
 
-    t_thrd.datasender_cxt.DataSndCtl = (DataSndCtlData*)ShmemInitStruct("Data Sender Ctl", DataSndShmemSize(), &found);
+    t_thrd.datasender_cxt.DataSndCtl = (DataSndCtlData *)ShmemInitStruct("Data Sender Ctl", DataSndShmemSize(), &found);
 
     if (!found) {
         /* First time through, so initialize */
@@ -1385,7 +1357,7 @@ void DataSndShmemInit(void)
         SHMQueueInit(&(t_thrd.datasender_cxt.DataSndCtl->SyncRepQueue));
 
         for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
-            DataSnd* datasnd = &t_thrd.datasender_cxt.DataSndCtl->datasnds[i];
+            DataSnd *datasnd = &t_thrd.datasender_cxt.DataSndCtl->datasnds[i];
 
             rc = memset_s(datasnd, sizeof(DataSnd), 0, sizeof(DataSnd));
             securec_check(rc, "", "");
@@ -1413,7 +1385,7 @@ bool DataSndInProgress(int type)
 
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
-        volatile DataSnd* datasnd = &t_thrd.datasender_cxt.DataSndCtl->datasnds[i];
+        volatile DataSnd *datasnd = &t_thrd.datasender_cxt.DataSndCtl->datasnds[i];
 
         SpinLockAcquire(&datasnd->mutex);
 
@@ -1435,7 +1407,7 @@ static bool DataSndCaughtup(void)
 
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
-        volatile DataSnd* datasnd = &t_thrd.datasender_cxt.DataSndCtl->datasnds[i];
+        volatile DataSnd *datasnd = &t_thrd.datasender_cxt.DataSndCtl->datasnds[i];
 
         SpinLockAcquire(&datasnd->mutex);
 
@@ -1456,7 +1428,7 @@ static bool DataSndCaughtup(void)
 void DataSndSetState(DataSndState state)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile DataSnd* datasnd = t_thrd.datasender_cxt.MyDataSnd;
+    volatile DataSnd *datasnd = t_thrd.datasender_cxt.MyDataSnd;
 
     Assert(t_thrd.datasender_cxt.am_datasender);
 
@@ -1479,7 +1451,7 @@ void DataSndSetState(DataSndState state)
  */
 static void DataSndKeepalive(bool requestReply)
 {
-    volatile DataSnd* datasnd = t_thrd.datasender_cxt.MyDataSnd;
+    volatile DataSnd *datasnd = t_thrd.datasender_cxt.MyDataSnd;
     DataSndKeepaliveMessage keepalive_message;
     errno_t errorno = EOK;
 
@@ -1496,9 +1468,8 @@ static void DataSndKeepalive(bool requestReply)
     /* Prepend with the message type and send it. */
     t_thrd.datasender_cxt.output_message[0] = 'k';
     errorno = memcpy_s(t_thrd.datasender_cxt.output_message + 1,
-        sizeof(DataPageMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024,
-        &keepalive_message,
-        sizeof(DataSndKeepaliveMessage));
+                       sizeof(DataPageMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024,
+                       &keepalive_message, sizeof(DataSndKeepaliveMessage));
     securec_check(errorno, "", "");
     (void)pq_putmessage_noblock('d', t_thrd.datasender_cxt.output_message, sizeof(DataSndKeepaliveMessage) + 1);
 
@@ -1515,7 +1486,7 @@ static void DataSndKeepalive(bool requestReply)
 static void DataSndRmData(bool requestReply)
 {
     RmDataMessage rmDataMessage;
-    volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
     errno_t errorno = EOK;
 
     /* Construct a new message */
@@ -1529,9 +1500,8 @@ static void DataSndRmData(bool requestReply)
     /* Prepend with the message type and send it. */
     t_thrd.datasender_cxt.output_message[0] = 'x';
     errorno = memcpy_s(t_thrd.datasender_cxt.output_message + 1,
-        sizeof(DataPageMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024,
-        &rmDataMessage,
-        sizeof(RmDataMessage));
+                       sizeof(DataPageMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024, &rmDataMessage,
+                       sizeof(RmDataMessage));
     securec_check(errorno, "", "");
     (void)pq_putmessage_noblock('d', t_thrd.datasender_cxt.output_message, sizeof(RmDataMessage) + 1);
 }
@@ -1555,15 +1525,15 @@ static void DataSndKeepaliveIfNecessary(TimestampTz now)
      * from the standby, send a keep-alive message to the standby requesting
      * an immediate reply.
      */
-    ping_time = TimestampTzPlusMilliseconds(
-        t_thrd.datasender_cxt.last_reply_timestamp, u_sess->attr.attr_storage.wal_sender_timeout / 2);
+    ping_time = TimestampTzPlusMilliseconds(t_thrd.datasender_cxt.last_reply_timestamp,
+                                            u_sess->attr.attr_storage.wal_sender_timeout / 2);
     if (now >= ping_time) {
         DataSndKeepalive(true);
         t_thrd.datasender_cxt.ping_sent = true;
     }
 }
 
-static uint32 DataSendReadData(char* buf, uint32 bufsize)
+static uint32 DataSendReadData(char *buf, uint32 bufsize)
 {
     uint32 bytesread = 0;
     char path[MAXPGPATH] = {0};
@@ -1580,18 +1550,17 @@ retry:
     while (t_thrd.datasender_cxt.dummy_data_read_file_fd == NULL) {
         /* if dummy standby have no data to send , return 0 */
         if (t_thrd.datasender_cxt.dummy_data_read_file_num > t_thrd.datarcvwriter_cxt.dummy_data_writer_file_num) {
-            ereport(DEBUG5,
-                (errmsg(
-                    "no data to send.dummy_data_read_file_num=%u", t_thrd.datasender_cxt.dummy_data_read_file_num)));
+            ereport(DEBUG5, (errmsg("no data to send.dummy_data_read_file_num=%u",
+                                    t_thrd.datasender_cxt.dummy_data_read_file_num)));
 
             if (total_len > bufsize)
-                ereport(PANIC,
-                    (errmsg("Secondery standby finish read data error, total len %u, bufsize %u", total_len, bufsize)));
+                ereport(PANIC, (errmsg("Secondery standby finish read data error, total len %u, bufsize %u", total_len,
+                                       bufsize)));
             return total_len;
         }
         /* get the file path */
-        nRet = snprintf_s(
-            path, sizeof(path), MAXPGPATH - 1, "base/dummy_standby/%u", t_thrd.datasender_cxt.dummy_data_read_file_num);
+        nRet = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "base/dummy_standby/%u",
+                          t_thrd.datasender_cxt.dummy_data_read_file_num);
         securec_check_ss(nRet, "\0", "\0");
 
         ereport(DEBUG5, (errmsg("DataSendReadData path=%s", path)));
@@ -1613,15 +1582,13 @@ retry:
         bytesread = fread(&nbytes, 1, sizeof(nbytes), t_thrd.datasender_cxt.dummy_data_read_file_fd);
         if (bytesread != sizeof(nbytes)) {
             if (ferror(t_thrd.datasender_cxt.dummy_data_read_file_fd)) {
-                ereport(PANIC,
-                    (errcode_for_file_access(),
-                        errmsg("could not read to data file %s length %u: %m", path, nbytes)));
+                ereport(PANIC, (errcode_for_file_access(),
+                                errmsg("could not read to data file %s length %u: %m", path, nbytes)));
             }
             if (feof(t_thrd.datasender_cxt.dummy_data_read_file_fd)) {
-                ereport(LOG,
-                    (errmsg("step1: data file num %u, read file fd %d",
-                        t_thrd.datasender_cxt.dummy_data_read_file_num,
-                        t_thrd.datasender_cxt.dummy_data_read_file_fd->_fileno)));
+                ereport(LOG, (errmsg("step1: data file num %u, read file fd %d",
+                                     t_thrd.datasender_cxt.dummy_data_read_file_num,
+                                     t_thrd.datasender_cxt.dummy_data_read_file_fd->_fileno)));
                 t_thrd.datasender_cxt.dummy_data_read_file_num++;
                 fclose(t_thrd.datasender_cxt.dummy_data_read_file_fd);
                 t_thrd.datasender_cxt.dummy_data_read_file_fd = NULL;
@@ -1637,8 +1604,8 @@ retry:
         /* if the bufsize is full, then we send it. */
         if (total_len + nbytes > bufsize) {
             if (fseek(t_thrd.datasender_cxt.dummy_data_read_file_fd, -(long)sizeof(nbytes), SEEK_CUR))
-                ereport(
-                    PANIC, (errmsg("fseek data file num %u error", t_thrd.datasender_cxt.dummy_data_read_file_num)));
+                ereport(PANIC,
+                        (errmsg("fseek data file num %u error", t_thrd.datasender_cxt.dummy_data_read_file_num)));
             break;
         }
 
@@ -1648,15 +1615,13 @@ retry:
         bytesread = fread(buf + total_len, 1, nbytes, t_thrd.datasender_cxt.dummy_data_read_file_fd);
         if (bytesread != nbytes) {
             if (ferror(t_thrd.datasender_cxt.dummy_data_read_file_fd)) {
-                ereport(PANIC,
-                    (errcode_for_file_access(),
-                        errmsg("could not read to data file %s length %u: %m", path, nbytes)));
+                ereport(PANIC, (errcode_for_file_access(),
+                                errmsg("could not read to data file %s length %u: %m", path, nbytes)));
             }
             if (feof(t_thrd.datasender_cxt.dummy_data_read_file_fd)) {
-                ereport(LOG,
-                    (errmsg("step2: data file num %u, read file fd %d",
-                        t_thrd.datasender_cxt.dummy_data_read_file_num,
-                        t_thrd.datasender_cxt.dummy_data_read_file_fd->_fileno)));
+                ereport(LOG, (errmsg("step2: data file num %u, read file fd %d",
+                                     t_thrd.datasender_cxt.dummy_data_read_file_num,
+                                     t_thrd.datasender_cxt.dummy_data_read_file_fd->_fileno)));
                 t_thrd.datasender_cxt.dummy_data_read_file_num++;
                 fclose(t_thrd.datasender_cxt.dummy_data_read_file_fd);
                 t_thrd.datasender_cxt.dummy_data_read_file_fd = NULL;
@@ -1680,7 +1645,7 @@ retry:
 /*
  * return datasender state string.
  */
-static const char* DataSndGetStateString(DataSndState state)
+static const char *DataSndGetStateString(DataSndState state)
 {
     switch (state) {
         case DATASNDSTATE_STARTUP:
@@ -1701,9 +1666,9 @@ Datum pg_stat_get_data_senders(PG_FUNCTION_ARGS)
 {
 #define PG_STAT_GET_DATA_SENDER_COLS 13
     TupleDesc tupdesc;
-    Tuplestorestate* tupstore = NULL;
+    Tuplestorestate *tupstore = NULL;
 
-    volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
     ServerMode local_role = UNKNOWN_MODE;
     int i = 0;
     errno_t rc = EOK;
@@ -1717,7 +1682,7 @@ Datum pg_stat_get_data_senders(PG_FUNCTION_ARGS)
 
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
-        volatile DataSnd* datasnd = &t_thrd.datasender_cxt.DataSndCtl->datasnds[i];
+        volatile DataSnd *datasnd = &t_thrd.datasender_cxt.DataSndCtl->datasnds[i];
         Datum values[PG_STAT_GET_DATA_SENDER_COLS];
         bool nulls[PG_STAT_GET_DATA_SENDER_COLS];
         char location[64] = {0};
@@ -1768,7 +1733,7 @@ Datum pg_stat_get_data_senders(PG_FUNCTION_ARGS)
         /* lwpid */
         values[j++] = Int32GetDatum(lwpid);
 
-        if (!superuser()) {
+        if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) {
             /*
              * Only superusers can see details. Other users only get the pid
              * value to know it's a walsender, but no details.
@@ -1800,42 +1765,26 @@ Datum pg_stat_get_data_senders(PG_FUNCTION_ARGS)
 
             /* queue */
             values[j++] = UInt32GetDatum(queue_size);
-            ret = snprintf_s(location,
-                sizeof(location),
-                sizeof(location) - 1,
-                "%X/%X",
-                queue_lower_tail.queueid,
-                queue_lower_tail.queueoff);
+            ret = snprintf_s(location, sizeof(location), sizeof(location) - 1, "%X/%X", queue_lower_tail.queueid,
+                             queue_lower_tail.queueoff);
             securec_check_ss(ret, "", "");
             values[j++] = CStringGetTextDatum(location);
-            ret = snprintf_s(
-                location, sizeof(location), sizeof(location) - 1, "%X/%X", queue_header.queueid, queue_header.queueoff);
+            ret = snprintf_s(location, sizeof(location), sizeof(location) - 1, "%X/%X", queue_header.queueid,
+                             queue_header.queueoff);
             securec_check_ss(ret, "", "");
             values[j++] = CStringGetTextDatum(location);
-            ret = snprintf_s(location,
-                sizeof(location),
-                sizeof(location) - 1,
-                "%X/%X",
-                queue_upper_tail.queueid,
-                queue_upper_tail.queueoff);
+            ret = snprintf_s(location, sizeof(location), sizeof(location) - 1, "%X/%X", queue_upper_tail.queueid,
+                             queue_upper_tail.queueoff);
             securec_check_ss(ret, "", "");
             values[j++] = CStringGetTextDatum(location);
             /* send */
-            ret = snprintf_s(location,
-                sizeof(location),
-                sizeof(location) - 1,
-                "%X/%X",
-                send_position.queueid,
-                send_position.queueoff);
+            ret = snprintf_s(location, sizeof(location), sizeof(location) - 1, "%X/%X", send_position.queueid,
+                             send_position.queueoff);
             securec_check_ss(ret, "", "");
             values[j++] = CStringGetTextDatum(location);
             /* receive */
-            ret = snprintf_s(location,
-                sizeof(location),
-                sizeof(location) - 1,
-                "%X/%X",
-                receive_position.queueid,
-                receive_position.queueoff);
+            ret = snprintf_s(location, sizeof(location), sizeof(location) - 1, "%X/%X", receive_position.queueid,
+                             receive_position.queueoff);
             securec_check_ss(ret, "", "");
             values[j++] = CStringGetTextDatum(location);
         }

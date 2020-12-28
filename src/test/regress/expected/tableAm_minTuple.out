@@ -1,0 +1,642 @@
+-- minimum tuple tests
+-- Test for char type.
+CREATE TABLE TESTMINTUPLE_CHAR_TBL(f1 char);
+INSERT INTO TESTMINTUPLE_CHAR_TBL (f1) VALUES ('a');
+INSERT INTO TESTMINTUPLE_CHAR_TBL (f1) VALUES ('A');
+-- any of the following three input formats are acceptable
+INSERT INTO TESTMINTUPLE_CHAR_TBL (f1) VALUES ('1');
+INSERT INTO TESTMINTUPLE_CHAR_TBL (f1) VALUES (2);
+INSERT INTO TESTMINTUPLE_CHAR_TBL (f1) VALUES ('3');
+-- zero-length char
+INSERT INTO TESTMINTUPLE_CHAR_TBL (f1) VALUES ('');
+-- try char's of greater than 1 length
+INSERT INTO TESTMINTUPLE_CHAR_TBL (f1) VALUES ('cd');
+ERROR:  value too long for type character(1)
+CONTEXT:  referenced column: f1
+INSERT INTO TESTMINTUPLE_CHAR_TBL (f1) VALUES ('c     ');
+-- Sorting the table is done via ExecSort() which uses ExecCopySlotMinimalTuple and ExecStoreMinimalTuple. 
+SELECT '' AS seven, * FROM TESTMINTUPLE_CHAR_TBL ORDER BY f1;
+ seven | f1 
+-------+----
+       | 1
+       | 2
+       | 3
+       | a
+       | A
+       | c
+       | 
+(7 rows)
+
+SELECT '' AS six, c.*
+   FROM TESTMINTUPLE_CHAR_TBL c
+   WHERE c.f1 <> 'a' ORDER BY f1;
+ six | f1 
+-----+----
+     | 1
+     | 2
+     | 3
+     | A
+     | c
+(5 rows)
+
+SELECT '' AS one, c.*
+   FROM TESTMINTUPLE_CHAR_TBL c
+   WHERE c.f1 = 'a';
+ one | f1 
+-----+----
+     | a
+(1 row)
+
+SELECT '' AS five, c.*
+   FROM TESTMINTUPLE_CHAR_TBL c
+   WHERE c.f1 < 'a' ORDER BY f1;
+ five | f1 
+------+----
+      | 1
+      | 2
+      | 3
+(3 rows)
+
+SELECT '' AS six, c.*
+   FROM TESTMINTUPLE_CHAR_TBL c
+   WHERE c.f1 <= 'a' ORDER BY f1;
+ six | f1 
+-----+----
+     | 1
+     | 2
+     | 3
+     | a
+(4 rows)
+
+SELECT '' AS one, c.*
+   FROM TESTMINTUPLE_CHAR_TBL c
+   WHERE c.f1 > 'a' ORDER BY f1;
+ one | f1 
+-----+----
+     | A
+     | c
+(2 rows)
+
+SELECT '' AS two, c.*
+   FROM TESTMINTUPLE_CHAR_TBL c
+   WHERE c.f1 >= 'a' ORDER BY f1;
+ two | f1 
+-----+----
+     | a
+     | A
+     | c
+(3 rows)
+
+DROP TABLE TESTMINTUPLE_CHAR_TBL;
+CREATE TABLE TESTMINTUPLE_INT_TBL(q1 int8, q2 int8);
+INSERT INTO TESTMINTUPLE_INT_TBL VALUES('  123   ','  456');
+INSERT INTO TESTMINTUPLE_INT_TBL VALUES('123   ','4567890123456789');
+INSERT INTO TESTMINTUPLE_INT_TBL VALUES('4567890123456789','123');
+INSERT INTO TESTMINTUPLE_INT_TBL VALUES(+4567890123456789,'4567890123456789');
+INSERT INTO TESTMINTUPLE_INT_TBL VALUES('+4567890123456789','-4567890123456789');
+-- bad inputs
+INSERT INTO TESTMINTUPLE_INT_TBL(q1) VALUES ('      ');
+ERROR:  invalid input syntax for type bigint: "      "
+LINE 1: INSERT INTO TESTMINTUPLE_INT_TBL(q1) VALUES ('      ');
+                                                     ^
+CONTEXT:  referenced column: q1
+INSERT INTO TESTMINTUPLE_INT_TBL(q1) VALUES ('xxx');
+ERROR:  invalid input syntax for type bigint: "xxx"
+LINE 1: INSERT INTO TESTMINTUPLE_INT_TBL(q1) VALUES ('xxx');
+                                                     ^
+CONTEXT:  referenced column: q1
+INSERT INTO TESTMINTUPLE_INT_TBL(q1) VALUES ('3908203590239580293850293850329485');
+ERROR:  value "3908203590239580293850293850329485" is out of range for type bigint
+LINE 1: INSERT INTO TESTMINTUPLE_INT_TBL(q1) VALUES ('39082035902395...
+                                                     ^
+CONTEXT:  referenced column: q1
+INSERT INTO TESTMINTUPLE_INT_TBL(q1) VALUES ('-1204982019841029840928340329840934');
+ERROR:  value "-1204982019841029840928340329840934" is out of range for type bigint
+LINE 1: INSERT INTO TESTMINTUPLE_INT_TBL(q1) VALUES ('-1204982019841...
+                                                     ^
+CONTEXT:  referenced column: q1
+INSERT INTO TESTMINTUPLE_INT_TBL(q1) VALUES ('- 123');
+ERROR:  invalid input syntax for type bigint: "- 123"
+LINE 1: INSERT INTO TESTMINTUPLE_INT_TBL(q1) VALUES ('- 123');
+                                                     ^
+CONTEXT:  referenced column: q1
+INSERT INTO TESTMINTUPLE_INT_TBL(q1) VALUES ('  345     5');
+ERROR:  invalid input syntax for type bigint: "  345     5"
+LINE 1: INSERT INTO TESTMINTUPLE_INT_TBL(q1) VALUES ('  345     5');
+                                                     ^
+CONTEXT:  referenced column: q1
+INSERT INTO TESTMINTUPLE_INT_TBL(q1) VALUES ('');
+-- Sorting the table is done via ExecSort() which uses ExecCopySlotMinimalTuple and ExecStoreMinimalTuple. 
+SELECT * FROM TESTMINTUPLE_INT_TBL ORDER BY q1,q2;
+        q1        |        q2         
+------------------+-------------------
+              123 |               456
+              123 |  4567890123456789
+ 4567890123456789 | -4567890123456789
+ 4567890123456789 |               123
+ 4567890123456789 |  4567890123456789
+                  |                  
+(6 rows)
+
+-- int8/int8 cmp
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE q2 = 4567890123456789 ORDER BY q1,q2;
+        q1        |        q2        
+------------------+------------------
+              123 | 4567890123456789
+ 4567890123456789 | 4567890123456789
+(2 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE q2 <> 4567890123456789 ORDER BY q1,q2;
+        q1        |        q2         
+------------------+-------------------
+              123 |               456
+ 4567890123456789 | -4567890123456789
+ 4567890123456789 |               123
+(3 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE q2 < 4567890123456789 ORDER BY q1,q2;
+        q1        |        q2         
+------------------+-------------------
+              123 |               456
+ 4567890123456789 | -4567890123456789
+ 4567890123456789 |               123
+(3 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE q2 > 4567890123456789 ORDER BY q1,q2;
+ q1 | q2 
+----+----
+(0 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE q2 <= 4567890123456789 ORDER BY q1,q2;
+        q1        |        q2         
+------------------+-------------------
+              123 |               456
+              123 |  4567890123456789
+ 4567890123456789 | -4567890123456789
+ 4567890123456789 |               123
+ 4567890123456789 |  4567890123456789
+(5 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE q2 >= 4567890123456789 ORDER BY q1,q2;
+        q1        |        q2        
+------------------+------------------
+              123 | 4567890123456789
+ 4567890123456789 | 4567890123456789
+(2 rows)
+
+-- int8/int4 cmp
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE q2 = 456 ORDER BY q1,q2;
+ q1  | q2  
+-----+-----
+ 123 | 456
+(1 row)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE q2 <> 456 ORDER BY q1,q2;
+        q1        |        q2         
+------------------+-------------------
+              123 |  4567890123456789
+ 4567890123456789 | -4567890123456789
+ 4567890123456789 |               123
+ 4567890123456789 |  4567890123456789
+(4 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE q2 < 456 ORDER BY q1,q2;
+        q1        |        q2         
+------------------+-------------------
+ 4567890123456789 | -4567890123456789
+ 4567890123456789 |               123
+(2 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE q2 > 456 ORDER BY q1,q2;
+        q1        |        q2        
+------------------+------------------
+              123 | 4567890123456789
+ 4567890123456789 | 4567890123456789
+(2 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE q2 <= 456 ORDER BY q1,q2;
+        q1        |        q2         
+------------------+-------------------
+              123 |               456
+ 4567890123456789 | -4567890123456789
+ 4567890123456789 |               123
+(3 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE q2 >= 456 ORDER BY q1,q2;
+        q1        |        q2        
+------------------+------------------
+              123 |              456
+              123 | 4567890123456789
+ 4567890123456789 | 4567890123456789
+(3 rows)
+
+-- int4/int8 cmp
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE 123 = q1 ORDER BY q1,q2;
+ q1  |        q2        
+-----+------------------
+ 123 |              456
+ 123 | 4567890123456789
+(2 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE 123 <> q1 ORDER BY q1,q2;
+        q1        |        q2         
+------------------+-------------------
+ 4567890123456789 | -4567890123456789
+ 4567890123456789 |               123
+ 4567890123456789 |  4567890123456789
+(3 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE 123 < q1 ORDER BY q1,q2;
+        q1        |        q2         
+------------------+-------------------
+ 4567890123456789 | -4567890123456789
+ 4567890123456789 |               123
+ 4567890123456789 |  4567890123456789
+(3 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE 123 > q1 ORDER BY q1,q2;
+ q1 | q2 
+----+----
+(0 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE 123 <= q1 ORDER BY q1,q2;
+        q1        |        q2         
+------------------+-------------------
+              123 |               456
+              123 |  4567890123456789
+ 4567890123456789 | -4567890123456789
+ 4567890123456789 |               123
+ 4567890123456789 |  4567890123456789
+(5 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE 123 >= q1 ORDER BY q1,q2;
+ q1  |        q2        
+-----+------------------
+ 123 |              456
+ 123 | 4567890123456789
+(2 rows)
+
+-- int8/int2 cmp
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE q2 = '456'::int2 ORDER BY q1,q2;
+ q1  | q2  
+-----+-----
+ 123 | 456
+(1 row)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE q2 <> '456'::int2 ORDER BY q1,q2;
+        q1        |        q2         
+------------------+-------------------
+              123 |  4567890123456789
+ 4567890123456789 | -4567890123456789
+ 4567890123456789 |               123
+ 4567890123456789 |  4567890123456789
+(4 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE q2 < '456'::int2 ORDER BY q1,q2;
+        q1        |        q2         
+------------------+-------------------
+ 4567890123456789 | -4567890123456789
+ 4567890123456789 |               123
+(2 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE q2 > '456'::int2 ORDER BY q1,q2;
+        q1        |        q2        
+------------------+------------------
+              123 | 4567890123456789
+ 4567890123456789 | 4567890123456789
+(2 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE q2 <= '456'::int2 ORDER BY q1,q2;
+        q1        |        q2         
+------------------+-------------------
+              123 |               456
+ 4567890123456789 | -4567890123456789
+ 4567890123456789 |               123
+(3 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE q2 >= '456'::int2 ORDER BY q1,q2;
+        q1        |        q2        
+------------------+------------------
+              123 |              456
+              123 | 4567890123456789
+ 4567890123456789 | 4567890123456789
+(3 rows)
+
+-- int2/int8 cmp
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE '123'::int2 = q1 ORDER BY q1,q2;
+ q1  |        q2        
+-----+------------------
+ 123 |              456
+ 123 | 4567890123456789
+(2 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE '123'::int2 <> q1 ORDER BY q1,q2;
+        q1        |        q2         
+------------------+-------------------
+ 4567890123456789 | -4567890123456789
+ 4567890123456789 |               123
+ 4567890123456789 |  4567890123456789
+(3 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE '123'::int2 < q1 ORDER BY q1,q2;
+        q1        |        q2         
+------------------+-------------------
+ 4567890123456789 | -4567890123456789
+ 4567890123456789 |               123
+ 4567890123456789 |  4567890123456789
+(3 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE '123'::int2 > q1 ORDER BY q1,q2;
+ q1 | q2 
+----+----
+(0 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE '123'::int2 <= q1 ORDER BY q1,q2;
+        q1        |        q2         
+------------------+-------------------
+              123 |               456
+              123 |  4567890123456789
+ 4567890123456789 | -4567890123456789
+ 4567890123456789 |               123
+ 4567890123456789 |  4567890123456789
+(5 rows)
+
+SELECT * FROM TESTMINTUPLE_INT_TBL WHERE '123'::int2 >= q1 ORDER BY q1,q2;
+ q1  |        q2        
+-----+------------------
+ 123 |              456
+ 123 | 4567890123456789
+(2 rows)
+
+SELECT '' AS five, q1 AS plus, -q1 AS minuz FROM TESTMINTUPLE_INT_TBL ORDER BY q1;
+ five |       plus       |       minuz       
+------+------------------+-------------------
+      |              123 |              -123
+      |              123 |              -123
+      | 4567890123456789 | -4567890123456789
+      | 4567890123456789 | -4567890123456789
+      | 4567890123456789 | -4567890123456789
+      |                  |                  
+(6 rows)
+
+SELECT '' AS five, q1, q2, q1 + q2 AS plus FROM TESTMINTUPLE_INT_TBL ORDER BY q1,q2;
+ five |        q1        |        q2         |       plus       
+------+------------------+-------------------+------------------
+      |              123 |               456 |              579
+      |              123 |  4567890123456789 | 4567890123456912
+      | 4567890123456789 | -4567890123456789 |                0
+      | 4567890123456789 |               123 | 4567890123456912
+      | 4567890123456789 |  4567890123456789 | 9135780246913578
+      |                  |                   |                 
+(6 rows)
+
+SELECT '' AS five, q1, q2, q1 - q2 AS minuz FROM TESTMINTUPLE_INT_TBL ORDER BY q1,q2;
+ five |        q1        |        q2         |       minuz       
+------+------------------+-------------------+-------------------
+      |              123 |               456 |              -333
+      |              123 |  4567890123456789 | -4567890123456666
+      | 4567890123456789 | -4567890123456789 |  9135780246913578
+      | 4567890123456789 |               123 |  4567890123456666
+      | 4567890123456789 |  4567890123456789 |                 0
+      |                  |                   |                  
+(6 rows)
+
+SELECT '' AS three, q1, q2, q1 * q2 AS multiply FROM TESTMINTUPLE_INT_TBL ORDER BY q1,q2;
+ERROR:  bigint out of range
+CONTEXT:  referenced column: multiply
+SELECT '' AS three, q1, q2, q1 * q2 AS multiply FROM TESTMINTUPLE_INT_TBL
+ WHERE q1 < 1000 or (q2 > 0 and q2 < 1000) ORDER BY q1,q2;
+ three |        q1        |        q2        |      multiply      
+-------+------------------+------------------+--------------------
+       |              123 |              456 |              56088
+       |              123 | 4567890123456789 | 561850485185185047
+       | 4567890123456789 |              123 | 561850485185185047
+(3 rows)
+
+SELECT '' AS five, q1, q2, q1 / q2 AS divide, q1 % q2 AS mod FROM TESTMINTUPLE_INT_TBL ORDER BY q1,q2;
+ five |        q1        |        q2         |        divide        | mod 
+------+------------------+-------------------+----------------------+-----
+      |              123 |               456 |     .269736842105263 | 123
+      |              123 |  4567890123456789 | 2.69270925253602e-14 | 123
+      | 4567890123456789 | -4567890123456789 |                   -1 |   0
+      | 4567890123456789 |               123 |     37137318076884.5 |  57
+      | 4567890123456789 |  4567890123456789 |                    1 |   0
+      |                  |                   |                      |    
+(6 rows)
+
+SELECT '' AS five, q1, float8(q1) FROM TESTMINTUPLE_INT_TBL ORDER BY q1;
+ five |        q1        |        float8        
+------+------------------+----------------------
+      |              123 |                  123
+      |              123 |                  123
+      | 4567890123456789 | 4.56789012345679e+15
+      | 4567890123456789 | 4.56789012345679e+15
+      | 4567890123456789 | 4.56789012345679e+15
+      |                  |                     
+(6 rows)
+
+SELECT '' AS five, q2, float8(q2) FROM TESTMINTUPLE_INT_TBL ORDER BY q2;
+ five |        q2         |        float8         
+------+-------------------+-----------------------
+      | -4567890123456789 | -4.56789012345679e+15
+      |               123 |                   123
+      |               456 |                   456
+      |  4567890123456789 |  4.56789012345679e+15
+      |  4567890123456789 |  4.56789012345679e+15
+      |                   |                      
+(6 rows)
+
+SELECT 37 + q1 AS plus4 FROM TESTMINTUPLE_INT_TBL ORDER BY q1;
+      plus4       
+------------------
+              160
+              160
+ 4567890123456826
+ 4567890123456826
+ 4567890123456826
+                 
+(6 rows)
+
+SELECT 37 - q1 AS minus4 FROM TESTMINTUPLE_INT_TBL ORDER BY q1;
+      minus4       
+-------------------
+               -86
+               -86
+ -4567890123456752
+ -4567890123456752
+ -4567890123456752
+                  
+(6 rows)
+
+SELECT '' AS five, 2 * q1 AS "twice int4" FROM TESTMINTUPLE_INT_TBL ORDER BY q1;
+ five |    twice int4    
+------+------------------
+      |              246
+      |              246
+      | 9135780246913578
+      | 9135780246913578
+      | 9135780246913578
+      |                 
+(6 rows)
+
+SELECT '' AS five, q1 * 2 AS "twice int4" FROM TESTMINTUPLE_INT_TBL ORDER BY q1;
+ five |    twice int4    
+------+------------------
+      |              246
+      |              246
+      | 9135780246913578
+      | 9135780246913578
+      | 9135780246913578
+      |                 
+(6 rows)
+
+drop table TESTMINTUPLE_INT_TBL;
+CREATE TABLE MINTUPLE_BOOL_TABLE_1 (f1 bool);
+INSERT INTO MINTUPLE_BOOL_TABLE_1 (f1) VALUES (bool 't');
+INSERT INTO MINTUPLE_BOOL_TABLE_1 (f1) VALUES (bool 'True');
+INSERT INTO MINTUPLE_BOOL_TABLE_1 (f1) VALUES (bool 'true');
+-- MINTUPLE_BOOL_TABLE_1 should be full of true's at this point
+SELECT '' AS t_3, MINTUPLE_BOOL_TABLE_1.* FROM MINTUPLE_BOOL_TABLE_1;
+ t_3 | f1 
+-----+----
+     | t
+     | t
+     | t
+(3 rows)
+
+SELECT '' AS t_3, MINTUPLE_BOOL_TABLE_1.*
+   FROM MINTUPLE_BOOL_TABLE_1
+   WHERE f1 = bool 'true';
+ t_3 | f1 
+-----+----
+     | t
+     | t
+     | t
+(3 rows)
+
+SELECT '' AS t_3, MINTUPLE_BOOL_TABLE_1.*
+   FROM MINTUPLE_BOOL_TABLE_1
+   WHERE f1 <> bool 'false';
+ t_3 | f1 
+-----+----
+     | t
+     | t
+     | t
+(3 rows)
+
+SELECT '' AS zero, MINTUPLE_BOOL_TABLE_1.*
+   FROM MINTUPLE_BOOL_TABLE_1
+   WHERE booleq(bool 'false', f1);
+ zero | f1 
+------+----
+(0 rows)
+
+INSERT INTO MINTUPLE_BOOL_TABLE_1 (f1) VALUES (bool 'f');
+SELECT '' AS f_1, MINTUPLE_BOOL_TABLE_1.*
+   FROM MINTUPLE_BOOL_TABLE_1
+   WHERE f1 = bool 'false';
+ f_1 | f1 
+-----+----
+     | f
+(1 row)
+
+CREATE TABLE MINTUPLE_BOOL_TABLE_2 (f1 bool);
+INSERT INTO MINTUPLE_BOOL_TABLE_2 (f1) VALUES (bool 'f');
+INSERT INTO MINTUPLE_BOOL_TABLE_2 (f1) VALUES (bool 'false');
+INSERT INTO MINTUPLE_BOOL_TABLE_2 (f1) VALUES (bool 'False');
+INSERT INTO MINTUPLE_BOOL_TABLE_2 (f1) VALUES (bool 'FALSE');
+-- This is now an invalid expression
+-- For pre-v6.3 this evaluated to false - thomas 1997-10-23
+INSERT INTO MINTUPLE_BOOL_TABLE_2 (f1)
+   VALUES (bool 'XXX');
+ERROR:  invalid input syntax for type boolean: "XXX"
+LINE 2:    VALUES (bool 'XXX');
+                        ^
+-- MINTUPLE_BOOL_TABLE_2 should be full of false's at this point
+SELECT '' AS f_4, MINTUPLE_BOOL_TABLE_2.* FROM MINTUPLE_BOOL_TABLE_2;
+ f_4 | f1 
+-----+----
+     | f
+     | f
+     | f
+     | f
+(4 rows)
+
+SELECT '' AS tf_12, MINTUPLE_BOOL_TABLE_1.*, MINTUPLE_BOOL_TABLE_2.*
+   FROM MINTUPLE_BOOL_TABLE_1, MINTUPLE_BOOL_TABLE_2
+   WHERE MINTUPLE_BOOL_TABLE_2.f1 <> MINTUPLE_BOOL_TABLE_1.f1;
+ tf_12 | f1 | f1 
+-------+----+----
+       | t  | f
+       | t  | f
+       | t  | f
+       | t  | f
+       | t  | f
+       | t  | f
+       | t  | f
+       | t  | f
+       | t  | f
+       | t  | f
+       | t  | f
+       | t  | f
+(12 rows)
+
+SELECT '' AS tf_12, MINTUPLE_BOOL_TABLE_1.*, MINTUPLE_BOOL_TABLE_2.*
+   FROM MINTUPLE_BOOL_TABLE_1, MINTUPLE_BOOL_TABLE_2
+   WHERE boolne(MINTUPLE_BOOL_TABLE_2.f1,MINTUPLE_BOOL_TABLE_1.f1);
+ tf_12 | f1 | f1 
+-------+----+----
+       | t  | f
+       | t  | f
+       | t  | f
+       | t  | f
+       | t  | f
+       | t  | f
+       | t  | f
+       | t  | f
+       | t  | f
+       | t  | f
+       | t  | f
+       | t  | f
+(12 rows)
+
+-- Joining of two tables is done via ExecHashJoin which uses ExecCopySlotMinimalTuple, ExecFetchSlotMinimalTuple and ExecStoreMinimalTuple. 
+SELECT '' AS ff_4, MINTUPLE_BOOL_TABLE_1.*, MINTUPLE_BOOL_TABLE_2.*
+   FROM MINTUPLE_BOOL_TABLE_1, MINTUPLE_BOOL_TABLE_2
+   WHERE MINTUPLE_BOOL_TABLE_2.f1 = MINTUPLE_BOOL_TABLE_1.f1 and MINTUPLE_BOOL_TABLE_1.f1 = bool 'false';
+ ff_4 | f1 | f1 
+------+----+----
+      | f  | f
+      | f  | f
+      | f  | f
+      | f  | f
+(4 rows)
+
+SELECT '' AS tf_12_ff_4, MINTUPLE_BOOL_TABLE_1.*, MINTUPLE_BOOL_TABLE_2.*
+   FROM MINTUPLE_BOOL_TABLE_1, MINTUPLE_BOOL_TABLE_2
+   WHERE MINTUPLE_BOOL_TABLE_2.f1 = MINTUPLE_BOOL_TABLE_1.f1 or MINTUPLE_BOOL_TABLE_1.f1 = bool 'true'
+   ORDER BY MINTUPLE_BOOL_TABLE_1.f1, MINTUPLE_BOOL_TABLE_2.f1;
+ tf_12_ff_4 | f1 | f1 
+------------+----+----
+            | f  | f
+            | f  | f
+            | f  | f
+            | f  | f
+            | t  | f
+            | t  | f
+            | t  | f
+            | t  | f
+            | t  | f
+            | t  | f
+            | t  | f
+            | t  | f
+            | t  | f
+            | t  | f
+            | t  | f
+            | t  | f
+(16 rows)
+
+   
+drop table MINTUPLE_BOOL_TABLE_1;
+drop table MINTUPLE_BOOL_TABLE_2;
+ 

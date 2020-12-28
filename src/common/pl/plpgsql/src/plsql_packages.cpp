@@ -38,14 +38,17 @@ PG_MODULE_MAGIC;
 extern Datum textregexsubstr_enforce_a(PG_FUNCTION_ARGS);
 extern Datum regexp_substr(PG_FUNCTION_ARGS);
 extern Datum intervaltonum(PG_FUNCTION_ARGS);
+extern Datum report_application_error(PG_FUNCTION_ARGS);
 
 extern "C" {
 Datum regexp_substr(PG_FUNCTION_ARGS);
 Datum intervaltonum(PG_FUNCTION_ARGS);
+Datum report_application_error(PG_FUNCTION_ARGS);
 }
 
 PG_FUNCTION_INFO_V1(regexp_substr);
 PG_FUNCTION_INFO_V1(intervaltonum);
+PG_FUNCTION_INFO_V1(report_application_error);
 
 // Convert interval(day) to numeric
 Datum intervaltonum(PG_FUNCTION_ARGS)
@@ -68,7 +71,7 @@ Datum intervaltonum(PG_FUNCTION_ARGS)
     PG_RETURN_NUMERIC(result);
 }
 
-/* convert string to hexadecimal */
+/*convert string to hexadecimal*/
 Datum rawtohex(PG_FUNCTION_ARGS)
 {
     char* str = TextDatumGetCString(PG_GETARG_TEXT_P(0));
@@ -83,6 +86,36 @@ Datum rawtohex(PG_FUNCTION_ARGS)
         CHECK_RETNULL_CALL1(textin, collation, CStringGetDatum(fmt)));
 
     CHECK_RETNULL_RETURN_DATUM(result);
+}
+
+/* report self-defined error: -20999 <= errorcode <=  -20000 */
+Datum report_application_error(PG_FUNCTION_ARGS)
+{
+#ifndef ENABLE_MULTIPLE_NODES
+        DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+#endif
+    char* log = NULL;
+    int errnum = 0;
+
+    if (PG_GETARG_DATUM(0) == 0) {
+        log = "";
+    } else {
+        log = text_to_cstring(PG_GETARG_TEXT_P(0));
+    }
+
+    if (PG_ARGISNULL(1)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("%s", log)));
+    } else {
+        errnum = PG_GETARG_INT32(1);
+        if ((errnum > -20000) || (errnum < -20999)) {
+            ereport(
+                ERROR, (errcode(ERRCODE_RAISE_EXCEPTION), errmsg("custom error code must be between -20000 and -20999")));
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_RAISE_EXCEPTION), errmsg("ORA%d: %s", errnum, log)));
+        }
+    }
+    
+    PG_RETURN_VOID();
 }
 
 Datum regexp_substr(PG_FUNCTION_ARGS)

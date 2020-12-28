@@ -4,6 +4,7 @@
  * External declarations pertaining to gtm/main/gtm_opt.c, gtm/proxy/gtm_proxy_opt.c and
  * gtm/common/gtm_opt_file.l
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 2011, Postgres-XC Development Group
  * Portions Copyright (c) 2000-2011, PostgreSQL Global Development Group
  * Written by Peter Eisentraut <peter_e@gmx.net>.
@@ -103,11 +104,11 @@ typedef enum {
  * with source location info.
  */
 typedef struct ConfigVariable {
-    char *name;
-    char *value;
-    char *filename;
+    char* name;
+    char* value;
+    char* filename;
     int sourceline;
-    struct ConfigVariable *next;
+    struct ConfigVariable* next;
 } ConfigVariable;
 
 extern bool ParseConfigFile(const char *config_file, const char *calling_file, int depth, int elevel,
@@ -122,7 +123,7 @@ extern void FreeConfigVariables(ConfigVariable *list);
  * won't be displayed when guc.c is asked for a list of acceptable values.
  */
 struct config_enum_entry {
-    const char *name;
+    const char* name;
     int val;
     bool hidden;
 };
@@ -130,17 +131,17 @@ struct config_enum_entry {
 /*
  * Signatures for per-variable check/assign hook functions
  */
-typedef bool (*GtmOptBoolCheckHook)(bool *newval, void **extra, GtmOptSource source);
-typedef bool (*GtmOptIntCheckHook)(int *newval, void **extra, GtmOptSource source);
-typedef bool (*GtmOptRealCheckHook)(double *newval, void **extra, GtmOptSource source);
-typedef bool (*GtmOptStringCheckHook)(char **newval, void **extra, GtmOptSource source);
-typedef bool (*GtmOptEnumCheckHook)(int *newval, void **extra, GtmOptSource source);
+typedef bool (*GtmOptBoolCheckHook)(bool* newval, void** extra, GtmOptSource source);
+typedef bool (*GtmOptIntCheckHook)(int* newval, void** extra, GtmOptSource source);
+typedef bool (*GtmOptRealCheckHook)(double* newval, void** extra, GtmOptSource source);
+typedef bool (*GtmOptStringCheckHook)(char** newval, void** extra, GtmOptSource source);
+typedef bool (*GtmOptEnumCheckHook)(int* newval, void** extra, GtmOptSource source);
 
-typedef void (*GtmOptBoolAssignHook)(bool newval, void *extra);
-typedef void (*GtmOptIntAssignHook)(int newval, void *extra);
-typedef void (*GtmOptRealAssignHook)(double newval, void *extra);
-typedef void (*GtmOptStringAssignHook)(const char *newval, void *extra);
-typedef void (*GtmOptEnumAssignHook)(int newval, void *extra);
+typedef void (*GtmOptBoolAssignHook)(bool newval, void* extra);
+typedef void (*GtmOptIntAssignHook)(int newval, void* extra);
+typedef void (*GtmOptRealAssignHook)(double newval, void* extra);
+typedef void (*GtmOptStringAssignHook)(const char* newval, void* extra);
+typedef void (*GtmOptEnumAssignHook)(int newval, void* extra);
 
 /*
  * Miscellaneous
@@ -186,15 +187,15 @@ typedef enum {
 /*
  * Functions exported by gtm_opt.c
  */
-extern void SetConfigOption(const char *name, const char *value, GtmOptContext context, GtmOptSource source);
+extern void SetConfigOption(const char* name, const char* value, GtmOptContext context, GtmOptSource source);
 
-extern void EmitWarningsOnPlaceholders(const char *className);
+extern void EmitWarningsOnPlaceholders(const char* className);
 
-extern const char *GetConfigOption(const char *name, bool restrict_superuser);
-extern const char *GetConfigOptionResetString(const char *name);
+extern const char* GetConfigOption(const char* name, bool restrict_superuser);
+extern const char* GetConfigOptionResetString(const char* name);
 extern void ProcessConfigFile(GtmOptContext context);
 extern void InitializeGTMOptions(void);
-extern bool SelectConfigFiles(const char *userDoption, const char *progname);
+extern bool SelectConfigFiles(const char* userDoption, const char* progname);
 extern void ResetAllOptions(void);
 extern int NewGTMNestLevel(void);
 extern bool parse_int(const char *value, int *result, int flags, const char **hintmsg);
@@ -202,10 +203,10 @@ extern bool parse_real(const char *value, double *result);
 extern bool set_config_option(const char *name, const char *value, GtmOptContext context, GtmOptSource source,
                               bool changeVal);
 
-extern char *GetConfigOptionByName(const char *name, const char **varname);
-extern void GetConfigOptionByNum(int varnum, const char **values, bool *noshow);
+extern char* GetConfigOptionByName(const char* name, const char** varname);
+extern void GetConfigOptionByNum(int varnum, const char** values, bool* noshow);
 extern int GetNumConfigOptions(void);
-extern void ParseLongOption(const char *string, char **name, char **value);
+extern void ParseLongOption(const char* string, char** name, char** value);
 
 #ifndef PG_KRB_SRVTAB
 #define PG_KRB_SRVTAB ""
@@ -235,42 +236,50 @@ extern bool optimize_bounded_sort;
 /*
  * Log_min_messages ENUM strings
  */
-#define Server_Message_Level_Options()                                                           \
-    static const struct config_enum_entry server_message_level_options[] = {                     \
-        { "debug", DEBUG2, true },   { "debug5", DEBUG5, false }, { "debug4", DEBUG4, false },   \
-        { "debug3", DEBUG3, false }, { "debug2", DEBUG2, false }, { "debug1", DEBUG1, false },   \
-        { "info", INFO, false },     { "notice", NOTICE, false }, { "warning", WARNING, false }, \
-        { "error", ERROR, false },   { "log", LOG, false },       { "fatal", FATAL, false },     \
-        { "panic", PANIC, false },   { NULL, 0, false }                                          \
-    }
+#define Server_Message_Level_Options()                                                               \
+    static const struct config_enum_entry server_message_level_options[] = {{"debug", DEBUG2, true}, \
+        {"debug5", DEBUG5, false},                                                                   \
+        {"debug4", DEBUG4, false},                                                                   \
+        {"debug3", DEBUG3, false},                                                                   \
+        {"debug2", DEBUG2, false},                                                                   \
+        {"debug1", DEBUG1, false},                                                                   \
+        {"info", INFO, false},                                                                       \
+        {"notice", NOTICE, false},                                                                   \
+        {"warning", WARNING, false},                                                                 \
+        {"error", ERROR, false},                                                                     \
+        {"log", LOG, false},                                                                         \
+        {"fatal", FATAL, false},                                                                     \
+        {"panic", PANIC, false},                                                                     \
+        {NULL, 0, false}}
 
 /*
  * Server Startup Option ENUM strings
  */
-#define Gtm_Startup_Mode_Options()                                                                              \
-    static const struct config_enum_entry gtm_startup_mode_options[] = {{ "act", GTM_ACT_MODE, false },         \
-                                                                        { "standby", GTM_STANDBY_MODE, false }, \
-                                                                        { NULL, 0, false }}
+#define Gtm_Startup_Mode_Options()                                       \
+    static const struct config_enum_entry gtm_startup_mode_options[] = { \
+        {"act", GTM_ACT_MODE, false}, {"standby", GTM_STANDBY_MODE, false}, {NULL, 0, false}}
 
 /*
  * Gtm Synchronous Option ENUM strings
  */
-#define Gtm_Sync_Options()                                               \
-    static const struct config_enum_entry gtm_sync_options[] = {         \
-        { "off", SYNC_GTM_OFF, false },   { "on", SYNC_GTM_ON, false },  \
-        { "auto", SYNC_GTM_AUTO, false }, { "true", SYNC_GTM_ON, true }, \
-        { "false", SYNC_GTM_OFF, true },  { "yes", SYNC_GTM_ON, true },  \
-        { "no", SYNC_GTM_OFF, true },     { "1", SYNC_GTM_ON, true },    \
-        { "0", SYNC_GTM_OFF, true },      { NULL, 0, false }             \
-    }
+#define Gtm_Sync_Options()                                                                    \
+    static const struct config_enum_entry gtm_sync_options[] = {{"off", SYNC_GTM_OFF, false}, \
+        {"on", SYNC_GTM_ON, false},                                                           \
+        {"auto", SYNC_GTM_AUTO, false},                                                       \
+        {"true", SYNC_GTM_ON, true},                                                          \
+        {"false", SYNC_GTM_OFF, true},                                                        \
+        {"yes", SYNC_GTM_ON, true},                                                           \
+        {"no", SYNC_GTM_OFF, true},                                                           \
+        {"1", SYNC_GTM_ON, true},                                                             \
+        {"0", SYNC_GTM_OFF, true},                                                            \
+        {NULL, 0, false}}
 
 /*
  * Gtm Authentication Type ENUM strings
  */
-#define Gtm_Authentication_Options()                                                                          \
-    static const struct config_enum_entry gtm_authentication_options[] = {{ "trust", GTM_AUTH_TRUST, false }, \
-                                                                          { "gss", GTM_AUTH_GSS, false },     \
-                                                                          { NULL, 0, false }}
+#define Gtm_Authentication_Options()                                       \
+    static const struct config_enum_entry gtm_authentication_options[] = { \
+        {"trust", GTM_AUTH_TRUST, false}, {"gss", GTM_AUTH_GSS, false}, {NULL, 0, false}}
 
 /*
  * Displayable names for context types (enum GtmContext)
@@ -278,27 +287,27 @@ extern bool optimize_bounded_sort;
  * Note: these strings are deliberately not localized.
  */
 #define gtmOptContext_Names() \
-    const char *const GtmOptContext_Names[] = { /* GTMC_STGARTUP */ "startup", /* GTMC_SIGHUP */ "sighup" }
+    const char* const GtmOptContext_Names[] = {/* GTMC_STGARTUP */ "startup", /* GTMC_SIGHUP */ "sighup"}
 
 /*
  * Displayable names for source types (enum GtmSource)
  *
  * Note: these strings are deliberately not localized.
  */
-#define gtmOptSource_Names()                                                                \
-    const char *const GtmOptSource_Names[] = { /* GTMC_S_DEFAULT */ "default",              \
-                                               /* GTMC_S_DYNAMIC_DEFAULT */ "default",      \
-                                               /* GTMC_S_ENV_VAR */ "environment variable", \
-                                               /* GTMC_S_FILE */ "configuration file",      \
-                                               /* GTMC_S_ARGV */ "command line",            \
-                                               /* GTMC_S_DATABASE */ "database",            \
-                                               /* GTMC_S_USER */ "user",                    \
-                                               /* GTMC_S_DATABASE_USER */ "database user",  \
-                                               /* GTMC_S_CLIENT */ "client",                \
-                                               /* GTMC_S_OVERRIDE */ "override",            \
-                                               /* GTMC_S_INTERACTIVE */ "interactive",      \
-                                               /* GTMC_S_TEST */ "test",                    \
-                                               /* GTMC_S_SESSION */ "session" }
+#define gtmOptSource_Names()                                                  \
+    const char* const GtmOptSource_Names[] = {/* GTMC_S_DEFAULT */ "default", \
+        /* GTMC_S_DYNAMIC_DEFAULT */ "default",                               \
+        /* GTMC_S_ENV_VAR */ "environment variable",                          \
+        /* GTMC_S_FILE */ "configuration file",                               \
+        /* GTMC_S_ARGV */ "command line",                                     \
+        /* GTMC_S_DATABASE */ "database",                                     \
+        /* GTMC_S_USER */ "user",                                             \
+        /* GTMC_S_DATABASE_USER */ "database user",                           \
+        /* GTMC_S_CLIENT */ "client",                                         \
+        /* GTMC_S_OVERRIDE */ "override",                                     \
+        /* GTMC_S_INTERACTIVE */ "interactive",                               \
+        /* GTMC_S_TEST */ "test",                                             \
+        /* GTMC_S_SESSION */ "session"}
 
 /*
  * Displayable names for GTM variable types (enum config_type)
@@ -316,6 +325,7 @@ extern bool optimize_bounded_sort;
  * This will be used both in *.conf and command line option override.
  * Add local_host and local_port for ha to get connect to standby
  */
+
 #define GTM_OPTNAME_LOCAL_HOST "local_host"
 #define GTM_OPTNAME_LOCAL_PORT "local_port"
 #define GTM_OPTNAME_ACTIVE_HOST "active_host"
@@ -342,10 +352,12 @@ extern bool optimize_bounded_sort;
 
 #define GTM_OPTNAME_ENABLE_ALARM "enable_alarm"
 #define GTM_OPTNAME_ACCESS_CONTROL "enable_connect_control"
+#define GTM_OPTNAME_ENABLE_THREADPOOL "gtm_enable_threadpool"
 
 #define GTM_OPTNAME_WRM_MAX_SERVER_MEMORY "wlm_max_mem"
 #define GTM_OPTNAME_WRM_QUERY_MEMORY_LIMIT "query_memory_limit"
 #define GTM_OPTNAME_MAX_TRANS "gtm_max_trans"
+#define GTM_OPTNAME_THREAD_NUMBER "gtm_num_threads"
 
 #define GTM_OPTNAME_STANDBY_ONLY "standby_only"
 #define GTM_OPTION "gtm_option"

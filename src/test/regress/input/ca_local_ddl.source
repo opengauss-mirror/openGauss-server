@@ -1,0 +1,289 @@
+/*---------------------------------------------------------------------------------------
+ *
+ * Test cooperation analysis ddl
+ *        #1-#3 create server
+ *        #4.	alter server
+ *        #5.	drop server
+ *        #6.	create foreign table
+ *		  #7.	alter foreign table
+ *		  #8.	analyze
+ *		  #9.	other ddl
+ *		  #10.	create foreign table ... like
+ *		  #11.  acl
+ *
+ * Portions Copyright (c) 2018, Huawei
+ *---------------------------------------------------------------------------------------
+ */
+
+drop server server_remote cascade;
+
+/* 
+	I.
+	create server: one options are missing. 
+*/
+create server server_remote
+foreign data wrapper gc_fdw
+options(dbname 'test', username 'test', password 'Gauss@123');
+
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', username 'test', password 'Gauss@123');
+
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', password 'Gauss@123');
+
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username 'test');
+
+/* 
+	II.
+	create server: use worong option
+*/
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username 'test', xue 'xue');
+
+/* 
+	III.
+	create server: one options value are wrong. 
+*/
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname '', username 'test', password 'Gauss@123');
+
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username '', password 'Gauss@123');
+
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username 'test', password '');
+
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '', dbname 'test', username 'test', password 'Gauss@123');
+
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1.0:@portstring@', dbname 'test', username 'test', password 'Gauss@123');
+
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500', dbname 'test', username 'test', password 'Gauss@123');
+
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500,10.113.191.124:29500', dbname 'test', username 'test', password 'Gauss@123');
+
+drop server server_remote;
+
+
+/* 
+	IV.
+	alter server
+*/
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username 'test', password 'Gauss@123');
+
+alter server server_remote options (set dbname 'test');
+alter server server_remote options (drop dbname);
+alter server server_remote owner to test;
+alter server server_remote options (add fetch_size '1000');
+alter server server_remote options (add dbname 'test');
+alter server server_remote rename to server_xue;
+drop server server_xue;
+
+/* 
+	V.
+	drop server
+*/
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username 'test', password 'Gauss@123');
+CREATE FOREIGN TABLE t1(x int, y int, z int) server server_remote;
+
+drop server server_remote;
+drop server server_remote cascade;
+
+/* 
+	VI.
+	create foreign table
+*/
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username 'test', password 'Gauss@123');
+
+CREATE FOREIGN TABLE t1(c1 int, c2 int NULL, c3 int) server server_remote options (table_name 't1');
+CREATE FOREIGN TABLE t1(c1 int, c2 int NOT NULL, c3 int) server server_remote options (table_name 't1');
+CREATE FOREIGN TABLE t1(c1 int, c2 int default 3, c3 int) server server_remote options (table_name 't1');
+CREATE FOREIGN TABLE t1(c1 int, c2 serial, c3 int) server server_remote options (table_name 't1');
+
+create table t2(c4 int, c5 int);
+CREATE FOREIGN TABLE t1(x int, y t2, z int) server server_remote options (table_name 't1');
+drop table t2;
+
+create sequence s1
+    increment by 1
+    minvalue 1 maxvalue 30
+    start 1
+    cache 5;
+CREATE FOREIGN TABLE t1(c1 int, c2 s1, c3 int) server server_remote options (table_name 't1');
+drop sequence s1;
+
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1', xue 'xue');
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1', schema_name 'xue') distribute by replication;
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1', schema_name 'xue') distribute by hash(x);
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1', schema_name 'xue') write only;
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1', schema_name 'xue') with error_table;
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1', schema_name 'xue') log into error_table;
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1', schema_name 'xue') remote log 'log';
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1', schema_name 'xue') PER NODE REJECT LIMIT '100';
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1', schema_name 'xue')
+PARTITION BY (x);
+
+/* 
+	VII.
+	alter foreign table
+*/
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1');
+
+alter foreign table t1 options (add xue 'xue');
+alter foreign table t1 options (add schema_name 'public');
+alter foreign table t1 options (drop table_name);
+alter foreign table t1 options (set table_name '');
+alter foreign table t1 options (set table_name 't1');
+
+alter foreign table t1 add column c1 int;
+alter foreign table t1 drop column z;
+
+alter foreign table t1 alter c2 type int;
+alter foreign table t1 alter c2 set not null;
+alter foreign table t1 alter c2 drop not null;
+alter foreign table t1 alter c2 set statistics 50;
+alter foreign table t1 alter c2 set statistics percent 5;
+
+alter foreign table t1 owner to test;
+
+drop foreign table t1;
+drop server server_remote;
+
+
+/* 
+	VIII.
+	analyze
+*/
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username 'test', password 'Gauss@123');
+
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't1');
+CREATE FOREIGN TABLE t2(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't2');
+CREATE FOREIGN TABLE t3(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't3');
+
+analyze t1(c1);
+analyze t1((c1, c2));
+
+analyze t1;
+select staattnum from pg_statistic where starelid = 't1'::regclass::oid order by 1;
+select stakey from pg_statistic_ext where starelid = 't1'::regclass::oid;
+analyze t2;
+select staattnum from pg_statistic where starelid = 't2'::regclass::oid order by 1;
+analyze t3;
+select staattnum from pg_statistic where starelid = 't3'::regclass::oid;
+
+CREATE FOREIGN TABLE t4(c3 int, c1 int) server server_remote options (schema_name 'public', table_name 't1');
+analyze t4;
+select staattnum from pg_statistic where starelid = 't4'::regclass::oid order by 1;
+select stakey from pg_statistic_ext where starelid = 't4'::regclass::oid;
+
+execute direct on (coordinator2) 'select staattnum from pg_statistic where starelid = ''t1''::regclass::oid order by 1';
+execute direct on (coordinator2) 'select stakey from pg_statistic_ext where starelid = ''t1''::regclass::oid';
+execute direct on (coordinator2) 'select staattnum from pg_statistic where starelid = ''t2''::regclass::oid order by 1';
+execute direct on (coordinator2) 'select staattnum from pg_statistic where starelid = ''t3''::regclass::oid';
+
+drop foreign table t1, t2, t3, t4;
+
+
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't1');
+CREATE FOREIGN TABLE t2(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't2');
+CREATE FOREIGN TABLE t3(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't3');
+
+analyze foreign tables;
+select staattnum from pg_statistic where starelid = 't1'::regclass::oid order by 1;
+select stakey from pg_statistic_ext where starelid = 't1'::regclass::oid;
+select staattnum from pg_statistic where starelid = 't2'::regclass::oid order by 1;
+select staattnum from pg_statistic where starelid = 't3'::regclass::oid;
+execute direct on (coordinator2) 'select staattnum from pg_statistic where starelid = ''t1''::regclass::oid order by 1';
+execute direct on (coordinator2) 'select stakey from pg_statistic_ext where starelid = ''t1''::regclass::oid';
+execute direct on (coordinator2) 'select staattnum from pg_statistic where starelid = ''t2''::regclass::oid order by 1';
+execute direct on (coordinator2) 'select staattnum from pg_statistic where starelid = ''t3''::regclass::oid';
+
+drop foreign table t1, t2, t3;
+
+/* 
+	IX.
+	other ddl
+*/
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't1');
+
+create index ix1 on t1(c1);
+cluster t1;
+vacuum t1;
+vacuum full t1;
+grant all on t1 to public;
+revoke all on t1 from public;
+
+start transaction;
+lock table t1 in access share mode;
+end transaction;
+
+truncate t1;
+
+create sequence s1
+    increment by 1
+    minvalue 1 maxvalue 30
+    start 1
+    cache 5
+    owned by t1.c1;
+
+
+drop foreign table t1;
+drop server server_remote;
+
+/* 
+	X.
+	create foreign table ... like
+*/
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username 'test', password 'Gauss@123');
+
+create table t2(x int, y int);
+CREATE FOREIGN TABLE t1(like t2) server server_remote;
+drop foreign table t1;
+drop table t2;
+
+create table t2(x int, y int NOT NULL);
+CREATE FOREIGN TABLE t1(like t2) server server_remote;
+drop table t2;
+
+drop server server_remote;
+
+/*
+    XI.
+    acl
+*/
+create server server_remote
+foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username 'test2', password 'Gauss@123');
+
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't1');
+
+select * from t1;
+
+drop foreign table t1;
+drop server server_remote;
+

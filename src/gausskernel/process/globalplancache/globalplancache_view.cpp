@@ -43,103 +43,92 @@
 * @in num: the number of hash entry
 * @return - void
 */
-void *GlobalPlanCache::GetStatus(uint32 *num)
+void*
+GlobalPlanCache::GetStatus(uint32 *num)
 {
     int rc = EOK;
     HASH_SEQ_STATUS hash_seq;
 
     for (int i = 0; i < NUM_GPC_PARTITIONS; i++) {
-        (void)LWLockAcquire(GetMainLWLockByIndex(FirstGPCMappingLock + i), LW_SHARED);
+        LWLockAcquire(GetMainLWLockByIndex(FirstGPCMappingLock + i), LW_SHARED);
     }
 
-    *num = 0;
+    uint32 localnum = 0;
 
     GPCEntry *entry = NULL;
-    GPCEnv *env = NULL;
     CachedPlanSource *ps = NULL;
-    
-    hash_seq_init(&hash_seq, m_global_plan_cache);
-    while ((entry = (GPCEntry*)hash_seq_search(&hash_seq)) != NULL) {
-        *num = (*num) + (uint32)entry->cachedPlans->length;
+
+    for (uint32 bucket_id = 0; bucket_id < GPC_NUM_OF_BUCKETS; bucket_id ++) {
+         localnum += hash_get_num_entries(m_array[bucket_id].hash_tbl);
     }
 
-    if (m_gpc_invalid_plansource != NULL) {
-        *num = (*num) + m_gpc_invalid_plansource->length;
+    LWLockAcquire(GPCClearLock, LW_SHARED);
+    if (m_invalid_list != NULL) {
+        localnum += m_invalid_list->length;
     }
 
-    if ((*num) == 0) {
+    if (localnum == 0) {
         for (int i = NUM_GPC_PARTITIONS - 1; i >= 0; i--) {
             LWLockRelease(GetMainLWLockByIndex(FirstGPCMappingLock + i));
         }
+        LWLockRelease(GPCClearLock);
+        *num = localnum;
         return NULL;
     }
 
-    GPCStatus *stat_array =
-        (GPCStatus*) palloc0(*num * sizeof(GPCStatus));
-
-    hash_seq_init(&hash_seq, m_global_plan_cache);
-
+    GPCViewStatus *stat_array = (GPCViewStatus*) palloc0(localnum * sizeof(GPCViewStatus));
     uint32 index = 0;
-    while ((entry = (GPCEntry*)hash_seq_search(&hash_seq)) != NULL) {
-        int numCachedPlans = entry->cachedPlans->length;
-        DListCell *cell = entry->cachedPlans->head;
+    for (uint32 bucket_id = 0; bucket_id < GPC_NUM_OF_BUCKETS; bucket_id++) {
+        hash_seq_init(&hash_seq, m_array[bucket_id].hash_tbl);
 
-        for (int i = 0; i < numCachedPlans; i++) {
-            Assert(cell != NULL);
-
-            env = (GPCEnv *) cell->data.ptr_value;
-            if (env && env->plansource) {
-                ps = env->plansource;
-                
-                size_t len = strlen(ps->query_string) + 1;
-                stat_array[index].query = (char *)palloc0(sizeof(char) * len);
-
-                rc = memcpy_s(stat_array[index].query, len, ps->query_string, len);
-                securec_check(rc, "\0", "\0");
-
-                stat_array[index].refcount = ps->gpc.refcount;
-                stat_array[index].valid = ps->gpc.is_valid;
-                stat_array[index].DatabaseID = env->database_id;
-                stat_array[index].schema_name = (char *)palloc0(sizeof(char) * NAMEDATALEN);
-                rc = memcpy_s(stat_array[index].schema_name, NAMEDATALEN, env->schema_name, NAMEDATALEN);
-                securec_check(rc, "\0", "\0");
-                stat_array[index].params_num = ps->num_params;
-
-                index++;
-            } else {
-                Assert (0);
-            }
+        while ((entry = (GPCEntry*)hash_seq_search(&hash_seq)) != NULL) {
+            Assert(entry->val.plansource != NULL);
+            ps = entry->val.plansource;
+            int len = strlen(ps->query_string) + 1;
+            stat_array[index].query = (char *)palloc0(sizeof(char) * len);
+            rc = memcpy_s(stat_array[index].query, len, ps->query_string, len);
+            securec_check(rc, "\0", "\0");
+            stat_array[index].refcount = ps->gpc.status.GetRefCount();
+            stat_array[index].valid = ps->gpc.status.IsValid();
+            stat_array[index].DatabaseID = entry->key.env.plainenv.database_id;
+            stat_array[index].schema_name = (char *)palloc0(sizeof(char) * NAMEDATALEN);
+            rc = memcpy_s(stat_array[index].schema_name, NAMEDATALEN, entry->key.env.schema_name, NAMEDATALEN);
+            securec_check(rc, "\0", "\0");
+            stat_array[index].params_num = ps->num_params;
+            stat_array[index].func_id = entry->key.spi_signature.func_oid;
+            index++;
         }
     }
 
-    if (m_gpc_invalid_plansource != NULL) {
-        DListCell *cell = m_gpc_invalid_plansource->head;
+    if (m_invalid_list != NULL) {
+        DListCell *cell = m_invalid_list->head;
 
         while (cell != NULL) {
             CachedPlanSource *curr = (CachedPlanSource *)cell->data.ptr_value;
-
-            size_t len = strlen(curr->query_string) + 1;
+            int len = strlen(curr->query_string) + 1;
             stat_array[index].query = (char *)palloc0(sizeof(char) * len);
 
             rc = memcpy_s(stat_array[index].query, len, curr->query_string, len);
             securec_check(rc, "\0", "\0");
 
-            stat_array[index].refcount = curr->gpc.refcount;
-            stat_array[index].valid = curr->gpc.is_valid;
+            stat_array[index].refcount = curr->gpc.status.GetRefCount();
+            stat_array[index].valid = curr->gpc.status.IsValid();
             stat_array[index].DatabaseID = 0;
             stat_array[index].schema_name = "";
             stat_array[index].params_num = 0;
-
+            stat_array[index].func_id = curr->gpc.key->spi_signature.func_oid;
             index++;
             cell = cell->next;
         }
     }
 
-    Assert (index == *num);
+    Assert(index == localnum);
+    *num = localnum;
 
     for (int i = NUM_GPC_PARTITIONS - 1; i >= 0; i--) {
         LWLockRelease(GetMainLWLockByIndex(FirstGPCMappingLock + i));
     }
+    LWLockRelease(GPCClearLock);
 
     return stat_array;
 }
@@ -149,70 +138,6 @@ void *GlobalPlanCache::GetStatus(uint32 *num)
 * @in num: the number of hash entry
 * @return - void
 */
-void *GlobalPlanCache::GetPrepareStatus(uint32 *num)
-{
-    int rc = EOK;
-    HASH_SEQ_STATUS hash_seq;
-
-    for (int i = 0; i < NUM_GPC_PARTITIONS; i++) {
-        (void)LWLockAcquire(GetMainLWLockByIndex(FirstGPCPrepareMappingLock + i), LW_SHARED);
-    }
-
-    GPCPreparedStatement *entry = NULL;
-    DList *prepare_list = NULL;
-
-    hash_seq_init(&hash_seq, m_global_prepared);
-
-    /* Get the row numbers. */
-    while ((entry = (GPCPreparedStatement*)hash_seq_search(&hash_seq)) != NULL) {
-        if (entry->prepare_statement_list) {
-            *num = *num + (uint32)entry->prepare_statement_list->length;
-        } else {
-            Assert(0);
-        }
-    }
-
-    if ((*num) == 0) {
-        for (int i = NUM_GPC_PARTITIONS - 1; i >= 0; i--) {
-            LWLockRelease(GetMainLWLockByIndex(FirstGPCPrepareMappingLock + i));
-        }
-
-        return NULL;
-    }
-
-    GPCPrepareStatus *stat_array = (GPCPrepareStatus*) palloc0(*num * sizeof(GPCPrepareStatus));
-
-    hash_seq_init(&hash_seq, m_global_prepared);
-
-    uint32 index = 0;
-    /* Get all real time session statistics from the register info hash table. */
-    while ((entry = (GPCPreparedStatement*)hash_seq_search(&hash_seq)) != NULL) {
-        prepare_list = (DList *) entry->prepare_statement_list;
-        if (prepare_list->length != 0) {
-            DListCell* iter = prepare_list->head;
-            for (; iter != NULL; iter = iter->next) {
-                PreparedStatement *prepare_statement = (PreparedStatement *)(iter->data.ptr_value);
-
-                size_t len = strlen(prepare_statement->stmt_name) + 1;
-                stat_array[index].statement_name = (char *)palloc0(sizeof(char) * len);
-                rc = memcpy_s(stat_array[index].statement_name, len, prepare_statement->stmt_name, len);
-                securec_check(rc, "\0", "\0");
-                stat_array[index].refcount = prepare_statement->plansource->gpc.refcount;
-                stat_array[index].global_session_id = (int)entry->global_sess_id;
-                stat_array[index].is_shared = prepare_statement->plansource->gpc.is_share;
-                index++;
-            } 
-        }
-    }
-    Assert (index == *num);
-
-    for (int i = NUM_GPC_PARTITIONS - 1; i >= 0; i--) {
-        LWLockRelease(GetMainLWLockByIndex(FirstGPCPrepareMappingLock + i));
-    }
-
-    return stat_array;
-}
-
 /*
  * @Description: Clean all the global plancaches which refcount is 0.
  * This function only be called when user call the global_plancache_clean() by themselves.
@@ -225,74 +150,49 @@ Datum GlobalPlanCache::PlanClean()
 {
     DListCell *cell = NULL;
 
-    for (uint32 currBucket = 0; currBucket < GPC_NUM_OF_BUCKETS; currBucket++) {
-        int bucketEntriesCount = gs_atomic_add_32(&(m_gpc_bucket_info_array[currBucket].entries_count), 0);
-        if (bucketEntriesCount == 0) {
-            continue;
-        }
-        /* Ok so bucket is not empty. Get the bucket S-lock so we can iterate through it. */
-        int partitionLock = (int) (FirstGPCMappingLock + currBucket);
-        (void)LWLockAcquire(GetMainLWLockByIndex(partitionLock), LW_EXCLUSIVE);
+    for (uint32 bucket_id = 0; bucket_id < GPC_NUM_OF_BUCKETS; bucket_id ++)
+    {
+        int lock_id = m_array[bucket_id].lockId;
+        LWLockAcquire(GetMainLWLockByIndex(lock_id), LW_EXCLUSIVE);
         /* Check the number of entries in the bucket again. 
          * GPC Eviction might have removed the last entry while we were waiting for the shared lock. */
-        bucketEntriesCount = gs_atomic_add_32(&(m_gpc_bucket_info_array[currBucket].entries_count), 0);
-        if (bucketEntriesCount == 0) {
-            LWLockRelease(GetMainLWLockByIndex(partitionLock));
+        int bucketEntriesCount = m_array[bucket_id].count;
+        if (0 == bucketEntriesCount) {
+            LWLockRelease(GetMainLWLockByIndex(lock_id));
             continue;
         }
         HASH_SEQ_STATUS hash_seq;
         GPCEntry *entry = NULL;
-        GPCEnv *env = NULL;
+        CachedPlanSource* cur = NULL;
 
-        hash_seq_init(&hash_seq, m_global_plan_cache);
-        hash_seq.curBucket = currBucket;
-        for (int entryIndex = 0; entryIndex < bucketEntriesCount; entryIndex++){
-            entry = (GPCEntry*)hash_seq_search(&hash_seq);
-            int numCachedPlans = entry->cachedPlans->length;
-            cell = entry->cachedPlans->head;
-
-            for (int i = 0; i < numCachedPlans; i++) {
-                Assert(cell != NULL);
-                DListCell *next_cell = cell->next;
-                env = (GPCEnv *) cell->data.ptr_value;
-                if (env->plansource->gpc.refcount == 0) {
-                    env->globalplancacheentry->cachedPlans = dlist_delete_cell(env->globalplancacheentry->cachedPlans, 
-                                                                               cell, false);
-                    env->plansource = NULL;
-                    MemoryContextDelete(env->context);
-                    (void)gs_atomic_add_32(&entry->refcount, -1);
-                }
-                cell = next_cell;
-            }
-
-            if (entry->refcount == 0) {
-                /* Remove the GPC entry */
-                Assert(entry->cachedPlans == NULL);
-
+        hash_seq_init(&hash_seq, m_array[bucket_id].hash_tbl);
+        while ((entry = (GPCEntry*)hash_seq_search(&hash_seq)) != NULL) {
+            cur = entry->val.plansource;
+            if(cur->gpc.status.RefCountZero()) {
                 bool found = false;
-                (void *)hash_search(m_global_plan_cache, (void *) &(entry->key), HASH_REMOVE, &found);
-                Assert(true == found);
-                uint32 gpc_bucket_index = (uint32)(entry->lockId - FirstGPCMappingLock);
-                m_gpc_bucket_info_array[gpc_bucket_index].entries_count--;
-                entry->magic = 0;
-                pfree((void *)entry->key.query_string);
+                DropCachedPlanInternal(cur);
+                cur->magic = 0;
+                hash_search(m_array[bucket_id].hash_tbl, (void *) &(entry->key), HASH_REMOVE, &found);
+                MemoryContextUnSeal(cur->context);
+                MemoryContextUnSeal(cur->query_context);
+                MemoryContextDelete(cur->context);
+                m_array[bucket_id].count--;
             }
         }
-        if (entry) {
-            hash_seq_term(&hash_seq);
-        }
-        LWLockRelease(GetMainLWLockByIndex(partitionLock));
+        LWLockRelease(GetMainLWLockByIndex(lock_id));
     }
     LWLockAcquire(GPCClearLock, LW_EXCLUSIVE);
-    if (m_gpc_invalid_plansource != NULL) {
-        cell = m_gpc_invalid_plansource->head;
+    if (m_invalid_list != NULL) {
+        cell = m_invalid_list->head;
         while (cell != NULL) {
             CachedPlanSource *curr = (CachedPlanSource *)cell->data.ptr_value;
-            if (curr->gpc.refcount == 0) {
+            if (curr->gpc.status.RefCountZero()) {
                 DListCell *next = cell->next;
-                m_gpc_invalid_plansource = dlist_delete_cell(m_gpc_invalid_plansource, cell, false);
+                m_invalid_list = dlist_delete_cell(m_invalid_list, cell, false);
                 DropCachedPlanInternal(curr);
                 curr->magic = 0;
+                MemoryContextUnSeal(curr->context);
+                MemoryContextUnSeal(curr->query_context);
                 MemoryContextDelete(curr->context);
                 cell = next;
             } else {
@@ -312,11 +212,7 @@ Datum GlobalPlanCache::PlanClean()
  */
 Datum GPCPlanClean(PG_FUNCTION_ARGS) 
 {
-#ifndef ENABLE_MULTIPLE_NODES
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-#endif
-
-    (void)GPC->PlanClean();
+    g_instance.plan_cache->PlanClean();
 
     PG_RETURN_BOOL(true);
 }

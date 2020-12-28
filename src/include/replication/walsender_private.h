@@ -56,6 +56,8 @@ typedef struct LogCtrlData {
     TimestampTz prev_reply_time;
     uint64 pre_rate1;
     uint64 pre_rate2;
+    int64 prev_RPO;
+    int64 current_RPO;
 } LogCtrlData;
 
 /*
@@ -69,7 +71,8 @@ typedef struct WalSnd {
     ClusterNodeState node_state; /* state of the node in the cluster */
     SndRole sendRole;            /* role of sender */
     XLogRecPtr sentPtr;          /* WAL has been sent up to this point */
-    bool needreload;             /* does currently-open file need to be reloaded? */
+    bool needreload;             /* does currently-open file need to be
+                                  * reloaded? */
     bool sendKeepalive;          /* do we send keepalives on this connection? */
     bool replSender;             /* is the walsender a normal replication or building */
 
@@ -111,8 +114,11 @@ typedef struct WalSnd {
      */
     int sync_standby_priority;
     int index;
-
+    XLogRecPtr arch_task_lsn;
+    int archive_obs_subterm;
     LogCtrlData log_ctrl;
+    unsigned int archive_flag;
+    Latch* arch_latch;
 } WalSnd;
 
 extern THR_LOCAL WalSnd* MyWalSnd;
@@ -139,9 +145,8 @@ typedef struct WalSndCtlData {
     bool sync_standbys_defined;
 
     /*
-     * 1. Whether master is allowed to switched to standalone if no synchronous
-     * Standbys are available; 2. master need not to keep waiting failed synchronous
-     * Standbys if most_available_sync is ON.This is copy of GUC variable most_available_sync.
+     * Whether master is allowed to switched to standalone if no synchronous
+     * Standbys are available. This is copy of GUC variable most_available_sync.
      */
     bool most_available_sync;
 
@@ -170,4 +175,3 @@ extern volatile bool bSyncStatStatBefore;
 extern void WalSndSetState(WalSndState state);
 
 #endif /* _WALSENDER_PRIVATE_H */
-

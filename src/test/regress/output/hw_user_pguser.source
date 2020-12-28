@@ -2,24 +2,24 @@
 /* These cases are for pguser option test in CreateUserStmt.
  * A user created with pguser option will have a password stored in MD5 format.
  */
-create user md5user_default		 with pguser password 'ttest@123';
-create user md5user_superuser 	 with pguser sysadmin password 'ttest@123';
-create user md5user_createdb 	 with pguser createdb password 'ttest@123';
-create user md5user_login 		 with pguser login password 'ttest@123';
-create user md5user_inherit 	 with pguser inherit password 'ttest@123';
-create user md5user_replication	 with pguser replication password 'ttest@123';
-create user md5user_auditadmin 	 with pguser auditadmin password 'ttest@123';
-create role md5role_default		 with pguser password 'ttest@123';
-create role md5role_superuser 	 with pguser sysadmin password 'ttest@123';
-create role md5role_createdb 	 with pguser createdb password 'ttest@123';
-create role md5role_login 		 with pguser login password 'ttest@123';
-create role md5role_inherit 	 with pguser inherit password 'ttest@123';
-create role md5role_replication	 with pguser replication password 'ttest@123';
-create role md5role_auditadmin	 with pguser auditadmin password 'ttest@123';
+create user md5user_default		 with pguser password 'gauss@123';
+create user md5user_superuser 	 with pguser sysadmin password 'gauss@123';
+create user md5user_createdb 	 with pguser createdb password 'gauss@123';
+create user md5user_login 		 with pguser login password 'gauss@123';
+create user md5user_inherit 	 with pguser inherit password 'gauss@123';
+create user md5user_replication	 with pguser replication password 'gauss@123';
+create user md5user_auditadmin 	 with pguser auditadmin password 'gauss@123';
+create role md5role_default		 with pguser password 'gauss@123';
+create role md5role_superuser 	 with pguser sysadmin password 'gauss@123';
+create role md5role_createdb 	 with pguser createdb password 'gauss@123';
+create role md5role_login 		 with pguser login password 'gauss@123';
+create role md5role_inherit 	 with pguser inherit password 'gauss@123';
+create role md5role_replication	 with pguser replication password 'gauss@123';
+create role md5role_auditadmin	 with pguser auditadmin password 'gauss@123';
 -- Incorrect statements.
-create user md5error with pguser pguser password 'ttest@123';
+create user md5error with pguser pguser password 'gauss@123';
 ERROR:  conflicting or redundant options
-create role md5error with pguser pguser password 'ttest@123';
+create role md5error with pguser pguser password 'gauss@123';
 ERROR:  conflicting or redundant options
 -- some check.
 select usename, 
@@ -135,16 +135,16 @@ select rolname    ,
 (14 rows)
 
 -- Password can be changed by "PGUSER" itself.
-set role md5user_default password 'ttest@123';
-alter role md5user_default identified by 'ttest@123456' replace 'ttest@123';
+set role md5user_default password 'gauss@123';
+alter role md5user_default identified by 'gauss@123456' replace 'gauss@123';
 -- Reset the connection to user postgres
 \c
 -- Invalid password
-set role md5user_default password 'ttest@123';
+set role md5user_default password 'gauss@123';
 ERROR:  Invalid username/password,set role denied.
 \c
 -- Login normal 
-set role md5user_default password 'ttest@123456';
+set role md5user_default password 'gauss@123456';
 \c
 -- The password format of md5user_default should be "md5" still.
 select usename, 
@@ -281,8 +281,8 @@ select * from pg_delete_audit('1111-1-1','2222-2-2');
  
 (1 row)
 
-create user set_role_user password 'ttest@123';
-set role set_role_user password 'ttest@123';
+create user set_role_user password 'gauss@123';
+set role set_role_user password 'gauss@123';
 reset role;
 drop user set_role_user;
 select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where detail_info like '%set_role_user%';

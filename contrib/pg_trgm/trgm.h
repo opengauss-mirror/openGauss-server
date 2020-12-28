@@ -6,7 +6,7 @@
 
 #include "access/gist.h"
 #include "access/itup.h"
-#include "storage/bufpage.h"
+#include "storage/buf/bufpage.h"
 #include "utils/builtins.h"
 
 /* options */

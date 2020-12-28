@@ -13,8 +13,17 @@
 #ifndef NODEFUNCS_H
 #define NODEFUNCS_H
 
+#ifndef FRONTEND_PARSER
 #include "nodes/parsenodes.h"
 #include "nodes/plannodes.h"
+#else
+#include "datatypes.h"
+#include "nodes/primnodes.h"
+#include "nodes/value.h"
+#include "catalog/pg_attribute.h"
+#include "access/tupdesc.h"
+#include "nodes/parsenodes_common.h"
+#endif 
 
 /* flags bits for query_tree_walker and query_tree_mutator */
 #define QTW_IGNORE_RT_SUBQUERIES 0x01  /* subqueries in rtable */
@@ -42,8 +51,10 @@ extern int exprLocation(const Node* expr);
 extern bool expression_tree_walker(Node* node, bool (*walker)(), void* context);
 extern Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* context, bool isCopy = true);
 
+#ifndef FRONTEND_PARSER
 extern bool query_tree_walker(Query* query, bool (*walker)(), void* context, int flags);
 extern Query* query_tree_mutator(Query* query, Node* (*mutator)(Node*, void*), void* context, int flags);
+#endif 
 
 extern bool range_table_walker(List* rtable, bool (*walker)(), void* context, int flags);
 extern List* range_table_mutator(List* rtable, Node* (*mutator)(Node*, void*), void* context, int flags);
@@ -56,6 +67,4 @@ extern bool is_func_distinct_unshippable(Oid funcid);
 
 extern bool lockNextvalWalker(Node* node, void* context);
 
-struct PlanState;
-extern bool planstate_tree_walker(struct PlanState *planstate, bool (*walker)(), void *context);
 #endif /* NODEFUNCS_H */

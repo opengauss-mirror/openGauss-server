@@ -17,6 +17,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/transam.h"
+#include "access/tableam.h"
 #include "access/xact.h"
 #include "auditfuncs.h"
 #include "catalog/pg_proc.h"
@@ -150,14 +151,14 @@ static Node* sql_fn_param_ref(ParseState* p_state, ParamRef* p_ref);
 static Node* sql_fn_post_column_ref(ParseState* p_state, ColumnRef* c_ref, Node* var);
 static Node* sql_fn_make_param(SQLFunctionParseInfoPtr p_info, int param_no, int location);
 static Node* sql_fn_resolve_param_name(SQLFunctionParseInfoPtr p_info, const char* param_name, int location);
-static List* init_execution_state(List* query_tree_list, SQLFunctionCachePtr f_cache, bool lazy_eval_ok);
-static void init_sql_fcache(FmgrInfo* f_info, Oid collation, bool lazy_eval_ok);
-static void postquel_start(execution_state* es, SQLFunctionCachePtr f_cache);
-static bool postquel_getnext(execution_state* es, SQLFunctionCachePtr f_cache);
+static List* init_execution_state(List* query_tree_list, SQLFunctionCachePtr fcache, bool lazy_eval_ok);
+static void init_sql_fcache(FmgrInfo* finfo, Oid collation, bool lazy_eval_ok);
+static void postquel_start(execution_state* es, SQLFunctionCachePtr fcache);
+static bool postquel_getnext(execution_state* es, SQLFunctionCachePtr fcache);
 static void postquel_end(execution_state* es);
-static void postquel_sub_params(SQLFunctionCachePtr f_cache, FunctionCallInfo fc_info);
+static void postquel_sub_params(SQLFunctionCachePtr fcache, FunctionCallInfo fcinfo);
 static Datum postquel_get_single_result(
-    TupleTableSlot* slot, FunctionCallInfo fc_info, SQLFunctionCachePtr f_cache, MemoryContext result_context);
+    TupleTableSlot* slot, FunctionCallInfo fcinfo, SQLFunctionCachePtr fcache, MemoryContext result_context);
 static void sql_exec_error_callback(void* arg);
 static void ShutdownSQLFunction(Datum arg);
 static void sqlfunction_startup(DestReceiver* self, int operation, TupleDesc type_info);
@@ -433,7 +434,7 @@ static Node* sql_fn_resolve_param_name(SQLFunctionParseInfoPtr p_info, const cha
  * The input is a List of Lists of parsed and rewritten, but not planned,
  * querytrees.	The sublist structure denotes the original query boundaries.
  */
-static List* init_execution_state(List* query_tree_list, SQLFunctionCachePtr f_cache, bool lazy_eval_ok)
+static List* init_execution_state(List* query_tree_list, SQLFunctionCachePtr fcache, bool lazy_eval_ok)
 {
     List* es_list = NIL;
     execution_state* last_tages = NULL;
@@ -456,7 +457,7 @@ static List* init_execution_state(List* query_tree_list, SQLFunctionCachePtr f_c
             if (query_tree->commandType == CMD_UTILITY)
                 stmt = query_tree->utilityStmt;
             else
-                stmt = (Node*)pg_plan_query(query_tree, f_cache->readonly_func ? CURSOR_OPT_PARALLEL_OK : 0, NULL);
+                stmt = (Node*)pg_plan_query(query_tree, 0, NULL);
 
             /* Precheck all commands for validity in a function */
             if (IsA(stmt, TransactionStmt))
@@ -465,14 +466,11 @@ static List* init_execution_state(List* query_tree_list, SQLFunctionCachePtr f_c
                         /* translator: %s is a SQL statement name */
                         errmsg("%s is not allowed in a SQL function", CreateCommandTag(stmt))));
 
-            if (f_cache->readonly_func && !CommandIsReadOnly(stmt))
+            if (fcache->readonly_func && !CommandIsReadOnly(stmt))
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         /* translator: %s is a SQL statement name */
                         errmsg("%s is not allowed in a non-volatile function", CreateCommandTag(stmt))));
-
-            if (IsInParallelMode() && !CommandIsReadOnly(stmt))
-                PreventCommandIfParallelMode(CreateCommandTag((Node *)stmt));
 
             /* OK, build the execution_state for this query */
             new_es = (execution_state*)palloc(sizeof(execution_state));
@@ -512,13 +510,13 @@ static List* init_execution_state(List* query_tree_list, SQLFunctionCachePtr f_c
      * output from a utility statement that check_sql_fn_retval deemed to not
      * have output.
      */
-    if (last_tages != NULL && f_cache->junkFilter) {
+    if (last_tages != NULL && fcache->junkFilter) {
         last_tages->setsResult = true;
         if (lazy_eval_ok && IsA(last_tages->stmt, PlannedStmt)) {
             PlannedStmt* ps = (PlannedStmt*)last_tages->stmt;
 
             if (ps->commandType == CMD_SELECT && ps->utilityStmt == NULL && !ps->hasModifyingCTE)
-                f_cache->lazyEval = last_tages->lazyEval = true;
+                fcache->lazyEval = last_tages->lazyEval = true;
         }
     }
 
@@ -528,15 +526,15 @@ static List* init_execution_state(List* query_tree_list, SQLFunctionCachePtr f_c
 /*
  * Initialize the SQLFunctionCache for a SQL function
  */
-static void init_sql_fcache(FmgrInfo* f_info, Oid collation, bool lazy_eval_ok)
+static void init_sql_fcache(FmgrInfo* finfo, Oid collation, bool lazy_eval_ok)
 {
-    Oid f_oid = f_info->fn_oid;
+    Oid f_oid = finfo->fn_oid;
     MemoryContext f_context;
     MemoryContext old_context;
     Oid ret_type;
     HeapTuple procedure_tuple;
     Form_pg_proc procedure_struct;
-    SQLFunctionCachePtr f_cache;
+    SQLFunctionCachePtr fcache;
     List* raw_parsetree_list = NIL;
     List* query_tree_list = NIL;
     List* flat_query_list = NIL;
@@ -548,7 +546,7 @@ static void init_sql_fcache(FmgrInfo* f_info, Oid collation, bool lazy_eval_ok)
      * Create memory context that holds all the SQLFunctionCache data.	It
      * must be a child of whatever context holds the FmgrInfo.
      */
-    f_context = AllocSetContextCreate(f_info->fn_mcxt,
+    f_context = AllocSetContextCreate(finfo->fn_mcxt,
         "SQL function data",
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
@@ -561,9 +559,9 @@ static void init_sql_fcache(FmgrInfo* f_info, Oid collation, bool lazy_eval_ok)
      * is done, we'll be able to recover the memory after failure, even if the
      * FmgrInfo is long-lived.
      */
-    f_cache = (SQLFunctionCachePtr)palloc0(sizeof(SQLFunctionCache));
-    f_cache->fcontext = f_context;
-    f_info->fn_extra = (void*)f_cache;
+    fcache = (SQLFunctionCachePtr)palloc0(sizeof(SQLFunctionCache));
+    fcache->fcontext = f_context;
+    finfo->fn_extra = (void*)fcache;
 
     /*
      * get the procedure tuple corresponding to the given function Oid
@@ -579,7 +577,7 @@ static void init_sql_fcache(FmgrInfo* f_info, Oid collation, bool lazy_eval_ok)
     /*
      * copy function name immediately for use by error reporting callback
      */
-    f_cache->fname = pstrdup(NameStr(procedure_struct->proname));
+    fcache->fname = pstrdup(NameStr(procedure_struct->proname));
 
     /*
      * get the result type from the procedure tuple, and check for polymorphic
@@ -588,7 +586,7 @@ static void init_sql_fcache(FmgrInfo* f_info, Oid collation, bool lazy_eval_ok)
     ret_type = procedure_struct->prorettype;
 
     if (IsPolymorphicType(ret_type)) {
-        ret_type = get_fn_expr_rettype(f_info);
+        ret_type = get_fn_expr_rettype(finfo);
         if (ret_type == InvalidOid) /* this probably should not happen */
             ereport(ERROR,
                 (errcode(ERRCODE_DATATYPE_MISMATCH),
@@ -596,23 +594,23 @@ static void init_sql_fcache(FmgrInfo* f_info, Oid collation, bool lazy_eval_ok)
                         format_type_be(procedure_struct->prorettype))));
     }
 
-    f_cache->rettype = ret_type;
+    fcache->rettype = ret_type;
 
     /* Fetch the typlen and byval info for the result type */
-    get_typlenbyval(ret_type, &f_cache->typlen, &f_cache->typbyval);
+    get_typlenbyval(ret_type, &fcache->typlen, &fcache->typbyval);
 
     /* Remember whether we're returning setof something */
-    f_cache->returnsSet = procedure_struct->proretset;
+    fcache->returnsSet = procedure_struct->proretset;
 
     /* Remember if function is STABLE/IMMUTABLE */
-    f_cache->readonly_func = (procedure_struct->provolatile != PROVOLATILE_VOLATILE);
+    fcache->readonly_func = (procedure_struct->provolatile != PROVOLATILE_VOLATILE);
 
     /*
      * We need the actual argument types to pass to the parser.  Also make
      * sure that parameter symbols are considered to have the function's
      * resolved input collation.
      */
-    f_cache->pinfo = prepare_sql_fn_parse_info(procedure_tuple, f_info->fn_expr, collation);
+    fcache->pinfo = prepare_sql_fn_parse_info(procedure_tuple, finfo->fn_expr, collation);
 
     /*
      * And of course we need the function body text.
@@ -622,7 +620,7 @@ static void init_sql_fcache(FmgrInfo* f_info, Oid collation, bool lazy_eval_ok)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("null prosrc for function %u when we need the function body text", f_oid)));
-    f_cache->src = TextDatumGetCString(tmp);
+    fcache->src = TextDatumGetCString(tmp);
 
     /*
      * Parse and rewrite the queries in the function text.	Use sublists to
@@ -639,7 +637,7 @@ static void init_sql_fcache(FmgrInfo* f_info, Oid collation, bool lazy_eval_ok)
      * but we'll not worry about it until the module is rewritten to use
      * plancache.c.
      */
-    raw_parsetree_list = pg_parse_query(f_cache->src);
+    raw_parsetree_list = pg_parse_query(fcache->src);
 
     query_tree_list = NIL;
     flat_query_list = NIL;
@@ -648,7 +646,7 @@ static void init_sql_fcache(FmgrInfo* f_info, Oid collation, bool lazy_eval_ok)
         List* queryTree_sublist = NIL;
 
         queryTree_sublist =
-            pg_analyze_and_rewrite_params(parsetree, f_cache->src, (ParserSetupHook)sql_fn_parser_setup, f_cache->pinfo);
+            pg_analyze_and_rewrite_params(parsetree, fcache->src, (ParserSetupHook)sql_fn_parser_setup, fcache->pinfo);
         query_tree_list = lappend(query_tree_list, queryTree_sublist);
         flat_query_list = list_concat(flat_query_list, list_copy(queryTree_sublist));
     }
@@ -672,12 +670,12 @@ static void init_sql_fcache(FmgrInfo* f_info, Oid collation, bool lazy_eval_ok)
      * coerce the returned rowtype to the desired form (unless the result type
      * is VOID, in which case there's nothing to coerce to).
      */
-    f_cache->returnsTuple = check_sql_fn_retval(f_oid, ret_type, flat_query_list, NULL, &f_cache->junkFilter);
+    fcache->returnsTuple = check_sql_fn_retval(f_oid, ret_type, flat_query_list, NULL, &fcache->junkFilter);
 
-    if (f_cache->returnsTuple) {
+    if (fcache->returnsTuple) {
         /* Make sure output rowtype is properly blessed */
-        BlessTupleDesc(f_cache->junkFilter->jf_resultSlot->tts_tupleDescriptor);
-    } else if (f_cache->returnsSet && type_is_rowtype(f_cache->rettype)) {
+        BlessTupleDesc(fcache->junkFilter->jf_resultSlot->tts_tupleDescriptor);
+    } else if (fcache->returnsSet && type_is_rowtype(fcache->rettype)) {
         /*
          * Returning rowtype as if it were scalar --- materialize won't work.
          * Right now it's sufficient to override any caller preference for
@@ -688,11 +686,11 @@ static void init_sql_fcache(FmgrInfo* f_info, Oid collation, bool lazy_eval_ok)
     }
 
     /* Finally, plan the queries */
-    f_cache->func_state = init_execution_state(query_tree_list, f_cache, lazy_eval_ok);
+    fcache->func_state = init_execution_state(query_tree_list, fcache, lazy_eval_ok);
 
     /* Mark fcache with time of creation to show it's valid */
-    f_cache->lxid = t_thrd.proc->lxid;
-    f_cache->subxid = GetCurrentSubTransactionId();
+    fcache->lxid = t_thrd.proc->lxid;
+    fcache->subxid = GetCurrentSubTransactionId();
 
     ReleaseSysCache(procedure_tuple);
 
@@ -700,7 +698,7 @@ static void init_sql_fcache(FmgrInfo* f_info, Oid collation, bool lazy_eval_ok)
 }
 
 /* Start up execution of one execution_state node */
-static void postquel_start(execution_state* es, SQLFunctionCachePtr f_cache)
+static void postquel_start(execution_state* es, SQLFunctionCachePtr fcache)
 {
     DestReceiver* dest = NULL;
 
@@ -720,18 +718,18 @@ static void postquel_start(execution_state* es, SQLFunctionCachePtr f_cache)
         /* pass down the needed info to the dest receiver routines */
         my_state = (DR_sqlfunction*)dest;
         Assert(my_state->pub.mydest == DestSQLFunction);
-        my_state->tstore = f_cache->tstore;
+        my_state->tstore = fcache->tstore;
         my_state->cxt = CurrentMemoryContext;
-        my_state->filter = f_cache->junkFilter;
+        my_state->filter = fcache->junkFilter;
     } else {
         dest = None_Receiver;
     }
 
     if (IsA(es->stmt, PlannedStmt)) {
         es->qd = CreateQueryDesc(
-            (PlannedStmt*)es->stmt, f_cache->src, GetActiveSnapshot(), InvalidSnapshot, dest, f_cache->paramLI, 0);
+            (PlannedStmt*)es->stmt, fcache->src, GetActiveSnapshot(), InvalidSnapshot, dest, fcache->paramLI, 0);
     } else {
-        es->qd = CreateUtilityQueryDesc(es->stmt, f_cache->src, GetActiveSnapshot(), dest, f_cache->paramLI);
+        es->qd = CreateUtilityQueryDesc(es->stmt, fcache->src, GetActiveSnapshot(), dest, fcache->paramLI);
     }
 
     /* Utility commands don't need Executor. */
@@ -758,7 +756,7 @@ static void postquel_start(execution_state* es, SQLFunctionCachePtr f_cache)
 
 /* Run one execution_state; either to completion or to first result row */
 /* Returns true if we ran to completion */
-static bool postquel_getnext(execution_state* es, SQLFunctionCachePtr f_cache)
+static bool postquel_getnext(execution_state* es, SQLFunctionCachePtr fcache)
 {
     bool result = false;
     /* initialize the parameters of the main statement */
@@ -771,7 +769,7 @@ static bool postquel_getnext(execution_state* es, SQLFunctionCachePtr f_cache)
     if (es->qd->utilitystmt) {
         /* ProcessUtility needs the PlannedStmt for DECLARE CURSOR */
         ProcessUtility((es->qd->plannedstmt ? (Node*)es->qd->plannedstmt : es->qd->utilitystmt),
-            f_cache->src,
+            fcache->src,
             es->qd->params,
             false, /* not top level */
             es->qd->dest,
@@ -868,40 +866,39 @@ static void postquel_end(execution_state* es)
 }
 
 /* Build ParamListInfo array representing current arguments */
-static void postquel_sub_params(SQLFunctionCachePtr f_cache, FunctionCallInfo fc_info)
+static void postquel_sub_params(SQLFunctionCachePtr fcache, FunctionCallInfo fcinfo)
 {
-    int n_args = fc_info->nargs;
+    int nargs = fcinfo->nargs;
 
-    if (n_args > 0) {
+    if (nargs > 0) {
         ParamListInfo param_li;
         int i;
 
-        if (f_cache->paramLI == NULL) {
-            param_li = (ParamListInfo)palloc(offsetof(ParamListInfoData, params) + n_args * sizeof(ParamExternData));
+        if (fcache->paramLI == NULL) {
+            param_li = (ParamListInfo)palloc(offsetof(ParamListInfoData, params) + nargs * sizeof(ParamExternData));
             /* we have static list of params, so no hooks needed */
             param_li->paramFetch = NULL;
             param_li->paramFetchArg = NULL;
             param_li->parserSetup = NULL;
             param_li->parserSetupArg = NULL;
             param_li->params_need_process = false;
-            param_li->numParams = n_args;
-            param_li->paramMask = NULL;
-            f_cache->paramLI = param_li;
+            param_li->numParams = nargs;
+            fcache->paramLI = param_li;
         } else {
-            param_li = f_cache->paramLI;
-            Assert(param_li->numParams == n_args);
+            param_li = fcache->paramLI;
+            Assert(param_li->numParams == nargs);
         }
 
-        for (i = 0; i < n_args; i++) {
+        for (i = 0; i < nargs; i++) {
             ParamExternData* prm = &param_li->params[i];
 
-            prm->value = fc_info->arg[i];
-            prm->isnull = fc_info->argnull[i];
+            prm->value = fcinfo->arg[i];
+            prm->isnull = fcinfo->argnull[i];
             prm->pflags = 0;
-            prm->ptype = f_cache->pinfo->argtypes[i];
+            prm->ptype = fcache->pinfo->argtypes[i];
         }
     } else {
-        f_cache->paramLI = NULL;
+        fcache->paramLI = NULL;
     }
 }
 
@@ -911,8 +908,10 @@ static void postquel_sub_params(SQLFunctionCachePtr f_cache, FunctionCallInfo fc
  * result.
  */
 static Datum postquel_get_single_result(
-    TupleTableSlot* slot, FunctionCallInfo fc_info, SQLFunctionCachePtr f_cache, MemoryContext result_context)
+    TupleTableSlot* slot, FunctionCallInfo fcinfo, SQLFunctionCachePtr fcache, MemoryContext result_context)
 {
+    Assert(slot != NULL);
+
     Datum value;
     MemoryContext old_context;
 
@@ -924,20 +923,22 @@ static Datum postquel_get_single_result(
      */
     old_context = MemoryContextSwitchTo(result_context);
 
-    if (f_cache->returnsTuple) {
+    if (fcache->returnsTuple) {
         /* We must return the whole tuple as a Datum. */
-        fc_info->isnull = false;
+        fcinfo->isnull = false;
         value = ExecFetchSlotTupleDatum(slot);
-        value = datumCopy(value, f_cache->typbyval, f_cache->typlen);
+        value = datumCopy(value, fcache->typbyval, fcache->typlen);
     } else {
         /*
          * Returning a scalar, which we have to extract from the first column
          * of the SELECT result, and then copy into result context if needed.
          */
-        value = slot_getattr(slot, 1, &(fc_info->isnull));
+        /* Get the Table Accessor Method*/
+        Assert(slot->tts_tupleDescriptor != NULL);
+        value = tableam_tslot_getattr(slot, 1, &(fcinfo->isnull));
 
-        if (!fc_info->isnull)
-            value = datumCopy(value, f_cache->typbyval, f_cache->typlen);
+        if (!fcinfo->isnull)
+            value = datumCopy(value, fcache->typbyval, fcache->typlen);
     }
 
     MemoryContextSwitchTo(old_context);
@@ -963,7 +964,7 @@ static void auditExecSQLFunction(Oid fn_oid, SQLFunctionCache* func, AuditResult
  */
 Datum fmgr_sql(PG_FUNCTION_ARGS)
 {
-    SQLFunctionCachePtr f_cache = NULL;
+    SQLFunctionCachePtr fcache = NULL;
     ErrorContextCallback sql_err_context;
     MemoryContext old_context;
     bool random_access = false;
@@ -1029,20 +1030,20 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
      * Initialize fcache (build plans) if first time through; or re-initialize
      * if the cache is stale.
      */
-    f_cache = (SQLFunctionCachePtr)fcinfo->flinfo->fn_extra;
+    fcache = (SQLFunctionCachePtr)fcinfo->flinfo->fn_extra;
 
-    if (f_cache != NULL) {
-        if (f_cache->lxid != t_thrd.proc->lxid || !SubTransactionIsActive(f_cache->subxid)) {
+    if (fcache != NULL) {
+        if (fcache->lxid != t_thrd.proc->lxid || !SubTransactionIsActive(fcache->subxid)) {
             /* It's stale; unlink and delete */
             fcinfo->flinfo->fn_extra = NULL;
-            MemoryContextDelete(f_cache->fcontext);
-            f_cache = NULL;
+            MemoryContextDelete(fcache->fcontext);
+            fcache = NULL;
         }
     }
 
-    if (f_cache == NULL) {
+    if (fcache == NULL) {
         init_sql_fcache(fcinfo->flinfo, PG_GET_COLLATION(), lazy_eval_ok);
-        f_cache = (SQLFunctionCachePtr)fcinfo->flinfo->fn_extra;
+        fcache = (SQLFunctionCachePtr)fcinfo->flinfo->fn_extra;
     }
 
     /*
@@ -1052,13 +1053,13 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
      * long-lived FmgrInfo, this policy represents more memory leakage, but
      * it's not entirely clear where to keep stuff instead.)
      */
-    old_context = MemoryContextSwitchTo(f_cache->fcontext);
+    old_context = MemoryContextSwitchTo(fcache->fcontext);
 
     /*
      * Find first unfinished query in function, and note whether it's the
      * first query.
      */
-    es_list = f_cache->func_state;
+    es_list = fcache->func_state;
     es = NULL;
     is_first = true;
     foreach (eslc, es_list) {
@@ -1078,14 +1079,14 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
      * continuing execution, we can re-use prior params.)
      */
     if (is_first && es != NULL && es->status == F_EXEC_START)
-        postquel_sub_params(f_cache, fcinfo);
+        postquel_sub_params(fcache, fcinfo);
 
     /*
      * Build tuplestore to hold results, if we don't have one already. Note
      * it's in the query-lifespan context.
      */
-    if (f_cache->tstore == NULL)
-        f_cache->tstore = tuplestore_begin_heap(random_access, false, u_sess->attr.attr_memory.work_mem);
+    if (fcache->tstore == NULL)
+        fcache->tstore = tuplestore_begin_heap(random_access, false, u_sess->attr.attr_memory.work_mem);
 
     /*
      * Execute each command in the function one after another until we either
@@ -1116,7 +1117,7 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
              * visible.  Take a new snapshot if we don't have one yet,
              * otherwise just bump the command ID in the existing snapshot.
              */
-            if (!f_cache->readonly_func) {
+            if (!fcache->readonly_func) {
                 CommandCounterIncrement();
                 if (!pushed_snapshot) {
                     PushActiveSnapshot(GetTransactionSnapshot());
@@ -1125,14 +1126,14 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
                     UpdateActiveSnapshotCommandId();
             }
 
-            postquel_start(es, f_cache);
-        } else if (!f_cache->readonly_func && !pushed_snapshot) {
+            postquel_start(es, fcache);
+        } else if (!fcache->readonly_func && !pushed_snapshot) {
             /* Re-establish active snapshot when re-entering function */
             PushActiveSnapshot(es->qd->snapshot);
             pushed_snapshot = true;
         }
 
-        completed = postquel_getnext(es, f_cache);
+        completed = postquel_getnext(es, fcache);
         /*
          * If we ran the command to completion, we can shut it down now. Any
          * row(s) we need to return are safely stashed in the tuplestore, and
@@ -1141,7 +1142,7 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
          * set, we can shut it down anyway because it must be a SELECT and we
          * don't care about fetching any more result rows.
          */
-        if (completed || !f_cache->returnsSet)
+        if (completed || !fcache->returnsSet)
             postquel_end(es);
 
         /*
@@ -1181,13 +1182,13 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
     }
 
     if (AUDIT_EXEC_ENABLED) {
-        auditExecSQLFunction(fcinfo->flinfo->fn_oid, f_cache, AUDIT_OK);
+        auditExecSQLFunction(fcinfo->flinfo->fn_oid, fcache, AUDIT_OK);
     }
 
     /*
      * The tuplestore now contains whatever row(s) we are supposed to return.
      */
-    if (f_cache->returnsSet) {
+    if (fcache->returnsSet) {
         ReturnSetInfo* rsi = (ReturnSetInfo*)fcinfo->resultinfo;
 
         if (es != NULL) {
@@ -1197,20 +1198,20 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
              */
             Assert(es->lazyEval);
             /* Re-use the junkfilter's output slot to fetch back the tuple */
-            Assert(f_cache->junkFilter);
-            if (f_cache->junkFilter == NULL) {
+            Assert(fcache->junkFilter);
+            if (fcache->junkFilter == NULL) {
                 ereport(ERROR,
                     (errcode(ERRCODE_FETCH_DATA_FAILED),
                         errmsg("function returns VOID, failed to get junk filter's slot")));
             }
-            slot = f_cache->junkFilter->jf_resultSlot;
-            if (!tuplestore_gettupleslot(f_cache->tstore, true, false, slot))
+            slot = fcache->junkFilter->jf_resultSlot;
+            if (!tuplestore_gettupleslot(fcache->tstore, true, false, slot))
                 ereport(ERROR, (errcode(ERRCODE_FETCH_DATA_FAILED), errmsg("failed to fetch lazy-eval tuple")));
             /* Extract the result as a datum, and copy out from the slot */
-            result = postquel_get_single_result(slot, fcinfo, f_cache, old_context);
+            result = postquel_get_single_result(slot, fcinfo, fcache, old_context);
             /* Clear the tuplestore, but keep it for next time */
             /* NB: this might delete the slot's content, but we don't care */
-            tuplestore_clear(f_cache->tstore);
+            tuplestore_clear(fcache->tstore);
 
             /*
              * Let caller know we're not finished.
@@ -1221,15 +1222,15 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
              * Ensure we will get shut down cleanly if the exprcontext is not
              * run to completion.
              */
-            if (!f_cache->shutdown_reg) {
-                RegisterExprContextCallback(rsi->econtext, ShutdownSQLFunction, PointerGetDatum(f_cache));
-                f_cache->shutdown_reg = true;
+            if (!fcache->shutdown_reg) {
+                RegisterExprContextCallback(rsi->econtext, ShutdownSQLFunction, PointerGetDatum(fcache));
+                fcache->shutdown_reg = true;
             }
-        } else if (f_cache->lazyEval) {
+        } else if (fcache->lazyEval) {
             /*
              * We are done with a lazy evaluation.	Clean up.
              */
-            tuplestore_clear(f_cache->tstore);
+            tuplestore_clear(fcache->tstore);
 
             /*
              * Let caller know we're finished.
@@ -1240,9 +1241,9 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
             result = (Datum)0;
 
             /* Deregister shutdown callback, if we made one */
-            if (f_cache->shutdown_reg) {
-                UnregisterExprContextCallback(rsi->econtext, ShutdownSQLFunction, PointerGetDatum(f_cache));
-                f_cache->shutdown_reg = false;
+            if (fcache->shutdown_reg) {
+                UnregisterExprContextCallback(rsi->econtext, ShutdownSQLFunction, PointerGetDatum(fcache));
+                fcache->shutdown_reg = false;
             }
         } else {
             /*
@@ -1251,43 +1252,43 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
              * tuplestore when done.)
              */
             rsi->returnMode = SFRM_Materialize;
-            rsi->setResult = f_cache->tstore;
-            f_cache->tstore = NULL;
+            rsi->setResult = fcache->tstore;
+            fcache->tstore = NULL;
             /* must copy desc because execQual will free it */
-            if (f_cache->junkFilter != NULL)
-                rsi->setDesc = CreateTupleDescCopy(f_cache->junkFilter->jf_cleanTupType);
+            if (fcache->junkFilter != NULL)
+                rsi->setDesc = CreateTupleDescCopy(fcache->junkFilter->jf_cleanTupType);
 
             fcinfo->isnull = true;
             result = (Datum)0;
 
             /* Deregister shutdown callback, if we made one */
-            if (f_cache->shutdown_reg) {
-                UnregisterExprContextCallback(rsi->econtext, ShutdownSQLFunction, PointerGetDatum(f_cache));
-                f_cache->shutdown_reg = false;
+            if (fcache->shutdown_reg) {
+                UnregisterExprContextCallback(rsi->econtext, ShutdownSQLFunction, PointerGetDatum(fcache));
+                fcache->shutdown_reg = false;
             }
         }
     } else {
         /*
          * Non-set function.  If we got a row, return it; else return NULL.
          */
-        if (f_cache->junkFilter != NULL) {
+        if (fcache->junkFilter != NULL) {
             /* Re-use the junkfilter's output slot to fetch back the tuple */
-            slot = f_cache->junkFilter->jf_resultSlot;
-            if (tuplestore_gettupleslot(f_cache->tstore, true, false, slot))
-                result = postquel_get_single_result(slot, fcinfo, f_cache, old_context);
+            slot = fcache->junkFilter->jf_resultSlot;
+            if (tuplestore_gettupleslot(fcache->tstore, true, false, slot))
+                result = postquel_get_single_result(slot, fcinfo, fcache, old_context);
             else {
                 fcinfo->isnull = true;
                 result = (Datum)0;
             }
         } else {
             /* Should only get here for VOID functions */
-            Assert(f_cache->rettype == VOIDOID);
+            Assert(fcache->rettype == VOIDOID);
             fcinfo->isnull = true;
             result = (Datum)0;
         }
 
         /* Clear the tuplestore, but keep it for next time */
-        tuplestore_clear(f_cache->tstore);
+        tuplestore_clear(fcache->tstore);
     }
 
     /* Pop snapshot if we have pushed one */
@@ -1301,7 +1302,7 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
      * the execution states to start over again on next call.
      */
     if (es == NULL) {
-        foreach (eslc, f_cache->func_state) {
+        foreach (eslc, fcache->func_state) {
             es = (execution_state*)lfirst(eslc);
             while (es != NULL) {
                 es->status = F_EXEC_START;
@@ -1329,25 +1330,25 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
  */
 static void sql_exec_error_callback(void* arg)
 {
-    FmgrInfo* fl_info = (FmgrInfo*)arg;
-    SQLFunctionCachePtr f_cache = (SQLFunctionCachePtr)fl_info->fn_extra;
+    FmgrInfo* flinfo = (FmgrInfo*)arg;
+    SQLFunctionCachePtr fcache = (SQLFunctionCachePtr)flinfo->fn_extra;
     int syntax_err_position;
 
     /*
      * We can do nothing useful if init_sql_fcache() didn't get as far as
      * saving the function name
      */
-    if (f_cache == NULL || f_cache->fname == NULL)
+    if (fcache == NULL || fcache->fname == NULL)
         return;
 
     /*
      * If there is a syntax error position, convert to internal syntax error
      */
     syntax_err_position = geterrposition();
-    if (syntax_err_position > 0 && f_cache->src != NULL) {
+    if (syntax_err_position > 0 && fcache->src != NULL) {
         errposition(0);
         internalerrposition(syntax_err_position);
-        internalerrquery(f_cache->src);
+        internalerrquery(fcache->src);
     }
 
     if (AUDIT_EXEC_ENABLED) {
@@ -1355,7 +1356,7 @@ static void sql_exec_error_callback(void* arg)
         int sql_state;
         getElevelAndSqlstate(&e_level, &sql_state);
         if (e_level >= ERROR)
-            auditExecSQLFunction(fl_info->fn_oid, f_cache, AUDIT_FAILED);
+            auditExecSQLFunction(flinfo->fn_oid, fcache, AUDIT_FAILED);
     }
     /*
      * Try to determine where in the function we failed.  If there is a query
@@ -1364,18 +1365,18 @@ static void sql_exec_error_callback(void* arg)
      * ExecutorEnd are blamed on the appropriate query; see postquel_start and
      * postquel_end.)
      */
-    if (f_cache->func_state != NULL) {
+    if (fcache->func_state != NULL) {
         execution_state* es = NULL;
         int query_num;
         ListCell* lc = NULL;
 
         es = NULL;
         query_num = 1;
-        foreach (lc, f_cache->func_state) {
+        foreach (lc, fcache->func_state) {
             es = (execution_state*)lfirst(lc);
             while (es != NULL) {
                 if (es->qd != NULL) {
-                    errcontext("SQL function \"%s\" statement %d", f_cache->fname, query_num);
+                    errcontext("SQL function \"%s\" statement %d", fcache->fname, query_num);
                     break;
                 }
                 es = es->next;
@@ -1389,7 +1390,7 @@ static void sql_exec_error_callback(void* arg)
              * couldn't identify a running query; might be function entry,
              * function exit, or between queries.
              */
-            errcontext("SQL function \"%s\"", f_cache->fname);
+            errcontext("SQL function \"%s\"", fcache->fname);
         }
     } else {
         /*
@@ -1397,7 +1398,7 @@ static void sql_exec_error_callback(void* arg)
          * function actually has an empty body, but in that case we may as
          * well report all errors as being "during startup".)
          */
-        errcontext("SQL function \"%s\" during startup", f_cache->fname);
+        errcontext("SQL function \"%s\" during startup", fcache->fname);
     }
 }
 
@@ -1407,22 +1408,22 @@ static void sql_exec_error_callback(void* arg)
  */
 static void ShutdownSQLFunction(Datum arg)
 {
-    SQLFunctionCachePtr f_cache = (SQLFunctionCachePtr)DatumGetPointer(arg);
+    SQLFunctionCachePtr fcache = (SQLFunctionCachePtr)DatumGetPointer(arg);
     execution_state* es = NULL;
     ListCell* lc = NULL;
 
-    foreach (lc, f_cache->func_state) {
+    foreach (lc, fcache->func_state) {
         es = (execution_state*)lfirst(lc);
         while (es != NULL) {
             /* Shut down anything still running */
             if (es->status == F_EXEC_RUN) {
                 /* Re-establish active snapshot for any called functions */
-                if (!f_cache->readonly_func)
+                if (!fcache->readonly_func)
                     PushActiveSnapshot(es->qd->snapshot);
 
                 postquel_end(es);
 
-                if (!f_cache->readonly_func)
+                if (!fcache->readonly_func)
                     PopActiveSnapshot();
             }
 
@@ -1433,12 +1434,12 @@ static void ShutdownSQLFunction(Datum arg)
     }
 
     /* Release tuplestore if we have one */
-    if (f_cache->tstore != NULL)
-        tuplestore_end(f_cache->tstore);
-    f_cache->tstore = NULL;
+    if (fcache->tstore != NULL)
+        tuplestore_end(fcache->tstore);
+    fcache->tstore = NULL;
 
     /* execUtils will deregister the callback... */
-    f_cache->shutdown_reg = false;
+    fcache->shutdown_reg = false;
 }
 
 /*
@@ -1783,6 +1784,7 @@ DestReceiver* CreateSQLFunctionDestReceiver(void)
     self->pub.rShutdown = sqlfunction_shutdown;
     self->pub.rDestroy = sqlfunction_destroy;
     self->pub.mydest = DestSQLFunction;
+    self->pub.tmpContext = NULL;
 
     /* private fields will be set by postquel_start */
     return (DestReceiver*)self;

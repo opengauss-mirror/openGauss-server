@@ -70,8 +70,8 @@ typedef struct knl_session_attr_sql {
     bool enable_nestloop;
     bool enable_mergejoin;
     bool enable_hashjoin;
-    bool enable_parallel_append;
     bool enable_index_nestloop;
+    bool under_explain;
     bool enable_nodegroup_debug;
     bool enable_partitionwise;
     bool enable_remotejoin;
@@ -81,6 +81,7 @@ typedef struct knl_session_attr_sql {
     bool enable_remotesort;
     bool enable_remotelimit;
     bool gtm_backup_barrier;
+    bool explain_allow_multinode;
     bool enable_stream_operator;
     bool enable_stream_concurrent_update;
     bool enable_vector_engine;
@@ -130,6 +131,7 @@ typedef struct knl_session_attr_sql {
     bool enable_online_ddl_waitlock;
     bool show_acce_estimate_detail;
     bool enable_prevent_job_task_startup;
+    bool enable_dngather;
     int from_collapse_limit;
     int join_collapse_limit;
     int geqo_threshold;
@@ -155,8 +157,6 @@ typedef struct knl_session_attr_sql {
     int acce_min_datasize_per_thread;
     int max_cn_temp_file_size;
     int default_statistics_target;
-    int min_parallel_table_scan_size;
-    int min_parallel_index_scan_size;
     /* Memory Limit user could set in session */
     int FencedUDFMemoryLimit;
     int64 g_default_expthresh;
@@ -166,9 +166,8 @@ typedef struct knl_session_attr_sql {
     double allocate_mem_cost;
     double cpu_index_tuple_cost;
     double cpu_operator_cost;
-    double parallel_tuple_cost;
-    double parallel_setup_cost;
     double stream_multiple;
+    double dngather_min_rows;
     double cursor_tuple_fraction;
     double Geqo_selection_bias;
     double Geqo_seed;
@@ -184,10 +183,12 @@ typedef struct knl_session_attr_sql {
     int backslash_quote;
     int constraint_exclusion;
     int rewrite_rule;
-    int sql_compatibility;  /* reference to DB_Compatibility */
+    int sql_compatibility;
     int guc_explain_perf_mode;
     int skew_strategy_store;
     int codegen_strategy;
+
+    int application_type;
 
     bool enable_unshipping_log;
     /*
@@ -202,14 +203,11 @@ typedef struct knl_session_attr_sql {
     double table_skewness_warning_threshold;
     bool enable_opfusion;
     bool enable_beta_opfusion;
-    bool enable_beta_nestloop_fusion;
-    bool parallel_leader_participation;
-    bool enable_parallel_hash;
+    bool enable_partition_opfusion;
     int opfusion_debug_mode;
-    int single_shard_stmt;
-    int force_parallel_mode;
-    int max_parallel_workers_per_gather;
-    int max_parallel_maintenance_workers;
+    double cost_weight_index;
+    double default_limit_rows;
+    int sql_beta_feature;
     /* hypo index */
     bool enable_hypo_index;
     bool hypopg_is_explain;

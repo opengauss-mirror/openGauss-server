@@ -37,10 +37,11 @@
 #define GTM_AUTH_GSS (2)
 
 extern int gtm_auth_method;
-extern char *gtm_krb_server_keyfile;
+extern char* gtm_krb_server_keyfile;
 extern const struct config_enum_entry gtm_auth_options[];
 
-extern bool CheckGtmKrbKeyFilePath(char **newval, void **extra, GtmOptSource source);
-extern bool CheckGtmAuthMethod(int *newval, void **extra, GtmOptSource source);
-extern void GtmPerformAuthentication(GTM_ThreadInfo *thrinfo);
+extern bool CheckGtmKrbKeyFilePath(char** newval, void** extra, GtmOptSource source);
+extern bool CheckGtmAuthMethod(int* newval, void** extra, GtmOptSource source);
+extern void GtmPerformAuthentication(GTM_ThreadInfo* thrinfo);
+extern void GtmAuthCleanup();
 #endif /* GTM_AUTH_H */

@@ -14,15 +14,18 @@
  * -------------------------------------------------------------------------
  */
 #include "access/dfs/dfs_query.h"
+#include "access/nbtree.h"
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
 #include <math.h>
 
+#include "access/heapam.h"
 #include "access/transam.h"
 #include "access/tupconvert.h"
 #include "access/tuptoaster.h"
 #include "access/visibilitymap.h"
+#include "access/tableam.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
 #include "catalog/index.h"
@@ -55,7 +58,7 @@
 #include "pgxc/groupmgr.h"
 #include "postmaster/autovacuum.h"
 #include "storage/cucache_mgr.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/lmgr.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
@@ -73,12 +76,15 @@
 #include "utils/sortsupport.h"
 #include "utils/syscache.h"
 #include "utils/timestamp.h"
-#include "utils/tqual.h"
 #include "tcop/utility.h"
 #include "tcop/dest.h"
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #endif
+
+#ifdef ENABLE_MULTIPLE_NODES
+#include "tsdb/utils/ts_relcache.h"
+#endif   /* ENABLE_MULTIPLE_NODES */
 
 #if defined(ENABLE_UT) || defined(ENABLE_QUNIT)
 #define static
@@ -148,6 +154,7 @@ THR_LOCAL int default_statistics_target = 100;
 #define DEFAULT_COLUMN_NUM 2
 #define DEFAULT_SAMPLERATE 0.02
 #define DEFAULT_EST_TARGET_ROWS 300
+const char* const ANALYZE_TEMP_TABLE_PREFIX = "pg_analyze";
 
 /*
  * If get sample rows on datanode or not. there are two cases:
@@ -237,6 +244,9 @@ template <bool isSingleColumn>
 static void update_stats_catalog(
     Relation pgstat, MemoryContext oldcontext, Oid relid, char relkind, bool inh, VacAttrStats* stats, int natts,
     char relpersistence);
+
+static BlockNumber estimate_psort_index_blocks(TupleDesc desc, double totalTuples);
+static BlockNumber estimate_btree_index_blocks(TupleDesc desc, double totalTuples, double table_factor = 1.0);
 
 /* The sample info of special attribute for compute statistic for index or type of tsvector. */
 typedef struct {
@@ -347,6 +357,18 @@ void analyze_rel(Oid relid, VacuumStmt* vacstmt, BufferAccessStrategy bstrategy)
      * the relation will close in analyze_rel_internal().
      */
     Relation onerel = analyze_get_relation(relid, vacstmt);
+    if (STMT_RETRY_ENABLED) {
+        // do noting for now, if query retry is on, just to skip validateTempRelation here
+    } else if (onerel != NULL && onerel->rd_rel != NULL && 
+        onerel->rd_rel->relpersistence == RELPERSISTENCE_TEMP && !validateTempNamespace(onerel->rd_rel->relnamespace)) {
+            relation_close(onerel, NEED_EST_TOTAL_ROWS_DN(vacstmt) ? AccessShareLock : ShareUpdateExclusiveLock);
+            ereport(ERROR,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                    errmsg("Temp table's data is invalid because datanode %s restart. "
+                       "Quit your session to clean invalid temp tables.", 
+                       g_instance.attr.attr_common.PGXCNodeName)));
+    }
+
     /*
      * do analyze If have onerel, otherwise,we should CommitTransaction
      * if it has StartTransaction already.
@@ -463,8 +485,10 @@ static void analyze_rel_internal(Relation onerel, VacuumStmt* vacstmt, BufferAcc
     /*
      * Check permissions --- this should match vacuum's check!
      */
-    if (!(pg_class_ownercheck(RelationGetPgClassOid(onerel, false), GetUserId()) ||
-            (pg_database_ownercheck(u_sess->proc_cxt.MyDatabaseId, GetUserId()) && !onerel->rd_rel->relisshared))) {
+    AclResult aclresult = pg_class_aclcheck(RelationGetPgClassOid(onerel, false), GetUserId(), ACL_VACUUM);
+    if (aclresult != ACLCHECK_OK && !(pg_class_ownercheck(RelationGetPgClassOid(onerel, false), GetUserId()) ||
+            (pg_database_ownercheck(u_sess->proc_cxt.MyDatabaseId, GetUserId()) && !onerel->rd_rel->relisshared) ||
+                (isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))) {
         /* No need for a WARNING if we already complained during VACUUM */
         if (!(vacstmt->options & VACOPT_VACUUM)) {
             if (onerel->rd_rel->relisshared)
@@ -516,11 +540,12 @@ static void analyze_rel_internal(Relation onerel, VacuumStmt* vacstmt, BufferAcc
     }
 
     /*
-    * Check that it's a plain table, materialized view, or foreign table; we
-    * used to do this in get_rel_oids() but seems safer to check after we've
-    * locked the relation.
-    */
-    if (onerel->rd_rel->relkind == RELKIND_RELATION || onerel->rd_rel->relkind == RELKIND_MATVIEW) {
+     * Check that it's a plain table or foreign table; we used to do this in
+     * get_rel_oids() but seems safer to check after we've locked the
+     * relation.
+     */
+    if (onerel->rd_rel->relkind == RELKIND_RELATION ||
+        onerel->rd_rel->relkind == RELKIND_MATVIEW) {
         /* Regular table, so we'll use the regular row acquisition function */
         /* Also get regular table's size */
         if (RelationIsPartitioned(onerel)) {
@@ -536,7 +561,8 @@ static void analyze_rel_internal(Relation onerel, VacuumStmt* vacstmt, BufferAcc
         } else {
             relpages = RelationGetNumberOfBlocks(onerel);
         }
-    } else if (onerel->rd_rel->relkind == RELKIND_FOREIGN_TABLE) {
+    } else if (onerel->rd_rel->relkind == RELKIND_FOREIGN_TABLE 
+               || onerel->rd_rel->relkind == RELKIND_STREAM) {
         /*
          * @hdfs
          * For a foreign table, call FDW's hook function to see whether it
@@ -547,7 +573,7 @@ static void analyze_rel_internal(Relation onerel, VacuumStmt* vacstmt, BufferAcc
 
         /* Support analyze or not */
         if (NULL != fdwroutine->AnalyzeForeignTable) {
-            /* Implement GetFdwType interface or not and file type is HDFS_ORC */
+            /* Implement GetFdwType interface or not and file type is HDFS_ORC*/
             if (isObsOrHdfsTableFormTblOid(RelationGetRelid(onerel)) ||
                 (IS_OBS_CSV_TXT_FOREIGN_TABLE(RelationGetRelid(onerel)) && !isWriteOnlyFt(RelationGetRelid(onerel)))) {
                 /* pass data used by AnalyzeForeignTable */
@@ -557,6 +583,7 @@ static void analyze_rel_internal(Relation onerel, VacuumStmt* vacstmt, BufferAcc
                 /* other types of foreign table */
                 retValue = fdwroutine->AnalyzeForeignTable(onerel, &acquirefunc, &relpages, 0, false);
             }
+
             if (!retValue) {
                 /* Supress warning info for mysql_fdw */
                 messageLevel = isMysqlFDWFromTblOid(RelationGetRelid(onerel)) ? LOG : messageLevel;
@@ -566,6 +593,7 @@ static void analyze_rel_internal(Relation onerel, VacuumStmt* vacstmt, BufferAcc
                 relation_close(onerel, lockmode);
                 return;
             }
+
         } else {
             ereport(messageLevel,
                 (errmsg("Table %s doesn't support analysis operation.", RelationGetRelationName(onerel))));
@@ -767,7 +795,7 @@ int64 get_target_rows(Relation onerel, VacAttrStats** vacattrstats, int attr_cnt
      */
     /* Get real tuple size using to caculate workmem_allow_rows. */
     workmem_allow_rows = get_workmem_allow_rows(onerel, total_width);
-    
+
     if (target_rows > workmem_allow_rows)
         workmem_allow_rows = target_rows;  // when workmem_allow_rows less than 30000,  set workmem_allow_rows = 30000
 
@@ -846,8 +874,15 @@ HeapTuple* get_total_rows(Relation onerel, VacuumStmt* vacstmt, BlockNumber relp
      */
     Oid foreignTableId = 0;
     bool isForeignTable = false;
-    DEBUG_START_TIMER;
-    bool onerel_isReplication = (vacstmt->disttype == DISTTYPE_REPLICATION);
+    DEBUG_MOD_START_TIMER(MOD_AUTOVAC);
+    bool onerel_isReplication = (DISTTYPE_REPLICATION == vacstmt->disttype);
+    int64 bufferRead = 0;
+    int64 bufferHit = 0;
+
+    if (onerel->pgstat_info != NULL) {
+        bufferRead = onerel->pgstat_info->t_counts.t_blocks_fetched;
+        bufferHit = onerel->pgstat_info->t_counts.t_blocks_hit;
+    }
 
     if (vacstmt->relation != NULL) {
         foreignTableId = RelationGetRelid(onerel);
@@ -894,9 +929,13 @@ HeapTuple* get_total_rows(Relation onerel, VacuumStmt* vacstmt, BlockNumber relp
         /* Table is partitioned but not a foreign table */
         *numrows = acquirePartitionedSampleRows<estimate_table_rownum>(
             onerel, vacstmt, elevel, rows, target_rows, totalrows, totaldeadrows, vacattrstats, attr_cnt);
-    } else if (isForeignTable ||
+    } else if (isForeignTable || onerel->rd_rel->relkind == RELKIND_STREAM ||
             (onerel->rd_rel->relkind == RELKIND_FOREIGN_TABLE &&
+#ifdef ENABLE_MOT
             (isMOTFromTblOid(RelationGetRelid(onerel)) || isOracleFDWFromTblOid(RelationGetRelid(onerel)) ||
+#else
+            (isOracleFDWFromTblOid(RelationGetRelid(onerel)) ||
+#endif
              isPostgresFDWFromTblOid(RelationGetRelid(onerel))))) {
         /*
          * @hdfs processing foreign table sampling operation 
@@ -926,8 +965,10 @@ HeapTuple* get_total_rows(Relation onerel, VacuumStmt* vacstmt, BlockNumber relp
                 *numrows = (tableFdwRoutine->AcquireSampleRows)(
                     onerel, elevel, rows, target_rows, totalrows, totaldeadrows, 0, estimate_table_rownum);
             }
+
             *totaldeadrows = 0; /* set totaldeadrows to zero. It is no means to foreign table. */
         }
+
     } else {
         if (RelationIsColStore(onerel)) {
             if (RelationIsPAXFormat(onerel)) {
@@ -954,13 +995,20 @@ HeapTuple* get_total_rows(Relation onerel, VacuumStmt* vacstmt, BlockNumber relp
         }
     }
 
-    DEBUG_STOP_TIMER("%s get sample rows for table \"%s\". "
-                     "totalrows: %ld, target_rows: %ld, numrows: %ld.",
+    if (onerel->pgstat_info != NULL) {
+        bufferRead = onerel->pgstat_info->t_counts.t_blocks_fetched - bufferRead;
+        bufferHit = onerel->pgstat_info->t_counts.t_blocks_hit - bufferHit;
+    }
+
+    DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "%s get sample rows for table \"%s\". "
+                     "totalrows: %ld, target_rows: %ld, numrows: %ld. Buffer: %ld hit/%ld read.",
         (estimate_table_rownum ? "Estimate" : "Real"),
         NameStr(onerel->rd_rel->relname),
         targrows,
         target_rows,
-        *numrows);
+        *numrows,
+        bufferHit,
+        bufferRead);
 
     if (estimate_table_rownum) {
         for (int i = 0; i < *numrows; i++) {
@@ -973,7 +1021,7 @@ HeapTuple* get_total_rows(Relation onerel, VacuumStmt* vacstmt, BlockNumber relp
         return NULL;
     } else {
         /* If hdfs table have sample rows on datanode, we should do the second sampling. */
-        if (IS_PGXC_DATANODE && *numrows > 0 && (analyzemode == ANALYZEMAIN || analyzemode == ANALYZEDELTA)) {
+        if (IS_PGXC_DATANODE && *numrows > 0 && (ANALYZEMAIN == analyzemode || ANALYZEDELTA == analyzemode)) {
             do_sampling_hdfs_second(onerel, vacstmt, analyzemode, *numrows, *totalrows, rows, pstHdfsSampleRows);
         }
 
@@ -1053,6 +1101,75 @@ static BlockNumber estimate_cstore_blocks(
     return total_pages;
 }
 
+#ifdef ENABLE_MULTIPLE_NODES
+static BlockNumber estimate_tsstore_blocks(Relation rel, int attrCnt, double totalTuples)
+{
+    int tuple_width = 0;
+    BlockNumber total_pages = 0;
+    int i;
+    const int text_width = 12;
+
+    if (0 >= totalTuples) {
+        return 0;
+    }
+
+    /* just as get_rel_data_width */
+    for (i = 1; i <= attrCnt; i++) {
+        Form_pg_attribute att = rel->rd_att->attrs[i - 1];
+        int32 item_width = -1;
+
+        if (att->attisdropped)
+            continue;
+
+        item_width = get_typlen(att->atttypid);
+        if (item_width > 0) {
+            /* for fixed-width datatype */
+            tuple_width += item_width;
+            continue;
+        }
+        /* text should be the tag, it should be small*/
+        if (att->atttypid == TEXTOID) {
+            tuple_width += text_width;
+            continue;
+        }
+
+        /* estimate stats by average default value*/
+        item_width = get_typavgwidth(att->atttypid, att->atttypmod);
+        Assert(item_width > 0);
+        
+        tuple_width += item_width;
+    }
+
+
+    total_pages = ceil(totalTuples / RelDefaultFullCuSize) * (RelDefaultFullCuSize * tuple_width / BLCKSZ);
+
+    if (0 < totalTuples && totalTuples < total_pages)
+        total_pages = totalTuples;
+
+    if (0 < totalTuples && 0 >= total_pages)
+        total_pages = 1;
+
+    return total_pages;
+}
+#endif   /* ENABLE_MULTIPLE_NODES */
+
+/*
+ * get_non_leaf_pages
+ * Given a perfect tree's leaf pages, estimate the number of non leaf pages.
+ */
+static double get_non_leaf_pages(double leafPages, int totalWidth)
+{
+    double nonLeafPages = 0.0;
+    /* Find number of branches */
+    double numOfBranches = (double)(BLCKSZ - sizeof(PageHeaderData)) * 100.0 / \
+        (BTREE_NONLEAF_FILLFACTOR * (double)totalWidth);
+    while (leafPages >= 1) {
+        leafPages /= numOfBranches;
+        nonLeafPages += ceil(leafPages);
+    }
+    return nonLeafPages + 1.0;
+}
+
 static BlockNumber estimate_psort_index_blocks(TupleDesc desc, double totalTuples)
 {
     int totalWidth = 0;
@@ -1065,6 +1182,58 @@ static BlockNumber estimate_psort_index_blocks(TupleDesc desc, double totalTuple
     }
 
     return (ceil(totalTuples / RelDefaultFullCuSize) * (RelDefaultFullCuSize * totalWidth / BLCKSZ));
+}
+
+/*
+ * estimate_btree_index_blocks
+ * Estimate number of blocks occupied by index.
+ * @in desc: tuple discriptor,
+ * @in totalTuples: total tuples, 
+ * @in table_factor: the table expansion factor,
+ * @out totalPages: return number of blocks.
+ */
+static BlockNumber estimate_btree_index_blocks(TupleDesc desc, double totalTuples, double table_factor)
+{
+    int totalWidth = 0;
+    int attrCnt = desc->natts;
+    Form_pg_attribute* attrs = desc->attrs;
+    BlockNumber totalPages = 0;   /* returning block number */
+
+    for (int attIdx = 0; attIdx < attrCnt; ++attIdx) {
+        Form_pg_attribute thisatt = attrs[attIdx];
+        totalWidth += get_typavgwidth(thisatt->atttypid, thisatt->atttypmod);
+        AssertEreport(totalWidth > 0,
+            MOD_OPT,
+            "The estimated average width of values of the type is not larger than 0"
+            "when setting the estimated output width of a base relation.");
+    }
+
+    /* Use colstore estimation without GUC */
+    if (!ENABLE_SQL_BETA_FEATURE(PAGE_EST_OPT)) {
+        return ceil(totalTuples / RelDefaultFullCuSize) * (RelDefaultFullCuSize * totalWidth / BLCKSZ);
+    }
+
+    /*
+     * Assume we have only one big balanced ternary tree for index from all datanodes. We estimate its leaf pages by:
+     * Find a perfectly filled tree and divide it by its fill factor (default, 90).
+     */
+    double leafPages = ceil(ceil((totalWidth * totalTuples) / BLCKSZ) * 100.0 / (double)BTREE_DEFAULT_FILLFACTOR);
+
+    /* After we have the 'flawed' tree and its leaf pages, we can estimate its non leaf pages. */
+    double nonLeafPages = get_non_leaf_pages(leafPages, totalWidth);
+
+    /* Sum up, apply the non-leaf fill factor */
+    totalPages = ceil((leafPages + nonLeafPages * 100.0 / (double)BTREE_NONLEAF_FILLFACTOR) * table_factor);
+
+    /* Print both original and optimized pages */
+    ereport(DEBUG2,
+            (errmodule(MOD_OPT),
+                (errmsg("Estimating index blocks with sql_beta_feature = PAGE_EST_OPT(original: %u, optimized: %u).",
+                    (unsigned int)(ceil(totalTuples / RelDefaultFullCuSize) * \
+                        (RelDefaultFullCuSize * totalWidth / BLCKSZ)),
+                    (unsigned int)totalPages))));
+
+    return totalPages;
 }
 
 /*
@@ -1111,7 +1280,7 @@ static VacAttrStats** get_vacattrstats_by_vacstmt(Relation onerel, VacuumStmt* v
         tcnt = 0;
 
         /* set up statistic structure for single column */
-        for (int attnum = -1; (attnum = bms_next_member(bms_single_column, attnum)) >= 0;) {
+        for (int attnum = -1; (attnum = bms_next_member(bms_single_column, attnum)) > 0;) {
             vacattrstats[tcnt] = examine_attribute(onerel, attnum, NULL);
             if (vacattrstats[tcnt] != NULL) {
                 ++tcnt;
@@ -1289,6 +1458,68 @@ static void do_analyze_finalize(
     return;
 }
 
+static inline void cleanup_indexes(int nindexes, Relation* Irel, const Relation onerel, int elevel)
+{
+    for (int ind = 0; ind < nindexes; ind++) {
+        IndexBulkDeleteResult* stats = NULL;
+        IndexVacuumInfo ivinfo;
+
+        ivinfo.index = Irel[ind];
+        ivinfo.analyze_only = true;
+        ivinfo.estimated_count = true;
+        ivinfo.message_level = elevel;
+
+        /*
+         * if not handle the return value of index_vacuum_cleanup(),
+         * ivinfo.num_heap_tuples might be useless.
+         */
+        ivinfo.num_heap_tuples = onerel->rd_rel->reltuples;
+
+        ivinfo.strategy = u_sess->analyze_cxt.vac_strategy;
+
+        if (RelationIsPartitioned(Irel[ind])) {
+            Partition indexPartition = NULL;
+            Relation indexPartitionRel = NULL;
+            ListCell* cell = NULL;
+            List* indexPartitionList = indexGetPartitionList(Irel[ind], AccessShareLock);
+
+            /*
+             * It is import to understand the nindexes indexes might be of different type,
+             * btree, hash ,gin, gist etc.
+             * here, we decide to seperate partitioned index with a list of partition,
+             * transfer partition into dummy relation, replace index relation(ivinfo.index)
+             * then call of index_vacuum_cleanup.
+             * another way is to seperate, in the underground implementation function,
+             * for example hash index or gin index implementation,
+             * and those are ususally system inbuilt functions.
+             * obviousll, the latter one will spend much more effort
+             * as it must deal with every index ethod.
+             */
+            foreach (cell, indexPartitionList) {
+                indexPartition = (Partition)lfirst(cell);
+                indexPartitionRel = partitionGetRelation(Irel[ind], indexPartition);
+
+                // key step: replace with coressponding dummy relation for partition
+                ivinfo.index = indexPartitionRel;
+
+                // finnaly, do the real work
+                if (!RelationIsColStore(onerel))
+                    stats = index_vacuum_cleanup(&ivinfo, NULL);
+                if (stats != NULL)
+                    pfree_ext(stats);
+                releaseDummyRelation(&indexPartitionRel);
+            }
+            releasePartitionList(Irel[ind], &indexPartitionList, AccessShareLock);
+        } else {
+            // do the real work
+            if (!RelationIsColStore(onerel))
+                stats = index_vacuum_cleanup(&ivinfo, NULL);
+            if (stats != NULL)
+                pfree_ext(stats);
+        }
+    }
+}
+
 /*
  *	do_analyze_rel() -- analyze one relation, recursively or not
  *
@@ -1302,7 +1533,6 @@ static void do_analyze_rel(Relation onerel, VacuumStmt* vacstmt, BlockNumber rel
 {
     int attr_cnt = 0;
     int i = 0;
-    int ind = 0;
     Relation* Irel = NULL;
     int nindexes = 0;
     bool hasindex = false;
@@ -1313,7 +1543,6 @@ static void do_analyze_rel(Relation onerel, VacuumStmt* vacstmt, BlockNumber rel
     double totalrows = 0;
     double totaldeadrows = 0;
     HeapTuple* rows = NULL;
-    char* dbname = NULL;
     PGRUsage ru0;
     TimestampTz starttime = 0;
     MemoryContext caller_context = NULL;
@@ -1338,12 +1567,12 @@ static void do_analyze_rel(Relation onerel, VacuumStmt* vacstmt, BlockNumber rel
     if (inh)
         ereport(elevel,
             (errmsg("analyzing \"%s.%s\" inheritance tree",
-                get_namespace_name(RelationGetNamespace(onerel), true),
+                get_namespace_name(RelationGetNamespace(onerel)),
                 RelationGetRelationName(onerel))));
     else
         ereport(elevel,
             (errmsg("analyzing \"%s.%s\"",
-                get_namespace_name(RelationGetNamespace(onerel), true),
+                get_namespace_name(RelationGetNamespace(onerel)),
                 RelationGetRelationName(onerel))));
 
     caller_context = do_analyze_preprocess(onerel->rd_rel->relowner,
@@ -1388,7 +1617,7 @@ static void do_analyze_rel(Relation onerel, VacuumStmt* vacstmt, BlockNumber rel
             targrows = vacattrstats[i]->minrows;
     }
 
-    for (ind = 0; ind < nindexes; ind++) {
+    for (int ind = 0; ind < nindexes; ind++) {
         AnlIndexData* thisdata = &indexdata[ind];
 
         for (i = 0; i < thisdata->attr_cnt; i++) {
@@ -1619,60 +1848,7 @@ static void do_analyze_rel(Relation onerel, VacuumStmt* vacstmt, BlockNumber rel
 
     /* If this isn't part of VACUUM ANALYZE, let index AMs do cleanup */
     if (!(vacstmt->options & VACOPT_VACUUM)) {
-        for (ind = 0; ind < nindexes; ind++) {
-            IndexBulkDeleteResult* stats = NULL;
-            IndexVacuumInfo ivinfo;
-
-            ivinfo.index = Irel[ind];
-            ivinfo.analyze_only = true;
-            ivinfo.estimated_count = true;
-            ivinfo.message_level = elevel;
-
-            // if not handle the return value of index_vacuum_cleanup(),
-            // ivinfo.num_heap_tuples might be useless.
-            ivinfo.num_heap_tuples = onerel->rd_rel->reltuples;
-
-            ivinfo.strategy = u_sess->analyze_cxt.vac_strategy;
-
-            if (RelationIsPartitioned(Irel[ind])) {
-                Partition indexPartition = NULL;
-                Relation indexPartitionRel = NULL;
-                ListCell* cell = NULL;
-                List* indexPartitionList = indexGetPartitionList(Irel[ind], AccessShareLock);
-
-                // It is import to understand the nindexes indexes might be of different type,
-                // btree, hash ,gin, gist etc.
-                // here, we decide to seperate partitioned index with a list of partition,
-                // transfer partition into dummy relation, replace index relation(ivinfo.index)
-                // then call of index_vacuum_cleanup.
-                // another way is to seperate, in the underground implementation function,
-                // for example hash index or gin index implementation,
-                // and those are ususally system inbuilt functions.
-                // obviousll, the latter one will spend much more effort
-                // as it must deal with every index ethod.
-                foreach (cell, indexPartitionList) {
-                    indexPartition = (Partition)lfirst(cell);
-                    indexPartitionRel = partitionGetRelation(Irel[ind], indexPartition);
-
-                    // key step: replace with coressponding dummy relation for partition
-                    ivinfo.index = indexPartitionRel;
-
-                    // finnaly, do the real work
-                    if (!RelationIsColStore(onerel))
-                        stats = index_vacuum_cleanup(&ivinfo, NULL);
-                    if (stats != NULL)
-                        pfree_ext(stats);
-                    releaseDummyRelation(&indexPartitionRel);
-                }
-                releasePartitionList(Irel[ind], &indexPartitionList, AccessShareLock);
-            } else {
-                // do the real work
-                if (!RelationIsColStore(onerel))
-                    stats = index_vacuum_cleanup(&ivinfo, NULL);
-                if (stats != NULL)
-                    pfree_ext(stats);
-            }
-        }
+        cleanup_indexes(nindexes, Irel, onerel, elevel);
     }
 
     /* Done with indexes */
@@ -1682,22 +1858,13 @@ static void do_analyze_rel(Relation onerel, VacuumStmt* vacstmt, BlockNumber rel
     if (IsAutoVacuumWorkerProcess() && u_sess->attr.attr_storage.Log_autovacuum_min_duration >= 0) {
         if (u_sess->attr.attr_storage.Log_autovacuum_min_duration == 0 ||
             TimestampDifferenceExceeds(
-                starttime, GetCurrentTimestamp(), u_sess->attr.attr_storage.Log_autovacuum_min_duration)) {
-
-            dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-            if (dbname == NULL) {
-                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE),
-                            errmsg("database with OID %u does not exist",
-                                u_sess->proc_cxt.MyDatabaseId)));
-            }
-
+                starttime, GetCurrentTimestamp(), u_sess->attr.attr_storage.Log_autovacuum_min_duration))
             ereport(LOG,
-                    (errmsg("automatic analyze of table \"%s.%s.%s\" system usage: %s",
-                            dbname,
-                            get_namespace_name(RelationGetNamespace(onerel), true),
-                            RelationGetRelationName(onerel),
-                            pg_rusage_show(&ru0))));
-        }
+                (errmsg("automatic analyze of table \"%s.%s.%s\" system usage: %s",
+                    get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId),
+                    get_namespace_name(RelationGetNamespace(onerel)),
+                    RelationGetRelationName(onerel),
+                    pg_rusage_show(&ru0))));
     }
 
     do_analyze_finalize(caller_context, save_userid, save_sec_context, save_nestlevel, analyzemode);
@@ -1860,7 +2027,7 @@ static void compute_index_stats(Relation onerel, double totalrows, AnlIndexData*
 VacAttrStats* examine_attribute(Relation onerel, Bitmapset* bms_attnums, bool isLog)
 {
     /* only analyze multi-column when each single column is valid */
-    for (int attnum = -1; (attnum = bms_next_member(bms_attnums, attnum)) >= 0;) {
+    for (int attnum = -1; (attnum = bms_next_member(bms_attnums, attnum)) > 0;) {
         Form_pg_attribute attr = onerel->rd_att->attrs[attnum - 1];
         if (!es_is_valid_column_to_analyze(attr)) {
             return NULL;
@@ -1885,7 +2052,7 @@ VacAttrStats* examine_attribute(Relation onerel, Bitmapset* bms_attnums, bool is
 
     /* Set stats->attrs */
     int index = 0;
-    for (int attnum = -1; (attnum = bms_next_member(bms_attnums, attnum)) >= 0;) {
+    for (int attnum = -1; (attnum = bms_next_member(bms_attnums, attnum)) > 0;) {
         Form_pg_attribute attr = onerel->rd_att->attrs[attnum - 1];
 
         stats->attrs[index] = (Form_pg_attribute)palloc0(ATTRIBUTE_FIXED_PART_SIZE);
@@ -2003,7 +2170,7 @@ static VacAttrStats* examine_attribute(Relation onerel, int attnum, Node* index_
         ok = std_typanalyze(stats);
 
     if (!ok || stats->compute_stats == NULL || stats->minrows <= 0) {
-        heap_freetuple_ext(typtuple);
+        tableam_tops_free_tuple(typtuple);
         pfree_ext(stats->attrs[0]);
         pfree_ext(stats->attrs);
         pfree_ext(stats);
@@ -2082,7 +2249,7 @@ BlockNumber BlockSampler_Next(BlockSampler bs)
      */
     V = anl_random_fract();
     p = 1.0 - (double)k / (double)K;
-    while (p > V) {
+    while (V < p) {
         /* skip */
         bs->t++;
         K--; /* keep K == N - t */
@@ -2305,6 +2472,7 @@ static int64 acquire_sample_rows(
     AnlPrefetch anlprefetch;
     int64 ori_targrows = targrows;
     anlprefetch.blocklist = NULL;
+    bool isAnalyzing = true;
 
     AssertEreport(targrows > 0, MOD_OPT, "Target row number must be greater than 0 when sampling.");
 
@@ -2331,7 +2499,7 @@ static int64 acquire_sample_rows(
     }
 
     /* Need a cutoff xmin for HeapTupleSatisfiesVacuum */
-    OldestXmin = GetOldestXmin(onerel, true);
+    OldestXmin = GetOldestXmin(onerel);
 
 retry:
     /* Prepare for sampling block numbers */
@@ -2428,7 +2596,8 @@ retry:
             if (u_sess->attr.attr_storage.enable_debug_vacuum)
                 t_thrd.utils_cxt.pRelatedRel = onerel;
 
-            switch (HeapTupleSatisfiesVacuum(&targtuple, OldestXmin, targbuffer)) {
+
+            switch (HeapTupleSatisfiesVacuum(&targtuple, OldestXmin, targbuffer, isAnalyzing)) {
                 case HEAPTUPLE_LIVE:
                     sample_it = true;
                     liverows += 1;
@@ -2544,7 +2713,7 @@ retry:
                             k >= 0 && k < targrows, MOD_OPT, "Index number out of range when replacing tuples.");
 
                         if (!estimate_table_rownum) {
-                            heap_freetuple_ext(rows[k]);
+                            tableam_tops_free_tuple(rows[k]);
                             rows[k] = heapCopyTuple(&targtuple, onerel->rd_att, targpage);
                         }
                     }
@@ -2689,7 +2858,6 @@ Datum GetValue(CU* cuPtr, int rowIdx)
     return (Datum)cuPtr->GetValue<attlen, hasNull>(rowIdx);
 }
 
-FORCE_INLINE
 void InitGetValFunc(int attlen, GetValFunc* getValFuncPtr, int col)
 {
     switch (attlen) {
@@ -2963,6 +3131,9 @@ static int64 AcquireSampleCStoreRows(Relation onerel, int elevel, HeapTuple* row
 
         totalwidth = 4 * onerel->rd_att->natts;
         relpages = ceil(*totalrows * totalwidth / BLCKSZ);
+        if (relpages == 0) {
+            relpages = 1;
+        }
         sampleCUs = ceil((double)targrows / relpages * totalblocks);
         sampleCUs = (sampleCUs > totalblocks) ? totalblocks : sampleCUs;
 
@@ -3095,7 +3266,7 @@ static int64 AcquireSampleCStoreRows(Relation onerel, int elevel, HeapTuple* row
         old_context = MemoryContextSwitchTo(sample_context);                        \
         Datum dm = getValFuncPtr[colNum][funcIdx[colNum]](cuPtr[colNum], (offset)); \
         int16 valueTyplen = attrs[(col_num)]->attlen;                               \
-        bool valueTypbyval = attrs[(col_num)]->attlen == 0 ? false : true;                  \
+        bool valueTypbyval = attrs[(col_num)]->attlen == 0 ? false : true;          \
         if (valueTyplen < 0)                                                        \
             (dest) = PointerGetDatum(PG_DETOAST_DATUM_COPY(dm));                    \
         else                                                                        \
@@ -3297,8 +3468,8 @@ static int64 AcquireSampleCStoreRows(Relation onerel, int elevel, HeapTuple* row
                     continue;
 
                 load_cu_data(0, num_attnums - 1, values, nulls, false);
-                heap_freetuple_ext(rows[location]);
-                rows[location] = heap_form_tuple(onerel->rd_att, values, nulls);
+                tableam_tops_free_tuple(rows[location]);
+                rows[location] = (HeapTuple)tableam_tops_form_tuple(onerel->rd_att, values, nulls, HEAP_TUPLE);
                 ItemPointerSet(&(rows[location])->t_self, targblock, targoffset + 1);
             }
 
@@ -3314,8 +3485,8 @@ static int64 AcquireSampleCStoreRows(Relation onerel, int elevel, HeapTuple* row
                 st_cell = (sample_tuple_cell*)lfirst(cell1);
                 location = lfirst_int(cell2);
                 targoffset = lfirst_int(cell3);
-                heap_freetuple_ext(rows[location]);
-                rows[location] = heap_form_tuple(onerel->rd_att, st_cell->values, st_cell->nulls);
+                tableam_tops_free_tuple(rows[location]);
+                rows[location] = (HeapTuple)tableam_tops_form_tuple(onerel->rd_att, st_cell->values, st_cell->nulls, HEAP_TUPLE);
                 ItemPointerSet(&(rows[location])->t_self, targblock, targoffset + 1);
             }
 
@@ -3470,7 +3641,7 @@ static int64 AcquireSampleDfsStoreRows(Relation onerel, int elevel, HeapTuple* r
     totalblocks = list_length(fileList);
 
     /* create tuple slot for scanning */
-    scanTupleSlot = MakeTupleTableSlot();
+    scanTupleSlot = MakeTupleTableSlot(true, tupdesc->tdTableAmType);
     scanTupleSlot->tts_tupleDescriptor = tupdesc;
     scanTupleSlot->tts_values = columnValues;
     scanTupleSlot->tts_isnull = columnNulls;
@@ -3553,7 +3724,7 @@ static int64 AcquireSampleDfsStoreRows(Relation onerel, int elevel, HeapTuple* r
              * reach the end of the relation.
              */
             if (numrows < targrows) {
-                rows[numrows++] = heap_form_tuple(tupdesc, columnValues, columnNulls);
+                rows[numrows++] = (HeapTuple)tableam_tops_form_tuple(tupdesc, columnValues, columnNulls,  HEAP_TUPLE);
             } else {
                 /*
                  * If we need to compute a new S value, we must use the "not yet
@@ -3572,8 +3743,8 @@ static int64 AcquireSampleDfsStoreRows(Relation onerel, int elevel, HeapTuple* r
                     AssertEreport(
                         rowIndex >= 0 && rowIndex < targrows, MOD_OPT, "index out of range when replacing tuple.");
 
-                    heap_freetuple_ext(rows[rowIndex]);
-                    rows[rowIndex] = heap_form_tuple(tupdesc, columnValues, columnNulls);
+                    tableam_tops_free_tuple(rows[rowIndex]);
+                    rows[rowIndex] = (HeapTuple)tableam_tops_form_tuple(tupdesc, columnValues, columnNulls, HEAP_TUPLE);
                 }
                 rowstoskip -= 1;
             }
@@ -3629,6 +3800,11 @@ double anl_random_fract(void)
  */
 double anl_init_selection_state(int n)
 {
+    if (unlikely(n == 0)) {
+        ereport(ERROR, 
+            (errcode(ERRCODE_DIVISION_BY_ZERO), 
+                errmsg("records n should not be zero")));
+    }
     /* Initial value of W (for use when Algorithm Z is first applied) */
     return exp(-log(anl_random_fract()) / n);
 }
@@ -3828,7 +4004,7 @@ static int64 acquire_inherited_sample_rows(
                             HeapTuple newtup;
 
                             newtup = do_convert_tuple(rows[numrows + j], map);
-                            heap_freetuple_ext(rows[numrows + j]);
+                            tableam_tops_free_tuple(rows[numrows + j]);
                             rows[numrows + j] = newtup;
                         }
                         free_conversion_map(map);
@@ -3989,6 +4165,13 @@ static int64 acquirePartitionedSampleRows(Relation onerel, VacuumStmt* vacstmt, 
     Relation partRel = NULL;
     MemoryContext old_context = NULL;
     MemoryContext col_partition_analyze_context = NULL;
+
+#ifdef ENABLE_MULTIPLE_NODES
+    if (RelationIsTsStore(onerel)) {
+        *totalrows = get_total_row_count(onerel);
+        return numRows;
+    }
+#endif   /* ENABLE_MULTIPLE_NODES */
 
     if (RELATION_OWN_BUCKET(onerel)) {
         /*
@@ -4217,7 +4400,7 @@ void update_attstats(Oid relid, char relkind, bool inh, int natts, VacAttrStats*
      * Create a resource owner to keep track of resources
      * in order to release resources when catch the exception.
      */
-    asOwner = ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "update_stats");
+    asOwner = ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "update_stats", MEMORY_CONTEXT_OPTIMIZER);
     oldOwner1 = t_thrd.utils_cxt.CurrentResourceOwner;
     t_thrd.utils_cxt.CurrentResourceOwner = asOwner;
 
@@ -4380,7 +4563,7 @@ static void update_stats_catalog(
                 values[i++] = PointerGetDatum(array); /* stavaluesN */
             } else {
                 ArrayType* array = NULL;
-                if (stats->stakind[k] == STATISTIC_KIND_MCV || stats->stakind[k] == STATISTIC_KIND_NULL_MCV) {
+                if (STATISTIC_KIND_MCV == stats->stakind[k] || STATISTIC_KIND_NULL_MCV == stats->stakind[k]) {
                     /* construct MCV/NULL-MCV for estended statistics */
                     array = es_construct_mcv_value_array(stats, k);
                     values[i++] = PointerGetDatum(array); /* stavaluesN */
@@ -4400,6 +4583,7 @@ static void update_stats_catalog(
     }
 
     int2vector* stakey = NULL;
+
     if (isSingleColumn == false) {
         Assert(stats->num_attrs > 1);
         /* compute stakey value */
@@ -4469,7 +4653,7 @@ static void update_stats_catalog(
         pfree_ext(stakey);
     }
 
-    heap_freetuple_ext(stup);
+    tableam_tops_free_tuple(stup);
 }
 
 /*
@@ -4504,7 +4688,7 @@ void delete_attstats(
      * Create a resource owner to keep track of resources
      * in order to release resources when catch the exception.
      */
-    asOwner = ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "delete_stats");
+    asOwner = ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "delete_stats", MEMORY_CONTEXT_OPTIMIZER);
     oldOwner1 = t_thrd.utils_cxt.CurrentResourceOwner;
     t_thrd.utils_cxt.CurrentResourceOwner = asOwner;
 
@@ -4652,7 +4836,7 @@ static Datum std_fetch_func(VacAttrStatsP stats, int rownum, bool* isNull, Relat
     HeapTuple tuple = stats->rows[rownum];
     TupleDesc tupDesc = rel->rd_att;
 
-    return heap_getattr(tuple, attnum, tupDesc, isNull);
+    return tableam_tops_tuple_getattr(tuple, attnum, tupDesc, isNull);
 }
 
 /*
@@ -5892,11 +6076,11 @@ static void do_sampling_complex_first(GBLSTAT_HDFS_SAMPLE_ROWS* pstHdfsSampleRow
         pstComplexRows->samplerows = sampleMainCnt + sampleDeltaCnt;
         pstComplexRows->rows = (HeapTuple*)palloc0(pstComplexRows->samplerows * sizeof(HeapTuple));
         for (tupleCounter = 0; tupleCounter < sampleMainCnt; tupleCounter++) {
-            pstComplexRows->rows[tupleCounter] = heap_copytuple(pstMainRows->rows[tupleCounter]);
+			pstComplexRows->rows[tupleCounter] = (HeapTuple) tableam_tops_copy_tuple(pstMainRows->rows[tupleCounter]);
         }
 
         for (; tupleCounter < pstComplexRows->samplerows; tupleCounter++) {
-            pstComplexRows->rows[tupleCounter] = heap_copytuple(pstDeltaRows->rows[tupleCounter - sampleMainCnt]);
+			pstComplexRows->rows[tupleCounter] = (HeapTuple) tableam_tops_copy_tuple(pstDeltaRows->rows[tupleCounter - sampleMainCnt]);
         }
     } else {
         /*
@@ -5937,11 +6121,11 @@ static void do_sampling_complex_first(GBLSTAT_HDFS_SAMPLE_ROWS* pstHdfsSampleRow
         }
 
         for (; keepCountor < keepMainCnt; keepCountor++) {
-            pstComplexRows->rows[keepCountor] = heap_copytuple(pstMainRows->rows[keepCountor]);
+			pstComplexRows->rows[keepCountor] = (HeapTuple) tableam_tops_copy_tuple(pstMainRows->rows[keepCountor]);
         }
 
         for (; keepCountor < pstComplexRows->samplerows; keepCountor++) {
-            pstComplexRows->rows[keepCountor] = heap_copytuple(pstDeltaRows->rows[keepCountor - keepMainCnt]);
+			pstComplexRows->rows[keepCountor] = (HeapTuple) tableam_tops_copy_tuple(pstDeltaRows->rows[keepCountor - keepMainCnt]);
         }
     }
 }
@@ -6092,7 +6276,7 @@ static void do_sampling_complex_by_secsample(Relation onerel, VacuumStmt* vacstm
          * send the second sample rows num to cn,
          * because cn will identify which rows belong dfs or delta from complex sample rows.
          */
-        tupdesc = CreateTemplateTupleDesc(2, false);
+        tupdesc = CreateTemplateTupleDesc(2, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "DfsSecSampleRows", FLOAT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "DeltaSecSampleRows", FLOAT8OID, -1, 0);
         tstate = begin_tup_output_tupdesc(vacstmt->dest, tupdesc);
@@ -6100,7 +6284,7 @@ static void do_sampling_complex_by_secsample(Relation onerel, VacuumStmt* vacstm
         tstate->slot->tts_isnull[0] = false;
         tstate->slot->tts_values[1] = pstDeltaSampleRows->secsamplerows;
         tstate->slot->tts_isnull[1] = false;
-        tstate->slot->tts_tuple = heap_form_tuple(tupdesc, tstate->slot->tts_values, tstate->slot->tts_isnull);
+		tstate->slot->tts_tuple = (HeapTuple)tableam_tops_form_tuple(tupdesc, tstate->slot->tts_values, tstate->slot->tts_isnull, HEAP_TUPLE);
         (vacstmt->dest->receiveSlot)(tstate->slot, vacstmt->dest);
 
         /* Send sample rows to CN is end after delta table sampling the third times. */
@@ -6237,6 +6421,48 @@ static bool equalTupleDescAttrsTypeid(TupleDesc tupdesc1, TupleDesc tupdesc2)
     return true;
 }
 
+static BlockNumber GetOneRelNBlocks(
+    const Relation onerel, const Relation Irel, const VacuumStmt* vacstmt, double totalindexrows)
+{
+    BlockNumber nblocks = 0;
+    if (RelationIsColStore(onerel)) {
+        nblocks = estimate_psort_index_blocks(Irel->rd_att, totalindexrows);
+    } else if (RelationIsPartitioned(onerel) && !RelationIsGlobalIndex(Irel)) {
+        ListCell* partCell = NULL;
+        Partition part = NULL;
+        Oid indexOid = InvalidOid;
+        Oid partOid = InvalidOid;
+        Oid partIndexOid = InvalidOid;
+        Partition indexPart = NULL;
+
+        indexOid = RelationGetRelid(Irel);
+
+        foreach (partCell, vacstmt->partList) {
+            part = (Partition)lfirst(partCell);
+            partOid = PartitionGetPartid(part);
+            partIndexOid = getPartitionIndexOid(indexOid, partOid);
+            indexPart = partitionOpen(Irel, partIndexOid, AccessShareLock);
+            nblocks += PartitionGetNumberOfBlocks(Irel, indexPart);
+            partitionClose(Irel, indexPart, AccessShareLock);
+        }
+    } else {
+        nblocks = RelationGetNumberOfBlocks(Irel);
+    }
+
+    return nblocks;
+}
+
+static BlockNumber estimate_index_blocks(Relation rel, double totalTuples, double table_factor)
+{
+    BlockNumber nblocks = 0;
+    if (RelationIsColStore(rel)) {
+        nblocks = estimate_psort_index_blocks(rel->rd_att, totalTuples);
+    } else {
+        nblocks = estimate_btree_index_blocks(rel->rd_att, totalTuples, table_factor);
+    }
+    return nblocks;
+}
+
 /*
  * update_pages_and_tuples_pgclass: Update pages and tuples of the relation for analyze to pg_class.
  *
@@ -6287,6 +6513,11 @@ static void update_pages_and_tuples_pgclass(Relation onerel, VacuumStmt* vacstmt
                 updrelpages = estimate_cstore_blocks(onerel, vacattrstats, attr_cnt, numrows, allrows, false);
             }
         }
+#ifdef ENABLE_MULTIPLE_NODES
+        else if (RelationIsTsStore(onerel)) {
+            updrelpages = estimate_tsstore_blocks(onerel, attr_cnt, totalrows);
+        }
+#endif   /* ENABLE_MULTIPLE_NODES */
 
         if (RelationIsPartitioned(onerel)) {
             Relation partRel = NULL;
@@ -6308,6 +6539,18 @@ static void update_pages_and_tuples_pgclass(Relation onerel, VacuumStmt* vacstmt
         heap_close(classRel, RowExclusiveLock);
     }
 
+    /* Estimate table expansion factor */
+    double table_factor = 1.0;
+    /* Compute table_factor with GUC PARAM_PATH_OPTIMIZATION on */
+    if (ENABLE_SQL_BETA_FEATURE(PARAM_PATH_OPT) && onerel && onerel->rd_rel) {
+        BlockNumber pages = onerel->rd_rel->relpages;
+        /* Reuse index estimation here (it is better to get the factor base on same kind of estimation) */
+        double estimated_relpages = (double)estimate_index_blocks(onerel, totalrows, table_factor);
+        table_factor = (double)pages / estimated_relpages;
+        /* Use 1.0 if table factor is too small */
+        table_factor = table_factor > 1.0 ? table_factor : 1.0;
+    }
+
     /*
      * Same for indexes. Vacuum always scans all indexes, so if we're part of
      * VACUUM ANALYZE, don't overwrite the accurate count already inserted by
@@ -6326,7 +6569,7 @@ static void update_pages_and_tuples_pgclass(Relation onerel, VacuumStmt* vacstmt
              */
             if (IS_PGXC_COORDINATOR && ((unsigned int)vacstmt->options & VACOPT_ANALYZE) &&
                 (0 != vacstmt->pstGlobalStatEx[vacstmt->tableidx].totalRowCnts)) {
-                nblocks = estimate_psort_index_blocks(Irel[ind]->rd_att, totalindexrows);
+                nblocks = estimate_index_blocks(Irel[ind], totalindexrows, table_factor);
                 Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
                 vac_update_relstats(Irel[ind], classRel, nblocks, totalindexrows, 0, false, BootstrapTransactionId);
                 heap_close(classRel, RowExclusiveLock);
@@ -6337,29 +6580,7 @@ static void update_pages_and_tuples_pgclass(Relation onerel, VacuumStmt* vacstmt
             if ((unsigned int)vacstmt->options & VACOPT_VACUUM)
                 break;
 
-            if (RelationIsColStore(onerel)) {
-                nblocks = estimate_psort_index_blocks(Irel[ind]->rd_att, totalindexrows);
-            } else if (RelationIsPartitioned(onerel) && !RelationIsGlobalIndex(Irel[ind])) {
-                ListCell* partCell = NULL;
-                Partition part = NULL;
-                Oid indexOid = InvalidOid;
-                Oid partOid = InvalidOid;
-                Oid partIndexOid = InvalidOid;
-                Partition indexPart = NULL;
-
-                indexOid = RelationGetRelid(Irel[ind]);
-
-                foreach (partCell, vacstmt->partList) {
-                    part = (Partition)lfirst(partCell);
-                    partOid = PartitionGetPartid(part);
-                    partIndexOid = getPartitionIndexOid(indexOid, partOid);
-                    indexPart = partitionOpen(Irel[ind], partIndexOid, AccessShareLock);
-                    nblocks += PartitionGetNumberOfBlocks(Irel[ind], indexPart);
-                    partitionClose(Irel[ind], indexPart, AccessShareLock);
-                }
-            } else {
-                nblocks = RelationGetNumberOfBlocks(Irel[ind]);
-            }
+            nblocks = GetOneRelNBlocks(onerel, Irel[ind], vacstmt, totalindexrows);
 
             Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
             vac_update_relstats(Irel[ind], classRel, nblocks, totalindexrows, 0, false, InvalidTransactionId);
@@ -6769,7 +6990,7 @@ static void analyze_compute_ndistinct(
          * column; but be sure to discount for any nulls we found.
          */
         stats->stadistinct = -1.0 * (1 - stats->stanullfrac);
-    } else if (toowide_cnt == 0 && nmultiple == ndistinct) {
+    } else if (toowide_cnt == 0 && (nmultiple - ndistinct == 0)) {
         /*
          * Every value in the sample appeared more than once.  Assume the
          * column has just these values.
@@ -6970,7 +7191,7 @@ static void spi_callback_get_sample_rows(void* clientData)
 
     if (spec->tupDesc->natts == SPI_tuptable->tupdesc->natts) {
         for (uint32 i = 0; i < SPI_processed; i++) {
-            spec->samplerows[i] = heap_copytuple(SPI_tuptable->vals[i]);
+			spec->samplerows[i] = (HeapTuple)tableam_tops_copy_tuple(SPI_tuptable->vals[i]);
         }
     } else {
         /*
@@ -6990,13 +7211,11 @@ static void spi_callback_get_sample_rows(void* clientData)
                     dropped_num++;
                     continue;
                 }
-
-                values[j] = heap_getattr(SPI_tuptable->vals[i], j - dropped_num + 1, SPI_tuptable->tupdesc, &nulls[j]);
+				values[j] = tableam_tops_tuple_getattr(SPI_tuptable->vals[i], j - dropped_num + 1, SPI_tuptable->tupdesc, &nulls[j]);
             }
 
             AssertEreport(spec->tupDesc->natts == (SPI_tuptable->tupdesc->natts + dropped_num), MOD_OPT, "");
-
-            spec->samplerows[i] = heap_form_tuple(spec->tupDesc, values, nulls);
+			spec->samplerows[i] = (HeapTuple)tableam_tops_form_tuple(spec->tupDesc, values, nulls, HEAP_TUPLE);
         }
     }
 
@@ -7012,7 +7231,7 @@ static void get_sample_rows_utility(
     StringInfoData str;
     initStringInfo(&str);
 
-    sampleSchemaName = get_namespace_name(get_rel_namespace(onerel->rd_id), true);
+    sampleSchemaName = get_namespace_name(get_rel_namespace(onerel->rd_id));
     sampleTableName = get_rel_name(onerel->rd_id);
 
     /**
@@ -7148,7 +7367,7 @@ static void set_stats_dndistinct(VacAttrStats* stats, VacuumStmt* vacstmt, int t
 
     /* Get absolute global distinct value. */
     distinct = (stats->stadistinct < 0.0) ? (-stats->stadistinct * vacstmt->pstGlobalStatEx[tableidx].totalRowCnts)
-        : stats->stadistinct;
+                                          : stats->stadistinct;
 
     /*
      * Estimate dndistinct with poisson for
@@ -7162,7 +7381,13 @@ static void set_stats_dndistinct(VacAttrStats* stats, VacuumStmt* vacstmt, int t
                     distinct, vacstmt->pstGlobalStatEx[tableidx].totalRowCnts, num_datanodes, 1)),
                 distinct);
     }
-
+    if (vacstmt->pstGlobalStatEx[tableidx].attnum < stats->attrs[0]->attnum || stats->attrs[0]->attnum <= 0) {
+        ereport(ERROR,
+            (errmodule(MOD_OPT),
+                errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("The column info is changed, Do analyze again for the relation: %s.", 
+                    vacstmt->relation->relname)));
+    }
     if (vacstmt->pstGlobalStatEx[tableidx].dndistinct[stats->attrs[0]->attnum - 1]  == 0.0) {
         return;
     }
@@ -7187,8 +7412,8 @@ static void set_stats_dndistinct(VacAttrStats* stats, VacuumStmt* vacstmt, int t
      */
     stats->stadndistinct = Max(dndistinct, ceil(distinct / num_datanodes));
     dntotalrows = (dndistinct > ceil(distinct / num_datanodes))
-        ? vacstmt->pstGlobalStatEx[tableidx].dn1totalRowCnts
-        : ceil(vacstmt->pstGlobalStatEx[tableidx].totalRowCnts / num_datanodes);
+                      ? vacstmt->pstGlobalStatEx[tableidx].dn1totalRowCnts
+                      : ceil(vacstmt->pstGlobalStatEx[tableidx].totalRowCnts / num_datanodes);
 
     /* Convert to relative value. */
     if (stats->stadndistinct > 0.1 * dntotalrows) {
@@ -7226,7 +7451,7 @@ static char* temporarySampleTableName(Oid relationOid, AnalyzeSampleTableSpecInf
                 u_sess->debug_query_id,
                 GetCurrentTimestamp(),
                 spec->stats->attrs[i]->attnum);
-            securec_check_ss_c(ret, "\0", "\0");
+            securec_check_ss(ret, "\0", "\0");
         }
 
         /* For single column and multi-column respectively */
@@ -7234,7 +7459,8 @@ static char* temporarySampleTableName(Oid relationOid, AnalyzeSampleTableSpecInf
             ret = snprintf_s(tmpname,
                 NAMEDATALEN,
                 NAMEDATALEN - 1,
-                "pg_analyze_%u_%lu_%ld_s%d",
+                "%s_%u_%lu_%ld_s%d",
+                ANALYZE_TEMP_TABLE_PREFIX,
                 relationOid,
                 u_sess->debug_query_id,
                 GetCurrentTimestamp(),
@@ -7243,7 +7469,8 @@ static char* temporarySampleTableName(Oid relationOid, AnalyzeSampleTableSpecInf
             ret = snprintf_s(tmpname,
                 NAMEDATALEN,
                 NAMEDATALEN - 1,
-                "pg_analyze_%u_%lu_%ld_m%d_m%d",
+                "%s_%u_%lu_%ld_m%d_m%d",
+                ANALYZE_TEMP_TABLE_PREFIX,
                 relationOid,
                 u_sess->debug_query_id,
                 GetCurrentTimestamp(),
@@ -7255,12 +7482,13 @@ static char* temporarySampleTableName(Oid relationOid, AnalyzeSampleTableSpecInf
         ret = snprintf_s(tmpname,
             NAMEDATALEN,
             NAMEDATALEN - 1,
-            "pg_analyze_%u_%lu_%ld",
+            "%s_%u_%lu_%ld",
+            ANALYZE_TEMP_TABLE_PREFIX,
             relationOid,
             u_sess->debug_query_id,
             GetCurrentTimestamp());
     }
-    securec_check_ss_c(ret, "\0", "\0");
+    securec_check_ss(ret, "\0", "\0");
 
     return pstrdup(tmpname);
 }
@@ -7289,29 +7517,25 @@ char* buildTempSampleTable(Oid relid, Oid mian_relid, TempSmpleTblType type, Ana
     const char* schemaName = NULL;
     const char* tableName = NULL;
     char* sampleTableName = NULL;
-    const char* attname = NULL;
     Relation onerel = NULL;
     Relation mianrel = NULL;
 
-    DEBUG_START_TIMER;
+    DEBUG_MOD_START_TIMER(MOD_AUTOVAC);
     onerel = relation_open(relid, AccessShareLock);
     if (OidIsValid(mian_relid)) {
         AssertEreport(TempSmpleTblType_Table == type, MOD_OPT, "");
         mianrel = relation_open(mian_relid, AccessShareLock);
-        schemaName = get_namespace_name(get_rel_namespace(mian_relid), true);
+        schemaName = get_namespace_name(get_rel_namespace(mian_relid));
         tableName = get_rel_name(mian_relid);
     } else {
-        schemaName = get_namespace_name(get_rel_namespace(relid), true);
+        schemaName = get_namespace_name(get_rel_namespace(relid));
         tableName = get_rel_name(relid);
     }
     initStringInfo(&str);
 
     if (TempSmpleTblType_Attrbute == type) {
-#ifdef ENABLE_MULTIPLE_NODES
         int saved_query_dop = u_sess->opt_cxt.query_dop;
-#endif
 
-        attname = NameStr(spec->stats->attrs[0]->attname);
         /* Generate temporary sample table name. */
         sampleTableName = temporarySampleTableName(relid, spec);
 
@@ -7394,9 +7618,8 @@ char* buildTempSampleTable(Oid relid, Oid mian_relid, TempSmpleTblType type, Ana
 
             SetUserIdAndSecContext(onerel->rd_rel->relowner, 0);
         }
-#ifdef ENABLE_MULTIPLE_NODES
+
         appendStringInfo(&str, "set query_dop = %d", saved_query_dop);
-#endif
     } else {
         char* group_name = get_pgxc_groupname(get_pgxc_class_groupoid(relid));
         const char* redistribution_group_name = PgxcGroupGetInRedistributionGroup();
@@ -7405,8 +7628,10 @@ char* buildTempSampleTable(Oid relid, Oid mian_relid, TempSmpleTblType type, Ana
          * Unable to create temp table on old installation group while
          * in cluster-resizing under analyzing.
          */
-        if (group_name != NULL && redistribution_group_name != NULL && strcmp(group_name, redistribution_group_name) == 0) {
-            DEBUG_STOP_TIMER("Unable to create temp table on old installation group \"%s\" while in cluster-resizing "
+        if (redistribution_group_name != NULL && group_name != NULL &&
+            strcmp(group_name, redistribution_group_name) == 0) {
+            DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, 
+                             "Unable to create temp table on old installation group \"%s\" while in cluster-resizing "
                              "under analyzing for table \"%s\".",
                 group_name,
                 quote_identifier(tableName));
@@ -7446,7 +7671,7 @@ char* buildTempSampleTable(Oid relid, Oid mian_relid, TempSmpleTblType type, Ana
     spi_exec_with_callback(DestSPI, str.data, false, 0, false, (void (*)(void*))NULL, NULL);
     u_sess->analyze_cxt.is_under_analyze = false;
 
-    DEBUG_STOP_TIMER("Created sample table %s success. querystring: %s", sampleTableName, str.data);
+    DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "Created sample table %s success. querystring: %s", sampleTableName, str.data);
 
     pfree_ext(str.data);
     pfree_ext(tableName);
@@ -7497,8 +7722,7 @@ static ArrayBuildState* spi_get_result_array(int attrno, MemoryContext memory_co
     for (uint32 i = 0; i < SPI_processed; i++) {
         Datum dValue = 0;
         bool isnull = false;
-
-        dValue = heap_getattr(SPI_tuptable->vals[i], attrno + 1, SPI_tuptable->tupdesc, &isnull);
+		dValue = tableam_tops_tuple_getattr(SPI_tuptable->vals[i], attrno + 1, SPI_tuptable->tupdesc, &isnull);
 
         /**
          * Add this value to the result array.
@@ -7580,8 +7804,7 @@ static void spi_callback_get_singlerow(void* clientData)
         AssertEreport(SPI_processed == 1, MOD_OPT, "we expect only one tuple"); /* we expect only one tuple. */
         AssertEreport(SPI_tuptable->tupdesc->attrs[0]->atttypid == INT8OID, MOD_OPT, "");
 
-        datum_f = heap_getattr(SPI_tuptable->vals[0], 1, SPI_tuptable->tupdesc, &isnull);
-
+        datum_f = tableam_tops_tuple_getattr(SPI_tuptable->vals[0], 1, SPI_tuptable->tupdesc, &isnull);
         if (isnull) {
             *out = 0;
         } else {
@@ -7608,13 +7831,13 @@ static void analyze_compute_samplerows(const char* tableName, AnalyzeSampleTable
 
     elog(ES_LOGLEVEL, "[Query to compute samplerows] : %s", str.data);
 
-    DEBUG_START_TIMER;
+    DEBUG_MOD_START_TIMER(MOD_AUTOVAC);
     spi_exec_with_callback(DestSPI, str.data, false, 0, true, (void (*)(void*))spi_callback_get_singlerow, &samplerows);
     pfree_ext(str.data);
 
     spec->samplerows = samplerows;
 
-    DEBUG_STOP_TIMER("Compute samplerows = %ld for table %s success.", spec->samplerows, tableName);
+    DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "Compute samplerows = %ld for table %s success.", spec->samplerows, tableName);
 }
 
 /*
@@ -7630,7 +7853,7 @@ static void analyze_compute_nullcount(const char* tableName, AnalyzeSampleTableS
 {
     int64 null_count = 0;
 
-    DEBUG_START_TIMER;
+    DEBUG_MOD_START_TIMER(MOD_AUTOVAC);
     if (es_is_not_null(spec)) {
         spec->stats->stanullfrac = 0.0;
     } else {
@@ -7658,7 +7881,7 @@ static void analyze_compute_nullcount(const char* tableName, AnalyzeSampleTableS
     spec->null_cnt = null_count;
     spec->nonnull_cnt = spec->samplerows - spec->null_cnt;
 
-    DEBUG_STOP_TIMER("Compute nullfrac = %.6f for table %s success"
+    DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "Compute nullfrac = %.6f for table %s success"
                      "null_count = %ld, samplerows = %ld.",
         spec->stats->stanullfrac,
         tableName,
@@ -7677,7 +7900,7 @@ static void analyze_compute_nullcount(const char* tableName, AnalyzeSampleTableS
  */
 static void analyze_compute_avgwidth(const char* tableName, AnalyzeSampleTableSpecInfo* spec)
 {
-    DEBUG_START_TIMER;
+    DEBUG_MOD_START_TIMER(MOD_AUTOVAC);
     if (spec->is_varwidth) {
         if (spec->nonnull_cnt == 0 && spec->null_cnt > 0) {
             spec->stats->stawidth = 0;
@@ -7707,7 +7930,7 @@ static void analyze_compute_avgwidth(const char* tableName, AnalyzeSampleTableSp
         }
     }
 
-    DEBUG_STOP_TIMER("Compute avgwidth = %d for table %s success.", spec->stats->stawidth, tableName);
+    DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "Compute avgwidth = %d for table %s success.", spec->stats->stawidth, tableName);
 }
 
 /*
@@ -7725,7 +7948,7 @@ static void analyze_distinct(const char* tableName, AnalyzeSampleTableSpecInfo* 
     ArrayBuildState* spiResult[DEFAULT_COLUMN_NUM];
     AnalyzeResultMultiColAsArraySpecInfo result;
 
-    DEBUG_START_TIMER;
+    DEBUG_MOD_START_TIMER(MOD_AUTOVAC);
     initStringInfo(&str);
     appendStringInfo(&str,
         "select count(*) as ndistinct, "
@@ -7758,16 +7981,17 @@ static void analyze_distinct(const char* tableName, AnalyzeSampleTableSpecInfo* 
         }
     }
 
-    DEBUG_STOP_TIMER("Compute global_ndistinct = %.0f for table %s success, "
-                     "sample_ndistinct = %.0f, nmultiple = %ld, nonnull_cnt = %ld, "
-                     "samplerows = %ld, totalrows = %.0f.",
-        spec->stats->stadistinct,
-        tableName,
-        spec->ndistinct,
-        spec->nmultiple,
-        spec->nonnull_cnt,
-        spec->samplerows,
-        spec->totalrows);
+    DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, 
+                         "Compute global_ndistinct = %.0f for table %s success, "
+                         "sample_ndistinct = %.0f, nmultiple = %ld, nonnull_cnt = %ld, "
+                         "samplerows = %ld, totalrows = %.0f.",
+                         spec->stats->stadistinct,
+                         tableName,
+                         spec->ndistinct,
+                         spec->nmultiple,
+                         spec->nonnull_cnt,
+                         spec->samplerows,
+                         spec->totalrows);
 }
 
 /*
@@ -7813,7 +8037,7 @@ static void analyze_compute_mcv(
     StringInfoData str;
     AnalyzeResultMultiColAsArraySpecInfo result;
 
-    DEBUG_START_TIMER;
+    DEBUG_MOD_START_TIMER(MOD_AUTOVAC);
     /* Compute real mincount for all sample rows of 2%. */
     mincount = compute_mcv_mincount(spec->samplerows, spec->ndistinct, spec->mcv_list.stattarget);
     /* We should restrict the minimum of mincount as MIN_MCV_COUNT. */
@@ -7875,6 +8099,8 @@ static void analyze_compute_mcv(
                     format_type_be(result.spi_tupDesc->attrs[0]->atttypid))));
         FreeTupleDesc(result.spi_tupDesc);
 
+        DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "Compute MCV for table %s failed.", tableName);
+
         return;
     }
 
@@ -7935,7 +8161,9 @@ static void analyze_compute_mcv(
 
     pfree_ext(spiResult);
 
-    DEBUG_STOP_TIMER("Compute %d rows of MCV for table %s success.", spec->mcv_list.num_mcv, tableName);
+    DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, 
+                        "Compute %d rows of MCV for table %s success.",
+                        spec->mcv_list.num_mcv, tableName);
 }
 
 /*
@@ -7952,6 +8180,7 @@ static void compute_histgram_internal(AnalyzeResultMultiColAsArraySpecInfo* spec
 
 #define VALUE_COLUMN 1
 #define ROWCOUNT_COLUMN 2
+
     MemoryContext oldContext;
     int64 vcount;
     Datum histgramValue;
@@ -7963,7 +8192,7 @@ static void compute_histgram_internal(AnalyzeResultMultiColAsArraySpecInfo* spec
 
 #define GET_DETOAST_HISTGRAM_VALUE(val)                                              \
     do {                                                                             \
-        (val) = heap_getattr(SPI_tuptable->vals[i], VALUE_COLUMN, tupDesc, &isnull); \
+        (val) = tableam_tops_tuple_getattr(SPI_tuptable->vals[i], VALUE_COLUMN, tupDesc, &isnull); \
         if (!isnull && !valueTypbyval) {                                             \
             oldContext = MemoryContextSwitchTo(u_sess->analyze_cxt.analyze_context); \
             if (valueTyplen < 0)                                                     \
@@ -7977,7 +8206,7 @@ static void compute_histgram_internal(AnalyzeResultMultiColAsArraySpecInfo* spec
     get_typlenbyvalalign(tupDesc->attrs[VALUE_COLUMN - 1]->atttypid, &valueTyplen, &valueTypbyval, &valueTypalign);
 
     for (uint32 i = 0; i < SPI_processed; i++) {
-        vcount = heap_getattr(SPI_tuptable->vals[i], ROWCOUNT_COLUMN, tupDesc, &isnull);
+		vcount = tableam_tops_tuple_getattr(SPI_tuptable->vals[i], ROWCOUNT_COLUMN, tupDesc, &isnull);
         spec->hist_list.sum_count += vcount;
         spec->hist_list.cur_mcv_idx++;
 
@@ -8077,8 +8306,8 @@ static void analyze_compute_histgram(int* slot_idx, const char* tableName, Analy
  * varchar/char/bpchar and the max width more than 20.
  */
 #define CHAR_WIDTH_EXCEED_20(spec)                                                                           \
-    ((((spec)->stats->attrs[0]->atttypid) == VARCHAROID || ((spec)->stats->attrs[0]->atttypid == CHAROID) || \
-         ((spec)->stats->attrs[0]->atttypid == BPCHAROID)) &&                                                \
+    (((VARCHAROID == (spec)->stats->attrs[0]->atttypid) || (CHAROID == (spec)->stats->attrs[0]->atttypid) || \
+         (BPCHAROID == (spec)->stats->attrs[0]->atttypid)) &&                                                \
         (spec)->stats->stawidth >= ANAYLZE_MAX_STAWIDTH)
 
     int64 non_mcv_num = 0;
@@ -8088,7 +8317,7 @@ static void analyze_compute_histgram(int* slot_idx, const char* tableName, Analy
     AnalyzeResultMultiColAsArraySpecInfo result;
     bool is_attr_diff = false;
 
-    DEBUG_START_TIMER;
+    DEBUG_MOD_START_TIMER(MOD_AUTOVAC);
     non_mcv_rows = spec->nonnull_cnt - spec->mcv_list.rows_mcv;
     non_mcv_num = spec->ndistinct - spec->mcv_list.num_mcv;
 
@@ -8188,7 +8417,9 @@ static void analyze_compute_histgram(int* slot_idx, const char* tableName, Analy
         }
     }
 
-    DEBUG_STOP_TIMER("Compute %d rows of Histgram for table %s success.", result.hist_list.num_hist, tableName);
+    DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC,
+                         "Compute %d rows of Histgram for table %s success.",
+                         result.hist_list.num_hist, tableName);
 }
 
 /*
@@ -8209,7 +8440,6 @@ static void do_analyze_compute_attr_stats(bool inh, Relation onerel, VacuumStmt*
     double numTotalRows, int64 numSampleRows, AnalyzeMode analyzemode)
 {
     int slot_idx = 0;
-    bool computeWidth = true;
     bool computeDistinct = true;
     bool computeMCV = true;
     bool computeHist = true;
@@ -8233,7 +8463,6 @@ static void do_analyze_compute_attr_stats(bool inh, Relation onerel, VacuumStmt*
         /*
          * All values are null. no point computing other statistics.
          */
-        computeWidth = false;
         computeDistinct = false;
         computeMCV = false;
         computeHist = false;
@@ -8317,10 +8546,10 @@ static void do_analyze_compute_attr_stats(bool inh, Relation onerel, VacuumStmt*
     /* Restore UID and security context */
     SetUserIdAndSecContext(save_userid, save_sec_context);
 
-    elog(DEBUG1,
-        "ANALYZE computing statistics on attribute %s, total column number: %u.",
+    ereport(DEBUG1,(errmodule(MOD_AUTOVAC),
+        errmsg("ANALYZE computing statistics on attribute %s, total column number: %u.",
         NameStr(stats->attrs[0]->attname),
-        stats->num_attrs);
+        stats->num_attrs)));
 }
 
 /*
@@ -8388,7 +8617,7 @@ static void analyze_tmptbl_debug_dn(AnalyzeTempTblDebugStage type, AnalyzeMode a
             CatalogUpdateIndexes(*tmpRelation, convert_tuple);
 
             if (tupmap != NULL) {
-                heap_freetuple_ext(convert_tuple);
+                tableam_tops_free_tuple(convert_tuple);
             }
         }
     } else {

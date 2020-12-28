@@ -1,0 +1,511 @@
+set enable_global_stats = true;
+/*
+ * This file is used to test the function of ExecVecUnique()
+ */
+----
+--- Create Table and Insert Data
+----
+create schema vector_unique_engine;
+set current_schema = vector_unique_engine;
+create table vector_unique_engine.ROW_UNIQUE_TABLE_01
+(
+	col_int0	int4
+   ,col_int1	int
+   ,col_int2	int
+   ,col_bint	bigint
+   ,col_char	char(25)
+   ,col_vchar	varchar(35)
+   ,col_num		numeric(10,4)
+   ,col_decimal	decimal
+   ,col_float	float
+   ,col_date	date
+   ,col_time	time
+   ,col_timetz	timetz
+   ,col_interval	interval
+);
+create table vector_unique_engine.VECTOR_UNIQUE_TABLE_01
+(
+	col_int0	int4
+   ,col_int1	int
+   ,col_int2	int
+   ,col_bint	bigint
+   ,col_char	char(25)
+   ,col_vchar	varchar(35)
+   ,col_num		numeric(10,4)
+   ,col_decimal	decimal
+   ,col_float	float
+   ,col_date	date
+   ,col_time	time
+   ,col_timetz	timetz
+   ,col_interval	interval
+)with(orientation = orc) tablespace hdfs_ts distribute by hash(col_int1);
+create table vector_unique_engine.ROW_UNIQUE_TABLE_02
+(
+	col_int0	int4
+   ,col_int1	int
+   ,col_int2	int
+   ,col_bint	bigint
+   ,col_char	char(25)
+   ,col_vchar	varchar(35)
+   ,col_num		numeric(10,4)
+   ,col_decimal	decimal
+   ,col_float	float
+   ,col_date	date
+   ,col_time	time
+   ,col_timetz	timetz
+   ,col_interval	interval
+);
+create table vector_unique_engine.VECTOR_UNIQUE_TABLE_02
+(
+	col_int0	int4
+   ,col_int1	int
+   ,col_int2	int
+   ,col_bint	bigint
+   ,col_char	char(25)
+   ,col_vchar	varchar(35)
+   ,col_num		numeric(10,4)
+   ,col_decimal	decimal
+   ,col_float	float
+   ,col_date	date
+   ,col_time	time
+   ,col_timetz	timetz
+   ,col_interval	interval
+)with(orientation = orc) tablespace hdfs_ts distribute by hash(col_int1);
+insert into ROW_UNIQUE_TABLE_01 values(1, 10, 100, 10000, 'aa', 'aaaaaa', 0.01, 10.01, 1100.01, '2015-02-14', '16:00:38', '1996-2-6 01:00:30+8', '2 day 13:24:56');
+insert into ROW_UNIQUE_TABLE_01 values(11, 20, 100, 10000, 'aa', 'gggggg', 0.01, 10.01, 1100.01, '2015-03-14', '16:02:38', '1996-2-8 01:00:30+8', '2 day 13:56:56');
+insert into ROW_UNIQUE_TABLE_01 values(1, 30, 100, 30000, 'bb', 'aaaaaa', 0.01, 10.01, 100.01, '2015-04-15', '16:02:38', '1996-2-6 01:00:30+8', '2 day 13:24:56');
+insert into ROW_UNIQUE_TABLE_01 values(11, 40, 100, 10000, 'bb', 'aaaaaa', 0.04, 10.01, 100.01, '2015-05-16', '16:00:38', '1996-2-8 01:00:30+8', '2 day 13:24:56');
+insert into ROW_UNIQUE_TABLE_01 values(1, 50, 200, 10000, 'cc', 'aaaaaa', 0.01, 10.11, 100.01, '2015-02-18', '16:00:38', '1996-2-6 01:00:30+8', '2 day 13:56:56');
+insert into ROW_UNIQUE_TABLE_01 values(11, 10, 100, 30000, 'dd', 'hhhhhh', 0.01, 10.01, 100.01, '2015-08-09', '16:00:38', '1996-2-8 01:00:30+8', '2 day 13:24:56');
+insert into ROW_UNIQUE_TABLE_01 values(1, 20, 100, 10000, 'dd', 'aaaaaa', 0.01, 10.01, 100.01, '2015-10-06', '16:05:38', '1996-2-6 01:00:30+8', '8 day 13:24:56');
+insert into ROW_UNIQUE_TABLE_01 values(11, 30, 100, 10000, 'ee', 'ffffff', 0.08, 10.01, 1100.01, '2015-12-02', '16:05:38', '1996-2-6 01:00:30+8', '2 day 13:24:56');
+insert into ROW_UNIQUE_TABLE_01 values(1, 40, 200, 60000, 'ee', 'aaaaaa', 0.08, 10.01, 1100.01, '2015-06-16', '16:00:38', '1996-2-8 01:00:30+8', '10 day 13:24:56');
+insert into ROW_UNIQUE_TABLE_01 values(11, 50, 100, 10000, 'gg', 'ffffff', 0.01, 10.11, 100.01, '2015-05-20', '16:00:38', '1996-2-6 01:00:30+8', '2 day 13:24:56');
+insert into ROW_UNIQUE_TABLE_02 values(2, 10, 900, 10000, 'aa', 'bbbbbb', 0.01, 10.01, 100.01, '2015-02-14', '16:00:38', '1996-2-6 01:00:30+8', '2 day 13:24:56');
+insert into ROW_UNIQUE_TABLE_02 values(1, 20, 100, 20000, 'cc', 'aaaaaa', 0.01, 10.01, 100.01, '2015-02-14', '16:00:38', '1996-2-16 01:00:30+8', '2 day 13:24:56');
+insert into ROW_UNIQUE_TABLE_02 values(2, 10, 800, 10000, 'aa', 'cccccc', 0.01, 10.02, 100.22, '2015-02-14', '16:00:38', '1996-2-6 01:00:30+8', '8 day 13:24:56');
+insert into ROW_UNIQUE_TABLE_02 values(7, 40, 100, 10000, 'aa', 'cccccc', 0.01, 10.01, 100.22, '2015-02-14', '16:08:38', '1996-2-16 01:00:30+8', '2 day 13:24:56');
+insert into ROW_UNIQUE_TABLE_02 values(2, 10, 700, 20000, 'eee', 'aaaaaa', 0.01, 10.01, 100.22, '2015-02-14', '16:08:38', '1996-2-6 01:00:30+8', '2 day 13:24:56');
+insert into ROW_UNIQUE_TABLE_02 values(1, 60, 100, 10000, 'aa', 'zzzzzz', 0.01, 10.02, 100.01, '2015-02-14', '16:00:38', '1996-2-6 01:00:30+8', '8 day 13:24:56');
+insert into ROW_UNIQUE_TABLE_02 values(2, 10, 600, 10000, 'ddd', 'aaaaaa', 0.01, 10.01, 100.01, '2015-02-16', '16:00:38', '1996-2-16 01:00:30+8', '2 day 13:24:56');
+insert into ROW_UNIQUE_TABLE_02 values(1, 80, 100, 20000, 'aa', 'vvvvvvv', 0.01, 10.01, 100.01, '2015-02-16', '16:00:38', '1996-2-6 01:00:30+8', '2 day 13:24:56');
+insert into VECTOR_UNIQUE_TABLE_01 select * from ROW_UNIQUE_TABLE_01;
+insert into VECTOR_UNIQUE_TABLE_02 select * from ROW_UNIQUE_TABLE_02;
+analyze VECTOR_UNIQUE_TABLE_01;
+analyze VECTOR_UNIQUE_TABLE_02;
+----
+--- case 1: Basic Cases
+----
+explain (verbose on, costs off) select distinct col_num from VECTOR_UNIQUE_TABLE_01 order by 1;
+                                                                      QUERY PLAN                                                                      
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: vector_unique_engine.vector_unique_table_01.col_num
+   ->  Vector Streaming (type: GATHER)
+         Output: vector_unique_engine.vector_unique_table_01.col_num
+         Merge Sort Key: vector_unique_engine.vector_unique_table_01.col_num
+         Node/s: All datanodes
+         ->  Vector Sort
+               Output: vector_unique_engine.vector_unique_table_01.col_num
+               Sort Key: vector_unique_engine.vector_unique_table_01.col_num
+               ->  Vector Sonic Hash Aggregate
+                     Output: vector_unique_engine.vector_unique_table_01.col_num
+                     Group By Key: vector_unique_engine.vector_unique_table_01.col_num
+                     Skew Agg Optimized by Statistic
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           Output: vector_unique_engine.vector_unique_table_01.col_num
+                           Distribute Key: vector_unique_engine.vector_unique_table_01.col_num
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Vector Sonic Hash Aggregate
+                                 Output: vector_unique_engine.vector_unique_table_01.col_num
+                                 Group By Key: vector_unique_engine.vector_unique_table_01.col_num
+                                 ->  Vector Result
+                                       Output: vector_unique_engine.vector_unique_table_01.col_num
+                                       ->  Vector Append
+                                             ->  Dfs Scan on vector_unique_engine.vector_unique_table_01
+                                                   Output: vector_unique_engine.vector_unique_table_01.col_num
+                                                   Distribute Key: vector_unique_engine.vector_unique_table_01.col_int1
+                                             ->  Vector Adapter
+                                                   Output: cstore.vector_unique_table_01.col_num
+                                                   ->  Seq Scan on cstore.pg_delta_vector_unique_engine_vector_unique_table_01 vector_unique_table_01
+                                                         Output: cstore.vector_unique_table_01.col_num
+                                                         Distribute Key: cstore.vector_unique_table_01.col_int1
+(32 rows)
+
+select distinct col_num from VECTOR_UNIQUE_TABLE_01 order by 1;
+ col_num 
+---------
+   .0100
+   .0400
+   .0800
+(3 rows)
+
+select distinct col_date from VECTOR_UNIQUE_TABLE_01 order by 1;
+         col_date         
+--------------------------
+ Sat Feb 14 00:00:00 2015
+ Wed Feb 18 00:00:00 2015
+ Sat Mar 14 00:00:00 2015
+ Wed Apr 15 00:00:00 2015
+ Sat May 16 00:00:00 2015
+ Wed May 20 00:00:00 2015
+ Tue Jun 16 00:00:00 2015
+ Sun Aug 09 00:00:00 2015
+ Tue Oct 06 00:00:00 2015
+ Wed Dec 02 00:00:00 2015
+(10 rows)
+
+select distinct col_time from VECTOR_UNIQUE_TABLE_01 order by 1;
+ col_time 
+----------
+ 16:00:38
+ 16:02:38
+ 16:05:38
+(3 rows)
+
+select distinct col_vchar from VECTOR_UNIQUE_TABLE_01 order by 1;
+ col_vchar 
+-----------
+ aaaaaa
+ ffffff
+ gggggg
+ hhhhhh
+(4 rows)
+
+select distinct col_timetz from VECTOR_UNIQUE_TABLE_01 order by 1;
+ col_timetz  
+-------------
+ 01:00:30+08
+(1 row)
+
+select distinct col_interval from VECTOR_UNIQUE_TABLE_01 order by 1;
+            col_interval            
+------------------------------------
+ @ 2 days 13 hours 24 mins 56 secs
+ @ 2 days 13 hours 56 mins 56 secs
+ @ 8 days 13 hours 24 mins 56 secs
+ @ 10 days 13 hours 24 mins 56 secs
+(4 rows)
+
+select distinct col_float + col_decimal from VECTOR_UNIQUE_TABLE_01 order by 1;
+ ?column? 
+----------
+   110.02
+   110.12
+  1110.02
+(3 rows)
+
+select distinct A.col_int1 + B.col_int2 from VECTOR_UNIQUE_TABLE_01 A, VECTOR_UNIQUE_TABLE_02 B order by 1;
+ ?column? 
+----------
+      110
+      120
+      130
+      140
+      150
+      610
+      620
+      630
+      640
+      650
+      710
+      720
+      730
+      740
+      750
+      810
+      820
+      830
+      840
+      850
+      910
+      920
+      930
+      940
+      950
+(25 rows)
+
+select distinct A.col_int1 + B.col_int2 from VECTOR_UNIQUE_TABLE_01 A, ROW_UNIQUE_TABLE_02 B order by 1;
+ ?column? 
+----------
+      110
+      120
+      130
+      140
+      150
+      610
+      620
+      630
+      640
+      650
+      710
+      720
+      730
+      740
+      750
+      810
+      820
+      830
+      840
+      850
+      910
+      920
+      930
+      940
+      950
+(25 rows)
+
+select distinct A.col_int1 + B.col_int2 from VECTOR_UNIQUE_TABLE_01 A, VECTOR_UNIQUE_TABLE_02 B where A.col_char = B.col_char order by 1;
+ ?column? 
+----------
+      110
+      120
+      150
+      810
+      820
+      910
+      920
+(7 rows)
+
+----
+--- case 2: With NULL
+----
+delete from VECTOR_UNIQUE_TABLE_01;
+insert into ROW_UNIQUE_TABLE_01 values(1, 80, 100, 20000, 'aa', NULL, 0.01, 10.01, 100.01, '2015-02-16', NULL, '1996-2-6 01:00:30+8', '2 day 13:24:56');
+insert into ROW_UNIQUE_TABLE_01 values(1, 60, 100, 20000, NULL, 'vvvvvvv', 0.01, 10.01, 100.01, '2015-02-16', '16:00:38', '1996-2-6 01:00:30+8', '2 day 13:24:56');
+insert into ROW_UNIQUE_TABLE_01 values(1, 80, 100, 20000, 'aa', 'vvvvvvv', 0.01, 10.01, 100.01, NULL, '16:00:38', '1996-2-6 01:00:30+8', NULL);
+insert into ROW_UNIQUE_TABLE_01 values(1, 60, NULL, 20000, 'aa', 'vvvvvvv', NULL, 10.01, 100.01, NULL, '16:00:38', '1996-2-6 01:00:30+8', '2 day 13:24:56');
+insert into VECTOR_UNIQUE_TABLE_01 select * from ROW_UNIQUE_TABLE_01;
+select distinct col_time from VECTOR_UNIQUE_TABLE_01 order by 1;
+ col_time 
+----------
+ 16:00:38
+ 16:02:38
+ 16:05:38
+ 
+(4 rows)
+
+select distinct col_date from VECTOR_UNIQUE_TABLE_01 order by 1;
+         col_date         
+--------------------------
+ Sat Feb 14 00:00:00 2015
+ Mon Feb 16 00:00:00 2015
+ Wed Feb 18 00:00:00 2015
+ Sat Mar 14 00:00:00 2015
+ Wed Apr 15 00:00:00 2015
+ Sat May 16 00:00:00 2015
+ Wed May 20 00:00:00 2015
+ Tue Jun 16 00:00:00 2015
+ Sun Aug 09 00:00:00 2015
+ Tue Oct 06 00:00:00 2015
+ Wed Dec 02 00:00:00 2015
+ 
+(12 rows)
+
+select distinct col_float + col_num from VECTOR_UNIQUE_TABLE_01 order by 1;
+ ?column? 
+----------
+   100.02
+   100.05
+  1100.02
+  1100.09
+         
+(5 rows)
+
+select distinct A.col_int1 + B.col_int2 from VECTOR_UNIQUE_TABLE_01 A, VECTOR_UNIQUE_TABLE_02 B where A.col_char = B.col_char order by 1;
+ ?column? 
+----------
+      110
+      120
+      150
+      160
+      180
+      810
+      820
+      860
+      880
+      910
+      920
+      960
+      980
+(13 rows)
+
+----
+--- case 3: Count(distinct)
+----
+explain (costs off) select col_int0, count(distinct col_time) from VECTOR_UNIQUE_TABLE_01 group by col_int0;
+                                                                        QUERY PLAN                                                                        
+----------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: vector_unique_engine.vector_unique_table_01.col_int0
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: vector_unique_engine.vector_unique_table_01.col_int0, vector_unique_engine.vector_unique_table_01.col_time
+                     Skew Agg Optimized by Statistic
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           ->  Vector Sonic Hash Aggregate
+                                 Group By Key: vector_unique_engine.vector_unique_table_01.col_int0, vector_unique_engine.vector_unique_table_01.col_time
+                                 ->  Vector Append
+                                       ->  Dfs Scan on vector_unique_table_01
+                                       ->  Vector Adapter
+                                             ->  Seq Scan on pg_delta_vector_unique_engine_vector_unique_table_01 vector_unique_table_01
+(14 rows)
+
+select col_int0, count(distinct col_time) from VECTOR_UNIQUE_TABLE_01 group by col_int0 order by 1;
+ col_int0 | count 
+----------+-------
+        1 |     3
+       11 |     3
+(2 rows)
+
+explain (costs off) select col_int1, count(distinct col_time) from VECTOR_UNIQUE_TABLE_01 group by col_int1;
+                                                                  QUERY PLAN                                                                  
+----------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: vector_unique_engine.vector_unique_table_01.col_int1
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: vector_unique_engine.vector_unique_table_01.col_int1, vector_unique_engine.vector_unique_table_01.col_time
+                     ->  Vector Append
+                           ->  Dfs Scan on vector_unique_table_01
+                           ->  Vector Adapter
+                                 ->  Seq Scan on pg_delta_vector_unique_engine_vector_unique_table_01 vector_unique_table_01
+(10 rows)
+
+select col_int1, count(distinct col_time) from VECTOR_UNIQUE_TABLE_01 group by col_int1 order by 1;
+ col_int1 | count 
+----------+-------
+       10 |     1
+       20 |     2
+       30 |     2
+       40 |     1
+       50 |     1
+       60 |     1
+       80 |     1
+(7 rows)
+
+explain (costs off) select count(distinct col_time) from VECTOR_UNIQUE_TABLE_01;
+                                                                  QUERY PLAN                                                                   
+-----------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Aggregate
+         ->  Vector Streaming (type: GATHER)
+               ->  Vector Aggregate
+                     ->  Vector Sonic Hash Aggregate
+                           Group By Key: vector_unique_engine.vector_unique_table_01.col_time
+                           Skew Agg Optimized by Statistic
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 ->  Vector Sonic Hash Aggregate
+                                       Group By Key: vector_unique_engine.vector_unique_table_01.col_time
+                                       ->  Vector Append
+                                             ->  Dfs Scan on vector_unique_table_01
+                                             ->  Vector Adapter
+                                                   ->  Seq Scan on pg_delta_vector_unique_engine_vector_unique_table_01 vector_unique_table_01
+(14 rows)
+
+select count(distinct col_time) from VECTOR_UNIQUE_TABLE_01;
+ count 
+-------
+     3
+(1 row)
+
+explain (costs off) select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01 group by col_int0);
+                                                                                          QUERY PLAN                                                                                          
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Unique
+         ->  Vector Sort
+               Sort Key: __unnamed_subquery__.x
+               ->  Vector Streaming (type: GATHER)
+                     ->  Vector Unique
+                           ->  Vector Sort
+                                 Sort Key: __unnamed_subquery__.x
+                                 ->  Vector Subquery Scan on __unnamed_subquery__
+                                       ->  Vector Sonic Hash Aggregate
+                                             Group By Key: vector_unique_engine.vector_unique_table_01.col_int0
+                                             Skew Agg Optimized by Statistic
+                                             ->  Vector Streaming(type: REDISTRIBUTE)
+                                                   ->  Vector Sonic Hash Aggregate
+                                                         Group By Key: vector_unique_engine.vector_unique_table_01.col_int0, vector_unique_engine.vector_unique_table_01.col_time
+                                                         Skew Agg Optimized by Statistic
+                                                         ->  Vector Streaming(type: REDISTRIBUTE)
+                                                               ->  Vector Sonic Hash Aggregate
+                                                                     Group By Key: vector_unique_engine.vector_unique_table_01.col_int0, vector_unique_engine.vector_unique_table_01.col_time
+                                                                     ->  Vector Append
+                                                                           ->  Dfs Scan on vector_unique_table_01
+                                                                           ->  Vector Adapter
+                                                                                 ->  Seq Scan on pg_delta_vector_unique_engine_vector_unique_table_01 vector_unique_table_01
+(23 rows)
+
+select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01 group by col_int0) order by 1;
+ x 
+---
+ 3
+(1 row)
+
+explain (costs off) select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01 group by col_int1);
+                                                                           QUERY PLAN                                                                           
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: __unnamed_subquery__.x
+               ->  Vector Streaming(type: REDISTRIBUTE)
+                     ->  Vector Subquery Scan on __unnamed_subquery__
+                           ->  Vector Sonic Hash Aggregate
+                                 Group By Key: vector_unique_engine.vector_unique_table_01.col_int1
+                                 ->  Vector Sonic Hash Aggregate
+                                       Group By Key: vector_unique_engine.vector_unique_table_01.col_int1, vector_unique_engine.vector_unique_table_01.col_time
+                                       ->  Vector Append
+                                             ->  Dfs Scan on vector_unique_table_01
+                                             ->  Vector Adapter
+                                                   ->  Seq Scan on pg_delta_vector_unique_engine_vector_unique_table_01 vector_unique_table_01
+(14 rows)
+
+select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01 group by col_int1) order by 1;
+ x 
+---
+ 1
+ 2
+(2 rows)
+
+explain (costs off) select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01);
+                                                                        QUERY PLAN                                                                         
+-----------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: count((count(vector_unique_engine.vector_unique_table_01.col_time)))
+               ->  Vector Aggregate
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Aggregate
+                                 ->  Vector Sonic Hash Aggregate
+                                       Group By Key: vector_unique_engine.vector_unique_table_01.col_time
+                                       Skew Agg Optimized by Statistic
+                                       ->  Vector Streaming(type: REDISTRIBUTE)
+                                             ->  Vector Sonic Hash Aggregate
+                                                   Group By Key: vector_unique_engine.vector_unique_table_01.col_time
+                                                   ->  Vector Append
+                                                         ->  Dfs Scan on vector_unique_table_01
+                                                         ->  Vector Adapter
+                                                               ->  Seq Scan on pg_delta_vector_unique_engine_vector_unique_table_01 vector_unique_table_01
+(17 rows)
+
+select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01);
+ x 
+---
+ 3
+(1 row)
+
+----
+--- Clean Table and Resource
+----
+drop schema vector_unique_engine cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table row_unique_table_01
+drop cascades to table vector_unique_table_01
+drop cascades to table row_unique_table_02
+drop cascades to table vector_unique_table_02

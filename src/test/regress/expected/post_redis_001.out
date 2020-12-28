@@ -1,0 +1,5 @@
+drop table redistable.redis_table_004_normal cascade;
+NOTICE:  drop cascades to view redistable.redis_view_004_normal
+drop table redis_table_003_normal cascade;
+NOTICE:  drop cascades to view redistable.redis_view_003_normal
+drop tablespace testtablespace;

@@ -97,6 +97,7 @@ typedef unsigned int pg_wchar;
 #define LC_KOI8_U 0x8b    /* Cyrillic KOI8-U */
 #define LC_ISO8859_5 0x8c /* ISO8859 Cyrillic */
 #define LC_ISO8859_9 0x8d /* ISO8859 Latin 5 (not supported yet) */
+/* FREE				0x8e	free (unused) */
 
 /*
  * Unused
@@ -221,6 +222,7 @@ typedef enum pg_enc {
     PG_WIN1257,       /* windows-1257 */
     PG_KOI8U,         /* KOI8-U */
     /* PG_ENCODING_BE_LAST points to the above entry */
+
     /* followings are for client encoding only */
     PG_SJIS,           /* Shift JIS (Winindows-932) */
     PG_BIG5,           /* Big5 (Windows-950) */
@@ -229,6 +231,7 @@ typedef enum pg_enc {
     PG_JOHAB,          /* EUC for Korean JOHAB */
     PG_SHIFT_JIS_2004, /* Shift-JIS-2004 */
     _PG_LAST_ENCODING_ /* mark only */
+
 } pg_enc;
 
 #define PG_ENCODING_BE_LAST PG_KOI8U
@@ -479,4 +482,3 @@ extern WCHAR* pgwin32_toUTF16(const char* str, int len, int* utf16len);
 #endif
 
 #endif /* PG_WCHAR_H */
-

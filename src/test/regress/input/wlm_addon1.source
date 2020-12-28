@@ -1,0 +1,40 @@
+CREATE DATABASE wadb;
+\c wadb
+set resource_track_duration=0;
+set query_band='wadb_test';
+--name: wlm_addon1
+--set up
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -c "set query_mem='500M';" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -c "create resource pool rp1;" > /dev/null 2>&1
+alter resource pool rp1 with (active_statements=-1);
+--Error Test
+alter resource pool rp1 with (mem_percent=-1);
+alter resource pool rp1 with (mem_percent=0);
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -c "create user user1 resource pool 'rp1' user group default password 'admin@123';" > /dev/null 2>&1
+--check info
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -c "select rolname, rolsystemadmin from pg_authid where rolname = 'user1';" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -c "select * from pg_resource_pool where respool_name = 'rp1';" > /dev/null 2>&1
+--runsql
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -U user_t -W 'admin@123' -c "select * from pg_sleep(10);" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -U user_t -W 'admin@123' -c "select * from pg_sleep(10);" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -U user_t -W 'admin@123' -c "select * from pg_sleep(10);" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -U user_t -W 'admin@123' -c "select * from pg_sleep(10);" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -U user_t -W 'admin@123' -c "select * from pg_sleep(10);" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -U user_t -W 'admin@123' -c "select * from pg_sleep(10);" > /dev/null 2>&1
+--check info
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -c "select count(*) from pg_session_wlmstat where query like '%pg_sleep(10)%' and status = 'pending';" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -c "SELECT pg_wlm_jump_queue(pid);" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -c "SELECT gs_wlm_switch_cgroup(threadid, 'class1:High');" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -c "select pg_terminate_backend(a.threadid) from pg_session_wlmstat a where query like '%pg_sleep(10)%' and query not like '%pg_terminate_backend%';" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -c "select count(*) from pg_session_wlmstat where query like '%pg_sleep(10)%';" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -c "create resource pool rp2;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -c "alter user user1 resource pool 'rp2';" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -c "alter user user1 PERM SPACE '1G';" > /dev/null 2>&1
+--clean up
+drop user user1;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -c "drop resource pool rp1;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wadb -c "drop resource pool rp2;" > /dev/null 2>&1
+\c postgres
+drop database wadb;
+\c regression
+--end of file

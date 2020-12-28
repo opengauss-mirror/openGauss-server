@@ -30,21 +30,21 @@ create   index  index_intervalPartTable_local1  on intervalPartTable_grant  (c1,
 ); 
 
 --  aliase of CREATE ROLE: create user for table level
-CREATE USER role_table_all PASSWORD 'ttest@123';
-CREATE USER role_table_insert PASSWORD 'ttest@123';
-CREATE USER role_table_delete PASSWORD 'ttest@123';
-CREATE USER role_table_update PASSWORD 'ttest@123';
-CREATE USER role_table_select PASSWORD 'ttest@123';
-CREATE USER role_table_truncate PASSWORD 'ttest@123';
-CREATE USER role_table_references PASSWORD 'ttest@123';
-CREATE USER role_table_trigger PASSWORD 'ttest@123';
+CREATE USER role_table_all PASSWORD 'gauss@123';
+CREATE USER role_table_insert PASSWORD 'gauss@123';
+CREATE USER role_table_delete PASSWORD 'gauss@123';
+CREATE USER role_table_update PASSWORD 'gauss@123';
+CREATE USER role_table_select PASSWORD 'gauss@123';
+CREATE USER role_table_truncate PASSWORD 'gauss@123';
+CREATE USER role_table_references PASSWORD 'gauss@123';
+CREATE USER role_table_trigger PASSWORD 'gauss@123';
 
 -- CREATE ROLE aliase : create user for column level
-CREATE USER role_column_all PASSWORD 'ttest@123';
-CREATE USER role_column_insert PASSWORD 'ttest@123';
-CREATE USER role_column_update PASSWORD 'ttest@123';
-CREATE USER role_column_select PASSWORD 'ttest@123';
-CREATE USER role_column_references PASSWORD 'ttest@123';
+CREATE USER role_column_all PASSWORD 'gauss@123';
+CREATE USER role_column_insert PASSWORD 'gauss@123';
+CREATE USER role_column_update PASSWORD 'gauss@123';
+CREATE USER role_column_select PASSWORD 'gauss@123';
+CREATE USER role_column_references PASSWORD 'gauss@123';
 
 -- range partitioned table: GRANT PRIVILEGES to role on table level
 GRANT ALL PRIVILEGES 
@@ -104,19 +104,19 @@ GRANT REFERENCES
 	ON TABLE rangePartTable_grant
 	TO role_column_references;
 
-SET ROLE role_table_select PASSWORD 'ttest@123';
+SET ROLE role_table_select PASSWORD 'gauss@123';
 insert into rangePartTable_grant values (8, 8.00, 8.156, 'd');
 RESET ROLE;
 
-SET ROLE role_table_insert PASSWORD 'ttest@123';
+SET ROLE role_table_insert PASSWORD 'gauss@123';
 insert into rangePartTable_grant values (8, 8.00, 8.156, 'd');
 RESET ROLE;
 
-SET ROLE role_table_select PASSWORD 'ttest@123';
+SET ROLE role_table_select PASSWORD 'gauss@123';
 insert into rangePartTable_grant values (8, 8.00, 8.156, 'd');
 RESET ROLE;
 
-SET ROLE role_table_select PASSWORD 'ttest@123';
+SET ROLE role_table_select PASSWORD 'gauss@123';
 select * from rangePartTable_grant;
 RESET ROLE;
 

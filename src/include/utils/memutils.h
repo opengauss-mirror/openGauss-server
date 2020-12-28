@@ -86,7 +86,6 @@ extern MemoryContext PmTopMemoryContext;
 extern MemoryContext StreamInfoContext;
 
 extern THR_LOCAL PGDLLIMPORT MemoryContext ErrorContext;
-extern THR_LOCAL PGDLLIMPORT MemoryContext CacheMemoryContext;
 
 /*
  * Memory-context-type-independent functions in mcxt.c
@@ -95,7 +94,7 @@ extern void MemoryContextInit(void);
 extern void MemoryContextReset(MemoryContext context);
 extern void MemoryContextDelete(MemoryContext context);
 extern void MemoryContextResetChildren(MemoryContext context);
-extern void MemoryContextDeleteChildren(MemoryContext context);
+extern void MemoryContextDeleteChildren(MemoryContext context, List* context_list = NULL);
 extern void MemoryContextDestroyAtThreadExit(MemoryContext context);
 extern void MemoryContextResetAndDeleteChildren(MemoryContext context);
 extern void MemoryContextSetParent(MemoryContext context, MemoryContext new_parent);
@@ -104,6 +103,9 @@ extern MemoryContext GetMemoryChunkContext(void* pointer);
 extern MemoryContext MemoryContextGetParent(MemoryContext context);
 extern bool MemoryContextIsEmpty(MemoryContext context);
 extern void MemoryContextStats(MemoryContext context);
+extern void MemoryContextSeal(MemoryContext context);
+extern void MemoryContextUnSeal(MemoryContext context);
+extern void MemoryContextUnSealChildren(MemoryContext context);
 
 #ifdef MEMORY_CONTEXT_CHECKING
 extern void MemoryContextCheck(MemoryContext context, bool own_by_session);
@@ -166,7 +168,11 @@ class AutoContextSwitch {
 public:
     AutoContextSwitch(MemoryContext memContext)
     {
-        m_oldMemContext = MemoryContextSwitchTo(memContext);
+        if (memContext == NULL) {
+            m_oldMemContext = CurrentMemoryContext;
+        } else {
+            m_oldMemContext = MemoryContextSwitchTo(memContext);
+        }
     };
 
     ~AutoContextSwitch()

@@ -166,7 +166,7 @@ static int vacuumlo(const char* database, const struct _param* param)
     strcat(buf, "      AND a.atttypid = t.oid ");
     strcat(buf, "      AND c.relnamespace = s.oid ");
     strcat(buf, "      AND t.typname in ('oid', 'lo') ");
-    strcat(buf, "      AND c.relkind = in ('r', 'm')");
+    strcat(buf, "      AND c.relkind = 'r'");
     strcat(buf, "      AND s.nspname !~ '^pg_'");
     res = PQexec(conn, buf);
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
@@ -405,10 +405,6 @@ int main(int argc, char** argv)
                 break;
             case 'U':
                 param.pg_user = strdup(optarg);
-                if (param.pg_user == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit(1);
-                }
                 break;
             case 'w':
                 param.pg_prompt = TRI_NO;
@@ -423,17 +419,9 @@ int main(int argc, char** argv)
                     exit(1);
                 }
                 param.pg_port = strdup(optarg);
-                if (param.pg_port == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit(1);
-                }
                 break;
             case 'h':
                 param.pg_host = strdup(optarg);
-                if (param.pg_host == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit(1);
-                }
                 break;
         }
     }

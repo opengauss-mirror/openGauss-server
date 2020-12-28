@@ -3,6 +3,7 @@
  * xlogrecord.h
  *        Definitions for the WAL record format.
  * 
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * 
@@ -16,7 +17,7 @@
 
 #include "access/rmgr.h"
 #include "access/xlogdefs.h"
-#include "storage/block.h"
+#include "storage/buf/block.h"
 #include "storage/relfilenode.h"
 #include "utils/pg_crc.h"
 #include "port/pg_crc32c.h"
@@ -52,10 +53,10 @@ typedef struct XLogRecordBlockHeader {
     uint8 id;           /* block reference ID */
     uint8 fork_flags;   /* fork within the relation, and flags */
     uint16 data_length; /* number of payload bytes (not including page
-                        * image) */
+                         * image) */
 
     /* If BKPBLOCK_HAS_IMAGE, an XLogRecordBlockImageHeader struct follows */
-    /* If BKPBLOCK_SAME_REL is not set, a RelFileNode follows */
+    /* If !BKPBLOCK_SAME_REL is not set, a RelFileNode follows */
     /* BlockNumber follows */
 } XLogRecordBlockHeader;
 
@@ -74,39 +75,24 @@ typedef struct XLogRecordBlockHeader {
  *
  * As a trivial form of data compression, the XLOG code is aware that
  * PG data pages usually contain an unused "hole" in the middle, which
- * contains only zero bytes.  If the length of "hole" > 0 then we have removed
+ * contains only zero bytes.  If hole_length > 0 then we have removed
  * such a "hole" from the stored data (and it's not counted in the
  * XLOG record's CRC, either).  Hence, the amount of block data actually
- * present is BLCKSZ - the length of "hole" bytes.
- *
- * When wal_compression is enabled, a full page image which "hole" was
- * removed is additionally compressed using LZ4 compression algorithm.
- * This can reduce the WAL volume, but at some extra cost of CPU spent
- * on the compression during WAL logging.
+ * present is BLCKSZ - hole_length bytes.
  */
 typedef struct XLogRecordBlockImageHeader {
-    union {
-        uint16 hole_offset; /* number of bytes before "hole" */
-        uint16 compression_flag; /* ONLY use the highest bit */
-    } hole_offset_info;
-    uint16 hole_length; /* number of page image bytes */
+    uint16 hole_offset; /* number of bytes before "hole" */
+    uint16 hole_length; /* number of bytes in "hole" */
 } XLogRecordBlockImageHeader;
 
 #define SizeOfXLogRecordBlockImageHeader sizeof(XLogRecordBlockImageHeader)
-
-/* Information stored in compression_flag */
-#define BKPIMAGE_IS_COMPRESSED 0x8000   /* page image is compressed */
-
-typedef uint16 XLogRecordBlockCompressHeader;
-#define SizeOfXLogRecordBlockCompressHeader sizeof(XLogRecordBlockCompressHeader)
 
 /*
  * Maximum size of the header for a block reference. This is used to size a
  * temporary buffer for constructing the header.
  */
 #define MaxSizeOfXLogRecordBlockHeader \
-    (SizeOfXLogRecordBlockHeader + SizeOfXLogRecordBlockImageHeader + SizeOfXLogRecordBlockCompressHeader + \
-     sizeof(RelFileNode) + sizeof(BlockNumber))
+    (SizeOfXLogRecordBlockHeader + SizeOfXLogRecordBlockImageHeader + sizeof(RelFileNode) + sizeof(BlockNumber))
 
 /*
  * XLogRecordDataHeaderShort/Long are used for the "main data" portion of

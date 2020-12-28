@@ -61,7 +61,6 @@ static int32* getValuesTypmods(RangeTblEntry* rte);
 #ifndef PGXC
 static int specialAttNum(const char* attname);
 #endif
-static bool isQueryUsingTempRelation_walker(Node* node, void* context);
 
 static Oid getPartitionOidForRTE(RangeTblEntry* rte, RangeVar* relation, ParseState* pstate, Relation rel);
 
@@ -192,15 +191,26 @@ static RangeTblEntry* scanNameSpaceForRefname(ParseState* pstate, const char* re
     ListCell* l = NULL;
 
     foreach (l, pstate->p_relnamespace) {
-        RangeTblEntry* rte = (RangeTblEntry*)lfirst(l);
+        ParseNamespaceItem *nsitem = (ParseNamespaceItem *) lfirst(l);
+        RangeTblEntry *rte = nsitem->p_rte;
+
+        /* If not inside LATERAL, ignore lateral-only items */
+        if (nsitem->p_lateral_only && !pstate->p_lateral_active)
+            continue;
 
         if (strcmp(rte->eref->aliasname, refname) == 0) {
-            if (result != NULL) {
+            if (result != NULL)
                 ereport(ERROR,
                     (errcode(ERRCODE_AMBIGUOUS_ALIAS),
                         errmsg("table reference \"%s\" is ambiguous", refname),
                         parser_errposition(pstate, location)));
-            }
+            /* SQL:2008 demands this be an error, not an invisible item */
+            if (nsitem->p_lateral_only && !nsitem->p_lateral_ok)
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
+                    errmsg("invalid reference to FROM-clause entry for table \"%s\"", refname),
+                    errdetail("The combining JOIN type must be INNER or LEFT for a LATERAL reference."),
+                    parser_errposition(pstate, location)));
             result = rte;
         }
     }
@@ -222,16 +232,27 @@ static RangeTblEntry* scanNameSpaceForRelid(ParseState* pstate, Oid relid, int l
     ListCell* l = NULL;
 
     foreach (l, pstate->p_relnamespace) {
-        RangeTblEntry* rte = (RangeTblEntry*)lfirst(l);
+        ParseNamespaceItem *nsitem = (ParseNamespaceItem *) lfirst(l);
+        RangeTblEntry *rte = nsitem->p_rte;
+
+        /* If not inside LATERAL, ignore lateral-only items */
+        if (nsitem->p_lateral_only && !pstate->p_lateral_active)
+            continue;
 
         /* yes, the test for alias == NULL should be there... */
         if (rte->rtekind == RTE_RELATION && rte->relid == relid && rte->alias == NULL) {
-            if (result != NULL) {
+            if (result != NULL)
                 ereport(ERROR,
                     (errcode(ERRCODE_AMBIGUOUS_ALIAS),
                         errmsg("table reference %u is ambiguous", relid),
                         parser_errposition(pstate, location)));
-            }
+            /* SQL:2008 demands this be an error, not an invisible item */
+            if (nsitem->p_lateral_only && !nsitem->p_lateral_ok)
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
+                        errmsg("invalid reference to FROM-clause entry for table \"%s\"", rte->eref->aliasname),
+                        errdetail("The combining JOIN type must be INNER or LEFT for a LATERAL reference."),
+                        parser_errposition(pstate, location)));
             result = rte;
         }
     }
@@ -285,7 +306,7 @@ static bool isFutureCTE(ParseState* pstate, const char* refname)
 }
 
 /*
- * searchRangeTable
+ * searchRangeTableForRel
  *	  See if any RangeTblEntry could possibly match the RangeVar.
  *	  If so, return a pointer to the RangeTblEntry; else return NULL.
  *
@@ -299,7 +320,7 @@ static bool isFutureCTE(ParseState* pstate, const char* refname)
  * Notice that we consider both matches on actual relation (or CTE) name
  * and matches on alias.
  */
-static RangeTblEntry* searchRangeTable(ParseState* pstate, RangeVar* relation)
+static RangeTblEntry* searchRangeTableForRel(ParseState* pstate, RangeVar* relation)
 {
     const char* refname = relation->relname;
     Oid relId = InvalidOid;
@@ -364,12 +385,14 @@ void checkNameSpaceConflicts(ParseState* pstate, List* namespace1, List* namespa
     ListCell* l1 = NULL;
 
     foreach (l1, namespace1) {
-        RangeTblEntry* rte1 = (RangeTblEntry*)lfirst(l1);
+        ParseNamespaceItem *nsitem1 = (ParseNamespaceItem *) lfirst(l1);
+        RangeTblEntry *rte1 = nsitem1->p_rte;
         const char* aliasname1 = rte1->eref->aliasname;
         ListCell* l2 = NULL;
 
         foreach (l2, namespace2) {
-            RangeTblEntry* rte2 = (RangeTblEntry*)lfirst(l2);
+            ParseNamespaceItem *nsitem2 = (ParseNamespaceItem *) lfirst(l2);
+            RangeTblEntry *rte2 = nsitem2->p_rte;
 
             if (strcmp(rte2->eref->aliasname, aliasname1) != 0) {
                 continue; /* definitely no conflict */
@@ -511,7 +534,18 @@ Node* scanRTEForColumn(ParseState* pstate, RangeTblEntry* rte, char* colname, in
                         errmsg("column reference \"%s\" is ambiguous", colname),
                         parser_errposition(pstate, location)));
             }
-            var = make_var(pstate, rte, attnum, location);
+            /*
+             * When user specifies a query on a hidden column. but it actually invisible to the user.
+             * So just ignore this column, this only happens on timeseries table.
+             */
+            if (strcmp(TS_PSEUDO_DIST_COLUMN, colname) == 0) {
+                var = ts_make_var(pstate, rte, attnum, location);
+                if (var == NULL) {
+                    continue;
+                }
+            } else {
+                var = make_var(pstate, rte, attnum, location);
+            }
             /* Require read access to the column */
             markVarForSelectPriv(pstate, var, rte);
             result = (Node*)var;
@@ -529,7 +563,7 @@ Node* scanRTEForColumn(ParseState* pstate, RangeTblEntry* rte, char* colname, in
     /*
      * If the RTE represents a real table, consider system column names.
      */
-    if (rte->rtekind == RTE_RELATION && rte->relkind != RELKIND_FOREIGN_TABLE) {
+    if (rte->rtekind == RTE_RELATION && rte->relkind != RELKIND_FOREIGN_TABLE && rte->relkind != RELKIND_STREAM) {
         /* quick check to see if name could be a system column */
         attnum = specialAttNum(colname);
         if (attnum != InvalidAttrNumber) {
@@ -541,7 +575,7 @@ Node* scanRTEForColumn(ParseState* pstate, RangeTblEntry* rte, char* colname, in
              * the relkind.  This kluge will not be needed in 9.3 and later.
              */
             if (SearchSysCacheExists2(ATTNUM, ObjectIdGetDatum(rte->relid), Int16GetDatum(attnum)) &&
-                get_rel_relkind(rte->relid) != RELKIND_VIEW) {
+                get_rel_relkind(rte->relid) != RELKIND_VIEW && get_rel_relkind(rte->relid) != RELKIND_CONTQUERY) {
                 var = make_var(pstate, rte, attnum, location);
                 /* Require read access to the column */
                 markVarForSelectPriv(pstate, var, rte);
@@ -554,84 +588,11 @@ Node* scanRTEForColumn(ParseState* pstate, RangeTblEntry* rte, char* colname, in
 }
 
 /*
- * Examine a fully-parsed query, and return TRUE iff any relation underlying
- * the query is a temporary relation (table, view, or materialized view).
- */
-bool isQueryUsingTempRelation(Query* query)
-{
-    return isQueryUsingTempRelation_walker((Node*)query, NULL);
-}
-
-static bool isQueryUsingTempRelation_walker(Node* node, void* context)
-{
-    if (node == NULL)
-        return false;
-
-    if (IsA(node, Query)) {
-        Query* query = (Query*)node;
-        ListCell* rtable;
-
-        foreach (rtable, query->rtable) {
-            RangeTblEntry* rte = (RangeTblEntry*)lfirst(rtable);
-
-            if (rte->rtekind == RTE_RELATION) {
-                Relation rel = heap_open(rte->relid, AccessShareLock);
-                char relpersistence = rel->rd_rel->relpersistence;
-
-                heap_close(rel, AccessShareLock);
-                if (relpersistence == RELPERSISTENCE_TEMP)
-                    return true;
-            }
-        }
-
-        return query_tree_walker(query, (bool (*)())isQueryUsingTempRelation_walker, context, QTW_IGNORE_JOINALIASES);
-    }
-
-    return expression_tree_walker(node, (bool (*)())isQueryUsingTempRelation_walker, context);
-}
-
-/* check if the query uses global temp table */
-static bool is_query_using_gtt_walker(Node* node, void* context)
-{
-    if (node == NULL)
-        return false;
-
-    if (IsA(node, Query)) {
-        Query* query = (Query*)node;
-        ListCell* rtable;
-
-        foreach(rtable, query->rtable) {
-            RangeTblEntry* rte = (RangeTblEntry*)lfirst(rtable);
-
-            if (rte->rtekind == RTE_RELATION) {
-                Relation rel = relation_open(rte->relid, AccessShareLock);
-                char relpersistence = rel->rd_rel->relpersistence;
-
-                relation_close(rel, AccessShareLock);
-                if (relpersistence == RELPERSISTENCE_GLOBAL_TEMP)
-                    return true;
-            }
-        }
-
-        return query_tree_walker(query, (bool (*)())is_query_using_gtt_walker, context, QTW_IGNORE_JOINALIASES);
-    }
-
-    return expression_tree_walker(node, (bool (*)())is_query_using_gtt_walker, context);
-}
-
-/* check if the query uses global temp table */
-bool is_query_using_gtt(Query* query)
-{
-    return is_query_using_gtt_walker((Node*) query, NULL);
-}
-
-
-/*
  * colNameToVar
- * 	  Search for an unqualified column name.
- * 	  If found, return the appropriate Var node (or expression).
- * 	  If not found, return NULL.  If the name proves ambiguous, raise error.
- * 	  If localonly is true, only names in the innermost query are considered.
+ *	  Search for an unqualified column name.
+ *	  If found, return the appropriate Var node (or expression).
+ *	  If not found, return NULL.  If the name proves ambiguous, raise error.
+ *	  If localonly is true, only names in the innermost query are considered.
  */
 Node* colNameToVar(ParseState* pstate, char* colname, bool localonly, int location, RangeTblEntry** final_rte)
 {
@@ -642,11 +603,17 @@ Node* colNameToVar(ParseState* pstate, char* colname, bool localonly, int locati
         ListCell* l = NULL;
 
         foreach (l, pstate->p_varnamespace) {
-            RangeTblEntry* rte = (RangeTblEntry*)lfirst(l);
+            ParseNamespaceItem *nsitem = (ParseNamespaceItem *) lfirst(l);
+            RangeTblEntry *rte = nsitem->p_rte;
             Node* newresult = NULL;
+
+            /* If not inside LATERAL, ignore lateral-only items */
+            if (nsitem->p_lateral_only && !pstate->p_lateral_active)
+                continue;
 
             /* use orig_pstate here to get the right sublevels_up */
             newresult = scanRTEForColumn(orig_pstate, rte, colname, location, true);
+
             if (newresult != NULL) {
                 if (final_rte != NULL) {
                     *final_rte = rte;
@@ -657,7 +624,14 @@ Node* colNameToVar(ParseState* pstate, char* colname, bool localonly, int locati
                         (errcode(ERRCODE_AMBIGUOUS_COLUMN),
                             errmsg("column reference \"%s\" is ambiguous", colname),
                             parser_errposition(orig_pstate, location)));
-                }
+				}
+                /* SQL:2008 demands this be an error, not an invisible item */
+                if (nsitem->p_lateral_only && !nsitem->p_lateral_ok)
+                    ereport(ERROR,
+                            (errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
+                            errmsg("invalid reference to FROM-clause entry for table \"%s\"", rte->eref->aliasname),
+                            errdetail("The combining JOIN type must be INNER or LEFT for a LATERAL reference."),
+                            parser_errposition(orig_pstate, location)));
                 result = newresult;
             }
         }
@@ -670,6 +644,38 @@ Node* colNameToVar(ParseState* pstate, char* colname, bool localonly, int locati
     }
 
     return result;
+}
+
+/*
+ * searchRangeTableForCol
+ *   See if any RangeTblEntry could possibly provide the given column name.
+ *   If so, return a pointer to the RangeTblEntry; else return NULL.
+ *
+ * This is different from colNameToVar in that it considers every entry in
+ * the ParseState's rangetable(s), not only those that are currently visible
+ * in the p_varnamespace lists.  This behavior is invalid per the SQL spec,
+ * and it may give ambiguous results (there might be multiple equally valid
+ * matches, but only one will be returned).  This must be used ONLY as a
+ * heuristic in giving suitable error messages.  See errorMissingColumn.
+ */
+static RangeTblEntry *
+searchRangeTableForCol(ParseState *pstate, char *colname, int location)
+{
+   ParseState *orig_pstate = pstate;
+
+   while (pstate != NULL)
+   {
+       ListCell   *l = NULL;
+
+       foreach(l, pstate->p_rtable)
+       {
+           RangeTblEntry *rte = (RangeTblEntry *)lfirst(l);
+           if (scanRTEForColumn(orig_pstate, rte, colname, location))
+               return rte;
+       }
+       pstate = pstate->parentParseState;
+   }
+   return NULL;
 }
 
 /*
@@ -939,26 +945,56 @@ static Oid getPartitionOidForRTE(RangeTblEntry* rte, RangeVar* relation, ParseSt
             rte->pname = makeAlias(relation->partitionname, NIL);
         } else {
             /* from clause is partition for (partition_key_values_list). */
-            RangePartitionDefState* rangePartDef = NULL;
+            if (rel->partMap->type == PART_TYPE_LIST) {
+                ListPartitionDefState* listPartDef = NULL;
+                listPartDef = makeNode(ListPartitionDefState);
+                listPartDef->boundary = relation->partitionKeyValuesList;
+                listPartDef->boundary = transformListPartitionValue(pstate, listPartDef->boundary, false, true);
+                listPartDef->boundary = transformIntoTargetType(
+                        rel->rd_att->attrs, (((ListPartitionMap*)rel->partMap)->partitionKey)->values[0], listPartDef->boundary);
 
-            rangePartDef = makeNode(RangePartitionDefState);
-            rangePartDef->boundary = relation->partitionKeyValuesList;
+                rte->plist = listPartDef->boundary;
 
-            transformRangePartitionValue(pstate, (Node*)rangePartDef, false);
+                partitionOid =
+                        partitionValuesGetPartitionOid(rel, listPartDef->boundary, AccessShareLock, true, true, false);
 
-            rangePartDef->boundary = transformConstIntoTargetType(
-                rel->rd_att->attrs, ((RangePartitionMap*)rel->partMap)->partitionKey, rangePartDef->boundary);
+                pfree_ext(listPartDef);
+            } else if (rel->partMap->type == PART_TYPE_HASH) {
+                HashPartitionDefState* hashPartDef = NULL;
+                hashPartDef = makeNode(HashPartitionDefState);
+                hashPartDef->boundary = relation->partitionKeyValuesList;
+                hashPartDef->boundary = transformListPartitionValue(pstate, hashPartDef->boundary, false, true);
+                hashPartDef->boundary = transformIntoTargetType(
+                        rel->rd_att->attrs, (((HashPartitionMap*)rel->partMap)->partitionKey)->values[0], hashPartDef->boundary);
 
-            rte->plist = rangePartDef->boundary;
+                rte->plist = hashPartDef->boundary;
 
-            partitionOid =
-                partitionValuesGetPartitionOid(rel, rangePartDef->boundary, AccessShareLock, true, true, false);
+                partitionOid =
+                        partitionValuesGetPartitionOid(rel, hashPartDef->boundary, AccessShareLock, true, true, false);
 
-            pfree_ext(rangePartDef);
+                pfree_ext(hashPartDef);
+            } else {
+                RangePartitionDefState* rangePartDef = NULL;
+                rangePartDef = makeNode(RangePartitionDefState);
+                rangePartDef->boundary = relation->partitionKeyValuesList;
+
+                transformRangePartitionValue(pstate, (Node*)rangePartDef, false);
+
+                rangePartDef->boundary = transformConstIntoTargetType(
+                        rel->rd_att->attrs, ((RangePartitionMap*)rel->partMap)->partitionKey, rangePartDef->boundary);
+
+                rte->plist = rangePartDef->boundary;
+
+                partitionOid =
+                        partitionValuesGetPartitionOid(rel, rangePartDef->boundary, AccessShareLock, true, true, false);
+
+                pfree_ext(rangePartDef);
+            }
 
             /* partition does not exist. */
             if (!OidIsValid(partitionOid)) {
-                if (rel->partMap->type == PART_TYPE_RANGE) {
+                if (rel->partMap->type == PART_TYPE_RANGE || 
+                    rel->partMap->type == PART_TYPE_LIST || rel->partMap->type == PART_TYPE_HASH) {
                     ereport(ERROR,
                         (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                             errmsg("The partition number is invalid or out-of-range")));
@@ -981,7 +1017,7 @@ static Oid getPartitionOidForRTE(RangeTblEntry* rte, RangeVar* relation, ParseSt
  * to include the RangeVar's parse location in any resulting error.
  *
  * Note: properly, lockmode should be declared LOCKMODE not int, but that
- * would require importing storage/lock.h into parse_relation.h.  Since
+ * would require importing storage/lock/lock.h into parse_relation.h.  Since
  * LOCKMODE is typedef'd as int anyway, that seems like overkill.
  */
 Relation parserOpenTable(ParseState* pstate, const RangeVar* relation, int lockmode, bool isFirstNode,
@@ -1140,7 +1176,7 @@ RangeTblEntry* addRangeTableEntry(ParseState* pstate, RangeVar* relation, Alias*
      */
     lockmode = isLockedRefname(pstate, refname) ? RowShareLock : AccessShareLock;
     rel = parserOpenTable(pstate, relation, lockmode, isFirstNode, isCreateView, isSupportSynonym);
-    if (IS_FOREIGNTABLE(rel)) {
+    if (IS_FOREIGNTABLE(rel) || IS_STREAM_TABLE(rel)) {
         /*
          * In the security mode, the useft privilege of a user must be
          * checked before the user select from a foreign table.
@@ -1199,6 +1235,7 @@ RangeTblEntry* addRangeTableEntry(ParseState* pstate, RangeVar* relation, Alias*
      * which is the right thing for all except target tables.
      */
     set_rte_flags(rte, inh, inFromCl, ACL_SELECT);
+    rte->lateral = false;
 
     setRteOrientation(rel, rte);
 
@@ -1269,6 +1306,7 @@ RangeTblEntry* addRangeTableEntryForRelation(ParseState* pstate, Relation rel, A
      * which is the right thing for all except target tables.
      */
     set_rte_flags(rte, inh, inFromCl, ACL_SELECT);
+    rte->lateral = false;
 
     setRteOrientation(rel, rte);
 
@@ -1297,11 +1335,10 @@ RangeTblEntry* addRangeTableEntryForRelation(ParseState* pstate, Relation rel, A
  * Note that an alias clause *must* be supplied.
  */
 RangeTblEntry* addRangeTableEntryForSubquery(
-    ParseState* pstate, Query* subquery, Alias* alias, bool inFromCl, bool sublinkPullUp)
+    ParseState* pstate, Query* subquery, Alias* alias, bool lateral, bool inFromCl, bool sublinkPullUp)
 {
     RangeTblEntry* rte = makeNode(RangeTblEntry);
     char* refname = NULL;
-    ;
     Alias* eref = NULL;
     int numaliases;
     int varattno;
@@ -1329,7 +1366,7 @@ RangeTblEntry* addRangeTableEntryForSubquery(
     rte->relid = InvalidOid;
     rte->subquery = subquery;
     rte->alias = query_alias;
-
+    rte->sublink_pull_up = sublinkPullUp;
     rte->orientation = REL_ORIENT_UNKNOWN;
     eref = (Alias*)copyObject(query_alias);
     numaliases = list_length(eref->colnames);
@@ -1364,6 +1401,7 @@ RangeTblEntry* addRangeTableEntryForSubquery(
      * Subqueries are never checked for access rights.
      */
     set_rte_flags(rte, false, inFromCl, 0);
+    rte->lateral = lateral;
 
     /*
      * Add completed RTE to pstate's range table list, but not to join list
@@ -1382,7 +1420,7 @@ RangeTblEntry* addRangeTableEntryForSubquery(
  * This is just like addRangeTableEntry() except that it makes a function RTE.
  */
 RangeTblEntry* addRangeTableEntryForFunction(
-    ParseState* pstate, char* funcname, Node* funcexpr, RangeFunction* rangefunc, bool inFromCl)
+    ParseState* pstate, char* funcname, Node* funcexpr, RangeFunction* rangefunc, bool lateral, bool inFromCl)
 {
     RangeTblEntry* rte = makeNode(RangeTblEntry);
     TypeFuncClass functypclass;
@@ -1477,6 +1515,7 @@ RangeTblEntry* addRangeTableEntryForFunction(
      * the RTE permissions mechanism).
      */
     set_rte_flags(rte, false, inFromCl, 0);
+    rte->lateral = lateral;
 
     /*
      * Add completed RTE to pstate's range table list, but not to join list
@@ -1539,6 +1578,7 @@ RangeTblEntry* addRangeTableEntryForValues(
      * Subqueries are never checked for access rights.
      */
     set_rte_flags(rte, false, inFromCl, 0);
+    rte->lateral = false;
 
     /*
      * Add completed RTE to pstate's range table list, but not to join list
@@ -1591,6 +1631,7 @@ RangeTblEntry* addRangeTableEntryForJoin(
 
     /* Joins are never checked for access rights. */
     set_rte_flags(rte, false, inFromCl, 0);
+    rte->lateral = false;
 
     /*
      * Add completed RTE to pstate's range table list, but not to join list
@@ -1685,6 +1726,7 @@ RangeTblEntry* addRangeTableEntryForCTE(
      * Subqueries are never checked for access rights.
      * ----------
      */
+    rte->lateral = false;
     rte->inh = false; /* never true for subqueries */
     rte->inFromCl = inFromCl;
 
@@ -1701,7 +1743,56 @@ RangeTblEntry* addRangeTableEntryForCTE(
      */
     if (pstate != NULL) {
         pstate->p_rtable = lappend(pstate->p_rtable, rte);
-    }
+	}
+
+    return rte;
+}
+
+/* return the rangeTableEntry according to the relation */
+RangeTblEntry* getRangeTableEntryByRelation(Relation rel)
+{
+    RangeTblEntry* rte = makeNode(RangeTblEntry);
+    char* refname = RelationGetRelationName(rel);
+
+    rte->rtekind = RTE_RELATION;
+    rte->alias = NULL;
+    rte->relid = RelationGetRelid(rel);
+    rte->relkind = rel->rd_rel->relkind;
+    rte->ispartrel = RELATION_IS_PARTITIONED(rel);
+    rte->relhasbucket = RELATION_HAS_BUCKET(rel);
+    rte->isexcluded = false;
+    /*
+     * In cases that target relation's rd_refSynOid is valid, it has been referenced from one synonym.
+     * thus, alias name is used to take its raw relname away in order to form the refname.
+     */
+    rte->refSynOid = rel->rd_refSynOid;
+
+#ifdef PGXC
+    rte->relname = pstrdup(RelationGetRelationName(rel));
+    rte->partAttrNum = get_rte_part_attr_num(rel);
+#endif
+
+    /*
+     * Build the list of effective column names using user-supplied aliases
+     * and/or actual column names.
+     */
+    rte->eref = makeAlias(refname, NIL);
+    buildRelationAliases(rel->rd_att, rte->alias, rte->eref);
+
+    /*
+     * The initial default on access checks is always check-for-READ-access,
+     * which is the right thing for all except target tables.
+     */
+    rte->inh = true; /* never true for joins */
+    rte->inFromCl = true;
+    rte->requiredPerms = ACL_SELECT;
+    rte->checkAsUser = InvalidOid;
+    rte->selectedCols = NULL;
+    rte->insertedCols = NULL;
+    rte->updatedCols = NULL;
+    rte->lateral = false;
+
+    setRteOrientation(rel, rte);
 
     return rte;
 }
@@ -1764,11 +1855,18 @@ void addRTEtoQuery(
         rtr->rtindex = rtindex;
         pstate->p_joinlist = lappend(pstate->p_joinlist, rtr);
     }
-    if (addToRelNameSpace) {
-        pstate->p_relnamespace = lappend(pstate->p_relnamespace, rte);
-    }
-    if (addToVarNameSpace) {
-        pstate->p_varnamespace = lappend(pstate->p_varnamespace, rte);
+    if (addToRelNameSpace || addToVarNameSpace)
+    {
+        ParseNamespaceItem *nsitem;
+    
+        nsitem = (ParseNamespaceItem *) palloc(sizeof(ParseNamespaceItem));
+        nsitem->p_rte = rte;
+        nsitem->p_lateral_only = false;
+        nsitem->p_lateral_ok = true;
+        if (addToRelNameSpace)
+            pstate->p_relnamespace = lappend(pstate->p_relnamespace, nsitem);
+        if (addToVarNameSpace)
+            pstate->p_varnamespace = lappend(pstate->p_varnamespace, nsitem);
     }
 }
 
@@ -2092,6 +2190,11 @@ static void expandTupleDesc(TupleDesc tupdesc, Alias* eref, int rtindex, int sub
             continue;
         }
 
+        /* Skip the hidden column for timeseries related relations */
+        if (TsRelWithImplDistColumn(tupdesc->attrs, varattno)) {
+            continue;
+        }
+
         if (colnames != NULL) {
             char* label = NULL;
 
@@ -2276,7 +2379,8 @@ char* get_rte_attribute_name(RangeTblEntry* rte, AttrNumber attnum)
  * get_rte_attribute_type
  *		Get attribute type/typmod/collation information from a RangeTblEntry
  */
-void get_rte_attribute_type(RangeTblEntry* rte, AttrNumber attnum, Oid* vartype, int32* vartypmod, Oid* varcollid)
+void get_rte_attribute_type(RangeTblEntry* rte, AttrNumber attnum, Oid* vartype,
+                            int32* vartypmod, Oid* varcollid, int* kvtype)
 {
     switch (rte->rtekind) {
         case RTE_RELATION: {
@@ -2307,6 +2411,9 @@ void get_rte_attribute_type(RangeTblEntry* rte, AttrNumber attnum, Oid* vartype,
             *vartype = att_tup->atttypid;
             *vartypmod = att_tup->atttypmod;
             *varcollid = att_tup->attcollation;
+            if (kvtype != NULL && att_tup->attkvtype == ATT_KV_HIDE) {
+                *kvtype = ATT_KV_HIDE;
+            }
             ReleaseSysCache(tp);
         } break;
         case RTE_SUBQUERY: {
@@ -2357,6 +2464,9 @@ void get_rte_attribute_type(RangeTblEntry* rte, AttrNumber attnum, Oid* vartype,
                 *vartype = att_tup->atttypid;
                 *vartypmod = att_tup->atttypmod;
                 *varcollid = att_tup->attcollation;
+                if (kvtype != NULL && att_tup->attkvtype == ATT_KV_HIDE) {
+                    *kvtype = ATT_KV_HIDE;
+                }
             } else if (functypclass == TYPEFUNC_SCALAR) {
                 /* Base data type, i.e. scalar */
                 *vartype = funcrettype;
@@ -2684,7 +2794,8 @@ void errorMissingRTE(ParseState* pstate, RangeVar* relation, bool hasplus)
      * rangetable.	(Note: cases involving a bad schema name in the RangeVar
      * will throw error immediately here.  That seems OK.)
      */
-    rte = searchRangeTable(pstate, relation);
+    rte = searchRangeTableForRel(pstate, relation);
+
     /*
      * If we found a match that has an alias and the alias is visible in the
      * namespace, then the problem is probably use of the relation's real name
@@ -2693,7 +2804,7 @@ void errorMissingRTE(ParseState* pstate, RangeVar* relation, bool hasplus)
      *
      * If we found a match that doesn't meet those criteria, assume the
      * problem is illegal use of a relation outside its scope, as in the
-     * b database is "SELECT ... FROM a, b LEFT JOIN c ON (a.x = c.y)".
+     * B database-ism "SELECT ... FROM a, b LEFT JOIN c ON (a.x = c.y)".
      */
     if (rte != NULL && rte->alias != NULL && strcmp(rte->eref->aliasname, relation->relname) != 0 &&
         refnameRangeTblEntry(pstate, NULL, rte->eref->aliasname, relation->location, &sublevels_up) == rte) {
@@ -2722,7 +2833,44 @@ void errorMissingRTE(ParseState* pstate, RangeVar* relation, bool hasplus)
             (errcode(ERRCODE_UNDEFINED_TABLE),
                 errmsg("missing FROM-clause entry for table \"%s\"", relation->relname),
                 parser_errposition(pstate, relation->location)));
-    }
+	}
+}
+
+/*
+ * Generate a suitable error about a missing column.
+ *
+ * Since this is a very common type of error, we work rather hard to
+ * produce a helpful message.
+ */
+void
+errorMissingColumn(ParseState *pstate,
+                  char *relname, char *colname, int location)
+{
+   RangeTblEntry *rte = NULL;
+
+   /*
+    * If relname was given, just play dumb and report it.  (In practice, a
+    * bad qualification name should end up at errorMissingRTE, not here, so
+    * no need to work hard on this case.)
+    */
+   if (relname)
+       ereport(ERROR,
+               (errcode(ERRCODE_UNDEFINED_COLUMN),
+                errmsg("column %s.%s does not exist", relname, colname),
+                parser_errposition(pstate, location)));
+
+   /*
+    * Otherwise, search the entire rtable looking for possible matches.  If
+    * we find one, emit a hint about it.
+    */
+   rte = searchRangeTableForCol(pstate, colname, location);
+
+   ereport(ERROR,
+           (errcode(ERRCODE_UNDEFINED_COLUMN),
+            errmsg("column \"%s\" does not exist", colname),
+            rte ? errhint("There is a column named \"%s\" in table \"%s\", but it cannot be referenced from this part of the query.",
+                          colname, rte->eref->aliasname) : 0,
+            parser_errposition(pstate, location)));
 }
 
 /*

@@ -19,7 +19,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = assert.o elog.o be_module.o plog.o
+OBJS = assert.o elog.o be_module.o plog.o fatal_err.o
 
 elog.o: $(top_builddir)/src/bin/gsqlerr/errmsg.h
 

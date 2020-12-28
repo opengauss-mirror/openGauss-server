@@ -153,7 +153,7 @@ CREATE TABLE hw_cstore_alter_t8(a int , b int , c int ) with (max_batchrow = 600
 CREATE TABLE hw_cstore_alter_t8(a int , b int , c int ) with (deltarow_threshold = 9999); -- failed
 CREATE TABLE hw_cstore_alter_t8(a int , b int , c int ) with (partial_cluster_rows = 600000); -- failed
 CREATE TABLE hw_cstore_alter_t8(a int , b int , c int ) with (internal_mask = 1024); -- failed
-CREATE TABLE hw_cstore_alter_t8(a int , b int , c int ) with (compression = 'yes', fillfactor=70); -- ok
+CREATE TABLE hw_cstore_alter_t8(a int , b int , c int ) with (compression = 'no', fillfactor=70); -- ok
 ALTER TABLE hw_cstore_alter_t8 SET (compression = 'yes'); -- ok
 ALTER TABLE hw_cstore_alter_t8 SET (compression = 'no'); -- ok
 ALTER TABLE hw_cstore_alter_t8 SET (compression = 'low'); -- failed

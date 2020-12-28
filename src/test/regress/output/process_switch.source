@@ -1,8 +1,8 @@
 --test create node group
-create user testdb_llt password 'ttest@123';
-set role testdb_llt password 'ttest@123';
+create user testdb_llt password 'gauss@123';
+set role testdb_llt password 'gauss@123';
 Create node group test_group with(datanode1);
-ERROR:  must be system admin to create cluster node groups
+ERROR:  must be system admin or createdb role to create cluster node groups
 reset role;
 Create node group group1  with(datanode1);
 ERROR:  PGXC Group group1: group already defined
@@ -21,9 +21,9 @@ drop node group group22;
 drop node group group2;
 CREATE NODE GROUP group1 WITH (datanode1,datanode2,datanode3,datanode4,datanode5,datanode6,datanode7,datanode8,datanode9,datanode10,datanode11,datanode12);
 ERROR:  PGXC Group group1: group already defined
-set role testdb_llt password 'ttest@123';
+set role testdb_llt password 'gauss@123';
 drop node group group1;
-ERROR:  must be system admin to remove cluster node groups
+ERROR:  must have sysadmin or createdb or drop privilege to remove cluster node groups
 reset role;
 drop node group group100;
 ERROR:  PGXC Group group100: group not defined

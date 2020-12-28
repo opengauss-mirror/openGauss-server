@@ -36,7 +36,7 @@
 #include "vecexecutor/vecnodes.h"
 #include "vecexecutor/vectorbatch.h"
 #include "vecexecutor/vecexecutor.h"
-#include "storage/itemptr.h"
+#include "storage/item/itemptr.h"
 
 /* Convert one column of the entire batch from vector store to row store.
  * typid in template is the OID of the column data type. */
@@ -175,6 +175,44 @@ TupleTableSlot* ExecVecToRow(VecToRowState* state) /* return: a tuple or NULL */
     return tuple;
 }
 
+void RecordCstorePartNum(VecToRowState* state, const VecToRow* node)
+{
+    // record partition num.If there is no partition table, it is set to 0
+    if (unlikely(IS_PGXC_DATANODE && NeedStubExecution(outerPlan(node)))) {
+        state->part_id = 0;
+    } else {
+        switch (nodeTag(outerPlan(node))) {
+            case T_CStoreScan:
+                state->part_id = ((CStoreScanState*)outerPlanState(state))->part_id;
+                break;
+            case T_DfsIndexScan:
+                if (((DfsIndexScanState*)outerPlanState(state))->m_indexScan) {
+                    state->part_id = ((DfsIndexScanState*)outerPlanState(state))->part_id;
+                }
+                break;
+            case T_CStoreIndexScan:
+                state->part_id = ((CStoreIndexScanState*)outerPlanState(state))->part_id;
+                break;
+            case T_CStoreIndexCtidScan:
+                state->part_id = ((CStoreIndexCtidScanState*)outerPlanState(state))->part_id;
+                break;
+            case T_CStoreIndexHeapScan:
+                state->part_id = ((CStoreIndexHeapScanState*)outerPlanState(state))->part_id;
+                break;
+
+#ifdef ENABLE_MULTIPLE_NODES
+            case T_TsStoreScan:
+                state->part_id = ((TsStoreScanState*)outerPlanState(state))->part_id;
+                break;
+#endif
+
+            default:
+                state->part_id = 0;
+                break;
+        }
+    }
+}
+
 VecToRowState* ExecInitVecToRow(VecToRow* node, EState* estate, int eflags)
 {
     VecToRowState* state = NULL;
@@ -200,9 +238,11 @@ VecToRowState* ExecInitVecToRow(VecToRow* node, EState* estate, int eflags)
      * We shield the child node from the need to support REWIND, BACKWARD, or
      * MARK/RESTORE.
      */
-    if (eflags & EXEC_FLAG_BACKWARD)
+    if ((uint32)eflags & EXEC_FLAG_BACKWARD)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("column store doesn't support backward scan")));
     outerPlanState(state) = ExecInitNode(outerPlan(node), estate, eflags);
+
+    RecordCstorePartNum(state, node);
 
     /*
      * Miscellaneous initialization
@@ -215,7 +255,9 @@ VecToRowState* ExecInitVecToRow(VecToRow* node, EState* estate, int eflags)
      * initialize tuple type.  no need to initialize projection info because
      * this node doesn't do projections.
      */
-    ExecAssignResultTypeFromTL(&state->ps);
+    ExecAssignResultTypeFromTL(
+            &state->ps,
+            ExecGetResultType(outerPlanState(state))->tdTableAmType);
 
     state->ps.ps_ProjInfo = NULL;
     state->m_currentRow = 0;

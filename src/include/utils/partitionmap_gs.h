@@ -33,14 +33,20 @@
 #include "access/htup.h"
 #include "catalog/pg_type.h"
 #include "nodes/primnodes.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "utils/hsearch.h"
 #include "utils/rel.h"
 #include "utils/relcache.h"
 #include "utils/partcache.h"
 #include "utils/partitionmap.h"
 
-typedef enum PartitionArea { PART_AREA_NONE = 0, PART_AREA_RANGE, PART_AREA_INTERVAL } PartitionArea;
+typedef enum PartitionArea {
+    PART_AREA_NONE = 0,
+    PART_AREA_RANGE,
+    PART_AREA_INTERVAL,
+    PART_AREA_LIST,
+    PART_AREA_HASH
+} PartitionArea;
 
 /*
  * Partition position in partitioned-table
@@ -73,9 +79,20 @@ typedef struct RangeElement {
 } RangeElement;
 
 typedef struct IntervalElement {
-    Oid partitionOid; /*the oid of partition*/
-    int sequenceNum;  /*the logic number of interval partition.*/
+    Oid partitionOid; /* the oid of partition */
+    int sequenceNum;  /* the logic number of interval partition. */
 } IntervalElement;
+
+typedef struct ListPartElement {
+    Oid partitionOid;                     /* the oid of partition */
+    int len;                              /* the length of values */
+    Const** boundary;                      /* list values */
+} ListPartElement;
+
+typedef struct HashPartElement {
+    Oid partitionOid;                     /* the oid of partition */
+    Const* boundary[1];                   /* hash bucket */
+} HashPartElement;
 
 // describe partition info of Value  Partitioned-Table
 typedef struct ValuePartitionMap {
@@ -91,13 +108,34 @@ typedef struct RangePartitionMap {
     int2vector* partitionKey;  /*partition key*/
     Oid* partitionKeyDataType; /*the data type of partition key*/
     /*section 1: range partition specific*/
-    int rangeElementsNum;          /*the number of range partition*/
-    RangeElement* rangeElements;   /*array of RangeElement*/
+    int rangeElementsNum;          /* the number of range partition*/
+    RangeElement* rangeElements;   /* array of RangeElement */
     Interval* intervalValue;       /* valid for interval partition */
     oidvector* intervalTablespace; /* valid for interval partition */
 } RangePartitionMap;
 
 bool ValueSatisfyLowBoudary(Const** partKeyValue, RangeElement* partition, Interval* intervalValue, bool topClosed);
+extern int2vector* GetPartitionKey(const PartitionMap* partMap);
+
+typedef struct ListPartitionMap {
+    PartitionMap type;
+    Oid relid;      /* Oid of partitioned table */
+    int2vector* partitionKey;  /* partition key */
+    Oid* partitionKeyDataType; /* the data type of partition key */
+    /* section 1: list partition specific */
+    int listElementsNum;          /* the number of list partition */
+    ListPartElement* listElements;   /* array of listElement */
+} ListPartitionMap;
+
+typedef struct HashPartitionMap {
+    PartitionMap type;
+    Oid relid;      /* Oid of partitioned table */
+    int2vector* partitionKey;  /* partition key */
+    Oid* partitionKeyDataType; /* the data type of partition key */
+    /* section 1: hash partition specific */
+    int hashElementsNum;          /* the number of hash partition */
+    HashPartElement* hashElements;   /* array of hashElement */
+} HashPartitionMap;
 
 #define PartitionkeyTypeGetIntervalType(type)                                          \
     do {                                                                               \
@@ -111,12 +149,12 @@ bool ValueSatisfyLowBoudary(Const** partKeyValue, RangeElement* partition, Inter
         TupleDesc tuple_desc = NULL;                                                                            \
         int2vector* partkey_column = NULL;                                                                      \
         int partkey_column_n = 0;                                                                               \
-        static THR_LOCAL Const consts[RANGE_PARTKEYMAXNUM];                                                     \
-        static THR_LOCAL Const* values[RANGE_PARTKEYMAXNUM];                                                    \
+        static THR_LOCAL Const consts[PARTITION_PARTKEYMAXNUM];                                                 \
+        static THR_LOCAL Const* values[PARTITION_PARTKEYMAXNUM];                                                \
         bool isnull = false;                                                                                    \
         Datum column_raw;                                                                                       \
         int i = 0;                                                                                              \
-        partkey_column = ((RangePartitionMap*)(rel)->partMap)->partitionKey;                                    \
+        partkey_column = GetPartitionKey((rel)->partMap);                                                       \
         partkey_column_n = partkey_column->dim1;                                                                \
         tuple_desc = (rel)->rd_att;                                                                             \
         for (i = 0; i < partkey_column_n; i++) {                                                                \
@@ -136,28 +174,46 @@ bool ValueSatisfyLowBoudary(Const** partKeyValue, RangeElement* partition, Inter
 
 #define partitionRoutingForValue(rel, keyValue, valueLen, topClosed, missIsOk, result)                                 \
     do {                                                                                                               \
-        if ((rel)->partMap->type == PART_TYPE_RANGE) {                                                                 \
-            (result)->partArea = PART_AREA_RANGE;                                                                      \
-        } else if (rel->partMap->type == PART_TYPE_INTERVAL) {                                                         \
-            Assert((valueLen) == 1);                                                                                   \
-            (result)->partArea = PART_AREA_INTERVAL;                                                                   \
+        if ((rel)->partMap->type == PART_TYPE_RANGE || (rel)->partMap->type == PART_TYPE_INTERVAL) {                   \
+            if ((rel)->partMap->type == PART_TYPE_RANGE) {                                                             \
+                (result)->partArea = PART_AREA_RANGE;                                                                  \
+            } else {                                                                                                   \
+                Assert((valueLen) == 1);                                                                               \
+                (result)->partArea = PART_AREA_INTERVAL;                                                               \
+            }                                                                                                          \
+            (result)->partitionId = getRangePartitionOid((rel)->partMap, (keyValue), &((result)->partSeq), topClosed);          \
+            if ((result)->partSeq < 0) {                                                                               \
+                (result)->fileExist = false;                                                                           \
+            } else {                                                                                                   \
+                (result)->fileExist = true;                                                                            \
+                RangePartitionMap* partMap = (RangePartitionMap*)((rel)->partMap);                                     \
+                if (partMap->rangeElements[(result)->partSeq].isInterval &&                                            \
+                    !ValueSatisfyLowBoudary(                                                                           \
+                        keyValue, &partMap->rangeElements[(result)->partSeq], partMap->intervalValue, topClosed)) {    \
+                    (result)->partSeq = -1;                                                                            \
+                    (result)->partitionId = InvalidOid;                                                                \
+                    (result)->fileExist = false;                                                                       \
+                }                                                                                                      \
+            }                                                                                                          \
+        } else if ((rel)->partMap->type == PART_TYPE_LIST) {                                                           \
+            (result)->partArea = PART_AREA_LIST;                                                                      \
+            (result)->partitionId = getListPartitionOid((rel), (keyValue), &((result)->partSeq), topClosed);          \
+            if ((result)->partSeq < 0) {                                                                               \
+                (result)->fileExist = false;                                                                           \
+            } else {                                                                                                   \
+                (result)->fileExist = true;                                                                            \
+            }                                                                                                          \
+        } else if ((rel)->partMap->type == PART_TYPE_HASH) {                                                           \
+            (result)->partArea = PART_AREA_HASH;                                                                      \
+            (result)->partitionId = getHashPartitionOid((rel), (keyValue), &((result)->partSeq), topClosed);          \
+            if ((result)->partSeq < 0) {                                                                               \
+                (result)->fileExist = false;                                                                           \
+            } else {                                                                                                   \
+                (result)->fileExist = true;                                                                            \
+            }                                                                                                          \
         } else {                                                                                                       \
             ereport(ERROR,                                                                                             \
                 (errcode(ERRCODE_INTERNAL_ERROR), errmsg("Unsupported partition strategy:%d", (rel)->partMap->type))); \
-        }                                                                                                              \
-        (result)->partitionId = getRangePartitionOid((rel), (keyValue), &((result)->partSeq), topClosed);              \
-        if ((result)->partSeq < 0) {                                                                                   \
-            (result)->fileExist = false;                                                                               \
-        } else {                                                                                                       \
-            (result)->fileExist = true;                                                                                \
-            RangePartitionMap* partMap = (RangePartitionMap*)((rel)->partMap);                                         \
-            if (partMap->rangeElements[(result)->partSeq].isInterval &&                                                \
-                !ValueSatisfyLowBoudary(                                                                               \
-                    keyValue, &partMap->rangeElements[(result)->partSeq], partMap->intervalValue, topClosed)) {        \
-                (result)->partSeq = -1;                                                                                \
-                (result)->partitionId = InvalidOid;                                                                    \
-                (result)->fileExist = false;                                                                           \
-            }                                                                                                          \
         }                                                                                                              \
     } while (0)
 
@@ -165,29 +221,53 @@ bool ValueSatisfyLowBoudary(Const** partKeyValue, RangeElement* partition, Inter
  * search >/>= keyValue partition if direction is true
  * search </<= keyValue partition if direction is false
  */
-#define partitionRoutingForValueRange(rel, keyValue, valueLen, topClosed, direction, result)                           \
+#define partitionRoutingForValueRange(cxt, keyValue, valueLen, topClosed, direction, result)                           \
     do {                                                                                                               \
-        if ((rel)->partMap->type == PART_TYPE_RANGE) {                                                                 \
+        if ((GetPartitionMap(cxt))->type == PART_TYPE_RANGE) {                                                                 \
             (result)->partArea = PART_AREA_RANGE;                                                                      \
-        } else if (rel->partMap->type == PART_TYPE_INTERVAL) {                                                         \
+        } else if ((GetPartitionMap(cxt))->type == PART_TYPE_INTERVAL) {                                                       \
             Assert((valueLen) == 1);                                                                                   \
             (result)->partArea = PART_AREA_INTERVAL;                                                                   \
         } else {                                                                                                       \
             ereport(ERROR,                                                                                             \
-                (errcode(ERRCODE_INTERNAL_ERROR), errmsg("Unsupported partition strategy:%d", (rel)->partMap->type))); \
+                (errcode(ERRCODE_INTERNAL_ERROR), errmsg("Unsupported partition strategy:%d", (GetPartitionMap(cxt))->type))); \
         }                                                                                                              \
-        (result)->partitionId = getRangePartitionOid((rel), (keyValue), &((result)->partSeq), topClosed);              \
+        (result)->partitionId = getRangePartitionOid((GetPartitionMap(cxt)), (keyValue), &((result)->partSeq), topClosed);              \
         if ((result)->partSeq < 0) {                                                                                   \
             (result)->fileExist = false;                                                                               \
         } else {                                                                                                       \
             (result)->fileExist = true;                                                                                \
-            RangePartitionMap* partMap = (RangePartitionMap*)((rel)->partMap);                                         \
+            RangePartitionMap* partMap = (RangePartitionMap*)(GetPartitionMap(cxt));                                           \
             if (partMap->rangeElements[(result)->partSeq].isInterval && !direction &&                                  \
                 !ValueSatisfyLowBoudary(                                                                               \
                     keyValue, &partMap->rangeElements[(result)->partSeq], partMap->intervalValue, topClosed)) {        \
                 --((result)->partSeq);                                                                                 \
                 (result)->partitionId = partMap->rangeElements[(result)->partSeq].partitionOid;                        \
             }                                                                                                          \
+        }                                                                                                              \
+    } while (0)
+
+#define partitionRoutingForValueEqual(rel, keyValue, valueLen, topClosed, result)                                      \
+    do {                                                                                                               \
+        if ((rel)->partMap->type == PART_TYPE_LIST) {                                                                 \
+            (result)->partArea = PART_AREA_LIST;                                                                      \
+            (result)->partitionId = getListPartitionOid((rel), (keyValue), &((result)->partSeq), topClosed);          \
+            if ((result)->partSeq < 0) {                                                                               \
+                (result)->fileExist = false;                                                                           \
+            } else {                                                                                                   \
+                (result)->fileExist = true;                                                                            \
+            }                                                                                                          \
+        } else if ((rel)->partMap->type == PART_TYPE_HASH) {                                                           \
+            (result)->partArea = PART_AREA_HASH;                                                                      \
+            (result)->partitionId = getHashPartitionOid((rel), (keyValue), &((result)->partSeq), topClosed);          \
+            if ((result)->partSeq < 0) {                                                                               \
+                (result)->fileExist = false;                                                                           \
+            } else {                                                                                                   \
+                (result)->fileExist = true;                                                                            \
+            }                                                                                                          \
+        } else {                                                                                                       \
+            ereport(ERROR,                                                                                             \
+                (errcode(ERRCODE_INTERNAL_ERROR), errmsg("Unsupported partition strategy:%d", (rel)->partMap->type))); \
         }                                                                                                              \
     } while (0)
 
@@ -345,12 +425,17 @@ typedef struct PruningResult {
                         /*if interval partitions is empty, intervalOffset=-1*/
     Bitmapset* intervalSelectedPartitions;
     List* ls_rangeSelectedPartitions;
+    Param* paramArg;
+    OpExpr* exprPart;
+    Expr* expr;
 } PruningResult;
 
 extern Oid partIDGetPartOid(Relation relation, PartitionIdentifier* partID);
 extern PartitionIdentifier* partOidGetPartID(Relation rel, Oid partOid);
 
 extern void RebuildPartitonMap(PartitionMap* oldMap, PartitionMap* newMap);
+extern void RebuildRangePartitionMap(RangePartitionMap* oldMap, RangePartitionMap* newMap);
+
 bool isPartKeyValuesInPartition(RangePartitionMap* partMap, Const** partKeyValues, int partkeyColumnNum, int partSeq);
 
 extern int comparePartitionKey(RangePartitionMap* partMap, Const** values1, Const** values2, int partKeyNum);
@@ -364,4 +449,8 @@ extern RangeElement* CopyRangeElementsWithoutBoundary(const RangeElement* src, i
 extern char* ReadIntervalStr(HeapTuple tuple, TupleDesc tupleDesc);
 extern oidvector* ReadIntervalTablespace(HeapTuple tuple, TupleDesc tupleDesc);
 int ValueCmpLowBoudary(Const** partKeyValue, const RangeElement* partition, Interval* intervalValue);
+extern void get_typlenbyval(Oid typid, int16 *typlen, bool *typbyval);
+extern RangeElement* copyRangeElements(RangeElement* src, int elementNum, int partkeyNum);
+extern int rangeElementCmp(const void* a, const void* b);
+extern void DestroyListElements(ListPartElement* src, int elementNum);
 #endif /* PARTITIONMAP_GS_H_ */

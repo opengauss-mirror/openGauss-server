@@ -33,7 +33,6 @@
 #include "access/transam.h"
 #include "threadpool/threadpool.h"
 
-#include <time.h>
 
 #ifdef ENABLE_DISTRIBUTE_TEST
 #define DISTRIBUTE_UPPER_BOUND 1000000
@@ -59,14 +58,17 @@ bool execute_whitebox(
     bool result = false;
     WhiteBoxInjectStruct wbInfo = {"", 0, "", 0, 0, 0, ""};
 
-    if (g_instance.distribute_test_param_instance->guc_probability == DISTRIBUTE_LOWER_BOUND) {
-        return false;
-    }
-    Assert(filename && funcname && (strlen(filename) < MAX_NAME_STR_LEN) && (strlen(funcname) < MAX_NAME_STR_LEN));
-
     if (g_instance.distribute_test_param_instance == NULL) {
         return false;
     }
+
+    if (g_instance.distribute_test_param_instance->guc_probability == DISTRIBUTE_LOWER_BOUND) {
+        return false;
+    }
+    Assert(filename);
+    Assert(funcname);
+    Assert(strlen(filename) < MAX_NAME_STR_LEN);
+    Assert(strlen(funcname) < MAX_NAME_STR_LEN);
 
     errorno = memset_s(default_gid, MAX_GID_STR_LEN, 0, MAX_GID_STR_LEN);
     securec_check(errorno, "", "");

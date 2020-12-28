@@ -100,7 +100,7 @@
 
 #define IS_PARTITIONED(hctl) ((hctl)->num_partitions != 0)
 
-#define FREELIST_IDX(hctl, hashcode) (IS_PARTITIONED(hctl) ? (hashcode) % NUM_FREELISTS : 0)
+#define FREELIST_IDX(hctl, hashcode) (IS_PARTITIONED(hctl) ? ((hashcode) % NUM_FREELISTS) : 0)
 
 /*
  * Key (also entry) part of a HASHELEMENT
@@ -165,6 +165,8 @@ static int string_compare(const char* key1, const char* key2, Size keysize)
     return strncmp(key1, key2, keysize - 1);
 }
 
+/************************** CREATE ROUTINES **********************/
+
 /*
  * hash_create -- create a new dynamic hash table
  *
@@ -196,7 +198,7 @@ HTAB* hash_create(const char* tabname, long nelem, HASHCTL* info, int flags)
      */
     if ((flags & HASH_SHARED_MEM) || (flags & HASH_HEAP_MEM)) {
         /* Set up to allocate the hash header */
-        t_thrd.dyhash_cxt.CurrentDynaHashCxt = t_thrd.top_mem_cxt;
+        t_thrd.dyhash_cxt.CurrentDynaHashCxt = THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR);
     } else if ((flags & HASH_CONTEXT) && (flags & HASH_EXTERN_CONTEXT)) {
         /*
          * HASH_CONTEXT shows info->hcxt provides extern memory context, and
@@ -215,7 +217,7 @@ HTAB* hash_create(const char* tabname, long nelem, HASHCTL* info, int flags)
         if ((flags & HASH_CONTEXT) || (flags & HASH_SHRCTX)) {
             t_thrd.dyhash_cxt.CurrentDynaHashCxt = info->hcxt;
         } else {
-            t_thrd.dyhash_cxt.CurrentDynaHashCxt = t_thrd.top_mem_cxt;
+            t_thrd.dyhash_cxt.CurrentDynaHashCxt = THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR);
         }
         if (flags & HASH_SHRCTX) {
             t_thrd.dyhash_cxt.CurrentDynaHashCxt = AllocSetContextCreate(t_thrd.dyhash_cxt.CurrentDynaHashCxt,
@@ -1434,11 +1436,11 @@ static int next_pow2_int(long num)
 /* Register a table as having an active hash_seq_search scan */
 static void register_seq_scan(HTAB* hashp)
 {
-    if (t_thrd.dyhash_cxt.num_seq_scans > MAX_SEQ_SCANS) {
+    if (t_thrd.dyhash_cxt.num_seq_scans >= MAX_SEQ_SCANS)
         ereport(ERROR,
             (errcode(ERRCODE_CHECK_VIOLATION),
                 errmsg("too many active hash_seq_search scans, cannot start one on \"%s\"", hashp->tabname)));
-    }
+
     t_thrd.dyhash_cxt.seq_scan_tables[t_thrd.dyhash_cxt.num_seq_scans] = hashp;
     t_thrd.dyhash_cxt.seq_scan_level[t_thrd.dyhash_cxt.num_seq_scans] = GetCurrentTransactionNestLevel();
     t_thrd.dyhash_cxt.num_seq_scans++;
@@ -1510,7 +1512,9 @@ void AtEOXact_HashTables(bool isCommit)
         int i;
 
         for (i = 0; i < t_thrd.dyhash_cxt.num_seq_scans; i++) {
-            elog(LOG, "leaked hash_seq_search scan for hash table %d", i);
+            HTAB* htab = t_thrd.dyhash_cxt.seq_scan_tables[i];
+            elog(WARNING, "leaked hash_seq_search scan for hash table %s", 
+                 ((htab == NULL) ? NULL : htab->tabname));
         }
     }
     t_thrd.dyhash_cxt.num_seq_scans = 0;
@@ -1528,8 +1532,11 @@ void AtEOSubXact_HashTables(bool isCommit, int nestDepth)
      */
     for (i = t_thrd.dyhash_cxt.num_seq_scans - 1; i >= 0; i--) {
         if (t_thrd.dyhash_cxt.seq_scan_level[i] >= nestDepth) {
-            if (isCommit)
-                elog(LOG, "leaked hash_seq_search scan for hash table %d", i);
+            if (isCommit) {
+                HTAB* htab = t_thrd.dyhash_cxt.seq_scan_tables[i];
+                elog(WARNING, "leaked hash_seq_search scan for hash table %s", 
+                     ((htab == NULL) ? NULL : htab->tabname));
+            }
             t_thrd.dyhash_cxt.seq_scan_tables[i] =
                 t_thrd.dyhash_cxt.seq_scan_tables[t_thrd.dyhash_cxt.num_seq_scans - 1];
             t_thrd.dyhash_cxt.seq_scan_level[i] = t_thrd.dyhash_cxt.seq_scan_level[t_thrd.dyhash_cxt.num_seq_scans - 1];

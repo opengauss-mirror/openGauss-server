@@ -1,60 +1,55 @@
 --
 -- DEPENDENCIES
 --
-CREATE USER regression_user PASSWORD 'ttest@123';
-CREATE USER regression_user2 PASSWORD 'ttest@123';
-CREATE USER regression_user3 PASSWORD 'ttest@123';
-CREATE GROUP regression_group PASSWORD 'ttest@123';
+CREATE USER regression_user PASSWORD 'gauss@123';
+CREATE USER regression_user2 PASSWORD 'gauss@123';
+CREATE USER regression_user3 PASSWORD 'gauss@123';
+CREATE GROUP regression_group PASSWORD 'gauss@123';
 CREATE TABLE deptest (f1 int primary key, f2 text);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "deptest_pkey" for table "deptest"
 GRANT SELECT ON TABLE deptest TO GROUP regression_group;
 GRANT ALL ON TABLE deptest TO regression_user, regression_user2;
 -- can't drop neither because they have privileges somewhere
-DROP USER regression_user CASCADE;
-DROP GROUP regression_group CASCADE;
-ERROR:  syntax error at or near "CASCADE"
-LINE 1: DROP GROUP regression_group CASCADE;
-                                    ^
+DROP USER regression_user;
+ERROR:  role "regression_user" cannot be dropped because some objects depend on it
+DETAIL:  privileges for table deptest
+DROP GROUP regression_group;
+ERROR:  role "regression_group" cannot be dropped because some objects depend on it
+DETAIL:  privileges for table deptest
 -- if we revoke the privileges we can drop the group
 REVOKE SELECT ON deptest FROM GROUP regression_group;
-DROP GROUP regression_group CASCADE;;
-ERROR:  syntax error at or near "CASCADE"
-LINE 1: DROP GROUP regression_group CASCADE;
-                                    ^
+DROP GROUP regression_group;
 -- can't drop the user if we revoke the privileges partially
 REVOKE SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES ON deptest FROM regression_user;
-ERROR:  role "regression_user" does not exist
-DROP USER regression_user CASCADE;;
-ERROR:  role "regression_user" does not exist
+DROP USER regression_user;
+ERROR:  role "regression_user" cannot be dropped because some objects depend on it
+DETAIL:  privileges for table deptest
 -- now we are OK to drop him
-REVOKE TRIGGER ON deptest FROM regression_user;
-ERROR:  role "regression_user" does not exist
-DROP USER regression_user CASCADE;;
-ERROR:  role "regression_user" does not exist
+REVOKE TRIGGER, ALTER, DROP, COMMENT, INDEX, VACUUM ON deptest FROM regression_user;
+DROP USER regression_user;
 -- we are OK too if we drop the privileges all at once
 REVOKE ALL ON deptest FROM regression_user2;
-DROP USER regression_user2 CASCADE;
+DROP USER regression_user2;
 -- can't drop the owner of an object
 -- the error message detail here would include a pg_toast_nnn name that
 -- is not constant, so suppress it
 \set VERBOSITY terse
 ALTER TABLE deptest OWNER TO regression_user3;
-DROP USER regression_user3 CASCADE;
+DROP USER regression_user3;
+ERROR:  role "regression_user3" cannot be dropped because some objects depend on it
 \set VERBOSITY default
 -- if we drop the object, we can drop the user too
 DROP TABLE deptest;
-ERROR:  table "deptest" does not exist
 DROP USER regression_user3;
-ERROR:  role "regression_user3" does not exist
 -- Test DROP OWNED
-CREATE USER regression_user0 PASSWORD 'ttest@123';
-CREATE USER regression_user1 PASSWORD 'ttest@123';
-CREATE USER regression_user2 PASSWORD 'ttest@123';
-SET SESSION AUTHORIZATION regression_user0 PASSWORD 'ttest@123';
+CREATE USER regression_user0 PASSWORD 'gauss@123';
+CREATE USER regression_user1 PASSWORD 'gauss@123';
+CREATE USER regression_user2 PASSWORD 'gauss@123';
+SET SESSION AUTHORIZATION regression_user0 PASSWORD 'gauss@123';
 -- permission denied
-DROP OWNED BY regression_user1 CASCADE;
+DROP OWNED BY regression_user1;
 ERROR:  Permission denied to drop objects.
-DROP OWNED BY regression_user0, regression_user2 CASCADE;
+DROP OWNED BY regression_user0, regression_user2;
 ERROR:  Permission denied to drop objects.
 REASSIGN OWNED BY regression_user0 TO regression_user1;
 ERROR:  Permission denied to reassign objects.
@@ -64,7 +59,7 @@ CREATE TABLE deptest1 (f1 int unique);
 NOTICE:  CREATE TABLE / UNIQUE will create implicit index "deptest1_f1_key" for table "deptest1"
 GRANT USAGE ON schema regression_user0 TO regression_user1;
 GRANT ALL ON deptest1 TO regression_user1 WITH GRANT OPTION;
-SET SESSION AUTHORIZATION regression_user1 PASSWORD 'ttest@123';
+SET SESSION AUTHORIZATION regression_user1 PASSWORD 'gauss@123';
 CREATE TABLE deptest (a int primary key, b text);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "deptest_pkey" for table "deptest"
 GRANT ALL ON regression_user0.deptest1 TO regression_user2;
@@ -75,7 +70,9 @@ RESET SESSION AUTHORIZATION;
 ------------------+----------+-------+--------------------------------------------------+--------------------------
  regression_user0 | deptest1 | table | regression_user0=arwdDxt/regression_user0       +| 
                   |          |       | regression_user1=a*r*w*d*D*x*t*/regression_user0+| 
-                  |          |       | regression_user2=arwdDxt/regression_user1        | 
+                  |          |       | regression_user1=A*P*m*i*v*/regression_user0    +| 
+                  |          |       | regression_user2=arwdDxt/regression_user1       +| 
+                  |          |       | regression_user2=APmiv/regression_user1          | 
 (1 row)
 
 DROP OWNED BY regression_user1;
@@ -91,9 +88,9 @@ DROP OWNED BY regression_user1;
 \d deptest
 -- Test REASSIGN OWNED
 DROP USER regression_user1;
-CREATE USER regression_user1 PASSWORD 'ttest@123';
+CREATE USER regression_user1 PASSWORD 'gauss@123';
 GRANT ALL ON regression_user0.deptest1 TO regression_user1;
-SET SESSION AUTHORIZATION regression_user1 PASSWORD 'ttest@123';
+SET SESSION AUTHORIZATION regression_user1 PASSWORD 'gauss@123';
 CREATE TABLE deptest (a int primary key, b text);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "deptest_pkey" for table "deptest"
 CREATE TABLE deptest2 (f1 int);
@@ -111,16 +108,14 @@ REASSIGN OWNED BY regression_user1 TO regression_user2;
 (1 row)
 
 -- doesn't work: grant still exists
-DROP USER regression_user1 CASCADE;
-DROP OWNED BY regression_user1;
-ERROR:  role "regression_user1" does not exist
 DROP USER regression_user1;
-ERROR:  role "regression_user1" does not exist
+ERROR:  role "regression_user1" cannot be dropped because some objects depend on it
+DETAIL:  privileges for table regression_user0.deptest1
+DROP OWNED BY regression_user1;
+DROP USER regression_user1;
 \set VERBOSITY terse
-DROP USER regression_user2 CASCADE;
-DROP OWNED BY regression_user2, regression_user0;
-ERROR:  role "regression_user2" does not exist
 DROP USER regression_user2;
-ERROR:  role "regression_user2" does not exist
+ERROR:  role "regression_user2" cannot be dropped because some objects depend on it
+DROP OWNED BY regression_user2, regression_user0;
+DROP USER regression_user2;
 DROP USER regression_user0;
-ERROR:  cannot drop schema regression_user0 because other objects depend on it

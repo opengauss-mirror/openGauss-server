@@ -9,9 +9,9 @@ function test_1()
 
   echo "n sync standby"
   kill_cluster
-  gs_guc set -D $primary_data_dir -c "synchronous_commit = on"
-  gs_guc set -D $primary_data_dir -c "synchronous_standby_names = '333(*)'"
-  gs_guc set -D $primary_data_dir -c "most_available_sync = on"
+  gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_commit = on"
+  gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_standby_names = '333(*)'"
+  gs_guc set -Z datanode -D $primary_data_dir -c "most_available_sync = on"
   start_cluster
 
   check_synchronous_commit "datanode1" 4
@@ -28,9 +28,9 @@ function test_1()
 
   echo "1 sync standby, 1 potential"
   kill_cluster
-  gs_guc set -D $primary_data_dir -c "synchronous_commit = on"
-  gs_guc set -D $primary_data_dir -c "synchronous_standby_names = '1(*)'"
-  gs_guc set -D $primary_data_dir -c "most_available_sync = on"
+  gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_commit = on"
+  gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_standby_names = '1(*)'"
+  gs_guc set -Z datanode -D $primary_data_dir -c "most_available_sync = on"
   start_cluster
 
   check_synchronous_commit "datanode1" 1
@@ -39,29 +39,21 @@ function test_1()
 
   echo "random error config"
   kill_cluster
-  gs_guc set -D $primary_data_dir -c "most_available_sync = doe"
+  gs_guc set -Z datanode -D $primary_data_dir -c "most_available_sync = doe"
   if [ $? -gt 0 ]; then
     echo "most_available_sync error tested!"
   else
     echo "most_available_sync error not tested failure $failed_keyword"
     exit 1
   fi
-  gs_guc set -D $primary_data_dir -c "synchronous_commit = john"
+  gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_commit = john"
   if [ $? -gt 0 ]; then
     echo "synchronous_commit error tested!"
   else
     echo "synchronous_commit error not tested failure $failed_keyword"
     exit 1
   fi
-  gs_guc set -D $primary_data_dir -c "synchronous_standby_names = 'jane'"
-  start_cluster
-  check_asynchronous_commit "datanode1" 4
-  
-  echo "test synchronous_standby_names = ''"
-  kill_cluster
-  gs_guc set -D $primary_data_dir -c "synchronous_commit = on"
-  gs_guc set -D $primary_data_dir -c "synchronous_standby_names = ''"
-  gs_guc set -D $primary_data_dir -c "most_available_sync = on"
+  gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_standby_names = 'jane'"
   start_cluster
   check_asynchronous_commit "datanode1" 4
 }
@@ -69,9 +61,9 @@ function test_1()
 function tear_down() {
   sleep 1
   kill_cluster
-  gs_guc set -D $primary_data_dir -c "synchronous_commit = on"
-  gs_guc set -D $primary_data_dir -c "synchronous_standby_names = '*'"
-  gs_guc set -D $primary_data_dir -c "most_available_sync = off"
+  gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_commit = on"
+  gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_standby_names = '*'"
+  gs_guc set -Z datanode -D $primary_data_dir -c "most_available_sync = off"
   start_cluster
   gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists test1;"
 }

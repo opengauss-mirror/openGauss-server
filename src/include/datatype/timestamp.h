@@ -38,6 +38,7 @@
  * Also, fsec_t is only meant for *fractional* seconds; beware of overflow
  * if the value you need to store could be many seconds.
  */
+
 #ifdef HAVE_INT64_TIMESTAMP
 
 typedef int64 Timestamp;
@@ -53,7 +54,8 @@ typedef double fsec_t; /* fractional seconds (in seconds) */
 #endif
 
 typedef struct {
-    TimeOffset time; /* all time units other than days, months and years */
+    TimeOffset time; /* all time units other than days, months and
+                      * years */
     int32 day;       /* days, after time for alignment */
     int32 month;     /* months and years, after time for alignment */
 } Interval;
@@ -77,7 +79,9 @@ typedef struct {
 /*
  * Assorted constants for datetime-related calculations
  */
+
 #define DAYS_PER_YEAR 365.25 /* assumes leap year every four years */
+#define DAYS_PER_NYEAR 365
 #define MONTHS_PER_YEAR 12
 /*
  *	DAYS_PER_MONTH is very imprecise.  The more accurate value is
@@ -154,10 +158,12 @@ typedef struct {
 
 /*
  * Julian date support.
+ *
  * IS_VALID_JULIAN checks the minimum date exactly, but is a bit sloppy
  * about the maximum, since it's far enough out to not be especially
  * interesting.
  */
+
 #define JULIAN_MINYEAR (-4713)
 #define JULIAN_MINMONTH (11)
 #define JULIAN_MINDAY (24)
@@ -225,4 +231,3 @@ typedef struct {
 #define MAX_VALUE_RR 99
 
 #endif /* DATATYPE_TIMESTAMP_H */
-

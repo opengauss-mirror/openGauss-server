@@ -1,0 +1,50 @@
+\! mkdir -p '@abs_srcdir@/data/upgrade/test/dir'
+\! cp -f '@abs_srcdir@/data/upgrade/16386_C1.0' '@abs_srcdir@/data/upgrade/test/16386_C1.0'
+\! cp -f '@abs_srcdir@/data/upgrade/12345' '@abs_srcdir@/data/upgrade/test/12345'
+\! cp -f '@abs_srcdir@/data/upgrade/12345_C' '@abs_srcdir@/data/upgrade/test/12345_C'
+\! cp -f '@abs_srcdir@/data/upgrade/dir/16386_C1.0' '@abs_srcdir@/data/upgrade/test/dir/16386_C1.0'
+\! @abs_bindir@/pg_format_cu -a 8192 -f '@abs_srcdir@/data/upgrade/test/16386_C1.0'
+successfully to align file(@abs_srcdir@/data/upgrade/test/16386_C1.0), original size(38) padding size(8154).
+successfully to align all files.
+\! @abs_bindir@/pg_format_cu -a 8192 -d '@abs_srcdir@/data/upgrade/test/dir'
+successfully to align file(@abs_srcdir@/data/upgrade/test/dir/16386_C1.0), original size(38) padding size(8154).
+successfully to align all files.
+\! @abs_bindir@/pg_format_cu 
+pg_format_cu is an upgrade tool about align column store files for PostgreSQL.
+
+Usage:
+  pg_format_cu [OPTION]...
+
+Options:
+  -d DIRECTORY       database directory absolutely path, align all the named file 
+  -f FILE_NAME       database file absolutely path, align the files 
+  -a ALIGN_SIZE      size to align 
+  -?, -h, --help     show this help, then exit
+\! @abs_bindir@/pg_format_cu --help
+pg_format_cu is an upgrade tool about align column store files for PostgreSQL.
+
+Usage:
+  pg_format_cu [OPTION]...
+
+Options:
+  -d DIRECTORY       database directory absolutely path, align all the named file 
+  -f FILE_NAME       database file absolutely path, align the files 
+  -a ALIGN_SIZE      size to align 
+  -?, -h, --help     show this help, then exit
+\! @abs_bindir@/pg_format_cu -a 8192
+you must give the direct path or file path.
+\! @abs_bindir@/pg_format_cu -a -1
+you must give the direct path or file path.
+\! @abs_bindir@/pg_format_cu -a 123
+you must give the direct path or file path.
+\! @abs_bindir@/pg_format_cu -a 8192 -f '@abs_srcdir@/data/upgrade/test/16386_C2.0'
+file(@abs_srcdir@/data/upgrade/test/16386_C2.0) not exist, OS errno=2.
+\! @abs_bindir@/pg_format_cu -a 8192 -f 'abcdefg'
+file(abcdefg) not exist, OS errno=2.
+\! @abs_bindir@/pg_format_cu -a 8192 -f '@abs_srcdir@/data/upgrade/test/12345'
+file(@abs_srcdir@/data/upgrade/test/12345) maybe not column store file.
+successfully to align all files.
+\! @abs_bindir@/pg_format_cu -a 8192 -f '@abs_srcdir@/data/upgrade/test/12345_C'
+file(@abs_srcdir@/data/upgrade/test/12345_C) maybe not column store file.
+successfully to align all files.
+\! rm -rf '@abs_srcdir@/data/upgrade/test'

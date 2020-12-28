@@ -51,6 +51,7 @@
 /*
  * MIT Kerberos authentication system - protocol version 5
  */
+
 #include <krb5.h>
 /* Some old versions of Kerberos do not include <com_err.h> in <krb5.h> */
 #if !defined(__COM_ERR_H) && !defined(__COM_ERR_H__)
@@ -103,6 +104,7 @@ static char* pg_an_to_ln(char* aname)
  * Various krb5 state which is not connection specific, and a flag to
  * indicate whether we have initialised it yet.
  */
+
 struct krb5_info {
     int pg_krb5_initialised;
     krb5_context pg_krb5_context = NULL;
@@ -229,7 +231,7 @@ static int pg_krb5_sendauth(PGconn* conn)
 #if defined(HAVE_KRB5_ERROR_TEXT_DATA)
             printfPQExpBuffer(&conn->errorMessage,
                 libpq_gettext("Kerberos 5 authentication rejected: %*s, remote datanode %s, err: %s\n"),
-                (int) err_ret->text.length, err_ret->text.data, conn->remote_nodename, strerror(errno));
+                    (int) err_ret->text.length, err_ret->text.data, conn->remote_nodename, strerror(errno));
 #elif defined(HAVE_KRB5_ERROR_E_DATA)
             printfPQExpBuffer(&conn->errorMessage,
                 libpq_gettext("Kerberos 5 authentication rejected: %*s, remote datanode %s, err: %s\n"),
@@ -258,10 +260,11 @@ static int pg_krb5_sendauth(PGconn* conn)
     if (!pg_set_noblock(conn->sock)) {
         char sebuf[256];
 
-        libpq_gettext("could not restore non-blocking mode on socket: %s, remote datanode %s, err: %s\n"),
-            pqStrerror(errno, sebuf, sizeof(sebuf)),
-            conn->remote_nodename,
-            strerror(errno));
+        printfPQExpBuffer(&conn->errorMessage,
+            libpq_gettext("could not restore non-blocking mode on socket: %s, remote datanode %s, err: %s\n"),
+                pqStrerror(errno, sebuf, sizeof(sebuf)),
+                conn->remote_nodename,
+                strerror(errno));
         ret = STATUS_ERROR;
     }
     pg_krb5_destroy(&info);
@@ -274,6 +277,7 @@ static int pg_krb5_sendauth(PGconn* conn)
 /*
  * GSSAPI authentication system.
  */
+
 #if defined(WIN32) && !defined(WIN32_ONLY_COMPILER)
 /*
  * MIT Kerberos GSSAPI DLL doesn't properly export the symbols for MingW
@@ -334,10 +338,10 @@ retry_init:
     /* Clean the config cache and ticket cache set by hadoop remote read. */
     krb5_clean_cache_profile_path();
 
-    /* Krb5 config file priority : setpath > env(MPPDB_KRB5_FILE_PATH) > default(/etc/krb5.conf). */
+    /* Krb5 config file priority : setpath > env(MPPDB_KRB5_FILE_PATH) > default(/etc/krb5.conf).*/
     krbconfig = gs_getenv_r("MPPDB_KRB5_FILE_PATH");
     if (check_client_env(krbconfig) != NULL)
-        krb5_set_profile_path(krbconfig);
+        (void)krb5_set_profile_path(krbconfig);
 
     /*
      * The first time come here(with no tickent cache), gss_init_sec_context will send TGS_REQ
@@ -456,7 +460,7 @@ static int pg_GSS_startup(PGconn* conn)
 
     maxlen = strlen(krbhostname) + strlen(krbsrvname) + 2;
     temp_gbuf.value = (char*)malloc(maxlen);
-    if (temp_gbuf.value == NULL) {
+    if (NULL == temp_gbuf.value) {
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("out of memory.\n"));
         return STATUS_ERROR;
     }
@@ -487,6 +491,7 @@ static int pg_GSS_startup(PGconn* conn)
 /*
  * SSPI authentication system (Windows only)
  */
+
 static void pg_SSPI_error(PGconn* conn, const char* mprefix, SECURITY_STATUS r)
 {
     char sysmsg[256];
@@ -544,6 +549,7 @@ static int pg_SSPI_continue(PGconn* conn)
         &outbuf,
         &contextAttr,
         NULL);
+
     if (r != SEC_E_OK && r != SEC_I_CONTINUE_NEEDED) {
         pg_SSPI_error(conn, libpq_gettext("SSPI continuation error"), r);
 
@@ -579,8 +585,7 @@ static int pg_SSPI_continue(PGconn* conn)
              * authentication. Keep check in case it shows up with other
              * authentication methods later.
              */
-            printfPQExpBuffer(&conn->errorMessage,
-                "SSPI returned invalid number of output buffers, remote datanode %s, err: %s\n",
+            printfPQExpBuffer(&conn->errorMessage, "SSPI returned invalid number of output buffers, remote datanode %s, err: %s\n",
                 conn->remote_nodename,
                 strerror(errno));
             return STATUS_ERROR;
@@ -620,7 +625,11 @@ static int pg_SSPI_startup(PGconn* conn, int use_negotiate)
     /*
      * Retreive credentials handle
      */
+#ifdef WIN32
     conn->sspicred = (CredHandle*)malloc(sizeof(CredHandle));
+#else
+    conn->sspicred = malloc(sizeof(CredHandle));
+#endif
     if (conn->sspicred == NULL) {
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("out of memory\n"));
         return STATUS_ERROR;
@@ -650,13 +659,23 @@ static int pg_SSPI_startup(PGconn* conn, int use_negotiate)
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("host name must be specified\n"));
         return STATUS_ERROR;
     }
+
     int krbsrvnameLen = strlen(conn->krbsrvname);
     int pghostLen = strlen(conn->pghost);
+#ifndef WIN32
     if (unlikely(krbsrvnameLen > PG_INT32_MAX - pghostLen - 2)) {
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("krb server name or host string is too long\n"));
         return STATUS_ERROR;
     }
-    int sspitarget_len = krbsrvnameLen + pghostLen + 2;
+#else
+    if (krbsrvnameLen > PG_INT32_MAX - pghostLen - 2) {
+        printfPQExpBuffer(&conn->errorMessage, libpq_gettext("krb server name or host string is too long\n"));
+        return STATUS_ERROR;
+    }
+
+#endif
+
+    int sspitarget_len = strlen(conn->krbsrvname) + strlen(conn->pghost) + 2;
 #ifdef WIN32
     conn->sspitarget = (char*)malloc(sspitarget_len);
 #else
@@ -831,7 +850,8 @@ static int pg_password_sendauth(PGconn* conn, const char* password, AuthRequest 
         case AUTH_REQ_SHA256: {
             char* crypt_pwd2 = NULL;
 
-            if (conn->password_stored_method == SHA256_PASSWORD || conn->password_stored_method == PLAIN_PASSWORD) {
+            if (SHA256_PASSWORD == conn->password_stored_method || PLAIN_PASSWORD == conn->password_stored_method) {
+
                 if (!pg_sha256_encrypt(
                         password, conn->salt, strlen(conn->salt), (char*)buf, client_key_buf, conn->iteration_count))
                     return STATUS_ERROR;
@@ -872,7 +892,7 @@ static int pg_password_sendauth(PGconn* conn, const char* password, AuthRequest 
                     0 != strncmp(conn->sever_signature, client_sever_signature_string, HMAC_STRING_LENGTH)) {
                     pwd_to_send = fail_info;
                 } else {
-                    /* calculate H, H = hmac(storedkey, token) XOR ClientKey */
+                    /*calculate H, H = hmac(storedkey, token) XOR ClientKey*/
                     sha_hex_to_bytes32(stored_key_bytes, stored_key_string);
                     CRYPT_hmac_ret2 = CRYPT_hmac(NID_hmacWithSHA256,
                         (GS_UCHAR*)stored_key_bytes,
@@ -881,6 +901,7 @@ static int pg_password_sendauth(PGconn* conn, const char* password, AuthRequest 
                         TOKEN_LENGTH,
                         (GS_UCHAR*)hmac_result,
                         (GS_UINT32*)&hmac_length);
+
                     if (CRYPT_hmac_ret2) {
                         return STATUS_ERROR;
                     }
@@ -892,13 +913,14 @@ static int pg_password_sendauth(PGconn* conn, const char* password, AuthRequest 
 
                     sha_bytes_to_hex64((uint8*)h, h_string);
 
-                    /* Send H to sever */
+                    /*Send H to sever*/
                     pwd_to_send = h_string;
                 }
             } else if (MD5_PASSWORD == conn->password_stored_method) {
                 /* Allocate enough space for  MD5 and SHA256 */
                 crypt_pwd_sz = (MD5_PASSWD_LEN + 1) + (SHA256_MD5_ENCRY_PASSWD_LEN + 1);
                 crypt_pwd = (char*)malloc(crypt_pwd_sz);
+
                 if (crypt_pwd == NULL) {
                     printfPQExpBuffer(&conn->errorMessage, libpq_gettext("out of memory\n"));
                     return STATUS_ERROR;
@@ -1135,14 +1157,20 @@ char* pg_fe_getauthname(PQExpBuffer errorMessage)
     const char* name = NULL;
     char* authn = NULL;
 
+#ifdef WIN32
+    char username[128];
+    DWORD namesize = sizeof(username) - 1;
+#else
     struct passwd pwdstr;
     struct passwd* pw = NULL;
     char pwdbuf[BUFSIZ];
     int rc = memset_s(pwdbuf, BUFSIZ, '\0', BUFSIZ);
     securec_check_c(rc, "\0", "\0");
+    size_t name_len;
 
     errno = 0;
     bool name_from_uid = true;
+#endif
     /*
      * Some users are using configure --enable-thread-safety-force, so we
      * might as well do the locking within our library to protect
@@ -1157,6 +1185,10 @@ char* pg_fe_getauthname(PQExpBuffer errorMessage)
     // confiured ,we should protect the pqGetpwuid()
     syscalllockAcquire(&getpwuid_lock);
     if (name == NULL) {
+#ifdef WIN32
+        if (GetUserName(username, &namesize))
+            name = username;
+#else
         if (pqGetpwuid(geteuid(), &pwdstr, pwdbuf, sizeof(pwdbuf), &pw) == 0) {
             name = pw->pw_name;
             name_from_uid = true;
@@ -1169,34 +1201,39 @@ char* pg_fe_getauthname(PQExpBuffer errorMessage)
                 name = NULL;
             }
         }
+#endif
     }
-
+#ifndef WIN32
     if (name != NULL && errno != ERANGE) {
-        size_t name_len;
         name_len = strlen(name);
-        authn = strdup(name);
+        if (name_len >= BUFSIZ) {
+            printfPQExpBuffer(errorMessage,
+                libpq_gettext("name len out of memory, from %d, len is [%zu], errno[%d]:%m\n"),
+                name_from_uid, name_len, errno);
+            syscalllockRelease(&getpwuid_lock);
+            pgunlock_thread();
+            return authn;
+        }
+        authn = (char*)malloc(sizeof(char) * (name_len + 1));
         if (authn == NULL) {
             printfPQExpBuffer(errorMessage,
-                libpq_gettext("strdup out of memory, from %d, len is [%zu], errno[%d]:%m\n"),
-                name_from_uid,
-                name_len,
-                errno);
-        } else if (authn[name_len] != '\0') {
-            printfPQExpBuffer(errorMessage,
                 libpq_gettext("strdup fail without end, from %d, len is [%zu], errno[%d]:%m\n"),
-                name_from_uid,
-                name_len,
-                errno);
-            Assert(0);
-            /* add '\0' to avoid read buffer overflow */
-            authn[name_len] = '\0';
+                name_from_uid, name_len, errno);
+            syscalllockRelease(&getpwuid_lock);
+            pgunlock_thread();
+            return authn;
         }
+        rc = memcpy_s(authn, BUFSIZ, name, name_len);
+        securec_check_c(rc,"\0","\0");
+        authn[name_len] = '\0';
     }
 
     if (errno) {
         printfPQExpBuffer(errorMessage, libpq_gettext("strdup with errno[%d] from %d\n"), errno, name_from_uid);
     }
-
+#else
+    authn = name != NULL ? strdup(name) : NULL;
+#endif
     syscalllockRelease(&getpwuid_lock);
 
     pgunlock_thread();
@@ -1227,9 +1264,8 @@ char* PQencryptPassword(const char* passwd, const char* user)
     char* crypt_pwd = NULL;
 
     crypt_pwd = (char*)malloc(MD5_PASSWD_LEN + 1);
-    if (crypt_pwd == NULL) {
+    if (crypt_pwd == NULL)
         return NULL;
-    }
 
     if (!pg_md5_encrypt(passwd, user, strlen(user), crypt_pwd)) {
         libpq_free(crypt_pwd);
@@ -1245,12 +1281,12 @@ char* PQencryptPassword(const char* passwd, const char* user)
  */
 const char* check_client_env(const char* input_env_value)
 {
-    const int MAXENVLEN = 1024;
+#define MAXENVLEN 1024
 
-    const char* danger_character_list[] = {";", "`", "\\", "'", "\"", ">", "<", "$", "&", "|", "!", "\n", "..", NULL};
+    const char* danger_character_list[] = {";", "`", "\\", "'", "\"", ">", "<", "$", "&", "|", "!", "\n", NULL};
     int i = 0;
 
-    if (input_env_value == NULL || strlen(input_env_value) > MAXENVLEN)
+    if (NULL == input_env_value || strlen(input_env_value) > MAXENVLEN)
         return NULL;
 
     for (i = 0; danger_character_list[i] != NULL; i++) {

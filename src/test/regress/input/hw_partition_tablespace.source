@@ -1,0 +1,86 @@
+--prepare for test
+\! rm -fr '@testtablespace@/hw_partition_tablespace_spc1'
+\! mkdir '@testtablespace@/hw_partition_tablespace_spc1'
+\! rm -fr '@testtablespace@/hw_partition_tablespace_spc2'
+\! mkdir '@testtablespace@/hw_partition_tablespace_spc2'
+\! rm -fr '@testtablespace@/hw_partition_tablespace_spc3'
+\! mkdir '@testtablespace@/hw_partition_tablespace_spc3'
+
+create tablespace hw_partition_tablespace_spc1 location '@testtablespace@/hw_partition_tablespace_spc1';
+create tablespace hw_partition_tablespace_spc2 location '@testtablespace@/hw_partition_tablespace_spc2';
+create tablespace hw_partition_tablespace_spc3 location '@testtablespace@/hw_partition_tablespace_spc3';
+
+--
+---- test tablesapce for range partition
+--
+--sucess
+create table test_range_tsp_1(a int)
+partition by range(a)
+(
+	partition test_range_tsp_1_p1 values less than (1),
+	partition test_range_tsp_1_p2 values less than (2)
+);
+--sucess
+create table test_range_tsp_2(a int)
+tablespace hw_partition_tablespace_spc1
+partition by range(a)
+(
+	partition test_range_tsp_2_p1 values less than (1),
+	partition test_range_tsp_2_p2 values less than (2)
+);
+--sucess
+create table test_range_tsp_3(a int)
+partition by range(a)
+(
+	partition test_range_tsp_3_p1 values less than (1) tablespace hw_partition_tablespace_spc1,
+	partition test_range_tsp_3_p2 values less than (2)
+);
+--sucess
+create table test_range_tsp_4(a int)
+partition by range(a)
+(
+	partition test_range_tsp_4_p1 values less than (1) tablespace hw_partition_tablespace_spc1,
+	partition test_range_tsp_4_p2 values less than (2) tablespace hw_partition_tablespace_spc2
+);
+--fail
+create table test_range_tsp_5(a int)
+partition by range(a)
+(
+	partition test_range_tsp_5_p1 values less than (1) tablespace hw_partition_tablespace_spc1,
+	partition test_range_tsp_5_p2 values less than (2) tablespace spc_not_exist
+);
+--clean up
+drop table test_range_tsp_1;
+drop table test_range_tsp_2;
+drop table test_range_tsp_3;
+drop table test_range_tsp_4;
+
+
+--clean up
+drop tablespace hw_partition_tablespace_spc1;
+drop tablespace hw_partition_tablespace_spc2;
+drop tablespace hw_partition_tablespace_spc3;
+
+--TABLESPACE NUMBER NAME
+CREATE TABLESPACE "125*&^" LOCATION '@testtablespace@/partition';
+CREATE TABLESPACE "2310" LOCATION '@testtablespace@/2310';
+
+create table table_01
+("15_87*&" int ,c_num numeric,c_big bigint)
+DISTRIBUTE BY HASH ("15_87*&")
+partition by range ("15_87*&")
+(partition p1 values less than(10) TABLESPACE "125*&^",
+partition p2 values less than(100));
+
+alter table table_01 rename to "9832_01*&^&%$#@";
+
+CREATE index "2354_op" on "9832_01*&^&%$#@"("15_87*&") local (
+partition "2354_op_001" TABLESPACE "125*&^",
+partition "2354_op_002") TABLESPACE "2310" ;
+
+\d+ "9832_01*&^&%$#@";
+
+DROP INDEX "2354_op";
+DROP TABLE "9832_01*&^&%$#@";
+DROP TABLESPACE "2310";
+DROP TABLESPACE "125*&^";

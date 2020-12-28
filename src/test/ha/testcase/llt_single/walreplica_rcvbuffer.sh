@@ -14,11 +14,11 @@ if [ $(gsql -d $db -p $dn1_primary_port -c "show enable_mix_replication;" | grep
 	stop_primary
 	stop_standby
 
-	gs_guc set -D $data_dir/datanode1 -c "walsender_max_send_size=64MB"
-	gs_guc set -D $data_dir/datanode1 -c "data_replicate_buffer_size=128MB"
-	gs_guc set -D $data_dir/datanode1_standby -c "walsender_max_send_size=64MB"
-	gs_guc set -D $data_dir/datanode1_standby -c "data_replicate_buffer_size=128MB"
-	gs_guc set -D $data_dir/datanode1_standby -c "wal_receiver_buffer_size=4MB"
+	gs_guc set -Z datanode -D $data_dir/datanode1 -c "walsender_max_send_size=64MB"
+	gs_guc set -Z datanode -D $data_dir/datanode1 -c "data_replicate_buffer_size=128MB"
+	gs_guc set -Z datanode -D $data_dir/datanode1_standby -c "walsender_max_send_size=64MB"
+	gs_guc set -Z datanode -D $data_dir/datanode1_standby -c "data_replicate_buffer_size=128MB"
+	gs_guc set -Z datanode -D $data_dir/datanode1_standby -c "wal_receiver_buffer_size=4MB"
 
 	start_primary
 
@@ -45,11 +45,11 @@ sleep 1
 stop_primary
 stop_standby
 
-gs_guc set -D $data_dir/datanode1 -c "walsender_max_send_size=8MB"
-gs_guc set -D $data_dir/datanode1 -c "data_replicate_buffer_size=16MB"
-gs_guc set -D $data_dir/datanode1_standby -c "walsender_max_send_size=8MB"
-gs_guc set -D $data_dir/datanode1_standby -c "data_replicate_buffer_size=16MB"
-gs_guc set -D $data_dir/datanode1_standby -c "wal_receiver_buffer_size=64MB"
+gs_guc set -Z datanode -D $data_dir/datanode1 -c "walsender_max_send_size=8MB"
+gs_guc set -Z datanode -D $data_dir/datanode1 -c "data_replicate_buffer_size=16MB"
+gs_guc set -Z datanode -D $data_dir/datanode1_standby -c "walsender_max_send_size=8MB"
+gs_guc set -Z datanode -D $data_dir/datanode1_standby -c "data_replicate_buffer_size=16MB"
+gs_guc set -Z datanode -D $data_dir/datanode1_standby -c "wal_receiver_buffer_size=64MB"
 
 start_standby
 start_primary

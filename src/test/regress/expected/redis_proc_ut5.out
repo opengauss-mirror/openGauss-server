@@ -26,7 +26,7 @@ START TRANSACTION;
 ERROR:  canceling data redistribution task
 CONTEXT:  referenced column: pg_sleep
 	select current_timestamp;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+--?ERROR:  current transaction is aborted, commands ignored until end of transaction block.*
 END;
 select current_timestamp;
 --?.*

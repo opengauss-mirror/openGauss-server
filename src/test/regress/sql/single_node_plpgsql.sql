@@ -2101,7 +2101,7 @@ $$ language plpgsql;
 select raise_test2(10);
 
 -- Test re-RAISE inside a nested exception block.  This case is allowed
--- by A's PL/SQL but was handled differently by PG before 9.1.
+-- by A db's PL/SQL but was handled differently by PG before 9.1.
 
 CREATE FUNCTION reraise_test() RETURNS void AS $$
 BEGIN

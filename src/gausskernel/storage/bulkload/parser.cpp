@@ -16,7 +16,7 @@
  *  parser.cpp
  *
  * IDENTIFICATION
- *        src/gausskernel/storage/bulkload/parser.cpp
+ *        src/bin/gds/parser.cpp
  *
  * ---------------------------------------------------------------------------------------
  */
@@ -29,11 +29,10 @@
 #include <fcntl.h>
 #include "securec.h"
 #include <string>
-
 #include "storage/gds_utils.h"
 
 #ifdef GDS_SERVER
-#include "parser.h"
+#include "storage/parser.h"
 #include "gds_mt.h"
 #include "package.h"
 #include "utils/memutils.h"
@@ -41,6 +40,8 @@
 
 #ifdef OBS_SERVER
 #include "storage/parser.h"
+#include "c.h"
+#include "pgstat.h"
 #include "access/obs/obs_am.h"
 #include "commands/obs_stream.h"
 #include "utils/plog.h"
@@ -64,7 +65,12 @@
 #define SEGMENT_SIZE 2147483648
 #define FILEHEADER_BUF_SIZE (1024 * 1024)
 #define CHUNK_SZ 128
+#define InvalidSymbol "../"
 const int GDS_HEADER_LEN = 4;
+
+#ifndef WIN32
+#define LOG_PERM_GRPR (S_IRUSR | S_IWUSR | S_IRGRP)
+#endif
 
 using namespace std;
 using namespace GDS;
@@ -275,11 +281,12 @@ void Source::SourceWrite(const char* buffer, size_t len)
 
 size_t Source::SourceWriteInternal(const void* buffer, size_t len)
 {
+    size_t nwrite = 0;
     const char* err_file = m_files[m_current - 1].c_str();
     if (m_fd == NULL) {
         parser_log(LEVEL_ERROR, "could not write file: %s, caused by fd empty.", err_file);
     }
-    size_t nwrite = fwrite(buffer, 1, len, m_fd);
+    nwrite = fwrite(buffer, 1, len, m_fd);
     if (ferror(m_fd)) {
         parser_log(LEVEL_ERROR, "could not write file %s with Error: %s", err_file, gs_strerror(errno));
     }
@@ -339,6 +346,9 @@ void Source::GenerateNewFileForExport(const char* prefix, const char* suffix)
 
     ASSERT(prefix != NULL);
 
+    if (strstr(prefix, InvalidSymbol) != NULL) {
+        parser_log(LEVEL_ERROR, "invalid path which include \"%s\"", InvalidSymbol);
+    }
     for (int i = 0; i < MAX_SEGMENT_NUM; i++) {
         if (suffix != NULL) {
             rc = snprintf_s(path, MAX_PATH_LEN, MAX_PATH_LEN - 1, "%s/%s.%s.%d", m_path.c_str(), prefix, suffix, i);
@@ -376,9 +386,11 @@ void Source::GenerateNewFileForExport(const char* prefix, const char* suffix)
                     path,
                     strerror(errno));
             }
-            if (fchmod(m_fd->_fileno, S_IRUSR | S_IWUSR) != 0) {
-                parser_log(LEVEL_ERROR, "failed to chmod of %s with error %s", path, strerror(errno));
+#ifndef WIN32
+            if (fchmod(fileno(m_fd), LOG_PERM_GRPR) != 0) {
+                parser_log(LEVEL_ERROR,"Could not change permissions of file \"%s\"\n", path);
             }
+#endif
             m_woffset = 0;
             return;
         }
@@ -692,6 +704,7 @@ inline static ParserResult TextReadLine(ReadableParser* self, LineBuffer& buf)
         char* end = NULL;
 
         // if buffer is empty, read new data from files
+        //
         if (need_data) {
             size_t nread;
             if ((nread = source->SourceRead(source, self->rec_buf, self->buf_len - 1)) == 0) {
@@ -707,11 +720,13 @@ inline static ParserResult TextReadLine(ReadableParser* self, LineBuffer& buf)
         // 1. eol char == '\n', we got a complete row.
         // 2. eol char == '\r', if '\r' is not the last char of buffer, we got a complete row.
         // else read more data and try again.
+        //
         raw_buffer = self->rec_buf + self->cur;
         remainLen = self->used_len - self->cur;
         end = self->rec_buf + self->used_len;
 
         eol = FindEolChar(raw_buffer, remainLen, self->eol, &self->eol_cur, &self->eol_cur_saved);
+
         if (eol == NULL) {
             if (!skipData) {
                 int ret = buf.AppendLine(raw_buffer, remainLen, false);
@@ -978,7 +993,9 @@ static void WritableParserInit(WritableParser* self, CmdBegin* cmd, FileList* fi
         parser_log(LEVEL_ERROR, "failed to init parser, out of memory");
 
     self->source->SetPath(UriToLocalPath(cmd->m_url));
-    ASSERT(cmd->m_prefix != NULL);
+    if (cmd->m_prefix == NULL) {
+        parser_log(LEVEL_ERROR, "the given prefix is NULL");
+    }
     self->prefix = strdup(cmd->m_prefix);
     if (self->prefix == NULL)
         parser_log(LEVEL_ERROR, "failed to copy prefix, out of memory");
@@ -1004,7 +1021,7 @@ Parser* CreateCSVParser()
     errno_t rc;
     CSVParser* self = (CSVParser*)malloc(sizeof(CSVParser));
 
-    if (self == NULL)
+    if (NULL == self)
         parser_log(LEVEL_ERROR, "failed to create parser, out of memory");
 
     rc = memset_s(self, sizeof(CSVParser), 0, sizeof(CSVParser));
@@ -1025,7 +1042,7 @@ Parser* CreateTextParser()
     errno_t rc;
     ReadableParser* self = (ReadableParser*)malloc(sizeof(ReadableParser));
 
-    if (self == NULL)
+    if (NULL == self)
         parser_log(LEVEL_ERROR, "failed to create parser, out of memory");
 
     rc = memset_s(self, sizeof(ReadableParser), 0, sizeof(ReadableParser));
@@ -1043,7 +1060,7 @@ Parser* CreateFixedParser()
     errno_t rc;
     FixParser* self = (FixParser*)malloc(sizeof(FixParser));
 
-    if (self == NULL)
+    if (NULL == self)
         parser_log(LEVEL_ERROR, "failed to create parser, out of memory");
 
     rc = memset_s(self, sizeof(FixParser), 0, sizeof(FixParser));
@@ -1061,7 +1078,7 @@ Parser* CreateWritableParser()
     errno_t rc;
     WritableParser* self = (WritableParser*)malloc(sizeof(WritableParser));
 
-    if (self == NULL)
+    if (NULL == self)
         parser_log(LEVEL_ERROR, "failed to create parser, out of memory");
 
     rc = memset_s(self, sizeof(WritableParser), 0, sizeof(WritableParser));
@@ -1264,7 +1281,7 @@ int GDS::LineBuffer::AppendLine(const char* buf, int buf_len, bool isComplete)
         /*
          * a overload buffer is found, which length is more than m_buf_len;
          */
-        if ((m_used_len == 0) || ((m_cur_line_completed == false) && (m_cur_line == m_buf))) {
+        if ((0 == m_used_len) || ((false == m_cur_line_completed) && (m_cur_line == m_buf))) {
             /* (0 == m_used_len) means m_buf is clean, buf is larger
              * ((false == m_cur_line_completed) && (m_cur_line == m_buf))), means  current line  partly in m_buf and buf
              * is larger */
@@ -1290,7 +1307,7 @@ int GDS::LineBuffer::AppendLine(const char* buf, int buf_len, bool isComplete)
         return -1;
     }
 
-    errno_t rc;
+    errno_t rc = EOK;
 
     // is prev line completed
     if (m_cur_line_completed) {
@@ -1338,15 +1355,17 @@ int GDS::LineBuffer::PackData(evbuffer* dest, bool isFlush)
 
     ASSERT(package_size > 0);
 
-    if (package_size == 0)
+    if (0 == package_size)
         parser_log(LEVEL_ERROR, "Failed to send package which size is 0.");
+
+    errno_t rc = EOK;
 
     if (isFlush && !m_cur_line_completed) {
         char row_header[ROW_HEADER_SIZE];
         *(uint32_t*)&row_header[0] = htonl((uint32_t)(m_cur_line_len + 4));  // add size of row_num
         *(uint32_t*)&row_header[4] = htonl(++m_row_num);
 
-        errno_t rc = memcpy_s(m_cur_line, m_buf_len - (m_cur_line - m_buf), row_header, ROW_HEADER_SIZE);
+        rc = memcpy_s(m_cur_line, m_buf_len - (m_cur_line - m_buf), row_header, ROW_HEADER_SIZE);
         parser_securec_check(rc);
 
         m_cur_line_completed = true;
@@ -1470,6 +1489,7 @@ static size_t SourceRead_OBS(Source* self, void* buffer, size_t len)
 
     /* Retry to read until getting requred bytes(4MB default) or EOF */
     PROFILING_OBS_START();
+    pgstat_report_waitevent(WAIT_EVENT_OBS_READ);
     do {
         nread = read_bucket_object(handler, (char*)buffer + already_read, (len - already_read));
         already_read += nread; /* nread may be < 0 */
@@ -1478,6 +1498,7 @@ static size_t SourceRead_OBS(Source* self, void* buffer, size_t len)
         if (nread == 0)
             self->m_obs_end = true;
     } while (nread > 0 && already_read < len);
+    pgstat_report_waitevent(WAIT_EVENT_END);
     PROFILING_OBS_END_READ(already_read);
 
     return already_read;
@@ -1590,6 +1611,7 @@ void GDS::LineBuffer::MarkLastLineCompleted()
      *  b.  m_overload_buf + m_buf
      *  so then uncompleted line will in m_overload_buf or m_buf
      */
+
     if (m_used_len != 0) {
         /* uncomplete line in m_buf */
         if (!m_cur_line_completed) {
@@ -1628,7 +1650,7 @@ void GDS::LineBuffer::MarkLastLineCompleted()
  */
 void GDS::LineBuffer::SaveOverloadBuf(StringInfo dest, const char* buf, int buf_len, bool isComplete)
 {
-    Assert((m_used_len == 0) || ((m_cur_line_completed == false) && (m_cur_line == m_buf)));
+    Assert((0 == m_used_len) || ((false == m_cur_line_completed) && (m_cur_line == m_buf)));
 
     Assert(u_sess->cmd_cxt.OBSParserContext);
     MemoryContext oldcontext = MemoryContextSwitchTo(u_sess->cmd_cxt.OBSParserContext);

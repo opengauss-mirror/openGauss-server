@@ -57,4 +57,3 @@ extern void LZ4FileRewind(LZ4File* lz4File);
 extern void LZ4FileClearBuffer(LZ4File* lz4File);
 
 #endif
-

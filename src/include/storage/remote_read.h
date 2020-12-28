@@ -69,4 +69,3 @@ extern int SetRemoteReadModeOffAndGetOldMode();
 extern void SetRemoteReadMode(int mode);
 
 #endif /* REMOTE_READ_H */
-

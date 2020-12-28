@@ -18,12 +18,14 @@
 
 #include <ctype.h>
 #include <fcntl.h>
-#include <unistd.h>
 
 #include "access/heapam.h"
 #include "access/sysattr.h"
 #include "access/xact.h"
 #include "access/xlog.h"
+#include "catalog/gs_client_global_keys.h"
+#include "catalog/gs_column_keys.h"
+#include "catalog/gs_encrypted_columns.h"
 #include "catalog/catalog.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
@@ -35,6 +37,7 @@
 #include "executor/executor.h"
 #include "executor/execStream.h"
 #include "executor/nodeModifyTable.h"
+#include "gs_policy/policy_common.h"
 #include "job/job_scheduler.h"
 #include "job/job_worker.h"
 #include "libpq/auth.h"
@@ -52,7 +55,7 @@
 #include "postmaster/postmaster.h"
 #include "replication/catchup.h"
 #include "replication/walsender.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
@@ -72,7 +75,7 @@
 #include "utils/ps_status.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "auditfuncs.h"
 #include "gssignal/gs_signal.h"
 #include "storage/cucache_mgr.h"
@@ -82,6 +85,7 @@
 #include "instruments/instr_user.h"
 #include "instruments/percentile.h"
 #include "instruments/instr_workload.h"
+#include "gs_policy/policy_common.h"
 
 #ifdef PGXC
 #include "catalog/pgxc_node.h"
@@ -103,10 +107,12 @@ static bool ThereIsAtLeastOneRole(void);
 static void process_startup_options(Port* port, bool am_superuser);
 static void process_pgoptions(Port* port, bool am_superuser);
 static void process_settings(Oid databaseid, Oid roleid);
-extern bool StreamThreadAmI();
-extern bool StreamTopConsumerAmI();
-void ShutdownPostgres(int code, Datum arg);
+static int8 getClientCacheRefreshType();
+static bool hasTuples(const Oid relOid);
 
+THR_LOCAL LoginUserPtr user_login_hook = nullptr;
+
+/*** InitPostgres support ***/
 AlarmCheckResult ConnAuthMethodChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam)
 {
     if (true == ConnAuthMethodCorrect) {
@@ -129,7 +135,7 @@ AlarmCheckResult ConnAuthMethodChecker(Alarm* alarm, AlarmAdditionalParam* addit
 
 void ReportAlarmTooManyDatabaseConn(const char* dbName)
 {
-    AlarmAdditionalParam temp_additional_param;
+    AlarmAdditionalParam tempAdditionalParam;
 
     // Initialize the alarm item
     AlarmItemInitialize(alarmItemTooManyDatabaseConn,
@@ -139,20 +145,20 @@ void ReportAlarmTooManyDatabaseConn(const char* dbName)
         alarmItemTooManyDatabaseConn->lastReportTime,
         alarmItemTooManyDatabaseConn->reportCount);
     // fill the alarm message
-    WriteAlarmAdditionalInfo(&temp_additional_param,
+    WriteAlarmAdditionalInfo(&tempAdditionalParam,
         g_instance.attr.attr_common.PGXCNodeName,
-        const_cast<char *>(dbName),
+        const_cast<char*>(dbName),
         "",
         alarmItemTooManyDatabaseConn,
         ALM_AT_Fault,
-        const_cast<char *>(dbName));
+        const_cast<char*>(dbName));
     // report the alarm
-    AlarmReporter(alarmItemTooManyDatabaseConn, ALM_AT_Fault, &temp_additional_param);
+    AlarmReporter(alarmItemTooManyDatabaseConn, ALM_AT_Fault, &tempAdditionalParam);
 }
 
 void ReportResumeTooManyDatabaseConn(const char* dbName)
 {
-    AlarmAdditionalParam temp_additional_param;
+    AlarmAdditionalParam tempAdditionalParam;
 
     // Initialize the alarm item
     AlarmItemInitialize(alarmItemTooManyDatabaseConn,
@@ -162,14 +168,14 @@ void ReportResumeTooManyDatabaseConn(const char* dbName)
         alarmItemTooManyDatabaseConn->lastReportTime,
         alarmItemTooManyDatabaseConn->reportCount);
     // fill the alarm message
-    WriteAlarmAdditionalInfo(&temp_additional_param,
+    WriteAlarmAdditionalInfo(&tempAdditionalParam,
         g_instance.attr.attr_common.PGXCNodeName,
-        const_cast<char *>(dbName),
+        const_cast<char*>(dbName),
         "",
         alarmItemTooManyDatabaseConn,
         ALM_AT_Resume);
     // report the alarm
-    AlarmReporter(alarmItemTooManyDatabaseConn, ALM_AT_Resume, &temp_additional_param);
+    AlarmReporter(alarmItemTooManyDatabaseConn, ALM_AT_Resume, &tempAdditionalParam);
 }
 
 /*
@@ -207,9 +213,9 @@ static HeapTuple GetDatabaseTuple(const char* dbname)
     tuple = systable_getnext(scan);
 
     /* Must copy tuple before releasing buffer */
-    if (HeapTupleIsValid(tuple)) {
+    if (HeapTupleIsValid(tuple))
         tuple = heap_copytuple(tuple);
-    }
+
     /* all done */
     systable_endscan(scan);
     heap_close(relation, AccessShareLock);
@@ -244,9 +250,9 @@ static HeapTuple GetDatabaseTupleByOid(Oid dboid)
     tuple = systable_getnext(scan);
 
     /* Must copy tuple before releasing buffer */
-    if (HeapTupleIsValid(tuple)) {
+    if (HeapTupleIsValid(tuple))
         tuple = heap_copytuple(tuple);
-    }
+
     /* all done */
     systable_endscan(scan);
     heap_close(relation, AccessShareLock);
@@ -302,9 +308,9 @@ static void PerformAuthentication(Port* port)
      * during authentication.  Since we're inside a transaction and might do
      * database access, we have to use the statement_timeout infrastructure.
      */
-    if (!enable_sig_alarm(u_sess->attr.attr_security.AuthenticationTimeout * 1000, true)) {
+    if (!enable_sig_alarm(u_sess->attr.attr_security.AuthenticationTimeout * 1000, true))
         ereport(FATAL, (errmsg("could not set timer for authorization timeout")));
-    }
+
     /*
      * Unblock SIGUSR2 so that SIGALRM can be triggered when perform authentication timeout.
      */
@@ -323,22 +329,19 @@ static void PerformAuthentication(Port* port)
     /*
      * Done with authentication.  Disable the timeout, and log if needed.
      */
-    if (!disable_sig_alarm(true)) {
+    if (!disable_sig_alarm(true))
         ereport(FATAL, (errmsg("could not disable timer for authorization timeout")));
-    }
 
     if (u_sess->attr.attr_storage.Log_connections) {
-        if (AM_WAL_SENDER) {
+        if (AM_WAL_SENDER)
             ereport(LOG, (errmsg("replication connection authorized: user=%s", port->user_name)));
-        } else {
+        else
             ereport(LOG, (errmsg("connection authorized: user=%s database=%s", port->user_name, port->database_name)));
-        }
     }
 
     /* INSTR: update user login counter */
-    if (IsUnderPostmaster && !IsBootstrapProcessingMode() && !dummyStandbyMode) {
+    if (IsUnderPostmaster && !IsBootstrapProcessingMode() && !dummyStandbyMode)
         InstrUpdateUserLogCounter(true);
-    }
 
     set_ps_display("startup", false);
 
@@ -353,11 +356,10 @@ static bool CheckLocalConnection()
     Assert(u_sess->proc_cxt.MyProcPort != NULL);
     if (IS_AF_UNIX(u_sess->proc_cxt.MyProcPort->raddr.addr.ss_family) ||
         strcmp(u_sess->proc_cxt.MyProcPort->remote_host, "127.0.0.1") == 0 ||
-        strcmp(u_sess->proc_cxt.MyProcPort->remote_host, "::1") == 0) {
+        strcmp(u_sess->proc_cxt.MyProcPort->remote_host, "::1") == 0)
         return true;
-    } else {
+    else
         return false;
-    }
 }
 
 static void SaveSessionEncodingInfo(Form_pg_database dbform)
@@ -373,103 +375,24 @@ static void SaveSessionEncodingInfo(Form_pg_database dbform)
     securec_check(rc, "\0", "\0");
 }
 
-/*
- * CheckMyDatabase -- fetch information from the pg_database entry for our DB
- */
-static void CheckMyDatabase(const char* name, bool am_superuser)
+static void SetEncordingInfo(Form_pg_database dbform, char* collate, char* ctype)
 {
-    HeapTuple tup;
-    Form_pg_database db_form;
-    char* collate = NULL;
-    char* ctype = NULL;
-
-    /* Fetch our pg_database row normally, via syscache */
-    tup = SearchSysCache1(DATABASEOID, ObjectIdGetDatum(u_sess->proc_cxt.MyDatabaseId));
-
-    if (!HeapTupleIsValid(tup)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_OBJECT),
-                errmsg("cache lookup failed for database %u", u_sess->proc_cxt.MyDatabaseId)));
-    }
-
-    db_form = (Form_pg_database)GETSTRUCT(tup);
-
-    /* This recheck is strictly paranoia */
-    if (strcmp(name, NameStr(db_form->datname)) != 0) {
-        ereport(FATAL,
-            (errcode(ERRCODE_UNDEFINED_DATABASE),
-                errmsg("database \"%s\" has disappeared from pg_database", name),
-                errdetail("Database OID %u now seems to belong to \"%s\".",
-                    u_sess->proc_cxt.MyDatabaseId,
-                    NameStr(db_form->datname))));
-    }
-    /*
-     * Check permissions to connect to the database.
-     *
-     * These checks are not enforced when in standalone mode, so that there is
-     * a way to recover from disabling all access to all databases, for
-     * example "UPDATE pg_database SET datallowconn = false;".
-     *
-     * We do not enforce them for autovacuum worker processes either.
-     */
-    if (IsUnderPostmaster && !IsAutoVacuumWorkerProcess()) {
-        /*
-         * Check that the database is currently allowing connections.
-         */
-        if (!db_form->datallowconn && (u_sess->attr.attr_common.upgrade_mode == 0 || !am_superuser)) {
-            ereport(FATAL,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                    errmsg("database \"%s\" is not currently accepting connections", name)));
-        }
-        /*
-         * Check privilege to connect to the database.	(The am_superuser test
-         * is redundant, but since we have the flag, might as well check it
-         * and save a few cycles.)
-         */
-        if (!am_superuser &&
-            pg_database_aclcheck(u_sess->proc_cxt.MyDatabaseId, GetUserId(), ACL_CONNECT) != ACLCHECK_OK) {
-            ereport(FATAL,
-                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                    errmsg("permission denied for database \"%s\"", name),
-                    errdetail("User does not have CONNECT privilege.")));
-        }
-        /*
-         * Check connection limit for this database.
-         *
-         * There is a race condition here --- we create our PGPROC before
-         * checking for other PGPROCs.	If two backends did this at about the
-         * same time, they might both think they were over the limit, while
-         * ideally one should succeed and one fail.  Getting that to work
-         * exactly seems more trouble than it is worth, however; instead we
-         * just document that the connection limit is approximate.
-         */
-        if (db_form->datconnlimit >= 0 && !am_superuser &&
-            CountDBBackends(u_sess->proc_cxt.MyDatabaseId) > db_form->datconnlimit) {
-            ReportAlarmTooManyDatabaseConn(name);
-
-            ereport(FATAL,
-                (errcode(ERRCODE_TOO_MANY_CONNECTIONS), errmsg("too many connections for database \"%s\"", name)));
-        } else if (!am_superuser) {
-            ReportResumeTooManyDatabaseConn(name);
-        }
-    }
-
     /*
      * OK, we're golden.  Next to-do item is to save the encoding info out of
      * the pg_database tuple.
      */
-    SetDatabaseEncoding(db_form->encoding);
+    SetDatabaseEncoding(dbform->encoding);
     /* Record it as a GUC internal option, too */
     SetConfigOption("server_encoding", GetDatabaseEncodingName(), PGC_INTERNAL, PGC_S_OVERRIDE);
     /* If we have no other source of client_encoding, use server encoding */
     SetConfigOption("client_encoding", GetDatabaseEncodingName(), PGC_BACKEND, PGC_S_DYNAMIC_DEFAULT);
 
     // if we are identical no bother to set that in thread pool settings.
-    if (!IS_THREAD_POOL_WORKER || strcmp(NameStr(db_form->datcollate), NameStr(t_thrd.port_cxt.cur_datcollate)) != 0 ||
-        strcmp(NameStr(db_form->datctype), NameStr(t_thrd.port_cxt.cur_datctype)) != 0) {
+    if (!IS_THREAD_POOL_WORKER || strcmp(NameStr(dbform->datcollate), NameStr(t_thrd.port_cxt.cur_datcollate)) != 0 ||
+        strcmp(NameStr(dbform->datctype), NameStr(t_thrd.port_cxt.cur_datctype)) != 0) {
         /* assign locale variables */
-        collate = NameStr(db_form->datcollate);
-        ctype = NameStr(db_form->datctype);
+        collate = NameStr(dbform->datcollate);
+        ctype = NameStr(dbform->datctype);
 
         if (pg_perm_setlocale(LC_COLLATE, collate) == NULL) {
             ereport(FATAL,
@@ -501,20 +424,107 @@ static void CheckMyDatabase(const char* name, bool am_superuser)
 
     if (IS_THREAD_POOL_WORKER) {
         // save for next session time restore.
-        SaveSessionEncodingInfo(db_form);
+        SaveSessionEncodingInfo(dbform);
     }
 
-    SetConfigOption("sql_compatibility", NameStr(db_form->datcompatibility), PGC_INTERNAL, PGC_S_OVERRIDE);
+    SetConfigOption("sql_compatibility", NameStr(dbform->datcompatibility), PGC_INTERNAL, PGC_S_OVERRIDE);
+    return;
+}
+
+/*
+ * CheckMyDatabase -- fetch information from the pg_database entry for our DB
+ */
+static void CheckMyDatabase(const char* name, bool am_superuser)
+{
+    HeapTuple tup;
+    Form_pg_database dbform;
+    char* collate = NULL;
+    char* ctype = NULL;
+
+    /* Fetch our pg_database row normally, via syscache */
+    tup = SearchSysCache1(DATABASEOID, ObjectIdGetDatum(u_sess->proc_cxt.MyDatabaseId));
+
+    if (!HeapTupleIsValid(tup))
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("cache lookup failed for database %u", u_sess->proc_cxt.MyDatabaseId)));
+
+    dbform = (Form_pg_database)GETSTRUCT(tup);
+
+    /* This recheck is strictly paranoia */
+    if (strcmp(name, NameStr(dbform->datname)) != 0)
+        ereport(FATAL,
+            (errcode(ERRCODE_UNDEFINED_DATABASE),
+                errmsg("database \"%s\" has disappeared from pg_database", name),
+                errdetail("Database OID %u now seems to belong to \"%s\".",
+                    u_sess->proc_cxt.MyDatabaseId,
+                    NameStr(dbform->datname))));
+
+    /*
+     * Check permissions to connect to the database.
+     *
+     * These checks are not enforced when in standalone mode, so that there is
+     * a way to recover from disabling all access to all databases, for
+     * example "UPDATE pg_database SET datallowconn = false;".
+     *
+     * We now enforce them for autovacuum worker processes.
+     */
+    if (IsUnderPostmaster) {
+        /*
+         * Check that the database is currently allowing connections.
+         */
+        if (!IsAutoVacuumWorkerProcess() &&
+            !dbform->datallowconn && 
+            (u_sess->attr.attr_common.upgrade_mode == 0 || !am_superuser))
+            ereport(FATAL,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                    errmsg("database \"%s\" is not currently accepting connections", name)));
+
+        /*
+         * Check privilege to connect to the database.	(The am_superuser test
+         * is redundant, but since we have the flag, might as well check it
+         * and save a few cycles.)
+         */
+        if (!am_superuser &&
+            pg_database_aclcheck(u_sess->proc_cxt.MyDatabaseId, GetUserId(), ACL_CONNECT) != ACLCHECK_OK)
+            ereport(FATAL,
+                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                    errmsg("permission denied for database \"%s\"", name),
+                    errdetail("User does not have CONNECT privilege.")));
+
+        /*
+         * Check connection limit for this database.
+         *
+         * There is a race condition here --- we create our PGPROC before
+         * checking for other PGPROCs.	If two backends did this at about the
+         * same time, they might both think they were over the limit, while
+         * ideally one should succeed and one fail.  Getting that to work
+         * exactly seems more trouble than it is worth, however; instead we
+         * just document that the connection limit is approximate.
+         */
+        if (dbform->datconnlimit >= 0 &&
+            (!am_superuser || IsAutoVacuumWorkerProcess()) &&
+            CountDBBackends(u_sess->proc_cxt.MyDatabaseId) > dbform->datconnlimit) {
+            ReportAlarmTooManyDatabaseConn(name);
+
+            ereport(FATAL,
+                (errcode(ERRCODE_TOO_MANY_CONNECTIONS), errmsg("too many connections for database \"%s\"", name)));
+        } else if (!am_superuser) {
+            ReportResumeTooManyDatabaseConn(name);
+        }
+    }
+
+    SetEncordingInfo(dbform, collate, ctype);
 
     ReleaseSysCache(tup);
 }
 
 static void CheckConnAuthority(const char* name, bool am_superuser)
 {
-    // Database Security: Check privilege to connect to the database.
-    // Only superuser on the local machine can connect to "template1".
     if (IsUnderPostmaster && !IsAutoVacuumWorkerProcess() && !IsJobSchedulerProcess() && !IsJobWorkerProcess()) {
-        if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && IsConnFromApp() &&
+        /* Database Security: Check privilege to connect to the database.
+         * Only superuser on the local machine can connect to "template1".*/
+        if (IS_PGXC_COORDINATOR && IsConnFromApp() &&
             (!am_superuser || !IsLocalAddr(u_sess->proc_cxt.MyProcPort)) &&
             strcmp(name, "template1") == 0) {
             ereport(FATAL,
@@ -534,9 +544,11 @@ static void CheckConnAuthority(const char* name, bool am_superuser)
  */
 static void InitCommunication(void)
 {
-
-    // initialize shared memory and semaphores appropriately.
-    if (!IsUnderPostmaster) { // postmaster already did this
+    /*
+     * initialize shared memory and semaphores appropriately.
+     */
+    if (!IsUnderPostmaster) /* postmaster already did this */
+    {
         /*
          * We're running a postgres bootstrap process or a standalone backend.
          * Create private "shmem" and semaphores.
@@ -565,9 +577,9 @@ void pg_split_opts(char** argv, int* argcp, char* optstr)
         while (isspace((unsigned char)*optstr)) {
             optstr++;
         }
-        if (*optstr == '\0') {
+
+        if (*optstr == '\0')
             break;
-        }
 
         argv[(*argcp)++] = optstr;
 
@@ -575,9 +587,8 @@ void pg_split_opts(char** argv, int* argcp, char* optstr)
             optstr++;
         }
 
-        if (*optstr) {
+        if (*optstr)
             *optstr++ = '\0';
-        }
     }
 }
 
@@ -612,7 +623,7 @@ void PostgresResetUsernamePgoption(const char* username)
 {
     ereport(DEBUG3, (errmsg("PostgresResetUsernamePgoption()")));
 
-    bool boot_strap = IsBootstrapProcessingMode();
+    bool bootstrap = IsBootstrapProcessingMode();
     bool am_superuser = false;
 
     /*
@@ -623,7 +634,7 @@ void PostgresResetUsernamePgoption(const char* username)
      * to prune them even if the process doesn't attempt to modify any
      * tuples.)
      */
-    if (!boot_strap && !dummyStandbyMode) {
+    if (!bootstrap && !dummyStandbyMode) {
         /* statement_timestamp must be set for timeouts to work correctly */
         SetCurrentStatementStartTimestamp();
         StartTransactionCommand();
@@ -646,19 +657,19 @@ void PostgresResetUsernamePgoption(const char* username)
      * In standalone mode and in autovacuum worker processes, we use a fixed
      * ID, otherwise we figure it out from the authenticated user name.
      */
-    if (boot_strap) {
+
+    if (bootstrap) {
         InitializeSessionUserIdStandalone();
         am_superuser = true;
     } else if (!IsUnderPostmaster) {
         InitializeSessionUserIdStandalone();
         am_superuser = true;
 
-        if (!ThereIsAtLeastOneRole()) {
+        if (!ThereIsAtLeastOneRole())
             ereport(WARNING,
                 (errcode(ERRCODE_UNDEFINED_OBJECT),
                     errmsg("no roles are defined in this database system"),
                     errhint("You should immediately run CREATE USER \"%s\" sysadmin;.", username)));
-        }
     } else {
         /* normal multiuser case */
         Assert(u_sess->proc_cxt.MyProcPort != NULL);
@@ -676,7 +687,7 @@ void PostgresResetUsernamePgoption(const char* username)
                 u_sess->proc_cxt.MyProcPort->user_name = (char*)GetSuperUserName((char*)username);
             }
 
-            InitializeSessionUserId(username, InvalidOid);
+            InitializeSessionUserId(username);
             am_superuser = superuser();
             u_sess->misc_cxt.CurrentUserName = u_sess->proc_cxt.MyProcPort->user_name;
         }
@@ -687,14 +698,12 @@ void PostgresResetUsernamePgoption(const char* username)
      * settings passed in the startup packet.	We couldn't do this before
      * because we didn't know if client is a superuser.
      */
-    if (u_sess->proc_cxt.MyProcPort != NULL) {
+    if (u_sess->proc_cxt.MyProcPort != NULL)
         process_pgoptions(u_sess->proc_cxt.MyProcPort, am_superuser);
-    }
 
     /* close the transaction we started above */
-    if (!boot_strap) {
+    if (!bootstrap)
         CommitTransactionCommand();
-    }
 }
 
 /*
@@ -711,7 +720,8 @@ static void process_startup_options(Port* port, bool am_superuser)
     char* name = NULL;
     char* value = NULL;
 
-    gucctx = am_superuser ? PGC_SUSET : PGC_BACKEND;
+    gucctx = (am_superuser || (isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) ?
+        PGC_SUSET : PGC_BACKEND;
 
     /*
      * First process any command-line switches that were included in the
@@ -752,7 +762,7 @@ static void process_startup_options(Port* port, bool am_superuser)
     }
 
     /* sanity check for ha maintenance port -- only super users are allowed to connect with client applications. */
-    if (IsConnFromApp() && IsHAPort(port) && !am_superuser) {
+    if (IsConnFromApp() && IsHAPort(port) && !(am_superuser || isOperatoradmin(GetUserId()))) {
         ConnAuthMethodCorrect = false;
         ereport(FATAL,
             (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
@@ -771,16 +781,31 @@ static void process_startup_options(Port* port, bool am_superuser)
         if (((IS_PGXC_COORDINATOR && !is_cluster_internal_connection(port)) || 
             (IS_SINGLE_NODE && !is_node_internal_connection(port))) &&
             !(u_sess->proc_cxt.clientIsGsCtl && AM_WAL_SENDER)) {
+            /* 
+             * Database Security: Support database audit Audit user login
+             * it's unsafe to deal with plugins hooks as dynamic lib may be released 
+             */
+            if (!(g_instance.status > NoShutdown) && user_login_hook) {
+                user_login_hook(port->database_name, port->user_name, false, true);
+            }
             ereport(FATAL,
                 (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                     errmsg("Forbid remote connection via internal maintenance tools.")));
         }
 
-        /* check 2 -- forbid non-initial users, except during cluster resizing with gs_redis */
+        /* check 2 -- forbid non-initial users, except gs_roach and during cluster resizing with gs_redis */
         if (!dummyStandbyMode && GetRoleOid(port->user_name) != INITIAL_USER_ID &&
-            !(ClusterResizingInProgress() && u_sess->proc_cxt.clientIsGsredis)) {
+            !(ClusterResizingInProgress() && u_sess->proc_cxt.clientIsGsredis) && !u_sess->proc_cxt.clientIsGsroach) {
             ereport(FATAL,
                 (errcode(ERRCODE_INVALID_OPERATION), errmsg("Inner maintenance tools only for the initial user.")));
+        }
+
+        /* check 3 -- forbid non-initial and non-operatoradmin for gs_roach */
+        if (u_sess->proc_cxt.clientIsGsroach && !dummyStandbyMode && GetRoleOid(port->user_name) != INITIAL_USER_ID &&
+                !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) {
+            ereport(FATAL,
+                (errcode(ERRCODE_INVALID_OPERATION),
+                    errmsg("Only allow initial user or operator admin to use operation tool gs_roach.")));
         }
     }
 
@@ -815,7 +840,7 @@ static void process_startup_options(Port* port, bool am_superuser)
                     pg_strcasecmp(u_sess->attr.attr_common.namespace_current_schema, value) == 0))) {
             rc = sprintf_s(sql, sizeof(sql), "SET %s = %s;", name, value);
             securec_check_ss(rc, "\0", "\0");
-            (void)register_pooler_session_param(name, sql);
+            (void)register_pooler_session_param(name, sql, POOL_CMD_GLOBAL_SET);
             ereport(DEBUG1, (errmsg("Save pooler session param: %s in startup", sql)));
         }
     }
@@ -829,7 +854,8 @@ static void process_pgoptions(Port* port, bool am_superuser)
 {
     GucContext gucctx;
 
-    gucctx = am_superuser ? PGC_SUSET : PGC_BACKEND;
+    gucctx = (am_superuser || (isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))?
+        PGC_SUSET : PGC_BACKEND;
 
     /*
      * Process any command-line if we are in a regular backend.
@@ -869,19 +895,19 @@ static void process_pgoptions(Port* port, bool am_superuser)
  */
 static void process_settings(Oid databaseid, Oid roleid)
 {
-    Relation rel_setting;
+    Relation relsetting;
 
-    if (!IsUnderPostmaster) {
+    if (!IsUnderPostmaster)
         return;
-    }
-    rel_setting = heap_open(DbRoleSettingRelationId, AccessShareLock);
+
+    relsetting = heap_open(DbRoleSettingRelationId, AccessShareLock);
 
     /* Later settings are ignored if set earlier. */
-    ApplySetting(databaseid, roleid, rel_setting, PGC_S_DATABASE_USER);
-    ApplySetting(InvalidOid, roleid, rel_setting, PGC_S_USER);
-    ApplySetting(databaseid, InvalidOid, rel_setting, PGC_S_DATABASE);
+    ApplySetting(databaseid, roleid, relsetting, PGC_S_DATABASE_USER);
+    ApplySetting(InvalidOid, roleid, relsetting, PGC_S_USER);
+    ApplySetting(databaseid, InvalidOid, relsetting, PGC_S_DATABASE);
 
-    heap_close(rel_setting, AccessShareLock);
+    heap_close(relsetting, AccessShareLock);
 }
 
 /*
@@ -896,11 +922,14 @@ static void process_settings(Oid databaseid, Oid roleid)
  */
 void ShutdownPostgres(int code, Datum arg)
 {
+    if (unlikely(u_sess->proc_cxt.gsRewindAddCount == true)) {
+        u_sess->proc_cxt.gsRewindAddCount = false;
+        (void)pg_atomic_sub_fetch_u32(&g_instance.comm_cxt.current_gsrewind_count, 1);
+    }
     SetInstrNull();
     /* Mark recursive vfd is invalid before aborting transaction. */
-#ifdef ENABLE_MULTIPLE_NODES
     StreamNodeGroup::MarkRecursiveVfdInvalid();
-#endif
+
     /* Make sure we've killed any active transaction */
     AbortOutOfAnyTransaction();
 
@@ -908,11 +937,11 @@ void ShutdownPostgres(int code, Datum arg)
      * If stream Top consumer or stream thread end up as elog FATAL, we must wait until we
      * get a sync point
      */
-#ifdef ENABLE_MULTIPLE_NODES
+
     StreamNodeGroup::syncQuit(STREAM_ERROR);
     StreamNodeGroup::destroy(STREAM_ERROR);
     ForgetRegisterStreamSnapshots();
-#endif
+
     /* Free remote xact state */
     free_RemoteXactState();
 
@@ -934,7 +963,7 @@ void ShutdownPostgres(int code, Datum arg)
 static bool ThereIsAtLeastOneRole(void)
 {
     Relation pg_authid_rel;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     bool result = false;
 
     pg_authid_rel = heap_open(AuthIdRelationId, AccessShareLock);
@@ -966,7 +995,7 @@ static void AlterPgxcNodePort(void)
     const char* node_port_str = NULL;
     int node_port;
     HeapTuple oldtup, newtup;
-    Oid node_oid;
+    Oid nodeOid;
     Relation rel;
     Datum new_record[Natts_pgxc_node];
     bool new_record_nulls[Natts_pgxc_node];
@@ -983,32 +1012,36 @@ static void AlterPgxcNodePort(void)
     }
     SpinLockRelease(&hashmdata->mutex);
 
-    if (!IsPostmasterEnvironment || !need_repair || isRestoreMode) {
+    if (!IsPostmasterEnvironment || !need_repair || isRestoreMode)
         return;
-    }
+
     node_name = GetConfigOption("pgxc_node_name", false, false);
     node_port_str = GetConfigOption("port", false, false);
-    node_oid = get_pgxc_nodeoid(node_name);
+    nodeOid = get_pgxc_nodeoid(node_name);
 
-    if (IS_PGXC_DATANODE) {
+    if (IS_PGXC_DATANODE)
         node_type = PGXC_NODE_DATANODE;
-    }
+
     /* Only a DB administrator can alter cluster nodes */
-    if (!superuser()) {
+    if (!superuser())
         return;
-    }
-    /* Look at the node tuple, and take exclusive lock on it */
-    rel = heap_open(PgxcNodeRelationId, RowExclusiveLock);
+
+    /*
+     * Look at the node tuple, and take exclusive lock on it,
+     * to make sure all update operations are serialized, ShareUpdateExclusiveLock is used,
+     * which is configed with itself, to avoid concurrent modifications.
+     */
+    rel = heap_open(PgxcNodeRelationId, ShareUpdateExclusiveLock);
 
     /* Check that node exists */
-    if (!OidIsValid(node_oid)) {
+    if (!OidIsValid(nodeOid))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("PGXC Node %s: object not defined", node_name)));
-    }
+
     /* Open new tuple, checks are performed on it and new values */
-    oldtup = SearchSysCacheCopy1(PGXCNODEOID, ObjectIdGetDatum(node_oid));
-    if (!HeapTupleIsValid(oldtup)) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("cache lookup failed for object %u", node_oid)));
-    }
+    oldtup = SearchSysCacheCopy1(PGXCNODEOID, ObjectIdGetDatum(nodeOid));
+    if (!HeapTupleIsValid(oldtup))
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("cache lookup failed for object %u", nodeOid)));
+
     /* Update values for catalog entry */
     node_port = atoi(node_port_str);
 
@@ -1037,9 +1070,9 @@ static void AlterPgxcNodePort(void)
 
         /* Update indexes */
         CatalogUpdateIndexes(rel, newtup);
+    } else {
+        need_repair = FALSE;
     }
-
-    need_repair = FALSE;
 
     heap_freetuple(oldtup);
     /* Release lock at Commit */
@@ -1047,12 +1080,45 @@ static void AlterPgxcNodePort(void)
 }
 #endif
 
+static bool hasTuples(const Oid relOid)
+{
+    Relation rel = NULL;
+    TableScanDesc scan = NULL;
+    bool result = false;
+
+    if (!IsUnderPostmaster) {
+        return false;
+    }
+    rel = heap_open(relOid, AccessShareLock);
+    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    result = (heap_getnext(scan, ForwardScanDirection) != NULL);
+    heap_endscan(scan);
+    heap_close(rel, AccessShareLock);
+
+    return result;
+}
+static int8 getClientCacheRefreshType ()
+{
+    int8 result = 0;
+    if (!hasTuples(ClientLogicGlobalSettingsId)) {
+        return result;
+    } else {
+        result = result | 1; /* 1: CMK type */
+        if (hasTuples(ClientLogicColumnSettingsId)) {
+            result = result | 2; /* 2：CEK type */
+            if (hasTuples(ClientLogicCachedColumnsId)) {
+                result = result | 4; /* 4: COLUMNS type */
+            }
+        }
+    }
+    return result;
+}
+
 PostgresInitializer::PostgresInitializer()
 {
     m_indbname = NULL;
     m_dboid = InvalidOid;
     m_username = NULL;
-    m_useroid = InvalidOid;
     m_isSuperUser = false;
     m_fullpath = NULL;
     memset_s(m_dbname, NAMEDATALEN, 0, NAMEDATALEN);
@@ -1061,20 +1127,17 @@ PostgresInitializer::PostgresInitializer()
 
 PostgresInitializer::~PostgresInitializer()
 {
-    if (m_fullpath != NULL) {
+    if (m_fullpath != NULL)
         pfree_ext(m_fullpath);
-    }
     m_indbname = NULL;
     m_username = NULL;
 }
 
-void PostgresInitializer::SetDatabaseAndUser(
-    const char* in_dbname, Oid dboid, const char* username, Oid useroid)
+void PostgresInitializer::SetDatabaseAndUser(const char* in_dbname, Oid dboid, const char* username)
 {
     m_indbname = in_dbname;
     m_dboid = dboid;
     m_username = username;
-    m_useroid = useroid;
 }
 
 void PostgresInitializer::InitBootstrap()
@@ -1096,8 +1159,6 @@ void PostgresInitializer::InitBootstrap()
     InitPGXCPort();
 
     InitSettings();
-
-    AuditUserLogin();
 }
 
 void PostgresInitializer::InitJobScheduler()
@@ -1121,15 +1182,15 @@ void PostgresInitializer::InitJobScheduler()
 
     LoadSysCache();
 
-    CheckDatabaseAuth();
+    InitDatabase();
 
-    InitPGXCPort();
+    if (IS_PGXC_COORDINATOR) {
+        InitPGXCPort();
+    }
 
     InitSettings();
 
     FinishInit();
-
-    AuditUserLogin();
 }
 
 void PostgresInitializer::InitJobExecuteWorker()
@@ -1153,15 +1214,15 @@ void PostgresInitializer::InitJobExecuteWorker()
 
     LoadSysCache();
 
-    CheckDatabaseAuth();
+    InitDatabase();
 
-    InitPGXCPort();
+    if (IS_PGXC_COORDINATOR) {
+        InitPGXCPort();
+    }
 
     InitSettings();
 
     FinishInit();
-
-    AuditUserLogin();
 }
 
 void PostgresInitializer::InitSnapshotWorker()
@@ -1185,15 +1246,77 @@ void PostgresInitializer::InitSnapshotWorker()
 
     LoadSysCache();
 
-    CheckDatabaseAuth();
+    InitDatabase();
 
     InitPGXCPort();
 
     InitSettings();
 
     FinishInit();
+}
 
-    AuditUserLogin();
+void PostgresInitializer::InitAspWorker()
+{
+    InitThread();
+
+    InitSysCache();
+
+    /* Initialize stats collection --- must happen before first xact */
+    pgstat_initialize();
+
+    SetProcessExitCallback();
+
+    StartXact();
+
+    SetSuperUserAndDatabase();
+
+    CheckConnPermission();
+
+    SetDatabase();
+
+    LoadSysCache();
+
+    InitDatabase();
+
+    if (IS_PGXC_COORDINATOR) {
+        InitPGXCPort();
+    }
+
+    InitSettings();
+
+    FinishInit();
+}
+
+void PostgresInitializer::InitStatementWorker()
+{
+    InitThread();
+
+    InitSysCache();
+
+    /* Initialize stats collection --- must happen before first xact */
+    pgstat_initialize();
+
+    SetProcessExitCallback();
+
+    StartXact();
+
+    SetSuperUserAndDatabase();
+
+    CheckConnPermission();
+
+    SetDatabase();
+
+    LoadSysCache();
+
+    InitDatabase();
+
+    if (IS_PGXC_COORDINATOR) {
+        InitPGXCPort();
+    }
+
+    InitSettings();
+
+    FinishInit();
 }
 
 void PostgresInitializer::InitPercentileWorker()
@@ -1217,15 +1340,13 @@ void PostgresInitializer::InitPercentileWorker()
 
     LoadSysCache();
 
-    CheckDatabaseAuth();
+    InitDatabase();
 
     InitPGXCPort();
 
     InitSettings();
 
     FinishInit();
-
-    AuditUserLogin();
 }
 
 void PostgresInitializer::InitAutoVacLauncher()
@@ -1238,6 +1359,38 @@ void PostgresInitializer::InitAutoVacLauncher()
     pgstat_initialize();
 
     SetProcessExitCallback();
+
+    return;
+}
+
+void PostgresInitializer::InitCsnminSync()
+{
+    InitThread();
+
+    InitSysCache();
+
+    /* Initialize stats collection --- must happen before first xact */
+    pgstat_initialize();
+
+    SetProcessExitCallback();
+
+    StartXact();
+
+    SetSuperUserAndDatabase();
+
+    CheckConnPermission();
+
+    SetDatabase();
+
+    LoadSysCache();
+
+    InitDatabase();
+
+    InitPGXCPort();
+
+    InitSettings();
+
+    FinishInit();
 
     return;
 }
@@ -1263,15 +1416,13 @@ void PostgresInitializer::InitAutoVacWorker()
 
     LoadSysCache();
 
-    CheckDatabaseAuth();
+    InitDatabase();
 
     InitPGXCPort();
 
     InitSettings();
 
     FinishInit();
-
-    AuditUserLogin();
 }
 
 void PostgresInitializer::InitCatchupWorker()
@@ -1295,6 +1446,11 @@ void PostgresInitializer::InitBackendWorker()
     pgstat_initialize();
 
     SetProcessExitCallback();
+    /* add rewind counter after destory callback function is binded */
+    if(unlikely(u_sess->proc_cxt.clientIsGsrewind == true && u_sess->proc_cxt.gsRewindAddCount == false)) {
+        u_sess->proc_cxt.gsRewindAddCount = true;
+        (void)pg_atomic_add_fetch_u32(&g_instance.comm_cxt.current_gsrewind_count, 1);
+    }
 
     if (!IS_THREAD_POOL_WORKER) {
         InitSession();
@@ -1309,32 +1465,14 @@ void PostgresInitializer::InitStreamWorker()
 {
     InitThread();
 
-    InitSysCache();
-
     /* Initialize stats collection --- must happen before first xact */
     pgstat_initialize();
 
     SetProcessExitCallback();
 
-    StartXact();
-
-    InitUser();
-
-    CheckConnPermission();
-
-    SetDatabase();
-
-    LoadSysCache();
-
-    CheckDatabaseAuth();
-
-    InitPGXCPort();
-
-    InitSettings();
-
-    FinishInit();
-
-    AuditUserLogin();
+    if (!IS_THREAD_POOL_STREAM) {
+        InitStreamSession();
+    }
 }
 
 void PostgresInitializer::InitWLM()
@@ -1358,15 +1496,15 @@ void PostgresInitializer::InitWLM()
 
     LoadSysCache();
 
-    CheckDatabaseAuth();
+    InitDatabase();
 
-    InitPGXCPort();
+    if (IS_PGXC_COORDINATOR) {
+        InitPGXCPort();
+    }
 
     InitSettings();
 
     FinishInit();
-
-    AuditUserLogin();
 }
 
 void PostgresInitializer::InitWAL()
@@ -1405,15 +1543,101 @@ void PostgresInitializer::InitWAL()
 
     LoadSysCache();
 
-    CheckDatabaseAuth();
+    InitDatabase();    
 
     InitPGXCPort();
 
     InitSettings();
 
     FinishInit();
+}
 
-    AuditUserLogin();
+void PostgresInitializer::InitCompactionWorker()
+{
+    u_sess->attr.attr_common.IgnoreSystemIndexes = false;
+
+    InitCompactionThread();
+
+    InitSysCache();
+
+    SetProcessExitCallback();
+
+    StartXact();
+
+    SetSuperUserStandalone();
+
+    CheckConnPermission();
+
+    SetDatabase();
+
+    LoadSysCache();
+
+    InitDatabase();
+
+    InitPGXCPort();
+
+    InitSettings();
+
+    FinishInit();
+}
+
+void PostgresInitializer::InitStreamingBackend()
+{
+    InitThread();
+
+    InitSysCache();
+
+    /* Initialize stats collection --- must happen before first xact */
+    pgstat_initialize();
+
+    SetProcessExitCallback();
+
+    StartXact();
+
+    SetSuperUserAndDatabase();
+
+    CheckConnPermission();
+
+    SetDatabase();
+
+    LoadSysCache();
+
+    InitDatabase();
+
+    if (IS_PGXC_COORDINATOR) {
+        InitPGXCPort();
+    }
+
+    InitSettings();
+
+    FinishInit();
+}
+
+void PostgresInitializer::InitCompactionWorkerSwitchSession()
+{
+    if (m_fullpath) {
+        m_fullpath = NULL;
+    }
+    memset_s(m_dbname, NAMEDATALEN, 0, NAMEDATALEN);
+    memset_s(m_details, PGAUDIT_MAXLENGTH, 0, PGAUDIT_MAXLENGTH);
+
+    InitSysCache();
+
+    StartXact();
+
+    SetSuperUserStandalone();
+
+    CheckConnPermission();
+
+    SetDatabase();
+
+    LoadSysCache();
+
+    InitDatabase();
+
+    InitSettings();
+
+    FinishInit();
 }
 
 void PostgresInitializer::GetDatabaseName(char* out_dbname)
@@ -1445,9 +1669,9 @@ void PostgresInitializer::InitThread()
 
     SharedInvalBackendInit(IS_THREAD_POOL_WORKER, false);
 
-    if (t_thrd.proc_cxt.MyBackendId > g_instance.shmem_cxt.MaxBackends || t_thrd.proc_cxt.MyBackendId <= 0) {
+    if (t_thrd.proc_cxt.MyBackendId > g_instance.shmem_cxt.MaxBackends || t_thrd.proc_cxt.MyBackendId <= 0)
         ereport(FATAL, (errmsg("bad backend ID: %d", t_thrd.proc_cxt.MyBackendId)));
-    }
+
     /* Now that we have a BackendId, we can participate in ProcSignal */
     ProcSignalInit(t_thrd.proc_cxt.MyBackendId);
 
@@ -1485,19 +1709,12 @@ void PostgresInitializer::InitSession()
 
     StartXact();
 
-    if (!IsUnderPostmaster) {
-        CheckAtLeastOneRoles();
-        SetSuperUserStandalone();
-    } else if (t_thrd.bgworker_cxt.is_background_worker) {
-        if (m_username == NULL && !OidIsValid(m_useroid)) {
-			InitializeSessionUserIdStandalone();
-			m_isSuperUser = true;
-        } else {
-            InitUser();
-        }
-    } else {
+    if (IsUnderPostmaster) {
         CheckAuthentication();
         InitUser();
+    } else {
+        CheckAtLeastOneRoles();
+        SetSuperUserStandalone();
     }
 
     CheckConnPermission();
@@ -1506,7 +1723,7 @@ void PostgresInitializer::InitSession()
 
     LoadSysCache();
 
-    CheckDatabaseAuth();
+    InitDatabase();
 
     InitPGXCPort();
 
@@ -1515,6 +1732,27 @@ void PostgresInitializer::InitSession()
     FinishInit();
 
     AuditUserLogin();
+}
+
+void PostgresInitializer::InitStreamSession()
+{
+    InitSysCache();
+
+    StartXact();
+
+    InitUser();
+
+    SetDatabase();
+
+    LoadSysCache();
+
+    InitDatabase();
+
+    InitPGXCPort();
+
+    InitSettings();
+
+    FinishInit();
 }
 
 void PostgresInitializer::InitSysCache()
@@ -1538,9 +1776,6 @@ void PostgresInitializer::InitSysCache()
 
     InitCatalogCache();
     InitPlanCache();
-
-    /* Initialize portal manager */
-    EnablePortalManager();
 }
 
 void PostgresInitializer::SetProcessExitCallback()
@@ -1587,11 +1822,10 @@ void PostgresInitializer::StartXact()
 void PostgresInitializer::CheckAuthentication()
 {
     /* for logic conn, we do auth in libcomm, so no auth process anymore */
-    if (u_sess->proc_cxt.MyProcPort->is_logic_conn) {
+    if (u_sess->proc_cxt.MyProcPort->is_logic_conn)
         u_sess->ClientAuthInProgress = false;
-    } else {
+    else
         PerformAuthentication(u_sess->proc_cxt.MyProcPort);
-    }
 }
 
 void PostgresInitializer::SetSuperUserStandalone()
@@ -1602,12 +1836,11 @@ void PostgresInitializer::SetSuperUserStandalone()
 
 void PostgresInitializer::CheckAtLeastOneRoles()
 {
-    if (!ThereIsAtLeastOneRole()) {
+    if (!ThereIsAtLeastOneRole())
         ereport(WARNING,
             (errcode(ERRCODE_UNDEFINED_OBJECT),
                 errmsg("no roles are defined in this database system"),
                 errhint("You should immediately run CREATE USER \"%s\" sysadmin;.", m_username)));
-    }
 }
 
 void PostgresInitializer::SetSuperUserAndDatabase()
@@ -1624,7 +1857,7 @@ void PostgresInitializer::SetSuperUserAndDatabase()
 
 void PostgresInitializer::InitUser()
 {
-    InitializeSessionUserId(m_username, m_useroid);
+    InitializeSessionUserId(m_username);
     m_isSuperUser = superuser();
     u_sess->misc_cxt.CurrentUserName = u_sess->proc_cxt.MyProcPort->user_name;
 }
@@ -1644,15 +1877,14 @@ void PostgresInitializer::CheckConnPermissionInShutDown()
      */
     if ((!m_isSuperUser || AM_WAL_SENDER) && u_sess->proc_cxt.MyProcPort != NULL &&
         u_sess->proc_cxt.MyProcPort->canAcceptConnections == CAC_WAITBACKUP) {
-        if (AM_WAL_SENDER) {
+        if (AM_WAL_SENDER)
             ereport(FATAL,
                 (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                     errmsg("new replication connections are not allowed during database shutdown")));
-        } else {
+        else
             ereport(FATAL,
                 (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                     errmsg("must be system admin to connect during database shutdown")));
-        }
     }
 }
 
@@ -1677,24 +1909,54 @@ void PostgresInitializer::CheckConnLimitation()
      * interactive use.
      * Inner tools use independent counter.
      */
-    if (!u_sess->proc_cxt.IsInnerMaintenanceTools) {
-        if (GetUsedConnectionCount() > g_instance.attr.attr_network.MaxConnections ||
-            !HaveNFreeProcs(g_instance.attr.attr_network.ReservedBackends)) {
-            /* if postgres for am_superuser, allowed to pass */
-            if (!m_isSuperUser || AM_WAL_SENDER) {
-                int active_count = pgstat_get_current_active_numbackends();
-                ereport(FATAL,
-                    (errcode(ERRCODE_TOO_MANY_CONNECTIONS),
-                        errmsg("Already too many clients, "
-                               "active/non-active/reserved: %d/%d/%d.",
-                            active_count,
-                            GetUsedConnectionCount() - active_count,
-                            g_instance.attr.attr_network.ReservedBackends)));
-            }
+    if (t_thrd.role != WORKER && t_thrd.role != THREADPOOL_WORKER) {
+        return;
+    }
+
+    int maxConn = g_instance.attr.attr_network.MaxConnections;
+    int reservedConn = g_instance.attr.attr_network.ReservedBackends;
+
+    SpinLockAcquire(&g_instance.conn_cxt.ConnCountLock);
+    int currentConn = g_instance.conn_cxt.CurConnCount;
+    int currentCMAConn = g_instance.conn_cxt.CurCMAConnCount;
+    bool tooManyConn = false;
+
+    if (u_sess->libpq_cxt.IsConnFromCmAgent) {
+        if (currentCMAConn >= NUM_CMAGENT_PROCS) {
+            tooManyConn = true;
+        } 
+    } else {
+         if (currentConn >= maxConn) {
+             if (AM_WAL_SENDER || u_sess->proc_cxt.IsInnerMaintenanceTools) {
+                 SpinLockRelease(&g_instance.conn_cxt.ConnCountLock);
+                 return;
+             } else if (!m_isSuperUser || currentConn >= maxConn + reservedConn) {
+                 tooManyConn = true;
+             }
+         }
+    }
+
+    if (!tooManyConn) {
+        u_sess->proc_cxt.PassConnLimit = true;
+        if (u_sess->libpq_cxt.IsConnFromCmAgent) {
+            g_instance.conn_cxt.CurCMAConnCount++;
+        } else {
+            g_instance.conn_cxt.CurConnCount++;
         }
-    } else if (GetUsedInnerToolConnCount() > g_instance.attr.attr_network.maxInnerToolConnections) {
-        ereport(FATAL, (errcode(ERRCODE_TOO_MANY_CONNECTIONS), errmsg("Already too many tools connected, max num: %d",
-            g_instance.attr.attr_network.maxInnerToolConnections)));
+    }
+    SpinLockRelease(&g_instance.conn_cxt.ConnCountLock);
+
+    if (tooManyConn) {
+        if (u_sess->libpq_cxt.IsConnFromCmAgent) {
+            ereport(FATAL, (errcode(ERRCODE_TOO_MANY_CONNECTIONS),
+                     errmsg("Too many CMA connections already, current/reserved: %d/%d",
+                        currentCMAConn, NUM_CMAGENT_PROCS)));
+        } else {
+            int activeConn = pgstat_get_current_active_numbackends();
+            ereport(FATAL, (errcode(ERRCODE_TOO_MANY_CONNECTIONS),
+                    errmsg("Too many clients already, current/active: %d/%d, max_connections/reserved: %d/%d.",
+                        currentConn, activeConn, maxConn, reservedConn)));
+        }
     }
 }
 
@@ -1707,13 +1969,13 @@ void PostgresInitializer::InitPlainWalSender()
      * we're done.
      */
     /* process any options passed in the startup packet */
-    if (u_sess->proc_cxt.MyProcPort != NULL) {
+    if (u_sess->proc_cxt.MyProcPort != NULL)
         process_startup_options(u_sess->proc_cxt.MyProcPort, m_isSuperUser);
-    }
+
     /* Apply PostAuthDelay as soon as we've read all options */
-    if (u_sess->attr.attr_security.PostAuthDelay > 0) {
+    if (u_sess->attr.attr_security.PostAuthDelay > 0)
         pg_usleep(u_sess->attr.attr_security.PostAuthDelay * 1000000L);
-    }
+
     /* initialize client encoding */
     InitializeClientEncoding();
 
@@ -1721,9 +1983,8 @@ void PostgresInitializer::InitPlainWalSender()
     pgstat_bestart();
 
     /* close the transaction we started above */
-    if (!dummyStandbyMode) {
+    if (!dummyStandbyMode)
         CommitTransactionCommand();
-    }
 }
 
 void PostgresInitializer::SetDefaultDatabase()
@@ -1735,7 +1996,8 @@ void PostgresInitializer::SetDefaultDatabase()
     m_fullpath = GetDatabasePath(u_sess->proc_cxt.MyDatabaseId, u_sess->proc_cxt.MyDatabaseTableSpace);
     /* This should happen only once per process */
     Assert(!u_sess->proc_cxt.DatabasePath);
-    u_sess->proc_cxt.DatabasePath = MemoryContextStrdup(u_sess->top_mem_cxt, m_fullpath);
+    u_sess->proc_cxt.DatabasePath =
+        MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), m_fullpath);
 }
 
 void PostgresInitializer::SetDatabase()
@@ -1747,11 +2009,11 @@ void PostgresInitializer::SetDatabase()
      * We take a shortcut in the bootstrap case, otherwise we have to look up
      * the db's entry in pg_database.
      */
-    if (m_indbname != NULL) {
+    if (m_indbname != NULL)
         SetDatabaseByName();
-    } else {
+    else
         SetDatabaseByOid();
-    }
+
     LockDatabase();
 
     RecheckDatabaseExists();
@@ -1762,7 +2024,7 @@ void PostgresInitializer::SetDatabase()
 void PostgresInitializer::SetDatabaseByName()
 {
     HeapTuple tuple;
-    Form_pg_database db_form;
+    Form_pg_database dbform;
 
     tuple = GetDatabaseTuple(m_indbname);
 
@@ -1777,9 +2039,9 @@ void PostgresInitializer::SetDatabaseByName()
         pgaudit_user_login(FALSE, (char*)m_indbname, m_details);
         ereport(FATAL, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database \"%s\" does not exist", m_indbname)));
     }
-    db_form = (Form_pg_database)GETSTRUCT(tuple);
+    dbform = (Form_pg_database)GETSTRUCT(tuple);
     u_sess->proc_cxt.MyDatabaseId = HeapTupleGetOid(tuple);
-    u_sess->proc_cxt.MyDatabaseTableSpace = db_form->dattablespace;
+    u_sess->proc_cxt.MyDatabaseTableSpace = dbform->dattablespace;
     /* take database name from the caller, just for paranoia */
     strlcpy(m_dbname, m_indbname, sizeof(m_dbname));
 }
@@ -1788,24 +2050,24 @@ void PostgresInitializer::SetDatabaseByOid()
 {
     /* caller specified database by OID */
     HeapTuple tuple;
-    Form_pg_database db_form;
+    Form_pg_database dbform;
 
     tuple = GetDatabaseTupleByOid(m_dboid);
 
     if (!HeapTupleIsValid(tuple)) {
-    // Database Security: Support database audit
-    // Audit user login
+        /* Database Security: Support database audit */
+        /* Audit user login*/
         snprintf_s(
             m_details, sizeof(m_details), sizeof(m_details) - 1, "login db failed,database(%u)does not exist", m_dboid);
         pgaudit_user_login(FALSE, "unkown", m_details);
 
         ereport(FATAL, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database %u does not exist", m_dboid)));
     }
-    db_form = (Form_pg_database)GETSTRUCT(tuple);
+    dbform = (Form_pg_database)GETSTRUCT(tuple);
     u_sess->proc_cxt.MyDatabaseId = HeapTupleGetOid(tuple);
-    u_sess->proc_cxt.MyDatabaseTableSpace = db_form->dattablespace;
+    u_sess->proc_cxt.MyDatabaseTableSpace = dbform->dattablespace;
     Assert(u_sess->proc_cxt.MyDatabaseId == m_dboid);
-    strlcpy(m_dbname, NameStr(db_form->datname), sizeof(m_dbname));
+    strlcpy(m_dbname, NameStr(dbform->datname), sizeof(m_dbname));
 }
 
 void PostgresInitializer::LockDatabase()
@@ -1860,8 +2122,8 @@ void PostgresInitializer::RecheckDatabaseExists()
 
     if (!HeapTupleIsValid(tuple) || u_sess->proc_cxt.MyDatabaseId != HeapTupleGetOid(tuple) ||
         u_sess->proc_cxt.MyDatabaseTableSpace != ((Form_pg_database)GETSTRUCT(tuple))->dattablespace) {
-        // Database Security: Support database audit
-        // Audit user login
+        /* Database Security: Support database audit */
+        /*Audit user login*/
         errno_t rc = snprintf_s(m_details,
             sizeof(m_details),
             sizeof(m_details) - 1,
@@ -1885,27 +2147,28 @@ void PostgresInitializer::SetDatabasePath()
     m_fullpath = GetDatabasePath(u_sess->proc_cxt.MyDatabaseId, u_sess->proc_cxt.MyDatabaseTableSpace);
 
     if (access(m_fullpath, F_OK) == -1) {
-        // Database Security: Support database audit
-        // Audit login db
+        /* Database Security: Support database audit */
+        /* Audit login db*/
         int rcs = snprintf_truncated_s(
             m_details, sizeof(m_details), "Audit messge:login db(%s) failed, database not exists", m_dbname);
         securec_check_ss(rcs, "\0", "\0");
 
         pgaudit_user_login(FALSE, (char*)m_username, m_details);
-        if (errno == ENOENT) {
+        if (errno == ENOENT)
             ereport(FATAL,
                 (errcode(ERRCODE_UNDEFINED_DATABASE),
                     errmsg("database \"%s\" does not exist", m_dbname),
                     errdetail("The database subdirectory \"%s\" is missing.", m_fullpath)));
-        } else {
+        else
             ereport(FATAL, (errcode_for_file_access(), errmsg("could not access directory \"%s\": %m", m_fullpath)));
-        }
     }
 
     ValidatePgVersion(m_fullpath);
-    // This should happen only once per process
+
+    /* This should happen only once per process */
     Assert(!u_sess->proc_cxt.DatabasePath);
-    u_sess->proc_cxt.DatabasePath = MemoryContextStrdup(u_sess->top_mem_cxt, m_fullpath);
+    u_sess->proc_cxt.DatabasePath = MemoryContextStrdup(
+        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), m_fullpath);
 }
 
 void PostgresInitializer::LoadSysCache()
@@ -1929,12 +2192,11 @@ void PostgresInitializer::ProcessStartupOpt()
      * settings passed in the startup packet.	We couldn't do this before
      * because we didn't know if client is a superuser.
      */
-    if (u_sess->proc_cxt.MyProcPort != NULL) {
+    if (u_sess->proc_cxt.MyProcPort != NULL)
         process_startup_options(u_sess->proc_cxt.MyProcPort, m_isSuperUser);
-    }
 }
 
-void PostgresInitializer::CheckDatabaseAuth()
+void PostgresInitializer::InitDatabase()
 {
     /*
      * Re-read the pg_database row for our database, check permissions and set
@@ -1960,9 +2222,9 @@ void PostgresInitializer::InitPGXCPort()
     /* update pgxc_node info from configfile */
     LWLockAcquire(AlterPortLock, LW_EXCLUSIVE);
 
-    if (!u_sess->attr.attr_common.xc_maintenance_mode && !g_instance.attr.attr_storage.IsRoachStandbyCluster) {
+    if (!u_sess->attr.attr_common.xc_maintenance_mode && !g_instance.attr.attr_storage.IsRoachStandbyCluster && IS_PGXC_COORDINATOR)
         AlterPgxcNodePort();
-    }
+
     LWLockRelease(AlterPortLock);
 #endif
 }
@@ -1972,10 +2234,17 @@ void PostgresInitializer::InitSettings()
     /* Process pg_db_role_setting options */
     process_settings(u_sess->proc_cxt.MyDatabaseId, GetSessionUserId());
 
+    ce_cache_refresh_type  = getClientCacheRefreshType();
+
     /* Apply PostAuthDelay as soon as we've read all options */
-    if (u_sess->attr.attr_security.PostAuthDelay > 0) {
+    if (u_sess->attr.attr_security.PostAuthDelay > 0)
         pg_usleep(u_sess->attr.attr_security.PostAuthDelay * 1000000L);
-    }
+
+    /*
+     * Initialize various default states that can't be set up until we've
+     * selected the active user and gotten the right GUC settings.
+     */
+
     /* set default namespace search path */
     InitializeSearchPath();
 
@@ -2004,6 +2273,15 @@ void PostgresInitializer::FinishInit()
 void PostgresInitializer::AuditUserLogin()
 {
     if (NULL != m_username) {
+        /* 
+         * Audit user login 
+         * it's unsafe to deal with plugins hooks as dynamic lib may be released 
+         */
+        if (!(g_instance.status > NoShutdown) && user_login_hook) {
+            /* audit policy need databaseid to store policy info */
+            user_login_hook(m_dbname, m_username, true, true);
+        }
+
         int rc = snprintf_s(m_details,
             sizeof(m_details),
             sizeof(m_details) - 1,
@@ -2015,3 +2293,77 @@ void PostgresInitializer::AuditUserLogin()
         pgaudit_user_login(TRUE, m_dbname, m_details);
     }
 }
+
+
+void PostgresInitializer::InitCompactionThread()
+{
+    ereport(DEBUG3, (errmsg("Init Compaction Thread")));
+    /*
+     * Add my PGPROC struct to the ProcArray.
+     *
+     * Once I have done this, I am visible to other backends!
+     */
+    InitProcessPhase2();
+
+    /*
+     * Initialize my entry in the shared-invalidation manager's array of
+     * per-backend data.
+     *
+     * Sets up t_thrd.proc_cxt.MyBackendId, a unique backend identifier.
+     */
+    t_thrd.proc_cxt.MyBackendId = InvalidBackendId;
+
+    SharedInvalBackendInit(IS_THREAD_POOL_WORKER, false);
+
+    if (t_thrd.proc_cxt.MyBackendId > g_instance.shmem_cxt.MaxBackends || t_thrd.proc_cxt.MyBackendId <= 0)
+        ereport(FATAL, (errmsg("bad backend ID: %d", t_thrd.proc_cxt.MyBackendId)));
+
+    /*
+     * Initialize local process's access to XLOG.
+     */
+    if (IsUnderPostmaster) {
+        /*
+         * The postmaster already started the XLOG machinery, but we need to
+         * call InitXLOGAccess(), if the system isn't in hot-standby mode.
+         * This is handled by calling RecoveryInProgress and ignoring the
+         * result.
+         */
+        (void)RecoveryInProgress();
+    } else {
+        /*
+         * We are either a bootstrap process or a standalone backend. Either
+         * way, start up the XLOG machinery, and register to have it closed
+         * down at exit.
+         */
+        StartupXLOG();
+        on_shmem_exit(ShutdownXLOG, 0);
+    }
+
+
+}
+
+void PostgresInitializer::InitBarrierCreator()
+{
+    InitThread();
+
+    InitSysCache();
+
+    /* Initialize stats collection --- must happen before first xact */
+    pgstat_initialize();
+
+    SetProcessExitCallback();
+
+    StartXact();
+    
+    SetSuperUserAndDatabase();
+
+    SetDatabase();
+
+    LoadSysCache();
+
+    InitPGXCPort();
+
+    return;
+}
+
+

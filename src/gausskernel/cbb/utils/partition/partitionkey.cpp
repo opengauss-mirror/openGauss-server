@@ -132,6 +132,91 @@ Datum transformPartitionBoundary(List* bondary, const bool* isTimestamptz)
     result = makeArrayResult(astate, CurrentMemoryContext);
     return result;
 }
+
+Datum transformListBoundary(List* bondary, const bool* isTimestamptz)
+{
+    Datum result;
+    ArrayBuildState* astate = NULL;
+    ListCell* cell = NULL;
+    int16 typlen = 0;
+    bool typbyval = false;
+    char typalign;
+    char typdelim;
+    Oid typioparam = InvalidOid;
+    Oid outfunc = InvalidOid;
+
+    int partKeyIdx = 0;
+
+    /* no change if empty list */
+    if (bondary == NIL) {
+        return (Datum)0;
+    }
+
+    /* We build new array using accumArrayResult */
+    astate = NULL;
+
+    /*
+ *      * If CREATE/SET, add new options to array; if RESET, just check that the
+ *           * user didn't say RESET (option=val).  (Must do this because the grammar
+ *                * doesn't enforce it.)
+ *                     */
+    foreach (cell, bondary) {
+        Node* partKeyFld = (Node*)lfirst(cell);
+        Const* maxValueItem = NULL;
+        text* t = NULL;
+        char* maxValue = NULL;
+        Size len = 0;
+        errno_t rc = 0;
+        Datum datumValue = (Datum)0;
+
+        Assert(nodeTag(partKeyFld) == T_Const);
+        maxValueItem = (Const*)partKeyFld;
+
+        if (!constIsMaxValue(maxValueItem)) {
+            /* get outfunc for consttype, excute the corresponding typeout function
+ *              * transform Const->constvalue into string format.
+ *                           */
+            get_type_io_data(maxValueItem->consttype,
+                IOFunc_output,
+                &typlen,
+                &typbyval,
+                &typalign,
+                &typdelim,
+                &typioparam,
+                &outfunc);
+            maxValue =
+                DatumGetCString(OidFunctionCall1Coll(outfunc, maxValueItem->constcollid, maxValueItem->constvalue));
+
+            if (isTimestamptz[partKeyIdx]) {
+                int tmp = u_sess->time_cxt.DateStyle;
+                u_sess->time_cxt.DateStyle = USE_ISO_DATES;
+                datumValue = DirectFunctionCall3(
+                    timestamptz_in, CStringGetDatum(maxValue), ObjectIdGetDatum(InvalidOid), Int32GetDatum(-1));
+
+                maxValue = (char*)DirectFunctionCall1(timestamptz_out, datumValue);
+                u_sess->time_cxt.DateStyle = tmp;
+            }
+
+            /* turn typeout function's output into string */
+            len = VARHDRSZ + strlen(maxValue);
+
+            t = (text*)palloc(len + 1);
+            SET_VARSIZE(t, len);
+
+            rc = snprintf_s(VARDATA(t), (len + 1 - VARHDRSZ), strlen(maxValue), "%s", maxValue);
+            securec_check_ss(rc, "\0", "\0");
+
+            astate = accumArrayResult(astate, PointerGetDatum(t), false, TEXTOID, CurrentMemoryContext);
+        } else {
+            maxValue = NULL;
+            astate = accumArrayResult(astate, (Datum)NULL, true, TEXTOID, CurrentMemoryContext);
+        }
+    }
+
+    result = makeArrayResult(astate, CurrentMemoryContext);
+    return result;
+}
+
 /*
  * @@GaussDB@@
  * Brief

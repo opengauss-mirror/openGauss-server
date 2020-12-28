@@ -21,7 +21,7 @@ analyze vector_append_table_01;
 ----
 --- test 3: Intersect
 ----
-explain (verbose, costs off, nodes off)
+explain (verbose, costs off)
 select col_int2 from vector_append_table_01 INTERSECT select col_int from vector_append_table_01 order by 1;
                                              QUERY PLAN                                             
 ----------------------------------------------------------------------------------------------------

@@ -1,0 +1,95 @@
+--Test LLVM optimization operator about int4 data type
+
+DROP FOREIGN TABLE IF EXISTS orders;
+create foreign table orders (
+ O_ORDERKEY INT4, 
+ O_CUSTKEY INT4, 
+ O_ORDERSTATUS TEXT, 
+ O_TOTALPRICE FLOAT8,
+ O_ORDERDATE TEXT,
+ O_ORDERPRIORITY TEXT, 
+ O_CLERK TEXT,
+ O_SHIPPRIORITY INT4, 
+ O_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb_small.db/orders_small/')
+distribute by roundrobin;
+
+--test "=" operator
+set enable_codegen = off;
+select * from orders where  272067654 = O_ORDERKEY;
+set enable_codegen = on;
+select * from orders where  272067654 = O_ORDERKEY;
+set enable_codegen = off;
+select * from orders where  O_ORDERKEY = 272067654;
+set enable_codegen = on;
+select * from orders where  O_ORDERKEY = 272067654 ;
+--add llt
+select * from orders where  O_ORDERKEY = 2::int2 ;
+select * from orders where  O_ORDERKEY = 2::int8 ;
+--test ">" operator
+set enable_codegen = off;
+select * from orders where  272067654 > O_ORDERKEY order by 1 limit 10;
+set enable_codegen = on;
+select * from orders where  272067654 > O_ORDERKEY order by 1 limit 10;
+set enable_codegen = off;
+select * from orders where  O_ORDERKEY > 272067654 order by 1 limit 10;
+set enable_codegen = on;
+select * from orders where  O_ORDERKEY > 272067654 order by 1 limit 10;
+select * from orders where  O_ORDERKEY > 272067654::int2 order by 1 limit 10;
+select * from orders where  O_ORDERKEY > 272067654::int8 order by 1 limit 10;
+--test ">=" operator
+set enable_codegen = off;
+select * from orders where  272067654 >= O_ORDERKEY order by 1 limit 10;
+set enable_codegen = on;
+select * from orders where  272067654 >= O_ORDERKEY order by 1 limit 10;
+set enable_codegen = off;
+select * from orders where  O_ORDERKEY >= 272067654 order by 1 limit 10;
+set enable_codegen = on;
+select * from orders where  O_ORDERKEY >= 272067654 order by 1 limit 10;
+select * from orders where  O_ORDERKEY >= 272067654::int2 order by 1 limit 10;
+select * from orders where  O_ORDERKEY >= 272067654::int8 order by 1 limit 10;
+--test "<" operator
+set enable_codegen = off;
+select * from orders where  272067654 < O_ORDERKEY order by 1 limit 10;
+set enable_codegen = on;
+select * from orders where  272067654 < O_ORDERKEY order by 1 limit 10;
+set enable_codegen = off;
+select * from orders where  O_ORDERKEY < 272067654 order by 1 limit 10;
+set enable_codegen = on;
+select * from orders where  O_ORDERKEY < 272067654 order by 1 limit 10;
+select * from orders where  O_ORDERKEY < 272067654::int2 order by 1 limit 10;
+select * from orders where  O_ORDERKEY < 272067654::int8 order by 1 limit 10;
+--test "<=" operator
+set enable_codegen = off;
+select * from orders where  272067654 <= O_ORDERKEY order by 1 limit 10;
+set enable_codegen = on;
+select * from orders where  272067654 <= O_ORDERKEY order by 1 limit 10;
+set enable_codegen = off;
+select * from orders where  O_ORDERKEY <= 272067654 order by 1 limit 10;
+set enable_codegen = on;
+select * from orders where  O_ORDERKEY <= 272067654 order by 1 limit 10;
+select * from orders where  O_ORDERKEY <= 272067654::int2 order by 1 limit 10;
+select * from orders where  O_ORDERKEY <= 272067654::int8 order by 1 limit 10;
+--test "<>" operator
+set enable_codegen = off;
+select * from orders where  272067654 <> O_ORDERKEY order by 1 limit 10;
+set enable_codegen = on;
+select * from orders where  272067654 <> O_ORDERKEY order by 1 limit 10;
+set enable_codegen = off;
+select * from orders where  O_ORDERKEY <> 272067654 order by 1 limit 10;
+set enable_codegen = on;
+select * from orders where  O_ORDERKEY <> 272067654 order by 1 limit 10;
+select * from orders where  O_ORDERKEY <> 272067654::int2 order by 1 limit 10;
+select * from orders where  O_ORDERKEY <> 272067654::int8 order by 1 limit 10;
+--test "!=" operator
+set enable_codegen = off;
+select * from orders where  272067654 != O_ORDERKEY order by 1 limit 10;
+set enable_codegen = on;
+select * from orders where  272067654 != O_ORDERKEY order by 1 limit 10;
+set enable_codegen = off;
+select * from orders where  O_ORDERKEY != 272067654 order by 1 limit 10;
+set enable_codegen = on;
+select * from orders where  O_ORDERKEY != 272067654 order by 1 limit 10;
+
+

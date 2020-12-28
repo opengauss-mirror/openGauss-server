@@ -16,13 +16,14 @@
  *  dfs_insert.cpp
  *
  * IDENTIFICATION
- *        src/gausskernel/storage/access/dfs/dfs_insert.cpp
+ *    src/gausskernel/storage/access/dfs/dfs_insert.cpp
  * ------------------------------------------------------------------------------
  */
 
 #include "access/dfs/dfs_insert.h"
 #include "access/heapam.h"
 #include "access/genam.h"
+#include "access/tableam.h"
 #include "access/xact.h"
 #include "dfsdesc.h"
 #include "catalog/dfsstore_ctlg.h"
@@ -34,7 +35,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/snapmgr.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 
 HTAB *g_dfsSpaceCache = NULL;
 #define MAX_FILE_ID ((1 << 24) - 1)
@@ -427,8 +428,8 @@ void DfsInsert::TupleInsert(Datum *values, bool *nulls, int option)
         /* insert tuple into delta table */
         MemoryContextReset(m_iterContext);
         AutoContextSwitch newContext(m_iterContext);
-        HeapTuple tuple = heap_form_tuple(m_delta->rd_att, values, nulls);
-        heap_insert(m_delta, tuple, GetCurrentCommandId(true), option, NULL);
+        HeapTuple tuple = (HeapTuple)tableam_tops_form_tuple(m_delta->rd_att, values, nulls, HEAP_TUPLE);
+        (void)heap_insert(m_delta, tuple, GetCurrentCommandId(true), option, NULL);
 
         return;
     }
@@ -445,7 +446,7 @@ void DfsInsert::TupleInsert(Datum *values, bool *nulls, int option)
             m_sorter->RunSort();
             slot = m_sorter->GetTuple();
             while (!TupIsNull(slot)) {
-                heap_deform_tuple(slot->tts_tuple, m_desc, slot->tts_values, slot->tts_isnull);
+                heap_deform_tuple((HeapTuple)slot->tts_tuple, m_desc, slot->tts_values, slot->tts_isnull);
                 tupleInsertInternal(slot->tts_values, slot->tts_isnull, option, false);
                 slot = m_sorter->GetTuple();
             }
@@ -730,7 +731,7 @@ uint32 DfsInsert::GetMaxIndexFileID(Relation heapRel)
     foreach (lc, btreeIndex) {
         ItemPointer tid;
         Relation idxRel = (Relation)lfirst(lc);
-        IndexScanDesc indexScan = index_beginscan(heapRel, idxRel, GetActiveSnapshot(), 0, 0);
+        IndexScanDesc indexScan = (IndexScanDesc)index_beginscan(heapRel, idxRel, GetActiveSnapshot(), 0, 0);
         index_rescan(indexScan, NULL, 0, NULL, 0);
         while ((tid = index_getnext_tid(indexScan, ForwardScanDirection)) != NULL) {
             tmpFileID = DfsItemPointerGetFileId(tid);
@@ -845,7 +846,7 @@ void DfsInsert::InitDfsSpaceCache()
         ctl.entrysize = sizeof(DFSSpaceKV);
         ctl.match = (HashCompareFunc)matchOid;
         ctl.hash = (HashValueFunc)oid_hash;
-        //init size 40k, max size 80k
+        // init size 40k, max size 80k
         g_dfsSpaceCache = HeapMemInitHash("DFS space cache", 40960, 81920, &ctl,
                                           HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
         if (g_dfsSpaceCache == NULL) {

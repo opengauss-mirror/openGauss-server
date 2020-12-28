@@ -49,7 +49,8 @@ typedef struct knl_instance_attr_common {
     bool Logging_collector;
     bool allowSystemTableMods;
     bool enable_thread_pool;
-	bool enable_global_plancache;
+    bool enable_ffic_log;
+    bool enable_global_plancache;
     int max_files_per_process;
     int pgstat_track_activity_query_size;
     int GtmHostPortArray[MAX_GTM_HOST_NUM];
@@ -75,8 +76,25 @@ typedef struct knl_instance_attr_common {
 
     bool enable_alarm;
     char* Alarm_component;
+    bool enable_tsdb;
+    char* Perf_directory;
+    char* asp_log_directory;
+    char* query_log_directory;
+    int asp_sample_num;
+
+    /*
+     * guc - bbox_blacklist_items
+     *      char* : original value
+     *      uint64 : parsed bits mask
+     */
+    char* bbox_blacklist_items;
+    uint64 bbox_blacklist_mask;
+#ifdef ENABLE_MOT
     char* MOTConfigFileName;
+#endif
+#ifndef ENABLE_MULTIPLE_NODES
     int sync_config_strategy;
+#endif
 } knl_instance_attr_common;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_COMMON_H_ */

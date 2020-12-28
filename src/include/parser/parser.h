@@ -15,12 +15,25 @@
 #ifndef PARSER_H
 #define PARSER_H
 
+#ifndef FRONTEND_PARSER
 #include "nodes/parsenodes.h"
+#else
+#include "nodes/parsenodes_common.h"
+#endif /* FRONTEND_PARSER */
 
-typedef enum { BACKSLASH_QUOTE_OFF, BACKSLASH_QUOTE_ON, BACKSLASH_QUOTE_SAFE_ENCODING } BackslashQuoteType;
+#include "parser/backslash_quotes.h"
+
+#define UPSERT_TO_MERGE_VERSION_NUM 92022
 
 /* Primary entry point for the raw parsing functions */
 extern List* raw_parser(const char* str, List** query_string_locationlist = NULL);
+
+#ifdef FRONTEND_PARSER
+
+class PGClientLogic;
+
+extern List *fe_raw_parser(PGClientLogic*, const char *str, List **query_string_locationlist = NULL);
+#endif /* FRONTEND_PARSER */
 
 /* Utility functions exported by gram.y (perhaps these should be elsewhere) */
 extern List* SystemFuncName(char* name);

@@ -3,6 +3,7 @@
  * pg_recvlogical.c - receive data from a logical decoding slot in a streaming fashion
  *                   and write it to to a local file.
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
@@ -47,6 +48,7 @@ static bool do_drop_slot = false;
 /* filled pairwise with option, value. value may be NULL */
 static char** options;
 static size_t noptions = 0;
+static bool g_change_plugin = false;
 static const char* plugin = "mppdb_decoding";
 
 /* Global State */
@@ -639,6 +641,9 @@ static int getOptions(const int argc, char* const* argv)
             /* general options */
             case 'f':
                 check_env_value_c(optarg);
+                if (outfile) {
+                    pfree_ext(outfile);
+                }
                 outfile = pg_strdup(optarg);
                 break;
             case 'n':
@@ -650,10 +655,16 @@ static int getOptions(const int argc, char* const* argv)
                 /* connnection options */
             case 'd':
                 check_env_value_c(optarg);
+                if (dbname) {
+                    pfree_ext(dbname);
+                }
                 dbname = pg_strdup(optarg);
                 break;
             case 'h':
                 check_env_value_c(optarg);
+                if (dbhost) {
+                    pfree_ext(dbhost);
+                }
                 dbhost = pg_strdup(optarg);
                 break;
             case 'p':
@@ -666,6 +677,9 @@ static int getOptions(const int argc, char* const* argv)
                 break;
             case 'U':
                 check_env_value_c(optarg);
+                if (dbuser) {
+                    pfree_ext(dbuser);
+                }
                 dbuser = pg_strdup(optarg);
                 break;
             case 'w':
@@ -696,7 +710,11 @@ static int getOptions(const int argc, char* const* argv)
             break;
             case 'P':
                 check_env_value_c(optarg);
+                if (plugin) {
+                    pfree_ext(plugin);
+                }
                 plugin = pg_strdup(optarg);
+                g_change_plugin = true;
                 break;
             case 's':
                 check_env_value_c(optarg);
@@ -724,6 +742,9 @@ static int getOptions(const int argc, char* const* argv)
                 break;
             case 'S':
                 check_env_value_c(optarg);
+                if (replication_slot) {
+                    pfree_ext(replication_slot);
+                }
                 replication_slot = pg_strdup(optarg);
                 break;
             case 'I':
@@ -767,6 +788,41 @@ static int getOptions(const int argc, char* const* argv)
     return 0;
 }
 
+static void process_free_option(void)
+{
+    if (outfile != NULL) {
+        pfree_ext(outfile);
+    }
+    if (dbname != NULL) {
+        pfree_ext(dbname);
+    }
+    if (dbhost != NULL) {
+        pfree_ext(dbhost);
+    }
+    if (dbport != NULL) {
+        pfree_ext(dbport);
+    }
+    if (dbuser != NULL) {
+        pfree_ext(dbuser);
+    }
+    if (g_change_plugin) {
+        pfree_ext(plugin);
+    } else if (plugin != NULL) {
+        plugin = NULL;
+    }
+    if (replication_slot != NULL) {
+        pfree_ext(replication_slot);
+    }
+    if (noptions > 0) {
+        for (size_t i = 0; i < noptions; i++) {
+            pfree_ext(options[i * 2]);
+            options[i * 2 + 1] = NULL;
+        }
+        noptions = 0;
+        pfree_ext(options);
+    }
+}
+
 int main(int argc, char** argv)
 {
     PGresult* res = NULL;
@@ -784,8 +840,10 @@ int main(int argc, char** argv)
         }
     }
 
-    if (getOptions(argc, argv) == -1)
+    if (getOptions(argc, argv) == -1) {
+        process_free_option();
         exit(1);
+    }
 
     /*
      * Required arguments
@@ -945,6 +1003,9 @@ int main(int argc, char** argv)
         }
         startpos = ((uint64)hi) << 32 | lo;
 
+        if (replication_slot != NULL) {
+            pfree_ext(replication_slot);
+        }
         replication_slot = strdup(PQgetvalue(res, 0, 0));
         if (replication_slot == NULL) {
             fprintf(stderr, "out of memory\n");

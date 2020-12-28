@@ -1,29 +1,20 @@
-/*
+/* ---------------------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996, 2003 VIA Networking Technologies, Inc.
- *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * ---------------------------------------------------------------------------------------
  *
  *  dfs_query.cpp
  *
  * IDENTIFICATION
- *        src/gausskernel/storage/access/dfs/dfs_query.cpp
+ *    src/gausskernel/storage/access/dfs/dfs_query.cpp
  *
  * ---------------------------------------------------------------------------------------
  */
 
-#include "access/dfs/dfs_query.h"
 #include "access/dfs/dfs_insert.h"
+#include "access/dfs/dfs_query.h"
+#include "access/dfs/dfs_query_check.h"
+#include "access/dfs/dfs_query_reader.h"
+#include "access/dfs/dfs_wrapper.h"
 #include "access/sysattr.h"
 #include "catalog/pg_am.h"
 #include "catalog/pg_operator.h"
@@ -48,15 +39,10 @@
 #include "utils/syscache.h"
 #include "utils/fmgroids.h"
 #include "utils/snapmgr.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "utils/int8.h"
 #include "executor/executor.h"
 
-#define NUMERIC_MAX_BITS 38
-
-extern void VerifyEncoding(int encoding);
-
-static HdfsQueryOperator HdfsGetQueryOperator(const char *operatorName);
 static Oid GetOperatorByTypeId(Oid typeID, Oid accessMethodId, int16 strategyNumber);
 /**
  * @Description: Filter the supported clause by the rules. We can now push down two
@@ -74,71 +60,10 @@ static bool clause_hdfs_pushdown(Expr *clause);
  * @return If all node satisfy, return true, otherwise return false.
  */
 static bool exprSatisfyPushDown(Node *leftop, Node *rightop);
-
-static bool IsParamConst(Node *node);
 static bool IsVarInNullTest(Expr *arg);
 static bool IsOperatorPushdown(Oid opno);
-static HdfsQueryOperator GetHdfsScanStrategyNumber(Oid opno);
 static int GetVarNoFromClause(Expr *clause);
 static bool PushDownSupportVar(Var *var);
-static Var *GetHdfsPrediacateVarType(Expr *expr, HdfsQueryOperator &strategy);
-static void CheckNumericAccuracy(TypeName *TypName);
-static void InitHdfsScanPredicateArr(dfs::reader::ReaderState *readerState, PlanState *ps, List *hdfsQual);
-static void SortReadColsByWeight(dfs::reader::ReaderState *readerState, double *selectivity);
-static void PartitionTblInit(dfs::reader::ReaderState *readerState);
-static void InitRequiredCols(dfs::reader::ReaderState *readerState, List *qual, List *columnList, List *targetList,
-                             List *restrictColList);
-static ParamExternData *HdfsGetParamExtern(Expr *expr, PlanState *ps);
-
-/**
- * @Description: Pruning unnecessary splits(partition) based on the restriction
- * of scan clauses (Static Partition Pruning).
- * @in ss: A ScanState struct.
- * @in rs: A ReaderState struct.
- * @in col_var_list: The var list of all the target columns and the
- * restriction columns.
- * @return return the remain file list.
- */
-static List *PruningUnnecessaryPartitions(ScanState *ss, dfs::reader::ReaderState *rs, List *col_var_list);
-/**
- * @Description: Create one Restriction info for one patition, and also bind PartColValue
- * in current split.
- * @in rel: target relation
- * @in partVar: partition column's var
- * @in scanrelid: Index relid of the target relation
- * @in partExpr: string format of this partition directory
- * @out/in @si: current splitinfo
- * @in equalExpr: the prepared equal expression.
- * @return return one partition restriction.
- */
-static Node *CreateOnePartitionRestriction(Relation rel, Var *partVar, Index scanrelid, const char *partExpr,
-                                           SplitInfo *si, Expr *equalExpr);
-
-/*
- * Get the HdfsQueryOperator according to the opratorName, here we only support seven types of operators and return
- * -1 for the unsupported operator.
- *
- * @_in param operatorName: the name of the operator like '<>'.
- * @return Return an HdfsQueryOperator of which the meaning can be found in the defination of HdfsQueryOperator.
- */
-static HdfsQueryOperator HdfsGetQueryOperator(const char *OpName)
-{
-    HdfsQueryOperator hdfsOpName = HDFS_QUERY_INVALID;
-    int32 OpNameIndex = 0;
-    int32 OpNameCount;
-    static const char *nameMappings[] = { "=", "<", ">", "<=", ">=", "<>", "!=" };
-
-    OpNameCount = sizeof(nameMappings) / sizeof(nameMappings[0]);
-    for (OpNameIndex = 0; OpNameIndex < OpNameCount; OpNameIndex++) {
-        const char *pgOpName = nameMappings[OpNameIndex];
-        if (strncmp(pgOpName, OpName, NAMEDATALEN) == 0) {
-            hdfsOpName = (HdfsQueryOperator)OpNameIndex;
-            break;
-        }
-    }
-
-    return hdfsOpName;
-}
 
 /*
  * Make a basic Operator expression node.
@@ -228,7 +153,7 @@ Node *BuildNullTestConstraint(Var *variable, NullTestType type)
  * @_in param isNull: Whether the value is null.
  * @return Return the constraint.
  */
-Node *BuildConstraintConst(Expr *equalExpr, Datum value, bool isNull)
+void BuildConstraintConst(Expr *equalExpr, Datum value, bool isNull)
 {
     Const *constant = (Const *)get_rightop(equalExpr);
 
@@ -239,8 +164,7 @@ Node *BuildConstraintConst(Expr *equalExpr, Datum value, bool isNull)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_DFS),
                         errmsg("Rigth operation in constraint expression cannot be NULL.")));
     }
-
-    return (Node *)equalExpr;
+    return;
 }
 
 OpExpr *MakeOperatorExpression(Var *variable, int16 strategyNumber)
@@ -283,7 +207,6 @@ static Oid GetOperatorByTypeId(Oid typeID, Oid accessMethodId, int16 strategyNum
 {
     /* Get default operator class from pg_opclass */
     Oid operatorClassId = GetDefaultOpClass(typeID, accessMethodId);
-
     if (InvalidOid == operatorClassId) {
         ereport(ERROR,
                 (errcode(ERRCODE_CASE_NOT_FOUND), errmodule(MOD_DFS), errmsg("Invalid Oid for operator %u.", typeID)));
@@ -299,7 +222,7 @@ static Oid GetOperatorByTypeId(Oid typeID, Oid accessMethodId, int16 strategyNum
 /*
  * Parse the fileNames string from the split List.
  * @_in_out param splitList: point to the original split List, which may contain multiple files.
- * @_in param currentFileName: point to the first file.
+ * @_in param currentFileName: point to the first file or the only file like '/user/file1.orc' (new buffer).
  * @return Return the split parsed from the list.
  */
 SplitInfo *ParseFileSplitList(List **splitList, char **currentFileName)
@@ -328,7 +251,7 @@ SplitInfo *FindFileSplitByID(List *splitList, int fileID)
         char *substr = strrchr(split->filePath, '.');
         if (unlikely(substr == nullptr)) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmodule(MOD_DFS),
-                errmsg("Invalid file path:%s", split->filePath)));
+                            errmsg("Invalid file path:%s", split->filePath)));
         }
         int currentFileID = pg_strtoint32(substr + 1);
         if (currentFileID == fileID) {
@@ -1069,7 +992,6 @@ static bool exprSatisfyPushDown(Node *leftop, Node *rightop)
 
             short *data = SHORT_NUMERIC_DIGITS(value);
             int ndigits = SHORT_NUMERIC_NDIGITS(value);
-
             if (ndigits <= 0) {
                 return true;
             }
@@ -1198,7 +1120,7 @@ bool IsVarNode(Node *node)
  * @_in param node: The node to be checkd.
  * @return Return true: the node is a extern or exec param; False: the node is not a extern or exec param.
  */
-static bool IsParamConst(Node *node)
+bool IsParamConst(Node *node)
 {
     bool is_param_const = false;
 
@@ -1246,7 +1168,6 @@ static bool IsOperatorPushdown(Oid opno)
     tp = SearchSysCache1(OPEROID, ObjectIdGetDatum(opno));
     if (HeapTupleIsValid(tp)) {
         Form_pg_operator optup = (Form_pg_operator)GETSTRUCT(tp);
-
         if (HDFS_QUERY_INVALID == HdfsGetQueryOperator(NameStr(optup->oprname))) {
             is_pushdown = false;
         }
@@ -1258,117 +1179,6 @@ static bool IsOperatorPushdown(Oid opno)
     ReleaseSysCache(tp);
 
     return is_pushdown;
-}
-
-/*
- * Extract the attribute type, attribute no and operator from the expression.
- *
- * @_in param expr: The expression to be parsed.
- * @_out param strategy: The operator strategy of the expression.
- * return the var in the predicate.
- */
-static Var *GetHdfsPrediacateVarType(Expr *expr, HdfsQueryOperator &strategy)
-{
-    Expr *leftop = NULL;
-    Expr *arg = NULL;
-    Oid opno = InvalidOid;
-    Var *var = NULL;
-
-    if (IsA(expr, OpExpr)) {
-        opno = ((OpExpr *)expr)->opno;
-
-        /* Get strategy number. */
-        strategy = GetHdfsScanStrategyNumber(opno);
-
-        /* Leftop should be var. Has been checked */
-        leftop = (Expr *)get_leftop(expr);
-        if (leftop && IsA(leftop, RelabelType)) {
-            leftop = ((RelabelType *)leftop)->arg;
-        }
-        if (leftop == NULL) {
-            ereport(ERROR, (errmodule(MOD_DFS), errmsg("The leftop is null")));
-        }
-
-        var = (Var *)leftop;
-    } else if (IsA(expr, NullTest)) {
-        /* Leftop should be var. Has been checked */
-        arg = ((NullTest *)expr)->arg;
-        if (arg && IsA(arg, RelabelType)) {
-            arg = ((RelabelType *)arg)->arg;
-        }
-        if (arg == NULL) {
-            ereport(ERROR, (errmodule(MOD_DFS), errmsg("The arg is null")));
-        }
-
-        var = (Var *)arg;
-
-        if (((NullTest *)expr)->nulltesttype == IS_NULL) {
-            strategy = HDFS_QUERY_ISNULL;
-        } else {
-            strategy = HDFS_QUERY_ISNOTNULL;
-        }
-    } else {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_DFS),
-                        errmsg("We only support pushing down opExpr and null test predicate.")));
-    }
-
-    return var;
-}
-
-/*
- * Parse the datum value from extern param according to the expr.
- *
- * @_in param expr: The extern param expression.
- * @_in param ps: PlanState from which we can get the value of ParamExternData.
- * @return Return the point to ParamExternData.
- */
-static ParamExternData *HdfsGetParamExtern(Expr *expr, PlanState *ps)
-{
-    Param *expression = (Param *)expr;
-    int thisParamId = expression->paramid;
-    ParamListInfo paramInfo = ps->state->es_param_list_info;
-
-    /*
-     * PARAM_EXTERN parameters must be sought in ecxt_param_list_info.
-     */
-    if (paramInfo && thisParamId > 0 && thisParamId <= paramInfo->numParams) {
-        ParamExternData *prm = &paramInfo->params[thisParamId - 1];
-
-        if (NULL != prm && OidIsValid(prm->ptype)) {
-            return prm;
-        }
-    }
-
-    ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmodule(MOD_DFS),
-                    errmsg("no value found for parameter %d", thisParamId)));
-    return NULL;
-}
-
-/*
- * Search the pg_operate catalog by operation oid, and return the operator strategy.
- *
- * @_in param opno: the oid of the operator.
- * @return Return an HdfsQueryOperator: HDFS_QUERY_INVALID means the current strategy is not supported,
- *     other value's meaning can be found in the defination of HdfsQueryOperator.
- */
-static HdfsQueryOperator GetHdfsScanStrategyNumber(Oid opno)
-{
-    HdfsQueryOperator strategy_number = HDFS_QUERY_INVALID;
-    HeapTuple tuple = NULL;
-    Form_pg_operator fpo = NULL;
-
-    tuple = SearchSysCache1(OPEROID, ObjectIdGetDatum(opno));
-    if (!HeapTupleIsValid(tuple)) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmodule(MOD_DFS),
-                        errmsg("could not find operator by oid %u", opno)));
-    }
-    fpo = (Form_pg_operator)GETSTRUCT(tuple);
-
-    strategy_number = HdfsGetQueryOperator(NameStr(fpo->oprname));
-
-    ReleaseSysCache(tuple);
-
-    return strategy_number;
 }
 
 /*
@@ -1396,7 +1206,7 @@ DfsPrivateItem *MakeDfsPrivateItem(List *columnList, List *targetList, List *res
         OpExpr *opExpr = (OpExpr *)lfirst(lc);
         opExpr->inputcollid = C_COLLATION_OID;
     }
-
+    list_free_ext(opExprList);
     return item;
 }
 
@@ -1522,189 +1332,12 @@ List *build_dfs_reader_tlist(List *reltargetlist, List *excludedColList)
             }
         }
     }
-
     if (indexColList != NIL) {
         list_free(indexColList);
         indexColList = NIL;
     }
 
     return tlist;
-}
-
-/*
- * @Description: Build the op expression according to the strategy and var.
- * @IN strategy: the operator type
- * @IN var: the column var
- * @Return: the op expression
- * @See also:
- */
-static Expr *BuildExprByStrategy(HdfsQueryOperator strategy, Var *var)
-{
-    Expr *expr = NULL;
-    switch (strategy) {
-        case HDFS_QUERY_EQ: {
-            expr = (Expr *)MakeOperatorExpression(var, BTEqualStrategyNumber);
-            break;
-        }
-        case HDFS_QUERY_LT: {
-            expr = (Expr *)MakeOperatorExpression(var, BTLessStrategyNumber);
-            break;
-        }
-        case HDFS_QUERY_GT: {
-            expr = (Expr *)MakeOperatorExpression(var, BTGreaterStrategyNumber);
-            break;
-        }
-        case HDFS_QUERY_LTE: {
-            expr = (Expr *)MakeOperatorExpression(var, BTLessEqualStrategyNumber);
-            break;
-        }
-        case HDFS_QUERY_GTE: {
-            expr = (Expr *)MakeOperatorExpression(var, BTGreaterEqualStrategyNumber);
-            break;
-        }
-        default: {
-            /* no process */
-            break;
-        }
-    }
-
-    return expr;
-}
-
-template <typename T, typename baseType>
-bool HdfsScanPredicate<T, baseType>::BuildHdfsScanPredicateFromClause(Expr *expr, PlanState *ps, ScanState *scanstate,
-                                                                      AttrNumber varNoPos, int predicateArrPos)
-{
-    Expr *rightop = NULL;
-    Expr *leftop = NULL;
-    Datum datumValue = (Datum)0;
-    Oid datumType = InvalidOid;
-    int32 typeMod = 0;
-    bool runningTimeSet = false;
-
-    if (IsA(expr, OpExpr)) {
-        /* Here the leftop must be not null and is either RelabelType or Var type. */
-        leftop = (Expr *)get_leftop(expr);
-        if (leftop == NULL) {
-            ereport(ERROR, (errmodule(MOD_DFS), errmsg("The leftop is null")));
-        }
-
-        if (IsA(leftop, RelabelType)) {
-            leftop = ((RelabelType *)leftop)->arg;
-        }
-        Assert(IsA(leftop, Var));
-
-        typeMod = ((Var *)leftop)->vartypmod;
-
-        /* Rightop should be const.Has been checked before. */
-        rightop = (Expr *)get_rightop(expr);
-        if (rightop == NULL) {
-            return runningTimeSet;
-        }
-
-        /* Build IR according to expr node. */
-        if (CodeGenThreadObjectReady()) {
-            (void)ForeignScanExprCodeGen(expr, NULL, &m_jittedFunc);
-        }
-
-        if (IsA(rightop, Const)) {
-            datumValue = ((Const *)rightop)->constvalue;
-            datumType = ((Const *)rightop)->consttype;
-        } else if (IsA(rightop, RelabelType)) {
-            rightop = ((RelabelType *)rightop)->arg;
-            Assert(rightop != NULL);
-            datumValue = ((Const *)rightop)->constvalue;
-            datumType = ((Const *)rightop)->consttype;
-        } else if (nodeTag(rightop) == T_Param && ((Param *)rightop)->paramkind == PARAM_EXTERN) {
-            ParamExternData *prm = HdfsGetParamExtern(rightop, ps);
-            datumValue = prm->value;
-            datumType = prm->ptype;
-        } else if (nodeTag(rightop) == T_Param && ((Param *)rightop)->paramkind == PARAM_EXEC) {
-            RunTimeParamPredicateInfo *runTimeParamPredicate =
-                (RunTimeParamPredicateInfo *)palloc0(sizeof(RunTimeParamPredicateInfo));
-            Param *parameter = (Param *)rightop;
-            runTimeParamPredicate->varNoPos = varNoPos;
-            runTimeParamPredicate->paraExecExpr = ExecInitExpr(rightop, NULL);
-            runTimeParamPredicate->opExpr = BuildExprByStrategy(m_strategy, (Var *)leftop);
-            runTimeParamPredicate->typeMod = typeMod;
-            runTimeParamPredicate->datumType = parameter->paramtype;
-            runTimeParamPredicate->paramPosition = predicateArrPos;
-            runTimeParamPredicate->varTypeOid = ((Var *)leftop)->vartype;
-            scanstate->runTimeParamPredicates = lappend(scanstate->runTimeParamPredicates, runTimeParamPredicate);
-
-            runningTimeSet = true;
-        } else if (nodeTag(rightop) == T_Param) {
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_DFS),
-                            errmsg("Not support pushing predicate with sublink param now!")));
-        } else {
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_DFS),
-                            errmsg("Not support pushing predicate with non-const")));
-        }
-    } else if (IsA(expr, NullTest)) {
-    } else {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_DFS),
-                        errmsg("We only support pushing down opExpr and null test predicates.")));
-    }
-
-    /*
-     * If the predicate is running time predicate, do not init it here.
-     * Must maintain the predicate in the future, if we add external logic.
-     */
-    if (!runningTimeSet) {
-        Init(datumValue, datumType, typeMod);
-    }
-
-    return runningTimeSet;
-}
-
-/*
- * brief: Build Predicate for pushdown of dfs scan.
- * input param @strategy:the operator strategy of the expression;
- * input param @var: the information of the attribute;
- * input param @expr: expression which has been filtered by the optimizer;
- * input param @ps: execution state for specific scan;
- * input_out param @readerState: includes colNoMap to adjust the column
- *      index with ORC file and store the predicate for each column;
- */
-template <class typeClass, typename baseType>
-static void BuildHdfsPredicate(HdfsQueryOperator strategy, Var *var, Expr *expr, PlanState *ps,
-                               dfs::reader::ReaderState *readerState)
-{
-    List **hdfsScanPredicateArr = readerState->hdfsScanPredicateArr;
-    uint32 *colNoMap = readerState->colNoMapArr;
-    AttrNumber attNo = var->varattno;
-    Oid attType = var->vartype;
-    Oid collation = var->varcollid;
-    int predicateArrPos = 0;
-    bool runningTimeSet = false;
-    if (colNoMap == NULL) {
-        predicateArrPos = attNo - 1;
-    } else {
-        predicateArrPos = colNoMap[attNo - 1] - 1;
-    }
-
-    HdfsScanPredicate<typeClass, baseType> *predicate =
-        New(CurrentMemoryContext) HdfsScanPredicate<typeClass, baseType>(attNo, attType, strategy, collation,
-                                                                         var->vartypmod);
-
-    runningTimeSet =
-        predicate->BuildHdfsScanPredicateFromClause(expr, ps, readerState->scanstate, predicateArrPos,
-                                                    list_length(hdfsScanPredicateArr[predicateArrPos]) + 1);
-    hdfsScanPredicateArr[predicateArrPos] = lappend(hdfsScanPredicateArr[predicateArrPos], predicate);
-
-    /* For the equal operator, generate the bloomfilter used to check stride skipping. */
-    if (u_sess->attr.attr_sql.enable_bloom_filter && !runningTimeSet && strategy == HDFS_QUERY_EQ &&
-        SATISFY_BLOOM_FILTER(attType)) {
-        filter::BloomFilter *bloomFilter = filter::createBloomFilter(attType, var->vartypmod, collation,
-                                                                     EQUAL_BLOOM_FILTER,
-                                                                     DEFAULT_ORC_BLOOM_FILTER_ENTRIES, false);
-        if (SECUREC_UNLIKELY(bloomFilter == NULL)) {
-            ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_DFS), errmsg("bloomFilter create failed")));
-        }
-        bloomFilter->addValue(predicate->m_argument->getValue());
-        readerState->bloomFilters[attNo - 1] = bloomFilter;
-    }
 }
 
 template <typename wrapper, typename baseType>
@@ -1727,7 +1360,8 @@ void SetRunTimePredicate(dfs::reader::ReaderState *readerState, RunTimeParamPred
         hdfsScanPredicate->setKeepFalse(false);
 
         if (runTimeParamPredicate->opExpr != NULL) {
-            baseRestriction = BuildConstraintConst(runTimeParamPredicate->opExpr, scanValue, false);
+            BuildConstraintConst(runTimeParamPredicate->opExpr, scanValue, false);
+            baseRestriction = (Node *)(runTimeParamPredicate->opExpr);
         }
     }
 
@@ -1794,7 +1428,6 @@ void BuildRunTimePredicates(dfs::reader::ReaderState *readerState)
                  */
                 uint32 typmod = runTimeParamPredicate->typeMod - VARHDRSZ;
                 uint32 precision = uint32((typmod >> 16) & 0xffff);
-
                 if (precision <= 18) {
                     SetRunTimePredicate<Int64Wrapper, int64>(readerState, runTimeParamPredicate, scanvalue, arrPosition,
                                                              isNull);
@@ -1890,67 +1523,6 @@ void BuildRunTimePredicates(dfs::reader::ReaderState *readerState)
 }
 
 /*
- * brief: Initialize the hdfs predicate which is going to push down.
- * input param @readerState: The state of the reader which includes the informations needed.
- * input param @ps: The state of foreign scan which includes the all the information about plan.
- * input param @hdfsQual: The list of predicate pushed down.
- */
-static void InitHdfsScanPredicateArr(dfs::reader::ReaderState *readerState, PlanState *ps, List *hdfsQual)
-{
-    ListCell *lc = NULL;
-    HdfsQueryOperator strategy = HDFS_QUERY_INVALID;
-
-    foreach (lc, hdfsQual) {
-        Expr *expr = (Expr *)lfirst(lc);
-        Var *var = GetHdfsPrediacateVarType(expr, strategy);
-
-        switch (var->vartype) {
-            case BOOLOID:
-            case INT1OID:
-            case INT2OID:
-            case INT4OID:
-            case INT8OID: {
-                BuildHdfsPredicate<Int64Wrapper, int64>(strategy, var, expr, ps, readerState);
-                break;
-            }
-            case NUMERICOID: {
-                /*
-                 * PushDownSupportVar() make sure that precision <= 38 for numeric
-                 */
-                uint32 precision = uint32(((uint32)(var->vartypmod - VARHDRSZ) >> 16) & 0xffff);
-                if (precision <= 18) {
-                    BuildHdfsPredicate<Int64Wrapper, int64>(strategy, var, expr, ps, readerState);
-                } else {
-                    BuildHdfsPredicate<Int128Wrapper, int128>(strategy, var, expr, ps, readerState);
-                }
-                break;
-            }
-            case FLOAT4OID:
-            case FLOAT8OID: {
-                BuildHdfsPredicate<Float8Wrapper, double>(strategy, var, expr, ps, readerState);
-                break;
-            }
-            case VARCHAROID:
-            case CLOBOID:
-            case TEXTOID:
-            case BPCHAROID: {
-                BuildHdfsPredicate<StringWrapper, char *>(strategy, var, expr, ps, readerState);
-                break;
-            }
-            case DATEOID:
-            case TIMESTAMPOID: {
-                BuildHdfsPredicate<TimestampWrapper, Timestamp>(strategy, var, expr, ps, readerState);
-                break;
-            }
-            default: {
-                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_DFS),
-                                errmsg("Data type %u has not been supported for predicate push down.", var->vartype)));
-            }
-        }
-    }
-}
-
-/*
  * Calculate the predicate selectivity of each column.
  */
 void CalculateWeightByColumns(PlannerInfo *root, List *hdfsQualColumn, List *hdfsQual, double *selectivity, int colNum)
@@ -1980,784 +1552,6 @@ void CalculateWeightByColumns(PlannerInfo *root, List *hdfsQualColumn, List *hdf
         }
     }
     pfree_ext(qualArr);
-}
-
-/*
- * Sort the columns to read order by selectivity in asce.
- */
-static void SortReadColsByWeight(dfs::reader::ReaderState *readerState, double *selectivity)
-{
-#define DFS_SWAP(T, A, B) do { \
-    T t_ = (A);       \
-    A = (B);          \
-    B = t_;           \
-} while (0)
-
-    if (selectivity == NULL) {
-        return;
-    }
-
-    for (uint32 i = 0; i < readerState->relAttrNum; i++) {
-        double minWeight = 1.0;
-        uint32 minCol = 0;
-        int flag = 0;
-
-        for (uint32 j = i; j < readerState->relAttrNum; j++) {
-            if (selectivity[j] != 0 && selectivity[j] < minWeight) {
-                minWeight = selectivity[j];
-                minCol = j;
-                flag = 1;
-            }
-        }
-
-        if (flag == 1) {
-            DFS_SWAP(float, selectivity[minCol], selectivity[i]);
-            DFS_SWAP(uint32, readerState->orderedCols[minCol], readerState->orderedCols[i]);
-        } else {
-            break;
-        }
-    }
-}
-
-/*
- * brief: The initialization process of partition table when scan begins.
- * input param @readerState: Execution state for specific dfs scan.
- */
-static void PartitionTblInit(dfs::reader::ReaderState *readerState)
-{
-    uint32 *partColNoArr = NULL;
-    uint32 adapt = 0;
-    uint32 i = 0;
-    List *partList = readerState->partList;
-
-    /* Array to store mapping from relation column no to orc reader column index. */
-    readerState->colNoMapArr = (uint32 *)palloc0(sizeof(uint32) * readerState->relAttrNum);
-
-    /* Array to store partition column value if exists. */
-    readerState->partitionColValueArr = (char **)palloc0(sizeof(char *) * readerState->relAttrNum);
-
-    /* Fill the partColNoArr according to partList. */
-    readerState->partNum = list_length(partList);
-
-    /*
-     * partColNoArr is an array to store partition column info which is used to indicate
-     * which column is partition column(1 => partition column, 0 => non-partition column)
-     * when building colNoMapArr and removing partition column from column list.
-     * Remember to pfree it in the end of beginScan.
-     */
-    partColNoArr = (uint32 *)palloc0(sizeof(uint32) * readerState->relAttrNum);
-    for (i = 0; i < readerState->partNum; i++) {
-        int IndexColNum = list_nth_int(partList, i);
-        partColNoArr[IndexColNum - 1] = 1;
-    }
-
-    /*
-     * Construct the colNoMapArr, when meet partition column all the columns after it need to decrease
-     * its mapping number. For example, the normal column array is [1,2,3,4,5,6,7], partition column is
-     * [3,5], then the colNoMapArr will be [1,2,3,3,4,4,5].
-     */
-    for (i = 0; i < readerState->relAttrNum; i++) {
-        readerState->colNoMapArr[i] = i - adapt + 1;
-        if (partColNoArr[i] == 1) {
-            adapt++;
-        }
-    }
-
-    pfree_ext(partColNoArr);
-}
-
-/*
- * @Description: Since the params of the dynamic restrictions will not be set here, so we pick them out.
- * @IN opExpressionList: the complete restrictions' list.
- * @Return: the filtered restrictions' list
- * @See also:
- */
-static List *ExtractNonParamRestriction(List *opExpressionList)
-{
-    ListCell *lc = NULL;
-    Expr *expr = NULL;
-    List *retRestriction = NIL;
-
-    foreach (lc, opExpressionList) {
-        expr = (Expr *)lfirst(lc);
-        if (IsA(expr, OpExpr)) {
-            Node *leftop = get_leftop(expr);
-            Node *rightop = get_rightop(expr);
-            if (rightop == NULL) {
-                continue;
-            }
-
-            if ((IsVarNode(leftop) && IsParamConst(rightop)) || (IsVarNode(rightop) && IsParamConst(leftop))) {
-                continue;
-            }
-        }
-        retRestriction = lappend(retRestriction, expr);
-    }
-
-    return retRestriction;
-}
-
-void FillReaderState(dfs::reader::ReaderState *readerState, ScanState *ss, DfsPrivateItem *item, Snapshot snapshot)
-{
-    uint32 i = 0;
-    Plan *plan = ss->ps.plan;
-    Assert(readerState != NULL);
-    if (readerState->persistCtx == NULL) {
-        readerState->persistCtx = AllocSetContextCreate(CurrentMemoryContext, "dfs reader context",
-                                                        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
-                                                        ALLOCSET_DEFAULT_MAXSIZE);
-    }
-    readerState->rescanCtx = AllocSetContextCreate(CurrentMemoryContext, "dfs rescan context", ALLOCSET_DEFAULT_MINSIZE,
-                                                   ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
-    /* To indicate which column will be used in the current query. */
-    readerState->relAttrNum = ss->ss_currentRelation->rd_att->natts;
-    readerState->queryRestrictionList = ExtractNonParamRestriction(item->opExpressionList);
-    readerState->runtimeRestrictionList = NIL;
-    readerState->staticPruneFiles = 0;
-    readerState->dynamicPrunFiles = 0;
-    readerState->bloomFilterRows = 0;
-    readerState->bloomFilterBlocks = 0;
-    readerState->minmaxFilterRows = 0;
-
-    /* init min/max statistics info */
-    readerState->minmaxCheckFiles = 0;
-    readerState->minmaxFilterFiles = 0;
-    readerState->minmaxCheckStripe = 0;
-    readerState->minmaxFilterStripe = 0;
-    readerState->minmaxCheckStride = 0;
-    readerState->minmaxFilterStride = 0;
-
-    readerState->orcMetaCacheBlockCount = 0;
-    readerState->orcMetaLoadBlockCount = 0;
-    readerState->orcDataCacheBlockCount = 0;
-    readerState->orcDataLoadBlockCount = 0;
-    readerState->orcMetaCacheBlockSize = 0;
-    readerState->orcMetaLoadBlockSize = 0;
-    readerState->orcDataCacheBlockSize = 0;
-    readerState->orcDataLoadBlockSize = 0;
-
-    readerState->currentFileID = 0;
-    readerState->currentFileSize = 0;
-    readerState->localBlock = 0;
-    readerState->remoteBlock = 0;
-    readerState->nnCalls = 0;
-    readerState->dnCalls = 0;
-    readerState->fdwEncoding = INVALID_ENCODING;
-    readerState->checkEncodingLevel = NO_ENCODING_CHECK;
-    readerState->incompatibleCount = 0;
-    readerState->dealWithCount = 0;
-    readerState->scanstate = ss;
-    readerState->snapshot = (snapshot == NULL) ? GetActiveSnapshot() : snapshot;
-    Assert(readerState->snapshot != NULL);
-    Assert(ss != NULL);
-    ss->runTimePredicatesReady = false;
-    ss->runTimeParamPredicates = NIL;
-    readerState->orderedCols = (uint32 *)palloc(sizeof(uint32) * readerState->relAttrNum);
-    for (i = 0; i < readerState->relAttrNum; i++) {
-        readerState->orderedCols[i] = i;
-    }
-    InitRequiredCols(readerState, plan->qual, item->columnList, item->targetList, item->restrictColList);
-    readerState->allColumnList = item->columnList;
-
-    /* Allocate and initialize the variables if the table is partitioned. */
-    if (((Scan *)plan)->isPartTbl) {
-        if (RelationIsForeignTable(ss->ss_currentRelation)) { /* value partition for hdfs foreign table */
-            readerState->partList = item->partList;
-            PartitionTblInit(readerState);
-        } else { /* value partition for hdfs table */
-            List *prunedSplitList = NULL;
-
-            /* try to prune necessary partitions here */
-            readerState->partList = item->partList;
-            prunedSplitList = PruningUnnecessaryPartitions(ss, readerState, item->columnList);
-
-            /* update scan list */
-            readerState->splitList = prunedSplitList;
-            PartitionTblInit(readerState);
-        }
-    } else {
-        readerState->partNum = 0;
-        readerState->partList = NIL;
-        readerState->colNoMapArr = NULL;
-        readerState->partitionColValueArr = NULL;
-    }
-
-    /*
-     * Because the ORC file dose not include partition column, not only must correct this
-     * hdfsScanPredicateArr number, but also call PartitionTblInit function.
-     * description: The partition table is CU format, do not repair this hdfsScanPredicateArr number
-     * and do not call PartitionTblInit function.
-     */
-    readerState->hdfsScanPredicateArr =
-        (List **)palloc0(sizeof(List *) * (readerState->relAttrNum - readerState->partNum));
-    if (u_sess->attr.attr_sql.enable_hdfs_predicate_pushdown && list_length(item->hdfsQual) > 0) {
-        readerState->bloomFilters =
-            (filter::BloomFilter **)palloc0(sizeof(filter::BloomFilter *) * readerState->relAttrNum);
-        InitHdfsScanPredicateArr(readerState, &(ss->ps), item->hdfsQual);
-        SortReadColsByWeight(readerState, item->selectivity);
-    }
-}
-
-/**
- * @Description: Pruning unnecessary splits(partition) based on the restriction of scan clauses (Static
- * Partition Pruning)
- */
-static List *PruningUnnecessaryPartitions(ScanState *ss, dfs::reader::ReaderState *rs, List *col_var_list)
-{
-    Relation rel = ss->ss_currentRelation;
-    rs->partList = ((ValuePartitionMap *)rel->partMap)->partList;
-    List *splitList = rs->splitList;
-    List *prunedSplitList = NULL;
-    int total_partitions = list_length(rs->splitList);
-    ListCell *c = NULL;
-    int pruned_partitions = 0;
-    bool pruned = false;
-    Index scanrelid = ((DfsScan *)ss->ps.plan)->scanrelid;
-    char *partsigs = (char *)palloc(MAX_PARSIGS_LENGTH);
-    char *curPartExpr = (char *)palloc(MAX_PARSIG_LENGTH);
-    int32_t fileNameOffset = strlen(getDfsStorePath(rel)->data) + 1;
-    int partNum = list_length(rs->partList);
-    Expr **equalExpr = (Expr **)palloc0(sizeof(Expr *) * partNum);
-    Var **partVars = (Var **)palloc0(sizeof(Var *) * partNum);
-    errno_t rc = 0;
-
-    /* prepare the equal expressions for all the partition columns. */
-    for (int i = 0; i < partNum; i++) {
-        AttrNumber partColId = list_nth_int(rs->partList, i);
-        partVars[i] = GetVarFromColumnList(col_var_list, partColId);
-        if (partVars[i] != NULL) {
-            equalExpr[i] = (Expr *)MakeOperatorExpression(partVars[i], BTEqualStrategyNumber);
-        }
-    }
-
-    /* Check each SplitInfo element from raw scanning list */
-    foreach (c, splitList) {
-        SplitInfo *si = (SplitInfo *)lfirst(c);
-        char *curpos = NULL;
-        Node *baseRestriction = NULL;
-        List *partRestriction = NIL;
-        char *fileName = si->filePath + fileNameOffset;
-
-        rc = memset_s(partsigs, MAX_PARSIGS_LENGTH, 0, MAX_PARSIGS_LENGTH);
-        securec_check(rc, "\0", "\0");
-
-        /* create parsigs without last '/' */
-        int64 baseNameLen = basename_len(fileName, '/');
-        if (unlikely(baseNameLen < 0)) {
-            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_DFS),
-                errmsg("Invalid file name:%s", fileName)));
-        }
-        rc = strncpy_s(partsigs, MAX_PARSIGS_LENGTH, fileName, baseNameLen);
-        CHECK_PARTITION_SIGNATURE(rc, fileName);
-        curpos = partsigs;
-
-        /* Process each partition level */
-        for (int i = 0; i < partNum; i++) {
-            /* Process last partition */
-            if (i == partNum - 1) {
-                baseRestriction = CreateOnePartitionRestriction(rel, partVars[i], scanrelid, curpos, si, equalExpr[i]);
-                if (baseRestriction != NULL) {
-                    partRestriction = lappend(partRestriction, baseRestriction);
-                }
-
-                break;
-            }
-
-            /* Buffer for current partition expression */
-            rc = memset_s(curPartExpr, MAX_PARSIG_LENGTH, 0, MAX_PARSIG_LENGTH);
-            securec_check(rc, "\0", "\0");
-            int slashPos = (int)strpos(curpos, "/");
-            if (unlikely(slashPos < 0)) {
-                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_DFS),
-                    errmsg("Invalid file name:%s", curpos)));
-            }
-            rc = strncpy_s(curPartExpr, MAX_PARSIG_LENGTH, curpos, slashPos);
-            CHECK_PARTITION_SIGNATURE(rc, curpos);
-
-            /*
-             * Create predicate restriction for current value-partition level
-             * elimination
-             */
-            baseRestriction = CreateOnePartitionRestriction(rel, partVars[i], scanrelid, curPartExpr, si, equalExpr[i]);
-            if (baseRestriction != NULL) {
-                partRestriction = lappend(partRestriction, baseRestriction);
-            }
-
-            curpos = (char *)curpos + strlen(curPartExpr) + 1;
-        }
-
-        /*
-         * Pruning unncessary partitions by evaluating parititon predicates
-         * through the primitive restrictions.
-         */
-        pruned = predicate_refuted_by(partRestriction, rs->queryRestrictionList, true);
-
-        ereport(DEBUG2,
-                (errmodule(MOD_DFS), errmsg("partition:%s should be pruned[%s]", partsigs, pruned ? "YES" : "NO")));
-
-        if (pruned) {
-            pruned_partitions++;
-        } else {
-            prunedSplitList = lappend(prunedSplitList, si);
-        }
-
-        if (partRestriction != NIL) {
-            list_free(partRestriction);
-            partRestriction = NIL;
-        }
-    }
-
-    /* count the number of partitions which is pruned static */
-    rs->staticPruneFiles += pruned_partitions;
-    ereport(DEBUG1, (errmodule(MOD_DFS),
-                     errmsg("Pruning partitions on relation %s with SPP optimization *%s* pruned:%d, total:%d",
-                            RelationGetRelationName(ss->ss_currentRelation),
-                            u_sess->attr.attr_sql.enable_valuepartition_pruning ? "ON" : "OFF", pruned_partitions,
-                            total_partitions)));
-
-    pfree_ext(partsigs);
-    pfree_ext(curPartExpr);
-    pfree_ext(equalExpr);
-    pfree_ext(partVars);
-
-    /* If SPP is disabled, we return the original splitlist directly */
-    if (!u_sess->attr.attr_sql.enable_valuepartition_pruning) {
-        return splitList;
-    }
-
-    return prunedSplitList;
-}
-
-/**
- * @Description: Create one Restriction info one patition, and also bind PartColValue
- * in current split.
- */
-static Node *CreateOnePartitionRestriction(Relation rel, Var *partVar, Index scanrelid, const char *partExpr,
-                                           SplitInfo *si, Expr *equalExpr)
-{
-    Node *baseRestriction = NULL;
-    Datum datumValue;
-    const char *pos = strchr(partExpr, '=');
-
-    if (pos == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_DFS),
-                        errmsg("Invalid partition expression:%s", partExpr)));
-    }
-
-    const char *partColValue = pos + 1;
-    /*
-     * If the value is NULL, means that no existence of predicate restriction.
-     */
-    if (partVar == NULL) {
-        si->partContentList = lappend(si->partContentList, makeString(UriDecode(partColValue)));
-        return NULL;
-    }
-
-    /*
-     * First check if the partitioning column with value *NULL* and build
-     * IS_NULL restriction check
-     */
-    if (strncmp(partColValue, DEFAULT_HIVE_NULL, DEFAULT_HIVE_NULL_LENGTH) == 0) {
-        baseRestriction = BuildNullTestConstraint(partVar, IS_NULL);
-    } else {
-        Assert(equalExpr != NULL);
-        datumValue = GetDatumFromString(partVar->vartype, partVar->vartypmod, UriDecode(partColValue));
-        baseRestriction = BuildConstraintConst(equalExpr, datumValue, false);
-    }
-
-    si->partContentList = lappend(si->partContentList, makeString(UriDecode(partColValue)));
-
-    return baseRestriction;
-}
-
-/*
- * brief: Decimal/numeric[p(,s)] data type is supported yet, but the max accuracy of decimal/numeric
- *        is less then 39 bits. So we must check it. If the decimal accuracy do not found in the
- *        TypeName struct, we will set NUMERICMAXBITS bit as default accuracy.
- * input param @TypName: the column typename struct.
- */
-static void CheckNumericAccuracy(TypeName *TypName)
-{
-    Assert(TypName != NULL);
-    if (TypName->typmods != NULL) {
-        int32 precision;
-        ListCell *typmods = list_head(TypName->typmods);
-        Node *tmn = NULL;
-        A_Const *ac = NULL;
-
-        if (typmods == NULL || lfirst(typmods) == NULL) {
-            return;
-        }
-
-        tmn = (Node *)lfirst(typmods);
-
-        Assert(IsA(tmn, A_Const));
-
-        ac = (A_Const *)tmn;
-        precision = ac->val.val.ival;
-
-        if (precision > NUMERIC_MAX_BITS) {
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_DFS),
-                            errmsg("The maximum accuracy of decimal/numeric data type supported "
-                                   "is %d bits.",
-                                   NUMERIC_MAX_BITS)));
-        }
-    } else if (TypName->typemod != -1) {  // for create table like case
-        uint32 typmod = (uint32)(TypName->typemod - VARHDRSZ);
-        uint32 precision = (typmod >> 16) & 0xffff;
-        if (precision > NUMERIC_MAX_BITS) {
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_DFS),
-                            errmsg("The maximum accuracy of decimal/numeric data type supported "
-                                   "is %d bits.",
-                                   NUMERIC_MAX_BITS)));
-        }
-    } else {
-        A_Const *n = makeNode(A_Const);
-        n->val.type = T_Integer;
-        n->val.val.ival = NUMERIC_MAX_BITS;
-        n->location = -1;
-
-        TypName->typmods = list_make1(n);
-    }
-}
-
-void checkEncoding(DefElem *optionDef)
-{
-    int encoding = pg_char_to_encoding(defGetString(optionDef));
-    if (encoding < 0) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_DFS),
-                        errmsg("argument to option\"%s\" must be a valid encoding name", optionDef->defname)));
-    } else {
-        VerifyEncoding(encoding);
-    }
-}
-
-void OrcCheckDataType(TypeName *typName, char *ColName, char *fileType)
-{
-    Oid TypeOid = typenameTypeId(NULL, typName);
-    if (fileType == NULL) {
-        fileType = "hdfs";
-    }
-
-    if (!(TypeOid == BOOLOID || TypeOid == BPCHAROID || TypeOid == DATEOID || TypeOid == FLOAT4OID ||
-          TypeOid == FLOAT8OID || TypeOid == INT1OID || TypeOid == INT2OID || TypeOid == INT4OID ||
-          TypeOid == INT8OID || TypeOid == NUMERICOID || TypeOid == TEXTOID || TypeOid == TIMESTAMPOID ||
-          TypeOid == VARCHAROID || TypeOid == CLOBOID)) {
-        if (pg_strcasecmp(fileType, "orc") == 0) {
-            ereport(ERROR, (errcode(ERRCODE_FDW_INVALID_DATA_TYPE), errmodule(MOD_DFS),
-                            errmsg("Column %s is unsupported data type for an orc table.", ColName)));
-        } else {
-            ereport(ERROR, (errcode(ERRCODE_FDW_INVALID_DATA_TYPE), errmodule(MOD_DFS),
-                            errmsg("Column %s is unsupported data type for %s table.", ColName, fileType)));
-        }
-    }
-
-    if (DATEOID == TypeOid && DB_IS_CMPT(DB_CMPT_C)) {
-        ereport(ERROR, (errcode(ERRCODE_FDW_INVALID_DATA_TYPE),
-                        errmsg("Date type is unsupported for hdfs table in TD-format database.")));
-    }
-
-    /*
-     * Check decimal/numeric accuracy.
-     */
-    if (NUMERICOID == TypeOid) {
-        CheckNumericAccuracy(typName);
-    }
-}
-
-/*
- * Construct three arraies which indicate the required columns, target columns and
- * restriction columns by each.
- * _out_param readerState: The state for reading.
- * _in_param qual: The predicates pushed down to reader.
- * _in_param columnList: The list of all the required columns.
- * _in_param targetList: The list of the target columns.
- * _in_param restrictColList: The list of the restriction columns.
- */
-static void InitRequiredCols(dfs::reader::ReaderState *readerState, List *qual, List *columnList, List *targetList,
-                             List *restrictColList)
-{
-    ListCell *lc = NULL;
-    Var *variable = NULL;
-    readerState->isRequired = (bool *)palloc0(sizeof(bool) * readerState->relAttrNum);
-    readerState->targetRequired = (bool *)palloc0(sizeof(bool) * readerState->relAttrNum);
-    readerState->restrictRequired = (bool *)palloc0(sizeof(bool) * readerState->relAttrNum);
-
-    foreach (lc, columnList) {
-        variable = (Var *)lfirst(lc);
-        readerState->isRequired[variable->varattno - 1] = true;
-    }
-
-    foreach (lc, targetList) {
-        variable = (Var *)lfirst(lc);
-        readerState->targetRequired[variable->varattno - 1] = true;
-    }
-
-    /* Add the restrict columns which can not be pushed down into the target list. */
-    if (list_length(qual) > 0) {
-        List *usedList = NIL;
-        foreach (lc, qual) {
-            Node *clause = (Node *)lfirst(lc);
-            List *clauseList = NIL;
-
-            /* recursively pull up any columns used in the restriction clause */
-            clauseList = pull_var_clause(clause, PVC_RECURSE_AGGREGATES, PVC_RECURSE_PLACEHOLDERS);
-
-            usedList = MergeList(usedList, clauseList, readerState->relAttrNum);
-            list_free_ext(clauseList);
-        }
-        foreach (lc, usedList) {
-            variable = (Var *)lfirst(lc);
-            readerState->targetRequired[variable->varattno - 1] = true;
-        }
-        list_free_ext(usedList);
-    }
-
-    foreach (lc, restrictColList) {
-        variable = (Var *)lfirst(lc);
-        readerState->restrictRequired[variable->varattno - 1] = true;
-    }
-}
-
-/**
- * @Description: Check the foldername validity for the OBS foreign table.
- * The first char and end char must be a '/'. Support the multi-foldername
- * for the OBS foreign table.
- * @in foldername, the given foldername.
- * @printName, the option name to be printed.
- * @delimiter, the string delimiter.
- * @return None.
- */
-void checkObsPath(char *foldername, char *printName, const char *delimiter)
-{
-    if (0 == strlen(foldername)) {
-        if (0 == pg_strcasecmp(printName, OPTION_NAME_FOLDERNAME)) {
-            ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
-                            errmsg("No %s is specified for the foreign table.", printName)));
-        } else {
-            ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
-                            errmsg("Unsupport any empy %s for the foreign table.", printName)));
-        }
-    }
-
-    char *tmpStr = NULL;
-    char *separaterStr = NULL;
-    char *tmp_token = NULL;
-    errno_t rc = 0;
-    int tmpStrLen = strlen(foldername);
-
-    if (*foldername != '/' || foldername[tmpStrLen - 1] != '/') {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmodule(MOD_DFS),
-                        errmsg("The first character and the end character of each %s"
-                               " must be a '/' in string \"%s\".",
-                               printName, foldername)));
-    }
-
-    tmpStr = (char *)palloc0(tmpStrLen + 1);
-    rc = strncpy_s(tmpStr, tmpStrLen + 1, foldername, tmpStrLen);
-    securec_check(rc, "\0", "\0");
-
-    char *bucket = NULL;
-    char *prefix = NULL;
-
-    separaterStr = strtok_r(tmpStr, delimiter, &tmp_token);
-    while (separaterStr != NULL) {
-        char *tmp = separaterStr;
-        /* detele ' ' before path. */
-        while (*tmp == ' ') {
-            tmp++;
-        }
-
-        if (strlen(tmp) == 0) {
-            ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
-                            errmsg("Unsupport any empy %s for the foreign table.", printName)));
-        }
-
-        if (*tmp != '/' || tmp[strlen(tmp) - 1] != '/') {
-            ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmodule(MOD_DFS),
-                            errmsg("The first character and the end character of each %s"
-                                   " must be a '/' in string \"%s\".",
-                                   printName, foldername)));
-        }
-        if (strlen(tmp) <= 2) {
-            ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmodule(MOD_DFS),
-                            errmsg("Unsupport any empy %s for the foreign table.", printName)));
-        }
-
-        /* check bucket or prefix is vaild. */
-        FetchUrlPropertiesForQuery(tmp, &bucket, &prefix);
-        Assert(bucket && prefix);
-
-        pfree_ext(bucket);
-        pfree_ext(prefix);
-
-        separaterStr = strtok_r(NULL, delimiter, &tmp_token);
-    }
-    pfree_ext(tmpStr);
-}
-
-void CheckFoldernameOrFilenamesOrCfgPtah(const char *OptStr, char *OptType)
-{
-    const char *Errorchar = NULL;
-    char BeginChar;
-    char EndChar;
-    uint32 i = 0;
-
-    Assert(OptStr != NULL);
-    Assert(OptType != NULL);
-
-    /* description: remove the hdfs info. */
-    if (strlen(OptStr) == 0) {
-        if (pg_strncasecmp(OptType, OPTION_NAME_FOLDERNAME, NAMEDATALEN) == 0) {
-            ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
-                            errmsg("No folder path is specified for the foreign table.")));
-        } else if (pg_strncasecmp(OptType, OPTION_NAME_FILENAMES, NAMEDATALEN) == 0) {
-            ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
-                            errmsg("No file path is specified for the foreign table.")));
-        } else {
-            ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
-                            errmsg("No hdfscfg path is specified for the server.")));
-        }
-    }
-    size_t optStrLen = strlen(OptStr);
-    for (i = 0; i < optStrLen; i++) {
-        if (OptStr[i] == ' ') {
-            if (i == 0 || (i - 1 > 0 && OptStr[i - 1] != '\\')) {
-                ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
-                                errmsg("There is an illegal character \'%c\' in the option %s.", OptStr[i], OptType)));
-            }
-        }
-    }
-    BeginChar = *OptStr;
-    EndChar = *(OptStr + strlen(OptStr) - 1);
-    if (BeginChar == ',' || EndChar == ',') {
-        ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
-                        errmsg("There is an illegal character \'%c\' in the option %s.", ',', OptType)));
-    }
-    if (0 == pg_strcasecmp(OptType, OPTION_NAME_FILENAMES) && EndChar == '/') {
-        ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
-                        errmsg("The option %s should not be end with \'%c\'.", OptType, EndChar)));
-    }
-
-    Errorchar = strstr(OptStr, ",");
-    if (Errorchar && 0 == pg_strcasecmp(OptType, OPTION_NAME_FOLDERNAME)) {
-        ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
-                        errmsg("Only a folder path is allowed for the foreign table.")));
-    }
-    if (Errorchar && 0 == pg_strcasecmp(OptType, OPTION_NAME_CFGPATH)) {
-        ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
-                        errmsg("Only a hdfscfg path is allowed for the server.")));
-    }
-
-    /*
-     * The path must be an absolute path.
-     */
-    if (!is_absolute_path(OptStr)) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmodule(MOD_DFS),
-                        errmsg("The path \"%s\" must be an absolute path.", OptStr)));
-    }
-}
-
-void CheckGetServerIpAndPort(const char *Address, List **AddrList, bool IsCheck, int real_addr_max)
-{
-    char *Str = NULL;
-    char *Delimiter = NULL;
-    char *SeparaterStr = NULL;
-    char *tmp_token = NULL;
-    HdfsServerAddress *ServerAddress = NULL;
-    int addressCounter = 0;
-    int addressMaxNum = (real_addr_max == -1 ? 2 : real_addr_max);
-    errno_t rc = 0;
-
-    Assert(Address != NULL);
-    Str = (char *)palloc0(strlen(Address) + 1);
-    rc = strncpy_s(Str, strlen(Address) + 1, Address, strlen(Address));
-    securec_check(rc, "\0", "\0");
-
-    /* Frist, check address stirng, the ' ' could not exist */
-    if (strstr(Str, " ") != NULL) {
-        ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
-                        errmsg("The address option exists illegal character: \'%c\'", ' ')));
-    }
-
-    if (strlen(Str) == 0) {
-        ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
-                        errmsg("No address is specified for the server.")));
-    }
-
-    /* Check the address string, the first and last character could not be a character ',' */
-    if (Str[strlen(Str) - 1] == ',' || *Str == ',') {
-        ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
-                        errmsg("The address option exists illegal character: \'%c\'", ',')));
-    }
-
-    /* Now, we obtain ip string and port string */
-    /* Separater Str use a ',' delimiter, for example xx.xx.xx.xx:xxxx,xx.xx.xx.xx:xxxx */
-    Delimiter = ",";
-    SeparaterStr = strtok_r(Str, Delimiter, &tmp_token);
-    while (SeparaterStr != NULL) {
-        char *AddrPort = NULL;
-        int PortLen = 0;
-
-        if (++addressCounter > addressMaxNum) {
-            ereport(ERROR,
-                    (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
-                     errmsg("The count of address \"%s\" must be not greater than %d.", Address, addressMaxNum)));
-        }
-
-        /* Judge ipv6 format or ipv4 format,like fe80::7888:bf24:e381:27:25000 */
-        if (strstr(SeparaterStr, "::") != NULL) {
-            ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
-                            errmsg("Unsupport ipv6 foramt")));
-        } else if ((AddrPort = strstr(SeparaterStr, ":")) != NULL) {
-            /* Deal with ipv4 format, like xx.xx.xx.xx:xxxx
-             * Get SeparaterStr is "xx.xx.xx.xx" and AddrPort is xxxx.
-             * Because the original SeparaterStr transform "xx.xx.xx.xx\0xxxxx"
-             */
-            *AddrPort++ = '\0';
-
-        } else {
-            ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
-                            errmsg("The incorrect address format")));
-        }
-
-        /* Check ip validity  */
-        (void)DirectFunctionCall1(inet_in, CStringGetDatum(SeparaterStr));
-
-        /* Check port validity */
-        if (AddrPort != NULL) {
-            PortLen = strlen(AddrPort);
-        }
-        if (PortLen != 0) {
-            char *PortStr = AddrPort;
-            while (*PortStr) {
-                if (isdigit(*PortStr)) {
-                    PortStr++;
-                } else {
-                    ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
-                                    errmsg("The address option exists illegal character: \'%c\'", *PortStr)));
-                }
-            }
-            int portVal = pg_strtoint32(AddrPort);
-            if (portVal > 65535) {
-                ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
-                                errmsg("The port value is out of range: \'%s\'", AddrPort)));
-            }
-        } else {
-            ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
-                            errmsg("The incorrect address format")));
-        }
-
-        /* If IsCheck is false, get port and ip, Otherwise, only check validity of ip and port. */
-        if (!IsCheck) {
-            ServerAddress = (HdfsServerAddress *)palloc0(sizeof(HdfsServerAddress));
-            ServerAddress->HdfsIp = SeparaterStr;
-            ServerAddress->HdfsPort = AddrPort;
-            *AddrList = lappend(*AddrList, ServerAddress);
-        }
-
-        SeparaterStr = strtok_r(NULL, Delimiter, &tmp_token);
-    }
 }
 
 /*
@@ -2828,7 +1622,6 @@ int64_t datumGetInt64ByVar(Datum datumValue, Var *colVar)
             ereport(ERROR, (errcode(ERRCODE_FDW_INVALID_DATA_TYPE), errmodule(MOD_DFS),
                             errmsg("Please select other functions to parse deciaml data.")));
         }
-
     } else {
         value = DatumGetInt64(datumValue);
     }
@@ -3039,7 +1832,6 @@ BlockNumber getPageCountForFt(void *additionalData)
     if (IsA(additionalData, SplitMap)) {
         SplitMap *splitMap = (SplitMap *)additionalData;
         fileList = splitMap->splits;
-
     } else {
         /* for dist obs foreign table. */
         DistFdwDataNodeTask *dnTask = (DistFdwDataNodeTask *)additionalData;
@@ -3051,7 +1843,6 @@ BlockNumber getPageCountForFt(void *additionalData)
      * description: BLSCKZ value may change
      */
     totalPageCount = (uint32)(totalSize + (BLCKSZ - 1)) / BLCKSZ;
-
     if (totalPageCount < 1) {
         totalPageCount = 1;
     }

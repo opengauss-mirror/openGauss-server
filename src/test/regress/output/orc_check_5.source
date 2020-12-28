@@ -1,0 +1,475 @@
+--
+-- Test orc foreign data wrapper.
+--
+-- Settings to make the result deterministic
+SET datestyle = "ISO, YMD";
+set enable_vector_engine=false;
+drop server hdfs_server cascade;
+ERROR:  server "hdfs_server" does not exist
+-- validator tests
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+CREATE FOREIGN TABLE test_validator_filename_missing (a int) 
+	SERVER hdfs_server distribute by roundrobin; -- ERROR
+ERROR:  It is not allowed to specify both filenames and foldername for a HDFS foreign table, need either filenames or foldername.
+CREATE FOREIGN TABLE test_validator_invalid_option (a int) 
+	SERVER hdfs_server 
+	OPTIONS(format 'orc', filenames 'bigrow.orc', bad_option_name '1') distribute by roundrobin; -- ERROR
+ERROR:  The path "bigrow.orc" must be an absolute path.
+CREATE FOREIGN TABLE test_validator_tooMany_option (a int) 
+	SERVER hdfs_server 
+	OPTIONS(format 'orc', filenames 'bigrow.orc', foldername '/user/hdfs') distribute by roundrobin; -- ERROR
+ERROR:  The path "bigrow.orc" must be an absolute path.
+drop foreign table test_validator_filename_missing;
+ERROR:  foreign table "test_validator_filename_missing" does not exist
+drop foreign table test_validator_invalid_option;
+ERROR:  foreign table "test_validator_invalid_option" does not exist
+drop foreign table test_validator_tooMany_option;
+ERROR:  foreign table "test_validator_toomany_option" does not exist
+--basic distributed foreign table test
+-- error scenarios
+DROP FOREIGN TABLE IF EXISTS test_missing_file;
+NOTICE:  foreign table "test_missing_file" does not exist, skipping
+CREATE FOREIGN TABLE test_missing_file (a int) SERVER hdfs_server 
+	OPTIONS (format 'orc', filenames '/user/hive/warehouse/mppdb.db/missing_file.orc') distribute by roundrobin;
+SELECT * FROM test_missing_file limit 10; -- ERROR
+ERROR:  The hdfs file /user/hive/warehouse/mppdb.db/missing_file.orc does not exist.
+drop foreign table test_missing_file;
+DROP FOREIGN TABLE IF EXISTS test_table_definition_mismatch;
+NOTICE:  foreign table "test_table_definition_mismatch" does not exist, skipping
+CREATE FOREIGN TABLE test_table_definition_mismatch (type CHAR(6)) SERVER hdfs_server
+	OPTIONS (format 'orc', filenames '/user/hive/warehouse/mppdb.db/bigrow.orc') distribute by roundrobin;
+SELECT * FROM test_table_definition_mismatch limit 10; -- ERROR
+ERROR:  Column count in table definition does not match with ORC file /user/hive/warehouse/mppdb.db/bigrow.orc.
+drop foreign table test_table_definition_mismatch;
+DROP FOREIGN TABLE IF EXISTS lineitem_twoStripes;
+NOTICE:  foreign table "lineitem_twostripes" does not exist, skipping
+Create foreign table lineitem_twoStripes (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000000_0,/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000001_0') distribute by roundrobin;
+explain (verbose, costs off) SELECT L_SHIPDATE FROM lineitem_twoStripes WHERE L_orderkey BETWEEN 509050 AND 509070 order by l_shipdate;
+WARNING:  Statistics in some tables or columns(public.lineitem_twostripes.l_orderkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                      QUERY PLAN                                                                       
+-------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: l_shipdate
+   ->  Sort
+         Output: l_shipdate
+         Sort Key: lineitem_twostripes.l_shipdate
+         ->  Foreign Scan on public.lineitem_twostripes
+               Output: l_shipdate
+               Pushdown Predicate Filter: ((lineitem_twostripes.l_orderkey >= 509050) AND (lineitem_twostripes.l_orderkey <= 509070))
+               Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000000_0,/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000001_0
+(9 rows)
+
+explain (verbose, costs off) select L_TAX from lineitem_twoStripes where L_LINESTATUS = 'V';
+WARNING:  Statistics in some tables or columns(public.lineitem_twostripes.l_linestatus) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                   QUERY PLAN                                                                    
+-------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: l_tax
+   ->  Foreign Scan on public.lineitem_twostripes
+         Output: l_tax
+         Pushdown Predicate Filter: (lineitem_twostripes.l_linestatus = 'V'::text)
+         Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000000_0,/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000001_0
+(6 rows)
+
+explain (verbose, costs off) select L_LINESTATUS from lineitem_twoStripes where L_RETURNFLAG = 'N' order by 1 desc offset 1000 limit 20;
+WARNING:  Statistics in some tables or columns(public.lineitem_twostripes.l_returnflag) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                            QUERY PLAN                                                                             
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: l_linestatus
+   ->  Streaming (type: GATHER)
+         Output: l_linestatus
+         ->  Limit
+               Output: l_linestatus
+               ->  Sort
+                     Output: l_linestatus
+                     Sort Key: lineitem_twostripes.l_linestatus DESC
+                     ->  Foreign Scan on public.lineitem_twostripes
+                           Output: l_linestatus
+                           Pushdown Predicate Filter: (lineitem_twostripes.l_returnflag = 'N'::text)
+                           Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000000_0,/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000001_0
+(13 rows)
+
+explain (verbose, costs off) SELECT count(L_SHIPDATE) FROM lineitem_twoStripes WHERE L_orderkey BETWEEN 509050 AND 509070;
+WARNING:  Statistics in some tables or columns(public.lineitem_twostripes.l_orderkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                         QUERY PLAN                                                                          
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count((count(l_shipdate)))
+   ->  Streaming (type: GATHER)
+         Output: (count(l_shipdate))
+         ->  Aggregate
+               Output: count(l_shipdate)
+               ->  Foreign Scan on public.lineitem_twostripes
+                     Output: l_shipdate
+                     Pushdown Predicate Filter: ((lineitem_twostripes.l_orderkey >= 509050) AND (lineitem_twostripes.l_orderkey <= 509070))
+                     Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000000_0,/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000001_0
+(10 rows)
+
+drop foreign table lineitem_twoStripes;
+DROP FOREIGN TABLE IF EXISTS lineitem;
+NOTICE:  foreign table "lineitem" does not exist, skipping
+Create foreign table lineitem (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS customer;
+NOTICE:  foreign table "customer" does not exist, skipping
+CREATE FOREIGN TABLE customer ( 
+ c_custkey BIGINT, 
+ c_name TEXT, 
+ c_address TEXT, 
+ c_nationkey INT4, 
+ c_phone TEXT, 
+ c_acctbal FLOAT4, 
+ c_mktsegment TEXT, 
+ c_comment TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/customer_orc11_64stripe')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS orders;
+NOTICE:  foreign table "orders" does not exist, skipping
+create foreign table orders (
+ O_ORDERKEY INT4, 
+ O_CUSTKEY INT4, 
+ O_ORDERSTATUS TEXT, 
+ O_TOTALPRICE FLOAT8,
+ O_ORDERDATE TEXT,
+ O_ORDERPRIORITY TEXT, 
+ O_CLERK TEXT,
+ O_SHIPPRIORITY INT4, 
+ O_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/orders_orc11_64stripe')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS part;
+NOTICE:  foreign table "part" does not exist, skipping
+create foreign table part  (
+ P_PARTKEY INT4,
+ P_NAME TEXT, 
+ P_MFGR TEXT,
+ P_BRAND TEXT,
+ P_TYPE TEXT,
+ P_SIZE INT4,
+ P_CONTAINER TEXT,
+ P_RETAILPRICE FLOAT8,
+ P_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/part_orc11_64stripe')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS supplier;
+NOTICE:  foreign table "supplier" does not exist, skipping
+create foreign table supplier  (
+ S_SUPPKEY INT4,
+ S_NAME TEXT,
+ S_ADDRESS TEXT,
+ S_NATIONKEY INT4,
+ S_PHONE TEXT,
+ S_ACCTBAL FLOAT8,
+ S_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/supplier_orc11_64stripe')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS partsupp;
+NOTICE:  foreign table "partsupp" does not exist, skipping
+create foreign table partsupp (
+ PS_PARTKEY INT4,
+ PS_SUPPKEY INT4,
+ PS_AVAILQTY INT4,
+ PS_SUPPLYCOST FLOAT8,
+ PS_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/partsupp_orc11_64stripe')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS nation;
+NOTICE:  foreign table "nation" does not exist, skipping
+create foreign table nation  (
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4,
+ N_COMMENT TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/nation_orc11_64stripe')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS region;
+NOTICE:  foreign table "region" does not exist, skipping
+create foreign table region  (
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/region_orc11_64stripe')
+distribute by roundrobin;
+-- there are bugs for the following three queries. cause EOF error from datanode
+explain (verbose, costs off) SELECT L_shipdate FROM lineitem WHERE L_orderkey between 2125190 and 2125200 order by l_shipdate;
+WARNING:  Statistics in some tables or columns(public.lineitem.l_orderkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                    QUERY PLAN                                                    
+------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: l_shipdate
+   ->  Sort
+         Output: l_shipdate
+         Sort Key: lineitem.l_shipdate
+         ->  Foreign Scan on public.lineitem
+               Output: l_shipdate
+               Pushdown Predicate Filter: ((lineitem.l_orderkey >= 2125190) AND (lineitem.l_orderkey <= 2125200))
+               Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe
+(9 rows)
+
+explain (verbose, costs off) SELECT count(L_shipdate) FROM lineitem WHERE L_orderkey between 2125190 and 2125200;
+WARNING:  Statistics in some tables or columns(public.lineitem.l_orderkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count((count(l_shipdate)))
+   ->  Streaming (type: GATHER)
+         Output: (count(l_shipdate))
+         ->  Aggregate
+               Output: count(l_shipdate)
+               ->  Foreign Scan on public.lineitem
+                     Output: l_shipdate
+                     Pushdown Predicate Filter: ((lineitem.l_orderkey >= 2125190) AND (lineitem.l_orderkey <= 2125200))
+                     Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe
+(10 rows)
+
+explain (verbose, costs off) SELECT *  from lineitem WHERE L_orderkey between 2125190 and 2125200 order by l_orderkey, l_partkey;
+WARNING:  Statistics in some tables or columns(public.lineitem.l_orderkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                            QUERY PLAN                                                                                                            
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment
+   ->  Sort
+         Output: l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment
+         Sort Key: lineitem.l_orderkey, lineitem.l_partkey
+         ->  Foreign Scan on public.lineitem
+               Output: l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment
+               Pushdown Predicate Filter: ((lineitem.l_orderkey >= 2125190) AND (lineitem.l_orderkey <= 2125200))
+               Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe
+(9 rows)
+
+create schema FVT_DATA_QUERY;
+create foreign table FVT_DATA_QUERY.TABLE_EXP_FROM_SUBQUERY_T1(
+D_ID int, D_W_ID int,
+D_NAME varchar(10),
+D_STREET_1 varchar(20))SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/subquery.db/table_exp_from_subquery_orc_t1')
+distribute by roundrobin;
+CREATE VIEW FVT_DATA_QUERY.TABLE_EXP_FROM_SUBQUERY_V1 as select * from FVT_DATA_QUERY.TABLE_EXP_FROM_SUBQUERY_T1;
+explain (verbose, costs off) SELECT DISTINCT SUM(D_ID) as result1 FROM FVT_DATA_QUERY.TABLE_EXP_FROM_SUBQUERY_V1 group by D_ID order by 1;
+WARNING:  Statistics in some tables or columns(fvt_data_query.table_exp_from_subquery_t1.d_id) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+ Unique
+   Output: (pg_catalog.sum((sum(table_exp_from_subquery_t1.d_id)))), table_exp_from_subquery_t1.d_id
+   ->  Sort
+         Output: (pg_catalog.sum((sum(table_exp_from_subquery_t1.d_id)))), table_exp_from_subquery_t1.d_id
+         Sort Key: (pg_catalog.sum((sum(table_exp_from_subquery_t1.d_id))))
+         ->  HashAggregate
+               Output: pg_catalog.sum((sum(table_exp_from_subquery_t1.d_id))), table_exp_from_subquery_t1.d_id
+               Group By Key: table_exp_from_subquery_t1.d_id
+               ->  Streaming (type: GATHER)
+                     Output: (sum(table_exp_from_subquery_t1.d_id)), table_exp_from_subquery_t1.d_id
+                     ->  HashAggregate
+                           Output: sum(table_exp_from_subquery_t1.d_id), table_exp_from_subquery_t1.d_id
+                           Group By Key: table_exp_from_subquery_t1.d_id
+                           ->  Foreign Scan on fvt_data_query.table_exp_from_subquery_t1
+                                 Output: table_exp_from_subquery_t1.d_id
+                                 Orc File: /user/hive/warehouse/subquery.db/table_exp_from_subquery_orc_t1
+(16 rows)
+
+drop schema FVT_DATA_QUERY cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to foreign table fvt_data_query.table_exp_from_subquery_t1
+drop cascades to view fvt_data_query.table_exp_from_subquery_v1
+create foreign table tenk1(unique1 int,unique2 int,two int,four int,ten int,twenty int,hundred int,thousand int,twothousand int,
+fivethous int,tenthous int,odd int,even int,stringu1 varchar,stringu2 varchar,string4 varchar)SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/tenk1_orc')
+distribute by roundrobin;
+explain (verbose, costs off) select count(distinct ss.ten) from (select ten from tenk1 a where unique1 IN (select hundred from tenk1 b)) ss;
+WARNING:  Statistics in some tables or columns(public.tenk1.unique1, public.tenk1.hundred, public.tenk1.ten) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count((count(a.ten)))
+   ->  Streaming (type: GATHER)
+         Output: (count(a.ten))
+         ->  Aggregate
+               Output: count(a.ten)
+               ->  HashAggregate
+                     Output: a.ten
+                     Group By Key: a.ten
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: a.ten
+                           Distribute Key: a.ten
+                           ->  HashAggregate
+                                 Output: a.ten
+                                 Group By Key: a.ten
+                                 ->  Hash Join
+                                       Output: a.ten
+                                       Hash Cond: (a.unique1 = b.hundred)
+                                       ->  Foreign Scan on public.tenk1 a
+                                             Output: a.ten, a.unique1
+                                             Orc File: /user/hive/warehouse/tenk1_orc
+                                       ->  Hash
+                                             Output: b.hundred
+                                             ->  HashAggregate
+                                                   Output: b.hundred
+                                                   Group By Key: b.hundred
+                                                   ->  Streaming(type: BROADCAST)
+                                                         Output: b.hundred
+                                                         ->  HashAggregate
+                                                               Output: b.hundred
+                                                               Group By Key: b.hundred
+                                                               ->  Foreign Scan on public.tenk1 b
+                                                                     Output: b.hundred
+                                                                     Orc File: /user/hive/warehouse/tenk1_orc
+(34 rows)
+
+explain (verbose, costs off) select r_name from region left join nation on n_nationkey < 5;
+WARNING:  Statistics in some tables or columns(public.region, public.nation.n_nationkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: region.r_name
+   ->  Nested Loop Left Join
+         Output: region.r_name
+         ->  Foreign Scan on public.region
+               Output: region.r_name
+               Orc File: /user/hive/warehouse/mppdb.db/region_orc11_64stripe
+         ->  Materialize
+               ->  Streaming(type: BROADCAST)
+                     ->  Foreign Scan on public.nation
+                           Pushdown Predicate Filter: (nation.n_nationkey < 5)
+                           Orc File: /user/hive/warehouse/mppdb.db/nation_orc11_64stripe
+(12 rows)
+
+drop foreign table tenk1;
+create table region001 as select R_REGIONKEY+1 id, R_REGIONKEY from region;
+explain (verbose, costs off) select * from region001 order by 1;
+WARNING:  Statistics in some tables or columns(public.region001.id) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                QUERY PLAN                
+------------------------------------------
+ Streaming (type: GATHER)
+   Output: id, r_regionkey
+   ->  Sort
+         Output: id, r_regionkey
+         Sort Key: region001.id
+         ->  Seq Scan on public.region001
+               Output: id, r_regionkey
+(7 rows)
+
+update region001 a set a.R_REGIONKEY=34 from customer where a.R_REGIONKEY = customer.c_custkey;
+explain (verbose, costs off) select * from region001 order by 1;
+WARNING:  Statistics in some tables or columns(public.region001.id) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                QUERY PLAN                
+------------------------------------------
+ Streaming (type: GATHER)
+   Output: id, r_regionkey
+   ->  Sort
+         Output: id, r_regionkey
+         Sort Key: region001.id
+         ->  Seq Scan on public.region001
+               Output: id, r_regionkey
+(7 rows)
+
+drop table region001;
+create foreign table  customer_demographics ( 
+        cd_demo_sk                int  ,
+        cd_gender                 char(1)  ,
+        cd_marital_status         char(1)  ,
+        cd_education_status       char(20) ,
+        cd_purchase_estimate      int  ,
+        cd_credit_rating          char(10) ,
+        cd_dep_count              int  ,
+        cd_dep_employed_count     int  ,
+        cd_dep_college_count      int   ) 
+server hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/customer_demographics')
+distribute by roundrobin;
+explain (verbose, costs off) select count(1) from customer_demographics where cd_education_status = 'College';
+WARNING:  Statistics in some tables or columns(public.customer_demographics.cd_education_status) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                   QUERY PLAN                                                   
+----------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count((count(1)))
+   ->  Streaming (type: GATHER)
+         Output: (count(1))
+         ->  Aggregate
+               Output: count(1)
+               ->  Foreign Scan on public.customer_demographics
+                     Pushdown Predicate Filter: (customer_demographics.cd_education_status = 'College'::bpchar)
+                     Orc File: /user/hive/warehouse/customer_demographics
+(9 rows)
+
+explain (verbose, costs off) select count(1) from customer_demographics where cd_education_status = 'College ';
+WARNING:  Statistics in some tables or columns(public.customer_demographics.cd_education_status) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                   QUERY PLAN                                                    
+-----------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count((count(1)))
+   ->  Streaming (type: GATHER)
+         Output: (count(1))
+         ->  Aggregate
+               Output: count(1)
+               ->  Foreign Scan on public.customer_demographics
+                     Pushdown Predicate Filter: (customer_demographics.cd_education_status = 'College '::bpchar)
+                     Orc File: /user/hive/warehouse/customer_demographics
+(9 rows)
+
+drop foreign table customer_demographics;
+reset enable_vector_engine;
+DROP FOREIGN TABLE IF EXISTS lineitem CASCADE;
+DROP FOREIGN TABLE IF EXISTS customer CASCADE;
+DROP FOREIGN TABLE IF EXISTS orders CASCADE;
+DROP FOREIGN TABLE IF EXISTS part CASCADE;
+DROP FOREIGN TABLE IF EXISTS partsupp CASCADE;
+DROP FOREIGN TABLE IF EXISTS supplier CASCADE;
+DROP FOREIGN TABLE IF EXISTS nation CASCADE;
+DROP FOREIGN TABLE IF EXISTS region CASCADE;
+DROP SERVER hdfs_server CASCADE;

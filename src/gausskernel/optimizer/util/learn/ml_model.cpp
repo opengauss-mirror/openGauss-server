@@ -50,7 +50,7 @@ static void HandleSubPlan(PlanState* resultPlan, PlannedStmt* pstmt, uint64 qid,
 static int64* JsonGetInt64Array(cJSON* root, int* length);
 static ModelPredictInfo* GetModelPredictInfo(const cJSON* root);
 static void SubPlanAssignPrediction(PlanState* resultPlan, ModelPredictInfo* info);
-static TupleDesc InitTupleVal(int MODEL_TRAIN_ATTRNUM);
+static TupleDesc InitTupleVal(int modelTrainAttrnum);
 static void UpdateTrainRes(Datum* values, Datum* datumsMax, Datum* datumsAcc, int nLabel, ModelAccuracy** mAcc,
     const ModelTrainInfo* info, char* labels);
 
@@ -71,7 +71,7 @@ Datum model_train_opt(PG_FUNCTION_ARGS)
                 errmsg("must be system admin to use model_train_opt()")));
     }
 
-    const static int MODEL_TRAIN_ATTRNUM = 4;
+    const static int modelTrainAttrnum = 4;
     char* templateName = NULL;
     char* modelName = NULL;
     /* function args */
@@ -88,9 +88,9 @@ Datum model_train_opt(PG_FUNCTION_ARGS)
     }
 
     /* initialize tuple to return */
-    TupleDesc tupdesc = InitTupleVal(MODEL_TRAIN_ATTRNUM);
-    Datum values[MODEL_TRAIN_ATTRNUM];
-    bool nulls[MODEL_TRAIN_ATTRNUM];
+    TupleDesc tupdesc = InitTupleVal(modelTrainAttrnum);
+    Datum values[modelTrainAttrnum];
+    bool nulls[modelTrainAttrnum];
 
     HeapTuple tuple;
     Datum result;
@@ -260,9 +260,7 @@ static void ModelTrainInternal(const char* templateName, const char* modelName, 
             (errmodule(MOD_OPT_AI),
                 errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("Model configuration contains illegal values, please check for template name %s "
-                       "model name %s",
-                    templateName,
-                    modelName)));
+                       "model name %s", templateName, modelName)));
     }
     /* 1. calls related model_train PG_FUNCTION */
     char* trainResultJson = TreeModelTrain(modelinfo, labels);
@@ -271,10 +269,8 @@ static void ModelTrainInternal(const char* templateName, const char* modelName, 
 
     cJSON* jsonObj = cJSON_Parse(trainResultJson);
     if (jsonObj == NULL) {
-        ereport(ERROR,
-            (errmodule(MOD_OPT_AI),
-                errcode(ERRCODE_UNEXPECTED_NODE_STATE),
-                errmsg("Output from AIEngine ia not in JSON format. Output is \n%s", trainResultJson)));
+        ereport(ERROR, (errmodule(MOD_OPT_AI), errcode(ERRCODE_UNEXPECTED_NODE_STATE),
+            errmsg("Output from AIEngine ia not in JSON format. Output is \n%s", trainResultJson)));
     }
     ModelTrainInfo* info = GetModelTrainInfo(jsonObj);
     cJSON_Delete(jsonObj);
@@ -297,6 +293,10 @@ static void ModelTrainInternal(const char* templateName, const char* modelName, 
     UpdateTrainRes(values, datumsMax, datumsAcc, nLabel, mAcc, info, labels);
 
     HeapTuple modelTuple = SearchSysCache1(OPTMODEL, CStringGetDatum(modelName));
+    if (!HeapTupleIsValid(modelTuple)) {
+        ereport(ERROR, (errmodule(MOD_OPT_AI), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+            errmsg("OPT Model not found for model name %s", modelName)));
+    }
     HeapTuple newTuple = heap_modify_tuple(modelTuple, RelationGetDescr(modelRel), values, nulls, replaces);
     simple_heap_update(modelRel, &newTuple->t_self, newTuple);
     CatalogUpdateIndexes(modelRel, newTuple);
@@ -505,7 +505,6 @@ Form_gs_opt_model CheckModelTargets(const char* templateName, const char* modelN
     }
     labelArray = DatumGetArrayTypeP(val);
     nElement = ARR_DIMS(labelArray)[0];
-
     /* Sanity check for labels attribute */
     if ((ARR_NDIM(labelArray) != 1) || (nElement <= 0) || (ARR_HASNULL(labelArray)) ||
         (ARR_ELEMTYPE(labelArray) != CHAROID)) {
@@ -521,7 +520,6 @@ Form_gs_opt_model CheckModelTargets(const char* templateName, const char* modelN
     securec_check(rc, "\0", "\0");
 
     bool isLegal = CheckLabels(labels, nLabel);
-
     if (isLegal) {
         modelinfo = (Form_gs_opt_model)GETSTRUCT(modelTuple);
         ReleaseSysCache(modelTuple);
@@ -556,25 +554,25 @@ static ModelTrainInfo* GetModelTrainInfo(const cJSON* root)
     cJSON* item = NULL;
     ModelTrainInfo* info = (ModelTrainInfo*)palloc0(sizeof(ModelTrainInfo));
     item = cJSON_GetObjectItem(root, "converged");
-    info->available = item->valueint;
+    info->available = (item == NULL) ? (false) : (item->valueint);
     item = cJSON_GetObjectItem(root, "max_startup");
-    info->max[LABEL_START_TIME_INDEX] = item->valueint;
+    info->max[LABEL_START_TIME_INDEX] = (item == NULL) ? (-1) : (item->valueint);
     item = cJSON_GetObjectItem(root, "max_total");
-    info->max[LABEL_TOTAL_TIME_INDEX] = item->valueint;
+    info->max[LABEL_TOTAL_TIME_INDEX] = (item == NULL) ? (-1) : (item->valueint);
     item = cJSON_GetObjectItem(root, "max_row");
-    info->max[LABEL_ROWS_INDEX] = item->valueint;
+    info->max[LABEL_ROWS_INDEX] = (item == NULL) ? (-1) : (item->valueint);
     item = cJSON_GetObjectItem(root, "max_mem");
-    info->max[LABEL_PEAK_MEMEORY_INDEX] = item->valueint;
+    info->max[LABEL_PEAK_MEMEORY_INDEX] = (item == NULL) ? (-1) : (item->valueint);
     item = cJSON_GetObjectItem(root, "re_startup");
-    info->acc[LABEL_START_TIME_INDEX] = item->valuedouble;
+    info->acc[LABEL_START_TIME_INDEX] = (item == NULL) ? (-1) : (item->valueint);
     item = cJSON_GetObjectItem(root, "re_total");
-    info->acc[LABEL_TOTAL_TIME_INDEX] = item->valuedouble;
+    info->acc[LABEL_TOTAL_TIME_INDEX] = (item == NULL) ? (-1) : (item->valueint);
     item = cJSON_GetObjectItem(root, "re_row");
-    info->acc[LABEL_ROWS_INDEX] = item->valuedouble;
+    info->acc[LABEL_ROWS_INDEX] = (item == NULL) ? (-1) : (item->valueint);
     item = cJSON_GetObjectItem(root, "re_mem");
-    info->acc[LABEL_PEAK_MEMEORY_INDEX] = item->valuedouble;
+    info->acc[LABEL_PEAK_MEMEORY_INDEX] = (item == NULL) ? (-1) : (item->valueint);
     item = cJSON_GetObjectItem(root, "feature_length");
-    info->feature_size = item->valueint;
+    info->feature_size = (item == NULL) ? (-1) : (item->valueint);
     return info;
 }
 
@@ -582,9 +580,9 @@ static ModelPredictInfo* GetModelPredictInfo(const cJSON* root)
 {
     /* caller should make sure root is not NULL */
     Assert(root);
-    static const int ARR_LEN = 4;
+    static const int arrLen = 4;
     cJSON* item = NULL;
-    int length[ARR_LEN] = {0};
+    int length[arrLen] = {0};
     int lengthLegit = 0;
     int i = 0;
     ModelPredictInfo* info = (ModelPredictInfo*)palloc0(sizeof(ModelPredictInfo));
@@ -597,7 +595,7 @@ static ModelPredictInfo* GetModelPredictInfo(const cJSON* root)
     item = cJSON_GetObjectItem(root, "pred_mem");
     info->peak_memory = JsonGetInt64Array(item, &length[i]);
     /* check if all prediction array has the same length, length is 0 if target not in labels entry */
-    for (i = 0; i < ARR_LEN; i++) {
+    for (i = 0; i < arrLen; i++) {
         if (length[i] != 0 && lengthLegit != 0) {
             if (length[i] != lengthLegit) {
                 pfree_ext(info);
@@ -944,11 +942,11 @@ bool PredictorIsValid(const char* modelName)
     return res;
 }
 
-static TupleDesc InitTupleVal(int MODEL_TRAIN_ATTRNUM)
+static TupleDesc InitTupleVal(int modelTrainAttrnum)
 {
     TupleDesc tupdesc;
     int i = 0;
-    tupdesc = CreateTemplateTupleDesc(MODEL_TRAIN_ATTRNUM, false);
+    tupdesc = CreateTemplateTupleDesc(modelTrainAttrnum, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)++i, "startup_time_accuracy", FLOAT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)++i, "total_time_accuracy", FLOAT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)++i, "rows_accuracy", FLOAT8OID, -1, 0);

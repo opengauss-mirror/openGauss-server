@@ -1,0 +1,102 @@
+drop server hdfs_server cascade;
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+create foreign table part_1 (a int, b varchar(20), c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_1')
+distribute by roundrobin
+partition by (b) automapped;
+create or replace function llt_extern_param(int) returns TABLE(a int, b varchar(20), c date)
+as
+$$
+select * from part_1 where a = $1 order by 1,2,3;
+$$
+LANGUAGE SQL;
+call llt_extern_param(1);
+explain (verbose, costs off, nodes off) select * from part_1 where a = 2;
+explain (verbose, costs off, nodes off) select * from part_1 where b is null;
+explain (verbose, costs off, nodes off) select * from part_1 where b is not null;
+explain (verbose, costs off, nodes off) select * from part_1 where b = null;
+explain (verbose, costs off, nodes off) select * from part_1 where b is not null and a = 1;
+explain (verbose, costs off, nodes off) select * from part_1 where b is null and c <> '2013-01-04';
+explain (verbose, costs off, nodes off) select * from part_1 where b is null or c != '2013-01-04';
+drop foreign table part_1;
+create foreign table part_2 (a int, b text, c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_2')
+distribute by roundrobin
+partition by (c) automapped;
+explain (verbose, costs off, nodes off) select c from part_2 where a = 2;
+explain (verbose, costs off, nodes off) select count(*) from part_2 where c = '2013-01-04';
+explain (verbose, costs off, nodes off) select * from part_2 where b is not null;
+explain (verbose, costs off, nodes off) select * from part_2 where b = null;
+explain (verbose, costs off, nodes off) select * from part_2 where b is not null and c = '2013-01-04';
+explain (verbose, costs off, nodes off) select * from part_2 where b is null and c != '2013-01-04';
+explain (verbose, costs off, nodes off) select * from part_2 where b is null or c != '2013-01-04';
+drop foreign table part_2;
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_3')
+distribute by roundrobin
+partition by (c, b) automapped;
+select * from part_3 where b is null;
+drop foreign table part_3;
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_3')
+distribute by roundrobin
+partition by (b, c) automapped;
+explain (verbose, costs off, nodes off) select * from part_3 where b is not null and a = 1;
+explain (verbose, costs off, nodes off) select * from part_3 where b is null and c != '2013-01-04';
+explain (verbose, costs off, nodes off) select * from part_3 where b is null or c != '2013-01-04';
+explain (verbose, costs off, nodes off) select * from part_3 where c = '2013-05-04';
+explain (verbose, costs off, nodes off) select * from part_3 where b = '123' and c = '2013-05-04';
+explain (verbose, costs off, nodes off) select * from part_3 where b = '123' and c != '2013-01-04';
+drop foreign table part_3;
+create foreign table part_3 (a int, b varchar(20))
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_3')
+distribute by roundrobin
+partition by (b) automapped;
+explain (verbose, costs off, nodes off) select * from part_3 where b is null;
+drop foreign table part_3;
+create foreign table part_4 (p_partkey int, p_name text, p_mfgr text, p_brand text, p_type text, p_size int, p_container text, p_retailprice float8, p_comment text) 
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_4')
+distribute by roundrobin
+partition by (p_mfgr) automapped;
+explain (verbose, costs off, nodes off) select distinct p_mfgr, p_partkey, p_name from part_4 where p_mfgr='Manufacturer#1';
+explain (verbose, costs off, nodes off) select distinct p_mfgr, p_partkey, p_name from part_4 where p_mfgr='Manufacturer#1' and p_partkey < 20000;
+explain (verbose, costs off, nodes off)select count(*) from part_4 where p_mfgr='Manufacturer#1';
+drop foreign table part_4;
+set enable_vector_engine=false;
+create foreign table part_1 (a int, b varchar(20), c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_1')
+distribute by roundrobin
+partition by (b) automapped;
+explain (verbose, costs off, nodes off) select * from part_1 where a = 2;
+drop foreign table part_1;
+CREATE foreign TABLE PARTITION_SELECT_PICT_TABLE_000_1(
+ C_CHAR_3 text,
+ C_VARCHAR_3 text,
+ C_INT INTEGER,
+ C_NUMERIC double precision,
+ C_TS_WITHOUT TIMESTAMP )
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/fvt_data_query_hive.db/foreign_partition_select_pict_table_000_1')
+distribute by roundrobin
+partition by (C_INT) automapped;
+CREATE foreign TABLE PARTITION_SELECT_PICT_TABLE_000_2(
+ C_CHAR_3 text,
+ C_VARCHAR_3 text,
+ C_INT INTEGER,
+ C_NUMERIC double precision,
+ C_TS_WITHOUT TIMESTAMP )
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/fvt_data_query_hive.db/foreign_partition_select_pict_table_000_2')
+distribute by roundrobin
+partition by (C_INT) automapped;
+explain (verbose, costs off, nodes off) SELECT trim(C_CHAR_3) , trim(C_VARCHAR_3) , C_INT , C_NUMERIC , C_TS_WITHOUT , lower(trim(C_CHAR_3)) , initcap(trim(C_VARCHAR_3)) , abs(C_INT) , abs(C_NUMERIC) , extract(year from C_TS_WITHOUT) FROM PARTITION_SELECT_PICT_TABLE_000_2 where ('abcdefg' <= C_VARCHAR_3 and 'ijklmno' >= C_VARCHAR_3) or C_INT >= 111 or C_NUMERIC in (111.1 , 222.2 , 333.3 , 444.4 , 555.5 , 666.6 , 777.7 , 888.8 , 999.9) ORDER BY 1 , 2 , 3 , 4 , 5;
+drop foreign table PARTITION_SELECT_PICT_TABLE_000_1;
+drop foreign table PARTITION_SELECT_PICT_TABLE_000_2;
+create foreign table partition_coltype_1 (int2col int2, int8col int8, boolcol bool, float4col float4, float8col float8, clobcol clob, bpcharcol bpchar,datecol date, timestampcol timestamp, numericcol decimal(10, 5))
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/partition_coltype_1')
+distribute by roundrobin
+partition by (int2col, int8col, float4col, float8col, bpcharcol,datecol, timestampcol, numericcol) automapped;
+explain (verbose, costs off, nodes off) select * from partition_coltype_1;
+drop foreign table partition_coltype_1;

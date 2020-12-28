@@ -5,7 +5,7 @@ insert into test_history values (0, 'init', NULL);
 -- row table
 drop table if exists trow1;
 
-create table trow1(c1 int, c2 int);
+create table trow1(c1 int, c2 int) distribute by hash(c1);
 select pg_sleep(0.1);
 insert into test_history
 select (select max(no)+1 from test_history), 'create table trow1', last_data_changed from pg_stat_all_tables where relname='trow1';
@@ -63,7 +63,7 @@ select (select max(no)+1 from test_history), 'select count', last_data_changed f
 -- partition table
 drop table if exists tpart;
 
-create table tpart(c1 int, c2 int)
+create table tpart(c1 int, c2 int) distribute by hash(c1)
 partition by range(c2)
 (
   partition p1 values less than(100),
@@ -150,7 +150,7 @@ select (select max(no)+1 from test_history), 'alter table tpart merge partitions
 -- column unlogged table
 drop table if exists tlog;
 
-create unlogged table tlog(c1 int, c2 int) with(orientation=column);
+create unlogged table tlog(c1 int, c2 int) with(orientation=column) distribute by hash(c1);
 select pg_sleep(0.1);
 insert into test_history
 select (select max(no)+1 from test_history), 'create unlogged table tlog', last_data_changed from pg_stat_all_tables where relname='tlog';
@@ -218,32 +218,32 @@ insert into test_history
 select (select max(no)+1 from test_history), 'insert into ttemp', last_data_changed from pg_stat_all_tables where relname='ttemp';
 
 -- copy from
-copy trow1 to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/trow1.data';
+copy trow1 to '@abs_srcdir@/data/trow1.data';
 select pg_sleep(0.1);
 insert into test_history
 select (select max(no)+1 from test_history), 'copy trow1 to', last_data_changed from pg_stat_all_tables where relname='trow1';
 
-copy trow1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/trow1.data';
+copy trow1 from '@abs_srcdir@/data/trow1.data';
 select pg_sleep(0.1);
 insert into test_history
 select (select max(no)+1 from test_history), 'copy trow1 from', last_data_changed from pg_stat_all_tables where relname='trow1';
 
-copy tlog to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/tlog.data';
+copy tlog to '@abs_srcdir@/data/tlog.data';
 select pg_sleep(0.1);
 insert into test_history
 select (select max(no)+1 from test_history), 'copy tlog to', last_data_changed from pg_stat_all_tables where relname='tlog';
 
-copy tlog from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/tlog.data';
+copy tlog from '@abs_srcdir@/data/tlog.data';
 select pg_sleep(0.1);
 insert into test_history
 select (select max(no)+1 from test_history), 'copy tlog from', last_data_changed from pg_stat_all_tables where relname='tlog';
 
-copy ttemp to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/ttemp.data';
+copy ttemp to '@abs_srcdir@/data/ttemp.data';
 select pg_sleep(0.1);
 insert into test_history
 select (select max(no)+1 from test_history), 'copy ttemp to', last_data_changed from pg_stat_all_tables where relname='ttemp';
 
-copy ttemp from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/ttemp.data';
+copy ttemp from '@abs_srcdir@/data/ttemp.data';
 select pg_sleep(0.1);
 insert into test_history
 select (select max(no)+1 from test_history), 'copy ttemp from', last_data_changed from pg_stat_all_tables where relname='ttemp';
@@ -287,6 +287,18 @@ select pg_sleep(0.1);
 insert into test_history
 select (select max(no)+1 from test_history), 'insert into t_xact - rollback', last_data_changed from pg_stat_all_tables where relname='t_xact';
 
+-- drop partition on temp partition table
+drop table if exists tpart_temp;
+
+create unlogged table tpart_temp(c1 int, c2 int) distribute by hash(c1)
+partition by range(c2)
+(
+  partition p1 values less than(100),
+  partition p2 values less than(200),
+  partition p3 values less than(300),
+  partition p4 values less than(400),
+  partition p5 values less than(maxvalue)
+);
 
 -- enable_save_datachanged_timestamp=off
 set enable_save_datachanged_timestamp=off;

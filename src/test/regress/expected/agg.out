@@ -6,7 +6,7 @@ set enable_hashagg = off;
 --force hash agg, if used sort agg will report error.
 select a , count(distinct  generate_series(1,2)) from t1 group by a;
 ERROR:  set-valued function called in context when calculate targetlist that cannot accept a set
-explain (verbose, costs off, nodes off)
+explain (verbose, costs off)
 select a , count(distinct  generate_series(1,2)) from t1 group by a;
                      QUERY PLAN                     
 ----------------------------------------------------

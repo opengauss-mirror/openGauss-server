@@ -80,6 +80,8 @@ typedef struct AggStatePerAggData {
     /* number of inputs including ORDER BY expressions */
     int numInputs;
 
+    bool        is_avg;
+
     /*
      * Number of aggregated input columns to pass to the transfn.  This
      * includes the ORDER BY columns for ordered-set aggs, but not for plain

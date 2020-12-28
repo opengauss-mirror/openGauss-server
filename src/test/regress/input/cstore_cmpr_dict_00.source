@@ -11,7 +11,7 @@ CREATE TABLE colcmpr_dict_00
 	coutry varchar(20),
 	telephone varchar(15)
 )  with (orientation = column)  ;
-COPY colcmpr_dict_00 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/colcmpr_dict_00.data';
+COPY colcmpr_dict_00 FROM '@abs_srcdir@/data/colcmpr_dict_00.data';
 SELECT * FROM colcmpr_dict_00;
 DROP TABLE colcmpr_dict_00;
 
@@ -27,6 +27,6 @@ CREATE TABLE colcmpr_dict_01
 	coutry text,
 	telephone numeric(15,2)
 ) with (orientation = column);
-COPY colcmpr_dict_01 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/colcmpr_dict_01.data';
+COPY colcmpr_dict_01 FROM '@abs_srcdir@/data/colcmpr_dict_01.data';
 SELECT * FROM colcmpr_dict_01;
 DROP TABLE colcmpr_dict_01;

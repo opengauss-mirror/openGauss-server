@@ -1,0 +1,234 @@
+set enable_global_stats = true;
+---
+--case 1: 
+---
+create table cstore_copy_t1(c1 int2, c2 int4, c3 int8, c4 char(10), c5 varchar(12),c6 numeric(10,2)) with (orientation = orc) tablespace hdfs_ts;
+COPY cstore_copy_t1 FROM '@abs_srcdir@/data/cstore_copy_t1.data' delimiter '|';
+COPY cstore_copy_t1 FROM '@abs_srcdir@/data/cstore_copy_t1.data' delimiter '|';
+COPY cstore_copy_t1 FROM '@abs_srcdir@/data/cstore_copy_t1.data' delimiter '|';
+drop table cstore_copy_t1;
+
+---
+--case 2: 
+---
+create table cstore_copy_t2_1(c1 int, c2 float, c3 text, partial cluster key(c1)) with (orientation = orc) tablespace hdfs_ts;
+create table cstore_copy_t2_2(c1 int, c2 float, c3 text, partial cluster key(c2)) with (orientation = orc) tablespace hdfs_ts;
+create table cstore_copy_t2_3(c1 int, c2 float, c3 text, partial cluster key(c3)) with (orientation = orc) tablespace hdfs_ts;
+create table cstore_copy_t2_4(c1 int, c2 float, c3 text, partial cluster key(c1, c2)) with (orientation = orc) tablespace hdfs_ts;
+create table cstore_copy_t2_5(c1 int, c2 float, c3 text, partial cluster key(c2, c3)) with (orientation = orc) tablespace hdfs_ts;
+COPY cstore_copy_t2_1 FROM '@abs_srcdir@/data/cstore_copy_t2.data' DELIMITER ',';
+COPY cstore_copy_t2_2 FROM '@abs_srcdir@/data/cstore_copy_t2.data' DELIMITER ',';
+COPY cstore_copy_t2_3 FROM '@abs_srcdir@/data/cstore_copy_t2.data' DELIMITER ',';
+COPY cstore_copy_t2_4 FROM '@abs_srcdir@/data/cstore_copy_t2.data' DELIMITER ',';
+COPY cstore_copy_t2_5 FROM '@abs_srcdir@/data/cstore_copy_t2.data' DELIMITER ',';
+drop table cstore_copy_t2_1;
+drop table cstore_copy_t2_2;
+drop table cstore_copy_t2_3;
+drop table cstore_copy_t2_4;
+drop table cstore_copy_t2_5;
+create table cstore_copy_t2_1(c1 int, c2 float, c3 text, partial cluster key(c1, c1, c1)) with (orientation = orc) tablespace hdfs_ts;
+create table cstore_copy_t2_1(c1 int, c2 float, c3 text, partial cluster key(c1, c3)) with (orientation = orc) tablespace hdfs_ts;
+alter table cstore_copy_t2_1 drop constraint cstore_copy_t2_1_cluster;
+alter table cstore_copy_t2_1 add partial cluster key(c1);
+alter table cstore_copy_t2_1 add partial cluster key(c1);
+alter table cstore_copy_t2_1 drop constraint cstore_copy_t2_1_cluster;
+alter table cstore_copy_t2_1 drop constraint cstore_copy_t2_1_cluster;
+COPY cstore_copy_t2_1 FROM '@abs_srcdir@/data/cstore_copy_t2.data' DELIMITER ',';
+drop table cstore_copy_t2_1;
+create table cstore_copy_t2_2(c1 int, c2 float, c3 text, constraint c1 partial cluster key(c1)) with (orientation = orc) tablespace hdfs_ts;
+alter table cstore_copy_t2_2 drop constraint c1;
+alter table cstore_copy_t2_2 add constraint c2 partial cluster key(c2);
+drop table cstore_copy_t2_2;
+
+---
+--case 3:
+---
+drop table if exists lineitem;
+CREATE TABLE LINEITEM
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+with (orientation = orc) tablespace hdfs_ts
+distribute by hash(L_ORDERKEY);
+COPY LINEITEM FROM '@abs_srcdir@/data/lineitem.data' DELIMITER '|';
+DELETE FROM LINEITEM;
+COPY LINEITEM FROM '@abs_srcdir@/data/lineitem.data' DELIMITER '|';
+drop table lineitem;
+------
+--case 4:
+------
+drop table if exists t;
+create table t(c1 int, c2 varchar(64), c3 char(20), c4 char(64), c5 time with time zone) 
+with (orientation = orc)  tablespace hdfs_ts distribute by hash(c1);
+copy t from '@abs_srcdir@/data/cstore_copy_t.data' DELIMITER '|' NULL as 'NULL';
+select * from t order by c1;
+
+drop table t;
+
+-------
+--case 5:
+------
+CREATE TABLE OOrder ( 
+                        o_id int NOT NULL, 
+                        o_d_id int NOT NULL, 
+                        o_w_id int NOT NULL, 
+                        o_c_id int NOT NULL, 
+                        o_entry_d timestamp NOT NULL, 
+                        o_carrier_id int NULL, 
+                        o_ol_cnt int NOT NULL, 
+                        o_all_local int NOT NULL)  with (orientation = orc)
+                         tablespace hdfs_ts;   
+copy oorder  from '@abs_srcdir@/data/oorder.data' with csv null ''; 
+copy oorder  from '@abs_srcdir@/data/oorder1_0' with csv null ''; 
+copy oorder  from '@abs_srcdir@/data/oorder2_0' with csv null ''; 
+select * from oorder where o_d_id=1 and o_c_id=1 order by 1,2,3;
+select count('ABC') from oorder;
+delete from oorder where o_d_id = 1 and o_c_id = 1;
+select count('ABC') from oorder;
+-----
+--case 6
+---
+copy oorder to '@abs_srcdir@/results/oorder.data' with csv null '';
+
+----
+--case 7
+----
+create table cstore_part_tbl(c1 int, c2 int) with (orientation = column)
+partition by range(c2)
+(
+	partition p1 values less than (10),
+	partition p2 values less than (20),
+	partition p3 values less than (30),
+	partition p4 values less than (40),
+	partition p5 values less than (50),
+	partition p6 values less than (60),
+	partition p7 values less than (70),
+	partition p8 values less than (80),
+	partition p9 values less than (90),
+	partition p10 values less than (100),
+	partition p11 values less than (110),
+	partition p12 values less than (120),
+	partition p13 values less than (130),
+	partition p14 values less than (140),
+	partition p15 values less than (150),
+	partition p16 values less than (160),
+	partition p17 values less than (170),
+	partition p18 values less than (180),
+	partition p19 values less than (190),
+	partition p20 values less than (200),
+	partition p21 values less than (210),
+	partition p22 values less than (220),
+	partition p23 values less than (230),
+	partition p24 values less than (240)
+);
+copy cstore_part_tbl from '@abs_srcdir@/data/cs_large_part.data' delimiter '|';
+
+--
+-- fix bug
+--
+CREATE TABLE hw_cstore_copy_batchrows
+(
+	c_int1 int,
+	c_int2 int,
+	PARTIAL CLUSTER KEY(c_int2)
+) WITH (orientation = column, MAX_BATCHROW=10000)
+partition by range (c_int2)
+(
+	partition p1 values less than (50),
+	partition p2 values less than (100)
+);
+
+CREATE TABLE hw_row_copy_batchrows
+(
+	c_int1 int,
+	c_int2 int
+)
+partition by range (c_int2)
+(
+	partition p1 values less than (50),
+	partition p2 values less than (100)
+);
+-- make sure that the loops number is equal to MAX_BATCHROW defined by hw_cstore_copy_batchrows
+CREATE OR REPLACE PROCEDURE hwproc_row_copy_batchrows()
+AS
+BEGIN
+       FOR I IN 1..10000 LOOP
+         INSERT INTO hw_row_copy_batchrows VALUES(1, 2);
+       END LOOP;
+END;
+/
+CALL hwproc_row_copy_batchrows();
+
+INSERT INTO hw_cstore_copy_batchrows SELECT * FROM hw_row_copy_batchrows;
+-- 10000 expected, but the result is 0
+SELECT COUNT(*) FROM hw_cstore_copy_batchrows;
+
+----
+--COPY FROM/TO DATA IN FIXED FORMAT
+----
+CREATE TABLE tmp_nation (
+    n_nationkey integer NOT NULL,
+    n_name character(25),
+    n_regionkey integer NOT NULL,
+    n_comment character varying(152)
+)with (orientation = orc) tablespace hdfs_ts 
+DISTRIBUTE BY HASH (n_nationkey);
+COPY tmp_nation FROM '@abs_srcdir@/data/datanode1/nation.fixed' FORMATTER(n_nationkey(0,2), n_name(2,25),n_regionkey(28,2),n_comment(30,152)) fixed;
+SELECT * FROM tmp_nation ORDER BY n_nationkey;
+COPY tmp_nation TO '@abs_srcdir@/results/nation.fixed' FORMATTER(n_nationkey(0,2), n_name(2,25),n_regionkey(28,2),n_comment(30,152)) fixed;
+delete from tmp_nation;
+--TRUNCATE tmp_nation;
+COPY tmp_nation FROM '@abs_srcdir@/data/datanode1/nation.fixed' FORMATTER(n_nationkey(0,2),n_regionkey(28,2),n_comment(30,152)) fixed;
+SELECT * FROM tmp_nation ORDER BY n_nationkey;
+COPY tmp_nation TO '@abs_srcdir@/results/nation.fixed' FORMATTER(n_nationkey(0,2),n_regionkey(28,2),n_comment(30,152)) fixed;
+
+----
+--COPY FROM/TO DATA WITH MULTIPLE BYTES DELIMITER
+----
+COPY tmp_nation TO '@abs_srcdir@/results/nation.mult' delimiter ',,,,,]]]]]]';
+COPY tmp_nation TO '@abs_srcdir@/results/nation.mult' delimiter ',,,[]';
+delete from tmp_nation;
+--truncate tmp_nation;
+COPY tmp_nation FROM '@abs_srcdir@/results/nation.mult' delimiter ',,,[]';
+SELECT * FROM tmp_nation ORDER BY n_nationkey;
+COPY tmp_nation TO '@abs_srcdir@/results/nation.mult' delimiter '(),,,' csv;
+delete from tmp_nation;
+--truncate tmp_nation;
+COPY tmp_nation FROM '@abs_srcdir@/results/nation.mult' delimiter '(),,,' csv;
+SELECT * FROM tmp_nation ORDER BY n_nationkey;
+
+create table tmp_mult_delim
+(c1 int, c2 varchar)with (orientation = orc) tablespace hdfs_ts 
+DISTRIBUTE BY HASH (c1);
+insert into tmp_mult_delim 
+values(1, '"fewf"sttt'),
+(2, '"fewf"sttt'),
+(3, 'fstes\\fwt');
+select * from tmp_mult_delim order by c1;
+COPY tmp_mult_delim TO '@abs_srcdir@/results/mult_delim.mult' delimiter 'few^fw"' csv;
+COPY tmp_mult_delim TO '@abs_srcdir@/results/mult_delim.mult' delimiter 'few^fw/' csv;
+delete from tmp_mult_delim;
+--truncate tmp_mult_delim;
+COPY tmp_mult_delim FROM '@abs_srcdir@/results/mult_delim.mult' delimiter 'few^fw/' csv;
+select * from tmp_mult_delim order by c1;
+drop table tmp_mult_delim;
+DROP TABLE tmp_nation;
+drop table hw_cstore_copy_batchrows;
+drop table hw_row_copy_batchrows;
+drop table OOrder;
+drop table cstore_part_tbl;

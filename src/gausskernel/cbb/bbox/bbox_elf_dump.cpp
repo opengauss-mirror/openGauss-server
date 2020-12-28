@@ -20,11 +20,10 @@
  *
  * -------------------------------------------------------------------------
  */
-#define __ASM_PTRACE_H
-
 #include "bbox_elf_dump.h"
 #include "bbox_syscall_support.h"
 #include "postgres.h"
+#include "gs_bbox.h"
 #include "../../src/include/securec.h"
 #include "../../src/include/securec_check.h"
 
@@ -91,7 +90,6 @@ static int BBOX_SkipDeviceAndNodeField(struct BBOX_READ_FILE_IO* pstReadIO)
 
                 return RET_ERR;
             }
-
             iGetChar = BBOX_GetCharFromFile(pstReadIO);
         }
 
@@ -255,7 +253,7 @@ errout:
  */
 static int BBOX_SettingDeviceFileFlag(char* pszFilePath, struct BBOX_VM_MAPS* pstSegmentMapping)
 {
-    struct kernel_stat stMarkerSB;
+    struct kernel_stat stMarkerSB = {0};
     if (sys_stat(pszFilePath, &stMarkerSB) < 0) {
         bbox_print(PRINT_ERR, "sys_stat error, errno = %d, path = %s\n", errno, pszFilePath);
         return RET_ERR;
@@ -481,8 +479,71 @@ static char BBOX_FillMappingAddress(struct BBOX_READ_FILE_IO* pstReadIO, struct 
 }
 
 /*
+ * use blacklist items to split the segment, thus drop partal slice from core file.
+ *      struct BBOX_WRITE_FDS *pstWriteFds : segment to be written into core file
+ * return RET_OK if success else RET_ERR.
+ */
+static int BBOX_VmExecludeBlackList(struct BBOX_VM_MAPS *pstVmMappingSegment)
+{
+    void    *pStartAddress = (void *)(uintptr_t)pstVmMappingSegment->uiStartAddress;
+    void    *pEndAddress = (void *)(uintptr_t)pstVmMappingSegment->uiEndAddress;
+    void    *pBlackStartAddress = NULL;
+    void    *pBlackEndAddress = NULL;
+    size_t  uiPageSize = sys_sysconf(_SC_PAGESIZE);
+    BBOX_BLACKLIST_STRU *pstBlackNode = NULL;
+    struct BBOX_VM_MAPS *pstNextVmSegment = NULL;
+
+    pstBlackNode = _BBOX_FindAddrInBlackList(pStartAddress, pEndAddress);
+    if (pstBlackNode != NULL) {
+
+        pBlackStartAddress = pstBlackNode->pBlackStartAddr;
+        pBlackEndAddress = pstBlackNode->pBlackEndAddr;
+
+        pstNextVmSegment = pstVmMappingSegment + 1;
+        pstNextVmSegment->iFlags = pstVmMappingSegment->iFlags;
+
+        if (pStartAddress < pBlackStartAddress) {
+            pstVmMappingSegment->uiWriteSize= (size_t)((uintptr_t)pBlackStartAddress - (uintptr_t)pStartAddress);
+            if ((pstVmMappingSegment->uiWriteSize) < uiPageSize) {
+                pstVmMappingSegment->uiEndAddress =
+                    (size_t)((uintptr_t)pBlackStartAddress + (pstVmMappingSegment->uiWriteSize % uiPageSize));
+            } else {
+                pstVmMappingSegment->uiEndAddress = (size_t)(uintptr_t)pBlackStartAddress;
+            }
+
+            pstVmMappingSegment->uiWriteSize= (size_t)((uintptr_t)pBlackStartAddress - (uintptr_t)pStartAddress);
+            pstVmMappingSegment->uiStartAddress = (size_t)(uintptr_t)pStartAddress;
+            pstVmMappingSegment->iIsRemoveFlags = BBOX_FALSE;
+        } else {
+            pstVmMappingSegment->iIsRemoveFlags = BBOX_TRUE;
+        }
+
+        if (pBlackEndAddress < pEndAddress) {
+            pstNextVmSegment->uiWriteSize = (size_t)((uintptr_t)pEndAddress - (uintptr_t)pBlackEndAddress);
+            if ((pstNextVmSegment->uiWriteSize) < uiPageSize) {
+                pstNextVmSegment->uiStartAddress =
+                    (size_t)((uintptr_t)pBlackEndAddress - (pstNextVmSegment->uiWriteSize % uiPageSize));
+            } else {
+                pstNextVmSegment->uiStartAddress = (size_t)(uintptr_t)pBlackEndAddress;
+            }
+
+            pstNextVmSegment->uiWriteSize = (size_t)((uintptr_t)pEndAddress - (uintptr_t)pBlackEndAddress);
+            pstNextVmSegment->uiEndAddress = (size_t)(uintptr_t)pEndAddress;
+            pstNextVmSegment->iIsRemoveFlags = BBOX_FALSE;
+        } else {
+            pstNextVmSegment->iIsRemoveFlags = BBOX_TRUE;
+        }
+    } else {
+        /* do nothing */
+    }
+
+    bbox_print(PRINT_DBG, "execlude black list success.\n");
+    return RET_OK;
+}
+
+/*
  * read /proc/self/maps and fill struct BBOX_VM_MAPS
- * in     : struct BBOX_VM_MAPS *pstVmMappingSegment - pointer to discription of mapping segment structure. 
+ * in     : struct BBOX_VM_MAPS *pstVmMappingSegment - pointer to discription of mapping segment structure.
  *          int iSegmentNum - count of mapping segment in address space.
  * return RET_OK or RET_ERR.
  */
@@ -490,7 +551,7 @@ static int BBOX_GetMappingSegment(struct BBOX_VM_MAPS* pstSegmentMapping, int* p
 {
     int iGetChar = -1;
     int iResult = RET_ERR;
-    const int iNewVmTotal = 0;
+    int iNewVmTotal = 0;
     int iVmTotal = 0;
     struct BBOX_READ_FILE_IO stReadIO;
     struct BBOX_VM_MAPS* pstCurSegment = NULL;
@@ -547,8 +608,21 @@ static int BBOX_GetMappingSegment(struct BBOX_VM_MAPS* pstSegmentMapping, int* p
             }
         }
 
-        pstCurSegment++;
+        while (_BBOX_FindAddrInBlackList(
+            (void *)(uintptr_t)pstCurSegment->uiStartAddress, (void *)(uintptr_t)pstCurSegment->uiEndAddress)) {
 
+            iResult = BBOX_VmExecludeBlackList(pstCurSegment);
+            if (RET_OK != iResult) {
+                BBOX_NOINTR(sys_close(stReadIO.iFd));
+                bbox_print(PRINT_ERR, "BBOX_VmExecludeBlackList is failed.\n");
+                return RET_ERR;
+            }
+
+            iNewVmTotal++;
+            pstCurSegment++;
+        }
+
+        pstCurSegment++;
         iVmTotal--;
     }
 
@@ -559,80 +633,6 @@ static int BBOX_GetMappingSegment(struct BBOX_VM_MAPS* pstSegmentMapping, int* p
     BBOX_NOINTR(sys_close(stReadIO.iFd));
 
     return RET_OK;
-}
-
-/*
- * get the size of a memory block that start with 0.
- * in      : void *pMemArea - start address of memory being checked.
- *           size_t uiMemSize - size of memory being checked
- *           size_t uiPageSize - size of memory page
- * return  : result - size of memory, it is not a negative.
- *           RET_ERR
- */
-static ssize_t BBOX_LeadingZeros(const void* pMemArea, size_t uiMemSize, size_t uiPageSize)
-{
-    size_t uiReadedSize = 0;
-    ssize_t iResult = RET_ERR;
-    int aiPipe[2] = {-1, -1};
-    errno_t rc = EOK;
-    if ((NULL == pMemArea) || (uiPageSize == 0) || (uiPageSize > BBOX_BUFF_SIZE)) {
-        bbox_print(PRINT_ERR,
-            "BBOX_LeadingZeros parameters is invalid: pMemArea maybe NULL "\
-            "uiPageSize = %zu.\n",
-            uiPageSize);
-        return RET_ERR;
-    }
-
-    char acBuff[uiPageSize];
-
-    rc = memset_s(acBuff, sizeof(acBuff), 0, sizeof(acBuff));
-    securec_check_c(rc, "\0", "\0");
-
-    char* pcBuff = acBuff;
-
-    if (sys_pipe(aiPipe) < 0) {
-        if (aiPipe[0] >= 0) {
-            BBOX_NOINTR(sys_close(aiPipe[0]));
-        }
-
-        if (aiPipe[1] >= 0) {
-            BBOX_NOINTR(sys_close(aiPipe[1]));
-        }
-
-        return RET_ERR;
-    }
-
-    for (uiReadedSize = 0; uiReadedSize < uiMemSize;) {
-        if ((uiReadedSize % uiPageSize) == 0) {
-            /* write a page into pipe and get the return value. 
-               -1 means this page is all 0, and we should continue,
-               other means we should read from pipe and calculate how many 0 and not 0 there is. */
-            BBOX_NOINTR(iResult = sys_write(aiPipe[1], (char*)pMemArea + uiReadedSize, uiPageSize));
-            if (iResult >= 0) {
-                BBOX_NOINTR(iResult = sys_read(aiPipe[0], acBuff, uiPageSize));
-                if (iResult >= 0) {
-                    pcBuff = acBuff;
-                } else {
-                    uiReadedSize += uiPageSize;
-                    continue;
-                }
-            } else {
-                uiReadedSize += uiPageSize;
-                continue;
-            }
-        }
-
-        if (*pcBuff++) {
-            break;
-        }
-
-        uiReadedSize++;
-    }
-
-    BBOX_NOINTR(sys_close(aiPipe[0]));
-    BBOX_NOINTR(sys_close(aiPipe[1]));
-
-    return uiReadedSize & ~(uiPageSize - 1);
 }
 
 /*
@@ -647,8 +647,6 @@ static ssize_t BBOX_LeadingZeros(const void* pMemArea, size_t uiMemSize, size_t 
 static int BBOX_VmMappingSizeDump(struct BBOX_VM_MAPS* pstVmMappingSegment, int iSegmentNum, int* piValidSegmentNum)
 {
     int iCount = 0;
-    ssize_t iZeroSize = 0;
-    size_t uiPageSize = sys_sysconf(_SC_PAGESIZE);
     struct BBOX_VM_MAPS* pstVmMapping = NULL;
 
     if (NULL == pstVmMappingSegment || NULL == piValidSegmentNum || iSegmentNum <= 0) {
@@ -670,22 +668,6 @@ static int BBOX_VmMappingSizeDump(struct BBOX_VM_MAPS* pstVmMappingSegment, int 
             pstVmMapping->uiWriteSize = 0;
             (*piValidSegmentNum)--;
             continue;
-        }
-
-        /* calculate size of area start with all 0 in the segment, which can be read and not discribe a equipment. */
-        if ((pstVmMapping->iFlags & PF_R) && ((pstVmMapping->iFlags & PF_DEVICE) == 0)) {
-            /* calculate size of area start with all 0. */
-            iZeroSize = BBOX_LeadingZeros((void*)(pstVmMapping->uiStartAddress),
-                pstVmMapping->uiEndAddress - pstVmMapping->uiStartAddress,
-                uiPageSize);
-            if (RET_ERR == iZeroSize) {
-                bbox_print(PRINT_ERR, "BBOX_LeadingZeros is failed, iZeroSize = %zd.\n", iZeroSize);
-
-                return RET_ERR;
-            }
-
-            /* increase the start address until it can skip feild with all 0. */
-            pstVmMapping->uiStartAddress += iZeroSize;
         }
 
         /* If the segment is a code segment or a non-anonymous segment that cannot be read or written,
@@ -1156,6 +1138,10 @@ static int BBOX_FillPsStatusTimeInfo(struct BBOX_ELF_PRPSSTATUS* pstPrPsStatus)
                 BBOX_NOINTR(sys_close(iStatFileFd));
                 return RET_ERR;
             }
+        } else if (iReadSize < 0) {
+            bbox_print(PRINT_ERR, "failed to read status file, iResult = %zd.\n", iReadSize);
+            BBOX_NOINTR(sys_close(iStatFileFd));
+            return RET_ERR;
         }
     } while (iReadSize > 0);
 
@@ -1275,7 +1261,6 @@ static int BBOX_FillPrPsStatusRegs(Frame* pFrame, struct BBOX_ELF_NOTE_INFO* pst
         return RET_ERR;
     }
 
-    pid_t tMainPid = pstNoteInfo->tMainPid;
     struct BBOX_THREAD_NOTE_INFO* pstThreadNoteInfo = pstNoteInfo->pstThreadNoteInfo;
 
     for (uCount = 0; uCount < (unsigned int)iThreadNum; uCount++) {
@@ -1295,11 +1280,6 @@ static int BBOX_FillPrPsStatusRegs(Frame* pFrame, struct BBOX_ELF_NOTE_INFO* pst
                 acBuff,
                 sizeof(struct CPURegs));
             securec_check_c(rc, "\0", "\0");
-
-            if (ptPids[uCount] == tMainPid) {
-                SET_FRAME(*(Frame*)pFrame, (pstThreadNoteInfo + uCount)->stPrpsstatus.stRegisters);
-            }
-
             rc = memset_s(acBuff, sizeof(acBuff), 0xFF, sizeof(acBuff));
             securec_check_c(rc, "\0", "\0");
         }
@@ -1312,7 +1292,7 @@ static int BBOX_FillPrPsStatusRegs(Frame* pFrame, struct BBOX_ELF_NOTE_INFO* pst
                 sizeof(struct CPURegs));
             securec_check_c(rc, "\0", "\0");
 
-            if (ptPids[uCount] == tMainPid) {
+            if (ptPids[uCount] == pstNoteInfo->tMainPid) {
                 SET_FRAME(*(Frame*)pFrame, (pstThreadNoteInfo + uCount)->stPrpsstatus.stRegisters);
             }
 
@@ -1665,11 +1645,11 @@ static int BBOX_OpenCoreFile(Frame* pFrame, const char* pFileName, struct BBOX_W
     rc = memset_s(szCmd, BBOX_CMD_LEN, 0, sizeof(szCmd));
     securec_check_c(rc, "\0", "\0");
 
-    /* If the user does not define the file name, set it to core.tid.gz */
+    /* If the user does not define the file name, set it to core.tid.lz4 */
     if (NULL != pFileName) {
-        bbox_snprintf(szCmd, BBOX_CMD_LEN, GZIP_CMD, 1, pFileName);
+        bbox_snprintf(szCmd, BBOX_CMD_LEN, COMPRESSION_CMD, 1, pFileName);
     } else {
-        bbox_snprintf(szCmd, BBOX_CMD_LEN, GZIP_CMD_WITH_FILENAME, 1, ((Frame*)pFrame)->tid);
+        bbox_snprintf(szCmd, BBOX_CMD_LEN, COMPRESSION_CMD_WITH_FILENAME, 1, ((Frame*)pFrame)->tid);
     }
 
     /* create core file using the way of compression while writing */
@@ -1679,7 +1659,7 @@ static int BBOX_OpenCoreFile(Frame* pFrame, const char* pFileName, struct BBOX_W
         return RET_ERR;
     }
 
-    pstFileWriteFd->uiMaxLength = -1;
+    pstFileWriteFd->uiMaxLength = ~(size_t)0;
 
     bbox_print(PRINT_LOG, "Open core file success.\n");
 
@@ -1852,15 +1832,20 @@ static int BBOX_WriteNotePhdr(
 
     /* Calculates the starting position and size of the note segment in the core file */
     uiOffSize = sizeof(BBOX_EHDR) + (iPhdrSum + 1) * sizeof(BBOX_PHDR) + 3 * sizeof(BBOX_SHDR);
-    ;
 
     /* Calculate the size of the user data */
     uiCoreUserSize = sizeof(BBOX_NHDR) + BBOX_CORE_STRING_LENGTH + sizeof(struct BBOX_CORE_USER);
 
     /* Calculate the size of the BBOX_ELF_PRPSSTATUS */
+#if defined(__aarch64__)
     uiNoteSize = (pstNoteInfo->iThreadNoteInfoNum) *
-                 (sizeof(BBOX_NHDR) + BBOX_CORE_STRING_LENGTH + sizeof(struct BBOX_ELF_PRPSSTATUS) + sizeof(BBOX_NHDR) +
-                     BBOX_CORE_STRING_LENGTH + sizeof(struct BBOX_FPREGSET));
+        (sizeof(BBOX_NHDR) + BBOX_CORE_STRING_LENGTH + sizeof(struct BBOX_ELF_PRPSSTATUS));
+#else
+    uiNoteSize = (pstNoteInfo->iThreadNoteInfoNum) *
+        (sizeof(BBOX_NHDR) + BBOX_CORE_STRING_LENGTH + sizeof(struct BBOX_ELF_PRPSSTATUS) + sizeof(BBOX_NHDR) +
+        BBOX_CORE_STRING_LENGTH + sizeof(struct BBOX_FPREGSET));
+#endif
+
     if (pstNoteInfo->iFpxRegistersFlag) {
         /* If the SSE register exists, add its size */
         uiNoteSize += (pstNoteInfo->iThreadNoteInfoNum) *
@@ -2315,6 +2300,8 @@ static int BBOX_WritePrPsStatusToFile(struct BBOX_ELF_PRPSSTATUS* pstPrPsStatusI
  */
 static int BBOX_WriteFpRegistersToFile(struct BBOX_FPREGSET* pstFpRegisters, struct BBOX_WRITE_FDS* pstFileFds)
 {
+/* since ptrace() doesn't support to obtain float registers' context in aarch64, don't dump it out. */
+#if !defined(__aarch64__)
     BBOX_NHDR stElfNhdr;
 
     if (NULL == pstFpRegisters || NULL == pstFileFds) {
@@ -2336,6 +2323,7 @@ static int BBOX_WriteFpRegistersToFile(struct BBOX_FPREGSET* pstFpRegisters, str
         bbox_print(PRINT_ERR, "BBOX_DoWrite  is failed.\n");
         return RET_ERR;
     }
+#endif
 
     return RET_OK;
 }
@@ -2815,7 +2803,10 @@ int BBOX_DoDumpElfCore(BBOX_GetAllThreadDone pDone, void* pDoneHandle, int iNumT
     pDone(pDoneHandle);
 
     pFileName = (char*)va_arg(ap, char*);
-    check_backend_env(pFileName);
+    if (CheckFilenameValid(pFileName) == RET_ERR) {
+        bbox_print(PRINT_ERR, "check core file name failed\n");
+        return RET_ERR;
+    }
     iResult = BBOX_OpenCoreFile(pFrame, pFileName, &stFileWriteFd); /* create core file. */
     if (RET_OK != iResult) {
         bbox_print(PRINT_ERR, "BBOX_OpenCoreFile is failed, iResult = %d.\n", iResult);

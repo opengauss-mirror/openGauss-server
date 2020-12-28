@@ -8,9 +8,9 @@ function test_1()
   check_detailed_instance
 
   kill_cluster
-  gs_guc set -D $primary_data_dir -c "synchronous_commit = on"
-  gs_guc set -D $primary_data_dir -c "synchronous_standby_names = '2(*)'"
-  gs_guc set -D $primary_data_dir -c "most_available_sync = on"
+  gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_commit = on"
+  gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_standby_names = '2(*)'"
+  gs_guc set -Z datanode -D $primary_data_dir -c "most_available_sync = on"
   start_cluster
 
   echo "start cluter success!"
@@ -49,7 +49,7 @@ function test_1()
 
   echo "set most_available off"
   kill_cluster
-  gs_guc set -D $primary_data_dir -c "most_available_sync = off"
+  gs_guc set -Z datanode -D $primary_data_dir -c "most_available_sync = off"
   start_cluster
   check_most_available "datanode1" "Off" 4
   kill_standby

@@ -1,0 +1,289 @@
+CREATE TABLE regex_1 (
+     id              int,
+     name            text,
+     person          text
+);
+create table regex_2 (
+     id              int,
+     name            text,
+     value           text,
+     primary key(id)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "regex_2_pkey" for table "regex_2"
+insert into regex_1 values(1, 'a', 'aaa');
+insert into regex_2 values(1, 'b', 'bbb');
+explain (costs on, verbose on, nodes on, analyse on, cpu on, detail on, buffers on) select * from regex_1;
+--?.*
+--?.*
+--? Data Node Scan  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=0 width=0\) \(actual time=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* loops=[0-9]*\)
+   Output: regex_1.id, regex_1.name, regex_1.person
+--?   Node/s: .*
+   Remote query: SELECT id, name, person FROM public.regex_1
+--?   (CPU: ex c/r=[0-9]*, ex cyc=[0-9]*, inc cyc=[0-9]*)
+--? Total runtime: [0-9]*\.[0-9]* ms
+(6 rows)
+
+explain (costs on, verbose on, nodes on, analyse on, cpu on, detail on, buffers on) select * from regex_2;
+--?.*
+--?.*
+--? Data Node Scan  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=0 width=0\) \(actual time=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* loops=[0-9]*\)
+   Output: regex_2.id, regex_2.name, regex_2.value
+--?   Node/s: .*
+   Remote query: SELECT id, name, value FROM public.regex_2
+--?   (CPU: ex c/r=[0-9]*, ex cyc=[0-9]*, inc cyc=[0-9]*)
+--? Total runtime: [0-9]*\.[0-9]* ms
+(6 rows)
+
+explain (costs on, verbose on, nodes on) select * from (select name from regex_1 intersect select name from regex_2 order by name) limit 10;
+WARNING:  Statistics in some tables or columns(public.regex_1.id, public.regex_1.name, public.regex_2.id, public.regex_2.name) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+--?.*
+--?.*
+--? Limit  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+   Output: __unnamed_subquery__.name
+--?   ->  Streaming \(type: GATHER\)  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+         Output: __unnamed_subquery__.name
+--?         Node/s: .*
+--?         ->  Limit  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+               Output: __unnamed_subquery__.name
+--?               ->  Subquery Scan on __unnamed_subquery__  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                     Output: __unnamed_subquery__.name
+--?                     ->  Sort  \(cost=.* rows=[0-9]* width=[0-9]*\)
+                           Output: "*SELECT* 1".name, (0)
+                           Sort Key: "*SELECT* 1".name
+--?                           ->  HashSetOp Intersect  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                                 Output: "*SELECT* 1".name, (0)
+--?                                 ->  Append  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+--?                                       ->  Streaming\(type: REDISTRIBUTE\)  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                                             Output: "*SELECT* 1".name, (0)
+                                             Distribute Key: "*SELECT* 1".name
+--?                                             Spawn on: .*
+                                             Consumer Nodes: All datanodes
+--?                                             ->  Subquery Scan on "\*SELECT\* 1"  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                                                   Output: "*SELECT* 1".name, 0
+--?                                                   ->  Seq Scan on public\.regex_1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                                                         Output: regex_1.name
+                                                         Distribute Key: regex_1.id
+--?                                       ->  Streaming\(type: REDISTRIBUTE\)  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                                             Output: "*SELECT* 2".name, (1)
+                                             Distribute Key: "*SELECT* 2".name
+--?                                             Spawn on: .*
+                                             Consumer Nodes: All datanodes
+--?                                             ->  Subquery Scan on "\*SELECT\* 2"  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                                                   Output: "*SELECT* 2".name, 1
+--?                                                   ->  Seq Scan on public\.regex_2  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                                                         Output: regex_2.name
+                                                         Distribute Key: regex_2.id
+(35 rows)
+
+explain (costs on, verbose on, nodes on) select * from (select name from regex_1 union select name from regex_2 order by name) limit 10;
+WARNING:  Statistics in some tables or columns(public.regex_1.id, public.regex_1.name, public.regex_2.id) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+--?.*
+--?.*
+--? Limit  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+   Output: regex_1.name
+--?   ->  Streaming \(type: GATHER\)  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+         Output: regex_1.name
+--?         Node/s: .*
+--?         ->  Limit  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+               Output: regex_1.name
+--?               ->  Sort  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                     Output: regex_1.name
+                     Sort Key: regex_1.name
+--?                     ->  HashAggregate  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                           Output: regex_1.name
+                           Group By Key: regex_1.name
+--?                           ->  Append  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+--?                                 ->  Streaming\(type: REDISTRIBUTE\)  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                                       Output: regex_1.name
+                                       Distribute Key: regex_1.name
+--?                                       Spawn on: .*
+                                       Consumer Nodes: All datanodes
+--?                                       ->  Seq Scan on public.regex_1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                                             Output: regex_1.name
+                                             Distribute Key: regex_1.id
+--?                                 ->  Streaming\(type: REDISTRIBUTE\)  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                                       Output: regex_2.name
+                                       Distribute Key: regex_2.name
+--?                                       Spawn on: .*
+                                       Consumer Nodes: All datanodes
+--?                                       ->  Seq Scan on public.regex_2  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                                             Output: regex_2.name
+                                             Distribute Key: regex_2.id
+(30 rows)
+
+explain (costs on, verbose on, nodes on) insert into regex_1 (select * from regex_2);
+WARNING:  Statistics in some tables or columns(public.regex_2.id) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+--?.*
+--?.*
+--? Streaming \(type: GATHER\)  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+--?   Node/s: .*
+--?   ->  Insert on public\.regex_1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+--?         ->  Seq Scan on public\.regex_2  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+               Output: regex_2.id, regex_2.name, regex_2.value
+               Distribute Key: regex_2.id
+(6 rows)
+
+set enable_hashjoin=on;
+set enable_nestloop=off;
+set enable_mergejoin=off;
+explain (costs on, verbose on, nodes on) select * from regex_1, regex_2 where regex_1.name=regex_2.name;
+WARNING:  Statistics in some tables or columns(public.regex_1.id, public.regex_1.name, public.regex_2.id, public.regex_2.name) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+--?.*
+--?.*
+--? Streaming \(type: GATHER\)  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+   Output: regex_1.id, regex_1.name, regex_1.person, regex_2.id, regex_2.name, regex_2.value
+--?   Node/s: .*
+--?   ->  Hash Join  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* distinct=\[[0-9]*, [0-9]*\] width=[0-9]*\)
+         Output: regex_1.id, regex_1.name, regex_1.person, regex_2.id, regex_2.name, regex_2.value
+         Hash Cond: (regex_1.name = regex_2.name)
+--?         ->  Streaming\(type: REDISTRIBUTE\)  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+               Output: regex_1.id, regex_1.name, regex_1.person
+               Distribute Key: regex_1.name
+--?               Spawn on: .*
+               Consumer Nodes: All datanodes
+--?               ->  Seq Scan on public\.regex_1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                     Output: regex_1.id, regex_1.name, regex_1.person
+                     Distribute Key: regex_1.id
+--?         ->  Hash  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+               Output: regex_2.id, regex_2.name, regex_2.value
+--?               ->  Streaming\(type: REDISTRIBUTE\)  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                     Output: regex_2.id, regex_2.name, regex_2.value
+                     Distribute Key: regex_2.name
+--?                     Spawn on: .*
+                     Consumer Nodes: All datanodes
+--?                     ->  Seq Scan on public\.regex_2  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                           Output: regex_2.id, regex_2.name, regex_2.value
+                           Distribute Key: regex_2.id
+(24 rows)
+
+set enable_hashjoin=off;
+set enable_nestloop=off;
+set enable_mergejoin=on;
+explain (costs on, verbose on, nodes on) select * from regex_1, regex_2 where regex_1.name=regex_2.name;
+WARNING:  Statistics in some tables or columns(public.regex_1.id, public.regex_1.name, public.regex_2.id, public.regex_2.name) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+--?.*
+--?.*
+--? Streaming \(type: GATHER\)  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+   Output: regex_1.id, regex_1.name, regex_1.person, regex_2.id, regex_2.name, regex_2.value
+--?   Node/s: .*
+--?   ->  Merge Join  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+         Output: regex_1.id, regex_1.name, regex_1.person, regex_2.id, regex_2.name, regex_2.value
+         Merge Cond: (regex_1.name = regex_2.name)
+--?         ->  Sort  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+               Output: regex_1.id, regex_1.name, regex_1.person
+               Sort Key: regex_1.name
+--?               ->  Streaming\(type: REDISTRIBUTE\)  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                     Output: regex_1.id, regex_1.name, regex_1.person
+                     Distribute Key: regex_1.name
+--?                     Spawn on: .*
+                     Consumer Nodes: All datanodes
+--?                     ->  Seq Scan on public\.regex_1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                           Output: regex_1.id, regex_1.name, regex_1.person
+                           Distribute Key: regex_1.id
+--?         ->  Sort  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+               Output: regex_2.id, regex_2.name, regex_2.value
+               Sort Key: regex_2.name
+--?               ->  Streaming\(type: REDISTRIBUTE\)  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                     Output: regex_2.id, regex_2.name, regex_2.value
+                     Distribute Key: regex_2.name
+--?                     Spawn on: .*
+--?                  Consumer Nodes: All datanodes
+--?                     ->  Seq Scan on public\.regex_2  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                           Output: regex_2.id, regex_2.name, regex_2.value
+                           Distribute Key: regex_2.id
+(28 rows)
+
+set enable_hashjoin=on;
+set enable_nestloop=on;
+set enable_mergejoin=on;
+explain (costs on, verbose on, nodes on) select * from regex_2, regex_1 where regex_1.id>regex_2.id;
+WARNING:  Statistics in some tables or columns(public.regex_2.id, public.regex_1.id) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+--?.*
+--?.*
+--? Streaming \(type: GATHER\)  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+   Output: regex_2.id, regex_2.name, regex_2.value, regex_1.id, regex_1.name, regex_1.person
+--?   Node/s: .*
+--?   ->  Nested Loop  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+         Output: regex_2.id, regex_2.name, regex_2.value, regex_1.id, regex_1.name, regex_1.person
+         Join Filter: (regex_1.id > regex_2.id)
+--?         ->  Streaming\(type: BROADCAST\)  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+               Output: regex_2.id, regex_2.name, regex_2.value
+--?               Spawn on: .*
+               Consumer Nodes: All datanodes
+--?               ->  Seq Scan on public\.regex_2  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                     Output: regex_2.id, regex_2.name, regex_2.value
+                     Distribute Key: regex_2.id
+--?         ->  Materialize  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+               Output: regex_1.id, regex_1.name, regex_1.person
+--?               ->  Seq Scan on public\.regex_1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                     Output: regex_1.id, regex_1.name, regex_1.person
+                     Distribute Key: regex_1.id
+(18 rows)
+
+explain (costs on, verbose on, nodes on) select avg(id) from regex_1;
+WARNING:  Statistics in some tables or columns(public.regex_1.id) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+--?.*
+--?.*
+--? Aggregate  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+   Output: pg_catalog.avg((avg(id)))
+--?   ->  Streaming \(type: GATHER\)  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+         Output: (avg(id))
+--?         Node/s: .*
+--?         ->  Aggregate  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+               Output: avg(id)
+--?               ->  Seq Scan on public\.regex_1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                     Output: id, name, person
+                     Distribute Key: id
+(10 rows)
+
+explain (costs on, verbose on, nodes on) select sum(id)+2 from regex_2 where value is not NULL group by name having sum(id)>0;
+WARNING:  Statistics in some tables or columns(public.regex_2.id, public.regex_2.value, public.regex_2.name) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+--?.*
+--?.*
+--? Streaming \(type: GATHER\)  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+   Output: ((sum(id) + 2)), name
+   Node/s: All datanodes
+--?   ->  HashAggregate  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+         Output: (sum(id) + 2), name
+         Group By Key: regex_2.name
+         Filter: (sum(regex_2.id) > 0)
+--?         ->  Streaming\(type: REDISTRIBUTE\)  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+               Output: name, id
+               Distribute Key: name
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+--?               ->  Seq Scan on public.regex_2  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                     Output: name, id
+                     Distribute Key: id
+                     Filter: (regex_2.value IS NOT NULL)
+(16 rows)
+
+explain (costs on, verbose on, nodes on) with recursive t(n) as (
+values(1)
+union all
+select n+1 from t where n<100
+)
+select sum(n) from t;
+--?.*
+--?.*
+--? Aggregate  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+   Output: sum(t.n)
+   CTE t
+--?     ->  Recursive Union  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+--?           ->  Values Scan on "\*VALUES\*"  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                 Output: "*VALUES*".column1
+--?           ->  WorkTable Scan on t  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                 Output: (t.n + 1)
+                 Filter: (t.n < 100)
+--?   ->  CTE Scan on t  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+         Output: t.n
+(11 rows)
+

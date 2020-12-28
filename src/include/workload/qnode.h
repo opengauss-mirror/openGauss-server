@@ -59,7 +59,9 @@ typedef struct ResourcePool {
 } ResourcePool;
 
 typedef struct WLMQNodeInfo {
+#ifndef WIN32
     pthread_cond_t condition; /* pthread condtion */
+#endif
     Oid userid;               /* The user id of the thread */
     bool removed;             /* whether is removed from the waiting list */
     bool privilege;           /* the query has privilege? */

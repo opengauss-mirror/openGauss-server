@@ -8,7 +8,7 @@ function test_1()
 {
 check_instance
 
-gs_guc reload -D $data_dir/datanode1 -c "wal_keep_segments=128"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "wal_keep_segments=128"
 
 #test create table and truncate at one transaction
 gsql -d $db -p $dn1_primary_port -c "start transaction; 
@@ -27,6 +27,7 @@ gsql -d $db -p $dn1_primary_port -c "CREATE unlogged TABLE table_replication_12
 							  , R_COMMENT    VARCHAR(152)
 							)
 							with (orientation = column)
+							distribute by hash(R_REGIONKEY)
 							;
 							vacuum full table_replication_12;"
 
@@ -53,7 +54,7 @@ rm xlog.log
 function tear_down()
 {
 sleep 1
-gs_guc reload -D $data_dir/datanode1 -c "wal_keep_segments=16"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "wal_keep_segments=16"
 gsql -d $db -p $dn1_primary_port -c "checkpoint;"
 gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists testtrunk; DROP TABLE if exists table_replication_12;"
 }

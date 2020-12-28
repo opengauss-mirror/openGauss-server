@@ -1,9 +1,9 @@
 # src/test/performance/sqls/inssimple
 #
-# Transactions are unsupported by B - so for insertion of
+# Transactions are unsupported by B db - so for insertion of
 # 8192 rows, 1 INSERT per Xaction, we returned "Transactions unsupported"
 #
-if ( $TestDBMS =~ /^b/ && $XACTBLOCK eq '' )
+if ( $TestDBMS =~ /^mysql/ && $XACTBLOCK eq '' )
 {
 	print STDERR " No_Xact\n";
 	return;

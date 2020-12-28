@@ -53,14 +53,13 @@ typedef enum {
 
 /* Product version number is unknown. */
 #define PRODUCT_VERSION_UNKNOWN ((uint32)0)
-/* DBAP product version number. */
-#define PRODUCT_VERSION_DBAP ((uint32)2)
-/* DBHTAP product version number. */
-#define PRODUCT_VERSION_DBHTAP ((uint32)3)
+/* GaussDB 200 product version number. */
+#define PRODUCT_VERSION_GAUSSDB200 ((uint32)2)
+/* GaussDB 300 product version number. */
+#define PRODUCT_VERSION_GAUSSDB300 ((uint32)3)
 
 extern void initialize_feature_flags();
 extern bool is_feature_disabled(feature_name);
 extern void signalReloadLicenseHandler(int sig);
 extern uint32 get_product_version();
 #endif  // GAUSSDB_VERSION_H_INCLUDED
-

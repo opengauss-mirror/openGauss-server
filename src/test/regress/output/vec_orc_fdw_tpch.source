@@ -1,0 +1,1585 @@
+-- Nov 13, succeeded queries:
+-- Q1,Q2,Q3,Q4,Q5,Q6,Q10,Q11,Q12,Q13,Q14,Q15,Q16,Q17,Q18,Q19,Q20,Q22
+-- DDL
+DROP FOREIGN TABLE IF EXISTS lineitem CASCADE;
+NOTICE:  foreign table "lineitem" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS customer CASCADE;
+NOTICE:  foreign table "customer" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS orders CASCADE;
+NOTICE:  foreign table "orders" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS part CASCADE;
+NOTICE:  foreign table "part" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS partsupp CASCADE;
+NOTICE:  foreign table "partsupp" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS supplier CASCADE;
+NOTICE:  foreign table "supplier" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS nation CASCADE;
+NOTICE:  foreign table "nation" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS region CASCADE;
+NOTICE:  foreign table "region" does not exist, skipping
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+Create foreign table lineitem (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/')
+distribute by roundrobin;
+CREATE FOREIGN TABLE customer ( 
+ c_custkey BIGINT, 
+ c_name TEXT, 
+ c_address TEXT, 
+ c_nationkey INT4, 
+ c_phone TEXT, 
+ c_acctbal FLOAT4, 
+ c_mktsegment TEXT, 
+ c_comment TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+create foreign table orders (
+ O_ORDERKEY INT4, 
+ O_CUSTKEY INT4, 
+ O_ORDERSTATUS TEXT, 
+ O_TOTALPRICE FLOAT8,
+ O_ORDERDATE TEXT,
+ O_ORDERPRIORITY TEXT, 
+ O_CLERK TEXT,
+ O_SHIPPRIORITY INT4, 
+ O_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/orders_orc11_64stripe/')
+distribute by roundrobin;
+create foreign table part  (
+ P_PARTKEY INT4,
+ P_NAME TEXT, 
+ P_MFGR TEXT,
+ P_BRAND TEXT,
+ P_TYPE TEXT,
+ P_SIZE INT4,
+ P_CONTAINER TEXT,
+ P_RETAILPRICE FLOAT8,
+ P_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/part_orc11_64stripe/')
+distribute by roundrobin;
+create foreign table supplier  (
+ S_SUPPKEY INT4,
+ S_NAME TEXT,
+ S_ADDRESS TEXT,
+ S_NATIONKEY INT4,
+ S_PHONE TEXT,
+ S_ACCTBAL FLOAT8,
+ S_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/supplier_orc11_64stripe/')
+distribute by roundrobin;
+create foreign table partsupp (
+ PS_PARTKEY INT4,
+ PS_SUPPKEY INT4,
+ PS_AVAILQTY INT4,
+ PS_SUPPLYCOST FLOAT8,
+ PS_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/partsupp_orc11_64stripe/')
+distribute by roundrobin;
+create foreign table nation  (
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4,
+ N_COMMENT TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/nation_orc11_64stripe/')
+distribute by roundrobin;
+create foreign table region  (
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/region_orc11_64stripe/')
+distribute by roundrobin;
+set enable_nestloop=off;
+set enable_mergejoin=off;
+-- Q1
+-- q1_pricing_summary_report
+-- single query (original)
+SELECT 
+  L_RETURNFLAG, L_LINESTATUS, CAST(SUM(L_QUANTITY) AS INT8), CAST(SUM(L_EXTENDEDPRICE) AS INT8) , CAST(SUM(L_EXTENDEDPRICE*(1-L_DISCOUNT)) AS INT8), CAST(SUM(L_EXTENDEDPRICE*(1-L_DISCOUNT)*(1+L_TAX)) AS INT8), CAST(AVG(L_QUANTITY) AS INT8), CAST(AVG(L_EXTENDEDPRICE) as INT8), CAST(AVG(L_DISCOUNT) AS INT8), COUNT(1) 
+FROM 
+  lineitem 
+WHERE 
+  L_SHIPDATE<='1998-09-02' 
+GROUP BY L_RETURNFLAG, L_LINESTATUS 
+ORDER BY L_RETURNFLAG, L_LINESTATUS;
+ l_returnflag | l_linestatus |   sum    |     sum      |     sum      |     sum      | avg |  avg  | avg |  count  
+--------------+--------------+----------+--------------+--------------+--------------+-----+-------+-----+---------
+ A            | F            | 37734107 |  56586554401 |  53758257135 |  55909065223 |  26 | 38273 |   0 | 1478493
+ N            | F            |   991417 |   1487504710 |   1413082168 |   1469649223 |  26 | 38284 |   0 |   38854
+ N            | O            | 74476040 | 111701729698 | 106118230308 | 110367043872 |  26 | 38249 |   0 | 2920374
+ R            | F            | 37719753 |  56568041381 |  53741292685 |  55889619120 |  26 | 38251 |   0 | 1478870
+(4 rows)
+
+-- Q2
+-- come from Hive, which rewrite out subqueries
+create table q2_minimum_cost_supplier_tmp1 as (select
+  (s.s_acctbal ), s.s_name, n.n_name, p.p_partkey, (ps.ps_supplycost), p.p_mfgr, s.s_address, s.s_phone, s.s_comment
+from
+  nation n join region r
+  on
+    n.n_regionkey = r.r_regionkey and r.r_name = 'EUROPE'
+  join supplier s
+  on
+s.s_nationkey = n.n_nationkey
+  join partsupp ps
+  on
+s.s_suppkey = ps.ps_suppkey
+  join part p
+  on
+    p.p_partkey = ps.ps_partkey and p.p_size = 15 and p.p_type like '%BRASS');
+create table q2_minimum_cost_supplier_tmp2 as (
+select
+  p_partkey, (min(ps_supplycost) )
+from
+  q2_minimum_cost_supplier_tmp1
+group by p_partkey);
+select
+  CAST(t1.s_acctbal AS INT8), t1.s_name, t1.n_name, t1.p_partkey, t1.p_mfgr, t1.s_address, t1.s_phone, t1.s_comment
+from
+  q2_minimum_cost_supplier_tmp1 t1 join q2_minimum_cost_supplier_tmp2 t2
+on
+  t1.p_partkey = t2.p_partkey and t1.ps_supplycost=t2.min
+order by s_acctbal desc, n_name, s_name, p_partkey
+limit 100; 
+ s_acctbal |       s_name       |     n_name     | p_partkey |     p_mfgr     |                s_address                 |     s_phone     |                                              s_comment                                               
+-----------+--------------------+----------------+-----------+----------------+------------------------------------------+-----------------+------------------------------------------------------------------------------------------------------
+      9939 | Supplier#000005359 | UNITED KINGDOM |    185358 | Manufacturer#4 | QKuHYh,vZGiwu2FWEJoLDx04                 | 33-429-790-6131 | uriously regular requests hag
+      9938 | Supplier#000005969 | ROMANIA        |    108438 | Manufacturer#1 | ANDENSOSmk,miq23Xfb5RWt6dvUcvt6Qa        | 29-520-692-3537 | efully express instructions. regular requests against the slyly fin
+      9936 | Supplier#000005250 | UNITED KINGDOM |       249 | Manufacturer#4 | B3rqp0xbSEim4Mpy2RH J                    | 33-320-228-2957 | etect about the furiously final accounts. slyly ironic pinto beans sleep inside the furiously
+      9924 | Supplier#000002324 | GERMANY        |     29821 | Manufacturer#4 | y3OD9UywSTOk                             | 17-779-299-1839 | ackages boost blithely. blithely regular deposits c
+      9871 | Supplier#000001286 | GERMANY        |     81285 | Manufacturer#2 | YKA,E2fjiVd7eUrzp2Ef8j1QxGo2DFnosaTEH    | 17-516-924-4574 |  regular accounts. furiously unusual courts above the fi
+      9871 | Supplier#000001286 | GERMANY        |    181285 | Manufacturer#4 | YKA,E2fjiVd7eUrzp2Ef8j1QxGo2DFnosaTEH    | 17-516-924-4574 |  regular accounts. furiously unusual courts above the fi
+      9871 | Supplier#000006373 | GERMANY        |     43868 | Manufacturer#5 | J8fcXWsTqM                               | 17-813-485-8637 | etect blithely bold asymptotes. fluffily ironic platelets wake furiously; blit
+      9853 | Supplier#000008973 | RUSSIA         |     18972 | Manufacturer#2 | t5L67YdBYYH6o,Vz24jpDyQ9                 | 32-188-594-7038 | rns wake final foxes. carefully unusual depende
+      9848 | Supplier#000006345 | FRANCE         |     86344 | Manufacturer#1 | VSt3rzk3qG698u6ld8HhOByvrTcSTSvQlDQDag   | 16-886-766-7945 | ges. slyly regular requests are. ruthless, express excuses cajole blithely across the unu
+      9848 | Supplier#000006345 | FRANCE         |    173827 | Manufacturer#2 | VSt3rzk3qG698u6ld8HhOByvrTcSTSvQlDQDag   | 16-886-766-7945 | ges. slyly regular requests are. ruthless, express excuses cajole blithely across the unu
+      9848 | Supplier#000008097 | RUSSIA         |    130557 | Manufacturer#2 | xMe97bpE69NzdwLoX                        | 32-375-640-3593 |  the special excuses. silent sentiments serve carefully final ac
+      9837 | Supplier#000007342 | RUSSIA         |      4841 | Manufacturer#4 | JOlK7C1,7xrEZSSOw                        | 32-399-414-5385 | blithely carefully bold theodolites. fur
+      9817 | Supplier#000002352 | RUSSIA         |    124815 | Manufacturer#2 | 4LfoHUZjgjEbAKw TgdKcgOc4D4uCYw          | 32-551-831-1437 | wake carefully alongside of the carefully final ex
+      9817 | Supplier#000002352 | RUSSIA         |    152351 | Manufacturer#3 | 4LfoHUZjgjEbAKw TgdKcgOc4D4uCYw          | 32-551-831-1437 | wake carefully alongside of the carefully final ex
+      9740 | Supplier#000003384 | FRANCE         |    138357 | Manufacturer#2 | o,Z3v4POifevE k9U1b 6J1ucX,I             | 16-494-913-5925 | s after the furiously bold packages sleep fluffily idly final requests: quickly final
+      9722 | Supplier#000008757 | UNITED KINGDOM |    156241 | Manufacturer#3 | Atg6GnM4dT2                              | 33-821-407-2995 | eep furiously sauternes; quickl
+      9681 | Supplier#000008406 | RUSSIA         |     78405 | Manufacturer#1 | ,qUuXcftUl                               | 32-139-873-8571 | haggle slyly regular excuses. quic
+      9644 | Supplier#000005148 | ROMANIA        |    107617 | Manufacturer#1 | kT4ciVFslx9z4s79p Js825                  | 29-252-617-4850 | final excuses. final ideas boost quickly furiously speci
+      9625 | Supplier#000001816 | FRANCE         |     34306 | Manufacturer#3 | e7vab91vLJPWxxZnewmnDBpDmxYHrb           | 16-392-237-6726 | e packages are around the special ideas. special, pending foxes us
+      9625 | Supplier#000009658 | ROMANIA        |    189657 | Manufacturer#1 | oE9uBgEfSS4opIcepXyAYM,x                 | 29-748-876-2014 | ronic asymptotes wake bravely final
+      9613 | Supplier#000003228 | ROMANIA        |    120715 | Manufacturer#2 | KDdpNKN3cWu7ZSrbdqp7AfSLxx,qWB           | 29-325-784-8187 | warhorses. quickly even deposits sublate daringly ironic instructions. slyly blithe t
+      9613 | Supplier#000003228 | ROMANIA        |    198189 | Manufacturer#4 | KDdpNKN3cWu7ZSrbdqp7AfSLxx,qWB           | 29-325-784-8187 | warhorses. quickly even deposits sublate daringly ironic instructions. slyly blithe t
+      9572 | Supplier#000004305 | ROMANIA        |    179270 | Manufacturer#2 | qNHZ7WmCzygwMPRDO9Ps                     | 29-973-481-1831 | kly carefully express asymptotes. furiou
+      9558 | Supplier#000003532 | UNITED KINGDOM |     88515 | Manufacturer#4 | EOeuiiOn21OVpTlGguufFDFsbN1p0lhpxHp      | 33-152-301-2164 |  foxes. quickly even excuses use. slyly special foxes nag bl
+      9493 | Supplier#000005975 | GERMANY        |     25974 | Manufacturer#5 | S6mIiCTx82z7lV                           | 17-992-579-4839 | arefully pending accounts. blithely regular excuses boost carefully carefully ironic p
+      9461 | Supplier#000002536 | UNITED KINGDOM |     20033 | Manufacturer#1 | 8mmGbyzaU 7ZS2wJumTibypncu9pNkDc4FYA     | 33-556-973-5522 | . slyly regular deposits wake slyly. furiously regular warthogs are.
+      9453 | Supplier#000000802 | ROMANIA        |    175767 | Manufacturer#1 | ,6HYXb4uaHITmtMBj4Ak57Pd                 | 29-342-882-6463 | gular frets. permanently special multipliers believe blithely alongs
+      9409 | Supplier#000007772 | UNITED KINGDOM |    117771 | Manufacturer#4 | AiC5YAH,gdu0i7                           | 33-152-491-1126 | nag against the final requests. furiously unusual packages cajole blit
+      9360 | Supplier#000004856 | ROMANIA        |     62349 | Manufacturer#5 | HYogcF3Jb yh1                            | 29-334-870-9731 | y ironic theodolites. blithely sile
+      9357 | Supplier#000006188 | UNITED KINGDOM |    138648 | Manufacturer#1 | g801,ssP8wpTk4Hm                         | 33-583-607-1633 | ously always regular packages. fluffily even accounts beneath the furiously final pack
+      9352 | Supplier#000003439 | GERMANY        |    170921 | Manufacturer#4 | qYPDgoiBGhCYxjgC                         | 17-128-996-4650 |  according to the carefully bold ideas
+      9313 | Supplier#000007807 | RUSSIA         |     90279 | Manufacturer#5 | oGYMPCk9XHGB2PBfKRnHA                    | 32-673-872-5854 | ecial packages among the pending, even requests use regula
+      9313 | Supplier#000007807 | RUSSIA         |    100276 | Manufacturer#5 | oGYMPCk9XHGB2PBfKRnHA                    | 32-673-872-5854 | ecial packages among the pending, even requests use regula
+      9280 | Supplier#000007194 | ROMANIA        |     47193 | Manufacturer#3 | zhRUQkBSrFYxIAXTfInj vyGRQjeK            | 29-318-454-2133 | o beans haggle after the furiously unusual deposits. carefully silent dolphins cajole carefully
+      9275 | Supplier#000008854 | RUSSIA         |     76346 | Manufacturer#3 | 1xhLoOUM7I3mZ1mKnerw OSqdbb4QbGa         | 32-524-148-5221 | y. courts do wake slyly. carefully ironic platelets haggle above the slyly regular the
+      9249 | Supplier#000003973 | FRANCE         |     26466 | Manufacturer#1 | d18GiDsL6Wm2IsGXM,RZf1jCsgZAOjNYVThTRP4  | 16-722-866-1658 | uests are furiously. regular tithes through the regular, final accounts cajole furiously above the q
+      9249 | Supplier#000003973 | FRANCE         |     33972 | Manufacturer#1 | d18GiDsL6Wm2IsGXM,RZf1jCsgZAOjNYVThTRP4  | 16-722-866-1658 | uests are furiously. regular tithes through the regular, final accounts cajole furiously above the q
+      9209 | Supplier#000007769 | ROMANIA        |     40256 | Manufacturer#5 | rsimdze 5o9P Ht7xS                       | 29-964-424-9649 | lites was quickly above the furiously ironic requests. slyly even foxes against the blithely bold 
+      9201 | Supplier#000009690 | UNITED KINGDOM |     67183 | Manufacturer#5 | CB BnUTlmi5zdeEl7R7                      | 33-121-267-9529 | e even, even foxes. blithely ironic packages cajole regular packages. slyly final ide
+      9192 | Supplier#000000115 | UNITED KINGDOM |     85098 | Manufacturer#3 | nJ 2t0f7Ve,wL1,6WzGBJLNBUCKlsV           | 33-597-248-1220 | es across the carefully express accounts boost caref
+      9190 | Supplier#000001226 | GERMANY        |     21225 | Manufacturer#4 | qsLCqSvLyZfuXIpjz                        | 17-725-903-1381 |  deposits. blithely bold excuses about the slyly bold forges wake 
+      9129 | Supplier#000004311 | RUSSIA         |    146768 | Manufacturer#5 | I8IjnXd7NSJRs594RxsRR0                   | 32-155-440-7120 | refully. blithely unusual asymptotes haggle 
+      9105 | Supplier#000008520 | GERMANY        |    150974 | Manufacturer#4 | RqRVDgD0ER J9 b41vR2,3                   | 17-728-804-1793 | ly about the blithely ironic depths. slyly final theodolites among the fluffily bold ideas print
+      9101 | Supplier#000005791 | ROMANIA        |    128254 | Manufacturer#5 | zub2zCV,jhHPPQqi,P2INAjE1zI n66cOEoXFG   | 29-549-251-5384 | ts. notornis detect blithely above the carefully bold requests. blithely even package
+      9095 | Supplier#000004582 | RUSSIA         |     39575 | Manufacturer#1 | WB0XkCSG3r,mnQ n,h9VIxjjr9ARHFvKgMDf     | 32-587-577-1351 | jole. regular accounts sleep blithely frets. final pinto beans play furiously past the 
+      8997 | Supplier#000004702 | FRANCE         |    102191 | Manufacturer#5 | 8XVcQK23akp                              | 16-811-269-8946 | ickly final packages along the express plat
+      8996 | Supplier#000009814 | ROMANIA        |    139813 | Manufacturer#2 | af0O5pg83lPU4IDVmEylXZVqYZQzSDlYLAmR     | 29-995-571-8781 |  dependencies boost quickly across the furiously pending requests! unusual dolphins play sl
+      8968 | Supplier#000010000 | ROMANIA        |    119999 | Manufacturer#5 | aTGLEusCiL4F PDBdv665XBJhPyCOB0i         | 29-578-432-2146 | ly regular foxes boost slyly. quickly special waters boost carefully ironi
+      8937 | Supplier#000007043 | UNITED KINGDOM |    109512 | Manufacturer#1 | FVajceZInZdbJE6Z9XsRUxrUEpiwHDrOXi,1Rz   | 33-784-177-8208 | efully regular courts. furiousl
+      8929 | Supplier#000008770 | FRANCE         |    173735 | Manufacturer#4 | R7cG26TtXrHAP9 HckhfRi                   | 16-242-746-9248 | cajole furiously unusual requests. quickly stealthy requests are. 
+      8921 | Supplier#000003967 | ROMANIA        |     26460 | Manufacturer#1 | eHoAXe62SY9                              | 29-194-731-3944 | aters. express, pending instructions sleep. brave, r
+      8921 | Supplier#000003967 | ROMANIA        |    173966 | Manufacturer#2 | eHoAXe62SY9                              | 29-194-731-3944 | aters. express, pending instructions sleep. brave, r
+      8914 | Supplier#000004603 | UNITED KINGDOM |    137063 | Manufacturer#2 | OUzlvMUr7n,utLxmPNeYKSf3T24OXskxB5       | 33-789-255-7342 |  haggle slyly above the furiously regular pinto beans. even 
+      8878 | Supplier#000007967 | FRANCE         |    167966 | Manufacturer#5 | A3pi1BARM4nx6R,qrwFoRPU                  | 16-442-147-9345 | ously foxes. express, ironic requests im
+      8862 | Supplier#000003323 | ROMANIA        |     73322 | Manufacturer#3 | W9 lYcsC9FwBqk3ItL                       | 29-736-951-3710 | ly pending ideas sleep about the furiously unu
+      8842 | Supplier#000005750 | ROMANIA        |    100729 | Manufacturer#5 | Erx3lAgu0g62iaHF9x50uMH4EgeN9hEG         | 29-344-502-5481 | gainst the pinto beans. fluffily unusual dependencies affix slyly even deposits.
+      8782 | Supplier#000003121 | ROMANIA        |     13120 | Manufacturer#5 | wNqTogx238ZYCamFb,50v,bj 4IbNFW9Bvw1xP   | 29-707-291-5144 | s wake quickly ironic ideas
+      8754 | Supplier#000009407 | UNITED KINGDOM |    179406 | Manufacturer#4 | CHRCbkaWcf5B                             | 33-903-970-9604 | e ironic requests. carefully even foxes above the furious
+      8691 | Supplier#000004429 | UNITED KINGDOM |    126892 | Manufacturer#2 | k,BQms5UhoAF1B2Asi,fLib                  | 33-964-337-5038 | efully express deposits kindle after the deposits. final 
+      8656 | Supplier#000006330 | RUSSIA         |    193810 | Manufacturer#2 | UozlaENr0ytKe2w6CeIEWFWn iO3S8Rae7Ou     | 32-561-198-3705 | symptotes use about the express dolphins. requests use after the express platelets. final, ex
+      8638 | Supplier#000002920 | RUSSIA         |     75398 | Manufacturer#1 | Je2a8bszf3L                              | 32-122-621-7549 | ly quickly ironic requests. even requests whithout t
+      8638 | Supplier#000002920 | RUSSIA         |    170402 | Manufacturer#3 | Je2a8bszf3L                              | 32-122-621-7549 | ly quickly ironic requests. even requests whithout t
+      8608 | Supplier#000006003 | UNITED KINGDOM |     76002 | Manufacturer#2 | EH9wADcEiuenM0NR08zDwMidw,52Y2RyILEiA    | 33-416-807-5206 | ar, pending accounts. pending depende
+      8570 | Supplier#000005936 | RUSSIA         |      5935 | Manufacturer#5 | jXaNZ6vwnEWJ2ksLZJpjtgt0bY2a3AU          | 32-644-251-7916 | . regular foxes nag carefully atop the regular, silent deposits. quickly regular packages 
+      8564 | Supplier#000000033 | GERMANY        |    110032 | Manufacturer#1 | gfeKpYw3400L0SDywXA6Ya1Qmq1w6YB9f3R      | 17-138-897-9374 | n sauternes along the regular asymptotes are regularly along the 
+      8554 | Supplier#000003979 | ROMANIA        |    143978 | Manufacturer#4 | BfmVhCAnCMY3jzpjUMy4CNWs9 HzpdQR7INJU    | 29-124-646-4897 | ic requests wake against the blithely unusual accounts. fluffily r
+      8517 | Supplier#000009529 | RUSSIA         |     37025 | Manufacturer#5 | e44R8o7JAIS9iMcr                         | 32-565-297-8775 | ove the even courts. furiously special platelets 
+      8517 | Supplier#000009529 | RUSSIA         |     59528 | Manufacturer#2 | e44R8o7JAIS9iMcr                         | 32-565-297-8775 | ove the even courts. furiously special platelets 
+      8504 | Supplier#000006830 | RUSSIA         |     44325 | Manufacturer#4 | BC4WFCYRUZyaIgchU 4S                     | 32-147-878-5069 | pades cajole. furious packages among the carefully express excuses boost furiously across th
+      8457 | Supplier#000009456 | UNITED KINGDOM |     19455 | Manufacturer#1 | 7SBhZs8gP1cJjT0Qf433YBk                  | 33-858-440-4349 | cing requests along the furiously unusual deposits promise among the furiously unus
+      8441 | Supplier#000003817 | FRANCE         |    141302 | Manufacturer#2 | hU3fz3xL78                               | 16-339-356-5115 | ely even ideas. ideas wake slyly furiously unusual instructions. pinto beans sleep ag
+      8433 | Supplier#000003990 | RUSSIA         |    191470 | Manufacturer#1 | wehBBp1RQbfxAYDASS75MsywmsKHRVdkrvNe6m   | 32-839-509-9301 | ep furiously. packages should have to haggle slyly across the deposits. furiously regu
+      8431 | Supplier#000002675 | ROMANIA        |      5174 | Manufacturer#1 | HJFStOu9R5NGPOegKhgbzBdyvrG2yh8w         | 29-474-643-1443 | ithely express pinto beans. blithely even foxes haggle. furiously regular theodol
+      8407 | Supplier#000005406 | RUSSIA         |    162889 | Manufacturer#4 | j7 gYF5RW8DC5UrjKC                       | 32-626-152-4621 | r the blithely regular packages. slyly ironic theodoli
+      8386 | Supplier#000008518 | FRANCE         |     36014 | Manufacturer#3 | 2jqzqqAVe9crMVGP,n9nTsQXulNLTUYoJjEDcqWV | 16-618-780-7481 | blithely bold pains are carefully platelets. finally regular pinto beans sleep carefully special
+      8377 | Supplier#000005306 | UNITED KINGDOM |    190267 | Manufacturer#5 | 9t8Y8 QqSIsoADPt6NLdk,TP5zyRx41oBUlgoGc9 | 33-632-514-7931 | ly final accounts sleep special, regular requests. furiously regular
+      8349 | Supplier#000008851 | FRANCE         |     66344 | Manufacturer#4 | nWxi7GwEbjhw1                            | 16-796-240-2472 |  boldly final deposits. regular, even instructions detect slyly. fluffily unusual pinto bea
+      8339 | Supplier#000007269 | FRANCE         |     17268 | Manufacturer#4 | ZwhJSwABUoiB04,3                         | 16-267-277-4365 | iously final accounts. even pinto beans cajole slyly regular
+      8328 | Supplier#000001744 | ROMANIA        |     69237 | Manufacturer#5 | oLo3fV64q2,FKHa3p,qHnS7Yzv,ps8           | 29-330-728-5873 | ep carefully-- even, careful packages are slyly along t
+      8308 | Supplier#000003142 | GERMANY        |     18139 | Manufacturer#1 | dqblvV8dCNAorGlJ                         | 17-595-447-6026 | olites wake furiously regular decoys. final requests nod 
+      8232 | Supplier#000009558 | RUSSIA         |    192000 | Manufacturer#2 | mcdgen,yT1iJDHDS5fV                      | 32-762-137-5858 |  foxes according to the furi
+      8153 | Supplier#000002731 | ROMANIA        |     15227 | Manufacturer#4 |  nluXJCuY1tu                             | 29-805-463-2030 |  special requests. even, regular warhorses affix among the final gr
+      8109 | Supplier#000009186 | FRANCE         |     99185 | Manufacturer#1 | wgfosrVPexl9pEXWywaqlBMDYYf              | 16-668-570-1402 | tions haggle slyly about the sil
+      8103 | Supplier#000003347 | UNITED KINGDOM |     18344 | Manufacturer#5 | m CtXS2S16i                              | 33-454-274-8532 | egrate with the slyly bold instructions. special foxes haggle silently among the
+      8046 | Supplier#000008780 | FRANCE         |    191222 | Manufacturer#3 | AczzuE0UK9osj ,Lx0Jmh                    | 16-473-215-6395 | onic platelets cajole after the regular instructions. permanently bold excuses
+      8042 | Supplier#000003245 | RUSSIA         |    135705 | Manufacturer#4 | Dh8Ikg39onrbOL4DyTfGw8a9oKUX3d9Y         | 32-836-132-8872 | osits. packages cajole slyly. furiously regular deposits cajole slyly. q
+      8042 | Supplier#000003245 | RUSSIA         |    150729 | Manufacturer#1 | Dh8Ikg39onrbOL4DyTfGw8a9oKUX3d9Y         | 32-836-132-8872 | osits. packages cajole slyly. furiously regular deposits cajole slyly. q
+      7992 | Supplier#000006108 | FRANCE         |    118574 | Manufacturer#1 | 8tBydnTDwUqfBfFV4l3                      | 16-974-998-8937 |  ironic ideas? fluffily even instructions wake. blithel
+      7981 | Supplier#000001288 | FRANCE         |     13784 | Manufacturer#4 | zE,7HgVPrCn                              | 16-646-464-8247 | ully bold courts. escapades nag slyly. furiously fluffy theodo
+      7950 | Supplier#000008101 | GERMANY        |     33094 | Manufacturer#5 | kkYvL6IuvojJgTNG IKkaXQDYgx8ILohj        | 17-627-663-8014 | arefully unusual requests x-ray above the quickly final deposits. 
+      7938 | Supplier#000009012 | ROMANIA        |     83995 | Manufacturer#2 | iUiTziH,Ek3i4lwSgunXMgrcTzwdb            | 29-250-925-9690 | to the blithely ironic deposits nag sly
+      7914 | Supplier#000001013 | RUSSIA         |    125988 | Manufacturer#2 | riRcntps4KEDtYScjpMIWeYF6mNnR            | 32-194-698-3365 |  busily bold packages are dolphi
+      7913 | Supplier#000004211 | GERMANY        |    159180 | Manufacturer#5 | 2wQRVovHrm3,v03IKzfTd,1PYsFXQFFOG        | 17-266-947-7315 | ay furiously regular platelets. cou
+      7913 | Supplier#000004211 | GERMANY        |    184210 | Manufacturer#4 | 2wQRVovHrm3,v03IKzfTd,1PYsFXQFFOG        | 17-266-947-7315 | ay furiously regular platelets. cou
+      7895 | Supplier#000007981 | GERMANY        |     85472 | Manufacturer#4 | NSJ96vMROAbeXP                           | 17-963-404-3760 | ic platelets affix after the furiously
+      7887 | Supplier#000009792 | GERMANY        |    164759 | Manufacturer#3 | Y28ITVeYriT3kIGdV2K8fSZ V2UqT5H1Otz      | 17-988-938-4296 | ckly around the carefully fluffy theodolites. slyly ironic pack
+      7872 | Supplier#000007206 | RUSSIA         |    104695 | Manufacturer#1 | 3w fNCnrVmvJjE95sgWZzvW                  | 32-432-452-7731 | ironic requests. furiously final theodolites cajole. final, express packages sleep. quickly reg
+      7852 | Supplier#000005864 | RUSSIA         |      8363 | Manufacturer#4 | WCNfBPZeSXh3h,c                          | 32-454-883-3821 | usly unusual pinto beans. brave ideas sleep carefully quickly ironi
+      7851 | Supplier#000001518 | UNITED KINGDOM |     86501 | Manufacturer#1 | ONda3YJiHKJOC                            | 33-730-383-3892 | ifts haggle fluffily pending pai
+      7844 | Supplier#000006683 | FRANCE         |     11680 | Manufacturer#4 | 2Z0JGkiv01Y00oCFwUGfviIbhzCdy            | 16-464-517-8943 |  express, final pinto beans x-ray slyly asymptotes. unusual, unusual
+(100 rows)
+
+DROP TABLE IF EXISTS q2_minimum_cost_supplier_tmp2;
+DROP TABLE IF EXISTS q2_minimum_cost_supplier_tmp1;
+-- Q3
+-- TPC-H/TPC-R Shipping Priority Query (Q3)
+select 
+  l_orderkey, CAST(sum(l_extendedprice*(1-l_discount)) AS INT8) as revenue, o_orderdate, o_shippriority 
+from 
+  customer c join orders o 
+    on c.c_mktsegment = 'BUILDING' and c.c_custkey = o.o_custkey 
+  join lineitem l 
+    on l.l_orderkey = o.o_orderkey
+where 
+  o_orderdate < '1995-03-15' and l_shipdate > '1995-03-15' 
+group by l_orderkey, o_orderdate, o_shippriority 
+order by revenue desc, o_orderdate 
+limit 10;
+ l_orderkey | revenue | o_orderdate | o_shippriority 
+------------+---------+-------------+----------------
+    2456423 |  406181 | 1995-03-05  |              0
+    3459808 |  405839 | 1995-03-04  |              0
+     492164 |  390324 | 1995-02-19  |              0
+    1188320 |  384538 | 1995-03-09  |              0
+    2435712 |  378673 | 1995-02-26  |              0
+    4878020 |  378377 | 1995-03-12  |              0
+    5521732 |  375154 | 1995-03-13  |              0
+    2628192 |  373133 | 1995-02-22  |              0
+     993600 |  371407 | 1995-03-05  |              0
+    2300070 |  367371 | 1995-03-13  |              0
+(10 rows)
+
+--Q4:
+--Same as impala
+select
+	o_orderpriority,
+	count(*) as order_count
+from
+	orders
+where
+	o_orderdate >= '1993-07-01'
+	and o_orderdate < '1993-10-01'
+	and exists (
+		select
+			*
+		from
+			lineitem
+		where
+			l_orderkey = o_orderkey
+			and l_commitdate < l_receiptdate
+	)
+group by
+	o_orderpriority
+order by
+	o_orderpriority;
+ o_orderpriority | order_count 
+-----------------+-------------
+ 1-URGENT        |       10594
+ 2-HIGH          |       10476
+ 3-MEDIUM        |       10410
+ 4-NOT SPECIFIED |       10556
+ 5-LOW           |       10487
+(5 rows)
+
+-- Q5
+-- TPC-H/TPC-R Local Supplier Volume Query (Q5)
+-- Functional Query Definition
+-- Approved February 1998
+select
+        n_name,
+        CAST(sum(l_extendedprice * (1 - l_discount)) AS INT8) as revenue
+from
+        customer,
+        orders,
+        lineitem,
+        supplier,
+        nation,
+        region
+where
+        c_custkey = o_custkey
+        and l_orderkey = o_orderkey
+        and l_suppkey = s_suppkey
+        and c_nationkey = s_nationkey
+        and s_nationkey = n_nationkey
+        and n_regionkey = r_regionkey
+        and r_name = 'ASIA'
+        and o_orderdate >= '1994-01-01'
+        and o_orderdate < '1995-01-01'
+group by
+        n_name
+order by
+        revenue desc;
+  n_name   | revenue  
+-----------+----------
+ INDONESIA | 55502041
+ VIETNAM   | 55295087
+ CHINA     | 53724494
+ INDIA     | 52035512
+ JAPAN     | 45410176
+(5 rows)
+
+-- Q6
+-- TPC-H/TPC-R Forecasting Revenue Change Query (Q6)
+-- Functional Query Definition
+-- Approved February 1998
+select
+	CAST(sum(l_extendedprice * l_discount) AS INT8) as revenue
+from
+	lineitem
+where
+	l_shipdate >= '1994-01-01'
+	and l_shipdate < '1995-01-01'
+	and l_discount >= 0.06 - 0.01
+    and l_discount <= 0.06 + 0.01
+	and l_quantity < 24;
+  revenue  
+-----------
+ 123141078
+(1 row)
+
+-- Q10
+-- TPC-H/TPC-R Returned Item Reporting Query (Q10)
+-- Functional Query Definition
+-- Approved February 1998
+select
+	c_custkey,
+	c_name,
+	CAST(sum(l_extendedprice * (1 - l_discount)) AS INT8) as revenue,
+	CAST(c_acctbal AS INT8),
+	n_name,
+	c_address,
+	c_phone,
+	c_comment
+from
+	customer,
+	orders,
+	lineitem,
+	nation
+where
+	c_custkey = o_custkey
+	and l_orderkey = o_orderkey
+	and o_orderdate >= '1993-10-01'
+	and o_orderdate < '1994-01-01'
+	and l_returnflag = 'R'
+	and c_nationkey = n_nationkey
+group by
+	c_custkey,
+	c_name,
+	c_acctbal,
+	c_phone,
+	n_name,
+	c_address,
+	c_comment
+order by
+	revenue desc
+limit 20;
+ c_custkey |       c_name       | revenue | c_acctbal |     n_name     |                c_address                 |     c_phone     |                                                    c_comment                                                     
+-----------+--------------------+---------+-----------+----------------+------------------------------------------+-----------------+------------------------------------------------------------------------------------------------------------------
+     57040 | Customer#000057040 |  734235 |       633 | JAPAN          | Eioyzjf4pp                               | 22-895-641-3466 | sits. slyly regular requests sleep alongside of the regular inst
+    143347 | Customer#000143347 |  721003 |      2557 | EGYPT          | 1aReFYv,Kw4                              | 14-742-935-3718 | ggle carefully enticing requests. final deposits use bold, bold pinto beans. ironic, idle re
+     60838 | Customer#000060838 |  679127 |      2455 | BRAZIL         | 64EaJ5vMAHWJlBOxJklpNc2RJiWE             | 12-913-494-9813 |  need to boost against the slyly regular account
+    101998 | Customer#000101998 |  637030 |      3791 | UNITED KINGDOM | 01c9CILnNtfOQYmZj                        | 33-593-865-6378 | ress foxes wake slyly after the bold excuses. ironic platelets are furiously carefully bold theodolites
+    125341 | Customer#000125341 |  633508 |      4984 | GERMANY        | S29ODD6bceU8QSuuEJznkNaK                 | 17-582-695-5962 | arefully even depths. blithely even excuses sleep furiously. foxes use except the dependencies. ca
+     25501 | Customer#000025501 |  620270 |      7725 | ETHIOPIA       |   W556MXuoiaYCCZamJI,Rn0B4ACUGdkQ8DZ     | 15-874-808-6793 | he pending instructions wake carefully at the pinto beans. regular, final instructions along the slyly fina
+    115831 | Customer#000115831 |  596424 |      5098 | FRANCE         | rFeBbEEyk dl ne7zV5fDrmiq1oK09wV7pxqCgIc | 16-715-386-3788 | l somas sleep. furiously final deposits wake blithely regular pinto b
+     84223 | Customer#000084223 |  594998 |       529 | UNITED KINGDOM | nAVZCs6BaWap rrM27N 2qBnzc5WBauxbA       | 33-442-824-8191 |  slyly final deposits haggle regular, pending dependencies. pending escapades wake 
+     54289 | Customer#000054289 |  585603 |      5583 | IRAN           | vXCxoCsU0Bad5JQI ,oobkZ                  | 20-834-292-4707 | ely special foxes are quickly finally ironic p
+     39922 | Customer#000039922 |  584878 |      7321 | GERMANY        | Zgy4s50l2GKN4pLDPBU8m342gIw6R            | 17-147-757-8036 | y final requests. furiously final foxes cajole blithely special platelets. f
+      6226 | Customer#000006226 |  576784 |      2230 | UNITED KINGDOM | 8gPu8,NPGkfyQQ0hcIYUGPIBWc,ybP5g,        | 33-657-701-3391 | ending platelets along the express deposits cajole carefully final 
+       922 | Customer#000000922 |  576768 |      3869 | GERMANY        | Az9RFaut7NkPnc5zSD2PwHgVwr4jRzq          | 17-945-916-9648 | luffily fluffy deposits. packages c
+    147946 | Customer#000147946 |  576455 |      2030 | ALGERIA        | iANyZHjqhyy7Ajah0pTrYyhJ                 | 10-886-956-3143 | ithely ironic deposits haggle blithely ironic requests. quickly regu
+    115640 | Customer#000115640 |  569341 |      6436 | ARGENTINA      | Vtgfia9qI 7EpHgecU1X                     | 11-411-543-4901 | ost slyly along the patterns; pinto be
+     73606 | Customer#000073606 |  568657 |      1786 | JAPAN          | xuR0Tro5yChDfOCrjkd2ol                   | 22-437-653-6966 | he furiously regular ideas. slowly
+    110246 | Customer#000110246 |  566843 |      7763 | VIETNAM        | 7KzflgX MDOq7sOkI                        | 31-943-426-9837 | egular deposits serve blithely above the fl
+    142549 | Customer#000142549 |  563537 |      5086 | INDONESIA      | ChqEoK43OysjdHbtKCp6dKqjNyvvi9           | 19-955-562-2398 | sleep pending courts. ironic deposits against the carefully unusual platelets cajole carefully express accounts.
+    146149 | Customer#000146149 |  557255 |      1792 | ROMANIA        | s87fvzFQpU                               | 29-744-164-6487 |  of the slyly silent accounts. quickly final accounts across the 
+     52528 | Customer#000052528 |  556397 |       552 | ARGENTINA      | NFztyTOR10UOJ                            | 11-208-192-3205 |  deposits hinder. blithely pending asymptotes breach slyly regular re
+     23431 | Customer#000023431 |  554270 |      3382 | ROMANIA        | HgiV0phqhaIa9aydNoIlb                    | 29-915-458-2654 | nusual, even instructions: furiously stealthy n
+(20 rows)
+
+-- q11_important_stock
+-- used intermediate table
+create table q11_part_tmp(ps_partkey, part_value) as (
+select 
+  ps_partkey, (sum(ps_supplycost * ps_availqty) ) as part_value 
+from
+  nation n join supplier s 
+  on 
+    s.s_nationkey = n.n_nationkey and n.n_name = 'GERMANY'
+  join partsupp ps 
+  on 
+    ps.ps_suppkey = s.s_suppkey
+group by ps_partkey);
+create table q11_sum_tmp(total_value) distribute by roundrobin as (
+select 
+  (sum(part_value)) as total_value
+from 
+  q11_part_tmp);
+  
+select 
+  ps_partkey, CAST(part_value AS INT8) as value
+from (select ps_partkey, part_value, total_value from q11_part_tmp, q11_sum_tmp) a
+where part_value > total_value * 0.0001
+order by value desc limit 100;
+ ps_partkey |  value   
+------------+----------
+     129760 | 17538457
+     166726 | 16503354
+     191287 | 16474802
+     161758 | 16101756
+      34452 | 15983845
+     139035 | 15907078
+       9403 | 15451756
+     154358 | 15212938
+      38823 | 15064803
+      85606 | 15053957
+      33354 | 14408297
+     154747 | 14407581
+      82865 | 14235490
+      76094 | 14094247
+        222 | 13937778
+     121271 | 13908336
+      55221 | 13716120
+      22819 | 13666434
+      76281 | 13646854
+      85298 | 13581155
+      85158 | 13554904
+     139684 | 13535539
+      31034 | 13498025
+      87305 | 13482847
+      10181 | 13445149
+      62323 | 13411824
+      26489 | 13377256
+      96493 | 13339058
+      56548 | 13329015
+      55576 | 13306843
+     159751 | 13306614
+      92406 | 13287414
+     182636 | 13223727
+     199969 | 13135288
+      62865 | 13001927
+       7284 | 12945298
+     197867 | 12944511
+      11562 | 12931576
+      75165 | 12916918
+      97175 | 12911284
+     140840 | 12896562
+      65241 | 12890600
+     166120 | 12876927
+       9035 | 12863829
+     144616 | 12853549
+     176723 | 12832310
+     170884 | 12792137
+      29790 | 12723300
+      95213 | 12555484
+     183873 | 12550533
+     171235 | 12476538
+      21533 | 12437821
+      17290 | 12432160
+     156397 | 12260624
+     122611 | 12222813
+     139155 | 12220319
+     146316 | 12215801
+     171381 | 12199735
+     198633 | 12078227
+     167417 | 12046638
+      59512 | 12043469
+      31688 | 12034894
+     159586 | 12001506
+       8993 | 11963814
+     120302 | 11857708
+      43536 | 11779341
+       9552 | 11776909
+      86223 | 11772205
+      53776 | 11758670
+     131285 | 11616954
+      91628 | 11611115
+     169644 | 11567960
+     182299 | 11567462
+      33107 | 11453819
+     104184 | 11436657
+      67027 | 11419127
+     176869 | 11371452
+      30885 | 11369675
+      54420 | 11345077
+      72240 | 11313951
+     178708 | 11294635
+      81298 | 11273686
+     158324 | 11243443
+     117095 | 11242535
+     176793 | 11237733
+      86091 | 11177794
+     116033 | 11145434
+     129058 | 11119112
+     193714 | 11104706
+     117195 | 11077218
+      49851 | 11043702
+      19791 | 11030663
+      75800 | 11012402
+     161562 | 10996372
+      10119 | 10980016
+      39185 | 10970043
+      47223 | 10950022
+     175594 | 10942923
+     111295 | 10893676
+     155446 | 10852765
+(100 rows)
+
+DROP TABLE IF EXISTS q11_part_tmp;
+DROP TABLE IF EXISTS q11_sum_tmp;
+-- q12_shipping
+-- HIVE query
+select 
+  l_shipmode,
+  sum(case
+    when o_orderpriority ='1-URGENT'
+         or o_orderpriority ='2-HIGH'
+    then 1
+    else 0
+end
+  ) as high_line_count,
+  sum(case
+    when o_orderpriority <> '1-URGENT'
+         and o_orderpriority <> '2-HIGH'
+    then 1
+    else 0
+end
+  ) as low_line_count
+from
+  orders o join lineitem l 
+  on 
+    o.o_orderkey = l.l_orderkey and l.l_commitdate < l.l_receiptdate
+and l.l_shipdate < l.l_commitdate and l.l_receiptdate >= '1994-01-01' 
+and l.l_receiptdate < '1995-01-01'
+where 
+  l.l_shipmode = 'MAIL' or l.l_shipmode = 'SHIP'
+group by l_shipmode
+order by l_shipmode;
+ l_shipmode | high_line_count | low_line_count 
+------------+-----------------+----------------
+ MAIL       |            6202 |           9324
+ SHIP       |            6200 |           9262
+(2 rows)
+
+--q13_customer_distribution
+--HIVE query
+select 
+  c_count, count(1) as custdist
+from 
+  (select 
+     c_custkey, count(o_orderkey) as c_count
+   from 
+     customer c left outer join orders o 
+     on 
+       c.c_custkey = o.o_custkey and not o.o_comment like '%special%requests%'
+   group by c_custkey
+   ) c_orders
+group by c_count
+order by custdist desc, c_count desc;
+ c_count | custdist 
+---------+----------
+       0 |    50005
+       9 |     6641
+      10 |     6532
+      11 |     6014
+       8 |     5937
+      12 |     5639
+      13 |     5024
+      19 |     4793
+       7 |     4687
+      17 |     4587
+      18 |     4529
+      20 |     4516
+      15 |     4505
+      14 |     4446
+      16 |     4273
+      21 |     4190
+      22 |     3623
+       6 |     3265
+      23 |     3225
+      24 |     2742
+      25 |     2086
+       5 |     1948
+      26 |     1612
+      27 |     1179
+       4 |     1007
+      28 |      893
+      29 |      593
+       3 |      415
+      30 |      376
+      31 |      226
+      32 |      148
+       2 |      134
+      33 |       75
+      34 |       50
+      35 |       37
+       1 |       17
+      36 |       14
+      38 |        5
+      37 |        5
+      40 |        4
+      41 |        2
+      39 |        1
+(42 rows)
+
+-- Q14
+-- TPC-H/TPC-R Promotion Effect Query (Q14)
+-- Functional Query Definition
+-- Approved February 1998
+select
+	CAST(100.00 * sum(case
+		when p_type like 'PROMO%'
+			then l_extendedprice * (1 - l_discount)
+		else 0
+	end) / sum(l_extendedprice * (1 - l_discount)) AS INT8) as promo_revenue
+from
+	lineitem,
+	part
+where
+	l_partkey = p_partkey
+	and l_shipdate >= '1995-09-01'
+	and l_shipdate < '1995-10-01';
+ promo_revenue 
+---------------
+            16
+(1 row)
+
+	
+-- Q15_top_supplier
+-- using intermediate table as temp storage
+-- have to change '=' to 'in' on "TOTAL_REVENUE = (SELECT MAX(TOTAL_REVENUE) FROM REVENUE0)"  
+CREATE TABLE REVENUE0 (SUPPLIER_NO, TOTAL_REVENUE) AS 
+		(select 
+		  l_suppkey as supplier_no, CAST(sum(l_extendedprice * (1 - l_discount)) AS INT8) as total_revenue
+		from 
+		  lineitem
+		where 
+		  l_shipdate >= '1996-01-01' and l_shipdate < '1996-04-01'
+		group by l_suppkey);
+SELECT S_SUPPKEY, S_NAME, S_ADDRESS, S_PHONE, CAST(TOTAL_REVENUE AS INT8)
+FROM SUPPLIER,  REVENUE0
+WHERE S_SUPPKEY = SUPPLIER_NO AND TOTAL_REVENUE in (SELECT MAX(TOTAL_REVENUE) FROM REVENUE0)
+ORDER BY S_SUPPKEY;
+ s_suppkey |       s_name       |     s_address     |     s_phone     | total_revenue 
+-----------+--------------------+-------------------+-----------------+---------------
+      8449 | Supplier#000008449 | Wp34zim9qYFbVctdW | 20-469-856-8873 |       1772627
+(1 row)
+
+DROP TABLE IF EXISTS REVENUE0;
+-- Q16
+-- TPC-H/TPC-R Parts/Supplier Relationship Query (Q16)
+-- Functional Query Definition
+-- Approved February 1998
+-- ATTN: maybe an issue of output
+select
+	p_brand,
+	p_type,
+	p_size,
+	count(ps_suppkey) as supplier_cnt
+from
+	partsupp,
+	part
+where
+	p_partkey = ps_partkey
+	and p_brand <> 'Brand#45'
+	and p_type not like 'MEDIUM POLISHED%'
+	and p_size in (49, 14, 23, 45, 19, 3, 36, 9)
+	and ps_suppkey not in (
+		select
+			s_suppkey
+		from
+			supplier
+		where s_comment like '%Customer%Complaints%'
+	)
+group by
+	p_brand,
+	p_type,
+	p_size
+order by
+	supplier_cnt desc,
+	p_brand,
+	p_type,
+	p_size
+limit 100
+;
+ p_brand  |          p_type           | p_size | supplier_cnt 
+----------+---------------------------+--------+--------------
+ Brand#41 | MEDIUM BRUSHED TIN        |      3 |           28
+ Brand#54 | STANDARD BRUSHED COPPER   |     14 |           28
+ Brand#11 | STANDARD BRUSHED TIN      |     23 |           24
+ Brand#11 | STANDARD BURNISHED BRASS  |     36 |           24
+ Brand#15 | MEDIUM ANODIZED NICKEL    |      3 |           24
+ Brand#15 | SMALL ANODIZED BRASS      |     45 |           24
+ Brand#15 | SMALL BURNISHED NICKEL    |     19 |           24
+ Brand#21 | MEDIUM ANODIZED COPPER    |      3 |           24
+ Brand#22 | SMALL BRUSHED NICKEL      |      3 |           24
+ Brand#22 | SMALL BURNISHED BRASS     |     19 |           24
+ Brand#25 | MEDIUM BURNISHED COPPER   |     36 |           24
+ Brand#31 | PROMO POLISHED COPPER     |     36 |           24
+ Brand#32 | ECONOMY PLATED BRASS      |      9 |           24
+ Brand#33 | LARGE POLISHED TIN        |     23 |           24
+ Brand#33 | PROMO POLISHED STEEL      |     14 |           24
+ Brand#35 | PROMO BRUSHED NICKEL      |     14 |           24
+ Brand#41 | ECONOMY BRUSHED STEEL     |      9 |           24
+ Brand#41 | ECONOMY POLISHED TIN      |     19 |           24
+ Brand#41 | LARGE PLATED COPPER       |     36 |           24
+ Brand#42 | ECONOMY PLATED BRASS      |      3 |           24
+ Brand#42 | STANDARD POLISHED TIN     |     49 |           24
+ Brand#43 | PROMO BRUSHED TIN         |      3 |           24
+ Brand#43 | SMALL ANODIZED COPPER     |     36 |           24
+ Brand#44 | STANDARD POLISHED NICKEL  |      3 |           24
+ Brand#52 | ECONOMY PLATED TIN        |     14 |           24
+ Brand#52 | SMALL ANODIZED COPPER     |      3 |           24
+ Brand#52 | STANDARD BURNISHED NICKEL |      3 |           24
+ Brand#53 | MEDIUM ANODIZED STEEL     |     14 |           24
+ Brand#14 | PROMO ANODIZED NICKEL     |     45 |           23
+ Brand#11 | ECONOMY BRUSHED COPPER    |     45 |           20
+ Brand#11 | ECONOMY PLATED BRASS      |     23 |           20
+ Brand#11 | LARGE BRUSHED COPPER      |     49 |           20
+ Brand#11 | LARGE POLISHED COPPER     |     49 |           20
+ Brand#12 | STANDARD ANODIZED TIN     |     49 |           20
+ Brand#12 | STANDARD PLATED BRASS     |     19 |           20
+ Brand#13 | ECONOMY BRUSHED BRASS     |      9 |           20
+ Brand#13 | ECONOMY BURNISHED STEEL   |     14 |           20
+ Brand#13 | LARGE BURNISHED NICKEL    |     19 |           20
+ Brand#13 | MEDIUM BURNISHED COPPER   |     36 |           20
+ Brand#13 | SMALL BRUSHED TIN         |     45 |           20
+ Brand#13 | STANDARD ANODIZED COPPER  |      3 |           20
+ Brand#13 | STANDARD PLATED NICKEL    |     23 |           20
+ Brand#14 | ECONOMY ANODIZED COPPER   |     14 |           20
+ Brand#14 | ECONOMY PLATED TIN        |     36 |           20
+ Brand#14 | ECONOMY POLISHED NICKEL   |      3 |           20
+ Brand#14 | MEDIUM ANODIZED NICKEL    |      3 |           20
+ Brand#14 | SMALL POLISHED TIN        |     14 |           20
+ Brand#15 | MEDIUM ANODIZED COPPER    |      9 |           20
+ Brand#15 | MEDIUM PLATED TIN         |     23 |           20
+ Brand#15 | PROMO PLATED BRASS        |     14 |           20
+ Brand#15 | SMALL ANODIZED COPPER     |     45 |           20
+ Brand#15 | SMALL PLATED COPPER       |     49 |           20
+ Brand#15 | STANDARD PLATED TIN       |      3 |           20
+ Brand#21 | LARGE ANODIZED COPPER     |     36 |           20
+ Brand#21 | LARGE BRUSHED TIN         |      3 |           20
+ Brand#21 | MEDIUM ANODIZED COPPER    |     14 |           20
+ Brand#21 | PROMO BRUSHED TIN         |     36 |           20
+ Brand#21 | PROMO POLISHED NICKEL     |     45 |           20
+ Brand#21 | SMALL ANODIZED COPPER     |      9 |           20
+ Brand#21 | SMALL POLISHED NICKEL     |     23 |           20
+ Brand#22 | LARGE ANODIZED COPPER     |     36 |           20
+ Brand#22 | LARGE BRUSHED COPPER      |     49 |           20
+ Brand#22 | PROMO ANODIZED TIN        |     49 |           20
+ Brand#22 | PROMO POLISHED BRASS      |     45 |           20
+ Brand#22 | SMALL BURNISHED STEEL     |     45 |           20
+ Brand#23 | MEDIUM ANODIZED STEEL     |     45 |           20
+ Brand#23 | PROMO POLISHED STEEL      |     23 |           20
+ Brand#23 | STANDARD BRUSHED TIN      |     14 |           20
+ Brand#23 | STANDARD PLATED NICKEL    |     36 |           20
+ Brand#24 | PROMO PLATED COPPER       |     49 |           20
+ Brand#24 | PROMO PLATED STEEL        |     49 |           20
+ Brand#24 | PROMO POLISHED STEEL      |      9 |           20
+ Brand#24 | STANDARD BRUSHED TIN      |     36 |           20
+ Brand#25 | LARGE ANODIZED BRASS      |      3 |           20
+ Brand#25 | PROMO BURNISHED TIN       |      3 |           20
+ Brand#31 | ECONOMY POLISHED NICKEL   |      3 |           20
+ Brand#31 | MEDIUM PLATED TIN         |     45 |           20
+ Brand#31 | SMALL ANODIZED STEEL      |     14 |           20
+ Brand#32 | ECONOMY ANODIZED COPPER   |     36 |           20
+ Brand#32 | ECONOMY BRUSHED NICKEL    |     49 |           20
+ Brand#32 | LARGE ANODIZED TIN        |     19 |           20
+ Brand#32 | MEDIUM BURNISHED COPPER   |     19 |           20
+ Brand#32 | SMALL ANODIZED STEEL      |     45 |           20
+ Brand#33 | ECONOMY POLISHED COPPER   |     19 |           20
+ Brand#33 | PROMO PLATED NICKEL       |     14 |           20
+ Brand#33 | SMALL POLISHED TIN        |      9 |           20
+ Brand#33 | STANDARD ANODIZED BRASS   |     49 |           20
+ Brand#33 | STANDARD BURNISHED BRASS  |     45 |           20
+ Brand#34 | ECONOMY BRUSHED NICKEL    |     49 |           20
+ Brand#34 | LARGE BRUSHED BRASS       |     19 |           20
+ Brand#34 | SMALL BRUSHED TIN         |      3 |           20
+ Brand#34 | STANDARD PLATED COPPER    |      9 |           20
+ Brand#35 | LARGE ANODIZED NICKEL     |      3 |           20
+ Brand#35 | MEDIUM ANODIZED BRASS     |     45 |           20
+ Brand#35 | MEDIUM ANODIZED STEEL     |     23 |           20
+ Brand#35 | PROMO ANODIZED COPPER     |     49 |           20
+ Brand#35 | SMALL POLISHED COPPER     |     14 |           20
+ Brand#41 | LARGE ANODIZED STEEL      |      3 |           20
+ Brand#41 | LARGE BRUSHED NICKEL      |     23 |           20
+ Brand#41 | LARGE BURNISHED COPPER    |      3 |           20
+(100 rows)
+
+-- q17_small_quantity_order_revenue
+create table lineitem_tmp (t_partkey, t_avg_quantity ) AS(
+select 
+  l_partkey as t_partkey, CAST(0.2 * avg(l_quantity) AS INT8) as t_avg_quantity
+from 
+  lineitem
+group by l_partkey);
+select
+  CAST(sum(l_extendedprice) / 7.0 AS INT8)as avg_yearly
+from
+  (select l_quantity, l_extendedprice, t_avg_quantity from
+   lineitem_tmp t join
+     (select
+        l_quantity, l_partkey, l_extendedprice
+      from
+        part p join lineitem l
+        on
+          p.p_partkey = l.l_partkey
+          and p.p_brand = 'Brand#23'
+          and p.p_container = 'MED BOX'
+      ) l1 on l1.l_partkey = t.t_partkey
+   ) a
+where l_quantity < t_avg_quantity;
+ avg_yearly 
+------------
+     285891
+(1 row)
+
+DROP TABLE IF EXISTS lineitem_tmp;
+-- Q18
+-- TPC-H/TPC-R Large Volume Customer Query (Q18)
+-- Function Query Definition
+-- Approved February 1998
+select
+	c_name,
+	c_custkey,
+	o_orderkey,
+	o_orderdate,
+	CAST(o_totalprice AS INT8),
+	sum(l_quantity)
+from
+	customer,
+	orders,
+	lineitem
+where
+	o_orderkey in (
+		select
+			l_orderkey
+		from
+			lineitem
+		group by
+			l_orderkey having
+				sum(l_quantity) > 300
+	)
+	and c_custkey = o_custkey
+	and o_orderkey = l_orderkey
+group by
+	c_name,
+	c_custkey,
+	o_orderkey,
+	o_orderdate,
+	o_totalprice
+order by
+	o_totalprice desc,
+	o_orderdate
+limit 100;
+       c_name       | c_custkey | o_orderkey | o_orderdate | o_totalprice | sum 
+--------------------+-----------+------------+-------------+--------------+-----
+ Customer#000128120 |    128120 |    4722021 | 1994-04-07  |       544089 | 323
+ Customer#000144617 |    144617 |    3043270 | 1997-02-12  |       530604 | 317
+ Customer#000013940 |     13940 |    2232932 | 1997-04-13  |       522721 | 304
+ Customer#000066790 |     66790 |    2199712 | 1996-09-30  |       515532 | 327
+ Customer#000046435 |     46435 |    4745607 | 1997-07-03  |       508048 | 309
+ Customer#000015272 |     15272 |    3883783 | 1993-07-28  |       500241 | 302
+ Customer#000146608 |    146608 |    3342468 | 1994-06-12  |       499795 | 303
+ Customer#000096103 |     96103 |    5984582 | 1992-03-16  |       494399 | 312
+ Customer#000024341 |     24341 |    1474818 | 1992-11-15  |       491348 | 302
+ Customer#000137446 |    137446 |    5489475 | 1997-05-23  |       487763 | 311
+ Customer#000107590 |    107590 |    4267751 | 1994-11-04  |       485141 | 301
+ Customer#000050008 |     50008 |    2366755 | 1996-12-09  |       483891 | 302
+ Customer#000015619 |     15619 |    3767271 | 1996-08-07  |       480084 | 318
+ Customer#000077260 |     77260 |    1436544 | 1992-09-12  |       479499 | 307
+ Customer#000109379 |    109379 |    5746311 | 1996-10-10  |       478064 | 302
+ Customer#000054602 |     54602 |    5832321 | 1997-02-09  |       471220 | 307
+ Customer#000105995 |    105995 |    2096705 | 1994-07-03  |       469693 | 307
+ Customer#000148885 |    148885 |    2942469 | 1992-05-31  |       469630 | 313
+ Customer#000114586 |    114586 |     551136 | 1993-05-19  |       469606 | 308
+ Customer#000105260 |    105260 |    5296167 | 1996-09-06  |       469361 | 303
+ Customer#000147197 |    147197 |    1263015 | 1997-02-02  |       467150 | 320
+ Customer#000064483 |     64483 |    2745894 | 1996-07-04  |       466991 | 304
+ Customer#000136573 |    136573 |    2761378 | 1996-05-31  |       461283 | 301
+ Customer#000016384 |     16384 |     502886 | 1994-04-12  |       458379 | 312
+ Customer#000117919 |    117919 |    2869152 | 1996-06-20  |       456816 | 317
+ Customer#000012251 |     12251 |     735366 | 1993-11-24  |       455107 | 309
+ Customer#000120098 |    120098 |    1971680 | 1995-06-14  |       453451 | 308
+ Customer#000066098 |     66098 |    5007490 | 1992-08-07  |       453436 | 304
+ Customer#000117076 |    117076 |    4290656 | 1997-02-05  |       449546 | 301
+ Customer#000129379 |    129379 |    4720454 | 1997-06-07  |       448666 | 303
+ Customer#000126865 |    126865 |    4702759 | 1994-11-07  |       447607 | 320
+ Customer#000088876 |     88876 |     983201 | 1993-12-30  |       446717 | 304
+ Customer#000036619 |     36619 |    4806726 | 1995-01-17  |       446704 | 328
+ Customer#000141823 |    141823 |    2806245 | 1996-12-29  |       446269 | 310
+ Customer#000053029 |     53029 |    2662214 | 1993-08-13  |       446144 | 302
+ Customer#000018188 |     18188 |    3037414 | 1995-01-25  |       443807 | 308
+ Customer#000066533 |     66533 |      29158 | 1995-10-21  |       443576 | 305
+ Customer#000037729 |     37729 |    4134341 | 1995-06-29  |       441083 | 309
+ Customer#000003566 |      3566 |    2329187 | 1998-01-04  |       439803 | 304
+ Customer#000045538 |     45538 |    4527553 | 1994-05-22  |       436275 | 305
+ Customer#000081581 |     81581 |    4739650 | 1995-11-04  |       435406 | 305
+ Customer#000119989 |    119989 |    1544643 | 1997-09-20  |       434568 | 320
+ Customer#000003680 |      3680 |    3861123 | 1998-07-03  |       433526 | 301
+ Customer#000113131 |    113131 |     967334 | 1995-12-15  |       432958 | 301
+ Customer#000141098 |    141098 |     565574 | 1995-09-24  |       430987 | 301
+ Customer#000093392 |     93392 |    5200102 | 1997-01-22  |       425488 | 304
+ Customer#000015631 |     15631 |    1845057 | 1994-05-12  |       419880 | 302
+ Customer#000112987 |    112987 |    4439686 | 1996-09-17  |       418161 | 305
+ Customer#000012599 |     12599 |    4259524 | 1998-02-12  |       415201 | 304
+ Customer#000105410 |    105410 |    4478371 | 1996-03-05  |       412755 | 302
+ Customer#000149842 |    149842 |    5156581 | 1994-05-30  |       411329 | 302
+ Customer#000010129 |     10129 |    5849444 | 1994-03-21  |       409130 | 309
+ Customer#000069904 |     69904 |    1742403 | 1996-10-19  |       408513 | 305
+ Customer#000017746 |     17746 |       6882 | 1997-04-09  |       408447 | 303
+ Customer#000013072 |     13072 |    1481925 | 1998-03-15  |       399195 | 301
+ Customer#000082441 |     82441 |     857959 | 1994-02-07  |       382580 | 305
+ Customer#000088703 |     88703 |    2995076 | 1994-01-30  |       363812 | 302
+(57 rows)
+
+--Q19
+--This query has different result compare to hive.
+--Once we tested this on real cluster, we can
+--compare the result directly against PG single node
+select
+  CAST(sum(l_extendedprice * (1 - l_discount) ) AS INT8) as revenue
+from
+  lineitem l join part p
+  on 
+    p.p_partkey = l.l_partkey    
+where
+  (
+    p_brand = 'Brand#12'
+	and p_container in ('SM CASE','SM BOX','SM PACK','SM PKG')
+	and l_quantity >= 1 and l_quantity <= 11
+	and p_size >= 1 and p_size <= 5
+	and l_shipmode in ('AIR','AIR REG')
+	and l_shipinstruct = 'DELIVER IN PERSON'
+  ) 
+  or 
+  (
+    p_brand = 'Brand#23'
+	and p_container in ('MED BAG','MED BOX','MED PKG','MED PACK')
+	and l_quantity >= 10 and l_quantity <= 20
+	and p_size >= 1 and p_size <= 10
+	and l_shipmode in ('AIR','AIR REG')
+	and l_shipinstruct = 'DELIVER IN PERSON'
+  )
+  or
+  (
+	p_brand = 'Brand#34'
+	and p_container in ('LG CASE','LG BOX','LG PACK','LG PKG')
+	and l_quantity >= 20 and l_quantity <= 30
+	and p_size >= 1 and p_size <= 15
+	and l_shipmode in ('AIR','AIR REG')
+	and l_shipinstruct = 'DELIVER IN PERSON'
+  );
+ revenue 
+---------
+ 3083843
+(1 row)
+
+--Q20
+--Potential_partial_promotion
+CREATE TABLE q20_tmp1 (p_partkey) as
+select distinct p_partkey
+from
+  part 
+where 
+  p_name like 'forest%';
+  
+CREATE TABLE q20_tmp2(l_partkey, l_suppkey, sum_quantity) AS
+(select 
+  l_partkey, l_suppkey, 0.5 * sum(l_quantity)
+from
+  lineitem
+where
+  l_shipdate >= '1994-01-01'
+  and l_shipdate < '1995-01-01'
+group by l_partkey, l_suppkey);
+CREATE TABLE q20_tmp3(ps_suppkey, ps_availqty, sum_quantity) AS
+(select 
+  ps_suppkey, ps_availqty, sum_quantity
+from  
+  partsupp ps join q20_tmp1 t1 
+  on 
+    ps.ps_partkey = t1.p_partkey
+  join q20_tmp2 t2 
+  on 
+    ps.ps_partkey = t2.l_partkey and ps.ps_suppkey = t2.l_suppkey);
+CREATE TABLE q20_tmp4(ps_suppkey) AS 
+(select 
+  ps_suppkey
+from 
+  q20_tmp3
+where 
+  ps_availqty > sum_quantity
+group by ps_suppkey);
+select 
+  s_name, s_address
+from 
+  supplier s join nation n
+  on
+    s.s_nationkey = n.n_nationkey
+    and n.n_name = 'CANADA'
+  join q20_tmp4 t4
+  on 
+    s.s_suppkey = t4.ps_suppkey
+order by s_name;
+       s_name       |                s_address                 
+--------------------+------------------------------------------
+ Supplier#000000020 | iybAE,RmTymrZVYaFZva2SH,j
+ Supplier#000000091 | YV45D7TkfdQanOOZ7q9QxkyGUapU1oOWU6q3
+ Supplier#000000205 | rF uV8d0JNEk
+ Supplier#000000285 | Br7e1nnt1yxrw6ImgpJ7YdhFDjuBf
+ Supplier#000000287 | 7a9SP7qW5Yku5PvSg
+ Supplier#000000354 | w8fOo5W,aS
+ Supplier#000000378 | FfbhyCxWvcPrO8ltp9
+ Supplier#000000402 | i9Sw4DoyMhzhKXCH9By,AYSgmD
+ Supplier#000000530 | 0qwCMwobKY OcmLyfRXlagA8ukENJv,
+ Supplier#000000555 | TfB,a5bfl3Ah 3Z 74GqnNs6zKVGM
+ Supplier#000000640 | mvvtlQKsTOsJj5Ihk7,cq
+ Supplier#000000729 | pqck2ppy758TQpZCUAjPvlU55K3QjfL7Bi
+ Supplier#000000736 | l6i2nMwVuovfKnuVgaSGK2rDy65DlAFLegiL7
+ Supplier#000000761 | zlSLelQUj2XrvTTFnv7WAcYZGvvMTx882d4
+ Supplier#000000887 | urEaTejH5POADP2ARrf
+ Supplier#000000935 | ij98czM 2KzWe7dDTOxB8sq0UfCdvrX
+ Supplier#000000975 | ,AC e,tBpNwKb5xMUzeohxlRn, hdZJo73gFQF8y
+ Supplier#000001263 | rQWr6nf8ZhB2TAiIDIvo5Io
+ Supplier#000001367 | 42YSkFcAXMMcucsqeEefOE4HeCC
+ Supplier#000001426 | bPOCc086oFm8sLtS,fGrH
+ Supplier#000001446 | lch9HMNU1R7a0LIybsUodVknk6
+ Supplier#000001500 | wDmF5xLxtQch9ctVu,
+ Supplier#000001602 | uKNWIeafaM644
+ Supplier#000001626 | UhxNRzUu1dtFmp0
+ Supplier#000001682 | pXTkGxrTQVyH1Rr
+ Supplier#000001700 | 7hMlCof1Y5zLFg
+ Supplier#000001726 | TeRY7TtTH24sEword7yAaSkjx8
+ Supplier#000001730 | Rc8e,1Pybn r6zo0VJIEiD0UD vhk
+ Supplier#000001746 | qWsendlOekQG1aW4uq06uQaCm51se8lirv7 hBRd
+ Supplier#000001806 | M934fuZSnLW
+ Supplier#000001855 | MWk6EAeozXb
+ Supplier#000001931 | FpJbMU2h6ZR2eBv8I9NIxF
+ Supplier#000002022 |  dwebGX7Id2pc25YvY33
+ Supplier#000002036 | 20ytTtVObjKUUI2WCB0A
+ Supplier#000002096 | kuxseyLtq QPLXxm9ZUrnB6Kkh92JtK5cQzzXNU 
+ Supplier#000002117 | MRtkgKolHJ9Wh X9J,urANHKDzvjr
+ Supplier#000002204 | uYmlr46C06udCqanj0KiRsoTQakZsEyssL
+ Supplier#000002218 | nODZw5q4dx kp0K5
+ Supplier#000002243 | nSOEV3JeOU79
+ Supplier#000002245 | hz2qWXWVjOyKhqPYMoEwz6zFkrTaDM
+ Supplier#000002282 | ES21K9dxoW1I1TzWCj7ekdlNwSWnv1Z  6mQ,BKn
+ Supplier#000002303 | nCoWfpB6YOymbgOht7ltfklpkHl
+ Supplier#000002331 | WRh2w5WFvRg7Z0S1AvSvHCL
+ Supplier#000002373 | RzHSxOTQmElCjxIBiVA52Z JB58rJhPRylR
+ Supplier#000002419 | qydBQd14I5l5mVXa4fYY
+ Supplier#000002571 | JZUugz04c iJFLrlGsz9O N,W 1rVHNIReyq
+ Supplier#000002585 | CsPoKpw2QuTY4AV1NkWuttneIa4SN
+ Supplier#000002629 | 0Bw,q5Zp8su9XrzoCngZ3cAEXZwZ
+ Supplier#000002721 | HVdFAN2JHMQSpKm
+ Supplier#000002730 | lIFxR4fzm31C6,muzJwl84z
+ Supplier#000002775 | yDclaDaBD4ihH
+ Supplier#000002799 | lwr, 6L3gdfc79PQut,4XO6nQsTJY63cAyYO
+ Supplier#000002934 | m,trBENywSArwg3DhB
+ Supplier#000002941 | Naddba 8YTEKekZyP0
+ Supplier#000003028 | jouzgX0WZjhNMWLaH4fy
+ Supplier#000003095 | HxON3jJhUi3zjt,r mTD
+ Supplier#000003143 | hdolgh608uTkHh7t6qfSqkifKaiFjnCH
+ Supplier#000003185 | hMa535Cbf2mj1Nw4OWOKWVrsK0VdDkJURrdjSIJe
+ Supplier#000003189 | DWdPxt7 RnkZv6VOByR0em
+ Supplier#000003201 | E87yws6I,t0qNs4QW7UzExKiJnJDZWue
+ Supplier#000003213 | pxrRP4irQ1VoyfQ,dTf3
+ Supplier#000003275 | 9xO4nyJ2QJcX6vGf
+ Supplier#000003288 | EDdfNt7E5Uc,xLTupoIgYL4yY7ujh,
+ Supplier#000003314 | jnisU8MzqO4iUB3zsPcrysMw3DDUojS4q7LD
+ Supplier#000003373 | iy8VM48ynpc3N2OsBwAvhYakO2us9R1bi
+ Supplier#000003421 | Sh3dt9W5oeofFWovnFhrg,
+ Supplier#000003422 | DJoCEapUeBXoV1iYiCcPFQvzsTv2ZI960
+ Supplier#000003441 | zvFJIzS,oUuShHjpcX
+ Supplier#000003590 | sy79CMLxqb,Cbo
+ Supplier#000003607 | lNqFHQYjwSAkf
+ Supplier#000003625 | qY588W0Yk5iaUy1RXTgNrEKrMAjBYHcKs
+ Supplier#000003723 | jZEp0OEythCLcS OmJSrFtxJ66bMlzSp
+ Supplier#000003849 | KgbZEaRk,6Q3mWvwh6uptrs1KRUHg 0
+ Supplier#000003894 | vvGC rameLOk
+ Supplier#000003941 | Pmb05mQfBMS618O7WKqZJ 9vyv
+ Supplier#000004059 | umEYZSq9RJ2WEzdsv9meU8rmqwzVLRgiZwC
+ Supplier#000004207 | tF64pwiOM4IkWjN3mS,e06WuAjLx
+ Supplier#000004236 | dl,HPtJmGipxYsSqn9wmqkuWjst,mCeJ8O6T
+ Supplier#000004278 | bBddbpBxIVp Di9
+ Supplier#000004281 | 1OwPHh Pgiyeus,iZS5eA23JDOipwk
+ Supplier#000004304 | hQCAz59k,HLlp2CKUrcBIL
+ Supplier#000004346 | S3076LEOwo
+ Supplier#000004406 | Ah0ZaLu6VwufPWUz,7kbXgYZhauEaHqGIg
+ Supplier#000004430 | yvSsKNSTL5HLXBET4luOsPNLxKzAMk
+ Supplier#000004527 | p pVXCnxgcklWF6A1o3OHY3qW6
+ Supplier#000004655 | 67NqBc4 t3PG3F8aO IsqWNq4kGaPowYL
+ Supplier#000004851 | Rj,x6IgLT7kBL99nqp
+ Supplier#000004871 | ,phpt6AWEnUS8t4Avb50rFfdg7O9c6nU8xxv8eC5
+ Supplier#000004884 | 42Z1uLye9nsn6aTGBNd dI8 x
+ Supplier#000004975 | GPq5PMKY6Wy
+ Supplier#000005076 | Xl7h9ifgvIHmqxFLgWfHK4Gjav BkP
+ Supplier#000005195 | Woi3b2ZaicPh ZSfu1EfXhE
+ Supplier#000005256 | Onc3t57VAMchm,pmoVLaU8bONni9NsuaM PzMMFz
+ Supplier#000005257 | f9g8SEHB7obMj3QXAjXS2vfYY22
+ Supplier#000005300 | gXG28YqpxU
+ Supplier#000005323 | tMCkdqbDoyNo8vMIkzjBqYexoRAuv,T6 qzcu
+ Supplier#000005386 | Ub6AAfHpWLWP
+ Supplier#000005426 | 9Dz2OVT1q sb4BK71ljQ1XjPBYRPvO
+ Supplier#000005465 | 63cYZenZBRZ613Q1FaoG0,smnC5zl9
+ Supplier#000005484 | saFdOR qW7AFY,3asPqiiAa11Mo22pCoN0BtPrKo
+ Supplier#000005505 | d2sbjG43KwMPX
+ Supplier#000005506 | On f5ypzoWgB
+ Supplier#000005631 | 14TVrjlzo2SJEBYCDgpMwTlvwSqC
+ Supplier#000005642 | ZwKxAv3V40tW E8P7Qwu,zlu,kPsL
+ Supplier#000005686 | f2RBKec2T1NIi7yS M
+ Supplier#000005730 | 5rkb0PSews HvxkL8JaD41UpnSF2cg8H1
+ Supplier#000005736 | 2dq XTYhtYWSfp
+ Supplier#000005737 | dmEWcS32C3kx,d,B95 OmYn48
+ Supplier#000005797 | ,o,OebwRbSDmVl9gN9fpWPCiqB UogvlSR
+ Supplier#000005875 | lK,sYiGzB94hSyHy9xvSZFbVQNCZe2LXZuGbS
+ Supplier#000005974 | REhR5jE,lLusQXvf54SwYySgsSSVFhu
+ Supplier#000006059 | 4m0cv8MwJ9yX2vlwI Z
+ Supplier#000006065 | UiI2Cy3W4Tu5sLk LuvXLRy6KihlGv
+ Supplier#000006093 | KJNUg1odUT2wtCS2s6PrH3D6fd
+ Supplier#000006099 | aZilwQKYDTVPoK
+ Supplier#000006109 | rY5gbfh3dKHnylcQUTPGCwnbe
+ Supplier#000006217 | RVN23SYT9jenUeaWGXUd
+ Supplier#000006297 | 73VRDOO56GUCyvc40oYJ
+ Supplier#000006435 | xIgE69XszYbnO4Eon7cHHO8y
+ Supplier#000006463 | 7 wkdj2EO49iotley2kmIM ADpLSszGV3RNWj
+ Supplier#000006478 | bQYPnj9lpmW3U
+ Supplier#000006521 | b9 2zjHzxR
+ Supplier#000006642 | N,CUclSqRLJcS8zQ
+ Supplier#000006659 | iTLsnvD8D2GzWNUv kRInwRjk5rDeEmfup1
+ Supplier#000006669 | NQ4Yryj624p7K53
+ Supplier#000006748 | rC,2rEn8gKDIS5Q0dJEoiF
+ Supplier#000006761 | n4jhxGMqB5prD1HhpLvwrWStOLlla
+ Supplier#000006808 | HGd2Xo 9nEcHJhZvXjXxWKIpApT
+ Supplier#000006858 | fnlINT885vBBhsWwTGiZ0o22thwGY16h GHJj21
+ Supplier#000006946 | To6Slo0GJTqcIvD
+ Supplier#000006949 | mLxYUJhsGcLtKe ,GFirNu183AvT
+ Supplier#000007072 | 2tRyX9M1a 4Rcm57s779F1ANG9jlpK
+ Supplier#000007098 | G3j8g0KC4OcbAu2OVoPHrXQWMCUdjq8wgCHOExu
+ Supplier#000007132 | xonvn0KAQIL3p8kYk HC1FSSDSUSTC
+ Supplier#000007135 | ls DoKV7V5ulfQy9V
+ Supplier#000007147 | Xzb16kC63wmLVYexUEgB0hXFvHkjT5iPpq
+ Supplier#000007160 | TqDGBULB3cTqIT6FKDvm9BS4e4v,zwYiQPb
+ Supplier#000007169 | tEc95D2moN9S84nd55O,dlnW
+ Supplier#000007278 | I2ae3rS7KVF8GVHtB
+ Supplier#000007365 | 51xhROLvQMJ05DndtZWt
+ Supplier#000007398 | V8eE6oZ00OFNU,
+ Supplier#000007402 | 4UVv58ery1rjmqSR5
+ Supplier#000007448 | yhhpWiJi7EJ6Q5VCaQ
+ Supplier#000007458 | BYuucapYkptZl6fnd2QaDyZmI9gR1Ih16e
+ Supplier#000007477 | 9m9j0wfhWzCvVHxkU,PpAxwSH0h
+ Supplier#000007509 | q8,V6LJRoHJjHcOuSG7aLTMg
+ Supplier#000007561 | rMcFg2530VC
+ Supplier#000007616 | R IovIqzDi3,QHnaqZk1xS4hGAgelhP4yj
+ Supplier#000007760 | JsPE18PvcdFTK
+ Supplier#000007801 | 69fi,U1r6enUb 
+ Supplier#000007865 | 5cDGCS,T6N
+ Supplier#000007885 | u3sicchh5ZpyTUpN1cJKNcAoabIWgY
+ Supplier#000007926 | ErzCF80K9Uy
+ Supplier#000007998 | LnASFBfYRFOo9d6d,asBvVq9Lo2P
+ Supplier#000008090 | eonbJZvoDFYBNUinYfp6yERIg
+ Supplier#000008224 | TWxt9f,LVER
+ Supplier#000008231 | IK7eGw Yj90sTdpsP,vcqWxLB
+ Supplier#000008243 | 2AyePMkDqmzVzjGTizXthFLo8h EiudCMxOmIIG
+ Supplier#000008323 | 75I18sZmASwm POeheRMdj9tmpyeQ,BfCXN5BIAb
+ Supplier#000008366 | h778cEj14BuW9OEKlvPTWq4iwASR6EBBXN7zeS8
+ Supplier#000008532 | Uc29q4,5xVdDOF87UZrxhr4xWS0ihEUXuh
+ Supplier#000008595 | MH0iB73GQ3z UW3O DbCbqmc
+ Supplier#000008610 | SgVgP90vP452sUNTgzL9zKwXHXAzV6tV
+ Supplier#000008683 | gLuGcugfpJSeGQARnaHNCaWnGaqsNnjyl20
+ Supplier#000008705 | aE,trRNdPx,4yinTD9O3DebDIp
+ Supplier#000008742 | HmPlQEzKCPEcTUL14,kKq
+ Supplier#000008841 | I 85Lu1sekbg2xrSIzm0
+ Supplier#000008872 | 8D 45GgxJO2OwwYP9S4AaXJKvDwPfLM
+ Supplier#000008879 | rDSA,D9oPM,65NMWEFrmGKAu
+ Supplier#000008967 | 2kwEHyMG 7FwozNImAUE6mH0hYtqYculJM
+ Supplier#000008972 | w2vF6 D5YZO3visPXsqVfLADTK
+ Supplier#000009032 | qK,trB6Sdy4Dz1BRUFNy
+ Supplier#000009043 | 57OPvKH4qyXIZ7IzYeCaw11a5N1Ki9f1WWmVQ,
+ Supplier#000009278 | RqYTzgxj93CLX 0mcYfCENOefD
+ Supplier#000009326 | XmiC,uy36B9,fb0zhcjaagiXQutg
+ Supplier#000009430 | igRqmneFt 
+ Supplier#000009549 | h3RVchUf8MzY46IzbZ0ng09
+ Supplier#000009601 | 51m637bO,Rw5DnHWFUvLacRx9
+ Supplier#000009709 | rRnCbHYgDgl9PZYnyWKVYSUW0vKg
+ Supplier#000009753 | wLhVEcRmd7PkJF4FBnGK7Z
+ Supplier#000009799 |  4wNjXGa4OKWl
+ Supplier#000009811 | E3iuyq7UnZxU7oPZIe2Gu6
+ Supplier#000009812 | APFRMy3lCbgFga53n5t9DxzFPQPgnjrGt32
+ Supplier#000009846 | 57sNwJJ3PtBDu,hMPP5QvpcOcSNRXn3PypJJrh
+ Supplier#000009899 | 7XdpAHrzr1t,UQFZE
+ Supplier#000009974 | 7wJ,J5DKcxSU4Kp1cQLpbcAvB5AsvKT
+(186 rows)
+
+DROP TABLE IF EXISTS q20_tmp4;
+DROP TABLE IF EXISTS q20_tmp3;
+DROP TABLE IF EXISTS q20_tmp2;
+DROP TABLE IF EXISTS q20_tmp1;
+--q22
+--Hive query, used intermediate table
+create table q22_customer_tmp(c_acctbal, c_custkey, cntrycode) as (
+select 
+ CAST((c_acctbal) AS INT8), c_custkey, substr(c_phone, 1, 2) as cntrycode
+from 
+  customer
+where 
+  substr(c_phone, 1, 2) = '13' or
+  substr(c_phone, 1, 2) = '31' or
+  substr(c_phone, 1, 2) = '23' or
+  substr(c_phone, 1, 2) = '29' or
+  substr(c_phone, 1, 2) = '30' or
+  substr(c_phone, 1, 2) = '18' or
+  substr(c_phone, 1, 2) = '17');
+  
+create table q22_customer_tmp1(avg_acctbal) distribute by roundrobin as (
+select
+  (avg(c_acctbal))
+from
+  q22_customer_tmp
+where
+  c_acctbal > 0.00);
+create table q22_orders_tmp as (
+select 
+  o_custkey 
+from 
+  orders
+group by 
+  o_custkey);
+  
+select
+  cntrycode, count(1) as numcust, CAST(sum(c_acctbal) AS INT8) as totacctbal
+from
+( select cntrycode, c_acctbal, avg_acctbal from q22_customer_tmp1 ct1,
+  (
+    select cntrycode, c_acctbal from
+      q22_orders_tmp ot 
+      right outer join q22_customer_tmp ct 
+      on
+        ct.c_custkey = ot.o_custkey
+    where
+      o_custkey is null
+  ) ct2
+) a
+where
+  c_acctbal > avg_acctbal
+group by cntrycode
+order by cntrycode;
+ cntrycode | numcust | totacctbal 
+-----------+---------+------------
+ 13        |     888 |    6737721
+ 17        |     861 |    6460576
+ 18        |     964 |    7236681
+ 23        |     893 |    6706474
+ 29        |     948 |    7158872
+ 30        |     909 |    6808430
+ 31        |     922 |    6806666
+(7 rows)
+
+DROP TABLE IF EXISTS q22_customer_tmp;
+DROP TABLE IF EXISTS q22_customer_tmp1;
+DROP TABLE IF EXISTS q22_orders_tmp;
+analyze orders;
+select O_CLERK,O_COMMENT from orders where O_ORDERKEY>115000 and O_ORDERKEY<115400 and O_CUSTKEY>100000 order by 1,2;
+     o_clerk     |                                   o_comment                                   
+-----------------+-------------------------------------------------------------------------------
+ Clerk#000000015 | usual deposits boost quick
+ Clerk#000000065 | posits. even accounts ab
+ Clerk#000000074 | ly ironic notornis. instructions are careful
+ Clerk#000000107 |  ironic packages. ir
+ Clerk#000000123 | c packages. furiously unusual requests lose. fluffily sp
+ Clerk#000000135 |  furiously regular packages around the regular ac
+ Clerk#000000177 | out the bold deposits. slyly bold asymptotes solve
+ Clerk#000000202 | uickly even foxes nag according to the ironic notorn
+ Clerk#000000248 | theodolites sleep among the closely regular ac
+ Clerk#000000256 |  furiously final packages along the furiously unusual requests detect a
+ Clerk#000000270 | thily ironic notornis detect at the slyly slow deposits. ironic foxes ab
+ Clerk#000000303 | blithely final theo
+ Clerk#000000341 | ckly even packages wake carefully among the excuses. carefu
+ Clerk#000000352 | nal, ironic theodolites. even, ironic 
+ Clerk#000000353 | arefully final packages boost carefully ironic accounts. theodolites wake 
+ Clerk#000000354 | r ideas across the instructions haggle care
+ Clerk#000000361 | pitaphs cajole according to the instructions. carefully ironic instructions a
+ Clerk#000000410 | ar asymptotes use quickly. carefully special deposits 
+ Clerk#000000467 | the furiously unusual asy
+ Clerk#000000551 | se against the carefully even asymptotes. fluffily pending grouch
+ Clerk#000000564 | accounts are about the final requests. unusual packages nag. express, ironic
+ Clerk#000000593 | grate blithely bold accounts. furiously silent accounts use a
+ Clerk#000000660 | ecial accounts cajole quickly. unusual theodo
+ Clerk#000000716 | ose. silent, unusual dependencies haggle slyly q
+ Clerk#000000765 | detect according to the slyly p
+ Clerk#000000771 | gular ideas haggle furiously along the quickly even a
+ Clerk#000000856 | yly along the carefully pending
+ Clerk#000000871 | ly bold packages wake slowly. quickly bold platelets 
+ Clerk#000000884 | int carefully according to the blithely bo
+ Clerk#000000888 | the furiously express accou
+ Clerk#000000912 | d excuses. ironic, final orbits haggle blithely
+ Clerk#000000976 | s use. blithely express requests across the furiously silent pearls ru
+ Clerk#000000977 | lly bold deposits. ironic tithes are furi
+ Clerk#000000988 | kages serve blithely special requests? slyly special dolphin
+(34 rows)
+
+select O_CLERK,O_COMMENT from orders where O_CUSTKEY < 100100 and O_CUSTKEY>100000 and o_orderstatus = 'P' order by 1,2;
+     o_clerk     |                                  o_comment                                  
+-----------------+-----------------------------------------------------------------------------
+ Clerk#000000001 | refully bold accounts. ironic dependencies unwind slyly.
+ Clerk#000000036 |  nod stealthily. slyly ruthless theodolites cajole whithou
+ Clerk#000000042 | sual accounts are slyly against
+ Clerk#000000074 | ly express dolphins. brave accounts nag ironic deposits. 
+ Clerk#000000109 | gainst the tithes boost carefully regular deposits. unu
+ Clerk#000000200 | press, express epitaphs wake blithely. regular accounts 
+ Clerk#000000204 | efully ironic deposits sleep blithely. ironic deposits boost furio
+ Clerk#000000235 | es try to nag! blithely regular dolphins cajole furiously final asy
+ Clerk#000000259 |  cajole slyly slyly even depo
+ Clerk#000000476 | ncies are above the carefully ironic foxes. asympto
+ Clerk#000000550 | nal excuses. carefully regular pinto beans wake blithe
+ Clerk#000000562 | aggle blithely regular, unusual packages. slyly silent
+ Clerk#000000570 | unusual requests. daring platelets are 
+ Clerk#000000591 | e the slyly brave ideas. quickly ironic packages affix furiously 
+ Clerk#000000623 | blithely regular hockey players. even, regular ins
+ Clerk#000000686 | he furiously special requests. blithely furious accounts a
+ Clerk#000000690 |  carefully express inst
+ Clerk#000000778 | ies are about the permanently regular theodolites. slyly regular asymptotes
+ Clerk#000000799 | s. fluffily regular theodolites c
+ Clerk#000000823 | quests impress along the carefully regular pac
+ Clerk#000000846 | ackages are furiously. ironic excuses sleep carefully ironic d
+ Clerk#000000947 |  after the pending,
+ Clerk#000000995 | wake slyly carefully regular depo
+ Clerk#000001000 | ly furiously unusual pinto beans. special foxes above the permanently
+(24 rows)
+
+create foreign table TABLE_EXP_FROM_SUBQUERY_T1(
+D_ID int, D_W_ID int, 
+D_NAME varchar(10), 
+D_STREET_1 varchar(20))SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/subquery.db/table_exp_from_subquery_orc_t1')
+distribute by roundrobin;
+create foreign table TABLE_EXP_FROM_SUBQUERY_T2(
+W_ID int, 
+W_NAME varchar(10), 
+W_STREET_1 varchar(20))SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/subquery.db/table_exp_from_subquery_orc_t2')
+distribute by roundrobin;
+set enable_hashjoin=false;
+set enable_mergejoin=false;
+set enable_nestloop=true;
+SELECT * FROM TABLE_EXP_FROM_SUBQUERY_T1 T1 WHERE D_ID IN (SELECT MAX(W_ID) FROM TABLE_EXP_FROM_SUBQUERY_T2) AND D_W_ID < 2 ORDER BY 1,2,3;
+ d_id | d_w_id |   d_name   |     d_street_1     
+------+--------+------------+--------------------
+   10 |      1 | osmgkxgssu | qjrlstdsqgwbirqefi
+(1 row)
+
+set enable_hashjoin=true;
+set enable_mergejoin=false;
+set enable_nestloop=false;
+drop foreign table TABLE_EXP_FROM_SUBQUERY_T1;
+drop foreign table TABLE_EXP_FROM_SUBQUERY_T2;
+CREATE FOREIGN TABLE customer_snappy ( 
+ c_custkey BIGINT, 
+ c_name TEXT, 
+ c_address TEXT, 
+ c_nationkey INT4, 
+ c_phone TEXT, 
+ c_acctbal FLOAT4, 
+ c_mktsegment TEXT, 
+ c_comment TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/snappy/customer_snappy/')
+distribute by roundrobin;
+select * from customer_snappy;
+ c_custkey |       c_name       |               c_address                | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                                     c_comment                                                     
+-----------+--------------------+----------------------------------------+-------------+-----------------+-----------+--------------+-------------------------------------------------------------------------------------------------------------------
+        20 | Customer#000000020 | JrPk8Pqplj4Ne                          |          22 | 32-957-234-8742 |    7603.4 | FURNITURE    | g alongside of the special excuses-- fluffily enticing packages wake 
+        19 | Customer#000000019 | uc,3bHIx84H,wdrmLOjVsiqXCq2tr          |          18 | 28-396-526-5053 |   8914.71 | HOUSEHOLD    |  nag. furiously careful packages are slyly at the accounts. furiously regular in
+        18 | Customer#000000018 | 3txGO AiuFux3zT0Z9NYaFRnZt             |           6 | 16-155-215-1315 |   5494.43 | BUILDING     | s sleep. carefully even instructions nag furiously alongside of t
+        17 | Customer#000000017 | izrh 6jdqtp2eqdtbkswDD8SG4SzXruMfIXyR7 |           2 | 12-970-682-3487 |      6.34 | AUTOMOBILE   | packages wake! blithely even pint
+        16 | Customer#000000016 | cYiaeMLZSMAOQ2 d0W,                    |          10 | 20-781-609-3107 |   4681.03 | FURNITURE    | kly silent courts. thinly regular theodolites sleep fluffily after 
+        15 | Customer#000000015 | YtWggXoOLdwdo7b0y,BZaGUQMLJMX1Y,EC,6Dn |          23 | 33-687-542-7601 |   2788.52 | HOUSEHOLD    |  platelets. regular deposits detect asymptotes. blithely unusual packages nag slyly at the fluf
+        14 | Customer#000000014 | KXkletMlL2JQEA                         |           1 | 11-845-129-3851 |    5266.3 | FURNITURE    | , ironic packages across the unus
+        13 | Customer#000000013 | nsXQu0oVjD7PM659uC3SRSp                |           3 | 13-761-547-5974 |   3857.34 | BUILDING     | ounts sleep carefully after the close frays. carefully bold notornis use ironic requests. blithely
+        12 | Customer#000000012 | 9PWKuhzT4Zr1Q                          |          13 | 23-791-276-1263 |   3396.49 | HOUSEHOLD    |  to the carefully final braids. blithely regular requests nag. ironic theodolites boost quickly along
+        11 | Customer#000000011 | PkWS 3HlXqwTuzrKg633BEi                |          23 | 33-464-151-3439 |    -272.6 | BUILDING     | ckages. requests sleep slyly. quickly even pinto beans promise above the slyly regular pinto beans. 
+        10 | Customer#000000010 | 6LrEaV6KR6PLVcgl2ArL Q3rqzLzcT1 v2     |           5 | 15-741-346-9870 |   2753.54 | HOUSEHOLD    | es regular deposits haggle. fur
+         9 | Customer#000000009 | xKiAFTjUsCuxfeleNqefumTrjS             |           8 | 18-338-906-3675 |   8324.07 | FURNITURE    | r theodolites according to the requests wake thinly excuses: pending requests haggle furiousl
+         8 | Customer#000000008 | I0B10bB0AymmC, 0PrRYBCP1yGJ8xcBPmWhl5  |          17 | 27-147-574-9335 |   6819.74 | BUILDING     | among the slyly regular theodolites kindle blithely courts. carefully even theodolites haggle slyly along the ide
+         7 | Customer#000000007 | TcGe5gaZNgVePxU5kRrvXBfkasDTea         |          18 | 28-190-982-9759 |   9561.95 | AUTOMOBILE   | ainst the ironic, express theodolites. express, even pinto beans among the exp
+         6 | Customer#000000006 | sKZz0CsnMD7mp4Xd0YrBvx,LREYKUWAh yVn   |          20 | 30-114-968-4951 |   7638.57 | AUTOMOBILE   | tions. even deposits boost according to the slyly bold packages. final accounts cajole requests. furious
+         5 | Customer#000000005 | KvpyuHCplrB84WgAiGV6sYpZq7Tj           |           3 | 13-750-942-6364 |    794.47 | HOUSEHOLD    | n accounts will have to unwind. foxes cajole accor
+         4 | Customer#000000004 | XxVSJsLAGtn                            |           4 | 14-128-190-5944 |   2866.83 | MACHINERY    |  requests. final, regular ideas sleep final accou
+         3 | Customer#000000003 | MG9kdTD2WBHm                           |           1 | 11-719-748-3364 |   7498.12 | AUTOMOBILE   |  deposits eat slyly ironic, even instructions. express foxes detect slyly. blithely even accounts abov
+         2 | Customer#000000002 | XSTf4,NCwDVaWNe6tEgvwfmRchLXak         |          13 | 23-768-687-3665 |    121.65 | AUTOMOBILE   | l accounts. blithely ironic theodolites integrate boldly: caref
+         1 | Customer#000000001 | IVhzIApeRb ot,c,E                      |          15 | 25-989-741-2988 |    711.56 | BUILDING     | to the even, regular platelets. regular, ironic epitaphs nag e
+(20 rows)
+
+CREATE FOREIGN TABLE customer_snappy_1 ( 
+ c_custkey BIGINT, 
+ c_name TEXT, 
+ c_address TEXT, 
+ c_nationkey INT4, 
+ c_phone TEXT, 
+ c_acctbal FLOAT4, 
+ c_mktsegment TEXT, 
+ c_comment TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/snappy/customer_snappy_1/')
+distribute by roundrobin;
+select c_phone from customer_snappy_1 where c_custkey>50000 and c_custkey<50020 order by 1;
+     c_phone     
+-----------------
+ 11-416-968-4335
+ 11-416-968-4335
+ 12-102-485-9851
+ 12-102-485-9851
+ 12-159-772-4165
+ 12-159-772-4165
+ 12-302-873-3633
+ 12-302-873-3633
+ 14-144-554-9055
+ 14-144-554-9055
+ 15-163-927-3141
+ 15-163-927-3141
+ 17-311-181-5846
+ 17-311-181-5846
+ 18-598-156-4109
+ 18-598-156-4109
+ 19-944-362-4842
+ 19-944-362-4842
+ 22-118-973-1939
+ 22-118-973-1939
+ 23-248-198-2611
+ 23-248-198-2611
+ 23-666-680-5389
+ 23-666-680-5389
+ 27-110-326-6920
+ 27-110-326-6920
+ 27-941-249-3227
+ 27-941-249-3227
+ 29-510-196-4703
+ 29-510-196-4703
+ 29-585-730-2444
+ 29-585-730-2444
+ 32-177-952-3323
+ 32-177-952-3323
+ 32-646-167-9139
+ 32-646-167-9139
+ 33-297-944-5785
+ 33-297-944-5785
+(38 rows)
+
+CREATE FOREIGN TABLE customer_snappy_2 ( 
+ c_custkey BIGINT, 
+ c_name TEXT, 
+ c_address TEXT, 
+ c_nationkey INT4, 
+ c_phone TEXT, 
+ c_acctbal FLOAT4, 
+ c_mktsegment TEXT, 
+ c_comment TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/snappy/customer_snappy_2/')
+distribute by roundrobin;
+select c_phone from customer_snappy_2 where c_custkey>10 and c_custkey<20 order by 1;
+     c_phone     
+-----------------
+ 11-845-129-3851
+ 11-845-129-3851
+ 11-845-129-3851
+ 12-970-682-3487
+ 12-970-682-3487
+ 12-970-682-3487
+ 13-761-547-5974
+ 13-761-547-5974
+ 13-761-547-5974
+ 16-155-215-1315
+ 16-155-215-1315
+ 16-155-215-1315
+ 20-781-609-3107
+ 20-781-609-3107
+ 20-781-609-3107
+ 23-791-276-1263
+ 23-791-276-1263
+ 23-791-276-1263
+ 28-396-526-5053
+ 28-396-526-5053
+ 28-396-526-5053
+ 33-464-151-3439
+ 33-464-151-3439
+ 33-464-151-3439
+ 33-687-542-7601
+ 33-687-542-7601
+ 33-687-542-7601
+(27 rows)
+
+DROP FOREIGN TABLE IF EXISTS customer_snappy CASCADE;
+DROP FOREIGN TABLE IF EXISTS customer_snappy_1 CASCADE;
+DROP FOREIGN TABLE IF EXISTS customer_snappy_2 CASCADE;
+create foreign table null_test (
+a text, 
+b text) 
+server hdfs_server 
+options(format 'orc', foldername '/user/hive/warehouse/null_2') 
+distribute by roundrobin;
+select * from null_test order by 1,2;
+ a |  b   
+---+------
+   | NULL
+   | NULL
+(2 rows)
+
+DROP FOREIGN TABLE IF EXISTS null_test CASCADE;
+DROP FOREIGN TABLE IF EXISTS lineitem CASCADE;
+DROP FOREIGN TABLE IF EXISTS customer CASCADE;
+DROP FOREIGN TABLE IF EXISTS orders CASCADE;
+DROP FOREIGN TABLE IF EXISTS part CASCADE;
+DROP FOREIGN TABLE IF EXISTS partsupp CASCADE;
+DROP FOREIGN TABLE IF EXISTS supplier CASCADE;
+DROP FOREIGN TABLE IF EXISTS nation CASCADE;
+DROP FOREIGN TABLE IF EXISTS region CASCADE;
+DROP SERVER hdfs_server CASCADE;

@@ -86,6 +86,7 @@ static void checkWin32Codepage(void);
 static void clear_sensitive_memory(char* strings, bool freeflag);
 
 extern void check_env_value(const char* input_env_value);
+static char* GetEnvStr(const char* env);
 
 /* ----------
  * HandleSlashCmds:
@@ -208,6 +209,12 @@ static backslashResult exec_command(const char* cmd, PsqlScanState scan_state, P
         psql_error("could not get cmd in function exec_command, so exit\n");
         exit(EXIT_FAILURE);
     }
+
+    /* Clear Sensitive info in query_buf for security */
+    if (query_buf != NULL && query_buf->len > 0 && SensitiveStrCheck(query_buf->data)) {
+        resetPQExpBuffer(query_buf);
+    }
+    
     /*
      * \a -- toggle field alignment This makes little sense but we keep it
      * around.
@@ -383,7 +390,7 @@ static backslashResult exec_command(const char* cmd, PsqlScanState scan_state, P
                     success = describeTableDetails(pattern, show_verbose, show_system);
                 else
                     /* standard listing of interesting things */
-                    success = listTables("tvmsE", NULL, show_verbose, show_system);
+                    success = listTables("tvsEmeo", NULL, show_verbose, show_system);
                 break;
             case 'a':
                 success = describeAggregates(pattern, show_verbose, show_system);
@@ -986,22 +993,6 @@ static backslashResult exec_command(const char* cmd, PsqlScanState scan_state, P
             puts(_("Query buffer reset (cleared)."));
     }
 
-    /* \s save history in a file or show it on the screen */
-    else if (strcmp(cmd, "s") == 0) {
-        char* fname = psql_scan_slash_option(scan_state, OT_NORMAL, NULL, true);
-        expand_tilde(&fname);
-        success = printHistory(fname, pset.popt.topt.pager);
-        if (success && !pset.quiet && fname) {
-            printf(_("Wrote history to file \"%s\".\n"), fname);
-        }
-        if (NULL == fname) {
-            putchar('\n');
-        } else {
-            free(fname);
-            fname = NULL;
-        }
-    }
-
     /* \set -- generalized set variable/option command */
     else if (strcmp(cmd, "set") == 0) {
         char* opt0 = psql_scan_slash_option(scan_state, OT_NORMAL, NULL, false);
@@ -1475,6 +1466,7 @@ static bool do_connect(char* dbname, char* user, char* host, char* port)
     bool isusernull = false;
     bool ishostnull = false;
     bool isportnull = false;
+    errno_t rc;
 
     if (NULL == dbname) {
         dbname = PQdb(o_conn);
@@ -1494,7 +1486,11 @@ static bool do_connect(char* dbname, char* user, char* host, char* port)
     }
 
     while (true) {
+#ifdef HAVE_CE
+#define PARAMS_ARRAY_SIZE 10
+#else
 #define PARAMS_ARRAY_SIZE 9
+#endif /* HAVE_CE */
         char* tmp = GetEnvStr("PGCLIENTENCODING");
         if (tmp != NULL) {
             check_env_value(tmp);
@@ -1519,13 +1515,19 @@ static bool do_connect(char* dbname, char* user, char* host, char* port)
         values[6] = (pset.notty || (tmp != NULL)) ? NULL : "auto";
         keywords[7] = "connect_timeout";
         values[7] = CONNECT_TIMEOUT;
-        keywords[8] = NULL;
-        values[8] = NULL;
+#ifdef HAVE_CE
+        keywords[8] = "enable_ce";
+        values[8] = (pset.enable_client_encryption) ? "1" : NULL;
+#endif
+        keywords[PARAMS_ARRAY_SIZE-1] = NULL;
+        values[PARAMS_ARRAY_SIZE-1] = NULL;
 
         n_conn = PQconnectdbParams(keywords, values, true);
 
         free(keywords);
         keywords = NULL;
+        rc = memset_s(values, PARAMS_ARRAY_SIZE * sizeof(*values), 0, PARAMS_ARRAY_SIZE * sizeof(*values));
+        check_memset_s(rc);
         free(values);
         values = NULL;
         if (NULL != tmp)
@@ -1829,8 +1831,6 @@ static bool editFile(const char* fname, int lineno)
     char* sys = NULL;
     size_t syssz = 0;
     int result;
-    bool b_default_editor = false;
-    bool b_default_editor_linenumber_arg = false;
 
     psql_assert(fname);
 
@@ -1843,10 +1843,16 @@ static bool editFile(const char* fname, int lineno)
         editorName = GetEnvStr("VISUAL");
 
     if (NULL == editorName) {
-        editorName = DEFAULT_EDITOR;
-        b_default_editor = true;
+        editorName = pg_strdup(DEFAULT_EDITOR);
     } else {
         check_env_value(editorName);
+    }
+
+    if (strlen(editorName) >= MAXPGPATH) {
+        psql_error("The value of \"editorName\" is too long.\n");
+        free(editorName);
+        editorName = NULL;
+        return false;
     }
 
     /* Get line number argument, if we need it. */
@@ -1854,23 +1860,31 @@ static bool editFile(const char* fname, int lineno)
         editor_lineno_arg = GetEnvStr("PSQL_EDITOR_LINENUMBER_ARG");
 #ifdef DEFAULT_EDITOR_LINENUMBER_ARG
         if (NULL == editor_lineno_arg) {
-            editor_lineno_arg = DEFAULT_EDITOR_LINENUMBER_ARG;
-            b_default_editor_linenumber_arg = true;
+            editor_lineno_arg = pg_strdup(DEFAULT_EDITOR_LINENUMBER_ARG);
         }
 #endif
         if (NULL == editor_lineno_arg) {
             psql_error("environment variable PSQL_EDITOR_LINENUMBER_ARG must be set to specify a line number\n");
+            free(editorName);
+            editorName = NULL;
             return false;
         }
         check_env_value(editor_lineno_arg);
     }
 
+    if (strlen(editor_lineno_arg) >= MAXPGPATH) {
+        psql_error("The value of \"editor_lineno_arg\" is too long.\n");
+        free(editor_lineno_arg);
+        editor_lineno_arg = NULL;
+        free(editorName);
+        editorName = NULL;
+        return false;
+    }
+
     /* Allocate sufficient memory for command line. */
-    if (lineno > 0)
-        syssz = strlen(editorName) + strlen(editor_lineno_arg) + 10 /* for integer */
-                + 1 + strlen(fname) + 10 + 1;
-    else
-        syssz = strlen(editorName) + strlen(fname) + 10 + 1;
+    lineno > 0 ? (syssz = strlen(editorName) + strlen(editor_lineno_arg) + 10 /* for integer */
+            + 1 + strlen(fname) + 10 + 1) :
+            (syssz = strlen(editorName) + strlen(fname) + 10 + 1);
 
     sys = (char*)pg_malloc(syssz);
 
@@ -1895,18 +1909,21 @@ static bool editFile(const char* fname, int lineno)
         check_sprintf_s(sprintf_s(sys, syssz, SYSTEMQUOTE "\"%s\" \"%s\"" SYSTEMQUOTE, editorName, fname));
 #endif
     result = system(sys);
-    if (result == -1)
+    if (result == -1) {
         psql_error("could not start editor \"%s\"\n", editorName);
-    else if (result == 127)
+    } else if (result == 127) {
         psql_error("could not start /bin/sh\n");
+    }
     free(sys);
     sys = NULL;
 
-    if (!b_default_editor)
+    if (editorName != NULL) {
         free(editorName);
+    }
     editorName = NULL;
-    if (editor_lineno_arg != NULL && !b_default_editor_linenumber_arg)
+    if (editor_lineno_arg != NULL) {
         free(editor_lineno_arg);
+    }
     editor_lineno_arg = NULL;
     return result == 0;
 }
@@ -2085,8 +2102,7 @@ int process_file(char* filename, bool single_txn, bool use_relative_path)
          * of the current script to this pathname.
          */
         if (use_relative_path && NULL != pset.inputfile && !is_absolute_path(filename) && !has_drive_prefix(filename)) {
-            int rc = strncpy_s(relpath, sizeof(relpath), pset.inputfile, strlen(pset.inputfile));
-            securec_check_c(rc, "", "");
+            strlcpy(relpath, pset.inputfile, sizeof(relpath));
             get_parent_directory(relpath);
             join_path_components(relpath, relpath, filename);
             canonicalize_path(relpath);
@@ -2138,8 +2154,8 @@ error:
         fclose(fd);
 
     /*
-     * Database Security: Data importing/dumping support AES128.
-     * If we are process gsqlrc file ,we won't clear the key info.
+     *Database Security: Data importing/dumping support AES128.
+     *If we are process gsqlrc file ,we won't clear the key info.
      */
     if (single_txn || use_relative_path)
         initDecryptInfo(&pset.decryptInfo);
@@ -2459,6 +2475,13 @@ static bool do_shell(const char* command)
             check_env_value(shellName);
         }
 
+        if (strlen(shellName) >= MAXPGPATH) {
+            psql_error("The value of \"SHELL\" is too long.\n");
+            free(shellName);
+            shellName = NULL;
+            return false;
+        }
+
         sys = (char*)pg_malloc(strlen(shellName) + 16);
 #ifndef WIN32
         check_sprintf_s(sprintf_s(sys,
@@ -2725,7 +2748,7 @@ extern void client_server_version_check(PGconn* conn)
     }
 
     sversion = PQgetvalue(res, 0, 0);
-    /* Find "database version" first, and ignore "Postgres X.X.X". */
+    /* Find "(GaussDB Kernel VXXXRXXXCXX build XXXX)" first, and ignore "Postgres X.X.X". */
     sversion = strstr(sversion, DEF_GS_VERSION);
     /* Compare the versions between gsql-clinet and server */
     if (NULL != sversion && strncmp(sversion, DEF_GS_VERSION, 37) != 0) {
@@ -2734,6 +2757,31 @@ extern void client_server_version_check(PGconn* conn)
 
     PQclear(res);
     return;
+}
+
+/*
+ * GetEnvStr
+ *
+ * Note: malloc space for get the return of getenv() function, then return the malloc space.
+ *         so, this space need be free.
+ */
+static char* GetEnvStr(const char* env)
+{
+    char* tmpvar = NULL;
+    const char* temp = getenv(env);
+    errno_t rc = 0;
+    if (temp != NULL) {
+        size_t len = strlen(temp);
+        if (0 == len)
+            return NULL;
+        tmpvar = (char*)malloc(len + 1);
+        if (tmpvar != NULL) {
+            rc = strcpy_s(tmpvar, len + 1, temp);
+            securec_check_c(rc, "\0", "\0");
+            return tmpvar;
+        }
+    }
+    return NULL;
 }
 
 #ifdef ENABLE_UT

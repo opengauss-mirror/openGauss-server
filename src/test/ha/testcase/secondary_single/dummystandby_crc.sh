@@ -38,7 +38,7 @@ start_primary
 
 # waiting for dummystandby connect to primary
 check_dummy_setup
-gs_ctl build -D $data_dir/datanode1_standby
+gs_ctl build -Z single_node -D $data_dir/datanode1_standby
 
 check_replication_setup
 }
@@ -46,11 +46,11 @@ check_replication_setup
 function test_2()
 {
 check_instance
-gs_guc reload -D $data_dir/datanode1 -c "enable_incremental_catchup=off"
-gs_guc reload -D $data_dir/datanode1 -c "checkpoint_segments=5"
-gs_guc reload -D $data_dir/datanode1_standby -c "checkpoint_segments=5"
-gs_guc reload -D $data_dir/datanode1 -c "wal_keep_segments=6"
-gs_guc reload -D $data_dir/datanode1_standby -c "wal_keep_segments=6"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "enable_incremental_catchup=off"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "checkpoint_segments=5"
+gs_guc reload -Z datanode -D $data_dir/datanode1_standby -c "checkpoint_segments=5"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "wal_keep_segments=6"
+gs_guc reload -Z datanode -D $data_dir/datanode1_standby -c "wal_keep_segments=6"
 
 stop_standby
 
@@ -82,7 +82,7 @@ stop_primary
 start_dummystandby
 
 # check the dummystandby has connected to standby(new primary). When gs_rewind, primary must be connected to dummystandby.
-gs_ctl build -D $data_dir/datanode1 
+gs_ctl build -D $data_dir/datanode1 -b incremental -Z single_node
 
 if [ $? -eq 0 ]; then
         echo "test_2: gs_rewind success as expected"
@@ -104,11 +104,11 @@ function tear_down()
 {
 sleep 1
 gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_test1;"
-gs_guc reload -D $data_dir/datanode1 -c "enable_incremental_catchup=on"
-gs_guc reload -D $data_dir/datanode1 -c "checkpoint_segments=64"
-gs_guc reload -D $data_dir/datanode1_standby -c "checkpoint_segments=64"
-gs_guc reload -D $data_dir/datanode1 -c "wal_keep_segments=65"
-gs_guc reload -D $data_dir/datanode1_standby -c "wal_keep_segments=65"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "enable_incremental_catchup=on"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "checkpoint_segments=64"
+gs_guc reload -Z datanode -D $data_dir/datanode1_standby -c "checkpoint_segments=64"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "wal_keep_segments=65"
+gs_guc reload -Z datanode -D $data_dir/datanode1_standby -c "wal_keep_segments=65"
 }
 
 test_1

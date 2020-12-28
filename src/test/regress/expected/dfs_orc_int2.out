@@ -1,0 +1,312 @@
+set enable_global_stats = true;
+--
+-- INT2
+--
+CREATE TABLE INT2_TBL(f1 int2)tablespace hdfs_ts ;
+INSERT INTO INT2_TBL(f1) VALUES ('0   ');
+INSERT INTO INT2_TBL(f1) VALUES ('  1234 ');
+INSERT INTO INT2_TBL(f1) VALUES ('    -1234');
+INSERT INTO INT2_TBL(f1) VALUES ('34.5');
+ERROR:  invalid input syntax for integer: "34.5"
+LINE 1: INSERT INTO INT2_TBL(f1) VALUES ('34.5');
+                                         ^
+CONTEXT:  referenced column: f1
+-- largest and smallest values
+INSERT INTO INT2_TBL(f1) VALUES ('32767');
+INSERT INTO INT2_TBL(f1) VALUES ('-32767');
+-- bad input values -- should give errors
+INSERT INTO INT2_TBL(f1) VALUES ('100000');
+ERROR:  value "100000" is out of range for type smallint
+LINE 1: INSERT INTO INT2_TBL(f1) VALUES ('100000');
+                                         ^
+CONTEXT:  referenced column: f1
+INSERT INTO INT2_TBL(f1) VALUES ('asdf');
+ERROR:  invalid input syntax for integer: "asdf"
+LINE 1: INSERT INTO INT2_TBL(f1) VALUES ('asdf');
+                                         ^
+CONTEXT:  referenced column: f1
+INSERT INTO INT2_TBL(f1) VALUES ('    ');
+ERROR:  invalid input syntax for integer: "    "
+LINE 1: INSERT INTO INT2_TBL(f1) VALUES ('    ');
+                                         ^
+CONTEXT:  referenced column: f1
+INSERT INTO INT2_TBL(f1) VALUES ('- 1234');
+ERROR:  invalid input syntax for integer: "- 1234"
+LINE 1: INSERT INTO INT2_TBL(f1) VALUES ('- 1234');
+                                         ^
+CONTEXT:  referenced column: f1
+INSERT INTO INT2_TBL(f1) VALUES ('4 444');
+ERROR:  invalid input syntax for integer: "4 444"
+LINE 1: INSERT INTO INT2_TBL(f1) VALUES ('4 444');
+                                         ^
+CONTEXT:  referenced column: f1
+INSERT INTO INT2_TBL(f1) VALUES ('123 dt');
+ERROR:  invalid input syntax for integer: "123 dt"
+LINE 1: INSERT INTO INT2_TBL(f1) VALUES ('123 dt');
+                                         ^
+CONTEXT:  referenced column: f1
+INSERT INTO INT2_TBL(f1) VALUES ('');
+INSERT INTO INT2_TBL(f1) VALUES (sqrt(-2));
+ERROR:  cannot take square root of a negative number
+CONTEXT:  referenced column: f1
+INSERT INTO INT2_TBL SELECT f1/0 FROM INT2_TBL;
+ERROR:  division by zero
+CONTEXT:  referenced column: f1
+SELECT '' AS five, * FROM INT2_TBL ORDER BY f1;
+ five |   f1   
+------+--------
+      | -32767
+      |  -1234
+      |      0
+      |   1234
+      |  32767
+      |       
+(6 rows)
+
+SELECT '' AS four, i.* FROM INT2_TBL i WHERE i.f1 <> int2 '0' ORDER BY f1;
+ four |   f1   
+------+--------
+      | -32767
+      |  -1234
+      |   1234
+      |  32767
+(4 rows)
+
+SELECT '' AS four, i.* FROM INT2_TBL i WHERE i.f1 <> int4 '0' ORDER BY f1;
+ four |   f1   
+------+--------
+      | -32767
+      |  -1234
+      |   1234
+      |  32767
+(4 rows)
+
+SELECT '' AS one, i.* FROM INT2_TBL i WHERE i.f1 = int2 '0' ORDER BY f1;
+ one | f1 
+-----+----
+     |  0
+(1 row)
+
+SELECT '' AS one, i.* FROM INT2_TBL i WHERE i.f1 = int4 '0' ORDER BY f1;
+ one | f1 
+-----+----
+     |  0
+(1 row)
+
+SELECT '' AS two, i.* FROM INT2_TBL i WHERE i.f1 < int2 '0' ORDER BY f1;
+ two |   f1   
+-----+--------
+     | -32767
+     |  -1234
+(2 rows)
+
+SELECT '' AS two, i.* FROM INT2_TBL i WHERE i.f1 < int4 '0' ORDER BY f1;
+ two |   f1   
+-----+--------
+     | -32767
+     |  -1234
+(2 rows)
+
+SELECT '' AS three, i.* FROM INT2_TBL i WHERE i.f1 <= int2 '0' ORDER BY f1;
+ three |   f1   
+-------+--------
+       | -32767
+       |  -1234
+       |      0
+(3 rows)
+
+SELECT '' AS three, i.* FROM INT2_TBL i WHERE i.f1 <= int4 '0' ORDER BY f1;
+ three |   f1   
+-------+--------
+       | -32767
+       |  -1234
+       |      0
+(3 rows)
+
+SELECT '' AS two, i.* FROM INT2_TBL i WHERE i.f1 > int2 '0' ORDER BY f1;
+ two |  f1   
+-----+-------
+     |  1234
+     | 32767
+(2 rows)
+
+SELECT '' AS two, i.* FROM INT2_TBL i WHERE i.f1 > int4 '0' ORDER BY f1;
+ two |  f1   
+-----+-------
+     |  1234
+     | 32767
+(2 rows)
+
+SELECT '' AS three, i.* FROM INT2_TBL i WHERE i.f1 >= int2 '0' ORDER BY f1;
+ three |  f1   
+-------+-------
+       |     0
+       |  1234
+       | 32767
+(3 rows)
+
+SELECT '' AS three, i.* FROM INT2_TBL i WHERE i.f1 >= int4 '0' ORDER BY f1;
+ three |  f1   
+-------+-------
+       |     0
+       |  1234
+       | 32767
+(3 rows)
+
+-- positive odds 
+SELECT '' AS one, i.* FROM INT2_TBL i WHERE (i.f1 % int2 '2') = int2 '1' ORDER BY f1;
+ one |  f1   
+-----+-------
+     | 32767
+(1 row)
+
+-- any evens 
+SELECT '' AS three, i.* FROM INT2_TBL i WHERE (i.f1 % int4 '2') = int2 '0' ORDER BY f1;
+ three |  f1   
+-------+-------
+       | -1234
+       |     0
+       |  1234
+(3 rows)
+
+SELECT '' AS five, i.f1, i.f1 * int2 '2' AS x FROM INT2_TBL i ORDER BY f1;
+ERROR:  smallint out of range
+CONTEXT:  referenced column: x
+SELECT '' AS five, i.f1, i.f1 * int2 '2' AS x FROM INT2_TBL i
+WHERE abs(f1) < 16384 ORDER BY f1;
+ five |  f1   |   x   
+------+-------+-------
+      | -1234 | -2468
+      |     0 |     0
+      |  1234 |  2468
+(3 rows)
+
+SELECT '' AS five, i.f1, i.f1 * int4 '2' AS x FROM INT2_TBL i ORDER BY f1;
+ five |   f1   |   x    
+------+--------+--------
+      | -32767 | -65534
+      |  -1234 |  -2468
+      |      0 |      0
+      |   1234 |   2468
+      |  32767 |  65534
+      |        |       
+(6 rows)
+
+SELECT '' AS five, i.f1, i.f1 + int2 '2' AS x FROM INT2_TBL i ORDER BY f1;
+ERROR:  smallint out of range
+CONTEXT:  referenced column: x
+SELECT '' AS five, i.f1, i.f1 + int2 '2' AS x FROM INT2_TBL i
+WHERE f1 < 32766 ORDER BY f1;
+ five |   f1   |   x    
+------+--------+--------
+      | -32767 | -32765
+      |  -1234 |  -1232
+      |      0 |      2
+      |   1234 |   1236
+(4 rows)
+
+SELECT '' AS five, i.f1, i.f1 + int4 '2' AS x FROM INT2_TBL i ORDER BY f1;
+ five |   f1   |   x    
+------+--------+--------
+      | -32767 | -32765
+      |  -1234 |  -1232
+      |      0 |      2
+      |   1234 |   1236
+      |  32767 |  32769
+      |        |       
+(6 rows)
+
+SELECT '' AS five, i.f1, i.f1 - int2 '2' AS x FROM INT2_TBL i ORDER BY f1;
+ERROR:  smallint out of range
+CONTEXT:  referenced column: x
+SELECT '' AS five, i.f1, i.f1 - int2 '2' AS x FROM INT2_TBL i
+WHERE f1 > -32767 ORDER BY f1;
+ five |  f1   |   x   
+------+-------+-------
+      | -1234 | -1236
+      |     0 |    -2
+      |  1234 |  1232
+      | 32767 | 32765
+(4 rows)
+
+SELECT '' AS five, i.f1, i.f1 - int4 '2' AS x FROM INT2_TBL i ORDER BY f1;
+ five |   f1   |   x    
+------+--------+--------
+      | -32767 | -32769
+      |  -1234 |  -1236
+      |      0 |     -2
+      |   1234 |   1232
+      |  32767 |  32765
+      |        |       
+(6 rows)
+
+SELECT '' AS five, i.f1, i.f1 / int2 '2' AS x FROM INT2_TBL i ORDER BY f1;
+ five |   f1   |    x     
+------+--------+----------
+      | -32767 | -16383.5
+      |  -1234 |     -617
+      |      0 |        0
+      |   1234 |      617
+      |  32767 |  16383.5
+      |        |         
+(6 rows)
+
+SELECT '' AS five, i.f1, i.f1 / int4 '2' AS x FROM INT2_TBL i ORDER BY f1;
+ five |   f1   |    x     
+------+--------+----------
+      | -32767 | -16383.5
+      |  -1234 |     -617
+      |      0 |        0
+      |   1234 |      617
+      |  32767 |  16383.5
+      |        |         
+(6 rows)
+
+-- corner cases
+SELECT (-1::int2<<15)::text;
+  text  
+--------
+ -32768
+(1 row)
+
+SELECT ((-1::int2<<15)+1::int2)::text;
+  text  
+--------
+ -32767
+(1 row)
+
+-- check sane handling of INT16_MIN overflow cases
+SELECT (-32768)::int2 * (-1)::int2;
+ERROR:  smallint out of range
+SELECT (-32768)::int2 / (-1)::int2;
+ERROR:  smallint out of range
+SELECT (-32768)::int2 % (-1)::int2;
+ ?column? 
+----------
+        0
+(1 row)
+
+-- check overflow case during dn insert
+/*CREATE TABLE t_num(a numeric(2,1))tablespace hdfs_ts ;
+CREATE FUNCTION test_insert(IN iter int) RETURNS integer AS $$
+BEGIN
+	forall i in 1..iter	
+		INSERT INTO t_num SELECT f1 FROM INT2_TBL;
+	return iter;
+END;
+$$ LANGUAGE plpgsql;
+SELECT test_insert(1);
+DROP FUNCtION test_insert;
+DROP TABLE t_num;*/
+DROP TABLE INT2_TBL;
+create table int1_test(c_tinyint tinyint,c_smallint smallint) tablespace hdfs_ts;
+set cstore_insert_mode='main';
+insert into int1_test values(1,1);
+insert into int1_test values(12,12);
+select * from int1_test where c_tinyint = 12::tinyint;
+ c_tinyint | c_smallint 
+-----------+------------
+ 12        |         12
+(1 row)
+
+drop table int1_test;

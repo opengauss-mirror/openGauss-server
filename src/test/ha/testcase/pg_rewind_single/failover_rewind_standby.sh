@@ -28,7 +28,7 @@ gs_ctl failover -D $data_dir/datanode1
 check_dummy_setup
 
 #use gs_rewind to mirror the primary on standby, sync the diferent part between them.
-gs_ctl build -D $data_dir/datanode1_standby
+gs_ctl build -D $data_dir/datanode1_standby -Z single_node -b incremental
 
 #check if rewind is ok.
 #start_standby

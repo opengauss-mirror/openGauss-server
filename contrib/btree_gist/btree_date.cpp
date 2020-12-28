@@ -122,7 +122,6 @@ Datum gbt_date_consistent(PG_FUNCTION_ARGS)
     DateADT query = PG_GETARG_DATEADT(1);
     StrategyNumber strategy = (StrategyNumber)PG_GETARG_UINT16(2);
 
-    /* Oid		subtype = PG_GETARG_OID(3); */
     bool* recheck = (bool*)PG_GETARG_POINTER(4);
     dateKEY* kkk = (dateKEY*)DatumGetPointer(entry->key);
     GBT_NUMKEY_R key;
@@ -141,7 +140,6 @@ Datum gbt_date_distance(PG_FUNCTION_ARGS)
     GISTENTRY* entry = (GISTENTRY*)PG_GETARG_POINTER(0);
     DateADT query = PG_GETARG_DATEADT(1);
 
-    /* Oid		subtype = PG_GETARG_OID(3); */
     dateKEY* kkk = (dateKEY*)DatumGetPointer(entry->key);
     GBT_NUMKEY_R key;
 

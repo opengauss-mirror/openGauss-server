@@ -1,0 +1,5 @@
+# security_plugin extension
+comment = 'provides security functionality'
+default_version = '1.0'
+module_pathname = '$libdir/security_plugin'
+relocatable = true

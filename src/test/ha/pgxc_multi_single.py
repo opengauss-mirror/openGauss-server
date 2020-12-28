@@ -265,7 +265,7 @@ class Pterodb():
 			os.system(datanode_cmd)
 			time.sleep(5)
 
-			datanode_cmd = g_valgrind + install_path + "/bin/gs_ctl" + " build "+ "-D " + self.data_dir + "/" + self.dname_prefix + str(i) + "_standby > "  + self.data_dir + "/" + self.dname_prefix + str(i) +"_standby"+ "/logdn" + str(i) + ".log 2>&1 &"
+			datanode_cmd = g_valgrind + install_path + "/bin/gs_ctl" + " build "+ "-D " + self.data_dir + "/" + self.dname_prefix + str(i) + "_standby" + " -Z single_node " + " > "  + self.data_dir + "/" + self.dname_prefix + str(i) +"_standby"+ "/logdn" + str(i) + ".log 2>&1 &"
 			print datanode_cmd
 			os.system(datanode_cmd)
 			time.sleep(5)
@@ -275,13 +275,13 @@ class Pterodb():
 	def __stop_server(self):
 		#stop data node
 		for i in range(1,self.data_node_num+1):
-			datanode_cmd = install_path + "/bin/gs_ctl stop -D " + self.data_dir + "/" + self.dname_prefix  + str(i)
+			datanode_cmd = install_path + "/bin/gs_ctl stop -D " + self.data_dir + "/" + self.dname_prefix  + str(i) + " -Z single_node"
 			print datanode_cmd
 			os.system(datanode_cmd)
                         break
 		#stop data node standby1,2,3...7
 		for i in range(1,self.data_node_num+1):
-			datanode_cmd = install_path + "/bin/gs_ctl stop -D " + self.data_dir + "/" + self.dname_prefix  + str(i) + "_standby"
+			datanode_cmd = install_path + "/bin/gs_ctl stop -D " + self.data_dir + "/" + self.dname_prefix  + str(i) + "_standby" + " -Z single_node"
 			print datanode_cmd
 			os.system(datanode_cmd)
 

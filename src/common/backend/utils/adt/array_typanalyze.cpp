@@ -110,6 +110,7 @@ Datum array_typanalyze(PG_FUNCTION_ARGS)
      */
     typentry =
         lookup_type_cache(element_typeid, TYPECACHE_EQ_OPR | TYPECACHE_CMP_PROC_FINFO | TYPECACHE_HASH_PROC_FINFO);
+
     if (!OidIsValid(typentry->eq_opr) || !OidIsValid(typentry->cmp_proc_finfo.fn_oid) ||
         !OidIsValid(typentry->hash_proc_finfo.fn_oid))
         PG_RETURN_BOOL(true);
@@ -136,6 +137,7 @@ Datum array_typanalyze(PG_FUNCTION_ARGS)
      * Note we leave stats->minrows set as std_typanalyze set it.  Should it
      * be increased for array analysis purposes?
      */
+
     PG_RETURN_BOOL(true);
 }
 
@@ -348,18 +350,19 @@ static void compute_array_stats(
 
             if (found) {
                 /* The element value is already on the tracking list */
+
                 /*
                  * The operators we assist ignore duplicate array elements, so
                  * count a given distinct element only once per array.
                  */
-                if (item->last_container == array_no) {
+                if (item->last_container == array_no)
                     continue;
-                }
 
                 item->frequency++;
                 item->last_container = array_no;
             } else {
                 /* Initialize new tracking list element */
+
                 /*
                  * If element type is pass-by-reference, we must copy it into
                  * palloc'd space, so that we can release the array below.
@@ -385,24 +388,21 @@ static void compute_array_stats(
         }
 
         /* Count null element presence once per array. */
-        if (null_present) {
+        if (null_present)
             null_elem_cnt++;
-        }
 
         /* Update frequency of the particular array distinct element count. */
         distinct_count = (int)(element_no - prev_element_no);
         count_item = (DECountItem*)hash_search(count_tab, &distinct_count, HASH_ENTER, &count_item_found);
 
-        if (count_item_found) {
+        if (count_item_found)
             count_item->frequency++;
-        } else {
+        else
             count_item->frequency = 1;
-        }
 
         /* Free memory allocated while detoasting. */
-        if (PointerGetDatum(array) != value) {
+        if (PointerGetDatum(array) != value)
             pfree_ext(array);
-        }
         pfree_ext(elem_values);
         pfree_ext(elem_nulls);
     }
@@ -422,12 +422,15 @@ static void compute_array_stats(
         TrackItem** sort_table;
         int track_len;
         int64 minfreq, maxfreq;
-
+        long hash_num;
         /*
          * We assume the standard stats code already took care of setting
          * stats_valid, stanullfrac, stawidth, stadistinct.  We'd have to
          * re-compute those values if we wanted to not store the standard
          * stats.
+         */
+
+        /*
          * Construct an array of the interesting hashtable items, that is,
          * those meeting the cutoff frequency (s - epsilon)*N.	Also identify
          * the minimum and maximum frequencies among these items.
@@ -437,7 +440,11 @@ static void compute_array_stats(
          */
         const int64 cutoff_freq = 9 * element_no / bucket_width;
 
-        i = hash_get_num_entries(elements_tab); /* surely enough space */
+        hash_num = hash_get_num_entries(elements_tab); /* surely enough space */
+        if (hash_num > INT_MAX) {
+            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("hash num out of the int max, [%ld]", hash_num)));
+        }
+        i = (int)hash_num;
         sort_table = (TrackItem**)palloc(sizeof(TrackItem*) * i);
 
         hash_seq_init(&scan_status, elements_tab);
@@ -474,9 +481,8 @@ static void compute_array_stats(
             qsort(sort_table, track_len, sizeof(TrackItem*), trackitem_compare_frequencies_desc);
             /* reset minfreq to the smallest frequency we're keeping */
             minfreq = sort_table[num_mcelem - 1]->frequency;
-        } else {
+        } else
             num_mcelem = track_len;
-        }
 
         /* Generate MCELEM slot entry */
         if (num_mcelem > 0) {
@@ -517,7 +523,7 @@ static void compute_array_stats(
             mcelem_freqs[i++] = (double)maxfreq / (double)nonnull_cnt;
             mcelem_freqs[i++] = (double)null_elem_cnt / (double)nonnull_cnt;
 
-            (void)MemoryContextSwitchTo(old_context);
+            MemoryContextSwitchTo(old_context);
 
             stats->stakind[slot_idx] = STATISTIC_KIND_MCELEM;
             stats->staop[slot_idx] = extra_data->eq_opr;
@@ -612,9 +618,6 @@ static void compute_array_stats(
             }
             Assert(j == count_items_count - 1);
 
-            if (slot_idx >= STATISTIC_NUM_SLOTS) {
-                ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("slot index for stats out of range")));
-            }
             stats->stakind[slot_idx] = STATISTIC_KIND_DECHIST;
             stats->staop[slot_idx] = extra_data->eq_opr;
             stats->stanumbers[slot_idx] = hist;
@@ -724,11 +727,10 @@ static int countitem_compare_count(const void* e1, const void* e2)
     const DECountItem* const* t1 = (const DECountItem* const*)e1;
     const DECountItem* const* t2 = (const DECountItem* const*)e2;
 
-    if ((*t1)->count < (*t2)->count) {
+    if ((*t1)->count < (*t2)->count)
         return -1;
-    } else if ((*t1)->count == (*t2)->count) {
+    else if ((*t1)->count == (*t2)->count)
         return 0;
-    } else {
+    else
         return 1;
-    }
 }

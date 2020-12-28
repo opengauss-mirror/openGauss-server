@@ -11,9 +11,12 @@
 #include <grpcpp/impl/codegen/channel_interface.h>
 #include <grpcpp/impl/codegen/client_unary_call.h>
 #include <grpcpp/impl/codegen/client_callback.h>
-#include <grpcpp/impl/codegen/method_handler_impl.h>
+#include <grpcpp/impl/codegen/message_allocator.h>
+#include <grpcpp/impl/codegen/method_handler.h>
 #include <grpcpp/impl/codegen/rpc_service_method.h>
 #include <grpcpp/impl/codegen/server_callback.h>
+#include <grpcpp/impl/codegen/server_callback_handlers.h>
+#include <grpcpp/impl/codegen/server_context.h>
 #include <grpcpp/impl/codegen/service_type.h>
 #include <grpcpp/impl/codegen/sync_stream.h>
 namespace gauss {
@@ -39,27 +42,27 @@ RemoteRead::Stub::Stub(const std::shared_ptr< ::grpc::ChannelInterface>& channel
 }
 
 void RemoteRead::Stub::experimental_async::GetCU(::grpc::ClientContext* context, const ::gauss::CURequest* request, ::gauss::CUResponse* response, std::function<void(::grpc::Status)> f) {
-  ::grpc::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_GetCU_, context, request, response, std::move(f));
+  ::grpc_impl::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_GetCU_, context, request, response, std::move(f));
 }
 
 void RemoteRead::Stub::experimental_async::GetCU(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::gauss::CUResponse* response, std::function<void(::grpc::Status)> f) {
-  ::grpc::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_GetCU_, context, request, response, std::move(f));
+  ::grpc_impl::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_GetCU_, context, request, response, std::move(f));
 }
 
 void RemoteRead::Stub::experimental_async::GetCU(::grpc::ClientContext* context, const ::gauss::CURequest* request, ::gauss::CUResponse* response, ::grpc::experimental::ClientUnaryReactor* reactor) {
-  ::grpc::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_GetCU_, context, request, response, reactor);
+  ::grpc_impl::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_GetCU_, context, request, response, reactor);
 }
 
 void RemoteRead::Stub::experimental_async::GetCU(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::gauss::CUResponse* response, ::grpc::experimental::ClientUnaryReactor* reactor) {
-  ::grpc::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_GetCU_, context, request, response, reactor);
+  ::grpc_impl::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_GetCU_, context, request, response, reactor);
 }
 
 ::grpc::ClientAsyncResponseReader< ::gauss::CUResponse>* RemoteRead::Stub::AsyncGetCURaw(::grpc::ClientContext* context, const ::gauss::CURequest& request, ::grpc::CompletionQueue* cq) {
-  return ::grpc::internal::ClientAsyncResponseReaderFactory< ::gauss::CUResponse>::Create(channel_.get(), cq, rpcmethod_GetCU_, context, request, true);
+  return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::gauss::CUResponse>::Create(channel_.get(), cq, rpcmethod_GetCU_, context, request, true);
 }
 
 ::grpc::ClientAsyncResponseReader< ::gauss::CUResponse>* RemoteRead::Stub::PrepareAsyncGetCURaw(::grpc::ClientContext* context, const ::gauss::CURequest& request, ::grpc::CompletionQueue* cq) {
-  return ::grpc::internal::ClientAsyncResponseReaderFactory< ::gauss::CUResponse>::Create(channel_.get(), cq, rpcmethod_GetCU_, context, request, false);
+  return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::gauss::CUResponse>::Create(channel_.get(), cq, rpcmethod_GetCU_, context, request, false);
 }
 
 ::grpc::Status RemoteRead::Stub::GetPage(::grpc::ClientContext* context, const ::gauss::PageRequest& request, ::gauss::PageResponse* response) {
@@ -67,27 +70,27 @@ void RemoteRead::Stub::experimental_async::GetCU(::grpc::ClientContext* context,
 }
 
 void RemoteRead::Stub::experimental_async::GetPage(::grpc::ClientContext* context, const ::gauss::PageRequest* request, ::gauss::PageResponse* response, std::function<void(::grpc::Status)> f) {
-  ::grpc::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_GetPage_, context, request, response, std::move(f));
+  ::grpc_impl::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_GetPage_, context, request, response, std::move(f));
 }
 
 void RemoteRead::Stub::experimental_async::GetPage(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::gauss::PageResponse* response, std::function<void(::grpc::Status)> f) {
-  ::grpc::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_GetPage_, context, request, response, std::move(f));
+  ::grpc_impl::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_GetPage_, context, request, response, std::move(f));
 }
 
 void RemoteRead::Stub::experimental_async::GetPage(::grpc::ClientContext* context, const ::gauss::PageRequest* request, ::gauss::PageResponse* response, ::grpc::experimental::ClientUnaryReactor* reactor) {
-  ::grpc::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_GetPage_, context, request, response, reactor);
+  ::grpc_impl::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_GetPage_, context, request, response, reactor);
 }
 
 void RemoteRead::Stub::experimental_async::GetPage(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::gauss::PageResponse* response, ::grpc::experimental::ClientUnaryReactor* reactor) {
-  ::grpc::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_GetPage_, context, request, response, reactor);
+  ::grpc_impl::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_GetPage_, context, request, response, reactor);
 }
 
 ::grpc::ClientAsyncResponseReader< ::gauss::PageResponse>* RemoteRead::Stub::AsyncGetPageRaw(::grpc::ClientContext* context, const ::gauss::PageRequest& request, ::grpc::CompletionQueue* cq) {
-  return ::grpc::internal::ClientAsyncResponseReaderFactory< ::gauss::PageResponse>::Create(channel_.get(), cq, rpcmethod_GetPage_, context, request, true);
+  return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::gauss::PageResponse>::Create(channel_.get(), cq, rpcmethod_GetPage_, context, request, true);
 }
 
 ::grpc::ClientAsyncResponseReader< ::gauss::PageResponse>* RemoteRead::Stub::PrepareAsyncGetPageRaw(::grpc::ClientContext* context, const ::gauss::PageRequest& request, ::grpc::CompletionQueue* cq) {
-  return ::grpc::internal::ClientAsyncResponseReaderFactory< ::gauss::PageResponse>::Create(channel_.get(), cq, rpcmethod_GetPage_, context, request, false);
+  return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::gauss::PageResponse>::Create(channel_.get(), cq, rpcmethod_GetPage_, context, request, false);
 }
 
 RemoteRead::Service::Service() {

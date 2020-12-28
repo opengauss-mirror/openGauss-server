@@ -1,13 +1,67 @@
-# test on extended statistics
-# test: multi column stats
-test: hw_es_multi_column_stats_prepare
-test: hw_es_multi_column_stats_1 hw_es_multi_column_stats_1_1 hw_es_multi_column_stats_1_2 hw_es_multi_column_stats_1_3 hw_es_multi_column_stats_1_4 hw_es_multi_column_stats_1_5 hw_es_multi_column_stats_1_6 hw_es_multi_column_stats_2_1 hw_es_multi_column_stats_2_2 hw_es_multi_column_stats_2_3 hw_es_multi_column_stats_3 hw_es_multi_column_stats_3_1 hw_es_multi_column_stats_3_2
-test: hw_es_multi_column_stats_end
+# ----------
+# test for set operations
+# ----------
+#test: vec_prepare -- original test
+#enum create_enumtype
+test: select_nest_views 
+test: vec_prepare_001 vec_prepare_002
+test: vec_prepare_003
 
-test: checksum limit1 setop setop_1 setop_2
-test: distinct prepare1 
-test: unsupported_features statistic statistic_2 
-#statistic_1 
-#test: extendstat
+#test distributed framework
+#show plan
+test: col_distribute_joinplan col_distribute_joinnew
 
-test: hw_setop_writefile
+test: col_distribute_limit col_distribute_distinct
+#col_distribute_prepare
+#col_distribute_function_1
+test: col_distribute_function_2 col_distribute_count_distinct_1 
+#col_distribute_count_distinct_2 col_distribute_count_distinct_3 col_distribute_count_distinct_4
+
+#test for col tpch
+#test: tpchcol01 tpchcol03 tpchcol04 tpchcol05 tpchcol06 tpchcol07 tpchcol08 tpchcol09 tpchcol12 tpchcol13 tpchcol14 tpchcol16 tpchcol18 tpchcol19 tpchcol21
+
+#test early free
+#test: early_free
+
+#test for col tpch with vector engine disabled
+#test: tpch_disablevec01 tpch_disablevec03 tpch_disablevec04 tpch_disablevec05 tpch_disablevec06 tpch_disablevec07 tpch_disablevec08 tpch_disablevec09 tpch_disablevec12 tpch_disablevec13 tpch_disablevec14 tpch_disablevec16 tpch_disablevec18 tpch_disablevec19 tpch_disablevec21
+
+#test sort optimize
+#test: sort_optimize
+#test directory
+
+test: directory_test
+#test node group name
+#test: nodegroup_name
+
+test: analyse_verify
+
+# test autoanalyze
+#test: autoanalyze_test_gucset
+#test: autoanalyze_test1 autoanalyze_test2 autoanalyze_test3 autoanalyze_test4
+#test: autoanalyze_test_gucreset
+
+# test create type
+#test: create_compositetype
+test: create_basetype
+
+#test add_views
+#test: add_views
+#test tabletype
+test: tabletype
+
+#test with recursive
+#test: recursive_ref_recursive
+#test: distribute_recursive_prepare
+#test: distribute_recursive_cte
+#test: distribute_recursive_cte_col
+#test: nohashjoin_distribute_recursive_cte
+#test: nohashjoin_distribute_recursive_cte_col
+#test: others
+#test: icbc_customer
+#test: distribute_recursive_unshippable
+#test: distribute_recursive_finalize
+#test: distribute_recursive_cte_1
+
+#test test_relpages
+#test: test_relpages

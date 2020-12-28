@@ -24,23 +24,29 @@ typedef struct DatanodeStatement {
     int current_nodes_number; /* number of nodes where statement is active */
     int max_nodes_number;     /* maximum number of nodes where statement is active */
     int* dns_node_indices;    /* node ids where statement is active */
+    instr_time* last_used_time; /* for gpc, save time when use this statement to send msg to dn */
 } DatanodeStatement;
 #endif
+
+#define NEED_SEND_PARSE_AGAIN(last_used_time, cur_time) \
+    (INSTR_TIME_GET_DOUBLE(cur_time) - INSTR_TIME_GET_DOUBLE(last_used_time)) > ((double)MAX_PREPARE_WAIING_TIME / 2)
 
 /* Utility statements PREPARE, EXECUTE, DEALLOCATE, EXPLAIN EXECUTE */
 extern void PrepareQuery(PrepareStmt* stmt, const char* queryString);
 extern void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* queryString, ParamListInfo params,
     DestReceiver* dest, char* completionTag);
-extern void DeallocateQuery(const DeallocateStmt* stmt);
+extern void DeallocateQuery(DeallocateStmt* stmt);
 extern void ExplainExecuteQuery(
     ExecuteStmt* execstmt, IntoClause* into, ExplainState* es, const char* queryString, ParamListInfo params);
 
 /* Low-level access to stored prepared statements */
+extern void StorePreparedStatementCNGPC(const char *stmt_name, CachedPlanSource *plansource,
+                                        bool from_sql, bool is_share);
 extern void StorePreparedStatement(const char* stmt_name, CachedPlanSource* plansource, bool from_sql);
-extern PreparedStatement* FetchPreparedStatement(const char* stmt_name, bool throwError);
+extern PreparedStatement* FetchPreparedStatement(const char* stmt_name, bool throwError, bool need_valid);
 extern void DropPreparedStatement(const char* stmt_name, bool showError);
-extern TupleDesc FetchPreparedStatementResultDesc(PreparedStatement* stmt);
-extern List* FetchPreparedStatementTargetList(PreparedStatement* stmt);
+extern TupleDesc FetchPreparedStatementResultDesc(PreparedStatement *stmt);
+extern List* FetchPreparedStatementTargetList(PreparedStatement *stmt);
 
 extern void DropAllPreparedStatements(void);
 extern void HandlePreparedStatementsForReload(void);
@@ -53,11 +59,13 @@ extern bool ActivateDatanodeStatementOnNode(const char* stmt_name, int noid);
 extern void DeActiveAllDataNodeStatements(void);
 extern bool HaveActiveDatanodeStatements(void);
 extern void DropDatanodeStatement(const char* stmt_name);
-extern int SetRemoteStatementName(Plan* plan, const char* stmt_name, int num_params, Oid* param_types, int n);
+extern int SetRemoteStatementName(Plan* plan, const char* stmt_name, int num_params, Oid* param_types, int n,
+                                        bool isBuildingCustomPlan, bool is_plan_shared = false);
+extern char* get_datanode_statement_name(const char* stmt_name, int n);
 #endif
-extern bool needRecompileQuery(const ExecuteStmt* stmt);
-extern void RePrepareQuery(const ExecuteStmt* stmt);
-extern bool checkRecompileCondition(const CachedPlanSource* plansource);
+extern bool needRecompileQuery(ExecuteStmt* stmt);
+extern void RePrepareQuery(ExecuteStmt* stmt);
+extern bool checkRecompileCondition(CachedPlanSource* plansource);
 
 extern void GetRemoteQuery(PlannedStmt* stmt, const char* queryString);
 extern void GetRemoteQueryWalker(Plan* plan, void* context, const char* queryString);
@@ -66,4 +74,3 @@ extern void PlanTreeWalker(
 
 extern DatanodeStatement* light_set_datanode_queries(const char* stmt_name);
 #endif /* PREPARE_H */
-

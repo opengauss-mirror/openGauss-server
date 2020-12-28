@@ -7,7 +7,7 @@ create schema row_sort;
 create table row_sort.test_sort_1(id int, num1 numeric, num2 decimal, str1 char(8), str2 char(8), str3 varchar(8), str4 varchar(8), str5 bytea, str6 bytea);
 
 --Insert Data
-COPY row_sort.test_sort_1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/sort_optimize.data' delimiter ',';
+COPY row_sort.test_sort_1 FROM '@abs_srcdir@/data/sort_optimize.data' delimiter ',';
 
 --Sortagg
 set enable_hashagg=off;

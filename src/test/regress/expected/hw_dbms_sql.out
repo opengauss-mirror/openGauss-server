@@ -1,0 +1,2725 @@
+--
+--@@GaussDB@@
+--plsql_packages test
+--
+/* BEGIN DBMS_SQL PACKAGE */
+create table t1(c1 int, c2 int, c3 int);
+create table t2(c1 int, c2 text, c3 int);
+create table t3(c1 int, c2 char(20), c3 int);
+create table t4(c1 int, c2 varchar(20), c3 int);
+create table t5(c1 bigint, c2 char(20), c3 bytea);
+insert into t1 select v,v,v from generate_series(101,110) as v;
+update t1 set c2 = NULL where c1 = 107; 
+insert into t2 values(1,'AAAAA', 1);
+insert into t2 values(2,'BBBBB', 2);
+insert into t2 values(3,'CCCCC', 3);
+insert into t2 values(4,'DDDDD', 4);
+insert into t2 values(5,'EEEEE', 5);
+insert into t2 values(NULL,'FFFFF', 6);
+insert into t2 values(7,NULL, 7);
+insert into t3 select * from t2;
+insert into t4 select * from t2;
+insert into t5 values(1,'AAAAA', 'AAAAAAAAAAAAAAAAAAAAAAAA');
+insert into t5 values(2,'BBBBB', 'BBBBBBBBBBBBBBBBBBBBBBBB');
+insert into t5 values(3,'CCCCC', 'CCCCCCCCCCCCCCCCCCCCCCCC');
+insert into t5 values(4,'DDDDD', 'DDDDDDDDDDDDDDDDDDDDDDDD');
+insert into t5 values(5,'EEEEE', 'EEEEEEEEEEEEEEEEEEEEEEEE');
+/* verify the DBMS_SQL library routines */
+select proname, prorettype, proargtypes, fencedmode 
+from pg_proc 
+where pronamespace in (
+	select oid
+	from pg_namespace
+	where nspname = 'dbms_sql') 
+order by 1,2,3,4;
+          proname           | prorettype |    proargtypes     | fencedmode 
+----------------------------+------------+--------------------+------------
+ bind_variable              |         23 | 23                 | f
+ close_cursor               |         23 | 23                 | f
+ column_value               |       2283 | 23 23 2283         | f
+ column_value_char          |       2249 | 23 23 1042 1700 23 | f
+ column_value_int           |         23 | 23 23              | f
+ column_value_long          |       2249 | 23 23 23 23 25 23  | f
+ column_value_raw           |       2249 | 23 23 17 1700 23   | f
+ column_value_text          |         25 | 23 23              | f
+ column_value_unknown       |         25 | 23 23 25           | f
+ dbms_sql_column_value_char |       1042 | 23 23              | f
+ dbms_sql_column_value_long |         20 | 23 23              | f
+ dbms_sql_column_value_raw  |         17 | 23 23              | f
+ define_column              |         23 | 23 23 2283 23      | f
+ define_column_char         |         23 | 23 23 25 23        | f
+ define_column_int          |         23 | 23 23              | f
+ define_column_long         |         23 | 23 23              | f
+ define_column_raw          |         23 | 23 23 17 23        | f
+ define_column_text         |         23 | 23 23 23           | f
+ define_column_unknown      |         23 | 23 23 25           | f
+ execute                    |         23 | 23                 | f
+ execute_and_fetch          |         23 | 23                 | f
+ fetch_rows                 |         23 | 23                 | f
+ is_open                    |         16 | 23                 | f
+ last_row_count             |         23 | 23                 | f
+ open_cursor                |         23 |                    | f
+ parse                      |         16 | 23 25 23           | f
+(26 rows)
+
+CREATE or REPLACE FUNCTION test_dbmssql_int()
+RETURNS text
+AS $$
+DECLARE
+    cursorid int;
+	query text;
+	define_column_ret int;
+	parse_ret int;
+	execute_ret int;
+	fetch_rows_ret int;
+	column_values_ret int;
+	close_cursor_ret int;
+	c1   int;
+	c2   int;
+	c1value int;
+	c2value int;
+	final_result text;
+BEGIN
+	query := 'select c1,c2 from t1 order by 1;';
+
+	-- step1 open cursor 
+	cursorid := dbms_sql.open_cursor();
+	/* raise notice 'open_cursor() cursorid: %', cursorid;*/
+	
+	-- step2 parse
+	parse_ret := dbms_sql.parse(cursorid, query, 1);
+	/*raise notice 'parse() %', parse_ret;*/
+
+	-- step3 define column
+	define_column_ret := dbms_sql.define_column(cursorid, 1, c1);
+	define_column_ret := dbms_sql.define_column(cursorid, 2, c2);
+	/*raise notice 'define_column() define_column_ret: %', define_column_ret;*/
+	
+	-- step3 execute
+	execute_ret := dbms_sql.execute(cursorid);
+	/*raise notice 'execute() ret %', execute_ret;*/
+	
+	-- step 4
+	final_result := '{';
+	LOOP
+        EXIT WHEN (dbms_sql.fetch_rows(cursorid) <= 0);
+			dbms_sql.column_value(cursorid, 1, c1value);
+			dbms_sql.column_value(cursorid, 2, c2value);
+			final_result := final_result || '(' || c1value || ', ' || c2value || ')'; 
+	END LOOP;
+	final_result := final_result ||'}';
+
+	-- step 5
+	close_cursor_ret := dbms_sql.close_cursor(cursorid);
+	/*raise notice 'close_cursor() ret %', close_cursor_ret;*/
+	return final_result;
+END;
+$$
+LANGUAGE 'plpgsql' NOT FENCED;
+CREATE or REPLACE FUNCTION test_dbmssql_text()
+RETURNS text
+AS $$
+DECLARE
+    cursorid int;
+	query text;
+	define_column_ret int;
+	parse_ret int;
+	execute_ret int;
+	fetch_rows_ret int;
+	column_values_ret int;
+	close_cursor_ret int;
+	c1   int;
+	c2   text;
+	c1value int;
+	c2value text;
+	final_result text;
+BEGIN
+	query := 'select c1,c2 from t2 order by 1;';
+
+	-- step1 open cursor 
+	cursorid := dbms_sql.open_cursor();
+	--raise notice 'open_cursor() cursorid: %', cursorid;
+	
+	-- step2 parse
+	parse_ret := dbms_sql.parse(cursorid, query, 1);
+	--raise notice 'parse() %', parse_ret;
+
+	-- step3 define column
+	define_column_ret := dbms_sql.define_column(cursorid, 1, c1);
+	define_column_ret := dbms_sql.define_column(cursorid, 2, c2, 200);
+	--raise notice 'define_column() define_column_ret: %', define_column_ret;
+	
+	-- step3 execute
+	execute_ret := dbms_sql.execute(cursorid);
+	--raise notice 'execute() ret %', execute_ret;
+	
+	-- step 4
+	final_result := '{';
+	LOOP
+        EXIT WHEN (dbms_sql.fetch_rows(cursorid) <= 0);
+			dbms_sql.column_value(cursorid, 1, c1value);
+			dbms_sql.column_value(cursorid, 2, c2value);
+			final_result := final_result || '(' || c1value || ', ' || c2value || ')'; 
+	END LOOP;
+	final_result := final_result ||'}';
+
+	-- step 5
+	close_cursor_ret := dbms_sql.close_cursor(cursorid);
+	--raise notice 'close_cursor() ret %', close_cursor_ret;
+	return final_result;
+END;
+$$
+LANGUAGE 'plpgsql' NOT FENCED;
+CREATE or REPLACE FUNCTION test_dbmssql_varchar()
+RETURNS text
+AS $$
+DECLARE
+    cursorid int;
+	query text;
+	define_column_ret int;
+	parse_ret int;
+	execute_ret int;
+	fetch_rows_ret int;
+	column_values_ret int;
+	close_cursor_ret int;
+	c1   int;
+	c2   varchar;
+	c1value int;
+	c2value varchar;
+	final_result text;
+BEGIN
+	query := 'select c1,c2 from t4 order by 1;';
+
+	-- step1 open cursor 
+	cursorid := dbms_sql.open_cursor();
+	--raise notice 'open_cursor() cursorid: %', cursorid;
+	
+	-- step2 parse
+	parse_ret := dbms_sql.parse(cursorid, query, 1);
+	--raise notice 'parse() %', parse_ret;
+
+	-- step3 define column
+	define_column_ret := dbms_sql.define_column(cursorid, 1, c1);
+	define_column_ret := dbms_sql.define_column(cursorid, 2, c2, 200);
+	--raise notice 'define_column() define_column_ret: %', define_column_ret;
+	
+	-- step3 execute
+	execute_ret := dbms_sql.execute(cursorid);
+	--raise notice 'execute() ret %', execute_ret;
+	
+	-- step 4
+	final_result := '{';
+	LOOP
+        EXIT WHEN (dbms_sql.fetch_rows(cursorid) <= 0);
+			c1value := dbms_sql.column_value(cursorid, 1, c1);
+			c2value := dbms_sql.column_value(cursorid, 2, c2);
+			final_result := final_result || '(' || c1value || ', ' || c2value || ')'; 
+	END LOOP;
+	final_result := final_result ||'}';
+
+	-- step 5
+	close_cursor_ret := dbms_sql.close_cursor(cursorid);
+	--raise notice 'close_cursor() ret %', close_cursor_ret;
+	return final_result;
+END;
+$$
+LANGUAGE 'plpgsql' NOT FENCED;
+CREATE or REPLACE FUNCTION test_dbmssql_char()
+RETURNS text
+AS $$
+DECLARE
+    cursorid int;
+	query text;
+	define_column_ret int;
+	parse_ret int;
+	execute_ret int;
+	fetch_rows_ret int;
+	column_values_ret int;
+	close_cursor_ret int;
+	c1   int;
+	c2   char(20);
+	c1value int;
+	c2value char(20);
+	c3value char(20);
+	err numeric;
+	act_len int;
+	value text;
+	final_result text;
+BEGIN
+	query := 'select c1,c2 from t3 order by 1;';
+	act_len := 3;
+	-- step1 open cursor 
+	cursorid := dbms_sql.open_cursor();
+	--raise notice 'open_cursor() cursorid: %', cursorid;
+	
+	-- step2 parse
+	parse_ret := dbms_sql.parse(cursorid, query, 1);
+	--raise notice 'parse() %', parse_ret;
+
+	-- step3 define column
+	define_column_ret := dbms_sql.define_column(cursorid, 1, c1);
+	define_column_ret := dbms_sql.define_column(cursorid, 2, c2, 200);
+	define_column_ret := dbms_sql.define_column(cursorid, 2, c2, 2);
+	raise notice 'define_column() define_column_ret: %', define_column_ret;
+	
+	-- step3 execute
+	execute_ret := dbms_sql.execute(cursorid);
+	--raise notice 'execute() ret %', execute_ret;
+	
+	-- step 4
+	final_result := '{';
+	LOOP
+        EXIT WHEN (dbms_sql.fetch_rows(cursorid) <= 0);
+			c1value := dbms_sql.column_value(cursorid, 1, c1);
+			--raise notice 'column_value_char() c1value: %', c1value;
+			dbms_sql.column_value_char(cursorid, 2, c2value);
+			--raise notice 'column_value_char() c2value: %', value;
+			dbms_sql.column_value_char(cursorid, 2, c3value, err, act_len);
+			--raise notice 'column_value_char() c3value: %', value;
+			final_result := final_result || '(' || c1value || ', ' || c2value || ',' || c3value || ')';
+	END LOOP;
+	final_result := final_result ||'}';
+
+	-- step 5
+	close_cursor_ret := dbms_sql.close_cursor(cursorid);
+	--raise notice 'close_cursor() ret %', close_cursor_ret;
+	return final_result;
+END;
+$$
+LANGUAGE 'plpgsql' NOT FENCED;
+CREATE or REPLACE FUNCTION test_dbmssql_bytea_long()
+RETURNS text
+AS $$
+DECLARE
+    cursorid int;
+	query text;
+	define_column_ret int;
+	parse_ret int;
+	execute_ret int;
+	fetch_rows_ret int;
+	column_values_ret int;
+	close_cursor_ret int;
+	value_length int;
+	c1   bigint;
+	c2   char(20);
+	c3	 bytea;
+	value1 text;
+	c2value text;
+	c3value bytea;
+	final_result text;
+BEGIN
+	query := 'select c2,c3 from t5 order by 1;';
+	value_length := 2;
+	-- step1 open cursor 
+	cursorid := dbms_sql.open_cursor();
+	--raise notice 'open_cursor() cursorid: %', cursorid;
+	
+	-- step2 parse
+	parse_ret := dbms_sql.parse(cursorid, query, 1);
+	--raise notice 'parse() %', parse_ret;
+
+	-- step3 define column
+	define_column_ret := dbms_sql.define_column_long(cursorid, 1);
+	--raise notice 'define_column2() define_column_ret: %', define_column_ret;
+	define_column_ret := dbms_sql.define_column(cursorid, 2, c3);
+	--raise notice 'define_column() define_column_ret: %', define_column_ret;
+	
+	-- step3 execute
+	execute_ret := dbms_sql.execute(cursorid);
+	--raise notice 'execute() ret %', execute_ret;
+	
+	-- step 4
+	final_result := '{';
+	LOOP
+        EXIT WHEN (dbms_sql.fetch_rows(cursorid) <= 0);
+			dbms_sql.column_value_long(cursorid, 1, 3, 1, c2value, value_length);
+			--raise notice 'column_value_long() value: %', value1;
+			dbms_sql.column_value_raw(cursorid, 2, c3value,0,5);
+			--raise notice 'column_value_raw() c3value: %', c3value;
+			final_result := final_result || '(' || c2value || ', ' || c3value || ')'; 
+	END LOOP;
+	final_result := final_result ||'}';
+	
+	-- step 5 
+	close_cursor_ret := dbms_sql.close_cursor(cursorid);
+	--raise notice 'close_cursor() ret %', close_cursor_ret;
+	return final_result;
+END;
+$$
+LANGUAGE 'plpgsql' NOT FENCED;
+select test_dbmssql_int();
+                                          test_dbmssql_int                                           
+-----------------------------------------------------------------------------------------------------
+ {(101, 101)(102, 102)(103, 103)(104, 104)(105, 105)(106, 106)(107, )(108, 108)(109, 109)(110, 110)}
+(1 row)
+
+select test_dbmssql_text();
+                         test_dbmssql_text                          
+--------------------------------------------------------------------
+ {(1, AAAAA)(2, BBBBB)(3, CCCCC)(4, DDDDD)(5, EEEEE)(7, )(, FFFFF)}
+(1 row)
+
+select test_dbmssql_char();
+NOTICE:  define_column() define_column_ret: 0
+CONTEXT:  referenced column: test_dbmssql_char
+                                       test_dbmssql_char                                       
+-----------------------------------------------------------------------------------------------
+ {(1, AAAAA,AAA)(2, BBBBB,BBB)(3, CCCCC,CCC)(4, DDDDD,DDD)(5, EEEEE,EEE)(7, ,)(, FFFFF,FFFFF)}
+(1 row)
+
+select test_dbmssql_varchar();
+                        test_dbmssql_varchar                        
+--------------------------------------------------------------------
+ {(1, AAAAA)(2, BBBBB)(3, CCCCC)(4, DDDDD)(5, EEEEE)(7, )(, FFFFF)}
+(1 row)
+
+select test_dbmssql_bytea_long();
+                                      test_dbmssql_bytea_long                                      
+---------------------------------------------------------------------------------------------------
+ {(AAA, \x4141414141)(BBB, \x4242424242)(CCC, \x4343434343)(DDD, \x4444444444)(EEE, \x4545454545)}
+(1 row)
+
+drop function test_dbmssql_int;
+drop function test_dbmssql_text;
+drop function test_dbmssql_char;
+drop function test_dbmssql_varchar;
+drop function test_dbmssql_bytea_long();
+/*
+ * --------------------------------------------------------------------------------
+ * Exceptional test
+ * --------------------------------------------------------------------------------
+ */
+-- test1: verify that cursor is not found
+-- test1.1 cursorid is not found in parse()
+CREATE or REPLACE FUNCTION dbmssql_exception_test1()
+RETURNS int AS $$
+DECLARE
+    cursorid int;
+    query text;
+BEGIN
+    query := 'select c1,c2 from t3 order by 1;';
+    cursorid := dbms_sql.open_cursor();
+	-- invalid request
+    dbms_sql.parse(cursorid + 1, query, 1);
+	
+	dbms_sql.close_cursor(cursorid);
+    return 0;
+END;
+$$
+LANGUAGE 'plpgsql' NOT FENCED;
+select dbmssql_exception_test1();
+ERROR:  given cursor:7 is not found
+CONTEXT:  SQL statement "CALL dbms_sql.parse(cursorid + 1,query,1)"
+PL/pgSQL function dbmssql_exception_test1() line 9 at PERFORM
+referenced column: dbmssql_exception_test1
+drop function dbmssql_exception_test1;
+-- test1.2 cursorid is not found in execute()
+CREATE or REPLACE FUNCTION dbmssql_exception_test2()
+RETURNS int AS $$
+DECLARE
+    cursorid int;
+	retval  int;
+    query text;
+BEGIN
+	query := 'select c1,c2 from t3 order by 1;';
+
+	cursorid := dbms_sql.open_cursor();
+	dbms_sql.parse(cursorid, query, 1);
+
+	-- invalid request
+    retval := dbms_sql.execute(cursorid + 1);
+
+	dbms_sql.close_cursor(cursorid);
+    return 0;
+END;
+$$
+LANGUAGE 'plpgsql' NOT FENCED;
+select dbmssql_exception_test2();
+ERROR:  given cursor:2 is not found
+CONTEXT:  PL/pgSQL function dbmssql_exception_test2() line 13 at assignment
+referenced column: dbmssql_exception_test2
+drop function dbmssql_exception_test2;
+-- test1.3 cursorid not found in define_column
+CREATE or REPLACE FUNCTION dbmssql_exception_test3()
+RETURNS int AS $$
+DECLARE
+    cursorid int;
+	retval  int;
+	c1 int;
+	c2 int;
+    query text;
+BEGIN
+	query := 'select c1,c2 from t1 order by 1;';
+
+	cursorid := dbms_sql.open_cursor();
+	dbms_sql.parse(cursorid, query, 1);
+
+	retval := dbms_sql.define_column(cursorid, 1, c1);
+	-- invalid request
+    retval := dbms_sql.execute(cursorid + 1);
+
+	dbms_sql.close_cursor(cursorid);
+    return 0;
+END;
+$$
+LANGUAGE 'plpgsql' NOT FENCED;
+select dbmssql_exception_test3();
+ERROR:  given cursor:2 is not found
+CONTEXT:  PL/pgSQL function dbmssql_exception_test3() line 16 at assignment
+referenced column: dbmssql_exception_test3
+drop function dbmssql_exception_test3;
+-- test1.4 cursorid not found in fetch_rows
+CREATE or REPLACE FUNCTION dbmssql_exception_test4()
+RETURNS int AS $$
+DECLARE
+    cursorid int;
+	retval  int;
+	c1 int;
+	c2 int;
+    query text;
+BEGIN
+	query := 'select c1,c2 from t1 order by 1;';
+
+	cursorid := dbms_sql.open_cursor();
+	dbms_sql.parse(cursorid, query, 1);
+
+	retval := dbms_sql.define_column(cursorid, 1, c1);
+    retval := dbms_sql.execute(cursorid);
+	-- invalid request
+	retval := dbms_sql.fetch_rows(cursorid+1);
+
+	dbms_sql.close_cursor(cursorid);
+    return 0;
+END;
+$$
+LANGUAGE 'plpgsql' NOT FENCED;
+select dbmssql_exception_test4();
+ERROR:  given cursor:2 is not found
+CONTEXT:  PL/pgSQL function dbmssql_exception_test4() line 17 at assignment
+referenced column: dbmssql_exception_test4
+drop function dbmssql_exception_test4;
+-- test1.5 cursorid not found in column_value
+CREATE or REPLACE FUNCTION dbmssql_exception_test5()
+RETURNS int AS $$
+DECLARE
+    cursorid int;
+	retval  int;
+	c1 int;
+	c2 int;
+    query text;
+BEGIN
+	query := 'select c1,c2 from t1 order by 1;';
+
+	cursorid := dbms_sql.open_cursor();
+	dbms_sql.parse(cursorid, query, 1);
+
+	retval := dbms_sql.define_column(cursorid, 1, c1);
+    retval := dbms_sql.execute(cursorid);
+	retval := dbms_sql.fetch_rows(cursorid);
+	-- invalid request
+	retval := dbms_sql.column_value(cursorid+1, 1, c1);
+
+	dbms_sql.close_cursor(cursorid);
+    return 0;
+END;
+$$
+LANGUAGE 'plpgsql' NOT FENCED;
+select dbmssql_exception_test5();
+ERROR:  given cursor:2 is not found
+CONTEXT:  PL/pgSQL function dbms_sql.column_value(integer,integer,anyelement) line 7 at assignment
+PL/pgSQL function dbmssql_exception_test5() line 18 at assignment
+referenced column: dbmssql_exception_test5
+drop function dbmssql_exception_test5;
+-- test1.6 cursorid not found in close_cursor
+create table tx(c1 int, c2 int);
+CREATE or REPLACE FUNCTION dbmssql_exception_test6()
+RETURNS int AS $$
+DECLARE
+    cursorid int;
+	retval  int;
+	c1 int;
+	c2 int;
+    query text;
+BEGIN
+	query := 'select c1,c2 from tx order by 1;';
+
+	cursorid := dbms_sql.open_cursor();
+	dbms_sql.parse(cursorid, query, 1);
+
+	retval := dbms_sql.define_column(cursorid, 1, c1);
+    retval := dbms_sql.execute(cursorid);
+	retval := dbms_sql.fetch_rows(cursorid);
+	retval := dbms_sql.column_value(cursorid, 1, c1);
+	-- invalid request
+	dbms_sql.close_cursor(cursorid+1);
+    return 0;
+END;
+$$
+LANGUAGE 'plpgsql' NOT FENCED;
+select dbmssql_exception_test6();
+ERROR:  No rows left in cursor 1
+CONTEXT:  PL/pgSQL function dbms_sql.column_value(integer,integer,anyelement) line 7 at assignment
+PL/pgSQL function dbmssql_exception_test6() line 17 at assignment
+referenced column: dbmssql_exception_test6
+insert into tx values(1,1);
+insert into tx values(2,2);
+select dbmssql_exception_test6();
+ERROR:  given cursor:2 is not found
+CONTEXT:  SQL statement "CALL dbms_sql.close_cursor(cursorid+1)"
+PL/pgSQL function dbmssql_exception_test6() line 19 at PERFORM
+referenced column: dbmssql_exception_test6
+drop table tx;
+drop function dbmssql_exception_test6;
+-- test1.7
+CREATE or REPLACE FUNCTION dbmssql_exception_test7()
+RETURNS int AS $$
+DECLARE
+    cursorid int;
+    retval  int;
+    c1 int;
+    c2 int;
+    query text;
+BEGIN
+    query := 'select c1,c2 from tx_not_exist order by 1;';
+
+    cursorid := dbms_sql.open_cursor();
+    dbms_sql.parse(cursorid, query, 1);
+
+    retval := dbms_sql.define_column(cursorid, 1, c1);
+    retval := dbms_sql.execute(cursorid);
+    retval := dbms_sql.fetch_rows(cursorid);
+    retval := dbms_sql.column_value(cursorid, 1, c1);
+    -- invalid request
+    dbms_sql.close_cursor(cursorid+1);
+    return 0;
+END;
+$$
+LANGUAGE 'plpgsql' NOT FENCED;
+--Call twice to test if there is un cleaned cursor context
+select dbmssql_exception_test7();
+ERROR:  relation "tx_not_exist" does not exist
+LINE 1: select c1,c2 from tx_not_exist order by 1;
+                          ^
+QUERY:  select c1,c2 from tx_not_exist order by 1;
+CONTEXT:  PL/pgSQL function dbmssql_exception_test7() line 15 at assignment
+referenced column: dbmssql_exception_test7
+select dbmssql_exception_test7();
+ERROR:  relation "tx_not_exist" does not exist
+LINE 1: select c1,c2 from tx_not_exist order by 1;
+                          ^
+QUERY:  select c1,c2 from tx_not_exist order by 1;
+CONTEXT:  PL/pgSQL function dbmssql_exception_test7() line 15 at assignment
+referenced column: dbmssql_exception_test7
+drop function dbmssql_exception_test7;
+-- test2: verify that use is not following regular parse() execute() define_column() process to run dbms_sql
+-- test2.1 run define_column without parse()
+CREATE or REPLACE FUNCTION dbmssql_exception_test21()
+RETURNS int AS $$
+DECLARE
+    cursorid int;
+	retval  int;
+	c1 int;
+	c2 int;
+    query text;
+BEGIN
+	query := 'select c1,c2 from t1 order by 1;';
+
+	cursorid := dbms_sql.open_cursor();
+	--retval := dbms_sql.parse(cursorid, query, 1);
+	retval := dbms_sql.define_column(cursorid, 1, c1);
+    retval := dbms_sql.execute(cursorid);
+	retval := dbms_sql.fetch_rows(cursorid);
+	retval := dbms_sql.column_value(cursorid, 1, c1);
+	dbms_sql.close_cursor(cursorid);
+
+    return 0;
+END;
+$$
+LANGUAGE 'plpgsql' NOT FENCED;
+select dbmssql_exception_test21();
+ERROR:  Invalid DBMS_SQL execution step in InsertColumnType(), error detail:Before dbms_sql.define_column() we must have cursor status in PARSE
+CONTEXT:  SQL statement "CALL dbms_sql.define_column_int(cursorid,pos)"
+PL/pgSQL function dbms_sql.define_column(integer,integer,anyelement,integer) line 7 at PERFORM
+PL/pgSQL function dbmssql_exception_test21() line 13 at assignment
+referenced column: dbmssql_exception_test21
+drop function dbmssql_exception_test21;
+-- test2.2 run execute without parse()
+CREATE or REPLACE FUNCTION dbmssql_exception_test22()
+RETURNS int AS $$
+DECLARE
+    cursorid int;
+	retval  int;
+	c1 int;
+	c2 int;
+    query text;
+BEGIN
+	query := 'select c1,c2 from t1 order by 1;';
+
+	cursorid := dbms_sql.open_cursor();
+	--retval := dbms_sql.parse(cursorid, query, 1);
+	--retval := dbms_sql.define_column(cursorid, 1, c1);
+    retval := dbms_sql.execute(cursorid);
+	retval := dbms_sql.fetch_rows(cursorid);
+	retval := dbms_sql.column_value(cursorid, 1, c1);
+	dbms_sql.close_cursor(cursorid);
+
+    return 0;
+END;
+$$
+LANGUAGE 'plpgsql' NOT FENCED;
+select dbmssql_exception_test22();
+ERROR:  Invalid DBMS_SQL execution step in dbms_sql_execute(), error detail:Before dbms_sql.execute() we must have the given cursorid after parse() or define_column()
+CONTEXT:  PL/pgSQL function dbmssql_exception_test22() line 14 at assignment
+referenced column: dbmssql_exception_test22
+drop function dbmssql_exception_test22;
+-- test2.3 run fetch_rows without execute()
+CREATE or REPLACE FUNCTION dbmssql_exception_test23()
+RETURNS int AS $$
+DECLARE
+    cursorid int;
+	retval  int;
+	c1 int;
+	c2 int;
+    query text;
+BEGIN
+	query := 'select c1,c2 from t1 order by 1;';
+
+	cursorid := dbms_sql.open_cursor();
+	retval := dbms_sql.parse(cursorid, query, 1);
+	retval := dbms_sql.define_column(cursorid, 1, c1);
+    --retval := dbms_sql.execute(cursorid);
+	retval := dbms_sql.fetch_rows(cursorid);
+	retval := dbms_sql.column_value(cursorid, 1, c1);
+	dbms_sql.close_cursor(cursorid);
+
+    return 0;
+END;
+$$
+LANGUAGE 'plpgsql' NOT FENCED;
+select dbmssql_exception_test23();
+ERROR:  Invalid DBMS_SQL execution step in dbms_sql_fetch_rows(), error detail:Before dbms_sql.fetch_rows() we must have the given cursorid after execute()
+CONTEXT:  PL/pgSQL function dbmssql_exception_test23() line 15 at assignment
+referenced column: dbmssql_exception_test23
+drop function dbmssql_exception_test23;
+-- test2.4 run column_value without fetch_rows
+CREATE or REPLACE FUNCTION dbmssql_exception_test24()
+RETURNS int AS $$
+DECLARE
+    cursorid int;
+	retval  int;
+	c1 int;
+	c2 int;
+    query text;
+BEGIN
+	query := 'select c1,c2 from t1 order by 1;';
+
+	cursorid := dbms_sql.open_cursor();
+	retval := dbms_sql.parse(cursorid, query, 1);
+	retval := dbms_sql.define_column(cursorid, 1, c1);
+    retval := dbms_sql.execute(cursorid);
+	--retval := dbms_sql.fetch_rows(cursorid);
+	retval := dbms_sql.column_value(cursorid, 1, c1);
+	dbms_sql.close_cursor(cursorid);
+
+    return 0;
+END;
+$$
+LANGUAGE 'plpgsql' NOT FENCED;
+select dbmssql_exception_test24();
+ERROR:  Invalid DBMS_SQL execution step in GetColumnValueDatum(), error detail:Before dbms_sql.column_value() we must have the given cursorid after fetch_rows()
+CONTEXT:  PL/pgSQL function dbms_sql.column_value(integer,integer,anyelement) line 7 at assignment
+PL/pgSQL function dbmssql_exception_test24() line 16 at assignment
+referenced column: dbmssql_exception_test24
+drop function dbmssql_exception_test24;
+-- test2.5 double close same cursorid
+CREATE or REPLACE FUNCTION dbmssql_exception_test25()
+RETURNS int AS $$
+DECLARE
+    cursorid int;
+	retval  int;
+	c1 int;
+	c2 int;
+    query text;
+BEGIN
+	query := 'select c1,c2 from t1 order by 1;';
+
+	cursorid := dbms_sql.open_cursor();
+	retval := dbms_sql.parse(cursorid, query, 1);
+	retval := dbms_sql.define_column(cursorid, 1, c1);
+    retval := dbms_sql.execute(cursorid);
+	retval := dbms_sql.fetch_rows(cursorid);
+	--retval := dbms_sql.column_value(cursorid, 1, c1);
+	dbms_sql.close_cursor(cursorid);
+	dbms_sql.close_cursor(cursorid);
+
+    return 0;
+END;
+$$
+LANGUAGE 'plpgsql' NOT FENCED;
+select dbmssql_exception_test25();
+ERROR:  given cursor:1 is not found
+CONTEXT:  SQL statement "CALL dbms_sql.close_cursor(cursorid)"
+PL/pgSQL function dbmssql_exception_test25() line 18 at PERFORM
+referenced column: dbmssql_exception_test25
+drop function dbmssql_exception_test25;
+-- test2.6 Test define_column unspported
+CREATE or REPLACE FUNCTION dbmssql_exception_test26()
+RETURNS int AS $$
+DECLARE
+    cursorid int;
+    retval  int;
+    c1 int;
+    c2 timestamp;
+    query text;
+BEGIN
+    query := 'select c1,c2 from t1 order by 1;';
+
+    cursorid := dbms_sql.open_cursor();
+    retval := dbms_sql.parse(cursorid, query, 1);
+    retval := dbms_sql.define_column(cursorid, 1, c2);
+    retval := dbms_sql.execute(cursorid);
+    retval := dbms_sql.fetch_rows(cursorid);
+    --retval := dbms_sql.column_value(cursorid, 1, c1);
+    dbms_sql.close_cursor(cursorid);
+    dbms_sql.close_cursor(cursorid);
+
+    return 0;
+END;
+$$
+LANGUAGE 'plpgsql' NOT FENCED;
+select dbmssql_exception_test26();
+ERROR:  UnSupport data type for define_column(cursor: 2, pos: 1, timestamp without time zone)
+CONTEXT:  SQL statement "CALL dbms_sql.define_column_unknown(cursorid,pos,col_type)"
+PL/pgSQL function dbms_sql.define_column(integer,integer,anyelement,integer) line 16 at PERFORM
+PL/pgSQL function dbmssql_exception_test26() line 13 at assignment
+referenced column: dbmssql_exception_test26
+drop function dbmssql_exception_test26;
+-- test2.7 Test column_value unspported
+CREATE or REPLACE FUNCTION dbmssql_exception_test27()
+RETURNS int AS $$
+DECLARE
+    cursorid int;
+    retval  int;
+    c1 int;
+    c2 timestamp;
+    query text;
+BEGIN
+    query := 'select c1,c2 from t1 order by 1;';
+
+    cursorid := dbms_sql.open_cursor();
+    retval := dbms_sql.parse(cursorid, query, 1);
+    retval := dbms_sql.define_column(cursorid, 1, c1);
+    retval := dbms_sql.execute(cursorid);
+    retval := dbms_sql.fetch_rows(cursorid);
+    retval := dbms_sql.column_value(cursorid, 1, c2);
+    dbms_sql.close_cursor(cursorid);
+    dbms_sql.close_cursor(cursorid);
+
+    return 0;
+END;
+$$
+LANGUAGE 'plpgsql' NOT FENCED;
+select dbmssql_exception_test27();
+ERROR:  UnSupport data type for column_value(cursor: 1, pos: 1, timestamp without time zone)
+CONTEXT:  SQL statement "CALL dbms_sql.column_value_unknown(cursorid,pos,col_type)"
+PL/pgSQL function dbms_sql.column_value(integer,integer,anyelement) line 16 at PERFORM
+PL/pgSQL function dbmssql_exception_test27() line 16 at assignment
+referenced column: dbmssql_exception_test27
+drop function dbmssql_exception_test27;
+-- test2.8 Test is_ipen
+CREATE or REPLACE FUNCTION dbmssql_exception_test28()
+RETURNS int AS $$
+DECLARE
+    cursorid int;
+    retval  int;
+	is_open boolean;
+    c1 int;
+    query text;
+BEGIN
+    query := 'select c1,c2 from t1 order by 1;';
+
+    cursorid := dbms_sql.open_cursor();
+	is_open := dbms_sql.is_open(cursorid);
+    retval := dbms_sql.parse(cursorid, query, 1);
+	is_open := dbms_sql.is_open(cursorid);
+    retval := dbms_sql.define_column(cursorid, 1, c1);
+	is_open := dbms_sql.is_open(cursorid);
+    retval := dbms_sql.execute(cursorid);
+	is_open := dbms_sql.is_open(cursorid);
+    retval := dbms_sql.fetch_rows(cursorid);
+	is_open := dbms_sql.is_open(cursorid);
+    dbms_sql.close_cursor(cursorid);
+	is_open := dbms_sql.is_open(cursorid);
+    dbms_sql.close_cursor(cursorid);
+	is_open := dbms_sql.is_open(cursorid);
+
+    return 0;
+END;
+$$
+LANGUAGE 'plpgsql' NOT FENCED;
+select dbmssql_exception_test28();
+is_open:true
+is_open:true
+is_open:true
+is_open:true
+is_open:true
+ERROR:  given cursor:1 is not found
+CONTEXT:  PL/pgSQL function dbmssql_exception_test28() line 27 at assignment
+referenced column: dbmssql_exception_test28
+drop function dbmssql_exception_test28;
+drop table t1;
+drop table t2;
+drop table t3;
+drop table t4;
+drop table t5;
+--Test Real Work
+CREATE OR REPLACE FUNCTION FUNC_SPMS_FPMS_DATA ( i_query in varchar2 ,i_separator in varchar2 ,i_dir in varchar2 ,i_filename in varchar2 )
+     RETURN number AUTHID CURRENT_USER is l_output utl_file.file_type ;
+     l_theCursor integer default dbms_sql.open_cursor ;
+     l_columnValue varchar2 ( 5000 ) ;
+     l_status integer ;
+     l_colCnt number default 0 ;
+     l_separator varchar2 ( 10 ) default '' ;
+     l_cnt number default 0 ;
+BEGIN
+    l_output := utl_file.fopen ( i_dir ,i_filename ,'w' ,32767 ) ;
+    dbms_sql.parse ( l_theCursor ,i_query ,dbms_sql.native ) ;
+    FOR i in 1..255 LOOP
+        BEGIN
+            dbms_sql.define_column ( l_theCursor ,i ,l_columnValue ,5000 ) ;
+            l_colCnt := i ;
+            exception WHEN others
+            THEN
+                IF ( sqlcode = - 1007 ) THEN
+                     EXIT ;
+                ELSE
+                    raise ;
+                END IF ;
+            END ;
+    END LOOP ;
+    dbms_sql.define_column ( l_theCursor ,1 ,l_columnValue ,5000 ) ;
+    l_status := dbms_sql.execute ( l_theCursor ) ;
+    LOOP EXIT WHEN( dbms_sql.fetch_rows ( l_theCursor ) <= 0 ) ;
+        l_separator := '' ;
+        FOR i in 1.. l_colCnt LOOP
+            dbms_sql.column_value ( l_theCursor ,i ,l_columnValue ) ;
+            IF i = l_colCnt
+            THEN
+                utl_file.put ( l_output ,l_separator || l_columnValue || chr ( 13 ) ) ;
+            ELSE
+                utl_file.put ( l_output ,l_separator || l_columnValue ) ;
+            END IF ;
+            l_separator := i_separator ;
+        END LOOP ;
+        utl_file.new_line ( l_output ) ;
+        l_cnt := l_cnt + 1 ;
+    END LOOP ;
+    dbms_sql.close_cursor ( l_theCursor ) ;
+    utl_file.fclose ( l_output ) ;
+    RETURN l_cnt ;
+END;
+/
+DROP FUNCTION FUNC_SPMS_FPMS_DATA;
+--open_cursor twice but close once
+create or replace procedure pro_dbms_sql_err_open_05()
+as 
+declare
+cursorid int;
+cursorid1 int;
+query varchar2(2000);
+begin
+cursorid := dbms_sql.open_cursor();
+cursorid1 := dbms_sql.open_cursor();
+dbms_sql.close_cursor(cursorid);
+EXCEPTION
+WHEN OTHERS THEN
+DBMS_SQL.CLOSE_CURSOR(cursorid1);
+end;
+/
+call pro_dbms_sql_err_open_05();
+ pro_dbms_sql_err_open_05 
+--------------------------
+ 
+(1 row)
+
+--param number more than required
+create or replace procedure pro_dbms_sql_parse_05()
+as
+declare
+        cursorid int;
+        query varchar(2000);
+        v_stat     int;
+begin
+        query := 'select * from dual;';
+        cursorid := dbms_sql.open_cursor();
+        dbms_sql.parse(cursorid,query, 1, 2);
+        v_stat := dbms_sql.execute(cursorid);
+        dbms_sql.close_cursor(cursorid);
+        EXCEPTION
+        WHEN OTHERS THEN
+        DBMS_SQL.CLOSE_CURSOR(cursorid);
+end;
+/
+ERROR:  when invoking function dbms_sql.parse, expected ")", maybe input something superfluous.
+CONTEXT:  compilation of PL/pgSQL function "pro_dbms_sql_parse_05" near line 8
+call pro_dbms_sql_parse_05();
+ERROR:  function "pro_dbms_sql_parse_05" doesn't exist 
+--param number not enough
+create or replace procedure pro_dbms_sql_parse_05()
+as 
+declare
+	cursorid int;
+	query varchar(2000);
+	v_stat     int;
+begin
+	query := 'select * from dual;';
+	cursorid := dbms_sql.open_cursor();
+	dbms_sql.parse(cursorid,query);
+	v_stat := dbms_sql.execute(cursorid);
+	dbms_sql.close_cursor(cursorid);
+	EXCEPTION
+        WHEN OTHERS THEN
+        DBMS_SQL.CLOSE_CURSOR(cursorid);
+end;
+/
+ERROR:  function dbms_sql.parse has no enough parameters
+CONTEXT:  compilation of PL/pgSQL function "pro_dbms_sql_parse_05" near line 8
+call pro_dbms_sql_parse_05();
+ERROR:  function "pro_dbms_sql_parse_05" doesn't exist 
+--2th argumen is null
+create or replace procedure pro_dbms_sql_parse_15()
+as 
+declare
+	cursorid int;
+	query varchar(2000);
+	v_stat     int;
+begin
+	query := 'select * from dual;';
+	cursorid := dbms_sql.open_cursor();
+	dbms_sql.parse(cursorid,'',1);
+	v_stat := dbms_sql.execute(cursorid);
+	dbms_sql.close_cursor(cursorid);
+end;
+/
+call pro_dbms_sql_parse_15();
+ERROR:  null value not allowed
+HINT:  2th argument is NULL.
+CONTEXT:  SQL statement "CALL dbms_sql.parse(cursorid,'',1)"
+PL/pgSQL function pro_dbms_sql_parse_15() line 9 at PERFORM
+--insert
+create table dbms_sql_udi_01(n_id   number,  v_name  varchar2(50), d_insert_date char(20));
+create or replace procedure pro_dbms_sql_insert_01()
+is 
+declare
+   v_cursor   int;
+   v_sql      varchar2(200);
+   v_id       int;
+   v_name     varchar2(50);
+   v_date     char(20);
+   v_stat     int;
+begin   
+   v_id := 1;
+   v_name := '1';
+   v_date := '85412';
+   v_cursor := dbms_sql.open_cursor();  
+   v_sql := 'insert into dbms_sql_udi_01(n_id, v_name, d_insert_date) values('||v_id||','||v_name||','||v_date||');';
+   dbms_sql.parse(v_cursor, v_sql,1);    
+   v_stat := dbms_sql.execute(v_cursor);  
+   dbms_sql.close_cursor(v_cursor);   
+end;
+/
+call pro_dbms_sql_insert_01();
+ERROR:  INSERT is not allowed in a non-volatile function
+CONTEXT:  SQL statement "insert into dbms_sql_udi_01(n_id, v_name, d_insert_date) values(1,1,85412);"
+PL/pgSQL function pro_dbms_sql_insert_01() line 16 at assignment
+select * from dbms_sql_udi_01;
+ n_id | v_name | d_insert_date 
+------+--------+---------------
+(0 rows)
+
+insert into dbms_sql_udi_01(n_id, v_name, d_insert_date) values (1, 'Tome', '20190306');
+--update 
+create or replace procedure pro_dbms_sql_update_01()
+as 
+declare
+   v_cursor   number;
+   v_sql      varchar2(200);
+   v_id       number;
+   v_name     varchar2(50);
+   v_stat     number;
+begin
+    v_name := '1';
+    v_id := 1;
+    v_cursor := dbms_sql.open_cursor();
+    v_sql := 'update dbms_sql_udi_01 set v_name = '||v_name||', d_insert_date = 8454 where n_id = '||v_id||';';
+    dbms_sql.parse(v_cursor, v_sql, 1);
+    v_stat := dbms_sql.execute(v_cursor);
+    dbms_sql.close_cursor(v_cursor);
+    commit;
+end;
+/
+call pro_dbms_sql_update_01();
+ERROR:  UPDATE is not allowed in a non-volatile function
+CONTEXT:  SQL statement "update dbms_sql_udi_01 set v_name = 1, d_insert_date = 8454 where n_id = 1;"
+PL/pgSQL function pro_dbms_sql_update_01() line 14 at assignment
+select * from dbms_sql_udi_01;
+ n_id | v_name |    d_insert_date     
+------+--------+----------------------
+    1 | Tome   | 20190306            
+(1 row)
+
+--delete
+create or replace procedure pro_dbms_sql_delete_01()
+as 
+declare
+    v_cursor   number;
+    v_sql      varchar2(200);
+    v_id       number;
+    v_stat     number;
+begin
+
+   v_id := 1;
+   v_sql := 'delete from dbms_sql_udi_01 where n_id = '||v_id||';';
+   v_cursor := dbms_sql.open_cursor();
+   dbms_sql.parse(v_cursor, v_sql,1);
+   v_stat := dbms_sql.execute(v_cursor);
+   dbms_sql.close_cursor(v_cursor);
+end;
+/
+call pro_dbms_sql_delete_01();
+ERROR:  DELETE is not allowed in a non-volatile function
+CONTEXT:  SQL statement "delete from dbms_sql_udi_01 where n_id = 1;"
+PL/pgSQL function pro_dbms_sql_delete_01() line 13 at assignment
+select * from dbms_sql_udi_01;
+ n_id | v_name |    d_insert_date     
+------+--------+----------------------
+    1 | Tome   | 20190306            
+(1 row)
+
+create or replace procedure pro_dbms_sql_all_03(in_raw raw,in_int int,in_long bigint,in_text text,in_char char(30),in_varchar varchar(30))
+as 
+declare
+cursorid int;
+v_id int;
+v_info bytea;
+v_long bigint;
+v_text text;
+v_char char(30);
+v_varchar varchar(30);
+query varchar(2000);
+execute_ret int;
+define_column_ret_raw raw;
+define_column_ret int;
+define_column_ret_long bigint;
+define_column_ret_text text;
+define_column_ret_char char(30);
+define_column_ret_varchar varchar(30);
+begin
+drop table if exists pro_dbms_sql_all_tb1_03 ;
+create table pro_dbms_sql_all_tb1_03(a int ,b raw,c bigint,d text,e char(30),f varchar(30));
+insert into pro_dbms_sql_all_tb1_03 values(1,HEXTORAW('DEADBEEF'),in_long,in_text,in_char,in_varchar);
+insert into pro_dbms_sql_all_tb1_03 values(in_int,in_raw,-9223372036854775808,'5','SDSWFSWFSFWF','845injnj');
+insert into pro_dbms_sql_all_tb1_03 values(3,HEXTORAW('DEADBEEF'),9223372036854775807,'4','sqsm','zhimajie');
+insert into pro_dbms_sql_all_tb1_03 values(-2147483648,HEXTORAW('1'),'3','3','nuannuan','weicn');
+insert into pro_dbms_sql_all_tb1_03 values(2147483647,HEXTORAW('2'),'4','2',in_varchar,in_char);
+query := 'select * from pro_dbms_sql_all_tb1_03 order by 1';
+
+cursorid := dbms_sql.open_cursor();
+
+dbms_sql.parse(cursorid, query, 1);
+
+define_column_ret:= dbms_sql.define_column(cursorid,1,v_id);
+define_column_ret_raw    := dbms_sql.define_column(cursorid,2,v_info);
+define_column_ret_long   := dbms_sql.define_column(cursorid,3,v_long);
+define_column_ret_text   := dbms_sql.define_column(cursorid,4,v_text);
+define_column_ret_char   := dbms_sql.define_column_char(cursorid,5,v_char,30);
+define_column_ret_varchar:= dbms_sql.define_column_varchar(cursorid,6,v_varchar,30);
+
+execute_ret := dbms_sql.execute(cursorid);
+loop 
+exit when (dbms_sql.fetch_rows(cursorid) <= 0);
+
+dbms_sql.column_value(cursorid,1,v_id);
+dbms_sql.column_value(cursorid,2,v_info);
+dbms_sql.column_value_long(cursorid,3,8,1,v_long,8);
+dbms_sql.column_value(cursorid,4,v_text);
+dbms_sql.column_value_char(cursorid,5,v_char,30);
+dbms_sql.column_value_char(cursorid,6,v_varchar,30);
+
+
+end loop;
+
+dbms_sql.close_cursor(cursorid);
+end;
+/
+call pro_dbms_sql_all_03(HEXTORAW('DEADBEEF'),2,4,'SDSWFSWFSFWF','sdjddd','dcjdshj23');
+NOTICE:  table "pro_dbms_sql_all_tb1_03" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists pro_dbms_sql_all_tb1_03"
+PL/pgSQL function pro_dbms_sql_all_03(raw,integer,bigint,text,character,character varying) line 19 at SQL statement
+CONTEXT:  SQL statement "create table pro_dbms_sql_all_tb1_03(a int ,b raw,c bigint,d text,e char(30),f varchar(30))"
+PL/pgSQL function pro_dbms_sql_all_03(raw,integer,bigint,text,character,character varying) line 20 at SQL statement
+ERROR:  Variable is not initiated
+CONTEXT:  PL/pgSQL function pro_dbms_sql_all_03(raw,integer,bigint,text,character,character varying) line 36 at assignment
+drop table if exists pro_dbms_sql_err_open_06_tb1;
+NOTICE:  table "pro_dbms_sql_err_open_06_tb1" does not exist, skipping
+create table pro_dbms_sql_err_open_06_tb1(c1 int,c2 int);
+create or replace procedure pro_dbms_sql_err_open_06() as
+declare
+id numeric ;
+start_time int;
+cursorid int; 
+query text;
+   a text;
+   b int;
+execute_ret int;
+begin
+cursorid := dbms_sql.open_cursor();
+query := 'select * from pro_dbms_sql_err_open_06_tb1;';
+dbms_sql.parse(cursorid, query, 1);
+dbms_sql.define_column(cursorid,1, a);
+dbms_sql.define_column(cursorid,2, b);
+execute_ret := dbms_sql.execute(cursorid);
+loop 
+exit when (dbms_sql.fetch_rows(cursorid) <= 0);
+dbms_sql.column_value(cursorid,1, a);
+dbms_sql.column_value(cursorid,2, b);
+end loop;
+dbms_sql.close_cursor(cursorid);
+end;
+/
+call pro_dbms_sql_err_open_06();
+,
+ pro_dbms_sql_err_open_06 
+--------------------------
+ 
+(1 row)
+
+call pro_dbms_sql_err_open_06();
+,
+ pro_dbms_sql_err_open_06 
+--------------------------
+ 
+(1 row)
+
+call pro_dbms_sql_err_open_06();
+,
+ pro_dbms_sql_err_open_06 
+--------------------------
+ 
+(1 row)
+
+create or replace procedure pro_dbms_sql_char_02()
+as 
+declare
+cursorid int;
+v_id int;
+v_info char(10):=1;
+query varchar(2000);
+execute_ret int;
+define_column_ret_text char(10) ;
+define_column_ret int;
+begin
+drop table if exists pro_dbms_sql_char_tb1_02 ;
+create table pro_dbms_sql_char_tb1_02(a int ,b char(20));
+insert into pro_dbms_sql_char_tb1_02 values(1,'闲听落花');
+insert into pro_dbms_sql_char_tb1_02 values(2,'天空之城such');
+query := 'select * from pro_dbms_sql_char_tb1_02 order by 1';
+
+cursorid := dbms_sql.open_cursor();
+
+dbms_sql.parse(cursorid, query, 1);
+
+define_column_ret:= dbms_sql.define_column(cursorid,1,v_id);
+define_column_ret_text:= dbms_sql.define_column_char(cursorid,2,v_info,10);
+
+execute_ret := dbms_sql.execute(cursorid);
+loop 
+exit when (dbms_sql.fetch_rows(cursorid) <= 0);
+
+dbms_sql.column_value(cursorid,1,v_id);
+dbms_sql.column_value_char(cursorid,2,v_info,10);
+
+end loop;
+
+dbms_sql.close_cursor(cursorid);
+end;
+/
+call pro_dbms_sql_char_02();
+NOTICE:  table "pro_dbms_sql_char_tb1_02" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists pro_dbms_sql_char_tb1_02"
+PL/pgSQL function pro_dbms_sql_char_02() line 11 at SQL statement
+CONTEXT:  SQL statement "create table pro_dbms_sql_char_tb1_02(a int ,b char(20))"
+PL/pgSQL function pro_dbms_sql_char_02() line 12 at SQL statement
+ERROR:  value too long for type character(10)
+CONTEXT:  PL/pgSQL function pro_dbms_sql_char_02() line 29 at SQL statement
+call pro_dbms_sql_char_02();
+NOTICE:  table "pro_dbms_sql_char_tb1_02" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists pro_dbms_sql_char_tb1_02"
+PL/pgSQL function pro_dbms_sql_char_02() line 11 at SQL statement
+CONTEXT:  SQL statement "create table pro_dbms_sql_char_tb1_02(a int ,b char(20))"
+PL/pgSQL function pro_dbms_sql_char_02() line 12 at SQL statement
+ERROR:  value too long for type character(10)
+CONTEXT:  PL/pgSQL function pro_dbms_sql_char_02() line 29 at SQL statement
+create or replace procedure pro_dbms_sql_fetch_rows_04()
+as 
+declare
+cursorid int;
+v_id varchar(3000) :=0;
+v_col1 int;
+v_info varchar(10);
+query varchar(2000);
+fetch_rows_ret int;
+begin
+query := 'select 1 from dual;';
+cursorid := dbms_sql.open_cursor();
+dbms_sql.parse(cursorid, query, 1);
+dbms_sql.define_column(cursorid,1, v_id);
+fetch_rows_ret := dbms_sql.execute(cursorid);
+dbms_sql.fetch_rows(cursorid);
+dbms_sql.column_value(cursorid,1,v_id);
+dbms_sql.close_cursor(cursorid);
+end;
+/
+call pro_dbms_sql_fetch_rows_04();
+1
+ pro_dbms_sql_fetch_rows_04 
+----------------------------
+ 
+(1 row)
+
+create or replace procedure pro_dbms_sql_fetch_rows_03()
+as 
+declare
+cursorid int;
+v_id varchar(3000) :=0;
+v_col1 int;
+v_info varchar(10);
+query varchar(2000);
+fetch_rows_ret int;
+begin
+query := 'select true from dual;';
+cursorid := dbms_sql.open_cursor();
+dbms_sql.parse(cursorid, query, 1);
+dbms_sql.define_column(cursorid,1, v_id);
+fetch_rows_ret := dbms_sql.execute(cursorid);
+dbms_sql.fetch_rows(cursorid);
+dbms_sql.column_value(cursorid,1,v_id);
+dbms_sql.close_cursor(cursorid);
+end;
+/
+call pro_dbms_sql_fetch_rows_03();
+true
+ pro_dbms_sql_fetch_rows_03 
+----------------------------
+ 
+(1 row)
+
+create or replace procedure pro_dbms_sql_all_02_02()
+as
+declare
+cursorid int;
+v_id int;
+v_info text;
+query varchar(2000);
+execute_ret int;
+define_column_ret_text text;
+define_column_ret int;
+
+cursor c1 for select * from pro_dbms_sql_all_tb2_02 order by 1;
+
+begin
+drop table if exists pro_dbms_sql_all_tb2_02 ;
+create table pro_dbms_sql_all_tb2_02(a int ) distribute by hash(a);
+insert into pro_dbms_sql_all_tb2_02 values(1);
+insert into pro_dbms_sql_all_tb2_02 values(2);
+insert into pro_dbms_sql_all_tb2_02 values(3);
+insert into pro_dbms_sql_all_tb2_02 values(4);
+insert into pro_dbms_sql_all_tb2_02 values(5);
+insert into pro_dbms_sql_all_tb2_02 values(6);
+query := 'select * from pro_dbms_sql_all_tb2_02 order by 1';
+cursorid := dbms_sql.open_cursor();
+dbms_sql.parse(cursorid, query, 1);
+define_column_ret:= dbms_sql.define_column(cursorid,1,v_id);
+define_column_ret_text:= dbms_sql.define_column(cursorid,2,v_info);
+execute_ret := dbms_sql.execute(cursorid);
+
+loop
+exit when (dbms_sql.fetch_rows(cursorid) <= 0);
+dbms_sql.column_value(cursorid,1,v_id);
+dbms_sql.column_value(cursorid,2,v_info);
+end loop;
+dbms_sql.close_cursor(cursorid);
+end;
+/
+call pro_dbms_sql_all_02_02();
+NOTICE:  table "pro_dbms_sql_all_tb2_02" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists pro_dbms_sql_all_tb2_02"
+PL/pgSQL function pro_dbms_sql_all_02_02() line 14 at SQL statement
+ERROR:  position 2 is greater than the num of table column (1 column)
+CONTEXT:  PL/pgSQL function dbms_sql.column_value(integer,integer,anyelement) line 9 at assignment
+SQL statement "CALL dbms_sql.column_value(cursorid,2,v_info)"
+PL/pgSQL function pro_dbms_sql_all_02_02() line 32 at SQL statement
+create or replace procedure pro_dbms_sql_all_01()
+as 
+declare
+cursorid int;
+v_id int;
+v_info text;
+query varchar(2000);
+execute_ret int;
+define_column_ret_text text;
+define_column_ret int;
+begin
+drop table if exists pro_dbms_sql_all_tb1_01 ;
+create table pro_dbms_sql_all_tb1_01(a int ,b text);
+insert into pro_dbms_sql_all_tb1_01 values(1,'闲听落花');
+insert into pro_dbms_sql_all_tb1_01 values(2,'私は音楽が好きです,肖申克的救赎，天空之城suchcbhdc');
+query := 'with tmp as (select * from pro_dbms_sql_all_tb1_01)select * from tmp order by 1';
+
+cursorid := dbms_sql.open_cursor();
+
+dbms_sql.parse(cursorid, query, 1);
+
+define_column_ret:= dbms_sql.define_column(cursorid,1,v_id);
+define_column_ret_text:= dbms_sql.define_column(cursorid,2,v_info);
+
+execute_ret := dbms_sql.execute(cursorid);
+loop 
+exit when (dbms_sql.fetch_rows(cursorid) <= 0);
+
+dbms_sql.column_value(cursorid,1,v_id);
+dbms_sql.column_value(cursorid,2,v_info);
+
+end loop;
+
+dbms_sql.close_cursor(cursorid);
+end;
+/
+call pro_dbms_sql_all_01();
+NOTICE:  table "pro_dbms_sql_all_tb1_01" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists pro_dbms_sql_all_tb1_01"
+PL/pgSQL function pro_dbms_sql_all_01() line 11 at SQL statement
+CONTEXT:  SQL statement "create table pro_dbms_sql_all_tb1_01(a int ,b text)"
+PL/pgSQL function pro_dbms_sql_all_01() line 12 at SQL statement
+id:1 info:闲听落花
+id:2 info:私は音楽が好きです,肖申克的救赎，天空之城suchcbhdc
+ pro_dbms_sql_all_01 
+---------------------
+ 
+(1 row)
+
+create or replace procedure pro_dbms_sql_select_into_01()
+as 
+declare
+cursorid int;
+v_id int;
+v_info text;
+query varchar(2000);
+execute_ret int;
+define_column_ret_text text;
+define_column_ret int;
+begin
+drop table if exists pro_dbms_sql_select_into_tb1_01 ;
+create table pro_dbms_sql_select_into_tb1_01(a int ,b text);
+insert into pro_dbms_sql_select_into_tb1_01 values(1,'闲听落花');
+insert into pro_dbms_sql_select_into_tb1_01 values(2,'私は音楽が好きです,肖申克的救赎，天空之城suchcbhdc');
+query := 'select * into pro_dbms_sql_select_into_tb1_02 from pro_dbms_sql_select_into_tb1_01 order by 1';
+
+cursorid := dbms_sql.open_cursor();
+
+dbms_sql.parse(cursorid, query, 1);
+
+define_column_ret:= dbms_sql.define_column(cursorid,1,v_id);
+define_column_ret_text:= dbms_sql.define_column(cursorid,2,v_info);
+
+execute_ret := dbms_sql.execute(cursorid);
+loop 
+exit when (dbms_sql.fetch_rows(cursorid) <= 0);
+
+dbms_sql.column_value(cursorid,1,v_id);
+dbms_sql.column_value(cursorid,2,v_info);
+
+end loop;
+
+dbms_sql.close_cursor(cursorid);
+end;
+/
+call pro_dbms_sql_select_into_01();
+NOTICE:  table "pro_dbms_sql_select_into_tb1_01" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists pro_dbms_sql_select_into_tb1_01"
+PL/pgSQL function pro_dbms_sql_select_into_01() line 11 at SQL statement
+CONTEXT:  SQL statement "create table pro_dbms_sql_select_into_tb1_01(a int ,b text)"
+PL/pgSQL function pro_dbms_sql_select_into_01() line 12 at SQL statement
+CONTEXT:  SQL statement "select * into pro_dbms_sql_select_into_tb1_02 from pro_dbms_sql_select_into_tb1_01 order by 1"
+PL/pgSQL function pro_dbms_sql_select_into_01() line 24 at assignment
+ERROR:  INSERT is not allowed in a non-volatile function
+CONTEXT:  SQL statement "select * into pro_dbms_sql_select_into_tb1_02 from pro_dbms_sql_select_into_tb1_01 order by 1"
+PL/pgSQL function pro_dbms_sql_select_into_01() line 24 at assignment
+drop table pro_dbms_sql_001;
+ERROR:  table "pro_dbms_sql_001" does not exist
+drop table pro_dbms_sql_002;
+ERROR:  table "pro_dbms_sql_002" does not exist
+create table pro_dbms_sql_001 (id int,col1 int,info varchar(10)) distribute by hash(id);
+create table pro_dbms_sql_002 (id int,col1 int,info varchar(10)) distribute by hash(id);
+insert into pro_dbms_sql_001 values(1,2,'AAAAA');
+insert into pro_dbms_sql_001 values(2,3,'BBBBB');
+insert into pro_dbms_sql_001 values(3,1,'CCCCC');
+insert into pro_dbms_sql_002 values(1,2,'AAAAAAAA');
+insert into pro_dbms_sql_002 values(2,3,'BBBBBBBB');
+insert into pro_dbms_sql_002 values(3,1,'CCCCCCCC');
+-- define_column_char
+create or replace procedure pro_dbms_sql_01(lenth int)
+as 
+declare
+cursorid int;
+err int;
+v_id int;
+v_col1 int;
+v_info varchar(10) :=1;
+query varchar(2000);
+execute_ret int;
+define_column_ret_char varchar(10);
+define_column_ret int;
+begin
+query := 'select * from pro_dbms_sql_001 order by 1;';
+
+cursorid := dbms_sql.open_cursor();
+
+dbms_sql.parse(cursorid, query, 1);
+
+define_column_ret:= dbms_sql.define_column(cursorid,1,v_id);
+define_column_ret:= dbms_sql.define_column(cursorid,2,v_col1);
+define_column_ret_char:= dbms_sql.define_column_char(cursorid,3,v_info,10);
+
+execute_ret := dbms_sql.execute(cursorid);
+loop 
+exit when (dbms_sql.fetch_rows(cursorid) <= 0);
+
+dbms_sql.column_value(cursorid,1,v_id);
+dbms_sql.column_value(cursorid,2,v_col1);
+dbms_sql.column_value_char(cursorid,3,v_info,err,lenth);
+
+end loop;
+
+dbms_sql.close_cursor(cursorid);
+end;
+/
+call pro_dbms_sql_01(1);
+id:1col1:2info:Alenth:1
+id:2col1:3info:Blenth:1
+id:3col1:1info:Clenth:1
+ pro_dbms_sql_01 
+-----------------
+ 
+(1 row)
+
+create or replace procedure pro_dbms_sql_fetch_rows_06()
+as
+declare
+cursorid int;
+v_id varchar(3000) :=0;
+v_col1 int;
+v_info varchar(10);
+query varchar(2000);
+fetch_rows_ret int;
+begin
+query := 'select ''2012-12-30''::date from dual;';
+cursorid := dbms_sql.open_cursor();
+dbms_sql.parse(cursorid, query, 1);
+dbms_sql.define_column(cursorid,1, v_id);
+fetch_rows_ret := dbms_sql.execute(cursorid);
+dbms_sql.fetch_rows(cursorid);
+dbms_sql.column_value(cursorid,1,v_id);
+exception when others then
+dbms_sql.close_cursor(cursorid);
+end;
+/
+call pro_dbms_sql_fetch_rows_06();
+Sun Dec 30 00:00:00 2012
+ pro_dbms_sql_fetch_rows_06 
+----------------------------
+ 
+(1 row)
+
+create or replace procedure pro_dbms_sql_fetch_rows_07()
+as
+declare
+cursorid int;
+v_id varchar(3000) :=0;
+v_col1 int;
+v_info varchar(10);
+query varchar(2000);
+fetch_rows_ret int;
+begin
+query := 'select ''2012-12-30''::clob from dual;';
+cursorid := dbms_sql.open_cursor();
+dbms_sql.parse(cursorid, query, 1);
+dbms_sql.define_column(cursorid,1, v_id);
+fetch_rows_ret := dbms_sql.execute(cursorid);
+dbms_sql.fetch_rows(cursorid);
+dbms_sql.column_value(cursorid,1,v_id);
+exception when others then
+dbms_sql.close_cursor(cursorid);
+end;
+/
+call pro_dbms_sql_fetch_rows_07();
+2012-12-30
+ pro_dbms_sql_fetch_rows_07 
+----------------------------
+ 
+(1 row)
+
+create or replace procedure pro_dbms_sql_last_row_count()
+as
+declare
+cursorid int;
+v_id varchar(3000) :=0;
+v_col1 int;
+v_info varchar(10);
+query varchar(2000);
+fetch_rows_ret int;
+begin
+query := 'select ''2012-12-30''::date from dual;';
+cursorid := dbms_sql.open_cursor();
+dbms_sql.parse(cursorid, query, 1);
+dbms_sql.define_column(cursorid,1, v_id);
+fetch_rows_ret := dbms_sql.execute(cursorid);
+loop
+exit when (dbms_sql.fetch_rows(cursorid) <= 0);
+dbms_sql.column_value(cursorid,1,v_id);
+end loop;
+dbms_sql.last_row_count(cursorid);
+dbms_sql.close_cursor(cursorid);
+end;
+/
+call pro_dbms_sql_last_row_count();
+Sun Dec 30 00:00:00 2012
+ERROR:  dbms_sql.last_row_count() is not supported yet. Invoked with cursor: 4
+CONTEXT:  SQL statement "CALL dbms_sql.last_row_count(cursorid)"
+PL/pgSQL function pro_dbms_sql_last_row_count() line 20 at PERFORM
+create or replace procedure pro_dbms_sql_execute_and_fetch()
+as
+declare
+cursorid int;
+v_id varchar(3000) :=0;
+v_col1 int;
+v_info varchar(10);
+query varchar(2000);
+fetch_rows_ret int;
+begin
+query := 'select ''2012-12-30''::date from dual;';
+cursorid := dbms_sql.open_cursor();
+dbms_sql.parse(cursorid, query, 1);
+dbms_sql.define_column(cursorid,1, v_id);
+fetch_rows_ret := dbms_sql.execute_and_fetch(cursorid);
+dbms_sql.column_value(cursorid,1,v_id);
+exception when others then
+dbms_sql.close_cursor(cursorid);
+end;
+/
+call pro_dbms_sql_execute_and_fetch();
+ERROR:  given cursor:1 is not found
+CONTEXT:  SQL statement "CALL dbms_sql.close_cursor(cursorid)"
+PL/pgSQL function pro_dbms_sql_execute_and_fetch() line 18 at PERFORM
+create or replace procedure pro_dbms_sql_bind_var()
+as
+declare
+cursorid int;
+v_id varchar(3000) :=0;
+v_col1 int;
+v_info varchar(10);
+query varchar(2000);
+fetch_rows_ret int;
+begin
+query := 'select * from dual;';
+cursorid := dbms_sql.open_cursor();
+dbms_sql.parse(cursorid, query, 1);
+dbms_sql.bind_variable(cursorid);
+fetch_rows_ret := dbms_sql.execute(cursorid);
+dbms_sql.fetch_rows(cursorid);
+dbms_sql.column_value(cursorid,1,v_id);
+exception when others then
+dbms_sql.close_cursor(cursorid);
+end;
+/
+call pro_dbms_sql_bind_var();
+ERROR:  given cursor:1 is not found
+CONTEXT:  SQL statement "CALL dbms_sql.close_cursor(cursorid)"
+PL/pgSQL function pro_dbms_sql_bind_var() line 19 at PERFORM
+create or replace procedure pro_dbms_sql_text()
+as
+declare
+cursorid int;
+v_id int :=1;
+v_info text :=1;
+query varchar(2000);
+execute_ret int;
+define_column_ret_text varchar(30) ;
+define_column_ret int;
+begin
+create table pro_dbms_sql_varchar_tb1_001(a int ,b varchar) distribute by hash(a);
+insert into pro_dbms_sql_varchar_tb1_001 values(1,'abcdefg');
+query := ' ;';
+cursorid := dbms_sql.open_cursor();
+dbms_sql.parse(cursorid, query, 1);
+define_column_ret:= dbms_sql.define_column(cursorid,1,v_id);
+define_column_ret_text:= dbms_sql.define_column_text(cursorid,2,v_info);
+execute_ret := dbms_sql.execute(cursorid);
+loop
+exit when (dbms_sql.fetch_rows(cursorid) <= 0);
+dbms_sql.column_value(cursorid,1,v_id);
+v_info:=dbms_sql.column_value_text(cursorid,2);
+end loop;
+dbms_sql.close_cursor(cursorid);
+EXCEPTION
+WHEN OTHERS THEN
+DBMS_SQL.CLOSE_CURSOR(cursorid);
+end;
+/
+call pro_dbms_sql_text();
+ pro_dbms_sql_text 
+-------------------
+ 
+(1 row)
+
+set work_mem='64kB';
+DECLARE
+    cursorid int;
+    retval  int;
+	is_open boolean;
+    c1 int;
+    c2 char(3996);
+    query text;
+BEGIN
+	Drop table if exists t01;
+	Create table t01 (c1 int, c2 char(3996)) distribute by hash(c1); --4kB each row
+	Insert into t01 select v,to_char(v) from generate_series(0,999) as v;--4M
+	query := 'select c1,c2 from t01 order by 1;';
+
+	--打开游标
+	cursorid := dbms_sql.open_cursor();
+	--编译游标
+	dbms_sql.parse(cursorid, query, 1);
+	--定义列
+	dbms_sql.define_column(cursorid,1,c1);
+	dbms_sql.define_column(cursorid,2,c2);
+	--执行
+	retval := dbms_sql.execute(cursorid);
+	--savepoint p1;
+	loop
+	exit when (dbms_sql.fetch_rows(cursorid) <= 0);
+		--获取值
+		dbms_sql.column_value(cursorid,1,c1);
+		dbms_sql.column_value(cursorid,2,c2);
+		--输出结果
+	end loop;
+	--关闭游标
+	dbms_sql.close_cursor(cursorid);
+	--return 0;
+END;
+/
+NOTICE:  table "t01" does not exist, skipping
+CONTEXT:  SQL statement "Drop table if exists t01"
+PL/pgSQL function inline_code_block line 8 at SQL statement
+c1:0 c2:0
+c1:1 c2:1
+c1:2 c2:2
+c1:3 c2:3
+c1:4 c2:4
+c1:5 c2:5
+c1:6 c2:6
+c1:7 c2:7
+c1:8 c2:8
+c1:9 c2:9
+c1:10 c2:10
+c1:11 c2:11
+c1:12 c2:12
+c1:13 c2:13
+c1:14 c2:14
+c1:15 c2:15
+c1:16 c2:16
+c1:17 c2:17
+c1:18 c2:18
+c1:19 c2:19
+c1:20 c2:20
+c1:21 c2:21
+c1:22 c2:22
+c1:23 c2:23
+c1:24 c2:24
+c1:25 c2:25
+c1:26 c2:26
+c1:27 c2:27
+c1:28 c2:28
+c1:29 c2:29
+c1:30 c2:30
+c1:31 c2:31
+c1:32 c2:32
+c1:33 c2:33
+c1:34 c2:34
+c1:35 c2:35
+c1:36 c2:36
+c1:37 c2:37
+c1:38 c2:38
+c1:39 c2:39
+c1:40 c2:40
+c1:41 c2:41
+c1:42 c2:42
+c1:43 c2:43
+c1:44 c2:44
+c1:45 c2:45
+c1:46 c2:46
+c1:47 c2:47
+c1:48 c2:48
+c1:49 c2:49
+c1:50 c2:50
+c1:51 c2:51
+c1:52 c2:52
+c1:53 c2:53
+c1:54 c2:54
+c1:55 c2:55
+c1:56 c2:56
+c1:57 c2:57
+c1:58 c2:58
+c1:59 c2:59
+c1:60 c2:60
+c1:61 c2:61
+c1:62 c2:62
+c1:63 c2:63
+c1:64 c2:64
+c1:65 c2:65
+c1:66 c2:66
+c1:67 c2:67
+c1:68 c2:68
+c1:69 c2:69
+c1:70 c2:70
+c1:71 c2:71
+c1:72 c2:72
+c1:73 c2:73
+c1:74 c2:74
+c1:75 c2:75
+c1:76 c2:76
+c1:77 c2:77
+c1:78 c2:78
+c1:79 c2:79
+c1:80 c2:80
+c1:81 c2:81
+c1:82 c2:82
+c1:83 c2:83
+c1:84 c2:84
+c1:85 c2:85
+c1:86 c2:86
+c1:87 c2:87
+c1:88 c2:88
+c1:89 c2:89
+c1:90 c2:90
+c1:91 c2:91
+c1:92 c2:92
+c1:93 c2:93
+c1:94 c2:94
+c1:95 c2:95
+c1:96 c2:96
+c1:97 c2:97
+c1:98 c2:98
+c1:99 c2:99
+c1:100 c2:100
+c1:101 c2:101
+c1:102 c2:102
+c1:103 c2:103
+c1:104 c2:104
+c1:105 c2:105
+c1:106 c2:106
+c1:107 c2:107
+c1:108 c2:108
+c1:109 c2:109
+c1:110 c2:110
+c1:111 c2:111
+c1:112 c2:112
+c1:113 c2:113
+c1:114 c2:114
+c1:115 c2:115
+c1:116 c2:116
+c1:117 c2:117
+c1:118 c2:118
+c1:119 c2:119
+c1:120 c2:120
+c1:121 c2:121
+c1:122 c2:122
+c1:123 c2:123
+c1:124 c2:124
+c1:125 c2:125
+c1:126 c2:126
+c1:127 c2:127
+c1:128 c2:128
+c1:129 c2:129
+c1:130 c2:130
+c1:131 c2:131
+c1:132 c2:132
+c1:133 c2:133
+c1:134 c2:134
+c1:135 c2:135
+c1:136 c2:136
+c1:137 c2:137
+c1:138 c2:138
+c1:139 c2:139
+c1:140 c2:140
+c1:141 c2:141
+c1:142 c2:142
+c1:143 c2:143
+c1:144 c2:144
+c1:145 c2:145
+c1:146 c2:146
+c1:147 c2:147
+c1:148 c2:148
+c1:149 c2:149
+c1:150 c2:150
+c1:151 c2:151
+c1:152 c2:152
+c1:153 c2:153
+c1:154 c2:154
+c1:155 c2:155
+c1:156 c2:156
+c1:157 c2:157
+c1:158 c2:158
+c1:159 c2:159
+c1:160 c2:160
+c1:161 c2:161
+c1:162 c2:162
+c1:163 c2:163
+c1:164 c2:164
+c1:165 c2:165
+c1:166 c2:166
+c1:167 c2:167
+c1:168 c2:168
+c1:169 c2:169
+c1:170 c2:170
+c1:171 c2:171
+c1:172 c2:172
+c1:173 c2:173
+c1:174 c2:174
+c1:175 c2:175
+c1:176 c2:176
+c1:177 c2:177
+c1:178 c2:178
+c1:179 c2:179
+c1:180 c2:180
+c1:181 c2:181
+c1:182 c2:182
+c1:183 c2:183
+c1:184 c2:184
+c1:185 c2:185
+c1:186 c2:186
+c1:187 c2:187
+c1:188 c2:188
+c1:189 c2:189
+c1:190 c2:190
+c1:191 c2:191
+c1:192 c2:192
+c1:193 c2:193
+c1:194 c2:194
+c1:195 c2:195
+c1:196 c2:196
+c1:197 c2:197
+c1:198 c2:198
+c1:199 c2:199
+c1:200 c2:200
+c1:201 c2:201
+c1:202 c2:202
+c1:203 c2:203
+c1:204 c2:204
+c1:205 c2:205
+c1:206 c2:206
+c1:207 c2:207
+c1:208 c2:208
+c1:209 c2:209
+c1:210 c2:210
+c1:211 c2:211
+c1:212 c2:212
+c1:213 c2:213
+c1:214 c2:214
+c1:215 c2:215
+c1:216 c2:216
+c1:217 c2:217
+c1:218 c2:218
+c1:219 c2:219
+c1:220 c2:220
+c1:221 c2:221
+c1:222 c2:222
+c1:223 c2:223
+c1:224 c2:224
+c1:225 c2:225
+c1:226 c2:226
+c1:227 c2:227
+c1:228 c2:228
+c1:229 c2:229
+c1:230 c2:230
+c1:231 c2:231
+c1:232 c2:232
+c1:233 c2:233
+c1:234 c2:234
+c1:235 c2:235
+c1:236 c2:236
+c1:237 c2:237
+c1:238 c2:238
+c1:239 c2:239
+c1:240 c2:240
+c1:241 c2:241
+c1:242 c2:242
+c1:243 c2:243
+c1:244 c2:244
+c1:245 c2:245
+c1:246 c2:246
+c1:247 c2:247
+c1:248 c2:248
+c1:249 c2:249
+c1:250 c2:250
+c1:251 c2:251
+c1:252 c2:252
+c1:253 c2:253
+c1:254 c2:254
+c1:255 c2:255
+c1:256 c2:256
+c1:257 c2:257
+c1:258 c2:258
+c1:259 c2:259
+c1:260 c2:260
+c1:261 c2:261
+c1:262 c2:262
+c1:263 c2:263
+c1:264 c2:264
+c1:265 c2:265
+c1:266 c2:266
+c1:267 c2:267
+c1:268 c2:268
+c1:269 c2:269
+c1:270 c2:270
+c1:271 c2:271
+c1:272 c2:272
+c1:273 c2:273
+c1:274 c2:274
+c1:275 c2:275
+c1:276 c2:276
+c1:277 c2:277
+c1:278 c2:278
+c1:279 c2:279
+c1:280 c2:280
+c1:281 c2:281
+c1:282 c2:282
+c1:283 c2:283
+c1:284 c2:284
+c1:285 c2:285
+c1:286 c2:286
+c1:287 c2:287
+c1:288 c2:288
+c1:289 c2:289
+c1:290 c2:290
+c1:291 c2:291
+c1:292 c2:292
+c1:293 c2:293
+c1:294 c2:294
+c1:295 c2:295
+c1:296 c2:296
+c1:297 c2:297
+c1:298 c2:298
+c1:299 c2:299
+c1:300 c2:300
+c1:301 c2:301
+c1:302 c2:302
+c1:303 c2:303
+c1:304 c2:304
+c1:305 c2:305
+c1:306 c2:306
+c1:307 c2:307
+c1:308 c2:308
+c1:309 c2:309
+c1:310 c2:310
+c1:311 c2:311
+c1:312 c2:312
+c1:313 c2:313
+c1:314 c2:314
+c1:315 c2:315
+c1:316 c2:316
+c1:317 c2:317
+c1:318 c2:318
+c1:319 c2:319
+c1:320 c2:320
+c1:321 c2:321
+c1:322 c2:322
+c1:323 c2:323
+c1:324 c2:324
+c1:325 c2:325
+c1:326 c2:326
+c1:327 c2:327
+c1:328 c2:328
+c1:329 c2:329
+c1:330 c2:330
+c1:331 c2:331
+c1:332 c2:332
+c1:333 c2:333
+c1:334 c2:334
+c1:335 c2:335
+c1:336 c2:336
+c1:337 c2:337
+c1:338 c2:338
+c1:339 c2:339
+c1:340 c2:340
+c1:341 c2:341
+c1:342 c2:342
+c1:343 c2:343
+c1:344 c2:344
+c1:345 c2:345
+c1:346 c2:346
+c1:347 c2:347
+c1:348 c2:348
+c1:349 c2:349
+c1:350 c2:350
+c1:351 c2:351
+c1:352 c2:352
+c1:353 c2:353
+c1:354 c2:354
+c1:355 c2:355
+c1:356 c2:356
+c1:357 c2:357
+c1:358 c2:358
+c1:359 c2:359
+c1:360 c2:360
+c1:361 c2:361
+c1:362 c2:362
+c1:363 c2:363
+c1:364 c2:364
+c1:365 c2:365
+c1:366 c2:366
+c1:367 c2:367
+c1:368 c2:368
+c1:369 c2:369
+c1:370 c2:370
+c1:371 c2:371
+c1:372 c2:372
+c1:373 c2:373
+c1:374 c2:374
+c1:375 c2:375
+c1:376 c2:376
+c1:377 c2:377
+c1:378 c2:378
+c1:379 c2:379
+c1:380 c2:380
+c1:381 c2:381
+c1:382 c2:382
+c1:383 c2:383
+c1:384 c2:384
+c1:385 c2:385
+c1:386 c2:386
+c1:387 c2:387
+c1:388 c2:388
+c1:389 c2:389
+c1:390 c2:390
+c1:391 c2:391
+c1:392 c2:392
+c1:393 c2:393
+c1:394 c2:394
+c1:395 c2:395
+c1:396 c2:396
+c1:397 c2:397
+c1:398 c2:398
+c1:399 c2:399
+c1:400 c2:400
+c1:401 c2:401
+c1:402 c2:402
+c1:403 c2:403
+c1:404 c2:404
+c1:405 c2:405
+c1:406 c2:406
+c1:407 c2:407
+c1:408 c2:408
+c1:409 c2:409
+c1:410 c2:410
+c1:411 c2:411
+c1:412 c2:412
+c1:413 c2:413
+c1:414 c2:414
+c1:415 c2:415
+c1:416 c2:416
+c1:417 c2:417
+c1:418 c2:418
+c1:419 c2:419
+c1:420 c2:420
+c1:421 c2:421
+c1:422 c2:422
+c1:423 c2:423
+c1:424 c2:424
+c1:425 c2:425
+c1:426 c2:426
+c1:427 c2:427
+c1:428 c2:428
+c1:429 c2:429
+c1:430 c2:430
+c1:431 c2:431
+c1:432 c2:432
+c1:433 c2:433
+c1:434 c2:434
+c1:435 c2:435
+c1:436 c2:436
+c1:437 c2:437
+c1:438 c2:438
+c1:439 c2:439
+c1:440 c2:440
+c1:441 c2:441
+c1:442 c2:442
+c1:443 c2:443
+c1:444 c2:444
+c1:445 c2:445
+c1:446 c2:446
+c1:447 c2:447
+c1:448 c2:448
+c1:449 c2:449
+c1:450 c2:450
+c1:451 c2:451
+c1:452 c2:452
+c1:453 c2:453
+c1:454 c2:454
+c1:455 c2:455
+c1:456 c2:456
+c1:457 c2:457
+c1:458 c2:458
+c1:459 c2:459
+c1:460 c2:460
+c1:461 c2:461
+c1:462 c2:462
+c1:463 c2:463
+c1:464 c2:464
+c1:465 c2:465
+c1:466 c2:466
+c1:467 c2:467
+c1:468 c2:468
+c1:469 c2:469
+c1:470 c2:470
+c1:471 c2:471
+c1:472 c2:472
+c1:473 c2:473
+c1:474 c2:474
+c1:475 c2:475
+c1:476 c2:476
+c1:477 c2:477
+c1:478 c2:478
+c1:479 c2:479
+c1:480 c2:480
+c1:481 c2:481
+c1:482 c2:482
+c1:483 c2:483
+c1:484 c2:484
+c1:485 c2:485
+c1:486 c2:486
+c1:487 c2:487
+c1:488 c2:488
+c1:489 c2:489
+c1:490 c2:490
+c1:491 c2:491
+c1:492 c2:492
+c1:493 c2:493
+c1:494 c2:494
+c1:495 c2:495
+c1:496 c2:496
+c1:497 c2:497
+c1:498 c2:498
+c1:499 c2:499
+c1:500 c2:500
+c1:501 c2:501
+c1:502 c2:502
+c1:503 c2:503
+c1:504 c2:504
+c1:505 c2:505
+c1:506 c2:506
+c1:507 c2:507
+c1:508 c2:508
+c1:509 c2:509
+c1:510 c2:510
+c1:511 c2:511
+c1:512 c2:512
+c1:513 c2:513
+c1:514 c2:514
+c1:515 c2:515
+c1:516 c2:516
+c1:517 c2:517
+c1:518 c2:518
+c1:519 c2:519
+c1:520 c2:520
+c1:521 c2:521
+c1:522 c2:522
+c1:523 c2:523
+c1:524 c2:524
+c1:525 c2:525
+c1:526 c2:526
+c1:527 c2:527
+c1:528 c2:528
+c1:529 c2:529
+c1:530 c2:530
+c1:531 c2:531
+c1:532 c2:532
+c1:533 c2:533
+c1:534 c2:534
+c1:535 c2:535
+c1:536 c2:536
+c1:537 c2:537
+c1:538 c2:538
+c1:539 c2:539
+c1:540 c2:540
+c1:541 c2:541
+c1:542 c2:542
+c1:543 c2:543
+c1:544 c2:544
+c1:545 c2:545
+c1:546 c2:546
+c1:547 c2:547
+c1:548 c2:548
+c1:549 c2:549
+c1:550 c2:550
+c1:551 c2:551
+c1:552 c2:552
+c1:553 c2:553
+c1:554 c2:554
+c1:555 c2:555
+c1:556 c2:556
+c1:557 c2:557
+c1:558 c2:558
+c1:559 c2:559
+c1:560 c2:560
+c1:561 c2:561
+c1:562 c2:562
+c1:563 c2:563
+c1:564 c2:564
+c1:565 c2:565
+c1:566 c2:566
+c1:567 c2:567
+c1:568 c2:568
+c1:569 c2:569
+c1:570 c2:570
+c1:571 c2:571
+c1:572 c2:572
+c1:573 c2:573
+c1:574 c2:574
+c1:575 c2:575
+c1:576 c2:576
+c1:577 c2:577
+c1:578 c2:578
+c1:579 c2:579
+c1:580 c2:580
+c1:581 c2:581
+c1:582 c2:582
+c1:583 c2:583
+c1:584 c2:584
+c1:585 c2:585
+c1:586 c2:586
+c1:587 c2:587
+c1:588 c2:588
+c1:589 c2:589
+c1:590 c2:590
+c1:591 c2:591
+c1:592 c2:592
+c1:593 c2:593
+c1:594 c2:594
+c1:595 c2:595
+c1:596 c2:596
+c1:597 c2:597
+c1:598 c2:598
+c1:599 c2:599
+c1:600 c2:600
+c1:601 c2:601
+c1:602 c2:602
+c1:603 c2:603
+c1:604 c2:604
+c1:605 c2:605
+c1:606 c2:606
+c1:607 c2:607
+c1:608 c2:608
+c1:609 c2:609
+c1:610 c2:610
+c1:611 c2:611
+c1:612 c2:612
+c1:613 c2:613
+c1:614 c2:614
+c1:615 c2:615
+c1:616 c2:616
+c1:617 c2:617
+c1:618 c2:618
+c1:619 c2:619
+c1:620 c2:620
+c1:621 c2:621
+c1:622 c2:622
+c1:623 c2:623
+c1:624 c2:624
+c1:625 c2:625
+c1:626 c2:626
+c1:627 c2:627
+c1:628 c2:628
+c1:629 c2:629
+c1:630 c2:630
+c1:631 c2:631
+c1:632 c2:632
+c1:633 c2:633
+c1:634 c2:634
+c1:635 c2:635
+c1:636 c2:636
+c1:637 c2:637
+c1:638 c2:638
+c1:639 c2:639
+c1:640 c2:640
+c1:641 c2:641
+c1:642 c2:642
+c1:643 c2:643
+c1:644 c2:644
+c1:645 c2:645
+c1:646 c2:646
+c1:647 c2:647
+c1:648 c2:648
+c1:649 c2:649
+c1:650 c2:650
+c1:651 c2:651
+c1:652 c2:652
+c1:653 c2:653
+c1:654 c2:654
+c1:655 c2:655
+c1:656 c2:656
+c1:657 c2:657
+c1:658 c2:658
+c1:659 c2:659
+c1:660 c2:660
+c1:661 c2:661
+c1:662 c2:662
+c1:663 c2:663
+c1:664 c2:664
+c1:665 c2:665
+c1:666 c2:666
+c1:667 c2:667
+c1:668 c2:668
+c1:669 c2:669
+c1:670 c2:670
+c1:671 c2:671
+c1:672 c2:672
+c1:673 c2:673
+c1:674 c2:674
+c1:675 c2:675
+c1:676 c2:676
+c1:677 c2:677
+c1:678 c2:678
+c1:679 c2:679
+c1:680 c2:680
+c1:681 c2:681
+c1:682 c2:682
+c1:683 c2:683
+c1:684 c2:684
+c1:685 c2:685
+c1:686 c2:686
+c1:687 c2:687
+c1:688 c2:688
+c1:689 c2:689
+c1:690 c2:690
+c1:691 c2:691
+c1:692 c2:692
+c1:693 c2:693
+c1:694 c2:694
+c1:695 c2:695
+c1:696 c2:696
+c1:697 c2:697
+c1:698 c2:698
+c1:699 c2:699
+c1:700 c2:700
+c1:701 c2:701
+c1:702 c2:702
+c1:703 c2:703
+c1:704 c2:704
+c1:705 c2:705
+c1:706 c2:706
+c1:707 c2:707
+c1:708 c2:708
+c1:709 c2:709
+c1:710 c2:710
+c1:711 c2:711
+c1:712 c2:712
+c1:713 c2:713
+c1:714 c2:714
+c1:715 c2:715
+c1:716 c2:716
+c1:717 c2:717
+c1:718 c2:718
+c1:719 c2:719
+c1:720 c2:720
+c1:721 c2:721
+c1:722 c2:722
+c1:723 c2:723
+c1:724 c2:724
+c1:725 c2:725
+c1:726 c2:726
+c1:727 c2:727
+c1:728 c2:728
+c1:729 c2:729
+c1:730 c2:730
+c1:731 c2:731
+c1:732 c2:732
+c1:733 c2:733
+c1:734 c2:734
+c1:735 c2:735
+c1:736 c2:736
+c1:737 c2:737
+c1:738 c2:738
+c1:739 c2:739
+c1:740 c2:740
+c1:741 c2:741
+c1:742 c2:742
+c1:743 c2:743
+c1:744 c2:744
+c1:745 c2:745
+c1:746 c2:746
+c1:747 c2:747
+c1:748 c2:748
+c1:749 c2:749
+c1:750 c2:750
+c1:751 c2:751
+c1:752 c2:752
+c1:753 c2:753
+c1:754 c2:754
+c1:755 c2:755
+c1:756 c2:756
+c1:757 c2:757
+c1:758 c2:758
+c1:759 c2:759
+c1:760 c2:760
+c1:761 c2:761
+c1:762 c2:762
+c1:763 c2:763
+c1:764 c2:764
+c1:765 c2:765
+c1:766 c2:766
+c1:767 c2:767
+c1:768 c2:768
+c1:769 c2:769
+c1:770 c2:770
+c1:771 c2:771
+c1:772 c2:772
+c1:773 c2:773
+c1:774 c2:774
+c1:775 c2:775
+c1:776 c2:776
+c1:777 c2:777
+c1:778 c2:778
+c1:779 c2:779
+c1:780 c2:780
+c1:781 c2:781
+c1:782 c2:782
+c1:783 c2:783
+c1:784 c2:784
+c1:785 c2:785
+c1:786 c2:786
+c1:787 c2:787
+c1:788 c2:788
+c1:789 c2:789
+c1:790 c2:790
+c1:791 c2:791
+c1:792 c2:792
+c1:793 c2:793
+c1:794 c2:794
+c1:795 c2:795
+c1:796 c2:796
+c1:797 c2:797
+c1:798 c2:798
+c1:799 c2:799
+c1:800 c2:800
+c1:801 c2:801
+c1:802 c2:802
+c1:803 c2:803
+c1:804 c2:804
+c1:805 c2:805
+c1:806 c2:806
+c1:807 c2:807
+c1:808 c2:808
+c1:809 c2:809
+c1:810 c2:810
+c1:811 c2:811
+c1:812 c2:812
+c1:813 c2:813
+c1:814 c2:814
+c1:815 c2:815
+c1:816 c2:816
+c1:817 c2:817
+c1:818 c2:818
+c1:819 c2:819
+c1:820 c2:820
+c1:821 c2:821
+c1:822 c2:822
+c1:823 c2:823
+c1:824 c2:824
+c1:825 c2:825
+c1:826 c2:826
+c1:827 c2:827
+c1:828 c2:828
+c1:829 c2:829
+c1:830 c2:830
+c1:831 c2:831
+c1:832 c2:832
+c1:833 c2:833
+c1:834 c2:834
+c1:835 c2:835
+c1:836 c2:836
+c1:837 c2:837
+c1:838 c2:838
+c1:839 c2:839
+c1:840 c2:840
+c1:841 c2:841
+c1:842 c2:842
+c1:843 c2:843
+c1:844 c2:844
+c1:845 c2:845
+c1:846 c2:846
+c1:847 c2:847
+c1:848 c2:848
+c1:849 c2:849
+c1:850 c2:850
+c1:851 c2:851
+c1:852 c2:852
+c1:853 c2:853
+c1:854 c2:854
+c1:855 c2:855
+c1:856 c2:856
+c1:857 c2:857
+c1:858 c2:858
+c1:859 c2:859
+c1:860 c2:860
+c1:861 c2:861
+c1:862 c2:862
+c1:863 c2:863
+c1:864 c2:864
+c1:865 c2:865
+c1:866 c2:866
+c1:867 c2:867
+c1:868 c2:868
+c1:869 c2:869
+c1:870 c2:870
+c1:871 c2:871
+c1:872 c2:872
+c1:873 c2:873
+c1:874 c2:874
+c1:875 c2:875
+c1:876 c2:876
+c1:877 c2:877
+c1:878 c2:878
+c1:879 c2:879
+c1:880 c2:880
+c1:881 c2:881
+c1:882 c2:882
+c1:883 c2:883
+c1:884 c2:884
+c1:885 c2:885
+c1:886 c2:886
+c1:887 c2:887
+c1:888 c2:888
+c1:889 c2:889
+c1:890 c2:890
+c1:891 c2:891
+c1:892 c2:892
+c1:893 c2:893
+c1:894 c2:894
+c1:895 c2:895
+c1:896 c2:896
+c1:897 c2:897
+c1:898 c2:898
+c1:899 c2:899
+c1:900 c2:900
+c1:901 c2:901
+c1:902 c2:902
+c1:903 c2:903
+c1:904 c2:904
+c1:905 c2:905
+c1:906 c2:906
+c1:907 c2:907
+c1:908 c2:908
+c1:909 c2:909
+c1:910 c2:910
+c1:911 c2:911
+c1:912 c2:912
+c1:913 c2:913
+c1:914 c2:914
+c1:915 c2:915
+c1:916 c2:916
+c1:917 c2:917
+c1:918 c2:918
+c1:919 c2:919
+c1:920 c2:920
+c1:921 c2:921
+c1:922 c2:922
+c1:923 c2:923
+c1:924 c2:924
+c1:925 c2:925
+c1:926 c2:926
+c1:927 c2:927
+c1:928 c2:928
+c1:929 c2:929
+c1:930 c2:930
+c1:931 c2:931
+c1:932 c2:932
+c1:933 c2:933
+c1:934 c2:934
+c1:935 c2:935
+c1:936 c2:936
+c1:937 c2:937
+c1:938 c2:938
+c1:939 c2:939
+c1:940 c2:940
+c1:941 c2:941
+c1:942 c2:942
+c1:943 c2:943
+c1:944 c2:944
+c1:945 c2:945
+c1:946 c2:946
+c1:947 c2:947
+c1:948 c2:948
+c1:949 c2:949
+c1:950 c2:950
+c1:951 c2:951
+c1:952 c2:952
+c1:953 c2:953
+c1:954 c2:954
+c1:955 c2:955
+c1:956 c2:956
+c1:957 c2:957
+c1:958 c2:958
+c1:959 c2:959
+c1:960 c2:960
+c1:961 c2:961
+c1:962 c2:962
+c1:963 c2:963
+c1:964 c2:964
+c1:965 c2:965
+c1:966 c2:966
+c1:967 c2:967
+c1:968 c2:968
+c1:969 c2:969
+c1:970 c2:970
+c1:971 c2:971
+c1:972 c2:972
+c1:973 c2:973
+c1:974 c2:974
+c1:975 c2:975
+c1:976 c2:976
+c1:977 c2:977
+c1:978 c2:978
+c1:979 c2:979
+c1:980 c2:980
+c1:981 c2:981
+c1:982 c2:982
+c1:983 c2:983
+c1:984 c2:984
+c1:985 c2:985
+c1:986 c2:986
+c1:987 c2:987
+c1:988 c2:988
+c1:989 c2:989
+c1:990 c2:990
+c1:991 c2:991
+c1:992 c2:992
+c1:993 c2:993
+c1:994 c2:994
+c1:995 c2:995
+c1:996 c2:996
+c1:997 c2:997
+c1:998 c2:998
+c1:999 c2:999
+reset work_mem;
+/* END DBMS_SQL PACKAGE*/

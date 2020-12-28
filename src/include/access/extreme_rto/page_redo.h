@@ -39,7 +39,10 @@
 
 namespace extreme_rto {
 
-static const uint32 PAGE_WORK_QUEUE_SIZE = 8192;
+static const uint32 PAGE_WORK_QUEUE_SIZE = 4096;
+
+static const uint32 EXTREME_RTO_ALIGN_LEN = 16; /* need 128-bit aligned */
+
 
 typedef enum {
     REDO_BATCH,
@@ -63,17 +66,17 @@ struct PageRedoWorker {
     XLogRecPtr lastReplayedReadRecPtr;
     XLogRecPtr lastReplayedEndRecPtr;
 #if (!defined __x86_64__) && (!defined __aarch64__)
-            /* protects lastReplayedReadRecPtr and lastReplayedEndRecPtr */
-    slock_t ptrLck;  
+    /* protects lastReplayedReadRecPtr and lastReplayedEndRecPtr */
+    slock_t ptrLck;
 #endif
-    PageRedoWorker* selfOrinAddr;
+    PageRedoWorker *selfOrinAddr;
     /* Worker id. */
     uint32 id;
     int index;
     /* Thread id */
     gs_thread_t tid;
     /* The proc struct of this worker thread. */
-    PGPROC* proc;
+    PGPROC *proc;
     RedoRole role;
     uint32 slotId;
     /* ---------------------------------------------
@@ -86,7 +89,7 @@ struct PageRedoWorker {
     ServerMode initialServerMode;
     /* Initial timeline ID from the dispatcher. */
     TimeLineID initialTimeLineID;
-    List* expectedTLIs;
+    List *expectedTLIs;
     /* ---------------------------------------------
      * Redo item queue.
      *
@@ -96,15 +99,11 @@ struct PageRedoWorker {
      */
 
     /* The head of the pending item list. */
-    RedoItem* pendingHead;
+    RedoItem *pendingHead;
     /* The tail of the pending item list. */
-    RedoItem* pendingTail;
+    RedoItem *pendingTail;
     /* To-be-replayed log-record-list queue. */
-    SPSCBlockingQueue* queue;
-
-    /* ---------------------------------------------
-     * Safe restart point handling.
-     */
+    SPSCBlockingQueue *queue;
 
     /*
      * The last recovery restart point seen by the txn worker.  Restart
@@ -120,7 +119,6 @@ struct PageRedoWorker {
      * log replay.  These are read by the txn-redo worker.
      */
 
-
     /* ---------------------------------------------
      * Global run-time context
      *
@@ -134,7 +132,7 @@ struct PageRedoWorker {
     HotStandbyState standbyState;
     TransactionId latestObservedXid;
     bool StandbyMode;
-    char* DataDir;
+    char *DataDir;
 
     TransactionId RecentXmin;
     /* ---------------------------------------------
@@ -145,7 +143,7 @@ struct PageRedoWorker {
      * are used by the dispatcher.
      */
     /* XLog invalid pages. */
-    void* xlogInvalidPages;
+    void *xlogInvalidPages;
 
     /* ---------------------------------------------
      * Phase barrier.
@@ -169,41 +167,38 @@ struct PageRedoWorker {
     uint32 fullSyncFlag;
     RedoParseManager parseManager;
     RedoBufferManager bufferManager;
-	int bufferPinWaitBufId;
 };
 
-extern THR_LOCAL PageRedoWorker* g_redoWorker;
-
+extern THR_LOCAL PageRedoWorker *g_redoWorker;
 
 /* Worker lifecycle. */
-PageRedoWorker* StartPageRedoWorker(PageRedoWorker* worker);
-void DestroyPageRedoWorker(PageRedoWorker* worker);
+PageRedoWorker *StartPageRedoWorker(PageRedoWorker *worker);
+void DestroyPageRedoWorker(PageRedoWorker *worker);
 
 /* Thread creation utility functions. */
-bool IsPageRedoWorkerProcess(int argc, char* argv[]);
-void AdaptArgvForPageRedoWorker(char* argv[]);
-void GetThreadNameIfPageRedoWorker(int argc, char* argv[], char** threadNamePtr);
+bool IsPageRedoWorkerProcess(int argc, char *argv[]);
+void AdaptArgvForPageRedoWorker(char *argv[]);
+void GetThreadNameIfPageRedoWorker(int argc, char *argv[], char **threadNamePtr);
 
 uint32 GetMyPageRedoWorkerIdWithLock();
-PGPROC* GetPageRedoWorkerProc(PageRedoWorker* worker);
+PGPROC *GetPageRedoWorkerProc(PageRedoWorker *worker);
 
 /* Worker main function. */
 void ParallelRedoThreadRegister();
 void ParallelRedoThreadMain();
 
 /* Dispatcher phases. */
-bool SendPageRedoEndMark(PageRedoWorker* worker);
-void WaitPageRedoWorkerReachLastMark(PageRedoWorker* worker);
+bool SendPageRedoEndMark(PageRedoWorker *worker);
+void WaitPageRedoWorkerReachLastMark(PageRedoWorker *worker);
 
 /* Redo processing. */
-void AddPageRedoItem(PageRedoWorker* worker, void* item);
-bool ProcessPendingPageRedoItems(PageRedoWorker* worker);
+void AddPageRedoItem(PageRedoWorker *worker, void *item);
 
 /* Run-time worker states. */
-uint64 GetCompletedRecPtr(PageRedoWorker* worker);
-void SetWorkerRestartPoint(PageRedoWorker* worker, XLogRecPtr restartPoint);
+uint64 GetCompletedRecPtr(PageRedoWorker *worker);
+void SetWorkerRestartPoint(PageRedoWorker *worker, XLogRecPtr restartPoint);
 
-void UpdatePageRedoWorkerStandbyState(PageRedoWorker* worker, HotStandbyState newState);
+void UpdatePageRedoWorkerStandbyState(PageRedoWorker *worker, HotStandbyState newState);
 
 /* Redo end states. */
 void ClearBTreeIncompleteActions(PageRedoWorker *worker);
@@ -211,20 +206,19 @@ void *GetXLogInvalidPages(PageRedoWorker *worker);
 bool RedoWorkerIsIdle(PageRedoWorker *worker);
 void PageRedoSetAffinity(uint32 id);
 
-void DumpPageRedoWorker(PageRedoWorker* worker);
-void HandlePageRedoInterrupts();
-PageRedoWorker* CreateWorker(uint32 id);
-extern void UpdateRecordGlobals(RedoItem* item, HotStandbyState standbyState);
+void DumpPageRedoWorker(PageRedoWorker *worker);
+PageRedoWorker *CreateWorker(uint32 id);
+extern void UpdateRecordGlobals(RedoItem *item, HotStandbyState standbyState);
 void ReferenceRedoItem(void *item);
 void DereferenceRedoItem(void *item);
 void PushToWorkerLsn(bool force);
 void GetCompletedReadEndPtr(PageRedoWorker *worker, XLogRecPtr *readPtr, XLogRecPtr *endPtr);
-void UpdateReadBufferForExtRto(XLogReaderState* state);
-bool SetReadBufferForExtRto(XLogReaderState* state, XLogRecPtr pageptr, int reqLen);
-bool XLogPageReadForExtRto(XLogRecPtr targetPagePtr, int reqLen, char* readBuf);
+void SetReadBufferForExtRto(XLogReaderState *state, XLogRecPtr pageptr, int reqLen);
 void DumpExtremeRtoReadBuf();
 void PutRecordToReadQueue(XLogReaderState *recordreader);
 bool LsnUpdate();
+void ResetRtoXlogReadBuf(XLogRecPtr targetPagePtr);
+bool XLogPageReadForExtRto(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen);
 
 }  // namespace extreme_rto
 #endif

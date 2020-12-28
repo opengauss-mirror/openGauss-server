@@ -35,6 +35,7 @@ static text* dotrim(const char* string, int stringlen, const char* set, int setl
  *	 Returns string, with all letters forced to lowercase.
  *
  ********************************************************************/
+
 Datum lower(PG_FUNCTION_ARGS)
 {
     text* in_string = PG_GETARG_TEXT_PP(0);
@@ -61,6 +62,7 @@ Datum lower(PG_FUNCTION_ARGS)
  *	 Returns string, with all letters forced to uppercase.
  *
  ********************************************************************/
+
 Datum upper(PG_FUNCTION_ARGS)
 {
     text* in_string = PG_GETARG_TEXT_PP(0);
@@ -90,6 +92,7 @@ Datum upper(PG_FUNCTION_ARGS)
  *	 characters.
  *
  ********************************************************************/
+
 Datum initcap(PG_FUNCTION_ARGS)
 {
     text* in_string = PG_GETARG_TEXT_PP(0);
@@ -118,53 +121,44 @@ Datum initcap(PG_FUNCTION_ARGS)
  *	 instead truncate (on the right) to len.
  *
  ********************************************************************/
+
 Datum lpad(PG_FUNCTION_ARGS)
 {
     text* string1 = PG_GETARG_TEXT_PP(0);
     int32 len = PG_GETARG_INT32(1);
     text* string2 = PG_GETARG_TEXT_PP(2);
     text* ret = NULL;
-    char *ptr1 = NULL;
-    char *ptr2 = NULL;
-    char *ptr2start = NULL;
-    char *ptr2end = NULL;
-    char *ptr_ret = NULL;
-    int m;
-    int s1len;
-    int s2len;
+    char *ptr1 = NULL, *ptr2 = NULL, *ptr2start = NULL, *ptr2end = NULL, *ptr_ret = NULL;
+    int m, s1len, s2len;
 
     int bytelen;
     errno_t ss_rc;
 
     /* Negative len is silently taken as zero */
-    if (len < 0) {
+    if (len < 0)
         len = 0;
-    }
 
     s1len = VARSIZE_ANY_EXHDR(string1);
-    if (s1len < 0) {
+    if (s1len < 0)
         s1len = 0; /* shouldn't happen */
-    }
 
     s2len = VARSIZE_ANY_EXHDR(string2);
-    if (s2len < 0) {
+    if (s2len < 0)
         s2len = 0; /* shouldn't happen */
-    }
 
     s1len = pg_mbstrlen_with_len(VARDATA_ANY(string1), s1len);
-    if (s1len > len) {
-        s1len = len; /* truncate string1 to len chars */
-    }
 
-    if (s2len <= 0) {
+    if (s1len > len)
+        s1len = len; /* truncate string1 to len chars */
+
+    if (s2len <= 0)
         len = s1len; /* nothing to pad with, so don't pad */
-    }
 
     bytelen = pg_database_encoding_max_length() * len;
+
     /* check for integer overflow */
-    if (len != 0 && bytelen / pg_database_encoding_max_length() != len) {
+    if (len != 0 && bytelen / pg_database_encoding_max_length() != len)
         ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("requested length too large")));
-    }
 
     ret = (text*)palloc(VARHDRSZ + bytelen);
 
@@ -183,9 +177,8 @@ Datum lpad(PG_FUNCTION_ARGS)
         ptr_ret += mlen;
         tmp_len += mlen;
         ptr2 += mlen;
-        if (ptr2 == ptr2end) { /* wrap around at end of s2 */
+        if (ptr2 == ptr2end) /* wrap around at end of s2 */
             ptr2 = ptr2start;
-        }
     }
 
     ptr1 = VARDATA_ANY(string1);
@@ -203,11 +196,10 @@ Datum lpad(PG_FUNCTION_ARGS)
 
     SET_VARSIZE(ret, ptr_ret - (char*)ret);
 
-    if (VARSIZE_ANY_EXHDR(ret) == 0 && DB_IS_CMPT(DB_CMPT_A) && !RETURN_NS) {
+    if (0 == VARSIZE_ANY_EXHDR(ret) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS)
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_TEXT_P(ret);
-    }
 }
 
 /********************************************************************
@@ -225,53 +217,44 @@ Datum lpad(PG_FUNCTION_ARGS)
  *	 instead truncate (on the right) to len.
  *
  ********************************************************************/
+
 Datum rpad(PG_FUNCTION_ARGS)
 {
     text* string1 = PG_GETARG_TEXT_PP(0);
     int32 len = PG_GETARG_INT32(1);
     text* string2 = PG_GETARG_TEXT_PP(2);
     text* ret = NULL;
-    char *ptr1 = NULL;
-    char *ptr2 = NULL;
-    char *ptr2start = NULL;
-    char *ptr2end = NULL;
-    char *ptr_ret = NULL;
-    int m;
-    int s1len;
-    int s2len;
+    char *ptr1 = NULL, *ptr2 = NULL, *ptr2start = NULL, *ptr2end = NULL, *ptr_ret = NULL;
+    int m, s1len, s2len;
 
     int bytelen;
     errno_t ss_rc;
 
     /* Negative len is silently taken as zero */
-    if (len < 0) {
+    if (len < 0)
         len = 0;
-    }
 
     s1len = VARSIZE_ANY_EXHDR(string1);
-    if (s1len < 0) {
+    if (s1len < 0)
         s1len = 0; /* shouldn't happen */
-    }
 
     s2len = VARSIZE_ANY_EXHDR(string2);
-    if (s2len < 0) {
+    if (s2len < 0)
         s2len = 0; /* shouldn't happen */
-    }
 
     s1len = pg_mbstrlen_with_len(VARDATA_ANY(string1), s1len);
-    if (s1len > len) {
-        s1len = len; /* truncate string1 to len chars */
-    }
 
-    if (s2len <= 0) {
+    if (s1len > len)
+        s1len = len; /* truncate string1 to len chars */
+
+    if (s2len <= 0)
         len = s1len; /* nothing to pad with, so don't pad */
-    }
 
     bytelen = pg_database_encoding_max_length() * len;
+
     /* Check for integer overflow */
-    if (len != 0 && bytelen / pg_database_encoding_max_length() != len) {
+    if (len != 0 && bytelen / pg_database_encoding_max_length() != len)
         ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("requested length too large")));
-    }
 
     ret = (text*)palloc(VARHDRSZ + bytelen);
     m = len - s1len;
@@ -302,18 +285,16 @@ Datum rpad(PG_FUNCTION_ARGS)
         ptr_ret += mlen;
         tmp_len += mlen;
         ptr2 += mlen;
-        if (ptr2 == ptr2end) { /* wrap around at end of s2 */
+        if (ptr2 == ptr2end) /* wrap around at end of s2 */
             ptr2 = ptr2start;
-        }
     }
 
     SET_VARSIZE(ret, ptr_ret - (char*)ret);
 
-    if (VARSIZE_ANY_EXHDR(ret) == 0 && DB_IS_CMPT(DB_CMPT_A) && !RETURN_NS) {
+    if (0 == VARSIZE_ANY_EXHDR(ret) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS)
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_TEXT_P(ret);
-    }
 }
 
 /********************************************************************
@@ -330,6 +311,7 @@ Datum rpad(PG_FUNCTION_ARGS)
  *	 up to the first character not in set.
  *
  ********************************************************************/
+
 Datum btrim(PG_FUNCTION_ARGS)
 {
     text* string = PG_GETARG_TEXT_PP(0);
@@ -337,11 +319,11 @@ Datum btrim(PG_FUNCTION_ARGS)
     text* ret = NULL;
 
     ret = dotrim(VARDATA_ANY(string), VARSIZE_ANY_EXHDR(string), VARDATA_ANY(set), VARSIZE_ANY_EXHDR(set), true, true);
-    if ((ret == NULL || VARSIZE_ANY_EXHDR(ret) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
+
+    if ((ret == NULL || 0 == VARSIZE_ANY_EXHDR(ret)) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_TEXT_P(ret);
-    }
 }
 
 /********************************************************************
@@ -349,17 +331,18 @@ Datum btrim(PG_FUNCTION_ARGS)
  * btrim1 --- btrim with set fixed as ' '
  *
  ********************************************************************/
+
 Datum btrim1(PG_FUNCTION_ARGS)
 {
     text* string = PG_GETARG_TEXT_PP(0);
     text* ret = NULL;
 
     ret = dotrim(VARDATA_ANY(string), VARSIZE_ANY_EXHDR(string), " ", 1, true, true);
-    if ((ret == NULL || VARSIZE_ANY_EXHDR(ret) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
+
+    if ((ret == NULL || 0 == VARSIZE_ANY_EXHDR(ret)) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_TEXT_P(ret);
-    }
 }
 
 /*
@@ -428,9 +411,8 @@ static text* dotrim(const char* string, int stringlen, const char* set, int setl
                         if (str_len == setmblen[i] && memcmp(str_pos, setchars[i], str_len) == 0)
                             break;
                     }
-                    if (i >= setnchars) {
+                    if (i >= setnchars)
                         break; /* no match here */
-                    }
                     string += str_len;
                     stringlen -= str_len;
                     resultndx++;
@@ -443,13 +425,11 @@ static text* dotrim(const char* string, int stringlen, const char* set, int setl
                     str_pos = stringchars[resultndx + resultnchars - 1];
                     str_len = stringmblen[resultndx + resultnchars - 1];
                     for (i = 0; i < setnchars; i++) {
-                        if (str_len == setmblen[i] && memcmp(str_pos, setchars[i], str_len) == 0) {
+                        if (str_len == setmblen[i] && memcmp(str_pos, setchars[i], str_len) == 0)
                             break;
-                        }
                     }
-                    if (i >= setnchars) {
+                    if (i >= setnchars)
                         break; /* no match here */
-                    }
                     stringlen -= str_len;
                     resultnchars--;
                 }
@@ -468,13 +448,11 @@ static text* dotrim(const char* string, int stringlen, const char* set, int setl
                     char str_ch = *string;
 
                     for (i = 0; i < setlen; i++) {
-                        if (str_ch == set[i]) {
+                        if (str_ch == set[i])
                             break;
-                        }
                     }
-                    if (i >= setlen) {
+                    if (i >= setlen)
                         break; /* no match here */
-                    }
                     string++;
                     stringlen--;
                 }
@@ -485,13 +463,11 @@ static text* dotrim(const char* string, int stringlen, const char* set, int setl
                     char str_ch = string[stringlen - 1];
 
                     for (i = 0; i < setlen; i++) {
-                        if (str_ch == set[i]) {
+                        if (str_ch == set[i])
                             break;
-                        }
                     }
-                    if (i >= setlen) {
+                    if (i >= setlen)
                         break; /* no match here */
-                    }
                     stringlen--;
                 }
             }
@@ -517,23 +493,20 @@ static text* dotrim(const char* string, int stringlen, const char* set, int setl
  *
  * Cloned from btrim and modified as required.
  ********************************************************************/
+
 Datum byteatrim(PG_FUNCTION_ARGS)
 {
     bytea* string = PG_GETARG_BYTEA_PP(0);
     bytea* set = PG_GETARG_BYTEA_PP(1);
     bytea* ret = NULL;
-    char *ptr = NULL;
-    char *end = NULL;
-    char *ptr2 = NULL;
-    char *ptr2start = NULL;
-    char *end2 = NULL;
+    char *ptr = NULL, *end = NULL, *ptr2 = NULL, *ptr2start = NULL, *end2 = NULL;
     int m, stringlen, setlen;
 
     stringlen = VARSIZE_ANY_EXHDR(string);
     setlen = VARSIZE_ANY_EXHDR(set);
-    if (stringlen <= 0 || setlen <= 0) {
+
+    if (stringlen <= 0 || setlen <= 0)
         PG_RETURN_BYTEA_P(string);
-    }
 
     m = stringlen;
     ptr = VARDATA_ANY(string);
@@ -544,14 +517,12 @@ Datum byteatrim(PG_FUNCTION_ARGS)
     while (m > 0) {
         ptr2 = ptr2start;
         while (ptr2 <= end2) {
-            if (*ptr == *ptr2) {
+            if (*ptr == *ptr2)
                 break;
-            }
             ++ptr2;
         }
-        if (ptr2 > end2) {
+        if (ptr2 > end2)
             break;
-        }
         ptr++;
         m--;
     }
@@ -559,14 +530,12 @@ Datum byteatrim(PG_FUNCTION_ARGS)
     while (m > 0) {
         ptr2 = ptr2start;
         while (ptr2 <= end2) {
-            if (*end == *ptr2) {
+            if (*end == *ptr2)
                 break;
-            }
             ++ptr2;
         }
-        if (ptr2 > end2) {
+        if (ptr2 > end2)
             break;
-        }
         end--;
         m--;
     }
@@ -594,6 +563,7 @@ Datum byteatrim(PG_FUNCTION_ARGS)
  *	 character not in set.
  *
  ********************************************************************/
+
 Datum ltrim(PG_FUNCTION_ARGS)
 {
     text* string = PG_GETARG_TEXT_PP(0);
@@ -601,11 +571,11 @@ Datum ltrim(PG_FUNCTION_ARGS)
     text* ret = NULL;
 
     ret = dotrim(VARDATA_ANY(string), VARSIZE_ANY_EXHDR(string), VARDATA_ANY(set), VARSIZE_ANY_EXHDR(set), true, false);
-    if ((ret == NULL || VARSIZE_ANY_EXHDR(ret) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
+
+    if ((ret == NULL || 0 == VARSIZE_ANY_EXHDR(ret)) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_TEXT_P(ret);
-    }
 }
 
 /********************************************************************
@@ -613,17 +583,18 @@ Datum ltrim(PG_FUNCTION_ARGS)
  * ltrim1 --- ltrim with set fixed as ' '
  *
  ********************************************************************/
+
 Datum ltrim1(PG_FUNCTION_ARGS)
 {
     text* string = PG_GETARG_TEXT_PP(0);
     text* ret = NULL;
 
     ret = dotrim(VARDATA_ANY(string), VARSIZE_ANY_EXHDR(string), " ", 1, true, false);
-    if ((ret == NULL || VARSIZE_ANY_EXHDR(ret) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
+
+    if ((ret == NULL || 0 == VARSIZE_ANY_EXHDR(ret)) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_TEXT_P(ret);
-    }
 }
 
 /********************************************************************
@@ -640,6 +611,7 @@ Datum ltrim1(PG_FUNCTION_ARGS)
  *	 character not in set.
  *
  ********************************************************************/
+
 Datum rtrim(PG_FUNCTION_ARGS)
 {
     text* string = PG_GETARG_TEXT_PP(0);
@@ -647,11 +619,11 @@ Datum rtrim(PG_FUNCTION_ARGS)
     text* ret = NULL;
 
     ret = dotrim(VARDATA_ANY(string), VARSIZE_ANY_EXHDR(string), VARDATA_ANY(set), VARSIZE_ANY_EXHDR(set), false, true);
-    if ((ret == NULL || VARSIZE_ANY_EXHDR(ret) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
+
+    if ((ret == NULL || 0 == VARSIZE_ANY_EXHDR(ret)) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_TEXT_P(ret);
-    }
 }
 
 /********************************************************************
@@ -659,17 +631,18 @@ Datum rtrim(PG_FUNCTION_ARGS)
  * rtrim1 --- rtrim with set fixed as ' '
  *
  ********************************************************************/
+
 Datum rtrim1(PG_FUNCTION_ARGS)
 {
     text* string = PG_GETARG_TEXT_PP(0);
     text* ret = NULL;
 
     ret = dotrim(VARDATA_ANY(string), VARSIZE_ANY_EXHDR(string), " ", 1, false, true);
-    if ((ret == NULL || VARSIZE_ANY_EXHDR(ret) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
+
+    if ((ret == NULL || 0 == VARSIZE_ANY_EXHDR(ret)) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_TEXT_P(ret);
-    }
 }
 
 /********************************************************************
@@ -688,21 +661,16 @@ Datum rtrim1(PG_FUNCTION_ARGS)
  *	 Improved by Edwin Ramirez <ramirez@doc.mssm.edu>.
  *
  ********************************************************************/
+
 Datum translate(PG_FUNCTION_ARGS)
 {
     text* string = PG_GETARG_TEXT_PP(0);
     text* from = PG_GETARG_TEXT_PP(1);
     text* to = PG_GETARG_TEXT_PP(2);
     text* result = NULL;
-    char *from_ptr = NULL;
-    char *to_ptr = NULL;
-    char *source = NULL;
-    char *target = NULL;
-    int m;
-    int fromlen;
-    int tolen;
-    int retlen;
-    int i;
+    char *from_ptr = NULL, *to_ptr = NULL;
+    char *source = NULL, *target = NULL;
+    int m, fromlen, tolen, retlen, i;
     int worst_len;
     int len;
     int source_len;
@@ -710,9 +678,8 @@ Datum translate(PG_FUNCTION_ARGS)
     errno_t ss_rc;
 
     m = VARSIZE_ANY_EXHDR(string);
-    if (m <= 0) {
+    if (m <= 0)
         PG_RETURN_TEXT_P(string);
-    }
     source = VARDATA_ANY(string);
 
     fromlen = VARSIZE_ANY_EXHDR(from);
@@ -725,10 +692,10 @@ Datum translate(PG_FUNCTION_ARGS)
      * single-byte character at each position of the string.
      */
     worst_len = pg_database_encoding_max_length() * m;
+
     /* check for integer overflow */
-    if (worst_len / pg_database_encoding_max_length() != m) {
+    if (worst_len / pg_database_encoding_max_length() != m)
         ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("requested length too large")));
-    }
 
     result = (text*)palloc(worst_len + VARHDRSZ);
     target = VARDATA(result);
@@ -741,9 +708,8 @@ Datum translate(PG_FUNCTION_ARGS)
 
         for (i = 0; i < fromlen; i += len) {
             len = pg_mblen(&from_ptr[i]);
-            if (len == source_len && memcmp(source, &from_ptr[i], len) == 0) {
+            if (len == source_len && memcmp(source, &from_ptr[i], len) == 0)
                 break;
-            }
 
             from_index++;
         }
@@ -753,9 +719,8 @@ Datum translate(PG_FUNCTION_ARGS)
 
             for (i = 0; i < from_index; i++) {
                 p += pg_mblen(p);
-                if (p >= (to_ptr + tolen)) {
+                if (p >= (to_ptr + tolen))
                     break;
-                }
             }
             if (p < (to_ptr + tolen)) {
                 len = pg_mblen(p);
@@ -765,6 +730,7 @@ Datum translate(PG_FUNCTION_ARGS)
                 tmp_len += len;
                 retlen += len;
             }
+
         } else {
             /* no match, so copy */
             ss_rc = memcpy_s(target, worst_len - tmp_len, source, source_len);
@@ -778,7 +744,7 @@ Datum translate(PG_FUNCTION_ARGS)
         m -= source_len;
     }
 
-    if (retlen == 0 && DB_IS_CMPT(DB_CMPT_A)) {
+    if (0 == retlen && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
         PG_RETURN_NULL();
     } else {
         SET_VARSIZE(result, retlen + VARHDRSZ);
@@ -788,6 +754,7 @@ Datum translate(PG_FUNCTION_ARGS)
          * a multibyte encoding, but it's not worth reallocating it; the result
          * probably won't live long anyway.
          */
+
         PG_RETURN_TEXT_P(result);
     }
 }
@@ -813,19 +780,21 @@ Datum translate(PG_FUNCTION_ARGS)
  *	 (range 1..255).
  *
  ********************************************************************/
+
 Datum ascii(PG_FUNCTION_ARGS)
 {
     text* string = PG_GETARG_TEXT_PP(0);
     int encoding = GetDatabaseEncoding();
     unsigned char* data = NULL;
 
-    if (VARSIZE_ANY_EXHDR(string) <= 0) {
+    if (VARSIZE_ANY_EXHDR(string) <= 0)
         PG_RETURN_INT32(0);
-    }
 
     data = (unsigned char*)VARDATA_ANY(string);
+
     if (encoding == PG_UTF8 && *data > 127) {
         /* return the code point for Unicode */
+
         int result = 0, tbytes = 0, i;
 
         if (*data >= 0xF0) {
@@ -843,15 +812,17 @@ Datum ascii(PG_FUNCTION_ARGS)
         Assert(tbytes > 0);
 
         for (i = 1; i <= tbytes; i++) {
-            Assert((data[i] & 0xC0) == 0x80);
-            result = (result << 6) + (data[i] & 0x3f);
+            if ((data[i] & 0xC0) != 0x80) {
+                report_invalid_encoding(PG_UTF8, (const char*)data, tbytes);
+            } else {
+                result = (result << 6) + (data[i] & 0x3f);
+            }
         }
 
         PG_RETURN_INT32(result);
     } else {
-        if (pg_encoding_max_length(encoding) > 1 && *data > 127) {
+        if (pg_encoding_max_length(encoding) > 1 && *data > 127)
             ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("requested character too large")));
-        }
 
         PG_RETURN_INT32((int32)*data);
     }
@@ -878,30 +849,30 @@ Datum ascii(PG_FUNCTION_ARGS)
  * invalid data to enter the database.
  *
  ********************************************************************/
+
 Datum chr(PG_FUNCTION_ARGS)
 {
     uint32 cvalue = PG_GETARG_UINT32(0);
     text* result = NULL;
     int encoding = GetDatabaseEncoding();
+
     if (encoding == PG_UTF8 && cvalue > 127) {
         /* for Unicode we treat the argument as a code point */
         int bytes;
         char* wch = NULL;
 
         /* We only allow valid Unicode code points */
-        if (cvalue > 0x001fffff) {
+        if (cvalue > 0x001fffff)
             ereport(ERROR,
                 (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
                     errmsg("requested character too large for encoding: %u", cvalue)));
-        }
 
-        if (cvalue > 0xffff) {
+        if (cvalue > 0xffff)
             bytes = 4;
-        } else if (cvalue > 0x07ff) {
+        else if (cvalue > 0x07ff)
             bytes = 3;
-        } else {
+        else
             bytes = 2;
-        }
 
         result = (text*)palloc(VARHDRSZ + bytes);
         SET_VARSIZE(result, VARHDRSZ + bytes);
@@ -920,23 +891,26 @@ Datum chr(PG_FUNCTION_ARGS)
             wch[2] = 0x80 | ((cvalue >> 6) & 0x3F);
             wch[3] = 0x80 | (cvalue & 0x3F);
         }
-    } else {
+
+    }
+
+    else {
         bool is_mb = false;
 
         /*
          * Error out on arguments that make no sense or that we can't validly
          * represent in the encoding.
          */
-        if (cvalue == 0) {
+
+        if (cvalue == 0)
             PG_RETURN_NULL();
-        }
 
         is_mb = pg_encoding_max_length(encoding) > 1;
-        if ((is_mb && (cvalue > 127)) || (!is_mb && (cvalue > 255))) {
+
+        if ((is_mb && (cvalue > 127)) || (!is_mb && (cvalue > 255)))
             ereport(ERROR,
                 (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
                     errmsg("requested character too large for encoding: %u", cvalue)));
-        }
 
         result = (text*)palloc(VARHDRSZ + 1);
         SET_VARSIZE(result, VARHDRSZ + 1);
@@ -959,25 +933,23 @@ Datum chr(PG_FUNCTION_ARGS)
  *	Repeat string by val.
  *
  ********************************************************************/
+
 Datum repeat(PG_FUNCTION_ARGS)
 {
     text* string = PG_GETARG_TEXT_PP(0);
     int32 count = PG_GETARG_INT32(1);
     text* result = NULL;
-    int slen;
-    int tlen;
+    int slen, tlen;
     int i;
-    char *cp = NULL;
-    char *sp = NULL;
+    char *cp = NULL, *sp = NULL;
 
-    if (count < 0) {
+    if (count < 0)
         count = 0;
-    }
 
     slen = VARSIZE_ANY_EXHDR(string);
-    if (unlikely(pg_mul_s32_overflow(count, slen, &tlen)) || unlikely(pg_add_s32_overflow(tlen, VARHDRSZ, &tlen))) {
+
+    if (unlikely(pg_mul_s32_overflow(count, slen, &tlen)) || unlikely(pg_add_s32_overflow(tlen, VARHDRSZ, &tlen)))
         ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("requested length too large")));
-    }
 
     result = (text*)palloc(tlen);
 
@@ -991,7 +963,7 @@ Datum repeat(PG_FUNCTION_ARGS)
         tlen -= slen;
     }
 
-    if (VARSIZE_ANY_EXHDR(result) == 0 && DB_IS_CMPT(DB_CMPT_A) && !RETURN_NS) {
+    if (0 == VARSIZE_ANY_EXHDR(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) {
         PG_RETURN_NULL();
     } else
         PG_RETURN_TEXT_P(result);

@@ -10,5 +10,3 @@ test: encode_tpch
 test: rlstm
 test: wlm_plan_encoding
 #END OF NO CHANGE SECTION
-
-

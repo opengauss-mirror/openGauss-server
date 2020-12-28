@@ -21,35 +21,35 @@ CALLED ON NULL INPUT
 SECURITY INVOKER
 COST 100;
 
-explain (verbose, costs off, nodes off) select * from test_function_immutable();
+explain (verbose, costs off) select * from test_function_immutable();
 select * from test_function_immutable();
 CREATE VIEW functionview AS SELECT f1,f2,left(f3,test_function_immutable()::INT) f3 FROM function_table_01;
 
 --targetlist
-explain (verbose, costs off, nodes off) select f1,left(f3,test_function_immutable()::INT) from function_table_01 order by 1 limit 3;
+explain (verbose, costs off) select f1,left(f3,test_function_immutable()::INT) from function_table_01 order by 1 limit 3;
 select f1,left(f3,test_function_immutable()::INT) from function_table_01 order by 1 limit 3;
 
 --fromQual
-explain (verbose, costs off, nodes off) select * from function_table_01 where f1 = test_function_immutable();
+explain (verbose, costs off) select * from function_table_01 where f1 = test_function_immutable();
 select * from function_table_01 where f1 = test_function_immutable();
 
 --sortClause
-explain (verbose, costs off, nodes off) select f1,f3 from function_table_01 order by left(f3,test_function_immutable()::INT) limit 3;
+explain (verbose, costs off) select f1,f3 from function_table_01 order by left(f3,test_function_immutable()::INT) limit 3;
 select f1,f3 from function_table_01 order by left(f3,test_function_immutable()::INT), f1 limit 3;
 
 --groupClause
-explain (verbose, costs off, nodes off) select avg(f2),left(f3,test_function_immutable()::INT) from function_table_01 group by 2 order by 1;
+explain (verbose, costs off) select avg(f2),left(f3,test_function_immutable()::INT) from function_table_01 group by 2 order by 1;
 select avg(f2),left(f3,test_function_immutable()::INT) from function_table_01 group by 2 order by 1;
 
 --havingClause
-explain (verbose, costs off, nodes off) select avg(f2) fa,f3 from function_table_01 group by f3 having avg(f2)>test_function_immutable()  order by 1;
+explain (verbose, costs off) select avg(f2) fa,f3 from function_table_01 group by f3 having avg(f2)>test_function_immutable()  order by 1;
 select avg(f2) fa,f3 from function_table_01 group by f3 having avg(f2)>test_function_immutable() order by 1;
 
 --limitClause && offsetClause
-explain (verbose, costs off, nodes off) select * from function_table_01 order by 1 limit test_function_immutable() offset test_function_immutable();
+explain (verbose, costs off) select * from function_table_01 order by 1 limit test_function_immutable() offset test_function_immutable();
 select * from function_table_01 order by 1  limit test_function_immutable() offset test_function_immutable();
 
-explain (verbose, costs off, nodes off) select avg(f2),left(f3,test_function_immutable()::INT) from function_table_01 group by 2 having avg(f2)>test_function_immutable() order by 1 limit test_function_immutable() offset test_function_immutable()-2;
+explain (verbose, costs off) select avg(f2),left(f3,test_function_immutable()::INT) from function_table_01 group by 2 having avg(f2)>test_function_immutable() order by 1 limit test_function_immutable() offset test_function_immutable()-2;
 select avg(f2),left(f3,test_function_immutable()::INT) from function_table_01 group by 2 having avg(f2)>test_function_immutable() order by 1 limit test_function_immutable() offset test_function_immutable()-2;
 
 drop view functionview;

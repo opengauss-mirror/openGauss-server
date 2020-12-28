@@ -36,7 +36,7 @@ static int UTF8_MatchText(char* t, int tlen, char* p, int plen, pg_locale_t loca
 
 static int SB_IMatchText(char* t, int tlen, char* p, int plen, pg_locale_t locale, bool locale_is_c);
 
-static inline int Generic_Text_IC_like(text* str, text* pat, Oid collation);
+static int Generic_Text_IC_like(text* str, text* pat, Oid collation);
 
 /* --------------------
  * Support routine for MatchText. Compares given multibyte streams
@@ -48,22 +48,17 @@ static inline int wchareq(const char* p1, const char* p2)
     int p1_len;
 
     /* Optimization:  quickly compare the first byte. */
-    if (*p1 != *p2) {
+    if (*p1 != *p2)
         return 0;
-    }
+
     p1_len = pg_mblen(p1);
-    if (pg_mblen(p2) != p1_len) {
+    if (pg_mblen(p2) != p1_len)
         return 0;
-    }
 
     /* They are the same length */
     while (p1_len--) {
-        if (*p1 != *p2) {
+        if (*p1++ != *p2++)
             return 0;
-        } else {
-            p1++;
-            p2++;
-        }
     }
     return 1;
 }
@@ -76,21 +71,22 @@ static inline int wchareq(const char* p1, const char* p2)
  * of getting a single character transformed to the system's wchar_t format.
  * So now, we just downcase the strings using lower() and apply regular LIKE
  * comparison.	This should be revisited when we install better locale support.
- *
+ */
+
+/*
  * We do handle case-insensitive matching for single-byte encodings using
  * fold-on-the-fly processing, however.
  */
-static char SB_lower_char(unsigned char inputCharacter, pg_locale_t locale, bool locale_is_c)
+static char SB_lower_char(unsigned char c, pg_locale_t locale, bool locale_is_c)
 {
-    if (locale_is_c) {
-        return (char)(pg_ascii_tolower(inputCharacter));
+    if (locale_is_c)
+        return pg_ascii_tolower(c);
 #ifdef HAVE_LOCALE_T
-    } else if (locale) {
-        return (char) (tolower_l(inputCharacter, locale));
+    else if (locale)
+        return tolower_l(c, locale);
 #endif
-    } else {
-        return (char)(pg_tolower(inputCharacter));
-    }
+    else
+        return pg_tolower(c);
 }
 
 #define NextByte(p, plen) ((p)++, (plen)--)
@@ -135,6 +131,7 @@ static char SB_lower_char(unsigned char inputCharacter, pg_locale_t locale, bool
 #include "like_match.cpp"
 
 /* setup to compile like_match.c for UTF8 encoding, using fast NextChar */
+
 #define NextChar(p, plen) \
     do {                  \
         (p)++;            \
@@ -148,19 +145,17 @@ static char SB_lower_char(unsigned char inputCharacter, pg_locale_t locale, bool
 /* Generic for all cases not requiring inline case-folding */
 int GenericMatchText(char* s, int slen, char* p, int plen)
 {
-    if (pg_database_encoding_max_length() == 1) {
+    if (pg_database_encoding_max_length() == 1)
         return SB_MatchText(s, slen, p, plen, 0, true);
-    } else if (GetDatabaseEncoding() == PG_UTF8) {
+    else if (GetDatabaseEncoding() == PG_UTF8)
         return UTF8_MatchText(s, slen, p, plen, 0, true);
-    } else {
+    else
         return MB_MatchText(s, slen, p, plen, 0, true);
-    }
 }
 
 static inline int Generic_Text_IC_like(text* str, text* pat, Oid collation)
 {
-    char *s = NULL;
-    char *p = NULL;
+    char *s = NULL, *p = NULL;
     int slen, plen;
 
     /*
@@ -168,19 +163,19 @@ static inline int Generic_Text_IC_like(text* str, text* pat, Oid collation)
      * on the pattern and text, but instead call SB_lower_char on each
      * character.  In the multi-byte case we don't have much choice :-(
      */
+
     if (pg_database_encoding_max_length() > 1) {
         /* lower's result is never packed, so OK to use old macros here */
         pat = DatumGetTextP(DirectFunctionCall1Coll(lower, collation, PointerGetDatum(pat)));
         p = VARDATA(pat);
-        plen = (int)(VARSIZE(pat) - VARHDRSZ);
+        plen = (VARSIZE(pat) - VARHDRSZ);
         str = DatumGetTextP(DirectFunctionCall1Coll(lower, collation, PointerGetDatum(str)));
         s = VARDATA(str);
-        slen = (int)(VARSIZE(str) - VARHDRSZ);
-        if (GetDatabaseEncoding() == PG_UTF8) {
+        slen = (VARSIZE(str) - VARHDRSZ);
+        if (GetDatabaseEncoding() == PG_UTF8)
             return UTF8_MatchText(s, slen, p, plen, 0, true);
-        } else {
+        else
             return MB_MatchText(s, slen, p, plen, 0, true);
-        }
     } else {
         /*
          * Here we need to prepare locale information for SB_lower_char. This
@@ -189,9 +184,9 @@ static inline int Generic_Text_IC_like(text* str, text* pat, Oid collation)
         pg_locale_t locale = 0;
         bool locale_is_c = false;
 
-        if (lc_ctype_is_c(collation)) {
+        if (lc_ctype_is_c(collation))
             locale_is_c = true;
-        } else if (collation != DEFAULT_COLLATION_OID) {
+        else if (collation != DEFAULT_COLLATION_OID) {
             if (!OidIsValid(collation)) {
                 /*
                  * This typically means that the parser could not resolve a
@@ -213,7 +208,10 @@ static inline int Generic_Text_IC_like(text* str, text* pat, Oid collation)
     }
 }
 
-/* interface routines called by the function manager */
+/*
+ *	interface routines called by the function manager
+ */
+
 Datum namelike(PG_FUNCTION_ARGS)
 {
     Name str = PG_GETARG_NAME(0);
@@ -223,7 +221,7 @@ Datum namelike(PG_FUNCTION_ARGS)
     int slen, plen;
 
     s = NameStr(*str);
-    slen = (int)(strlen(s));
+    slen = strlen(s);
     p = VARDATA_ANY(pat);
     plen = VARSIZE_ANY_EXHDR(pat);
 
@@ -241,7 +239,7 @@ Datum namenlike(PG_FUNCTION_ARGS)
     int slen, plen;
 
     s = NameStr(*str);
-    slen = (int)(strlen(s));
+    slen = strlen(s);
     p = VARDATA_ANY(pat);
     plen = VARSIZE_ANY_EXHDR(pat);
 
@@ -322,6 +320,44 @@ Datum byteanlike(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(result);
 }
 
+Datum
+byteawithoutorderwithequalcollike(PG_FUNCTION_ARGS)
+{
+    bytea *str = PG_GETARG_BYTEA_PP(0);
+    bytea *pat = PG_GETARG_BYTEA_PP(1);
+    bool result = false;
+    char *s, *p;
+    int slen, plen;
+
+    s = VARDATA_ANY(str);
+    slen = VARSIZE_ANY_EXHDR(str);
+    p = VARDATA_ANY(pat);
+    plen = VARSIZE_ANY_EXHDR(pat);
+
+    result = (GenericMatchText(s, slen, p, plen) == LIKE_TRUE);
+
+    PG_RETURN_BOOL(result);
+}
+
+Datum
+byteawithoutorderwithequalcolnlike(PG_FUNCTION_ARGS)
+{
+    bytea *str = PG_GETARG_BYTEA_PP(0);
+    bytea *pat = PG_GETARG_BYTEA_PP(1);
+    bool result = false;
+    char *s, *p;
+    int slen, plen;
+
+    s = VARDATA_ANY(str);
+    slen = VARSIZE_ANY_EXHDR(str);
+    p = VARDATA_ANY(pat);
+    plen = VARSIZE_ANY_EXHDR(pat);
+
+    result = (GenericMatchText(s, slen, p, plen) != LIKE_TRUE);
+
+    PG_RETURN_BOOL(result);
+}
+
 Datum rawlike(PG_FUNCTION_ARGS)
 {
     bytea* str = PG_GETARG_BYTEA_PP(0);
@@ -358,7 +394,9 @@ Datum rawnlike(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(result);
 }
 
-/* Case-insensitive versions */
+//
+// Case-insensitive versions
+//
 Datum nameiclike(PG_FUNCTION_ARGS)
 {
     Name str = PG_GETARG_NAME(0);
@@ -417,11 +455,10 @@ Datum like_escape(PG_FUNCTION_ARGS)
     text* esc = PG_GETARG_TEXT_PP(1);
     text* result = NULL;
 
-    if (pg_database_encoding_max_length() == 1) {
+    if (pg_database_encoding_max_length() == 1)
         result = SB_do_like_escape(pat, esc);
-    } else {
+    else
         result = MB_do_like_escape(pat, esc);
-    }
 
     PG_RETURN_TEXT_P(result);
 }
@@ -438,4 +475,3 @@ Datum like_escape_bytea(PG_FUNCTION_ARGS)
 
     PG_RETURN_BYTEA_P((bytea*)result);
 }
-

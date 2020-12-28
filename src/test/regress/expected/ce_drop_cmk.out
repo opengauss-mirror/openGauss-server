@@ -1,0 +1,78 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+\! gs_ktool -g
+GENERATE
+2
+CREATE USER test_security_admin CREATEROLE PASSWORD "Gauss@123";
+CREATE USER test1 PASSWORD "Gauss@123";
+CREATE USER test2 PASSWORD "Gauss@123";
+SELECT count(*), 'count' FROM gs_client_global_keys;
+ count | ?column? 
+-------+----------
+     0 | count
+(1 row)
+
+SET ROLE test1 PASSWORD "Gauss@123";
+CREATE CLIENT MASTER KEY test_drop_cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+SET ROLE test2 PASSWORD "Gauss@123";
+CREATE CLIENT MASTER KEY test_drop_cmk2 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/2" , ALGORITHM = AES_256_CBC);
+SELECT count(*), 'count' FROM gs_client_global_keys;
+ count | ?column? 
+-------+----------
+     2 | count
+(1 row)
+
+SET ROLE test1 PASSWORD "Gauss@123";
+DROP CLIENT MASTER KEY test_drop_cmk2;
+ERROR:  global setting "test_drop_cmk2" does not exist
+SELECT count(*), 'count' FROM gs_client_global_keys;
+ count | ?column? 
+-------+----------
+     2 | count
+(1 row)
+
+DROP CLIENT MASTER KEY test2.test_drop_cmk2;
+ERROR:  permission denied for schema test2
+SELECT count(*), 'count' FROM gs_client_global_keys;
+ count | ?column? 
+-------+----------
+     2 | count
+(1 row)
+
+SET ROLE test2 PASSWORD "Gauss@123";
+DROP CLIENT MASTER KEY test2.test_drop_cmk2;
+SELECT count(*), 'count' FROM gs_client_global_keys;
+ count | ?column? 
+-------+----------
+     1 | count
+(1 row)
+
+SET ROLE test_security_admin PASSWORD "Gauss@123";
+DROP CLIENT MASTER KEY test1.test_drop_cmk1;
+ERROR:  permission denied for schema test1
+SELECT count(*), 'count' FROM gs_client_global_keys;
+ count | ?column? 
+-------+----------
+     1 | count
+(1 row)
+
+RESET ROLE; 
+DROP CLIENT MASTER KEY test1.test_drop_cmk1;
+DROP CLIENT MASTER KEY IF EXISTS test1.test_drop_cmk1 CASCADE;
+NOTICE:  global setting "test_drop_cmk1" does not exist
+DROP CLIENT MASTER KEY IF EXISTS test2.test_drop_cmk2 CASCADE;
+NOTICE:  global setting "test_drop_cmk2" does not exist
+DROP USER test1,test2,test_security_admin;
+SELECT count(*), 'count' FROM gs_client_global_keys;
+ count | ?column? 
+-------+----------
+     0 | count
+(1 row)
+
+\! gs_ktool -d all
+DELETE ALL
+ 1 2

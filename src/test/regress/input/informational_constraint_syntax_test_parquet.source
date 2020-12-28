@@ -1,0 +1,568 @@
+--test soft constraint syntax, there are two kind syntax formats, which are table-level constraint and column-level constraint
+--currently, the primary key and unique constraints are supported.
+
+
+----test primary key on table level + not enforced (+ default is enable query optimization) mode
+Drop server if exists hdfs_server cascade;
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique primary key(id) not enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique primary key (num) not enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique primary key (num) not enforced enable query optimization,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+
+------test partition foreign table
+drop foreign table if exists part_1;
+create foreign table part_1 (
+	a int ,
+	constraint part_1constr_unique unique (b) not enforced,
+	b varchar(20), 
+	c date)
+SERVER hdfs_server OPTIONS(format 'parquet', foldername '/user/hive/warehouse/partition.db/part_1_parquet')
+distribute by roundrobin
+partition by (b) automapped;
+select relname,relhasindex from pg_class where oid='part_1'::regclass;
+select  conname,  contype, consoft, conindid, conkey from pg_constraint where conname ='part_1constr_unique';
+
+
+----test primary key on table level + not enforced + disable query optimization mode
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique primary key (num) not enforced disable query optimization,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+
+----test primary key on column level + not enforced (+ default is enable query optimization) mode
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique primary key not enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique primary key not enforced enable query optimization,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+
+----test primary key on column level + not enforced + disable query optimization mode
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique primary key not enforced disable query optimization,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+
+------test partition foreign table + column level
+drop foreign table if exists part_1;
+create foreign table part_1 (
+	a int,
+	b varchar(20) constraint part_1constr_unique primary key not enforced, 
+	c date)
+SERVER hdfs_server OPTIONS(format 'parquet', foldername '/user/hive/warehouse/partition.db/part_1_parquet')
+distribute by roundrobin
+partition by (b) automapped;
+select relname,relhasindex from pg_class where oid='part_1'::regclass;
+select  conname,  contype, consoft, conindid, conkey from pg_constraint where conname ='part_1constr_unique';
+
+----test unique on table level + not enforced (+ default is enable query optimization) mode
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique unique(id) not enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique unique (num) not enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique unique (num) not enforced enable query optimization,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+
+------ test partition foreign table 
+drop foreign table if exists part_1;
+create foreign table part_1 (
+	a int constraint part_1constr_unique unique not enforced,
+	b varchar(20), 
+	c date)
+SERVER hdfs_server OPTIONS(format 'parquet', foldername '/user/hive/warehouse/partition.db/part_1_parquet')
+distribute by roundrobin
+partition by (b) automapped;
+select relname,relhasindex from pg_class where oid='part_1'::regclass;
+select  conname,  contype, consoft, conindid, conkey from pg_constraint where conname ='part_1constr_unique';
+
+----test unique on table level + not enforced + disable query optimization mode
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique unique (num) not enforced disable query optimization,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+
+----test unique on column level + not enforced (+ default is enable query optimization) mode
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique unique not enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique unique not enforced enable query optimization,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+
+----test unique key on column level + not enforced + disable query optimization mode
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique unique not enforced disable query optimization,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+
+------test partition foreign table + column level
+drop foreign table if exists part_1;
+create foreign table part_1 (
+	a int,
+	b varchar(20) constraint part_1constr_unique unique not enforced, 
+	c date)
+SERVER hdfs_server OPTIONS(format 'parquet', foldername '/user/hive/warehouse/partition.db/part_1_parquet')
+distribute by roundrobin
+partition by (b) automapped;
+select relname,relhasindex from pg_class where oid='part_1'::regclass;
+select  conname,  contype, consoft, conindid, conkey from pg_constraint where conname ='part_1constr_unique';
+
+--test mutil-constraints can be built on time for mutil-columns
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique_001 unique (id) not enforced,
+ constraint constr_unique_002 unique (num) not enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname like 'constr_unique%';
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique_001 unique  not enforced,
+ constraint constr_unique_002 unique (num) not enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname like 'constr_unique%';
+
+--test mutil-constraints can be built on time for one column(In fact, only one constraint will be built)
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique_001 unique  not enforced  constraint constr_unique_002 unique  not enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname like 'constr_unique%';
+
+--test support mutil-constraints on one column, but only a primaty key constraint on one column.
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique_001 unique (num) not enforced,
+ constraint constr_unique_002 unique (num) not enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname like 'constr_unique%';
+
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique_001 unique (num) not enforced,
+ constraint constr_unique_002 primary key (num) not enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname like 'constr_unique%';
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+
+ constraint constr_unique_002 primary key (num) not enforced,
+  constraint constr_unique_001 unique (num) not enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname like 'constr_unique%';
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique_001 unique (num) not enforced,
+ constraint constr_unique_002 primary key (num) not enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+--only a primaty key constraint on one table, the error will be thorwn out 
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique_001 primary key (num) not enforced,
+ constraint constr_unique_002 primary key (num) not enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique_001 primary key (id) not enforced,
+ constraint constr_unique_002 primary key (num) not enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+
+
+--test error syntax
+-- enforced attribute dose unsupport
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique unique(id) enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique unique(id) enforced disable query optimization,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique unique(id) enforced enable query optimization ,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin; 
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique primary key (id) enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique unique  enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique primary key  enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+
+-- test do not support mutil-columns combined constraint
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int ,
+ constraint constr_unique primary key (id, num) not  enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int ,
+ constraint constr_unique primary key (id, num) not  enforced enable query optimization,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int ,
+ constraint constr_unique unique (id, num) not  enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+
+--test only support primary key and unique constraint
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int ,
+ constraint constr_unique check (id<10) not  enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+create foreign table soft_constraint_tbl001(
+ id int ,
+ constraint constr_unique check (id<10),
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+
+--test alter foreign table drop constraint syntax
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique unique  not enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+alter foreign table soft_constraint_tbl001 drop constraint constr_unique RESTRICT;
+select  conname,  contype, consoft, conindid, conkey from pg_constraint where conname ='constr_unique';
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique unique  not enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+alter foreign table soft_constraint_tbl001 drop constraint constr_unique cascade;
+select  conname,  contype, consoft, conindid, conkey from pg_constraint where conname ='constr_unique';
+
+--test alter foreign table add constraint syntax
+alter foreign table soft_constraint_tbl001 drop constraint constr_unique RESTRICT;
+alter foreign table soft_constraint_tbl001 add constraint constr_unique unique(id) not enforced;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+
+alter foreign table soft_constraint_tbl001 drop constraint constr_unique RESTRICT;
+alter foreign table soft_constraint_tbl001 add constraint constr_unique unique(id) not enforced disable query optimization;
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+
+alter foreign table soft_constraint_tbl001 drop constraint constr_unique RESTRICT;
+alter foreign table soft_constraint_tbl001 add constraint constr_unique primary key(id) not enforced;
+select  conname,  contype, consoft, conindid, conkey from pg_constraint where conname ='constr_unique';
+
+--test only build one primary key 
+alter foreign table soft_constraint_tbl001 add constraint constr_unique_90 primary key(id) not enforced;
+alter foreign table soft_constraint_tbl001 add constraint constr_unique_100 primary key(id) not enforced;
+
+--test, do not create constraint, name of whith has been existed in the pg_constraint. 
+alter foreign table soft_constraint_tbl001 add constraint constr_unique unique(num) not enforced;
+
+--test, error alter foreign table syntax
+alter foreign table soft_constraint_tbl001 add constraint constr_unique unique(id, num) not enforced;
+alter foreign table soft_constraint_tbl001 add constraint constr_unique unique(id, num) enforced;
+
+
+drop foreign table if exists soft_constraint_tbl001;
+
+--test, other foreign table do not support informational constraint
+drop foreign table if exists EXT_LINEITEM;
+CREATE FOREIGN TABLE EXT_LINEITEM (
+	L_ORDERKEY    BIGINT NOT NULL,        
+	L_PARTKEY     BIGINT unique not enforced      
+)SERVER gsmpp_server OPTIONS(format 'text', location 'gsfs://127.0.0.1:8900/lineitem.data', delimiter '|', mode 'normal');
+drop foreign table if exists EXT_LINEITEM;
+CREATE FOREIGN TABLE EXT_LINEITEM (
+	L_ORDERKEY    BIGINT NOT NULL,        
+	L_PARTKEY     BIGINT unique  enforced      
+)SERVER gsmpp_server OPTIONS(format 'text', location 'gsfs://127.0.0.1:8900/lineitem.data', delimiter '|', mode 'normal');
+
+--test, normal table, either not enforced or enforced will still create index.
+drop table if exists test010;
+create table test010(id int constraint constr_unique unique not enforced);
+drop table if exists test010;
+create table test010(id int unique);
+select count(*) from pg_index where indexrelid in (select conindid from pg_constraint where conrelid = 'test010'::regclass);
+drop table if exists test010;
+
+--add llt
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int primary key not enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+
+alter foreign table soft_constraint_tbl001 add primary key(id) not enforced;
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int unique not enforced,
+ num int
+) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet/')
+distribute by roundrobin;
+
+alter foreign table soft_constraint_tbl001 add unique(id) not enforced;
+drop foreign table if exists info_cons_add_003;
+create foreign table info_cons_add_003 (
+ c_id1  TEXT,
+ c_id2  date,
+ c_id3  smallint,
+ c_id4  boolean,
+ c_id5  float4,
+ c_id6  timestamp,
+ c_id7  decimal(4,2),
+ c_id8  bigint,
+ c_id9  char(9),
+ c_id10 int,
+ c_id11 float8,
+ c_id12 varchar(20)
+)
+server hdfs_server OPTIONS(format 'parquet', foldername '/user/hive/warehouse/sql_on_hadoop.db/info_cons_tab_2_parquet')
+distribute by roundrobin
+partition by (c_id12) automapped;
+ALTER FOREIGN TABLE info_cons_add_003
+ADD CONSTRAINT constr_add_003 
+  PRIMARY KEY (c_id9) NOT ENFORCED ENABLE QUERY OPTIMIZATION;
+drop foreign table info_cons_add_003;
+drop server if exists hdfs_server cascade;

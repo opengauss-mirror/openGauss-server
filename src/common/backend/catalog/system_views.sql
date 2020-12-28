@@ -30,14 +30,18 @@ CREATE VIEW pg_roles AS
         rolkind,
         pgxc_group.group_name as nodegroup,
         roltempspace,
-        rolspillspace
+        rolspillspace,
+        rolmonitoradmin,
+        roloperatoradmin,
+        rolpolicyadmin
     FROM pg_authid LEFT JOIN pg_db_role_setting s
     ON (pg_authid.oid = setrole AND setdatabase = 0) 
     LEFT JOIN pgxc_group
-    ON (pg_authid.rolnodegroup = pgxc_group.oid);
+    ON (pg_authid.rolnodegroup = pgxc_group.oid)
+    WHERE pg_authid.rolname = current_user 
+    OR (SELECT rolcreaterole FROM pg_authid WHERE pg_authid.rolname = current_user)
+    OR (SELECT rolsystemadmin FROM pg_authid WHERE pg_authid.rolname = current_user);
 
-REVOKE ALL on pg_roles FROM public;
-	
 CREATE VIEW pg_shadow AS
     SELECT
         rolname AS usename,
@@ -54,7 +58,10 @@ CREATE VIEW pg_shadow AS
         roltabspace AS spacelimit,
         setconfig AS useconfig,
         roltempspace AS tempspacelimit,
-        rolspillspace AS spillspacelimit
+        rolspillspace AS spillspacelimit,
+        rolmonitoradmin AS usemonitoradmin,
+        roloperatoradmin AS useoperatoradmin,
+        rolpolicyadmin AS usepolicyadmin
     FROM pg_authid LEFT JOIN pg_db_role_setting s
     ON (pg_authid.oid = setrole AND setdatabase = 0)
     WHERE rolcanlogin;
@@ -86,7 +93,10 @@ CREATE VIEW pg_user AS
         setconfig AS useconfig,
         pgxc_group.group_name AS nodegroup,
         roltempspace AS tempspacelimit,
-        rolspillspace AS spillspacelimit
+        rolspillspace AS spillspacelimit,
+        rolmonitoradmin AS usemonitoradmin,
+        roloperatoradmin AS useoperatoradmin,
+        rolpolicyadmin AS usepolicyadmin
     FROM pg_authid LEFT JOIN pg_db_role_setting s
     ON (pg_authid.oid = setrole AND setdatabase = 0)
     LEFT JOIN pgxc_group
@@ -104,6 +114,121 @@ CREATE VIEW pg_rules AS
     FROM (pg_rewrite R JOIN pg_class C ON (C.oid = R.ev_class))
         LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
     WHERE R.rulename != '_RETURN';
+
+create view pg_catalog.gs_labels as
+SELECT labelname
+    ,labeltype
+    ,fqdntype
+    ,CASE fqdntype
+        WHEN 'column' THEN (select nspname from pg_namespace where oid = fqdnnamespace)
+        WHEN 'table' THEN (select nspname from pg_namespace where oid = fqdnnamespace)
+        WHEN 'view' THEN (select nspname from pg_namespace where oid = fqdnnamespace)
+        WHEN 'schema' THEN (select nspname from pg_namespace where oid = fqdnnamespace)
+        WHEN 'function' THEN (select nspname from pg_namespace where oid = fqdnnamespace)
+        ELSE ''
+    END AS schemaname
+    ,CASE fqdntype
+        WHEN 'column' THEN (select relname from pg_class where oid = fqdnid)
+        WHEN 'table' THEN (select relname from pg_class where oid = fqdnid)
+        WHEN 'view' THEN (select relname from pg_class where oid = fqdnid)
+        WHEN 'function' THEN (select proname from pg_proc where oid=fqdnid)
+        WHEN 'label' THEN relcolumn
+        ELSE ''
+    END AS fqdnname
+    ,CASE fqdntype
+        WHEN 'column' THEN relcolumn
+        ELSE ''
+    END AS columnname
+FROM gs_policy_label WHERE length(fqdntype)>0 ORDER BY labelname, labeltype ,fqdntype;
+
+REVOKE ALL on pg_catalog.gs_labels FROM public;
+--for audit
+create view pg_catalog.gs_auditing_access as
+    select distinct
+        p.polname,
+        'access' as pol_type,
+        p.polenabled,
+        a.accesstype as access_type,
+        a.labelname as label_name,
+        --CONCAT(l.fqdntype, ':', l.columnname) as access_object,
+        CASE l.fqdntype
+            WHEN 'column'   THEN l.fqdntype || ':' || l.schemaname || '.' || l.fqdnname || '.' || l.columnname
+            WHEN 'table'    THEN l.fqdntype || ':' || l.schemaname || '.' || l.fqdnname
+            WHEN 'view'     THEN l.fqdntype || ':' || l.schemaname || '.' || l.fqdnname
+            WHEN 'schema'   THEN l.fqdntype || ':' || l.schemaname
+            WHEN 'function' THEN l.fqdntype || ':' || l.schemaname || '.' || l.fqdnname
+            WHEN 'label'    THEN l.fqdntype || ':' || l.columnname
+            ELSE l.fqdntype || ':' || ''
+        END AS access_object,
+        (select
+            logicaloperator
+            from gs_auditing_policy_filters
+            where p.Oid=policyoid) as filter_name
+    from gs_auditing_policy p
+        left join gs_auditing_policy_access a ON (a.policyoid=p.Oid)
+        left join gs_labels l ON (a.labelname=l.labelname)
+    where length(a.accesstype) > 0 order by 1,3;
+
+REVOKE ALL on pg_catalog.gs_auditing_access FROM public;
+
+create view pg_catalog.gs_auditing_privilege as
+    select distinct
+        p.polname,
+        'privilege' as pol_type,
+        p.polenabled,
+        priv.privilegetype as access_type,
+        priv.labelname as label_name,
+        --CONCAT(l.fqdntype, ':', l.columnname) as priv_object,
+        CASE l.fqdntype
+            WHEN 'column'   THEN l.fqdntype || ':' || l.schemaname || '.' || l.fqdnname || '.' || l.columnname
+            WHEN 'table'    THEN l.fqdntype || ':' || l.schemaname || '.' || l.fqdnname
+            WHEN 'view'     THEN l.fqdntype || ':' || l.schemaname || '.' || l.fqdnname
+            WHEN 'schema'   THEN l.fqdntype || ':' || l.schemaname
+            WHEN 'function' THEN l.fqdntype || ':' || l.schemaname || '.' || l.fqdnname
+            WHEN 'label'    THEN l.fqdntype || ':' || l.columnname
+            ELSE l.fqdntype || ':' || ''
+        END AS priv_object,
+        (select
+            logicaloperator
+            from gs_auditing_policy_filters
+            where p.Oid=policyoid) as filter_name
+        from gs_auditing_policy p
+            left join gs_auditing_policy_privileges priv ON (priv.policyoid=p.Oid)
+            left join gs_labels l ON (priv.labelname=l.labelname)
+        where length(priv.privilegetype) > 0 order by 1,3;
+
+REVOKE ALL on pg_catalog.gs_auditing_privilege FROM public;
+
+create view pg_catalog.gs_auditing as
+    select * from gs_auditing_privilege
+    union all
+    select * from gs_auditing_access order by polname;
+
+REVOKE ALL on pg_catalog.gs_auditing FROM public;
+--for audit end
+
+--for masking
+create view pg_catalog.gs_masking as
+select distinct p.polname,
+p.polenabled,
+a.actiontype as maskaction,
+a.actlabelname as labelname,
+CASE l.fqdntype
+            WHEN 'column'   THEN l.fqdntype || ':' || l.schemaname || '.' || l.fqdnname || '.' || l.columnname
+            WHEN 'table'    THEN l.fqdntype || ':' || l.schemaname || '.' || l.fqdnname
+            WHEN 'view'     THEN l.fqdntype || ':' || l.schemaname || '.' || l.fqdnname
+            WHEN 'schema'   THEN l.fqdntype || ':' || l.schemaname
+            WHEN 'function' THEN l.fqdntype || ':' || l.schemaname || '.' || l.fqdnname
+            WHEN 'label'    THEN l.fqdntype || ':' || l.columnname
+            ELSE l.fqdntype || ':' || ''
+        END AS masking_object,
+(select
+    logicaloperator
+    from gs_masking_policy_filters
+    where p.Oid=policyoid) as filter_name
+from gs_masking_policy p join gs_masking_policy_actions a ON (p.Oid=a.policyoid ) join gs_labels l ON (a.actlabelname=l.labelname) WHERE l.fqdntype='column' or l.fqdntype='table' order by polname;
+
+REVOKE ALL on pg_catalog.gs_masking FROM public;
 
 -- CREATE VIEW for pg_rlspolicy
 CREATE VIEW pg_rlspolicies AS
@@ -124,7 +249,7 @@ CREATE VIEW pg_rlspolicies AS
                 ARRAY
                 (
                     SELECT rolname
-                    FROM pg_catalog.pg_roles
+                    FROM pg_catalog.pg_authid
                     WHERE oid = ANY (pol.polroles) ORDER BY 1
                 )
         END AS policyroles,
@@ -138,7 +263,9 @@ CREATE VIEW pg_rlspolicies AS
         pg_catalog.pg_get_expr(pol.polqual, pol.polrelid) AS policyqual
     FROM pg_catalog.pg_rlspolicy pol
     JOIN pg_catalog.pg_class C ON (C.oid = pol.polrelid)
-    LEFT JOIN pg_catalog.pg_namespace N ON (N.oid = C.relnamespace);
+    LEFT JOIN pg_catalog.pg_namespace N ON (N.oid = C.relnamespace)
+    WHERE C.relowner = (SELECT oid FROM pg_authid WHERE rolname=current_user)
+    OR (SELECT rolsystemadmin FROM pg_authid WHERE rolname=current_user);
 
 CREATE VIEW pg_views AS
     SELECT
@@ -169,7 +296,7 @@ CREATE VIEW pg_tables AS
          LEFT JOIN pg_object po ON (po.object_oid = C.oid and po.object_type = 'r')
     WHERE C.relkind = 'r';
 
-CREATE VIEW pg_matviews AS
+CREATE VIEW pg_catalog.gs_matviews AS
     SELECT
         N.nspname AS schemaname,
         C.relname AS matviewname,
@@ -192,10 +319,10 @@ CREATE VIEW pg_indexes AS
          JOIN pg_class I ON (I.oid = X.indexrelid)
          LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
          LEFT JOIN pg_tablespace T ON (T.oid = I.reltablespace)
-    WHERE C.relkind IN ('r', 'm') AND I.relkind IN ('i', 'I');
+    WHERE C.relkind IN ('r','m') AND I.relkind IN ('i','I');
 
 -- For global temporary table
-CREATE VIEW pg_gtt_relstats WITH (security_barrier) AS
+CREATE VIEW pg_catalog.pg_gtt_relstats WITH (security_barrier) AS
  SELECT n.nspname AS schemaname,
     c.relname AS tablename,
     (select relfilenode from pg_get_gtt_relstats(c.oid)),
@@ -209,7 +336,7 @@ CREATE VIEW pg_gtt_relstats WITH (security_barrier) AS
      LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
  WHERE c.relpersistence='g' AND c.relkind in('r','p','i','t');
 
-CREATE VIEW pg_gtt_attached_pids WITH (security_barrier) AS
+CREATE VIEW pg_catalog.pg_gtt_attached_pids WITH (security_barrier) AS
  SELECT n.nspname AS schemaname,
     c.relname AS tablename,
     c.oid AS relid,
@@ -219,7 +346,7 @@ CREATE VIEW pg_gtt_attached_pids WITH (security_barrier) AS
      LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
  WHERE c.relpersistence='g' AND c.relkind in('r','S');
 
-CREATE VIEW pg_gtt_stats WITH (security_barrier) AS
+CREATE VIEW pg_catalog.pg_gtt_stats WITH (security_barrier) AS
 SELECT s.nspname AS schemaname,
     s.relname AS tablename,
     s.attname,
@@ -454,7 +581,7 @@ SELECT
 	l.objoid, l.classoid, l.objsubid,
 	CASE WHEN rel.relkind = 'r' THEN 'table'::text
 		 WHEN rel.relkind = 'v' THEN 'view'::text
-         WHEN rel.relkind = 'm' THEN 'materialized view'::text
+		 WHEN rel.relkind = 'm' THEN 'materialized view'::text
 		 WHEN rel.relkind = 'S' THEN 'sequence'::text
 		 WHEN rel.relkind = 'f' THEN 'foreign table'::text END AS objtype,
 	rel.relnamespace AS objnamespace,
@@ -490,8 +617,8 @@ WHERE
 UNION ALL
 SELECT
 	l.objoid, l.classoid, l.objsubid,
-	CASE WHEN pro.prokind = 'a' THEN 'aggregate'::text
-	     WHEN pro.prokind != 'a' THEN 'function'::text
+	CASE WHEN pro.proisagg = true THEN 'aggregate'::text
+	     WHEN pro.proisagg = false THEN 'function'::text
 	END AS objtype,
 	pro.pronamespace AS objnamespace,
 	CASE WHEN pg_function_is_visible(pro.oid)
@@ -823,8 +950,7 @@ CREATE OR REPLACE VIEW pg_catalog.pg_stat_activity AS
     FROM pg_database D, pg_stat_get_activity_with_conninfo(NULL) AS S, pg_authid U, gs_wlm_session_respool(0) AS T
     WHERE S.datid = D.oid AND
             S.usesysid = U.oid AND
-            T.sessionid = S.sessionid AND
-            S.pid = T.threadid;
+            T.sessionid = S.sessionid;
 
 CREATE OR REPLACE VIEW pg_catalog.pg_stat_activity_ng AS
     SELECT
@@ -856,9 +982,7 @@ CREATE OR REPLACE VIEW pg_catalog.pg_stat_activity_ng AS
     WHERE S.datid = D.oid AND
             S.usesysid = U.oid AND
             T.sessionid = S.sessionid AND
-            S.pid = T.threadid AND
-            S.sessionid = N.sessionid AND
-            S.pid = N.pid;
+            S.sessionid = N.sessionid;
 
 ALTER TEXT SEARCH CONFIGURATION pound ADD MAPPING
         FOR zh_words, en_word, numeric, alnum, grapsymbol, multisymbol
@@ -896,8 +1020,7 @@ CREATE OR REPLACE VIEW pg_catalog.pg_session_wlmstat AS
     FROM pg_database D, pg_stat_get_session_wlmstat(NULL) AS S, pg_authid AS U, gs_wlm_session_respool(0) AS T
     WHERE S.datid = D.oid AND
             S.usesysid = U.oid AND
-            T.sessionid = S.sessionid AND
-            T.threadid = S.threadid;
+            T.sessionid = S.sessionid;
 
 CREATE VIEW pg_wlm_statistics AS 
     SELECT 
@@ -1158,7 +1281,7 @@ DECLARE
 	END; $$
 LANGUAGE plpgsql NOT FENCED;
 
-create table gs_wlm_session_info
+create table gs_wlm_session_query_info_all
 (
 	datid	     		Oid,
 	dbname	     		text,
@@ -1227,11 +1350,102 @@ create table gs_wlm_session_info
 	mem_top4_value bigint,
 	mem_top5_value bigint,
 	top_mem_dn text,
-	top_cpu_dn text
+    top_cpu_dn text,
+    n_returned_rows      bigint,
+    n_tuples_fetched     bigint,
+    n_tuples_returned    bigint,
+    n_tuples_inserted    bigint,
+    n_tuples_updated     bigint,
+    n_tuples_deleted     bigint,
+    n_blocks_fetched     bigint,
+    n_blocks_hit         bigint,
+    db_time              bigint,
+    cpu_time             bigint,
+    execution_time       bigint,
+    parse_time           bigint,
+    plan_time            bigint,
+    rewrite_time         bigint,
+    pl_execution_time    bigint,
+    pl_compilation_time  bigint,
+    net_send_time        bigint,
+    data_io_time         bigint,
+    is_slow_query        bigint
 );
 
 CREATE VIEW gs_wlm_session_info_all AS
 SELECT * FROM pg_stat_get_wlm_session_info(0);
+
+CREATE VIEW gs_wlm_session_info AS
+SELECT
+        S.datid,
+        S.dbname,
+        S.schemaname,
+        S.nodename,
+        S.username,
+        S.application_name,
+        S.client_addr,
+        S.client_hostname,
+        S.client_port,
+        S.query_band,
+        S.block_time,
+        S.start_time,
+        S.finish_time,
+        S.duration,
+        S.estimate_total_time,
+        S.status,
+        S.abort_info,
+        S.resource_pool,
+        S.control_group,
+        S.estimate_memory,
+        S.min_peak_memory,
+        S.max_peak_memory,
+        S.average_peak_memory,
+        S.memory_skew_percent,
+        S.spill_info,
+        S.min_spill_size,
+        S.max_spill_size,
+        S.average_spill_size,
+        S.spill_skew_percent,
+        S.min_dn_time,
+        S.max_dn_time,
+        S.average_dn_time,
+        S.dntime_skew_percent,
+        S.min_cpu_time,
+        S.max_cpu_time,
+        S.total_cpu_time,
+        S.cpu_skew_percent,
+        S.min_peak_iops,
+        S.max_peak_iops,
+        S.average_peak_iops,
+        S.iops_skew_percent,
+        S.warning,
+        S.queryid,
+        S.query,
+        S.query_plan,
+        S.node_group,
+        S.cpu_top1_node_name,
+        S.cpu_top2_node_name,
+        S.cpu_top3_node_name,
+        S.cpu_top4_node_name,
+        S.cpu_top5_node_name,
+        S.mem_top1_node_name,
+        S.mem_top2_node_name,
+        S.mem_top3_node_name,
+        S.mem_top4_node_name,
+        S.mem_top5_node_name,
+        S.cpu_top1_value,
+        S.cpu_top2_value,
+        S.cpu_top3_value,
+        S.cpu_top4_value,
+        S.cpu_top5_value,
+        S.mem_top1_value,
+        S.mem_top2_value,
+        S.mem_top3_value,
+        S.mem_top4_value,
+        S.mem_top5_value,
+        S.top_mem_dn,
+        S.top_cpu_dn
+FROM gs_wlm_session_query_info_all S;
 
 CREATE VIEW gs_wlm_session_history AS
 SELECT
@@ -1319,7 +1533,7 @@ DECLARE
 		query_str := 'SELECT * FROM pg_stat_get_wlm_session_info(1)';
 		
 		IF flag > 0 THEN
-			EXECUTE 'INSERT INTO gs_wlm_session_info ' || query_str;
+			EXECUTE 'INSERT INTO gs_wlm_session_query_info_all ' || query_str;
 		ELSE
 			EXECUTE query_str;
 		END IF;
@@ -1396,12 +1610,14 @@ CREATE VIEW gs_wlm_workload_records AS
             S.usesysid = U.oid;	
 
 CREATE VIEW gs_os_run_info AS SELECT * FROM pv_os_run_info();
-CREATE VIEW gs_thread_memory_detail AS SELECT * FROM pv_thread_memory_detail();
+CREATE VIEW gs_session_memory_context AS SELECT * FROM pv_session_memory_detail();
+CREATE VIEW gs_thread_memory_context AS SELECT * FROM pv_thread_memory_detail();
 CREATE VIEW gs_shared_memory_detail AS SELECT * FROM pg_shared_memory_detail();
 CREATE VIEW gs_instance_time AS SELECT * FROM pv_instance_time();
 CREATE VIEW gs_session_time AS SELECT * FROM pv_session_time();
 CREATE VIEW gs_session_memory AS SELECT * FROM pv_session_memory();
 CREATE VIEW gs_total_memory_detail AS SELECT * FROM pv_total_memory_detail();
+CREATE VIEW pg_total_memory_detail AS SELECT * FROM pv_total_memory_detail();
 CREATE VIEW gs_redo_stat AS SELECT * FROM pg_stat_get_redo_stat();
 CREATE VIEW gs_session_stat AS SELECT * FROM pv_session_stat();
 CREATE VIEW gs_file_stat AS SELECT * FROM pg_stat_get_file_stat();
@@ -1428,10 +1644,10 @@ BEGIN
                       S.freesize AS freesize,
                       S.usedsize AS usedsize
                     FROM
-                      pv_session_memory_detail() S
+                      gs_session_memory_context S
                       LEFT JOIN
                      (SELECT DISTINCT thrdtype, tid
-                      FROM gs_thread_memory_detail) T
+                      FROM gs_thread_memory_context) T
                       on S.threadid = T.tid
                    ),
                    TM AS
@@ -1446,10 +1662,10 @@ BEGIN
                       T.freesize AS freesize,
                       T.usedsize AS usedsize
                     FROM
-                      gs_thread_memory_detail T
+                      gs_thread_memory_context T
                       LEFT JOIN
                       (SELECT DISTINCT sessid, threadid
-                       FROM pv_session_memory_detail()) S
+                       FROM gs_session_memory_context) S
                       ON T.tid = S.threadid
                    )
                    SELECT * from SM
@@ -1669,8 +1885,8 @@ AS $$ SELECT CAST(float8out($1) AS VARCHAR2) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
 CREATE OR REPLACE FUNCTION to_char(TEXT)
-RETURNS varchar
-AS $$ SELECT $1::varchar(10485760) $$
+RETURNS TEXT
+AS $$ SELECT $1 $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
 CREATE OR REPLACE FUNCTION to_number(TEXT)
@@ -2081,6 +2297,13 @@ create or replace function regexp_substr(text,text)
 returns text
 AS '$libdir/plpgsql','regexp_substr'
 LANGUAGE C STRICT IMMUTABLE NOT FENCED;
+
+CREATE OR REPLACE FUNCTION report_application_error(
+    IN log text,
+    IN code integer default null 
+)RETURNS void 
+AS '$libdir/plpgsql','report_application_error'
+LANGUAGE C VOLATILE NOT FENCED;
 
 create or replace function bitand(bigint,bigint)
 returns bigint 
@@ -2718,7 +2941,7 @@ RETURNS int
 AS $$
 DECLARE
 	query_ec_str text;
-	query_plan_str text;
+    query_plan_str text;
 	query_str text;
 	record_cnt int;
 	BEGIN
@@ -2740,18 +2963,18 @@ DECLARE
 							ec_query,
 							ec_libodbc_type
 						FROM pg_stat_get_wlm_ec_operator_info(0) where ec_operator > 0';
-
-		query_plan_str := 'SELECT * FROM gs_stat_get_wlm_plan_operator_info(0)';
+		
+        query_plan_str := 'SELECT * FROM gs_stat_get_wlm_plan_operator_info(0)';
 
 		query_str := 'SELECT * FROM pg_stat_get_wlm_operator_info(1)';
 		
 		IF flag > 0 THEN
 			EXECUTE 'INSERT INTO gs_wlm_ec_operator_info ' || query_ec_str;
-			EXECUTE 'INSERT INTO gs_wlm_plan_operator_info ' || query_plan_str;
+            EXECUTE 'INSERT INTO gs_wlm_plan_operator_info ' || query_plan_str;
 			EXECUTE 'INSERT INTO gs_wlm_operator_info ' || query_str;
 		ELSE
 			EXECUTE query_ec_str;
-			EXECUTE query_plan_str;
+            EXECUTE query_plan_str;
 			EXECUTE query_str;
 		END IF;
 		
@@ -2995,39 +3218,6 @@ create table gs_wlm_ec_operator_info
 CREATE VIEW pg_catalog.pg_tde_info AS 
 SELECT * from pg_tde_info();
 
-
--- view for get the skew of the data distribution in all datanodes
-CREATE OR REPLACE VIEW pg_catalog.pgxc_get_table_skewness AS
-WITH skew AS
-(
-	SELECT
-		schemaname,
-		tablename,
-		sum(dnsize) AS totalsize,
-		avg(dnsize) AS avgsize,
-		max(dnsize) AS maxsize,
-		min(dnsize) AS minsize,
-		(max(dnsize) - min(dnsize)) AS skewsize,
-		stddev(dnsize) AS skewstddev
-	FROM pg_catalog.pg_class c
-	INNER JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-	INNER JOIN pg_catalog.table_distribution() s ON s.schemaname = n.nspname AND s.tablename = c.relname
-	INNER JOIN pg_catalog.pgxc_class x ON c.oid = x.pcrelid AND x.pclocatortype = 'H'
-	GROUP BY schemaname,tablename
-)
-SELECT
-	schemaname,
-	tablename,
-	totalsize,
-	avgsize::numeric(1000),
-	(maxsize/totalsize)::numeric(4,3)  AS maxratio,
-	(minsize/totalsize)::numeric(4,3)  AS minratio,
-	skewsize,
-	(skewsize/totalsize)::numeric(4,3)  AS skewratio,
-	skewstddev::numeric(1000)
-FROM skew
-WHERE totalsize > 0;
-
 --get delta infomation in single DN
 CREATE OR REPLACE FUNCTION pg_get_delta_info(IN rel TEXT, IN schema_name TEXT, OUT part_name TEXT, OUT live_tuple INT8, OUT data_size INT8, OUT blockNum INT8)
 RETURNS setof record
@@ -3075,58 +3265,6 @@ LANGUAGE 'plpgsql' NOT FENCED;
 
 CREATE VIEW pg_catalog.pg_stat_bad_block AS
 	SELECT DISTINCT * from pg_stat_bad_block();
-
-CREATE OR REPLACE FUNCTION gs_get_stat_db_cu(OUT node_name1 text, OUT db_name text, OUT mem_hit bigint, OUT hdd_sync_read bigint, OUT hdd_asyn_read bigint)
-RETURNS setof record
-AS $$
-DECLARE
-        row_name record;
-        each_node_out record;
-        query_str text;
-        query_str_nodes text;
-        BEGIN
-                query_str_nodes := 'SELECT pgxc_node_str()';
-                FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                        query_str := 'SELECT D.datname AS datname,
-                        pg_stat_get_db_cu_mem_hit(D.oid) AS mem_hit,
-                        pg_stat_get_db_cu_hdd_sync(D.oid) AS hdd_sync_read,
-                        pg_stat_get_db_cu_hdd_asyn(D.oid) AS hdd_asyn_read
-                        FROM pg_database D;';
-                        FOR each_node_out IN EXECUTE(query_str) LOOP
-                                node_name1 := row_name.pgxc_node_str;
-                                db_name := each_node_out.datname;
-                                mem_hit := each_node_out.mem_hit;
-                                hdd_sync_read := each_node_out.hdd_sync_read;
-                                hdd_asyn_read := each_node_out.hdd_asyn_read;
-                                return next;
-                        END LOOP;
-                END LOOP;
-                return;
-        END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-
-
-CREATE VIEW gs_stat_db_cu AS
-    SELECT DISTINCT * from gs_get_stat_db_cu();
-
-CREATE OR REPLACE FUNCTION gs_stat_reset()
-RETURNS void
-AS $$
-DECLARE
-        row_name record;
-        each_node_out record;
-        query_str text;
-        query_str_nodes text;
-        BEGIN
-                query_str_nodes := 'SELECT pgxc_node_str()';
-                FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                        query_str := 'SELECT * FROM pg_stat_reset()';
-                        EXECUTE(query_str);
-                END LOOP;
-                return;
-        END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
 
 CREATE OR REPLACE FUNCTION lock_cluster_ddl()
 RETURNS boolean                    
@@ -3261,3 +3399,58 @@ CREATE OR REPLACE VIEW pg_catalog.get_global_prepared_xacts AS
 		UNION ALL
 		SELECT * FROM get_remote_prepared_xacts();
 
+CREATE unlogged table statement_history(
+    db_name name,
+    schema_name name,
+    origin_node integer,
+    user_name name,
+    application_name text,
+    client_addr text,
+    client_port integer,
+    unique_query_id bigint,
+    debug_query_id bigint,
+    query text,
+    start_time timestamp with time zone,
+    finish_time timestamp with time zone,
+    slow_sql_threshold bigint,
+    transaction_id bigint,
+    thread_id bigint,
+    session_id bigint,
+    n_soft_parse bigint,
+    n_hard_parse bigint,
+    query_plan text,
+    n_returned_rows bigint,
+    n_tuples_fetched bigint,
+    n_tuples_returned bigint,
+    n_tuples_inserted bigint,
+    n_tuples_updated bigint,
+    n_tuples_deleted bigint,
+    n_blocks_fetched bigint,
+    n_blocks_hit bigint,
+    db_time bigint,
+    cpu_time bigint,
+    execution_time bigint,
+    parse_time bigint,
+    plan_time bigint,
+    rewrite_time bigint,
+    pl_execution_time bigint,
+    pl_compilation_time bigint,
+    data_io_time bigint,
+    net_send_info text,
+    net_recv_info text,
+    net_stream_send_info text,
+    net_stream_recv_info text,
+    lock_count bigint,
+    lock_time bigint,
+    lock_wait_count bigint,
+    lock_wait_time bigint,
+    lock_max_count bigint,
+    lwlock_count bigint,
+    lwlock_wait_count bigint,
+    lwlock_time bigint,
+    lwlock_wait_time bigint,
+    details bytea,
+    is_slow_sql bool
+);
+REVOKE ALL on table pg_catalog.statement_history FROM public;
+create index statement_history_time_idx on pg_catalog.statement_history USING btree (start_time, is_slow_sql);

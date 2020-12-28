@@ -9,6 +9,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
      endif
   endif
 endif
-OBJS = heapam.o hio.o pruneheap.o rewriteheap.o syncscan.o tuptoaster.o visibilitymap.o
+OBJS = heapam.o heapam_visibility.o hio.o pruneheap.o rewriteheap.o syncscan.o tuptoaster.o visibilitymap.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

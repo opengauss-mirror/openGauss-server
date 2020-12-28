@@ -1,0 +1,151 @@
+set enable_global_stats = true;
+-- create table
+create table rowt_insert_mode (
+	c_tinyint         tinyint,
+	c_smallint        smallint,
+	c_int             integer,
+	c_bigint          bigint,
+	c_money           money,
+	c_numeric         numeric,
+	c_real            real,
+	c_double          double precision,
+	c_decimal         decimal,
+	c_varchar         varchar,
+	c_char            char(30),
+	c_nvarchar2       nvarchar2,
+	c_text            text,
+	c_timestamp       timestamp with time zone,
+	c_timestamptz     timestamp without time zone,
+	c_date            date,
+	c_time            time without time zone,
+	c_timetz          time with time zone,
+	c_interval        interval,
+	c_tinterval       tinterval,
+	c_smalldatetime   smalldatetime,
+	c_bytea           varchar,
+	c_boolean         boolean,
+	c_inet            varchar,
+	c_cidr            varchar,
+	c_bit             varchar,
+	c_varbit          varchar,
+	c_oid             oid
+);
+
+create table t1_insert_mode (
+	c_tinyint         tinyint,
+	c_smallint        smallint,
+	c_int             integer,
+	c_bigint          bigint,
+	c_money           money,
+	c_numeric         numeric,
+	c_real            real,
+	c_double          double precision,
+	c_decimal         decimal,
+	c_varchar         varchar,
+	c_char            char(30),
+	c_nvarchar2       nvarchar2,
+	c_text            text,
+	c_timestamp       timestamp with time zone,
+	c_timestamptz     timestamp without time zone,
+	c_date            date,
+	c_time            time without time zone,
+	c_timetz          time with time zone,
+	c_interval        interval,
+	c_tinterval       tinterval,
+	c_smalldatetime   smalldatetime,
+	c_bytea           varchar,
+	c_boolean         boolean,
+	c_inet            varchar,
+	c_cidr            varchar,
+	c_bit             varchar,
+	c_varbit          varchar,
+	c_oid             oid
+) tablespace hdfs_ts;
+
+-- prepare data
+copy rowt_insert_mode from '@abs_srcdir@/data/insert_data';
+
+-- start test
+-- insert ... select ...
+set cstore_insert_mode=auto;
+delete t1_insert_mode;
+insert into t1_insert_mode select * from rowt_insert_mode;
+select count(*) from cstore.pg_delta_public_t1_insert_mode;
+
+set cstore_insert_mode=main;
+delete t1_insert_mode;
+insert into t1_insert_mode select * from rowt_insert_mode;
+select count(*) from cstore.pg_delta_public_t1_insert_mode;
+
+set cstore_insert_mode=delta;
+delete t1_insert_mode;
+insert into t1_insert_mode select * from rowt_insert_mode;
+select count(*) from cstore.pg_delta_public_t1_insert_mode;
+
+-- copy ... from ...
+set cstore_insert_mode=auto;
+delete t1_insert_mode;
+copy t1_insert_mode from '@abs_srcdir@/data/insert_data';
+select count(*) from cstore.pg_delta_public_t1_insert_mode;
+
+set cstore_insert_mode=main;
+delete t1_insert_mode;
+copy t1_insert_mode from '@abs_srcdir@/data/insert_data';
+select count(*) from cstore.pg_delta_public_t1_insert_mode;
+
+set cstore_insert_mode=delta;
+delete t1_insert_mode;
+copy t1_insert_mode from '@abs_srcdir@/data/insert_data';
+select count(*) from cstore.pg_delta_public_t1_insert_mode;
+
+-- insert ... values
+set cstore_insert_mode=auto;
+delete t1_insert_mode;
+insert into t1_insert_mode values (13, 13768, 115026, -9457, '$561.32', 561.322815379585, 1682.67, 1682.1, 61032419699811781, 'asdfasfas', 'asdasfasfasffsf432423424234', '>你们好sdadasdads', 'ss', '1974-10-02 12:18:35.454199+08', '1971-03-20 11:13:50', '1972-05-30 11:05:28', '11:13:50', '12:18:35.454199+08', '26 years 3 mons 21 days 11:41:24.545801','["1947-05-10 23:59:12+08" "1973-01-14 03:14:21+08"]', '1974-10-02 12:19:00', '\\x2f2f31323435313234343534', 'true', '10.1.1.1', '10.2.0.5/32', '0101101010', '0111010011', 136);
+select count(*) from cstore.pg_delta_public_t1_insert_mode;
+
+set cstore_insert_mode=main;
+delete t1_insert_mode;
+insert into t1_insert_mode values (13, 13768, 115026, -9457, '$561.32', 561.322815379585, 1682.67, 1682.1, 61032419699811781, 'asdfasfas', 'asdasfasfasffsf432423424234', '>你们好sdadasdads', 'ss', '1974-10-02 12:18:35.454199+08', '1971-03-20 11:13:50', '1972-05-30 11:05:28', '11:13:50', '12:18:35.454199+08', '26 years 3 mons 21 days 11:41:24.545801','["1947-05-10 23:59:12+08" "1973-01-14 03:14:21+08"]', '1974-10-02 12:19:00', '\\x2f2f31323435313234343534', 'true', '10.1.1.1', '10.2.0.5/32', '0101101010', '0111010011', 136);
+select count(*) from cstore.pg_delta_public_t1_insert_mode;
+
+set cstore_insert_mode=delta;
+delete t1_insert_mode;
+insert into t1_insert_mode values (13, 13768, 115026, -9457, '$561.32', 561.322815379585, 1682.67, 1682.1, 61032419699811781, 'asdfasfas', 'asdasfasfasffsf432423424234', '>你们好sdadasdads', 'ss', '1974-10-02 12:18:35.454199+08', '1971-03-20 11:13:50', '1972-05-30 11:05:28', '11:13:50', '12:18:35.454199+08', '26 years 3 mons 21 days 11:41:24.545801','["1947-05-10 23:59:12+08" "1973-01-14 03:14:21+08"]', '1974-10-02 12:19:00', '\\x2f2f31323435313234343534', 'true', '10.1.1.1', '10.2.0.5/32', '0101101010', '0111010011', 136);
+select count(*) from cstore.pg_delta_public_t1_insert_mode;
+
+select * from cstore.pg_delta_public_t1_insert_mode;
+
+drop table t1_insert_mode, rowt_insert_mode;
+
+-- test "vacuum deltamerge"
+create schema schema_deltamerge;
+set current_schema=schema_deltamerge;
+
+set cstore_insert_mode=auto;
+
+create table t1(id int) tablespace hdfs_ts;
+create table t1_row(id int);
+insert into t1_row values(generate_series(1,11000));
+insert into t1 select * from t1_row;
+insert into t1 select * from t1_row;
+select count(*) from cstore.pg_delta_schema_deltamerge_t1;
+
+set current_schema=public;
+
+set cstore_insert_mode=delta;
+vacuum deltamerge schema_deltamerge.t1;
+select count(*) from cstore.pg_delta_schema_deltamerge_t1;
+
+set cstore_insert_mode=auto;
+vacuum deltamerge schema_deltamerge.t1;
+select count(*) from cstore.pg_delta_schema_deltamerge_t1;
+
+set cstore_insert_mode=main;
+vacuum deltamerge schema_deltamerge.t1;
+select count(*) from cstore.pg_delta_schema_deltamerge_t1;
+
+drop table schema_deltamerge.t1;
+drop table schema_deltamerge.t1_row;
+drop schema schema_deltamerge;
+

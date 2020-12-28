@@ -3,18 +3,8 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- * 
+ *
  * knl_thread.h
  *        Data stucture for thread level global variables.
  *
@@ -41,7 +31,7 @@
  *         All context define below should follow naming rules:
  *         knl_t_xxxx
  *
- * 
+ *
  * IDENTIFICATION
  *        src/include/knl/knl_thread.h
  *
@@ -61,21 +51,22 @@
 #include "knl/knl_guc.h"
 #include "knl/knl_session.h"
 #include "nodes/pg_list.h"
-#include "storage/s_lock.h"
+#include "storage/lock/s_lock.h"
 #include "utils/palloc.h"
 #include "storage/latch.h"
 #include "portability/instr_time.h"
 #include "cipher.h"
 #include "openssl/ossl_typ.h"
 #include "workload/qnode.h"
+#include "streaming/init.h"
 #include "tcop/dest.h"
-#include "postmaster/bgworker.h"
-
+#include "streaming/init.h"
+#include "utils/memgroup.h"
+#include "lib/circularqueue.h"
+#include "pgxc/barrier.h"
 #define MAX_PATH_LEN 1024
 
-#define RESERVE_SIZE 32
-
-#define MAX_THREAD_NAME_LENGTH 16
+#define RESERVE_SIZE 34
 
 typedef struct ResourceOwnerData* ResourceOwner;
 
@@ -85,6 +76,7 @@ typedef struct knl_t_codegen_context {
     bool g_runningInFmgr;
 
     long codegen_IRload_thr_count;
+
 } knl_t_codegen_context;
 
 typedef struct knl_t_relopt_context {
@@ -99,6 +91,7 @@ typedef struct knl_t_relopt_context {
     bool need_initialization;
 
     int max_custom_options;
+
 } knl_t_relopt_context;
 
 typedef struct knl_t_mem_context {
@@ -139,9 +132,7 @@ typedef struct knl_t_mem_context {
      */
     MemoryContext batch_encode_numeric_mem_cxt;
 
-    /*
-     * system auditor memory context.
-     */
+    /* system auditor memory context. */
     MemoryContext pgAuditLocalContext;
 } knl_t_mem_context;
 
@@ -202,11 +193,11 @@ typedef struct knl_t_xact_context {
     CLogXidStatus cachedFetchXidStatus;
     XLogRecPtr cachedCommitLSN;
 
-    /* var in multixact.cpp */
+    /* var in multixact.cpp*/
     struct mXactCacheEnt* MXactCache;
     MemoryContext MXactContext;
 
-    /* var in twophase.cpp */
+    /* var in twophase.cpp*/
     /*
      * Global transaction entry currently locked by us, if any.  Note that any
      * access to the entry pointed to by this variable must be protected by
@@ -220,7 +211,7 @@ typedef struct knl_t_xact_context {
     struct TwoPhaseStateData* TwoPhaseState;
     xllist records;
 
-    /* var in varsup.cpp */
+    /* var in varsup.cpp*/
     TransactionId cn_xid;
     TransactionId next_xid;
     bool force_get_xid_from_gtm;
@@ -292,12 +283,14 @@ typedef struct knl_t_xact_context {
      */
     TimestampTz GTMxactStartTimestamp;
     TimestampTz GTMdeltaTimestamp;
+    bool timestamp_from_cn;
 
     bool XactLocalNodePrepared;
     bool XactReadLocalNode;
     bool XactWriteLocalNode;
     bool XactLocalNodeCanAbort;
     bool XactPrepareSent;
+    bool AlterCoordinatorStmt;
 
     /* white-box check TransactionID, when there is no 2pc
      *  the thread local variable save the executor cn commit(abort) xid
@@ -346,32 +339,6 @@ typedef struct knl_t_xact_context {
     struct SERIALIZABLEXACT* MySerializableXact;
     bool MyXactDidWrite;
 
-    /*
-     * When running as a parallel worker, we place only a single
-     * TransactionStateData on the parallel worker's state stack, and the XID
-     * reflected there will be that of the *innermost* currently-active
-     * subtransaction in the backend that initiated parallelism.  However,
-     * GetTopTransactionId and TransactionIdIsCurrentTransactionId
-     * need to return the same answers in the parallel worker as they would have
-     * in the user backend, so we need some additional bookkeeping.
-     *
-     * XactTopTransactionId stores the XID of our toplevel transaction, which
-     * will be the same as TopTransactionState.transactionId in an ordinary
-     * backend; but in a parallel backend, which does not have the entire
-     * transaction state, it will instead be copied from the backend that started
-     * the parallel operation.
-     *
-     * nParallelCurrentXids will be 0 and ParallelCurrentXids NULL in an ordinary
-     * backend, but in a parallel backend, nParallelCurrentXids will contain the
-     * number of XIDs that need to be considered current, and ParallelCurrentXids
-     * will contain the XIDs themselves.  This includes all XIDs that were current
-     * or sub-committed in the parent at the time the parallel operation began.
-     * The XIDs are stored sorted in numerical order (not logical order) to make
-     * lookups as fast as possible.
-     */
-    int nParallelCurrentXids;
-    TransactionId *ParallelCurrentXids;
-
 #ifdef PGXC
     bool useLocalSnapshot;
     /*
@@ -384,6 +351,8 @@ typedef struct knl_t_xact_context {
 	bool   inheritFileNode;
 #endif
 } knl_t_xact_context;
+
+typedef void (*RedoInterruptCallBackFunc)(void);
 
 typedef struct knl_t_xlog_context {
 #define MAXFNAMELEN 64
@@ -639,7 +608,7 @@ typedef struct knl_t_xlog_context {
     bool bgwriterLaunched;
     bool pagewriter_launched;
 
-    /* Added for XLOG scaling */
+    /* Added for XLOG scaling*/
     /* For WALInsertLockAcquire/Release functions */
     int MyLockNo;
     bool holdingAllLocks;
@@ -722,11 +691,18 @@ typedef struct knl_t_xlog_context {
     struct XLogwrtResult* LogwrtResult;
     bool needImmediateCkp;
     int redoItemIdx;
+    /* ignore cleanup when startup end. when isIgoreCleanup is true, a standby DN always keep isIgoreCleanup true */
+    bool        forceFinishHappened;
+    uint32      invaildPageCnt;
+    uint32      imcompleteActionCnt;
+    XLogRecPtr  max_page_flush_lsn;
+    bool        permit_finish_redo;
 
 #ifndef ENABLE_MULTIPLE_NODES
     /* redo RM_STANDBY_ID record committing csn's transaction id */
     List* committing_csn_list;
 #endif
+    RedoInterruptCallBackFunc redoInterruptCallBackFunc;
 } knl_t_xlog_context;
 
 typedef struct knl_t_dfs_context {
@@ -739,6 +715,7 @@ typedef struct knl_t_dfs_context {
     List* pending_free_reader_list;
 
     List* pending_free_writer_list;
+
 } knl_t_dfs_context;
 
 typedef struct knl_t_obs_context {
@@ -955,7 +932,7 @@ typedef struct knl_t_wlmthrd_context {
     /* thread initialization has been finished */
     bool wlm_init_done;
 
-    /*check if current stmt has recorded cursor */
+    /*check if current stmt has recorded cursor*/
     bool has_cursor_record;
 
     /* alarm finish time */
@@ -971,6 +948,7 @@ typedef struct knl_t_wlmthrd_context {
     int wlm_got_sighup;
 
     MemoryContext MaskPasswordMemoryContext;
+    MemoryContext query_resource_track_mcxt;
 } knl_t_wlmthrd_context;
 
 #define RANDOM_LEN 16
@@ -1011,7 +989,7 @@ typedef struct knl_t_aes_context {
      */
     GS_UINT32 insert_position;
 
-    /* use saved random salt unless unavailable */
+    /* use saved random salt unless unavailable*/
     GS_UCHAR gs_random_salt_saved[RANDOM_LEN];
     bool random_salt_tag;
     GS_UINT64 random_salt_count;
@@ -1027,6 +1005,7 @@ typedef struct knl_t_time_context {
     TimestampTz stmt_system_timestamp;
 
     bool is_abstimeout_in;
+
 } knl_t_time_context;
 
 /* We provide a small stack of ErrorData records for re-entrant cases */
@@ -1086,6 +1065,8 @@ typedef struct knl_t_log_context {
 
     struct ErrorData* errordata;
 
+    struct LogControlData* pLogCtl;
+
     int errordata_stack_depth; /* index of topmost active frame */
 
     int recursion_depth; /* to detect actual recursion */
@@ -1119,6 +1100,7 @@ typedef struct knl_t_log_context {
     struct StringInfoData* msgbuf;
 
     unsigned char* module_logging_configure;
+
 } knl_t_log_context;
 
 typedef struct knl_t_format_context {
@@ -1157,7 +1139,8 @@ typedef struct knl_t_audit_context {
     int64 next_rotation_time;
     bool pipe_eof_seen;
     bool rotation_disabled;
-    FILE* sysauditFile;
+    FILE *sysauditFile;
+    FILE *policyauditFile;
     Latch sysAuditorLatch;
     time_t last_pgaudit_start_time;
     struct AuditIndexTable* audit_indextbl;
@@ -1207,6 +1190,14 @@ typedef struct knl_t_arch_context {
      * Latch used by signal handlers to wake up the sleep in the main loop.
      */
     Latch mainloop_latch;
+
+    XLogRecPtr pitr_task_last_lsn;
+    /* millsecond */
+    int task_wait_interval;
+    int sync_walsender_idx;
+    int sync_walsender_term;
+    /* for standby millsecond*/
+    long last_arch_time;
 } knl_t_arch_context;
 
 /* Maximum length of a timezone name (not including trailing null) */
@@ -1219,9 +1210,13 @@ typedef struct knl_t_logger_context {
     bool rotation_disabled;
     FILE* syslogFile;
     FILE* csvlogFile;
+    FILE* querylogFile;
+    char* last_query_log_file_name;
+    FILE* asplogFile;
     int64 first_syslogger_file_time;
     char* last_file_name;
     char* last_csv_file_name;
+    char* last_asp_file_name;
     Latch sysLoggerLatch;
 
 #define NBUFFER_LISTS 256
@@ -1289,6 +1284,9 @@ typedef struct knl_t_interrupt_context {
     volatile uint32 CritSectionCount;
 
     volatile bool InterruptByCN;
+
+    volatile bool InterruptCountResetFlag;
+
 } knl_t_interrupt_context;
 
 typedef int64 pg_time_t;
@@ -1354,6 +1352,7 @@ typedef struct knl_t_vacuum_context {
     MemoryContext vac_context;
 
     bool in_vacuum;
+
 } knl_t_vacuum_context;
 
 typedef struct knl_t_autovacuum_context {
@@ -1408,6 +1407,7 @@ typedef struct knl_t_bgwriter_context {
     volatile sig_atomic_t got_SIGHUP;
     volatile sig_atomic_t shutdown_requested;
     int thread_id;
+    pg_time_t next_flush_time;
 } knl_t_bgwriter_context;
 
 typedef struct knl_t_pagewriter_context {
@@ -1415,6 +1415,7 @@ typedef struct knl_t_pagewriter_context {
     volatile sig_atomic_t shutdown_requested;
     int page_writer_after;
     int pagewriter_id;
+    pg_time_t next_flush_time;
 } knl_t_pagewriter_context;
 
 #define MAX_SEQ_SCANS 100
@@ -1601,23 +1602,25 @@ typedef struct knl_t_utils_context {
      * It's used during each value's partition routing, and reset after done.
      */
     MemoryContext gValueCompareContext;
-    /* ContextUsedCount-- is used to count the number of gValueCompareContext to
+    /*ContextUsedCount-- is used to count the number of gValueCompareContext to
      * avoid the allocated memory is released early.
      */
     int ContextUsedCount;
     struct PartitionIdentifier* partId;
 #define RANGE_PARTKEYMAXNUM 4
     struct Const* valueItemArr[RANGE_PARTKEYMAXNUM];
+    struct ResourceOwnerData* TopResourceOwner;
     struct ResourceOwnerData* CurrentResourceOwner;
+    struct ResourceOwnerData* STPSavedResourceOwner;
     struct ResourceOwnerData* CurTransactionResourceOwner;
     struct ResourceOwnerData* TopTransactionResourceOwner;
-    struct ResourceOwnerData* StpSavedResourceOwner;
     struct ResourceReleaseCallbackItem* ResourceRelease_callbacks;
     bool SortColumnOptimize;
     struct RelationData* pRelatedRel;
 
+#ifndef WIN32
     timer_t sigTimerId;
-
+#endif
     unsigned int ConfigFileLineno;
     const char* GUC_flex_fatal_errmsg;
     sigjmp_buf* GUC_flex_fatal_jmp;
@@ -1636,6 +1639,9 @@ typedef struct knl_t_utils_context {
     /* Memory Protecting feature initialization flag */
     bool gs_mp_inited;
 
+    /* Memory Protecting need flag */
+    bool memNeedProtect; 
+
     /* Track memory usage in chunks at individual thread level */
     int32 trackedMemChunks;
 
@@ -1647,22 +1653,18 @@ typedef struct knl_t_utils_context {
 
     /* Memory Protecting feature initialization flag */
     int32 beyondChunk;
+
+    bool backend_reserved;
 } knl_t_utils_context;
 
-/* Maximum number of preferred Datanodes that can be defined in cluster */
-#define MAX_PREFERRED_NODES 64
-
 typedef struct knl_t_pgxc_context {
-    Oid primary_data_node;
-    int num_preferred_data_nodes;
-    Oid preferred_data_node[MAX_PREFERRED_NODES];
-
     /*
      * Local cache for current installation/redistribution node group, allocated in
      * t_thrd.top_mem_cxt at session start-up time
      */
     char* current_installation_nodegroup;
     char* current_redistribution_nodegroup;
+	int globalBucketLen;
 
     /* Global number of nodes. Point to a shared memory block */
     int* shmemNumCoords;
@@ -1706,6 +1708,15 @@ typedef struct knl_t_pgxc_context {
 #define BEGIN_CMD_BUFF_SIZE 1024
     char begin_cmd[BEGIN_CMD_BUFF_SIZE];
 } knl_t_pgxc_context;
+
+typedef enum CommLockStatus {
+    CommLockInvalid = 0,
+    CommLockFree,
+    CommLockHold
+} CommLockStatus;
+typedef struct knl_t_pgxc_comm_context {
+    CommLockStatus s_nodename_cache_mutex_status;
+} knl_t_pgxc_comm_context;
 
 typedef struct knl_t_conn_context {
     /* connector.cpp */
@@ -1784,11 +1795,6 @@ typedef struct knl_t_walwriter_context {
     volatile sig_atomic_t shutdown_requested;
 } knl_t_walwriter_context;
 
-typedef struct knl_t_walwriterauxiliary_context {
-    volatile sig_atomic_t got_SIGHUP;
-    volatile sig_atomic_t shutdown_requested;
-} knl_t_walwriterauxiliary_context;
-
 typedef struct knl_t_poolcleaner_context {
     volatile sig_atomic_t shutdown_requested;
 } knl_t_poolcleaner_context;
@@ -1837,7 +1843,7 @@ typedef struct knl_t_snapshot_context {
 
 typedef struct knl_t_comm_context {
     /*
-     * last epoll wait up time of receiver loop thread
+     *last epoll wait up time of receiver loop thread
      */
     uint64 g_receiver_loop_poll_up;
     int LibcommThreadType;
@@ -1851,11 +1857,11 @@ typedef struct knl_t_comm_context {
     struct mc_poller* g_libcomm_poller_list;
     struct mc_poller_hndl_list* g_libcomm_recv_poller_hndl_list;
     /*
-     * last time when consumer thread exit gs_wait_poll
+     *last time when consumer thread exit gs_wait_poll
      */
     uint64 g_consumer_process_duration;
     /*
-     * last time when producer thread exit gs_send
+     *last time when producer thread exit gs_send
      */
     uint64 g_producer_process_duration;
     pid_t MyPid;
@@ -1895,7 +1901,7 @@ typedef struct knl_t_libpq_context {
     int UnBlockSig, BlockSig, StartupBlockSig;
 #endif
 
-    /* variables for save query results to temp file */
+    /* variables for save query results to temp file*/
     bool save_query_result_to_disk;
     struct TempFileContextInfo* PqTempFileContextInfo;
 
@@ -1922,8 +1928,6 @@ typedef struct knl_t_contrib_context {
      * Allocated and filled in InitGcFdwOptions.
      */
     struct PgFdwOption* gc_fdw_options;
-    struct FileSlot* slots; /* initilaized with zeros */
-    int32 slotid;           /* next slot id */
 } knl_t_contrib_context;
 
 typedef struct knl_t_basebackup_context {
@@ -2067,7 +2071,6 @@ typedef struct knl_t_walreceiver_context {
      * NB: RESERVE_SIZE must be changed at the same time.
      */
     char** reserve_item;
-#define RESERVE_SIZE 32
     time_t standby_config_modify_time;
     time_t Primary_config_modify_time;
     TimestampTz last_sendfilereply_timestamp;
@@ -2145,7 +2148,7 @@ typedef struct knl_t_walsender_context {
      * MAX_SEND_SIZE bytes --> wal data bytes
      */
     char* output_data_message;
-    /* used to flag the latest length in output_data_message */
+    /* used to flag the latest length in output_data_message*/
     uint32 output_data_msg_cur_len;
     XLogRecPtr output_data_msg_start_xlog;
     XLogRecPtr output_data_msg_end_xlog;
@@ -2260,7 +2263,6 @@ typedef struct knl_t_storage_context {
      */
     TransactionId latestObservedXid;
     struct RunningTransactionsData* CurrentRunningXacts;
-    TransactionId* proc_xids;
     struct VirtualTransactionId* proc_vxids;
 
     union BufferDescPadded* BufferDescriptors;
@@ -2483,7 +2485,7 @@ typedef struct knl_t_storage_context {
 } knl_t_storage_context;
 
 typedef struct knl_t_port_context {
-    char cryptresult[21]; /* encrypted result (1 + 4 + 4 + 11 + 1) */
+    char cryptresult[21]; /* encrypted result (1 + 4 + 4 + 11 + 1)*/
     char buf[24];
 
     bool thread_is_exiting;
@@ -2514,7 +2516,7 @@ typedef struct knl_t_postmaster_context {
     /* flag when process startup packet for logic conn */
     bool ProcessStartupPacketForLogicConn;
 
-    /* socket and port for recv gs_sock from receiver flow control */
+    /* socket and port for recv gs_sock from receiver flow control*/
     int sock_for_libcomm;
     struct Port* port_for_libcomm;
     bool KeepSocketOpenForStream;
@@ -2533,7 +2535,6 @@ typedef struct knl_t_postmaster_context {
 
     /* The socket(s) we're listening to. */
     pgsocket ListenSocket[MAXLISTEN];
-    pgsocket SctpListenSocket[MAXLISTEN];
     char LocalAddrList[MAXLISTEN][IP_LEN];
     int LocalIpNum;
     int listen_sock_type[MAXLISTEN]; /* ori type: enum ListenSocketType */
@@ -2639,6 +2640,7 @@ typedef struct knl_t_locale_context {
     char lc_numeric_envbuf[LC_ENV_BUFSIZE];
 
     char lc_time_envbuf[LC_ENV_BUFSIZE];
+
 } knl_t_locale_context;
 
 typedef struct knl_t_stat_context {
@@ -2649,12 +2651,15 @@ typedef struct knl_t_stat_context {
      */
     MemoryContext local_bad_block_mcxt;
     HTAB* local_bad_block_stat;
+    volatile bool need_exit;
 } knl_t_stat_context;
 
 typedef struct knl_t_thread_pool_context {
+    class ThreadPoolGroup* group;
     class ThreadPoolListener* listener;
     class ThreadPoolWorker* worker;
     class ThreadPoolScheduler* scheduler;
+    class ThreadPoolStream* stream;
     bool reaper_dead_session;
 } knl_t_thread_pool_context;
 
@@ -2681,6 +2686,22 @@ typedef struct knl_t_perf_snap_context {
     volatile bool is_mem_protect;
 } knl_t_perf_snap_context;
 
+typedef struct knl_t_ash_context {
+    time_t last_ash_start_time;
+    volatile sig_atomic_t need_exit;
+    volatile bool got_SIGHUP;
+    uint32 slot; // the slot of ActiveSessionHistArray
+    struct wait_event_info* waitEventStr;
+} knl_t_ash_context;
+
+typedef struct knl_t_statement_context {
+    volatile sig_atomic_t need_exit;
+    volatile bool got_SIGHUP;
+    int slow_sql_retention_time;
+    int full_sql_retention_time;
+} knl_t_statement_context;
+
+
 /* Default send interval is 1s */
 const int DEFAULT_SEND_INTERVAL = 1000;
 typedef struct knl_t_heartbeat_context {
@@ -2689,16 +2710,33 @@ typedef struct knl_t_heartbeat_context {
     struct heartbeat_state* state;
 } knl_t_heartbeat_context;
 
-/* autonomous_transaction */
-struct PLpgSQL_expr;
-typedef void (*check_client_encoding_hook_type)(void);
-typedef struct knl_t_autonomous_context {
-    PLpgSQL_expr* sqlstmt;
-    bool isnested;
-    BackgroundWorkerHandle handle;
-    check_client_encoding_hook_type check_client_encoding_hook;
-} knl_t_autonomous_context;
+/* compaction and compaction worker use */
+typedef struct knl_t_ts_compaction_context {
+    volatile sig_atomic_t got_SIGHUP;
+    volatile sig_atomic_t shutdown_requested;
+    volatile sig_atomic_t sleep_long;
+    MemoryContext compaction_mem_cxt;
+    MemoryContext compaction_data_cxt;
+} knl_t_ts_compaction_context;
 
+typedef struct knl_t_security_policy_context {
+    // memory context
+    MemoryContext StringMemoryContext;
+    MemoryContext VectorMemoryContext;
+    MemoryContext MapMemoryContext;
+    MemoryContext SetMemoryContext;
+
+    // masking
+    const char* prepare_stmt_name;
+    int node_location;
+} knl_t_security_policy_context;
+
+typedef struct knl_t_csnmin_sync_context {
+    volatile sig_atomic_t got_SIGHUP;
+    volatile sig_atomic_t shutdown_requested;
+} knl_t_csnmin_sync_context;
+
+#ifdef ENABLE_MOT
 /* MOT thread attributes */
 #define MOT_MAX_ERROR_MESSAGE 256
 #define MOT_MAX_ERROR_FRAMES  32
@@ -2743,56 +2781,17 @@ typedef struct knl_t_mot_context {
     int bindPolicy;
     unsigned int mbindFlags;
 } knl_t_mot_context;
+#endif
 
-typedef struct knl_t_bgworker_context {
-    BackgroundWorkerArray *background_worker_data;
-    BackgroundWorker *my_bgworker_entry;
-    bool is_background_worker;
-    bool worker_shutdown_requested;
-    /*
-     * The postmaster's list of registered background workers, in private memory.
-     */
-    slist_head background_worker_list;
-
-    /* Is there a parallel message pending which we need to receive? */
-    volatile bool ParallelMessagePending;
-    /* Are we initializing a parallel worker? */
-    bool InitializingParallelWorker;
-    /*
-     * Our parallel worker number.  We initialize this to -1, meaning that we are
-     * not a parallel worker.  In parallel workers, it will be set to a value >= 0
-     * and < the number of workers before any user code is invoked; each parallel
-     * worker will get a different parallel worker number.
-     */
-    int ParallelWorkerNumber;
-    /* List of active parallel contexts. */
-    dlist_head pcxt_list;
-
-    BufferUsage *save_pgBufferUsage;
-    MemoryContext hpm_context;
-    MemoryContext memCxt;
-} knl_t_bgworker_context;
-
-struct shm_mq;
-struct shm_mq_handle;
-struct PQcommMethods;
-typedef struct knl_t_msqueue_context {
-    shm_mq *pq_mq;
-    shm_mq_handle *pq_mq_handle;
-    bool pq_mq_busy;
-    ThreadId pq_mq_parallel_master_pid;
-    BackendId pq_mq_parallel_master_backend_id;
-    const PQcommMethods *save_PqCommMethods;
-    CommandDest save_whereToSendOutput;
-    ProtocolVersion save_FrontendProtocol;
-    const PQcommMethods *PqCommMethods;
-    bool is_changed;
-} knl_t_msqueue_context;
+typedef struct knl_t_barrier_creator_context {
+    volatile sig_atomic_t got_SIGHUP;
+    volatile sig_atomic_t shutdown_requested;
+} knl_t_barrier_creator_context;
 
 /* thread context. */
 typedef struct knl_thrd_context {
     knl_thread_role role;
-    knl_thread_role subrole;  // we need some sub role status.
+    knl_thread_role subrole;  /* we need some sub role status. */
 
     struct GsSignalSlot* signal_slot;
     /* Pointer to this process's PGPROC and PGXACT structs, if any */
@@ -2805,6 +2804,7 @@ typedef struct knl_thrd_context {
     int myLogicTid;
 
     MemoryContext top_mem_cxt;
+    MemoryContextGroup* mcxt_group;
 
     knl_t_aes_context aes_cxt;
     knl_t_aiocompleter_context aio_cxt;
@@ -2812,7 +2812,6 @@ typedef struct knl_thrd_context {
     knl_t_arch_context arch;
     knl_t_async_context asy_cxt;
     knl_t_audit_context audit;
-    knl_t_autonomous_context autonomous_cxt;
     knl_t_autovacuum_context autovacuum_cxt;
     knl_t_basebackup_context basebackup_cxt;
     knl_t_bgwriter_context bgwriter_cxt;
@@ -2847,6 +2846,7 @@ typedef struct knl_thrd_context {
     knl_t_lwlockmoniter_context lwm_cxt;
     knl_t_mem_context mem_cxt;
     knl_t_obs_context obs_cxt;
+    knl_t_pgxc_comm_context pgxc_comm_cxt;
     knl_t_pgxc_context pgxc_cxt;
     knl_t_port_context port_cxt;
     knl_t_postgres_context postgres_cxt;
@@ -2877,7 +2877,6 @@ typedef struct knl_thrd_context {
     knl_t_walreceiver_context walreceiver_cxt;
     knl_t_walreceiverfuncs_context walreceiverfuncs_cxt;
     knl_t_walwriter_context walwriter_cxt;
-    knl_t_walwriterauxiliary_context walwriterauxiliary_cxt;
     knl_t_catchup_context catchup_cxt;
     knl_t_wlmthrd_context wlm_cxt;
     knl_t_xact_context xact_cxt;
@@ -2886,15 +2885,47 @@ typedef struct knl_thrd_context {
     knl_t_perf_snap_context perf_snap_cxt;
     knl_t_page_redo_context page_redo_cxt;
     knl_t_heartbeat_context heartbeat_cxt;
+    knl_t_security_policy_context security_policy_cxt;
     knl_t_poolcleaner_context poolcleaner_cxt;
+    knl_t_ts_compaction_context ts_compaction_cxt;
+    knl_t_ash_context ash_cxt;
+    knl_t_statement_context statement_cxt;
+    knl_t_streaming_context streaming_cxt;
+    knl_t_csnmin_sync_context csnminsync_cxt;
+#ifdef ENABLE_MOT
     knl_t_mot_context mot_cxt;
-    knl_t_bgworker_context bgworker_cxt;
-    knl_t_msqueue_context msqueue_cxt;
+#endif
+    knl_t_barrier_creator_context barrier_creator_cxt;
 } knl_thrd_context;
 
+#ifdef ENABLE_MOT
 extern void knl_thread_mot_init();
+#endif
+
 extern void knl_thread_init(knl_thread_role role);
 extern THR_LOCAL knl_thrd_context t_thrd;
-extern void knl_thread_set_name(const char* name, bool isCommandTag = false);
+
+inline bool StreamThreadAmI()
+{
+    return (t_thrd.role == STREAM_WORKER || t_thrd.role == THREADPOOL_STREAM);
+}
+
+inline void StreamTopConsumerIam()
+{
+    t_thrd.subrole = TOP_CONSUMER;
+}
+
+inline bool StreamTopConsumerAmI()
+{
+    return (t_thrd.subrole == TOP_CONSUMER);
+}
+
+#ifdef ENABLE_MULTIPLE_NODES
+#define BUCKETDATALEN (t_thrd.pgxc_cxt.globalBucketLen)
+#define BUCKETSTRLEN (6*BUCKETDATALEN)
+#endif
+
+RedoInterruptCallBackFunc RegisterRedoInterruptCallBack(RedoInterruptCallBackFunc func);
+void RedoInterruptCallBack();
 
 #endif /* SRC_INCLUDE_KNL_KNL_THRD_H_ */

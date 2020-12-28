@@ -12,14 +12,14 @@ INSERT INTO cmpr_toast_dead_loop_raw SELECT * FROM cmpr_toast_dead_loop_raw;
 INSERT INTO cmpr_toast_dead_loop_raw SELECT * FROM cmpr_toast_dead_loop_raw;
 INSERT INTO cmpr_toast_dead_loop_raw SELECT * FROM cmpr_toast_dead_loop_raw;
 INSERT INTO cmpr_toast_dead_loop_raw SELECT * FROM cmpr_toast_dead_loop_raw;
-COPY cmpr_toast_dead_loop_raw TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_toast_dead_loop.data';
+COPY cmpr_toast_dead_loop_raw TO '@abs_srcdir@/data/cmpr_toast_dead_loop.data';
 
 CREATE TABLE cmpr_toast_dead_loop
 (
     id int delta,
     f1 varchar(10000)
-) COMPRESS;
-COPY cmpr_toast_dead_loop FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_toast_dead_loop.data';
+) ;
+COPY cmpr_toast_dead_loop FROM '@abs_srcdir@/data/cmpr_toast_dead_loop.data';
 
 SELECT (SELECT COUNT(*) FROM cmpr_toast_dead_loop_raw) - (SELECT COUNT(*) FROM cmpr_toast_dead_loop);
 (SELECT * FROM cmpr_toast_dead_loop_raw) MINUS ALL (SELECT * FROM cmpr_toast_dead_loop);
@@ -27,4 +27,4 @@ SELECT (SELECT COUNT(*) FROM cmpr_toast_dead_loop_raw) - (SELECT COUNT(*) FROM c
 
 DROP TABLE cmpr_toast_dead_loop_raw;
 DROP TABLE cmpr_toast_dead_loop;
-\! rm @abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_toast_dead_loop.data
+\! rm @abs_srcdir@/data/cmpr_toast_dead_loop.data

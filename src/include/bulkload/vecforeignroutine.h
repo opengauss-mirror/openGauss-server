@@ -26,6 +26,6 @@
 #define SRC_INCLUDE_BULKLOAD_VECFOREIGNROUTINE_H
 #include "nodes/execnodes.h"
 
-extern VectorBatch *distExecVecImport(VecForeignScanState *node);
+extern VectorBatch* distExecVecImport(VecForeignScanState* node);
 
 #endif  // SRC_INCLUDE_BULKLOAD_VECFOREIGNROUTINE_H

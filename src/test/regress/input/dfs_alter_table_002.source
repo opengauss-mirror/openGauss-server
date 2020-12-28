@@ -1,0 +1,1213 @@
+CREATE SCHEMA cstore_alter_table;
+SET SEARCH_PATH TO cstore_alter_table;
+SET INTERVALsTYLE = POSTGRES;
+set cstore_insert_mode=main;
+-- test empty normal table
+DROP TABLE IF EXISTS alter_addcols_00;
+CREATE TABLE alter_addcols_00( a int , b int ) with ( orientation = orc ) tablespace hdfs_ts distribute by hash(a);
+ALTER TABLE alter_addcols_00 ADD COLUMN b int;
+ALTER TABLE alter_addcols_00 ADD COLUMN c int NULL;
+SELECT c FROM alter_addcols_00 WHERE c =  1;
+ALTER TABLE alter_addcols_00 ADD COLUMN d int NOT NULL;
+SELECT d FROM alter_addcols_00 WHERE d >=  1;
+ALTER TABLE alter_addcols_00 ADD COLUMN e int default 5;
+SELECT e FROM alter_addcols_00 WHERE e =  5;
+ALTER TABLE alter_addcols_00 ADD COLUMN f int NULL default 10;
+SELECT f FROM alter_addcols_00 WHERE f =  10;
+ALTER TABLE alter_addcols_00 ADD COLUMN g int check(g > 2);
+ALTER TABLE alter_addcols_00 ADD COLUMN g int default f + 11;
+
+ALTER TABLE alter_addcols_00 ADD COLUMN g varchar(100) default 'chars less than 31 size';
+INSERT INTO alter_addcols_00(a) VALUES(1);
+SELECT COUNT(*) FROM alter_addcols_00;
+SELECT * FROM alter_addcols_00;
+INSERT INTO alter_addcols_00(a, d) VALUES(1, 4);
+SELECT * FROM alter_addcols_00;
+
+ALTER TABLE alter_addcols_00 ADD COLUMN h varchar(100) default 'i think this is a string whose length is greater than 31.';
+SELECT * FROM alter_addcols_00;
+
+ALTER TABLE alter_addcols_00 ADD COLUMN i varchar(100) NOT NULL DEFAULT 'i think this is a string whose length is greater than 31.';
+SELECT * FROM alter_addcols_00;
+
+INSERT INTO alter_addcols_00(a, d) VALUES(1, 7);
+INSERT INTO alter_addcols_00(a, d) VALUES(1, 11);
+INSERT INTO alter_addcols_00(a, d) VALUES(1, 13);
+ALTER TABLE alter_addcols_00 ADD COLUMN j varchar(100) NOT NULL DEFAULT 'i think this is a string whose length is greater than 31.';
+SELECT * FROM alter_addcols_00;
+
+INSERT INTO alter_addcols_00(a, d) VALUES(1, 17);
+ALTER TABLE alter_addcols_00 ADD COLUMN k time with time zone DEFAULT '2015-04-02 20:26:53 PST';
+SELECT * FROM alter_addcols_00;
+INSERT INTO alter_addcols_00(a, d) VALUES(1, 19);
+SELECT * FROM alter_addcols_00;
+
+ALTER TABLE alter_addcols_00 ADD COLUMN p interval DEFAULT 1100;
+INSERT INTO alter_addcols_00(a, d) VALUES(1, 23);
+SELECT * FROM alter_addcols_00;
+
+ALTER TABLE alter_addcols_00 ADD COLUMN q interval DEFAULT '1 12:59:10';
+INSERT INTO alter_addcols_00(a, d) VALUES(1, 29);
+SELECT * FROM alter_addcols_00;
+
+ALTER TABLE alter_addcols_00 ADD COLUMN l name DEFAULT 'Gauss MPPDB';
+-- TODO: forbid SMALLSERIAL && SERIAL && BIGSERIA
+ALTER TABLE alter_addcols_00 ADD COLUMN l smallserial;
+ALTER TABLE alter_addcols_00 ADD COLUMN l serial;
+ALTER TABLE alter_addcols_00 ADD COLUMN l bigserial;
+ALTER TABLE alter_addcols_00 ADD COLUMN m clob;
+ALTER TABLE alter_addcols_00 ADD COLUMN n blob;
+ALTER TABLE alter_addcols_00 ADD COLUMN o macaddr;
+-- test noempty normal table holding 1 tuple
+DROP TABLE IF EXISTS alter_addcols_01;
+CREATE TABLE alter_addcols_01(a int) with ( orientation = orc ) tablespace hdfs_ts distribute by hash(a);
+INSERT INTO alter_addcols_01 VALUES (1);
+
+ALTER TABLE alter_addcols_01 ADD COLUMN b int;
+SELECT * FROM alter_addcols_01;
+INSERT INTO alter_addcols_01 VALUES (1, 2);
+SELECT * FROM alter_addcols_01;
+
+ALTER TABLE alter_addcols_01 ADD COLUMN c int NULL;
+SELECT * FROM alter_addcols_01;
+INSERT INTO alter_addcols_01 VALUES (1, 3);
+SELECT * FROM alter_addcols_01;
+INSERT INTO alter_addcols_01 VALUES (1, 4, 1);
+SELECT * FROM alter_addcols_01;
+
+ALTER TABLE alter_addcols_01 ADD COLUMN d int NOT NULL;
+ALTER TABLE alter_addcols_01 ADD COLUMN d int NOT NULL DEFAULT 55;
+SELECT * FROM alter_addcols_01;
+INSERT INTO alter_addcols_01 VALUES (1, 5, 2);
+SELECT * FROM alter_addcols_01;
+INSERT INTO alter_addcols_01 VALUES (1, 6, 3, 0);
+SELECT * FROM alter_addcols_01;
+
+ALTER TABLE alter_addcols_01 ADD COLUMN e int NOT NULL DEFAULT 5+5;
+SELECT * FROM alter_addcols_01 order by 1, 2, 3;
+
+-- some cu whose tuples has been deleted must be skipped.
+DROP TABLE IF EXISTS alter_addcols_02;
+CREATE TABLE alter_addcols_02(a int, b int) with ( orientation = orc ) tablespace hdfs_ts distribute by hash(a);
+INSERT INTO alter_addcols_02 VALUES (1, 2);
+INSERT INTO alter_addcols_02 VALUES (1, 3);
+INSERT INTO alter_addcols_02 VALUES (1, 4);
+DELETE FROM alter_addcols_02 WHERE b = 2;
+ALTER TABLE alter_addcols_02 ADD COLUMN c int NOT NULL DEFAULT 9*9;
+SELECT * FROM alter_addcols_02 order by 1, 2, 3;
+
+START TRANSACTION;
+INSERT INTO alter_addcols_02 VALUES (1, 5);
+\! @gsqldir@/gsql -d regression -p @portstring@ -c "INSERT INTO cstore_alter_table.alter_addcols_02 VALUES (1, 6);"
+\! @gsqldir@/gsql -d regression -p @portstring@ -c "SELECT * FROM cstore_alter_table.alter_addcols_02"
+ROLLBACK;
+ALTER TABLE alter_addcols_02 ADD COLUMN d int NOT NULL DEFAULT 9*99;
+SELECT * FROM alter_addcols_02 order by 1, 2, 3;
+
+ALTER TABLE alter_addcols_02 ADD COLUMN e int DEFAULT 100*100, ADD COLUMN f char(31) DEFAULT 'hello world, i am from China!!', ADD COLUMN g char(32) DEFAULT 'hello world, i am from China!!!', ADD COLUMN h char(33) DEFAULT 'hello world, i am from China!!!!', ADD COLUMN i char(130) DEFAULT 'hello world, i am from China!!!!hello world, i am from China!!!!';
+INSERT INTO alter_addcols_02 VALUES (1, 5);
+SELECT * FROM alter_addcols_02 order by 1, 2, 3;
+
+UPDATE alter_addcols_02 SET b = 7 WHERE b > 4;
+SELECT * FROM alter_addcols_02;
+ALTER TABLE alter_addcols_02 ADD COLUMN j varchar(100) NOT NULL DEFAULT 'DEFAULT hello world, i am from China!!!!hello world, i am from DEFAULT hello world, i am !!!!';
+SELECT * FROM alter_addcols_02 order by 1, 2, 3;
+
+-----------  partition table -----------
+-- test empty partition table
+DROP TABLE IF EXISTS alter_addcols_50;
+CREATE TABLE alter_addcols_50( a int , b int ) with ( orientation = orc ) tablespace hdfs_ts distribute by hash(a) partition by values(b);
+ALTER TABLE alter_addcols_50 ADD COLUMN b int;
+ALTER TABLE alter_addcols_50 ADD COLUMN c int NULL;
+SELECT c FROM alter_addcols_50 WHERE c =  1;
+ALTER TABLE alter_addcols_50 ADD COLUMN d int NOT NULL;
+SELECT d FROM alter_addcols_50 WHERE d >=  1;
+ALTER TABLE alter_addcols_50 ADD COLUMN e int default 5;
+SELECT e FROM alter_addcols_50 WHERE e =  5;
+ALTER TABLE alter_addcols_50 ADD COLUMN f int NULL default 10;
+SELECT f FROM alter_addcols_50 WHERE f =  10;
+
+ALTER TABLE alter_addcols_50 ADD COLUMN g int check(g > 2);
+ALTER TABLE alter_addcols_50 ADD COLUMN g int default f + 11;
+
+ALTER TABLE alter_addcols_50 ADD COLUMN g varchar(100) default 'chars less than 31 size';
+INSERT INTO alter_addcols_50(a) VALUES(1);
+SELECT COUNT(*) FROM alter_addcols_50;
+SELECT * FROM alter_addcols_50;
+
+INSERT INTO alter_addcols_50(a, d) VALUES(1, 4);
+SELECT * FROM alter_addcols_50;
+
+ALTER TABLE alter_addcols_50 ADD COLUMN h varchar(100) default 'i think this is a string whose length is greater than 31.';
+SELECT * FROM alter_addcols_50;
+
+ALTER TABLE alter_addcols_50 ADD COLUMN i varchar(100) NOT NULL DEFAULT 'i think this is a string whose length is greater than 31.';
+SELECT * FROM alter_addcols_50;
+
+INSERT INTO alter_addcols_50(a, d) VALUES(1, 7);
+INSERT INTO alter_addcols_50(a, d) VALUES(1, 11);
+INSERT INTO alter_addcols_50(a, d) VALUES(1, 13);
+ALTER TABLE alter_addcols_50 ADD COLUMN j varchar(100) NOT NULL DEFAULT 'i think this is a string whose length is greater than 31.';
+SELECT * FROM alter_addcols_50;
+
+INSERT INTO alter_addcols_50(a, d) VALUES(1, 17);
+ALTER TABLE alter_addcols_50 ADD COLUMN k time with time zone DEFAULT '2015-04-02 20:26:53 PST';
+SELECT * FROM alter_addcols_50;
+
+INSERT INTO alter_addcols_50(a, d) VALUES(1, 19);
+SELECT * FROM alter_addcols_50;
+
+ALTER TABLE alter_addcols_50 ADD COLUMN p interval DEFAULT 1100;
+INSERT INTO alter_addcols_50(a, d) VALUES(1, 23);
+SELECT * FROM alter_addcols_50;
+
+ALTER TABLE alter_addcols_50 ADD COLUMN q interval DEFAULT '1 12:59:10';
+INSERT INTO alter_addcols_50(a, d) VALUES(1, 29);
+SELECT * FROM alter_addcols_50;
+
+ALTER TABLE alter_addcols_50 ADD COLUMN l name DEFAULT 'Gauss MPPDB';
+-- TODO: forbid SMALLSERIAL && SERIAL && BIGSERIA
+ALTER TABLE alter_addcols_50 ADD COLUMN l smallserial;
+ALTER TABLE alter_addcols_50 ADD COLUMN l serial;
+ALTER TABLE alter_addcols_50 ADD COLUMN l bigserial;
+ALTER TABLE alter_addcols_50 ADD COLUMN m clob;
+ALTER TABLE alter_addcols_50 ADD COLUMN n blob;
+ALTER TABLE alter_addcols_50 ADD COLUMN o macaddr;
+
+-- test noempty normal table holding tuples
+DROP TABLE IF EXISTS alter_addcols_51;
+CREATE TABLE alter_addcols_51(a int, b int) with ( orientation = orc ) tablespace hdfs_ts distribute by hash(a) partition by values(b);
+
+------ test the same partition, only one partition
+INSERT INTO alter_addcols_51 VALUES (1, 1);
+ALTER TABLE alter_addcols_51 ADD COLUMN c int;
+SELECT * FROM alter_addcols_51;
+INSERT INTO alter_addcols_51 VALUES (1, 2, 2);
+SELECT * FROM alter_addcols_51;
+
+ALTER TABLE alter_addcols_51 ADD COLUMN d int NULL;
+SELECT * FROM alter_addcols_51;
+INSERT INTO alter_addcols_51 VALUES (1,2,3);
+SELECT * FROM alter_addcols_51;
+INSERT INTO alter_addcols_51 VALUES (1,2,4,1);
+SELECT * FROM alter_addcols_51;
+
+ALTER TABLE alter_addcols_51 ADD COLUMN e int NOT NULL;
+ALTER TABLE alter_addcols_51 ADD COLUMN e int NOT NULL DEFAULT 55;
+SELECT * FROM alter_addcols_51;
+INSERT INTO alter_addcols_51 VALUES (1,2,6,1);
+SELECT * FROM alter_addcols_51;
+INSERT INTO alter_addcols_51 VALUES (1,2,6,1,10);
+SELECT * FROM alter_addcols_51;
+
+ALTER TABLE alter_addcols_51 ADD COLUMN f int NOT NULL DEFAULT 5+5;
+SELECT * FROM alter_addcols_51;
+
+-- some cu whose tuples has been deleted must be skipped.
+DROP TABLE IF EXISTS alter_addcols_52;
+CREATE TABLE alter_addcols_52(a int, b int) with ( orientation = orc ) tablespace hdfs_ts distribute by hash(a) partition by values(b);
+
+INSERT INTO alter_addcols_52 VALUES (1, 2);
+INSERT INTO alter_addcols_52 VALUES (1, 3);
+INSERT INTO alter_addcols_52 VALUES (1, 4);
+DELETE FROM alter_addcols_52 WHERE b = 2;
+ALTER TABLE alter_addcols_52 ADD COLUMN c int NOT NULL DEFAULT 9*9;
+SELECT * FROM alter_addcols_52 order by 1, 2, 3;
+
+START TRANSACTION;
+INSERT INTO alter_addcols_52 VALUES (1, 5);
+\! @gsqldir@/gsql -d regression -p @portstring@ -c "INSERT INTO cstore_alter_table.alter_addcols_52 VALUES (1, 6);"
+\! @gsqldir@/gsql -d regression -p @portstring@ -c "SELECT * FROM cstore_alter_table.alter_addcols_52"
+ROLLBACK;
+ALTER TABLE alter_addcols_52 ADD COLUMN d int NOT NULL DEFAULT 9*99;
+SELECT * FROM alter_addcols_52 order by 1, 2, 3;
+
+ALTER TABLE alter_addcols_52 ADD COLUMN e int DEFAULT 100*100, ADD COLUMN f char(31) DEFAULT 'hello world, i am from China!!', ADD COLUMN g char(32) DEFAULT 'hello world, i am from China!!!', ADD COLUMN h char(33) DEFAULT 'hello world, i am from China!!!!', ADD COLUMN i char(130) DEFAULT 'hello world, i am from China!!!!hello world, i am from China!!!!';
+INSERT INTO alter_addcols_52 VALUES (1, 5);
+SELECT * FROM alter_addcols_52 order by 1, 2, 3;
+
+UPDATE alter_addcols_52 SET b = 7 WHERE b > 4;
+SELECT * FROM alter_addcols_52 order by 1, 2, 3;
+
+ALTER TABLE alter_addcols_52 ADD COLUMN j varchar(100) NOT NULL DEFAULT 'DEFAULT hello world, i am from China!!!!hello world, i am from DEFAULT hello world, i am !!!!';
+SELECT * FROM alter_addcols_52 order by 1, 2, 3;
+
+INSERT INTO alter_addcols_52(a, b) VALUES (1, 101);
+INSERT INTO alter_addcols_52(a, b) VALUES (1, 102);
+INSERT INTO alter_addcols_52(a, b) VALUES (1, 103);
+INSERT INTO alter_addcols_52(a, b) VALUES (1, 701);
+INSERT INTO alter_addcols_52(a, b) VALUES (1, 702);
+INSERT INTO alter_addcols_52(a, b) VALUES (1, 703);
+ALTER TABLE alter_addcols_52 ADD COLUMN k text NOT NULL DEFAULT 'hello world!';
+SELECT * FROM alter_addcols_52 order by 1, 2, 3;
+
+VACUUM FULL alter_addcols_52;
+SELECT * FROM alter_addcols_52 order by 1, 2, 3;
+
+-- test constraint PARTIAL CLUSTER KEY
+CREATE TABLE alter_addcols_53(a int, b int) WITH ( orientation = orc )tablespace hdfs_ts;
+INSERT INTO alter_addcols_53 VALUES(1, 1), (1, 2), (1, 3);
+ALTER TABLE alter_addcols_53 ADD CONSTRAINT pc1  PARTIAL CLUSTER KEY (b);
+SELECT * FROM alter_addcols_53 order by 1, 2;
+
+-- test case: the continuous two ROLLBACK failed.
+CREATE TABLE alter_addcols_54(a int) with ( orientation = orc)tablespace hdfs_ts;
+START TRANSACTION;
+ALTER TABLE alter_addcols_54 add column b int;
+ROLLBACK;
+ALTER TABLE alter_addcols_54 add column b int;
+START TRANSACTION;
+ALTER TABLE alter_addcols_54 add column c int;
+ROLLBACK;
+ALTER TABLE alter_addcols_54 add column c int;
+
+-- test all the datatypes
+CREATE TABLE alter_addcols_55 (initial int4) with( orientation = orc)tablespace hdfs_ts;
+ALTER TABLE alter_addcols_55 ADD COLUMN xmin integer; -- fails
+ALTER TABLE alter_addcols_55 ADD COLUMN a int4 default 3;
+ALTER TABLE alter_addcols_55 ADD COLUMN b tinyint default 1;
+ALTER TABLE alter_addcols_55 ADD COLUMN c smallint default 2;
+ALTER TABLE alter_addcols_55 ADD COLUMN d bigint;
+ALTER TABLE alter_addcols_55 ADD COLUMN e decimal(5,2);
+ALTER TABLE alter_addcols_55 ADD COLUMN f numeric(10,5);
+ALTER TABLE alter_addcols_55 ADD COLUMN g float4;
+ALTER TABLE alter_addcols_55 ADD COLUMN h float8;
+ALTER TABLE alter_addcols_55 ADD COLUMN i char;
+ALTER TABLE alter_addcols_55 ADD COLUMN j varchar(10);
+ALTER TABLE alter_addcols_55 ADD COLUMN k char(5);
+ALTER TABLE alter_addcols_55 ADD COLUMN l text;
+ALTER TABLE alter_addcols_55 ADD COLUMN m nvarchar2;
+ALTER TABLE alter_addcols_55 ADD COLUMN o timestamptz;
+ALTER TABLE alter_addcols_55 ADD COLUMN p timestamp;
+ALTER TABLE alter_addcols_55 ADD COLUMN q date;
+ALTER TABLE alter_addcols_55 ADD COLUMN r timetz;
+ALTER TABLE alter_addcols_55 ADD COLUMN s time;
+ALTER TABLE alter_addcols_55 ADD COLUMN t tinterval;
+ALTER TABLE alter_addcols_55 ADD COLUMN u interval;
+ALTER TABLE alter_addcols_55 ADD COLUMN v smalldatetime;
+ALTER TABLE alter_addcols_55 ADD COLUMN w oid;
+ALTER TABLE alter_addcols_55 ADD COLUMN x bit(8);
+ALTER TABLE alter_addcols_55 ADD COLUMN y varbit(8);
+\d+ alter_addcols_55;
+-- unsupport type
+ALTER TABLE alter_addcols_55 ADD COLUMN n name;
+ALTER TABLE alter_addcols_55 ADD COLUMN aa tid;
+ALTER TABLE alter_addcols_55 ADD COLUMN bb xid;
+ALTER TABLE alter_addcols_55 ADD COLUMN cc oidvector;
+ALTER TABLE alter_addcols_55 ADD COLUMN dd smgr;
+ALTER TABLE alter_addcols_55 ADD COLUMN ee point;
+ALTER TABLE alter_addcols_55 ADD COLUMN ff lseg;
+ALTER TABLE alter_addcols_55 ADD COLUMN gg path;
+ALTER TABLE alter_addcols_55 ADD COLUMN hh box;
+ALTER TABLE alter_addcols_55 ADD COLUMN ii polygon;
+ALTER TABLE alter_addcols_55 ADD COLUMN ll float8[];
+ALTER TABLE alter_addcols_55 ADD COLUMN mm float4[];
+ALTER TABLE alter_addcols_55 ADD COLUMN nn int2[];
+INSERT INTO alter_addcols_55 (initial, a, b, c, d, e, f, g, h, i, j, k, l, m, o, p, q, r, s, u,
+	v, w, x, y)
+   VALUES (1, 2, 3, 4, 5, 6.1, 7.2, 8.3, 9.4, 'a', 'b', 'c', 'd', 'e', '2015-04-10 09:00:00 PST', '2015-04-10 09:00:00', 
+   '2015-04-10 09:00:00', '2015-04-10 09:00:00', '2015-04-10 09:00:00','02:30:00','2015-04-10',1,'01010101','0101');
+SELECT * FROM alter_addcols_55;
+DROP TABLE alter_addcols_55;
+
+-- Add column for not-empty table
+CREATE TABLE alter_addcols_56 (initial int4) with( orientation = orc)tablespace hdfs_ts;
+insert into alter_addcols_56 values(1);
+insert into alter_addcols_56 values(2);
+ALTER TABLE alter_addcols_56 ADD COLUMN xmin integer;
+ALTER TABLE alter_addcols_56 ADD COLUMN a int4 default 3;
+ALTER TABLE alter_addcols_56 ADD COLUMN b tinyint default 1;
+ALTER TABLE alter_addcols_56 ADD COLUMN c smallint default 2;
+ALTER TABLE alter_addcols_56 ADD COLUMN d bigint;
+ALTER TABLE alter_addcols_56 ADD COLUMN e decimal(5,2);
+ALTER TABLE alter_addcols_56 ADD COLUMN f numeric(10,5);
+ALTER TABLE alter_addcols_56 ADD COLUMN g float4;
+ALTER TABLE alter_addcols_56 ADD COLUMN h float8;
+ALTER TABLE alter_addcols_56 ADD COLUMN i char;
+ALTER TABLE alter_addcols_56 ADD COLUMN j varchar(10);
+ALTER TABLE alter_addcols_56 ADD COLUMN k char(5);
+ALTER TABLE alter_addcols_56 ADD COLUMN l text;
+ALTER TABLE alter_addcols_56 ADD COLUMN m nvarchar2;
+ALTER TABLE alter_addcols_56 ADD COLUMN o timestamptz;
+ALTER TABLE alter_addcols_56 ADD COLUMN p timestamp;
+ALTER TABLE alter_addcols_56 ADD COLUMN q date;
+ALTER TABLE alter_addcols_56 ADD COLUMN r timetz;
+ALTER TABLE alter_addcols_56 ADD COLUMN s time;
+ALTER TABLE alter_addcols_56 ADD COLUMN t tinterval;
+ALTER TABLE alter_addcols_56 ADD COLUMN u interval;
+ALTER TABLE alter_addcols_56 ADD COLUMN v smalldatetime;
+ALTER TABLE alter_addcols_56 ADD COLUMN w oid;
+ALTER TABLE alter_addcols_56 ADD COLUMN x bit(8);
+ALTER TABLE alter_addcols_56 ADD COLUMN y varbit(8);
+
+INSERT INTO alter_addcols_56 (initial, a, b, c, d, e, f, g, h, i, j, k, l, m, o, p, q, r, s, u,
+	v, w, x, y)
+   VALUES (1, 2, 3, 4, 5, 6.1, 7.2, 8.3, 9.4, 'a', 'b', 'c', 'd', 'e', '2015-04-10 09:00:00 PST', '2015-04-10 09:00:00', 
+   '2015-04-10 09:00:00', '2015-04-10 09:00:00', '2015-04-10 09:00:00','02:30:00','2015-04-10',1,'01010101','0101');
+SELECT * FROM alter_addcols_56;
+DROP TABLE alter_addcols_56;
+
+-- Add mutliple column 
+CREATE TABLE alter_addcols_57 (initial int4) with( orientation = orc)tablespace hdfs_ts;
+insert into alter_addcols_57 values(1);
+ALTER TABLE alter_addcols_57 ADD(mychar char default 'a', mychar1 varchar(10) NOT NULL default 'ab', id integer NULL);
+select * from alter_addcols_57;
+insert into alter_addcols_57 values(2,'b','abc',2);
+select * from alter_addcols_57;
+drop table alter_addcols_57;
+
+-- Add column for patitioned table
+CREATE TABLE alter_addcols_58(a int, b int) with ( orientation = orc ) tablespace hdfs_ts distribute by hash(a) partition by values(b);
+insert into alter_addcols_58 values(1,1);
+insert into alter_addcols_58 values(2,4);
+insert into alter_addcols_58 values(3,9);
+select * from alter_addcols_58 order by a;
+Alter table alter_addcols_58 add column c int default 2;
+select * from alter_addcols_58 order by a;
+insert into alter_addcols_58 values(2,5,4);
+select * from alter_addcols_58 order by a;
+
+DROP TABLE alter_addcols_58;
+
+-- testcase: the whole cu is deleted.
+CREATE TABLE alter_addcols_58(a int, b int) WITH ( orientation = orc)tablespace hdfs_ts;
+TRUNCATE TABLE alter_addcols_58;
+INSERT INTO alter_addcols_58 VALUES(1, 1);
+INSERT INTO alter_addcols_58 VALUES(1, 2);
+INSERT INTO alter_addcols_58 VALUES(1, 3);
+INSERT INTO alter_addcols_58 VALUES(1, 4);
+INSERT INTO alter_addcols_58 VALUES(1, 5);
+INSERT INTO alter_addcols_58 VALUES(1, 6);
+INSERT INTO alter_addcols_58 VALUES(1, 7);
+INSERT INTO alter_addcols_58 VALUES(1, 8);
+INSERT INTO alter_addcols_58 VALUES(1, 9);
+DELETE FROM alter_addcols_58 WHERE b%2 = 0;
+ALTER TABLE alter_addcols_58 ADD COLUMN c int default 3;
+SELECT * FROM alter_addcols_58;
+DROP TABLE alter_addcols_58;
+
+--------------------------------------------------------- ALTER TABLE SET DATA TYPE
+-- unsupported datatype
+CREATE TABLE alter_addcols_58( a int , b int) WITH ( orientation = orc)tablespace hdfs_ts;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE name;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE tid;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE xid;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE oidvector;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE smgr;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE point;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE lseg;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE path;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE box;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE polygon;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE float8[];
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE float4[];
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE int2[];
+-- test: cannot change data type of DISTRIBUTE column.
+ALTER TABLE alter_addcols_58 ALTER COLUMN a SET DATA TYPE varchar(100);
+DROP TABLE alter_addcols_58;
+-- testcase 1: the whole cu is deleted
+CREATE TABLE alter_addcols_60(a int, b int) WITH ( orientation = orc)tablespace hdfs_ts;
+-- testcase 1.1: the rows within cu is 1
+INSERT INTO alter_addcols_60 VALUES(1, 1);
+DELETE FROM alter_addcols_60;
+ALTER TABLE alter_addcols_60 ALTER COLUMN b SET DATA TYPE char;
+SELECT COUNT(*) FROM alter_addcols_60;
+SELECT * FROM alter_addcols_60;
+-- testcase 1.2: the rows within cu is 7
+TRUNCATE TABLE alter_addcols_60;
+INSERT INTO alter_addcols_60 VALUES(1, 1);
+INSERT INTO alter_addcols_60 VALUES(1, 2);
+INSERT INTO alter_addcols_60 VALUES(1, 3);
+INSERT INTO alter_addcols_60 VALUES(1, 4);
+INSERT INTO alter_addcols_60 VALUES(1, 5);
+INSERT INTO alter_addcols_60 VALUES(1, 6);
+INSERT INTO alter_addcols_60 VALUES(1, 7);
+VACUUM FULL alter_addcols_60;
+DELETE FROM alter_addcols_60;
+ALTER TABLE alter_addcols_60 ALTER COLUMN b SET DATA TYPE int;
+SELECT COUNT(*) FROM alter_addcols_60;
+SELECT * FROM alter_addcols_60;
+-- testcase 1.3: the rows within cu is 8
+TRUNCATE TABLE alter_addcols_60;
+INSERT INTO alter_addcols_60 VALUES(1, 1);
+INSERT INTO alter_addcols_60 VALUES(1, 2);
+INSERT INTO alter_addcols_60 VALUES(1, 3);
+INSERT INTO alter_addcols_60 VALUES(1, 4);
+INSERT INTO alter_addcols_60 VALUES(1, 5);
+INSERT INTO alter_addcols_60 VALUES(1, 6);
+INSERT INTO alter_addcols_60 VALUES(1, 7);
+INSERT INTO alter_addcols_60 VALUES(1, 8);
+VACUUM FULL alter_addcols_60;
+DELETE FROM alter_addcols_60;
+ALTER TABLE alter_addcols_60 ALTER COLUMN b SET DATA TYPE varchar(100);
+SELECT COUNT(*) FROM alter_addcols_60;
+SELECT * FROM alter_addcols_60;
+-- testcase 1.4: the rows within cu is 9
+TRUNCATE TABLE alter_addcols_60;
+INSERT INTO alter_addcols_60 VALUES(1, 1);
+INSERT INTO alter_addcols_60 VALUES(1, 2);
+INSERT INTO alter_addcols_60 VALUES(1, 3);
+INSERT INTO alter_addcols_60 VALUES(1, 4);
+INSERT INTO alter_addcols_60 VALUES(1, 5);
+INSERT INTO alter_addcols_60 VALUES(1, 6);
+INSERT INTO alter_addcols_60 VALUES(1, 7);
+INSERT INTO alter_addcols_60 VALUES(1, 8);
+INSERT INTO alter_addcols_60 VALUES(1, 9);
+VACUUM FULL alter_addcols_60;
+DELETE FROM alter_addcols_60;
+ALTER TABLE alter_addcols_60 ALTER COLUMN b SET DATA TYPE int;
+SELECT COUNT(*) FROM alter_addcols_60;
+SELECT * FROM alter_addcols_60;
+-- testcase 1.5: the rows within cu is 17
+TRUNCATE TABLE alter_addcols_60;
+INSERT INTO alter_addcols_60 VALUES(1, 1);
+INSERT INTO alter_addcols_60 VALUES(1, 2);
+INSERT INTO alter_addcols_60 VALUES(1, 3);
+INSERT INTO alter_addcols_60 VALUES(1, 4);
+INSERT INTO alter_addcols_60 VALUES(1, 5);
+INSERT INTO alter_addcols_60 VALUES(1, 6);
+INSERT INTO alter_addcols_60 VALUES(1, 7);
+INSERT INTO alter_addcols_60 VALUES(1, 8);
+INSERT INTO alter_addcols_60 VALUES(1, 9);
+INSERT INTO alter_addcols_60 VALUES(1, 10);
+INSERT INTO alter_addcols_60 VALUES(1, 11);
+INSERT INTO alter_addcols_60 VALUES(1, 12);
+INSERT INTO alter_addcols_60 VALUES(1, 13);
+INSERT INTO alter_addcols_60 VALUES(1, 14);
+INSERT INTO alter_addcols_60 VALUES(1, 15);
+INSERT INTO alter_addcols_60 VALUES(1, 16);
+INSERT INTO alter_addcols_60 VALUES(1, 17);
+VACUUM FULL alter_addcols_60;
+DELETE FROM alter_addcols_60;
+ALTER TABLE alter_addcols_60 ALTER COLUMN b SET DATA TYPE varchar(100);
+SELECT COUNT(*) FROM alter_addcols_60;
+SELECT * FROM alter_addcols_60;
+-- testcase 1.5: the rows within cu is 64
+TRUNCATE TABLE alter_addcols_60;
+INSERT INTO alter_addcols_60 VALUES(1, 2);
+INSERT INTO alter_addcols_60 SELECT * FROM alter_addcols_60;
+INSERT INTO alter_addcols_60 SELECT * FROM alter_addcols_60;
+INSERT INTO alter_addcols_60 SELECT * FROM alter_addcols_60;
+INSERT INTO alter_addcols_60 SELECT * FROM alter_addcols_60;
+INSERT INTO alter_addcols_60 SELECT * FROM alter_addcols_60;
+INSERT INTO alter_addcols_60 SELECT * FROM alter_addcols_60;
+VACUUM FULL alter_addcols_60;
+DELETE FROM alter_addcols_60;
+ALTER TABLE alter_addcols_60 ALTER COLUMN b SET DATA TYPE int;
+SELECT COUNT(*) FROM alter_addcols_60;
+SELECT * FROM alter_addcols_60;
+-- testcase 1.5: the rows within cu is 65
+TRUNCATE TABLE alter_addcols_60;
+INSERT INTO alter_addcols_60 VALUES(1, 2);
+INSERT INTO alter_addcols_60 SELECT * FROM alter_addcols_60;
+INSERT INTO alter_addcols_60 SELECT * FROM alter_addcols_60;
+INSERT INTO alter_addcols_60 SELECT * FROM alter_addcols_60;
+INSERT INTO alter_addcols_60 SELECT * FROM alter_addcols_60;
+INSERT INTO alter_addcols_60 SELECT * FROM alter_addcols_60;
+INSERT INTO alter_addcols_60 SELECT * FROM alter_addcols_60;
+INSERT INTO alter_addcols_60 VALUES(1, 3);
+VACUUM FULL alter_addcols_60;
+DELETE FROM alter_addcols_60;
+ALTER TABLE alter_addcols_60 ALTER COLUMN b SET DATA TYPE varchar(100);
+SELECT COUNT(*) FROM alter_addcols_60;
+SELECT * FROM alter_addcols_60;
+-- testcase 1.5: the rows within cu is 73
+TRUNCATE TABLE alter_addcols_60;
+INSERT INTO alter_addcols_60 VALUES(1, 2);
+INSERT INTO alter_addcols_60 SELECT * FROM alter_addcols_60;
+INSERT INTO alter_addcols_60 SELECT * FROM alter_addcols_60;
+INSERT INTO alter_addcols_60 SELECT * FROM alter_addcols_60;
+INSERT INTO alter_addcols_60 SELECT * FROM alter_addcols_60;
+INSERT INTO alter_addcols_60 SELECT * FROM alter_addcols_60;
+INSERT INTO alter_addcols_60 SELECT * FROM alter_addcols_60;
+INSERT INTO alter_addcols_60 VALUES(1, 1);
+INSERT INTO alter_addcols_60 VALUES(1, 2);
+INSERT INTO alter_addcols_60 VALUES(1, 3);
+INSERT INTO alter_addcols_60 VALUES(1, 4);
+INSERT INTO alter_addcols_60 VALUES(1, 5);
+INSERT INTO alter_addcols_60 VALUES(1, 6);
+INSERT INTO alter_addcols_60 VALUES(1, 7);
+INSERT INTO alter_addcols_60 VALUES(1, 8);
+INSERT INTO alter_addcols_60 VALUES(1, 9);
+VACUUM FULL alter_addcols_60;
+DELETE FROM alter_addcols_60;
+ALTER TABLE alter_addcols_60 ALTER COLUMN b SET DATA TYPE int;
+SELECT COUNT(*) FROM alter_addcols_60;
+SELECT * FROM alter_addcols_60;
+DROP TABLE alter_addcols_60;
+
+-- char,char(n),varchar(n),integer
+CREATE TABLE alter_addcols_61(id1 integer, mychar char, name char(5), name2 varchar(5)) WITH( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_61 VALUES(1,'1','12','1234');
+INSERT INTO alter_addcols_61 VALUES(1,'a','ab','abcd');
+SELECT * FROM alter_addcols_61 order by 1, 2;
+\d+ alter_addcols_61;
+
+--can't alter distributed key
+ALTER TABLE alter_addcols_61 ALTER id1 TYPE char;
+
+-- CHAR->INT, failed
+ALTER TABLE alter_addcols_61 ALTER mychar TYPE int;
+
+-- char(n) extended
+ALTER TABLE alter_addcols_61 ALTER name TYPE char(10);
+\d+ alter_addcols_61;
+SELECT * FROM alter_addcols_61 order by 1, 2;
+
+--test altered column char extended
+UPDATE alter_addcols_61 SET name = 'abcdefg' WHERE id1=2;
+SELECT * FROM alter_addcols_61 order by 1, 2;
+UPDATE alter_addcols_61 SET name = 'abcdefg' WHERE mychar='a';
+SELECT * FROM alter_addcols_61;
+DELETE FROM alter_addcols_61 WHERE mychar='a';
+SELECT * FROM alter_addcols_61 order by 1, 2;
+
+-- char->int, succeed
+ALTER TABLE alter_addcols_61 ALTER COLUMN mychar SET DATA TYPE int;
+SELECT * FROM alter_addcols_61 order by 1, 2;
+
+-- int-->char after deleting
+INSERT INTO alter_addcols_61 VALUES (1, 3, 'cc', 'dd');
+INSERT INTO alter_addcols_61 VALUES (1, 4, '34', 'dd');
+DELETE FROM alter_addcols_61 WHERE name = 'cc';
+ALTER TABLE alter_addcols_61 ALTER COLUMN name SET DATA TYPE int;
+SELECT * FROM alter_addcols_61 order by 1, 2;
+-- test altered column char->int, can't insert succeed
+INSERT INTO alter_addcols_61 VALUES(1, 'b', 'abcdef', '1234');
+-- varchar(n) extended
+ALTER TABLE alter_addcols_61 ALTER name2 TYPE varchar(20);
+\d+ alter_addcols_61;
+SELECT * FROM alter_addcols_61 order by 1, 2;
+
+ALTER TABLE alter_addcols_61 ALTER name TYPE varchar(20);
+INSERT INTO alter_addcols_61 VALUES(1, 3, 'abcdef', '1234567');
+SELECT * FROM alter_addcols_61 order by 1, 2;
+DROP TABLE alter_addcols_61;
+
+-- test DELETE
+CREATE TABLE alter_addcols_62(a int, b int) WITH ( orientation = orc)tablespace hdfs_ts;
+TRUNCATE TABLE alter_addcols_62;
+INSERT INTO alter_addcols_62 VALUES(1, 1);
+INSERT INTO alter_addcols_62 VALUES(1, 2);
+INSERT INTO alter_addcols_62 VALUES(1, 3);
+INSERT INTO alter_addcols_62 VALUES(1, 4);
+INSERT INTO alter_addcols_62 VALUES(1, 5);
+INSERT INTO alter_addcols_62 VALUES(1, 6);
+INSERT INTO alter_addcols_62 VALUES(1, 7);
+INSERT INTO alter_addcols_62 VALUES(1, 8);
+INSERT INTO alter_addcols_62 VALUES(1, 9);
+VACUUM FULL alter_addcols_62;
+DELETE FROM alter_addcols_62 WHERE b%3 = 0;
+ALTER TABLE alter_addcols_62 ALTER COLUMN b SET DATA TYPE char;
+SELECT COUNT(*) FROM alter_addcols_62;
+SELECT * FROM alter_addcols_62;
+DROP TABLE alter_addcols_62;
+
+-- test cudesc table with toast tuples.
+CREATE TABLE alter_addcols_63(a int, b int) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_63 VALUES(1, 1), (1,2), (1, 3), (1, 4), (1, 5);
+INSERT INTO alter_addcols_63 SELECT * FROM alter_addcols_63;
+INSERT INTO alter_addcols_63 SELECT * FROM alter_addcols_63;
+INSERT INTO alter_addcols_63 SELECT * FROM alter_addcols_63;
+INSERT INTO alter_addcols_63 SELECT * FROM alter_addcols_63;
+INSERT INTO alter_addcols_63 SELECT * FROM alter_addcols_63;
+INSERT INTO alter_addcols_63 SELECT * FROM alter_addcols_63;
+INSERT INTO alter_addcols_63 SELECT * FROM alter_addcols_63;
+INSERT INTO alter_addcols_63 SELECT * FROM alter_addcols_63;
+INSERT INTO alter_addcols_63 SELECT * FROM alter_addcols_63;
+INSERT INTO alter_addcols_63 SELECT * FROM alter_addcols_63;
+INSERT INTO alter_addcols_63 SELECT * FROM alter_addcols_63;
+INSERT INTO alter_addcols_63 SELECT * FROM alter_addcols_63;
+INSERT INTO alter_addcols_63 SELECT * FROM alter_addcols_63;
+INSERT INTO alter_addcols_63 SELECT * FROM alter_addcols_63;
+INSERT INTO alter_addcols_63 VALUES(1, 6), (1, 7), (1, 8);
+INSERT INTO alter_addcols_63 SELECT * FROM alter_addcols_63;
+VACUUM FULL alter_addcols_63;
+DELETE FROM alter_addcols_63 WHERE b > 6;
+DELETE FROM alter_addcols_63 WHERE b = 2;
+ALTER TABLE alter_addcols_63 ALTER COLUMN b SET DATA TYPE char;
+SELECT COUNT(*) FROM alter_addcols_63;
+SELECT DISTINCT * FROM alter_addcols_63 ORDER BY b;
+ALTER TABLE alter_addcols_63 ALTER COLUMN b SET DATA TYPE int;
+SELECT COUNT(*) FROM alter_addcols_63;
+SELECT DISTINCT * FROM alter_addcols_63 ORDER BY b;
+ALTER TABLE alter_addcols_63 ALTER COLUMN b SET DATA TYPE char;
+SELECT COUNT(*) FROM alter_addcols_63;
+SELECT DISTINCT * FROM alter_addcols_63 ORDER BY b;
+ALTER TABLE alter_addcols_63 ALTER COLUMN b SET DATA TYPE int;
+SELECT COUNT(*) FROM alter_addcols_63;
+SELECT DISTINCT * FROM alter_addcols_63 ORDER BY b;
+ALTER TABLE alter_addcols_63 ALTER COLUMN b SET DATA TYPE char;
+SELECT COUNT(*) FROM alter_addcols_63;
+SELECT DISTINCT * FROM alter_addcols_63 ORDER BY b;
+DROP TABLE alter_addcols_63;
+
+-- test the FULL NULL cu
+CREATE TABLE alter_addcols_64(a int, b int) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_64 VALUES(1), (1), (1), (1), (1);
+VACUUM FULL alter_addcols_64;
+ALTER TABLE alter_addcols_64 ALTER COLUMN b SET DATA TYPE char;
+SELECT COUNT(*) FROM alter_addcols_64;
+SELECT DISTINCT * FROM alter_addcols_64;
+DROP TABLE alter_addcols_64;
+
+-- test THE SAME VALUE cu
+-- case 1.1: char -> int
+CREATE TABLE alter_addcols_65(a int, b char) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_65 VALUES(1, '2'), (1, '2'), (1, '2'), (1, '2'), (1, '2');
+VACUUM FULL alter_addcols_65;
+ALTER TABLE alter_addcols_65 ALTER COLUMN b SET DATA TYPE int;
+SELECT DISTINCT * FROM alter_addcols_65;
+DROP TABLE alter_addcols_65;
+
+CREATE TABLE alter_addcols_65(a int, b char) WITH ( orientation = orc)tablespace hdfs_ts;
+TRUNCATE TABLE alter_addcols_65;
+INSERT INTO alter_addcols_65 VALUES(1, 'a'), (1, 'a'), (1, 'a'), (1, 'a'), (1, 'a');
+VACUUM FULL alter_addcols_65;
+ALTER TABLE alter_addcols_65 ALTER COLUMN b SET DATA TYPE int;
+SELECT DISTINCT * FROM alter_addcols_65;
+\d+ alter_addcols_65
+DROP TABLE alter_addcols_65;
+-- case 1.2  int  -> char
+CREATE TABLE alter_addcols_66(a int, b int) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_66 VALUES(1, 6), (1, 6), (1, 6), (1, 6), (1, 6);
+VACUUM FULL alter_addcols_66;
+ALTER TABLE alter_addcols_66 ALTER COLUMN b SET DATA TYPE char;
+SELECT DISTINCT * FROM alter_addcols_66;
+DROP TABLE alter_addcols_66;
+
+CREATE TABLE alter_addcols_66(a int, b int) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_66 VALUES(1, 6666), (1, 6666), (1, 6666), (1, 6666), (1, 6666);
+VACUUM FULL alter_addcols_66;
+ALTER TABLE alter_addcols_66 ALTER COLUMN b SET DATA TYPE char;
+SELECT DISTINCT * FROM alter_addcols_66;
+DROP TABLE alter_addcols_66;
+
+-- case 1.3  int  -> varchar(10)
+CREATE TABLE alter_addcols_67(a int, b int) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_67 VALUES(1, 6), (1, 6), (1, 6), (1, 6), (1, 6);
+VACUUM FULL alter_addcols_67;
+ALTER TABLE alter_addcols_67 ALTER COLUMN b SET DATA TYPE varchar(10);
+SELECT DISTINCT * FROM alter_addcols_67;
+DROP TABLE alter_addcols_67;
+
+CREATE TABLE alter_addcols_67(a int, b int) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_67 VALUES(1, 2147483647), (1, 2147483647), (1, 2147483647), (1, 2147483647), (1, 2147483647);
+VACUUM FULL alter_addcols_67;
+ALTER TABLE alter_addcols_67 ALTER COLUMN b SET DATA TYPE varchar(10);
+SELECT DISTINCT * FROM alter_addcols_67;
+DROP TABLE alter_addcols_67;
+
+CREATE TABLE alter_addcols_67(a int, b int) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_67 VALUES(1, 2147483647), (1, 2147483647), (1, 2147483647), (1, 2147483647), (1, 2147483647);
+VACUUM FULL alter_addcols_67;
+ALTER TABLE alter_addcols_67 ALTER COLUMN b SET DATA TYPE varchar(9);
+SELECT DISTINCT * FROM alter_addcols_67;
+DROP TABLE alter_addcols_67;
+
+-- case 1.4  varchar(10) -> int
+CREATE TABLE alter_addcols_68(a int, b varchar(10)) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_68 VALUES(1, '2147483647'), (1, '2147483647'), (1, '2147483647'), (1, '2147483647'), (1, '2147483647');
+VACUUM FULL alter_addcols_68;
+ALTER TABLE alter_addcols_68 ALTER COLUMN b SET DATA TYPE int;
+SELECT DISTINCT * FROM alter_addcols_68;
+DROP TABLE alter_addcols_68;
+
+CREATE TABLE alter_addcols_68(a int, b varchar(10)) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_68 VALUES(1, '3147483647'), (1, '3147483647'), (1, '3147483647'), (1, '3147483647'), (1, '3147483647');
+VACUUM FULL alter_addcols_68;
+ALTER TABLE alter_addcols_68 ALTER COLUMN b SET DATA TYPE int;
+SELECT DISTINCT * FROM alter_addcols_68;
+DROP TABLE alter_addcols_68;
+
+-- case 1.5  varchar(40) <-> varchar(50)
+CREATE TABLE alter_addcols_69(a int, b varchar(40)) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_69 VALUES(1, '3147483647'), (1, '3147483647'), (1, '3147483647'), (1, '3147483647'), (1, '3147483647');
+VACUUM FULL alter_addcols_69;
+ALTER TABLE alter_addcols_69 ALTER COLUMN b SET DATA TYPE varchar(50);
+SELECT DISTINCT * FROM alter_addcols_69;
+
+ALTER TABLE alter_addcols_69 ALTER COLUMN b SET DATA TYPE varchar(40);
+SELECT DISTINCT * FROM alter_addcols_69;
+
+INSERT INTO alter_addcols_69 VALUES(1, '0123456789012345678901234567890123456789');
+ALTER TABLE alter_addcols_69 ALTER COLUMN b SET DATA TYPE varchar(50);
+SELECT DISTINCT * FROM alter_addcols_69 ORDER BY b;
+
+INSERT INTO alter_addcols_69 VALUES(1, '01234567890123456789012345678901234567890123456789');
+ALTER TABLE alter_addcols_69 ALTER COLUMN b SET DATA TYPE varchar(40);
+SELECT DISTINCT * FROM alter_addcols_69 ORDER BY b;
+
+DROP TABLE alter_addcols_69;
+
+-- test DELETED && NULL tuple within one cu
+CREATE TABLE alter_addcols_70(a int, b int) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_70 VALUES(1), (1), (1), (1), (1);
+INSERT INTO alter_addcols_70 VALUES(1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6);
+VACUUM FULL alter_addcols_70;
+DELETE FROM alter_addcols_70 WHERE b%2 = 0;
+ALTER TABLE alter_addcols_70 ALTER COLUMN b SET DATA TYPE char;
+SELECT COUNT(*) FROM alter_addcols_70;
+SELECT DISTINCT * FROM alter_addcols_70 ORDER BY b;
+DROP TABLE alter_addcols_70;
+
+-- test only NULL value within one cu
+CREATE TABLE alter_addcols_71(a int, b int) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_71 VALUES(1), (1), (1), (1), (1);
+INSERT INTO alter_addcols_71 VALUES(1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6);
+VACUUM FULL alter_addcols_71;
+ALTER TABLE alter_addcols_71 ALTER COLUMN b SET DATA TYPE char;
+SELECT COUNT(*) FROM alter_addcols_71;
+SELECT DISTINCT * FROM alter_addcols_71 ORDER BY b;
+DROP TABLE alter_addcols_71;
+
+-- test USING expression 
+-- 1.1 USING expression about only the column to be changed.
+CREATE TABLE alter_addcols_72(a int, b int) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_72 VALUES(1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6); 
+VACUUM FULL alter_addcols_72;
+ALTER TABLE alter_addcols_72 ALTER COLUMN b SET DATA TYPE char USING b - 1;
+SELECT COUNT(*) FROM alter_addcols_72;
+SELECT DISTINCT * FROM alter_addcols_72 ORDER BY b;
+DROP TABLE alter_addcols_72;
+-- 1.2 USING expression can return NULL value.
+CREATE TABLE alter_addcols_73(a int, b int) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_73 VALUES(1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6); 
+VACUUM FULL alter_addcols_73;
+ALTER TABLE alter_addcols_73 ALTER COLUMN b SET DATA TYPE char USING NULLIF(b, 2);
+SELECT COUNT(*) FROM alter_addcols_73;
+SELECT DISTINCT * FROM alter_addcols_73 ORDER BY b;
+DROP TABLE alter_addcols_73;
+-- 1.3 USING expression including the column to be changed and the other column.
+CREATE TABLE alter_addcols_74(a int, b int) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_74 VALUES(1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6); 
+VACUUM FULL alter_addcols_74;
+ALTER TABLE alter_addcols_74 ALTER COLUMN b SET DATA TYPE char USING b + a;
+SELECT COUNT(*) FROM alter_addcols_74;
+SELECT DISTINCT * FROM alter_addcols_74 ORDER BY b;
+DROP TABLE alter_addcols_74;
+-- 1.4 USING expression retrun null value, but it violate the NOT NULL constraint.
+CREATE TABLE alter_addcols_75(a int, b int not null) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_75 VALUES(1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6); 
+VACUUM FULL alter_addcols_75;
+ALTER TABLE alter_addcols_75 ALTER COLUMN b SET DATA TYPE char USING NULLIF(b, 2);
+SELECT COUNT(*) FROM alter_addcols_75;
+SELECT DISTINCT * FROM alter_addcols_75 ORDER BY b;
+DROP TABLE alter_addcols_75;
+-- 1.5 USING expression return null value, but it violate the NOT NULL constraint for the same value cu.
+CREATE TABLE alter_addcols_76(a int, b int not null) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_76 VALUES(1, 2), (1, 2), (1, 2), (1, 2), (1, 2), (1, 2); 
+VACUUM FULL alter_addcols_76;
+ALTER TABLE alter_addcols_76 ALTER COLUMN b SET DATA TYPE char USING NULLIF(b, 2);
+SELECT COUNT(*) FROM alter_addcols_76;
+SELECT DISTINCT * FROM alter_addcols_76 ORDER BY b;
+DROP TABLE alter_addcols_76;
+-- 1.6 USING expression return the string whose length is greater than 32.
+CREATE TABLE alter_addcols_77(a int, b int not null) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_77 VALUES(1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6); 
+VACUUM FULL alter_addcols_77;
+ALTER TABLE alter_addcols_77 ALTER COLUMN b SET DATA TYPE varchar(40) USING b::char || 'ldiloveyouhelloworldiloveyouhelloworl';
+SELECT COUNT(*) FROM alter_addcols_77;
+SELECT DISTINCT * FROM alter_addcols_77 ORDER BY b;
+DROP TABLE alter_addcols_77;
+
+CREATE TABLE alter_addcols_78(a int, b int not null) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_78 VALUES(1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6); 
+VACUUM FULL alter_addcols_78;
+ALTER TABLE alter_addcols_78 ALTER COLUMN b SET DATA TYPE varchar(40) USING 'ldiloveyouhelloworldiloveyouhelloworl';
+SELECT COUNT(*) FROM alter_addcols_78;
+SELECT DISTINCT * FROM alter_addcols_78 ORDER BY b;
+DROP TABLE alter_addcols_78;
+
+-- forbit alter the same column within a sql clause.
+CREATE TABLE alter_addcols_79(a int, b int) WITH ( orientation = orc)tablespace hdfs_ts;
+ALTER TABLE alter_addcols_79 ALTER COLUMN b SET DATA TYPE varchar(40) USING 'ldiloveyouhelloworldiloveyouhelloworl', ALTER COLUMN b SET DATA TYPE bigint;
+ALTER TABLE alter_addcols_79 ALTER COLUMN b SET DATA TYPE varchar(40) USING 'ldiloveyouhelloworldiloveyouhelloworl', ALTER COLUMN b SET DATA TYPE varchar(40) USING 'ldiloveyouhelloworldiloveyouhelloworl';
+DROP TABLE alter_addcols_79;
+
+-- test multiple SET DATA TYPE within one sql clause.
+CREATE TABLE alter_addcols_80(a int, b int, c varchar(10)) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_80 VALUES(1, 1, 'hello'), (1,2, 'love'), (1, 3, 'pig'), (1, 4, 'dog'), (1, 5, 'kitty');
+INSERT INTO alter_addcols_80 SELECT * FROM alter_addcols_80;
+INSERT INTO alter_addcols_80 SELECT * FROM alter_addcols_80;
+INSERT INTO alter_addcols_80 SELECT * FROM alter_addcols_80;
+INSERT INTO alter_addcols_80 SELECT * FROM alter_addcols_80;
+INSERT INTO alter_addcols_80 SELECT * FROM alter_addcols_80;
+INSERT INTO alter_addcols_80 SELECT * FROM alter_addcols_80;
+INSERT INTO alter_addcols_80 SELECT * FROM alter_addcols_80;
+INSERT INTO alter_addcols_80 SELECT * FROM alter_addcols_80;
+INSERT INTO alter_addcols_80 SELECT * FROM alter_addcols_80;
+INSERT INTO alter_addcols_80 SELECT * FROM alter_addcols_80;
+INSERT INTO alter_addcols_80 SELECT * FROM alter_addcols_80;
+INSERT INTO alter_addcols_80 SELECT * FROM alter_addcols_80;
+INSERT INTO alter_addcols_80 SELECT * FROM alter_addcols_80;
+INSERT INTO alter_addcols_80 SELECT * FROM alter_addcols_80;
+INSERT INTO alter_addcols_80 VALUES(1, 6), (1, 7), (1, 8);
+INSERT INTO alter_addcols_80 SELECT * FROM alter_addcols_80;
+VACUUM FULL alter_addcols_80;
+DELETE FROM alter_addcols_80 WHERE b > 6;
+DELETE FROM alter_addcols_80 WHERE b = 2;
+ALTER TABLE alter_addcols_80 ALTER COLUMN b SET DATA TYPE varchar(7) USING b::char || 'zcw', ALTER COLUMN c SET DATA TYPE varchar(8);
+SELECT COUNT(*) FROM alter_addcols_80;
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '1zcw';
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '2zcw';
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '3zcw';
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '4zcw';
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '5zcw';
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '6zcw';
+SELECT DISTINCT * FROM alter_addcols_80 ORDER BY b;
+ALTER TABLE alter_addcols_80 ALTER COLUMN b SET DATA TYPE varchar(10), ALTER COLUMN c SET DATA TYPE varchar(10);
+SELECT COUNT(*) FROM alter_addcols_80;
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '1zcw';
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '2zcw';
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '3zcw';
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '4zcw';
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '5zcw';
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '6zcw';
+SELECT DISTINCT * FROM alter_addcols_80 ORDER BY b;
+DROP TABLE alter_addcols_80;
+
+-- test rollback
+CREATE TABLE alter_addcols_81(a int, b int, c varchar(10)) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_81 VALUES(1, 1, 'hello'), (1,2, 'love'), (1, 3, 'pig'), (1, 4, 'dog'), (1, 5, 'kitty');
+INSERT INTO alter_addcols_81 SELECT * FROM alter_addcols_81;
+INSERT INTO alter_addcols_81 SELECT * FROM alter_addcols_81;
+INSERT INTO alter_addcols_81 SELECT * FROM alter_addcols_81;
+INSERT INTO alter_addcols_81 SELECT * FROM alter_addcols_81;
+INSERT INTO alter_addcols_81 SELECT * FROM alter_addcols_81;
+INSERT INTO alter_addcols_81 SELECT * FROM alter_addcols_81;
+INSERT INTO alter_addcols_81 SELECT * FROM alter_addcols_81;
+INSERT INTO alter_addcols_81 SELECT * FROM alter_addcols_81;
+INSERT INTO alter_addcols_81 SELECT * FROM alter_addcols_81;
+INSERT INTO alter_addcols_81 SELECT * FROM alter_addcols_81;
+INSERT INTO alter_addcols_81 SELECT * FROM alter_addcols_81;
+INSERT INTO alter_addcols_81 SELECT * FROM alter_addcols_81;
+INSERT INTO alter_addcols_81 SELECT * FROM alter_addcols_81;
+INSERT INTO alter_addcols_81 SELECT * FROM alter_addcols_81;
+INSERT INTO alter_addcols_81 VALUES(1, 6), (1, 7), (1, 8);
+INSERT INTO alter_addcols_81 SELECT * FROM alter_addcols_81;
+VACUUM FULL alter_addcols_81;
+DELETE FROM alter_addcols_81 WHERE b > 6;
+DELETE FROM alter_addcols_81 WHERE b = 2;
+START TRANSACTION;
+ALTER TABLE alter_addcols_81 ALTER COLUMN b SET DATA TYPE varchar(7) USING b::char || 'zcw', ALTER COLUMN c SET DATA TYPE varchar(8);
+SELECT COUNT(*) FROM alter_addcols_81;
+SELECT DISTINCT * FROM alter_addcols_81 ORDER BY b;
+\d+ alter_addcols_81
+ROLLBACK;
+\d+ alter_addcols_81
+SELECT COUNT(*) FROM alter_addcols_81;
+SELECT DISTINCT * FROM alter_addcols_81 ORDER BY b;
+DROP TABLE alter_addcols_81;
+-- test DEFAULT constraint value can be changed succssfully.
+CREATE TABLE alter_addcols_82(a int, b int, c varchar(10) DEFAULT 'abcd') WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_82 VALUES (1, 2, '12'), (1, 3, '13'), (1, 4, '14');
+VACUUM FULL alter_addcols_82;
+ALTER TABLE alter_addcols_82 ALTER COLUMN c SET DATA TYPE int;
+\d+ alter_addcols_82
+SELECT COUNT(*) FROM alter_addcols_82;
+SELECT DISTINCT * FROM alter_addcols_82 ORDER BY b;
+INSERT INTO alter_addcols_82 VALUES (1, 5);
+ALTER TABLE alter_addcols_82 ALTER COLUMN c DROP DEFAULT;
+DROP TABLE alter_addcols_82;
+
+-- test PARTIAL CLUSTER KEY constraint
+CREATE TABLE alter_addcols_83(a int, b int, c varchar(10), PARTIAL CLUSTER KEY(b)) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_83 VALUES(1, 1, 'hello'), (1,2, 'love'), (1, 3, 'pig'), (1, 4, 'dog'), (1, 5, 'kitty');
+INSERT INTO alter_addcols_83 SELECT * FROM alter_addcols_83;
+INSERT INTO alter_addcols_83 SELECT * FROM alter_addcols_83;
+INSERT INTO alter_addcols_83 SELECT * FROM alter_addcols_83;
+INSERT INTO alter_addcols_83 SELECT * FROM alter_addcols_83;
+INSERT INTO alter_addcols_83 SELECT * FROM alter_addcols_83;
+INSERT INTO alter_addcols_83 SELECT * FROM alter_addcols_83;
+VACUUM FULL alter_addcols_83;
+SELECT COUNT(*) FROM alter_addcols_83;
+SELECT DISTINCT * FROM alter_addcols_83 ORDER BY b;
+\d+ alter_addcols_83;
+ALTER TABLE alter_addcols_83 ALTER COLUMN b SET DATA TYPE varchar(5);
+\d+ alter_addcols_83;
+VACUUM FULL alter_addcols_83;
+SELECT COUNT(*) FROM alter_addcols_83;
+SELECT DISTINCT * FROM alter_addcols_83 ORDER BY b;
+DROP TABLE alter_addcols_83;
+
+--
+-- Alter type for patitioned table
+--
+CREATE TABLE alter_addcols_84(c1 int, c2 int, c3 char(10), c4 varchar(8)) with ( orientation = orc ) tablespace hdfs_ts distribute by hash(c1) partition by values(c2);
+INSERT INTO alter_addcols_84 VALUES(1,1,'123','1234');
+INSERT INTO alter_addcols_84 VALUES(2,4,'1234','12345');
+INSERT INTO alter_addcols_84 VALUES(3,9,'1234','123456');
+INSERT INTO alter_addcols_84 VALUES(4,5,'abc','abcde');
+SELECT * FROM alter_addcols_84 ORDER BY c1;
+
+-- disallow alter partitioned key's type
+ALTER TABLE alter_addcols_84 ALTER c2 TYPE char;
+
+-- char(n)->int, varchar(n)->int
+ALTER TABLE alter_addcols_84 ALTER c3 TYPE int;  --failed
+ALTER TABLE alter_addcols_84 ALTER c4 type int;  --failed
+DELETE FROM alter_addcols_84 WHERE c1=4;
+ALTER TABLE alter_addcols_84 ALTER c3 TYPE int;  --succeed
+ALTER TABLE alter_addcols_84 ALTER c4 TYPE int;  --succeed
+\d+ alter_addcols_84;
+
+INSERT INTO alter_addcols_84 VALUES(5,7,'a','ab');  --failed
+
+-- int->smallint, [set data]type
+ALTER TABLE alter_addcols_84 ALTER c3 SET DATA TYPE smallint;  --succeed
+ALTER TABLE alter_addcols_84 ALTER c4 SET DATA TYPE smallint;  --failed
+
+-- int->char(n)
+ALTER TABLE alter_addcols_84 ALTER c4 TYPE char(10);
+INSERT INTO alter_addcols_84 VALUES(5,8,10,'abc');
+SELECT * FROM alter_addcols_84 ORDER BY c1;
+
+-- char(n) cut
+ALTER TABLE alter_addcols_84 ATLER c4 TYPE char(5);  --failed
+alter TABLE alter_addcols_84 ALTER c4 TYPE char(7);  --succeed
+\d+ alter_addcols_84;
+
+-- char(n) extended
+ALTER TABLE alter_addcols_84 ALTER c4 TYPE char(12);
+INSERT INTO alter_addcols_84 VALUES(6,5,23,'abcdefgh');
+SELECT * FROM alter_addcols_84 ORDER BY c1;
+
+--multiple column altered
+ALTER TABLE alter_addcols_84 ALTER c3 TYPE char(6), ALTER c4 TYPE char(10);  --succeed
+\d+ alter_addcols_84;
+
+ALTER TABLE alter_addcols_84 ALTER c3 TYPE int, ALTER c4 TYPE int;  --failed
+\d+ alter_addcols_84;
+
+-- add column mix alter type
+ALTER TABLE alter_addcols_84 ADD COLUMN c5 int DEFAULT 3, ALTER c4 TYPE varchar(10);
+\d+ alter_addcols_84;
+
+ALTER TABLE alter_addcols_84 ADD COLUMN c6 CHAR DEFAULT 'a', ALTER c5 TYPE char(2), ADD COLUMN c7 int, ALTER c6 TYPE int;
+ALTER TABLE alter_addcols_84 ADD COLUMN c6 CHAR DEFAULT 'a', ALTER c5 TYPE char(2), ADD COLUMN c7 int, ALTER c5 TYPE int;
+ALTER TABLE alter_addcols_84 ADD COLUMN c6 CHAR DEFAULT 'a', ALTER c5 TYPE char(2), ADD COLUMN c7 int, ALTER c4 TYPE varchar(12);
+\d+ alter_addcols_84;
+SELECT * FROM alter_addcols_84 ORDER BY c1;
+DROP TABLE alter_addcols_84;
+
+-- ALTER TABLE ALTER COLUMN DROP / SET DEFAULT constraint
+CREATE TABLE alter_addcols_85 ( a int , b int default '5') WITH ( orientation = orc)tablespace hdfs_ts; 
+ALTER TABLE alter_addcols_85 ALTER COLUMN b DROP DEFAULT;
+\d+ alter_addcols_85
+-- testcase: cann't refer to any other column
+ALTER TABLE alter_addcols_85 ALTER COLUMN b SET DEFAULT 10 + a;
+ALTER TABLE alter_addcols_85 ALTER COLUMN b SET DEFAULT 15;
+\d+ alter_addcols_85
+INSERT INTO alter_addcols_85 VALUES(1), (2), (3), (4);
+SELECT * FROM alter_addcols_85 ORDER BY a;
+DROP TABLE alter_addcols_85;
+
+CREATE TABLE alter_addcols_86 ( a int , b int) WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_86 VALUES(1), (2), (3), (4);
+ALTER TABLE alter_addcols_86 ALTER COLUMN b SET DEFAULT 25;
+INSERT INTO alter_addcols_86 VALUES(5), (6), (7), (8);
+SELECT * FROM alter_addcols_86 ORDER BY a;
+DROP TABLE alter_addcols_86;
+
+CREATE TABLE alter_addcols_87 ( a int , b varchar(10) default 'abcd') WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_87 VALUES(1, '1'), (2, '2'), (3, '3'), (4, '4');
+ALTER TABLE alter_addcols_87 ALTER COLUMN b SET DATA TYPE int;
+SELECT DISTINCT * FROM alter_addcols_87 ORDER BY a;
+-- error happens because the DEFAULT expression cannot be converted into INT datatype.
+INSERT INTO alter_addcols_87 VALUES (5);
+ALTER TABLE alter_addcols_87 ALTER COLUMN b DROP DEFAULT;
+ALTER TABLE alter_addcols_87 ALTER COLUMN b SET DEFAULT 5;
+INSERT INTO alter_addcols_87 VALUES (5);
+SELECT DISTINCT * FROM alter_addcols_87 ORDER BY a;
+DROP TABLE alter_addcols_87;
+
+-- testcase: change DEFAULT constraint directly, without DROP DEFAULT step.
+CREATE TABLE alter_addcols_88 ( a int , b varchar(10) default 'abcd') WITH ( orientation = orc)tablespace hdfs_ts;
+INSERT INTO alter_addcols_88 VALUES(1, '1'), (2, '2'), (3, '3'), (4, '4');
+ALTER TABLE alter_addcols_88 ALTER COLUMN b SET DATA TYPE int;
+ALTER TABLE alter_addcols_88 ALTER COLUMN b SET DEFAULT 5;
+INSERT INTO alter_addcols_88 VALUES (5);
+SELECT DISTINCT * FROM alter_addcols_88 ORDER BY a;
+DROP TABLE alter_addcols_88;
+
+-- testcase: invalid cu cache
+CREATE TABLE alter_addcols_90 ( a int , b varchar(20) NOT NULL ) WITH ( orientation = orc ) tablespace hdfs_ts;
+INSERT INTO alter_addcols_90 VALUES( 1, 'helloworld');
+INSERT INTO alter_addcols_90 VALUES( 1, 'heorlhelld');
+INSERT INTO alter_addcols_90 VALUES( 1, 'worlddheor');
+VACUUM FULL alter_addcols_90;
+START TRANSACTION ; 
+SELECT * FROM alter_addcols_90 ORDER BY b;
+ALTER TABLE alter_addcols_90 ALTER COLUMN  b SET  DATA TYPE varchar(19);
+SELECT * FROM alter_addcols_90 ORDER BY b;
+COMMIT;
+DROP TABLE alter_addcols_90;
+
+CREATE TABLE alter_addcols_91 ( a int , c int, b varchar(50) not null);
+INSERT INTO alter_addcols_91 VALUES (1, 1, 'helloworldhelloworldhelloworldhelloworldhello');
+INSERT INTO alter_addcols_91 SELECT * FROM alter_addcols_91;
+INSERT INTO alter_addcols_91 SELECT * FROM alter_addcols_91;
+INSERT INTO alter_addcols_91 SELECT * FROM alter_addcols_91;
+INSERT INTO alter_addcols_91 SELECT * FROM alter_addcols_91;
+INSERT INTO alter_addcols_91 SELECT * FROM alter_addcols_91;
+INSERT INTO alter_addcols_91 SELECT * FROM alter_addcols_91;
+INSERT INTO alter_addcols_91 SELECT * FROM alter_addcols_91;
+INSERT INTO alter_addcols_91 SELECT * FROM alter_addcols_91;
+INSERT INTO alter_addcols_91 SELECT * FROM alter_addcols_91;
+INSERT INTO alter_addcols_91 SELECT * FROM alter_addcols_91;
+CREATE TABLE alter_addcols_92 ( a int , c int, b varchar(50) not null);
+INSERT INTO alter_addcols_92 VALUES (1, 2, 'zhangxuefuzhangxuefuzhangxuefuzhangxuefuzhang');
+INSERT INTO alter_addcols_92 SELECT * FROM alter_addcols_92;
+INSERT INTO alter_addcols_92 SELECT * FROM alter_addcols_92;
+INSERT INTO alter_addcols_92 SELECT * FROM alter_addcols_92;
+INSERT INTO alter_addcols_92 SELECT * FROM alter_addcols_92;
+INSERT INTO alter_addcols_92 SELECT * FROM alter_addcols_92;
+INSERT INTO alter_addcols_92 SELECT * FROM alter_addcols_92;
+INSERT INTO alter_addcols_92 SELECT * FROM alter_addcols_92;
+INSERT INTO alter_addcols_92 SELECT * FROM alter_addcols_92;
+INSERT INTO alter_addcols_92 SELECT * FROM alter_addcols_92;
+INSERT INTO alter_addcols_92 SELECT * FROM alter_addcols_92;
+CREATE TABLE alter_addcols_93 ( a int , c int, b varchar(50) not null ) WITH (orientation = orc)tablespace hdfs_ts;
+-- cu1 size > 1024
+INSERT INTO alter_addcols_93 SELECT * FROM alter_addcols_91;
+INSERT INTO alter_addcols_93 SELECT * FROM alter_addcols_92;
+-- delete the whole cu1
+DELETE FROM alter_addcols_93 WHERE c = 1;
+-- expect that the new data will use the cu1's space.
+ALTER TABLE alter_addcols_93 ALTER COLUMN b SET DATA TYPE varchar(49);
+ALTER TABLE alter_addcols_93 ALTER COLUMN b SET DATA TYPE varchar(48);
+-- expect the new data, but not the cu1's data.
+SELECT DISTINCT * FROM alter_addcols_93;
+ALTER TABLE alter_addcols_93 ALTER COLUMN b SET DATA TYPE varchar(49);
+ALTER TABLE alter_addcols_93 ALTER COLUMN b SET DATA TYPE varchar(48);
+-- expect the new data, but not the cu1's data.
+SELECT DISTINCT * FROM alter_addcols_93;
+ALTER TABLE alter_addcols_93 ALTER COLUMN b SET DATA TYPE varchar(49);
+ALTER TABLE alter_addcols_93 ALTER COLUMN b SET DATA TYPE varchar(48);
+-- expect the new data, but not the cu1's data.
+SELECT DISTINCT * FROM alter_addcols_93;
+DROP TABLE alter_addcols_91;
+DROP TABLE alter_addcols_92;
+DROP TABLE alter_addcols_93;
+
+-- test: estate var must be global
+CREATE TABLE alter_addcols_94 (
+c_tinyint  tinyint,
+c_smallint smallint,
+c_int integer,
+c_bigint   bigint,
+c_money    money,
+c_numeric   numeric,
+c_real      real,
+c_double double precision,
+c_decimal   decimal,
+c_varchar   varchar,
+c_char   char(30),
+c_nvarchar2  nvarchar2,
+c_text text,
+c_timestamp   timestamp with time zone,
+c_timestamptz timestamp without time zone,
+c_date     date,
+c_time     time without time zone,
+c_timetz   time with time zone,
+c_interval  interval,
+c_tinterval   tinterval,
+c_smalldatetime   smalldatetime,
+c_boolean  boolean,
+c_oid oid) with (orientation=orc) tablespace hdfs_ts;
+INSERT INTO alter_addcols_94 (c_varchar) VALUES(1);
+INSERT INTO alter_addcols_94 (c_varchar) VALUES(2);
+ALTER TABLE  IF EXISTS alter_addcols_94 MODIFY (c_varchar interval);
+SELECT c_varchar FROM alter_addcols_94;
+DROP TABLE alter_addcols_94;
+
+-- test: index is empty when table data will not be rewrited.
+CREATE TABLE alter_addcols_95 (id int , info varchar(1100) not null, info1 int) WITH (orientation=orc) tablespace hdfs_ts;
+CREATE INDEX idx95_1 ON alter_addcols_95 (info);
+INSERT INTO alter_addcols_95 VALUES (1,'aa',1),(2,'aa',2),(3,'aa',3),(4,4,4),(5,'aa',5);
+SELECT * FROM  alter_addcols_95 WHERE info='aa' ORDER BY 1, 3;
+ALTER TABLE alter_addcols_95 ALTER info TYPE varchar(1100);
+SELECT * FROM  alter_addcols_95 WHERE info='aa' ORDER BY 1, 3;
+DROP TABLE alter_addcols_95;
+
+CREATE TABLE alter_addcols_99 (id int , info varchar(1100) not null, info1 int) WITH (orientation=orc) tablespace hdfs_ts;
+CREATE INDEX idx99_1 ON alter_addcols_99 (info) LOCAL;
+INSERT INTO alter_addcols_99 VALUES (1,'aa',1),(2,'aa',2),(3,'aa',3),(4,4,4),(5,'aa',5);
+SELECT * FROM  alter_addcols_99 WHERE info='aa' ORDER BY 1, 3;
+ALTER TABLE alter_addcols_99 ALTER info TYPE varchar(1100);
+SELECT * FROM  alter_addcols_99 WHERE info='aa' ORDER BY 1, 3;
+DROP TABLE alter_addcols_99;
+
+-- successfull to handle the continuous two ALTER TABLE same action.
+CREATE TABLE alter_addcols_96 (id int , info varchar(1100) not null, info1 int) WITH (orientation=orc) tablespace hdfs_ts;
+CREATE INDEX idx96_1 ON alter_addcols_96 (info);
+INSERT INTO alter_addcols_96 VALUES (1,'aa',1),(2,'aa',2),(3,'aa',3),(4,4,4),(5,'aa',5);
+SELECT * FROM  alter_addcols_96 WHERE info='aa' ORDER BY 1, 3;
+ALTER TABLE alter_addcols_96 ALTER info TYPE varchar(1100);
+SELECT * FROM  alter_addcols_96 WHERE info='aa' ORDER BY 1, 3;
+ALTER TABLE alter_addcols_96 ALTER info TYPE varchar(1100);
+SELECT * FROM  alter_addcols_96 WHERE info='aa' ORDER BY 1, 3;
+DROP TABLE alter_addcols_96;
+
+CREATE TABLE alter_addcols_100 (id int , info varchar(1100) not null, info1 int) WITH (orientation=orc) tablespace hdfs_ts;
+CREATE INDEX idx100_1 ON alter_addcols_100 (info) LOCAL;
+INSERT INTO alter_addcols_100 VALUES (1,'aa',1),(2,'aa',2),(3,'aa',3),(4,4,4),(5,'aa',5);
+SELECT * FROM  alter_addcols_100 WHERE info='aa' ORDER BY 1, 3;
+ALTER TABLE alter_addcols_100 ALTER info TYPE varchar(1100);
+SELECT * FROM  alter_addcols_100 WHERE info='aa' ORDER BY 1, 3;
+ALTER TABLE alter_addcols_100 ALTER info TYPE varchar(1100);
+SELECT * FROM  alter_addcols_100 WHERE info='aa' ORDER BY 1, 3;
+DROP TABLE alter_addcols_100;
+
+-- successfull to handle more than one index
+CREATE TABLE alter_addcols_97 (id int , info varchar(1100) not null, info1 int) WITH (orientation=orc) tablespace hdfs_ts
+partition by values(info1);
+CREATE INDEX idx97_1 ON alter_addcols_97 (info) LOCAL;
+CREATE INDEX idx97_2 ON alter_addcols_97 (info1) LOCAL;
+INSERT INTO alter_addcols_97 VALUES (1,'aa',1),(2,'aa',2),(3,'aa',3),(4,4,4),(5,'aa',5);
+SELECT * FROM  alter_addcols_97 WHERE info='aa' ORDER BY 1, 3;
+SELECT * FROM  alter_addcols_97 WHERE info1>3 ORDER BY 1, 3;
+ALTER TABLE alter_addcols_97 ALTER info TYPE varchar(1100);
+SELECT * FROM  alter_addcols_97 WHERE info='aa' ORDER BY 1, 3;
+SELECT * FROM  alter_addcols_97 WHERE info1>3 ORDER BY 1, 3;
+DROP TABLE alter_addcols_97;
+
+CREATE TABLE alter_addcols_101 (id int , info varchar(1100) not null, info1 int) WITH (orientation=orc) tablespace hdfs_ts;
+CREATE INDEX idx101_1 ON alter_addcols_101 (info);
+CREATE INDEX idx101_2 ON alter_addcols_101 (info1);
+INSERT INTO alter_addcols_101 VALUES (1,'aa',1),(2,'aa',2),(3,'aa',3),(4,4,4),(5,'aa',5);
+SELECT * FROM  alter_addcols_101 WHERE info='aa' ORDER BY 1, 3;
+SELECT * FROM  alter_addcols_101 WHERE info1>3 ORDER BY 1, 3;
+ALTER TABLE alter_addcols_101 ALTER info TYPE varchar(1100);
+SELECT * FROM  alter_addcols_101 WHERE info='aa' ORDER BY 1, 3;
+SELECT * FROM  alter_addcols_101 WHERE info1>3 ORDER BY 1, 3;
+DROP TABLE alter_addcols_101;
+
+-- rebuild all the indexes when rewrite the heap data.
+CREATE TABLE alter_addcols_98 (id int , info varchar(1100) not null, info1 int) WITH (orientation=orc) tablespace hdfs_ts;
+CREATE INDEX idx98_1 ON alter_addcols_98 (info1);
+INSERT INTO alter_addcols_98 VALUES (1,'aa',1),(2,'aa',2),(3,'aa',3),(4,4,4),(5,'aa',5);
+SELECT * FROM  alter_addcols_98 WHERE info='aa' ORDER BY 1, 3;
+SELECT * FROM  alter_addcols_98 WHERE info1>3 ORDER BY 1, 3;
+ALTER TABLE alter_addcols_98 ALTER info1 TYPE varchar(15);
+SELECT * FROM  alter_addcols_98 WHERE info='aa' ORDER BY 1, 3;
+SELECT * FROM  alter_addcols_98 WHERE info1='3' ORDER BY 1, 3;
+ALTER TABLE alter_addcols_98 ALTER info1 TYPE int;
+SELECT * FROM  alter_addcols_98 WHERE info='aa' ORDER BY 1, 3;
+SELECT * FROM  alter_addcols_98 WHERE info1='3' ORDER BY 1, 3;
+DROP TABLE alter_addcols_98;
+
+CREATE TABLE alter_addcols_102 (id int , info varchar(1100) not null, info1 int) WITH (orientation=orc) tablespace hdfs_ts;
+CREATE INDEX idx102_1 ON alter_addcols_102 (info1) LOCAL;
+INSERT INTO alter_addcols_102 VALUES (1,'aa',1),(2,'aa',2),(3,'aa',3),(4,4,4),(5,'aa',5);
+SELECT * FROM  alter_addcols_102 WHERE info='aa' ORDER BY 1, 3;
+SELECT * FROM  alter_addcols_102 WHERE info1>3 ORDER BY 1, 3;
+ALTER TABLE alter_addcols_102 ALTER info1 TYPE varchar(15);
+SELECT * FROM  alter_addcols_102 WHERE info='aa' ORDER BY 1, 3;
+SELECT * FROM  alter_addcols_102 WHERE info1='3' ORDER BY 1, 3;
+ALTER TABLE alter_addcols_102 ALTER info1 TYPE int;
+SELECT * FROM  alter_addcols_102 WHERE info='aa' ORDER BY 1, 3;
+SELECT * FROM  alter_addcols_102 WHERE info1='3' ORDER BY 1, 3;
+DROP TABLE alter_addcols_102;
+drop schema cstore_alter_table cascade;

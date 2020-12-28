@@ -1,0 +1,412 @@
+/*
+ * This file is used to test the function of ExecVecHashJoin()---(1)
+ */
+----
+--- Create Table and Insert Data
+----
+create schema vector_hashjoin_engine;
+set current_schema=vector_hashjoin_engine;
+set codegen_cost_threshold=0;
+set query_mem=0;
+
+
+CREATE TABLE vector_hashjoin_engine.ROW_HASHJOIN_TABLE_01(
+ C_CHAR_1 CHAR(1),
+ C_CHAR_2 CHAR(10),
+ C_CHAR_3 CHAR(100),
+ C_VARCHAR_1 VARCHAR(1),
+ C_VARCHAR_2 VARCHAR(10),
+ C_VARCHAR_3 VARCHAR(1024),
+ C_INT BIGINT,
+ C_BIGINT BIGINT,
+ C_SMALLINT BIGINT,
+ C_FLOAT FLOAT,
+ C_NUMERIC numeric(20,5),
+ C_DP double precision,
+ C_DATE DATE,
+ C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+ C_TS_WITH TIMESTAMP WITH TIME ZONE );
+
+CREATE TABLE vector_hashjoin_engine.ROW_HASHJOIN_TABLE_02(
+ C_CHAR_1 CHAR(1),
+ C_CHAR_2 CHAR(10),
+ C_CHAR_3 CHAR(100),
+ C_VARCHAR_1 VARCHAR(1),
+ C_VARCHAR_2 VARCHAR(10),
+ C_VARCHAR_3 VARCHAR(1024),
+ C_INT BIGINT,
+ C_BIGINT BIGINT,
+ C_SMALLINT BIGINT,
+ C_FLOAT FLOAT,
+ C_NUMERIC numeric(20,5),
+ C_DP double precision,
+ C_DATE DATE,
+ C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+ C_TS_WITH TIMESTAMP WITH TIME ZONE );
+
+CREATE TABLE vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_01(
+ C_CHAR_1 CHAR(1),
+ C_CHAR_2 CHAR(10),
+ C_CHAR_3 CHAR(100),
+ C_VARCHAR_1 VARCHAR(1),
+ C_VARCHAR_2 VARCHAR(10),
+ C_VARCHAR_3 VARCHAR(1024),
+ C_INT BIGINT,
+ C_BIGINT BIGINT,
+ C_SMALLINT BIGINT,
+ C_FLOAT FLOAT,
+ C_NUMERIC numeric(20,5),
+ C_DP double precision,
+ C_DATE DATE,
+ C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+ C_TS_WITH TIMESTAMP WITH TIME ZONE, PARTIAL CLUSTER KEY(C_DP))WITH (ORIENTATION=COLUMN);
+
+CREATE TABLE vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_02(
+ C_CHAR_1 CHAR(1),
+ C_CHAR_2 CHAR(10),
+ C_CHAR_3 CHAR(100),
+ C_VARCHAR_1 VARCHAR(1),
+ C_VARCHAR_2 VARCHAR(10),
+ C_VARCHAR_3 VARCHAR(1024),
+ C_INT BIGINT,
+ C_BIGINT BIGINT,
+ C_SMALLINT BIGINT,
+ C_FLOAT FLOAT,
+ C_NUMERIC numeric(20,5),
+ C_DP double precision,
+ C_DATE DATE,
+ C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+ C_TS_WITH TIMESTAMP WITH TIME ZONE, PARTIAL CLUSTER KEY(C_INT))WITH (ORIENTATION=COLUMN)  DISTRIBUTE BY HASH (C_INT);
+
+CREATE TABLE vector_hashjoin_engine.ROW_HASHJOIN_TABLE_03(
+ C_CHAR_1 CHAR(1),
+ C_CHAR_2 CHAR(10),
+ C_CHAR_3 CHAR(100),
+ C_VARCHAR_1 VARCHAR(1),
+ C_VARCHAR_2 VARCHAR(10),
+ C_VARCHAR_3 VARCHAR(1024),
+ C_INT BIGINT,
+ C_BIGINT BIGINT,
+ C_SMALLINT BIGINT,
+ C_FLOAT FLOAT,
+ C_NUMERIC numeric(20,5),
+ C_DP double precision,
+ C_DATE DATE,
+ C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+ C_TS_WITH TIMESTAMP WITH TIME ZONE );
+
+CREATE TABLE vector_hashjoin_engine.ROW_HASHJOIN_TABLE_04(
+ C_CHAR_1 CHAR(1),
+ C_CHAR_2 CHAR(10),
+ C_CHAR_3 CHAR(100),
+ C_VARCHAR_1 VARCHAR(1),
+ C_VARCHAR_2 VARCHAR(10),
+ C_VARCHAR_3 VARCHAR(1024),
+ C_INT BIGINT,
+ C_BIGINT BIGINT,
+ C_SMALLINT BIGINT,
+ C_FLOAT FLOAT,
+ C_NUMERIC numeric(20,5),
+ C_DP double precision,
+ C_DATE DATE,
+ C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+ C_TS_WITH TIMESTAMP WITH TIME ZONE );
+
+CREATE TABLE vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_03(
+ C_CHAR_1 CHAR(1),
+ C_CHAR_2 CHAR(10),
+ C_CHAR_3 CHAR(100),
+ C_VARCHAR_1 VARCHAR(1),
+ C_VARCHAR_2 VARCHAR(10),
+ C_VARCHAR_3 VARCHAR(1024),
+ C_INT BIGINT,
+ C_BIGINT BIGINT,
+ C_SMALLINT BIGINT,
+ C_FLOAT FLOAT,
+ C_NUMERIC numeric(20,5),
+ C_DP double precision,
+ C_DATE DATE,
+ C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+ C_TS_WITH TIMESTAMP WITH TIME ZONE ) WITH (ORIENTATION=COLUMN) ;
+
+ CREATE TABLE vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_04(
+ C_CHAR_1 CHAR(1),
+ C_CHAR_2 CHAR(10),
+ C_CHAR_3 CHAR(100),
+ C_VARCHAR_1 VARCHAR(1),
+ C_VARCHAR_2 VARCHAR(10),
+ C_VARCHAR_3 VARCHAR(1024),
+ C_INT BIGINT,
+ C_BIGINT BIGINT,
+ C_SMALLINT BIGINT,
+ C_FLOAT FLOAT,
+ C_NUMERIC numeric(20,5),
+ C_DP double precision,
+ C_DATE DATE,
+ C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+ C_TS_WITH TIMESTAMP WITH TIME ZONE )  WITH (ORIENTATION=COLUMN);
+
+ create table vector_hashjoin_engine.ROW_HASHJOIN_TABLE_05
+(
+   c1 int
+  ,c2 int
+  ,c3 char(100)
+)distribute by hash(c1);
+
+create table vector_hashjoin_engine.ROW_HASHJOIN_TABLE_06
+(
+   c1 int
+  ,c2 int
+  ,c3 char(100)
+)distribute by hash(c2);
+
+create table vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_05
+(
+   c1 int
+  ,c2 int
+  ,c3 char(100)
+)with (orientation = column) distribute by hash(c1);
+
+create table vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_06
+(
+   c1 int
+  ,c2 int
+  ,c3 char(100)
+)with (orientation = column) distribute by hash(c2);
+
+
+create table vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_09
+(
+   c1 int1
+  ,c2 int
+)with (orientation = column) distribute by hash(c2);
+
+create table vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_10
+(
+   c1 int1
+  ,c2 int
+)with (orientation = column) distribute by hash(c2);
+
+create table vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_13
+(
+    c1  int not null
+   ,c2  bigint  not null
+   ,c3  char(6) not null
+)with (orientation = column) distribute by hash(c1);
+
+create table vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_14
+(
+    c1  int not null
+   ,c2  bigint  not null
+   ,c3  char(6) not null
+)with (orientation = column) distribute by hash(c1);
+
+
+
+CREATE OR REPLACE PROCEDURE func_insert_tbl_hashjoin_01()
+AS  
+BEGIN  
+       FOR I IN 1..20 LOOP  
+	   FOR J IN 1..10 LOOP  
+         INSERT INTO ROW_HASHJOIN_TABLE_01 VALUES('A','b20_000aa','b20_000aaaaAHWGS','a','aaadf','b20_000aaaaaaaFAFEFAGEAFEAFEAGEAGEAGEE_'||i,i,j,i+j,i+0.0001,i+0.00001,i+0.000001,'2000-01-01','2000-01-01 01:01:01','2000-01-01 01:01:01+01');
+       END LOOP; 
+	    END LOOP; 
+END;
+/
+CALL func_insert_tbl_hashjoin_01();
+select count(*) from ROW_HASHJOIN_TABLE_01;
+
+CREATE OR REPLACE PROCEDURE func_insert_tbl_hashjoin_02()
+AS  
+BEGIN  
+       FOR I IN 5..24 LOOP  
+	   FOR J IN 5..14 LOOP  
+         INSERT INTO ROW_HASHJOIN_TABLE_02 VALUES('B','b20_001eq','b20_001XXXXEFFE','b','bbbbb','b20_001bbbbbxxdfregwhrghwerhwrwhrwehrewhr_'||i,i,j,i+j,i+0.0001,I+0.00001,I+0.000001,'2000-01-01','2000-01-01 01:01:01','2000-01-01 01:01:01+01');
+       END LOOP; 
+	    END LOOP; 
+END;
+/
+CALL func_insert_tbl_hashjoin_02();
+select count(*) from ROW_HASHJOIN_TABLE_02;
+
+CREATE OR REPLACE PROCEDURE func_insert_tbl_hashjoin_03()
+AS  
+BEGIN  
+       FOR I IN 1..10 LOOP  
+	   FOR J IN 1..5 LOOP  
+         INSERT INTO ROW_HASHJOIN_TABLE_03 VALUES('A','path_inner','path_inner_aaaaAHWGS','a','aaadf','path_inner_aaaaaaaFAFEFAGEAFEAFEAGEAGEAGEE_'||i,i,j,i+j,i+0.0001,i+0.00001,i+0.000001,'2000-01-01','2000-01-01 01:01:01','2000-01-01 01:01:01+01');
+       END LOOP; 
+	    END LOOP; 
+END;
+/
+CALL func_insert_tbl_hashjoin_03();
+
+CREATE OR REPLACE PROCEDURE func_insert_tbl_hashjoin_04()
+AS  
+BEGIN  
+       FOR I IN 1..10 LOOP  
+	   FOR J IN 1..5 LOOP  
+         INSERT INTO ROW_HASHJOIN_TABLE_04 VALUES('B','b20_001eq','b20_001XXXXEFFE','b','bbbbb','b20_001bbbbbxxdfregwhrghwerhwrwhrwehrewhr_'||i,i,j,i+j,i+0.0001,I+0.00001,I+0.000001,'2000-01-01','2000-01-01 01:01:01','2000-01-01 01:01:01+01');
+       END LOOP; 
+	    END LOOP; 
+END;
+/
+CALL func_insert_tbl_hashjoin_04();
+
+\parallel on  2
+--insert into ROW_HASHJOIN_TABLE_05 select generate_series(1,2000), generate_series(1,2000), 'row'|| generate_series(1,2000);
+copy ROW_HASHJOIN_TABLE_05 from '@abs_srcdir@/data/vec_hashjoin1_data1.txt' delimiter as ' ';
+--insert into ROW_HASHJOIN_TABLE_06 select generate_series(5000,6000,1), generate_series(5000,6000,1), 'row'|| generate_series(1,1001);
+copy ROW_HASHJOIN_TABLE_06 from '@abs_srcdir@/data/vec_hashjoin1_data2.txt' delimiter as ' ';
+\parallel off
+
+\parallel on 8
+INSERT INTO vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_01 SELECT * FROM vector_hashjoin_engine.ROW_HASHJOIN_TABLE_01;
+INSERT INTO vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_02 SELECT * FROM vector_hashjoin_engine.ROW_HASHJOIN_TABLE_02;
+insert into vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_03 select * from vector_hashjoin_engine.ROW_HASHJOIN_TABLE_03; 
+insert into vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_04 select * from vector_hashjoin_engine.ROW_HASHJOIN_TABLE_04;
+insert into vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_05 select * from ROW_HASHJOIN_TABLE_05;
+insert into vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_06 select * from ROW_HASHJOIN_TABLE_06;
+
+insert into vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_09 select generate_series(1,10)%2;
+insert into vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_10 select generate_series(1,10)%4;
+insert into vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_13 select generate_series(1,10)%6, generate_series(1,10)%6, 'row'|| generate_series(1,10)%6;
+insert into vector_hashjoin_engine.VECTOR_HASHJOIN_TABLE_14 select generate_series(1,10)%4, generate_series(1,10)%4, 'row'|| generate_series(1,10)%4;
+\parallel off
+
+\parallel on  10
+analyze vector_hashjoin_table_01;
+analyze vector_hashjoin_table_02;
+analyze vector_hashjoin_table_03;
+analyze vector_hashjoin_table_04;
+analyze vector_hashjoin_table_05;
+analyze vector_hashjoin_table_06;
+analyze vector_hashjoin_table_09;
+analyze vector_hashjoin_table_10;
+analyze vector_hashjoin_table_13;
+analyze vector_hashjoin_table_14;
+\parallel off
+
+set enable_nestloop=off;
+set enable_mergejoin=off;
+
+----
+--- case 1: HashJoin Inner Join
+----
+explain (verbose on, costs off) SELECT A.C_INT, A.C_BIGINT, A.C_VARCHAR_3, A.C_DATE FROM VECTOR_HASHJOIN_TABLE_01 A INNER JOIN VECTOR_HASHJOIN_TABLE_02 B ON A.C_INT = B.C_INT WHERE A.C_INT <8  AND  A.C_BIGINT<9  ORDER BY 1, 2;
+SELECT A.C_INT, A.C_BIGINT, A.C_VARCHAR_3, A.C_DATE FROM VECTOR_HASHJOIN_TABLE_01 A INNER JOIN VECTOR_HASHJOIN_TABLE_02 B ON A.C_INT = B.C_INT WHERE A.C_INT <10  AND  A.C_BIGINT<5  ORDER BY 1, 2;
+-- SELECT A.C_INT, A.C_BIGINT, A.C_VARCHAR_3, A.C_DATE FROM VECTOR_HASHJOIN_TABLE_01 A INNER JOIN VECTOR_HASHJOIN_TABLE_02 B ON A.C_INT = B.C_INT WHERE A.C_INT >10 AND  A.C_BIGINT<5 ORDER BY 1, 2;
+SELECT B.C_INT , A.C_BIGINT FROM VECTOR_HASHJOIN_TABLE_04 B left JOIN VECTOR_HASHJOIN_TABLE_03 A ON A.C_INT = B.C_INT where coalesce(B.C_BIGINT,2) > A.C_BIGINT order by 1,2;
+SELECT A.c1, B.c1 from VECTOR_HASHJOIN_TABLE_09 A INNER JOIN VECTOR_HASHJOIN_TABLE_10 B ON A.c1 = B.c1 order by 1, 2 limit 10;
+SELECT count(*) from VECTOR_HASHJOIN_TABLE_03 A inner join VECTOR_HASHJOIN_TABLE_04 B on A.C_CHAR_2 = B.C_VARCHAR_2;
+
+----
+--- case 2: HashJoin Left/Right Join
+----
+explain (verbose on, costs off) SELECT A.C_INT,A.C_BIGINT,A.C_VARCHAR_3,A.C_DATE FROM VECTOR_HASHJOIN_TABLE_01 A LEFT JOIN VECTOR_HASHJOIN_TABLE_02 B ON A.C_INT = B.C_INT WHERE A.C_INT >45 AND  A.C_BIGINT>28 ORDER BY 1, 2;
+
+SELECT A.C_INT,A.C_BIGINT,A.C_VARCHAR_3,A.C_DATE FROM VECTOR_HASHJOIN_TABLE_01 A LEFT JOIN VECTOR_HASHJOIN_TABLE_02 B ON A.C_INT = B.C_INT WHERE A.C_INT >10 AND  A.C_BIGINT>5 ORDER BY 1, 2;
+--SELECT A.C_INT,A.C_BIGINT,A.C_VARCHAR_3,A.C_DATE FROM VECTOR_HASHJOIN_TABLE_01 A LEFT JOIN VECTOR_HASHJOIN_TABLE_02 B ON A.C_INT = B.C_INT WHERE A.C_INT <10 AND  A.C_BIGINT>5 ORDER BY 1, 2;
+
+explain (verbose on, costs off, nodes off) SELECT A.C_INT,A.C_BIGINT FROM VECTOR_HASHJOIN_TABLE_01 A LEFT JOIN VECTOR_HASHJOIN_TABLE_02 B ON A.C_INT = B.C_INT and A.C_BIGINT > 1000 WHERE A.C_INT <4 ORDER BY 1, 2;
+SELECT A.C_INT,A.C_BIGINT FROM VECTOR_HASHJOIN_TABLE_01 A LEFT JOIN VECTOR_HASHJOIN_TABLE_02 B ON A.C_INT = B.C_INT and A.C_BIGINT > 1000 WHERE A.C_INT <4 ORDER BY 1, 2;
+
+SELECT B.C_INT, A.C_BIGINT FROM  VECTOR_HASHJOIN_TABLE_04 B RIGHT JOIN VECTOR_HASHJOIN_TABLE_03 A ON A.C_INT = B.C_INT AND A.C_BIGINT<2 order by 1,2;
+--SELECT B.C_INT , A.C_BIGINT FROM VECTOR_HASHJOIN_TABLE_04 B left JOIN VECTOR_HASHJOIN_TABLE_03 A ON A.C_INT = B.C_INT where coalesce(A.C_BIGINT,2) <2 order by 1,2;
+--SELECT B.C_INT, A.C_BIGINT FROM VECTOR_HASHJOIN_TABLE_04 B left JOIN VECTOR_HASHJOIN_TABLE_03 A ON A.C_INT = B.C_INT and coalesce(B.C_BIGINT,2) > A.C_BIGINT where coalesce(A.C_BIGINT,2) < 2 order by 1,2;
+
+----
+--- case 3: HashJoin Anti Join
+----
+explain (verbose on, costs off, nodes off)  SELECT B.C_INT , A.C_BIGINT FROM  VECTOR_HASHJOIN_TABLE_04 B  RIGHT JOIN VECTOR_HASHJOIN_TABLE_03 A ON A.C_INT = B.C_INT AND A.C_BIGINT<2 where B.C_INT is NULL order by 1,2;
+SELECT B.C_INT , A.C_BIGINT FROM  VECTOR_HASHJOIN_TABLE_04 B  RIGHT JOIN VECTOR_HASHJOIN_TABLE_03 A ON A.C_INT = B.C_INT AND A.C_BIGINT<2 where B.C_INT is NULL order by 1,2;
+
+explain (verbose on, costs off, nodes off) SELECT B.C_INT, A.C_BIGINT FROM VECTOR_HASHJOIN_TABLE_04 B RIGHT JOIN VECTOR_HASHJOIN_TABLE_03 A ON A.C_INT = B.C_INT where B.C_INT is NULL order by 1,2;
+SELECT B.C_INT, A.C_BIGINT FROM VECTOR_HASHJOIN_TABLE_04 B RIGHT JOIN VECTOR_HASHJOIN_TABLE_03 A ON A.C_INT = B.C_INT  where B.C_INT is NULL order by 1,2;
+
+----
+--- case 4: HashJoin Complicate Hash Value
+----
+select A.*, B.c3 from VECTOR_HASHJOIN_TABLE_05 A join VECTOR_HASHJOIN_TABLE_05 B on substring(A.c3, 2) = substring(B.c3, 2) order by A.c1 limit 100;
+select A.*, B.c3 from VECTOR_HASHJOIN_TABLE_05 A left join VECTOR_HASHJOIN_TABLE_05 B on substring(A.c3, 2) = substring(B.c3, 2) order by A.c1 limit 100;
+select A.*, B.c3 from VECTOR_HASHJOIN_TABLE_05 A right join VECTOR_HASHJOIN_TABLE_05 B on substring(A.c3, 2) = substring(B.c3, 2) order by A.c1 limit 100;
+--select * from VECTOR_HASHJOIN_TABLE_05 A right  join VECTOR_HASHJOIN_TABLE_05 B on  A.c1 = B.c1 and substring(A.c3, 2) = substring(B.c3, 2) order by 1,2,3,4 limit 100;
+select * from VECTOR_HASHJOIN_TABLE_05 A right  join VECTOR_HASHJOIN_TABLE_05 B on  A.c1 = B.c1 and substring(A.c3, 2) < substring(B.c3, 2) order by 1,2,3,4 limit 100;
+
+--set work_mem=64;
+--select a.c_int from vector_hashjoin_table_01 a left join vector_hashjoin_table_01 b on a.c_int=b.c_float order by 1;
+
+
+----
+--- case 5: HashJoin with Flush to Disk 
+----
+set work_mem=64;
+select A.*, B.c3 from VECTOR_HASHJOIN_TABLE_05 A join VECTOR_HASHJOIN_TABLE_05 B on substring(A.c3, 2) = substring(B.c3, 2) order by A.c1;
+select A.*, B.c3 from VECTOR_HASHJOIN_TABLE_05 A left join VECTOR_HASHJOIN_TABLE_05 B on substring(A.c3, 2) = substring(B.c3, 2) order by A.c1;
+select A.*, B.c3 from VECTOR_HASHJOIN_TABLE_05 A right join VECTOR_HASHJOIN_TABLE_05 B on substring(A.c3, 2) = substring(B.c3, 2) order by A.c1;
+--select * from VECTOR_HASHJOIN_TABLE_05 A right  join VECTOR_HASHJOIN_TABLE_05 B on  A.c1 = B.c1 and substring(A.c3, 2) = substring(B.c3, 2) order by 1,2,3,4;
+select * from VECTOR_HASHJOIN_TABLE_05 A right  join VECTOR_HASHJOIN_TABLE_05 B on  A.c1 = B.c1 and substring(A.c3, 2) < substring(B.c3, 2) order by 1,2,3,4 limit 100;
+reset work_mem;
+
+----
+--- case : test innerjoin codegen with fast path
+----
+explain (verbose on, costs off) select count(*) from VECTOR_HASHJOIN_TABLE_13 A inner join VECTOR_HASHJOIN_TABLE_14 B on A.c1 = B.c1;
+select count(*) from VECTOR_HASHJOIN_TABLE_13 A inner join VECTOR_HASHJOIN_TABLE_14 B on A.c1 = B.c1;
+--select count(*) from VECTOR_HASHJOIN_TABLE_13 A inner join VECTOR_HASHJOIN_TABLE_14 B on A.c2 = B.c2;
+--select count(*) from VECTOR_HASHJOIN_TABLE_13 A inner join VECTOR_HASHJOIN_TABLE_14 B on A.c3 = B.c3;
+--select count(*) from VECTOR_HASHJOIN_TABLE_13 A inner join VECTOR_HASHJOIN_TABLE_14 B on A.c1 = B.c1 and A.c3 = B.c3;
+set enable_codegen=off;
+select count(*) from VECTOR_HASHJOIN_TABLE_13 A inner join VECTOR_HASHJOIN_TABLE_14 B on A.c1 = B.c1;
+set enable_codegen=on;
+reset query_mem;
+
+--test exception case
+create table t1(c1 int, c2 int) with(orientation=column);
+insert into t1 values(1,2);
+insert into t1 values(2,2);
+insert into t1 values(3,NULL);
+
+
+create table t2(c1 int, c2 int) with(orientation=column);
+
+insert into t2 values(1,1);
+insert into t2 values(2,2);
+insert into t2 values(NULL,3);
+
+set enable_sonic_hashjoin=on;
+set enable_hashjoin=on;
+set enable_mergejoin=off;
+set enable_nestloop=off;
+set query_dop=1;
+
+explain (costs off)
+select 2/(coalesce(t1.c2,0)+ coalesce(t2.c1,0)) from t1, t2 where t1.c1 = t2.c2 and (coalesce(t2.c1, 0) + coalesce(t1.c2, 0))> 0 order by 1;
+
+select 2/(coalesce(t1.c2,0)+ coalesce(t2.c1,0)) from t1, t2 where t1.c1 = t2.c2 and (coalesce(t2.c1, 0) + coalesce(t1.c2, 0))> 0 order by  1;
+
+set enable_sonic_hashjoin=off;
+set enable_hashjoin=on;
+set enable_mergejoin=off;
+set enable_nestloop=off;
+set query_dop=1;
+
+explain (costs off)
+select 2/(coalesce(t1.c2,0)+ coalesce(t2.c1,0)) from t1, t2 where t1.c1 = t2.c2 and (coalesce(t2.c1, 0) + coalesce(t1.c2, 0))> 0 order by 1;
+
+select 2/(coalesce(t1.c2,0)+ coalesce(t2.c1,0)) from t1, t2 where t1.c1 = t2.c2 and (coalesce(t2.c1, 0) + coalesce(t1.c2, 0))> 0 order by  1;
+
+set enable_hashjoin=off;
+set enable_mergejoin=on;
+set enable_nestloop=off;
+set query_dop=1;
+
+explain (costs off)
+select 2/(coalesce(t1.c2,0)+ coalesce(t2.c1,0)) from t1, t2 where t1.c1 = t2.c2 and (coalesce(t2.c1, 0) + coalesce(t1.c2, 0))> 0 order by 1;
+
+select 2/(coalesce(t1.c2,0)+ coalesce(t2.c1,0)) from t1, t2 where t1.c1 = t2.c2 and (coalesce(t2.c1, 0) + coalesce(t1.c2, 0))> 0 order by  1;
+
+----
+--- Clean table and resource
+----
+drop schema vector_hashjoin_engine cascade;

@@ -1,3 +1,4 @@
+
 -- txid_snapshot data type and related functions
 
 -- Enforce use of COMMIT instead of 2PC for temporary objects

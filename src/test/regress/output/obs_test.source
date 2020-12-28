@@ -1,0 +1,152 @@
+\! chmod +x ./s3bin/s3
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/t1_out/ address=@obshostname@ ak=@ak@ sk=@sk@
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/obs_test001/t1_obs/ address=@obshostname@ ak=@ak@ sk=@sk@
+drop foreign table if exists t1_base;
+NOTICE:  foreign table "t1_base" does not exist, skipping
+create foreign table t1_base
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/obs_test/t1_obs_write',
+    format 'text',
+    DELIMITER ',',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+);
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+create table t1
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+) distribute by hash(hd_demo_sk);
+insert into t1 select * from t1_base;
+drop foreign table if exists t1_obs_write;
+NOTICE:  foreign table "t1_obs_write" does not exist, skipping
+CREATE FOREIGN TABLE t1_obs_write
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server
+OPTIONS(
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/t1_out/',
+    format 'text',
+    delimiter ',',
+    encoding 'utf8',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+    encrypt 'off')
+Write Only;
+insert into t1_obs_write select * from t1;
+drop foreign table if exists t1_obs_read;
+NOTICE:  foreign table "t1_obs_read" does not exist, skipping
+CREATE FOREIGN TABLE t1_obs_read
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+)
+SERVER gsmpp_server
+OPTIONS(
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/t1_out/',
+    format 'text',
+    delimiter ',',
+    encoding 'utf8',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+    encrypt 'off');
+select count(*) from t1_obs_read;
+  count  
+---------
+ 6291456
+(1 row)
+
+drop table if exists t1_read_test;
+NOTICE:  table "t1_read_test" does not exist, skipping
+CREATE TABLE t1_read_test
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer
+);
+insert into t1_read_test select * from t1_obs_read;
+select count(*) from (select * from t1 minus all select * from t1_read_test);
+ count 
+-------
+     0
+(1 row)
+
+drop table if exists t1_row;
+NOTICE:  table "t1_row" does not exist, skipping
+create table t1_row
+(
+    hd_demo_sk                integer               not null,
+    hd_buy_potential          varchar
+) distribute by hash(hd_demo_sk);
+copy t1_row from '@abs_srcdir@/data/t1_row.txt';
+drop foreign table if exists t1_obs_write_001;
+NOTICE:  foreign table "t1_obs_write_001" does not exist, skipping
+CREATE FOREIGN TABLE t1_obs_write_001
+(
+    hd_demo_sk                integer               not null,
+    hd_buy_potential          varchar
+)
+SERVER gsmpp_server
+OPTIONS(
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/obs_test001/t1_obs/',
+    format 'text',
+    delimiter ',',
+    encoding 'utf8',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+    encrypt 'off')
+Write Only;
+insert into t1_obs_write_001 select * from t1_row;
+drop foreign table if exists t1_obs_read_001;
+NOTICE:  foreign table "t1_obs_read_001" does not exist, skipping
+CREATE FOREIGN TABLE t1_obs_read_001
+(
+    hd_demo_sk                integer               not null,
+    hd_buy_potential          varchar
+)
+SERVER gsmpp_server
+OPTIONS(
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/obs_test001/t1_obs/',
+    format 'text',
+    delimiter ',',
+    encoding 'utf8',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+    encrypt 'off');
+select count(*) from t1_obs_read_001;
+ count 
+-------
+     1
+(1 row)
+
+drop foreign table if exists t1_obs_read_001;
+drop foreign table if exists t1_obs_write_001;
+drop foreign table t1_obs_write;
+drop foreign table t1_obs_read;
+drop table t1_read_test;
+drop table t1;
+drop foreign table t1_base;

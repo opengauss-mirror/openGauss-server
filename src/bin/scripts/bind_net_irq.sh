@@ -25,9 +25,9 @@ export LC_ALL=en_US.UTF-8
 net_cores=$1
 
 #check euleros stop sysmonitor
-os=$(source /etc/os-release; echo $ID)
+os=$(cat /etc/*release | grep "NAME=" |  head -n 1 | cut -d '=' -f 2 | tr -d '"' | tr A-Z a-z)
 
-if [ ["$os"x = "euleros"x] -o ["$os"x = "openeuler"x] -o ["$os"x = "neokylin"x] -o ["$os"x = "kylin"x] ]
+if [ "$os"x = "euleros"x ]
 then
     service sysmonitor stop
 fi

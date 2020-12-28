@@ -223,7 +223,7 @@ static void read_configuration(void)
         return;
     }
     read_vars(conf);
-    pclose(conf);
+    fclose(conf);
     uninstall_pgxc_ctl_bash(pgxc_ctl_bash_path);
     elog(INFO, "Finished to read configuration.\n");
 }
@@ -406,28 +406,16 @@ int main(int argc, char* argv[])
                 if (home)
                     free(home);
                 home = strdup(optarg);
-                if (home == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit(1);
-                }
                 break;
             case 'i':
                 if (infile)
                     free(infile);
                 infile = strdup(optarg);
-                if (infile == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit(1);
-                }
                 break;
             case 'o':
                 if (outfile)
                     free(outfile);
                 outfile = strdup(optarg);
-                if (outfile == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit(1);
-                }
                 break;
             case 'v':
                 verbose = "y";
@@ -439,28 +427,16 @@ int main(int argc, char* argv[])
                 if (logdir)
                     free(logdir);
                 logdir = strdup(optarg);
-                if (logdir == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit(1);
-                }
                 break;
             case 'L':
                 if (logfile)
                     free(logfile);
                 logfile = strdup(optarg);
-                if (logfile == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit(1);
-                }
                 break;
             case 'c':
                 if (configuration)
                     free(configuration);
                 configuration = strdup(optarg);
-                if (configuration == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit(1);
-                }
                 break;
             case 'h':
                 help_opt = 1;

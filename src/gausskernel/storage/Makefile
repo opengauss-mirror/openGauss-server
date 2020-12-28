@@ -25,6 +25,10 @@ subdir = src/gausskernel/storage
 top_builddir = ../../..
 include $(top_builddir)/src/Makefile.global
 
-SUBDIRS     = access  bulkload  replication  buffer  cmgr  cstore  dfs  file  freespace  ipc  large_object  lmgr page  remote  smgr mot
+SUBDIRS     = access  bulkload  replication  buffer  cmgr  cstore  dfs  file  freespace  ipc  large_object  lmgr page  remote  smgr
+
+ifeq ($(enable_mot), yes)
+SUBDIRS     += mot
+endif
 
 include $(top_srcdir)/src/gausskernel/common.mk

@@ -1,0 +1,2 @@
+select * from hash_col as A, rep_row as B where A.c2 = B.c2 order by 1;
+select * from hash_col as A, rep_col as B where A.c2 = B.c2 order by 1;

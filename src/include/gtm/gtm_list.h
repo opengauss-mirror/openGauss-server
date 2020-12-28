@@ -42,16 +42,16 @@ typedef struct gtm_ListCell gtm_ListCell;
 
 typedef struct gtm_List {
     int length;
-    gtm_ListCell *head;
-    gtm_ListCell *tail;
+    gtm_ListCell* head;
+    gtm_ListCell* tail;
 } gtm_List;
 
 struct gtm_ListCell {
     union {
-        void *ptr_value;
+        void* ptr_value;
         int int_value;
     } data;
-    gtm_ListCell *next;
+    gtm_ListCell* next;
 };
 
 /*
@@ -59,7 +59,7 @@ struct gtm_ListCell {
  * words, a non-gtm_NIL list is guaranteed to have length >= 1 and
  * head/tail != NULL
  */
-#define gtm_NIL ((gtm_List *)NULL)
+#define gtm_NIL ((gtm_List*)NULL)
 
 /*
  * These routines are used frequently. However, we can't implement
@@ -69,25 +69,25 @@ struct gtm_ListCell {
  */
 #ifdef __GNUC__
 
-static __inline__ gtm_ListCell *gtm_list_head(gtm_List *l)
+static __inline__ gtm_ListCell* gtm_list_head(gtm_List* l)
 {
     return l ? l->head : NULL;
 }
 
-static __inline__ gtm_ListCell *gtm_list_tail(gtm_List *l)
+static __inline__ gtm_ListCell* gtm_list_tail(gtm_List* l)
 {
     return l ? l->tail : NULL;
 }
 
-static __inline__ int gtm_list_length(gtm_List *l)
+static __inline__ int gtm_list_length(gtm_List* l)
 {
     return l ? l->length : 0;
 }
 #else
 
-extern gtm_ListCell *gtm_list_head(gtm_List *l);
-extern gtm_ListCell *gtm_list_tail(gtm_List *l);
-extern int gtm_list_length(gtm_List *l);
+extern gtm_ListCell* gtm_list_head(gtm_List* l);
+extern gtm_ListCell* gtm_list_tail(gtm_List* l);
+extern int gtm_list_length(gtm_List* l);
 #endif /* __GNUC__ */
 
 /*
@@ -158,55 +158,55 @@ extern int gtm_list_length(gtm_List *l);
     for ((cell1) = gtm_list_head(list1), (cell2) = gtm_list_head(list2); (cell1) != NULL && (cell2) != NULL; \
          (cell1) = gtm_lnext(cell1), (cell2) = gtm_lnext(cell2))
 
-extern gtm_List *gtm_lappend(gtm_List *list, void *datum);
-extern gtm_List *gtm_lappend_int(gtm_List *list, int datum);
+extern gtm_List* gtm_lappend(gtm_List* list, void* datum);
+extern gtm_List* gtm_lappend_int(gtm_List* list, int datum);
 
-extern gtm_ListCell *gtm_lappend_cell(gtm_List *list, gtm_ListCell *prev, void *datum);
-extern gtm_ListCell *gtm_lappend_cell_int(gtm_List *list, gtm_ListCell *prev, int datum);
+extern gtm_ListCell* gtm_lappend_cell(gtm_List* list, gtm_ListCell* prev, void* datum);
+extern gtm_ListCell* gtm_lappend_cell_int(gtm_List* list, gtm_ListCell* prev, int datum);
 
-extern gtm_List *gtm_lcons(void *datum, gtm_List *list);
-extern gtm_List *gtm_lcons_int(int datum, gtm_List *list);
+extern gtm_List* gtm_lcons(void* datum, gtm_List* list);
+extern gtm_List* gtm_lcons_int(int datum, gtm_List* list);
 
-extern gtm_List *gtm_list_concat(gtm_List *list1, gtm_List *list2);
-extern gtm_List *gtm_list_truncate(gtm_List *list, int new_size);
+extern gtm_List* gtm_list_concat(gtm_List* list1, gtm_List* list2);
+extern gtm_List* gtm_list_truncate(gtm_List* list, int new_size);
 
-extern void *gtm_list_nth(gtm_List *list, int n);
-extern int gtm_list_nth_int(gtm_List *list, int n);
+extern void* gtm_list_nth(gtm_List* list, int n);
+extern int gtm_list_nth_int(gtm_List* list, int n);
 
-extern bool gtm_list_member(gtm_List *list, const void *datum);
-extern bool gtm_list_member_ptr(gtm_List *list, const void *datum);
-extern bool gtm_list_member_int(gtm_List *list, int datum);
+extern bool gtm_list_member(gtm_List* list, const void* datum);
+extern bool gtm_list_member_ptr(gtm_List* list, const void* datum);
+extern bool gtm_list_member_int(gtm_List* list, int datum);
 
-extern gtm_List *gtm_list_delete(gtm_List *list, const void *datum);
-extern gtm_List *gtm_list_delete_ptr(gtm_List *list, const void *datum);
-extern gtm_List *gtm_list_delete_int(gtm_List *list, int datum);
-extern gtm_List *gtm_list_delete_first(gtm_List *list);
-extern gtm_List *gtm_list_delete_cell(gtm_List *list, gtm_ListCell *cell, gtm_ListCell *prev);
+extern gtm_List* gtm_list_delete(gtm_List* list, const void* datum);
+extern gtm_List* gtm_list_delete_ptr(gtm_List* list, const void* datum);
+extern gtm_List* gtm_list_delete_int(gtm_List* list, int datum);
+extern gtm_List* gtm_list_delete_first(gtm_List* list);
+extern gtm_List* gtm_list_delete_cell(gtm_List* list, gtm_ListCell* cell, gtm_ListCell* prev);
 
-extern gtm_List *gtm_list_union(gtm_List *list1, gtm_List *list2);
-extern gtm_List *gtm_list_union_ptr(gtm_List *list1, gtm_List *list2);
-extern gtm_List *gtm_list_union_int(gtm_List *list1, gtm_List *list2);
+extern gtm_List* gtm_list_union(gtm_List* list1, gtm_List* list2);
+extern gtm_List* gtm_list_union_ptr(gtm_List* list1, gtm_List* list2);
+extern gtm_List* gtm_list_union_int(gtm_List* list1, gtm_List* list2);
 
-extern gtm_List *gtm_list_intersection(gtm_List *list1, gtm_List *list2);
+extern gtm_List* gtm_list_intersection(gtm_List* list1, gtm_List* list2);
 /* currently, there's no need for list_intersection_int etc */
 
-extern gtm_List *gtm_list_difference(gtm_List *list1, gtm_List *list2);
-extern gtm_List *gtm_list_difference_ptr(gtm_List *list1, gtm_List *list2);
-extern gtm_List *gtm_list_difference_int(gtm_List *list1, gtm_List *list2);
+extern gtm_List* gtm_list_difference(gtm_List* list1, gtm_List* list2);
+extern gtm_List* gtm_list_difference_ptr(gtm_List* list1, gtm_List* list2);
+extern gtm_List* gtm_list_difference_int(gtm_List* list1, gtm_List* list2);
 
-extern gtm_List *gtm_list_append_unique(gtm_List *list, void *datum);
-extern gtm_List *gtm_list_append_unique_ptr(gtm_List *list, void *datum);
-extern gtm_List *gtm_list_append_unique_int(gtm_List *list, int datum);
+extern gtm_List* gtm_list_append_unique(gtm_List* list, void* datum);
+extern gtm_List* gtm_list_append_unique_ptr(gtm_List* list, void* datum);
+extern gtm_List* gtm_list_append_unique_int(gtm_List* list, int datum);
 
-extern gtm_List *gtm_list_concat_unique(gtm_List *list1, gtm_List *list2);
-extern gtm_List *gtm_list_concat_unique_ptr(gtm_List *list1, gtm_List *list2);
-extern gtm_List *gtm_list_concat_unique_int(gtm_List *list1, gtm_List *list2);
+extern gtm_List* gtm_list_concat_unique(gtm_List* list1, gtm_List* list2);
+extern gtm_List* gtm_list_concat_unique_ptr(gtm_List* list1, gtm_List* list2);
+extern gtm_List* gtm_list_concat_unique_int(gtm_List* list1, gtm_List* list2);
 
-extern void gtm_list_free(gtm_List *list);
-extern void gtm_list_free_deep(gtm_List *list);
+extern void gtm_list_free(gtm_List* list);
+extern void gtm_list_free_deep(gtm_List* list);
 
-extern gtm_List *gtm_list_copy(gtm_List *list);
-extern gtm_List *gtm_list_copy_tail(gtm_List *list, int nskip);
+extern gtm_List* gtm_list_copy(gtm_List* list);
+extern gtm_List* gtm_list_copy_tail(gtm_List* list, int nskip);
 
 /*
  * To ease migration to the new list API, a set of compatibility
@@ -264,7 +264,7 @@ extern gtm_List *gtm_list_copy_tail(gtm_List *list, int nskip);
 
 #define gtm_listCopy(list) gtm_list_copy(list)
 
-extern int gtm_length(gtm_List *list);
+extern int gtm_length(gtm_List* list);
 #endif /* ENABLE_LIST_COMPAT */
 
 #endif /* GTM_LIST_H */

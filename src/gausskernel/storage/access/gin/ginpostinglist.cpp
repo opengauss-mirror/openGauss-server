@@ -9,7 +9,7 @@
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
- *			src/gausskernel/storage/access/gin/ginpostinglist.cpp
+ *    src/gausskernel/storage/access/gin/ginpostinglist.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -113,9 +113,9 @@ static inline void uint64_to_itemptr(uint64 val, ItemPointer iptr, GinPostingLis
 /*
  * Varbyte-encode 'val' into *ptr. *ptr is incremented to next integer.
  */
-static void encode_varbyte(uint64 val, unsigned char** ptr)
+static void encode_varbyte(uint64 val, unsigned char **ptr)
 {
-    unsigned char* p = *ptr;
+    unsigned char *p = *ptr;
 
     while (val > 0x7F) {
         *(p++) = 0x80 | (val & 0x7F);
@@ -129,10 +129,10 @@ static void encode_varbyte(uint64 val, unsigned char** ptr)
 /*
  * Decode varbyte-encoded integer at *ptr. *ptr is incremented to next integer.
  */
-static uint64 decode_varbyte(unsigned char** ptr, GinPostingListType type)
+static uint64 decode_varbyte(unsigned char **ptr, GinPostingListType type)
 {
     uint64 val;
-    unsigned char* p = *ptr;
+    unsigned char *p = *ptr;
     uint64 c;
 
     c = *(p++);
@@ -197,14 +197,14 @@ static uint64 decode_varbyte(unsigned char** ptr, GinPostingListType type)
  * The allocated size of the returned struct is short-aligned, and the padding
  * byte at the end, if any, is zero.
  */
-GinPostingList* ginCompressPostingList(const ItemPointer ipd, int nipd, int maxsize, int* nwritten, bool isColStore)
+GinPostingList *ginCompressPostingList(const ItemPointer ipd, int nipd, int maxsize, int *nwritten, bool isColStore)
 {
     uint64 prev;
     int totalpacked = 0;
     int maxbytes;
-    GinPostingList* result = NULL;
-    unsigned char* ptr = NULL;
-    unsigned char* endptr = NULL;
+    GinPostingList *result = NULL;
+    unsigned char *ptr = NULL;
+    unsigned char *endptr = NULL;
     errno_t ret = EOK;
     int ipmax = isColStore ? 7 : 6;
 
@@ -214,7 +214,7 @@ GinPostingList* ginCompressPostingList(const ItemPointer ipd, int nipd, int maxs
 
     maxsize = SHORTALIGN_DOWN((uint)maxsize);
 
-    result = (GinPostingList*)palloc(maxsize);
+    result = (GinPostingList *)palloc(maxsize);
     result->type = isColStore ? COL_STORE_TYPE : ROW_STORE_TYPE;
 
     maxbytes = maxsize - offsetof(GinPostingList, bytes);
@@ -241,7 +241,7 @@ GinPostingList* ginCompressPostingList(const ItemPointer ipd, int nipd, int maxs
              * item fits in that space before writing it out.
              */
             unsigned char buf[ipmax];
-            unsigned char* p = buf;
+            unsigned char *p = buf;
 
             encode_varbyte(delta, &p);
             if (p - buf > (endptr - ptr)) {
@@ -292,7 +292,7 @@ GinPostingList* ginCompressPostingList(const ItemPointer ipd, int nipd, int maxs
  * Decode a compressed posting list into an array of item pointers.
  * The number of items is returned in *ndecoded.
  */
-ItemPointer ginPostingListDecode(GinPostingList* plist, int* ndecoded)
+ItemPointer ginPostingListDecode(GinPostingList *plist, int *ndecoded)
 {
     return ginPostingListDecodeAllSegments(plist, SizeOfGinPostingList(plist), ndecoded);
 }
@@ -302,15 +302,15 @@ ItemPointer ginPostingListDecode(GinPostingList* plist, int* ndecoded)
  * The number of items is returned in *ndecoded_out. The segments are stored
  * one after each other, with total size 'len' bytes.
  */
-ItemPointer ginPostingListDecodeAllSegments(GinPostingList* segment, int len, int* ndecoded_out)
+ItemPointer ginPostingListDecodeAllSegments(GinPostingList *segment, int len, int *ndecoded_out)
 {
     ItemPointer result;
     int nallocated;
     uint64 val;
-    char* endseg = ((char*)segment) + len;
+    char *endseg = ((char *)segment) + len;
     int ndecoded;
-    unsigned char* ptr = NULL;
-    unsigned char* endptr = NULL;
+    unsigned char *ptr = NULL;
+    unsigned char *endptr = NULL;
 
     /*
      * Guess an initial size of the array.
@@ -319,7 +319,7 @@ ItemPointer ginPostingListDecodeAllSegments(GinPostingList* segment, int len, in
     result = (ItemPointer)palloc(nallocated * sizeof(ItemPointerData));
 
     ndecoded = 0;
-    while ((char*)segment < endseg) {
+    while ((char *)segment < endseg) {
         /* enlarge output array if needed */
         if (ndecoded >= nallocated) {
             nallocated *= 2;
@@ -357,7 +357,7 @@ ItemPointer ginPostingListDecodeAllSegments(GinPostingList* segment, int len, in
 /*
  * Add all item pointers from a bunch of posting lists to a TIDBitmap.
  */
-int ginPostingListDecodeAllSegmentsToTbm(GinPostingList* ptr, int len, TIDBitmap* tbm)
+int ginPostingListDecodeAllSegmentsToTbm(GinPostingList *ptr, int len, TIDBitmap *tbm)
 {
     int ndecoded;
     ItemPointer items;
@@ -374,9 +374,9 @@ int ginPostingListDecodeAllSegmentsToTbm(GinPostingList* ptr, int len, TIDBitmap
  * Returns a palloc'd array, and *nmerged is set to the number of items in
  * the result, after eliminating duplicates.
  */
-ItemPointer ginMergeItemPointers(ItemPointerData* a, uint32 na, ItemPointerData* b, uint32 nb, int* nmerged)
+ItemPointer ginMergeItemPointers(ItemPointerData *a, uint32 na, ItemPointerData *b, uint32 nb, int *nmerged)
 {
-    ItemPointerData* dst = NULL;
+    ItemPointerData *dst = NULL;
     errno_t ret = EOK;
 
     dst = (ItemPointer)palloc((na + nb) * sizeof(ItemPointerData));
@@ -404,9 +404,9 @@ ItemPointer ginMergeItemPointers(ItemPointerData* a, uint32 na, ItemPointerData*
         securec_check(ret, "", "");
         *nmerged = na + nb;
     } else {
-        ItemPointerData* dptr = dst;
-        ItemPointerData* aptr = a;
-        ItemPointerData* bptr = b;
+        ItemPointerData *dptr = dst;
+        ItemPointerData *aptr = a;
+        ItemPointerData *bptr = b;
 
         while (aptr - a < na && bptr - b < nb) {
             int cmp = ginCompareItemPointers(aptr, bptr);

@@ -1,19 +1,8 @@
-/*
+/* -------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2010, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
  *
  * veccstoreindexctidscan.cpp
  *    Support routines for index-ctids scans of column stores.
@@ -36,6 +25,7 @@
 #include "access/relscan.h"
 #include "access/gin_private.h"
 #include "access/tableam.h"
+#include "access/nbtree.h"
 #include "executor/executor.h"
 #include "executor/execdebug.h"
 #include "executor/nodeIndexscan.h"
@@ -50,6 +40,8 @@
 #include "utils/batchsort.h"
 #include "nodes/makefuncs.h"
 #include "catalog/pg_partition_fn.h"
+
+static void EliminateDuplicateScalarArrayElem(BitmapIndexScanState *node);
 
 /*
  * Fix targetList using attid from index relation.
@@ -108,7 +100,7 @@ CstoreBitmapIndexScanState* ExecInitCstoreBitmapIndexScan(CStoreIndexCtidScan* n
     CstoreBitmapIndexScanState* indexstate = NULL;
     bool relistarget = false;
     int sortMem = SET_NODEMEM(node->scan.plan.operatorMemKB[0], node->scan.plan.dop);
-    int maxMem = node->scan.plan.operatorMaxMem > 0 ? node->scan.plan.operatorMaxMem / SET_DOP(node->scan.plan.dop) : 0;
+    int maxMem = (node->scan.plan.operatorMaxMem > 0) ? (node->scan.plan.operatorMaxMem / SET_DOP(node->scan.plan.dop)) : 0;
 
     /* check for unsupported flags */
     Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -160,7 +152,7 @@ CstoreBitmapIndexScanState* ExecInitCstoreBitmapIndexScan(CStoreIndexCtidScan* n
      * here.  This allows an index-advisor plugin to EXPLAIN a plan containing
      * references to nonexistent indexes.
      */
-    if (eflags & EXEC_FLAG_EXPLAIN_ONLY)
+    if ((uint32)eflags & EXEC_FLAG_EXPLAIN_ONLY)
         return indexstate;
 
     /*
@@ -235,7 +227,7 @@ CstoreBitmapIndexScanState* ExecInitCstoreBitmapIndexScan(CStoreIndexCtidScan* n
 
             ExecCloseScanRelation(currentrel);
 
-            indexstate->biss_ScanDesc = abs_idx_beginscan_bitmap(indexstate->biss_CurrentIndexPartition,
+            indexstate->biss_ScanDesc = scan_handler_idx_beginscan_bitmap(indexstate->biss_CurrentIndexPartition,
                 estate->es_snapshot,
                 indexstate->biss_NumScanKeys,
                 (ScanState*)indexstate);
@@ -244,7 +236,7 @@ CstoreBitmapIndexScanState* ExecInitCstoreBitmapIndexScan(CStoreIndexCtidScan* n
         /*
          * Initialize scan descriptor.
          */
-        indexstate->biss_ScanDesc = abs_idx_beginscan_bitmap(
+        indexstate->biss_ScanDesc = scan_handler_idx_beginscan_bitmap(
             indexstate->biss_RelationDesc, estate->es_snapshot, indexstate->biss_NumScanKeys, (ScanState*)indexstate);
     }
 
@@ -254,7 +246,7 @@ CstoreBitmapIndexScanState* ExecInitCstoreBitmapIndexScan(CStoreIndexCtidScan* n
      */
     if ((indexstate->biss_NumRuntimeKeys == 0 && indexstate->biss_NumArrayKeys == 0) &&
         PointerIsValid(indexstate->biss_ScanDesc))
-        abs_idx_rescan(indexstate->biss_ScanDesc, indexstate->biss_ScanKeys, indexstate->biss_NumScanKeys, NULL, 0);
+        scan_handler_idx_rescan(indexstate->biss_ScanDesc, indexstate->biss_ScanKeys, indexstate->biss_NumScanKeys, NULL, 0);
 
     /*
      * all done.
@@ -301,7 +293,7 @@ CStoreIndexCtidScanState* ExecInitCstoreIndexCtidScan(CStoreIndexCtidScan* node,
         //
         CStoreIndexCtidScanState* cctidscanstate = makeNode(CStoreIndexCtidScanState);
         errno_t rc = memcpy_s(cctidscanstate, sizeof(CStoreScanState), cstorescanstate, sizeof(CStoreScanState));
-        securec_check(rc, "\0", "\0");
+        securec_check(rc, "", "");
 
         cctidscanstate->ps.plan = (Plan*)node;
         cctidscanstate->ps.state = estate;
@@ -341,7 +333,7 @@ VectorBatch* ExecCstoreIndexCtidScan(CStoreIndexCtidScanState* state)
 {
     VectorBatch* tids = NULL;
     IndexSortState* sort = NULL;
-    AbsIdxScanDesc scandesc = NULL;
+    IndexScanDesc scandesc = NULL;
     List* indexTList = NIL;
     int64 ntids = 0;
     bool doscan = false;
@@ -398,8 +390,8 @@ VectorBatch* ExecCstoreIndexCtidScan(CStoreIndexCtidScanState* state)
             }
             while (doscan) {
                 tids->Reset(true);
-                if (likely(scandesc->type != T_ScanDesc_HBucketIndex)) {
-                    ntids = index_column_getbitmap((IndexScanDesc)scandesc, (const void*)sort, tids);
+                if (likely(!RELATION_OWN_BUCKET(scandesc->indexRelation))) {
+                    ntids = index_column_getbitmap(scandesc, (const void*)sort, tids);
                 } else {
                     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("hash bucket is not supported in column store.")));
@@ -408,7 +400,7 @@ VectorBatch* ExecCstoreIndexCtidScan(CStoreIndexCtidScanState* state)
 
                 doscan = ExecIndexAdvanceArrayKeys(node->biss_ArrayKeys, node->biss_NumArrayKeys);
                 if (doscan) /* reset index scan */
-                    abs_idx_rescan(node->biss_ScanDesc, node->biss_ScanKeys, node->biss_NumScanKeys, NULL, 0);
+                    scan_handler_idx_rescan(node->biss_ScanDesc, node->biss_ScanKeys, node->biss_NumScanKeys, NULL, 0);
             }
 
             RunSorter(sort);
@@ -492,6 +484,67 @@ void ExecReScanCstoreIndexCtidScan(CStoreIndexCtidScanState* state)
             state->m_cstoreBitmapIndexScan->m_sort->m_tidEnd = false;
 
             ExecReScanBitmapIndexScan((BitmapIndexScanState*)state->m_cstoreBitmapIndexScan);
+            EliminateDuplicateScalarArrayElem(state->m_cstoreBitmapIndexScan);
         }
     }
 }
+
+/*
+ * handle with where clause is like that t1.a in [value1, values2, ..., valueN], as for cbtree index, 
+ * in cstoreIndexCtidScan,we get each scalar element from [value1, values2, ..., valueN] clause, then scan cbtree.
+ * if the [value1, values2, ..., valueN] clause have duplicate data, cstoreIndexCtidScan will scan duplicate result
+ * set, so we must eliminate.
+ */
+static void EliminateDuplicateScalarArrayElem(BitmapIndexScanState* node)
+{
+    IndexScanDesc scan = (IndexScanDesc)node->biss_ScanDesc;
+    int16* indoption = scan->indexRelation->rd_indoption;
+    int i;
+
+    /* Now process each array key. */
+    for (i = 0; i < node->biss_NumArrayKeys; i++) {
+        ScanKey cur;
+        int num_elems;
+        int num_nonnulls = 0;
+        int j;
+        IndexArrayKeyInfo* arrayKey = &(node->biss_ArrayKeys[i]);
+        cur = &node->biss_ScanKeys[i];
+
+        for (j = 0; j < arrayKey->num_elems; j++) {
+            if (!arrayKey->elem_nulls[j]) {
+                arrayKey->elem_nulls[num_nonnulls] = false;
+                arrayKey->elem_values[num_nonnulls++] = arrayKey->elem_values[j];
+            }
+        }
+
+        /* If there's no non-nulls, the scan qual is unsatisfiable. */
+        if (num_nonnulls == 0) {
+            node->biss_NumArrayKeys = -1;
+            break;
+        }
+
+        /*
+        * Sort the non-null elements and eliminate any duplicates. We must
+        * sort in the same ordering used by the index column, so that the
+        * successive primitive indexscans produce data in index order.
+        */
+        num_elems = _bt_sort_array_elements(scan,
+                                            cur,
+                                            (indoption[cur->sk_attno - 1] & INDOPTION_DESC) != 0,
+                                            arrayKey->elem_values,
+                                            num_nonnulls);
+        arrayKey->num_elems = num_elems;
+        /* because sort the arrayKey->elem_values var, we must init value of scan_key->sk_argument again. */
+        arrayKey->scan_key->sk_argument = arrayKey->elem_values[0];
+        /* the first element is not null. */
+        arrayKey->scan_key->sk_flags &= ~SK_ISNULL;
+    }
+
+    /* scan->keyData will be used to scan cbtree, set the sorted condition. */
+    if (node->biss_ScanKeys && scan->numberOfKeys > 0) {
+        errno_t rc = memmove_s(scan->keyData, (size_t)scan->numberOfKeys * sizeof(ScanKeyData),
+            node->biss_ScanKeys, (size_t)scan->numberOfKeys * sizeof(ScanKeyData));
+        securec_check(rc, "\0", "\0");
+    }
+}
+

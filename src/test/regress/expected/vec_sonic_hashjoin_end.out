@@ -1,0 +1,22 @@
+DROP SCHEMA sonic_hashjoin_test_number cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table sonic_hashjoin_test_number.vec_hashjoin_table_01_num
+drop cascades to table sonic_hashjoin_test_number.vec_hashjoin_table_02_num
+drop cascades to table sonic_hashjoin_test_number.vec_hashjoin_table_03_num
+drop cascades to table sonic_hashjoin_test_number.vec_hashjoin_table_04_num
+DROP SCHEMA sonic_hashjoin_test_date cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table sonic_hashjoin_test_date.vec_hashjoin_table_01_date
+drop cascades to table sonic_hashjoin_test_date.vec_hashjoin_table_02_date
+drop cascades to table sonic_hashjoin_test_date.vec_hashjoin_table_03_date
+drop cascades to table sonic_hashjoin_test_date.vec_hashjoin_table_04_date
+DROP SCHEMA sonic_hashjoin_test_string cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table sonic_hashjoin_test_string.vec_hashjoin_table_string_01
+drop cascades to table sonic_hashjoin_test_string.vec_hashjoin_table_string_02
+drop cascades to table sonic_hashjoin_test_string.vec_hashjoin_table_string_03
+drop cascades to table sonic_hashjoin_test_string.vec_hashjoin_table_string_04
+DROP SCHEMA sonic_hashjoin_test_othertype cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table sonic_hashjoin_test_othertype.row_hashjoin_table_01_net
+drop cascades to table sonic_hashjoin_test_othertype.vec_hashjoin_table_01_net

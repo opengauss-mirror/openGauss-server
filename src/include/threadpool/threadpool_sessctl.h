@@ -27,37 +27,19 @@
 
 #include "storage/procsignal.h"
 #include "knl/knl_variable.h"
+#include "utils/tuplestore.h"
 
 #define MEMORY_CONTEXT_NAME_LEN 64
 #define PROC_NAME_LEN 64
 #define NUM_SESSION_MEMORY_DETAIL_ELEM 8
 #define NUM_THREAD_MEMORY_DETAIL_ELEM 9
-#define TOP_MEMORY_CONTEXT_CHILD_NUM 256
-#define TOTAL_MEMORY_CONTEXT_CHILD_NUM (g_instance.shmem_cxt.MaxBackends * TOP_MEMORY_CONTEXT_CHILD_NUM)
+#define NUM_SHARED_MEMORY_DETAIL_ELEM 6
 
-typedef struct SessionMemoryDetail {
-    char contextName[MEMORY_CONTEXT_NAME_LEN];
-    char parent[MEMORY_CONTEXT_NAME_LEN];
-    int64 totalSize;
-    int64 freeSize;
-    int64 usedSize;
-    int level;
-    uint64 sessId;
-    ThreadId threadId;
-    pg_time_t sessStartTime;
-    SessionMemoryDetail* next;
-} SessionMemoryDetail;
-
-typedef struct SessionMemoryDetailPad {
-    uint32 nelements;
-    SessionMemoryDetail* sessionMemoryDetail;
-} SessionMemoryDetailPad;
 
 typedef struct knl_sess_control {
-    knl_sess_control* prev;
-    knl_sess_control* next;
-    knl_session_context* sess;
+    Dlelem elem;
     int idx;  // session array index;
+    knl_session_context* sess;
     volatile sig_atomic_t lock;
 } knl_sess_control;
 
@@ -74,32 +56,24 @@ public:
     int CountDBSessions(Oid dbId);
     void SigHupHandler();
     void HandlePoolerReload();
-    SessionMemoryDetail* getSessionMemoryDetail(uint32* num);
+    void CheckSessionTimeout();
+    void CheckPermissionForSendSignal(knl_session_context* sess);
+    void getSessionMemoryDetail(Tuplestorestate* tupStore, TupleDesc tupDesc, knl_sess_control** sess);
     knl_session_context* GetSessionByIdx(int idx);
     int FindCtrlIdxBySessId(uint64 id);
+    TransactionId ListAllSessionGttFrozenxids(int maxSize, ThreadId *pids, TransactionId *xids, int *n);
+    bool IsActiveListEmpty();
 
     inline int GetActiveSessionCount()
     {
         return m_activeSessionCount;
     }
 
-    inline const knl_sess_control* GetSessionList()
-    {
-        return m_activelist;
-    }
-
-    inline pthread_mutex_t* GetSessionCtrlLock()
-    {
-        return &m_sessCtrlock;
-    }
-
 private:
     void recursiveSessMemCxt(
-        knl_session_context* sess, const MemoryContext context, SessionMemoryDetailPad* data, int groupcnt);
+        knl_session_context* sess, const MemoryContext context, Tuplestorestate* tupStore, TupleDesc tupDesc);
     void calculateSessMemCxtStats(
-        knl_session_context* sess, const MemoryContext context, SessionMemoryDetailPad* data, int groupcnt);
-    void createSessTempSmallCxtGroup(knl_session_context* sess, SessionMemoryDetailPad* data) const;
-    void getSessMemCxts(SessionMemoryDetailPad* data);
+        knl_session_context* sess, const MemoryContext context, Tuplestorestate* tupStore, TupleDesc tupDesc);
 
     inline bool IsValidCtrlIndex(int ctrl_index)
     {
@@ -126,8 +100,8 @@ private:
     int m_maxReserveSessionCount;
     /* session control structure. */
     knl_sess_control* m_base;
-    knl_sess_control* m_freelist;
-    knl_sess_control* m_activelist;
+    Dllist m_freelist;
+    Dllist m_activelist;
     pthread_mutex_t m_sessCtrlock;
 
     MemoryContext m_context;

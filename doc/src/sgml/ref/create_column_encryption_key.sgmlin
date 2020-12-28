@@ -1,0 +1,17 @@
+<refentry id="SQL-CREATE_COLUMN_ENCRYPTION_KEY">
+<refmeta>
+<refentrytitle>SQL-CREATE COLUMN ENCRYPTION KEY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE COLUMN ENCRYPTION KEY</refname>
+<refpurpose>create column encryption key</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE COLUMN ENCRYPTION KEY 
+     [WITH] ( ['CLIENT_MASTER_KEY' , 'ALGORITHM'] );
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -30,7 +30,7 @@
 #include "utils/aes.h"
 #include "utils/evp_cipher.h"
 
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 #include "port.h"
 #include "getopt_long.h"
 #include "pgxc/pgxc.h"
@@ -64,7 +64,7 @@ GS_UCHAR* trans_encrypt_iv = NULL;
 char* g_fi_ca_path = NULL;
 
 // tde algo
-TDE_ALGO g_tde_algo;
+TDE_ALGO g_tde_algo = TDE_ALGO_NULL;
 
 // the prefix of the output cipher/randfile
 char* g_prefix = NULL;
@@ -157,9 +157,9 @@ bool gs_decrypt_aes(GS_UCHAR* ciphertext, GS_UINT32 cipherlen, GS_UCHAR* key, GS
  */
 Datum gs_encrypt_aes128(PG_FUNCTION_ARGS)
 {
-    GS_UCHAR* key = NULL;
+    char* key = NULL;
     GS_UINT32 keylen = 0;
-    GS_UCHAR* plaintext = NULL;
+    char* plaintext = NULL;
     GS_UINT32 plaintextlen = 0;
     GS_UCHAR* ciphertext = NULL;
     GS_UINT32 ciphertextlen = 0;
@@ -180,17 +180,18 @@ Datum gs_encrypt_aes128(PG_FUNCTION_ARGS)
         ereport(ERROR,
             (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("The encryption key can not be empty!")));
     }
-    plaintext = (GS_UCHAR*)(text_to_cstring(PG_GETARG_TEXT_P(0)));
-    plaintextlen = strlen((const char*)plaintext);
-
-    key = (GS_UCHAR*)(text_to_cstring(PG_GETARG_TEXT_P(1)));
-    keylen = strlen((const char*)key);
+    
+    plaintext = text_to_cstring(PG_GETARG_TEXT_P(0));
+    plaintextlen = strlen(plaintext);
+    key = text_to_cstring(PG_GETARG_TEXT_P(1));
+    keylen = strlen(key);
 
     /* The input key must shorter than RANDOM_LEN(16) */
-    if (keylen > RANDOM_LEN) {
+    if (!check_input_password(key)) {
         ereport(ERROR,
             (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
-                errmsg("The encryption key must be shorter than 16 bytes!")));
+                errmsg("The encryption key must be %d~%d bytes and contain at least three kinds of characters!",
+                MIN_KEY_LEN, MAX_KEY_LEN)));
     }
 
     /*
@@ -206,7 +207,7 @@ Datum gs_encrypt_aes128(PG_FUNCTION_ARGS)
     securec_check(errorno, "\0", "\0");
 
     /* encrypt the plaintext to ciphertext */
-    retval = gs_encrypt_aes_speed(plaintext, key, ciphertext, &ciphertextlen);
+    retval = gs_encrypt_aes_speed((GS_UCHAR*)plaintext, (GS_UCHAR*)key, ciphertext, &ciphertextlen);
 
     errorno = memset_s(plaintext, plaintextlen, '\0', plaintextlen);
     securec_check(errorno, "\0", "\0");
@@ -235,7 +236,7 @@ Datum gs_encrypt_aes128(PG_FUNCTION_ARGS)
     }
     encodetextlen = strlen(encodetext);
 
-    outtext = cstring_to_text((char*)encodetext);
+    outtext = cstring_to_text(encodetext);
     errorno = memset_s(encodetext, encodetextlen, '\0', encodetextlen);
     securec_check(errorno, "\0", "\0");
     OPENSSL_free(encodetext);
@@ -386,7 +387,7 @@ bool gs_encrypt_aes_128(
     if ((NULL == g_prefix && NULL == g_key && NULL == g_vector) ||
         (NULL != g_prefix && is_prefix_in_key_mode((const char*)g_prefix))) {
         /* get a random values as salt for encrypt */
-        retval = RAND_bytes(init_rand, RANDOM_LEN);
+        retval = RAND_priv_bytes(init_rand, RANDOM_LEN);
         if (retval != 1) {
             (void)fprintf(stderr, _("generate random key failed, errcode:%u\n"), retval);
             return false;
@@ -405,71 +406,72 @@ bool gs_encrypt_aes_128(
         /* add init_rand to the end of ciphertext for decrypt */
         rc = memcpy_s(ciphertext + (*cipherlen), (Size)RANDOM_LEN, init_rand, (Size)RANDOM_LEN);
         securec_check(rc, "\0", "\0");
-    } else {
-        /* -f is not in key mode */
-        if (NULL != g_prefix) {
-            gausshome = gs_getenv_r("GAUSSHOME");
-            char real_gausshome[MAXPGPATH * 4] = {'\0'};  // 4096 bytes is more secure.
-
-            if (gausshome == NULL || realpath(gausshome, real_gausshome) == NULL ||
-                strlen(real_gausshome) >= MAXPGPATH) {
-                (void)fprintf(stderr, _("get environment of GAUSSHOME failed or GAUSSHOME is too long.\n"));
-                exit(1);
-            }
-            gausshome = real_gausshome;
-
-            check_backend_env(gausshome);
-            ret = snprintf_s(randfile, MAXPGPATH, MAXPGPATH - 1, "%s/bin/%s.key.rand", gausshome, g_prefix);
-            securec_check_ss(ret, "\0", "\0");
-            ret = snprintf_s(cipherfile, MAXPGPATH, MAXPGPATH - 1, "%s/bin/%s.key.cipher", gausshome, g_prefix);
-            securec_check_ss(ret, "\0", "\0");
-
-            gausshome = NULL;
-            /* get key from file */
-            status = getKeyVectorFromCipherFile(cipherfile, randfile, tmp_cipher, init_rand);
-            if (status) {
-                encryptstatus =
-                    aes128Encrypt(plaintext, plainlen, tmp_cipher, CIPHER_LEN, init_rand, ciphertext, cipherlen);
-                if (!encryptstatus) {
-                    return false;
-                }
-            }
-
-            if (!status) {
-                (void)fprintf(
-                    stderr, _("Failed to decrypt key from transparent encryption random file %s.\n"), randfile);
-                return false;
-            }
-
-            if (cipherbufferlen < ((size_t)(*cipherlen) + RANDOM_LEN)) {
-                (void)fprintf(stderr, _("ciphertext buffer is too small.\n"));
-                return false;
-            }
-            /* add init_rand to the end of ciphertext for decrypt */
-            rc = memcpy_s(ciphertext + (*cipherlen), (Size)RANDOM_LEN, init_rand, (Size)RANDOM_LEN);
-            securec_check(rc, "\0", "\0");
-        } else {
-            encryptstatus = aes128Encrypt(plaintext,
-                plainlen,
-                (GS_UCHAR*)g_key,
-                (GS_UINT32)g_key_len,
-                (GS_UCHAR*)g_vector,
-                ciphertext,
-                cipherlen);
-            if (!encryptstatus) {
-                return false;
-            }
-
-            if (((size_t)(*cipherlen) + (size_t)g_vector_len) > cipherbufferlen) {
-                (void)fprintf(stderr, _("ciphertext buffer is too small\n"));
-                return false;
-            }
-
-            /* add init_rand to the end of ciphertext for decrypt */
-            rc = memcpy_s(ciphertext + (*cipherlen), (Size)g_vector_len, g_vector, (Size)g_vector_len);
-            securec_check(rc, "\0", "\0");
+        return true;
+    } 
+        
+    /* -f is not in key mode */
+    if (NULL != g_prefix) {
+        gausshome = gs_getenv_r("GAUSSHOME");
+        char real_gausshome[PATH_MAX + 1] = {'\0'};
+        if (gausshome == NULL || realpath(gausshome, real_gausshome) == NULL) {
+            (void)fprintf(stderr, _("get environment of GAUSSHOME failed.\n"));
+            exit(1);
         }
+
+        check_backend_env(real_gausshome);
+        ret = snprintf_s(randfile, MAXPGPATH, MAXPGPATH - 1, "%s/bin/%s.key.rand", real_gausshome, g_prefix);
+        securec_check_ss(ret, "\0", "\0");
+        ret = snprintf_s(cipherfile, MAXPGPATH, MAXPGPATH - 1, "%s/bin/%s.key.cipher", real_gausshome, g_prefix);
+        securec_check_ss(ret, "\0", "\0");
+
+        /* get key from file */
+        status = getKeyVectorFromCipherFile(cipherfile, randfile, tmp_cipher, init_rand);
+        if (!status) {
+            rc = memset_s(tmp_cipher, sizeof(tmp_cipher), 0, sizeof(tmp_cipher));
+            securec_check(rc, "\0", "\0");
+            (void)fprintf(
+                stderr, _("Failed to decrypt key from transparent encryption random file %s.\n"), randfile);
+            return false;
+        }
+        encryptstatus =
+            aes128Encrypt(plaintext, plainlen, tmp_cipher, CIPHER_LEN, init_rand, ciphertext, cipherlen);
+        if (!encryptstatus) {
+            rc = memset_s(tmp_cipher, sizeof(tmp_cipher), 0, sizeof(tmp_cipher));
+            securec_check(rc, "\0", "\0");
+            return false;
+        }
+
+        if (cipherbufferlen < ((size_t)(*cipherlen) + RANDOM_LEN)) {
+            rc = memset_s(tmp_cipher, sizeof(tmp_cipher), 0, sizeof(tmp_cipher));
+            securec_check(rc, "\0", "\0");
+            (void)fprintf(stderr, _("ciphertext buffer is too small.\n"));
+            return false;
+        }
+        /* add init_rand to the end of ciphertext for decrypt */
+        rc = memcpy_s(ciphertext + (*cipherlen), (Size)RANDOM_LEN, init_rand, (Size)RANDOM_LEN);
+        securec_check(rc, "\0", "\0");
+        return true;
+    } 
+    
+    encryptstatus = aes128Encrypt(plaintext,
+        plainlen,
+        (GS_UCHAR*)g_key,
+        (GS_UINT32)g_key_len,
+        (GS_UCHAR*)g_vector,
+        ciphertext,
+        cipherlen);
+    if (!encryptstatus) {
+        return false;
     }
+
+    if (((size_t)(*cipherlen) + (size_t)g_vector_len) > cipherbufferlen) {
+        (void)fprintf(stderr, _("ciphertext buffer is too small\n"));
+        return false;
+    }
+
+    /* add init_rand to the end of ciphertext for decrypt */
+    rc = memcpy_s(ciphertext + (*cipherlen), (Size)g_vector_len, g_vector, (Size)g_vector_len);
+    securec_check(rc, "\0", "\0");
 
     return true;
 }
@@ -520,43 +522,58 @@ bool gs_decrypt_aes_128(GS_UCHAR* ciphertext, GS_UINT32 cipherlen, GS_UCHAR* key
  *	Encrypt plain text to cipher text.
  *	This function use aes128 to encrypt plain text,key comes from certificate file
  */
-void encryptOBS(const char* srcplaintext, char destciphertext[], uint32 destcipherlength)
+void encryptOBS(char* srcplaintext, char destciphertext[], uint32 destcipherlength)
 {
     errno_t rc = EOK;
 
-    GS_UINT32 cipher_text_len = 512;
-    GS_UINT32 encode_text_len = 0;
-    GS_UCHAR* cipher_text = NULL;
-    GS_UCHAR* decipher_key = NULL;
-    getOBSKeyString(&decipher_key);
+    GS_UINT32 ciphertextlen = 512;
+    GS_UCHAR* ciphertext = NULL;
+    GS_UCHAR* decipherkey = NULL;
+    getOBSKeyString(&decipherkey);
 
-    cipher_text = (GS_UCHAR*)palloc(cipher_text_len);
-    rc = memset_s(cipher_text, cipher_text_len, 0, cipher_text_len);
+    ciphertext = (GS_UCHAR*)palloc(ciphertextlen);
+    rc = memset_s(ciphertext, ciphertextlen, 0, ciphertextlen);
     securec_check(rc, "\0", "\0");
-    if (!gs_encrypt_aes_128((GS_UCHAR*)srcplaintext, decipher_key,
-        (GS_UINT32)strlen((const char*)decipher_key), cipher_text, &cipher_text_len)) {
+    if (!gs_encrypt_aes_128((GS_UCHAR*)srcplaintext, decipherkey,
+        (GS_UINT32)strlen((const char*)decipherkey), ciphertext, &ciphertextlen)) {
+        rc = memset_s(srcplaintext, strlen(srcplaintext) + 1, 0, strlen(srcplaintext) + 1);
+        securec_check(rc, "\0", "\0");
+        rc = memset_s(ciphertext, ciphertextlen, 0, ciphertextlen);
+        securec_check(rc, "\0", "\0");
+        pfree_ext(ciphertext);
+        rc = memset_s(decipherkey, RANDOM_LEN + 1, 0, RANDOM_LEN + 1);
+        securec_check(rc, "\0", "\0");
+        pfree_ext(decipherkey);
         ereport(ERROR, (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("Encrypt OBS AK/SK failed.")));
     }
 
-    char* encodetext = SEC_encodeBase64((char*)cipher_text, cipher_text_len + RANDOM_LEN);
+    char* encodetext = SEC_encodeBase64((char*)ciphertext, ciphertextlen + RANDOM_LEN);
 
     if (encodetext == NULL || destcipherlength < strlen(encodetext) + 1) {
+        rc = memset_s(srcplaintext, strlen(srcplaintext) + 1, 0, strlen(srcplaintext) + 1);
+        securec_check(rc, "\0", "\0");
+        rc = memset_s(ciphertext, ciphertextlen, 0, ciphertextlen);
+        securec_check(rc, "\0", "\0");
+        pfree_ext(ciphertext);
+        rc = memset_s(decipherkey, RANDOM_LEN + 1, 0, RANDOM_LEN + 1);
+        securec_check(rc, "\0", "\0");
+        pfree_ext(decipherkey);
         ereport(ERROR,
             (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("Encrypt OBS AK/SK internal error")));
     }
-    encode_text_len = strlen(encodetext);
-    rc = memcpy_s(destciphertext, destcipherlength, encodetext, (encode_text_len + 1));
+
+    rc = memcpy_s(destciphertext, destcipherlength, encodetext, (strlen(encodetext) + 1));
     securec_check(rc, "\0", "\0");
-    rc = memset_s(encodetext, encode_text_len + 1, 0, encode_text_len + 1);
+    rc = memset_s(encodetext, strlen(encodetext) + 1, 0, strlen(encodetext) + 1);
     securec_check(rc, "\0", "\0");
     OPENSSL_free(encodetext);
     encodetext = NULL;
-    rc = memset_s(cipher_text, cipher_text_len, 0, cipher_text_len);
+    rc = memset_s(ciphertext, ciphertextlen, 0, ciphertextlen);
     securec_check(rc, "\0", "\0");
-    pfree_ext(cipher_text);
-    rc = memset_s(decipher_key, RANDOM_LEN + 1, 0, RANDOM_LEN + 1);
+    pfree_ext(ciphertext);
+    rc = memset_s(decipherkey, RANDOM_LEN + 1, 0, RANDOM_LEN + 1);
     securec_check(rc, "\0", "\0");
-    pfree_ext(decipher_key);
+    pfree_ext(decipherkey);
 }
 
 /*
@@ -594,11 +611,20 @@ void decryptOBS(const char* srcciphertext, char destplaintext[], uint32 destplai
     securec_check(rc, "\0", "\0");
     if (!gs_decrypt_aes_128(ciphertext, decodetextlen, decipherkey,
         (GS_UINT32)strlen((const char*)decipherkey), plaintext, &plaintextlen)) {
+        rc = memset_s(decipherkey, RANDOM_LEN + 1, 0, RANDOM_LEN + 1);
+        securec_check(rc, "\0", "\0");
+        pfree_ext(decipherkey);
         ereport(ERROR, (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("Decrypt OBS AK/SK failed.")));
     }
 
     /* 1 byte for \0 */
     if (plaintextlen + 1 > destplainlength) {
+        rc = memset_s(decipherkey, RANDOM_LEN + 1, 0, RANDOM_LEN + 1);
+        securec_check(rc, "\0", "\0");
+        pfree_ext(decipherkey);
+        rc = memset_s(plaintext, decodetextlen, 0, decodetextlen);
+        securec_check(rc, "\0", "\0");
+        pfree_ext(plaintext);
         ereport(ERROR,
             (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("Decrypt OBS AK/SK internal error.")));
     }
@@ -642,16 +668,15 @@ void getOBSKeyString(GS_UCHAR** cipherKey)
      */
     LWLockAcquire(OBSGetPathLock, LW_SHARED);
     cipherpath = gs_getenv_r("GAUSSHOME");
-    char real_gausshome[PATH_MAX] = {'\0'};
-
+    char real_gausshome[PATH_MAX + 1] = {'\0'};
     LWLockRelease(OBSGetPathLock);
-    check_backend_env(cipherpath);
-    if (realpath(cipherpath, real_gausshome) == NULL) {
+    if (cipherpath == NULL || realpath(cipherpath, real_gausshome) == NULL) {
         (void)fprintf(stderr, _("Get environment of GAUSSHOME failed or it is invalid.\n"));
         ereport(ERROR,
             (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("Failed to get OBS certificate file.")));
     }
     cipherpath = real_gausshome;
+    check_backend_env(cipherpath);
 
     ret = snprintf_s(cipherkeyfile, MAXPGPATH, MAXPGPATH - 1, "%s/bin", cipherpath);
     securec_check_ss(ret, "\0", "\0");
@@ -667,10 +692,9 @@ void getOBSKeyString(GS_UCHAR** cipherKey)
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_FILE),
-                errmsg("No key file %s", isexistscipherkeyfile),
-                errhint("Please create %s file with gs_guc, such as : gs_guc generate -S XXX -D $GAUSSHOME/bin -o "
-                        "obsserver",
-                    isexistscipherkeyfile)));
+                errmsg("No key file obsserver.key.cipher"),
+                errhint("Please create obsserver.key.cipher file with gs_guc, such as : gs_guc generate -S XXX -D $GAUSSHOME/bin -o "
+                        "obsserver")));
     }
 }
 
@@ -699,7 +723,7 @@ bool gs_encrypt_aes_speed(GS_UCHAR* plaintext, GS_UCHAR* key, GS_UCHAR* cipherte
 
     if (random_salt_tag == false || random_salt_count > random_salt_count_max) {
         /* get a random values as salt for encrypt */
-        retval = RAND_bytes(init_rand, RANDOM_LEN);
+        retval = RAND_priv_bytes(init_rand, RANDOM_LEN);
         if (retval != 1) {
             (void)fprintf(stderr, _("generate random key failed,errcode:%u\n"), retval);
             return false;
@@ -813,9 +837,8 @@ static GS_UCHAR* getECKeyString(void)
      * Get cipher file and prepare the plain buffer
      */
     gshome = gs_getenv_r("GAUSSHOME");
-    char real_gausshome[PATH_MAX] = {'\0'};
-    check_backend_env(gshome);
-    if (realpath(gshome, real_gausshome) == NULL) {
+    char real_gausshome[PATH_MAX + 1] = {'\0'};
+    if (gshome == NULL || realpath(gshome, real_gausshome) == NULL) {
         ereport(ERROR,
             (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
                 errmsg("Failed to get EC certificate file: get env GAUSSHOME failed.")));
@@ -843,10 +866,9 @@ static GS_UCHAR* getECKeyString(void)
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_FILE),
-                errmsg("No key file %s", cipherfile),
-                errhint("Please create %s file with gs_guc and gs_ssh, such as : gs_ssh -c \"gs_guc generate -S XXX -D "
-                        "$GAUSSHOME/bin -o datasource\"",
-                    cipherfile)));
+                errmsg("No key file datasource.key.cipher"),
+                errhint("Please create datasource.key.cipher file with gs_guc and gs_ssh, such as : gs_ssh -c \"gs_guc generate -S XXX -D "
+                        "$GAUSSHOME/bin -o datasource\"")));
     }
     /*
      * Note: plainkey is of length RANDOM_LEN + 1
@@ -865,13 +887,12 @@ static GS_UCHAR* getECKeyString(void)
  * @IN dest_cipher_length: dest buffer length which is given by the caller
  * @RETURN: void
  */
-void encryptECString(const char* src_plain_text, char* dest_cipher_text, uint32 dest_cipher_length)
+void encryptECString(char* src_plain_text, char* dest_cipher_text, uint32 dest_cipher_length)
 {
-    GS_UINT32 cipher_text_len = 0;
-    GS_UCHAR cipher_text[1024];
-    GS_UCHAR* cipher_key = NULL;
-    char* encode_text = NULL;
-    GS_UINT32 encode_text_len = 0; 
+    GS_UINT32 ciphertextlen = 0;
+    GS_UCHAR ciphertext[1024];
+    GS_UCHAR* cipherkey = NULL;
+    char* encodetext = NULL;
     errno_t ret = EOK;
 
     if (NULL == src_plain_text) {
@@ -879,19 +900,27 @@ void encryptECString(const char* src_plain_text, char* dest_cipher_text, uint32 
     }
 
     /* First, get encrypt key */
-    cipher_key = getECKeyString();
+    cipherkey = getECKeyString();
 
     /* Clear cipher buffer which will be used later */
-    ret = memset_s(cipher_text, sizeof(cipher_text), 0, sizeof(cipher_text));
+    ret = memset_s(ciphertext, sizeof(ciphertext), 0, sizeof(ciphertext));
     securec_check(ret, "\0", "\0");
 
     /*
      * Step-1: Cipher
      * 	src_text with cipher key -> cipher text
      */
-    cipher_text_len = (GS_UINT32)sizeof(cipher_text);
-    if (!gs_encrypt_aes_128((GS_UCHAR*)src_plain_text, cipher_key,
-        (GS_UINT32)strlen((const char*)cipher_key), cipher_text, &cipher_text_len)) {
+    ciphertextlen = (GS_UINT32)sizeof(ciphertext);
+    if (!gs_encrypt_aes_128((GS_UCHAR*)src_plain_text, cipherkey,
+        (GS_UINT32)strlen((const char*)cipherkey), ciphertext, &ciphertextlen)) {
+        ret = memset_s(src_plain_text, strlen(src_plain_text), 0, strlen(src_plain_text));
+        securec_check(ret, "\0", "\0");            
+        ret = memset_s(ciphertext, sizeof(ciphertext), 0, sizeof(ciphertext));
+        securec_check(ret, "\0", "\0");
+        ret = memset_s(cipherkey, RANDOM_LEN + 1, 0, RANDOM_LEN + 1);
+        securec_check(ret, "\0", "\0");
+        pfree_ext(src_plain_text);
+        pfree_ext(cipherkey);
         ereport(
             ERROR, (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("encrypt the EC string failed!")));
     }
@@ -900,36 +929,49 @@ void encryptECString(const char* src_plain_text, char* dest_cipher_text, uint32 
      * Step-2: Encode
      * 	cipher text by Base64 -> encode text
      */
-    encode_text = SEC_encodeBase64((char*)cipher_text, cipher_text_len + RANDOM_LEN);
+    encodetext = SEC_encodeBase64((char*)ciphertext, ciphertextlen + RANDOM_LEN);
 
     /* Check dest buffer length */
-    if (encode_text == NULL || dest_cipher_length < strlen(EC_ENCRYPT_PREFIX) + strlen(encode_text) + 1) {
+    if (encodetext == NULL || dest_cipher_length < strlen(EC_ENCRYPT_PREFIX) + strlen(encodetext) + 1) {
+        if (encodetext != NULL) {
+            ret = memset_s(encodetext, strlen(encodetext), 0, strlen(encodetext));
+            securec_check(ret, "\0", "\0");
+            OPENSSL_free(encodetext);
+            encodetext = NULL;
+        }
+        ret = memset_s(src_plain_text, strlen(src_plain_text), 0, strlen(src_plain_text));
+        securec_check(ret, "\0", "\0");
+        ret = memset_s(ciphertext, sizeof(ciphertext), 0, sizeof(ciphertext));
+        securec_check(ret, "\0", "\0");
+        ret = memset_s(cipherkey, RANDOM_LEN + 1, 0, RANDOM_LEN + 1);
+        securec_check(ret, "\0", "\0");
+        pfree_ext(src_plain_text);
+        pfree_ext(cipherkey);
         ereport(ERROR,
             (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
                 errmsg("Encrypt EC internal error: dest cipher length is too short.")));
     }
-	
-    encode_text_len = strlen(encode_text);
+
     /* Copy the encrypt string into the dest buffer */
     ret = memcpy_s(dest_cipher_text, dest_cipher_length, EC_ENCRYPT_PREFIX, strlen(EC_ENCRYPT_PREFIX));
     securec_check(ret, "\0", "\0");
     ret = memcpy_s(dest_cipher_text + strlen(EC_ENCRYPT_PREFIX),
         dest_cipher_length - strlen(EC_ENCRYPT_PREFIX),
-        encode_text,
-        encode_text_len + 1);
+        encodetext,
+        strlen(encodetext) + 1);
     securec_check(ret, "\0", "\0");
 
     /* Clear buffer for safety's sake */
-    ret = memset_s(encode_text, encode_text_len, 0, encode_text_len);
+    ret = memset_s(encodetext, strlen(encodetext), 0, strlen(encodetext));
     securec_check(ret, "\0", "\0");
-    ret = memset_s(cipher_text, sizeof(cipher_text), 0, sizeof(cipher_text));
+    ret = memset_s(ciphertext, sizeof(ciphertext), 0, sizeof(ciphertext));
     securec_check(ret, "\0", "\0");
-    ret = memset_s(cipher_key, RANDOM_LEN + 1, 0, RANDOM_LEN + 1);
+    ret = memset_s(cipherkey, RANDOM_LEN + 1, 0, RANDOM_LEN + 1);
     securec_check(ret, "\0", "\0");
 
-    OPENSSL_free(encode_text);
-    encode_text = NULL;
-    pfree_ext(cipher_key);
+    OPENSSL_free(encodetext);
+    encodetext = NULL;
+    pfree_ext(cipherkey);
 }
 
 /*
@@ -968,12 +1010,32 @@ void decryptECString(const char* src_cipher_text, char* dest_plain_text, uint32 
     /* Step-2: Decipher */
     if (!gs_decrypt_aes_128(ciphertext, ciphertextlen, cipherkey,
         (GS_UINT32)strlen((const char*)cipherkey), plaintext, &plaintextlen)) {
+        ret = memset_s(plaintext, plaintextlen, 0, plaintextlen);
+        securec_check(ret, "\0", "\0");
+        ret = memset_s(cipherkey, RANDOM_LEN + 1, 0, RANDOM_LEN + 1);
+        securec_check(ret, "\0", "\0");
+        ret = memset_s(ciphertext, ciphertextlen, 0, ciphertextlen);
+        securec_check(ret, "\0", "\0");
+        pfree_ext(plaintext);
+        pfree_ext(cipherkey);
+        OPENSSL_free(ciphertext);
+        ciphertext = NULL;
         ereport(
             ERROR, (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("decrypt the EC string failed!")));
     }
 
     /* Check dest buffer length */
     if (plaintextlen > dest_plain_length) {
+        ret = memset_s(plaintext, plaintextlen, 0, plaintextlen);
+        securec_check(ret, "\0", "\0");
+        ret = memset_s(cipherkey, RANDOM_LEN + 1, 0, RANDOM_LEN + 1);
+        securec_check(ret, "\0", "\0");
+        ret = memset_s(ciphertext, ciphertextlen, 0, ciphertextlen);
+        securec_check(ret, "\0", "\0");
+        pfree_ext(plaintext);
+        pfree_ext(cipherkey);
+        OPENSSL_free(ciphertext);
+        ciphertext = NULL;
         ereport(ERROR,
             (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
                 errmsg("Decrypt EC internal error: dest plain length is too short.")));
@@ -1133,12 +1195,18 @@ void add_fi_ca_cert()
     if (g_fi_ca_path != NULL) {
         return;
     }
+
     char* node_agent_env = gs_getenv_r("NODE_AGENT_HOME");
-    if (node_agent_env == NULL) {
-        ereport(WARNING, (errmsg("Transparent encryption Getting environment variable NODE_AGENT_HOME.")));
-        return;
+    char real_node_agent_home[PATH_MAX + 1] = {'\0'};
+    if (node_agent_env == NULL || realpath(node_agent_env, real_node_agent_home) == NULL) {
+        (void)fprintf(stderr, _("Transparent encryption get environment variable NODE_AGENT_HOME failed.\n"));
+        ereport(ERROR,
+            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
+                errmsg("Transparent encryption Getting environment variable NODE_AGENT_HOME failed.\n")));
     }
+    node_agent_env = real_node_agent_home;    
     check_backend_env(node_agent_env);
+    
     g_fi_ca_path = (char*)palloc0(MAXPGPATH);
     int ret =
         snprintf_s(g_fi_ca_path, MAXPGPATH, MAXPGPATH - 1, "%s/security/cert/subcert/certFile/ca.crt", node_agent_env);
@@ -1149,10 +1217,16 @@ void add_fi_ca_cert()
 void init_the_kerberos_env()
 {
     char* gaussdb_krb5_env = gs_getenv_r("MPPDB_KRB5_FILE_PATH");
-    if (gaussdb_krb5_env == NULL) {
-        ereport(WARNING, (errmsg("Transparent encryption Getting environment variable MPPDB_KRB5_FILE_PATH NULL.")));
-        return;
+
+    char real_mppdb_krb5_file_path[PATH_MAX + 1] = {'\0'};
+    if (gaussdb_krb5_env == NULL || realpath(gaussdb_krb5_env, real_mppdb_krb5_file_path) == NULL) {
+        (void)fprintf(stderr, _("Transparent encryption Getting environment variable MPPDB_KRB5_FILE_PATH failed.\n"));
+        ereport(ERROR,
+            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
+                errmsg("Transparent encryption Getting environment variable MPPDB_KRB5_FILE_PATH failed.\n")));
     }
+    gaussdb_krb5_env = real_mppdb_krb5_file_path;
+
     check_backend_env(gaussdb_krb5_env);
     krb5_set_profile_path(gaussdb_krb5_env);
 
@@ -1170,18 +1244,19 @@ static void do_help(void)
     (void)printf(_("Usage:\n"));
     (void)printf(_("  %s [OPTION]... PLAINTEXT\n"), pgname);
     (void)printf(_("\nGeneral options:\n"));
-    (void)printf(_("  -?, --help                   show this help, then exit.\n"));
-    (void)printf(_("  -V, --version                output version information, then exit.\n"));
-    (void)printf(_("  -k, --key=Value              the key value for AES128.\n"));
-    (void)printf(_("  -v, --vector=Value           the random value for AES128.\n"));
-    (void)printf(_("  -f, --file-prefix=Value      the cipher files prefix.\n"));
-    (void)printf(_("  -B, --key-base64=Value       the key value encoded in base64.\n"));
-    (void)printf(_("  -D, --vector-base64=Value    the random value encoded in base64.\n"));
-    (void)printf(_("  -N, --key-name=value         the cluster key name in KMS.\n"));
-    (void)printf(_("  -U, --kms-url-=value         the kms internet address.for "
+    (void)printf(_("  -?, --help                        show this help, then exit.\n"));
+    (void)printf(_("  -V, --version                     output version information, then exit.\n"));
+    (void)printf(_("  -k, --key=PASSWORD                the password for AES128.\n"));
+    (void)printf(_("  -v, --vector=VectorValue          the random vector for AES128.\n"));
+    (void)printf(_("  -f, --file-prefix=FilePrefix      the cipher files prefix.\n"));
+    (void)printf(_("  -B, --key-base64=Value            the key value encoded in base64.\n"));
+    (void)printf(_("  -D, --vector-base64=Value         the random value encoded in base64.\n"));
+    (void)printf(_("  -N, --key-name=Value              the cluster key name in KMS.\n"));
+    (void)printf(_("  -U, --kms-url-=Value              the kms internet address. for "
                    "example,\"kms://https@host2;host3:29800/kms\".\n"));
-    (void)printf(_("  -I, --init=value             init the tde key.the value must be SM4-CTR-128 or AES-CTR-128.\n"));
-    (void)printf(_("  PLAINTEXT                    the plain text you want to encrypt.\n"));
+    (void)printf(_("  -I, --init=Value                  init the tde key. " 
+                   "the value must be SM4-CTR-128 or AES-CTR-128.\n"));
+    (void)printf(_("  PLAINTEXT                         the plain text you want to encrypt.\n"));
 }
 
 /*
@@ -1252,8 +1327,7 @@ int encrypte_main(int argc, char* const argv[])
     GS_UCHAR* plaintext = NULL;
     GS_UCHAR* ciphertext = NULL;
     GS_UINT32 ciphertextlen = 0;
-    char* encode_text = NULL;
-    GS_UINT32 encode_text_len = 0;
+    char* encodetext = NULL;
     GS_UCHAR* decipherkey = NULL;
     char* kmsurl = NULL;
     char* keyname = NULL;
@@ -1314,7 +1388,7 @@ int encrypte_main(int argc, char* const argv[])
                     (void)fprintf(stderr, _("%s: mask passwd failed. optarg is null, or out of memory!\n"), pgname);
                     do_advice();
                     exit(1);
-                };
+                }
                 g_key_len = (int)strlen(g_key);
                 break;
             }
@@ -1325,15 +1399,23 @@ int encrypte_main(int argc, char* const argv[])
 
                 decoded_key = (GS_UCHAR*)SEC_decodeBase64(optarg, &decodelen);
 
+                if (0 == strlen(optarg) || !mask_single_passwd(optarg)) {
+                    (void)fprintf(stderr, _("%s: mask base64 encoded key failed. optarg is null, or out of memory!\n"), 
+                        pgname);
+                    do_advice();
+                    exit(1);
+                }
+
                 if (decoded_key == NULL || decodelen == 0) {
                     (void)fprintf(stderr, _("%s: failed to decode base64 encoded key.\n"), pgname);
                     do_advice();
                     exit(1);
                 }
 
-                g_key = (char*)decoded_key;
+                g_key = gs_strdup((char *)decoded_key);
+                OPENSSL_free(decoded_key);
+                decoded_key = NULL;
                 g_key_len = (int)decodelen;
-
                 break;
             }
             case 'D': {
@@ -1355,11 +1437,14 @@ int encrypte_main(int argc, char* const argv[])
                     do_advice();
                     exit(1);
                 }
-                g_vector = (char*)decoded_vector;
+                g_vector = gs_strdup((char *)decoded_vector);
+                OPENSSL_free(decoded_vector);
+                decoded_vector = NULL;
                 g_vector_len = (int)decodelen;
                 break;
             }
             case 'N': {
+                GS_FREE(keyname);
                 keyname = gs_strdup(optarg);
                 if (keyname == NULL) {
                     (void)fprintf(stderr, _("%s: Key name is wrrong,it must be usable!\n"), pgname);
@@ -1369,6 +1454,7 @@ int encrypte_main(int argc, char* const argv[])
                 break;
             }
             case 'U': {
+                GS_FREE(kmsurl);
                 kmsurl = gs_strdup(optarg);
                 if (kmsurl == NULL) {
                     (void)fprintf(
@@ -1379,6 +1465,7 @@ int encrypte_main(int argc, char* const argv[])
                 break;
             }
             case 'I': {
+                GS_FREE(tdealgo);
                 tdealgo = gs_strdup(optarg);
                 if (tdealgo == NULL || !is_prefix_in_key_mode(tdealgo)) {
                     (void)fprintf(stderr,
@@ -1429,7 +1516,10 @@ int encrypte_main(int argc, char* const argv[])
         }
         exit(0);
     }
-
+    if (tdealgo != NULL) {
+        free(tdealgo);
+        tdealgo = NULL;
+    }
     if (kmsurl != NULL) {
         free(kmsurl);
         kmsurl = NULL;
@@ -1438,10 +1528,15 @@ int encrypte_main(int argc, char* const argv[])
         free(keyname);
         keyname = NULL;
     }
-
     /* Get plaintext from command line */
     if (optind < argc) {
-        plaintext = (GS_UCHAR*)argv[optind++];
+        plaintext = (GS_UCHAR*)gs_strdup(argv[optind]);
+        if (!mask_single_passwd(argv[optind])) {
+            (void)fprintf(stderr, _("%s: mask plaintext failed. optarg is null, or out of memory!\n"), pgname);
+            do_advice();
+            exit(1);
+        }
+        optind++;
     }
 
     /* Complain if any arguments remain */
@@ -1449,12 +1544,14 @@ int encrypte_main(int argc, char* const argv[])
         (void)fprintf(stderr, _("%s: too many command-line arguments (first is \"%s\")\n"), pgname, argv[optind]);
         (void)fprintf(stderr, _("Try \"%s --help\" for more information.\n"), pgname);
         free_global_value();
+        GS_FREE(plaintext);
         exit(1);
     }
 
     if (NULL == plaintext || 0 == strlen((char*)plaintext)) {
         (void)fprintf(stderr, _("%s: options PLAINTEXT must be input and it is not null\n"), pgname);
         free_global_value();
+        GS_FREE(plaintext);
         exit(1);
     }
 
@@ -1462,29 +1559,39 @@ int encrypte_main(int argc, char* const argv[])
     if ((NULL == g_key && NULL != g_vector) || (NULL != g_key && NULL == g_vector)) {
         (void)fprintf(stderr, _("%s: key and vector should be both specified.\n"), pgname);
         free_global_value();
+        GS_FREE(plaintext);
         exit(1);
     }
 
     if (NULL != g_prefix && (NULL != g_key || NULL != g_vector)) {
         (void)fprintf(stderr, _("%s: key/vector and cipher files cannot be used together.\n"), pgname);
         free_global_value();
+        GS_FREE(plaintext);
         exit(1);
     }
 
-    cipherpath = gs_getenv_r("GAUSSHOME");
-    char real_gausshome[PATH_MAX] = {'\0'};
-    check_backend_env(cipherpath);
-    if (realpath(cipherpath, real_gausshome) == NULL) {
+    if (g_key != NULL && !check_input_password(g_key)) {
+        (void)fprintf(stderr, _("%s: The input key must be %d~%d bytes and "
+            "contain at least three kinds of characters!\n"),
+            pgname, MIN_KEY_LEN, MAX_KEY_LEN);
+        free_global_value();
+        GS_FREE(plaintext);
+        exit(1);
+    }
+
+    cipherpath = getGaussHome();
+    if (cipherpath == NULL) {
         (void)fprintf(stderr, _("get environment of GAUSSHOME failed.\n"));
         free_global_value();
+        GS_FREE(plaintext);
         return -1;
     }
-    cipherpath = real_gausshome;
 
     char* tmp_cipherpath = (char*)malloc(strlen(cipherpath) + 1);
     if (tmp_cipherpath == NULL) {
         (void)fprintf(stderr, _("memory is temporarily unavailable.\n"));
         free_global_value();
+        GS_FREE(plaintext);
         return -1;
     }
 
@@ -1510,6 +1617,7 @@ int encrypte_main(int argc, char* const argv[])
             free(tmp_cipherpath);
             tmp_cipherpath = NULL;
             free_global_value();
+            GS_FREE(plaintext);
             exit(1);
         }
     } else {
@@ -1562,32 +1670,31 @@ int encrypte_main(int argc, char* const argv[])
         goto ENCRYPTE_MAIN_EXIT;
     }
 
-    encode_text = SEC_encodeBase64((char*)ciphertext, ciphertextlen + RANDOM_LEN);
-    if (NULL == encode_text) {
+    encodetext = SEC_encodeBase64((char*)ciphertext, ciphertextlen + RANDOM_LEN);
+    if (NULL == encodetext) {
         (void)fprintf(stderr, _("Encrypt input text internal error.\n"));
         result = -1;
         goto ENCRYPTE_MAIN_EXIT;
     }
 
-    encode_text_len = strlen(encode_text);
-    if (CIPHERTEXT_LEN < encode_text_len + 1) {
+    if (CIPHERTEXT_LEN < strlen(encodetext) + 1) {
         (void)fprintf(stderr, _("Encrypt input text internal error.\n"));
         result = -1;
         goto ENCRYPTE_MAIN_EXIT;
     }
 
-    ret = memcpy_s(destciphertext, CIPHERTEXT_LEN, encode_text, (encode_text_len + 1));
+    ret = memcpy_s(destciphertext, CIPHERTEXT_LEN, encodetext, (strlen(encodetext) + 1));
     securec_check(ret, "\0", "\0");
 
     (void)fprintf(stdout, _("%s\n"), destciphertext);
 
 ENCRYPTE_MAIN_EXIT:
     /* clean all footprint for security. */
-    if (encode_text != NULL) {
-        ret = memset_s(encode_text, encode_text_len + 1, 0, encode_text_len + 1);
+    if (encodetext != NULL) {
+        ret = memset_s(encodetext, strlen(encodetext) + 1, 0, strlen(encodetext) + 1);
         securec_check(ret, "\0", "\0");
-        OPENSSL_free(encode_text);
-        encode_text = NULL;
+        OPENSSL_free(encodetext);
+        encodetext = NULL;
     }
 
     if (ciphertext != NULL) {
@@ -1605,6 +1712,7 @@ ENCRYPTE_MAIN_EXIT:
     }
 
     free_global_value();
+    GS_FREE(plaintext);
 
     return result;
 }
@@ -1615,7 +1723,7 @@ ENCRYPTE_MAIN_EXIT:
  * vector: must be with length of CIPHER_LEN + 1.
  *         Which is the random of cipherkeyfile.
  */
-bool getKeyVectorFromCipherFile(char* cipherkeyfile, const char* cipherrndfile, GS_UCHAR* key, GS_UCHAR* vector)
+bool getKeyVectorFromCipherFile(const char* cipherkeyfile, const char* cipherrndfile, GS_UCHAR* key, GS_UCHAR* vector)
 {
     GS_UINT32 plainlen = 0;
     RandkeyFile rand_file_content;
@@ -1624,6 +1732,8 @@ bool getKeyVectorFromCipherFile(char* cipherkeyfile, const char* cipherrndfile, 
 
     if (!ReadContentFromFile(cipherkeyfile, &cipher_file_content, sizeof(cipher_file_content)) ||
         !ReadContentFromFile(cipherrndfile, &rand_file_content, sizeof(rand_file_content))) {
+        ClearCipherKeyFile(&cipher_file_content);
+        ClearRandKeyFile(&rand_file_content);
         (void)fprintf(stderr,
             _("Failed to read contents of cipher files of transparent encryption: %s, %s.\n"),
             cipherkeyfile,
@@ -1861,17 +1971,22 @@ bool getAkSkForTransEncrypt(char* ak, int akbuflen, char* sk, int skbuflen)
 char* getGaussHome()
 {
     char* tmp = NULL;
-    char* danger_token[] = {"|", ";", "&", "$", "<", ">", "`", "\\", "!", "\n", NULL};
+    char* danger_token[] = {";", "`", "\\", "'", "\"", ">", "<", "$", "&", "|", "!", "\n", NULL};
     const int MAX_GAUSSHOME_LEN = 4096;
 
     tmp = gs_getenv_r("GAUSSHOME");
-    if (NULL == tmp) {
-        ereport(WARNING, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("get environment of GAUSSHOME failed.\n")));
+    char real_gausshome[PATH_MAX + 1] = {'\0'};
+    if (tmp == NULL || realpath(tmp, real_gausshome) == NULL) {
+        (void)fprintf(stderr, _("Get environment of GAUSSHOME failed.\n"));
+        ereport(ERROR,
+            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
+                errmsg("Get environment of GAUSSHOME failed.\n")));
         return NULL;
     }
+    tmp = real_gausshome;
 
     if (strlen(tmp) > MAX_GAUSSHOME_LEN) {
-        ereport(WARNING, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("environment of GAUSSHOME is too long.\n")));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("environment of GAUSSHOME is too long.\n")));
         return NULL;
     }
 
@@ -1880,18 +1995,36 @@ char* getGaussHome()
     securec_check(rc, "\0", "\0");
 
     if ('\0' == *tmp_tmp) {
-        ereport(WARNING, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("$GAUSSHOME is not set or it's NULL.\n")));
-        return tmp_tmp;
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("$GAUSSHOME is not set or it's NULL.\n")));
+        return NULL;
     }
     for (int i = 0; danger_token[i] != NULL; ++i) {
         if (strstr(tmp_tmp, danger_token[i])) {
-            ereport(WARNING,
+            ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("Invalid character '%s' in $GAUSSHOME.\n", danger_token[i])));
+            return NULL;
         }
     }
 
     return tmp_tmp;
+}
+
+/* 
+ * check kms url and region variables for TDE, kms_url and kms_region should not be null or '\0'.
+ */
+
+static inline void CheckKmsUrlRegin()
+{
+    if (NULL == g_instance.attr.attr_common.transparent_encrypt_kms_url ||
+        '\0' == g_instance.attr.attr_common.transparent_encrypt_kms_url[0] ||
+        NULL == g_instance.attr.attr_security.transparent_encrypt_kms_region ||
+        '\0' == g_instance.attr.attr_security.transparent_encrypt_kms_region[0]) {
+        ereport(PANIC,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("transparent_encrypt_kms_url and transparent_encrypt_kms_region should not be empty when "
+                       "transparent encryption enabled.\n")));
+    }
 }
 
 /*
@@ -1919,18 +2052,10 @@ void getTransEncryptDEK(GS_UCHAR* dek)
     GS_UCHAR* decodedkey = NULL;
     GS_UINT32 decodedlen = 0;
 
-    if (NULL == g_instance.attr.attr_common.transparent_encrypt_kms_url ||
-        '\0' == g_instance.attr.attr_common.transparent_encrypt_kms_url[0] ||
-        NULL == g_instance.attr.attr_security.transparent_encrypt_kms_region ||
-        '\0' == g_instance.attr.attr_security.transparent_encrypt_kms_region[0]) {
-        ereport(PANIC,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("transparent_encrypt_kms_url and transparent_encrypt_kms_region should not be empty when "
-                       "transparent encryption enabled.\n")));
-    }
+    CheckKmsUrlRegin();
 
     if (!getAkSkForTransEncrypt(ak, sizeof(ak), sk, sizeof(sk))) {
-        ereport(PANIC,
+        ereport(ERROR,
             (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
                 errmsg("Failed to get ak/sk for transparent encryption.\n")));
     }
@@ -1962,9 +2087,9 @@ void getTransEncryptDEK(GS_UCHAR* dek)
     rc = snprintf_s(cmd,
         MAX_CMD_LEN,
         MAX_CMD_LEN - 1,
-        "export JAVA_HOME=$GAUSSHOME/jdk;export JRE_HOME=$JAVA_HOME/jre;export "
+        "export JRE_HOME=$GAUSSHOME/jre;export "
         "LD_LIBRARY_PATH=$JRE_HOME/lib/amd64/server:$LD_LIBRARY_PATH;export "
-        "PATH=$JAVA_HOME/bin:$JRE_HOME/bin:$PATH;java -jar \"%s/bin/getDEK.jar\" \"%s\" \"%s\" \"%s\" \"%s\"",
+        "PATH=$JRE_HOME/bin:$PATH;java -jar \"%s/bin/getDEK.jar\" \"%s\" \"%s\" \"%s\" \"%s\"",
         gausshome,
         url,
         region,
@@ -1977,9 +2102,9 @@ void getTransEncryptDEK(GS_UCHAR* dek)
     rc = snprintf_s(cmd_log,
         MAX_CMD_LEN,
         MAX_CMD_LEN - 1,
-        "export JAVA_HOME=$GAUSSHOME/jdk;export JRE_HOME=$JAVA_HOME/jre;export "
+        "export JRE_HOME=$GAUSSHOME/jre;export "
         "LD_LIBRARY_PATH=$JRE_HOME/lib/amd64/server:$LD_LIBRARY_PATH;export "
-        "PATH=$JAVA_HOME/bin:$JRE_HOME/bin:$PATH;java -jar \"%s/bin/getDEK.jar\" \"%s\" \"%s\" \"ak\" \"sk\"",
+        "PATH=$JRE_HOME/bin:$PATH;java -jar \"%s/bin/getDEK.jar\" \"%s\" \"%s\" \"ak\" \"sk\"",
         gausshome,
         url,
         region);
@@ -2000,7 +2125,7 @@ void getTransEncryptDEK(GS_UCHAR* dek)
 
         pfree_ext(get_result);
 
-        ereport(PANIC,
+        ereport(ERROR,
             (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
                 errmsg("Failed to fork subprocess to get DEK for transparent encryption. Failure command is: [%s]\n",
                     cmd_log)));
@@ -2012,11 +2137,11 @@ void getTransEncryptDEK(GS_UCHAR* dek)
 
     /* If any error occurs, getDEK.jar will give a message starts with "ERROR:". */
     if (0 == i || strncmp(get_result, "ERROR:", 6) == 0) {
-        ereport(PANIC,
+        ereport(ERROR,
             (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
                 errmsg("Failed to get DEK for transparent encryption. Failure command is [%s], error message is [%s]\n",
                     cmd_log,
-                    (0 == i ? "<NULL>" : get_result))));
+                    ((i == 0) ? "<NULL>" : get_result))));
     }
 
     if (get_result[i - 1] == '\n') {
@@ -2027,7 +2152,7 @@ void getTransEncryptDEK(GS_UCHAR* dek)
 
     /* Here we failed to decode DEK, so get_result must be error message. */
     if (NULL == decodedkey || decodedlen != DEK_LEN) {
-        ereport(PANIC,
+        ereport(ERROR,
             (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
                 errmsg("Failed to get decode DEK for transparent encryption. Failure content is [%s].\n", get_result)));
     } else {
@@ -2076,10 +2201,8 @@ static void testDEK(GS_UCHAR* dek)
     plaintext = (GS_UCHAR*)palloc0(decodelen);
 
     if (!gs_decrypt_aes_128(encrypted_sample_string, decodelen, dek, DEK_LEN, plaintext, &plainlen)) {
-        if (encrypted_sample_string != NULL) {
-            OPENSSL_free(encrypted_sample_string);
-            encrypted_sample_string = NULL;
-        }
+        OPENSSL_free(encrypted_sample_string);
+        encrypted_sample_string = NULL;
         pfree_ext(plaintext);
         ereport(PANIC,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -2108,7 +2231,7 @@ bool getAndCheckTranEncryptDEK()
 
     /* Transparent encryption disabled. */
     if (!isEncryptedCluster()) {
-        ereport(LOG, (errmsg("Transparent encryption disabled.")));
+        ereport(LOG, (errmsg("Transparent encryption disabled.\n")));
         return true;
     }
 
@@ -2171,6 +2294,7 @@ bool getAndCheckTranEncryptDEK()
 
         if (!table_a_key.check_key((unsigned char*)dek)) {
             ereport(WARNING, (errmsg("Transparent encryption get key failed.\n")));
+            return false;
         }
 
         table_a_key.getIV(trans_encrypt_iv);
@@ -2190,12 +2314,12 @@ bool isEncryptedCluster()
 {
     if (isSecurityMode && (g_instance.attr.attr_security.transparent_encrypted_string == NULL ||
                               *g_instance.attr.attr_security.transparent_encrypted_string == '\0')) {
-        ereport(DEBUG5, (errmsg("Transparent encryption disabled in DWS.")));
+        ereport(DEBUG5, (errmsg("Transparent encryption disabled in DWS.\n")));
         return false;
 
     } else if ((!isSecurityMode) && (g_instance.attr.attr_common.transparent_encrypt_kms_url == NULL ||
                                         *g_instance.attr.attr_common.transparent_encrypt_kms_url == '\0')) {
-        ereport(DEBUG5, (errmsg("Transparent encryption disabled in GaussDB.")));
+        ereport(DEBUG5, (errmsg("Transparent encryption disabled in GaussDB.\n")));
         return false;
     }
 

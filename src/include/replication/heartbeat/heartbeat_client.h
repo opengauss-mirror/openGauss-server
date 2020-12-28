@@ -47,4 +47,3 @@ private:
 };
 
 #endif /* _HEARTBEAT_CLIENT_H */
-

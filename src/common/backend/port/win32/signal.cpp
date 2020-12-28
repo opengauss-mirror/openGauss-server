@@ -51,7 +51,7 @@ static BOOL WINAPI pg_console_handler(DWORD dwCtrlType);
  */
 void pg_usleep(long microsec)
 {
-    if (WaitForSingleObject(pgwin32_signal_event, (microsec < 500 ? 1 : (microsec + 500) / 1000)) == WAIT_OBJECT_0) {
+    if (WaitForSingleObject(pgwin32_signal_event, ((microsec < 500) ? 1 : ((microsec + 500) / 1000))) == WAIT_OBJECT_0) {
         pgwin32_dispatch_queued_signals();
         errno = EINTR;
         return;
@@ -80,7 +80,7 @@ void pgwin32_signal_initialize(void)
 
     /* Create thread for handling signals */
     signal_thread_handle = CreateThread(NULL, 0, pg_signal_thread, NULL, 0, NULL);
-    if (signal_thread_handle == NULL)
+    if (signal_thread_handle == INVALID_HANDLE_VALUE)
         ereport(FATAL, (errmsg_internal("could not create signal handler thread")));
 
     /* Create console control handle to pick up Ctrl-C etc */
@@ -160,7 +160,7 @@ HANDLE pgwin32_create_signal_listener(pid_t pid)
     char pipename[128];
     HANDLE pipe = NULL;
 
-    int rcs = snprintf_s(pipename, sizeof(pipename), sizeof(pipename) - 1, "\\\\.\\pipe\\pgsignal_%d", pid);
+    int rcs = snprintf_s(pipename, sizeof(pipename), sizeof(pipename) - 1, "\\\\.\\pipe\\pgsignal_%d", (int)pid);
     securec_check_ss(rcs, "\0", "\0");
 
     pipe = CreateNamedPipe(pipename,
@@ -292,11 +292,10 @@ static DWORD WINAPI pg_signal_thread(LPVOID param)
                  */
             }
             hThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)pg_signal_dispatch_thread, (LPVOID)pipe, 0, NULL);
-            if (hThread == nullptr) {
+            if (hThread == INVALID_HANDLE_VALUE)
                 write_stderr("could not create signal dispatch thread: error code %lu\n", GetLastError());
-            } else {
+            else
                 CloseHandle(hThread);
-            }
 
             /*
              * Background thread is running with our instance of the pipe. So

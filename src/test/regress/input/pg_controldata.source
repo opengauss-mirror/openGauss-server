@@ -1,5 +1,0 @@
-\! @abs_bindir@/pg_controldata @abs_srcdir@/tmp_check/datanode1
-\! @abs_bindir@/pg_controldata -V 
-\! @abs_bindir@/pg_controldata --version
-\! @abs_bindir@/pg_controldata -? 
-\! @abs_bindir@/pg_controldata --help

@@ -2110,7 +2110,7 @@ memcpy(destination->data, buffer, 40);
         <row>
          <entry><type>tid</type></entry>
          <entry><type>ItemPointer</type></entry>
-         <entry><filename>storage/itemptr.h</filename></entry>
+         <entry><filename>storage/item/itemptr.h</filename></entry>
         </row>
         <row>
          <entry><type>time</type></entry>

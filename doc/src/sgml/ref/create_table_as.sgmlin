@@ -15,6 +15,7 @@ CREATE [ UNLOGGED ] TABLE table_name
     [ WITH ( {storage_parameter = value} [, ... ] ) ]
     [ COMPRESS | NOCOMPRESS ]
     [ TABLESPACE tablespace_name ]
+    [ DISTRIBUTE BY { REPLICATION | { [HASH ] ( column_name ) } } ]
     [ TO { GROUP groupname | NODE ( nodename [, ... ] ) } ]
     AS query
     [ WITH [ NO ] DATA ];

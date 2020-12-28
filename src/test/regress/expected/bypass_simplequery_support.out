@@ -7,7 +7,6 @@ set enable_seqscan=off;
 set opfusion_debug_mode = 'log';
 set log_min_messages=debug;
 set logging_module = 'on(OPFUSION)';
-set max_parallel_workers_per_gather=0;
 -- create table
 drop table if exists test_bypass_sq1;
 NOTICE:  table "test_bypass_sq1" does not exist, skipping
@@ -364,6 +363,16 @@ explain update test_bypass_sq1 set col2=col2-1,col3='test_update' where col1=0 a
 (4 rows)
 
 update test_bypass_sq1 set col2=col2-1,col3='test_update' where col1=0 and col2=0;
+explain update test_bypass_sq1 set col2=col1 where col1=0 and col2=0;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ [Bypass]
+ Update on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=42)
+   ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=42)
+         Index Cond: ((col1 = 0) AND (col2 = 0))
+(4 rows)
+
+update test_bypass_sq1 set col2=col1 where col1=0 and col2=0;
 explain update test_bypass_sq1 set col2=col1-1,col3='test_update' where col1=2 and col2=2;
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
@@ -1815,6 +1824,53 @@ SELECT node_name,select_count, update_count, insert_count, delete_count,  ddl_co
  datanode1 |            2 |            1 |            1 |            1 |         0 |         5
 (1 row)
 
+CREATE OR REPLACE FUNCTION tri_bypass() RETURNS trigger AS $$
+BEGIN
+    NEW.col2 = NEW.col2 + 2;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+set opfusion_debug_mode = 'log';
+drop table if exists test_bypass_sq8;
+NOTICE:  table "test_bypass_sq8" does not exist, skipping
+create table test_bypass_sq8(col1 int, col2 int, col3 text);
+create index itest_bypass_sq8 on test_bypass_sq8(col1,col2);
+create trigger tri_bypass after insert on test_bypass_sq8 for each row execute procedure tri_bypass();
+insert into test_bypass_sq8 values(1,1,'test');
+explain select * from test_bypass_sq8 where col1 = 1;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query's relation is not support.
+ Index Scan using itest_bypass_sq8 on test_bypass_sq8  (cost=0.00..24.36 rows=6 width=40)
+   Index Cond: (col1 = 1)
+(3 rows)
+
+explain update test_bypass_sq8 set col2 = 2 where col1 = 1;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query's relation is not support.
+ Update on test_bypass_sq8  (cost=0.00..24.36 rows=6 width=42)
+   ->  Index Scan using itest_bypass_sq8 on test_bypass_sq8  (cost=0.00..24.36 rows=6 width=42)
+         Index Cond: (col1 = 1)
+(4 rows)
+
+explain delete test_bypass_sq8 where col1 = 1;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query's relation is not support.
+ Delete on test_bypass_sq8  (cost=0.00..24.36 rows=6 width=6)
+   ->  Index Scan using itest_bypass_sq8 on test_bypass_sq8  (cost=0.00..24.36 rows=6 width=6)
+         Index Cond: (col1 = 1)
+(4 rows)
+
+explain insert into test_bypass_sq8 values(2,2,'testinsert');
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query's relation is not support.
+ Insert on test_bypass_sq8  (cost=0.00..0.01 rows=1 width=0)
+   ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(3 rows)
+
 set opfusion_debug_mode=off;
 RESET SESSION AUTHORIZATION;
 SELECT node_name,select_count, update_count, insert_count, delete_count,  ddl_count, dml_count FROM pgxc_sql_count where user_name='qps' order by node_name;
@@ -1845,4 +1901,8 @@ drop table test_bypass_sq4;
 drop table test_bypass_sq5;
 drop table test_bypass_sq6;
 drop table test_bypass_sq7;
+drop table test_bypass_sq8;
+ERROR:  table "test_bypass_sq8" does not exist
+drop function tri_bypass;
+ERROR:  function tri_bypass does not exist
 drop type complextype;

@@ -1,0 +1,22 @@
+<refentry id="SQL-CREATE_RESOURCE_LABEL">
+<refmeta>
+<refentrytitle>CREATE RESOURCE LABEL</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE RESOURCE LABEL</refname>
+<refpurpose>define a new resource label</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE RESOURCE LABEL [ IF NOT EXISTS ] label_name ADD label_item_list[ , ... ];
+
+where label_item_list can be:
+resource_type(resource_path[, ... ])
+
+where resource_type can be:
+{ TABLE | COLUMN | SCHEMA | VIEW | FUNCTION }
+</synopsis>
+</refsynopsisdiv>
+</refentry>

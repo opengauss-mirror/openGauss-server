@@ -1,0 +1,170 @@
+DROP SCHEMA bicoredata_001 CASCADE;
+ERROR:  schema "bicoredata_001" does not exist
+CREATE SCHEMA bicoredata_001;
+SET CURRENT_SCHEMA = bicoredata_001;
+--FUNC_001
+CREATE FUNCTION RmvDupstrWithSep(text, text, text)
+	RETURNS text
+	AS 'com.huawei.udf.RmvDupstrWithSep.evaluate'
+	LANGUAGE java;
+SELECT RmvDupstrWithSep('AS,de,frd,s,de',',','&');
+ rmvdupstrwithsep 
+------------------
+ AS&de&frd&s
+(1 row)
+
+--FUNC_002
+CREATE FUNCTION SplitStr(text, text, integer)
+	RETURNS text
+	AS 'com.huawei.udf.SplitStrUDF.evaluate(java.lang.String, java.lang.String, java.lang.Integer)'
+	LANGUAGE java;
+SELECT SplitStr('gf-dj|232|sdaASF', '\|',1);
+ splitstr 
+----------
+ gf-dj
+(1 row)
+
+CREATE FUNCTION SplitStr(text, integer, integer)
+	RETURNS text
+	AS 'com.huawei.udf.SplitStrUDF.evaluate(java.lang.String, java.lang.Integer, java.lang.Integer)'
+	LANGUAGE java;
+SELECT SplitStr('gf-dj,232,sdaASF',1,1);
+ splitstr 
+----------
+ gf
+(1 row)
+
+--!FUNC_003: passing parameter type Object
+--FUNC_004
+CREATE FUNCTION getjsonobj(varchar, varchar) RETURNS varchar AS 'com.huawei.platform.bi.udf.common.GetJsonObj.evaluate' LANGUAGE java;
+SELECT GetJsonObj ('{"1":["cid","550"]}','$.1[0]');
+ getjsonobj 
+------------
+ cid
+(1 row)
+
+SELECT GetJsonObj ('{selectedMode:click,scanMode:qr_code}','$.scanMode');
+ getjsonobj 
+------------
+ qr_code
+(1 row)
+
+--FUNC_005
+CREATE FUNCTION GetJsonObject(text, text)
+	RETURNS text
+	AS 'com.huawei.udf.GetJsonObject.evaluate'
+	LANGUAGE java;
+SELECT getJsonObject('{"a":"cid","b":"550"}','a');
+ getjsonobject 
+---------------
+ cid
+(1 row)
+
+--FUNC_006
+CREATE FUNCTION GetParam(text, text, text, text, text)
+	RETURNS text
+	AS 'com.huawei.udf.GetTradeLogParam.evaluate'
+	LANGUAGE java;
+SELECT getParam('skey1=value1,key2=value2f','key1','query','s','f');
+ getparam 
+----------
+ value1
+(1 row)
+
+SELECT getParam('{"1":["cid","550"]}','1','json','{','}');
+   getparam    
+---------------
+ ["cid","550"]
+(1 row)
+
+--FUNC_007
+CREATE FUNCTION month_sub_udf(text, integer)
+	RETURNS text
+	AS 'com.huawei.udf.MonthSubUDF.evaluate(java.lang.String, java.lang.Integer)'
+	LANGUAGE java;
+SELECT month_sub_udf('201612', 1);
+ month_sub_udf 
+---------------
+ 201611
+(1 row)
+
+--FUNC_008
+CREATE FUNCTION month_add_udf(text, integer)
+	RETURNS text
+	AS 'com.huawei.udf.MonthAddUDF.evaluate(java.lang.String, java.lang.Integer)'
+	LANGUAGE java;
+SELECT month_add_udf('201612', 1);
+ month_add_udf 
+---------------
+ 201701
+(1 row)
+
+--FUNC_009
+CREATE FUNCTION GetWeekWithDate(text)
+	RETURNS text
+	AS 'com.huawei.platform.bi.udf.common.GetWeekWithDateUDF.evaluate'
+	LANGUAGE java;
+SELECT GetWeekWithDate('20161206');
+  getweekwithdate  
+-------------------
+ 20161205-20161211
+(1 row)
+
+CREATE FUNCTION GetWeekWithDate(text, integer)
+	RETURNS text
+	AS 'com.huawei.platform.bi.udf.common.GetWeekWithDateUDF.evaluate(java.lang.String, java.lang.Integer)'
+	LANGUAGE java;
+SELECT GetWeekWithDate('20161206', 1);
+  getweekwithdate  
+-------------------
+ 20161204-20161210
+(1 row)
+
+--FUNC_010
+CREATE FUNCTION DateFormatSlash(text)
+	RETURNS text
+	AS 'com.huawei.udf.DateFormatSlashUDF.evaluate'
+	LANGUAGE java;
+SELECT DateFormatSlash ('2016/12/06');
+ dateformatslash 
+-----------------
+ 20161206
+(1 row)
+
+--FUNC_011
+CREATE FUNCTION DateFormat(text)
+	RETURNS text
+	AS 'com.huawei.udf.DateFormatUDF.evaluate'
+	LANGUAGE java;
+SELECT DateFormat ('20161206');
+ dateformat 
+------------
+ 2016-12-06
+(1 row)
+
+SELECT DateFormat ('2016-12-06');
+ dateformat 
+------------
+ 20161206
+(1 row)
+
+SELECT DateFormat ('20161206010101');
+     dateformat      
+---------------------
+ 2016-12-06 01:01:01
+(1 row)
+
+DROP SCHEMA bicoredata_001 CASCADE;
+NOTICE:  drop cascades to 12 other objects
+DETAIL:  drop cascades to function rmvdupstrwithsep(text,text,text)
+drop cascades to function splitstr(text,text,integer)
+drop cascades to function splitstr(text,integer,integer)
+drop cascades to function getjsonobj(character varying,character varying)
+drop cascades to function getjsonobject(text,text)
+drop cascades to function getparam(text,text,text,text,text)
+drop cascades to function month_sub_udf(text,integer)
+drop cascades to function month_add_udf(text,integer)
+drop cascades to function getweekwithdate(text)
+drop cascades to function getweekwithdate(text,integer)
+drop cascades to function dateformatslash(text)
+drop cascades to function dateformat(text)

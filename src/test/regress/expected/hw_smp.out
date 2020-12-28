@@ -3,7 +3,6 @@
 -- Create @ 2017-7-11
 --
 --dynamic smp+random plan, plan should be same
-set max_parallel_workers_per_gather=0;
 set plan_mode_seed = 1485495508;
 explain (costs off) select count(node_name) as dncnt
 	from pgxc_node where node_type='D'
@@ -186,7 +185,7 @@ partition p5 values less than (100),
 partition p8 values less than (maxvalue)
 );
 set enable_hashagg = off;
-explain (nodes off, costs off)
+explain (costs off)
 with s1 as(
 	select a1, sum(b1) total from smp_mergeappend1 join smp_mergeappend2 on a1 = a2 group by a1
 ),
@@ -269,7 +268,7 @@ create table store_sales_extend_max_1t(ss_item_sk int,
                                   ss_list_price decimal(7,2)
 )
 with (orientation = column)  ;
-explain (nodes off, costs off)
+explain (costs off)
 select min((select max(ss_date) from store_sales_extend_min_1t) +
 		(select min(ss_time) from store_sales_extend_max_1t))
 		from store_sales_extend_min_1t;
@@ -308,7 +307,7 @@ create  table item_store_sold
     product_id decimal(15,5) ,
     location_id number(28,0)
 )with (orientation=column)  ;
-explain (nodes off, costs off)
+explain (costs off)
 select (54 - 9) c1
 from
     item_store_sold t1,
@@ -343,7 +342,7 @@ NOTICE:  table "tc" does not exist, skipping
 set enable_seqscan=off;
 --update
 create table t(c1 int, c2 int, c3 int);
-explain (nodes off, costs off) update t set c2=2;
+explain (costs off) update t set c2=2;
      QUERY PLAN      
 ---------------------
  Update on t
@@ -353,7 +352,7 @@ explain (nodes off, costs off) update t set c2=2;
 -- update column store
 create table tc(c1 int, c2 int, c3 int)
 WITH (ORIENTATION = COLUMN);
-explain (nodes off, costs off) update tc set c2=2;
+explain (costs off) update tc set c2=2;
           QUERY PLAN           
 -------------------------------
  Row Adapter
@@ -366,7 +365,7 @@ create table t_bitmapor (c1 int, c2 int, c3 int);
 create index t_bitmapor_c1 on t_bitmapor (c1);
 create index t_bitmapor_c2 on t_bitmapor (c2);
 create index t_bitmapor_c3 on t_bitmapor (c3);
-explain (nodes off, costs off) select * from t_bitmapor where c1=1 and c2=1 or c3=1;
+explain (costs off) select * from t_bitmapor where c1=1 and c2=1 or c3=1;
                       QUERY PLAN                       
 -------------------------------------------------------
  Bitmap Heap Scan on t_bitmapor
@@ -381,7 +380,7 @@ explain (nodes off, costs off) select * from t_bitmapor where c1=1 and c2=1 or c
                Index Cond: (c3 = 1)
 (10 rows)
 
-explain (nodes off, costs off) select /*+ rows(t_bitmapor #2000000) */ * from t_bitmapor where c1=1 and c2=1 or c3=1;
+explain (costs off) select /*+ rows(t_bitmapor #2000000) */ * from t_bitmapor where c1=1 and c2=1 or c3=1;
                    QUERY PLAN                    
 -------------------------------------------------
  Bitmap Heap Scan on t_bitmapor
@@ -399,7 +398,7 @@ create table tc_bitmapor (c1 int, c2 int, c3 int) WITH (ORIENTATION = COLUMN);
 create index tc_bitmapor_c1 on tc_bitmapor (c1);
 create index tc_bitmapor_c2 on tc_bitmapor (c2);
 create index tc_bitmapor_c3 on tc_bitmapor (c3);
-explain (nodes off, costs off) select * from tc_bitmapor where c1=1 and c2=1 or c3=1;
+explain (costs off) select * from tc_bitmapor where c1=1 and c2=1 or c3=1;
                          QUERY PLAN                         
 ------------------------------------------------------------
  Row Adapter
@@ -413,7 +412,7 @@ explain (nodes off, costs off) select * from tc_bitmapor where c1=1 and c2=1 or 
                      Index Cond: (c3 = 1)
 (9 rows)
 
-explain (nodes off, costs off) select /*+ rows(tc_bitmapor #2000000) */ * from tc_bitmapor where c1=1 and c2=1 or c3=1;
+explain (costs off) select /*+ rows(tc_bitmapor #2000000) */ * from tc_bitmapor where c1=1 and c2=1 or c3=1;
                          QUERY PLAN                         
 ------------------------------------------------------------
  Row Adapter
@@ -470,4 +469,3 @@ drop cascades to table store_sales_extend_max_1t
 drop cascades to table item_inventory
 drop cascades to table item_inventory_plan
 drop cascades to table item_store_sold
-reset max_parallel_workers_per_gather;

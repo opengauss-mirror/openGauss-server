@@ -1,0 +1,1926 @@
+set current_schema='shipping_schema';
+set explain_perf_mode = pretty;
+-----对View_a.* 的强转场景不能下推---
+-----case1 不下推---
+explain (num_costs off)
+select (select (a.*)::text) from view_t10 a order by 1;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Sort Key: ((SubPlan 1))
+   ->  Data Node Scan on t10 "_REMOTE_TABLE_QUERY_"
+         SubPlan 1
+           ->  Result
+(5 rows)
+
+select (select (a.*)::text) from view_t10 a order by 1;
+       a       
+---------------
+ (12-sep-2014)
+ (12-sep-2015)
+ (12-sep-2016)
+(3 rows)
+
+-----case2 不下推---
+explain (num_costs off)
+select (a.*)::text  from view_t10 a order by 1;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Sort Key: ((ROW(t10.a))::text)
+   ->  Data Node Scan on t10 "_REMOTE_TABLE_QUERY_"
+(3 rows)
+
+select (a.*)::text  from view_t10 a order by 1;
+       a       
+---------------
+ (12-sep-2014)
+ (12-sep-2015)
+ (12-sep-2016)
+(3 rows)
+
+-----case3 不下推---
+explain (num_costs off)
+select (a.*) from view_t10 a, view_t10 b where (a.*)::text = (b.*)::text order by 1; 
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: shipping_schema.t10.a
+   ->  Hash Join
+         Hash Cond: ((ROW(shipping_schema.t10.a))::text = (ROW(shipping_schema.t10.a))::text)
+         ->  Data Node Scan on t10 "_REMOTE_TABLE_QUERY_"
+         ->  Hash
+               ->  Data Node Scan on t10 "_REMOTE_TABLE_QUERY_"
+(7 rows)
+
+select (a.*) from view_t10 a, view_t10 b where (a.*)::text = (b.*)::text order by 1; 
+      a      
+-------------
+ 12-sep-2014
+ 12-sep-2015
+ 12-sep-2016
+(3 rows)
+
+-----case4 下推---
+explain (num_costs off)
+select (a.*) from view_t10 a, view_t10 b where (select a.*)::text = (select b.*)::text order by 1;
+ id |                   operation                   
+----+-----------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Sort
+  3 |       ->  Merge Join (4,8)
+  4 |          ->  Sort
+  5 |             ->  Streaming(type: REDISTRIBUTE)
+  6 |                ->  Seq Scan on t10
+  7 |                   ->  Result  [6, SubPlan 1]
+  8 |          ->  Sort
+  9 |             ->  Streaming(type: REDISTRIBUTE)
+ 10 |                ->  Seq Scan on t10
+ 11 |                   ->  Result  [10, SubPlan 2]
+(11 rows)
+
+    Predicate Information (identified by plan id)    
+-----------------------------------------------------
+   3 --Merge Join (4,8)
+         Merge Cond: (((SubPlan 1)) = ((SubPlan 2)))
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+select (a.*) from view_t10 a, view_t10 b where (select a.*)::text = (select b.*)::text order by 1;
+      a      
+-------------
+ 12-sep-2014
+ 12-sep-2015
+ 12-sep-2016
+(3 rows)
+
+----case5 不下推
+explain (num_costs off)
+select (select (select (select (a.*)::text)) from view_t10 a order by 1 limit 1 );
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Result
+   InitPlan 3 (returns $2)
+     ->  Limit
+           ->  Sort
+                 Sort Key: ((SubPlan 2))
+                 ->  Data Node Scan on t10 "_REMOTE_TABLE_QUERY_"
+                       SubPlan 2
+                         ->  Result
+                               InitPlan 1 (returns $1)
+                                 ->  Result
+(10 rows)
+
+select (select (select (select (a.*)::text)) from view_t10 a order by 1 limit 1 );
+       a       
+---------------
+ (12-sep-2014)
+(1 row)
+
+---Array_SubLink测试,下推结果正确------
+---case1----
+explain (num_costs off)
+SELECT ARRAY(select f2 from t11 order by f2) AS "ARRAY";  
+ id |                           operation                           
+----+---------------------------------------------------------------
+  1 | ->  Result
+  2 |    ->  Streaming (type: GATHER)  [1, InitPlan 1 (returns $0)]
+  3 |       ->  Sort
+  4 |          ->  Streaming(type: BROADCAST)
+  5 |             ->  Seq Scan on t11
+(5 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+SELECT ARRAY(select f2 from t11 order by f2) AS "ARRAY"; 
+                     ARRAY                     
+-----------------------------------------------
+ {1.15,1.15,1.18,1.21,1.24,1.26,1.26,1.3,1.32}
+(1 row)
+
+---case2----
+explain (num_costs off)
+SELECT ARRAY(select f2 from t11 order by f2) AS "ARRAY", f1 from t11 order by 1,2; 
+ id |                 operation                 
+----+-------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Sort
+  3 |       ->  Seq Scan on t11
+  4 |    ->  Sort  [3, InitPlan 1 (returns $0)]
+  5 |       ->  Streaming(type: BROADCAST)
+  6 |          ->  Seq Scan on t11
+(6 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+SELECT ARRAY(select f2 from t11 order by f2) AS "ARRAY", f1 from t11 order by 1,2; 
+                     ARRAY                     |  f1  
+-----------------------------------------------+------
+ {1.15,1.15,1.18,1.21,1.24,1.26,1.26,1.3,1.32} | cat1
+ {1.15,1.15,1.18,1.21,1.24,1.26,1.26,1.3,1.32} | cat1
+ {1.15,1.15,1.18,1.21,1.24,1.26,1.26,1.3,1.32} | cat1
+ {1.15,1.15,1.18,1.21,1.24,1.26,1.26,1.3,1.32} | cat1
+ {1.15,1.15,1.18,1.21,1.24,1.26,1.26,1.3,1.32} | cat1
+ {1.15,1.15,1.18,1.21,1.24,1.26,1.26,1.3,1.32} | cat2
+ {1.15,1.15,1.18,1.21,1.24,1.26,1.26,1.3,1.32} | cat2
+ {1.15,1.15,1.18,1.21,1.24,1.26,1.26,1.3,1.32} | cat2
+ {1.15,1.15,1.18,1.21,1.24,1.26,1.26,1.3,1.32} | cat2
+(9 rows)
+
+---case3----
+explain (num_costs off)
+SELECT ARRAY(select (select f2 from t11 order by f2 limit 1)) AS "ARRAY", f1 from t11 order by 1,2; 
+ id |                   operation                   
+----+-----------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Sort
+  3 |       ->  Seq Scan on t11
+  4 |    ->  Result  [3, InitPlan 2 (returns $1)]
+  5 |       ->  Limit  [4, InitPlan 1 (returns $0)]
+  6 |          ->  Sort
+  7 |             ->  Streaming(type: BROADCAST)
+  8 |                ->  Limit
+  9 |                   ->  Sort
+ 10 |                      ->  Seq Scan on t11
+(10 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+SELECT ARRAY(select (select f2 from t11 order by f2 limit 1)) AS "ARRAY", f1 from t11 order by 1,2; 
+ ARRAY  |  f1  
+--------+------
+ {1.15} | cat1
+ {1.15} | cat1
+ {1.15} | cat1
+ {1.15} | cat1
+ {1.15} | cat1
+ {1.15} | cat2
+ {1.15} | cat2
+ {1.15} | cat2
+ {1.15} | cat2
+(9 rows)
+
+---case4----
+explain (num_costs off)
+select ARRAY(select f2  from t11 where f2 >(select f2 from t11 order by f2 limit 1) ) order by 1;
+ id |                           operation                           
+----+---------------------------------------------------------------
+  1 | ->  Result
+  2 |    ->  Streaming (type: GATHER)  [1, InitPlan 2 (returns $1)]
+  3 |       ->  Seq Scan on t11
+  4 |          ->  Limit  [3, InitPlan 1 (returns $0)]
+  5 |             ->  Sort
+  6 |                ->  Streaming(type: BROADCAST)
+  7 |                   ->  Limit
+  8 |                      ->  Sort
+  9 |                         ->  Seq Scan on t11
+(9 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   3 --Seq Scan on t11
+         Filter: (f2 > $0)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+---case5----
+explain (num_costs off)
+SELECT ARRAY(select f2 from t11 ) AS "ARRAY", f1 from t11 order by 2; 
+ id |                            operation                            
+----+-----------------------------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Sort
+  3 |       ->  Seq Scan on t11
+  4 |    ->  Streaming(type: BROADCAST)  [3, InitPlan 1 (returns $0)]
+  5 |       ->  Seq Scan on t11
+(5 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+---case6----
+explain (num_costs off)
+SELECT ARRAY(select avg(f2) over(partition by f2 order by f2) from t11) as "ARRAY" ;
+ id |                           operation                           
+----+---------------------------------------------------------------
+  1 | ->  Result
+  2 |    ->  Streaming (type: GATHER)  [1, InitPlan 1 (returns $0)]
+  3 |       ->  WindowAgg
+  4 |          ->  Sort
+  5 |             ->  Streaming(type: REDISTRIBUTE)
+  6 |                ->  Seq Scan on t11
+(6 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+---case7----
+explain (verbose on, num_costs off)
+SELECT ARRAY(select sum(f2) over(order by f2) from t11) as "ARRAY" ;
+WARNING:  Statistics in some tables or columns(shipping_schema.t11.f0) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                           operation                           
+----+---------------------------------------------------------------
+  1 | ->  Result
+  2 |    ->  Streaming (type: GATHER)  [1, InitPlan 1 (returns $0)]
+  3 |       ->  WindowAgg
+  4 |          ->  Streaming(type: BROADCAST)
+  5 |             ->  Sort
+  6 |                ->  Seq Scan on shipping_schema.t11
+(6 rows)
+
+           Targetlist Information (identified by plan id)            
+---------------------------------------------------------------------
+   1 --Result
+         Output: $0
+   2 --Streaming (type: GATHER)
+         Output: (sum(f2) OVER (ORDER BY f2 USING = NULLS LAST)), f2
+   3 --WindowAgg
+         Output: sum(f2) OVER (ORDER BY f2 USING = NULLS LAST), f2
+   4 --Streaming(type: BROADCAST)
+         Output: f2
+         Merge Sort Key: t11.f2
+   5 --Sort
+         Output: f2
+         Sort Key: t11.f2
+   6 --Seq Scan on shipping_schema.t11
+         Output: f2
+         Distribute Key: f0
+(15 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+---case8---
+explain (verbose on, num_costs off)
+SELECT ARRAY(select sum(f2) over(order by f2) from t11 order by f2) as "ARRAY" ;
+WARNING:  Statistics in some tables or columns(shipping_schema.t11.f0) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                           operation                           
+----+---------------------------------------------------------------
+  1 | ->  Result
+  2 |    ->  Streaming (type: GATHER)  [1, InitPlan 1 (returns $0)]
+  3 |       ->  Sort
+  4 |          ->  Streaming(type: BROADCAST)
+  5 |             ->  WindowAgg
+  6 |                ->  Streaming(type: BROADCAST)
+  7 |                   ->  Sort
+  8 |                      ->  Seq Scan on shipping_schema.t11
+(8 rows)
+
+           Targetlist Information (identified by plan id)            
+---------------------------------------------------------------------
+   1 --Result
+         Output: $0
+   2 --Streaming (type: GATHER)
+         Output: (sum(f2) OVER (ORDER BY f2 USING = NULLS LAST)), f2
+   3 --Sort
+         Output: (sum(f2) OVER (ORDER BY f2 USING = NULLS LAST)), f2
+         Sort Key: t11.f2
+   4 --Streaming(type: BROADCAST)
+         Output: (sum(f2) OVER (ORDER BY f2 USING = NULLS LAST)), f2
+   5 --WindowAgg
+         Output: sum(f2) OVER (ORDER BY f2 USING = NULLS LAST), f2
+   6 --Streaming(type: BROADCAST)
+         Output: f2
+         Merge Sort Key: t11.f2
+   7 --Sort
+         Output: f2
+         Sort Key: t11.f2
+   8 --Seq Scan on shipping_schema.t11
+         Output: f2
+         Distribute Key: f0
+(20 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--case9---
+set  enable_seqscan=off;
+explain (verbose on, num_costs off)
+select array(select f0 from t13 order by 1) as "array";
+WARNING:  Statistics in some tables or columns(shipping_schema.t13.f0) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                                  operation                                  
+----+-----------------------------------------------------------------------------
+  1 | ->  Result
+  2 |    ->  Streaming (type: GATHER)  [1, InitPlan 1 (returns $0)]
+  3 |       ->  Sort
+  4 |          ->  Streaming(type: BROADCAST)
+  5 |             ->  Index Only Scan using index_ship_t13 on shipping_schema.t13
+(5 rows)
+
+          Targetlist Information (identified by plan id)           
+-------------------------------------------------------------------
+   1 --Result
+         Output: $0
+   2 --Streaming (type: GATHER)
+         Output: f0
+   3 --Sort
+         Output: f0
+         Sort Key: t13.f0
+   4 --Streaming(type: BROADCAST)
+         Output: f0
+   5 --Index Only Scan using index_ship_t13 on shipping_schema.t13
+         Output: f0
+         Distribute Key: f0
+(12 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+select array(select f0 from t13 order by 1) as "array";
+        array        
+---------------------
+ {1,2,3,4,5,6,7,8,9}
+(1 row)
+
+reset enable_seqscan;
+---case10--
+set  enable_seqscan=off;
+explain (verbose on, num_costs off)
+select array(select f0 from (select f0 from t13 order by 1) order by 1) as "array";
+WARNING:  Statistics in some tables or columns(shipping_schema.t13.f0) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                                  operation                                  
+----+-----------------------------------------------------------------------------
+  1 | ->  Result
+  2 |    ->  Streaming (type: GATHER)  [1, InitPlan 1 (returns $0)]
+  3 |       ->  Sort
+  4 |          ->  Streaming(type: BROADCAST)
+  5 |             ->  Index Only Scan using index_ship_t13 on shipping_schema.t13
+(5 rows)
+
+          Targetlist Information (identified by plan id)           
+-------------------------------------------------------------------
+   1 --Result
+         Output: $0
+   2 --Streaming (type: GATHER)
+         Output: t13.f0
+   3 --Sort
+         Output: t13.f0
+         Sort Key: t13.f0
+   4 --Streaming(type: BROADCAST)
+         Output: t13.f0
+   5 --Index Only Scan using index_ship_t13 on shipping_schema.t13
+         Output: t13.f0
+         Distribute Key: t13.f0
+(12 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+select array(select f0 from (select f0 from t13 order by 1) order by 1) as "array";
+        array        
+---------------------
+ {1,2,3,4,5,6,7,8,9}
+(1 row)
+
+reset enable_seqscan;
+---insert values ----
+create table shipping_insert (a int);
+explain (verbose on, num_costs off)
+insert into shipping_insert values ((select 1));
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Insert on shipping_schema.shipping_insert
+   Node expr: shipping_insert.a
+   Remote query: INSERT INTO shipping_schema.shipping_insert (a) VALUES ($1)
+   InitPlan 1 (returns $0)
+     ->  Result
+           Output: 1
+   ->  Result
+         Output: $0
+(8 rows)
+
+insert into shipping_insert values ((select 1));
+explain (verbose on, num_costs off)
+insert into shipping_insert values ((select 1 from dual));
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Insert on shipping_schema.shipping_insert
+   Node expr: shipping_insert.a
+   Remote query: INSERT INTO shipping_schema.shipping_insert (a) VALUES ($1)
+   InitPlan 1 (returns $0)
+     ->  Subquery Scan on dual
+           Output: 1
+           ->  Result
+                 Output: 'X'::text
+   ->  Result
+         Output: $0
+(10 rows)
+
+explain (verbose on, num_costs off)
+insert into shipping_insert values ((select 1));
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Insert on shipping_schema.shipping_insert
+   Node expr: shipping_insert.a
+   Remote query: INSERT INTO shipping_schema.shipping_insert (a) VALUES ($1)
+   InitPlan 1 (returns $0)
+     ->  Result
+           Output: 1
+   ->  Result
+         Output: $0
+(8 rows)
+
+explain (verbose on, num_costs off)
+insert into shipping_insert values ((select 1 from dual));
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Insert on shipping_schema.shipping_insert
+   Node expr: shipping_insert.a
+   Remote query: INSERT INTO shipping_schema.shipping_insert (a) VALUES ($1)
+   InitPlan 1 (returns $0)
+     ->  Subquery Scan on dual
+           Output: 1
+           ->  Result
+                 Output: 'X'::text
+   ->  Result
+         Output: $0
+(10 rows)
+
+---group by ----
+explain (verbose on, num_costs off)
+select a from shipping_test_col group by (select array(select 1)),a;
+WARNING:  Statistics in some tables or columns(shipping_schema.shipping_test_col.a) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                           operation                           
+----+---------------------------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  HashAggregate
+  3 |       ->  Row Adapter
+  4 |          ->  CStore Scan on shipping_schema.shipping_test_col
+  5 |    ->  Result  [4, InitPlan 2 (returns $1)]
+  6 |       ->  Result  [5, InitPlan 1 (returns $0)]
+(6 rows)
+
+     Targetlist Information (identified by plan id)     
+--------------------------------------------------------
+   1 --Streaming (type: GATHER)
+         Output: a, ($1)
+   5 --Result
+         Output: $0
+   6 --Result
+         Output: 1
+   2 --HashAggregate
+         Output: a, ($1)
+         Group By Key: ($1), shipping_test_col.a
+   3 --Row Adapter
+         Output: a, ($1)
+   4 --CStore Scan on shipping_schema.shipping_test_col
+         Output: a, $1
+         Distribute Key: a
+(14 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+select a from shipping_test_col group by (select array(select 1)),a;
+ a 
+---
+(0 rows)
+
+---having---
+explain (verbose on, num_costs off)
+select 1 from shipping_test_col having count(a) <=any (select count(b)  group by 1);
+WARNING:  Statistics in some tables or columns(shipping_schema.shipping_test_col.a) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                            operation                             
+----+------------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Aggregate
+  3 |       ->  Vector Streaming (type: GATHER)
+  4 |          ->  Vector Aggregate
+  5 |             ->  CStore Scan on shipping_schema.shipping_test_col
+  6 |       ->  HashAggregate  [2, SubPlan 1]
+  7 |          ->  Result
+(7 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   2 --Vector Aggregate
+         Filter: (SubPlan 1)
+(2 rows)
+
+      Targetlist Information (identified by plan id)       
+-----------------------------------------------------------
+   1 --Row Adapter
+         Output: (1)
+   2 --Vector Aggregate
+         Output: (1)
+   3 --Vector Streaming (type: GATHER)
+         Output: (1), (count(a)), (count(b))
+   4 --Vector Aggregate
+         Output: 1, count(a), count(b)
+   5 --CStore Scan on shipping_schema.shipping_test_col
+         Output: a, b
+         Distribute Key: a
+   6 --HashAggregate
+         Output: ($0)
+         Group By Key: count((count(shipping_test_col.b)))
+   7 --Result
+         Output: count((count(shipping_test_col.b)))
+(16 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+select 1 from shipping_test_col having count(a) <=any (select count(b)  group by 1);
+ ?column? 
+----------
+        1
+(1 row)
+
+-----order by ---
+explain (verbose on, num_costs off)
+select f0 from t12 group by f0 having count(f0) <=any (select count(f1)  group by f0) order by (select f0);
+WARNING:  Statistics in some tables or columns(shipping_schema.t12.f0) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                     operation                      
+----+----------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Streaming (type: GATHER)
+  3 |       ->  Vector Sort
+  4 |          ->  Vector Hash Aggregate
+  5 |             ->  CStore Scan on shipping_schema.t12
+  6 |             ->  Result  [4, SubPlan 1]
+  7 |             ->  HashAggregate  [4, SubPlan 2]
+  8 |                ->  Result
+(8 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   4 --Vector Hash Aggregate
+         Filter: (SubPlan 2)
+(2 rows)
+
+ Targetlist Information (identified by plan id) 
+------------------------------------------------
+   1 --Row Adapter
+         Output: f0, ((SubPlan 1))
+   2 --Vector Streaming (type: GATHER)
+         Output: f0, ((SubPlan 1))
+         Merge Sort Key: ((SubPlan 1))
+   3 --Vector Sort
+         Output: f0, ((SubPlan 1))
+         Sort Key: ((SubPlan 1))
+   4 --Vector Hash Aggregate
+         Output: f0, (SubPlan 1)
+         Group By Key: t12.f0
+   5 --CStore Scan on shipping_schema.t12
+         Output: f0, f1
+         Distribute Key: f0
+   6 --Result
+         Output: t12.f0
+   7 --HashAggregate
+         Output: count(t12.f1), ($2)
+         Group By Key: t12.f0
+   8 --Result
+         Output: t12.f0
+(21 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+select f0 from t12 group by f0 having count(f0) <=any (select count(f1)  group by f0) order by (select f0);
+ f0 
+----
+  1
+  2
+  3
+  4
+  5
+  6
+  7
+  8
+  9
+(9 rows)
+
+---setop/limit---
+explain (verbose on, num_costs off)
+select f0 from t12 where f2 = (select 1.21) 
+union 
+select (2) 
+union all 
+select t1.f0 from t12 t1 full join t12 t2 on (t1.f1 = t2.f1 and t1.f2 < (select 2)) order by 1 
+limit (select f0 from t12 group by f0 having count(f0) <=any (select count(f1)  group by f0) order by (select f0) limit 1);
+WARNING:  Statistics in some tables or columns(shipping_schema.t12.f0, shipping_schema.t12.f2, shipping_schema.t12.f1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                             operation                             
+----+-------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Sort
+  4 |          ->  Append(5, 12)
+  5 |             ->  HashAggregate
+  6 |                ->  Append(7, 10)
+  7 |                   ->  Row Adapter
+  8 |                      ->  CStore Scan on shipping_schema.t12
+  9 |                         ->  Result  [8, InitPlan 4 (returns $5)]
+ 10 |                   ->  Subquery Scan on "*SELECT* 2"
+ 11 |                      ->  Result
+ 12 |             ->  Hash Full Join (13, 16)
+ 13 |                ->  Streaming(type: REDISTRIBUTE)
+ 14 |                   ->  Row Adapter
+ 15 |                      ->  CStore Scan on shipping_schema.t12 t1
+ 16 |                ->  Hash
+ 17 |                   ->  Streaming(type: REDISTRIBUTE)
+ 18 |                      ->  Row Adapter
+ 19 |                         ->  CStore Scan on shipping_schema.t12 t2
+ 20 |                ->  Result  [12, InitPlan 5 (returns $6)]
+ 21 |    ->  Row Adapter  [1, InitPlan 3 (returns $4)]
+ 22 |       ->  Vector Streaming (type: GATHER)
+ 23 |          ->  Vector Limit
+ 24 |             ->  Vector Streaming(type: BROADCAST)
+ 25 |                ->  Vector Limit
+ 26 |                   ->  Vector Sort
+ 27 |                      ->  Vector Hash Aggregate
+ 28 |                         ->  CStore Scan on shipping_schema.t12
+ 29 |                         ->  Result  [27, SubPlan 1]
+ 30 |                         ->  HashAggregate  [27, SubPlan 2]
+ 31 |                            ->  Result
+(31 rows)
+
+           Predicate Information (identified by plan id)           
+-------------------------------------------------------------------
+  27 --Vector Hash Aggregate
+         Filter: (SubPlan 2)
+   8 --CStore Scan on shipping_schema.t12
+         Filter: (shipping_schema.t12.f2 = ($5)::double precision)
+  10 --Subquery Scan on "*SELECT* 2"
+         Filter: (Hash By 2)
+  12 --Hash Full Join (13, 16)
+         Hash Cond: (t1.f1 = t2.f1)
+         Join Filter: (t1.f2 < ($6)::double precision)
+(9 rows)
+
+         Targetlist Information (identified by plan id)         
+----------------------------------------------------------------
+   1 --Limit
+         Output: shipping_schema.t12.f0
+  21 --Row Adapter
+         Output: shipping_schema.t12.f0, ((SubPlan 1))
+  22 --Vector Streaming (type: GATHER)
+         Output: shipping_schema.t12.f0, ((SubPlan 1))
+  23 --Vector Limit
+         Output: shipping_schema.t12.f0, ((SubPlan 1))
+  24 --Vector Streaming(type: BROADCAST)
+         Output: shipping_schema.t12.f0, ((SubPlan 1))
+         Merge Sort Key: ((SubPlan 1))
+  25 --Vector Limit
+         Output: shipping_schema.t12.f0, ((SubPlan 1))
+  26 --Vector Sort
+         Output: shipping_schema.t12.f0, ((SubPlan 1))
+         Sort Key: ((SubPlan 1))
+  27 --Vector Hash Aggregate
+         Output: shipping_schema.t12.f0, (SubPlan 1)
+         Group By Key: shipping_schema.t12.f0
+  28 --CStore Scan on shipping_schema.t12
+         Output: shipping_schema.t12.f0, shipping_schema.t12.f1
+         Distribute Key: shipping_schema.t12.f0
+  29 --Result
+         Output: shipping_schema.t12.f0
+  30 --HashAggregate
+         Output: count(shipping_schema.t12.f1), ($2)
+         Group By Key: shipping_schema.t12.f0
+  31 --Result
+         Output: shipping_schema.t12.f0
+   2 --Streaming (type: GATHER)
+         Output: shipping_schema.t12.f0
+         Merge Sort Key: shipping_schema.t12.f0
+   3 --Sort
+         Output: shipping_schema.t12.f0
+         Sort Key: shipping_schema.t12.f0
+   4 --Append(5, 12)
+   5 --HashAggregate
+         Output: shipping_schema.t12.f0
+         Group By Key: shipping_schema.t12.f0
+   6 --Append(7, 10)
+   7 --Row Adapter
+         Output: shipping_schema.t12.f0
+   8 --CStore Scan on shipping_schema.t12
+         Output: shipping_schema.t12.f0
+         Distribute Key: shipping_schema.t12.f0
+   9 --Result
+         Output: 1.21
+  10 --Subquery Scan on "*SELECT* 2"
+         Output: 2
+  11 --Result
+         Output: 2
+  12 --Hash Full Join (13, 16)
+         Output: t1.f0
+  20 --Result
+         Output: 2
+  13 --Streaming(type: REDISTRIBUTE)
+         Output: t1.f0, t1.f1, t1.f2
+         Distribute Key: t1.f1
+  14 --Row Adapter
+         Output: t1.f0, t1.f1, t1.f2
+  15 --CStore Scan on shipping_schema.t12 t1
+         Output: t1.f0, t1.f1, t1.f2
+         Distribute Key: t1.f0
+  16 --Hash
+         Output: t2.f1
+  17 --Streaming(type: REDISTRIBUTE)
+         Output: t2.f1
+         Distribute Key: t2.f1
+  18 --Row Adapter
+         Output: t2.f1
+  19 --CStore Scan on shipping_schema.t12 t2
+         Output: t2.f1
+         Distribute Key: t2.f0
+(73 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+select f0 from t12 where f2 = (select 1.21) 
+union 
+select (2) 
+union all 
+select t1.f0 from t12 t1 full join t12 t2 on (t1.f1 = t2.f1 and t1.f2 < (select 2)) order by 1 
+limit (select f0 from t12 group by f0 having count(f0) <=any (select count(f1)  group by f0) order by (select f0) limit 1);
+ f0 
+----
+  1
+(1 row)
+
+---SubPlan---
+explain (verbose on, num_costs off)
+select f0 from t12 where exists (select 1) and (select 1.25) > any(select f2) order by 1;
+WARNING:  Statistics in some tables or columns(shipping_schema.t12.f0) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                     operation                      
+----+----------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Streaming (type: GATHER)
+  3 |       ->  Vector Sort
+  4 |          ->  Vector Result
+  5 |             ->  CStore Scan on shipping_schema.t12
+  6 |                ->  Result  [5, SubPlan 3]
+  7 |       ->  Result  [5, InitPlan 2 (returns $1)]
+  8 |       ->  Result  [4, InitPlan 1 (returns $0)]
+(8 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   4 --Vector Result
+         One-Time Filter: $0
+   5 --CStore Scan on shipping_schema.t12
+         Filter: (SubPlan 3)
+(4 rows)
+
+ Targetlist Information (identified by plan id) 
+------------------------------------------------
+   1 --Row Adapter
+         Output: f0
+   2 --Vector Streaming (type: GATHER)
+         Output: f0
+         Merge Sort Key: t12.f0
+   8 --Result
+   7 --Result
+         Output: 1.25
+   3 --Vector Sort
+         Output: f0
+         Sort Key: t12.f0
+   4 --Vector Result
+         Output: f0
+   5 --CStore Scan on shipping_schema.t12
+         Output: f0, f2
+         Distribute Key: f0
+   6 --Result
+         Output: t12.f2
+(18 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+select f0 from t12 where exists (select 1) and (select 1.25) > any(select f2) order by 1;
+ f0 
+----
+  1
+  2
+  3
+  5
+  6
+(5 rows)
+
+---SubLink---
+explain (verbose on, num_costs off)
+select (select f0 > all (select f2 from t12)) from t12 where exists (select 1) and (select 1.25) > any(select f2) order by 1;
+WARNING:  Statistics in some tables or columns(shipping_schema.t12.f0) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                           operation                            
+----+----------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Streaming (type: GATHER)
+  3 |       ->  Vector Sort
+  4 |          ->  Vector Result
+  5 |             ->  CStore Scan on shipping_schema.t12
+  6 |                ->  Result  [5, SubPlan 5]
+  7 |       ->  Result  [5, InitPlan 4 (returns $3)]
+  8 |             ->  Result  [4, SubPlan 2]
+  9 |                ->  Row Adapter  [8, SubPlan 1]
+ 10 |                   ->  Vector Materialize
+ 11 |                      ->  Vector Streaming(type: BROADCAST)
+ 12 |                         ->  CStore Scan on shipping_schema.t12
+ 13 |       ->  Result  [4, InitPlan 3 (returns $2)]
+(13 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   4 --Vector Result
+         One-Time Filter: $2
+   5 --CStore Scan on shipping_schema.t12
+         Filter: (SubPlan 5)
+(4 rows)
+
+         Targetlist Information (identified by plan id)         
+----------------------------------------------------------------
+   1 --Row Adapter
+         Output: ((SubPlan 2))
+   2 --Vector Streaming (type: GATHER)
+         Output: ((SubPlan 2))
+         Merge Sort Key: ((SubPlan 2))
+  13 --Result
+   7 --Result
+         Output: 1.25
+   3 --Vector Sort
+         Output: ((SubPlan 2))
+         Sort Key: ((SubPlan 2))
+   4 --Vector Result
+         Output: (SubPlan 2)
+   5 --CStore Scan on shipping_schema.t12
+         Output: shipping_schema.t12.f0, shipping_schema.t12.f2
+         Distribute Key: shipping_schema.t12.f0
+   6 --Result
+         Output: shipping_schema.t12.f2
+   8 --Result
+         Output: (SubPlan 1)
+   9 --Row Adapter
+         Output: shipping_schema.t12.f2
+  10 --Vector Materialize
+         Output: shipping_schema.t12.f2
+  11 --Vector Streaming(type: BROADCAST)
+         Output: shipping_schema.t12.f2
+  12 --CStore Scan on shipping_schema.t12
+         Output: shipping_schema.t12.f2
+         Distribute Key: shipping_schema.t12.f0
+(29 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+select (select f0 > all (select f2 from t12)) from t12 where exists (select 1) and (select 1.25) > any(select f2) order by 1;
+ ?column? 
+----------
+ f
+ t
+ t
+ t
+ t
+(5 rows)
+
+----CTE---
+explain (verbose on, num_costs off)
+with tmp(c1) as (
+(select 3) union select (select f0) from t12 where (select f1)='cat1' )
+select f1 from t12,tmp where tmp.c1 = t12.f0 limit (select 2);
+WARNING:  Statistics in some tables or columns(shipping_schema.t12.f0) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                          operation                          
+----+-------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Limit
+  3 |       ->  Vector Streaming (type: GATHER)
+  4 |          ->  Vector Nest Loop (5,14)
+  5 |             ->  Vector Sonic Hash Aggregate
+  6 |                ->  Vector Append(7, 10)
+  7 |                   ->  Vector Subquery Scan on "*SELECT* 1"
+  8 |                      ->  Vector Adapter
+  9 |                         ->  Result
+ 10 |                   ->  Vector Streaming(type: REDISTRIBUTE)
+ 11 |                      ->  CStore Scan on shipping_schema.t12
+ 12 |                         ->  Result  [11, SubPlan 2]
+ 13 |                         ->  Result  [11, SubPlan 3]
+ 14 |             ->  CStore Scan on shipping_schema.t12
+ 15 |       ->  Result  [2, InitPlan 1 (returns $0)]
+(15 rows)
+
+    Predicate Information (identified by plan id)    
+-----------------------------------------------------
+   4 --Vector Nest Loop (5,14)
+         Join Filter: (shipping_schema.t12.f0 = (3))
+   7 --Vector Subquery Scan on "*SELECT* 1"
+         Filter: (Hash By 3)
+  11 --CStore Scan on shipping_schema.t12
+         Filter: ((SubPlan 3) = 'cat1'::text)
+(6 rows)
+
+         Targetlist Information (identified by plan id)         
+----------------------------------------------------------------
+   1 --Row Adapter
+         Output: shipping_schema.t12.f1
+   2 --Vector Limit
+         Output: shipping_schema.t12.f1
+  15 --Result
+         Output: 2
+   3 --Vector Streaming (type: GATHER)
+         Output: shipping_schema.t12.f1
+   4 --Vector Nest Loop (5,14)
+         Output: shipping_schema.t12.f1
+   5 --Vector Sonic Hash Aggregate
+         Output: (3)
+         Group By Key: (3)
+   6 --Vector Append(7, 10)
+   7 --Vector Subquery Scan on "*SELECT* 1"
+         Output: 3
+   8 --Vector Adapter
+         Output: (3)
+   9 --Result
+         Output: 3
+  10 --Vector Streaming(type: REDISTRIBUTE)
+         Output: ((SubPlan 2))
+         Distribute Key: ((SubPlan 2))
+  11 --CStore Scan on shipping_schema.t12
+         Output: (SubPlan 2)
+         Distribute Key: shipping_schema.t12.f0
+  12 --Result
+         Output: shipping_schema.t12.f0
+  13 --Result
+         Output: shipping_schema.t12.f1
+  14 --CStore Scan on shipping_schema.t12
+         Output: shipping_schema.t12.f1, shipping_schema.t12.f0
+         Distribute Key: shipping_schema.t12.f0
+(33 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+with tmp(c1) as (
+(select 3) union select (select f0) from t12 where (select f1)='cat1' )
+select f1 from t12,tmp where tmp.c1 = t12.f0 limit (select 2);
+  f1  
+------
+ cat1
+ cat1
+(2 rows)
+
+---distinct ---
+explain (verbose on, num_costs off)
+select count(distinct(select f1)) from t12 where exists (select 1) and (select 1.25) > any(select f2) order by 1;
+WARNING:  Statistics in some tables or columns(shipping_schema.t12.f0, shipping_schema.t12.f1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                          operation                          
+----+-------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Sort
+  3 |       ->  Vector Aggregate
+  4 |          ->  Vector Streaming (type: GATHER)
+  5 |             ->  Vector Aggregate
+  6 |                ->  Vector Streaming(type: REDISTRIBUTE)
+  7 |                   ->  Vector Result
+  8 |                      ->  CStore Scan on shipping_schema.t12
+  9 |                         ->  Result  [8, SubPlan 1]
+ 10 |                         ->  Result  [8, SubPlan 4]
+ 11 |       ->  Result  [8, InitPlan 3 (returns $2)]
+ 12 |       ->  Result  [7, InitPlan 2 (returns $1)]
+(12 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   7 --Vector Result
+         One-Time Filter: $1
+   8 --CStore Scan on shipping_schema.t12
+         Filter: (SubPlan 4)
+(4 rows)
+
+       Targetlist Information (identified by plan id)       
+------------------------------------------------------------
+   1 --Row Adapter
+         Output: (count((count(DISTINCT ((SubPlan 1))))))
+   2 --Vector Sort
+         Output: (count((count(DISTINCT ((SubPlan 1))))))
+         Sort Key: (count((count(DISTINCT ((SubPlan 1))))))
+  12 --Result
+  11 --Result
+         Output: 1.25
+   3 --Vector Aggregate
+         Output: count((count(DISTINCT ((SubPlan 1)))))
+   4 --Vector Streaming (type: GATHER)
+         Output: (count(DISTINCT ((SubPlan 1))))
+   5 --Vector Aggregate
+         Output: count(DISTINCT ((SubPlan 1)))
+   6 --Vector Streaming(type: REDISTRIBUTE)
+         Output: f1, f2, ((SubPlan 1))
+         Distribute Key: ((SubPlan 1))
+   7 --Vector Result
+         Output: f1, f2, ((SubPlan 1))
+   8 --CStore Scan on shipping_schema.t12
+         Output: f1, f2, (SubPlan 1)
+         Distribute Key: f0
+   9 --Result
+         Output: t12.f1
+  10 --Result
+         Output: t12.f2
+(26 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+select count(distinct(select f1)) from t12 where exists (select 1) and (select 1.25) > any(select f2) order by 1;
+ count 
+-------
+     2
+(1 row)
+
+---window Agg---
+explain (verbose on, num_costs off)
+select sum(f0), sum(f2) over (partition by (select f1) order by (select f1)) tmp
+from  t12 where (select f1)='cat1' group by f2,f0,f1
+order by 1,2;
+WARNING:  Statistics in some tables or columns(shipping_schema.t12.f0, shipping_schema.t12.f2, shipping_schema.t12.f1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                          operation                          
+----+-------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Streaming (type: GATHER)
+  3 |       ->  Vector Sort
+  4 |          ->  Vector WindowAgg
+  5 |             ->  Vector Sort
+  6 |                ->  Vector Streaming(type: REDISTRIBUTE)
+  7 |                   ->  Vector Hash Aggregate
+  8 |                      ->  CStore Scan on shipping_schema.t12
+  9 |                         ->  Result  [8, SubPlan 2]
+ 10 |                      ->  Result  [7, SubPlan 1]
+(10 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   8 --CStore Scan on shipping_schema.t12
+         Filter: ((SubPlan 2) = 'cat1'::text)
+(2 rows)
+
+                          Targetlist Information (identified by plan id)                           
+---------------------------------------------------------------------------------------------------
+   1 --Row Adapter
+         Output: (sum(f0)), (sum(f2) OVER (PARTITION BY ((SubPlan 1)))), f2, f0, f1, ((SubPlan 1))
+   2 --Vector Streaming (type: GATHER)
+         Output: (sum(f0)), (sum(f2) OVER (PARTITION BY ((SubPlan 1)))), f2, f0, f1, ((SubPlan 1))
+         Merge Sort Key: (sum(t12.f0)), (sum(t12.f2) OVER (PARTITION BY ((SubPlan 1))))
+   3 --Vector Sort
+         Output: (sum(f0)), (sum(f2) OVER (PARTITION BY ((SubPlan 1)))), f2, f0, f1, ((SubPlan 1))
+         Sort Key: (sum(t12.f0)), (sum(t12.f2) OVER (PARTITION BY ((SubPlan 1))))
+   4 --Vector WindowAgg
+         Output: (sum(f0)), sum(f2) OVER (PARTITION BY ((SubPlan 1))), f2, f0, f1, ((SubPlan 1))
+   5 --Vector Sort
+         Output: f2, f0, f1, ((SubPlan 1)), (sum(f0))
+         Sort Key: ((SubPlan 1))
+   6 --Vector Streaming(type: REDISTRIBUTE)
+         Output: f2, f0, f1, ((SubPlan 1)), (sum(f0))
+         Distribute Key: ((SubPlan 1))
+   7 --Vector Hash Aggregate
+         Output: f2, f0, f1, (SubPlan 1), sum(f0)
+         Group By Key: t12.f2, t12.f0, t12.f1
+   8 --CStore Scan on shipping_schema.t12
+         Output: f2, f0, f1
+         Distribute Key: f0
+   9 --Result
+         Output: t12.f1
+  10 --Result
+         Output: t12.f1
+(26 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+select sum(f0), sum(f2) over (partition by (select f1) order by (select f1)) tmp
+from t12 where (select f1)='cat1' group by f2,f0,f1
+order by 1,2;
+ sum | tmp  
+-----+------
+   1 | 6.04
+   2 | 6.04
+   3 | 6.04
+   4 | 6.04
+   5 | 6.04
+(5 rows)
+
+----Agg---
+explain (verbose on, num_costs off)
+select sum((select (f0))), sum(f2) over (partition by (select f1) order by (select f1)) tmp
+from  t12 where (select f1)='cat1' group by f2,f0,f1
+order by 1,2 limit 2;
+WARNING:  Statistics in some tables or columns(shipping_schema.t12.f0, shipping_schema.t12.f2, shipping_schema.t12.f1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                             operation                             
+----+-------------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Limit
+  3 |       ->  Vector Streaming (type: GATHER)
+  4 |          ->  Vector Limit
+  5 |             ->  Vector Sort
+  6 |                ->  Vector WindowAgg
+  7 |                   ->  Vector Sort
+  8 |                      ->  Vector Streaming(type: REDISTRIBUTE)
+  9 |                         ->  Vector Hash Aggregate
+ 10 |                            ->  CStore Scan on shipping_schema.t12
+ 11 |                               ->  Result  [10, SubPlan 3]
+ 12 |                            ->  Result  [9, SubPlan 2]
+ 13 |                            ->  Result  [9, SubPlan 1]
+(13 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+  10 --CStore Scan on shipping_schema.t12
+         Filter: ((SubPlan 3) = 'cat1'::text)
+(2 rows)
+
+                               Targetlist Information (identified by plan id)                               
+------------------------------------------------------------------------------------------------------------
+   1 --Row Adapter
+         Output: (sum((SubPlan 1))), (sum(f2) OVER (PARTITION BY ((SubPlan 2)))), f2, f0, f1, ((SubPlan 2))
+   2 --Vector Limit
+         Output: (sum((SubPlan 1))), (sum(f2) OVER (PARTITION BY ((SubPlan 2)))), f2, f0, f1, ((SubPlan 2))
+   3 --Vector Streaming (type: GATHER)
+         Output: (sum((SubPlan 1))), (sum(f2) OVER (PARTITION BY ((SubPlan 2)))), f2, f0, f1, ((SubPlan 2))
+         Merge Sort Key: (sum((SubPlan 1))), (sum(t12.f2) OVER (PARTITION BY ((SubPlan 2))))
+   4 --Vector Limit
+         Output: (sum((SubPlan 1))), (sum(f2) OVER (PARTITION BY ((SubPlan 2)))), f2, f0, f1, ((SubPlan 2))
+   5 --Vector Sort
+         Output: (sum((SubPlan 1))), (sum(f2) OVER (PARTITION BY ((SubPlan 2)))), f2, f0, f1, ((SubPlan 2))
+         Sort Key: (sum((SubPlan 1))), (sum(t12.f2) OVER (PARTITION BY ((SubPlan 2))))
+   6 --Vector WindowAgg
+         Output: (sum((SubPlan 1))), sum(f2) OVER (PARTITION BY ((SubPlan 2))), f2, f0, f1, ((SubPlan 2))
+   7 --Vector Sort
+         Output: f2, f0, f1, ((SubPlan 2)), (sum((SubPlan 1)))
+         Sort Key: ((SubPlan 2))
+   8 --Vector Streaming(type: REDISTRIBUTE)
+         Output: f2, f0, f1, ((SubPlan 2)), (sum((SubPlan 1)))
+         Distribute Key: ((SubPlan 2))
+   9 --Vector Hash Aggregate
+         Output: f2, f0, f1, (SubPlan 2), sum((SubPlan 1))
+         Group By Key: t12.f2, t12.f0, t12.f1
+  10 --CStore Scan on shipping_schema.t12
+         Output: f2, f0, f1
+         Distribute Key: f0
+  11 --Result
+         Output: t12.f1
+  12 --Result
+         Output: t12.f1
+  13 --Result
+         Output: t12.f0
+(32 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+select sum((select (f0))), sum(f2) over (partition by (select f1) order by (select f1)) tmp
+from  t12 where (select f1)='cat1' group by f2,f0,f1
+order by 1,2 limit 2;
+ sum | tmp  
+-----+------
+   1 | 6.04
+   2 | 6.04
+(2 rows)
+
+---多nodegroup场景---
+set expected_computing_nodegroup =group1;
+---case1---
+explain (verbose on, num_costs off)
+select f0 from t14 where f2 = (select 1.21) 
+union 
+select (2) 
+union all 
+select t1.f0 from t14 t1 full join t14 t2 on (t1.f1 = t2.f1 and t1.f2 < (select 2)) order by 1 
+limit (select f0 from t14 group by f0 having count(f0) <=any (select count(f1)  group by f0) order by (select f0) limit 1);
+WARNING:  Statistics in some tables or columns(shipping_schema.t14.f0, shipping_schema.t14.f1, shipping_schema.t14.f2) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                                operation                                 
+----+--------------------------------------------------------------------------
+  1 | ->  Limit
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Sort
+  4 |          ->  Append(5, 12)
+  5 |             ->  HashAggregate
+  6 |                ->  Append(7, 10)
+  7 |                   ->  Row Adapter
+  8 |                      ->  CStore Scan on shipping_schema.t14
+  9 |                         ->  Result  [8, InitPlan 4 (returns $5)]
+ 10 |                   ->  Streaming(type: REDISTRIBUTE ng: group1->ship_ng0)
+ 11 |                      ->  Result
+ 12 |             ->  Hash Full Join (13, 16)
+ 13 |                ->  Streaming(type: REDISTRIBUTE)
+ 14 |                   ->  Row Adapter
+ 15 |                      ->  CStore Scan on shipping_schema.t14 t1
+ 16 |                ->  Hash
+ 17 |                   ->  Streaming(type: REDISTRIBUTE)
+ 18 |                      ->  Row Adapter
+ 19 |                         ->  CStore Scan on shipping_schema.t14 t2
+ 20 |                ->  Result  [12, InitPlan 5 (returns $6)]
+ 21 |    ->  Row Adapter  [1, InitPlan 3 (returns $4)]
+ 22 |       ->  Vector Streaming (type: GATHER)
+ 23 |          ->  Vector Limit
+ 24 |             ->  Vector Streaming(type: BROADCAST)
+ 25 |                ->  Vector Limit
+ 26 |                   ->  Vector Sort
+ 27 |                      ->  Vector Hash Aggregate
+ 28 |                         ->  CStore Scan on shipping_schema.t14
+ 29 |                         ->  Result  [27, SubPlan 1]
+ 30 |                         ->  HashAggregate  [27, SubPlan 2]
+ 31 |                            ->  Result
+(31 rows)
+
+           Predicate Information (identified by plan id)           
+-------------------------------------------------------------------
+  27 --Vector Hash Aggregate
+         Filter: (SubPlan 2)
+   8 --CStore Scan on shipping_schema.t14
+         Filter: (shipping_schema.t14.f2 = ($5)::double precision)
+  12 --Hash Full Join (13, 16)
+         Hash Cond: (t1.f1 = t2.f1)
+         Join Filter: (t1.f2 < ($6)::double precision)
+(7 rows)
+
+         Targetlist Information (identified by plan id)         
+----------------------------------------------------------------
+   1 --Limit
+         Output: shipping_schema.t14.f0
+  21 --Row Adapter
+         Output: shipping_schema.t14.f0, ((SubPlan 1))
+  22 --Vector Streaming (type: GATHER)
+         Output: shipping_schema.t14.f0, ((SubPlan 1))
+  23 --Vector Limit
+         Output: shipping_schema.t14.f0, ((SubPlan 1))
+  24 --Vector Streaming(type: BROADCAST)
+         Output: shipping_schema.t14.f0, ((SubPlan 1))
+         Merge Sort Key: ((SubPlan 1))
+  25 --Vector Limit
+         Output: shipping_schema.t14.f0, ((SubPlan 1))
+  26 --Vector Sort
+         Output: shipping_schema.t14.f0, ((SubPlan 1))
+         Sort Key: ((SubPlan 1))
+  27 --Vector Hash Aggregate
+         Output: shipping_schema.t14.f0, (SubPlan 1)
+         Group By Key: shipping_schema.t14.f0
+  28 --CStore Scan on shipping_schema.t14
+         Output: shipping_schema.t14.f0, shipping_schema.t14.f1
+         Distribute Key: shipping_schema.t14.f0
+  29 --Result
+         Output: shipping_schema.t14.f0
+  30 --HashAggregate
+         Output: count(shipping_schema.t14.f1), ($2)
+         Group By Key: shipping_schema.t14.f0
+  31 --Result
+         Output: shipping_schema.t14.f0
+   2 --Streaming (type: GATHER)
+         Output: shipping_schema.t14.f0
+         Merge Sort Key: shipping_schema.t14.f0
+   3 --Sort
+         Output: shipping_schema.t14.f0
+         Sort Key: shipping_schema.t14.f0
+   4 --Append(5, 12)
+   5 --HashAggregate
+         Output: shipping_schema.t14.f0
+         Group By Key: shipping_schema.t14.f0
+   6 --Append(7, 10)
+   7 --Row Adapter
+         Output: shipping_schema.t14.f0
+   8 --CStore Scan on shipping_schema.t14
+         Output: shipping_schema.t14.f0
+         Distribute Key: shipping_schema.t14.f0
+   9 --Result
+         Output: 1.21
+  10 --Streaming(type: REDISTRIBUTE ng: group1->ship_ng0)
+         Output: (2)
+         Distribute Key: (2)
+  11 --Result
+         Output: 2
+  12 --Hash Full Join (13, 16)
+         Output: t1.f0
+  20 --Result
+         Output: 2
+  13 --Streaming(type: REDISTRIBUTE)
+         Output: t1.f0, t1.f1, t1.f2
+         Distribute Key: t1.f1
+  14 --Row Adapter
+         Output: t1.f0, t1.f1, t1.f2
+  15 --CStore Scan on shipping_schema.t14 t1
+         Output: t1.f0, t1.f1, t1.f2
+         Distribute Key: t1.f0
+  16 --Hash
+         Output: t2.f1
+  17 --Streaming(type: REDISTRIBUTE)
+         Output: t2.f1
+         Distribute Key: t2.f1
+  18 --Row Adapter
+         Output: t2.f1
+  19 --CStore Scan on shipping_schema.t14 t2
+         Output: t2.f1
+         Distribute Key: t2.f0
+(74 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+select f0 from t14 where f2 = (select 1.21) 
+union 
+select (2) 
+union all 
+select t1.f0 from t14 t1 full join t14 t2 on (t1.f1 = t2.f1 and t1.f2 < (select 2)) order by 1 
+limit (select f0 from t14 group by f0 having count(f0) <=any (select count(f1)  group by f0) order by (select f0) limit 1);
+ f0 
+----
+  1
+(1 row)
+
+----case2---
+explain (verbose on, num_costs off)
+select sum((select (f0))), sum(f2) over (partition by (select f1) order by (select f1)) tmp
+from  t14 where (select f1)='cat1' group by cube(f2,f0,(select f1))
+order by 1,2 limit 2;
+WARNING:  Statistics in some tables or columns(shipping_schema.t14.f0, shipping_schema.t14.f1, shipping_schema.t14.f2) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                              operation                               
+----+----------------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Limit
+  3 |       ->  Vector Sort
+  4 |          ->  Vector WindowAgg
+  5 |             ->  Vector Sort
+  6 |                ->  Vector Hash Aggregate
+  7 |                   ->  Vector Streaming (type: GATHER)
+  8 |                      ->  Vector Hash Aggregate
+  9 |                         ->  Vector Sort Aggregate
+ 10 |                            ->  Vector Sort
+ 11 |                               ->  CStore Scan on shipping_schema.t14
+ 12 |                                  ->  Result  [11, SubPlan 2]
+ 13 |                                  ->  Result  [11, SubPlan 3]
+ 14 |                            ->  Result  [9, SubPlan 1]
+(14 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+  11 --CStore Scan on shipping_schema.t14
+         Filter: ((SubPlan 3) = 'cat1'::text)
+(2 rows)
+
+                                                       Targetlist Information (identified by plan id)                                                       
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+   1 --Row Adapter
+         Output: (pg_catalog.sum((pg_catalog.sum((sum((SubPlan 1))))))), (sum(f2) OVER (PARTITION BY ((SubPlan 2)))), f2, f0, ((SubPlan 2)), (GROUPINGID())
+   2 --Vector Limit
+         Output: (pg_catalog.sum((pg_catalog.sum((sum((SubPlan 1))))))), (sum(f2) OVER (PARTITION BY ((SubPlan 2)))), f2, f0, ((SubPlan 2)), (GROUPINGID())
+   3 --Vector Sort
+         Output: (pg_catalog.sum((pg_catalog.sum((sum((SubPlan 1))))))), (sum(f2) OVER (PARTITION BY ((SubPlan 2)))), f2, f0, ((SubPlan 2)), (GROUPINGID())
+         Sort Key: (pg_catalog.sum((pg_catalog.sum((sum((SubPlan 1))))))), (sum(t14.f2) OVER (PARTITION BY ((SubPlan 2))))
+   4 --Vector WindowAgg
+         Output: (pg_catalog.sum((pg_catalog.sum((sum((SubPlan 1))))))), sum(f2) OVER (PARTITION BY ((SubPlan 2))), f2, f0, ((SubPlan 2)), (GROUPINGID())
+   5 --Vector Sort
+         Output: f2, f0, ((SubPlan 2)), (GROUPINGID()), (pg_catalog.sum((pg_catalog.sum((sum((SubPlan 1)))))))
+         Sort Key: ((SubPlan 2))
+   6 --Vector Hash Aggregate
+         Output: f2, f0, ((SubPlan 2)), (GROUPINGID()), pg_catalog.sum((pg_catalog.sum((sum((SubPlan 1))))))
+         Group By Key: t14.f2, t14.f0, ((SubPlan 2)), (GROUPINGID())
+   7 --Vector Streaming (type: GATHER)
+         Output: f2, f0, ((SubPlan 2)), (GROUPINGID()), (pg_catalog.sum((sum((SubPlan 1)))))
+   8 --Vector Hash Aggregate
+         Output: f2, f0, ((SubPlan 2)), (GROUPINGID()), pg_catalog.sum((sum((SubPlan 1))))
+         Group By Key: t14.f2, t14.f0, ((SubPlan 2)), GROUPINGID()
+   9 --Vector Sort Aggregate
+         Output: f2, f0, ((SubPlan 2)), sum((SubPlan 1)), GROUPINGID()
+         Sort Key: ((SubPlan 2)), t14.f2
+         Sort Key: t14.f0, ((SubPlan 2))
+  10 --Vector Sort
+         Output: f2, f0, ((SubPlan 2))
+         Sort Key: t14.f2, t14.f0, ((SubPlan 2))
+  11 --CStore Scan on shipping_schema.t14
+         Output: f2, f0, (SubPlan 2)
+         Distribute Key: f0
+  12 --Result
+         Output: t14.f1
+  13 --Result
+         Output: t14.f1
+  14 --Result
+         Output: t14.f0
+(36 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+select sum((select (f0))), sum(f2) over (partition by (select f1) order by (select f1)) tmp
+from  t14 where (select f1)='cat1' group by cube(f2,f0,(select f1))
+order by 1,2 limit 2;
+ sum |  tmp  
+-----+-------
+   1 | 12.08
+   1 | 12.08
+(2 rows)
+
+---Array_SubLink nodegroup场景------
+---case1----
+explain (num_costs off)
+SELECT ARRAY(select f2 from t14 order by f2) AS "ARRAY";  
+ id |                                operation                                 
+----+--------------------------------------------------------------------------
+  1 | ->  Result
+  2 |    ->  Row Adapter  [1, InitPlan 1 (returns $0)]
+  3 |       ->  Vector Streaming (type: GATHER)
+  4 |          ->  Vector Sort
+  5 |             ->  Vector Streaming(type: BROADCAST ng: ship_ng0->GenGroup)
+  6 |                ->  CStore Scan on t14
+(6 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+SELECT ARRAY(select f2 from t14 order by f2) AS "ARRAY"; 
+                     ARRAY                     
+-----------------------------------------------
+ {1.15,1.15,1.18,1.21,1.24,1.26,1.26,1.3,1.32}
+(1 row)
+
+---case2----
+explain (num_costs off)
+SELECT ARRAY(select f2 from t14 order by f2) AS "ARRAY", f1 from t14 order by 1,2; 
+ id |                                  operation                                  
+----+-----------------------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Streaming (type: GATHER)
+  3 |       ->  Vector Sort
+  4 |          ->  CStore Scan on t14
+  5 |       ->  Row Adapter  [4, InitPlan 1 (returns $0)]
+  6 |          ->  Vector Streaming(type: BROADCAST)
+  7 |             ->  Vector Sort
+  8 |                ->  Vector Streaming(type: BROADCAST ng: ship_ng0->GenGroup)
+  9 |                   ->  CStore Scan on t14
+(9 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+SELECT ARRAY(select f2 from t14 order by f2) AS "ARRAY", f1 from t14 order by 1,2; 
+                     ARRAY                     |  f1  
+-----------------------------------------------+------
+ {1.15,1.15,1.18,1.21,1.24,1.26,1.26,1.3,1.32} | cat1
+ {1.15,1.15,1.18,1.21,1.24,1.26,1.26,1.3,1.32} | cat1
+ {1.15,1.15,1.18,1.21,1.24,1.26,1.26,1.3,1.32} | cat1
+ {1.15,1.15,1.18,1.21,1.24,1.26,1.26,1.3,1.32} | cat1
+ {1.15,1.15,1.18,1.21,1.24,1.26,1.26,1.3,1.32} | cat1
+ {1.15,1.15,1.18,1.21,1.24,1.26,1.26,1.3,1.32} | cat2
+ {1.15,1.15,1.18,1.21,1.24,1.26,1.26,1.3,1.32} | cat2
+ {1.15,1.15,1.18,1.21,1.24,1.26,1.26,1.3,1.32} | cat2
+ {1.15,1.15,1.18,1.21,1.24,1.26,1.26,1.3,1.32} | cat2
+(9 rows)
+
+---case3----
+explain (num_costs off)
+SELECT ARRAY(select (select f2 from t14 order by f2 limit 1)) AS "ARRAY", f1 from t14 order by 1,2; 
+ id |                                operation                                 
+----+--------------------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Streaming (type: GATHER)
+  3 |       ->  Vector Sort
+  4 |          ->  CStore Scan on t14
+  5 |       ->  Result  [4, InitPlan 2 (returns $1)]
+  6 |          ->  Row Adapter  [5, InitPlan 1 (returns $0)]
+  7 |             ->  Vector Streaming(type: BROADCAST ng: ship_ng0->GenGroup)
+  8 |                ->  Vector Limit
+  9 |                   ->  Vector Sort
+ 10 |                      ->  Vector Streaming(type: BROADCAST)
+ 11 |                         ->  Vector Limit
+ 12 |                            ->  Vector Sort
+ 13 |                               ->  CStore Scan on t14
+(13 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+SELECT ARRAY(select (select f2 from t14 order by f2 limit 1)) AS "ARRAY", f1 from t14 order by 1,2; 
+ ARRAY  |  f1  
+--------+------
+ {1.15} | cat1
+ {1.15} | cat1
+ {1.15} | cat1
+ {1.15} | cat1
+ {1.15} | cat1
+ {1.15} | cat2
+ {1.15} | cat2
+ {1.15} | cat2
+ {1.15} | cat2
+(9 rows)
+
+---case4----
+explain (num_costs off)
+select ARRAY(select f2  from t14 where f2 >(select f2 from t14 order by f2 limit 1) order by 1) order by 1;
+ id |                                  operation                                  
+----+-----------------------------------------------------------------------------
+  1 | ->  Result
+  2 |    ->  Row Adapter  [1, InitPlan 2 (returns $1)]
+  3 |       ->  Vector Streaming (type: GATHER)
+  4 |          ->  Vector Sort
+  5 |             ->  Vector Streaming(type: BROADCAST ng: ship_ng0->GenGroup)
+  6 |                ->  CStore Scan on t14
+  7 |             ->  Row Adapter  [6, InitPlan 1 (returns $0)]
+  8 |                ->  Vector Streaming(type: BROADCAST ng: ship_ng0->GenGroup)
+  9 |                   ->  Vector Limit
+ 10 |                      ->  Vector Sort
+ 11 |                         ->  Vector Streaming(type: BROADCAST)
+ 12 |                            ->  Vector Limit
+ 13 |                               ->  Vector Sort
+ 14 |                                  ->  CStore Scan on t14
+(14 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   6 --CStore Scan on t14
+         Filter: (f2 > $0)
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+---case5----
+explain (num_costs off)
+SELECT ARRAY(select f2 from t14 ) AS "ARRAY", f1 from t14 order by 2; 
+ id |                               operation                               
+----+-----------------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Streaming (type: GATHER)
+  3 |       ->  Vector Sort
+  4 |          ->  CStore Scan on t14
+  5 |       ->  Row Adapter  [4, InitPlan 1 (returns $0)]
+  6 |          ->  Vector Streaming(type: BROADCAST ng: ship_ng0->GenGroup)
+  7 |             ->  CStore Scan on t14
+(7 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+---case6----
+explain (num_costs off)
+SELECT ARRAY(select avg(f2) over(partition by f2 order by f2) from t14) as "ARRAY" ;
+ id |                        operation                        
+----+---------------------------------------------------------
+  1 | ->  Result
+  2 |    ->  Row Adapter  [1, InitPlan 1 (returns $0)]
+  3 |       ->  Vector Streaming (type: GATHER)
+  4 |          ->  Vector WindowAgg
+  5 |             ->  Vector Sort
+  6 |                ->  Vector Streaming(type: REDISTRIBUTE)
+  7 |                   ->  CStore Scan on t14
+(7 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+---case7----
+explain (verbose on, num_costs off)
+SELECT ARRAY(select sum(f2) over(order by f2) from t14) as "ARRAY" ;
+WARNING:  Statistics in some tables or columns(shipping_schema.t14.f0, shipping_schema.t14.f2) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                          operation                          
+----+-------------------------------------------------------------
+  1 | ->  Result
+  2 |    ->  Row Adapter  [1, InitPlan 1 (returns $0)]
+  3 |       ->  Vector Streaming (type: GATHER)
+  4 |          ->  Vector WindowAgg
+  5 |             ->  Vector Streaming(type: BROADCAST)
+  6 |                ->  Vector Sort
+  7 |                   ->  Vector Streaming(type: REDISTRIBUTE)
+  8 |                      ->  CStore Scan on shipping_schema.t14
+(8 rows)
+
+           Targetlist Information (identified by plan id)            
+---------------------------------------------------------------------
+   1 --Result
+         Output: $0
+   2 --Row Adapter
+         Output: (sum(f2) OVER (ORDER BY f2 USING = NULLS LAST)), f2
+   3 --Vector Streaming (type: GATHER)
+         Output: (sum(f2) OVER (ORDER BY f2 USING = NULLS LAST)), f2
+   4 --Vector WindowAgg
+         Output: sum(f2) OVER (ORDER BY f2 USING = NULLS LAST), f2
+   5 --Vector Streaming(type: BROADCAST)
+         Output: f2
+         Merge Sort Key: t14.f2
+   6 --Vector Sort
+         Output: f2
+         Sort Key: t14.f2
+   7 --Vector Streaming(type: REDISTRIBUTE)
+         Output: f2
+         Distribute Key: f2
+   8 --CStore Scan on shipping_schema.t14
+         Output: f2
+         Distribute Key: f0
+(20 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+---case8---
+explain (verbose on, num_costs off)
+SELECT ARRAY(select sum(f2) over(order by f2) from t14 order by f2) as "ARRAY" ;
+WARNING:  Statistics in some tables or columns(shipping_schema.t14.f0, shipping_schema.t14.f2) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                          operation                          
+----+-------------------------------------------------------------
+  1 | ->  Result
+  2 |    ->  Row Adapter  [1, InitPlan 1 (returns $0)]
+  3 |       ->  Vector Streaming (type: GATHER)
+  4 |          ->  Vector WindowAgg
+  5 |             ->  Vector Streaming(type: BROADCAST)
+  6 |                ->  Vector Sort
+  7 |                   ->  Vector Streaming(type: REDISTRIBUTE)
+  8 |                      ->  CStore Scan on shipping_schema.t14
+(8 rows)
+
+           Targetlist Information (identified by plan id)            
+---------------------------------------------------------------------
+   1 --Result
+         Output: $0
+   2 --Row Adapter
+         Output: (sum(f2) OVER (ORDER BY f2 USING = NULLS LAST)), f2
+   3 --Vector Streaming (type: GATHER)
+         Output: (sum(f2) OVER (ORDER BY f2 USING = NULLS LAST)), f2
+   4 --Vector WindowAgg
+         Output: sum(f2) OVER (ORDER BY f2 USING = NULLS LAST), f2
+   5 --Vector Streaming(type: BROADCAST)
+         Output: f2
+         Merge Sort Key: t14.f2
+   6 --Vector Sort
+         Output: f2
+         Sort Key: t14.f2
+   7 --Vector Streaming(type: REDISTRIBUTE)
+         Output: f2
+         Distribute Key: f2
+   8 --CStore Scan on shipping_schema.t14
+         Output: f2
+         Distribute Key: f0
+(20 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--case9---
+set  enable_seqscan=off;
+explain (verbose on, num_costs off)
+select array(select f0 from t15 order by 1) as "array";
+WARNING:  Statistics in some tables or columns(shipping_schema.t15.f0) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                                  operation                                  
+----+-----------------------------------------------------------------------------
+  1 | ->  Result
+  2 |    ->  Streaming (type: GATHER)  [1, InitPlan 1 (returns $0)]
+  3 |       ->  Sort
+  4 |          ->  Streaming(type: BROADCAST)
+  5 |             ->  Index Only Scan using index_ship_t15 on shipping_schema.t15
+(5 rows)
+
+          Targetlist Information (identified by plan id)           
+-------------------------------------------------------------------
+   1 --Result
+         Output: $0
+   2 --Streaming (type: GATHER)
+         Output: f0
+   3 --Sort
+         Output: f0
+         Sort Key: t15.f0
+   4 --Streaming(type: BROADCAST)
+         Output: f0
+   5 --Index Only Scan using index_ship_t15 on shipping_schema.t15
+         Output: f0
+         Distribute Key: f0
+(12 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+select array(select f0 from t15 order by 1) as "array";
+        array        
+---------------------
+ {1,2,3,4,5,6,7,8,9}
+(1 row)
+
+reset enable_seqscan;
+---case10--
+set  enable_seqscan=off;
+explain (verbose on, num_costs off)
+select array(select f0 from (select f0 from t15 order by 1) order by 1) as "array";
+WARNING:  Statistics in some tables or columns(shipping_schema.t15.f0) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+ id |                                  operation                                  
+----+-----------------------------------------------------------------------------
+  1 | ->  Result
+  2 |    ->  Streaming (type: GATHER)  [1, InitPlan 1 (returns $0)]
+  3 |       ->  Sort
+  4 |          ->  Streaming(type: BROADCAST)
+  5 |             ->  Index Only Scan using index_ship_t15 on shipping_schema.t15
+(5 rows)
+
+          Targetlist Information (identified by plan id)           
+-------------------------------------------------------------------
+   1 --Result
+         Output: $0
+   2 --Streaming (type: GATHER)
+         Output: t15.f0
+   3 --Sort
+         Output: t15.f0
+         Sort Key: t15.f0
+   4 --Streaming(type: BROADCAST)
+         Output: t15.f0
+   5 --Index Only Scan using index_ship_t15 on shipping_schema.t15
+         Output: t15.f0
+         Distribute Key: t15.f0
+(12 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+select array(select f0 from (select f0 from t15 order by 1) order by 1) as "array";
+        array        
+---------------------
+ {1,2,3,4,5,6,7,8,9}
+(1 row)
+
+reset enable_seqscan;

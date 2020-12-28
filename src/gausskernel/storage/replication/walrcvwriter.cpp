@@ -2,17 +2,6 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 2010-2013, PostgreSQL Global Development Group
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
  *
  * walrcvwriter.cpp
  *   functions for xlog receive management
@@ -34,7 +23,7 @@
 #include "replication/dataqueue.h"
 #include "replication/datareceiver.h"
 #include "replication/walsender.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
 #include "storage/proc.h"
@@ -47,6 +36,7 @@
 #include "utils/ps_status.h"
 #include "utils/resowner.h"
 #include "gssignal/gs_signal.h"
+#include "gs_bbox.h"
 
 /*
  * These variables are used similarly to openLogFile/SegNo/Off,
@@ -66,8 +56,8 @@ static uint32 ws_dummy_data_writer_file_offset = 0;
 bool ws_dummy_data_writer_use_file = false;
 
 /* Signal handlers */
-static void WSDataWriteOnDummyStandby(const char* buf, uint32 nbytes);
-static void WSDataRcvWriteOnDummyStandby(const char* buf, uint32 nbytes);
+static void WSDataWriteOnDummyStandby(const char *buf, uint32 nbytes);
+static void WSDataRcvWriteOnDummyStandby(const char *buf, uint32 nbytes);
 static void walrcvWriterSigHupHandler(SIGNAL_ARGS);
 static void walrcvWriterQuickDie(SIGNAL_ARGS);
 static void reqShutdownHandler(SIGNAL_ARGS);
@@ -75,7 +65,7 @@ static void reqShutdownHandler(SIGNAL_ARGS);
 void SetWalRcvWriterPID(ThreadId tid)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     SpinLockAcquire(&walrcv->mutex);
     walrcv->writerPid = tid;
     SpinLockRelease(&walrcv->mutex);
@@ -84,7 +74,7 @@ void SetWalRcvWriterPID(ThreadId tid)
 static void setWalRcvWriterLatch(void)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     SpinLockAcquire(&walrcv->mutex);
     walrcv->walrcvWriterLatch = &t_thrd.proc->procLatch;
     walrcv->writerPid = t_thrd.proc_cxt.MyProcPid;
@@ -94,7 +84,7 @@ static void setWalRcvWriterLatch(void)
 static void emptyWalRcvWriterLatch(void)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     SpinLockAcquire(&walrcv->mutex);
     walrcv->walrcvWriterLatch = NULL;
     walrcv->writerPid = 0;
@@ -104,7 +94,7 @@ static void emptyWalRcvWriterLatch(void)
 bool WalRcvWriterInProgress(void)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
 
     SpinLockAcquire(&walrcv->mutex);
     if (walrcv->writerPid == 0) {
@@ -115,11 +105,11 @@ bool WalRcvWriterInProgress(void)
     return true;
 }
 
-WalRcvCtlBlock* getCurrentWalRcvCtlBlock(void)
+WalRcvCtlBlock *getCurrentWalRcvCtlBlock(void)
 {
-    WalRcvCtlBlock* walrcb = NULL;
+    WalRcvCtlBlock *walrcb = NULL;
     /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
 
     SpinLockAcquire(&walrcv->mutex);
     walrcb = walrcv->walRcvCtlBlock;
@@ -130,7 +120,7 @@ WalRcvCtlBlock* getCurrentWalRcvCtlBlock(void)
 /*
  * Write XLOG data to disk.
  */
-static void XLogWalRcvWrite(WalRcvCtlBlock* walrcb, char* buf, Size nbytes, XLogRecPtr recptr)
+static void XLogWalRcvWrite(WalRcvCtlBlock *walrcb, char *buf, Size nbytes, XLogRecPtr recptr)
 {
     int startoff;
     int byteswritten;
@@ -140,7 +130,7 @@ static void XLogWalRcvWrite(WalRcvCtlBlock* walrcb, char* buf, Size nbytes, XLog
     while (nbytes > 0) {
         int segbytes;
         /* use volatile pointer to prevent code rearrangement */
-        volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+        volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
 
         if (recvFile < 0 || !XLByteInSeg(recptr, recvSegNo)) {
             bool use_existent = false;
@@ -158,10 +148,9 @@ static void XLogWalRcvWrite(WalRcvCtlBlock* walrcb, char* buf, Size nbytes, XLog
                  * pages associated with the file like XLogFileClose() does.
                  */
                 if (close(recvFile) != 0)
-                    ereport(PANIC,
-                        (errcode_for_file_access(),
-                            errmsg("could not close log file %s: %m",
-                                XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, recvSegNo))));
+                    ereport(PANIC, (errcode_for_file_access(),
+                                    errmsg("could not close log file %s: %m",
+                                           XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, recvSegNo))));
 
                 /*
                  * Create .done file forcibly to prevent the restored segment from
@@ -191,11 +180,9 @@ static void XLogWalRcvWrite(WalRcvCtlBlock* walrcb, char* buf, Size nbytes, XLog
         /* Need to seek in the file? */
         if (recvOff != (uint32)startoff) {
             if (lseek(recvFile, (off_t)startoff, SEEK_SET) < 0)
-                ereport(PANIC,
-                    (errcode_for_file_access(),
-                        errmsg("could not seek in log file %s to offset %d: %m",
-                            XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, recvSegNo),
-                            startoff)));
+                ereport(PANIC, (errcode_for_file_access(),
+                                errmsg("could not seek in log file %s to offset %d: %m",
+                                       XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, recvSegNo), startoff)));
             recvOff = startoff;
         }
 
@@ -208,17 +195,17 @@ static void XLogWalRcvWrite(WalRcvCtlBlock* walrcb, char* buf, Size nbytes, XLog
             if (errno == 0)
                 errno = ENOSPC;
             ereport(PANIC,
-                (errcode_for_file_access(),
-                    errmsg("could not write to log file %s at offset %u, length %lu: %m",
-                        XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, recvSegNo),
-                        recvOff,
-                        INT2ULONG(segbytes))));
+                    (errcode_for_file_access(),
+                     errmsg("could not write to log file %s at offset %u, length %lu: %m",
+                            XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, recvSegNo), recvOff, INT2ULONG(segbytes))));
         }
-        if (unlikely(recvOff == (uint32)0 && segbytes >= (int)sizeof(XLogPageHeaderData) &&
-            ((XLogPageHeader)buf)->xlp_magic == XLOG_PAGE_MAGIC &&
-            (recvSegNo * XLogSegSize) != ((XLogPageHeader)buf)->xlp_pageaddr)) {
-            ereport(PANIC, (errmsg("invalid page addr, seg addr:%lu, buf page addr:%lu",
-                recvSegNo * XLogSegSize, ((XLogPageHeader)buf)->xlp_pageaddr)));
+        if (recvOff == (uint32)0 && segbytes >= (int)sizeof(XLogPageHeaderData)) {
+            if (((XLogPageHeader)buf)->xlp_magic == XLOG_PAGE_MAGIC &&
+                (recvSegNo * XLogSegSize) != ((XLogPageHeader)buf)->xlp_pageaddr) {
+                ereport(PANIC, (errcode_for_file_access(),
+                                errmsg("unexpected page addr %lu of log file %s", ((XLogPageHeader)buf)->xlp_pageaddr,
+                                       XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, recvSegNo))));
+            }
         }
         /* Update state for write */
         XLByteAdvance(recptr, byteswritten);
@@ -251,18 +238,16 @@ static void XLogWalRcvWrite(WalRcvCtlBlock* walrcb, char* buf, Size nbytes, XLog
         /* Report XLOG streaming progress in PS display */
         if (u_sess->attr.attr_common.update_process_title) {
             char activitymsg[50];
-            nRetCode = snprintf_s(activitymsg,
-                sizeof(activitymsg),
-                sizeof(activitymsg) - 1,
-                "walrcvwriter streaming %X/%X",
-                (uint32)(t_thrd.walrcvwriter_cxt.walStreamWrite >> 32),
-                (uint32)t_thrd.walrcvwriter_cxt.walStreamWrite);
+            nRetCode = snprintf_s(activitymsg, sizeof(activitymsg), sizeof(activitymsg) - 1,
+                                  "walrcvwriter streaming %X/%X",
+                                  (uint32)(t_thrd.walrcvwriter_cxt.walStreamWrite >> 32),
+                                  (uint32)t_thrd.walrcvwriter_cxt.walStreamWrite);
             securec_check_ss(nRetCode, "\0", "\0");
             set_ps_display(activitymsg, false);
         }
 
-        ereport(DEBUG2,
-            (errmsg("write xlog done: start %X/%X %lu bytes", (uint32)(recptr >> 32), (uint32)recptr, write_bytes)));
+        ereport(DEBUG2, (errmsg("write xlog done: start %X/%X %lu bytes", (uint32)(recptr >> 32), (uint32)recptr,
+                                write_bytes)));
     }
 }
 
@@ -278,16 +263,15 @@ void WalRcvXLogClose(void)
          */
         if (close(recvFile) != 0)
             ereport(PANIC,
-                (errcode_for_file_access(),
-                    errmsg(
-                        "could not close log file %s: %m", XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, recvSegNo))));
+                    (errcode_for_file_access(), errmsg("could not close log file %s: %m",
+                                                       XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, recvSegNo))));
     }
     recvFile = -1;
 
     LWLockRelease(WALWriteLock);
 }
 
-static void WSDataWriteOnDummyStandby(const char* buf, uint32 nbytes)
+static void WSDataWriteOnDummyStandby(const char *buf, uint32 nbytes)
 {
     ssize_t write_len = -1;
     char path[MAXPGPATH] = {0};
@@ -315,20 +299,15 @@ static void WSDataWriteOnDummyStandby(const char* buf, uint32 nbytes)
     /* open the file */
     if (ws_dummy_data_writer_file_fd < 0) {
         /* get the file path */
-        nRet = snprintf_s(path,
-            sizeof(path),
-            MAXPGPATH - 1,
-            "base/dummy_standby/%u",
-            t_thrd.walrcvwriter_cxt.ws_dummy_data_writer_file_num);
+        nRet = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "base/dummy_standby/%u",
+                          t_thrd.walrcvwriter_cxt.ws_dummy_data_writer_file_num);
         securec_check_ss_c(nRet, "\0", "\0");
 
         ws_dummy_data_writer_file_fd = open(path, O_RDWR | O_CREAT | PG_BINARY, S_IRUSR | S_IWUSR);
         if (ws_dummy_data_writer_file_fd < 0)
-            ereport(PANIC,
-                (errcode_for_file_access(),
-                    errmsg("could not create data file \"%s\", dummy_data_writer_file_fd=%d: %m",
-                        path,
-                        ws_dummy_data_writer_file_fd)));
+            ereport(PANIC, (errcode_for_file_access(),
+                            errmsg("could not create data file \"%s\", dummy_data_writer_file_fd=%d: %m", path,
+                                   ws_dummy_data_writer_file_fd)));
     }
 
     errno = 0;
@@ -340,7 +319,7 @@ static void WSDataWriteOnDummyStandby(const char* buf, uint32 nbytes)
             errno = ENOSPC;
         }
         ereport(PANIC, (errcode_for_file_access(),
-            errmsg("could not write to data file %s buffer len %u, length %u: %m", path, nbytes, nbytes)));
+                        errmsg("could not write to data file %s buffer len %u, length %u: %m", path, nbytes, nbytes)));
     }
 
     errno = 0;
@@ -349,35 +328,28 @@ static void WSDataWriteOnDummyStandby(const char* buf, uint32 nbytes)
         /* if write didn't set errno, assume no disk space */
         if (errno == 0)
             errno = ENOSPC;
-        ereport(PANIC,
-            (errcode_for_file_access(),
-                errmsg("could not write to data file %s "
-                       "at offset %u, length %u: %m",
-                    path,
-                    (uint32)ws_dummy_data_writer_file_offset,
-                    nbytes)));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not write to data file %s "
+                                                          "at offset %u, length %u: %m",
+                                                          path, (uint32)ws_dummy_data_writer_file_offset, nbytes)));
     }
 
     ws_dummy_data_writer_file_offset = ws_dummy_data_writer_file_offset + nbytes + sizeof(nbytes);
 
     ereport(u_sess->attr.attr_storage.HaModuleDebug ? LOG : DEBUG2,
-        (errmsg("the dummy data write info: writer_file_num %u %u bytes",
-            t_thrd.walrcvwriter_cxt.ws_dummy_data_writer_file_num,
-            nbytes)));
+            (errmsg("the dummy data write info: writer_file_num %u %u bytes",
+                    t_thrd.walrcvwriter_cxt.ws_dummy_data_writer_file_num, nbytes)));
 
     /* use fdatasync to make sure the received data to flush the disk */
     if (pg_fdatasync(ws_dummy_data_writer_file_fd) != 0)
-        ereport(PANIC,
-            (errcode_for_file_access(),
-                errmsg("could not fdatasync data file num %u, fd %d: %m",
-                    t_thrd.walrcvwriter_cxt.ws_dummy_data_writer_file_num,
-                    ws_dummy_data_writer_file_fd)));
+        ereport(PANIC, (errcode_for_file_access(),
+                        errmsg("could not fdatasync data file num %u, fd %d: %m",
+                               t_thrd.walrcvwriter_cxt.ws_dummy_data_writer_file_num, ws_dummy_data_writer_file_fd)));
 }
 
 /*
  * Write data to disk of DummyStandby.
  */
-static void WSDataRcvWriteOnDummyStandby(const char* buf, uint32 nbytes)
+static void WSDataRcvWriteOnDummyStandby(const char *buf, uint32 nbytes)
 {
     ws_dummy_data_writer_use_file = true;
     WSDataWriteOnDummyStandby(buf, (uint32)nbytes);
@@ -396,11 +368,11 @@ void CloseWSDataFileOnDummyStandby(void)
 
 void InitWSDataNumOnDummyStandby(void)
 {
-    DIR* dir = NULL;
-    struct dirent* de = NULL;
+    DIR *dir = NULL;
+    struct dirent *de = NULL;
     int max_num_file = 0;
     int min_num_file = 0;
-    char* dirpath = DUMMY_STANDBY_DATADIR;
+    char *dirpath = DUMMY_STANDBY_DATADIR;
 
     /* open the dir of base/dummy_standby */
     errno = 0;
@@ -439,11 +411,8 @@ void InitWSDataNumOnDummyStandby(void)
         /* search the max num file */
         max_num_file = Max(atoi(de->d_name), max_num_file);
         min_num_file = Min(atoi(de->d_name), min_num_file);
-        ereport(DEBUG5,
-            (errmsg("InitDummyDataNum de->d_name=%s;   max_num_path=%d; min_num_file=%d.",
-                de->d_name,
-                max_num_file,
-                min_num_file)));
+        ereport(DEBUG5, (errmsg("InitDummyDataNum de->d_name=%s;   max_num_path=%d; min_num_file=%d.", de->d_name,
+                                max_num_file, min_num_file)));
     }
 
     t_thrd.walsender_cxt.ws_dummy_data_read_file_num = min_num_file;
@@ -454,19 +423,19 @@ void InitWSDataNumOnDummyStandby(void)
 /*
  * Write all the wal data to disk.
  */
-int WalDataRcvWrite()
+int WalDataRcvWrite(void)
 {
     /* Use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-    char* writeBuf = NULL;
-    char* cur_buf = NULL;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    char *writeBuf = NULL;
+    char *cur_buf = NULL;
     uint32 left_nbytes = 0;
     uint32 get_queue_nbytes = 0;
     uint32 remainbytes = 0;
     uint32 cur_data_nbytes = 0;
-    DataQueuePtr start_pos = {0, 0};
-    DataQueuePtr end_pos = {0, 0};
-    WalRcvCtlBlock* walrcb = getCurrentWalRcvCtlBlock();
+    DataQueuePtr start_pos = { 0, 0 };
+    DataQueuePtr end_pos = { 0, 0 };
+    WalRcvCtlBlock *walrcb = getCurrentWalRcvCtlBlock();
     errno_t errorno = EOK;
     XLogRecPtr recptr = InvalidXLogRecPtr;
     char data_flag;
@@ -485,12 +454,8 @@ int WalDataRcvWrite()
     start_pos.queueoff = walrcv->local_write_pos.queueoff;
     SpinLockRelease(&walrcv->mutex);
 
-    get_queue_nbytes = GetFromDataQueue(writeBuf,
-        g_instance.attr.attr_storage.DataQueueBufSize * 1024,
-        start_pos,
-        end_pos,
-        true,
-        t_thrd.dataqueue_cxt.DataWriterQueue);
+    get_queue_nbytes = GetFromDataQueue(writeBuf, g_instance.attr.attr_storage.DataQueueBufSize * 1024, start_pos,
+                                        end_pos, true, t_thrd.dataqueue_cxt.DataWriterQueue);
     if (get_queue_nbytes == 0) {
         LWLockRelease(RcvWriteLock);
         END_CRIT_SECTION();
@@ -512,10 +477,8 @@ int WalDataRcvWrite()
                 securec_check(errorno, "\0", "\0");
                 Assert(!XLogRecPtrIsInvalid(recptr));
 
-                (void)WSWalRcvWrite(walrcb,
-                    cur_buf + sizeof(uint32) + 1 + sizeof(XLogRecPtr),
-                    cur_data_nbytes - (sizeof(uint32) + 1 + sizeof(XLogRecPtr)),
-                    recptr);
+                (void)WSWalRcvWrite(walrcb, cur_buf + sizeof(uint32) + 1 + sizeof(XLogRecPtr),
+                                    cur_data_nbytes - (sizeof(uint32) + 1 + sizeof(XLogRecPtr)), recptr);
 
                 break;
             case 'd':
@@ -550,7 +513,7 @@ int WalDataRcvWrite()
             default:
                 Assert(false);
                 ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("unexpected wal data type %c", data_flag)));
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("unexpected wal data type %c", data_flag)));
                 break;
         }
 
@@ -566,7 +529,7 @@ int WalDataRcvWrite()
     DQByteAdvance(walrcv->local_write_pos, get_queue_nbytes);
     SpinLockRelease(&walrcv->mutex);
 
-    PopFromDataQueue(((WalRcvData*)walrcv)->local_write_pos, t_thrd.dataqueue_cxt.DataWriterQueue);
+    PopFromDataQueue(((WalRcvData *)walrcv)->local_write_pos, t_thrd.dataqueue_cxt.DataWriterQueue);
 
     LWLockRelease(RcvWriteLock);
     END_CRIT_SECTION();
@@ -580,11 +543,11 @@ int WalDataRcvWrite()
  * If we're in the midst of dying, it's unwise to do anything that might throw
  * an error, so we skip sending a reply in that case.
  */
-int walRcvWrite(WalRcvCtlBlock* walrcb)
+int walRcvWrite(WalRcvCtlBlock *walrcb)
 {
     int64 walfreeoffset;
     int64 walwriteoffset;
-    char* walrecvbuf = NULL;
+    char *walrecvbuf = NULL;
     XLogRecPtr startptr;
     int64 recBufferSize = g_instance.attr.attr_storage.WalReceiverBufSize * 1024;
     int nbytes = 0;
@@ -599,7 +562,8 @@ int walRcvWrite(WalRcvCtlBlock* walrcb)
 
     if (walrcb->walFreeOffset == walrcb->walWriteOffset) {
         if (IsExtremeRtoReadWorkerRunning()) {
-            if (walrcb->walFreeOffset != walrcb->walReadOffset) {
+            if (walrcb->walFreeOffset != walrcb->walReadOffset && 
+                pg_atomic_read_u32(&(g_instance.comm_cxt.localinfo_cxt.is_finish_redo)) == ATOMIC_FALSE) {
                 nbytes = 1;
             }
         }
@@ -621,8 +585,8 @@ int walRcvWrite(WalRcvCtlBlock* walrcb)
 
     XLogWalRcvWrite(walrcb, walrecvbuf + walwriteoffset, nbytes, startptr);
     XLByteAdvance(startptr, nbytes);
-    ereport(
-        DEBUG5, (errmsg("walRcvWrite: write len:%d, at %u,%X", nbytes, (uint32)(startptr >> 32), (uint32)startptr)));
+    ereport(DEBUG5,
+            (errmsg("walRcvWrite: write len:%d, at %u,%X", nbytes, (uint32)(startptr >> 32), (uint32)startptr)));
 
     SpinLockAcquire(&walrcb->mutex);
     walrcb->walWriteOffset += nbytes;
@@ -630,28 +594,24 @@ int walRcvWrite(WalRcvCtlBlock* walrcb)
     if (IsExtremeRedo()) {
         if (walrcb->walWriteOffset == recBufferSize && (walrcb->walReadOffset > 0)) {
             walrcb->walWriteOffset = 0;
-            if (walrcb->walFreeOffset == recBufferSize)
+            if (walrcb->walFreeOffset == recBufferSize) {
                 walrcb->walFreeOffset = 0;
-            
+            }
         }
     } else {
         if (walrcb->walWriteOffset == recBufferSize) {
-        walrcb->walWriteOffset = 0;
-        if (walrcb->walFreeOffset == recBufferSize)
-            walrcb->walFreeOffset = 0;
+            walrcb->walWriteOffset = 0;
+            if (walrcb->walFreeOffset == recBufferSize) {
+                walrcb->walFreeOffset = 0;
+            }
         }
     }
     walfreeoffset = walrcb->walFreeOffset;
     walwriteoffset = walrcb->walWriteOffset;
     SpinLockRelease(&walrcb->mutex);
 
-    ereport(DEBUG5,
-        (errmsg("walRcvWrite: nbytes(%d),walfreeoffset(%ld),walwriteoffset(%ld),startptr(%u:%u)",
-            nbytes,
-            walfreeoffset,
-            walwriteoffset,
-            (uint32)(startptr >> 32),
-            (uint32)startptr)));
+    ereport(DEBUG5, (errmsg("walRcvWrite: nbytes(%d),walfreeoffset(%ld),walwriteoffset(%ld),startptr(%u:%u)", nbytes,
+                            walfreeoffset, walwriteoffset, (uint32)(startptr >> 32), (uint32)startptr)));
 
     LWLockRelease(WALWriteLock);
 
@@ -666,7 +626,7 @@ int walRcvWrite(WalRcvCtlBlock* walrcb)
  * for walRcvWrite() the wal source is from the walrcb and for WSWalRcvWrite()
  * the wal source is from the wal write queue.
  */
-int WSWalRcvWrite(WalRcvCtlBlock* walrcb, char* buf, Size nbytes, XLogRecPtr start_ptr)
+int WSWalRcvWrite(WalRcvCtlBlock *walrcb, char *buf, Size nbytes, XLogRecPtr start_ptr)
 {
     if (walrcb == NULL) {
         ereport(NOTICE, (errmsg("have nothing of the wal receiver wal block info.")));
@@ -699,9 +659,7 @@ void walrcvWriterMain(void)
     sigset_t oldSigMask;
     MemoryContext walrcvWriterContext;
 
-    knl_thread_set_name("WalRcvWriter");
-
-    ereport(LOG, (errmsg("WalRcvWriter thread started")));
+    ereport(LOG, (errmsg("walrcvwriter thread started")));
     /*
      * Reset some signals that are accepted by postmaster but not here
      */
@@ -732,7 +690,7 @@ void walrcvWriterMain(void)
      * Create a resource owner to keep track of our resources (currently only
      * buffer pins).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "WalReceive Writer");
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "WalReceive Writer", MEMORY_CONTEXT_STORAGE);
 
     /*
      * Create a memory context that we will do all our work in.  We do this so
@@ -740,11 +698,8 @@ void walrcvWriterMain(void)
      * possible memory leaks.  Formerly this code just ran in
      * t_thrd.top_mem_cxt, but resetting that would be a really bad idea.
      */
-    walrcvWriterContext = AllocSetContextCreate(t_thrd.top_mem_cxt,
-        "WalReceive Writer",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    walrcvWriterContext = AllocSetContextCreate(t_thrd.top_mem_cxt, "WalReceive Writer", ALLOCSET_DEFAULT_MINSIZE,
+                                                ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     (void)MemoryContextSwitchTo(walrcvWriterContext);
 
     /* init the dummy standby data num to write */
@@ -760,12 +715,12 @@ void walrcvWriterMain(void)
      * See notes in postgres.c about the design of this coding.
      */
     int curTryCounter = 0;
-    int* oldTryCounter = nullptr;
+    int *oldTryCounter = nullptr;
     if (sigsetjmp(localSigjmpBuf, 1) != 0) {
         gstrace_tryblock_exit(true, oldTryCounter);
 
         // We need restore the signal mask of current thread
-        //
+        // 
         pthread_sigmask(SIG_SETMASK, &oldSigMask, NULL);
 
         /* Since not using PG_TRY, must reset error stack by hand */
@@ -866,7 +821,7 @@ void walrcvWriterMain(void)
             ;
 
         if (t_thrd.walrcvwriter_cxt.shutdownRequested) {
-            ereport(LOG, (errmsg("WalRcvWriter thread shut down")));
+            ereport(LOG, (errmsg("walrcvwriter thread shut down")));
             /*
              * From here on, elog(ERROR) should end with exit(1), not send
              * control back to the sigsetjmp block above
@@ -878,7 +833,7 @@ void walrcvWriterMain(void)
 
         rc = WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, (long)1000 /* ms */);
         if (rc & WL_POSTMASTER_DEATH) {
-            ereport(LOG, (errmsg("WalRcvWriter thread shut down with code 1")));
+            ereport(LOG, (errmsg("walrcvwriter thread shut down with code 1")));
             gs_thread_exit(1);
         }
     }

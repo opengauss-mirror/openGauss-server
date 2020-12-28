@@ -1,0 +1,52 @@
+create schema sonic_hashjoin_test_date;
+set current_schema = sonic_hashjoin_test_date;
+CREATE TABLE sonic_hashjoin_test_date.VEC_HASHJOIN_TABLE_01_DATE(
+C_INT INT,
+C_BIGINT BIGINT,
+C_SMALLINT SMALLINT,
+a DATE,
+b TIMESTAMP WITHOUT TIME ZONE,
+c TIMESTAMP WITH TIME ZONE,
+d TIMESTAMPTZ,
+e TIMETZ,
+f INTERVAL,
+g TINTERVAL,
+h SMALLDATETIME
+) with(orientation = column) distribute by hash(c_int);
+CREATE TABLE sonic_hashjoin_test_date.VEC_HASHJOIN_TABLE_02_DATE(
+C_INT INT,
+C_BIGINT BIGINT,
+C_SMALLINT SMALLINT,
+a DATE,
+b TIMESTAMP WITHOUT TIME ZONE,
+c TIMESTAMP WITH TIME ZONE,
+d TIMESTAMPTZ,
+e TIMETZ,
+f INTERVAL,
+g TINTERVAL,
+h SMALLDATETIME
+) with(orientation = column) distribute by hash(c_int);
+CREATE TABLE sonic_hashjoin_test_date.VEC_HASHJOIN_TABLE_03_DATE(
+C_INT INT,
+C_BIGINT BIGINT,
+C_SMALLINT SMALLINT,
+a DATE,
+b TIMESTAMP WITHOUT TIME ZONE,
+c TIMESTAMP WITH TIME ZONE,
+d TIMESTAMPTZ,
+e TIMETZ,
+f INTERVAL,
+g TINTERVAL,
+h SMALLDATETIME
+) with(orientation = column) distribute by replication;
+CREATE TABLE sonic_hashjoin_test_date.VEC_HASHJOIN_TABLE_04_DATE(
+C_INT INT
+) with(orientation = column) distribute by hash(c_int);
+copy VEC_HASHJOIN_TABLE_01_DATE from '@abs_srcdir@/data/vec_sonic_hashjoin_date_1.data' delimiter as '|';
+copy VEC_HASHJOIN_TABLE_02_DATE from '@abs_srcdir@/data/vec_sonic_hashjoin_date_2.data' delimiter as '|';
+copy VEC_HASHJOIN_TABLE_03_DATE from '@abs_srcdir@/data/vec_sonic_hashjoin_date_1.data' delimiter as '|';
+INSERT INTO VEC_HASHJOIN_TABLE_04_DATE values(1);
+analyze VEC_HASHJOIN_TABLE_01_DATE;
+analyze VEC_HASHJOIN_TABLE_02_DATE;
+analyze VEC_HASHJOIN_TABLE_03_DATE;
+analyze VEC_HASHJOIN_TABLE_04_DATE;

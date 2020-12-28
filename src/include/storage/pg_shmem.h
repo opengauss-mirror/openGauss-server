@@ -58,4 +58,3 @@ extern void PGSharedMemoryDetach(void);
 extern void cancelIpcMemoryDetach(void);
 
 #endif /* PG_SHMEM_H */
-

@@ -1,0 +1,64 @@
+CREATE DATABASE wlm_clear_global_schema;
+\c wlm_clear_global_schema
+set resource_track_duration=0;
+set query_band='wlm_clear_global_schema_test';
+set xc_maintenance_mode = on;
+set transaction_read_only = off;
+DECLARE
+sql_stmt VARCHAR2(500);
+my_cursor REFCURSOR;
+username text;
+respool_name text;
+tbsname text;
+group_name text;
+BEGIN
+
+-- drop tablespace except pg_defalut and pg_global
+sql_stmt := 'select spcname from  pg_tablespace  where spcname != ''pg_default'' and spcname !=''pg_global'' ';
+OPEN my_cursor FOR EXECUTE sql_stmt;
+FETCH FROM my_cursor INTO tbsname;
+WHILE my_cursor % FOUND LOOP
+EXECUTE IMMEDIATE 'DROP TABLESPACE '||tbsname||' ';
+FETCH FROM my_cursor INTO tbsname;
+END LOOP;
+CLOSE my_cursor;
+
+sql_stmt := 'select rolname from  pg_authid  where rolsuper != ''t'' ';
+OPEN my_cursor FOR EXECUTE sql_stmt;
+FETCH FROM my_cursor INTO username;
+WHILE my_cursor % FOUND LOOP
+EXECUTE IMMEDIATE 'DROP USER '||username||' CASCADE';
+FETCH FROM my_cursor INTO username;
+END LOOP;
+CLOSE my_cursor;
+
+-- drop all resource pool except default_respool pool.
+sql_stmt := 'SELECT respool_name FROM pg_resource_pool  WHERE oid != 10 ';
+
+OPEN my_cursor FOR EXECUTE sql_stmt;
+FETCH FROM my_cursor INTO respool_name;
+WHILE my_cursor % FOUND LOOP
+EXECUTE IMMEDIATE 'DROP RESOURCE POOL '||respool_name||' ';
+FETCH FROM my_cursor INTO respool_name;
+END LOOP;
+CLOSE my_cursor;
+
+--drop node group
+sql_stmt := 'SELECT group_name FROM pgxc_group ';
+
+OPEN my_cursor FOR EXECUTE sql_stmt;
+FETCH FROM my_cursor INTO group_name;
+WHILE my_cursor % FOUND LOOP
+EXECUTE IMMEDIATE 'DROP NODE GROUP '||group_name||' ';
+FETCH FROM my_cursor INTO group_name;
+END LOOP;
+CLOSE my_cursor;
+
+END;
+/
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_clear_global_schema -c "SELECT * from pg_tables where schemaname != 'pg_catalog' and schemaname != 'information_schema';"
+--output
+\c postgres
+drop database wlm_clear_global_schema;
+\c regression
+--end of file

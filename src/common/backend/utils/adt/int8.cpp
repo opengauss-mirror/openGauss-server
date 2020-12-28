@@ -37,9 +37,11 @@ typedef struct {
  **		Routines for 64-bit integers.
  **
  ***********************************************************************/
+
 /* ----------------------------------------------------------
  * Formatting and conversion routines.
  * --------------------------------------------------------- */
+
 /*
  * scanint8 --- try to parse a string into an int8.
  *
@@ -59,30 +61,29 @@ bool scanint8(const char* str, bool errorOK, int64* result)
      * As INT64_MIN can't be stored as a positive 64 bit integer, accumulate
      * value as a negative number.
      */
+
     /* skip leading spaces */
-    while (*ptr && isspace((unsigned char)*ptr))
+    while (*ptr && isspace((unsigned char)*ptr)) {
         ptr++;
+    }
 
     /* handle sign */
     if (*ptr == '-') {
         ptr++;
         neg = true;
-    } else if (*ptr == '+') {
+    } else if (*ptr == '+')
         ptr++;
-    }
 
     /* require at least one digit */
     if (unlikely(!isdigit((unsigned char)*ptr))) {
-        if (errorOK) {
+        if (errorOK)
             return false;
-        }
-        else if (DB_IS_CMPT(DB_CMPT_A | DB_CMPT_PG)) {
+        else if (DB_IS_CMPT(A_FORMAT | PG_FORMAT))
             ereport(ERROR,
                 (errmodule(MOD_FUNCTION),
                     errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                     errmsg("invalid input syntax for type %s: \"%s\"", "bigint", str)));
-        }
-        else if (DB_IS_CMPT(DB_CMPT_B)) {
+        else if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
             *result = tmp;
             return true;
         }
@@ -108,29 +109,25 @@ bool scanint8(const char* str, bool errorOK, int64* result)
     }
 
     if (unlikely(*ptr != '\0')) {
-        if (errorOK) {
+        if (errorOK)
             return false;
-        }
-        else {
-            /* Empty string will be treated as NULL if sql_compatibility == DB_CMPT_A,
+        else
+            /* Empty string will be treated as NULL if sql_compatibility == A_FORMAT,
                 Other wise whitespace will be convert to 0 */
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                     errmsg("invalid input syntax for type %s: \"%s\"", "bigint", str)));
-        }
     }
 
     if (!neg) {
         /* could fail if input is most negative number */
         if (unlikely(tmp == PG_INT64_MIN)) {
-            if (errorOK) {
+            if (errorOK)
                 return false;
-            }
-            else {
+            else
                 ereport(ERROR,
                     (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
                         errmsg("value \"%s\" is out of range for type %s", str, "bigint")));
-            }
         }
         tmp = -tmp;
     }
@@ -139,7 +136,7 @@ bool scanint8(const char* str, bool errorOK, int64* result)
     return true;
 }
 
-/* int8in
+/* int8in()
  */
 Datum int8in(PG_FUNCTION_ARGS)
 {
@@ -150,7 +147,7 @@ Datum int8in(PG_FUNCTION_ARGS)
     PG_RETURN_INT64(result);
 }
 
-/* int8out
+/* int8out()
  */
 Datum int8out(PG_FUNCTION_ARGS)
 {
@@ -189,7 +186,8 @@ Datum int8send(PG_FUNCTION_ARGS)
 /* ----------------------------------------------------------
  *	Relational operators for int8s, including cross-data-type comparisons.
  * --------------------------------------------------------- */
-/* int8relop
+
+/* int8relop()
  * Is val1 relop val2?
  */
 Datum int8eq(PG_FUNCTION_ARGS)
@@ -240,7 +238,7 @@ Datum int8ge(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(val1 >= val2);
 }
 
-/* int84relop
+/* int84relop()
  * Is 64-bit val1 relop 32-bit val2?
  */
 Datum int84eq(PG_FUNCTION_ARGS)
@@ -291,7 +289,7 @@ Datum int84ge(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(val1 >= val2);
 }
 
-/* int48relop
+/* int48relop()
  * Is 32-bit val1 relop 64-bit val2?
  */
 Datum int48eq(PG_FUNCTION_ARGS)
@@ -342,7 +340,7 @@ Datum int48ge(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(val1 >= val2);
 }
 
-/* int82relop
+/* int82relop()
  * Is 64-bit val1 relop 16-bit val2?
  */
 Datum int82eq(PG_FUNCTION_ARGS)
@@ -393,7 +391,7 @@ Datum int82ge(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(val1 >= val2);
 }
 
-/* int28relop
+/* int28relop()
  * Is 16-bit val1 relop 64-bit val2?
  */
 Datum int28eq(PG_FUNCTION_ARGS)
@@ -447,6 +445,7 @@ Datum int28ge(PG_FUNCTION_ARGS)
 /* ----------------------------------------------------------
  *	Arithmetic operators on 64-bit integers.
  * --------------------------------------------------------- */
+
 Datum int8um(PG_FUNCTION_ARGS)
 {
     int64 arg = PG_GETARG_INT64(0);
@@ -518,7 +517,7 @@ Datum int8div(PG_FUNCTION_ARGS)
      * INT64_MIN / -1 is problematic, since the result can't be represented on
      * a two's-complement machine.  Some machines produce INT64_MIN, some
      * produce zero, some throw an exception.  We produce an exception like
-     * C and D do.
+     * C db and D db do.
      */
     if (arg2 == -1) {
         int128 res = (int128)arg1 * (-1);
@@ -534,32 +533,38 @@ Datum int8div(PG_FUNCTION_ARGS)
     PG_RETURN_FLOAT8(result);
 }
 
-/* int8abs
+/* int8abs()
  * Absolute value
  */
 Datum int8abs(PG_FUNCTION_ARGS)
 {
     int64 arg1 = PG_GETARG_INT64(0);
     int64 result;
+
     if (unlikely(arg1 == PG_INT64_MIN))
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("bigint out of range")));
     result = (arg1 < 0) ? -arg1 : arg1;
     PG_RETURN_INT64(result);
 }
 
-/* int8mod
+/* int8mod()
  * Modulo operation.
  */
 Datum int8mod(PG_FUNCTION_ARGS)
 {
     int64 arg1 = PG_GETARG_INT64(0);
     int64 arg2 = PG_GETARG_INT64(1);
-    if (unlikely(arg2 == 0)) {
-        /* zero is not allowed to be divisor */
-        ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
 
-        /* ensure compiler realizes we mustn't reach the division (gcc bug) */
-        PG_RETURN_NULL();
+    if (unlikely(arg2 == 0)) {
+        if (DB_IS_CMPT(PG_FORMAT)) {
+            /* zero is not allowed to be divisor if compatible with PG */
+            ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
+
+            /* ensure compiler realizes we mustn't reach the division (gcc bug) */
+            PG_RETURN_NULL();
+        }
+        // zero is allowed to be divisor
+        PG_RETURN_INT64(arg1);
     }
 
     /*
@@ -571,6 +576,7 @@ Datum int8mod(PG_FUNCTION_ARGS)
         PG_RETURN_INT64(0);
 
     /* No overflow is possible */
+
     PG_RETURN_INT64(arg1 % arg2);
 }
 
@@ -593,8 +599,7 @@ Datum int8inc(PG_FUNCTION_ARGS)
         PG_RETURN_POINTER(arg);
     } else
 #endif
-	{
-
+    {
         /* Not called as an aggregate, so just do it the dumb way */
         int64 arg = PG_GETARG_INT64(0);
         int64 result;
@@ -624,8 +629,7 @@ Datum int8dec(PG_FUNCTION_ARGS)
         PG_RETURN_POINTER(arg);
     } else
 #endif
-	{
-
+    {
         /* Not called as an aggregate, so just do it the dumb way */
         int64 arg = PG_GETARG_INT64(0);
         int64 result;
@@ -645,6 +649,7 @@ Datum int8dec(PG_FUNCTION_ARGS)
  * point right at int8inc, but then the opr_sanity regression test would
  * complain about mismatched entries for a built-in function.
  */
+
 Datum int8inc_any(PG_FUNCTION_ARGS)
 {
     return int8inc(fcinfo);
@@ -730,7 +735,7 @@ Datum int84div(PG_FUNCTION_ARGS)
      * INT64_MIN / -1 is problematic, since the result can't be represented on
      * a two's-complement machine.  Some machines produce INT64_MIN, some
      * produce zero, some throw an exception.  We produce an exception like
-     * C and D do.
+     * C db and D db do.
      */
     if (arg2 == -1) {
         int128 res = (int128)arg1 * (-1);
@@ -741,6 +746,7 @@ Datum int84div(PG_FUNCTION_ARGS)
     }
 
     /* No overflow is possible */
+
     result = (arg1 * 1.0) / (arg2 * 1.0);
 
     PG_RETURN_FLOAT8(result);
@@ -780,7 +786,9 @@ Datum int48mul(PG_FUNCTION_ARGS)
     int32 arg1 = PG_GETARG_INT32(0);
     int64 arg2 = PG_GETARG_INT64(1);
     int64 result;
+
     result = arg1 * arg2;
+
     /*
      * Overflow check.	We basically check to see if result / arg2 gives arg1
      * again.  There is one case where this fails: arg2 = 0 (which cannot
@@ -894,7 +902,7 @@ Datum int82div(PG_FUNCTION_ARGS)
      * INT64_MIN / -1 is problematic, since the result can't be represented on
      * a two's-complement machine.  Some machines produce INT64_MIN, some
      * produce zero, some throw an exception.  We produce an exception like
-     * C and D do.
+     * C db and D db do.
      */
     if (arg2 == -1) {
         int128 res = (int128)arg1 * (-1);
@@ -905,6 +913,7 @@ Datum int82div(PG_FUNCTION_ARGS)
     }
 
     /* No overflow is possible */
+
     result = (arg1 * 1.0) / (arg2 * 1.0);
 
     PG_RETURN_FLOAT8(result);
@@ -951,7 +960,9 @@ Datum int28mul(PG_FUNCTION_ARGS)
     int16 arg1 = PG_GETARG_INT16(0);
     int64 arg2 = PG_GETARG_INT64(1);
     int64 result;
+
     result = arg1 * arg2;
+
     /*
      * Overflow check.	We basically check to see if result / arg2 gives arg1
      * again.  There is one case where this fails: arg2 = 0 (which cannot
@@ -995,6 +1006,7 @@ Datum int28div(PG_FUNCTION_ARGS)
  *		int8shl		- returns arg1 << arg2
  *		int8shr		- returns arg1 >> arg2
  */
+
 Datum int8and(PG_FUNCTION_ARGS)
 {
     int64 arg1 = PG_GETARG_INT64(0);
@@ -1045,6 +1057,7 @@ Datum int8shr(PG_FUNCTION_ARGS)
 /* ----------------------------------------------------------
  *	Conversion operators.
  * --------------------------------------------------------- */
+
 /* Cast int8 -> bool */
 Datum int8_bool(PG_FUNCTION_ARGS)
 {
@@ -1115,7 +1128,7 @@ Datum i8tod(PG_FUNCTION_ARGS)
     PG_RETURN_FLOAT8(result);
 }
 
-/* dtoi8
+/* dtoi8()
  * Convert float8 to 8-byte integer.
  */
 Datum dtoi8(PG_FUNCTION_ARGS)
@@ -1151,7 +1164,7 @@ Datum i8tof(PG_FUNCTION_ARGS)
     PG_RETURN_FLOAT4(result);
 }
 
-/* ftoi8
+/* ftoi8()
  * Convert float4 to 8-byte integer.
  */
 Datum ftoi8(PG_FUNCTION_ARGS)
@@ -1164,6 +1177,7 @@ Datum ftoi8(PG_FUNCTION_ARGS)
      * assumption that rint() will pass through a NaN or Inf unchanged.
      */
     num = rint(num);
+
     /*
      * Range check.  We must be careful here that the boundary values are
      * expressed exactly in the float domain.  We expect PG_INT64_MIN  to be an

@@ -34,8 +34,14 @@ typedef unsigned int Oid;
 #else
 #define InvalidOid ((Oid)0)
 #endif
+
 #define VirtualBktOid     (Oid(1))
 #define InvalidBktId    (-1)
+
+#define DIR_BUCKET_ID    (-2) // relfilenode points to a bucket dir
+#define BUCKET_ID_IS_DIR(bucket_node) ((bucket_node) == DIR_BUCKET_ID)
+#define BUCKET_NODE_IS_VALID(bucket_node) ((bucket_node) > InvalidBktId)
+
 #define OID_MAX  UINT_MAX
 
 /* you will need to include <limits.h> to use the above #define */

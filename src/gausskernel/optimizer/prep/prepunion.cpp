@@ -245,7 +245,7 @@ static Plan* recurse_set_operations(Node* setOp, PlannerInfo* root, double tuple
         /*
          * Generate plan for primitive subquery
          */
-        subplan = subquery_planner(root->glob, subquery, root, false, tuple_fraction, &subroot, &root->dis_keys);
+        subplan = subquery_planner(root->glob, subquery, root, false, tuple_fraction, &subroot, root->subquery_type, &root->dis_keys);
 
         /* Save subroot and subplan in RelOptInfo for setrefs.c */
         rel->subplan = subplan;
@@ -303,6 +303,7 @@ static Plan* recurse_set_operations(Node* setOp, PlannerInfo* root, double tuple
             List* distribute_index = distributeKeyIndex(rel->subroot, subplan->distributed_keys, subplan->targetlist);
             if (distribute_index == NIL) {
                 rel->distribute_keys = NIL;
+                rel->rangelistOid = InvalidOid;
             } else {
                 ListCell* lc = NULL;
                 /* Find each distribute key for new subquery */
@@ -340,6 +341,8 @@ static Plan* recurse_set_operations(Node* setOp, PlannerInfo* root, double tuple
 #ifdef STREAMPLAN
         plan->distributed_keys = rel->distribute_keys;
 #endif
+
+        root->param_upper = bms_union(root->param_upper, subroot->param_upper);
 
         /*
          * We don't bother to determine the subquery's output ordering since
@@ -663,7 +666,7 @@ static Plan* generate_union_plan(SetOperationStmt* op, PlannerInfo* root, double
     /*
      * Append the child results together.
      */
-    plan = (Plan*)make_append(planlist, -1, tlist);
+    plan = (Plan*)make_append(planlist, tlist);
 
 #ifdef STREAMPLAN
     if (IS_STREAM_PLAN) {
@@ -762,12 +765,19 @@ static Plan* generate_nonunion_plan(SetOperationStmt* op, PlannerInfo* root, dou
      * column is shown as a variable not a constant, else setrefs.c will get
      * confused.
      */
-    tlist = generate_append_tlist(op->colTypes, op->colCollations, true, planlist, refnames_tlist);
+    if (!u_sess->attr.attr_sql.enable_dngather) {
+        tlist = generate_append_tlist(op->colTypes, op->colCollations, true, planlist, refnames_tlist);
+    } else {
+        ereport(ERROR,
+                    (errmodule(MOD_OPT),
+                        errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("can't generate plan for INTERSECT/EXCEPT with dn gather on.")));
+    }
 
     /*
      * Append the child results together.
      */
-    plan = (Plan*)make_append(planlist, -1, tlist);
+    plan = (Plan*)make_append(planlist, tlist);
 
 #ifdef STREAMPLAN
     if (IS_STREAM_PLAN) {
@@ -992,8 +1002,7 @@ static bool choose_hashed_setop(PlannerInfo* root, List* groupClauses, Plan* inp
     Path sorted_p;
     double plan_rows = PLAN_LOCAL_ROWS(input_plan);
     OpMemInfo hash_mem_info, sort_mem_info;
-    size_t opmem_len = sizeof(OpMemInfo);
-    errno_t rc;
+    errno_t rc = 0;
 
     rc = memset_s(&hashed_p, sizeof(Path), 0, sizeof(Path));
     securec_check(rc, "\0", "\0");
@@ -1001,9 +1010,9 @@ static bool choose_hashed_setop(PlannerInfo* root, List* groupClauses, Plan* inp
     securec_check(rc, "\0", "\0");
 
     if (mem_info != NULL) {
-        rc = memset_s(&sort_mem_info, opmem_len, 0, opmem_len);
+        rc = memset_s(&sort_mem_info, sizeof(OpMemInfo), 0, sizeof(OpMemInfo));
         securec_check(rc, "\0", "\0");
-        rc = memset_s(&hash_mem_info, opmem_len, 0, opmem_len);
+        rc = memset_s(&hash_mem_info, sizeof(OpMemInfo), 0, sizeof(OpMemInfo));
         securec_check(rc, "\0", "\0");
     }
 
@@ -1101,14 +1110,14 @@ static bool choose_hashed_setop(PlannerInfo* root, List* groupClauses, Plan* inp
     if (compare_fractional_path_costs(&hashed_p, &sorted_p, tuple_fraction) < 0) {
         /* Hashed is cheaper, so use it */
         if (mem_info != NULL) {
-            rc = memcpy_s(mem_info, opmem_len, &hash_mem_info, opmem_len);
+            rc = memcpy_s(mem_info, sizeof(OpMemInfo), &hash_mem_info, sizeof(OpMemInfo));
             securec_check(rc, "\0", "\0");
         }
         return true;
     }
 
     if (mem_info != NULL) {
-        rc = memcpy_s(mem_info, opmem_len, &sort_mem_info, opmem_len);
+        rc = memcpy_s(mem_info, sizeof(OpMemInfo), &sort_mem_info, sizeof(OpMemInfo));
         securec_check(rc, "\0", "\0");
     }
     return false;
@@ -1422,7 +1431,7 @@ static void expand_inherited_rtentry(PlannerInfo* root, RangeTblEntry* rte, Inde
 {
     Query* parse = root->parse;
     Oid parentOID;
-    Relation parentRel;
+    Relation parentRel = NULL;
     PlanRowMark* oldrc = NULL;
     Relation oldrelation;
     LOCKMODE lockmode;
@@ -1612,6 +1621,7 @@ static void expand_inherited_rtentry(PlannerInfo* root, RangeTblEntry* rte, Inde
      */
     if (list_length(appinfos) < 2) { /* 2 is the least one descendant. Clear flag before returning. */
         rte->inh = false;
+        list_free_deep(appinfos);
         return;
     }
 
@@ -1928,6 +1938,7 @@ static Node* adjust_appendrel_attrs_mutator(Node* node, adjust_appendrel_attrs_c
     AssertEreport(!IsA(node, SpecialJoinInfo),
         MOD_OPT,
         "Shouldn't need to handle planner auxiliary node SpecialJoinInfo in adjust_appendrel_attrs_mutator");
+    Assert(!IsA(node, LateralJoinInfo));
     AssertEreport(!IsA(node, AppendRelInfo),
         MOD_OPT,
         "Shouldn't need to handle planner auxiliary node AppendRelInfo in adjust_appendrel_attrs_mutator");
@@ -2157,7 +2168,7 @@ void expand_dfs_tables(PlannerInfo* root)
 void expand_internal_rtentry(PlannerInfo* root, RangeTblEntry* rte, Index rti)
 {
     Query* parse = root->parse;
-    Oid parentOid;
+    Oid parentOid = InvalidOid;
     Relation prarentRel;
     PlanRowMark* oldrc = NULL;
     LOCKMODE lockmode;
@@ -2297,7 +2308,7 @@ void expand_internal_rtentry(PlannerInfo* root, RangeTblEntry* rte, Index rti)
              */
             childrte->mainRelName = pstrdup(RelationGetRelationName(prarentRel));
             Oid nameSpaceOid = RelationGetNamespace(prarentRel);
-            childrte->mainRelNameSpace = pstrdup(get_namespace_name(nameSpaceOid, true));
+            childrte->mainRelNameSpace = pstrdup(get_namespace_name(nameSpaceOid));
         }
         parse->rtable = lappend(parse->rtable, childrte);
         childRTindex = list_length(parse->rtable);
@@ -2370,6 +2381,7 @@ void expand_internal_rtentry(PlannerInfo* root, RangeTblEntry* rte, Index rti)
      */
     if (list_length(appinfos) < 2) { /* 2 is the least one descendant. Clear flag before returning. */
         rte->inh = false;
+        list_free_deep(appinfos);
         return;
     }
 
@@ -2389,9 +2401,9 @@ void expand_internal_rtentry(PlannerInfo* root, RangeTblEntry* rte, Index rti)
 List* find_all_internal_tableOids(Oid parentOid)
 {
     List* oids = NULL;
-    Oid deltaTblOid;
-    HeapTuple tuple;
-    Form_pg_class relForm;
+    Oid deltaTblOid = InvalidOid;
+    HeapTuple tuple = NULL;
+    Form_pg_class relForm = NULL;
 
     AssertEreport(OidIsValid(parentOid), MOD_OPT, "parent Oid should be valid in find_all_internal_tableOids");
     tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(parentOid));
@@ -2447,3 +2459,98 @@ void parallel_setop(PlannerInfo* root, Plan* plan, bool isunionall)
     }
 }
 
+/*
+ * @Description: After the sublink is pulled, the can_push flag of the
+ *      parent query and subquery changes and needs to be re-marked. 
+ *
+ * @in parent - Parent query.
+ * @in child - Child query.
+ * @return : void.
+ */
+void mark_parent_child_pushdown_flag(Query *parent, Query *child)
+{
+    /* Set the flag only when cost_param is set to maximized pushdown. */
+    if (IS_STREAM_PLAN && ((parent->can_push && !child->can_push) ||
+        (!parent->can_push && child->can_push))) {
+        if (check_base_rel_in_fromlist(parent, (Node *)parent->jointree)) {
+            set_stream_off();
+        } else {
+            parent->can_push = false;
+            child->can_push = false;
+        }
+    }
+}
+
+
+bool check_base_rel_in_fromlist(Query *parse, Node *jtnode)
+{
+    if (jtnode == NULL) {
+        return false;
+    }
+
+    if (IsA(jtnode, RangeTblRef)) {
+        int rtindex = ((RangeTblRef *) jtnode)->rtindex;
+        RangeTblEntry *rte = rt_fetch(rtindex, parse->rtable);
+        return (rte->rtekind == RTE_RELATION) ? true : false;
+    } else if (IsA(jtnode, FromExpr)) {
+        ListCell *lc = NULL;
+        FromExpr *f = (FromExpr *) jtnode;
+
+        foreach(lc , f->fromlist)
+        {
+            return check_base_rel_in_fromlist(parse, (Node *) lfirst(lc));
+        }
+        
+    } else if (IsA(jtnode, JoinExpr)) {
+        JoinExpr *j = (JoinExpr *) jtnode;
+        bool left_has_base_rel = false;
+        bool right_has_base_rel = false;
+
+        left_has_base_rel = check_base_rel_in_fromlist(parse, j->larg);
+        right_has_base_rel = check_base_rel_in_fromlist(parse, j->rarg);
+
+        return (left_has_base_rel || right_has_base_rel) ? true : false;
+    } else {
+        ereport(ERROR,
+                (errmodule(MOD_OPT),
+                 errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                 errmsg("unrecognized node type: %d", (int) nodeTag(jtnode))));
+        
+        return false;
+    }
+
+    return false;
+}
+
+
+UNIONALL_SHIPPING_TYPE precheck_shipping_union_all(Query *subquery, Node *setOp)
+{
+    if (setOp == NULL) {
+        elog(ERROR, "subquery's setOperations tree should not be NULL in pull_up_simple_union_all");
+    }
+
+    if (IsA(setOp, RangeTblRef)) {
+        RangeTblEntry * rte = rt_fetch(((RangeTblRef *) setOp)->rtindex, subquery->rtable);
+        return (rte->subquery->can_push) ? SHIPPING_ALL : SHIPPING_NONE;
+    } else if (IsA(setOp, SetOperationStmt)) {
+        SetOperationStmt* setOpStmt = (SetOperationStmt *) setOp;
+        UNIONALL_SHIPPING_TYPE larg_shippihg_state = SHIPPING_NONE;
+        UNIONALL_SHIPPING_TYPE rarg_shippihg_state = SHIPPING_NONE;
+
+        larg_shippihg_state = precheck_shipping_union_all(subquery, setOpStmt->larg);
+        rarg_shippihg_state = precheck_shipping_union_all(subquery, setOpStmt->rarg);
+
+        if (larg_shippihg_state == rarg_shippihg_state) {
+            return (larg_shippihg_state == SHIPPING_ALL) ? SHIPPING_ALL : SHIPPING_NONE;
+            
+        } else {
+            return SHIPPING_PARTIAL;
+        }
+    } else {
+        ereport(ERROR,
+                (errmodule(MOD_OPT),
+                 errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                 errmsg("unrecognized node type: %d", (int) nodeTag(setOp))));
+        return SHIPPING_NONE;
+    }
+}

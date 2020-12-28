@@ -58,13 +58,18 @@
 #include "optimizer/nodegroups.h"
 #include "utils/inval.h"
 #include "utils/lsyscache.h"
+#include "gs_policy/policy_common.h"
+
+#ifdef ENABLE_MULTIPLE_NODES
+#include "tsdb/compaction/compaction_entry.h"
+#endif   /* ENABLE_MULTIPLE_NODES */
 
 #define DIRECTORY_LOCK_FILE "postmaster.pid"
 
 Alarm alarmItemTooManyDbUserConn[1] = {ALM_AI_Unknown, ALM_AS_Normal, 0, 0, 0, 0, {0}, {0}, NULL};
 
 /* ----------------------------------------------------------------
- * ignoring system indexes support stuff
+ *		ignoring system indexes support stuff
  *
  * NOTE: "ignoring system indexes" means we do not use the system indexes
  * for lookups (either in hardwired catalog accesses or in planner-generated
@@ -152,14 +157,16 @@ void ReportResumeDataInstLockFileExist()
 }
 
 /* ----------------------------------------------------------------
- *            database path / name support stuff
+ *				database path / name support stuff
  * ----------------------------------------------------------------
  */
+
 void SetDatabasePath(const char* path)
 {
     /* This should happen only once per process */
     Assert(!u_sess->proc_cxt.DatabasePath);
-    u_sess->proc_cxt.DatabasePath = MemoryContextStrdup(u_sess->top_mem_cxt, path);
+    u_sess->proc_cxt.DatabasePath =
+        MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), path);
 }
 
 /*
@@ -172,13 +179,13 @@ void SetDataDir(const char* dir)
 
     /* If presented path is relative, convert to absolute */
     char* newm = make_absolute_path(dir);
-    char real_newm[PATH_MAX] = {'\0'};
-    char* DataDir = (char*)MemoryContextAlloc(u_sess->top_mem_cxt, MAXPGPATH);
+    char real_newm[PATH_MAX + 1] = {'\0'};
+    char* DataDir = (char*)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), MAXPGPATH);
 
     if (realpath(newm, real_newm) == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FILE_READ_FAILED),errmsg("invalid path:%s", dir)));
     }
-    errno_t rc = strncpy_s(DataDir, MAXPGPATH, real_newm, strlen(real_newm));
+    errno_t rc = strncpy_s(DataDir, MAXPGPATH, real_newm, MAXPGPATH - 1);
     securec_check(rc, "\0", "\0");
     pfree(newm);
 
@@ -202,10 +209,10 @@ void SetDataDir(const char* dir)
 void ChangeToDataDir(void)
 {
     AssertState(t_thrd.proc_cxt.DataDir);
-    if (chdir(t_thrd.proc_cxt.DataDir) < 0) {
-        ereport(FATAL, (errcode_for_file_access(), errmsg("could not change directory to \"%s\": %m",
-            t_thrd.proc_cxt.DataDir)));
-    }
+
+    if (chdir(t_thrd.proc_cxt.DataDir) < 0)
+        ereport(FATAL,
+            (errcode_for_file_access(), errmsg("could not change directory to \"%s\": %m", t_thrd.proc_cxt.DataDir)));
 }
 
 /*
@@ -221,34 +228,39 @@ void ChangeToDataDir(void)
 char* make_absolute_path(const char* path)
 {
     char* newm = NULL;
-    size_t tmp_len;
+    size_t tmplen;
 
     /* Returning null for null input is convenient for some callers */
     if (path == NULL) {
         return NULL;
     }
+
     if (!is_absolute_path(path)) {
         char* buf = NULL;
-        size_t buf_len = MAXPGPATH;
+        size_t buflen;
+
+        buflen = MAXPGPATH;
 
         for (;;) {
 #ifdef FRONTEND
-            buf = (char*)malloc(buf_len);
+            buf = (char*)malloc(buflen);
 #else
-            buf = (char*)MemoryContextAlloc(u_sess->top_mem_cxt, buf_len);
+            buf = (char*)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), buflen);
 #endif
-            if (buf == NULL) {
+
+            if (buf == NULL)
                 ereport(FATAL, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
-            }
-            if (getcwd(buf, buf_len) != NULL) {
+
+            if (getcwd(buf, buflen) != NULL) {
                 break;
-            } else if (errno == ERANGE) {
+            }
+            else if (errno == ERANGE) {
 #ifdef FRONTEND
                 free(buf);
 #else
                 pfree(buf);
 #endif
-                buf_len *= 2;
+                buflen *= 2;
                 continue;
             } else {
 #ifdef FRONTEND
@@ -260,27 +272,28 @@ char* make_absolute_path(const char* path)
             }
         }
 
-        tmp_len = strlen(buf) + strlen(path) + 2;
+        tmplen = strlen(buf) + strlen(path) + 2;
 #ifdef FRONTEND
-        newm = (char*)malloc(tmp_len);
+        newm = (char*)malloc(tmplen);
 #else
-        newm = (char*)MemoryContextAlloc(u_sess->top_mem_cxt, tmp_len);
+        newm = (char*)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), tmplen);
 #endif
-        if (newm == NULL) {
+
+        if (newm == NULL)
             ereport(FATAL, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
-        }
-        int rcs = snprintf_s(newm, tmp_len, tmp_len - 1, "%s/%s", buf, path);
-        securec_check_ss(rcs, "", "");
+
+        int rcs = snprintf_s(newm, tmplen, tmplen - 1, "%s/%s", buf, path);
+        securec_check_ss(rcs, "\0", "\0");
 #ifdef FRONTEND
         free(buf);
 #else
         pfree(buf);
 #endif
     } else {
-        newm = MemoryContextStrdup(u_sess->top_mem_cxt, path);
-        if (newm == NULL) {
+        newm = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), path);
+
+        if (newm == NULL)
             ereport(FATAL, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
-        }
     }
 
     /* Make sure punctuation is canonical, too */
@@ -304,7 +317,10 @@ Oid GetAuthenticatedUserId(void)
  */
 Oid GetUserId(void)
 {
-    AssertState(OidIsValid(u_sess->misc_cxt.CurrentUserId));
+    if (!OidIsValid(u_sess->misc_cxt.CurrentUserId)) {
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("Current user id is invalid. Please try later.")));
+    }
     return u_sess->misc_cxt.CurrentUserId;
 }
 
@@ -327,14 +343,14 @@ Oid GetOuterUserId(void)
     return u_sess->misc_cxt.OuterUserId;
 }
 
-static void SetOuterUserId(Oid user_id)
+static void SetOuterUserId(Oid userid)
 {
     AssertState(u_sess->misc_cxt.SecurityRestrictionContext == 0);
-    AssertArg(OidIsValid(user_id));
-    u_sess->misc_cxt.OuterUserId = user_id;
+    AssertArg(OidIsValid(userid));
+    u_sess->misc_cxt.OuterUserId = userid;
 
     /* We force the effective user ID to match, too */
-    u_sess->misc_cxt.CurrentUserId = user_id;
+    u_sess->misc_cxt.CurrentUserId = userid;
 }
 
 /*
@@ -346,22 +362,21 @@ Oid GetSessionUserId(void)
     return u_sess->misc_cxt.SessionUserId;
 }
 
-static void SetSessionUserId(Oid user_id, bool is_superuser)
+static void SetSessionUserId(Oid userid, bool is_superuser)
 {
     AssertState(u_sess->misc_cxt.SecurityRestrictionContext == 0);
-    AssertArg(OidIsValid(user_id));
-    u_sess->misc_cxt.SessionUserId = user_id;
+    AssertArg(OidIsValid(userid));
+    u_sess->misc_cxt.SessionUserId = userid;
     u_sess->misc_cxt.SessionUserIsSuperuser = is_superuser;
     u_sess->misc_cxt.SetRoleIsActive = false;
 
     /* We force the effective user IDs to match, too */
-    u_sess->misc_cxt.OuterUserId = user_id;
-    u_sess->misc_cxt.CurrentUserId = user_id;
+    u_sess->misc_cxt.OuterUserId = userid;
+    u_sess->misc_cxt.CurrentUserId = userid;
 
     /* update user id in MyBEEntry */
-    if (t_thrd.shemem_ptr_cxt.MyBEEntry != NULL) {
-        t_thrd.shemem_ptr_cxt.MyBEEntry->st_userid = user_id;
-    }
+    if (t_thrd.shemem_ptr_cxt.MyBEEntry != NULL)
+        t_thrd.shemem_ptr_cxt.MyBEEntry->st_userid = userid;
 }
 
 /*
@@ -400,9 +415,8 @@ bool in_logic_cluster()
  */
 bool exist_logic_cluster()
 {
-    if (!IS_PGXC_COORDINATOR) {
+    if (!IS_PGXC_COORDINATOR)
         return false;
-    }
 
     HeapTuple htup;
     htup = SearchSysCache1(PGXCGROUPNAME, CStringGetDatum(VNG_OPTION_ELASTIC_GROUP));
@@ -442,12 +456,13 @@ const char* get_current_lcgroup_name()
     if (IS_PGXC_COORDINATOR && u_sess->attr.attr_common.current_logic_cluster_name == NULL &&
         OidIsValid(u_sess->misc_cxt.current_logic_cluster) && t_thrd.proc_cxt.postgres_initialized) {
         Form_pgxc_group rform;
-        HeapTuple group_tup = SearchSysCache1(PGXCGROUPOID, ObjectIdGetDatum(u_sess->misc_cxt.current_logic_cluster));
-        if (HeapTupleIsValid(group_tup)) {
-            rform = (Form_pgxc_group)GETSTRUCT(group_tup);
-            u_sess->attr.attr_common.current_logic_cluster_name =
-                MemoryContextStrdup(u_sess->top_mem_cxt, NameStr(rform->group_name));
-            ReleaseSysCache(group_tup);
+        HeapTuple groupTup = SearchSysCache1(PGXCGROUPOID, ObjectIdGetDatum(u_sess->misc_cxt.current_logic_cluster));
+
+        if (HeapTupleIsValid(groupTup)) {
+            rform = (Form_pgxc_group)GETSTRUCT(groupTup);
+            u_sess->attr.attr_common.current_logic_cluster_name = MemoryContextStrdup(
+                SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), NameStr(rform->group_name));
+            ReleaseSysCache(groupTup);
         }
     }
     return u_sess->attr.attr_common.current_logic_cluster_name;
@@ -476,7 +491,7 @@ static void set_current_lcgroup_oid(Oid group_oid)
 const char* show_lcgroup_name()
 {
     const char* name = get_current_lcgroup_name();
-    return name == NULL ? "" : name;
+    return (name == NULL) ? "" : name;
 }
 
 /*
@@ -513,14 +528,15 @@ bool is_lcgroup_admin()
 bool is_logic_cluster(Oid group_id)
 {
     Datum datum;
-    bool is_null = false;
+    bool isNull = false;
     HeapTuple tup;
     char group_kind;
 
     tup = SearchSysCache1(PGXCGROUPOID, ObjectIdGetDatum(group_id));
+
     if (HeapTupleIsValid(tup)) {
-        datum = SysCacheGetAttr(PGXCGROUPOID, tup, Anum_pgxc_group_kind, &is_null);
-        if (!is_null) {
+        datum = SysCacheGetAttr(PGXCGROUPOID, tup, Anum_pgxc_group_kind, &isNull);
+        if (!isNull) {
             group_kind = DatumGetChar(datum);
             if (group_kind == 'v' || group_kind == 'e') {
                 ReleaseSysCache(tup);
@@ -538,19 +554,24 @@ bool is_logic_cluster(Oid group_id)
  *		Obtain PGXC Logic Group Oid for roleid
  *		Return Invalid Oid if group does not exist
  */
-Oid get_pgxc_logic_groupoid(Oid role_id)
+Oid get_pgxc_logic_groupoid(Oid roleid)
 {
-    Datum acl_datum;
+    bool isNull = true;
+    Datum aclDatum;
     Oid group_id;
-    HeapTuple role_tup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(role_id));
-    if (!HeapTupleIsValid(role_tup)) {
+    HeapTuple roleTup;
+
+    roleTup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(roleid));
+
+    if (!HeapTupleIsValid(roleTup)) {
         return InvalidOid;
     }
 
-    bool is_null = true;
-    acl_datum = SysCacheGetAttr(AUTHOID, role_tup, Anum_pg_authid_rolnodegroup, &is_null);
-    group_id = is_null ? InvalidOid : DatumGetObjectId(acl_datum);
-    ReleaseSysCache(role_tup);
+    aclDatum = SysCacheGetAttr(AUTHOID, roleTup, Anum_pg_authid_rolnodegroup, &isNull);
+
+    group_id = isNull ? InvalidOid : DatumGetObjectId(aclDatum);
+
+    ReleaseSysCache(roleTup);
 
     return group_id;
 }
@@ -560,18 +581,26 @@ Oid get_pgxc_logic_groupoid(Oid role_id)
  *		Obtain PGXC Logic Group Oid for rolename
  *		Return Invalid Oid if group does not exist
  */
-Oid get_pgxc_logic_groupoid(const char* role_name)
+Oid get_pgxc_logic_groupoid(const char* rolename)
 {
-    bool is_null = false;
-    HeapTuple role_tup = SearchSysCache1(AUTHNAME, CStringGetDatum(role_name));
-    if (!HeapTupleIsValid(role_tup)) {
+    bool isNull = false;
+    Datum aclDatum;
+    Oid group_id;
+    HeapTuple roleTup;
+
+    roleTup = SearchSysCache1(AUTHNAME, CStringGetDatum(rolename));
+
+    if (!HeapTupleIsValid(roleTup)) {
         return InvalidOid;
     }
 
-    is_null = true;
-    Datum acl_datum = SysCacheGetAttr(AUTHOID, role_tup, Anum_pg_authid_rolnodegroup, &is_null);
-    Oid group_id = is_null ? InvalidOid : DatumGetObjectId(acl_datum);
-    ReleaseSysCache(role_tup);
+    isNull = true;
+
+    aclDatum = SysCacheGetAttr(AUTHOID, roleTup, Anum_pg_authid_rolnodegroup, &isNull);
+
+    group_id = isNull ? InvalidOid : DatumGetObjectId(aclDatum);
+
+    ReleaseSysCache(roleTup);
 
     return group_id;
 }
@@ -580,7 +609,7 @@ Oid get_pgxc_logic_groupoid(const char* role_name)
  * NodeGroupCallback
  *		Syscache inval callback function
  */
-static void NodeGroupCallback(Datum arg, int cache_id, uint32 hash_value)
+static void NodeGroupCallback(Datum arg, int cacheid, uint32 hashvalue)
 {
     u_sess->misc_cxt.current_nodegroup_mode = NG_UNKNOWN;
     RelationCacheInvalidateBuckets();
@@ -629,15 +658,15 @@ static void RegisterNodeGroupCacheCallback()
  * and perhaps restored is indeed invalid.	We have to be able to get
  * through AbortTransaction without asserting in case InitPostgres fails.
  */
-void GetUserIdAndSecContext(Oid* user_id, int* sec_context)
+void GetUserIdAndSecContext(Oid* userid, int* sec_context)
 {
-    *user_id = u_sess->misc_cxt.CurrentUserId;
+    *userid = u_sess->misc_cxt.CurrentUserId;
     *sec_context = u_sess->misc_cxt.SecurityRestrictionContext;
 }
 
-void SetUserIdAndSecContext(Oid user_id, int sec_context)
+void SetUserIdAndSecContext(Oid userid, int sec_context)
 {
-    u_sess->misc_cxt.CurrentUserId = user_id;
+    u_sess->misc_cxt.CurrentUserId = userid;
     u_sess->misc_cxt.SecurityRestrictionContext = sec_context;
 }
 
@@ -663,35 +692,38 @@ bool InSecurityRestrictedOperation(void)
  * pljava.	We allow the userid to be set, but only when not inside a
  * security restriction context.
  */
-void GetUserIdAndContext(Oid* user_id, bool* sec_def_context)
+void GetUserIdAndContext(Oid* userid, bool* sec_def_context)
 {
-    *user_id = u_sess->misc_cxt.CurrentUserId;
+    *userid = u_sess->misc_cxt.CurrentUserId;
     *sec_def_context = InLocalUserIdChange();
 }
 
-void SetUserIdAndContext(Oid user_id, bool sec_def_context)
+void SetUserIdAndContext(Oid userid, bool sec_def_context)
 {
     /* We throw the same error SET ROLE would. */
-    if (InSecurityRestrictedOperation()) {
+    if (InSecurityRestrictedOperation())
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("cannot set parameter \"%s\" within security-restricted operation", "role")));
-    }
-    u_sess->misc_cxt.CurrentUserId = user_id;
-    if (sec_def_context) {
+
+    u_sess->misc_cxt.CurrentUserId = userid;
+
+    if (sec_def_context)
         u_sess->misc_cxt.SecurityRestrictionContext |= SECURITY_LOCAL_USERID_CHANGE;
-    } else {
+    else
         u_sess->misc_cxt.SecurityRestrictionContext &= ~SECURITY_LOCAL_USERID_CHANGE;
-    }
 }
 
 /*
  * Check whether specified role has explicit REPLICATION privilege
  */
-bool has_rolreplication(Oid role_id)
+bool has_rolreplication(Oid roleid)
 {
     bool result = false;
-    HeapTuple utup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(role_id));
+    HeapTuple utup;
+
+    utup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(roleid));
+
     if (HeapTupleIsValid(utup)) {
         result = ((Form_pg_authid)GETSTRUCT(utup))->rolreplication;
         ReleaseSysCache(utup);
@@ -703,16 +735,18 @@ bool has_rolreplication(Oid role_id)
 /*
  * Check whether specified role has explicit vcadmin privilege
  */
-bool has_rolvcadmin(Oid role_id)
+bool has_rolvcadmin(Oid roleid)
 {
-    bool is_null = false;
+    bool isNull = false;
     bool result = false;
+    HeapTuple utup;
     Datum datum;
 
-    HeapTuple utup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(role_id));
+    utup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(roleid));
+
     if (HeapTupleIsValid(utup)) {
-        datum = SysCacheGetAttr(AUTHOID, utup, Anum_pg_authid_rolkind, &is_null);
-        if (!is_null) {
+        datum = SysCacheGetAttr(AUTHOID, utup, Anum_pg_authid_rolkind, &isNull);
+        if (!isNull) {
             result = (DatumGetChar(datum) == 'v');
         }
         ReleaseSysCache(utup);
@@ -724,73 +758,82 @@ bool has_rolvcadmin(Oid role_id)
 /*
  * Initialize user identity during normal backend startup
  */
-void InitializeSessionUserId(const char* role_name, Oid role_id)
+void InitializeSessionUserId(const char* rolename)
 {
-    HeapTuple role_tup;
+    HeapTuple roleTup;
     Form_pg_authid rform;
-    char* rname = NULL;
-    /* Audit user login */
+    Oid roleid;
+    /* Audit user login*/
     char details[PGAUDIT_MAXLENGTH];
 
     /*
      * Don't do scans if we're bootstrapping, none of the system catalogs
      * exist yet, and they should be owned by postgres anyway.
      */
-    AssertState(!IsBootstrapProcessingMode());
+    if (IsBootstrapProcessingMode()) {
+        ereport(
+            ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("IsBootstrapProcessingMode")));
+    }
 
     /* In pooler stateless reuse mode, to reset session userid */
-    if (!g_instance.attr.attr_network.PoolerStatelessReuse) {
+    if (!ENABLE_STATELESS_REUSE) {
         /* call only once */
-        AssertState(!OidIsValid(u_sess->misc_cxt.AuthenticatedUserId));
-    }
-
-    if (role_name != NULL) {
-        role_tup = SearchSysCache1(AUTHNAME, PointerGetDatum(role_name));
-        if (!HeapTupleIsValid(role_tup)) {
-            /* Audit user login */
-            int rcs = snprintf_truncated_s(details,
-                sizeof(details),
-                "login db(%s) failed-the role(%s)does not exist",
-                u_sess->proc_cxt.MyProcPort->database_name,
-                role_name);
-            securec_check_ss(rcs, "", "");
-            pgaudit_user_login(FALSE, u_sess->proc_cxt.MyProcPort->database_name, details);
-
-            ereport(FATAL, (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
-                errmsg("Invalid username/password,login denied.")));
-        }
-    } else {
-        role_tup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(role_id));
-        if (!HeapTupleIsValid(role_tup)) {
+        bool isUserOidInvalid = !(OidIsValid(u_sess->misc_cxt.AuthenticatedUserId));
+        if (!isUserOidInvalid) {
+            AssertState(false);
             ereport(FATAL,
-                (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
-                    errmsg("role with OID %u does not exist", role_id)));
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("Abnormal process. UserOid has been reseted. Current userOid[%u], reset username is %s.",
+                        u_sess->misc_cxt.AuthenticatedUserId, rolename)));
         }
     }
 
-    rform = (Form_pg_authid)GETSTRUCT(role_tup);
-    role_id = HeapTupleGetOid(role_tup);
-    rname = NameStr(rform->rolname);
+    roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(rolename));
 
-    u_sess->misc_cxt.AuthenticatedUserId = role_id;
+    if (!HeapTupleIsValid(roleTup)) {
+        /* 
+         * Audit user login 
+         * it's unsafe to deal with plugins hooks as dynamic lib may be released 
+         */
+        if (!(g_instance.status > NoShutdown) && user_login_hook) {
+            user_login_hook(u_sess->proc_cxt.MyProcPort->database_name, rolename, false, true);
+        }
+        int rcs = snprintf_truncated_s(details,
+            sizeof(details),
+            "login db(%s) failed-the role(%s)does not exist",
+            u_sess->proc_cxt.MyProcPort->database_name,
+            rolename);
+        securec_check_ss(rcs, "\0", "\0");
+        pgaudit_user_login(FALSE, u_sess->proc_cxt.MyProcPort->database_name, details);
+
+        ereport(FATAL,
+            (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION), errmsg("Invalid username/password,login denied.")));
+    }
+
+    rform = (Form_pg_authid)GETSTRUCT(roleTup);
+    roleid = HeapTupleGetOid(roleTup);
+
+    u_sess->misc_cxt.AuthenticatedUserId = roleid;
     u_sess->misc_cxt.AuthenticatedUserIsSuperuser = rform->rolsuper;
-    u_sess->proc_cxt.MyRoleId = role_id;
+    u_sess->proc_cxt.MyRoleId = roleid;
 
     /* This sets u_sess->misc_cxt.OuterUserId/u_sess->misc_cxt.CurrentUserId too */
-    SetSessionUserId(role_id, u_sess->misc_cxt.AuthenticatedUserIsSuperuser);
+    SetSessionUserId(roleid, u_sess->misc_cxt.AuthenticatedUserIsSuperuser);
 
     RegisterNodeGroupCacheCallback();
 
     if (IS_PGXC_COORDINATOR) {
-        Datum group_datum;
-        bool is_null = true;
-        group_datum = SysCacheGetAttr(AUTHOID, role_tup, Anum_pg_authid_rolnodegroup, &is_null);
-        u_sess->misc_cxt.current_logic_cluster = is_null ? InvalidOid : DatumGetObjectId(group_datum);
+        Datum groupDatum;
+        bool isNull = true;
+
+        groupDatum = SysCacheGetAttr(AUTHOID, roleTup, Anum_pg_authid_rolnodegroup, &isNull);
+
+        u_sess->misc_cxt.current_logic_cluster = isNull ? InvalidOid : DatumGetObjectId(groupDatum);
     }
 
     /* Also mark our PGPROC entry with the authenticated user id */
     /* (We assume this is an atomic store so no lock is needed) */
-    t_thrd.proc->roleId = role_id;
+    t_thrd.proc->roleId = roleid;
 
     /*
      * These next checks are not enforced when in standalone mode, so that
@@ -801,11 +844,11 @@ void InitializeSessionUserId(const char* role_name, Oid role_id)
         /*
          * Is role allowed to login at all?
          */
-        if (!rform->rolcanlogin) {
+        if (!rform->rolcanlogin)
             ereport(FATAL,
                 (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
-                    errmsg("role \"%s\" is not permitted to login", rname)));
-        }
+                    errmsg("role \"%s\" is not permitted to login", rolename)));
+
         /*
          * Check connection limit for this role.
          *
@@ -817,22 +860,22 @@ void InitializeSessionUserId(const char* role_name, Oid role_id)
          * just document that the connection limit is approximate.
          */
         if (rform->rolconnlimit >= 0 && !u_sess->misc_cxt.AuthenticatedUserIsSuperuser &&
-            CountUserBackends(role_id) > rform->rolconnlimit) {
-            ReportAlarmTooManyDbUserConn(rname);
+            CountUserBackends(roleid) > rform->rolconnlimit) {
+            ReportAlarmTooManyDbUserConn(rolename);
 
             ereport(FATAL,
-                (errcode(ERRCODE_TOO_MANY_CONNECTIONS), errmsg("too many connections for role \"%s\"", rname)));
+                (errcode(ERRCODE_TOO_MANY_CONNECTIONS), errmsg("too many connections for role \"%s\"", rolename)));
         } else if (!u_sess->misc_cxt.AuthenticatedUserIsSuperuser) {
-            ReportResumeTooManyDbUserConn(rname);
+            ReportResumeTooManyDbUserConn(rolename);
         }
     }
 
     /* Record username and superuser status as GUC settings too */
-    SetConfigOption("session_authorization", rname, PGC_BACKEND, PGC_S_OVERRIDE);
+    SetConfigOption("session_authorization", rolename, PGC_BACKEND, PGC_S_OVERRIDE);
     SetConfigOption(
         "is_sysadmin", u_sess->misc_cxt.AuthenticatedUserIsSuperuser ? "on" : "off", PGC_INTERNAL, PGC_S_OVERRIDE);
 
-    ReleaseSysCache(role_tup);
+    ReleaseSysCache(roleTup);
 }
 
 /*
@@ -842,14 +885,18 @@ void InitializeSessionUserIdStandalone(void)
 {
     /*
      * This function should only be called in single-user mode and in
-     * autovacuum workers, and in background workers.
+     * autovacuum workers.
      */
-    AssertState(!IsUnderPostmaster || IsAutoVacuumWorkerProcess() ||
-        IsJobSchedulerProcess() || IsJobWorkerProcess() || AM_WAL_SENDER ||
-        t_thrd.bgworker_cxt.is_background_worker);
+#ifdef ENABLE_MULTIPLE_NODES
+    AssertState(!IsUnderPostmaster || IsAutoVacuumWorkerProcess() || IsJobSchedulerProcess() || IsJobWorkerProcess() ||
+                AM_WAL_SENDER || CompactionProcess::IsTsCompactionProcess());
+#else   /* ENABLE_MULTIPLE_NODES */
+    AssertState(!IsUnderPostmaster || IsAutoVacuumWorkerProcess() || IsJobSchedulerProcess() || IsJobWorkerProcess() ||
+                AM_WAL_SENDER);
+#endif   /* ENABLE_MULTIPLE_NODES */
 
     /* In pooler stateless reuse mode, to reset session userid */
-    if (!g_instance.attr.attr_network.PoolerStatelessReuse) {
+    if (!ENABLE_STATELESS_REUSE) {
         /* call only once */
         AssertState(!OidIsValid(u_sess->misc_cxt.AuthenticatedUserId));
     }
@@ -875,34 +922,33 @@ void InitializeSessionUserIdStandalone(void)
  * fail during an end-of-transaction GUC reversion, but we may someday
  * have to push it up into assign_session_authorization.
  */
-void SetSessionAuthorization(Oid user_id, bool is_superuser)
+void SetSessionAuthorization(Oid userid, bool is_superuser)
 {
     /* Must have authenticated already, else can't make permission check */
     AssertState(OidIsValid(u_sess->misc_cxt.AuthenticatedUserId));
 
-    if (!t_thrd.xact_cxt.bInAbortTransaction && user_id != u_sess->misc_cxt.AuthenticatedUserId &&
-        !u_sess->misc_cxt.AuthenticatedUserIsSuperuser && !superuser()) {
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-            errmsg("permission denied to set session authorization")));
-    }
-    SetSessionUserId(user_id, is_superuser);
+    if (!t_thrd.xact_cxt.bInAbortTransaction && userid != u_sess->misc_cxt.AuthenticatedUserId &&
+        !u_sess->misc_cxt.AuthenticatedUserIsSuperuser && !superuser())
+        ereport(
+            ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("permission denied to set session authorization")));
+
+    SetSessionUserId(userid, is_superuser);
 
     SetConfigOption("is_sysadmin", is_superuser ? "on" : "off", PGC_INTERNAL, PGC_S_OVERRIDE);
 }
 
 /*
  * Report current role id
- * This follows the semantics of SET ROLE, ie return the outer-level ID
- * not the current effective ID, and return InvalidOid when the setting
- * is logically SET ROLE NONE.
+ *		This follows the semantics of SET ROLE, ie return the outer-level ID
+ *		not the current effective ID, and return InvalidOid when the setting
+ *		is logically SET ROLE NONE.
  */
 Oid GetCurrentRoleId(void)
 {
-    if (u_sess->misc_cxt.SetRoleIsActive) {
+    if (u_sess->misc_cxt.SetRoleIsActive)
         return u_sess->misc_cxt.OuterUserId;
-    } else {
+    else
         return InvalidOid;
-    }
 }
 
 /*
@@ -917,7 +963,7 @@ Oid GetCurrentRoleId(void)
  * here because this routine must be able to execute in a failed transaction
  * to restore a prior value of the ROLE GUC variable.)
  */
-void SetCurrentRoleId(Oid role_id, bool is_superuser)
+void SetCurrentRoleId(Oid roleid, bool is_superuser)
 {
     /*
      * Get correct info if it's SET ROLE NONE
@@ -926,41 +972,64 @@ void SetCurrentRoleId(Oid role_id, bool is_superuser)
      * SetSessionUserId call will fix everything.  This is needed since we
      * will get called during GUC initialization.
      */
-    if (!OidIsValid(role_id)) {
-        if (!OidIsValid(u_sess->misc_cxt.SessionUserId)) {
+    if (!OidIsValid(roleid)) {
+        if (!OidIsValid(u_sess->misc_cxt.SessionUserId))
             return;
-        }
-        role_id = u_sess->misc_cxt.SessionUserId;
+
+        roleid = u_sess->misc_cxt.SessionUserId;
         is_superuser = u_sess->misc_cxt.SessionUserIsSuperuser;
 
         u_sess->misc_cxt.SetRoleIsActive = false;
-    } else {
+    } else
         u_sess->misc_cxt.SetRoleIsActive = true;
-    }
-    SetOuterUserId(role_id);
+
+    SetOuterUserId(roleid);
+
     SetConfigOption("is_sysadmin", is_superuser ? "on" : "off", PGC_INTERNAL, PGC_S_OVERRIDE);
+
     if (u_sess->misc_cxt.SessionUserIsSuperuser) {
-        set_current_lcgroup_oid(OidIsValid(role_id) ? get_pgxc_logic_groupoid(role_id) : InvalidOid);
+        set_current_lcgroup_oid(OidIsValid(roleid) ? get_pgxc_logic_groupoid(roleid) : InvalidOid);
     }
 }
 
 /*
  * Get user name from user oid
  */
-char* GetUserNameFromId(Oid role_id)
+char* GetUserNameFromId(Oid roleid)
 {
-    HeapTuple tuple = SearchSysCache1(AUTHOID, ObjectIdGetDatum(role_id));
-    if (!HeapTupleIsValid(tuple)) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("invalid role OID: %u", role_id)));
-    }
-    char* result = pstrdup(NameStr(((Form_pg_authid)GETSTRUCT(tuple))->rolname));
+    HeapTuple tuple;
+    char* result = NULL;
+
+    tuple = SearchSysCache1(AUTHOID, ObjectIdGetDatum(roleid));
+
+    if (!HeapTupleIsValid(tuple))
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("invalid role OID: %u", roleid)));
+
+    result = pstrdup(NameStr(((Form_pg_authid)GETSTRUCT(tuple))->rolname));
 
     ReleaseSysCache(tuple);
     return result;
 }
 
+char* GetUserNameById(Oid roleid)
+{
+    HeapTuple tuple;
+    char* result = NULL;
+
+    tuple = SearchSysCache1(AUTHOID, ObjectIdGetDatum(roleid));
+
+    if (!HeapTupleIsValid(tuple))
+        return NULL;
+
+    result = pstrdup(NameStr(((Form_pg_authid)GETSTRUCT(tuple))->rolname));
+
+    ReleaseSysCache(tuple);
+    return result;
+}
+
+
 /* -------------------------------------------------------------------------
- *                      Interlock-file support
+ *				Interlock-file support
  *
  * These routines are used to create both a data-directory lockfile
  * ($DATADIR/postmaster.pid) and a Unix-socket-file lockfile ($SOCKFILE.lock).
@@ -972,19 +1041,22 @@ char* GetUserNameFromId(Oid role_id)
  * On successful lockfile creation, a proc_exit callback to remove the
  * lockfile is automatically created.
  * -------------------------------------------------------------------------
- *
+ */
+
+/*
  * proc_exit callback to remove a lockfile.
  */
-static void UnlinkLockFile(int status, Datum file_name)
+static void UnlinkLockFile(int status, Datum filename)
 {
-    char* f_name = (char*)DatumGetPointer(file_name);
-    if (f_name != NULL) {
-        if (unlink(f_name) != 0) {
+    char* fname = (char*)DatumGetPointer(filename);
+
+    if (fname != NULL) {
+        if (unlink(fname) != 0) {
             /* Should we complain if the unlink fails? */
-            ereport(LOG, (errmsg("unlink lockfile %s fails.", f_name)));
+            ereport(LOG, (errmsg("unlink lockfile %s fails.", fname)));
         }
 
-        pfree(f_name);
+        pfree(fname);
     }
 }
 
@@ -995,7 +1067,7 @@ static void UnlinkLockFile(int status, Datum file_name)
  * amPostmaster is used to determine how to encode the output PID.
  * isDDLock and refName are used to determine what error message to produce.
  */
-static void CreateLockFile(const char* file_name, bool am_post_master, bool is_dd_lock, const char* ref_name)
+static void CreateLockFile(const char* filename, bool amPostmaster, bool isDDLock, const char* refName)
 {
     int fd = -1;
     char buffer[MAXPGPATH * 2 + 256];
@@ -1003,9 +1075,7 @@ static void CreateLockFile(const char* file_name, bool am_post_master, bool is_d
     int len;
     int encoded_pid;
     pid_t other_pid;
-    pid_t my_pid;
-    pid_t my_p_pid;
-    pid_t my_gp_pid;
+    pid_t my_pid, my_p_pid, my_gp_pid;
     const char* envvar = NULL;
 
     /*
@@ -1040,6 +1110,7 @@ static void CreateLockFile(const char* file_name, bool am_post_master, bool is_d
 #endif
 
     envvar = gs_getenv_r("PG_GRANDPARENT_PID");
+
     if (envvar != NULL) {
         check_backend_env(envvar);
         my_gp_pid = atoi(envvar);
@@ -1059,34 +1130,33 @@ static void CreateLockFile(const char* file_name, bool am_post_master, bool is_d
          * Think not to make the file protection weaker than 0600.	See
          * comments below.
          */
-        fd = open(file_name, O_RDWR | O_CREAT | O_EXCL, 0600);
-        if (fd >= 0) {
+        fd = open(filename, O_RDWR | O_CREAT | O_EXCL, 0600);
+
+        if (fd >= 0)
             break; /* Success; exit the retry loop */
-        }
 
         /*
          * Couldn't create the pid file. Probably it already exists.
          */
-        if ((errno != EEXIST && errno != EACCES) || ntries > 100) {
-            ereport(FATAL, (errcode_for_file_access(), errmsg("could not create lock file \"%s\": %m", file_name)));
-        }
+        if ((errno != EEXIST && errno != EACCES) || ntries > 100)
+            ereport(FATAL, (errcode_for_file_access(), errmsg("could not create lock file \"%s\": %m", filename)));
 
         /*
          * Read the file to get the old owner's PID.  Note race condition
          * here: file might have been deleted since we tried to create it.
          */
-        fd = open(file_name, O_RDONLY, 0600);
+        fd = open(filename, O_RDONLY, 0600);
+
         if (fd < 0) {
-            if (errno == ENOENT) {
+            if (errno == ENOENT)
                 continue; /* race condition; try again */
-            }
-            ereport(FATAL, (errcode_for_file_access(), errmsg("could not open lock file \"%s\": %m", file_name)));
+
+            ereport(FATAL, (errcode_for_file_access(), errmsg("could not open lock file \"%s\": %m", filename)));
         }
 
         pgstat_report_waitevent(WAIT_EVENT_LOCK_FILE_CREATE_READ);
-        if ((len = read(fd, buffer, sizeof(buffer) - 1)) < 0) {
-            ereport(FATAL, (errcode_for_file_access(), errmsg("could not read lock file \"%s\": %m", file_name)));
-        }
+        if ((len = read(fd, buffer, sizeof(buffer) - 1)) < 0)
+            ereport(FATAL, (errcode_for_file_access(), errmsg("could not read lock file \"%s\": %m", filename)));
         pgstat_report_waitevent(WAIT_EVENT_END);
         close(fd);
 
@@ -1094,22 +1164,26 @@ static void CreateLockFile(const char* file_name, bool am_post_master, bool is_d
         encoded_pid = atoi(buffer);
 
         /* if pid < 0, the pid is for postgres, not postmaster */
-        other_pid = (pid_t)(encoded_pid < 0 ? -encoded_pid : encoded_pid);
+        other_pid = (pid_t)((encoded_pid < 0) ? -encoded_pid : encoded_pid);
+
         if (other_pid <= 0) {
-            struct stat file_name_stat;
-            if (lstat(file_name, &file_name_stat) >= 0) {
-                if (0 == file_name_stat.st_size) {
-                    if (remove(file_name) < 0)
-                        ereport(FATAL, (errcode_for_file_access(),
-                            errmsg("bogus lock file \"%s\",could not unlink it : %m", file_name)));
+            struct stat filenameStat;
+
+            if (lstat(filename, &filenameStat) >= 0) {
+                if (0 == filenameStat.st_size) {
+                    if (remove(filename) < 0)
+                        ereport(FATAL,
+                            (errcode_for_file_access(),
+                                errmsg("bogus lock file \"%s\",could not unlink it : %m", filename)));
 
                     continue;
                 }
             }
             ereport(FATAL,
                 (errmsg("bogus data in lock file \"%s\": \"%s\", please kill the "
-                    "instance process, than remove the damaged lock file",
-                    file_name, buffer)));
+                        "instance process, than remove the damaged lock file",
+                    filename,
+                    buffer)));
         }
 
         /*
@@ -1148,18 +1222,21 @@ static void CreateLockFile(const char* file_name, bool am_post_master, bool is_d
 
                     ereport(FATAL,
                         (errcode(ERRCODE_LOCK_FILE_EXISTS),
-                            errmsg("lock file \"%s\" already exists", file_name),
-                            is_dd_lock ?
-                                (encoded_pid < 0 ?
-                                    errhint("Is another postgres (PID %d) running in data directory \"%s\"?",
-                                        (int)other_pid, ref_name) :
-                                    errhint("Is another postmaster (PID %d) running in data directory \"%s\"?",
-                                        (int)other_pid, ref_name)) :
-                                (encoded_pid < 0 ?
-                                    errhint("Is another postgres (PID %d) using socket file \"%s\"?",
-                                        (int)other_pid, ref_name) :
-                                    errhint("Is another postmaster (PID %d) using socket file \"%s\"?",
-                                        (int)other_pid, ref_name))));
+                            errmsg("lock file \"%s\" already exists", filename),
+                            isDDLock
+                                ? ((encoded_pid < 0)
+                                          ? errhint("Is another postgres (PID %d) running in data directory \"%s\"?",
+                                                (int)other_pid,
+                                                refName)
+                                          : errhint("Is another postmaster (PID %d) running in data directory \"%s\"?",
+                                                (int)other_pid,
+                                                refName))
+                                : ((encoded_pid < 0) ? errhint("Is another postgres (PID %d) using socket file \"%s\"?",
+                                                         (int)other_pid,
+                                                         refName)
+                                                   : errhint("Is another postmaster (PID %d) using socket file \"%s\"?",
+                                                         (int)other_pid,
+                                                         refName))));
                 }
             }
         }
@@ -1175,24 +1252,31 @@ static void CreateLockFile(const char* file_name, bool am_post_master, bool is_d
          * not find the shmem ID values in it; we can't treat that as an
          * error.
          */
-        if (is_dd_lock != false) {
+        if (isDDLock != false) {
             char* ptr = buffer;
-            unsigned long id1;
-            unsigned long id2;
-            for (int line_no = 1; line_no < LOCK_FILE_LINE_SHMEM_KEY; line_no++) {
-                if ((ptr = strchr(ptr, '\n')) == NULL) {
+            unsigned long id1, id2;
+            int lineno;
+
+            for (lineno = 1; lineno < LOCK_FILE_LINE_SHMEM_KEY; lineno++) {
+                if ((ptr = strchr(ptr, '\n')) == NULL)
                     break;
-                }
+
                 ptr++;
             }
 
             if (ptr != NULL && sscanf_s(ptr, "%lu %lu", &id1, &id2) == 2) {
                 if (PGSharedMemoryIsInUse(id1, id2)) {
-                    ereport(FATAL, (errcode(ERRCODE_LOCK_FILE_EXISTS),
-                        errmsg("pre-existing shared memory block (key %lu, ID %lu) is still in use", id1, id2),
-                        errhint("If you're sure there are no old "
-                            "server processes still running, remove the shared memory block "
-                            "or just delete the file \"%s\".", file_name)));
+                    ereport(FATAL,
+                        (errcode(ERRCODE_LOCK_FILE_EXISTS),
+                            errmsg("pre-existing shared memory block "
+                                   "(key %lu, ID %lu) is still in use",
+                                id1,
+                                id2),
+                            errhint("If you're sure there are no old "
+                                    "server processes still running, remove "
+                                    "the shared memory block "
+                                    "or just delete the file \"%s\".",
+                                filename)));
                 }
             }
         }
@@ -1202,12 +1286,13 @@ static void CreateLockFile(const char* file_name, bool am_post_master, bool is_d
          * it.	Need a loop because of possible race condition against other
          * would-be creators.
          */
-        if (unlink(file_name) < 0) {
-            ereport(FATAL, (errcode_for_file_access(),
-                errmsg("could not remove old lock file \"%s\": %m", file_name),
-                errhint("The file seems accidentally left over, but "
-                    "it could not be removed. Please remove the file by hand and try again.")));
-        }
+        if (unlink(filename) < 0)
+            ereport(FATAL,
+                (errcode_for_file_access(),
+                    errmsg("could not remove old lock file \"%s\": %m", filename),
+                    errhint("The file seems accidentally left over, but "
+                            "it could not be removed. Please remove the file "
+                            "by hand and try again.")));
     }
 
     ReportResumeDataInstLockFileExist();
@@ -1218,48 +1303,59 @@ static void CreateLockFile(const char* file_name, bool am_post_master, bool is_d
      * both datadir and socket lockfiles; although more stuff may get added to
      * the datadir lockfile later.
      */
-    char* unix_socket_dir = NULL;
+    char* unixSocketDir = NULL;
+    char* pghost = gs_getenv_r("PGHOST");
+    if (pghost != NULL) {
+        check_backend_env(pghost);
+    }
+
     if (*g_instance.attr.attr_network.UnixSocketDir != '\0') {
-        unix_socket_dir = g_instance.attr.attr_network.UnixSocketDir;
+        unixSocketDir = g_instance.attr.attr_network.UnixSocketDir;
     } else {
-        unix_socket_dir = DEFAULT_PGSOCKET_DIR;
+        if (pghost != NULL && *(pghost) != '\0') {
+            unixSocketDir = pghost;
+        } else {
+            unixSocketDir = DEFAULT_PGSOCKET_DIR;
+        }
     }
 
     int rc = snprintf_s(buffer,
         sizeof(buffer),
         sizeof(buffer) - 1,
         "%d\n%s\n%ld\n%d\n%s\n",
-        am_post_master ? (int)my_pid : -((int)my_pid),
+        amPostmaster ? (int)my_pid : -((int)my_pid),
         t_thrd.proc_cxt.DataDir,
         (long)t_thrd.proc_cxt.MyStartTime,
         g_instance.attr.attr_network.PostPortNumber,
 #ifdef HAVE_UNIX_SOCKETS
-        unix_socket_dir
+        unixSocketDir
 #else
         ""
 #endif
     );
 
-    securec_check_ss(rc, "", "");
+    securec_check_ss(rc, "\0", "\0");
 
     /*
      * In a standalone backend, the next line (LOCK_FILE_LINE_LISTEN_ADDR)
      * will never receive data, so fill it in as empty now.
      */
-    if (is_dd_lock && !am_post_master) {
+    if (isDDLock && !amPostmaster)
         strlcat(buffer, "\n", sizeof(buffer));
-    }
+
     errno = 0;
 
     pgstat_report_waitevent(WAIT_EVENT_LOCK_FILE_CREATE_WRITE);
-    if ((unsigned int)(write(fd, buffer, strlen(buffer))) != strlen(buffer)) {
+    if (strlen(buffer) > 0) {
+        if ((unsigned int)(write(fd, buffer, strlen(buffer))) != strlen(buffer)) {
         int save_errno = errno;
 
         close(fd);
-        (void)unlink(file_name);
+        (void)unlink(filename);
         /* if write didn't set errno, assume problem is no disk space */
         errno = save_errno ? save_errno : ENOSPC;
-        ereport(FATAL, (errcode_for_file_access(), errmsg("could not write lock file \"%s\": %m", file_name)));
+        ereport(FATAL, (errcode_for_file_access(), errmsg("could not write lock file \"%s\": %m", filename)));
+        }
     }
     pgstat_report_waitevent(WAIT_EVENT_END);
 
@@ -1268,18 +1364,18 @@ static void CreateLockFile(const char* file_name, bool am_post_master, bool is_d
         int save_errno = errno;
 
         close(fd);
-        (void)unlink(file_name);
+        (void)unlink(filename);
         errno = save_errno;
-        ereport(FATAL, (errcode_for_file_access(), errmsg("could not write lock file \"%s\": %m", file_name)));
+        ereport(FATAL, (errcode_for_file_access(), errmsg("could not write lock file \"%s\": %m", filename)));
     }
     pgstat_report_waitevent(WAIT_EVENT_END);
 
     if (close(fd) != 0) {
         int save_errno = errno;
 
-        (void)unlink(file_name);
+        (void)unlink(filename);
         errno = save_errno;
-        ereport(FATAL, (errcode_for_file_access(), errmsg("could not write lock file \"%s\": %m", file_name)));
+        ereport(FATAL, (errcode_for_file_access(), errmsg("could not write lock file \"%s\": %m", filename)));
     }
 
     /*
@@ -1287,7 +1383,7 @@ static void CreateLockFile(const char* file_name, bool am_post_master, bool is_d
      */
     {
         char* ptr = NULL;
-        ptr = MemoryContextStrdup(u_sess->top_mem_cxt, file_name);
+        ptr = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), filename);
         on_proc_exit(UnlinkLockFile, PointerGetDatum(ptr));
     }
 }
@@ -1299,26 +1395,27 @@ static void CreateLockFile(const char* file_name, bool am_post_master, bool is_d
  * directory to t_thrd.proc_cxt.DataDir, so we can just use a relative path.  This
  * helps ensure that we are locking the directory we should be.
  */
-void CreateDataDirLockFile(bool am_post_master)
+void CreateDataDirLockFile(bool amPostmaster)
 {
-    CreateLockFile(DIRECTORY_LOCK_FILE, am_post_master, true, t_thrd.proc_cxt.DataDir);
+    CreateLockFile(DIRECTORY_LOCK_FILE, amPostmaster, true, t_thrd.proc_cxt.DataDir);
 }
 
 /*
  * Create a lockfile for the specified Unix socket file.
  */
-void CreateSocketLockFile(const char* socket_file, bool am_post_master, bool is_create_psql_sock)
+void CreateSocketLockFile(const char* socketfile, bool amPostmaster, bool is_create_psql_sock)
 {
-    char lock_file[MAXPGPATH];
-    int rc = snprintf_s(lock_file, sizeof(lock_file), sizeof(lock_file) - 1, "%s.lock", socket_file);
-    securec_check_ss(rc, "", "");
+    char lockfile[MAXPGPATH];
 
-    CreateLockFile(lock_file, am_post_master, false, socket_file);
-    /* Save name of lock_file for TouchSocketLockFile */
+    int rc = snprintf_s(lockfile, sizeof(lockfile), sizeof(lockfile) - 1, "%s.lock", socketfile);
+    securec_check_ss(rc, "\0", "\0");
+
+    CreateLockFile(lockfile, amPostmaster, false, socketfile);
+    /* Save name of lockfile for TouchSocketLockFile */
     errno_t rcs = strcpy_s((is_create_psql_sock ? u_sess->misc_cxt.socketLockFile : u_sess->misc_cxt.hasocketLockFile),
         MAXPGPATH,
-        lock_file);
-    securec_check_c(rcs, "", "");
+        lockfile);
+    securec_check_c(rcs, "\0", "\0");
 }
 
 /*
@@ -1329,10 +1426,10 @@ void CreateSocketLockFile(const char* socket_file, bool am_post_master, bool is_
  * from being removed by overenthusiastic /tmp-directory-cleaner daemons.
  * (Another reason we should never have put the socket file in /tmp...)
  */
-void TouchSocketLockFileInternel(const char* socket_lock_file)
+void TouchSocketLockFileInternel(const char* socketLockFile)
 {
     /* Do nothing if we did not create a socket... */
-    if (socket_lock_file[0] != '\0') {
+    if (socketLockFile[0] != '\0') {
         /*
          * utime() is POSIX standard, utimes() is a common alternative; if we
          * have neither, fall back to actually reading the file (which only
@@ -1340,15 +1437,16 @@ void TouchSocketLockFileInternel(const char* socket_lock_file)
          * most cases).  In all paths, we ignore errors.
          */
 #ifdef HAVE_UTIME
-        utime(socket_lock_file, NULL);
+        utime(socketLockFile, NULL);
 #else /* !HAVE_UTIME */
 #ifdef HAVE_UTIMES
-        utimes(socket_lock_file, NULL);
+        utimes(socketLockFile, NULL);
 #else /* !HAVE_UTIMES */
         int fd = -1;
         char buffer[1];
 
-        fd = open(socket_lock_file, O_RDONLY | PG_BINARY, 0);
+        fd = open(socketLockFile, O_RDONLY | PG_BINARY, 0);
+
         if (fd >= 0) {
             read(fd, buffer, sizeof(buffer));
             close(fd);
@@ -1376,11 +1474,12 @@ void AddToDataDirLockFile(int target_line, const char* str)
 {
     int fd = -1;
     int len;
-    int line_no;
+    int lineno;
     char* ptr = NULL;
     char buffer[BLCKSZ];
 
     fd = open(DIRECTORY_LOCK_FILE, O_RDWR | PG_BINARY, 0);
+
     if (fd < 0) {
         ereport(LOG, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", DIRECTORY_LOCK_FILE)));
         return;
@@ -1389,6 +1488,7 @@ void AddToDataDirLockFile(int target_line, const char* str)
     pgstat_report_waitevent(WAIT_EVENT_LOCK_FILE_ADDTODATADIR_READ);
     len = read(fd, buffer, sizeof(buffer) - 1);
     pgstat_report_waitevent(WAIT_EVENT_END);
+
     if (len < 0) {
         ereport(LOG, (errcode_for_file_access(), errmsg("could not read from file \"%s\": %m", DIRECTORY_LOCK_FILE)));
         close(fd);
@@ -1402,11 +1502,13 @@ void AddToDataDirLockFile(int target_line, const char* str)
      */
     ptr = buffer;
 
-    for (line_no = 1; line_no < target_line; line_no++) {
+    for (lineno = 1; lineno < target_line; lineno++) {
         if ((ptr = strchr(ptr, '\n')) == NULL) {
             ereport(LOG,
                 (errmsg("incomplete data in \"%s\": found only %d newlines while trying to add line %d",
-                    DIRECTORY_LOCK_FILE, line_no - 1, target_line)));
+                    DIRECTORY_LOCK_FILE,
+                    lineno - 1,
+                    target_line)));
             close(fd);
             return;
         }
@@ -1418,7 +1520,7 @@ void AddToDataDirLockFile(int target_line, const char* str)
      * Write or rewrite the target line.
      */
     int rcs = snprintf_s(ptr, buffer + sizeof(buffer) - ptr, buffer + sizeof(buffer) - ptr - 1, "%s\n", str);
-    securec_check_ss(rcs, "", "");
+    securec_check_ss(rcs, "\0", "\0");
 
     /*
      * And rewrite the data.  Since we write in a single kernel call, this
@@ -1431,9 +1533,9 @@ void AddToDataDirLockFile(int target_line, const char* str)
     if (lseek(fd, (off_t)0, SEEK_SET) != 0 || (int)write(fd, buffer, len) != len) {
         pgstat_report_waitevent(WAIT_EVENT_END);
         /* if write didn't set errno, assume problem is no disk space */
-        if (errno == 0) {
+        if (errno == 0)
             errno = ENOSPC;
-        }
+
         ereport(LOG, (errcode_for_file_access(), errmsg("could not write to file \"%s\": %m", DIRECTORY_LOCK_FILE)));
         close(fd);
         return;
@@ -1452,9 +1554,11 @@ void AddToDataDirLockFile(int target_line, const char* str)
 }
 
 /* -------------------------------------------------------------------------
- *                     Version checking support
+ *				Version checking support
  * -------------------------------------------------------------------------
- *
+ */
+
+/*
  * Determine whether the PG_VERSION file in directory `path' indicates
  * a data version compatible with the version of this program.
  *
@@ -1465,67 +1569,68 @@ void ValidatePgVersion(const char* path)
     char full_path[MAXPGPATH];
     FILE* file = NULL;
     int ret;
-    long file_major;
-    long file_minor;
-    long my_major = 0;
-    long my_minor = 0;
+    long file_major, file_minor;
+    long my_major = 0, my_minor = 0;
     char* endptr = NULL;
     const char* version_string = PG_VERSION;
     errno_t rc;
 
     my_major = strtol(version_string, &endptr, 10);
-    if (*endptr == '.') {
+
+    if (*endptr == '.')
         my_minor = strtol(endptr + 1, NULL, 10);
-    }
+
     rc = snprintf_s(full_path, sizeof(full_path), sizeof(full_path) - 1, "%s/PG_VERSION", path);
     securec_check_intval(rc, , );
 
     file = AllocateFile(full_path, "r");
+
     if (file == NULL) {
-        if (errno == ENOENT) {
+        if (errno == ENOENT)
             ereport(FATAL,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("\"%s\" is not a valid data directory", path),
                     errdetail("File \"%s\" is missing.", full_path)));
-        } else {
+        else
             ereport(FATAL, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", full_path)));
-        }
     }
 
     ret = fscanf_s(file, "%ld.%ld", &file_major, &file_minor);
-    if (ret != 2) {
+
+    if (ret != 2)
         ereport(FATAL,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("\"%s\" is not a valid data directory", path),
                 errdetail("File \"%s\" does not contain valid data.", full_path),
                 errhint("You might need to initdb.")));
-    }
-    (void)FreeFile(file);
-    if (my_major != file_major || my_minor != file_minor) {
+
+    FreeFile(file);
+
+    if (my_major != file_major || my_minor != file_minor)
         ereport(FATAL,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("database files are incompatible with server"),
                 errdetail("The data directory was initialized by PostgreSQL version %ld.%ld, "
-                    "which is not compatible with this version %s.",
-                        file_major,
-                        file_minor,
-                        version_string)));
-    }
+                          "which is not compatible with this version %s.",
+                    file_major,
+                    file_minor,
+                    version_string)));
 }
 
 /* -------------------------------------------------------------------------
- *                       Library preload support
+ *				Library preload support
  * -------------------------------------------------------------------------
- *
+ */
+/*
  * load the shared libraries listed in 'libraries'
  *
  * 'gucname': name of GUC variable, for error reports
  * 'restricted': if true, force libraries to be in $libdir/plugins/
  */
-static void load_libraries(const char* libraries, const char* guc_name, bool restricted)
+static void load_libraries(const char* libraries, const char* gucname, bool restricted)
 {
-    char* raw_string = NULL;
-    List* elem_list = NULL;
+    char* rawstring = NULL;
+    List* elemlist = NULL;
     int elevel;
     ListCell* l = NULL;
 
@@ -1534,13 +1639,14 @@ static void load_libraries(const char* libraries, const char* guc_name, bool res
     }
 
     /* Need a modifiable copy of string */
-    raw_string = pstrdup(libraries);
+    rawstring = pstrdup(libraries);
+
     /* Parse string into list of identifiers */
-    if (!SplitIdentifierString(raw_string, ',', &elem_list)) {
+    if (!SplitIdentifierString(rawstring, ',', &elemlist)) {
         /* syntax error in list */
-        pfree(raw_string);
-        list_free(elem_list);
-        ereport(LOG, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("invalid list syntax in parameter \"%s\"", guc_name)));
+        pfree(rawstring);
+        list_free(elemlist);
+        ereport(LOG, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("invalid list syntax in parameter \"%s\"", gucname)));
         return;
     }
 
@@ -1549,39 +1655,59 @@ static void load_libraries(const char* libraries, const char* guc_name, bool res
      * that was preloaded into the postmaster.	(Only possible in EXEC_BACKEND
      * configurations)
      */
-    elevel = LOG;
 #ifdef EXEC_BACKEND
-    if (IsUnderPostmaster && u_sess->misc_cxt.process_shared_preload_libraries_in_progress) {
-        elevel = DEBUG2;
-    }
-#endif
 
-    foreach (l, elem_list) {
+    if (IsUnderPostmaster && u_sess->misc_cxt.process_shared_preload_libraries_in_progress)
+        elevel = DEBUG2;
+    else
+#endif
+        elevel = LOG;
+
+    foreach (l, elemlist) {
         char* tok = (char*)lfirst(l);
-        char* file_name = NULL;
+        char* filename = NULL;
         errno_t rc;
 
+        filename = pstrdup(tok);
+        if (strcmp(filename, "security_plugin") == 0 && WorkingGrandVersionNum  < 92076) {
+            continue;
+        }        
+        canonicalize_path(filename);
+
         /* If restricting, insert $libdir/plugins if not mentioned already */
-        file_name = pstrdup(tok);
-        canonicalize_path(file_name);
-        if (restricted && first_dir_separator(file_name) == NULL) {
+        if (restricted && first_dir_separator(filename) == NULL) {
             char* expanded = NULL;
-            expanded = (char*)palloc(strlen("$libdir/plugins/") + strlen(file_name) + 1);
-            rc = strcpy_s(expanded, strlen("$libdir/plugins/") + strlen(file_name) + 1, "$libdir/plugins/");
-            securec_check_c(rc, "", "");
-            rc = strcat_s(expanded, strlen("$libdir/plugins/") + strlen(file_name) + 1, file_name);
-            securec_check_c(rc, "", "");
-            pfree(file_name);
-            file_name = expanded;
+
+            expanded = (char*)palloc(strlen("$libdir/plugins/") + strlen(filename) + 1);
+            rc = strcpy_s(expanded, strlen("$libdir/plugins/") + strlen(filename) + 1, "$libdir/plugins/");
+            securec_check_c(rc, "\0", "\0");
+            rc = strcat_s(expanded, strlen("$libdir/plugins/") + strlen(filename) + 1, filename);
+            securec_check_c(rc, "\0", "\0");
+            pfree(filename);
+            filename = expanded;
         }
 
-        load_file(file_name, restricted);
-        ereport(elevel, (errmsg("loaded library \"%s\"", file_name)));
-        pfree(file_name);
+        load_file(filename, restricted);
+        ereport(elevel, (errmsg("loaded library \"%s\"", filename)));
+        pfree(filename);
     }
 
-    pfree(raw_string);
-    list_free(elem_list);
+    pfree(rawstring);
+    list_free(elemlist);
+}
+
+/*
+ * process shared preloaded libraries internal
+ */
+void
+process_shared_preload_libraries_internal(void)
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    if (is_streaming_engine_available()) {
+	   load_libraries("streaming", "shared_preload_libraries", false);
+    }
+#endif
+    return;
 }
 
 /*
@@ -1591,6 +1717,7 @@ void process_shared_preload_libraries(void)
 {
     u_sess->misc_cxt.process_shared_preload_libraries_in_progress = true;
     load_libraries(g_instance.attr.attr_common.shared_preload_libraries_string, "shared_preload_libraries", false);
+    process_shared_preload_libraries_internal();
     u_sess->misc_cxt.process_shared_preload_libraries_in_progress = false;
 }
 
@@ -1608,6 +1735,7 @@ void pg_bindtextdomain(const char* domain)
 
     if (my_exec_path[0] != '\0') {
         char locale_path[MAXPGPATH];
+
         get_locale_path(my_exec_path, locale_path);
         bindtextdomain(domain, locale_path);
         pg_bind_textdomain_codeset(domain);
@@ -1622,4 +1750,5 @@ void Reset_Pseudo_CurrentUserId(void)
 {
     u_sess->misc_cxt.Pseudo_CurrentUserId = &u_sess->misc_cxt.CurrentUserId;
 }
+
 

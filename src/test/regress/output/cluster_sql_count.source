@@ -1,0 +1,393 @@
+-------------------------------THERE IS FOR QPS : CLUSTER SQL COUNT -------------------------------------------
+/* QPS guc parameter test . 
+ */
+/*track_sql_count default value is on*/
+SHOW track_sql_count;
+ track_sql_count 
+-----------------
+ on
+(1 row)
+
+SET track_sql_count=off;
+/* test 1 : track_activities is on but track_sql_count is off */
+SHOW track_activities;
+ track_activities 
+------------------
+ on
+(1 row)
+
+SHOW track_sql_count;
+ track_sql_count 
+-----------------
+ off
+(1 row)
+
+SELECT * FROM gs_sql_count;
+--? node_name | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
+-----------+-----------+--------------+--------------+--------------+--------------+-----------------+-----------+-----------+-----------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------
+(0 rows)
+
+/* test 2 : track_activities is off but track_sql_count is on */
+SET track_activities=off;
+SET track_sql_count=on;
+SELECT * FROM gs_sql_count;
+--? node_name | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
+-----------+-----------+--------------+--------------+--------------+--------------+-----------------+-----------+-----------+-----------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------
+(0 rows)
+
+/* test 3 : track_activities is off but track_sql_count is off */
+SET track_activities=off;
+SET track_sql_count=off;
+SELECT * FROM gs_sql_count;
+--? node_name | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
+-----------+-----------+--------------+--------------+--------------+--------------+-----------------+-----------+-----------+-----------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------
+(0 rows)
+
+/* test 4 : track_activities is on but track_sql_count is on */
+SET track_activities=on;
+SET track_sql_count=on;
+SELECT * FROM gs_sql_count;
+--?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
+--?.*
+--? coordinator1 | .*  |            0 |            0 |            0 |            0 |               0 |         0 |         0 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+(1 row)
+
+SELECT * FROM pgxc_sql_count order by node_name;
+--?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
+--?.*
+--? coordinator1 | .*  |            1 |            0 |            0 |            0 |               0 |         0 |         1 |         0 |                .* |              .* |              .* |              .* |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? coordinator2 | .*  |            0 |            0 |            0 |            0 |               0 |         0 |         0 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? coordinator3 | .*  |            0 |            0 |            0 |            0 |               0 |         0 |         0 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? datanode1    | .*  |            0 |            0 |            0 |            0 |               0 |         0 |         0 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? datanode10   | .*  |            0 |            0 |            0 |            0 |               0 |         0 |         0 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? datanode11   | .*  |            0 |            0 |            0 |            0 |               0 |         0 |         0 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? datanode12   | .*  |            0 |            0 |            0 |            0 |               0 |         0 |         0 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? datanode2    | .*  |            0 |            0 |            0 |            0 |               0 |         0 |         0 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? datanode3    | .*  |            0 |            0 |            0 |            0 |               0 |         0 |         0 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? datanode4    | .*  |            0 |            0 |            0 |            0 |               0 |         0 |         0 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? datanode5    | .*  |            0 |            0 |            0 |            0 |               0 |         0 |         0 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? datanode6    | .*  |            0 |            0 |            0 |            0 |               0 |         0 |         0 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? datanode7    | .*  |            0 |            0 |            0 |            0 |               0 |         0 |         0 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? datanode8    | .*  |            0 |            0 |            0 |            0 |               0 |         0 |         0 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? datanode9    | .*  |            0 |            0 |            0 |            0 |               0 |         0 |         0 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+(15 rows)
+
+/* QPS sql ddl count test . 
+ */
+/* test 5 : track_sql_count is on, ddl and dcl test */
+DROP TABLE IF EXISTS t CASCADE;
+NOTICE:  table "t" does not exist, skipping
+CREATE TABLE t(a int, b int);
+DROP USER IF EXISTS qps CASCADE;
+NOTICE:  role "qps" does not exist, skipping
+CREATE USER qps PASSWORD 'GAUSS@123';
+GRANT INSERT on TABLE t to qps;
+GRANT SELECT on TABLE t to qps;
+GRANT UPDATE on TABLE t to qps;
+GRANT DELETE on TABLE t to qps;
+SELECT * FROM gs_sql_count;
+--?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
+--?.*
+--? coordinator1 | .*  |            2 |            0 |            0 |            0 |               0 |         4 |         2 |         4 |              .* |             .* |            .* |              .* |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? coordinator1 | .*  |            0 |            0 |            0 |            0 |               0 |         0 |         0 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+(2 rows)
+
+/* QPS sql dml count test .
+ */
+/* test 6 : track_sql_count is on, dml-insert */
+SET track_sql_count=on;
+SET SESSION SESSION AUTHORIZATION qps PASSWORD 'GAUSS@123';
+INSERT INTO t values(generate_series(1, 10), generate_series(1,10));
+SELECT * FROM gs_sql_count;
+--?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
+--?.*
+--? coordinator1 | .*       |            0 |            0 |            1 |            0 |               0 |         0 |         1 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |               .* |             .* |             .* |             .* |                   0 |                 0 |                 0 |                 0
+(1 row)
+
+/* test 7 :track_sql_count is on, dml-select */
+SELECT * FROM t order by a;
+ a  | b  
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+  6 |  6
+  7 |  7
+  8 |  8
+  9 |  9
+ 10 | 10
+(10 rows)
+
+SELECT * FROM gs_sql_count;
+--?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
+--?.*
+--? coordinator1 | .*       |            2 |            0 |            1 |            0 |               0 |         0 |         3 |         0 |               .* |             .* |             .* |               .* |                   0 |                 0 |                 0 |                 0 |               .* |             .* |             .* |             .* |                   0 |                 0 |                 0 |                 0
+(1 row)
+
+/* test 8 : track_sql_count is on, dml-update */
+update t set b = 11 where b = 1;
+SELECT * FROM gs_sql_count;
+--?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
+--?.*
+--? coordinator1 | .*       |            3 |            1 |            1 |            0 |               0 |         0 |         5 |         0 |               .* |             .* |             .* |               .* |               .* |             .* |             .* |             .* |               .* |             .* |             .* |             .* |                   0 |                 0 |                 0 |                 0
+(1 row)
+
+/* test 9 : track_sql_count is on, dml-delete */
+delete from t where b =11;
+SELECT * FROM gs_sql_count;
+--?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
+--?.*
+--? coordinator1 | .*       |            4 |            1 |            1 |            1 |               0 |         0 |         7 |         0 |               .* |             .* |             .* |               .* |               .* |             .* |             .* |             .* |               .* |             .* |             .* |             .* |               .* |             .* |             .* |             .*
+(1 row)
+
+/* test 10 : doesn`t count if dml error */
+INSERT INTO t1 values(generate_series(1, 10), generate_series(1,10));
+ERROR:  relation "t1" does not exist
+LINE 2: INSERT INTO t1 values(generate_series(1, 10), generate_serie...
+                    ^
+SELECT * FROM gs_sql_count;
+--?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
+--?.*
+--? coordinator1 | .*       |            5 |            1 |            1 |            1 |               0 |         0 |         8 |         0 |               .* |             .* |             .* |               .* |               .* |             .* |             .* |             .* |               .* |             .* |             .* |             .* |               .* |             .* |             .* |             .*
+(1 row)
+
+/* QPS user test .
+ */ 
+/* test 11 : superuer and ordinary user */
+SELECT * FROM pgxc_sql_count;
+ERROR:  must be system admin or monitor admin to use EXECUTE DIRECT
+CONTEXT:  SQL statement "EXECUTE DIRECT ON (datanode1) 'SELECT * FROM gs_sql_count'"
+PL/pgSQL function pgxc_get_sql_count() line 12 at FOR over EXECUTE statement
+SELECT * FROM gs_sql_count;
+--?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
+--?.*
+--? coordinator1 | .*       |            6 |            1 |            1 |            1 |               0 |         0 |         9 |         0 |               .* |              .* |             .* |               .* |               .* |             .* |             .* |             .* |               .* |             .* |             .* |             .* |               .* |             .* |             .* |             .*
+(1 row)
+
+/* test 12 : ordinary user can not set */
+SET SESSION SESSION AUTHORIZATION qps PASSWORD 'GAUSS@123';
+SET track_sql_count= off;
+ERROR:  permission denied to set parameter "track_sql_count"
+ 
+/* QPS  guc parameter value type test .
+ */
+/* test 13 : track_sql_count can not set non-bool*/
+RESET SESSION AUTHORIZATION;
+SET track_sql_count= a;
+ERROR:  parameter "track_sql_count" requires a Boolean value
+/* test for merge into count */
+/* test 14 : mergeinto in the case that merge can be pushed down 
+ */
+SET SESSION SESSION AUTHORIZATION qps PASSWORD 'GAUSS@123';
+SET track_sql_count= on;
+ERROR:  permission denied to set parameter "track_sql_count"
+CREATE TABLE products_row
+(
+product_id INTEGER DEFAULT 0,
+product_name VARCHAR(60) DEFAULT 'null',
+category VARCHAR(60) DEFAULT 'unknown',
+total INTEGER DEFAULT '0'
+);
+CREATE TABLE newproducts_row
+(
+product_id INTEGER DEFAULT 0,
+product_name VARCHAR(60) DEFAULT 'null',
+category VARCHAR(60) DEFAULT 'unknown',
+total INTEGER DEFAULT '0'
+);
+INSERT INTO products_row VALUES (1501, 'vivitar 35mm', 'electrncs', 100);
+INSERT INTO products_row VALUES (1502, 'olympus is50', 'electrncs', 100);
+INSERT INTO newproducts_row VALUES (1502, 'olympus camera', 'electrncs', 200);
+INSERT INTO newproducts_row VALUES (1601, 'lamaze', 'toys', 200);
+ANALYZE products_row;
+ANALYZE newproducts_row;
+/* before merge into */
+RESET SESSION AUTHORIZATION;
+SELECT * FROM pgxc_sql_count where user_name='qps' order by node_name;
+--?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
+--?.*
+--? coordinator1 | .*       |            7 |            1 |            5 |            1 |               0 |         2 |        16 |         0 |               .* |              .* |             .* |               .* |               .* |             .* |             .* |             .* |               .* |              .* |             .* |              .* |               .* |             .* |             .* |             .*
+--? coordinator2 | .*       |            4 |            0 |            0 |            0 |               0 |         2 |         6 |         6 |                .* |               .* |               .* |               .* |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? coordinator3 | .*       |            4 |            0 |            0 |            0 |               0 |         2 |         6 |         6 |                .* |               .* |               .* |               .* |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? datanode1    | .*       |            7 |            1 |            0 |            1 |               0 |         2 |        13 |        12 |              .* |             .* |             .* |              .* |                .* |              .* |              .* |              .* |                   0 |                 0 |                 0 |                 0 |                 .* |              .* |              .* |               .*
+--? datanode10   | .*       |            1 |            1 |            2 |            1 |               0 |         2 |         9 |        15 |               .* |             .* |             .* |             .* |                .* |              .* |              .* |              .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode11   | .*       |            1 |            1 |            1 |            1 |               0 |         2 |         8 |        14 |               .* |             .* |             .* |             .* |                .* |              .* |              .* |              .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode12   | .*       |            1 |            1 |            0 |            1 |               0 |         2 |         7 |        12 |               .* |             .* |             .* |             .* |                 .* |               .* |               .* |               .* |                   0 |                 0 |                 0 |                 0 |                 .* |               .* |               .* |               .*
+--? datanode2    | .*       |            1 |            1 |            2 |            1 |               0 |         2 |         9 |        15 |               .* |             .* |             .* |             .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode3    | .*       |            1 |            1 |            1 |            1 |               0 |         2 |         8 |        15 |               .* |             .* |             .* |             .* |                .* |              .* |              .* |              .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode4    | .*       |            1 |            1 |            3 |            1 |               0 |         2 |        10 |        18 |               .* |             .* |             .* |             .* |                .* |              .* |              .* |              .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode5    | .*       |            1 |            1 |            0 |            1 |               0 |         2 |         7 |        12 |               .* |             .* |             .* |             .* |                .* |              .* |              .* |              .* |                   0 |                 0 |                 0 |                 0 |                 .* |               .* |               .* |               .*
+--? datanode6    | .*       |            1 |            1 |            1 |            1 |               0 |         2 |         8 |        15 |               .* |             .* |             .* |             .* |                .* |              .* |              .* |              .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode7    | .*       |            1 |            1 |            1 |            1 |               0 |         2 |         8 |        15 |               .* |             .* |             .* |             .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode8    | .*       |            1 |            1 |            3 |            1 |               0 |         2 |        10 |        15 |               .* |             .* |             .* |             .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode9    | .*       |            1 |            1 |            0 |            1 |               0 |         2 |         7 |        12 |               .* |             .* |             .* |             .* |                 .* |               .* |               .* |               .* |                   0 |                 0 |                 0 |                 0 |                 .* |               .* |               .* |               .*
+(15 rows)
+
+SET SESSION SESSION AUTHORIZATION qps PASSWORD 'GAUSS@123';
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category, total = np.total
+WHEN NOT MATCHED THEN
+  INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
+/* after merge into */
+RESET SESSION AUTHORIZATION;
+SELECT * FROM pgxc_sql_count where user_name='qps' order by node_name;
+--?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
+--?.*
+--? coordinator1 | .*       |            7 |            1 |            5 |            1 |               1 |         2 |        17 |         0 |               .* |              .* |             .* |               .* |               .* |             .* |             .* |             .* |               .* |              .* |             .* |              .* |               .* |             .* |             .* |             .*
+--? coordinator2 | .*       |            4 |            0 |            0 |            0 |               0 |         2 |         6 |         6 |                .* |               .* |               .* |               .* |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? coordinator3 | .*       |            4 |            0 |            0 |            0 |               0 |         2 |         6 |         6 |                .* |               .* |               .* |               .* |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? datanode1    | .*       |            7 |            1 |            0 |            1 |               1 |         2 |        14 |        15 |              .* |             .* |             .* |              .* |                .* |              .* |              .* |              .* |                   0 |                 0 |                 0 |                 0 |                 .* |               .* |               .* |               .*
+--? datanode10   | .*       |            1 |            1 |            2 |            1 |               1 |         2 |        10 |        18 |               .* |             .* |             .* |             .* |                .* |              .* |              .* |              .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode11   | .*       |            1 |            1 |            1 |            1 |               1 |         2 |         9 |        17 |               .* |             .* |             .* |             .* |                .* |              .* |              .* |              .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode12   | .*       |            1 |            1 |            0 |            1 |               1 |         2 |         8 |        15 |               .* |             .* |             .* |             .* |                 .* |               .* |               .* |               .* |                   0 |                 0 |                 0 |                 0 |                 .* |               .* |               .* |               .*
+--? datanode2    | .*       |            1 |            1 |            2 |            1 |               1 |         2 |        10 |        18 |               .* |             .* |             .* |             .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode3    | .*       |            1 |            1 |            1 |            1 |               1 |         2 |         9 |        18 |               .* |             .* |             .* |             .* |                .* |              .* |              .* |              .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode4    | .*       |            1 |            1 |            3 |            1 |               1 |         2 |        11 |        21 |               .* |             .* |             .* |             .* |                .* |              .* |              .* |              .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode5    | .*       |            1 |            1 |            0 |            1 |               1 |         2 |         8 |        15 |               .* |             .* |             .* |             .* |                .* |              .* |              .* |              .* |                   0 |                 0 |                 0 |                 0 |                 .* |               .* |               .* |               .*
+--? datanode6    | .*       |            1 |            1 |            1 |            1 |               1 |         2 |         9 |        18 |               .* |             .* |             .* |             .* |                .* |              .* |              .* |              .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode7    | .*       |            1 |            1 |            1 |            1 |               1 |         2 |         9 |        18 |               .* |             .* |             .* |             .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode8    | .*       |            1 |            1 |            3 |            1 |               1 |         2 |        11 |        18 |               .* |             .* |             .* |             .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode9    | .*       |            1 |            1 |            0 |            1 |               1 |         2 |         8 |        15 |               .* |             .* |             .* |             .* |                 .* |               .* |               .* |               .* |                   0 |                 0 |                 0 |                 0 |                 .* |               .* |               .* |               .*
+(15 rows)
+
+/* test 15 : merge can not be pushed down */
+SET SESSION SESSION AUTHORIZATION qps PASSWORD 'GAUSS@123';
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category, total = np.total
+WHEN NOT MATCHED THEN
+  INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
+RESET SESSION AUTHORIZATION;
+SELECT * FROM pgxc_sql_count where user_name='qps' order by node_name;
+--?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
+--?.*
+--? coordinator1 | .*       |            7 |            1 |            5 |            1 |               2 |         2 |        18 |         0 |               .* |              .* |             .* |               .* |               .* |             .* |             .* |             .* |               .* |              .* |             .* |              .* |               .* |             .* |             .* |             .*
+--? coordinator2 | .*       |            4 |            0 |            0 |            0 |               0 |         2 |         6 |         6 |                .* |               .* |               .* |               .* |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? coordinator3 | .*       |            4 |            0 |            0 |            0 |               0 |         2 |         6 |         6 |                .* |               .* |               .* |               .* |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+--? datanode1    | .*       |            8 |            3 |            0 |            1 |               1 |         2 |        17 |        18 |              .* |             .* |             .* |              .* |                .* |               .* |              .* |               .* |                   0 |                 0 |                 0 |                 0 |                 .* |               .* |               .* |               .*
+--? datanode10   | .*       |            2 |            3 |            2 |            1 |               1 |         2 |        13 |        21 |               .* |             .* |             .* |              .* |                .* |               .* |              .* |               .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode11   | .*       |            2 |            3 |            1 |            1 |               1 |         2 |        12 |        20 |               .* |             .* |             .* |              .* |                .* |               .* |              .* |               .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode12   | .*       |            2 |            3 |            0 |            1 |               1 |         2 |        11 |        18 |               .* |             .* |             .* |              .* |                .* |               .* |               .* |               .* |                   0 |                 0 |                 0 |                 0 |                 .* |               .* |               .* |               .*
+--? datanode2    | .*       |            2 |            3 |            2 |            1 |               1 |         2 |        13 |        21 |               .* |             .* |             .* |              .* |                .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode3    | .*       |            2 |            3 |            1 |            1 |               1 |         2 |        12 |        21 |               .* |             .* |             .* |              .* |                .* |               .* |              .* |               .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode4    | .*       |            2 |            3 |            3 |            1 |               1 |         2 |        14 |        24 |               .* |             .* |             .* |              .* |                .* |               .* |              .* |               .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode5    | .*       |            2 |            3 |            0 |            1 |               1 |         2 |        11 |        18 |               .* |             .* |             .* |              .* |                .* |               .* |              .* |               .* |                   0 |                 0 |                 0 |                 0 |                 .* |               .* |               .* |               .*
+--? datanode6    | .*       |            2 |            3 |            1 |            1 |               1 |         2 |        12 |        21 |               .* |             .* |             .* |              .* |                .* |               .* |              .* |               .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode7    | .*       |            2 |            3 |            1 |            1 |               1 |         2 |        12 |        21 |               .* |             .* |             .* |              .* |                .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode8    | .*       |            2 |            3 |            3 |            1 |               1 |         2 |        14 |        21 |               .* |             .* |             .* |              .* |                .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .* |                 .* |               .* |               .* |               .*
+--? datanode9    | .*       |            2 |            3 |            0 |            1 |               1 |         2 |        11 |        18 |               .* |             .* |             .* |              .* |                .* |               .* |               .* |               .* |                   0 |                 0 |                 0 |                 0 |                 .* |               .* |               .* |               .*
+(15 rows)
+
+/* reset */
+SET track_sql_count= off;
+/* clean resources */
+DROP TABLE t;
+DROP USER qps CASCADE;
+/* user name longer then 56 */
+create user cross_gjfgvnfjgniorejngviernhgrwenhgvikrvnerngerjngoirwejm PASSWORD 'test_123';
+set track_sql_count=on;
+select * from gs_sql_count where user_name='cross_gjfgvnfjgniorejngviernhgrwenhgvikrvnerngerjngoirwejm';
+  node_name   |                         user_name                          | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
+--------------+------------------------------------------------------------+--------------+--------------+--------------+--------------+-----------------+-----------+-----------+-----------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------
+ coordinator1 | cross_gjfgvnfjgniorejngviernhgrwenhgvikrvnerngerjngoirwejm |            0 |            0 |            0 |            0 |               0 |         0 |         0 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+(1 row)
+
+select * from pgxc_sql_count where user_name='cross_gjfgvnfjgniorejngviernhgrwenhgvikrvnerngerjngoirwejm' and node_name='coordinator1';
+  node_name   |                         user_name                          | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
+--------------+------------------------------------------------------------+--------------+--------------+--------------+--------------+-----------------+-----------+-----------+-----------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------
+ coordinator1 | cross_gjfgvnfjgniorejngviernhgrwenhgvikrvnerngerjngoirwejm |            0 |            0 |            0 |            0 |               0 |         0 |         0 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
+(1 row)
+
+select workload from DBE_PERF.workload_sql_count;
+   workload   
+--------------
+ default_pool
+(1 row)
+
+drop user cross_gjfgvnfjgniorejngviernhgrwenhgvikrvnerngerjngoirwejm;
+SET track_sql_count= off;
+/* execute */
+create user sql_count_tuser2 sysadmin password "test_123";
+SET track_sql_count= on;
+ALTER SESSION SET SESSION AUTHORIZATION sql_count_tuser2 PASSWORD 'test_123';
+prepare execute_test as select relname from pg_class where oid=$1;
+execute execute_test(1259);
+ relname  
+----------
+ pg_class
+(1 row)
+
+deallocate execute_test;
+execute direct on (datanode1) 'select relname from pg_class where oid=1259;';
+ relname  
+----------
+ pg_class
+(1 row)
+
+select user_name,select_count,update_count,insert_count,delete_count,mergeinto_count,ddl_count,dml_count,dcl_count from gs_sql_count where user_name='sql_count_tuser2';
+    user_name     | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count 
+------------------+--------------+--------------+--------------+--------------+-----------------+-----------+-----------+-----------
+ sql_count_tuser2 |            0 |            0 |            0 |            0 |               0 |         2 |         2 |         0
+(1 row)
+
+\c
+SET track_sql_count= off;
+drop user sql_count_tuser2 cascade;
+/* drop user rollback */
+create user sql_count_tuser1 password "test_123";
+SET track_sql_count= on;
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1/ -c "track_sql_count=on" > /dev/null 2>&1
+select pg_sleep(3);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show track_sql_count;
+ track_sql_count 
+-----------------
+ on
+(1 row)
+
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -U sql_count_tuser1 -W test_123 -c "select select_count from gs_sql_count;"
+ select_count 
+--------------
+            2
+(1 row)
+
+begin;
+drop user sql_count_tuser1 cascade;
+rollback;
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -U sql_count_tuser1 -W test_123 -c "select select_count from gs_sql_count;"
+ select_count 
+--------------
+            5
+(1 row)
+
+select user_name from gs_sql_count where user_name='sql_count_tuser1';
+    user_name     
+------------------
+ sql_count_tuser1
+(1 row)
+
+drop user sql_count_tuser1 cascade;
+select user_name from gs_sql_count where user_name='sql_count_tuser1';
+ user_name 
+-----------
+(0 rows)
+
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1/ -c "track_sql_count=off" > /dev/null 2>&1
+select pg_sleep(3);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+SET track_sql_count= off;

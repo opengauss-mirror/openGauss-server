@@ -1,0 +1,30 @@
+--remove patchfile
+\! rm -rf @abs_gausshome@/hotpatch/pat/* > /dev/null 2>&1
+--no patch file ,load failed
+\! @abs_bindir@/gs_ctl hotpatch -D @abs_srcdir@/tmp_check/coordinator1 -a load -n @abs_gausshome@/hotpatch/pat/GAUSSDBV300R002C00KERNELHP0001.pat
+\! $CODE_BASE/Code/src/distribute/lib/hotpatch/tool/fastcheck/patch_tool_llt.sh @abs_gausshome@/hotpatch/pat/ > /dev/null 2>&1 
+--generate patch file, load succeed
+\! @abs_bindir@/gs_ctl hotpatch -D @abs_srcdir@/tmp_check/coordinator1 -a load -n @abs_gausshome@/hotpatch/pat/GAUSSDBV300R002C00KERNELHP0001.pat
+--info, should show info, status is deactive
+\! @abs_bindir@/gs_ctl hotpatch -D @abs_srcdir@/tmp_check/coordinator1 -a info -n @abs_gausshome@/hotpatch/pat/GAUSSDBV300R002C00KERNELHP0001.pat
+\! @abs_bindir@/gs_ctl hotpatch -D @abs_srcdir@/tmp_check/coordinator1 -a list -n @abs_gausshome@/hotpatch/pat/GAUSSDBV300R002C00KERNELHP0001.pat
+--load twice, return already loaded
+\! @abs_bindir@/gs_ctl hotpatch -D @abs_srcdir@/tmp_check/coordinator1 -a load -n @abs_gausshome@/hotpatch/pat/GAUSSDBV300R002C00KERNELHP0001.pat
+--active succeed
+\! @abs_bindir@/gs_ctl hotpatch -D @abs_srcdir@/tmp_check/coordinator1 -a active -n @abs_gausshome@/hotpatch/pat/GAUSSDBV300R002C00KERNELHP0001.pat
+--info, should show info, status is active
+\! @abs_bindir@/gs_ctl hotpatch -D @abs_srcdir@/tmp_check/coordinator1 -a info -n @abs_gausshome@/hotpatch/pat/GAUSSDBV300R002C00KERNELHP0001.pat
+\! @abs_bindir@/gs_ctl hotpatch -D @abs_srcdir@/tmp_check/coordinator1 -a list -n @abs_gausshome@/hotpatch/pat/GAUSSDBV300R002C00KERNELHP0001.pat
+--active twice, return already active
+\! @abs_bindir@/gs_ctl hotpatch -D @abs_srcdir@/tmp_check/coordinator1 -a active -n @abs_gausshome@/hotpatch/pat/GAUSSDBV300R002C00KERNELHP0001.pat
+--unload when active, return status not correct
+\! @abs_bindir@/gs_ctl hotpatch -D @abs_srcdir@/tmp_check/coordinator1 -a unload -n @abs_gausshome@/hotpatch/pat/GAUSSDBV300R002C00KERNELHP0001.pat
+--deactive
+\! @abs_bindir@/gs_ctl hotpatch -D @abs_srcdir@/tmp_check/coordinator1 -a deactive -n @abs_gausshome@/hotpatch/pat/GAUSSDBV300R002C00KERNELHP0001.pat
+--info, should show info, status is deactive
+\! @abs_bindir@/gs_ctl hotpatch -D @abs_srcdir@/tmp_check/coordinator1 -a info -n @abs_gausshome@/hotpatch/pat/GAUSSDBV300R002C00KERNELHP0001.pat
+\! @abs_bindir@/gs_ctl hotpatch -D @abs_srcdir@/tmp_check/coordinator1 -a list -n @abs_gausshome@/hotpatch/pat/GAUSSDBV300R002C00KERNELHP0001.pat
+--unload when deactive
+\! @abs_bindir@/gs_ctl hotpatch -D @abs_srcdir@/tmp_check/coordinator1 -a unload -n @abs_gausshome@/hotpatch/pat/GAUSSDBV300R002C00KERNELHP0001.pat
+--remove patchfile
+\! rm -rf @abs_gausshome@/hotpatch/pat/* > /dev/null 2>&1

@@ -7,7 +7,7 @@
 
 #include "access/htup.h"
 #include "fmgr.h"
-#include "storage/itemptr.h"
+#include "storage/item/itemptr.h"
 
 struct PLyDatumToOb;
 typedef PyObject* (*PLyDatumToObFunc)(struct PLyDatumToOb*, Datum);

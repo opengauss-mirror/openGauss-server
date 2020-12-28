@@ -273,7 +273,7 @@ select f1, ss1 as relabel from
 -- Test cases involving PARAM_EXEC parameters and min/max index optimizations.
 -- Per bug report from David Sanchez i Gregori.
 --
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select * from (
   select max(unique1) from tenk1 as a
   where exists (select 1 from tenk1 as b where b.thousand = a.unique2)
@@ -284,7 +284,7 @@ select * from (
   where exists (select 1 from tenk1 as b where b.thousand = a.unique2)
 ) ss;
 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select * from (
   select min(unique1) from tenk1 as a
   where not exists (select 1 from tenk1 as b where b.unique2 = 10000)
@@ -295,7 +295,7 @@ select * from (
   where not exists (select 1 from tenk1 as b where b.unique2 = 10000)
 ) ss;
 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select * from (
   select min(unique1) as b from tenk1 as a
   where not exists (select 1 from tenk1 as b where b.unique2 = 10000)
@@ -306,7 +306,7 @@ select * from (
   where not exists (select 1 from tenk1 as b where b.unique2 = 10000)
 ) ss where b>5;
 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select * from (
   select min(unique1) from tenk1 as a
   where exists (select * from generate_series(1,1))
@@ -317,7 +317,7 @@ select * from (
   where exists (select * from generate_series(1,1))
 ) ss;
 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select * from (
   select min(unique1) from tenk1 as a
   where exists (select * from generate_series(1,1))

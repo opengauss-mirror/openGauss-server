@@ -1,0 +1,125 @@
+set enable_global_stats = true;
+set current_schema=vector_engine;
+set enable_vector_engine=on;
+set enable_nestloop=off;
+explain (costs off)  select
+	c_name,
+	c_custkey,
+	o_orderkey,
+	o_orderdate,
+	o_totalprice,
+	sum(l_quantity)
+from
+	customer,
+	orders,
+	lineitem
+where
+	o_orderkey in (
+		select
+			l_orderkey
+		from
+			lineitem
+		group by
+			l_orderkey having
+				sum(l_quantity) > 300
+	)
+	and c_custkey = o_custkey
+	and o_orderkey = l_orderkey
+group by
+	c_name,
+	c_custkey,
+	o_orderkey,
+	o_orderdate,
+	o_totalprice
+order by
+	o_totalprice desc,
+	o_orderdate
+limit 100;
+                                                                                                      QUERY PLAN                                                                                                      
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Limit
+         ->  Vector Streaming (type: GATHER)
+               Merge Sort Key: vector_engine.orders.o_totalprice DESC, vector_engine.orders.o_orderdate
+               Node/s: All datanodes
+               ->  Vector Limit
+                     ->  Vector Sort Aggregate
+                           Group By Key: vector_engine.orders.o_totalprice, vector_engine.orders.o_orderdate, vector_engine.customer.c_name, vector_engine.customer.c_custkey, vector_engine.orders.o_orderkey
+                           ->  Vector Sort
+                                 Sort Key: vector_engine.orders.o_totalprice DESC, vector_engine.orders.o_orderdate, vector_engine.customer.c_name, vector_engine.customer.c_custkey, vector_engine.orders.o_orderkey
+                                 ->  Vector Sonic Hash Join
+                                       Hash Cond: (vector_engine.orders.o_custkey = vector_engine.customer.c_custkey)
+                                       ->  Vector Streaming(type: REDISTRIBUTE)
+                                             Spawn on: All datanodes
+                                             ->  Vector Sonic Hash Join
+                                                   Hash Cond: (vector_engine.lineitem.l_orderkey = vector_engine.orders.o_orderkey)
+                                                   Generate Bloom Filter On Expr: vector_engine.orders.o_orderkey
+                                                   Generate Bloom Filter On Index: 1
+                                                   ->  Vector Append
+                                                         ->  Dfs Scan on lineitem
+                                                               Filter By Bloom Filter On Expr: vector_engine.lineitem.l_orderkey
+                                                               Filter By Bloom Filter On Index: 1
+                                                         ->  Vector Adapter
+                                                               ->  Seq Scan on pg_delta_vector_engine_lineitem lineitem
+                                                   ->  Vector Sonic Hash Join
+                                                         Hash Cond: (vector_engine.orders.o_orderkey = vector_engine.lineitem.l_orderkey)
+                                                         Generate Bloom Filter On Expr: vector_engine.lineitem.l_orderkey
+                                                         Generate Bloom Filter On Index: 0
+                                                         ->  Vector Append
+                                                               ->  Dfs Scan on orders
+                                                                     Filter By Bloom Filter On Expr: vector_engine.orders.o_orderkey
+                                                                     Filter By Bloom Filter On Index: 0
+                                                               ->  Vector Adapter
+                                                                     ->  Seq Scan on pg_delta_vector_engine_orders orders
+                                                         ->  Vector Sonic Hash Aggregate
+                                                               Group By Key: vector_engine.lineitem.l_orderkey
+                                                               Filter: (sum(vector_engine.lineitem.l_quantity) > 300::numeric)
+                                                               ->  Vector Append
+                                                                     ->  Dfs Scan on lineitem
+                                                                     ->  Vector Adapter
+                                                                           ->  Seq Scan on pg_delta_vector_engine_lineitem lineitem
+                                       ->  Vector Append
+                                             ->  Dfs Scan on customer
+                                             ->  Vector Adapter
+                                                   ->  Seq Scan on pg_delta_vector_engine_customer customer
+(45 rows)
+
+select
+	c_name,
+	c_custkey,
+	o_orderkey,
+	o_orderdate,
+	o_totalprice,
+	sum(l_quantity)
+from
+	customer,
+	orders,
+	lineitem
+where
+	o_orderkey in (
+		select
+			l_orderkey
+		from
+			lineitem
+		group by
+			l_orderkey having
+				sum(l_quantity) > 300
+	)
+	and c_custkey = o_custkey
+	and o_orderkey = l_orderkey
+group by
+	c_name,
+	c_custkey,
+	o_orderkey,
+	o_orderdate,
+	o_totalprice
+order by
+	o_totalprice desc,
+	o_orderdate
+limit 100;
+       c_name       | c_custkey | o_orderkey |       o_orderdate        | o_totalprice |  sum   
+--------------------+-----------+------------+--------------------------+--------------+--------
+ Customer#000000667 |       667 |      29158 | Sat Oct 21 00:00:00 1995 |    439687.23 | 305.00
+ Customer#000000178 |       178 |       6882 | Wed Apr 09 00:00:00 1997 |    422359.65 | 303.00
+(2 rows)
+

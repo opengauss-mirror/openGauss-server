@@ -36,7 +36,6 @@
 #include "commands/matview.h"
 #include "executor/functions.h"
 #include "executor/spi.h"
-#include "executor/tqueue.h"
 #include "executor/tstoreReceiver.h"
 #include "libpq/libpq.h"
 #include "libpq/pqformat.h"
@@ -137,6 +136,7 @@ DestReceiver* CreateDestReceiver(CommandDest dest)
 
         case DestTransientRel:
             return CreateTransientRelDestReceiver(InvalidOid);
+
         case DestTupleBroadCast:
         case DestTupleLocalBroadCast:
         case DestTupleRedistribute:
@@ -150,8 +150,6 @@ DestReceiver* CreateDestReceiver(CommandDest dest)
         case DestBatchLocalRoundRobin:
         case DestBatchHybrid:
             return createStreamDestReceiver(dest);
-        case DestTupleQueue:
-            return CreateTupleQueueDestReceiver(NULL);
         default:
             break;
     }
@@ -190,7 +188,6 @@ void EndCommand(const char* commandTag, CommandDest dest)
         case DestCopyOut:
         case DestSQLFunction:
         case DestTransientRel:
-        case DestTupleQueue:
         default:
             break;
     }
@@ -221,7 +218,6 @@ void EndCommand_noblock(const char* commandTag, CommandDest dest)
         case DestIntoRel:
         case DestCopyOut:
         case DestSQLFunction:
-        case DestTupleQueue:
         default:
             break;
     }
@@ -269,7 +265,6 @@ void NullCommand(CommandDest dest)
         case DestCopyOut:
         case DestSQLFunction:
         case DestTransientRel:
-        case DestTupleQueue:
         default:
             break;
     }
@@ -300,7 +295,14 @@ void ReadyForQuery(CommandDest dest)
                 StringInfoData buf;
 
                 pq_beginmessage(&buf, 'Z');
-                pq_sendbyte(&buf, TransactionBlockStatusCode());
+                if (u_sess->attr.attr_common.enable_full_encryption) {
+                    unsigned short s = TransactionBlockStatusCode();
+                    s = s << 8; 
+                    s |= (uint8)ce_cache_refresh_type;
+                    pq_sendint16(&buf, s);
+                } else {
+                    pq_sendbyte(&buf, TransactionBlockStatusCode());
+                }
                 pq_endmessage(&buf);
             } else if (PG_PROTOCOL_MAJOR(FrontendProtocol) >= 2)
                 pq_putemptymessage('Z');
@@ -318,7 +320,7 @@ void ReadyForQuery(CommandDest dest)
         case DestIntoRel:
         case DestCopyOut:
         case DestSQLFunction:
-        case DestTupleQueue:
+        case DestTransientRel:
         default:
             break;
     }
@@ -353,7 +355,6 @@ void ReadyForQuery_noblock(CommandDest dest, int timeout)
         case DestIntoRel:
         case DestCopyOut:
         case DestSQLFunction:
-        case DestTupleQueue:
         default:
             break;
     }

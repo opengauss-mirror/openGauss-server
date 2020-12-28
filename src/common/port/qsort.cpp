@@ -68,7 +68,7 @@ static void swapfunc(char*, char*, size_t, int);
     } while (0)
 
 #define SWAPINIT(a, es) \
-    swaptype = ((char*)(a) - (char*)0) % sizeof(long) || (es) % sizeof(long) ? 2 : (es) == sizeof(long) ? 0 : 1;
+    swaptype = ((char*)(a) - (char*)0) % sizeof(long) || (es) % sizeof(long) ? 2 : ((es) == sizeof(long) ? 0 : 1);
 
 static void swapfunc(char* a, char* b, size_t n, int swaptype)
 {
@@ -91,25 +91,23 @@ static void swapfunc(char* a, char* b, size_t n, int swaptype)
     if ((n) > 0)         \
     swapfunc((a), (b), (size_t)(n), swaptype)
 
+#define returnifzero(a)   \
+    if (a == 0) {         \
+        return;           \
+    }                     \
+
 static char* med3(char* a, char* b, char* c, int (*cmp)(const void*, const void*))
 {
-    return cmp(a, b) < 0 ? (cmp(b, c) < 0 ? b : (cmp(a, c) < 0 ? c : a))
-                         : (cmp(b, c) > 0 ? b : (cmp(a, c) < 0 ? a : c));
+    return (cmp(a, b) < 0) ? ((cmp(b, c) < 0) ? b : ((cmp(a, c) < 0) ? c : a))
+                         : ((cmp(b, c) > 0) ? b : ((cmp(a, c) < 0) ? a : c));
 }
 
 void pg_qsort(void* a, size_t n, size_t es, int (*cmp)(const void*, const void*))
 {
-    char *pa = NULL;
-    char *pb = NULL;
-    char *pc = NULL;
-    char *pd = NULL;
-    char *pl = NULL;
-    char *pm = NULL;
-    char *pn = NULL;
-    int d;
-    int r;
-    int swaptype;
-    int presorted;
+    char *pa = NULL, *pb = NULL, *pc = NULL, *pd = NULL, *pl = NULL, *pm = NULL, *pn = NULL;
+    int d, r, swaptype, presorted;
+
+    returnifzero(es);
 
 loop:
     SWAPINIT(a, es);

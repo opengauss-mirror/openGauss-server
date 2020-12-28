@@ -15,7 +15,7 @@ select regexp_matches('Programmer', '(\w)(.*?\1)', 'g');
 SELECT regexp_matches('foo' || chr(10) || 'bar' || chr(10) || 'bequq' || chr(10) || 'baz', '^', 'mg');
 SELECT regexp_matches('foo' || chr(10) || 'bar' || chr(10) || 'bequq' || chr(10) || 'baz', '$', 'mg');
 SELECT regexp_matches('1' || chr(10) || '2' || chr(10) || '3' || chr(10) || '4' || chr(10), '^.?', 'mg');
-create database tpcds dbcompatibility 'c';
+create database tpcds dbcompatibility 'C';
 \c tpcds
 select regexp_matches('foo/bar/baz',
                       '^([^/]+?)(?:/([^/]+?))(?:/([^/]+?))?$', '');

@@ -47,6 +47,8 @@ typedef struct knl_session_attr_network {
     bool comm_timer_mode;
     bool comm_no_delay;
     int PoolerTimeout;
+    int MinPoolSize;
+    int PoolerMaxIdleTime;
     int PoolerConnectMaxLoops;
     int PoolerConnectIntervalTime;
     int PoolerConnectTimeout;

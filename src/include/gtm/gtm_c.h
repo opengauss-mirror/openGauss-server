@@ -60,11 +60,12 @@ typedef enum GTM_PGXCNodeType {
     GTM_NODE_DEFAULT = 8 /* In case nothing is associated to connection */
 } GTM_PGXCNodeType;
 
-typedef enum SnapshotType {
-    SNAPSHOT_TYPE_UNDEFINED,
-    SNAPSHOT_TYPE_LOCAL,
-    SNAPSHOT_TYPE_GLOBAL
-} SnapshotType;
+typedef enum GTM_SnapshotType {
+    GTM_SNAPSHOT_TYPE_UNDEFINED,
+    GTM_SNAPSHOT_TYPE_LOCAL,
+    GTM_SNAPSHOT_TYPE_GLOBAL,
+    GTM_SNAPSHOT_TYPE_AUTOVACUUM
+} GTM_SnapshotType;
 
 /*
  * A unique handle to identify transaction at the GTM. It could just be
@@ -124,24 +125,25 @@ typedef enum GTM_SequenceKeyType {
 
 typedef struct GTM_SequenceKeyData {
     uint32 gsk_keylen;
-    char *gsk_key;
+    char* gsk_key;
     GTM_SequenceKeyType gsk_type; /* see constants below */
 } GTM_SequenceKeyData;            /* Counter key, set by the client */
 
-typedef GTM_SequenceKeyData *GTM_SequenceKey;
+typedef GTM_SequenceKeyData* GTM_SequenceKey;
 
 typedef struct GTM_DBNameData {
     uint32 gsd_dblen;
-    char *gsd_db;
+    char* gsd_db;
 } GTM_DBNameData; /* database that sequence belongs to */
 
-typedef GTM_DBNameData *GTM_DBName;
+typedef GTM_DBNameData* GTM_DBName;
 
 #define GTM_MAX_SEQKEY_LENGTH 1024
 
 #define InvalidSequenceValue 0x7fffffffffffffffLL
 #define SEQVAL_IS_VALID(v) ((v) != InvalidSequenceValue)
 
+#define MaxSequenceValue 0x7fffffffffffffffLL
 #define InvalidUUID ((GTM_UUID)0)
 #define InitialUUIDValue_Default ((GTM_UUID)1000000)
 #define MaxSequenceUUID 0x7fffffffffffffffLL
@@ -149,6 +151,10 @@ typedef GTM_DBNameData *GTM_DBName;
 #define GTM_MAX_GLOBAL_TRANSACTIONS 16384
 
 #define GTM_MAX_ERROR_LENGTH 1024
+
+#define GTM_HOST_FLAG_BASE 100
+#define HOST2FLAG(h) ((uint32)((h) + GTM_HOST_FLAG_BASE))
+#define FLAG2HOST(f) ((GtmHostIndex)((f) - GTM_HOST_FLAG_BASE))
 
 #ifndef FREE_AND_RESET
 #define FREE_AND_RESET(ptr) do { \
@@ -171,7 +177,7 @@ typedef struct GTM_SnapshotData {
     uint64 csn;
 } GTM_SnapshotData;
 
-typedef GTM_SnapshotData *GTM_Snapshot;
+typedef GTM_SnapshotData* GTM_Snapshot;
 
 typedef struct GTM_SnapshotStatusData {
     GlobalTransactionId xmin;
@@ -186,7 +192,7 @@ typedef struct GTM_SnapshotStatusData {
     Size snapshot_totalsize;
 } GTM_SnapshotStatusData;
 
-typedef GTM_SnapshotStatusData *GTM_SnapshotStatus;
+typedef GTM_SnapshotStatusData* GTM_SnapshotStatus;
 
 /* A struct providing some info of gtm for views */
 typedef struct GTMLite_StatusData {
@@ -194,7 +200,7 @@ typedef struct GTMLite_StatusData {
     uint64 csn;
 } GTMLite_StatusData;
 
-typedef GTMLite_StatusData *GTMLite_Status;
+typedef GTMLite_StatusData* GTMLite_Status;
 
 /* Define max size of node name in start up packet */
 #define SP_NODE_NAME 64
@@ -260,6 +266,8 @@ typedef enum GtmHostIndex {
 
 extern int gtm_max_trans;
 
+extern int gtm_num_threads;
+
 /*
  * Initial GXID value to start with, when -x option is not specified at the first run.
  *
@@ -275,5 +283,5 @@ extern int gtm_max_trans;
 extern void GTM_CopySnapshot(GTM_Snapshot dst, GTM_Snapshot src);
 #endif
 
-extern char *transfer_snapshot_type(SnapshotType snap_type);
+extern const char *transfer_snapshot_type(GTM_SnapshotType gtm_snap_type);
 #endif /* GTM_C_H */

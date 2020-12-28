@@ -1,0 +1,207 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+DROP CLIENT MASTER KEY IF EXISTS triggerCMK CASCADE;
+NOTICE:  global setting "triggercmk" does not exist
+CREATE CLIENT MASTER KEY triggerCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY triggerCEK1 WITH VALUES (CLIENT_MASTER_KEY = triggerCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE COLUMN ENCRYPTION KEY triggerCEK2 WITH VALUES (CLIENT_MASTER_KEY = triggerCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+--trigger--same CEK--Encryption
+CREATE TABLE test_trigger_src_tbl(id1 INT, id2 INT ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = triggerCEK1, ENCRYPTION_TYPE = DETERMINISTIC), id3 INT ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = triggerCEK2, ENCRYPTION_TYPE = DETERMINISTIC));
+CREATE TABLE test_trigger_des_tbl(id1 INT, id2 INT ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = triggerCEK1, ENCRYPTION_TYPE = DETERMINISTIC), id3 INT ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = triggerCEK2, ENCRYPTION_TYPE = DETERMINISTIC));
+CREATE OR REPLACE FUNCTION tri_insert_func() RETURNS TRIGGER AS
+$$
+DECLARE
+BEGIN
+INSERT INTO test_trigger_des_tbl VALUES(NEW.id1, NEW.id2, NEW.id3);
+RETURN NEW;
+END
+$$ LANGUAGE PLPGSQL;
+CREATE OR REPLACE FUNCTION tri_update_func() RETURNS TRIGGER AS
+$$
+DECLARE
+BEGIN
+UPDATE test_trigger_des_tbl SET id3 = NEW.id3 WHERE id2=OLD.id2;
+RETURN OLD;
+END
+$$ LANGUAGE PLPGSQL;
+CREATE OR REPLACE FUNCTION TRI_DELETE_FUNC() RETURNS TRIGGER AS
+$$
+DECLARE
+BEGIN
+DELETE FROM test_trigger_des_tbl WHERE id2=OLD.id2;
+RETURN OLD;
+END
+$$ LANGUAGE PLPGSQL;
+--创建INSERT触发器
+CREATE TRIGGER insert_trigger
+BEFORE INSERT ON test_trigger_src_tbl
+FOR EACH ROW
+EXECUTE PROCEDURE tri_insert_func();
+--创建UPDATE触发器
+CREATE TRIGGER update_trigger
+AFTER UPDATE ON test_trigger_src_tbl
+FOR EACH ROW
+EXECUTE PROCEDURE tri_update_func();
+--创建DELETE触发器
+CREATE TRIGGER delete_trigger
+BEFORE DELETE ON test_trigger_src_tbl
+FOR EACH ROW
+EXECUTE PROCEDURE tri_delete_func();
+--执行INSERT触发事件并检查触发结果
+INSERT INTO test_trigger_src_tbl VALUES(100,200,300);
+SELECT * FROM test_trigger_src_tbl;
+ id1 | id2 | id3 
+-----+-----+-----
+ 100 | 200 | 300
+(1 row)
+
+SELECT * FROM test_trigger_des_tbl;
+ id1 | id2 | id3 
+-----+-----+-----
+ 100 | 200 | 300
+(1 row)
+
+--执行UPDATE触发事件并检查触发结果
+UPDATE test_trigger_src_tbl SET id3=400 WHERE id2=200;
+SELECT * FROM test_trigger_src_tbl;
+ id1 | id2 | id3 
+-----+-----+-----
+ 100 | 200 | 400
+(1 row)
+
+SELECT * FROM test_trigger_des_tbl;
+ id1 | id2 | id3 
+-----+-----+-----
+ 100 | 200 | 400
+(1 row)
+
+--执行DELETE触发事件并检查触发结果
+DELETE FROM test_trigger_src_tbl WHERE id2=200;
+SELECT * FROM test_trigger_src_tbl;
+ id1 | id2 | id3 
+-----+-----+-----
+(0 rows)
+
+SELECT * FROM test_trigger_des_tbl;
+ id1 | id2 | id3 
+-----+-----+-----
+(0 rows)
+
+--修改触发器
+ALTER TRIGGER delete_trigger ON test_trigger_src_tbl RENAME TO delete_trigger_renamed;
+--禁用insert_trigger触发器
+ALTER TABLE test_trigger_src_tbl DISABLE TRIGGER insert_trigger;
+--禁用当前表上所有触发器
+ALTER TABLE test_trigger_src_tbl DISABLE TRIGGER ALL;
+--删除触发器
+DROP TRIGGER insert_trigger ON test_trigger_src_tbl;
+DROP TRIGGER update_trigger ON test_trigger_src_tbl;
+DROP TRIGGER delete_trigger_renamed ON test_trigger_src_tbl;
+DROP TABLE IF EXISTS test_trigger_src_tbl;
+DROP TABLE IF EXISTS test_trigger_des_tbl;
+CREATE TABLE test_trigger_src_tbl(id1 INT, id2 INT ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = triggerCEK1, ENCRYPTION_TYPE = DETERMINISTIC), id3 INT ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = triggerCEK2, ENCRYPTION_TYPE = RANDOMIZED));
+CREATE TABLE test_trigger_des_tbl(id1 INT, id2 INT ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = triggerCEK2, ENCRYPTION_TYPE = DETERMINISTIC), id3 INT ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = triggerCEK2, ENCRYPTION_TYPE = RANDOMIZED));
+CREATE OR REPLACE FUNCTION tri_insert_func() RETURNS TRIGGER AS
+$$
+DECLARE
+BEGIN
+INSERT INTO test_trigger_des_tbl VALUES(NEW.id1, NEW.id2, NEW.id3);
+RETURN NEW;
+END
+$$ LANGUAGE PLPGSQL;
+CREATE OR REPLACE FUNCTION tri_update_func() RETURNS TRIGGER AS
+$$
+DECLARE
+BEGIN
+UPDATE test_trigger_des_tbl SET id3 = NEW.id3 WHERE id2=OLD.id2;
+RETURN OLD;
+END
+$$ LANGUAGE PLPGSQL;
+CREATE OR REPLACE FUNCTION TRI_DELETE_FUNC() RETURNS TRIGGER AS
+$$
+DECLARE
+BEGIN
+DELETE FROM test_trigger_des_tbl WHERE id3=OLD.id3;
+RETURN OLD;
+END
+$$ LANGUAGE PLPGSQL;
+--创建INSERT触发器
+CREATE TRIGGER insert_trigger
+BEFORE INSERT ON test_trigger_src_tbl
+FOR EACH ROW
+EXECUTE PROCEDURE tri_insert_func();
+--创建UPDATE触发器
+CREATE TRIGGER update_trigger
+AFTER UPDATE ON test_trigger_src_tbl
+FOR EACH ROW
+EXECUTE PROCEDURE tri_update_func();
+--创建DELETE触发器
+CREATE TRIGGER delete_trigger
+BEFORE DELETE ON test_trigger_src_tbl
+FOR EACH ROW
+EXECUTE PROCEDURE tri_delete_func();
+--执行INSERT触发事件并检查触发结果
+INSERT INTO test_trigger_src_tbl VALUES(100,200,300);
+INSERT INTO test_trigger_src_tbl VALUES(100,400,500);
+SELECT * FROM test_trigger_src_tbl;
+ id1 | id2 | id3 
+-----+-----+-----
+ 100 | 200 | 300
+ 100 | 400 | 500
+(2 rows)
+
+SELECT * FROM test_trigger_des_tbl;
+ id1 | id2 | id3 
+-----+-----+-----
+ 100 | 200 | 300
+ 100 | 400 | 500
+(2 rows)
+
+--执行UPDATE触发事件并检查触发结果
+UPDATE test_trigger_src_tbl SET id3=400 WHERE id2=200;
+SELECT * FROM test_trigger_src_tbl;
+ id1 | id2 | id3 
+-----+-----+-----
+ 100 | 400 | 500
+ 100 | 200 | 400
+(2 rows)
+
+SELECT * FROM test_trigger_des_tbl;
+ id1 | id2 | id3 
+-----+-----+-----
+ 100 | 400 | 500
+ 100 | 200 | 400
+(2 rows)
+
+--执行DELETE触发事件并检查触发结果
+DELETE FROM test_trigger_src_tbl WHERE id3=500;
+ERROR(CLIENT): operator is not allowed on datatype of this column
+SELECT * FROM test_trigger_src_tbl;
+ id1 | id2 | id3 
+-----+-----+-----
+ 100 | 400 | 500
+ 100 | 200 | 400
+(2 rows)
+
+SELECT * FROM test_trigger_des_tbl; 
+ id1 | id2 | id3 
+-----+-----+-----
+ 100 | 400 | 500
+ 100 | 200 | 400
+(2 rows)
+
+DROP TRIGGER insert_trigger ON test_trigger_src_tbl;
+DROP TRIGGER update_trigger ON test_trigger_src_tbl;
+DROP TRIGGER delete_trigger ON test_trigger_src_tbl;
+DROP TABLE IF EXISTS test_trigger_src_tbl;
+DROP TABLE IF EXISTS test_trigger_des_tbl;
+DROP COLUMN ENCRYPTION KEY triggerCEK1;
+DROP COLUMN ENCRYPTION KEY triggerCEK2;
+DROP CLIENT MASTER KEY triggerCMK;
+\! gs_ktool -d all
+DELETE ALL
+ 1

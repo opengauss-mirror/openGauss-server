@@ -15,7 +15,7 @@
 #define STORAGE_GTT_H
 
 #include "access/htup.h"
-#include "storage/block.h"
+#include "storage/buf/block.h"
 #include "storage/relfilenode.h"
 #include "nodes/execnodes.h"
 #include "utils/relcache.h"
@@ -45,4 +45,5 @@ extern Oid gtt_fetch_current_relfilenode(Oid relid);
 extern void gtt_switch_rel_relfilenode(Oid rel1, Oid relfilenode1, Oid rel2, Oid relfilenode2, bool footprint);
 extern void gtt_create_storage_files(Oid relid);
 extern void remove_gtt_att_statistic(Oid reloid, int attnum);
+extern void CheckGttTableInUse(Relation rel);
 #endif  /* STORAGE_GTT_H */

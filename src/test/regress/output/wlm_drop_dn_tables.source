@@ -1,0 +1,42 @@
+CREATE DATABASE testdb;
+\c testdb
+set resource_track_duration=0;
+set query_band='testdb_test';
+\! @abs_bindir@/gsql -r -p @portstring@ -d testdb -c "set xc_maintenance_mode = on;"
+SET
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d testdb -c "set transaction_read_only = off;"
+SET
+--output
+DECLARE
+sql_stmt VARCHAR2(500);
+my_cursor REFCURSOR;
+username text;
+schemaname  text;
+tablename text;
+relkind  CHAR;
+BEGIN
+sql_stmt := 'SELECT n.nspname AS schemaname, c.relname AS tablename, c.relkind AS relkind FROM pg_class c LEFT JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname != ''pg_catalog'' and n.nspname !=''information_schema'' and relkind in (''r'',''f'') ';
+OPEN my_cursor FOR EXECUTE sql_stmt;
+FETCH FROM my_cursor INTO schemaname, tablename, relkind;
+WHILE my_cursor % FOUND LOOP
+IF relkind = 'f' THEN
+EXECUTE IMMEDIATE 'DROP FOREIGN TABLE '||schemaname||'.'||tablename||' CASCADE';
+ELSE
+EXECUTE IMMEDIATE 'DROP TABLE '||schemaname||'.'||tablename||' CASCADE';
+END IF;
+FETCH FROM my_cursor INTO schemaname, tablename, relkind;
+END LOOP;
+CLOSE my_cursor;
+END;
+/
+\! @abs_bindir@/gsql -r -p @portstring@ -d testdb -c "SELECT * from pg_tables where schemaname != 'pg_catalog' and schemaname != 'information_schema';"
+ schemaname | tablename | tableowner | tablespace | hasindexes | hasrules | hastriggers | tablecreator | created | last_ddl_time 
+------------+-----------+------------+------------+------------+----------+-------------+--------------+---------+---------------
+(0 rows)
+
+--output
+\c postgres
+drop database testdb;
+\c regression
+--end of file

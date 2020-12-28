@@ -149,78 +149,97 @@ static void FinishCompareVarStrType(const char* minval, const char* maxval, CUDe
 }
 
 static FuncSetMinMaxInfo g_FuncTabSetMinMax[] = {
-    {BOOLOID, /* OID = 16 bool */
+    {   BOOLOID, /* OID = 16 bool */
         NULL,
         CompareDummy,
-        FinishCompareDummy},
-    {BYTEAOID, /* OID = 17 bytea */
+        FinishCompareDummy
+    },
+    {   BYTEAOID, /* OID = 17 bytea */
         SetMinMaxVarStrType,
         CompareVarStrType,
-        FinishCompareVarStrType},
-    {CHAROID, /* OID = 18 char */
+        FinishCompareVarStrType
+    },
+    {   CHAROID, /* OID = 18 char */
         SetMinMaxChar,
         CompareChar,
-        FinishCompareFixedLength},
-    {NAMEOID, /* OID = 19 name */
+        FinishCompareFixedLength
+    },
+    {   NAMEOID, /* OID = 19 name */
         NULL,
         CompareDummy,
-        FinishCompareDummy},
-    {INT8OID, /* OID = 20 int8 */
+        FinishCompareDummy
+    },
+    {   INT8OID, /* OID = 20 int8 */
         SetMinMaxInt64,
         CompareInt64,
-        FinishCompareFixedLength},
-    {INT2OID, /* OID = 21 int2 */
+        FinishCompareFixedLength
+    },
+    {   INT2OID, /* OID = 21 int2 */
         SetMinMaxInt16,
         CompareInt16,
-        FinishCompareFixedLength},
-    {INT4OID, /* OID = 23 int4 */
+        FinishCompareFixedLength
+    },
+    {   INT4OID, /* OID = 23 int4 */
         SetMinMaxInt32,
         CompareInt32,
-        FinishCompareFixedLength},
-    {TEXTOID, /* OID = 25 text */
+        FinishCompareFixedLength
+    },
+    {   TEXTOID, /* OID = 25 text */
         SetMinMaxVarStrType,
         CompareVarStrType,
-        FinishCompareVarStrType},
-    {OIDOID, /* OID = 26 oid */
+        FinishCompareVarStrType
+    },
+    {   OIDOID, /* OID = 26 oid */
         SetMinMaxUint32,
         CompareUint32,
-        FinishCompareFixedLength},
-    {TIDOID, /* OID = 27 tid */
+        FinishCompareFixedLength
+    },
+    {   TIDOID, /* OID = 27 tid */
         SetMinMaxUint64,
         CompareUint64,
-        FinishCompareFixedLength},
-    {BPCHAROID, /* OID = 1042 bpchar */
+        FinishCompareFixedLength
+    },
+    {   BPCHAROID, /* OID = 1042 bpchar */
         SetMinMaxVarStrType,
         CompareVarStrType,
-        FinishCompareVarStrType},
-    {VARCHAROID, /* OID = 1043 varchar */
+        FinishCompareVarStrType
+    },
+    {   VARCHAROID, /* OID = 1043 varchar */
         SetMinMaxVarStrType,
         CompareVarStrType,
-        FinishCompareVarStrType},
-    {DATEOID, /* OID = 1082 date */
+        FinishCompareVarStrType
+    },
+    {   DATEOID, /* OID = 1082 date */
         SetMinMaxDate,
         CompareDate,
-        FinishCompareFixedLength},
-    {TIMEOID, /* OID = 1083 time */
+        FinishCompareFixedLength
+    },
+    {   TIMEOID, /* OID = 1083 time */
         SetMinMaxTime,
         CompareTime,
-        FinishCompareFixedLength},
-    {TIMESTAMPOID, /* OID = 1114 timestamp */
+        FinishCompareFixedLength
+    },
+    {   TIMESTAMPOID, /* OID = 1114 timestamp */
         SetMinMaxTimestamp,
         CompareTimestamp,
-        FinishCompareFixedLength},
-    {TIMESTAMPTZOID, /* OID = 1184 timestamptz */
+        FinishCompareFixedLength
+    },
+    {   TIMESTAMPTZOID, /* OID = 1184 timestamptz */
         SetMinMaxTimestamptz,
         CompareTimestamptz,
-        FinishCompareFixedLength},
-    {NUMERICOID, /* OID = 1700 numeric */
+        FinishCompareFixedLength
+    },
+    {   NUMERICOID, /* OID = 1700 numeric */
         NULL,
         CompareDummy,
-        FinishCompareDummy},
-    {INT1OID, /* OID = 5545 int1 */
+        FinishCompareDummy
+    },
+    {   INT1OID, /* OID = 5545 int1 */
         SetMinMaxChar,
         CompareChar,
-        FinishCompareFixedLength}};
+        FinishCompareFixedLength
+    }
+};
 
 const int FuncSetMinMaxTabSize = sizeof(g_FuncTabSetMinMax) / sizeof(FuncSetMinMaxInfo);
 
@@ -451,7 +470,6 @@ static void SetMinMaxVarStrTypeInternal(char* minval, char* maxval, Datum v, boo
 
         int cmpSize = Min(copySize, minval[0]);
         int ret = memcmp(v_dat, b + 1, cmpSize);
-
         if (ret < 0 || (ret == 0 && copySize < minval[0])) {
             minval[0] = copySize;
             rc = memcpy_s(minval + 1, (MIN_MAX_LEN - 1), v_dat, copySize);

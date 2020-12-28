@@ -39,7 +39,7 @@ void pg_usleep(long microsec)
         delay.tv_usec = microsec % 1000000L;
         (void)select(0, NULL, NULL, NULL, &delay);
 #else
-        SleepEx((microsec < 500 ? 1 : (microsec + 500) / 1000), FALSE);  // 500ms add to 1000s
+        SleepEx(((microsec < 500) ? 1 : ((microsec + 500) / 1000)), FALSE);  // 500ms add to 1000s
 #endif
     }
 }
@@ -65,7 +65,7 @@ void pg_usleep_retry(long microsec, int retry_times = 0)
         }
 
 #else
-        SleepEx((microsec < 500 ? 1 : (microsec + 500) / 1000), FALSE);  // 500ms add to 1000s
+        SleepEx(((microsec < 500) ? 1 : ((microsec + 500) / 1000)), FALSE);  // 500ms add to 1000s
 #endif
     }
 }

@@ -162,7 +162,7 @@ private:
         return 0;
     }
 
-    void init(DatumDesc* desc, uint16 fileIdx)
+    virtual void init(DatumDesc* desc, uint16 fileIdx)
     {
         Assert(false);
     }

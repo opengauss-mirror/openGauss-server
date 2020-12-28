@@ -97,6 +97,64 @@ uint32 hashquickany(uint32 seed, register const unsigned char* data, register in
 }
 
 /*
+ * @Description: Looks for a prime number slightly greater than
+ * 	input parameter n. The prime is chosen so that it is not
+ * 	near any power of 2.
+ * 	Note: If input n is near 2^64-1, the intermediate result
+ * 	may overflow, the caller must avoid this condition.
+ */
+uint64 hashfindprime(uint64 n)
+{
+    uint64 pow2;
+    uint64 i;
+
+    n += 100;
+
+    pow2 = 1;
+    while (pow2 * 2 < n) {
+        pow2 = 2 * pow2;
+    }
+
+    if ((double)n < 1.05 * (double)pow2) {
+        n = (uint64)((double)n * HASH_RANDOM_1);
+    }
+
+    pow2 = 2 * pow2;
+
+    if ((double)n > 0.95 * (double)pow2) {
+        n = (uint64)((double)n * HASH_RANDOM_2);
+    }
+
+    if (n > pow2 - 20) {
+        n += 30;
+    }
+
+    /*
+     * Now we have n far enough from powers of 2. To make
+     * n more random (especially, if it was not near
+     * a power of 2), we then multiply it by a random number.
+     */
+    n = (uint64)((double)n * HASH_RANDOM_3);
+    bool getPrime = false;
+    while (true) {
+        getPrime = true;
+        for (i = 2; i * i <= n; i++) {
+            if (n % i == 0) {
+                /* not prime */
+                getPrime = false;
+                break;
+            }
+        }
+        if (getPrime) {
+            break;
+        }
+        n++;
+    }
+
+    return n;
+}
+
+/*
  * @Description: SonicHash constructor.
  * 	Create memory contexts and some general variables.
  */
@@ -124,9 +182,9 @@ SonicHash::SonicHash(int size) : m_hash(0), m_atomSize(size), m_rows(0), m_selec
 /*
  * @Description: Initialize hash functions.
  * @in desc - relation description.
- * @in hash_fun - hash_fun needed to be assigned.
- * @in key_indx - hash key indexes.
- * @in is_atom - if true, need to hash values from atom.
+ * @in hashFun - hashFun needed to be assigned.
+ * @in keyIndx - hash key indexes.
+ * @in isAtom - if true, need to hash values from atom.
  * 	Otherwise, hash values from VectorBatch.
  */
 void SonicHash::initHashFunc(TupleDesc desc, void* hash_fun_in, uint16* key_indx, bool is_atom)
@@ -301,7 +359,7 @@ void SonicHash::initHashFunc(TupleDesc desc, void* hash_fun_in, uint16* key_indx
  * @in func - hash function. For hashInteger, this paramter is not used.
  */
 template <bool rehash, typename containerType, typename realType>
-void SonicHash::hashInteger(char* val, uint8* flag, int nval, uint32* res, PGFunction func)
+void SonicHash::hashInteger(char* val, uint8* flag, int nval, uint32* res, FmgrInfo* hashFmgr)
 {
     containerType* arrval = (containerType*)val;
     uint32* res1 = res;
@@ -330,7 +388,7 @@ void SonicHash::hashInteger(char* val, uint8* flag, int nval, uint32* res, PGFun
  * @in func - hash function. For hashInteger8, this paramter is not used.
  */
 template <bool rehash>
-void SonicHash::hashInteger8(char* val, uint8* flag, int nval, uint32* res, PGFunction func)
+void SonicHash::hashInteger8(char* val, uint8* flag, int nval, uint32* res, FmgrInfo* hashFmgr)
 {
     int64* arrval = (int64*)val;
     uint32* res1 = res;
@@ -362,7 +420,7 @@ void SonicHash::hashInteger8(char* val, uint8* flag, int nval, uint32* res, PGFu
  * @in func - hash function.
  */
 template <bool rehash, typename containerType, typename realType>
-void SonicHash::hashGeneralFunc(char* val, uint8* flag, int nval, uint32* res, PGFunction func)
+void SonicHash::hashGeneralFunc(char* val, uint8* flag, int nval, uint32* res, FmgrInfo* hashFmgr)
 {
     uint32 hash_val;
     containerType* arrval = (containerType*)val;
@@ -370,6 +428,8 @@ void SonicHash::hashGeneralFunc(char* val, uint8* flag, int nval, uint32* res, P
     FunctionCallInfoData fcinfo;
     Datum args[2];
     fcinfo.arg = &args[0];
+    fcinfo.flinfo = hashFmgr;
+    PGFunction func = hashFmgr->fn_addr;
 
     for (int i = 0; i < nval; i++) {
         if (likely(NOT_NULL(*flag))) {
@@ -405,7 +465,7 @@ void SonicHash::hashGeneralFunc(char* val, uint8* flag, int nval, uint32* res, P
  * @in func - hash function. For hashbpchar, this paramter is not used.
  */
 template <bool rehash>
-inline void SonicHash::hashbpchar(char* val, uint8* flag, int nval, uint32* res, PGFunction func)
+inline void SonicHash::hashbpchar(char* val, uint8* flag, int nval, uint32* res, FmgrInfo* hashFmgr)
 {
     Datum* key = (Datum*)val;
     char* key_data = NULL;
@@ -440,7 +500,7 @@ inline void SonicHash::hashbpchar(char* val, uint8* flag, int nval, uint32* res,
  * @in func - hash function. For hashtext, this paramter is not used.
  */
 template <bool rehash>
-inline void SonicHash::hashtext(char* val, uint8* flag, int nval, uint32* res, PGFunction func)
+inline void SonicHash::hashtext(char* val, uint8* flag, int nval, uint32* res, FmgrInfo* hashFmgr)
 {
     Datum* key = (Datum*)val;
     char* key_data = NULL;
@@ -477,7 +537,7 @@ inline void SonicHash::hashtext(char* val, uint8* flag, int nval, uint32* res, P
  * @in func - hash function. For hashtext, this paramter is not used.
  */
 template <bool rehash>
-inline void SonicHash::hashtext_compatible(char* val, uint8* flag, int nval, uint32* res, PGFunction func)
+inline void SonicHash::hashtext_compatible(char* val, uint8* flag, int nval, uint32* res, FmgrInfo* hashFmgr)
 {
     Datum* key = (Datum*)val;
     char* key_data = NULL;
@@ -511,7 +571,7 @@ inline void SonicHash::hashtext_compatible(char* val, uint8* flag, int nval, uin
  * @in func - hash function. For hashnumeric, this paramter is not used.
  */
 template <bool rehash>
-inline void SonicHash::hashnumeric(char* val, uint8* flag, int nval, uint32* res, PGFunction func)
+inline void SonicHash::hashnumeric(char* val, uint8* flag, int nval, uint32* res, FmgrInfo* hashFmgr)
 {
     uint32 hash_val;
     Datum* key = (Datum*)val;
@@ -562,7 +622,7 @@ int64 SonicHash::getRows()
 
 /*
  * @Description: Check whether a type is integer.
- * @in type_id - type oid.
+ * @in typeId - type oid.
  * @return - true is the type is integer.
  */
 bool SonicHash::integerType(Oid type_id)
@@ -586,9 +646,9 @@ bool SonicHash::integerType(Oid type_id)
  * 	When attribute oid is the oid listed in this function and
  * 	is hash key, the data can not be compressed,
  * 	use EncodingDatumArray to put data.
- * @in type_oid - column attr type oid need to check.
- * @in attr_idx - attr index need to check.
- * @in key_idx - hash key indexes.
+ * @in typeOid - column attr type oid need to check.
+ * @in attidx - attr index need to check.
+ * @in keyIdx - hash key indexes.
  * @in keyNum - total hash column number.
  * @return - true if the input hash column cannot be compressed.
  */

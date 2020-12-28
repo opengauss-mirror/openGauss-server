@@ -254,20 +254,11 @@ bool process_equivalence(PlannerInfo* root, RestrictInfo* restrictinfo, bool bel
         }
 
         /*
-         * Case 2: need to merge ec1 and ec2.  This should never happen after
-         * we've built any canonical pathkeys; if it did, those pathkeys might
-         * be rendered non-canonical by the merge.
-         */
-        if (root->canon_pathkeys != NIL)
-            elog(ERROR, "too late to merge equivalence classes");
-
-        /*
-         * We add ec2's items to ec1, then set ec2's ec_merged link to point
-         * to ec1 and remove ec2 from the eq_classes list.  We cannot simply
-         * delete ec2 because that could leave dangling pointers in existing
-         * PathKeys.  We leave it behind with a link so that the merged EC can
-         * be found.
-
+         * Case 2: need to merge ec1 and ec2.  We add ec2's items to ec1, then
+         * set ec2's ec_merged link to point to ec1 and remove ec2 from the
+         * eq_classes list.  We cannot simply delete ec2 because that could
+         * leave dangling pointers in existing PathKeys.  We leave it behind
+         * with a link so that the merged EC can be found.
          */
         ec1->ec_members = list_concat(ec1->ec_members, ec2->ec_members);
         ec1->ec_sources = list_concat(ec1->ec_sources, ec2->ec_sources);
@@ -1045,7 +1036,7 @@ List* generate_join_implied_equalities_for_ecs(
         /* Lookup parent->child translation data */
         inner_appinfo = find_childrel_appendrelinfo(root, inner_rel);
         /* Construct relids for the parent rel */
-        nominal_inner_relids = bms_make_singleton((int)(inner_appinfo->parent_relid));
+        nominal_inner_relids = bms_make_singleton(inner_appinfo->parent_relid);
         /* ECs will be marked with the parent's relid, not the child's */
         nominal_join_relids = bms_union(outer_relids, nominal_inner_relids);
     } else {
@@ -1970,7 +1961,8 @@ void mutate_eclass_expressions(PlannerInfo* root, Node* (*mutator)(), void* cont
  * a separate parameterized path for each one, since that leads to different
  * join orders.)
  */
-List* generate_implied_equalities_for_indexcol(PlannerInfo* root, IndexOptInfo* index, int indexcol)
+List* generate_implied_equalities_for_indexcol(PlannerInfo* root,
+                        IndexOptInfo* index, int indexcol, Relids prohibited_rels)
 {
     List* result = NIL;
     RelOptInfo* rel = index->rel;
@@ -2041,11 +2033,15 @@ List* generate_implied_equalities_for_indexcol(PlannerInfo* root, IndexOptInfo* 
             if (other_em == cur_em || bms_overlap(other_em->em_relids, rel->relids))
                 continue;
 
+            /* Forget it if caller doesn't want joins to this rel */
+            if (bms_overlap(other_em->em_relids, prohibited_rels))
+                continue;
+
             /*
              * Also, if this is a child rel, avoid generating a useless join
              * to its parent rel.
              */
-            if (is_child_rel && bms_is_member((int)parent_relid, other_em->em_relids))
+            if (is_child_rel && bms_is_member(parent_relid, other_em->em_relids))
                 continue;
 
             eq_op = select_equality_operator(cur_ec, cur_em->em_datatype, other_em->em_datatype);

@@ -328,11 +328,6 @@ struct WLMContextLock {
         (void)pthread_cond_signal(condition);
     }
 
-    void ConditionWakeUpAll(pthread_cond_t* condition)
-    {
-        (void)pthread_cond_broadcast(condition);
-    }
-
 private:
     pthread_mutex_t* m_mutex;
     bool m_isLocked;

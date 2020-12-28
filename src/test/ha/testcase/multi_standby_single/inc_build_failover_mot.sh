@@ -12,7 +12,7 @@ function test_1()
 
   #create mot data
   gsql -d $db -p $dn1_primary_port -c "DROP FOREIGN TABLE if exists mot_switch1; CREATE FOREIGN TABLE mot_switch1(id INT,name VARCHAR(15) NOT NULL) SERVER mot_server;"
-  gsql -d $db -p $dn1_primary_port -c "copy mot_switch1 from '$g_data_path/datanode1/pg_copydir/data5';"
+  gsql -d $db -p $dn1_primary_port -c "copy mot_switch1 from '$scripts_dir/data/data5';"
 
   print_time
   echo "start cluter success!"
@@ -35,8 +35,8 @@ function test_1()
   print_time
   echo build
   #sleep 5
-  build_result=`gs_ctl build -D ${primary_data_dir}`
-  #build_result=`gs_ctl build -D ${primary_data_dir} -b full`
+  build_result=`gs_ctl build -Z single_node -D ${primary_data_dir}`
+  #build_result=`gs_ctl build -Z single_node -D ${primary_data_dir} -b full`
   echo $build_result
   print_time
   if [[ $build_result =~ $inc_build_pattern ]]

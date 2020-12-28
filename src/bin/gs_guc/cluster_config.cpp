@@ -55,6 +55,7 @@
 #include <sys/resource.h>
 #include <getopt.h>
 #include <stdio.h>
+#include <limits.h>
 
 #include "common/config/cm_config.h"
 #include "bin/elog.h"
@@ -152,6 +153,7 @@ char** readfile(const char* path, int reserve_num_lines);
 void freefile(char** lines);
 
 extern bool get_env_value(const char* env_var, char* output_env_value, size_t env_var_value_len);
+extern int checkPath(const char* fileName);
 void* pg_malloc_memory(size_t size);
 extern char* xstrdup(const char* s);
 extern char* g_lcname;
@@ -557,7 +559,7 @@ char* get_nodename_list_by_AZ(const char* AZName, const char* data_dir)
                 if (dn->datanodeId == 0)
                     continue;
 
-                if (CASCADE_STANDBY_TYPE == dn->datanodeRole)
+                if (dn->datanodeRole == CASCADE_STANDBY_TYPE)
                     continue;
 
                 for (n = 0; n < CM_MAX_DATANODE_STANDBY_NUM && !get_dn_in_same_shard; n++) {
@@ -765,80 +767,6 @@ int32 get_local_gtm_name(char* instancename)
     return CLUSTER_CONFIG_ERROR;
 }
 
-/*
- ******************************************************************************
- Function    : get_local_gtm_dbpath
- Description :
- Input       : dbpath -
- Output      : None
- Return      : None
- ******************************************************************************
-*/
-void get_local_gtm_dbpath(char* dbpath, const uint32 dbpathlen)
-{
-    errno_t rc;
-    rc = memcpy_s(dbpath, dbpathlen, g_currentNode->gtmLocalDataPath, dbpathlen);
-    securec_check_c(rc, "\0", "\0");
-}
-
-/*
- ******************************************************************************
- Function    : get_local_cm_dbpath
- Description :  Get the path to the local cmagent or cmserver.
-                     For cmserver, need to check "1 == g_currentNode->cmServerLevel"
- Input       : dbpath -
- Output      : None
- Return      : None
- ******************************************************************************
-*/
-void get_local_cm_dbpath(char* dbpath, const uint32 dbpathlen)
-{
-    errno_t rc;
-
-    rc = memcpy_s(dbpath, dbpathlen, g_currentNode->cmDataPath, dbpathlen);
-    securec_check_c(rc, "\0", "\0");
-}
-
-/*
- ******************************************************************************
- Function    : get_local_cordinator_dbpath
- Description :
- Input       : dbpath -
- Output      : None
- Return      : None
- ******************************************************************************
-*/
-void get_local_cordinator_dbpath(char* dbpath, const uint32 dbpathlen)
-{
-    errno_t rc;
-    rc = memcpy_s(dbpath, dbpathlen, g_currentNode->DataPath, dbpathlen);
-    securec_check_c(rc, "\0", "\0");
-}
-
-/*
- ******************************************************************************
- Function    : get_local_datanode_dbpath
- Description :
- Input       : slot -
-               dbpath -
- Output      : None
- Return      : None
- ******************************************************************************
-*/
-int32 get_local_datanode_dbpath(uint32 slot, char* dbpath, const uint32 dbpathlen)
-{
-    errno_t rc;
-
-    if (slot >= g_currentNode->datanodeCount) {
-        return CLUSTER_CONFIG_ERROR;
-    }
-
-    rc = memcpy_s(dbpath, dbpathlen, g_currentNode->datanode[slot].datanodeLocalDataPath, dbpathlen);
-    securec_check_c(rc, "\0", "\0");
-
-    return CLUSTER_CONFIG_SUCCESS;
-}
-
 int get_dynamic_dn_role(void)
 {
     char path[MAXPGPATH];
@@ -846,8 +774,8 @@ int get_dynamic_dn_role(void)
     int nRet = 0;
     FILE* fp = NULL;
     char line_info[MAXPGPATH] = {0};
-    char* node_name = NULL;
-    char* dn_role = NULL;
+    char* node_name = nullptr;
+    char* dn_role = nullptr;
     uint32 nodeidx = 0;
     struct stat statbuf;
 
@@ -872,13 +800,14 @@ int get_dynamic_dn_role(void)
     while ((fgets(line_info, 1023 - 1, fp)) != NULL) {
         line_info[(int)strlen(line_info) - 1] = '\0';
         node_name = strtok_r(line_info, "=", &dn_role);
-        for (nodeidx = 0; nodeidx < g_node_num; nodeidx++) {
-            if (0 == strncmp(g_node[nodeidx].nodeName, node_name, strlen(node_name))){
-                g_node[nodeidx].datanode[0].datanodeRole = atoi(dn_role);
+        for (nodeidx = 0; node_name && (nodeidx < g_node_num); nodeidx++) {
+            if (strncmp(g_node[nodeidx].nodeName, node_name, strlen(node_name)) == 0) {
+                g_node[nodeidx].datanode[0].datanodeRole = (uint32)atoi(dn_role);
             }
         }
     }
 
+    (void)fclose(fp);
     return 0;
 }
 
@@ -901,6 +830,13 @@ int init_gauss_cluster_config(void)
     uint32 nodeidx = 0;
     struct stat statbuf {};
 
+    static bool is_init = false;
+    if (is_init) {
+        return 0;
+    }
+    is_init = true;
+    g_dn_replication_num = 0;
+
     if (!get_env_value("GAUSSHOME", gausshome, sizeof(gausshome) / sizeof(char)))
         return 1;
 
@@ -911,6 +847,10 @@ int init_gauss_cluster_config(void)
         nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/bin/%s", gausshome, STATIC_CONFIG_FILE);
     }
     securec_check_ss_c(nRet, "\0", "\0");
+
+    if (checkPath(path) != 0) {
+        return 1;
+    }
 
     if (lstat(path, &statbuf) != 0) {
         write_stderr("ERROR: could not stat file \"%s\": %s\n", path, strerror(errno));
@@ -929,8 +869,8 @@ int init_gauss_cluster_config(void)
 
     if (g_nodeHeader.node <= 0) {
         write_stderr("ERROR: Invalid cluster_staic_config file,"
-                     " curerent node id is:%u .\n",
-            g_nodeHeader.node);
+                     " curerent node id is:%d .\n",
+            (int32)g_nodeHeader.node);
         GS_FREE(g_node);
         return 1;
     }
@@ -942,12 +882,12 @@ int init_gauss_cluster_config(void)
     }
 
     if (NULL == g_currentNode) {
-        write_stderr("ERROR: failed to find current node by nodeid, curerent node id is:%u .\n", g_nodeHeader.node);
+        write_stderr("ERROR: failed to find current node by nodeid, curerent node id is:%d .\n", (int32)g_nodeHeader.node);
         GS_FREE(g_node);
         return 1;
     }
 
-    if (0 != get_dynamic_dn_role()) {
+    if (get_dynamic_dn_role() != 0) {
         write_stderr("ERROR: failed to get dynamic dn role.\n");
         GS_FREE(g_node);
         return 1;
@@ -992,6 +932,9 @@ int save_guc_para_info()
     rc = snprintf_s(guc_file, MAXPGPATH, MAXPGPATH - 1, "%s/bin/%s", gausshome, GUC_OPT_CONF_FILE);
     securec_check_ss_c(rc, "\0", "\0");
 
+    if (checkPath(guc_file) != 0) {
+        return FAILURE;
+    }
     /* maybe fail because of privilege */
     fp = fopen(guc_file, "r");
     if (fp == NULL) {
@@ -1128,7 +1071,14 @@ char** readfile(const char* path, int reserve_num_lines)
         *result = NULL;
         return result;
     }
-    buffer = (char*)malloc(statbuf.st_size + 1);
+
+    if (statbuf.st_size > LONG_MAX - 1) {
+        write_stderr("malloc size too big, size (%ld).\n", statbuf.st_size);
+        close(fd);
+        return NULL;
+    }
+
+    buffer = (char*)malloc((size_t)(statbuf.st_size + 1));
     if (NULL == buffer) {
         close(fd);
         write_stderr("ERROR: Memory allocation failed.\n");

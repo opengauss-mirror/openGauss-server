@@ -663,7 +663,7 @@ EXECUTE update_p('ELECTRNCS');
 DROP SYNONYM p;
 EXECUTE update_p('ELECTRNCS');
 ERROR:  relation "p" does not exist on DN datanode1
--- case 15. For define view using some synonym, dependency must be record before view decoupling is implemented, which is a little different from A DB behavior.
+-- case 15. For define view using some synonym, dependency must be record before view decoupling is implemented, which is a little different from A db behavior.
 INSERT INTO syn_test.t1 VALUES(1,1,2),(1,2,3),(2,3,1),(2,1,5);
 CREATE SYNONYM st1 FOR syn_test.t1;
 CREATE VIEW v1 AS SELECT * FROM st1;

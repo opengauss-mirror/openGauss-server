@@ -1,0 +1,18 @@
+CREATE TABLE pg_class_stat AS
+SELECT relname::text, relpages, reltuples
+FROM pg_class c JOIN pg_namespace n ON(c.relnamespace = n.oid AND n.nspname NOT IN ('pg_toast', 'pg_catalog', 'information_schema'))
+WHERE false;
+CREATE TABLE pg_statistic_stat AS
+SELECT relname::text, staattnum, stadistinct, s.stadndistinct
+FROM pg_statistic s JOIN pg_class c ON(c.oid = s.starelid AND c.relnamespace <>11)
+WHERE false;
+COPY pg_class_stat FROM STDIN;
+COPY pg_statistic_stat FROM STDIN;
+UPDATE pg_class SET (relpages, reltuples) = (t.relpages, t.reltuples) FROM pg_class_stat t
+WHERE pg_class.relname = t.relname and relnamespace=(select oid from pg_namespace where nspname='vector_engine');
+UPDATE pg_statistic SET (stadistinct, stadndistinct) = (t.stadistinct, t.stadndistinct)
+FROM pg_statistic_stat t, pg_class c
+WHERE starelid=c.oid and c.relname = t.relname and pg_statistic.staattnum = t.staattnum
+and relnamespace=(select oid from pg_namespace where nspname='vector_engine');
+DROP TABLE pg_class_stat;
+DROP TABLE pg_statistic_stat;

@@ -30,7 +30,9 @@
 #include "knl/knl_variable.h"
 #include "access/parallel_recovery/posix_semaphore.h"
 
+
 namespace extreme_rto {
+typedef void (*CallBackFunc)();
 
 struct SPSCBlockingQueue {
     pg_atomic_uint32 writeHead; /* Array index for the next write. */
@@ -39,20 +41,21 @@ struct SPSCBlockingQueue {
     uint32 mask;                /* Bit mask for computing index. */
     pg_atomic_uint32 maxUsage;
     pg_atomic_uint64 totalCnt;
-    void* buffer[1]; /* Queue buffer, the actual size is capacity. */
+    CallBackFunc callBackFunc;
+    void *buffer[1]; /* Queue buffer, the actual size is capacity. */
 };
 
-SPSCBlockingQueue* SPSCBlockingQueueCreate(uint32 capacity);
-void SPSCBlockingQueueDestroy(SPSCBlockingQueue* queue);
+SPSCBlockingQueue *SPSCBlockingQueueCreate(uint32 capacity, CallBackFunc func = NULL);
+void SPSCBlockingQueueDestroy(SPSCBlockingQueue *queue);
 
-bool SPSCBlockingQueuePut(SPSCBlockingQueue* queue, void* element);
-void* SPSCBlockingQueueTake(SPSCBlockingQueue* queue);
-bool SPSCBlockingQueueIsEmpty(SPSCBlockingQueue* queue);
-void* SPSCBlockingQueueTop(SPSCBlockingQueue* queue);
-void SPSCBlockingQueuePop(SPSCBlockingQueue* queue);
-void DumpQueue(const SPSCBlockingQueue* queue);
-uint32 SPSCGetQueueCount(SPSCBlockingQueue* queue);
-bool SPSCBlockingQueueGetAll(SPSCBlockingQueue* queue, void*** eleArry, uint32* eleNum);
-void SPSCBlockingQueuePopN(SPSCBlockingQueue* queue, uint32 n);
+bool SPSCBlockingQueuePut(SPSCBlockingQueue *queue, void *element);
+void *SPSCBlockingQueueTake(SPSCBlockingQueue *queue);
+bool SPSCBlockingQueueIsEmpty(SPSCBlockingQueue *queue);
+void *SPSCBlockingQueueTop(SPSCBlockingQueue *queue);
+void SPSCBlockingQueuePop(SPSCBlockingQueue *queue);
+void DumpQueue(const SPSCBlockingQueue *queue);
+uint32 SPSCGetQueueCount(SPSCBlockingQueue *queue);
+bool SPSCBlockingQueueGetAll(SPSCBlockingQueue *queue, void ***eleArry, uint32 *eleNum);
+void SPSCBlockingQueuePopN(SPSCBlockingQueue *queue, uint32 n);
 }  // namespace extreme_rto
 #endif

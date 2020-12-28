@@ -28,6 +28,8 @@
  * Since mod10(9*1 + 7*3 + 9*1 + 0*3) = mod10(M*3) = mod10(3*3) = 9; the check digit remains the same.
  *
  */
+#ifndef ISMN_H
+#define ISMN_H
 
 /* where the digit set begins, and how many of them are in the table */
 const unsigned ISMN_index[10][2] = {
@@ -48,3 +50,5 @@ const char* ISMN_range[][2] = {{"0-000", "0-099"},
     {"0-700000", "0-899999"},
     {"0-9000000", "0-9999999"},
     {NULL, NULL}};
+
+#endif

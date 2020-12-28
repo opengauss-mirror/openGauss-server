@@ -21,10 +21,11 @@ explain (costs off, verbose on) execute s (1,1);
 explain (costs off, verbose on) execute i (6,6,6);
          QUERY PLAN         
 ----------------------------
+ [Bypass]
  Insert on public.t1_xc_fqs
    ->  Result
          Output: 6, 6, 6
-(3 rows)
+(4 rows)
 
 explain (costs off, verbose on) execute u (2,2);
                           QUERY PLAN                           
@@ -187,10 +188,11 @@ explain (costs off, verbose on) execute s (1);
 explain (costs off, verbose on) execute i (6);
          QUERY PLAN         
 ----------------------------
+ [Bypass]
  Insert on public.t1_xc_fqs
    ->  Result
          Output: 6, 2, 3
-(3 rows)
+(4 rows)
 
 explain (costs off, verbose on) execute u (2);
                           QUERY PLAN                           
@@ -2555,10 +2557,11 @@ explain (costs off, verbose on) execute s (1);
 explain (costs off, verbose on) execute i (6);
          QUERY PLAN         
 ----------------------------
+ [Bypass]
  Insert on public.t1_xc_fqs
    ->  Result
          Output: 6, 2, 3
-(3 rows)
+(4 rows)
 
 explain (costs off, verbose on) execute u (2);
                           QUERY PLAN                           
@@ -3533,9 +3536,9 @@ DEALLOCATE PREPARE pa;
 drop table pbe_prunning_tmp;
 drop table pbe_prunning_000;
 SET enable_pbe_optimization to false;
-create table t_openGauss6666666 (id int,name text);
-insert into t_openGauss6666666 values (1,'a'),(2,'b'),(3,'c'), (4,'d'),(5,'e');
-prepare a as select * from t_openGauss6666666 where id=$1;
+create table t_DTS2017082304009 (id int,name text);
+insert into t_DTS2017082304009 values (1,'a'),(2,'b'),(3,'c'), (4,'d'),(5,'e');
+prepare a as select * from t_DTS2017082304009 where id=$1;
 execute a (1);
  id | name 
 ----+------
@@ -3573,7 +3576,7 @@ execute a (1);
 (1 row)
 
 deallocate a;
-drop table t_openGauss6666666;
+drop table t_DTS2017082304009;
 -- Bugfix for FQS multi-table join
 create table t1(id1 int, id2 int, num int);
 insert into t1 values (1,11,11), (2,21,21), (3,31,31), (4,41,41), (5,51,51);
@@ -3639,16 +3642,15 @@ INSERT INTO pbe_prunning_001 values (1, 1, 1);
 INSERT INTO pbe_prunning_002 values (1, 1, 1);
 PREPARE pa AS SELECT * FROM pbe_prunning_001 pp1 RIGHT OUTER JOIN pbe_prunning_002 pp2 ON pp1.c_int=pp2.c_int WHERE (pp1.c_int=$1 AND pp1.c_numeric=$2 AND pp2.c_int=$3 AND pp2.c_numeric=$4) or pp1.id=$5;
 EXPLAIN(COSTS FALSE) EXECUTE pa(10,10,10,10,11);
-                                                          QUERY PLAN                                                          
-------------------------------------------------------------------------------------------------------------------------------
+                                                         QUERY PLAN                                                          
+-----------------------------------------------------------------------------------------------------------------------------
  Hash Join
-   Hash Cond: (pp2.c_int = pp1.c_int)
+   Hash Cond: (pp1.c_int = pp2.c_int)
    Join Filter: (((pp1.c_int = $1) AND (pp1.c_numeric = $2) AND (pp2.c_int = $3) AND (pp2.c_numeric = $4)) OR (pp1.id = $5))
-   ->  Seq Scan on pbe_prunning_002 pp2
+   ->  Seq Scan on pbe_prunning_001 pp1
    ->  Hash
-         ->  Seq Scan on pbe_prunning_001 pp1
-               Filter: (((c_int = $1) AND (c_numeric = $2)) OR ((c_int = $1) AND (c_numeric = $2)) OR (id = $5) OR (id = $5))
-(7 rows)
+         ->  Seq Scan on pbe_prunning_002 pp2
+(6 rows)
 
 DEALLOCATE PREPARE pa;
 DROP TABLE pbe_prunning_001;
@@ -4088,18 +4090,18 @@ deallocate s0;
 drop table t1_xc_fqs;
 drop table t2_xc_fqs;
 set enable_pbe_optimization to true;
-create table openGauss9999999_t1 (id int, num int);
-insert into openGauss9999999_t1 values (1,1),(20,20);
-explain analyze create table openGauss9999999_t2 as select * from openGauss9999999_t1;
+create table DTS2018081308755_t1 (id int, num int);
+insert into DTS2018081308755_t1 values (1,1),(20,20);
+explain analyze create table DTS2018081308755_t2 as select * from DTS2018081308755_t1;
                                                       QUERY PLAN                                                       
 -----------------------------------------------------------------------------------------------------------------------
---? Insert on opengauss9999999_t2  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\) \(actual time=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* loops=[0-9]*\)
---?   ->  Seq Scan on opengauss9999999_t1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\) \(actual time=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* loops=[0-9]*\)
---? Total runtime: .*
+--?Insert on dts2018081308755_t2  (cost=0.00..31.49 rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--?  ->  Seq Scan on dts2018081308755_t1  (cost=0.00..31.49 rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
 (3 rows)
 
-drop table openGauss9999999_t2;
-drop table openGauss9999999_t1;
+drop table DTS2018081308755_t2;
+drop table DTS2018081308755_t1;
 create table cs_his(segment1 varchar(15), period_name varchar(15), currency_code varchar(15), frequency_code varchar(15), segment3 varchar(15), segment3_desc varchar(200), end_balance_dr numeric, end_balance_cr numeric) with (orientation=column);
 create table bs_his(row_desc varchar(800),row_id numeric,amount1 numeric, amount2 numeric, period_name varchar(80), frequency_code varchar(80), currency_code varchar(80), segment1 varchar(80)) with (orientation=column);
 insert into cs_his values('11','20190227','22','33','44','55',1.3,3.5);

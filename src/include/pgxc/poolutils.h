@@ -17,7 +17,7 @@
 
 #include "nodes/parsenodes.h"
 
-#define TIMEOUT_CLEAN_LOOP 10 /* Wait 10s for all the transactions to shutdown */
+#define TIMEOUT_CLEAN_LOOP 15 /* Wait 15s for all the transactions to shutdown */
 
 /* Error codes for connection cleaning */
 #define CLEAN_CONNECTION_COMPLETED 0
@@ -38,7 +38,8 @@ void processPoolerReload(void);
 
 #define ResetSessionExecutorInfo(is_force)                                      \
     do {                                                                        \
-        MemoryContext old_context = MemoryContextSwitchTo(u_sess->top_mem_cxt); \
+        MemoryContext old_context = MemoryContextSwitchTo(                      \
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));       \
         InitMultinodeExecutor(is_force);                                        \
         PoolManagerReconnect();                                                 \
         MemoryContextSwitchTo(old_context);                                     \

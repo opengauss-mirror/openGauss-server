@@ -1,4 +1,17 @@
-
+#
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#         http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+#
 # ----------------------------------------------------------------------------
 #
 # Postgres-XC CM common makefile
@@ -20,7 +33,7 @@ else
   override CPPFLAGS :=  -I$(top_srcdir)/src/include/libcomm -I../ -I./ $(CPPFLAGS)
 endif
 
-SUBDIRS = sctp_core sctp_utils
+SUBDIRS = libcomm_core libcomm_utils
 
 ifneq "$(MAKECMDGOALS)" "clean"
   ifneq "$(MAKECMDGOALS)" "distclean"
@@ -29,7 +42,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = libcomm.o
+OBJS = libcomm.o libcomm_common.o
 
 include $(top_srcdir)/src/gausskernel/common.mk
 

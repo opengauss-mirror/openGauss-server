@@ -20,7 +20,7 @@
 #include "access/spgist_private.h"
 #include "utils/rel_gs.h"
 #include "miscadmin.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "utils/datum.h"
 #include "utils/memutils.h"
 
@@ -33,7 +33,7 @@ typedef struct ScanStackEntry {
 } ScanStackEntry;
 
 /* Free a ScanStackEntry */
-static void freeScanStackEntry(SpGistScanOpaque so, ScanStackEntry* stackEntry)
+static void freeScanStackEntry(SpGistScanOpaque so, ScanStackEntry *stackEntry)
 {
     if (!so->state.attType.attbyval && DatumGetPointer(stackEntry->reconstructedValue) != NULL) {
         pfree(DatumGetPointer(stackEntry->reconstructedValue));
@@ -45,10 +45,10 @@ static void freeScanStackEntry(SpGistScanOpaque so, ScanStackEntry* stackEntry)
 /* Free the entire stack */
 static void freeScanStack(SpGistScanOpaque so)
 {
-    ListCell* lc = NULL;
+    ListCell *lc = NULL;
 
     foreach (lc, so->scanStack) {
-        freeScanStackEntry(so, (ScanStackEntry*)lfirst(lc));
+        freeScanStackEntry(so, (ScanStackEntry *)lfirst(lc));
     }
     list_free(so->scanStack);
     so->scanStack = NIL;
@@ -60,20 +60,20 @@ static void freeScanStack(SpGistScanOpaque so)
  */
 static void resetSpGistScanOpaque(SpGistScanOpaque so)
 {
-    ScanStackEntry* startEntry = NULL;
+    ScanStackEntry *startEntry = NULL;
 
     freeScanStack(so);
 
     if (so->searchNulls) {
         /* Stack a work item to scan the null index entries */
-        startEntry = (ScanStackEntry*)palloc0(sizeof(ScanStackEntry));
+        startEntry = (ScanStackEntry *)palloc0(sizeof(ScanStackEntry));
         ItemPointerSet(&startEntry->ptr, (uint32)SPGIST_NULL_BLKNO, FirstOffsetNumber);
         so->scanStack = lappend(so->scanStack, startEntry);
     }
 
     if (so->searchNonNulls) {
         /* Stack a work item to scan the non-null index entries */
-        startEntry = (ScanStackEntry*)palloc0(sizeof(ScanStackEntry));
+        startEntry = (ScanStackEntry *)palloc0(sizeof(ScanStackEntry));
         ItemPointerSet(&startEntry->ptr, (uint32)SPGIST_ROOT_BLKNO, FirstOffsetNumber);
         so->scanStack = lappend(so->scanStack, startEntry);
     }
@@ -171,11 +171,8 @@ Datum spgbeginscan(PG_FUNCTION_ARGS)
         so->keyData = (ScanKey)palloc(sizeof(ScanKeyData) * keysz);
     }
     initSpGistState(&so->state, scan->indexRelation);
-    so->tempCxt = AllocSetContextCreate(CurrentMemoryContext,
-        "SP-GiST search temporary context",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    so->tempCxt = AllocSetContextCreate(CurrentMemoryContext, "SP-GiST search temporary context",
+                                        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
 
     /* Set up indexTupDesc and xs_itupdesc in case it's an index-only scan */
     so->indexTupDesc = scan->xs_itupdesc = RelationGetDescr(rel);
@@ -192,8 +189,8 @@ Datum spgrescan(PG_FUNCTION_ARGS)
     ScanKey scankey = (ScanKey)PG_GETARG_POINTER(1);
     /* copy scankeys into local storage */
     if (scankey && scan->numberOfKeys > 0) {
-        errno_t rc = memmove_s(
-            scan->keyData, scan->numberOfKeys * sizeof(ScanKeyData), scankey, scan->numberOfKeys * sizeof(ScanKeyData));
+        errno_t rc = memmove_s(scan->keyData, scan->numberOfKeys * sizeof(ScanKeyData), scankey,
+                               scan->numberOfKeys * sizeof(ScanKeyData));
         securec_check(rc, "\0", "\0");
     }
 
@@ -235,13 +232,13 @@ Datum spgrestrpos(PG_FUNCTION_ARGS)
  * *recheck is set true if any of the operators are lossy
  */
 static bool spgLeafTest(Relation index, SpGistScanOpaque so, SpGistLeafTuple leafTuple, bool isnull, int level,
-    Datum reconstructedValue, Datum* leafValue, bool* recheck)
+                        Datum reconstructedValue, Datum *leafValue, bool *recheck)
 {
     bool result = false;
     Datum leafDatum;
     spgLeafConsistentIn in;
     spgLeafConsistentOut out;
-    FmgrInfo* procinfo = NULL;
+    FmgrInfo *procinfo = NULL;
     MemoryContext oldCtx;
 
     if (isnull) {
@@ -292,7 +289,7 @@ static void spgWalk(Relation index, SpGistScanOpaque so, bool scanWholeIndex, st
     bool reportedSome = false;
 
     while (scanWholeIndex || !reportedSome) {
-        ScanStackEntry* stackEntry = NULL;
+        ScanStackEntry *stackEntry = NULL;
         BlockNumber blkno;
         OffsetNumber offset;
         Page page;
@@ -303,7 +300,7 @@ static void spgWalk(Relation index, SpGistScanOpaque so, bool scanWholeIndex, st
             break; /* there are no more pages to scan */
         }
 
-        stackEntry = (ScanStackEntry*)linitial(so->scanStack);
+        stackEntry = (ScanStackEntry *)linitial(so->scanStack);
         so->scanStack = list_delete_first(so->scanStack);
 
     redirect:
@@ -338,14 +335,13 @@ static void spgWalk(Relation index, SpGistScanOpaque so, bool scanWholeIndex, st
                     leafTuple = (SpGistLeafTuple)PageGetItem(page, PageGetItemId(page, offset));
                     if (leafTuple->tupstate != SPGIST_LIVE) {
                         /* all tuples on root should be live */
-                        ereport(ERROR,
-                            (errcode(ERRCODE_INDEX_CORRUPTED),
-                                errmsg("unexpected SPGiST tuple state: %d", leafTuple->tupstate)));
+                        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                                        errmsg("unexpected SPGiST tuple state: %d", leafTuple->tupstate)));
                     }
 
                     Assert(ItemPointerIsValid(&leafTuple->heapPtr));
                     if (spgLeafTest(index, so, leafTuple, isnull, stackEntry->level, stackEntry->reconstructedValue,
-                        &leafValue, &recheck)) {
+                                    &leafValue, &recheck)) {
                         storeRes(so, &leafTuple->heapPtr, leafValue, isnull, recheck);
                         reportedSome = true;
                     }
@@ -372,14 +368,13 @@ static void spgWalk(Relation index, SpGistScanOpaque so, bool scanWholeIndex, st
                             break;
                         }
                         /* We should not arrive at a placeholder */
-                        ereport(ERROR,
-                            (errcode(ERRCODE_INDEX_CORRUPTED),
-                                errmsg("unexpected SPGiST tuple state: %d", leafTuple->tupstate)));
+                        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                                        errmsg("unexpected SPGiST tuple state: %d", leafTuple->tupstate)));
                     }
 
                     Assert(ItemPointerIsValid(&leafTuple->heapPtr));
                     if (spgLeafTest(index, so, leafTuple, isnull, stackEntry->level, stackEntry->reconstructedValue,
-                        &leafValue, &recheck)) {
+                                    &leafValue, &recheck)) {
                         storeRes(so, &leafTuple->heapPtr, leafValue, isnull, recheck);
                         reportedSome = true;
                     }
@@ -391,8 +386,8 @@ static void spgWalk(Relation index, SpGistScanOpaque so, bool scanWholeIndex, st
             SpGistInnerTuple innerTuple;
             spgInnerConsistentIn in;
             spgInnerConsistentOut out;
-            FmgrInfo* procinfo = NULL;
-            SpGistNodeTuple* nodes = NULL;
+            FmgrInfo *procinfo = NULL;
+            SpGistNodeTuple *nodes = NULL;
             SpGistNodeTuple node;
             int i = 0;
             MemoryContext oldCtx;
@@ -405,9 +400,8 @@ static void spgWalk(Relation index, SpGistScanOpaque so, bool scanWholeIndex, st
                     Assert(ItemPointerGetBlockNumber(&stackEntry->ptr) != SPGIST_METAPAGE_BLKNO);
                     goto redirect;
                 }
-                ereport(ERROR,
-                    (errcode(ERRCODE_INDEX_CORRUPTED),
-                        errmsg("unexpected SPGiST tuple state: %d", innerTuple->tupstate)));
+                ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                                errmsg("unexpected SPGiST tuple state: %d", innerTuple->tupstate)));
             }
 
             /* use temp context for calling inner_consistent */
@@ -425,7 +419,7 @@ static void spgWalk(Relation index, SpGistScanOpaque so, bool scanWholeIndex, st
             in.nodeLabels = spgExtractNodeLabels(&so->state, innerTuple);
 
             /* collect node pointers */
-            nodes = (SpGistNodeTuple*)palloc(sizeof(SpGistNodeTuple) * in.nNodes);
+            nodes = (SpGistNodeTuple *)palloc(sizeof(SpGistNodeTuple) * in.nNodes);
             SGITITERATE(innerTuple, i, node)
             {
                 nodes[i] = node;
@@ -441,7 +435,7 @@ static void spgWalk(Relation index, SpGistScanOpaque so, bool scanWholeIndex, st
             } else {
                 /* force all children to be visited */
                 out.nNodes = in.nNodes;
-                out.nodeNumbers = (int*)palloc(sizeof(int) * in.nNodes);
+                out.nodeNumbers = (int *)palloc(sizeof(int) * in.nNodes);
                 for (i = 0; i < in.nNodes; i++)
                     out.nodeNumbers[i] = i;
             }
@@ -450,9 +444,8 @@ static void spgWalk(Relation index, SpGistScanOpaque so, bool scanWholeIndex, st
 
             /* If allTheSame, they should all or none of 'em match */
             if (innerTuple->allTheSame && out.nNodes != 0 && out.nNodes != in.nNodes) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_INDEX_CORRUPTED),
-                     errmsg("inconsistent inner_consistent results for allTheSame inner tuple")));
+                ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                                errmsg("inconsistent inner_consistent results for allTheSame inner tuple")));
             }
 
             for (i = 0; i < out.nNodes; i++) {
@@ -460,10 +453,10 @@ static void spgWalk(Relation index, SpGistScanOpaque so, bool scanWholeIndex, st
 
                 Assert(nodeN >= 0 && nodeN < in.nNodes);
                 if (ItemPointerIsValid(&nodes[nodeN]->t_tid)) {
-                    ScanStackEntry* newEntry = NULL;
+                    ScanStackEntry *newEntry = NULL;
 
                     /* Create new work item for this node */
-                    newEntry = (ScanStackEntry*)palloc(sizeof(ScanStackEntry));
+                    newEntry = (ScanStackEntry *)palloc(sizeof(ScanStackEntry));
                     newEntry->ptr = nodes[nodeN]->t_tid;
                     newEntry->level = stackEntry->level;
                     if (out.levelAdds != NULL) {
@@ -472,8 +465,8 @@ static void spgWalk(Relation index, SpGistScanOpaque so, bool scanWholeIndex, st
 
                     /* Must copy value out of temp context */
                     if (out.reconstructedValues) {
-                        newEntry->reconstructedValue =
-                            datumCopy(out.reconstructedValues[i], so->state.attType.attbyval, so->state.attType.attlen);
+                        newEntry->reconstructedValue = datumCopy(out.reconstructedValues[i], so->state.attType.attbyval,
+                                                                 so->state.attType.attlen);
                     } else {
                         newEntry->reconstructedValue = (Datum)0;
                     }
@@ -504,7 +497,7 @@ static void storeBitmap(SpGistScanOpaque so, ItemPointer heapPtr, Datum leafValu
 Datum spggetbitmap(PG_FUNCTION_ARGS)
 {
     IndexScanDesc scan = (IndexScanDesc)PG_GETARG_POINTER(0);
-    TIDBitmap* tbm = (TIDBitmap*)PG_GETARG_POINTER(1);
+    TIDBitmap *tbm = (TIDBitmap *)PG_GETARG_POINTER(1);
     SpGistScanOpaque so = (SpGistScanOpaque)scan->opaque;
 
     /* Copy want_itup to *so so we don't need to pass it around separately */
@@ -541,8 +534,8 @@ Datum spggettuple(PG_FUNCTION_ARGS)
     SpGistScanOpaque so = (SpGistScanOpaque)scan->opaque;
 
     if (dir != ForwardScanDirection) {
-        ereport(ERROR, 
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("SP-GiST only supports forward scan direction")));
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("SP-GiST only supports forward scan direction")));
     }
 
     /* Copy want_itup to *so so we don't need to pass it around separately */
@@ -580,7 +573,7 @@ Datum spggettuple(PG_FUNCTION_ARGS)
 Datum spgcanreturn(PG_FUNCTION_ARGS)
 {
     Relation index = (Relation)PG_GETARG_POINTER(0);
-    SpGistCache* cache = NULL;
+    SpGistCache *cache = NULL;
 
     /* We can do it if the opclass config function says so */
     cache = spgGetCache(index);

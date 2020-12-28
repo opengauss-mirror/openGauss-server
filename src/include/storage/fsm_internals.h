@@ -14,8 +14,8 @@
 #ifndef FSM_INTERNALS_H
 #define FSM_INTERNALS_H
 
-#include "storage/buf.h"
-#include "storage/bufpage.h"
+#include "storage/buf/buf.h"
+#include "storage/buf/bufpage.h"
 
 /*
  * Structure of a FSM page. See src/backend/storage/freespace/README for

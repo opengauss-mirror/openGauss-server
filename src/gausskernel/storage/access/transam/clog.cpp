@@ -1,5 +1,4 @@
-/* -------------------------------------------------------------------------
- *
+/*
  * clog.cpp
  *		PostgreSQL transaction-commit-log manager
  *
@@ -23,7 +22,7 @@
  * for aborts (whether sync or async), since the post-crash assumption would
  * be that such transactions failed anyway.
  *
- * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2020, Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
@@ -74,17 +73,17 @@
 static int ZeroCLOGPage(int64 pageno, bool writeXlog);
 static void WriteZeroPageXlogRec(int64 pageno);
 static void WriteTruncateXlogRec(int64 pageno);
-static void CLogSetPageStatus(TransactionId xid, int nsubxids, TransactionId* subxids, CLogXidStatus status,
-    XLogRecPtr lsn, int64 pageno, bool all_xact_same_page);
-static void set_status_by_pages(int nsubxids, TransactionId* subxids, CLogXidStatus status, XLogRecPtr lsn);
+static void CLogSetPageStatus(TransactionId xid, int nsubxids, TransactionId *subxids, CLogXidStatus status,
+                              XLogRecPtr lsn, int64 pageno, bool all_xact_same_page);
+static void set_status_by_pages(int nsubxids, TransactionId *subxids, CLogXidStatus status, XLogRecPtr lsn);
 static void CLogSetStatusBit(TransactionId xid, CLogXidStatus status, XLogRecPtr lsn, int slotno);
 
 static bool CLogGroupUpdateXidStatus(TransactionId xid, CLogXidStatus status, XLogRecPtr lsn, int64 pageno);
-static void CLogSetPageStatusInternal(
-    TransactionId xid, int nsubxids, TransactionId* subxids, CLogXidStatus status, XLogRecPtr lsn, int64 pageno);
+static void CLogSetPageStatusInternal(TransactionId xid, int nsubxids, const TransactionId *subxids,
+                                      CLogXidStatus status, XLogRecPtr lsn, int64 pageno);
 int FIT_lw_deadlock(int n_edges);
 
-static inline char* GetTransactionStatus(CLogXidStatus status)
+static inline char *GetTransactionStatus(CLogXidStatus status)
 {
     if (status == CLOG_XID_STATUS_IN_PROGRESS)
         return "transaction in progress";
@@ -151,9 +150,9 @@ static inline char* GetTransactionStatus(CLogXidStatus status)
  * but aren't yet in cache, as well as hinting pages not to fall out of
  * cache yet.
  */
-void CLogSetTreeStatus(TransactionId xid, int nsubxids, TransactionId* subxids, CLogXidStatus status, XLogRecPtr lsn)
+void CLogSetTreeStatus(TransactionId xid, int nsubxids, TransactionId *subxids, CLogXidStatus status, XLogRecPtr lsn)
 {
-    int64 pageno = TransactionIdToPage(xid); /* get page of parent */
+    int64 pageno = (int64)TransactionIdToPage(xid); /* get page of parent */
     int i;
 
     if (SECUREC_UNLIKELY(!(status == CLOG_XID_STATUS_COMMITTED || status == CLOG_XID_STATUS_ABORTED)))
@@ -197,16 +196,14 @@ void CLogSetTreeStatus(TransactionId xid, int nsubxids, TransactionId* subxids, 
          * for the subxids on that first page.
          */
         if (status == CLOG_XID_STATUS_COMMITTED)
-            set_status_by_pages(nsubxids - nsubxids_on_first_page,
-                subxids + nsubxids_on_first_page,
-                CLOG_XID_STATUS_SUB_COMMITTED,
-                lsn);
+            set_status_by_pages(nsubxids - nsubxids_on_first_page, subxids + nsubxids_on_first_page,
+                                CLOG_XID_STATUS_SUB_COMMITTED, lsn);
 
         /*
          * Now set the parent and subtransactions on same page as the parent,
          * if any
          */
-        pageno = TransactionIdToPage(xid);
+        pageno = (int64)TransactionIdToPage(xid);
         CLogSetPageStatus(xid, nsubxids_on_first_page, subxids, status, lsn, pageno, false);
 
         /*
@@ -230,12 +227,12 @@ void CLogSetTreeStatus(TransactionId xid, int nsubxids, TransactionId* subxids, 
  *						the same page.
  * @return -  no return
  */
-static void CLogSetPageStatus(TransactionId xid, int nsubxids, TransactionId* subxids, CLogXidStatus status,
-    XLogRecPtr lsn, int64 pageno, bool all_xact_same_page)
+static void CLogSetPageStatus(TransactionId xid, int nsubxids, TransactionId *subxids, CLogXidStatus status,
+                              XLogRecPtr lsn, int64 pageno, bool all_xact_same_page)
 {
     /* Can't use group update when PGPROC overflows. */
     StaticAssertStmt(THRESHOLD_SUBTRANS_CLOG_OPT <= PGPROC_MAX_CACHED_SUBXIDS,
-        "group clog threshold less than PGPROC cached subxids");
+                     "group clog threshold less than PGPROC cached subxids");
 
     /*
      * When there is contention on ClogCtl(pageno)->shared->control_lock, we try to group multiple
@@ -253,7 +250,7 @@ static void CLogSetPageStatus(TransactionId xid, int nsubxids, TransactionId* su
      */
     if (all_xact_same_page && xid == t_thrd.pgxact->xid && nsubxids <= THRESHOLD_SUBTRANS_CLOG_OPT &&
         nsubxids == t_thrd.pgxact->nxids &&
-        memcmp(subxids, t_thrd.proc->subxids.xids, nsubxids * sizeof(TransactionId)) == 0) {
+        memcmp(subxids, t_thrd.proc->subxids.xids, (size_t)(nsubxids * sizeof(TransactionId))) == 0) {
         /*
          * We don't try to do group update optimization if a process has
          * overflowed the subxids array in its PGPROC, since in that case we
@@ -297,9 +294,9 @@ static void CLogSetPageStatus(TransactionId xid, int nsubxids, TransactionId* su
  * @in lsn - the lsn for xlog record
  * @return -  no return
  */
-static void set_status_by_pages(int nsubxids, TransactionId* subxids, CLogXidStatus status, XLogRecPtr lsn)
+static void set_status_by_pages(int nsubxids, TransactionId *subxids, CLogXidStatus status, XLogRecPtr lsn)
 {
-    int64 pageno = TransactionIdToPage(subxids[0]);
+    int64 pageno = (int64)TransactionIdToPage(subxids[0]);
     int offset = 0;
     int i = 0;
 
@@ -307,10 +304,10 @@ static void set_status_by_pages(int nsubxids, TransactionId* subxids, CLogXidSta
 
     while (i < nsubxids) {
         int num_on_page = 0;
-        int64 nextpageno;
+        int64 nextpageno = 0;
 
         do {
-            nextpageno = TransactionIdToPage(subxids[i]);
+            nextpageno = (int64)TransactionIdToPage(subxids[i]);
             if (nextpageno != pageno)
                 break;
             num_on_page++;
@@ -328,14 +325,14 @@ static void set_status_by_pages(int nsubxids, TransactionId* subxids, CLogXidSta
  *
  * We don't do any locking here; caller must handle that.
  */
-static void CLogSetPageStatusInternal(
-    TransactionId xid, int nsubxids, TransactionId* subxids, CLogXidStatus status, XLogRecPtr lsn, int64 pageno)
+static void CLogSetPageStatusInternal(TransactionId xid, int nsubxids, const TransactionId *subxids,
+                                      CLogXidStatus status, XLogRecPtr lsn, int64 pageno)
 {
     int slotno;
     int i;
 
     if (!(status == CLOG_XID_STATUS_COMMITTED || status == CLOG_XID_STATUS_ABORTED ||
-            (status == CLOG_XID_STATUS_SUB_COMMITTED && !TransactionIdIsValid(xid))))
+          (status == CLOG_XID_STATUS_SUB_COMMITTED && !TransactionIdIsValid(xid))))
         ereport(PANIC, (errmsg("CLOG PAGE STATUS ERROR: xid %lu status %s", xid, GetTransactionStatus(status))));
 
     Assert(LWLockHeldByMeInMode(ClogCtl(pageno)->shared->control_lock, LW_EXCLUSIVE));
@@ -389,7 +386,7 @@ static void CLogSetPageStatusInternal(
  */
 static bool CLogGroupUpdateXidStatus(TransactionId xid, CLogXidStatus status, XLogRecPtr lsn, int64 pageno)
 {
-    PGPROC* proc = t_thrd.proc;
+    PGPROC *proc = t_thrd.proc;
     uint32 nextidx;
     uint32 wakeidx;
 
@@ -475,14 +472,10 @@ static bool CLogGroupUpdateXidStatus(TransactionId xid, CLogXidStatus status, XL
     /* Walk the list and update the status of all XIDs. */
     while (nextidx != INVALID_PGPROCNO) {
         proc = g_instance.proc_base_all_procs[nextidx];
-        PGXACT* pgxact = &g_instance.proc_base_all_xacts[nextidx];
+        PGXACT *pgxact = &g_instance.proc_base_all_xacts[nextidx];
 
-        CLogSetPageStatusInternal(proc->clogGroupMemberXid,
-            pgxact->nxids,
-            proc->subxids.xids,
-            proc->clogGroupMemberXidStatus,
-            proc->clogGroupMemberLsn,
-            proc->clogGroupMemberPage);
+        CLogSetPageStatusInternal(proc->clogGroupMemberXid, pgxact->nxids, proc->subxids.xids,
+                                  proc->clogGroupMemberXidStatus, proc->clogGroupMemberLsn, proc->clogGroupMemberPage);
 
         /* Move to next proc in list. */
         nextidx = pg_atomic_read_u32(&proc->clogGroupNext);
@@ -522,13 +515,13 @@ static bool CLogGroupUpdateXidStatus(TransactionId xid, CLogXidStatus status, XL
 static void CLogSetStatusBit(TransactionId xid, CLogXidStatus status, XLogRecPtr lsn, int slotno)
 {
     int byteno = TransactionIdToByte(xid);
-    int64 pageno = TransactionIdToPage(xid);
+    int64 pageno = (int64)TransactionIdToPage(xid);
     uint32 bshift = TransactionIdToBIndex(xid) * CLOG_BITS_PER_XACT;
-    unsigned char* byteptr = NULL;
+    unsigned char *byteptr = NULL;
     unsigned char byteval;
     unsigned char curval;
 
-    byteptr = (unsigned char*)(ClogCtl(pageno)->shared->page_buffer[slotno] + byteno);
+    byteptr = (unsigned char *)(ClogCtl(pageno)->shared->page_buffer[slotno] + byteno);
     curval = (*byteptr >> bshift) & CLOG_XACT_BITMASK;
 
     /*
@@ -545,13 +538,10 @@ static void CLogSetStatusBit(TransactionId xid, CLogXidStatus status, XLogRecPtr
      * or we should already be there when replaying changes during recovery.
      */
     if (!(curval == 0 || (curval == CLOG_XID_STATUS_SUB_COMMITTED && status != CLOG_XID_STATUS_IN_PROGRESS) ||
-            curval == ((uint32)status) ||
-            (curval == CLOG_XID_STATUS_COMMITTED && status == CLOG_XID_STATUS_SUB_COMMITTED)))
-        ereport(PANIC,
-            (errmsg("CLOG STATUS ERROR: xid: %lu input status %s, current status %s",
-                xid,
-                GetTransactionStatus(status),
-                GetTransactionStatus(curval))));
+          curval == ((uint32)status) ||
+          (curval == CLOG_XID_STATUS_COMMITTED && status == CLOG_XID_STATUS_SUB_COMMITTED)))
+        ereport(PANIC, (errmsg("CLOG STATUS ERROR: xid: %lu input status %s, current status %s", xid,
+                               GetTransactionStatus(status), GetTransactionStatus(curval))));
 
     /* note this assumes exclusive access to the clog page */
     byteval = *byteptr;
@@ -568,7 +558,7 @@ static void CLogSetStatusBit(TransactionId xid, CLogXidStatus status, XLogRecPtr
      * LSN correctly.
      */
     if (!XLogRecPtrIsInvalid(lsn)) {
-        int lsnindex = GetLSNIndex(slotno, xid);
+        int lsnindex = (int)GetLSNIndex(slotno, xid);
 
         if (XLByteLT(ClogCtl(pageno)->shared->group_lsn[lsnindex], lsn))
             ClogCtl(pageno)->shared->group_lsn[lsnindex] = lsn;
@@ -590,23 +580,23 @@ static void CLogSetStatusBit(TransactionId xid, CLogXidStatus status, XLogRecPtr
  * NB: this is a low-level routine and is NOT the preferred entry point
  * for most uses; TransactionLogFetch() in transam.c is the intended caller.
  */
-CLogXidStatus CLogGetStatus(TransactionId xid, XLogRecPtr* lsn)
+CLogXidStatus CLogGetStatus(TransactionId xid, XLogRecPtr *lsn)
 {
-    int64 pageno = TransactionIdToPage(xid);
+    int64 pageno = (int64)TransactionIdToPage(xid);
     int byteno = TransactionIdToByte(xid);
     uint32 bshift = TransactionIdToBIndex(xid) * CLOG_BITS_PER_XACT;
     int slotno;
     int lsnindex;
-    unsigned char* byteptr = NULL;
+    unsigned char *byteptr = NULL;
     CLogXidStatus status;
 
     /* lock is acquired by SimpleLruReadPage_ReadOnly */
     slotno = SimpleLruReadPage_ReadOnly(ClogCtl(pageno), pageno, xid);
-    byteptr = (unsigned char*)(ClogCtl(pageno)->shared->page_buffer[slotno] + byteno);
+    byteptr = (unsigned char *)(ClogCtl(pageno)->shared->page_buffer[slotno] + byteno);
 
     status = (*byteptr >> bshift) & CLOG_XACT_BITMASK;
 
-    lsnindex = GetLSNIndex(slotno, xid);
+    lsnindex = (int)GetLSNIndex(slotno, xid);
     *lsn = ClogCtl(pageno)->shared->group_lsn[lsnindex];
 
     LWLockRelease(ClogCtl(pageno)->shared->control_lock);
@@ -640,7 +630,7 @@ CLogXidStatus CLogGetStatus(TransactionId xid, XLogRecPtr* lsn)
  */
 Size CLOGShmemBuffers(void)
 {
-    return Min(256, Max(4, g_instance.attr.attr_storage.NBuffers / 512));
+    return (Size)Min(256, Max(4, g_instance.attr.attr_storage.NBuffers / 512));
 }
 
 /*
@@ -652,7 +642,7 @@ Size CLOGShmemSize(void)
     Size sz = 0;
 
     for (i = 0; i < NUM_CLOG_PARTITIONS; i++) {
-        sz += SimpleLruShmemSize(CLOGShmemBuffers(), CLOG_LSNS_PER_PAGE);
+        sz += SimpleLruShmemSize((int)CLOGShmemBuffers(), CLOG_LSNS_PER_PAGE);
     }
 
     return sz;
@@ -666,14 +656,9 @@ void CLOGShmemInit(void)
 
     for (i = 0; i < NUM_CLOG_PARTITIONS; i++) {
         rc = sprintf_s(name, SLRU_MAX_NAME_LENGTH, "%s%d", "CLOG Ctl", i);
-        securec_check_ss(rc, "\0", "\0");
-        SimpleLruInit(ClogCtl(i),
-            name,
-            LWTRANCHE_CLOG_CTL,
-            CLOGShmemBuffers(),
-            CLOG_LSNS_PER_PAGE,
-            CBufMappingPartitionLockByIndex(i),
-            "pg_clog");
+        securec_check_ss(rc, "", "");
+        SimpleLruInit(ClogCtl(i), name, (int)LWTRANCHE_CLOG_CTL, (int)CLOGShmemBuffers(), CLOG_LSNS_PER_PAGE,
+                      CBufMappingPartitionLockByIndex(i), "pg_clog");
     }
 }
 
@@ -685,8 +670,8 @@ void CLOGShmemInit(void)
  */
 void BootStrapCLOG(void)
 {
-    int slotno;
-    int64 pageno;
+    int slotno = 0;
+    int64 pageno = 0;
 
     for (pageno = 0; pageno < CLOG_BATCH_SIZE; pageno++) {
         (void)LWLockAcquire(ClogCtl(pageno)->shared->control_lock, LW_EXCLUSIVE);
@@ -696,7 +681,7 @@ void BootStrapCLOG(void)
         LWLockRelease(ClogCtl(pageno)->shared->control_lock);
     }
 
-    pageno = TransactionIdToPage(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
+    pageno = (int64)TransactionIdToPage(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
     (void)LWLockAcquire(ClogCtl(pageno)->shared->control_lock, LW_EXCLUSIVE);
     if (pageno >= CLOG_BATCH_SIZE) {
         /* Create and zero the first page of the commit log */
@@ -741,7 +726,7 @@ static int ZeroCLOGPage(int64 pageno, bool writeXlog)
 void StartupCLOG(void)
 {
     TransactionId xid = t_thrd.xact_cxt.ShmemVariableCache->nextXid;
-    int64 pageno = TransactionIdToPage(xid);
+    int64 pageno = (int64)TransactionIdToPage(xid);
 
     (void)LWLockAcquire(ClogCtl(pageno)->shared->control_lock, LW_EXCLUSIVE);
 
@@ -759,7 +744,7 @@ void StartupCLOG(void)
 void TrimCLOG(void)
 {
     TransactionId xid = t_thrd.xact_cxt.ShmemVariableCache->nextXid;
-    int64 pageno = TransactionIdToPage(xid);
+    int64 pageno = (int64)TransactionIdToPage(xid);
 
     (void)LWLockAcquire(ClogCtl(pageno)->shared->control_lock, LW_EXCLUSIVE);
 
@@ -785,20 +770,20 @@ void TrimCLOG(void)
         uint32 bshift = TransactionIdToBIndex(xid) * CLOG_BITS_PER_XACT;
         int slotno;
         errno_t rc = EOK;
-        unsigned char* byteptr = NULL;
+        unsigned char *byteptr = NULL;
 
         slotno = SimpleLruReadPage(ClogCtl(pageno), pageno, false, xid);
-        byteptr = (unsigned char*)(ClogCtl(pageno)->shared->page_buffer[slotno] + byteno);
+        byteptr = (unsigned char *)(ClogCtl(pageno)->shared->page_buffer[slotno] + byteno);
 
         /* Zero so-far-unused positions in the current byte */
         *byteptr &= (1U << bshift) - 1;
         /* Zero the rest of the page */
-        rc = memset_s(byteptr + 1, BLCKSZ - byteno - 1, 0, BLCKSZ - byteno - 1);
-        securec_check(rc, "\0", "\0");
+        rc = memset_s(byteptr + 1, (size_t)(BLCKSZ - byteno - 1), 0, (size_t)(BLCKSZ - byteno - 1));
+        securec_check(rc, "", "");
 
         ClogCtl(pageno)->shared->page_dirty[slotno] = true;
     } else
-        /* We need to set ForceCheckFirstXid true, see slru.h */
+        /* We need to set force_check_first_xid true, see slru.h */
         ClogCtl(pageno)->shared->force_check_first_xid = true;
 
     LWLockRelease(ClogCtl(pageno)->shared->control_lock);
@@ -834,9 +819,9 @@ void CheckPointCLOG(void)
 
 /*
  * Get the max page no of segment file.
- * Note that the caller must hold LW_EXCLUSIVE on ClogCtl(pageno)->shared->control_lock & CLogControlLock
+ * Note that the caller must hold LW_EXCLUSIVE on ClogCtl(pageno)->shared->control_lock
  */
-int ClogSegCurMaxPageNo(char* path, int64 pageno)
+int ClogSegCurMaxPageNo(char *path, int64 pageno)
 {
     /*
      * In a crash-and-restart situation, it's possible for us to receive
@@ -849,7 +834,6 @@ int ClogSegCurMaxPageNo(char* path, int64 pageno)
     if (fd < 0) {
         if (errno != ENOENT) {
             Assert(!t_thrd.xlog_cxt.InRecovery);
-            LWLockRelease(CLogControlLock);
             LWLockRelease(ClogCtl(pageno)->shared->control_lock);
             ereport(ERROR, (errcode(ERRCODE_IO_ERROR), errmsg("Open file %s failed. %s\n", path, strerror(errno))));
         }
@@ -866,28 +850,26 @@ int ClogSegCurMaxPageNo(char* path, int64 pageno)
 
     off_t endOffset = lseek(fd, 0, SEEK_END);
     if (endOffset < 0) {
-        LWLockRelease(CLogControlLock);
         LWLockRelease(ClogCtl(pageno)->shared->control_lock);
         if (close(fd))
             ereport(ERROR, (errcode(ERRCODE_IO_ERROR), errmsg("Close file %s failed. %s\n", path, strerror(errno))));
         ereport(ERROR, (errcode(ERRCODE_IO_ERROR), errmsg("seek file %s failed. %s\n", path, strerror(errno))));
     }
     if (close(fd)) {
-        LWLockRelease(CLogControlLock);
         LWLockRelease(ClogCtl(pageno)->shared->control_lock);
         ereport(ERROR, (errcode(ERRCODE_IO_ERROR), errmsg("Close file %s failed. %s\n", path, strerror(errno))));
     }
 
-    return endOffset / BLCKSZ - 1;
+    return (int)(endOffset / BLCKSZ - 1);
 }
 
 /*
  * Check whether ClogPage has been extended
- * The caller must hold LW_EXCLUSIVE on ClogCtl(pageno)->shared->control_lock & CLogControlLock
+ * The caller must hold LW_EXCLUSIVE on ClogCtl(pageno)->shared->control_lock
  * true - means has been extended
  * false - means might be not extended or extended, not sure.
  */
-bool ClogPageHasBeenExtended(int64 pageno, int64& maxPageNoInSeg)
+bool ClogPageHasBeenExtended(int64 pageno, int64 &maxPageNoInSeg)
 {
     SlruShared shared = ClogCtl(pageno)->shared;
     char path[MAXPGPATH];
@@ -931,13 +913,8 @@ bool ClogPageHasBeenExtended(int64 pageno, int64& maxPageNoInSeg)
         return true;
     }
 
-    rc = snprintf_s(path,
-        MAXPGPATH,
-        MAXPGPATH - 1,
-        "%s/%04X%08X",
-        (ClogCtl(pageno))->dir,
-        (uint32)((uint64)(segno) >> 32),
-        (uint32)((segno) & (int64)0xFFFFFFFF));
+    rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%04X%08X", (ClogCtl(pageno))->dir,
+                    (uint32)((uint64)(segno) >> 32), (uint32)((segno) & (int64)0xFFFFFFFF));
     securec_check_ss(rc, "", "");
     rpageNo = ClogSegCurMaxPageNo(path, pageno);
     maxPageNoInSeg = rpageNo + segno * SLRU_PAGES_PER_SEGMENT;
@@ -963,7 +940,7 @@ bool ClogPageHasBeenExtended(int64 pageno, int64& maxPageNoInSeg)
  */
 void ExtendCLOG(TransactionId newestXact, bool allowXlog)
 {
-    int64 pageno;
+    int64 pageno = 0;
 
 #ifdef PGXC
     int64 maxPageNoInSeg = 0;
@@ -975,7 +952,8 @@ void ExtendCLOG(TransactionId newestXact, bool allowXlog)
      * Also, there is a special case of when transactions wrap-around that
      * we need to detect.
      */
-    pageno = TransactionIdToPage(newestXact);
+    pageno = (int64)TransactionIdToPage(newestXact);
+
     /*
      * Just do a check. In most case, it will return.
      * We don't acquire a LW_SHARD on ClogCtl(pageno)->shared->control_lock when do this check
@@ -987,32 +965,38 @@ void ExtendCLOG(TransactionId newestXact, bool allowXlog)
 
     /*  Check whether this pageno has been extended */
     (void)LWLockAcquire(ClogCtl(pageno)->shared->control_lock, LW_EXCLUSIVE);
-    (void)LWLockAcquire(CLogControlLock, LW_EXCLUSIVE);
     if (ClogPageHasBeenExtended(pageno, maxPageNoInSeg)) {
         if (ClogCtl(pageno)->shared->force_check_first_xid)
             ClogCtl(pageno)->shared->force_check_first_xid = false;
 
-        LWLockRelease(CLogControlLock);
         LWLockRelease(ClogCtl(pageno)->shared->control_lock);
         return;
     }
 
-    Assert(maxPageNoInSeg < pageno);
+    /* Now we need extend clog pages belong to this partition and from maxPageNoInSeg + 1 to pageno
+     * for example, partitionId = 1, maxPageInSeg = 3 amd pageno = 256*3+1, then page 256*1+1, 256*2+1,
+     * 256*3+1 will be extended, when page 256*3+1 in memory of partition1, then other partition cannot
+     * see it, to extend clog independently, otherwise in disk, others see it as hole file, the pageno
+     * smaller that 256*3+1 considered as extended, the file system make sure that hole in the log-file
+     * can be read, get all 0.
+     * even the extending over current file will be ok.
+     */
+    int64 partitionId = pageno % NUM_CLOG_PARTITIONS;
+    int64 i = (maxPageNoInSeg + 1) / NUM_CLOG_PARTITIONS * NUM_CLOG_PARTITIONS + partitionId;
+    if (i < (maxPageNoInSeg + 1)) {
+        i += NUM_CLOG_PARTITIONS;
+    }
 
-    /* Now we need extend clog pages from maxPageNoInSeg + 1 to pageno */
-    for (int64 i = maxPageNoInSeg + 1; i <= pageno; ++i) {
+    for (; i <= pageno; i += NUM_CLOG_PARTITIONS) {
         int64 tmp_max_segno = 0;
         if (!ClogPageHasBeenExtended(i, tmp_max_segno)) {
-            int slotno = ZeroCLOGPage(i, !t_thrd.xlog_cxt.InRecovery && allowXlog);
-            /* write the page to disk, sync the file length with other buffer manager */
-            SimpleLruWritePage(ClogCtl(pageno), slotno);
+            (void)ZeroCLOGPage(i, !t_thrd.xlog_cxt.InRecovery && allowXlog);
         }
     }
 
     if (ClogCtl(pageno)->shared->force_check_first_xid)
         ClogCtl(pageno)->shared->force_check_first_xid = false;
 
-    LWLockRelease(CLogControlLock);
     LWLockRelease(ClogCtl(pageno)->shared->control_lock);
 
 #else
@@ -1077,7 +1061,7 @@ void TruncateCLOG(TransactionId oldestXact)
 static void WriteZeroPageXlogRec(int64 pageno)
 {
     XLogBeginInsert();
-    XLogRegisterData((char*)(&pageno), sizeof(int64));
+    XLogRegisterData((char *)(&pageno), sizeof(int64));
     (void)XLogInsert(RM_CLOG_ID, CLOG_ZEROPAGE);
 }
 
@@ -1092,15 +1076,15 @@ static void WriteTruncateXlogRec(int64 pageno)
     XLogRecPtr recptr;
 
     XLogBeginInsert();
-    XLogRegisterData((char*)(&pageno), sizeof(int64));
+    XLogRegisterData((char *)(&pageno), sizeof(int64));
     recptr = XLogInsert(RM_CLOG_ID, CLOG_TRUNCATE);
-    XLogWaitFlush(recptr);
+    XLogFlush(recptr);
 }
 
 /*
  * CLOG resource manager's routines
  */
-void clog_redo(XLogReaderState* record)
+void clog_redo(XLogReaderState *record)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
     errno_t rc = EOK;
@@ -1221,9 +1205,9 @@ int FIT_lw_deadlock(int n_edges)
  * @Return: integer value
  * @See also:
  */
-static inline int conv_text2int(text* arg)
+static inline int conv_text2int(text *arg)
 {
-    char* cstr = text_to_cstring(arg);
+    char *cstr = text_to_cstring(arg);
     int val = atoi(cstr);
     pfree_ext(cstr);
     return val;
@@ -1240,7 +1224,7 @@ static inline int conv_text2int(text* arg)
  * @Return: 0, sucess; otherwise failed.
  * @See also:
  */
-static int gs_fault_inject_impl(int64 fit_type, text* arg1, text* arg2, text* arg3, text* arg4, text* arg5)
+static int gs_fault_inject_impl(int64 fit_type, text *arg1, text *arg2, text *arg3, text *arg4, text *arg5)
 {
     int ret = 0;
     switch (fit_type) {
@@ -1268,12 +1252,8 @@ static int gs_fault_inject_impl(int64 fit_type, text* arg1, text* arg2, text* ar
 Datum gs_fault_inject(PG_FUNCTION_ARGS)
 {
 #ifdef USE_ASSERT_CHECKING
-    int ret = gs_fault_inject_impl(PG_GETARG_INT64(0),
-        PG_GETARG_TEXT_P(1),
-        PG_GETARG_TEXT_P(2),
-        PG_GETARG_TEXT_P(3),
-        PG_GETARG_TEXT_P(4),
-        PG_GETARG_TEXT_P(5));
+    int ret = gs_fault_inject_impl(PG_GETARG_INT64(0), PG_GETARG_TEXT_P(1), PG_GETARG_TEXT_P(2), PG_GETARG_TEXT_P(3),
+                                   PG_GETARG_TEXT_P(4), PG_GETARG_TEXT_P(5));
     PG_RETURN_INT64(ret);
 #else
     ereport(WARNING, (errmsg("unsupported fault injection")));

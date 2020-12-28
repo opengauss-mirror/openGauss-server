@@ -1,0 +1,31 @@
+set enable_global_stats = true;
+-- problem:
+-- show Partial Cluster infomation by psql command \d+
+-- case 1: \d and \d+ for table without Partial Cluster Key
+CREATE TABLE cstore_without_partial_cluster_key
+(
+	a int,
+	b int
+) with ( orientation = orc ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+\d cstore_without_partial_cluster_key
+\d+ cstore_without_partial_cluster_key
+DROP TABLE cstore_without_partial_cluster_key;
+
+-- case 2: \d and \d+ for table with Partial Cluster Key
+CREATE TABLE cstore_with_partial_cluster_key
+(
+	a int,
+	b int,
+	PARTIAL CLUSTER KEY (b)
+) with ( orientation = orc , compression = zlib ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+\d cstore_with_partial_cluster_key
+\d+ cstore_with_partial_cluster_key
+DROP TABLE cstore_with_partial_cluster_key;
+
+--- case 3: row table does not support PARTIAL CLUSTER KEY
+CREATE TABLE row_table_with_partial_cluster_key
+(
+	a int,
+	b int,
+	PARTIAL CLUSTER KEY (b)
+);

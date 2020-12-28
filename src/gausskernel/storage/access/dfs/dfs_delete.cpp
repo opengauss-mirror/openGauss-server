@@ -14,10 +14,10 @@
  * -------------------------------------------------------------------------
  *
  * dfs_delete.cpp
- *      routines to support DFS(such as HDFS, DFS,...)
+ *    routines to support DFS(such as HDFS, DFS,...)
  *
  * IDENTIFICATION
- *        src/gausskernel/storage/access/dfs/dfs_delete.cpp
+ *    src/gausskernel/storage/access/dfs/dfs_delete.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -39,7 +39,7 @@
 #include "utils/numeric_gs.h"
 #include "utils/relcache.h"
 #include "utils/snapmgr.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "utils/typcache.h"
 
 /* max number of desc object for one load */

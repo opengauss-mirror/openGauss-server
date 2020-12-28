@@ -3,7 +3,7 @@
 --
 -- Check on dropped columns
 CREATE TABLE xc_alter_table_1 (id int, name varchar(80), code varchar(80));
-EXPLAIN (VERBOSE true, COSTS false, NODES false) INSERT INTO xc_alter_table_1(name) VALUES ('aaa'),('bbb'),('ccc');
+EXPLAIN (VERBOSE true, COSTS false) INSERT INTO xc_alter_table_1(name) VALUES ('aaa'),('bbb'),('ccc');
 INSERT INTO xc_alter_table_1(name) VALUES ('aaa'),('bbb'),('ccc');
 SELECT id, name, code FROM xc_alter_table_1 ORDER BY 1;
 -- Cannot drop distribution column
@@ -12,14 +12,14 @@ ALTER TABLE xc_alter_table_1 DROP COLUMN id;
 ALTER TABLE xc_alter_table_1 DROP COLUMN code;
 -- Check for query generation of remote INSERT
 INSERT INTO xc_alter_table_1(name) VALUES('ddd'),('eee'),('fff');
-EXPLAIN (VERBOSE true, COSTS false, NODES false) INSERT INTO xc_alter_table_1(name) VALUES('ddd'),('eee'),('fff');
+EXPLAIN (VERBOSE true, COSTS false) INSERT INTO xc_alter_table_1(name) VALUES('ddd'),('eee'),('fff');
 SELECT id, name FROM xc_alter_table_1 ORDER BY 1;
 -- Check for query generation of remote INSERT SELECT
 INSERT INTO xc_alter_table_1(name) SELECT 'ggg';
-EXPLAIN (VERBOSE true, COSTS false, NODES false) INSERT INTO xc_alter_table_1(name) SELECT 'ggg';
+EXPLAIN (VERBOSE true, COSTS false) INSERT INTO xc_alter_table_1(name) SELECT 'ggg';
 SELECT id, name FROM xc_alter_table_1 ORDER BY 1;
 -- Check for query generation of remote UPDATE
-EXPLAIN (VERBOSE true, COSTS false, NODES false) UPDATE xc_alter_table_1 SET name = 'zzz' WHERE id = currval('xc_alter_table_1_id_seq');
+EXPLAIN (VERBOSE true, COSTS false) UPDATE xc_alter_table_1 SET name = 'zzz' WHERE id = currval('xc_alter_table_1_id_seq');
 UPDATE xc_alter_table_1 SET name = 'zzz' WHERE id = currval('xc_alter_table_1_id_seq');
 SELECT id, name FROM xc_alter_table_1 ORDER BY 1;
 DROP TABLE xc_alter_table_1;
@@ -37,22 +37,22 @@ ALTER TABLE xc_alter_table_2 DROP COLUMN a;
 ALTER TABLE xc_alter_table_2 DROP COLUMN d;
 ALTER TABLE xc_alter_table_2 DROP COLUMN e;
 -- Check for query generation of remote INSERT
-EXPLAIN (VERBOSE true, COSTS false, NODES false) INSERT INTO xc_alter_table_2 VALUES ('Kodek', false);
+EXPLAIN (VERBOSE true, COSTS false) INSERT INTO xc_alter_table_2 VALUES ('Kodek', false);
 INSERT INTO xc_alter_table_2 VALUES ('Kodek', false);
 SELECT b, c FROM xc_alter_table_2 ORDER BY b;
 -- Check for query generation of remote UPDATE
-EXPLAIN (VERBOSE true, COSTS false, NODES false) UPDATE xc_alter_table_2 SET b = 'Morphee', c = false WHERE b = 'Neo';
+EXPLAIN (VERBOSE true, COSTS false) UPDATE xc_alter_table_2 SET b = 'Morphee', c = false WHERE b = 'Neo';
 UPDATE xc_alter_table_2 SET b = 'Morphee', c = false WHERE b = 'Neo';
 SELECT b, c FROM xc_alter_table_2 ORDER BY b;
 -- Add some new columns
 ALTER TABLE xc_alter_table_2 ADD COLUMN a int;
 ALTER TABLE xc_alter_table_2 ADD COLUMN a2 varchar(20);
 -- Check for query generation of remote INSERT
-EXPLAIN (VERBOSE true, COSTS false, NODES false) INSERT INTO xc_alter_table_2 (a, a2, b, c) VALUES (100, 'CEO', 'Gordon', true);
+EXPLAIN (VERBOSE true, COSTS false) INSERT INTO xc_alter_table_2 (a, a2, b, c) VALUES (100, 'CEO', 'Gordon', true);
 INSERT INTO xc_alter_table_2 (a, a2, b, c) VALUES (100, 'CEO', 'Gordon', true);
 SELECT a, a2, b, c FROM xc_alter_table_2 ORDER BY b;
 -- Check for query generation of remote UPDATE
-EXPLAIN (VERBOSE true, COSTS false, NODES false) UPDATE xc_alter_table_2 SET a = 200, a2 = 'CTO' WHERE b = 'John';
+EXPLAIN (VERBOSE true, COSTS false) UPDATE xc_alter_table_2 SET a = 200, a2 = 'CTO' WHERE b = 'John';
 UPDATE xc_alter_table_2 SET a = 200, a2 = 'CTO' WHERE b = 'John';
 SELECT a, a2, b, c FROM xc_alter_table_2 ORDER BY b;
 DROP TABLE xc_alter_table_2;

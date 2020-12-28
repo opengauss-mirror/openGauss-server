@@ -139,8 +139,10 @@ const int64 Int64MultiOutOfBound[20] = {INT64_MIN_VALUE,
 static inline BiAdjustScale adjustBi64ToSameScale(
     int64 x, int x_scale, int64 y, int y_scale, int* result_scale, int64* x_scaled, int64* y_scaled)
 {
-    Assert(x_scale >= 0 && x_scale <= MAXINT64DIGIT);
-    Assert(y_scale >= 0 && y_scale <= MAXINT64DIGIT);
+    Assert(x_scale >= 0);
+    Assert(x_scale <= MAXINT64DIGIT);
+    Assert(y_scale >= 0);
+    Assert(y_scale <= MAXINT64DIGIT);
 
     int delta_scale = x_scale - y_scale;
     int64 tmpval = 0;
@@ -149,7 +151,7 @@ static inline BiAdjustScale adjustBi64ToSameScale(
         /* use negative number is to avoid INT64_MIN * -1
          * out of int64 bound.
          */
-        tmpval = y < 0 ? y : -y;
+        tmpval = (y < 0) ? y : -y;
         *result_scale = x_scale;
         *x_scaled = x;
         /* the result of tmpval * ScaleMultipler[delta_scale]
@@ -165,7 +167,7 @@ static inline BiAdjustScale adjustBi64ToSameScale(
         /* use negative number is to avoid INT64_MIN * -1
          * out of int64 bound.
          */
-        tmpval = x < 0 ? x : -x;
+        tmpval = (x < 0) ? x : -x;
         *result_scale = y_scale;
         *y_scaled = y;
         /* the result of tmpval * ScaleMultipler[delta_scale]
@@ -195,8 +197,10 @@ static inline BiAdjustScale adjustBi64ToSameScale(
 static inline BiAdjustScale adjustBi128ToSameScale(
     int128 x, int x_scale, int128 y, int y_scale, int* result_scale, int128* x_scaled, int128* y_scaled)
 {
-    Assert(x_scale >= 0 && x_scale <= MAXINT128DIGIT);
-    Assert(y_scale >= 0 && y_scale <= MAXINT128DIGIT);
+    Assert(x_scale >= 0);
+    Assert(x_scale <= MAXINT128DIGIT);
+    Assert(y_scale >= 0);
+    Assert(y_scale <= MAXINT128DIGIT);
 
     int delta_scale = x_scale - y_scale;
     int128 tmpval = 0;
@@ -205,7 +209,7 @@ static inline BiAdjustScale adjustBi128ToSameScale(
         /* use negative number is to avoid INT128_MIN * -1
          * out of int128 bound.
          */
-        tmpval = y < 0 ? y : -y;
+        tmpval = (y < 0) ? y : -y;
         *result_scale = x_scale;
         *x_scaled = x;
         /* the result of tmpval * ScaleMultipler[delta_scale]
@@ -221,7 +225,7 @@ static inline BiAdjustScale adjustBi128ToSameScale(
         /* use negative number is to avoid INT128_MIN * -1
          * out of int128 bound.
          */
-        tmpval = x < 0 ? x : -x;
+        tmpval = (x < 0) ? x : -x;
         *result_scale = y_scale;
         *y_scaled = y;
         /* the result of tmpval * ScaleMultipler[delta_scale]
@@ -249,7 +253,8 @@ static inline BiAdjustScale adjustBi128ToSameScale(
 template <typename bitype>
 inline void getBiWeightDigit(bitype val, int scale, int* weight, int* firstDigit)
 {
-    Assert(scale >= 0 && scale <= MAXINT128DIGIT);
+    Assert(scale >= 0);
+    Assert(scale <= MAXINT128DIGIT);
 
     /* calculate weight of val */
     int digits = 0;
@@ -310,7 +315,8 @@ inline void getBiWeightDigit(bitype val, int scale, int* weight, int* firstDigit
 template <bool use_ctl>
 Datum bi64add64(Numeric larg, Numeric rarg, bictl* ctl)
 {
-    Assert(NUMERIC_IS_BI(larg) && NUMERIC_IS_BI(rarg));
+    Assert(NUMERIC_IS_BI(larg));
+    Assert(NUMERIC_IS_BI(rarg));
 
     uint8 lvalscale = NUMERIC_BI_SCALE(larg);
     uint8 rvalscale = NUMERIC_BI_SCALE(rarg);
@@ -385,7 +391,8 @@ Datum bi64add64(Numeric larg, Numeric rarg, bictl* ctl)
 template <bool larg_is_int128, bool rarg_is_int128, bool use_ctl>
 Datum bi128add128(Numeric larg, Numeric rarg, bictl* ctl)
 {
-    Assert(NUMERIC_IS_BI(larg) && NUMERIC_IS_BI(rarg));
+    Assert(NUMERIC_IS_BI(larg));
+    Assert(NUMERIC_IS_BI(rarg));
 
     uint8 lvalscale = NUMERIC_BI_SCALE(larg);
     uint8 rvalscale = NUMERIC_BI_SCALE(rarg);
@@ -432,6 +439,7 @@ Datum bi128add128(Numeric larg, Numeric rarg, bictl* ctl)
                 }
             }
         /* BI_LEFT_OUT_OF_BOUND OR BI_RIGHT_OUT_OF_BOUND OR add overflow */
+        /* fall through */
         default:
             /* result is out of int128 bound, call numeric_add calculate */
             Datum args[2];
@@ -460,7 +468,8 @@ Datum bi128add128(Numeric larg, Numeric rarg, bictl* ctl)
  */
 Datum bi64sub64(Numeric larg, Numeric rarg, bictl* ctl)
 {
-    Assert(NUMERIC_IS_BI(larg) && NUMERIC_IS_BI(rarg));
+    Assert(NUMERIC_IS_BI(larg));
+    Assert(NUMERIC_IS_BI(rarg));
 
     uint8 lvalscale = NUMERIC_BI_SCALE(larg);
     uint8 rvalscale = NUMERIC_BI_SCALE(rarg);
@@ -515,7 +524,8 @@ Datum bi64sub64(Numeric larg, Numeric rarg, bictl* ctl)
 template <bool larg_is_int128, bool rarg_is_int128>
 Datum bi128sub128(Numeric larg, Numeric rarg, bictl* ctl)
 {
-    Assert(NUMERIC_IS_BI(larg) && NUMERIC_IS_BI(rarg));
+    Assert(NUMERIC_IS_BI(larg));
+    Assert(NUMERIC_IS_BI(rarg));
 
     uint8 lvalscale = NUMERIC_BI_SCALE(larg);
     uint8 rvalscale = NUMERIC_BI_SCALE(rarg);
@@ -542,6 +552,7 @@ Datum bi128sub128(Numeric larg, Numeric rarg, bictl* ctl)
                 return makeNumeric128(result, resScale);
             }
         /* BI_LEFT_OUT_OF_BOUND OR BI_RIGHT_OUT_OF_BOUND OR add overflow */
+        /* fall through */
         default:
             /* result is out of int128 bound, call numeric_sub calculate */
             Datum args[2];
@@ -563,9 +574,12 @@ Datum bi128sub128(Numeric larg, Numeric rarg, bictl* ctl)
  */
 Datum bi64mul64(Numeric larg, Numeric rarg, bictl* ctl)
 {
-    Assert(NUMERIC_IS_BI(larg) && NUMERIC_IS_BI(rarg));
-    Assert(NUMERIC_BI_SCALE(larg) >= 0 && NUMERIC_BI_SCALE(larg) <= MAXINT64DIGIT);
-    Assert(NUMERIC_BI_SCALE(rarg) >= 0 && NUMERIC_BI_SCALE(rarg) <= MAXINT64DIGIT);
+    Assert(NUMERIC_IS_BI(larg));
+    Assert(NUMERIC_IS_BI(rarg));
+    Assert(NUMERIC_BI_SCALE(larg) >= 0);
+    Assert(NUMERIC_BI_SCALE(larg) <= MAXINT64DIGIT);
+    Assert(NUMERIC_BI_SCALE(rarg) >= 0);
+    Assert(NUMERIC_BI_SCALE(rarg) <= MAXINT64DIGIT);
 
     int64 leftval = NUMERIC_64VALUE(larg);
     int64 rightval = NUMERIC_64VALUE(rarg);
@@ -594,9 +608,12 @@ Datum bi64mul64(Numeric larg, Numeric rarg, bictl* ctl)
 template <bool larg_is_int128, bool rarg_is_int128>
 Datum bi128mul128(Numeric larg, Numeric rarg, bictl* ctl)
 {
-    Assert(NUMERIC_IS_BI(larg) && NUMERIC_IS_BI(rarg));
-    Assert(NUMERIC_BI_SCALE(larg) >= 0 && NUMERIC_BI_SCALE(larg) <= MAXINT128DIGIT);
-    Assert(NUMERIC_BI_SCALE(rarg) >= 0 && NUMERIC_BI_SCALE(rarg) <= MAXINT128DIGIT);
+    Assert(NUMERIC_IS_BI(larg));
+    Assert(NUMERIC_IS_BI(rarg));
+    Assert(NUMERIC_BI_SCALE(larg) >= 0);
+    Assert(NUMERIC_BI_SCALE(larg) <= MAXINT128DIGIT);
+    Assert(NUMERIC_BI_SCALE(rarg) >= 0);
+    Assert(NUMERIC_BI_SCALE(rarg) <= MAXINT128DIGIT);
 
     int128 leftval = 0;
     int128 rightval = 0;
@@ -621,6 +638,15 @@ Datum bi128mul128(Numeric larg, Numeric rarg, bictl* ctl)
     }
 }
 
+static inline void CheckBi64Args(Numeric larg, Numeric rarg)
+{
+    Assert(NUMERIC_IS_BI(larg));
+    Assert(NUMERIC_IS_BI(rarg));
+    Assert(NUMERIC_BI_SCALE(larg) >= 0);
+    Assert(NUMERIC_BI_SCALE(larg) <= MAXINT64DIGIT);
+    Assert(NUMERIC_BI_SCALE(rarg) >= 0);
+    Assert(NUMERIC_BI_SCALE(rarg) <= MAXINT64DIGIT);
+}
 /*
  * @Description: Calculate the result of bi64 divide bi64. The
  *               result is same with numeric_div.
@@ -632,9 +658,7 @@ Datum bi128mul128(Numeric larg, Numeric rarg, bictl* ctl)
  */
 Datum bi64div64(Numeric larg, Numeric rarg, bictl* ctl)
 {
-    Assert(NUMERIC_IS_BI(larg) && NUMERIC_IS_BI(rarg));
-    Assert(NUMERIC_BI_SCALE(larg) >= 0 && NUMERIC_BI_SCALE(larg) <= MAXINT64DIGIT);
-    Assert(NUMERIC_BI_SCALE(rarg) >= 0 && NUMERIC_BI_SCALE(rarg) <= MAXINT64DIGIT);
+    CheckBi64Args(larg, rarg);
 
     uint8 lvalscale = NUMERIC_BI_SCALE(larg);
     uint8 rvalscale = NUMERIC_BI_SCALE(rarg);
@@ -650,8 +674,8 @@ Datum bi64div64(Numeric larg, Numeric rarg, bictl* ctl)
     int firstdigit1 = 0;
     int firstdigit2 = 0;
     /* Use the absolute value of leftval and rightval. */
-    getBiWeightDigit<uint64>((leftval >= 0 ? leftval : -leftval), lvalscale, &weight1, &firstdigit1);
-    getBiWeightDigit<uint64>((rightval >= 0 ? rightval : -rightval), rvalscale, &weight2, &firstdigit2);
+    getBiWeightDigit<uint64>(((leftval >= 0) ? leftval : -leftval), lvalscale, &weight1, &firstdigit1);
+    getBiWeightDigit<uint64>(((rightval >= 0) ? rightval : -rightval), rvalscale, &weight2, &firstdigit2);
 
     /*
      * Estimate weight of quotient.  If the two first digits are equal, we
@@ -678,10 +702,10 @@ Datum bi64div64(Numeric larg, Numeric rarg, bictl* ctl)
         result = divnum / rightval;
         if (result > 0) {
             round = ((result % 10) >= 5);
-            result = round ? (result / 10 + 1) : result / 10;
+            result = round ? (result / 10 + 1) : (result / 10);
         } else if (result < 0) {
             round = ((result % 10) <= -5);
-            result = round ? (result / 10 - 1) : result / 10;
+            result = round ? (result / 10 - 1) : (result / 10);
         }
         /* round over, rscale-- */
         rscale--;
@@ -716,6 +740,16 @@ Datum Simplebi64div64(Numeric larg, Numeric rarg)
     return bi64div64(larg, rarg, NULL);
 }
 
+static inline void CheckBi128Args(Numeric larg, Numeric rarg)
+{
+    Assert(NUMERIC_IS_BI(larg));
+    Assert(NUMERIC_IS_BI(rarg));
+    Assert(NUMERIC_BI_SCALE(larg) >= 0);
+    Assert(NUMERIC_BI_SCALE(larg) <= MAXINT128DIGIT);
+    Assert(NUMERIC_BI_SCALE(rarg) >= 0);
+    Assert(NUMERIC_BI_SCALE(rarg) <= MAXINT128DIGIT);
+}
+
 /*
  * @Description: This function can calculate the result of bi64(big integer)
  *               divide bi128(big integer), can calculate the result of bi128
@@ -731,9 +765,7 @@ Datum Simplebi64div64(Numeric larg, Numeric rarg)
 template <bool larg_is_int128, bool rarg_is_int128>
 Datum bi128div128(Numeric larg, Numeric rarg, bictl* ctl)
 {
-    Assert(NUMERIC_IS_BI(larg) && NUMERIC_IS_BI(rarg));
-    Assert(NUMERIC_BI_SCALE(larg) >= 0 && NUMERIC_BI_SCALE(larg) <= MAXINT128DIGIT);
-    Assert(NUMERIC_BI_SCALE(rarg) >= 0 && NUMERIC_BI_SCALE(rarg) <= MAXINT128DIGIT);
+    CheckBi128Args(larg, rarg);
 
     uint8 lvalscale = NUMERIC_BI_SCALE(larg);
     uint8 rvalscale = NUMERIC_BI_SCALE(rarg);
@@ -754,8 +786,8 @@ Datum bi128div128(Numeric larg, Numeric rarg, bictl* ctl)
     int firstdigit1 = 0;
     int firstdigit2 = 0;
     /* Use the absolute value of leftval and rightval. */
-    getBiWeightDigit<uint128>((leftval >= 0 ? leftval : -leftval), lvalscale, &weight1, &firstdigit1);
-    getBiWeightDigit<uint128>((rightval >= 0 ? rightval : -rightval), rvalscale, &weight2, &firstdigit2);
+    getBiWeightDigit<uint128>(((leftval >= 0) ? leftval : -leftval), lvalscale, &weight1, &firstdigit1);
+    getBiWeightDigit<uint128>(((rightval >= 0) ? rightval : -rightval), rvalscale, &weight2, &firstdigit2);
 
     /*
      * Estimate weight of quotient.  If the two first digits are equal, we
@@ -780,9 +812,9 @@ Datum bi128div128(Numeric larg, Numeric rarg, bictl* ctl)
                !__builtin_mul_overflow(leftval, getScaleMultiplier(adjustScale), &divnum))) {
         result = divnum / rightval;
         if (result > 0) {
-            result = ((result % 10) >= 5) ? (result / 10 + 1) : result / 10;
+            result = ((result % 10) >= 5) ? (result / 10 + 1) : (result / 10);
         } else if (result < 0) {
-            result = ((result % 10) <= -5) ? (result / 10 - 1) : result / 10;
+            result = ((result % 10) <= -5) ? (result / 10 - 1) : (result / 10);
         }
         /* round over, rscale-- */
         rscale--;
@@ -816,7 +848,8 @@ Datum bi128div128(Numeric larg, Numeric rarg, bictl* ctl)
 template <biop op>
 Datum bi64cmp64(Numeric larg, Numeric rarg, bictl* ctl)
 {
-    Assert(NUMERIC_IS_BI(larg) && NUMERIC_IS_BI(rarg));
+    Assert(NUMERIC_IS_BI(larg));
+    Assert(NUMERIC_IS_BI(rarg));
 
     uint8 lvalscale = NUMERIC_BI_SCALE(larg);
     uint8 rvalscale = NUMERIC_BI_SCALE(rarg);
@@ -854,7 +887,7 @@ Datum bi64cmp64(Numeric larg, Numeric rarg, bictl* ctl)
                 result = (leftval_scaled > right_scaled);
                 PG_RETURN_INT32(result);
             case BICMP:  // > || == || <
-                result = (leftval_scaled > right_scaled ? 1 : (leftval_scaled < right_scaled ? -1 : 0));
+                result = ((leftval_scaled > right_scaled) ? 1 : ((leftval_scaled < right_scaled) ? -1 : 0));
                 PG_RETURN_INT32(result);
             default:
                 elog(LOG, "undefined big integer operator.");
@@ -883,7 +916,7 @@ Datum bi64cmp64(Numeric larg, Numeric rarg, bictl* ctl)
                 PG_RETURN_INT32(result);
             case BICMP: {
                 int128 right_scaled_128 = rightval * getScaleMultiplier(resScale - rvalscale);
-                result = (leftval > right_scaled_128 ? 1 : (leftval < right_scaled_128 ? -1 : 0));
+                result = ((leftval > right_scaled_128) ? 1 : ((leftval < right_scaled_128) ? -1 : 0));
                 PG_RETURN_INT32(result);
             }
             default:
@@ -914,7 +947,7 @@ Datum bi64cmp64(Numeric larg, Numeric rarg, bictl* ctl)
                 PG_RETURN_INT32(result);
             case BICMP: {
                 int128 left_scaled_128 = leftval * getScaleMultiplier(resScale - lvalscale);
-                result = (left_scaled_128 > rightval ? 1 : (left_scaled_128 < rightval ? -1 : 0));
+                result = ((left_scaled_128 > rightval) ? 1 : ((left_scaled_128 < rightval) ? -1 : 0));
                 PG_RETURN_INT32(result);
             }
             default:
@@ -943,7 +976,8 @@ Datum bi64cmp64(Numeric larg, Numeric rarg, bictl* ctl)
 template <biop op, bool larg_is_int128, bool rarg_is_int128>
 Datum bi128cmp128(Numeric larg, Numeric rarg, bictl* ctl)
 {
-    Assert(NUMERIC_IS_BI(larg) && NUMERIC_IS_BI(rarg));
+    Assert(NUMERIC_IS_BI(larg));
+    Assert(NUMERIC_IS_BI(rarg));
 
     uint8 lvalscale = NUMERIC_BI_SCALE(larg);
     uint8 rvalscale = NUMERIC_BI_SCALE(rarg);
@@ -985,7 +1019,7 @@ Datum bi128cmp128(Numeric larg, Numeric rarg, bictl* ctl)
                 result = (leftval_scaled > right_scaled);
                 PG_RETURN_INT32(result);
             case BICMP:
-                result = (leftval_scaled > right_scaled ? 1 : (leftval_scaled < right_scaled ? -1 : 0));
+                result = ((leftval_scaled > right_scaled) ? 1 : ((leftval_scaled < right_scaled) ? -1 : 0));
                 PG_RETURN_INT32(result);
             default:
                 elog(LOG, "undefined big integer operator.");
@@ -1041,7 +1075,8 @@ Datum bi128cmp128(Numeric larg, Numeric rarg, bictl* ctl)
  */
 static Datum bi64cmp64_smaller(Numeric larg, Numeric rarg, bictl* ctl)
 {
-    Assert(NUMERIC_IS_BI(larg) && NUMERIC_IS_BI(rarg));
+    Assert(NUMERIC_IS_BI(larg));
+    Assert(NUMERIC_IS_BI(rarg));
 
     uint8 lvalscale = NUMERIC_BI_SCALE(larg);
     uint8 rvalscale = NUMERIC_BI_SCALE(rarg);
@@ -1103,7 +1138,8 @@ static Datum bi64cmp64_smaller(Numeric larg, Numeric rarg, bictl* ctl)
  */
 static Datum bi64cmp64_larger(Numeric larg, Numeric rarg, bictl* ctl)
 {
-    Assert(NUMERIC_IS_BI(larg) && NUMERIC_IS_BI(rarg));
+    Assert(NUMERIC_IS_BI(larg));
+    Assert(NUMERIC_IS_BI(rarg));
 
     uint8 lvalscale = NUMERIC_BI_SCALE(larg);
     uint8 rvalscale = NUMERIC_BI_SCALE(rarg);
@@ -1168,7 +1204,8 @@ static Datum bi64cmp64_larger(Numeric larg, Numeric rarg, bictl* ctl)
 template <bool larg_is_int128, bool rarg_is_int128>
 Datum bi128cmp128_smaller(Numeric larg, Numeric rarg, bictl* ctl)
 {
-    Assert(NUMERIC_IS_BI(larg) && NUMERIC_IS_BI(rarg));
+    Assert(NUMERIC_IS_BI(larg));
+    Assert(NUMERIC_IS_BI(rarg));
 
     uint8 lvalscale = NUMERIC_BI_SCALE(larg);
     uint8 rvalscale = NUMERIC_BI_SCALE(rarg);
@@ -1243,7 +1280,8 @@ Datum bi128cmp128_smaller(Numeric larg, Numeric rarg, bictl* ctl)
 template <bool larg_is_int128, bool rarg_is_int128>
 Datum bi128cmp128_larger(Numeric larg, Numeric rarg, bictl* ctl)
 {
-    Assert(NUMERIC_IS_BI(larg) && NUMERIC_IS_BI(rarg));
+    Assert(NUMERIC_IS_BI(larg));
+    Assert(NUMERIC_IS_BI(rarg));
 
     uint8 lvalscale = NUMERIC_BI_SCALE(larg);
     uint8 rvalscale = NUMERIC_BI_SCALE(rarg);
@@ -1453,10 +1491,10 @@ static inline Datum int64_hash_bi(int64 num, int scale)
     }
 
     uint32 lohalf = (uint32)num;
-    uint32 hihalf = (uint32)(num >> 32);
+    uint32 hihalf = (uint32)((uint64)num >> 32);
 
     lohalf ^= (num >= 0) ? hihalf : ~hihalf;
-    return hash_uint32(lohalf) ^ scale;
+    return hash_uint32(lohalf) ^ (uint32)scale;
 }
 
 /*
@@ -1485,7 +1523,7 @@ static inline Datum int128_hash_bi(int128 num, int scale)
     }
 
     uint64 lohalf64 = (uint64)num;
-    uint64 hihalf64 = (uint64)(num >> 64);
+    uint64 hihalf64 = (uint64)((uint128)num >> 64);
 
     lohalf64 ^= (num >= 0) ? hihalf64 : ~hihalf64;
 
@@ -1493,7 +1531,7 @@ static inline Datum int128_hash_bi(int128 num, int scale)
     uint32 hihalf32 = (uint32)(lohalf64 >> 32);
 
     lohalf32 ^= (num >= 0) ? hihalf32 : ~hihalf32;
-    return hash_uint32(lohalf32) ^ scale;
+    return hash_uint32(lohalf32) ^ (uint32)scale;
 }
 
 /*
@@ -1733,7 +1771,8 @@ void replace_numeric_hash_to_bi(int numCols, FmgrInfo* hashFunctions)
  */
 Datum bi64_out(int64 data, int scale)
 {
-    Assert(scale >= 0 && scale <= MAXINT64DIGIT);
+    Assert(scale >= 0);
+    Assert(scale <= MAXINT64DIGIT);
     char buf[MAXBI64LEN];
     char* result = NULL;
     uint64 val_u64 = 0;
@@ -1823,7 +1862,8 @@ template <bool preceding_zero>
 static int int128_to_string(int128 data, char* str, int len, int scale)
 {
     Assert(data >= 0);
-    Assert(scale >= 0 && scale <= MAXINT128DIGIT);
+    Assert(scale >= 0);
+    Assert(scale <= MAXINT128DIGIT);
 
     int rc = -1;
     /* turn to int64 */
@@ -1880,7 +1920,8 @@ static int int128_to_string(int128 data, char* str, int len, int scale)
  */
 Datum bi128_out(int128 data, int scale)
 {
-    Assert(scale >= 0 && scale <= MAXINT128DIGIT);
+    Assert(scale >= 0);
+    Assert(scale <= MAXINT128DIGIT);
     char buf[MAXBI128LEN];
     char* result = NULL;
 

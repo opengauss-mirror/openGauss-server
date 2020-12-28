@@ -40,7 +40,6 @@ static char sccsid[] = "@(#)dl.c	5.4 (Berkeley) 2/23/91";
 
 #include <nlist.h>
 #include <link.h>
-#include <dlfcn.h>
 
 #include "dynloader.h"
 #include "securec.h"

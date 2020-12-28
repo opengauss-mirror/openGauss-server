@@ -81,35 +81,35 @@ select col1, col2, char_length(col3) from inserttest;
 (8 rows)
 
 drop table inserttest;
-create table s1_openGauss1201201(id int, num int);
-create sequence ss1_openGauss1201201;
-select setval('ss1_openGauss1201201', 10);
+create table s1_DTS2019021501700(id int, num int);
+create sequence ss1_DTS2019021501700;
+select setval('ss1_DTS2019021501700', 10);
  setval 
 --------
      10
 (1 row)
 
-select * from ss1_openGauss1201201;
+select * from ss1_DTS2019021501700;
     sequence_name     | last_value | start_value | increment_by |      max_value      | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
 ----------------------+------------+-------------+--------------+---------------------+-----------+-------------+---------+-----------+-----------+------
- ss1_opengauss1201201 |         10 |           1 |            1 | 9223372036854775807 |         1 |           1 |       0 | f         | t         |    0
+ ss1_dts2019021501700 |         10 |           1 |            1 | 9223372036854775807 |         1 |           1 |       0 | f         | t         |    0
 (1 row)
 
-alter table s1_openGauss1201201 alter column id set default nextval('ss1_openGauss1201201');
-insert into s1_openGauss1201201 (num) values (11);
-insert into s1_openGauss1201201 (num) values (12);
-select * from s1_openGauss1201201 order by id;
+alter table s1_DTS2019021501700 alter column id set default nextval('ss1_DTS2019021501700');
+insert into s1_DTS2019021501700 (num) values (11);
+insert into s1_DTS2019021501700 (num) values (12);
+select * from s1_DTS2019021501700 order by id;
  id | num 
 ----+-----
  11 |  11
  12 |  12
 (2 rows)
 
-select * from ss1_openGauss1201201;
+select * from ss1_DTS2019021501700;
     sequence_name     | last_value | start_value | increment_by |      max_value      | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
 ----------------------+------------+-------------+--------------+---------------------+-----------+-------------+---------+-----------+-----------+------
- ss1_opengauss1201201 |         12 |           1 |            1 | 9223372036854775807 |         1 |           1 |      31 | f         | t         |    0
+ ss1_dts2019021501700 |         12 |           1 |            1 | 9223372036854775807 |         1 |           1 |      31 | f         | t         |    0
 (1 row)
 
-drop table s1_openGauss1201201;
-drop sequence ss1_openGauss1201201;
+drop table s1_DTS2019021501700;
+drop sequence ss1_DTS2019021501700;

@@ -194,7 +194,7 @@ Datum file_fdw_validator(PG_FUNCTION_ARGS)
         DefElem* def = (DefElem*)lfirst(cell);
 
         if (!is_valid_option(def->defname, catalog)) {
-            const struct FileFdwOption* opt;
+            const struct FileFdwOption* opt = NULL;
             StringInfoData buf;
 
             /*
@@ -554,7 +554,7 @@ static TupleTableSlot* fileIterateForeignScan(ForeignScanState* node)
      * We can also pass tupleOid = NULL because we don't allow oids for
      * foreign tables.
      */
-    (void)ExecClearTuple(slot);
+    ExecClearTuple(slot);
     found = NextCopyFrom(festate->cstate, NULL, slot->tts_values, slot->tts_isnull, NULL);
     if (found)
         ExecStoreVirtualTuple(slot);

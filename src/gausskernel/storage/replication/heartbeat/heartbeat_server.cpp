@@ -16,7 +16,7 @@
  *  heartbeat_server.cpp
  *
  * IDENTIFICATION
- *        src/gausskernel/storage/replication/heartbeat/heartbeat_server.cpp 
+ *        src/gausskernel/storage/replication/heartbeat/heartbeat_server.cpp
  *
  * ---------------------------------------------------------------------------------------
  */
@@ -35,7 +35,7 @@
 
 using namespace PureLibpq;
 
-static void AcceptConn(int epollFd, int events, void* arg, void** releasedConnPtr);
+static void AcceptConn(int epollFd, int events, void *arg, void **releasedConnPtr);
 
 HeartbeatServer::HeartbeatServer(int epollfd)
 {
@@ -67,21 +67,17 @@ bool HeartbeatServer::Start()
     for (int i = START_REPLNODE_NUM; i < MAX_REPLNODE_NUM; i++) {
         if (t_thrd.postmaster_cxt.ReplConnArray[i] != NULL) {
             if (IsAlreadyListen(t_thrd.postmaster_cxt.ReplConnArray[i]->localhost,
-                t_thrd.postmaster_cxt.ReplConnArray[i]->localheartbeatport)) {
+                                t_thrd.postmaster_cxt.ReplConnArray[i]->localheartbeatport)) {
                 continue;
             }
 
-            status = StreamServerPort(AF_UNSPEC,
-                t_thrd.postmaster_cxt.ReplConnArray[i]->localhost,
-                (unsigned short)t_thrd.postmaster_cxt.ReplConnArray[i]->localheartbeatport,
-                serverListenSocket_,
-                MAX_REPLNODE_NUM);
+            status = StreamServerPort(AF_UNSPEC, t_thrd.postmaster_cxt.ReplConnArray[i]->localhost,
+                                      (unsigned short)t_thrd.postmaster_cxt.ReplConnArray[i]->localheartbeatport,
+                                      serverListenSocket_, MAX_REPLNODE_NUM);
             if (status != STATUS_OK) {
-                ereport(COMMERROR,
-                    (errmsg("could not create Ha listen socket for ReplConnInfoArr[%d]\"%s:%d\"",
-                        i,
-                        t_thrd.postmaster_cxt.ReplConnArray[i]->localhost,
-                        t_thrd.postmaster_cxt.ReplConnArray[i]->localheartbeatport)));
+                ereport(COMMERROR, (errmsg("could not create Ha listen socket for ReplConnInfoArr[%d]\"%s:%d\"", i,
+                                           t_thrd.postmaster_cxt.ReplConnArray[i]->localhost,
+                                           t_thrd.postmaster_cxt.ReplConnArray[i]->localheartbeatport)));
                 CloseListenSockets();
                 return false;
             }
@@ -150,16 +146,16 @@ bool HeartbeatServer::InitListenConnections()
             return false;
         }
 
-        HeartbeatConnection* listenCon = MakeConnection(listenFd, NULL);
+        HeartbeatConnection *listenCon = MakeConnection(listenFd, NULL);
         if (listenCon == NULL) {
             ereport(COMMERROR,
-                (errmsg("makeConnection failed, listenCon is NULL,epollFd=%d, listenFd=%d.", epollfd_, listenFd)));
+                    (errmsg("makeConnection failed, listenCon is NULL,epollFd=%d, listenFd=%d.", epollfd_, listenFd)));
             return false;
         }
 
         listenCon->callback = AcceptConn;
         listenCon->epHandle = epollfd_;
-        listenCon->arg = (void*)this;
+        listenCon->arg = (void *)this;
 
         if (EventAdd(epollfd_, EPOLLIN, listenCon)) {
             ereport(COMMERROR, (errmsg("Add listen socket failed[fd=%d].", listenFd)));
@@ -195,7 +191,7 @@ void HeartbeatServer::CloseListenSockets()
     }
 }
 
-bool HeartbeatServer::IsAlreadyListen(const char* ip, int port) const
+bool HeartbeatServer::IsAlreadyListen(const char *ip, int port) const
 {
     int listen_index = 0;
     char sock_ip[IP_LEN] = {0};
@@ -209,12 +205,12 @@ bool HeartbeatServer::IsAlreadyListen(const char* ip, int port) const
         if (serverListenSocket_[listen_index] != PGINVALID_SOCKET) {
             struct sockaddr_in saddr;
             socklen_t slen;
-            char* result = NULL;
+            char *result = NULL;
             rc = memset_s(&saddr, sizeof(saddr), 0, sizeof(saddr));
             securec_check(rc, "", "");
 
             slen = sizeof(saddr);
-            if (getsockname(serverListenSocket_[listen_index], (struct sockaddr*)&saddr, (socklen_t*)&slen) < 0) {
+            if (getsockname(serverListenSocket_[listen_index], (struct sockaddr *)&saddr, (socklen_t *)&slen) < 0) {
                 ereport(WARNING, (errmsg("Get socket name failed")));
                 continue;
             }
@@ -247,43 +243,35 @@ bool HeartbeatServer::IsAlreadyListen(const char* ip, int port) const
  * else the conn is illegal and remmove it from unidentifiedConns_.
  *
  */
-bool HeartbeatServer::AddConnection(HeartbeatConnection* con, HeartbeatConnection** releasedConnPtr)
+bool HeartbeatServer::AddConnection(HeartbeatConnection *con, HeartbeatConnection **releasedConnPtr)
 {
     *releasedConnPtr = NULL;
     for (int i = START_REPLNODE_NUM; i < MAX_REPLNODE_NUM; i++) {
-        ReplConnInfo* replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
+        ReplConnInfo *replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
         if (replconninfo == NULL) {
             continue;
         }
 
-        if (strncmp((char*)replconninfo->remotehost, con->remoteHost, IP_LEN) == 0 &&
+        if (strncmp((char *)replconninfo->remotehost, con->remoteHost, IP_LEN) == 0 &&
             replconninfo->remoteheartbeatport == con->channelIdentifier) {
             if (identifiedConns_[i] != NULL) {
                 /* remove old connection if has duplicated connections. */
-                ereport(COMMERROR,
-                    (errmsg("The connection has existed and remove the old connection, "
-                            "remote ip: %s, remote heartbeat port:%d, old fd:%d, new fd:%d.",
-                        con->remoteHost,
-                        con->channelIdentifier,
-                        identifiedConns_[i]->fd,
-                        con->fd)));
+                ereport(COMMERROR, (errmsg("The connection has existed and remove the old connection, "
+                                           "remote ip: %s, remote heartbeat port:%d, old fd:%d, new fd:%d.",
+                                           con->remoteHost, con->channelIdentifier, identifiedConns_[i]->fd, con->fd)));
                 RemoveConn(identifiedConns_[i]);
                 *releasedConnPtr = identifiedConns_[i];
             }
             identifiedConns_[i] = con;
-            ereport(LOG,
-                (errmsg("Adding connection successed, remote ip: %s, remote heartbeat port:%d.",
-                    con->remoteHost,
-                    con->channelIdentifier)));
+            ereport(LOG, (errmsg("Adding connection successed, remote ip: %s, remote heartbeat port:%d.",
+                                 con->remoteHost, con->channelIdentifier)));
             RemoveUnidentifiedConnection(con);
             return true;
         }
     }
 
-    ereport(COMMERROR,
-        (errmsg("The connection is illegal, remote ip: %s, remote heartbeat port:%d.",
-            con->remoteHost,
-            con->channelIdentifier)));
+    ereport(COMMERROR, (errmsg("The connection is illegal, remote ip: %s, remote heartbeat port:%d.", con->remoteHost,
+                               con->channelIdentifier)));
     RemoveUnidentifiedConnection(con);
     return false;
 }
@@ -291,38 +279,32 @@ bool HeartbeatServer::AddConnection(HeartbeatConnection* con, HeartbeatConnectio
 /*
  * Remove an indentified connection.
  */
-void HeartbeatServer::RemoveConnection(HeartbeatConnection* con)
+void HeartbeatServer::RemoveConnection(HeartbeatConnection *con)
 {
     for (int i = START_REPLNODE_NUM; i < MAX_REPLNODE_NUM; i++) {
-        ReplConnInfo* replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
+        ReplConnInfo *replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
         if (replconninfo == NULL) {
             continue;
         }
 
-        if (strncmp((char*)replconninfo->remotehost, con->remoteHost, IP_LEN) == 0 &&
+        if (strncmp((char *)replconninfo->remotehost, con->remoteHost, IP_LEN) == 0 &&
             replconninfo->remoteheartbeatport == con->channelIdentifier) {
             if (identifiedConns_[i] == NULL) {
-                ereport(COMMERROR,
-                    (errmsg("The connection is not existed, remote ip: %s, remote heartbeat port:%d.",
-                        con->remoteHost,
-                        con->channelIdentifier)));
+                ereport(COMMERROR, (errmsg("The connection is not existed, remote ip: %s, remote heartbeat port:%d.",
+                                           con->remoteHost, con->channelIdentifier)));
             } else {
-                ereport(LOG,
-                    (errmsg("Removing connection successed, remote ip: %s, remote heartbeat port:%d.",
-                        con->remoteHost,
-                        con->channelIdentifier)));
+                ereport(LOG, (errmsg("Removing connection successed, remote ip: %s, remote heartbeat port:%d.",
+                                     con->remoteHost, con->channelIdentifier)));
                 identifiedConns_[i] = NULL;
             }
             return;
         }
     }
-    ereport(COMMERROR,
-        (errmsg("Remove an unexisted connection, remote ip: %s, remote heartbeat port:%d.",
-            con->remoteHost,
-            con->channelIdentifier)));
+    ereport(COMMERROR, (errmsg("Remove an unexisted connection, remote ip: %s, remote heartbeat port:%d.",
+                               con->remoteHost, con->channelIdentifier)));
 }
 
-void HeartbeatServer::AddUnidentifiedConnection(HeartbeatConnection* con, HeartbeatConnection** releasedConnPtr)
+void HeartbeatServer::AddUnidentifiedConnection(HeartbeatConnection *con, HeartbeatConnection **releasedConnPtr)
 {
     for (int i = START_REPLNODE_NUM; i < MAX_REPLNODE_NUM; i++) {
         if (unidentifiedConns_[i] == NULL) {
@@ -338,7 +320,7 @@ void HeartbeatServer::AddUnidentifiedConnection(HeartbeatConnection* con, Heartb
 }
 
 /* used for move con from unidentifiedConns to identifiedConns_, so can't free con */
-void HeartbeatServer::RemoveUnidentifiedConnection(HeartbeatConnection* con)
+void HeartbeatServer::RemoveUnidentifiedConnection(HeartbeatConnection *con)
 {
     for (int i = START_REPLNODE_NUM; i < MAX_REPLNODE_NUM; i++) {
         if (unidentifiedConns_[i] == con) {
@@ -351,7 +333,7 @@ void HeartbeatServer::RemoveUnidentifiedConnection(HeartbeatConnection* con)
 }
 
 /* release the oldest unidentified connection and return the position */
-int HeartbeatServer::ReleaseOldestUnidentifiedConnection(HeartbeatConnection** releasedConnPtr)
+int HeartbeatServer::ReleaseOldestUnidentifiedConnection(HeartbeatConnection **releasedConnPtr)
 {
     int oldestPos = -1;
     TimestampTz minTime = -1;
@@ -377,16 +359,16 @@ int HeartbeatServer::ReleaseOldestUnidentifiedConnection(HeartbeatConnection** r
 }
 
 /* The server process the heartbeat packet and reply. */
-static void ProcessHeartbeatPacketServer(int epollFd, int events, void* arg, void** releasedConnPtr)
+static void ProcessHeartbeatPacketServer(int epollFd, int events, void *arg, void **releasedConnPtr)
 {
     ereport(DEBUG2, (errmsg("[server] process heartbeat")));
 
     *releasedConnPtr = NULL;
-    HeartbeatConnection* con = (HeartbeatConnection*)arg;
-    HeartbeatServer* server = (HeartbeatServer*)con->arg;
+    HeartbeatConnection *con = (HeartbeatConnection *)arg;
+    HeartbeatServer *server = (HeartbeatServer *)con->arg;
 
     HeartbeatPacket inPacket;
-    if (pq_getbytes(con->port, (char*)(&inPacket), sizeof(HeartbeatPacket)) != 0) {
+    if (pq_getbytes(con->port, (char *)(&inPacket), sizeof(HeartbeatPacket)) != 0) {
         ereport(LOG, (errmsg("connection closed by peer.")));
         server->RemoveConnection(con);
         RemoveConn(con);
@@ -404,15 +386,15 @@ static void ProcessHeartbeatPacketServer(int epollFd, int events, void* arg, voi
     }
 }
 
-static void ProcessStartupPacket(int epollFd, int events, void* arg, void** releasedConnPtr)
+static void ProcessStartupPacket(int epollFd, int events, void *arg, void **releasedConnPtr)
 {
     *releasedConnPtr = NULL;
-    HeartbeatConnection* con = (HeartbeatConnection*)arg;
-    HeartbeatServer* server = (HeartbeatServer*)con->arg;
+    HeartbeatConnection *con = (HeartbeatConnection *)arg;
+    HeartbeatServer *server = (HeartbeatServer *)con->arg;
 
     HeartbeatStartupPacket inPacket;
     inPacket.channelIdentifier = INVALID_CHANNEL_ID;
-    if (pq_getbytes(con->port, (char*)(&inPacket), sizeof(HeartbeatStartupPacket)) != 0) {
+    if (pq_getbytes(con->port, (char *)(&inPacket), sizeof(HeartbeatStartupPacket)) != 0) {
         ereport(LOG, (errmsg("connection closed by peer.")));
         server->RemoveUnidentifiedConnection(con);
         RemoveConn(con);
@@ -432,7 +414,7 @@ static void ProcessStartupPacket(int epollFd, int events, void* arg, void** rele
     con->lastActiveTime = GetCurrentTimestamp();
     con->callback = ProcessHeartbeatPacketServer;
 
-    if (!server->AddConnection(con, (HeartbeatConnection**)releasedConnPtr)) {
+    if (!server->AddConnection(con, (HeartbeatConnection **)releasedConnPtr)) {
         RemoveConn(con);
         *releasedConnPtr = con;
         return;
@@ -447,11 +429,11 @@ static void ProcessStartupPacket(int epollFd, int events, void* arg, void** rele
 }
 
 /* Accept new connections from clients */
-static void AcceptConn(int epollFd, int events, void* arg, void** releasedConnPtr)
+static void AcceptConn(int epollFd, int events, void *arg, void **releasedConnPtr)
 {
     *releasedConnPtr = NULL;
-    PurePort* port = NULL;
-    HeartbeatConnection* listenCon = (HeartbeatConnection*)arg;
+    PurePort *port = NULL;
+    HeartbeatConnection *listenCon = (HeartbeatConnection *)arg;
     if (listenCon == NULL) {
         ereport(COMMERROR, (errmsg("AcceptConn arg is NULL.")));
         return;
@@ -459,7 +441,7 @@ static void AcceptConn(int epollFd, int events, void* arg, void** releasedConnPt
 
     port = ConnectCreate(listenCon->fd);
     if (port != NULL) {
-        HeartbeatConnection* newCon = MakeConnection(port->sock, port);
+        HeartbeatConnection *newCon = MakeConnection(port->sock, port);
         if (newCon == NULL) {
             ereport(DEBUG1, (errmsg("makeConnection failed.")));
             CloseAndFreePort(port);
@@ -475,8 +457,8 @@ static void AcceptConn(int epollFd, int events, void* arg, void** releasedConnPt
          * The connection has not send startup packet,
          * and store it in undentified connections first.
          */
-        HeartbeatServer* server = (HeartbeatServer*)listenCon->arg;
-        server->AddUnidentifiedConnection(newCon, (HeartbeatConnection**)releasedConnPtr);
+        HeartbeatServer *server = (HeartbeatServer *)listenCon->arg;
+        server->AddUnidentifiedConnection(newCon, (HeartbeatConnection **)releasedConnPtr);
 
         /* add new connection fd to main thread to process startup packet */
         if (EventAdd(epollFd, EPOLLIN, newCon)) {

@@ -22,6 +22,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/tableam.h"
 #include "access/tupconvert.h"
 #include "utils/builtins.h"
 
@@ -60,18 +61,23 @@
  * outdesc as the "expected" rowtype.  This is okay for current uses but
  * might need generalization in future.
  */
-TupleConversionMap* convert_tuples_by_position(TupleDesc indesc, TupleDesc outdesc, const char* msg)
+TupleConversionMap *convert_tuples_by_position(TupleDesc indesc, TupleDesc outdesc, const char *msg)
 {
+    TupleConversionMap *map = NULL;
+    AttrNumber *attrMap = NULL;
+    int nincols;
+    int noutcols;
+    int n;
     int i;
-    /* Verify compatibility and prepare attribute-number map */
-    int n = outdesc->natts;
-    AttrNumber* attr_map = (AttrNumber*)palloc0(n * sizeof(AttrNumber));
-    int j = 0; /* j is next physical input attribute */
-    /* these count non-dropped attributes */
-    int nincols = 0;
-    int noutcols = 0;
-    bool same = true;
+    int j;
+    bool same = false;
 
+    /* Verify compatibility and prepare attribute-number map */
+    n = outdesc->natts;
+    attrMap = (AttrNumber *)palloc0(n * sizeof(AttrNumber));
+    j = 0;                  /* j is next physical input attribute */
+    nincols = noutcols = 0; /* these count non-dropped attributes */
+    same = true;
     for (i = 0; i < n; i++) {
         Form_pg_attribute att = outdesc->attrs[i];
         Oid atttypid;
@@ -89,18 +95,15 @@ TupleConversionMap* convert_tuples_by_position(TupleDesc indesc, TupleDesc outde
             nincols++;
             /* Found matching column, check type */
             if (atttypid != att->atttypid || (atttypmod != att->atttypmod && atttypmod >= 0))
-                ereport(ERROR,
-                    (errcode(ERRCODE_DATATYPE_MISMATCH),
-                        errmsg_internal("%s", _(msg)),
-                        errdetail("Returned type %s does not match expected type %s in column %d.",
-                            format_type_with_typemod(att->atttypid, att->atttypmod),
-                            format_type_with_typemod(atttypid, atttypmod),
-                            noutcols)));
-            attr_map[i] = (AttrNumber)(j + 1);
+                ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg_internal("%s", _(msg)),
+                                errdetail("Returned type %s does not match expected type %s in column %d.",
+                                          format_type_with_typemod(att->atttypid, att->atttypmod),
+                                          format_type_with_typemod(atttypid, atttypmod), noutcols)));
+            attrMap[i] = (AttrNumber)(j + 1);
             j++;
             break;
         }
-        if (attr_map[i] == 0)
+        if (attrMap[i] == 0)
             same = false; /* we'll complain below */
     }
 
@@ -114,13 +117,10 @@ TupleConversionMap* convert_tuples_by_position(TupleDesc indesc, TupleDesc outde
 
     /* Report column count mismatch using the non-dropped-column counts */
     if (!same)
-        ereport(ERROR,
-            (errcode(ERRCODE_DATATYPE_MISMATCH),
-                errmsg_internal("%s", _(msg)),
-                errdetail("Number of returned columns (%d) does not match "
-                          "expected column count (%d).",
-                    nincols,
-                    noutcols)));
+        ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg_internal("%s", _(msg)),
+                        errdetail("Number of returned columns (%d) does not match "
+                                  "expected column count (%d).",
+                                  nincols, noutcols)));
 
     /*
      * Check to see if the map is one-to-one and the tuple types are the same.
@@ -129,7 +129,7 @@ TupleConversionMap* convert_tuples_by_position(TupleDesc indesc, TupleDesc outde
      */
     if (indesc->natts == outdesc->natts && indesc->tdtypeid == outdesc->tdtypeid) {
         for (i = 0; i < n; i++) {
-            if (attr_map[i] == (i + 1))
+            if (attrMap[i] == (i + 1))
                 continue;
 
             /*
@@ -137,7 +137,7 @@ TupleConversionMap* convert_tuples_by_position(TupleDesc indesc, TupleDesc outde
              * also dropped, we needn't convert.  However, attlen and attalign
              * must agree.
              */
-            if (attr_map[i] == 0 && indesc->attrs[i]->attisdropped &&
+            if (attrMap[i] == 0 && indesc->attrs[i]->attisdropped &&
                 indesc->attrs[i]->attlen == outdesc->attrs[i]->attlen &&
                 indesc->attrs[i]->attalign == outdesc->attrs[i]->attalign)
                 continue;
@@ -150,21 +150,21 @@ TupleConversionMap* convert_tuples_by_position(TupleDesc indesc, TupleDesc outde
 
     if (same) {
         /* Runtime conversion is not needed */
-        pfree(attr_map);
+        pfree(attrMap);
         return NULL;
     }
 
     /* Prepare the map structure */
-    TupleConversionMap* map = (TupleConversionMap*)palloc(sizeof(TupleConversionMap));
+    map = (TupleConversionMap *)palloc(sizeof(TupleConversionMap));
     map->indesc = indesc;
     map->outdesc = outdesc;
-    map->attrMap = attr_map;
+    map->attrMap = attrMap;
     /* preallocate workspace for Datum arrays */
-    map->outvalues = (Datum*)palloc(n * sizeof(Datum));
-    map->outisnull = (bool*)palloc(n * sizeof(bool));
+    map->outvalues = (Datum *)palloc(n * sizeof(Datum));
+    map->outisnull = (bool *)palloc(n * sizeof(bool));
     n = indesc->natts + 1; /* +1 for NULL */
-    map->invalues = (Datum*)palloc(n * sizeof(Datum));
-    map->inisnull = (bool*)palloc(n * sizeof(bool));
+    map->invalues = (Datum *)palloc(n * sizeof(Datum));
+    map->inisnull = (bool *)palloc(n * sizeof(bool));
     map->invalues[0] = (Datum)0; /* set up the NULL entry */
     map->inisnull[0] = true;
 
@@ -178,20 +178,20 @@ TupleConversionMap* convert_tuples_by_position(TupleDesc indesc, TupleDesc outde
  * match of both type and typmod.  The error messages will be a bit unhelpful
  * unless both rowtypes are named composite types.
  */
-TupleConversionMap* convert_tuples_by_name(TupleDesc indesc, TupleDesc outdesc, const char* msg)
+TupleConversionMap *convert_tuples_by_name(TupleDesc indesc, TupleDesc outdesc, const char *msg)
 {
-    TupleConversionMap* map = NULL;
-    AttrNumber* attr_map = NULL;
+    TupleConversionMap *map = NULL;
+    AttrNumber *attrMap = NULL;
     int n;
     int i;
     bool same = false;
 
     /* Verify compatibility and prepare attribute-number map */
     n = outdesc->natts;
-    attr_map = (AttrNumber*)palloc0(n * sizeof(AttrNumber));
+    attrMap = (AttrNumber *)palloc0(n * sizeof(AttrNumber));
     for (i = 0; i < n; i++) {
         Form_pg_attribute att = outdesc->attrs[i];
-        char* attname = NULL;
+        char *attname = NULL;
         Oid atttypid;
         int32 atttypmod;
         int j;
@@ -209,24 +209,17 @@ TupleConversionMap* convert_tuples_by_name(TupleDesc indesc, TupleDesc outdesc, 
                 /* Found it, check type */
                 if (atttypid != att->atttypid || atttypmod != att->atttypmod)
                     ereport(ERROR,
-                        (errcode(ERRCODE_DATATYPE_MISMATCH),
-                            errmsg_internal("%s", _(msg)),
-                            errdetail("Attribute \"%s\" of type %s does not match corresponding attribute of type %s.",
-                                attname,
-                                format_type_be(outdesc->tdtypeid),
-                                format_type_be(indesc->tdtypeid))));
-                attr_map[i] = (AttrNumber)(j + 1);
+                            (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg_internal("%s", _(msg)),
+                             errdetail("Attribute \"%s\" of type %s does not match corresponding attribute of type %s.",
+                                       attname, format_type_be(outdesc->tdtypeid), format_type_be(indesc->tdtypeid))));
+                attrMap[i] = (AttrNumber)(j + 1);
                 break;
             }
         }
-        if (attr_map[i] == 0)
-            ereport(ERROR,
-                (errcode(ERRCODE_DATATYPE_MISMATCH),
-                    errmsg_internal("%s", _(msg)),
-                    errdetail("Attribute \"%s\" of type %s does not exist in type %s.",
-                        attname,
-                        format_type_be(outdesc->tdtypeid),
-                        format_type_be(indesc->tdtypeid))));
+        if (attrMap[i] == 0)
+            ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg_internal("%s", _(msg)),
+                            errdetail("Attribute \"%s\" of type %s does not exist in type %s.", attname,
+                                      format_type_be(outdesc->tdtypeid), format_type_be(indesc->tdtypeid))));
     }
 
     /*
@@ -237,7 +230,7 @@ TupleConversionMap* convert_tuples_by_name(TupleDesc indesc, TupleDesc outdesc, 
     if (indesc->natts == outdesc->natts && indesc->tdtypeid == outdesc->tdtypeid) {
         same = true;
         for (i = 0; i < n; i++) {
-            if (attr_map[i] == (i + 1))
+            if (attrMap[i] == (i + 1))
                 continue;
 
             /*
@@ -245,7 +238,7 @@ TupleConversionMap* convert_tuples_by_name(TupleDesc indesc, TupleDesc outdesc, 
              * also dropped, we needn't convert.  However, attlen and attalign
              * must agree.
              */
-            if (attr_map[i] == 0 && indesc->attrs[i]->attisdropped &&
+            if (attrMap[i] == 0 && indesc->attrs[i]->attisdropped &&
                 indesc->attrs[i]->attlen == outdesc->attrs[i]->attlen &&
                 indesc->attrs[i]->attalign == outdesc->attrs[i]->attalign)
                 continue;
@@ -258,21 +251,21 @@ TupleConversionMap* convert_tuples_by_name(TupleDesc indesc, TupleDesc outdesc, 
 
     if (same) {
         /* Runtime conversion is not needed */
-        pfree(attr_map);
+        pfree(attrMap);
         return NULL;
     }
 
     /* Prepare the map structure */
-    map = (TupleConversionMap*)palloc(sizeof(TupleConversionMap));
+    map = (TupleConversionMap *)palloc(sizeof(TupleConversionMap));
     map->indesc = indesc;
     map->outdesc = outdesc;
-    map->attrMap = attr_map;
+    map->attrMap = attrMap;
     /* preallocate workspace for Datum arrays */
-    map->outvalues = (Datum*)palloc(n * sizeof(Datum));
-    map->outisnull = (bool*)palloc(n * sizeof(bool));
+    map->outvalues = (Datum *)palloc(n * sizeof(Datum));
+    map->outisnull = (bool *)palloc(n * sizeof(bool));
     n = indesc->natts + 1; /* +1 for NULL */
-    map->invalues = (Datum*)palloc(n * sizeof(Datum));
-    map->inisnull = (bool*)palloc(n * sizeof(bool));
+    map->invalues = (Datum *)palloc(n * sizeof(Datum));
+    map->inisnull = (bool *)palloc(n * sizeof(bool));
     map->invalues[0] = (Datum)0; /* set up the NULL entry */
     map->inisnull[0] = true;
 
@@ -282,13 +275,13 @@ TupleConversionMap* convert_tuples_by_name(TupleDesc indesc, TupleDesc outdesc, 
 /*
  * Perform conversion of a tuple according to the map.
  */
-HeapTuple do_convert_tuple(HeapTuple tuple, TupleConversionMap* map)
+HeapTuple do_convert_tuple(HeapTuple tuple, TupleConversionMap *map)
 {
-    AttrNumber* attr_map = map->attrMap;
-    Datum* invalues = map->invalues;
-    bool* inisnull = map->inisnull;
-    Datum* outvalues = map->outvalues;
-    bool* outisnull = map->outisnull;
+    AttrNumber *attrMap = map->attrMap;
+    Datum *invalues = map->invalues;
+    bool *inisnull = map->inisnull;
+    Datum *outvalues = map->outvalues;
+    bool *outisnull = map->outisnull;
     int outnatts = map->outdesc->natts;
     int i;
 
@@ -303,7 +296,7 @@ HeapTuple do_convert_tuple(HeapTuple tuple, TupleConversionMap* map)
      * Transpose into proper fields of the new tuple.
      */
     for (i = 0; i < outnatts; i++) {
-        int j = attr_map[i];
+        int j = attrMap[i];
 
         outvalues[i] = invalues[j];
         outisnull[i] = inisnull[j];
@@ -312,13 +305,13 @@ HeapTuple do_convert_tuple(HeapTuple tuple, TupleConversionMap* map)
     /*
      * Now form the new tuple.
      */
-    return heap_form_tuple(map->outdesc, outvalues, outisnull);
+    return (HeapTuple)tableam_tops_form_tuple(map->outdesc, outvalues, outisnull, HEAP_TUPLE);
 }
 
 /*
  * Free a TupleConversionMap structure.
  */
-void free_conversion_map(TupleConversionMap* map)
+void free_conversion_map(TupleConversionMap *map)
 {
     /* indesc and outdesc are not ours to free */
     pfree(map->attrMap);

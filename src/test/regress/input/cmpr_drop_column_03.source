@@ -29,13 +29,13 @@ CREATE TABLE cmpr_drop_column_03_raw(
         c_int_9 integer NOT NULL,
         c_int_10 integer NOT NULL,
         c_int_11 integer NOT NULL,
-        c_int_12 integer NOT NULL) COMPRESS;
+        c_int_12 integer NOT NULL) ;
 ALTER TABLE cmpr_drop_column_03_raw DROP COLUMN C_INT_4;
 ALTER TABLE cmpr_drop_column_03_raw ADD COLUMN C_INT_4 INTEGER;
-COPY cmpr_drop_column_03 TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_column_03.data';
-COPY cmpr_drop_column_03_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_column_03.data';
+COPY cmpr_drop_column_03 TO '@abs_srcdir@/data/cmpr_drop_column_03.data';
+COPY cmpr_drop_column_03_raw FROM '@abs_srcdir@/data/cmpr_drop_column_03.data';
 (SELECT * FROM cmpr_drop_column_03) MINUS ALL (SELECT * FROM cmpr_drop_column_03_raw);
 (SELECT * FROM cmpr_drop_column_03_raw) MINUS ALL (SELECT * FROM cmpr_drop_column_03);
 DROP TABLE cmpr_drop_column_03_raw;
 DROP TABLE cmpr_drop_column_03;
-\! rm -fr @abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_column_03.data
+\! rm -fr @abs_srcdir@/data/cmpr_drop_column_03.data

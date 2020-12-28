@@ -17,10 +17,6 @@
 
 #include "segdata.h"
 
-/*
-#define GIST_DEBUG
-#define GIST_QUERY_DEBUG
-*/
 
 PG_MODULE_MAGIC;
 
@@ -28,10 +24,6 @@ extern int seg_yyparse(void* result);
 extern void seg_yyerror(const char* message);
 extern void seg_scanner_init(const char* str);
 extern void seg_scanner_finish(void);
-
-/*
-extern int	 seg_yydebug;
-*/
 
 /*
  * Auxiliary data structure for picksplit method.
@@ -893,7 +885,7 @@ static int restore(char* result, float val, int n)
         /* ... this is not done yet. */
     }
 
-    pfree(tmp);
+    pfree_ext(tmp);
     return (strlen(result));
 }
 

@@ -33,4 +33,3 @@ typedef struct knl_hotpatch_context {
 void check_and_process_hotpatch(void);
 int hotpatch_remove_signal_file(const char* data_dir);
 #endif
-

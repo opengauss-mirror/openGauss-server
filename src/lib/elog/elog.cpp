@@ -1,6 +1,5 @@
 /*
- * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
- * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
+ * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -37,6 +36,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <time.h>
 
 #ifdef HAVE_SYS_RESOURCE_H
 #include <sys/time.h>
@@ -50,11 +50,12 @@
 #define PGDLLIMPORT
 #endif
 
-#include "miscadmin.h"
+#include "pgtime.h"
 #include "bin/elog.h"
 
 #if defined(__CYGWIN__)
 #include <sys/cygwin.h>
+#define _WINSOCKAPI_
 #include <windows.h>
 /* Cygwin defines WIN32 in windows.h, but we don't want it. */
 #undef WIN32
@@ -63,7 +64,7 @@
 #define curLogFileMark "-current.log"
 // optimize,to suppose pirnt to file and screen
 static bool allow_log_store = false;
-
+void check_env_value_c(const char* input_env_value);
 /*
  * @@GaussDB@@
  * Brief            :
@@ -128,9 +129,9 @@ void write_stderr(const char* fmt, ...)
     // optimize,to suppose pirnt to file and screen
     va_list bp;
 
-    va_start(ap, fmt);
+    (void)va_start(ap, fmt);
     // optimize,to suppose pirnt to file and screen
-    va_start(bp, fmt);
+    (void)va_start(bp, fmt);
 #if !defined(WIN32) && !defined(__CYGWIN__)
     // On Unix, we just fprintf to stdout, print screen
     (void)vfprintf(stdout, fmt, ap);
@@ -161,8 +162,8 @@ void write_log(const char* fmt, ...)
     va_list ap;
     va_list bp;
 
-    va_start(ap, fmt);
-    va_start(bp, fmt);
+    (void)va_start(ap, fmt);
+    (void)va_start(bp, fmt);
 #if !defined(WIN32) && !defined(__CYGWIN__)
     // On Unix, we just write to the log file.
     (void)vfprintf(stderr, fmt, bp);  // print to log file
@@ -311,8 +312,6 @@ static void redirect_output(const char* prefix_name, const char* log_dir)
         printf(_("Warning: create_log_file failed!\n"));
         return;
     }
-    allow_log_store = true;
-    return;
 }
 
 void init_log(char* prefix_name)
@@ -322,6 +321,7 @@ void init_log(char* prefix_name)
     bool is_redirect = false;
     int nRet = 0;
     gausslog_dir = gs_getenv_r("GAUSSLOG");
+    check_env_value_c(gausslog_dir);
     if ((NULL == gausslog_dir) || ('\0' == gausslog_dir[0])) {
         is_redirect = false;
     } else {
@@ -341,6 +341,7 @@ void init_log(char* prefix_name)
             return;
         }
     }
+    allow_log_store = is_redirect;  // if false print to screen, if true print to file
     if (true == is_redirect) {
         redirect_output(prefix_name, log_dir);
     }

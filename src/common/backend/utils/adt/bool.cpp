@@ -38,67 +38,59 @@ bool parse_bool_with_len(const char* value, size_t len, bool* result)
         case 't':
         case 'T':
             if (pg_strncasecmp(value, "true", len) == 0) {
-                if (result != NULL) {
+                if (result != NULL)
                     *result = true;
-                }
                 return true;
             }
             break;
         case 'f':
         case 'F':
             if (pg_strncasecmp(value, "false", len) == 0) {
-                if (result != NULL) {
+                if (result != NULL)
                     *result = false;
-                }
                 return true;
             }
             break;
         case 'y':
         case 'Y':
             if (pg_strncasecmp(value, "yes", len) == 0) {
-                if (result != NULL) {
+                if (result != NULL)
                     *result = true;
-                }
                 return true;
             }
             break;
         case 'n':
         case 'N':
             if (pg_strncasecmp(value, "no", len) == 0) {
-                if (result != NULL) {
+                if (result != NULL)
                     *result = false;
-                }
                 return true;
             }
             break;
         case 'o':
         case 'O':
             /* 'o' is not unique enough */
-            if (pg_strncasecmp(value, "on", (len > 2 ? len : 2)) == 0) {
-                if (result != NULL) {
+            if (pg_strncasecmp(value, "on", ((len > 2) ? len : 2)) == 0) {
+                if (result != NULL)
                     *result = true;
-                }
                 return true;
-            } else if (pg_strncasecmp(value, "off", (len > 2 ? len : 2)) == 0) {
-                if (result != NULL) {
+            } else if (pg_strncasecmp(value, "off", ((len > 2) ? len : 2)) == 0) {
+                if (result != NULL)
                     *result = false;
-                }
                 return true;
             }
             break;
         case '1':
             if (len == 1) {
-                if (result != NULL) {
+                if (result != NULL)
                     *result = true;
-                }
                 return true;
             }
             break;
         case '0':
             if (len == 1) {
-                if (result != NULL) {
+                if (result != NULL)
                     *result = false;
-                }
                 return true;
             }
             break;
@@ -106,16 +98,15 @@ bool parse_bool_with_len(const char* value, size_t len, bool* result)
             break;
     }
 
-    if (result != NULL) {
+    if (result != NULL)
         *result = false; /* suppress compiler warning */
-    }
-
     return false;
 }
 
 /*****************************************************************************
  *	 USER I/O ROUTINES														 *
  *****************************************************************************/
+
 /*
  *		boolin			- converts "t" or "f" to 1 or 0
  *
@@ -144,11 +135,8 @@ Datum boolin(PG_FUNCTION_ARGS)
         len--;
     }
 
-
-    if (parse_bool_with_len(str, len, &result)) {
+    if (parse_bool_with_len(str, len, &result))
         PG_RETURN_BOOL(result);
-    }
-
 
     ereport(ERROR,
         (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
@@ -210,11 +198,10 @@ Datum booltext(PG_FUNCTION_ARGS)
     bool arg1 = PG_GETARG_BOOL(0);
     const char* str = NULL;
 
-    if (arg1) {
+    if (arg1)
         str = "true";
-    } else {
+    else
         str = "false";
-    }
 
     PG_RETURN_TEXT_P(cstring_to_text(str));
 }
@@ -222,6 +209,7 @@ Datum booltext(PG_FUNCTION_ARGS)
 /*****************************************************************************
  *	 PUBLIC ROUTINES														 *
  *****************************************************************************/
+
 Datum booleq(PG_FUNCTION_ARGS)
 {
     bool arg1 = PG_GETARG_BOOL(0);

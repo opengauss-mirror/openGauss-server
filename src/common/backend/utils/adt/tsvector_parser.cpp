@@ -18,8 +18,6 @@
 #include "tsearch/ts_locale.h"
 #include "tsearch/ts_utils.h"
 
-const int STATE_LEN = 32;
-
 /*
  * Private state of tsvector parser.  Note that tsquery also uses this code to
  * parse its input, hence the boolean flags.  The two flags are both true or
@@ -77,11 +75,11 @@ void close_tsvector_parser(TSVectorParseState state)
 /* increase the size of 'word' if needed to hold one more character */
 #define RESIZEPRSBUF                                                \
     do {                                                            \
-        int clen = cur_pos - state->word;                            \
+        int clen = curpos - state->word;                            \
         if (clen + state->eml >= state->len) {                      \
             state->len *= 2;                                        \
             state->word = (char*)repalloc(state->word, state->len); \
-            cur_pos = state->word + clen;                            \
+            curpos = state->word + clen;                            \
         }                                                           \
     } while (0)
 
@@ -99,7 +97,7 @@ void close_tsvector_parser(TSVectorParseState state)
         if (strval != NULL)                 \
             *strval = state->word;          \
         if (lenval != NULL)                 \
-            *lenval = cur_pos - state->word; \
+            *lenval = curpos - state->word; \
         if (endptr != NULL)                 \
             *endptr = state->prsbuf;        \
         return true;                        \
@@ -115,16 +113,14 @@ void close_tsvector_parser(TSVectorParseState state)
 #define WAITPOSDELIM 7
 #define WAITCHARCMPLX 8
 
-#define PRSSYNTAXERROR prs_syntax_error(state)
+#define PRSSYNTAXERROR prssyntaxerror(state)
 
-const int POSA_LEN_BASE = 4;
-
-static void prs_syntax_error(TSVectorParseState state)
+static void prssyntaxerror(TSVectorParseState state)
 {
     ereport(ERROR,
         (errcode(ERRCODE_SYNTAX_ERROR),
             state->is_tsquery ? errmsg("syntax error in tsquery: \"%s\"", state->bufstart)
-                                : errmsg("syntax error in tsvector: \"%s\"", state->bufstart)));
+                              : errmsg("syntax error in tsvector: \"%s\"", state->bufstart)));
 }
 
 /*
@@ -146,9 +142,9 @@ static void prs_syntax_error(TSVectorParseState state)
 bool gettoken_tsvector(
     TSVectorParseState state, char** strval, int* lenval, WordEntryPos** pos_ptr, int* poslen, char** endptr)
 {
-    int old_state = 0;
-    char* cur_pos = state->word;
-    int state_code = WAITWORD;
+    int oldstate = 0;
+    char* curpos = state->word;
+    int statecode = WAITWORD;
 
     /*
      * pos is for collecting the comma delimited list of positions followed by
@@ -159,101 +155,95 @@ bool gettoken_tsvector(
     int posalen = 0; /* allocated size of pos */
 
     while (1) {
-        if (state_code == WAITWORD) {
-            if (*(state->prsbuf) == '\0') {
+        if (statecode == WAITWORD) {
+            if (*(state->prsbuf) == '\0')
                 return false;
-            } else if (t_iseq(state->prsbuf, '\'')) {
-                state_code = WAITENDCMPLX;
-            } else if (t_iseq(state->prsbuf, '\\')) {
-                state_code = WAITNEXTCHAR;
-                old_state = WAITENDWORD;
-            } else if (state->oprisdelim && ISOPERATOR(state->prsbuf)) {
+            else if (t_iseq(state->prsbuf, '\''))
+                statecode = WAITENDCMPLX;
+            else if (t_iseq(state->prsbuf, '\\')) {
+                statecode = WAITNEXTCHAR;
+                oldstate = WAITENDWORD;
+            } else if (state->oprisdelim && ISOPERATOR(state->prsbuf))
                 PRSSYNTAXERROR;
-            } else if (!t_isspace(state->prsbuf)) {
-                COPYCHAR(cur_pos, state->prsbuf);
-                cur_pos += pg_mblen(state->prsbuf);
-                state_code = WAITENDWORD;
+            else if (!t_isspace(state->prsbuf)) {
+                COPYCHAR(curpos, state->prsbuf);
+                curpos += pg_mblen(state->prsbuf);
+                statecode = WAITENDWORD;
             }
-        } else if (state_code == WAITNEXTCHAR) {
-            if (*(state->prsbuf) == '\0') {
+        } else if (statecode == WAITNEXTCHAR) {
+            if (*(state->prsbuf) == '\0')
                 ereport(ERROR,
                     (errcode(ERRCODE_SYNTAX_ERROR), errmsg("there is no escaped character: \"%s\"", state->bufstart)));
-            } else {
+            else {
                 RESIZEPRSBUF;
-                COPYCHAR(cur_pos, state->prsbuf);
-                cur_pos += pg_mblen(state->prsbuf);
-                Assert(old_state != 0);
-                state_code = old_state;
+                COPYCHAR(curpos, state->prsbuf);
+                curpos += pg_mblen(state->prsbuf);
+                Assert(oldstate != 0);
+                statecode = oldstate;
             }
-        } else if (state_code == WAITENDWORD) {
+        } else if (statecode == WAITENDWORD) {
             if (t_iseq(state->prsbuf, '\\')) {
-                state_code = WAITNEXTCHAR;
-                old_state = WAITENDWORD;
+                statecode = WAITNEXTCHAR;
+                oldstate = WAITENDWORD;
             } else if (t_isspace(state->prsbuf) || *(state->prsbuf) == '\0' ||
                        (state->oprisdelim && ISOPERATOR(state->prsbuf))) {
                 RESIZEPRSBUF;
-                if (cur_pos == state->word) {
+                if (curpos == state->word)
                     PRSSYNTAXERROR;
-                }
-                *(cur_pos) = '\0';
+                *(curpos) = '\0';
                 RETURN_TOKEN;
             } else if (t_iseq(state->prsbuf, ':')) {
-                if (cur_pos == state->word) {
+                if (curpos == state->word)
                     PRSSYNTAXERROR;
-                }
-                *(cur_pos) = '\0';
-                if (state->oprisdelim) {
+                *(curpos) = '\0';
+                if (state->oprisdelim)
                     RETURN_TOKEN;
-                } else {
-                    state_code = INPOSINFO;
-                }
+                else
+                    statecode = INPOSINFO;
             } else {
                 RESIZEPRSBUF;
-                COPYCHAR(cur_pos, state->prsbuf);
-                cur_pos += pg_mblen(state->prsbuf);
+                COPYCHAR(curpos, state->prsbuf);
+                curpos += pg_mblen(state->prsbuf);
             }
-        } else if (state_code == WAITENDCMPLX) {
+        } else if (statecode == WAITENDCMPLX) {
             if (t_iseq(state->prsbuf, '\'')) {
-                state_code = WAITCHARCMPLX;
+                statecode = WAITCHARCMPLX;
             } else if (t_iseq(state->prsbuf, '\\')) {
-                state_code = WAITNEXTCHAR;
-                old_state = WAITENDCMPLX;
+                statecode = WAITNEXTCHAR;
+                oldstate = WAITENDCMPLX;
             } else if (*(state->prsbuf) == '\0')
                 PRSSYNTAXERROR;
             else {
                 RESIZEPRSBUF;
-                COPYCHAR(cur_pos, state->prsbuf);
-                cur_pos += pg_mblen(state->prsbuf);
+                COPYCHAR(curpos, state->prsbuf);
+                curpos += pg_mblen(state->prsbuf);
             }
-        } else if (state_code == WAITCHARCMPLX) {
+        } else if (statecode == WAITCHARCMPLX) {
             if (t_iseq(state->prsbuf, '\'')) {
                 RESIZEPRSBUF;
-                COPYCHAR(cur_pos, state->prsbuf);
-                cur_pos += pg_mblen(state->prsbuf);
-                state_code = WAITENDCMPLX;
+                COPYCHAR(curpos, state->prsbuf);
+                curpos += pg_mblen(state->prsbuf);
+                statecode = WAITENDCMPLX;
             } else {
                 RESIZEPRSBUF;
-                *(cur_pos) = '\0';
-                if (cur_pos == state->word) {
+                *(curpos) = '\0';
+                if (curpos == state->word)
                     PRSSYNTAXERROR;
-                }
                 if (state->oprisdelim) {
                     RETURN_TOKEN;
-                } else {
-                    state_code = WAITPOSINFO;
-                }
+                } else
+                    statecode = WAITPOSINFO;
                 continue; /* recheck current character */
             }
-        } else if (state_code == WAITPOSINFO) {
-            if (t_iseq(state->prsbuf, ':')) {
-                state_code = INPOSINFO;
-            } else {
+        } else if (statecode == WAITPOSINFO) {
+            if (t_iseq(state->prsbuf, ':'))
+                statecode = INPOSINFO;
+            else
                 RETURN_TOKEN;
-            }
-        } else if (state_code == INPOSINFO) {
+        } else if (statecode == INPOSINFO) {
             if (t_isdigit(state->prsbuf)) {
                 if (posalen == 0) {
-                    posalen = POSA_LEN_BASE;
+                    posalen = 4;
                     pos = (WordEntryPos*)palloc(sizeof(WordEntryPos) * posalen);
                     npos = 0;
                 } else if (npos + 1 >= posalen) {
@@ -263,50 +253,42 @@ bool gettoken_tsvector(
                 npos++;
                 WEP_SETPOS(pos[npos - 1], (unsigned int)LIMITPOS(atoi(state->prsbuf)));
                 /* we cannot get here in tsquery, so no need for 2 errmsgs */
-                if (WEP_GETPOS(pos[npos - 1]) == 0) {
+                if (WEP_GETPOS(pos[npos - 1]) == 0)
                     ereport(ERROR,
                         (errcode(ERRCODE_SYNTAX_ERROR),
                             errmsg("wrong position info in tsvector: \"%s\"", state->bufstart)));
-                }
                 WEP_SETWEIGHT(pos[npos - 1], 0);
-                state_code = WAITPOSDELIM;
-            } else {
+                statecode = WAITPOSDELIM;
+            } else
                 PRSSYNTAXERROR;
-            }
-        } else if (state_code == WAITPOSDELIM) {
-            if (t_iseq(state->prsbuf, ',')) {
-                state_code = INPOSINFO;
-            }
+        } else if (statecode == WAITPOSDELIM) {
+            if (t_iseq(state->prsbuf, ','))
+                statecode = INPOSINFO;
             else if (t_iseq(state->prsbuf, 'a') || t_iseq(state->prsbuf, 'A') || t_iseq(state->prsbuf, '*')) {
-                if (WEP_GETWEIGHT(pos[npos - 1])) {
+                if (WEP_GETWEIGHT(pos[npos - 1]))
                     PRSSYNTAXERROR;
-                }
                 WEP_SETWEIGHT(pos[npos - 1], 3);
             } else if (t_iseq(state->prsbuf, 'b') || t_iseq(state->prsbuf, 'B')) {
-                if (WEP_GETWEIGHT(pos[npos - 1])) {
+                if (WEP_GETWEIGHT(pos[npos - 1]))
                     PRSSYNTAXERROR;
-                }
                 WEP_SETWEIGHT(pos[npos - 1], 2);
             } else if (t_iseq(state->prsbuf, 'c') || t_iseq(state->prsbuf, 'C')) {
-                if (WEP_GETWEIGHT(pos[npos - 1])) {
+                if (WEP_GETWEIGHT(pos[npos - 1]))
                     PRSSYNTAXERROR;
-                }
                 WEP_SETWEIGHT(pos[npos - 1], 1);
             } else if (t_iseq(state->prsbuf, 'd') || t_iseq(state->prsbuf, 'D')) {
-                if (WEP_GETWEIGHT(pos[npos - 1])) {
+                if (WEP_GETWEIGHT(pos[npos - 1]))
                     PRSSYNTAXERROR;
-                }
                 WEP_SETWEIGHT(pos[npos - 1], 0);
-            } else if (t_isspace(state->prsbuf) || *(state->prsbuf) == '\0') {
+            } else if (t_isspace(state->prsbuf) || *(state->prsbuf) == '\0')
                 RETURN_TOKEN;
-            } else if (!t_isdigit(state->prsbuf)) {
+            else if (!t_isdigit(state->prsbuf))
                 PRSSYNTAXERROR;
-            }
-        } else { /* internal error */
+        } else /* internal error */
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                    errmsg("unrecognized state in gettoken_tsvector: %d", state_code)));
-        }
+                    errmsg("unrecognized state in gettoken_tsvector: %d", statecode)));
+
         /* get next char */
         state->prsbuf += pg_mblen(state->prsbuf);
     }

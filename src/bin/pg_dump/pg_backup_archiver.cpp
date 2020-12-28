@@ -116,7 +116,7 @@ static ShutdownInformation shutdown_info;
 const char* encrypt_salt;
 
 #define NO_SLOT (-1)
-#define RESTORE_READ_CNT (100)
+static const int RESTORE_READ_CNT = 100;
 
 #define TEXT_DUMP_HEADER "--\n-- PostgreSQL database dump\n--\n\n"
 #define TEXT_DUMPALL_HEADER "--\n-- PostgreSQL database cluster dump\n--\n\n"
@@ -300,7 +300,8 @@ void RestoreArchive(Archive* AHX)
     bool parallel_mode = false;
     TocEntry* te = NULL;
     OutputContext sav;
-
+    char* p = NULL;
+    errno_t rc = 0;
     AH->stage = STAGE_INITIALIZING;
 
     /*
@@ -369,8 +370,11 @@ void RestoreArchive(Archive* AHX)
         AHX->minRemoteVersion = 0;
         AHX->maxRemoteVersion = 999999;
 
-        ConnectDatabase(AHX, ropt->dbname, ropt->pghost, ropt->pgport, ropt->username, ropt->promptPassword);
+        (void)ConnectDatabase(AHX, ropt->dbname, ropt->pghost, ropt->pgport, ropt->username, ropt->promptPassword);
 
+        if (CheckIfStandby(AHX)) {
+            exit_horribly(NULL, "%s is not supported on standby or cascade standby\n", progname);
+        }
         /*
          * If we're talking to the DB directly, don't send comments since they
          * obscure SQL when displaying errors
@@ -412,8 +416,16 @@ void RestoreArchive(Archive* AHX)
     /*
      * Put the rand value to encrypt file for decrypt.
      */
-    if (('\0' != *AH->publicArc.rand) && (NULL == encrypt_salt))
-        (void)ahprintf(AH, "%s", AH->publicArc.rand);
+    if (('\0' != *AH->publicArc.rand) && (NULL == encrypt_salt)) {
+        p = (char*)pg_malloc(RANDOM_LEN + 1);
+        rc = memset_s(p, RANDOM_LEN + 1, 0, RANDOM_LEN + 1);
+        securec_check_c(rc, "\0", "\0");
+        rc = memcpy_s(p, RANDOM_LEN, AH->publicArc.rand, RANDOM_LEN);
+        securec_check_c(rc, "\0", "\0");
+        (void)ahwrite(p, 1, RANDOM_LEN, AH);
+        free(p);
+        p = NULL;
+    }
 
     (void)ahprintf(AH, "--\n-- PostgreSQL database dump\n--\n\n");
 
@@ -1232,7 +1244,7 @@ int archprintf(Archive* AH, const char* fmt, ...)
     va_list ap;
     int bSize = strlen(fmt) + 256;
     int cnt = -1;
-    int rc = 0;
+    size_t ret = 0;
 
     /*
      * This is paranoid: deal with the possibility that vsnprintf is willing
@@ -1247,13 +1259,11 @@ int archprintf(Archive* AH, const char* fmt, ...)
         bSize *= 2;
         p = (char*)pg_malloc(bSize);
         (void)va_start(ap, fmt);
-        rc = vsnprintf_s(p, bSize, bSize - 1, fmt, ap);
-        securec_check_ss_c(rc, "", "");
-        cnt = rc;
+        cnt = vsnprintf_s(p, bSize, bSize - 1, _(fmt), ap);
         va_end(ap);
     }
 
-    size_t ret = WriteData(AH, p, cnt);
+    ret = WriteData(AH, p, cnt);
     if (ret != (size_t)cnt) {
         write_msg(NULL, "could not write to output file: %s\n", strerror(errno));
         exit_nicely(1);
@@ -1263,14 +1273,9 @@ int archprintf(Archive* AH, const char* fmt, ...)
     return cnt;
 }
 
-/*******************************
- * Stuff below here should be 'private' to the archiver routines
- *******************************/
-static void SetOutput(ArchiveHandle* AH, const char* filename, int compression)
+static int set_fn(ArchiveHandle* AH, const char* filename)
 {
-    int fn = 0;
-    int fn_copy = 0;
-
+    int fn;
     if (NULL != filename) {
         fn = -1;
     } else if (NULL != (AH->FH)) {
@@ -1281,6 +1286,18 @@ static void SetOutput(ArchiveHandle* AH, const char* filename, int compression)
     } else {
         fn = fileno(stdout);
     }
+    return fn;
+}
+
+/*******************************
+ * Stuff below here should be 'private' to the archiver routines
+ *******************************/
+static void SetOutput(ArchiveHandle* AH, const char* filename, int compression)
+{
+    int fn = 0;
+    int fn_copy = 0;
+
+    fn = set_fn(AH, filename);
 
         /* If compression explicitly requested, use gzopen */
 #ifdef HAVE_LIBZ
@@ -1292,9 +1309,13 @@ static void SetOutput(ArchiveHandle* AH, const char* filename, int compression)
         nRet = snprintf_s(fmode, sizeof(fmode) / sizeof(char), sizeof(fmode) / sizeof(char) - 1, "wb%d", compression);
         securec_check_ss_c(nRet, "\0", "\0");
 
-        if (fn >= 0)
-            AH->OF = gzdopen(dup(fn), fmode);
-        else
+        if (fn >= 0) {
+            fn_copy = dup(fn);
+            if (fn_copy < 0) {
+                exit_horribly(modulename, "could not open output file: %s\n", strerror(errno));
+            }
+            AH->OF = gzdopen(fn_copy, fmode);
+        } else
             AH->OF = gzopen(filename, fmode);
         AH->gzOut = 1;
     } else
@@ -1373,7 +1394,6 @@ int ahprintf(ArchiveHandle* AH, const char* fmt, ...)
     va_list ap;
     int bSize = strlen(fmt) + 256; /* Usually enough */
     int cnt = -1;
-    int rc = 0;
 
     /*
      * This is paranoid: deal with the possibility that vsnprintf is willing
@@ -1388,8 +1408,7 @@ int ahprintf(ArchiveHandle* AH, const char* fmt, ...)
         bSize *= 2;
         p = (char*)pg_malloc(bSize);
         (void)va_start(ap, fmt);
-        cnt = vsnprintf_s(p, bSize, bSize - 1, fmt, ap);
-        securec_check_ss_c(rc, "", "");
+        cnt = vsnprintf(p, bSize, fmt, ap);
         va_end(ap);
     }
     (void)ahwrite(p, 1, cnt, AH);
@@ -2541,6 +2560,7 @@ static bool _tocEntryIsACL(TocEntry* te)
  */
 static void _doSetFixedOutputState(ArchiveHandle* AH)
 {
+    errno_t rc;
     /* Disable statement_timeout in archive for pg_restore/psql  */
     (void)ahprintf(AH, "SET statement_timeout = 0;\n");
 
@@ -2563,6 +2583,8 @@ static void _doSetFixedOutputState(ArchiveHandle* AH)
         }
 
         (void)ahprintf(AH, "SET ROLE %s PASSWORD %s;\n", fmtId(AH->ropt->use_role), retrolepasswd);
+        rc = memset_s(retrolepasswd, strlen(retrolepasswd), 0, strlen(retrolepasswd));
+        securec_check_c(rc, "\0", "\0");
         PQfreemem(retrolepasswd);
     }
 
@@ -2844,15 +2866,12 @@ static void _getObjectDescription(PQExpBuffer buf, TocEntry* te, ArchiveHandle* 
 {
     const char* type = te->desc;
 
-    /* Use ALTER TABLE for MATERIALIZED VIEW */
-	if (strcmp(type, "MATERIALIZED VIEW") == 0)
-		type = "TABLE";
-
     /* objects named by a schema and name */
     if (strcmp(type, "COLLATION") == 0 || strcmp(type, "CONVERSION") == 0 || strcmp(type, "DOMAIN") == 0 ||
         strcmp(type, "TABLE") == 0 || strcmp(type, "SYNONYM") == 0 || strcmp(type, "VIEW") == 0 ||
         strcmp(type, "SEQUENCE") == 0 || strcmp(type, "TYPE") == 0 || strcmp(type, "FOREIGN TABLE") == 0 ||
-        strcmp(type, "TEXT SEARCH DICTIONARY") == 0 || strcmp(type, "TEXT SEARCH CONFIGURATION") == 0) {
+        strcmp(type, "TEXT SEARCH DICTIONARY") == 0 || strcmp(type, "TEXT SEARCH CONFIGURATION") == 0 ||
+        strcmp(type, "MATERIALIZED VIEW") == 0) {
         (void)appendPQExpBuffer(buf, "%s ", type);
         if ((te->nmspace != NULL) && te->nmspace[0]) /* is null pre-7.3 */
             (void)appendPQExpBuffer(buf, "%s.", fmtId(te->nmspace));
@@ -2890,8 +2909,12 @@ static void _getObjectDescription(PQExpBuffer buf, TocEntry* te, ArchiveHandle* 
      *
      * Now function option not support "ALTER FUNCTION XX IF EXISTS" grammer
      */
-    if (strcmp(type, "AGGREGATE") == 0 || strcmp(type, "FUNCTION") == 0 || strcmp(type, "OPERATOR") == 0 ||
-        strcmp(type, "OPERATOR CLASS") == 0 || strcmp(type, "OPERATOR FAMILY") == 0) {
+    if (strcmp(type, "AGGREGATE") == 0 
+            || strcmp(type, "FUNCTION") == 0 
+            || strcmp(type, "PROCEDURE") == 0 
+            || strcmp(type, "OPERATOR") == 0 
+            || strcmp(type, "OPERATOR CLASS") == 0 
+            || strcmp(type, "OPERATOR FAMILY") == 0) {
         /* Chop "DROP " off the front and make a modifiable copy */
         int len = (int)strlen("DROP ");
         char* first = NULL;
@@ -2899,6 +2922,10 @@ static void _getObjectDescription(PQExpBuffer buf, TocEntry* te, ArchiveHandle* 
 
         if (strcmp(type, "FUNCTION") == 0) {
             len += (int)strlen("FUNCTION IF EXISTS ");
+        }
+
+        if (strcmp(type, "PROCEDURE") == 0) {
+            len += (int)strlen("PROCEDURE IF EXISTS ");
         }
 
         first = gs_strdup(te->dropStmt + len);
@@ -2913,6 +2940,11 @@ static void _getObjectDescription(PQExpBuffer buf, TocEntry* te, ArchiveHandle* 
         if (strcmp(type, "FUNCTION") == 0) {
             (void)appendPQExpBufferStr(buf, "FUNCTION ");
         }
+
+        if (strcmp(type, "PROCEDURE") == 0) {
+            (void)appendPQExpBufferStr(buf, "PROCEDURE ");
+        }
+
         (void)appendPQExpBufferStr(buf, first);
 
         free(first);
@@ -3083,17 +3115,31 @@ static void _printTocEntry(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ropt
      * with DROP commands must appear in one list or the other.
      */
     if (!ropt->noOwner && !ropt->use_setsessauth && strlen(te->owner) > 0 && strlen(te->dropStmt) > 0) {
-        if (strcmp(te->desc, "AGGREGATE") == 0 || strcmp(te->desc, "BLOB") == 0 || strcmp(te->desc, "COLLATION") == 0 ||
-            strcmp(te->desc, "CONVERSION") == 0 || strcmp(te->desc, "DATABASE") == 0 ||
-            strcmp(te->desc, "DOMAIN") == 0 || strcmp(te->desc, "FOREIGN TABLE") == 0 ||
-            strcmp(te->desc, "FUNCTION") == 0 || strcmp(te->desc, "DIRECTORY") == 0 ||
-            strcmp(te->desc, "OPERATOR") == 0 || strcmp(te->desc, "OPERATOR CLASS") == 0 ||
-            strcmp(te->desc, "OPERATOR FAMILY") == 0 || strcmp(te->desc, "PROCEDURAL LANGUAGE") == 0 ||
-            strcmp(te->desc, "SCHEMA") == 0 || strcmp(te->desc, "TABLE") == 0 || strcmp(te->desc, "SYNONYM") == 0 ||
-            strcmp(te->desc, "TYPE") == 0 || strcmp(te->desc, "VIEW") == 0 || 
-            strcmp(te->desc, "MATERIALIZED VIEW") == 0 || strcmp(te->desc, "SEQUENCE") == 0 ||
-            strcmp(te->desc, "TEXT SEARCH DICTIONARY") == 0 || strcmp(te->desc, "TEXT SEARCH CONFIGURATION") == 0 ||
-            strcmp(te->desc, "FOREIGN DATA WRAPPER") == 0 || strcmp(te->desc, "SERVER") == 0) {
+        if (strcmp(te->desc, "AGGREGATE") == 0 
+                || strcmp(te->desc, "BLOB") == 0 
+                || strcmp(te->desc, "COLLATION") == 0 
+                || strcmp(te->desc, "CONVERSION") == 0 
+                || strcmp(te->desc, "DATABASE") == 0 
+                || strcmp(te->desc, "DOMAIN") == 0 
+                || strcmp(te->desc, "FOREIGN TABLE") == 0 
+                || strcmp(te->desc, "FUNCTION") == 0 
+                || strcmp(te->desc, "PROCEDURE") == 0 
+                || strcmp(te->desc, "DIRECTORY") == 0 
+                || strcmp(te->desc, "OPERATOR") == 0 
+                || strcmp(te->desc, "OPERATOR CLASS") == 0 
+                || strcmp(te->desc, "OPERATOR FAMILY") == 0 
+                || strcmp(te->desc, "PROCEDURAL LANGUAGE") == 0 
+                || strcmp(te->desc, "SCHEMA") == 0 
+                || strcmp(te->desc, "TABLE") == 0 
+                || strcmp(te->desc, "SYNONYM") == 0 
+                || strcmp(te->desc, "TYPE") == 0 
+                || strcmp(te->desc, "VIEW") == 0 
+                || strcmp(te->desc, "MATERIALIZED VIEW") == 0
+                || strcmp(te->desc, "SEQUENCE") == 0 
+                || strcmp(te->desc, "TEXT SEARCH DICTIONARY") == 0 
+                || strcmp(te->desc, "TEXT SEARCH CONFIGURATION") == 0 
+                || strcmp(te->desc, "FOREIGN DATA WRAPPER") == 0 
+                || strcmp(te->desc, "SERVER") == 0) {
             PQExpBuffer temp = createPQExpBuffer();
             (void)appendPQExpBuffer(temp, "ALTER ");
             _getObjectDescription(temp, te, AH);
@@ -3647,7 +3693,7 @@ static void restore_toc_entries_parallel(ArchiveHandle* AH)
     /*
      * Now reconnect the single parent connection.
      */
-    ConnectDatabase((Archive*)AH, ropt->dbname, ropt->pghost, ropt->pgport, ropt->username, ropt->promptPassword);
+    (void)ConnectDatabase((Archive*)AH, ropt->dbname, ropt->pghost, ropt->pgport, ropt->username, ropt->promptPassword);
 
     _doSetFixedOutputState(AH);
 
@@ -3917,7 +3963,7 @@ static parallel_restore_result parallel_restore(RestoreArgs* args)
     /*
      * We need our own database connection, too
      */
-    ConnectDatabase((Archive*)AH, ropt->dbname, ropt->pghost, ropt->pgport, ropt->username, ropt->promptPassword);
+    (void)ConnectDatabase((Archive*)AH, ropt->dbname, ropt->pghost, ropt->pgport, ropt->username, ropt->promptPassword);
 
     _doSetFixedOutputState(AH);
 
@@ -4186,6 +4232,9 @@ static void reduce_dependencies(ArchiveHandle* AH, TocEntry* te, TocEntry* ready
 
     for (i = 0; i < te->nRevDeps; i++) {
         TocEntry* otherte = AH->tocsByDumpId[te->revDeps[i]];
+        if (NULL == otherte) {
+            exit_horribly(NULL, "otherte cannot be NULL.\n");
+        }
 
         otherte->depCount--;
         if (otherte->depCount == 0 && otherte->par_prev != NULL) {
@@ -4276,7 +4325,7 @@ static ArchiveHandle* CloneArchive(ArchiveHandle* AH)
 
         ddr_Assert(AH->connection == NULL);
         /* this also sets clone->connection */
-        ConnectDatabase(
+        (void)ConnectDatabase(
             (Archive*)pstClone, ropt->dbname, ropt->pghost, ropt->pgport, ropt->username, ropt->promptPassword);
     } else {
         char* dbname = NULL;
@@ -4299,7 +4348,7 @@ static ArchiveHandle* CloneArchive(ArchiveHandle* AH)
         encname = pg_encoding_to_char(AH->publicArc.encoding);
 
         /* this also sets clone->connection */
-        ConnectDatabase((Archive*)pstClone, dbname, pghost, pgport, username, TRI_NO);
+        (void)ConnectDatabase((Archive*)pstClone, dbname, pghost, pgport, username, TRI_NO);
 
         /*
          * Set the same encoding, whatever we set here is what we got from
@@ -4324,6 +4373,7 @@ static ArchiveHandle* CloneArchive(ArchiveHandle* AH)
  */
 static void DeCloneArchive(ArchiveHandle* AH)
 {
+    errno_t rc;
     /* Clear format-specific state */
     (AH->DeCloneptr)(AH);
 
@@ -4345,6 +4395,8 @@ static void DeCloneArchive(ArchiveHandle* AH)
         AH->currTablespace = NULL;
     }
     if (NULL != AH->savedPassword) {
+        rc = memset_s(AH->savedPassword, strlen(AH->savedPassword), 0, strlen(AH->savedPassword));
+        securec_check_c(rc, "\0", "\0");
         free(AH->savedPassword);
         AH->savedPassword = NULL;
     }
@@ -4651,6 +4703,7 @@ static bool decryptFromFile(FILE* source, unsigned char* Key, GS_UCHAR** decrypt
     int errnum;
     GS_UINT32 cipherlen = 0;
     GS_UCHAR cipherleninfo[RANDOM_LEN + 1] = {0};
+    char* endptr = NULL;
     GS_UCHAR* ciphertext = NULL;
     GS_UCHAR* outputstr = NULL;
     bool decryptstatus = false;
@@ -4682,9 +4735,9 @@ static bool decryptFromFile(FILE* source, unsigned char* Key, GS_UCHAR** decrypt
             }
         }
 
-        cipherlen = atoi((char*)cipherleninfo);
-        if (0 == cipherlen) {
-            printf("cipher length is zero!\n");
+        cipherlen = (GS_UINT32)strtol((char*)cipherleninfo, &endptr, 10);
+        if (endptr == (char*)cipherleninfo || cipherlen == 0 ) {
+            write_msg(modulename, "WARNING: line ignored: %s, cipher length is %u\n", (char*)cipherleninfo, cipherlen);
             return false;
         }
 
@@ -4847,3 +4900,27 @@ bool checkAndCreateDir(const char* dirName)
 
     return true;
 }
+
+bool CheckIfStandby(struct Archive *fout)
+{
+    bool isStandby = false;
+    const char *query = "select local_role from pg_stat_get_stream_replications()";
+    PGresult* res = NULL;
+    int ntups;
+
+    res = ExecuteSqlQuery(fout, query, PGRES_TUPLES_OK);
+
+    ntups = PQntuples(res);
+    if (ntups != 1)
+        exit_horribly(NULL,
+            ngettext(
+                "query returned %d row instead of one: %s\n", "query returned %d rows instead of one: %s\n", ntups),
+            ntups,
+            query);
+
+    isStandby = strstr(PQgetvalue(res, 0, 0), "Standby") != NULL;
+    PQclear(res);
+    
+    return isStandby;
+}
+

@@ -28,7 +28,6 @@
 #include <sys/mount.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <unistd.h>
 #include <errno.h>
 #include <mntent.h>
 #include <libcgroup.h>
@@ -46,10 +45,13 @@
 #define static
 #endif
 
+#define MAX_COMMAND_LENGTH 128
+#define MOUNT_POINT_LENGTH (MAXPGPATH + 16)
+
 int cgutil_is_sles11_sp2 = 0; /* to indicate if the current OS is SLES SP2 version */
 
 char* cgutil_subsys_table[] = {
-    MOUNT_CPU_NAME, MOUNT_BLKIO_NAME, MOUNT_CPUSET_NAME, MOUNT_CPUACCT_NAME, MOUNT_MEMORY_NAME};
+    MOUNT_CPU_NAME, MOUNT_CPUACCT_NAME, MOUNT_BLKIO_NAME, MOUNT_CPUSET_NAME, MOUNT_MEMORY_NAME};
 
 static gscgroup_grp_t* cgutil_vaddr_back[GSCGROUP_ALLNUM] = {NULL}; /* for recovering */
 
@@ -68,6 +70,38 @@ static int cgexec_update_class_cpuset(int cls, char* cpuset);
 static int cgexec_update_top_group_cpuset(int top, char* cpuset);
 /* update one group cpu cores */
 static int cgexec_update_cgroup_cpuset(gscgroup_grp_t* grp, char* cpuset);
+
+int CheckBackendEnv(const char* input_env_value)
+{
+    const int max_env_len = 1024;
+    const char* danger_character_list[] = {";", "`", "\\", "'", "\"", ">", "<", "$", "&", "|", "!", "\n", NULL};
+    int i = 0;
+
+    if (input_env_value == nullptr || strlen(input_env_value) >= max_env_len) {
+        fprintf(stderr, "ERROR: wrong environment variable \"%s\"\n", input_env_value);
+        return -1;
+    }
+    
+    for (i = 0; danger_character_list[i] != NULL; i++) {
+        if (strstr((const char*)input_env_value, danger_character_list[i])) {
+            fprintf(stderr, "ERROR: environment variable \"%s\" contain invaild symbol \"%s\".\n",
+                input_env_value, danger_character_list[i]);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+inline int CheckSystemSucess(pid_t status)
+{
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+        return 0;
+    } else {
+        fprintf(stderr, "command execute failed for: %d!\n", WEXITSTATUS(status));
+        return -1;
+    }
+}
+
 /*
  * function name: cgexec_get_cgroup_number
  * description  : get the Cgroup numbers
@@ -84,9 +118,8 @@ static int cgexec_get_cgroup_number(void)
     int cgcnt = -1;
 
     f = fopen("/proc/cgroups", "r");
-    if (f == NULL) {
+    if (f == NULL)
         return -1;
-    }
 
     while (NULL != fgets(buf, PROCLINE_LEN, f)) {
         /* example from proc:
@@ -97,33 +130,29 @@ static int cgexec_get_cgroup_number(void)
          */
         p = buf;
         q = strchr(p, '\t');
-        if (q == NULL) {
+        if (q == NULL)
             continue;
-        }
 
         *q = '\0';
         if (0 == strcmp(MOUNT_CPU_NAME, p)) {
-            while (*(q++) == ' ') {
+            while (*(q++) == ' ')
                 continue;
-            }
 
             /* get the second column */
             p = strchr(q, '\t');
-            if (p == NULL) {
+            if (p == NULL)
                 break;
-            }
 
             *p = '\0';
 
-            hierarchy = atoi(q);
+            hierarchy = (int)strtol(q, NULL, 10);
             if (hierarchy == 0) {
                 fprintf(stderr, "cgroup is not mounted!\n");
                 break;
             }
 
-            while (*(p++) == ' ') {
+            while (*(p++) == ' ')
                 continue;
-            }
 
             /* get the third column */
             q = strchr(p, '\t');
@@ -133,7 +162,7 @@ static int cgexec_get_cgroup_number(void)
             }
             *q = '\0';
 
-            cgcnt = atoi(p);
+            cgcnt = (int)strtol(p, NULL, 10);
         }
     }
 
@@ -173,9 +202,8 @@ int cgexec_check_cpuset_value(const char* clsset, const char* grpset)
     }
 
     /* group cpuset value must be in class cpuset range */
-    if (grpstart >= clsstart && grpend <= clsend) {
+    if (grpstart >= clsstart && grpend <= clsend)
         return 0;
-    }
 
     return -1;
 }
@@ -254,6 +282,10 @@ static int cgexec_trans_cpusets_to_percent(int highlen, int lowlen)
 {
     int pct = 0;
 
+    if (highlen == 0) {
+        fprintf(stderr, "ERROR: %s:%d, Division by zero!\n", __FILE__, __LINE__);
+        return -1;
+    }
     pct = lowlen * GROUP_ALL_PERCENT / highlen;
 
     /*
@@ -264,9 +296,8 @@ static int cgexec_trans_cpusets_to_percent(int highlen, int lowlen)
      * make sure that the length got from the percentage
      * will be the same with the low length.
      */
-    while (cgexec_trans_percent_to_cpusets(highlen, pct) < lowlen || !pct) {
+    while (cgexec_trans_percent_to_cpusets(highlen, pct) < lowlen || !pct)
         pct++;
-    }
 
     return pct;
 }
@@ -323,9 +354,8 @@ static int cgexec_check_cpuset_percent(int high, int low, char* cpuset)
     /* return values which are to be restored in  cpuset */
     int ret_start, ret_end;
 
-    if (cgexec_get_cgroup_id_range(high, &forstart, &forend) == -1) {
+    if (cgexec_get_cgroup_id_range(high, &forstart, &forend) == -1)
         return -1;
-    }
 
     /* the cpuset length of the high level group */
     highlen = cgexec_get_cpuset_length(cgutil_vaddr[high]->cpuset, &highstart, &highend);
@@ -335,14 +365,12 @@ static int cgexec_check_cpuset_percent(int high, int low, char* cpuset)
 
     for (i = forstart; i <= forend; i++) {
         /* the low level group is ignored currently */
-        if (cgutil_vaddr[i]->used == 0 || i == low) {
+        if (cgutil_vaddr[i]->used == 0 || i == low)
             continue;
-        }
 
         /* only the workload groups with the same class "high" are considered. */
-        if ((high >= CLASSCG_START_ID && high <= CLASSCG_END_ID) && high != cgutil_vaddr[i]->ginfo.wd.cgid) {
+        if ((high >= CLASSCG_START_ID && high <= CLASSCG_END_ID) && high != cgutil_vaddr[i]->ginfo.wd.cgid)
             continue;
-        }
 
         /*
          * in order to check whether the newly set setspct makes
@@ -406,23 +434,20 @@ static int cgexec_reset_cpuset_cgroups(int high, int low)
     char sets[CPUSET_LEN];          /* the calculated cpuset to be updated */
     bool flag = false;              /*flag to indicate first time enter the loop */
 
-    if (cgexec_get_cgroup_id_range(high, &forstart, &forend) == -1) {
+    if (cgexec_get_cgroup_id_range(high, &forstart, &forend) == -1)
         return -1;
-    }
 
     /* the cpuset length of the high level group */
     highlen = cgexec_get_cpuset_length(cgutil_vaddr[high]->cpuset, &highstart, &highend);
 
     for (i = forstart; i <= forend; i++) {
         /* the low level group is ignored in the reseting list */
-        if (cgutil_vaddr[i]->used == 0 || (low != 0 && i == low)) {
+        if (cgutil_vaddr[i]->used == 0 || (low != 0 && i == low))
             continue;
-        }
 
         /* only the workload groups belonging to high class is considered */
-        if ((high >= CLASSCG_START_ID && high <= CLASSCG_END_ID) && high != cgutil_vaddr[i]->ginfo.wd.cgid) {
+        if ((high >= CLASSCG_START_ID && high <= CLASSCG_END_ID) && high != cgutil_vaddr[i]->ginfo.wd.cgid)
             continue;
-        }
 
         /* only groups with quota values are considered */
         if (cgutil_vaddr[i]->ainfo.quota) {
@@ -461,9 +486,8 @@ static int cgexec_reset_cpuset_cgroups(int high, int low)
             }
 
             /* next time enter the loop, flag will be true*/
-            if (!flag) {
+            if (!flag)
                 flag = true;
-            }
         }
         /*
          * for the case of reseting backend groups, or workload groups, since they don't have
@@ -495,14 +519,12 @@ static int cgexec_check_fixed_percent(int high)
     (void)cgexec_get_cgroup_id_range(high, &forstart, &forend);
 
     for (i = forstart; i <= forend; i++) {
-        if (cgutil_vaddr[i]->used == 0 || !cgutil_vaddr[i]->ainfo.quota) {
+        if (cgutil_vaddr[i]->used == 0 || !cgutil_vaddr[i]->ainfo.quota)
             continue;
-        }
 
         /* only the workload groups belonging to high class is considered */
-        if ((high >= CLASSCG_START_ID && high <= CLASSCG_END_ID) && high != cgutil_vaddr[i]->ginfo.wd.cgid) {
+        if ((high >= CLASSCG_START_ID && high <= CLASSCG_END_ID) && high != cgutil_vaddr[i]->ginfo.wd.cgid)
             continue;
-        }
 
         sets_total_pct += cgutil_vaddr[i]->ainfo.quota;
     }
@@ -703,9 +725,8 @@ static int cgexec_update_remain_cgroup(gscgroup_grp_t* grp, int cls)
         /* calculate the remain percentage */
         for (j = WDCG_START_ID; j <= WDCG_END_ID; j++) {
             if (cgutil_vaddr[j]->used && cgutil_vaddr[j]->ginfo.wd.cgid == cls &&
-                cgutil_vaddr[j]->ginfo.wd.wdlevel == i) {
+                cgutil_vaddr[j]->ginfo.wd.wdlevel == i)
                 break;
-            }
         }
 
         rempct -= cgutil_vaddr[j]->ginfo.wd.percent;
@@ -715,16 +736,14 @@ static int cgexec_update_remain_cgroup(gscgroup_grp_t* grp, int cls)
     for (i = grp->ginfo.wd.wdlevel; i <= cgutil_vaddr[cls]->ginfo.cls.maxlevel; i++) {
         for (j = WDCG_START_ID; j <= WDCG_END_ID; j++) {
             if (cgutil_vaddr[j]->used && cgutil_vaddr[j]->ginfo.wd.cgid == cls &&
-                cgutil_vaddr[j]->ginfo.wd.wdlevel == i) {
+                cgutil_vaddr[j]->ginfo.wd.wdlevel == i)
                 break;
-            }
         }
 
         /* get the parent path of the workload group */
         relpath = gscgroup_get_parent_wdcg_path(j, cgutil_vaddr, current_nodegroup);
-        if (NULL == relpath) {
+        if (NULL == relpath)
             return -1;
-        }
 
         /* get the remain group path */
         sret = snprintf_s(rempath,
@@ -768,6 +787,7 @@ static int cgexec_update_remain_cgroup(gscgroup_grp_t* grp, int cls)
  * return value :
  *          NULL: abnormal
  *         other: normal
+ *
  */
 static char* cgexec_get_blkio_throttle_value(const char* relpath, const char* name)
 {
@@ -777,9 +797,8 @@ static char* cgexec_get_blkio_throttle_value(const char* relpath, const char* na
     int ret = 0;
 
     /* allocate new cgroup structure */
-    if ((cg = cgexec_get_cgroup(relpath)) == NULL) {
+    if ((cg = cgexec_get_cgroup(relpath)) == NULL)
         return NULL;
-    }
 
     /* get controller */
     cgc = cgroup_get_controller(cg, MOUNT_BLKIO_NAME);
@@ -825,9 +844,8 @@ static int cgexec_update_cgroup_value(gscgroup_grp_t* grp)
     errno_t rc;
 
     /* get the relative path */
-    if (NULL == (relpath = gscgroup_get_relative_path(grp->gid, cgutil_vaddr, current_nodegroup))) {
+    if (NULL == (relpath = gscgroup_get_relative_path(grp->gid, cgutil_vaddr, current_nodegroup)))
         return -1;
-    }
 
     /* allocate new cgroup structure */
     cg = cgroup_new_cgroup(relpath);
@@ -973,13 +991,12 @@ static int cgexec_update_cgroup_value(gscgroup_grp_t* grp)
 
     if (pass && cgutil_opt.iopsread[0]) {
         ioval = cgexec_get_blkio_throttle_value(relpath, BLKIO_IOPSREAD);
-        if (NULL == ioval || IODATA_LEN < (strlen(ioval) + 1)) {
+        if (NULL == ioval || IODATA_LEN < (strlen(ioval) + 1))
             fprintf(stderr,
                 "ERROR: the blkio value %s for %s can't be saved "
                 "for no spaces in config file.\n",
                 cgutil_opt.iopsread,
                 BLKIO_IOPSREAD);
-        }
         else {
             rc = snprintf_s(grp->ainfo.iopsread, IODATA_LEN, IODATA_LEN - 1, "%s", ioval);
             securec_check_intval(rc, free(relpath), -1);
@@ -988,13 +1005,12 @@ static int cgexec_update_cgroup_value(gscgroup_grp_t* grp)
 
     if (pass && cgutil_opt.bpswrite[0]) {
         ioval = cgexec_get_blkio_throttle_value(relpath, BLKIO_BPSWRITE);
-        if (NULL == ioval || IODATA_LEN < (strlen(ioval) + 1)) {
+        if (NULL == ioval || IODATA_LEN < (strlen(ioval) + 1))
             fprintf(stderr,
                 "ERROR: the blkio value %s for %s can't be saved "
                 "for no spaces in config file.\n",
                 cgutil_opt.bpswrite,
                 BLKIO_BPSWRITE);
-        }
         else {
             rc = snprintf_s(grp->ainfo.bpswrite, IODATA_LEN, IODATA_LEN - 1, "%s", ioval);
             securec_check_intval(rc, free(relpath), -1);
@@ -1003,13 +1019,12 @@ static int cgexec_update_cgroup_value(gscgroup_grp_t* grp)
 
     if (pass && cgutil_opt.iopswrite[0]) {
         ioval = cgexec_get_blkio_throttle_value(relpath, BLKIO_IOPSWRITE);
-        if (NULL == ioval || IODATA_LEN < (strlen(ioval) + 1)) {
+        if (NULL == ioval || IODATA_LEN < (strlen(ioval) + 1))
             fprintf(stderr,
                 "ERROR: the blkio value %s for %s can't be saved "
                 "for no spaces in config file.\n",
                 cgutil_opt.iopswrite,
                 BLKIO_IOPSWRITE);
-        }
         else {
             rc = snprintf_s(grp->ainfo.iopswrite, IODATA_LEN, IODATA_LEN - 1, "%s", ioval);
             securec_check_intval(rc, free(relpath), -1);
@@ -1042,14 +1057,12 @@ static int cgexec_search_workload_group(int cls)
 
     /* search workload group */
     for (i = WDCG_START_ID; i <= WDCG_END_ID; ++i) {
-        if (cgutil_vaddr[i]->used == 0 || cgutil_vaddr[i]->ginfo.wd.cgid != cls) {
+        if (cgutil_vaddr[i]->used == 0 || cgutil_vaddr[i]->ginfo.wd.cgid != cls)
             continue;
-        }
 
         /* workload name with level or no level */
-        if (tmpstr != NULL) {
+        if (tmpstr != NULL)
             cmp = strcmp(cgutil_vaddr[i]->grpname, cgutil_opt.wdname);
-        }
         else {
             if (':' == cgutil_vaddr[i]->grpname[wdname_len])
                 cmp = strncmp(cgutil_vaddr[i]->grpname, cgutil_opt.wdname, wdname_len);
@@ -1208,9 +1221,8 @@ static int cgexec_create_remain_cgroup(gscgroup_grp_t* grp)
     char rempath[16];
     errno_t sret;
 
-    if (NULL == (relpath = gscgroup_get_parent_wdcg_path(grp->gid, cgutil_vaddr, current_nodegroup))) {
+    if (NULL == (relpath = gscgroup_get_parent_wdcg_path(grp->gid, cgutil_vaddr, current_nodegroup)))
         return -1;
-    }
 
     /* add the remain path dir */
     sret = snprintf_s(
@@ -1222,9 +1234,8 @@ static int cgexec_create_remain_cgroup(gscgroup_grp_t* grp)
 
     /* get the class group */
     for (i = CLASSCG_START_ID; i <= CLASSCG_END_ID; i++) {
-        if (cgutil_vaddr[i]->used && cgutil_vaddr[i]->gid == grp->ginfo.wd.cgid) {
+        if (cgutil_vaddr[i]->used && cgutil_vaddr[i]->gid == grp->ginfo.wd.cgid)
             break;
-        }
     }
 
     if (i > CLASSCG_END_ID) {
@@ -1247,9 +1258,8 @@ static int cgexec_create_remain_cgroup(gscgroup_grp_t* grp)
 
     (void)cgexec_create_default_cgroup(relpath, cpushares, ioweight, cgutil_vaddr[i]->cpuset);
 
-    if (changed) {
+    if (changed)
         cgutil_vaddr[i]->ginfo.cls.rempct = GROUP_ALL_PERCENT;
-    }
 
     free(relpath);
     relpath = NULL;
@@ -1270,9 +1280,8 @@ int cgexec_set_blkio_throttle_value(const char* relpath, const char* name, const
     struct cgroup_controller* cgc = NULL;
 
     /* allocate new cgroup structure */
-    if ((cg = cgexec_get_cgroup(relpath)) == NULL) {
+    if ((cg = cgexec_get_cgroup(relpath)) == NULL)
         return -1;
-    }
 
     /* get controller */
     cgc = cgroup_get_controller(cg, MOUNT_BLKIO_NAME);
@@ -1283,24 +1292,21 @@ int cgexec_set_blkio_throttle_value(const char* relpath, const char* name, const
 
     head = strdup(value);
     if (head == NULL) {
-        fprintf(stderr, "out of memory\n");
+        cgroup_free_controllers(cg);
         cgroup_free(&cg);
         return -1;
     }
-
     p = head;
 
     do {
         q = strchr(p, '\n');
-        if (q != NULL) {
+        if (q != NULL)
             *q++ = '\0';
-        }
 
         i = p;
         while (*i++) {
-            if (*i == '\t') {
+            if (*i == '\t')
                 *i = ' ';
-            }
         }
 
         ret = cgroup_set_value_string(cgc, name, p);
@@ -1350,9 +1356,8 @@ int cgexec_create_new_cgroup(gscgroup_grp_t* grp)
     struct cgroup_controller* cg_controllers[MOUNT_SUBSYS_KINDS] = {0};
     errno_t sret;
 
-    if (NULL == (relpath = gscgroup_get_relative_path(grp->gid, cgutil_vaddr, current_nodegroup))) {
+    if (NULL == (relpath = gscgroup_get_relative_path(grp->gid, cgutil_vaddr, current_nodegroup)))
         return -1;
-    }
 
     /* allocate new cgroup structure */
     cg = cgroup_new_cgroup(relpath);
@@ -1391,11 +1396,7 @@ int cgexec_create_new_cgroup(gscgroup_grp_t* grp)
     if (grp->ainfo.shares &&
         (0 != (ret = cgroup_set_value_uint64(cg_controllers[MOUNT_CPU_ID], CPU_SHARES, grp->ainfo.shares)))) {
         fprintf(stderr, "ERROR: failed to set %s as %d for %s\n", CPU_SHARES, grp->ainfo.shares, cgroup_strerror(ret));
-        free(relpath);
-        relpath = NULL;
-        cgroup_free_controllers(cg);
-        cgroup_free(&cg);
-        return -1;
+        goto error;
     }
 
     /* set the blkio.weight value */
@@ -1548,18 +1549,15 @@ static int cgexec_create_workload_cgroup(gscgroup_grp_t* grp)
     int i, j;
 
     /* skip the workload */
-    if (nextlevel > grp->ginfo.wd.wdlevel) {
+    if (nextlevel > grp->ginfo.wd.wdlevel)
         return 0;
-    }
     /* when the workload is the next level workload group */
     if (nextlevel == grp->ginfo.wd.wdlevel) {
-        if (-1 == cgexec_create_new_cgroup(grp)) {
+        if (-1 == cgexec_create_new_cgroup(grp))
             return -1;
-        }
 
-        if (-1 == cgexec_create_remain_cgroup(grp)) {
+        if (-1 == cgexec_create_remain_cgroup(grp))
             return -1;
-        }
     }
     /* need to create all parent workload group firstly */
     else if (nextlevel < grp->ginfo.wd.wdlevel) {
@@ -1568,9 +1566,8 @@ static int cgexec_create_workload_cgroup(gscgroup_grp_t* grp)
         for (i = nextlevel; i < grp->ginfo.wd.wdlevel; i++) {
             for (j = grp->gid; j <= WDCG_END_ID; j++) {
                 if (cgutil_vaddr[j]->used && cgid == cgutil_vaddr[j]->ginfo.wd.cgid &&
-                    i == cgutil_vaddr[j]->ginfo.wd.wdlevel) {
+                    i == cgutil_vaddr[j]->ginfo.wd.wdlevel)
                     break;
-                }
             }
 
             if (j > WDCG_END_ID) {
@@ -1578,29 +1575,25 @@ static int cgexec_create_workload_cgroup(gscgroup_grp_t* grp)
                 return -1;
             }
 
-            if (-1 == cgexec_create_new_cgroup(cgutil_vaddr[j])) {
+            if (-1 == cgexec_create_new_cgroup(cgutil_vaddr[j]))
                 return -1;
-            }
 
             cls_grp->ginfo.cls.rempct -= cgutil_vaddr[j]->ginfo.wd.percent;
 
-            if (-1 == cgexec_create_remain_cgroup(cgutil_vaddr[j])) {
+            if (-1 == cgexec_create_remain_cgroup(cgutil_vaddr[j]))
                 return -1;
-            }
 
             /* set the maxlevel value of class group */
             cls_grp->ginfo.cls.maxlevel = i;
         }
 
-        if (-1 == cgexec_create_new_cgroup(grp)) {
+        if (-1 == cgexec_create_new_cgroup(grp))
             return -1;
-        }
 
         cls_grp->ginfo.cls.rempct -= grp->ginfo.wd.percent;
 
-        if (-1 == cgexec_create_remain_cgroup(grp)) {
+        if (-1 == cgexec_create_remain_cgroup(grp))
             return -1;
-        }
     }
 
     /* set the maxlevel of Class group */
@@ -1634,9 +1627,8 @@ static int cgexec_create_timeshare_cgroup(gscgroup_grp_t* grp)
 
     /* get the top timeshare path */
     toppath = gscgroup_get_topts_path(grp->gid, cgutil_vaddr, current_nodegroup);
-    if (NULL == toppath) {
+    if (NULL == toppath)
         return -1;
-    }
 
     /* create the top level Cgroup */
     ret = cgexec_create_default_cgroup(toppath, cpushares, ioweight, grp->cpuset);
@@ -1696,9 +1688,8 @@ static int cgexec_delete_default_cgroup(gscgroup_grp_t* grp)
     char* relpath = NULL;
 
     relpath = gscgroup_get_relative_path(grp->gid, cgutil_vaddr, current_nodegroup);
-    if (NULL == relpath) {
+    if (NULL == relpath)
         return -1;
-    }
 
     (void)cgexec_delete_cgroups(relpath);
 
@@ -1751,9 +1742,8 @@ static int cgexec_create_nodegroup_default_cgroups(void)
 
     /* create all Cgroup except the timeshare Cgroup */
     for (i = CLASSCG_START_ID; i <= WDCG_END_ID; i++) {
-        if (0 == cgutil_vaddr[i]->used) {
+        if (0 == cgutil_vaddr[i]->used)
             continue;
-        }
 
         /* update the cpuset info */
         sret = snprintf_s(cgutil_vaddr[i]->cpuset, CPUSET_LEN, CPUSET_LEN - 1, "%s", cpu_allset);
@@ -1787,9 +1777,8 @@ static int cgexec_create_nodegroup_default_cgroups(void)
 
     /* create the timeshare group of each Class group */
     for (i = CLASSCG_START_ID; i <= CLASSCG_END_ID; i++) {
-        if (0 == cgutil_vaddr[i]->used) {
+        if (0 == cgutil_vaddr[i]->used)
             continue;
-        }
 
         ret = cgexec_create_timeshare_cgroup(cgutil_vaddr[i]);
         if (-1 == ret) {
@@ -1816,16 +1805,13 @@ static int cgexec_create_default_cgroups(void)
     errno_t sret;
 
     /* the root Cgroup has exists after mounting Cgroup file system */
-    if ((cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()) && (cgutil_opt.refresh == 0 &&
-        cgutil_opt.revert == 0)) {
+    if ((cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()) && (cgutil_opt.refresh == 0 && cgutil_opt.revert == 0))
         (void)cgexec_update_cgroup_value(cgutil_vaddr[TOPCG_ROOT]);
-    }
 
     /* create all Cgroup except the timeshare Cgroup */
     for (i = 1; i <= WDCG_END_ID; i++) {
-        if (0 == cgutil_vaddr[i]->used) {
+        if (0 == cgutil_vaddr[i]->used)
             continue;
-        }
 
         /* set gaussdb default cpuset value */
         if (*cgutil_vaddr[TOPCG_GAUSSDB]->cpuset == '\0') {
@@ -1845,13 +1831,11 @@ static int cgexec_create_default_cgroups(void)
             securec_check_intval(sret, , -1);
         }
 
-        if (i < CLASSCG_START_ID) {
+        if (i < CLASSCG_START_ID)
             ret = cgexec_create_new_cgroup(cgutil_vaddr[i]);
-        }
         else if (i >= CLASSCG_START_ID && i <= CLASSCG_END_ID) {
-            if (0 == cgutil_vaddr[i]->used) {
+            if (0 == cgutil_vaddr[i]->used)
                 continue;
-            }
 
             /* reset the maxlevel number */
             cgutil_vaddr[i]->ginfo.cls.maxlevel = 0;
@@ -1861,16 +1845,13 @@ static int cgexec_create_default_cgroups(void)
         } else if (i >= WDCG_START_ID && i <= WDCG_END_ID) {
             int cls = cgutil_vaddr[i]->ginfo.wd.cgid;
 
-            if (strncmp(cgutil_vaddr[i]->grpname, GSCGROUP_TOP_WORKLOAD, sizeof(GSCGROUP_TOP_WORKLOAD) - 1) == 0) {
+            if (strncmp(cgutil_vaddr[i]->grpname, GSCGROUP_TOP_WORKLOAD, sizeof(GSCGROUP_TOP_WORKLOAD) - 1) == 0)
                 cgconf_set_top_workload_group(i, cls);
-            }
 
-            if (cgutil_vaddr[i]->ginfo.cls.maxlevel == 1) {
+            if (cgutil_vaddr[i]->ginfo.cls.maxlevel == 1)
                 cgutil_vaddr[i]->ginfo.cls.rempct = GROUP_ALL_PERCENT;
-            }
-            else if (cgutil_vaddr[cls]->ginfo.cls.maxlevel < cgutil_vaddr[i]->ginfo.wd.wdlevel) {
+            else if (cgutil_vaddr[cls]->ginfo.cls.maxlevel < cgutil_vaddr[i]->ginfo.wd.wdlevel)
                 cgutil_vaddr[cls]->ginfo.cls.rempct -= cgutil_vaddr[i]->ginfo.cls.percent;
-            }
 
             ret = cgexec_create_workload_cgroup(cgutil_vaddr[i]);
         }
@@ -1883,9 +1864,8 @@ static int cgexec_create_default_cgroups(void)
 
     /* create the timeshare group of each Class group */
     for (i = CLASSCG_START_ID; i <= CLASSCG_END_ID; i++) {
-        if (0 == cgutil_vaddr[i]->used) {
+        if (0 == cgutil_vaddr[i]->used)
             continue;
-        }
 
         ret = cgexec_create_timeshare_cgroup(cgutil_vaddr[i]);
         if (-1 == ret) {
@@ -1906,9 +1886,8 @@ bool cgexec_is_same_group(const char* oldwd, const char* newwd)
 {
     int len = strlen(newwd);
 
-    if (':' == oldwd[len]) {
+    if (':' == oldwd[len])
         return strncmp(oldwd, newwd, len) == 0;
-    }
 
     return false;
 }
@@ -1931,9 +1910,8 @@ static int cgexec_create_class_cgroup(void)
     /* check if the class exists */
     for (i = CLASSCG_START_ID; i <= CLASSCG_END_ID; i++) {
         if (cgutil_vaddr[i]->used == 0) {
-            if (cls == 0) {
+            if (cls == 0)
                 cls = i;
-            }
             continue;
         }
 
@@ -1958,9 +1936,8 @@ static int cgexec_create_class_cgroup(void)
         {
             /* check the remain percentage */
             for (i = CLASSCG_START_ID; i <= CLASSCG_END_ID; i++) {
-                if (cgutil_vaddr[i]->used) {
+                if (cgutil_vaddr[i]->used)
                     percent += cgutil_vaddr[i]->ginfo.cls.percent;
-                }
             }
 
             if (cgutil_opt.clspct) {
@@ -1973,12 +1950,10 @@ static int cgexec_create_class_cgroup(void)
                     return -1;
                 }
             } else {
-                if (DEFAULT_CLASS_PERCENT > (GROUP_ALL_PERCENT - percent)) {
+                if (DEFAULT_CLASS_PERCENT > (GROUP_ALL_PERCENT - percent))
                     cgutil_opt.clspct = GROUP_ALL_PERCENT - percent;
-                }
-                else {
+                else
                     cgutil_opt.clspct = DEFAULT_CLASS_PERCENT;
-                }
 
                 if (cgutil_opt.clspct == 0) {
                     fprintf(stderr,
@@ -2008,7 +1983,7 @@ static int cgexec_create_class_cgroup(void)
 
             /* create the workload cgroup */
             if (-1 == cgexec_create_workload_cgroup(cgutil_vaddr[i])) {
-                cgconf_reset_workload_group(i, cls);
+                cgconf_reset_workload_group(i);
                 return -1;
             }
         }
@@ -2038,9 +2013,8 @@ static int cgexec_create_class_cgroup(void)
         }
 
         for (i = WDCG_START_ID; i <= WDCG_END_ID; i++) {
-            if (cgutil_vaddr[i]->used == 0) {
+            if (cgutil_vaddr[i]->used == 0)
                 break;
-            }
 
             if (cgutil_vaddr[i]->ginfo.wd.cgid == cls &&
                 cgexec_is_same_group(cgutil_vaddr[i]->grpname, cgutil_opt.wdname)) {
@@ -2066,21 +2040,18 @@ static int cgexec_create_class_cgroup(void)
                 return -1;
             }
         } else {
-            if (DEFAULT_WORKLOAD_PERCENT >= cgutil_vaddr[cls]->ginfo.cls.rempct) {
+            if (DEFAULT_WORKLOAD_PERCENT >= cgutil_vaddr[cls]->ginfo.cls.rempct)
                 cgutil_opt.grppct = cgutil_vaddr[cls]->ginfo.cls.rempct - 1;
-            }
-            else {
+            else
                 cgutil_opt.grppct = DEFAULT_WORKLOAD_PERCENT;
-            }
         }
 
         /* if timeshare has been created, drop them */
         if (find) {
             /* get the top timeshare path */
             toppath = gscgroup_get_topts_path(cgutil_vaddr[cls]->gid, cgutil_vaddr, current_nodegroup);
-            if (NULL == toppath) {
+            if (NULL == toppath)
                 return -1;
-            }
 
             if (-1 == cgexec_delete_cgroups(toppath)) {
                 free(toppath);
@@ -2096,18 +2067,16 @@ static int cgexec_create_class_cgroup(void)
 
         /* create the workload cgroup */
         if (-1 == cgexec_create_workload_cgroup(cgutil_vaddr[i])) {
-            cgconf_reset_workload_group(i, cls);
+            cgconf_reset_workload_group(i);
             return -1;
         }
 
         /* create timeshare cgroup */
-        if (-1 == cgexec_create_timeshare_cgroup(cgutil_vaddr[cls])) {
+        if (-1 == cgexec_create_timeshare_cgroup(cgutil_vaddr[cls]))
             return -1;
-        }
     } else {
-        if (find == 0 && -1 == cgexec_create_timeshare_cgroup(cgutil_vaddr[cls])) {
+        if (find == 0 && -1 == cgexec_create_timeshare_cgroup(cgutil_vaddr[cls]))
             return -1;
-        }
     }
 
     return 0;
@@ -2133,9 +2102,8 @@ static int cgexec_delete_remain_cgroup(gscgroup_grp_t* grp)
     errno_t sret;
 
     relpath = gscgroup_get_parent_wdcg_path(grp->gid, cgutil_vaddr, current_nodegroup);
-    if (NULL == relpath) {
+    if (NULL == relpath)
         return -1;
-    }
 
     /* add the remain path dir */
     sret = snprintf_s(
@@ -2284,9 +2252,8 @@ int cgexec_copy_next_level_cgroup(const char* relpath, gscgroup_grp_t* grp)
     cgroup_free(&newcg);
 
     /* delete the old one */
-    if (-1 == cgexec_delete_default_cgroup(grp)) {
+    if (-1 == cgexec_delete_default_cgroup(grp))
         return -1;
-    }
 
     /* update the workload group */
     grp->ginfo.wd.wdlevel -= 1;
@@ -2330,37 +2297,32 @@ static int cgexec_delete_workload_cgroup(gscgroup_grp_t* grp)
     /* it is the last level workload group */
     if (wglevel == cls_grp->ginfo.cls.maxlevel) {
         /* delete remain cgroup */
-        if (-1 == cgexec_delete_remain_cgroup(grp)) {
+        if (-1 == cgexec_delete_remain_cgroup(grp))
             return -1;
-        }
 
         /* delete workload cgroup */
-        if (-1 == cgexec_delete_default_cgroup(grp)) {
+        if (-1 == cgexec_delete_default_cgroup(grp))
             return -1;
-        }
 
         /* reset remain percent */
         cls_grp->ginfo.cls.rempct += grp->ginfo.wd.percent;
 
-        cgconf_reset_workload_group(grp->gid, cgid);
+        cgconf_reset_workload_group(grp->gid);
     } else {
         /* delete the first one */
-        if (-1 == cgexec_delete_default_cgroup(grp)) {
+        if (-1 == cgexec_delete_default_cgroup(grp))
             return -1;
-        }
 
-        if (NULL == (relpath = gscgroup_get_parent_wdcg_path(grp->gid, cgutil_vaddr, current_nodegroup))) {
+        if (NULL == (relpath = gscgroup_get_parent_wdcg_path(grp->gid, cgutil_vaddr, current_nodegroup)))
             return -1;
-        }
 
         /* count from 2 is for discarding the TopWD group */
         for (i = 2; i < wglevel; i++) {
             /* calculate the remain percentage */
             for (j = WDCG_START_ID; j <= WDCG_END_ID; j++) {
                 if (cgutil_vaddr[j]->used && cgutil_vaddr[j]->ginfo.wd.cgid == cgid &&
-                    cgutil_vaddr[j]->ginfo.wd.wdlevel == i) {
+                    cgutil_vaddr[j]->ginfo.wd.wdlevel == i)
                     break;
-                }
             }
 
             rempct -= cgutil_vaddr[j]->ginfo.wd.percent;
@@ -2369,15 +2331,14 @@ static int cgexec_delete_workload_cgroup(gscgroup_grp_t* grp)
         cls_grp->ginfo.cls.rempct += grp->ginfo.wd.percent;
 
         /* reset, can't use grp */
-        cgconf_reset_workload_group(wgid, cgid);
+        cgconf_reset_workload_group(wgid);
 
         for (i = wglevel; i < cls_grp->ginfo.cls.maxlevel; i++) {
             /* get the next level workload */
             for (j = WDCG_START_ID; j <= WDCG_END_ID; j++) {
                 if (cgutil_vaddr[j]->used && cgutil_vaddr[j]->ginfo.wd.cgid == cgid &&
-                    cgutil_vaddr[j]->ginfo.wd.wdlevel == (i + 1)) {
+                    cgutil_vaddr[j]->ginfo.wd.wdlevel == (i + 1))
                     break;
-                }
             }
 
             /* copy the next workload into this level */
@@ -2420,9 +2381,8 @@ static int cgexec_delete_workload_cgroup(gscgroup_grp_t* grp)
 
     cls_grp->ginfo.cls.maxlevel -= 1;
 
-    if (-1 == cgexec_create_timeshare_cgroup(cgutil_vaddr[cgid])) {
+    if (-1 == cgexec_create_timeshare_cgroup(cgutil_vaddr[cgid]))
         return -1;
-    }
 
     return 0;
 }
@@ -2441,9 +2401,8 @@ static int cgexec_delete_class_cgroup(void)
 
     /* check if the class exists */
     for (i = CLASSCG_START_ID; i <= CLASSCG_END_ID; i++) {
-        if (cgutil_vaddr[i]->used == 0) {
+        if (cgutil_vaddr[i]->used == 0)
             continue;
-        }
 
         if (0 == strcmp(cgutil_vaddr[i]->grpname, cgutil_opt.clsname)) {
             cls = i;
@@ -2620,14 +2579,12 @@ static int cgexec_update_cgroup_cpuset(gscgroup_grp_t* grp, char* cpuset)
 {
     char* relpath = NULL;
 
-    if (strcmp(grp->cpuset, cpuset) == 0) {
+    if (strcmp(grp->cpuset, cpuset) == 0)
         return 0;
-    }
 
     /* get the relative path */
-    if (NULL == (relpath = gscgroup_get_relative_path(grp->gid, cgutil_vaddr, current_nodegroup))) {
+    if (NULL == (relpath = gscgroup_get_relative_path(grp->gid, cgutil_vaddr, current_nodegroup)))
         return -1;
-    }
 
     /* update cgroup cpuset value with relative path */
     if (cgexec_update_cgroup_cpuset_value(relpath, cpuset) == -1) {
@@ -2724,9 +2681,8 @@ static int cgexec_check_workload_cgroup_cpuset(int cls, const char* cpuset)
         if (cgutil_vaddr[i]->used && cgutil_vaddr[i]->ginfo.wd.cgid == cls &&
             strcmp(cgutil_vaddr[i]->grpname, topwd) != 0) {
             if (cgexec_check_cpuset_value(cpuset, cgutil_vaddr[i]->cpuset) < 0) {
-                if (cgexec_update_cgroup_cpuset(cgutil_vaddr[i], cgutil_vaddr[cls]->cpuset) == -1) {
+                if (cgexec_update_cgroup_cpuset(cgutil_vaddr[i], cgutil_vaddr[cls]->cpuset) == -1)
                     return -1;
-                }
             }
         }
     }
@@ -2755,9 +2711,8 @@ static int cgexec_update_all_workload_cgroup_cpuset(int cls, char* cpuset)
         if (cgutil_vaddr[i]->used && cgutil_vaddr[i]->ginfo.wd.cgid == cls &&
             strcmp(cgutil_vaddr[i]->grpname, topwd) != 0) {
             /* if the cpuset of upper levels groups alter larger, workload groups will be altered larger, too*/
-            if (cgexec_update_cgroup_cpuset(cgutil_vaddr[i], cpuset) == -1) {
+            if (cgexec_update_cgroup_cpuset(cgutil_vaddr[i], cpuset) == -1)
                 return -1;
-            }
         }
     }
 
@@ -2926,13 +2881,11 @@ static int cgexec_update_all_class_cgroup_cpuset(char* cpuset)
 {
     /* update all class group cpuset from default value to new cpuset */
     for (int i = CLASSCG_START_ID; i <= CLASSCG_END_ID; ++i) {
-        if (cgutil_vaddr[i]->used == 0) {
+        if (cgutil_vaddr[i]->used == 0)
             continue;
-        }
 
-        if (cgexec_update_class_cpuset(i, cpuset) == -1) {
+        if (cgexec_update_class_cpuset(i, cpuset) == -1)
             return -1;
-        }
     }
 
     return 0;
@@ -2949,13 +2902,11 @@ static int cgexec_update_all_backend_cgroup_cpuset(char* cpuset)
 {
     /* update all backend group cpuset from default value to new cpuset */
     for (int i = BACKENDCG_START_ID; i <= BACKENDCG_END_ID; ++i) {
-        if (cgutil_vaddr[i]->used == 0) {
+        if (cgutil_vaddr[i]->used == 0)
             continue;
-        }
 
-        if (cgexec_update_cgroup_cpuset(cgutil_vaddr[i], cpuset) == -1) {
+        if (cgexec_update_cgroup_cpuset(cgutil_vaddr[i], cpuset) == -1)
             return -1;
-        }
     }
 
     return 0;
@@ -3004,31 +2955,26 @@ static int cgexec_update_top_group_cpuset(int top, char* cpuset)
             cgutil_passwd_user->pw_name);
         securec_check_intval(rc, , -1);
 
-        if (NULL == (dir = opendir(path))) {
+        if (NULL == (dir = opendir(path)))
             return -1;
-        }
 
         while (NULL != (de = readdir(dir))) {
-            if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) {
+            if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
                 continue;
-            }
 
             rc = snprintf_s(subpath, sizeof(subpath), sizeof(subpath) - 1, "%s/%s", path, de->d_name);
             securec_check_intval(rc, (void)closedir(dir);, -1);
 
             /* check if it is directory */
             ret = stat(subpath, &statbuf);
-            if (0 != ret || !S_ISDIR(statbuf.st_mode)) {
+            if (0 != ret || !S_ISDIR(statbuf.st_mode))
                 continue;
-            }
 
-            if (NULL != strstr(de->d_name, GSCGROUP_TOP_BACKEND)) {
+            if (NULL != strstr(de->d_name, GSCGROUP_TOP_BACKEND))
                 continue;
-            }
 
-            if (NULL != strstr(de->d_name, GSCGROUP_TOP_CLASS)) {
+            if (NULL != strstr(de->d_name, GSCGROUP_TOP_CLASS))
                 continue;
-            }
 
             if (cgutil_vaddr[0] != NULL) {
                 (void)munmap(cgutil_vaddr[0], GSCGROUP_ALLNUM * sizeof(gscgroup_grp_t));
@@ -3230,9 +3176,8 @@ static int cgexec_check_dynamic_backend_percent(int bkd)
         /* set the cgutil_vaddr item */
         cgconf_update_backend_group(cgutil_vaddr[bkd]);
 
-        if (-1 == cgexec_update_cgroup_value(cgutil_vaddr[bkd])) {
+        if (-1 == cgexec_update_cgroup_value(cgutil_vaddr[bkd]))
             return -1;
-        }
     }
 
     return 0;
@@ -3252,9 +3197,8 @@ static int cgexec_update_dynamic_backend_cgroup(void)
 
     /* check if the class exists */
     for (i = BACKENDCG_START_ID; i <= BACKENDCG_END_ID; i++) {
-        if (cgutil_vaddr[i]->used == 0) {
+        if (cgutil_vaddr[i]->used == 0)
             continue;
-        }
 
         if (0 == strcmp(cgutil_vaddr[i]->grpname, cgutil_opt.bkdname)) {
             bkd = i;
@@ -3263,9 +3207,8 @@ static int cgexec_update_dynamic_backend_cgroup(void)
     }
 
     if (bkd) {
-        if (cgexec_check_dynamic_backend_percent(bkd) == -1) {
+        if (cgexec_check_dynamic_backend_percent(bkd) == -1)
             return -1;
-        }
     } else {
         fprintf(stderr, "ERROR: the specified backend group %s doesn't exist!\n", cgutil_opt.bkdname);
         return -1;
@@ -3296,23 +3239,20 @@ static int cgexec_update_top_group_percent(void)
             cgutil_opt.toppct = 10;
         }
 
-        if (cgutil_vaddr[TOPCG_ROOT]->ginfo.top.percent == cgutil_opt.toppct) {
+        if (cgutil_vaddr[TOPCG_ROOT]->ginfo.top.percent == cgutil_opt.toppct)
             return 0;
-        }
 
         cgutil_vaddr[TOPCG_ROOT]->ginfo.top.percent = cgutil_opt.toppct;
 
         cgutil_vaddr[TOPCG_ROOT]->ainfo.weight = MAX_IO_WEIGHT * cgutil_opt.toppct / GROUP_ALL_PERCENT;
 
         if ((cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()) &&
-            (-1 == cgexec_update_cgroup_value(cgutil_vaddr[TOPCG_ROOT]))) {
+            (-1 == cgexec_update_cgroup_value(cgutil_vaddr[TOPCG_ROOT])))
             return -1;
-        }
     } else if (0 == strcmp(cgutil_opt.topname, GSCGROUP_TOP_DATABASE) ||
                0 == strcmp(cgutil_opt.topname, cgutil_vaddr[TOPCG_GAUSSDB]->grpname)) {
-        if (cgutil_vaddr[TOPCG_GAUSSDB]->ginfo.top.percent == cgutil_opt.toppct) {
+        if (cgutil_vaddr[TOPCG_GAUSSDB]->ginfo.top.percent == cgutil_opt.toppct)
             return 0;
-        }
 
         cgutil_vaddr[TOPCG_GAUSSDB]->ginfo.top.percent = cgutil_opt.toppct;
         cgutil_vaddr[TOPCG_GAUSSDB]->ainfo.shares =
@@ -3320,15 +3260,13 @@ static int cgexec_update_top_group_percent(void)
         cgutil_vaddr[TOPCG_GAUSSDB]->percent =
             cgutil_vaddr[TOPCG_ROOT]->percent * cgutil_opt.toppct / GROUP_ALL_PERCENT;
 
-        if (-1 == cgexec_update_cgroup_value(cgutil_vaddr[TOPCG_GAUSSDB])) {
+        if (-1 == cgexec_update_cgroup_value(cgutil_vaddr[TOPCG_GAUSSDB]))
             return -1;
-        }
 
         cgconf_update_top_percent();
     } else if (0 == strcmp(cgutil_opt.topname, GSCGROUP_TOP_BACKEND)) {
-        if (cgutil_vaddr[TOPCG_BACKEND]->ginfo.top.percent == cgutil_opt.toppct) {
+        if (cgutil_vaddr[TOPCG_BACKEND]->ginfo.top.percent == cgutil_opt.toppct)
             return 0;
-        }
 
         cgutil_vaddr[TOPCG_BACKEND]->ginfo.top.percent = cgutil_opt.toppct;
         cgutil_vaddr[TOPCG_BACKEND]->ainfo.shares = DEFAULT_CPU_SHARES * cgutil_opt.toppct / 10;
@@ -3336,9 +3274,8 @@ static int cgexec_update_top_group_percent(void)
         cgutil_vaddr[TOPCG_BACKEND]->percent =
             cgutil_vaddr[TOPCG_GAUSSDB]->percent * cgutil_opt.toppct / GROUP_ALL_PERCENT;
 
-        if (-1 == cgexec_update_cgroup_value(cgutil_vaddr[TOPCG_BACKEND])) {
+        if (-1 == cgexec_update_cgroup_value(cgutil_vaddr[TOPCG_BACKEND]))
             return -1;
-        }
 
         cgconf_update_backend_percent();
 
@@ -3348,15 +3285,13 @@ static int cgexec_update_top_group_percent(void)
         cgutil_vaddr[TOPCG_CLASS]->percent =
             cgutil_vaddr[TOPCG_GAUSSDB]->percent * (GROUP_ALL_PERCENT - cgutil_opt.toppct) / GROUP_ALL_PERCENT;
 
-        if (-1 == cgexec_update_cgroup_value(cgutil_vaddr[TOPCG_CLASS])) {
+        if (-1 == cgexec_update_cgroup_value(cgutil_vaddr[TOPCG_CLASS]))
             return -1;
-        }
 
         cgconf_update_class_percent();
     } else if (0 == strcmp(cgutil_opt.topname, GSCGROUP_TOP_CLASS)) {
-        if (cgutil_vaddr[TOPCG_CLASS]->ginfo.top.percent == cgutil_opt.toppct) {
+        if (cgutil_vaddr[TOPCG_CLASS]->ginfo.top.percent == cgutil_opt.toppct)
             return 0;
-        }
 
         cgutil_vaddr[TOPCG_CLASS]->ginfo.top.percent = cgutil_opt.toppct;
         cgutil_vaddr[TOPCG_CLASS]->ainfo.shares = DEFAULT_CPU_SHARES * cgutil_opt.toppct / 10;
@@ -3364,9 +3299,8 @@ static int cgexec_update_top_group_percent(void)
         cgutil_vaddr[TOPCG_CLASS]->percent =
             cgutil_vaddr[TOPCG_GAUSSDB]->percent * cgutil_opt.toppct / GROUP_ALL_PERCENT;
 
-        if (-1 == cgexec_update_cgroup_value(cgutil_vaddr[TOPCG_CLASS])) {
+        if (-1 == cgexec_update_cgroup_value(cgutil_vaddr[TOPCG_CLASS]))
             return -1;
-        }
 
         cgconf_update_class_percent();
 
@@ -3377,9 +3311,8 @@ static int cgexec_update_top_group_percent(void)
         cgutil_vaddr[TOPCG_BACKEND]->percent =
             cgutil_vaddr[TOPCG_GAUSSDB]->percent * (GROUP_ALL_PERCENT - cgutil_opt.toppct) / GROUP_ALL_PERCENT;
 
-        if (-1 == cgexec_update_cgroup_value(cgutil_vaddr[TOPCG_BACKEND])) {
+        if (-1 == cgexec_update_cgroup_value(cgutil_vaddr[TOPCG_BACKEND]))
             return -1;
-        }
 
         cgconf_update_backend_percent();
     } else {
@@ -3428,9 +3361,8 @@ int cgexec_update_top_group_cpuset_userset(const char* topname, char* cpuset)
          * we need update all the belonging lower level groups by percentage.
          */
         if (cgexec_update_top_group_cpuset(TOPCG_GAUSSDB, cpuset) == -1 ||
-            cgexec_reset_cpuset_cgroups(TOPCG_GAUSSDB, 0) == -1) {
+            cgexec_reset_cpuset_cgroups(TOPCG_GAUSSDB, 0) == -1)
             return -1;
-        }
         /*
          * each time we use "-f" to set cpuset,
          * we need reset quota to let this group not be influenced next time
@@ -3457,9 +3389,8 @@ static int cgexec_update_dynamic_top_cgroup(void)
         return -1;
     }
 
-    if (*cgutil_opt.sets) {
+    if (*cgutil_opt.sets)
         return cgexec_update_top_group_cpuset_userset(cgutil_opt.topname, cgutil_opt.sets);
-    }
 
     return 0;
 }
@@ -3481,9 +3412,8 @@ static int cgexec_update_fixed_class_cgroup(void)
 
     /* check if the class exists */
     for (i = CLASSCG_START_ID; i <= CLASSCG_END_ID; i++) {
-        if (cgutil_vaddr[i]->used == 0) {
+        if (cgutil_vaddr[i]->used == 0)
             continue;
-        }
 
         if (0 == strcmp(cgutil_vaddr[i]->grpname, cgutil_opt.clsname)) {
             cls = i;
@@ -3528,19 +3458,16 @@ static int cgexec_update_fixed_class_cgroup(void)
                      * setslength = 0: cpusets have been set well, go to step 3.
                      * setslength > 0: cpusets is empty yet and need reset, go to step 2.
                      */
-                    if ((need_reset = cgexec_check_cpuset_percent(cls, wd, cpusets)) == -1) {
+                    if ((need_reset = cgexec_check_cpuset_percent(cls, wd, cpusets)) == -1)
                         return -1;
-                    }
 
                     /*step 2: defragment the other workload groups.  */
-                    if (need_reset > 0 && (cgexec_reset_cpuset_cgroups(cls, wd) == -1)) {
+                    if (need_reset > 0 && (cgexec_reset_cpuset_cgroups(cls, wd) == -1))
                         return -1;
-                    }
 
                     /* step 3: update the workload group. */
-                    if (cgexec_update_cgroup_cpuset(cgutil_vaddr[wd], cpusets) == -1) {
+                    if (cgexec_update_cgroup_cpuset(cgutil_vaddr[wd], cpusets) == -1)
                         return -1;
-                    }
 
                     cgutil_vaddr[wd]->ainfo.quota = cgutil_opt.setspct;
 
@@ -3561,9 +3488,8 @@ static int cgexec_update_fixed_class_cgroup(void)
         if (cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()) {
             if ((cgutil_opt.bpsread[0] || cgutil_opt.iopsread[0] || cgutil_opt.bpswrite[0] ||
                     cgutil_opt.iopswrite[0]) &&
-                (-1 == cgexec_update_cgroup_value(cgutil_vaddr[cls]))) {
+                (-1 == cgexec_update_cgroup_value(cgutil_vaddr[cls])))
                 return -1;
-            }
         }
         if (cgutil_opt.setspct) {
             /*
@@ -3572,14 +3498,12 @@ static int cgexec_update_fixed_class_cgroup(void)
              * return value = 0: legal and no need to do defragment.
              * return value > 0: need defragment
              */
-            if ((need_reset = cgexec_check_cpuset_percent(TOPCG_CLASS, cls, cpusets)) == -1) {
+            if ((need_reset = cgexec_check_cpuset_percent(TOPCG_CLASS, cls, cpusets)) == -1)
                 return -1;
-            }
 
             /* step 2: degragment the other class groups, reset their belonging workload groups by percentage. */
-            if (need_reset > 0 && (cgexec_reset_cpuset_cgroups(TOPCG_CLASS, cls) == -1)) {
+            if (need_reset > 0 && (cgexec_reset_cpuset_cgroups(TOPCG_CLASS, cls) == -1))
                 return -1;
-            }
 
             /*step 3: update the class group. */
             if (cgexec_update_class_cpuset(cls, cpusets) == -1) {
@@ -3598,9 +3522,8 @@ static int cgexec_update_fixed_class_cgroup(void)
             cgutil_vaddr[cls]->ainfo.quota = cgutil_opt.setspct;
 
         } else if (cgutil_opt.setfixed) {
-            if (cgexec_update_class_cpuset(cls, cgutil_vaddr[TOPCG_CLASS]->cpuset) == -1) {
+            if (cgexec_update_class_cpuset(cls, cgutil_vaddr[TOPCG_CLASS]->cpuset) == -1)
                 return -1;
-            }
 
             if (cgexec_reset_cpuset_cgroups(cls, 0) == -1) {
                 fprintf(stderr, "ERROR: reset workload cpuset for class \"%s\" failed.\n", cgutil_vaddr[cls]->grpname);
@@ -3633,9 +3556,8 @@ static int cgexec_update_fixed_backend_cgroup(void)
 
     /* check if the class exists */
     for (i = BACKENDCG_START_ID; i <= BACKENDCG_END_ID; i++) {
-        if (cgutil_vaddr[i]->used == 0) {
+        if (cgutil_vaddr[i]->used == 0)
             continue;
-        }
 
         if (0 == strcmp(cgutil_vaddr[i]->grpname, cgutil_opt.bkdname)) {
             bkd = i;
@@ -3647,30 +3569,25 @@ static int cgexec_update_fixed_backend_cgroup(void)
         if (cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()) {
             if ((cgutil_opt.bpsread[0] || cgutil_opt.iopsread[0] || cgutil_opt.bpswrite[0] ||
                     cgutil_opt.iopswrite[0]) &&
-                (-1 == cgexec_update_cgroup_value(cgutil_vaddr[bkd]))) {
+                (-1 == cgexec_update_cgroup_value(cgutil_vaddr[bkd])))
                 return -1;
-            }
         }
         /* set cpuset by percentage*/
         if (cgutil_opt.setspct) {
             /* the same steps with updating workload groups.*/
-            if ((need_reset = cgexec_check_cpuset_percent(TOPCG_BACKEND, bkd, cpuset)) == -1) {
+            if ((need_reset = cgexec_check_cpuset_percent(TOPCG_BACKEND, bkd, cpuset)) == -1)
                 return -1;
-            }
 
-            if (need_reset > 0 && (cgexec_reset_cpuset_cgroups(TOPCG_BACKEND, bkd) == -1)) {
+            if (need_reset > 0 && (cgexec_reset_cpuset_cgroups(TOPCG_BACKEND, bkd) == -1))
                 return -1;
-            }
 
-            if (cgexec_update_cgroup_cpuset(cgutil_vaddr[bkd], cpuset) == -1) {
+            if (cgexec_update_cgroup_cpuset(cgutil_vaddr[bkd], cpuset) == -1)
                 return -1;
-            }
 
             cgutil_vaddr[bkd]->ainfo.quota = cgutil_opt.setspct;
         } else if (cgutil_opt.setfixed) {
-            if (cgexec_update_cgroup_cpuset(cgutil_vaddr[bkd], cgutil_vaddr[TOPCG_BACKEND]->cpuset) == -1) {
+            if (cgexec_update_cgroup_cpuset(cgutil_vaddr[bkd], cgutil_vaddr[TOPCG_BACKEND]->cpuset) == -1)
                 return -1;
-            }
 
             cgutil_vaddr[bkd]->ainfo.quota = 0;
         }
@@ -3706,12 +3623,10 @@ static int cgexec_update_fixed_top_cgroup(void)
             fprintf(stderr, "ERROR: users can't modify the cpu cores percentage of Gaussdb cgroup with \"--fixed\"!\n");
             return -1;
         }
-    } else if (0 == strcmp(cgutil_opt.topname, GSCGROUP_TOP_BACKEND)) {
+    } else if (0 == strcmp(cgutil_opt.topname, GSCGROUP_TOP_BACKEND))
         top = TOPCG_BACKEND;
-    }
-    else if (0 == strcmp(cgutil_opt.topname, GSCGROUP_TOP_CLASS)) {
+    else if (0 == strcmp(cgutil_opt.topname, GSCGROUP_TOP_CLASS))
         top = TOPCG_CLASS;
-    }
     else {
         fprintf(stderr, "ERROR: the specified top group %s doesn't exist!\n", cgutil_opt.topname);
         return -1;
@@ -3872,7 +3787,7 @@ int cgexec_check_mount_for_upgrade(void)
         securec_check_intval(sret, , -1);
 
         ret = system(cmd);
-        if (-1 == ret) {
+        if (CheckSystemSucess(ret) == -1) {
             fprintf(stderr, "ERROR: failed to umount cgroup under %s!\n", GSCGROUP_MOUNT_POINT_OLD);
             return -1;
         }
@@ -3950,8 +3865,9 @@ int cgexec_detect_cgroup_mount(void)
 {
     int i, j;
 
-    if (cgutil_opt.cflag <= 0)
+    if (cgutil_opt.cflag <= 0) {
         return 1;
+    }
 
     for (i = 0; i < MOUNT_SUBSYS_KINDS; ++i) {
         if (i == MOUNT_BLKIO_ID && !(cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()))
@@ -3973,6 +3889,139 @@ int cgexec_detect_cgroup_mount(void)
     return 1;
 }
 
+static int RemoveExistSymbolLink(const char* mpoint)
+{
+    int ret;
+    char cmd[MAX_COMMAND_LENGTH];
+    struct stat statbuf;
+    errno_t rc;
+    
+    rc = memset_s(&statbuf, sizeof(statbuf), 0, sizeof(statbuf));
+    securec_check_c(rc, "\0", "\0");
+    /* If the mount point is already exist, directory should be remove */                
+    ret = lstat(mpoint, &statbuf);
+    if (S_ISLNK(statbuf.st_mode)) {
+        rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "rm %s", mpoint);
+        securec_check_ss_c(rc, "\0", "\0");
+
+        ret = system(cmd);
+        if (CheckSystemSucess(ret) == -1) {
+            fprintf(stderr, "ERROR: failed to remove exist symbol link %s!\n", mpoint);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int MountCgroupInternal(const char* mpoint, const char* type)
+{
+    int ret;
+    char cmd[MAX_COMMAND_LENGTH];
+    struct stat statbuf;
+    errno_t rc;
+    
+    rc = memset_s(&statbuf, sizeof(statbuf), 0, sizeof(statbuf));
+    securec_check_c(rc, "\0", "\0");
+    /* check new mount point directory */
+    ret = stat(mpoint, &statbuf);
+    if (ret != 0 || !S_ISDIR(statbuf.st_mode)) {
+        if (mkdir(mpoint, S_IRWXU) != 0) {
+            fprintf(stderr, "ERROR: failed to create %s directory!\n", mpoint);
+            return -1;
+        }
+    }
+
+    rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1,
+        "mount -t cgroup -o %s %s %s", type, type, mpoint);
+    securec_check_ss_c(rc, "\0", "\0");
+    ret = system(cmd);
+    if (CheckSystemSucess(ret) == -1) {
+        fprintf(stderr, "ERROR: failed to mount cgroup under %s!\n", mpoint);
+        return -1;
+    }
+    fprintf(stderr, "LOG: mount %s success.\n", type);
+    return 0;
+}
+
+static int LinkCpuCgroup(const char* target, const char* source)
+{
+    int ret;
+    char cmd[MAX_COMMAND_LENGTH];
+    errno_t rc;
+
+    rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "ln -s %s %s", source, target);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    ret = system(cmd);
+    if (CheckSystemSucess(ret) == -1) {
+        fprintf(stderr, "ERROR: failed to mount cgroup under %s!\n", target);
+        return -1;
+    }
+
+    return 0;
+}
+
+static int CgexecRemountCpuCgroup(const char* path, const char* tmp_mpoint)
+{
+    int ret;
+    char mpoint[MOUNT_POINT_LENGTH];
+    errno_t rc;
+
+    rc = snprintf_s(mpoint, sizeof(mpoint), sizeof(mpoint) - 1, 
+        "%s/cpu", path);
+    securec_check_ss_c(rc, "\0", "\0");
+    ret = RemoveExistSymbolLink(mpoint);
+    if (ret != 0) {
+        return ret;
+    }
+    ret = LinkCpuCgroup(mpoint, tmp_mpoint);
+    if (ret != 0) {
+        return ret;
+    }
+    rc = snprintf_s(mpoint, sizeof(mpoint), sizeof(mpoint) - 1, 
+        "%s/cpuacct", path);
+    securec_check_ss_c(rc, "\0", "\0");
+    ret = RemoveExistSymbolLink(mpoint);
+    if (ret != 0) {
+        return ret;
+    }
+    ret = LinkCpuCgroup(mpoint, tmp_mpoint);
+
+    return ret;
+}
+
+static int CgexecMountCpuCgroup(const char* path)
+{
+    int ret;
+    char tmp_mpoint[MOUNT_POINT_LENGTH];
+    char mpoint[MOUNT_POINT_LENGTH];
+    errno_t rc;
+
+    /* cpu and cpuacct sub-system should mount cpu,cpuacct sub-system */
+    rc = snprintf_s(tmp_mpoint, sizeof(tmp_mpoint), sizeof(tmp_mpoint) - 1, 
+        "%s/cpu,cpuacct", path);
+    securec_check_ss_c(rc, "\0", "\0");
+    ret = MountCgroupInternal(tmp_mpoint, "cpu,cpuacct");
+    if (ret != 0) {
+        /* mount failed means that cpu and cpuacct not mount together */
+        rc = snprintf_s(mpoint, sizeof(mpoint), sizeof(mpoint) - 1, 
+            "%s/cpu", path);
+        securec_check_ss_c(rc, "\0", "\0");
+        ret = MountCgroupInternal(mpoint, cgutil_subsys_table[MOUNT_CPU_ID]);
+        if (ret != 0) {
+            return ret;
+        }
+        rc = snprintf_s(mpoint, sizeof(mpoint), sizeof(mpoint) - 1, 
+            "%s/cpuacct", path);
+        securec_check_ss_c(rc, "\0", "\0");
+        ret = MountCgroupInternal(mpoint, cgutil_subsys_table[MOUNT_CPUACCT_ID]);
+    } else {
+        ret = CgexecRemountCpuCgroup(path, tmp_mpoint);
+    }
+
+    return ret;
+}
+
 /*
  * @Description: mount the Cgroup file system on the Root directory.
  * @IN void
@@ -3983,14 +4032,22 @@ int cgexec_mount_root_cgroup(void)
 {
     int i, ret;
 
-    char cmd[128], mpoint[MAXPGPATH + 16];
-    char* path = GSCGROUP_MOUNT_POINT;
+    char mpoint[MOUNT_POINT_LENGTH];
+    char* path = NULL;
     struct stat statbuf;
 
     errno_t rc;
     rc = memset_s(&statbuf, sizeof(statbuf), 0, sizeof(statbuf));
-    securec_check_errno(rc, , -1);
+    securec_check_c(rc, "\0", "\0");
 
+    if (cgutil_opt.mpflag)
+        path = cgutil_opt.mpoint;
+    else
+        path = GSCGROUP_MOUNT_POINT;
+
+    if (CheckBackendEnv(path) != 0) {
+        return -1;
+    }
     /* Create mount point directory */
     ret = stat(path, &statbuf);
     if (0 != ret || !S_ISDIR(statbuf.st_mode)) {
@@ -3998,6 +4055,8 @@ int cgexec_mount_root_cgroup(void)
             fprintf(stderr, "ERROR: failed to create %s directory!\n", path);
             return -1;
         }
+        /* change the right to 755 */
+        (void)chmod(path, S_IRWXU | (S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH));
     }
 
     for (i = 0; i < MOUNT_SUBSYS_KINDS; ++i) {
@@ -4007,32 +4066,58 @@ int cgexec_mount_root_cgroup(void)
 
         /* If the subsys has not mounted, we will use new point to mount. */
         if (*cgutil_opt.mpoints[i] == '\0') {
-            rc = snprintf_s(mpoint, sizeof(mpoint), sizeof(mpoint) - 1, "%s/%s", path, cgutil_subsys_table[i]);
-            securec_check_intval(rc, , -1);
+            /* cpu and cpuacct sub-system all mount on cpu,cpuacct in new linux system */
+            if (i == MOUNT_CPU_ID) {
+                ret = CgexecMountCpuCgroup(path);
+                i++;
+            } else {
+                rc = snprintf_s(mpoint, sizeof(mpoint), sizeof(mpoint) - 1, "%s/%s", path, cgutil_subsys_table[i]);
+                securec_check_ss_c(rc, "\0", "\0");
+                ret = MountCgroupInternal(mpoint, cgutil_subsys_table[i]);
+            }
+        }
+    }
 
-            /* check new mount point directory */
-            ret = stat(mpoint, &statbuf);
-            if (0 != ret || !S_ISDIR(statbuf.st_mode)) {
-                if (mkdir(mpoint, S_IRWXU) != 0) {
-                    fprintf(stderr, "ERROR: failed to create %s directory!\n", mpoint);
+    return 0;
+}
+
+static int CgexecUmountRootCgroupInternal(const char* path, int index)
+{
+    int ret;
+    char cmd[MAX_COMMAND_LENGTH], mpoint[MOUNT_POINT_LENGTH];
+    errno_t rc;
+
+    /* get mount point full name */
+    rc = snprintf_s(mpoint, sizeof(mpoint), sizeof(mpoint) - 1, "%s/%s", path, cgutil_subsys_table[index]);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    /* we will unmount the point which you specify. */
+    if (strcmp(cgutil_opt.mpoints[index], mpoint) == 0) {
+        rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "umount %s", mpoint);
+        securec_check_ss_c(rc, "\0", "\0");
+
+        ret = system(cmd);
+        if (CheckSystemSucess(ret) == -1) {
+            fprintf(stderr, "ERROR: failed to umount cgroup under %s!\n", mpoint);
+            return -1;
+        }
+        fprintf(stderr, "LOG: umount cgroup under %s!\n", mpoint);
+    } else if (index == MOUNT_CPU_ID || index == MOUNT_CPUACCT_ID) {
+        /* check new mount point directory */
+        RemoveExistSymbolLink(mpoint);
+
+        if (index == MOUNT_CPU_ID) {
+            rc = snprintf_s(mpoint, sizeof(mpoint), sizeof(mpoint) - 1, "%s/cpu,cpuacct", path);
+            securec_check_ss_c(rc, "\0", "\0");
+            if (*cgutil_opt.mpoints[index] && strcmp(cgutil_opt.mpoints[index], mpoint) == 0) {
+                rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "umount %s", mpoint);
+                securec_check_ss_c(rc, "\0", "\0");
+
+                ret = system(cmd);
+                if (CheckSystemSucess(ret) == -1) {
+                    fprintf(stderr, "ERROR: failed to umount cgroup under %s!\n", mpoint);
                     return -1;
                 }
-            }
-
-            /* use new point to mount */
-            rc = snprintf_s(cmd,
-                sizeof(cmd),
-                sizeof(cmd) - 1,
-                "mount -t cgroup -o %s %s %s",
-                cgutil_subsys_table[i],
-                cgutil_subsys_table[i],
-                mpoint);
-            securec_check_intval(rc, , -1);
-
-            ret = system(cmd);
-            if (-1 == ret) {
-                fprintf(stderr, "ERROR: failed to mount cgroup under %s!\n", mpoint);
-                return -1;
             }
         }
     }
@@ -4049,50 +4134,42 @@ int cgexec_mount_root_cgroup(void)
 int cgexec_umount_root_cgroup(void)
 {
     int i, ret;
-    char cmd[128], mpoint[MAXPGPATH + 16];
-    char* path = GSCGROUP_MOUNT_POINT;
-    errno_t sret;
+    char cmd[MAX_COMMAND_LENGTH];
+    char* path = NULL;
+    errno_t rc;
 
+    if (cgutil_opt.mpflag)
+        path = cgutil_opt.mpoint;
+    else
+        path = GSCGROUP_MOUNT_POINT;
+
+    if (CheckBackendEnv(path) != 0) {
+        return -1;
+    }
     for (i = 0; i < MOUNT_SUBSYS_KINDS; ++i) {
         /* 'blkio' is invalid, ignore it */
         if (i == MOUNT_BLKIO_ID && !(cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()))
             continue;
 
-        /* mount point is not empty, maybe it need unmount */
-        if (*cgutil_opt.mpoints[i]) {
-            /* mount under different directories */
-            if (strcmp(cgutil_opt.mpoints[i], GSCGROUP_MOUNT_POINT) != 0) {
-                /* get mount point full name */
-                sret = sprintf_s(mpoint, sizeof(mpoint), "%s/%s", path, cgutil_subsys_table[i]);
-                securec_check_intval(sret, , -1);
-
-                /* we will unmount the point which you specify. */
-                if (strcmp(cgutil_opt.mpoints[i], mpoint) == 0) {
-                    sret = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "umount %s", mpoint);
-                    securec_check_intval(sret, , -1);
-
-                    ret = system(cmd);
-                    if (-1 == ret) {
-                        fprintf(stderr, "ERROR: failed to umount cgroup under %s!\n", mpoint);
-                        return -1;
-                    }
-                }
-            } else {
-                /* It has mounted on old default point, we unmount it only once. */
-                if (strcmp(cgutil_opt.mpoints[i], GSCGROUP_MOUNT_POINT_OLD) == 0) {
-                    sret = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "umount %s", GSCGROUP_MOUNT_POINT_OLD);
-                    securec_check_intval(sret, , -1);
-
-                    ret = system(cmd);
-                    if (-1 == ret) {
-                        fprintf(stderr, "ERROR: failed to umount cgroup under %s!\n", GSCGROUP_MOUNT_POINT_OLD);
-                        return -1;
-                    }
-
-                    break;
-                }
-            }
+        if (*cgutil_opt.mpoints[i] == '\0') {
+            continue;
         }
+
+        /* It has mounted on old default point, we unmount it only once. */
+        if (strcmp(cgutil_opt.mpoints[i], GSCGROUP_MOUNT_POINT_OLD) == 0) {
+            rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "umount %s", GSCGROUP_MOUNT_POINT_OLD);
+            securec_check_ss_c(rc, "\0", "\0");
+
+            ret = system(cmd);
+            if (CheckSystemSucess(ret) == -1) {
+                fprintf(stderr, "ERROR: failed to umount cgroup under %s!\n", GSCGROUP_MOUNT_POINT_OLD);
+                return -1;
+            }
+
+            break;
+        }
+
+        ret = CgexecUmountRootCgroupInternal(path, i);
     }
 
     return 0;
@@ -4245,7 +4322,6 @@ int cgexec_create_groups(void)
         securec_check_intval(sret, free(cgpath); free(ngcgpath), -1);
 
         ret = stat(ngcgpath, &buf);
-
         /* if the nodegroup doesn't exist, create the default cgroups */
         if (0 != ret) {
             /* rename the origin cgroup into nodegroup cgroup */
@@ -4460,8 +4536,9 @@ int cgexec_drop_groups(void)
             return -1;
         }
 
-        if (-1 == cgexec_delete_class_cgroup())
+        if (-1 == cgexec_delete_class_cgroup()) {
             cgconf_remove_backup_conffile();
+        }
     }
 
     if (geteuid() == 0 && cgutil_opt.umflag) {
@@ -4511,8 +4588,9 @@ int cgexec_update_groups(void)
     }
 
     /* remove the backup file */
-    if (-1 == ret)
+    if (-1 == ret) {
         cgconf_remove_backup_conffile();
+    }
 
     return 0;
 }
@@ -4815,10 +4893,12 @@ static int cgexec_refresh_groups_internal(void)
     /* create default groups.
      * if an error happened, then return -1.
      */
-    if (cgexec_create_default_cgroups())
+    if (cgexec_create_default_cgroups()) {
         return -1;
-    if (cgexec_create_cm_default_cgroup())
+    }
+    if (cgexec_create_cm_default_cgroup()) {
         return -1;
+    }
 
     return 0;
 }
@@ -4990,7 +5070,7 @@ int cgexec_recover_update_fixed_class_group(int id, char* cpuset, int reverse)
     if (!reverse) /* from down to up */
     {
         /* copy the value into class group */
-        sret = strcpy_s(cgutil_vaddr[id]->cpuset, GPNAME_LEN, cpuset);
+        sret = strcpy_s(cgutil_vaddr[id]->cpuset, CPUSET_LEN, cpuset);
         securec_check_errno(sret, , -1);
 
         /* update the class group into cgroup fs */
@@ -5169,7 +5249,7 @@ int cgexec_recover_create_groups(int cls_add, const int* wd_add)
 
         /* create the workload cgroup */
         if (-1 == cgexec_create_workload_cgroup(cgutil_vaddr[wld])) {
-            cgconf_reset_workload_group(wld, tmpcls);
+            cgconf_reset_workload_group(wld);
             return -1;
         }
     }

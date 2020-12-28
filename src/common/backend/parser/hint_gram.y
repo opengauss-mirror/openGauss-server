@@ -47,14 +47,14 @@ static double convert_to_numeric(Node *value);
 
 
 
-%type <node> join_hint_item join_order_hint join_method_hint stream_hint row_hint scan_hint skew_hint expr_const
+%type <node> join_hint_item join_order_hint join_method_hint stream_hint row_hint scan_hint skew_hint expr_const pred_push_hint rewrite_hint
 %type <list> relation_list join_hint_list relation_item relation_list_with_p ident_list skew_relist
              column_list_p column_list value_list_p value_list value_list_item value_type value_list_with_bracket
 %token <str>	IDENT FCONST SCONST BCONST XCONST
 %token <ival>	ICONST
 
 %token <keyword> NestLoop_P MergeJoin_P HashJoin_P No_P Leading_P Rows_P Broadcast_P
-				Redistribute_P BlockName_P TableScan_P IndexScan_P IndexOnlyScan_P Skew_P NULL_P TRUE_P FALSE_P
+				Redistribute_P BlockName_P TableScan_P IndexScan_P IndexOnlyScan_P Skew_P HINT_MULTI_NODE_P NULL_P TRUE_P FALSE_P Predpush_P Rewrite_P
 
 %nonassoc	IDENT NULL_P
 
@@ -115,11 +115,73 @@ join_hint_item:
 		scanHint->negative = true;
 		$$ = (Node *) scanHint;
 	}
-	;
 	| skew_hint
 	{
 		$$ = $1;
 	}
+	| HINT_MULTI_NODE_P
+	{
+		MultiNodeHint *multi_node_hint = (MultiNodeHint *)makeNode(MultiNodeHint);
+		multi_node_hint->multi_node_hint = true;
+		$$ = (Node *) multi_node_hint;
+	}
+    | pred_push_hint
+    {
+        $$ = $1;
+    }
+	| No_P rewrite_hint
+	{
+		$$ = $2;
+	}
+
+rewrite_hint:
+	Rewrite_P '(' ident_list ')'
+	{
+		RewriteHint *rewriteHint = makeNode(RewriteHint);
+		rewriteHint->param_names = $3;
+		rewriteHint->param_bits = 0;
+		$$ = (Node *) rewriteHint;
+	}
+
+pred_push_hint:
+    Predpush_P '(' ident_list ')'
+    {
+        PredpushHint *predpushHint = makeNode(PredpushHint);
+        predpushHint->base.relnames = $3;
+        predpushHint->base.hint_keyword = HINT_KEYWORD_PREDPUSH;
+        predpushHint->base.state = HINT_STATE_NOTUSED;
+        predpushHint->dest_name = NULL;
+        predpushHint->dest_id = 0;
+        predpushHint->candidates = NULL;
+        predpushHint->negative = false;
+        $$ = (Node *) predpushHint;
+    }
+    |
+    Predpush_P '(' ident_list ',' IDENT ')'
+    {
+        PredpushHint *predpushHint = makeNode(PredpushHint);
+        predpushHint->base.relnames = $3;
+        predpushHint->base.hint_keyword = HINT_KEYWORD_PREDPUSH;
+        predpushHint->base.state = HINT_STATE_NOTUSED;
+        predpushHint->dest_name = $5;
+        predpushHint->dest_id = 0;
+        predpushHint->candidates = NULL;
+        predpushHint->negative = false;
+        $$ = (Node *) predpushHint;
+    }
+    |
+    No_P Predpush_P
+    {
+        PredpushHint *predpushHint = makeNode(PredpushHint);
+        predpushHint->base.relnames = NULL;
+        predpushHint->base.hint_keyword = HINT_KEYWORD_PREDPUSH;
+        predpushHint->base.state = HINT_STATE_NOTUSED;
+        predpushHint->dest_name = NULL;
+        predpushHint->dest_id = 0;
+        predpushHint->candidates = NULL;
+        predpushHint->negative = true;
+        $$ = (Node *) predpushHint;
+    }
 
 join_order_hint:
 	Leading_P '(' relation_list_with_p ')'
@@ -404,7 +466,7 @@ makeStringValue(char *str)
 {
 	Value	   *val = makeNode(Value);
 
-	if (DB_IS_CMPT(DB_CMPT_A))
+	if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
 	{
 		if (NULL == str || 0 == strlen(str))
 		{

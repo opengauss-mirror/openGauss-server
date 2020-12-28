@@ -1,0 +1,464 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+DROP CLIENT MASTER KEY IF EXISTS colConstraintCMK CASCADE;
+NOTICE:  global setting "colconstraintcmk" does not exist
+CREATE CLIENT MASTER KEY colConstraintCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY colConstraintCEK WITH VALUES (CLIENT_MASTER_KEY = colConstraintCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE IF NOT EXISTS columns_constraint (
+id int,
+col1 INTEGER NOT NULL ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+col2 decimal(3,2) NULL ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+col3 varchar(10) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+col4 numeric DEFAULT 9.99 ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC)
+);
+CREATE TABLE IF NOT EXISTS columns_constraint_unencrypt (
+id int,
+col1 INTEGER NOT NULL,
+col2 decimal(3,2) NULL,
+col3 varchar(10),
+col4 numeric DEFAULT 9.99
+);
+INSERT INTO columns_constraint VALUES (1, 10, 1.34, 'John', DEFAULT);
+INSERT INTO columns_constraint VALUES (2, NULL, 1.34, 'Moses', DEFAULT);
+ERROR:  null value in column "col1" violates not-null constraint
+--?.*
+INSERT INTO columns_constraint VALUES (3, 10, NULL, 'Alex', DEFAULT);
+INSERT INTO columns_constraint VALUES (4, 10, NULL, 'John', DEFAULT);
+INSERT INTO columns_constraint VALUES (5, 10, NULL, 'Jorgen', 10.1);
+select * from columns_constraint order by id;
+ id | col1 | col2 |  col3  | col4 
+----+------+------+--------+------
+  1 |   10 | 1.34 | John   | 9.99
+  3 |   10 |      | Alex   | 9.99
+  4 |   10 |      | John   | 9.99
+  5 |   10 |      | Jorgen | 10.1
+(4 rows)
+
+ALTER TABLE columns_constraint ALTER COLUMN col4 SET DEFAULT 7.77;
+INSERT INTO columns_constraint VALUES (6, 10, 1.34, 'UNIQUE5', DEFAULT);
+SELECT * FROM columns_constraint order by id;
+ id | col1 | col2 |  col3   | col4 
+----+------+------+---------+------
+  1 |   10 | 1.34 | John    | 9.99
+  3 |   10 |      | Alex    | 9.99
+  4 |   10 |      | John    | 9.99
+  5 |   10 |      | Jorgen  | 10.1
+  6 |   10 | 1.34 | UNIQUE5 | 7.77
+(5 rows)
+
+ALTER TABLE columns_constraint ALTER COLUMN col4 DROP DEFAULT;
+INSERT INTO columns_constraint VALUES (7, 10, 1.34, 'UNIQUE6', DEFAULT);
+SELECT * FROM columns_constraint order by id;
+ id | col1 | col2 |  col3   | col4 
+----+------+------+---------+------
+  1 |   10 | 1.34 | John    | 9.99
+  3 |   10 |      | Alex    | 9.99
+  4 |   10 |      | John    | 9.99
+  5 |   10 |      | Jorgen  | 10.1
+  6 |   10 | 1.34 | UNIQUE5 | 7.77
+  7 |   10 | 1.34 | UNIQUE6 |     
+(6 rows)
+
+ALTER TABLE IF EXISTS columns_constraint ADD  COLUMN col5 int ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC);
+ALTER TABLE IF EXISTS columns_constraint ADD  COLUMN col6 int unique ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "columns_constraint_col6_key" for table "columns_constraint"
+ALTER TABLE IF EXISTS columns_constraint ADD  COLUMN col7 int ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC) check (col7 > 9);
+ERROR(CLIENT): could not support encrypted columns as check constraints
+\d columns_constraint;
+        Table "public.columns_constraint"
+ Column |       Type        |     Modifiers      
+--------+-------------------+--------------------
+ id     | integer           | 
+ col1   | integer           | not null encrypted
+ col2   | numeric           |  encrypted
+ col3   | character varying |  encrypted
+ col4   | numeric           |  encrypted
+ col5   | integer           |  encrypted
+ col6   | integer           |  encrypted
+Indexes:
+    "columns_constraint_col6_key" UNIQUE CONSTRAINT, btree (col6) TABLESPACE pg_default
+
+CREATE TABLE IF NOT EXISTS columns_constraint_alter_check (
+id int,
+col1 INTEGER NOT NULL ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+col2 decimal(3,2) NULL ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC)
+);
+ALTER TABLE IF EXISTS columns_constraint_alter_check ADD  COLUMN col3 int ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC) check (col3 is not null);
+\d columns_constraint_alter_check;
+Table "public.columns_constraint_alter_check"
+ Column |  Type   |     Modifiers      
+--------+---------+--------------------
+ id     | integer | 
+ col1   | integer | not null encrypted
+ col2   | numeric |  encrypted
+ col3   | integer |  encrypted
+Check constraints:
+    "columns_constraint_alter_check_col3_check" CHECK (col3 IS NOT NULL)
+
+ALTER TABLE IF EXISTS columns_constraint_unencrypt ADD  COLUMN col5 int unique;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "columns_constraint_unencrypt_col5_key" for table "columns_constraint_unencrypt"
+ALTER TABLE IF EXISTS columns_constraint_unencrypt ADD  COLUMN col6 int check (col6 is not null);
+ALTER TABLE IF EXISTS columns_constraint_unencrypt ADD  COLUMN col7 int ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC);
+\d columns_constraint_unencrypt;
+  Table "public.columns_constraint_unencrypt"
+ Column |         Type          |  Modifiers   
+--------+-----------------------+--------------
+ id     | integer               | 
+ col1   | integer               | not null
+ col2   | numeric(3,2)          | 
+ col3   | character varying(10) | 
+ col4   | numeric               | default 9.99
+ col5   | integer               | 
+ col6   | integer               | 
+ col7   | integer               |  encrypted
+Indexes:
+    "columns_constraint_unencrypt_col5_key" UNIQUE CONSTRAINT, btree (col5) TABLESPACE pg_default
+Check constraints:
+    "columns_constraint_unencrypt_col6_check" CHECK (col6 IS NOT NULL)
+
+DROP TABLE IF EXISTS columns_constraint;
+DROP TABLE IF EXISTS columns_constraint_unencrypt;
+DROP TABLE IF EXISTS columns_constraint_alter_check;
+-- support
+CREATE TABLE IF NOT EXISTS columns_alter_constraint (
+id int,
+col1 INTEGER NOT NULL ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+col2 decimal(3,2) NULL ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+col3 varchar(10) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = RANDOMIZED));
+ALTER TABLE columns_alter_constraint ADD CONSTRAINT test_check CHECK (col3 is NOT NULL);
+\d columns_alter_constraint;
+     Table "public.columns_alter_constraint"
+ Column |       Type        |     Modifiers      
+--------+-------------------+--------------------
+ id     | integer           | 
+ col1   | integer           | not null encrypted
+ col2   | numeric           |  encrypted
+ col3   | character varying |  encrypted
+Check constraints:
+    "test_check" CHECK (col3 IS NOT NULL)
+
+ALTER TABLE columns_alter_constraint DROP CONSTRAINT test_check;
+ALTER TABLE IF EXISTS columns_alter_constraint ADD CONSTRAINT test_check_col1 CHECK (col1 > 4);
+ERROR(CLIENT): could not support encrypted columns as check constraints
+ALTER TABLE IF EXISTS columns_alter_constraint ADD CONSTRAINT test_check_col1 CHECK (col1 > 4 and col3 is not null);
+ERROR(CLIENT): could not support encrypted columns as check constraints
+ALTER TABLE IF EXISTS columns_alter_constraint ADD CONSTRAINT test_check_col2 CHECK (id > 5 and col3 is not null);
+ALTER TABLE IF EXISTS columns_alter_constraint ADD CONSTRAINT test_check_col3 CHECK (id > 5 and col1 > 4);
+ERROR(CLIENT): could not support encrypted columns as check constraints
+ALTER TABLE IF EXISTS columns_alter_constraint ADD CONSTRAINT test_check_col3 CHECK (col2 is not null and col3 is not null);
+\d columns_alter_constraint;
+     Table "public.columns_alter_constraint"
+ Column |       Type        |     Modifiers      
+--------+-------------------+--------------------
+ id     | integer           | 
+ col1   | integer           | not null encrypted
+ col2   | numeric           |  encrypted
+ col3   | character varying |  encrypted
+Check constraints:
+    "test_check_col2" CHECK (id > 5 AND col3 IS NOT NULL)
+    "test_check_col3" CHECK (col2 IS NOT NULL AND col3 IS NOT NULL)
+
+ALTER TABLE columns_alter_constraint DROP CONSTRAINT test_check_col2;
+ALTER TABLE columns_alter_constraint DROP CONSTRAINT test_check_col3;
+ALTER TABLE IF EXISTS columns_alter_constraint ADD CONSTRAINT columns_constraint_primary1 primary key (col1);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "columns_constraint_primary1" for table "columns_alter_constraint"
+ALTER TABLE columns_alter_constraint DROP CONSTRAINT columns_constraint_primary1;
+ALTER TABLE IF EXISTS columns_alter_constraint ADD CONSTRAINT columns_constraint_primary2 primary key (id, col1);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "columns_constraint_primary2" for table "columns_alter_constraint"
+\d columns_alter_constraint;
+     Table "public.columns_alter_constraint"
+ Column |       Type        |     Modifiers      
+--------+-------------------+--------------------
+ id     | integer           | not null
+ col1   | integer           | not null encrypted
+ col2   | numeric           |  encrypted
+ col3   | character varying |  encrypted
+Indexes:
+    "columns_constraint_primary2" PRIMARY KEY, btree (id, col1) TABLESPACE pg_default
+
+ALTER TABLE columns_alter_constraint DROP CONSTRAINT columns_constraint_primary2;
+ALTER TABLE IF EXISTS columns_alter_constraint ADD CONSTRAINT columns_constraint_primary3 primary key (id, col3);
+ERROR(CLIENT): could not support random encrypted columns as primary key constraints
+\d columns_alter_constraint;
+     Table "public.columns_alter_constraint"
+ Column |       Type        |     Modifiers      
+--------+-------------------+--------------------
+ id     | integer           | not null
+ col1   | integer           | not null encrypted
+ col2   | numeric           |  encrypted
+ col3   | character varying |  encrypted
+
+ALTER TABLE columns_alter_constraint DROP CONSTRAINT columns_constraint_primary3;
+ERROR:  constraint "columns_constraint_primary3" of relation "columns_alter_constraint" does not exist
+CREATE TABLE IF NOT EXISTS columns_alter_unique (
+id int,
+col1 INTEGER NOT NULL ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+col2 decimal(3,2) NULL ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+col3 varchar(10) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = RANDOMIZED)); 
+ALTER TABLE IF EXISTS columns_alter_unique ADD CONSTRAINT columns_constraint_unique1 UNIQUE (id);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "columns_constraint_unique1" for table "columns_alter_unique"
+ALTER TABLE IF EXISTS columns_alter_unique ADD CONSTRAINT columns_constraint_unique2 UNIQUE (col1);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "columns_constraint_unique2" for table "columns_alter_unique"
+ALTER TABLE IF EXISTS columns_alter_unique ADD CONSTRAINT columns_constraint_unique3 UNIQUE (col3);
+ERROR(CLIENT): could not support random encrypted columns as unique constraints
+\d columns_alter_unique;
+       Table "public.columns_alter_unique"
+ Column |       Type        |     Modifiers      
+--------+-------------------+--------------------
+ id     | integer           | 
+ col1   | integer           | not null encrypted
+ col2   | numeric           |  encrypted
+ col3   | character varying |  encrypted
+Indexes:
+    "columns_constraint_unique1" UNIQUE CONSTRAINT, btree (id) TABLESPACE pg_default
+    "columns_constraint_unique2" UNIQUE CONSTRAINT, btree (col1) TABLESPACE pg_default
+
+DROP TABLE IF EXISTS columns_alter_constraint;
+DROP TABLE IF EXISTS columns_alter_unique;
+-- test check
+CREATE TABLE IF NOT EXISTS check_encrypt_age1 (id int, age int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC) check(age > 10));
+ERROR(CLIENT): could not support encrypted columns as check constraints
+CREATE TABLE IF NOT EXISTS check_encrypt_age2 (id int, age int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC), check(age > 10));
+ERROR(CLIENT): could not support encrypted columns as check constraints
+CREATE TABLE IF NOT EXISTS check_encrypt_age3 (id int, age int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC) check(id > 10));
+CREATE TABLE IF NOT EXISTS check_encrypt_id1 (id int, age int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC), check(id > 10));
+CREATE TABLE IF NOT EXISTS check_encrypt_id2 (id int check(id > 10), age int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC));
+CREATE TABLE IF NOT EXISTS check_age_null_1 (id int, age int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC) check(age IS NOT NULL));
+insert into check_age_null_1 values(1, 2);
+insert into check_age_null_1 values(2, NULL);
+ERROR:  new row for relation "check_age_null_1" violates check constraint "check_age_null_1_age_check"
+DETAIL:  Failing row contains (2, null).
+select * from check_age_null_1 order by id;
+ id | age 
+----+-----
+  1 |   2
+(1 row)
+
+CREATE TABLE IF NOT EXISTS check_age_null_2 (id int, age int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC), check(age IS NOT NULL));
+insert into check_age_null_2 values(1, 2);
+insert into check_age_null_2 values(2, NULL);
+ERROR:  new row for relation "check_age_null_2" violates check constraint "check_age_null_2_age_check"
+DETAIL:  Failing row contains (2, null).
+select * from check_age_null_2 order by id;
+ id | age 
+----+-----
+  1 |   2
+(1 row)
+
+CREATE TABLE IF NOT EXISTS check_random_age1 (id int, age int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = RANDOMIZED) check(age > 10));
+ERROR(CLIENT): could not support encrypted columns as check constraints
+CREATE TABLE IF NOT EXISTS check_random_age2 (id int, age int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = RANDOMIZED), check(age > 10));
+ERROR(CLIENT): could not support encrypted columns as check constraints
+CREATE TABLE IF NOT EXISTS check_random_age3 (id int, age int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = RANDOMIZED) check(id > 10));
+CREATE TABLE IF NOT EXISTS check_random_id1 (id int, age int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = RANDOMIZED), check(id > 10));
+CREATE TABLE IF NOT EXISTS check_random_id2 (id int check(id > 10), age int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = RANDOMIZED));
+CREATE TABLE IF NOT EXISTS check_randomage_null_1 (id int, age int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = RANDOMIZED) check(age IS NOT NULL));
+insert into check_randomage_null_1 values(1, 2);
+insert into check_randomage_null_1 values(2, NULL);
+ERROR:  new row for relation "check_randomage_null_1" violates check constraint "check_randomage_null_1_age_check"
+DETAIL:  Failing row contains (2, null).
+select * from check_randomage_null_1 order by id;
+ id | age 
+----+-----
+  1 |   2
+(1 row)
+
+CREATE TABLE IF NOT EXISTS check_randomage_null_2 (id int, age int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = RANDOMIZED), check(age IS NOT NULL));
+insert into check_randomage_null_2 values(1, 2);
+insert into check_randomage_null_2 values(2, NULL);
+ERROR:  new row for relation "check_randomage_null_2" violates check constraint "check_randomage_null_2_age_check"
+DETAIL:  Failing row contains (2, null).
+select * from check_randomage_null_2 order by id;
+ id | age 
+----+-----
+  1 |   2
+(1 row)
+
+CREATE TABLE IF NOT EXISTS check_mult1 (id int, age int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC), check(id > 10 and age is not null));
+CREATE TABLE IF NOT EXISTS check_mult2 (id int, age int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC) check(id > 10 and age is not null));
+\d check_mult2;
+  Table "public.check_mult2"
+ Column |  Type   | Modifiers  
+--------+---------+------------
+ id     | integer | 
+ age    | integer |  encrypted
+Check constraints:
+    "check_mult2_check" CHECK (id > 10 AND age IS NOT NULL)
+
+CREATE TABLE IF NOT EXISTS check_mult3 (id int, age int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC) check(id > 10 and age < 100 ));
+ERROR(CLIENT): could not support encrypted columns as check constraints
+CREATE TABLE IF NOT EXISTS check_mult4 (id int, age int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC), check(id > 10 and age < 100 ));
+ERROR(CLIENT): could not support encrypted columns as check constraints
+CREATE TABLE IF NOT EXISTS check_mult5 (id int, age int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC) ,name varchar(10) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC) check(id > 10 or age < 100 and name is not NULL ));
+ERROR(CLIENT): could not support encrypted columns as check constraints
+CREATE TABLE IF NOT EXISTS check_mult6 (id int, age int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC) ,name varchar(10) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC) check(id > 10 or age is not NULL and name is not NULL));
+DROP TABLE IF EXISTS check_encrypt_age1;
+NOTICE:  table "check_encrypt_age1" does not exist, skipping
+DROP TABLE IF EXISTS check_encrypt_age2;
+NOTICE:  table "check_encrypt_age2" does not exist, skipping
+DROP TABLE IF EXISTS check_encrypt_age3;
+DROP TABLE IF EXISTS check_encrypt_id1;
+DROP TABLE IF EXISTS check_encrypt_id2;
+DROP TABLE IF EXISTS check_age_null_1;
+DROP TABLE IF EXISTS check_age_null_2;
+DROP TABLE IF EXISTS check_random_age1;
+NOTICE:  table "check_random_age1" does not exist, skipping
+DROP TABLE IF EXISTS check_random_age2;
+NOTICE:  table "check_random_age2" does not exist, skipping
+DROP TABLE IF EXISTS check_random_age3;
+DROP TABLE IF EXISTS check_random_id1;
+DROP TABLE IF EXISTS check_random_id2;
+DROP TABLE IF EXISTS check_randomage_null_1;
+DROP TABLE IF EXISTS check_randomage_null_2;
+DROP TABLE IF EXISTS check_mult1;
+DROP TABLE IF EXISTS check_mult2;
+DROP TABLE IF EXISTS check_mult3;
+NOTICE:  table "check_mult3" does not exist, skipping
+DROP TABLE IF EXISTS check_mult4;
+NOTICE:  table "check_mult4" does not exist, skipping
+DROP TABLE IF EXISTS check_mult5;
+NOTICE:  table "check_mult5" does not exist, skipping
+DROP TABLE IF EXISTS check_mult6;
+--support
+CREATE TABLE IF NOT EXISTS test_primary_key (
+id INT,
+col1 INTEGER PRIMARY KEY ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_primary_key_pkey" for table "test_primary_key"
+\d test_primary_key;
+    Table "public.test_primary_key"
+ Column |  Type   |     Modifiers      
+--------+---------+--------------------
+ id     | integer | 
+ col1   | integer | not null encrypted
+Indexes:
+    "test_primary_key_pkey" PRIMARY KEY, btree (col1) TABLESPACE pg_default
+
+ALTER TABLE test_primary_key  ADD CONSTRAINT check_pri1 PRIMARY KEY(id);
+ERROR:  multiple primary keys for table "test_primary_key" are not allowed
+ALTER TABLE test_primary_key  ADD CONSTRAINT check_pri2 PRIMARY KEY(id, col1);
+ERROR:  multiple primary keys for table "test_primary_key" are not allowed
+CREATE TABLE IF NOT EXISTS test_primary_key2 (
+id INT,
+col1 INTEGER ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC), PRIMARY KEY(col1)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_primary_key2_pkey" for table "test_primary_key2"
+CREATE TABLE IF NOT EXISTS random_primary_key (
+id INT,
+col1 INTEGER PRIMARY KEY ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = RANDOMIZED)
+);
+ERROR(CLIENT): could not support random encrypted columns as primary key constraints
+CREATE TABLE IF NOT EXISTS random_primary_key2 (
+id INT,
+col1 INTEGER ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = RANDOMIZED), PRIMARY KEY(col1)
+);
+ERROR(CLIENT): could not support random encrypted columns as primary key constraints
+-- support
+CREATE TABLE IF NOT EXISTS tb_primary_key2 (
+id int,
+col1 INTEGER ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+primary key (id, col1)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "tb_primary_key2_pkey" for table "tb_primary_key2"
+INSERT INTO tb_primary_key2 VALUES (1, 1);
+CREATE TABLE IF NOT EXISTS tb_primary_key3 (
+id int,
+col1 INTEGER ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = RANDOMIZED),
+primary key (id, col1)
+);
+ERROR(CLIENT): could not support random encrypted columns as primary key constraints
+DROP TABLE IF EXISTS test_primary_key;
+DROP TABLE IF EXISTS test_primary_key2;
+DROP TABLE IF EXISTS random_primary_key;
+NOTICE:  table "random_primary_key" does not exist, skipping
+DROP TABLE IF EXISTS random_primary_key2;
+NOTICE:  table "random_primary_key2" does not exist, skipping
+DROP TABLE IF EXISTS random_primary_key;
+NOTICE:  table "random_primary_key" does not exist, skipping
+DROP TABLE IF EXISTS tb_primary_key2;
+DROP TABLE IF EXISTS tb_primary_key3;
+NOTICE:  table "tb_primary_key3" does not exist, skipping
+--  support
+CREATE TABLE IF NOT EXISTS unique_constraint (
+id int,
+col varchar(10) UNIQUE ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC)
+);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "unique_constraint_col_key" for table "unique_constraint"
+insert into unique_constraint values (1,'unique1');
+insert into unique_constraint values (2,'unique2');
+insert into unique_constraint values (3,'unique2');
+ERROR:  duplicate key value violates unique constraint "unique_constraint_col_key"
+DETAIL:  Key (col)=(unique2) already exists.
+select * from unique_constraint order by id;
+ id |   col   
+----+---------
+  1 | unique1
+  2 | unique2
+(2 rows)
+
+-- no support
+CREATE TABLE IF NOT EXISTS unique_constraint (
+id int,
+col varchar(10) UNIQUE ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = RANDOMIZED)
+);
+ERROR(CLIENT): could not support random encrypted columns as unique constraints
+CREATE TABLE IF NOT EXISTS unique_constraint_test (
+id int,
+col varchar(10) UNIQUE ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC)
+);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "unique_constraint_test_col_key" for table "unique_constraint_test"
+CREATE TABLE IF NOT EXISTS unique_tb(
+    id int, name varchar(10) UNIQUE
+);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "unique_tb_name_key" for table "unique_tb"
+CREATE TABLE IF NOT EXISTS unique_tb2(
+    id int, name varchar(10) UNIQUE
+);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "unique_tb2_name_key" for table "unique_tb2"
+DROP TABLE IF EXISTS unique_constraint;
+DROP TABLE IF EXISTS unique_constraint_test;
+DROP TABLE IF EXISTS unique_tb;
+DROP TABLE IF EXISTS unique_tb2;
+-- support
+CREATE TABLE IF NOT EXISTS table_constraint (
+id int,
+col1 INTEGER ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+col2 decimal(3,2) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+UNIQUE (col1, col2)
+);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "table_constraint_col1_col2_key" for table "table_constraint"
+CREATE TABLE IF NOT EXISTS table_constraint_random (
+id int,
+col1 INTEGER ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+col2 decimal(3,2) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = RANDOMIZED),
+UNIQUE (col1, col2)
+);
+ERROR(CLIENT): could not support random encrypted columns as unique constraints
+CREATE TABLE IF NOT EXISTS tr2ex (i1 INT ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC) , i2 INT, EXCLUDE USING GIST(i1 with =, i2 with <>));
+ERROR:  EXCLUDE constraint is not yet supported.
+--test empty data
+CREATE TABLE IF NOT EXISTS columns_constraint_test (
+id int,
+col3 varchar(10) NOT NULL ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = colConstraintCEK, ENCRYPTION_TYPE = DETERMINISTIC)
+);
+insert into columns_constraint_test VALUES (1,'');
+ERROR:  null value in column "col3" violates not-null constraint
+DETAIL:  Failing row contains (1, null).
+select * from columns_constraint_test;
+ id | col3 
+----+------
+(0 rows)
+
+DROP TABLE IF EXISTS columns_constraint_test;
+DROP TABLE IF EXISTS table_constraint;
+DROP TABLE IF EXISTS table_constraint_random;
+NOTICE:  table "table_constraint_random" does not exist, skipping
+DROP COLUMN ENCRYPTION KEY colConstraintCEK;
+DROP CLIENT MASTER KEY colConstraintCMK;
+\! gs_ktool -d all
+DELETE ALL
+ 1

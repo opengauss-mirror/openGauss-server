@@ -1,0 +1,846 @@
+/*
+ * This file is used to test pull down of subplan expressions
+ */
+set query_dop = 1;
+create schema nodegroup_subplan_test;
+set current_schema = nodegroup_subplan_test;
+
+set enable_nodegroup_explain=true;
+set expected_computing_nodegroup='group1';
+
+create node group ng0 with (datanode1, datanode2, datanode3);
+create node group ng1 with (datanode4, datanode5, datanode6);
+create node group ng2 with (datanode7, datanode8, datanode9);
+create node group ng3 with (datanode10, datanode11, datanode12);
+
+-- Create Table and Insert Data
+create table temp(a int, b int, c int, d int)with(autovacuum_enabled = off);
+create table t_subplan1(a1 int, b1 int, c1 int, d1 int) with (orientation = column,autovacuum_enabled = off) distribute by hash(a1, b1) to group ng0;
+create table t_subplan2(a2 int, b2 int, c2 int, d2 int) with (orientation = column,autovacuum_enabled = off) distribute by hash(a2, b2) to group ng1;
+insert into temp select generate_series(1, 100)%98, generate_series(1, 100)%20, generate_series(1, 100)%13, generate_series(1, 100)%6;
+insert into t_subplan1 select * from temp;
+delete from temp;
+insert into temp select generate_series(1, 50)%48, generate_series(1, 50)%28, generate_series(1, 50)%12, generate_series(1, 50)%9;
+insert into t_subplan2 select * from temp;
+
+create table t_subplan5(a1 int, b1 int, c1 int, d1 int) with (orientation = column,autovacuum_enabled = off) distribute by hash(a1, b1) to group ng2;
+create table t_subplan6(a2 int, b2 int, c2 int, d2 int) with (orientation = column,autovacuum_enabled = off) distribute by hash(a2, b2) to group ng3;
+insert into t_subplan5 select * from t_subplan1;
+insert into t_subplan6 select * from t_subplan2;
+
+--create row table
+create table t_subplan7(a1 int, b1 int, c1 int, d1 int) with (orientation = column,autovacuum_enabled = off) distribute by hash(a1, b1) to group ng1;
+insert into t_subplan7 select * from t_subplan1;
+
+-- 1. initplan
+explain (costs off, nodes off)
+select case when (select count(*)
+                  from t_subplan2
+                  where a2 between 1 and 20) > 15
+            then (select avg(b2)
+                  from t_subplan2
+                  where a2 between 1 and 20)
+            else (select avg(c2)
+                  from t_subplan2
+                  where a2 between 1 and 20) end bucket1 ,
+       case when (select count(*)
+                  from t_subplan2
+                  where a2 between 1 and 20) > 25
+             then (select avg(b2)
+                  from t_subplan2
+                  where a2 between 1 and 20)
+            else (select avg(c2)
+                  from t_subplan2
+                  where a2 between 1 and 20) end bucket2
+from t_subplan1
+where a1 = 5 or a1 = 6
+;
+
+explain (costs off, nodes off)
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select (avg (d1))
+              from t_subplan1 t1
+               where a1 > 
+					(select avg(a2)
+					from t_subplan2 t2))
+ group by a1
+ order by a1, cnt
+ limit 10;
+
+explain (costs off, nodes off)
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select (avg (d1))
+              from t_subplan1 t1
+               where a1 > 
+					(select avg(a2)
+					from t_subplan2 t2))
+ group by a1
+ order by a1, cnt
+ offset (select avg(d2) from t_subplan2);
+
+-- 2. subplan
+explain (costs off, nodes off)
+with t as
+(select d1
+,d2
+,sum(c1+c2) as total
+from t_subplan1
+,t_subplan2
+where a1 = a2
+group by d1
+,d2)
+ select  total
+from t ctr1
+where ctr1.total > (select avg(total)*1.2
+from t ctr2
+where ctr1.d2 = ctr2.d2)
+order by 1
+limit 10;
+
+explain (costs off, nodes off)
+with t as
+(select d1
+,d2
+,sum(c1+c2) as total
+from t_subplan1
+,t_subplan2
+where a1 = a2
+group by d1
+,d2)
+ select  total
+from t ctr1
+where ctr1.total > (select avg(total)*1.2
+from t ctr2
+where ctr1.d2 = ctr2.d2
+and ctr1.d2+ctr2.d2 < (select avg(total)*3
+from t ctr3
+where ctr2.d2=ctr3.d2))
+order by 1
+limit 10;
+
+explain (costs off, nodes off)
+with t as
+(select d1
+,d2
+,sum(c1+c2) as total
+from t_subplan1
+,t_subplan2
+where a1 = a2
+group by d1
+,d2)
+ select  total
+from t ctr1
+where ctr1.total > (select avg(total)*1.2
+from t ctr2
+where ctr1.d2 = ctr2.d2
+and ctr1.d2+ctr2.d2 < (select avg(total)*3
+from t ctr3
+where ctr2.d2=ctr3.d2
+and ctr1.d1 = ctr3.d1))
+order by 1
+limit 10;
+
+explain (costs off, nodes off)
+select * from t_subplan1 t1
+where
+ exists (select * from t_subplan2 t2
+	where t1.a1=t2.a2) and
+ (exists (select * from t_subplan2 t2
+	where t1.b1+20=t2.b2) or
+  exists (select * from t_subplan2 t2
+	where t1.c1 = t2.c2))
+order by 1,2,3,4;
+;
+
+-- 3. initplan & subplan
+explain (costs off, nodes off)
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select avg (d1)
+              from t_subplan1
+               where a1+b1<200 )
+        and b1 > 1.2 *
+             (select avg(b2)
+             from t_subplan2 t2
+             where t2.c2=t_subplan1.c1)
+ group by a1
+ order by a1, cnt
+ limit 10;
+
+explain (costs off, nodes off)
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select avg (d1)
+              from t_subplan1
+               where a1+b1<200 )
+        and b1 > 1.2 *
+             (select avg(b2)
+             from t_subplan2 t2
+             where t2.c2=t_subplan1.c1 and
+			 t_subplan1.d1 < (select max(d2) from t_subplan2))
+ group by a1
+ order by a1, cnt
+ limit 10;
+
+explain (costs off, nodes off)
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select avg (d1)
+              from t_subplan1
+               where a1+b1<200 )
+        and b1 > 1.2 *
+             (select avg(b2)
+             from t_subplan2 t2
+             where t2.c2=t_subplan1.c1 and
+			 t2.d2 > (select min(d1) from t_subplan1))
+ group by a1
+ order by a1, cnt
+ limit 10;
+
+explain (costs off, nodes off)
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select (avg (d1))
+              from t_subplan1 t1
+               where a1 > 
+					(select avg(a2)
+					from t_subplan2 t2
+					where t1.d1=t2.d2))
+ group by a1
+ order by a1, cnt
+ limit 10;
+
+-- Set up some simple test tables
+CREATE TABLE INT4_TBL(f1 int4) with (orientation=column) to group ng2;
+
+INSERT INTO INT4_TBL(f1) VALUES ('   0  ');
+INSERT INTO INT4_TBL(f1) VALUES ('123456     ');
+INSERT INTO INT4_TBL(f1) VALUES ('    -123456');
+INSERT INTO INT4_TBL(f1) VALUES ('2147483647');
+INSERT INTO INT4_TBL(f1) VALUES ('-2147483647');
+INSERT INTO INT4_TBL(f1) VALUES (NULL);
+
+CREATE TABLE tenk1 (
+	unique1		int4,
+	unique2		int4,
+	two			int4,
+	four		int4,
+	ten			int4,
+	twenty		int4,
+	hundred		int4,
+	thousand	int4,
+	twothousand	int4,
+	fivethous	int4,
+	tenthous	int4,
+	odd			int4,
+	even		int4,
+	stringu1	varchar(64),
+	stringu2	varchar(64),
+	string4		varchar(64)
+) WITH (orientation=column) to group ng1;
+COPY tenk1 FROM '@abs_srcdir@/data/tenk.data';
+
+CREATE TABLE SUBSELECT_TBL (
+  f1 integer,
+  f2 integer,
+  f3 float
+) with (orientation=column) distribute by hash(f1, f2, f3) to group ng3;
+
+INSERT INTO SUBSELECT_TBL VALUES (1, 2, 3);
+INSERT INTO SUBSELECT_TBL VALUES (2, 3, 4);
+INSERT INTO SUBSELECT_TBL VALUES (3, 4, 5);
+INSERT INTO SUBSELECT_TBL VALUES (1, 1, 1);
+INSERT INTO SUBSELECT_TBL VALUES (2, 2, 2);
+INSERT INTO SUBSELECT_TBL VALUES (3, 3, 3);
+INSERT INTO SUBSELECT_TBL VALUES (6, 7, 8);
+INSERT INTO SUBSELECT_TBL VALUES (8, 9, NULL);
+
+SELECT '' AS eight, * FROM SUBSELECT_TBL ORDER BY f1, f2, f3;
+
+-- Uncorrelated subselects
+
+SELECT '' AS two, f1 AS "Constant Select" FROM SUBSELECT_TBL
+WHERE f1 IN (SELECT 1) ORDER BY 2;
+
+explain (costs off, nodes off)
+SELECT '' AS two, f1 AS "Constant Select" FROM SUBSELECT_TBL
+  WHERE f1 IN (SELECT 1) ORDER BY 2;
+
+explain (costs off, nodes off)
+SELECT '' AS six, f1 AS "Uncorrelated Field" FROM SUBSELECT_TBL
+  WHERE f1 IN (SELECT f2 FROM SUBSELECT_TBL) 
+  ORDER BY 2;
+
+explain (costs off, nodes off)
+SELECT '' AS six, f1 AS "Uncorrelated Field" FROM SUBSELECT_TBL
+  WHERE f1 IN (SELECT f2 FROM SUBSELECT_TBL WHERE
+    f2 IN (SELECT f1 FROM SUBSELECT_TBL)) 
+    ORDER BY 2;
+
+explain (costs off, nodes off)
+SELECT '' AS three, f1, f2
+  FROM SUBSELECT_TBL
+  WHERE (f1, f2) NOT IN (SELECT f2, CAST(f3 AS int4) FROM SUBSELECT_TBL
+                         WHERE f3 IS NOT NULL) 
+                         ORDER BY f1, f2;
+-- Correlated subselects
+
+explain (costs off, nodes off)
+SELECT '' AS six, f1 AS "Correlated Field", f2 AS "Second Field"
+  FROM SUBSELECT_TBL upper
+  WHERE f1 IN (SELECT f2 FROM SUBSELECT_TBL WHERE f1 = upper.f1) 
+  ORDER BY f1, f2;
+
+explain (costs off, nodes off)
+SELECT '' AS six, f1 AS "Correlated Field", f3 AS "Second Field"
+  FROM SUBSELECT_TBL upper
+  WHERE f1 IN
+    (SELECT f2 FROM SUBSELECT_TBL WHERE CAST(upper.f2 AS float) = f3)
+    ORDER BY 2, 3;
+
+explain (costs off, nodes off)
+SELECT '' AS six, f1 AS "Correlated Field", f3 AS "Second Field"
+  FROM SUBSELECT_TBL upper
+  WHERE f3 IN (SELECT upper.f1 + f2 FROM SUBSELECT_TBL
+               WHERE f2 = CAST(f3 AS integer)) 
+               ORDER BY 2, 3;
+
+explain (costs off, nodes off)
+SELECT '' AS five, f1 AS "Correlated Field"
+  FROM SUBSELECT_TBL
+  WHERE (f1, f2) IN (SELECT f2, CAST(f3 AS int4) FROM SUBSELECT_TBL
+                     WHERE f3 IS NOT NULL) 
+                     ORDER BY 2;
+
+--
+-- Use some existing tables in the regression test
+--
+explain (costs off, nodes off)
+SELECT '' AS eight, ss.f1 AS "Correlated Field", ss.f3 AS "Second Field"
+  FROM SUBSELECT_TBL ss
+  WHERE f1 NOT IN (SELECT f1+1 FROM INT4_TBL
+                   WHERE f1 != ss.f1 AND f1 < 2147483647) 
+                   ORDER BY 2, 3;
+
+explain (costs off, nodes off)
+select f1, float8(count(*)) / (select count(*) from int4_tbl)
+from int4_tbl group by f1 order by f1;
+
+--
+-- Test cases to catch unpleasant interactions between IN-join processing
+-- and subquery pullup.
+--
+
+-- delelte this sentence, because the output is related with number of nodes
+--select count(*) from
+--  (select 1 from tenk1 a
+--   where unique1 IN (select hundred from tenk1 b)) ss;
+explain (costs off, nodes off)
+select count(distinct ss.ten) from
+  (select ten from tenk1 a
+   where unique1 IN (select hundred from tenk1 b)) ss;
+explain (costs off, nodes off)
+select count(*) from
+  (select 1 from tenk1 a
+   where unique1 IN (select distinct hundred from tenk1 b)) ss;
+explain (costs off, nodes off)
+select count(distinct ss.ten) from
+  (select ten from tenk1 a
+   where unique1 IN (select distinct hundred from tenk1 b)) ss;
+
+--
+-- Test cases to check for overenthusiastic optimization of
+-- "IN (SELECT DISTINCT ...)" and related cases.  Per example from
+-- Luca Pireddu and Michael Fuhr.
+--
+
+-- Enforce use of COMMIT instead of 2PC for temporary objects
+SET enforce_two_phase_commit TO off;
+
+-- CREATE TEMP TABLE subselect_foo (id integer);
+CREATE  TABLE subselect_foo (id integer) with (orientation = column) to group ng1;
+-- CREATE TEMP TABLE bar (id1 integer, id2 integer);
+CREATE  TABLE subselect_bar (id1 integer, id2 integer) with (orientation = column) to group ng2;
+
+INSERT INTO subselect_foo VALUES (1);
+
+INSERT INTO subselect_bar VALUES (1, 1);
+INSERT INTO subselect_bar VALUES (2, 2);
+INSERT INTO subselect_bar VALUES (3, 1);
+
+-- These cases require an extra level of distinct-ing above subquery s
+explain (costs off, nodes off)
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT DISTINCT id1, id2 FROM subselect_bar) AS s);
+explain (costs off, nodes off)
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT id1,id2 FROM subselect_bar GROUP BY id1,id2) AS s);
+explain (costs off, nodes off)
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT id1, id2 FROM subselect_bar UNION
+                      SELECT id1, id2 FROM subselect_bar) AS s);
+
+-- These cases do not
+explain (costs off, nodes off)
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT DISTINCT ON (id2) id1, id2 FROM subselect_bar) AS s);
+explain (costs off, nodes off)
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT id2 FROM subselect_bar GROUP BY id2) AS s);
+explain (costs off, nodes off)
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT id2 FROM subselect_bar UNION
+                      SELECT id2 FROM subselect_bar) AS s);
+
+--
+-- Test case to catch problems with multiply nested sub-SELECTs not getting
+-- recalculated properly.  Per bug report from Didier Moens.
+--
+
+CREATE TABLE orderstest (
+    approver_ref integer,
+    po_ref integer,
+    ordercanceled boolean
+) with (orientation = column,autovacuum_enabled = off) to group ng3;
+
+INSERT INTO orderstest VALUES (1, 1, false);
+INSERT INTO orderstest VALUES (66, 5, false);
+INSERT INTO orderstest VALUES (66, 6, false);
+INSERT INTO orderstest VALUES (66, 7, false);
+INSERT INTO orderstest VALUES (66, 1, true);
+INSERT INTO orderstest VALUES (66, 8, false);
+INSERT INTO orderstest VALUES (66, 1, false);
+INSERT INTO orderstest VALUES (77, 1, false);
+INSERT INTO orderstest VALUES (1, 1, false);
+INSERT INTO orderstest VALUES (66, 1, false);
+INSERT INTO orderstest VALUES (1, 1, false);
+
+CREATE VIEW orders_view AS
+SELECT *,
+(SELECT CASE
+   WHEN ord.approver_ref=1 THEN '---' ELSE 'Approved'
+ END) AS "Approved",
+(SELECT CASE
+ WHEN ord.ordercanceled
+ THEN 'Canceled'
+ ELSE
+  (SELECT CASE
+		WHEN ord.po_ref=1
+		THEN
+		 (SELECT CASE
+				WHEN ord.approver_ref=1
+				THEN '---'
+				ELSE 'Approved'
+			END)
+		ELSE 'PO'
+	END)
+END) AS "Status",
+(CASE
+ WHEN ord.ordercanceled
+ THEN 'Canceled'
+ ELSE
+  (CASE
+		WHEN ord.po_ref=1
+		THEN
+		 (CASE
+				WHEN ord.approver_ref=1
+				THEN '---'
+				ELSE 'Approved'
+			END)
+		ELSE 'PO'
+	END)
+END) AS "Status_OK"
+FROM orderstest ord;
+
+explain (costs off, nodes off)
+SELECT * FROM orders_view 
+ORDER BY approver_ref, po_ref, ordercanceled;
+
+SELECT * FROM orders_view 
+ORDER BY approver_ref, po_ref, ordercanceled;
+
+DROP TABLE orderstest cascade;
+
+explain (costs off, nodes off)
+select f1, ss1 as relabel from
+    (select *, (select sum(f1) from int4_tbl b where f1 >= a.f1) as ss1
+     from int4_tbl a) ss 
+     ORDER BY f1, relabel;
+
+--
+-- Test cases involving PARAM_EXEC parameters and min/max index optimizations.
+-- Per bug report from David Sanchez i Gregori.
+--
+
+explain (costs off, nodes off)
+select * from (
+  select max(unique1) from tenk1 as a
+  where exists (select 1 from tenk1 as b where b.thousand = a.unique2)
+) ss;
+
+explain (costs off, nodes off)
+select * from (
+  select min(unique1) from tenk1 as a
+  where not exists (select 1 from tenk1 as b where b.unique2 = 10000)
+) ss;
+
+--
+-- Test case for bug #4290: bogus calculation of subplan param sets
+--
+
+create  table ta (id int, val int) with (orientation=column) to group ng1;
+
+insert into ta values(1,1);
+insert into ta values(2,2);
+
+create  table tb (id int, aval int) with (orientation=column) to group ng2;
+
+insert into tb values(1,1);
+insert into tb values(2,1);
+insert into tb values(3,2);
+insert into tb values(4,2);
+
+create  table tc (id int, aid int) with (orientation=column) to group ng3;
+
+insert into tc values(1,1);
+insert into tc values(2,2);
+
+explain (costs off, nodes off)
+select
+  ( select min(tb.id) from tb
+    where tb.aval = (select ta.val from ta where ta.id = tc.aid) ) as min_tb_id
+from tc 
+ORDER BY min_tb_id;
+
+--
+-- Test case for 8.3 "failed to locate grouping columns" bug
+--
+
+-- create temp table t1 (f1 numeric(14,0), f2 varchar(30));
+create  table subselect_t1 (f1 numeric(14,0), f2 varchar(30)) with (orientation=column) to group ng0;
+
+explain (costs off, nodes off)
+select * from
+  (select distinct f1, f2, (select f2 from subselect_t1 x where x.f1 = up.f1) as fs
+   from subselect_t1 up) ss
+group by f1,f2,fs;
+
+--
+-- Check that whole-row Vars reading the result of a subselect don't include
+-- any junk columns therein
+--
+explain (costs off, nodes off)
+select q from (select max(f1) from int4_tbl group by f1 order by f1) q;
+
+explain (costs off, nodes off)
+with q as (select max(f1) from int4_tbl group by f1 order by f1)
+  select q from q;
+
+--
+-- Test case for sublinks pushed down into subselects via join alias expansion
+--
+
+explain (costs off, nodes off)
+select
+  (select sq1) as qq1
+from
+  (select exists(select 1 from int4_tbl where f1 = f1) as sq1, 42 as dummy
+   from int4_tbl) sq0
+  join
+  int4_tbl i4 on dummy = i4.f1;
+
+select
+  (select sq1) as qq1
+from
+  (select exists(select 1 from int4_tbl where f1 = f1) as sq1, 42 as dummy
+   from int4_tbl) sq0
+  join
+  int4_tbl i4 on dummy = i4.f1;
+
+--
+-- Test case for cross-type partial matching in hashed subplan (bug #7597)
+--
+
+-- create temp table outer_7597 (f1 int4, f2 int4);
+create  table outer_7597 (f1 int4, f2 int4) with (orientation=column) to group ng0;
+insert into outer_7597 values (0, 0);
+insert into outer_7597 values (1, 0);
+insert into outer_7597 values (0, null);
+insert into outer_7597 values (1, null);
+
+-- create temp table inner_7597(c1 int8, c2 int8);
+create  table inner_7597(c1 int8, c2 int8) with (orientation=column) to group ng1;
+insert into inner_7597 values(0, null);
+
+explain (costs off, nodes off)
+select * from outer_7597 where (f1, f2) not in (select * from inner_7597);
+
+--
+-- Test case for planner bug with nested EXISTS handling
+--
+explain (costs off, nodes off)
+select a.thousand from tenk1 a, tenk1 b
+where a.thousand = b.thousand
+  and exists ( select 1 from tenk1 c where b.hundred = c.hundred
+                   and not exists ( select 1 from tenk1 d
+                                    where a.thousand = d.thousand ) );
+
+-- other sdv failed case
+create table t_subplan3(a3 int, b3 int) with (orientation=column) distribute by replication  to group ng3
+partition by range(a3) (partition p1 values less than (25), partition p2 values less than (maxvalue));
+insert into t_subplan3 values(1, 20);
+insert into t_subplan3 values(27, 27);
+explain (costs off, nodes off)
+select * from t_subplan3 where b3=(select max(b2) from t_subplan2);
+
+explain (costs off, nodes off)
+select count(*) from t_subplan3 t1 group by a3,b3
+having not exists
+(select sum(t2.b3), t2.a3, t2.b3, rank() over (partition by t1.b3 order by t2.a3) from t_subplan3 t2
+group by 2,3 order by 1,2,3,4);
+
+explain (costs off, nodes off, verbose on)
+select c1, d1 from t_subplan1
+where exists(select b3 from t_subplan3 where a3>=2)
+group by c1, d1 order by c1+1 desc, 2 desc limit 5;
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan2 where
+ exists (select d1 from t_subplan1 where d1<8 and
+  exists (select b1 from t_subplan1 where c1<20 and
+   exists (select * from t_subplan1 where d1<9 and d1 >1 order by d1 limit 7) order by c1,b1 limit 10))
+and exists( select max(a1),count(b1),c2 from t_subplan1 group by c2 having c2>2 or c2 is null)
+order by a2, b2, c2, d2 limit 10;
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan2 where
+ exists( select max(a1),count(b1),c2 from t_subplan1 group by rollup(c2,c2) having c2>2 and c2 is not null)
+order by a2,b2,c2,d2 limit 10;
+
+-- test any, all, rowcompare, array sublink
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where a1 in (select count(c2) from t_subplan2) or d1=0 order by 1,2,3,4;
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where a1 in (select count(c2) from t_subplan2 where c1>d2 minus all select d1 from t_subplan2) or d1=0 order by 1,2,3,4;
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where a1 in (select count(c2)::int from t_subplan2 where c1>d2 union all select d1 from t_subplan2) or d1=0 order by 1,2,3,4 limit 5;
+
+explain (costs off, nodes off, verbose on)
+select b1, count(*) from t_subplan1
+where c1 = all (select b2 from t_subplan2 where b2>4)
+or d1 != all (select c2 from t_subplan2 where c2>10)
+group by b1 order by 1, 2 limit 5;
+
+explain (costs off, nodes off, verbose on)
+select b1, count(*) from t_subplan1
+where c1 = any (select b2 from t_subplan2 where b2>4)
+or d1 != any (select c2 from t_subplan2 where c2>10)
+group by b1 order by 1, 2 limit 5;
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where (10,15)<=(select b1, min(b2) from t_subplan2 group by b1) order by a1, b1, c1, d1;
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where (b1,c1) < (select a2, b2 from t_subplan2 where b2=4 and a2=4) order by a1, b1, c1, d1;
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where array(select max(b2) from t_subplan2 group by b1)=array(select min(b2) from t_subplan2 group by b1);
+
+explain (costs off, nodes off, verbose on)
+select array(select max(b2) from t_subplan2 group by b1) from t_subplan1 order by a1, b1, c1, d1;
+
+explain (costs off, nodes off, verbose on)
+select array(select a1 from t_subplan1 where t_subplan1.b1=t_subplan2.b2 order by 1) from t_subplan2 order by a2, b2, c2, d2;
+
+-- test cte sublink
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (select a1) select foo from cte) from t_subplan1 order by 1 limit 3;
+
+select (with cte(foo) as (select a1) select foo from cte) from t_subplan1 order by 1 limit 3;
+
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (select a1 from dual) select foo from cte) from t_subplan1 order by 1 limit 3;
+
+select (with cte(foo) as (select a1 from dual) select foo from cte) from t_subplan1 order by 1 limit 3;
+
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (values(b1)) values((select foo from cte))) from t_subplan1 order by 1 limit 3;
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (select avg(a1) from t_subplan1) select foo from cte) from t_subplan1 order by 1 limit 3;
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) select foo from cte) from t_subplan1 order by 1 limit 3;
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) select foo+t_subplan1.c1 from cte) from t_subplan1 order by 1 limit 3; 
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) values((select foo from cte))) from t_subplan1 order by 1 limit 3;
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (values(b1)) select foo from cte) from t_subplan1 order by 1 limit 3;
+explain (costs off, nodes off, verbose on)
+select (select b1 from (values((select b1 from t_subplan2 limit 1), (select a1 from t_subplan2 limit 1))) as t(c,d)) from t_subplan1 order by 1 limit 3; 
+
+-- test cte sublink applied in different subquery level
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
+ select count(*) from (select 'abc', count(d2) from tmp))
+ order by 1,2,3,4;
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where a1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
+ select count(*) from (select 'abc', d2 from tmp))
+ order by 1,2,3,4;
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
+ select count(*) from (select 'abc', count(d2) from tmp tmp1
+ where d2>(select count(*) from tmp tmp2 where tmp2.d2=tmp1.d2)))
+ order by 1,2,3,4;
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
+ select count(*) from (select 'abc', d2 from tmp tmp1
+ where d2>(select count(*) from tmp tmp2 where tmp2.d2=tmp1.d2)))
+ order by 1,2,3,4;
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 left join
+(select a2, b2, (select b1 from t_subplan1 limit 1) c2 from t_subplan2)
+on b2=b1 and a1 not in (null)
+inner join t_subplan1 t3 on t3.a1=t_subplan1.c1 where t3.a1=0 order by 1,2,3,4 limit 5;
+
+explain (costs off, nodes off, verbose on)
+select count(*) from t_subplan2 group by a2,b2 order by (a2,b2) > some(select min(a1), length(trim(b2)) from t_subplan1), 1;
+
+-- update
+explain (costs off, nodes off, verbose on)
+update t_subplan2 set d2 = t1.b from (select max(a1) b from t_subplan1 group by c1 not in (select a1*0-1 from t_subplan1)) t1;
+
+explain (costs off, nodes off, verbose on) 
+select count(*) from t_subplan1 group by a1 having(avg(b1) = some (select b2 from t_subplan2)) order by 1 limit 5;
+
+explain (costs off, nodes off, verbose on) 
+select max(a1), b1 = some (select b2 from t_subplan2) from t_subplan1 group by b1 order by 1,2 limit 5;
+
+explain (costs off, nodes off, verbose on) 
+select max(a1), min(b1) = some (select b2 from t_subplan2) from t_subplan1 group by b1 order by 1,2 limit 5;
+
+explain (costs off, nodes off, verbose on) 
+select a1, b1 from t_subplan1 group by a1, b1 having(grouping(b1)) = some (select b2 from t_subplan2) order by 1,2 limit 5;
+
+explain (costs off, nodes off, verbose on) 
+select a1, rank() over(partition by a1)  = some (select a2  from t_subplan2) from t_subplan1 order by 1,2 limit 5;
+
+
+explain (costs off, nodes off, verbose on) 
+select * from t_subplan7 t1 where a1 in (select t1.a1 - 1 from t_subplan1);
+
+set work_mem = '1MB';
+set enable_nestloop = off;
+set enable_hashjoin = off;
+explain (costs off, nodes off, verbose on) 
+select * from t_subplan1 where c1 > any(select c2 from t_subplan2 join t_subplan3 on a3 = a2 where b2 < b1) order by 1,2,3,4 limit 10;
+
+set enable_mergejoin=off;
+set enable_hashjoin = on;
+explain (costs off, nodes off, verbose on) 
+select * from t_subplan1 where c1 > any(select c2 from t_subplan2 join t_subplan3 on a3 = a2 where b2 < b1) order by 1,2,3,4 limit 10;
+
+---add llt case
+CREATE TABLE t_subplan08
+(
+   col_num	numeric(5, 0)
+  ,col_int	int
+  ,col_timestamptz	timestamptz
+  ,col_varchar	varchar
+  ,col_char	char(2)
+  ,col_interval	interval
+  ,col_timetz	timetz
+  ,col_tinterval	tinterval
+) with(orientation=column) to group ng0;
+
+COPY t_subplan08(col_num, col_int, col_timestamptz, col_varchar, col_char, col_interval, col_timetz, col_tinterval) FROM stdin;
+123	5	2017-09-09 19:45:37	2017-09-09 19:45:37	a	2 day 13:34:56	1984-2-6 01:00:30+8	["Sep 4, 1983 23:59:12" "Oct 4, 1983 23:59:12"]
+234	6	2017-10-09 19:45:37	2017-10-09 19:45:37	c	1 day 18:34:56	1986-2-6 03:00:30+8	["May 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]
+345	7	2017-11-09 19:45:37	2017-11-09 19:45:37	d	1 day 13:34:56	1987-2-6 08:00:30+8	["epoch" "Mon May 1 00:30:30 1995"]
+456	8	2017-12-09 19:45:37	2017-12-09 19:45:37	h	18 day 14:34:56	1989-2-6 06:00:30+8	["Feb 15 1990 12:15:03" "2001-09-23 11:12:13"]
+567	9	2018-01-09 19:45:37	2018-01-09 19:45:37	m	18 day 15:34:56	1990-2-6 12:00:30+8	\N
+678	10	2018-02-09 19:45:37	2018-02-09 19:45:37	\N	7 day 16:34:56	2002-2-6 00:00:30+8	["-infinity" "infinity"]
+789	11	2018-03-09 19:45:37	2018-03-09 19:45:37	g	22 day 13:34:56	1984-2-6 00:00:30+8	["Feb 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]
+147	12	2018-04-09 19:45:37	2018-04-09 19:45:37	l	\N	1984-2-7 00:00:30+8	["Feb 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]
+369	13	2018-05-09 19:45:37	2018-05-09 19:45:37	a	21 day 13:34:56	\N	["Feb 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]
+\.
+
+CREATE TABLE t_subplan09
+(
+   col_num	numeric(5, 0)
+  ,col_int	int
+  ,col_timestamptz	timestamptz
+  ,col_varchar	varchar
+  ,col_char	char(2)
+  ,col_interval	interval
+  ,col_timetz	timetz
+  ,col_tinterval	tinterval
+) with(orientation=column) to group ng2;
+
+insert into t_subplan09 select * from t_subplan08;
+insert into t_subplan09 values (NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);
+
+CREATE TABLE t_subplan10
+(
+   col_num	numeric(5, 0)
+  ,col_int	int
+  ,col_timestamptz	timestamptz
+  ,col_varchar	varchar
+  ,col_char	char(2)
+  ,col_interval	interval
+  ,col_timetz	timetz
+  ,col_tinterval	tinterval
+) with(orientation=column) to group ng3;
+
+insert into t_subplan08 values (1,4,'2014-01-09 19:35:37','2014-11-09 19:35:37','j','8 day 13:34:56','1988-2-6 01:00:30+8', NULL);
+
+explain (costs off, nodes off, verbose on) 
+select count(*) from t_subplan08 group by col_interval  having(min(col_interval)  = any(select col_interval  from t_subplan09));
+
+explain (costs off, nodes off, verbose on) 
+select count(*) from t_subplan08 group by col_interval  having(min(col_interval)  = any(select col_interval  from t_subplan10));
+
+explain (costs off, nodes off, verbose on)
+select count(*) from t_subplan08 group by col_timetz  having(min(col_timetz)  = any(select col_timetz  from t_subplan09)) order by 1;
+
+
+explain (costs off, nodes off, verbose on)
+select count(*) from t_subplan08 group by col_char  having(min(col_char)  = any(select col_char  from t_subplan09)) order by 1;
+
+explain (costs off, nodes off, verbose on)
+select b1, count(*) from t_subplan1 where c1 = all (select b2 from t_subplan2 where b2 != c1) group by b1 order by 1, 2 limit 5;
+
+reset current_schema;
+drop schema nodegroup_subplan_test cascade;
+
+drop node group ng0;
+drop node group ng1;
+drop node group ng2;
+drop node group ng3;
+reset query_dop;

@@ -1,0 +1,931 @@
+-- some misc test case
+-- create obs server
+CREATE SERVER obs_server FOREIGN DATA WRAPPER 	dfs_fdw OPTIONS (address '@obshostname@', type 'obs', access_key '@ak@', secret_access_key '@sk@');
+--?.*
+-- create obs foreign table
+DROP FOREIGN TABLE IF EXISTS nation;
+NOTICE:  foreign table "nation" does not exist, skipping
+create foreign table nation  (
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4,
+ N_COMMENT TEXT) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/acceleration/tpch_small/nation/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+DROP FOREIGN TABLE IF EXISTS supplier;
+NOTICE:  foreign table "supplier" does not exist, skipping
+create foreign table supplier  (
+ S_SUPPKEY INT4,
+ S_NAME TEXT,
+ S_ADDRESS TEXT,
+ S_NATIONKEY INT4,
+ S_PHONE TEXT,
+ S_ACCTBAL FLOAT8,
+ S_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/acceleration/tpch_small/supplier/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+DROP FOREIGN TABLE IF EXISTS region;
+NOTICE:  foreign table "region" does not exist, skipping
+create foreign table region  (
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/acceleration/tpch_small/region/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+-- set explain_perf_mode
+set explain_perf_mode=pretty;
+show explain_perf_mode;
+ explain_perf_mode 
+-------------------
+ pretty
+(1 row)
+
+set query_dop=1;
+-- test case 1: simple query, pushdown agg+scan
+set acceleration_with_compute_pool=off;
+select count(*) from nation;
+ count 
+-------
+    25
+(1 row)
+
+set acceleration_with_compute_pool=on;
+select count(*) from nation;
+ count 
+-------
+    25
+(1 row)
+
+set acceleration_with_compute_pool=off;
+explain (costs off) select count(*) from nation;
+ id |                   operation                   
+----+-----------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Aggregate
+  3 |       ->  Vector Streaming (type: GATHER)
+  4 |          ->  Vector Aggregate
+  5 |             ->  Vector Foreign Scan on nation
+(5 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   5 --Vector Foreign Scan on nation
+         Server Type: obs
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+set acceleration_with_compute_pool=on;
+set show_acce_estimate_detail=on;
+set explain_perf_mode=normal;
+explain (costs off, verbose on) select count(*) from nation;
+                                                                                                                          QUERY PLAN                                                                                                                          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (pg_catalog.count(*))
+   ->  Vector Aggregate
+         Output: pg_catalog.count(*)
+         ->  Vector Streaming (type: GATHER)
+               Output: (count(*))
+               Node/s: All datanodes
+               ->  Vector Streaming (type: PLAN ROUTER)
+                     Output: (count(*))
+--?.*
+                     ->  Vector Streaming (type: SCAN GATHER)
+                           Output: (count(*))
+                           Node/s: DNs in compute pool
+                           ->  Vector Aggregate
+                                 Output: count(*)
+                                 ->  Vector Foreign Scan on public.nation
+                                       Output: 'Dummy'
+                                       Server Type: obs
+                                       Orc File: /gaussdbcheck/obsorccheck/acceleration/tpch_small/nation/
+                                       Estimation Details: file format: orc, pl: 2048, rp threshold: 2, total size: 14595, file number: 13, data size/thread: 7297, file number/thread: 6, relation width: 72, plan width: 0, adjusted pl: 2048, rp/thread: 4
+(20 rows)
+
+set explain_perf_mode=pretty;
+-- test case 2: "OBS foreign table doesn't support not-stream plan"
+set acceleration_with_compute_pool=on;
+with recursive tmp1 as (select s_suppkey,s_nationkey,s_comment from supplier order by 1)
+select tmp1.s_nationkey, region.r_name from tmp1, region where tmp1.s_suppkey=region.r_regionkey  group by tmp1.s_nationkey,region.r_name order by 1,2;
+ s_nationkey |   r_name    
+-------------+-------------
+           1 | EUROPE
+           5 | ASIA
+          15 | MIDDLE EAST
+          17 | AMERICA
+(4 rows)
+
+-- test case 3: subplan
+set acceleration_with_compute_pool=off;
+select n_nationkey, count(*) from nation group by n_nationkey order by n_nationkey offset(select avg(r_regionkey) from region);
+ n_nationkey | count 
+-------------+-------
+           2 |     1
+           3 |     1
+           4 |     1
+           5 |     1
+           6 |     1
+           7 |     1
+           8 |     1
+           9 |     1
+          10 |     1
+          11 |     1
+          12 |     1
+          13 |     1
+          14 |     1
+          15 |     1
+          16 |     1
+          17 |     1
+          18 |     1
+          19 |     1
+          20 |     1
+          21 |     1
+          22 |     1
+          23 |     1
+          24 |     1
+(23 rows)
+
+set acceleration_with_compute_pool=on;
+select n_nationkey, count(*) from nation group by n_nationkey order by n_nationkey offset(select avg(r_regionkey) from region);
+ n_nationkey | count 
+-------------+-------
+           2 |     1
+           3 |     1
+           4 |     1
+           5 |     1
+           6 |     1
+           7 |     1
+           8 |     1
+           9 |     1
+          10 |     1
+          11 |     1
+          12 |     1
+          13 |     1
+          14 |     1
+          15 |     1
+          16 |     1
+          17 |     1
+          18 |     1
+          19 |     1
+          20 |     1
+          21 |     1
+          22 |     1
+          23 |     1
+          24 |     1
+(23 rows)
+
+set acceleration_with_compute_pool=off;
+explain (costs off) select n_nationkey, count(*) from nation group by n_nationkey order by n_nationkey offset(select avg(r_regionkey) from region);
+ id |                       operation                        
+----+--------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Limit
+  3 |       ->  Vector Sort
+  4 |          ->  Vector Sonic Hash Aggregate
+  5 |             ->  Vector Streaming (type: GATHER)
+  6 |                ->  Vector Sonic Hash Aggregate
+  7 |                   ->  Vector Foreign Scan on nation
+  8 |       ->  Row Adapter  [2, InitPlan 1 (returns $0)]
+  9 |          ->  Vector Streaming (type: GATHER)
+ 10 |             ->  Vector Aggregate
+ 11 |                ->  Vector Streaming(type: BROADCAST)
+ 12 |                   ->  Vector Aggregate
+ 13 |                      ->  Vector Foreign Scan on region
+(13 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+  13 --Vector Foreign Scan on region
+         Server Type: obs
+   7 --Vector Foreign Scan on nation
+         Server Type: obs
+(4 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+set acceleration_with_compute_pool=on;
+explain (costs off) select n_nationkey, count(*) from nation group by n_nationkey order by n_nationkey offset(select avg(r_regionkey) from region);
+ id |                       operation                        
+----+--------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Limit
+  3 |       ->  Vector Sort
+  4 |          ->  Vector Sonic Hash Aggregate
+  5 |             ->  Vector Streaming (type: GATHER)
+  6 |                ->  Vector Sonic Hash Aggregate
+  7 |                   ->  Vector Foreign Scan on nation
+  8 |       ->  Row Adapter  [2, InitPlan 1 (returns $0)]
+  9 |          ->  Vector Streaming (type: GATHER)
+ 10 |             ->  Vector Aggregate
+ 11 |                ->  Vector Streaming(type: BROADCAST)
+ 12 |                   ->  Vector Aggregate
+ 13 |                      ->  Vector Foreign Scan on region
+(13 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+  13 --Vector Foreign Scan on region
+         Server Type: obs
+   7 --Vector Foreign Scan on nation
+         Server Type: obs
+(4 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+-- test case 4: dop > 1
+set acceleration_with_compute_pool=on;
+explain (costs off) select count(*) from nation;
+ id |                      operation                       
+----+------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Aggregate
+  3 |       ->  Vector Streaming (type: GATHER)
+  4 |          ->  Vector Streaming (type: PLAN ROUTER)
+  5 |             ->  Vector Streaming (type: SCAN GATHER)
+  6 |                ->  Vector Aggregate
+  7 |                   ->  Vector Foreign Scan on nation
+(7 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   7 --Vector Foreign Scan on nation
+         Server Type: obs
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+explain performance select count(*) from nation;
+ id |                         operation                          |       A-time        | A-rows | E-rows | E-distinct |  Peak Memory   | E-memory | A-width | E-width | E-costs 
+----+------------------------------------------------------------+---------------------+--------+--------+------------+----------------+----------+---------+---------+---------
+--?  1 | ->  Row Adapter                                            | .*                  |      1 | .*
+--?  2 |    ->  Vector Aggregate                                    | .*                  |      1 | .*
+--?  3 |       ->  Vector Streaming (type: GATHER)                  | .*                  |      4 | .*
+--?  4 |          ->  Vector Streaming (type: PLAN ROUTER)          | .*                  |      4 | .*
+--?  5 |             ->  Vector Streaming (type: SCAN GATHER)       | .*                  |      4 | .*
+--?  6 |                ->  Vector Aggregate                        | .*                  |      4 | .*
+--?  7 |                   ->  Vector Foreign Scan on public.nation | .*                  |     25 | .*
+(7 rows)
+
+                                                                                         Predicate Information (identified by plan id)                                                                                          
+--?--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+   7 --Vector Foreign Scan on public.nation
+         Server Type: obs
+--?         Estimation Details: file format: orc, pl: 2048, rp threshold: 2, total size: 14595, file number: 13, data size/thread: 7297, file number/thread: 6, relation width: 72, plan width: 0, adjusted pl: 2048, rp/thread: 4
+(3 rows)
+
+              Memory Information (identified by plan id)               
+-----------------------------------------------------------------------
+ Coordinator Query Peak Memory:
+--?         Query Peak Memory: 1MB
+ DataNode Query Peak Memory
+--?         datanode1 Query Peak Memory: 1MB
+--?         datanode2 Query Peak Memory: 1MB
+   1 --Row Adapter
+--?.*
+   2 --Vector Aggregate
+--?         Peak Memory: 182KB
+   3 --Vector Streaming (type: GATHER)
+--?         Peak Memory: 156KB
+   4 --Vector Streaming (type: PLAN ROUTER)
+--?         datanode1 Peak Memory: 266KB
+--?         datanode2 Peak Memory: 265KB
+--?         datanode1 Stream Send time: 0.000; Data Serialize time: 0.020
+--?         datanode2 Stream Send time: 0.000; Data Serialize time: 0.014
+   5 --Vector Streaming (type: SCAN GATHER)
+--?         datanode1 Peak Memory: 289KB
+--?         datanode2 Peak Memory: 288KB
+   6 --Vector Aggregate
+--?         datanode1 Peak Memory: 141KB
+--?         datanode2 Peak Memory: 141KB
+--?         datanode1 Stream Send time: 0.000; Data Serialize time: 0.035
+--?         datanode2 Stream Send time: 0.000; Data Serialize time: 0.033
+   7 --Vector Foreign Scan on public.nation
+--?         datanode1 Peak Memory: 100KB
+--?         datanode2 Peak Memory: 100KB
+(27 rows)
+
+ Targetlist Information (identified by plan id) 
+------------------------------------------------
+   1 --Row Adapter
+         Output: (pg_catalog.count(*))
+   2 --Vector Aggregate
+         Output: pg_catalog.count(*)
+   3 --Vector Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+   4 --Vector Streaming (type: PLAN ROUTER)
+         Output: (count(*))
+   5 --Vector Streaming (type: SCAN GATHER)
+         Output: (count(*))
+   6 --Vector Aggregate
+         Output: count(*)
+   7 --Vector Foreign Scan on public.nation
+         Output: 'Dummy'
+(15 rows)
+
+--?
+--?--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+   1 --Row Adapter
+--?         (actual time=1902.468..1902.472 rows=1 loops=1)
+--?         (CPU: ex c/r=67636, ex row=1, ex cyc=67636, inc cyc=4935011160)
+   2 --Vector Aggregate
+--?         (actual time=1902.443..1902.445 rows=1 loops=1)
+--?         (Buffers: 0)
+--?         (CPU: ex c/r=65706, ex row=4, ex cyc=262824, inc cyc=4934943524)
+   3 --Vector Streaming (type: GATHER)
+--?         (actual time=1874.316..1902.343 rows=4 loops=1)
+--?         (Buffers: 0)
+--?         (CPU: ex c/r=1233670175, ex row=4, ex cyc=4934680700, inc cyc=4934680700)
+   4 --Vector Streaming (type: PLAN ROUTER)
+--?         datanode1 (actual time=1868.306..1868.956 rows=2 loops=1)
+--?         datanode2 (actual time=1896.345..1896.847 rows=2 loops=1)
+--?         datanode1 (Buffers: 0)
+--?         datanode2 (Buffers: 0)
+--?         datanode1 (CPU: ex c/r=2424037032, ex row=2, ex cyc=4848074064, inc cyc=4848074064)
+--?         datanode2 (CPU: ex c/r=2460211770, ex row=2, ex cyc=4920423540, inc cyc=4920423540)
+   5 --Vector Streaming (type: SCAN GATHER)
+--?         datanode1 (actual time=339.328..345.119 rows=2 loops=1)
+--?         datanode2 (actual time=342.204..344.413 rows=2 loops=1)
+--?         datanode1 (Buffers: 0)
+--?         datanode2 (Buffers: 0)
+--?         datanode1 (CPU: ex c/r=447619266, ex row=2, ex cyc=895238532, inc cyc=895238532)
+--?         datanode2 (CPU: ex c/r=446701054, ex row=2, ex cyc=893402108, inc cyc=893402108)
+   6 --Vector Aggregate
+--?         datanode1 (actual time=0.472..0.473 rows=2 loops=2)
+--?         datanode2 (actual time=0.470..0.471 rows=2 loops=2)
+--?         datanode1 (Buffers: 0)
+--?         datanode2 (Buffers: 0)
+--?         datanode1 (CPU: ex c/r=23623, ex row=13, ex cyc=307100, inc cyc=1149728)
+--?         datanode2 (CPU: ex c/r=25948, ex row=12, ex cyc=311376, inc cyc=1219732)
+   7 --Vector Foreign Scan on public.nation
+--?         datanode1 (actual time=0.135..0.404 rows=13 loops=2)
+--?         datanode2 (actual time=0.163..0.352 rows=12 loops=2)
+--?         datanode1 (local read ratio: 100.0%, local: 7, remote: 0) (meta cache: hit ratio 100.0%, hit[count 7, size 3192], read[count 0, size 0] data cache: hit ratio 0.0%, hit[count 0, size 0], read[count 0, size 0])
+--?         datanode2 (local read ratio: 100.0%, local: 6, remote: 0) (meta cache: hit ratio 100.0%, hit[count 6, size 2784], read[count 0, size 0] data cache: hit ratio 0.0%, hit[count 0, size 0], read[count 0, size 0])
+--?         datanode1 (Buffers: 0)
+--?         datanode2 (Buffers: 0)
+--?         datanode1 (CPU: ex c/r=64817, ex row=13, ex cyc=842628, inc cyc=842628)
+--?         datanode2 (CPU: ex c/r=75696, ex row=12, ex cyc=908356, inc cyc=908356)
+(41 rows)
+
+                      User Define Profiling                       
+------------------------------------------------------------------
+ Plan Node id: 3  Track name: coordinator get datanode connection
+--?.*
+ Plan Node id: 4  Track name: get compute pool connection
+--?.*
+--?.*
+ Plan Node id: 5  Track name: get compute datanode connection
+--?.*
+--?.*
+(8 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--? Total runtime: .*
+(20 rows)
+
+set query_dop=2;
+select count(*) from nation;
+ count 
+-------
+    25
+(1 row)
+
+set query_dop=3;
+select count(*) from nation;
+ count 
+-------
+    25
+(1 row)
+
+set query_dop=4;
+select count(*) from nation;
+ count 
+-------
+    25
+(1 row)
+
+reset query_dop;
+-- test case 5: replication is unsupported
+DROP FOREIGN TABLE IF EXISTS region1;
+NOTICE:  foreign table "region1" does not exist, skipping
+create foreign table region1  (
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/acceleration/region/')
+distribute by replication;
+ERROR:  Only support ROUNDROBIN distribution type for this foreign table.
+-- test case 6: invalid address of the comptue pool
+set acceleration_with_compute_pool=on;
+--?.*
+--?.*
+select count(*) from nation;
+WARNING:  The compute pool is unavailable temporarily when acceleration_with_compute_pool is on!
+--?.*
+ count 
+-------
+    25
+(1 row)
+
+explain (costs off) select count(*) from nation;
+WARNING:  The compute pool is unavailable temporarily when acceleration_with_compute_pool is on!
+--?.*
+ id |                   operation                   
+----+-----------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Aggregate
+  3 |       ->  Vector Streaming (type: GATHER)
+  4 |          ->  Vector Aggregate
+  5 |             ->  Vector Foreign Scan on nation
+(5 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   5 --Vector Foreign Scan on nation
+         Server Type: obs
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--?.*
+--?.*
+-- test case 7: bloomfilter pushdown
+drop table if exists bf_col;
+NOTICE:  table "bf_col" does not exist, skipping
+create table bf_col(h1 int, i2 int2, i4 int4, i8 int8, f4 float4, f8 float8, v1 varchar(10), v2 varchar, c1 char(10), c2 char, t1 text, dec decimal)  with(orientation=column) distribute by replication;
+insert into bf_col values(1, 9002, 9002, 9002, 9002.01, 9002.5, 'b9002', 'b9002', 'b9002', '9', 'b9002', 9002.95);
+insert into bf_col values(2, 1002, 1002, 1002, 1002.01, 1002.5, 'a1002', 'a1002', 'a1002', '1', 'a1002', 1002.95);
+insert into bf_col values(3, 2002, 2002, 2002, 2002.01, 2002.5, 'a2002', 'a2002', 'a2002', '3', 'a2002', 2002.95);
+insert into bf_col values(4, 902, 902, 902, 902.01, 902.5, 'a902', 'a902', 'a902', '2', 'a902', 902.95);
+insert into bf_col values(5, 3002, 3002, 3002, 3002.01, 3002.5, 'a3002', 'a3002', 'a3002', '4', 'a3002', 3002.95);
+drop foreign table if exists bf_orc;
+NOTICE:  foreign table "bf_orc" does not exist, skipping
+create foreign table bf_orc(i2 int2, i4 int4, i8 int8, f4 float4, f8 float8, v1 varchar(10), v2 varchar, c1 char(10), c2 char, t1 text, t2 clob, dec decimal)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/test_computing_pool/bloomfilter_test/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+analyze bf_orc;
+analyze bf_col;
+set enable_bloom_filter=on;
+set enable_codegen=off;
+set work_mem='100MB';
+set query_dop=2;
+explain (costs off) select count(*) from bf_col,bf_orc where bf_col.i4=bf_orc.i4 and bf_col.h1<3;
+ id |                               operation                                
+----+------------------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Aggregate
+  3 |       ->  Vector Streaming (type: GATHER)
+  4 |          ->  Vector Streaming(type: LOCAL GATHER dop: 1/2)
+  5 |             ->  Vector Aggregate
+  6 |                ->  Vector Sonic Hash Join (7,8)
+  7 |                   ->  Vector Foreign Scan on bf_orc
+  8 |                   ->  Vector Streaming(type: LOCAL BROADCAST dop: 2/1)
+  9 |                      ->  CStore Scan on bf_col
+(9 rows)
+
+   Predicate Information (identified by plan id)   
+---------------------------------------------------
+   6 --Vector Sonic Hash Join (7,8)
+         Hash Cond: (bf_orc.i4 = bf_col.i4)
+--?.*
+--?.*
+   7 --Vector Foreign Scan on bf_orc
+         Server Type: obs
+--?.*
+--?.*
+   9 --CStore Scan on bf_col
+         Filter: (h1 < 3)
+(10 rows)
+
+--?.*
+--?.*
+--? System available mem: .*
+--? Query Max mem: .*
+--? Query estimated mem: .*
+(3 rows)
+
+set explain_perf_mode=normal;
+explain (costs off, timing off, analyze on) select count(*) from bf_col,bf_orc where bf_col.i4=bf_orc.i4 and bf_col.h1<3;
+                                                         QUERY PLAN                                                          
+-----------------------------------------------------------------------------------------------------------------------------
+ Row Adapter (actual rows=1 loops=1)
+   ->  Vector Aggregate (actual rows=1 loops=1)
+         ->  Vector Streaming (type: GATHER) (actual rows=4 loops=1)
+               Node/s: All datanodes
+               ->  Vector Streaming(type: LOCAL GATHER dop: 1/2) (actual rows=4)
+                     Spawn on: All datanodes
+                     ->  Vector Aggregate (actual rows=4)
+                           ->  Vector Sonic Hash Join (actual rows=36)
+                                 Hash Cond: (bf_orc.i4 = bf_col.i4)
+--?.*
+--?.*
+--?.*
+--?.*
+                                 ->  Vector Foreign Scan on bf_orc (actual rows=45)
+                                       Server Type: obs
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+                                 ->  Vector Streaming(type: LOCAL BROADCAST dop: 2/1) (actual rows=8)
+                                       Spawn on: All datanodes
+                                       ->  CStore Scan on bf_col (actual rows=4)
+                                             Filter: (h1 < 3)
+--?.*
+(25 rows)
+
+set acceleration_with_compute_pool=off;
+select count(*) from bf_col,bf_orc where bf_col.i4=bf_orc.i4 and bf_col.h1<3;
+ count 
+-------
+    36
+(1 row)
+
+set acceleration_with_compute_pool=on;
+set query_dop=1;
+select count(*) from bf_col,bf_orc where bf_col.i4=bf_orc.i4 and bf_col.h1<3;
+ count 
+-------
+    36
+(1 row)
+
+set query_dop=2;
+select count(*) from bf_col,bf_orc where bf_col.i4=bf_orc.i4 and bf_col.h1<3;
+ count 
+-------
+    36
+(1 row)
+
+set query_dop=3;
+select count(*) from bf_col,bf_orc where bf_col.i4=bf_orc.i4 and bf_col.h1<3;
+ count 
+-------
+    36
+(1 row)
+
+set query_dop=4;
+select count(*) from bf_col,bf_orc where bf_col.i4=bf_orc.i4 and bf_col.h1<3;
+ count 
+-------
+    36
+(1 row)
+
+reset enable_bloom_filter;
+-- test case 8: pushdown scan to computing pool for text format
+drop foreign table if exists    txt_obs_ft001;
+NOTICE:  foreign table "txt_obs_ft001" does not exist, skipping
+create foreign table txt_obs_ft001
+( a int, b int )
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/test_computing_pool/txt_obs_test/',
+    format 'text',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+) read only;
+set acceleration_with_compute_pool=on;
+explain (verbose, costs off) select * from txt_obs_ft001 order by a;
+--?.*
+--?.*
+ Row Adapter
+   Output: a, b
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b
+         Merge Sort Key: txt_obs_ft001.a
+         ->  Vector Sort
+               Output: a, b
+               Sort Key: txt_obs_ft001.a
+               ->  Vector Foreign Scan on public.txt_obs_ft001
+                     Output: a, b
+                     Foreign File: gsobs://@obshostname@/@obsbucket@/test_computing_pool/txt_obs_test/
+(11 rows)
+
+select * from txt_obs_ft001 order by a;
+ a | b 
+---+---
+ 1 | 1
+ 1 | 1
+ 1 | 1
+ 2 | 2
+ 2 | 2
+ 2 | 2
+(6 rows)
+
+drop table if exists join_test_tbl;
+NOTICE:  table "join_test_tbl" does not exist, skipping
+create table join_test_tbl ( a int, b int);
+insert into join_test_tbl values(1,1);
+explain (verbose, costs off) select * from txt_obs_ft001, join_test_tbl where txt_obs_ft001.a= join_test_tbl.b order by txt_obs_ft001.a, txt_obs_ft001.b;
+WARNING:  Statistics in some tables or columns(public.join_test_tbl.a, public.join_test_tbl.b) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+--?.*
+--?.*
+ Streaming (type: GATHER)
+   Output: txt_obs_ft001.a, txt_obs_ft001.b, join_test_tbl.a, join_test_tbl.b
+   Merge Sort Key: txt_obs_ft001.a, txt_obs_ft001.b
+   ->  Sort
+         Output: txt_obs_ft001.a, txt_obs_ft001.b, join_test_tbl.a, join_test_tbl.b
+         Sort Key: txt_obs_ft001.a, txt_obs_ft001.b
+         ->  Hash Join
+               Output: txt_obs_ft001.a, txt_obs_ft001.b, join_test_tbl.a, join_test_tbl.b
+               Hash Cond: (txt_obs_ft001.a = join_test_tbl.b)
+               ->  Foreign Scan on public.txt_obs_ft001
+                     Output: txt_obs_ft001.a, txt_obs_ft001.b
+                     Foreign File: gsobs://@obshostname@/@obsbucket@/test_computing_pool/txt_obs_test/
+               ->  Hash
+                     Output: join_test_tbl.a, join_test_tbl.b
+                     ->  Streaming(type: BROADCAST)
+                           Output: join_test_tbl.a, join_test_tbl.b
+                           ->  Seq Scan on public.join_test_tbl
+                                 Output: join_test_tbl.a, join_test_tbl.b
+                                 Distribute Key: join_test_tbl.a
+(19 rows)
+
+select * from txt_obs_ft001, join_test_tbl where txt_obs_ft001.a= join_test_tbl.b order by txt_obs_ft001.a, txt_obs_ft001.b;
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(3 rows)
+
+-- test case 9: smp for text/csv format
+show query_dop;
+ query_dop 
+-----------
+ 4
+(1 row)
+
+set query_dop=2;
+select * from txt_obs_ft001, join_test_tbl where txt_obs_ft001.a= join_test_tbl.b order by txt_obs_ft001.a, txt_obs_ft001.b;
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(3 rows)
+
+-- test case 10: unsupport value partition for text/csv format
+drop foreign table if exists part_text_ft;
+NOTICE:  foreign table "part_text_ft" does not exist, skipping
+create foreign table part_text_ft
+( a int, b int )
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/test_computing_pool/txt_obs_test/',
+    format 'text',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+) 
+read only
+partition by (b) automapped;
+ERROR:  It is not allowed to create partition on this foreign table.
+-- test case 11: file number < dn number, just 1 file in obsorccheck/acceleration/exception/nation/
+DROP FOREIGN TABLE IF EXISTS nation1;
+NOTICE:  foreign table "nation1" does not exist, skipping
+create foreign table nation1  (
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4,
+ N_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/acceleration/exception/nation/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+set acceleration_with_compute_pool=on;
+explain (costs off) select count(*) from nation1;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Aggregate
+         ->  Vector Streaming (type: GATHER)
+               Node/s: All datanodes
+               ->  Vector Aggregate
+                     ->  Vector Foreign Scan on nation1
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/acceleration/exception/nation/
+(8 rows)
+
+-- test case 12: append node when acceleration_with_compute_pool is on
+explain (costs off)  select count(*) from nation union all select count(*) from nation1;
+                                                         QUERY PLAN                                                          
+-----------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Result
+               ->  Vector Append
+                     ->  Vector Aggregate
+                           ->  Vector Streaming(type: BROADCAST)
+                                 Spawn on: All datanodes
+                                 ->  Vector Streaming (type: PLAN ROUTER)
+--?.*
+                                       ->  Vector Streaming (type: SCAN GATHER)
+                                             Node/s: DNs in compute pool
+                                             ->  Vector Aggregate
+                                                   ->  Vector Foreign Scan on nation
+                                                         Server Type: obs
+                                                         Orc File: /@obsbucket@/obsorccheck/acceleration/tpch_small/nation/
+                     ->  Vector Aggregate
+                           ->  Vector Streaming(type: BROADCAST)
+                                 Spawn on: All datanodes
+                                 ->  Vector Aggregate
+                                       ->  Vector Foreign Scan on nation1
+                                             Server Type: obs
+                                             Orc File: /@obsbucket@/obsorccheck/acceleration/exception/nation/
+(23 rows)
+
+-- test case 13: PBE usage for the compute pool
+prepare select_nation(int) as select count(*) from nation where n_nationkey=$1;
+execute select_nation(1);
+ count 
+-------
+     1
+(1 row)
+
+-- test case 14: invalid address for the compute pool
+--?.*
+--?.*
+explain  (costs off) select count(*) from nation;
+WARNING:  The compute pool is unavailable temporarily when acceleration_with_compute_pool is on!
+reason: Failed to connect to the compute pool. See log file for more details.
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Aggregate
+         ->  Vector Streaming (type: GATHER)
+               Node/s: All datanodes
+               ->  Vector Aggregate
+                     ->  Vector Foreign Scan on nation
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/acceleration/tpch_small/nation/
+(8 rows)
+
+--?.*
+--?.*
+-- test case 15: func oid > FirstNormalObjectId
+set explain_perf_mode=summary;
+show explain_perf_mode;
+ explain_perf_mode 
+-------------------
+ summary
+(1 row)
+
+create or replace function funczy(abc integer) returns integer as $$
+begin
+	if (abc < 0) then
+		return abs(abc+1);
+	else
+		return abc+1;
+	end if;
+end;
+$$ language plpgsql immutable;
+explain (verbose on, costs off) select count(*) from nation where funczy(n_regionkey) = 100;
+ id |                      operation                       
+----+------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Aggregate
+  3 |       ->  Vector Streaming (type: GATHER)
+  4 |          ->  Vector Aggregate
+  5 |             ->  Vector Foreign Scan on public.nation
+(5 rows)
+
+   Predicate Information (identified by plan id)    
+----------------------------------------------------
+   5 --Vector Foreign Scan on public.nation
+         Filter: (funczy(nation.n_regionkey) = 100)
+         Server Type: obs
+(3 rows)
+
+ Targetlist Information (identified by plan id) 
+------------------------------------------------
+   1 --Row Adapter
+         Output: (pg_catalog.count(*))
+   2 --Vector Aggregate
+         Output: pg_catalog.count(*)
+   3 --Vector Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+   4 --Vector Aggregate
+         Output: count(*)
+   5 --Vector Foreign Scan on public.nation
+         Output: 'Dummy'
+(11 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+explain (verbose on, costs off) select count(funczy(n_nationkey)) from nation group by n_regionkey;
+ id |                      operation                       
+----+------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Streaming (type: GATHER)
+  3 |       ->  Vector Sonic Hash Aggregate
+  4 |          ->  Vector Streaming(type: REDISTRIBUTE)
+  5 |             ->  Vector Foreign Scan on public.nation
+(5 rows)
+
+ Predicate Information (identified by plan id) 
+-----------------------------------------------
+   5 --Vector Foreign Scan on public.nation
+         Server Type: obs
+(2 rows)
+
+      Targetlist Information (identified by plan id)       
+-----------------------------------------------------------
+   1 --Row Adapter
+         Output: (count(funczy(n_nationkey))), n_regionkey
+   2 --Vector Streaming (type: GATHER)
+         Output: (count(funczy(n_nationkey))), n_regionkey
+         Node/s: All datanodes
+   3 --Vector Sonic Hash Aggregate
+         Output: count(funczy(n_nationkey)), n_regionkey
+         Group By Key: nation.n_regionkey
+   4 --Vector Streaming(type: REDISTRIBUTE)
+         Output: n_regionkey, n_nationkey
+         Distribute Key: n_regionkey
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+   5 --Vector Foreign Scan on public.nation
+         Output: n_regionkey, n_nationkey
+(15 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+-- cleanup
+DROP FOREIGN TABLE IF EXISTS nation;
+DROP FOREIGN TABLE IF EXISTS nation1;
+DROP FOREIGN TABLE IF EXISTS region;
+DROP FOREIGN TABLE IF EXISTS supplier;
+DROP SERVER IF EXISTS obs_server CASCADE;
+NOTICE:  drop cascades to foreign table bf_orc

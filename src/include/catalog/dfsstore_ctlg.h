@@ -30,7 +30,7 @@
 #include "catalog/objectaddress.h"
 #include "lib/stringinfo.h"
 #include "utils/relcache.h"
-#include "storage/block.h"
+#include "storage/buf/block.h"
 #include "storage/dfs/dfs_connector.h"
 
 

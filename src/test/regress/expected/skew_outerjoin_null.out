@@ -1,0 +1,284 @@
+/*
+################################################################################
+# TESTCASE NAME : skew_outerjoin_null.py 
+# COMPONENT(S)  : 测试由于outer join 补空导致的倾斜场景
+# PREREQUISITE  : setup.py
+# PLATFORM      : all
+# DESCRIPTION   : skew caused by outer join
+# TAG           : outer join, skew
+# TC LEVEL      : Level 1
+################################################################################
+*/
+--I1.设置guc参数
+set current_schema to skew_join;
+--S1.skew_option=normal
+set skew_option=normal;
+--S2.设置计划格式
+set explain_perf_mode=normal;
+--S3.设置计划生成参数
+set enable_broadcast = off;
+--S4.设置计划生成参数
+set enable_mergejoin = off;
+--S5.设置计划生成参数
+set enable_nestloop = off;
+set query_dop = 1002;
+--I1.left outer join产生NULL
+--S1.上层join为right join，执行计划，生成倾斜优化计划
+explain select x, y, z, a, c from r left join s on r.a = s.b left join t on s.c = t.d order by 1, 2, 3, 4, 5 limit 1;
+                                                                     QUERY PLAN                                                                      
+-----------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=3.27..3.30 rows=1 width=20)
+   ->  Streaming (type: GATHER)  (cost=3.27..3.62 rows=12 width=20)
+         Merge Sort Key: r.x, s.y, t.z, r.a, s.c
+         Node/s: All datanodes
+         ->  Limit  (cost=3.21..3.21 rows=12 width=20)
+               ->  Sort  (cost=3.21..3.21 rows=12 width=20)
+                     Sort Key: r.x, s.y, t.z, r.a, s.c
+                     ->  Streaming(type: LOCAL GATHER dop: 1/2)  (cost=3.19..3.20 rows=12 width=20)
+                           Spawn on: All datanodes
+                           ->  Limit  (cost=3.19..3.19 rows=12 width=20)
+                                 ->  Sort  (cost=3.19..3.21 rows=96 width=20)
+                                       Sort Key: r.x, s.y, t.z, r.a, s.c
+                                       ->  Hash Left Join  (cost=1.84..3.15 rows=100 width=20)
+                                             Hash Cond: (s.c = t.d)
+                                             Skew Join Optimized by Rule
+                                             ->  Streaming(type: PART REDISTRIBUTE PART LOCAL dop: 2/2)  (cost=0.92..2.18 rows=100 width=16)
+                                                   Spawn on: All datanodes
+                                                   ->  Hash Left Join  (cost=0.92..1.85 rows=100 width=16)
+                                                         Hash Cond: (r.a = s.b)
+                                                         ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (cost=0.00..0.87 rows=100 width=8)
+                                                               Spawn on: All datanodes
+                                                               ->  Seq Scan on r  (cost=0.00..0.54 rows=100 width=8)
+                                                         ->  Hash  (cost=0.87..0.87 rows=96 width=12)
+                                                               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (cost=0.00..0.87 rows=100 width=12)
+                                                                     Spawn on: All datanodes
+                                                                     ->  Seq Scan on s  (cost=0.00..0.54 rows=100 width=12)
+                                             ->  Hash  (cost=0.87..0.87 rows=96 width=8)
+                                                   ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (cost=0.00..0.87 rows=100 width=8)
+                                                         Spawn on: All datanodes
+                                                         ->  Seq Scan on t  (cost=0.00..0.54 rows=100 width=8)
+(30 rows)
+
+--S2.上层join为right join，执行查询
+select x, y, z, a, c from r left join s on r.a = s.b left join t on s.c = t.d order by 1, 2, 3, 4, 5 limit 1;
+ x | y | z | a | c 
+---+---+---+---+---
+ 1 |   |   | 1 |  
+(1 row)
+
+--S3.上层join为right join，执行计划，不生成倾斜优化计划
+explain select x, y, z, a, c from r left join s on r.a = s.b right join t on s.c = t.d order by 1, 2, 3, 4, 5 limit 1;
+                                                                     QUERY PLAN                                                                      
+-----------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=3.27..3.30 rows=1 width=20)
+   ->  Streaming (type: GATHER)  (cost=3.27..3.62 rows=12 width=20)
+         Merge Sort Key: r.x, s.y, t.z, r.a, s.c
+         Node/s: All datanodes
+         ->  Limit  (cost=3.21..3.21 rows=12 width=20)
+               ->  Sort  (cost=3.21..3.21 rows=12 width=20)
+                     Sort Key: r.x, s.y, t.z, r.a, s.c
+                     ->  Streaming(type: LOCAL GATHER dop: 1/2)  (cost=3.19..3.20 rows=12 width=20)
+                           Spawn on: All datanodes
+                           ->  Limit  (cost=3.19..3.19 rows=12 width=20)
+                                 ->  Sort  (cost=3.19..3.21 rows=96 width=20)
+                                       Sort Key: r.x, s.y, t.z, r.a, s.c
+                                       ->  Hash Right Join  (cost=1.84..3.15 rows=100 width=20)
+                                             Hash Cond: (s.c = t.d)
+                                             ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (cost=0.92..2.18 rows=100 width=16)
+                                                   Spawn on: All datanodes
+                                                   ->  Hash Join  (cost=0.92..1.85 rows=100 width=16)
+                                                         Hash Cond: (r.a = s.b)
+                                                         ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (cost=0.00..0.87 rows=100 width=8)
+                                                               Spawn on: All datanodes
+                                                               ->  Seq Scan on r  (cost=0.00..0.54 rows=100 width=8)
+                                                         ->  Hash  (cost=0.87..0.87 rows=96 width=12)
+                                                               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (cost=0.00..0.87 rows=100 width=12)
+                                                                     Spawn on: All datanodes
+                                                                     ->  Seq Scan on s  (cost=0.00..0.54 rows=100 width=12)
+                                             ->  Hash  (cost=0.87..0.87 rows=96 width=8)
+                                                   ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (cost=0.00..0.87 rows=100 width=8)
+                                                         Spawn on: All datanodes
+                                                         ->  Seq Scan on t  (cost=0.00..0.54 rows=100 width=8)
+(29 rows)
+
+--S4.上层join为right join，执行查询
+select x, y, z, a, c from r left join s on r.a = s.b right join t on s.c = t.d order by 1, 2, 3, 4, 5 limit 1;
+ x | y | z | a | c 
+---+---+---+---+---
+   |   | 1 |   |  
+(1 row)
+
+--S5.上层join为full join，执行计划，生成倾斜优化计划
+explain select x, y, z, a, c from r left join s on r.a = s.b full join t on s.c = t.d order by 1, 2, 3, 4, 5 limit 1;
+                                                                     QUERY PLAN                                                                      
+-----------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=3.27..3.30 rows=1 width=20)
+   ->  Streaming (type: GATHER)  (cost=3.27..3.62 rows=12 width=20)
+         Merge Sort Key: r.x, s.y, t.z, r.a, s.c
+         Node/s: All datanodes
+         ->  Limit  (cost=3.21..3.21 rows=12 width=20)
+               ->  Sort  (cost=3.21..3.21 rows=12 width=20)
+                     Sort Key: r.x, s.y, t.z, r.a, s.c
+                     ->  Streaming(type: LOCAL GATHER dop: 1/2)  (cost=3.19..3.20 rows=12 width=20)
+                           Spawn on: All datanodes
+                           ->  Limit  (cost=3.19..3.19 rows=12 width=20)
+                                 ->  Sort  (cost=3.19..3.21 rows=96 width=20)
+                                       Sort Key: r.x, s.y, t.z, r.a, s.c
+                                       ->  Hash Full Join  (cost=1.84..3.15 rows=100 width=20)
+                                             Hash Cond: (s.c = t.d)
+                                             Skew Join Optimized by Rule
+                                             ->  Streaming(type: PART REDISTRIBUTE PART LOCAL dop: 2/2)  (cost=0.92..2.18 rows=100 width=16)
+                                                   Spawn on: All datanodes
+                                                   ->  Hash Left Join  (cost=0.92..1.85 rows=100 width=16)
+                                                         Hash Cond: (r.a = s.b)
+                                                         ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (cost=0.00..0.87 rows=100 width=8)
+                                                               Spawn on: All datanodes
+                                                               ->  Seq Scan on r  (cost=0.00..0.54 rows=100 width=8)
+                                                         ->  Hash  (cost=0.87..0.87 rows=96 width=12)
+                                                               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (cost=0.00..0.87 rows=100 width=12)
+                                                                     Spawn on: All datanodes
+                                                                     ->  Seq Scan on s  (cost=0.00..0.54 rows=100 width=12)
+                                             ->  Hash  (cost=0.87..0.87 rows=96 width=8)
+                                                   ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (cost=0.00..0.87 rows=100 width=8)
+                                                         Spawn on: All datanodes
+                                                         ->  Seq Scan on t  (cost=0.00..0.54 rows=100 width=8)
+(30 rows)
+
+--S6.上层join为full join，执行查询
+select x, y, z, a, c from r left join s on r.a = s.b full join t on s.c = t.d order by 1, 2, 3, 4, 5 limit 1;
+ x | y | z | a | c 
+---+---+---+---+---
+ 1 |   |   | 1 |  
+(1 row)
+
+--I2.full outer join
+--S1.上层join为right join，执行计划，生成倾斜优化计划
+explain select x, y, z, a, c from r full join s on r.a = s.b left join t on s.c = t.d order by 1, 2, 3, 4, 5 limit 1;
+                                                                     QUERY PLAN                                                                      
+-----------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=3.27..3.30 rows=1 width=20)
+   ->  Streaming (type: GATHER)  (cost=3.27..3.62 rows=12 width=20)
+         Merge Sort Key: r.x, s.y, t.z, r.a, s.c
+         Node/s: All datanodes
+         ->  Limit  (cost=3.21..3.21 rows=12 width=20)
+               ->  Sort  (cost=3.21..3.21 rows=12 width=20)
+                     Sort Key: r.x, s.y, t.z, r.a, s.c
+                     ->  Streaming(type: LOCAL GATHER dop: 1/2)  (cost=3.19..3.20 rows=12 width=20)
+                           Spawn on: All datanodes
+                           ->  Limit  (cost=3.19..3.19 rows=12 width=20)
+                                 ->  Sort  (cost=3.19..3.21 rows=96 width=20)
+                                       Sort Key: r.x, s.y, t.z, r.a, s.c
+                                       ->  Hash Left Join  (cost=1.84..3.15 rows=100 width=20)
+                                             Hash Cond: (s.c = t.d)
+                                             Skew Join Optimized by Rule
+                                             ->  Streaming(type: PART REDISTRIBUTE PART LOCAL dop: 2/2)  (cost=0.92..2.18 rows=100 width=16)
+                                                   Spawn on: All datanodes
+                                                   ->  Hash Full Join  (cost=0.92..1.85 rows=100 width=16)
+                                                         Hash Cond: (r.a = s.b)
+                                                         ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (cost=0.00..0.87 rows=100 width=8)
+                                                               Spawn on: All datanodes
+                                                               ->  Seq Scan on r  (cost=0.00..0.54 rows=100 width=8)
+                                                         ->  Hash  (cost=0.87..0.87 rows=96 width=12)
+                                                               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (cost=0.00..0.87 rows=100 width=12)
+                                                                     Spawn on: All datanodes
+                                                                     ->  Seq Scan on s  (cost=0.00..0.54 rows=100 width=12)
+                                             ->  Hash  (cost=0.87..0.87 rows=96 width=8)
+                                                   ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (cost=0.00..0.87 rows=100 width=8)
+                                                         Spawn on: All datanodes
+                                                         ->  Seq Scan on t  (cost=0.00..0.54 rows=100 width=8)
+(30 rows)
+
+--S2.上层join为right join，执行查询
+select x, y, z, a, c from r full join s on r.a = s.b left join t on s.c = t.d order by 1, 2, 3, 4, 5 limit 1;
+ x | y | z | a | c 
+---+---+---+---+---
+ 1 |   |   | 1 |  
+(1 row)
+
+--S3.上层join为right join，执行计划，生成倾斜优化计划
+explain select x, y, z, a, c from r full join s on r.a = s.b right join t on s.c = t.d order by 1, 2, 3, 4, 5 limit 1;
+                                                                     QUERY PLAN                                                                      
+-----------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=3.27..3.30 rows=1 width=20)
+   ->  Streaming (type: GATHER)  (cost=3.27..3.62 rows=12 width=20)
+         Merge Sort Key: r.x, s.y, t.z, r.a, s.c
+         Node/s: All datanodes
+         ->  Limit  (cost=3.21..3.21 rows=12 width=20)
+               ->  Sort  (cost=3.21..3.21 rows=12 width=20)
+                     Sort Key: r.x, s.y, t.z, r.a, s.c
+                     ->  Streaming(type: LOCAL GATHER dop: 1/2)  (cost=3.19..3.20 rows=12 width=20)
+                           Spawn on: All datanodes
+                           ->  Limit  (cost=3.19..3.19 rows=12 width=20)
+                                 ->  Sort  (cost=3.19..3.21 rows=96 width=20)
+                                       Sort Key: r.x, s.y, t.z, r.a, s.c
+                                       ->  Hash Left Join  (cost=1.84..3.15 rows=100 width=20)
+                                             Hash Cond: (s.b = r.a)
+                                             Skew Join Optimized by Rule
+                                             ->  Streaming(type: PART REDISTRIBUTE PART LOCAL dop: 2/2)  (cost=0.92..2.18 rows=100 width=16)
+                                                   Spawn on: All datanodes
+                                                   ->  Hash Left Join  (cost=0.92..1.85 rows=100 width=16)
+                                                         Hash Cond: (t.d = s.c)
+                                                         ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (cost=0.00..0.87 rows=100 width=8)
+                                                               Spawn on: All datanodes
+                                                               ->  Seq Scan on t  (cost=0.00..0.54 rows=100 width=8)
+                                                         ->  Hash  (cost=0.87..0.87 rows=96 width=12)
+                                                               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (cost=0.00..0.87 rows=100 width=12)
+                                                                     Spawn on: All datanodes
+                                                                     ->  Seq Scan on s  (cost=0.00..0.54 rows=100 width=12)
+                                             ->  Hash  (cost=0.87..0.87 rows=96 width=8)
+                                                   ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (cost=0.00..0.87 rows=100 width=8)
+                                                         Spawn on: All datanodes
+                                                         ->  Seq Scan on r  (cost=0.00..0.54 rows=100 width=8)
+(30 rows)
+
+--S4.上层join为right join，执行查询
+select x, y, z, a, c from r full join s on r.a = s.b right join t on s.c = t.d order by 1, 2, 3, 4, 5 limit 1;
+ x |  y  | z | a |  c  
+---+-----+---+---+-----
+   | 100 | 1 |   | 199
+(1 row)
+
+--S5.上层join为full join，执行计划，生成倾斜优化计划
+explain select x, y, z, a, c from r full join s on r.a = s.b full join t on s.c = t.d order by 1, 2, 3, 4, 5 limit 1;
+                                                                     QUERY PLAN                                                                      
+-----------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=3.27..3.30 rows=1 width=20)
+   ->  Streaming (type: GATHER)  (cost=3.27..3.62 rows=12 width=20)
+         Merge Sort Key: r.x, s.y, t.z, r.a, s.c
+         Node/s: All datanodes
+         ->  Limit  (cost=3.21..3.21 rows=12 width=20)
+               ->  Sort  (cost=3.21..3.21 rows=12 width=20)
+                     Sort Key: r.x, s.y, t.z, r.a, s.c
+                     ->  Streaming(type: LOCAL GATHER dop: 1/2)  (cost=3.19..3.20 rows=12 width=20)
+                           Spawn on: All datanodes
+                           ->  Limit  (cost=3.19..3.19 rows=12 width=20)
+                                 ->  Sort  (cost=3.19..3.21 rows=96 width=20)
+                                       Sort Key: r.x, s.y, t.z, r.a, s.c
+                                       ->  Hash Full Join  (cost=1.84..3.15 rows=100 width=20)
+                                             Hash Cond: (s.c = t.d)
+                                             Skew Join Optimized by Rule
+                                             ->  Streaming(type: PART REDISTRIBUTE PART LOCAL dop: 2/2)  (cost=0.92..2.18 rows=100 width=16)
+                                                   Spawn on: All datanodes
+                                                   ->  Hash Full Join  (cost=0.92..1.85 rows=100 width=16)
+                                                         Hash Cond: (r.a = s.b)
+                                                         ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (cost=0.00..0.87 rows=100 width=8)
+                                                               Spawn on: All datanodes
+                                                               ->  Seq Scan on r  (cost=0.00..0.54 rows=100 width=8)
+                                                         ->  Hash  (cost=0.87..0.87 rows=96 width=12)
+                                                               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (cost=0.00..0.87 rows=100 width=12)
+                                                                     Spawn on: All datanodes
+                                                                     ->  Seq Scan on s  (cost=0.00..0.54 rows=100 width=12)
+                                             ->  Hash  (cost=0.87..0.87 rows=96 width=8)
+                                                   ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (cost=0.00..0.87 rows=100 width=8)
+                                                         Spawn on: All datanodes
+                                                         ->  Seq Scan on t  (cost=0.00..0.54 rows=100 width=8)
+(30 rows)
+
+--S6.上层join为full join，执行查询
+select x, y, z, a, c from r full join s on r.a = s.b full join t on s.c = t.d order by 1, 2, 3, 4, 5 limit 1;
+ x | y | z | a | c 
+---+---+---+---+---
+ 1 |   |   | 1 |  
+(1 row)
+
+set query_dop = 2002;

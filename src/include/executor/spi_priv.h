@@ -16,7 +16,7 @@
 #include "executor/spi.h"
 
 #define _SPI_PLAN_MAGIC 569278163
-
+#define INVALID_SPI_KEY (uint32)(-1)
 typedef struct _SPI_connection {
     /* current results */
     uint64 processed; /* by Executor */
@@ -29,12 +29,16 @@ typedef struct _SPI_connection {
     SubTransactionId connectSubid; /* ID of connecting subtransaction */
     CommandDest dest;              /* identify which is the orientated caller of spi interface, analyze or normal */
 
-    /* transaction management suppoort */
-    bool atomic;                   /* atomic execution context, does not allow transactions */
-    bool internal_xact;            /* SPI-managed transaction boundary, skip cleanup */
+    /* transaction management support */
+    bool atomic; /* atomic execution context, does not allow transactions */
+    bool internal_xact; /* SPI-managed transaction boundary, skip cleanup */
 
     void* clientData;              /* argument to call back function */
     void (*spiCallback)(void*);    /* callback for process received data. */
+    Oid func_oid;                  /* corresponding oid */
+    uint32 spi_hash_key;           /* corresponding oid */
+    uint32 visit_id;               /* visit count */
+    int plan_id;
 } _SPI_connection;
 
 /*
@@ -87,6 +91,8 @@ typedef struct _SPI_plan {
     Oid* argtypes;               /* Argument types (NULL if nargs is 0) */
     ParserSetupHook parserSetup; /* alternative parameter spec method */
     void* parserSetupArg;
+    uint32 id;                   /* SPIplan id in a function */
+    uint32 spi_key;              /* key in SPICacheTable */
 } _SPI_plan;
 
 #endif /* SPI_PRIV_H */

@@ -93,7 +93,7 @@ if [ $(query_primary | grep -E "Promoting" | wc -l) -eq 1 ]; then
 else
     if [ $(query_primary | grep -E "Secondary" | wc -l) -eq 1 ]; then
         echo "$failed_keyword, test_3 failover succeed unexpected"
-        gs_ctl build -D $data_dir/datanode1_standby
+        gs_ctl build -Z single_node -D $data_dir/datanode1_standby
         check_replication_setup
         exit 1
     fi
@@ -103,7 +103,7 @@ stop_primary
 start_standby_as_primary
 # waiting for dummystandby connect to primary
 check_dummy2_setup
-gs_ctl build -D $data_dir/datanode1
+gs_ctl build -Z single_node -D $data_dir/datanode1
 
 check_replication_setup_for_primary
 wait_primarycatchup_finish

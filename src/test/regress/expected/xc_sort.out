@@ -27,7 +27,7 @@ select * from xc_sort1_hash order by val, val2;
    9 |    2
 (7 rows)
 
-explain (costs off, verbose on, nodes off) select * from xc_sort1_hash order by val, val2;
+explain (costs off, verbose on) select * from xc_sort1_hash order by val, val2;
                     QUERY PLAN                     
 ---------------------------------------------------
  Sort
@@ -49,7 +49,7 @@ select val::char(3), val2 from xc_sort1_hash order by val, val2;
  9   |    2
 (7 rows)
 
-explain (costs off, verbose on, nodes off) select val::char(3), val2 from xc_sort1_hash order by val, val2;
+explain (costs off, verbose on) select val::char(3), val2 from xc_sort1_hash order by val, val2;
                              QUERY PLAN                              
 ---------------------------------------------------------------------
  Sort
@@ -69,7 +69,7 @@ select sum(val), val2 from xc_sort1_hash group by val2 order by sum(val);
   10 |    2
 (5 rows)
 
-explain (costs off, verbose on, nodes off) select sum(val), val2 from xc_sort1_hash group by val2 order by sum(val);
+explain (costs off, verbose on) select sum(val), val2 from xc_sort1_hash group by val2 order by sum(val);
                   QUERY PLAN                  
 ----------------------------------------------
  Sort
@@ -90,7 +90,7 @@ select * from xc_sort1_hash where val = 5 order by val2;
    5 |   10
 (2 rows)
 
-explain (costs off, verbose on, nodes off) select * from xc_sort1_hash where val = 5 order by val2;
+explain (costs off, verbose on) select * from xc_sort1_hash where val = 5 order by val2;
                QUERY PLAN                
 -----------------------------------------
  Sort
@@ -114,7 +114,7 @@ select * from xc_sort1_hash natural join xc_sort2_hash order by val, val2;
    9 |    2
 (7 rows)
 
-explain (costs off, verbose on, nodes off) select * from xc_sort1_hash natural join xc_sort2_hash order by val, val2;
+explain (costs off, verbose on) select * from xc_sort1_hash natural join xc_sort2_hash order by val, val2;
                                                  QUERY PLAN                                                 
 ------------------------------------------------------------------------------------------------------------
  Sort
@@ -144,7 +144,7 @@ select sum(val) over w, array_agg(val) over w from xc_sort1_hash window w as (or
   21 | {5,7,9}
 (7 rows)
 
-explain (costs off, verbose on, nodes off) select sum(val) over w, array_agg(val) over w from xc_sort1_hash window w as (order by val, val2 rows 2 preceding) order by 1; 
+explain (costs off, verbose on) select sum(val) over w, array_agg(val) over w from xc_sort1_hash window w as (order by val, val2 rows 2 preceding) order by 1; 
                                                                                                               QUERY PLAN                                                                                                               
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Sort
@@ -176,7 +176,7 @@ select * from xc_sort1_hash join xc_sort2_hash using (val2) order by xc_sort1_ha
     2 |   9 |   9
 (11 rows)
 
-explain (costs off, verbose on, nodes off) select * from xc_sort1_hash join xc_sort2_hash using (val2) order by xc_sort1_hash.val, xc_sort2_hash.val, xc_sort2_hash.val2; 
+explain (costs off, verbose on) select * from xc_sort1_hash join xc_sort2_hash using (val2) order by xc_sort1_hash.val, xc_sort2_hash.val, xc_sort2_hash.val2; 
                                                              QUERY PLAN                                                             
 ------------------------------------------------------------------------------------------------------------------------------------
  Sort
@@ -208,7 +208,7 @@ select * from xc_sort1_rep order by val, val2;
    9 |    2
 (7 rows)
 
-explain (costs off, verbose on, nodes off) select * from xc_sort1_rep order by val, val2;
+explain (costs off, verbose on) select * from xc_sort1_rep order by val, val2;
                    QUERY PLAN                    
 -------------------------------------------------
  Sort
@@ -230,7 +230,7 @@ select val::char(3), val2 from xc_sort1_rep order by val, val2;
  9   |    2
 (7 rows)
 
-explain (costs off, verbose on, nodes off) select val::char(3), val2 from xc_sort1_rep order by val, val2;
+explain (costs off, verbose on) select val::char(3), val2 from xc_sort1_rep order by val, val2;
                             QUERY PLAN                             
 -------------------------------------------------------------------
  Sort
@@ -250,7 +250,7 @@ select sum(val), val2 from xc_sort1_rep group by val2 order by sum(val);
   10 |    2
 (5 rows)
 
-explain (costs off, verbose on, nodes off) select sum(val), val2 from xc_sort1_rep group by val2 order by sum(val);
+explain (costs off, verbose on) select sum(val), val2 from xc_sort1_rep group by val2 order by sum(val);
                  QUERY PLAN                  
 ---------------------------------------------
  Sort
@@ -276,7 +276,7 @@ select * from xc_sort1_rep natural join xc_sort2_rep order by val, val2;
    9 |    2
 (7 rows)
 
-explain (costs off, verbose on, nodes off) select * from xc_sort1_rep natural join xc_sort2_rep order by val, val2;
+explain (costs off, verbose on) select * from xc_sort1_rep natural join xc_sort2_rep order by val, val2;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
  Sort
@@ -306,7 +306,7 @@ select sum(val) over w, array_agg(val) over w from xc_sort1_rep window w as (ord
   21 | {5,7,9}
 (7 rows)
 
-explain (costs off, verbose on, nodes off) select sum(val) over w, array_agg(val) over w from xc_sort1_rep window w as (order by val, val2 rows 2 preceding) order by 1; 
+explain (costs off, verbose on) select sum(val) over w, array_agg(val) over w from xc_sort1_rep window w as (order by val, val2 rows 2 preceding) order by 1; 
                                                                                                               QUERY PLAN                                                                                                               
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Sort
@@ -338,7 +338,7 @@ select * from xc_sort1_rep join xc_sort2_hash using (val2) order by xc_sort1_rep
     2 |   9 |   9
 (11 rows)
 
-explain (costs off, verbose on, nodes off) select * from xc_sort1_rep join xc_sort2_hash using (val2) order by xc_sort1_rep.val, xc_sort2_hash.val, xc_sort2_hash.val2; 
+explain (costs off, verbose on) select * from xc_sort1_rep join xc_sort2_hash using (val2) order by xc_sort1_rep.val, xc_sort2_hash.val, xc_sort2_hash.val2; 
                                                            QUERY PLAN                                                            
 ---------------------------------------------------------------------------------------------------------------------------------
  Sort
@@ -368,7 +368,7 @@ select * from xc_sort1_hash order by val, val2;
    9 |    2
 (7 rows)
 
-explain (costs off, verbose on, nodes off) select * from xc_sort1_hash order by val, val2;  
+explain (costs off, verbose on) select * from xc_sort1_hash order by val, val2;  
                     QUERY PLAN                     
 ---------------------------------------------------
  Sort

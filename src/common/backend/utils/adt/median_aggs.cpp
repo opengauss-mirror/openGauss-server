@@ -102,6 +102,10 @@ static void MedianPutDatum(MedianBuildState* mstate, Datum dvalue)
  */
 Datum median_transfn(PG_FUNCTION_ARGS)
 {
+#ifdef ENABLE_MULTIPLE_NODES
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("median is not yet supported.")));
+#endif
+
     Oid arg1Typeid = get_fn_expr_argtype(fcinfo->flinfo, 1);
     if (arg1Typeid == InvalidOid) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("could not determine input data type")));
@@ -152,6 +156,10 @@ static const double HALF_FACTOR = 0.5;
  */
 Datum median_float8_finalfn(PG_FUNCTION_ARGS)
 {
+#ifdef ENABLE_MULTIPLE_NODES
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("median is not yet supported.")));
+#endif
+
     Datum result;
 
     if (PG_ARGISNULL(0)) {
@@ -201,6 +209,10 @@ static int datum_interval_cmp(const void* arg1, const void* arg2)
  */
 Datum median_interval_finalfn(PG_FUNCTION_ARGS)
 {
+#ifdef ENABLE_MULTIPLE_NODES
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("median is not yet supported.")));
+#endif
+
     /* returns null if no input values */
     if (PG_ARGISNULL(0)) {
         PG_RETURN_NULL(); 

@@ -1,0 +1,3 @@
+Drop server if exists hdfs_server cascade;
+-- CREATE SERVER hdfs_server FOREIGN DATA WRAPPER HDFS_FDW OPTIONS (type 'hdfs', address '10.67.128.30:25000,10.67.128.28',HDFSCFGPATH '/home/hanfeng/FI_client/hadoop_client/HDFS/hadoop/etc/hadoop');
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');

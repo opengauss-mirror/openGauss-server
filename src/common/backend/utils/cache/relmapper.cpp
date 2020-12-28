@@ -52,7 +52,7 @@
 #include "catalog/storage.h"
 #include "miscadmin.h"
 #include "storage/fd.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 #include "utils/inval.h"
 #include "utils/relmapper.h"
 
@@ -195,13 +195,6 @@ void RelationMapUpdateMap(Oid relationId, Oid fileNode, bool shared, bool immedi
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("cannot change relation mapping within subtransaction")));
         }
-
-        if (IsInParallelMode()) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("cannot change relation mapping in parallel mode")));
-        }
-
         if (immediate) {
             /* Make it active, but only locally */
             if (shared) {
@@ -373,13 +366,10 @@ void AtCCI_RelationMap(void)
  *
  * During abort, we just have to throw away any pending map changes.
  * Normal post-abort cleanup will take care of fixing relcache entries.
- * Parallel worker commit/abort is handled by resetting active mappings
- * that may have been received from the leader process.  (There should be
- * no pending updates in parallel workers.)
  */
-void AtEOXact_RelationMap(bool isCommit, bool isParallelWorker)
+void AtEOXact_RelationMap(bool isCommit)
 {
-    if (isCommit && !isParallelWorker) {
+    if (isCommit) {
         /*
          * We should not get here with any "pending" updates.  (We could
          * logically choose to treat such as committed, but in the current
@@ -400,10 +390,7 @@ void AtEOXact_RelationMap(bool isCommit, bool isParallelWorker)
             u_sess->relmap_cxt.active_local_updates->num_mappings = 0;
         }
     } else {
-        /* Abort or parallel worker --- drop all local and pending updates */
-        Assert(!isParallelWorker || u_sess->relmap_cxt.pending_shared_updates->num_mappings == 0);
-        Assert(!isParallelWorker || u_sess->relmap_cxt.pending_local_updates->num_mappings == 0);
-
+        /* Abort --- drop all local and pending updates */
         u_sess->relmap_cxt.active_shared_updates->num_mappings = 0;
         u_sess->relmap_cxt.active_local_updates->num_mappings = 0;
         u_sess->relmap_cxt.pending_shared_updates->num_mappings = 0;
@@ -749,7 +736,7 @@ static void write_relmap_file(bool shared, RelMapFile* newmap, bool write_wal, b
             lsn = XLogInsert(RM_RELMAP_ID, XLOG_RELMAP_UPDATE);
 
             /* As always, WAL must hit the disk before the data update does */
-            XLogWaitFlush(lsn);
+            XLogFlush(lsn);
         }
 
         errno = 0;

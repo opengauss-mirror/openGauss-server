@@ -1,0 +1,265 @@
+-- some misc test case
+
+-- create obs server
+CREATE SERVER obs_server FOREIGN DATA WRAPPER 	dfs_fdw OPTIONS (address '@obshostname@', type 'obs', access_key '@ak@', secret_access_key '@sk@');
+
+\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | sed 's/bin.*$//g' >tmp_dir
+
+-- create obs foreign table
+DROP FOREIGN TABLE IF EXISTS nation;
+create foreign table nation  (
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4,
+ N_COMMENT TEXT) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/acceleration/tpch_small/nation/')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS supplier;
+create foreign table supplier  (
+ S_SUPPKEY INT4,
+ S_NAME TEXT,
+ S_ADDRESS TEXT,
+ S_NATIONKEY INT4,
+ S_PHONE TEXT,
+ S_ACCTBAL FLOAT8,
+ S_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/acceleration/tpch_small/supplier/')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS region;
+create foreign table region  (
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/acceleration/tpch_small/region/')
+distribute by roundrobin;
+
+-- set explain_perf_mode
+set explain_perf_mode=pretty;
+show explain_perf_mode;
+set query_dop=1;
+
+
+-- test case 1: simple query, pushdown agg+scan
+set acceleration_with_compute_pool=off;
+select count(*) from nation;
+
+set acceleration_with_compute_pool=on;
+select count(*) from nation;
+
+set acceleration_with_compute_pool=off;
+explain (costs off) select count(*) from nation;
+
+set acceleration_with_compute_pool=on;
+set show_acce_estimate_detail=on;
+set explain_perf_mode=normal;
+explain (costs off, verbose on) select count(*) from nation;
+set explain_perf_mode=pretty;
+
+
+-- test case 2: "OBS foreign table doesn't support not-stream plan"
+set acceleration_with_compute_pool=on;
+with recursive tmp1 as (select s_suppkey,s_nationkey,s_comment from supplier order by 1)
+select tmp1.s_nationkey, region.r_name from tmp1, region where tmp1.s_suppkey=region.r_regionkey  group by tmp1.s_nationkey,region.r_name order by 1,2;
+
+-- test case 3: subplan
+set acceleration_with_compute_pool=off;
+select n_nationkey, count(*) from nation group by n_nationkey order by n_nationkey offset(select avg(r_regionkey) from region);
+
+set acceleration_with_compute_pool=on;
+select n_nationkey, count(*) from nation group by n_nationkey order by n_nationkey offset(select avg(r_regionkey) from region);
+
+set acceleration_with_compute_pool=off;
+explain (costs off) select n_nationkey, count(*) from nation group by n_nationkey order by n_nationkey offset(select avg(r_regionkey) from region);
+
+set acceleration_with_compute_pool=on;
+explain (costs off) select n_nationkey, count(*) from nation group by n_nationkey order by n_nationkey offset(select avg(r_regionkey) from region);
+
+-- test case 4: dop > 1
+set acceleration_with_compute_pool=on;
+explain (costs off) select count(*) from nation;
+explain performance select count(*) from nation;
+
+set query_dop=2;
+select count(*) from nation;
+
+set query_dop=3;
+select count(*) from nation;
+
+set query_dop=4;
+select count(*) from nation;
+
+reset query_dop;
+
+-- test case 5: replication is unsupported
+DROP FOREIGN TABLE IF EXISTS region1;
+create foreign table region1  (
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/acceleration/region/')
+distribute by replication;
+
+
+-- test case 6: invalid address of the comptue pool
+set acceleration_with_compute_pool=on;
+\! cat tmp_dir | xargs -I{} sed -i "/cpip/s/.*/cpip = abc/g" {}/bin/cp_client.conf
+\! sed -i "/cpip/s/.*/cpip = abc/g" @abs_bindir@/cp_client.conf
+
+select count(*) from nation;
+explain (costs off) select count(*) from nation;
+
+\! cat tmp_dir | xargs -I{} sed -i "/cpip/s/.*/cpip = localhost/g" {}/bin/cp_client.conf
+\! sed -i "/cpip/s/.*/cpip = localhost/g" @abs_bindir@/cp_client.conf
+
+
+-- test case 7: bloomfilter pushdown
+drop table if exists bf_col;
+create table bf_col(h1 int, i2 int2, i4 int4, i8 int8, f4 float4, f8 float8, v1 varchar(10), v2 varchar, c1 char(10), c2 char, t1 text, dec decimal)  with(orientation=column) distribute by replication;
+insert into bf_col values(1, 9002, 9002, 9002, 9002.01, 9002.5, 'b9002', 'b9002', 'b9002', '9', 'b9002', 9002.95);
+insert into bf_col values(2, 1002, 1002, 1002, 1002.01, 1002.5, 'a1002', 'a1002', 'a1002', '1', 'a1002', 1002.95);
+insert into bf_col values(3, 2002, 2002, 2002, 2002.01, 2002.5, 'a2002', 'a2002', 'a2002', '3', 'a2002', 2002.95);
+insert into bf_col values(4, 902, 902, 902, 902.01, 902.5, 'a902', 'a902', 'a902', '2', 'a902', 902.95);
+insert into bf_col values(5, 3002, 3002, 3002, 3002.01, 3002.5, 'a3002', 'a3002', 'a3002', '4', 'a3002', 3002.95);
+
+drop foreign table if exists bf_orc;
+create foreign table bf_orc(i2 int2, i4 int4, i8 int8, f4 float4, f8 float8, v1 varchar(10), v2 varchar, c1 char(10), c2 char, t1 text, t2 clob, dec decimal)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/test_computing_pool/bloomfilter_test/')
+distribute by roundrobin;
+
+analyze bf_orc;
+analyze bf_col;
+
+set enable_bloom_filter=on;
+set enable_codegen=off;
+set work_mem='100MB';
+set query_dop=2;
+explain (costs off) select count(*) from bf_col,bf_orc where bf_col.i4=bf_orc.i4 and bf_col.h1<3;
+
+set explain_perf_mode=normal;
+explain (costs off, timing off, analyze on) select count(*) from bf_col,bf_orc where bf_col.i4=bf_orc.i4 and bf_col.h1<3;
+
+
+set acceleration_with_compute_pool=off;
+select count(*) from bf_col,bf_orc where bf_col.i4=bf_orc.i4 and bf_col.h1<3;
+
+set acceleration_with_compute_pool=on;
+set query_dop=1;
+select count(*) from bf_col,bf_orc where bf_col.i4=bf_orc.i4 and bf_col.h1<3;
+
+set query_dop=2;
+select count(*) from bf_col,bf_orc where bf_col.i4=bf_orc.i4 and bf_col.h1<3;
+
+set query_dop=3;
+select count(*) from bf_col,bf_orc where bf_col.i4=bf_orc.i4 and bf_col.h1<3;
+
+set query_dop=4;
+select count(*) from bf_col,bf_orc where bf_col.i4=bf_orc.i4 and bf_col.h1<3;
+
+reset enable_bloom_filter;
+
+-- test case 8: pushdown scan to computing pool for text format
+drop foreign table if exists    txt_obs_ft001;
+create foreign table txt_obs_ft001
+( a int, b int )
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/test_computing_pool/txt_obs_test/',
+    format 'text',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+) read only;
+
+set acceleration_with_compute_pool=on;
+
+explain (verbose, costs off, nodes off) select * from txt_obs_ft001 order by a;
+select * from txt_obs_ft001 order by a;
+
+drop table if exists join_test_tbl;
+create table join_test_tbl ( a int, b int);
+insert into join_test_tbl values(1,1);
+
+explain (verbose, costs off, nodes off) select * from txt_obs_ft001, join_test_tbl where txt_obs_ft001.a= join_test_tbl.b order by txt_obs_ft001.a, txt_obs_ft001.b;
+
+select * from txt_obs_ft001, join_test_tbl where txt_obs_ft001.a= join_test_tbl.b order by txt_obs_ft001.a, txt_obs_ft001.b;
+
+-- test case 9: smp for text/csv format
+show query_dop;
+set query_dop=2;
+select * from txt_obs_ft001, join_test_tbl where txt_obs_ft001.a= join_test_tbl.b order by txt_obs_ft001.a, txt_obs_ft001.b;
+
+
+-- test case 10: unsupport value partition for text/csv format
+drop foreign table if exists part_text_ft;
+create foreign table part_text_ft
+( a int, b int )
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/test_computing_pool/txt_obs_test/',
+    format 'text',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+) 
+read only
+partition by (b) automapped;
+
+-- test case 11: file number < dn number, just 1 file in obsorccheck/acceleration/exception/nation/
+DROP FOREIGN TABLE IF EXISTS nation1;
+create foreign table nation1  (
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4,
+ N_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/acceleration/exception/nation/')
+distribute by roundrobin;
+set acceleration_with_compute_pool=on;
+explain (costs off) select count(*) from nation1;
+
+-- test case 12: append node when acceleration_with_compute_pool is on
+explain (costs off)  select count(*) from nation union all select count(*) from nation1;
+
+-- test case 13: PBE usage for the compute pool
+prepare select_nation(int) as select count(*) from nation where n_nationkey=$1;
+execute select_nation(1);
+
+-- test case 14: invalid address for the compute pool
+\! cat tmp_dir | xargs -I{} sed -i "/username/s/.*/username = omm1/g" {}/bin/cp_client.conf
+\! sed -i "/username/s/.*/username = omm1/g" @abs_bindir@/cp_client.conf
+explain  (costs off) select count(*) from nation;
+\! cat tmp_dir | xargs -I{} sed -i "/username/s/.*/username = omm/g" {}/bin/cp_client.conf
+\! sed -i "/username/s/.*/username = omm/g" @abs_bindir@/cp_client.conf
+
+-- test case 15: func oid > FirstNormalObjectId
+set explain_perf_mode=summary;
+show explain_perf_mode;
+
+create or replace function funczy(abc integer) returns integer as $$
+begin
+	if (abc < 0) then
+		return abs(abc+1);
+	else
+		return abc+1;
+	end if;
+end;
+$$ language plpgsql immutable;
+
+explain (verbose on, costs off) select count(*) from nation where funczy(n_regionkey) = 100;
+explain (verbose on, costs off) select count(funczy(n_nationkey)) from nation group by n_regionkey;
+
+-- cleanup
+DROP FOREIGN TABLE IF EXISTS nation;
+DROP FOREIGN TABLE IF EXISTS nation1;
+DROP FOREIGN TABLE IF EXISTS region;
+DROP FOREIGN TABLE IF EXISTS supplier;
+DROP SERVER IF EXISTS obs_server CASCADE;

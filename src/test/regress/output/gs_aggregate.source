@@ -306,8 +306,8 @@ CREATE TABLE customer_address (
 )
 WITH (orientation=row, compression=no)
  ;
-COPY customer_address FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/customer_address.dat';
-COPY web_site FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/web_site.data' DELIMITER as ',' NULL as '';
+COPY customer_address FROM '@abs_srcdir@/data/customer_address.dat';
+COPY web_site FROM '@abs_srcdir@/data/web_site.data' DELIMITER as ',' NULL as '';
 ANALYZE customer_address;
 ANALYZE web_site;
 SET enable_hashagg = off;

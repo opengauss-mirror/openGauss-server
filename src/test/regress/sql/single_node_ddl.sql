@@ -13,7 +13,7 @@ select /*+ redistribute(table1) +*/ * from table1;
 drop table table1;
 create barrier;
 clean connection to node (dn2);
-
+execute direct on (dn2) 'select * from table1';
 create table table_neg_tmp (id int);
 create table table1 (id int) to node (dn2);
 create table table2 (like table_neg_tmp including distribution);
@@ -22,11 +22,3 @@ drop table table_neg_tmp;
 create node group group1_90 with (datanode);
 alter node group group1_90 set default;
 drop node group group1_90;
-create table t1 (id int, value char(3));
-explain plan for select * from t1;
-select id, operation, options, object_name, object_type, projection from plan_table;
-delete from plan_table where id=1;
-drop table t1;
-
--- add userid field in audit file
-select * from pg_query_audit('1970-1-1', '9999-12-31') limit 0;

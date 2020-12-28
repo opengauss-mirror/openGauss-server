@@ -283,6 +283,7 @@ static void remove_rel_from_query(PlannerInfo* root, int relid, Relids joinrelid
     List* joininfos = NIL;
     Index rti;
     ListCell* l = NULL;
+    ListCell* nextl = NULL;
 
     /*
      * Mark the rel as "dead" to show it is no longer part of the join tree.
@@ -330,6 +331,26 @@ static void remove_rel_from_query(PlannerInfo* root, int relid, Relids joinrelid
     }
 
     /*
+     * Likewise remove references from LateralJoinInfo data structures.
+     *
+     * If we are deleting a LATERAL subquery, we can forget its
+     * LateralJoinInfo altogether.  Otherwise, make sure the target is not
+     * included in any lateral_lhs set.  (It probably can't be, since that
+     * should have precluded deciding to remove it; but let's cope anyway.)
+     */
+    for (l = list_head(root->lateral_info_list); l != NULL; l = nextl)
+    {
+        LateralJoinInfo *ljinfo = (LateralJoinInfo *) lfirst(l);
+
+        nextl = lnext(l);
+        if (ljinfo->lateral_rhs == (Index)relid)
+            root->lateral_info_list = list_delete_ptr(root->lateral_info_list,
+                                                      ljinfo);
+        else
+            ljinfo->lateral_lhs = bms_del_member(ljinfo->lateral_lhs, relid);
+    }
+
+    /*
      * Likewise remove references from PlaceHolderVar data structures.
      *
      * Here we have a special case: if a PHV's eval_at set is just the target
@@ -345,8 +366,6 @@ static void remove_rel_from_query(PlannerInfo* root, int relid, Relids joinrelid
             phinfo->ph_eval_at = bms_add_member(phinfo->ph_eval_at, relid);
 
         phinfo->ph_needed = bms_del_member(phinfo->ph_needed, relid);
-        /* ph_may_need probably isn't used after this, but fix it anyway */
-        phinfo->ph_may_need = bms_del_member(phinfo->ph_may_need, relid);
     }
 
     /*

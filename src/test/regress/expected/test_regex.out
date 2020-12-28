@@ -12,7 +12,7 @@ create table regex_2 (
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "regex_2_pkey" for table "regex_2"
 insert into regex_1 values(1, 'a', 'aaa');
 insert into regex_2 values(1, 'b', 'bbb');
-explain (costs on, verbose on, nodes on, analyse on, cpu on, detail on, buffers on) select * from regex_1;
+explain (costs on, verbose on, analyse on, cpu on, detail on, buffers on) select * from regex_1;
                                                  QUERY PLAN                                                 
 ------------------------------------------------------------------------------------------------------------
 --? Seq Scan on public.regex_1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=833 width=68\) \(actual time=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* loops=[0-9]*\)
@@ -22,7 +22,7 @@ explain (costs on, verbose on, nodes on, analyse on, cpu on, detail on, buffers 
 --? Total runtime: [0-9]*\.[0-9]* ms
 (5 rows)
 
-explain (costs on, verbose on, nodes on, analyse on, cpu on, detail on, buffers on) select * from regex_2;
+explain (costs on, verbose on, analyse on, cpu on, detail on, buffers on) select * from regex_2;
                                                  QUERY PLAN                                                 
 ------------------------------------------------------------------------------------------------------------
 --? Seq Scan on public.regex_2  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\) \(actual time=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* loops=[0-9]*\)
@@ -32,7 +32,7 @@ explain (costs on, verbose on, nodes on, analyse on, cpu on, detail on, buffers 
 --? Total runtime: [0-9]*\.[0-9]* ms
 (5 rows)
 
-explain (costs on, verbose on, nodes on) select * from (select name from regex_1 intersect select name from regex_2 order by name) limit 10;
+explain (costs on, verbose on) select * from (select name from regex_1 intersect select name from regex_2 order by name) limit 10;
                                               QUERY PLAN                                              
 ------------------------------------------------------------------------------------------------------
 --? Limit  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
@@ -55,7 +55,7 @@ explain (costs on, verbose on, nodes on) select * from (select name from regex_1
                                        Output: regex_2.name
 (18 rows)
 
-explain (costs on, verbose on, nodes on) select * from (select name from regex_1 union select name from regex_2 order by name) limit 10;
+explain (costs on, verbose on) select * from (select name from regex_1 union select name from regex_2 order by name) limit 10;
                                         QUERY PLAN                                        
 ------------------------------------------------------------------------------------------
 --? Limit  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
@@ -73,7 +73,7 @@ explain (costs on, verbose on, nodes on) select * from (select name from regex_1
                            Output: regex_2.name
 (13 rows)
 
-explain (costs on, verbose on, nodes on) insert into regex_1 (select * from regex_2);
+explain (costs on, verbose on) insert into regex_1 (select * from regex_2);
                                QUERY PLAN                               
 ------------------------------------------------------------------------
 --? Insert on public.regex_1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
@@ -84,7 +84,7 @@ explain (costs on, verbose on, nodes on) insert into regex_1 (select * from rege
 set enable_hashjoin=on;
 set enable_nestloop=off;
 set enable_mergejoin=off;
-explain (costs on, verbose on, nodes on) select * from regex_1, regex_2 where regex_1.name=regex_2.name;
+explain (costs on, verbose on) select * from regex_1, regex_2 where regex_1.name=regex_2.name;
                                          QUERY PLAN                                          
 ---------------------------------------------------------------------------------------------
 --? Hash Join  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* distinct=\[[0-9]*, [0-9]*\] width=[0-9]*\)
@@ -101,7 +101,7 @@ explain (costs on, verbose on, nodes on) select * from regex_1, regex_2 where re
 set enable_hashjoin=off;
 set enable_nestloop=off;
 set enable_mergejoin=on;
-explain (costs on, verbose on, nodes on) select * from regex_1, regex_2 where regex_1.name=regex_2.name;
+explain (costs on, verbose on) select * from regex_1, regex_2 where regex_1.name=regex_2.name;
                                          QUERY PLAN                                          
 ---------------------------------------------------------------------------------------------
 --? Merge Join  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
@@ -122,7 +122,7 @@ explain (costs on, verbose on, nodes on) select * from regex_1, regex_2 where re
 set enable_hashjoin=on;
 set enable_nestloop=on;
 set enable_mergejoin=on;
-explain (costs on, verbose on, nodes on) select * from regex_2, regex_1 where regex_1.id>regex_2.id;
+explain (costs on, verbose on) select * from regex_2, regex_1 where regex_1.id>regex_2.id;
                                          QUERY PLAN                                          
 ---------------------------------------------------------------------------------------------
 --? Nested Loop  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
@@ -134,7 +134,7 @@ explain (costs on, verbose on, nodes on) select * from regex_2, regex_1 where re
          Index Cond: (regex_1.id > regex_2.id)
 (7 rows)
 
-explain (costs on, verbose on, nodes on) select avg(id) from regex_1;
+explain (costs on, verbose on) select avg(id) from regex_1;
                               QUERY PLAN                               
 -----------------------------------------------------------------------
 --? Aggregate  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
@@ -143,7 +143,7 @@ explain (costs on, verbose on, nodes on) select avg(id) from regex_1;
          Output: id, name, person
 (4 rows)
 
-explain (costs on, verbose on, nodes on) select sum(id)+2 from regex_2 where value is not NULL group by name having sum(id)>0;
+explain (costs on, verbose on) select sum(id)+2 from regex_2 where value is not NULL group by name having sum(id)>0;
                                QUERY PLAN                               
 ------------------------------------------------------------------------
 --? HashAggregate  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
@@ -155,7 +155,7 @@ explain (costs on, verbose on, nodes on) select sum(id)+2 from regex_2 where val
          Filter: (regex_2.value IS NOT NULL)
 (7 rows)
 
-explain (costs on, verbose on, nodes on) with recursive t(n) as (
+explain (costs on, verbose on) with recursive t(n) as (
 values(1)
 union all
 select n+1 from t where n<100

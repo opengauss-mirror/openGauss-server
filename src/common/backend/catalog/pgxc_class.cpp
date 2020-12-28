@@ -31,8 +31,28 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
+/*
+ * PgxcClassCreate
+ *		Create a pgxc_class entry
+ */
+static void PgxcClassCreateInner(bool *nulls, Datum *values)
+{
+    Relation pgxcclassrel;
+    HeapTuple htup;
+    /* Open the relation for insertion */
+    pgxcclassrel = heap_open(PgxcClassRelationId, RowExclusiveLock);
+
+    htup = heap_form_tuple(pgxcclassrel->rd_att, values, nulls);
+
+    (void)simple_heap_insert(pgxcclassrel, htup);
+
+    CatalogUpdateIndexes(pgxcclassrel, htup);
+    heap_freetuple_ext(htup);
+
+    heap_close(pgxcclassrel, RowExclusiveLock);
+}
 
 /*
  * PgxcClassCreate
@@ -41,8 +61,6 @@
 void PgxcClassCreate(Oid pcrelid, char pclocatortype, int2* pcattnum, int pchashalgorithm, int pchashbuckets,
     int numnodes, Oid* nodes, int distributeNum, const char* groupname)
 {
-    Relation pgxcclassrel;
-    HeapTuple htup;
     bool nulls[Natts_pgxc_class];
     Datum values[Natts_pgxc_class];
     int i;
@@ -50,7 +68,7 @@ void PgxcClassCreate(Oid pcrelid, char pclocatortype, int2* pcattnum, int pchash
     int2vector* attnum_array = NULL;
     Relation pgxcgrouprel;
     HeapTuple ghtup;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     Form_pgxc_group groupForm;
     int scan_group;
     oidvector* gmember = NULL;
@@ -153,17 +171,54 @@ void PgxcClassCreate(Oid pcrelid, char pclocatortype, int2* pcattnum, int pchash
     /* Node information */
     values[Anum_pgxc_class_pcattnum - 1] = PointerGetDatum(attnum_array);
     values[Anum_pgxc_class_nodes - 1] = PointerGetDatum(nodes_array);
+    PgxcClassCreateInner(nulls, values);
+}
 
-    /* Open the relation for insertion */
-    pgxcclassrel = heap_open(PgxcClassRelationId, RowExclusiveLock);
+/*
+ * PgxcClassCreateForReloption
+ *      Create a pgxc_class entry, only for merge list
+ */
+void PgxcClassCreateForReloption(Oid pcrelid, const char* reloptionstr)
+{
+    bool nulls[Natts_pgxc_class];
+    Datum values[Natts_pgxc_class];
+    int i;
 
-    htup = heap_form_tuple(pgxcclassrel->rd_att, values, nulls);
+    /* Iterate through attributes initializing nulls and values */
+    for (i = 0; i < Natts_pgxc_class; i++) {
+        nulls[i] = true;
+        values[i] = (Datum)0;
+    }
 
-    (void)simple_heap_insert(pgxcclassrel, htup);
+    /* should not happen */
+    if (pcrelid == InvalidOid) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("pgxc class relid invalid.")));
+        return;
+    }
+    values[Anum_pgxc_class_pcrelid - 1] = ObjectIdGetDatum(pcrelid);
+    values[Anum_pgxc_class_option - 1] = CStringGetTextDatum(reloptionstr);
+    nulls[Anum_pgxc_class_pcrelid - 1] = false;
+    nulls[Anum_pgxc_class_option - 1] = false;
+    PgxcClassCreateInner(nulls, values);
+}
 
-    CatalogUpdateIndexes(pgxcclassrel, htup);
+/*
+ * PgxcClassAlter
+ *		Modify a pgxc_class entry with given data
+ */
+static void PgxcClassAlterInner(Relation rel, Oid pcrelid, bool *new_record_nulls, Datum *new_record, bool* new_record_repl)
+{
+    HeapTuple oldtup, newtup;
+    Assert(RelationIsValid(rel));
+    Assert(OidIsValid(pcrelid));
+    oldtup = SearchSysCacheCopy1(PGXCCLASSRELID, ObjectIdGetDatum(pcrelid));
 
-    heap_close(pgxcclassrel, RowExclusiveLock);
+    /* Update relation */
+    newtup = heap_modify_tuple(oldtup, RelationGetDescr(rel), new_record, new_record_nulls, new_record_repl);
+    simple_heap_update(rel, &oldtup->t_self, newtup);
+    CatalogUpdateIndexes(rel, newtup);
+    heap_freetuple_ext(newtup);
+    heap_freetuple_ext(oldtup);
 }
 
 /*
@@ -174,7 +229,7 @@ void PgxcClassAlter(Oid pcrelid, char pclocatortype, int2* pcattnum, int numpcat
     int pchashbuckets, int numnodes, Oid* nodes, char ch_redis, PgxcClassAlterType type, const char* groupname)
 {
     Relation rel;
-    HeapTuple oldtup, newtup;
+    HeapTuple oldtup;
     oidvector* nodes_array = NULL;
     int2vector* pcattnum_array = NULL;
     Datum new_record[Natts_pgxc_class];
@@ -280,11 +335,48 @@ void PgxcClassAlter(Oid pcrelid, char pclocatortype, int2* pcattnum, int numpcat
     new_record[Anum_pgxc_class_pgroup - 1] = DirectFunctionCall1(namein, CStringGetDatum(groupname));
     new_record[Anum_pgxc_class_nodes - 1] = PointerGetDatum(nodes_array);
 
-    /* Update relation */
-    newtup = heap_modify_tuple(oldtup, RelationGetDescr(rel), new_record, new_record_nulls, new_record_repl);
-    simple_heap_update(rel, &oldtup->t_self, newtup);
-    CatalogUpdateIndexes(rel, newtup);
+    PgxcClassAlterInner(rel, pcrelid, new_record_nulls, new_record, new_record_repl);
     pfree_ext(nodes_array);
+    heap_freetuple_ext(oldtup);
+    heap_close(rel, RowExclusiveLock);
+}
+
+/*
+ * PgxcClassAlterForReloption
+ *      Modify a pgxc_class entry with given data
+ */
+void PgxcClassAlterForReloption(Oid pcrelid, const char* reloptionstr)
+{
+    Relation rel;
+    HeapTuple oldtup;
+    Datum new_record[Natts_pgxc_class];
+    bool new_record_nulls[Natts_pgxc_class];
+    bool new_record_repl[Natts_pgxc_class];
+
+    Assert(OidIsValid(pcrelid));
+
+    rel = heap_open(PgxcClassRelationId, RowExclusiveLock);
+    oldtup = SearchSysCacheCopy1(PGXCCLASSRELID, ObjectIdGetDatum(pcrelid));
+
+    if (!HeapTupleIsValid(oldtup)) /* should not happen */
+        ereport(
+            ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for pgxc_class %u", pcrelid)));
+
+    /* Initialize fields */
+    errno_t errorno = EOK;
+    errorno = memset_s(new_record, sizeof(new_record), 0, sizeof(new_record));
+    securec_check(errorno, "\0", "\0");
+    errorno = memset_s(new_record_nulls, sizeof(new_record_nulls), true, sizeof(new_record_nulls));
+    securec_check(errorno, "\0", "\0");
+    errorno = memset_s(new_record_repl, sizeof(new_record_repl), false, sizeof(new_record_repl));
+    securec_check(errorno, "\0", "\0");
+
+    /* Reserve column */
+    new_record_nulls[Anum_pgxc_class_option - 1] = false;
+    new_record_repl[Anum_pgxc_class_option - 1] = true;
+    new_record[Anum_pgxc_class_option - 1] = CStringGetTextDatum(reloptionstr);
+    PgxcClassAlterInner(rel, pcrelid, new_record_nulls, new_record, new_record_repl);
+    heap_freetuple_ext(oldtup);
     heap_close(rel, RowExclusiveLock);
 }
 
@@ -302,6 +394,7 @@ void RemovePgxcClass(Oid pcrelid)
      */
     relation = heap_open(PgxcClassRelationId, RowExclusiveLock);
     tup = SearchSysCache(PGXCCLASSRELID, ObjectIdGetDatum(pcrelid), 0, 0, 0);
+
     if (!HeapTupleIsValid(tup)) /* should not happen */
         ereport(
             ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for pgxc_class %u", pcrelid)));

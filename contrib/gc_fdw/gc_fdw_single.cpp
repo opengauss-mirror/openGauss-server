@@ -49,7 +49,7 @@
 #include "optimizer/tlist.h"
 #include "parser/parsetree.h"
 #include "pgxc/pgxcnode.h"
-#include "storage/block.h"
+#include "storage/buf/block.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
 #include "utils/lsyscache.h"

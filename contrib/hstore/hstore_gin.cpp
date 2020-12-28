@@ -25,7 +25,7 @@ PG_FUNCTION_INFO_V1(gin_extract_hstore);
 extern "C" Datum gin_extract_hstore(PG_FUNCTION_ARGS);
 
 /* Build an indexable text value */
-static text* makeitem(char* str, int len, char flag)
+static text* makeitem(const char* str, int len, char flag)
 {
     text* item = NULL;
 
@@ -45,6 +45,7 @@ static text* makeitem(char* str, int len, char flag)
 Datum gin_extract_hstore(PG_FUNCTION_ARGS)
 {
     HStore* hs = PG_GETARG_HS(0);
+    NOT_NULL_HS(hs);
     int32* nentries = (int32*)PG_GETARG_POINTER(1);
     Datum* entries = NULL;
     HEntry* hsent = ARRPTR(hs);

@@ -16,6 +16,7 @@ eth1ip=`/sbin/ifconfig eth1|sed -n 2p|awk  '{ print $2 }'`
 ethens=`/sbin/ifconfig ens4f0|sed -n 2p |awk  '{ print $2 }'`
 enp2s0f0=`/sbin/ifconfig enp2s0f0|sed -n 2p |awk  '{ print $2 }'`
 enp2s0f1=`/sbin/ifconfig enp2s0f1|sed -n 2p |awk  '{ print $2 }'`
+enp125s0f0=`/sbin/ifconfig enp125s0f0|sed -n 2p |awk  '{ print $2 }'`
 
 if [ -n "$eth0ip" ]; then
         export eth_local_ip=$eth0ip
@@ -27,6 +28,8 @@ elif [ -n "$enp2s0f0" ];then
         export eth_local_ip=$enp2s0f0
 elif [ -n "$enp2s0f1" ];then
         export eth_local_ip=$enp2s0f1
+elif [ -n "$enp125s0f0" ];then
+        export eth_local_ip=$enp125s0f0
 else
      echo "error eth0 and eth1 not configured,exit"
      exit 1
@@ -580,4 +583,104 @@ check_primary_setup_for_multi_standby
 
 echo query datanode1_standby
 check_replication_setup
+}
+
+#################################################################################
+#cascade standby
+#hacheck
+#cascade_data_dir=$standby2_data_dir
+
+function query_cascade_standby()
+{
+ echo query cascade standby
+ gs_ctl query -D  $data_dir/datanode2_standby
+}
+
+function check_cascade_standby_startup()
+{
+echo checking cascade standby startup
+for i in $(seq 1 30)
+do
+        if [ $(query_cascade_standby | grep -E $startup_keyword | wc -l) -eq 0 -o $(query_cascade_standby | grep $startup_keyword1 | wc -l) -gt 0 ]; then
+                sleep 2
+        else
+                sleep 5
+                return 0
+        fi
+done
+echo "$failed_keyword when check_cascade_standby_startup"
+exit 1
+}
+
+function check_cascade_primary_setup()
+{
+echo checking primary setup for cascade
+for i in $(seq 1 30)
+do
+        if [ $(query_primary | grep -E $setup_keyword | wc -l) -eq 1 ]; then
+                return 0
+        else
+                sleep 2
+        fi
+done
+
+echo "$failed_keyword when check_cascade_primary_setup"
+exit 1
+}
+
+function check_cascade_replication_setup()
+{
+echo checking replication setup for cascade
+for i in $(seq 1 30)
+do
+        if [ $(query_standby | grep -E $setup_keyword | wc -l) -eq 2 ]; then
+                return 0
+        else
+                sleep 2
+        fi
+done
+echo "$failed_keyword when check_cascade_replication_setup"
+exit 1
+}
+
+function kill_cascade_standby()
+{
+  echo "kill cascade standby $standby2_data_dir"
+  ps -ef | grep -w $standby2_data_dir | grep -v grep | awk '{print $2}' | xargs kill -9
+  sleep 3
+}
+
+function stop_cascade_standby()
+{
+echo "stop cascade_standby $standby2_data_dir"
+$bin_dir/gs_ctl stop -D $standby2_data_dir -m fast > ./results/gs_ctl.log 2>&1
+sleep 3
+}
+
+function start_cascade_standby()
+{
+echo "start cascade standby $standby2_data_dir"
+$bin_dir/gaussdb --single_node  -M cascade_standby -p $standby2_port -D $standby2_data_dir > ./results/gaussdb.log 2>&1 &
+check_cascade_standby_startup
+}
+
+function start_primary_as_cascade_standby()
+{
+echo "start primary $primary_data_dir as cascade standby"
+$bin_dir/gaussdb --single_node  -M cascade_standby -p $dn1_primary_port -D $primary_data_dir > ./results/gaussdb.log 2>&1 &
+check_primary_startup
+}
+
+function check_instance_cascade_standby()
+{
+sleep 2
+date
+#can grep datanode1 datanode1_standby datanode1_dummystandby gtm
+ps -ef | grep $data_dir | grep -v grep
+
+echo query datanode1
+check_cascade_primary_setup
+
+echo query datanode1_standby
+check_cascade_replication_setup
 }

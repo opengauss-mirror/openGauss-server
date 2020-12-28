@@ -32,9 +32,17 @@
 #define REPL_IDX_PRIMARY 1
 #define REPL_IDX_STANDBY 2
 
-typedef enum { NoDemote = 0, SmartDemote, FastDemote } DemoteMode;
+typedef enum {
+    NoDemote = 0,
+    SmartDemote,
+    FastDemote
+} DemoteMode;
 
-typedef enum { UNUSED_LISTEN_SOCKET = 0, PSQL_LISTEN_SOCKET, HA_LISTEN_SOCKET } ListenSocketType;
+typedef enum {
+    UNUSED_LISTEN_SOCKET = 0,
+    PSQL_LISTEN_SOCKET,
+    HA_LISTEN_SOCKET
+} ListenSocketType;
 
 typedef enum {
     UNKNOWN_MODE = 0,
@@ -42,7 +50,8 @@ typedef enum {
     PRIMARY_MODE,
     STANDBY_MODE,
     CASCADE_STANDBY_MODE,
-    PENDING_MODE
+    PENDING_MODE,
+    RECOVERY_MODE
 } ServerMode;
 
 typedef enum {
@@ -149,4 +158,3 @@ extern bool data_catchup;
 extern bool wal_catchup;
 
 #endif /* _REPLICA_INTERNAL_H */
-

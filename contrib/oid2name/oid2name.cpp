@@ -266,8 +266,10 @@ void add_one_elt(char* eltname, eary* earyItem)
  */
 char* get_comma_elts(eary* earyItem)
 {
-    char *ret, *ptr;
-    int i, length = 0;
+    char *ret = NULL;
+    char *ptr = NULL;
+    int i = 0;
+    int length = 0;
 
     if (earyItem->num == 0)
         return pg_strdup("");
@@ -419,14 +421,15 @@ int sql_exec(PGconn* conn, const char* todo, bool quiet)
  */
 void sql_exec_dumpalldbs(PGconn* conn, struct options* opts)
 {
-    char todo[1024];
+    char todo[1024] = {0};
 
     /* get the oid and database name from the system pg_database table */
-    snprintf(todo,
-        sizeof(todo),
+    errno_t rc = snprintf_s(todo,
+        sizeof(todo), sizeof(todo) - 1,
         "SELECT d.oid AS \"Oid\", datname AS \"Database Name\", "
         "spcname AS \"Tablespace\" FROM pg_catalog.pg_database d JOIN pg_catalog.pg_tablespace t ON "
         "(dattablespace = t.oid) ORDER BY 2");
+    securec_check_ss_c(rc, "\0", "\0");
 
     sql_exec(conn, todo, opts->quiet);
 }
@@ -436,17 +439,17 @@ void sql_exec_dumpalldbs(PGconn* conn, struct options* opts)
  */
 void sql_exec_dumpalltables(PGconn* conn, struct options* opts)
 {
-    char todo[1024];
+    char todo[1024] = {0};
     char* addfields = ",c.oid AS \"Oid\", nspname AS \"Schema\", spcname as \"Tablespace\" ";
 
-    snprintf(todo,
-        sizeof(todo),
+    errno_t rc = snprintf_s(todo,
+        sizeof(todo), sizeof(todo) - 1,
         "SELECT pg_catalog.pg_relation_filenode(c.oid) as \"Filenode\", relname as \"Table Name\" %s "
         "FROM pg_class c "
         "	LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
         "	LEFT JOIN pg_catalog.pg_database d ON d.datname = pg_catalog.current_database(),"
         "	pg_catalog.pg_tablespace t "
-        "WHERE relkind IN ('r', 'm'%s%s) AND "
+        "WHERE relkind IN ('r'%s%s) AND "
         "	%s"
         "		t.oid = CASE"
         "			WHEN reltablespace <> 0 THEN reltablespace"
@@ -458,6 +461,7 @@ void sql_exec_dumpalltables(PGconn* conn, struct options* opts)
         opts->systables ? ", 't'" : "",
         opts->systables ? ""
                         : "n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname !~ '^pg_toast' AND");
+    securec_check_ss_c(rc, "\0", "\0");
 
     sql_exec(conn, todo, opts->quiet);
 }
@@ -466,7 +470,7 @@ void sql_exec_dumpalltables2(PGconn* conn, struct options* opts)
 {
     char todo[2048];
     char* addfields = ",c.oid AS \"Oid\", nspname AS \"Schema\", spcname as \"Tablespace\" ";
-    errno_t rc = EOK;
+    errno_t rc;
 
     // query from pg_partition
     //
@@ -496,6 +500,27 @@ void sql_exec_dumpalltables2(PGconn* conn, struct options* opts)
     sql_exec(conn, todo, opts->quiet);
 }
 
+
+void sql_exec_encap_query(char* todo, int todoLen, bool iseExtended, char *qualifiers)
+{
+    char* addfields = ",c.oid AS \"Oid\", nspname AS \"Schema\", spcname as \"Tablespace\" ";
+
+    errno_t rc = snprintf_s(todo, todoLen, todoLen - 1,
+        "SELECT pg_catalog.pg_relation_filenode(c.oid) as \"Filenode\", relname as \"Table Name\" %s\n"
+        "FROM pg_catalog.pg_class c \n"
+        "	LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \n"
+        "	LEFT JOIN pg_catalog.pg_database d ON d.datname = pg_catalog.current_database(),\n"
+        "	pg_catalog.pg_tablespace t \n"
+        "WHERE relkind IN ('r', 'i', 'S', 't') AND \n"
+        "		t.oid = CASE\n"
+        "			WHEN reltablespace <> 0 THEN reltablespace\n"
+        "			ELSE dattablespace\n"
+        "		END AND \n"
+        "  (%s) \n"
+        "ORDER BY relname\n",
+        iseExtended ? addfields : "", qualifiers);
+    securec_check_ss_c(rc, "\0", "\0");
+}
 /*
  * Show oid, filenode, name, schema and tablespace for each of the
  * given objects in the current database.
@@ -503,10 +528,12 @@ void sql_exec_dumpalltables2(PGconn* conn, struct options* opts)
 void sql_exec_searchtables(PGconn* conn, struct options* opts)
 {
     char* todo = NULL;
-    char *qualifiers, *ptr;
-    char *comma_oids, *comma_filenodes, *comma_tables;
+    char *comma_oids = NULL;
+    char *comma_filenodes = NULL;
+    char *comma_tables = NULL;
+    char *qualifiers = NULL;
+    char *ptr = NULL;
     bool written = false;
-    char* addfields = ",c.oid AS \"Oid\", nspname AS \"Schema\", spcname as \"Tablespace\" ";
 
     /* get tables qualifiers, whether names, filenodes, or OIDs */
     comma_oids = get_comma_elts(opts->oids);
@@ -537,23 +564,11 @@ void sql_exec_searchtables(PGconn* conn, struct options* opts)
     free(comma_filenodes);
 
     /* now build the query */
-    todo = (char*)pg_malloc(650 + strlen(qualifiers));
-    snprintf(todo,
-        650 + strlen(qualifiers),
-        "SELECT pg_catalog.pg_relation_filenode(c.oid) as \"Filenode\", relname as \"Table Name\" %s\n"
-        "FROM pg_catalog.pg_class c \n"
-        "	LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \n"
-        "	LEFT JOIN pg_catalog.pg_database d ON d.datname = pg_catalog.current_database(),\n"
-        "	pg_catalog.pg_tablespace t \n"
-        "WHERE relkind IN ('r', 'm', 'i', 'S', 't') AND \n"
-        "		t.oid = CASE\n"
-        "			WHEN reltablespace <> 0 THEN reltablespace\n"
-        "			ELSE dattablespace\n"
-        "		END AND \n"
-        "  (%s) \n"
-        "ORDER BY relname\n",
-        opts->extended ? addfields : "",
-        qualifiers);
+    int todoLen = 650 + strlen(qualifiers);
+    todo = (char*)pg_malloc(todoLen);
+    (void)memset_s(todo, todoLen, 0, todoLen);
+
+    sql_exec_encap_query(todo, todoLen, opts->extended, qualifiers);
 
     free(qualifiers);
 
@@ -642,12 +657,14 @@ void sql_exec_searchtables2(PGconn* conn, struct options* opts)
 
 void sql_exec_dumpalltbspc(PGconn* conn, struct options* opts)
 {
-    char todo[1024];
+    char todo[1024] = {0};
+    errno_t rc;
 
-    snprintf(todo,
-        sizeof(todo),
+    rc = snprintf_s(todo,
+        sizeof(todo), sizeof(todo) - 1,
         "SELECT oid AS \"Oid\", spcname as \"Tablespace Name\"\n"
         "FROM pg_catalog.pg_tablespace");
+    securec_check_ss_c(rc, "\0", "\0");
 
     sql_exec(conn, todo, opts->quiet);
 }

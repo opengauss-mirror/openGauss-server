@@ -30,6 +30,17 @@
 #include <unistd.h>
 #endif
 
+#ifdef HAVE_CE
+#include "client_logic_common/client_logic_utils.h"
+#include "client_logic_common/statement_data.h"
+#include "client_logic_cache/icached_column_manager.h"
+#include "client_logic_cache/icached_column.h"
+#include "client_logic_processor/stmt_processor.h"
+#include "client_logic_processor/values_processor.h"
+#include "client_logic_fmt/gs_copy.h"
+#include "client_logic_processor/raw_values_cont.h"
+#endif /* HAVE_CE */
+
 /* keep this in same order as ExecStatusType in libpq-fe.h */
 char* const pgresStatus[] = {"PGRES_EMPTY_QUERY",
     "PGRES_COMMAND_OK",
@@ -500,7 +511,7 @@ void* pqResultAlloc(PGresult* res, size_t nBytes, bool isBinary)
     }
 
     /* If there's enough space in the current block, no problem. */
-    if (nBytes <= (size_t)res->spaceLeft) {
+    if (nBytes <= (size_t)(unsigned)res->spaceLeft) {
         space = res->curBlock->space + res->curOffset;
         res->curOffset += nBytes;
         res->spaceLeft -= nBytes;
@@ -642,6 +653,7 @@ void PQclear(PGresult* res)
     res->errFields = NULL;
     res->events = NULL;
     res->nEvents = 0;
+    /* res->curBlock was zeroed out earlier */
 
     /* Free the PGresult structure itself */
     libpq_free(res);
@@ -765,6 +777,7 @@ void pqInternalNotice(const PGNoticeHooks* hooks, const char* fmt, ...)
      */
     pqSaveMessageField(res, PG_DIAG_MESSAGE_PRIMARY, msgBuf);
     pqSaveMessageField(res, PG_DIAG_SEVERITY, libpq_gettext("NOTICE"));
+    /* XXX should provide a SQLSTATE too? */
 
     /*
      * Result text is always just the primary message + newline. If we can't
@@ -849,20 +862,106 @@ static bool pqAddTuple(PGresult* res, PGresAttValue* tup, const char** errmsgp)
     return TRUE;
 }
 
+#ifdef HAVE_CE
+static bool pqSaveMessageField(PGconn* conn, PGMessageField *pfield, const char *value)
+{
+    bool isProcessedMessage(false);
+    unsigned char* processedValueStart = (unsigned char*)strstr(value, ")=(\\x");
+    char* loc =  NULL;
+    if (!processedValueStart) {
+        return false;
+    }
+    
+    processedValueStart += 3; /* move forward to the \\x */
+    char stop_chars[] = ",)";
+    while (processedValueStart) {
+        /* locating the closing parenthese */
+        unsigned char* processedValueEnd = (unsigned char*)strpbrk((const char*)(processedValueStart + 1), stop_chars);
+        if (processedValueEnd != NULL) {
+            int processedValueSize = processedValueEnd - processedValueStart;
+            Assert(processedValueSize >= 0);
+            char valueEofChar = processedValueStart[processedValueSize];
+
+            /* string must be null terminated, processedValueSize is ignored for textual values */
+            processedValueStart[processedValueSize] = '\0';
+
+            /* deprocess data */
+            unsigned char* plaintext = (unsigned char*)malloc(processedValueSize); // plaintext size <= ciphertext size
+            if (plaintext == NULL) {
+                return false;
+            }
+            size_t plaintextSize(0);
+            bool ret = RawValues::get_unprocessed_data(conn->client_logic->rawValuesForReplace, processedValueStart,
+                plaintext, plaintextSize);
+            /* place back the removed char (it was removed for the null terminated \0) */
+            processedValueStart[processedValueSize] = valueEofChar;
+
+            /* build error string if deprocessing succeeded */
+            if (ret) {
+
+                /* copy error string chunk by chunk */
+                if (!isProcessedMessage) {
+                    check_strncpy_s(strncpy_s(pfield->contents, strlen(value), value,
+                        (char *)processedValueStart - value)); /* until processed text */
+                    check_strncat_s(strncat_s(pfield->contents, strlen(value), (char *)plaintext,
+                        plaintextSize)); /* deprocessed text` */
+                    check_strncat_s(strncat_s(pfield->contents, strlen(value), (char *)processedValueEnd,
+                        strlen((char *)processedValueEnd))); /* end of string */
+                } else if (loc != NULL) {
+                    check_memset_s(memset_s(loc, strlen(value) - ((char *)processedValueStart - value), '\0',
+                        strlen(loc))); /* until processed text */
+                    check_strncpy_s(strncpy_s(loc, strlen(value) - ((char *)processedValueStart - value), 
+                        (char *)plaintext, plaintextSize)); /* deprocessed text */
+                    check_strncat_s(strncat_s(loc, strlen(value) - ((char *)processedValueStart - value),
+                        (char *)processedValueEnd, strlen((char *)processedValueEnd))); /* end of string */
+                }
+                loc = strstr(pfield->contents, "\\x");
+                isProcessedMessage = true;
+
+            }
+            if (plaintext != NULL) {
+                free(plaintext);
+                plaintext = NULL;
+            }
+            processedValueStart = (unsigned char*)strstr((char*)processedValueEnd, "\\x");
+
+        } else {
+            break;
+        }
+    }
+    return isProcessedMessage;
+}
+#endif
+
 /*
  * pqSaveMessageField - save one field of an error or notice message
  */
-void pqSaveMessageField(PGresult* res, char code, const char* value)
+void pqSaveMessageField(PGresult *res, char code, const char *value, PGconn* conn)
 {
-    PGMessageField* pfield = NULL;
-
-    pfield = (PGMessageField*)pqResultAlloc(res, sizeof(PGMessageField) + strlen(value), TRUE);
-    if (pfield == NULL)
-        return; /* out of memory? */
+    PGMessageField *pfield = (PGMessageField *)pqResultAlloc(res, sizeof(PGMessageField) + strlen(value), TRUE);
+    if (pfield == NULL) {
+        return;                 /* out of memory? */
+    }
     pfield->code = code;
-    check_strcpy_s(strcpy_s(pfield->contents, strlen(value) + 1, value));
     pfield->next = res->errFields;
     res->errFields = pfield;
+#ifdef HAVE_CE
+    /*
+     * errors may contain the ciphertext from the query
+     * we need to deprocess them back to the client
+     */
+    bool isProcessedMessage(false);
+    if (code == 'D' && value) {
+        Assert(conn != NULL);
+        isProcessedMessage = pqSaveMessageField(conn, pfield, value);
+    }
+
+    if (!isProcessedMessage) {
+        check_strcpy_s(strcpy_s(pfield->contents, strlen(value) + 1, value));
+    }
+#else
+    check_strcpy_s(strcpy_s(pfield->contents, strlen(value) + 1, value));
+#endif
 }
 
 /*
@@ -929,12 +1028,11 @@ void pqSaveParameterStatus(PGconn* conn, const char* name, const char* value)
 
         cnt = sscanf_s(value, "%d.%d.%d", &vmaj, &vmin, &vrev);
 
-        if (cnt < 2) {
+        if (cnt < 2)
             conn->sversion = 0; /* unknown */
-        } else {
-            if (cnt == 2) {
+        else {
+            if (cnt == 2)
                 vrev = 0;
-            }
             conn->sversion = (100 * vmaj + vmin) * 100 + vrev;
         }
     }
@@ -994,16 +1092,46 @@ int pqRowProcessor(PGconn* conn, const char** errmsgp)
             tup[i].len = NULL_LEN;
             tup[i].value = res->null_field;
         } else {
+#ifdef HAVE_CE
+            bool isValueDecrypted = false;
+            unsigned char* deProcessed = NULL;
+            if (conn->client_logic->enable_client_encryption) {
+                if (is_clientlogic_datatype(res->attDescs[i].typid)) {
+                    size_t length = (size_t)clen;
+                    if (ValuesProcessor::deprocess_value(conn, (unsigned char *)columns[i].value, length,
+                        res->attDescs[i].atttypmod, res->attDescs[i].format, &deProcessed, length, false)) {
+                        clen = (int)length;
+                        isValueDecrypted = true;
+                    } else {
+                        *errmsgp = libpq_gettext("ERROR(CLIENT): failed to process data of processed column");
+                        conn->client_logic->isInvalidOperationOnColumn = true;
+                        goto fail;
+                    }
+                }
+            }
+#endif /* HAVE_CE */
+
             bool isbinary = (res->attDescs[i].format != 0);
             char* val = NULL;
 
             val = (char*)pqResultAlloc(res, clen + 1, isbinary);
-            if (val == NULL)
+            if (val == NULL) {
                 goto fail;
+            }
 
             /* copy and zero-terminate the data (even if it's binary) */
             if (clen > 0) {
-                int rcs = memcpy_s(val, clen + 1, columns[i].value, clen);
+                int rcs = 0;
+#ifdef HAVE_CE
+                if (!conn->client_logic->enable_client_encryption || !isValueDecrypted) {
+                    rcs = memcpy_s(val, clen + 1, columns[i].value, clen);
+                } else {
+                    rcs = memcpy_s(val, clen + 1, deProcessed, clen);
+                    free(deProcessed);
+                }
+#else
+                rcs = memcpy_s(val, clen + 1, columns[i].value, clen);
+#endif /* HAVE_CE */
                 securec_check_c(rcs, "\0", "\0");
             }
             val[clen] = '\0';
@@ -1060,6 +1188,37 @@ int PQsendQuery(PGconn* conn, const char* query)
         return 0;
     }
 
+#ifdef HAVE_CE
+    StatementData statementData (conn, query);
+    if (conn->client_logic->enable_client_encryption) {
+        if (!conn->client_logic->disable_once) {
+            bool clientLogicRet = Processor::run_pre_query(&statementData);
+            if (!clientLogicRet)
+                return 0;
+            query = statementData.params.adjusted_query;
+        } else {
+            conn->client_logic->disable_once  = false;
+        }
+    } else { 
+        char *temp_query = del_blanks(const_cast<char*>(query), strlen(query));
+        const char *global_setting_str = "createclientmasterkey";
+        const char *column_setting_str = "createcolumnencryptionkey";
+        const char *client_logic_str = "encryptedwith";
+        if (temp_query != NULL && ((strcasestr(temp_query, global_setting_str) != NULL) ||
+            (strcasestr(temp_query, column_setting_str) != NULL) ||
+            (strcasestr(temp_query, client_logic_str) != NULL))) {
+            free(temp_query);
+            temp_query = NULL;
+            printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR: disable client logic feature\n"));
+            return 0;
+        }
+        if (temp_query != NULL) {
+            free(temp_query);
+            temp_query = NULL;
+        }
+    } 
+#endif
+
     /* construct the outgoing Query message */
     if (pqPutMsgStart('Q', false, conn) < 0 || pqPuts(query, conn) < 0 || pqPutMsgEnd(conn) < 0) {
         pqHandleSendFailure(conn);
@@ -1106,6 +1265,16 @@ int PQsendQueryPoolerStatelessReuse(PGconn* conn, const char* query)
         return 0;
     }
 
+#ifdef HAVE_CE
+    StatementData statementData(conn, "", query, 0, 0, 0, 0, 0);
+    if (conn->client_logic->enable_client_encryption) {
+        bool clientLogicRet = Processor::run_pre_query(&statementData);
+        if (!clientLogicRet)
+            return 0;
+        query = statementData.params.adjusted_query;
+    }
+#endif
+
     /* construct the outgoing Query message */
     if (pqPutMsgStart('O', false, conn) < 0 || pqPuts(query, conn) < 0 || pqPutMsgEnd(conn) < 0) {
         pqHandleSendFailure(conn);
@@ -1142,6 +1311,10 @@ int PQsendQueryPoolerStatelessReuse(PGconn* conn, const char* query)
 int PQsendQueryParams(PGconn* conn, const char* command, int nParams, const Oid* paramTypes,
     const char* const* paramValues, const int* paramLengths, const int* paramFormats, int resultFormat)
 {
+#ifdef HAVE_CE
+    StatementData statementData (conn, "", command, nParams, paramTypes, paramValues, paramLengths, paramFormats);
+#endif
+
     if (!PQsendQueryStart(conn))
         return 0;
 
@@ -1149,6 +1322,18 @@ int PQsendQueryParams(PGconn* conn, const char* command, int nParams, const Oid*
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("command string is a null pointer\n"));
         return 0;
     }
+
+#ifdef HAVE_CE
+    if (conn->client_logic->enable_client_encryption) {
+        bool clientLogicRet = Processor::run_pre_query(&statementData);
+        if (!clientLogicRet)
+            return 0;
+        command = statementData.params.adjusted_query;
+        paramTypes = statementData.params.adjusted_paramTypes;
+        paramValues = statementData.params.adjusted_param_values;
+        paramLengths = statementData.params.adjusted_param_lengths;
+    }
+#endif
 
     return PQsendQueryGuts(conn,
         command,
@@ -1170,7 +1355,7 @@ int PQsendQueryParamsBatch(PGconn* conn, const char* command, int nParams, int n
     if (!PQsendQueryStart(conn))
         return 0;
 
-    if (command == NULL) {
+    if (NULL == command) {
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("command string is a null pointer\n"));
         return 0;
     }
@@ -1208,6 +1393,16 @@ int PQsendPrepare(PGconn* conn, const char* stmtName, const char* query, int nPa
         return 0;
     }
 
+#ifdef HAVE_CE
+    StatementData statementData (conn, stmtName, query, 0, 0, 0, 0, 0);
+    if (conn->client_logic->enable_client_encryption) {
+        bool clientLogicRet = Processor::run_pre_query(&statementData);
+        if (!clientLogicRet)
+            return 0;
+        query = statementData.params.adjusted_query;
+    }
+#endif
+
     /* This isn't gonna work on a 2.0 server */
     if (PG_PROTOCOL_MAJOR(conn->pversion) < 3) {
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("function requires at least protocol version 3.0\n"));
@@ -1215,8 +1410,10 @@ int PQsendPrepare(PGconn* conn, const char* stmtName, const char* query, int nPa
     }
 
     /* construct the Parse message */
-    if (pqPutMsgStart('P', false, conn) < 0 || pqPuts(stmtName, conn) < 0 || pqPuts(query, conn) < 0)
+    bool put_msg_status = pqPutMsgStart('P', false, conn) < 0 || pqPuts(stmtName, conn) < 0 || pqPuts(query, conn) < 0;
+    if (put_msg_status) {
         goto sendFailed;
+    }
 
     if (nParams > 0 && (paramTypes != NULL)) {
         int i;
@@ -1279,6 +1476,17 @@ int PQsendQueryPrepared(PGconn* conn, const char* stmtName, int nParams, const c
         return 0;
     }
 
+#ifdef HAVE_CE
+    StatementData statementData(conn, stmtName, nParams, NULL, paramValues, paramLengths, paramFormats);
+    if (conn->client_logic->enable_client_encryption) {
+        bool clientLogicRet = Processor::run_pre_exec(&statementData);
+        if (!clientLogicRet)
+            return 0;
+        paramValues = statementData.params.adjusted_param_values;
+        paramLengths = statementData.params.adjusted_param_lengths;
+    }
+#endif
+
     return PQsendQueryGuts(conn,
         NULL, /* no command to parse */
         stmtName,
@@ -1296,15 +1504,15 @@ int PQsendQueryPrepared(PGconn* conn, const char* stmtName, int nParams, const c
  *		using protocol 3.0 so we can pass parameters
  */
 int PQsendQueryPreparedBatch(PGconn* conn, const char* stmtName, int nParams, int nBatchCount,
-    const char* const* paramValues,  // [{param1,param2,param3,...},...]
-    const int* paramLengths,         // [{param1,param2,param3,...},...]
-    const int* paramFormats,         // {param1,param2,param3,...} It's different from the others.
+    const char* const* paramValues,  //[{param1,param2,param3,...},...]
+    const int* paramLengths,         //[{param1,param2,param3,...},...]
+    const int* paramFormats,         //{param1,param2,param3,...} It's different from the others.
     int resultFormat)
 {
     if (!PQsendQueryStart(conn))
         return 0;
 
-    if (stmtName == NULL) {
+    if (NULL == stmtName) {
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("statement name is a null pointer\n"));
         return 0;
     }
@@ -1422,9 +1630,9 @@ static int PQsendQueryGuts(PGconn* conn, const char* command, const char* stmtNa
 
             if ((paramFormats != NULL) && paramFormats[i] != 0) {
                 /* binary parameter */
-                if (paramLengths != NULL)
+                if (paramLengths != NULL) {
                     nbytes = paramLengths[i];
-                else {
+                } else {
                     printfPQExpBuffer(
                         &conn->errorMessage, libpq_gettext("length must be given for binary parameter\n"));
                     goto sendFailed;
@@ -1501,19 +1709,18 @@ static bool PQsendEachTupleParam(PGconn* conn, int nParams, int nBatchCount, con
         return false;
     }
 
-
     // send each tuple of parameters.
     for (tuple = 0; tuple < nBatchCount; tuple++) {
         /* Send parameters */
         for (i = 0; i < nParams; i++) {
-            if (paramValues != NULL && (paramValues[tuple * nParams + i] != NULL)) {
+            if (NULL != paramValues && (paramValues[tuple * nParams + i] != NULL)) {
                 int nbytes;
 
-                if (paramFormats != NULL && paramFormats[i] != 0) {
+                if (NULL != paramFormats && paramFormats[i] != 0) {
                     /* binary parameter */
-                    if (paramLengths != NULL)
+                    if (NULL != paramLengths) {
                         nbytes = paramLengths[tuple * nParams + i];
-                    else {
+                    } else {
                         printfPQExpBuffer(
                             &conn->errorMessage, libpq_gettext("length must be given for binary parameter\n"));
                         return false;
@@ -1523,7 +1730,7 @@ static bool PQsendEachTupleParam(PGconn* conn, int nParams, int nBatchCount, con
                     nbytes = (int)strlen(paramValues[tuple * nParams + i]);
                 }
                 if (pqPutInt(nbytes, 4, conn) < 0 ||
-                    pqPutnchar(paramValues[tuple * nParams + i], (size_t)nbytes, conn) < 0)
+                    pqPutnchar(paramValues[tuple * nParams + i], (size_t)(unsigned)nbytes, conn) < 0)
                     return false;
             } else {
                 /* take the param as NULL */
@@ -1543,10 +1750,10 @@ static bool PQsendEachTupleParam(PGconn* conn, int nParams, int nBatchCount, con
  * command may be NULL to indicate we use an already-prepared statement
  */
 static int PQsendQueryGutsBatch(PGconn* conn, const char* command, const char* stmtName, int nParams, int nBatchCount,
-    const Oid* paramTypes,           // {param1,param2,param3,...}
-    const char* const* paramValues,  // [{param1,param2,param3,...},...]
-    const int* paramLengths,         // [{param1,param2,param3,...},...]
-    const int* paramFormats,         // {param1,param2,param3,...}
+    const Oid* paramTypes,           //{param1,param2,param3,...}
+    const char* const* paramValues,  //[{param1,param2,param3,...},...]
+    const int* paramLengths,         //[{param1,param2,param3,...},...]
+    const int* paramFormats,         //{param1,param2,param3,...}
     int resultFormat)
 {
     int i;
@@ -1562,7 +1769,7 @@ static int PQsendQueryGutsBatch(PGconn* conn, const char* command, const char* s
      * using specified statement name and the unnamed portal.
      */
 
-    if (command != NULL) {
+    if (NULL != command) {
         /* construct the Parse message */
         if (pqPutMsgStart('P', false, conn) < 0 || pqPuts(stmtName, conn) < 0 || pqPuts(command, conn) < 0)
             goto sendFailed;
@@ -1587,7 +1794,7 @@ static int PQsendQueryGutsBatch(PGconn* conn, const char* command, const char* s
         goto sendFailed;
 
     /* Send parameter formats */
-    if (nParams > 0 && paramFormats != NULL) {
+    if (nParams > 0 && NULL != paramFormats) {
         if (pqPutInt(nParams, 2, conn) < 0)
             goto sendFailed;
         for (i = 0; i < nParams; i++) {
@@ -1629,9 +1836,9 @@ static int PQsendQueryGutsBatch(PGconn* conn, const char* command, const char* s
 
     /* and remember the query text too, if possible */
     /* if insufficient memory, last_query just winds up NULL */
-    if (conn->last_query != NULL)
+    if (NULL != conn->last_query)
         free(conn->last_query);
-    if (command != NULL)
+    if (NULL != command)
         conn->last_query = strdup(command);
     else
         conn->last_query = NULL;
@@ -1750,6 +1957,7 @@ void parseInput(PGconn* conn)
  * PQisBusy
  *	 Return TRUE if PQgetResult would block waiting for input.
  */
+
 int PQisBusy(PGconn* conn)
 {
     if (conn == NULL)
@@ -1761,13 +1969,54 @@ int PQisBusy(PGconn* conn)
     /* PQgetResult will return immediately in all states except BUSY. */
     return conn->asyncStatus == PGASYNC_BUSY;
 }
+#ifdef HAVE_CE
+void checkRefreshCacheOnError(PGconn* conn)
+{
+    if (conn->client_logic->enable_client_encryption) {
+        if (conn->client_logic->isInvalidOperationOnColumn && !conn->client_logic->isDuringRefreshCacheOnError) {
+            /*
+             * copy query because it will be overwritten
+             */
+            char* query_to_resend = NULL;
+            size_t last_query_size = 0;
+            if (conn->last_query != NULL) { 
+                last_query_size = strlen(conn->last_query);
+            }
+            if (last_query_size > 0) {
+                query_to_resend = (char*)malloc(last_query_size + 1);
+                if (query_to_resend != NULL) {
+                    check_strncpy_s(strncpy_s(query_to_resend, last_query_size + 1, conn->last_query, last_query_size));
+                    query_to_resend[last_query_size] = '\0';
+                }
+            }
 
+            /*
+             * if an "invalid operation on a column" was detected it probably means 
+             * that a DML operation was made on "client logic" special column
+             * however, the client that performed the DML operation was under the impression that
+             * this is a regular column for this reason, the driver's CACHE needs to be updated again.
+             */
+            conn->client_logic->isDuringRefreshCacheOnError = true;
+            conn->client_logic->cacheRefreshType =  CacheRefreshType::ALL;
+            ICachedColumnManager::get_instance().load_cache(conn);
+            if (query_to_resend != NULL) {
+                PQclear(PQexec(conn, query_to_resend));
+                free(query_to_resend);
+                query_to_resend = NULL;
+            }
+            conn->client_logic->isInvalidOperationOnColumn = false;
+            conn->client_logic->isDuringRefreshCacheOnError = false;
+        }
+    }
+}
+#endif 
 /*
  * PQgetResult
  *	  Get the next PGresult produced by a query.  Returns NULL if no
  *	  query work remains or an error has occurred (e.g. out of
  *	  memory).
  */
+
 PGresult* PQgetResult(PGconn* conn)
 {
     PGresult* res = NULL;
@@ -1794,7 +2043,8 @@ PGresult* PQgetResult(PGconn* conn)
         }
 
         /* Wait for some more data, and load it. */
-        if (flushResult || pqWait(TRUE, FALSE, conn) || pqReadData(conn) < 0) {
+        bool read_data_status = flushResult || pqWait(TRUE, FALSE, conn) || pqReadData(conn) < 0;
+        if (read_data_status) {
             /*
              * conn->errorMessage has been set by pqWait or pqReadData. We
              * want to append it to any already-received error message.
@@ -1802,7 +2052,13 @@ PGresult* PQgetResult(PGconn* conn)
             conn->status = CONNECTION_BAD;
             pqSaveErrorResult(conn);
             conn->asyncStatus = PGASYNC_IDLE;
-            return pqPrepareAsyncResult(conn);
+            res = pqPrepareAsyncResult(conn);
+#ifdef HAVE_CE
+            if (conn->client_logic->enable_client_encryption) {
+                conn->client_logic->m_lastResultStatus = res->resultStatus;
+            }
+#endif
+            return res;
         }
 
         /* Parse it. */
@@ -1836,6 +2092,9 @@ PGresult* PQgetResult(PGconn* conn)
             break;
     }
 
+    /*
+     * Command Complete was recieved (res is not NULL)
+     */
     if (res != NULL) {
         int i;
 
@@ -1855,6 +2114,20 @@ PGresult* PQgetResult(PGconn* conn)
             res->events[i].resultInitialized = TRUE;
         }
     }
+
+#ifdef HAVE_CE
+    if (conn->client_logic->enable_client_encryption) {
+        Assert(conn->client_logic && (conn->client_logic->enable_client_encryption));
+        /*
+         * when res is NULL then it means ReadyForQuery was received
+         */
+        if (res)
+            conn->client_logic->m_lastResultStatus = res->resultStatus;
+        else if (conn->asyncStatus != PGASYNC_BUSY) {
+            Processor::run_post_query(conn);
+        }
+    }
+#endif
 
     return res;
 }
@@ -1978,9 +2251,9 @@ PGresult* PQexecPrepared(PGconn* conn, const char* stmtName, int nParams, const 
  */
 PGresult* PQexecPreparedBatch(PGconn* conn, const char* stmtName, int nParams,
     int nBatchCount,                 // the count of parameter tuples.
-    const char* const* paramValues,  // [{param1,param2,param3,...},...]
-    const int* paramLengths,         // [{param1,param2,param3,...},...]
-    const int* paramFormats,         // {param1,param2,param3,...}
+    const char* const* paramValues,  //[{param1,param2,param3,...},...]
+    const int* paramLengths,         //[{param1,param2,param3,...},...]
+    const int* paramFormats,         //{param1,param2,param3,...}
     int resultFormat)
 {
     if (!PQexecStart(conn))
@@ -2094,6 +2367,10 @@ static PGresult* PQexecFinish(PGconn* conn)
             break;
     }
 
+#ifdef HAVE_CE
+    checkRefreshCacheOnError(conn);
+#endif
+
     return lastResult;
 }
 
@@ -2173,11 +2450,13 @@ int PQsendDescribePortal(PGconn* conn, const char* portal)
 static int PQsendDescribe(PGconn* conn, char desc_type, const char* desc_target)
 {
     /* Treat null desc_target as empty string */
-    if (desc_target == NULL)
+    if (desc_target == NULL) {
         desc_target = "";
+    }
 
-    if (!PQsendQueryStart(conn))
+    if (!PQsendQueryStart(conn)) {
         return 0;
+    }
 
     /* This isn't gonna work on a 2.0 server */
     if (PG_PROTOCOL_MAJOR(conn->pversion) < 3) {
@@ -2272,6 +2551,19 @@ int PQputCopyData(PGconn* conn, const char* buffer, int nbytes)
     parseInput(conn);
 
     if (nbytes > 0) {
+        char *encBuffer = NULL;
+#ifdef HAVE_CE
+        if (conn->client_logic->enable_client_encryption) {
+            int res = process_copy_chunk(conn, buffer, nbytes, &encBuffer);
+            if (res > 0) {
+                buffer = encBuffer;
+                nbytes = res;
+            } else if (res < 0) {
+                return res;          
+            }
+            /* if res is 0 - no client logic was done, but no failure. continue normal flow */
+        }
+#endif
         /*
          * Try to flush any previously sent data in preference to growing the
          * output buffer.  If we can't enlarge the buffer enough to hold the
@@ -2280,19 +2572,28 @@ int PQputCopyData(PGconn* conn, const char* buffer, int nbytes)
          * case.)
          */
         if ((conn->outBufSize - conn->outCount - 5) < nbytes) {
-            if (pqFlush(conn) < 0)
+            if (pqFlush(conn) < 0) {
+                free(encBuffer);
                 return -1;
-            if (pqCheckOutBufferSpace(conn->outCount + 5 + (size_t)nbytes, conn))
+            }
+            if (pqCheckOutBufferSpace(conn->outCount + 5 + (size_t)(unsigned)nbytes, conn)) {
+                free(encBuffer);
                 return pqIsnonblocking(conn) ? 0 : -1;
+            }
         }
         /* Send the data (too simple to delegate to fe-protocol files) */
         if (PG_PROTOCOL_MAJOR(conn->pversion) >= 3) {
-            if (pqPutMsgStart('d', false, conn) < 0 || pqPutnchar(buffer, nbytes, conn) < 0 || pqPutMsgEnd(conn) < 0)
+            if (pqPutMsgStart('d', false, conn) < 0 || pqPutnchar(buffer, nbytes, conn) < 0 || pqPutMsgEnd(conn) < 0) { 
+                free(encBuffer);
                 return -1;
+            }
         } else {
-            if (pqPutMsgStart(0, false, conn) < 0 || pqPutnchar(buffer, nbytes, conn) < 0 || pqPutMsgEnd(conn) < 0)
+            if (pqPutMsgStart(0, false, conn) < 0 || pqPutnchar(buffer, nbytes, conn) < 0 || pqPutMsgEnd(conn) < 0) { 
+                free(encBuffer);
                 return -1;
+            }
         }
+        free(encBuffer);
     }
     return 1;
 }
@@ -2456,6 +2757,7 @@ int PQgetline(PGconn* conn, char* s, int maxlen)
  *
  * The returned data is *not* null-terminated.
  */
+
 int PQgetlineAsync(PGconn* conn, char* buffer, int bufsize)
 {
     if (conn == NULL)
@@ -2623,6 +2925,7 @@ int PQbinaryTuples(const PGresult* res)
  * Helper routines to range-check field numbers and tuple numbers.
  * Return TRUE if OK, FALSE if not
  */
+
 static int check_field_number(const PGresult* res, int field_num)
 {
     if (res == NULL)
@@ -2712,8 +3015,9 @@ int PQfnumber(const PGresult* res, const char* field_name)
      * condition.
      */
     field_case = strdup(field_name);
-    if (field_case == NULL)
+    if (field_case == NULL) {
         return -1; /* grotty */
+    }
 
     in_quotes = false;
     optr = field_case;
@@ -2731,7 +3035,7 @@ int PQfnumber(const PGresult* res, const char* field_name)
                 }
             } else {
                 *optr++ = c;
-            }            
+            }
         } else if (c == '"') {
             in_quotes = true;
         } else {
@@ -2775,7 +3079,7 @@ int PQfformat(const PGresult* res, int field_num)
 {
     if (!check_field_number(res, field_num))
         return 0;
-    if (res->attDescs != NULL)
+    if (res->attDescs != NULL) 
         return res->attDescs[field_num].format;
     else
         return 0;
@@ -2785,9 +3089,14 @@ Oid PQftype(const PGresult* res, int field_num)
 {
     if (!check_field_number(res, field_num))
         return InvalidOid;
-    if (res->attDescs != NULL)
-        return res->attDescs[field_num].typid;
-    else
+    if (res->attDescs != NULL) { 
+#ifdef HAVE_CE
+        if (is_clientlogic_datatype(res->attDescs[field_num].typid))
+            return res->attDescs[field_num].atttypmod;
+        else
+#endif
+            return res->attDescs[field_num].typid;
+    } else
         return InvalidOid;
 }
 
@@ -2795,20 +3104,42 @@ int PQfsize(const PGresult* res, int field_num)
 {
     if (!check_field_number(res, field_num))
         return 0;
-    if (res->attDescs != NULL)
-        return res->attDescs[field_num].typlen;
-    else
-        return 0;
+    if (res->attDescs != NULL) {
+#ifdef HAVE_CE
+        if (is_clientlogic_datatype(res->attDescs[field_num].typid)) {
+            if (res->attDescs[field_num].tableid > 0 && res->attDescs[field_num].columnid > 0) {
+                const ICachedColumn *cachedColumn = ICachedColumnManager::get_instance().get_cached_column(
+                    res->attDescs[field_num].tableid, res->attDescs[field_num].columnid);
+                if (cachedColumn) {
+                    return -1; /* variable length */
+                }
+            }
+        } else
+#endif
+            return res->attDescs[field_num].typlen;
+    }
+    return 0;
 }
 
 int PQfmod(const PGresult* res, int field_num)
 {
     if (!check_field_number(res, field_num))
         return 0;
-    if (res->attDescs != NULL)
-        return res->attDescs[field_num].atttypmod;
-    else
-        return 0;
+    if (res->attDescs != NULL) {
+#ifdef HAVE_CE
+        if (is_clientlogic_datatype(res->attDescs[field_num].typid)) {
+            if (res->attDescs[field_num].tableid > 0 && res->attDescs[field_num].columnid > 0) {
+                const ICachedColumn *cachedColumn = ICachedColumnManager::get_instance().get_cached_column(
+                    res->attDescs[field_num].tableid, res->attDescs[field_num].columnid);
+                if (cachedColumn) {
+                    return cachedColumn->get_origdatatype_mod();
+                }
+            }
+        } else
+#endif
+            return res->attDescs[field_num].atttypmod;
+    }
+    return 0;
 }
 
 char* PQcmdStatus(PGresult* res)
@@ -2836,12 +3167,14 @@ char* PQoidStatus(const PGresult* res)
 #endif
     size_t len;
 
-    if ((res == NULL) || (res->cmdStatus == NULL) || strncmp(res->cmdStatus, "INSERT ", 7) != 0)
+    if ((res == NULL) || (res->cmdStatus == NULL) || strncmp(res->cmdStatus, "INSERT ", 7) != 0) {
         return "";
+    }
 
     len = strspn(res->cmdStatus + 7, "0123456789");
-    if (len > 23)
+    if (len > 23) {
         len = 23;
+    }
     if (len > 0)
         check_strncpy_s(strncpy_s(buf, sizeof(buf), res->cmdStatus + 7, len));
     buf[len] = '\0';
@@ -2881,8 +3214,7 @@ Oid PQoidValue(const PGresult* res)
  */
 char* PQcmdTuples(PGresult* res)
 {
-    char *p = NULL;
-    char *c = NULL;
+    char *p = NULL, *c = NULL;
 
     if (res == NULL)
         return "";
@@ -2890,12 +3222,10 @@ char* PQcmdTuples(PGresult* res)
     if (strncmp(res->cmdStatus, "INSERT ", 7) == 0) {
         p = res->cmdStatus + 7;
         /* INSERT: skip oid and space */
-        while (*p && *p != ' ') {
+        while (*p && *p != ' ')
             p++;
-        }    
-        if (*p == 0) {
+        if (*p == 0)
             goto interpret_error; /* no space? */
-        }
         p++;
     } else if (strncmp(res->cmdStatus, "SELECT ", 7) == 0 || strncmp(res->cmdStatus, "DELETE ", 7) == 0 ||
                strncmp(res->cmdStatus, "UPDATE ", 7) == 0)
@@ -2909,13 +3239,11 @@ char* PQcmdTuples(PGresult* res)
 
     /* check that we have an integer (at least one digit, nothing else) */
     for (c = p; *c; c++) {
-        if (!isdigit((unsigned char)*c)) {
-             goto interpret_error;
-        }  
+        if (!isdigit((unsigned char)*c))
+            goto interpret_error;
     }
-    if (c == p) {
+    if (c == p)
         goto interpret_error;
-    }
 
     return p;
 
@@ -3020,6 +3348,7 @@ int PQsetnonblocking(PGconn* conn, int arg)
 
 /*
  * return the blocking status of the database connection
+ *		TRUE == nonblocking, FALSE == blocking
  */
 int PQisnonblocking(const PGconn* conn)
 {
@@ -3091,8 +3420,9 @@ static size_t PQescapeStringInternal(
     char* target = to;
     size_t remaining = length;
 
-    if (error != NULL)
+    if (error != NULL) {
         *error = 0;
+    }
 
     while (remaining > 0 && *source != '\0') {
         char c = *source;
@@ -3116,8 +3446,9 @@ static size_t PQescapeStringInternal(
 
         /* Copy the character */
         for (i = 0; i < len; i++) {
-            if (remaining == 0 || *source == '\0')
+            if (remaining == 0 || *source == '\0') {
                 break;
+            }
             *target++ = *source++;
             remaining--;
         }
@@ -3131,13 +3462,16 @@ static size_t PQescapeStringInternal(
          * the server will error out on.
          */
         if (i < len) {
-            if (error != NULL)
+            if (error != NULL) {
                 *error = 1;
-            if (conn != NULL)
+            }
+            if (conn != NULL) {
                 printfPQExpBuffer(&conn->errorMessage, libpq_gettext("incomplete multibyte character\n"));
+            }
             for (; i < len; i++) {
-                if (((size_t)(target - to)) / 2 >= length)
+                if (((size_t)(target - to)) / 2 >= length) {
                     break;
+                }
                 *target++ = ' ';
             }
             break;
@@ -3155,8 +3489,9 @@ size_t PQescapeStringConn(PGconn* conn, char* to, const char* from, size_t lengt
     if (conn == NULL) {
         /* force empty-string result */
         *to = '\0';
-        if (error != NULL)
+        if (error != NULL) {
             *error = 1;
+        }
         return 0;
     }
     return PQescapeStringInternal(conn, to, from, length, error, conn->client_encoding, conn->std_strings);
@@ -3186,16 +3521,17 @@ static char* PQescapeInternal(PGconn* conn, const char* str, size_t len, bool as
     char quote_char = as_ident ? '"' : '\'';
 
     /* We must have a connection, else fail immediately. */
-    if (conn == NULL)
+    if (conn == NULL) {
         return NULL;
+    }
 
     /* Scan the string for characters that must be escaped. */
     for (s = str; (size_t)(s - str) < len && *s != '\0'; ++s) {
-        if (*s == quote_char)
+        if (*s == quote_char) {
             ++num_quotes;
-        else if (*s == '\\')
+        } else if (*s == '\\') {
             ++num_backslashes;
-        else if (IS_HIGHBIT_SET(*s)) {
+        } else if (IS_HIGHBIT_SET(*s)) {
             int charlen;
 
             /* Slow path for possible multibyte characters */
@@ -3217,7 +3553,7 @@ static char* PQescapeInternal(PGconn* conn, const char* str, size_t len, bool as
     result_size = input_len + num_quotes + 3; /* two quotes, plus a NUL */
     if (!as_ident && num_backslashes > 0) {
         result_size += num_backslashes + 2;
-    }   
+    }
     result = rp = (char*)malloc(result_size);
     if (rp == NULL) {
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("out of memory\n"));
@@ -3268,7 +3604,7 @@ static char* PQescapeInternal(PGconn* conn, const char* str, size_t len, bool as
                     *rp++ = *s;
                     if (--i == 0) {
                         break;
-                    }   
+                    }
                     ++s; /* for loop will provide the final increment */
                 }
             }
@@ -3451,8 +3787,8 @@ static inline char get_hex(char c)
  *
  *		If not std_strings, all backslashes sent to the output are doubled.
  */
-static unsigned char* PQescapeByteaInternal(
-    PGconn* conn, const unsigned char* from, size_t from_length, size_t* to_length, bool std_strings, bool use_hex)
+static unsigned char *PQescapeByteaInternal(PGconn *conn, const unsigned char *from, size_t from_length,
+    size_t *to_length, bool std_strings, bool use_hex, bool add_quotes = false)
 {
     const unsigned char* vp = NULL;
     unsigned char* rp = NULL;
@@ -3471,30 +3807,37 @@ static unsigned char* PQescapeByteaInternal(
     } else {
         vp = from;
         for (i = from_length; i > 0; i--, vp++) {
-            if (*vp < 0x20 || *vp > 0x7e)
+            if (*vp < 0x20 || *vp > 0x7e) {
                 len += bslash_len + 3;
-            else if (*vp == '\'')
+            } else if (*vp == '\'') {
                 len += 2;
-            else if (*vp == '\\')
+            } else if (*vp == '\\') {
                 len += bslash_len + bslash_len;
-            else
+            } else {
                 len++;
+            }
         }
     }
 
+    if (add_quotes) {
+        len += 2;
+    }
     *to_length = len;
     rp = (unsigned char*)malloc(len);
     if (rp == NULL) {
-        if (conn != NULL)
+        if (conn != NULL) {
             printfPQExpBuffer(&conn->errorMessage, libpq_gettext("out of memory\n"));
+        }
         return NULL;
     }
 
     result = rp;
+    if (add_quotes) {
+        *rp++ = '\'';
+    }  
     if (use_hex) {
-        if (!std_strings) {
+        if (!std_strings)
             *rp++ = '\\';
-        }    
         *rp++ = '\\';
         *rp++ = 'x';
     }
@@ -3523,19 +3866,30 @@ static unsigned char* PQescapeByteaInternal(
             }
             *rp++ = '\\';
             *rp++ = '\\';
-        } else
+        } else {
             *rp++ = c;
+        }
+    }
+    if (add_quotes) {
+        *rp++ = '\'';
     }
     *rp = '\0';
 
     return result;
 }
 
-unsigned char* PQescapeByteaConn(PGconn* conn, const unsigned char* from, size_t from_length, size_t* to_length)
+unsigned char *PQescapeByteaConn1(PGconn *conn, const unsigned char *from, size_t from_length, size_t *to_length,
+    bool add_quotes)
 {
     if (conn == NULL)
         return NULL;
-    return PQescapeByteaInternal(conn, from, from_length, to_length, conn->std_strings, (conn->sversion >= 90000));
+    return PQescapeByteaInternal(conn, from, from_length, to_length, conn->std_strings, (conn->sversion >= 90000),
+        add_quotes);
+}
+
+unsigned char *PQescapeByteaConn(PGconn *conn, const unsigned char *from, size_t from_length, size_t *to_length)
+{
+    return PQescapeByteaConn1(conn, from, from_length, to_length, false);
 }
 
 unsigned char* PQescapeBytea(const unsigned char* from, size_t from_length, size_t* to_length)
@@ -3562,12 +3916,12 @@ unsigned char* PQescapeBytea(const unsigned char* from, size_t from_length, size
 unsigned char* PQunescapeBytea(const unsigned char* strtext, size_t* retbuflen)
 {
     size_t strtextlen, buflen;
-    unsigned char *buffer = NULL;
-    unsigned char *tmpbuf = NULL;
+    unsigned char *buffer = NULL, *tmpbuf = NULL;
     size_t i, j;
 
-    if (strtext == NULL)
+    if (strtext == NULL) {
         return NULL;
+    }
 
     strtextlen = strlen((const char*)strtext);
 
@@ -3578,8 +3932,9 @@ unsigned char* PQunescapeBytea(const unsigned char* strtext, size_t* retbuflen)
         buflen = (strtextlen - 2) / 2;
         /* Avoid unportable malloc(0) */
         buffer = (unsigned char*)malloc(buflen > 0 ? buflen : 1);
-        if (buffer == NULL)
+        if (buffer == NULL) {
             return NULL;
+        }
 
         s = strtext + 2;
         p = buffer;
@@ -3593,7 +3948,7 @@ unsigned char* PQunescapeBytea(const unsigned char* strtext, size_t* retbuflen)
             v1 = get_hex(*s++);
             if (!*s || v1 == (char)-1) {
                 continue;
-            }           
+            }
             v2 = get_hex(*s++);
             if (v2 != (char)-1) {
                 *p++ = (v1 << 4) | v2;
@@ -3607,16 +3962,17 @@ unsigned char* PQunescapeBytea(const unsigned char* strtext, size_t* retbuflen)
          * unportable malloc(0) if input is zero-length.
          */
         buffer = (unsigned char*)malloc(strtextlen + 1);
-        if (buffer == NULL)
+        if (buffer == NULL) {
             return NULL;
+        }
 
         for (i = j = 0; i < strtextlen;) {
             switch (strtext[i]) {
                 case '\\':
                     i++;
-                    if (strtext[i] == '\\')
+                    if (strtext[i] == '\\') {
                         buffer[j++] = strtext[i++];
-                    else {
+                    } else {
                         if ((ISFIRSTOCTDIGIT(strtext[i])) && (ISOCTDIGIT(strtext[i + 1])) &&
                             (ISOCTDIGIT(strtext[i + 2]))) {
                             unsigned int byte;

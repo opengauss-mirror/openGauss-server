@@ -403,7 +403,6 @@ static void enter_dump_br(int argc, char* const* argv)
                 g_rm_logfile = true;
                 break;
             }
-
             default: {
                 fprintf(stderr,
                     _("Try \"%s help %s\" for more information.\n"),
@@ -909,7 +908,7 @@ static void scan_curdir_and_do(
             }
 
             ret = snprintf_s(fullpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", cur_dir, ent->d_name);
-            securec_check_c(ret, "\0", "\0");
+            securec_check_ss_c(ret, "\0", "\0");
 
             /*
              * don't use ent->d_type to judge whether it's a direcotry.

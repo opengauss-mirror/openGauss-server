@@ -45,14 +45,14 @@ static bool decryptFromFile(FILE* source, DecryptInfo* pDecryptInfo);
 bool init_aes_vector_random(GS_UCHAR* aes_vector, size_t vector_len)
 {
     errno_t errorno = EOK;
-    GS_UINT32 retval = 0;
+    int retval = 0;
     GS_UCHAR random_vector[RANDOM_LEN] = {0};
 
-    retval = RAND_bytes(random_vector, RANDOM_LEN);
+    retval = RAND_priv_bytes(random_vector, RANDOM_LEN);
     if (retval != 1) {
         errorno = memset_s(random_vector, RANDOM_LEN, '\0', RANDOM_LEN);
         securec_check_c(errorno, "", "");
-        (void)fprintf(stderr, _("generate random aes vector failed,errcode:%u\n"), retval);
+        (void)fprintf(stderr, _("generate random aes vector failed,errcode:%d\n"), retval);
         return false;
     }
 
@@ -199,7 +199,7 @@ static bool decryptFromFile(FILE* source, DecryptInfo* pDecryptInfo)
     int nread = 0;
     GS_UINT32 plainlen = 0;
     GS_UINT64 cipherlen = 0;
-    GS_UCHAR cipherleninfo[RANDOM_LEN] = {0};
+    GS_UCHAR cipherleninfo[RANDOM_LEN + 1] = {0};
     GS_UCHAR* ciphertext = NULL;
     GS_UCHAR* outputstr = NULL;
     bool decryptstatus = false;
@@ -232,7 +232,7 @@ static bool decryptFromFile(FILE* source, DecryptInfo* pDecryptInfo)
         }
 
         char *tmp = NULL;
-        cipherlen = strtoul((char*)cipherleninfo, &tmp, 10);
+        cipherlen = strtoul((char *)cipherleninfo, &tmp, 10);
         if (*tmp != '\0' || cipherlen > PG_UINT32_MAX || cipherlen == 0) {
             printf("Invalid cipherlen(%s), maybe the content is corrupt.\n", cipherleninfo);
             return false;
@@ -245,8 +245,6 @@ static bool decryptFromFile(FILE* source, DecryptInfo* pDecryptInfo)
         outputstr = (GS_UCHAR*)malloc((size_t)cipherlen);
         if (NULL == outputstr) {
             printf("memory alloc failed!\n");
-            errorno = memset_s(ciphertext, cipherlen, '\0', cipherlen);
-            securec_check_c(errorno, "", "");
             free(ciphertext);
             ciphertext = NULL;
             return false;
@@ -349,13 +347,13 @@ bool aes128Encrypt(GS_UCHAR* PlainText, GS_UINT32 PlainLen, GS_UCHAR* Key, GS_UI
         (char*)Key, keylen, RandSalt, RANDOM_LEN, ITERATE_TIMES, (EVP_MD*)EVP_sha256(), RANDOM_LEN, deriver_key);
     if (!retval) {
         (void)fprintf(stderr, _("generate the derived key failed, errcode:%u\n"), retval);
-        CleanupBuffer(aes_vector, RANDOM_LEN);
         CleanupBuffer(deriver_key, RANDOM_LEN);
         return false;
     }
 
     /* get random aes vector for encryption */
     if (init_aes_vector_random(aes_vector, RANDOM_LEN) == false) {
+        CleanupBuffer(deriver_key, RANDOM_LEN);
         return false;
     }
 
@@ -363,21 +361,22 @@ bool aes128Encrypt(GS_UCHAR* PlainText, GS_UINT32 PlainLen, GS_UCHAR* Key, GS_UI
     retval = CRYPT_encrypt(
         NID_aes_128_cbc, deriver_key, RANDOM_LEN, aes_vector, RANDOM_LEN, PlainText, PlainLen, CipherText, CipherLen);
 
+    if (retval != 0) {
+        CleanupBuffer(aes_vector, RANDOM_LEN);
+        CleanupBuffer(deriver_key, RANDOM_LEN);
+        (void)fprintf(stderr, _("encrypt plain text to cipher text failed, errcode:%u\n"), retval);
+        return false;
+    } 
+
     /* copy vector salt(aes_vector) to the cipher for decrypt */
     errno_t errorno = memcpy_s(CipherText + (*CipherLen), RANDOM_LEN, aes_vector, RANDOM_LEN);
     securec_check_c(errorno, "\0", "\0");
     *CipherLen = *CipherLen + RANDOM_LEN;
-
+    
     /* clean the decrypt_key and aes_vector for security */
     CleanupBuffer(aes_vector, RANDOM_LEN);
     CleanupBuffer(deriver_key, RANDOM_LEN);
-
-    if (retval != 0) {
-        (void)fprintf(stderr, _("encrypt plain text to cipher text failed, errcode:%u\n"), retval);
-        return false;
-    } else {
-        return true;
-    }
+    return true;
 }
 
 /*
@@ -408,8 +407,7 @@ bool aes128Decrypt(GS_UCHAR* CipherText, GS_UINT32 CipherLen, GS_UCHAR* Key, GS_
     retval = PKCS5_PBKDF2_HMAC(
         (char*)Key, keylen, RandSalt, RANDOM_LEN, ITERATE_TIMES, (EVP_MD*)EVP_sha256(), RANDOM_LEN, decrypt_key);
     if (!retval) {
-        /* clean the decrypt_key and aes_vector for security */
-        CleanupBuffer(aes_vector, RANDOM_LEN);
+        /* clean the decrypt_key for security */
         CleanupBuffer(decrypt_key, RANDOM_LEN);
         (void)fprintf(stderr, _("generate the derived key failed, errcode:%u\n"), retval);
         return false;
@@ -515,13 +513,9 @@ bool aes128EncryptSpeed(GS_UCHAR* PlainText, GS_UINT32 PlainLen, GS_UCHAR* Key, 
         return false;
     }
 
-    /* Format input key to a 16-byte string padding by '\0' */
+    /* Copy the contents of the key to the user_key */
     errorno = memcpy_s(user_key, RANDOM_LEN, Key, keylen);
     securec_check_c(errorno, "\0", "\0");
-    if (keylen < RANDOM_LEN) {
-        errorno = memset_s(user_key + keylen, RANDOM_LEN - keylen, '\0', RANDOM_LEN - keylen);
-        securec_check_c(errorno, "\0", "\0");
-    }
 
     if (encryption_function_call == false) {
         encryption_function_call = true;
@@ -651,6 +645,85 @@ THR_LOCAL GS_UCHAR mac_vector_used[NUMBER_OF_SAVED_DERIVEKEYS][RANDOM_LEN] = {0}
 THR_LOCAL GS_UCHAR random_salt_used[NUMBER_OF_SAVED_DERIVEKEYS][RANDOM_LEN] = {0};
 THR_LOCAL GS_UCHAR user_input_used[NUMBER_OF_SAVED_DERIVEKEYS][RANDOM_LEN] = {0};
 
+/* 
+ * check input parameters of aes128DecryptSpeed function.
+ */
+static bool CheckAes128DecryptInput(const GS_UCHAR* cipherText, GS_UINT32 cipherLen, GS_UINT32 keyLen)
+{
+    if (keyLen > RANDOM_LEN) {
+        (void)fprintf(stderr, _("For new decryption function, key must be shorter than 16 bytes!\n"));
+        return false;
+    }
+
+    if (cipherText == NULL) {
+        (void)fprintf(stderr, _("invalid cipher text,please check it!\n"));
+        return false;
+    }
+
+    if (cipherLen < (2 * RANDOM_LEN + MAC_LEN)) {
+        (void)fprintf(stderr, _("Cipertext is too short to decrypt\n"));
+        return false;
+    }
+    return true;
+}
+
+/*
+ * we save 48(= NUMBER_OF_SAVED_DERIVEKEYS) used decrypt keys and mac keys in thread global variables,
+ * if (randsalt, userKey ^ randsalt) match any stored (salt, key) pair, return drived decrypt_key and mac_key,
+ * and adjust usage frequency array.
+ */
+
+static GS_UINT32 FindDriveKey(const GS_UCHAR* randSalt, GS_UINT32* usageFrequency, const GS_UCHAR* userKey, 
+    GS_UCHAR* decryptKey, GS_UCHAR* macKey)
+{
+    GS_UINT32 derivekeyFound = 0;
+    /* 
+     * Search for matched derive_vector_used in the order of usageFrequency.
+     * Start with usageFrequency[0] by first checking random_salt_used[usageFrequency[0]].
+     */
+    for (GS_UINT32 i = 0; i < NUMBER_OF_SAVED_DERIVEKEYS && !derivekeyFound; ++i) {
+        if (0 == memcmp(random_salt_used[usageFrequency[i]], randSalt, RANDOM_LEN)) {
+            derivekeyFound = 1;
+            /* unmask saved userKey and derive_key */
+            for (GS_UINT32 j = 0; j < RANDOM_LEN; ++j) {
+                GS_UCHAR mask = (char)random_salt_used[usageFrequency[i]][j];
+                if (userKey[j] == ((char)user_input_used[usageFrequency[i]][j] ^ (char)mask)) {
+                    decryptKey[j] = ((char)derive_vector_used[usageFrequency[i]][j] ^ (char)mask);
+                    macKey[j] = ((char)mac_vector_used[usageFrequency[i]][j] ^ (char)mask);
+                } else {
+                    derivekeyFound = 0;
+                }
+            }
+            /* 
+             * Once a derive_vector_used is used again, its usage_frency will be promoted.
+             * Of coure, for i=0 member, there is no place to promote.
+             */
+            if (i > 0 && i < NUMBER_OF_SAVED_DERIVEKEYS / 2 && derivekeyFound) {
+                /*
+                 * For i from 1 to NUMBER_OF_SAVED_DERIVEKEYS/2 - 1,
+                 * the usage_frency of found derive_key will be promoted to i-1 and
+                 * the previos i-1 member will be relegated to i.
+                 */
+                GS_UINT32 temp = usageFrequency[i - 1];
+                usageFrequency[i - 1] = usageFrequency[i];
+                usageFrequency[i] = temp;
+            } else if (i >= NUMBER_OF_SAVED_DERIVEKEYS / 2 && derivekeyFound) {
+                /*
+                 * For i from NUMBER_OF_SAVED_DERIVEKEYS/2 to NUMBER_OF_SAVED_DERIVEKEYS-1,
+                 * the usage_frency of found derive_key will be promoted to NUMBER_OF_SAVED_DERIVEKEYS/2 - 1
+                 * as it is used more than one time.
+                 * And the previos NUMBER_OF_SAVED_DERIVEKEYS/2 - 1 member will be relegated to i,
+                 * which means this derivekey may be replaced by a newborn derivekey.
+                 */
+                GS_UINT32 temp = usageFrequency[NUMBER_OF_SAVED_DERIVEKEYS / 2 - 1];
+                usageFrequency[NUMBER_OF_SAVED_DERIVEKEYS / 2 - 1] = usageFrequency[i];
+                usageFrequency[i] = temp;
+            }
+        }
+    }
+    return derivekeyFound;
+}
+
 /*
  * Target		:Decrypt functions for security.
  * Description	:Decrypt with standard aes128 algorthm using openssl functions.
@@ -682,24 +755,11 @@ bool aes128DecryptSpeed(GS_UCHAR* CipherText, GS_UINT32 CipherLen, GS_UCHAR* Key
 
     keylen = strlen((const char*)Key);
 
-    if (keylen > RANDOM_LEN) {
-        (void)fprintf(stderr, _("For new decryption function, key must be shorter than 16 bytes!\n"));
+    if (!CheckAes128DecryptInput(CipherText, CipherLen, keylen)) {
         return false;
     }
 
-    if (NULL == CipherText) {
-        (void)fprintf(stderr, _("invalid cipher text,please check it!\n"));
-        return false;
-    }
-
-    if (CipherLen < (2 * RANDOM_LEN + MAC_LEN)) {
-        (void)fprintf(stderr, _("Cipertext is too short to decrypt\n"));
-        return false;
-    }
-
-    if (decryption_function_call == false) {
-        decryption_function_call = true;
-    }
+    decryption_function_call = true;
 
     /* split the ciphertext to cipherpart, aes vector and mac vector for decrypt
      * read the aes vector for decrypt from ciphertext
@@ -730,58 +790,14 @@ bool aes128DecryptSpeed(GS_UCHAR* CipherText, GS_UINT32 CipherLen, GS_UCHAR* Key
             usage_frequency[i] = i;
     }
 
-    /* Format input key to a 16-byte string padding by '\0' */
+    /* Copy the contents of the key to the user_key */
     errorno = memcpy_s(user_key, RANDOM_LEN, Key, keylen);
     securec_check_c(errorno, "\0", "\0");
-    if (keylen < RANDOM_LEN) {
-        errorno = memset_s(user_key + keylen, RANDOM_LEN - keylen, '\0', RANDOM_LEN - keylen);
-        securec_check_c(errorno, "\0", "\0");
-    }
 
     /* Search for matched derive_vector_used in the order of usage_frequency.
      * Start with usage_frequency[0] by first checking random_salt_used[usage_frequency[0]].
      */
-    for (GS_UINT32 i = 0; i < NUMBER_OF_SAVED_DERIVEKEYS && !DERIVEKEY_FOUND; ++i) {
-        if (0 == memcmp(random_salt_used[usage_frequency[i]], RandSalt, RANDOM_LEN)) {
-            DERIVEKEY_FOUND = 1;
-            /* unmask saved user_key and derive_key */
-            for (GS_UINT32 j = 0; j < RANDOM_LEN; ++j) {
-                GS_UCHAR mask = (char)random_salt_used[usage_frequency[i]][j];
-                if (user_key[j] == ((char)user_input_used[usage_frequency[i]][j] ^ (char)mask)) {
-                    decrypt_key[j] = ((char)derive_vector_used[usage_frequency[i]][j] ^ (char)mask);
-                    mac_key[j] = ((char)mac_vector_used[usage_frequency[i]][j] ^ (char)mask);
-                } else {
-                    DERIVEKEY_FOUND = 0;
-                }
-            }
-            /* Once a derive_vector_used is used again, its usage_frency will be promoted.
-             * Of coure, for i=0 member, there is no place to promote.
-             */
-            if (i > 0 && i < NUMBER_OF_SAVED_DERIVEKEYS / 2 && DERIVEKEY_FOUND) {
-                /*
-                 * For i from 1 to NUMBER_OF_SAVED_DERIVEKEYS/2 - 1,
-                 * the usage_frency of found derive_key will be promoted to i-1 and
-                 * the previos i-1 member will be relegated to i.
-                 */
-                GS_UINT32 temp = usage_frequency[i - 1];
-                usage_frequency[i - 1] = usage_frequency[i];
-                usage_frequency[i] = temp;
-            } else if (i >= NUMBER_OF_SAVED_DERIVEKEYS / 2 && DERIVEKEY_FOUND) {
-                /*
-                 * For i from NUMBER_OF_SAVED_DERIVEKEYS/2 to NUMBER_OF_SAVED_DERIVEKEYS-1,
-                 * the usage_frency of found derive_key will be promoted to NUMBER_OF_SAVED_DERIVEKEYS/2 - 1
-                 * as it is used more than one time.
-                 * And the previos NUMBER_OF_SAVED_DERIVEKEYS/2 - 1 member will be relegated to i,
-                 * which means this derivekey may be replaced by a newborn derivekey.
-                 */
-                GS_UINT32 temp = usage_frequency[NUMBER_OF_SAVED_DERIVEKEYS / 2 - 1];
-                usage_frequency[NUMBER_OF_SAVED_DERIVEKEYS / 2 - 1] = usage_frequency[i];
-                usage_frequency[i] = temp;
-            } else {
-                ;
-            }
-        }
-    }
+    DERIVEKEY_FOUND = FindDriveKey(RandSalt, usage_frequency, user_key, decrypt_key, mac_key);
 
     /* Generate deriveKey if find no derive_vector_saved  to use. */
     if (!DERIVEKEY_FOUND) {

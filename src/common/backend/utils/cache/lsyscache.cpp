@@ -42,6 +42,7 @@
 #include "catalog/pgxc_class.h"
 #include "catalog/pgxc_node.h"
 #include "catalog/pgxc_group.h"
+#include "catalog/pgxc_slice.h"
 #include "catalog/pg_resource_pool.h"
 #include "catalog/pg_workload_group.h"
 #include "catalog/pg_app_workloadgroup_mapping.h"
@@ -60,15 +61,18 @@
 #include "utils/fmgroids.h"
 #include "utils/inval.h"
 #include "utils/lsyscache.h"
+#include "utils/partitionkey.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
+#include "utils/snapmgr.h"
 #include "storage/proc.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "utils/typcache.h"
 #include "optimizer/streamplan.h"
 #include "pgxc/pgxc.h"
 #include "utils/acl.h"
+#include "streaming/planner.h"
 #include "catalog/pgxc_group.h"
 
 /*				---------- AMOP CACHES ----------						 */
@@ -99,6 +103,7 @@ int get_op_opfamily_strategy(Oid opno, Oid opfamily)
     HeapTuple tp;
     Form_pg_amop amop_tup;
     int result;
+
     tp = SearchSysCache3(AMOPOPID, ObjectIdGetDatum(opno), CharGetDatum(AMOP_SEARCH), ObjectIdGetDatum(opfamily));
     if (!HeapTupleIsValid(tp)) {
         return 0;
@@ -120,6 +125,7 @@ Oid get_op_opfamily_sortfamily(Oid opno, Oid opfamily)
     HeapTuple tp;
     Form_pg_amop amop_tup;
     Oid result;
+
     tp = SearchSysCache3(AMOPOPID, ObjectIdGetDatum(opno), CharGetDatum(AMOP_ORDER), ObjectIdGetDatum(opfamily));
     if (!HeapTupleIsValid(tp)) {
         return InvalidOid;
@@ -143,14 +149,15 @@ void get_op_opfamily_properties(Oid opno, Oid opfamily, bool ordering_op, int* s
 {
     HeapTuple tp;
     Form_pg_amop amop_tup;
+
     tp = SearchSysCache3(AMOPOPID,
         ObjectIdGetDatum(opno),
         CharGetDatum(ordering_op ? AMOP_ORDER : AMOP_SEARCH),
         ObjectIdGetDatum(opfamily));
-    if (!HeapTupleIsValid(tp)) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-            errmsg("operator %u is not a member of opfamily %u", opno, opfamily)));
-    }
+    if (!HeapTupleIsValid(tp))
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("operator %u is not a member of opfamily %u", opno, opfamily)));
     amop_tup = (Form_pg_amop)GETSTRUCT(tp);
     *strategy = amop_tup->amopstrategy;
     *lefttype = amop_tup->amoplefttype;
@@ -170,6 +177,7 @@ Oid get_opfamily_member(Oid opfamily, Oid lefttype, Oid righttype, int16 strateg
     HeapTuple tp;
     Form_pg_amop amop_tup;
     Oid result;
+
     tp = SearchSysCache4(AMOPSTRATEGY,
         ObjectIdGetDatum(opfamily),
         ObjectIdGetDatum(lefttype),
@@ -213,6 +221,7 @@ bool get_ordering_op_properties(Oid opno, Oid* opfamily, Oid* opcintype, int16* 
     *opfamily = InvalidOid;
     *opcintype = InvalidOid;
     *strategy = 0;
+
     /*
      * Search pg_amop to see if the target operator is registered as the "<"
      * or ">" operator of any btree opfamily.
@@ -238,6 +247,7 @@ bool get_ordering_op_properties(Oid opno, Oid* opfamily, Oid* opcintype, int16* 
         }
     }
     ReleaseSysCacheList(catlist);
+
     return result;
 }
 
@@ -275,8 +285,10 @@ bool get_compare_function_for_ordering_op(Oid opno, Oid* cmpfunc, bool* reverse)
         *reverse = (strategy == BTGreaterStrategyNumber);
         return true;
     }
+
     /* ensure outputs are set on failure */
     *cmpfunc = InvalidOid;
+
     *reverse = false;
     return false;
 }
@@ -300,6 +312,7 @@ bool get_sort_function_for_ordering_op(Oid opno, Oid* sortfunc, bool* issupport,
     Oid opfamily;
     Oid opcintype;
     int16 strategy;
+
     /* Find the operator in pg_amop */
     if (get_ordering_op_properties(opno, &opfamily, &opcintype, &strategy)) {
         /* Found a suitable opfamily, get matching support function */
@@ -324,6 +337,7 @@ bool get_sort_function_for_ordering_op(Oid opno, Oid* sortfunc, bool* issupport,
         *reverse = (strategy == BTGreaterStrategyNumber);
         return true;
     }
+
     /* ensure outputs are set on failure */
     *sortfunc = InvalidOid;
     *issupport = false;
@@ -348,6 +362,7 @@ Oid get_equality_op_for_ordering_op(Oid opno, bool* reverse)
     Oid opfamily;
     Oid opcintype;
     int16 strategy;
+
     /* Find the operator in pg_amop */
     if (get_ordering_op_properties(opno, &opfamily, &opcintype, &strategy)) {
         /* Found a suitable opfamily, get matching equality operator */
@@ -564,9 +579,11 @@ bool get_op_hash_functions(Oid opno, RegProcedure* lhs_procno, RegProcedure* rhs
      * multiple opfamilies, assume we can use any one.
      */
     catlist = SearchSysCacheList1(AMOPOPID, ObjectIdGetDatum(opno));
+
     for (i = 0; i < catlist->n_members; i++) {
         HeapTuple tuple = &catlist->members[i]->tuple;
         Form_pg_amop aform = (Form_pg_amop)GETSTRUCT(tuple);
+
         if (aform->amopmethod == HASH_AM_OID && aform->amopstrategy == HTEqualStrategyNumber) {
             /*
              * Get the matching support function(s).  Failure probably
@@ -752,6 +769,8 @@ Oid get_opfamily_proc(Oid opfamily, Oid lefttype, Oid righttype, int16 procnum)
     return result;
 }
 
+/*				---------- ATTRIBUTE CACHES ----------					 */
+
 /*
  * get_attname
  *		Given the relation id and the attribute number,
@@ -783,6 +802,7 @@ char* get_attname(Oid relid, AttrNumber attnum)
 char* get_relid_attribute_name(Oid relid, AttrNumber attnum)
 {
     char* attname = NULL;
+
     attname = get_attname(relid, attnum);
     if (attname == NULL) {
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
@@ -917,10 +937,12 @@ char* get_collation_name(Oid colloid)
 char* get_constraint_name(Oid conoid)
 {
     HeapTuple tp;
+
     tp = SearchSysCache1(CONSTROID, ObjectIdGetDatum(conoid));
     if (HeapTupleIsValid(tp)) {
         Form_pg_constraint contup = (Form_pg_constraint)GETSTRUCT(tp);
         char* result = NULL;
+
         result = pstrdup(NameStr(contup->conname));
         ReleaseSysCache(tp);
         return result;
@@ -968,6 +990,8 @@ Oid get_opclass_input_type(Oid opclass)
     ReleaseSysCache(tp);
     return result;
 }
+
+/*				---------- OPERATOR CACHE ----------					 */
 
 /*
  * get_opcode
@@ -1421,16 +1445,6 @@ char func_volatile(Oid funcid)
 }
 
 /*
- * func_parallel
- * 		Given procedure id, return the function's proparallel flag.
- */
-char func_parallel(Oid funcid)
-{
-    /* Now we treat all func as parallel safe */
-    return PROPARALLEL_SAFE;
-}
-
-/*
  * get_func_proshippable
  *		Given procedure id, return the function's proshippable flag.
  */
@@ -1439,14 +1453,14 @@ bool get_func_proshippable(Oid funcid)
     HeapTuple tp;
     bool result = false;
     bool isNull = true;
-    Relation relation = heap_open(ProcedureRelationId, AccessShareLock);
+    Relation relation = heap_open(ProcedureRelationId, NoLock);
     tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcid));
     if (!HeapTupleIsValid(tp)) {
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcid)));
     }
     Datum datum = heap_getattr(tp, Anum_pg_proc_shippable, RelationGetDescr(relation), &isNull);
     result = DatumGetBool(datum);
-    heap_close(relation, AccessShareLock);
+    heap_close(relation, NoLock);
     ReleaseSysCache(tp);
     return result;
 }
@@ -1530,11 +1544,13 @@ bool get_func_iswindow(Oid funcid)
     tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcid));
     if (!HeapTupleIsValid(tp)) {
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcid)));
-    }
-    result = PROC_IS_WIN(((Form_pg_proc)GETSTRUCT(tp))->prokind);
+}
+    result = ((Form_pg_proc)GETSTRUCT(tp))->proiswindow;
     ReleaseSysCache(tp);
     return result;
 }
+
+/*				---------- RELATION CACHE ----------					 */
 
 /*
  * get_relname_relid
@@ -1546,6 +1562,8 @@ Oid get_relname_relid(const char* relname, Oid relnamespace)
 {
     return GetSysCacheOid2(RELNAMENSP, PointerGetDatum(relname), ObjectIdGetDatum(relnamespace));
 }
+
+/* sucks, we don't bother add a header file for it */
 
 /*
  * get_relname_relid_extend
@@ -1692,12 +1710,14 @@ int get_relnatts(Oid relid)
     if (HeapTupleIsValid(tp)) {
         Form_pg_class reltup = (Form_pg_class)GETSTRUCT(tp);
         int result;
+
         CatalogRelationBuildParam catalogParam = GetCatalogParam(relid);
-        if (catalogParam.oId != InvalidOid) {
+        if (catalogParam.oid != InvalidOid) {
             result = (AttrNumber)catalogParam.natts;
         } else {
             result = reltup->relnatts;
         }
+
         ReleaseSysCache(tp);
         return result;
     } else {
@@ -1937,6 +1957,8 @@ char get_rel_persistence(Oid relid)
         return '\0';
     }
 }
+
+/*				---------- TYPE CACHE ----------						 */
 
 /*
  * get_typisdefined
@@ -2384,7 +2406,7 @@ char* get_typename_with_namespace(Oid typid)
         StringInfoData typeName;
         char* typeNamespace = "%";
         if (!isTempNamespace(typeForm->typnamespace)) {
-            typeNamespace = get_namespace_name(typeForm->typnamespace, true);
+            typeNamespace = get_namespace_name(typeForm->typnamespace);
             Assert(typeNamespace[0] != '%');
         }
         initStringInfo(&typeName);
@@ -2442,6 +2464,7 @@ Oid get_typeoid_with_namespace(const char* typname)
     Assert(OidIsValid(namespaceId));
     typid = GetSysCacheOid2(TYPENAMENSP, PointerGetDatum(atpname), ObjectIdGetDatum(namespaceId));
     pfree_ext(namestr);
+    list_free_ext(elemlist);
     return typid;
 }
 
@@ -2468,6 +2491,42 @@ Oid get_pgxc_nodeoid(const char* nodename)
     return node_oid;
 }
 
+Oid get_pgxc_datanodeoid(const char* nodename, bool missingOK)
+{
+    Oid dn_oid = InvalidOid;
+    CatCList* memlist = NULL;
+    int i;
+    memlist = SearchSysCacheList1(PGXCNODENAME, PointerGetDatum(nodename));
+    for (i = 0; i < memlist->n_members; i++) {
+        HeapTuple tup = &memlist->members[i]->tuple;
+        char node_type = ((Form_pgxc_node)GETSTRUCT(tup))->node_type;
+        if (node_type == PGXC_NODE_DATANODE) {
+            dn_oid = HeapTupleGetOid(tup);
+            break;
+        }
+    }
+    ReleaseSysCacheList(memlist);
+
+    if (dn_oid == InvalidOid && !missingOK) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("datanode \"%s\" does not exist", nodename)));
+    }
+
+    return dn_oid;
+}
+
+
+/*
+ * Check if the two given strings indicate the same host.
+ */
+ inline bool IsSameHost(const char* str1, const char* str2){
+     if (str1 == NULL || str2 == NULL){
+         return false;
+     }
+     return (strcmp(str1, "localhost") == 0 && strcmp(str2, "127.0.0.1") == 0) ||
+            (strcmp(str1, str2) == 0);
+ }
+
 /*
  * Check the datanode is exist.
  * 	this case only make sense under multi-standbys mode.
@@ -2488,9 +2547,7 @@ bool check_pgxc_node_name_is_exist(
         int comm_control_port_exist = ((Form_pgxc_node)GETSTRUCT(tup))->control_port;
 
         /* check host */
-        if ((strncmp(host_exist, "localhost", strlen("localhost")) == 0 &&
-                strncmp(host, "127.0.0.1", strlen("127.0.0.1")) == 0) ||
-            (strncmp(host_exist, host, strlen(host)) == 0)) {
+        if (IsSameHost(host_exist, host)) {
             /* check port */
             if (port_exist == port) {
                 node_has_been_def = true;
@@ -2625,7 +2682,8 @@ char* get_pgxc_nodename(Oid nodeid, NameData* namedata)
  * get_pgxc_nodename_noexcept
  *		Get node name for given Oid, for print log.
  */
-char* get_pgxc_nodename_noexcept(Oid nodeid, char* nodename)
+
+char* get_pgxc_nodename_noexcept(Oid nodeid, NameData* nodename)
 {
     HeapTuple tuple;
     Form_pgxc_node nodeForm;
@@ -2638,10 +2696,12 @@ char* get_pgxc_nodename_noexcept(Oid nodeid, char* nodename)
         return NULL;
     }
     nodeForm = (Form_pgxc_node)GETSTRUCT(tuple);
-    rc = strncpy_s(nodename, NAMEDATALEN, NameStr(nodeForm->node_name), NAMEDATALEN - 1);
+
+    rc = strncpy_s(nodename->data, NAMEDATALEN, NameStr(nodeForm->node_name), NAMEDATALEN - 1);
     securec_check(rc, "\0", "\0");
     ReleaseSysCache(tuple);
-    return nodename;
+
+    return nodename->data;
 }
 
 bool is_pgxc_central_nodeid(Oid nodeid)
@@ -3068,6 +3128,7 @@ bool node_check_host(const char* host, Oid nodeid)
         }
     }
     ReleaseSysCache(tuple);
+
     return result;
 }
 
@@ -3268,11 +3329,167 @@ int get_pgxc_groupmembers_redist(Oid groupid, Oid** members)
     return nmembers;
 }
 
+static List* GetAllSliceTuples(Relation pgxcSliceRel, Oid tableOid)
+{
+    ScanKeyData skey[2];
+    SysScanDesc sliceScan = NULL;
+    HeapTuple htup = NULL;
+    HeapTuple dtup = NULL;
+    List* sliceList = NULL;
+
+    ScanKeyInit(&skey[0], Anum_pgxc_slice_relid, BTEqualStrategyNumber,
+        F_OIDEQ, ObjectIdGetDatum(tableOid));
+    ScanKeyInit(&skey[1], Anum_pgxc_slice_type, BTEqualStrategyNumber,
+        F_CHAREQ, CharGetDatum(PGXC_SLICE_TYPE_SLICE));
+    sliceScan = systable_beginscan(pgxcSliceRel, PgxcSliceOrderIndexId, true, SnapshotNow, 2, skey);
+    while (HeapTupleIsValid((htup = systable_getnext(sliceScan)))) {
+        dtup = heap_copytuple(htup);
+        sliceList = lappend(sliceList, dtup);
+    }
+    systable_endscan(sliceScan);
+
+    return sliceList;
+}
+
+static List* GetSliceBoundary(Relation rel, Datum boundaries, List* distKeyPosList, bool attIsNull, bool isRangeSlice)
+{
+    List* boundaryValueList = NIL;
+    List* resultBoundaryList = NIL;
+    ListCell* boundaryCell = NULL;
+    ListCell* distKeyCell = NULL;
+    Value* boundaryValue = NULL;
+    Datum boundaryDatum = (Datum)0;
+    Node* boundaryNode = NULL;
+    Form_pg_attribute* relation_atts = NULL;
+    Form_pg_attribute att = NULL;
+    int16 typlen = 0;
+    bool typbyval = false;
+    char typalign, typdelim;
+    Oid typioparam, func, typid, typelem, typcollation;
+    int32 typmod = -1;
+    bool isFirstDefault = true;
+        
+    if (attIsNull) {
+        resultBoundaryList = NIL;
+    } else {
+        /* unstransform string items to Value list */
+        boundaryValueList = untransformPartitionBoundary(boundaries);
+        relation_atts = rel->rd_att->attrs;
+        forboth(boundaryCell, boundaryValueList, distKeyCell, distKeyPosList) {
+            boundaryValue = (Value*)lfirst(boundaryCell);
+            att = relation_atts[(int)lfirst_int(distKeyCell) - 1];
+            /* get the oid/mod/collation/ of partition key */
+            typid = att->atttypid;
+            typmod = att->atttypmod;
+            typcollation = att->attcollation;
+            /* deal with null */
+            if (!PointerIsValid(boundaryValue->val.str)) {
+                if (isRangeSlice) {
+                    boundaryNode = (Node*)makeMaxConst(typid, typmod, typcollation);
+                } else {
+                    /* when it's list slice, we just append one DEFAULT */
+                    if (isFirstDefault) {
+                        boundaryNode = (Node*)makeMaxConst(typid, typmod, typcollation);
+                        isFirstDefault = false;
+                    } else {
+                        continue;
+                    }
+                }
+            } else {
+                /* get the typein function's oid of current type */
+                get_type_io_data(typid, IOFunc_input, &typlen, &typbyval, &typalign, &typdelim, &typioparam, &func);
+                typelem = get_element_type(typid);
+
+                /* now call the typein function with collation,string, element_type, typemod
+                 * as it's parameters.
+                 */
+                boundaryDatum = OidFunctionCall3Coll(func, typcollation, CStringGetDatum(boundaryValue->val.str),
+                    ObjectIdGetDatum(typelem), Int32GetDatum(typmod));
+                boundaryNode = (Node*)makeConst(typid, typmod, typcollation, typlen, boundaryDatum, false, typbyval);
+            }
+            resultBoundaryList = lappend(resultBoundaryList, boundaryNode);
+        }
+    }
+
+    return resultBoundaryList;
+}
+
+static DistState* BuildDistStateHelper(DistributionType distType, List* sliceDefinitions) 
+{
+    DistState* distState = makeNode(DistState);
+    distState->strategy = (distType == DISTTYPE_RANGE) ? 'r' : 'l';
+    distState->sliceList = sliceDefinitions;
+    return distState;
+}
+
+static DistState* BuildDistState(Relation rel, List* distKeyPosList, DistributionType distType)
+{
+    bool tmpNull, attIsNull, specified;
+    ListCell* sliceCell = NULL;
+    List* boundary = NULL;
+    List* sliceDefinitions = NIL;
+    ListSliceDefState* listSliceDef = NULL;
+    ListSliceDefState* lastListSliceDef = NULL;
+    RangePartitionDefState* rangeSliceDef = NULL;
+
+    Relation pgxcSliceRel = heap_open(PgxcSliceRelationId, AccessShareLock);
+    TupleDesc desc = RelationGetDescr(pgxcSliceRel);
+    Oid tableOid = RelationGetRelid(rel);
+
+    List* sliceList = GetAllSliceTuples(pgxcSliceRel, tableOid);
+
+    foreach (sliceCell, sliceList) {
+        HeapTuple sliceTuple = (HeapTuple)lfirst(sliceCell);
+        Datum boundDatum = heap_getattr(sliceTuple, Anum_pgxc_slice_boundaries, desc, &attIsNull);
+        int4 sindex = DatumGetInt32(heap_getattr(sliceTuple, Anum_pgxc_slice_sindex, desc, &tmpNull));
+        char* sliceName = DatumGetCString(heap_getattr(sliceTuple, Anum_pgxc_slice_relname, desc, &tmpNull));
+        specified = DatumGetBool(heap_getattr(sliceTuple, Anum_pgxc_slice_specified, desc, &tmpNull));
+        Oid nodeOid = DatumGetObjectId(heap_getattr(sliceTuple, Anum_pgxc_slice_nodeoid, desc, &tmpNull));
+
+        if (distType == DISTTYPE_LIST) {
+            boundary = GetSliceBoundary(rel, boundDatum, distKeyPosList, attIsNull, false);
+            if (sindex == 0) {
+                listSliceDef = makeNode(ListSliceDefState);
+                listSliceDef->name = pstrdup(sliceName);
+                if (specified) {
+                    listSliceDef->datanode_name = get_pgxc_nodename(nodeOid, NULL);
+                }
+
+                listSliceDef->boundaries = lappend(listSliceDef->boundaries, boundary);
+                sliceDefinitions = lappend(sliceDefinitions, listSliceDef);
+                lastListSliceDef = listSliceDef;
+            } else {
+                lastListSliceDef->boundaries = lappend(lastListSliceDef->boundaries, boundary);
+            }
+        } else if (distType == DISTTYPE_RANGE) {
+            rangeSliceDef = makeNode(RangePartitionDefState);
+            rangeSliceDef->partitionName = pstrdup(sliceName);
+            if (specified) {
+                rangeSliceDef->tablespacename = get_pgxc_nodename(nodeOid, NULL);
+            }
+            rangeSliceDef->boundary = GetSliceBoundary(rel, boundDatum, distKeyPosList, attIsNull, true);
+            sliceDefinitions = lappend(sliceDefinitions, rangeSliceDef);
+        }
+    }
+
+    relation_close(pgxcSliceRel, AccessShareLock);
+    list_free_ext(sliceList);
+
+    DistState* distState = BuildDistStateHelper(distType, sliceDefinitions);
+
+    return distState;
+}
+
 DistributeBy* getTableDistribution(Oid srcRelid)
 {
+    Relation rel;
     HeapTuple tuple;
     Form_pgxc_class classForm;
+    List* distKeyPosList = NULL;
     DistributeBy* result = makeNode(DistributeBy);
+
+    rel = relation_open(srcRelid, AccessShareLock);
+
     tuple = SearchSysCache1(PGXCCLASSRELID, ObjectIdGetDatum(srcRelid));
     if (!HeapTupleIsValid(tuple)) {
         ereport(ERROR,
@@ -3293,6 +3510,12 @@ DistributeBy* getTableDistribution(Oid srcRelid)
         case LOCATOR_TYPE_RROBIN:  // round robin
             result->disttype = DISTTYPE_ROUNDROBIN;
             break;
+        case LOCATOR_TYPE_LIST:  // list
+            result->disttype = DISTTYPE_LIST;
+            break;
+        case LOCATOR_TYPE_RANGE:  // range
+            result->disttype = DISTTYPE_RANGE;
+            break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -3301,11 +3524,19 @@ DistributeBy* getTableDistribution(Oid srcRelid)
     }
     for (int i = 0; i < classForm->pcattnum.dim1; i++) {
         result->colname = lappend(result->colname, makeString(get_attname(srcRelid, classForm->pcattnum.values[i])));
+        distKeyPosList = lappend_int(distKeyPosList, classForm->pcattnum.values[i]);
     }
+
+    if (IsLocatorDistributedBySlice(classForm->pclocatortype)) {
+        result->distState = BuildDistState(rel, distKeyPosList, result->disttype);
+    }
+
     ReleaseSysCache(tuple);
+    list_free_ext(distKeyPosList);
+    relation_close(rel, AccessShareLock);
+
     return result;
 }
-
 
 DistributeBy* getTableHBucketDistribution(Relation rel)
 {
@@ -3319,8 +3550,8 @@ DistributeBy* getTableHBucketDistribution(Relation rel)
         }
         result = makeNode(DistributeBy);
         result->disttype = DISTTYPE_HASH;
-        for (int i = 0; i < rel->rd_bucketkey->bucketKey->ndim; i++) {
-            result->colname = lappend(result->colname,
+        for (int i = 0; i < rel->rd_bucketkey->bucketKey->dim1; i++) {
+            result->colname = lappend(result->colname, 
                                       makeString(get_attname(rel->rd_id, rel->rd_bucketkey->bucketKey->values[i])));
         }
     }
@@ -4068,9 +4299,9 @@ int32 get_attavgwidth(Oid relid, AttrNumber attnum, bool ispartition)
     HeapTuple tp;
     int32 stawidth;
     char stakind = ispartition ? STARELKIND_PARTITION : STARELKIND_CLASS;
-    if (u_sess->attr.attr_common.upgrade_mode != 0) {
+
+    if (u_sess->attr.attr_common.upgrade_mode != 0)
         return 0;
-    }
     if (!ispartition && get_rel_persistence(relid) == RELPERSISTENCE_GLOBAL_TEMP) {
         tp = get_gtt_att_statistic(relid, attnum);
         if (!HeapTupleIsValid(tp)) {
@@ -4085,12 +4316,12 @@ int32 get_attavgwidth(Oid relid, AttrNumber attnum, bool ispartition)
     }
     tp = SearchSysCache4(
         STATRELKINDATTINH, ObjectIdGetDatum(relid), CharGetDatum(stakind), Int16GetDatum(attnum), BoolGetDatum(false));
+
     if (HeapTupleIsValid(tp)) {
         stawidth = ((Form_pg_statistic)GETSTRUCT(tp))->stawidth;
         ReleaseSysCache(tp);
-        if (stawidth > 0) {
+        if (stawidth > 0)
             return stawidth;
-        }
     }
     return 0;
 }
@@ -4110,6 +4341,39 @@ double get_attstadndistinct(HeapTuple statstuple)
         return 0;
     } else {
         return DatumGetFloat4(val);
+    }
+}
+
+static void get_attstatsslotnumber(HeapTuple statstuple, float4** numbers, int* nnumbers, int idx)
+{
+    bool isnull = false;
+    ArrayType* statarray = NULL;
+    int narrayelem;
+    Datum val = SysCacheGetAttr(STATRELKINDATTINH, statstuple, Anum_pg_statistic_stanumbers1 + idx, &isnull);
+    if (isnull) {
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("stanumbers is null")));
+    }
+    statarray = DatumGetArrayTypeP(val);
+    /*
+     * We expect the array to be a 1-D float4 array; verify that. We don't
+     * need to use deconstruct_array() since the array data is just going
+     * to look like a C array of float4 values.
+     */
+    narrayelem = ARR_DIMS(statarray)[0];
+    if (ARR_NDIM(statarray) != 1 || narrayelem <= 0 || ARR_HASNULL(statarray) ||
+        ARR_ELEMTYPE(statarray) != FLOAT4OID) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("stanumbers is not a 1-D float4 array")));
+    }
+    *numbers = (float4*)palloc(narrayelem * sizeof(float4));
+    int rc = memcpy_s(*numbers, narrayelem * sizeof(float4), ARR_DATA_PTR(statarray), narrayelem * sizeof(float4));
+    securec_check(rc, "\0", "\0");
+    *nnumbers = narrayelem;
+    /*
+     * Free statarray if it's a detoasted copy.
+     */
+    if ((Pointer)statarray != DatumGetPointer(val)) {
+        pfree_ext(statarray);
     }
 }
 
@@ -4154,7 +4418,6 @@ bool get_attstatsslot(HeapTuple statstuple, Oid atttype, int32 atttypmod, int re
     bool isnull = false;
     ArrayType* statarray = NULL;
     Oid arrayelemtype;
-    int narrayelem;
     HeapTuple typeTuple;
     Form_pg_type typeForm;
     if (u_sess->attr.attr_common.upgrade_mode != 0) {
@@ -4214,32 +4477,7 @@ bool get_attstatsslot(HeapTuple statstuple, Oid atttype, int32 atttypmod, int re
     }
 
     if (numbers != NULL) {
-        val = SysCacheGetAttr(STATRELKINDATTINH, statstuple, Anum_pg_statistic_stanumbers1 + i, &isnull);
-        if (isnull) {
-            ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("stanumbers is null")));
-        }
-        statarray = DatumGetArrayTypeP(val);
-        /*
-         * We expect the array to be a 1-D float4 array; verify that. We don't
-         * need to use deconstruct_array() since the array data is just going
-         * to look like a C array of float4 values.
-         */
-        narrayelem = ARR_DIMS(statarray)[0];
-        if (ARR_NDIM(statarray) != 1 || narrayelem <= 0 || ARR_HASNULL(statarray) ||
-            ARR_ELEMTYPE(statarray) != FLOAT4OID) {
-            ereport(ERROR,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("stanumbers is not a 1-D float4 array")));
-        }
-        *numbers = (float4*)palloc(narrayelem * sizeof(float4));
-        int rc = memcpy_s(*numbers, narrayelem * sizeof(float4), ARR_DATA_PTR(statarray), narrayelem * sizeof(float4));
-        securec_check(rc, "\0", "\0");
-        *nnumbers = narrayelem;
-        /*
-         * Free statarray if it's a detoasted copy.
-         */
-        if ((Pointer)statarray != DatumGetPointer(val)) {
-            pfree_ext(statarray);
-        }
+        get_attstatsslotnumber(statstuple, numbers, nnumbers, i);
     }
     return true;
 }
@@ -4421,25 +4659,23 @@ void free_attstatsslot(Oid atttype, Datum* values, int nvalues, float4* numbers,
  *
  * Returns a palloc'd copy of the string, or NULL if no such namespace.
  */
-char* get_namespace_name(Oid nspid, bool report_error)
+char* get_namespace_name(Oid nspid)
 {
     HeapTuple tp;
+
     tp = SearchSysCache1(NAMESPACEOID, ObjectIdGetDatum(nspid));
     if (HeapTupleIsValid(tp)) {
         Form_pg_namespace nsptup = (Form_pg_namespace)GETSTRUCT(tp);
         char* result = NULL;
+
         result = pstrdup(NameStr(nsptup->nspname));
         ReleaseSysCache(tp);
         return result;
-    } else {
-        if (report_error) {
-            ereport(ERROR,
-                (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                    errmsg("cache lookup failed for namespace %u", nspid)));
-        }
+    } else
         return NULL;
-    }
 }
+
+/*				---------- PG_RANGE CACHE ----------				 */
 
 /*
  * get_range_subtype
@@ -4477,7 +4713,7 @@ char* get_cfgnamespace(Oid cfgid)
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", cfgid)));
     }
     typeForm = (Form_pg_type)GETSTRUCT(tuple);
-    result = pstrdup(get_namespace_name(typeForm->typnamespace, true));
+    result = pstrdup(get_namespace_name(typeForm->typnamespace));
     ReleaseSysCache(tuple);
     return result;
 }
@@ -4497,7 +4733,7 @@ char* get_typenamespace(Oid typid)
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", typid)));
     }
     typeForm = (Form_pg_type)GETSTRUCT(tuple);
-    result = pstrdup(get_namespace_name(typeForm->typnamespace, true));
+    result = pstrdup(get_namespace_name(typeForm->typnamespace));
     ReleaseSysCache(tuple);
     return result;
 }
@@ -4592,10 +4828,26 @@ void get_oper_name_namespace_oprs(Oid operid, char** oprname, char** nspname, Oi
     }
     operform = (Form_pg_operator)GETSTRUCT(opertup);
     *oprname = pstrdup(NameStr(operform->oprname));
-    *nspname = get_namespace_name(operform->oprnamespace, true);
+    *nspname = get_namespace_name(operform->oprnamespace);
     *oprleft = operform->oprleft;
     *oprright = operform->oprright;
     ReleaseSysCache(opertup);
+}
+
+/* check PolymorphicType
+ * If the return type is polymorphic, continue
+ * For example: CREATE FUNCTION array_abs(x anyarray) RETURN anyarray ...
+ * And we have SQL: select array_abs({1,-2,3,-4});
+ * Obviously, the output type(output_id) is INT, not anyarray
+ * So we don't check the return type.
+ */
+static inline bool CompareRetType(Oid inputOid, Oid outputOid)
+{
+    if (!IsPolymorphicType(inputOid)) {
+        return inputOid == outputOid;
+    }
+
+    return true;
 }
 
 Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr)
@@ -4622,39 +4874,60 @@ Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr)
             /* Consider only procs in specified namespace */
             if (procform->pronamespace != funcnamespace) {
                 continue;
-            }
         }
-        if (expr != NULL && IsA(expr, FuncExpr) && procform->pronargs != list_length(((FuncExpr*)expr)->args)) {
+	   }
+        if (expr != NULL && IsA(expr, FuncExpr) && procform->pronargs != list_length(((FuncExpr*)expr)->args)
+#ifdef ENABLE_MULTIPLE_NODES
+            && !is_streaming_hash_group_func(funcname, funcnamespace)
+#endif   /* ENABLE_MULTIPLE_NODES */
+            )
             continue;
-        }
 
-        /* If the return type is polymorphic, continue
-         * For example: CREATE FUNCTION array_abs(x anyarray) RETURN anyarray ...
-         * And we have SQL: select array_abs({1,-2,3,-4});
-         * Obviously, the output type(procform->prorettype) is INT, not anyarray
-         * So we don't check the return type.
+        /*
+         * User will define their own function (UDF).
+         * 
+         * GaussDB compares the number of input parameters, the type of each parameters, and return type
+         * to find the corresponding function.
+         *
+         *                   function(arg1, arg2, arg3)
+         *                   $$
+                                return ret;
+                             $$
+         *
+         * Two Scenario:
+         * 1) In MPP, same UDF in cn/dn has differnet oid.
+         * 2) In MPP or SingleNode, UDF in VIEW or pg_rewrite.
          */
-        if (expr != NULL && IsA(expr, FuncExpr) && !IsPolymorphicType(procform->prorettype) &&
-            procform->prorettype != ((FuncExpr*)expr)->funcresulttype) {
+        if (expr != NULL && IsA(expr, FuncExpr) &&
+            !CompareRetType(procform->prorettype, ((FuncExpr*)expr)->funcresulttype)) {
+            /*
+             * Compare the return oid of the function, if the returned Oid doesnot match,
+             * it means it's not the function we want.
+             */
             continue;
         }
         /*
          * Support the same function name, same number of arguments and different argument type
          */
-        if (expr != NULL && IsA(expr, FuncExpr)) {
+        if (expr != NULL && IsA(expr, FuncExpr) 
+#ifdef ENABLE_MULTIPLE_NODES
+            && !is_streaming_hash_group_func(funcname, funcnamespace)
+#endif   /* ENABLE_MULTIPLE_NODES */
+            ) {
             int j = 0;
             bool matched = true;
 
             for (j = 0; j < nargs; j++) {
-                if (!IsPolymorphicType(procform->proargtypes.values[j]) && argtypes[j] != procform->proargtypes.values[j]) {
+                if (!CompareRetType(procform->proargtypes.values[j], argtypes[j])) {
                     matched = false;
                     break;
                 }
             }
-            if (!matched) {
+
+            if (!matched)
                 continue;
-            }
         }
+
         ReleaseSysCacheList(catlist);
         return HeapTupleGetOid(proctup);
     }
@@ -4715,10 +4988,11 @@ Oid partid_get_parentid(Oid partid)
     /* Get the partitioned table's oid */
     relid = partitionForm->parentid;
     ReleaseSysCache(partitionTup);
+
     return relid;
 }
 
-/* function is not strict and not agg */
+/* function is not strict and not agg*/
 bool is_not_strict_agg(Oid funcOid)
 {
     HeapTuple func_tuple;
@@ -4728,7 +5002,8 @@ bool is_not_strict_agg(Oid funcOid)
         return false;
     }
     func_form = (Form_pg_proc)GETSTRUCT(func_tuple);
-    if (func_form->proisstrict == false && !PROC_IS_AGG(func_form->prokind)) {
+
+    if (func_form->proisstrict == false && func_form->proisagg == false) {
         ReleaseSysCache(func_tuple);
         return true;
     }

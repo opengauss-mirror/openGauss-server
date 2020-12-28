@@ -1,0 +1,143 @@
+\! gs_ktool -d all
+\! gs_ktool -g
+
+CREATE CLIENT MASTER KEY MyCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY MyCEK770 WITH VALUES (CLIENT_MASTER_KEY = MyCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+
+CREATE TABLE IF NOT EXISTS tr1(
+i INT,
+ii INT,
+i1 INT1,
+i2 INT2,
+i4 INT4,
+i8 INT8,
+f4 FLOAT4,
+f8 FLOAT8,
+c  CHAR,
+c8 CHAR(8),
+v  VARCHAR,
+v8 VARCHAR(8),
+b  BYTEA,
+n1 NUMERIC,
+n2 NUMERIC (5),
+n3 NUMERIC (5,2)
+);
+
+CREATE TABLE IF NOT EXISTS tr2(
+i INT,
+ii INT,
+i1 INT1       ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK770, ENCRYPTION_TYPE = DETERMINISTIC),
+i2 INT2       ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK770, ENCRYPTION_TYPE = DETERMINISTIC),
+i4 INT4       ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK770, ENCRYPTION_TYPE = DETERMINISTIC),
+i8 INT8       ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK770, ENCRYPTION_TYPE = DETERMINISTIC),
+f4 FLOAT4     ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK770, ENCRYPTION_TYPE = DETERMINISTIC),
+f8 FLOAT8     ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK770, ENCRYPTION_TYPE = DETERMINISTIC),
+c  CHAR       ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK770, ENCRYPTION_TYPE = DETERMINISTIC),
+c8 CHAR(8)    ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK770, ENCRYPTION_TYPE = DETERMINISTIC),
+v  VARCHAR    ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK770, ENCRYPTION_TYPE = DETERMINISTIC),
+v8 VARCHAR(8) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK770, ENCRYPTION_TYPE = DETERMINISTIC),
+b  BYTEA      ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK770, ENCRYPTION_TYPE = DETERMINISTIC),
+n1 NUMERIC    ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK770, ENCRYPTION_TYPE = DETERMINISTIC),
+n2 NUMERIC (5) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK770, ENCRYPTION_TYPE = DETERMINISTIC),
+n3 NUMERIC (5,2) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK770, ENCRYPTION_TYPE = DETERMINISTIC)
+);
+
+INSERT INTO tr1 VALUES ( 1, 1, 1, 1, 1, 1, 3.14, 3.14,'C','IDO'       ,'Ido''s'    , 'Shlomo'    , '\x1234', 540.50, 540.50, 540.50);
+INSERT INTO tr2 VALUES ( 1, 1, 1, 1, 1, 1, 3.14, 3.14,'C','IDO'       ,'Ido''s'    , 'Shlomo'    , '\x1234', 540.50, 540.50, 540.50);
+BEGIN;
+DECLARE select_all_tr1 CURSOR FOR SELECT * from tr1 ORDER BY i;
+DECLARE select_all_tr2 CURSOR FOR SELECT * from tr2 ORDER BY i;
+FETCH 5 from select_all_tr1;
+FETCH 5 from select_all_tr2;
+CLOSE select_all_tr1;
+CLOSE select_all_tr2;
+END;
+
+BEGIN;
+DECLARE select_all_tr1 CURSOR FOR SELECT * from tr1 ORDER BY i;
+DECLARE select_all_tr2 CURSOR FOR SELECT * from tr2 ORDER BY i;
+FETCH 5 from select_all_tr1;
+FETCH 5 from select_all_tr2;
+CLOSE select_all_tr1;
+CLOSE select_all_tr2;
+END;
+
+INSERT INTO tr1 VALUES ( 0, 0, 0, 0, 0, 0, 0.14, 0.14,'z','ELI'       ,'Eli''s'    , 'Shemer'    , '\x09',3490.65,3490.65,3490.65);
+INSERT INTO tr2 VALUES ( 0, 0, 0, 0, 0, 0, 0.14, 0.14,'z','ELI'       ,'Eli''s'    , 'Shemer'    , '\x09',3490.65,3490.65,3490.65);
+BEGIN;
+DECLARE select_all_tr1 CURSOR FOR SELECT * from tr1 ORDER BY i;
+DECLARE select_all_tr2 CURSOR FOR SELECT * from tr2 ORDER BY i;
+FETCH 5 from select_all_tr1;
+FETCH 5 from select_all_tr2;
+CLOSE select_all_tr1;
+CLOSE select_all_tr2;
+END;
+
+INSERT INTO tr1 VALUES ( 4, 4, 0, 0, 0, 0,-0.14,-0.14,'z','A A       ','A a       ', 'A a       ', '\xababababababababababababababababababababab',43543.01,43543.01,43543.01);
+INSERT INTO tr2 VALUES ( 4, 4, 0, 0, 0, 0,-0.14,-0.14,'z','A A       ','A a       ', 'A a       ', '\xababababababababababababababababababababab',43543.01,43543.01,43543.01);
+BEGIN;
+DECLARE select_all_tr1 CURSOR FOR SELECT * from tr1 ORDER BY i;
+DECLARE select_all_tr2 CURSOR FOR SELECT * from tr2 ORDER BY i;
+FETCH 5 from select_all_tr1;
+FETCH 5 from select_all_tr2;
+CLOSE select_all_tr1;
+CLOSE select_all_tr2;
+END;
+
+BEGIN;
+DECLARE select_one_tr1 CURSOR FOR SELECT * from tr1 WHERE i1=1 AND ii=1;
+DECLARE select_one_tr2 CURSOR FOR SELECT * from tr2 WHERE i1=1 AND ii=1;
+FETCH 5 from select_one_tr1;
+FETCH 5 from select_one_tr2;
+CLOSE select_one_tr1;
+CLOSE select_one_tr2;
+END;
+
+UPDATE tr1 SET ii=5,i2=5 WHERE i1=1 AND ii=1;
+UPDATE tr2 SET ii=5,i2=5 WHERE i1=1 AND ii=1;
+BEGIN;
+DECLARE select_one_tr1 CURSOR FOR SELECT * from tr1 WHERE i1=1 AND ii=5;
+DECLARE select_one_tr2 CURSOR FOR SELECT * from tr2 WHERE i1=1 AND ii=5;
+FETCH 5 from select_one_tr1;
+FETCH 5 from select_one_tr2;
+CLOSE select_one_tr1;
+CLOSE select_one_tr2;
+END;
+
+DELETE from tr1 WHERE i1=1 AND ii=5;
+DELETE from tr2 WHERE i1=1 AND ii=5;
+BEGIN;
+DECLARE select_one_tr1 CURSOR FOR SELECT * from tr1 WHERE i1=1 AND ii=5;
+DECLARE select_one_tr2 CURSOR FOR SELECT * from tr2 WHERE i1=1 AND ii=5;
+FETCH 5 from select_one_tr1;
+FETCH 5 from select_one_tr2;
+CLOSE select_one_tr1;
+CLOSE select_one_tr2;
+END;
+
+BEGIN;
+DECLARE select_all_tr1 CURSOR FOR SELECT * from tr1 ORDER BY i;
+DECLARE select_all_tr2 CURSOR FOR SELECT * from tr2 ORDER BY i;
+FETCH 5 from select_all_tr1;
+FETCH 5 from select_all_tr2;
+CLOSE select_all_tr1;
+CLOSE select_all_tr2;
+END;
+
+DELETE from tr1;
+DELETE from tr2;
+BEGIN;
+DECLARE select_all_tr1 CURSOR FOR SELECT * from tr1 ORDER BY i;
+DECLARE select_all_tr2 CURSOR FOR SELECT * from tr2 ORDER BY i;
+FETCH 5 from select_all_tr1;
+FETCH 5 from select_all_tr2;
+CLOSE select_all_tr1;
+CLOSE select_all_tr2;
+END;
+
+DROP TABLE tr1;
+DROP TABLE tr2;
+
+DROP CLIENT MASTER KEY mycmk CASCADE;
+
+\! gs_ktool -d all

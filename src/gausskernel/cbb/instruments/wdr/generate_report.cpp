@@ -1,19 +1,7 @@
-/*
+/* -------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2009, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
- *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
  *
  * generate_report.cpp
  *   functions for user stat, such as login/logout counter
@@ -161,7 +149,7 @@ char* GenReport::GenerateHtmlReport(List* Contents)
      * declare css for html
      */
     const char* css =
-        "<html lang=\"en\"><head><title>openGauss WDR Workload Diagnosis Report</title>\n"
+        "<html lang=\"en\"><head><title>XuanYuan WDR Workload Diagnosis Report</title>\n"
         "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\" />\n"
         "<style type=\"text/css\">\n"
         "a.wdr {font:bold 8pt Arial,Helvetica,sans-serif;color:#663300;vertical-align:top;"
@@ -393,7 +381,11 @@ void GenReport::get_snapinfo_data(report_params* params)
     /* host version of host info */
     List* verList = NIL;
     resetStringInfo(&query);
+#ifndef ENABLE_MULTIPLE_NODES
     appendStringInfo(&query, "select version() as \"openGauss Version\";");
+#else
+    appendStringInfo(&query, "select version() as \"GaussDB Version\";");
+#endif
     GenReport::get_query_data(query.data, true, &verList, &dash->type);
     GenReport::TableTranspose(verList, &overturn_data);
     tmpList = list_concat(tmpList, overturn_data);
@@ -603,7 +595,7 @@ void GenReport::TableToHtml(dashboard* dash, StringInfoData& tableHtml)
     /* Unique Query need set index from uniqueid to unique text */
     if (strcmp(dash->dashTitle, "SQL Statistics") == 0) {
         GenReport::table_to_Html(dash->table, dash->type, HAVE_SQLID, tableHtml);
-    } else if (strcmp(dash->dashTitle, "SQL Dateil") == 0) {
+    } else if (strcmp(dash->dashTitle, "SQL Detail") == 0) {
         GenReport::table_to_Html(dash->table, dash->type, HAVE_SQLTEXT, tableHtml);
     } else {
         GenReport::table_to_Html(dash->table, dash->type, HAVE_OTHER, tableHtml);
@@ -1120,6 +1112,16 @@ static void SQLNodeTotalElapsedTime(report_params* params)
         " (t2.snap_n_blocks_hit - coalesce(t1.snap_n_blocks_hit, 0))) as \"Physical Read\", "
         " (t2.snap_cpu_time - coalesce(t1.snap_cpu_time, 0)) as \"CPU Time(us)\", "
         " (t2.snap_data_io_time - coalesce(t1.snap_data_io_time, 0)) as \"Data IO Time(us)\", "
+        " (t2.snap_sort_count - coalesce(t1.snap_sort_count, 0)) as \"Sort Count\", "
+        " (t2.snap_sort_time - coalesce(t1.snap_sort_time, 0)) as \"Sort Time(us)\", "
+        " (t2.snap_sort_mem_used - coalesce(t1.snap_sort_mem_used, 0)) as \"Sort Mem Used(KB)\", "
+        " (t2.snap_sort_spill_count - coalesce(t1.snap_sort_spill_count, 0)) as \"Sort Spill Count\", "
+        " (t2.snap_sort_spill_size - coalesce(t1.snap_sort_spill_size, 0)) as \"Sort Spill Size(KB)\", "
+        " (t2.snap_hash_count - coalesce(t1.snap_hash_count, 0)) as \"Hash Count\", "
+        " (t2.snap_hash_time - coalesce(t1.snap_hash_time, 0)) as \"Hash Time(us)\", "
+        " (t2.snap_hash_mem_used - coalesce(t1.snap_hash_mem_used, 0)) as \"Hash Mem Used(KB)\", "
+        " (t2.snap_hash_spill_count - coalesce(t1.snap_hash_spill_count, 0)) as \"Hash Spill Count\", "
+        " (t2.snap_hash_spill_size - coalesce(t1.snap_hash_spill_size, 0)) as \"Hash Spill Size(KB)\", "
         " LEFT(t2.snap_query, 25) as \"SQL Text\" "
         "  from (select * from snapshot.snap_summary_statement where snapshot_id = %ld and snap_node_name = '%s') t1"
         " right join "
@@ -1168,6 +1170,16 @@ static void SQLNodeCPUTime(report_params* params)
         " ((t2.snap_n_blocks_fetched - coalesce(t1.snap_n_blocks_fetched, 0)) - "
         " (t2.snap_n_blocks_hit - coalesce(t1.snap_n_blocks_hit, 0))) as \"Physical Read\", "
         " (t2.snap_data_io_time - coalesce(t1.snap_data_io_time, 0)) as \"Data IO Time(us)\", "
+        " (t2.snap_sort_count - coalesce(t1.snap_sort_count, 0)) as \"Sort Count\", "
+        " (t2.snap_sort_time - coalesce(t1.snap_sort_time, 0)) as \"Sort Time(us)\", "
+        " (t2.snap_sort_mem_used - coalesce(t1.snap_sort_mem_used, 0)) as \"Sort Mem Used(KB)\", "
+        " (t2.snap_sort_spill_count - coalesce(t1.snap_sort_spill_count, 0)) as \"Sort Spill Count\", "
+        " (t2.snap_sort_spill_size - coalesce(t1.snap_sort_spill_size, 0)) as \"Sort Spill Size(KB)\", "
+        " (t2.snap_hash_count - coalesce(t1.snap_hash_count, 0)) as \"Hash Count\", "
+        " (t2.snap_hash_time - coalesce(t1.snap_hash_time, 0)) as \"Hash Time(us)\", "
+        " (t2.snap_hash_mem_used - coalesce(t1.snap_hash_mem_used, 0)) as \"Hash Mem Used(KB)\", "
+        " (t2.snap_hash_spill_count - coalesce(t1.snap_hash_spill_count, 0)) as \"Hash Spill Count\", "
+        " (t2.snap_hash_spill_size - coalesce(t1.snap_hash_spill_size, 0)) as \"Hash Spill Size(KB)\", "
         " LEFT(t2.snap_query, 25) as \"SQL Text\" "
         "  from (select * from snapshot.snap_summary_statement where snapshot_id = %ld and snap_node_name = '%s') t1"
         " right join "
@@ -1217,6 +1229,16 @@ static void SQLNodeRowsReturned(report_params* params)
         " (t2.snap_n_blocks_hit - coalesce(t1.snap_n_blocks_hit, 0))) as \"Physical Read\", "
         " (t2.snap_cpu_time - coalesce(t1.snap_cpu_time, 0)) as \"CPU Time(us)\", "
         " (t2.snap_data_io_time - coalesce(t1.snap_data_io_time, 0)) as \"Data IO Time(us)\", "
+        " (t2.snap_sort_count - coalesce(t1.snap_sort_count, 0)) as \"Sort Count\", "
+        " (t2.snap_sort_time - coalesce(t1.snap_sort_time, 0)) as \"Sort Time(us)\", "
+        " (t2.snap_sort_mem_used - coalesce(t1.snap_sort_mem_used, 0)) as \"Sort Mem Used(KB)\", "
+        " (t2.snap_sort_spill_count - coalesce(t1.snap_sort_spill_count, 0)) as \"Sort Spill Count\", "
+        " (t2.snap_sort_spill_size - coalesce(t1.snap_sort_spill_size, 0)) as \"Sort Spill Size(KB)\", "
+        " (t2.snap_hash_count - coalesce(t1.snap_hash_count, 0)) as \"Hash Count\", "
+        " (t2.snap_hash_time - coalesce(t1.snap_hash_time, 0)) as \"Hash Time(us)\", "
+        " (t2.snap_hash_mem_used - coalesce(t1.snap_hash_mem_used, 0)) as \"Hash Mem Used(KB)\", "
+        " (t2.snap_hash_spill_count - coalesce(t1.snap_hash_spill_count, 0)) as \"Hash Spill Count\", "
+        " (t2.snap_hash_spill_size - coalesce(t1.snap_hash_spill_size, 0)) as \"Hash Spill Size(KB)\", "
         " LEFT(t2.snap_query, 25) as \"SQL Text\" "
         "  from (select * from snapshot.snap_summary_statement where snapshot_id = %ld and snap_node_name = '%s') t1"
         " right join "
@@ -1265,6 +1287,16 @@ static void SQLNodeRowRead(report_params* params)
         " (t2.snap_n_blocks_hit - coalesce(t1.snap_n_blocks_hit, 0))) as \"Physical Read\", "
         " (t2.snap_cpu_time - coalesce(t1.snap_cpu_time, 0)) as \"CPU Time(us)\", "
         " (t2.snap_data_io_time - coalesce(t1.snap_data_io_time, 0)) as \"Data IO Time(us)\", "
+        " (t2.snap_sort_count - coalesce(t1.snap_sort_count, 0)) as \"Sort Count\", "
+        " (t2.snap_sort_time - coalesce(t1.snap_sort_time, 0)) as \"Sort Time(us)\", "
+        " (t2.snap_sort_mem_used - coalesce(t1.snap_sort_mem_used, 0)) as \"Sort Mem Used(KB)\", "
+        " (t2.snap_sort_spill_count - coalesce(t1.snap_sort_spill_count, 0)) as \"Sort Spill Count\", "
+        " (t2.snap_sort_spill_size - coalesce(t1.snap_sort_spill_size, 0)) as \"Sort Spill Size(KB)\", "
+        " (t2.snap_hash_count - coalesce(t1.snap_hash_count, 0)) as \"Hash Count\", "
+        " (t2.snap_hash_time - coalesce(t1.snap_hash_time, 0)) as \"Hash Time(us)\", "
+        " (t2.snap_hash_mem_used - coalesce(t1.snap_hash_mem_used, 0)) as \"Hash Mem Used(KB)\", "
+        " (t2.snap_hash_spill_count - coalesce(t1.snap_hash_spill_count, 0)) as \"Hash Spill Count\", "
+        " (t2.snap_hash_spill_size - coalesce(t1.snap_hash_spill_size, 0)) as \"Hash Spill Size(KB)\", "
         " LEFT(t2.snap_query, 25) as \"SQL Text\" "
         "  from (select * from snapshot.snap_summary_statement where snapshot_id = %ld and snap_node_name = '%s') t1"
         " right join "
@@ -1312,6 +1344,16 @@ static void SQLNodeExecutions(report_params* params)
         " (t2.snap_n_blocks_hit - coalesce(t1.snap_n_blocks_hit, 0))) as \"Physical Read\", "
         " (t2.snap_cpu_time - coalesce(t1.snap_cpu_time, 0)) as \"CPU Time(us)\", "
         " (t2.snap_data_io_time - coalesce(t1.snap_data_io_time, 0)) as \"Data IO Time(us)\", "
+        " (t2.snap_sort_count - coalesce(t1.snap_sort_count, 0)) as \"Sort Count\", "
+        " (t2.snap_sort_time - coalesce(t1.snap_sort_time, 0)) as \"Sort Time(us)\", "
+        " (t2.snap_sort_mem_used - coalesce(t1.snap_sort_mem_used, 0)) as \"Sort Mem Used(KB)\", "
+        " (t2.snap_sort_spill_count - coalesce(t1.snap_sort_spill_count, 0)) as \"Sort Spill Count\", "
+        " (t2.snap_sort_spill_size - coalesce(t1.snap_sort_spill_size, 0)) as \"Sort Spill Size(KB)\", "
+        " (t2.snap_hash_count - coalesce(t1.snap_hash_count, 0)) as \"Hash Count\", "
+        " (t2.snap_hash_time - coalesce(t1.snap_hash_time, 0)) as \"Hash Time(us)\", "
+        " (t2.snap_hash_mem_used - coalesce(t1.snap_hash_mem_used, 0)) as \"Hash Mem Used(KB)\", "
+        " (t2.snap_hash_spill_count - coalesce(t1.snap_hash_spill_count, 0)) as \"Hash Spill Count\", "
+        " (t2.snap_hash_spill_size - coalesce(t1.snap_hash_spill_size, 0)) as \"Hash Spill Size(KB)\", "
         " LEFT(t2.snap_query, 25) as \"SQL Text\" "
         "  from (select * from snapshot.snap_summary_statement where snapshot_id = %ld and snap_node_name = '%s') t1"
         " right join "
@@ -1360,6 +1402,16 @@ static void SQLNodePhysicalReads(report_params* params)
         " (t2.snap_n_blocks_fetched - coalesce(t1.snap_n_blocks_fetched, 0)) as \"Logical Read\", "
         " (t2.snap_cpu_time - coalesce(t1.snap_cpu_time, 0)) as \"CPU Time(us)\", "
         " (t2.snap_data_io_time - coalesce(t1.snap_data_io_time, 0)) as \"Data IO Time(us)\", "
+        " (t2.snap_sort_count - coalesce(t1.snap_sort_count, 0)) as \"Sort Count\", "
+        " (t2.snap_sort_time - coalesce(t1.snap_sort_time, 0)) as \"Sort Time(us)\", "
+        " (t2.snap_sort_mem_used - coalesce(t1.snap_sort_mem_used, 0)) as \"Sort Mem Used(KB)\", "
+        " (t2.snap_sort_spill_count - coalesce(t1.snap_sort_spill_count, 0)) as \"Sort Spill Count\", "
+        " (t2.snap_sort_spill_size - coalesce(t1.snap_sort_spill_size, 0)) as \"Sort Spill Size(KB)\", "
+        " (t2.snap_hash_count - coalesce(t1.snap_hash_count, 0)) as \"Hash Count\", "
+        " (t2.snap_hash_time - coalesce(t1.snap_hash_time, 0)) as \"Hash Time(us)\", "
+        " (t2.snap_hash_mem_used - coalesce(t1.snap_hash_mem_used, 0)) as \"Hash Mem Used(KB)\", "
+        " (t2.snap_hash_spill_count - coalesce(t1.snap_hash_spill_count, 0)) as \"Hash Spill Count\", "
+        " (t2.snap_hash_spill_size - coalesce(t1.snap_hash_spill_size, 0)) as \"Hash Spill Size(KB)\", "
         " LEFT(t2.snap_query, 25) as \"SQL Text\" "
         "  from (select * from snapshot.snap_summary_statement where snapshot_id = %ld and snap_node_name = '%s') t1"
         " right join "
@@ -1406,6 +1458,16 @@ static void SQLNodeLogicalReads(report_params* params)
         " (t2.snap_n_blocks_hit - coalesce(t1.snap_n_blocks_hit, 0))) as \"Physical Read\", "
         " (t2.snap_cpu_time - coalesce(t1.snap_cpu_time, 0)) as \"CPU Time(us)\", "
         " (t2.snap_data_io_time - coalesce(t1.snap_data_io_time, 0)) as \"Data IO Time(us)\", "
+        " (t2.snap_sort_count - coalesce(t1.snap_sort_count, 0)) as \"Sort Count\", "
+        " (t2.snap_sort_time - coalesce(t1.snap_sort_time, 0)) as \"Sort Time(us)\", "
+        " (t2.snap_sort_mem_used - coalesce(t1.snap_sort_mem_used, 0)) as \"Sort Mem Used(KB)\", "
+        " (t2.snap_sort_spill_count - coalesce(t1.snap_sort_spill_count, 0)) as \"Sort Spill Count\", "
+        " (t2.snap_sort_spill_size - coalesce(t1.snap_sort_spill_size, 0)) as \"Sort Spill Size(KB)\", "
+        " (t2.snap_hash_count - coalesce(t1.snap_hash_count, 0)) as \"Hash Count\", "
+        " (t2.snap_hash_time - coalesce(t1.snap_hash_time, 0)) as \"Hash Time(us)\", "
+        " (t2.snap_hash_mem_used - coalesce(t1.snap_hash_mem_used, 0)) as \"Hash Mem Used(KB)\", "
+        " (t2.snap_hash_spill_count - coalesce(t1.snap_hash_spill_count, 0)) as \"Hash Spill Count\", "
+        " (t2.snap_hash_spill_size - coalesce(t1.snap_hash_spill_size, 0)) as \"Hash Spill Size(KB)\", "
         " LEFT(t2.snap_query, 25) as \"SQL Text\" "
         "  from (select * from snapshot.snap_summary_statement where snapshot_id = %ld and snap_node_name = '%s') t1"
         " right join "
@@ -1474,6 +1536,16 @@ static void SQLclusterElapsedTime(report_params* params)
         " (t2.snap_n_blocks_hit - coalesce(t1.snap_n_blocks_hit, 0))) as \"Physical Read\", "
         " (t2.snap_cpu_time - coalesce(t1.snap_cpu_time, 0)) as \"CPU Time(us)\", "
         " (t2.snap_data_io_time - coalesce(t1.snap_data_io_time, 0)) as \"Data IO Time(us)\", "
+        " (t2.snap_sort_count - coalesce(t1.snap_sort_count, 0)) as \"Sort Count\", "
+        " (t2.snap_sort_time - coalesce(t1.snap_sort_time, 0)) as \"Sort Time(us)\", "
+        " (t2.snap_sort_mem_used - coalesce(t1.snap_sort_mem_used, 0)) as \"Sort Mem Used(KB)\", "
+        " (t2.snap_sort_spill_count - coalesce(t1.snap_sort_spill_count, 0)) as \"Sort Spill Count\", "
+        " (t2.snap_sort_spill_size - coalesce(t1.snap_sort_spill_size, 0)) as \"Sort Spill Size(KB)\", "
+        " (t2.snap_hash_count - coalesce(t1.snap_hash_count, 0)) as \"Hash Count\", "
+        " (t2.snap_hash_time - coalesce(t1.snap_hash_time, 0)) as \"Hash Time(us)\", "
+        " (t2.snap_hash_mem_used - coalesce(t1.snap_hash_mem_used, 0)) as \"Hash Mem Used(KB)\", "
+        " (t2.snap_hash_spill_count - coalesce(t1.snap_hash_spill_count, 0)) as \"Hash Spill Count\", "
+        " (t2.snap_hash_spill_size - coalesce(t1.snap_hash_spill_size, 0)) as \"Hash Spill Size(KB)\", "
         " LEFT(t2.snap_query, 25) as \"SQL Text\" "
         "  from (select * from snapshot.snap_summary_statement where snapshot_id = %ld) t1"
         " right join (select * from snapshot.snap_summary_statement where snapshot_id = %ld) t2"
@@ -1519,6 +1591,16 @@ static void SQLClusterCPUTime(report_params* params)
         " ((t2.snap_n_blocks_fetched - coalesce(t1.snap_n_blocks_fetched, 0)) - "
         " (t2.snap_n_blocks_hit - coalesce(t1.snap_n_blocks_hit, 0))) as \"Physical Read\", "
         " (t2.snap_data_io_time - coalesce(t1.snap_data_io_time, 0)) as \"Data IO Time(us)\", "
+        " (t2.snap_sort_count - coalesce(t1.snap_sort_count, 0)) as \"Sort Count\", "
+        " (t2.snap_sort_time - coalesce(t1.snap_sort_time, 0)) as \"Sort Time(us)\", "
+        " (t2.snap_sort_mem_used - coalesce(t1.snap_sort_mem_used, 0)) as \"Sort Mem Used(KB)\", "
+        " (t2.snap_sort_spill_count - coalesce(t1.snap_sort_spill_count, 0)) as \"Sort Spill Count\", "
+        " (t2.snap_sort_spill_size - coalesce(t1.snap_sort_spill_size, 0)) as \"Sort Spill Size(KB)\", "
+        " (t2.snap_hash_count - coalesce(t1.snap_hash_count, 0)) as \"Hash Count\", "
+        " (t2.snap_hash_time - coalesce(t1.snap_hash_time, 0)) as \"Hash Time(us)\", "
+        " (t2.snap_hash_mem_used - coalesce(t1.snap_hash_mem_used, 0)) as \"Hash Mem Used(KB)\", "
+        " (t2.snap_hash_spill_count - coalesce(t1.snap_hash_spill_count, 0)) as \"Hash Spill Count\", "
+        " (t2.snap_hash_spill_size - coalesce(t1.snap_hash_spill_size, 0)) as \"Hash Spill Size(KB)\", "
         " LEFT(t2.snap_query, 25) as \"SQL Text\" "
         "  from (select * from snapshot.snap_summary_statement where snapshot_id = %ld) t1"
         " right join (select * from snapshot.snap_summary_statement where snapshot_id = %ld) t2"
@@ -1563,6 +1645,16 @@ static void SQLClusterRowsReturned(report_params* params)
         " (t2.snap_n_blocks_hit - coalesce(t1.snap_n_blocks_hit, 0))) as \"Physical Read\", "
         " (t2.snap_cpu_time - coalesce(t1.snap_cpu_time, 0)) as \"CPU Time(us)\", "
         " (t2.snap_data_io_time - coalesce(t1.snap_data_io_time, 0)) as \"Data IO Time(us)\", "
+        " (t2.snap_sort_count - coalesce(t1.snap_sort_count, 0)) as \"Sort Count\", "
+        " (t2.snap_sort_time - coalesce(t1.snap_sort_time, 0)) as \"Sort Time(us)\", "
+        " (t2.snap_sort_mem_used - coalesce(t1.snap_sort_mem_used, 0)) as \"Sort Mem Used(KB)\", "
+        " (t2.snap_sort_spill_count - coalesce(t1.snap_sort_spill_count, 0)) as \"Sort Spill Count\", "
+        " (t2.snap_sort_spill_size - coalesce(t1.snap_sort_spill_size, 0)) as \"Sort Spill Size(KB)\", "
+        " (t2.snap_hash_count - coalesce(t1.snap_hash_count, 0)) as \"Hash Count\", "
+        " (t2.snap_hash_time - coalesce(t1.snap_hash_time, 0)) as \"Hash Time(us)\", "
+        " (t2.snap_hash_mem_used - coalesce(t1.snap_hash_mem_used, 0)) as \"Hash Mem Used(KB)\", "
+        " (t2.snap_hash_spill_count - coalesce(t1.snap_hash_spill_count, 0)) as \"Hash Spill Count\", "
+        " (t2.snap_hash_spill_size - coalesce(t1.snap_hash_spill_size, 0)) as \"Hash Spill Size(KB)\", "
         " LEFT(t2.snap_query, 25) as \"SQL Text\" "
         "  from (select * from snapshot.snap_summary_statement where snapshot_id = %ld) t1"
         " right join (select * from snapshot.snap_summary_statement where snapshot_id = %ld) t2"
@@ -1607,6 +1699,16 @@ static void SQLClusterRowRead(report_params* params)
         " (t2.snap_n_blocks_hit - coalesce(t1.snap_n_blocks_hit, 0))) as \"Physical Read\", "
         " (t2.snap_cpu_time - coalesce(t1.snap_cpu_time, 0)) as \"CPU Time(us)\", "
         " (t2.snap_data_io_time - coalesce(t1.snap_data_io_time, 0)) as \"Data IO Time(us)\", "
+        " (t2.snap_sort_count - coalesce(t1.snap_sort_count, 0)) as \"Sort Count\", "
+        " (t2.snap_sort_time - coalesce(t1.snap_sort_time, 0)) as \"Sort Time(us)\", "
+        " (t2.snap_sort_mem_used - coalesce(t1.snap_sort_mem_used, 0)) as \"Sort Mem Used(KB)\", "
+        " (t2.snap_sort_spill_count - coalesce(t1.snap_sort_spill_count, 0)) as \"Sort Spill Count\", "
+        " (t2.snap_sort_spill_size - coalesce(t1.snap_sort_spill_size, 0)) as \"Sort Spill Size(KB)\", "
+        " (t2.snap_hash_count - coalesce(t1.snap_hash_count, 0)) as \"Hash Count\", "
+        " (t2.snap_hash_time - coalesce(t1.snap_hash_time, 0)) as \"Hash Time(us)\", "
+        " (t2.snap_hash_mem_used - coalesce(t1.snap_hash_mem_used, 0)) as \"Hash Mem Used(KB)\", "
+        " (t2.snap_hash_spill_count - coalesce(t1.snap_hash_spill_count, 0)) as \"Hash Spill Count\", "
+        " (t2.snap_hash_spill_size - coalesce(t1.snap_hash_spill_size, 0)) as \"Hash Spill Size(KB)\", "
         " LEFT(t2.snap_query, 25) as \"SQL Text\" "
         "  from (select * from snapshot.snap_summary_statement where snapshot_id = %ld) t1"
         " right join (select * from snapshot.snap_summary_statement where snapshot_id = %ld) t2"
@@ -1652,6 +1754,16 @@ static void SQLClusterExecutions(report_params* params)
         " (t2.snap_n_blocks_hit - coalesce(t1.snap_n_blocks_hit, 0))) as \"Physical Read\", "
         " (t2.snap_cpu_time - coalesce(t1.snap_cpu_time, 0)) as \"CPU Time(us)\", "
         " (t2.snap_data_io_time - coalesce(t1.snap_data_io_time, 0)) as \"Data IO Time(us)\", "
+        " (t2.snap_sort_count - coalesce(t1.snap_sort_count, 0)) as \"Sort Count\", "
+        " (t2.snap_sort_time - coalesce(t1.snap_sort_time, 0)) as \"Sort Time(us)\", "
+        " (t2.snap_sort_mem_used - coalesce(t1.snap_sort_mem_used, 0)) as \"Sort Mem Used(KB)\", "
+        " (t2.snap_sort_spill_count - coalesce(t1.snap_sort_spill_count, 0)) as \"Sort Spill Count\", "
+        " (t2.snap_sort_spill_size - coalesce(t1.snap_sort_spill_size, 0)) as \"Sort Spill Size(KB)\", "
+        " (t2.snap_hash_count - coalesce(t1.snap_hash_count, 0)) as \"Hash Count\", "
+        " (t2.snap_hash_time - coalesce(t1.snap_hash_time, 0)) as \"Hash Time(us)\", "
+        " (t2.snap_hash_mem_used - coalesce(t1.snap_hash_mem_used, 0)) as \"Hash Mem Used(KB)\", "
+        " (t2.snap_hash_spill_count - coalesce(t1.snap_hash_spill_count, 0)) as \"Hash Spill Count\", "
+        " (t2.snap_hash_spill_size - coalesce(t1.snap_hash_spill_size, 0)) as \"Hash Spill Size(KB)\", "
         " LEFT(t2.snap_query, 25) as \"SQL Text\" "
         "  from (select * from snapshot.snap_summary_statement where snapshot_id = %ld) t1"
         " right join (select * from snapshot.snap_summary_statement where snapshot_id = %ld) t2"
@@ -1697,6 +1809,16 @@ static void SQLClusterPhysicalReads(report_params* params)
         " (t2.snap_n_blocks_fetched - coalesce(t1.snap_n_blocks_fetched, 0)) as \"Logical Read\", "
         " (t2.snap_cpu_time - coalesce(t1.snap_cpu_time, 0)) as \"CPU Time(us)\", "
         " (t2.snap_data_io_time - coalesce(t1.snap_data_io_time, 0)) as \"Data IO Time(us)\", "
+        " (t2.snap_sort_count - coalesce(t1.snap_sort_count, 0)) as \"Sort Count\", "
+        " (t2.snap_sort_time - coalesce(t1.snap_sort_time, 0)) as \"Sort Time(us)\", "
+        " (t2.snap_sort_mem_used - coalesce(t1.snap_sort_mem_used, 0)) as \"Sort Mem Used(KB)\", "
+        " (t2.snap_sort_spill_count - coalesce(t1.snap_sort_spill_count, 0)) as \"Sort Spill Count\", "
+        " (t2.snap_sort_spill_size - coalesce(t1.snap_sort_spill_size, 0)) as \"Sort Spill Size(KB)\", "
+        " (t2.snap_hash_count - coalesce(t1.snap_hash_count, 0)) as \"Hash Count\", "
+        " (t2.snap_hash_time - coalesce(t1.snap_hash_time, 0)) as \"Hash Time(us)\", "
+        " (t2.snap_hash_mem_used - coalesce(t1.snap_hash_mem_used, 0)) as \"Hash Mem Used(KB)\", "
+        " (t2.snap_hash_spill_count - coalesce(t1.snap_hash_spill_count, 0)) as \"Hash Spill Count\", "
+        " (t2.snap_hash_spill_size - coalesce(t1.snap_hash_spill_size, 0)) as \"Hash Spill Size(KB)\", "
         " LEFT(t2.snap_query, 25) as \"SQL Text\" "
         "  from (select * from snapshot.snap_summary_statement where snapshot_id = %ld) t1"
         " right join (select * from snapshot.snap_summary_statement where snapshot_id = %ld) t2"
@@ -1742,6 +1864,16 @@ static void SQLClusterLogicalReads(report_params* params)
         " (t2.snap_n_blocks_hit - coalesce(t1.snap_n_blocks_hit, 0))) as \"Physical Read\", "
         " (t2.snap_cpu_time - coalesce(t1.snap_cpu_time, 0)) as \"CPU Time(us)\", "
         " (t2.snap_data_io_time - coalesce(t1.snap_data_io_time, 0)) as \"Data IO Time(us)\", "
+        " (t2.snap_sort_count - coalesce(t1.snap_sort_count, 0)) as \"Sort Count\", "
+        " (t2.snap_sort_time - coalesce(t1.snap_sort_time, 0)) as \"Sort Time(us)\", "
+        " (t2.snap_sort_mem_used - coalesce(t1.snap_sort_mem_used, 0)) as \"Sort Mem Used(KB)\", "
+        " (t2.snap_sort_spill_count - coalesce(t1.snap_sort_spill_count, 0)) as \"Sort Spill Count\", "
+        " (t2.snap_sort_spill_size - coalesce(t1.snap_sort_spill_size, 0)) as \"Sort Spill Size(KB)\", "
+        " (t2.snap_hash_count - coalesce(t1.snap_hash_count, 0)) as \"Hash Count\", "
+        " (t2.snap_hash_time - coalesce(t1.snap_hash_time, 0)) as \"Hash Time(us)\", "
+        " (t2.snap_hash_mem_used - coalesce(t1.snap_hash_mem_used, 0)) as \"Hash Mem Used(KB)\", "
+        " (t2.snap_hash_spill_count - coalesce(t1.snap_hash_spill_count, 0)) as \"Hash Spill Count\", "
+        " (t2.snap_hash_spill_size - coalesce(t1.snap_hash_spill_size, 0)) as \"Hash Spill Size(KB)\", "
         " LEFT(t2.snap_query, 25) as \"SQL Text\" "
         "  from (select * from snapshot.snap_summary_statement where snapshot_id = %ld) t1"
         " right join (select * from snapshot.snap_summary_statement where snapshot_id = %ld) t2"
@@ -1813,10 +1945,11 @@ static void AllTablesStat(report_params* params)
         " (snap_2.snap_autovacuum_count - coalesce(snap_1.snap_autovacuum_count, 0)) AS \"Autovacuum Count\","
         " (snap_2.snap_analyze_count - coalesce(snap_1.snap_analyze_count, 0)) AS \"Analyze Count\","
         " (snap_2.snap_autoanalyze_count - coalesce(snap_1.snap_autoanalyze_count, 0)) AS \"Autoanalyze Count\" FROM"
-        " (SELECT * FROM snapshot.snap_global_stat_user_tables"
-        " WHERE snapshot_id = %ld and snap_node_name = '%s') snap_2"
-        " LEFT JOIN (SELECT * FROM snapshot.snap_global_stat_user_tables WHERE snapshot_id = %ld and "
-        "snap_node_name = '%s') snap_1 ON snap_2.snap_relid = snap_1.snap_relid AND snap_2.snap_schemaname = "
+        " (SELECT * FROM snapshot.snap_global_stat_all_tables WHERE snapshot_id = %ld and snap_node_name = '%s' and"
+        " snap_schemaname NOT IN ('pg_catalog', 'information_schema', 'snapshot') AND snap_schemaname !~ '^pg_toast') snap_2"
+        " LEFT JOIN (SELECT * FROM snapshot.snap_global_stat_all_tables WHERE snapshot_id = %ld and "
+        " snap_node_name = '%s' and snap_schemaname NOT IN ('pg_catalog', 'information_schema', 'snapshot') AND"
+        " snap_schemaname !~ '^pg_toast') snap_1 ON snap_2.snap_relid = snap_1.snap_relid AND snap_2.snap_schemaname = "
         "snap_1.snap_schemaname AND snap_2.snap_relname = snap_1.snap_relname AND snap_2.db_name = snap_1.db_name "
         " order by snap_2.db_name, snap_2.snap_schemaname limit 200;",
         params->end_snap_id,
@@ -1851,10 +1984,12 @@ static void GetObjectNodeStat(report_params* params)
         " (snap_2.snap_idx_scan - coalesce(snap_1.snap_idx_scan, 0)) AS \"Index Scan\","
         " (snap_2.snap_idx_tup_read - coalesce(snap_1.snap_idx_tup_read, 0)) AS \"Index Tuple Read\","
         " (snap_2.snap_idx_tup_fetch - coalesce(snap_1.snap_idx_tup_fetch, 0)) AS \"Index Tuple Fetch\" FROM"
-        " (SELECT * FROM snapshot.snap_global_stat_user_indexes "
-        "   WHERE snapshot_id = %ld and snap_node_name = '%s') snap_2"
-        " LEFT JOIN (SELECT * FROM snapshot.snap_global_stat_user_indexes WHERE snapshot_id = %ld "
-        "and snap_node_name = '%s') snap_1 ON snap_2.snap_relid = snap_1.snap_relid AND "
+        " (SELECT * FROM snapshot.snap_global_stat_all_indexes "
+        " WHERE snapshot_id = %ld and snap_node_name = '%s' and snap_schemaname NOT IN"
+        " ('pg_catalog', 'information_schema', 'snapshot') AND snap_schemaname !~ '^pg_toast') snap_2"
+        " LEFT JOIN (SELECT * FROM snapshot.snap_global_stat_all_indexes WHERE snapshot_id = %ld "
+        "and snap_node_name = '%s' and snap_schemaname NOT IN ('pg_catalog', 'information_schema', 'snapshot')"
+        " AND snap_schemaname !~ '^pg_toast') snap_1 ON snap_2.snap_relid = snap_1.snap_relid AND "
         "snap_2.snap_indexrelid = snap_1.snap_indexrelid AND snap_2.snap_schemaname = snap_1.snap_schemaname "
         "AND snap_2.snap_relname = snap_1.snap_relname AND snap_2.snap_indexrelname = snap_1.snap_indexrelname "
         "AND snap_2.db_name = snap_1.db_name order by snap_2.db_name, snap_2.snap_schemaname limit 200;",
@@ -1922,11 +2057,13 @@ static void GlobalTablesStat(report_params* params)
         " (snap_2.snap_autovacuum_count - coalesce(snap_1.snap_autovacuum_count, 0)) AS \"Autovacuum Count\","
         " (snap_2.snap_analyze_count - coalesce(snap_1.snap_analyze_count, 0)) AS \"Analyze Count\","
         " (snap_2.snap_autoanalyze_count - coalesce(snap_1.snap_autoanalyze_count, 0)) AS \"Autoanalyze Count\" FROM"
-        " (SELECT C.snap_relid, T.* FROM snapshot.snap_summary_stat_user_tables as T"
+        " (SELECT C.snap_relid, T.* FROM (select * from snapshot.snap_summary_stat_all_tables where snap_schemaname NOT IN"
+        " ('pg_catalog', 'information_schema', 'snapshot') and snap_schemaname !~ '^pg_toast') as T"
         " LEFT JOIN snapshot.snap_class_vital_info AS C"
         " ON T.snap_relname = C.snap_relname AND T.snap_schemaname = C.snap_schemaname"
         " AND T.snapshot_id = C.snapshot_id AND T.db_name = C.db_name WHERE C.snapshot_id = %ld) AS snap_2 LEFT JOIN"
-        " (SELECT C.snap_relid, T.* FROM snapshot.snap_summary_stat_user_tables as T"
+        " (SELECT C.snap_relid, T.* FROM (select * from snapshot.snap_summary_stat_all_tables where snap_schemaname NOT IN"
+        " ('pg_catalog', 'information_schema', 'snapshot') and snap_schemaname !~ '^pg_toast') as T"
         " LEFT JOIN snapshot.snap_class_vital_info AS C"
         " ON T.snap_relname = C.snap_relname AND T.snap_schemaname = C.snap_schemaname"
         " AND T.snapshot_id = C.snapshot_id AND T.db_name = C.db_name WHERE C.snapshot_id = %ld) AS snap_1"
@@ -1960,7 +2097,8 @@ static void GlobalTableIndex(report_params* params)
         "(snap_2.snap_idx_tup_read - coalesce(snap_1.snap_idx_tup_read, 0)) AS \"Index Tuple Read\","
         " (snap_2.snap_idx_tup_fetch - coalesce(snap_1.snap_idx_tup_fetch, 0)) AS \"Index Tuple Fetch\" FROM"
         " (SELECT Ti.*, I.snap_relid as snap_indexrelid FROM"
-        " (SELECT C.snap_relid, T.* FROM snapshot.snap_summary_stat_user_indexes as T"
+        " (SELECT C.snap_relid, T.* FROM ( select * from snapshot.snap_summary_stat_all_indexes where snap_schemaname NOT IN"
+        " ('pg_catalog', 'information_schema', 'snapshot') AND snap_schemaname !~ '^pg_toast') as T"
         " LEFT JOIN snapshot.snap_class_vital_info AS C ON (T.snap_relname = C.snap_relname AND"
         " T.snap_schemaname = C.snap_schemaname AND T.db_name = C.db_name AND T.snapshot_id = C.snapshot_id) "
         "WHERE T.snapshot_id = %ld) AS Ti LEFT JOIN snapshot.snap_class_vital_info as I ON "
@@ -1968,7 +2106,8 @@ static void GlobalTableIndex(report_params* params)
         " Ti.snap_schemaname = I.snap_schemaname AND Ti.db_name = I.db_name AND Ti.snapshot_id = I.snapshot_id) "
         "WHERE Ti.snapshot_id = %ld) AS snap_2"
         " LEFT JOIN (SELECT Ti.*, I.snap_relid as snap_indexrelid FROM"
-        " (SELECT C.snap_relid, T.* FROM snapshot.snap_summary_stat_user_indexes as T"
+        " (SELECT C.snap_relid, T.* FROM (select * from snapshot.snap_summary_stat_all_indexes where snap_schemaname NOT IN"
+        " ('pg_catalog', 'information_schema', 'snapshot') AND snap_schemaname !~ '^pg_toast') as T"
         " LEFT JOIN snapshot.snap_class_vital_info AS C ON (T.snap_relname = C.snap_relname AND"
         " T.snap_schemaname = C.snap_schemaname AND T.db_name = C.db_name AND T.snapshot_id = C.snapshot_id) "
         "WHERE T.snapshot_id = %ld) AS Ti"
@@ -2269,7 +2408,7 @@ static void GetNodeSqlDetailData(report_params* params)
     pfree_ext(query.data);
 }
 
-static void GetSqlDateilData(report_params* params)
+static void GetSqlDetailData(report_params* params)
 {
     if (is_summary_report(params)) {
         return;
@@ -2340,10 +2479,11 @@ static char* NodeTableIOStrPart(report_params* params)
         " (t2.snap_toast_blks_hit - coalesce(t1.snap_toast_blks_hit, 0)) as toast_blks_hit,"
         " (t2.snap_tidx_blks_read - coalesce(t1.snap_tidx_blks_read, 0)) as tidx_blks_read,"
         " (t2.snap_tidx_blks_hit - coalesce(t1.snap_tidx_blks_hit, 0)) as tidx_blks_hit from"
-        " (select * from snapshot.snap_global_statio_user_tables"
-        " where snapshot_id = %ld and snap_node_name = '%s') t1"
-        " right join (select * from snapshot.snap_global_statio_user_tables where"
-        " snapshot_id = %ld and snap_node_name = '%s') t2"
+        " (select * from snapshot.snap_global_statio_all_tables where snapshot_id = %ld and snap_node_name = '%s' and"
+        " snap_schemaname NOT IN ('pg_catalog', 'information_schema', 'snapshot') AND snap_schemaname !~ '^pg_toast') t1"
+        " right join"
+        " (select * from snapshot.snap_global_statio_all_tables where snapshot_id = %ld and snap_node_name = '%s' and"
+        " snap_schemaname NOT IN ('pg_catalog', 'information_schema', 'snapshot') AND snap_schemaname !~ '^pg_toast') t2"
         " on t1.snap_relid = t2.snap_relid and t2.db_name = t1.db_name and"
         " t2.snap_schemaname = t1.snap_schemaname )  as table_io left join",
         params->begin_snap_id,
@@ -2364,11 +2504,13 @@ static void TableIOBufferhit(report_params* params)
         " (t2.snap_idx_blks_read - coalesce(t1.snap_idx_blks_read, 0)) as idx_blks_read,"
         " (t2.snap_idx_blks_hit - coalesce(t1.snap_idx_blks_hit, 0)) as idx_blks_hit"
         " from"
-        " (select * from snapshot.snap_global_statio_user_indexes"
-        " where snapshot_id = %ld and snap_node_name = '%s') t1"
+        " (select * from snapshot.snap_global_statio_all_indexes"
+        " where snapshot_id = %ld and snap_node_name = '%s' and snap_schemaname NOT IN"
+        " ('pg_catalog', 'information_schema', 'snapshot') AND snap_schemaname !~ '^pg_toast') t1"
         " right join"
-        " (select * from snapshot.snap_global_statio_user_indexes"
-        " where snapshot_id = %ld and snap_node_name = '%s') t2"
+        " (select * from snapshot.snap_global_statio_all_indexes"
+        " where snapshot_id = %ld and snap_node_name = '%s' and snap_schemaname NOT IN"
+        " ('pg_catalog', 'information_schema', 'snapshot') AND snap_schemaname !~ '^pg_toast') t2"
         " on t1.snap_relid = t2.snap_relid and t2.snap_indexrelid = t1.snap_indexrelid and "
         "t2.db_name = t1.db_name and t2.snap_schemaname = t1.snap_schemaname) as idx_io"
         " on table_io.db_name = idx_io.db_name and table_io.snap_schemaname = idx_io.snap_schemaname"
@@ -2412,9 +2554,11 @@ static void GetNodeCacheIOData(report_params* params)
         " (t2.snap_idx_blks_read - coalesce(t1.snap_idx_blks_read, 0)) as \"Idx Blks Read\", "
         " (t2.snap_idx_blks_hit - coalesce(t1.snap_idx_blks_hit, 0)) as \"Idx Blks Hit\" "
         " from "
-        "(select * from snapshot.snap_global_statio_user_indexes where snapshot_id = %ld and snap_node_name = '%s') t1"
-        "  right join (select * from snapshot.snap_global_statio_user_indexes "
-        "where snapshot_id = %ld and snap_node_name = '%s') t2"
+        "(select * from snapshot.snap_global_statio_all_indexes where snapshot_id = %ld and snap_node_name = '%s' and"
+        " snap_schemaname NOT IN ('pg_catalog', 'information_schema', 'snapshot') AND snap_schemaname !~ '^pg_toast') t1"
+        "  right join"
+        " (select * from snapshot.snap_global_statio_all_indexes where snapshot_id = %ld and snap_node_name = '%s' and"
+        " snap_schemaname NOT IN ('pg_catalog', 'information_schema', 'snapshot') AND snap_schemaname !~ '^pg_toast') t2"
         " on t1.snap_relid = t2.snap_relid and t2.snap_indexrelid = t1.snap_indexrelid and "
         " t2.db_name = t1.db_name and t2.snap_schemaname = t1.snap_schemaname "
         " order by \"%%Idx Blks Hit Ratio\" asc limit 200",
@@ -2456,11 +2600,13 @@ static char* ClusterTableIOStrPart(report_params* params)
         " (t2.snap_toast_blks_hit - coalesce(t1.snap_toast_blks_hit, 0)) as toast_blks_hit,"
         " (t2.snap_tidx_blks_read - coalesce(t1.snap_tidx_blks_read, 0)) as tidx_blks_read,"
         " (t2.snap_tidx_blks_hit - coalesce(t1.snap_tidx_blks_hit, 0)) as tidx_blks_hit"
-        " FROM (SELECT C.snap_relid, T.* FROM snapshot.snap_summary_statio_user_tables as T"
+        " FROM (SELECT C.snap_relid, T.* FROM (select * from snapshot.snap_summary_statio_all_tables where snap_schemaname NOT IN"
+        " ('pg_catalog', 'information_schema', 'snapshot') AND snap_schemaname !~ '^pg_toast') as T"
         " LEFT JOIN snapshot.snap_class_vital_info AS C"
         " ON T.snap_relname = C.snap_relname AND T.snap_schemaname = C.snap_schemaname and"
         " T.db_name = C.db_name and T.snapshot_id = C.snapshot_id WHERE C.snapshot_id = %ld) AS t1"
-        " right join (SELECT C.snap_relid, T.* FROM snapshot.snap_summary_statio_user_tables as T"
+        " right join (SELECT C.snap_relid, T.* FROM (select * from snapshot.snap_summary_statio_all_tables where snap_schemaname NOT IN"
+        " ('pg_catalog', 'information_schema', 'snapshot') AND snap_schemaname !~ '^pg_toast') as T"
         " LEFT JOIN snapshot.snap_class_vital_info AS C ON T.snap_relname = C.snap_relname and"
         " T.snap_schemaname = C.snap_schemaname and T.db_name = C.db_name and T.snapshot_id = C.snapshot_id"
         " WHERE C.snapshot_id = %ld) AS t2 ON (t1.snap_relid = t2.snap_relid  and t1.db_name = t2.db_name"
@@ -2487,14 +2633,16 @@ static void ClusterTableIO(report_params* params)
         " sum(t2.snap_idx_blks_read - coalesce(t1.snap_idx_blks_read, 0)) as idx_blks_read,"
         " sum(t2.snap_idx_blks_hit - coalesce(t1.snap_idx_blks_hit, 0)) as idx_blks_hit"
         " FROM (SELECT Ti.*, I.snap_relid as snap_indexrelid FROM"
-        " (SELECT C.snap_relid, T.* FROM snapshot.snap_summary_statio_user_indexes as T"
+        " (SELECT C.snap_relid, T.* FROM (select * from snapshot.snap_summary_statio_all_indexes where snap_schemaname NOT IN"
+        " ('pg_catalog', 'information_schema', 'snapshot') AND snap_schemaname !~ '^pg_toast') as T"
         " LEFT JOIN snapshot.snap_class_vital_info AS C ON (T.snap_relname = C.snap_relname AND"
         " T.snap_schemaname = C.snap_schemaname AND T.db_name = C.db_name AND T.snapshot_id = C.snapshot_id)"
         " WHERE T.snapshot_id = %ld) AS Ti"
         " LEFT JOIN snapshot.snap_class_vital_info as I ON (Ti.snap_indexrelname = I.snap_relname AND"
         " Ti.snap_schemaname = I.snap_schemaname AND Ti.db_name = I.db_name AND Ti.snapshot_id = I.snapshot_id)"
         " WHERE Ti.snapshot_id = %ld) AS t2 LEFT JOIN (SELECT Ti.*, I.snap_relid as snap_indexrelid FROM"
-        " (SELECT C.snap_relid, T.* FROM snapshot.snap_summary_statio_user_indexes as T"
+        " (SELECT C.snap_relid, T.* FROM (select * from snapshot.snap_summary_statio_all_indexes where snap_schemaname NOT IN"
+        " ('pg_catalog', 'information_schema', 'snapshot') AND snap_schemaname !~ '^pg_toast') as T"
         " LEFT JOIN snapshot.snap_class_vital_info AS C ON (T.snap_relname = C.snap_relname AND"
         " T.snap_schemaname = C.snap_schemaname AND T.db_name = C.db_name AND T.snapshot_id = C.snapshot_id)"
         " WHERE T.snapshot_id = %ld) AS Ti"
@@ -2544,7 +2692,8 @@ static void GetClusterCacheIOData(report_params* params)
         " (t2.snap_idx_blks_read - coalesce(t1.snap_idx_blks_read, 0)) as \"Idx Blks Read\", "
         " (t2.snap_idx_blks_hit - coalesce(t1.snap_idx_blks_hit, 0)) as \"Idx Blks Hit\" "
         " FROM (SELECT Ti.*, I.snap_relid as snap_indexrelid FROM"
-        " (SELECT C.snap_relid, T.* FROM snapshot.snap_summary_statio_user_indexes as T"
+        " (SELECT C.snap_relid, T.* FROM (select * from snapshot.snap_summary_statio_all_indexes where snap_schemaname NOT IN"
+        " ('pg_catalog', 'information_schema', 'snapshot') AND snap_schemaname !~ '^pg_toast') as T"
         " LEFT JOIN snapshot.snap_class_vital_info AS C ON (T.snap_relname = C.snap_relname AND"
         " T.snap_schemaname = C.snap_schemaname AND T.db_name = C.db_name AND T.snapshot_id = C.snapshot_id) "
         "WHERE T.snapshot_id = %ld) AS Ti"
@@ -2552,7 +2701,8 @@ static void GetClusterCacheIOData(report_params* params)
         " Ti.snap_schemaname = I.snap_schemaname AND Ti.db_name = I.db_name AND Ti.snapshot_id = I.snapshot_id) "
         "WHERE Ti.snapshot_id = %ld) AS t2"
         " LEFT JOIN (SELECT Ti.*, I.snap_relid as snap_indexrelid FROM"
-        " (SELECT C.snap_relid, T.* FROM snapshot.snap_summary_statio_user_indexes as T"
+        " (SELECT C.snap_relid, T.* FROM (select * from snapshot.snap_summary_statio_all_indexes where snap_schemaname NOT IN"
+        " ('pg_catalog', 'information_schema', 'snapshot') AND snap_schemaname !~ '^pg_toast') as T"
         " LEFT JOIN snapshot.snap_class_vital_info AS C ON (T.snap_relname = C.snap_relname AND"
         " T.snap_schemaname = C.snap_schemaname AND T.db_name = C.db_name AND T.snapshot_id = C.snapshot_id) "
         "WHERE T.snapshot_id = %ld) AS Ti"
@@ -2597,6 +2747,8 @@ static void GetCacheIOData(report_params* params)
  */
 int64 get_snap_gap_by_table(report_params* params, const char* table_name)
 {
+    Assert(params);
+    Assert(table_name);
     int64 result = -1;
     bool is_null = false;
 
@@ -3080,7 +3232,7 @@ static void get_summary_load_profile_file_io(report_params* params, dashboard* d
     pfree(query.data);
 }
 
-/* load profile - logins */
+/* load profile - logons */
 static void get_summary_load_profile_logins(report_params* params, dashboard* dash)
 {
     if (!pre_check_load_profile(params, dash)) {
@@ -3402,11 +3554,11 @@ static void get_summary_top10event_waitevent(report_params* params)
             "  from "
             "     (select snap_event, snap_wait, snap_total_wait_time as total_time, snap_type "
             "        from snapshot.snap_global_wait_events "
-            "        where snapshot_id = %ld and snap_event != 'none' "
+            "        where snapshot_id = %ld and snap_event != 'none' and snap_event != 'wait cmd' "
             "              and snap_event != 'unknown_lwlock_event' and snap_nodename = '%s') snap_1, "
             "     (select snap_event, snap_wait, snap_total_wait_time as total_time, snap_type "
             "        from snapshot.snap_global_wait_events "
-            "        where snapshot_id = %ld and snap_event != 'none' "
+            "        where snapshot_id = %ld and snap_event != 'none' and snap_event != 'wait cmd' "
             "              and snap_event != 'unknown_lwlock_event' and snap_nodename = '%s') snap_2 "
             "  where snap_2.snap_event = snap_1.snap_event "
             "  order by snap_total_wait_time desc limit 10) "
@@ -3476,10 +3628,7 @@ static void get_summary_wait_classes(report_params* params)
         "    group by snap_type) snap_1 "
         "    on snap_2.type = snap_1.type "
         "    order by \"Total Wait Time(us)\" desc",
-        params->end_snap_id,
-        get_report_node(params),
-        params->begin_snap_id,
-        get_report_node(params));
+        params->end_snap_id, get_report_node(params), params->begin_snap_id, get_report_node(params));
 
     GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
     pfree(query.data);
@@ -3974,12 +4123,38 @@ static bool IsSnapIdValid(report_params* params)
     return false;
 }
 
+/* check if the node name is valid */
+static bool IsNodeNameValid(const report_params* params)
+{
+    if (params->report_node == NULL) {
+        return false;
+    }
+
+#ifndef ENABLE_MULTIPLE_NODES
+    const char *currentNodeName = NULL;
+    if (!g_instance.attr.attr_common.PGXCNodeName || g_instance.attr.attr_common.PGXCNodeName[0] == '\0') {
+        currentNodeName = "unknown name";
+    } else {
+        currentNodeName = g_instance.attr.attr_common.PGXCNodeName;
+    }
+
+    if (strncmp(params->report_node, currentNodeName, strlen(currentNodeName)) != 0) {
+        return false;
+    }
+#else
+    if (!OidIsValid(get_pgxc_nodeoid(params->report_node))) {
+        return false;
+    }
+#endif
+
+    return true;
+}
+
 /*
  * check generate_wdr_report proc's parameters
  */
 static void check_report_parameter(report_params* params)
 {
-    const char *currentNodeName = NULL;
     if (params == NULL) {
         return;
     }
@@ -4009,18 +4184,8 @@ static void check_report_parameter(report_params* params)
             (errcode(ERRCODE_INTERNAL_ERROR),
                 errmsg("invalid report scope, should be %s or %s", g_clusterScope, g_nodeScope)));
     }
-    /* Checking PGXCNodeName just for supporting openGauss
-     * It should be changed to check the node name's oid isValid in distributed version.
-     */
-    if (!g_instance.attr.attr_common.PGXCNodeName || g_instance.attr.attr_common.PGXCNodeName[0] == '\0') {
-        currentNodeName = "unknown name";
-    } else {
-        currentNodeName = g_instance.attr.attr_common.PGXCNodeName;
-    }
 
-    if ((strncmp(params->report_scope, g_nodeScope, strlen(g_nodeScope)) == 0) &&
-        ((params->report_node == NULL) || 
-        strncmp(params->report_node, currentNodeName, strlen(currentNodeName)) != 0)) {
+    if ((strncmp(params->report_scope, g_nodeScope, strlen(g_nodeScope)) == 0) && !IsNodeNameValid(params)) {
         ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("invalid report node name.")));
     }
 }
@@ -4090,7 +4255,7 @@ void GenReport::get_report_data(report_params* params)
     GetConfigSettings(params);
 
     /* detail - sql detail */
-    GetSqlDateilData(params);
+    GetSqlDetailData(params);
 }
 
 /*

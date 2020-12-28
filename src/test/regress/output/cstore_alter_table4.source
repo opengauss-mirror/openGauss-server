@@ -427,7 +427,7 @@ Has OIDs: no
 Options: orientation=column, compression=low
 
 ALTER TABLE alter_addcols_84 ALTER c3 TYPE int, ALTER c4 TYPE int;  --failed
-ERROR:  invalid input syntax for integer: "abcdefgh  "
+--?ERROR:  invalid input syntax for integer: ".*
 \d+ alter_addcols_84;
                Table "cstore_alter_table_4.alter_addcols_84"
  Column |     Type      | Modifiers | Storage  | Stats target | Description 

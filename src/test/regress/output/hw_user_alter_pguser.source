@@ -1,45 +1,45 @@
 /*-----------------------------------------------------------------
-		test alter user with pguser (openGauss8888888)
+		test alter user with pguser (DTS2017031606532)
 -----------------------------------------------------------------*/
 create or replace function ismd5(pwd text) returns bool as $$ begin return left(pwd, 3) = 'md5'; end; $$ language plpgsql;
 --alter with admin
-create user md5user_default with password 'Ttest@123';
-create role md5role_default with password 'Ttest@123';
+create user md5user_default with password 'Gauss@123';
+create role md5role_default with password 'Gauss@123';
 alter user md5user_default with pguser;	--error
 ERROR:  option "pguser" not recognized
 alter role md5role_default with pguser;	--error
 ERROR:  option "pguser" not recognized
-alter user md5user_default with pguser password 'Ttest@1234';
+alter user md5user_default with pguser password 'Gauss@1234';
 ERROR:  option "pguser" not recognized
-alter role md5role_default with pguser password 'Ttest@1234';
+alter role md5role_default with pguser password 'Gauss@1234';
 ERROR:  option "pguser" not recognized
 alter user md5user_default with pguser;	--OK
 ERROR:  option "pguser" not recognized
 alter role md5role_default with pguser;	--OK
 ERROR:  option "pguser" not recognized
 select usename, ismd5(passwd) from pg_shadow where usename ilike 'md5%' order by usename;	--md5 now
-     usename     | ismd5
+     usename     | ismd5 
 -----------------+-------
  md5user_default | f
 (1 row)
 
 select rolname, ismd5(rolpassword) from pg_authid where rolname ilike 'md5%' order by rolname;	--md5 now
-     rolname     | ismd5
+     rolname     | ismd5 
 -----------------+-------
  md5role_default | f
  md5user_default | f
 (2 rows)
 
-alter user md5user_default with password 'Ttest@12345';
-alter role md5role_default with password 'Ttest@12345';
+alter user md5user_default with password 'Gauss@12345';
+alter role md5role_default with password 'Gauss@12345';
 select usename, ismd5(passwd) from pg_shadow where usename ilike 'md5%' order by usename;	--md5 still
-     usename     | ismd5
+     usename     | ismd5 
 -----------------+-------
  md5user_default | f
 (1 row)
 
 select rolname, ismd5(rolpassword) from pg_authid where rolname ilike 'md5%' order by rolname;	--md5 still
-     rolname     | ismd5
+     rolname     | ismd5 
 -----------------+-------
  md5role_default | f
  md5user_default | f
@@ -48,54 +48,54 @@ select rolname, ismd5(rolpassword) from pg_authid where rolname ilike 'md5%' ord
 drop user md5user_default;
 drop role md5role_default;
 --alter by userself
-create user md5user_default with password 'Ttest@12345';
-set role md5user_default password 'Ttest@12345';
+create user md5user_default with password 'Gauss@12345';
+set role md5user_default password 'Gauss@12345';
 alter user md5user_default with pguser;	--error
 ERROR:  option "pguser" not recognized
-alter user md5user_default with pguser identified by 'Ttest@123456' replace 'Ttest@12344'; --invalid password;
+alter user md5user_default with pguser identified by 'Gauss@123456' replace 'Gauss@12344'; --invalid password;
 ERROR:  option "pguser" not recognized
-alter user md5user_default with pguser identified by 'Ttest@123456' replace 'Ttest@12345'; --OK
+alter user md5user_default with pguser identified by 'Gauss@123456' replace 'Gauss@12345'; --OK
 ERROR:  option "pguser" not recognized
 \c
 select usename, ismd5(passwd) from pg_shadow where usename ilike 'md5%' order by usename;	--md5 now
-     usename     | ismd5
+     usename     | ismd5 
 -----------------+-------
  md5user_default | f
 (1 row)
 
 select rolname, ismd5(rolpassword) from pg_authid where rolname ilike 'md5%' order by rolname;	--md5 now
-     rolname     | ismd5
+     rolname     | ismd5 
 -----------------+-------
  md5user_default | f
 (1 row)
 
-set role md5user_default password 'Ttest@123456';
+set role md5user_default password 'Gauss@123456';
 ERROR:  Invalid username/password,set role denied.
 alter user md5user_default with pguser;	--OK
 ERROR:  option "pguser" not recognized
-alter user md5user_default identified by 'Ttest@123456' replace 'Ttest@12344'; --invalid password;
-alter user md5user_default identified by 'Ttest@1234567' replace 'Ttest@123456'; --OK
+alter user md5user_default identified by 'Gauss@123456' replace 'Gauss@12344'; --invalid password;
+alter user md5user_default identified by 'Gauss@1234567' replace 'Gauss@123456'; --OK
 \c
 select usename, ismd5(passwd) from pg_shadow where usename ilike 'md5%' order by usename;	--md5 still
-     usename     | ismd5
+     usename     | ismd5 
 -----------------+-------
  md5user_default | f
 (1 row)
 
 select rolname, ismd5(rolpassword) from pg_authid where rolname ilike 'md5%' order by rolname;	--md5 still
-     rolname     | ismd5
+     rolname     | ismd5 
 -----------------+-------
  md5user_default | f
 (1 row)
 
 drop user md5user_default cascade;
 drop function ismd5;
-create user test_createrole_lock_cr with createrole password "TestPwd@123";
-create user test_createrole_lock_sys with sysadmin password "TestPwd@123";
-create user test_createrole_lock_audit with auditadmin password "TestPwd@123";
-\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_createrole_lock_cr -W TestPwd@123 -c "Alter user test_createrole_lock_sys account lock;"
+create user test_createrole_lock_cr with createrole password "Gauss_234";
+create user test_createrole_lock_sys with sysadmin password "Gauss_234";
+create user test_createrole_lock_audit with auditadmin password "Gauss_234";
+\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_createrole_lock_cr -W Gauss_234 -c "Alter user test_createrole_lock_sys account lock;"
 ERROR:  Permission denied.
-\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_createrole_lock_cr -W TestPwd@123 -c "Alter user test_createrole_lock_audit account lock;"
+\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_createrole_lock_cr -W Gauss_234 -c "Alter user test_createrole_lock_audit account lock;"
 ALTER ROLE
 drop user test_createrole_lock_cr;
 drop user test_createrole_lock_sys;
@@ -108,6 +108,9 @@ CREATE USER user_name [ [ WITH ] option [ ... ] ] [ ENCRYPTED | UNENCRYPTED ] { 
 
 where option can be:
 {SYSADMIN | NOSYSADMIN}
+    | {MONADMIN | NOMONADMIN}
+    | {OPRADMIN | NOOPRADMIN}
+    | {POLADMIN | NOPOLADMIN}
     | {AUDITADMIN | NOAUDITADMIN}
     | {CREATEDB | NOCREATEDB}
     | {USEFT | NOUSEFT}
@@ -117,12 +120,15 @@ where option can be:
     | {REPLICATION | NOREPLICATION}
     | {INDEPENDENT | NOINDEPENDENT}
     | {VCADMIN | NOVCADMIN}
+    | {PERSISTENCE | NOPERSISTENCE}
     | CONNECTION LIMIT connlimit
     | VALID BEGIN 'timestamp'
     | VALID UNTIL 'timestamp'
     | RESOURCE POOL 'respool'
     | USER GROUP 'groupuser'
     | PERM SPACE 'spacelimit'
+    | TEMP SPACE 'tmpspacelimit'
+    | SPILL SPACE 'spillspacelimit'
     | NODE GROUP logic_cluster_name
     | IN ROLE role_name [, ...]
     | IN GROUP role_name [, ...]
@@ -143,6 +149,9 @@ CREATE ROLE role_name [ [ WITH ] option [ ... ] ] [ ENCRYPTED | UNENCRYPTED ] { 
 
 where option can be:
 {SYSADMIN | NOSYSADMIN}
+    | {MONADMIN | NOMONADMIN}
+    | {OPRADMIN | NOOPRADMIN}
+    | {POLADMIN | NOPOLADMIN}
     | {AUDITADMIN | NOAUDITADMIN}
     | {CREATEDB | NOCREATEDB}
     | {USEFT | NOUSEFT}
@@ -152,12 +161,15 @@ where option can be:
     | {REPLICATION | NOREPLICATION}
     | {INDEPENDENT | NOINDEPENDENT}
     | {VCADMIN | NOVCADMIN}
+    | {PERSISTENCE | NOPERSISTENCE}
     | CONNECTION LIMIT connlimit
     | VALID BEGIN 'timestamp'
     | VALID UNTIL 'timestamp'
     | RESOURCE POOL 'respool'
     | USER GROUP 'groupuser'
     | PERM SPACE 'spacelimit'
+    | TEMP SPACE 'tmpspacelimit'
+    | SPILL SPACE 'spillspacelimit'
     | NODE GROUP logic_cluster_name
     | IN ROLE role_name [, ...]
     | IN GROUP role_name [, ...]
@@ -188,11 +200,15 @@ where option can be:
     | {INHERIT | NOINHERIT}
     | {AUDITADMIN | NOAUDITADMIN}
     | {SYSADMIN | NOSYSADMIN}
+    | {MONADMIN | NOMONADMIN}
+    | {OPRADMIN | NOOPRADMIN}
+    | {POLADMIN | NOPOLADMIN}
     | {USEFT | NOUSEFT}
     | {LOGIN | NOLOGIN}
     | {REPLICATION | NOREPLICATION}
     | {INDEPENDENT | NOINDEPENDENT}
     | {VCADMIN | NOVCADMIN}
+    | {PERSISTENCE | NOPERSISTENCE}
     | CONNECTION LIMIT connlimit
     | [ ENCRYPTED | UNENCRYPTED ] PASSWORD { 'password' | DISABLE }
     | [ ENCRYPTED | UNENCRYPTED ] IDENTIFIED BY { 'password' [ REPLACE 'old_password' ] | DISABLE }
@@ -201,6 +217,8 @@ where option can be:
     | RESOURCE POOL 'respool'
     | USER GROUP 'groupuser'
     | PERM SPACE 'spacelimit'
+    | TEMP SPACE 'tmpspacelimit'
+    | SPILL SPACE 'spillspacelimit'
     | NODE GROUP logic_cluster_name
     | ACCOUNT { LOCK | UNLOCK }
     | PGUSER
@@ -223,11 +241,15 @@ where option can be:
     | {INHERIT | NOINHERIT}
     | {AUDITADMIN | NOAUDITADMIN}
     | {SYSADMIN | NOSYSADMIN}
+    | {MONADMIN | NOMONADMIN}
+    | {OPRADMIN | NOOPRADMIN}
+    | {POLADMIN | NOPOLADMIN}
     | {USEFT | NOUSEFT}
     | {LOGIN | NOLOGIN}
     | {REPLICATION | NOREPLICATION}
     | {INDEPENDENT | NOINDEPENDENT}
     | {VCADMIN | NOVCADMIN}
+    | {PERSISTENCE | NOPERSISTENCE}
     | CONNECTION LIMIT connlimit
     | [ ENCRYPTED | UNENCRYPTED ] PASSWORD { 'password' | DISABLE }
     | [ ENCRYPTED | UNENCRYPTED ] IDENTIFIED BY { 'password' [ REPLACE 'old_password' ] | DISABLE }
@@ -236,6 +258,8 @@ where option can be:
     | RESOURCE POOL 'respool'
     | USER GROUP 'groupuser'
     | PERM SPACE 'spacelimit'
+    | TEMP SPACE 'tmpspacelimit'
+    | SPILL SPACE 'spillspacelimit'
     | NODE GROUP logic_cluster_name
     | ACCOUNT { LOCK | UNLOCK }
     | PGUSER
@@ -248,6 +272,9 @@ CREATE GROUP group_name [ [ WITH ] option [ ... ] ] [ ENCRYPTED | UNENCRYPTED ] 
 
 where option can be:
 {SYSADMIN | NOSYSADMIN}
+    | {MONADMIN | NOMONADMIN}
+    | {OPRADMIN | NOOPRADMIN}
+    | {POLADMIN | NOPOLADMIN}
     | {AUDITADMIN | NOAUDITADMIN}
     | {CREATEDB | NOCREATEDB}
     | {USEFT | NOUSEFT}
@@ -257,12 +284,15 @@ where option can be:
     | {REPLICATION | NOREPLICATION}
     | {INDEPENDENT | NOINDEPENDENT}
     | {VCADMIN | NOVCADMIN}
+    | {PERSISTENCE | NOPERSISTENCE}
     | CONNECTION LIMIT connlimit
     | VALID BEGIN 'timestamp'
     | VALID UNTIL 'timestamp'
     | RESOURCE POOL 'respool'
     | USER GROUP 'groupuser'
     | PERM SPACE 'spacelimit'
+    | TEMP SPACE 'tmpspacelimit'
+    | SPILL SPACE 'spillspacelimit'
     | NODE GROUP logic_group_name
     | IN ROLE role_name [, ...]
     | IN GROUP role_name [, ...]
@@ -276,101 +306,101 @@ where option can be:
     | PGUSER
 
 -- Test PG system functions by normal user
-create user test_normal_user password 'Ttest@123';
-\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_normal_user -W Ttest@123 -c "select * from pg_ls_dir('./');"
+create user test_normal_user password 'Gauss@123';
+\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_normal_user -W Gauss@123 -c "select * from pg_ls_dir('./');"
 ERROR:  must be initial account to get directory listings
-\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_normal_user -W Ttest@123 -c "select * from pg_read_file('tmp.txt');"
+\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_normal_user -W Gauss@123 -c "select * from pg_read_file('tmp.txt');"
 ERROR:  must be initial account to read files
-\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_normal_user -W Ttest@123 -c "select * from pg_read_file('tmp.txt', 2, 9);"
+\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_normal_user -W Gauss@123 -c "select * from pg_read_file('tmp.txt', 2, 9);"
 ERROR:  must be initial account to read files
-\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_normal_user -W Ttest@123 -c "select * from pg_read_binary_file('tmp.txt');"
+\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_normal_user -W Gauss@123 -c "select * from pg_read_binary_file('tmp.txt');"
 ERROR:  must be initial account to read files
-\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_normal_user -W Ttest@123 -c "select * from pg_stat_file('tmp.txt');"
+\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_normal_user -W Gauss@123 -c "select * from pg_stat_file('tmp.txt');"
 ERROR:  must be initial account to get file information
-\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_normal_user -W Ttest@123 -c "select * from pg_stat_file_recursive('tmp.txt');"
+\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_normal_user -W Gauss@123 -c "select * from pg_stat_file_recursive('tmp.txt');"
 ERROR:  must be initial account to get file information
 drop user test_normal_user cascade;
 -- End Test PG system functions
 --Test client ecological compatibility with PG
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_encryption_type=1" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_encryption_type=1" >/dev/null 2>&1
 select pg_sleep(1);
- pg_sleep
+ pg_sleep 
 ----------
-
+ 
 (1 row)
 
-create user md5_compatible_user1 with pguser password 'ttest@123';
+create user md5_compatible_user1 with pguser password 'gauss@123';
 NOTICE:  The encrypted password contains MD5 ciphertext, which is not secure.
 create user md5_compatible_user2 password 'md529c2b5b4676f802b4e20e393024e280a';
 NOTICE:  Using encrypted password directly now and it is not recommended.
 HINT:  The role can't be used if you don't know the original password before encrypted.
-create user normal_compatible_user1 password 'ttest@123';
+create user normal_compatible_user1 password 'gauss@123';
 NOTICE:  The encrypted password contains MD5 ciphertext, which is not secure.
 create user normal_compatible_user2 password 'sha256fd063ca2fa3716f5a0db1b60879cac866284b81c1c9f8258138613991c567c7c1e98455895ed488f4d4a2b8f3f6901fd4bc7f608d5f3145acd4effce514535e42c83975ab970e69699a5448270540c669ad06562360125618d1f249a238882e2md5eec0ac50069b1884cb639071e3dee4ebecdfecefade';
 NOTICE:  Using encrypted password directly now and it is not recommended.
 HINT:  The role can't be used if you don't know the original password before encrypted.
 select length(rolpassword) from pg_authid where rolname = 'md5_compatible_user1';
- length
+ length 
 --------
     244
 (1 row)
 
 select length(rolpassword) from pg_authid where rolname = 'md5_compatible_user2';
- length
+ length 
 --------
      35
 (1 row)
 
 select length(rolpassword) from pg_authid where rolname = 'normal_compatible_user1';
- length
+ length 
 --------
     244
 (1 row)
 
 select length(rolpassword) from pg_authid where rolname = 'normal_compatible_user2';
- length
+ length 
 --------
     244
 (1 row)
 
-set role md5_compatible_user1 password 'ttest@123';
+set role md5_compatible_user1 password 'gauss@123';
 reset role;
-set role md5_compatible_user2 password 'ttest@123';
+set role md5_compatible_user2 password 'gauss@123';
 reset role;
 set role md5_compatible_user2 password 'md529c2b5b4676f802b4e20e393024e280a';
 NOTICE:  Using encrypted password directly is not recommended.
-alter role md5_compatible_user2 identified by 'md529c2b5b4676f802b4e20e393024e280a' replace 'ttest@123';
+alter role md5_compatible_user2 identified by 'md529c2b5b4676f802b4e20e393024e280a' replace 'gauss@123';
 ERROR:  Password can't contain more than 32 characters.
-alter role md5_compatible_user2 identified by 'Ttest@123' replace 'md529c2b5b4676f802b4e20e393024e280a';
+alter role md5_compatible_user2 identified by 'Gauss@123' replace 'md529c2b5b4676f802b4e20e393024e280a';
 ERROR:  The old password is invalid.
-alter role md5_compatible_user2 identified by 'Ttest@123' replace 'ttest@123';
+alter role md5_compatible_user2 identified by 'Gauss@123' replace 'gauss@123';
 NOTICE:  The encrypted password contains MD5 ciphertext, which is not secure.
 reset role;
-set role normal_compatible_user1 password 'ttest@123';
+set role normal_compatible_user1 password 'gauss@123';
 reset role;
-set role normal_compatible_user2 password 'ttest@123';
+set role normal_compatible_user2 password 'gauss@123';
 reset role;
 set role normal_compatible_user2 password 'sha256fd063ca2fa3716f5a0db1b60879cac866284b81c1c9f8258138613991c567c7c1e98455895ed488f4d4a2b8f3f6901fd4bc7f608d5f3145acd4effce514535e42c83975ab970e69699a5448270540c669ad06562360125618d1f249a238882e2md5eec0ac50069b1884cb639071e3dee4ebecdfecefade';
 NOTICE:  Using encrypted password directly is not recommended.
-alter role normal_compatible_user2 identified by 'sha256fd063ca2fa3716f5a0db1b60879cac866284b81c1c9f8258138613991c567c7c1e98455895ed488f4d4a2b8f3f6901fd4bc7f608d5f3145acd4effce514535e42c83975ab970e69699a5448270540c669ad06562360125618d1f249a238882e2md5eec0ac50069b1884cb639071e3dee4ebecdfecefade' replace 'ttest@123';
+alter role normal_compatible_user2 identified by 'sha256fd063ca2fa3716f5a0db1b60879cac866284b81c1c9f8258138613991c567c7c1e98455895ed488f4d4a2b8f3f6901fd4bc7f608d5f3145acd4effce514535e42c83975ab970e69699a5448270540c669ad06562360125618d1f249a238882e2md5eec0ac50069b1884cb639071e3dee4ebecdfecefade' replace 'gauss@123';
 ERROR:  Password can't contain more than 32 characters.
-alter role normal_compatible_user2 identified by 'Ttest@123' replace 'sha256fd063ca2fa3716f5a0db1b60879cac866284b81c1c9f8258138613991c567c7c1e98455895ed488f4d4a2b8f3f6901fd4bc7f608d5f3145acd4effce514535e42c83975ab970e69699a5448270540c669ad06562360125618d1f249a238882e2md5eec0ac50069b1884cb639071e3dee4ebecdfecefade';
+alter role normal_compatible_user2 identified by 'Gauss@123' replace 'sha256fd063ca2fa3716f5a0db1b60879cac866284b81c1c9f8258138613991c567c7c1e98455895ed488f4d4a2b8f3f6901fd4bc7f608d5f3145acd4effce514535e42c83975ab970e69699a5448270540c669ad06562360125618d1f249a238882e2md5eec0ac50069b1884cb639071e3dee4ebecdfecefade';
 ERROR:  The old password is invalid.
-alter role normal_compatible_user2 identified by 'Ttest@123' replace 'ttest@123';
+alter role normal_compatible_user2 identified by 'Gauss@123' replace 'gauss@123';
 NOTICE:  The encrypted password contains MD5 ciphertext, which is not secure.
 reset role;
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_encryption_type=2" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_encryption_type=2" >/dev/null 2>&1
 select pg_sleep(1);
- pg_sleep
+ pg_sleep 
 ----------
-
+ 
 (1 row)
 
-set role normal_compatible_user1 password 'ttest@123';
-alter role normal_compatible_user1 identified by 'Ttest@123' replace 'ttest@123';
+set role normal_compatible_user1 password 'gauss@123';
+alter role normal_compatible_user1 identified by 'Gauss@123' replace 'gauss@123';
 reset role;
 select length(rolpassword) from pg_authid where rolname = 'normal_compatible_user1';
- length
+ length 
 --------
     209
 (1 row)
@@ -380,13 +410,13 @@ drop user md5_compatible_user2;
 drop user normal_compatible_user1;
 drop user normal_compatible_user2;
 --The supported special character of password are: ~!@#$%^&*()-_=+\\|[{}];:,<.>/?
-create role special_character_password_role password 'ttest""123';
+create role special_character_password_role password 'gauss""123';
 WARNING:  Characters except numbers, alphabetic characters and special characters are not recommended in password.
 ERROR:  Password must contain at least three kinds of characters.
-drop role special_character_password_role;
+drop role special_character_password_role; 
 ERROR:  role "special_character_password_role" does not exist
 --test create table for non-eixt/invalid/available schema
-create user schematest_user1 password 'Ttest_234';
+create user schematest_user1 password 'Gauss_234';
 create schema schematest_schema_1;
 set current_schema=schematest_schema_1;
 create table schematest_tbtest(a int); drop table schematest_schema_1.schematest_tbtest;
@@ -398,7 +428,7 @@ create table schema_no_exit.schematest_tbtest(a int);
 ERROR:  schema "schema_no_exit" does not exist
 set current_schema=schema_no_exit,schematest_schema_1;
 create table schematest_tbtest(a int); drop table schematest_schema_1.schematest_tbtest;
-set role schematest_user1 password "TestPwd@123";
+set role schematest_user1 password "Gauss_234";
 set current_schema=schematest_schema_1;
 create table schematest_tbtest(a int);
 ERROR:  permission denied for schema schematest_schema_1
@@ -421,20 +451,20 @@ drop schema schematest_schema_1;
 --test disable gram for iam authenication
 create user iam_auth_user01 password disable;
 create user iam_auth_user02 identified by disable;
-alter user iam_auth_user01 password 'ttest@123';
-alter user iam_auth_user02 identified by 'ttest@123';
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -U iam_auth_user01 -W ttest@123 -c "alter user iam_auth_user01 password disable;"
+alter user iam_auth_user01 password 'gauss@123';
+alter user iam_auth_user02 identified by 'gauss@123';
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U iam_auth_user01 -W gauss@123 -c "alter user iam_auth_user01 password disable;"
 ERROR:  Only system admin can disable user's password.
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -U iam_auth_user02 -W ttest@123 -c "alter user iam_auth_user02 identified by disable;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U iam_auth_user02 -W gauss@123 -c "alter user iam_auth_user02 identified by disable;"
 ERROR:  Only system admin can disable user's password.
 alter user iam_auth_user01 password disable;
 alter user iam_auth_user02 identified by disable;
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -U iam_auth_user01 -W ttest@123 -c "\q"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U iam_auth_user01 -W gauss@123 -c "\q"
 gsql: FATAL:  Invalid username/password,login denied.
-\! @abs_bindir@/gsql -d postgres -p @portstring@ -U iam_auth_user02 -W ttest@123 -c "\q"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U iam_auth_user02 -W gauss@123 -c "\q"
 gsql: FATAL:  Invalid username/password,login denied.
-alter user iam_auth_user01 password 'ttest@234';
-alter user iam_auth_user02 identified by 'ttest@234' replace 'ttest@34';
+alter user iam_auth_user01 password 'gauss@234';
+alter user iam_auth_user02 identified by 'gauss@234' replace 'gauss@34';
 drop user iam_auth_user01;
 drop user iam_auth_user02;
 --test user/role name check

@@ -14,7 +14,7 @@ set resource_track_level=operator;
  839680
 (3 rows)
 
-/* Test data skew */explain (analyze on ,verbose off ,costs off ,cpu off, detail off, nodes off, num_nodes off, buffers off, timing off) 
+/* Test data skew */explain (analyze on ,verbose off ,costs off ,cpu off, detail off, num_buffers off, timing off) 
 select count(*), c1 from t13 group by 2 order by 2;
                        QUERY PLAN                        
 ---------------------------------------------------------
@@ -32,7 +32,7 @@ select count(*), c1 from t13 group by 2 order by 2;
 select query, query_plan, warning from pgxc_wlm_session_history where query like '%Test data skew%' order by 3,2,1;
                                                                    query                                                                   |                                             query_plan                                             |                                warning                                 
 -------------------------------------------------------------------------------------------------------------------------------------------+----------------------------------------------------------------------------------------------------+------------------------------------------------------------------------
---? /\* Test data skew \*/explain (analyze on ,verbose off ,costs off ,cpu off, detail off, nodes off, num_nodes off, buffers off, timing off) +| 1 | Streaming (type: GATHER)  (.*)                            +| PlanNode[4] DataSkew:"Seq Scan", min_dn_tuples:0, max_dn_tuples:839680
+--? /\* Test data skew \*/explain (analyze on ,verbose off ,costs off ,cpu off, detail off, num_buffers off, timing off) +| 1 | Streaming (type: GATHER)  (.*)                            +| PlanNode[4] DataSkew:"Seq Scan", min_dn_tuples:0, max_dn_tuples:839680
  select count(*), c1 from t13 group by 2 order by 2;                                                                                       |   |  Merge Sort Key: c1                                                                           +| 
 --?                                                                                                                                           | 2 |  ->  Sort  (.*)                                           +| 
                                                                                                                                            |   |   Sort Key: c1                                                                                +| 

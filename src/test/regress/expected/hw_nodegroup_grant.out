@@ -1,0 +1,342 @@
+create node group group_test_t12 with (datanode1, datanode2);
+create node group group_test_t23 with (datanode2, datanode3);
+create node group group_test_t123456 with (datanode1, datanode2, datanode3,datanode4, datanode5,datanode6);
+create node group group_test_t234567 with (datanode7, datanode2, datanode3,datanode4, datanode5,datanode6);
+--create user
+create user test_group_t1 password 'huawei@123';
+create user test_group_t2 password 'huawei@123';
+--error test
+grant create on node group group1  to test_group_t1;
+grant create on node group group_test_t122 to test_group_t2;
+ERROR:  Target node group "group_test_t122" does not exist
+set role test_group_t1 password 'huawei@123';
+set default_storage_nodegroup = group_test_t12;
+create table tbl_1(a int);
+ERROR:  permission denied for node group group_test_t12
+grant create on node group group_test_t12 to test_group_t2;
+ERROR:  permission denied for node group group_test_t12
+reset role;
+--add llt
+select aclitemin('test_group_t1=p/test_group_t1');
+           aclitemin           
+-------------------------------
+ test_group_t1=p/test_group_t1
+(1 row)
+
+select acldefault('G', u1.usesysid) from (select usesysid from pg_user where usename = 'test_group_t1') u1;
+            acldefault             
+-----------------------------------
+ {test_group_t1=UCp/test_group_t1}
+(1 row)
+
+grant create on node group group_test_t12 to test_group_t1 with grant option;
+--case1: test grant create to test_group_t1 on test_group_t12
+grant create on node group group_test_t12 to test_group_t1;
+set role test_group_t1 password 'huawei@123';
+create table tbl_2(a int, b int) to group group_test_t12;
+create table tbl_1(a int) to group group_test_t23;
+ERROR:  permission denied for node group group_test_t23
+--test select/insert/update/delete privilige
+insert into tbl_2 values(1, 1),(2, 2);
+select count(*) from tbl_2;
+ count 
+-------
+     2
+(1 row)
+
+update tbl_2 set b = 10 where a = 2;
+delete from tbl_2;
+--test has_nodegroup_privilege function
+select * from has_nodegroup_privilege('test_group_t1', 'group_test_t12', 'create');
+ has_nodegroup_privilege 
+-------------------------
+ t
+(1 row)
+
+select * from has_nodegroup_privilege('test_group_t1', 'group_test_t23', 'create');
+ has_nodegroup_privilege 
+-------------------------
+ f
+(1 row)
+
+select * from has_nodegroup_privilege('group_test_t12', 'create');
+ has_nodegroup_privilege 
+-------------------------
+ t
+(1 row)
+
+select has_nodegroup_privilege(t1.oid, 'usage') from (select oid from pgxc_group where group_name = 'group_test_t12') as t1;
+ has_nodegroup_privilege 
+-------------------------
+ t
+(1 row)
+
+reset role;
+--test user2 use user1 table
+set role test_group_t1 password 'huawei@123';
+grant usage on schema test_group_t1 to test_group_t2;
+set role test_group_t2 password 'huawei@123';
+select * from test_group_t1.tbl_2;
+ERROR:  permission denied for node group group_test_t12
+reset role;
+--test_group_t2 has usage on group_test_t12, but can not create table
+grant usage on node group group_test_t12 to test_group_t2;
+set role test_group_t2 password 'huawei@123';
+select * from test_group_t1.tbl_2;
+ERROR:  permission denied for relation tbl_2
+set role test_group_t1 password 'huawei@123';
+grant select on table tbl_2 to  test_group_t2;
+set role test_group_t2 password 'huawei@123';
+select * from test_group_t1.tbl_2;
+ a | b 
+---+---
+(0 rows)
+
+create table tbl_4(a int, b int) to group group_test_t12;
+ERROR:  permission denied for node group group_test_t12
+reset role;
+--test insert into select
+grant create on node group group_test_t123456 to test_group_t1;
+grant create on node group group_test_t23 to test_group_t1;
+set role test_group_t1 password 'huawei@123'; 
+drop table tbl_2;
+create table tbl_3(a int) to group group_test_t23;
+create table tbl_2(a int) to group group_test_t123456;
+explain (verbose on, costs off) insert into  tbl_2 select * from tbl_3;
+WARNING:  Statistics in some tables or columns(test_group_t1.tbl_3.a) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: (GenGroup) datanode1, datanode2, datanode3, datanode4, datanode5, datanode6
+   ->  Insert on test_group_t1.tbl_2
+         ->  Streaming(type: REDISTRIBUTE ng: group_test_t23->group_test_t123456)
+               Output: tbl_3.a
+               Distribute Key: tbl_3.a
+               Spawn on: (group_test_t23) datanode2, datanode3
+               Consumer Nodes: (group_test_t123456) datanode1, datanode2, datanode3, datanode4, datanode5, datanode6
+               ->  Seq Scan on test_group_t1.tbl_3
+                     Output: tbl_3.a
+                     Distribute Key: tbl_3.a
+                     Exec Nodes: (group_test_t23) datanode2, datanode3
+(12 rows)
+
+--test usage priviliges
+show expected_computing_nodegroup;
+ expected_computing_nodegroup 
+------------------------------
+ query
+(1 row)
+
+set expected_computing_nodegroup = group_test_t234567;
+show expected_computing_nodegroup;
+ expected_computing_nodegroup 
+------------------------------
+ group_test_t234567
+(1 row)
+
+CREATE TABLE aa(a INT) DISTRIBUTE BY HASH(a);
+--test view and subquery
+create view bb as select * from aa;
+select * from bb;
+ERROR:  permission denied for node group group_test_t234567
+create view cc as select count(*) from pg_proc;
+select count(*) from cc; 
+ count 
+-------
+     1
+(1 row)
+
+create view dd as select proname ,a from pg_proc, aa;
+select * from dd;
+ERROR:  permission denied for node group group_test_t234567
+--test function
+CREATE OR REPLACE FUNCTION fuc02( ) RETURN int
+AS 
+  h int;
+BEGIN
+   select a into h from aa;
+END;
+/
+select * from fuc02();
+ERROR:  permission denied for node group group_test_t234567
+CONTEXT:  SQL statement "select a        from aa"
+PL/pgSQL function fuc02() line 3 at SQL statement
+CREATE OR REPLACE FUNCTION fuc03( ) RETURN int
+AS 
+  h int;
+BEGIN
+   select proname into h from pg_proc;
+END;
+/
+select * from fuc03();
+ERROR:  query returned 2 rows more than one row
+CONTEXT:  PL/pgSQL function fuc03() line 3 at SQL statement
+create table tbl_4(a int, b int) to group group_test_t234567;
+ERROR:  permission denied for node group group_test_t234567
+reset role;
+grant compute on node group group_test_t234567 to test_group_t1;
+revoke all on node group group_test_t123456 from test_group_t1;
+set role test_group_t1 password 'huawei@123'; 
+set expected_computing_nodegroup = group_test_t234567;
+create table tbl_5(a int, b int) to group group_test_t234567;
+ERROR:  permission denied for node group group_test_t234567
+explain  (verbose on, costs off)select count(*) from tbl_2 join tbl_3 on tbl_2.a=tbl_3.a;
+WARNING:  Statistics in some tables or columns(test_group_t1.tbl_2.a, test_group_t1.tbl_3.a) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                               QUERY PLAN                                                                
+-----------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   Exec Nodes: (GenGroup) datanode2, datanode3, datanode1, datanode4, datanode5, datanode6
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: (GenGroup) datanode2, datanode3, datanode1, datanode4, datanode5, datanode6
+         ->  Aggregate
+               Output: count(*)
+               Exec Nodes: (group_test_t23) datanode2, datanode3
+               ->  Hash Join
+                     Exec Nodes: (group_test_t23) datanode2, datanode3
+                     Hash Cond: (tbl_3.a = tbl_2.a)
+                     ->  Seq Scan on test_group_t1.tbl_3
+                           Output: tbl_3.a
+                           Distribute Key: tbl_3.a
+                           Exec Nodes: (group_test_t23) datanode2, datanode3
+                     ->  Hash
+                           Output: tbl_2.a
+                           Exec Nodes: (group_test_t23) datanode2, datanode3
+                           ->  Streaming(type: REDISTRIBUTE ng: group_test_t123456->group_test_t23)
+                                 Output: tbl_2.a
+                                 Distribute Key: tbl_2.a
+                                 Spawn on: (group_test_t123456) datanode1, datanode2, datanode3, datanode4, datanode5, datanode6
+                                 Consumer Nodes: (group_test_t23) datanode2, datanode3
+                                 ->  Seq Scan on test_group_t1.tbl_2
+                                       Output: tbl_2.a
+                                       Distribute Key: tbl_2.a
+                                       Exec Nodes: (group_test_t123456) datanode1, datanode2, datanode3, datanode4, datanode5, datanode6
+(28 rows)
+
+select * from has_nodegroup_privilege('test_group_t1', 'group_test_t234567', 'create');
+ has_nodegroup_privilege 
+-------------------------
+ f
+(1 row)
+
+select * from has_nodegroup_privilege('test_group_t1', 'group_test_t234567', 'usage');
+ has_nodegroup_privilege 
+-------------------------
+ f
+(1 row)
+
+select * from has_nodegroup_privilege('group_test_t234567', 'compute');
+ has_nodegroup_privilege 
+-------------------------
+ t
+(1 row)
+
+select has_nodegroup_privilege('test_group_t1', t1.oid, 'compute') from (select oid from pgxc_group where group_name = 'group_test_t234567') as t1;
+ has_nodegroup_privilege 
+-------------------------
+ t
+(1 row)
+
+select has_nodegroup_privilege(t1.oid, 'compute with grant option') from (select oid from pgxc_group where group_name = 'group_test_t234567') as t1;
+ has_nodegroup_privilege 
+-------------------------
+ f
+(1 row)
+
+select has_nodegroup_privilege(u1.oid, 'group_test_t234567', 'usage with grant option') from (select oid from pg_roles where rolname = 'test_group_t1') as u1;
+ has_nodegroup_privilege 
+-------------------------
+ f
+(1 row)
+
+select has_nodegroup_privilege(u1.oid, t1.oid , 'create with grant option') from (select oid from pg_roles where rolname = 'test_group_t1') as u1,
+(select oid from pgxc_group where group_name = 'group_test_t234567') as t1;
+ has_nodegroup_privilege 
+-------------------------
+ f
+(1 row)
+
+--null test
+select * from has_nodegroup_privilege('test_group_t1', 123456, 'usage');
+ has_nodegroup_privilege 
+-------------------------
+ 
+(1 row)
+
+select has_nodegroup_privilege(123456, 'usage') is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select * from has_nodegroup_privilege(123456, 12345, 'usage');
+ has_nodegroup_privilege 
+-------------------------
+ 
+(1 row)
+
+reset role;
+--test superuser
+select * from has_nodegroup_privilege('group_test_t12', 'create');
+ has_nodegroup_privilege 
+-------------------------
+ t
+(1 row)
+
+select * from has_nodegroup_privilege(current_user,'group_test_t12', 'create');
+ has_nodegroup_privilege 
+-------------------------
+ t
+(1 row)
+
+select * from has_nodegroup_privilege('group_test_t12', 'create with grant option');
+ has_nodegroup_privilege 
+-------------------------
+ t
+(1 row)
+
+select * from has_nodegroup_privilege(NULL, 'create');
+ has_nodegroup_privilege 
+-------------------------
+ 
+(1 row)
+
+select * from has_nodegroup_privilege('group_test_t12', 'create');
+ has_nodegroup_privilege 
+-------------------------
+ t
+(1 row)
+
+select * from has_nodegroup_privilege(NULL, 12345,'create');
+ has_nodegroup_privilege 
+-------------------------
+ 
+(1 row)
+
+select * from has_nodegroup_privilege(12345, NULL);
+ has_nodegroup_privilege 
+-------------------------
+ 
+(1 row)
+
+select * from has_nodegroup_privilege(12, NULL, 'create');
+ has_nodegroup_privilege 
+-------------------------
+ 
+(1 row)
+
+select * from has_nodegroup_privilege(12345,2345, NULL);
+ has_nodegroup_privilege 
+-------------------------
+ 
+(1 row)
+
+drop user test_group_t1 cascade;
+drop user test_group_t2 cascade;
+drop node group group_test_t12;
+drop node group group_test_t23;
+drop node group group_test_t123456;
+drop node group group_test_t234567;

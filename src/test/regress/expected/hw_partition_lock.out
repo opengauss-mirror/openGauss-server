@@ -589,12 +589,12 @@ ERROR:  CLUSTER cannot run inside a transaction block
 -- locks on partitioned relation
 select c.relname, l.mode from pg_locks as l inner join pg_class as c on l.relation = c.oid
 	 where l.locktype = 'relation' and c.parttype = 'p' order by 1, 2;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+--?ERROR:  current transaction is aborted, commands ignored until end of transaction block.*
 -- locks on partition
 select p.relname, l.mode from pg_locks as l inner join pg_partition as p
 	 on l.classid = p.parentid and l.objid = p.oid
 	 where l.locktype = 'partition' order by 1, 2;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+--?ERROR:  current transaction is aborted, commands ignored until end of transaction block.*
 rollback;
 --1. check locks on partitions in 'analyze command'
 start transaction;
@@ -602,11 +602,11 @@ analyze columnar_storage.create_columnar_table_152 ;
 ERROR:  ANALYZE cannot run inside a transaction block
 select c.relname, l.mode from pg_locks as l inner join pg_class as c on l.relation = c.oid
 	 where l.locktype = 'relation' and c.parttype = 'p' order by 1, 2;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+--?ERROR:  current transaction is aborted, commands ignored until end of transaction block.*
 select p.relname, l.mode from pg_locks as l inner join pg_partition as p
 	 on l.classid = p.parentid and l.objid = p.oid
 	 where l.locktype = 'partition' order by 1, 2;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+--?ERROR:  current transaction is aborted, commands ignored until end of transaction block.*
 rollback;
 --2. check locks on relation and partitions in 'alter table truncate command'
 start transaction;
@@ -686,7 +686,7 @@ SET enable_indexonlyscan = OFF;
 SET enable_bitmapscan = OFF;
 SET enable_tidscan = OFF;
 start transaction;
-explain (nodes off, costs off) select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
+explain (costs off) select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
                           QUERY PLAN                           
 ---------------------------------------------------------------
  Streaming (type: GATHER)
@@ -729,7 +729,7 @@ SET enable_indexonlyscan = OFF;
 SET enable_bitmapscan = OFF;
 SET enable_tidscan = OFF;
 start transaction;
-explain (nodes off, costs off) select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
+explain (costs off) select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
                                               QUERY PLAN                                              
 ------------------------------------------------------------------------------------------------------
  Streaming (type: GATHER)
@@ -775,7 +775,7 @@ SET enable_indexonlyscan = ON;
 SET enable_bitmapscan = OFF;
 SET enable_tidscan = OFF;
 start transaction;
-explain (nodes off, costs off) select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
+explain (costs off) select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
                           QUERY PLAN                           
 ---------------------------------------------------------------
  Streaming (type: GATHER)
@@ -818,7 +818,7 @@ SET enable_indexonlyscan = OFF;
 SET enable_bitmapscan = ON;
 SET enable_tidscan = OFF;
 start transaction;
-explain (nodes off, costs off) select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
+explain (costs off) select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
                                     QUERY PLAN                                     
 -----------------------------------------------------------------------------------
  Streaming (type: GATHER)
@@ -866,7 +866,7 @@ SET enable_indexonlyscan = OFF;
 SET enable_bitmapscan = OFF;
 SET enable_tidscan = ON;
 start transaction;
-explain (nodes off, costs off) select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
+explain (costs off) select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
                           QUERY PLAN                           
 ---------------------------------------------------------------
  Streaming (type: GATHER)

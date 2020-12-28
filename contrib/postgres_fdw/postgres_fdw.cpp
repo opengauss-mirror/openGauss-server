@@ -38,6 +38,7 @@
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "knl/knl_guc.h"
+#include "access/tableam.h"
 
 PG_MODULE_MAGIC;
 
@@ -1603,7 +1604,7 @@ static void get_remote_estimate(const char *sql, PGconn *conn, double *rows, int
         if (p == NULL) {
             elog(ERROR, "could not interpret EXPLAIN output: \"%s\"", line);
         }
-        n = sscanf(p, "(cost=%lf..%lf rows=%lf width=%d)", startup_cost, total_cost, rows, width);
+        n = sscanf_s(p, "(cost=%lf..%lf rows=%lf width=%d)", startup_cost, total_cost, rows, width);
         if (n != 4) {
             elog(ERROR, "could not interpret EXPLAIN output: \"%s\"", line);
         }
@@ -1927,7 +1928,7 @@ static const char **convert_prep_stmt_params(PgFdwModifyState *fmstate, ItemPoin
             Datum value;
             bool isnull = false;
 
-            value = slot_getattr(slot, attnum, &isnull);
+            value = tableam_tslot_getattr(slot, attnum, &isnull);
             if (isnull) {
                 p_values[pindex] = NULL;
             } else {

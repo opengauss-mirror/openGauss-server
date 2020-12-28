@@ -23,6 +23,7 @@
 #include "optimizer/paths.h"
 #include "optimizer/planner.h"
 #include "utils/memutils.h"
+#include "utils/guc.h"
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #endif
@@ -213,7 +214,8 @@ void join_search_one_level(PlannerInfo* root, int level)
          * never fail, and so the following sanity check is useful.
          * ----------
          */
-        if (joinrels[level] == NIL && root->join_info_list == NIL)
+        if (joinrels[level] == NIL && root->join_info_list == NIL &&
+            root->lateral_info_list == NIL)
             ereport(ERROR,
                 (errmodule(MOD_OPT),
                     errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
@@ -304,7 +306,10 @@ static bool join_is_legal(PlannerInfo* root, RelOptInfo* rel1, RelOptInfo* rel2,
 {
     SpecialJoinInfo* match_sjinfo = NULL;
     bool reversed = false;
+    bool unique_exchange = false;
     bool must_be_leftjoin = false;
+    bool lateral_fwd = false;
+    bool lateral_rev = false;
     ListCell* l = NULL;
 
     /*
@@ -370,13 +375,24 @@ static bool join_is_legal(PlannerInfo* root, RelOptInfo* rel1, RelOptInfo* rel2,
                 return false; /* invalid join path */
             match_sjinfo = sjinfo;
             reversed = false;
+
+            if (sjinfo->jointype == JOIN_SEMI && bms_equal(sjinfo->syn_righthand, rel2->relids) &&
+                create_unique_path(root, rel2, (Path*)linitial(rel2->cheapest_total_path), sjinfo) != NULL) {
+                unique_exchange = true;
+            }
         } else if (bms_is_subset(sjinfo->min_lefthand, rel2->relids) &&
                    bms_is_subset(sjinfo->min_righthand, rel1->relids)) {
             if (match_sjinfo != NULL)
                 return false; /* invalid join path */
             match_sjinfo = sjinfo;
             reversed = true;
+
+            if (sjinfo->jointype == JOIN_SEMI && bms_equal(sjinfo->syn_righthand, rel1->relids) &&
+                   create_unique_path(root, rel1, (Path*)linitial(rel1->cheapest_total_path), sjinfo) != NULL) {
+                unique_exchange = true;
+            }
         } else if (sjinfo->jointype == JOIN_SEMI && bms_equal(sjinfo->syn_righthand, rel2->relids) &&
+                    ((Path*)linitial(rel2->cheapest_total_path))->param_info == NULL &&
                    create_unique_path(root, rel2, (Path*)linitial(rel2->cheapest_total_path), sjinfo) != NULL) {
             /* ----------
              * For a semijoin, we can join the RHS to anything else by
@@ -403,13 +419,16 @@ static bool join_is_legal(PlannerInfo* root, RelOptInfo* rel1, RelOptInfo* rel2,
             if (match_sjinfo != NULL)
                 return false; /* invalid join path */
             match_sjinfo = sjinfo;
+            unique_exchange = true;
             reversed = false;
         } else if (sjinfo->jointype == JOIN_SEMI && bms_equal(sjinfo->syn_righthand, rel1->relids) &&
+                    ((Path*)linitial(rel1->cheapest_total_path))->param_info == NULL &&
                    create_unique_path(root, rel1, (Path*)linitial(rel1->cheapest_total_path), sjinfo) != NULL) {
             /* Reversed semijoin case */
             if (match_sjinfo != NULL)
                 return false; /* invalid join path */
             match_sjinfo = sjinfo;
+            unique_exchange = true;
             reversed = true;
         } else {
             /*
@@ -466,6 +485,47 @@ static bool join_is_legal(PlannerInfo* root, RelOptInfo* rel1, RelOptInfo* rel2,
             (match_sjinfo->jointype != JOIN_LEFT && match_sjinfo->jointype != JOIN_LEFT_ANTI_FULL) ||
             !match_sjinfo->lhs_strict))
         return false; /* invalid join path */
+
+    /*
+     * We also have to check for constraints imposed by LATERAL references.
+     * The proposed rels could each contain lateral references to the other,
+     * in which case the join is impossible.  If there are lateral references
+     * in just one direction, then the join has to be done with a nestloop
+     * with the lateral referencer on the inside.  If the join matches an SJ
+     * that cannot be implemented by such a nestloop, the join is impossible.
+     */
+    lateral_fwd = lateral_rev = false;
+    foreach(l, root->lateral_info_list)
+    {
+        LateralJoinInfo *ljinfo = (LateralJoinInfo *) lfirst(l);
+
+        if (bms_is_member(ljinfo->lateral_rhs, rel2->relids) &&
+            bms_overlap(ljinfo->lateral_lhs, rel1->relids))
+        {
+            /* has to be implemented as nestloop with rel1 on left */
+            if (lateral_rev)
+                return false;   /* have lateral refs in both directions */
+            lateral_fwd = true;
+            if (!bms_is_subset(ljinfo->lateral_lhs, rel1->relids))
+                return false;   /* rel1 can't compute the required parameter */
+            if (match_sjinfo &&
+                ((reversed && !unique_exchange) || match_sjinfo->jointype == JOIN_FULL))
+                return false;   /* not implementable as nestloop */
+        }
+        if (bms_is_member(ljinfo->lateral_rhs, rel1->relids) &&
+            bms_overlap(ljinfo->lateral_lhs, rel2->relids))
+        {
+            /* has to be implemented as nestloop with rel2 on left */
+            if (lateral_fwd)
+                return false;   /* have lateral refs in both directions */
+            lateral_rev = true;
+            if (!bms_is_subset(ljinfo->lateral_lhs, rel2->relids))
+                return false;   /* rel2 can't compute the required parameter */
+            if (match_sjinfo &&
+                ((!reversed && !unique_exchange) || match_sjinfo->jointype == JOIN_FULL))
+                return false;   /* not implementable as nestloop */
+        }
+    }
 
     /* Otherwise, it's a valid join */
     *sjinfo_p = match_sjinfo;
@@ -701,13 +761,23 @@ RelOptInfo* make_join_rel(PlannerInfo* root, RelOptInfo* rel1, RelOptInfo* rel2)
      * e.g. cannot broadcast hashed results for inner plan of semi join when outer
      * plan is replicated now.
      */
-    if (IS_STREAM && joinrel->pathlist == NIL) {
-        errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
-            NOTPLANSHIPPING_LENGTH,
-            "\"Full Join\" on redistribution unsupported data type");
-        securec_check_ss(sprintf_rc, "\0", "\0");
-        mark_stream_unsupport();
-        mark_dummy_rel(joinrel);
+
+    if (IS_STREAM && NIL == joinrel->pathlist) {
+        /*
+         * We remove the useless RelOptInfo and then try other join path if the current level 
+         * is not the top level.
+         */
+        if (ENABLE_PRED_PUSH_ALL(root) && root->join_cur_level < list_length(root->join_rel_level[1])) {
+            remove_join_rel(root, joinrel);
+            return NULL;
+        } else {
+            errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+                        NOTPLANSHIPPING_LENGTH,
+                        "\"Full Join\" on redistribution unsupported data type");
+            securec_check_ss_c(sprintf_rc, "\0", "\0");
+            mark_stream_unsupport();
+            mark_dummy_rel(joinrel);
+        }
     }
 #endif
 
@@ -735,6 +805,22 @@ bool have_join_order_restriction(PlannerInfo* root, RelOptInfo* rel1, RelOptInfo
 {
     bool result = false;
     ListCell* l = NULL;
+
+    /*
+     * If either side has a lateral reference to the other, attempt the join
+     * regardless of outer-join considerations.
+     */
+    foreach(l, root->lateral_info_list)
+    {
+        LateralJoinInfo *ljinfo = (LateralJoinInfo *) lfirst(l);
+
+        if (bms_is_member(ljinfo->lateral_rhs, rel2->relids) &&
+            bms_overlap(ljinfo->lateral_lhs, rel1->relids))
+            return true;
+        if (bms_is_member(ljinfo->lateral_rhs, rel1->relids) &&
+            bms_overlap(ljinfo->lateral_lhs, rel2->relids))
+            return true;
+    }
 
     /*
      * It's possible that the rels correspond to the left and right sides of a
@@ -808,6 +894,15 @@ bool have_join_order_restriction(PlannerInfo* root, RelOptInfo* rel1, RelOptInfo
 static bool has_join_restriction(PlannerInfo* root, RelOptInfo* rel)
 {
     ListCell* l = NULL;
+
+    foreach(l, root->lateral_info_list)
+    {
+        LateralJoinInfo *ljinfo = (LateralJoinInfo *) lfirst(l);
+
+        if (bms_is_member(ljinfo->lateral_rhs, rel->relids) ||
+            bms_overlap(ljinfo->lateral_lhs, rel->relids))
+            return true;
+    }
 
     foreach (l, root->join_info_list) {
         SpecialJoinInfo* sjinfo = (SpecialJoinInfo*)lfirst(l);
@@ -914,9 +1009,9 @@ static void mark_dummy_rel(RelOptInfo* rel)
 
     /* Evict any previously chosen paths */
     rel->pathlist = NIL;
-    rel->partial_pathlist = NIL;
+
     /* Set up the dummy path */
-    Path* append_path = (Path*)create_append_path(NULL, rel, NIL, NIL, NULL, 0, false, -1);
+    Path* append_path = (Path*)create_append_path(NULL, rel, NIL, NULL);
     if (append_path != NULL) {
         add_path(NULL, rel, append_path);
     }

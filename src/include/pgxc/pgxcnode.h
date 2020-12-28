@@ -23,10 +23,47 @@
 #include "utils/globalplancache.h"
 #include "utils/snapshot.h"
 #include "libcomm/libcomm.h"
+#include "pgxc/poolmgr.h"
 #include "getaddrinfo.h"
 #include <unistd.h>
+#include "knl/knl_variable.h"
+#include <sys/time.h>
+#include <sys/ioctl.h>
+#include "access/transam.h"
+#include "access/xact.h"
+#include "catalog/pg_type.h"
+#include "nodes/nodes.h"
+#include "catalog/namespace.h"
+#include "catalog/pg_namespace.h"
+#include "catalog/pgxc_node.h"
+#include "catalog/pg_collation.h"
+#include "tcop/dest.h"
+#include "utils/distribute_test.h"
+#include "utils/elog.h"
+#include "utils/guc.h"
+#include "utils/memutils.h"
+#include "utils/snapmgr.h"
+#include "utils/syscache.h"
+#include "utils/formatting.h"
+#include "miscadmin.h"
+#include "postmaster/postmaster.h"
+#include "postmaster/twophasecleaner.h"
+#include "libcomm/libcomm.h"
+
+#ifdef HAVE_POLL_H
+#include <poll.h>
+#endif
+#ifdef HAVE_SYS_POLL_H
+#include <sys/poll.h>
+#endif
 
 #define NO_SOCKET -1
+#define CMD_ID_MSG_LEN 8
+#define PGXC_CANCEL_DELAY 15
+
+#define ERROR_OCCURED true
+#define NO_ERROR_OCCURED false
+#define CN_SESSION_ID_MASK 0xffffffffffff
 
 /* Message type code of bucket map and dn node index */
 #define MSG_TYPE_PGXC_BUCKET_MAP 'G'
@@ -38,9 +75,6 @@
 #define DDL_PBE_VERSION_NUM 92067    /* Version control for DDL PBE */
 
 struct StreamNetCtl;
-/* Connection to Datanode maintained by Pool Manager */
-typedef struct pg_conn NODE_CONNECTION;
-typedef struct pg_cancel NODE_CANCEL;
 
 /* Helper structure to access Datanode from Session */
 typedef enum {
@@ -71,6 +105,12 @@ typedef enum {
     RESP_ROLLBACK_NOT_RECEIVED /* Response is NOT ROLLBACK */
 } RESP_ROLLBACK;
 
+/* To identify the different uses of CSN */
+typedef enum {
+    FETCH_CSN,        /* A flag to fecth csn from other nodes */
+    GLOBAL_CSN_MIN    /* The global min csn between all nodes */
+} CsnType;
+
 #define DN_CONNECTION_STATE_ERROR(dnconn) \
     ((dnconn)->state == DN_CONNECTION_STATE_ERROR_FATAL || (dnconn)->transaction_status == 'E')
 
@@ -96,9 +136,9 @@ struct pgxc_node_handle {
     /* fd of the connection */
     int sock;
 
-    /* sctp connection */
+    /* tcp connection */
     int tcpCtlPort;
-    int sctpPort;
+    int listenPort;
     /* logic connection socket between cn and dn */
     gsocket gsock;
 
@@ -133,6 +173,7 @@ struct pgxc_node_handle {
 
     char* remoteNodeName;
     int nodeIdx; /* datanode index, like t_thrd.postmaster_cxt.PGXCNodeId */
+    knl_virtual_role remote_node_type;
     PoolConnInfo connInfo;
     /* flag to identify logic connection between cn and dn */
     bool is_logic_conn;
@@ -141,6 +182,18 @@ struct pgxc_node_handle {
     TransactionId  remote_top_txid;
 };
 typedef struct pgxc_node_handle PGXCNodeHandle;
+
+/*
+ * Because the number of node handles is identical to the number of nodes,
+ * so here we combine both CN and DN handles together for better maitanences
+ */
+typedef struct PGXCNodeHandleGroup {
+    PGXCNodeHandle* nodeHandles;
+    uint32 nodeHandleNums;
+
+    /* dn and cn slots often process together, so need offset to indicate real postion */
+    uint32 offset;
+} PGXCNodeHandleGroup;
 
 typedef struct PGXCNodeNetCtlLayer {
     int conn_num;        /* size of array */
@@ -160,20 +213,12 @@ typedef struct PGXCNodeAllHandles {
     PGXCNodeHandle** coord_handles;    /* an array of Coordinator handles */
 } PGXCNodeAllHandles;
 
-typedef struct {
-    int* fds;
-    gsocket* gsock;
-    PoolConnInfo* connInfos;
-    NODE_CONNECTION** pgConn;
-    int pgConnCnt;
-} PoolConnDef;
-
+extern unsigned long LIBCOMM_BUFFER_SIZE;
 extern void InitMultinodeExecutor(bool is_force);
 
 /* Open/close connection routines (invoked from Pool Manager) */
 extern char *PGXCNodeConnStr(const char *host, int port, const char *dbname, const char *user,
     const char *pgoptions, const char *remote_type, int proto_type, const char *remote_nodename);
-
 extern NODE_CONNECTION* PGXCNodeConnect(char* connstr);
 extern int PGXCNodeSendSetQuery(NODE_CONNECTION* conn, const char* sql_command);
 extern int PGXCNodeSetQueryGetResult(NODE_CONNECTION* conn);
@@ -200,31 +245,28 @@ extern int LibcommReadData(NODE_CONNECTION* conn);
 extern PGXCNodeAllHandles* get_handles(
     List* datanodelist, List* coordlist, bool is_query_coord_only, List* dummydatanodelist = NIL);
 extern void pfree_pgxc_all_handles(PGXCNodeAllHandles* handles);
-
 extern void release_pgxc_handles(PGXCNodeAllHandles* pgxc_handles);
 extern void release_handles(void);
-extern void reset_handles_at_abort();
+extern void destroy_handles(void);
+extern void reset_handles_at_abort(void);
 extern void cancel_query(void);
+extern void cancel_query_without_read(void);
 extern void stop_query(void);
 extern void clear_all_data(void);
-
 extern int get_transaction_nodes(
     PGXCNodeHandle** connections, char client_conn_type, PGXCNode_HandleRequested type_requested);
 extern char* collect_pgxcnode_names(
     char* nodestring, int conn_count, PGXCNodeHandle** connections, char client_conn_type);
 extern char* collect_localnode_name(char* nodestring);
 extern int get_active_nodes(PGXCNodeHandle** connections);
-
 extern void ensure_in_buffer_capacity(size_t bytes_needed, PGXCNodeHandle* handle);
 extern void ensure_out_buffer_capacity(size_t bytes_needed, PGXCNodeHandle* handle);
-
 extern int pgxc_node_send_threadid(PGXCNodeHandle* handle, uint32 threadid);
 extern int pgxc_node_send_queryid(PGXCNodeHandle* handle, uint64 queryid);
-extern int pgxc_node_send_sessid(PGXCNodeHandle *handle, uint64 global_sess_id, PGXCNode_HandleGPC handle_type);
-
+extern int pgxc_node_send_cn_identifier(PGXCNodeHandle *handle, PGXCNode_HandleGPC handle_type);
 extern int pgxc_node_send_unique_sql_id(PGXCNodeHandle* handle);
 extern int pgxc_node_send_query(PGXCNodeHandle* handle, const char* query, bool isPush = false,
-    bool trigger_ship = false, bool check_gtm_mode = false);
+    bool trigger_ship = false, bool check_gtm_mode = false, const char *compressPlan = NULL, int cLen = 0);
 extern void pgxc_node_send_gtm_mode(PGXCNodeHandle* handle);
 extern int pgxc_node_send_plan_with_params(PGXCNodeHandle* handle, const char* query, short num_params,
     Oid* param_types, int paramlen, const char* params, int fetch_size);
@@ -241,6 +283,7 @@ extern int pgxc_node_send_query_extended(PGXCNodeHandle* handle, const char* que
     int fetch_size);
 extern int pgxc_node_send_gxid(PGXCNodeHandle* handle, GlobalTransactionId gxid, bool isforcheck);
 extern int pgxc_node_send_commit_csn(PGXCNodeHandle* handle, uint64 commit_csn);
+extern int pgxc_node_send_csn(PGXCNodeHandle* handle, uint64 commit_csn, CsnType csn_type);
 extern int pgxc_node_notify_commit(PGXCNodeHandle* handle);
 extern int pgxc_node_send_cmd_id(PGXCNodeHandle* handle, CommandId cid);
 extern int pgxc_node_send_wlm_cgroup(PGXCNodeHandle* handle);
@@ -268,7 +311,6 @@ extern bool datanode_receive_from_physic_conn(
 const int conn_count, PGXCNodeHandle** connections, struct timeval* timeout);
 extern bool datanode_receive_from_logic_conn(
 const int conn_count, PGXCNodeHandle** connections, StreamNetCtl* ctl, int time_out);
-
 extern bool pgxc_node_validate(PGXCNodeHandle *conn);
 extern int pgxc_node_read_data(PGXCNodeHandle* conn, bool close_if_error, bool StreamConnection = false);
 extern int pgxc_node_read_data_from_logic_conn(PGXCNodeHandle* conn, bool close_if_error);
@@ -277,23 +319,47 @@ extern void connect_server(
     const char* conn_str, PGXCNodeHandle** handle, const char* host, int port, const char* log_conn_str);
 extern void release_conn_to_compute_pool();
 extern void release_pgfdw_conn();
-
 extern int pgxc_node_send_userpl(PGXCNodeHandle* handle, int userpl);
 extern int pgxc_node_send_userpl(PGXCNodeHandle* handle, int64 userpl);
 extern int pgxc_node_send_cpconf(PGXCNodeHandle* handle, char* data);
 extern int  pgxc_send_bucket_map(PGXCNodeHandle* handle, uint2* bucketMap, int dnNodeIdx);
-
 extern bool light_node_receive(PGXCNodeHandle* handle);
 extern bool light_node_receive_from_logic_conn(PGXCNodeHandle* handle);
 extern int pgxc_node_pgstat_send(PGXCNodeHandle* handle, char tag);
 extern void pgxc_node_free(PGXCNodeHandle* handle);
 extern void pgxc_node_init(PGXCNodeHandle* handle, int sock);
-void pgxc_node_free_def(PoolConnDef* result);
-#endif /* PGXCNODE_H */
+extern void pgxc_node_free_def(PoolConnDef* result);
+extern void pgxc_palloc_net_ctl(int conn_num);
+extern int ts_get_tag_colnum(Oid relid, bool need_index = false, List** idx_list = NULL);
+extern void init_pgxc_handle(PGXCNodeHandle* pgxc_handle);
+
+#ifdef ENABLE_MULTIPLE_NODES
+extern GlobalNodeDefinition *global_node_definition;
+extern bool IsAutoVacuumWorkerProcess();
+extern char *format_type_with_nspname(Oid type_oid);
+extern void pgxc_node_all_free(void);
+extern void FreePgxcNodehandles(PGXCNodeHandleGroup* handleGroup);
+extern void FreePgxcNodehandlesWithStatus(PGXCNodeHandleGroup* handleGroup, char *statusArray, bool *hasError);
+extern void LibcommFinish(NODE_CONNECTION *conn);
+extern int LibcommWaitpoll(NODE_CONNECTION *conn);
+extern int get_int(PGXCNodeHandle * conn, size_t len, int *out);
+extern int get_char(PGXCNodeHandle * conn, char *out);
+extern PoolHandle * GetPoolAgent();
+extern void destroy_slots(List *slots);
+extern void init_pgxc_handle(PGXCNodeHandle *pgxc_handle);
+extern char* get_pgxc_nodename(Oid nodeid, NameData* namedata);
+extern List* get_dn_handles(List *datanodelist, List *dummynodelist, PGXCNodeAllHandles* result);
+extern List* get_cn_handles(List *coordlist, PGXCNodeAllHandles* result);
+extern void init_handles(List* dn_allocate, List* co_allocate, PoolConnDef* pfds);
+extern int PollInterrupts(struct pollfd *ufds, int nfds, int timeout);
+extern int find_name_by_params(Oid *param_types, char	**paramTypes, short num_params);
+extern void add_params_name_to_send(PGXCNodeHandle *handle, char	**paramTypes, short num_params);
+extern int LibcommSendQueryPoolerStatelessReuse(NODE_CONNECTION *conn, const char *query);
+#endif
 
 #ifdef ENABLE_UT
 extern char* getNodenameByIndex(int index);
-extern int LibcommSendQueryPoolerStatelessReuse(NODE_CONNECTION* conn, const char* query);
-extern int LibcommWaitpoll(NODE_CONNECTION* conn);
 extern int light_node_read_data(PGXCNodeHandle* conn);
 #endif /* USE_UT */
+
+#endif /* PGXCNODE_H */

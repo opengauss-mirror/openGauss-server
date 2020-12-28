@@ -1,0 +1,816 @@
+--check hdfs_fdw exists
+select fdwname from pg_foreign_data_wrapper where fdwname = 'hdfs_fdw';
+ fdwname  
+----------
+ hdfs_fdw
+(1 row)
+
+--check pg_foreign_server,not exists orc_fdw
+SELECT srvname FROM pg_foreign_server;
+        srvname         
+------------------------
+ gsmpp_server
+ gsmpp_errorinfo_server
+ log_srv
+(3 rows)
+
+--test create server
+CREATE SERVER hdfs_server001 FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+CREATE SERVER hdfs_server004 FOREIGN DATA WRAPPER 	HDFS_FDW;
+ERROR:  Need type option for the server.
+HINT:  Valid options in this context are: obs, hdfs, dummy
+CREATE SERVER hdfs_server002 FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (type 'hdfs', hdfscfgpath '/home/hanfeng');
+CREATE SERVER not_hdfs_server003 FOREIGN DATA WRAPPER 	dist_fdw ;
+--error create server
+--error create server
+create server server_005 foreign data wrapper hdfs_fdw options(type 'hdfs', hdfscfgpath  '/home/hanfeng', address '10.67.128.36h:25000');
+ERROR:  invalid input syntax for type inet: "10.67.128.36h"
+create server server_005 foreign data wrapper hdfs_fdw options(type 'hdfs', hdfscfgpath  '/home/hanfeng', address '10.67.128.36:25000h');
+ERROR:  The address option exists illegal character: 'h'
+create server server_005 foreign data wrapper hdfs_fdw options(type 'hdfs', hdfscfgpath  '/home/hanfeng', address '10.67.128.36,25000');
+ERROR:  The incorrect address format
+create server server_005 foreign data wrapper hdfs_fdw options(type 'hdfs', hdfscfgpath  '/home/hanfeng', address '10.67.128.36:25000 ');
+ERROR:  The address option exists illegal character: ' '
+create server server_005 foreign data wrapper hdfs_fdw options(type 'hdfs', hdfscfgpath  '/home/hanfeng', address '10.67.128.36:25000,');
+ERROR:  The address option exists illegal character: ','
+create server server_005 foreign data wrapper hdfs_fdw options(type 'hdfs', hdfscfgpath  '/home/hanfeng', address '10.67.128.36:25000, ');
+ERROR:  The address option exists illegal character: ' '
+create server server_005 foreign data wrapper hdfs_fdw options(type 'hdfs', hdfscfgpath  '/home/hanfeng', address '10.67.128.36:25000,10');
+ERROR:  The incorrect address format
+create server server_005 foreign data wrapper hdfs_fdw options(type 'hdfs', hdfscfgpath  '/home/hanfeng', address '10.67.128.356:25000');
+ERROR:  invalid input syntax for type inet: "10.67.128.356"
+create server server_005 foreign data wrapper hdfs_fdw options(type 'hdfs', hdfscfgpath  '/home/hanfeng', address '10.67.128.36:25000:10.67.128.376:596');
+ERROR:  The address option exists illegal character: ':'
+create server server_005 foreign data wrapper hdfs_fdw options(type 'hdfs', hdfscfgpath  '/home/hanfeng', address '10.67.128.36:25000,10.67.128.376:56, ');
+ERROR:  The address option exists illegal character: ' '
+create server server_005 foreign data wrapper hdfs_fdw options(type 'hdfs', hdfscfgpath  '/home/hanfeng', address '10.67.128.36:25000,10.67.128.37:56, ');
+ERROR:  The address option exists illegal character: ' '
+--test no cfgpath
+create server server_005 foreign data wrapper hdfs_fdw options(type 'hdfs', address '10.67.128.36:25000,10.67.128.37:56');
+ERROR:  Need hdfscfgpath option for the HDFS server.
+--test alter server
+ALTER SERVER hdfs_server001 OPTIONS (SET address '10.67.128.36:25000');
+ALTER SERVER hdfs_server001 OPTIONS (SET address '@hdfshostname@:@hdfsport@');
+ALTER SERVER hdfs_server001 OPTIONS (add hdfscfgpath '/home/hanfeng');
+ERROR:  option "hdfscfgpath" provided more than once
+--ALTER SERVER hdfs_server001 OPTIONS (drop hdfscfgpath );
+ALTER SERVER hdfs_server001 OPTIONS (drop address );
+--test create foreign table
+create foreign table ForeignTbl001 ( 
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT) server hdfs_server001 options (format 'orc',filenames '/user/hive/warehouse/mppdb.db/region_orc11_64stripe') distribute by roundrobin;
+--test need orc format
+create foreign table ForeignTbl002 (
+id int) server hdfs_server001 options (format 'paquet',filenames '/user/hive/warehouse/mppdb/address_orc11_64stripe') distribute by roundrobin;
+ERROR:  Invalid option "paquet"
+HINT:  Valid options in this context are: orc, parquet, text, csv
+--test need  format
+create foreign table ForeignTbl002 (
+id int) server hdfs_server001 options (filenames '/user/hive/warehouse/mppdb/address_orc11_64stripe') distribute by roundrobin;
+ERROR:  Need format option for the foreign table.
+--test need roundrobin
+create foreign table ForeignTbl002 (
+id  int) server hdfs_server001 options (format 'orc',filenames '/user/hive/warehouse/mppdb/address_orc11_63stripe') distribute by hash (id);
+ERROR:  Unsupport distribute type.
+DETAIL:  Supported option values are "roundrobin" and "replication".
+create foreign table ForeignTbl003 (
+id int) server hdfs_server001 options (format 'orc',filenames '/user/hive/warehouse/mppdb/address_orc11_63stripe') ;
+ERROR:  Need DISTRIBUTE BY clause for the foreign table.
+--test need either filenames or foldername, but not both
+create foreign table ForeignTbl003 (
+id int) server hdfs_server001 options (format 'orc',filenames '/user/hive/warehouse/mppdb/address_orc11_63stripe',foldername '/user/hive/warehouse/mppdb/')  distribute by roundrobin;
+ERROR:  It is not allowed to specify both filenames and foldername for the foreign table, need either filenames or foldername.
+--test not need address option
+create foreign table ForeignTbl003 (
+id int) server hdfs_server001 options (address '10.145.130.26:25000',filenames '/user/hive/warehouse/mppdb/address_orc11_63stripe') distribute by roundrobin;
+ERROR:  Need format option for the foreign table.
+-- not need disribute by roundrobin for not hdfs server foreign table
+CREATE FOREIGN TABLE ForeignTbl004 (
+name text, 
+street text, 
+city text, 
+state text, 
+zip int) SERVER not_hdfs_server003 options (location 'gsfs://192.168.20.199:10001');
+--alter foreign table 
+ALTER FOREIGN TABLE ForeignTbl001 OPTIONS (set  filenames '/user/hive/warehouse/mppdb.db');
+ALTER FOREIGN TABLE ForeignTbl001 OPTIONS (DROP format);
+ERROR:  Need format option for the foreign table.
+ALTER FOREIGN TABLE ForeignTbl001 OPTIONS (DROP filenames);
+ERROR:  It is not allowed to specify both filenames and foldername for the foreign table, need either filenames or foldername.
+ALTER FOREIGN TABLE ForeignTbl001 OPTIONS (DROP foldername);
+ERROR:  option "foldername" not found
+ALTER FOREIGN TABLE ForeignTbl001 ADD time TIMESTAMP;
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+ALTER FOREIGN TABLE ForeignTbl001 ALTER time TYPE TIME;
+ERROR:  Column time is unsupported data type for hdfs table.
+--test dml
+delete from ForeignTbl004;
+ERROR:  cannot delete from foreign table "foreigntbl004"
+truncate ForeignTbl004;
+ERROR:  It is not supported to truncate foreign table "foreigntbl004".
+vacuum ForeignTbl004;
+WARNING:  skipping "foreigntbl004" --- cannot vacuum non-tables or special system tables
+update ForeignTbl004 set name = 'Gauss';
+ERROR:  cannot update foreign table "foreigntbl004"
+insert into ForeignTbl004 values ('Gauss', 'tang', 'xian', 'centreslidepeopletotalandcountry', 0000);
+ERROR:  Un-support feature
+DETAIL:  insert statement is an INSERT INTO VALUES(...)
+--drop table
+drop FOREIGN TABLE ForeignTbl004 CASCADE;
+--drop server 
+DROP SERVER not_hdfs_server003;
+DROP SERVER hdfs_server001;
+ERROR:  cannot drop server hdfs_server001 because other objects depend on it
+DETAIL:  foreign table foreigntbl001 depends on server hdfs_server001
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+DROP SERVER hdfs_server001 CASCADE;
+NOTICE:  drop cascades to foreign table foreigntbl001
+create schema  fvt_data_query_hive;
+create server orc_server foreign data wrapper hdfs_fdw options (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+create foreign table fvt_data_query_hive.elk_create_foreign_table_022_1
+(
+ c_id1 int ,
+ c_first varchar(16) ,
+c_since timestamp 
+)
+server orc_server OPTIONS(format 'orc', filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table_022/000000_0') distribute by roundrobin;
+select s.srvname,c.relname  from  pg_class c,pg_foreign_table f ,pg_foreign_server s  where s.oid=f.ftserver  and f.ftrelid=c.oid and c.relname ='elk_create_foreign_table_022_1';
+  srvname   |            relname             
+------------+--------------------------------
+ orc_server | elk_create_foreign_table_022_1
+(1 row)
+
+create  table fvt_data_query_hive.elk_create_foreign_table_022_2
+(
+ c_id1 int
+)inherits (fvt_data_query_hive.elk_create_foreign_table_022_1);
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+create temporary table elk_create_foreign_table_022_2( c_id1 int)inherits (fvt_data_query_hive.elk_create_foreign_table_022_1);
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+drop server orc_server cascade;
+NOTICE:  drop cascades to foreign table fvt_data_query_hive.elk_create_foreign_table_022_1
+create server elk_create_foreign_table_server foreign data wrapper hdfs_fdw options (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+create foreign table fvt_data_query_hive.elk_create_foreign_table_012_1
+(
+ c_id int ,
+ c_first varchar(16),
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',foldername  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_012,/user/hive/warehouse/hive/elk_create_foreign_orc_table')distribute by roundrobin;
+ERROR:  Only a folder path is allowed for the foreign table.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_012_1
+(
+ c_id int ,
+ c_first varchar(16),
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',foldername  '')distribute by roundrobin;
+ERROR:  No folder path is specified for the foreign table.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_029_1
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_029/000000_0', encoding 'utf8') distribute by roundrobin;
+--alter
+alter  foreign table fvt_data_query_hive.elk_create_foreign_table_029_1 drop column c_since;
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table fvt_data_query_hive.elk_create_foreign_table_029_1 add column c_name text;                                               ---alter sucess
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table fvt_data_query_hive.elk_create_foreign_table_029_1 add constraint constraint_029 primary key(c_id);         -----alter error
+ERROR:  The foreign table only support "NOT ENFORCED" informational constraint.
+alter foreign table fvt_data_query_hive.elk_create_foreign_table_029_1 set without cluster;                               -----alter error                  
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table fvt_data_query_hive.elk_create_foreign_table_029_1 rename to elk_create_foreign_table_029_1_1;               -----alter error
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table  fvt_data_query_hive.elk_create_foreign_table_029_1 rename c_first to c_first1;                                               
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+alter foreign table  fvt_data_query_hive.elk_create_foreign_table_029_1 set schema public;  
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+create  table fvt_data_query_hive.elk_create_foreign_table_019_1
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp ,
+primary key(c_id)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "elk_create_foreign_table_019_1_pkey" for table "elk_create_foreign_table_019_1"
+create foreign table fvt_data_query_hive.elk_create_foreign_table_019_3
+(
+ c_id int  REFERENCES fvt_data_query_hive.elk_create_foreign_table_019_1(c_id) ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_019/000000_0')distribute by roundrobin;
+ERROR:  REFERENCES constraint is not yet supported.
+--error format option
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_1
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format ' orc',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/elk_create_foreign_table_053') distribute by roundrobin;
+ERROR:  Invalid option " orc"
+HINT:  Valid options in this context are: orc, parquet, text, csv
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_2
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc ',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0') distribute by roundrobin;
+ERROR:  Invalid option "orc "
+HINT:  Valid options in this context are: orc, parquet, text, csv
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_2
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'or',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0') distribute by roundrobin;
+ERROR:  Invalid option "or"
+HINT:  Valid options in this context are: orc, parquet, text, csv
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_2
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orce',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0') distribute by roundrobin;
+ERROR:  Invalid option "orce"
+HINT:  Valid options in this context are: orc, parquet, text, csv
+--error filenames
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_3
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  ' /user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0') distribute by roundrobin;
+ERROR:  There is an illegal character ' ' in the option filenames.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0 ') distribute by roundrobin;
+ERROR:  There is an illegal character ' ' in the option filenames.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  ',') distribute by roundrobin;
+ERROR:  There is an illegal character ',' in the option filenames.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  ',/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0') distribute by roundrobin;
+ERROR:  There is an illegal character ',' in the option filenames.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0,') distribute by roundrobin;
+ERROR:  There is an illegal character ',' in the option filenames.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  '') distribute by roundrobin;
+ERROR:  No file path is specified for the foreign table.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  '/han,usr/,') distribute by roundrobin;
+ERROR:  There is an illegal character ',' in the option filenames.
+--error foldername option
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+foldername   ' /user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/') distribute by roundrobin;
+ERROR:  There is an illegal character ' ' in the option foldername.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+foldername   '/user/hive/warehouse/hive/elk_create_foreign_orc_table,/elk_create_foreign_orc_table_053/') distribute by roundrobin;
+ERROR:  Only a folder path is allowed for the foreign table.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+foldername   '') distribute by roundrobin;
+ERROR:  No folder path is specified for the foreign table.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+foldername   ',') distribute by roundrobin;
+ERROR:  There is an illegal character ',' in the option foldername.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_013_1
+(
+ c_id int ,
+ c_first varchar(16),
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',foldername '/user/hive/warehouse/hive/elk_create_foreign_orc_table',filenames '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_013/000000_1')distribute by roundrobin;
+ERROR:  It is not allowed to specify both filenames and foldername for the foreign table, need either filenames or foldername.
+--error format option
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_1
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format ' orc',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/elk_create_foreign_table_053') distribute by roundrobin;
+ERROR:  Invalid option " orc"
+HINT:  Valid options in this context are: orc, parquet, text, csv
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_2
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc ',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0') distribute by roundrobin;
+ERROR:  Invalid option "orc "
+HINT:  Valid options in this context are: orc, parquet, text, csv
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_2
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'or',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0') distribute by roundrobin;
+ERROR:  Invalid option "or"
+HINT:  Valid options in this context are: orc, parquet, text, csv
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_2
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orce',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0') distribute by roundrobin;
+ERROR:  Invalid option "orce"
+HINT:  Valid options in this context are: orc, parquet, text, csv
+--error filenames
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_3
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  ' /user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0') distribute by roundrobin;
+ERROR:  There is an illegal character ' ' in the option filenames.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0 ') distribute by roundrobin;
+ERROR:  There is an illegal character ' ' in the option filenames.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  ',') distribute by roundrobin;
+ERROR:  There is an illegal character ',' in the option filenames.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  ',/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0') distribute by roundrobin;
+ERROR:  There is an illegal character ',' in the option filenames.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/000000_0,') distribute by roundrobin;
+ERROR:  There is an illegal character ',' in the option filenames.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  '') distribute by roundrobin;
+ERROR:  No file path is specified for the foreign table.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_4
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+filenames  '/han,usr/,') distribute by roundrobin;
+ERROR:  There is an illegal character ',' in the option filenames.
+--error foldername option
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+foldername   ' /user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_053/') distribute by roundrobin;
+ERROR:  There is an illegal character ' ' in the option foldername.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+foldername   '/user/hive/warehouse/hive/elk_create_foreign_orc_table,/elk_create_foreign_orc_table_053/') distribute by roundrobin;
+ERROR:  Only a folder path is allowed for the foreign table.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+foldername   '') distribute by roundrobin;
+ERROR:  No folder path is specified for the foreign table.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_053_6
+(
+ c_id int ,
+ c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',
+foldername   ',') distribute by roundrobin;
+ERROR:  There is an illegal character ',' in the option foldername.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_013_1
+(
+ c_id int ,
+ c_first varchar(16),
+c_since timestamp
+)
+server elk_create_foreign_table_server OPTIONS(format 'orc',foldername '/user/hive/warehouse/hive/elk_create_foreign_orc_table',filenames '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_013/000000_1')distribute by roundrobin;
+ERROR:  It is not allowed to specify both filenames and foldername for the foreign table, need either filenames or foldername.
+drop schema fvt_data_query_hive cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to foreign table fvt_data_query_hive.elk_create_foreign_table_029_1
+drop cascades to table fvt_data_query_hive.elk_create_foreign_table_019_1
+drop  server elk_create_foreign_table_server;
+--chack error syntax for hdfscfgpath option
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address '10.135.140.45:5689',hdfscfgpath ' /user');
+ERROR:  There is an illegal character ' ' in the option hdfscfgpath.
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address '10.135.140.45:5689',hdfscfgpath '/user ');
+ERROR:  There is an illegal character ' ' in the option hdfscfgpath.
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address '10.135.140.45:5689',hdfscfgpath '/user,/home');
+ERROR:  Only a hdfscfg path is allowed for the server.
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address '10.135.140.45:5689',hdfscfgpath '/user,');
+ERROR:  There is an illegal character ',' in the option hdfscfgpath.
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address '10.135.140.45:5689',hdfscfgpath ',/user');
+ERROR:  There is an illegal character ',' in the option hdfscfgpath.
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address '10.135.140.45:5689',hdfscfgpath '');
+ERROR:  No hdfscfg path is specified for the server.
+--check error syntax for address option
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address '10.135.140.45:5689 ');
+ERROR:  The address option exists illegal character: ' '
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address ' 10.135.140.45:5689');
+ERROR:  The address option exists illegal character: ' '
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address '');
+ERROR:  No address is specified for the server.
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address '10.135.140.45::5689');
+ERROR:  Unsupport ipv6 foramt
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address '10.135.140:5689');
+ERROR:  invalid input syntax for type inet: "10.135.140"
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address '10.135.140:');
+ERROR:  invalid input syntax for type inet: "10.135.140"
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address '10.135.140');
+ERROR:  The incorrect address format
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address '10.135.140.45:45, 10.135.140:568');
+ERROR:  The address option exists illegal character: ' '
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address '10.135.140.45:45,10.135.140:568');
+ERROR:  invalid input syntax for type inet: "10.135.140"
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address '10.135.140.45:45 ,10.135.140.89:568,');
+ERROR:  The address option exists illegal character: ' '
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address '10.135.140.45:45,10.135.140.89:568,');
+ERROR:  The address option exists illegal character: ','
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address ',10.135.140.45:45,10.135.140.89:568');
+ERROR:  The address option exists illegal character: ','
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address '10.135.140.45:45,10.135.140.89');
+ERROR:  The incorrect address format
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address '10.135.140.45:45,10.h135.140.89:45');
+ERROR:  invalid input syntax for type inet: "10.h135.140.89"
+create server error_server foreign data wrapper HDFS_FDW options(type 'hdfs', address '10.135.140.45:45,10.135.140.89:45h');
+ERROR:  The address option exists illegal character: 'h'
+--check error syntax for format option
+create server foreigntbl_server foreign data wrapper HDFS_FDW options(type 'hdfs', address '10.135.140.45:45',hdfscfgpath '@hdfscfgpath@');
+create foreign table foreigntbl (id int) server foreigntbl_server options(format ' orc',filenames '/home') distribute by roundrobin;
+ERROR:  Invalid option " orc"
+HINT:  Valid options in this context are: orc, parquet, text, csv
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc ',filenames '/home') distribute by roundrobin;
+ERROR:  Invalid option "orc "
+HINT:  Valid options in this context are: orc, parquet, text, csv
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'or',filenames '/home') distribute by roundrobin;
+ERROR:  Invalid option "or"
+HINT:  Valid options in this context are: orc, parquet, text, csv
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orch',filenames '/home') distribute by roundrobin;
+ERROR:  Invalid option "orch"
+HINT:  Valid options in this context are: orc, parquet, text, csv
+--check error syntax for filenames option
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',filenames ' /home') distribute by roundrobin;
+ERROR:  There is an illegal character ' ' in the option filenames.
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',filenames '/home ') distribute by roundrobin;
+ERROR:  There is an illegal character ' ' in the option filenames.
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',filenames '/home,') distribute by roundrobin;
+ERROR:  There is an illegal character ',' in the option filenames.
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',filenames ',/home') distribute by roundrobin;
+ERROR:  There is an illegal character ',' in the option filenames.
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',filenames '/home, /user') distribute by roundrobin;
+ERROR:  There is an illegal character ' ' in the option filenames.
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',filenames '') distribute by roundrobin;
+ERROR:  No file path is specified for the foreign table.
+--check error syntax for foldername option
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',filenames '/home', foldername '/home/123') distribute by roundrobin;
+ERROR:  It is not allowed to specify both filenames and foldername for the foreign table, need either filenames or foldername.
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername ' /home/123') distribute by roundrobin;
+ERROR:  There is an illegal character ' ' in the option foldername.
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername '/home/123 ') distribute by roundrobin;
+ERROR:  There is an illegal character ' ' in the option foldername.
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername ',/home/123') distribute by roundrobin;
+ERROR:  There is an illegal character ',' in the option foldername.
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername '/home/123,') distribute by roundrobin;
+ERROR:  There is an illegal character ',' in the option foldername.
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername '/home/123,/user/123') distribute by roundrobin;
+ERROR:  Only a folder path is allowed for the foreign table.
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername '') distribute by roundrobin;
+ERROR:  No folder path is specified for the foreign table.
+create foreign table foreigntbl (id int) server foreigntbl_server options(format 'orc',foldername '/han\ jk') distribute by roundrobin;
+drop foreign table foreigntbl;
+drop server foreigntbl_server;
+create server elk_create_foreign_partition_server_005 foreign data wrapper hdfs_fdw options (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+create schema fvt_data_query_hive;
+create foreign table fvt_data_query_hive.elk_create_foreign_partition_table_005
+(
+ c_first text,
+ c_since timestamp ,
+ c_id int 
+)
+server elk_create_foreign_partition_server_005 OPTIONS(format 'orc',filenames '/user/hive/warehouse/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=1/000000_0,/user/hive/warehouse/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=2/000000_0,/user/hive/warehouse/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=3/000000_0,/user/hive/warehouse/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=4/000000_0')
+distribute by roundrobin 
+partition by (c_id) automapped;  --error msg for filenames option
+ERROR:  The filenames option is not supported for a partitioned foreign table.
+drop schema fvt_data_query_hive cascade;
+drop server elk_create_foreign_partition_server_005;
+create server elk_create_foreign_partition_server_005 foreign data wrapper hdfs_fdw options (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+create schema fvt_data_query_hive;
+create foreign table fvt_data_query_hive.elk_create_foreign_partition_table_005
+(
+ c_first text,
+ c_since timestamp ,
+ c_id int
+)
+server elk_create_foreign_partition_server_005 OPTIONS(format 'orc',filenames '/user/hive/warehouse/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=1/000000_0,/user/hive/warehouse/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=2/000000_0,/user/hive/warehouse/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=3/000000_0,/user/hive/warehouse/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=4/000000_0')
+distribute by roundrobin
+partition by (c_id) automapped;
+ERROR:  The filenames option is not supported for a partitioned foreign table.
+create foreign table fvt_data_query_hive.elk_create_foreign_partition_table_005
+(
+ c_first text,
+ c_since timestamp ,
+ c_id int
+)
+server elk_create_foreign_partition_server_005 OPTIONS(format 'orc',filenames '/user/hive/warehouse/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_005/c_id=1/000000_0')
+distribute by roundrobin
+partition by (c_id) automapped;
+ERROR:  The filenames option is not supported for a partitioned foreign table.
+create foreign table fvt_data_query_hive.elk_create_foreign_partition_table_056
+(
+c_first text,
+c_since timestamp ,
+c_id    int
+)
+server elk_create_foreign_partition_server_056 OPTIONS(format 'orc',foldername  '/user/hive/warehouse/fvt_data_query_hive.db/elk_create_foreign_partition_orc_table_056')
+ distribute by roundrobin
+(c_id) automapped;
+ERROR:  unrecognized distribution option "roundrobin"
+drop schema fvt_data_query_hive cascade;
+create schema fvt_data_query_hive;
+create foreign table fvt_data_query_hive.elk_create_foreign_table_054_6
+(
+c_id int ,
+c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_partition_server_005 OPTIONS(format 'orc',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_054') distribute by roundrobin;
+select count(*) from fvt_data_query_hive.elk_create_foreign_table_054_6;
+ERROR:  The entries in the options fileNames must be file!
+create foreign table fvt_data_query_hive.elk_create_foreign_table_054_1
+(
+c_id int ,
+c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_partition_server_005 OPTIONS(format 'orc',filenames  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_054/000000_0/') distribute by roundrobin;
+ERROR:  The option filenames should not be end with '/'.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_054_4
+(
+c_id int ,
+c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_partition_server_005 OPTIONS(format 'orc',foldername  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_054/000000_0/') distribute by roundrobin;
+select count(*) from fvt_data_query_hive.elk_create_foreign_table_054_4;
+ERROR:  The foldername option cannot be a file path.
+create foreign table fvt_data_query_hive.elk_create_foreign_table_054_5
+(
+c_id int ,
+c_first varchar(16) ,
+c_since timestamp
+)
+server elk_create_foreign_partition_server_005 OPTIONS(format 'orc',foldername  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_054/000000_0') distribute by roundrobin;
+select count(*) from fvt_data_query_hive.elk_create_foreign_table_054_5;
+ERROR:  The foldername option cannot be a file path.
+create server elk_create_server_013 foreign data wrapper options (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '/home/mpply/hadoop_client/HDFS/hadoop/etc/hadoop');
+ERROR:  syntax error at or near "options"
+LINE 1: ...server elk_create_server_013 foreign data wrapper options (t...
+                                                             ^
+create foreign table fvt_data_query_hive.error_data_type_tbl(r_time time) 
+server elk_create_foreign_partition_server_005  OPTIONS(format 'orc',foldername  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_054/000000_0') distribute by roundrobin;
+ERROR:  Column r_time is unsupported data type for hdfs table.
+--Only the HDFS foreign table support roundrobin distirbute type, the guc support_extended_features is true in pg_regress mode, so the following two tables can be created.
+create table test007(id int) distribute by roundrobin;
+create foreign table redis_table_000(c_int8 int8) server gsmpp_server options(location 'gsfs://10.67.234.234:9101/*') distribute by roundrobin;
+ERROR:  For foreign table ROUNDROBIN distribution type is built-in support.
+--add llt
+Drop server hdfs_server cascade;
+ERROR:  server "hdfs_server" does not exist
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',HDFSCFGPATH '/home/hanfeng/FI_client/hadoop_client/HDFS/hadoop/etc');
+create foreign table region  (
+ R_REGIONKEY  INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT )
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/region_orc11_64stripe')
+distribute by roundrobin;
+select * from region;
+--?.*detail can be found in log of coordinator1.
+Drop server hdfs_server cascade;
+NOTICE:  drop cascades to foreign table region
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+create foreign table region  (
+ R_REGIONKEY  INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT )
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/region_orc11_64stripe')
+distribute by roundrobin;
+select * from region;
+ r_regionkey |   r_name    |                                                      r_comment                                                      
+-------------+-------------+---------------------------------------------------------------------------------------------------------------------
+           0 | AFRICA      | lar deposits. blithely final packages cajole. regular waters are final requests. regular accounts are according to 
+           1 | AMERICA     | hs use ironic, even requests. s
+           2 | ASIA        | ges. thinly even pinto beans ca
+           3 | EUROPE      | ly final courts cajole furiously final excuse
+           4 | MIDDLE EAST | uickly special accounts cajole carefully blithely close requests. carefully final asymptotes haggle furiousl
+(5 rows)
+
+Drop server hdfs_server cascade;
+NOTICE:  drop cascades to foreign table region
+--check alter foreign table add node statment
+create foreign table fvt_data_query_hive.error_data_type_tbl(r_time int) 
+server elk_create_foreign_partition_server_005  OPTIONS(format 'orc',foldername  '/user/hive/warehouse/hive/elk_create_foreign_orc_table/elk_create_foreign_orc_table_054/000000_0') distribute by roundrobin;
+alter foreign table fvt_data_query_hive.error_data_type_tbl add node (newnode);
+ERROR:  PGXC Node newnode: object not defined
+alter foreign table fvt_data_query_hive.error_data_type_tbl delete node (newnode);
+ERROR:  PGXC Node newnode: object not defined
+drop schema fvt_data_query_hive cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to foreign table fvt_data_query_hive.elk_create_foreign_table_054_6
+drop cascades to foreign table fvt_data_query_hive.elk_create_foreign_table_054_4
+drop cascades to foreign table fvt_data_query_hive.elk_create_foreign_table_054_5
+drop cascades to foreign table fvt_data_query_hive.error_data_type_tbl
+drop server elk_create_foreign_partition_server_005;
+--support SET STATISTICS feature
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+create foreign table region  (
+ R_REGIONKEY  INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT )
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/region_orc11_64stripe')
+distribute by roundrobin;
+ALTER FOREIGN TABLE region ALTER COLUMN r_name SET STATISTICS 1000;
+select attstattarget from pg_attribute where attrelid = ( select oid from pg_class where relname = 'region' ) and attnum = 2;
+ attstattarget 
+---------------
+          1000
+(1 row)
+
+ALTER FOREIGN TABLE region ALTER COLUMN r_name SET STATISTICS PERCENT 80;
+select attstattarget from pg_attribute where attrelid = ( select oid from pg_class where relname = 'region' ) and attnum = 2;
+ attstattarget 
+---------------
+           -81
+(1 row)
+
+Drop server hdfs_server cascade;
+NOTICE:  drop cascades to foreign table region
+CREATE DATABASE gbk_c_db WITH ENCODING 'GBK' LC_COLLATE='C' LC_CTYPE='C' TEMPLATE=template0;
+\c gbk_c_db;
+CREATE SERVER hdfs_server_global FOREIGN DATA WRAPPER HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+create node group group0203 with (datanode1, datanode2);
+drop foreign table if exists f_glb_hdfs_utf8_latin1_001_01;
+NOTICE:  foreign table "f_glb_hdfs_utf8_latin1_001_01" does not exist, skipping
+create foreign table f_glb_hdfs_utf8_latin1_001_01
+(
+        c_tinyint           tinyint,
+        c_smallint          smallint,
+        c_int               int,
+        c_bigint            bigint,
+        c_money             money,
+        c_char              char(50),
+        c_varchar           varchar(50),
+        c_nvarchar          nvarchar2(50),
+    c_bpchar            bpchar,
+        c_text              text,
+        c_clob              clob,
+        c_bytea             bytea,
+        c_name              name,
+        c_date              date,
+        c_time1             time,
+        c_time2             time without time zone,
+        c_timestamp1        timestamp,
+    c_timestamp2        timestamp without time zone,
+        c_smalldatetime     smalldatetime,
+        c_interval1         interval day to second(6),
+        c_interval2         interval hour
+)
+SERVER hdfs_server_global
+OPTIONS(filenames '/user/hive/warehouse/hdfs_global/global_latin1_hdfs.txt',
+format 'text',
+delimiter ',', null 'null',
+encoding 'latin1',
+date_format 'hh24/mi/ss/yyyy/mm/dd',
+time_format 'mi//hh24//ss',
+timestamp_format 'hh24/mi/ss/yy/mm/dd',
+smalldatetime_format 'hh24/mi/ss/mm/dd/yyyy',
+checkencoding 'high'
+)
+distribute by replication;
+ERROR:  default conversion function for encoding "LATIN1" to "GBK" does not exist
+drop foreign table if exists f_glb_hdfs_utf8_latin1_001_01;
+NOTICE:  foreign table "f_glb_hdfs_utf8_latin1_001_01" does not exist, skipping
+drop server hdfs_server_global;
+\c regression
+drop database gbk_c_db;

@@ -30,7 +30,7 @@
 #include "vecexecutor/vecexecutor.h"
 #include "executor/nodeSubqueryscan.h"
 
-static VectorBatch* vec_sub_query_next(VecSubqueryScanState* node);
+static VectorBatch* VecSubqueryNext(VecSubqueryScanState* node);
 
 /* ----------------------------------------------------------------
  *                      Scan Support
@@ -42,7 +42,7 @@ static VectorBatch* vec_sub_query_next(VecSubqueryScanState* node);
  *      This is a workhorse for ExecSubqueryScan
  * ----------------------------------------------------------------
  */
-static VectorBatch* vec_sub_query_next(VecSubqueryScanState* node)
+static VectorBatch* VecSubqueryNext(VecSubqueryScanState* node)
 {
     VectorBatch* batch = NULL;
 
@@ -79,7 +79,7 @@ static bool vec_sub_query_recheck(VecSubqueryScanState* node, VectorBatch* slot)
  */
 VectorBatch* ExecVecSubqueryScan(VecSubqueryScanState* node)
 {
-    return ExecVecScan(&node->ss, (ExecVecScanAccessMtd)vec_sub_query_next, (ExecVecScanRecheckMtd)vec_sub_query_recheck);
+    return ExecVecScan(&node->ss, (ExecVecScanAccessMtd)VecSubqueryNext, (ExecVecScanRecheckMtd)vec_sub_query_recheck);
 }
 
 /* ----------------------------------------------------------------
@@ -143,7 +143,10 @@ VecSubqueryScanState* ExecInitVecSubqueryScan(VecSubqueryScan* node, EState* est
     /*
      * Initialize result tuple type and projection info.
      */
-    ExecAssignResultTypeFromTL(&vecsubquerystate->ss.ps);
+    ExecAssignResultTypeFromTL(
+            &vecsubquerystate->ss.ps,
+            vecsubquerystate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+
     ExecAssignVecScanProjectionInfo(&vecsubquerystate->ss);
 
     // Allocate vector for qualification results

@@ -33,14 +33,17 @@
 #include "access/reloptions.h"
 #include "access/transam.h"
 #include "access/xact.h"
+#include "access/tableam.h"
 #include "catalog/dfsstore_ctlg.h"
 #include "catalog/namespace.h"
+#include "catalog/gs_matview.h"
 #include "catalog/pg_database.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pgxc_class.h"
 #include "catalog/storage.h"
 #include "catalog/storage_gtt.h"
 #include "commands/cluster.h"
+#include "commands/matview.h"
 #include "commands/tablespace.h"
 #include "commands/vacuum.h"
 #include "executor/nodeModifyTable.h"
@@ -48,7 +51,7 @@
 #include "optimizer/cost.h"
 #include "pgstat.h"
 #include "postmaster/autovacuum.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/lmgr.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
@@ -60,10 +63,15 @@
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/commands_gstrace.h"
+#ifdef ENABLE_MOT
 #include "foreign/fdwapi.h"
+#endif
+#ifdef ENABLE_MULTIPLE_NODES
+#include "tsdb/utils/constant_def.h"
+#endif
 
 #ifdef PGXC
 #include "pgxc/pgxc.h"
@@ -130,7 +138,7 @@ static void GPIVacuumMainPartition(
 /// VACUUM FULL table runs.
 void CNGuardOldQueryForVacuumFull(VacuumStmt* vacstmt, Oid relid)
 {
-    if (IS_PGXC_COORDINATOR && (vacstmt->options & VACOPT_FULL)) {
+    if (IS_PGXC_COORDINATOR && ((uint32)(vacstmt->options) & VACOPT_FULL)) {
         /// Acquiring this lock will be blocked by any other transaction,
         /// even it's just a SELECT query. Until that transaction finishes,
         /// lock can be gained.
@@ -352,6 +360,7 @@ void vacuum(
                     StartTransactionCommand();
                     /* functions in indexes may want a snapshot set */
                     PushActiveSnapshot(GetTransactionSnapshot());
+                    LockSharedObject(DatabaseRelationId, u_sess->proc_cxt.MyDatabaseId, 0, RowExclusiveLock);
                 }
 
                 /*
@@ -405,9 +414,10 @@ void vacuum(
          * PostgresMain().
          */
         StartTransactionCommand();
+        LockSharedObject(DatabaseRelationId, u_sess->proc_cxt.MyDatabaseId, 0, RowExclusiveLock);
     }
 
-    if ((vacstmt->options & VACOPT_VACUUM) && !IsAutoVacuumWorkerProcess()) {
+    if (((uint32)(vacstmt->options) & VACOPT_VACUUM) && !IsAutoVacuumWorkerProcess()) {
         /*
          * Update pg_database.datfrozenxid, and truncate pg_clog if possible.
          * (autovacuum.c does this for itself.)
@@ -426,7 +436,7 @@ void vacuum(
     }
 }
 
-bool rel_is_pax_format(HeapTuple tuple, TupleDesc tupdesc)
+bool CheckRelOrientationByPgClassTuple(HeapTuple tuple, TupleDesc tupdesc, const char* orientation)
 {
     bool ret = false;
     bytea* options = NULL;
@@ -436,7 +446,7 @@ bool rel_is_pax_format(HeapTuple tuple, TupleDesc tupdesc)
         const char* format = ((options) && (((StdRdOptions*)(options))->orientation))
             ? ((char*)(options) + *(int*)&(((StdRdOptions*)(options))->orientation))
             : ORIENTATION_ROW;
-        if (pg_strcasecmp(format, ORIENTATION_ORC) == 0)
+        if (pg_strcasecmp(format, orientation) == 0)
             ret = true;
 
         pfree_ext(options);
@@ -459,7 +469,7 @@ char* get_nsp_relname(Oid relid)
             NAMEDATALEN * 2,
             NAMEDATALEN * 2 - 1,
             "%s.%s",
-            get_namespace_name(get_rel_namespace(relid), true),
+            get_namespace_name(get_rel_namespace(relid)),
             relname);
         securec_check_ss(rc, "\0", "\0");
 
@@ -483,8 +493,32 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
     MemoryContext oldcontext = NULL;
     TupleDesc pgclassdesc = GetDefaultPgClassDesc();
 
-    /* OID supplied by VACUUM's caller? */
+    /*
+     * OID supplied by VACUUM's caller?
+     * Matview need to be processed, it can not be FULL vacuum because ctid
+     * is used by refresh.
+     * 1. if the relid is valid, this function is called by autovacuum, it
+     *    is not a FULL vacuum.
+     * 2. if the stmt->relation is set, it is be called by 'VACUUM rel', user
+     *    can set the FULL options, we must check it and make an error report.
+     * 3. if there are no relations are setted, it will scan all relations to
+     *    vacuum, we simply skip the matview when FULL option is setted.
+     */
     if (OidIsValid(relid)) {
+        /* check for safety */
+        if (is_incremental_matview(relid) && (vacstmt->options & VACOPT_FULL)) {
+            ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                         errmsg("relation with OID %u cannot do the FULL vacuum", relid)));
+        }
+
+        if (OidIsValid(find_matview_mlog_table(relid)) && (vacstmt->options & VACOPT_FULL)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("relation with OID %u has one or more incremental materialized view associated, and cannot be FULL vacuumed",
+                                   relid)));
+        }
+
         if (t_thrd.vacuum_cxt.vac_context) {
             oldcontext = MemoryContextSwitchTo(t_thrd.vacuum_cxt.vac_context);
         }
@@ -516,6 +550,31 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
          * now and then.
          */
         relationid = RangeVarGetRelidExtended(vacstmt->relation, NoLock, false, false, false, true, NULL, NULL);
+
+        if (is_incremental_matview(relationid) && (vacstmt->options & VACOPT_FULL)) {
+            ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                         errmsg("relation with OID %u cannot do the FULL vacuum", relationid)));
+        }
+
+        /*
+         * We can't do full vacuum on a table if it's associated with some incremental materialized views.
+         *
+         * The reason is, we keep the association of tuple tids between base tables and mvs, via matviewmaps,
+         * and the tid of base table may be changed after a full vacuum, which can cause data inconsistency.
+         *
+         * For example, if we do the following operations on the base table and mv:
+         *      Insert tid1, Insert tid2, Insert tid3, Refresh mv, Delete tid1, Vacuum full, Delete tid1, Refresh mv
+         *
+         * the second 'Delete tid1' will remove one tuple(originally tid2 before vacuum) from the base table, but will
+         * do nothing on mv. On the other hand, some tuples will exist in mv forever after this operation sequence.
+         */
+        if (OidIsValid(find_matview_mlog_table(relationid)) && (vacstmt->options & VACOPT_FULL)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("relation with OID %u has one or more incremental materialized view associated, and cannot be FULL vacuumed",
+                                   relationid)));
+        }
 
         /* 1.a partition */
         if (PointerIsValid(vacstmt->relation->partitionname)) {
@@ -578,9 +637,11 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
             if (HeapTupleIsValid(classTup)) {
                 /* for dfs special vacuum, just skip for non-dfs table. */
                 if ((((vacstmt->options & VACOPT_HDFSDIRECTORY) || (vacstmt->options & VACOPT_COMPACT)) &&
-                        !rel_is_pax_format(classTup, pgclassdesc)) ||
-                    ((vacstmt->options & VACOPT_MERGE) && !rel_is_CU_format(classTup, pgclassdesc) &&
-                        !rel_is_pax_format(classTup, pgclassdesc))) {
+                        !CheckRelOrientationByPgClassTuple(classTup, pgclassdesc, ORIENTATION_ORC)) ||
+                    ((vacstmt->options & VACOPT_MERGE) &&
+                        !(CheckRelOrientationByPgClassTuple(classTup, pgclassdesc, ORIENTATION_COLUMN) ||
+                        CheckRelOrientationByPgClassTuple(classTup, pgclassdesc, ORIENTATION_ORC) ||
+                        CheckRelOrientationByPgClassTuple(classTup, pgclassdesc, ORIENTATION_TIMESERIES)))) {
                     ReleaseSysCache(classTup);
 
                     return NIL;
@@ -589,10 +650,10 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
                 classForm = (Form_pg_class)GETSTRUCT(classTup);
 
                 /* Partitioned table, get all the partitions */
-                if (classForm->parttype  == PARTTYPE_PARTITIONED_RELATION && classForm->relkind == RELKIND_RELATION &&
+                if (classForm->parttype == PARTTYPE_PARTITIONED_RELATION && classForm->relkind == RELKIND_RELATION &&
                     ((vacstmt->options & VACOPT_FULL) || (vacstmt->options & VACOPT_VACUUM))) {
                     Relation pgpartition;
-                    HeapScanDesc scan;
+                    TableScanDesc scan;
                     HeapTuple tuple;
                     ScanKeyData keys[2];
 
@@ -610,9 +671,9 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
                         ObjectIdGetDatum(relationid));
 
                     pgpartition = heap_open(PartitionRelationId, AccessShareLock);
-                    scan = heap_beginscan(pgpartition, SnapshotNow, 2, keys);
+                    scan = tableam_scan_begin(pgpartition, SnapshotNow, 2, keys);
 
-                    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+                    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
                         if (t_thrd.vacuum_cxt.vac_context) {
                             oldcontext = MemoryContextSwitchTo(t_thrd.vacuum_cxt.vac_context);
                         }    
@@ -648,10 +709,16 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
                 } else {
                     /* 
                      * non-partitioned table 
-                     * forbit vacuum full/vacuum/analyze cstore.xxxxx direct on datanode 
+                     * forbit vacuum full/vacuum/analyze cstore.xxxxx direct on datanode
+                     * except for timeseries index tables.
                      */
                     if (classForm->relnamespace == CSTORE_NAMESPACE) {
-                        if (memcmp(vacstmt->relation->relname, "pg_delta", 8)) {
+                        if (memcmp(vacstmt->relation->relname, "pg_delta", 8)
+#ifdef ENABLE_MULTIPLE_NODES
+                            && memcmp(vacstmt->relation->relname, TsConf::TAG_TABLE_NAME_PREFIX,
+                                      strlen(TsConf::TAG_TABLE_NAME_PREFIX))
+#endif
+                            ) {
                             ereport(ERROR,
                                 (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
                                     errmsg("cstore.%s is a internal table", vacstmt->relation->relname)));
@@ -665,6 +732,9 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
                     vacObj->tab_oid = relationid;
                     vacObj->parent_oid = InvalidOid;
                     vacObj->flags = VACFLG_SIMPLE_HEAP;
+                    vacObj->is_tsdb_deltamerge = (classForm->relkind == RELKIND_RELATION &&
+                        (vacstmt->options & VACOPT_MERGE) &&
+                        CheckRelOrientationByPgClassTuple(classTup, pgclassdesc, ORIENTATION_TIMESERIES));
                     oid_list = lappend(oid_list, vacObj);
 
                     if (t_thrd.vacuum_cxt.vac_context) {
@@ -685,33 +755,39 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
          * and B-Tree index partitions from pg_class and pg_partition.
          */
         Relation pgclass;
-        HeapScanDesc scan;
+        TableScanDesc scan;
         HeapTuple tuple;
 
-        /* Process all plain relations listed in pg_class */
         pgclass = heap_open(RelationRelationId, AccessShareLock);
 
-        scan = heap_beginscan(pgclass, SnapshotNow, 0, NULL);
+        scan = tableam_scan_begin(pgclass, SnapshotNow, 0, NULL);
 
-        while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
-            /* for dfs special vacuum, just skip for non-dfs table. */
-            if ((((vacstmt->options & VACOPT_HDFSDIRECTORY) || (vacstmt->options & VACOPT_COMPACT)) &&
-                    !rel_is_pax_format(tuple, pgclassdesc)) ||
-                ((vacstmt->options & VACOPT_MERGE) && !rel_is_CU_format(tuple, pgclassdesc) &&
-                    !rel_is_pax_format(tuple, pgclassdesc)))
+        while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
+            Form_pg_class classForm = (Form_pg_class) GETSTRUCT(tuple);
+
+            if (classForm->relkind != RELKIND_RELATION && classForm->relkind != RELKIND_MATVIEW)
                 continue;
 
-            Form_pg_class classForm = (Form_pg_class)GETSTRUCT(tuple);
-
-            /* Only vacuum table and materialized view */
-            if (classForm->relkind != RELKIND_RELATION && classForm->relkind != RELKIND_MATVIEW) {
+            /* skip the incremental matview */
+            if ((is_incremental_matview(HeapTupleGetOid(tuple)) ||
+                    (OidIsValid(find_matview_mlog_table(HeapTupleGetOid(tuple))))) &&
+                (vacstmt->options & VACOPT_FULL)) {
                 continue;
             }
+
+            /* for dfs special vacuum, just skip for non-dfs table. */
+            if ((((vacstmt->options & VACOPT_HDFSDIRECTORY) || (vacstmt->options & VACOPT_COMPACT)) &&
+                    !CheckRelOrientationByPgClassTuple(tuple, pgclassdesc, ORIENTATION_ORC)) ||
+                ((vacstmt->options & VACOPT_MERGE) &&
+                !CheckRelOrientationByPgClassTuple(tuple, pgclassdesc, ORIENTATION_COLUMN) &&
+                !CheckRelOrientationByPgClassTuple(tuple, pgclassdesc, ORIENTATION_ORC)))
+                continue;
 
             /* Plain relation and valued partition relation */
             if (classForm->parttype == PARTTYPE_NON_PARTITIONED_RELATION ||
                 classForm->parttype == PARTTYPE_VALUE_PARTITIONED_RELATION ||
-                ((vacstmt->options & VACOPT_MERGE) && rel_is_CU_format(tuple, pgclassdesc))) {
+                ((vacstmt->options & VACOPT_MERGE) &&
+                    CheckRelOrientationByPgClassTuple(tuple, pgclassdesc, ORIENTATION_COLUMN))) {
                 /*
                  * when vacuum/vacuum full/analyze the total database,
                  * we skip some collect of relations, for example in CSTORE namespace.
@@ -737,7 +813,7 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
                  * It is a partitioned table, so find all the partitions in pg_partition
                  */
                 Relation pgpartition;
-                HeapScanDesc partScan;
+                TableScanDesc partScan;
                 HeapTuple partTuple;
                 ScanKeyData keys[2];
 
@@ -755,8 +831,8 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
                     ObjectIdGetDatum(HeapTupleGetOid(tuple)));
 
                 pgpartition = heap_open(PartitionRelationId, AccessShareLock);
-                partScan = heap_beginscan(pgpartition, SnapshotNow, 2, keys);
-                while (NULL != (partTuple = heap_getnext(partScan, ForwardScanDirection))) {
+                partScan = tableam_scan_begin(pgpartition, SnapshotNow, 2, keys);
+                while (NULL != (partTuple = (HeapTuple) tableam_scan_getnexttuple(partScan, ForwardScanDirection))) {
                     if (t_thrd.vacuum_cxt.vac_context) {
                         oldcontext = MemoryContextSwitchTo(t_thrd.vacuum_cxt.vac_context);                    
                     }
@@ -867,7 +943,7 @@ void vacuum_set_xid_limits(Relation rel, int64 freeze_min_age, int64 freeze_tabl
     *freezeLimit = limit;
 
     if (freezeTableLimit != NULL) {
-        int64 freezetable;
+        int freezetable;
 
         /*
          * Determine the table freeze age to use: as specified by the caller,
@@ -879,7 +955,7 @@ void vacuum_set_xid_limits(Relation rel, int64 freeze_min_age, int64 freeze_tabl
         freezetable = freeze_table_age;
         if (freezetable < 0)
             freezetable = u_sess->attr.attr_storage.vacuum_freeze_table_age;
-        freezetable = Min((double) freezetable, g_instance.attr.attr_storage.autovacuum_freeze_max_age * 0.95);
+        freezetable = Min(freezetable, g_instance.attr.attr_storage.autovacuum_freeze_max_age * 0.95);
         Assert(freezetable >= 0);
 
         /*
@@ -1063,7 +1139,7 @@ void vac_update_relstats(Relation relation, Relation classRel, RelPageType num_p
      * backend.
      * Caller can pass InvalidTransactionId if it has no new data.
      */
-    xid64datum = heap_getattr(ctup, Anum_pg_class_relfrozenxid64, RelationGetDescr(classRel), &isNull);
+    xid64datum = tableam_tops_tuple_getattr(ctup, Anum_pg_class_relfrozenxid64, RelationGetDescr(classRel), &isNull);
 
     if (isNull) {
         relfrozenxid = pgcform->relfrozenxid;
@@ -1098,7 +1174,7 @@ void vac_update_relstats(Relation relation, Relation classRel, RelPageType num_p
         replaces[Anum_pg_class_relfrozenxid64 - 1] = true;
         values[Anum_pg_class_relfrozenxid64 - 1] = TransactionIdGetDatum(frozenxid);
 
-        nctup = heap_modify_tuple(ctup, RelationGetDescr(classRel), values, nulls, replaces);
+        nctup = (HeapTuple) tableam_tops_modify_tuple(ctup, RelationGetDescr(classRel), values, nulls, replaces);
         ctup = nctup;
         dirty = true;
     }
@@ -1167,11 +1243,12 @@ void vac_update_datfrozenxid(void)
         Form_pg_class classForm = (Form_pg_class)GETSTRUCT(classTup);
 
         /*
-         * Only consider relations able to hold unfrozen XIDs (anything else
-         * should have InvalidTransactionId in relfrozenxid anyway.)
+         * Only consider heap and TOAST tables (anything else should have
+         * InvalidTransactionId in relfrozenxid anyway.)
          */
-        if (classForm->relkind != RELKIND_RELATION && classForm->relkind != RELKIND_MATVIEW && 
-                classForm->relkind != RELKIND_TOASTVALUE)
+        if (classForm->relkind != RELKIND_RELATION &&
+            classForm->relkind != RELKIND_MATVIEW &&
+            classForm->relkind != RELKIND_TOASTVALUE)
             continue;
 
         /* global temp table relstats not in pg_class */
@@ -1179,7 +1256,7 @@ void vac_update_datfrozenxid(void)
             continue;
         }
 
-        xid64datum = heap_getattr(classTup, Anum_pg_class_relfrozenxid64, RelationGetDescr(relation), &isNull);
+        xid64datum = tableam_tops_tuple_getattr(classTup, Anum_pg_class_relfrozenxid64, RelationGetDescr(relation), &isNull);
 
         if (isNull) {
             relfrozenxid = classForm->relfrozenxid;
@@ -1239,9 +1316,13 @@ void vac_update_datfrozenxid(void)
     */
     if (u_sess->attr.attr_storage.max_active_gtt > 0) {
         TransactionId safeAge;
-        TransactionId oldestGttFrozenxid = ENABLE_THREAD_POOL ? 
-                                            ListAllSessionGttFrozenxids(0, NULL, NULL, NULL) :
-                                            ListAllThreadGttFrozenxids(0, NULL, NULL, NULL);
+        TransactionId oldestGttFrozenxid = InvalidTransactionId;
+        if (ENABLE_THREAD_POOL) {
+            ThreadPoolSessControl* sessCtl = g_threadPoolControler->GetSessionCtrl();
+            oldestGttFrozenxid = sessCtl->ListAllSessionGttFrozenxids(0, NULL, NULL, NULL);
+        } else {
+            oldestGttFrozenxid = ListAllThreadGttFrozenxids(0, NULL, NULL, NULL);
+        }
 
         if (TransactionIdIsNormal(oldestGttFrozenxid)) {
             safeAge =
@@ -1286,7 +1367,7 @@ void vac_update_datfrozenxid(void)
      * standalone backend and we want to bring the datfrozenxid in sync with gxid.
      * Also detect the common case where it doesn't go forward either.
      */
-    xid64datum = heap_getattr(tuple, Anum_pg_database_datfrozenxid64, RelationGetDescr(relation), &isNull);
+    xid64datum = tableam_tops_tuple_getattr(tuple, Anum_pg_database_datfrozenxid64, RelationGetDescr(relation), &isNull);
 
     if (isNull) {
         datfrozenxid = dbform->datfrozenxid;
@@ -1319,7 +1400,7 @@ void vac_update_datfrozenxid(void)
         replaces[Anum_pg_database_datfrozenxid64 - 1] = true;
         values[Anum_pg_database_datfrozenxid64 - 1] = TransactionIdGetDatum(newFrozenXid);
 
-        newtuple = heap_modify_tuple(tuple, RelationGetDescr(relation), values, nulls, replaces);
+        newtuple = (HeapTuple) tableam_tops_modify_tuple(tuple, RelationGetDescr(relation), values, nulls, replaces);
         dirty = true;
     }
 
@@ -1361,7 +1442,7 @@ void vac_update_datfrozenxid(void)
 static void vac_truncate_clog(TransactionId frozenXID)
 {
     Relation relation;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tuple;
     Oid oldest_datoid;
     /* init oldest_datoid to sync with my frozenXID */
@@ -1387,12 +1468,12 @@ static void vac_truncate_clog(TransactionId frozenXID)
      */
     relation = heap_open(DatabaseRelationId, AccessShareLock);
 
-    scan = heap_beginscan(relation, SnapshotNow, 0, NULL);
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(relation, SnapshotNow, 0, NULL);
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         volatile FormData_pg_database* dbform = (Form_pg_database)GETSTRUCT(tuple);
         bool isNull = false;
         TransactionId datfrozenxid;
-        Datum xid64datum = heap_getattr(tuple, Anum_pg_database_datfrozenxid64, RelationGetDescr(relation), &isNull);
+        Datum xid64datum = tableam_tops_tuple_getattr(tuple, Anum_pg_database_datfrozenxid64, RelationGetDescr(relation), &isNull);
 
         if (isNull) {
             datfrozenxid = dbform->datfrozenxid;
@@ -1486,10 +1567,17 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
     LockRelId cudescLockRelid = InvalidLockRelId;
     LockRelId deltaLockRelid = InvalidLockRelId;
 
+    /* Vacuum map/log table obeys the same rule as toast, only triggered by vacuum, ignored by autovacuum */
+    bool doMapLog = do_toast;
+    Oid maplogOid;
+
     int messageLevel = -1;
     /* Begin a transaction for vacuuming this relation */
     gstrace_entry(GS_TRC_ID_vacuum_rel);
     StartTransactionCommand();
+
+    /* vacuum must hold RowExclusiveLock on db for a new transaction */
+    LockSharedObject(DatabaseRelationId, u_sess->proc_cxt.MyDatabaseId, 0, RowExclusiveLock);
 
     if (!(vacstmt->options & VACOPT_FULL)) {
         /*
@@ -1523,10 +1611,10 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
     }
 
 #ifdef PGXC
-    ereport(DEBUG1, (errmsg("Starting autovacuum")));
+    ereport(DEBUG1, (errmodule(MOD_AUTOVAC), (errmsg("Starting autovacuum"))));
     /* Now that flags have been set, we can take a snapshot correctly */
     PushActiveSnapshot(GetTransactionSnapshot());
-    ereport(DEBUG1, (errmsg("Started autovacuum")));
+    ereport(DEBUG1, (errmodule(MOD_AUTOVAC), (errmsg("Started autovacuum"))));
 #endif
     /*
      * Check for user-requested abort.	Note we want this to be inside a
@@ -1557,6 +1645,7 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         lmodePartTable = ShareUpdateExclusiveLock;
     }
 
+#ifdef ENABLE_MOT
     if (vacuumRelation(vacstmt->flags) && vacstmt->isMOTForeignTable) {
         if (IS_PGXC_COORDINATOR) {
             proc_snapshot_and_transaction();
@@ -1564,6 +1653,10 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         }
         lmode = AccessExclusiveLock;
     }
+#endif
+
+    if ((!OidIsValid(relationid)) && (vacstmt->options & VACOPT_FULL) && is_sys_table(relid))
+        lmode = AccessExclusiveLock;
 
     /*
      * Open the relation and get the appropriate lock on it.
@@ -1585,9 +1678,11 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         if (relid < FirstNormalObjectId && (vacstmt->options & VACOPT_FULL)) {
             Relation rel = try_relation_open(relid, AccessShareLock);
             if (rel != NULL && rel->rd_rel->relkind == RELKIND_RELATION) {
-                if (!(pg_class_ownercheck(relid, GetUserId()) ||
+                AclResult aclresult = pg_class_aclcheck(relid, GetUserId(), ACL_VACUUM);
+                if (aclresult != ACLCHECK_OK && !(pg_class_ownercheck(relid, GetUserId()) ||
                         (pg_database_ownercheck(u_sess->proc_cxt.MyDatabaseId, GetUserId()) &&
-                            !rel->rd_rel->relisshared))) {
+                            !rel->rd_rel->relisshared) ||
+                                (isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))) {
                     if (vacstmt->options & VACOPT_VERBOSE)
                         messageLevel = VERBOSEMESSAGE;
                     else
@@ -1639,6 +1734,17 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         CNGuardOldQueryForVacuumFull(vacstmt, relid);
 
         onerel = try_relation_open(relid, lmode);
+        if (STMT_RETRY_ENABLED) {
+        // do noting for now, if query retry is on, just to skip validateTempRelation here
+        } else if (onerel != NULL && onerel->rd_rel != NULL && 
+            onerel->rd_rel->relpersistence == RELPERSISTENCE_TEMP && !validateTempNamespace(onerel->rd_rel->relnamespace)) {
+            relation_close(onerel, lmode);
+            ereport(ERROR,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                    errmsg("Temp table's data is invalid because datanode %s restart. "
+                       "Quit your session to clean invalid temp tables.", 
+                       g_instance.attr.attr_common.PGXCNodeName)));
+        }
         GetLock = true;
         /*
          * We block vacuum operation while the target table is in redistribution
@@ -1713,7 +1819,10 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         if (onepartrel) {
             if (onepartrel->rd_rel->relkind == RELKIND_RELATION) {
                 partID = partOidGetPartID(onepartrel, relid);
-                if (partID->partArea == PART_AREA_RANGE || partID->partArea == PART_AREA_INTERVAL) {
+                if (PART_AREA_RANGE == partID->partArea ||
+                    partID->partArea == PART_AREA_INTERVAL ||
+                    PART_AREA_LIST == partID->partArea ||
+                    PART_AREA_HASH == partID->partArea) {
                     if (ConditionalLockPartition(onepartrel->rd_id, relid, lmode, PARTITION_LOCK)) {
                         GetLock = true;
                     }
@@ -1785,19 +1894,23 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
             deltarel = try_relation_open(deltarelid, NoLock);
     }
 
-#define CloseAllRelationsBeforeReturnFalse()            \
-    do {                                                \
-        if (RelationIsPartition(onerel)) {              \
-            releaseDummyRelation(&onerel);              \
-            partitionClose(onepartrel, onepart, lmode); \
-            relation_close(onepartrel, lmodePartTable); \
-        } else {                                        \
-            relation_close(onerel, lmode);              \
-        }                                               \
-        if (cudescrel != NULL)                          \
-            relation_close(cudescrel, lmode);           \
-        if (deltarel != NULL)                           \
-            relation_close(deltarel, lmode);            \
+#define CloseAllRelationsBeforeReturnFalse()                \
+    do {                                                    \
+        if (RelationIsPartition(onerel)) {                  \
+            releaseDummyRelation(&onerel);                  \
+            if (onepart != NULL) {                          \
+                partitionClose(onepartrel, onepart, lmode); \
+            }                                               \
+            if (onepartrel != NULL) {                       \
+                relation_close(onepartrel, lmodePartTable); \
+            }                                               \
+        } else {                                            \
+            relation_close(onerel, lmode);                  \
+        }                                                   \
+        if (cudescrel != NULL)                              \
+            relation_close(cudescrel, lmode);               \
+        if (deltarel != NULL)                               \
+            relation_close(deltarel, lmode);                \
     } while (0)
 
     // We don't do vaccum when the table is in redistribution.
@@ -1830,8 +1943,11 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
      * Note we choose to treat permissions failure as a WARNING and keep
      * trying to vacuum the rest of the DB --- is this appropriate?
      */
-    if (!(pg_class_ownercheck(RelationGetPgClassOid(onerel, (onepart != NULL)), GetUserId()) ||
-            (pg_database_ownercheck(u_sess->proc_cxt.MyDatabaseId, GetUserId()) && !onerel->rd_rel->relisshared))) {
+    AclResult aclresult = pg_class_aclcheck(RelationGetPgClassOid(onerel, (onepart != NULL)), GetUserId(), ACL_VACUUM);
+    if (aclresult != ACLCHECK_OK &&
+        !(pg_class_ownercheck(RelationGetPgClassOid(onerel, (onepart != NULL)), GetUserId()) ||
+            (pg_database_ownercheck(u_sess->proc_cxt.MyDatabaseId, GetUserId()) && !onerel->rd_rel->relisshared) ||
+                (isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))) {
         if (vacstmt->options & VACOPT_VERBOSE)
             messageLevel = VERBOSEMESSAGE;
         else
@@ -1864,7 +1980,9 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
      * relation.
      */
     if (onerel->rd_rel->relkind != RELKIND_RELATION &&
+#ifdef ENABLE_MOT
         !(RelationIsForeignTable(onerel) && isMOTFromTblOid(onerel->rd_id)) &&
+#endif
         onerel->rd_rel->relkind != RELKIND_MATVIEW &&
         onerel->rd_rel->relkind != RELKIND_TOASTVALUE) {
 
@@ -1957,6 +2075,17 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         toast_relid = InvalidOid;
     }
 
+    /* Matview and basetable don't support vacuum full, and matview can never be created on partition table */
+    maplogOid = InvalidOid;
+    if (doMapLog && !(vacstmt->options & VACOPT_FULL) && !RelationIsPartition(onerel)) {
+        if (is_incremental_matview(relid)) {
+            maplogOid = DatumGetObjectId(get_matview_mapid(relid));
+        } else {
+            maplogOid = onerel->rd_mlogoid;
+        }
+    }
+
+
     /*
      * Switch to the table owner's userid, so that any index functions are run
      * as that user.  Also lock down security-restricted operations and
@@ -2023,6 +2152,7 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
     }
 
     WaitState oldStatus = pgstat_report_waitstatus_relname(STATE_VACUUM, get_nsp_relname(relid));
+#ifdef ENABLE_MOT
     if (onerel->rd_rel->relkind == RELKIND_FOREIGN_TABLE) {
         FdwRoutine* fdwroutine =  GetFdwRoutineForRelation(onerel, false);
 
@@ -2038,6 +2168,9 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
                     RelationGetRelationName(onerel))));
         }
     } else if ((vacstmt->options & VACOPT_FULL) && (vacstmt->flags & VACFLG_SIMPLE_HEAP)) {
+#else
+    if ((vacstmt->options & VACOPT_FULL) && (vacstmt->flags & VACFLG_SIMPLE_HEAP)) {
+#endif
         bool is_hdfs_rel = RelationIsPAXFormat(onerel);
         if (is_hdfs_rel) {
             ereport(LOG, (errmsg("vacuum full for DFS table: %s", onerel->rd_rel->relname.data)));
@@ -2111,7 +2244,7 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
             if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
                 DropEmptyPartitionDirectories(relid);
             }
-        } else if (vacuumMainPartition(vacstmt->flags)) {
+        } else if (vacuumMainPartition((uint32)(vacstmt->flags))) {
             pgstat_report_waitstatus_relname(STATE_VACUUM, get_nsp_relname(relid));
             GPIVacuumMainPartition(onerel, vacstmt, lmode, vac_strategy);
         } else {
@@ -2161,6 +2294,13 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         vacstmt->onepartrel = NULL;
         vacstmt->onepart = NULL;
         (void)vacuum_rel(toast_relid, vacstmt, false);
+    }
+
+    if (maplogOid != InvalidOid) {
+        vacstmt->flags = VACFLG_SIMPLE_HEAP;
+        vacstmt->onepartrel = NULL;
+        vacstmt->onepart = NULL;
+        (void)vacuum_rel(maplogOid, vacstmt, false);
     }
 
     /*
@@ -2333,7 +2473,7 @@ void vac_update_partstats(Partition part, BlockNumber num_pages, double num_tupl
      * relfrozenxid should never go backward.  Caller can pass
      * InvalidTransactionId if it has no new data.
      */
-    xid64datum = heap_getattr(parttup, Anum_pg_partition_relfrozenxid64, RelationGetDescr(rd), &isNull);
+    xid64datum = tableam_tops_tuple_getattr(parttup, Anum_pg_partition_relfrozenxid64, RelationGetDescr(rd), &isNull);
 
     if (isNull) {
         relfrozenxid = partform->relfrozenxid;
@@ -2363,7 +2503,7 @@ void vac_update_partstats(Partition part, BlockNumber num_pages, double num_tupl
         replaces[Anum_pg_partition_relfrozenxid64 - 1] = true;
         values[Anum_pg_partition_relfrozenxid64 - 1] = TransactionIdGetDatum(frozenxid);
 
-        nparttup = heap_modify_tuple(parttup, RelationGetDescr(rd), values, nulls, replaces);
+        nparttup = (HeapTuple) tableam_tops_modify_tuple(parttup, RelationGetDescr(rd), values, nulls, replaces);
         parttup = nparttup;
         dirty = true;
     }
@@ -2382,45 +2522,37 @@ void vac_update_partstats(Partition part, BlockNumber num_pages, double num_tupl
     heap_close(rd, RowExclusiveLock);
 }
 
-void vac_open_part_indexes(VacuumStmt* vacstmt, LOCKMODE lockmode, int* nindexes, int* nindexesGlobal, Relation** Irel,
+static void vac_open_global_indexs(
+    List* globIndOidList, LOCKMODE lockmode, int* nindexes, int* nGlobalIndexes, Relation** Irel)
+{
+    ListCell* globIndCell = NULL;
+    Relation indrel = NULL;
+    int j = 0;
+    int i = *nindexes;
+
+    // collect ready global partion indexes
+    foreach (globIndCell, globIndOidList) {
+        Oid globIndOid = lfirst_oid(globIndCell);
+        indrel = index_open(globIndOid, lockmode);
+        Assert(indrel != NULL);
+        if (IndexIsReady(indrel->rd_index) && IndexIsUsable(indrel->rd_index)) {
+            (*Irel)[i + j] = indrel;
+            j++;
+        } else {
+            index_close(indrel, lockmode);
+        }
+    }
+    *nGlobalIndexes = j;
+    *nindexes += j;
+}
+
+static void vac_open_local_indexs(List* localIndOidList, LOCKMODE lockmode, int* nindexes, Relation** Irel,
     Relation** indexrel, Partition** indexpart)
 {
-    List* localIndOidList = NIL;
-    List* globIndOidList = NIL;
+    int i = 0;
     ListCell* localIndCell = NULL;
-    ListCell* globIndCell = NULL;
-    int localIndNums;
-    int globIndNums;
-    int tolIndNums;
     Relation indrel = NULL;
 
-    Assert(lockmode != NoLock);
-    Assert(vacstmt->onepart != NULL);
-    Assert(vacstmt->onepartrel != NULL);
-
-    // get local partition indexes
-    localIndOidList = PartitionGetPartIndexList(vacstmt->onepart);
-    localIndNums = list_length(localIndOidList);
-    // get global partition indexes
-    globIndOidList = RelationGetSpecificKindIndexList(vacstmt->onepartrel, true);
-    globIndNums = list_length(globIndOidList);
-
-    tolIndNums = localIndNums + globIndNums;
-    if (tolIndNums > 0) {
-        *Irel = (Relation*)palloc((long)(tolIndNums) * sizeof(Relation));
-    } else {
-        *Irel = NULL;
-    }
-    if (localIndNums > 0) {
-        *indexrel = (Relation*)palloc((long)(localIndNums) * sizeof(Relation));
-        *indexpart = (Partition*)palloc((long)(localIndNums) * sizeof(Partition));
-    } else {
-        *indexrel = NULL;
-        *indexpart = NULL;
-    }
-
-    // collect ready local partition indexes
-    int i = 0;
     foreach (localIndCell, localIndOidList) {
         Oid localIndOid = lfirst_oid(localIndCell);
         /* Get the index partition's parent oid */
@@ -2445,24 +2577,50 @@ void vac_open_part_indexes(VacuumStmt* vacstmt, LOCKMODE lockmode, int* nindexes
         }
     }
     *nindexes = i;
+}
+
+void vac_open_part_indexes(VacuumStmt* vacstmt, LOCKMODE lockmode, int* nindexes, int* nindexesGlobal, Relation** Irel,
+    Relation** indexrel, Partition** indexpart)
+{
+    List* localIndOidList = NIL;
+    List* globIndOidList = NIL;
+    int localIndNums;
+    int globIndNums;
+    long tolIndNums;
+
+    Assert(lockmode != NoLock);
+    Assert(vacstmt->onepart != NULL);
+    Assert(vacstmt->onepartrel != NULL);
+
+    // get local partition indexes
+    localIndOidList = PartitionGetPartIndexList(vacstmt->onepart);
+    localIndNums = list_length(localIndOidList);
+    // get global partition indexes
+    globIndOidList = RelationGetSpecificKindIndexList(vacstmt->onepartrel, true);
+    globIndNums = list_length(globIndOidList);
+
+    tolIndNums = (long)localIndNums + (long)globIndNums;
+    if (tolIndNums > 0) {
+        *Irel = (Relation*)palloc(tolIndNums * sizeof(Relation));
+    } else {
+        *Irel = NULL;
+    }
+    if (localIndNums > 0) {
+        *indexrel = (Relation*)palloc(localIndNums * sizeof(Relation));
+        *indexpart = (Partition*)palloc(localIndNums * sizeof(Partition));
+    } else {
+        *indexrel = NULL;
+        *indexpart = NULL;
+    }
+
+    // collect ready local partition indexes
+    vac_open_local_indexs(localIndOidList, lockmode, nindexes, Irel, indexrel, indexpart);
 
     // collect ready global partion indexes
-    int j = 0;
-    foreach (globIndCell, globIndOidList) {
-        Oid globIndOid = lfirst_oid(globIndCell);
-        indrel = index_open(globIndOid, lockmode);
-        if (IndexIsReady(indrel->rd_index) && IndexIsUsable(indrel->rd_index)) {
-            (*Irel)[i + j] = indrel;
-            j++;
-        } else {
-            index_close(indrel, lockmode);
-        }
-    }
-    *nindexesGlobal = j;
-    *nindexes += j;
+    vac_open_global_indexs(globIndOidList, lockmode, nindexes, nindexesGlobal, Irel);
 
-    list_free(localIndOidList);
-    list_free(globIndOidList);
+    list_free_ext(localIndOidList);
+    list_free_ext(globIndOidList);
 }
 
 void vac_close_part_indexes(
@@ -2540,7 +2698,7 @@ void CalculatePartitionedRelStats(_in_ Relation partitionRel, _in_ Relation part
         bool isNull = false;
         TransactionId relfrozenxid;
         Relation rel = heap_open(PartitionRelationId, AccessShareLock);
-        Datum xid64datum = heap_getattr(partTuple, Anum_pg_partition_relfrozenxid64, RelationGetDescr(rel), &isNull);
+        Datum xid64datum = tableam_tops_tuple_getattr(partTuple, Anum_pg_partition_relfrozenxid64, RelationGetDescr(rel), &isNull);
 
         if (isNull) {
             relfrozenxid = partForm->relfrozenxid;
@@ -2559,11 +2717,11 @@ void CalculatePartitionedRelStats(_in_ Relation partitionRel, _in_ Relation part
 
             /* calculate pages and tuples from all the partitioned. */
             pages += (uint32) partForm->relpages;
-            allVisiblePages += (uint32) partForm->relallvisible;
+            allVisiblePages += partForm->relallvisible;
             tuples += partForm->reltuples;
 
             /* update the relfrozenxid */
-            xid64datum = heap_getattr(partTuple, Anum_pg_partition_relfrozenxid64, RelationGetDescr(rel), &isNull);
+            xid64datum = tableam_tops_tuple_getattr(partTuple, Anum_pg_partition_relfrozenxid64, RelationGetDescr(rel), &isNull);
 
             if (isNull) {
                 relfrozenxid = partForm->relfrozenxid;
@@ -2661,7 +2819,7 @@ void CStoreVacUpdateNormalRelStats(Oid relid, TransactionId frozenxid, Relation 
     bool isNull = false;
     TransactionId relfrozenxid;
     Relation rel = heap_open(RelationRelationId, AccessShareLock);
-    Datum xid64datum = heap_getattr(ctup, Anum_pg_class_relfrozenxid64, RelationGetDescr(rel), &isNull);
+    Datum xid64datum = tableam_tops_tuple_getattr(ctup, Anum_pg_class_relfrozenxid64, RelationGetDescr(rel), &isNull);
     heap_close(rel, AccessShareLock);
 
     if (isNull) {
@@ -2693,7 +2851,7 @@ void CStoreVacUpdateNormalRelStats(Oid relid, TransactionId frozenxid, Relation 
         replaces[Anum_pg_class_relfrozenxid64 - 1] = true;
         values[Anum_pg_class_relfrozenxid64 - 1] = TransactionIdGetDatum(frozenxid);
 
-        nctup = heap_modify_tuple(ctup, RelationGetDescr(pgclassRel), values, nulls, replaces);
+        nctup = (HeapTuple) tableam_tops_modify_tuple(ctup, RelationGetDescr(pgclassRel), values, nulls, replaces);
         if (isNull) {
             simple_heap_update(pgclassRel, &nctup->t_self, nctup);
             CatalogUpdateIndexes(pgclassRel, nctup);
@@ -2725,7 +2883,7 @@ void CStoreVacUpdatePartitionStats(Oid relid, TransactionId frozenxid)
      */
     bool isNull = false;
     TransactionId relfrozenxid;
-    Datum xid64datum = heap_getattr(ctup, Anum_pg_partition_relfrozenxid64, RelationGetDescr(rd), &isNull);
+    Datum xid64datum = tableam_tops_tuple_getattr(ctup, Anum_pg_partition_relfrozenxid64, RelationGetDescr(rd), &isNull);
 
     if (isNull) {
         relfrozenxid = pgcform->relfrozenxid;
@@ -2755,7 +2913,7 @@ void CStoreVacUpdatePartitionStats(Oid relid, TransactionId frozenxid)
         replaces[Anum_pg_partition_relfrozenxid64 - 1] = true;
         values[Anum_pg_partition_relfrozenxid64 - 1] = TransactionIdGetDatum(frozenxid);
 
-        ntup = heap_modify_tuple(ctup, RelationGetDescr(rd), values, nulls, replaces);
+        ntup = (HeapTuple) tableam_tops_modify_tuple(ctup, RelationGetDescr(rd), values, nulls, replaces);
         if (isNull) {
             simple_heap_update(rd, &ntup->t_self, ntup);
             CatalogUpdateIndexes(rd, ntup);
@@ -2774,7 +2932,7 @@ static List* get_part_oid(Oid relid)
 {
     List* oid_list = NIL;
     Relation pgpartition;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tuple;
     ScanKeyData keys[2];
     MemoryContext oldcontext = NULL;
@@ -2789,9 +2947,9 @@ static List* get_part_oid(Oid relid)
     ScanKeyInit(&keys[1], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
 
     pgpartition = heap_open(PartitionRelationId, AccessShareLock);
-    scan = heap_beginscan(pgpartition, SnapshotNow, 2, keys);
+    scan = tableam_scan_begin(pgpartition, SnapshotNow, 2, keys);
 
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         if (t_thrd.vacuum_cxt.vac_context) {
             oldcontext = MemoryContextSwitchTo(t_thrd.vacuum_cxt.vac_context);        
         }
@@ -2811,20 +2969,20 @@ static void getTuplesAndInsert(Relation source, Oid dest_oid)
 {
     /* open dest relation */
     Relation dest = relation_open(dest_oid, AccessExclusiveLock);
-    HeapScanDesc scan = heap_beginscan(source, SnapshotNow, 0, NULL);
+    TableScanDesc scan = tableam_scan_begin(source, SnapshotNow, 0, NULL);
     HeapTuple tuple = NULL;
 
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         HeapTuple copyTuple = NULL;
 
-        copyTuple = heap_copytuple(tuple);
+        copyTuple = (HeapTuple) tableam_tops_copy_tuple(tuple);
 
         (void)simple_heap_insert(dest, copyTuple);
 
         heap_freetuple(copyTuple);
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     /* close dest relation */
     if (dest != NULL)
         relation_close(dest, NoLock);
@@ -2854,13 +3012,15 @@ void merge_cu_relation(void* _info, VacuumStmt* stmt)
     /* Silently ignore tables that are temp tables of other backends */
     if (RELATION_IS_OTHER_TEMP(rel)) {
         /* just close relation */
-        relation_close(rel, NoLock);
+        if (NULL != rel)
+            relation_close(rel, NoLock);
         PopActiveSnapshot();
         CommitTransactionCommand();
     } else if (RELATION_IS_PARTITIONED(rel)) {
         /* deal with patitioned table */
         List* oid_list = get_part_oid(rel_oid);
-        relation_close(rel, NoLock);
+        if (rel != NULL)
+            relation_close(rel, NoLock);
         PopActiveSnapshot();
         CommitTransactionCommand();
 
@@ -2943,9 +3103,11 @@ void merge_cu_relation(void* _info, VacuumStmt* stmt)
         finish_heap_swap(deltaOid, OIDNewHeap, false, false, false, u_sess->utils_cxt.RecentGlobalXmin);
 
         /* close relation */
-        relation_close(delta_rel, NoLock);
-        
-        relation_close(rel, NoLock);
+        if (delta_rel != NULL)
+            relation_close(delta_rel, NoLock);
+
+        if (rel != NULL)
+            relation_close(rel, NoLock);
         /*
          * Complete the transaction and free all temporary memory used.
          */
@@ -3026,7 +3188,7 @@ static void make_real_queries(MergeInfo* info)
 static List* get_tables_to_merge()
 {
     HeapTuple tuple;
-    HeapScanDesc relScan;
+    TableScanDesc relScan;
 
     ScanKeyData key[1];
     Form_pg_class form;
@@ -3038,8 +3200,8 @@ static List* get_tables_to_merge()
     Relation classRel = heap_open(RelationRelationId, AccessShareLock);
     ScanKeyInit(&key[0], Anum_pg_class_relkind, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(RELKIND_RELATION));
 
-    relScan = heap_beginscan(classRel, SnapshotNow, 1, key);
-    while ((tuple = heap_getnext(relScan, ForwardScanDirection)) != NULL) {
+    relScan = tableam_scan_begin(classRel, SnapshotNow, 1, key);
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(relScan, ForwardScanDirection)) != NULL) {
         form = (Form_pg_class)GETSTRUCT(tuple);
         Oid relid = HeapTupleGetOid(tuple);
 
@@ -3307,7 +3469,8 @@ void RemoveGarbageFiles(Relation rel, DFSDescHandler* handler)
      */
     StringInfo store_path = getDfsStorePath(rel);
     DfsSrvOptions* dfsoptions = GetDfsSrvOptions(rel->rd_rel->reltablespace);
-    dfs::DFSConnector* conn = dfs::createConnector(t_thrd.top_mem_cxt, dfsoptions, rel->rd_rel->reltablespace);
+    dfs::DFSConnector* conn = dfs::createConnector(
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), dfsoptions, rel->rd_rel->reltablespace);
 
     /*
      * get files in desc table
@@ -3375,7 +3538,7 @@ void DfsVacuumFull(Oid relid, VacuumStmt* vacstmt)
      * "vacuum full" is default behavior, not "vacuum full compact"
      */
     t_thrd.vacuum_cxt.vacuum_full_compact = false;
-    if (vacstmt->options & VACOPT_COMPACT)
+    if ((uint32)(vacstmt->options) & VACOPT_COMPACT)
         t_thrd.vacuum_cxt.vacuum_full_compact = true;
 
     /*
@@ -3491,7 +3654,8 @@ static void DropEmptyPartitionDirectories(Oid relid)
      * get connection object and will be used in RemoveEmptyDir()
      */
     DfsSrvOptions* options = GetDfsSrvOptions(rel->rd_rel->reltablespace);
-    dfs::DFSConnector* conn = dfs::createConnector(t_thrd.top_mem_cxt, options, rel->rd_rel->reltablespace);
+    dfs::DFSConnector* conn = dfs::createConnector(
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), options, rel->rd_rel->reltablespace);
 
     /*
      * walk the root path of dfs table recursively
@@ -3557,10 +3721,11 @@ static bool GPIIsInvisibleTuple(ItemPointer itemptr, void* state, Oid partOid)
     if (partStat == PART_METADATA_INVISIBLE) {
         pvacStates->invisMap = bms_add_member(pvacStates->invisMap, partOid);
         return true;
+    } else {
+        // visible include EXIST and NOEXIST
+        pvacStates->visMap = bms_add_member(pvacStates->visMap, partOid);
+        return false;
     }
-    // visible include EXIST and NOEXIST
-    pvacStates->visMap = bms_add_member(pvacStates->visMap, partOid);
-    return false;
 }
 
 // clean invisible tuples for global partition index

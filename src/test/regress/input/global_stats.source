@@ -1,10 +1,10 @@
 create schema global_stats;
 set current_schema = global_stats;
-create table global_stats_table_01(c1 int2, c2 int4, c3 int8);
+create table global_stats_table_01(c1 int2, c2 int4, c3 int8) distribute by hash(c1);
 create index global_stats_table_01_idx1 on global_stats_table_01(c1, c2);
-create table global_stats_table_02(c1 int2, c2 int4, c3 int8);
-create table global_stats_table_03(c1 int2, c2 int4, c3 int8);
-create table global_stats_table_04(c1 bigint, c2 int, c3 char(10)) WITH (ORIENTATION = COLUMN);
+create table global_stats_table_02(c1 int2, c2 int4, c3 int8) distribute by hash(c2);
+create table global_stats_table_03(c1 int2, c2 int4, c3 int8) distribute by hash(c1);
+create table global_stats_table_04(c1 bigint, c2 int, c3 char(10)) WITH (ORIENTATION = COLUMN) distribute by hash(c2) ;
 create index global_stats_table_04_idx1 on global_stats_table_02(c1, c2);
 CREATE TABLE global_stats_table_05
 (
@@ -18,9 +18,9 @@ PARTITION BY RANGE(c1)
     PARTITION c12 VALUES LESS THAN(100),
     PARTITION c13 VALUES LESS THAN(120)
 ) ;
-copy global_stats_table_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/quality_derive1.data';
-copy global_stats_table_02 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/quality_derive2.data';
-copy global_stats_table_03 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/quality_derive3.data';
+copy global_stats_table_01 from '@abs_srcdir@/data/quality_derive1.data';
+copy global_stats_table_02 from '@abs_srcdir@/data/quality_derive2.data';
+copy global_stats_table_03 from '@abs_srcdir@/data/quality_derive3.data';
 insert into global_stats_table_04 select generate_series(1,100), generate_series(1,100), 'col'|| generate_series(1,100);
 insert into global_stats_table_05 select * from global_stats_table_01;
 --test for analyze
@@ -91,4 +91,4 @@ drop table global_stats_table_04;
 drop table global_stats_table_05;
 
 select staattnum, stavalues1 from pg_statistic where starelid in (select oid from pg_class where  relname ='pg_language') order by staattnum;
-
+execute direct on(datanode1) 'select staattnum, stavalues1 from pg_statistic where starelid in (select oid from pg_class where  relname =''pg_language'') order by staattnum';

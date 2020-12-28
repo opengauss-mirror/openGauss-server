@@ -1,5 +1,6 @@
 
 CREATE SCHEMA gtt_function;
+CREATE USER gtt_user PASSWORD 'Gauss@123';
 
 set search_path=gtt_function,sys;
 
@@ -25,6 +26,16 @@ cluster gtt1 using gtt1_pkey;
 -- ok
 create index CONCURRENTLY idx_gtt1 on gtt1 (b);
 
+--ERROR
+alter index idx_gtt1 SET TABLESPACE pg_default;
+alter index idx_gtt1 SET (on_commit_delete_rows='true');
+alter index idx_gtt1 RESET (on_commit_delete_rows='false');
+
+--ok
+alter index idx_gtt1 REBUILD;
+alter index idx_gtt1 UNUSABLE;
+alter index idx_gtt1 RENAME TO gtt1_idx;
+
 -- ERROR
 create table gtt1(a int primary key, b text) on commit delete rows;
 
@@ -34,8 +45,28 @@ create table gtt1(a int primary key, b text) with(on_commit_delete_rows=true);
 -- ERROR
 alter table gtt1 SET TABLESPACE pg_default;
 
+-- ok
+alter table gtt1 OWNER TO gtt_user;
+
+-- ERROR
+alter table gtt1 SET COMPRESS;
+
 -- ERROR
 alter table gtt1 set (on_commit_delete_rows='true');
+alter table gtt1 reset (on_commit_delete_rows='false');
+
+--ok
+alter table gtt1 DISABLE TRIGGER ALL;
+alter table gtt1 ENABLE TRIGGER ALL;
+alter table gtt1 DISABLE ROW LEVEL SECURITY;
+alter table gtt1 ENABLE ROW LEVEL SECURITY;
+alter table gtt1 FORCE ROW LEVEL SECURITY;
+alter table gtt1 NO FORCE ROW LEVEL SECURITY;
+
+--ok
+CREATE INDEX idx_b ON gtt1(b);
+alter table gtt1 CLUSTER ON idx_b;
+alter table gtt1 SET WITHOUT CLUSTER;
 
 -- ERROR
 create or replace global temp view gtt_v as select 5;
@@ -165,12 +196,18 @@ create global temp table gtt_test_rename(a int, b text);
 
 --ok
 alter table gtt_test_rename rename to gtt_test_new;
+alter table gtt_test_new rename column b to bb;
 
 --ok
 alter table gtt_test_new add constraint pk1 primary key(a);
+alter table gtt_test_new rename constraint pk1 to gtt_test_pk1;
 
 --ok
-alter table gtt_test_new drop constraint pk1;
+alter table gtt_test_new add constraint chk1 check(a > 0);
+alter table gtt_test_new validate constraint chk1;
+
+--ok
+alter table gtt_test_new drop constraint gtt_test_pk1;
 
 --ok
 ALTER TABLE gtt_test_new ADD COLUMN address integer;
@@ -182,10 +219,21 @@ insert into gtt_test_new values(1, 'hello postgres', 128);
 ALTER TABLE gtt_test_new MODIFY (address varchar(1024));
 
 --ok
+ALTER TABLE gtt_test_new ALTER address SET NOT NULL;
+ALTER TABLE gtt_test_new ALTER address SET (n_distinct=1);
+ALTER TABLE gtt_test_new ALTER bb SET STORAGE PLAIN;
+
+--ok
+ALTER TABLE gtt_test_new ADD STATISTICS ((a, address));
+
+--ok
 select * from gtt_test_new;
 
 --ok
 ALTER TABLE gtt_test_new DROP address;
+
+--ok
+ALTER TABLE gtt_test_new SET SCHEMA public;
 
 --gtt statistic test
 create global temp table gtt_statistic_test(id int);
@@ -329,4 +377,5 @@ create global temp table gtt_test11(c1 int) with(on_commit_delete_rows='');
 reset search_path;
 
 drop schema gtt_function cascade;
-
+drop table public.gtt_test_new;
+drop user gtt_user;

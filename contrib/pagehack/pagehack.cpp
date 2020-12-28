@@ -54,6 +54,7 @@
 #include "access/slru.h"
 #include "access/twophase_rmgr.h"
 #include "access/double_write.h"
+#include "access/double_write_basic.h"
 #include "catalog/pg_control.h"
 #include "catalog/pg_attribute.h"
 #include "catalog/pg_class.h"
@@ -67,8 +68,8 @@
 #include "catalog/pgxc_node.h"
 #include "commands/dbcommands.h"
 #include "replication/slot.h"
-#include "storage/bufpage.h"
-#include "storage/lock.h"
+#include "storage/buf/bufpage.h"
+#include "storage/lock/lock.h"
 #include "storage/proc.h"
 #include "storage/relfilenode.h"
 #include "storage/sinval.h"
@@ -79,6 +80,7 @@
 #include "utils/timestamp.h"
 #include "cstore.h"
 #include "common/build_query/build_query.h"
+#include "tsdb/utils/constant_def.h"
 
 /* Max number of pg_class oid, currently about 4000 */
 #define MAX_PG_CLASS_ID 10000
@@ -100,7 +102,7 @@ static const char* indents[] = {  // 10 tab is enough to used.
     "\t\t\t\t\t\t\t\t\t\t"};
 static const int nIndents = sizeof(indents) / sizeof(indents[0]);
 static int indentLevel = 0;
-static HeapTupleData dummyTuple = {0};
+static HeapTupleData dummyTuple;
 
 // add those special tables to parse, so we can read the tuple data
 //
@@ -112,6 +114,7 @@ static const char* PgHeapRelName[] = {"pg_class",
     "pg_index",
     "pg_partition",
     "pg_cudesc_xx",  // all the relations about pg_cudesc_xx kind, not the real pg_cudesc table
+    "ts_cudesc_xx",
     "pg_database",
     "pg_tablespace",
     "pg_attribute",
@@ -123,6 +126,7 @@ static void ParsePgClassTupleData(binary tupdata, int len, binary nullBitmap, in
 static void ParsePgIndexTupleData(binary tupdata, int len, binary nullBitmap, int nattrs);
 static void ParsePgPartitionTupleData(binary tupdata, int len, binary nullBitmap, int natrrs);
 static void ParsePgCudescXXTupleData(binary tupdata, int len, binary nullBitmap, int natrrs);
+static void ParseTsCudescXXTupleData(binary tupdata, int len, binary nullBitmap, int nattrs);
 static void ParsePgDatabaseTupleData(binary tupdata, int len, binary nullBitmap, int nattrs);
 static void ParsePgTablespaceTupleData(binary tupdata, int len, binary nullBitmap, int nattrs);
 static void ParsePgAttributeTupleData(binary tupdata, int len, binary nullBitmap, int nattrs);
@@ -137,6 +141,7 @@ static ParseHeapTupleData PgHeapRelTupleParser[] = {
     ParsePgIndexTupleData,       // pg_index
     ParsePgPartitionTupleData,   // pg_partition
     ParsePgCudescXXTupleData,    // pg_cudesc_xx
+    ParseTsCudescXXTupleData,    // ts_cudesc_xx
     ParsePgDatabaseTupleData,    // pg_database
     ParsePgTablespaceTupleData,  // pg_tablespace
     ParsePgAttributeTupleData,   // pg_attribute
@@ -843,6 +848,7 @@ typedef enum HackingType {
     HACKING_CSNLOG,
     HACKING_STATE,
     HACKING_DW,
+    HACKING_DW_SINGLE,
     NUM_HACKINGTYPE
 } HackingType;
 
@@ -859,7 +865,8 @@ static const char* HACKINGTYPE[] = {"heap",
     "clog",
     "csnlog",
     "gaussdb_state",
-    "double_write"};
+    "double_write",
+    "dw_single_flush_file"};
 
 typedef enum SegmentType { SEG_HEAP, SEG_INDEX_BTREE, SEG_UNDO, SEG_UNKNOWN } SegmentType;
 
@@ -1033,7 +1040,7 @@ static bool HexStringToInt(char* hex_string, int* result)
         else
             return false;
 
-        *result += onechar << index * 4;
+        *result += onechar << (index * 4);
         index++;
     }
 
@@ -1201,6 +1208,129 @@ static void ParsePgCudescXXTupleData(binary tupdata, int len, binary nullBitmap,
         nextAttr += sizeof(uint32);
     }
 
+    Assert(len >= int(nextAttr - (char*)tupdata));
+}
+
+static void ParseTsCudescXXTupleData(binary tupdata, int len, binary nullBitmap, int nattrs)
+{
+    if (nattrs != TsCudesc::MAX_ATT_NUM) {
+        fprintf(stdout, "invalid attributes number, expected %d, result %d", TsCudesc::MAX_ATT_NUM, nattrs);
+        exit(1);
+    }
+
+    int datlen = 0;
+    int j = 0;
+    int i = 0;
+    char* dat = NULL;
+    char* nextAttr = (char*)tupdata;
+    unsigned char ch = 0;
+    unsigned char bitmask = 0;
+    bool isnulls[nattrs] = {0};
+    
+    if (NULL != nullBitmap) {
+        datlen = (nattrs + 7) / 8;
+        j = 0;
+        for (i = 0; i < datlen; ++i) {
+            ch = nullBitmap[i];
+            bitmask = 1;
+            do {
+                isnulls[j] = (ch & bitmask) ? false : true;
+                bitmask <<= 1;
+                ++j;
+            } while (bitmask != 0 && j < nattrs);
+        }
+    }
+
+    indentLevel = 4;
+    if (!isnulls[0]) {
+        nextAttr = (char*)att_align_nominal((long int)nextAttr, 'i');
+        fprintf(stdout, "\n%s" "ColId: %d", indents[indentLevel], *(int32*)nextAttr);
+        nextAttr += sizeof(int32);
+    }
+
+    if (!isnulls[1]) {
+        nextAttr = (char*)att_align_nominal((long int)nextAttr, 'i');
+        fprintf(stdout, "\n%s" "TagId: %d", indents[indentLevel], *(int32*)nextAttr);
+        nextAttr += sizeof(int32);
+    }
+
+    if (!isnulls[2]) {
+        nextAttr = (char*)att_align_nominal((long int)nextAttr, 'i');
+        fprintf(stdout, "\n%s" "CUId: %u", indents[indentLevel], *(uint32*)nextAttr);
+        nextAttr += sizeof(uint32);
+    }
+    
+    if (!isnulls[3]) {
+        // rough check MIN/MAX
+        nextAttr = (char*)att_align_pointer((long int)nextAttr, 'i', -1, nextAttr);
+        datlen = VARSIZE_ANY_EXHDR(nextAttr);
+        Assert(datlen < 32 && datlen >= 0);
+        dat = VARDATA_ANY(nextAttr);
+        Assert(dat == nextAttr + 4 || dat == nextAttr + 1);
+        fprintf(stdout, "\n%s" "MIN size: %d", indents[indentLevel], datlen);
+#ifdef DEBUG
+        fprintf(stdout, "\n%s" "data are:", indents[indentLevel]);
+        formatBytes((unsigned char*)dat, datlen);
+#endif
+        nextAttr += datlen + int(dat - nextAttr);
+    }
+
+    if (!isnulls[4]) {
+        nextAttr = (char*)att_align_pointer((long int)nextAttr, 'i', -1, nextAttr);
+        datlen = VARSIZE_ANY_EXHDR(nextAttr);
+        Assert(datlen < 32 && datlen >= 0);
+        dat = VARDATA_ANY(nextAttr);
+        Assert(dat == nextAttr + 4 || dat == nextAttr + 1);
+        fprintf(stdout, "\n%s" "MAX size: %d", indents[indentLevel], datlen);
+#ifdef DEBUG
+        fprintf(stdout, "\n%s" "data are:", indents[indentLevel]);
+        formatBytes((unsigned char*)dat, datlen);
+#endif
+        nextAttr = nextAttr + datlen + int(dat - nextAttr);
+    }
+
+    if (!isnulls[5]) {
+        nextAttr = (char*)att_align_nominal((long int)nextAttr, 'i');
+        fprintf(stdout, "\n%s" "rows: %d", indents[indentLevel], *(int32*)nextAttr);
+        nextAttr = nextAttr + sizeof(int32);
+    }
+
+    if (!isnulls[6]) {
+        nextAttr = (char*)att_align_nominal((long int)nextAttr, 'i');
+        fprintf(stdout, "\n%s" "mode: %x", indents[indentLevel], *(uint32*)nextAttr);
+        nextAttr = nextAttr + sizeof(int32);
+    }
+
+    if (!isnulls[7]) {
+        nextAttr = (char*)att_align_nominal((long int)nextAttr, 'd');
+        fprintf(stdout, "\n%s" "cu size: %d", indents[indentLevel], *(int32*)nextAttr);
+        nextAttr = nextAttr + sizeof(int64);
+    }
+
+    if (!isnulls[8]) {
+        // CU Pointer
+        nextAttr = (char*)att_align_pointer((long int)nextAttr, 'i', -1, nextAttr);
+        datlen = VARSIZE_ANY_EXHDR(nextAttr);
+        dat = VARDATA_ANY(nextAttr);
+        if (datlen >= 0 && datlen <= (int)sizeof(uint64)) {
+            fprintf(stdout, "\n%s" "cu pointer: %lu, sizeof: %d",
+                indents[indentLevel], *(uint64*)dat, datlen);
+        } else {
+            fprintf(stdout,"\n%s" "cu pointer bitmap: %d",
+                indents[indentLevel], datlen);
+#ifdef DEBUG
+            fprintf(stdout, "\n%s" "data are:", indents[indentLevel]);
+            formatBytes((unsigned char*)dat, datlen);
+#endif
+        }
+        nextAttr = nextAttr + datlen + int(dat - nextAttr);
+    }
+
+    if (!isnulls[9]) {
+        nextAttr = (char*)att_align_nominal((long int)nextAttr, 'i');
+        fprintf(stdout, "\n%s" "cu magic: %u", indents[indentLevel], *(uint32*)nextAttr);
+        nextAttr = nextAttr + sizeof(uint32);
+    }
     Assert(len >= int(nextAttr - (char*)tupdata));
 }
 
@@ -1944,7 +2074,7 @@ static void ParsePgIndexTupleData(binary tupdata, int len, binary nullBitmap, in
         indents[indentLevel],
         (pgIndexTupData->indisready));
 
-    // TODO: add the other fields if needed. you have to inplace following indisready with the right field
+    //  add the other fields if needed. you have to inplace following indisready with the right field
     //
 #ifdef DEBUG
     int remain = len - (offsetof(FormData_pg_index, indisready) + sizeof(bool));
@@ -2817,9 +2947,9 @@ static void parse_relation_options_struct(char* vardata, int relkind)
         fprintf(stdout, "%s end_ctid_internal: %s\n", indents[indentLevel], (vardata + optstr_offset));
 
         --indentLevel;
-    } else {
-        /* TODO: index relation options */
     }
+    /*  else can index relation options but won't solve it now*/
+    
 }
 
 static void parse_oid_array(Oid* ids, int nids)
@@ -3692,8 +3822,8 @@ static void parse_dw_batch(char* buf, FILE* fd, dw_file_head_t* file_head, uint1
     uint16 file_page_id, read_pages;
     uint16 reading_pages;
     uint32 flush_pages;
-    char* start_buf;
-    dw_batch_t* curr_head;
+    char* start_buf = NULL;
+    dw_batch_t* curr_head = NULL;
 
     fseek(fd, (file_head->start * BLCKSZ), SEEK_SET);
 
@@ -3784,6 +3914,141 @@ static bool parse_dw_file(const char* file_name, uint32 start_page, uint32 page_
     parse_dw_batch(buf, fd, &file_head, (uint16)page_num);
 
     free(buf);
+    fclose(fd);
+    return true;
+}
+
+static bool dw_verify_item(const dw_single_flush_item* item, uint16 dwn)
+{
+    if (item->data_page_idx == 0 || item->dwn != dwn) {
+        return false;
+    }
+    pg_crc32c crc;
+    /* Contents are protected with a CRC */
+    INIT_CRC32C(crc);
+    COMP_CRC32C(crc, (char*)item, offsetof(dw_single_flush_item, crc));
+    FIN_CRC32C(crc);
+
+    if (EQ_CRC32C(crc, item->crc)) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+static bool parse_dw_single_flush_file(const char* file_name)
+{
+    FILE* fd;
+    size_t result;
+    dw_single_flush_item *item = (dw_single_flush_item*)malloc(sizeof(dw_single_flush_item) *
+        DW_SINGLE_DIRTY_PAGE_NUM);
+    uint16 batch_size = SINGLE_BLOCK_TAG_NUM;
+    uint16 blk_num = (DW_SINGLE_DIRTY_PAGE_NUM / batch_size) + (DW_SINGLE_DIRTY_PAGE_NUM % batch_size == 0 ? 0 : 1);
+    char *unaligned_buf = (char *)malloc((blk_num + 1 + 1) * BLCKSZ);
+    char *buf = (char *)TYPEALIGN(BLCKSZ, unaligned_buf);
+    char *file_head = buf;
+    buf = buf + BLCKSZ;
+    char *item_buf = buf;
+    char *unaligned_buf2 = (char *)malloc(BLCKSZ + BLCKSZ); /* one more BLCKSZ for alignment */
+    char *dw_block = (char *)TYPEALIGN(BLCKSZ, unaligned_buf2);
+
+    if (NULL == (fd = fopen(file_name, "rb"))) {
+        fprintf(stderr, "%s: %s\n", file_name, gs_strerror(errno));
+        return false;
+    }
+
+    /* read all buffer tag item, need skip head page */
+    fseek(fd, 0, SEEK_SET);
+    result = fread(file_head, 1, BLCKSZ, fd);
+    if (BLCKSZ != result) {
+        fprintf(stderr, "Reading error");
+        return false;
+    }
+    fseek(fd, BLCKSZ, SEEK_SET);
+    result = fread(item_buf, 1, blk_num * BLCKSZ, fd);
+    if (blk_num * BLCKSZ != result) {
+        fprintf(stderr, "Reading error");
+        return false;
+    }
+
+    int offset = 0;
+    int num = 0;
+    dw_single_flush_item *temp = NULL;
+    uint16 head_dwn = ((dw_file_head_t*)file_head)->head.dwn;
+
+    for (int i = 0; i < blk_num; i++) {
+        for (int j = i * batch_size; j < (i + 1) * batch_size; j++) {
+            offset = BLCKSZ * i + j % SINGLE_BLOCK_TAG_NUM * sizeof(dw_single_flush_item);
+            temp = (dw_single_flush_item*)((char*)buf + offset);
+            if (temp->data_page_idx != 0) {
+                fprintf(stdout,
+                    "flush_item[data_page_idx %u, dwn %u, crc %u]\n",
+                    temp->data_page_idx,
+                    temp->dwn,
+                    temp->crc);
+                if (!dw_verify_item(temp, head_dwn)) {
+                    fprintf(stdout, "flush item check failed, not need recovery \n");
+                } else {
+                    item[num].data_page_idx = temp->data_page_idx;
+                    item[num].dwn = temp->dwn;
+                    item[num].buf_tag = temp->buf_tag;
+                    item[num].crc = temp->crc;
+                    num++;
+                }
+                if (temp->buf_tag.rnode.bucketNode == -1) {
+                    fprintf(stdout,
+                        "buf_tag[rel %u/%u/%u blk %u fork %d]\n",
+                        temp->buf_tag.rnode.spcNode,
+                        temp->buf_tag.rnode.dbNode,
+                        temp->buf_tag.rnode.relNode,
+                        temp->buf_tag.blockNum,
+                        temp->buf_tag.forkNum);
+                } else {
+                    fprintf(stdout,
+                        "buf_tag[rel %u/%u/%u/%d blk %u fork %d]\n",
+                        temp->buf_tag.rnode.spcNode,
+                        temp->buf_tag.rnode.dbNode,
+                        temp->buf_tag.rnode.relNode,
+                        temp->buf_tag.rnode.bucketNode,
+                        temp->buf_tag.blockNum,
+                        temp->buf_tag.forkNum);
+                }
+            }
+        }
+    }
+
+    for (int i = 0; i < num; i++) {
+        int idx = item[i].data_page_idx;
+        fseek(fd, (162 + idx) * BLCKSZ, SEEK_SET);
+        result = fread(dw_block, 1, BLCKSZ, fd);
+        if (BLCKSZ != result) {
+            fprintf(stderr, "Reading error");
+            return false;
+        }
+        if (temp->buf_tag.rnode.bucketNode == -1) {
+                fprintf(stdout,
+                    "buf_tag[rel %u/%u/%u blk %u fork %d]\n",
+                    item[i].buf_tag.rnode.spcNode,
+                    item[i].buf_tag.rnode.dbNode,
+                    item[i].buf_tag.rnode.relNode,
+                    item[i].buf_tag.blockNum,
+                    item[i].buf_tag.forkNum);
+            } else {
+                fprintf(stdout,
+                    "buf_tag[rel %u/%u/%u/%d blk %u fork %d]\n",
+                    item[i].buf_tag.rnode.spcNode,
+                    item[i].buf_tag.rnode.dbNode,
+                    item[i].buf_tag.rnode.relNode,
+                    item[i].buf_tag.rnode.bucketNode,
+                    item[i].buf_tag.blockNum,
+                    item[i].buf_tag.forkNum);
+            }
+        parse_a_page(dw_block, item[i].buf_tag.blockNum, item[i].buf_tag.blockNum % 131072, SEG_UNKNOWN);
+    }
+
+    free(item);
+    free(unaligned_buf);
+    free(unaligned_buf2);
     fclose(fd);
     return true;
 }
@@ -4266,7 +4531,12 @@ int main(int argc, char** argv)
                 exit(1);
             }
             break;
-
+        case HACKING_DW_SINGLE:
+            if (!parse_dw_single_flush_file(filename)) {
+                fprintf(stderr, "Error during parsing dw single flush file %s\n", filename);
+                exit(1);
+            }
+            break;
         default:
             /* should be impossible to be here */
             Assert(false);

@@ -17,13 +17,12 @@ SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
  enable_bitmapscan                 | on
  enable_bloom_filter               | on
  enable_broadcast                  | on
- enable_cbm_tracking               | off
  enable_change_hjcost              | off
  enable_codegen                    | on
  enable_codegen_print              | off
  enable_compress_spill             | on
  enable_copy_server_files          | off
- enable_data_replicate             | off
+ enable_data_replicate             | on
  enable_debug_vacuum               | off
  enable_delta_store                | off
  enable_double_write               | on
@@ -36,7 +35,6 @@ SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
  enable_global_stats               | on
  enable_hashagg                    | on
  enable_hashjoin                   | on
- enable_hypo_index                 | off
  enable_incremental_catchup        | on
  enable_incremental_checkpoint     | on
  enable_index_nestloop             | on
@@ -60,9 +58,8 @@ SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
  enable_online_ddl_waitlock        | off
  enable_opfusion                   | on
  enable_page_lsn_check             | on
- enable_parallel_append            | on
  enable_parallel_ddl               | on
- enable_parallel_hash              | on
+ enable_partition_opfusion         | off
  enable_partitionwise              | off
  enable_pbe_optimization           | on
  enable_prevent_job_task_startup   | off
@@ -78,7 +75,7 @@ SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
  enable_sonic_optspill             | on
  enable_sort                       | on
  enable_stream_replication         | on
- enable_thread_pool                | off
+ enable_thread_pool                | on
  enable_tidscan                    | on
  enable_upgrade_merge_lock_mode    | off
  enable_upsert_to_merge            | on
@@ -87,7 +84,7 @@ SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
  enable_vector_engine              | on
  enable_wdr_snapshot               | off
  enable_xlog_prune                 | on
-(83 rows)
+(80 rows)
 
 CREATE TABLE foo2(fooid int, f2 int);
 INSERT INTO foo2 VALUES(1, 11);
@@ -828,11 +825,9 @@ select * from tt order by 1, 2;
 -- note that nextval() gets executed a second time in the rule expansion,
 -- which is expected.
 select * from tt_log order by 1, 2;
- f1 |  data   
-----+---------
-    | barlog
-    | foollog
-(2 rows)
+ f1 | data 
+----+------
+(0 rows)
 
 -- test case for a whole-row-variable bug
 create function foo1(n integer, out a text, out b text)

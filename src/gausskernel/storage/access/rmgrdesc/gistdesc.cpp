@@ -20,14 +20,14 @@
 #include "lib/stringinfo.h"
 #include "storage/relfilenode.h"
 
-static void out_gistxlogPageSplit(StringInfo buf, gistxlogPageSplit* xlrec)
+static void out_gistxlogPageSplit(StringInfo buf, gistxlogPageSplit *xlrec)
 {
     appendStringInfo(buf, "page_split: splits to %hu pages", xlrec->npage);
 }
 
-void gist_desc(StringInfo buf, XLogReaderState* record)
+void gist_desc(StringInfo buf, XLogReaderState *record)
 {
-    char* rec = XLogRecGetData(record);
+    char *rec = XLogRecGetData(record);
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
 
     switch (info) {
@@ -35,7 +35,7 @@ void gist_desc(StringInfo buf, XLogReaderState* record)
             appendStringInfo(buf, "page_update: ");
             break;
         case XLOG_GIST_PAGE_SPLIT:
-            out_gistxlogPageSplit(buf, (gistxlogPageSplit*)rec);
+            out_gistxlogPageSplit(buf, (gistxlogPageSplit *)rec);
             break;
         case XLOG_GIST_CREATE_INDEX:
             appendStringInfo(buf, "create_index: ");
@@ -45,4 +45,3 @@ void gist_desc(StringInfo buf, XLogReaderState* record)
             break;
     }
 }
-

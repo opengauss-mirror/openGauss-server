@@ -1,7 +1,7 @@
 --include chinese
-create table 测试(f int);
-insert into 测试 values (1);
-select * from 测试;
+create table 华为(f int);
+insert into 华为 values (1);
+select * from 华为;
 \set HISTSIZE -1
 \set HISTSIZE 30.5
 \set HISTSIZE 0

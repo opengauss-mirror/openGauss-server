@@ -34,8 +34,9 @@
  * $From: sha2.cpp,v 1.1 2001/11/08 00:01:51 adg Exp adg $
  *
  */
-#include "postgres.h"
-#include "knl/knl_variable.h"
+#include "postgres_fe.h"
+#ifndef FRONTEND_PARSER
+#endif /* FRONTEND_PARSER */
 #include <sys/param.h>
 #include "libpq/sha2.h"
 #include "openssl/evp.h"
@@ -371,8 +372,9 @@ void SHA256_Update2(SHA256_CTX2* context, const uint8* data, size_t len)
     errno_t rc = 0;
 
     /* Calling with no data is valid (we do nothing) */
-    if (len == 0)
+    if (len == 0) {
         return;
+    }
 
     usedspace = (context->bitcount >> 3) % SHA256_BLOCK_LENGTH;
     if (usedspace > 0) {
@@ -524,7 +526,7 @@ void sha_hex_to_bytes32(char* s, const char b[64])
     int i = 0;
     uint8 v1, v2;
     for (i = 0; i < 64; i += 2) {
-        v1 = b[i] >= 'a' ? b[i] - 'a' + 10 : b[i] - '0';
+        v1 = (b[i] >= 'a') ? (b[i] - 'a' + 10) : (b[i] - '0');
         v2 = (*((b + i) + 1)) >= 'a' ? (*((b + i) + 1)) - 'a' + 10 : (*((b + i) + 1)) - '0';
 
         s[i / 2] = (v1 << 4) + v2;
@@ -537,7 +539,7 @@ void sha_hex_to_bytes4(char* s, const char b[8])
     int i = 0;
     uint8 v1, v2;
     for (i = 0; i < 8; i += 2) {
-        v1 = b[i] >= 'a' ? b[i] - 'a' + 10 : b[i] - '0';
+        v1 = (b[i] >= 'a') ? (b[i] - 'a' + 10) : (b[i] - '0');
         v2 = (*((b + i) + 1)) >= 'a' ? (*((b + i) + 1)) - 'a' + 10 : (*((b + i) + 1)) - '0';
 
         s[i / 2] = (v1 << 4) + v2;
@@ -566,8 +568,9 @@ bool pg_sha256_encrypt(
     char client_string[CLIENT_STRING_LENGTH] = "Client Key";
     errno_t rc = 0;
 
-    if (NULL == password || NULL == buf)
+    if (password == NULL || buf == NULL) {
         return false;
+    }
 
     password_len = strlen(password);
     sha_hex_to_bytes32(salt, (char*)salt_s);
@@ -632,8 +635,14 @@ bool pg_sha256_encrypt(
         sha_bytes_to_hex64((uint8*)client_key, client_key_buf);
     }
 
+#ifndef WIN32
     hash_ret = EVP_Digest(
         (GS_UCHAR*)client_key, HMAC_LENGTH, (GS_UCHAR*)stored_key, (GS_UINT32*)&stored_key_length, EVP_sha256(), NULL);
+#else
+    hash_ret = EVP_Digest(
+        (GS_UCHAR*)client_key, HMAC_LENGTH, (GS_UCHAR*)stored_key, (unsigned int *)&stored_key_length,
+        EVP_sha256(), NULL);
+#endif
     if (!hash_ret) {
         rc = memset_s(k, K_LENGTH + 1, 0, K_LENGTH + 1);
         SECUREC_CHECK(rc);
@@ -693,8 +702,10 @@ int XOR_between_password(const char* password1, const char* password2, char* r, 
 {
     int i;
 
-    if (NULL == password1 || NULL == password2 || length < 0)
+    if (password1 == NULL || password2 == NULL || length < 0) {
         return -1;
+    }
+
     for (i = 0; i < length; i++) {
         *r++ = (unsigned char)*password1++ ^ (unsigned char)*password2++;
     }
@@ -709,14 +720,17 @@ bool pg_sha256_encrypt_for_md5(const char* password, const char* salt, size_t sa
     char* crypt_buf = NULL;
     errno_t rc = 0;
 
-    if (NULL == password || NULL == salt || NULL == buf)
+    if (password == NULL || salt == NULL || buf == NULL) {
         return false;
+    }
+        
 
     password_len = strlen(password);
     /* +1 here is just to avoid risk of unportable malloc(0) */
     crypt_buf = (char*)malloc(password_len + salt_len + 1);
-    if (crypt_buf == NULL)
+    if (crypt_buf == NULL) {
         return false;
+    }
 
     rc = memset_s(&sha_contest, sizeof(sha_contest), 0, sizeof(sha_contest));
     securec_check_c(rc, crypt_buf, "");
@@ -745,6 +759,7 @@ bool pg_sha256_encrypt_for_md5(const char* password, const char* salt, size_t sa
     rc = memset_s(crypt_buf, password_len + salt_len + 1, 0, password_len + salt_len + 1);
     securec_check_c(rc, crypt_buf, "");
     free(crypt_buf);
+    crypt_buf = NULL;
 
     return true;
 }

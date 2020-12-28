@@ -1,0 +1,161 @@
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds_eol.log
+drop table if exists test_ud_eol;
+create table test_ud_eol (id int, name char(100)) distribute by hash(id);
+create foreign table test_ud_eol_f1 (id int, name char(100)) server gsmpp_server options (location 'gsfs://127.0.0.1:8900/test_ud_eol_f2.dat.0', format 'text');
+--1 test 0x0d0a
+alter foreign table test_ud_eol_f1 options (set location 'gsfs://127.0.0.1:8900/test_ud_eol_f2.dat.1');
+
+truncate table test_ud_eol;
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (add eol '0x0d');
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (set eol '0x0a');
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (set eol '0x0d0a');
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+--2 test 0x0d
+alter foreign table test_ud_eol_f1 options (set location 'gsfs://127.0.0.1:8900/test_ud_eol_f2.dat.2');
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (drop eol);
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (add eol '0x0d0a');
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (set eol '0x0a');
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (set eol '0x0d');
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+--3 test 0x0a
+alter foreign table test_ud_eol_f1 options (set location 'gsfs://127.0.0.1:8900/test_ud_eol_f2.dat.3');
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (drop eol);
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (add eol '0x0d0a');
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (set eol '0x0d');
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (set eol '0x0a');
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+--4 test \r\n
+alter foreign table test_ud_eol_f1 options (set location 'gsfs://127.0.0.1:8900/test_ud_eol_f2.dat.1');
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (drop eol);
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (add eol '\r');
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (set eol '\n');
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (set eol '\r\n');
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+--5 test \r
+alter foreign table test_ud_eol_f1 options (set location 'gsfs://127.0.0.1:8900/test_ud_eol_f2.dat.2');
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (drop eol);
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (add eol '\r\n');
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (set eol '\n');
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (set eol '\r');
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+--6 test \n
+alter foreign table test_ud_eol_f1 options (set location 'gsfs://127.0.0.1:8900/test_ud_eol_f2.dat.3');
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (drop eol);
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (add eol '\r\n');
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (set eol '\r');
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (set eol '\n');
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+--7 test $
+alter foreign table test_ud_eol_f1 options (set location 'gsfs://127.0.0.1:8900/test_ud_eol_f2.dat.4');
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (drop eol);
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+truncate table test_ud_eol;
+alter foreign table test_ud_eol_f1 options (add eol '$');
+insert into test_ud_eol select * from test_ud_eol_f1;
+select * from test_ud_eol order by id;
+
+\! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 34
+
+\! gds_num=`ps ux | grep -w gds | grep -v grep | awk '{print $2}'|wc -l`; while(($gds_num>0)); do sleep 1; gds_num=`ps ux | grep -w gds | grep -v grep | awk '{print $2}'|wc -l`; done
+
+drop foreign table test_ud_eol_f1;
+--drop foreign table test_ud_eol_f2;
+drop table test_ud_eol;

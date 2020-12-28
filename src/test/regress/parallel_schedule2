@@ -1,4 +1,58 @@
-#dispatch from 13
-test: function 
-test: aggregates_part1 aggregates_part2 aggregates_part3 count_distinct_part1 count_distinct_part2 count_distinct_part3 count_distinct_part4
+# ----------
+# Advisory lock need to be tested in series in Postgres-XC
+# ---------
+#test: advisory_lock
+
+# ----------
+# Another group of parallel tests
+# ----------
+test: collate tablesample tablesample_1 tablesample_2 
+
+# ----------
+# Another group of parallel tests
+# ----------
+#ignore: select_views
+#test: cluster dependency guc bitmapops tsdicts functional_deps json
+#test: ts_utf8
+#test: order by clause
+test: hw_order_cn
+
+# ----------
+# Database security
+# ----------
+# test password complexity
+#test: hw_pwd_complexity
+# test password reuse
+test: hw_pwd_reuse
+# test auditadmin
+#test: hw_auditadmin
+#test: query_self_tuning_2
+#test: hw_sec_account_lock_unlock
+
+#test: delete update namespace case select_having select_implicit
+
+#test: hw_test_operate_user
+#test: hw_createtbl_llt
+#test run gsqlerr and scanEreport
+#test: gsqlerr
+#test gs_initdb tool
+#test: gs_initdb
+#test: license_checker
+#test connect through ssl cert
+#test: hw_sslconn
+#test ssl connect through cert with pwd
+#test: hw_sslpwd
+
+
+
+
+
+
+
+
+
+
+
+
+
 

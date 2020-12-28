@@ -19,12 +19,13 @@
 
 #include "access/genam.h"
 #include "access/spgist_private.h"
+#include "access/tableam.h"
 #include "utils/rel_gs.h"
 #include "access/xlog.h"
 #include "access/xloginsert.h"
 #include "catalog/index.h"
 #include "miscadmin.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/smgr.h"
 #include "utils/aiomem.h"
 #include "utils/memutils.h"
@@ -35,10 +36,10 @@ typedef struct {
 } SpGistBuildState;
 
 /* Callback to process one heap tuple during IndexBuildHeapScan */
-static void spgistBuildCallback(
-    Relation index, HeapTuple htup, Datum* values, const bool* isnull, bool tupleIsAlive, void* state)
+static void spgistBuildCallback(Relation index, HeapTuple htup, Datum *values, const bool *isnull, bool tupleIsAlive,
+                                void *state)
 {
-    SpGistBuildState* buildstate = (SpGistBuildState*)state;
+    SpGistBuildState *buildstate = (SpGistBuildState *)state;
     MemoryContext oldCtx;
 
     /* Work in temp context, and reset it after each tuple */
@@ -57,16 +58,15 @@ Datum spgbuild(PG_FUNCTION_ARGS)
 {
     Relation heap = (Relation)PG_GETARG_POINTER(0);
     Relation index = (Relation)PG_GETARG_POINTER(1);
-    IndexInfo* indexInfo = (IndexInfo*)PG_GETARG_POINTER(2);
-    IndexBuildResult* result = NULL;
+    IndexInfo *indexInfo = (IndexInfo *)PG_GETARG_POINTER(2);
+    IndexBuildResult *result = NULL;
     double reltuples;
     SpGistBuildState buildstate;
     Buffer metabuffer, rootbuffer, nullbuffer;
 
     if (RelationGetNumberOfBlocks(index) != 0)
-        ereport(ERROR,
-            (errcode(ERRCODE_INDEX_CORRUPTED),
-                errmsg("index \"%s\" already contains data", RelationGetRelationName(index))));
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                        errmsg("index \"%s\" already contains data", RelationGetRelationName(index))));
 
     /*
      * Initialize the meta page and root pages
@@ -120,19 +120,17 @@ Datum spgbuild(PG_FUNCTION_ARGS)
     initSpGistState(&buildstate.spgstate, index);
     buildstate.spgstate.isBuild = true;
 
-    buildstate.tmpCtx = AllocSetContextCreate(CurrentMemoryContext,
-        "SP-GiST build temporary context",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    buildstate.tmpCtx = AllocSetContextCreate(CurrentMemoryContext, "SP-GiST build temporary context",
+                                              ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
+                                              ALLOCSET_DEFAULT_MAXSIZE);
 
-    reltuples = IndexBuildHeapScan(heap, index, indexInfo, true, spgistBuildCallback, (void*)&buildstate, NULL);
+    reltuples = tableam_index_build_scan(heap, index, indexInfo, true, spgistBuildCallback, (void*)&buildstate);
 
     MemoryContextDelete(buildstate.tmpCtx);
 
     SpGistUpdateMetaPage(index);
 
-    result = (IndexBuildResult*)palloc0(sizeof(IndexBuildResult));
+    result = (IndexBuildResult *)palloc0(sizeof(IndexBuildResult));
     result->heap_tuples = result->index_tuples = reltuples;
 
     PG_RETURN_POINTER(result);
@@ -157,6 +155,10 @@ Datum spgbuildempty(PG_FUNCTION_ARGS)
     }
     ADIO_END();
 
+    if (page == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("variable page should not be NULL")));
+    }
+
     SpGistInitMetapage(page);
 
     /*
@@ -167,21 +169,21 @@ Datum spgbuildempty(PG_FUNCTION_ARGS)
      * create records are replayed.
      */
     PageSetChecksumInplace(page, SPGIST_METAPAGE_BLKNO);
-    smgrwrite(index->rd_smgr, INIT_FORKNUM, SPGIST_METAPAGE_BLKNO, (char*)page, true);
+    smgrwrite(index->rd_smgr, INIT_FORKNUM, SPGIST_METAPAGE_BLKNO, (char *)page, true);
     log_newpage(&index->rd_smgr->smgr_rnode.node, INIT_FORKNUM, SPGIST_METAPAGE_BLKNO, page, false);
 
     /* Likewise for the root page. */
     SpGistInitPage(page, SPGIST_LEAF);
 
     PageSetChecksumInplace(page, SPGIST_ROOT_BLKNO);
-    smgrwrite(index->rd_smgr, INIT_FORKNUM, SPGIST_ROOT_BLKNO, (char*)page, true);
+    smgrwrite(index->rd_smgr, INIT_FORKNUM, SPGIST_ROOT_BLKNO, (char *)page, true);
     log_newpage(&index->rd_smgr->smgr_rnode.node, INIT_FORKNUM, SPGIST_ROOT_BLKNO, page, true);
 
     /* Likewise for the null-tuples root page. */
     SpGistInitPage(page, SPGIST_LEAF | SPGIST_NULLS);
 
     PageSetChecksumInplace(page, SPGIST_NULL_BLKNO);
-    smgrwrite(index->rd_smgr, INIT_FORKNUM, SPGIST_NULL_BLKNO, (char*)page, true);
+    smgrwrite(index->rd_smgr, INIT_FORKNUM, SPGIST_NULL_BLKNO, (char *)page, true);
     log_newpage(&index->rd_smgr->smgr_rnode.node, INIT_FORKNUM, SPGIST_NULL_BLKNO, page, true);
 
     /*
@@ -210,8 +212,8 @@ Datum spgbuildempty(PG_FUNCTION_ARGS)
 Datum spginsert(PG_FUNCTION_ARGS)
 {
     Relation index = (Relation)PG_GETARG_POINTER(0);
-    Datum* values = (Datum*)PG_GETARG_POINTER(1);
-    bool* isnull = (bool*)PG_GETARG_POINTER(2);
+    Datum *values = (Datum *)PG_GETARG_POINTER(1);
+    bool *isnull = (bool *)PG_GETARG_POINTER(2);
     ItemPointer ht_ctid = (ItemPointer)PG_GETARG_POINTER(3);
 
 #ifdef NOT_USED
@@ -222,11 +224,8 @@ Datum spginsert(PG_FUNCTION_ARGS)
     MemoryContext oldCtx;
     MemoryContext insertCtx;
 
-    insertCtx = AllocSetContextCreate(CurrentMemoryContext,
-        "SP-GiST insert temporary context",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    insertCtx = AllocSetContextCreate(CurrentMemoryContext, "SP-GiST insert temporary context",
+                                      ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     oldCtx = MemoryContextSwitchTo(insertCtx);
 
     initSpGistState(&spgstate, index);
@@ -244,7 +243,7 @@ Datum spginsert(PG_FUNCTION_ARGS)
 
 Datum spgmerge(PG_FUNCTION_ARGS)
 {
-    IndexBuildResult* result = NULL;
+    IndexBuildResult *result = NULL;
 
     ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("spgmerge: unimplemented")));
     PG_RETURN_POINTER(result);

@@ -59,6 +59,16 @@ typedef struct CheckPointNew {
     CommitSeqNo next_csn;
 } CheckPointNew;
 
+/* add length to distinguish between different versions of checkpoint */
+typedef struct CheckPointPlus
+{
+    CheckPoint ori_checkpoint;
+    CommitSeqNo next_csn;
+    uint64 length;
+    TransactionId recent_global_xmin;
+    /* you can add more attributes here */
+} CheckPointPlus;
+
 typedef struct CheckPointOld {
     XLogRecPtrOld      redo;            /* next RecPtr available when we began to
                                          * create CheckPoint (i.e. REDO start point) */
@@ -90,6 +100,8 @@ typedef struct CheckPointOld {
 #define XLOG_END_OF_RECOVERY            0x90    /* not use in mppdb*/
 #define XLOG_FPI_FOR_HINT               0xA0
 #define XLOG_FPI                        0xB0    /* not use in mppdb*/
+#define XLOG_DELAY_XLOG_RECYCLE         0xC0
+
 
 /*
  * System status indicator.  Note this is stored in pg_control; if you change

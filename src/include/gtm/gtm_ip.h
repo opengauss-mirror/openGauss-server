@@ -16,7 +16,7 @@
 #ifndef GTM_IP_H
 #define GTM_IP_H
 
-#include "gtm/pqcomm.h"
+#include "gtm/utils/pqcomm.h"
 
 extern int gtm_getaddrinfo_all(const char *hostname, const char *servname, const struct addrinfo *hintp,
                                struct addrinfo **result);
@@ -25,14 +25,14 @@ extern void gtm_freeaddrinfo_all(int hint_ai_family, struct addrinfo *ai);
 extern int gtm_getnameinfo_all(const struct sockaddr_storage *addr, int salen, char *node, int nodelen, char *service,
                                int servicelen, int flags);
 
-extern int gtm_range_sockaddr(const struct sockaddr_storage *addr, const struct sockaddr_storage *netaddr,
-                              const struct sockaddr_storage *netmask);
+extern int gtm_range_sockaddr(const struct sockaddr_storage* addr, const struct sockaddr_storage* netaddr,
+    const struct sockaddr_storage* netmask);
 
-extern int gtm_sockaddr_cidr_mask(struct sockaddr_storage *mask, const char *numbits, int family);
+extern int gtm_sockaddr_cidr_mask(struct sockaddr_storage* mask, const char* numbits, int family);
 
 #ifdef HAVE_IPV6
-extern void gtm_promote_v4_to_v6_addr(struct sockaddr_storage *addr);
-extern void gtm_promote_v4_to_v6_mask(struct sockaddr_storage *addr);
+extern void gtm_promote_v4_to_v6_addr(struct sockaddr_storage* addr);
+extern void gtm_promote_v4_to_v6_mask(struct sockaddr_storage* addr);
 #endif
 
 #ifdef HAVE_UNIX_SOCKETS

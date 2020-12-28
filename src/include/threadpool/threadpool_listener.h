@@ -49,12 +49,20 @@ public:
     void AddEpoll(knl_session_context* session);
     void SendShutDown();
     void ReaperAllSession();
+    void ShutDown() const;
 
     inline ThreadPoolGroup* GetGroup()
     {
         return m_group;
     }
-
+    inline ThreadId GetThreadId()
+    {
+        return m_tid;
+    }
+    inline void ResetThreadId()
+    {
+        m_tid = 0;
+    }
 private:
     void HandleConnEvent(int nevets);
     knl_session_context* GetSessionBaseOnEvent(struct epoll_event* ev);

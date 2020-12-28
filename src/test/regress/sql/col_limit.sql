@@ -35,7 +35,7 @@ set enable_nestloop=off;
 --1. Limit within top query;
 --2. Locator type is hash;
 
-explain (verbose, costs off, nodes off) select c1, c2, c3 from limit_table_01 limit 2 offset 1;
+explain (verbose, costs off) select c1, c2, c3 from limit_table_01 limit 2 offset 1;
 
 select c1, c2, c3 from limit_table_01 order by c1 limit 2 offset 1;
 select c1, c2, c3 from limit_table_01 order by c1 limit 2;

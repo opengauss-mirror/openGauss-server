@@ -4,6 +4,7 @@
  *	  POSTGRES heap access method definitions.
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -18,7 +19,7 @@
 #include "access/skey.h"
 #include "access/xlogrecord.h"
 #include "nodes/primnodes.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "storage/pagecompress.h"
 #include "utils/relcache.h"
 #include "utils/partcache.h"
@@ -30,6 +31,92 @@
 #define HEAP_INSERT_SKIP_FSM 0x0002
 #define HEAP_INSERT_FROZEN 0x0004
 #define HEAP_INSERT_SPECULATIVE 0x0008
+#define HEAP_INSERT_SKIP_ERROR 0x0010
+
+/* ----------------------------------------------------------------
+ *               Scan State Information
+ * ----------------------------------------------------------------
+ */
+typedef struct SeqScanAccessor {
+    BlockNumber sa_last_prefbf;  /* last prefetch block number */
+    BlockNumber sa_pref_trigbf;  /* last triggle block number */
+    uint32 sa_prefetch_quantity; /* preftch quantity*/
+    uint32 sa_prefetch_trigger;  /* the prefetch-trigger distance bewteen last prefetched buffer and currently accessed buffer */
+} SeqScanAccessor;
+
+typedef struct RangeScanInRedis{
+    uint8 isRangeScanInRedis;
+    uint8 sliceTotal;
+    uint8 sliceIndex;
+} RangeScanInRedis;
+
+/*
+ * Generic descriptor for table scans. This is the base-class for table scans,
+ * which needs to be embedded in the scans of individual AMs.
+ */
+typedef struct TableScanDescData
+{
+    /* scan parameters */        
+    // !! rs_rd MUST BE FIRST MEMBER !!
+    Relation        rs_rd;        /* heap relation descriptor */
+    Snapshot        rs_snapshot;  /* snapshot to see */
+    int             rs_nkeys;     /* number of scan keys */
+    ScanKey         rs_key;       /* array of scan key descriptors */
+    bool rs_pageatatime;  /* verify visibility page-at-a-time? */
+
+    /*
+     * Information about type and behaviour of the scan, a bitmask of members
+     * of the ScanOptions enum (see tableam.h).
+     */
+    uint32          rs_flags;
+
+    /* state set up at initscan time */
+    BlockNumber rs_nblocks;           /* number of blocks to scan */
+    BlockNumber rs_startblock;        /* block # to start at */
+    BufferAccessStrategy rs_strategy; /* access strategy for reads */
+    bool rs_syncscan;                 /* report location to syncscan logic? */
+
+    /* scan current state */
+    bool rs_inited;        /* false = scan not init'd yet */
+    BlockNumber rs_cblock; /* current block # in scan, if any */
+    Buffer rs_cbuf;        /* current buffer in scan, if any */
+
+    /* these fields only used in page-at-a-time mode and for bitmap scans */
+    int rs_cindex;                                   /* current tuple's index in vistuples */
+    int rs_ntuples;                                  /* number of visible tuples on page */
+    OffsetNumber rs_vistuples[MaxHeapTuplesPerPage]; /* their offsets */
+    SeqScanAccessor* rs_ss_accessor;                 /* adio use it to init prefetch quantity and trigger */
+
+    /* state set up at initscan time */
+    RangeScanInRedis  rs_rangeScanInRedis;       /* if it is a range scan in redistribution */
+} TableScanDescData;
+
+/* struct definition appears in relscan.h */
+typedef struct TableScanDescData *TableScanDesc;
+typedef struct HeapScanDescData* HeapScanDesc;
+typedef struct IndexScanDescData* IndexScanDesc;
+
+/*
+ * Base class for fetches from a table via an index. This is the base-class
+ * for such scans, which needs to be embedded in the respective struct for
+ * individual AMs.
+ */
+typedef struct IndexFetchTableData
+{
+    Relation rel;
+} IndexFetchTableData;
+
+/*
+ * Descriptor for fetches from heap via an index.
+ */
+typedef struct IndexFetchHeapData
+{
+    IndexFetchTableData xs_base; /* AM independent part of the descriptor */
+
+    /* NB: if xs_cbuf is not InvalidBuffer, we hold a pin on that buffer */
+} IndexFetchHeapData;
+
+struct ScanState;
 
 typedef struct BulkInsertStateData* BulkInsertState;
 
@@ -44,6 +131,33 @@ typedef struct {
     /* forbid to use page replication */
     bool disablePageReplication;
 } HeapMultiInsertExtraArgs;
+
+/*
+ * When tuple_update, tuple_delete, or tuple_lock fail because the target 
+ * tuple is already outdated, they fill in this struct to provide information 
+ * to the caller about what happened.
+ *
+ * ctid is the target's ctid link: it is the same as the target's TID if the
+ * target was deleted, or the location of the replacement tuple if the target
+ * was updated.
+ *
+ * xmax is the outdating transaction's XID.  If the caller wants to visit the
+ * replacement tuple, it must check that this matches before believing the
+ * replacement is really a match.
+ *
+ * cmax is the outdating command's CID, but only when the failure code is
+ * HeapTupleSelfUpdated (i.e., something in the current transaction outdated the
+ * tuple); otherwise cmax is zero.  (We make this restriction because
+ * HeapTupleHeaderGetCmax doesn't work for tuples outdated in other
+ * transactions.)
+ */
+typedef struct TM_FailureData
+{
+    ItemPointerData ctid;
+    TransactionId xmax;
+    TransactionId xmin;
+    CommandId cmax;
+} TM_FailureData;
 
 #define enable_heap_bcm_data_replication() \
     (u_sess->attr.attr_storage.enable_data_replicate && !g_instance.attr.attr_storage.enable_mix_replication)
@@ -80,7 +194,6 @@ extern void bucketClosePartition(Partition bucket);
 
 /* struct definition appears in relscan.h */
 typedef struct HeapScanDescData* HeapScanDesc;
-typedef struct ParallelHeapScanDescData *ParallelHeapScanDesc;
 
 /*
  * HeapScanIsValid
@@ -88,35 +201,24 @@ typedef struct ParallelHeapScanDescData *ParallelHeapScanDesc;
  */
 #define HeapScanIsValid(scan) PointerIsValid(scan)
 
-extern HeapScanDesc heap_beginscan(
-    Relation relation, Snapshot snapshot, int nkeys, ScanKey key, bool isRangeScanInRedis = false);
-extern HeapScanDesc heap_beginscan_strat(
+extern TableScanDesc heap_beginscan(
+    Relation relation, Snapshot snapshot, int nkeys, ScanKey key, RangeScanInRedis rangeScanInRedis = {false,0,0});
+extern TableScanDesc heap_beginscan_strat(
     Relation relation, Snapshot snapshot, int nkeys, ScanKey key, bool allow_strat, bool allow_sync);
-extern HeapScanDesc heap_beginscan_bm(Relation relation, Snapshot snapshot, int nkeys, ScanKey key);
-extern HeapScanDesc heap_beginscan_sampling(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
-    bool allow_strat, bool allow_sync, bool isRangeScanInRedis);
+extern TableScanDesc heap_beginscan_bm(Relation relation, Snapshot snapshot, int nkeys, ScanKey key);
+extern TableScanDesc heap_beginscan_sampling(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
+    bool allow_strat, bool allow_sync, RangeScanInRedis rangeScanInRedis);
 
-extern void heapgetpage(HeapScanDesc scan, BlockNumber page);
+extern void heapgetpage(TableScanDesc scan, BlockNumber page);
 
-extern void heap_rescan(HeapScanDesc scan, ScanKey key);
-extern void heap_endscan(HeapScanDesc scan);
-extern HeapTuple heap_getnext(HeapScanDesc scan, ScanDirection direction);
-/*
- * Update snapshot used by the scan.
- */
-extern void heap_scan_update_snapshot(HeapScanDesc scan, Snapshot snapshot);
+extern void heap_rescan(TableScanDesc sscan, ScanKey key);
+extern void heap_endscan(TableScanDesc scan);
+extern HeapTuple heap_getnext(TableScanDesc scan, ScanDirection direction);
 
-extern Size heap_parallelscan_estimate(Snapshot snapshot);
-extern void heap_parallelscan_initialize(ParallelHeapScanDesc target, Size pscan_len, Relation relation,
-    Snapshot snapshot);
-extern void heap_parallelscan_reinitialize(ParallelHeapScanDesc parallel_scan);
-extern HeapScanDesc heap_beginscan_parallel(Relation relation, ParallelHeapScanDesc parallel_scan);
+extern void heap_init_parallel_seqscan(TableScanDesc sscan, int32 dop, ScanDirection dir);
 
-extern void heap_init_parallel_seqscan(HeapScanDesc scan, int32 dop, ScanDirection dir);
-
-extern HeapTuple heapGetNextForVerify(HeapScanDesc scan, ScanDirection direction, bool& isValidRelationPage);
-extern bool heap_fetch(
-    Relation relation, Snapshot snapshot, HeapTuple tuple, Buffer* userbuf, bool keep_buf, Relation stats_relation);
+extern HeapTuple heapGetNextForVerify(TableScanDesc scan, ScanDirection direction, bool& isValidRelationPage);
+extern bool heap_fetch(Relation relation, Snapshot snapshot, HeapTuple tuple, Buffer *userbuf, bool keep_buf, Relation stats_relation);
 extern bool heap_hot_search_buffer(ItemPointer tid, Relation relation, Buffer buffer, Snapshot snapshot,
     HeapTuple heapTuple, HeapTupleHeaderData* uncompressTup, bool* all_dead, bool first_call);
 extern bool heap_hot_search(ItemPointer tid, Relation relation, Snapshot snapshot, bool* all_dead);
@@ -138,13 +240,12 @@ extern bool heap_change_xidbase_after_freeze(Relation relation, Buffer buffer);
 extern bool rewrite_page_prepare_for_xid(Page page, TransactionId xid, bool multi);
 extern int heap_multi_insert(Relation relation, Relation parent, HeapTuple* tuples, int ntuples, CommandId cid, int options,
     BulkInsertState bistate, HeapMultiInsertExtraArgs* args);
-extern HTSU_Result heap_delete(Relation relation, ItemPointer tid, ItemPointer ctid, TransactionId* update_xmax,
-    CommandId cid, Snapshot crosscheck, bool wait, bool allow_delete_self = false);
-extern HTSU_Result heap_update(Relation relation, Relation parentRelation, ItemPointer otid, HeapTuple newtup,
-    ItemPointer ctid, TransactionId* update_xmax, CommandId cid, Snapshot crosscheck,
-    bool wait, bool allow_update_self = false);
-extern HTSU_Result heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer* buffer, ItemPointer ctid,
-    TransactionId* update_xmax, CommandId cid, LockTupleMode mode, bool nowait, bool allow_lock_self = false);
+extern TM_Result heap_delete(Relation relation, ItemPointer tid, CommandId cid, Snapshot crosscheck, 
+    bool wait, TM_FailureData *tmfd, bool allow_delete_self = false);
+extern TM_Result heap_update(Relation relation, Relation parentRelation, ItemPointer otid, HeapTuple newtup,
+    CommandId cid, Snapshot crosscheck, bool wait, TM_FailureData *tmfd, bool allow_delete_self = false);
+extern TM_Result heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer* buffer, 
+    CommandId cid, LockTupleMode mode, bool nowait, TM_FailureData *tmfd, bool allow_lock_self = false);
 
 extern void heap_inplace_update(Relation relation, HeapTuple tuple);
 extern bool heap_freeze_tuple(HeapTuple tuple, TransactionId cutoff_xid);
@@ -154,8 +255,8 @@ extern Oid simple_heap_insert(Relation relation, HeapTuple tup);
 extern void simple_heap_delete(Relation relation, ItemPointer tid, int options = 0);
 extern void simple_heap_update(Relation relation, ItemPointer otid, HeapTuple tup);
 
-extern void heap_markpos(HeapScanDesc scan);
-extern void heap_restrpos(HeapScanDesc scan);
+extern void heap_markpos(TableScanDesc scan);
+extern void heap_restrpos(TableScanDesc scan);
 
 extern void heap_sync(Relation relation, LOCKMODE lockmode = RowExclusiveLock);
 
@@ -164,10 +265,10 @@ extern void partition_sync(Relation rel, Oid partitionId, LOCKMODE toastLockmode
 extern void heap_redo(XLogReaderState* rptr);
 extern void heap_desc(StringInfo buf, XLogReaderState* record);
 extern void heap2_redo(XLogReaderState* rptr);
-extern void heap_bcm_redo(xl_heap_bcm* xlrec, RelFileNode node, XLogRecPtr lsn);
 extern void heap2_desc(StringInfo buf, XLogReaderState* record);
 extern void heap3_redo(XLogReaderState* rptr);
 extern void heap3_desc(StringInfo buf, XLogReaderState* record);
+extern void heap_bcm_redo(xl_heap_bcm* xlrec, RelFileNode node, XLogRecPtr lsn);
 
 extern bool heap_page_upgrade(Relation relation, Buffer buffer);
 extern void heap_page_upgrade_nocheck(Relation relation, Buffer buffer);
@@ -196,6 +297,11 @@ extern void heap_page_prune_execute(Page page, OffsetNumber* redirected, int nre
     int ndead, OffsetNumber* nowunused, int nunused, bool repairFragmentation);
 extern void heap_get_root_tuples(Page page, OffsetNumber* root_offsets);
 
+extern IndexFetchTableData * heapam_index_fetch_begin(Relation rel);
+extern void heapam_index_fetch_reset(IndexFetchTableData *scan);
+extern void heapam_index_fetch_end(IndexFetchTableData *scan);
+extern HeapTuple heapam_index_fetch_tuple(IndexScanDesc scan, bool *all_dead);
+
 /* in heap/syncscan.c */
 extern void ss_report_location(Relation rel, BlockNumber location);
 extern BlockNumber ss_get_location(Relation rel, BlockNumber relnblocks);
@@ -203,5 +309,39 @@ extern void SyncScanShmemInit(void);
 extern Size SyncScanShmemSize(void);
 
 extern void PushHeapPageToDataQueue(Buffer buffer);
+
+/*
+ * HeapTupleSatisfiesVisibility
+ *		True iff heap tuple satisfies a time qual.
+ *
+ * Notes:
+ *	Assumes heap tuple is valid.
+ *	Beware of multiple evaluations of snapshot argument.
+ *	Hint bits in the HeapTuple's t_infomask may be updated as a side effect;
+ *	if so, the indicated buffer is marked dirty.
+ */
+extern bool HeapTupleSatisfiesVisibility(HeapTuple stup, Snapshot snapshot, Buffer buffer);
+
+/* Result codes for HeapTupleSatisfiesVacuum */
+typedef enum {
+    HEAPTUPLE_DEAD,               /* tuple is dead and deletable */
+    HEAPTUPLE_LIVE,               /* tuple is live (committed, no deleter) */
+    HEAPTUPLE_RECENTLY_DEAD,      /* tuple is dead, but not deletable yet */
+    HEAPTUPLE_INSERT_IN_PROGRESS, /* inserting xact is still in progress */
+    HEAPTUPLE_DELETE_IN_PROGRESS  /* deleting xact is still in progress */
+} HTSV_Result;
+
+/* Special "satisfies" routines with different APIs */
+extern TM_Result HeapTupleSatisfiesUpdate(HeapTuple htup, CommandId curcid, Buffer buffer, bool self_visible = false);
+extern HTSV_Result HeapTupleSatisfiesVacuum(HeapTuple htup, TransactionId OldestXmin, Buffer buffer, bool isAnalyzing = false);
+extern bool HeapTupleIsSurelyDead(HeapTuple htup, TransactionId OldestXmin);
+extern void HeapTupleSetHintBits(HeapTupleHeader tuple, Buffer buffer, uint16 infomask, TransactionId xid);
+
+/*
+ * To avoid leaking to much knowledge about reorderbuffer implementation
+ * details this is implemented in reorderbuffer.c not tqual.c.
+ */
+extern bool ResolveCminCmaxDuringDecoding(
+    struct HTAB* tuplecid_data, Snapshot snapshot, HeapTuple htup, Buffer buffer, CommandId* cmin, CommandId* cmax);
 
 #endif /* HEAPAM_H */

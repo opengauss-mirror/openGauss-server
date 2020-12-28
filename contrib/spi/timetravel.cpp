@@ -23,7 +23,6 @@
 
 PG_MODULE_MAGIC;
 
-/* AbsoluteTime currabstime(void); */
 Datum timetravel(PG_FUNCTION_ARGS);
 Datum set_timetravel(PG_FUNCTION_ARGS);
 Datum get_timetravel(PG_FUNCTION_ARGS);
@@ -387,7 +386,6 @@ Datum /* have to return HeapTuple to Executor */
          * SPI_copytuple allocates tmptuple in upper executor context - have
          * to free allocation using SPI_pfree
          */
-        /* SPI_pfree(tmptuple); */
     } else
         /* DELETE case */
         rettuple = trigtuple;
@@ -449,10 +447,6 @@ Datum set_timetravel(PG_FUNCTION_ARGS)
     PG_RETURN_INT32(ret);
 }
 
-/*
- * get_timetravel (relname) --
- *	get timetravel status for specified relation (ON/OFF)
- */
 PG_FUNCTION_INFO_V1(get_timetravel);
 
 Datum get_timetravel(PG_FUNCTION_ARGS)
@@ -476,14 +470,6 @@ static int findTTStatus(char* name)
             return 0;
     return 1;
 }
-
-/*
-AbsoluteTime
-currabstime()
-{
-    return (GetCurrentAbsoluteTime());
-}
-*/
 
 static EPlan* find_plan(char* ident, EPlan** eplan, int* nplans)
 {

@@ -1,0 +1,49 @@
+set explain_perf_mode=normal;
+-- aggregate functions with group by clause
+select avg(c1), avg(c2), avg(c3), avg(c4), avg(c5), avg(c6), avg(c7) from aggtable1 group by c8 order by c8;
+         avg         |         avg         |         avg         |         avg         |         avg         |       avg        |       avg        
+---------------------+---------------------+---------------------+---------------------+---------------------+------------------+------------------
+ 10.3333333333333333 | 11.3333333333333333 | 12.3333333333333333 | 13.3333333333333333 | 14.3333333333333333 | 15.3333333333333 | 16.3333333333333
+ 17.3333333333333333 | 18.3333333333333333 | 19.3333333333333333 | 20.3333333333333333 | 21.3333333333333333 | 22.3333333333333 | 23.3333333333333
+(2 rows)
+
+select max(c1), max(c2), max(c3), max(c4), max(c5), max(c6), max(c7) from aggtable1 group by c8 order by c8;
+ max | max | max | max | max | max | max 
+-----+-----+-----+-----+-----+-----+-----
+  29 | 30  |  31 |  32 |  33 |  34 |  35
+  36 | 37  |  38 |  39 |  40 |  41 |  42
+(2 rows)
+
+select count(c1), count(c2), count(c3), count(c4), count(c5), count(c6), count(c7) from aggtable1 group by c8 order by c8;
+ count | count | count | count | count | count | count 
+-------+-------+-------+-------+-------+-------+-------
+  6144 |  6144 |  6144 |  6144 |  6144 |  6144 |  6144
+  6144 |  6144 |  6144 |  6144 |  6144 |  6144 |  6144
+(2 rows)
+
+explain (verbose on, costs off) select avg(c1), sum(c2), min(c3), max(c4), count(c5), count(*) from aggtable1 group by c8 order by c8;
+                                                                                          QUERY PLAN                                                                                          
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (pg_catalog.avg((avg(c1)))), (sum((sum((c2)::double precision)))), (min((min(c3)))), (max((max(c4)))), (count((count(c5)))), (pg_catalog.count(*)), c8
+   Merge Sort Key: aggtable1.c8
+   Node/s: All datanodes
+   ->  Sort
+         Output: (pg_catalog.avg((avg(c1)))), (sum((sum((c2)::double precision)))), (min((min(c3)))), (max((max(c4)))), (count((count(c5)))), (pg_catalog.count(*)), c8
+         Sort Key: aggtable1.c8
+         ->  HashAggregate
+               Output: pg_catalog.avg((avg(c1))), sum((sum((c2)::double precision))), min((min(c3))), max((max(c4))), count((count(c5))), pg_catalog.count(*), c8
+               Group By Key: aggtable1.c8
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: (avg(c1)), (sum((c2)::double precision)), (min(c3)), (max(c4)), (count(c5)), (count(*)), c8
+                     Distribute Key: c8
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Dummy HashAggregate
+                           Output: avg(c1), sum((c2)::double precision), min(c3), max(c4), count(c5), count(*), c8
+                           Group By Key: aggtable1.c8
+                           ->  Foreign Scan on public.aggtable1
+                                 Output: count((c1)), sum(((c1))::numeric), sum(c2::double precision), min(c3), max(c4), count(c5), count(*), c8
+                                 Remote SQL: SELECT count((c1)), sum(((c1))::numeric), sum(c2::double precision), min(c3), max(c4), count(c5), count(*), c8 FROM public.aggtable1 GROUP BY c8
+(21 rows)
+

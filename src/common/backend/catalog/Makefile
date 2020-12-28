@@ -21,8 +21,9 @@ OBJS = catalog.o dependency.o heap.o index.o indexing.o namespace.o aclchk.o \
        objectaddress.o pg_aggregate.o pg_collation.o pg_constraint.o pg_conversion.o \
        pg_depend.o pg_enum.o pg_inherits.o pg_largeobject.o pg_namespace.o pg_object.o\
        pg_operator.o pg_proc.o pg_range.o pg_db_role_setting.o pg_shdepend.o pg_synonym.o\
-       pg_type.o pgxc_class.o storage_gtt.o storage.o toasting.o pg_job.o pg_partition.o \
-       pg_hashbucket.o  cstore_ctlg.o dfsstore_ctlg.o pg_builtin_proc.o
+       pg_type.o pgxc_class.o storage.o storage_gtt.o toasting.o pg_job.o pg_partition.o\
+       pg_hashbucket.o cstore_ctlg.o dfsstore_ctlg.o pg_builtin_proc.o streaming_stream.o\
+       gs_matview.o pgxc_slice.o
 
 BKIFILES = postgres.bki postgres.description postgres.shdescription
 
@@ -36,8 +37,8 @@ all: $(BKIFILES) schemapg.h
 
 POSTGRES_BKI_SRCS = $(addprefix $(top_srcdir)/src/include/catalog/,\
 	pg_proc.h pg_type.h pg_attribute.h pg_class.h pg_partition.h\
-	pg_attrdef.h pg_constraint.h pg_inherits.h pg_index.h pg_operator.h \
-	pg_opfamily.h pg_opclass.h pg_am.h pg_amop.h pg_amproc.h \
+	pg_attrdef.h pg_constraint.h pg_inherits.h pg_index.h pg_operator.data \
+	pg_opfamily.h pg_opclass.h pg_am.h pg_amop.data pg_amproc.h \
 	pg_language.h pg_largeobject_metadata.h pg_largeobject.h pg_aggregate.h \
 	pg_statistic.h pg_rewrite.h pg_trigger.h pg_description.h \
 	pg_cast.h pg_enum.h pg_namespace.h pg_conversion.h pg_depend.h \
@@ -48,9 +49,15 @@ POSTGRES_BKI_SRCS = $(addprefix $(top_srcdir)/src/include/catalog/,\
 	pg_obsscaninfo.h pg_foreign_data_wrapper.h pg_foreign_server.h pg_user_mapping.h \
 	pgxc_class.h pgxc_node.h pgxc_group.h pg_resource_pool.h pg_workload_group.h \
 	pg_app_workloadgroup_mapping.h pg_foreign_table.h pg_rlspolicy.h \
-	pg_default_acl.h pg_seclabel.h pg_shseclabel.h pg_collation.h pg_range.h \
-	pg_job.h pg_job_proc.h pg_extension_data_source.h pg_statistic_ext.h pg_object.h  pg_synonym.h \
-	toasting.h indexing.h gs_obsscaninfo.h pg_directory.h pg_hashbucket.h gs_opt_model.h \
+	pg_default_acl.h pg_seclabel.h pg_shseclabel.h pg_collation.h pg_range.h gs_policy_label.h \
+	gs_auditing_policy.h gs_auditing_policy_acc.h gs_auditing_policy_priv.h gs_auditing_policy_filter.h \
+	gs_masking_policy.h gs_masking_policy_actions.h gs_masking_policy_filters.h \
+	gs_encrypted_columns.h gs_column_keys.h gs_column_keys_args.h \
+	gs_client_global_keys.h gs_client_global_keys_args.h \
+	pg_job.h gs_asp.h pg_job_proc.h pg_extension_data_source.h pg_statistic_ext.h pg_object.h  pg_synonym.h \
+	toasting.h indexing.h gs_obsscaninfo.h pg_directory.h pg_hashbucket.h gs_global_config.h\
+	pg_streaming_stream.h pg_streaming_cont_query.h pg_streaming_reaper_status.h gs_matview.h\
+	gs_matview_dependency.h pgxc_slice.h gs_opt_model.h\
     )
 
 # location of Catalog.pm

@@ -4,6 +4,7 @@
  *	  header file for hash template implementation
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -83,6 +84,7 @@ computeHashT(Datum value)
 		case INT2VECTOROID:
 			return DirectFunctionCall1(hashint2vector, value);
 
+		case CLOBOID:
 		case NVARCHAR2OID:
 		case VARCHAROID:
 		case TEXTOID:
@@ -110,7 +112,8 @@ computeHashT(Datum value)
 
 		case BPCHAROID:
 			return DirectFunctionCall1(hashbpchar, value);
-
+		case BYTEAWITHOUTORDERWITHEQUALCOLOID:
+		case BYTEAWITHOUTORDERCOLOID:
 		case RAWOID:
 		case BYTEAOID:
 			return DirectFunctionCall1(hashvarlena, value);

@@ -97,10 +97,6 @@ int main(int argc, char* argv[])
                     inf = stdin;
                 } else {
                     ifnam = strdup(optarg);
-                    if (ifnam == NULL) {
-                        fprintf(stderr, "out of memory\n");
-                        exit(1);
-                    }
                 }
                 break;
 
@@ -114,19 +110,11 @@ int main(int argc, char* argv[])
                     outf = stdout;
                 } else {
                     ofnam = strdup(optarg);
-                    if (ofnam == NULL) {
-                        fprintf(stderr, "out of memory\n");
-                        exit(1);
-                    }
                 }
                 break;
 
             case 'E':
                 token = strdup(optarg);
-                if (token == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit(1);
-                }
                 if (ignoreToks == NULL) {
                     ignoreToks = (tokenlist*)malloc(sizeof(tokenlist));
                     if (ignoreToks == NULL) {
@@ -148,10 +136,6 @@ int main(int argc, char* argv[])
 
             case 'I':
                 token = strdup(optarg);
-                if (token == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit(1);
-                }
                 if (includeToks == NULL) {
                     includeToks = (tokenlist*)malloc(sizeof(tokenlist));
                     if (includeToks == NULL) {

@@ -75,19 +75,10 @@ extern void FileClose(File file);
 extern void FileCloseWithThief(File file);
 extern int FilePrefetch(File file, off_t offset, int amount, uint32 wait_event_info = 0);
 extern int FileSync(File file, uint32 wait_event_info = 0);
-extern off_t FileSize(File file);
 extern off_t FileSeek(File file, off_t offset, int whence);
 extern int FileTruncate(File file, off_t offset, uint32 wait_event_info = 0);
 extern void FileWriteback(File file, off_t offset, off_t nbytes);
 extern char* FilePathName(File file);
-
-/* Operations used for sharing named temporary files */
-extern File PathNameCreateTemporaryFile(char *name, bool error_on_failure);
-extern File PathNameOpenTemporaryFile(char *name);
-extern bool PathNameDeleteTemporaryFile(const char *name, bool error_on_failure);
-extern void PathNameCreateTemporaryDir(const char *base, const char *name);
-extern void PathNameDeleteTemporaryDir(const char *name);
-extern void TempTablespacePath(char *path, Size pathSize, Oid tablespace);
 
 extern void FileAsyncCUClose(File* vfdList, int32 vfdnum);
 extern int FileAsyncRead(AioDispatchDesc_t** dList, int32 dn);
@@ -130,10 +121,10 @@ extern void CloseGaussPidDir(void);
 extern void closeAllVfds(void);
 extern void SetTempTablespaces(Oid* tableSpaces, int numSpaces);
 extern bool TempTablespacesAreSet(void);
-extern int GetTempTablespaces(Oid *tableSpaces, int numSpaces);
 extern Oid GetNextTempTableSpace(void);
 extern void AtEOXact_Files(void);
 extern void AtEOSubXact_Files(bool isCommit, SubTransactionId mySubid, SubTransactionId parentSubid);
+extern void AtProcExit_Files(int code, Datum arg);
 extern void RemovePgTempFiles(void);
 
 extern void RemoveErrorCacheFiles();

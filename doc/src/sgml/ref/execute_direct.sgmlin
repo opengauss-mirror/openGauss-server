@@ -11,6 +11,7 @@
 <refsynopsisdiv>
 <synopsis>
 EXECUTE DIRECT ON ( nodename [, ... ] ) query;
+EXECUTE DIRECT ON { COORDINATORS | DATANODES | ALL } query;
 </synopsis>
 </refsynopsisdiv>
 </refentry>

@@ -1,0 +1,44 @@
+/*
+ * This file is used to prepare for the function test of JavaUDF
+ */
+----
+-- Clear the current user's log files produced during the JavaUDF testing in the last fastcheck
+----
+\! if [ -d "/tmp/gs_profile" ]; then find /tmp/gs_profile/ -user $USER | xargs rm > /dev/null 2>&1; else break; fi
+\! if [ -d "/tmp/pg_log" ]; then find  /tmp/pg_log/ -user $USER | xargs rm > /dev/null 2>&1; else break; fi
+----
+-- Wait for less than 300s to prepare fenced UDF Master process
+----
+\! for (( i=0; i<20; i=i+1 )); do if [ -e /tmp/.gaussUDF.socket ]; then sleep 15s; else break; fi; done
+\! ps -ef | grep 'gaussdb fenced UDF master process' | awk '{print $2}' | xargs kill -s 9 > /dev/null 2>&1
+\! rm -rf /tmp/.gaussUDF.socket > /dev/null 2>&1
+\! @abs_bindir@/gaussdb  --fenced -k /tmp/ -D /tmp/ > /dev/null 2>&1 &
+----
+-- Prepare jars
+----
+\! cp -r @abs_srcdir@/jar/*  @abs_bindir@/../lib/postgresql/java/
+----
+-- change the directory permission so that every one can test JavaUDF in fastcheck
+----
+\! chmod 777 /tmp/gs_profile > /dev/null 2>&1
+\! chmod 777 /tmp/pg_log > /dev/null 2>&1
+----
+--- Create Table and Insert Data
+----
+DROP SCHEMA javaudf_basic CASCADE;
+ERROR:  schema "javaudf_basic" does not exist
+CREATE SCHEMA javaudf_basic;
+SET CURRENT_SCHEMA = javaudf_basic;
+CREATE TABLE typeTable(boolCol BOOL, charCol "char", int2Col INT2, int4Col INT4, int8Col INT8, floatCol FLOAT4, doubleCol FLOAT8, varcharCol VARCHAR(10), textCol TEXT, timeCol TIME, timestampCol TIMESTAMP)
+DISTRIBUTE BY HASH (int4Col)
+;
+INSERT INTO typeTable VALUES ( 1, 'a', 1,1,1, 1.0, 1.0, 'abc','abc','1:00:00', '2018-06-01 1:00:00');
+INSERT INTO typeTable VALUES ( 0, 'b', 2,2,2, 2.0, 2.0, 'bcd','bcd','2:00:00', '2018-06-02 2:00:00');
+INSERT INTO typeTable VALUES ( 1, 'c', 3,3,3, 3.0, 3.0, 'cde','cde','3:00:00', '2018-06-03 3:00:00');
+INSERT INTO typeTable VALUES ( 0, 'd', 4,4,4, 4.0, 4.0, 'def','def','4:00:00', '2018-06-04 4:00:00');
+INSERT INTO typeTable VALUES ( 1, 'e', 5,5,5, 5.0, 5.0, 'efg','efg','5:00:00', '2018-06-05 5:00:00');
+CREATE TABLE boundaryTable(textCol TEXT, charCol "char", int2Col INT2, int4Col INT4, int8Col INT8, floatCol FLOAT4, doubleCol FLOAT8)
+DISTRIBUTE BY HASH (int4Col);
+INSERT INTO boundaryTable VALUES ('null', null, null, null, null, null, null);
+INSERT INTO boundaryTable VALUES ('min', 'aa' , -32768, -2147483648 , -9223372036854775808, 10.9999, 20.9999);
+INSERT INTO boundaryTable VALUES ('max', 'bb' , 32767, 2147483647, 9223372036854775807, 10.9999, 20.9999);

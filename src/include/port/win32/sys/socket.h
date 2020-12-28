@@ -13,6 +13,7 @@
  */
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#define _WINSOCKAPI_
 #include <windows.h>
 
 #undef ERROR

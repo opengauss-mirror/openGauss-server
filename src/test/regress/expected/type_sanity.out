@@ -234,9 +234,10 @@ SELECT p1.oid, p1.typname, p2.oid, p2.proname, p3.oid, p3.proname
 FROM pg_type AS p1, pg_proc AS p2, pg_proc AS p3
 WHERE p1.typinput = p2.oid AND p1.typreceive = p3.oid AND
     p2.pronargs != p3.pronargs;
- oid | typname | oid | proname | oid | proname 
------+---------+-----+---------+-----+---------
-(0 rows)
+ oid  | typname | oid  | proname | oid  | proname  
+------+---------+------+---------+------+----------
+ 4301 | hll     | 4305 | hll_in  | 4307 | hll_recv
+(1 row)
 
 -- Composites, domains, enums, ranges should all use the same receive routines
 SELECT DISTINCT typtype, typreceive

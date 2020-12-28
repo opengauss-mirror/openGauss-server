@@ -114,7 +114,6 @@ Datum gbt_float4_consistent(PG_FUNCTION_ARGS)
     float4 query = PG_GETARG_FLOAT4(1);
     StrategyNumber strategy = (StrategyNumber)PG_GETARG_UINT16(2);
 
-    /* Oid		subtype = PG_GETARG_OID(3); */
     bool* recheck = (bool*)PG_GETARG_POINTER(4);
     float4KEY* kkk = (float4KEY*)DatumGetPointer(entry->key);
     GBT_NUMKEY_R key;
@@ -133,7 +132,6 @@ Datum gbt_float4_distance(PG_FUNCTION_ARGS)
     GISTENTRY* entry = (GISTENTRY*)PG_GETARG_POINTER(0);
     float4 query = PG_GETARG_FLOAT4(1);
 
-    /* Oid		subtype = PG_GETARG_OID(3); */
     float4KEY* kkk = (float4KEY*)DatumGetPointer(entry->key);
     GBT_NUMKEY_R key;
 

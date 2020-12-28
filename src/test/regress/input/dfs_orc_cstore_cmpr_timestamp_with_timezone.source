@@ -1,0 +1,18 @@
+set enable_global_stats = true;
+set enable_vector_engine=on;
+-- Problem:
+-- basic timestamp with time zone type data compression, including DELTA method, min/max computation.
+CREATE TABLE colcmpr_timestamp_with_timezone
+(
+	distkey INT4,
+	a timestamp with time zone,
+	b timestamp with time zone,
+	c timestamp with time zone,
+	d timestamp with time zone,
+	e timestamp with time zone,
+	f timestamp with time zone
+) with (orientation = orc) tablespace hdfs_ts  DISTRIBUTE BY HASH(distkey);
+COPY colcmpr_timestamp_with_timezone FROM '@abs_srcdir@/data/colcmpr_timestamp_with_timezone.data' delimiter ',';
+SET DATESTYLE=POSTGRESQL;
+SELECT * FROM colcmpr_timestamp_with_timezone;
+DROP TABLE colcmpr_timestamp_with_timezone;

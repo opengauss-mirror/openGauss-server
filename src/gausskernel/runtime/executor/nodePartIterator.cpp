@@ -61,8 +61,8 @@ PartIteratorState* ExecInitPartIterator(PartIterator* node, EState* estate, int 
 
 static void init_scan_partition(PartIteratorState* node)
 {
-    int paramno;
-    unsigned int itr_idx;
+    int paramno = 0;
+    unsigned int itr_idx = 0;
     PartIterator* pi_node = (PartIterator*)node->ps.plan;
     ParamExecData* param = NULL;
 
@@ -100,7 +100,30 @@ TupleTableSlot* ExecPartIterator(PartIteratorState* node)
     EState* state = node->ps.lefttree->state;
     bool orig_early_free = state->es_skip_early_free;
 
-    if (pi_node->itrs == 0) {
+    PlanState* noden = (PlanState*)node->ps.lefttree;
+    int partitionScan;
+    switch (nodeTag(noden)) {
+        case T_SeqScanState:
+            partitionScan =  ((SeqScanState*)noden)->part_id;
+            break;
+        case T_IndexScanState:
+            partitionScan =  ((IndexScanState*)noden)->part_id;
+            break;
+        case T_IndexOnlyScanState:
+            partitionScan =  ((IndexOnlyScanState*)noden)->part_id;
+            break;
+        case T_BitmapHeapScanState:
+            partitionScan =  ((BitmapHeapScanState*)noden)->part_id;
+            break;
+        case T_VecToRowState:
+            partitionScan = ((VecToRowState*)noden)->part_id;
+            break;
+        default:
+            partitionScan = pi_node->itrs;
+            break;
+    }
+
+    if (partitionScan == 0) {
         /* return NULL if no partition is selected */
         return NULL;
     }
@@ -119,7 +142,7 @@ TupleTableSlot* ExecPartIterator(PartIteratorState* node)
 
     /* switch to next partition until we get a unempty tuple */
     for (;;) {
-        if (node->currentItr + 1 >= pi_node->itrs) /* have scanned all partitions */
+        if (node->currentItr + 1 >= partitionScan) /* have scanned all partitions */
             return NULL;
 
         /* switch to next partiiton */
@@ -160,7 +183,7 @@ void ExecEndPartIterator(PartIteratorState* node)
 void ExecReScanPartIterator(PartIteratorState* node)
 {
     PartIterator* pi_node = NULL;
-    int paramno;
+    int paramno = -1;
     ParamExecData* param = NULL;
     PartIterator* piterator = NULL;
 

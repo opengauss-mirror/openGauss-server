@@ -1,0 +1,35 @@
+<refentry id="SQL-ALTER_AUDIT_POLICY">
+<refmeta>
+<refentrytitle>ALTER AUDIT POLICY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER AUDIT POLICY</refname>
+<refpurpose>change a audit policy</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER AUDIT POLICY [ IF EXISTS ] policy_name { ADD | REMOVE } { [ privilege_audit_clause ] [ access_audit_clause ] }; 
+ALTER AUDIT POLICY [ IF EXISTS ] policy_name MODIFY ( filter_group_clause ); 
+ALTER AUDIT POLICY [ IF EXISTS ] policy_name DROP FILTER; 
+ALTER AUDIT POLICY [ IF EXISTS ] policy_name COMMENTS policy_comments; 
+ALTER AUDIT POLICY [ IF EXISTS ] policy_name { ENABLE | DISABLE }; 
+
+where privilege_audit_clause can be:
+PRIVILEGES { DDL | ALL }
+
+where access_audit_clause can be:
+ACCESS { DML | ALL }
+
+where filter_group_clause can be:
+FILTER ON { ( FILTER_TYPE ( filter_value [, ... ] ) ) [, ... ] }
+
+where DDL can be:
+{ ( ALTER | ANALYZE | COMMENT | CREATE | DROP | GRANT | REVOKE | SET | SHOW | LOGIN_ACCESS | LOGIN_FAILURE | LOGOUT | LOGIN ) }
+
+where DML can be: 
+{ ( COPY | DEALLOCATE | DELETE_P | EXECUTE | REINDEX | INSERT | REPARE | SELECT | TRUNCATE | UPDATE ) }
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -232,6 +232,7 @@ void canonicalize_path(char* path)
     char* spath = NULL;
     bool was_sep = false;
     int pending_strips;
+    int origin_len = strlen(path);
     errno_t ret = 0;
 
 #ifdef WIN32
@@ -335,21 +336,21 @@ void canonicalize_path(char* path)
          * possible drive specifier on Windows). We have to put back one or
          * more ".."'s that we took off.
          */
-        while (--pending_strips > 0) {
-            ret = strcat_s(path, strlen(path) + sizeof("../") + 1, "../");
+        while (pending_strips-- > 0) {
+#ifndef FRONTEND
+            int new_len = strlen(path) + sizeof("../") + 1;
+            if (new_len > origin_len) {
+                path = (char*)repalloc((void*)path, new_len);
+                origin_len = new_len;
+            }
+#endif
+            ret = strcat_s(path, origin_len, "../");
 #ifdef FRONTEND
             securec_check_ss_c(ret, "\0", "\0");
 #else
             securec_check_ss(ret, "\0", "\0");
 #endif
         }
-        ret = strcat_s(path, strlen(path) + sizeof("../") + 1, "../");
-
-#ifdef FRONTEND
-        securec_check_ss_c(ret, "\0", "\0");
-#else
-        securec_check_ss(ret, "\0", "\0");
-#endif
     }
 }
 
@@ -689,9 +690,10 @@ bool get_home_path(char* ret_path, size_t sz)
      * eats valuable desktop heap.
      */
     tmppath = gs_getenv_r("APPDATA");
-    if (tmppath == NULL)
+    if (tmppath == NULL) {
         return false;
-    check_backend_env(tmppath);
+    }
+
     int rc = snprintf_s(ret_path, sz, sz - 1, "%s/postgresql", tmppath);
 #ifdef FRONTEND
     securec_check_ss_c(rc, "\0", "\0");
@@ -755,7 +757,7 @@ static void trim_directory(char* path)
 }
 
 /*
- * trim_trailing_separator
+ *	trim_trailing_separator
  *
  * trim off trailing slashes, but not a leading slash
  */

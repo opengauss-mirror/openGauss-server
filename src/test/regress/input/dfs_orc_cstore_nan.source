@@ -1,0 +1,16 @@
+set enable_global_stats = true;
+set enable_vector_engine=on;
+-- problem:
+-- NAN special value test, including data type: float4, float8, double precision, real.
+-- if HAVE_INT64_TIMESTAMP is not defined, time/timestamp/timestamp with time zone are also included.
+CREATE TABLE cstore_nan
+(
+	a INT4, 
+	b float4, 
+	c float8,
+	g double precision,
+	h real
+) with (orientation = orc) tablespace hdfs_ts  DISTRIBUTE BY HASH(a);
+COPY cstore_nan FROM '@abs_srcdir@/data/cstore_nan.data' delimiter '|';
+SELECT * FROM cstore_nan order by a,b;
+DROP TABLE cstore_nan;

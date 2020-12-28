@@ -85,13 +85,11 @@ static int GetOldFunctionMessage(StringInfo buf)
         return EOF;
     appendBinaryStringInfo(buf, (char*)&ibuf, 4);
     nargs = ntohl(ibuf);
-
     if (unlikely(nargs < 0 || nargs > FUNC_MAX_ARGS)) {
         ereport(FATAL,
             (errcode(ERRCODE_PROTOCOL_VIOLATION),
                     errmsg("invalid argument count %d in function call message", nargs)));
     }
-    
     /* For each argument ... */
     while (nargs-- > 0) {
         int argsize;
@@ -182,7 +180,6 @@ static void fetch_fp_info(Oid func_id, struct fp_info* fip)
 {
     HeapTuple func_htp;
     Form_pg_proc pp;
-    errno_t errorno;
 
     if (unlikely(!(OidIsValid(func_id))))
                 ereport(ERROR,
@@ -217,10 +214,11 @@ static void fetch_fp_info(Oid func_id, struct fp_info* fip)
 
     fip->nmspace = pp->pronamespace;
     fip->rettype = pp->prorettype;
+    errno_t errorno = EOK;
     errorno = memcpy_s(fip->argtypes, pp->pronargs * sizeof(Oid), pp->proargtypes.values, pp->pronargs * sizeof(Oid));
-    securec_check(errorno, "\0", "\0");
+    securec_check(errorno, "", "");
     errorno = strcpy_s(fip->fname, NAMEDATALEN, NameStr(pp->proname));
-    securec_check_c(errorno, "\0", "\0");
+    securec_check(errorno, "", "");
 
     ReleaseSysCache(func_htp);
 
@@ -302,7 +300,8 @@ int HandleFunctionRequest(StringInfo msgBuf)
         ereport(ERROR,
             (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
                 errmsg("current transaction is aborted, "
-                       "commands ignored until end of transaction block")));
+                    "commands ignored until end of transaction block, firstChar[%c]",
+                    u_sess->proc_cxt.firstChar)));
 
     /*
      * Now that we know we are in a valid transaction, set snapshot in case
@@ -337,7 +336,7 @@ int HandleFunctionRequest(StringInfo msgBuf)
      */
     aclresult = pg_namespace_aclcheck(fip->nmspace, GetUserId(), ACL_USAGE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(fip->nmspace, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(fip->nmspace));
 
     aclresult = pg_proc_aclcheck(fid, GetUserId(), ACL_EXECUTE);
     if (aclresult != ACLCHECK_OK)
@@ -417,7 +416,6 @@ int HandleFunctionRequest(StringInfo msgBuf)
  */
 static int16 parse_fcall_arguments(StringInfo msgBuf, struct fp_info* fip, FunctionCallInfo fcinfo)
 {
-#define MAX_ARG_SIZE 1073741824
     int nargs;
     int i;
     int numAFormats;
@@ -426,13 +424,11 @@ static int16 parse_fcall_arguments(StringInfo msgBuf, struct fp_info* fip, Funct
 
     /* Get the argument format codes */
     numAFormats = pq_getmsgint(msgBuf, 2);
-
     if (numAFormats > FUNC_MAX_ARGS) {
         ereport(ERROR,
             (errcode(ERRCODE_PROTOCOL_VIOLATION),
                 errmsg("function call message supplies invalid numAFormats %d", numAFormats)));
     }
-    
     if (numAFormats > 0) {
         aformats = (int16*)palloc(numAFormats * sizeof(int16));
         for (i = 0; i < numAFormats; i++)
@@ -584,7 +580,7 @@ static int16 parse_fcall_arguments_20(StringInfo msgBuf, struct fp_info* fip, Fu
             continue;
         }
         fcinfo->argnull[i] = false;
-        if (argsize < 0)
+        if (argsize < 0 || argsize > MAX_ARG_SIZE)
             ereport(ERROR,
                 (errcode(ERRCODE_PROTOCOL_VIOLATION),
                     errmsg("invalid argument size %d in function call message", argsize)));

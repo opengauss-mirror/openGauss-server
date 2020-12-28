@@ -33,10 +33,13 @@
 #define AttributeRelationId  1249
 #define AttributeRelation_Rowtype_Id  75
 
+#define IsAttributeRelation(rel) (RelationGetRelid(rel) == AttributeRelationId)
+#define IsAttributeCache(cache) ((cache)->cc_reloid == AttributeRelationId)
+
 CATALOG(pg_attribute,1249) BKI_BOOTSTRAP BKI_WITHOUT_OIDS BKI_ROWTYPE_OID(75) BKI_SCHEMA_MACRO
 {
-	Oid			attrelid;   /* OID of relation containing this attribute */
-	NameData	attname;            /* name of attribute */
+	Oid			attrelid;		/* OID of relation containing this attribute */
+	NameData	attname;		/* name of attribute */
 
 	/*
 	 * atttypid is the OID of the instance in Catalog Class pg_type that
@@ -171,7 +174,7 @@ CATALOG(pg_attribute,1249) BKI_BOOTSTRAP BKI_WITHOUT_OIDS BKI_ROWTYPE_OID(75) BK
 	bytea		attinitdefval;
 
 #endif
-	/* the attribute type for kv storage: tag(1), field(2), time(3) or default(0) */
+	/* the attribute type for kv storage: tag(1), field(2), time(3), hide(4) or default(0) */
 	int1		attkvtype;
 } FormData_pg_attribute;
 

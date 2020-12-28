@@ -11,7 +11,7 @@ INSERT INTO t_distinct select generate_series(1, 1000)%501, generate_series(1, 1
 analyze t_distinct;
 -- Case 3 groupagg optimization
 set enable_hashagg=off;
-explain (costs off, nodes off) select avg(distinct(a)) from t_distinct;
+explain (costs off) select avg(distinct(a)) from t_distinct;
               QUERY PLAN               
 ---------------------------------------
  Row Adapter
@@ -25,7 +25,7 @@ select avg(distinct(a)) from t_distinct;
  250.0000000000000000
 (1 row)
 
-explain (costs off, nodes off) select avg(distinct(b::numeric(5,1)))+5, d from t_distinct group by d order by 2;
+explain (costs off) select avg(distinct(b::numeric(5,1)))+5, d from t_distinct group by d order by 2;
                  QUERY PLAN                  
 ---------------------------------------------
  Row Adapter
@@ -48,7 +48,7 @@ select avg(distinct(b::numeric(5,1)))+5, d from t_distinct group by d order by 2
  42.0000000000000000 | 6
 (7 rows)
 
-explain (costs off, nodes off) select avg(distinct(c))+count(distinct(c)), b from t_distinct group by b order by 2;
+explain (costs off) select avg(distinct(c))+count(distinct(c)), b from t_distinct group by b order by 2;
                  QUERY PLAN                  
 ---------------------------------------------
  Row Adapter
@@ -74,7 +74,7 @@ select avg(distinct(c))+count(distinct(c)), b from t_distinct group by b order b
     10.0000000000000000 | 9
 (10 rows)
 
-explain (costs off, nodes off) select c from t_distinct group by c having avg(distinct(c))>50 order by 1;
+explain (costs off) select c from t_distinct group by c having avg(distinct(c))>50 order by 1;
                    QUERY PLAN                    
 -------------------------------------------------
  Row Adapter
@@ -91,7 +91,7 @@ select c from t_distinct group by c having avg(distinct(c))>50 order by 1 limit 
 ---
 (0 rows)
 
-explain (costs off, nodes off) select b, c from t_distinct group by b, c order by b, count(distinct(c))-c;
+explain (costs off) select b, c from t_distinct group by b, c order by b, count(distinct(c))-c;
                     QUERY PLAN                     
 ---------------------------------------------------
  Row Adapter
@@ -119,7 +119,7 @@ select b, c from t_distinct group by b, c order by b, count(distinct(c))-c limit
  9 | 9
 (10 rows)
 
-explain (costs off, nodes off) select count(distinct(c)), d from t_distinct group by d having avg(distinct(c)) <> 0 order by 2;
+explain (costs off) select count(distinct(c)), d from t_distinct group by d having avg(distinct(c)) <> 0 order by 2;
                    QUERY PLAN                    
 -------------------------------------------------
  Row Adapter
@@ -145,7 +145,7 @@ select count(distinct(c)), d from t_distinct group by d having avg(distinct(c)) 
 
 reset enable_hashagg;
 -- Case 4 two_level_hashagg
-explain (costs off, nodes off) select count(distinct(b)), count(c), d from t_distinct group by d order by d;
+explain (costs off) select count(distinct(b)), count(c), d from t_distinct group by d order by d;
                  QUERY PLAN                  
 ---------------------------------------------
  Row Adapter
@@ -168,7 +168,7 @@ select count(distinct(b)), count(c), d from t_distinct group by d order by d;
     75 |   143 | 6
 (7 rows)
 
-explain (costs off, nodes off) select avg(distinct(b)), d, count(c) from t_distinct group by d order by d;
+explain (costs off) select avg(distinct(b)), d, count(c) from t_distinct group by d order by d;
                  QUERY PLAN                  
 ---------------------------------------------
  Row Adapter
@@ -191,7 +191,7 @@ select avg(distinct(b)), d, count(c) from t_distinct group by d order by d;
  37.0000000000000000 | 6 |   143
 (7 rows)
 
-explain (costs off, nodes off) select count(c), count(distinct(a)), d from t_distinct group by d order by d;
+explain (costs off) select count(c), count(distinct(a)), d from t_distinct group by d order by d;
                  QUERY PLAN                  
 ---------------------------------------------
  Row Adapter
@@ -214,7 +214,7 @@ select count(c), count(distinct(a)), d from t_distinct group by d order by d;
    143 |   143 | 6
 (7 rows)
 
-explain (costs off, nodes off) select count(c), d, count(distinct(d)) from t_distinct group by d order by 1;
+explain (costs off) select count(c), d, count(distinct(d)) from t_distinct group by d order by 1;
                     QUERY PLAN                     
 ---------------------------------------------------
  Row Adapter
@@ -239,7 +239,7 @@ select count(c), d, count(distinct(d)) from t_distinct group by d order by 1, 2;
    143 | 6 |     1
 (7 rows)
 
-explain (costs off, nodes off) select count(c), d, count(distinct(b)) from t_distinct group by d order by 3;
+explain (costs off) select count(c), d, count(distinct(b)) from t_distinct group by d order by 3;
                     QUERY PLAN                     
 ---------------------------------------------------
  Row Adapter
@@ -264,7 +264,7 @@ select count(c), d, count(distinct(b)) from t_distinct group by d order by 3, 2;
    143 | 6 |    75
 (7 rows)
 
-explain (costs off, nodes off) select count(d), count(distinct(d)), a%2, b%2, c%2 from t_distinct group by 3,4,5 order by 3,4,5;
+explain (costs off) select count(d), count(distinct(d)), a%2, b%2, c%2 from t_distinct group by 3,4,5 order by 3,4,5;
                        QUERY PLAN                        
 ---------------------------------------------------------
  Row Adapter
@@ -288,7 +288,7 @@ select count(d), count(distinct(d)), a%2, b%2, c%2 from t_distinct group by 3,4,
    168 |     7 |        1 |        1 |        1
 (8 rows)
 
-explain (costs off, nodes off) select count(c), d from t_distinct group by d having count(distinct(d))=1 order by d;
+explain (costs off) select count(c), d from t_distinct group by d having count(distinct(d))=1 order by d;
                  QUERY PLAN                  
 ---------------------------------------------
  Row Adapter
@@ -312,7 +312,7 @@ select count(c), d from t_distinct group by d having count(distinct(d))=1 order 
    143 | 6
 (7 rows)
 
-explain (costs off, nodes off) select count(c), count(distinct(b)) from t_distinct group by d having count(d)=1428 order by d;
+explain (costs off) select count(c), count(distinct(b)) from t_distinct group by d having count(d)=1428 order by d;
                  QUERY PLAN                  
 ---------------------------------------------
  Row Adapter
@@ -329,7 +329,7 @@ select count(c), count(distinct(b)) from t_distinct group by d having count(d)=1
 -------+-------
 (0 rows)
 
-explain (costs off, nodes off) select count(distinct(c)), d from t_distinct group by d order by count(c), d;
+explain (costs off) select count(distinct(c)), d from t_distinct group by d order by count(c), d;
                     QUERY PLAN                     
 ---------------------------------------------------
  Row Adapter
@@ -354,7 +354,7 @@ select count(distinct(c)), d from t_distinct group by d order by count(c), d;
     25 | 6
 (7 rows)
 
-explain (costs off, nodes off) select count(distinct(c)), d from t_distinct where c <= any (select count(distinct(b)) from t_distinct group by c limit 5) group by d order by d;
+explain (costs off) select count(distinct(c)), d from t_distinct where c <= any (select count(distinct(b)) from t_distinct group by c limit 5) group by d order by d;
                                                 QUERY PLAN                                                
 ----------------------------------------------------------------------------------------------------------
  Row Adapter

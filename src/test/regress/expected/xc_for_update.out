@@ -95,7 +95,7 @@ WITH q1 AS (SELECT * from t1 order by 1 FOR UPDATE) SELECT * FROM q1 FOR UPDATE;
 ERROR:  SELECT FOR UPDATE/SHARE cannot be applied to a WITH query
 -- confirm that in various join scenarios for update gets to the remote query
 -- single table case
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 for update of t1 nowait;
+explain (costs off, num_verbose on)  select * from t1 for update of t1 nowait;
            QUERY PLAN            
 ---------------------------------
  LockRows
@@ -105,7 +105,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 for 
 (4 rows)
 
 -- two table case
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 where t1.val = t2.val for update nowait;
+explain (costs off, num_verbose on)  select * from t1, t2 where t1.val = t2.val for update nowait;
                              QUERY PLAN                             
 --------------------------------------------------------------------
  LockRows
@@ -121,7 +121,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 
                      Output: t2.val, t2.val2, t2.ctid
 (11 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 where t1.val = t2.val for update;
+explain (costs off, num_verbose on)  select * from t1, t2 where t1.val = t2.val for update;
                              QUERY PLAN                             
 --------------------------------------------------------------------
  LockRows
@@ -137,7 +137,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 
                      Output: t2.val, t2.val2, t2.ctid
 (11 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 where t1.val = t2.val for share;
+explain (costs off, num_verbose on)  select * from t1, t2 where t1.val = t2.val for share;
                              QUERY PLAN                             
 --------------------------------------------------------------------
  LockRows
@@ -153,7 +153,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 
                      Output: t2.val, t2.val2, t2.ctid
 (11 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 where t1.val = t2.val;
+explain (costs off, num_verbose on)  select * from t1, t2 where t1.val = t2.val;
                  QUERY PLAN                 
 --------------------------------------------
  Hash Join
@@ -167,7 +167,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 
                Output: t2.val, t2.val2
 (9 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2;
+explain (costs off, num_verbose on)  select * from t1, t2;
                  QUERY PLAN                 
 --------------------------------------------
  Nested Loop
@@ -180,7 +180,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2;
                Output: t2.val, t2.val2
 (8 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 for update;
+explain (costs off, num_verbose on)  select * from t1, t2 for update;
                              QUERY PLAN                             
 --------------------------------------------------------------------
  LockRows
@@ -195,7 +195,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 
                      Output: t2.val, t2.val2, t2.ctid
 (10 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 for update nowait;
+explain (costs off, num_verbose on)  select * from t1, t2 for update nowait;
                              QUERY PLAN                             
 --------------------------------------------------------------------
  LockRows
@@ -210,7 +210,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 
                      Output: t2.val, t2.val2, t2.ctid
 (10 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 for share nowait;
+explain (costs off, num_verbose on)  select * from t1, t2 for share nowait;
                              QUERY PLAN                             
 --------------------------------------------------------------------
  LockRows
@@ -225,7 +225,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 
                      Output: t2.val, t2.val2, t2.ctid
 (10 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 for share;
+explain (costs off, num_verbose on)  select * from t1, t2 for share;
                              QUERY PLAN                             
 --------------------------------------------------------------------
  LockRows
@@ -240,7 +240,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 
                      Output: t2.val, t2.val2, t2.ctid
 (10 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 for share of t2;
+explain (costs off, num_verbose on)  select * from t1, t2 for share of t2;
                              QUERY PLAN                             
 --------------------------------------------------------------------
  LockRows
@@ -256,7 +256,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 
 (10 rows)
 
 -- three table case
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2, t3;
+explain (costs off, num_verbose on)  select * from t1, t2, t3;
                          QUERY PLAN                          
 -------------------------------------------------------------
  Nested Loop
@@ -275,7 +275,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2,
                Output: t3.val, t3.val2
 (14 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2, t3 for update;
+explain (costs off, num_verbose on)  select * from t1, t2, t3 for update;
                                           QUERY PLAN                                          
 ----------------------------------------------------------------------------------------------
  LockRows
@@ -296,7 +296,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2,
                      Output: t3.val, t3.val2, t3.ctid
 (16 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2, t3 for update of t1;
+explain (costs off, num_verbose on)  select * from t1, t2, t3 for update of t1;
                                           QUERY PLAN                                          
 ----------------------------------------------------------------------------------------------
  LockRows
@@ -317,7 +317,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2,
                      Output: t3.val, t3.val2, t3.ctid
 (16 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2, t3 for update of t1,t3;
+explain (costs off, num_verbose on)  select * from t1, t2, t3 for update of t1,t3;
                                           QUERY PLAN                                          
 ----------------------------------------------------------------------------------------------
  LockRows
@@ -338,7 +338,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2,
                      Output: t3.val, t3.val2, t3.ctid
 (16 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2, t3 for update of t1,t3 nowait;
+explain (costs off, num_verbose on)  select * from t1, t2, t3 for update of t1,t3 nowait;
                                           QUERY PLAN                                          
 ----------------------------------------------------------------------------------------------
  LockRows
@@ -359,7 +359,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2,
                      Output: t3.val, t3.val2, t3.ctid
 (16 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2, t3 for share of t1,t2 nowait;
+explain (costs off, num_verbose on)  select * from t1, t2, t3 for share of t1,t2 nowait;
                                           QUERY PLAN                                          
 ----------------------------------------------------------------------------------------------
  LockRows
@@ -381,7 +381,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2,
 (16 rows)
 
 -- check a few subquery cases
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from (select * from t1 for update of t1 nowait) as foo;
+explain (costs off, num_verbose on)  select * from (select * from t1 for update of t1 nowait) as foo;
                    QUERY PLAN                   
 ------------------------------------------------
  Subquery Scan on foo
@@ -392,7 +392,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from (select
                Output: t1.val, t1.val2, t1.ctid
 (6 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 where val in (select val from t2 for update of t2 nowait) for update;
+explain (costs off, num_verbose on)  select * from t1 where val in (select val from t2 for update of t2 nowait) for update;
                           QUERY PLAN                           
 ---------------------------------------------------------------
  LockRows
@@ -415,7 +415,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 wher
                                        Output: t2.val, t2.ctid
 (18 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 where val in (select val from t2 for update of t2 nowait);
+explain (costs off, num_verbose on)  select * from t1 where val in (select val from t2 for update of t2 nowait);
                        QUERY PLAN                        
 ---------------------------------------------------------
  Hash Join
@@ -437,7 +437,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 wher
 (16 rows)
 
 -- test multiple row marks
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 for share of t2 for update of t1;
+explain (costs off, num_verbose on)  select * from t1, t2 for share of t2 for update of t1;
                              QUERY PLAN                             
 --------------------------------------------------------------------
  LockRows
@@ -453,7 +453,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 
 (10 rows)
 
 -- make sure FOR UPDATE takes prioriy over FOR SHARE when mentioned for the same table
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 for share of t1 for update of t1;
+explain (costs off, num_verbose on)  select * from t1 for share of t1 for update of t1;
            QUERY PLAN            
 ---------------------------------
  LockRows
@@ -462,7 +462,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 for 
          Output: val, val2, ctid
 (4 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 for update of t1 for share of t1;
+explain (costs off, num_verbose on)  select * from t1 for update of t1 for share of t1;
            QUERY PLAN            
 ---------------------------------
  LockRows
@@ -471,7 +471,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 for 
          Output: val, val2, ctid
 (4 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 for share of t1 for share of t1 for update of t1;
+explain (costs off, num_verbose on)  select * from t1 for share of t1 for share of t1 for update of t1;
            QUERY PLAN            
 ---------------------------------
  LockRows
@@ -480,7 +480,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 for 
          Output: val, val2, ctid
 (4 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 for share of t1 for share of t1 for share of t1;
+explain (costs off, num_verbose on)  select * from t1 for share of t1 for share of t1 for share of t1;
            QUERY PLAN            
 ---------------------------------
  LockRows
@@ -490,7 +490,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 for 
 (4 rows)
 
 -- make sure NOWAIT is used in remote query even if it is not mentioned with FOR UPDATE clause
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 for share of t1 for share of t1 nowait for update of t1;
+explain (costs off, num_verbose on)  select * from t1 for share of t1 for share of t1 nowait for update of t1;
            QUERY PLAN            
 ---------------------------------
  LockRows
@@ -500,7 +500,7 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 for 
 (4 rows)
 
 -- same table , different aliases and different row marks for different aliases
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 a,t1 b for share of a for update of b;
+explain (costs off, num_verbose on)  select * from t1 a,t1 b for share of a for update of b;
                           QUERY PLAN                          
 --------------------------------------------------------------
  LockRows
@@ -517,9 +517,9 @@ explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 a,t1
 
 -- test WITH queries
 -- join of a WITH table and a normal table
-explain (costs off, num_nodes off, nodes off, verbose on)  WITH q1 AS (SELECT * from t1 FOR UPDATE) SELECT * FROM q1,t2 FOR UPDATE;
+explain (costs off, num_verbose on)  WITH q1 AS (SELECT * from t1 FOR UPDATE) SELECT * FROM q1,t2 FOR UPDATE;
 ERROR:  SELECT FOR UPDATE/SHARE cannot be applied to a WITH query
-explain (costs off, num_nodes off, nodes off, verbose on)  WITH q1 AS (SELECT * from t1) SELECT * FROM q1;
+explain (costs off, num_verbose on)  WITH q1 AS (SELECT * from t1) SELECT * FROM q1;
             QUERY PLAN             
 -----------------------------------
  CTE Scan on q1
@@ -530,9 +530,9 @@ explain (costs off, num_nodes off, nodes off, verbose on)  WITH q1 AS (SELECT * 
 (5 rows)
 
 -- make sure row marks are no ops for queries on WITH tables
-explain (costs off, num_nodes off, nodes off, verbose on)  WITH q1 AS (SELECT * from t1) SELECT * FROM q1 FOR UPDATE;
+explain (costs off, num_verbose on)  WITH q1 AS (SELECT * from t1) SELECT * FROM q1 FOR UPDATE;
 ERROR:  SELECT FOR UPDATE/SHARE cannot be applied to a WITH query
-explain (costs off, num_nodes off, nodes off, verbose on)  WITH q1 AS (SELECT * from t1 FOR UPDATE) SELECT * FROM q1 FOR UPDATE;
+explain (costs off, num_verbose on)  WITH q1 AS (SELECT * from t1 FOR UPDATE) SELECT * FROM q1 FOR UPDATE;
 ERROR:  SELECT FOR UPDATE/SHARE cannot be applied to a WITH query
 -- test case of inheried tables
 select * from p1 order by 1 for update;
@@ -544,7 +544,7 @@ select * from p1 order by 1 for update;
  123 | 345
 (4 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from p1 for update;
+explain (costs off, num_verbose on)  select * from p1 for update;
          QUERY PLAN          
 -----------------------------
  LockRows
@@ -560,7 +560,7 @@ select * from c1 order by 1 for update;
  123 | 345 | 567 | 789
 (2 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)  select * from c1 for update;
+explain (costs off, num_verbose on)  select * from c1 for update;
             QUERY PLAN            
 ----------------------------------
  LockRows
@@ -580,10 +580,11 @@ drop table t3;
 create table t1(a int,b int,c int);
 create table t2(a int,b int,c int);
 create table t3(a int,b int,c int);
-create table rep(a int,b int,c int);
+create table rep(a int,b int,c int) distribute by replication;
 create table vt(a int,b int,c int) with(orientation = column);
 create foreign table ft (id int not null) server gsmpp_server options(format 'text', location 'gsfs://127.0.0.1:99999/test.data', mode 'normal', delimiter '|');
-ERROR:  server "gsmpp_server" does not exist
+ERROR:  Current mode does not support FOREIGN table yet
+DETAIL:  The feature is not currently supported
 create view view_t1 as select * from t1;
 create view view_vt as select * from vt;
 create view view_ft as select * from ft;
@@ -918,7 +919,7 @@ select * from lock_partition_001, lock_partition_002, lock_partition_003 order b
    1 |    1 |   2 |    2 |   3 |   13
 (4 rows)
 
-explain (costs off, verbose on, nodes off) select * from lock_partition_001, lock_partition_002, lock_partition_003 order by lock_partition_003.val2 for update of lock_partition_001;
+explain (costs off, verbose on) select * from lock_partition_001, lock_partition_002, lock_partition_003 order by lock_partition_003.val2 for update of lock_partition_001;
                                                                                                                                                                 QUERY PLAN                                                                                                                                                                 
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Sort
@@ -977,7 +978,7 @@ create table customer
     c_login                   char(13)                      ,
     c_email_address           char(50)                      ,
     c_last_review_date        char(10)                      
-); 
+) distribute by hash(c_birth_day,c_birth_month); 
 create table customer_address
 (
     ca_address_sk             integer               not null,
@@ -993,7 +994,7 @@ create table customer_address
     ca_country                varchar(20)                   ,
     ca_gmt_offset             decimal(5,2)                  ,
     ca_location_type          char(20)                     
-);
+) distribute by hash (ca_address_sk);
 create table household_demographics
 (
     hd_demo_sk                integer               not null,
@@ -1001,7 +1002,7 @@ create table household_demographics
     hd_buy_potential          char(15)                      ,
     hd_dep_count              integer                       ,
     hd_vehicle_count          integer                       
-);
+) distribute by hash (hd_income_band_sk);
 --failed for limit
 select c_current_addr_sk, c_current_hdemo_sk, c_first_shipto_date_sk
 from customer a where exists

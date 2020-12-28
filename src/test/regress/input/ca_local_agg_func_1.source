@@ -1,0 +1,12 @@
+set explain_perf_mode=normal;
+
+select stddev_samp(c4), stddev_samp(c5), stddev_samp(c7) from aggtable1 group by c8 order by c8;
+select stddev(c4), stddev(c5), stddev(c7) from aggtable1 group by c8 order by c8;
+
+explain (verbose on, costs off) select var_pop(c4), var_samp(c5), variance(c7), stddev_pop(c4), stddev_samp(c5), stddev(c7) from aggtable1 group by c8 order by c8;
+
+select regr_count(c4,c7), regr_sxx(c4,c7), regr_syy(c4,c7), regr_sxy(c4,c7), regr_avgx(c4,c7), regr_avgy(c4,c7) from aggtable1 group by c8 order by c8;
+select regr_r2(c4,c7), regr_slope(c4,c7), regr_intercept(c4,c7), covar_pop(c4,c7), covar_samp(c4,c7), corr(c4,c7) from aggtable1 group by c8 order by c8;
+
+explain (verbose on, costs off) select regr_count(c4,c7), regr_sxx(c4,c7), regr_syy(c4,c7), regr_sxy(c4,c7), regr_avgx(c4,c7), regr_avgy(c4,c7) from aggtable1 group by c8 order by c8;
+explain (verbose on, costs off) select regr_r2(c4,c7), regr_slope(c4,c7), regr_intercept(c4,c7), covar_pop(c4,c7), covar_samp(c4,c7), corr(c4,c7) from aggtable1 group by c8 order by c8;

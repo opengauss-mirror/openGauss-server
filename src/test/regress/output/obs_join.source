@@ -1,0 +1,1211 @@
+CREATE SERVER obs_server_info FOREIGN DATA WRAPPER dfs_fdw OPTIONS (address '@obshostname@', type 'obs', encrypt 'off', access_key '@ak@', secret_access_key '@sk@');
+--informational primary key
+CREATE FOREIGN TABLE obs_tbl_1 (a int primary key not enforced, b text, c text) 
+SERVER obs_server_info
+OPTIONS (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "obs_tbl_1_pkey" for foreign table "obs_tbl_1"
+--informational unique
+CREATE FOREIGN TABLE obs_tbl_2 (a int unique not enforced, b text, c text) 
+SERVER obs_server_info
+OPTIONS (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "obs_tbl_2_a_key" for foreign table "obs_tbl_2"
+--multi-unique
+CREATE FOREIGN TABLE obs_tbl_3 (a int unique not enforced, b text unique not enforced, c text) 
+SERVER obs_server_info 
+OPTIONS (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "obs_tbl_3_a_key" for foreign table "obs_tbl_3"
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "obs_tbl_3_b_key" for foreign table "obs_tbl_3"
+CREATE FOREIGN TABLE obs_tbl_4 (a int, b text, c text) 
+SERVER obs_server_info 
+OPTIONS (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+alter foreign table obs_tbl_4 add constraint unique_a unique (a) not enforced;
+NOTICE:  ALTER FOREIGN TABLE / ADD UNIQUE will create constraint "unique_a" for foreign table "obs_tbl_4"
+\d+ obs_tbl_4
+                          Foreign table "public.obs_tbl_4"
+ Column |  Type   | Modifiers | FDW Options | Storage  | Stats target | Description 
+--------+---------+-----------+-------------+----------+--------------+-------------
+ a      | integer |           |             | plain    |              | 
+ b      | text    |           |             | extended |              | 
+ c      | text    |           |             | extended |              | 
+Constraint:
+    "unique_a" enable optimization Informational Constraint UNIQUE (a)
+Server: obs_server_info
+FDW Options: (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+FDW permition: read only
+Has OIDs: no
+Distribute By: ROUND ROBIN
+Location Nodes: ALL DATANODES
+
+alter foreign table obs_tbl_4 drop constraint unique_a;
+\d+ obs_tbl_4
+                          Foreign table "public.obs_tbl_4"
+ Column |  Type   | Modifiers | FDW Options | Storage  | Stats target | Description 
+--------+---------+-----------+-------------+----------+--------------+-------------
+ a      | integer |           |             | plain    |              | 
+ b      | text    |           |             | extended |              | 
+ c      | text    |           |             | extended |              | 
+Server: obs_server_info
+FDW Options: (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+FDW permition: read only
+Has OIDs: no
+Distribute By: ROUND ROBIN
+Location Nodes: ALL DATANODES
+
+alter foreign table obs_tbl_4 add  unique (a) not enforced;
+NOTICE:  ALTER FOREIGN TABLE / ADD UNIQUE will create constraint "obs_tbl_4_a_key" for foreign table "obs_tbl_4"
+alter foreign table obs_tbl_4 add  unique (b) not enforced;
+NOTICE:  ALTER FOREIGN TABLE / ADD UNIQUE will create constraint "obs_tbl_4_b_key" for foreign table "obs_tbl_4"
+alter foreign table obs_tbl_4 add  unique (a) not enforced DISABLE QUERY OPTIMIZATION;
+NOTICE:  ALTER FOREIGN TABLE / ADD UNIQUE will create constraint "obs_tbl_4_a_key1" for foreign table "obs_tbl_4"
+alter foreign table obs_tbl_4 add  unique (b) not enforced DISABLE QUERY OPTIMIZATION;
+NOTICE:  ALTER FOREIGN TABLE / ADD UNIQUE will create constraint "obs_tbl_4_b_key1" for foreign table "obs_tbl_4"
+--unsupport Multi-column 
+alter foreign table obs_tbl_4 add  unique (a, b) not enforced;
+ERROR:  Multi-column combined informational constraint is forbidden.
+alter foreign table obs_tbl_4 add  primary key (a, b) not enforced;
+ERROR:  Multi-column combined informational constraint is forbidden.
+--unsupport enforced
+alter foreign table obs_tbl_4 add unique (a);
+ERROR:  The foreign table only support "NOT ENFORCED" informational constraint.
+--unsupport Multi primary key
+CREATE FOREIGN TABLE obs_tbl_5(a int primary key not enforced, b text primary key not enforced, c text) 
+SERVER obs_server_info 
+OPTIONS (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+distribute by roundrobin;
+ERROR:  Multiple primary keys for foreign table "obs_tbl_5" are not allowed.
+LINE 1: ... obs_tbl_5(a int primary key not enforced, b text primary ke...
+                                                             ^
+--unsupport primary key include Multi column
+CREATE FOREIGN TABLE obs_tbl_5(a int, b int, primary key(a, b) not enforced) 
+SERVER obs_server_info 
+OPTIONS (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+distribute by roundrobin;
+ERROR:  Multi-column combined informational constraint is forbidden.
+--not null
+CREATE FOREIGN TABLE obs_tbl_6 (a int not null, b text, c text) 
+SERVER obs_server_info 
+OPTIONS (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+\d obs_tbl_6
+      Foreign table "public.obs_tbl_6"
+ Column |  Type   | Modifiers | FDW Options 
+--------+---------+-----------+-------------
+ a      | integer | not null  | 
+ b      | text    |           | 
+ c      | text    |           | 
+Server: obs_server_info
+FDW Options: (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+FDW permition: read only
+
+alter foreign table obs_tbl_6 alter b set not null;
+\d obs_tbl_6
+      Foreign table "public.obs_tbl_6"
+ Column |  Type   | Modifiers | FDW Options 
+--------+---------+-----------+-------------
+ a      | integer | not null  | 
+ b      | text    | not null  | 
+ c      | text    |           | 
+Server: obs_server_info
+FDW Options: (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+FDW permition: read only
+
+alter foreign table obs_tbl_6 alter b drop not null;
+\d obs_tbl_6
+      Foreign table "public.obs_tbl_6"
+ Column |  Type   | Modifiers | FDW Options 
+--------+---------+-----------+-------------
+ a      | integer | not null  | 
+ b      | text    |           | 
+ c      | text    |           | 
+Server: obs_server_info
+FDW Options: (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+FDW permition: read only
+
+--error:
+--unsupport enforced
+CREATE FOREIGN TABLE obs_tbl_7 (a int unique, b text, c text) 
+SERVER obs_server_info 
+OPTIONS (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+distribute by roundrobin;
+ERROR:  The foreign table only support "NOT ENFORCED" informational constraint.
+CREATE FOREIGN TABLE obs_tbl_8 (a int primary key, b text, c text) 
+SERVER obs_server_info 
+OPTIONS (encoding 'utf-8', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', format 'ORC')
+distribute by roundrobin;
+ERROR:  The foreign table only support "NOT ENFORCED" informational constraint.
+--common table unsupport not enforced constraint
+CREATE TABLE plain_tbl_1 (a int primary key not enforced, b int);
+ERROR:  It is not allowed to support "NOT ENFORCED" informational constraint.
+--delete not null, table include primary key
+--not in 
+explain (costs off)select * from obs_tbl_1 as t1 where t1.a not in (select t2.a from obs_tbl_1 as t2 join obs_tbl_1 as t3 on (1 = 1));
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Nest Loop Anti Join
+               Join Filter: (t1.a = t2.a)
+               ->  Vector Foreign Scan on obs_tbl_1 t1
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           Spawn on: All datanodes
+                           ->  Vector Nest Loop
+                                 ->  Vector Foreign Scan on obs_tbl_1 t2
+                                       Server Type: obs
+                                       Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+                                 ->  Vector Materialize
+                                       ->  Vector Streaming(type: BROADCAST)
+                                             Spawn on: All datanodes
+                                             ->  Vector Foreign Scan on obs_tbl_1 t3
+                                                   Server Type: obs
+                                                   Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(21 rows)
+
+explain (costs off)select * from obs_tbl_1 as t1 where t1.a not in (select a from obs_tbl_1);
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Nest Loop Anti Join
+               Join Filter: (t1.a = obs_tbl_1.a)
+               ->  Vector Foreign Scan on obs_tbl_1 t1
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           Spawn on: All datanodes
+                           ->  Vector Foreign Scan on obs_tbl_1
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(14 rows)
+
+--base relation is not null
+explain (costs off)select * from obs_tbl_1 as t1 where t1.a is not null;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_1 t1
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off)select * from obs_tbl_1 as t1 where t1.a is not null and t1.b < 10;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_1 t1
+               Filter: ((b)::bigint < 10)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(7 rows)
+
+explain (costs off)select * from obs_tbl_1 as t1 where (t1.a is not null and t1.b > 1) and t1.b < 10;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_1 t1
+               Filter: (((b)::bigint > 1) AND ((b)::bigint < 10))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(7 rows)
+
+explain (costs off)select * from obs_tbl_1 as t1 where (t1.a is not null or t1.b > 1) and t1.b < 10;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_1 t1
+               Filter: ((b)::bigint < 10)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(7 rows)
+
+explain (costs off)select * from obs_tbl_1 as t1 where (t1.a is not null or t1.b > 1) or t1.b < 10;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_1 t1
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off)select * from obs_tbl_1 as t1 where (t1.a is not null or t1.b > 1) or (t1.b < 10 and t1.b > 2);
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_1 t1
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off)select * from obs_tbl_1 as t1 where (t1.a is not null or t1.b > 1) and (t1.b < 10 and t1.b > 2);
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_1 t1
+               Filter: (((b)::bigint < 10) AND ((b)::bigint > 2))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(7 rows)
+
+--not in,  table include not null
+explain (costs off)select * from obs_tbl_6 as t1 where t1.a not in (select t2.a from obs_tbl_6 as t2 join obs_tbl_6 as t3 on (1 = 1));
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Nest Loop Anti Join
+               Join Filter: (t1.a = t2.a)
+               ->  Vector Foreign Scan on obs_tbl_6 t1
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           Spawn on: All datanodes
+                           ->  Vector Nest Loop
+                                 ->  Vector Foreign Scan on obs_tbl_6 t2
+                                       Server Type: obs
+                                       Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+                                 ->  Vector Materialize
+                                       ->  Vector Streaming(type: BROADCAST)
+                                             Spawn on: All datanodes
+                                             ->  Vector Foreign Scan on obs_tbl_6 t3
+                                                   Server Type: obs
+                                                   Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(21 rows)
+
+explain (costs off)select * from obs_tbl_6 as t1 where t1.a not in (select a from obs_tbl_6);
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Nest Loop Anti Join
+               Join Filter: (t1.a = obs_tbl_6.a)
+               ->  Vector Foreign Scan on obs_tbl_6 t1
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           Spawn on: All datanodes
+                           ->  Vector Foreign Scan on obs_tbl_6
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(14 rows)
+
+--base relation is not null
+explain (costs off)select * from obs_tbl_6 as t1 where t1.a is not null;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_6 t1
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off)select * from obs_tbl_6 as t1 where t1.a is not null and t1.b < 10;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_6 t1
+               Filter: ((b)::bigint < 10)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(7 rows)
+
+explain (costs off)select * from obs_tbl_6 as t1 where (t1.a is not null and t1.b > 1) and t1.b < 10;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_6 t1
+               Filter: (((b)::bigint > 1) AND ((b)::bigint < 10))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(7 rows)
+
+explain (costs off)select * from obs_tbl_6 as t1 where (t1.a is not null or t1.b > 1) and t1.b < 10;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_6 t1
+               Filter: ((b)::bigint < 10)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(7 rows)
+
+explain (costs off)select * from obs_tbl_6 as t1 where (t1.a is not null or t1.b > 1) or t1.b < 10;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_6 t1
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off)select * from obs_tbl_6 as t1 where (t1.a is not null or t1.b > 1) or (t1.b < 10 and t1.b > 2);
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_6 t1
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off)select * from obs_tbl_6 as t1 where (t1.a is not null or t1.b > 1) and (t1.b < 10 and t1.b > 2);
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_6 t1
+               Filter: (((b)::bigint < 10) AND ((b)::bigint > 2))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(7 rows)
+
+--scan optimize
+explain (costs off)select * from obs_tbl_1 as t1 where t1.a = 10 and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_1 t1
+               Filter(Informational Constraint Optimization): ((b)::bigint < 20)
+               Pushdown Predicate Filter(Informational Constraint Optimization): (a = 10)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(8 rows)
+
+  
+explain (costs off)select * from obs_tbl_1 as t1 where t1.a + 1 = 10 and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_1 t1
+               Filter(Informational Constraint Optimization): (((b)::bigint < 20) AND ((a + 1) = 10))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(7 rows)
+
+  
+explain (costs off)select * from obs_tbl_1 as t1 where (1 + t1.a - 10) + 1 = 10 and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_1 t1
+               Filter(Informational Constraint Optimization): (((b)::bigint < 20) AND ((((1 + a) - 10) + 1) = 10))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(7 rows)
+
+  
+explain (costs off)select * from obs_tbl_1 as t1 where (2 * t1.a - 10) + 1 = 10 and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_1 t1
+               Filter: (((b)::bigint < 20) AND ((((2 * a) - 10) + 1) = 10))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(7 rows)
+
+  
+explain (costs off)select * from obs_tbl_1 as t1 where (2 * (t1.a - 10)) + 1 = 10 and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_1 t1
+               Filter: (((b)::bigint < 20) AND (((2 * (a - 10)) + 1) = 10))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(7 rows)
+
+  
+explain (costs off)select * from obs_tbl_1 as t1 where ((2 * 0) + (t1.a - 10)) + 1 = 10 and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_1 t1
+               Filter(Informational Constraint Optimization): (((b)::bigint < 20) AND (((0 + (a - 10)) + 1) = 10))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(7 rows)
+
+  
+--can not optimize
+explain (costs off)select * from obs_tbl_1 as t1 where (0 * t1.a) + 1 = 10 and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_1 t1
+               Filter: (((b)::bigint < 20) AND (((0 * a) + 1) = 10))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(7 rows)
+
+  
+explain (costs off)select * from obs_tbl_1 as t1 where t1.a * 0 = 10 and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_1 t1
+               Filter: (((b)::bigint < 20) AND ((a * 0) = 10))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(7 rows)
+
+  
+explain (costs off)select * from obs_tbl_1 as t1 where t1.a + t1.b = 10 and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_1 t1
+               Filter: (((b)::bigint < 20) AND ((a + (b)::bigint) = 10))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(7 rows)
+
+  
+explain (costs off)select * from obs_tbl_1 as t1 where t1.a + t1.a = 10 and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_1 t1
+               Filter: (((b)::bigint < 20) AND ((a + a) = 10))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(7 rows)
+
+  
+explain (costs off)select * from obs_tbl_1 as t1 where t1.a = t1.b and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Foreign Scan on obs_tbl_1 t1
+               Filter: (((b)::bigint < 20) AND (a = (b)::bigint))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(7 rows)
+
+--join optimize
+set enable_hashjoin = off;
+explain (costs off)select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a + 1= t2.a and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Nest Loop
+               Join Filter(Informational Constraint Optimization): ((t1.a + 1) = t2.a)
+               ->  Vector Foreign Scan on obs_tbl_1 t1
+                     Filter: ((b)::bigint < 20)
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           Spawn on: All datanodes
+                           ->  Vector Foreign Scan on obs_tbl_1 t2
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(15 rows)
+
+explain (costs off)select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a * 2 = t2.a and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Nest Loop
+               Join Filter(Informational Constraint Optimization): ((t1.a * 2) = t2.a)
+               ->  Vector Foreign Scan on obs_tbl_1 t1
+                     Filter: ((b)::bigint < 20)
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           Spawn on: All datanodes
+                           ->  Vector Foreign Scan on obs_tbl_1 t2
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(15 rows)
+
+explain (costs off)select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a * 2 = t2.a * 2 and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Nest Loop
+               Join Filter: ((t1.a * 2) = (t2.a * 2))
+               ->  Vector Foreign Scan on obs_tbl_1 t1
+                     Filter: ((b)::bigint < 20)
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           Spawn on: All datanodes
+                           ->  Vector Foreign Scan on obs_tbl_1 t2
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(15 rows)
+
+explain (costs off)select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a * 2 = t2.a * 2 and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Nest Loop
+               Join Filter: ((t1.a * 2) = (t2.a * 2))
+               ->  Vector Foreign Scan on obs_tbl_1 t1
+                     Filter: ((b)::bigint < 20)
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           Spawn on: All datanodes
+                           ->  Vector Foreign Scan on obs_tbl_1 t2
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(15 rows)
+
+explain (costs off)select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a * 2 = t2.a * 0 and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Nest Loop
+               Join Filter: ((t1.a * 2) = (t2.a * 0))
+               ->  Vector Foreign Scan on obs_tbl_1 t1
+                     Filter: ((b)::bigint < 20)
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           Spawn on: All datanodes
+                           ->  Vector Foreign Scan on obs_tbl_1 t2
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(15 rows)
+
+explain (costs off)select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a * 2 = (1 + t2.a + 10) and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Nest Loop
+               Join Filter(Informational Constraint Optimization): ((t1.a * 2) = ((1 + t2.a) + 10))
+               ->  Vector Foreign Scan on obs_tbl_1 t1
+                     Filter: ((b)::bigint < 20)
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           Spawn on: All datanodes
+                           ->  Vector Foreign Scan on obs_tbl_1 t2
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(15 rows)
+
+explain (costs off)select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a * 2 = ((10 * 0) + t2.a + 10) and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Nest Loop
+               Join Filter(Informational Constraint Optimization): ((t1.a * 2) = ((0 + t2.a) + 10))
+               ->  Vector Foreign Scan on obs_tbl_1 t1
+                     Filter: ((b)::bigint < 20)
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           Spawn on: All datanodes
+                           ->  Vector Foreign Scan on obs_tbl_1 t2
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(15 rows)
+
+explain (costs off) select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a * 2 = (t2.a * (0 + 1)) and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Nest Loop
+               Join Filter: ((t1.a * 2) = (t2.a * 1))
+               ->  Vector Foreign Scan on obs_tbl_1 t1
+                     Filter: ((b)::bigint < 20)
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           Spawn on: All datanodes
+                           ->  Vector Foreign Scan on obs_tbl_1 t2
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(15 rows)
+
+	
+--can not optimize
+--t2.b have not unique
+explain (costs off) select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a = t2.a * 2  and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Nest Loop
+               Join Filter: (t1.a = (t2.a * 2))
+               ->  Vector Foreign Scan on obs_tbl_1 t1
+                     Filter: ((b)::bigint < 20)
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           Spawn on: All datanodes
+                           ->  Vector Foreign Scan on obs_tbl_1 t2
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(15 rows)
+
+--substr not optimize
+explain (costs off) select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on substr(t1.a, 1, 1) = t2.a and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Nest Loop
+               Join Filter(Informational Constraint Optimization): ((substr((t1.a)::text, 1, 1))::bigint = t2.a)
+               ->  Vector Foreign Scan on obs_tbl_1 t1
+                     Filter: ((b)::bigint < 20)
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           Spawn on: All datanodes
+                           ->  Vector Foreign Scan on obs_tbl_1 t2
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(15 rows)
+
+--convert
+explain (costs off) select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a = t2.a::numeric and t1.b < 20;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Nest Loop
+               Join Filter: ((t1.a)::numeric = (t2.a)::numeric)
+               ->  Vector Foreign Scan on obs_tbl_1 t1
+                     Filter: ((b)::bigint < 20)
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           Spawn on: All datanodes
+                           ->  Vector Foreign Scan on obs_tbl_1 t2
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(15 rows)
+
+--no stream plan unsupport
+explain (costs off) select * from obs_tbl_1 as t1 join obs_tbl_1 as t2 on t1.a = t2.a * 2  and t1.b < 20;
+ERROR:  OBS foreign table doesn't support not-stream plan.
+create foreign table obs_t1 (a INT4, b TEXT, c TEXT) 
+server obs_server_info 
+options (encoding 'utf-8', format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+create table t1(a int, b int)with(orientation = column) distribute by hash(a);
+create table t1_r(a int, b int)distribute by replication;
+explain (costs off)select 1 from obs_t1 as t1 join obs_t1 as t2 on (t1.a = t2.a);
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Nest Loop
+               Join Filter: (t1.a = t2.a)
+               ->  Vector Foreign Scan on obs_t1 t1
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           Spawn on: All datanodes
+                           ->  Vector Foreign Scan on obs_t1 t2
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(14 rows)
+
+explain (costs off)select 1 from obs_t1 as t1 join t1 as t2 on (t1.a = t2.a);
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Nest Loop
+               Join Filter: (t1.a = t2.a)
+               ->  Vector Streaming(type: REDISTRIBUTE)
+                     Spawn on: All datanodes
+                     ->  Vector Foreign Scan on obs_t1 t1
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  CStore Scan on t1 t2
+(11 rows)
+
+explain (costs off)select 1 from obs_t1 as t1 join t1_r as t2 on (t1.a = t2.a);		
+--?.*
+--?.*
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Nested Loop
+         Join Filter: (t1.a = t2.a)
+         ->  Foreign Scan on obs_t1 t1
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+         ->  Seq Scan on t1_r t2
+(8 rows)
+
+	
+	
+explain (costs off)select t1.a, t1.b from obs_t1 as t1 join t1 as t2 on (t1.a = t2.a) group by t1.a, t1.b;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: t1.a, t1.b
+               ->  Vector Nest Loop
+                     Join Filter: (t1.a = t2.a)
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           Spawn on: All datanodes
+                           ->  Vector Foreign Scan on obs_t1 t1
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+                     ->  CStore Scan on t1 t2
+(13 rows)
+
+	
+explain (costs off)select a from obs_t1 union select a from t1;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: obs_t1.a
+               ->  Vector Append
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           Spawn on: All datanodes
+                           ->  Vector Foreign Scan on obs_t1
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+                     ->  CStore Scan on t1
+(12 rows)
+
+explain (costs off)select a from obs_t1 union select a from obs_t1;	
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Unique
+               ->  Vector Sort
+                     Sort Key: public.obs_t1.a
+                     ->  Vector Append
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 Spawn on: All datanodes
+                                 ->  Vector Foreign Scan on obs_t1
+                                       Server Type: obs
+                                       Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 Spawn on: All datanodes
+                                 ->  Vector Foreign Scan on obs_t1
+                                       Server Type: obs
+                                       Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(17 rows)
+
+explain (costs off)select a from obs_t1 union all select a from obs_t1;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Result
+               ->  Vector Append
+                     ->  Vector Foreign Scan on obs_t1
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+                     ->  Vector Foreign Scan on obs_t1
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(11 rows)
+
+explain (costs off)select a, b from obs_t1 group by a, b;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: a, b
+         ->  Vector Streaming (type: GATHER)
+               Node/s: All datanodes
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: a, b
+                     ->  Vector Foreign Scan on obs_t1
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(10 rows)
+
+explain (costs off)select a, sum(b) from obs_t1 group by a;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Hash Aggregate
+         Group By Key: a
+         ->  Vector Streaming (type: GATHER)
+               Node/s: All datanodes
+               ->  Vector Hash Aggregate
+                     Group By Key: a
+                     ->  Vector Foreign Scan on obs_t1
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(10 rows)
+
+explain (costs off)select a, count(distinct b), count(distinct c) from obs_t1 group by a;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Nest Loop
+               Join Filter: (NOT (public.obs_t1.a IS DISTINCT FROM public.obs_t1.a))
+               ->  Vector Sort Aggregate
+                     Group By Key: public.obs_t1.a
+                     ->  Vector Sort
+                           Sort Key: public.obs_t1.a
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 Spawn on: All datanodes
+                                 ->  Vector Foreign Scan on obs_t1
+                                       Server Type: obs
+                                       Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Sort Aggregate
+                           Group By Key: public.obs_t1.a
+                           ->  Vector Sort
+                                 Sort Key: public.obs_t1.a
+                                 ->  Vector Streaming(type: REDISTRIBUTE)
+                                       Spawn on: All datanodes
+                                       ->  Vector Foreign Scan on obs_t1
+                                             Server Type: obs
+                                             Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(24 rows)
+
+explain (costs off)update t1 set b = 10 where t1.a in (select a from obs_t1);
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Update on t1
+               ->  Vector Nest Loop Semi Join
+                     Join Filter: (t1.a = obs_t1.a)
+                     ->  CStore Scan on t1
+                     ->  Vector Materialize
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 Spawn on: All datanodes
+                                 ->  Vector Foreign Scan on obs_t1
+                                       Server Type: obs
+                                       Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(13 rows)
+
+explain (costs off)delete t1 where t1.a in (select a from obs_t1);
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Delete on t1
+               ->  Vector Nest Loop Semi Join
+                     Join Filter: (t1.a = obs_t1.a)
+                     ->  CStore Scan on t1
+                     ->  Vector Materialize
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 Spawn on: All datanodes
+                                 ->  Vector Foreign Scan on obs_t1
+                                       Server Type: obs
+                                       Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(13 rows)
+
+explain (costs off)insert into t1 select a, b from obs_t1;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Insert on t1
+               ->  Vector Streaming(type: REDISTRIBUTE)
+                     Spawn on: All datanodes
+                     ->  Vector Foreign Scan on obs_t1
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(9 rows)
+
+explain (costs off)select a from obs_t1 intersect select a from t1;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector HashSetOp Intersect
+               ->  Vector Append
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           Spawn on: All datanodes
+                           ->  Vector Subquery Scan on "*SELECT* 1"
+                                 ->  Vector Foreign Scan on obs_t1
+                                       Server Type: obs
+                                       Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+                     ->  Vector Subquery Scan on "*SELECT* 2"
+                           ->  CStore Scan on t1
+(13 rows)
+
+explain (costs off)select a from obs_t1 union select a from t1;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: obs_t1.a
+               ->  Vector Append
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           Spawn on: All datanodes
+                           ->  Vector Foreign Scan on obs_t1
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+                     ->  CStore Scan on t1
+(12 rows)
+
+explain (costs off)select a from obs_t1 union select a from obs_t1;	
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Unique
+               ->  Vector Sort
+                     Sort Key: public.obs_t1.a
+                     ->  Vector Append
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 Spawn on: All datanodes
+                                 ->  Vector Foreign Scan on obs_t1
+                                       Server Type: obs
+                                       Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 Spawn on: All datanodes
+                                 ->  Vector Foreign Scan on obs_t1
+                                       Server Type: obs
+                                       Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(17 rows)
+
+explain (costs off)select a from obs_t1 union select a from t1_r;	
+--?.*
+--?.*
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  HashAggregate
+         Group By Key: obs_t1.a
+         ->  Append
+               ->  Streaming(type: REDISTRIBUTE)
+                     Spawn on: All datanodes
+                     ->  Foreign Scan on obs_t1
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  Subquery Scan on "*SELECT* 2"
+                     Filter: (Hash By "*SELECT* 2".a)
+                     ->  Seq Scan on t1_r
+(13 rows)
+
+explain (costs off)select a from obs_t1 union all select a from obs_t1;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Result
+               ->  Vector Append
+                     ->  Vector Foreign Scan on obs_t1
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+                     ->  Vector Foreign Scan on obs_t1
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(11 rows)
+
+explain (costs off)select a from obs_t1 union all select a from t1;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Vector Result
+               ->  Vector Append
+                     ->  Vector Foreign Scan on obs_t1
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+                     ->  CStore Scan on t1
+(9 rows)
+
+explain (costs off)select a from obs_t1 union all select a from t1_r;
+--?.*
+--?.*
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Result
+         ->  Append
+               ->  Foreign Scan on obs_t1
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  Seq Scan on t1_r
+                     Filter: (Hash By a)
+(9 rows)
+
+explain (costs off)select a from obs_t1 group by rollup(a, b);
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Hash Aggregate
+         Group By Key: a, b, (GROUPINGID())
+         ->  Vector Streaming (type: GATHER)
+               Node/s: All datanodes
+               ->  Vector Hash Aggregate
+                     Group By Key: a, b, GROUPINGID()
+                     ->  Vector Sort Aggregate
+                           Group By Key: a, b
+                           Group By Key: a
+                           Group By Key: ()
+                           ->  Vector Sort
+                                 Sort Key: a, b
+                                 ->  Vector Foreign Scan on obs_t1
+                                       Server Type: obs
+                                       Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(16 rows)
+
+drop foreign table if exists    tbl_csv_header;
+NOTICE:  foreign table "tbl_csv_header" does not exist, skipping
+create foreign table tbl_csv_header
+(
+a int,
+b int
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obs_ddl/test_case_data/tbl_csv_header',
+    format 'csv',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+	header 'true'
+) read only;
+select * from tbl_csv_header;
+ a | b 
+---+---
+ 1 | 2
+ 3 | 4
+(2 rows)
+
+drop FOREIGN TABLE obs_tbl_1;
+drop FOREIGN TABLE obs_tbl_2;
+drop FOREIGN TABLE obs_tbl_3; 
+drop FOREIGN TABLE obs_tbl_4;
+drop FOREIGN TABLE obs_tbl_6; 
+drop foreign table obs_t1;
+drop table t1;
+drop table t1_r;
+--add llt
+drop foreign table if exists t1_analyze;
+NOTICE:  foreign table "t1_analyze" does not exist, skipping
+create foreign table t1_analyze
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/test/t1.txt',
+    format 'text',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+);
+analyze t1_analyze;
+drop foreign table t1_analyze;
+drop SERVER obs_server_info;

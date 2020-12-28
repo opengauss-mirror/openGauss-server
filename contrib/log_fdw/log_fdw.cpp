@@ -56,7 +56,7 @@
 #include "optimizer/var.h"
 #include "parser/parse_type.h"
 #include "postmaster/syslogger.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "utils/acl.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
@@ -65,7 +65,7 @@
 #include "utils/lsyscache.h"
 #include "utils/relcache.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 #include "utils/zfiles.h"
 #include "miscadmin.h"
 #include "zlib.h"
@@ -774,7 +774,8 @@ static inline char* get_nodename_same_to_cn_pgxcnode_table(void)
     Assert(IS_PGXC_DATANODE);
 
     Relation rel = heap_open(PgxcNodeRelationId, AccessShareLock);
-    HeapScanDesc scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    TableScanDesc scan;
+    scan  = heap_beginscan(rel, SnapshotNow, 0, NULL);
     HeapTuple tuple = NULL;
     char* name = NULL;
 
@@ -846,7 +847,8 @@ static void build_hashtbl_of_master_dnname_and_ip(HTAB* tmp_htbl)
     bool found = false;
 
     Relation rel = heap_open(PgxcNodeRelationId, AccessShareLock);
-    HeapScanDesc scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    TableScanDesc scan;
+    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
 
     /* scan pgxc_node table and get all info */
     while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
@@ -995,7 +997,8 @@ static void htbl_insert_localhost_nodes(
 static void build_hashtbl_of_unreachable(HTAB* unreach_htbl)
 {
     Relation rel = heap_open(PgxcNodeRelationId, AccessShareLock);
-    HeapScanDesc scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    TableScanDesc scan;
+    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
     HeapTuple tuple = NULL;
     List* localhost_cn = NIL;
     List* localhost_dn = NIL;
@@ -2056,8 +2059,11 @@ static bool get_and_open_next_file(ForeignScanState* node)
 
     /* set IO functions according to log file postfix */
     set_io_functions(festate);
-    pfree_ext(festate->dname);
-    pfree_ext(festate->filename);
+    if (NULL != festate->dname) {
+        Assert(festate->filename);
+        pfree_ext(festate->dname);
+        pfree_ext(festate->filename);
+    }
     festate->filename = fetch_filename_from_logfile(festate->logfile_info->name);
     festate->dname = fetch_dirname_from_logfile(festate->logfile_info->name);
     festate->m_lineno_of_file = 0;
@@ -2373,7 +2379,7 @@ static TupleTableSlot* pglog_iterate_fs(ForeignScanState* node)
             /* fast path, return the next tuple from its cache */
             TupleTableSlot* slot = node->ss.ss_ScanTupleSlot;
             tup = festate->m_tuple_buf[festate->m_tuple_cur++];
-            (void)ExecStoreTuple(tup, slot, InvalidBuffer, false);
+            ExecStoreTuple(tup, slot, InvalidBuffer, false);
             return slot;
         }
 
@@ -2405,7 +2411,7 @@ static TupleTableSlot* pglog_iterate_fs(ForeignScanState* node)
             festate->m_tuple_cur = 1;
 
             TupleTableSlot* slot = node->ss.ss_ScanTupleSlot;
-            (void)ExecStoreTuple(tuple, slot, InvalidBuffer, false);
+            ExecStoreTuple(tuple, slot, InvalidBuffer, false);
             return slot;
         }
     }
@@ -2426,8 +2432,11 @@ static TupleTableSlot* iterate_fs_without_logdata(ForeignScanState* node)
         return NULL; /* no other log file */
     }
 
-    pfree_ext(festate->dname);
-    pfree_ext(festate->filename);
+    if (NULL != festate->dname) {
+        Assert(festate->filename);
+        pfree_ext(festate->dname);
+        pfree_ext(festate->filename);
+    }
     /* set filename and dirname */
     festate->filename = fetch_filename_from_logfile(festate->logfile_info->name);
     festate->dname = fetch_dirname_from_logfile(festate->logfile_info->name);
@@ -2445,8 +2454,8 @@ static TupleTableSlot* iterate_fs_without_logdata(ForeignScanState* node)
     HeapTuple tuple = heap_form_tuple(node->ss.ss_currentRelation->rd_att, festate->m_values, festate->m_isnull);
 
     TupleTableSlot* slot = node->ss.ss_ScanTupleSlot;
-    (void)ExecClearTuple(slot);
-    (void)ExecStoreTuple(tuple, slot, InvalidBuffer, false);
+    ExecClearTuple(slot);
+    ExecStoreTuple(tuple, slot, InvalidBuffer, false);
 
     (void)MemoryContextSwitchTo(old_memcnxt);
     return slot;
@@ -2983,7 +2992,7 @@ static TupleTableSlot* profilelog_iterate_fs(ForeignScanState* node)
             /* fast path, return the next tuple from its cache */
             TupleTableSlot* slot = node->ss.ss_ScanTupleSlot;
             HeapTuple tuple = festate->m_tuple_buf[festate->m_tuple_cur++];
-            (void)ExecStoreTuple(tuple, slot, InvalidBuffer, false);
+            ExecStoreTuple(tuple, slot, InvalidBuffer, false);
             return slot;
         }
 
@@ -3017,7 +3026,7 @@ static TupleTableSlot* profilelog_iterate_fs(ForeignScanState* node)
             festate->m_tuple_cur = 1;
 
             TupleTableSlot* slot = node->ss.ss_ScanTupleSlot;
-            (void)ExecStoreTuple(tuple, slot, InvalidBuffer, false);
+            ExecStoreTuple(tuple, slot, InvalidBuffer, false);
             return slot;
         }
     }

@@ -4,6 +4,7 @@ declare build_version_mode='release'
 declare build_binarylib_dir='None'
 declare to_package='NO'
 declare optimized='true'
+declare distribute='NO'
 #########################################################################
 ##read command line paramenters
 #######################################################################
@@ -15,7 +16,8 @@ function print_help()
     -m|--version_mode                 this values of paramenter is debug, release or memcheck, the default value is release
     -3rd|--binarylib_dir              the parent directory of binarylibs
     -pkg|--package                    package the project,by default, only compile the project
-    -nopt|--not_optimized             on kunpeng platform, like 1616 version, without LSE optimized
+    -nopt|--not_optimized             on kunpeng platform , like 1616 version, without LSE optimized
+    -d|--distribute                   compiling on distribute mode
     "
 }
 
@@ -35,7 +37,11 @@ while [ $# -gt 0 ]; do
             ;;
         -pkg|--package)
             to_package='YES'
-                        shift 1
+            shift 1
+            ;;
+        -d|--distribute)
+            distribute='YES'
+            shift 1
             ;;
         -3rd|--binarylib_dir)
             if [ "$2"X = X ]; then
@@ -73,7 +79,7 @@ declare BUILD_DIR="${ROOT_DIR}/dest"
 PLAT_FORM_STR=$(sh "${ROOT_DIR}/src/get_PlatForm_str.sh")
 if [ "${PLAT_FORM_STR}"x == "Failed"x ]
 then
-    echo "We only support OPENEULER(aarch64), CentOS(x86-64), neokylin(aarch64), kylin(aarch64), Asianux(x86-64) platform."
+    echo "We only support OPENEULER(aarch64), CentOS(x86-64) platform."
     exit 1;
 fi
 
@@ -95,7 +101,11 @@ export CC=$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/bin/gcc
 export CXX=$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/bin/g++
 export LD_LIBRARY_PATH=$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/lib64:$BUILD_TOOLS_PATH/gcc$gcc_version/isl/lib:$BUILD_TOOLS_PATH/gcc$gcc_version/mpc/lib/:$BUILD_TOOLS_PATH/gcc$gcc_version/mpfr/lib/:$BUILD_TOOLS_PATH/gcc$gcc_version/gmp/lib/:$LD_LIBRARY_PATH
 export PATH=$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/bin:$PATH
-export MAKE_JOBS=$(($(cat /proc/cpuinfo | grep processor | wc -l) * 2))
+if [ "${distribute}"X = "YES"X ]
+then
+  export JAVA_HOME=${ROOT_DIR}/third_party/buildtools/${PLAT_FORM_STR}/jdk8/jdk1.8.0_77
+  export JRE_HOME=$JAVA_HOME/jre
+fi
 
 log()
 {
@@ -128,10 +138,48 @@ function srv_pkg_pre_check()
 # 1. clean install path and log file
 srv_pkg_pre_check
 
+#get OS distributed version.
+kernel=""
+version=""
+if [ -f "/etc/openEuler-release" ]
+then
+        kernel=$(cat /etc/openEuler-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
+        version=$(cat /etc/openEuler-release | awk -F '(' '{print $2}'| awk -F ')' '{print $1}' | tr A-Z a-z)
+elif [ -f "/etc/centos-release" ]
+then
+        kernel=$(cat /etc/centos-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
+        version=$(cat /etc/centos-release | awk -F '(' '{print $2}'| awk -F ')' '{print $1}' | tr A-Z a-z)
+elif [ -f "/etc/euleros-release" ]
+then
+        kernel=$(cat /etc/centos-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
+        version=$(cat /etc/centos-release | awk -F '(' '{print $2}'| awk -F ')' '{print $1}' | tr A-Z a-z)
+else
+        kernel=$(lsb_release -d | awk -F ' ' '{print $2}'| tr A-Z a-z)
+        version=$(lsb_release -r | awk -F ' ' '{print $2}')
+fi
+
+## to solve kernel="name=openeuler"
+if echo $kernel | grep -q 'openeuler'
+then
+        kernel="openeuler"
+fi
+
+if [ X"$kernel" == X"centos" ]; then
+    dist_version="CentOS"
+elif [ X"$kernel" == X"openeuler" ]; then
+    dist_version="openEuler"
+elif [ X"$kernel" == X"euleros" ]; then
+	dist_version="EulerOS"
+else
+    echo "We only support openEuler(aarch64), EulerOS(aarch64), CentOS platform."
+    echo "Kernel is $kernel"
+    exit 1
+fi
+
 function getExtraFlags()
 {
     if [ "$PLATFORM_ARCH"X == "aarch64"X ] ; then
-        if [ ["$dist_version" == "openEuler"] -o ["$dist_version" == "neokylin"] -o ["$dist_version" == "kylin"] ]; then
+        if [ "$dist_version" == "openEuler" ] || [ "$dist_version" == "EulerOS" ] ; then
             GAUSSDB_EXTRA_FLAGS=" -D__USE_NUMA"
             if [ "${optimized}"x == "true"x ] ; then
                 GAUSSDB_EXTRA_FLAGS=" -D__USE_NUMA -D__ARM_LSE"
@@ -155,16 +203,26 @@ function compile_gaussdb()
     fi
     getExtraFlags
     #configure
-    make distclean -s -j${MAKE_JOBS} >> "$LOG_FILE" 2>&1
+    make distclean -sj >> "$LOG_FILE" 2>&1
     echo "Begin configure, Please wait a few minutes..."
     chmod 755 configure
 
-    if [ "${build_version_mode}"x == "release"x ]; then
-        ./configure --prefix="${BUILD_DIR}" --3rd=${with_3rd} CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" --enable-thread-safety --with-readline --without-zlib CC=g++ >> "$LOG_FILE" 2>&1
-    elif [ "${build_version_mode}"x == "memcheck"x ]; then
-        ./configure --prefix="${BUILD_DIR}" --3rd=${with_3rd} CFLAGS='-O0' --enable-debug --enable-cassert --enable-thread-safety --with-readline --without-zlib --enable-memory-check CC=g++  >> "$LOG_FILE" 2>&1
+    if [ "${distribute}"X = "YES"X ]; then
+      if [ "${build_version_mode}"x == "release"x ]; then
+        ./configure --prefix="${BUILD_DIR}" --3rd=${with_3rd} CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" --enable-thread-safety --without-readline --without-zlib --enable-multiple-nodes CC=g++ >> "$LOG_FILE" 2>&1
+      elif [ "${build_version_mode}"x == "memcheck"x ]; then
+        ./configure --prefix="${BUILD_DIR}" --3rd=${with_3rd} CFLAGS='-O0' --enable-debug --enable-cassert --enable-thread-safety --without-readline --without-zlib --enable-memory-check --enable-multiple-nodes CC=g++  >> "$LOG_FILE" 2>&1
+      else
+        ./configure --prefix="${BUILD_DIR}" --3rd=${with_3rd} CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-debug --enable-cassert --enable-thread-safety --without-readline --without-zlib --enable-multiple-nodes CC=g++ >> "$LOG_FILE" 2>&1
+      fi
     else
-        ./configure --prefix="${BUILD_DIR}" --3rd=${with_3rd} CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-debug --enable-cassert --enable-thread-safety --with-readline --without-zlib CC=g++ >> "$LOG_FILE" 2>&1
+      if [ "${build_version_mode}"x == "release"x ]; then
+        ./configure --prefix="${BUILD_DIR}" --3rd=${with_3rd} CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" --enable-thread-safety --without-readline --without-zlib CC=g++ >> "$LOG_FILE" 2>&1
+      elif [ "${build_version_mode}"x == "memcheck"x ]; then
+        ./configure --prefix="${BUILD_DIR}" --3rd=${with_3rd} CFLAGS='-O0' --enable-debug --enable-cassert --enable-thread-safety --without-readline --without-zlib --enable-memory-check CC=g++  >> "$LOG_FILE" 2>&1
+      else
+        ./configure --prefix="${BUILD_DIR}" --3rd=${with_3rd} CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-debug --enable-cassert --enable-thread-safety --without-readline --without-zlib CC=g++ >> "$LOG_FILE" 2>&1
+      fi
     fi
 
     if [ $? -ne 0 ]; then
@@ -175,8 +233,8 @@ function compile_gaussdb()
     echo "Begin make compile database, Please wait a few minutes..."
     export GAUSSHOME=${BUILD_DIR}
     export LD_LIBRARY_PATH=${BUILD_DIR}/lib:${BUILD_DIR}/lib/postgresql:${LD_LIBRARY_PATH}
-    make -s -j${MAKE_JOBS} >> "$LOG_FILE" 2>&1
-    make install -s -j${MAKE_JOBS} >> "$LOG_FILE" 2>&1
+    make -sj >> "$LOG_FILE" 2>&1
+    make install -sj>> "$LOG_FILE" 2>&1
 
     if [ $? -ne 0 ]; then
         die "make compile failed."

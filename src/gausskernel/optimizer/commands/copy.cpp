@@ -23,6 +23,7 @@
 #include "access/hbucket_am.h"
 #include "access/relscan.h"
 #include "access/sysattr.h"
+#include "access/tableam.h"
 #include "access/xact.h"
 #include "access/xlog.h"
 #include "bulkload/dist_fdw.h"
@@ -92,10 +93,13 @@
 #include "utils/rel_gs.h"
 #include "utils/sec_rls_utils.h"
 #include "utils/snapmgr.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "parser/parsetree.h"
 #include "utils/partitionmap_gs.h"
 #include "access/tableam.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "tsdb/storage/ts_store_insert.h"
+#endif   /* ENABLE_MULTIPLE_NODES */
 
 #define ISOCTAL(c) (((c) >= '0') && ((c) <= '7'))
 #define OCTVALUE(c) ((c) - '0')
@@ -312,13 +316,28 @@ static void SendCopyBegin(CopyState cstate)
         StringInfoData buf;
         int natts = list_length(cstate->attnumlist);
         int16 format = (IS_BINARY(cstate) ? 1 : 0);
-        int i;
 
         pq_beginmessage(&buf, 'H');
         pq_sendbyte(&buf, format); /* overall format */
         pq_sendint16(&buf, natts);
-        for (i = 0; i < natts; i++)
-            pq_sendint16(&buf, format); /* per-column formats */
+
+        TupleDesc	tupDesc;
+        Form_pg_attribute *attr = NULL;
+        ListCell *cur = NULL;
+        if (cstate->rel)
+            tupDesc = RelationGetDescr(cstate->rel);
+        else
+            tupDesc = cstate->queryDesc->tupDesc;
+        attr = tupDesc->attrs;
+        foreach(cur, cstate->attnumlist)
+        {
+            int16 fmt = format;
+            int attnum = lfirst_int(cur);
+            if (attr[attnum - 1]->atttypid == BYTEAWITHOUTORDERWITHEQUALCOLOID ||
+                attr[attnum - 1]->atttypid == BYTEAWITHOUTORDERCOLOID)
+                fmt = (int16)attr[attnum - 1]->atttypmod;
+            pq_sendint16(&buf, fmt); /* per-column formats */
+        }
         pq_endmessage(&buf);
         cstate->copy_dest = COPY_NEW_FE;
     } else if (PG_PROTOCOL_MAJOR(FrontendProtocol) >= 2) {
@@ -827,36 +846,6 @@ void CleanBulkloadStates()
 #endif
 }
 
-static void CheckCopyFilepath(const char* filename)
-{
-    /* Don't check file path when init db */
-    if (IsInitdb || filename == NULL) {
-        return;
-    }
-
-    /* Use directory to check casue the file may not exist, then it will failed in realpath */
-    char dir[PATH_MAX] = {0};
-    errno_t rc = strcpy_s(dir, PATH_MAX, filename);
-    securec_check_ss(rc, "", "");
-    if (dirname(dir) == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("dirname failed : %m")));
-    }
-
-    char realDir[PATH_MAX] = {0};
-    if (realpath(dir, realDir) == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("realpath failed : %m")));
-    }
-
-    char copyFilepath[PATH_MAX] = {0};
-    rc = snprintf_s(copyFilepath, PATH_MAX, PATH_MAX - 1, "%s/pg_copydir", t_thrd.proc_cxt.DataDir);
-    securec_check_ss(rc, "", "");
-
-    if (strncmp(realDir, copyFilepath, strlen(copyFilepath)) != 0) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-            errmsg("file must under dir:%s", copyFilepath)));
-    }
-}
-
 /*
  *	 DoCopy executes the SQL COPY statement
  *
@@ -919,8 +908,6 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
                         "gsql's \\copy command also works for anyone.")));
     }
 
-    CheckCopyFilepath(stmt->filename);
-
     if (stmt->relation) {
         TupleDesc tupDesc;
         AclMode required_access = (is_from ? ACL_INSERT : ACL_SELECT);
@@ -931,6 +918,17 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
 
         /* Open and lock the relation, using the appropriate lock type. */
         rel = heap_openrv(stmt->relation, (is_from ? RowExclusiveLock : AccessShareLock));
+
+        if (STMT_RETRY_ENABLED) {
+        // do noting for now, if query retry is on, just to skip validateTempRelation here
+        } else if (rel != NULL && rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP && !validateTempNamespace(rel->rd_rel->relnamespace)) {
+            heap_close(rel, (is_from ? RowExclusiveLock : AccessShareLock));
+            ereport(ERROR,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                    errmsg("Temp table's data is invalid because datanode %s restart. "
+                       "Quit your session to clean invalid temp tables.", 
+                       g_instance.attr.attr_common.PGXCNodeName)));
+        }
 
         /* @Online expansion: check if the table is in redistribution read only mode */
         if (rel != NULL && is_from && RelationInClusterResizingReadOnly(rel))
@@ -983,10 +981,8 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
         Assert(rel);
 
         /* check read-only transaction */
-        if (u_sess->attr.attr_common.XactReadOnly && !RELATION_IS_TEMP(rel)) {
+        if (u_sess->attr.attr_common.XactReadOnly && !RELATION_IS_TEMP(rel))
             PreventCommandIfReadOnly("COPY FROM");
-        }
-        PreventCommandIfParallelMode("COPY FROM");
 
         /* set write for backend status for the thread, we will use it to check default transaction readOnly */
         pgstat_set_stmt_tag(STMTTAG_WRITE);
@@ -1035,7 +1031,7 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
         heap_close(rel, (is_from ? NoLock : AccessShareLock));
 
     if (AUDIT_COPY_ENABLED) {
-        if (is_from)
+        if (is_from && stmt->relation)
             audit_report(AUDIT_COPY_FROM, AUDIT_OK, stmt->relation->relname, queryString);
         else
             audit_report(AUDIT_COPY_TO, AUDIT_OK, stmt->filename ? stmt->filename : "stdout", queryString);
@@ -1274,6 +1270,7 @@ static void CheckCopyIncompatibleOptions(CopyState cstate, int force_fix_width)
  */
 void ProcessCopyOptions(CopyState cstate, bool is_from, List* options)
 {
+    #define NULL_VAL_STRING_LEN 100
     bool format_specified = false;
     ListCell* option = NULL;
     bool noescapingSpecified = false;
@@ -1331,7 +1328,7 @@ void ProcessCopyOptions(CopyState cstate, bool is_from, List* options)
             if (cstate->null_print)
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
             char* null_print = defGetString(defel);
-            if (strlen(null_print) > 100) {
+            if (strlen(null_print) > NULL_VAL_STRING_LEN) {
                 ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("null value string is too long")));
             }
             cstate->null_print = null_print;
@@ -1780,9 +1777,6 @@ void ProcessCopyOptions(CopyState cstate, bool is_from, List* options)
             (errcode(ERRCODE_SYNTAX_ERROR),
                 errmsg("illegal chars conversion may confuse COPY escape 0x%x", cstate->escape[0])));
     }
-
-    /* Check fileheader */
-    CheckCopyFilepath(cstate->headerFilename);
 }
 
 static void ProcessCopyNotAllowedOptions(CopyState cstate)
@@ -2230,12 +2224,18 @@ static CopyState BeginCopyTo(
     CopyState cstate;
     bool pipe = (filename == NULL);
     MemoryContext oldcontext;
+    bool flag = rel != NULL && rel->rd_rel->relkind != RELKIND_RELATION;
 
-    if (rel != NULL && rel->rd_rel->relkind != RELKIND_RELATION) {
+    if (flag) {
         if (rel->rd_rel->relkind == RELKIND_VIEW)
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("cannot copy from view \"%s\"", RelationGetRelationName(rel)),
+                    errhint("Try the COPY (SELECT ...) TO variant.")));
+        else if (rel->rd_rel->relkind == RELKIND_CONTQUERY)
+            ereport(ERROR,
+                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                    errmsg("cannot copy from contquery \"%s\"", RelationGetRelationName(rel)),
                     errhint("Try the COPY (SELECT ...) TO variant.")));
         else if (rel->rd_rel->relkind == RELKIND_MATVIEW)
             ereport(ERROR,
@@ -2247,6 +2247,11 @@ static CopyState BeginCopyTo(
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                         errmsg("cannot copy from foreign table \"%s\"", RelationGetRelationName(rel)),
                         errhint("Try the COPY (SELECT ...) TO variant.")));
+        } else if (rel->rd_rel->relkind == RELKIND_STREAM) {
+            ereport(ERROR,
+                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                    errmsg("cannot copy from stream \"%s\"", RelationGetRelationName(rel)),
+                    errhint("Try the COPY (SELECT ...) TO variant.")));
         } else if (rel->rd_rel->relkind == RELKIND_SEQUENCE)
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
@@ -2277,7 +2282,7 @@ static CopyState BeginCopyTo(
             ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("relative path not allowed for COPY to file")));
 
         cstate->filename = pstrdup(filename);
-        if (!u_sess->utils_cxt.last_roleid_is_super && CheckCopyFileInBlackList(cstate->filename)) {
+        if (!u_sess->sec_cxt.last_roleid_is_super && CheckCopyFileInBlackList(cstate->filename)) {
             ereport(
                 ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("do not support system admin to COPY to %s", filename)));
         }
@@ -2423,7 +2428,7 @@ static void DeformCopyTuple(
 
 static uint64 DFSCopyTo(CopyState cstate, TupleDesc tupDesc, Datum* values, bool* nulls)
 {
-    HeapScanDesc scandesc = NULL;
+    TableScanDesc scandesc = NULL;
     HeapTuple tuple = NULL;
     Relation delta = NULL;
     DfsScanState* scanState = NULL;
@@ -2452,10 +2457,10 @@ static uint64 DFSCopyTo(CopyState cstate, TupleDesc tupDesc, Datum* values, bool
     pfree_ext(scanState);
 
     delta = heap_open(cstate->curPartionRel->rd_rel->reldeltarelid, AccessShareLock);
-    scandesc = heap_beginscan(delta, GetActiveSnapshot(), 0, NULL);
+    scandesc = tableam_scan_begin(delta, GetActiveSnapshot(), 0, NULL);
 
     /* Copy the data on delta table to local file. */
-    while ((tuple = heap_getnext(scandesc, ForwardScanDirection)) != NULL) {
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scandesc, ForwardScanDirection)) != NULL) {
         CHECK_FOR_INTERRUPTS();
 
         /* Deconstruct the tuple ... faster than repeated heap_getattr */
@@ -2466,7 +2471,7 @@ static uint64 DFSCopyTo(CopyState cstate, TupleDesc tupDesc, Datum* values, bool
         processed++;
     }
 
-    heap_endscan(scandesc);
+    tableam_scan_end(scandesc);
     heap_close(delta, AccessShareLock);
 
     return processed;
@@ -2661,20 +2666,21 @@ static uint64 CopyTo(CopyState cstate, bool isFirst, bool isLast)
                 }
             } else {
                 HeapTuple tuple;
-                AbsTblScanDesc scandesc = abs_tbl_beginscan(cstate->curPartionRel, GetActiveSnapshot(), 0, NULL);
+                TableScanDesc scandesc;
+                scandesc = scan_handler_tbl_beginscan(cstate->curPartionRel, GetActiveSnapshot(), 0, NULL);
 
-                while ((tuple = abs_tbl_getnext(scandesc, ForwardScanDirection)) != NULL) {
+                while ((tuple = (HeapTuple) scan_handler_tbl_getnext(scandesc, ForwardScanDirection, cstate->curPartionRel)) != NULL) {
                     CHECK_FOR_INTERRUPTS();
 
                     /* Deconstruct the tuple ... faster than repeated heap_getattr */
-                    heap_deform_tuple2(tuple, tupDesc, values, nulls, GetHeapScanDesc(scandesc)->rs_cbuf);
+                    heap_deform_tuple2(tuple, tupDesc, values, nulls, GetTableScanDesc(scandesc, cstate->curPartionRel)->rs_cbuf);
 
                     /* Format and send the data */
                     CopyOneRowTo(cstate, HeapTupleGetOid(tuple), values, nulls);
                     processed++;
                 }
 
-                abs_tbl_endscan(scandesc);
+                scan_handler_tbl_endscan(scandesc, cstate->curPartionRel);
             }
             pfree_ext(values);
             pfree_ext(nulls);
@@ -2786,14 +2792,12 @@ static void CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum* values, const bo
             CopySendInt32(cstate, sizeof(int32));
             CopySendInt32(cstate, tupleOid);
         }
-    } else {
+    } else if (cstate->oids){
         /* Text format has no per-tuple header, but send OID if wanted */
         /* Assume digits don't need any quoting or encoding conversion */
-        if (cstate->oids) {
-            string = DatumGetCString(DirectFunctionCall1(oidout, ObjectIdGetDatum(tupleOid)));
-            CopySendString(cstate, string);
-            need_delim = true;
-        }
+        string = DatumGetCString(DirectFunctionCall1(oidout, ObjectIdGetDatum(tupleOid)));
+        CopySendString(cstate, string);
+        need_delim = true;
     }
 
     if (IS_FIXED(cstate))
@@ -3411,15 +3415,27 @@ static uint64 CopyFrom(CopyState cstate)
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("cannot copy to view \"%s\"", RelationGetRelationName(cstate->rel))));
+        else if (cstate->rel->rd_rel->relkind == RELKIND_CONTQUERY)
+            ereport(ERROR,
+                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                    errmsg("cannot copy to contquery \"%s\"",
+                    RelationGetRelationName(cstate->rel))));
         else if (cstate->rel->rd_rel->relkind == RELKIND_MATVIEW)
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                    errmsg("cannot copy to materialized view \"%s\"", RelationGetRelationName(cstate->rel))));	
-	else if (cstate->rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE) {
+                    errmsg("cannot copy to materialized view \"%s\"",
+                    RelationGetRelationName(cstate->rel))));
+        else if (cstate->rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE) {
             if (!CheckSupportedFDWType(RelationGetRelid(cstate->rel)))
                 ereport(ERROR,
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                         errmsg("cannot copy to foreign table \"%s\"", RelationGetRelationName(cstate->rel))));
+            isForeignTbl = true;
+        } else if (cstate->rel->rd_rel->relkind == RELKIND_STREAM) {
+            if (!CheckSupportedFDWType(RelationGetRelid(cstate->rel)))
+                ereport(ERROR,
+                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                        errmsg("cannot copy to stream \"%s\"", RelationGetRelationName(cstate->rel))));
             isForeignTbl = true;
         } else if (cstate->rel->rd_rel->relkind == RELKIND_SEQUENCE)
             ereport(ERROR,
@@ -3462,9 +3478,9 @@ static uint64 CopyFrom(CopyState cstate)
      */
     if (cstate->rel->rd_createSubid != InvalidSubTransactionId ||
         cstate->rel->rd_newRelfilenodeSubid != InvalidSubTransactionId) {
-        hi_options |= HEAP_INSERT_SKIP_FSM;
+        hi_options |= TABLE_INSERT_SKIP_FSM;
         if (!XLogIsNeeded())
-            hi_options |= HEAP_INSERT_SKIP_WAL;
+            hi_options |= TABLE_INSERT_SKIP_WAL;
     }
     /*
      * Optimize if new relfilenode was created in this subxact or
@@ -3478,7 +3494,7 @@ static uint64 CopyFrom(CopyState cstate)
     if (cstate->freeze && ThereAreNoPriorRegisteredSnapshots() && ThereAreNoReadyPortals() &&
         (cstate->rel->rd_newRelfilenodeSubid == GetCurrentSubTransactionId() ||
             cstate->rel->rd_createSubid == GetCurrentSubTransactionId())) {
-        hi_options |= HEAP_INSERT_FROZEN;
+        hi_options |= TABLE_INSERT_FROZEN;
     }
 
     /*
@@ -3499,7 +3515,8 @@ static uint64 CopyFrom(CopyState cstate)
     isPartitionRel = RELATION_IS_PARTITIONED(resultRelationDesc);
     hasBucket = RELATION_OWN_BUCKET(resultRelationDesc);
     hasPartition = isPartitionRel || hasBucket;
-    needflush = ((hi_options & HEAP_INSERT_SKIP_WAL) || enable_heap_bcm_data_replication()) && !RelationIsForeignTable(cstate->rel);
+    needflush = ((hi_options & TABLE_INSERT_SKIP_WAL) || enable_heap_bcm_data_replication()) 
+                && !RelationIsForeignTable(cstate->rel) && !RelationIsStream(cstate->rel);
 
     estate->es_result_relations = resultRelInfo;
     estate->es_num_result_relations = 1;
@@ -3507,7 +3524,7 @@ static uint64 CopyFrom(CopyState cstate)
     estate->es_range_table = cstate->range_table;
 
     /* Set up a tuple slot too */
-    myslot = ExecInitExtraTupleSlot(estate);
+    myslot = ExecInitExtraTupleSlot(estate, cstate->rel->rd_tam_type);
     ExecSetSlotDescriptor(myslot, tupDesc);
     /* Triggers might need a slot as well */
     estate->es_trig_tuple_slot = ExecInitExtraTupleSlot(estate);
@@ -3594,7 +3611,7 @@ static uint64 CopyFrom(CopyState cstate)
      * the relation
      */
     if (enable_heap_bcm_data_replication()) {
-        if (!RelationIsForeignTable(cstate->rel))
+        if (!RelationIsForeignTable(cstate->rel) && !RelationIsStream(cstate->rel))
             HeapSyncHashSearch(cstate->rel->rd_id, HASH_ENTER);
         LockRelFileNode(cstate->rel->rd_node, RowExclusiveLock);
     }
@@ -3605,6 +3622,9 @@ static uint64 CopyFrom(CopyState cstate)
     CStoreInsert* cstoreInsert = NULL;
 
     DfsInsertInter* dfsInsert = NULL;
+#ifdef ENABLE_MULTIPLE_NODES
+    Tsdb::TsStoreInsert *tsstoreInsert = NULL;
+#endif   /* ENABLE_MULTIPLE_NODES */
     // because every partition relation share the same option values with their parent relation, so
     // we can init once and read many times for both normal relation and partition relation.
     //
@@ -3633,6 +3653,17 @@ static uint64 CopyFrom(CopyState cstate)
         }
         MemoryContextSwitchTo(oldcontext);
     }
+#ifdef ENABLE_MULTIPLE_NODES
+    else if (RelationIsTsStore(cstate->rel) && IS_PGXC_DATANODE) {
+        oldcontext = MemoryContextSwitchTo(cstate->copycontext);
+        /*Init copy mem, it will pass the allocated memory to copy datanode to use.*/
+        InitCopyMemArg(cstate, CopyMem);
+        Assert (isPartitionRel);
+        tsstoreInsert = New (CurrentMemoryContext)Tsdb::TsStoreInsert(cstate->rel);
+
+        MemoryContextSwitchTo(oldcontext);
+    }
+#endif   /* ENABLE_MULTIPLE_NODES */
 
     for (;;) {
         TupleTableSlot* slot = NULL;
@@ -3676,7 +3707,7 @@ static uint64 CopyFrom(CopyState cstate)
                     goto retry_copy;
                 } else {
                     ereport(LOG,
-                        (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("A error in Copy From cannot be catched.")));
+                        (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("An error in Copy From cannot be catched.")));
                     PG_RE_THROW();
                 }
             }
@@ -3701,7 +3732,7 @@ static uint64 CopyFrom(CopyState cstate)
                         } else {
                             ereport(LOG,
                                 (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
-                                    errmsg("A error in Copy From cannot be catched.")));
+                                    errmsg("An error in Copy From cannot be catched.")));
                             PG_RE_THROW();
                         }
                     }
@@ -3756,7 +3787,7 @@ static uint64 CopyFrom(CopyState cstate)
                             } else {
                                 ereport(LOG,
                                     (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
-                                        errmsg("A error in Copy From cannot be catched.")));
+                                        errmsg("An error in Copy From cannot be catched.")));
                                 PG_RE_THROW();
                             }
                         }
@@ -3811,7 +3842,7 @@ static uint64 CopyFrom(CopyState cstate)
                             } else {
                                 ereport(LOG,
                                     (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
-                                        errmsg("A error in Copy From cannot be catched.")));
+                                        errmsg("An error in Copy From cannot be catched.")));
                                 PG_RE_THROW();
                             }
                         }
@@ -3837,7 +3868,45 @@ static uint64 CopyFrom(CopyState cstate)
 
                     continue;
                 }
-            } else {
+            }
+#ifdef ENABLE_MULTIPLE_NODES
+            else if (RelationIsTsStore(cstate->rel)) {
+                bool endFlag = false;
+                while (true) {
+                    PG_TRY();
+                    {
+                        is_EOF = !NextCopyFrom(cstate, econtext, values, nulls, &loaded_oid);
+                    }
+
+                    PG_CATCH();
+                    {
+                        if(TrySaveImportError(cstate)) {
+                            resetPerTupCxt = true;
+                            goto retry_copy;
+                        } else {
+                            ereport(LOG, (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
+                                    errmsg("An error in Copy From cannot be catched.")));
+                            PG_RE_THROW();
+                        }
+                    }
+
+                    PG_END_TRY();
+                    if (!is_EOF) {
+                        tsstoreInsert->batch_insert(values, nulls, hi_options);
+                    } else {
+                        endFlag = true;
+                        tsstoreInsert->end_batch_insert();
+                        break;
+                    }
+                }
+                resetPerTupCxt = true;
+                if (true == endFlag) {
+                    break;
+                }
+                continue;
+            }
+#endif   /* ENABLE_MULTIPLE_NODES */
+            else {
                 PG_TRY();
                 {
                     is_EOF = !NextCopyFrom(cstate, econtext, values, nulls, &loaded_oid);
@@ -3909,21 +3978,56 @@ static uint64 CopyFrom(CopyState cstate)
             Oid* att_type = NULL;
             RemoteCopyData* remoteCopyState = cstate->remoteCopyState;
             ExecNodes* exec_nodes = NULL;
+            List* taglist = NIL;
+            int dcolNum = -1;
+            bool pseudoTsDistcol = false;
 
             if (remoteCopyState->idx_dist_by_col != NULL) {
                 att_type = (Oid*)palloc(tupDesc->natts * sizeof(Oid));
-                for (int i = 0; i < tupDesc->natts; i++) {
-                    att_type[i] = attr[i]->atttypid;
+                dcolNum = lfirst_int(list_head(remoteCopyState->idx_dist_by_col));
+
+                /* If a timeseries table use hidden column as distribution column,
+                 * then fetch all the tag columns in the table to build a list,
+                 * i.e. taglist. Use pseudoTsDistcol to identify this situation.
+                 */
+                if (RelationIsTsStore(cstate->rel) && dcolNum > 0 &&
+                    list_length(remoteCopyState->idx_dist_by_col) == 1 &&
+                    TsRelWithImplDistColumn(attr, dcolNum)) {
+                    pseudoTsDistcol = true;
+                    for (int i = 0; i < tupDesc->natts; i++) {
+                        att_type[i] = attr[i]->atttypid;
+                        /* collect all the tag columns info to taglist */
+                        if (attr[i]->attkvtype == ATT_KV_TAG) {
+                            taglist = lappend_int(taglist, i);
+                        }
+                    }
+                    Assert(taglist != NULL);
+                } else {
+                    for (int i = 0; i < tupDesc->natts; i++) {
+                        att_type[i] = attr[i]->atttypid;
+                    }
                 }
             }
 
-            exec_nodes = GetRelationNodes(remoteCopyState->rel_loc,
-                values,
-                nulls,
-                att_type,
-                remoteCopyState->idx_dist_by_col,
-                RELATION_ACCESS_INSERT,
-                false);
+            /* For implicit distribution ts table, use targlist instead of idx_dist_by_col */
+            if (pseudoTsDistcol) {
+                exec_nodes = GetRelationNodes(remoteCopyState->rel_loc,
+                    values,
+                    nulls,
+                    att_type,
+                    taglist,
+                    RELATION_ACCESS_INSERT,
+                    false);
+                list_free_ext(taglist);
+            } else {
+                exec_nodes = GetRelationNodes(remoteCopyState->rel_loc,
+                    values,
+                    nulls,
+                    att_type,
+                    remoteCopyState->idx_dist_by_col,
+                    RELATION_ACCESS_INSERT,
+                    false);
+            }
             if (att_type != NULL) {
                 pfree_ext(att_type);
             }
@@ -3942,7 +4046,7 @@ static uint64 CopyFrom(CopyState cstate)
 #endif
 
             /* And now we can form the input tuple. */
-            tuple = heap_form_tuple(tupDesc, values, nulls);
+            tuple = (HeapTuple) tableam_tops_form_tuple(tupDesc, values, nulls, HEAP_TUPLE);
 
             if (loaded_oid != InvalidOid)
                 HeapTupleSetOid(tuple, loaded_oid);
@@ -4048,7 +4152,7 @@ static uint64 CopyFrom(CopyState cstate)
                             searchHBucketFakeRelation(
                                 estate->esfRelations, estate->es_query_cxt, heaprel, bucketid, targetRel);
                         }
-                        (void)heap_insert(targetRel, tuple, mycid, 0, NULL);
+                        (void)tableam_tuple_insert(targetRel, tuple, mycid, 0, NULL);
                         if (needflush) {
                             partitionList = list_append_unique_oid(partitionList, partitionid);
                         }
@@ -4056,9 +4160,9 @@ static uint64 CopyFrom(CopyState cstate)
                         Assert(bucketid != InvalidBktId);
                         searchHBucketFakeRelation(
                             estate->esfRelations, estate->es_query_cxt, cstate->rel, bucketid, targetRel);
-                        (void)heap_insert(targetRel, tuple, mycid, hi_options, bistate);
+                        (void)tableam_tuple_insert(targetRel, tuple, mycid, hi_options, bistate);
                     } else {
-                        (void)heap_insert(cstate->rel, tuple, mycid, hi_options, bistate);
+                        (void)tableam_tuple_insert(cstate->rel, tuple, mycid, hi_options, bistate);
                     }
 
                     /* OK, store the tuple and create index entries for it */
@@ -4100,6 +4204,13 @@ static uint64 CopyFrom(CopyState cstate)
 
     if (cstorePartitionInsert != NULL)
         DELETE_EX(cstorePartitionInsert);
+
+#ifdef ENABLE_MULTIPLE_NODES
+    if (tsstoreInsert != NULL) {
+        delete tsstoreInsert;
+        tsstoreInsert = NULL;
+    }
+#endif   /* ENABLE_MULTIPLE_NODES */
 
     if (CopyMem != NULL) {
         pfree_ext(CopyMem);
@@ -4153,6 +4264,7 @@ static uint64 CopyFrom(CopyState cstate)
     (void)MemoryContextSwitchTo(oldcontext);
 
     delete cstate->pcState;
+    cstate->pcState = NULL;
 
 #ifdef PGXC
 
@@ -4163,7 +4275,7 @@ static uint64 CopyFrom(CopyState cstate)
         bool replicated = (remoteCopyState->rel_loc->locatorType == LOCATOR_TYPE_REPLICATED);
         DataNodeCopyFinish(remoteCopyState->connections,
             u_sess->pgxc_cxt.NumDataNodes,
-            replicated ? PGXCNodeGetNodeId(t_thrd.pgxc_cxt.primary_data_node, PGXC_NODE_DATANODE) : -1,
+            replicated ? PGXCNodeGetNodeId(u_sess->pgxc_cxt.primary_data_node, PGXC_NODE_DATANODE) : -1,
             replicated ? COMBINE_TYPE_SAME : COMBINE_TYPE_SUM,
             cstate->rel);
     }
@@ -4213,7 +4325,8 @@ static uint64 CopyFrom(CopyState cstate)
         }
     }
 
-    if (enable_heap_bcm_data_replication() && !RelationIsForeignTable(cstate->rel))
+    if (enable_heap_bcm_data_replication() && !RelationIsForeignTable(cstate->rel)
+        && !RelationIsStream(cstate->rel))
         HeapSyncHashSearch(cstate->rel->rd_id, HASH_REMOVE);
 
     list_free_ext(partitionList);
@@ -4267,6 +4380,19 @@ static void EstCopyMemInfo(Relation rel, UtilityDesc* desc)
  * @IN CopyMem: CopyMem is used to passing parameters of mem_info to execute on copy.
  * @Return: void
  */
+static int getPartitionNumInInitCopy(Relation relation)
+{
+    int partitionNum = 1;
+    if (relation->partMap->type == PART_TYPE_LIST) {
+        partitionNum = getNumberOfListPartitions(relation);
+    } else if (relation->partMap->type == PART_TYPE_HASH) {
+        partitionNum = getNumberOfHashPartitions(relation);
+    } else {
+        partitionNum = getNumberOfRangePartitions(relation);
+    }
+    return partitionNum; 
+}
+
 static void InitCopyMemArg(CopyState cstate, MemInfoArg* CopyMem)
 {
     bool isPartitionRel = false;
@@ -4289,9 +4415,9 @@ static void InitCopyMemArg(CopyState cstate, MemInfoArg* CopyMem)
         hasPck = true;
     }
 
-    if (cstate != NULL && cstate->memUsage.work_mem > 0) {
+    if (cstate->memUsage.work_mem > 0) {
         if (!isPartitionRel) {
-            /* Init memory for cstore ordinary table. */
+            /* Init memory for cstore ordinary table.*/
             if (RelationIsCUFormat(cstate->rel)) {
                 if (!hasPck) {
                     CopyMem->MemInsert = cstate->memUsage.work_mem;
@@ -4310,7 +4436,7 @@ static void InitCopyMemArg(CopyState cstate, MemInfoArg* CopyMem)
                     CopyMem->MemSort,
                     CopyMem->canSpreadmaxMem);
             } else if (RelationIsPAXFormat(cstate->rel)) {
-                /* Init memory for cstore ordinary table. */
+                /* Init memory for cstore ordinary table.*/
                 if (!hasPck) {
                     CopyMem->MemInsert =
                         cstate->memUsage.work_mem < DFS_MIN_MEM_SIZE ? DFS_MIN_MEM_SIZE : cstate->memUsage.work_mem;
@@ -4354,7 +4480,7 @@ static void InitCopyMemArg(CopyState cstate, MemInfoArg* CopyMem)
             }
         } else {
             /* Init memory for cstore partition table. */
-            partitionNum = getNumberOfRangePartitions(relation);
+            partitionNum = getPartitionNumInInitCopy(relation);
             /* if has pck, meminfo = insert + sort. */
             if (!hasPck) {
                 CopyMem->MemInsert = cstate->memUsage.work_mem;
@@ -4468,8 +4594,8 @@ static void CopyFromInsertBatch(Relation rel, EState* estate, CommandId mycid, i
      * 2. not forbid page replication
      */
     HeapMultiInsertExtraArgs args = {NULL, 0, false};
-    (void)heap_multi_insert(
-        rel, resultRelInfo->ri_RelationDesc, bufferedTuples, nBufferedTuples, mycid, hi_options, bistate, &args);
+    (void)tableam_tuple_multi_insert(rel, resultRelInfo->ri_RelationDesc,
+        (Tuple*)bufferedTuples, nBufferedTuples, mycid, hi_options, bistate, &args);
     MemoryContextSwitchTo(oldcontext);
 
     /*
@@ -4516,7 +4642,8 @@ void FlushInsertSelectBulk(DistInsertSelectState* node, EState* estate, bool can
     slot = ExecInitExtraTupleSlot(estate);
     ExecSetSlotDescriptor(slot, RelationGetDescr(resultRelationDesc));
     
-    if (enable_heap_bcm_data_replication() && !RelationIsForeignTable(resultRelationDesc)) {
+    if (enable_heap_bcm_data_replication() && !RelationIsForeignTable(resultRelationDesc)
+        && !RelationIsStream(resultRelationDesc)) {
         needflush = true;
     }
     
@@ -4616,9 +4743,9 @@ static int CopyFromCompressAndInsertBatch(PageCompress* pcState, EState* estate,
          */
         HeapMultiInsertExtraArgs args = {pcState->GetCmprHeaderData(), pcState->GetCmprHeaderSize(), false};
 
-        nInsertedTuples = heap_multi_insert(heapRelation,
+        nInsertedTuples = tableam_tuple_multi_insert(heapRelation,
             resultRelInfo->ri_RelationDesc,
-            pcState->GetOutputTups(),
+            (Tuple*)pcState->GetOutputTups(),
             pcState->GetOutputCount(),
             mycid,
             hi_options,
@@ -4740,7 +4867,7 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist, L
     volatile_defexprs = false;
 
     if (cstate->is_from && (cstate->log_errors || cstate->logErrorsData)) {
-        cstate->logger->m_namespace = get_namespace_name(RelationGetNamespace(cstate->rel), true);
+        cstate->logger->m_namespace = get_namespace_name(RelationGetNamespace(cstate->rel));
     }
 
     /*
@@ -4855,7 +4982,7 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist, L
         struct stat st;
 
         cstate->filename = pstrdup(filename);
-        if (!u_sess->utils_cxt.last_roleid_is_super && CheckCopyFileInBlackList(cstate->filename)) {
+        if (!u_sess->sec_cxt.last_roleid_is_super && CheckCopyFileInBlackList(cstate->filename)) {
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_NAME), errmsg("do not support system admin to COPY from %s", filename)));
         }
@@ -5192,6 +5319,8 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
     int* defmap = cstate->defmap;
     ExprState** defexprs = cstate->defexprs;
     errno_t rc = 0;
+    bool pseudoTsDistcol = false;
+    int tgt_col_num = -1;
 
     tupDesc = RelationGetDescr(cstate->rel);
     attr = tupDesc->attrs;
@@ -5205,11 +5334,37 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
     rc = memset_s(nulls, num_phys_attrs * sizeof(bool), true, num_phys_attrs * sizeof(bool));
     securec_check(rc, "", "");
 
+    /* For both CN & DN,
+     * check whether the operation is performed on the timeseries table with
+     * an implicit distribution column.
+     * If so, find out the hidden column index and set pseudoTsDistcol.
+     */
+    if (RelationIsTsStore(cstate->rel)) {
+        List* dist_col = NIL;
+        if (IS_PGXC_COORDINATOR) {
+            dist_col = cstate->rel->rd_locator_info->partAttrNum;
+            if (list_length(dist_col)==1) {
+                tgt_col_num = lfirst_int(list_head(dist_col)) - 1;
+                if (TsRelWithImplDistColumn(attr, tgt_col_num)) {
+                    pseudoTsDistcol = true;
+                }
+            }
+        } else {
+            for (i = 0; i < num_phys_attrs; i++) {
+                if (TsRelWithImplDistColumn(attr, i)) {
+                    tgt_col_num = i;
+                    pseudoTsDistcol = true;
+                    break;
+                }
+            }
+        }
+    }
+
     if (!IS_BINARY(cstate)) {
         char** field_strings;
         ListCell* cur = NULL;
-        int fldct;
-        int fieldno;
+        int fldct;      // total num of field in file
+        int fieldno;    // current field count
         char* string = NULL;
 
         /* read raw fields in the next line */
@@ -5256,6 +5411,12 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
             int attnum = lfirst_int(cur);
             int m = attnum - 1;
 
+            /* Skip the hidden distribute column */
+            if (pseudoTsDistcol && m == tgt_col_num) {
+                nfields--;
+                continue;
+            }
+
             if (fieldno > fldct || (!cstate->fill_missing_fields && fieldno == fldct))
                 ereport(ERROR,
                     (errcode(ERRCODE_BAD_COPY_FILE_FORMAT),
@@ -5267,7 +5428,7 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
                  * 1. A db SQL compatibility requires; or
                  * 2. This column donesn't accept any empty string.
                  */
-                if ((DB_IS_CMPT(DB_CMPT_A) || !accept_empty_str[m]) &&
+                if ((u_sess->attr.attr_sql.sql_compatibility == A_FORMAT || !accept_empty_str[m]) &&
                     (string != NULL && string[0] == '\0')) {
                     /* for any type, '' = null */
                     string = NULL;
@@ -5348,7 +5509,7 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
                 ereport(ERROR, (errcode(ERRCODE_BAD_COPY_FILE_FORMAT), errmsg("received copy data after EOF marker")));
             return false;
         }
-        if (fld_count != attr_count)
+        if (fld_count != attr_count && !pseudoTsDistcol)
             ereport(ERROR,
                 (errcode(ERRCODE_BAD_COPY_FILE_FORMAT),
                     errmsg("row field count is %d, expected %d", (int)fld_count, attr_count)));
@@ -5386,6 +5547,9 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
         foreach (cur, cstate->attnumlist) {
             int attnum = lfirst_int(cur);
             int m = attnum - 1;
+
+            /* Skip the hidden distribute column */
+            if (pseudoTsDistcol && m == tgt_col_num) continue;
 
             cstate->cur_attname = NameStr(attr[m]->attname);
             i++;
@@ -5570,7 +5734,7 @@ retry:
                     cstate->eol_type = EOL_UNKNOWN;
                 cstate->cur_lineno++;
                 if (cstate->header_line) {
-                    /* skip header, this should only in private mode with csv file */
+                    /* skip header, this should only in private mode with csv file*/
                     resetStringInfo(&cstate->line_buf);
                     cstate->line_buf_converted = false;
                     cstate->cur_lineno++;
@@ -5586,42 +5750,26 @@ retry:
          */
         switch (cstate->eol_type) {
             case EOL_NL:
-                if (cstate->line_buf.len < 1) {
-                    ereport(ERROR,
-                            (errcode(ERRCODE_DATA_EXCEPTION),
-                             errmsg("copy data corrupted")));
-                }
+                Assert(cstate->line_buf.len >= 1);
                 cstate->line_buf.len--;
                 cstate->line_buf.data[cstate->line_buf.len] = '\0';
                 break;
             case EOL_CR:
-                if (cstate->line_buf.len < 1 ||
-                    cstate->line_buf.data[cstate->line_buf.len - 1] != '\r') {
-                    ereport(ERROR,
-                            (errcode(ERRCODE_DATA_EXCEPTION),
-                             errmsg("copy data corrupted")));
-                }
+                Assert(cstate->line_buf.len >= 1);
+                Assert(cstate->line_buf.data[cstate->line_buf.len - 1] == '\r');
                 cstate->line_buf.len--;
                 cstate->line_buf.data[cstate->line_buf.len] = '\0';
                 break;
             case EOL_CRNL:
-                if (cstate->line_buf.len < 2 ||
-                    cstate->line_buf.data[cstate->line_buf.len - 2] != '\r' ||
-                    cstate->line_buf.data[cstate->line_buf.len - 1] != '\n') {
-                    ereport(ERROR,
-                            (errcode(ERRCODE_DATA_EXCEPTION),
-                             errmsg("copy data corrupted")));
-                }
+                Assert(cstate->line_buf.len >= 2);
+                Assert(cstate->line_buf.data[cstate->line_buf.len - 2] == '\r');
+                Assert(cstate->line_buf.data[cstate->line_buf.len - 1] == '\n');
                 cstate->line_buf.len -= 2;
                 cstate->line_buf.data[cstate->line_buf.len] = '\0';
                 break;
             case EOL_UD:
-                if (cstate->line_buf.len < (int)strlen(cstate->eol) ||
-                    strstr(cstate->line_buf.data, cstate->eol) == NULL) {
-                    ereport(ERROR,
-                            (errcode(ERRCODE_DATA_EXCEPTION),
-                             errmsg("copy data corrupted")));
-                }
+                Assert(cstate->line_buf.len >= (int)strlen(cstate->eol));
+                Assert(strstr(cstate->line_buf.data, cstate->eol) != NULL);
                 cstate->line_buf.len -= strlen(cstate->eol);
                 cstate->line_buf.data[cstate->line_buf.len] = '\0';
                 break;
@@ -7084,7 +7232,7 @@ static void copy_dest_receive(TupleTableSlot* slot, DestReceiver* self)
     CopyState cstate = myState->cstate;
 
     /* Make sure the tuple is fully deconstructed */
-    slot_getallattrs(slot);
+    tableam_tslot_getallattrs(slot);
 
     /* And send the data */
     CopyOneRowTo(cstate, InvalidOid, slot->tts_values, slot->tts_isnull);
@@ -7345,14 +7493,13 @@ char* scan_dir(DIR* dir, const char* dirpath, const char* pattern, long* filesiz
 
 char* TrimStr(const char* str)
 {
-    int len;
-    char* end = NULL;
-    char* cur = NULL;
-
     if (str == NULL) {
         return NULL;
     }
-    
+
+    int len;
+    char* end = NULL;
+    char* cur = NULL;
     char* cpyStr = pstrdup(str);
     char* begin = cpyStr;
     errno_t rc;
@@ -7886,12 +8033,9 @@ static int CopyGetDataFileSegment(CopyState cstate, void* databuf, int minread, 
 //
 int HandleGDSCmd(CopyState cstate, StringInfo buf)
 {
-#ifndef ENABLE_MULTIPLE_NODES
-    ereport(ERROR, (errmodule(MOD_GDS), (errmsg("No GDS service available in single-node mode."))));
-#endif
     int retval = 0;
     CmdBase* cmd = DeserializeCmd(buf);
-    GDSStream* stream = dynamic_cast<GDSStream *>(cstate->io_stream);
+    GDSStream* stream = dynamic_cast<GDSStream*>(cstate->io_stream);
     if (stream == NULL) {
         ereport(ERROR,
             (errmodule(MOD_GDS),
@@ -7984,12 +8128,12 @@ int HandleGDSCmd(CopyState cstate, StringInfo buf)
  */
 static bool CopyGetNextLineFromGDS(CopyState cstate)
 {
-#ifndef ENABLE_MULTIPLE_NODES
-        ereport(ERROR, (errmodule(MOD_GDS), (errmsg("No GDS service available in single-node mode."))));
-#endif
-
-    GDSStream* streamfd = dynamic_cast<GDSStream *>(cstate->io_stream);
+    GDSStream* streamfd = dynamic_cast<GDSStream*>(cstate->io_stream);
     Assert(streamfd != NULL);
+    if (unlikely(streamfd == NULL)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("invalid streamfd value.")));
+    }
 
     StringInfo buffer = streamfd->m_inBuf;
     stringinfo_ptr inBuffer = &cstate->inBuffer;
@@ -8276,9 +8420,9 @@ void execExport(CopyState cpstate, TupleTableSlot* slot)
 
     Oid tupOid = InvalidOid;
     if (slot->tts_tuple && RelationGetDescr(cpstate->rel)->tdhasoid)
-        tupOid = HeapTupleGetOid(slot->tts_tuple);
+        tupOid = HeapTupleGetOid((HeapTuple) slot->tts_tuple);
 
-    slot_getallattrs(slot);
+    tableam_tslot_getallattrs(slot);
     CopyOneRowTo(cpstate, tupOid, slot->tts_values, slot->tts_isnull);
 
     (void)MemoryContextSwitchTo(oldcontext);
@@ -8329,11 +8473,16 @@ void endExport(CopyState cstate)
                 cmd.m_type = CMD_TYPE_END;
                 SerializeCmd(&cmd, stream->m_outBuf);
                 stream->Flush();
+                stream->Close();
                 delete stream;
             }
         } else {
-            GDSStream* stream = dynamic_cast<GDSStream *>(cstate->io_stream);
+            GDSStream* stream = dynamic_cast<GDSStream*>(cstate->io_stream);
             Assert(stream != NULL);
+            if (unlikely(stream == NULL)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("invalid stream value.")));
+            }
             CmdBase cmd;
             if (cstate->outBuffer->len > 0)
                 RemoteExportFlushData(cstate);
@@ -8494,19 +8643,19 @@ static void exportAppendOutBuffer(CopyState cstate)
 
 inline static void RemoteExportFlushData(CopyState cstate)
 {
-#ifndef ENABLE_MULTIPLE_NODES
-        ereport(ERROR, (errmodule(MOD_GDS), (errmsg("No GDS service available in single-node mode."))));
-#endif
-
     int retval = 0;
-    GDSStream* stream = dynamic_cast<GDSStream *>(cstate->io_stream);
-
-    Assert(stream != NULL);
+    GDSStream* stream = dynamic_cast<GDSStream*>(cstate->io_stream);
 
     if (cstate->copy_dest == COPY_OBS) {
         cstate->io_stream->Write(cstate->outBuffer->data, cstate->outBuffer->len);
         resetStringInfo(cstate->outBuffer);
         return;
+    }
+
+    Assert(stream != NULL);
+    if (unlikely(stream == NULL)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("invalid stream value.")));
     }
 
     PackData(stream->m_outBuf, cstate->outBuffer);
@@ -8614,9 +8763,9 @@ void FlushErrorInfo(Relation rel, EState* estate, ErrorCacheEntry* cache)
             HeapTuple tup = NULL;
 
             CHECK_FOR_INTERRUPTS();
-            tup = heap_form_tuple(err.m_desc, err.m_values, err.m_isNull);
-            (void)heap_insert(rel, tup, estate->es_output_cid, 0, NULL);
-            heap_freetuple(tup);
+            tup = (HeapTuple)heap_form_tuple(err.m_desc, err.m_values, err.m_isNull);
+            tableam_tuple_insert(rel, tup, estate->es_output_cid, 0, NULL);
+            tableam_tops_free_tuple(tup);
         }
     }
 }

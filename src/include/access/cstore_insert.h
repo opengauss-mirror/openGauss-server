@@ -30,7 +30,7 @@
 #include "access/cstore_psort.h"
 #include "access/cstore_vector.h"
 #include "access/cstore_minmax_func.h"
-#include "storage/cstore_compress.h"
+#include "storage/cstore/cstore_compress.h"
 #include "storage/spin.h"
 
 struct InsertArg {
@@ -213,7 +213,7 @@ private:
 
     /* work for Index insert */
     ResultRelInfo *m_resultRelInfo; /* contain index meta info */
-    bool* m_isIndexInfoCreatedLocal;  /* whether the indexInfo exprState intialized locally within this class */
+
     Relation *m_idxRelation;        /* index relations */
     InsertArg *m_idxInsertArgs;     /* index inserting arguments */
     CStoreInsert **m_idxInsert;     /* index inserter */
@@ -352,7 +352,7 @@ private:
         return (m_last_insert_partition != -1) && (m_last_insert_partition != partitionIdx);
     };
 
-    Relation GetPartFakeRelation(int partitionIdx)
+    inline Relation GetPartFakeRelation(int partitionIdx)
     {
         AutoContextSwitch contextSwitcher(m_cstorePartMemContext);
 

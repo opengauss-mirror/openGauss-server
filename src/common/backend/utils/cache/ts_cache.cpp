@@ -46,7 +46,7 @@
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 /*
  * MAXTOKENTYPE/MAXDICTSPERTT are arbitrary limits on the workspace size
@@ -412,8 +412,7 @@ TSConfigCacheEntry* lookup_ts_config_cache(Oid cfgId)
         if (!OidIsValid(cfg->cfgparser)) {
             ereport(ERROR,
                 (errcode(ERRCODE_CONFIG_FILE_ERROR), errmsg("text search configuration %u has no parser", cfgId)));
-        }
-
+		}
         if (entry == NULL) {
             bool found = false;
 
@@ -439,7 +438,7 @@ TSConfigCacheEntry* lookup_ts_config_cache(Oid cfgId)
 
         optdatum = SysCacheGetAttr(TSCONFIGOID, tp, Anum_pg_ts_config_cfoptions, &isnull);
 
-        /* we record defined options in configuration and fill in undefined options with default value */
+        /*we record defined options in configuration and fill in undefined options with default value */
         bytea* bytea_opts = tsearch_config_reloptions(optdatum, false, cfg->cfgparser, true);
         if (PointerIsValid(bytea_opts)) {
             Assert(
@@ -603,13 +602,13 @@ bool check_TSCurrentConfig(char** newval, void** extra, GucSource source)
         }
         cfg = (Form_pg_ts_config)GETSTRUCT(tuple);
 
-        buf = quote_qualified_identifier(get_namespace_name(cfg->cfgnamespace, true), NameStr(cfg->cfgname));
+        buf = quote_qualified_identifier(get_namespace_name(cfg->cfgnamespace), NameStr(cfg->cfgname));
 
         ReleaseSysCache(tuple);
 
         /* GUC wants it malloc'd not palloc'd */
         pfree(*newval);
-        *newval = MemoryContextStrdup(u_sess->top_mem_cxt, buf);
+        *newval = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), buf);
         pfree(buf);
         buf = NULL;
         if (!*newval) {

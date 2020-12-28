@@ -29,6 +29,7 @@
 #include "postgres_fe.h"
 #include "gs_tar_const.h"
 #include "streamutil.h"
+#include "libpq/libpq-fe.h"
 #include "fetchmot.h"
 #include "utils/builtins.h"
 #include "common/fe_memutils.h"
@@ -51,21 +52,38 @@ static void CheckConnResult(PGconn* conn, const char* progname)
     PQclear(res);
 }
 
-static void MotReceiveAndAppendTarFile(
-    const char* basedir, const char* chkptName, PGconn* conn, const char* progname, int compresslevel)
+static char* GenerateChpktHeader(const char* chkptName) 
+{
+    char* copybuf = (char*)xmalloc0(TAR_BLOCK_SIZE);
+    int chkptDirLen = strlen(chkptName);
+    errno_t errorno = strcpy_s(copybuf + 2, chkptDirLen + 1, chkptName);
+    securec_check_c(errorno, "", "");
+
+    copybuf[0] = '.';
+    copybuf[1] = '/';
+    copybuf[chkptDirLen + 2] = '/';
+    copybuf[TAR_FILE_TYPE] = TAR_TYPE_DICTORY;
+
+    for (int i = 0; i < 11; i++) {
+        copybuf[TAR_LEN_LEFT + i] = '0';
+    }
+    errorno = sprintf_s(&copybuf[TAR_FILE_MODE], TAR_BLOCK_SIZE - TAR_FILE_MODE, "%07o ", FILE_PERMISSION);
+    securec_check_ss_c(errorno, "", "");
+    return copybuf;
+}
+
+static void MotReceiveAndAppendTarFile(const char* basedir, const char* chkptName, PGconn* conn, const char* progname,
+                                       int compresslevel)
 {
     CheckConnResult(conn, progname);
 
     FILE* tarfile = NULL;
     char filename[MAXPGPATH];
-    errno_t errorno = EOK;
-    char* copybuf = NULL;
-    FILE* file = NULL;
     char current_path[MAXPGPATH];
     int current_len_left = 0;
     int current_padding = 0;
 
-    errorno = strncpy_s(current_path, sizeof(current_path), basedir, strlen(basedir));
+    errno_t errorno = strncpy_s(current_path, sizeof(current_path), basedir, sizeof(current_path) - 1);
     securec_check_c(errorno, "", "");
 
 #ifdef HAVE_LIBZ
@@ -83,10 +101,7 @@ static void MotReceiveAndAppendTarFile(
 
             ztarfile = gzdopen(duplicatedfd, "ab");
             if (gzsetparams(ztarfile, compresslevel, Z_DEFAULT_STRATEGY) != Z_OK) {
-                fprintf(stderr,
-                    _("%s: could not set compression level %d: %s\n"),
-                    progname,
-                    compresslevel,
+                fprintf(stderr, _("%s: could not set compression level %d: %s\n"), progname, compresslevel,
                     get_gz_error(ztarfile));
                 close(duplicatedfd);
                 duplicatedfd = -1;
@@ -96,71 +111,52 @@ static void MotReceiveAndAppendTarFile(
             duplicatedfd = -1;
         } else
 #endif
-            tarfile = stdout;
-        errorno = strcpy_s(filename, 1, "-");
-        securec_check_c(errorno, "\0", "\0");
+        tarfile = stdout;
+        errorno = strcpy_s(filename, MAXPGPATH, "-");
+        securec_check_c(errorno, "", "");
     } else {
+        const char* formatName = (compresslevel != 0) ? "%s/base.tar.gz" : "%s/base.tar";
+        errorno = snprintf_s(filename, sizeof(filename), sizeof(filename) - 1, formatName, basedir);
+        securec_check_ss_c(errorno, "", "");
 #ifdef HAVE_LIBZ
         if (compresslevel != 0) {
-            errorno = snprintf_s(filename, sizeof(filename), sizeof(filename) - 1, "%s/base.tar.gz", basedir);
-            securec_check_ss_c(errorno, "", "");
             ztarfile = openGzFile(filename, compresslevel, "ab");
         } else
 #endif
         {
-            errorno = snprintf_s(filename, sizeof(filename), sizeof(filename) - 1, "%s/base.tar", basedir);
-            // basdir has been realpath before
-            securec_check_ss_c(errorno, "", "");
             tarfile = fopen(filename, "ab");
         }
     }
 
     /* chkptName header */
-    copybuf = (char*)xmalloc0(TAR_BLOCK_SIZE);
-
-    errorno = snprintf_s(copybuf, TAR_BLOCK_SIZE, TAR_BLOCK_SIZE - 1, "./%s/", chkptName);
-    copybuf[TAR_FILE_TYPE] = TAR_TYPE_DICTORY;
-
-    securec_check_ss_c(errorno, "", "");
-
-    for (int i = 0; i < 11; i++) {
-        copybuf[TAR_LEN_LEFT + i] = '0';
-    }
-    errorno = sprintf_s(&copybuf[TAR_FILE_MODE], TAR_BLOCK_SIZE - TAR_FILE_MODE, "%07o ", FILE_PERMISSION);
-    securec_check_ss_c(errorno, "", "");
-
+    char* copybuf = GenerateChpktHeader(chkptName);
+    int writeResult;
 #ifdef HAVE_LIBZ
     if (ztarfile != NULL) {
-        if (!writeGzFile(ztarfile, copybuf, TAR_BLOCK_SIZE)) {
-            fprintf(stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename, strerror(errno));
-            disconnect_and_exit(1);
-        }
+        writeResult = !writeGzFile(ztarfile, copybuf, TAR_BLOCK_SIZE);
     } else
 #endif
     {
-        if (fwrite(copybuf, TAR_BLOCK_SIZE, 1, tarfile) != 1) {
-            fprintf(stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename, strerror(errno));
-            disconnect_and_exit(1);
-        }
+        writeResult = fwrite(copybuf, TAR_BLOCK_SIZE, 1, tarfile) != 1;
+    }
+
+    if (writeResult) {
+        fprintf(stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename, strerror(errno));
+        disconnect_and_exit(1);
     }
 
     while (1) {
-        int r;
-
         if (copybuf != NULL) {
             PQfreemem(copybuf);
             copybuf = NULL;
         }
 
-        r = PQgetCopyData(conn, &copybuf, 0);
+        int r = PQgetCopyData(conn, &copybuf, 0);
         if (r == -1) {
 #ifdef HAVE_LIBZ
             if (ztarfile != NULL) {
                 if (gzclose(ztarfile) != 0) {
-                    fprintf(stderr,
-                        _("%s: could not close compressed file \"%s\": %s\n"),
-                        progname,
-                        filename,
+                    fprintf(stderr, _("%s: could not close compressed file \"%s\": %s\n"), progname, filename,
                         get_gz_error(ztarfile));
                     disconnect_and_exit(1);
                 }
@@ -169,9 +165,8 @@ static void MotReceiveAndAppendTarFile(
             {
                 if (strcmp(basedir, "-") != 0) {
                     if (fclose(tarfile) != 0) {
-                        fprintf(
-                            stderr, _("%s: could not close file \"%s\": %s\n"), progname, filename, strerror(errno));
-                        tarfile = NULL;
+                        fprintf(stderr, _("%s: could not close file \"%s\": %s\n"), progname, filename,
+                                strerror(errno));
                         disconnect_and_exit(1);
                     }
                     tarfile = NULL;
@@ -206,7 +201,7 @@ static void MotReceiveAndAppendTarFile(
             /*
              * All files are padded up to 512 bytes
              */
-            current_padding = PADDING_LEFT(current_len_left);
+            current_padding = ((current_len_left + TAR_FILE_PADDING) & ~TAR_FILE_PADDING) - current_len_left;
             /*
              * First part of header is zero terminated filename.
              * when getting a checkpoint, file name can be either
@@ -215,25 +210,19 @@ static void MotReceiveAndAppendTarFile(
              */
             if (strstr(copybuf, "mot.ctrl")) {
                 errorno =
-                    snprintf_s(filename, sizeof(filename), sizeof(filename) - 1, "%s/%s", current_path, "mot.ctrl");
+                        snprintf_s(filename, sizeof(filename), sizeof(filename) - 1, "%s/%s", current_path, "mot.ctrl");
                 securec_check_ss_c(errorno, "", "");
             } else {
                 char* chkptOffset = strstr(copybuf, chkptName);
-                if (chkptOffset) {
-                    errorno = snprintf_s(
-                        filename, sizeof(filename), sizeof(filename) - 1, "%s/%s", current_path, chkptOffset);
-                    securec_check_ss_c(errorno, "", "");
-                } else {
-                    errorno =
-                        snprintf_s(filename, sizeof(filename), sizeof(filename) - 1, "%s/%s", current_path, copybuf);
-                    securec_check_ss_c(errorno, "", "");
-                }
+                char* cpBuffer = chkptOffset ? chkptOffset : copybuf;
+                errorno = snprintf_s(filename, sizeof(filename), sizeof(filename) - 1, "%s/%s", current_path, cpBuffer);
+                securec_check_ss_c(errorno, "", "");
             }
 
             if (filename[strlen(filename) - 1] == '/') {
                 filename[strlen(filename) - 1] = '\0'; /* Remove trailing slash */
-                errorno = strcpy_s(copybuf, r, filename);
-                securec_check_c(errorno, "\0", "\0");
+                errorno = strcpy_s(copybuf, strlen(filename), filename);
+                securec_check_c(errorno, "", "");
                 continue; /* directory or link handled */
             }
 #ifdef HAVE_LIBZ
@@ -258,21 +247,19 @@ static void MotReceiveAndAppendTarFile(
              * Continuing blocks in existing file
              */
             if (current_len_left == 0 && r == current_padding) {
+                int writeResult;
 #ifdef HAVE_LIBZ
                 if (ztarfile != NULL) {
-                    if (!writeGzFile(ztarfile, copybuf, current_padding)) {
-                        fprintf(
-                            stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename, strerror(errno));
-                        disconnect_and_exit(1);
-                    }
+                    writeResult = !writeGzFile(ztarfile, copybuf, current_padding);
                 } else
 #endif
                 {
-                    if (fwrite(copybuf, current_padding, 1, tarfile) != 1) {
-                        fprintf(
-                            stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename, strerror(errno));
-                        disconnect_and_exit(1);
-                    }
+                    writeResult = fwrite(copybuf, current_padding, 1, tarfile) != 1;
+                }
+                if (writeResult) {
+                    fprintf(stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename,
+                        strerror(errno));
+                    disconnect_and_exit(1);
                 }
                 totaldone += r;
                 current_padding -= r;
@@ -299,18 +286,10 @@ static void MotReceiveAndAppendTarFile(
             }
             current_len_left -= r;
             if (current_len_left == 0 && current_padding == 0) {
-                /*
-                 * Received the last block, and there is no padding to be
-                 * expected. Close the file and move on to the next tar
-                 * header.
-                 */
-                fclose(file);
-                file = NULL;
                 continue;
             }
         } /* continuing data in existing file */
     }     /* loop over all data blocks */
-
     if (tarfile != NULL) {
         fclose(tarfile);
         tarfile = NULL;
@@ -320,8 +299,6 @@ static void MotReceiveAndAppendTarFile(
         PQfreemem(copybuf);
         copybuf = NULL;
     }
-
-    return;
 }
 
 /*
@@ -403,7 +380,7 @@ static void MotReceiveAndUnpackTarFile(const char* basedir, const char* chkptNam
             /*
              * All files are padded up to 512 bytes
              */
-            current_padding = PADDING_LEFT(current_len_left);
+            current_padding = ((current_len_left + 511) & ~511) - current_len_left;
 
             /*
              * First part of header is zero terminated filename.
@@ -551,12 +528,10 @@ static void MotReceiveAndUnpackTarFile(const char* basedir, const char* chkptNam
  * @param conn The connection to use in order to fetch.
  * @param progname The caller program name (for logging).
  * @param verbose Controls verbose output.
- * @param format Plain text format ('p') or tar format ('t').
- * @param compresslevel Compression level.
  * @return Boolean value denoting success or failure.
  */
-void FetchMotCheckpoint(
-    const char* basedir, PGconn* conn, const char* progname, bool verbose, const char format, int compresslevel)
+void FetchMotCheckpoint(const char* basedir, PGconn* conn, const char* progname, bool verbose, const char format,
+                        int compresslevel)
 {
     PGresult* res = NULL;
     const char* fetchQuery = "FETCH_MOT_CHECKPOINT";
@@ -632,8 +607,8 @@ void FetchMotCheckpoint(
                     disconnect_and_exit(1);
                 }
             } else {
-                fprintf(
-                    stderr, "%s: directory \"%s\" already exists, please remove it and try again\n", progname, dirName);
+                fprintf(stderr, "%s: directory \"%s\" already exists, please remove it and try again\n", progname,
+                        dirName);
                 PQclear(res);
                 disconnect_and_exit(1);
             }

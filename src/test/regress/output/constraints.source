@@ -285,55 +285,45 @@ DROP TABLE ATACC1 CASCADE;
 --
 DELETE FROM INSERT_TBL;
 ALTER SEQUENCE INSERT_SEQ RESTART WITH 4;
+ERROR:  ALTER SEQUENCE is not yet supported.
 CREATE TABLE tmp (xd INT, yd TEXT, zd INT);
 INSERT INTO tmp VALUES (null, 'Y', null);
 INSERT INTO tmp VALUES (5, '!check failed', null);
 INSERT INTO tmp VALUES (null, 'try again', null);
 INSERT INTO INSERT_TBL(y) select yd from tmp order by yd;
+ERROR:  new row for relation "insert_tbl" violates check constraint "insert_con"
+DETAIL:  Failing row contains (9, !check failed, -9).
 SELECT '' AS three, * FROM INSERT_TBL order by x,y,z;
- three | x |       y       | z  
--------+---+---------------+----
-       | 4 | !check failed | -4
-       | 5 | try again     | -5
-       | 6 | Y             | -6
-(3 rows)
+ three | x | y | z 
+-------+---+---+---
+(0 rows)
 
 INSERT INTO INSERT_TBL SELECT * FROM tmp WHERE yd = 'try again';
 ERROR:  null value in column "x" violates not-null constraint
 DETAIL:  Failing row contains (null, try again, null).
 INSERT INTO INSERT_TBL(y,z) SELECT yd, -7 FROM tmp WHERE yd = 'try again';
+ERROR:  new row for relation "insert_tbl" violates check constraint "insert_tbl_check"
+DETAIL:  Failing row contains (10, try again, -7).
 INSERT INTO INSERT_TBL(y,z) SELECT yd, -8 FROM tmp WHERE yd = 'try again';
-ERROR:  new row for relation "insert_tbl" violates check constraint "insert_con"
-DETAIL:  Failing row contains (8, try again, -8).
+ERROR:  new row for relation "insert_tbl" violates check constraint "insert_tbl_check"
+DETAIL:  Failing row contains (11, try again, -8).
 SELECT '' AS four, * FROM INSERT_TBL order by x,y,z;
- four | x |       y       | z  
-------+---+---------------+----
-      | 4 | !check failed | -4
-      | 5 | try again     | -5
-      | 6 | Y             | -6
-      | 7 | try again     | -7
-(4 rows)
+ four | x | y | z 
+------+---+---+---
+(0 rows)
 
 DROP TABLE tmp;
 --
 -- Check constraints on UPDATE
 --
 UPDATE INSERT_TBL SET x = NULL WHERE x = 5;
-ERROR:  null value in column "x" violates not-null constraint
-DETAIL:  Failing row contains (null, try again, -5).
 UPDATE INSERT_TBL SET x = 6 WHERE x = 6;
 UPDATE INSERT_TBL SET x = -z, z = -x;
 UPDATE INSERT_TBL SET x = z, z = x;
-ERROR:  new row for relation "insert_tbl" violates check constraint "insert_con"
-DETAIL:  Failing row contains (-4, !check failed, 4).
 SELECT * FROM INSERT_TBL order by x,y,z;
- x |       y       | z  
----+---------------+----
- 4 | !check failed | -4
- 5 | try again     | -5
- 6 | Y             | -6
- 7 | try again     | -7
-(4 rows)
+ x | y | z 
+---+---+---
+(0 rows)
 
 -- DROP TABLE INSERT_TBL;
 --
@@ -342,7 +332,7 @@ SELECT * FROM INSERT_TBL order by x,y,z;
 CREATE TABLE COPY_TBL (x INT, y TEXT, z INT,
 	CONSTRAINT COPY_CON
 	CHECK (x > 3 AND y <> 'check failed' AND x < 7 ));
-COPY COPY_TBL FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/constro.data';
+COPY COPY_TBL FROM '@abs_srcdir@/data/constro.data';
 SELECT '' AS two, * FROM COPY_TBL order by x,y,z;
  two | x |       y       | z 
 -----+---+---------------+---
@@ -350,7 +340,7 @@ SELECT '' AS two, * FROM COPY_TBL order by x,y,z;
      | 6 | OK            | 4
 (2 rows)
 
-COPY COPY_TBL FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/constrf.data';
+COPY COPY_TBL FROM '@abs_srcdir@/data/constrf.data';
 ERROR:  new row for relation "copy_tbl" violates check constraint "copy_con"
 DETAIL:  Failing row contains (7, check failed, 6).
 CONTEXT:  COPY copy_tbl, line 2: "7	check failed	6"

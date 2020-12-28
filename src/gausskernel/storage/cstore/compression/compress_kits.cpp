@@ -34,9 +34,9 @@
     {                                                                                                                \
         if (NULL == (buf))                                                                                           \
             ereport(ERROR,                                                                                           \
-                (errcode(ERRCODE_OUT_OF_MEMORY),                                                                     \
-                    errmsg("memory is temporarily unavailable"),                                                     \
-                    errdetail("Failed on request of size %lu bytes under storage engine.", (unsigned long)(size)))); \
+                    (errcode(ERRCODE_OUT_OF_MEMORY),                                                                     \
+                     errmsg("memory is temporarily unavailable"),                                                     \
+                     errdetail("Failed on request of size %lu bytes under storage engine.", (unsigned long)(size)))); \
     }
 
 /*
@@ -49,8 +49,9 @@ void BufferHelperMalloc(BufferHelper* p, Size in_size)
 {
     Assert(Unknown == p->bufType);
     // In order to avoid over-boundary read in the function readData, more 8 byte memory is allocated.
-    if (unlikely(in_size > SIZE_MAX - 8)) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Size overflow")));
+
+    if (in_size + 8 <= 0) {
+        ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg(" palloc size to big, size(%ld).", (long)in_size)));
     }
     Size s = in_size + 8;
     if (s < MaxAllocSize) {
@@ -60,7 +61,7 @@ void BufferHelperMalloc(BufferHelper* p, Size in_size)
     } else {
         /* malloc from protected memory */
         p->bufType = FromMemProt;
-        p->buf = (char*)GS_MEMPROT_MALLOC(s);
+        p->buf = (char*)GS_MEMPROT_MALLOC(s, true);
         MEMPROT_ALLOC_VALID(p->buf, s);
         gs_atomic_add_64(&storageTrackedBytes, s);
     }
@@ -76,8 +77,8 @@ void BufferHelperMalloc(BufferHelper* p, Size in_size)
 void BufferHelperRemalloc(BufferHelper* p, Size in_size)
 {
     // In order to avoid over-boundary read in the function readData, more 8 byte memory is allocated.
-    if (unlikely(in_size > SIZE_MAX - 8)) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Size overflow")));
+    if (in_size + 8 <= 0) {
+        ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg(" palloc size to big, size(%ld).", (long)in_size)));
     }
     Size s = in_size + 8;
     if (FromMemCnxt == p->bufType) {
@@ -86,7 +87,7 @@ void BufferHelperRemalloc(BufferHelper* p, Size in_size)
             p->bufSize = s;
         } else {
             /* fetch big memory, and copy original data. */
-            char* buf = (char*)GS_MEMPROT_MALLOC(s);
+            char* buf = (char*)GS_MEMPROT_MALLOC(s, true);
             MEMPROT_ALLOC_VALID(buf, s);
             gs_atomic_add_64(&storageTrackedBytes, s);
 
@@ -102,13 +103,13 @@ void BufferHelperRemalloc(BufferHelper* p, Size in_size)
         Assert(FromMemProt == p->bufType);
         if (t_thrd.utils_cxt.gs_mp_inited) {
             /* realloc directly from protected memory */
-            p->buf = (char*)GS_MEMPROT_REALLOC(p->buf, p->bufSize, s);
+            p->buf = (char*)GS_MEMPROT_REALLOC(p->buf, p->bufSize, s, true);
             MEMPROT_ALLOC_VALID(p->buf, s - p->bufSize);
             gs_atomic_add_64(&storageTrackedBytes, s - p->bufSize);
             p->bufSize = s;
         } else {
             /* malloc a new bigger memory from protected memory */
-            char* buf = (char*)GS_MEMPROT_MALLOC(s);
+            char* buf = (char*)GS_MEMPROT_MALLOC(s, true);
             MEMPROT_ALLOC_VALID(buf, s);
             gs_atomic_add_64(&storageTrackedBytes, s);
 
@@ -148,10 +149,10 @@ void BufferHelperFree(BufferHelper* p)
 
 #ifdef USE_ASSERT_CHECKING
 static void RleCheckCompressedData(_in_ char* rawData, _in_ int rawDataSize, _in_ char* cmprBuf, _in_ int cmprBufSize,
-    _in_ short eachValSize, _in_ unsigned int minRepeats);
+                                   _in_ short eachValSize, _in_ unsigned int minRepeats);
 
 static void DeltaCheckCompressedData(_in_ char* rawData, _in_ int rawDataSize, _in_ char* cmprBuf, _in_ int cmprBufSize,
-    _in_ short eachRawValSize, _in_ short eachCmprValSize, _in_ int64 minVal, _in_ int64 maxVal);
+                                     _in_ short eachRawValSize, _in_ short eachCmprValSize, _in_ int64 minVal, _in_ int64 maxVal);
 
 static void Lz4CheckCompressedData(
     _in_ const char* rawData, _in_ int rawDataSize, _in_ const char* cmprBuf, _in_ int cmprBufSize);
@@ -386,14 +387,15 @@ static FORCE_INLINE void writeData(char* out, unsigned int* outpos, int64 data)
 // different m_eachValSize, different marker used, just only repeating 0xFE.
 // m_eachValSize is the index of this array.
 const int64 RleCoder::RleMarker[] = {(int64)0,
-    (int64)0x00000000000000FE,
-    (int64)0x000000000000FEFE,
-    (int64)0x0000000000FEFEFE,
-    (int64)0x00000000FEFEFEFE,
-    (int64)0x000000FEFEFEFEFE,
-    (int64)0x0000FEFEFEFEFEFE,
-    (int64)0x00FEFEFEFEFEFEFE,
-    (int64)0xFEFEFEFEFEFEFEFE};
+                                     (int64)0x00000000000000FE,
+                                     (int64)0x000000000000FEFE,
+                                     (int64)0x0000000000FEFEFE,
+                                     (int64)0x00000000FEFEFEFE,
+                                     (int64)0x000000FEFEFEFEFE,
+                                     (int64)0x0000FEFEFEFEFEFE,
+                                     (int64)0x00FEFEFEFEFEFEFE,
+                                     (int64)0xFEFEFEFEFEFEFEFE
+                                    };
 
 // make sure that RLE method can save some space than plain storage for X repeats values.
 // X means the repeating times.
@@ -1255,19 +1257,19 @@ void ZlibEncoder::Prepare(int level)
 
         case Z_STREAM_ERROR:
             ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("level %d is invalid when preparing zlib encoder.", level)));
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("level %d is invalid when preparing zlib encoder.", level)));
             break;
 
         case Z_VERSION_ERROR:
             ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("version is incompatible when preparing zlib encoder.")));
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("version is incompatible when preparing zlib encoder.")));
             break;
 
         default:
             ereport(ERROR,
-                (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("error %d occurs when preparing zlib encoder.", m_errno)));
+                    (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("error %d occurs when preparing zlib encoder.", m_errno)));
             break;
     }
 }
@@ -1410,7 +1412,7 @@ int ZlibDecoder::Decompress(unsigned char* outbuf, const int outsize, bool& done
 
 // decompress and check immediately after compressing at running time
 static void RleCheckCompressedData(_in_ char* rawData, _in_ int rawDataSize, _in_ char* cmprBuf, _in_ int cmprBufSize,
-    _in_ short eachValSize, _in_ unsigned int minRepeats)
+                                   _in_ short eachValSize, _in_ unsigned int minRepeats)
 {
     BufferHelper uncmprBuf = {NULL, 0, Unknown};
     BufferHelperMalloc(&uncmprBuf, rawDataSize);
@@ -1424,7 +1426,7 @@ static void RleCheckCompressedData(_in_ char* rawData, _in_ int rawDataSize, _in
 }
 
 static void DeltaCheckCompressedData(_in_ char* rawData, _in_ int rawDataSize, _in_ char* cmprBuf, _in_ int cmprBufSize,
-    _in_ short eachRawValSize, _in_ short eachCmprValSize, _in_ int64 minVal, _in_ int64 maxVal)
+                                     _in_ short eachRawValSize, _in_ short eachCmprValSize, _in_ int64 minVal, _in_ int64 maxVal)
 {
     short inValSize = DeltaGetBytesNum(minVal, maxVal);
     Assert(inValSize == eachCmprValSize);

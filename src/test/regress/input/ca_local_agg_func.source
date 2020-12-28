@@ -1,0 +1,6 @@
+set explain_perf_mode=normal;
+
+select var_pop(c4), var_pop(c5), var_pop(c7) from aggtable1 group by c8 order by c8;
+select var_samp(c4), var_samp(c5), var_samp(c7) from aggtable1 group by c8 order by c8;
+select variance(c4), variance(c5), variance(c7) from aggtable1 group by c8 order by c8;
+select stddev_pop(c4), stddev_pop(c5), stddev_pop(c7) from aggtable1 group by c8 order by c8;

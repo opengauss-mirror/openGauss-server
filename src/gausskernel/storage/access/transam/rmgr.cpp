@@ -34,7 +34,6 @@
 #include "access/nbtree.h"
 #include "access/spgist.h"
 #include "access/xact.h"
-#include "access/fsm_redo.h"
 #include "access/xlog_internal.h"
 #include "catalog/storage_xlog.h"
 #include "commands/dbcommands.h"
@@ -42,15 +41,17 @@
 #include "commands/tablespace.h"
 #include "replication/slot.h"
 #ifdef PGXC
-#include "pgxc/barrier.h"
+    #include "pgxc/barrier.h"
 #endif
 #include "storage/standby.h"
 #include "utils/relmapper.h"
+#ifdef ENABLE_MOT
 #include "storage/mot/mot_xlog.h"
+#endif
 
 /* must be kept in sync with RmgrData definition in xlog_internal.h */
 #define PG_RMGR(symname, name, redo, desc, startup, cleanup, safe_restartpoint) \
-    {name, redo, desc, startup, cleanup, safe_restartpoint},
+    { name, redo, desc, startup, cleanup, safe_restartpoint },
 
 const RmgrData RmgrTable[RM_MAX_ID + 1] = {
 #include "access/rmgrlist.h"

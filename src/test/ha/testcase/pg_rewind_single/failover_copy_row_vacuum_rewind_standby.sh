@@ -31,12 +31,12 @@ fi
 stop_standby
 
 start_primary_as_standby
-gs_ctl failover -D $data_dir/datanode1 
+gs_ctl failover -D $data_dir/datanode1 -Z single_node
 
 check_dummy_setup
 
 #use incremental to mirror the primary on standby, sync the diferent part between them.
-gs_ctl build -D $data_dir/datanode1_standby
+gs_ctl build -D $data_dir/datanode1_standby -Z single_node -b incemental
 
 #check if rewind is ok.
 #start_standby

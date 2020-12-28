@@ -1,0 +1,20 @@
+--
+-- bypass parallel test part4
+--
+start transaction;
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+update bypass_paral set col3='pp3' where col1 is null and col2 is not null;
+select * from bypass_paral where col1 is null and col2 is not null;
+ col1 | col2 |    col3     
+------+------+-------------
+      |    1 | pp3
+      |    2 | pp3
+      |    2 | test_insert
+(3 rows)
+
+commit;

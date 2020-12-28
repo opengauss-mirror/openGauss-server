@@ -1,0 +1,198 @@
+DROP SCHEMA bicoredata_008 CASCADE;
+ERROR:  schema "bicoredata_008" does not exist
+CREATE SCHEMA bicoredata_008;
+SET CURRENT_SCHEMA = bicoredata_008;
+--FUNC_112.Result differs from CloudBU because the order outcome is different from HIVE 
+CREATE FUNCTION GetLastValue(text, text)
+	RETURNS text
+	AS'com.huawei.udf.GetLastValue.evaluate'
+	LANGUAGE java;
+SELECT GetLastValue('', 'testvalue');
+ getlastvalue 
+--------------
+ testvalue
+(1 row)
+
+SELECT GetLastValue('', '');
+ getlastvalue 
+--------------
+ 
+(1 row)
+
+SELECT GetLastValue('testuser', 'testvalue');
+ getlastvalue 
+--------------
+ testvalue
+(1 row)
+
+SELECT GetLastValue(user1,value) FROM 
+(
+	SELECT user1,value FROM
+	(
+	SELECT 'testuser' AS user1,'testvalue' AS value
+	UNION ALL
+	SELECT 'testuser' AS user1,'' AS value
+	)t
+	GROUP BY t.value,t.user1
+	ORDER BY t.value DESC
+)t2;
+ getlastvalue 
+--------------
+ 
+ testvalue
+(2 rows)
+
+SELECT GetLastValue(user,value) FROM
+(
+	SELECT user,value FROM 
+	(
+	SELECT 'testuser' AS user,'testvalue' AS value
+	UNION ALL
+	SELECT 'testuser2' AS user,'' AS value
+	)t 
+	GROUP BY t.value,t.user
+	ORDER BY t.value DESC
+)t2;
+ getlastvalue 
+--------------
+ 
+ testvalue
+(2 rows)
+
+--!FUNC_113.	GetPushPre input ArrayList
+--!FUNC_114.	OsVauleSort dependent on file
+--!FUNC_115.	PushMsgProcess input ArrayList<String>
+--FUNC_116
+CREATE FUNCTION ReplaceTeminal(text)
+	RETURNS text
+	AS'com.huawei.udf.ReplaceTeminal.evaluate'
+	LANGUAGE java;
+SELECT replaceteminal('2.2.1') ;
+ replaceteminal 
+----------------
+ android 2.2
+(1 row)
+
+--FUNC_117
+CREATE FUNCTION replaceTerminalInfo(text)
+	RETURNS text
+	AS'com.huawei.udf.ReplaceTerminalInfoUDF.evaluate'
+	LANGUAGE java;
+SELECT replaceTerminalInfo('coolpad5860');
+ replaceterminalinfo 
+---------------------
+ coolpad 5860
+(1 row)
+
+--FUNC_118
+CREATE FUNCTION replaceTerminalOs(text)
+	RETURNS text
+	AS'com.huawei.udf.ReplaceTerminalOsUDF.evaluate'
+	LANGUAGE java;
+SELECT replaceTerminalOs('4.2');
+ replaceterminalos 
+-------------------
+ android 4.2
+(1 row)
+
+--!FUNC_119.	versionUpgrade input ArrayList
+--FUNC_120
+CREATE FUNCTION GetAdPushMsg(text, int4)
+	RETURNS text
+	AS'com.huawei.udf.GetAdPushMsg.evaluate(java.lang.String, java.lang.Integer)'
+	LANGUAGE java;
+--LACK OF TESTCASE
+--!FUNC_121 GetHonorTimeAndVersions returns map<String,String>
+--CREATE FUNCTION GetHonorTimeAndVersions RETURNS text AS'com.huawei.udf.GetHonorTimeAndVersions.evaluate' LANGUAGE java;
+--SELECT GetHonorTimeAndVersions('20151001');
+--FUNC_122 GetMinSeconds returns Long
+CREATE FUNCTION GetMinSeconds(text, text)
+	RETURNS int8
+	AS'com.huawei.udf.GetMinSecondsUDF.evaluate'
+	LANGUAGE java;
+SELECT GetMinSeconds('20161010','yyyyMMdd');
+ getminseconds 
+---------------
+ 1476028800000
+(1 row)
+
+--!FUNC_123  has dependent file
+--FUNC_124
+CREATE FUNCTION GetOperatorFromNumber(text)
+	RETURNS text
+	AS 'com.huawei.udf.GetOperatorFromNumber.evaluate'
+	LANGUAGE java;
+SELECT getOperatorFromNumber('13665696273');
+ getoperatorfromnumber 
+-----------------------
+ 1
+(1 row)
+
+--FUNC_125
+CREATE FUNCTION IsDeviceIdLegal(varchar)
+	RETURNS bool
+	AS 'com.huawei.udf.IsDeviceIdLegal.evaluate'
+	LANGUAGE java;
+SELECT isdeviceidlegal('0123456789abcde');
+ isdeviceidlegal 
+-----------------
+ t
+(1 row)
+
+--FUNC_126
+CREATE FUNCTION LongToIP(int8)
+	RETURNS text
+	AS 'com.huawei.udf.LongToIPUDF.evaluate(java.lang.Long)'
+	LANGUAGE java;
+SELECT LongToIP(19216811);
+  longtoip   
+-------------
+ 1.37.57.171
+(1 row)
+
+--FUNC_127
+CREATE FUNCTION LinkRelativeRatio(float8, float8, int4)
+	RETURNS float8
+	AS 'com.huawei.udf.LinkRelativeRatioUDF.evaluate(java.lang.Double, java.lang.Double, java.lang.Integer)'
+	LANGUAGE java;
+SELECT LinkRelativeRatio(1.1,2.3,5);
+ linkrelativeratio 
+-------------------
+           1.09091
+(1 row)
+
+CREATE FUNCTION LinkRelativeRatio(float8,float8)
+	RETURNS float8
+	AS 'com.huawei.udf.LinkRelativeRatioUDF.evaluate(java.lang.Double, java.lang.Double)'
+	LANGUAGE java;
+SELECT LinkRelativeRatio(1.1,2.3);
+ linkrelativeratio 
+-------------------
+          1.090909
+(1 row)
+
+--FUNC_128
+CREATE FUNCTION RevertDeviceId(varchar)
+	RETURNS varchar
+	AS 'com.huawei.udf.RevertDeviceId.evaluate'
+	LANGUAGE java;
+SELECT revertDeviceId('asd1234123456789');
+  revertdeviceid  
+------------------
+ asd1234123456789
+(1 row)
+
+DROP SCHEMA bicoredata_008 CASCADE;
+NOTICE:  drop cascades to 12 other objects
+DETAIL:  drop cascades to function getlastvalue(text,text)
+drop cascades to function replaceteminal(text)
+drop cascades to function replaceterminalinfo(text)
+drop cascades to function replaceterminalos(text)
+drop cascades to function getadpushmsg(text,integer)
+drop cascades to function getminseconds(text,text)
+drop cascades to function getoperatorfromnumber(text)
+drop cascades to function isdeviceidlegal(character varying)
+drop cascades to function longtoip(bigint)
+drop cascades to function linkrelativeratio(double precision,double precision,integer)
+drop cascades to function linkrelativeratio(double precision,double precision)
+drop cascades to function revertdeviceid(character varying)

@@ -1,0 +1,45 @@
+--for LLT
+--test gs_log tool
+\! @abs_bindir@/gs_log pp
+\! @abs_bindir@/gs_log -h
+\! @abs_bindir@/gs_log help
+\! @abs_bindir@/gs_log help dump
+\! @abs_bindir@/gs_log help dumpall
+\! @abs_bindir@/gs_log help gensql
+\! @abs_bindir@/gs_log help help
+\! @abs_bindir@/gs_log help haha
+\! @abs_bindir@/gs_log gensql
+\! @abs_bindir@/gs_log gensql -o 1.sql
+\! @abs_bindir@/gs_log gensql -o 1.sql
+\! rm 1.sql
+\! @abs_bindir@/gs_log gensql -p
+-- test gs_log dump
+\! cp @abs_srcdir@/data/postgresql-2018-01-17_000000.prf @abs_srcdir@/tblsp/
+\! cp @abs_srcdir@/data/postgresql-2018-01-17_000001.prf @abs_srcdir@/tblsp/
+\! cp @abs_srcdir@/data/postgresql-2018-01-17_000002.prf @abs_srcdir@/tblsp/
+\! @abs_bindir@/gs_log dump -f @abs_srcdir@/tblsp/postgresql-2018-01-17_000000.prf
+\! @abs_bindir@/gs_log dump -f @abs_srcdir@/tblsp/postgresql-2018-01-17_000001.prf
+\! @abs_bindir@/gs_log dump -f @abs_srcdir@/tblsp/postgresql-2018-01-17_000002.prf
+\! @abs_bindir@/gs_log dump -r -f @abs_srcdir@/tblsp/postgresql-2018-01-17_000000.prf
+\! @abs_bindir@/gs_log dump -r 
+\! @abs_bindir@/gs_log dump -p 
+\! @abs_bindir@/gs_log dump -f ppp
+\! touch ppp.prf
+\! @abs_bindir@/gs_log dump -f ppp.prf
+\! rm ppp.prf ppp.txt
+-- test gs_log dumpall
+\! mkdir @abs_srcdir@/tblsp/gs_profile
+\! mkdir @abs_srcdir@/tblsp/gs_profile/d1
+\! cp @abs_srcdir@/data/postgresql-2018-01-17_000000.prf @abs_srcdir@/tblsp/gs_profile/d1/
+\! mkdir @abs_srcdir@/tblsp/gs_profile/d2
+\! cp @abs_srcdir@/data/postgresql-2018-01-17_000000.prf @abs_srcdir@/tblsp/gs_profile/d2/
+\! mkdir @abs_srcdir@/tblsp/gs_profile/d3
+\! cp @abs_srcdir@/data/postgresql-2018-01-17_000000.prf @abs_srcdir@/tblsp/gs_profile/d3/
+\! mkdir @abs_srcdir@/tblsp/gs_profile/d4
+\! cp @abs_srcdir@/data/postgresql-2018-01-17_000000.prf @abs_srcdir@/tblsp/gs_profile/d4/
+\! @abs_bindir@/gs_log dumpall -d @abs_srcdir@/tblsp/gs_profile
+\! @abs_bindir@/gs_log dumpall -d @abs_srcdir@/tblsp/pp
+\! @abs_bindir@/gs_log dumpall -r -d @abs_srcdir@/tblsp/gs_profile
+\! @abs_bindir@/gs_log dumpall -r
+\! @abs_bindir@/gs_log dumpall -p 
+\! rm -rf @abs_srcdir@/tblsp/gs_profile

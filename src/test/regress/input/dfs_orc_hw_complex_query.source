@@ -1,0 +1,1046 @@
+set enable_global_stats = true;
+drop schema if exists complex_query cascade;
+create schema complex_query;
+set search_path=complex_query;
+
+-- normal table the schema, same for HDFS table 
+create table  t1(c1 int, c2 tinyint, c3 smallint, c4 integer, c5 bigint, c6 decimal, c7 char(10), c8 varchar(30), c9 text, c10 time, c11 timestamp, c12 date, c13 interval);
+create table  t2(c1 int, c2 tinyint, c3 smallint, c4 integer, c5 bigint, c6 decimal, c7 char(10), c8 varchar(30), c9 text, c10 time, c11 timestamp, c12 date, c13 interval);
+create table  t3(c1 int, c2 tinyint, c3 smallint, c4 integer, c5 bigint, c6 decimal, c7 char(10), c8 varchar(30), c9 text, c10 time, c11 timestamp, c12 date, c13 interval);
+create table  t4(c1 int, c2 tinyint, c3 smallint, c4 integer, c5 bigint, c6 decimal, c7 char(10), c8 varchar(30), c9 text, c10 time, c11 timestamp, c12 date, c13 interval);
+create table  t5(c1 int, c2 tinyint, c3 smallint, c4 integer, c5 bigint, c6 decimal, c7 char(10), c8 varchar(30), c9 text, c10 time, c11 timestamp, c12 date, c13 interval);
+create table  t6(c1 int, c2 tinyint, c3 smallint, c4 integer, c5 bigint, c6 decimal, c7 char(10), c8 varchar(30), c9 text, c10 time, c11 timestamp, c12 date, c13 interval);
+create table  t7(c1 int, c2 tinyint, c3 smallint, c4 integer, c5 bigint, c6 decimal, c7 char(10), c8 varchar(30), c9 text, c10 time, c11 timestamp, c12 date, c13 interval);
+create table  t8(c1 int, c2 tinyint, c3 smallint, c4 integer, c5 bigint, c6 decimal, c7 char(10), c8 varchar(30), c9 text, c10 time, c11 timestamp, c12 date, c13 interval);
+create table  t9(c1 int, c2 tinyint, c3 smallint, c4 integer, c5 bigint, c6 decimal, c7 char(10), c8 varchar(30), c9 text, c10 time, c11 timestamp, c12 date, c13 interval);
+create table t10(c1 int, c2 tinyint, c3 smallint, c4 integer, c5 bigint, c6 decimal, c7 char(10), c8 varchar(30), c9 text, c10 time, c11 timestamp, c12 date, c13 interval);
+
+insert into t1 values (0, 0,0,0,0, 0.001, '1', '1', '1', time'01:01:00', timestamp'2015-01-01 01:00:00', date '2015-01-01', interval'1 days 1 hours');
+insert into t1 values (1, 1,1,1,1, 1.001, '1', '1', '1', time'01:01:00', timestamp'2015-01-01 01:00:00', date '2015-01-01', interval'1 days 1 hours');
+insert into t1 values (2, 2,2,2,2, 2.001, '2', '2', '2', time'02:02:00', timestamp'2015-02-02 02:00:00', date '2015-02-02', interval'2 days 2 hours');
+insert into t1 values (3, 3,3,3,3, 3.001, '3', '3', '3', time'03:03:00', timestamp'2015-03-03 03:00:00', date '2015-03-03', interval'3 days 3 hours');
+insert into t1 values (4, 4,4,4,4, 4.001, '4', '4', '4', time'04:04:00', timestamp'2015-04-04 04:00:00', date '2015-04-04', interval'4 days 4 hours');
+insert into t1 values (5, 5,5,5,5, 5.001, '5', '5', '5', time'05:05:00', timestamp'2015-05-05 05:00:00', date '2015-05-05', interval'5 days 5 hours');
+insert into t1 values (6, 6,6,6,6, 6.001, '6', '6', '6', time'06:06:00', timestamp'2015-06-06 06:00:00', date '2015-06-06', interval'6 days 6 hours');
+insert into t1 values (7, 7,7,7,7, 7.001, '7', '7', '7', time'07:07:00', timestamp'2015-07-07 07:00:00', date '2015-07-07', interval'7 days 7 hours');
+
+/* enlarge size to 16384 rows */
+insert into t1 select (c1 + (select max(c1) from t1)), (c1 + (select max(c1) from t1)) % 8, (c1 + (select max(c1) from t1)) % 16,(c1 + (select max(c1) from t1)) % 32, (c1 + (select max(c1) from t1)) % 64, c6,c7,c8,c9,c10,c11,c12,c13 from t1;
+insert into t1 select (c1 + (select max(c1) from t1)), (c1 + (select max(c1) from t1)) % 8, (c1 + (select max(c1) from t1)) % 16,(c1 + (select max(c1) from t1)) % 32, (c1 + (select max(c1) from t1)) % 64, c6,c7,c8,c9,c10,c11,c12,c13 from t1;
+insert into t1 select (c1 + (select max(c1) from t1)), (c1 + (select max(c1) from t1)) % 8, (c1 + (select max(c1) from t1)) % 16,(c1 + (select max(c1) from t1)) % 32, (c1 + (select max(c1) from t1)) % 64, c6,c7,c8,c9,c10,c11,c12,c13 from t1;
+insert into t1 select (c1 + (select max(c1) from t1)), (c1 + (select max(c1) from t1)) % 8, (c1 + (select max(c1) from t1)) % 16,(c1 + (select max(c1) from t1)) % 32, (c1 + (select max(c1) from t1)) % 64, c6,c7,c8,c9,c10,c11,c12,c13 from t1;
+insert into t1 select (c1 + (select max(c1) from t1)), (c1 + (select max(c1) from t1)) % 8, (c1 + (select max(c1) from t1)) % 16,(c1 + (select max(c1) from t1)) % 32, (c1 + (select max(c1) from t1)) % 64, c6,c7,c8,c9,c10,c11,c12,c13 from t1;
+insert into t1 select (c1 + (select max(c1) from t1)), (c1 + (select max(c1) from t1)) % 8, (c1 + (select max(c1) from t1)) % 16,(c1 + (select max(c1) from t1)) % 32, (c1 + (select max(c1) from t1)) % 64, c6,c7,c8,c9,c10,c11,c12,c13 from t1;
+insert into t1 select (c1 + (select max(c1) from t1)), (c1 + (select max(c1) from t1)) % 8, (c1 + (select max(c1) from t1)) % 16,(c1 + (select max(c1) from t1)) % 32, (c1 + (select max(c1) from t1)) % 64, c6,c7,c8,c9,c10,c11,c12,c13 from t1;
+insert into t1 select (c1 + (select max(c1) from t1)), (c1 + (select max(c1) from t1)) % 8, (c1 + (select max(c1) from t1)) % 16,(c1 + (select max(c1) from t1)) % 32, (c1 + (select max(c1) from t1)) % 64, c6,c7,c8,c9,c10,c11,c12,c13 from t1;
+insert into t1 select (c1 + (select max(c1) from t1)), (c1 + (select max(c1) from t1)) % 8, (c1 + (select max(c1) from t1)) % 16,(c1 + (select max(c1) from t1)) % 32, (c1 + (select max(c1) from t1)) % 64, c6,c7,c8,c9,c10,c11,c12,c13 from t1;
+insert into t1 select (c1 + (select max(c1) from t1)), (c1 + (select max(c1) from t1)) % 8, (c1 + (select max(c1) from t1)) % 16,(c1 + (select max(c1) from t1)) % 32, (c1 + (select max(c1) from t1)) % 64, c6,c7,c8,c9,c10,c11,c12,c13 from t1;
+insert into t1 select (c1 + (select max(c1) from t1)), (c1 + (select max(c1) from t1)) % 8, (c1 + (select max(c1) from t1)) % 16,(c1 + (select max(c1) from t1)) % 32, (c1 + (select max(c1) from t1)) % 64, c6,c7,c8,c9,c10,c11,c12,c13 from t1;
+
+/* create HDFS table T1H ... T10H */
+create table  t1h (like t1 including defaults) tablespace hdfs_ts;
+create table  t2h (like t1 including defaults) tablespace hdfs_ts;
+create table  t3h (like t1 including defaults) tablespace hdfs_ts;
+create table  t4h (like t1 including defaults) tablespace hdfs_ts;
+create table  t5h (like t1 including defaults) tablespace hdfs_ts;
+create table  t6h (like t1 including defaults) tablespace hdfs_ts;
+create table  t7h (like t1 including defaults) tablespace hdfs_ts;
+create table  t8h (like t1 including defaults) tablespace hdfs_ts;
+create table  t9h (like t1 including defaults) tablespace hdfs_ts;
+create table t10h (like t1 including defaults) tablespace hdfs_ts;
+
+/* create partitioned HDFS table T1HP1...T10HP1  P1 indicate partition by values(c2-c5)*/
+create table  t1hp1 (like t1 including defaults) tablespace hdfs_ts partition by values(c2,c3,c4,c5);
+create table  t2hp1 (like t1 including defaults) tablespace hdfs_ts partition by values(c2,c3,c4,c5);
+create table  t3hp1 (like t1 including defaults) tablespace hdfs_ts partition by values(c2,c3,c4,c5);
+create table  t4hp1 (like t1 including defaults) tablespace hdfs_ts partition by values(c2,c3,c4,c5);
+create table  t5hp1 (like t1 including defaults) tablespace hdfs_ts partition by values(c2,c3,c4,c5);
+create table  t6hp1 (like t1 including defaults) tablespace hdfs_ts partition by values(c2,c3,c4,c5);
+create table  t7hp1 (like t1 including defaults) tablespace hdfs_ts partition by values(c2,c3,c4,c5);
+create table  t8hp1 (like t1 including defaults) tablespace hdfs_ts partition by values(c2,c3,c4,c5);
+create table  t9hp1 (like t1 including defaults) tablespace hdfs_ts partition by values(c2,c3,c4,c5);
+create table t10hp1 (like t1 including defaults) tablespace hdfs_ts partition by values(c2,c3,c4,c5);
+
+/* create partitioned HDFS table T1HP2...T10HP2  P2 indicate partition by values(c6-c9)*/
+create table  t1hp2 (like t1 including defaults) tablespace hdfs_ts partition by values(c6,c7,c8,c9);
+create table  t2hp2 (like t1 including defaults) tablespace hdfs_ts partition by values(c6,c7,c8,c9);
+create table  t3hp2 (like t1 including defaults) tablespace hdfs_ts partition by values(c6,c7,c8,c9);
+create table  t4hp2 (like t1 including defaults) tablespace hdfs_ts partition by values(c6,c7,c8,c9);
+create table  t5hp2 (like t1 including defaults) tablespace hdfs_ts partition by values(c6,c7,c8,c9);
+create table  t6hp2 (like t1 including defaults) tablespace hdfs_ts partition by values(c6,c7,c8,c9);
+create table  t7hp2 (like t1 including defaults) tablespace hdfs_ts partition by values(c6,c7,c8,c9);
+create table  t8hp2 (like t1 including defaults) tablespace hdfs_ts partition by values(c6,c7,c8,c9);
+create table  t9hp2 (like t1 including defaults) tablespace hdfs_ts partition by values(c6,c7,c8,c9);
+create table t10hp2 (like t1 including defaults) tablespace hdfs_ts partition by values(c6,c7,c8,c9);
+
+/* create partitioned HDFS table T1HP3...T10HP3  P3 indicate partition by values(c10-c13)*/
+create table  t1hp3 (like t1 including defaults) tablespace hdfs_ts partition by values(c10,c11,c12,c13);
+create table  t2hp3 (like t1 including defaults) tablespace hdfs_ts partition by values(c10,c11,c12,c13);
+create table  t3hp3 (like t1 including defaults) tablespace hdfs_ts partition by values(c10,c11,c12,c13);
+create table  t4hp3 (like t1 including defaults) tablespace hdfs_ts partition by values(c10,c11,c12,c13);
+create table  t5hp3 (like t1 including defaults) tablespace hdfs_ts partition by values(c10,c11,c12,c13);
+create table  t6hp3 (like t1 including defaults) tablespace hdfs_ts partition by values(c10,c11,c12,c13);
+create table  t7hp3 (like t1 including defaults) tablespace hdfs_ts partition by values(c10,c11,c12,c13);
+create table  t8hp3 (like t1 including defaults) tablespace hdfs_ts partition by values(c10,c11,c12,c13);
+create table  t9hp3 (like t1 including defaults) tablespace hdfs_ts partition by values(c10,c11,c12,c13);
+create table t10hp3 (like t1 including defaults) tablespace hdfs_ts partition by values(c10,c11,c12,c13);
+
+/* verify table schema */
+select c.relname, c.parttype, c.reloptions, p.parttype, p.parttype, p.partstrategy, p.partkey
+from pg_class as c inner join pg_namespace as n on c.relnamespace = n.oid
+                   left join pg_partition as p on p.parentid = c.oid
+where n.nspname = 'complex_query'
+order by c.oid;
+
+/* populate data into T2..T10 T1H..T10 T1HPx...T10HPx */
+-- populate T2..T10
+insert into  t2 select * from t1;
+insert into  t3 select * from t1;
+insert into  t4 select * from t1;
+insert into  t5 select * from t1;
+insert into  t6 select * from t1;
+insert into  t7 select * from t1;
+insert into  t8 select * from t1;
+insert into  t9 select * from t1;
+insert into t10 select * from t1;
+
+-- for HDFS table we have last 1/3 populated in delta table and first 2/3 tuples into HDFS external tables
+set cstore_insert_mode = delta;
+insert into  t1h select * from t1 where c1 > 12288;
+insert into  t2h select * from t1 where c1 > 12288;
+insert into  t3h select * from t1 where c1 > 12288;
+insert into  t4h select * from t1 where c1 > 12288;
+insert into  t5h select * from t1 where c1 > 12288;
+insert into  t6h select * from t1 where c1 > 12288;
+insert into  t7h select * from t1 where c1 > 12288;
+insert into  t8h select * from t1 where c1 > 12288;
+insert into  t9h select * from t1 where c1 > 12288;
+insert into t10h select * from t1 where c1 > 12288;
+
+insert into  t1hp1 select * from t1 where c1 > 12288;
+insert into  t2hp1 select * from t1 where c1 > 12288;
+insert into  t3hp1 select * from t1 where c1 > 12288;
+insert into  t4hp1 select * from t1 where c1 > 12288;
+insert into  t5hp1 select * from t1 where c1 > 12288;
+insert into  t6hp1 select * from t1 where c1 > 12288;
+insert into  t7hp1 select * from t1 where c1 > 12288;
+insert into  t8hp1 select * from t1 where c1 > 12288;
+insert into  t9hp1 select * from t1 where c1 > 12288;
+insert into t10hp1 select * from t1 where c1 > 12288;
+
+insert into  t1hp2 select * from t1 where c1 > 12288;
+insert into  t2hp2 select * from t1 where c1 > 12288;
+insert into  t3hp2 select * from t1 where c1 > 12288;
+insert into  t4hp2 select * from t1 where c1 > 12288;
+insert into  t5hp2 select * from t1 where c1 > 12288;
+insert into  t6hp2 select * from t1 where c1 > 12288;
+insert into  t7hp2 select * from t1 where c1 > 12288;
+insert into  t8hp2 select * from t1 where c1 > 12288;
+insert into  t9hp2 select * from t1 where c1 > 12288;
+insert into t10hp2 select * from t1 where c1 > 12288;
+
+insert into  t1hp3 select * from t1 where c1 > 12288;
+insert into  t2hp3 select * from t1 where c1 > 12288;
+insert into  t3hp3 select * from t1 where c1 > 12288;
+insert into  t4hp3 select * from t1 where c1 > 12288;
+insert into  t5hp3 select * from t1 where c1 > 12288;
+insert into  t6hp3 select * from t1 where c1 > 12288;
+insert into  t7hp3 select * from t1 where c1 > 12288;
+insert into  t8hp3 select * from t1 where c1 > 12288;
+insert into  t9hp3 select * from t1 where c1 > 12288;
+insert into t10hp3 select * from t1 where c1 > 12288;
+
+-- populate into main table
+set cstore_insert_mode = main;
+insert into  t1h select * from t1 where c1 <= 12288;
+insert into  t2h select * from t1 where c1 <= 12288;
+insert into  t3h select * from t1 where c1 <= 12288;
+insert into  t4h select * from t1 where c1 <= 12288;
+insert into  t5h select * from t1 where c1 <= 12288;
+insert into  t6h select * from t1 where c1 <= 12288;
+insert into  t7h select * from t1 where c1 <= 12288;
+insert into  t8h select * from t1 where c1 <= 12288;
+insert into  t9h select * from t1 where c1 <= 12288;
+insert into t10h select * from t1 where c1 <= 12288;
+
+insert into  t1hp1 select * from t1 where c1 <= 12288;
+insert into  t2hp1 select * from t1 where c1 <= 12288;
+insert into  t3hp1 select * from t1 where c1 <= 12288;
+insert into  t4hp1 select * from t1 where c1 <= 12288;
+insert into  t5hp1 select * from t1 where c1 <= 12288;
+insert into  t6hp1 select * from t1 where c1 <= 12288;
+insert into  t7hp1 select * from t1 where c1 <= 12288;
+insert into  t8hp1 select * from t1 where c1 <= 12288;
+insert into  t9hp1 select * from t1 where c1 <= 12288;
+insert into t10hp1 select * from t1 where c1 <= 12288;
+
+insert into  t1hp2 select * from t1 where c1 <= 12288;
+insert into  t2hp2 select * from t1 where c1 <= 12288;
+insert into  t3hp2 select * from t1 where c1 <= 12288;
+insert into  t4hp2 select * from t1 where c1 <= 12288;
+insert into  t5hp2 select * from t1 where c1 <= 12288;
+insert into  t6hp2 select * from t1 where c1 <= 12288;
+insert into  t7hp2 select * from t1 where c1 <= 12288;
+insert into  t8hp2 select * from t1 where c1 <= 12288;
+insert into  t9hp2 select * from t1 where c1 <= 12288;
+insert into t10hp2 select * from t1 where c1 <= 12288;
+
+insert into  t1hp3 select * from t1 where c1 <= 12288;
+insert into  t2hp3 select * from t1 where c1 <= 12288;
+insert into  t3hp3 select * from t1 where c1 <= 12288;
+insert into  t4hp3 select * from t1 where c1 <= 12288;
+insert into  t5hp3 select * from t1 where c1 <= 12288;
+insert into  t6hp3 select * from t1 where c1 <= 12288;
+insert into  t7hp3 select * from t1 where c1 <= 12288;
+insert into  t8hp3 select * from t1 where c1 <= 12288;
+insert into  t9hp3 select * from t1 where c1 <= 12288;
+insert into t10hp3 select * from t1 where c1 <= 12288;
+
+set enable_nestloop=off;
+
+-- sanity check
+select count(*) from t1  union all
+select count(*) from t2  union all
+select count(*) from t3  union all
+select count(*) from t4  union all
+select count(*) from t5  union all
+select count(*) from t6  union all
+select count(*) from t7  union all
+select count(*) from t8  union all
+select count(*) from t9  union all
+select count(*) from t10;
+
+select count(*) from  t1h  union all 
+select count(*) from  t2h  union all
+select count(*) from  t3h  union all
+select count(*) from  t4h  union all
+select count(*) from  t5h  union all
+select count(*) from  t6h  union all
+select count(*) from  t7h  union all
+select count(*) from  t8h  union all
+select count(*) from  t9h  union all
+select count(*) from t10h;
+
+
+select count(*) from  t1hp1  union all 
+select count(*) from  t2hp1  union all
+select count(*) from  t3hp1  union all
+select count(*) from  t4hp1  union all
+select count(*) from  t5hp1  union all
+select count(*) from  t6hp1  union all
+select count(*) from  t7hp1  union all
+select count(*) from  t8hp1  union all
+select count(*) from  t9hp1  union all
+select count(*) from t10hp1;
+
+select count(*) from  t1hp2  union all 
+select count(*) from  t2hp2  union all
+select count(*) from  t3hp2  union all
+select count(*) from  t4hp2  union all
+select count(*) from  t5hp2  union all
+select count(*) from  t6hp2  union all
+select count(*) from  t7hp2  union all
+select count(*) from  t8hp2  union all
+select count(*) from  t9hp2  union all
+select count(*) from t10hp2;
+
+select count(*) from  t1hp3  union all 
+select count(*) from  t2hp3  union all
+select count(*) from  t3hp3  union all
+select count(*) from  t4hp3  union all
+select count(*) from  t5hp3  union all
+select count(*) from  t6hp3  union all
+select count(*) from  t7hp3  union all
+select count(*) from  t8hp3  union all
+select count(*) from  t9hp3  union all
+select count(*) from t10hp3;
+
+/*
+ * Design Overview:
+ *
+ * We first build test function templates with parameters to accept queried tables, and use the
+ * template function to do separate tests, as we populate same data and have same schema(column definition)
+ * but with different physical variations at table's storage level, this enable us easily to do multiple
+ * test combinations.
+ *
+ * 1. multi inner join tests
+ * 2. multi mix join tests
+ * 3. SubQuery Test
+ * 4. Correlated SubQuery testing
+ */
+--
+-- 1. Template test function for multi inner join types
+--
+CREATE OR REPLACE FUNCTION multi_inner_join_test(
+    TestName  VARCHAR,
+    param_t1  VARCHAR,
+    param_t2  VARCHAR,
+    param_t3  VARCHAR,
+    param_t4  VARCHAR,
+    param_t5  VARCHAR,
+    param_t6  VARCHAR,
+    param_t7  VARCHAR,
+    param_t8  VARCHAR,
+    param_t9  VARCHAR,
+    param_t10 VARCHAR
+) RETURNS TEXT 
+AS $$
+DECLARE
+    count_result INTEGER;
+BEGIN
+    EXECUTE
+    '
+    select count(*) as """Tn"" vs ""TnH"" for outer/innser join return code"
+    from
+    (
+    select alias1.c1,alias1.c2,alias1.c3,alias1.c4,alias1.c5,alias1.c6,alias1.c7,alias1.c8,alias1.c9,alias1.c10,alias1.c11,alias1.c12
+             from t1 as alias1 inner join  t2 as alias2  on alias1.c1 = alias2.c1 and alias1.c2 = alias2.c2
+                               inner join  t3 as alias3  on alias2.c1 = alias3.c1 and alias1.c2 = alias3.c2
+                               inner join  t4 as alias4  on alias3.c1 = alias4.c1 and alias1.c2 = alias4.c2
+                               inner join  t5 as alias5  on alias4.c1 = alias5.c1 and alias1.c2 = alias5.c2
+                               inner join  t6 as alias6  on alias5.c1 = alias6.c1 and alias1.c2 = alias6.c2
+                               inner join  t7 as alias7  on alias6.c1 = alias7.c1 and alias1.c2 = alias7.c2
+                               inner join  t8 as alias8  on alias7.c1 = alias8.c1 and alias1.c2 = alias8.c2
+                               inner join  t9 as alias9  on alias8.c1 = alias9.c1 and alias1.c2 = alias9.c2
+                               inner join t10 as alias10 on alias9.c1 = alias10.c1 and alias1.c2 = alias10.c2
+    where  (alias1.c1 < 100)
+    and (alias2.c2 in(2,3))
+    and (alias3.c3 in(1,2,3,4,5))
+    and (alias4.c4 in(1,2,3,4,5,6,7))
+    and (alias5.c5 > 0)
+    and (alias6.c6 > 1.000)
+    and (alias7.c7 in (''1'', ''2'', ''3'', ''9'', ''6''))
+    and (alias8.c8 in (''2'', ''3'', ''4'', ''7''))
+    and (alias9.c9 in (''2'', ''3'', ''9'', ''7''))
+    and (alias10.c10 >= time''01:01:00'')
+    and (alias10.c11 >= timestamp ''2015-01-01 01:00:00'')
+    and (alias10.c12 in(date ''2015-05-05'', date ''2015-04-04'', date ''2015-01-01'', date ''2015-02-02'', date ''2015-03-03''))
+
+    MINUS ALL
+
+    select alias1.c1,alias1.c2,alias1.c3,alias1.c4,alias1.c5,alias1.c6,alias1.c7,alias1.c8,alias1.c9,alias1.c10,alias1.c11,alias1.c12
+                          from ' || quote_ident(param_t1) || ' as alias1
+                     inner join '|| quote_ident(param_t2) || ' as alias2  on alias1.c1 = alias2.c1 and alias1.c2 = alias2.c2
+                     inner join '|| quote_ident(param_t3) || ' as alias3  on alias2.c1 = alias3.c1 and alias1.c2 = alias3.c2
+                     inner join '|| quote_ident(param_t4) || ' as alias4  on alias3.c1 = alias4.c1 and alias1.c2 = alias4.c2
+                     inner join '|| quote_ident(param_t5) || ' as alias5  on alias4.c1 = alias5.c1 and alias1.c2 = alias5.c2
+                     inner join '|| quote_ident(param_t6) || ' as alias6  on alias5.c1 = alias6.c1 and alias1.c2 = alias6.c2
+                     inner join '|| quote_ident(param_t7) || ' as alias7  on alias6.c1 = alias7.c1 and alias1.c2 = alias7.c2
+                     inner join '|| quote_ident(param_t8) || ' as alias8  on alias7.c1 = alias8.c1 and alias1.c2 = alias8.c2
+                     inner join '|| quote_ident(param_t9) || ' as alias9  on alias8.c1 = alias9.c1 and alias1.c2 = alias9.c2
+                     inner join '|| quote_ident(param_t10)|| ' as alias10 on alias9.c1 = alias10.c1 and alias1.c2 = alias10.c2
+    where  (alias1.c1 < 100)
+    and (alias2.c2 in(2,3))
+    and (alias3.c3 in(1,2,3,4,5))
+    and (alias4.c4 in(1,2,3,4,5,6,7))
+    and (alias5.c5 > 0)
+    and (alias6.c6 > 1.000)
+    and (alias7.c7 in (''1'', ''2'', ''3'', ''9'', ''6''))
+    and (alias8.c8 in (''2'', ''3'', ''4'', ''7''))
+    and (alias9.c9 in (''2'', ''3'', ''9'', ''7''))
+    and (alias10.c10 >= time''01:01:00'')
+    and (alias10.c11 >= timestamp ''2015-01-01 01:00:00'')
+    and (alias10.c12 in(date ''2015-05-05'', date ''2015-04-04'', date ''2015-01-01'', date ''2015-02-02'', date ''2015-03-03''))
+    );
+    '
+    INTO count_result;
+      
+    return TestName || ' return code:' || count_result;
+END;
+$$ LANGUAGE plpgsql;
+
+--
+-- 2. multi mix join tests
+--
+CREATE OR REPLACE FUNCTION multi_mix_join_test(
+    TestName  VARCHAR,
+    param_t1  VARCHAR,
+    param_t2  VARCHAR,
+    param_t3  VARCHAR,
+    param_t4  VARCHAR,
+    param_t5  VARCHAR,
+    param_t6  VARCHAR,
+    param_t7  VARCHAR,
+    param_t8  VARCHAR,
+    param_t9  VARCHAR,
+    param_t10 VARCHAR
+) RETURNS TEXT 
+AS $$
+DECLARE
+    count_result INTEGER;
+BEGIN
+    EXECUTE
+    '
+    select count(*) as """Tn"" vs ""TnH"" for outer/innser join return code"
+    from
+    (
+    select alias1.c1,alias1.c2,alias1.c3,alias1.c4,alias1.c5,alias1.c6,alias1.c7,alias1.c8,alias1.c9,alias1.c10,alias1.c11,alias1.c12
+         from t1 as alias1 inner join  t2 as alias2  on alias1.c1 = alias2.c1 and alias1.c2 = alias2.c2
+                      full outer join  t3 as alias3  on alias2.c1 = alias3.c1 and alias1.c2 = alias3.c2
+                            left join  t4 as alias4  on alias3.c1 = alias4.c1 and alias1.c2 = alias4.c2
+                            left join  t5 as alias5  on alias4.c1 = alias5.c1 and alias1.c2 = alias5.c2
+                            left join  t6 as alias6  on alias5.c1 = alias6.c1 and alias1.c2 = alias6.c2
+                      full outer join  t7 as alias7  on alias6.c1 = alias7.c1 and alias1.c2 = alias7.c2
+                     right outer join  t8 as alias8  on alias7.c1 = alias8.c1 and alias1.c2 = alias8.c2
+                     right outer join  t9 as alias9  on alias8.c1 = alias9.c1 and alias1.c2 = alias9.c2
+                     right outer join t10 as alias10 on alias9.c1 = alias10.c1 and alias1.c2 = alias10.c2
+    where  (alias1.c1 < 100)
+    and (alias2.c2 in(2,3))
+    and (alias3.c3 in(1,2,3,4,5))
+    and (alias4.c4 in(1,2,3,4,5,6,7))
+    and (alias5.c5 > 0)
+    and (alias6.c6 > 1.000)
+    and (alias7.c7 in (''1'', ''2'', ''3'', ''9'', ''6''))
+    and (alias8.c8 in (''2'', ''3'', ''4'', ''7''))
+    and (alias9.c9 in (''2'', ''3'', ''9'', ''7''))
+    and (alias10.c10 >= time''01:01:00'')
+    and (alias10.c11 >= timestamp ''2015-01-01 01:00:00'')
+    and (alias10.c12 in(date ''2015-05-05'', date ''2015-04-04'', date ''2015-01-01'', date ''2015-02-02'', date ''2015-03-03''))
+
+    MINUS ALL
+
+    select alias1.c1,alias1.c2,alias1.c3,alias1.c4,alias1.c5,alias1.c6,alias1.c7,alias1.c8,alias1.c9,alias1.c10,alias1.c11,alias1.c12
+                                from ' || quote_ident(param_t1) || ' as alias1
+                           inner join '|| quote_ident(param_t2) || ' as alias2  on alias1.c1 = alias2.c1 and alias1.c2 = alias2.c2
+                      full outer join '|| quote_ident(param_t3) || ' as alias3  on alias2.c1 = alias3.c1 and alias1.c2 = alias3.c2
+                            left join '|| quote_ident(param_t4) || ' as alias4  on alias3.c1 = alias4.c1 and alias1.c2 = alias4.c2
+                            left join '|| quote_ident(param_t5) || ' as alias5  on alias4.c1 = alias5.c1 and alias1.c2 = alias5.c2
+                            left join '|| quote_ident(param_t6) || ' as alias6  on alias5.c1 = alias6.c1 and alias1.c2 = alias6.c2
+                      full outer join '|| quote_ident(param_t7) || ' as alias7  on alias6.c1 = alias7.c1 and alias1.c2 = alias7.c2
+                     right outer join '|| quote_ident(param_t8) || ' as alias8  on alias7.c1 = alias8.c1 and alias1.c2 = alias8.c2
+                     right outer join '|| quote_ident(param_t9) || ' as alias9  on alias8.c1 = alias9.c1 and alias1.c2 = alias9.c2
+                     right outer join '|| quote_ident(param_t10)|| ' as alias10 on alias9.c1 = alias10.c1 and alias1.c2 = alias10.c2
+    where  (alias1.c1 < 100)
+    and (alias2.c2 in(2,3))
+    and (alias3.c3 in(1,2,3,4,5))
+    and (alias4.c4 in(1,2,3,4,5,6,7))
+    and (alias5.c5 > 0)
+    and (alias6.c6 > 1.000)
+    and (alias7.c7 in (''1'', ''2'', ''3'', ''9'', ''6''))
+    and (alias8.c8 in (''2'', ''3'', ''4'', ''7''))
+    and (alias9.c9 in (''2'', ''3'', ''9'', ''7''))
+    and (alias10.c10 >= time''01:01:00'')
+    and (alias10.c11 >= timestamp ''2015-01-01 01:00:00'')
+    and (alias10.c12 in(date ''2015-05-05'', date ''2015-04-04'', date ''2015-01-01'', date ''2015-02-02'', date ''2015-03-03''))
+    );
+    '
+    INTO count_result;
+      
+    return TestName || ' return code:' || count_result;
+END;
+$$ LANGUAGE plpgsql;
+
+--
+-- SubQuery Test
+--
+CREATE OR REPLACE FUNCTION subquery_test1(
+    TestName  VARCHAR,
+    param_t1  VARCHAR,
+    param_t2  VARCHAR,
+    param_t3  VARCHAR
+) RETURNS TEXT 
+AS $$
+DECLARE
+    count_result INTEGER;
+BEGIN
+    EXECUTE
+    '
+    select count(*)
+    from (
+        select * from t1 alias1 join t2 alias2 on alias1.c1 = alias2.c1
+        where alias1.c4 in (select alias3.c2 from t3 as alias3) and alias1.c7 in(''1'', ''2'', ''3'')
+        MINUS ALL
+        select * from '|| param_t1 ||' alias1 join ' || param_t2 || ' alias2 on alias1.c1 = alias2.c1
+        where alias1.c4 in (select alias3.c2 from '|| param_t3 ||' as alias3) and alias1.c7 in(''1'', ''2'', ''3'')
+    )
+    '
+    INTO count_result;
+      
+    return TestName || ' return code:' || count_result;
+END;
+$$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION subquery_test2(
+    TestName  VARCHAR,
+    param_t1  VARCHAR,
+    param_t2  VARCHAR,
+    param_t3  VARCHAR
+) RETURNS TEXT 
+AS $$
+DECLARE
+    count_result INTEGER;
+BEGIN
+    EXECUTE
+    '
+    select count(*)
+    from (
+        select * from t1 as alias1 join t2 as alias2 on alias1.c1 = alias2.c1
+        where alias1.c2 in (select alias3.c4 from t3 alias3) and alias1.c7 not in(''1'', ''2'', ''3'')
+        MINUS ALL
+        select * from '|| param_t1 ||' as alias1 join '|| param_t2 ||' as alias2 on alias1.c1 = alias2.c1
+        where alias1.c2 in (select alias3.c4 from '|| param_t3 ||' alias3) and alias1.c7 not in(''1'', ''2'', ''3'')
+    )
+    '
+    INTO count_result;
+      
+    return TestName || ' return code:' || count_result;
+END;
+$$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION subquery_test3(
+    TestName  VARCHAR,
+    param_t1  VARCHAR,
+    param_t2  VARCHAR,
+    param_t3  VARCHAR
+) RETURNS TEXT 
+AS $$
+DECLARE
+    count_result INTEGER;
+BEGIN
+    EXECUTE
+    '
+    select count(*)
+    from (
+        select * from t1 as alias1 join t2 as alias2 on alias1.c1 = alias2.c1
+        where alias1.c10 in (select alias3.c10 from t3 as alias3 where alias3.c2 in (1,2,3))
+        MINUS ALL
+        select * from '|| param_t1 ||' as alias1 join '|| param_t2 ||' as alias2 on alias1.c1 = alias2.c1
+        where alias1.c10 in (select alias3.c10 from '|| param_t3 ||' as alias3 where alias3.c2 in (1,2,3))
+    )
+    '
+    INTO count_result;
+      
+    return TestName || ' return code:' || count_result;
+END;
+$$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION subquery_test4(
+    TestName  VARCHAR,
+    param_t1  VARCHAR,
+    param_t2  VARCHAR,
+    param_t3  VARCHAR
+) RETURNS TEXT 
+AS $$
+DECLARE
+    count_result INTEGER;
+BEGIN
+    EXECUTE
+    '
+    select count(*)
+    from (
+        select * from t1 alias1 join t2 alias2 on alias1.c1 = alias2.c1
+        where alias1.c10 not in (select alias3.c10 from t3 as alias3 where alias3.c5 = 65)
+        MINUS ALL
+        select * from '|| param_t1 ||'  alias1 join '|| param_t2 ||'  alias2 on alias1.c1 = alias2.c1
+        where alias1.c10 not in (select alias3.c10 from '|| param_t3 ||'  as alias3 where alias3.c5 = 65)
+    )
+    '
+    INTO count_result;
+      
+    return TestName || ' return code:' || count_result;
+END;
+$$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION subquery_test5(
+    TestName  VARCHAR,
+    param_t1  VARCHAR,
+    param_t2  VARCHAR
+) RETURNS TEXT 
+AS $$
+DECLARE
+    count_result INTEGER;
+BEGIN
+    EXECUTE
+    '
+    select count(*)
+    from (
+    select * from t1 as alis1
+    where alis1.c1 in (select alis1.c1 from t4 as alias2 where alias2.c10 = time''04:04:00'' and alias2.c5 = 10) and alis1.c5 = 10
+    MINUS ALL
+    select * from '|| param_t1 ||'  as alis1
+    where alis1.c1 in (select alis1.c1 from '|| param_t2 ||'  as alias2 where alias2.c10 = time''04:04:00'' and alias2.c5 = 10) and alis1.c5 = 10
+    )
+    '
+    INTO count_result;
+      
+    return TestName || ' return code:' || count_result;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION subquery_test6(
+    TestName  VARCHAR,
+    param_t1  VARCHAR,
+    param_t2  VARCHAR
+) RETURNS TEXT 
+AS $$
+DECLARE
+    count_result INTEGER;
+BEGIN
+    EXECUTE
+    '
+    select count(*)
+    from (
+        select * from t1 alias1
+        where alias1.c1 in (select alias1.c1 from t4 as alias2 where alias2.c11 > timestamp''2015-06-03 03:00:00'') and alias1.c1 = 5
+
+        MINUS ALL
+        select * from '|| param_t1 ||' alias1
+        where alias1.c1 in (select alias1.c1 from '|| param_t2 ||' as alias2 where alias2.c11 > timestamp''2015-06-03 03:00:00'') and alias1.c1 = 5
+    )
+    '
+    INTO count_result;
+      
+    return TestName || ' return code:' || count_result;
+END;
+$$ LANGUAGE plpgsql;
+
+--
+-- Correlated Subquery Test
+--
+CREATE OR REPLACE FUNCTION correlated_subquery_test1(
+    TestName  VARCHAR,
+    param_t1  VARCHAR,
+    param_t2  VARCHAR
+) RETURNS TEXT 
+AS $$
+DECLARE
+    count_result INTEGER;
+BEGIN
+    EXECUTE
+    '
+    select count(*)
+    from
+    (
+        select * from t1 as alias1
+        where alias1.c2 = (select max(alias2.c2) from t2 as alias2 where alias2.c3 = alias1.c3 and alias2.c5 = 45)
+        MINUS ALL
+        select * from '|| param_t1 ||'  as alias1
+        where alias1.c2 = (select max(alias2.c2) from '|| param_t2 ||'  as alias2 where alias2.c3 = alias1.c3 and alias2.c5 = 45)
+    )
+    '
+    INTO count_result;
+      
+    return TestName || ' return code:' || count_result;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION correlated_subquery_test2(
+    TestName  VARCHAR,
+    param_t1  VARCHAR,
+    param_t2  VARCHAR
+) RETURNS TEXT 
+AS $$
+DECLARE
+    count_result INTEGER;
+BEGIN
+    EXECUTE
+    '
+    select count(*)
+    from
+    (
+        select * from t1 as alias1
+        where alias1.c2 in (select alias2.c2 from t2 as alias2 where alias2.c3 = alias1.c3 and alias2.c5 = 50)
+        MINUS ALL
+        select * from '|| param_t1 ||'  as alias1
+        where alias1.c2 in (select alias2.c2 from '|| param_t2 ||'  as alias2 where alias2.c3 = alias1.c3 and alias2.c5 = 50)
+    )
+    '
+    INTO count_result;
+      
+    return TestName || ' return code:' || count_result;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION correlated_subquery_test3(
+    TestName  VARCHAR,
+    param_t1  VARCHAR,
+    param_t2  VARCHAR
+) RETURNS TEXT 
+AS $$
+DECLARE
+    count_result INTEGER;
+BEGIN
+    EXECUTE
+    '
+    select count(*)
+    from
+    (
+        select * from t1 as alias1
+        where alias1.c2 not in (select alias2.c2 from t2 as alias2 where alias2.c3 = alias1.c3 and alias2.c5  in (45,46))
+        and alias1.c5 = 1
+        MINUS ALL
+        select * from '|| param_t1 ||'  as alias1
+        where alias1.c2 not in (select alias2.c2 from '|| param_t2 ||'  as alias2 where alias2.c3 = alias1.c3 and alias2.c5  in (45,46))
+        and alias1.c5 = 1
+    )
+    '
+    INTO count_result;
+      
+    return TestName || ' return code:' || count_result;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION correlated_subquery_test4(
+    TestName  VARCHAR,
+    param_t1  VARCHAR,
+    param_t2  VARCHAR
+) RETURNS TEXT 
+AS $$
+DECLARE
+    count_result INTEGER;
+BEGIN
+    EXECUTE
+    '
+    select count(*)
+    from
+    (
+        select * from t1 as alias1
+        where exists (select alias2.c2 from t2 as alias2 where alias2.c3 = alias1.c3 and alias2.c5 = 45)
+        or alias1.c5 = 1
+        MINUS ALL
+        select * from '|| param_t1 ||' as alias1
+        where exists (select alias2.c2 from '|| param_t2 ||'  as alias2 where alias2.c3 = alias1.c3 and alias2.c5 = 45)
+        or alias1.c5 = 1
+    )
+    '
+    INTO count_result;
+      
+    return TestName || ' return code:' || count_result;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION correlated_subquery_test5(
+    TestName  VARCHAR,
+    param_t1  VARCHAR,
+    param_t2  VARCHAR
+) RETURNS TEXT 
+AS $$
+DECLARE
+    count_result INTEGER;
+BEGIN
+    EXECUTE
+    '
+    select count(*)
+    from
+    (
+        select * from t1 as alias1
+        where not exists (select alias2.c2 from t2 as alias2 where alias2.c3 = alias1.c3 and alias2.c12 = date''2015-01-01'')
+        or alias1.c5 = 1
+        MINUS ALL
+        select * from '|| param_t1 ||' as alias1
+        where not exists (select alias2.c2 from '|| param_t2 ||' as alias2 where alias2.c3 = alias1.c3 and alias2.c12 = date''2015-01-01'')
+        or alias1.c5 = 1
+    )
+    '
+    INTO count_result;
+      
+    return TestName || ' return code:' || count_result;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION correlated_subquery_test6(
+    TestName  VARCHAR,
+    param_t1  VARCHAR,
+    param_t2  VARCHAR,
+    param_t3  VARCHAR
+) RETURNS TEXT 
+AS $$
+DECLARE
+    count_result INTEGER;
+BEGIN
+    EXECUTE
+    '
+    select count(*)
+    from
+    (
+        select * from t1 as alias1
+        where alias1.c2 in (select alias2.c2 from t2 as alias2 where alias2.c3 = alias1.c3 and alias2.c5 = 50 and alias2.c12 in (select max(alias3.c12) from t3 alias3 where alias3.c3 < 20) )
+        and alias1.c5 = 13
+        MINUS ALL
+        select * from '|| param_t1 ||' as alias1
+        where alias1.c2 in (select alias2.c2 from '|| param_t2 ||' as alias2 where alias2.c3 = alias1.c3 and alias2.c5 = 50 and alias2.c12 in (select max(alias3.c12) from '|| param_t3 ||' alias3 where alias3.c3 < 20) )
+        and alias1.c5 = 13
+    )
+    '
+    INTO count_result;
+      
+    return TestName || ' return code:' || count_result;
+END;
+$$ LANGUAGE plpgsql;
+
+/* Test start! */
+-- Multi inner join tests
+select multi_inner_join_test('Multi-Inner Join test [1], return code:',
+        't1h',
+        't2h',
+        't3h',
+        't4h',
+        't5h',
+        't6h',
+        't7h',
+        't8h',
+        't9h',
+        't10h');
+
+select multi_inner_join_test('Multi-Inner Join test [2], return code:',
+         't1hp1',
+         't2hp1',
+         't3hp1',
+         't4hp1',
+         't5hp1',
+         't6hp1',
+         't7hp1',
+         't8hp1',
+         't9hp1',
+        't10hp1');
+
+select multi_inner_join_test('Multi-Inner Join test [3], return code:',
+         't1hp2',
+         't2hp2',
+         't3hp2',
+         't4hp2',
+         't5hp2',
+         't6hp2',
+         't7hp2',
+         't8hp2',
+         't9hp2',
+        't10hp2');
+        
+select multi_inner_join_test('Multi-Inner Join test [4], return code:',
+         't1hp3',
+         't2hp3',
+         't3hp3',
+         't4hp3',
+         't5hp3',
+         't6hp3',
+         't7hp3',
+         't8hp3',
+         't9hp3',
+        't10hp3');
+
+select multi_inner_join_test('Multi-Inner Join test [5], return code:',
+         't1',
+         't2h',
+         't3h',
+         't4hp1',
+         't5hp2',
+         't6hp3',
+         't7hp1',
+         't8hp2',
+         't9hp3',
+        't10hp1');
+
+-- Multi mix join tests
+select multi_mix_join_test('Multi-Mix Join test [1], return code:',
+        't1h',
+        't2h',
+        't3h',
+        't4h',
+        't5h',
+        't6h',
+        't7h',
+        't8h',
+        't9h',
+        't10h');
+
+select multi_mix_join_test('Multi-Mix Join test [2], return code:',
+         't1hp1',
+         't2hp1',
+         't3hp1',
+         't4hp1',
+         't5hp1',
+         't6hp1',
+         't7hp1',
+         't8hp1',
+         't9hp1',
+        't10hp1');
+
+select multi_mix_join_test('Multi-Mix Join test [3], return code:',
+         't1hp2',
+         't2hp2',
+         't3hp2',
+         't4hp2',
+         't5hp2',
+         't6hp2',
+         't7hp2',
+         't8hp2',
+         't9hp2',
+        't10hp2');
+
+select multi_mix_join_test('Multi-Mix Join test [4], return code:',
+         't1hp3',
+         't2hp3',
+         't3hp3',
+         't4hp3',
+         't5hp3',
+         't6hp3',
+         't7hp3',
+         't8hp3',
+         't9hp3',
+        't10hp3');
+
+select multi_mix_join_test('Multi-Mix Join test [5], return code:',
+         't1',
+         't2h',
+         't3h',
+         't4hp1',
+         't5hp2',
+         't6hp3',
+         't7hp1',
+         't8hp2',
+         't9hp3',
+        't10hp1');
+
+/* 3. subquery test */
+select subquery_test1('SubQuery Test 1.1:', 't1h', 't2h', 't3h');
+select subquery_test1('SubQuery Test 1.2:', 't1hp1', 't2hp1', 't3hp1');
+select subquery_test1('SubQuery Test 1.3:', 't1hp2', 't2hp2', 't3hp2');
+select subquery_test1('SubQuery Test 1.4:', 't1hp3', 't2hp3', 't3hp3');
+select subquery_test1('SubQuery Test 1.5:', 't1h', 't2hp1', 't3hp3');
+
+select subquery_test2('SubQuery Test 2.1:', 't1h', 't2h', 't3h');
+select subquery_test2('SubQuery Test 2.2:', 't1hp1', 't2hp1', 't3hp1');
+select subquery_test2('SubQuery Test 2.3:', 't1hp2', 't2hp2', 't3hp2');
+select subquery_test2('SubQuery Test 2.4:', 't1hp3', 't2hp3', 't3hp3');
+select subquery_test2('SubQuery Test 2.5:', 't1h', 't2hp1', 't3hp3');
+
+select subquery_test3('SubQuery Test 3.1:', 't1h', 't2h', 't3h');
+select subquery_test3('SubQuery Test 3.2:', 't1hp1', 't2hp1', 't3hp1');
+select subquery_test3('SubQuery Test 3.3:', 't1hp2', 't2hp2', 't3hp2');
+select subquery_test3('SubQuery Test 3.4:', 't1hp3', 't2hp3', 't3hp3');
+select subquery_test3('SubQuery Test 3.5:', 't1h', 't2hp1', 't3hp3');
+
+select subquery_test4('SubQuery Test 4.1:', 't1h', 't2h', 't3h');
+select subquery_test4('SubQuery Test 4.2:', 't1hp1', 't2hp1', 't3hp1');
+select subquery_test4('SubQuery Test 4.3:', 't1hp2', 't2hp2', 't3hp2');
+select subquery_test4('SubQuery Test 4.4:', 't1hp3', 't2hp3', 't3hp3');
+select subquery_test4('SubQuery Test 4.5:', 't1h', 't2hp1', 't3hp3');
+
+select subquery_test5('SubQuery Test 5.1:', 't1h', 't2h');
+select subquery_test5('SubQuery Test 5.2:', 't1hp1', 't2hp1');
+select subquery_test5('SubQuery Test 5.3:', 't1hp2', 't2hp2');
+select subquery_test5('SubQuery Test 5.4:', 't1hp3', 't2hp3');
+select subquery_test5('SubQuery Test 5.5:', 't1h', 't2hp1');
+
+select subquery_test6('SubQuery Test 6.1:', 't1h', 't2h');
+select subquery_test6('SubQuery Test 6.2:', 't1hp1', 't2hp1');
+select subquery_test6('SubQuery Test 6.3:', 't1hp2', 't2hp2');
+select subquery_test6('SubQuery Test 6.4:', 't1hp3', 't2hp3');
+select subquery_test6('SubQuery Test 6.5:', 't1h', 't2hp1');
+
+/* 4. correlated subquery testing */
+select correlated_subquery_test1('Correlated SubQuery Test 1.1:', 't1h', 't2h');
+select correlated_subquery_test1('Correlated SubQuery Test 1.2:', 't1hp1', 't2hp1');
+select correlated_subquery_test1('Correlated SubQuery Test 1.3:', 't1hp2', 't2hp2');
+select correlated_subquery_test1('Correlated SubQuery Test 1.4:', 't1hp3', 't2hp3');
+select correlated_subquery_test1('Correlated SubQuery Test 1.5:', 't1h', 't2hp1');
+
+select correlated_subquery_test2('Correlated SubQuery Test 2.1:', 't1h', 't2h');
+select correlated_subquery_test2('Correlated SubQuery Test 2.2:', 't1hp1', 't2hp1');
+select correlated_subquery_test2('Correlated SubQuery Test 2.3:', 't1hp2', 't2hp2');
+select correlated_subquery_test2('Correlated SubQuery Test 2.4:', 't1hp3', 't2hp3');
+select correlated_subquery_test2('Correlated SubQuery Test 2.5:', 't1h', 't2hp1');
+
+
+select correlated_subquery_test3('Correlated SubQuery Test 3.1:', 't1h', 't2h');
+select correlated_subquery_test3('Correlated SubQuery Test 3.2:', 't1hp1', 't2hp1');
+select correlated_subquery_test3('Correlated SubQuery Test 3.3:', 't1hp2', 't2hp2');
+select correlated_subquery_test3('Correlated SubQuery Test 3.4:', 't1hp3', 't2hp3');
+select correlated_subquery_test3('Correlated SubQuery Test 3.5:', 't1h', 't2hp1');
+
+select correlated_subquery_test4('Correlated SubQuery Test 4.1:', 't1h', 't2h');
+select correlated_subquery_test4('Correlated SubQuery Test 4.2:', 't1hp1', 't2hp1');
+select correlated_subquery_test4('Correlated SubQuery Test 4.3:', 't1hp2', 't2hp2');
+select correlated_subquery_test4('Correlated SubQuery Test 4.4:', 't1hp3', 't2hp3');
+select correlated_subquery_test4('Correlated SubQuery Test 4.5:', 't1h', 't2hp1');
+
+select correlated_subquery_test5('Correlated SubQuery Test 5.1:', 't1h', 't2h');
+select correlated_subquery_test5('Correlated SubQuery Test 5.2:', 't1hp1', 't2hp1');
+select correlated_subquery_test5('Correlated SubQuery Test 5.3:', 't1hp2', 't2hp2');
+select correlated_subquery_test5('Correlated SubQuery Test 5.4:', 't1hp3', 't2hp3');
+select correlated_subquery_test5('Correlated SubQuery Test 5.5:', 't1h', 't2hp1');
+
+select correlated_subquery_test6('Correlated SubQuery Test 6.1:', 't1h', 't2h' , 't3h');
+select correlated_subquery_test6('Correlated SubQuery Test 6.2:', 't1hp1', 't2hp1', 't3hp1');
+select correlated_subquery_test6('Correlated SubQuery Test 6.3:', 't1hp2', 't2hp2', 't3hp2');
+select correlated_subquery_test6('Correlated SubQuery Test 6.4:', 't1hp3', 't2hp3', 't3hp3');
+select correlated_subquery_test6('Correlated SubQuery Test 6.5:', 't1h', 't2hp1', 't3hp2');
+
+-- drop base line table
+drop table t1;
+drop table t2;
+drop table t3;
+drop table t4;
+drop table t5;
+drop table t6;
+drop table t7;
+drop table t8;
+drop table t9;
+drop table t10;
+
+-- drop none-partitioned HDFS table
+drop table  t1h;
+drop table  t2h;
+drop table  t3h;
+drop table  t4h;
+drop table  t5h;
+drop table  t6h;
+drop table  t7h;
+drop table  t8h;
+drop table  t9h;
+drop table t10h;
+
+-- drop partitioned HDFS table
+drop table  t1hp1;
+drop table  t2hp1;
+drop table  t3hp1;
+drop table  t4hp1;
+drop table  t5hp1;
+drop table  t6hp1;
+drop table  t7hp1;
+drop table  t8hp1;
+drop table  t9hp1;
+drop table t10hp1;
+
+drop table  t1hp2;
+drop table  t2hp2;
+drop table  t3hp2;
+drop table  t4hp2;
+drop table  t5hp2;
+drop table  t6hp2;
+drop table  t7hp2;
+drop table  t8hp2;
+drop table  t9hp2;
+drop table t10hp2;
+
+drop table  t1hp3;
+drop table  t2hp3;
+drop table  t3hp3;
+drop table  t4hp3;
+drop table  t5hp3;
+drop table  t6hp3;
+drop table  t7hp3;
+drop table  t8hp3;
+drop table  t9hp3;
+drop table t10hp3;
+
+--verify if schema is fully cleaned-up.
+select c.relname, c.parttype, c.reloptions, p.parttype, p.parttype, p.partstrategy, p.partkey
+from pg_class as c inner join pg_namespace as n on c.relnamespace = n.oid
+                   left join pg_partition as p on p.parentid = c.oid
+where n.nspname = 'complex_query'
+order by c.oid;
+
+-- drop functions
+DROP FUNCTION multi_inner_join_test(TestName VARCHAR, param_t1 VARCHAR, param_t2 VARCHAR, param_t3 VARCHAR, param_t4 VARCHAR, param_t5 VARCHAR, param_t6 VARCHAR, param_t7 VARCHAR, param_t8 VARCHAR, param_t9 VARCHAR, param_t10 VARCHAR);
+DROP FUNCTION multi_mix_join_test(TestName VARCHAR, param_t1 VARCHAR, param_t2 VARCHAR, param_t3 VARCHAR, param_t4 VARCHAR, param_t5 VARCHAR, param_t6 VARCHAR, param_t7 VARCHAR, param_t8 VARCHAR, param_t9 VARCHAR, param_t10 VARCHAR);
+DROP FUNCTION subquery_test1(TestName VARCHAR, param_t1 VARCHAR, param_t2 VARCHAR, param_t3 VARCHAR);
+DROP FUNCTION subquery_test2(TestName VARCHAR, param_t1 VARCHAR, param_t2 VARCHAR, param_t3 VARCHAR);
+DROP FUNCTION subquery_test3(TestName VARCHAR, param_t1 VARCHAR, param_t2 VARCHAR, param_t3 VARCHAR);
+DROP FUNCTION subquery_test4(TestName VARCHAR, param_t1 VARCHAR, param_t2 VARCHAR, param_t3 VARCHAR);
+DROP FUNCTION subquery_test5(TestName VARCHAR, param_t1 VARCHAR, param_t2 VARCHAR);
+DROP FUNCTION subquery_test6(TestName VARCHAR, param_t1 VARCHAR, param_t2 VARCHAR);
+DROP FUNCTION correlated_subquery_test1(TestName  VARCHAR, param_t1  VARCHAR, param_t2  VARCHAR);
+DROP FUNCTION correlated_subquery_test2(TestName  VARCHAR, param_t1  VARCHAR, param_t2  VARCHAR);
+DROP FUNCTION correlated_subquery_test3(TestName  VARCHAR, param_t1  VARCHAR, param_t2  VARCHAR);
+DROP FUNCTION correlated_subquery_test4(TestName  VARCHAR, param_t1  VARCHAR, param_t2  VARCHAR);
+DROP FUNCTION correlated_subquery_test5(TestName  VARCHAR, param_t1  VARCHAR, param_t2  VARCHAR);
+DROP FUNCTION correlated_subquery_test6(TestName  VARCHAR, param_t1  VARCHAR, param_t2  VARCHAR, param_t3  VARCHAR);
+
+drop schema if exists complex_query cascade;

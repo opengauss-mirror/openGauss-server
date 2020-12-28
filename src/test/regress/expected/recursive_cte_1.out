@@ -36,7 +36,7 @@ CREATE TABLE test_int_rep (
     pname text,
     "time" timestamp without time zone
 )
-WITH (orientation=column, compression=low)
+WITH (orientation=column, compression=no)
 ;
 explain (costs off, verbose ON)
 WITH RECURSIVE tmp1 AS 
@@ -491,10 +491,9 @@ CREATE TABLE test_int_rep (
     pname text,
     "time" timestamp without time zone
 )
-WITH (orientation=row, compression=low)
+WITH (orientation=row, compression=no)
 ;
-ERROR:  Value "low" of option "compression" is invalid for row table
-DETAIL:  Valid values are "yes" and "no"
+ERROR:  relation "test_int_rep" already exists
 explain (costs off, verbose ON)
 WITH RECURSIVE tmp1 AS 
 (

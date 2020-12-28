@@ -1,0 +1,123 @@
+--delete new catalog objects in reverse order
+begin;
+set isinplaceupgrade=on;
+--1.delete system tuple
+create or replace function insert_pg_opfamily()
+returns void
+as $$
+declare
+row_name record;
+query_str text;
+query_str_nodes text;
+begin
+query_str_nodes := 'select node_name,node_host,node_port from pgxc_node';
+for row_name in execute(query_str_nodes) loop
+query_str := 'execute direct on (' || row_name.node_name || ') ''delete from pg_opfamily where oid=1''';
+execute(query_str);
+end loop;
+return;
+end; $$
+language 'plpgsql';
+select insert_pg_opfamily();
+ insert_pg_opfamily 
+--------------------
+ 
+(1 row)
+
+drop function if exists insert_pg_opfamily();
+--2.delete system view attribute
+create or replace view pg_catalog.moc_pg_class as select relname from pg_class;
+--3.delete system type(already done in the forward process)
+--4.delete system namespace
+drop schema if exists pg_inplace_schema1;
+--5.delete system function
+drop function if exists pg_catalog.pg_inplace_func1(oid);
+--6.delete new system attribute and its default
+alter table pg_catalog.pg_inplace_table1 alter b drop default;
+alter table pg_catalog.pg_inplace_table1 drop if exists b;
+--7.delete new system table, its type, its index and its toast table
+drop index if exists pg_toast.pg_toast_1_index;
+drop type if exists pg_toast.pg_toast_1;
+drop table if exists pg_toast.pg_toast_1;
+drop index if exists pg_catalog.pg_inplace_table1_oid_index;
+drop type if exists pg_catalog.pg_inplace_table1;
+drop table if exists pg_catalog.pg_inplace_table1;
+commit;
+--check rollback results
+select oid,relname,relnamespace,relfilenode,reltoastrelid,reltoastidxid,relkind,relnatts,relhasoids from pg_class where oid>=1 and oid<=4 order by oid;
+ oid | relname | relnamespace | relfilenode | reltoastrelid | reltoastidxid | relkind | relnatts | relhasoids 
+-----+---------+--------------+-------------+---------------+---------------+---------+----------+------------
+(0 rows)
+
+select t.oid,t.typname,t.typnamespace,t.typrelid,c.relname,c.reltype from pg_type as t, pg_class as c where t.typrelid=c.oid and c.relname='pg_inplace_table1';
+ oid | typname | typnamespace | typrelid | relname | reltype 
+-----+---------+--------------+----------+---------+---------
+(0 rows)
+
+select refclassid,deptype from pg_depend where (refobjid>=1 and refobjid<=4) or refobjid='pg_toast.pg_toast_1'::regtype order by refclassid;
+ERROR:  type "pg_toast.pg_toast_1" does not exist
+LINE 1: ...d where (refobjid>=1 and refobjid<=4) or refobjid='pg_toast....
+                                                             ^
+select refclassid,deptype from pg_depend where (refobjid>=1 and refobjid<=4) order by refclassid;
+ refclassid | deptype 
+------------+---------
+(0 rows)
+
+select oid,proname,prosrc,prolang from pg_proc where prosrc='set_working_grand_version_num_manually' order by oid;
+ oid  |                proname                 |                 prosrc                 | prolang 
+------+----------------------------------------+----------------------------------------+---------
+ 7998 | set_working_grand_version_num_manually | set_working_grand_version_num_manually |      12
+(1 row)
+
+select oid,nspname from pg_namespace where oid=1;
+ oid | nspname 
+-----+---------
+(0 rows)
+
+select oid<16384 as oid_is_bootstrap,relnatts from pg_class where relname='moc_pg_class';
+ oid_is_bootstrap | relnatts 
+------------------+----------
+ t                |        1
+(1 row)
+
+select oid,* from pg_opfamily where oid=1;
+ oid | opfmethod | opfname | opfnamespace | opfowner 
+-----+-----------+---------+--------------+----------
+(0 rows)
+
+--do some clean up
+begin;
+set isinplaceupgrade=on;
+drop view if exists pg_catalog.moc_pg_class;
+commit;
+--restore working grand version and turn off inplace upgrade
+create or replace function restore_working_grand_version()
+returns void
+as $$
+declare
+row_name record;
+query_str text;
+query_str_nodes text;
+begin
+query_str_nodes := 'select node_name from pgxc_node';
+for row_name in execute(query_str_nodes) loop
+query_str := 'execute direct on (' || row_name.node_name || ') ''select start_inplace_upgrade_functions_manually()''';
+execute(query_str);
+query_str := 'execute direct on (' || row_name.node_name || ') ''select set_working_grand_version_num_manually(0)''';
+execute(query_str);
+query_str := 'execute direct on (' || row_name.node_name || ') ''select stop_inplace_upgrade_functions_manually()''';
+execute(query_str);
+end loop;
+return;
+end; $$
+language 'plpgsql';
+select restore_working_grand_version();
+ restore_working_grand_version 
+-------------------------------
+ 
+(1 row)
+
+drop function if exists start_inplace_upgrade_functions_manually();
+drop function if exists stop_inplace_upgrade_functions_manually();
+drop function if exists change_working_grand_version();
+drop function if exists restore_working_grand_version();

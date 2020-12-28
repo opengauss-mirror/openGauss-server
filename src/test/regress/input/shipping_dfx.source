@@ -1,0 +1,96 @@
+set current_schema='shipping_schema';
+---create function shippable---
+CREATE FUNCTION shipping_func_time_01() RETURNS timestamptz
+    AS 'select clock_timestamp();'
+    LANGUAGE SQL
+    stable shippable
+    RETURNS NULL ON NULL INPUT;
+---create function not shippable---
+CREATE FUNCTION shipping_func_time_02() RETURNS timestamptz
+    AS 'select clock_timestamp();'
+    LANGUAGE SQL
+    stable not shippable
+    RETURNS NULL ON NULL INPUT;
+
+---create function defalut shippable---
+CREATE FUNCTION shipping_func_time_03() RETURNS timestamptz
+    AS 'select clock_timestamp();'
+    LANGUAGE SQL
+    volatile 
+    RETURNS NULL ON NULL INPUT;
+
+---create function defalut shippable---
+CREATE FUNCTION shipping_func_time_04() RETURNS timestamptz
+    AS 'select clock_timestamp();'
+    LANGUAGE SQL
+    immutable 
+    RETURNS NULL ON NULL INPUT;
+
+---confirm results1---
+select proname,proshippable from pg_proc where  proname='shipping_func_time_02' or proname='shipping_func_time_01' or proname='shipping_func_time_03' order by 1;
+/* shipping */
+explain (costs off)  select shipping_func_time_01(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+/* not shipping */
+explain (costs off)  select shipping_func_time_02(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+/* not shipping */
+explain (costs off)  select shipping_func_time_03(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+
+---confirm results2---
+alter function shipping_func_time_01() shippable;
+select proname,proshippable from pg_proc where proname='shipping_func_time_02' or proname='shipping_func_time_01' or proname='shipping_func_time_03' order by 1;
+/* shipping */
+explain (costs off)  select shipping_func_time_01(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+
+---confirm results3---
+alter function shipping_func_time_01() not shippable;
+
+select proname,proshippable from pg_proc where proname='shipping_func_time_02' or proname='shipping_func_time_01' or proname='shipping_func_time_03' order by 1;
+/* not shipping */
+explain (costs off)  select shipping_func_time_01(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+
+---confirm results4---
+alter function shipping_func_time_02() shippable;
+select proname,proshippable from pg_proc where proname='shipping_func_time_02' or proname='shipping_func_time_01' or proname='shipping_func_time_03' order by 1;
+/* shipping */
+explain (costs off)  select shipping_func_time_02(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+
+---confirm results5---
+alter function shipping_func_time_03() shippable;
+
+select proname,proshippable from pg_proc where proname='shipping_func_time_02' or proname='shipping_func_time_01' or proname='shipping_func_time_03' order by 1;
+/* shipping */
+explain (costs off)  select shipping_func_time_03(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+
+
+----confirm results6----
+/*immutable function shipping always */
+select proname,proshippable from pg_proc where proname='shipping_func_time_04';
+explain (costs off)  select shipping_func_time_04(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+alter function shipping_func_time_04() not shippable;
+explain (costs off)  select shipping_func_time_04(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+
+
+------------------------C function-------------------
+CREATE FUNCTION shipping_c_func_time_05()
+   RETURNS int4
+   AS '@libdir@/regress@DLSUFFIX@', 'vec_int4add_0'
+   LANGUAGE C IMMUTABLE not fenced;
+explain (costs off)  select shipping_c_func_time_05(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+
+CREATE FUNCTION shipping_c_func_time_06()
+   RETURNS int4
+   AS '@libdir@/regress@DLSUFFIX@', 'vec_int4add_0'
+   LANGUAGE C STABLE shippable not fenced;
+explain (costs off)  select shipping_c_func_time_06(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+alter function shipping_c_func_time_06() not shippable;
+explain (costs off)  select shipping_c_func_time_06(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+
+
+
+--------------------clean --------------------------------------
+drop function shipping_func_time_01();
+drop function shipping_func_time_02();
+drop function shipping_func_time_03();
+drop function shipping_func_time_04();
+drop function shipping_c_func_time_05();
+drop function shipping_c_func_time_06();

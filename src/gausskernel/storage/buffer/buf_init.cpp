@@ -17,9 +17,9 @@
 
 #include "postgres.h"
 #include "knl/knl_variable.h"
-
-#include "storage/bufmgr.h"
-#include "storage/buf_internals.h"
+#include "gs_bbox.h"
+#include "storage/buf/bufmgr.h"
+#include "storage/buf/buf_internals.h"
 #include "storage/ipc.h"
 #include "storage/cucache_mgr.h"
 #include "pgxc/pgxc.h"
@@ -27,7 +27,7 @@
 
 const int PAGE_QUEUE_SLOT_MULTI_NBUFFERS = 5;
 
-static inline void MemsetPageQueue(char *buffer, Size len)
+static void MemsetPageQueue(char *buffer, Size len)
 {
     int rc;
     while (len > 0) {
@@ -86,20 +86,28 @@ void InitBufferPool(void)
     bool found_bufs = false;
     bool found_descs = false;
     bool found_buf_ckpt = false;
+    uint64 buffer_size;
 
-    t_thrd.storage_cxt.BufferDescriptors = (BufferDescPadded*)CACHELINEALIGN(ShmemInitStruct("Buffer Descriptors",
-        g_instance.attr.attr_storage.NBuffers * sizeof(BufferDescPadded) + PG_CACHE_LINE_SIZE,
-        &found_descs));
+    t_thrd.storage_cxt.BufferDescriptors = (BufferDescPadded *)CACHELINEALIGN(
+        ShmemInitStruct("Buffer Descriptors",
+                        g_instance.attr.attr_storage.NBuffers * sizeof(BufferDescPadded) + PG_CACHE_LINE_SIZE,
+                        &found_descs));
+
     /* Init candidate buffer list and candidate buffer free map */
     candidate_buf_init();
 
 #ifdef __aarch64__
-    t_thrd.storage_cxt.BufferBlocks = (char*)CACHELINEALIGN(ShmemInitStruct(
-        "Buffer Blocks", g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ + PG_CACHE_LINE_SIZE, &found_bufs));
-#else
+    buffer_size = g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ + PG_CACHE_LINE_SIZE;
     t_thrd.storage_cxt.BufferBlocks =
-        (char*)ShmemInitStruct("Buffer Blocks", g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ, &found_bufs);
+        (char *)CACHELINEALIGN(ShmemInitStruct("Buffer Blocks", buffer_size, &found_bufs));
+#else
+    buffer_size = g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ;
+    t_thrd.storage_cxt.BufferBlocks = (char *)ShmemInitStruct("Buffer Blocks", buffer_size, &found_bufs);
 #endif
+
+    if (BBOX_BLACKLIST_SHARE_BUFFER) {
+        bbox_blacklist_add(SHARED_BUFFER, t_thrd.storage_cxt.BufferBlocks, buffer_size);
+    }
 
     /*
      * The array used to sort to-be-checkpointed buffer ids is located in
@@ -108,16 +116,17 @@ void InitBufferPool(void)
      * the checkpointer is restarted, memory allocation failures would be
      * painful.
      */
-    g_instance.ckpt_cxt_ctl->CkptBufferIds = (CkptSortItem*)ShmemInitStruct(
-        "Checkpoint BufferIds", g_instance.attr.attr_storage.NBuffers * sizeof(CkptSortItem), &found_buf_ckpt);
+    g_instance.ckpt_cxt_ctl->CkptBufferIds =
+        (CkptSortItem *)ShmemInitStruct("Checkpoint BufferIds",
+                                        g_instance.attr.attr_storage.NBuffers * sizeof(CkptSortItem), &found_buf_ckpt);
 
     if (g_instance.attr.attr_storage.enableIncrementalCheckpoint && g_instance.ckpt_cxt_ctl->dirty_page_queue == NULL) {
-        g_instance.ckpt_cxt_ctl->dirty_page_queue_size =
-            g_instance.attr.attr_storage.NBuffers * PAGE_QUEUE_SLOT_MULTI_NBUFFERS;
+        g_instance.ckpt_cxt_ctl->dirty_page_queue_size = g_instance.attr.attr_storage.NBuffers *
+                                                         PAGE_QUEUE_SLOT_MULTI_NBUFFERS;
         MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.increCheckPoint_context);
 
         Size queue_mem_size = g_instance.ckpt_cxt_ctl->dirty_page_queue_size * sizeof(DirtyPageQueueSlot);
-        g_instance.ckpt_cxt_ctl->dirty_page_queue = (DirtyPageQueueSlot*)malloc(queue_mem_size);
+        g_instance.ckpt_cxt_ctl->dirty_page_queue = (DirtyPageQueueSlot *)malloc(queue_mem_size);
         if (g_instance.ckpt_cxt_ctl->dirty_page_queue == NULL) {
             ereport(ERROR, (errmodule(MOD_INCRE_CKPT), errmsg("Memory allocation failed.\n")));
         }
@@ -137,7 +146,7 @@ void InitBufferPool(void)
          * Initialize all the buffer headers.
          */
         for (i = 0; i < g_instance.attr.attr_storage.NBuffers; i++) {
-            BufferDesc* buf = GetBufferDescriptor(i);
+            BufferDesc *buf = GetBufferDescriptor(i);
             CLEAR_BUFFERTAG(buf->tag);
 
             pg_atomic_init_u32(&buf->state, 0);
@@ -189,12 +198,5 @@ Size BufferShmemSize(void)
     /* size of checkpoint sort array in bufmgr.c */
     size = add_size(size, mul_size(g_instance.attr.attr_storage.NBuffers, sizeof(CkptSortItem)));
 
-    /* size of candidate buffers */
-    size = add_size(size, mul_size(g_instance.attr.attr_storage.NBuffers, sizeof(Buffer)));
-
-    /* size of candidate free map */
-    size = add_size(size, mul_size(g_instance.attr.attr_storage.NBuffers, sizeof(bool)));
-
     return size;
 }
-

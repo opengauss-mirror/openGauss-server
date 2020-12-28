@@ -21,8 +21,10 @@
  * Changing this requires an initdb.
  */
 #define NAMEDATALEN 64
+#ifndef ENABLE_MULTIPLE_NODES
 #define BUCKETDATALEN 16384
 #define BUCKETSTRLEN 6 * BUCKETDATALEN
+#endif
 #define NODEIDLEN 4
 #define MAX_NODE_DIG 5         // datanode number <= 4096
 #define MAX_DATANODE_NUM 4096  // this value should be same as MaxDataNodes
@@ -153,7 +155,7 @@
  */
 #ifdef HAVE_SYNC_FILE_RANGE
 #define DEFAULT_BACKEND_FLUSH_AFTER 0 /* never enabled by default */
-#define DEFAULT_BGWRITER_FLUSH_AFTER 32
+#define DEFAULT_BGWRITER_FLUSH_AFTER 64
 #define DEFAULT_CHECKPOINT_FLUSH_AFTER 32
 #else
 #define DEFAULT_BACKEND_FLUSH_AFTER 0

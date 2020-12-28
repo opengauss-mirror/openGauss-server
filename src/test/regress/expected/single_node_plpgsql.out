@@ -2475,7 +2475,7 @@ select raise_test2(10);
 ERROR:  too few parameters specified for RAISE
 CONTEXT:  PL/pgSQL function raise_test2(integer) line 3 at RAISE
 -- Test re-RAISE inside a nested exception block.  This case is allowed
--- by A's PL/SQL but was handled differently by PG before 9.1.
+-- by A db's PL/SQL but was handled differently by PG before 9.1.
 CREATE FUNCTION reraise_test() RETURNS void AS $$
 BEGIN
    BEGIN

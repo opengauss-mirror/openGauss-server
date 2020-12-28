@@ -31,6 +31,7 @@
 #include "utils/dynahash.h"
 #include "access/hash.h"
 #include "access/tuptoaster.h"
+#include "access/tableam.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 
@@ -53,27 +54,28 @@ static const NumberTypeOpt* binarySearch(Oid typeOid);
 
 /* const array for number type. */
 static const NumberTypeOpt g_number_types[] = {
-    {20, int64Compare, int64Minus, int64Plus},    /* int8 */
-    {21, int16Compare, int16Minus, int16Plus},    /* int2 */
-    {23, int32Compare, int32Minus, int32Plus},    /* int4 */
-    {26, uint32Compare, uint32Minus, uint32Plus}, /* oid */
-    {1082, int32Compare, int32Minus, int32Plus},  /* date */
-    {1083, int64Compare, int64Minus, int64Plus},  /* time */
-    {1114, int64Compare, int64Minus, int64Plus},  /* timestamp */
-    {1184, int64Compare, int64Minus, int64Plus},  /* timestamptz */
-    {12089, int64Compare, int64Minus, int64Plus}, /* time_stamp */
+    { 20, int64Compare, int64Minus, int64Plus },    /* int8 */
+    { 21, int16Compare, int16Minus, int16Plus },    /* int2 */
+    { 23, int32Compare, int32Minus, int32Plus },    /* int4 */
+    { 26, uint32Compare, uint32Minus, uint32Plus }, /* oid */
+    { 1082, int32Compare, int32Minus, int32Plus },  /* date */
+    { 1083, int64Compare, int64Minus, int64Plus },  /* time */
+    { 1114, int64Compare, int64Minus, int64Plus },  /* timestamp */
+    { 1184, int64Compare, int64Minus, int64Plus },  /* timestamptz */
+    { 12089, int64Compare, int64Minus, int64Plus }, /* time_stamp */
 };
 static const int g_number_type_count = sizeof(g_number_types) / sizeof(NumberTypeOpt);
 
 /* Map about max values in byte for delta compression */
 static const int64 g_max_value_in_bytes[] = {0x0000000000000000,
-    0x00000000000000FF,
-    0x000000000000FFFF,
-    0x0000000000FFFFFF,
-    0x00000000FFFFFFFF,
-    0x000000FFFFFFFFFF,
-    0x0000FFFFFFFFFFFF,
-    0x00FFFFFFFFFFFFFF};
+                                             0x00000000000000FF,
+                                             0x000000000000FFFF,
+                                             0x0000000000FFFFFF,
+                                             0x00000000FFFFFFFF,
+                                             0x000000FFFFFFFFFF,
+                                             0x0000FFFFFFFFFFFF,
+                                             0x00FFFFFFFFFFFFFF
+                                            };
 static const int64 g_number_max_value_in_bytes = (int64)(sizeof(g_max_value_in_bytes) / sizeof(int64));
 
 #define getTupleSpace(_tuple) (sizeof(ItemIdData) + MAXALIGN((_tuple)->t_len))
@@ -406,7 +408,7 @@ PageCompress::PageCompress(Relation rel, MemoryContext memCtx)
     m_parentMemCxt = memCtx;
     m_cmprHeaderData = (char*)palloc(BLCKSZ);
     m_pageMemCnxt = AllocSetContextCreate(
-        memCtx, "PageCompression", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+                        memCtx, "PageCompression", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
 
     int nattrs = RelationGetNumberOfAttributes(m_rel);
     m_cmprMode = (char*)palloc0((Size)(nattrs * sizeof(char)));
@@ -473,7 +475,7 @@ ColArray* PageCompress::DeformTups(HeapTuple* tups, int nTups)
      *   ....
      */
     for (int row = 0; row < nTups; ++row) {
-        heap_deform_tuple(tups[row], desc, m_deformVals, m_deformNulls);
+		heap_deform_tuple(tups[row], desc, m_deformVals, m_deformNulls);
 
         for (int col = 0; col < attrNum; ++col) {
             colArray[col].val[row] = m_deformVals[col];
@@ -611,7 +613,7 @@ Datum PageCompress::DictUncompress(DictCmprMeta* metaInfo, const char* compressB
             }
             default:
                 ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported byval length: %d", (int)(attlen))));
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported byval length: %d", (int)(attlen))));
         }
     } else
         res = PointerGetDatum(val->itemData);
@@ -761,7 +763,7 @@ bool PageCompress::PrefixCompress(PrefixCmprMeta* prefix, Datum val, Datum& cmpr
 }
 
 Datum PageCompress::PrefixUncompress(int attlen, PrefixCmprMeta* prefix, char* start, int* attrCmprsValSize,
-    char* uncmprValBuf, int* dataLenWithPadding, char attalign)
+                                     char* uncmprValBuf, int* dataLenWithPadding, char attalign)
 {
     int attsize;
     char* attdata = NULL;
@@ -1697,7 +1699,7 @@ bool PageCompress::CompressOnePage(void)
          * or all compressed tuples fill part of one page.
          */
         if (hascmpr)
-            fillOnePage = Dispatch(m_mappedTups[row], heap_form_cmprs_tuple(desc, &formTupleData), size, blksize);
+			fillOnePage = Dispatch(m_mappedTups[row], (HeapTuple)tableam_tops_form_cmprs_tuple(desc, &formTupleData, HEAP_TUPLE), size, blksize);
         else
             fillOnePage = Dispatch(m_mappedTups[row], size, blksize);
 
@@ -1731,7 +1733,7 @@ bool PageCompress::CompressOnePage(void)
             continue;
         }
 
-        heap_deform_tuple(raw, desc, values, isnulls);
+		heap_deform_tuple(raw, desc, values, isnulls);
         hascmpr = false;
 
         for (int col = 0; col < attrNum; ++col) {
@@ -1743,7 +1745,7 @@ bool PageCompress::CompressOnePage(void)
         }
 
         if (hascmpr)
-            fillOnePage = Dispatch(raw, heap_form_cmprs_tuple(desc, &formTupleData), size, blksize);
+			fillOnePage = Dispatch(raw, (HeapTuple)tableam_tops_form_cmprs_tuple(desc, &formTupleData, HEAP_TUPLE), size, blksize);
         else
             fillOnePage = Dispatch(raw, size, blksize);
 
@@ -1802,9 +1804,9 @@ handle_remains:
              *       after they are written into pages by heap_multi_insert().
              */
             rc = memcpy_s(m_inTups + m_current,
-                (size_t)(sizeof(HeapTuple) * thisToasts),
-                m_toastTups + prevToastNum,
-                (size_t)(sizeof(HeapTuple) * thisToasts));
+                          (size_t)(sizeof(HeapTuple) * thisToasts),
+                          m_toastTups + prevToastNum,
+                          (size_t)(sizeof(HeapTuple) * thisToasts));
             securec_check(rc, "", "");
             m_current += thisToasts;
         }
@@ -1813,9 +1815,9 @@ handle_remains:
         if (remainBeforeCmpr) {
             /* case 3.2.1: raw tuples are all in m_mappedTups[m_mappedTupsNum] */
             rc = memcpy_s(m_inTups + m_current,
-                (size_t)(sizeof(HeapTuple) * m_mappedTupsNum),
-                m_mappedTups,
-                (size_t)(sizeof(HeapTuple) * m_mappedTupsNum));
+                          (size_t)(sizeof(HeapTuple) * m_mappedTupsNum),
+                          m_mappedTups,
+                          (size_t)(sizeof(HeapTuple) * m_mappedTupsNum));
             securec_check(rc, "", "");
         } else {
             /*
@@ -1825,9 +1827,9 @@ handle_remains:
             int offset = m_current;
             if (m_cmprTupsNum > 0) {
                 rc = memcpy_s(m_inTups + offset,
-                    (size_t)(sizeof(HeapTuple) * m_cmprTupsNum),
-                    m_mappedTups,
-                    (size_t)(sizeof(HeapTuple) * m_cmprTupsNum));
+                              (size_t)(sizeof(HeapTuple) * m_cmprTupsNum),
+                              m_mappedTups,
+                              (size_t)(sizeof(HeapTuple) * m_cmprTupsNum));
                 securec_check(rc, "", "");
                 offset += m_cmprTupsNum;
                 m_cmprTupsNum = 0;
@@ -1836,7 +1838,7 @@ handle_remains:
             int uncmpr = m_inTupsNum - m_uncmprTupIdx;
             if (uncmpr > 0) {
                 rc = memcpy_s(m_inTups + offset, (size_t)(sizeof(HeapTuple) * uncmpr), m_cmprTups + m_uncmprTupIdx,
-                    (size_t)(sizeof(HeapTuple) * uncmpr));
+                              (size_t)(sizeof(HeapTuple) * uncmpr));
                 securec_check(rc, "", "");
             }
         }
@@ -1896,9 +1898,9 @@ void PageCompress::OutputRawTupsAfterCmpr(int nToasts)
     int uncmprNum = m_inTupsNum - m_uncmprTupIdx;
     if (uncmprNum > 0) {
         errno_t rc = memcpy_s(m_mappedTups + m_cmprTupsNum,
-            (size_t)(sizeof(HeapTuple) * uncmprNum),
-            m_cmprTups + m_uncmprTupIdx,
-            (size_t)(sizeof(HeapTuple) * uncmprNum));
+                              (size_t)(sizeof(HeapTuple) * uncmprNum),
+                              m_cmprTups + m_uncmprTupIdx,
+                              (size_t)(sizeof(HeapTuple) * uncmprNum));
         securec_check(rc, "", "");
     }
     Assert((m_cmprTupsNum + uncmprNum) <= m_mappedTupsNum);
@@ -1934,9 +1936,9 @@ void PageCompress::OutputCmprTups(int nToasts)
         m_outputTupsNum = m_inTupsNum;
     else {
         errno_t rc = memmove_s(m_cmprTups + m_cmprTupsNum,
-            (size_t)(sizeof(HeapTuple) * uncmprNum),
-            m_cmprTups + m_uncmprTupIdx,
-            (size_t)(sizeof(HeapTuple) * uncmprNum));
+                               (size_t)(sizeof(HeapTuple) * uncmprNum),
+                               m_cmprTups + m_uncmprTupIdx,
+                               (size_t)(sizeof(HeapTuple) * uncmprNum));
         securec_check(rc, "", "");
         m_outputTupsNum = m_cmprTupsNum + uncmprNum;
     }
@@ -2057,7 +2059,7 @@ void PageCompress::ForwardWrite(void)
         Assert(
             (0 == (dest->t_infomask & HEAP_HASNULL)) ||
             0 == memcmp(
-                     (char*)dest->t_bits, (char*)src->t_bits, BITMAPLEN(HeapTupleHeaderGetNatts(src, m_rel->rd_att))));
+                (char*)dest->t_bits, (char*)src->t_bits, BITMAPLEN(HeapTupleHeaderGetNatts(src, m_rel->rd_att))));
 
         rc = memcpy_s((char*)dest, src->t_hoff, (char*)src, src->t_hoff);
         securec_check(rc, "", "");
@@ -2218,11 +2220,11 @@ void PageCompress::CheckCmprAttr(Datum rawVal, bool rawNull, int col, FormCmprTu
     Assert(1 != atts[col]->attlen);
     int cmprSize;
     Datum value = UncompressOneAttr(m_cmprMode[col],
-        m_cmprMeta[col],
-        atts[col]->atttypid,
-        atts[col]->attlen,
-        DatumGetPointer(formTuple->values[col]),
-        &cmprSize);
+                                    m_cmprMeta[col],
+                                    atts[col]->atttypid,
+                                    atts[col]->attlen,
+                                    DatumGetPointer(formTuple->values[col]),
+                                    &cmprSize);
 
     Assert(cmprSize == formTuple->valsize[col]);
     CheckCmprDatum(rawVal, value, atts[col]);
@@ -2239,7 +2241,7 @@ void PageCompress::CheckCmprTuple(HeapTuple rawTup, HeapTuple cmprTup)
     bool* isnulls = (bool*)palloc(sizeof(bool) * nattrs);
     bool* isnulls2 = (bool*)palloc(sizeof(bool) * nattrs);
 
-    heap_deform_cmprs_tuple(cmprTup, desc, values, isnulls, m_cmprHeaderData);
+	heap_deform_cmprs_tuple(cmprTup, desc, values, isnulls, m_cmprHeaderData);
     heap_deform_tuple(rawTup, desc, values2, isnulls2);
 
     for (int col = 0; col < nattrs; ++col) {
@@ -2295,7 +2297,7 @@ void PageCompress::CheckCmprHeaderData(void)
                 for (int i = 0; i < dictMeta->dictItemNum; ++i) {
                     Assert(dictMeta->dictItems[i].itemSize == target->dictItems[i].itemSize);
                     Assert(0 == memcmp(dictMeta->dictItems[i].itemData, target->dictItems[i].itemData,
-                        target->dictItems[i].itemSize));
+                                       target->dictItems[i].itemSize));
                 }
 
                 break;
@@ -2418,10 +2420,10 @@ void PageCompress::TraceCmprPage(
             case CMPR_DELTA:
                 deltaMeta = (DeltaCmprMeta*)m_cmprMeta[col];
                 ereport(INFO,
-                    (errmsg("COL %d: Delta Compress, attrlen %d, delta bytes %d",
-                        col,
-                        atts[col]->attlen,
-                        deltaMeta->bytes)));
+                        (errmsg("COL %d: Delta Compress, attrlen %d, delta bytes %d",
+                                col,
+                                atts[col]->attlen,
+                                deltaMeta->bytes)));
                 break;
 
             case CMPR_NUMSTR:
@@ -2508,7 +2510,6 @@ static int int16Compare(Datum arg1, Datum arg2)
 {
     int16 val1 = DatumGetInt16(arg1);
     int16 val2 = DatumGetInt16(arg2);
-
     if (val1 > val2)
         return (1);
     if (val1 < val2)
@@ -2541,7 +2542,6 @@ static int int32Compare(Datum arg1, Datum arg2)
 {
     int32 val1 = DatumGetInt32(arg1);
     int32 val2 = DatumGetInt32(arg2);
-
     if (val1 > val2)
         return 1;
     if (val1 < val2)
@@ -2574,7 +2574,6 @@ static int uint32Compare(Datum arg1, Datum arg2)
 {
     uint32 val1 = DatumGetUInt32(arg1);
     uint32 val2 = DatumGetUInt32(arg2);
-
     if (val1 > val2)
         return 1;
     if (val1 < val2)
@@ -2607,7 +2606,6 @@ static int int64Compare(Datum arg1, Datum arg2)
 {
     int64 val1 = DatumGetInt64(arg1);
     int64 val2 = DatumGetInt64(arg2);
-
     if (val1 > val2)
         return 1;
     if (val1 < val2)
@@ -2633,4 +2631,3 @@ static Datum int64Plus(Datum arg1, int64 arg2)
 
     PG_RETURN_INT64((int64)(val1 + arg2));
 }
-

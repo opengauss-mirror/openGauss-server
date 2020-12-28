@@ -136,7 +136,7 @@ DataSlotTag DataCacheMgr::InitORCSlotTag(RelFileNode* rnode, int32 fileid, uint6
 }
 
 DataSlotTag DataCacheMgr::InitOBSSlotTag(uint32 hostNameHash, uint32 bucketNameHash, uint32 fileFirstHalfHash,
-    uint32 fileSecondHalfHash, uint64 offset, uint64 length) const
+                                         uint32 fileSecondHalfHash, uint64 offset, uint64 length) const
 {
     DataSlotTag tag;
     tag.slotTag.obsSlotTag.m_serverHash = hostNameHash;
@@ -285,45 +285,45 @@ CacheSlotId_t DataCacheMgr::ReserveDataBlock(DataSlotTag* dataSlotTag, int size,
     if (cacheTag.type == CACHE_COlUMN_DATA) {
         CUSlotTag* cuslotTag = &dataSlotTag->slotTag.cuSlotTag;
         ereport(DEBUG1,
-            (errmodule(MOD_CACHE),
-                errmsg("allocate metadata block, type(%d), slotID(%d), spcID(%u), dbID(%u), relID(%u), colId(%d), "
-                       "cuID(%d), cuPoint(%lu)",
-                    cacheTag.type,
-                    slot,
-                    cuslotTag->m_rnode.spcNode,
-                    cuslotTag->m_rnode.dbNode,
-                    cuslotTag->m_rnode.relNode,
-                    cuslotTag->m_colId,
-                    cuslotTag->m_CUId,
-                    cuslotTag->m_cuPtr)));
+                (errmodule(MOD_CACHE),
+                 errmsg("allocate metadata block, type(%d), slotID(%d), spcID(%u), dbID(%u), relID(%u), colId(%d), "
+                        "cuID(%d), cuPoint(%lu)",
+                        cacheTag.type,
+                        slot,
+                        cuslotTag->m_rnode.spcNode,
+                        cuslotTag->m_rnode.dbNode,
+                        cuslotTag->m_rnode.relNode,
+                        cuslotTag->m_colId,
+                        cuslotTag->m_CUId,
+                        cuslotTag->m_cuPtr)));
     } else if (cacheTag.type == CACHE_ORC_DATA) {
         ORCSlotTag* orcslotTag = &dataSlotTag->slotTag.orcSlotTag;
         ereport(DEBUG1,
-            (errmodule(MOD_CACHE),
-                errmsg("allocate metadata block, type(%d), slotID(%d), spcID(%u), dbID(%u), relID(%u), fileID(%d), "
-                       "length(%lu), offset(%lu)",
-                    cacheTag.type,
-                    slot,
-                    orcslotTag->m_rnode.spcNode,
-                    orcslotTag->m_rnode.dbNode,
-                    orcslotTag->m_rnode.relNode,
-                    orcslotTag->m_fileId,
-                    orcslotTag->m_length,
-                    orcslotTag->m_offset)));
+                (errmodule(MOD_CACHE),
+                 errmsg("allocate metadata block, type(%d), slotID(%d), spcID(%u), dbID(%u), relID(%u), fileID(%d), "
+                        "length(%lu), offset(%lu)",
+                        cacheTag.type,
+                        slot,
+                        orcslotTag->m_rnode.spcNode,
+                        orcslotTag->m_rnode.dbNode,
+                        orcslotTag->m_rnode.relNode,
+                        orcslotTag->m_fileId,
+                        orcslotTag->m_length,
+                        orcslotTag->m_offset)));
     } else if (cacheTag.type == CACHE_OBS_DATA) {
         OBSSlotTag* obsslotTag = &dataSlotTag->slotTag.obsSlotTag;
         ereport(DEBUG1,
-            (errmodule(MOD_CACHE),
-                errmsg("allocate metadata block, type(%d), slotID(%d), serverHash(%u), bucketHash(%u), fileHash1( %u), "
-                       "fileHash2(%u), length(%lu), offset(%lu)",
-                    cacheTag.type,
-                    slot,
-                    obsslotTag->m_serverHash,
-                    obsslotTag->m_bucketHash,
-                    obsslotTag->m_fileFirstHash,
-                    obsslotTag->m_fileSecondHash,
-                    obsslotTag->m_length,
-                    obsslotTag->m_offset)));
+                (errmodule(MOD_CACHE),
+                 errmsg("allocate metadata block, type(%d), slotID(%d), serverHash(%u), bucketHash(%u), fileHash1( %u), "
+                        "fileHash2(%u), length(%lu), offset(%lu)",
+                        cacheTag.type,
+                        slot,
+                        obsslotTag->m_serverHash,
+                        obsslotTag->m_bucketHash,
+                        obsslotTag->m_fileFirstHash,
+                        obsslotTag->m_fileSecondHash,
+                        obsslotTag->m_length,
+                        obsslotTag->m_offset)));
     }
 
     return slot;
@@ -415,7 +415,7 @@ void DataCacheMgr::TerminateVerifyCU()
  * @See also:
  */
 CUUncompressedRetCode DataCacheMgr::StartUncompressCU(
-    CUDesc* cuDescPtr, CacheSlotId_t slotId, int planNodeId, bool timing)
+    CUDesc* cuDescPtr, CacheSlotId_t slotId, int planNodeId, bool timing, int align_size)
 {
     CU* cuPtr = GetCUBuf(slotId);
 
@@ -472,7 +472,7 @@ CUUncompressedRetCode DataCacheMgr::StartUncompressCU(
 
     /* Always presume compressed disk and uncompressed cache. */
     UNCOMPRESS_TRACE(TRACK_START(planNodeId, UNCOMPRESS_CU));
-    cuPtr->UnCompress(cuDescPtr->row_count, cuDescPtr->magic);
+    cuPtr->UnCompress(cuDescPtr->row_count, cuDescPtr->magic, align_size);
     UNCOMPRESS_TRACE(TRACK_END(planNodeId, UNCOMPRESS_CU));
 
     /* Do not put the compressedBuf in the cache
@@ -598,48 +598,51 @@ void DataCacheMgr::PrintDataCacheSlotLeakWarning(CacheSlotId_t slotId)
     Assert(IsValidCacheSlotID(slotId));
 
     const CacheTag* cacheTag = m_cache_mgr->GetCacheBlockTag(slotId, &refcount);
+    if (cacheTag == NULL) {
+        ereport(ERROR, (errmsg("No cache found when print data cache slot leak warning:  slotId:%d", slotId)));
+    }
     errno_t rc = memcpy_s(&(tag.slotTag), sizeof(DataSlotTagKey), cacheTag->key, sizeof(DataSlotTagKey));
     securec_check(rc, "\0", "\0");
     if (cacheTag->type == CACHE_COlUMN_DATA) {
         CUSlotTag* cuslotTag = &tag.slotTag.cuSlotTag;
         ereport(WARNING,
-            (errmsg("CUCache refcount leak: type:%d, spaceNode: %u, dbNode: %u, relNode: %u, colId: %d, cuId: %d, "
-                    "cuPoint: %lu, refcount: %u, slotId:%d",
-                cacheTag->type,
-                cuslotTag->m_rnode.spcNode,
-                cuslotTag->m_rnode.dbNode,
-                cuslotTag->m_rnode.relNode,
-                cuslotTag->m_colId,
-                cuslotTag->m_CUId,
-                cuslotTag->m_cuPtr,
-                refcount,
-                slotId)));
+                (errmsg("CUCache refcount leak: type:%d, spaceNode: %u, dbNode: %u, relNode: %u, colId: %d, cuId: %d, "
+                        "cuPoint: %lu, refcount: %u, slotId:%d",
+                        cacheTag->type,
+                        cuslotTag->m_rnode.spcNode,
+                        cuslotTag->m_rnode.dbNode,
+                        cuslotTag->m_rnode.relNode,
+                        cuslotTag->m_colId,
+                        cuslotTag->m_CUId,
+                        cuslotTag->m_cuPtr,
+                        refcount,
+                        slotId)));
     } else if (cacheTag->type == CACHE_ORC_DATA) {
         ORCSlotTag* orcslotTag = &tag.slotTag.orcSlotTag;
         ereport(WARNING,
-            (errmsg("ORCCache refcount leak: type:%d, spaceNode: %u, dbNode: %u, relNode: %u, fileId: %d, length: %lu, "
-                    "offset: %lu, refcount: %u, slotId:%d",
-                cacheTag->type,
-                orcslotTag->m_rnode.spcNode,
-                orcslotTag->m_rnode.dbNode,
-                orcslotTag->m_rnode.relNode,
-                orcslotTag->m_fileId,
-                orcslotTag->m_length,
-                orcslotTag->m_offset,
-                refcount,
-                slotId)));
+                (errmsg("ORCCache refcount leak: type:%d, spaceNode: %u, dbNode: %u, relNode: %u, fileId: %d, length: %lu, "
+                        "offset: %lu, refcount: %u, slotId:%d",
+                        cacheTag->type,
+                        orcslotTag->m_rnode.spcNode,
+                        orcslotTag->m_rnode.dbNode,
+                        orcslotTag->m_rnode.relNode,
+                        orcslotTag->m_fileId,
+                        orcslotTag->m_length,
+                        orcslotTag->m_offset,
+                        refcount,
+                        slotId)));
     } else if (cacheTag->type == CACHE_OBS_DATA) {
         OBSSlotTag* obsslotTag = &tag.slotTag.obsSlotTag;
         ereport(WARNING,
-            (errmsg("OBSCache refcount leak: type:%d, server hash: %u, bucket hash: %u, file hash1: %u, file hash2: "
-                    "%u, length: %lu, offset: %lu",
-                cacheTag->type,
-                obsslotTag->m_serverHash,
-                obsslotTag->m_bucketHash,
-                obsslotTag->m_fileFirstHash,
-                obsslotTag->m_fileSecondHash,
-                obsslotTag->m_length,
-                obsslotTag->m_offset)));
+                (errmsg("OBSCache refcount leak: type:%d, server hash: %u, bucket hash: %u, file hash1: %u, file hash2: "
+                        "%u, length: %lu, offset: %lu",
+                        cacheTag->type,
+                        obsslotTag->m_serverHash,
+                        obsslotTag->m_bucketHash,
+                        obsslotTag->m_fileFirstHash,
+                        obsslotTag->m_fileSecondHash,
+                        obsslotTag->m_length,
+                        obsslotTag->m_offset)));
     }
 
     return;
@@ -742,10 +745,10 @@ int CompltrReadCUReq(void* aioDesc, long res)
     if (res != desc->cuDesc.size) {
         *(desc->cuDesc.io_error) = true;
         ereport(WARNING,
-            (errmsg("CompltrReadCUReq error! slotid(%d), expect cu_size(%d), load cu_size(%ld)",
-                desc->cuDesc.slotId,
-                desc->cuDesc.size,
-                res)));
+                (errmsg("CompltrReadCUReq error! slotid(%d), expect cu_size(%d), load cu_size(%ld)",
+                        desc->cuDesc.slotId,
+                        desc->cuDesc.size,
+                        res)));
     } else {
         *(desc->cuDesc.io_error) = false;
     }
@@ -777,10 +780,10 @@ int CompltrWriteCUReq(void* aioDesc, long res)
     if (res != desc->cuDesc.size) {
         *(desc->cuDesc.io_error) = true;
         ereport(WARNING,
-            (errmsg("CompltrWriteCUReq error! cuid(%u), expect cu_size(%d), load cu_size(%ld)",
-                (uint32)desc->cuDesc.slotId,
-                desc->cuDesc.size,
-                res)));
+                (errmsg("CompltrWriteCUReq error! cuid(%u), expect cu_size(%d), load cu_size(%ld)",
+                        (uint32)desc->cuDesc.slotId,
+                        desc->cuDesc.size,
+                        res)));
     } else {
         *(desc->cuDesc.io_error) = false;
     }
@@ -832,16 +835,16 @@ CacheSlotId_t ORCCacheAllocBlock(
             if (maxRetry-- <= 0) {
                 err_found = true;
                 ereport(LOG,
-                    (errmodule(MOD_ORC),
-                        errmsg("wait IO find an error when allocate orc data, slotID(%d), spcID(%u), dbID(%u), "
-                               "relID(%u), fileID(%d), offset(%lu), length(%lu)",
-                            slotId,
-                            rnode->spcNode,
-                            rnode->dbNode,
-                            rnode->relNode,
-                            relid,
-                            offset,
-                            length)));
+                        (errmodule(MOD_ORC),
+                         errmsg("wait IO find an error when allocate orc data, slotID(%d), spcID(%u), dbID(%u), "
+                                "relID(%u), fileID(%d), offset(%lu), length(%lu)",
+                                slotId,
+                                rnode->spcNode,
+                                rnode->dbNode,
+                                rnode->relNode,
+                                relid,
+                                offset,
+                                length)));
                 break;
             } else {
                 slotId = ORCCache->ReserveDataBlock(&dataSlotTag, length, found);
@@ -878,7 +881,7 @@ bool OBSCacheRenewBlock(CacheSlotId_t slotID)
  * liborc(orc.HdfsCacheFileInputStream.read)
  */
 CacheSlotId_t OBSCacheAllocBlock(const char* hostName, const char* bucketName, const char* prefixName, uint64 offset,
-    uint64 length, bool& found, bool& err_found)
+                                 uint64 length, bool& found, bool& err_found)
 {
     Assert(hostName && bucketName && prefixName);
 

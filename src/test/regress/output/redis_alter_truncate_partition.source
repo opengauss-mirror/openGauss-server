@@ -1,4 +1,4 @@
-create table t3(c1 int, c2 int)  
+create table t3(c1 int, c2 int) distribute by hash (c1)
 PARTITION BY RANGE (c2)
 (
         partition p0 values less than (10),
@@ -23,7 +23,7 @@ create unlogged table data_redis.pg_delete_delta_16399
         block_number bigint,
         block_offset int
 )
- ;
+distribute by hash(xcnodeid,dnrelid,block_number,block_offset);
 create view ctid_view as
 select *, xc_node_id,pg_tupleid_get_blocknum(ctid),pg_tupleid_get_offset(ctid) from t3 partition (p0)
 where ctid between pg_get_redis_rel_start_ctid('t3','p0') and pg_get_redis_rel_end_ctid('t3','p0')
@@ -117,7 +117,7 @@ select count(*) from data_redis.pg_delete_delta_16399;
 (1 row)
 
 -- test error path --- 
-create table t4(c1 int, c2 int)  
+create table t4(c1 int, c2 int) distribute by hash (c1)
 PARTITION BY RANGE (c2)
 (
         partition p0 values less than (10),
@@ -142,7 +142,7 @@ create unlogged table data_redis.pg_delete_delta_12345
         block_number bigint,
         block_offset int
 )
- ;
+distribute by hash(xcnodeid,dnrelid,block_number,block_offset);
 -- truncate is succeed
 alter table t4 truncate partition p0;
 -- clean up -- 

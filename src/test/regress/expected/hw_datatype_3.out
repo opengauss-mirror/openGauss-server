@@ -7,9 +7,9 @@ set search_path = hw_datatype_3;
 --smalldatetime
 CREATE TABLE SMALLDATETIME_TBL (d1 smalldatetime);
 SELECT LOCALTIMESTAMP;
---?.*timestamp.*       
 --?.*
---? .*
+--?.*
+--?.*
 (1 row)
 
 INSERT INTO SMALLDATETIME_TBL VALUES ('now');
@@ -17,15 +17,15 @@ INSERT INTO SMALLDATETIME_TBL VALUES ('today');
 SHOW TIMEZONE; 
  TimeZone 
 ----------
- PST8PDT
+--?.*
 (1 row)
 
 SELECT * FROM SMALLDATETIME_TBL;
          d1          
 ---------------------
---? .*
---? .*
-(2 rows)
+--?.*
+--?.*
+--?.*
 
 INSERT INTO SMALLDATETIME_TBL VALUES ('yesterday');
 INSERT INTO SMALLDATETIME_TBL VALUES ('tomorrow');
@@ -34,15 +34,15 @@ INSERT INTO SMALLDATETIME_TBL VALUES ('tomorrow zulu');
 SELECT * FROM SMALLDATETIME_TBL;
          d1          
 ---------------------
---? .*
---? .*
---? .*
---? .*
---? .*
---? .*
-(6 rows)
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
 
-EXPLAIN (VERBOSE on, COSTS on, NODES on) SELECT count(*) AS One FROM SMALLDATETIME_TBL WHERE d1 = smalldatetime  'today';
+EXPLAIN (VERBOSE on, COSTS on) SELECT count(*) AS One FROM SMALLDATETIME_TBL WHERE d1 = smalldatetime  'today';
                                       QUERY PLAN                                       
 ---------------------------------------------------------------------------------------
 --? Aggregate  (cost=.* rows=1 width=8)
@@ -1379,4 +1379,4 @@ select oidvectortypes(b) from tbl_oidvector;
 (1 row)
 
 drop table tbl_oidvector;
---?reset search_path;.*
+reset search_path;

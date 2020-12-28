@@ -1,6 +1,6 @@
 ---RETURN---
 SET CHECK_FUNCTION_BODIES TO ON;
---default return out arg. not supported in A DB
+--default return out arg. not supported in A db
 CREATE OR REPLACE FUNCTION test_return( i in integer, j out integer) 
 RETURN integer 
 AS
@@ -600,7 +600,7 @@ drop procedure test_assigrn_func2;
 SET CHECK_FUNCTION_BODIES TO OFF;
 ---RETURN---
 SET CHECK_FUNCTION_BODIES TO ON;
---default return out arg. not supported in A DB
+--default return out arg. not supported in A db
 CREATE OR REPLACE FUNCTION test_return( i in integer, j out integer) 
 RETURN integer 
 AS

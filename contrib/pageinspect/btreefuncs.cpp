@@ -54,8 +54,6 @@ PG_FUNCTION_INFO_V1(bt_page_stats);
             elog(ERROR, "block number out of range");               \
     }
 
-static const int HEX_DUMP_VALUE = 3;
-
 /* ------------------------------------------------
  * structure for single btree page statistics
  * ------------------------------------------------
@@ -169,7 +167,7 @@ Datum bt_page_stats(PG_FUNCTION_ARGS)
     TupleDesc tupleDesc;
     int j;
     char* values[11];
-    BTPageStat stat;
+    BTPageStat stat = {0};
 
     if (!superuser())
         ereport(ERROR,
@@ -319,8 +317,7 @@ Datum bt_page_items(PG_FUNCTION_ARGS)
         uargs = (user_args*)palloc(sizeof(struct user_args));
 
         uargs->page = (char*)palloc(BLCKSZ);
-        errno_t rc = memcpy_s(uargs->page, BLCKSZ, BufferGetPage(buffer), BLCKSZ);
-        securec_check_c(rc, "", "");
+        memcpy(uargs->page, BufferGetPage(buffer), BLCKSZ);
 
         UnlockReleaseBuffer(buffer);
         relation_close(rel, AccessShareLock);
@@ -378,10 +375,7 @@ Datum bt_page_items(PG_FUNCTION_ARGS)
 
         ptr = (char*)itup + IndexInfoFindDataOffset(itup->t_info);
         dlen = IndexTupleSize(itup) - IndexInfoFindDataOffset(itup->t_info);
-        if (unlikely(dlen < 0 || dlen >= MaxAllocSize / HEX_DUMP_VALUE)) {
-            elog(ERROR, "invalid data len:%d", dlen);
-        }
-        dump = (char*)palloc0(dlen * HEX_DUMP_VALUE + 1);
+        dump = (char*)palloc0(dlen * 3 + 1);
         values[j] = dump;
         for (off = 0; off < dlen; off++) {
             if (off > 0)

@@ -30,6 +30,7 @@
 #include <fcntl.h>
 
 #ifdef WIN32
+#define _WINSOCKAPI_
 #include <windows.h>
 #include <io.h>
 #endif
@@ -47,14 +48,14 @@ int pgut_flock(int fd, int operation, int64 offset, int location, int64 len)
     HANDLE handle = (HANDLE)_get_osfhandle(fd);
     DWORD lo = len;
     const DWORD hi = 0;
-    errno_t rc;
+    errno_t rc = EOK;
 
     OVERLAPPED Oapped;
     rc = memset_s(&Oapped, sizeof(OVERLAPPED), 0, sizeof(OVERLAPPED));
     securec_check_c(rc, "\0", "\0");
     Oapped.Offset = offset;
 
-    /* UNlOCK */
+    /*  UNlOCK*/
     if (operation & LOCK_UN) {
         ret = UnlockFileEx(handle, 0, lo, hi, &Oapped);
     } else {
@@ -85,12 +86,12 @@ int pgut_flock(int fd, int operation, int64 offset, int location, int64 len)
 {
     struct flock lck;
     int cmd;
-    errno_t rc;
+    errno_t rc = EOK;
 
     rc = memset_s(&lck, sizeof(lck), 0, sizeof(lck));
     securec_check_c(rc, "\0", "\0");
 
-    /* Get start location of lock area */
+    /*Get start location of lock area*/
     if ((unsigned int)location & START_LOCATION) {
         lck.l_whence = SEEK_SET;
     }
@@ -105,17 +106,19 @@ int pgut_flock(int fd, int operation, int64 offset, int location, int64 len)
     lck.l_len = len;
     lck.l_pid = getpid();
 
-    if ((unsigned int)operation & LOCK_UN)
+    if ((unsigned int)operation & LOCK_UN) {
         lck.l_type = F_UNLCK;
-    else if ((unsigned int)operation & LOCK_EX)
+    } else if ((unsigned int)operation & LOCK_EX) {
         lck.l_type = F_WRLCK;
-    else
+    } else {
         lck.l_type = F_RDLCK;
+    }
 
-    if ((unsigned int)operation & LOCK_NB)
+    if ((unsigned int)operation & LOCK_NB) {
         cmd = F_SETLK;
-    else
+    } else {
         cmd = F_SETLKW;
+    }
 
     return fcntl(fd, cmd, &lck);
 }

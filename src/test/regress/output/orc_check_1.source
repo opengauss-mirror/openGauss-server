@@ -1,0 +1,531 @@
+drop server hdfs_server cascade;
+ERROR:  server "hdfs_server" does not exist
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+create foreign table part_1 (a int, b varchar(20), c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_1')
+distribute by roundrobin
+partition by (b) automapped;
+create or replace function llt_extern_param(int) returns TABLE(a int, b varchar(20), c date)
+as
+$$
+select * from part_1 where a = $1 order by 1,2,3;
+$$
+LANGUAGE SQL;
+call llt_extern_param(1);
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 | 123 | Fri Jan 04 00:00:00 2013
+ 1 |     | Fri Jan 04 00:00:00 2013
+(2 rows)
+
+explain (verbose, costs off) select * from part_1 where a = 2;
+WARNING:  Statistics in some tables or columns(public.part_1.a) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_1
+               Output: a, b, c
+               Pushdown Predicate Filter: (part_1.a = 2)
+               Orc File: /user/hive/warehouse/partition.db/part_1
+(8 rows)
+
+explain (verbose, costs off) select * from part_1 where b is null;
+WARNING:  Statistics in some tables or columns(public.part_1.b) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_1
+               Output: a, b, c
+               Filter: (part_1.b IS NULL)
+               Orc File: /user/hive/warehouse/partition.db/part_1
+               Partition pruning: b(total 2; left 1)
+(9 rows)
+
+explain (verbose, costs off) select * from part_1 where b is not null;
+WARNING:  Statistics in some tables or columns(public.part_1.b) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_1
+               Output: a, b, c
+               Filter: (part_1.b IS NOT NULL)
+               Orc File: /user/hive/warehouse/partition.db/part_1
+               Partition pruning: b(total 2; left 1)
+(9 rows)
+
+explain (verbose, costs off) select * from part_1 where b = null;
+WARNING:  Statistics in some tables or columns(public.part_1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Vector Result
+               Output: a, b, c
+               One-Time Filter: NULL::boolean
+               ->  Partitioned Vector Foreign Scan on public.part_1
+                     Output: a, b, c
+                     Orc File: /user/hive/warehouse/partition.db/part_1
+(10 rows)
+
+explain (verbose, costs off) select * from part_1 where b is not null and a = 1;
+WARNING:  Statistics in some tables or columns(public.part_1.b, public.part_1.a) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_1
+               Output: a, b, c
+               Filter: (part_1.b IS NOT NULL)
+               Pushdown Predicate Filter: (part_1.a = 1)
+               Orc File: /user/hive/warehouse/partition.db/part_1
+               Partition pruning: b(total 2; left 1)
+(10 rows)
+
+explain (verbose, costs off) select * from part_1 where b is null and c <> '2013-01-04';
+WARNING:  Statistics in some tables or columns(public.part_1.b, public.part_1.c) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                   QUERY PLAN                                                   
+----------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_1
+               Output: a, b, c
+               Filter: (part_1.b IS NULL)
+               Pushdown Predicate Filter: (part_1.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone)
+               Orc File: /user/hive/warehouse/partition.db/part_1
+               Partition pruning: b(total 2; left 1)
+(10 rows)
+
+explain (verbose, costs off) select * from part_1 where b is null or c != '2013-01-04';
+WARNING:  Statistics in some tables or columns(public.part_1.b, public.part_1.c) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_1
+               Output: a, b, c
+               Filter: ((part_1.b IS NULL) OR (part_1.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone))
+               Orc File: /user/hive/warehouse/partition.db/part_1
+               Partition pruning: b(total 2; left 2)
+(9 rows)
+
+drop foreign table part_1;
+create foreign table part_2 (a int, b text, c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_2')
+distribute by roundrobin
+partition by (c) automapped;
+explain (verbose, costs off) select c from part_2 where a = 2;
+WARNING:  Statistics in some tables or columns(public.part_2.a) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: c
+   ->  Vector Streaming (type: GATHER)
+         Output: c
+         ->  Partitioned Vector Foreign Scan on public.part_2
+               Output: c
+               Pushdown Predicate Filter: (part_2.a = 2)
+               Orc File: /user/hive/warehouse/partition.db/part_2
+(8 rows)
+
+explain (verbose, costs off) select count(*) from part_2 where c = '2013-01-04';
+WARNING:  Statistics in some tables or columns(public.part_2.c) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (pg_catalog.count(*))
+   ->  Vector Aggregate
+         Output: pg_catalog.count(*)
+         ->  Vector Streaming (type: GATHER)
+               Output: (count(*))
+               ->  Vector Aggregate
+                     Output: count(*)
+                     ->  Partitioned Vector Foreign Scan on public.part_2
+                           Output: 'Dummy'
+                           Filter: (part_2.c = 'Fri Jan 04 00:00:00 2013'::timestamp without time zone)
+                           Orc File: /user/hive/warehouse/partition.db/part_2
+                           Partition pruning: c(total 3; left 1)
+(13 rows)
+
+explain (verbose, costs off) select * from part_2 where b is not null;
+WARNING:  Statistics in some tables or columns(public.part_2.b) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_2
+               Output: a, b, c
+               Pushdown Predicate Filter: (part_2.b IS NOT NULL)
+               Orc File: /user/hive/warehouse/partition.db/part_2
+(8 rows)
+
+explain (verbose, costs off) select * from part_2 where b = null;
+WARNING:  Statistics in some tables or columns(public.part_2) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Vector Result
+               Output: a, b, c
+               One-Time Filter: NULL::boolean
+               ->  Partitioned Vector Foreign Scan on public.part_2
+                     Output: a, b, c
+                     Orc File: /user/hive/warehouse/partition.db/part_2
+(10 rows)
+
+explain (verbose, costs off) select * from part_2 where b is not null and c = '2013-01-04';
+WARNING:  Statistics in some tables or columns(public.part_2.b, public.part_2.c) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_2
+               Output: a, b, c
+               Filter: (part_2.c = 'Fri Jan 04 00:00:00 2013'::timestamp without time zone)
+               Pushdown Predicate Filter: (part_2.b IS NOT NULL)
+               Orc File: /user/hive/warehouse/partition.db/part_2
+               Partition pruning: c(total 3; left 1)
+(10 rows)
+
+explain (verbose, costs off) select * from part_2 where b is null and c != '2013-01-04';
+WARNING:  Statistics in some tables or columns(public.part_2.b, public.part_2.c) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_2
+               Output: a, b, c
+               Filter: (part_2.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone)
+               Pushdown Predicate Filter: (part_2.b IS NULL)
+               Orc File: /user/hive/warehouse/partition.db/part_2
+               Partition pruning: c(total 3; left 2)
+(10 rows)
+
+explain (verbose, costs off) select * from part_2 where b is null or c != '2013-01-04';
+WARNING:  Statistics in some tables or columns(public.part_2.b, public.part_2.c) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_2
+               Output: a, b, c
+               Filter: ((part_2.b IS NULL) OR (part_2.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone))
+               Orc File: /user/hive/warehouse/partition.db/part_2
+               Partition pruning: c(total 3; left 3)
+(9 rows)
+
+drop foreign table part_2;
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_3')
+distribute by roundrobin
+partition by (c, b) automapped;
+select * from part_3 where b is null;
+ a | b | c 
+---+---+---
+(0 rows)
+
+drop foreign table part_3;
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_3')
+distribute by roundrobin
+partition by (b, c) automapped;
+explain (verbose, costs off) select * from part_3 where b is not null and a = 1;
+WARNING:  Statistics in some tables or columns(public.part_3.b, public.part_3.a) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b, c
+               Filter: (part_3.b IS NOT NULL)
+               Pushdown Predicate Filter: (part_3.a = 1)
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: b(total 2; left 1)
+(10 rows)
+
+explain (verbose, costs off) select * from part_3 where b is null and c != '2013-01-04';
+WARNING:  Statistics in some tables or columns(public.part_3.b, public.part_3.c) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b, c
+               Filter: ((part_3.b IS NULL) AND (part_3.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone))
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: b(total 2; left 1), c(total 2; left 1)
+(9 rows)
+
+explain (verbose, costs off) select * from part_3 where b is null or c != '2013-01-04';
+WARNING:  Statistics in some tables or columns(public.part_3.b, public.part_3.c) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b, c
+               Filter: ((part_3.b IS NULL) OR (part_3.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone))
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: b(total 2; left 2), c(total 4; left 4)
+(9 rows)
+
+explain (verbose, costs off) select * from part_3 where c = '2013-05-04';
+WARNING:  Statistics in some tables or columns(public.part_3.c) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b, c
+               Filter: (part_3.c = 'Sat May 04 00:00:00 2013'::timestamp without time zone)
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: c(total 4; left 0)
+(9 rows)
+
+explain (verbose, costs off) select * from part_3 where b = '123' and c = '2013-05-04';
+WARNING:  Statistics in some tables or columns(public.part_3.b, public.part_3.c) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                            QUERY PLAN                                                             
+-----------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b, c
+               Filter: (((part_3.b)::text = '123'::text) AND (part_3.c = 'Sat May 04 00:00:00 2013'::timestamp without time zone))
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: b(total 2; left 1), c(total 2; left 0)
+(9 rows)
+
+explain (verbose, costs off) select * from part_3 where b = '123' and c != '2013-01-04';
+WARNING:  Statistics in some tables or columns(public.part_3.c, public.part_3.b) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                             QUERY PLAN                                                             
+------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b, c
+               Filter: ((part_3.c <> 'Fri Jan 04 00:00:00 2013'::timestamp without time zone) AND ((part_3.b)::text = '123'::text))
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: b(total 2; left 1), c(total 2; left 1)
+(9 rows)
+
+drop foreign table part_3;
+create foreign table part_3 (a int, b varchar(20))
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_3')
+distribute by roundrobin
+partition by (b) automapped;
+explain (verbose, costs off) select * from part_3 where b is null;
+WARNING:  Statistics in some tables or columns(public.part_3.b) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Row Adapter
+   Output: a, b
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b
+         ->  Partitioned Vector Foreign Scan on public.part_3
+               Output: a, b
+               Filter: (part_3.b IS NULL)
+               Orc File: /user/hive/warehouse/partition.db/part_3
+               Partition pruning: b(total 2; left 1)
+(9 rows)
+
+drop foreign table part_3;
+create foreign table part_4 (p_partkey int, p_name text, p_mfgr text, p_brand text, p_type text, p_size int, p_container text, p_retailprice float8, p_comment text) 
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_4')
+distribute by roundrobin
+partition by (p_mfgr) automapped;
+explain (verbose, costs off) select distinct p_mfgr, p_partkey, p_name from part_4 where p_mfgr='Manufacturer#1';
+WARNING:  Statistics in some tables or columns(public.part_4.p_mfgr, public.part_4.p_partkey, public.part_4.p_name) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Row Adapter
+   Output: p_mfgr, p_partkey, p_name
+   ->  Vector Hash Aggregate
+         Output: p_mfgr, p_partkey, p_name
+         Group By Key: part_4.p_mfgr, part_4.p_partkey, part_4.p_name
+         ->  Vector Streaming (type: GATHER)
+               Output: p_mfgr, p_partkey, p_name
+               ->  Vector Hash Aggregate
+                     Output: p_mfgr, p_partkey, p_name
+                     Group By Key: part_4.p_mfgr, part_4.p_partkey, part_4.p_name
+                     ->  Partitioned Vector Foreign Scan on public.part_4
+                           Output: p_mfgr, p_partkey, p_name
+                           Filter: (part_4.p_mfgr = 'Manufacturer#1'::text)
+                           Orc File: /user/hive/warehouse/partition.db/part_4
+                           Partition pruning: p_mfgr(total 5; left 1)
+(15 rows)
+
+explain (verbose, costs off) select distinct p_mfgr, p_partkey, p_name from part_4 where p_mfgr='Manufacturer#1' and p_partkey < 20000;
+WARNING:  Statistics in some tables or columns(public.part_4.p_partkey, public.part_4.p_mfgr, public.part_4.p_name) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Row Adapter
+   Output: p_mfgr, p_partkey, p_name
+   ->  Vector Hash Aggregate
+         Output: p_mfgr, p_partkey, p_name
+         Group By Key: part_4.p_mfgr, part_4.p_partkey, part_4.p_name
+         ->  Vector Streaming (type: GATHER)
+               Output: p_mfgr, p_partkey, p_name
+               ->  Vector Hash Aggregate
+                     Output: p_mfgr, p_partkey, p_name
+                     Group By Key: part_4.p_mfgr, part_4.p_partkey, part_4.p_name
+                     ->  Partitioned Vector Foreign Scan on public.part_4
+                           Output: p_mfgr, p_partkey, p_name
+                           Filter: (part_4.p_mfgr = 'Manufacturer#1'::text)
+                           Pushdown Predicate Filter: (part_4.p_partkey < 20000)
+                           Orc File: /user/hive/warehouse/partition.db/part_4
+                           Partition pruning: p_mfgr(total 5; left 1)
+(16 rows)
+
+explain (verbose, costs off)select count(*) from part_4 where p_mfgr='Manufacturer#1';
+WARNING:  Statistics in some tables or columns(public.part_4.p_mfgr) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Row Adapter
+   Output: (pg_catalog.count(*))
+   ->  Vector Aggregate
+         Output: pg_catalog.count(*)
+         ->  Vector Streaming (type: GATHER)
+               Output: (count(*))
+               ->  Vector Aggregate
+                     Output: count(*)
+                     ->  Partitioned Vector Foreign Scan on public.part_4
+                           Output: 'Dummy'
+                           Filter: (part_4.p_mfgr = 'Manufacturer#1'::text)
+                           Orc File: /user/hive/warehouse/partition.db/part_4
+                           Partition pruning: p_mfgr(total 5; left 1)
+(13 rows)
+
+drop foreign table part_4;
+set enable_vector_engine=false;
+create foreign table part_1 (a int, b varchar(20), c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_1')
+distribute by roundrobin
+partition by (b) automapped;
+explain (verbose, costs off) select * from part_1 where a = 2;
+WARNING:  Statistics in some tables or columns(public.part_1.a) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a, b, c
+   ->  Partitioned Foreign Scan on public.part_1
+         Output: a, b, c
+         Pushdown Predicate Filter: (part_1.a = 2)
+         Orc File: /user/hive/warehouse/partition.db/part_1
+(6 rows)
+
+drop foreign table part_1;
+CREATE foreign TABLE PARTITION_SELECT_PICT_TABLE_000_1(
+ C_CHAR_3 text,
+ C_VARCHAR_3 text,
+ C_INT INTEGER,
+ C_NUMERIC double precision,
+ C_TS_WITHOUT TIMESTAMP )
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/fvt_data_query_hive.db/foreign_partition_select_pict_table_000_1')
+distribute by roundrobin
+partition by (C_INT) automapped;
+CREATE foreign TABLE PARTITION_SELECT_PICT_TABLE_000_2(
+ C_CHAR_3 text,
+ C_VARCHAR_3 text,
+ C_INT INTEGER,
+ C_NUMERIC double precision,
+ C_TS_WITHOUT TIMESTAMP )
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/fvt_data_query_hive.db/foreign_partition_select_pict_table_000_2')
+distribute by roundrobin
+partition by (C_INT) automapped;
+explain (verbose, costs off) SELECT trim(C_CHAR_3) , trim(C_VARCHAR_3) , C_INT , C_NUMERIC , C_TS_WITHOUT , lower(trim(C_CHAR_3)) , initcap(trim(C_VARCHAR_3)) , abs(C_INT) , abs(C_NUMERIC) , extract(year from C_TS_WITHOUT) FROM PARTITION_SELECT_PICT_TABLE_000_2 where ('abcdefg' <= C_VARCHAR_3 and 'ijklmno' >= C_VARCHAR_3) or C_INT >= 111 or C_NUMERIC in (111.1 , 222.2 , 333.3 , 444.4 , 555.5 , 666.6 , 777.7 , 888.8 , 999.9) ORDER BY 1 , 2 , 3 , 4 , 5;
+WARNING:  Statistics in some tables or columns(public.partition_select_pict_table_000_2.c_varchar_3, public.partition_select_pict_table_000_2.c_int, public.partition_select_pict_table_000_2.c_numeric) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                                                                                           QUERY PLAN                                                                                                                                                                           
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (btrim(c_char_3)), (btrim(c_varchar_3)), c_int, c_numeric, c_ts_without, (lower(btrim(c_char_3))), (initcap(btrim(c_varchar_3))), (abs(c_int)), (abs(c_numeric)), (date_part('year'::text, c_ts_without))
+   ->  Sort
+         Output: (btrim(c_char_3)), (btrim(c_varchar_3)), c_int, c_numeric, c_ts_without, (lower(btrim(c_char_3))), (initcap(btrim(c_varchar_3))), (abs(c_int)), (abs(c_numeric)), (date_part('year'::text, c_ts_without))
+         Sort Key: (btrim(partition_select_pict_table_000_2.c_char_3)), (btrim(partition_select_pict_table_000_2.c_varchar_3)), partition_select_pict_table_000_2.c_int, partition_select_pict_table_000_2.c_numeric, partition_select_pict_table_000_2.c_ts_without
+         ->  Partitioned Foreign Scan on public.partition_select_pict_table_000_2
+               Output: btrim(c_char_3), btrim(c_varchar_3), c_int, c_numeric, c_ts_without, lower(btrim(c_char_3)), initcap(btrim(c_varchar_3)), abs(c_int), abs(c_numeric), date_part('year'::text, c_ts_without)
+               Filter: ((('abcdefg'::text <= partition_select_pict_table_000_2.c_varchar_3) AND ('ijklmno'::text >= partition_select_pict_table_000_2.c_varchar_3)) OR (partition_select_pict_table_000_2.c_int >= 111) OR (partition_select_pict_table_000_2.c_numeric = ANY ('{111.1,222.2,333.3,444.4,555.5,666.6,777.7,888.8,999.9}'::double precision[])))
+               Orc File: /user/hive/warehouse/fvt_data_query_hive.db/foreign_partition_select_pict_table_000_2
+               Partition pruning: c_int(total 3; left 3)
+(10 rows)
+
+drop foreign table PARTITION_SELECT_PICT_TABLE_000_1;
+drop foreign table PARTITION_SELECT_PICT_TABLE_000_2;
+create foreign table partition_coltype_1 (int2col int2, int8col int8, boolcol bool, float4col float4, float8col float8, clobcol clob, bpcharcol bpchar,datecol date, timestampcol timestamp, numericcol decimal(10, 5))
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/partition_coltype_1')
+distribute by roundrobin
+partition by (int2col, int8col, float4col, float8col, bpcharcol,datecol, timestampcol, numericcol) automapped;
+ERROR:  column "float4col" cannot be served as a value-partitioning column because of its datatype [real]
+explain (verbose, costs off) select * from partition_coltype_1;
+ERROR:  relation "partition_coltype_1" does not exist
+LINE 1: ...ain (verbose, costs off) select * from partition_...
+                                                             ^
+drop foreign table partition_coltype_1;
+ERROR:  foreign table "partition_coltype_1" does not exist

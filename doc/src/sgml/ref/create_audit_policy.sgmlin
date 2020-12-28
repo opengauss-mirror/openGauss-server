@@ -1,0 +1,34 @@
+<refentry id="SQL-CREATE_AUDIT_POLICY">
+<refmeta>
+<refentrytitle>CREATE AUDIT POLICY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE AUDIT POLICY</refname>
+<refpurpose>define a new audit policy</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE AUDIT POLICY [ IF NOT EXISTS ] policy_name { { privilege_audit_clause | access_audit_clause } [ filter_group_clause ] [ ENABLED | DISABLED ] };
+
+where privilege_audit_clause can be:
+PRIVILEGES { DDL | ALL } [ ON LABEL ( resource_label_name [, ... ] ) ]
+
+where access_audit_clause can be:
+ACCESS { DML | ALL } [ ON LABEL ( resource_label_name [, ... ] ) ]
+
+where filter_group_clause can be:
+FILTER ON { ( FILTER_TYPE ( filter_value [, ... ] ) ) [, ... ] }
+
+where DDL can be:
+{ ( ALTER | ANALYZE | COMMENT | CREATE | DROP | GRANT | REVOKE | SET | SHOW | LOGIN_ACCESS | LOGIN_FAILURE | LOGOUT | LOGIN ) }
+
+where DML can be: 
+{ ( COPY | DEALLOCATE | DELETE_P | EXECUTE | REINDEX | INSERT | REPARE | SELECT | TRUNCATE | UPDATE ) }
+
+where FILTER_TYPE can be:
+{ APP | ROLES | IP }
+</synopsis>
+</refsynopsisdiv>
+</refentry>

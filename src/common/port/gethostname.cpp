@@ -25,7 +25,7 @@ int gethostname(char* name, int namelen)
         called++;
         uname(&mname);
     }
-    ss_rc = strncpy_s(name, namelen, mname.nodename, (SYS_NMLN < namelen ? SYS_NMLN : namelen));
+    ss_rc = strncpy_s(name, namelen, mname.nodename, ((SYS_NMLN < namelen) ? SYS_NMLN : namelen));
     securec_check_c(ss_rc, "\0", "\0");
     return 0;
 }

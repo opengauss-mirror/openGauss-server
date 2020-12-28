@@ -264,6 +264,7 @@ extern const int day_tab[2][13];
 #define DTERR_INTERVAL_OVERFLOW (-4)
 #define DTERR_TZDISP_OVERFLOW (-5)
 
+#ifndef FRONTEND_PARSER
 extern void GetCurrentDateTime(struct pg_tm* tm);
 extern void GetCurrentTimeUsec(struct pg_tm* tm, fsec_t* fsec, int* tzp);
 extern void j2date(int jd, int* year, int* month, int* day);
@@ -302,5 +303,7 @@ extern Datum pg_timezone_abbrevs(PG_FUNCTION_ARGS);
 extern Datum pg_timezone_names(PG_FUNCTION_ARGS);
 
 extern Interval *char_to_interval(char *str, int32 typmod);
+#endif // !FRONTEND_PARSER
+
 #endif /* DATETIME_H */
 

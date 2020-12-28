@@ -1,0 +1,234 @@
+----
+--- test: stream plan's subplan can't do projections, when distribute_keys is not in subplan's targetlists, need to add a result node to help it available.
+----
+create schema vector_stream_engine_1;
+set current_schema = vector_stream_engine_1;
+CREATE TABLE fvt_distribute_query_base_tables_01 (
+    w_name character(10),
+    w_street_1 character varying(20),
+    w_zip character(9),
+    w_id integer
+)
+WITH (orientation=column, compression=low)
+DISTRIBUTE BY HASH (w_id)
+PARTITION BY RANGE (w_id)
+(
+    PARTITION fvt_distribute_query_base_tables_01_p1 VALUES LESS THAN (6),
+    PARTITION fvt_distribute_query_base_tables_01_p2 VALUES LESS THAN (8),
+    PARTITION fvt_distribute_query_base_tables_01_p3 VALUES LESS THAN (MAXVALUE)
+)
+ENABLE ROW MOVEMENT;
+CREATE TABLE fvt_distribute_query_base_tables_02 (
+    c_id character varying,
+    c_street_1 character varying(20),
+    c_city text,
+    c_zip character varying(9),
+    c_d_id numeric,
+    c_w_id text
+)
+WITH (orientation=column, compression=low)
+DISTRIBUTE BY HASH (c_id);
+CREATE TABLE fvt_distribute_query_base_tables_03 (
+    d_w_id integer,
+    d_name character varying(10),
+    d_street_2 character varying(20),
+    d_city character varying(20),
+    d_id integer
+)
+WITH (orientation=column, compression=low)
+DISTRIBUTE BY HASH (d_w_id);
+CREATE TABLE fvt_distribute_query_base_tables_04 (
+    w_id integer,
+    w_name character varying(20),
+    w_zip integer
+)
+WITH (orientation=column, compression=low)
+DISTRIBUTE BY HASH (w_id);
+  
+COPY fvt_distribute_query_base_tables_01 (w_name, w_street_1, w_zip, w_id) FROM stdin;
+;
+  
+COPY fvt_distribute_query_base_tables_02 (c_id, c_street_1, c_city, c_zip, c_d_id, c_w_id) FROM stdin;
+;
+COPY fvt_distribute_query_base_tables_03 (d_w_id, d_name, d_street_2, d_city, d_id) FROM stdin;
+;
+COPY fvt_distribute_query_base_tables_04 (w_id, w_name, w_zip) FROM stdin;
+;
+create view fvt_distribute_query_tables_01 as select * from fvt_distribute_query_base_tables_01 where w_name in (select w_name from fvt_distribute_query_base_tables_04) union select * from fvt_distribute_query_base_tables_01;
+create view fvt_distribute_query_tables_02 as select * from fvt_distribute_query_base_tables_02 where c_zip like '%111' or c_zip like  '%a%' or c_w_id like 'lost%';
+create view fvt_distribute_query_tables_03 as select * from fvt_distribute_query_base_tables_03 where exists (select * from fvt_distribute_query_tables_01 where d_w_id = w_id) union all select * from fvt_distribute_query_base_tables_03 where d_w_id >=9;
+analyze fvt_distribute_query_base_tables_01;
+analyze fvt_distribute_query_base_tables_02;
+analyze fvt_distribute_query_base_tables_03;
+analyze fvt_distribute_query_base_tables_04;
+explain (verbose on, costs off)
+select all table_02.c_d_id<8 t2 , table_02.c_city , table_03.d_w_id 
+from fvt_distribute_query_tables_02 as table_02
+right outer join fvt_distribute_query_tables_03 as table_03 on table_02.c_d_id = table_03.d_id order by 1,2,3 limit 50;
+                                                                                                                                                                                                         QUERY PLAN                                                                                                                                                                                                          
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: ((fvt_distribute_query_base_tables_02.c_d_id < 8::numeric)), fvt_distribute_query_base_tables_02.c_city, "*SELECT* 1".d_w_id
+   ->  Vector Limit
+         Output: ((fvt_distribute_query_base_tables_02.c_d_id < 8::numeric)), fvt_distribute_query_base_tables_02.c_city, "*SELECT* 1".d_w_id
+         ->  Vector Streaming (type: GATHER)
+               Output: ((fvt_distribute_query_base_tables_02.c_d_id < 8::numeric)), fvt_distribute_query_base_tables_02.c_city, "*SELECT* 1".d_w_id
+               Merge Sort Key: ((fvt_distribute_query_base_tables_02.c_d_id < 8::numeric)), fvt_distribute_query_base_tables_02.c_city, "*SELECT* 1".d_w_id
+               ->  Vector Limit
+                     Output: ((fvt_distribute_query_base_tables_02.c_d_id < 8::numeric)), fvt_distribute_query_base_tables_02.c_city, "*SELECT* 1".d_w_id
+                     ->  Vector Sort
+                           Output: ((fvt_distribute_query_base_tables_02.c_d_id < 8::numeric)), fvt_distribute_query_base_tables_02.c_city, "*SELECT* 1".d_w_id
+                           Sort Key: ((fvt_distribute_query_base_tables_02.c_d_id < 8::numeric)), fvt_distribute_query_base_tables_02.c_city, "*SELECT* 1".d_w_id
+                           ->  Vector Hash Left Join
+                                 Output: (fvt_distribute_query_base_tables_02.c_d_id < 8::numeric), fvt_distribute_query_base_tables_02.c_city, "*SELECT* 1".d_w_id
+                                 Hash Cond: ((("*SELECT* 1".d_id)::numeric) = fvt_distribute_query_base_tables_02.c_d_id)
+                                 ->  Vector Streaming(type: REDISTRIBUTE)
+                                       Output: "*SELECT* 1".d_w_id, "*SELECT* 1".d_id, (("*SELECT* 1".d_id)::numeric)
+                                       Distribute Key: (("*SELECT* 1".d_id)::numeric)
+                                       ->  Vector Result
+                                             Output: "*SELECT* 1".d_w_id, "*SELECT* 1".d_id, "*SELECT* 1".d_id
+                                             ->  Vector Append
+                                                   ->  Vector Subquery Scan on "*SELECT* 1"
+                                                         Output: "*SELECT* 1".d_w_id, "*SELECT* 1".d_id
+                                                         ->  Vector Nest Loop Semi Join
+                                                               Output: vector_stream_engine_1.fvt_distribute_query_base_tables_03.d_w_id, vector_stream_engine_1.fvt_distribute_query_base_tables_03.d_name, vector_stream_engine_1.fvt_distribute_query_base_tables_03.d_street_2, vector_stream_engine_1.fvt_distribute_query_base_tables_03.d_city, vector_stream_engine_1.fvt_distribute_query_base_tables_03.d_id
+                                                               Join Filter: (vector_stream_engine_1.fvt_distribute_query_base_tables_03.d_w_id = fvt_distribute_query_tables_01.w_id)
+                                                               ->  CStore Scan on vector_stream_engine_1.fvt_distribute_query_base_tables_03
+                                                                     Output: vector_stream_engine_1.fvt_distribute_query_base_tables_03.d_w_id, vector_stream_engine_1.fvt_distribute_query_base_tables_03.d_name, vector_stream_engine_1.fvt_distribute_query_base_tables_03.d_street_2, vector_stream_engine_1.fvt_distribute_query_base_tables_03.d_city, vector_stream_engine_1.fvt_distribute_query_base_tables_03.d_id
+                                                                     Distribute Key: vector_stream_engine_1.fvt_distribute_query_base_tables_03.d_w_id
+                                                               ->  Vector Materialize
+                                                                     Output: fvt_distribute_query_tables_01.w_id
+                                                                     ->  Vector Subquery Scan on fvt_distribute_query_tables_01
+                                                                           Output: fvt_distribute_query_tables_01.w_id
+                                                                           ->  Vector Sonic Hash Aggregate
+                                                                                 Output: vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_name, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_street_1, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_zip, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_id
+                                                                                 Group By Key: vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_name, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_street_1, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_zip, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_id
+                                                                                 ->  Vector Append
+                                                                                       ->  Vector Streaming(type: REDISTRIBUTE)
+                                                                                             Output: vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_name, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_street_1, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_zip, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_id
+                                                                                             Distribute Key: vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_id
+                                                                                             ->  Vector Nest Loop Semi Join
+                                                                                                   Output: vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_name, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_street_1, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_zip, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_id
+                                                                                                   Join Filter: (vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_name = ((fvt_distribute_query_base_tables_04.w_name)::bpchar))
+                                                                                                   ->  Vector Streaming(type: REDISTRIBUTE)
+                                                                                                         Output: vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_name, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_street_1, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_zip, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_id
+                                                                                                         Distribute Key: vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_name
+                                                                                                         ->  Vector Partition Iterator
+                                                                                                               Output: vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_name, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_street_1, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_zip, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_id
+                                                                                                               Iterations: 3
+                                                                                                               ->  Partitioned CStore Scan on vector_stream_engine_1.fvt_distribute_query_base_tables_01
+                                                                                                                     Output: vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_name, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_street_1, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_zip, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_id
+                                                                                                                     Distribute Key: vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_id
+                                                                                                                     Selected Partitions:  1..3
+                                                                                                   ->  Vector Materialize
+                                                                                                         Output: fvt_distribute_query_base_tables_04.w_name, ((fvt_distribute_query_base_tables_04.w_name)::bpchar)
+                                                                                                         ->  Vector Streaming(type: REDISTRIBUTE)
+                                                                                                               Output: fvt_distribute_query_base_tables_04.w_name, ((fvt_distribute_query_base_tables_04.w_name)::bpchar)
+                                                                                                               Distribute Key: ((fvt_distribute_query_base_tables_04.w_name)::bpchar)
+                                                                                                               ->  CStore Scan on vector_stream_engine_1.fvt_distribute_query_base_tables_04
+                                                                                                                     Output: fvt_distribute_query_base_tables_04.w_name, fvt_distribute_query_base_tables_04.w_name
+                                                                                                                     Distribute Key: fvt_distribute_query_base_tables_04.w_id
+                                                                                       ->  Vector Partition Iterator
+                                                                                             Output: vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_name, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_street_1, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_zip, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_id
+                                                                                             Iterations: 3
+                                                                                             ->  Partitioned CStore Scan on vector_stream_engine_1.fvt_distribute_query_base_tables_01
+                                                                                                   Output: vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_name, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_street_1, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_zip, vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_id
+                                                                                                   Distribute Key: vector_stream_engine_1.fvt_distribute_query_base_tables_01.w_id
+                                                                                                   Selected Partitions:  1..3
+                                                   ->  Vector Subquery Scan on "*SELECT* 2"
+                                                         Output: "*SELECT* 2".d_w_id, "*SELECT* 2".d_id
+                                                         ->  CStore Scan on vector_stream_engine_1.fvt_distribute_query_base_tables_03
+                                                               Output: vector_stream_engine_1.fvt_distribute_query_base_tables_03.d_w_id, vector_stream_engine_1.fvt_distribute_query_base_tables_03.d_name, vector_stream_engine_1.fvt_distribute_query_base_tables_03.d_street_2, vector_stream_engine_1.fvt_distribute_query_base_tables_03.d_city, vector_stream_engine_1.fvt_distribute_query_base_tables_03.d_id
+                                                               Distribute Key: vector_stream_engine_1.fvt_distribute_query_base_tables_03.d_w_id
+                                                               Filter: (vector_stream_engine_1.fvt_distribute_query_base_tables_03.d_w_id >= 9)
+                                 ->  Vector Streaming(type: REDISTRIBUTE)
+                                       Output: fvt_distribute_query_base_tables_02.c_d_id, fvt_distribute_query_base_tables_02.c_city
+                                       Distribute Key: fvt_distribute_query_base_tables_02.c_d_id
+                                       ->  CStore Scan on vector_stream_engine_1.fvt_distribute_query_base_tables_02
+                                             Output: fvt_distribute_query_base_tables_02.c_d_id, fvt_distribute_query_base_tables_02.c_city
+                                             Distribute Key: fvt_distribute_query_base_tables_02.c_id
+                                             Filter: (((fvt_distribute_query_base_tables_02.c_zip)::text ~~ '%111'::text) OR ((fvt_distribute_query_base_tables_02.c_zip)::text ~~ '%a%'::text) OR (fvt_distribute_query_base_tables_02.c_w_id ~~ 'lost%'::text))
+(81 rows)
+
+select all table_02.c_d_id<8 t2 , table_02.c_city , table_03.d_w_id 
+from fvt_distribute_query_tables_02 as table_02
+right outer join fvt_distribute_query_tables_03 as table_03 on table_02.c_d_id = table_03.d_id order by 1,2,3 limit 50;
+ t2 |      c_city       | d_w_id 
+----+-------------------+--------
+ f  | aigsmeiowseloie   |      1
+ f  | aigsmeiowseloie   |      2
+ f  | aigsmeiowseloie   |      3
+ f  | aigsmeiowseloie   |      4
+ f  | aigsmeiowseloie   |      5
+ f  | aigsmeiowseloie   |      6
+ f  | aigsmeiowseloie   |      7
+ f  | aigsmeiowseloie   |      8
+ f  | aigsmeiowseloie   |      9
+ f  | atkcbfubchjeyjvn  |      1
+ f  | atkcbfubchjeyjvn  |      2
+ f  | atkcbfubchjeyjvn  |      3
+ f  | atkcbfubchjeyjvn  |      4
+ f  | atkcbfubchjeyjvn  |      5
+ f  | atkcbfubchjeyjvn  |      6
+ f  | atkcbfubchjeyjvn  |      7
+ f  | atkcbfubchjeyjvn  |      8
+ f  | atkcbfubchjeyjvn  |      9
+ f  | aupclygnzblz      |      1
+ f  | aupclygnzblz      |      2
+ f  | aupclygnzblz      |      3
+ f  | aupclygnzblz      |      4
+ f  | aupclygnzblz      |      5
+ f  | aupclygnzblz      |      6
+ f  | aupclygnzblz      |      7
+ f  | aupclygnzblz      |      8
+ f  | aupclygnzblz      |      9
+ f  | azvhqkucpvxqlcnpf |      1
+ f  | azvhqkucpvxqlcnpf |      2
+ f  | azvhqkucpvxqlcnpf |      3
+ f  | azvhqkucpvxqlcnpf |      4
+ f  | azvhqkucpvxqlcnpf |      5
+ f  | azvhqkucpvxqlcnpf |      6
+ f  | azvhqkucpvxqlcnpf |      7
+ f  | azvhqkucpvxqlcnpf |      8
+ f  | azvhqkucpvxqlcnpf |      9
+ f  | bgaytpbbzboxhflwg |      1
+ f  | bgaytpbbzboxhflwg |      2
+ f  | bgaytpbbzboxhflwg |      3
+ f  | bgaytpbbzboxhflwg |      4
+ f  | bgaytpbbzboxhflwg |      5
+ f  | bgaytpbbzboxhflwg |      6
+ f  | bgaytpbbzboxhflwg |      7
+ f  | bgaytpbbzboxhflwg |      8
+ f  | bgaytpbbzboxhflwg |      9
+ f  | bgdgxxbzwwujfm    |      1
+ f  | bgdgxxbzwwujfm    |      2
+ f  | bgdgxxbzwwujfm    |      3
+ f  | bgdgxxbzwwujfm    |      4
+ f  | bgdgxxbzwwujfm    |      5
+(50 rows)
+
+--test for table alais
+select a from fvt_distribute_query_base_tables_03 a where a.d_w_id=90123;
+                a                 
+----------------------------------
+ (90123,,tanngyanludeshuo,,90181)
+(1 row)
+
+select fvt_distribute_query_base_tables_03 from fvt_distribute_query_base_tables_03 where d_w_id=90123;
+ fvt_distribute_query_base_tables_03 
+-------------------------------------
+ (90123,,tanngyanludeshuo,,90181)
+(1 row)
+
+----
+--- Clean Resources and Tables
+----
+drop schema vector_stream_engine_1 cascade;
+NOTICE:  drop cascades to 7 other objects
+DETAIL:  drop cascades to table fvt_distribute_query_base_tables_01
+drop cascades to table fvt_distribute_query_base_tables_02
+drop cascades to table fvt_distribute_query_base_tables_03
+drop cascades to table fvt_distribute_query_base_tables_04
+drop cascades to view fvt_distribute_query_tables_01
+drop cascades to view fvt_distribute_query_tables_02
+drop cascades to view fvt_distribute_query_tables_03

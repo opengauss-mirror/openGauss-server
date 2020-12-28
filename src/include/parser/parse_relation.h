@@ -34,19 +34,21 @@ extern RangeTblEntry* addRangeTableEntry(ParseState* pstate, RangeVar* relation,
 extern RangeTblEntry* addRangeTableEntryForRelation(
     ParseState* pstate, Relation rel, Alias* alias, bool inh, bool inFromCl);
 extern RangeTblEntry* addRangeTableEntryForSubquery(
-    ParseState* pstate, Query* subquery, Alias* alias, bool inFromCl, bool sublinkPullUp = false);
+    ParseState* pstate, Query* subquery, Alias* alias, bool lateral, bool inFromCl, bool sublinkPullUp = false);
 extern RangeTblEntry* addRangeTableEntryForFunction(
-    ParseState* pstate, char* funcname, Node* funcexpr, RangeFunction* rangefunc, bool inFromCl);
+    ParseState* pstate, char* funcname, Node* funcexpr, RangeFunction* rangefunc, bool lateral, bool inFromCl);
 extern RangeTblEntry* addRangeTableEntryForValues(
     ParseState* pstate, List* exprs, List* collations, Alias* alias, bool inFromCl);
 extern RangeTblEntry* addRangeTableEntryForJoin(
     ParseState* pstate, List* colnames, JoinType jointype, List* aliasvars, Alias* alias, bool inFromCl);
 extern RangeTblEntry* addRangeTableEntryForCTE(
     ParseState* pstate, CommonTableExpr* cte, Index levelsup, RangeVar* rv, bool inFromCl);
+extern RangeTblEntry* getRangeTableEntryByRelation(Relation rel);
 extern bool isLockedRefname(ParseState* pstate, const char* refname);
 extern void addRTEtoQuery(
     ParseState* pstate, RangeTblEntry* rte, bool addToJoinList, bool addToRelNameSpace, bool addToVarNameSpace);
 extern void errorMissingRTE(ParseState* pstate, RangeVar* relation, bool hasplus = false);
+extern void errorMissingColumn(ParseState *pstate, char *relname, char *colname, int location);
 extern void expandRTE(RangeTblEntry* rte, int rtindex, int sublevels_up, int location, bool include_dropped,
     List** colnames, List** colvars);
 extern List* expandRelAttrs(ParseState* pstate, RangeTblEntry* rte, int rtindex, int sublevels_up, int location);
@@ -54,9 +56,6 @@ extern int attnameAttNum(Relation rd, const char* attname, bool sysColOK);
 extern Name attnumAttName(Relation rd, int attid);
 extern Oid attnumTypeId(Relation rd, int attid);
 extern Oid attnumCollationId(Relation rd, int attid);
-extern bool isQueryUsingTempRelation(Query* query);
-/* global temp table check */
-extern bool is_query_using_gtt(Query* query);
 
 #ifdef PGXC
 extern int specialAttNum(const char* attname);

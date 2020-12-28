@@ -1,0 +1,22 @@
+CREATE DATABASE rmdb;
+\c rmdb
+set resource_track_duration=0;
+set query_band='rmdb_test';
+--show info
+\! @abs_bindir@/gsql -r -p @portstring@ -d rmdb -c "SELECT count(*) FROM pg_total_memory_detail;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d rmdb -c "SELECT count(*) FROM pgxc_total_memory_detail;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d rmdb -c "SELECT count(*) FROM gs_wlm_session_statistics;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d rmdb -c "SELECT count(*) FROM gs_wlm_operator_statistics;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d rmdb -c "SELECT count(*) FROM gs_session_cpu_statistics;"
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d rmdb -c "SELECT count(*) FROM gs_session_memory_statistics;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d rmdb -c "SELECT count(*) FROM gs_wlm_session_history;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d rmdb -c "SELECT count(*) FROM gs_wlm_session_info;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d rmdb -c "SELECT count(*) FROM pgxc_wlm_session_info;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d rmdb -c "SELECT count(*) FROM gs_wlm_operator_info;"
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d rmdb -c "SELECT count(*) FROM pgxc_wlm_operator_history;" > /dev/null 2>&1
+\c postgres
+drop database rmdb;
+\c regression
+--end of file

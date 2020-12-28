@@ -147,9 +147,9 @@
 
 #define MOUNT_SUBSYS_KINDS 5
 #define MOUNT_CPU_ID 0
-#define MOUNT_BLKIO_ID 1
-#define MOUNT_CPUSET_ID 2
-#define MOUNT_CPUACCT_ID 3
+#define MOUNT_CPUACCT_ID 1    /* cpu and cpuacct could not be separated */
+#define MOUNT_BLKIO_ID 2
+#define MOUNT_CPUSET_ID 3
 #define MOUNT_MEMORY_ID 4
 
 #define MOUNT_CPU_NAME "cpu"
@@ -161,7 +161,7 @@
 #define GSCGROUP_CONF_DIR "etc"
 #define GSCFG_BACKUP ".bak"
 
-#define GSCGROUP_MOUNT_POINT "/dev/cgroup"
+#define GSCGROUP_MOUNT_POINT "/sys/fs/cgroup"
 #define GSCGROUP_MOUNT_POINT_OLD "/dev/cgroups"
 
 #define GSCGROUP_ROOT "Root"

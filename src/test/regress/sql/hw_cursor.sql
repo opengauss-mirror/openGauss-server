@@ -272,7 +272,7 @@ call sp_testsp();
 drop procedure sp_testsp;
 drop table t1;
 ------------------------------------------------------------------------------
------support a's cursor in or out params---------------------------------
+-----support A db's cursor in or out params---------------------------------
 ------------------------------------------------------------------------------
 CREATE TABLE TBL(VALUE INT);
 INSERT INTO TBL VALUES (1);
@@ -629,6 +629,7 @@ CALL SP_TEST();
 DROP TABLE TBL;
 DROP PROCEDURE SP_TEST;
 
+-- GAUSSDBV100R001C00-754 
 CREATE TABLE TBL_H248LNK_INFO(ULBSGMODULENO INTEGER);
 INSERT INTO TBL_H248LNK_INFO VALUES(123);
 INSERT INTO TBL_H248LNK_INFO VALUES(456);
@@ -1327,7 +1328,7 @@ call sp_testsp();
 drop procedure sp_testsp;
 drop table t1;
 ------------------------------------------------------------------------------
------support a's cursor in or out params---------------------------------
+-----support A db's cursor in or out params---------------------------------
 ------------------------------------------------------------------------------
 CREATE TABLE TBL(VALUE INT);
 INSERT INTO TBL VALUES (1);
@@ -1684,6 +1685,7 @@ CALL SP_TEST();
 DROP TABLE TBL;
 DROP PROCEDURE SP_TEST;
 
+-- GAUSSDBV100R001C00-754 
 CREATE TABLE TBL_H248LNK_INFO(ULBSGMODULENO INTEGER);
 INSERT INTO TBL_H248LNK_INFO VALUES(123);
 INSERT INTO TBL_H248LNK_INFO VALUES(456);

@@ -208,7 +208,6 @@ static char* pgxcCtlGetTime(void)
 
     now = time(NULL);
     tm_s = localtime(&now);
-    /*	tm_s = gmtime(&now); */
 
     snprintf(timebuf,
         MAXTOKEN,

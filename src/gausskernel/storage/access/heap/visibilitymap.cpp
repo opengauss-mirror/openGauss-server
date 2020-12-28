@@ -88,9 +88,8 @@
 #include "access/visibilitymap.h"
 #include "access/xlog.h"
 #include "access/xlogutils.h"
-
 #include "miscadmin.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/lmgr.h"
 #include "storage/smgr.h"
 #include "utils/aiomem.h"
@@ -99,14 +98,15 @@
 #include "catalog/pg_hashbucket_fn.h"
 #include "utils/syscache.h"
 /* table for fast counting of set bits */
-static const uint8 number_of_ones[256] = {0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4, 1, 2, 2, 3, 2, 3, 3, 4, 2, 3,
-    3, 4, 3, 4, 4, 5, 1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5, 2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
-    1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5, 2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6, 2, 3, 3, 4, 3, 4,
-    4, 5, 3, 4, 4, 5, 4, 5, 5, 6, 3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7, 1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4,
-    3, 4, 4, 5, 2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6, 2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6, 3, 4,
-    4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7, 2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6, 3, 4, 4, 5, 4, 5, 5, 6,
-    4, 5, 5, 6, 5, 6, 6, 7, 3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7, 4, 5, 5, 6, 5, 6, 6, 7, 5, 6, 6, 7, 6, 7,
-    7, 8};
+static const uint8 number_of_ones[256] = {
+    0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4, 1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5, 1, 2, 2, 3, 2,
+    3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5, 2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6, 1, 2, 2, 3, 2, 3, 3, 4, 2, 3,
+    3, 4, 3, 4, 4, 5, 2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6, 2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5,
+    6, 3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7, 1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5, 2, 3, 3, 4,
+    3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6, 2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6, 3, 4, 4, 5, 4, 5, 5, 6, 4,
+    5, 5, 6, 5, 6, 6, 7, 2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6, 3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6,
+    6, 7, 3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7, 4, 5, 5, 6, 5, 6, 6, 7, 5, 6, 6, 7, 6, 7, 7, 8
+};
 
 /* prototypes for internal routines */
 static Buffer vm_readbuf(Relation rel, BlockNumber blkno, bool extend);
@@ -155,7 +155,7 @@ void visibilitymap_clear(Relation rel, BlockNumber heapBlk, Buffer buf)
  *
  * If the page doesn't exist in the map file yet, it is extended.
  */
-void visibilitymap_pin(Relation rel, BlockNumber heapBlk, Buffer* buf)
+void visibilitymap_pin(Relation rel, BlockNumber heapBlk, Buffer *buf)
 {
     BlockNumber mapBlock = HEAPBLK_TO_MAPBLOCK(heapBlk);
 
@@ -202,7 +202,7 @@ bool visibilitymap_pin_ok(BlockNumber heapBlk, Buffer buf)
  * any I/O.
  */
 void visibilitymap_set(Relation rel, BlockNumber heapBlk, Buffer heapBuf, XLogRecPtr recptr, Buffer vmBuf,
-    TransactionId cutoff_xid, bool free_dict)
+                       TransactionId cutoff_xid, bool free_dict)
 {
     BlockNumber mapBlock = HEAPBLK_TO_MAPBLOCK(heapBlk);
     Page page;
@@ -220,6 +220,7 @@ void visibilitymap_set(Relation rel, BlockNumber heapBlk, Buffer heapBuf, XLogRe
     page = BufferGetPage(vmBuf);
 
     LockBuffer(vmBuf, BUFFER_LOCK_EXCLUSIVE);
+
     START_CRIT_SECTION();
     if (visibilitymap_set_page(page, heapBlk)) {
         MarkBufferDirty(vmBuf);
@@ -267,13 +268,13 @@ void visibilitymap_set(Relation rel, BlockNumber heapBlk, Buffer heapBuf, XLogRe
  * we might see the old value.	It is the caller's responsibility to deal with
  * all concurrency issues!
  */
-bool visibilitymap_test(Relation rel, BlockNumber heapBlk, Buffer* buf)
+bool visibilitymap_test(Relation rel, BlockNumber heapBlk, Buffer *buf)
 {
     BlockNumber mapBlock = HEAPBLK_TO_MAPBLOCK(heapBlk);
     uint32 mapByte = HEAPBLK_TO_MAPBYTE(heapBlk);
     uint8 mapBit = HEAPBLK_TO_MAPBIT(heapBlk);
     bool result = false;
-    unsigned char* map = NULL;
+    unsigned char *map = NULL;
 
 #ifdef TRACE_VISIBILITYMAP
     ereport(DEBUG1, (errmsg("vm_test %s %d", RelationGetRelationName(rel), heapBlk)));
@@ -281,7 +282,15 @@ bool visibilitymap_test(Relation rel, BlockNumber heapBlk, Buffer* buf)
 
     /* Reuse the old pinned buffer if possible */
     if (BufferIsValid(*buf)) {
-        if (BufferGetBlockNumber(*buf) != mapBlock) {
+        volatile BufferDesc *bufHdr = NULL;
+
+        if (BufferIsLocal(*buf)) {
+            bufHdr = &(u_sess->storage_cxt.LocalBufferDescriptors[-(*buf) - 1]);
+        } else {
+            bufHdr = GetBufferDescriptor(*buf - 1);
+        }
+
+        if (bufHdr->tag.blockNum != mapBlock || bufHdr->tag.rnode.bucketNode != rel->rd_node.bucketNode) {
             ReleaseBuffer(*buf);
             *buf = InvalidBuffer;
         }
@@ -293,7 +302,7 @@ bool visibilitymap_test(Relation rel, BlockNumber heapBlk, Buffer* buf)
             return false;
     }
 
-    map = (unsigned char*)PageGetContents(BufferGetPage(*buf));
+    map = (unsigned char *)PageGetContents(BufferGetPage(*buf));
 
     /*
      * A single-bit read is atomic.  There could be memory-ordering effects
@@ -312,7 +321,7 @@ BlockNumber visibilitymap_count_heap(Relation rel)
 
     for (mapBlock = 0;; mapBlock++) {
         Buffer mapBuffer;
-        unsigned char* map = NULL;
+        unsigned char *map = NULL;
         unsigned int i;
 
         /*
@@ -330,7 +339,7 @@ BlockNumber visibilitymap_count_heap(Relation rel)
          * immediately stale anyway if anyone is concurrently setting or
          * clearing bits, and we only really need an approximate value.
          */
-        map = (unsigned char*)PageGetContents(BufferGetPage(mapBuffer));
+        map = (unsigned char *)PageGetContents(BufferGetPage(mapBuffer));
 
         for (i = 0; i < MAPSIZE; i++) {
             result += number_of_ones[map[i]];
@@ -354,7 +363,7 @@ BlockNumber visibilitymap_count(Relation rel, Partition part)
     BlockNumber result = 0;
 
     if (RELATION_OWN_BUCKET(rel)) {
-        oidvector* bucketlist = searchHashBucketByOid(rel->rd_bucketoid);
+        oidvector *bucketlist = searchHashBucketByOid(rel->rd_bucketoid);
 
         for (int i = 0; i < bucketlist->dim1; i++) {
             buckRel = bucketGetRelation(rel, part, bucketlist->values[i]);
@@ -386,9 +395,8 @@ void XLogBlockTruncateRelVM(Relation rel, BlockNumber nheapblocks)
      * If no visibility map has been created yet for this relation, there's
      * nothing to truncate.
      */
-    if (!smgrexists(rel->rd_smgr, VISIBILITYMAP_FORKNUM)) {
+    if (!smgrexists(rel->rd_smgr, VISIBILITYMAP_FORKNUM))
         return;
-    }
 
     /*
      * Unless the new size is exactly at a visibility map page boundary, the
@@ -399,9 +407,9 @@ void XLogBlockTruncateRelVM(Relation rel, BlockNumber nheapblocks)
      */
     if (truncByte != 0 || truncBit != 0) {
         newnblocks = truncBlock + 1;
-    } else {
+
+    } else
         newnblocks = truncBlock;
-    }
 
     if (smgrnblocks(rel->rd_smgr, VISIBILITYMAP_FORKNUM) <= newnblocks) {
         /* nothing to do, the file was already smaller than requested size */
@@ -417,9 +425,9 @@ void XLogBlockTruncateRelVM(Relation rel, BlockNumber nheapblocks)
      * invalidate their copy of smgr_vm_nblocks, and this one too at the next
      * command boundary.  But this ensures it isn't outright wrong until then.
      */
-     rel->rd_smgr->smgr_vm_nblocks = newnblocks;
+    if (rel->rd_smgr)
+        rel->rd_smgr->smgr_vm_nblocks = newnblocks;
 }
-
 
 /*
  *	visibilitymap_truncate - truncate the visibility map
@@ -463,7 +471,7 @@ void visibilitymap_truncate(Relation rel, BlockNumber nheapblocks)
     if (truncByte != 0 || truncBit != 0) {
         Buffer mapBuffer;
         Page page;
-        unsigned char* map = NULL;
+        unsigned char *map = NULL;
 
         newnblocks = truncBlock + 1;
 
@@ -474,7 +482,7 @@ void visibilitymap_truncate(Relation rel, BlockNumber nheapblocks)
         }
 
         page = BufferGetPage(mapBuffer);
-        map = (unsigned char*)PageGetContents(page);
+        map = (unsigned char *)PageGetContents(page);
 
         LockBuffer(mapBuffer, BUFFER_LOCK_EXCLUSIVE);
 
@@ -577,6 +585,7 @@ static Buffer vm_readbuf(Relation rel, BlockNumber blkno, bool extend)
     if (PageIsNew(BufferGetPage(buf))) {
         PageInit(BufferGetPage(buf), BLCKSZ, 0);
     }
+
     return buf;
 }
 
@@ -622,7 +631,7 @@ static void vm_extend(Relation rel, BlockNumber vm_nblocks)
      */
     if ((rel->rd_smgr->smgr_vm_nblocks == 0 || rel->rd_smgr->smgr_vm_nblocks == InvalidBlockNumber) &&
         !smgrexists(rel->rd_smgr, VISIBILITYMAP_FORKNUM))
-        smgrcreate(rel->rd_smgr, VISIBILITYMAP_FORKNUM, false);
+        smgrcreate(rel->rd_smgr, VISIBILITYMAP_FORKNUM, t_thrd.xlog_cxt.InRecovery);
 
     vm_nblocks_now = smgrnblocks(rel->rd_smgr, VISIBILITYMAP_FORKNUM);
     // check tablespace size limitation when extending VM file.
@@ -635,7 +644,7 @@ static void vm_extend(Relation rel, BlockNumber vm_nblocks)
     while (vm_nblocks_now < vm_nblocks) {
         PageSetChecksumInplace(pg, vm_nblocks_now);
 
-        smgrextend(rel->rd_smgr, VISIBILITYMAP_FORKNUM, vm_nblocks_now, (char*)pg, false);
+        smgrextend(rel->rd_smgr, VISIBILITYMAP_FORKNUM, vm_nblocks_now, (char *)pg, false);
         vm_nblocks_now++;
     }
 
@@ -666,11 +675,11 @@ static void vm_extend(Relation rel, BlockNumber vm_nblocks)
     ADIO_END();
 }
 
-BlockNumber VisibilityMapCalTruncBlkNo(BlockNumber rel_blk_no)
+BlockNumber VisibilityMapCalTruncBlkNo(BlockNumber relBlkNo)
 {
     BlockNumber newnblocks;
 
-    newnblocks = HEAPBLK_TO_MAPBLOCK(rel_blk_no);
+    newnblocks = HEAPBLK_TO_MAPBLOCK(relBlkNo);
 
     return newnblocks;
 }

@@ -35,6 +35,7 @@
 
 #include "access/genam.h"
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
@@ -75,7 +76,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 /* result structure for get_rels_with_domain() */
 typedef struct {
@@ -98,7 +99,7 @@ static Oid findRangeCanonicalFunction(List* procname, Oid typeOid);
 static Oid findRangeSubtypeDiffFunction(List* procname, Oid subtype);
 static void validateDomainConstraint(Oid domainoid, char* ccbin);
 static List* get_rels_with_domain(Oid domainOid, LOCKMODE lockmode);
-static void checkEnumOwner(HeapTuple tup);
+static void checkEnumAlterPrivilege(HeapTuple tup);
 static char* domainAddConstraint(
     Oid domainOid, Oid domainNamespace, Oid baseTypeOid, int typMod, Constraint* constr, char* domainName);
 static void CheckFuncParamType(Oid foid, Oid toid, bool isin);
@@ -196,11 +197,11 @@ void DefineType(List* names, List* parameters)
     /* Check we have creation rights in target namespace */
     aclresult = pg_namespace_aclcheck(typeNamespace, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(typeNamespace, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(typeNamespace));
     if (isalter) {
         aclresult = pg_namespace_aclcheck(typeNamespace, typowner, ACL_CREATE);
         if (aclresult != ACLCHECK_OK)
-            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(typeNamespace, true));
+            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(typeNamespace));
     }
 
     /*
@@ -722,11 +723,11 @@ void DefineDomain(CreateDomainStmt* stmt)
     /* Check we have creation rights in target namespace */
     aclresult = pg_namespace_aclcheck(domainNamespace, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(domainNamespace, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(domainNamespace));
     if (isalter) {
         aclresult = pg_namespace_aclcheck(domainNamespace, typowner, ACL_CREATE);
         if (aclresult != ACLCHECK_OK)
-            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(domainNamespace, true));
+            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(domainNamespace));
     }
 
     /*
@@ -1050,11 +1051,11 @@ void DefineEnum(CreateEnumStmt* stmt)
     /* Check we have creation rights in target namespace */
     aclresult = pg_namespace_aclcheck(enumNamespace, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(enumNamespace, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(enumNamespace));
     if (isalter) {
         aclresult = pg_namespace_aclcheck(enumNamespace, typowner, ACL_CREATE);
         if (aclresult != ACLCHECK_OK)
-            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(enumNamespace, true));
+            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(enumNamespace));
     }
 
     /*
@@ -1166,7 +1167,7 @@ void AlterEnum(AlterEnumStmt* stmt)
     }
 
     /* Check it's an enum and check user has permission to ALTER the enum */
-    checkEnumOwner(tup);
+    checkEnumAlterPrivilege(tup);
 
     if (stmt->oldVal) {
         /* Rename an existing label */
@@ -1180,12 +1181,12 @@ void AlterEnum(AlterEnumStmt* stmt)
 }
 
 /*
- * checkEnumOwner
+ * checkEnumAlterPrivilege
  *
  * Check that the type is actually an enum and that the current user
  * has permission to do ALTER TYPE on it.  Throw an error if not.
  */
-static void checkEnumOwner(HeapTuple tup)
+static void checkEnumAlterPrivilege(HeapTuple tup)
 {
     Form_pg_type typTup = (Form_pg_type)GETSTRUCT(tup);
 
@@ -1194,9 +1195,11 @@ static void checkEnumOwner(HeapTuple tup)
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("%s is not an enum", format_type_be(HeapTupleGetOid(tup)))));
 
-    /* Permission check: must own type */
-    if (!pg_type_ownercheck(HeapTupleGetOid(tup), GetUserId()))
-        aclcheck_error_type(ACLCHECK_NOT_OWNER, HeapTupleGetOid(tup));
+    /* Permission check. */
+    AclResult aclresult = pg_type_aclcheck(HeapTupleGetOid(tup), GetUserId(), ACL_ALTER);
+    if (aclresult != ACLCHECK_OK && !pg_type_ownercheck(HeapTupleGetOid(tup), GetUserId())) {
+        aclcheck_error_type(ACLCHECK_NO_PRIV, HeapTupleGetOid(tup));
+    }
 }
 
 /*
@@ -1247,11 +1250,11 @@ void DefineRange(CreateRangeStmt* stmt)
     /* Check we have creation rights in target namespace */
     aclresult = pg_namespace_aclcheck(typeNamespace, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(typeNamespace, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(typeNamespace));
     if (isalter) {
         aclresult = pg_namespace_aclcheck(typeNamespace, typowner, ACL_CREATE);
         if (aclresult != ACLCHECK_OK)
-            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(typeNamespace, true));
+            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(typeNamespace));
     }
 
     /*
@@ -1471,7 +1474,7 @@ static void makeRangeConstructors(const char* name, Oid nmspace, Oid rangeOid, O
          */
         procOid = ProcedureCreate(name, /* name: same as range type */
             nmspace,                    /* namespace */
-            false,                      /* not a db compatible */
+            false,                      /* not A db compatible */
             false,                      /* replace */
             false,                      /* returns set */
             rangeOid,                   /* return type */
@@ -1480,7 +1483,8 @@ static void makeRangeConstructors(const char* name, Oid nmspace, Oid rangeOid, O
             F_FMGR_INTERNAL_VALIDATOR,  /* language validator */
             prosrc[i],                  /* prosrc */
             NULL,                       /* probin */
-            PROKIND_FUNCTION,           /* prokind */
+            false,                      /* isAgg */
+            false,                      /* isWindowFunc */
             false,                      /* security_definer */
             false,                      /* leakproof */
             false,                      /* isStrict */
@@ -1494,6 +1498,7 @@ static void makeRangeConstructors(const char* name, Oid nmspace, Oid rangeOid, O
             1.0,                        /* procost */
             0.0,                        /* prorows */
             NULL,                       /* prodefaultargpos */
+            false,
             false,
             false,
             false);
@@ -1928,7 +1933,7 @@ Oid DefineCompositeType(RangeVar* typevar, List* coldeflist)
     createStmt->tableElts = coldeflist;
     createStmt->inhRelations = NIL;
     createStmt->constraints = NIL;
-    createStmt->options = NIL;
+    createStmt->options = list_make1(defWithOids(false));
     createStmt->oncommit = ONCOMMIT_NOOP;
     createStmt->tablespacename = NULL;
     createStmt->if_not_exists = false;
@@ -2049,7 +2054,7 @@ void AlterDomainDefault(List* names, Node* defaultRaw)
         new_record_repl[Anum_pg_type_typdefault - 1] = true;
     }
 
-    newtuple = heap_modify_tuple(tup, RelationGetDescr(rel), new_record, new_record_nulls, new_record_repl);
+    newtuple = (HeapTuple) tableam_tops_modify_tuple(tup, RelationGetDescr(rel), new_record, new_record_nulls, new_record_repl);
 
     simple_heap_update(rel, &tup->t_self, newtuple);
 
@@ -2077,7 +2082,7 @@ void AlterDomainDefault(List* names, Node* defaultRaw)
 
     /* Clean up */
     heap_close(rel, NoLock);
-    heap_freetuple_ext(newtuple);
+    tableam_tops_free_tuple(newtuple);
 }
 
 /*
@@ -2111,6 +2116,7 @@ void AlterDomainNotNull(List* names, bool notNull)
     /* Is the domain already set to the desired constraint? */
     if (typTup->typnotnull == notNull) {
         heap_close(typrel, RowExclusiveLock);
+        tableam_tops_free_tuple(tup);
         return;
     }
 
@@ -2127,12 +2133,12 @@ void AlterDomainNotNull(List* names, bool notNull)
             RelToCheck* rtc = (RelToCheck*)lfirst(rt);
             Relation testrel = rtc->rel;
             TupleDesc tupdesc = RelationGetDescr(testrel);
-            HeapScanDesc scan;
+            TableScanDesc scan;
             HeapTuple tuple;
 
             /* Scan all tuples in this relation */
-            scan = heap_beginscan(testrel, SnapshotNow, 0, NULL);
-            while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+            scan = tableam_scan_begin(testrel, SnapshotNow, 0, NULL);
+            while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
                 int i;
 
                 /* Test attributes that are of the domain */
@@ -2150,7 +2156,7 @@ void AlterDomainNotNull(List* names, bool notNull)
                                     RelationGetRelationName(testrel))));
                 }
             }
-            heap_endscan(scan);
+            tableam_scan_end(scan);
 
             /* Close each rel after processing, but keep lock */
             heap_close(testrel, NoLock);
@@ -2168,7 +2174,7 @@ void AlterDomainNotNull(List* names, bool notNull)
     CatalogUpdateIndexes(typrel, tup);
 
     /* Clean up */
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
     heap_close(typrel, RowExclusiveLock);
 }
 
@@ -2421,12 +2427,12 @@ void AlterDomainValidateConstraint(List* names, char* constrName)
     /*
      * Now update the catalog, while we have the door open.
      */
-    copyTuple = heap_copytuple(tuple);
+    copyTuple = (HeapTuple)tableam_tops_copy_tuple(tuple);
     copy_con = (Form_pg_constraint)GETSTRUCT(copyTuple);
     copy_con->convalidated = true;
     simple_heap_update(conrel, &copyTuple->t_self, copyTuple);
     CatalogUpdateIndexes(conrel, copyTuple);
-    heap_freetuple_ext(copyTuple);
+    tableam_tops_free_tuple(copyTuple);
 
     systable_endscan(scan);
 
@@ -2460,12 +2466,12 @@ static void validateDomainConstraint(Oid domainoid, char* ccbin)
         RelToCheck* rtc = (RelToCheck*)lfirst(rt);
         Relation testrel = rtc->rel;
         TupleDesc tupdesc = RelationGetDescr(testrel);
-        HeapScanDesc scan;
+        TableScanDesc scan;
         HeapTuple tuple;
 
         /* Scan all tuples in this relation */
-        scan = heap_beginscan(testrel, SnapshotNow, 0, NULL);
-        while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+        scan = tableam_scan_begin(testrel, SnapshotNow, 0, NULL);
+        while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
             int i;
 
             /* Test attributes that are of the domain */
@@ -2492,7 +2498,7 @@ static void validateDomainConstraint(Oid domainoid, char* ccbin)
 
             ResetExprContext(econtext);
         }
-        heap_endscan(scan);
+        tableam_scan_end(scan);
 
         /* Hold relation lock till commit (XXX bad for concurrency) */
         heap_close(testrel, NoLock);
@@ -2603,16 +2609,10 @@ static List* get_rels_with_domain(Oid domainOid, LOCKMODE lockmode)
              */
             if (OidIsValid(rel->rd_rel->reltype))
                 find_composite_type_dependencies(rel->rd_rel->reltype, NULL, format_type_be(domainOid));
-                
-            /*
-             * Otherwise, we can ignore relations except those with both
-             * storage and user-chosen column types.
-             *
-             * XXX If an index-only scan could satisfy "col::some_domain" from
-             * a suitable expression index, this should also check expression
-             * index columns.
-             */
-            if (rel->rd_rel->relkind != RELKIND_RELATION && rel->rd_rel->relkind != RELKIND_MATVIEW) {
+
+            /* Otherwise we can ignore views, composite types, etc */
+            if (rel->rd_rel->relkind != RELKIND_RELATION &&
+                rel->rd_rel->relkind != RELKIND_MATVIEW) {
                 relation_close(rel, lockmode);
                 continue;
             }
@@ -2953,8 +2953,10 @@ void RenameType(RenameStmt* stmt)
     typTup = (Form_pg_type)GETSTRUCT(tup);
 
     /* check permissions on type */
-    if (!pg_type_ownercheck(typeOid, GetUserId()))
-        aclcheck_error_type(ACLCHECK_NOT_OWNER, typeOid);
+    AclResult aclresult = pg_type_aclcheck(typeOid, GetUserId(), ACL_ALTER);
+    if (aclresult != ACLCHECK_OK && !pg_type_ownercheck(typeOid, GetUserId())) {
+        aclcheck_error_type(ACLCHECK_NO_PRIV, typeOid);
+    }
 
     /* ALTER DOMAIN used on a non-domain? */
     if (stmt->renameType == OBJECT_DOMAIN && typTup->typtype != TYPTYPE_DOMAIN)
@@ -3018,7 +3020,7 @@ void AlterTypeOwner(List* names, Oid newOwnerId, ObjectType objecttype)
     typeOid = typeTypeId(tup);
 
     /* Copy the syscache entry so we can scribble on it below */
-    newtup = heap_copytuple(tup);
+    newtup = (HeapTuple)tableam_tops_copy_tuple(tup);
     ReleaseSysCache(tup);
     tup = newtup;
     typTup = (Form_pg_type)GETSTRUCT(tup);
@@ -3063,7 +3065,7 @@ void AlterTypeOwner(List* names, Oid newOwnerId, ObjectType objecttype)
             /* New owner must have CREATE privilege on namespace */
             aclresult = pg_namespace_aclcheck(typTup->typnamespace, newOwnerId, ACL_CREATE);
             if (aclresult != ACLCHECK_OK)
-                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(typTup->typnamespace, true));
+                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(typTup->typnamespace));
         }
 
         /*
@@ -3244,7 +3246,7 @@ Oid AlterTypeNamespaceInternal(
             (errcode(ERRCODE_DUPLICATE_OBJECT),
                 errmsg("type \"%s\" already exists in schema \"%s\"",
                     NameStr(typform->typname),
-                    get_namespace_name(nspOid, true))));
+                    get_namespace_name(nspOid))));
 
     /* Detect whether type is a composite type (but not a table rowtype) */
     isCompositeType =
@@ -3302,7 +3304,7 @@ Oid AlterTypeNamespaceInternal(
                 (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
                     errmsg("failed to change schema dependency for type %s", format_type_be(typeOid))));
 
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 
     heap_close(rel, RowExclusiveLock);
 

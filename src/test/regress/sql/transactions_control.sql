@@ -1,6 +1,5 @@
 CREATE TABLE test1 (a int, b text);
 
-
 CREATE PROCEDURE transaction_test1()
 AS
 BEGIN
@@ -217,6 +216,7 @@ SELECT * FROM test2;
 
 SELECT * FROM pg_cursors;
 
+
 -- commit inside block with exception handler
 TRUNCATE test1;
 
@@ -279,16 +279,16 @@ DROP TABLE test2;
 DROP TABLE test3;
 
 --
-CREATE TABLE test1(id int, name varchar(20));
-INSERT INTO test1 values(1, 'bbb');
+create table test1(id int, name varchar(20));
+insert into test1 values(1,'bbb');
 
 CREATE OR REPLACE PROCEDURE PROC_OUT_PARAM_001(P1 OUT INT)
 AS
 BEGIN
 select id into P1 from test1 where name = 'bbb';
-insert into test1 values(P1, 'ddd');
+insert into test1 values(P1,'ddd');
 COMMIT;
-insert into test1 values(P1, 'eee');
+insert into test1 values(P1,'eee');
 ROLLBACK;
 END;
 /
@@ -300,11 +300,11 @@ PROC_OUT_PARAM_001(V_P1);
 END;
 /
 
-SELECT * from test1;
+select * from test1;
 
 start transaction;
 select * from test1 for share;
 select count(*) > 0 from dbe_perf.global_locks where transactionid is not null;
 commit;
 
-DROP TABLE TEST1;
+DROP TABLE test1;

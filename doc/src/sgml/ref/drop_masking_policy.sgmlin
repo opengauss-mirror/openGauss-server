@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_MASKING_POLICY">
+<refmeta>
+<refentrytitle>DROP MASKING POLICY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP MASKING POLICY</refname>
+<refpurpose>remove a masking policy</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP MASKING POLICY [IF EXISTS] policy_name;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

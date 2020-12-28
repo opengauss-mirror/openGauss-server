@@ -19,9 +19,8 @@
  * IDENTIFICATION
  *    src/gausskernel/runtime/vecexecutor/vecprimitive/float.inl
  *
- * -------------------------------------------------------------------------
+ *-------------------------------------------------------------------------
  */
-
 
 #ifndef FLOAT_INL
 #define FLOAT_INL

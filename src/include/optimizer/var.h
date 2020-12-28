@@ -52,7 +52,9 @@ typedef enum {
 } ReplaceNodeClauseBehavior;
 
 extern Relids pull_varnos(Node* node, int level = 0, bool isSkip = false);
+extern Relids pull_varnos_of_level(Node *node, int levelsup);
 extern void pull_varattnos(Node* node, Index varno, Bitmapset** varattnos);
+extern List *pull_vars_of_level(Node *node, int levelsup);
 extern bool contain_var_clause(Node* node);
 extern bool contain_vars_of_level(Node* node, int levelsup);
 extern int locate_var_of_level(Node* node, int levelsup);
@@ -68,6 +70,7 @@ extern bool check_node_clause(Node* clause, Node* node);
 extern bool contain_vars_of_level_or_above(Node* node, int levelsup);
 
 extern bool check_param_clause(Node* clause);
+extern Bitmapset* collect_param_clause(Node* clause);
 extern bool check_param_expr(Node* node);
 extern List* check_random_expr(Node* node);
 

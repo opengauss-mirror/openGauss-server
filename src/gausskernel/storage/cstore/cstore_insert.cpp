@@ -24,6 +24,7 @@
 
 #include "postgres.h"
 #include "knl/knl_variable.h"
+#include "access/tableam.h"
 #include "access/xact.h"
 #include "access/genam.h"
 #include "access/cstore_rewrite.h"
@@ -45,10 +46,10 @@
 #include "storage/cucache_mgr.h"
 #include "access/cstore_insert.h"
 #include "pgxc/pgxc.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "utils/memutils.h"
 #include "utils/date.h"
-#include "storage/cstorealloc.h"
+#include "storage/cstore/cstorealloc.h"
 #include "storage/ipc.h"
 #include "catalog/pg_partition_fn.h"
 #include "libpq/pqformat.h"
@@ -64,7 +65,7 @@
 
 #define ENABLE_DELTA(batch)                                                              \
     ((batch) != NULL && ((g_instance.attr.attr_storage.enable_delta_store && IsEnd()) && \
-                            ((batch)->m_rows_curnum < m_delta_rows_threshold)))
+                         ((batch)->m_rows_curnum < m_delta_rows_threshold)))
 
 // total memory cache size by adio, used for memory control with  cstore_backwrite_max_threshold
 int64 adio_write_cache_size = 0;
@@ -80,10 +81,9 @@ static inline int str_to_uint64(const char* str, uint64* val)
 {
     char* end = NULL;
     uint64 uint64_value = 0;
-    uint32 str_len = 0;
 
     Assert(str != NULL && val != NULL);
-    str_len = strlen(str);
+    uint32 str_len = strlen(str);
     if (str_len == 0) {
         return -1;
     }
@@ -139,13 +139,12 @@ static inline bool relation_has_indexes(ResultRelInfo* rel)
 }
 
 CStoreInsert::CStoreInsert(_in_ Relation relation, _in_ const InsertArg& args, _in_ bool is_update_cu, _in_ Plan* plan,
-    _in_ MemInfoArg* ArgmemInfo)
+                           _in_ MemInfoArg* ArgmemInfo)
     : m_fullCUSize(RelationGetMaxBatchRows(relation)), m_delta_rows_threshold(RelationGetDeltaRowsThreshold(relation))
 {
     m_insert_end_flag = false;
     m_relation = relation;
     m_resultRelInfo = args.es_result_relations;
-    m_isIndexInfoCreatedLocal = NULL;
     m_bufferedBatchRows = NULL;
     m_tmpBatchRows = args.tmpBatchRows;
     m_idxBatchRow = args.idxBatchRow;
@@ -154,26 +153,16 @@ CStoreInsert::CStoreInsert(_in_ Relation relation, _in_ const InsertArg& args, _
     /* set the cstore Insert mem info. */
     InitInsertMemArg(plan, ArgmemInfo);
 
-    m_tmpMemCnxt = AllocSetContextCreate(CurrentMemoryContext,
-        "INSERT TEMP MEM CNXT",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
-    m_batchInsertCnxt = AllocSetContextCreate(CurrentMemoryContext,
-        "Batch Insert Mem CNXT",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE,
-        STANDARD_CONTEXT,
-        m_cstorInsertMem->MemInsert * 1024L);
+    m_tmpMemCnxt = AllocSetContextCreate(CurrentMemoryContext, "INSERT TEMP MEM CNXT",
+                                         ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+    m_batchInsertCnxt = AllocSetContextCreate(CurrentMemoryContext, "Batch Insert Mem CNXT", ALLOCSET_DEFAULT_MINSIZE, 
+                                              ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE,
+                                              STANDARD_CONTEXT, m_cstorInsertMem->MemInsert * 1024L);
 
     ADIO_RUN()
     {
-        m_aio_memcnxt = AllocSetContextCreate(CurrentMemoryContext,
-            "ADIO CU CACHE CNXT",
-            ALLOCSET_DEFAULT_MINSIZE,
-            ALLOCSET_DEFAULT_INITSIZE,
-            ALLOCSET_DEFAULT_MAXSIZE);
+        m_aio_memcnxt = AllocSetContextCreate(CurrentMemoryContext, "ADIO CU CACHE CNXT", ALLOCSET_DEFAULT_MINSIZE,
+                                              ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
         /* the other ADIO vars will be initialized later */
     }
     ADIO_ELSE()
@@ -239,7 +228,6 @@ CStoreInsert::~CStoreInsert()
     m_cuStorage = NULL;
     m_idxKeyAttr = NULL;
     m_resultRelInfo = NULL;
-    m_isIndexInfoCreatedLocal = NULL;
     m_tmpMemCnxt = NULL;
     m_aio_dispath_cudesc = NULL;
     m_vfdList = NULL;
@@ -363,19 +351,12 @@ void CStoreInsert::Destroy()
                 DeInitInsertArg(m_idxInsertArgs[i]);
             }
         }
-        
+
         FreeExecutorState(m_estate);
-        for (int i = 0; i < m_resultRelInfo->ri_NumIndices; ++i) {
-            if (m_isIndexInfoCreatedLocal[i]) {
-                m_resultRelInfo->ri_IndexRelationInfo[i]->ii_ExpressionsState = NIL;
-            }
-        }
-        
         m_estate = NULL;
         m_econtext = NULL;
         pfree(m_fake_values);
         pfree(m_fake_isnull);
-        pfree(m_isIndexInfoCreatedLocal);
     }
 
 #ifdef USE_ASSERT_CHECKING
@@ -452,11 +433,8 @@ void CStoreInsert::InitInsertMemArg(Plan* plan, MemInfoArg* ArgmemInfo)
         m_cstorInsertMem->canSpreadmaxMem = plan->operatorMaxMem;
         m_cstorInsertMem->spreadNum = 0;
         m_cstorInsertMem->partitionNum = 1;
-        MEMCTL_LOG(DEBUG2,
-            "CStoreInsert(init plan):Insert workmem is : %dKB, sort workmem: %dKB,can spread mem is %dKB.",
-            m_cstorInsertMem->MemInsert,
-            m_cstorInsertMem->MemSort,
-            m_cstorInsertMem->canSpreadmaxMem);
+        MEMCTL_LOG(DEBUG2, "CStoreInsert(init plan):Insert workmem is : %dKB, sort workmem: %dKB,can spread "
+            "mem is %dKB.",m_cstorInsertMem->MemInsert, m_cstorInsertMem->MemSort, m_cstorInsertMem->canSpreadmaxMem);
     } else if (ArgmemInfo != NULL) {
         Assert(ArgmemInfo->partitionNum > 0);
         m_cstorInsertMem->canSpreadmaxMem = ArgmemInfo->canSpreadmaxMem;
@@ -466,13 +444,9 @@ void CStoreInsert::InitInsertMemArg(Plan* plan, MemInfoArg* ArgmemInfo)
             m_cstorInsertMem->MemSort = SORT_MIM_MEM;
         m_cstorInsertMem->spreadNum = ArgmemInfo->spreadNum;
         m_cstorInsertMem->partitionNum = ArgmemInfo->partitionNum;
-        MEMCTL_LOG(DEBUG2,
-            "CStoreInsert(init ArgmemInfo):Insert workmem is : %dKB, one paritition sort workmem: %dKB,"
-            "partition totalnum is %d, can spread mem is %dKB.",
-            m_cstorInsertMem->MemInsert,
-            m_cstorInsertMem->MemSort,
-            m_cstorInsertMem->partitionNum,
-            m_cstorInsertMem->canSpreadmaxMem);
+        MEMCTL_LOG(DEBUG2, "CStoreInsert(init ArgmemInfo):Insert workmem is : %dKB, one paritition sort workmem: %dKB,"
+                   "partition totalnum is %d, can spread mem is %dKB.", m_cstorInsertMem->MemInsert,
+                   m_cstorInsertMem->MemSort, m_cstorInsertMem->partitionNum, m_cstorInsertMem->canSpreadmaxMem);
     } else {
         m_cstorInsertMem->canSpreadmaxMem = 0;
         m_cstorInsertMem->MemInsert = u_sess->attr.attr_storage.partition_max_cache_size;
@@ -523,21 +497,23 @@ void CStoreInsert::InitColSpaceAlloc()
     }
 
     /* when we get the max cu ID, wo need to check the TIDS in all the btree index */
-    List* btreeIndex = NIL;
+    List *indexRel = NIL;
     if (m_resultRelInfo != NULL) {
         for (int i = 0; i < m_resultRelInfo->ri_NumIndices; ++i) {
-
-            if (m_idxRelation[i]->rd_rel->relam == CBTREE_AM_OID)
-                btreeIndex = lappend(btreeIndex, m_idxRelation[i]);
+            Oid amOid = m_idxRelation[i]->rd_rel->relam;
+            if (amOid == CBTREE_AM_OID || amOid == CGIN_AM_OID) {
+                indexRel = lappend(indexRel, m_idxRelation[i]);
+            }
         }
     }
 
     /* Whether we need build column space cache for relation */
-    CStoreAllocator::BuildColSpaceCacheForRel(m_relation, attrIds, attNo, btreeIndex);
+    CStoreAllocator::BuildColSpaceCacheForRel(m_relation, attrIds, attNo, indexRel);
 
     pfree_ext(attrIds);
-    if (btreeIndex != NIL)
-        list_free(btreeIndex);
+    if (indexRel != NIL) {
+        list_free(indexRel);
+    }
 }
 
 void CStoreInsert::BeginBatchInsert(const InsertArg& args)
@@ -599,8 +575,7 @@ void CStoreInsert::BeginBatchInsert(const InsertArg& args)
             m_aio_dispath_cudesc[col] =
                 (AioDispatchCUDesc_t**)palloc(sizeof(AioDispatchCUDesc_t*) * MAX_CU_WRITE_REQSIZ);
             m_vfdList[col] = (File*)palloc(sizeof(File) * MAX_CU_WRITE_REQSIZ);
-            errno_t rc = memset_s(
-                (char*)m_vfdList[col], sizeof(File) * MAX_CU_WRITE_REQSIZ, 0xFF, sizeof(File) * MAX_CU_WRITE_REQSIZ);
+            errno_t rc = memset_s((char*)m_vfdList[col], sizeof(File) * MAX_CU_WRITE_REQSIZ, 0xFF, sizeof(File) * MAX_CU_WRITE_REQSIZ);
             securec_check(rc, "\0", "\0");
         }
     }
@@ -682,7 +657,6 @@ void CStoreInsert::InitIndexInfo(void)
         m_econtext = GetPerTupleExprContext(m_estate);
         RelationPtr idxRelArray = m_resultRelInfo->ri_IndexRelationDescs;
         m_idxRelation = (Relation*)palloc(sizeof(Relation) * m_resultRelInfo->ri_NumIndices);
-        m_isIndexInfoCreatedLocal = (bool*)palloc(sizeof(bool) * m_resultRelInfo->ri_NumIndices);
 
         bool isPartition = RelationIsPartition(m_relation);
 
@@ -724,13 +698,7 @@ void CStoreInsert::InitIndexInfo(void)
                     m_relation, m_idxKeyAttr[which_index], m_idxKeyNum[which_index], m_idxInsertArgs[which_index]);
                 /* Initilize index inserter */
                 m_idxInsert[which_index] = New(CurrentMemoryContext)
-                    CStoreInsert(m_idxRelation[which_index], m_idxInsertArgs[which_index], false, NULL, NULL);
-            }
-
-            if (m_resultRelInfo->ri_IndexRelationInfo[which_index]->ii_ExpressionsState == NIL) {
-                m_isIndexInfoCreatedLocal[which_index] = true;
-            } else {
-                m_isIndexInfoCreatedLocal[which_index] = false;
+                                            CStoreInsert(m_idxRelation[which_index], m_idxInsertArgs[which_index], false, NULL, NULL);
             }
         }
     }
@@ -851,10 +819,8 @@ void CStoreInsert::InsertDeltaTable(bulkload_rows* batchRowPtr, int options)
     HeapTuple tuple = NULL;
 
     if (batchRowPtr->m_attr_num != m_delta_desc->natts) {
-        ereport(ERROR,
-            (errcode(ERRCODE_DATA_EXCEPTION),
-                errmsg("The delta table's definition is not the same"
-                       " with main relation, please use pg_sync_cstore_delta to adjust it.")));
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("The delta table's definition is not the same"
+                        " with main relation, please use pg_sync_cstore_delta to adjust it.")));
     }
     Datum* values = (Datum*)palloc(sizeof(Datum) * batchRowPtr->m_attr_num);
     bool* nulls = (bool*)palloc(sizeof(bool) * batchRowPtr->m_attr_num);
@@ -867,9 +833,9 @@ void CStoreInsert::InsertDeltaTable(bulkload_rows* batchRowPtr, int options)
 
         /* We always generate xlog for delta tuple */
         uint32 tmpVal = (uint32)options;
-        tmpVal = tmpVal & (~HEAP_INSERT_SKIP_WAL);
+        tmpVal = tmpVal & (~TABLE_INSERT_SKIP_WAL);
 
-        heap_insert(m_delta_relation, tuple, GetCurrentCommandId(true), (int)tmpVal, NULL);
+        (void)tableam_tuple_insert(m_delta_relation, tuple, GetCurrentCommandId(true), (int)tmpVal, NULL);
     }
 
     pfree(values);
@@ -897,15 +863,10 @@ void CStoreInsert::InsertNotPsortIdx(int indice)
     iter.begin(m_idxBatchRow);
     while (iter.not_end()) {
         iter.next(values, isnull);
-        ItemPointer tupleid = (ItemPointer)&values[m_idxBatchRow->m_attr_num - 1];
+        ItemPointer tupleid = (ItemPointer) & values[m_idxBatchRow->m_attr_num - 1];
 
         if (!hasIndexExpr) {
-            (void)index_insert(indexRel, /* index relation */
-                values,            /* array of index Datums */
-                isnull,            /* null flags */
-                tupleid,           /* tid of heap tuple */
-                m_relation,        /* heap relation */
-                UNIQUE_CHECK_NO);  /* type of uniqueness check to do */
+            (void)index_insert(indexRel, values, isnull, tupleid, m_relation, UNIQUE_CHECK_NO); 
         } else {
             for (int i = 0; i < m_idxKeyNum[indice]; i++) {
                 if (!isnull[i]) {
@@ -922,12 +883,7 @@ void CStoreInsert::InsertNotPsortIdx(int indice)
             m_econtext->ecxt_scantuple = fakeSlot;
             FormIndexDatum(indexInfo, fakeSlot, m_estate, values, isnull);
 
-            (void)index_insert(indexRel, /* index relation */
-                values,            /* array of index Datums */
-                isnull,            /* null flags */
-                tupleid,           /* tid of heap tuple */
-                m_relation,        /* heap relation */
-                UNIQUE_CHECK_NO);  /* type of uniqueness check to do */
+            (void)index_insert(indexRel, values, isnull, tupleid, m_relation, UNIQUE_CHECK_NO); 
 
             for (int i = 0; i < m_idxKeyNum[indice]; i++) {
                 if (!isnull[i]) {
@@ -939,6 +895,11 @@ void CStoreInsert::InsertNotPsortIdx(int indice)
             heap_freetuple(fakeTuple);
             fakeTuple = NULL;
             ExecDropSingleTupleTableSlot(fakeSlot);
+            /*
+             * This has been pointing to somewhere locate in the per-query memory context "m_estate" which will be free soon
+             * therefore, set it to NULL.
+             */
+            indexInfo->ii_ExpressionsState = NIL;
             fakeSlot = NULL;
             (void)MemoryContextSwitchTo(oldCxt);
             ResetExprContext(m_econtext);
@@ -1056,13 +1017,9 @@ void CStoreInsert::CUWrite(int attno, int col)
         CStoreCUReplication(
             m_relation, cuStorage->m_cnode.m_attid, cu->m_compressedBuf, cuDesc->cu_size, cuDesc->cu_pointer);
         cu->FreeMem<false>();
-        ereport(LOG,
-            (errmodule(MOD_ADIO),
-                errmsg("CUListWrite: sync write cloumn(%d), cuid(%u), offset(%lu), size(%d)  ",
-                    col,
-                    cuDesc->cu_id,
-                    cuDesc->cu_pointer,
-                    cuDesc->cu_size)));
+        ereport(LOG, (errmodule(MOD_ADIO),
+                 errmsg("CUListWrite: sync write cloumn(%d), cuid(%u), offset(%lu), size(%d)  ",
+                        col, cuDesc->cu_id, cuDesc->cu_pointer, cuDesc->cu_size)));
         return;
     }
 
@@ -1074,11 +1031,8 @@ void CStoreInsert::CUWrite(int attno, int col)
     }
     CUCache->UnLockPrivateCache();
     if (need_flush_cache) {
-        ereport(LOG,
-            (errmodule(MOD_ADIO),
-                errmsg("CUListWrite: exceed total cache, relid(%u), size(%ld)  ",
-                    m_relation->rd_node.relNode,
-                    adio_write_cache_size)));
+        ereport(LOG, (errmodule(MOD_ADIO), errmsg("CUListWrite: exceed total cache, relid(%u), size(%ld)  ",
+                        m_relation->rd_node.relNode, adio_write_cache_size)));
         CUListFlushAll(attno);
     }
 
@@ -1087,12 +1041,8 @@ void CStoreInsert::CUWrite(int attno, int col)
 
     /* when col cache cu exceed upper limit, write cache cu of this col */
     if (m_aio_cache_write_threshold[col] + cuDesc->cu_size >= cstore_backwrite_quantity * 1024LL) {
-        ereport(DEBUG1,
-            (errmodule(MOD_ADIO),
-                errmsg("CUListWrite: exceed write threshold, column(%d), count(%d), size(%d)  ",
-                    col,
-                    count,
-                    m_aio_cache_write_threshold[col])));
+        ereport(DEBUG1, (errmodule(MOD_ADIO), errmsg("CUListWrite: exceed write threshold, column(%d), count(%d), size(%d)  ",
+                        col, count, m_aio_cache_write_threshold[col])));
         /* submint io */
         if (count > 0) {
             FileAsyncCUWrite(dList, count);
@@ -1127,44 +1077,28 @@ void CStoreInsert::CUWrite(int attno, int col)
     aioDescp->aiocb.aio_reqprio = CompltrPriority(aioDescp->cuDesc.reqType);
 
     dList[count] = aioDescp;
-    io_prep_pwrite((struct iocb*)dList[count],
-        aioDescp->cuDesc.fd,
-        aioDescp->cuDesc.buf,
-        aioDescp->cuDesc.size,
-        aioDescp->cuDesc.offset);
+    io_prep_pwrite((struct iocb*)dList[count], aioDescp->cuDesc.fd, aioDescp->cuDesc.buf, aioDescp->cuDesc.size,
+                   aioDescp->cuDesc.offset);
     count++;
 
     /* record size */
     CUCache->LockPrivateCache();
     adio_write_cache_size += cuDesc->cu_size;
     CUCache->UnLockPrivateCache();
-    ereport(DEBUG1,
-        (errmodule(MOD_ADIO),
-            errmsg("CUListWrite: increase cache size, column(%d), cu_size(%d),total cache size(%ld)",
-                col,
-                cuDesc->cu_size,
-                adio_write_cache_size)));
+    ereport(DEBUG1, (errmodule(MOD_ADIO), errmsg("CUListWrite: increase cache size, column(%d), cu_size(%d),total cache size(%ld)",
+                    col, cuDesc->cu_size, adio_write_cache_size)));
 
     /* submint io */
     if (count >= MAX_CU_WRITE_REQSIZ) {
-        ereport(DEBUG1,
-            (errmodule(MOD_ADIO),
-                errmsg("CUListWrite: exceed queue size, cloumn(%d), count(%d), size(%d) ",
-                    col,
-                    count,
-                    m_aio_cache_write_threshold[col])));
+        ereport(DEBUG1, (errmodule(MOD_ADIO), errmsg("CUListWrite: exceed queue size, cloumn(%d), count(%d), size(%d) ",
+                        col, count, m_aio_cache_write_threshold[col])));
         FileAsyncCUWrite(dList, count);
         CUListWriteCompeleteIO(col, count);
         count = 0;
     }
     m_aio_dispath_idx[col] = count;
-    ereport(DEBUG1,
-        (errmodule(MOD_ADIO),
-            errmsg("CUListWrite: add cloumn(%d), cuid(%u), offset(%lu), size(%d) ",
-                col,
-                cuDesc->cu_id,
-                cuDesc->cu_pointer,
-                cuDesc->cu_size)));
+    ereport(DEBUG1, (errmodule(MOD_ADIO), errmsg("CUListWrite: add cloumn(%d), cuid(%u), offset(%lu), size(%d) ",
+                    col, cuDesc->cu_id, cuDesc->cu_pointer, cuDesc->cu_size)));
 
     return;
 }
@@ -1225,15 +1159,10 @@ void CUListWriteAbort(int code, Datum arg)
                 adio_write_cache_size -= cuDesc->size;
                 Assert(adio_write_cache_size >= 0);
                 CUCache->UnLockPrivateCache();
-                ereport(LOG,
-                    (errmodule(MOD_ADIO),
-                        errmsg("aio cu write abort: relation(%s), colid(%d), cuid(%u), cu_size(%d), total cache "
-                               "size(%ld),",
-                            RelationGetRelationName(insert->m_relation),
-                            col,
-                            (uint32)cuDesc->slotId,
-                            cuDesc->size,
-                            adio_write_cache_size)));
+                ereport(LOG, (errmodule(MOD_ADIO),
+                         errmsg("aio cu write abort: relation(%s), colid(%d), cuid(%u), cu_size(%d), total cache "
+                                "size(%ld),", RelationGetRelationName(insert->m_relation), col,
+                                (uint32)cuDesc->slotId, cuDesc->size, adio_write_cache_size)));
             }
             adio_share_free((void*)dList[idx]);
             dList[idx] = NULL;
@@ -1264,14 +1193,9 @@ void CStoreInsert::CUListWriteCompeleteIO(int col, int count)
         }
 
         if (cu->m_adio_error) {
-            ereport(ERROR,
-                (errcode_for_file_access(),
+            ereport(ERROR, (errcode_for_file_access(),
                     errmsg("write cu failed, colid(%d) cuid(%u), offset(%lu), size(%d) : %m",
-                        col,
-                        (uint32)cuDesc->slotId,
-                        cuDesc->cu_pointer,
-                        cuDesc->size),
-                    errhint("Check free disk space.")));
+                    col, (uint32)cuDesc->slotId, cuDesc->cu_pointer, cuDesc->size), errhint("Check free disk space.")));
         }
     }
 
@@ -1288,12 +1212,8 @@ void CStoreInsert::CUListWriteCompeleteIO(int col, int count)
             adio_write_cache_size -= cuDesc->size;
             Assert(adio_write_cache_size >= 0);
             CUCache->UnLockPrivateCache();
-            ereport(DEBUG1,
-                (errmodule(MOD_ADIO),
-                    errmsg("CUListWriteCompeleteIO: decrease cache size, column(%d), idx(%d), total cache size(%ld)",
-                        col,
-                        idx,
-                        adio_write_cache_size)));
+            ereport(DEBUG1, (errmodule(MOD_ADIO), errmsg("CUListWriteCompeleteIO: decrease cache size, column(%d)," 
+                "idx(%d), total cache size(%ld)", col, idx, adio_write_cache_size)));
             m_aio_cache_write_threshold[col] -= cuDesc->size;
             Assert(m_aio_cache_write_threshold[col] >= 0);
         }
@@ -1328,7 +1248,10 @@ void CStoreInsert::SaveAll(int options, _in_ const char* delBitmap)
     /* step 1: Lock relation for extension */
     LockRelationForExtension(m_relation, ExclusiveLock);
     uint32 curCUID = CStoreAllocator::GetNextCUID(m_relation);
-
+    if (m_resultRelInfo != NULL && m_resultRelInfo->ri_NumIndices > 0) {
+        curCUID = CStoreAllocator::recheck_max_cuid(
+            m_relation, curCUID, m_resultRelInfo->ri_NumIndices, m_idxRelation);
+    }
     for (col = 0; col < attno; ++col) {
         if (m_relation->rd_att->attrs[col]->attisdropped)
             continue;
@@ -1378,17 +1301,11 @@ void CStoreInsert::SaveAll(int options, _in_ const char* delBitmap)
                     IOSchedulerAndUpdate(IO_TYPE_WRITE, 1, IO_TYPE_COLUMN);
 
                 cuStorage->SaveCU(cu->m_compressedBuf, cuDesc->cu_pointer, cuDesc->cu_size, false);
-
+                const int CUALIGNSIZE = cuStorage->Is2ByteAlign() ? ALIGNOF_TIMESERIES_CUSIZE : ALIGNOF_CUSIZE;
                 if (u_sess->attr.attr_storage.HaModuleDebug)
-                    ereport(LOG,
-                        (errmsg("HA-SaveAll: rnode %u/%u/%u, col %d, blockno %lu,"
-                                " cuUnitCount %d",
-                            m_relation->rd_node.spcNode,
-                            m_relation->rd_node.dbNode,
-                            m_relation->rd_node.relNode,
-                            cuStorage->m_cnode.m_attid,
-                            cuDesc->cu_pointer / ALIGNOF_CUSIZE,
-                            cuDesc->cu_size / ALIGNOF_CUSIZE)));
+                    ereport(LOG, (errmsg("HA-SaveAll: rnode %u/%u/%u, col %d, blockno %lu, cuUnitCount %d",
+                        m_relation->rd_node.spcNode, m_relation->rd_node.dbNode, m_relation->rd_node.relNode, 
+                        cuStorage->m_cnode.m_attid, cuDesc->cu_pointer / CUALIGNSIZE, cuDesc->cu_size / CUALIGNSIZE)));
 
                 CStoreCUReplication(
                     m_relation, cuStorage->m_cnode.m_attid, cu->m_compressedBuf, cuDesc->cu_size, cuDesc->cu_pointer);
@@ -1404,17 +1321,12 @@ void CStoreInsert::SaveAll(int options, _in_ const char* delBitmap)
     ADIO_END();
 
     /* step 6: Insert CUDesc of virtual column */
-    CStore::SaveVCCUDesc(m_relation->rd_rel->relcudescrelid,
-        m_cuDescPPtr[firstColIdx]->cu_id,
-        m_cuDescPPtr[firstColIdx]->row_count,
-        m_cuDescPPtr[firstColIdx]->magic,
-        options,
-        delBitmap);
+    CStore::SaveVCCUDesc(m_relation->rd_rel->relcudescrelid, m_cuDescPPtr[firstColIdx]->cu_id,
+                         m_cuDescPPtr[firstColIdx]->row_count, m_cuDescPPtr[firstColIdx]->magic, options, delBitmap);
 
     /* Workaround for those SQL (insert) unsupported by optimizer */
     if (unlikely(!IS_PGXC_DATANODE)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), (errmsg("This query is not supported by optimizer in CStore."))));
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), (errmsg("This query is not supported by optimizer in CStore."))));
     }
 }
 
@@ -1467,7 +1379,7 @@ CU* CStoreInsert::FormCU(int col, bulkload_rows* batchRowPtr, CUDesc* cuDescPtr)
 
         // Magic number is for checking CU data
         cuPtr->SetMagic(cuDescPtr->magic);
-        cuPtr->Compress(batchRowPtr->m_rows_curnum, m_compress_modes);
+        cuPtr->Compress(batchRowPtr->m_rows_curnum, m_compress_modes, ALIGNOF_CUSIZE);
         cuDescPtr->cu_size = cuPtr->GetCUSize();
     }
     cuDescPtr->row_count = batchRowPtr->m_rows_curnum;
@@ -1516,13 +1428,10 @@ bool CStoreInsert::TryEncodeNumeric(int col, bulkload_rows* batchRowPtr, CUDesc*
     phase2_out.filter = m_cuCmprsOptions + col;
 
     BatchNumeric batch = {batchRowPtr->m_vectors[col].m_values_nulls.m_vals_points,
-        batchRowPtr->m_vectors[col].m_values_nulls.m_null_bitmap,
-        batchRowPtr->m_rows_curnum,
-        hasNull,
-        cu_append_null_value,
-        (void*)cuPtr};
-
-    if (NumericCompressBatchValues(&batch, &phase1_out, &phase2_out, &not_exact_size)) {
+                          batchRowPtr->m_vectors[col].m_values_nulls.m_null_bitmap,
+                          batchRowPtr->m_rows_curnum, hasNull, cu_append_null_value, (void*)cuPtr
+                        };
+    if (NumericCompressBatchValues(&batch, &phase1_out, &phase2_out, &not_exact_size, ALIGNOF_CUSIZE)) {
         // expand the memory if needed
         Assert(cuPtr->m_srcDataSize == 0);
         if (unlikely(cuPtr->m_srcData + not_exact_size > cuPtr->m_srcBuf + cuPtr->m_srcBufSize)) {
@@ -1600,7 +1509,6 @@ bool CStoreInsert::FormNumberStringCU(int col, bulkload_rows* batchRowPtr, CUDes
         char* p = DatumGetPointer(v);
         Assert(p != NULL);
         uint32 len = VARSIZE_ANY_EXHDR(p);
-
         // this means that it's an empty string.
         // because we cannot map an empty string to any integer
         // so don't handle this case and return false.
@@ -1927,7 +1835,7 @@ void CStoreInsert::CUInsert(_in_ BatchCUData* CUData, _in_ int options)
         m_cuPPtr[col] = CUData->CUptrData[col];
     }
 
-    /* 
+    /*
      * step 2: a) Allocate CUID and CUPointer
      *         b) Write CU and CUDesc
      */
@@ -1990,7 +1898,7 @@ void CStoreInsert::BatchInsert(_in_ VectorBatch* pBatch, _in_ int options)
 
             int startIdx = 0;
             while (m_bufferedBatchRows->append_one_vector(
-                RelationGetDescr(m_relation), pBatch, &startIdx, m_cstorInsertMem)) {
+                       RelationGetDescr(m_relation), pBatch, &startIdx, m_cstorInsertMem)) {
                 BatchInsertCommon(m_bufferedBatchRows, options);
                 m_bufferedBatchRows->reset(true);
             }
@@ -2164,7 +2072,7 @@ void CStoreInsert::FlashData(int options)
 }
 
 CStorePartitionInsert::CStorePartitionInsert(_in_ Relation relation, _in_ ResultRelInfo* es_result_relations,
-    _in_ int type, _in_ bool is_update_cu, _in_ Plan* plan, _in_ MemInfoArg* ArgmemInfo)
+                                             _in_ int type, _in_ bool is_update_cu, _in_ Plan* plan, _in_ MemInfoArg* ArgmemInfo)
     : CStore()
 {
     m_memInfo = NULL;
@@ -2184,19 +2092,12 @@ CStorePartitionInsert::CStorePartitionInsert(_in_ Relation relation, _in_ Result
 
     InitInsertPartMemArg(plan, ArgmemInfo);
 
-    m_cstorePartMemContext = AllocSetContextCreate(CurrentMemoryContext,
-        "CStore PARAENT PARTITION INSERT",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE,
-        STANDARD_CONTEXT,
-        m_memInfo->MemInsert * 1024L);
+    m_cstorePartMemContext = AllocSetContextCreate(CurrentMemoryContext, "CStore PARAENT PARTITION INSERT",
+                                ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
+                                ALLOCSET_DEFAULT_MAXSIZE, STANDARD_CONTEXT, m_memInfo->MemInsert * 1024L);
 
-    m_tmpMemCnxt = AllocSetContextCreate(CurrentMemoryContext,
-        "CStore PARTITIONED TEMP INSERT",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    m_tmpMemCnxt = AllocSetContextCreate(CurrentMemoryContext, "CStore PARTITIONED TEMP INSERT",
+                                         ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
 
     AutoContextSwitch contextSwitcher(m_cstorePartMemContext);
 
@@ -2315,26 +2216,18 @@ void CStorePartitionInsert::InitInsertPartMemArg(Plan* plan, MemInfoArg* ArgmemI
         m_memInfo->canSpreadmaxMem = plan->operatorMaxMem;
         m_memInfo->spreadNum = 0;
         m_memInfo->partitionNum = m_partitionNum;
-        MEMCTL_LOG(DEBUG2,
-            "CStorePartInsert(init plan):Insert workmem is : %dKB, sort workmem: %dKB,"
-            "parititions totalnum is(%d)can spread maxMem is %dKB.",
-            m_memInfo->MemInsert,
-            m_memInfo->MemSort,
-            m_memInfo->partitionNum,
-            m_memInfo->canSpreadmaxMem);
+        MEMCTL_LOG(DEBUG2, "CStorePartInsert(init plan):Insert workmem is : %dKB, sort workmem: %dKB,"
+                   "parititions totalnum is(%d)can spread maxMem is %dKB.", m_memInfo->MemInsert,
+                   m_memInfo->MemSort, m_memInfo->partitionNum, m_memInfo->canSpreadmaxMem);
     } else if (ArgmemInfo != NULL) {
         m_memInfo->MemInsert = ArgmemInfo->MemInsert;
         m_memInfo->MemSort = ArgmemInfo->MemSort;
         m_memInfo->canSpreadmaxMem = ArgmemInfo->canSpreadmaxMem;
         m_memInfo->spreadNum = ArgmemInfo->spreadNum;
         m_memInfo->partitionNum = ArgmemInfo->partitionNum;
-        MEMCTL_LOG(DEBUG2,
-            "CStorePartInsert(init ArgmemInfo):Insert workmem is : %dKB, sort workmem: %dKB,"
-            "parititions totalnum is(%d)can spread maxMem is %dKB.",
-            m_memInfo->MemInsert,
-            m_memInfo->MemSort,
-            m_memInfo->partitionNum,
-            m_memInfo->canSpreadmaxMem);
+        MEMCTL_LOG(DEBUG2, "CStorePartInsert(init ArgmemInfo):Insert workmem is : %dKB, sort workmem: %dKB,"
+                   "parititions totalnum is(%d)can spread maxMem is %dKB.", m_memInfo->MemInsert,
+                   m_memInfo->MemSort, m_memInfo->partitionNum, m_memInfo->canSpreadmaxMem);
     } else {
         /*
          * For static load, a single partition of sort Mem is 512MB, and there is no need to subdivide sort Mem.
@@ -2399,8 +2292,7 @@ bool CStorePartitionInsert::CacheValues(Datum* values, const bool* nulls, int pa
         Size tuple_size = partitionBatchRows->calculate_tuple_size(RelationGetDescr(m_relation), values, nulls);
         if ((BULKLOAD_MAX_MEMSIZE - partitionBatchRows->m_using_blocks_total_rawsize) < tuple_size) {
             if (unlikely(partitionBatchRows->m_rows_curnum == 0)) {
-                ereport(
-                    ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("the size of one tuple reaches the limit (1GB).")));
+                ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("the size of one tuple reaches the limit (1GB).")));
             }
             /* need to flush the partition on cache. */
             return false;
@@ -2418,7 +2310,7 @@ void CStorePartitionInsert::SaveCacheValues(int partitionidx, bool doFlush, int 
     if (unlikely(m_insert[partitionidx] == NULL)) {
         AutoContextSwitch contextSwitcher(m_cstorePartMemContext);
         m_insert[partitionidx] = New(m_cstorePartMemContext)
-            CStoreInsert(GetPartFakeRelation(partitionidx), m_insertArgs, m_isUpdate, NULL, m_memInfo);
+                                CStoreInsert(GetPartFakeRelation(partitionidx), m_insertArgs, m_isUpdate, NULL, m_memInfo);
     }
 
     // Check which partition batchrows/valuecache is full,
@@ -2503,8 +2395,6 @@ void CStorePartitionInsert::MoveBatchRowToPartitionValueCache(int partitionidx)
 void CStorePartitionInsert::BatchInsert(_in_ Datum* values, _in_ const bool* nulls, _in_ int options)
 {
     Relation partitionedRel = m_relation;
-    int partkeyColNum = 0;
-    int2vector* partKeyColumn = NULL;
     Const consts[RANGE_PARTKEYMAXNUM];
     Const* partKeyValues[RANGE_PARTKEYMAXNUM] = {};
     PartitionIdentifier matchPartition;
@@ -2512,22 +2402,27 @@ void CStorePartitionInsert::BatchInsert(_in_ Datum* values, _in_ const bool* nul
     CHECK_FOR_INTERRUPTS();
     // Step 1: We need know this batchrow should be which partition and then
     // store into m_batchrows for each partition
-    partKeyColumn = ((RangePartitionMap*)(partitionedRel)->partMap)->partitionKey;
-    partkeyColNum = partKeyColumn->dim1;
+    int2vector* partKeyColumn = ((RangePartitionMap*)(partitionedRel)->partMap)->partitionKey;
+    int partkeyColNum = partKeyColumn->dim1;
 
     Assert(partkeyColNum <= RANGE_PARTKEYMAXNUM);
     for (int i = 0; i < partkeyColNum; i++) {
         int col_location = partKeyColumn->values[i];
         partKeyValues[i] = transformDatum2Const(
-            (partitionedRel)->rd_att, col_location, values[col_location - 1], nulls[col_location - 1], &consts[i]);
+                               (partitionedRel)->rd_att, col_location, values[col_location - 1], nulls[col_location - 1], &consts[i]);
     }
     partitionRoutingForValue((partitionedRel), partKeyValues, partkeyColNum, true, false, (&matchPartition));
 
     if (!OidIsValid(matchPartition.partitionId)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("inserted partition key does not map to any table partition")));
-    }
+        if (options & HEAP_INSERT_SKIP_ERROR) {
+            char *relname = get_rel_name((Oid) (partitionedRel)->rd_id);
+            ereport(LOG, (errmsg("inserted partition key does not map to any table partition in %s", relname)));
+            return;
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("inserted partition key does not map to any table partition")));
+        }
+    }    
 
     // Step 2: Caches values to BatchRows or PartitionCacheValues.
     // flash partition insert when swith partition
@@ -2562,7 +2457,7 @@ void CStorePartitionInsert::BatchInsert(_in_ Datum* values, _in_ const bool* nul
         moveCacheToDisk = true;
     }
     while ((m_memInfo->MemInsert > 0 &&
-               (int64)t_thrd.cstore_cxt.bulkload_memsize_used >= ((int64)(m_memInfo->MemInsert)) * 1024) ||
+            (int64)t_thrd.cstore_cxt.bulkload_memsize_used >= ((int64)(m_memInfo->MemInsert)) * 1024) ||
            moveCacheToDisk) {
         int FlushIdx = -1;
 
@@ -2574,27 +2469,17 @@ void CStorePartitionInsert::BatchInsert(_in_ Datum* values, _in_ const bool* nul
         if (FlushIdx >= 0) {
             MoveBatchRowToPartitionValueCache(FlushIdx);
             moveBatchCount++;
-            ereport(LOG,
-                (errmsg("The insert memory reaches the upper limit, it needs to flush some partition to the disk. "
-                        "The used memory is %lu, the controlled memory limit is %dKB, the partition relation is %s, "
-                        "the flush partition id is %d, the flush count is %d.",
-                    t_thrd.cstore_cxt.bulkload_memsize_used,
-                    m_memInfo->MemInsert,
-                    RelationGetRelationName(m_relation),
-                    FlushIdx,
-                    moveBatchCount)));
+            ereport(LOG, (errmsg("The insert memory reaches the upper limit, it needs to flush some partition "
+                "to the disk. The used memory is %lu, the controlled memory limit is %dKB, the partition relation " 
+                "is %s, the flush partition id is %d, the flush count is %d.",t_thrd.cstore_cxt.bulkload_memsize_used,
+                m_memInfo->MemInsert, RelationGetRelationName(m_relation), FlushIdx, moveBatchCount)));
         }
 
         if (t_thrd.cstore_cxt.bulkload_memsize_used == old_memsize) {
-            ereport(ERROR,
-                (errcode(ERRCODE_INTERNAL_ERROR),
-                    errmsg("The max insert memory is too small, it may occur endless loop. "
-                           " The used memory is %lu, the controlled memory limit is %dKB, the partition relation is "
-                           "%s, the flush partition id is %d.",
-                        t_thrd.cstore_cxt.bulkload_memsize_used,
-                        m_memInfo->MemInsert,
-                        RelationGetRelationName(m_relation),
-                        FlushIdx)));
+            ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("The max insert memory is too small, it may occur "
+            "endless loop. The used memory is %lu, the controlled memory limit is %dKB, the partition relation is "
+            "%s, the flush partition id is %d.",  t_thrd.cstore_cxt.bulkload_memsize_used,
+            m_memInfo->MemInsert, RelationGetRelationName(m_relation), FlushIdx)));
         }
 
         moveCacheToDisk = false;
@@ -2658,8 +2543,6 @@ void CStorePartitionInsert::EndBatchInsert()
 
 bulkload_rows* CStorePartitionInsert::GetBatchRow(int partitionIdx)
 {
-    bulkload_rows* batch = NULL;
-
     Assert(partitionIdx < m_partitionNum);
 
     /* Using disk cache */
@@ -2669,7 +2552,7 @@ bulkload_rows* CStorePartitionInsert::GetBatchRow(int partitionIdx)
     }
 
     /* Check if the partition has held a batchrow */
-    batch = m_partRelBatchRows[partitionIdx];
+    bulkload_rows* batch = m_partRelBatchRows[partitionIdx];
     if (batch == NULL) {
         Assert(list_length(m_batchFreeList) > 0);
 
@@ -2692,11 +2575,9 @@ bulkload_rows* CStorePartitionInsert::GetBatchRow(int partitionIdx)
 
 void CStorePartitionInsert::ReleaseBatchRow(int partitionIdx)
 {
-    bulkload_rows* batch = NULL;
-
     Assert(partitionIdx < m_partitionNum);
 
-    batch = m_partRelBatchRows[partitionIdx];
+    bulkload_rows* batch = m_partRelBatchRows[partitionIdx];
     if (batch != NULL) {
         /* reset batchrows for partition */
         m_partRelBatchRows[partitionIdx] = NULL;
@@ -2730,34 +2611,24 @@ bool CStorePartitionInsert::hasEnoughMem(int partitionidx, int64 memsize_used)
     bool sysBusy = gs_sysmemory_busy((int64)memsize_used, true);
     if (memsize_used > (int64)(m_memInfo->MemInsert * 1024L) || sysBusy) {
         if (sysBusy) {
-            MEMCTL_LOG(LOG,
-                "CStorePartitionInsert(%d) early spilled, workmem: %dKB, usedmem: %ldKB",
-                partitionidx,
-                m_memInfo->MemInsert,
-                memsize_used / 1024L);
+            MEMCTL_LOG(LOG, "CStorePartitionInsert(%d) early spilled, workmem: %dKB, usedmem: %ldKB",
+                       partitionidx, m_memInfo->MemInsert, memsize_used / 1024L);
             pgstat_add_warning_early_spill();
         } else if (m_memInfo->canSpreadmaxMem > m_memInfo->MemInsert) {
             int64 spreadMem = Min(Min(dywlm_client_get_memory(), m_memInfo->MemInsert),
-                m_memInfo->canSpreadmaxMem - m_memInfo->MemInsert - m_memInfo->MemSort);
+                                  m_memInfo->canSpreadmaxMem - m_memInfo->MemInsert - m_memInfo->MemSort);
             if (spreadMem > m_memInfo->MemInsert * 0.1) {
                 m_memInfo->MemInsert += spreadMem;
                 m_memInfo->spreadNum++;
                 AllocSet context = (AllocSet)m_cstorePartMemContext;
                 context->maxSpaceSize += spreadMem * 1024L;
 
-                MEMCTL_LOG(DEBUG2,
-                    "CStorePartitionInsert(%d) auto mem spread %ldKB succeed, and work mem is %dKB, spreadNum is %d.",
-                    partitionidx,
-                    spreadMem,
-                    m_memInfo->MemInsert,
-                    m_memInfo->spreadNum);
+                MEMCTL_LOG(DEBUG2, "CStorePartitionInsert(%d) auto mem spread %ldKB succeed, and work mem is %dKB, spreadNum is %d.",
+                           partitionidx, spreadMem, m_memInfo->MemInsert, m_memInfo->spreadNum);
                 return true;
             } else {
-                MEMCTL_LOG(LOG,
-                    "CStorePartitionInsert(%d) auto mem spread %ldKB failed, and work mem is %dKB.",
-                    partitionidx,
-                    spreadMem,
-                    m_memInfo->MemInsert);
+                MEMCTL_LOG(LOG, "CStorePartitionInsert(%d) auto mem spread %ldKB failed, and work mem is %dKB.",
+                           partitionidx, spreadMem, m_memInfo->MemInsert);
             }
 
             if (m_memInfo->spreadNum > 0) {
@@ -2765,11 +2636,8 @@ bool CStorePartitionInsert::hasEnoughMem(int partitionidx, int64 memsize_used)
             }
 
             if (!sysBusy) {
-                MEMCTL_LOG(LOG,
-                    "CStorePartitionInsert(%d) Disk Spilled: totalSpace: %dKB, used is: %ldKB",
-                    partitionidx,
-                    m_memInfo->MemInsert,
-                    memsize_used / 1024L);
+                MEMCTL_LOG(LOG, "CStorePartitionInsert(%d) Disk Spilled: totalSpace: %dKB, used is: %ldKB",
+                           partitionidx, m_memInfo->MemInsert, memsize_used / 1024L);
             }
         }
         return false;
@@ -2933,8 +2801,7 @@ end:
     // if i==0, we think there is no record in cache and read is over.
     // otherwise, read fails and some error happens.
     if (i > 0)
-        ereport(
-            ERROR, (errcode(ERRCODE_DATA_CORRUPTED), (errmsg("read incomplete record from partition value cache."))));
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), (errmsg("read incomplete record from partition value cache."))));
 
     return EOF;
 }
@@ -3030,8 +2897,7 @@ void PartitionValueCache::FlushData()
     if (likely(m_bufCursor > 0)) {
         int retval = FilePWrite(m_fd, m_buffer, m_bufCursor, m_writeOffset);
         if (retval < 0)
-            ereport(ERROR,
-                (errcode_for_file_access(), errmsg("could not write cache file \"%s\": %m", FilePathName(m_fd))));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not write cache file \"%s\": %m", FilePathName(m_fd))));
         m_writeOffset += retval;
     }
 }

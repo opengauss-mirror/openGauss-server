@@ -1,0 +1,3932 @@
+--
+----Prepare
+--
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+drop table if exists t2;
+NOTICE:  table "t2" does not exist, skipping
+drop table if exists t3;
+NOTICE:  table "t3" does not exist, skipping
+create table t1 (a int2, b int4, c int8);
+create table t2 (a int2, b int4, c int8);
+create table t3 (a int2, b int4, c int8);
+copy t1 from '@libdir@/data/quality_derive1.data';
+copy t2 from '@libdir@/data/quality_derive2.data';
+copy t3 from '@libdir@/data/quality_derive3.data';
+analyze t1;
+analyze t2;
+analyze t3;
+--
+----Inner Join
+--
+--T_Var
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where t2.b < 50 order by 1, 2, 3, 4, 5, 6;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+         ->  Hash Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Hash Cond: (t1.b = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+                           Filter: (t1.b < 50)
+               ->  Hash
+                     Output: t2.a, t2.b, t2.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.a
+                                 Filter: (t2.b < 50)
+(30 rows)
+
+select * from t1 inner join t2 on t1.b = t2.b where t2.b < 50 order by 1, 2, 3, 4, 5, 6;
+  a  | b  | c  |  a  | b  | c  
+-----+----+----+-----+----+----
+ -11 | 31 | 88 |  51 | 31 | 35
+ -11 | 31 | 88 |  53 | 31 | 39
+  -6 | 41 | 10 |  54 | 41 |  3
+  -6 | 41 | 10 |  58 | 41 |   
+  -2 |  5 | 70 |   4 |  5 | 11
+  -2 |  5 | 70 |  45 |  5 |  0
+  -2 |  5 | 70 |  76 |  5 |   
+  -1 |  3 | 97 |  63 |  3 | 20
+  -1 |  3 | 97 |  80 |  3 | 53
+   0 |  2 | 99 |  51 |  2 | 17
+   0 |  2 | 99 |  77 |  2 | 48
+   9 |  7 | 66 |  37 |  7 | 65
+  10 | 40 | 30 |  37 | 40 | 65
+  12 | 33 |    |   5 | 33 | 58
+  17 | 13 | 83 | -10 | 13 | 39
+  17 | 13 | 83 |  23 | 13 | 22
+  20 | 26 | 80 |  88 | 26 | 80
+  21 | 33 | 96 |   5 | 33 | 58
+  29 |  4 | 75 |  -6 |  4 | 53
+  29 |  4 | 75 |  73 |  4 | 44
+  29 | 10 |    | -11 | 10 | 88
+  29 | 11 | 47 |  97 | 11 | 61
+  34 |  5 | 57 |   4 |  5 | 11
+  34 |  5 | 57 |  45 |  5 |  0
+  34 |  5 | 57 |  76 |  5 |   
+  34 | 42 | 85 |  72 | 42 | 52
+  37 | 27 |  5 |  28 | 27 | 71
+  37 | 27 |  5 |  75 | 27 | 22
+  44 | 27 |    |  28 | 27 | 71
+  44 | 27 |    |  75 | 27 | 22
+  46 | 24 | 60 |   8 | 24 | 11
+  46 | 24 | 60 |  41 | 24 | 51
+  48 | 26 | 80 |  88 | 26 | 80
+  49 | 23 | 52 |  49 | 23 | 94
+  49 | 23 | 52 |  79 | 23 | 43
+  56 | 38 | 64 |  78 | 38 | 84
+  61 | 15 | 11 |  24 | 15 | 57
+  63 | 36 | 46 |  64 | 36 | 39
+  63 | 36 | 46 |  65 | 36 | 96
+  64 | 39 | 18 |  75 | 39 | 35
+  67 | 30 | 49 |   5 | 30 | 68
+  67 | 30 | 49 |  29 | 30 | 38
+  71 | 30 |    |   5 | 30 | 68
+  71 | 30 |    |  29 | 30 | 38
+  71 | 41 |  9 |  54 | 41 |  3
+  71 | 41 |  9 |  58 | 41 |   
+  72 | 35 |    |  13 | 35 | 26
+  72 | 35 |    |  49 | 35 | 33
+  72 | 48 | 91 |   8 | 48 |  5
+  72 | 48 | 91 |  69 | 48 | 38
+  77 | 38 | 48 |  78 | 38 | 84
+  79 | 26 | 31 |  88 | 26 | 80
+  79 | 39 | 85 |  75 | 39 | 35
+  89 | 36 | 13 |  64 | 36 | 39
+  89 | 36 | 13 |  65 | 36 | 96
+  93 |  3 |    |  63 |  3 | 20
+  93 |  3 |    |  80 |  3 | 53
+(57 rows)
+
+explain (verbose on, costs off)
+select * from (select t1.* from t1 inner join t2 on t1.b = t2.b) t where t.b < 50 order by 1, 2, 3;
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c
+   Merge Sort Key: t1.a, t1.b, t1.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c
+         Sort Key: t1.a, t1.b, t1.c
+         ->  Hash Join
+               Output: t1.a, t1.b, t1.c
+               Hash Cond: (t1.b = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+                           Filter: (t1.b < 50)
+               ->  Hash
+                     Output: t2.b
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.b
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.b
+                                 Distribute Key: t2.a
+                                 Filter: (t2.b < 50)
+(30 rows)
+
+select * from (select t1.* from t1 inner join t2 on t1.b = t2.b) t where t.b < 50 order by 1, 2, 3;
+  a  | b  | c  
+-----+----+----
+ -11 | 31 | 88
+ -11 | 31 | 88
+  -6 | 41 | 10
+  -6 | 41 | 10
+  -2 |  5 | 70
+  -2 |  5 | 70
+  -2 |  5 | 70
+  -1 |  3 | 97
+  -1 |  3 | 97
+   0 |  2 | 99
+   0 |  2 | 99
+   9 |  7 | 66
+  10 | 40 | 30
+  12 | 33 |   
+  17 | 13 | 83
+  17 | 13 | 83
+  20 | 26 | 80
+  21 | 33 | 96
+  29 |  4 | 75
+  29 |  4 | 75
+  29 | 10 |   
+  29 | 11 | 47
+  34 |  5 | 57
+  34 |  5 | 57
+  34 |  5 | 57
+  34 | 42 | 85
+  37 | 27 |  5
+  37 | 27 |  5
+  44 | 27 |   
+  44 | 27 |   
+  46 | 24 | 60
+  46 | 24 | 60
+  48 | 26 | 80
+  49 | 23 | 52
+  49 | 23 | 52
+  56 | 38 | 64
+  61 | 15 | 11
+  63 | 36 | 46
+  63 | 36 | 46
+  64 | 39 | 18
+  67 | 30 | 49
+  67 | 30 | 49
+  71 | 30 |   
+  71 | 30 |   
+  71 | 41 |  9
+  71 | 41 |  9
+  72 | 35 |   
+  72 | 35 |   
+  72 | 48 | 91
+  72 | 48 | 91
+  77 | 38 | 48
+  79 | 26 | 31
+  79 | 39 | 85
+  89 | 36 | 13
+  89 | 36 | 13
+  93 |  3 |   
+  93 |  3 |   
+(57 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where t2.b = 2 or t2.b = 3 order by 1, 2, 3, 4, 5, 6;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+         ->  Nested Loop
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Join Filter: (t1.b = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t2.a, t2.b, t2.c
+                     Distribute Key: t2.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t2
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.a
+                           Filter: ((t2.b = 2) OR (t2.b = 3))
+               ->  Materialize
+                     Output: t1.a, t1.b, t1.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t1
+                                 Output: t1.a, t1.b, t1.c
+                                 Distribute Key: t1.a
+                                 Filter: ((t1.b = 2) OR (t1.b = 3))
+(30 rows)
+
+select * from t1 inner join t2 on t1.b = t2.b where t2.b = 2 or t2.b = 3 order by 1, 2, 3, 4, 5, 6;
+ a  | b | c  | a  | b | c  
+----+---+----+----+---+----
+ -1 | 3 | 97 | 63 | 3 | 20
+ -1 | 3 | 97 | 80 | 3 | 53
+  0 | 2 | 99 | 51 | 2 | 17
+  0 | 2 | 99 | 77 | 2 | 48
+ 93 | 3 |    | 63 | 3 | 20
+ 93 | 3 |    | 80 | 3 | 53
+(6 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where t2.b in (2, 3) order by 1, 2, 3, 4, 5, 6;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+         ->  Nested Loop
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Join Filter: (t1.b = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t2.a, t2.b, t2.c
+                     Distribute Key: t2.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t2
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.a
+                           Filter: (t2.b = ANY ('{2,3}'::integer[]))
+               ->  Materialize
+                     Output: t1.a, t1.b, t1.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t1
+                                 Output: t1.a, t1.b, t1.c
+                                 Distribute Key: t1.a
+                                 Filter: (t1.b = ANY ('{2,3}'::integer[]))
+(30 rows)
+
+select * from t1 inner join t2 on t1.b = t2.b where t2.b in (2, 3) order by 1, 2, 3, 4, 5, 6;
+ a  | b | c  | a  | b | c  
+----+---+----+----+---+----
+ -1 | 3 | 97 | 63 | 3 | 20
+ -1 | 3 | 97 | 80 | 3 | 53
+  0 | 2 | 99 | 51 | 2 | 17
+  0 | 2 | 99 | 77 | 2 | 48
+ 93 | 3 |    | 63 | 3 | 20
+ 93 | 3 |    | 80 | 3 | 53
+(6 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b+ t1.a = t2.b where t1.b + t1.a < 50 order by 1, 2, 3, 4, 5, 6;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         ->  Hash Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Hash Cond: (((t1.b + t1.a)) = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c, ((t1.b + t1.a))
+                     Distribute Key: ((t1.b + t1.a))
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c, (t1.b + t1.a)
+                           Distribute Key: t1.a
+                           Filter: ((t1.b + t1.a) < 50)
+               ->  Hash
+                     Output: t2.a, t2.b, t2.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.a
+                                 Filter: (t2.b < 50)
+(30 rows)
+
+select * from t1 inner join t2 on t1.b+ t1.a = t2.b where t1.b + t1.a < 50 order by 1, 2, 3, 4, 5, 6;
+ a  | b  | c  | a  | b  | c  
+----+----+----+----+----+----
+ -6 | 41 | 10 | 13 | 35 | 26
+ -6 | 41 | 10 | 49 | 35 | 33
+ -2 |  5 | 70 | 63 |  3 | 20
+ -2 |  5 | 70 | 80 |  3 | 53
+ -1 |  3 | 97 | 51 |  2 | 17
+ -1 |  3 | 97 | 77 |  2 | 48
+  0 |  2 | 99 | 51 |  2 | 17
+  0 |  2 | 99 | 77 |  2 | 48
+  4 | 34 | 28 | 78 | 38 | 84
+ 12 | 33 |    |  3 | 45 | 18
+ 12 | 33 |    | 54 | 45 |   
+ 17 | 13 | 83 |  5 | 30 | 68
+ 17 | 13 | 83 | 29 | 30 | 38
+ 22 |  8 |    |  5 | 30 | 68
+ 22 |  8 |    | 29 | 30 | 38
+ 29 |  4 | 75 |  5 | 33 | 58
+ 29 | 10 |    | 75 | 39 | 35
+ 29 | 11 | 47 | 37 | 40 | 65
+ 34 |  5 | 57 | 75 | 39 | 35
+(19 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t2.b = t3.b where t2.b < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.c
+         ->  Hash Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+               Hash Cond: (t1.b = t2.b)
+               ->  Hash Join
+                     Output: t1.a, t1.b, t1.c, t3.a, t3.b, t3.c
+                     Hash Cond: (t1.b = t3.b)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t1
+                                 Output: t1.a, t1.b, t1.c
+                                 Distribute Key: t1.a
+                                 Filter: (t1.b < 50)
+                     ->  Hash
+                           Output: t3.a, t3.b, t3.c
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: t3.a, t3.b, t3.c
+                                 Distribute Key: t3.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on public.t3
+                                       Output: t3.a, t3.b, t3.c
+                                       Distribute Key: t3.a
+                                       Filter: (t3.b < 50)
+               ->  Hash
+                     Output: t2.a, t2.b, t2.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.a
+                                 Filter: (t2.b < 50)
+(44 rows)
+
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t2.b = t3.b where t2.b < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+ a  | b  | c  |  a  | b  | c  |  a  | b  | c  
+----+----+----+-----+----+----+-----+----+----
+ -1 |  3 | 97 |  63 |  3 | 20 |  20 |  3 | 49
+ -1 |  3 | 97 |  80 |  3 | 53 |  20 |  3 | 49
+  0 |  2 | 99 |  51 |  2 | 17 |  76 |  2 |   
+  0 |  2 | 99 |  77 |  2 | 48 |  76 |  2 |   
+  9 |  7 | 66 |  37 |  7 | 65 |  -5 |  7 | 50
+  9 |  7 | 66 |  37 |  7 | 65 |  -3 |  7 | 64
+  9 |  7 | 66 |  37 |  7 | 65 |  88 |  7 | 71
+ 17 | 13 | 83 | -10 | 13 | 39 |  -6 | 13 | 53
+ 17 | 13 | 83 |  23 | 13 | 22 |  -6 | 13 | 53
+ 20 | 26 | 80 |  88 | 26 | 80 |  37 | 26 | 15
+ 29 | 10 |    | -11 | 10 | 88 |  87 | 10 |  2
+ 29 | 11 | 47 |  97 | 11 | 61 |  17 | 11 | 34
+ 34 | 42 | 85 |  72 | 42 | 52 |  62 | 42 | 96
+ 34 | 42 | 85 |  72 | 42 | 52 |  71 | 42 | 29
+ 37 | 27 |  5 |  28 | 27 | 71 |   3 | 27 | 46
+ 37 | 27 |  5 |  28 | 27 | 71 |  42 | 27 | 56
+ 37 | 27 |  5 |  28 | 27 | 71 |  69 | 27 | 77
+ 37 | 27 |  5 |  75 | 27 | 22 |   3 | 27 | 46
+ 37 | 27 |  5 |  75 | 27 | 22 |  42 | 27 | 56
+ 37 | 27 |  5 |  75 | 27 | 22 |  69 | 27 | 77
+ 44 | 27 |    |  28 | 27 | 71 |   3 | 27 | 46
+ 44 | 27 |    |  28 | 27 | 71 |  42 | 27 | 56
+ 44 | 27 |    |  28 | 27 | 71 |  69 | 27 | 77
+ 44 | 27 |    |  75 | 27 | 22 |   3 | 27 | 46
+ 44 | 27 |    |  75 | 27 | 22 |  42 | 27 | 56
+ 44 | 27 |    |  75 | 27 | 22 |  69 | 27 | 77
+ 46 | 24 | 60 |   8 | 24 | 11 |  37 | 24 | 37
+ 46 | 24 | 60 |  41 | 24 | 51 |  37 | 24 | 37
+ 48 | 26 | 80 |  88 | 26 | 80 |  37 | 26 | 15
+ 49 | 23 | 52 |  49 | 23 | 94 |  99 | 23 | 50
+ 49 | 23 | 52 |  79 | 23 | 43 |  99 | 23 | 50
+ 56 | 38 | 64 |  78 | 38 | 84 | -10 | 38 | 45
+ 61 | 15 | 11 |  24 | 15 | 57 |  31 | 15 | 61
+ 61 | 15 | 11 |  24 | 15 | 57 |  52 | 15 |  6
+ 64 | 39 | 18 |  75 | 39 | 35 |  80 | 39 | 66
+ 67 | 30 | 49 |   5 | 30 | 68 |  32 | 30 | 72
+ 67 | 30 | 49 |  29 | 30 | 38 |  32 | 30 | 72
+ 71 | 30 |    |   5 | 30 | 68 |  32 | 30 | 72
+ 71 | 30 |    |  29 | 30 | 38 |  32 | 30 | 72
+ 72 | 48 | 91 |   8 | 48 |  5 |   7 | 48 |  5
+ 72 | 48 | 91 |   8 | 48 |  5 |  64 | 48 | 93
+ 72 | 48 | 91 |  69 | 48 | 38 |   7 | 48 |  5
+ 72 | 48 | 91 |  69 | 48 | 38 |  64 | 48 | 93
+ 77 | 38 | 48 |  78 | 38 | 84 | -10 | 38 | 45
+ 79 | 26 | 31 |  88 | 26 | 80 |  37 | 26 | 15
+ 79 | 39 | 85 |  75 | 39 | 35 |  80 | 39 | 66
+ 93 |  3 |    |  63 |  3 | 20 |  20 |  3 | 49
+ 93 |  3 |    |  80 |  3 | 53 |  20 |  3 | 49
+(48 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where t1.b < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         ->  Hash Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+               Hash Cond: (t1.b = ((2 * t2.b)))
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+                           Filter: (t1.b < 50)
+               ->  Hash
+                     Output: t2.a, t2.b, t2.c, t3.a, t3.b, t3.c, ((2 * t2.b))
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c, t3.a, t3.b, t3.c, ((2 * t2.b))
+                           Distribute Key: ((2 * t2.b))
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Hash Join
+                                 Output: t2.a, t2.b, t2.c, t3.a, t3.b, t3.c, (2 * t2.b)
+                                 Hash Cond: (t2.b = ((2 * t3.b)))
+                                 ->  Streaming(type: REDISTRIBUTE)
+                                       Output: t2.a, t2.b, t2.c
+                                       Distribute Key: t2.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on public.t2
+                                             Output: t2.a, t2.b, t2.c
+                                             Distribute Key: t2.a
+                                             Filter: ((2 * t2.b) < 50)
+                                 ->  Hash
+                                       Output: t3.a, t3.b, t3.c, ((2 * t3.b))
+                                       ->  Streaming(type: REDISTRIBUTE)
+                                             Output: t3.a, t3.b, t3.c, ((2 * t3.b))
+                                             Distribute Key: ((2 * t3.b))
+                                             Spawn on: All datanodes
+                                             Consumer Nodes: All datanodes
+                                             ->  Seq Scan on public.t3
+                                                   Output: t3.a, t3.b, t3.c, (2 * t3.b)
+                                                   Distribute Key: t3.a
+                                                   Filter: ((2 * (2 * t3.b)) < 50)
+(49 rows)
+
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where t1.b < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+ a  | b  | c  | a  | b  | c  | a  | b  | c  
+----+----+----+----+----+----+----+----+----
+ 22 |  8 |    | -6 |  4 | 53 | 76 |  2 |   
+ 22 |  8 |    | 73 |  4 | 44 | 76 |  2 |   
+ 46 | 24 | 60 | 30 | 12 | 14 | 23 |  6 | 13
+ 54 |  8 | 18 | -6 |  4 | 53 | 76 |  2 |   
+ 54 |  8 | 18 | 73 |  4 | 44 | 76 |  2 |   
+ 72 | 48 | 91 |  8 | 24 | 11 | 51 | 12 |   
+ 72 | 48 | 91 | 41 | 24 | 51 | 51 | 12 |   
+(7 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where t2.b < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         ->  Hash Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+               Hash Cond: (t1.b = ((2 * t2.b)))
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+               ->  Hash
+                     Output: t2.a, t2.b, t2.c, t3.a, t3.b, t3.c, ((2 * t2.b))
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c, t3.a, t3.b, t3.c, ((2 * t2.b))
+                           Distribute Key: ((2 * t2.b))
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Hash Join
+                                 Output: t2.a, t2.b, t2.c, t3.a, t3.b, t3.c, (2 * t2.b)
+                                 Hash Cond: (t2.b = ((2 * t3.b)))
+                                 ->  Streaming(type: REDISTRIBUTE)
+                                       Output: t2.a, t2.b, t2.c
+                                       Distribute Key: t2.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on public.t2
+                                             Output: t2.a, t2.b, t2.c
+                                             Distribute Key: t2.a
+                                             Filter: (t2.b < 50)
+                                 ->  Hash
+                                       Output: t3.a, t3.b, t3.c, ((2 * t3.b))
+                                       ->  Streaming(type: REDISTRIBUTE)
+                                             Output: t3.a, t3.b, t3.c, ((2 * t3.b))
+                                             Distribute Key: ((2 * t3.b))
+                                             Spawn on: All datanodes
+                                             Consumer Nodes: All datanodes
+                                             ->  Seq Scan on public.t3
+                                                   Output: t3.a, t3.b, t3.c, (2 * t3.b)
+                                                   Distribute Key: t3.a
+                                                   Filter: ((2 * t3.b) < 50)
+(48 rows)
+
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where t2.b < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+ a  | b  | c  | a  | b  | c  | a  | b  |  c  
+----+----+----+----+----+----+----+----+-----
+ -8 | 84 | 44 | 72 | 42 | 52 |  6 | 21 |  14
+ -8 | 96 | 20 |  8 | 48 |  5 | 37 | 24 |  37
+ -8 | 96 | 20 | 69 | 48 | 38 | 37 | 24 |  37
+ 22 |  8 |    | -6 |  4 | 53 | 76 |  2 |    
+ 22 |  8 |    | 73 |  4 | 44 | 76 |  2 |    
+ 35 | 80 |  2 | 37 | 40 | 65 | 98 | 20 | 100
+ 46 | 24 | 60 | 30 | 12 | 14 | 23 |  6 |  13
+ 46 | 60 | 25 |  5 | 30 | 68 | 31 | 15 |  61
+ 46 | 60 | 25 |  5 | 30 | 68 | 52 | 15 |   6
+ 46 | 60 | 25 | 29 | 30 | 38 | 31 | 15 |  61
+ 46 | 60 | 25 | 29 | 30 | 38 | 52 | 15 |   6
+ 54 |  8 | 18 | -6 |  4 | 53 | 76 |  2 |    
+ 54 |  8 | 18 | 73 |  4 | 44 | 76 |  2 |    
+ 55 | 84 | 62 | 72 | 42 | 52 |  6 | 21 |  14
+ 60 | 84 | 99 | 72 | 42 | 52 |  6 | 21 |  14
+ 72 | 48 | 91 |  8 | 24 | 11 | 51 | 12 |    
+ 72 | 48 | 91 | 41 | 24 | 51 | 51 | 12 |    
+ 72 | 52 | 45 | 88 | 26 | 80 | -6 | 13 |  53
+(18 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where t1.b in (8, 84, 80, 24, 48) order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         ->  Hash Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+               Hash Cond: (((2 * t2.b)) = t1.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t2.a, t2.b, t2.c, t3.a, t3.b, t3.c, ((2 * t2.b))
+                     Distribute Key: ((2 * t2.b))
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Nested Loop
+                           Output: t2.a, t2.b, t2.c, t3.a, t3.b, t3.c, (2 * t2.b)
+                           Join Filter: (t2.b = ((2 * t3.b)))
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: t3.a, t3.b, t3.c, ((2 * t3.b))
+                                 Distribute Key: ((2 * t3.b))
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on public.t3
+                                       Output: t3.a, t3.b, t3.c, (2 * t3.b)
+                                       Distribute Key: t3.a
+                                       Filter: ((2 * (2 * t3.b)) = ANY ('{8,84,80,24,48}'::integer[]))
+                           ->  Materialize
+                                 Output: t2.a, t2.b, t2.c
+                                 ->  Streaming(type: REDISTRIBUTE)
+                                       Output: t2.a, t2.b, t2.c
+                                       Distribute Key: t2.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on public.t2
+                                             Output: t2.a, t2.b, t2.c
+                                             Distribute Key: t2.a
+                                             Filter: ((2 * t2.b) = ANY ('{8,84,80,24,48}'::integer[]))
+               ->  Hash
+                     Output: t1.a, t1.b, t1.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t1
+                                 Output: t1.a, t1.b, t1.c
+                                 Distribute Key: t1.a
+                                 Filter: (t1.b = ANY ('{8,84,80,24,48}'::integer[]))
+(49 rows)
+
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where t1.b in (8, 84, 80, 24, 48) order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+ a  | b  | c  | a  | b  | c  | a  | b  |  c  
+----+----+----+----+----+----+----+----+-----
+ -8 | 84 | 44 | 72 | 42 | 52 |  6 | 21 |  14
+ 22 |  8 |    | -6 |  4 | 53 | 76 |  2 |    
+ 22 |  8 |    | 73 |  4 | 44 | 76 |  2 |    
+ 35 | 80 |  2 | 37 | 40 | 65 | 98 | 20 | 100
+ 46 | 24 | 60 | 30 | 12 | 14 | 23 |  6 |  13
+ 54 |  8 | 18 | -6 |  4 | 53 | 76 |  2 |    
+ 54 |  8 | 18 | 73 |  4 | 44 | 76 |  2 |    
+ 55 | 84 | 62 | 72 | 42 | 52 |  6 | 21 |  14
+ 60 | 84 | 99 | 72 | 42 | 52 |  6 | 21 |  14
+ 72 | 48 | 91 |  8 | 24 | 11 | 51 | 12 |    
+ 72 | 48 | 91 | 41 | 24 | 51 | 51 | 12 |    
+(11 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t3.b = t2.b where t2.b = 2 or t2.b = 3 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.c
+         ->  Nested Loop
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+               Join Filter: (t1.b = t3.b)
+               ->  Nested Loop
+                     Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+                     Join Filter: (t1.b = t2.b)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.a
+                                 Filter: ((t2.b = 2) OR (t2.b = 3))
+                     ->  Materialize
+                           Output: t1.a, t1.b, t1.c
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: t1.a, t1.b, t1.c
+                                 Distribute Key: t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on public.t1
+                                       Output: t1.a, t1.b, t1.c
+                                       Distribute Key: t1.a
+                                       Filter: ((t1.b = 2) OR (t1.b = 3))
+               ->  Materialize
+                     Output: t3.a, t3.b, t3.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t3.a, t3.b, t3.c
+                           Distribute Key: t3.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t3
+                                 Output: t3.a, t3.b, t3.c
+                                 Distribute Key: t3.a
+                                 Filter: ((t3.b = 2) OR (t3.b = 3))
+(44 rows)
+
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t3.b = t2.b where t2.b = 2 or t2.b = 3 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+ a  | b | c  | a  | b | c  | a  | b | c  
+----+---+----+----+---+----+----+---+----
+ -1 | 3 | 97 | 63 | 3 | 20 | 20 | 3 | 49
+ -1 | 3 | 97 | 80 | 3 | 53 | 20 | 3 | 49
+  0 | 2 | 99 | 51 | 2 | 17 | 76 | 2 |   
+  0 | 2 | 99 | 77 | 2 | 48 | 76 | 2 |   
+ 93 | 3 |    | 63 | 3 | 20 | 20 | 3 | 49
+ 93 | 3 |    | 80 | 3 | 53 | 20 | 3 | 49
+(6 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where abs(t2.b) < 50 order by 1, 2, 3, 4, 5, 6;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+         ->  Hash Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Hash Cond: (t1.b = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+                           Filter: (abs(t1.b) < 50)
+               ->  Hash
+                     Output: t2.a, t2.b, t2.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.a
+                                 Filter: (abs(t2.b) < 50)
+(30 rows)
+
+select * from t1 inner join t2 on t1.b = t2.b where abs(t2.b) < 50 order by 1, 2, 3, 4, 5, 6;
+  a  | b  | c  |  a  | b  | c  
+-----+----+----+-----+----+----
+ -11 | 31 | 88 |  51 | 31 | 35
+ -11 | 31 | 88 |  53 | 31 | 39
+  -6 | 41 | 10 |  54 | 41 |  3
+  -6 | 41 | 10 |  58 | 41 |   
+  -2 |  5 | 70 |   4 |  5 | 11
+  -2 |  5 | 70 |  45 |  5 |  0
+  -2 |  5 | 70 |  76 |  5 |   
+  -1 |  3 | 97 |  63 |  3 | 20
+  -1 |  3 | 97 |  80 |  3 | 53
+   0 |  2 | 99 |  51 |  2 | 17
+   0 |  2 | 99 |  77 |  2 | 48
+   9 |  7 | 66 |  37 |  7 | 65
+  10 | 40 | 30 |  37 | 40 | 65
+  12 | 33 |    |   5 | 33 | 58
+  17 | 13 | 83 | -10 | 13 | 39
+  17 | 13 | 83 |  23 | 13 | 22
+  20 | 26 | 80 |  88 | 26 | 80
+  21 | 33 | 96 |   5 | 33 | 58
+  29 |  4 | 75 |  -6 |  4 | 53
+  29 |  4 | 75 |  73 |  4 | 44
+  29 | 10 |    | -11 | 10 | 88
+  29 | 11 | 47 |  97 | 11 | 61
+  34 |  5 | 57 |   4 |  5 | 11
+  34 |  5 | 57 |  45 |  5 |  0
+  34 |  5 | 57 |  76 |  5 |   
+  34 | 42 | 85 |  72 | 42 | 52
+  37 | 27 |  5 |  28 | 27 | 71
+  37 | 27 |  5 |  75 | 27 | 22
+  44 | 27 |    |  28 | 27 | 71
+  44 | 27 |    |  75 | 27 | 22
+  46 | 24 | 60 |   8 | 24 | 11
+  46 | 24 | 60 |  41 | 24 | 51
+  48 | 26 | 80 |  88 | 26 | 80
+  49 | 23 | 52 |  49 | 23 | 94
+  49 | 23 | 52 |  79 | 23 | 43
+  56 | 38 | 64 |  78 | 38 | 84
+  61 | 15 | 11 |  24 | 15 | 57
+  63 | 36 | 46 |  64 | 36 | 39
+  63 | 36 | 46 |  65 | 36 | 96
+  64 | 39 | 18 |  75 | 39 | 35
+  67 | 30 | 49 |   5 | 30 | 68
+  67 | 30 | 49 |  29 | 30 | 38
+  71 | 30 |    |   5 | 30 | 68
+  71 | 30 |    |  29 | 30 | 38
+  71 | 41 |  9 |  54 | 41 |  3
+  71 | 41 |  9 |  58 | 41 |   
+  72 | 35 |    |  13 | 35 | 26
+  72 | 35 |    |  49 | 35 | 33
+  72 | 48 | 91 |   8 | 48 |  5
+  72 | 48 | 91 |  69 | 48 | 38
+  77 | 38 | 48 |  78 | 38 | 84
+  79 | 26 | 31 |  88 | 26 | 80
+  79 | 39 | 85 |  75 | 39 | 35
+  89 | 36 | 13 |  64 | 36 | 39
+  89 | 36 | 13 |  65 | 36 | 96
+  93 |  3 |    |  63 |  3 | 20
+  93 |  3 |    |  80 |  3 | 53
+(57 rows)
+
+explain (verbose on, costs off)
+select * from (select t1.* from t1 inner join t2 on t1.b = t2.b) t where abs(t.b) < 50 order by 1, 2, 3;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c
+   Merge Sort Key: t1.a, t1.b, t1.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c
+         Sort Key: t1.a, t1.b, t1.c
+         ->  Hash Join
+               Output: t1.a, t1.b, t1.c
+               Hash Cond: (t1.b = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+                           Filter: (abs(t1.b) < 50)
+               ->  Hash
+                     Output: t2.b
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.b
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.b
+                                 Distribute Key: t2.a
+                                 Filter: (abs(t2.b) < 50)
+(30 rows)
+
+select * from (select t1.* from t1 inner join t2 on t1.b = t2.b) t where abs(t.b) < 50 order by 1, 2, 3;
+  a  | b  | c  
+-----+----+----
+ -11 | 31 | 88
+ -11 | 31 | 88
+  -6 | 41 | 10
+  -6 | 41 | 10
+  -2 |  5 | 70
+  -2 |  5 | 70
+  -2 |  5 | 70
+  -1 |  3 | 97
+  -1 |  3 | 97
+   0 |  2 | 99
+   0 |  2 | 99
+   9 |  7 | 66
+  10 | 40 | 30
+  12 | 33 |   
+  17 | 13 | 83
+  17 | 13 | 83
+  20 | 26 | 80
+  21 | 33 | 96
+  29 |  4 | 75
+  29 |  4 | 75
+  29 | 10 |   
+  29 | 11 | 47
+  34 |  5 | 57
+  34 |  5 | 57
+  34 |  5 | 57
+  34 | 42 | 85
+  37 | 27 |  5
+  37 | 27 |  5
+  44 | 27 |   
+  44 | 27 |   
+  46 | 24 | 60
+  46 | 24 | 60
+  48 | 26 | 80
+  49 | 23 | 52
+  49 | 23 | 52
+  56 | 38 | 64
+  61 | 15 | 11
+  63 | 36 | 46
+  63 | 36 | 46
+  64 | 39 | 18
+  67 | 30 | 49
+  67 | 30 | 49
+  71 | 30 |   
+  71 | 30 |   
+  71 | 41 |  9
+  71 | 41 |  9
+  72 | 35 |   
+  72 | 35 |   
+  72 | 48 | 91
+  72 | 48 | 91
+  77 | 38 | 48
+  79 | 26 | 31
+  79 | 39 | 85
+  89 | 36 | 13
+  89 | 36 | 13
+  93 |  3 |   
+  93 |  3 |   
+(57 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where abs(t2.b) = 71 or abs(t2.b) = 39 order by 1, 2, 3, 4, 5, 6;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+         ->  Nested Loop
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Join Filter: (t1.b = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+                           Filter: ((abs(t1.b) = 71) OR (abs(t1.b) = 39))
+               ->  Materialize
+                     Output: t2.a, t2.b, t2.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.a
+                                 Filter: ((abs(t2.b) = 71) OR (abs(t2.b) = 39))
+(30 rows)
+
+select * from t1 inner join t2 on t1.b = t2.b where abs(t2.b) = 71 or abs(t2.b) = 39 order by 1, 2, 3, 4, 5, 6;
+ a  | b  | c  | a  | b  | c  
+----+----+----+----+----+----
+ 64 | 39 | 18 | 75 | 39 | 35
+ 79 | 39 | 85 | 75 | 39 | 35
+ 91 | 71 | 49 |  5 | 71 | 29
+ 91 | 71 | 49 | 74 | 71 | 56
+ 95 | 71 |  2 |  5 | 71 | 29
+ 95 | 71 |  2 | 74 | 71 | 56
+(6 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where abs(t2.b) in (71, 39) order by 1, 2, 3, 4, 5, 6;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+         ->  Nested Loop
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Join Filter: (t1.b = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+                           Filter: (abs(t1.b) = ANY ('{71,39}'::integer[]))
+               ->  Materialize
+                     Output: t2.a, t2.b, t2.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.a
+                                 Filter: (abs(t2.b) = ANY ('{71,39}'::integer[]))
+(30 rows)
+
+select * from t1 inner join t2 on t1.b = t2.b where abs(t2.b) in (71, 39) order by 1, 2, 3, 4, 5, 6;
+ a  | b  | c  | a  | b  | c  
+----+----+----+----+----+----
+ 64 | 39 | 18 | 75 | 39 | 35
+ 79 | 39 | 85 | 75 | 39 | 35
+ 91 | 71 | 49 |  5 | 71 | 29
+ 91 | 71 | 49 | 74 | 71 | 56
+ 95 | 71 |  2 |  5 | 71 | 29
+ 95 | 71 |  2 | 74 | 71 | 56
+(6 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b+ t1.a = t2.b where abs(t1.b + t1.a) < 50 order by 1, 2, 3, 4, 5, 6;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         ->  Hash Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Hash Cond: (((t1.b + t1.a)) = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c, ((t1.b + t1.a))
+                     Distribute Key: ((t1.b + t1.a))
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c, (t1.b + t1.a)
+                           Distribute Key: t1.a
+                           Filter: (abs((t1.b + t1.a)) < 50)
+               ->  Hash
+                     Output: t2.a, t2.b, t2.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.a
+                                 Filter: (abs(t2.b) < 50)
+(30 rows)
+
+select * from t1 inner join t2 on t1.b+ t1.a = t2.b where abs(t1.b + t1.a) < 50 order by 1, 2, 3, 4, 5, 6;
+ a  | b  | c  | a  | b  | c  
+----+----+----+----+----+----
+ -6 | 41 | 10 | 13 | 35 | 26
+ -6 | 41 | 10 | 49 | 35 | 33
+ -2 |  5 | 70 | 63 |  3 | 20
+ -2 |  5 | 70 | 80 |  3 | 53
+ -1 |  3 | 97 | 51 |  2 | 17
+ -1 |  3 | 97 | 77 |  2 | 48
+  0 |  2 | 99 | 51 |  2 | 17
+  0 |  2 | 99 | 77 |  2 | 48
+  4 | 34 | 28 | 78 | 38 | 84
+ 12 | 33 |    |  3 | 45 | 18
+ 12 | 33 |    | 54 | 45 |   
+ 17 | 13 | 83 |  5 | 30 | 68
+ 17 | 13 | 83 | 29 | 30 | 38
+ 22 |  8 |    |  5 | 30 | 68
+ 22 |  8 |    | 29 | 30 | 38
+ 29 |  4 | 75 |  5 | 33 | 58
+ 29 | 10 |    | 75 | 39 | 35
+ 29 | 11 | 47 | 37 | 40 | 65
+ 34 |  5 | 57 | 75 | 39 | 35
+(19 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t2.b = t3.b where abs(t2.b) < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.c
+         ->  Nested Loop
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+               Join Filter: (t1.b = t3.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t3.a, t3.b, t3.c
+                     Distribute Key: t3.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t3
+                           Output: t3.a, t3.b, t3.c
+                           Distribute Key: t3.a
+                           Filter: (abs(t3.b) < 50)
+               ->  Materialize
+                     Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+                     ->  Hash Join
+                           Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+                           Hash Cond: (t1.b = t2.b)
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: t1.a, t1.b, t1.c
+                                 Distribute Key: t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on public.t1
+                                       Output: t1.a, t1.b, t1.c
+                                       Distribute Key: t1.a
+                                       Filter: (abs(t1.b) < 50)
+                           ->  Hash
+                                 Output: t2.a, t2.b, t2.c
+                                 ->  Streaming(type: REDISTRIBUTE)
+                                       Output: t2.a, t2.b, t2.c
+                                       Distribute Key: t2.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on public.t2
+                                             Output: t2.a, t2.b, t2.c
+                                             Distribute Key: t2.a
+                                             Filter: (abs(t2.b) < 50)
+(44 rows)
+
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t2.b = t3.b where abs(t2.b) < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+ a  | b  | c  |  a  | b  | c  |  a  | b  | c  
+----+----+----+-----+----+----+-----+----+----
+ -1 |  3 | 97 |  63 |  3 | 20 |  20 |  3 | 49
+ -1 |  3 | 97 |  80 |  3 | 53 |  20 |  3 | 49
+  0 |  2 | 99 |  51 |  2 | 17 |  76 |  2 |   
+  0 |  2 | 99 |  77 |  2 | 48 |  76 |  2 |   
+  9 |  7 | 66 |  37 |  7 | 65 |  -5 |  7 | 50
+  9 |  7 | 66 |  37 |  7 | 65 |  -3 |  7 | 64
+  9 |  7 | 66 |  37 |  7 | 65 |  88 |  7 | 71
+ 17 | 13 | 83 | -10 | 13 | 39 |  -6 | 13 | 53
+ 17 | 13 | 83 |  23 | 13 | 22 |  -6 | 13 | 53
+ 20 | 26 | 80 |  88 | 26 | 80 |  37 | 26 | 15
+ 29 | 10 |    | -11 | 10 | 88 |  87 | 10 |  2
+ 29 | 11 | 47 |  97 | 11 | 61 |  17 | 11 | 34
+ 34 | 42 | 85 |  72 | 42 | 52 |  62 | 42 | 96
+ 34 | 42 | 85 |  72 | 42 | 52 |  71 | 42 | 29
+ 37 | 27 |  5 |  28 | 27 | 71 |   3 | 27 | 46
+ 37 | 27 |  5 |  28 | 27 | 71 |  42 | 27 | 56
+ 37 | 27 |  5 |  28 | 27 | 71 |  69 | 27 | 77
+ 37 | 27 |  5 |  75 | 27 | 22 |   3 | 27 | 46
+ 37 | 27 |  5 |  75 | 27 | 22 |  42 | 27 | 56
+ 37 | 27 |  5 |  75 | 27 | 22 |  69 | 27 | 77
+ 44 | 27 |    |  28 | 27 | 71 |   3 | 27 | 46
+ 44 | 27 |    |  28 | 27 | 71 |  42 | 27 | 56
+ 44 | 27 |    |  28 | 27 | 71 |  69 | 27 | 77
+ 44 | 27 |    |  75 | 27 | 22 |   3 | 27 | 46
+ 44 | 27 |    |  75 | 27 | 22 |  42 | 27 | 56
+ 44 | 27 |    |  75 | 27 | 22 |  69 | 27 | 77
+ 46 | 24 | 60 |   8 | 24 | 11 |  37 | 24 | 37
+ 46 | 24 | 60 |  41 | 24 | 51 |  37 | 24 | 37
+ 48 | 26 | 80 |  88 | 26 | 80 |  37 | 26 | 15
+ 49 | 23 | 52 |  49 | 23 | 94 |  99 | 23 | 50
+ 49 | 23 | 52 |  79 | 23 | 43 |  99 | 23 | 50
+ 56 | 38 | 64 |  78 | 38 | 84 | -10 | 38 | 45
+ 61 | 15 | 11 |  24 | 15 | 57 |  31 | 15 | 61
+ 61 | 15 | 11 |  24 | 15 | 57 |  52 | 15 |  6
+ 64 | 39 | 18 |  75 | 39 | 35 |  80 | 39 | 66
+ 67 | 30 | 49 |   5 | 30 | 68 |  32 | 30 | 72
+ 67 | 30 | 49 |  29 | 30 | 38 |  32 | 30 | 72
+ 71 | 30 |    |   5 | 30 | 68 |  32 | 30 | 72
+ 71 | 30 |    |  29 | 30 | 38 |  32 | 30 | 72
+ 72 | 48 | 91 |   8 | 48 |  5 |   7 | 48 |  5
+ 72 | 48 | 91 |   8 | 48 |  5 |  64 | 48 | 93
+ 72 | 48 | 91 |  69 | 48 | 38 |   7 | 48 |  5
+ 72 | 48 | 91 |  69 | 48 | 38 |  64 | 48 | 93
+ 77 | 38 | 48 |  78 | 38 | 84 | -10 | 38 | 45
+ 79 | 26 | 31 |  88 | 26 | 80 |  37 | 26 | 15
+ 79 | 39 | 85 |  75 | 39 | 35 |  80 | 39 | 66
+ 93 |  3 |    |  63 |  3 | 20 |  20 |  3 | 49
+ 93 |  3 |    |  80 |  3 | 53 |  20 |  3 | 49
+(48 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where abs(t1.b) < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         ->  Hash Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+               Hash Cond: (t1.b = ((2 * t2.b)))
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+                           Filter: (abs(t1.b) < 50)
+               ->  Hash
+                     Output: t2.a, t2.b, t2.c, t3.a, t3.b, t3.c, ((2 * t2.b))
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c, t3.a, t3.b, t3.c, ((2 * t2.b))
+                           Distribute Key: ((2 * t2.b))
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Hash Join
+                                 Output: t2.a, t2.b, t2.c, t3.a, t3.b, t3.c, (2 * t2.b)
+                                 Hash Cond: (t2.b = ((2 * t3.b)))
+                                 ->  Streaming(type: REDISTRIBUTE)
+                                       Output: t2.a, t2.b, t2.c
+                                       Distribute Key: t2.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on public.t2
+                                             Output: t2.a, t2.b, t2.c
+                                             Distribute Key: t2.a
+                                             Filter: (abs((2 * t2.b)) < 50)
+                                 ->  Hash
+                                       Output: t3.a, t3.b, t3.c, ((2 * t3.b))
+                                       ->  Streaming(type: REDISTRIBUTE)
+                                             Output: t3.a, t3.b, t3.c, ((2 * t3.b))
+                                             Distribute Key: ((2 * t3.b))
+                                             Spawn on: All datanodes
+                                             Consumer Nodes: All datanodes
+                                             ->  Seq Scan on public.t3
+                                                   Output: t3.a, t3.b, t3.c, (2 * t3.b)
+                                                   Distribute Key: t3.a
+                                                   Filter: (abs((2 * (2 * t3.b))) < 50)
+(49 rows)
+
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where abs(t1.b) < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+ a  | b  | c  | a  | b  | c  | a  | b  | c  
+----+----+----+----+----+----+----+----+----
+ 22 |  8 |    | -6 |  4 | 53 | 76 |  2 |   
+ 22 |  8 |    | 73 |  4 | 44 | 76 |  2 |   
+ 46 | 24 | 60 | 30 | 12 | 14 | 23 |  6 | 13
+ 54 |  8 | 18 | -6 |  4 | 53 | 76 |  2 |   
+ 54 |  8 | 18 | 73 |  4 | 44 | 76 |  2 |   
+ 72 | 48 | 91 |  8 | 24 | 11 | 51 | 12 |   
+ 72 | 48 | 91 | 41 | 24 | 51 | 51 | 12 |   
+(7 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where abs(t2.b) < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         ->  Hash Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+               Hash Cond: (t1.b = ((2 * t2.b)))
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+               ->  Hash
+                     Output: t2.a, t2.b, t2.c, t3.a, t3.b, t3.c, ((2 * t2.b))
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c, t3.a, t3.b, t3.c, ((2 * t2.b))
+                           Distribute Key: ((2 * t2.b))
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Hash Join
+                                 Output: t2.a, t2.b, t2.c, t3.a, t3.b, t3.c, (2 * t2.b)
+                                 Hash Cond: (t2.b = ((2 * t3.b)))
+                                 ->  Streaming(type: REDISTRIBUTE)
+                                       Output: t2.a, t2.b, t2.c
+                                       Distribute Key: t2.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on public.t2
+                                             Output: t2.a, t2.b, t2.c
+                                             Distribute Key: t2.a
+                                             Filter: (abs(t2.b) < 50)
+                                 ->  Hash
+                                       Output: t3.a, t3.b, t3.c, ((2 * t3.b))
+                                       ->  Streaming(type: REDISTRIBUTE)
+                                             Output: t3.a, t3.b, t3.c, ((2 * t3.b))
+                                             Distribute Key: ((2 * t3.b))
+                                             Spawn on: All datanodes
+                                             Consumer Nodes: All datanodes
+                                             ->  Seq Scan on public.t3
+                                                   Output: t3.a, t3.b, t3.c, (2 * t3.b)
+                                                   Distribute Key: t3.a
+                                                   Filter: (abs((2 * t3.b)) < 50)
+(48 rows)
+
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where abs(t2.b) < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+ a  | b  | c  | a  | b  | c  | a  | b  |  c  
+----+----+----+----+----+----+----+----+-----
+ -8 | 84 | 44 | 72 | 42 | 52 |  6 | 21 |  14
+ -8 | 96 | 20 |  8 | 48 |  5 | 37 | 24 |  37
+ -8 | 96 | 20 | 69 | 48 | 38 | 37 | 24 |  37
+ 22 |  8 |    | -6 |  4 | 53 | 76 |  2 |    
+ 22 |  8 |    | 73 |  4 | 44 | 76 |  2 |    
+ 35 | 80 |  2 | 37 | 40 | 65 | 98 | 20 | 100
+ 46 | 24 | 60 | 30 | 12 | 14 | 23 |  6 |  13
+ 46 | 60 | 25 |  5 | 30 | 68 | 31 | 15 |  61
+ 46 | 60 | 25 |  5 | 30 | 68 | 52 | 15 |   6
+ 46 | 60 | 25 | 29 | 30 | 38 | 31 | 15 |  61
+ 46 | 60 | 25 | 29 | 30 | 38 | 52 | 15 |   6
+ 54 |  8 | 18 | -6 |  4 | 53 | 76 |  2 |    
+ 54 |  8 | 18 | 73 |  4 | 44 | 76 |  2 |    
+ 55 | 84 | 62 | 72 | 42 | 52 |  6 | 21 |  14
+ 60 | 84 | 99 | 72 | 42 | 52 |  6 | 21 |  14
+ 72 | 48 | 91 |  8 | 24 | 11 | 51 | 12 |    
+ 72 | 48 | 91 | 41 | 24 | 51 | 51 | 12 |    
+ 72 | 52 | 45 | 88 | 26 | 80 | -6 | 13 |  53
+(18 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where abs(t1.b) in (8, 24, 48, 52, 84) order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+                                                 QUERY PLAN                                                 
+------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         ->  Hash Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+               Hash Cond: (((2 * t2.b)) = t1.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t2.a, t2.b, t2.c, t3.a, t3.b, t3.c, ((2 * t2.b))
+                     Distribute Key: ((2 * t2.b))
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Nested Loop
+                           Output: t2.a, t2.b, t2.c, t3.a, t3.b, t3.c, (2 * t2.b)
+                           Join Filter: (t2.b = ((2 * t3.b)))
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: t3.a, t3.b, t3.c, ((2 * t3.b))
+                                 Distribute Key: ((2 * t3.b))
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on public.t3
+                                       Output: t3.a, t3.b, t3.c, (2 * t3.b)
+                                       Distribute Key: t3.a
+                                       Filter: (abs((2 * (2 * t3.b))) = ANY ('{8,24,48,52,84}'::integer[]))
+                           ->  Materialize
+                                 Output: t2.a, t2.b, t2.c
+                                 ->  Streaming(type: REDISTRIBUTE)
+                                       Output: t2.a, t2.b, t2.c
+                                       Distribute Key: t2.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on public.t2
+                                             Output: t2.a, t2.b, t2.c
+                                             Distribute Key: t2.a
+                                             Filter: (abs((2 * t2.b)) = ANY ('{8,24,48,52,84}'::integer[]))
+               ->  Hash
+                     Output: t1.a, t1.b, t1.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t1
+                                 Output: t1.a, t1.b, t1.c
+                                 Distribute Key: t1.a
+                                 Filter: (abs(t1.b) = ANY ('{8,24,48,52,84}'::integer[]))
+(49 rows)
+
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where abs(t1.b) in (8, 24, 48, 52, 84) order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+ a  | b  | c  | a  | b  | c  | a  | b  | c  
+----+----+----+----+----+----+----+----+----
+ -8 | 84 | 44 | 72 | 42 | 52 |  6 | 21 | 14
+ 22 |  8 |    | -6 |  4 | 53 | 76 |  2 |   
+ 22 |  8 |    | 73 |  4 | 44 | 76 |  2 |   
+ 46 | 24 | 60 | 30 | 12 | 14 | 23 |  6 | 13
+ 54 |  8 | 18 | -6 |  4 | 53 | 76 |  2 |   
+ 54 |  8 | 18 | 73 |  4 | 44 | 76 |  2 |   
+ 55 | 84 | 62 | 72 | 42 | 52 |  6 | 21 | 14
+ 60 | 84 | 99 | 72 | 42 | 52 |  6 | 21 | 14
+ 72 | 48 | 91 |  8 | 24 | 11 | 51 | 12 |   
+ 72 | 48 | 91 | 41 | 24 | 51 | 51 | 12 |   
+ 72 | 52 | 45 | 88 | 26 | 80 | -6 | 13 | 53
+(11 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where abs(t2.b) = 71 order by 1, 2, 3, 4, 5, 6;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+         ->  Nested Loop
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Join Filter: (t1.b = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+                           Filter: (abs(t1.b) = 71)
+               ->  Materialize
+                     Output: t2.a, t2.b, t2.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.a
+                                 Filter: (abs(t2.b) = 71)
+(30 rows)
+
+select * from t1 inner join t2 on t1.b = t2.b where abs(t2.b) = 71 order by 1, 2, 3, 4, 5, 6;
+ a  | b  | c  | a  | b  | c  
+----+----+----+----+----+----
+ 91 | 71 | 49 |  5 | 71 | 29
+ 91 | 71 | 49 | 74 | 71 | 56
+ 95 | 71 |  2 |  5 | 71 | 29
+ 95 | 71 |  2 | 74 | 71 | 56
+(4 rows)
+
+explain (verbose on, costs off)
+select * from (select t2.* from t1 inner join t2 on t1.b = t2.b) t where abs(t.b) = 71 order by 1, 2, 3;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t2.a, t2.b, t2.c
+   Merge Sort Key: t2.a, t2.b, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t2.a, t2.b, t2.c
+         Sort Key: t2.a, t2.b, t2.c
+         ->  Nested Loop
+               Output: t2.a, t2.b, t2.c
+               Join Filter: (t1.b = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.b
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.b
+                           Distribute Key: t1.a
+                           Filter: (abs(t1.b) = 71)
+               ->  Materialize
+                     Output: t2.a, t2.b, t2.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.a
+                                 Filter: (abs(t2.b) = 71)
+(30 rows)
+
+select * from (select t2.* from t1 inner join t2 on t1.b = t2.b) t where abs(t.b) = 71 order by 1, 2, 3;
+ a  | b  | c  
+----+----+----
+  5 | 71 | 29
+  5 | 71 | 29
+ 74 | 71 | 56
+ 74 | 71 | 56
+(4 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b::float = t2.b where abs(t2.b::float) = 71 order by 1, 2, 3, 4, 5, 6;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         ->  Nested Loop
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Join Filter: (((t1.b)::double precision) = ((t2.b)::double precision))
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c, ((t1.b)::double precision)
+                     Distribute Key: ((t1.b)::double precision)
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c, (t1.b)::double precision
+                           Distribute Key: t1.a
+                           Filter: (abs((t1.b)::double precision) = 71::double precision)
+               ->  Materialize
+                     Output: t2.a, t2.b, t2.c, ((t2.b)::double precision)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c, ((t2.b)::double precision)
+                           Distribute Key: ((t2.b)::double precision)
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c, t2.b
+                                 Distribute Key: t2.a
+                                 Filter: (abs((t2.b)::double precision) = 71::double precision)
+(30 rows)
+
+select * from t1 inner join t2 on t1.b::float = t2.b where abs(t2.b::float) = 71 order by 1, 2, 3, 4, 5, 6;
+ a  | b  | c  | a  | b  | c  
+----+----+----+----+----+----
+ 91 | 71 | 49 |  5 | 71 | 29
+ 91 | 71 | 49 | 74 | 71 | 56
+ 95 | 71 |  2 |  5 | 71 | 29
+ 95 | 71 |  2 | 74 | 71 | 56
+(4 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where to_timestamp(t2.b, 'SSSSS') > '0001-01-01 00:00:50 BC' order by 1, 2, 3, 4, 5, 6;
+                                                                    QUERY PLAN                                                                    
+--------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+         ->  Hash Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Hash Cond: (t1.b = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+                           Filter: (to_timestamp((t1.b)::text, 'SSSSS'::text) > 'Sat Jan 01 00:00:50 0001 BC'::timestamp without time zone)
+               ->  Hash
+                     Output: t2.a, t2.b, t2.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.a
+                                 Filter: (to_timestamp((t2.b)::text, 'SSSSS'::text) > 'Sat Jan 01 00:00:50 0001 BC'::timestamp without time zone)
+(30 rows)
+
+select * from t1 inner join t2 on t1.b = t2.b where to_timestamp(t2.b, 'SSSSS') > '0001-01-01 00:00:50 BC' order by 1, 2, 3, 4, 5, 6;
+  a  | b  |  c  | a  | b  | c  
+-----+----+-----+----+----+----
+  -8 | 96 |  20 | 14 | 96 | 98
+   6 | 68 |  46 | 93 | 68 |   
+  34 | 66 |  74 | 23 | 66 | 26
+  34 | 66 |  74 | 40 | 66 | 28
+  35 | 80 |   2 | 15 | 80 | 78
+  46 | 68 |   6 | 93 | 68 |   
+  51 | 99 |  59 | 93 | 99 | 19
+  55 | 74 |  61 | 12 | 74 | 30
+  58 | 62 |  80 | 76 | 62 |   
+  58 | 62 |  80 | 89 | 62 | 64
+  61 | 62 |  59 | 76 | 62 |   
+  61 | 62 |  59 | 89 | 62 | 64
+  66 | 55 |  76 | 38 | 55 | 26
+  67 | 88 |  34 | 84 | 88 | 41
+  75 | 55 |  82 | 38 | 55 | 26
+  75 | 74 | 100 | 12 | 74 | 30
+  83 | 99 |  45 | 93 | 99 | 19
+  91 | 71 |  49 |  5 | 71 | 29
+  91 | 71 |  49 | 74 | 71 | 56
+  93 | 70 |  64 | -6 | 70 | 72
+  93 | 70 |  64 | 78 | 70 | 71
+  95 | 71 |   2 |  5 | 71 | 29
+  95 | 71 |   2 | 74 | 71 | 56
+  96 | 78 |  38 | 53 | 78 |   
+  96 | 78 |  38 | 78 | 78 | 26
+  96 | 78 |  38 | 78 | 78 | 82
+ 100 | 82 |  93 | 41 | 82 |   
+(27 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where greatest(t2.b, 10) = 10 order by 1, 2, 3, 4, 5, 6;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+         ->  Nested Loop
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Join Filter: (t1.b = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+                           Filter: (GREATEST(t1.b, 10) = 10)
+               ->  Materialize
+                     Output: t2.a, t2.b, t2.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.a
+                                 Filter: (GREATEST(t2.b, 10) = 10)
+(30 rows)
+
+select * from t1 inner join t2 on t1.b = t2.b where greatest(t2.b, 10) = 10 order by 1, 2, 3, 4, 5, 6;
+ a  | b  | c  |  a  | b  | c  
+----+----+----+-----+----+----
+ -2 |  5 | 70 |   4 |  5 | 11
+ -2 |  5 | 70 |  45 |  5 |  0
+ -2 |  5 | 70 |  76 |  5 |   
+ -1 |  3 | 97 |  63 |  3 | 20
+ -1 |  3 | 97 |  80 |  3 | 53
+  0 |  2 | 99 |  51 |  2 | 17
+  0 |  2 | 99 |  77 |  2 | 48
+  9 |  7 | 66 |  37 |  7 | 65
+ 29 |  4 | 75 |  -6 |  4 | 53
+ 29 |  4 | 75 |  73 |  4 | 44
+ 29 | 10 |    | -11 | 10 | 88
+ 34 |  5 | 57 |   4 |  5 | 11
+ 34 |  5 | 57 |  45 |  5 |  0
+ 34 |  5 | 57 |  76 |  5 |   
+ 93 |  3 |    |  63 |  3 | 20
+ 93 |  3 |    |  80 |  3 | 53
+(16 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t3.b = t2.b where greatest(t2.b, 20) = 20 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.c
+         ->  Nested Loop
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+               Join Filter: (t1.b = t3.b)
+               ->  Nested Loop
+                     Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+                     Join Filter: (t1.b = t2.b)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t1
+                                 Output: t1.a, t1.b, t1.c
+                                 Distribute Key: t1.a
+                                 Filter: (GREATEST(t1.b, 20) = 20)
+                     ->  Materialize
+                           Output: t2.a, t2.b, t2.c
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on public.t2
+                                       Output: t2.a, t2.b, t2.c
+                                       Distribute Key: t2.a
+                                       Filter: (GREATEST(t2.b, 20) = 20)
+               ->  Materialize
+                     Output: t3.a, t3.b, t3.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t3.a, t3.b, t3.c
+                           Distribute Key: t3.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t3
+                                 Output: t3.a, t3.b, t3.c
+                                 Distribute Key: t3.a
+                                 Filter: (GREATEST(t3.b, 20) = 20)
+(44 rows)
+
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t3.b = t2.b where greatest(t2.b, 20) = 20 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+ a  | b  | c  |  a  | b  | c  | a  | b  | c  
+----+----+----+-----+----+----+----+----+----
+ -1 |  3 | 97 |  63 |  3 | 20 | 20 |  3 | 49
+ -1 |  3 | 97 |  80 |  3 | 53 | 20 |  3 | 49
+  0 |  2 | 99 |  51 |  2 | 17 | 76 |  2 |   
+  0 |  2 | 99 |  77 |  2 | 48 | 76 |  2 |   
+  9 |  7 | 66 |  37 |  7 | 65 | -5 |  7 | 50
+  9 |  7 | 66 |  37 |  7 | 65 | -3 |  7 | 64
+  9 |  7 | 66 |  37 |  7 | 65 | 88 |  7 | 71
+ 17 | 13 | 83 | -10 | 13 | 39 | -6 | 13 | 53
+ 17 | 13 | 83 |  23 | 13 | 22 | -6 | 13 | 53
+ 29 | 10 |    | -11 | 10 | 88 | 87 | 10 |  2
+ 29 | 11 | 47 |  97 | 11 | 61 | 17 | 11 | 34
+ 61 | 15 | 11 |  24 | 15 | 57 | 31 | 15 | 61
+ 61 | 15 | 11 |  24 | 15 | 57 | 52 | 15 |  6
+ 93 |  3 |    |  63 |  3 | 20 | 20 |  3 | 49
+ 93 |  3 |    |  80 |  3 | 53 | 20 |  3 | 49
+(15 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where least(t2.b, 50) = 50 order by 1, 2, 3, 4, 5, 6;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+         ->  Nested Loop
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Join Filter: (t1.b = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+                           Filter: (LEAST(t1.b, 50) = 50)
+               ->  Materialize
+                     Output: t2.a, t2.b, t2.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.a
+                                 Filter: (LEAST(t2.b, 50) = 50)
+(30 rows)
+
+select * from t1 inner join t2 on t1.b = t2.b where least(t2.b, 50) = 50 order by 1, 2, 3, 4, 5, 6;
+  a  | b  |  c  | a  | b  | c  
+-----+----+-----+----+----+----
+  -8 | 96 |  20 | 14 | 96 | 98
+   6 | 68 |  46 | 93 | 68 |   
+  34 | 66 |  74 | 23 | 66 | 26
+  34 | 66 |  74 | 40 | 66 | 28
+  35 | 80 |   2 | 15 | 80 | 78
+  46 | 68 |   6 | 93 | 68 |   
+  51 | 99 |  59 | 93 | 99 | 19
+  55 | 74 |  61 | 12 | 74 | 30
+  58 | 62 |  80 | 76 | 62 |   
+  58 | 62 |  80 | 89 | 62 | 64
+  61 | 62 |  59 | 76 | 62 |   
+  61 | 62 |  59 | 89 | 62 | 64
+  66 | 55 |  76 | 38 | 55 | 26
+  67 | 88 |  34 | 84 | 88 | 41
+  75 | 55 |  82 | 38 | 55 | 26
+  75 | 74 | 100 | 12 | 74 | 30
+  83 | 99 |  45 | 93 | 99 | 19
+  91 | 71 |  49 |  5 | 71 | 29
+  91 | 71 |  49 | 74 | 71 | 56
+  93 | 70 |  64 | -6 | 70 | 72
+  93 | 70 |  64 | 78 | 70 | 71
+  95 | 71 |   2 |  5 | 71 | 29
+  95 | 71 |   2 | 74 | 71 | 56
+  96 | 78 |  38 | 53 | 78 |   
+  96 | 78 |  38 | 78 | 78 | 26
+  96 | 78 |  38 | 78 | 78 | 82
+ 100 | 82 |  93 | 41 | 82 |   
+(27 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t3.b = t2.b where least(t2.b, 50) = 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.c
+         ->  Nested Loop
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+               Join Filter: (t1.b = t3.b)
+               ->  Nested Loop
+                     Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+                     Join Filter: (t1.b = t2.b)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t1
+                                 Output: t1.a, t1.b, t1.c
+                                 Distribute Key: t1.a
+                                 Filter: (LEAST(t1.b, 50) = 50)
+                     ->  Materialize
+                           Output: t2.a, t2.b, t2.c
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on public.t2
+                                       Output: t2.a, t2.b, t2.c
+                                       Distribute Key: t2.a
+                                       Filter: (LEAST(t2.b, 50) = 50)
+               ->  Materialize
+                     Output: t3.a, t3.b, t3.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t3.a, t3.b, t3.c
+                           Distribute Key: t3.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t3
+                                 Output: t3.a, t3.b, t3.c
+                                 Distribute Key: t3.a
+                                 Filter: (LEAST(t3.b, 50) = 50)
+(44 rows)
+
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t3.b = t2.b where least(t2.b, 50) = 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+  a  | b  |  c  | a  | b  | c  | a  | b  | c  
+-----+----+-----+----+----+----+----+----+----
+  -8 | 96 |  20 | 14 | 96 | 98 | 61 | 96 | 83
+  34 | 66 |  74 | 23 | 66 | 26 | 84 | 66 | 45
+  34 | 66 |  74 | 40 | 66 | 28 | 84 | 66 | 45
+  55 | 74 |  61 | 12 | 74 | 30 | 31 | 74 | 49
+  58 | 62 |  80 | 76 | 62 |    | 82 | 62 | 25
+  58 | 62 |  80 | 89 | 62 | 64 | 82 | 62 | 25
+  61 | 62 |  59 | 76 | 62 |    | 82 | 62 | 25
+  61 | 62 |  59 | 89 | 62 | 64 | 82 | 62 | 25
+  66 | 55 |  76 | 38 | 55 | 26 | 47 | 55 | 92
+  67 | 88 |  34 | 84 | 88 | 41 | 20 | 88 | 80
+  67 | 88 |  34 | 84 | 88 | 41 | 56 | 88 | 42
+  67 | 88 |  34 | 84 | 88 | 41 | 79 | 88 | 13
+  75 | 55 |  82 | 38 | 55 | 26 | 47 | 55 | 92
+  75 | 74 | 100 | 12 | 74 | 30 | 31 | 74 | 49
+  96 | 78 |  38 | 53 | 78 |    | 31 | 78 | 44
+  96 | 78 |  38 | 53 | 78 |    | 57 | 78 |   
+  96 | 78 |  38 | 78 | 78 | 26 | 31 | 78 | 44
+  96 | 78 |  38 | 78 | 78 | 26 | 57 | 78 |   
+  96 | 78 |  38 | 78 | 78 | 82 | 31 | 78 | 44
+  96 | 78 |  38 | 78 | 78 | 82 | 57 | 78 |   
+ 100 | 82 |  93 | 41 | 82 |    | 65 | 82 |  3
+(21 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where dsqrt(t2.b) = 6 order by 1, 2, 3, 4, 5, 6;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+         ->  Nested Loop
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Join Filter: (t1.b = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+                           Filter: (dsqrt((t1.b)::double precision) = 6::double precision)
+               ->  Materialize
+                     Output: t2.a, t2.b, t2.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.a
+                                 Filter: (dsqrt((t2.b)::double precision) = 6::double precision)
+(30 rows)
+
+select * from t1 inner join t2 on t1.b = t2.b where dsqrt(t2.b) = 6 order by 1, 2, 3, 4, 5, 6;
+ a  | b  | c  | a  | b  | c  
+----+----+----+----+----+----
+ 63 | 36 | 46 | 64 | 36 | 39
+ 63 | 36 | 46 | 65 | 36 | 96
+ 89 | 36 | 13 | 64 | 36 | 39
+ 89 | 36 | 13 | 65 | 36 | 96
+(4 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t3.b = t2.b where floor(dsqrt(t2.b)) = 6 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.c
+         ->  Nested Loop
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+               Join Filter: (t1.b = t3.b)
+               ->  Nested Loop
+                     Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+                     Join Filter: (t1.b = t2.b)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t1
+                                 Output: t1.a, t1.b, t1.c
+                                 Distribute Key: t1.a
+                                 Filter: (floor(dsqrt((t1.b)::double precision)) = 6::double precision)
+                     ->  Materialize
+                           Output: t2.a, t2.b, t2.c
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on public.t2
+                                       Output: t2.a, t2.b, t2.c
+                                       Distribute Key: t2.a
+                                       Filter: (floor(dsqrt((t2.b)::double precision)) = 6::double precision)
+               ->  Materialize
+                     Output: t3.a, t3.b, t3.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t3.a, t3.b, t3.c
+                           Distribute Key: t3.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t3
+                                 Output: t3.a, t3.b, t3.c
+                                 Distribute Key: t3.a
+                                 Filter: (floor(dsqrt((t3.b)::double precision)) = 6::double precision)
+(44 rows)
+
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t3.b = t2.b where floor(dsqrt(t2.b)) = 6 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+ a  | b  | c  | a  | b  | c  |  a  | b  | c  
+----+----+----+----+----+----+-----+----+----
+ 34 | 42 | 85 | 72 | 42 | 52 |  62 | 42 | 96
+ 34 | 42 | 85 | 72 | 42 | 52 |  71 | 42 | 29
+ 56 | 38 | 64 | 78 | 38 | 84 | -10 | 38 | 45
+ 64 | 39 | 18 | 75 | 39 | 35 |  80 | 39 | 66
+ 72 | 48 | 91 |  8 | 48 |  5 |   7 | 48 |  5
+ 72 | 48 | 91 |  8 | 48 |  5 |  64 | 48 | 93
+ 72 | 48 | 91 | 69 | 48 | 38 |   7 | 48 |  5
+ 72 | 48 | 91 | 69 | 48 | 38 |  64 | 48 | 93
+ 77 | 38 | 48 | 78 | 38 | 84 | -10 | 38 | 45
+ 79 | 39 | 85 | 75 | 39 | 35 |  80 | 39 | 66
+(10 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b  and t1.b > 3 right join t3 on t3.b = t2.b order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.b, t3.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.b, t3.c
+         ->  Hash Right Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+               Hash Cond: (t2.b = t3.b)
+               ->  Hash Join
+                     Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+                     Hash Cond: (t1.b = t2.b)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t1
+                                 Output: t1.a, t1.b, t1.c
+                                 Distribute Key: t1.a
+                                 Filter: (t1.b > 3)
+                     ->  Hash
+                           Output: t2.a, t2.b, t2.c
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on public.t2
+                                       Output: t2.a, t2.b, t2.c
+                                       Distribute Key: t2.a
+                                       Filter: (t2.b > 3)
+               ->  Hash
+                     Output: t3.a, t3.b, t3.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t3.a, t3.b, t3.c
+                           Distribute Key: t3.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t3
+                                 Output: t3.a, t3.b, t3.c
+                                 Distribute Key: t3.a
+(43 rows)
+
+select * from t1 inner join t2 on t1.b = t2.b  and t1.b > 3 right join t3 on t3.b = t2.b order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+  a  | b  |  c  |  a  | b  | c  |  a  |  b  |  c  
+-----+----+-----+-----+----+----+-----+-----+-----
+  -8 | 96 |  20 |  14 | 96 | 98 |  61 |  96 |  83
+   9 |  7 |  66 |  37 |  7 | 65 |  -5 |   7 |  50
+   9 |  7 |  66 |  37 |  7 | 65 |  -3 |   7 |  64
+   9 |  7 |  66 |  37 |  7 | 65 |  88 |   7 |  71
+  17 | 13 |  83 | -10 | 13 | 39 |  -6 |  13 |  53
+  17 | 13 |  83 |  23 | 13 | 22 |  -6 |  13 |  53
+  20 | 26 |  80 |  88 | 26 | 80 |  37 |  26 |  15
+  29 | 10 |     | -11 | 10 | 88 |  87 |  10 |   2
+  29 | 11 |  47 |  97 | 11 | 61 |  17 |  11 |  34
+  34 | 42 |  85 |  72 | 42 | 52 |  62 |  42 |  96
+  34 | 42 |  85 |  72 | 42 | 52 |  71 |  42 |  29
+  34 | 66 |  74 |  23 | 66 | 26 |  84 |  66 |  45
+  34 | 66 |  74 |  40 | 66 | 28 |  84 |  66 |  45
+  37 | 27 |   5 |  28 | 27 | 71 |   3 |  27 |  46
+  37 | 27 |   5 |  28 | 27 | 71 |  42 |  27 |  56
+  37 | 27 |   5 |  28 | 27 | 71 |  69 |  27 |  77
+  37 | 27 |   5 |  75 | 27 | 22 |   3 |  27 |  46
+  37 | 27 |   5 |  75 | 27 | 22 |  42 |  27 |  56
+  37 | 27 |   5 |  75 | 27 | 22 |  69 |  27 |  77
+  44 | 27 |     |  28 | 27 | 71 |   3 |  27 |  46
+  44 | 27 |     |  28 | 27 | 71 |  42 |  27 |  56
+  44 | 27 |     |  28 | 27 | 71 |  69 |  27 |  77
+  44 | 27 |     |  75 | 27 | 22 |   3 |  27 |  46
+  44 | 27 |     |  75 | 27 | 22 |  42 |  27 |  56
+  44 | 27 |     |  75 | 27 | 22 |  69 |  27 |  77
+  46 | 24 |  60 |   8 | 24 | 11 |  37 |  24 |  37
+  46 | 24 |  60 |  41 | 24 | 51 |  37 |  24 |  37
+  48 | 26 |  80 |  88 | 26 | 80 |  37 |  26 |  15
+  49 | 23 |  52 |  49 | 23 | 94 |  99 |  23 |  50
+  49 | 23 |  52 |  79 | 23 | 43 |  99 |  23 |  50
+  55 | 74 |  61 |  12 | 74 | 30 |  31 |  74 |  49
+  56 | 38 |  64 |  78 | 38 | 84 | -10 |  38 |  45
+  58 | 62 |  80 |  76 | 62 |    |  82 |  62 |  25
+  58 | 62 |  80 |  89 | 62 | 64 |  82 |  62 |  25
+  61 | 15 |  11 |  24 | 15 | 57 |  31 |  15 |  61
+  61 | 15 |  11 |  24 | 15 | 57 |  52 |  15 |   6
+  61 | 62 |  59 |  76 | 62 |    |  82 |  62 |  25
+  61 | 62 |  59 |  89 | 62 | 64 |  82 |  62 |  25
+  64 | 39 |  18 |  75 | 39 | 35 |  80 |  39 |  66
+  66 | 55 |  76 |  38 | 55 | 26 |  47 |  55 |  92
+  67 | 30 |  49 |   5 | 30 | 68 |  32 |  30 |  72
+  67 | 30 |  49 |  29 | 30 | 38 |  32 |  30 |  72
+  67 | 88 |  34 |  84 | 88 | 41 |  20 |  88 |  80
+  67 | 88 |  34 |  84 | 88 | 41 |  56 |  88 |  42
+  67 | 88 |  34 |  84 | 88 | 41 |  79 |  88 |  13
+  71 | 30 |     |   5 | 30 | 68 |  32 |  30 |  72
+  71 | 30 |     |  29 | 30 | 38 |  32 |  30 |  72
+  72 | 48 |  91 |   8 | 48 |  5 |   7 |  48 |   5
+  72 | 48 |  91 |   8 | 48 |  5 |  64 |  48 |  93
+  72 | 48 |  91 |  69 | 48 | 38 |   7 |  48 |   5
+  72 | 48 |  91 |  69 | 48 | 38 |  64 |  48 |  93
+  75 | 55 |  82 |  38 | 55 | 26 |  47 |  55 |  92
+  75 | 74 | 100 |  12 | 74 | 30 |  31 |  74 |  49
+  77 | 38 |  48 |  78 | 38 | 84 | -10 |  38 |  45
+  79 | 26 |  31 |  88 | 26 | 80 |  37 |  26 |  15
+  79 | 39 |  85 |  75 | 39 | 35 |  80 |  39 |  66
+  96 | 78 |  38 |  53 | 78 |    |  31 |  78 |  44
+  96 | 78 |  38 |  53 | 78 |    |  57 |  78 |    
+  96 | 78 |  38 |  78 | 78 | 26 |  31 |  78 |  44
+  96 | 78 |  38 |  78 | 78 | 26 |  57 |  78 |    
+  96 | 78 |  38 |  78 | 78 | 82 |  31 |  78 |  44
+  96 | 78 |  38 |  78 | 78 | 82 |  57 |  78 |    
+ 100 | 82 |  93 |  41 | 82 |    |  65 |  82 |   3
+     |    |     |     |    |    |  -1 |   0 |    
+     |    |     |     |    |    |   3 |  49 |   4
+     |    |     |     |    |    |   5 |  59 |  45
+     |    |     |     |    |    |   6 |  21 |  14
+     |    |     |     |    |    |   7 |  50 |  28
+     |    |     |     |    |    |   7 |  73 |  33
+     |    |     |     |    |    |   7 |     |   8
+     |    |     |     |    |    |   8 |  90 |  88
+     |    |     |     |    |    |  13 |  92 |  52
+     |    |     |     |    |    |  15 |  17 |   3
+     |    |     |     |    |    |  17 |  46 |  62
+     |    |     |     |    |    |  20 |   3 |  49
+     |    |     |     |    |    |  20 |   9 |  81
+     |    |     |     |    |    |  20 |     |   8
+     |    |     |     |    |    |  22 |  95 |  27
+     |    |     |     |    |    |  23 |   6 |  13
+     |    |     |     |    |    |  23 |  34 |  87
+     |    |     |     |    |    |  23 |  63 |  63
+     |    |     |     |    |    |  24 |  91 |  35
+     |    |     |     |    |    |  28 |     |  97
+     |    |     |     |    |    |  29 |  52 |  43
+     |    |     |     |    |    |  30 | 100 |  64
+     |    |     |     |    |    |  31 |  61 |  27
+     |    |     |     |    |    |  33 |     |  54
+     |    |     |     |    |    |  34 |  84 |    
+     |    |     |     |    |    |  35 |  29 |  34
+     |    |     |     |    |    |  35 |  29 |  89
+     |    |     |     |    |    |  36 |  19 |  12
+     |    |     |     |    |    |  38 |  17 |  28
+     |    |     |     |    |    |  38 |  95 |    
+     |    |     |     |    |    |  47 |  69 |  75
+     |    |     |     |    |    |  48 |  75 |  61
+     |    |     |     |    |    |  51 |  12 |    
+     |    |     |     |    |    |  54 |  54 |  14
+     |    |     |     |    |    |  54 |  83 |    
+     |    |     |     |    |    |  59 |  19 |   1
+     |    |     |     |    |    |  60 |  22 |  17
+     |    |     |     |    |    |  60 |  29 |    
+     |    |     |     |    |    |  60 |  85 |  31
+     |    |     |     |    |    |  64 |  19 |  25
+     |    |     |     |    |    |  67 |  64 |  59
+     |    |     |     |    |    |  68 |   0 |  49
+     |    |     |     |    |    |  70 |  52 |  86
+     |    |     |     |    |    |  70 |  69 |  32
+     |    |     |     |    |    |  72 |  29 |  95
+     |    |     |     |    |    |  73 |   8 |    
+     |    |     |     |    |    |  73 |  79 |  31
+     |    |     |     |    |    |  73 |     |  76
+     |    |     |     |    |    |  76 |   2 |    
+     |    |     |     |    |    |  76 |  90 |  27
+     |    |     |     |    |    |  77 |   8 |  34
+     |    |     |     |    |    |  78 |  63 |  81
+     |    |     |     |    |    |  78 |     |  73
+     |    |     |     |    |    |  84 |  76 |  44
+     |    |     |     |    |    |  85 |  79 |  66
+     |    |     |     |    |    |  85 |  84 |  40
+     |    |     |     |    |    |  86 |     |  98
+     |    |     |     |    |    |  90 |  85 |   2
+     |    |     |     |    |    |  91 |  73 |  98
+     |    |     |     |    |    |  92 |  93 |  93
+     |    |     |     |    |    |  94 |  67 |  23
+     |    |     |     |    |    |  95 |  47 |  96
+     |    |     |     |    |    |  97 |  85 |  43
+     |    |     |     |    |    |  97 |  86 |  74
+     |    |     |     |    |    |  98 |  20 | 100
+     |    |     |     |    |    |  99 |     |  78
+     |    |     |     |    |    | 100 |  61 |  63
+     |    |     |     |    |    | 100 |     |  52
+(131 rows)
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b  and t1.b > 3 left join t3 on t3.c = t2.c order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.b, t3.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.b, t3.c
+         ->  Hash Left Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+               Hash Cond: (t2.c = t3.c)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+                     Distribute Key: t2.c
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Hash Join
+                           Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+                           Hash Cond: (t1.b = t2.b)
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: t1.a, t1.b, t1.c
+                                 Distribute Key: t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on public.t1
+                                       Output: t1.a, t1.b, t1.c
+                                       Distribute Key: t1.a
+                                       Filter: (t1.b > 3)
+                           ->  Hash
+                                 Output: t2.a, t2.b, t2.c
+                                 ->  Streaming(type: REDISTRIBUTE)
+                                       Output: t2.a, t2.b, t2.c
+                                       Distribute Key: t2.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on public.t2
+                                             Output: t2.a, t2.b, t2.c
+                                             Distribute Key: t2.a
+                                             Filter: (t2.b > 3)
+               ->  Hash
+                     Output: t3.a, t3.b, t3.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t3.a, t3.b, t3.c
+                           Distribute Key: t3.c
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t3
+                                 Output: t3.a, t3.b, t3.c
+                                 Distribute Key: t3.a
+(48 rows)
+
+select * from t1 inner join t2 on t1.b = t2.b  and t1.b > 3 left join t3 on t3.c = t2.c order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+  a  | b  |  c  |  a  | b  | c  |  a  |  b  | c  
+-----+----+-----+-----+----+----+-----+-----+----
+ -11 | 31 |  88 |  51 | 31 | 35 |  24 |  91 | 35
+ -11 | 31 |  88 |  53 | 31 | 39 |     |     |   
+  -8 | 96 |  20 |  14 | 96 | 98 |  86 |     | 98
+  -8 | 96 |  20 |  14 | 96 | 98 |  91 |  73 | 98
+  -6 | 41 |  10 |  54 | 41 |  3 |  15 |  17 |  3
+  -6 | 41 |  10 |  54 | 41 |  3 |  65 |  82 |  3
+  -6 | 41 |  10 |  58 | 41 |    |     |     |   
+  -2 |  5 |  70 |   4 |  5 | 11 |     |     |   
+  -2 |  5 |  70 |  45 |  5 |  0 |     |     |   
+  -2 |  5 |  70 |  76 |  5 |    |     |     |   
+   6 | 68 |  46 |  93 | 68 |    |     |     |   
+   9 |  7 |  66 |  37 |  7 | 65 |     |     |   
+  10 | 40 |  30 |  37 | 40 | 65 |     |     |   
+  12 | 33 |     |   5 | 33 | 58 |     |     |   
+  17 | 13 |  83 | -10 | 13 | 39 |     |     |   
+  17 | 13 |  83 |  23 | 13 | 22 |     |     |   
+  20 | 26 |  80 |  88 | 26 | 80 |  20 |  88 | 80
+  21 | 33 |  96 |   5 | 33 | 58 |     |     |   
+  29 |  4 |  75 |  -6 |  4 | 53 |  -6 |  13 | 53
+  29 |  4 |  75 |  73 |  4 | 44 |  31 |  78 | 44
+  29 |  4 |  75 |  73 |  4 | 44 |  84 |  76 | 44
+  29 | 10 |     | -11 | 10 | 88 |   8 |  90 | 88
+  29 | 11 |  47 |  97 | 11 | 61 |  31 |  15 | 61
+  29 | 11 |  47 |  97 | 11 | 61 |  48 |  75 | 61
+  34 |  5 |  57 |   4 |  5 | 11 |     |     |   
+  34 |  5 |  57 |  45 |  5 |  0 |     |     |   
+  34 |  5 |  57 |  76 |  5 |    |     |     |   
+  34 | 42 |  85 |  72 | 42 | 52 |  13 |  92 | 52
+  34 | 42 |  85 |  72 | 42 | 52 | 100 |     | 52
+  34 | 66 |  74 |  23 | 66 | 26 |     |     |   
+  34 | 66 |  74 |  40 | 66 | 28 |   7 |  50 | 28
+  34 | 66 |  74 |  40 | 66 | 28 |  38 |  17 | 28
+  35 | 80 |   2 |  15 | 80 | 78 |  99 |     | 78
+  37 | 27 |   5 |  28 | 27 | 71 |  88 |   7 | 71
+  37 | 27 |   5 |  75 | 27 | 22 |     |     |   
+  44 | 27 |     |  28 | 27 | 71 |  88 |   7 | 71
+  44 | 27 |     |  75 | 27 | 22 |     |     |   
+  46 | 24 |  60 |   8 | 24 | 11 |     |     |   
+  46 | 24 |  60 |  41 | 24 | 51 |     |     |   
+  46 | 68 |   6 |  93 | 68 |    |     |     |   
+  48 | 26 |  80 |  88 | 26 | 80 |  20 |  88 | 80
+  49 | 23 |  52 |  49 | 23 | 94 |     |     |   
+  49 | 23 |  52 |  79 | 23 | 43 |  29 |  52 | 43
+  49 | 23 |  52 |  79 | 23 | 43 |  97 |  85 | 43
+  51 | 99 |  59 |  93 | 99 | 19 |     |     |   
+  55 | 74 |  61 |  12 | 74 | 30 |     |     |   
+  56 | 38 |  64 |  78 | 38 | 84 |     |     |   
+  58 | 62 |  80 |  76 | 62 |    |     |     |   
+  58 | 62 |  80 |  89 | 62 | 64 |  -3 |   7 | 64
+  58 | 62 |  80 |  89 | 62 | 64 |  30 | 100 | 64
+  61 | 15 |  11 |  24 | 15 | 57 |     |     |   
+  61 | 62 |  59 |  76 | 62 |    |     |     |   
+  61 | 62 |  59 |  89 | 62 | 64 |  -3 |   7 | 64
+  61 | 62 |  59 |  89 | 62 | 64 |  30 | 100 | 64
+  63 | 36 |  46 |  64 | 36 | 39 |     |     |   
+  63 | 36 |  46 |  65 | 36 | 96 |  62 |  42 | 96
+  63 | 36 |  46 |  65 | 36 | 96 |  95 |  47 | 96
+  64 | 39 |  18 |  75 | 39 | 35 |  24 |  91 | 35
+  66 | 55 |  76 |  38 | 55 | 26 |     |     |   
+  67 | 30 |  49 |   5 | 30 | 68 |     |     |   
+  67 | 30 |  49 |  29 | 30 | 38 |     |     |   
+  67 | 88 |  34 |  84 | 88 | 41 |     |     |   
+  71 | 30 |     |   5 | 30 | 68 |     |     |   
+  71 | 30 |     |  29 | 30 | 38 |     |     |   
+  71 | 41 |   9 |  54 | 41 |  3 |  15 |  17 |  3
+  71 | 41 |   9 |  54 | 41 |  3 |  65 |  82 |  3
+  71 | 41 |   9 |  58 | 41 |    |     |     |   
+  72 | 35 |     |  13 | 35 | 26 |     |     |   
+  72 | 35 |     |  49 | 35 | 33 |   7 |  73 | 33
+  72 | 48 |  91 |   8 | 48 |  5 |   7 |  48 |  5
+  72 | 48 |  91 |  69 | 48 | 38 |     |     |   
+  75 | 55 |  82 |  38 | 55 | 26 |     |     |   
+  75 | 74 | 100 |  12 | 74 | 30 |     |     |   
+  77 | 38 |  48 |  78 | 38 | 84 |     |     |   
+  79 | 26 |  31 |  88 | 26 | 80 |  20 |  88 | 80
+  79 | 39 |  85 |  75 | 39 | 35 |  24 |  91 | 35
+  83 | 99 |  45 |  93 | 99 | 19 |     |     |   
+  89 | 36 |  13 |  64 | 36 | 39 |     |     |   
+  89 | 36 |  13 |  65 | 36 | 96 |  62 |  42 | 96
+  89 | 36 |  13 |  65 | 36 | 96 |  95 |  47 | 96
+  91 | 71 |  49 |   5 | 71 | 29 |  71 |  42 | 29
+  91 | 71 |  49 |  74 | 71 | 56 |  42 |  27 | 56
+  93 | 70 |  64 |  -6 | 70 | 72 |  32 |  30 | 72
+  93 | 70 |  64 |  78 | 70 | 71 |  88 |   7 | 71
+  95 | 71 |   2 |   5 | 71 | 29 |  71 |  42 | 29
+  95 | 71 |   2 |  74 | 71 | 56 |  42 |  27 | 56
+  96 | 78 |  38 |  53 | 78 |    |     |     |   
+  96 | 78 |  38 |  78 | 78 | 26 |     |     |   
+  96 | 78 |  38 |  78 | 78 | 82 |     |     |   
+ 100 | 82 |  93 |  41 | 82 |    |     |     |   
+(90 rows)
+
+--
+----Outer Join
+--
+--SUCESS
+explain (verbose on, costs off)
+select * from t1 left join t2 on t1.b = t2.b where t2.b < 50 order by 1, 2, 3, 4, 5, 6;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+         ->  Hash Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Hash Cond: (t1.b = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+                           Filter: (t1.b < 50)
+               ->  Hash
+                     Output: t2.a, t2.b, t2.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.a
+                                 Filter: (t2.b < 50)
+(30 rows)
+
+select * from t1 left join t2 on t1.b = t2.b where t2.b < 50 order by 1, 2, 3, 4, 5, 6;
+  a  | b  | c  |  a  | b  | c  
+-----+----+----+-----+----+----
+ -11 | 31 | 88 |  51 | 31 | 35
+ -11 | 31 | 88 |  53 | 31 | 39
+  -6 | 41 | 10 |  54 | 41 |  3
+  -6 | 41 | 10 |  58 | 41 |   
+  -2 |  5 | 70 |   4 |  5 | 11
+  -2 |  5 | 70 |  45 |  5 |  0
+  -2 |  5 | 70 |  76 |  5 |   
+  -1 |  3 | 97 |  63 |  3 | 20
+  -1 |  3 | 97 |  80 |  3 | 53
+   0 |  2 | 99 |  51 |  2 | 17
+   0 |  2 | 99 |  77 |  2 | 48
+   9 |  7 | 66 |  37 |  7 | 65
+  10 | 40 | 30 |  37 | 40 | 65
+  12 | 33 |    |   5 | 33 | 58
+  17 | 13 | 83 | -10 | 13 | 39
+  17 | 13 | 83 |  23 | 13 | 22
+  20 | 26 | 80 |  88 | 26 | 80
+  21 | 33 | 96 |   5 | 33 | 58
+  29 |  4 | 75 |  -6 |  4 | 53
+  29 |  4 | 75 |  73 |  4 | 44
+  29 | 10 |    | -11 | 10 | 88
+  29 | 11 | 47 |  97 | 11 | 61
+  34 |  5 | 57 |   4 |  5 | 11
+  34 |  5 | 57 |  45 |  5 |  0
+  34 |  5 | 57 |  76 |  5 |   
+  34 | 42 | 85 |  72 | 42 | 52
+  37 | 27 |  5 |  28 | 27 | 71
+  37 | 27 |  5 |  75 | 27 | 22
+  44 | 27 |    |  28 | 27 | 71
+  44 | 27 |    |  75 | 27 | 22
+  46 | 24 | 60 |   8 | 24 | 11
+  46 | 24 | 60 |  41 | 24 | 51
+  48 | 26 | 80 |  88 | 26 | 80
+  49 | 23 | 52 |  49 | 23 | 94
+  49 | 23 | 52 |  79 | 23 | 43
+  56 | 38 | 64 |  78 | 38 | 84
+  61 | 15 | 11 |  24 | 15 | 57
+  63 | 36 | 46 |  64 | 36 | 39
+  63 | 36 | 46 |  65 | 36 | 96
+  64 | 39 | 18 |  75 | 39 | 35
+  67 | 30 | 49 |   5 | 30 | 68
+  67 | 30 | 49 |  29 | 30 | 38
+  71 | 30 |    |   5 | 30 | 68
+  71 | 30 |    |  29 | 30 | 38
+  71 | 41 |  9 |  54 | 41 |  3
+  71 | 41 |  9 |  58 | 41 |   
+  72 | 35 |    |  13 | 35 | 26
+  72 | 35 |    |  49 | 35 | 33
+  72 | 48 | 91 |   8 | 48 |  5
+  72 | 48 | 91 |  69 | 48 | 38
+  77 | 38 | 48 |  78 | 38 | 84
+  79 | 26 | 31 |  88 | 26 | 80
+  79 | 39 | 85 |  75 | 39 | 35
+  89 | 36 | 13 |  64 | 36 | 39
+  89 | 36 | 13 |  65 | 36 | 96
+  93 |  3 |    |  63 |  3 | 20
+  93 |  3 |    |  80 |  3 | 53
+(57 rows)
+
+--FAILED
+explain (verbose on, costs off)
+select * from t1 right join t2 on t1.b = t2.b where t2.b < 50 order by 1, 2, 3, 4, 5, 6;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         ->  Hash Right Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Hash Cond: (t1.b = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+               ->  Hash
+                     Output: t2.a, t2.b, t2.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.a
+                                 Filter: (t2.b < 50)
+(29 rows)
+
+select * from t1 right join t2 on t1.b = t2.b where t2.b < 50 order by 1, 2, 3, 4, 5, 6;
+  a  | b  | c  |  a  | b  | c  
+-----+----+----+-----+----+----
+ -11 | 31 | 88 |  51 | 31 | 35
+ -11 | 31 | 88 |  53 | 31 | 39
+  -6 | 41 | 10 |  54 | 41 |  3
+  -6 | 41 | 10 |  58 | 41 |   
+  -2 |  5 | 70 |   4 |  5 | 11
+  -2 |  5 | 70 |  45 |  5 |  0
+  -2 |  5 | 70 |  76 |  5 |   
+  -1 |  3 | 97 |  63 |  3 | 20
+  -1 |  3 | 97 |  80 |  3 | 53
+   0 |  2 | 99 |  51 |  2 | 17
+   0 |  2 | 99 |  77 |  2 | 48
+   9 |  7 | 66 |  37 |  7 | 65
+  10 | 40 | 30 |  37 | 40 | 65
+  12 | 33 |    |   5 | 33 | 58
+  17 | 13 | 83 | -10 | 13 | 39
+  17 | 13 | 83 |  23 | 13 | 22
+  20 | 26 | 80 |  88 | 26 | 80
+  21 | 33 | 96 |   5 | 33 | 58
+  29 |  4 | 75 |  -6 |  4 | 53
+  29 |  4 | 75 |  73 |  4 | 44
+  29 | 10 |    | -11 | 10 | 88
+  29 | 11 | 47 |  97 | 11 | 61
+  34 |  5 | 57 |   4 |  5 | 11
+  34 |  5 | 57 |  45 |  5 |  0
+  34 |  5 | 57 |  76 |  5 |   
+  34 | 42 | 85 |  72 | 42 | 52
+  37 | 27 |  5 |  28 | 27 | 71
+  37 | 27 |  5 |  75 | 27 | 22
+  44 | 27 |    |  28 | 27 | 71
+  44 | 27 |    |  75 | 27 | 22
+  46 | 24 | 60 |   8 | 24 | 11
+  46 | 24 | 60 |  41 | 24 | 51
+  48 | 26 | 80 |  88 | 26 | 80
+  49 | 23 | 52 |  49 | 23 | 94
+  49 | 23 | 52 |  79 | 23 | 43
+  56 | 38 | 64 |  78 | 38 | 84
+  61 | 15 | 11 |  24 | 15 | 57
+  63 | 36 | 46 |  64 | 36 | 39
+  63 | 36 | 46 |  65 | 36 | 96
+  64 | 39 | 18 |  75 | 39 | 35
+  67 | 30 | 49 |   5 | 30 | 68
+  67 | 30 | 49 |  29 | 30 | 38
+  71 | 30 |    |   5 | 30 | 68
+  71 | 30 |    |  29 | 30 | 38
+  71 | 41 |  9 |  54 | 41 |  3
+  71 | 41 |  9 |  58 | 41 |   
+  72 | 35 |    |  13 | 35 | 26
+  72 | 35 |    |  49 | 35 | 33
+  72 | 48 | 91 |   8 | 48 |  5
+  72 | 48 | 91 |  69 | 48 | 38
+  77 | 38 | 48 |  78 | 38 | 84
+  79 | 26 | 31 |  88 | 26 | 80
+  79 | 39 | 85 |  75 | 39 | 35
+  89 | 36 | 13 |  64 | 36 | 39
+  89 | 36 | 13 |  65 | 36 | 96
+  93 |  3 |    |  63 |  3 | 20
+  93 |  3 |    |  80 |  3 | 53
+     |    |    |   3 | 45 | 18
+     |    |    |   5 |  1 | 35
+     |    |    |  30 | 12 | 14
+     |    |    |  46 |  1 | 88
+     |    |    |  52 | 25 | 76
+     |    |    |  54 | 45 |   
+     |    |    |  56 | 25 | 60
+     |    |    |  74 | 22 | 94
+     |    |    |  89 | 25 | 29
+     |    |    |  90 | 21 |  7
+(67 rows)
+
+--FAILED
+explain (verbose on, costs off)
+select * from t1 left join t2 on t1.b = t2.b where t1.b < 10 order by 1, 2, 3, 4, 5, 6;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         ->  Hash Right Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Hash Cond: (t2.b = t1.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t2.a, t2.b, t2.c
+                     Distribute Key: t2.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t2
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.a
+               ->  Hash
+                     Output: t1.a, t1.b, t1.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t1
+                                 Output: t1.a, t1.b, t1.c
+                                 Distribute Key: t1.a
+                                 Filter: (t1.b < 10)
+(29 rows)
+
+select * from t1 left join t2 on t1.b = t2.b where t1.b < 10 order by 1, 2, 3, 4, 5, 6;
+ a  | b | c  | a  | b | c  
+----+---+----+----+---+----
+ -2 | 5 | 70 |  4 | 5 | 11
+ -2 | 5 | 70 | 45 | 5 |  0
+ -2 | 5 | 70 | 76 | 5 |   
+ -1 | 3 | 97 | 63 | 3 | 20
+ -1 | 3 | 97 | 80 | 3 | 53
+  0 | 2 | 99 | 51 | 2 | 17
+  0 | 2 | 99 | 77 | 2 | 48
+  9 | 7 | 66 | 37 | 7 | 65
+ 22 | 8 |    |    |   |   
+ 29 | 4 | 75 | -6 | 4 | 53
+ 29 | 4 | 75 | 73 | 4 | 44
+ 34 | 5 | 57 |  4 | 5 | 11
+ 34 | 5 | 57 | 45 | 5 |  0
+ 34 | 5 | 57 | 76 | 5 |   
+ 54 | 8 | 18 |    |   |   
+ 93 | 3 |    | 63 | 3 | 20
+ 93 | 3 |    | 80 | 3 | 53
+(17 rows)
+
+--SUCESS
+explain (verbose on, costs off)
+select * from t1 right join t2 on t1.b = t2.b where t1.b < 10 order by 1, 2, 3, 4, 5, 6;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c
+         ->  Nested Loop
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Join Filter: (t1.b = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+                           Filter: (t1.b < 10)
+               ->  Materialize
+                     Output: t2.a, t2.b, t2.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.a
+                                 Filter: (t2.b < 10)
+(30 rows)
+
+select * from t1 right join t2 on t1.b = t2.b where t1.b < 10 order by 1, 2, 3, 4, 5, 6;
+ a  | b | c  | a  | b | c  
+----+---+----+----+---+----
+ -2 | 5 | 70 |  4 | 5 | 11
+ -2 | 5 | 70 | 45 | 5 |  0
+ -2 | 5 | 70 | 76 | 5 |   
+ -1 | 3 | 97 | 63 | 3 | 20
+ -1 | 3 | 97 | 80 | 3 | 53
+  0 | 2 | 99 | 51 | 2 | 17
+  0 | 2 | 99 | 77 | 2 | 48
+  9 | 7 | 66 | 37 | 7 | 65
+ 29 | 4 | 75 | -6 | 4 | 53
+ 29 | 4 | 75 | 73 | 4 | 44
+ 34 | 5 | 57 |  4 | 5 | 11
+ 34 | 5 | 57 | 45 | 5 |  0
+ 34 | 5 | 57 | 76 | 5 |   
+ 93 | 3 |    | 63 | 3 | 20
+ 93 | 3 |    | 80 | 3 | 53
+(15 rows)
+
+--FAILED
+explain (verbose on, costs off)
+select * from t1 left join t2 on t1.b = t2.b and t2.b < 10 order by 1, 2, 3, 4, 5, 6;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         ->  Hash Left Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Hash Cond: (t1.b = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+               ->  Hash
+                     Output: t2.a, t2.b, t2.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.a
+                                 Filter: (t2.b < 10)
+(29 rows)
+
+select * from t1 left join t2 on t1.b = t2.b and t2.b < 10 order by 1, 2, 3, 4, 5, 6;
+  a  | b  |  c  | a  | b | c  
+-----+----+-----+----+---+----
+ -11 | 31 |  88 |    |   |   
+ -10 | 92 |  24 |    |   |   
+  -8 | 84 |  44 |    |   |   
+  -8 | 96 |  20 |    |   |   
+  -7 |    |  91 |    |   |   
+  -6 | 41 |  10 |    |   |   
+  -6 |    |  57 |    |   |   
+  -4 | 73 |  64 |    |   |   
+  -2 |  5 |  70 |  4 | 5 | 11
+  -2 |  5 |  70 | 45 | 5 |  0
+  -2 |  5 |  70 | 76 | 5 |   
+  -1 |  3 |  97 | 63 | 3 | 20
+  -1 |  3 |  97 | 80 | 3 | 53
+   0 |  2 |  99 | 51 | 2 | 17
+   0 |  2 |  99 | 77 | 2 | 48
+   2 |    |     |    |   |   
+   4 | 34 |  28 |    |   |   
+   6 | 37 |  73 |    |   |   
+   6 | 68 |  46 |    |   |   
+   7 | 93 |  62 |    |   |   
+   9 |  7 |  66 | 37 | 7 | 65
+  10 | 40 |  30 |    |   |   
+  12 | 33 |     |    |   |   
+  15 | 19 |  51 |    |   |   
+  15 | 64 |  78 |    |   |   
+  17 | 13 |  83 |    |   |   
+  20 | 26 |  80 |    |   |   
+  21 | 33 |  96 |    |   |   
+  22 |  8 |     |    |   |   
+  25 | 49 |  84 |    |   |   
+  25 |    |   1 |    |   |   
+  27 | 79 |     |    |   |   
+  29 |  4 |  75 | -6 | 4 | 53
+  29 |  4 |  75 | 73 | 4 | 44
+  29 | 10 |     |    |   |   
+  29 | 11 |  47 |    |   |   
+  34 |  5 |  57 |  4 | 5 | 11
+  34 |  5 |  57 | 45 | 5 |  0
+  34 |  5 |  57 | 76 | 5 |   
+  34 | 42 |  85 |    |   |   
+  34 | 66 |  74 |    |   |   
+  35 | 80 |   2 |    |   |   
+  35 |    |  19 |    |   |   
+  37 | 19 |  73 |    |   |   
+  37 | 27 |   5 |    |   |   
+  39 | 91 |  84 |    |   |   
+  40 | 32 |  41 |    |   |   
+  40 | 85 |  12 |    |   |   
+  44 | 27 |     |    |   |   
+  45 | 46 |  23 |    |   |   
+  45 |    |   8 |    |   |   
+  46 | 24 |  60 |    |   |   
+  46 | 60 |  25 |    |   |   
+  46 | 68 |   6 |    |   |   
+  48 | 16 |   1 |    |   |   
+  48 | 26 |  80 |    |   |   
+  49 | 23 |  52 |    |   |   
+  49 |    |  22 |    |   |   
+  50 | 34 |  90 |    |   |   
+  50 | 72 |  58 |    |   |   
+  51 | 46 |  69 |    |   |   
+  51 | 99 |  59 |    |   |   
+  54 |  8 |  18 |    |   |   
+  54 |    |   9 |    |   |   
+  55 | 74 |  61 |    |   |   
+  55 | 84 |  62 |    |   |   
+  56 | 29 |  50 |    |   |   
+  56 | 38 |  64 |    |   |   
+  58 | 62 |  80 |    |   |   
+  58 | 85 |  25 |    |   |   
+  59 |    |  24 |    |   |   
+  60 | 37 |     |    |   |   
+  60 | 84 |  99 |    |   |   
+  61 | 15 |  11 |    |   |   
+  61 | 62 |  59 |    |   |   
+  63 | 36 |  46 |    |   |   
+  64 | 39 |  18 |    |   |   
+  65 | 93 |  15 |    |   |   
+  66 | 55 |  76 |    |   |   
+  67 | 30 |  49 |    |   |   
+  67 | 88 |  34 |    |   |   
+  68 |    |     |    |   |   
+  71 | 30 |     |    |   |   
+  71 | 41 |   9 |    |   |   
+  72 | 35 |     |    |   |   
+  72 | 48 |  91 |    |   |   
+  72 | 52 |  45 |    |   |   
+  74 |    |  74 |    |   |   
+  75 | 55 |  82 |    |   |   
+  75 | 74 | 100 |    |   |   
+  77 | 38 |  48 |    |   |   
+  77 | 47 |     |    |   |   
+  79 | 26 |  31 |    |   |   
+  79 | 39 |  85 |    |   |   
+  79 | 69 |  71 |    |   |   
+  81 |    |  89 |    |   |   
+  83 | 99 |  45 |    |   |   
+  84 |    |  74 |    |   |   
+  89 | 17 |  37 |    |   |   
+  89 | 36 |  13 |    |   |   
+  91 | 71 |  49 |    |   |   
+  93 |  3 |     | 63 | 3 | 20
+  93 |  3 |     | 80 | 3 | 53
+  93 | 70 |  64 |    |   |   
+  94 |    |   2 |    |   |   
+  95 | 71 |   2 |    |   |   
+  96 | 78 |  38 |    |   |   
+ 100 | 82 |  93 |    |   |   
+(108 rows)
+
+--FAILED
+explain (verbose on, costs off)
+select * from t1 right join t2 on t1.b = t2.b and t2.b < 10 order by 1, 2, 3, 4, 5, 6;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         ->  Hash Right Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Hash Cond: (t1.b = t2.b)
+               Join Filter: (t2.b < 10)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+               ->  Hash
+                     Output: t2.a, t2.b, t2.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.a
+(29 rows)
+
+select * from t1 right join t2 on t1.b = t2.b and t2.b < 10 order by 1, 2, 3, 4, 5, 6;
+ a  | b | c  |  a  | b  | c  
+----+---+----+-----+----+----
+ -2 | 5 | 70 |   4 |  5 | 11
+ -2 | 5 | 70 |  45 |  5 |  0
+ -2 | 5 | 70 |  76 |  5 |   
+ -1 | 3 | 97 |  63 |  3 | 20
+ -1 | 3 | 97 |  80 |  3 | 53
+  0 | 2 | 99 |  51 |  2 | 17
+  0 | 2 | 99 |  77 |  2 | 48
+  9 | 7 | 66 |  37 |  7 | 65
+ 29 | 4 | 75 |  -6 |  4 | 53
+ 29 | 4 | 75 |  73 |  4 | 44
+ 34 | 5 | 57 |   4 |  5 | 11
+ 34 | 5 | 57 |  45 |  5 |  0
+ 34 | 5 | 57 |  76 |  5 |   
+ 93 | 3 |    |  63 |  3 | 20
+ 93 | 3 |    |  80 |  3 | 53
+    |   |    | -11 | 10 | 88
+    |   |    | -10 | 13 | 39
+    |   |    |  -7 | 89 |   
+    |   |    |  -6 | 70 | 72
+    |   |    |  -5 | 65 | 32
+    |   |    |  -4 | 97 | 33
+    |   |    |   0 |    | 50
+    |   |    |   1 | 76 | 61
+    |   |    |   1 | 87 | 24
+    |   |    |   3 | 45 | 18
+    |   |    |   5 |  1 | 35
+    |   |    |   5 | 30 | 68
+    |   |    |   5 | 33 | 58
+    |   |    |   5 | 71 | 29
+    |   |    |   8 | 24 | 11
+    |   |    |   8 | 48 |  5
+    |   |    |   8 |    | 24
+    |   |    |  12 | 53 | 20
+    |   |    |  12 | 74 | 30
+    |   |    |  13 | 35 | 26
+    |   |    |  14 | 96 | 98
+    |   |    |  15 | 80 | 78
+    |   |    |  17 | 90 | 59
+    |   |    |  19 | 75 | 84
+    |   |    |  19 | 95 | 61
+    |   |    |  23 | 13 | 22
+    |   |    |  23 | 66 | 26
+    |   |    |  24 | 15 | 57
+    |   |    |  24 | 56 | 26
+    |   |    |  27 |    | 37
+    |   |    |  28 | 27 | 71
+    |   |    |  28 |    | 71
+    |   |    |  29 | 30 | 38
+    |   |    |  30 | 12 | 14
+    |   |    |  30 | 94 | 58
+    |   |    |  37 | 40 | 65
+    |   |    |  38 | 53 | 15
+    |   |    |  38 | 55 | 26
+    |   |    |  40 | 66 | 28
+    |   |    |  41 | 24 | 51
+    |   |    |  41 | 82 |   
+    |   |    |  41 |    | 31
+    |   |    |  42 | 89 |   
+    |   |    |  46 |  1 | 88
+    |   |    |  46 | 95 |  5
+    |   |    |  46 | 98 | 25
+    |   |    |  49 | 23 | 94
+    |   |    |  49 | 35 | 33
+    |   |    |  51 | 31 | 35
+    |   |    |  52 | 25 | 76
+    |   |    |  53 | 31 | 39
+    |   |    |  53 | 78 |   
+    |   |    |  54 | 41 |  3
+    |   |    |  54 | 45 |   
+    |   |    |  54 |    |  3
+    |   |    |  56 | 25 | 60
+    |   |    |  58 | 41 |   
+    |   |    |  58 |    | 63
+    |   |    |  61 | 51 | 60
+    |   |    |  61 | 65 | 55
+    |   |    |  64 | 36 | 39
+    |   |    |  65 | 36 | 96
+    |   |    |  67 |    | 96
+    |   |    |  69 | 48 | 38
+    |   |    |  70 | 59 | 31
+    |   |    |  70 | 89 | 69
+    |   |    |  72 | 42 | 52
+    |   |    |  74 | 22 | 94
+    |   |    |  74 | 71 | 56
+    |   |    |  75 | 27 | 22
+    |   |    |  75 | 39 | 35
+    |   |    |  75 |    |  9
+    |   |    |  76 | 62 |   
+    |   |    |  78 | 38 | 84
+    |   |    |  78 | 70 | 71
+    |   |    |  78 | 78 | 26
+    |   |    |  78 | 78 | 82
+    |   |    |  79 | 23 | 43
+    |   |    |  84 | 65 | 96
+    |   |    |  84 | 88 | 41
+    |   |    |  86 | 77 |   
+    |   |    |  88 | 26 | 80
+    |   |    |  89 | 25 | 29
+    |   |    |  89 | 62 | 64
+    |   |    |  90 | 21 |  7
+    |   |    |  93 | 68 |   
+    |   |    |  93 | 99 | 19
+    |   |    |  95 | 86 | 40
+    |   |    |  97 | 11 | 61
+    |   |    | 100 | 57 | 65
+(105 rows)
+
+--FAILED
+explain (verbose on, costs off)
+select * from t1 left join t2 on t1.b = t2.b and t1.b < 10 order by 1, 2, 3, 4, 5, 6;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         ->  Hash Left Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Hash Cond: (t1.b = t2.b)
+               Join Filter: (t1.b < 10)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+               ->  Hash
+                     Output: t2.a, t2.b, t2.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t2
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.a
+(29 rows)
+
+select * from t1 left join t2 on t1.b = t2.b and t1.b < 10 order by 1, 2, 3, 4, 5, 6;
+  a  | b  |  c  | a  | b | c  
+-----+----+-----+----+---+----
+ -11 | 31 |  88 |    |   |   
+ -10 | 92 |  24 |    |   |   
+  -8 | 84 |  44 |    |   |   
+  -8 | 96 |  20 |    |   |   
+  -7 |    |  91 |    |   |   
+  -6 | 41 |  10 |    |   |   
+  -6 |    |  57 |    |   |   
+  -4 | 73 |  64 |    |   |   
+  -2 |  5 |  70 |  4 | 5 | 11
+  -2 |  5 |  70 | 45 | 5 |  0
+  -2 |  5 |  70 | 76 | 5 |   
+  -1 |  3 |  97 | 63 | 3 | 20
+  -1 |  3 |  97 | 80 | 3 | 53
+   0 |  2 |  99 | 51 | 2 | 17
+   0 |  2 |  99 | 77 | 2 | 48
+   2 |    |     |    |   |   
+   4 | 34 |  28 |    |   |   
+   6 | 37 |  73 |    |   |   
+   6 | 68 |  46 |    |   |   
+   7 | 93 |  62 |    |   |   
+   9 |  7 |  66 | 37 | 7 | 65
+  10 | 40 |  30 |    |   |   
+  12 | 33 |     |    |   |   
+  15 | 19 |  51 |    |   |   
+  15 | 64 |  78 |    |   |   
+  17 | 13 |  83 |    |   |   
+  20 | 26 |  80 |    |   |   
+  21 | 33 |  96 |    |   |   
+  22 |  8 |     |    |   |   
+  25 | 49 |  84 |    |   |   
+  25 |    |   1 |    |   |   
+  27 | 79 |     |    |   |   
+  29 |  4 |  75 | -6 | 4 | 53
+  29 |  4 |  75 | 73 | 4 | 44
+  29 | 10 |     |    |   |   
+  29 | 11 |  47 |    |   |   
+  34 |  5 |  57 |  4 | 5 | 11
+  34 |  5 |  57 | 45 | 5 |  0
+  34 |  5 |  57 | 76 | 5 |   
+  34 | 42 |  85 |    |   |   
+  34 | 66 |  74 |    |   |   
+  35 | 80 |   2 |    |   |   
+  35 |    |  19 |    |   |   
+  37 | 19 |  73 |    |   |   
+  37 | 27 |   5 |    |   |   
+  39 | 91 |  84 |    |   |   
+  40 | 32 |  41 |    |   |   
+  40 | 85 |  12 |    |   |   
+  44 | 27 |     |    |   |   
+  45 | 46 |  23 |    |   |   
+  45 |    |   8 |    |   |   
+  46 | 24 |  60 |    |   |   
+  46 | 60 |  25 |    |   |   
+  46 | 68 |   6 |    |   |   
+  48 | 16 |   1 |    |   |   
+  48 | 26 |  80 |    |   |   
+  49 | 23 |  52 |    |   |   
+  49 |    |  22 |    |   |   
+  50 | 34 |  90 |    |   |   
+  50 | 72 |  58 |    |   |   
+  51 | 46 |  69 |    |   |   
+  51 | 99 |  59 |    |   |   
+  54 |  8 |  18 |    |   |   
+  54 |    |   9 |    |   |   
+  55 | 74 |  61 |    |   |   
+  55 | 84 |  62 |    |   |   
+  56 | 29 |  50 |    |   |   
+  56 | 38 |  64 |    |   |   
+  58 | 62 |  80 |    |   |   
+  58 | 85 |  25 |    |   |   
+  59 |    |  24 |    |   |   
+  60 | 37 |     |    |   |   
+  60 | 84 |  99 |    |   |   
+  61 | 15 |  11 |    |   |   
+  61 | 62 |  59 |    |   |   
+  63 | 36 |  46 |    |   |   
+  64 | 39 |  18 |    |   |   
+  65 | 93 |  15 |    |   |   
+  66 | 55 |  76 |    |   |   
+  67 | 30 |  49 |    |   |   
+  67 | 88 |  34 |    |   |   
+  68 |    |     |    |   |   
+  71 | 30 |     |    |   |   
+  71 | 41 |   9 |    |   |   
+  72 | 35 |     |    |   |   
+  72 | 48 |  91 |    |   |   
+  72 | 52 |  45 |    |   |   
+  74 |    |  74 |    |   |   
+  75 | 55 |  82 |    |   |   
+  75 | 74 | 100 |    |   |   
+  77 | 38 |  48 |    |   |   
+  77 | 47 |     |    |   |   
+  79 | 26 |  31 |    |   |   
+  79 | 39 |  85 |    |   |   
+  79 | 69 |  71 |    |   |   
+  81 |    |  89 |    |   |   
+  83 | 99 |  45 |    |   |   
+  84 |    |  74 |    |   |   
+  89 | 17 |  37 |    |   |   
+  89 | 36 |  13 |    |   |   
+  91 | 71 |  49 |    |   |   
+  93 |  3 |     | 63 | 3 | 20
+  93 |  3 |     | 80 | 3 | 53
+  93 | 70 |  64 |    |   |   
+  94 |    |   2 |    |   |   
+  95 | 71 |   2 |    |   |   
+  96 | 78 |  38 |    |   |   
+ 100 | 82 |  93 |    |   |   
+(108 rows)
+
+--FAILED
+explain (verbose on, costs off)
+select * from t1 right join t2 on t1.b = t2.b and t1.b < 10 order by 1, 2, 3, 4, 5, 6;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+         ->  Hash Left Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+               Hash Cond: (t2.b = t1.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t2.a, t2.b, t2.c
+                     Distribute Key: t2.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t2
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.a
+               ->  Hash
+                     Output: t1.a, t1.b, t1.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t1
+                                 Output: t1.a, t1.b, t1.c
+                                 Distribute Key: t1.a
+                                 Filter: (t1.b < 10)
+(29 rows)
+
+select * from t1 right join t2 on t1.b = t2.b and t1.b < 10 order by 1, 2, 3, 4, 5, 6;
+ a  | b | c  |  a  | b  | c  
+----+---+----+-----+----+----
+ -2 | 5 | 70 |   4 |  5 | 11
+ -2 | 5 | 70 |  45 |  5 |  0
+ -2 | 5 | 70 |  76 |  5 |   
+ -1 | 3 | 97 |  63 |  3 | 20
+ -1 | 3 | 97 |  80 |  3 | 53
+  0 | 2 | 99 |  51 |  2 | 17
+  0 | 2 | 99 |  77 |  2 | 48
+  9 | 7 | 66 |  37 |  7 | 65
+ 29 | 4 | 75 |  -6 |  4 | 53
+ 29 | 4 | 75 |  73 |  4 | 44
+ 34 | 5 | 57 |   4 |  5 | 11
+ 34 | 5 | 57 |  45 |  5 |  0
+ 34 | 5 | 57 |  76 |  5 |   
+ 93 | 3 |    |  63 |  3 | 20
+ 93 | 3 |    |  80 |  3 | 53
+    |   |    | -11 | 10 | 88
+    |   |    | -10 | 13 | 39
+    |   |    |  -7 | 89 |   
+    |   |    |  -6 | 70 | 72
+    |   |    |  -5 | 65 | 32
+    |   |    |  -4 | 97 | 33
+    |   |    |   0 |    | 50
+    |   |    |   1 | 76 | 61
+    |   |    |   1 | 87 | 24
+    |   |    |   3 | 45 | 18
+    |   |    |   5 |  1 | 35
+    |   |    |   5 | 30 | 68
+    |   |    |   5 | 33 | 58
+    |   |    |   5 | 71 | 29
+    |   |    |   8 | 24 | 11
+    |   |    |   8 | 48 |  5
+    |   |    |   8 |    | 24
+    |   |    |  12 | 53 | 20
+    |   |    |  12 | 74 | 30
+    |   |    |  13 | 35 | 26
+    |   |    |  14 | 96 | 98
+    |   |    |  15 | 80 | 78
+    |   |    |  17 | 90 | 59
+    |   |    |  19 | 75 | 84
+    |   |    |  19 | 95 | 61
+    |   |    |  23 | 13 | 22
+    |   |    |  23 | 66 | 26
+    |   |    |  24 | 15 | 57
+    |   |    |  24 | 56 | 26
+    |   |    |  27 |    | 37
+    |   |    |  28 | 27 | 71
+    |   |    |  28 |    | 71
+    |   |    |  29 | 30 | 38
+    |   |    |  30 | 12 | 14
+    |   |    |  30 | 94 | 58
+    |   |    |  37 | 40 | 65
+    |   |    |  38 | 53 | 15
+    |   |    |  38 | 55 | 26
+    |   |    |  40 | 66 | 28
+    |   |    |  41 | 24 | 51
+    |   |    |  41 | 82 |   
+    |   |    |  41 |    | 31
+    |   |    |  42 | 89 |   
+    |   |    |  46 |  1 | 88
+    |   |    |  46 | 95 |  5
+    |   |    |  46 | 98 | 25
+    |   |    |  49 | 23 | 94
+    |   |    |  49 | 35 | 33
+    |   |    |  51 | 31 | 35
+    |   |    |  52 | 25 | 76
+    |   |    |  53 | 31 | 39
+    |   |    |  53 | 78 |   
+    |   |    |  54 | 41 |  3
+    |   |    |  54 | 45 |   
+    |   |    |  54 |    |  3
+    |   |    |  56 | 25 | 60
+    |   |    |  58 | 41 |   
+    |   |    |  58 |    | 63
+    |   |    |  61 | 51 | 60
+    |   |    |  61 | 65 | 55
+    |   |    |  64 | 36 | 39
+    |   |    |  65 | 36 | 96
+    |   |    |  67 |    | 96
+    |   |    |  69 | 48 | 38
+    |   |    |  70 | 59 | 31
+    |   |    |  70 | 89 | 69
+    |   |    |  72 | 42 | 52
+    |   |    |  74 | 22 | 94
+    |   |    |  74 | 71 | 56
+    |   |    |  75 | 27 | 22
+    |   |    |  75 | 39 | 35
+    |   |    |  75 |    |  9
+    |   |    |  76 | 62 |   
+    |   |    |  78 | 38 | 84
+    |   |    |  78 | 70 | 71
+    |   |    |  78 | 78 | 26
+    |   |    |  78 | 78 | 82
+    |   |    |  79 | 23 | 43
+    |   |    |  84 | 65 | 96
+    |   |    |  84 | 88 | 41
+    |   |    |  86 | 77 |   
+    |   |    |  88 | 26 | 80
+    |   |    |  89 | 25 | 29
+    |   |    |  89 | 62 | 64
+    |   |    |  90 | 21 |  7
+    |   |    |  93 | 68 |   
+    |   |    |  93 | 99 | 19
+    |   |    |  95 | 86 | 40
+    |   |    |  97 | 11 | 61
+    |   |    | 100 | 57 | 65
+(105 rows)
+
+--FAILED
+explain (verbose on, costs off)
+select * from t1 left join t2 on t1.b = t2.b left join t3 on t2.b = t3.b where t1.b > 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         ->  Hash Left Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+               Hash Cond: (t1.b = t2.b)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b, t1.c
+                     Distribute Key: t1.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+                           Filter: (t1.b > 50)
+               ->  Hash
+                     Output: t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+                     ->  Hash Left Join
+                           Output: t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+                           Hash Cond: (t2.b = t3.b)
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on public.t2
+                                       Output: t2.a, t2.b, t2.c
+                                       Distribute Key: t2.a
+                           ->  Hash
+                                 Output: t3.a, t3.b, t3.c
+                                 ->  Streaming(type: REDISTRIBUTE)
+                                       Output: t3.a, t3.b, t3.c
+                                       Distribute Key: t3.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on public.t3
+                                             Output: t3.a, t3.b, t3.c
+                                             Distribute Key: t3.a
+(42 rows)
+
+select * from t1 left join t2 on t1.b = t2.b left join t3 on t2.b = t3.b where t1.b > 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+  a  | b  |  c  | a  | b  | c  | a  | b  | c  
+-----+----+-----+----+----+----+----+----+----
+ -10 | 92 |  24 |    |    |    |    |    |   
+  -8 | 84 |  44 |    |    |    |    |    |   
+  -8 | 96 |  20 | 14 | 96 | 98 | 61 | 96 | 83
+  -4 | 73 |  64 |    |    |    |    |    |   
+   6 | 68 |  46 | 93 | 68 |    |    |    |   
+   7 | 93 |  62 |    |    |    |    |    |   
+  15 | 64 |  78 |    |    |    |    |    |   
+  27 | 79 |     |    |    |    |    |    |   
+  34 | 66 |  74 | 23 | 66 | 26 | 84 | 66 | 45
+  34 | 66 |  74 | 40 | 66 | 28 | 84 | 66 | 45
+  35 | 80 |   2 | 15 | 80 | 78 |    |    |   
+  39 | 91 |  84 |    |    |    |    |    |   
+  40 | 85 |  12 |    |    |    |    |    |   
+  46 | 60 |  25 |    |    |    |    |    |   
+  46 | 68 |   6 | 93 | 68 |    |    |    |   
+  50 | 72 |  58 |    |    |    |    |    |   
+  51 | 99 |  59 | 93 | 99 | 19 |    |    |   
+  55 | 74 |  61 | 12 | 74 | 30 | 31 | 74 | 49
+  55 | 84 |  62 |    |    |    |    |    |   
+  58 | 62 |  80 | 76 | 62 |    | 82 | 62 | 25
+  58 | 62 |  80 | 89 | 62 | 64 | 82 | 62 | 25
+  58 | 85 |  25 |    |    |    |    |    |   
+  60 | 84 |  99 |    |    |    |    |    |   
+  61 | 62 |  59 | 76 | 62 |    | 82 | 62 | 25
+  61 | 62 |  59 | 89 | 62 | 64 | 82 | 62 | 25
+  65 | 93 |  15 |    |    |    |    |    |   
+  66 | 55 |  76 | 38 | 55 | 26 | 47 | 55 | 92
+  67 | 88 |  34 | 84 | 88 | 41 | 20 | 88 | 80
+  67 | 88 |  34 | 84 | 88 | 41 | 56 | 88 | 42
+  67 | 88 |  34 | 84 | 88 | 41 | 79 | 88 | 13
+  72 | 52 |  45 |    |    |    |    |    |   
+  75 | 55 |  82 | 38 | 55 | 26 | 47 | 55 | 92
+  75 | 74 | 100 | 12 | 74 | 30 | 31 | 74 | 49
+  79 | 69 |  71 |    |    |    |    |    |   
+  83 | 99 |  45 | 93 | 99 | 19 |    |    |   
+  91 | 71 |  49 |  5 | 71 | 29 |    |    |   
+  91 | 71 |  49 | 74 | 71 | 56 |    |    |   
+  93 | 70 |  64 | -6 | 70 | 72 |    |    |   
+  93 | 70 |  64 | 78 | 70 | 71 |    |    |   
+  95 | 71 |   2 |  5 | 71 | 29 |    |    |   
+  95 | 71 |   2 | 74 | 71 | 56 |    |    |   
+  96 | 78 |  38 | 53 | 78 |    | 31 | 78 | 44
+  96 | 78 |  38 | 53 | 78 |    | 57 | 78 |   
+  96 | 78 |  38 | 78 | 78 | 26 | 31 | 78 | 44
+  96 | 78 |  38 | 78 | 78 | 26 | 57 | 78 |   
+  96 | 78 |  38 | 78 | 78 | 82 | 31 | 78 | 44
+  96 | 78 |  38 | 78 | 78 | 82 | 57 | 78 |   
+ 100 | 82 |  93 | 41 | 82 |    | 65 | 82 |  3
+(48 rows)
+
+--SUCESS
+explain (verbose on, costs off)
+select * from t1 right join t2 on t1.b = t2.b right join t3 on t2.b = t3.b where t1.b > 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.c
+         ->  Hash Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+               Hash Cond: (t1.b = t3.b)
+               ->  Hash Join
+                     Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+                     Hash Cond: (t1.b = t2.b)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t1
+                                 Output: t1.a, t1.b, t1.c
+                                 Distribute Key: t1.a
+                                 Filter: (t1.b > 50)
+                     ->  Hash
+                           Output: t2.a, t2.b, t2.c
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on public.t2
+                                       Output: t2.a, t2.b, t2.c
+                                       Distribute Key: t2.a
+                                       Filter: (t2.b > 50)
+               ->  Hash
+                     Output: t3.a, t3.b, t3.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t3.a, t3.b, t3.c
+                           Distribute Key: t3.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t3
+                                 Output: t3.a, t3.b, t3.c
+                                 Distribute Key: t3.a
+                                 Filter: (t3.b > 50)
+(44 rows)
+
+select * from t1 right join t2 on t1.b = t2.b right join t3 on t2.b = t3.b where t1.b > 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+  a  | b  |  c  | a  | b  | c  | a  | b  | c  
+-----+----+-----+----+----+----+----+----+----
+  -8 | 96 |  20 | 14 | 96 | 98 | 61 | 96 | 83
+  34 | 66 |  74 | 23 | 66 | 26 | 84 | 66 | 45
+  34 | 66 |  74 | 40 | 66 | 28 | 84 | 66 | 45
+  55 | 74 |  61 | 12 | 74 | 30 | 31 | 74 | 49
+  58 | 62 |  80 | 76 | 62 |    | 82 | 62 | 25
+  58 | 62 |  80 | 89 | 62 | 64 | 82 | 62 | 25
+  61 | 62 |  59 | 76 | 62 |    | 82 | 62 | 25
+  61 | 62 |  59 | 89 | 62 | 64 | 82 | 62 | 25
+  66 | 55 |  76 | 38 | 55 | 26 | 47 | 55 | 92
+  67 | 88 |  34 | 84 | 88 | 41 | 20 | 88 | 80
+  67 | 88 |  34 | 84 | 88 | 41 | 56 | 88 | 42
+  67 | 88 |  34 | 84 | 88 | 41 | 79 | 88 | 13
+  75 | 55 |  82 | 38 | 55 | 26 | 47 | 55 | 92
+  75 | 74 | 100 | 12 | 74 | 30 | 31 | 74 | 49
+  96 | 78 |  38 | 53 | 78 |    | 31 | 78 | 44
+  96 | 78 |  38 | 53 | 78 |    | 57 | 78 |   
+  96 | 78 |  38 | 78 | 78 | 26 | 31 | 78 | 44
+  96 | 78 |  38 | 78 | 78 | 26 | 57 | 78 |   
+  96 | 78 |  38 | 78 | 78 | 82 | 31 | 78 | 44
+  96 | 78 |  38 | 78 | 78 | 82 | 57 | 78 |   
+ 100 | 82 |  93 | 41 | 82 |    | 65 | 82 |  3
+(21 rows)
+
+--FAILED
+explain (verbose on, costs off)
+select * from t1 left join t2 on t1.b = t2.b left join t3 on t2.b = t3.b where t2.b > 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.b, t3.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.b, t3.c
+         ->  Hash Left Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+               Hash Cond: (t2.b = t3.b)
+               ->  Hash Join
+                     Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+                     Hash Cond: (t1.b = t2.b)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t1
+                                 Output: t1.a, t1.b, t1.c
+                                 Distribute Key: t1.a
+                                 Filter: (t1.b > 50)
+                     ->  Hash
+                           Output: t2.a, t2.b, t2.c
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on public.t2
+                                       Output: t2.a, t2.b, t2.c
+                                       Distribute Key: t2.a
+                                       Filter: (t2.b > 50)
+               ->  Hash
+                     Output: t3.a, t3.b, t3.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t3.a, t3.b, t3.c
+                           Distribute Key: t3.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t3
+                                 Output: t3.a, t3.b, t3.c
+                                 Distribute Key: t3.a
+(43 rows)
+
+select * from t1 left join t2 on t1.b = t2.b left join t3 on t2.b = t3.b where t2.b > 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+  a  | b  |  c  | a  | b  | c  | a  | b  | c  
+-----+----+-----+----+----+----+----+----+----
+  -8 | 96 |  20 | 14 | 96 | 98 | 61 | 96 | 83
+   6 | 68 |  46 | 93 | 68 |    |    |    |   
+  34 | 66 |  74 | 23 | 66 | 26 | 84 | 66 | 45
+  34 | 66 |  74 | 40 | 66 | 28 | 84 | 66 | 45
+  35 | 80 |   2 | 15 | 80 | 78 |    |    |   
+  46 | 68 |   6 | 93 | 68 |    |    |    |   
+  51 | 99 |  59 | 93 | 99 | 19 |    |    |   
+  55 | 74 |  61 | 12 | 74 | 30 | 31 | 74 | 49
+  58 | 62 |  80 | 76 | 62 |    | 82 | 62 | 25
+  58 | 62 |  80 | 89 | 62 | 64 | 82 | 62 | 25
+  61 | 62 |  59 | 76 | 62 |    | 82 | 62 | 25
+  61 | 62 |  59 | 89 | 62 | 64 | 82 | 62 | 25
+  66 | 55 |  76 | 38 | 55 | 26 | 47 | 55 | 92
+  67 | 88 |  34 | 84 | 88 | 41 | 20 | 88 | 80
+  67 | 88 |  34 | 84 | 88 | 41 | 56 | 88 | 42
+  67 | 88 |  34 | 84 | 88 | 41 | 79 | 88 | 13
+  75 | 55 |  82 | 38 | 55 | 26 | 47 | 55 | 92
+  75 | 74 | 100 | 12 | 74 | 30 | 31 | 74 | 49
+  83 | 99 |  45 | 93 | 99 | 19 |    |    |   
+  91 | 71 |  49 |  5 | 71 | 29 |    |    |   
+  91 | 71 |  49 | 74 | 71 | 56 |    |    |   
+  93 | 70 |  64 | -6 | 70 | 72 |    |    |   
+  93 | 70 |  64 | 78 | 70 | 71 |    |    |   
+  95 | 71 |   2 |  5 | 71 | 29 |    |    |   
+  95 | 71 |   2 | 74 | 71 | 56 |    |    |   
+  96 | 78 |  38 | 53 | 78 |    | 31 | 78 | 44
+  96 | 78 |  38 | 53 | 78 |    | 57 | 78 |   
+  96 | 78 |  38 | 78 | 78 | 26 | 31 | 78 | 44
+  96 | 78 |  38 | 78 | 78 | 26 | 57 | 78 |   
+  96 | 78 |  38 | 78 | 78 | 82 | 31 | 78 | 44
+  96 | 78 |  38 | 78 | 78 | 82 | 57 | 78 |   
+ 100 | 82 |  93 | 41 | 82 |    | 65 | 82 |  3
+(32 rows)
+
+-- SUCESS
+explain (verbose on, costs off)
+select * from t1 left join t2 on t1.b = t2.b left join t3 on t2.b = t3.b where t3.b > 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.c, t3.a, t3.c
+         ->  Hash Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+               Hash Cond: (t1.b = t3.b)
+               ->  Hash Join
+                     Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c
+                     Hash Cond: (t1.b = t2.b)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t1
+                                 Output: t1.a, t1.b, t1.c
+                                 Distribute Key: t1.a
+                                 Filter: (t1.b > 50)
+                     ->  Hash
+                           Output: t2.a, t2.b, t2.c
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on public.t2
+                                       Output: t2.a, t2.b, t2.c
+                                       Distribute Key: t2.a
+                                       Filter: (t2.b > 50)
+               ->  Hash
+                     Output: t3.a, t3.b, t3.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t3.a, t3.b, t3.c
+                           Distribute Key: t3.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t3
+                                 Output: t3.a, t3.b, t3.c
+                                 Distribute Key: t3.a
+                                 Filter: (t3.b > 50)
+(44 rows)
+
+select * from t1 left join t2 on t1.b = t2.b left join t3 on t2.b = t3.b where t3.b > 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+  a  | b  |  c  | a  | b  | c  | a  | b  | c  
+-----+----+-----+----+----+----+----+----+----
+  -8 | 96 |  20 | 14 | 96 | 98 | 61 | 96 | 83
+  34 | 66 |  74 | 23 | 66 | 26 | 84 | 66 | 45
+  34 | 66 |  74 | 40 | 66 | 28 | 84 | 66 | 45
+  55 | 74 |  61 | 12 | 74 | 30 | 31 | 74 | 49
+  58 | 62 |  80 | 76 | 62 |    | 82 | 62 | 25
+  58 | 62 |  80 | 89 | 62 | 64 | 82 | 62 | 25
+  61 | 62 |  59 | 76 | 62 |    | 82 | 62 | 25
+  61 | 62 |  59 | 89 | 62 | 64 | 82 | 62 | 25
+  66 | 55 |  76 | 38 | 55 | 26 | 47 | 55 | 92
+  67 | 88 |  34 | 84 | 88 | 41 | 20 | 88 | 80
+  67 | 88 |  34 | 84 | 88 | 41 | 56 | 88 | 42
+  67 | 88 |  34 | 84 | 88 | 41 | 79 | 88 | 13
+  75 | 55 |  82 | 38 | 55 | 26 | 47 | 55 | 92
+  75 | 74 | 100 | 12 | 74 | 30 | 31 | 74 | 49
+  96 | 78 |  38 | 53 | 78 |    | 31 | 78 | 44
+  96 | 78 |  38 | 53 | 78 |    | 57 | 78 |   
+  96 | 78 |  38 | 78 | 78 | 26 | 31 | 78 | 44
+  96 | 78 |  38 | 78 | 78 | 26 | 57 | 78 |   
+  96 | 78 |  38 | 78 | 78 | 82 | 31 | 78 | 44
+  96 | 78 |  38 | 78 | 78 | 82 | 57 | 78 |   
+ 100 | 82 |  93 | 41 | 82 |    | 65 | 82 |  3
+(21 rows)
+
+-- FAILED
+explain (verbose on, costs off)
+select * from t1 right join t2 on t1.b = t2.b right join t3 on t2.b = t3.b where t3.b > 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Merge Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+   Node/s: All datanodes
+   ->  Sort
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         Sort Key: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+         ->  Hash Right Join
+               Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t3.a, t3.b, t3.c
+               Hash Cond: (t2.b = t3.b)
+               ->  Hash Right Join
+                     Output: t2.a, t2.b, t2.c, t1.a, t1.b, t1.c
+                     Hash Cond: (t1.b = t2.b)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t1
+                                 Output: t1.a, t1.b, t1.c
+                                 Distribute Key: t1.a
+                     ->  Hash
+                           Output: t2.a, t2.b, t2.c
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: t2.a, t2.b, t2.c
+                                 Distribute Key: t2.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on public.t2
+                                       Output: t2.a, t2.b, t2.c
+                                       Distribute Key: t2.a
+               ->  Hash
+                     Output: t3.a, t3.b, t3.c
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t3.a, t3.b, t3.c
+                           Distribute Key: t3.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on public.t3
+                                 Output: t3.a, t3.b, t3.c
+                                 Distribute Key: t3.a
+                                 Filter: (t3.b > 50)
+(42 rows)
+
+select * from t1 right join t2 on t1.b = t2.b right join t3 on t2.b = t3.b where t3.b > 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+  a  | b  |  c  | a  | b  | c  |  a  |  b  | c  
+-----+----+-----+----+----+----+-----+-----+----
+  -8 | 96 |  20 | 14 | 96 | 98 |  61 |  96 | 83
+  34 | 66 |  74 | 23 | 66 | 26 |  84 |  66 | 45
+  34 | 66 |  74 | 40 | 66 | 28 |  84 |  66 | 45
+  55 | 74 |  61 | 12 | 74 | 30 |  31 |  74 | 49
+  58 | 62 |  80 | 76 | 62 |    |  82 |  62 | 25
+  58 | 62 |  80 | 89 | 62 | 64 |  82 |  62 | 25
+  61 | 62 |  59 | 76 | 62 |    |  82 |  62 | 25
+  61 | 62 |  59 | 89 | 62 | 64 |  82 |  62 | 25
+  66 | 55 |  76 | 38 | 55 | 26 |  47 |  55 | 92
+  67 | 88 |  34 | 84 | 88 | 41 |  20 |  88 | 80
+  67 | 88 |  34 | 84 | 88 | 41 |  56 |  88 | 42
+  67 | 88 |  34 | 84 | 88 | 41 |  79 |  88 | 13
+  75 | 55 |  82 | 38 | 55 | 26 |  47 |  55 | 92
+  75 | 74 | 100 | 12 | 74 | 30 |  31 |  74 | 49
+  96 | 78 |  38 | 53 | 78 |    |  31 |  78 | 44
+  96 | 78 |  38 | 53 | 78 |    |  57 |  78 |   
+  96 | 78 |  38 | 78 | 78 | 26 |  31 |  78 | 44
+  96 | 78 |  38 | 78 | 78 | 26 |  57 |  78 |   
+  96 | 78 |  38 | 78 | 78 | 82 |  31 |  78 | 44
+  96 | 78 |  38 | 78 | 78 | 82 |  57 |  78 |   
+ 100 | 82 |  93 | 41 | 82 |    |  65 |  82 |  3
+     |    |     |  1 | 76 | 61 |  84 |  76 | 44
+     |    |     | 17 | 90 | 59 |   8 |  90 | 88
+     |    |     | 17 | 90 | 59 |  76 |  90 | 27
+     |    |     | 19 | 75 | 84 |  48 |  75 | 61
+     |    |     | 19 | 95 | 61 |  22 |  95 | 27
+     |    |     | 19 | 95 | 61 |  38 |  95 |   
+     |    |     | 46 | 95 |  5 |  22 |  95 | 27
+     |    |     | 46 | 95 |  5 |  38 |  95 |   
+     |    |     | 70 | 59 | 31 |   5 |  59 | 45
+     |    |     | 95 | 86 | 40 |  97 |  86 | 74
+     |    |     |    |    |    |   7 |  73 | 33
+     |    |     |    |    |    |  13 |  92 | 52
+     |    |     |    |    |    |  23 |  63 | 63
+     |    |     |    |    |    |  24 |  91 | 35
+     |    |     |    |    |    |  29 |  52 | 43
+     |    |     |    |    |    |  30 | 100 | 64
+     |    |     |    |    |    |  31 |  61 | 27
+     |    |     |    |    |    |  34 |  84 |   
+     |    |     |    |    |    |  47 |  69 | 75
+     |    |     |    |    |    |  54 |  54 | 14
+     |    |     |    |    |    |  54 |  83 |   
+     |    |     |    |    |    |  60 |  85 | 31
+     |    |     |    |    |    |  67 |  64 | 59
+     |    |     |    |    |    |  70 |  52 | 86
+     |    |     |    |    |    |  70 |  69 | 32
+     |    |     |    |    |    |  73 |  79 | 31
+     |    |     |    |    |    |  78 |  63 | 81
+     |    |     |    |    |    |  85 |  79 | 66
+     |    |     |    |    |    |  85 |  84 | 40
+     |    |     |    |    |    |  90 |  85 |  2
+     |    |     |    |    |    |  91 |  73 | 98
+     |    |     |    |    |    |  92 |  93 | 93
+     |    |     |    |    |    |  94 |  67 | 23
+     |    |     |    |    |    |  97 |  85 | 43
+     |    |     |    |    |    | 100 |  61 | 63
+(56 rows)
+
+--
+---- muti-equality clause
+--
+explain (verbose on, costs off)
+select count(*) from t1 inner join t2 on t1.a::int=t2.a and t1.a::int=t2.b where t2.b<10;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Aggregate
+               Output: count(*)
+               ->  Nested Loop
+                     Join Filter: ((t1.a)::integer = t2.a)
+                     ->  Seq Scan on public.t2
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.a
+                           Filter: ((t2.b < 10) AND (t2.a = t2.b))
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+                           Filter: ((t1.a)::integer < 10)
+(17 rows)
+
+explain (verbose on, costs off)
+select count(*) from t1 inner join t2 on t1.a=t2.a and t1.a=t2.b where t2.b<10;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Aggregate
+               Output: count(*)
+               ->  Nested Loop
+                     Join Filter: (t1.a = t2.a)
+                     ->  Seq Scan on public.t1
+                           Output: t1.a, t1.b, t1.c
+                           Distribute Key: t1.a
+                           Filter: (t1.a < 10)
+                     ->  Seq Scan on public.t2
+                           Output: t2.a, t2.b, t2.c
+                           Distribute Key: t2.a
+                           Filter: ((t2.b < 10) AND (t2.a = t2.b))
+(17 rows)
+
+--
+--- Clean up
+--
+drop table t1;
+drop table t2;
+drop table t3;
+--
+----Prepare
+--
+create table t1(id bigint, name varchar2);
+insert into t1 values(1,'apple');
+insert into t1 values(2,'banana');
+insert into t1 values(3,'coconut');
+create table t2(name varchar2, price number);
+insert into t2 values('apple',1.99);
+insert into t2 values('banana',0.99);
+insert into t2 values('coconut',0.5);
+analyze t1;
+analyze t2;
+explain (verbose on, costs off)
+select t1.id,t1.name,t2.price from t1 join t2 on t1.name=t2.name where t1.name='apple';
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.id, t1.name, t2.price
+   Node/s: All datanodes
+   ->  Nested Loop
+         Output: t1.id, t1.name, t2.price
+         ->  Streaming(type: REDISTRIBUTE)
+               Output: t1.id, t1.name
+               Distribute Key: t1.name
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Seq Scan on public.t1
+                     Output: t1.id, t1.name
+                     Distribute Key: t1.id
+                     Filter: ((t1.name)::text = 'apple'::text)
+         ->  Seq Scan on public.t2
+               Output: t2.name, t2.price
+               Distribute Key: t2.name
+               Filter: ((t2.name)::text = 'apple'::text)
+(18 rows)
+
+ 
+explain (verbose on, costs off)
+select t1.id,t1.name,t2.price from t1 join t2 on t1.name=t2.name where t1.name!='apple';
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.id, t1.name, t2.price
+   Node/s: All datanodes
+   ->  Nested Loop
+         Output: t1.id, t1.name, t2.price
+         Join Filter: ((t1.name)::text = (t2.name)::text)
+         ->  Streaming(type: REDISTRIBUTE)
+               Output: t1.id, t1.name
+               Distribute Key: t1.name
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Seq Scan on public.t1
+                     Output: t1.id, t1.name
+                     Distribute Key: t1.id
+                     Filter: ((t1.name)::text <> 'apple'::text)
+         ->  Seq Scan on public.t2
+               Output: t2.name, t2.price
+               Distribute Key: t2.name
+               Filter: ((t2.name)::text <> 'apple'::text)
+(19 rows)
+
+ 
+explain (verbose on, costs off)
+select t1.id,t1.name,t2.price from t1 join t2 on t1.name=t2.name where t1.name>'apple';
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.id, t1.name, t2.price
+   Node/s: All datanodes
+   ->  Nested Loop
+         Output: t1.id, t1.name, t2.price
+         Join Filter: ((t1.name)::text = (t2.name)::text)
+         ->  Streaming(type: REDISTRIBUTE)
+               Output: t1.id, t1.name
+               Distribute Key: t1.name
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Seq Scan on public.t1
+                     Output: t1.id, t1.name
+                     Distribute Key: t1.id
+                     Filter: ((t1.name)::text > 'apple'::text)
+         ->  Seq Scan on public.t2
+               Output: t2.name, t2.price
+               Distribute Key: t2.name
+               Filter: ((t2.name)::text > 'apple'::text)
+(19 rows)
+
+ 
+explain (verbose on, costs off)
+select t1.id,t1.name,t2.price from t1 join t2 on t1.name=t2.name where t1.name<'apple';
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.id, t1.name, t2.price
+   Node/s: All datanodes
+   ->  Nested Loop
+         Output: t1.id, t1.name, t2.price
+         Join Filter: ((t1.name)::text = (t2.name)::text)
+         ->  Streaming(type: REDISTRIBUTE)
+               Output: t1.id, t1.name
+               Distribute Key: t1.name
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Seq Scan on public.t1
+                     Output: t1.id, t1.name
+                     Distribute Key: t1.id
+                     Filter: ((t1.name)::text < 'apple'::text)
+         ->  Seq Scan on public.t2
+               Output: t2.name, t2.price
+               Distribute Key: t2.name
+               Filter: ((t2.name)::text < 'apple'::text)
+(19 rows)
+
+ 
+explain (verbose on, costs off)
+select t1.id,t1.name,t2.price from t1 join t2 on t1.name=t2.name where t1.name like 'a%';
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.id, t1.name, t2.price
+   Node/s: All datanodes
+   ->  Nested Loop
+         Output: t1.id, t1.name, t2.price
+         Join Filter: ((t1.name)::text = (t2.name)::text)
+         ->  Streaming(type: REDISTRIBUTE)
+               Output: t1.id, t1.name
+               Distribute Key: t1.name
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Seq Scan on public.t1
+                     Output: t1.id, t1.name
+                     Distribute Key: t1.id
+                     Filter: ((t1.name)::text ~~ 'a%'::text)
+         ->  Seq Scan on public.t2
+               Output: t2.name, t2.price
+               Distribute Key: t2.name
+               Filter: ((t2.name)::text ~~ 'a%'::text)
+(19 rows)
+
+ 
+explain (verbose on, costs off)
+select t1.id,t1.name,t2.price from t1 join t2 on t1.name=t2.name where substr(t1.name,1,2) in ('ap','co');
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.id, t1.name, t2.price
+   Node/s: All datanodes
+   ->  Nested Loop
+         Output: t1.id, t1.name, t2.price
+         Join Filter: ((t1.name)::text = (t2.name)::text)
+         ->  Streaming(type: REDISTRIBUTE)
+               Output: t1.id, t1.name
+               Distribute Key: t1.name
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Seq Scan on public.t1
+                     Output: t1.id, t1.name
+                     Distribute Key: t1.id
+                     Filter: (substr((t1.name)::text, 1, 2) = ANY ('{ap,co}'::text[]))
+         ->  Seq Scan on public.t2
+               Output: t2.name, t2.price
+               Distribute Key: t2.name
+               Filter: (substr((t2.name)::text, 1, 2) = ANY ('{ap,co}'::text[]))
+(19 rows)
+
+--
+--- Clean up
+--
+drop table t1;
+drop table t2;

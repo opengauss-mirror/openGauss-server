@@ -19,12 +19,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <time.h>
 
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "access/skey.h"
 #include "access/gtm.h"
+#include "access/tableam.h"
 #include "access/relscan.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_type.h"
@@ -38,7 +38,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/relcache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #include "nodes/nodes.h"
 #include "optimizer/clauses.h"
@@ -178,7 +178,7 @@ List* GetPreferredReplicationNode(List* relNodes)
     return NIL;
 #else
 
-    ListCell* item;
+    ListCell* item = NULL;
     int nodeid = -1;
 
     if (list_length(relNodes) <= 0)
@@ -213,7 +213,6 @@ List* GetPreferredReplicationNode(List* relNodes)
 int compute_modulo(unsigned int numerator, unsigned int denominator)
 {
 #ifndef ENABLE_MULTIPLE_NODES
-    Assert(false);
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return 0;
 #else
@@ -250,7 +249,7 @@ int compute_modulo(unsigned int numerator, unsigned int denominator)
         for (q = 0, r = 0; m > denominator; q++, r++)
             m = (m >> xc_mod_q[s][q]) + (m & xc_mod_r[s][r]);
 
-        m = m == denominator ? 0 : m;
+        m = (m == denominator) ? 0 : m;
 
         return m;
     }
@@ -340,18 +339,42 @@ bool IsTypeDistributable(Oid col_type)
         col_type == NUMERICOID || col_type == CHAROID || col_type == BPCHAROID || col_type == VARCHAROID ||
         col_type == NVARCHAR2OID || col_type == DATEOID || col_type == TIMEOID || col_type == TIMESTAMPOID ||
         col_type == TIMESTAMPTZOID || col_type == INTERVALOID || col_type == TIMETZOID ||
-        col_type == SMALLDATETIMEOID || col_type == TEXTOID || col_type == UUIDOID)
+        col_type == SMALLDATETIMEOID || col_type == TEXTOID || col_type == CLOBOID || col_type == UUIDOID)
         return true;
 
     // following types are not allowed as distribution column
     // seldom used, non-standard, imprecise or large data types
-    if (g_instance.attr.attr_common.support_extended_features &&
-        (col_type == OIDOID || col_type == ABSTIMEOID || col_type == RELTIMEOID || col_type == CASHOID ||
-            col_type == BYTEAOID || col_type == RAWOID || col_type == BOOLOID || col_type == NAMEOID ||
-            col_type == INT2VECTOROID || col_type == OIDVECTOROID || col_type == FLOAT4OID || col_type == FLOAT8OID))
+    if (g_instance.attr.attr_common.support_extended_features && (col_type == OIDOID || col_type == ABSTIMEOID ||
+        col_type == RELTIMEOID || col_type == CASHOID || col_type == BYTEAOID || col_type == RAWOID ||
+        col_type == BOOLOID || col_type == NAMEOID || col_type == INT2VECTOROID || col_type == OIDVECTOROID ||
+        col_type == FLOAT4OID || col_type == FLOAT8OID || col_type == BYTEAWITHOUTORDERWITHEQUALCOLOID))
         return true;
 
     return false;
+}
+
+
+bool IsTypeDistributableForSlice(Oid colType)
+{
+    switch (colType) {
+        case INT2OID:
+        case INT4OID:
+        case INT8OID:
+        case NUMERICOID:
+            return true;
+        case CHAROID:
+        case BPCHAROID:
+        case VARCHAROID:
+        case NVARCHAR2OID:
+        case TEXTOID:
+            return true;
+        case DATEOID:
+        case TIMESTAMPOID:
+        case TIMESTAMPTZOID:
+            return true;
+        default:
+            return false;
+    }
 }
 
 /*
@@ -390,12 +413,12 @@ bool IsTableDistOnPrimary(RelationLocInfo* rel_loc_info)
 {
     ListCell* item = NULL;
 
-    if (!OidIsValid(t_thrd.pgxc_cxt.primary_data_node) || rel_loc_info == NULL ||
+    if (!OidIsValid(u_sess->pgxc_cxt.primary_data_node) || rel_loc_info == NULL ||
         list_length(rel_loc_info->nodeList) == 0)
         return false;
 
     foreach (item, rel_loc_info->nodeList) {
-        if (PGXCNodeGetNodeId(t_thrd.pgxc_cxt.primary_data_node, PGXC_NODE_DATANODE) == lfirst_int(item))
+        if (PGXCNodeGetNodeId(u_sess->pgxc_cxt.primary_data_node, PGXC_NODE_DATANODE) == lfirst_int(item))
             return true;
     }
     return false;
@@ -412,7 +435,8 @@ bool IsLocatorInfoEqual(RelationLocInfo* locInfo1, RelationLocInfo* locInfo2)
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return false;
 #else
-    List *nodeList1, *nodeList2;
+    List* nodeList1 = NULL;
+    List* nodeList2 = NULL;
     Assert(locInfo1 && locInfo2);
 
     nodeList1 = locInfo1->nodeList;
@@ -439,12 +463,19 @@ bool IsLocatorInfoEqual(RelationLocInfo* locInfo1, RelationLocInfo* locInfo2)
 #endif
 }
 
+bool IsSliceInfoEqualByOid(Oid tabOid1, Oid tabOid2)
+{
+    Assert(false);
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+    return false;
+}
+
 /*
  * InitBuckets
  *
  * Set buckets_ptr of RelationLocInfo
  */
-static void InitBuckets(RelationLocInfo* rel_loc_info, Relation relation)
+void InitBuckets(RelationLocInfo* rel_loc_info, Relation relation)
 {
     Relation rel = relation;
 
@@ -485,7 +516,7 @@ static void InitBuckets(RelationLocInfo* rel_loc_info, Relation relation)
  */
 
 ExecNodes* GetRelationNodes(RelationLocInfo* rel_loc_info, Datum* values, const bool* nulls, Oid* attr,
-    List* idx_dist_by_col, RelationAccessType accessType, bool needDistribution)
+    List* idx_dist_by_col, RelationAccessType accessType, bool needDistribution, bool use_bucketmap)
 {
 #ifndef ENABLE_MULTIPLE_NODES
     Assert(false);
@@ -493,7 +524,7 @@ ExecNodes* GetRelationNodes(RelationLocInfo* rel_loc_info, Datum* values, const 
     return NULL;
 #else
 
-    ExecNodes* exec_nodes;
+    ExecNodes* exec_nodes = NULL;
     long hashValue;
     int modulo;
     int nodeIndex;
@@ -504,6 +535,7 @@ ExecNodes* GetRelationNodes(RelationLocInfo* rel_loc_info, Datum* values, const 
     exec_nodes = makeNode(ExecNodes);
     exec_nodes->baselocatortype = rel_loc_info->locatorType;
     exec_nodes->accesstype = accessType;
+    exec_nodes->bucketid = INVALID_BUCKET_ID;
 
     switch (rel_loc_info->locatorType) {
         case LOCATOR_TYPE_REPLICATED:
@@ -525,7 +557,8 @@ ExecNodes* GetRelationNodes(RelationLocInfo* rel_loc_info, Datum* values, const 
                  * on replicated tables. If -1, do not use primary copy.
                  */
                 if (IsTableDistOnPrimary(rel_loc_info) && exec_nodes->nodeList &&
-                    list_length(exec_nodes->nodeList) > 1) { /* make sure more than 1 */
+                    list_length(exec_nodes->nodeList) > 1) /* make sure more than 1 */
+                {
                     exec_nodes->primarynodelist =
                         list_make1_int(PGXCNodeGetNodeId(primary_data_node, PGXC_NODE_DATANODE));
                     exec_nodes->nodeList =
@@ -548,6 +581,7 @@ ExecNodes* GetRelationNodes(RelationLocInfo* rel_loc_info, Datum* values, const 
                 modulo = compute_modulo(abs(hashValue), list_length(rel_loc_info->nodeList));
                 nodeIndex = get_node_from_modulo(modulo, rel_loc_info->nodeList);
                 exec_nodes->nodeList = list_make1_int(nodeIndex);
+                exec_nodes->bucketid = compute_modulo(abs((int)hashValue), BUCKETDATALEN);
             } else {
                 if (accessType == RELATION_ACCESS_INSERT)
                     /* Insert NULL to first node */
@@ -568,8 +602,6 @@ ExecNodes* GetRelationNodes(RelationLocInfo* rel_loc_info, Datum* values, const 
                 exec_nodes->nodeList = list_copy(rel_loc_info->nodeList);
             break;
 
-            /* PGXCTODO case LOCATOR_TYPE_RANGE: */
-            /* PGXCTODO case LOCATOR_TYPE_CUSTOM: */
         default:
             ereport(ERROR, (errmsg("Error: no such supported locator type: %c\n", rel_loc_info->locatorType)));
             break;
@@ -603,6 +635,7 @@ ExecNodes* GetRelationNodesByQuals(void* query_arg, Oid reloid, Index varno, Nod
     List* idx_dist = NULL;
     /* datanodes reduction where there are params */
     List* distcol_expr_list = NULL;
+    List* bucket_expr_list = NULL;
     bool needDynamicReduce = false;
 
     int len = 0;
@@ -714,9 +747,17 @@ ExecNodes* GetRelationNodesByQuals(void* query_arg, Oid reloid, Index varno, Nod
                     }
                     needDynamicReduce = true;
                 } else {
+                    if (IsA(distcol_expr_original, Param) && boundParams == NULL) {
+                        Param* param_expr = (Param*)distcol_expr_original;
+                        /* node reduction only for PARAM_EXTERN params with the form '$n' */
+                        if (param_expr->paramkind != PARAM_EXTERN) {
+                            break;
+                        }
+                    }
                     break;
                 }
                 distcol_expr_list = lappend(distcol_expr_list, copyObject(distcol_expr));
+                bucket_expr_list = lappend(bucket_expr_list, copyObject(distcol_expr));
             } else {
                 break;
             }
@@ -753,11 +794,26 @@ ExecNodes* GetRelationNodesByQuals(void* query_arg, Oid reloid, Index varno, Nod
         exec_nodes->nodeList = NIL;
         exec_nodes->en_relid = rel_loc_info->relid;
         exec_nodes->nodelist_is_nil = true;
-    } else {
-        list_free_deep(distcol_expr_list);
+    }
+
+    if (exec_nodes != NULL && list_length(rel_loc_info->partAttrNum) == list_length(bucket_expr_list)) {
+        exec_nodes->bucketexpr = bucket_expr_list;
+        exec_nodes->bucketrelid = rel_loc_info->relid;
     }
 
     return exec_nodes;
+}
+
+void PruningDatanode(ExecNodes* execNodes, ParamListInfo boundParams)
+{
+    Assert(false);
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+}
+
+void ConstructSliceBoundary(ExecNodes* en)
+{
+    Assert(false);
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
 }
 
 /*
@@ -795,13 +851,12 @@ char GetLocatorType(Oid relid)
  */
 List* GetAllDataNodes(void)
 {
-    int i;
-    List* nodeList = NIL;
-
-    for (i = 0; i < u_sess->pgxc_cxt.NumDataNodes; i++)
-        nodeList = lappend_int(nodeList, i);
-
-    return nodeList;
+    if (IS_STREAM) {
+        /* single node only has one node */
+        return lappend_int(NIL, 0);
+    } else {
+        return NIL;
+    }
 }
 
 /*
@@ -856,6 +911,9 @@ static uint2* tryGetBucketMap(const char* groupname, char* relname, bool isOther
     HeapTuple htup;
     int len;
     rel = heap_open(PgxcGroupRelationId, ShareLock);
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     len = BUCKETDATALEN * sizeof(uint2);
 
     htup = SearchSysCache1(PGXCGROUPNAME, CStringGetDatum(groupname));
@@ -897,7 +955,7 @@ void RelationBuildLocator(Relation rel)
     SysScanDesc pcscan;
     HeapTuple htup;
     MemoryContext oldContext;
-    RelationLocInfo* relationLocInfo;
+    RelationLocInfo* relationLocInfo = NULL;
     int j;
     Form_pgxc_class pgxc_class;
 
@@ -987,10 +1045,11 @@ RelationLocInfo* GetRelationLocInfo(Oid relid)
      * It may not be the most efficient solution, the idea way is to invalidate all relcache
      * in pgxc_pool_reload(), -- will improve later.
      */
-    if (ret_loc_info && rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE) {
+    if (ret_loc_info && (RELKIND_FOREIGN_TABLE == rel->rd_rel->relkind 
+        || RELKIND_STREAM == rel->rd_rel->relkind)) {
         ExecNodes* exec_nodes = RelidGetExecNodes(relid, false);
 
-        if (exec_nodes->nodeList != NIL) {
+        if (NIL != exec_nodes->nodeList) {
             ret_loc_info->nodeList = list_copy(exec_nodes->nodeList);
             list_free(exec_nodes->nodeList);
             bms_free(exec_nodes->distribution.bms_data_nodeids);
@@ -1000,6 +1059,37 @@ RelationLocInfo* GetRelationLocInfo(Oid relid)
     }
 
     relation_close(rel, AccessShareLock);
+
+    return ret_loc_info;
+}
+
+/*
+ * GetLocatorRelationInfoDN
+ * Returns the locator information for hashbucket relation
+ * only relid and partAttrNum is valid, other fields are dummy
+ */
+RelationLocInfo* GetRelationLocInfoDN(Oid reloid)
+{
+    RelationLocInfo* ret_loc_info = NULL;
+    Relation relation = heap_open(reloid, NoLock);
+
+    if (!REALTION_BUCKETKEY_VALID(relation)) {
+        heap_close(relation, NoLock);
+        return NULL;
+    }
+
+    ret_loc_info = (RelationLocInfo*)palloc0(sizeof(RelationLocInfo));
+    ret_loc_info->relid = reloid;
+    ret_loc_info->locatorType = LOCATOR_TYPE_HASH;
+    ret_loc_info->nodeList = lappend_int(ret_loc_info->nodeList, u_sess->pgxc_cxt.PGXCNodeId);
+
+    int2vector* colids = relation->rd_bucketkey->bucketKey;
+
+    for (int i = 0; i< colids->dim1; i++) {
+        ret_loc_info->partAttrNum = lappend_int(ret_loc_info->partAttrNum, colids->values[i]);
+    }
+
+    heap_close(relation, NoLock);
 
     return ret_loc_info;
 }
@@ -1015,7 +1105,7 @@ RelationLocInfo* CopyRelationLocInfo(RelationLocInfo* srcInfo)
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return NULL;
 #else
-    RelationLocInfo* destInfo;
+    RelationLocInfo* destInfo = NULL;
 
     Assert(srcInfo);
     destInfo = (RelationLocInfo*)palloc0(sizeof(RelationLocInfo));
@@ -1053,11 +1143,19 @@ Distribution* NewDistribution()
 {
     Distribution* distribution = (Distribution*)palloc0(sizeof(Distribution));
 
-    if (NULL == distribution) {
+    if (distribution == NULL) {
         ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("Could not alloc new memory.")));
     }
 
     return distribution;
+}
+
+void DestroyDistribution(Distribution* distribution)
+{
+    if (distribution != NULL) {
+        bms_free(distribution->bms_data_nodeids);
+        pfree(distribution);
+    }
 }
 
 /*
@@ -1236,14 +1334,14 @@ int GetMinDnNum()
 {
     int dataNodeNum = u_sess->pgxc_cxt.NumDataNodes;
     Relation rel = NULL;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tuple;
     bool isNull = false;
 
     rel = heap_open(PgxcGroupRelationId, ShareLock);
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
 
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         Datum group_members_datum = heap_getattr(tuple, Anum_pgxc_group_members, RelationGetDescr(rel), &isNull);
         /* Should not happend */
         if (isNull) {
@@ -1259,7 +1357,7 @@ int GetMinDnNum()
         }
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, ShareLock);
 
     return dataNodeNum;

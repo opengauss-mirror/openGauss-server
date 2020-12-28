@@ -121,7 +121,7 @@ private:
 
     FORCE_INLINE uint32 get_bucket(uint32 hashvalue)
     {
-        return hashvalue & (m_size - 1);
+        return hashvalue & (uint32)(m_size - 1);
     }
     template <bool simple>
     void AllocHashSlot(VectorBatch* batch, int i, int flag, bool foundMatch, SetOpHashCell* cell);

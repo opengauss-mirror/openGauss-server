@@ -12,12 +12,12 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- *
+ * 
  * gtm_semaphore.h
  *        Wrapper semaphore for the sysv sema. Currently the database only use the
- *        sysv sema.
- *
- *
+ *        sysv sema. 
+ * 
+ * 
  * IDENTIFICATION
  *        src/include/gtm/gtm_semaphore.h
  *
@@ -34,7 +34,7 @@ typedef struct PGSemaphoreData {
     int semNum; /* semaphore number within set */
 } PGSemaphoreData;
 
-typedef PGSemaphoreData *PGSemaphore;
+typedef PGSemaphoreData* PGSemaphore;
 
 /* key_t is the int type */
 typedef key_t IpcSemaphoreKey; /* semaphore key passed to semget */
@@ -97,7 +97,7 @@ void reset_sema_key(int sema_key);
  * @in value, the given initial value.
  * @return none
  */
-void create_sema(PGSemaphore sema, IpcSemaphoreKey &key, int value);
+void create_sema(PGSemaphore sema, IpcSemaphoreKey& key, int value);
 
 /**
  * @Description: Lock a semaphore (decrement count), blocking if

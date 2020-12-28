@@ -1,0 +1,73 @@
+--create resource pool success.
+CREATE RESOURCE POOL respool_temp15 WITH ( MEM_PERCENT=1,CPU_affinity=1);
+CREATE WORKLOAD GROUP  wlgroup_15 USING RESOURCE POOL respool_temp15 WITH(ACT_STATEMENTS=100); 
+CREATE APP WORKLOAD GROUP MAPPING GSQL WITH (WORKLOAD_GPNAME=wlgroup_15);
+SELECT * FROM pg_resource_pool;
+  respool_name  | mem_percent | cpu_affinity | control_group 
+----------------+-------------+--------------+---------------
+ default_pool   |          99 |           -1 | 
+ respool_temp15 |           1 |            1 | 
+(2 rows)
+
+SELECT * FROM pg_workload_group;
+ workload_gpname | respool_oid | act_statements 
+-----------------+-------------+----------------
+ default_group   |          10 |             -1
+--? wlgroup_15   |.*|              100
+(2 rows)
+
+SELECT * FROM pg_app_workloadgroup_mapping;
+       appname       | workload_gpname 
+---------------------+-----------------
+ default_application | default_group
+ gsql                | wlgroup_15
+(2 rows)
+
+--create data tables.
+create table test_table_a(a varchar(256),b varchar(256),c varchar(256),d varchar(256),e varchar(256),f varchar(256),g varchar(256),h varchar(256),i varchar(256),j varchar(256));
+create table test_table_b as select * from test_table_a;
+create table test_table_c as select * from test_table_a;
+create table test_table_d as select * from test_table_a;
+create table test_table_e as select * from test_table_a;
+create table test_table_f as select * from test_table_a;
+create table test_table_g as select * from test_table_a;
+create table test_table_h as select * from test_table_a;
+create table test_table_i as select * from test_table_a;
+create table test_table_j as select * from test_table_a;
+--wlm memory enqueue.
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from pg_sleep(10), test_table_a as a full join test_table_b b on(b.a=a.a) full join test_table_c c on(c.a=a.a) full join test_table_d d on(d.a=a.a) full join test_table_e e on(e.a=a.a) full join test_table_f f on(f.a=a.a);" &
+\! sleep 12
+ERROR:  workload manager reserving memory [25 MB] unsuccessful for query: "select * from pg_sleep(10), test_table_a as a full join test_table_b b on(b.a=a.a) full join test_table_c c on(c.a=a.a) full join test_table_d d on(d.a=a.a) full join test_table_e e on(e.a=a.a) full join test_table_f f on(f.a=a.a);". reason: Memory is not enough.
+--drop data ebales.
+drop table test_table_a;
+drop table test_table_b;
+drop table test_table_c;
+drop table test_table_d;
+drop table test_table_e;
+drop table test_table_f;
+drop table test_table_g;
+drop table test_table_h;
+drop table test_table_i;
+drop table test_table_j;
+--drop resource pool success.
+DROP APP WORKLOAD GROUP MAPPING GSQL;
+DROP WORKLOAD GROUP wlgroup_15;
+DROP RESOURCE POOL respool_temp15;
+SELECT * FROM pg_resource_pool;
+ respool_name | mem_percent | cpu_affinity | control_group 
+--------------+-------------+--------------+---------------
+ default_pool |         100 |           -1 | 
+(1 row)
+
+SELECT * FROM pg_workload_group;
+ workload_gpname | respool_oid | act_statements 
+-----------------+-------------+----------------
+ default_group   |          10 |             -1
+(1 row)
+
+SELECT * FROM pg_app_workloadgroup_mapping;
+       appname       | workload_gpname 
+---------------------+-----------------
+ default_application | default_group
+(1 row)
+

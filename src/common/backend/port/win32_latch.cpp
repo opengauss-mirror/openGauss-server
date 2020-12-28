@@ -22,7 +22,6 @@
 
 #include <fcntl.h>
 #include <signal.h>
-#include <unistd.h>
 
 #include "miscadmin.h"
 #include "portability/instr_time.h"

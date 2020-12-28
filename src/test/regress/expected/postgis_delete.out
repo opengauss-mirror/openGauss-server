@@ -1,0 +1,21 @@
+drop extension postgis cascade;
+NOTICE:  drop cascades to 8 other objects
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+drop schema postgis cascade;
+NOTICE:  drop cascades to 9 other objects
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*

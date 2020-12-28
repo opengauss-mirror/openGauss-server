@@ -3,6 +3,7 @@
  * slru.h
  *		Simple LRU buffering for transaction status logfiles
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -14,7 +15,7 @@
 #define SLRU_H
 
 #include "access/xlogdefs.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 
 /*
  * Define SLRU segment size.  A page is the same BLCKSZ as is used everywhere
@@ -112,7 +113,7 @@ typedef struct SlruSharedData {
      * by the computed ShmemVariableCache->nextXid after replaying all xlog records.
      * If ShmemVariableCache->nextXid happens to be the first xid of a new clog page,
      * extension of this page will not occur due to the shortcut mechanism of ExtendCLOG.
-     * We distinguish such scenario by setting ForceCheckFirstXid true and bypass the shortcut
+     * We distinguish such scenario by setting force_check_first_xid true and bypass the shortcut
      * in order not to miss the clog page extension.
      */
     bool force_check_first_xid;

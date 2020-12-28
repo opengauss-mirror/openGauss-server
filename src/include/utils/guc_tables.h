@@ -79,6 +79,7 @@ enum config_group {
     STATS,
     STATS_MONITORING,
     STATS_COLLECTOR,
+    STREAMING,
     AUTOVACUUM,
     JOB,
     CLIENT_CONN,
@@ -97,6 +98,7 @@ enum config_group {
     UPGRADE_OPTIONS,
     TSDB,
     INSTRUMENTS_OPTIONS,
+    CE_OPTIONS,
 #ifdef PGXC
     DATA_NODES,
     GTM,

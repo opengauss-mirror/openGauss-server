@@ -18,11 +18,11 @@
 
 #include "commands/sequence.h"
 
-void seq_desc(StringInfo buf, XLogReaderState* record)
+void seq_desc(StringInfo buf, XLogReaderState *record)
 {
-    char* rec = XLogRecGetData(record);
+    char *rec = XLogRecGetData(record);
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
-    xl_seq_rec* xlrec = (xl_seq_rec*)rec;
+    xl_seq_rec *xlrec = (xl_seq_rec *)rec;
 
     if (info == XLOG_SEQ_LOG)
         appendStringInfo(buf, "log: ");
@@ -33,4 +33,3 @@ void seq_desc(StringInfo buf, XLogReaderState* record)
 
     appendStringInfo(buf, "rel %u/%u/%u", xlrec->node.spcNode, xlrec->node.dbNode, xlrec->node.relNode);
 }
-

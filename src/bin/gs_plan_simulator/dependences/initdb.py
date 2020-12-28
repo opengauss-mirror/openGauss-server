@@ -55,6 +55,11 @@ class Pterodb():
 		self.data_node_num = data_node_num
 		self.data_dir = data_dir
 
+	def get_rand_string(self):
+		with open("/dev/random", "rb") as fd:
+			st = fd.read(13)
+		return "%s%s" % ("GS@", st.encode("hex"))
+
 	def init_env(self):
 		if(os.path.exists(self.data_dir) == False):
 			os.mkdir(self.data_dir)
@@ -71,19 +76,15 @@ class Pterodb():
 		conf_file = self.data_dir + "/gtm_data/gtm.conf"
 		global port_
 		self.__modify_conf_port(conf_file, 100, 1)
-		pwd = ''.join(random.sample(string.ascii_letters, 2))
-		pwd = pwd + "@" + ''.join(random.sample(string.digits, 8))
-		print pwd
+		pwd = self.get_rand_string()
 		for i in range(1, self.coordinator_num+1):
 			coor_cmd_init = bin_path + "bin/gs_initdb -w " + pwd + " -D " + self.data_dir + "/coordinator" + str(i) + " --nodename=coordinator" + str(i)
-			print coor_cmd_init
 			os.system(coor_cmd_init)
 			conf_file = self.data_dir + "/coordinator"+ str(i) + "/postgresql.conf"
 			self.__modify_conf_port(conf_file, i-1, -1)
 
 		for i in range(1, self.data_node_num+1):
 			datanode_cmd_init = bin_path + "bin/gs_initdb -w " + pwd + " -D " + self.data_dir + "/data_node" + str(i) + " --nodename=datanode" + str(i)
-			print datanode_cmd_init
 			os.system(datanode_cmd_init)
 			conf_file = self.data_dir + "/data_node"+ str(i) + "/postgresql.conf"
 			self.__modify_conf_port(conf_file, i, 0)

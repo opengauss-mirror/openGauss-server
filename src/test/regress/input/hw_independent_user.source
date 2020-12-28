@@ -1,33 +1,33 @@
 --test separation of privilege
-create user sysuser with sysadmin password 'ttest@123';
-create user secuser with createrole password 'ttest@123';
-create user auduser with auditadmin password 'ttest@123';
+create user sysuser with sysadmin password 'gauss@123';
+create user secuser with createrole password 'gauss@123';
+create user auduser with auditadmin password 'gauss@123';
 
-create user independent_user with independent sysadmin password 'ttest@123';
-create user independent_user with independent createrole password 'ttest@123';
-create user independent_user with independent auditadmin password 'ttest@123';
-create user independent_user with independent password 'ttest@123';
+create user independent_user with independent sysadmin password 'gauss@123';
+create user independent_user with independent createrole password 'gauss@123';
+create user independent_user with independent auditadmin password 'gauss@123';
+create user independent_user with independent password 'gauss@123';
 alter user independent_user with sysadmin;
 alter user independent_user with createrole;
 alter user independent_user with auditadmin;
 alter user independent_user with noindependent;
 
-create user noindependent_user with noindependent password 'ttest@123';
+create user noindependent_user with noindependent password 'gauss@123';
 alter user independent_user with independent user noindependent_user;
 alter user noindependent_user with sysadmin independent;
 alter user noindependent_user with createrole independent;
 alter user noindependent_user with auditadmin independent;
 alter user noindependent_user with independent;
-create user create_role_in_independent_role in role independent_user password 'ttest@123';
-create user create_independent_role_to_role with independent role sysuser password 'ttest@123';
-create user create_independent_role_to_role with independent admin sysuser password 'ttest@123';
-alter user noindependent_user identified by 'ttest@789';
+create user create_role_in_independent_role in role independent_user password 'gauss@123';
+create user create_independent_role_to_role with independent role sysuser password 'gauss@123';
+create user create_independent_role_to_role with independent admin sysuser password 'gauss@123';
+alter user noindependent_user identified by 'gauss@789';
 grant independent_user to noindependent_user;
-\! @abs_bindir@/gsql -d regression -U noindependent_user -W 'ttest@123' -p @portstring@ -c 'alter user noindependent_user with noindependent;'
-\! @abs_bindir@/gsql -d regression -U independent_user -W 'ttest@123' -p @portstring@ -c 'create table independent_tbl(id1 int,id2 int);insert into independent_tbl values(100,100);insert into independent_tbl values(300,300);'
-\! @abs_bindir@/gsql -d regression -U independent_user -W 'ttest@123' -p @portstring@ -c 'create view independent_user.myview as select * from independent_user.independent_tbl;'
-\! @abs_bindir@/gsql -d regression -U noindependent_user -W 'ttest@123' -p @portstring@ -c 'create table noindependent_tbl(id1 int,id2 int);insert into noindependent_tbl values(100,100);insert into noindependent_tbl values(300,300);'
-\! @abs_bindir@/gsql -d regression -U noindependent_user -W 'ttest@123' -p @portstring@ -c 'create view noindependent_user.myview as select * from noindependent_user.noindependent_tbl;'
+\! @abs_bindir@/gsql -d regression -U noindependent_user -W 'gauss@123' -p @portstring@ -c 'alter user noindependent_user with noindependent;'
+\! @abs_bindir@/gsql -d regression -U independent_user -W 'gauss@123' -p @portstring@ -c 'create table independent_tbl(id1 int,id2 int);insert into independent_tbl values(100,100);insert into independent_tbl values(300,300);'
+\! @abs_bindir@/gsql -d regression -U independent_user -W 'gauss@123' -p @portstring@ -c 'create view independent_user.myview as select * from independent_user.independent_tbl;'
+\! @abs_bindir@/gsql -d regression -U noindependent_user -W 'gauss@123' -p @portstring@ -c 'create table noindependent_tbl(id1 int,id2 int);insert into noindependent_tbl values(100,100);insert into noindependent_tbl values(300,300);'
+\! @abs_bindir@/gsql -d regression -U noindependent_user -W 'gauss@123' -p @portstring@ -c 'create view noindependent_user.myview as select * from noindependent_user.noindependent_tbl;'
 --independent
 insert into independent_user.independent_tbl values(100,100);
 delete from independent_user.independent_tbl where id1=100;
@@ -75,8 +75,8 @@ select * into public.temp_create_tbl from independent_user.independent_tbl;
 create index indep_idx on independent_user.independent_tbl(id2);
 drop index independent_user.indep_idx;
 --test disable password for independent
-\! @abs_bindir@/gsql -d regression -U independent_user -W 'ttest@123' -p @portstring@ -c 'alter user independent_user password disable;'
-\! @abs_bindir@/gsql -d regression -U noindependent_user -W 'ttest@123' -p @portstring@ -c 'alter user noindependent_user password disable;'
+\! @abs_bindir@/gsql -d regression -U independent_user -W 'gauss@123' -p @portstring@ -c 'alter user independent_user password disable;'
+\! @abs_bindir@/gsql -d regression -U noindependent_user -W 'gauss@123' -p @portstring@ -c 'alter user noindependent_user password disable;'
 alter user independent_user password disable;
 alter user noindependent_user password disable;
 

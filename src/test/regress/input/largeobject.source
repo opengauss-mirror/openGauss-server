@@ -142,14 +142,14 @@ SELECT loread(fd, 36) FROM lotest_stash_values;
 SELECT lo_close(fd) FROM lotest_stash_values;
 END;
 
-SELECT lo_export(loid, '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/lotest.txt') FROM lotest_stash_values;
-COPY lotest_stash_values TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/lotest.txt';
-\lo_import '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/lotest.txt'
+SELECT lo_export(loid, '@abs_builddir@/results/lotest.txt') FROM lotest_stash_values;
+COPY lotest_stash_values TO '@abs_builddir@/results/lotest.txt';
+\lo_import '@abs_builddir@/results/lotest.txt'
 
 \set newloid :LASTOID
 
 -- just make sure \lo_export does not barf
-\lo_export :newloid '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/lotest2.txt'
+\lo_export :newloid '@abs_builddir@/results/lotest2.txt'
 
 -- This is a hack to test that export/import are reversible
 -- This uses knowledge about the inner workings of large object mechanism

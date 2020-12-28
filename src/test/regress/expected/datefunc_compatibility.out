@@ -1,0 +1,94 @@
+select add_months('2018-02-28',3) from dual;
+        add_months        
+--------------------------
+ Mon May 28 00:00:00 2018
+(1 row)
+
+select add_months('2018-02-27',3) from dual;
+        add_months        
+--------------------------
+ Sun May 27 00:00:00 2018
+(1 row)
+
+select add_months('2018-01-31',1) from dual;
+        add_months        
+--------------------------
+ Wed Feb 28 00:00:00 2018
+(1 row)
+
+select add_months('2018-01-31',2) from dual;
+        add_months        
+--------------------------
+ Sat Mar 31 00:00:00 2018
+(1 row)
+
+select add_months('2018-01-31',4) from dual;
+        add_months        
+--------------------------
+ Thu May 31 00:00:00 2018
+(1 row)
+
+
+set behavior_compat_options='end_month_calculate';
+select add_months('2018-02-28',3) from dual;
+        add_months        
+--------------------------
+ Thu May 31 00:00:00 2018
+(1 row)
+
+select add_months('2018-02-27',3) from dual;
+        add_months        
+--------------------------
+ Sun May 27 00:00:00 2018
+(1 row)
+
+select add_months('2018-01-31',1) from dual;
+        add_months        
+--------------------------
+ Wed Feb 28 00:00:00 2018
+(1 row)
+
+select add_months('2018-01-31',2) from dual;
+        add_months        
+--------------------------
+ Sat Mar 31 00:00:00 2018
+(1 row)
+
+select add_months('2018-01-31',4) from dual;
+        add_months        
+--------------------------
+ Thu May 31 00:00:00 2018
+(1 row)
+
+
+set behavior_compat_options='';
+select add_months('2018-02-28',3) from dual;
+        add_months        
+--------------------------
+ Mon May 28 00:00:00 2018
+(1 row)
+
+select add_months('2018-02-27',3) from dual;
+        add_months        
+--------------------------
+ Sun May 27 00:00:00 2018
+(1 row)
+
+select add_months('2018-01-31',1) from dual;
+        add_months        
+--------------------------
+ Wed Feb 28 00:00:00 2018
+(1 row)
+
+select add_months('2018-01-31',2) from dual;
+        add_months        
+--------------------------
+ Sat Mar 31 00:00:00 2018
+(1 row)
+
+select add_months('2018-01-31',4) from dual;
+        add_months        
+--------------------------
+ Thu May 31 00:00:00 2018
+(1 row)
+

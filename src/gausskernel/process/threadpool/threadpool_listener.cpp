@@ -50,16 +50,21 @@
 
 #define INVALID_FD (-1)
 
-static void t_pool_listener_loop(ThreadPoolListener* listener);
+static void TpoolListenerLoop(ThreadPoolListener* listener);
 
-static void listener_sigusrl_handler(SIGNAL_ARGS)
+static void ListenerSIGUSR1Handler(SIGNAL_ARGS)
 {
     t_thrd.threadpool_cxt.listener->m_reaperAllSession = true;
 }
 
+static void ListenerSIGKILLHandler(SIGNAL_ARGS)
+{
+    proc_exit(0);
+}
+
 void TpoolListenerMain(ThreadPoolListener* listener)
 {
-    knl_thread_set_name("ThdPoolListener");
+    t_thrd.proc_cxt.MyProgName = "ThreadPoolListener";
     pgstat_report_appname("ThreadPoolListener");
 
     (void)gspqsignal(SIGHUP, SIG_IGN);
@@ -68,11 +73,12 @@ void TpoolListenerMain(ThreadPoolListener* listener)
     (void)gspqsignal(SIGTERM, SIG_IGN);
     (void)gspqsignal(SIGQUIT, SIG_IGN);
     (void)gspqsignal(SIGPIPE, SIG_IGN);
-    (void)gspqsignal(SIGUSR1, listener_sigusrl_handler);
+    (void)gspqsignal(SIGUSR1, ListenerSIGUSR1Handler);
     (void)gspqsignal(SIGUSR2, SIG_IGN);
     (void)gspqsignal(SIGFPE, FloatExceptionHandler);
     (void)gspqsignal(SIGCHLD, SIG_DFL);
     (void)gspqsignal(SIGHUP, SIG_IGN);
+    (void)gspqsignal(SIGKILL, ListenerSIGKILLHandler);
 
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
@@ -80,11 +86,11 @@ void TpoolListenerMain(ThreadPoolListener* listener)
     listener->CreateEpoll();
     listener->NotifyReady();
 
-    t_pool_listener_loop(listener);
+    TpoolListenerLoop(listener);
     proc_exit(0);
 }
 
-static void t_pool_listener_loop(ThreadPoolListener* listener)
+static void TpoolListenerLoop(ThreadPoolListener* listener)
 {
     listener->WaitTask();
 }
@@ -119,7 +125,7 @@ ThreadPoolListener::~ThreadPoolListener()
 int ThreadPoolListener::StartUp()
 {
     m_tid = initialize_util_thread(THREADPOOL_LISTENER, (void*)this);
-    return (m_tid == 0 ? STATUS_ERROR : STATUS_OK);
+    return ((m_tid == 0) ? STATUS_ERROR : STATUS_OK);
 }
 
 void ThreadPoolListener::NotifyReady()
@@ -131,6 +137,7 @@ void ThreadPoolListener::CreateEpoll()
 {
     /* MAX_LISTEN_SESSIONS for epool_create is ignored Since Linux 2.6.8 */
     m_epollFd = epoll_create(GLOBAL_MAX_SESSION_NUM);
+
     if (m_epollFd == INVALID_FD) {
         ereport(LOG,
             (errmsg("Fail to create epoll for thread pool listener, "
@@ -140,6 +147,7 @@ void ThreadPoolListener::CreateEpoll()
     }
 
     m_epollEvents = (struct epoll_event*)palloc0_noexcept(sizeof(struct epoll_event) * GLOBAL_MAX_SESSION_NUM);
+
     if (m_epollEvents == NULL) {
         elog(LOG, "Not enough memory for listener epoll");
         proc_exit(0);
@@ -151,7 +159,10 @@ void ThreadPoolListener::AddEpoll(knl_session_context* session)
     struct epoll_event ev = {0};
 
     m_idleSessionList->AddTail(&session->elem);
-
+    ereport(DEBUG2, 
+        (errmodule(MOD_THREAD_POOL),
+            errmsg("Add a session to idleSessionList, now length is %lu, ",
+                m_idleSessionList->GetLength())));
     /*
      * Because we will dispatch the socket to worker thread once
      * we find an input event of the socket, so we use one_shot mode.
@@ -184,12 +195,22 @@ void ThreadPoolListener::AddNewSession(knl_session_context* session)
 {
     AddEpoll(session);
     (void)pg_atomic_fetch_add_u32((volatile uint32*)&m_group->m_sessionCount, 1);
+    ereport(DEBUG2, 
+        (errmodule(MOD_THREAD_POOL), 
+            errmsg("This group add a session, and now sessionCount is %d, ",
+                m_group->m_sessionCount)));
 }
 
 void ThreadPoolListener::SendShutDown()
 {
     m_reaperAllSession = true;
     gs_signal_send(m_tid, SIGUSR1);
+}
+
+void ThreadPoolListener::ShutDown() const
+{
+    if (m_tid != 0)
+        gs_signal_send(m_tid, SIGKILL);
 }
 
 void ThreadPoolListener::ReaperAllSession()
@@ -201,14 +222,14 @@ void ThreadPoolListener::ReaperAllSession()
         /*
          * There is a very rare case that all thread pool workers happen to
          * encounter FATAL and exit before close session.
-         * Under such scenarios, we choose to PANIC since we have no way
-         * to clean up session resources.
+         * Under such scenarios, we choose to exit directly.
          */
         if (m_group->m_workerNum <= 0 && m_group->m_sessionCount > 0) {
-            ereport(PANIC,
+            ereport(WARNING,
                 (errmsg("No thread pool worker left while waiting for session close. "
                         "This is a very rare case when all thread pool workers happen to"
                         " encounter FATAL problems before session close.")));
+            ExitPostmaster(1);
         }
 
         elem = m_idleSessionList->RemoveHead();
@@ -220,6 +241,11 @@ void ThreadPoolListener::ReaperAllSession()
             elem = m_idleSessionList->RemoveHead();
         }
         pg_usleep(100);
+        if (elem == NULL && m_group->m_sessionCount > 0) {
+            ereport(DEBUG2, (errmodule(MOD_THREAD_POOL),
+                errmsg("IdleSessionList is NULL, but there are %d session in group, ",
+                    m_group->m_sessionCount)));
+        }
     }
     m_reaperAllSession = false;
 }
@@ -257,6 +283,7 @@ void ThreadPoolListener::HandleConnEvent(int nevets)
     for (int i = 0; i < nevets; i++) {
         tmp_event = &m_epollEvents[i];
         session = GetSessionBaseOnEvent(tmp_event);
+
         if (session == NULL) {
             continue;
         }
@@ -269,15 +296,15 @@ knl_session_context* ThreadPoolListener::GetSessionBaseOnEvent(struct epoll_even
 {
     knl_session_context* session = (knl_session_context*)ev->data.ptr;
 
-    if (ev->events & EPOLLIN) {
-        return session;
-    } else if (ev->events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
+    if (ev->events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
         /* The worker thread will do the left clean up work. */
         if (session->status == KNL_SESS_UNINIT) {
             session->status = KNL_SESS_CLOSERAW;
         } else {
             session->status = KNL_SESS_CLOSE;
         }
+        return session;
+    } else if (ev->events & EPOLLIN) {
         return session;
     }
     return NULL;
@@ -292,9 +319,15 @@ void ThreadPoolListener::DispatchSession(knl_session_context* session)
             if (((ThreadPoolWorker*)DLE_VAL(sc))->WakeUpToWork(session)) {
                 pg_atomic_fetch_add_u32((volatile uint32*)&m_group->m_processTaskCount, 1);
                 break;
-            }
+           }
         } else {
-            m_readySessionList->AddTail(&session->elem);
+            /* Add new session to the head so the connection request can be quickly processed. */
+            if (session->status == KNL_SESS_UNINIT) {
+                m_readySessionList->AddHead(&session->elem);
+            } else {
+                m_readySessionList->AddTail(&session->elem);
+            }
+
             pg_atomic_fetch_add_u32((volatile uint32*)&m_group->m_waitServeSessionCount, 1);
             break;
         }

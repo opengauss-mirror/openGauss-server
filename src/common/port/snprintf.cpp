@@ -183,7 +183,7 @@ int pg_vsprintf_inner(char* str, size_t count, const char* fmt, va_list args, ch
         target.bufstart = target.bufptr = str;
         target.bufend = str + count - 1;
     } else {
-        arget.bufstart = target.bufptr = str;
+        target.bufstart = target.bufptr = str;
         target.bufend = NULL;
     }
 
@@ -332,7 +332,6 @@ static int dopr(PrintfTarget* target, const char* format, va_list args)
     int i;
     PrintfArgType argtypes[PG_NL_ARGMAX + 1];
     PrintfArgValue argvalues[PG_NL_ARGMAX + 1];
-    int rc  = 0;
 
     /*
      * Parse the format string to determine whether there are %n$ format
@@ -340,8 +339,9 @@ static int dopr(PrintfTarget* target, const char* format, va_list args)
      */
     have_dollar = have_non_dollar = false;
     last_dollar = 0;
-    rc = memset_s(argtypes, sizeof(argtypes), 0, sizeof(argtypes));
-    securec_check(rc, "", "");
+    errno_t rc = memset_s(argtypes, sizeof(argtypes), 0, sizeof(argtypes));
+    securec_check(rc, "\0", "\0");
+
     while ((ch = *format++) != '\0') {
         if (ch != '%') {
             continue;

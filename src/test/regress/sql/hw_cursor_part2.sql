@@ -95,7 +95,7 @@ drop procedure sp_testsp;
 drop table t1;
 
 ------------------------------------------------------------------------------
------support a's cursor in or out params---------------------------------
+-----support A db's cursor in or out params---------------------------------
 ------------------------------------------------------------------------------
 CREATE TABLE TBL(VALUE INT);
 INSERT INTO TBL VALUES (1);

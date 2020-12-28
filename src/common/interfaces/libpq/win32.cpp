@@ -29,8 +29,10 @@
 #endif
 #define NOCRYPT
 
+#include "postgres_fe.h"
+
 #include "win32.h"
-#include "libpq-int.h"
+#include "libpq/libpq-int.h"
 
 /* Declared here to avoid pulling in all includes, which causes name collissions */
 #ifdef ENABLE_NLS
@@ -104,6 +106,7 @@ static struct WSErrorEntry {
  * Returns 0 if not found, linear but who cares, at this moment
  * we're already in pain :)
  */
+
 static int LookupWSErrorMessage(DWORD err, char* dest, int dest_size)
 {
     struct WSErrorEntry* e = NULL;
@@ -146,6 +149,7 @@ struct MessageDLL {
  * special install)			   / Magnus Naeslund (mag@fbab.net)
  *
  */
+
 const char* winsock_strerror(int err, char* strerrbuf, size_t buflen)
 {
     unsigned long flags;
@@ -153,6 +157,7 @@ const char* winsock_strerror(int err, char* strerrbuf, size_t buflen)
     int success = LookupWSErrorMessage(err, strerrbuf, buflen);
 
     for (i = 0; !success && i < DLLS_SIZE; i++) {
+
         if (!dlls[i].loaded) {
             dlls[i].loaded = 1; /* Only load once */
             dlls[i].handle = (void*)LoadLibraryEx(dlls[i].dll_name, 0, LOAD_LIBRARY_AS_DATAFILE);
@@ -169,9 +174,9 @@ const char* winsock_strerror(int err, char* strerrbuf, size_t buflen)
                      flags, dlls[i].handle, err, MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT), strerrbuf, buflen - 64, 0);
     }
 
-    if (!success) {
+    if (!success)
         check_sprintf_s(sprintf_s(strerrbuf, buflen, libpq_gettext("unrecognized socket error: 0x%08X/%d"), err, err));
-    } else {
+    else {
         strerrbuf[buflen - 1] = '\0';
         offs = strlen(strerrbuf);
         if (offs > (int)buflen - 64)

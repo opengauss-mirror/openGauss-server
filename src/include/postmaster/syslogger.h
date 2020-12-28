@@ -42,6 +42,9 @@
 
 #define PROFILE_LOG_TAG "gs_profile"
 #define PROFILE_LOG_SUFFIX ".prf"
+#define SLOWQUERY_LOG_TAG "sql_monitor"
+#define ASP_LOG_TAG "asp_data"
+#define PERF_JOB_TAG "pg_perf"
 
 enum LogType {
     /* error log */
@@ -49,6 +52,11 @@ enum LogType {
 
     /* profiling log */
     LOG_TYPE_PLOG,
+
+    /* slow query monitor log */
+    LOG_TYPE_PLAN_LOG,
+    /* active session profile log */
+    LOG_TYPE_ASP_LOG,
 
     /* a solider flag, LOG_TYPE_MAXVALID should be <= LOG_TYPE_UPLIMIT */
     LOG_TYPE_MAXVALID,
@@ -60,6 +68,33 @@ enum LogType {
     LOG_TYPE_UPLIMIT = 127
 };
 
+typedef struct LogControlData {
+    bool inited;
+    uint16 ver;
+
+    /* rotation request */
+    volatile sig_atomic_t rotation_requested;
+
+    /* to flush buffer request */
+    volatile sig_atomic_t flush_requested;
+
+    /* log directory */
+    char* log_dir;
+
+    /* pattern of log file name */
+    char* filename_pattern;
+    char* file_suffix;
+
+    /* current log file name and its fd */
+    char* now_file_name;
+    FILE* now_file_fd;
+
+    /* log chunk buffer */
+    char* log_buf;
+    int cur_len;
+    int max_len;
+} LogControlData;
+
 /*
  * max length of this node name. this is a arbitrary value.
  * just keep it the same with struct NameData.
@@ -67,13 +102,13 @@ enum LogType {
 #define LOG_MAX_NODENAME_LEN 64
 
 #define LOG_MAGICNUM 0x2017091810170000
-
+#define PROTO_HEADER_MAGICNUM 0x123456789ABCDEF0
 /*
  * current log version about profile log
  * advance it when log struct is modified each time.
  */
 #define PROFILE_LOG_VERSION 1
-extern const uint64 PROTO_HEADER_MAGICNUM;
+
 /* header data in each binary log file */
 typedef struct {
     /* must be the first */
@@ -98,11 +133,11 @@ typedef struct {
     char nuls[2]; /* always \0\0 */
     uint16 len;   /* size of this chunk (counts data only) */
     char logtype; /* which log type, see LogType */
-    /* last chunk of message ? 't' or 'f' ('T' or 'F' for CSV case) */
-    char is_last;
+    char is_last; /* last chunk of message? 't' or 'f' ('T' or
+                   * 'F' for CSV case) */
     /* writer's pid. be placed the last, and make data 8 bytes alligned */
     ThreadId pid;
-    uint64 magic;
+    uint64 magic; /* magic number to check the proto header */
     char data[FLEXIBLE_ARRAY_MEMBER]; /* data payload starts here */
 } LogPipeProtoHeader;
 
@@ -134,5 +169,11 @@ extern void SysLoggerMain(int fd);
 
 extern void LogCtlLastFlushBeforePMExit(void);
 extern void set_flag_to_flush_buffer(void);
+extern void* SQMOpenLogFile(bool *doOpen);
+extern void SQMCloseLogFile();
+
+extern void* ASPOpenLogFile(bool *doOpen);
+extern void ASPCloseLogFile();
+extern void init_instr_log_directory(bool include_nodename, const char* logid);
 
 #endif /* _SYSLOGGER_H */

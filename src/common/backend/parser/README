@@ -16,7 +16,7 @@ gram.y		parse the tokens and produce a "raw" parse tree
 analyze.cpp	top level of parse analysis for optimizable queries
 parse_agg.cpp	handle aggregates, like SUM(col1),  AVG(col2), ...
 parse_clause.cpp	handle clauses like WHERE, ORDER BY, GROUP BY, ...
-parse_compatibility.cpp	Handle a db compatibal syntax and feature support
+parse_compatibility.cpp	Handle A db compatibal syntax and feature support
 parse_coerce.cpp	handle coercing expressions to different data types
 parse_collate.cpp	assign collation information in completed expressions
 parse_cte.cpp	handle Common Table Expressions (WITH clauses)

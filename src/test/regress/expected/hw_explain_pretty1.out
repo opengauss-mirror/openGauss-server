@@ -38,7 +38,7 @@ explain (costs off, analyze on) insert into explain_table_01 select * from expla
 --?.*
 --?.*
 --? Insert on explain_table_01 (actual time=.* rows=5 loops=1)
---?   ->  Seq Scan on explain_table_01 (actual time=[\d+\.\d+\,\d+\.\d+]\.\.[\d+\.\d+,\d+\.\d+], rows=5)
+--?   ->  Seq Scan on explain_table_01 (actual time=[\d+.\d+\,\d+\.\d+]\.\.[\d+\.\d+\,\d+\.\d+] rows=5 loops=1)
 --? Total runtime:.*
 (3 rows)
 
@@ -46,7 +46,7 @@ explain (costs off, analyze on) insert into explain_table_01 select * from expla
 --?.*
 --?.*
 --? Insert on explain_table_01 (actual time=.* rows=4 loops=1)
---?   ->  Seq Scan on explain_table_02 (actual time=[\d+.\d+\,\d+\.\d+]\.\.[\d+\.\d+\,\d+\.\d+], rows=4)
+--?   ->  Seq Scan on explain_table_02 (actual time=[\d+.\d+\,\d+\.\d+]\.\.[\d+\.\d+\,\d+\.\d+] rows=4 loops=1)
 --? Total runtime:.*
 (3 rows)
 
@@ -55,7 +55,7 @@ explain (costs off, analyze on) insert into explain_table_03 select * from expla
 --?.*
 --? Row Adapter (actual time=.* rows=0 loops=1)
 --?   ->  Vector Insert on explain_table_03 (actual time=.* rows=3 loops=1)
---?         ->  CStore Scan on explain_table_03 (actual time=[\d+.\d+\,\d+\.\d+]\.\.[\d+\.\d+\,\d+\.\d+], rows=3)
+--?         ->  CStore Scan on explain_table_03 (actual time=[\d+.\d+\,\d+\.\d+]\.\.[\d+\.\d+\,\d+\.\d+] rows=3 loops=1)
 --? Total runtime:.*
 (4 rows)
 

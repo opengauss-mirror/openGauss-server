@@ -47,15 +47,14 @@ typedef struct {
 } pull_varattnos_context;
 
 typedef struct {
-    int var_location;
+    List *vars;
     int sublevels_up;
-} locate_var_of_level_context;
+} pull_vars_context;
 
 typedef struct {
     int var_location;
-    int relid;
     int sublevels_up;
-} locate_var_of_relation_context;
+} locate_var_of_level_context;
 
 typedef struct {
     int min_varlevel;
@@ -102,10 +101,10 @@ typedef struct var_info {
 
 static bool pull_varnos_walker(Node* node, pull_varnos_context* context);
 static bool pull_varattnos_walker(Node* node, pull_varattnos_context* context);
+static bool pull_vars_walker(Node *node, pull_vars_context *context);
 static bool contain_var_clause_walker(Node* node, void* context);
 static bool contain_vars_of_level_walker(Node* node, int* sublevels_up);
 static bool locate_var_of_level_walker(Node* node, locate_var_of_level_context* context);
-static bool locate_var_of_relation_walker(Node* node, locate_var_of_relation_context* context);
 static bool find_minimum_var_level_walker(Node* node, find_minimum_var_level_context* context);
 static bool pull_var_clause_walker(Node* node, pull_var_clause_context* context);
 static Node* flatten_join_alias_vars_mutator(Node* node, flatten_join_alias_vars_context* context);
@@ -118,6 +117,7 @@ static bool check_random_expr_walker(Node* node, pull_node* context);
 static bool check_subplan_expr_walker(Node* node, pull_node* context);
 static Node* get_special_node_from_expr(Node* node, List** varlist);
 static bool contain_vars_of_level_or_above_walker(Node* node, int* sublevels_up);
+static bool collect_param_clause_walker(Node* node, void* context);
 
 /*
  * pull_varnos
@@ -141,6 +141,31 @@ Relids pull_varnos(Node* node, int level, bool isSkip)
      * it's a Query, we don't want to increment sublevels_up.
      */
     (void)query_or_expression_tree_walker(node, (bool (*)())pull_varnos_walker, (void*)&context, 0);
+
+    return context.varnos;
+}
+
+/*
+ * pull_varnos_of_level
+ *     Create a set of all the distinct varnos present in a parsetree.
+ *     Only Vars of the specified level are considered.
+ */
+Relids
+pull_varnos_of_level(Node *node, int levelsup)
+{
+   pull_varnos_context context;
+
+   context.varnos = NULL;
+   context.sublevels_up = levelsup;
+
+   /*
+    * Must be prepared to start with a Query or a bare expression tree; if
+    * it's a Query, we don't want to increment sublevels_up.
+    */
+   query_or_expression_tree_walker(node,
+                                   (bool (*)())pull_varnos_walker,
+                                   (void *) &context,
+                                   0);
 
     return context.varnos;
 }
@@ -238,6 +263,73 @@ static bool pull_varattnos_walker(Node* node, pull_varattnos_context* context)
     AssertEreport(!IsA(node, Query), MOD_OPT, "");
 
     return expression_tree_walker(node, (bool (*)())pull_varattnos_walker, (void*)context);
+}
+
+/*
+ * pull_vars_of_level
+ *     Create a list of all Vars referencing the specified query level
+ *     in the given parsetree.
+ *
+ * This is used on unplanned parsetrees, so we don't expect to see any
+ * PlaceHolderVars.
+ *
+ * Caution: the Vars are not copied, only linked into the list.
+ */
+List *
+pull_vars_of_level(Node *node, int levelsup)
+{
+   pull_vars_context context;
+
+   context.vars = NIL;
+   context.sublevels_up = levelsup;
+
+   /*
+    * Must be prepared to start with a Query or a bare expression tree; if
+    * it's a Query, we don't want to increment sublevels_up.
+    */
+   query_or_expression_tree_walker(node,
+                                   (bool (*)())pull_vars_walker,
+                                   (void *) &context,
+                                   0);
+
+   return context.vars;
+}
+
+static bool
+pull_vars_walker(Node *node, pull_vars_context *context)
+{
+   if (node == NULL)
+       return false;
+   if (IsA(node, Var))
+   {
+       Var        *var = (Var *) node;
+
+       if (var->varlevelsup == (Index)context->sublevels_up)
+           context->vars = lappend(context->vars, var);
+       return false;
+   }
+   if (IsA(node, PlaceHolderVar))
+   {
+       PlaceHolderVar *phv = (PlaceHolderVar *) node;
+   
+       if (phv->phlevelsup == (Index)context->sublevels_up)
+           context->vars = lappend(context->vars, phv);
+       /* we don't want to look into the contained expression */
+       return false;
+   }
+   if (IsA(node, Query))
+   {
+       /* Recurse into RTE subquery or not-yet-planned sublink subquery */
+       bool result = false;
+
+       context->sublevels_up++;
+       result = query_tree_walker((Query *) node, (bool (*)())pull_vars_walker,
+                                  (void *) context, 0);
+       context->sublevels_up--;
+       return result;
+   }
+   return expression_tree_walker(node, (bool (*)())pull_vars_walker,
+                                 (void *) context);
 }
 
 /*
@@ -427,59 +519,6 @@ static bool locate_var_of_level_walker(Node* node, locate_var_of_level_context* 
         return result;
     }
     return expression_tree_walker(node, (bool (*)())locate_var_of_level_walker, (void*)context);
-}
-
-/*
- * locate_var_of_relation
- *	  Find the parse location of any Var of the specified relation.
- *
- * Returns -1 if no such Var is in the querytree, or if they all have
- * unknown parse location.
- *
- * Will recurse into sublinks.	Also, may be invoked directly on a Query.
- */
-int locate_var_of_relation(Node* node, int relid, int levelsup)
-{
-    locate_var_of_relation_context context;
-
-    context.var_location = -1; /* in case we find nothing */
-    context.relid = relid;
-    context.sublevels_up = levelsup;
-
-    (void)query_or_expression_tree_walker(node, (bool (*)())locate_var_of_relation_walker, (void*)&context, 0);
-
-    return context.var_location;
-}
-
-static bool locate_var_of_relation_walker(Node* node, locate_var_of_relation_context* context)
-{
-    if (node == NULL)
-        return false;
-    if (IsA(node, Var)) {
-        Var* var = (Var*)node;
-
-        if (var->varno == (unsigned int)context->relid && var->varlevelsup == (unsigned int)context->sublevels_up &&
-            var->location >= 0) {
-            context->var_location = var->location;
-            return true; /* abort tree traversal and return true */
-        }
-        return false;
-    }
-    if (IsA(node, CurrentOfExpr)) {
-        /* since CurrentOfExpr doesn't carry location, nothing we can do */
-        return false;
-    }
-    /* No extra code needed for PlaceHolderVar; just look in contained expr */
-    if (IsA(node, Query)) {
-        /* Recurse into subselects */
-        bool result = false;
-
-        context->sublevels_up++;
-        result = query_tree_walker((Query*)node, (bool (*)())locate_var_of_relation_walker, (void*)context, 0);
-        context->sublevels_up--;
-        return result;
-    }
-    return expression_tree_walker(node, (bool (*)())locate_var_of_relation_walker, (void*)context);
 }
 
 /*
@@ -948,17 +987,21 @@ Node* replace_node_clause(Node* clause, Node* src_list, Node* dest_list, uint32 
  */
 static Node* replace_node_clause_mutator(Node* node, replace_node_clause_context* context)
 {
-    if (node == NULL)
+    if (node == NULL) {
         return NULL;
+    }
 
     if (IsA(context->src, List) && IsA(context->dest, List)) {
-        ListCell* lc = NULL;
-        ListCell* lc2 = NULL;
-        Assert(list_length((List*)context->src) == list_length((List*)context->dest));
-        forboth(lc, (List*)context->src, lc2, (List*)context->dest)
-        {
+        ListCell *lc = NULL;
+        ListCell *lc2 = NULL;
+        Assert (list_length((List *) context->src) == list_length((List *) context->dest));
+        forboth(lc, (List *) context->src, lc2, (List *) context->dest) {
             if (equal(node, lfirst(lc))) {
-                return (Node*)lfirst(lc2);
+                if (context->isCopy) {
+                    return (Node *) copyObject(lfirst(lc2));
+                } else {
+                    return (Node *) lfirst(lc2);
+                }
             }
         }
     } else if (equal(node, context->src)) {
@@ -967,13 +1010,17 @@ static Node* replace_node_clause_mutator(Node* node, replace_node_clause_context
             return node;
         } else {
             ++context->replace_count;
-            return context->dest;
+            if (context->isCopy) {
+                return (Node *) copyObject(context->dest);
+            } else {
+                return context->dest;
+            }
         }
     }
 
     if (!context->recurse_aggref && IsA(node, Aggref)) {
         if (context->isCopy) {
-            return (Node*)copyObject(node);
+            return (Node *) copyObject(node);
         } else {
             return node;
         }
@@ -1012,13 +1059,52 @@ static bool check_param_clause_walker(Node* node, void* context)
     if (IsA(node, SubPlan) || (IsA(node, Param) && ((Param*)node)->paramkind != PARAM_EXTERN))
         return true;
 
+    if (IsA(node, RestrictInfo)) {
+        node = (Node*)((RestrictInfo*)node)->clause;
+    }
+
     return expression_tree_walker(node, (bool (*)())check_param_clause_walker, (void*)context);
 }
 
-/* 
- * @Description: Check if the expr contain param
- * @in node: Search node
- * @return: true if the expr contain param
+/* collect param ids */
+typedef struct collect_param_context {
+    Bitmapset *param_ids;
+}collect_param_context;
+
+Bitmapset* collect_param_clause(Node* clause)
+{
+    collect_param_context context;
+    context.param_ids = NULL;
+    collect_param_clause_walker(clause, &context);
+
+    return context.param_ids;
+}
+
+static bool collect_param_clause_walker(Node* node, void* context)
+{
+    if (NULL == node)
+        return false;
+
+    collect_param_context *ctx = (collect_param_context *)context;
+
+    if ((IsA(node, Param) && ((Param*)node)->paramkind != PARAM_EXTERN)) {
+        Param *param = (Param *)node;
+        ctx->param_ids = bms_add_member(ctx->param_ids, param->paramid);
+        return true;
+    }
+
+    if (IsA(node, RestrictInfo)) {
+        node = (Node*)((RestrictInfo*)node)->clause;
+    }
+
+    return expression_tree_walker(node, (bool (*)())collect_param_clause_walker, (void*)context);
+}
+
+
+/*
+ *@Description: Check if the expr contain param
+ *@in node: Search node
+ *@return: true if the expr contain param
  */
 bool check_param_expr(Node* node)
 {
@@ -1266,6 +1352,7 @@ static Node* flatten_join_alias_vars_mutator(Node* node, flatten_join_alias_vars
         AssertEreport(!IsA(node, SubPlan), MOD_OPT, "");
     /* Shouldn't need to handle these planner auxiliary nodes here */
     AssertEreport(!IsA(node, SpecialJoinInfo), MOD_OPT, "");
+    Assert(!IsA(node, LateralJoinInfo));
     AssertEreport(!IsA(node, PlaceHolderInfo), MOD_OPT, "");
     AssertEreport(!IsA(node, MinMaxAggInfo), MOD_OPT, "");
 

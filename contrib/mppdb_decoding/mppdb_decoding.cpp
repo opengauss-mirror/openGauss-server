@@ -330,7 +330,12 @@ static void tuple_to_jsoninfo(
 
         /* print attribute type */
         if (cols_type != NULL) {
-            cJSON* col_type = cJSON_CreateString(format_type_be(typid));
+            char* type_name = format_type_be(typid);
+            if (strlen(type_name) == strlen("clob") && strncmp(type_name, "clob", strlen("clob")) == 0) {
+                errno_t rc = strcpy_s(type_name, sizeof("clob"), "text");
+                securec_check_c(rc, "\0", "\0");
+            }
+            cJSON* col_type = cJSON_CreateString(type_name);
             cJSON_AddItemToArray(cols_type, col_type);
         }
 

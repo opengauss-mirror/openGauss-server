@@ -46,7 +46,7 @@ check_dummy_setup
 gsql -d $db -p $dn1_primary_port -c "checkpoint;"
 
 #use incremental to mirror the primary on standby, sync the diferent part between them.
-gs_ctl build -D $data_dir/datanode1_standby
+gs_ctl build -D $data_dir/datanode1_standby -Z single_node -b incemental
 
 #check if rewind is ok.
 #start_standby

@@ -82,100 +82,100 @@ struct JitLlvmCodeGenContext {
     llvm::StructType* IndexIteratorType;
 
     // helper functions
-    llvm::Constant* debugLogFunc;
-    llvm::Constant* isSoftMemoryLimitReachedFunc;
-    llvm::Constant* getPrimaryIndexFunc;
-    llvm::Constant* getTableIndexFunc;
-    llvm::Constant* initKeyFunc;
-    llvm::Constant* getColumnAtFunc;
+    llvm::FunctionCallee debugLogFunc;
+    llvm::FunctionCallee isSoftMemoryLimitReachedFunc;
+    llvm::FunctionCallee getPrimaryIndexFunc;
+    llvm::FunctionCallee getTableIndexFunc;
+    llvm::FunctionCallee initKeyFunc;
+    llvm::FunctionCallee getColumnAtFunc;
 
-    llvm::Constant* setExprArgIsNullFunc;
-    llvm::Constant* getExprArgIsNullFunc;
-    llvm::Constant* getDatumParamFunc;
-    llvm::Constant* readDatumColumnFunc;
-    llvm::Constant* writeDatumColumnFunc;
-    llvm::Constant* buildDatumKeyFunc;
+    llvm::FunctionCallee setExprArgIsNullFunc;
+    llvm::FunctionCallee getExprArgIsNullFunc;
+    llvm::FunctionCallee getDatumParamFunc;
+    llvm::FunctionCallee readDatumColumnFunc;
+    llvm::FunctionCallee writeDatumColumnFunc;
+    llvm::FunctionCallee buildDatumKeyFunc;
 
-    llvm::Constant* setBitFunc;
-    llvm::Constant* resetBitmapSetFunc;
-    llvm::Constant* getTableFieldCountFunc;
-    llvm::Constant* writeRowFunc;
-    llvm::Constant* searchRowFunc;
-    llvm::Constant* createNewRowFunc;
-    llvm::Constant* insertRowFunc;
-    llvm::Constant* deleteRowFunc;
-    llvm::Constant* setRowNullBitsFunc;
-    llvm::Constant* setExprResultNullBitFunc;
-    llvm::Constant* execClearTupleFunc;
-    llvm::Constant* execStoreVirtualTupleFunc;
-    llvm::Constant* selectColumnFunc;
-    llvm::Constant* setTpProcessedFunc;
-    llvm::Constant* setScanEndedFunc;
+    llvm::FunctionCallee setBitFunc;
+    llvm::FunctionCallee resetBitmapSetFunc;
+    llvm::FunctionCallee getTableFieldCountFunc;
+    llvm::FunctionCallee writeRowFunc;
+    llvm::FunctionCallee searchRowFunc;
+    llvm::FunctionCallee createNewRowFunc;
+    llvm::FunctionCallee insertRowFunc;
+    llvm::FunctionCallee deleteRowFunc;
+    llvm::FunctionCallee setRowNullBitsFunc;
+    llvm::FunctionCallee setExprResultNullBitFunc;
+    llvm::FunctionCallee execClearTupleFunc;
+    llvm::FunctionCallee execStoreVirtualTupleFunc;
+    llvm::FunctionCallee selectColumnFunc;
+    llvm::FunctionCallee setTpProcessedFunc;
+    llvm::FunctionCallee setScanEndedFunc;
 
-    llvm::Constant* copyKeyFunc;
-    llvm::Constant* fillKeyPatternFunc;
-    llvm::Constant* adjustKeyFunc;
-    llvm::Constant* searchIteratorFunc;
-    llvm::Constant* beginIteratorFunc;
-    llvm::Constant* createEndIteratorFunc;
-    llvm::Constant* isScanEndFunc;
-    llvm::Constant* getRowFromIteratorFunc;
-    llvm::Constant* destroyIteratorFunc;
+    llvm::FunctionCallee copyKeyFunc;
+    llvm::FunctionCallee fillKeyPatternFunc;
+    llvm::FunctionCallee adjustKeyFunc;
+    llvm::FunctionCallee searchIteratorFunc;
+    llvm::FunctionCallee beginIteratorFunc;
+    llvm::FunctionCallee createEndIteratorFunc;
+    llvm::FunctionCallee isScanEndFunc;
+    llvm::FunctionCallee getRowFromIteratorFunc;
+    llvm::FunctionCallee destroyIteratorFunc;
 
-    llvm::Constant* setStateIteratorFunc;
-    llvm::Constant* getStateIteratorFunc;
-    llvm::Constant* isStateIteratorNullFunc;
-    llvm::Constant* isStateScanEndFunc;
-    llvm::Constant* getRowFromStateIteratorFunc;
-    llvm::Constant* destroyStateIteratorsFunc;
-    llvm::Constant* setStateScanEndFlagFunc;
-    llvm::Constant* getStateScanEndFlagFunc;
+    llvm::FunctionCallee setStateIteratorFunc;
+    llvm::FunctionCallee getStateIteratorFunc;
+    llvm::FunctionCallee isStateIteratorNullFunc;
+    llvm::FunctionCallee isStateScanEndFunc;
+    llvm::FunctionCallee getRowFromStateIteratorFunc;
+    llvm::FunctionCallee destroyStateIteratorsFunc;
+    llvm::FunctionCallee setStateScanEndFlagFunc;
+    llvm::FunctionCallee getStateScanEndFlagFunc;
 
-    llvm::Constant* resetStateRowFunc;
-    llvm::Constant* setStateRowFunc;
-    llvm::Constant* getStateRowFunc;
-    llvm::Constant* copyOuterStateRowFunc;
-    llvm::Constant* getOuterStateRowCopyFunc;
-    llvm::Constant* isStateRowNullFunc;
+    llvm::FunctionCallee resetStateRowFunc;
+    llvm::FunctionCallee setStateRowFunc;
+    llvm::FunctionCallee getStateRowFunc;
+    llvm::FunctionCallee copyOuterStateRowFunc;
+    llvm::FunctionCallee getOuterStateRowCopyFunc;
+    llvm::FunctionCallee isStateRowNullFunc;
 
-    llvm::Constant* resetStateLimitCounterFunc;
-    llvm::Constant* incrementStateLimitCounterFunc;
-    llvm::Constant* getStateLimitCounterFunc;
+    llvm::FunctionCallee resetStateLimitCounterFunc;
+    llvm::FunctionCallee incrementStateLimitCounterFunc;
+    llvm::FunctionCallee getStateLimitCounterFunc;
 
-    llvm::Constant* prepareAvgArrayFunc;
-    llvm::Constant* loadAvgArrayFunc;
-    llvm::Constant* saveAvgArrayFunc;
-    llvm::Constant* computeAvgFromArrayFunc;
+    llvm::FunctionCallee prepareAvgArrayFunc;
+    llvm::FunctionCallee loadAvgArrayFunc;
+    llvm::FunctionCallee saveAvgArrayFunc;
+    llvm::FunctionCallee computeAvgFromArrayFunc;
 
-    llvm::Constant* resetAggValueFunc;
-    llvm::Constant* getAggValueFunc;
-    llvm::Constant* setAggValueFunc;
+    llvm::FunctionCallee resetAggValueFunc;
+    llvm::FunctionCallee getAggValueFunc;
+    llvm::FunctionCallee setAggValueFunc;
 
-    llvm::Constant* resetAggMaxMinNullFunc;
-    llvm::Constant* setAggMaxMinNotNullFunc;
-    llvm::Constant* getAggMaxMinIsNullFunc;
+    llvm::FunctionCallee resetAggMaxMinNullFunc;
+    llvm::FunctionCallee setAggMaxMinNotNullFunc;
+    llvm::FunctionCallee getAggMaxMinIsNullFunc;
 
-    llvm::Constant* prepareDistinctSetFunc;
-    llvm::Constant* insertDistinctItemFunc;
-    llvm::Constant* destroyDistinctSetFunc;
+    llvm::FunctionCallee prepareDistinctSetFunc;
+    llvm::FunctionCallee insertDistinctItemFunc;
+    llvm::FunctionCallee destroyDistinctSetFunc;
 
-    llvm::Constant* resetTupleDatumFunc;
-    llvm::Constant* readTupleDatumFunc;
-    llvm::Constant* writeTupleDatumFunc;
+    llvm::FunctionCallee resetTupleDatumFunc;
+    llvm::FunctionCallee readTupleDatumFunc;
+    llvm::FunctionCallee writeTupleDatumFunc;
 
-    llvm::Constant* selectSubQueryResultFunc;
-    llvm::Constant* copyAggregateToSubQueryResultFunc;
+    llvm::FunctionCallee selectSubQueryResultFunc;
+    llvm::FunctionCallee copyAggregateToSubQueryResultFunc;
 
-    llvm::Constant* GetSubQuerySlotFunc;
-    llvm::Constant* GetSubQueryTableFunc;
-    llvm::Constant* GetSubQueryIndexFunc;
-    llvm::Constant* GetSubQuerySearchKeyFunc;
-    llvm::Constant* GetSubQueryEndIteratorKeyFunc;
+    llvm::FunctionCallee GetSubQuerySlotFunc;
+    llvm::FunctionCallee GetSubQueryTableFunc;
+    llvm::FunctionCallee GetSubQueryIndexFunc;
+    llvm::FunctionCallee GetSubQuerySearchKeyFunc;
+    llvm::FunctionCallee GetSubQueryEndIteratorKeyFunc;
 
     // builtins
-#define APPLY_UNARY_OPERATOR(funcid, name) llvm::Constant* _builtin_##name;
-#define APPLY_BINARY_OPERATOR(funcid, name) llvm::Constant* _builtin_##name;
-#define APPLY_TERNARY_OPERATOR(funcid, name) llvm::Constant* _builtin_##name;
+#define APPLY_UNARY_OPERATOR(funcid, name) llvm::FunctionCallee _builtin_##name;
+#define APPLY_BINARY_OPERATOR(funcid, name) llvm::FunctionCallee _builtin_##name;
+#define APPLY_TERNARY_OPERATOR(funcid, name) llvm::FunctionCallee _builtin_##name;
 #define APPLY_UNARY_CAST_OPERATOR(funcid, name) APPLY_UNARY_OPERATOR(funcid, name)
 #define APPLY_BINARY_CAST_OPERATOR(funcid, name) APPLY_BINARY_OPERATOR(funcid, name)
 #define APPLY_TERNARY_CAST_OPERATOR(funcid, name) APPLY_TERNARY_OPERATOR(funcid, name)

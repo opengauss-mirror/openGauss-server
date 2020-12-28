@@ -26,6 +26,7 @@
 #include "executor/executor.h"
 #include "access/genam.h"
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "access/transam.h"
 #include "access/xact.h"
 #include "access/xloginsert.h"
@@ -40,6 +41,7 @@
 #include "catalog/pg_job.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_tablespace.h"
+#include "catalog/pgxc_slice.h"
 #include "commands/comment.h"
 #include "commands/dbcommands.h"
 #include "commands/tablecmds.h"
@@ -66,7 +68,7 @@
 #include "utils/sec_rls_utils.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "utils/timestamp.h"
 #ifdef PGXC
 #include "pgxc/execRemote.h"
@@ -97,7 +99,6 @@ static void movedb_failure_callback(int code, Datum arg);
 static bool get_db_info(const char* name, LOCKMODE lockmode, Oid* dbIdP, Oid* ownerIdP, int* encodingP,
     bool* dbIsTemplateP, bool* dbAllowConnP, Oid* dbLastSysOidP, TransactionId* dbFrozenXidP, Oid* dbTablespace,
     char** dbCollate, char** dbCtype, char** src_compatibility = NULL);
-static bool have_createdb_privilege(void);
 static void remove_dbtablespaces(Oid db_id);
 static bool check_db_file_conflict(Oid db_id);
 static void createdb_xact_callback(bool isCommit, const void* arg);
@@ -136,7 +137,7 @@ bool userbindlc(Oid rolid)
  */
 void createdb(const CreatedbStmt* stmt)
 {
-    HeapScanDesc scan;
+    TableScanDesc scan;
     Relation rel;
     Oid src_dboid;
     Oid src_owner;
@@ -216,7 +217,7 @@ void createdb(const CreatedbStmt* stmt)
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
             dcompatibility = defel;
         } else if (strcmp(defel->defname, "location") == 0) {
-            ereport(WARNING,
+            ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("LOCATION is not supported anymore"),
                     errhint("Consider using tablespaces instead.")));
@@ -473,6 +474,8 @@ void createdb(const CreatedbStmt* stmt)
      * potential waiting; we may as well throw an error first if we're gonna
      * throw one.
      */
+
+    LockDatabaseObject(DatabaseRelationId, src_dboid, 0, AccessExclusiveLock);
     if (CountOtherDBBackends(src_dboid, &notherbackends, &npreparedxacts))
         ereport(ERROR,
             (errcode(ERRCODE_OBJECT_IN_USE),
@@ -592,8 +595,8 @@ void createdb(const CreatedbStmt* stmt)
          * each one to the new database.
          */
         rel = heap_open(TableSpaceRelationId, AccessShareLock);
-        scan = heap_beginscan(rel, snapshot, 0, NULL);
-        while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+        scan = tableam_scan_begin(rel, snapshot, 0, NULL);
+        while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
             Oid srctablespace = HeapTupleGetOid(tuple);
             Oid dsttablespace;
             char* srcpath = NULL;
@@ -641,7 +644,7 @@ void createdb(const CreatedbStmt* stmt)
                 (void)XLogInsert(RM_DBASE_ID, XLOG_DBASE_CREATE | XLR_SPECIAL_REL_UPDATE);
             }
         }
-        heap_endscan(scan);
+        tableam_scan_end(scan);
         heap_close(rel, AccessShareLock);
 
         /*
@@ -798,6 +801,48 @@ static void createdb_failure_callback(int code, Datum arg)
     remove_dbtablespaces(fparms->dest_dboid);
 }
 
+void ts_dropdb_xact_callback(bool isCommit, const void* arg)
+{
+    Oid* db_oid = (Oid*)arg;
+    if (!isCommit) {
+        *db_oid = InvalidOid;
+    }
+    (void)pg_atomic_sub_fetch_u32(&g_instance.ts_compaction_cxt.drop_db_count, 1);
+    ereport(LOG, (errmodule(MOD_TIMESERIES), errcode(ERRCODE_LOG),
+        errmsg("drop db callback have drop db session count after subtract %u", 
+        pg_atomic_read_u32(&g_instance.ts_compaction_cxt.drop_db_count))));
+}
+
+#ifdef ENABLE_MULTIPLE_NODES
+void handle_compaction_dropdb(const char* dbname)
+{   
+    /**
+     * if timeseries db and compaction working, send sigusr1 to compaction producer
+     * signal will block producer switch session.
+     */
+    if (!IS_PGXC_DATANODE) {
+        return;
+    }
+    if (g_instance.attr.attr_common.enable_tsdb && u_sess->attr.attr_common.enable_ts_compaction) {
+        Oid drop_databse_oid = get_database_oid(dbname, false);
+        (void)pg_atomic_add_fetch_u32(&g_instance.ts_compaction_cxt.drop_db_count, 1);
+        g_instance.ts_compaction_cxt.dropdb_id = drop_databse_oid;
+        ereport(LOG, (errmodule(MOD_TIMESERIES), errcode(ERRCODE_LOG),
+            errmsg("drop db callback have drop db session count after add %u", 
+            pg_atomic_read_u32(&g_instance.ts_compaction_cxt.drop_db_count))));
+               
+        while (!g_instance.ts_compaction_cxt.compaction_rest && 
+            g_instance.ts_compaction_cxt.state == Compaction::COMPACTION_IN_PROGRESS) {
+            pg_usleep(100 * USECS_PER_MSEC);
+        }
+        
+        set_dbcleanup_callback(ts_dropdb_xact_callback, &g_instance.ts_compaction_cxt.dropdb_id,
+            sizeof(g_instance.ts_compaction_cxt.dropdb_id));
+  
+    }
+}
+#endif
+
 /*
  * DROP DATABASE
  */
@@ -820,6 +865,9 @@ void dropdb(const char* dbname, bool missing_ok)
                 errmsg("could not drop database "
                        "while ddl delay function is enabled")));
 
+#ifdef ENABLE_MULTIPLE_NODES
+    handle_compaction_dropdb(dbname);
+#endif
     /*
      * Look up the target database's OID, and get exclusive lock on it. We
      * need this to ensure that no new backend starts up in the target
@@ -847,8 +895,10 @@ void dropdb(const char* dbname, bool missing_ok)
     /*
      * Permission checks
      */
-    if (!pg_database_ownercheck(db_id, GetUserId()))
-        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DATABASE, dbname);
+    AclResult aclresult = pg_database_aclcheck(db_id, GetUserId(), ACL_DROP);
+    if (aclresult != ACLCHECK_OK && !pg_database_ownercheck(db_id, GetUserId())) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_DATABASE, dbname);
+    }
 
     /* DROP hook for the database being removed */
     if (object_access_hook) {
@@ -884,7 +934,6 @@ void dropdb(const char* dbname, bool missing_ok)
             (errcode(ERRCODE_OBJECT_IN_USE),
                 errmsg("database \"%s\" is used by a logical decoding slot", dbname),
                 errdetail("There are %d slot(s), %d of them active", nslots, nslots_active)));
-
     /*
      * Check for other backends in the target database.  (Because we hold the
      * database lock, no new ones can start after this.)
@@ -894,14 +943,16 @@ void dropdb(const char* dbname, bool missing_ok)
     if (CountOtherDBBackends(db_id, &notherbackends, &npreparedxacts))
         ereport(ERROR,
             (errcode(ERRCODE_OBJECT_IN_USE),
-                errmsg("database \"%s\" is being accessed by other users", dbname),
+                errmsg("Database \"%s\" is being accessed by other users. You can stop all connections by command:"
+                    " \"clean connection to all force for database XXXX;\" or wait for the sessions to end by querying "
+                    "view: \"pg_stat_activity\".", dbname),
                 errdetail_busy_db(notherbackends, npreparedxacts)));
 
-    /* Search need delete use-defined C fun library. */
+    /* Search need delete use-defined C fun library.*/
     prepareDatabaseCFunLibrary(db_id);
 
     /* Relate to remove all job belong the database. */
-    remove_job_by_oid(dbname, DbOid);
+    remove_job_by_oid(dbname, DbOid, true);
 
     /* Search need delete use-defined dictionary. */
     deleteDatabaseTSFile(db_id);
@@ -988,16 +1039,35 @@ void dropdb(const char* dbname, bool missing_ok)
 
 #ifdef PGXC
     /* Drop sequences on gtm that are on the database dropped. */
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && g_instance.attr.attr_storage.enable_gtm_free == false)
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
         if (DropSequenceGTM(0, dbname))
-            ereport(ERROR,
+            ereport(LOG,
                 (errcode(ERRCODE_SQL_STATEMENT_NOT_YET_COMPLETE),
                     errmsg("Deletion of sequences on database %s not completed", dbname)));
 #endif
 
     LWLockRelease(DelayDDLLock);
+
+    ereport(LOG,(errmsg("drop database \"%s\", id is %u", dbname, db_id)));
+
     /* need calculate user used space info */
     g_instance.comm_cxt.force_cal_space_info = true;
+
+    /* Drop local connection for dbname */
+    if(IS_PGXC_COORDINATOR) {
+        DropDBCleanConnection(dbname);
+    }
+}
+
+/*
+ * Must be owner or have alter privilege to alter database
+ */
+static void AlterDatabasePermissionCheck(Oid dboid, const char* dbname)
+{
+    AclResult aclresult = pg_database_aclcheck(dboid, GetUserId(), ACL_ALTER);
+    if (aclresult != ACLCHECK_OK && !pg_database_ownercheck(dboid, GetUserId())) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_DATABASE, dbname);
+    }
 }
 
 /*
@@ -1021,9 +1091,8 @@ void RenameDatabase(const char* oldname, const char* newname)
     if (!get_db_info(oldname, AccessExclusiveLock, &db_id, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database \"%s\" does not exist", oldname)));
 
-    /* must be owner */
-    if (!pg_database_ownercheck(db_id, GetUserId()))
-        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DATABASE, oldname);
+    /* Permission check. */
+    AlterDatabasePermissionCheck(db_id, oldname);
 
     /* must have createdb rights */
     if (!have_createdb_privilege())
@@ -1168,11 +1237,8 @@ static void movedb(const char* dbname, const char* tblspcname)
     UnlockSharedObject(DatabaseRelationId, db_id, 0, AccessExclusiveLock);
 #endif
 
-    /*
-     * Permission checks
-     */
-    if (!pg_database_ownercheck(db_id, GetUserId()))
-        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DATABASE, dbname);
+    /* Permission check. */
+    AlterDatabasePermissionCheck(db_id, dbname);
 
     /*
      * Obviously can't move the tables of my own database
@@ -1218,7 +1284,9 @@ static void movedb(const char* dbname, const char* tblspcname)
     if (CountOtherDBBackends(db_id, &notherbackends, &npreparedxacts))
         ereport(ERROR,
             (errcode(ERRCODE_OBJECT_IN_USE),
-                errmsg("database \"%s\" is being accessed by other users", dbname),
+                errmsg("Database \"%s\" is being accessed by other users. You can stop all connections by command:"
+                    " \"clean connection to all force for database XXXX;\" or wait for the sessions to end by querying "
+                    "view: \"pg_stat_activity\".", dbname),
                 errdetail_busy_db(notherbackends, npreparedxacts)));
 
     /*
@@ -1324,7 +1392,7 @@ static void movedb(const char* dbname, const char* tblspcname)
         new_record_repl[Anum_pg_database_dattablespace - 1] = true;
 
         newtuple =
-            heap_modify_tuple(oldtuple, RelationGetDescr(pgdbrel), new_record, new_record_nulls, new_record_repl);
+            (HeapTuple) tableam_tops_modify_tuple(oldtuple, RelationGetDescr(pgdbrel), new_record, new_record_nulls, new_record_repl);
         simple_heap_update(pgdbrel, &oldtuple->t_self, newtuple);
 
         /* Update indexes */
@@ -1545,8 +1613,8 @@ void AlterDatabase(AlterDatabaseStmt* stmt, bool isTopLevel)
     if (!HeapTupleIsValid(tuple))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database \"%s\" does not exist", stmt->dbname)));
 
-    if (!pg_database_ownercheck(HeapTupleGetOid(tuple), GetUserId()))
-        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DATABASE, stmt->dbname);
+    /* Permmision Check */
+    AlterDatabasePermissionCheck(HeapTupleGetOid(tuple), stmt->dbname);
 
     /*
      * Build an updated tuple, perusing the information just obtained
@@ -1572,7 +1640,7 @@ void AlterDatabase(AlterDatabaseStmt* stmt, bool isTopLevel)
         AlterDatabasePrivateObject(dbform, HeapTupleGetOid(tuple), enablePrivateObject);
     }
 
-    newtuple = heap_modify_tuple(tuple, RelationGetDescr(rel), new_record, new_record_nulls, new_record_repl);
+    newtuple = (HeapTuple) tableam_tops_modify_tuple(tuple, RelationGetDescr(rel), new_record, new_record_nulls, new_record_repl);
     simple_heap_update(rel, &tuple->t_self, newtuple);
 
     /* Update indexes */
@@ -1597,8 +1665,8 @@ void AlterDatabaseSet(AlterDatabaseSetStmt* stmt)
      */
     shdepLockAndCheckObject(DatabaseRelationId, datid);
 
-    if (!pg_database_ownercheck(datid, GetUserId()))
-        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DATABASE, stmt->dbname);
+    /* Permission check. */
+    AlterDatabasePermissionCheck(datid, stmt->dbname);
 
     AlterSetting(datid, InvalidOid, stmt->setstmt);
 
@@ -1688,11 +1756,11 @@ void AlterDatabaseOwner(const char* dbname, Oid newOwnerId)
             repl_val[Anum_pg_database_datacl - 1] = PointerGetDatum(newAcl);
         }
 
-        newtuple = heap_modify_tuple(tuple, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
+        newtuple = (HeapTuple) tableam_tops_modify_tuple(tuple, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
         simple_heap_update(rel, &newtuple->t_self, newtuple);
         CatalogUpdateIndexes(rel, newtuple);
 
-        heap_freetuple_ext(newtuple);
+        tableam_tops_free_tuple(newtuple);
 
         /* Update owner dependency reference */
         changeDependencyOnOwner(DatabaseRelationId, HeapTupleGetOid(tuple), newOwnerId);
@@ -1836,7 +1904,7 @@ static bool get_db_info(const char* name, LOCKMODE lockmode, Oid* dbIdP, Oid* ow
 }
 
 /* Check if current user has createdb privileges */
-static bool have_createdb_privilege(void)
+bool have_createdb_privilege(void)
 {
     bool result = false;
     HeapTuple utup;
@@ -1862,7 +1930,7 @@ static bool have_createdb_privilege(void)
 static void remove_dbtablespaces(Oid db_id)
 {
     Relation rel;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tuple;
     Snapshot snapshot;
 
@@ -1877,8 +1945,8 @@ static void remove_dbtablespaces(Oid db_id)
     snapshot = RegisterSnapshot(GetLatestSnapshot());
 
     rel = heap_open(TableSpaceRelationId, AccessShareLock);
-    scan = heap_beginscan(rel, snapshot, 0, NULL);
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(rel, snapshot, 0, NULL);
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         Oid dsttablespace = HeapTupleGetOid(tuple);
         char* dstpath = NULL;
         struct stat st;
@@ -1915,7 +1983,7 @@ static void remove_dbtablespaces(Oid db_id)
         pfree_ext(dstpath);
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
     UnregisterSnapshot(snapshot);
 }
@@ -1936,7 +2004,7 @@ static bool check_db_file_conflict(Oid db_id)
 {
     bool result = false;
     Relation rel;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tuple;
     Snapshot snapshot;
 
@@ -1950,8 +2018,8 @@ static bool check_db_file_conflict(Oid db_id)
     snapshot = RegisterSnapshot(GetLatestSnapshot());
 
     rel = heap_open(TableSpaceRelationId, AccessShareLock);
-    scan = heap_beginscan(rel, snapshot, 0, NULL);
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(rel, snapshot, 0, NULL);
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         Oid dsttablespace = HeapTupleGetOid(tuple);
         char* dstpath = NULL;
         struct stat st;
@@ -1972,7 +2040,7 @@ static bool check_db_file_conflict(Oid db_id)
         pfree_ext(dstpath);
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
     UnregisterSnapshot(snapshot);
 
@@ -2062,6 +2130,26 @@ char* get_database_name(Oid dbid)
     return result;
 }
 
+char* get_and_check_db_name(Oid dbid, bool is_ereport)
+{
+    char* dbname = NULL;
+
+    dbname = get_database_name(dbid);
+    if (dbname == NULL) {
+        if (is_ereport) {
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_DATABASE),
+                 errmsg("database with OID %u does not exist", dbid)));
+        }
+        dbname = pstrdup("invalid database");
+    }
+
+    return dbname;
+}
+
+/*
+ * DATABASE resource manager's routines
+ */
 void xlog_db_create(Oid dstDbId, Oid dstTbSpcId, Oid srcDbId, Oid srcTbSpcId)
 {
     char* src_path = NULL;
@@ -2094,8 +2182,8 @@ void xlog_db_create(Oid dstDbId, Oid dstTbSpcId, Oid srcDbId, Oid srcTbSpcId)
      *
      * We don't need to copy subdirectories
      */
-    bool copy_res = false;
-    copy_res = copydir(src_path, dst_path, false, WARNING);
+    bool copyRes = false;
+    copyRes = copydir(src_path, dst_path, false, WARNING);
 
     /*
      * In this scenario, src_path may be droped:
@@ -2106,7 +2194,7 @@ void xlog_db_create(Oid dstDbId, Oid dstTbSpcId, Oid srcDbId, Oid srcTbSpcId)
      *  #4. Redo killed;
      *  #5. start again and Redo from #1, when Redo #2, src_path do not exits because it is already drop in Redo #3;
      */
-    if (!copy_res) {
+    if (!copyRes) {
         RelFileNode tmp = {srcTbSpcId, srcDbId, 0, InvalidBktId};
 
         /* forknum and blockno has no meaning */
@@ -2116,9 +2204,7 @@ void xlog_db_create(Oid dstDbId, Oid dstTbSpcId, Oid srcDbId, Oid srcTbSpcId)
 
 void xlog_db_drop(Oid dbId, Oid tbSpcId)
 {
-    char* dst_path = NULL;
-
-    dst_path = GetDatabasePath(dbId, tbSpcId);
+    char* dst_path = GetDatabasePath(dbId, tbSpcId);
 
     if (InHotStandby) {
         /*
@@ -2141,10 +2227,10 @@ void xlog_db_drop(Oid dbId, Oid tbSpcId)
     XLogDropDatabase(dbId);
 
     /* And remove the physical files */
-    if (!rmtree(dst_path, true))
-        ereport(
-            WARNING, (errmsg("some useless files may be left behind in old database directory \"%s\"", dst_path)));
-
+    if (!rmtree(dst_path, true)) {
+        ereport(WARNING, (errmsg("some useless files may be left behind in old database directory \"%s\"", dst_path)));
+    }
+    
     if (InHotStandby) {
         /*
          * Release locks prior to commit. XXX There is a race condition
@@ -2157,17 +2243,10 @@ void xlog_db_drop(Oid dbId, Oid tbSpcId)
     }
 }
 
-
-/*
- * DATABASE resource manager's routines
- */
 void dbase_redo(XLogReaderState* record)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
-
-    /* Backup blocks are not used in dbase records */
     Assert(!XLogRecHasAnyBlockRefs(record));
-
     if (info == XLOG_DBASE_CREATE) {
         xl_dbase_create_rec* xlrec = (xl_dbase_create_rec*)XLogRecGetData(record);
         xlog_db_create(xlrec->db_id, xlrec->tablespace_id, xlrec->src_db_id, xlrec->src_tablespace_id);
@@ -2178,6 +2257,29 @@ void dbase_redo(XLogReaderState* record)
         ereport(PANIC, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("dbase_redo: unknown op code %hhu", info)));
 
     t_thrd.xlog_cxt.needImmediateCkp = true;
+}
+
+/*
+ * Get remote nodes prepared xacts, if remote nodes have prepared xacts,
+ * we cannot drop database. Otherwise, drop database finally failed in 
+ * remote nodes and gs_clean cannot connect to database in CN to clean
+ * the in-doubt transactions.
+ * The memory palloc in PortalHeapMemory context, it will release after 
+ * operation finished, it also can be released in abort transaction if operation
+ * failed.
+ */
+int64 GetRemoteNodePreparedNumDB(const char* dbname)
+{
+    int64 size = 0;
+    StringInfoData buf;
+    ParallelFunctionState* state = NULL;
+    initStringInfo(&buf);
+    appendStringInfo(&buf,
+        "SELECT count(*) from pg_catalog.pg_prepared_xacts where database = '%s'", dbname);
+    state = RemoteFunctionResultHandler(buf.data, NULL, StrategyFuncSum, true, EXEC_ON_ALL_NODES, true);
+    size = state->result;
+    FreeParallelFunctionState(state);
+    return size;
 }
 
 /*
@@ -2200,6 +2302,7 @@ void PreCleanAndCheckConns(const char* dbname, bool missing_ok)
     int rc;
     Oid db_id;
     int notherbackends, npreparedxacts;
+    int64 nremotepreparedxacts;
 
     /* 0. check if db exists? */
     db_id = get_database_oid(dbname, missing_ok);
@@ -2218,13 +2321,25 @@ void PreCleanAndCheckConns(const char* dbname, bool missing_ok)
     if (CountOtherDBBackends(db_id, &notherbackends, &npreparedxacts))
         ereport(ERROR,
             (errcode(ERRCODE_OBJECT_IN_USE),
-                errmsg("database \"%s\" is being accessed by other users", dbname),
+                errmsg("Database \"%s\" is being accessed by other users. You can stop all connections by command:"
+                    " \"clean connection to all force for database XXXX;\" or wait for the sessions to end by querying "
+                    "view: \"pg_stat_activity\".", dbname),
                 errdetail_busy_db(notherbackends, npreparedxacts)));
 
     /* 4. check for other backends in remote CNs */
     rc = sprintf_s(query, sizeof(query), "CLEAN CONNECTION TO ALL CHECK FOR DATABASE %s;", quote_identifier(dbname));
     securec_check_ss(rc, "\0", "\0");
     ExecUtilityStmtOnNodes(query, NULL, false, true, EXEC_ON_COORDS, false);
+
+    /* 5. get and check remote node prepared xacts num */
+    nremotepreparedxacts = GetRemoteNodePreparedNumDB(dbname);
+    if (nremotepreparedxacts != 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OBJECT_IN_USE),
+                errmsg("Database \"%s\" is being accessed by other users. You can "
+                "call gs_clean to clean prepared transactions", dbname),
+                errdetail_busy_db(0, nremotepreparedxacts)));
+    }
 }
 
 /*
@@ -2296,6 +2411,34 @@ static void AlterDatabasePrivateObject(const Form_pg_database fbform, Oid dbid, 
             ATExecEnableDisableRls(rel, RELATION_RLS_ENABLE, ShareUpdateExclusiveLock);
             relation_close(rel, ShareUpdateExclusiveLock);
         }
+        /*
+         * step 4: create row level security for pg_namespace if not exists
+         *   CREATE ROW LEVEL SECURITY POLICY pg_namespace_rls ON pg_namespace AS PERMISSIVE FOR SELECT TO PUBLIC
+         *     USING (has_schema_privilege(current_user, nspname, 'select'))
+         */
+        rlsPolicyId = get_rlspolicy_oid(NamespaceRelationId, "pg_namespace_rls", true);
+        if (false == OidIsValid(rlsPolicyId)) {
+            CreateRlsPolicyForSystem(
+                "pg_catalog", "pg_namespace", "pg_namespace_rls", "has_schema_privilege", "oid", "USAGE");
+            rel = relation_open(NamespaceRelationId, ShareUpdateExclusiveLock);
+            ATExecEnableDisableRls(rel, RELATION_RLS_ENABLE, ShareUpdateExclusiveLock);
+            relation_close(rel, ShareUpdateExclusiveLock);
+        }
+        /*
+         * step 5: create row level security for pgxc_slice if not exists
+         *   CREATE ROW LEVEL SECURITY POLICY pgxc_slice_rls ON pgxc_slice AS PERMISSIVE FOR SELECT TO PUBLIC
+         *     USING (has_schema_privilege(current_user, nspname, 'select'))
+         */
+        if (t_thrd.proc->workingVersionNum >= RANGE_LIST_DISTRIBUTION_VERSION_NUM) {
+            rlsPolicyId = get_rlspolicy_oid(PgxcSliceRelationId, "pgxc_slice_rls", true);
+            if (OidIsValid(rlsPolicyId) == false) {
+                CreateRlsPolicyForSystem(
+                    "pg_catalog", "pgxc_slice", "pgxc_slice_rls", "has_table_privilege", "relid", "select");
+                rel = relation_open(PgxcSliceRelationId, ShareUpdateExclusiveLock);
+                ATExecEnableDisableRls(rel, RELATION_RLS_ENABLE, ShareUpdateExclusiveLock);
+                relation_close(rel, ShareUpdateExclusiveLock);
+            }
+        }
     } else {
         /* Remove row level security policy for system catalog */
         /* step 1: remove row level security policy from pg_class */
@@ -2321,6 +2464,24 @@ static void AlterDatabasePrivateObject(const Form_pg_database fbform, Oid dbid, 
             rel = relation_open(ProcedureRelationId, ShareUpdateExclusiveLock);
             ATExecEnableDisableRls(rel, RELATION_RLS_DISABLE, ShareUpdateExclusiveLock);
             relation_close(rel, ShareUpdateExclusiveLock);
+        }
+        /* step 4: remove row level security policy from pg_namespace */
+        rlsPolicyId = get_rlspolicy_oid(NamespaceRelationId, "pg_namespace_rls", true);
+        if (OidIsValid(rlsPolicyId)) {
+            RemoveRlsPolicyById(rlsPolicyId);
+            rel = relation_open(NamespaceRelationId, ShareUpdateExclusiveLock);
+            ATExecEnableDisableRls(rel, RELATION_RLS_DISABLE, ShareUpdateExclusiveLock);
+            relation_close(rel, ShareUpdateExclusiveLock);
+        }
+        /* step 5: remove row level security policy from pgxc_slice */
+        if (t_thrd.proc->workingVersionNum >= RANGE_LIST_DISTRIBUTION_VERSION_NUM) {
+            rlsPolicyId = get_rlspolicy_oid(PgxcSliceRelationId, "pgxc_slice_rls", true);
+            if (OidIsValid(rlsPolicyId)) {
+                RemoveRlsPolicyById(rlsPolicyId);
+                rel = relation_open(PgxcSliceRelationId, ShareUpdateExclusiveLock);
+                ATExecEnableDisableRls(rel, RELATION_RLS_DISABLE, ShareUpdateExclusiveLock);
+                relation_close(rel, ShareUpdateExclusiveLock);
+            }
         }
     }
 }

@@ -15,12 +15,13 @@
 #ifndef _BGWRITER_H
 #define _BGWRITER_H
 
-#include "storage/block.h"
+#include "storage/buf/block.h"
 #include "storage/relfilenode.h"
 #include "postmaster/pagewriter.h"
 
 typedef struct CkptSortItem CkptSortItem;
 
+#ifdef ENABLE_MOT
 typedef enum {
     EVENT_CHECKPOINT_CREATE_SNAPSHOT,
     EVENT_CHECKPOINT_SNAPSHOT_READY,
@@ -32,6 +33,7 @@ typedef void (*CheckpointCallback)(CheckpointEvent checkpointEvent, XLogRecPtr l
 
 extern void RegisterCheckpointCallback(CheckpointCallback callback, void* arg);
 extern void CallCheckpointCallback(CheckpointEvent checkpointEvent, XLogRecPtr lsn);
+#endif
 
 extern void BackgroundWriterMain(void);
 extern void CheckpointerMain(void);
@@ -48,7 +50,7 @@ extern void CheckpointerShmemInit(void);
 extern bool FirstCallSinceLastCheckpoint(void);
 extern bool IsBgwriterProcess(void);
 
-/*incremental checkpoint bgwriter thread */
+/* incremental checkpoint bgwriter thread */
 const int INCRE_CKPT_BGWRITER_VIEW_COL_NUM = 6;
 extern const incre_ckpt_view_col g_bgwriter_view_col[INCRE_CKPT_BGWRITER_VIEW_COL_NUM];
 extern void candidate_buf_init(void);
@@ -68,10 +70,9 @@ typedef struct BgWriterProc {
     pg_atomic_uint64 head;
     pg_atomic_uint64 tail;
     bool need_flush;
-    volatile bool is_hibernating;  /* the thread is hibernating */
     ThrdDwCxt thrd_dw_cxt;         /* thread double writer cxt */
     volatile uint32 thread_last_flush;
     int32 next_scan_loc;
 } BgWriterProc;
-
 #endif /* _BGWRITER_H */
+

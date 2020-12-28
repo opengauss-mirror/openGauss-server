@@ -563,7 +563,7 @@ alter sequence foo_f1_seq restart with 1;
 INSERT INTO fp VALUES (1,'test',42), (2,'More', 11), (3,upper('more'), 7+9);
 INSERT INTO fp_child VALUES(123,'child',999,-123);
 ALTER table fp ADD COLUMN f4 int8 DEFAULT 99;
-explain (costs off, num_nodes off, nodes off, verbose on)
+explain (costs off, num_verbose on)
 UPDATE fp SET f4 = f4 + f3 WHERE f4 = 99;
                                                                  QUERY PLAN                                                                  
 ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -580,7 +580,7 @@ UPDATE fp SET f4 = f4 + f3 WHERE f4 = 99;
          Remote query: SELECT f1, f2, f3, fc, f4, ctid, xc_node_id FROM ONLY public.fp_child fp WHERE f4 = 99
 (11 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)
+explain (costs off, num_verbose on)
 UPDATE fp SET f3 = f3*2  FROM xc_int8_tbl i  WHERE fp.f1 = i.q2;
                                                                 QUERY PLAN                                                                
 ------------------------------------------------------------------------------------------------------------------------------------------
@@ -613,7 +613,7 @@ UPDATE fp SET f3 = f3*2  FROM xc_int8_tbl i  WHERE fp.f1 = i.q2;
                      Remote query: SELECT ctid, q2 FROM ONLY public.xc_int8_tbl i WHERE true
 (27 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)
+explain (costs off, num_verbose on)
 update fp_child set fc=fc+2 returning *, f4-f1;
                                                                                        QUERY PLAN                                                                                        
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -626,7 +626,7 @@ update fp_child set fc=fc+2 returning *, f4-f1;
          Remote query: SELECT f1, f2, f3, fc, f4, ctid, xc_node_id FROM ONLY public.fp_child WHERE true
 (7 rows)
 
-explain (costs off, num_nodes off, nodes off, verbose on)
+explain (costs off, num_verbose on)
 update fp set f3 = f3 + 1 where f1<2 returning *, f3-f1;
                                                                                  QUERY PLAN                                                                                 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------

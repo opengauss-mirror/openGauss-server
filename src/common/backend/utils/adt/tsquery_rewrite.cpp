@@ -175,8 +175,7 @@ static QTNode* dofindsubquery(QTNode* root, QTNode* ex, QTNode* subs, bool* isfi
 
     /* unless we matched here, consider matches at child nodes */
     if (root && (root->flags & QTN_NOCHANGE) == 0 && root->valnode->type == QI_OPR) {
-        int i = 0;
-        int j = 0;
+        int i = 0, j = 0;
 
         /*
          * Any subtrees that are replaced by NULL must be dropped from the
@@ -301,7 +300,7 @@ Datum tsquery_rewrite_query(PG_FUNCTION_ARGS)
 
                 oldcontext = MemoryContextSwitchTo(outercontext);
                 tree = findsubquery(tree, qex, qsubs, NULL);
-                (void)MemoryContextSwitchTo(oldcontext);
+                MemoryContextSwitchTo(oldcontext);
 
                 QTNFree(qex);
                 if (qtex != (TSQuery)DatumGetPointer(qdata))

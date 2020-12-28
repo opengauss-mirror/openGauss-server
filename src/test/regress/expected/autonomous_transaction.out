@@ -94,46 +94,6 @@ select * from at_tb2;
 (4 rows)
 
 truncate table at_tb2;
-create or replace procedure at_test5(i int)
-AS 
-DECLARE
-  PRAGMA AUTONOMOUS_TRANSACTION;
-BEGIN
-  insert into at_tb2 values(3, 'klk');
-  commit;
-end;
-/
-select at_test5(6);
-ERROR:  there is no transaction in progress
-CONTEXT:  PL/pgSQL function at_test5(integer) line 6 at COMMIT
-referenced column: at_test5
-select * from at_tb2;
- id | val 
-----+-----
-  3 | klk
-(1 row)
-
-truncate table at_tb2;
-create or replace procedure at_test6(i int)
-AS 
-DECLARE
-  PRAGMA AUTONOMOUS_TRANSACTION;
-BEGIN
-  insert into at_tb2 values(3, 'klk');
-  rollback;
-end;
-/
-select at_test6(6);
-ERROR:  there is no transaction in progress
-CONTEXT:  PL/pgSQL function at_test6(integer) line 6 at ROLLBACK
-referenced column: at_test6
-select * from at_tb2;
- id | val 
-----+-----
-  3 | klk
-(1 row)
-
-truncate table at_tb2;
 DECLARE
 begin
 insert into at_tb2 values(1, 'begin');
@@ -385,7 +345,6 @@ ON  tg_test1
 FOR EACH ROW
 EXECUTE PROCEDURE tri_insert_test2_func();
 insert into tg_test1 values(1,'a','2020-08-13 09:00:00', 1);  
-ERROR:  Un-support feature
-DETAIL:  Trigger doesnot support autonomous transaction
+ERROR:  Un-support feature : Trigger don't support autonomous transaction
 CONTEXT:  PL/pgSQL function tri_insert_test2_func() line 4 at statement block
   

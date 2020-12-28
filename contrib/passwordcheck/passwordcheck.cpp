@@ -56,7 +56,8 @@ static void check_password(
     int pwdlen = strlen(password);
     char encrypted[MD5_PASSWD_LEN + 1];
     int i;
-    bool pwd_has_letter, pwd_has_nonletter;
+    bool pwd_has_letter = false;
+    bool pwd_has_nonletter = false;
 
     switch (password_type) {
         case PASSWORD_TYPE_MD5:

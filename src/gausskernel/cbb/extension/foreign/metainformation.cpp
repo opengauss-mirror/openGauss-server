@@ -14,10 +14,10 @@
  * -------------------------------------------------------------------------
  *
  * metainformation.cpp
- *    support interface for pushdown metainformation.
+ * support interface for pushdown metainformation.
  *
  * IDENTIFICATION
- *    src/gausskernel/cbb/extension/foreign/metainformation.cpp
+ *		  src/gausskernel/cbb/extension/foreign/metainformation.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -41,7 +41,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 
 extern void getOBSKeyString(unsigned char** cipherKey);
 
@@ -54,8 +54,8 @@ void fillTxtCsvFormatForeignOption(Oid relId, ForeignOptions* options)
 ForeignOptions* setForeignOptions(Oid relid)
 {
     ForeignOptions* options = makeNode(ForeignOptions);
-
     ServerTypeOption srvType = getServerType(relid);
+    errno_t rc = EOK;
 
     switch (srvType) {
         case T_OBS_SERVER: {
@@ -92,6 +92,10 @@ ForeignOptions* setForeignOptions(Oid relid)
 
             optionDef = makeDefElem(OPTION_NAME_OBSKEY, (Node*)makeString(pstrdup((char*)obskey)));
             options->fOptions = lappend(options->fOptions, optionDef);
+
+            rc = memset_s(obskey, strlen((const char*)obskey), 0, strlen((const char*)obskey));
+            securec_check(rc, "\0", "\0");
+            pfree(obskey);
             break;
         }
         case T_HDFS_SERVER: {

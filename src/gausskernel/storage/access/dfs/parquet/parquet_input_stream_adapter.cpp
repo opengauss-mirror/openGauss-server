@@ -17,7 +17,7 @@
  *
  *
  * IDENTIFICATION
- *         src/gausskernel/storage/access/dfs/parquet/parquet_input_stream_adapter.cpp
+ *    src/gausskernel/storage/access/dfs/parquet/parquet_input_stream_adapter.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -28,13 +28,14 @@
 namespace dfs {
 namespace reader {
 ParquetInputStreamAdapter::ParquetInputStreamAdapter(MemoryContext memoryContext,
-                                                    std::unique_ptr<dfs::GSInputStream> gsInputStream)
+                                                     std::unique_ptr<dfs::GSInputStream> gsInputStream)
     : m_gsInputStream(std::move(gsInputStream)),
-        m_internalContext(memoryContext),
-        m_offset(0),
-        m_buffer(NULL),
-        m_bufferSize(0)
-{}
+      m_internalContext(memoryContext),
+      m_offset(0),
+      m_buffer(NULL),
+      m_bufferSize(0)
+{
+}
 
 ParquetInputStreamAdapter::~ParquetInputStreamAdapter()
 {

@@ -1,0 +1,393 @@
+set explain_perf_mode=normal;
+set resource_track_log=detail;
+-- outer-level aggregates
+explain (verbose on, costs off) select c8, sum(distinct c4) from aggtable1 a group by c8
+having exists (select 1 from aggtable1 b where sum(distinct a.c4) = b.c4)
+order by c8;
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: a.c8, (sum(a.c4))
+   Merge Sort Key: a.c8
+   Node/s: All datanodes
+   ->  Sort
+         Output: a.c8, (sum(a.c4))
+         Sort Key: a.c8
+         ->  HashAggregate
+               Output: a.c8, sum(a.c4)
+               Group By Key: a.c8
+               Filter: (SubPlan 1)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: a.c8, a.c4
+                     Distribute Key: a.c8
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: a.c8, a.c4
+                           Group By Key: a.c8, a.c4
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: a.c8, a.c4
+                                 Distribute Key: a.c4, a.c8
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Dummy HashAggregate
+                                       Output: a.c8, a.c4
+                                       Group By Key: a.c8, a.c4
+                                       ->  Foreign Scan on public.aggtable1 a
+                                             Output: c8, c4
+                                             Remote SQL: SELECT c8, c4 FROM public.aggtable1 GROUP BY c8, c4
+               SubPlan 1
+                 ->  Result
+                       Filter: (sum(a.c4) = (b.c4)::numeric)
+                       ->  Materialize
+                             Output: b.c4
+                             ->  Streaming(type: BROADCAST)
+                                   Output: b.c4
+                                   Spawn on: All datanodes
+                                   Consumer Nodes: All datanodes
+                                   ->  Foreign Scan on public.aggtable1 b
+                                         Output: b.c4
+                                         Remote SQL: SELECT c4 FROM public.aggtable1
+(42 rows)
+
+-- condition, having
+select avg(c1) from aggtable1 group by c8 having c8 = 200 order by c8;
+         avg         
+---------------------
+ 17.3333333333333333
+(1 row)
+
+explain (verbose on, costs off) select avg(c1) from aggtable1 group by c8 having c8 = 200 order by c8;
+                                                            QUERY PLAN                                                             
+-----------------------------------------------------------------------------------------------------------------------------------
+ HashAggregate
+   Output: pg_catalog.avg((avg(c1))), c8
+   Group By Key: aggtable1.c8
+   ->  Streaming (type: GATHER)
+         Output: (avg(c1)), c8
+         Node/s: All datanodes
+         ->  Dummy HashAggregate
+               Output: avg(c1), c8
+               Group By Key: aggtable1.c8
+               ->  Foreign Scan on public.aggtable1
+                     Output: count((c1)), sum(((c1))::numeric), c8
+                     Remote SQL: SELECT count((c1)), sum(((c1))::numeric), c8 FROM public.aggtable1 WHERE ((c8 = 200)) GROUP BY c8
+(12 rows)
+
+-- window function
+select c1, c2, avg(c1) from aggtable1 group by cube(c1, c2) order by c1, c2, avg(c1);
+ c1 | c2 |          avg           
+----+----+------------------------
+  1 | 2  | 1.00000000000000000000
+  1 |    | 1.00000000000000000000
+  8 | 9  |     8.0000000000000000
+  8 |    |     8.0000000000000000
+ 29 | 30 |    29.0000000000000000
+ 29 |    |    29.0000000000000000
+ 36 | 37 |    36.0000000000000000
+ 36 |    |    36.0000000000000000
+    | 2  | 1.00000000000000000000
+    | 9  |     8.0000000000000000
+    | 30 |    29.0000000000000000
+    | 37 |    36.0000000000000000
+    |    |    13.8333333333333333
+    |    |                       
+    |    |                       
+    |    |                       
+(16 rows)
+
+explain (verbose on, costs off) select c1, c2, avg(c1) from aggtable1 group by cube(c1, c2) order by c1, c2, avg(c1);
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: c1, c2, (pg_catalog.avg((avg(c1)))), (GROUPINGID())
+   Merge Sort Key: aggtable1.c1, aggtable1.c2, (pg_catalog.avg((avg(aggtable1.c1))))
+   Node/s: All datanodes
+   ->  Sort
+         Output: c1, c2, (pg_catalog.avg((avg(c1)))), (GROUPINGID())
+         Sort Key: aggtable1.c1, aggtable1.c2, (pg_catalog.avg((avg(aggtable1.c1))))
+         ->  HashAggregate
+               Output: c1, c2, pg_catalog.avg((avg(c1))), (GROUPINGID())
+               Group By Key: aggtable1.c1, aggtable1.c2, (GROUPINGID())
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: c1, c2, (avg(c1)), (GROUPINGID())
+                     Distribute Key: c1, c2, (GROUPINGID())
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  GroupAggregate
+                           Output: c1, c2, avg(c1), GROUPINGID()
+                           Group By Key: aggtable1.c1, aggtable1.c2
+                           Group By Key: aggtable1.c1
+                           Group By Key: ()
+                           Sort Key: aggtable1.c2
+                             Group By Key: aggtable1.c2
+                           ->  Sort
+                                 Output: c1, c2
+                                 Sort Key: aggtable1.c1, aggtable1.c2
+                                 ->  Foreign Scan on public.aggtable1
+                                       Output: c1, c2
+                                       Remote SQL: SELECT c1, c2 FROM public.aggtable1
+(28 rows)
+
+-- implicit case
+explain (verbose on, costs off) select avg(distinct(substr(c2, 4, 1))) from implicit_cast;
+WARNING:  Statistics in some tables or columns(public.implicit_cast.c2) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.avg((avg(DISTINCT ((substr(c2, 4, 1))::numeric))))
+   ->  Streaming (type: GATHER)
+         Output: (avg(DISTINCT ((substr(c2, 4, 1))::numeric)))
+         Node/s: All datanodes
+         ->  Aggregate
+               Output: avg(DISTINCT ((substr(c2, 4, 1))::numeric))
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: c2, ((substr(c2, 4, 1))::numeric)
+                     Distribute Key: ((substr(c2, 4, 1))::numeric)
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Foreign Scan on public.implicit_cast
+                           Output: c2, substr(c2, 4, 1)
+                           Remote SQL: SELECT c2 FROM public.implicit_cast
+(15 rows)
+
+-- tpch Q1
+explain (verbose on, costs off)
+select
+        l_returnflag,
+        l_linestatus,
+        sum(l_quantity) as sum_qty,
+        sum(l_extendedprice) as sum_base_price,
+        sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,
+        sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)/1000) as sum_charge, --add /1000
+        avg(l_quantity) as avg_qty,
+        avg(l_extendedprice) as avg_price,
+        avg(l_discount) as avg_disc,
+        count(*) as count_order
+from
+        lineitem
+where
+        l_shipdate <= date '1998-12-01' - interval '3 day'
+group by
+        l_returnflag,
+        l_linestatus
+order by
+        l_returnflag,
+        l_linestatus;
+                                                                                                                                                                                                                                                                                        QUERY PLAN                                                                                                                                                                                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: l_returnflag, l_linestatus, (sum((sum(l_quantity)))), (sum((sum(l_extendedprice)))), (sum((sum((l_extendedprice * (1::numeric - l_discount)))))), (sum((sum((((l_extendedprice * (1::numeric - l_discount)) * (1::numeric + l_tax)) / 1000::numeric))))), (pg_catalog.avg((avg(l_quantity)))), (pg_catalog.avg((avg(l_extendedprice)))), (pg_catalog.avg((avg(l_discount)))), (pg_catalog.count(*))
+   Merge Sort Key: lineitem.l_returnflag, lineitem.l_linestatus
+   Node/s: All datanodes
+   ->  Sort
+         Output: l_returnflag, l_linestatus, (sum((sum(l_quantity)))), (sum((sum(l_extendedprice)))), (sum((sum((l_extendedprice * (1::numeric - l_discount)))))), (sum((sum((((l_extendedprice * (1::numeric - l_discount)) * (1::numeric + l_tax)) / 1000::numeric))))), (pg_catalog.avg((avg(l_quantity)))), (pg_catalog.avg((avg(l_extendedprice)))), (pg_catalog.avg((avg(l_discount)))), (pg_catalog.count(*))
+         Sort Key: lineitem.l_returnflag, lineitem.l_linestatus
+         ->  HashAggregate
+               Output: l_returnflag, l_linestatus, sum((sum(l_quantity))), sum((sum(l_extendedprice))), sum((sum((l_extendedprice * (1::numeric - l_discount))))), sum((sum((((l_extendedprice * (1::numeric - l_discount)) * (1::numeric + l_tax)) / 1000::numeric)))), pg_catalog.avg((avg(l_quantity))), pg_catalog.avg((avg(l_extendedprice))), pg_catalog.avg((avg(l_discount))), pg_catalog.count(*)
+               Group By Key: lineitem.l_returnflag, lineitem.l_linestatus
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: l_returnflag, l_linestatus, (sum(l_quantity)), (sum(l_extendedprice)), (sum((l_extendedprice * (1::numeric - l_discount)))), (sum((((l_extendedprice * (1::numeric - l_discount)) * (1::numeric + l_tax)) / 1000::numeric))), (avg(l_quantity)), (avg(l_extendedprice)), (avg(l_discount)), (count(*))
+                     Distribute Key: l_linestatus, l_returnflag
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  Dummy HashAggregate
+                           Output: l_returnflag, l_linestatus, sum(l_quantity), sum(l_extendedprice), sum((l_extendedprice * (1::numeric - l_discount))), sum((((l_extendedprice * (1::numeric - l_discount)) * (1::numeric + l_tax)) / 1000::numeric)), avg(l_quantity), avg(l_extendedprice), avg(l_discount), count(*)
+                           Group By Key: lineitem.l_returnflag, lineitem.l_linestatus
+                           ->  Foreign Scan on public.lineitem
+                                 Output: l_returnflag, l_linestatus, sum(l_quantity), sum(l_extendedprice), sum((l_extendedprice * (1::numeric - l_discount))), sum((((l_extendedprice * (1::numeric - l_discount)) * (1::numeric + l_tax)) / 1000::numeric)), count((l_quantity)), sum(((l_quantity))::numeric), count((l_extendedprice)), sum(((l_extendedprice))::numeric), count((l_discount)), sum(((l_discount))::numeric), count(*)
+                                 Remote SQL: SELECT l_returnflag, l_linestatus, sum(l_quantity), sum(l_extendedprice), sum((l_extendedprice * (1::numeric - l_discount))), sum((((l_extendedprice * (1::numeric - l_discount)) * (1::numeric + l_tax)) / 1000::numeric)), count((l_quantity)), sum(((l_quantity))::numeric), count((l_extendedprice)), sum(((l_extendedprice))::numeric), count((l_discount)), sum(((l_discount))::numeric), count(*) FROM public.lineitem WHERE ((l_shipdate <= '1998-11-28 00:00:00'::timestamp without time zone)) GROUP BY l_returnflag, l_linestatus
+(21 rows)
+
+select
+        l_returnflag,
+        l_linestatus,
+        sum(l_quantity) as sum_qty,
+        sum(l_extendedprice) as sum_base_price,
+        sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,
+        sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)/1000) as sum_charge, --add /1000
+        avg(l_quantity) as avg_qty,
+        avg(l_extendedprice) as avg_price,
+        avg(l_discount) as avg_disc,
+        count(*) as count_order
+from
+        lineitem
+where
+        l_shipdate <= date '1998-12-01' - interval '3 day'
+group by
+        l_returnflag,
+        l_linestatus
+order by
+        l_returnflag,
+        l_linestatus;
+ l_returnflag | l_linestatus |  sum_qty  | sum_base_price | sum_disc_price |         sum_charge          |       avg_qty       |     avg_price      |       avg_disc        | count_order 
+--------------+--------------+-----------+----------------+----------------+-----------------------------+---------------------+--------------------+-----------------------+-------------
+ A            | F            |  61294.00 |    92020418.33 |  87412093.2709 |  90826.04140505800000000000 | 25.1824157764995892 | 37806.252395234182 | .05058751027115858669 |        2434
+ N            | F            |   1852.00 |     2634524.69 |   2524639.6609 |       2621.1250599230000000 | 26.4571428571428571 | 37636.067000000000 | .04742857142857142857 |          70
+ N            | O            | 130564.00 |   195348592.46 | 185621134.7858 | 193145.62533801700000000000 | 25.6965164337728794 | 38446.879051367841 | .05026372761267467034 |        5081
+ R            | F            |  62210.00 |    93368051.62 |  88721248.6007 |  92323.89742950500000000000 | 25.7598343685300207 | 38661.719097308489 | .04997929606625258799 |        2415
+(4 rows)
+
+-- invalid scanrelid in foreignscan node, so doesn't pushdown agg node
+explain (verbose on, costs off)
+select max(lpad(hd_buy_potential,20,'my')), (select min(t1.hd_demo_sk))
+from   household_demographics as t1
+where  t1.hd_demo_sk not in
+       (select min(hd_demo_sk)
+        from   household_demographics
+        where  length(hd_buy_potential) > 2 and hd_vehicle_count is null);
+WARNING:  Statistics in some tables or columns(public.household_demographics.hd_demo_sk, public.household_demographics.hd_vehicle_count) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                          QUERY PLAN                                                                                          
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: max((max(lpad((t1.hd_buy_potential)::text, 20, 'my'::text)))), (SubPlan 1)
+   ->  Streaming (type: GATHER)
+         Output: (max(lpad((t1.hd_buy_potential)::text, 20, 'my'::text))), (min(t1.hd_demo_sk))
+         Node/s: All datanodes
+         ->  Aggregate
+               Output: max(lpad((t1.hd_buy_potential)::text, 20, 'my'::text)), min(t1.hd_demo_sk)
+               ->  Nested Loop Anti Join
+                     Output: t1.hd_buy_potential, t1.hd_demo_sk
+                     Join Filter: ((t1.hd_demo_sk = (min((min(household_demographics.hd_demo_sk))))) OR (t1.hd_demo_sk IS NULL) OR ((min((min(household_demographics.hd_demo_sk)))) IS NULL))
+                     ->  Foreign Scan on public.household_demographics t1
+                           Output: t1.hd_buy_potential, t1.hd_demo_sk
+                           Remote SQL: SELECT hd_demo_sk, hd_buy_potential FROM public.household_demographics
+                     ->  Materialize
+                           Output: (min((min(household_demographics.hd_demo_sk))))
+                           ->  Aggregate
+                                 Output: min((min(household_demographics.hd_demo_sk)))
+                                 ->  Streaming(type: BROADCAST)
+                                       Output: (min(household_demographics.hd_demo_sk))
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Aggregate
+                                             Output: min(household_demographics.hd_demo_sk)
+                                             ->  Foreign Scan on public.household_demographics
+                                                   Output: household_demographics.hd_demo_sk
+                                                   Remote SQL: SELECT hd_demo_sk FROM public.household_demographics WHERE ((hd_vehicle_count IS NULL)) AND ((length(hd_buy_potential) > 2))
+   SubPlan 1
+     ->  Result
+           Output: min((min(t1.hd_demo_sk)))
+(29 rows)
+
+explain (verbose on, costs off)
+select c2, c3
+from aggtable1
+where c3 in
+      (select count(*)
+       from household_demographics
+       where hd_buy_potential like '%s%')
+order by 1, 2;
+WARNING:  Statistics in some tables or columns(public.household_demographics.hd_buy_potential) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                    QUERY PLAN                                                                    
+--------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: aggtable1.c2, aggtable1.c3
+   Merge Sort Key: aggtable1.c2, aggtable1.c3
+   Node/s: All datanodes
+   ->  Sort
+         Output: aggtable1.c2, aggtable1.c3
+         Sort Key: aggtable1.c2, aggtable1.c3
+         ->  Hash Join
+               Output: aggtable1.c2, aggtable1.c3
+               Hash Cond: (aggtable1.c3 = (pg_catalog.count(*)))
+               ->  Foreign Scan on public.aggtable1
+                     Output: aggtable1.c2, aggtable1.c3
+                     Remote SQL: SELECT c2, c3 FROM public.aggtable1
+               ->  Hash
+                     Output: (pg_catalog.count(*))
+                     ->  Aggregate
+                           Output: pg_catalog.count(*)
+                           ->  Streaming(type: BROADCAST)
+                                 Output: (count(*))
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Aggregate
+                                       Output: count(*)
+                                       ->  Foreign Scan on public.household_demographics
+                                             Remote SQL: SELECT NULL FROM public.household_demographics WHERE ((hd_buy_potential ~~ '%s%'::text))
+(25 rows)
+
+-- special case for group by column
+explain (verbose on, costs off)
+select min(t7.wd_varchar),
+       t7.wd_bigint,
+       t7.wd_numeric,
+       max(t7.wd_date4),
+       avg(wd_tinyint),
+       count(t7.wd_smallint),
+       sum(t1.c_d_id),
+       coalesce(t1.c_discount, 2.5),
+       t7.wd_int
+  from multdistr_07 t7
+ inner join multdistr_05 t1
+    on t1.c_w_id + 1 = t7.wd_tinyint
+   and t1.c_id + 1 = t7.wd_bigint
+ where (t1.c_d_id, t1.c_w_id) in
+       (select t2.col_int - 1, t2.col_bigint
+          from multdistr_02 t2
+         where t2.col_int < 2000)
+ group by t7.wd_bigint, t7.wd_numeric, coalesce(t1.c_discount, 2.5), 9
+ order by 1, 2, 3, 4, 5, 6, 7, 8, 9 limit 200;
+WARNING:  Statistics in some tables or columns(public.multdistr_02.col_int, public.multdistr_02.col_bigint, public.multdistr_05.c_id, public.multdistr_05.c_w_id, public.multdistr_05.c_d_id, public.multdistr_05.c_discount) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                   QUERY PLAN                                                                                                    
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: (min(t7.wd_varchar)), t7.wd_bigint, t7.wd_numeric, (max(t7.wd_date4)), (avg(t7.wd_tinyint)), (count(t7.wd_smallint)), (sum(t1.c_d_id)), (COALESCE(t1.c_discount, 2.5)), t7.wd_int
+   ->  Streaming (type: GATHER)
+         Output: (min(t7.wd_varchar)), t7.wd_bigint, t7.wd_numeric, (max(t7.wd_date4)), (avg(t7.wd_tinyint)), (count(t7.wd_smallint)), (sum(t1.c_d_id)), (COALESCE(t1.c_discount, 2.5)), t7.wd_int
+         Merge Sort Key: (min(t7.wd_varchar)), t7.wd_bigint, t7.wd_numeric, (max(t7.wd_date4)), (avg(t7.wd_tinyint)), (count(t7.wd_smallint)), (sum(t1.c_d_id)), (COALESCE(t1.c_discount, 2.5)), t7.wd_int
+         Node/s: All datanodes
+         ->  Limit
+               Output: (min(t7.wd_varchar)), t7.wd_bigint, t7.wd_numeric, (max(t7.wd_date4)), (avg(t7.wd_tinyint)), (count(t7.wd_smallint)), (sum(t1.c_d_id)), (COALESCE(t1.c_discount, 2.5)), t7.wd_int
+               ->  Sort
+                     Output: (min(t7.wd_varchar)), t7.wd_bigint, t7.wd_numeric, (max(t7.wd_date4)), (avg(t7.wd_tinyint)), (count(t7.wd_smallint)), (sum(t1.c_d_id)), (COALESCE(t1.c_discount, 2.5)), t7.wd_int
+                     Sort Key: (min(t7.wd_varchar)), t7.wd_bigint, t7.wd_numeric, (max(t7.wd_date4)), (avg(t7.wd_tinyint)), (count(t7.wd_smallint)), (sum(t1.c_d_id)), (COALESCE(t1.c_discount, 2.5)), t7.wd_int
+                     ->  HashAggregate
+                           Output: min(t7.wd_varchar), t7.wd_bigint, t7.wd_numeric, max(t7.wd_date4), avg(t7.wd_tinyint), count(t7.wd_smallint), sum(t1.c_d_id), (COALESCE(t1.c_discount, 2.5)), t7.wd_int
+                           Group By Key: t7.wd_bigint, t7.wd_numeric, COALESCE(t1.c_discount, 2.5), t7.wd_int
+                           ->  Nested Loop
+                                 Output: t7.wd_bigint, t7.wd_numeric, COALESCE(t1.c_discount, 2.5), t7.wd_int, t7.wd_varchar, t7.wd_date4, t7.wd_tinyint, t7.wd_smallint, t1.c_d_id
+                                 Join Filter: ((((t1.c_id + 1)) = t7.wd_bigint) AND ((t1.c_w_id + 1) = t7.wd_tinyint))
+                                 ->  Streaming(type: REDISTRIBUTE)
+                                       Output: t7.wd_bigint, t7.wd_numeric, t7.wd_int, t7.wd_varchar, t7.wd_date4, t7.wd_tinyint, t7.wd_smallint
+                                       Distribute Key: t7.wd_bigint
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Foreign Scan on public.multdistr_07 t7
+                                             Output: t7.wd_bigint, t7.wd_numeric, t7.wd_int, t7.wd_varchar, t7.wd_date4, t7.wd_tinyint, t7.wd_smallint
+                                             Remote SQL: SELECT wd_tinyint, wd_smallint, wd_int, wd_bigint, wd_numeric, wd_varchar, wd_date4 FROM public.multdistr_07
+                                 ->  Materialize
+                                       Output: t1.c_discount, t1.c_d_id, t1.c_w_id, t1.c_id, ((t1.c_id + 1))
+                                       ->  Streaming(type: REDISTRIBUTE)
+                                             Output: t1.c_discount, t1.c_d_id, t1.c_w_id, t1.c_id, ((t1.c_id + 1))
+                                             Distribute Key: ((t1.c_id + 1))
+                                             Spawn on: All datanodes
+                                             Consumer Nodes: All datanodes
+                                             ->  Nested Loop Semi Join
+                                                   Output: t1.c_discount, t1.c_d_id, t1.c_w_id, t1.c_id, (t1.c_id + 1)
+                                                   Join Filter: ((t1.c_w_id = t2.col_bigint) AND (t1.c_d_id = ((t2.col_int - 1))))
+                                                   ->  Streaming(type: REDISTRIBUTE)
+                                                         Output: t1.c_discount, t1.c_d_id, t1.c_w_id, t1.c_id
+                                                         Distribute Key: t1.c_d_id
+                                                         Spawn on: All datanodes
+                                                         Consumer Nodes: All datanodes
+                                                         ->  Foreign Scan on public.multdistr_05 t1
+                                                               Output: t1.c_discount, t1.c_d_id, t1.c_w_id, t1.c_id
+                                                               Remote SQL: SELECT c_id, c_d_id, c_w_id, c_discount FROM public.multdistr_05
+                                                   ->  Materialize
+                                                         Output: t2.col_int, t2.col_bigint, ((t2.col_int - 1))
+                                                         ->  Streaming(type: REDISTRIBUTE)
+                                                               Output: t2.col_int, t2.col_bigint, ((t2.col_int - 1))
+                                                               Distribute Key: ((t2.col_int - 1))
+                                                               Spawn on: All datanodes
+                                                               Consumer Nodes: All datanodes
+                                                               ->  Foreign Scan on public.multdistr_02 t2
+                                                                     Output: t2.col_int, t2.col_bigint, (t2.col_int - 1)
+                                                                     Remote SQL: SELECT col_int, col_bigint FROM public.multdistr_02 WHERE ((col_int < 2000))
+(53 rows)
+

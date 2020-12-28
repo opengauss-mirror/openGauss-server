@@ -3,14 +3,14 @@ CREATE TABLE SEQ_CURRVAL_TABLE_009(COL_NAME VARCHAR2(20),COL_NUM INTEGER) ;
 ALTER TABLE SEQ_CURRVAL_TABLE_009 ADD PRIMARY KEY(COL_NUM);
 CREATE SEQUENCE CURRVAL_SEQUENCE_009 INCREMENT BY 100 START WITH 1;
 
-explain (costs off, nodes off) INSERT INTO SEQ_CURRVAL_TABLE_009 VALUES('nextval',nextval('CURRVAL_SEQUENCE_009'));
+explain (costs off) INSERT INTO SEQ_CURRVAL_TABLE_009 VALUES('nextval',nextval('CURRVAL_SEQUENCE_009'));
 INSERT INTO SEQ_CURRVAL_TABLE_009 VALUES('nextval',nextval('CURRVAL_SEQUENCE_009'));
 INSERT INTO SEQ_CURRVAL_TABLE_009 VALUES('nextval',nextval('CURRVAL_SEQUENCE_009'));
 SELECT * FROM SEQ_CURRVAL_TABLE_009 ORDER BY COL_NAME,COL_NUM;
-explain (costs off, nodes off) UPDATE  SEQ_CURRVAL_TABLE_009 SET COL_NAME='new' WHERE COL_NUM=currval('CURRVAL_SEQUENCE_009');
+explain (costs off) UPDATE  SEQ_CURRVAL_TABLE_009 SET COL_NAME='new' WHERE COL_NUM=currval('CURRVAL_SEQUENCE_009');
 UPDATE  SEQ_CURRVAL_TABLE_009 SET COL_NAME='new' WHERE COL_NUM=currval('CURRVAL_SEQUENCE_009');
 SELECT * FROM SEQ_CURRVAL_TABLE_009 ORDER BY COL_NUM,COL_NAME;
-explain (costs off, nodes off) UPDATE SEQ_CURRVAL_TABLE_009 SET COL_NUM=nextval('CURRVAL_SEQUENCE_009');
+explain (costs off) UPDATE SEQ_CURRVAL_TABLE_009 SET COL_NUM=nextval('CURRVAL_SEQUENCE_009');
 UPDATE SEQ_CURRVAL_TABLE_009 SET COL_NUM=nextval('CURRVAL_SEQUENCE_009');
 SELECT * FROM SEQ_CURRVAL_TABLE_009 ORDER BY COL_NUM,COL_NAME;
 
@@ -82,7 +82,7 @@ create table uschema2_ix.position_type
 )
 ;
 
-explain (costs off, nodes off) 
+explain (costs off) 
 select t1.ITEM_PRICE_START_DT,
 t0.PARTY_ID
 from uschema2_ix.OFFERS_20050701 t0
@@ -98,7 +98,7 @@ and t1.ITEM_ID in ( select t0.LOcation_ID from uschema2_ix.ASSOCIATE t0
                                                       ));
 
 -- can't push down rowexpr
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select position_type_desc, count(*) from uschema2_ix.position_type
 group by case when length(position_type_cd)>5 then (length(position_type_desc)-20, length(position_type_cd)+1)
 else (length(position_type_desc)-10, length(position_type_cd)+2) end, 1;

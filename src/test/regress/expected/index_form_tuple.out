@@ -1,0 +1,118 @@
+CREATE TABLE index_form_tuple_s (rf_a SERIAL PRIMARY KEY,
+	b INT);
+NOTICE:  CREATE TABLE will create implicit sequence "index_form_tuple_s_rf_a_seq" for serial column "index_form_tuple_s.rf_a"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "index_form_tuple_s_pkey" for table "index_form_tuple_s"
+CREATE TABLE index_form_tuple (a SERIAL PRIMARY KEY,
+	b INT,
+	c TEXT,
+	d TEXT
+	);
+NOTICE:  CREATE TABLE will create implicit sequence "index_form_tuple_a_seq" for serial column "index_form_tuple.a"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "index_form_tuple_pkey" for table "index_form_tuple"
+CREATE INDEX index_form_tuple_b ON index_form_tuple (b);
+CREATE INDEX index_form_tuple_c ON index_form_tuple (c);
+CREATE INDEX index_form_tuple_c_b ON index_form_tuple (c,b);
+CREATE INDEX index_form_tuple_b_c ON index_form_tuple (b,c);
+INSERT INTO index_form_tuple_s (b) VALUES (0);
+INSERT INTO index_form_tuple_s (b) SELECT b FROM index_form_tuple_s;
+INSERT INTO index_form_tuple_s (b) SELECT b FROM index_form_tuple_s;
+INSERT INTO index_form_tuple_s (b) SELECT b FROM index_form_tuple_s;
+INSERT INTO index_form_tuple_s (b) SELECT b FROM index_form_tuple_s;
+INSERT INTO index_form_tuple_s (b) SELECT b FROM index_form_tuple_s;
+drop table index_form_tuple_s cascade;
+-- CREATE TABLE clstr_tst_inh () INHERITS (index_form_tuple);
+INSERT INTO index_form_tuple (b, c) VALUES (11, 'once');
+INSERT INTO index_form_tuple (b, c) VALUES (10, 'diez');
+INSERT INTO index_form_tuple (b, c) VALUES (31, 'treinta y uno');
+INSERT INTO index_form_tuple (b, c) VALUES (22, 'veintidos');
+INSERT INTO index_form_tuple (b, c) VALUES (3, 'tres');
+INSERT INTO index_form_tuple (b, c) VALUES (20, 'veinte');
+INSERT INTO index_form_tuple (b, c) VALUES (23, 'veintitres');
+INSERT INTO index_form_tuple (b, c) VALUES (21, 'veintiuno');
+INSERT INTO index_form_tuple (b, c) VALUES (4, 'cuatro');
+INSERT INTO index_form_tuple (b, c) VALUES (14, 'catorce');
+INSERT INTO index_form_tuple (b, c) VALUES (2, 'dos');
+INSERT INTO index_form_tuple (b, c) VALUES (18, 'dieciocho');
+INSERT INTO index_form_tuple (b, c) VALUES (27, 'veintisiete');
+INSERT INTO index_form_tuple (b, c) VALUES (25, 'veinticinco');
+INSERT INTO index_form_tuple (b, c) VALUES (13, 'trece');
+INSERT INTO index_form_tuple (b, c) VALUES (28, 'veintiocho');
+INSERT INTO index_form_tuple (b, c) VALUES (32, 'treinta y dos');
+INSERT INTO index_form_tuple (b, c) VALUES (5, 'cinco');
+INSERT INTO index_form_tuple (b, c) VALUES (29, 'veintinueve');
+INSERT INTO index_form_tuple (b, c) VALUES (1, 'uno');
+INSERT INTO index_form_tuple (b, c) VALUES (24, 'veinticuatro');
+INSERT INTO index_form_tuple (b, c) VALUES (30, 'treinta');
+INSERT INTO index_form_tuple (b, c) VALUES (12, 'doce');
+INSERT INTO index_form_tuple (b, c) VALUES (17, 'diecisiete');
+INSERT INTO index_form_tuple (b, c) VALUES (9, 'nueve');
+INSERT INTO index_form_tuple (b, c) VALUES (19, 'diecinueve');
+INSERT INTO index_form_tuple (b, c) VALUES (26, 'veintiseis');
+INSERT INTO index_form_tuple (b, c) VALUES (15, 'quince');
+INSERT INTO index_form_tuple (b, c) VALUES (7, 'siete');
+INSERT INTO index_form_tuple (b, c) VALUES (16, 'dieciseis');
+INSERT INTO index_form_tuple (b, c) VALUES (8, 'ocho');
+-- This entry is needed to test that TOASTED values are copied correctly.
+INSERT INTO index_form_tuple (b, c, d) VALUES (6, 'seis', repeat('xyzzy', 100000));
+CLUSTER index_form_tuple_c ON index_form_tuple;
+-- Verify that foreign key link still works
+INSERT INTO index_form_tuple (b, c) VALUES (1111, 'this should fail');
+-- Try changing indisclustered
+ALTER TABLE index_form_tuple CLUSTER ON index_form_tuple_b_c;
+-- Try turning off all clustering
+ALTER TABLE index_form_tuple SET WITHOUT CLUSTER;
+drop table index_form_tuple cascade;
+create table index_form_tuple_1(col1 int, col2 int, col3 text);
+create index iindex_form_tuple_1 on index_form_tuple_1(col1,col2);
+insert into index_form_tuple_1 values (0,0,'test_insert');
+insert into index_form_tuple_1 values (0,1,'test_insert');
+insert into index_form_tuple_1 values (1,1,'test_insert');
+insert into index_form_tuple_1 values (1,2,'test_insert');
+insert into index_form_tuple_1 values (0,0,'test_insert2');
+insert into index_form_tuple_1 values (2,2,'test_insert2');
+insert into index_form_tuple_1 values (0,0,'test_insert3');
+insert into index_form_tuple_1 values (3,3,'test_insert3');
+insert into index_form_tuple_1(col1,col2) values (1,1);
+insert into index_form_tuple_1(col1,col2) values (2,2);
+insert into index_form_tuple_1(col1,col2) values (3,3);
+insert into index_form_tuple_1 values (null,null,null);
+select col1,col2 from index_form_tuple_1 where col1=0 and col2=0 order by col1,col2 for update limit 1;
+ col1 | col2 
+------+------
+    0 |    0
+(1 row)
+
+-- drop table index_form_tuple_1 cascade;
+drop table index_form_tuple_1 cascade;
+CREATE TEMP TABLE index_form_tuple_2 (s1 int);
+INSERT INTO index_form_tuple_2 VALUES (42),(3),(10),(7),(null),(null),(1);
+CREATE INDEX si ON index_form_tuple_2 (s1);
+SET enable_sort = false;
+SELECT * FROM index_form_tuple_2 ORDER BY s1;
+ s1 
+----
+  1
+  3
+  7
+ 10
+ 42
+   
+   
+(7 rows)
+
+drop table index_form_tuple_2 cascade;
+create table index_form_tuple_3 ( sm_ship_mode_sk integer not null, sm_ship_mode_id char(16) not null, sm_type char(30) , sm_code char(10) , sm_carrier char(20) , sm_contract char(20) , sm_email varchar(50) , sm_id varchar(20) , sm_phone varchar(20) , sm_num varchar(10) , sm_text varchar(2000) , sm_text_tv tsvector , sm_text_ts tsquery ) ;
+create index i_index_form_tuple_3_zh5 on index_form_tuple_3 using gin(to_tsvector('ngram',sm_text));
+insert into index_form_tuple_3 values(1,'AAAAAAAABAAAAAAA','EXPRESS ','AIR ','UPS ','YvxvxVaJI10') ;
+analyze index_form_tuple_3;
+set enable_global_stats=off;
+analyze index_form_tuple_3;
+analyze index_form_tuple_3;
+drop table index_form_tuple_3 cascade;
+reset enable_global_stats;
+SET enforce_two_phase_commit TO off;
+CREATE TEMP TABLE index_form_tuple_4(f1 point);
+INSERT INTO index_form_tuple_4 SELECT '(0,0)' FROM generate_series(0,1000);
+CREATE INDEX index_form_tuple_4_index ON index_form_tuple_4 USING gist (f1);
+drop table index_form_tuple_4 cascade;
+RESET enforce_two_phase_commit;

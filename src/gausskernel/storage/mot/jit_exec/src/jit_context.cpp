@@ -342,7 +342,7 @@ static bool PrepareJitContextSubQueryData(JitContext* jitContext)
 {
     // allocate sub-query search keys and generate tuple table slot array using session top memory context
     MemoryContext oldCtx = CurrentMemoryContext;
-    CurrentMemoryContext = u_sess->top_mem_cxt;
+    CurrentMemoryContext = SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR);
     for (uint32_t i = 0; i < jitContext->m_subQueryCount; ++i) {
         JitContext::SubQueryData* subQueryData = &jitContext->m_subQueryData[i];
         if (subQueryData->m_tupleDesc == nullptr) {
@@ -658,7 +658,7 @@ static void CleanupJitContextSubQueryDataArray(JitContext* jitContext)
 static void CleanupJitContextSubQueryData(JitContext::SubQueryData* subQueryData)
 {
     MemoryContext oldCtx = CurrentMemoryContext;
-    CurrentMemoryContext = u_sess->top_mem_cxt;
+    CurrentMemoryContext = SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR);
     if (subQueryData->m_slot != nullptr) {
         ExecDropSingleTupleTableSlot(subQueryData->m_slot);
         subQueryData->m_slot = nullptr;

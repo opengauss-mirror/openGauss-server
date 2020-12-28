@@ -148,17 +148,18 @@ void PQprint(FILE* fout, const PGresult* res, const PQprintOpt* po)
             screen_size.ws_col = 80;
 #endif
             char* tmp = gs_getenv_r("PAGER");
-            if (check_client_env(tmp) == NULL)
+            if (check_client_env(tmp) == NULL) {
                 pagerenv = NULL;
-            else
+            } else {
                 pagerenv = strdup(tmp);
+            }
 
             if (pagerenv != NULL && pagerenv[0] != '\0' && !po->html3 &&
                 ((po->expanded && nTups * (nFields + 1) >= screen_size.ws_row) ||
                     (!po->expanded &&
-                        nTups * (total_line_length / screen_size.ws_col + 1) * (1 + (po->standard != 0)) >=
-                            screen_size.ws_row - (po->header != 0) * (total_line_length / screen_size.ws_col + 1) * 2 -
-                                (po->header != 0) * 2 /* row count and newline */
+                        nTups * (total_line_length / screen_size.ws_col + 1) * (1 + (int)(po->standard != 0)) >=
+                            screen_size.ws_row - (int)(po->header != 0) * (total_line_length / screen_size.ws_col + 1)
+                            * 2 - (int)(po->header != 0) * 2 /* row count and newline */
                         ))) {
                 if (check_client_env(pagerenv) == NULL) {
                     fprintf(stderr, libpq_gettext("check parameter failed.\n"));
@@ -306,13 +307,14 @@ static void do_field(const PQprintOpt* po, const PGresult* res, const int i, con
     pval = PQgetvalue(res, i, j);
 
     if (plen < 1 || (pval == NULL) || !*pval) {
-        if (po->align || po->expanded)
+        if (po->align || po->expanded) {
             skipit = true;
-        else {
+        } else {
             goto efield;
         }
-    } else
+    } else {
         skipit = false;
+    }
 
     if (!skipit) {
         if (po->align && !fieldNotNum[j]) {
@@ -332,13 +334,15 @@ static void do_field(const PQprintOpt* po, const PGresult* res, const int i, con
              * insist on a digit in the last column for a numeric. This test
              * is still not bulletproof but it handles most cases.
              */
-            if (*pval == 'E' || *pval == 'e' || !(ch >= '0' && ch <= '9'))
-                fieldNotNum[j] = 1;
+            if (*pval == 'E' || *pval == 'e' || !(ch >= '0' && ch <= '9')) {
+                fieldNotNum[j] = 1; 
+            }
         }
 
         if (!po->expanded && (po->align || po->html3)) {
-            if (plen > fieldMax[j])
+            if (plen > fieldMax[j]) {
                 fieldMax[j] = plen;
+            }
             if ((fields[i * nFields + j] = (char*)malloc(plen + 1)) == NULL) {
                 fprintf(stderr, libpq_gettext("out of memory\n"));
                 abort();
@@ -495,8 +499,9 @@ void PQdisplayTuples(const PGresult* res, FILE* fp, /* where to send the output 
     int nTuples;
     int* fLength = NULL;
 
-    if (fieldSep == NULL)
+    if (fieldSep == NULL) {
         fieldSep = DEFAULT_FIELD_SEP;
+    }
 
     /* Get some useful info about the results */
     nFields = PQnfields(res);
@@ -519,8 +524,9 @@ void PQdisplayTuples(const PGresult* res, FILE* fp, /* where to send the output 
             for (i = 0; i < nTuples; i++) {
                 int flen = PQgetlength(res, i, j);
 
-                if (flen > fLength[j])
+                if (flen > fLength[j]) {
                     fLength[j] = flen;
+                }
             }
         }
     }

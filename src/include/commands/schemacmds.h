@@ -29,4 +29,3 @@ extern void AlterSchemaOwner(const char* name, Oid newOwnerId);
 extern void AlterSchemaOwner_oid(Oid schemaOid, Oid newOwnerId);
 
 #endif /* SCHEMACMDS_H */
-

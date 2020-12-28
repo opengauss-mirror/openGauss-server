@@ -22,7 +22,7 @@
 
 extern int cmpg_getaddrinfo_all(
     const char* hostname, const char* servname, const struct addrinfo* hintp, struct addrinfo** result);
-extern void cmpg_freeaddrinfo_all(int hint_ai_family, struct addrinfo* ai);
+extern void cmpg_freeaddrinfo_all(struct addrinfo* ai);
 
 #ifdef HAVE_UNIX_SOCKETS
 #define IS_AF_UNIX(fam) ((fam) == AF_UNIX)

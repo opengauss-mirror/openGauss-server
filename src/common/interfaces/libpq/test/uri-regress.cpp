@@ -26,9 +26,8 @@ int main(int argc, char* argv[])
     char* errmsg = NULL;
     bool local = true;
 
-    if (argc != 2) {
+    if (argc != 2)
         return 1;
-    }
 
     opts = PQconninfoParse(argv[1], &errmsg);
     if (opts == NULL) {

@@ -1,7 +1,7 @@
 --INT8
 \set VERBOSITY terse
 CREATE TABLE vint8_test(a INT8, b INT8, c INT8) with (orientation = column) ;
-copy vint8_test from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vint8_normal.data' delimiter '|' NULL '';
+copy vint8_test from '@abs_srcdir@/data/vint8_normal.data' delimiter '|' NULL '';
 
 --test vint8pl
 --select b+c, (b+c) is NULL from vint8_test where a <= 3 order by a;

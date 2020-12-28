@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_CLIENT_MASTER_KEY">
+<refmeta>
+<refentrytitle>SQL-DROP CLIENT MASTER KEY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP CLIENT MASTER KEY</refname>
+<refpurpose>drop client master key</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP CLIENT MASTER KEY [ IF EXISTS ] client_master_key_name [, ...];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

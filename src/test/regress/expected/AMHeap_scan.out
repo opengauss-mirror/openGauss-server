@@ -1,0 +1,3386 @@
+---- test for scan for partitioned table
+---- add by jiayanhua
+---- case 1: partitioned table + partitioned table
+--prepare
+CREATE TABLE heap_tbl_scan_test_03(SN INT, NAME NAME)
+PARTITION BY RANGE (SN)
+(
+	PARTITION P1_heap_tbl_scan_test_03 VALUES LESS THAN(10),
+	PARTITION P2_heap_tbl_scan_test_03 VALUES LESS THAN(20),
+	PARTITION P3_heap_tbl_scan_test_03 VALUES LESS THAN(30),
+	PARTITION P4_heap_tbl_scan_test_03 VALUES LESS THAN(40)
+);
+CREATE TABLE heap_tbl_scan_test_04(SN INT, PHONE NAME)
+PARTITION BY RANGE (SN)
+(
+	PARTITION P1_heap_tbl_scan_test_04 VALUES LESS THAN(10),
+	PARTITION P2_heap_tbl_scan_test_04 VALUES LESS THAN(20),
+	PARTITION P3_heap_tbl_scan_test_04 VALUES LESS THAN(30),
+	PARTITION P4_heap_tbl_scan_test_04 VALUES LESS THAN(40)
+);
+INSERT INTO heap_tbl_scan_test_03 VALUES (1,'DFM');
+INSERT INTO heap_tbl_scan_test_03 VALUES (11,'CHAO');
+INSERT INTO heap_tbl_scan_test_03 VALUES (21,'ZJR');
+INSERT INTO heap_tbl_scan_test_03 VALUES (31,'JYH');
+INSERT INTO heap_tbl_scan_test_04 VALUES (1,'15478523126');
+INSERT INTO heap_tbl_scan_test_04 VALUES (11,'15236997586');
+INSERT INTO heap_tbl_scan_test_04 VALUES (21,'15936985364');
+INSERT INTO heap_tbl_scan_test_04 VALUES (31,'15873285556');
+CREATE UNIQUE INDEX index_on_heap_tbl_scan_test_03 ON heap_tbl_scan_test_03 (SN) LOCAL;
+CREATE UNIQUE INDEX index_on_heap_tbl_scan_test_04 ON heap_tbl_scan_test_04 (SN) LOCAL;
+SELECT * FROM heap_tbl_scan_test_03 ORDER BY 1;
+ sn | name 
+----+------
+  1 | DFM
+ 11 | CHAO
+ 21 | ZJR
+ 31 | JYH
+(4 rows)
+
+SELECT * FROM heap_tbl_scan_test_04 ORDER BY 1;
+ sn |    phone    
+----+-------------
+  1 | 15478523126
+ 11 | 15236997586
+ 21 | 15936985364
+ 31 | 15873285556
+(4 rows)
+
+--
+---- nestloop + bitmapscan
+--
+SET enable_seqscan = OFF;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = ON;
+SET enable_tidscan = OFF;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = ON;
+SET enable_mergejoin = OFF;
+SET enable_hashjoin = OFF;
+-- explain cross join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Nested Loop
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+               Selected Partitions:  1..4
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+               Selected Partitions:  1..4
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_04
+                     Recheck Cond: (sn = heap_tbl_scan_test_03.sn)
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_04
+                           Index Cond: (sn = heap_tbl_scan_test_03.sn)
+                           Selected Partitions:  1..4
+(15 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Nested Loop Left Join
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_04
+                     Recheck Cond: (heap_tbl_scan_test_03.sn = sn)
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_04
+                           Index Cond: (heap_tbl_scan_test_03.sn = sn)
+                           Selected Partitions:  1..4
+(15 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Nested Loop Left Join
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_03
+                     Recheck Cond: (sn = heap_tbl_scan_test_04.sn)
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_03
+                           Index Cond: (sn = heap_tbl_scan_test_04.sn)
+                           Selected Partitions:  1..4
+(15 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Full Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Nested Loop Left Join
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_03
+               Recheck Cond: (sn > 40)
+               Selected Partitions:  NONE
+               ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_03
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_04
+               Recheck Cond: (heap_tbl_scan_test_03.sn = sn)
+               Selected Partitions:  1..4
+               ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_04
+                     Index Cond: (heap_tbl_scan_test_03.sn = sn)
+                     Selected Partitions:  1..4
+(17 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Nested Loop
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_03
+               Recheck Cond: (sn > 40)
+               Selected Partitions:  NONE
+               ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_03
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_04
+               Recheck Cond: ((sn = heap_tbl_scan_test_03.sn) AND (sn > 40))
+               Selected Partitions:  NONE
+               ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_04
+                     Index Cond: ((sn = heap_tbl_scan_test_03.sn) AND (sn > 40))
+                     Selected Partitions:  NONE
+(17 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Nested Loop
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_03
+               Recheck Cond: (sn > 40)
+               Selected Partitions:  NONE
+               ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_03
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_04
+               Recheck Cond: ((sn = heap_tbl_scan_test_03.sn) AND (sn > 40))
+               Selected Partitions:  NONE
+               ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_04
+                     Index Cond: ((sn = heap_tbl_scan_test_03.sn) AND (sn > 40))
+                     Selected Partitions:  NONE
+(17 rows)
+
+-- rsult of cross join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- result of no partition to join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+---- nestloop + tidscan
+--
+SET enable_seqscan = OFF;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = OFF;
+SET enable_tidscan = ON;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = ON;
+SET enable_mergejoin = OFF;
+SET enable_hashjoin = OFF;
+-- explain cross join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Nested Loop
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+               Selected Partitions:  1..4
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+               Selected Partitions:  1..4
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Index Cond: (sn = heap_tbl_scan_test_03.sn)
+                     Selected Partitions:  1..4
+(12 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Nested Loop Left Join
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Index Cond: (heap_tbl_scan_test_03.sn = sn)
+                     Selected Partitions:  1..4
+(12 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Nested Loop Left Join
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Index Cond: (sn = heap_tbl_scan_test_04.sn)
+                     Selected Partitions:  1..4
+(12 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Full Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Nested Loop Left Join
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+               Index Cond: (heap_tbl_scan_test_03.sn = sn)
+               Selected Partitions:  1..4
+(11 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Nested Loop
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+               Index Cond: ((sn = heap_tbl_scan_test_03.sn) AND (sn > 40))
+               Selected Partitions:  NONE
+(11 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Nested Loop
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+               Index Cond: ((sn = heap_tbl_scan_test_03.sn) AND (sn > 40))
+               Selected Partitions:  NONE
+(11 rows)
+
+-- rsult of cross join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- result of no partition to join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+----mergejoin + seqscan
+--
+SET enable_seqscan = ON;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = OFF;
+SET enable_tidscan = OFF;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = OFF;
+SET enable_mergejoin = ON;
+SET enable_hashjoin = OFF;
+-- explain cross join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Nested Loop
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+               Selected Partitions:  1..4
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+               Selected Partitions:  1..4
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Sort
+               Sort Key: heap_tbl_scan_test_03.sn
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+                           Selected Partitions:  1..4
+         ->  Sort
+               Sort Key: heap_tbl_scan_test_04.sn
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(16 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Left Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Sort
+               Sort Key: heap_tbl_scan_test_03.sn
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+                           Selected Partitions:  1..4
+         ->  Sort
+               Sort Key: heap_tbl_scan_test_04.sn
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(16 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Left Join
+         Merge Cond: (heap_tbl_scan_test_04.sn = heap_tbl_scan_test_03.sn)
+         ->  Sort
+               Sort Key: heap_tbl_scan_test_04.sn
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+         ->  Sort
+               Sort Key: heap_tbl_scan_test_03.sn
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+                           Selected Partitions:  1..4
+(16 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Full Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Sort
+               Sort Key: heap_tbl_scan_test_03.sn
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+                           Selected Partitions:  1..4
+         ->  Sort
+               Sort Key: heap_tbl_scan_test_04.sn
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(16 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Merge Left Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Sort
+         Sort Key: heap_tbl_scan_test_03.sn
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+                     Filter: (sn > 40)
+                     Selected Partitions:  NONE
+   ->  Sort
+         Sort Key: heap_tbl_scan_test_04.sn
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+                     Selected Partitions:  1..4
+(15 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Sort
+         Sort Key: heap_tbl_scan_test_03.sn
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+                     Filter: (sn > 40)
+                     Selected Partitions:  NONE
+   ->  Sort
+         Sort Key: heap_tbl_scan_test_04.sn
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+                     Filter: (sn > 40)
+                     Selected Partitions:  NONE
+(16 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Sort
+         Sort Key: heap_tbl_scan_test_03.sn
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+                     Filter: (sn > 40)
+                     Selected Partitions:  NONE
+   ->  Sort
+         Sort Key: heap_tbl_scan_test_04.sn
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+                     Filter: (sn > 40)
+                     Selected Partitions:  NONE
+(16 rows)
+
+-- rsult of cross join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- result of no partition to join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+----mergejoin + indexscan
+--
+SET enable_seqscan = OFF;
+SET enable_indexscan = ON;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = OFF;
+SET enable_tidscan = OFF;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = OFF;
+SET enable_mergejoin = ON;
+SET enable_hashjoin = OFF;
+--
+---- explain cross join
+--
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Nested Loop
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+               Selected Partitions:  1..4
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+               Selected Partitions:  1..4
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Left Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Left Join
+         Merge Cond: (heap_tbl_scan_test_04.sn = heap_tbl_scan_test_03.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Full Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Right Join
+   Merge Cond: (heap_tbl_scan_test_04.sn = heap_tbl_scan_test_03.sn)
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+               Selected Partitions:  1..4
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+(12 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+(13 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+(13 rows)
+
+-- rsult of cross join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- result of no partition to join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+--mergejoin + indexonlyscan
+--
+SET enable_seqscan = OFF;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = ON;
+SET enable_bitmapscan = OFF;
+SET enable_tidscan = OFF;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = OFF;
+SET enable_mergejoin = ON;
+SET enable_hashjoin = OFF;
+-- explain cross join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Nested Loop
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+               Selected Partitions:  1..4
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+               Selected Partitions:  1..4
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Left Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Left Join
+         Merge Cond: (heap_tbl_scan_test_04.sn = heap_tbl_scan_test_03.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Full Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Left Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Selected Partitions:  1..4
+(12 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+(13 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+(13 rows)
+
+-- rsult of cross join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- result of no partition to join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+---- mergejoin + bitmapscan
+--
+SET enable_seqscan = OFF;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = ON;
+SET enable_tidscan = OFF;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = OFF;
+SET enable_mergejoin = ON;
+SET enable_hashjoin = OFF;
+-- explain cross join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Nested Loop
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+               Selected Partitions:  1..4
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+               Selected Partitions:  1..4
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_04
+                     Recheck Cond: (sn = heap_tbl_scan_test_03.sn)
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_04
+                           Index Cond: (sn = heap_tbl_scan_test_03.sn)
+                           Selected Partitions:  1..4
+(15 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Nested Loop Left Join
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_04
+                     Recheck Cond: (heap_tbl_scan_test_03.sn = sn)
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_04
+                           Index Cond: (heap_tbl_scan_test_03.sn = sn)
+                           Selected Partitions:  1..4
+(15 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Nested Loop Left Join
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_03
+                     Recheck Cond: (sn = heap_tbl_scan_test_04.sn)
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_03
+                           Index Cond: (sn = heap_tbl_scan_test_04.sn)
+                           Selected Partitions:  1..4
+(15 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Full Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Nested Loop Left Join
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_03
+               Recheck Cond: (sn > 40)
+               Selected Partitions:  NONE
+               ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_03
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_04
+               Recheck Cond: (heap_tbl_scan_test_03.sn = sn)
+               Selected Partitions:  1..4
+               ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_04
+                     Index Cond: (heap_tbl_scan_test_03.sn = sn)
+                     Selected Partitions:  1..4
+(17 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Sort
+         Sort Key: heap_tbl_scan_test_03.sn
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_03
+                     Recheck Cond: (sn > 40)
+                     Selected Partitions:  NONE
+                     ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_03
+                           Index Cond: (sn > 40)
+                           Selected Partitions:  NONE
+   ->  Sort
+         Sort Key: heap_tbl_scan_test_04.sn
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_04
+                     Recheck Cond: (sn > 40)
+                     Selected Partitions:  NONE
+                     ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_04
+                           Index Cond: (sn > 40)
+                           Selected Partitions:  NONE
+(22 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Sort
+         Sort Key: heap_tbl_scan_test_03.sn
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_03
+                     Recheck Cond: (sn > 40)
+                     Selected Partitions:  NONE
+                     ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_03
+                           Index Cond: (sn > 40)
+                           Selected Partitions:  NONE
+   ->  Sort
+         Sort Key: heap_tbl_scan_test_04.sn
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_04
+                     Recheck Cond: (sn > 40)
+                     Selected Partitions:  NONE
+                     ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_04
+                           Index Cond: (sn > 40)
+                           Selected Partitions:  NONE
+(22 rows)
+
+-- rsult of cross join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- result of no partition to join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+---- mergejoin + tidscan
+--
+SET enable_seqscan = OFF;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = OFF;
+SET enable_tidscan = ON;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = OFF;
+SET enable_mergejoin = ON;
+SET enable_hashjoin = OFF;
+-- explain cross join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Nested Loop
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+               Selected Partitions:  1..4
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+               Selected Partitions:  1..4
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Left Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Left Join
+         Merge Cond: (heap_tbl_scan_test_04.sn = heap_tbl_scan_test_03.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Full Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Left Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Selected Partitions:  1..4
+(12 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+(13 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+(13 rows)
+
+-- rsult of cross join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- result of no partition to join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+---- all + seqscan
+--
+SET enable_seqscan = ON;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = OFF;
+SET enable_tidscan = OFF;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = ON;
+SET enable_mergejoin = ON;
+SET enable_hashjoin = ON;
+-- explain cross join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Nested Loop
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+               Selected Partitions:  1..4
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+               Selected Partitions:  1..4
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Hash Join
+         Hash Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Hash Left Join
+         Hash Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Hash Left Join
+         Hash Cond: (heap_tbl_scan_test_04.sn = heap_tbl_scan_test_03.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Hash Full Join
+         Hash Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Hash Right Join
+   Hash Cond: (heap_tbl_scan_test_04.sn = heap_tbl_scan_test_03.sn)
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+               Selected Partitions:  1..4
+   ->  Hash
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+                     Filter: (sn > 40)
+                     Selected Partitions:  NONE
+(12 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Hash Join
+   Hash Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+               Filter: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Hash
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+                     Filter: (sn > 40)
+                     Selected Partitions:  NONE
+(13 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Hash Join
+   Hash Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+               Filter: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Hash
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+                     Filter: (sn > 40)
+                     Selected Partitions:  NONE
+(13 rows)
+
+-- rsult of cross join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- result of no partition to join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+---- all + indexscan
+--
+SET enable_seqscan = OFF;
+SET enable_indexscan = ON;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = OFF;
+SET enable_tidscan = OFF;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = ON;
+SET enable_mergejoin = ON;
+SET enable_hashjoin = ON;
+--
+---- explain cross join
+--
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Nested Loop
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+               Selected Partitions:  1..4
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+               Selected Partitions:  1..4
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Left Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Left Join
+         Merge Cond: (heap_tbl_scan_test_04.sn = heap_tbl_scan_test_03.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Full Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Right Join
+   Merge Cond: (heap_tbl_scan_test_04.sn = heap_tbl_scan_test_03.sn)
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+               Selected Partitions:  1..4
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+(12 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+(13 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+(13 rows)
+
+-- rsult of cross join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Right Join
+   Merge Cond: (heap_tbl_scan_test_04.sn = heap_tbl_scan_test_03.sn)
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+               Selected Partitions:  1..4
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+(12 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+(13 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+(13 rows)
+
+-- result of no partition to join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+-- all + indexonlyscan
+--
+SET enable_seqscan = OFF;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = ON;
+SET enable_bitmapscan = OFF;
+SET enable_tidscan = OFF;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = ON;
+SET enable_mergejoin = ON;
+SET enable_hashjoin = ON;
+-- explain cross join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Nested Loop
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+               Selected Partitions:  1..4
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+               Selected Partitions:  1..4
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Left Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Left Join
+         Merge Cond: (heap_tbl_scan_test_04.sn = heap_tbl_scan_test_03.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Full Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Left Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Selected Partitions:  1..4
+(12 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+(13 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+(13 rows)
+
+-- rsult of cross join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Left Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Selected Partitions:  1..4
+(12 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+(13 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+(13 rows)
+
+-- result of no partition to join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+---- all + bitmapscan
+--
+SET enable_seqscan = OFF;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = ON;
+SET enable_tidscan = OFF;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = ON;
+SET enable_mergejoin = ON;
+SET enable_hashjoin = ON;
+-- explain cross join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Nested Loop
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+               Selected Partitions:  1..4
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+               Selected Partitions:  1..4
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_04
+                     Recheck Cond: (sn = heap_tbl_scan_test_03.sn)
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_04
+                           Index Cond: (sn = heap_tbl_scan_test_03.sn)
+                           Selected Partitions:  1..4
+(15 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Nested Loop Left Join
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_04
+                     Recheck Cond: (heap_tbl_scan_test_03.sn = sn)
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_04
+                           Index Cond: (heap_tbl_scan_test_03.sn = sn)
+                           Selected Partitions:  1..4
+(15 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Nested Loop Left Join
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_03
+                     Recheck Cond: (sn = heap_tbl_scan_test_04.sn)
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_03
+                           Index Cond: (sn = heap_tbl_scan_test_04.sn)
+                           Selected Partitions:  1..4
+(15 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Full Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Nested Loop Left Join
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_03
+               Recheck Cond: (sn > 40)
+               Selected Partitions:  NONE
+               ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_03
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_04
+               Recheck Cond: (heap_tbl_scan_test_03.sn = sn)
+               Selected Partitions:  1..4
+               ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_04
+                     Index Cond: (heap_tbl_scan_test_03.sn = sn)
+                     Selected Partitions:  1..4
+(17 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Hash Join
+   Hash Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_03
+               Recheck Cond: (sn > 40)
+               Selected Partitions:  NONE
+               ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_03
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+   ->  Hash
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_04
+                     Recheck Cond: (sn > 40)
+                     Selected Partitions:  NONE
+                     ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_04
+                           Index Cond: (sn > 40)
+                           Selected Partitions:  NONE
+(19 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Hash Join
+   Hash Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_03
+               Recheck Cond: (sn > 40)
+               Selected Partitions:  NONE
+               ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_03
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+   ->  Hash
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_04
+                     Recheck Cond: (sn > 40)
+                     Selected Partitions:  NONE
+                     ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_04
+                           Index Cond: (sn > 40)
+                           Selected Partitions:  NONE
+(19 rows)
+
+-- rsult of cross join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Nested Loop Left Join
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_03
+               Recheck Cond: (sn > 40)
+               Selected Partitions:  NONE
+               ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_03
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_04
+               Recheck Cond: (heap_tbl_scan_test_03.sn = sn)
+               Selected Partitions:  1..4
+               ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_04
+                     Index Cond: (heap_tbl_scan_test_03.sn = sn)
+                     Selected Partitions:  1..4
+(17 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Hash Join
+   Hash Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_03
+               Recheck Cond: (sn > 40)
+               Selected Partitions:  NONE
+               ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_03
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+   ->  Hash
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_04
+                     Recheck Cond: (sn > 40)
+                     Selected Partitions:  NONE
+                     ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_04
+                           Index Cond: (sn > 40)
+                           Selected Partitions:  NONE
+(19 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Hash Join
+   Hash Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_03
+               Recheck Cond: (sn > 40)
+               Selected Partitions:  NONE
+               ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_03
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+   ->  Hash
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Bitmap Heap Scan on heap_tbl_scan_test_04
+                     Recheck Cond: (sn > 40)
+                     Selected Partitions:  NONE
+                     ->  Partitioned Bitmap Index Scan on index_on_heap_tbl_scan_test_04
+                           Index Cond: (sn > 40)
+                           Selected Partitions:  NONE
+(19 rows)
+
+-- result of no partition to join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+---- all + tidscan
+--
+SET enable_seqscan = OFF;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = OFF;
+SET enable_tidscan = ON;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = ON;
+SET enable_mergejoin = ON;
+SET enable_hashjoin = ON;
+-- explain cross join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Nested Loop
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+               Selected Partitions:  1..4
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+               Selected Partitions:  1..4
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Left Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Left Join
+         Merge Cond: (heap_tbl_scan_test_04.sn = heap_tbl_scan_test_03.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Merge Full Join
+         Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Left Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Selected Partitions:  1..4
+(12 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+(13 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_03 on heap_tbl_scan_test_03
+               Index Cond: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_heap_tbl_scan_test_04 on heap_tbl_scan_test_04
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+(13 rows)
+
+-- rsult of cross join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- result of no partition to join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+---- all is open
+--
+SET enable_seqscan = ON;
+SET enable_indexscan = ON;
+SET enable_indexonlyscan = ON;
+SET enable_bitmapscan = ON;
+SET enable_tidscan = ON;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = ON;
+SET enable_mergejoin = ON;
+SET enable_hashjoin = ON;
+-- explain cross join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Nested Loop
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+               Selected Partitions:  1..4
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+               Selected Partitions:  1..4
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Hash Join
+         Hash Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Hash Left Join
+         Hash Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Hash Left Join
+         Hash Cond: (heap_tbl_scan_test_04.sn = heap_tbl_scan_test_03.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_scan_test_03.sn, heap_tbl_scan_test_03.name
+   ->  Hash Full Join
+         Hash Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+                           Selected Partitions:  1..4
+(13 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40; 
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Hash Right Join
+   Hash Cond: (heap_tbl_scan_test_04.sn = heap_tbl_scan_test_03.sn)
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+               Selected Partitions:  1..4
+   ->  Hash
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+                     Filter: (sn > 40)
+                     Selected Partitions:  NONE
+(12 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Hash Join
+   Hash Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+               Filter: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Hash
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+                     Filter: (sn > 40)
+                     Selected Partitions:  NONE
+(13 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Hash Join
+   Hash Cond: (heap_tbl_scan_test_03.sn = heap_tbl_scan_test_04.sn)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Seq Scan on heap_tbl_scan_test_03
+               Filter: (sn > 40)
+               Selected Partitions:  NONE
+   ->  Hash
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Seq Scan on heap_tbl_scan_test_04
+                     Filter: (sn > 40)
+                     Selected Partitions:  NONE
+(13 rows)
+
+-- rsult of cross join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 CROSS JOIN heap_tbl_scan_test_04 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 INNER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 RIGHT OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 FULL OUTER JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) ORDER BY heap_tbl_scan_test_03.SN, heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_03.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- result of no partition to join
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT heap_tbl_scan_test_03.NAME, heap_tbl_scan_test_04.PHONE FROM heap_tbl_scan_test_03 LEFT JOIN heap_tbl_scan_test_04 ON (heap_tbl_scan_test_03.SN = heap_tbl_scan_test_04.SN) WHERE heap_tbl_scan_test_04.SN > 40 AND heap_tbl_scan_test_03.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+-- clean up
+DROP TABLE heap_tbl_scan_test_03;
+DROP TABLE heap_tbl_scan_test_04;

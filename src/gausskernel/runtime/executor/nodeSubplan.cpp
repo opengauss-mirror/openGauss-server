@@ -21,6 +21,7 @@
 
 #include <math.h>
 #include "miscadmin.h"
+#include "access/tableam.h"
 #include "executor/executor.h"
 #include "executor/nodeSubplan.h"
 #include "nodes/makefuncs.h"
@@ -225,8 +226,7 @@ static Datum ExecScanSubPlan(SubPlanState* node, ExprContext* econtext, bool* is
      */
     Assert(list_length(sub_plan->parParam) == list_length(node->args));
 
-    forboth(l, sub_plan->parParam, pvar, node->args)
-    {
+    forboth(l, sub_plan->parParam, pvar, node->args) {
         int paramid = lfirst_int(l);
         ParamExecData* prm = &(econtext->ecxt_param_exec_vals[paramid]);
 
@@ -287,6 +287,8 @@ static Datum ExecScanSubPlan(SubPlanState* node, ExprContext* econtext, bool* is
         int col;
         ListCell* plst = NULL;
 
+        /* Get the Table Accessor Method*/
+        Assert(slot != NULL && slot->tts_tupleDescriptor != NULL);
         if (sub_link_type == EXISTS_SUBLINK) {
             found = true;
             result = BoolGetDatum(true);
@@ -311,10 +313,10 @@ static Datum ExecScanSubPlan(SubPlanState* node, ExprContext* econtext, bool* is
              * freeing.
              */
             if (node->curTuple)
-                heap_freetuple_ext(node->curTuple);
+                tableam_tops_free_tuple(node->curTuple);
             node->curTuple = ExecCopySlotTuple(slot);
 
-            result = heap_getattr(node->curTuple, 1, tdesc, isNull);
+            result = tableam_tops_tuple_getattr(node->curTuple, 1, tdesc, isNull);
             /* keep scanning subplan to make sure there's only one tuple */
             continue;
         }
@@ -326,7 +328,7 @@ static Datum ExecScanSubPlan(SubPlanState* node, ExprContext* econtext, bool* is
             found = true;
             /* stash away current value */
             Assert(sub_plan->firstColType == tdesc->attrs[0]->atttypid);
-            dvalue = slot_getattr(slot, 1, &disnull);
+            dvalue = tableam_tslot_getattr(slot, 1, &disnull);
             astate = accumArrayResult(astate, dvalue, disnull, sub_plan->firstColType, oldcontext);
             /* keep scanning subplan to collect all values */
             continue;
@@ -353,7 +355,7 @@ static Datum ExecScanSubPlan(SubPlanState* node, ExprContext* econtext, bool* is
 
             prmdata = &(econtext->ecxt_param_exec_vals[paramid]);
             Assert(prmdata->execPlan == NULL);
-            prmdata->value = slot_getattr(slot, col, &(prmdata->isnull));
+            prmdata->value = tableam_tslot_getattr(slot, col, &(prmdata->isnull));
             col++;
         }
 
@@ -503,6 +505,8 @@ void buildSubPlanHash(SubPlanState* node, ExprContext* econtext)
         ListCell* plst = NULL;
         bool isnew = false;
 
+        /* Get the Table Accessor Method*/
+        Assert(slot->tts_tupleDescriptor != NULL);
         /*
          * Load up the Params representing the raw sub-select outputs, then
          * form the projection tuple to store in the hashtable.
@@ -512,7 +516,7 @@ void buildSubPlanHash(SubPlanState* node, ExprContext* econtext)
             ParamExecData* prmdata = &(innerecontext->ecxt_param_exec_vals[paramid]);
 
             Assert(prmdata->execPlan == NULL);
-            prmdata->value = slot_getattr(slot, col, &(prmdata->isnull));
+            prmdata->value = tableam_tslot_getattr(slot, col, &(prmdata->isnull));
             col++;
         }
         slot = ExecProject(node->projRight, NULL);
@@ -585,11 +589,14 @@ bool findPartialMatch(TupleHashTable hashtable, TupleTableSlot* slot, FmgrInfo* 
  */
 bool slotAllNulls(TupleTableSlot* slot)
 {
+    /* Get the Table Accessor Method*/
+    Assert(slot != NULL && slot->tts_tupleDescriptor != NULL);
+
     int ncols = slot->tts_tupleDescriptor->natts;
     int i;
 
     for (i = 1; i <= ncols; i++) {
-        if (!slot_attisnull(slot, i))
+        if (!tableam_tslot_attisnull(slot, i))
             return false;
     }
     return true;
@@ -603,11 +610,13 @@ bool slotAllNulls(TupleTableSlot* slot)
  */
 bool slotNoNulls(TupleTableSlot* slot)
 {
+    /* Get the Table Accessor Method*/
+    Assert(slot != NULL && slot->tts_tupleDescriptor != NULL);
     int ncols = slot->tts_tupleDescriptor->natts;
     int i;
 
     for (i = 1; i <= ncols; i++) {
-        if (slot_attisnull(slot, i))
+        if (tableam_tslot_attisnull(slot, i))
             return false;
     }
     return true;
@@ -817,12 +826,14 @@ SubPlanState* ExecInitSubPlan(SubPlan* subplan, PlanState* parent)
          * (hack alert!).  The righthand expressions will be evaluated in our
          * own innerecontext.
          */
-        tup_desc = ExecTypeFromTL(leftptlist, false);
+        // slot contains virtual tuple, so set the default tableAm type to HEAP
+        tup_desc = ExecTypeFromTL(leftptlist, false, false, TAM_HEAP);
         slot = ExecInitExtraTupleSlot(estate);
         ExecSetSlotDescriptor(slot, tup_desc);
         sstate->projLeft = ExecBuildProjectionInfo(lefttlist, NULL, slot, NULL);
 
-        tup_desc = ExecTypeFromTL(rightptlist, false);
+        // slot contains virtual tuple, so set the default tableAm type to HEAP
+        tup_desc = ExecTypeFromTL(rightptlist, false, false, TAM_HEAP);
         slot = ExecInitExtraTupleSlot(estate);
         ExecSetSlotDescriptor(slot, tup_desc);
         sstate->projRight = ExecBuildProjectionInfo(righttlist, sstate->innerecontext, slot, NULL);
@@ -887,6 +898,8 @@ void ExecSetParamPlan(SubPlanState* node, ExprContext* econtext)
      */
     for (slot = ExecProcNode(planstate); !TupIsNull(slot); slot = ExecProcNode(planstate)) {
         TupleDesc tdesc = slot->tts_tupleDescriptor;
+        /* Get the Table Accessor Method*/
+        Assert(slot->tts_tupleDescriptor != NULL);
         int i = 1;
 
         if (sub_link_type == EXISTS_SUBLINK) {
@@ -908,7 +921,7 @@ void ExecSetParamPlan(SubPlanState* node, ExprContext* econtext)
             found = true;
             /* stash away current value */
             Assert(subplan->firstColType == tdesc->attrs[0]->atttypid);
-            dvalue = slot_getattr(slot, 1, &disnull);
+            dvalue = tableam_tslot_getattr(slot, 1, &disnull);
             astate = accumArrayResult(astate, dvalue, disnull, subplan->firstColType, oldcontext);
             /* keep scanning subplan to collect all values */
             continue;
@@ -928,7 +941,7 @@ void ExecSetParamPlan(SubPlanState* node, ExprContext* econtext)
          * keeps track of the copied tuple for eventual freeing.
          */
         if (node->curTuple)
-            heap_freetuple_ext(node->curTuple);
+            tableam_tops_free_tuple(node->curTuple);
         node->curTuple = ExecCopySlotTuple(slot);
 
         /*
@@ -939,7 +952,7 @@ void ExecSetParamPlan(SubPlanState* node, ExprContext* econtext)
             ParamExecData* prm = &(econtext->ecxt_param_exec_vals[paramid]);
 
             prm->execPlan = NULL;
-            prm->value = heap_getattr(node->curTuple, i, tdesc, &(prm->isnull));
+            prm->value = tableam_tops_tuple_getattr(node->curTuple, i, tdesc, &(prm->isnull));
             i++;
         }
     }

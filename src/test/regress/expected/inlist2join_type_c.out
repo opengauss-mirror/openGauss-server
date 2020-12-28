@@ -1,0 +1,622 @@
+create schema inlist2join_type_c;
+set current_schema=inlist2join_type_c;
+set qrw_inlist2join_optmode = 1;
+create table type
+(
+   col_int      TINYINT
+  ,col_int2     SMALLINT
+  ,col_int4	INTEGER
+  ,col_int8	BIGINT
+  ,col_char     CHAR(20)
+  ,col_varchar  VARCHAR(30)
+  ,col_num      DECIMAL(10,2)
+  ,col_num2     NUMERIC(10,4)
+  ,col_float    FLOAT4
+  ,col_float2   FLOAT8
+  ,col_float3	FLOAT(3)
+  ,col_float4	BINARY_DOUBLE
+  ,col_float5	DECIMAL(10,4)
+  ,col_float6	INTEGER(6,3)
+  ,col_bool	BOOLEAN
+  ,col_text	TEXT
+)with (orientation=column)
+distribute by hash(col_int);
+insert into type values
+(0, 5 ,	193540, 1935401906, 'aabccd', 'aabccd', 1.20 , 10.0000, null    , 1.1   , 10.1234, 321.321, 123.123654, 123.123654, true,'aabccd'), 
+(1, 6 ,	134597, 1345971420, 'abccd',  'abccd' , 11.18, 1.1181 , 55.555, 55.555, 10.1234, 321.321, 123.123654, 123.123654, false, 'abccd' ),  
+(2, 7 ,	656473, 656473370 , 'aabccd', 'aabccd', 1.20 , 10.0000, 1.1   , 1.1   , 10.1234, 321.321, 124.123654, 123.123654, true , 'aabccd'),  
+(3, 8 ,	126971, 1269710788, 'abccd',  'abccd' , 11.18, 1.1181 , 55.555, 55.555, 10.1234, 321.321, 123.123654, 123.123654, false, 'abccd' ),  
+(4, 9 ,	115677, 1156776517, 'aabccd', 'aabccd', 1.20 , 10.0000, 1.1   , 1.1   , 10.1234, 321.321, 123.123654, 124.123654, true , 'aabccd'),  
+(5, 10,	128901, 1289013296, 'abccd',  'abccd' , 11.18, 1.1181 , 55.555, 55.555, 10.1234, 321.321, 123.123654, 123.123654, true , 'abccd' );
+select col_int from type where col_int in (1,2) order by 1;
+ col_int 
+---------
+ 1
+ 2
+(2 rows)
+
+explain (costs off) select col_int from type where col_int in (1,2) order by 1;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c.type.col_int
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c.type.col_int
+               ->  Vector Hash Semi Join
+                     Hash Cond: ((inlist2join_type_c.type.col_int)::bigint = "*VALUES*".column1)
+                     ->  CStore Scan on type
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           ->  Vector Adapter
+                                 ->  Values Scan on "*VALUES*"
+(11 rows)
+
+select col_int2 from type where col_int2 in (5,10) order by 1;
+ col_int2 
+----------
+        5
+       10
+(2 rows)
+
+explain (costs off) select col_int2 from type where col_int2 in (5,10) order by 1;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c.type.col_int2
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c.type.col_int2
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c.type.col_int2 = "*VALUES*".column1)
+                     ->  CStore Scan on type
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_int4 from type where col_int4 in (134597, 134597) order by 1;
+ col_int4 
+----------
+   134597
+(1 row)
+
+explain (costs off) select col_int4 from type where col_int4 in (134597, 134597) order by 1;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c.type.col_int4
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c.type.col_int4
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c.type.col_int4 = "*VALUES*".column1)
+                     ->  CStore Scan on type
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_int8 from type where col_int8 in (1345971420, 1156776517) order by 1;
+  col_int8  
+------------
+ 1156776517
+ 1345971420
+(2 rows)
+
+explain (costs off) select col_int8 from type where col_int8 in (1345971420, 1156776517) order by 1;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c.type.col_int8
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c.type.col_int8
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c.type.col_int8 = "*VALUES*".column1)
+                     ->  CStore Scan on type
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_char from type where col_char in ('aabccd','aabccd', 'aab') order by 1;
+       col_char       
+----------------------
+ aabccd              
+ aabccd              
+ aabccd              
+(3 rows)
+
+explain (costs off) select col_char from type where col_char in ('aabccd','aabccd', 'aab') order by 1;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c.type.col_char
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c.type.col_char
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c.type.col_char = "*VALUES*".column1)
+                     ->  CStore Scan on type
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_varchar from type where col_varchar in ('abccd', 'abc','aac') order by 1;
+ col_varchar 
+-------------
+ abccd
+ abccd
+ abccd
+(3 rows)
+
+explain (costs off) select col_varchar from type where col_varchar in ('abccd', 'abc','aac') order by 1;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c.type.col_varchar
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c.type.col_varchar
+               ->  Vector Hash Semi Join
+                     Hash Cond: ((inlist2join_type_c.type.col_varchar)::text = "*VALUES*".column1)
+                     ->  CStore Scan on type
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_num from type where col_num in (1.20, 11.18, 3,45) order by 1;
+ col_num 
+---------
+    1.20
+    1.20
+    1.20
+   11.18
+   11.18
+   11.18
+(6 rows)
+
+explain (costs off) select col_num from type where col_num  in (1.20, 11.18, 3,45) order by 1;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c.type.col_num
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c.type.col_num
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c.type.col_num = "*VALUES*".column1)
+                     ->  CStore Scan on type
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_num2 from type where col_num2 in (1.1181, 10.0000) order by 1;
+ col_num2 
+----------
+   1.1181
+   1.1181
+   1.1181
+  10.0000
+  10.0000
+  10.0000
+(6 rows)
+
+explain (costs off) select col_num2 from type where col_num2 in (1.1181, 10.0000) order by 1;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c.type.col_num2
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c.type.col_num2
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c.type.col_num2 = "*VALUES*".column1)
+                     ->  CStore Scan on type
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_float from type where col_float in (1.1, 55.555) order by 1;
+ col_float 
+-----------
+(0 rows)
+
+explain (costs off) select col_float from type where col_float in (1.1, 55.555) order by 1;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c.type.col_float
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c.type.col_float
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c.type.col_float = "*VALUES*".column1)
+                     ->  CStore Scan on type
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_float2 from type where col_float2 in (10.1234, 1.1, 11.2222) order by 1;
+ col_float2 
+------------
+        1.1
+        1.1
+        1.1
+(3 rows)
+
+explain (costs off) select col_float2 from type where col_float2 in (10.1234, 1.1, 11.2222) order by 1;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c.type.col_float2
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c.type.col_float2
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c.type.col_float2 = "*VALUES*".column1)
+                     ->  CStore Scan on type
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_float3 from type where col_float3	in (341.321, 10.1234, 10.1114, 11.2222) order by 1;
+ col_float3 
+------------
+(0 rows)
+
+explain (costs off) select col_float3 from type where col_float3 in (341.321, 10.1234, 10.1114, 11.2222) order by 1;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c.type.col_float3
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c.type.col_float3
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c.type.col_float3 = "*VALUES*".column1)
+                     ->  CStore Scan on type
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_float4 from type where col_float4	in (321.321, 500.123) order by 1;
+ col_float4 
+------------
+    321.321
+    321.321
+    321.321
+    321.321
+    321.321
+    321.321
+(6 rows)
+
+explain (costs off) select col_float4 from type where col_float4 in (321.321, 500.123) order by 1;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c.type.col_float4
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c.type.col_float4
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c.type.col_float4 = "*VALUES*".column1)
+                     ->  CStore Scan on type
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_float5 from type where col_float5	in (123.123654, 123.1237) order by 1;
+ col_float5 
+------------
+   123.1237
+   123.1237
+   123.1237
+   123.1237
+   123.1237
+(5 rows)
+
+explain (costs off) select col_float5 from type where col_float5 in (123.123654,123.1237) order by 1;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c.type.col_float5
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c.type.col_float5
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c.type.col_float5 = "*VALUES*".column1)
+                     ->  CStore Scan on type
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_float6 from type where col_float6	in (123.124, 113.123654) order by 1;
+ col_float6 
+------------
+    123.124
+    123.124
+    123.124
+    123.124
+    123.124
+(5 rows)
+
+explain (costs off) select col_float6 from type where col_float6 in (123.124, 113.123654) order by 1;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c.type.col_float6
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c.type.col_float6
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c.type.col_float6 = "*VALUES*".column1)
+                     ->  CStore Scan on type
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_bool from type where col_bool in (true, false) order by 1;
+ col_bool 
+----------
+ f
+ f
+ t
+ t
+ t
+ t
+(6 rows)
+
+explain (costs off) select col_bool from type where col_bool in (true, false) order by 1;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c.type.col_bool
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c.type.col_bool
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c.type.col_bool = "*VALUES*".column1)
+                     ->  CStore Scan on type
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_text from type where col_text in ('abccd', 'aab') order by 1;
+ col_text 
+----------
+ abccd
+ abccd
+ abccd
+(3 rows)
+
+explain (costs off) select col_text from type where col_text in ('abccd', 'aab') order by 1;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c.type.col_text
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c.type.col_text
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c.type.col_text = "*VALUES*".column1)
+                     ->  CStore Scan on type
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+CREATE TABLE time
+(                                                                                                                              
+  col_int		int
+  ,col_date		date
+  ,col_timestamp	timestamp
+  ,col_timestamptz	timestamptz
+  ,col_smalldatetime	smalldatetime
+  ,col_char		char
+  ,col_interval		interval
+  ,col_time		time
+  ,col_timetz		timetz
+  ,col_tinterval	tinterval
+)with (orientation=column)
+distribute by hash(col_int);
+COPY time(col_int, col_date, col_timestamp, col_timestamptz, col_smalldatetime, col_char, col_interval, col_time, col_timetz, col_tinterval) FROM stdin;
+select col_char from time where col_char in ('a', 'd') order by 1;
+ col_char 
+----------
+ a
+ d
+(2 rows)
+
+explain (costs off) select col_char from time where col_char in ('a', 'd') order by 1;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c."time".col_char
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c."time".col_char
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c."time".col_char = "*VALUES*".column1)
+                     ->  CStore Scan on "time"
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_date from time where col_date in ('2011-11-01 00:00:00', '2012-11-02 00:00:00') order by 1;
+         col_date         
+--------------------------
+ Tue Nov 01 00:00:00 2011
+ Tue Nov 01 00:00:00 2011
+ Fri Nov 02 00:00:00 2012
+ Fri Nov 02 00:00:00 2012
+(4 rows)
+
+explain (costs off) select col_date from time where col_date in ('2011-11-01 00:00:00', '2012-11-02 00:00:00') order by 1;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c."time".col_date
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c."time".col_date
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c."time".col_date = "*VALUES*".column1)
+                     ->  CStore Scan on "time"
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_timestamp from time where col_timestamp in ('2017-09-09 19:45:37', '2017-09-09 19:45:37') order by 1;
+      col_timestamp       
+--------------------------
+ Sat Sep 09 19:45:37 2017
+(1 row)
+
+explain (costs off) select col_timestamp from time where col_timestamp in ('2017-09-09 19:45:37', '2017-09-09 19:45:37') order by 1;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c."time".col_timestamp
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c."time".col_timestamp
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c."time".col_timestamp = "*VALUES*".column1)
+                     ->  CStore Scan on "time"
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_timestamptz from time where col_timestamptz in ('2017-09-09 19:45:37', '2017-09-09 19:45:37') order by 1;
+       col_timestamptz        
+------------------------------
+ Sat Sep 09 19:45:37 2017 PDT
+(1 row)
+
+explain (costs off) select col_timestamptz from time where col_timestamptz in ('2017-09-09 19:45:37', '2017-09-09 19:45:37') order by 1;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c."time".col_timestamptz
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c."time".col_timestamptz
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c."time".col_timestamptz = "*VALUES*".column1)
+                     ->  CStore Scan on "time"
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_smalldatetime from time where col_smalldatetime in ('2017-09-09 19:45:37', '2003-04-12 04:05:06') order by 1;
+    col_smalldatetime     
+--------------------------
+ Sat Apr 12 04:05:00 2003
+ Sat Apr 12 04:05:00 2003
+ Sat Apr 12 04:05:00 2003
+ Sat Apr 12 04:05:00 2003
+(4 rows)
+
+explain (costs off) select col_smalldatetime from time where col_smalldatetime in ('2017-09-09 19:45:37', '2003-04-12 04:05:06') order by 1;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c."time".col_smalldatetime
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c."time".col_smalldatetime
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c."time".col_smalldatetime = "*VALUES*".column1)
+                     ->  CStore Scan on "time"
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_time from time where col_time  in ('08:00:30', '00:00:30', '12:00:30') order by 1;
+ col_time 
+----------
+ 08:00:30
+(1 row)
+
+explain (costs off) select col_time from time where col_time  in ('08:00:30', '00:00:30', '12:00:30') order by 1;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c."time".col_time
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c."time".col_time
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c."time".col_time = "*VALUES*".column1)
+                     ->  CStore Scan on "time"
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_timetz from time where col_timetz  in ('08:00:30+08', '00:00:30+08', '12:00:30+08') order by 1;
+ col_timetz  
+-------------
+ 08:00:30+08
+(1 row)
+
+explain (costs off) select col_timetz from time where col_timetz  in ('08:00:30+08', '00:00:30+08', '12:00:30+08') order by 1;
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c."time".col_timetz
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c."time".col_timetz
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c."time".col_timetz = "*VALUES*".column1)
+                     ->  CStore Scan on "time"
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_interval from time where col_interval in ('2 day 13:34:56', '1 day 18:34:56') order by 1;
+           col_interval            
+-----------------------------------
+ @ 1 day 18 hours 34 mins 56 secs
+ @ 2 days 13 hours 34 mins 56 secs
+(2 rows)
+
+explain (costs off) select col_interval from time where col_interval in ('2 day 13:34:56', '1 day 18:34:56') order by 1;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c."time".col_interval
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c."time".col_interval
+               ->  Vector Hash Semi Join
+                     Hash Cond: (inlist2join_type_c."time".col_interval = "*VALUES*".column1)
+                     ->  CStore Scan on "time"
+                     ->  Vector Adapter
+                           ->  Values Scan on "*VALUES*"
+(10 rows)
+
+select col_tinterval from time where col_tinterval in ('["Sep 4, 1983 23:59:12" "Oct 4, 1983 23:59:12"]', '["May 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]') order by 1;
+                          col_tinterval                          
+-----------------------------------------------------------------
+ ["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]
+ ["Sat May 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+(2 rows)
+
+explain (costs off) select col_tinterval from time where col_tinterval in ('["Sep 4, 1983 23:59:12" "Oct 4, 1983 23:59:12"]', '["May 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]') order by 1;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: inlist2join_type_c."time".col_tinterval
+         ->  Vector Sort
+               Sort Key: inlist2join_type_c."time".col_tinterval
+               ->  Vector Nest Loop Semi Join
+                     Join Filter: (inlist2join_type_c."time".col_tinterval = "*VALUES*".column1)
+                     ->  CStore Scan on "time"
+                     ->  Vector Materialize
+                           ->  Vector Adapter
+                                 ->  Values Scan on "*VALUES*"
+(11 rows)
+
+drop schema inlist2join_type_c cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table type
+drop cascades to table "time"

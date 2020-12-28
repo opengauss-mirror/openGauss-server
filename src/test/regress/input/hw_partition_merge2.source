@@ -1,0 +1,249 @@
+-- ALTER TABLE MERGE PARTITIONS INTO PARTITION
+
+-- 0. Functional Test
+-- 1. Abnormal Test
+-- 2. Table has tablespace
+-- 3. Table has toast
+-- 4. Table has index
+-- 5. Table has VM and FSM
+
+
+
+-- 3. Table has toast
+create table test_merge_toast (a int, b text) with(autovacuum_enabled = off)
+partition by range (a)
+(
+	partition test_merge_toast_p1 values less than (10),
+	partition test_merge_toast_p2 values less than (20),
+	partition test_merge_toast_p3 values less than (30),
+	partition test_merge_toast_p4 values less than (40)
+);
+
+insert into test_merge_toast values (1, lpad('a',409600,'b'));
+insert into test_merge_toast values (11, lpad('a',409600,'b'));
+
+alter table test_merge_toast merge partitions test_merge_toast_p1, test_merge_toast_p2 into partition test_merge_toast_px;
+
+select count (*) from test_merge_toast;
+select count (*) from test_merge_toast partition (test_merge_toast_px);
+
+drop table test_merge_toast;
+
+
+-- 4. Table has index
+create table test_merge_index_test (c1 int, c2 int, c3 int) with(autovacuum_enabled = off)
+partition by range (c2)
+(
+	partition test_merge_index_test_p1 values less than (10),
+	partition test_merge_index_test_p2 values less than (20),
+	partition test_merge_index_test_p3 values less than (30),
+	partition test_merge_index_test_p4 values less than (40),
+	partition test_merge_index_test_p5 values less than (50),
+	partition test_merge_index_test_p6 values less than (60),
+	partition test_merge_index_test_p7 values less than (70),
+	partition test_merge_index_test_p8 values less than (80),
+	partition test_merge_index_test_p9 values less than (90),
+	partition test_merge_index_test_p10 values less than (100),
+	partition test_merge_index_test_p11 values less than (110),
+	partition test_merge_index_test_p12 values less than (120),
+	partition test_merge_index_test_p13 values less than (130),
+	partition test_merge_index_test_p14 values less than (140),
+	partition test_merge_index_test_p15 values less than (150),
+	partition test_merge_index_test_p16 values less than (160),
+	partition test_merge_index_test_p17 values less than (170),
+	partition test_merge_index_test_p18 values less than (180),
+	partition test_merge_index_test_p19 values less than (190),
+	partition test_merge_index_test_p20 values less than (200),
+	partition test_merge_index_test_p21 values less than (210),
+	partition test_merge_index_test_p22 values less than (220),
+	partition test_merge_index_test_p23 values less than (230),
+	partition test_merge_index_test_p24 values less than (240),
+	partition test_merge_index_test_p25 values less than (250),
+	partition test_merge_index_test_p26 values less than (260),
+	partition test_merge_index_test_p27 values less than (270),
+	partition test_merge_index_test_p28 values less than (280),
+	partition test_merge_index_test_p29 values less than (290),
+	partition test_merge_index_test_p30 values less than (300)
+);
+
+insert into test_merge_index_test values (generate_series(1, 299), generate_series(1, 299), generate_series(1, 299));
+--create indexes
+create index idx1_test_merge_index on test_merge_index_test(c1) local;
+create index idx2_test_merge_index on test_merge_index_test(c1, c2) local;
+create index idx3_test_merge_index on test_merge_index_test(c1, c2, c3) local;
+create index idx4_test_merge_index on test_merge_index_test using hash (c1) local;
+--4.1 merge 2 partitions into one
+alter table test_merge_index_test merge partitions 
+	test_merge_index_test_p1, test_merge_index_test_p2
+	into partition test_merge_index_test_p2;
+-- merged index check, seqscan
+SET enable_seqscan = ON;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = OFF;
+
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
+select * from test_merge_index_test order by c1;
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
+select * from test_merge_index_test order by c1, c2;
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
+select * from test_merge_index_test order by c1, c2, c3;
+-- merged index check, indexcan
+SET enable_seqscan = OFF;
+SET enable_indexscan = ON;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = OFF;
+
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
+select * from test_merge_index_test order by c1;
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
+select * from test_merge_index_test order by c1, c2;
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
+select * from test_merge_index_test order by c1, c2, c3;
+-- merged index check, indexonlycan
+SET enable_seqscan = OFF;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = ON;
+SET enable_bitmapscan = OFF;
+
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
+select * from test_merge_index_test order by c1;
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
+select * from test_merge_index_test order by c1, c2;
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
+select * from test_merge_index_test order by c1, c2, c3;
+--4.2 merge 3 partitions into one
+alter table test_merge_index_test merge partitions 
+	test_merge_index_test_p2, test_merge_index_test_p3, test_merge_index_test_p4
+	into partition test_merge_index_test_p4;
+-- merged index check, seqscan
+SET enable_seqscan = ON;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = OFF;
+
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
+select * from test_merge_index_test order by c1;
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
+select * from test_merge_index_test order by c1, c2;
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
+select * from test_merge_index_test order by c1, c2, c3;
+-- merged index check, indexcan
+SET enable_seqscan = OFF;
+SET enable_indexscan = ON;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = OFF;
+
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
+select * from test_merge_index_test order by c1;
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
+select * from test_merge_index_test order by c1, c2;
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
+select * from test_merge_index_test order by c1, c2, c3;
+-- merged index check, indexonlycan
+SET enable_seqscan = OFF;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = ON;
+SET enable_bitmapscan = OFF;
+
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
+select * from test_merge_index_test order by c1;
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
+select * from test_merge_index_test order by c1, c2;
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
+select * from test_merge_index_test order by c1, c2, c3;
+--4.3 merge multiple partitions into one
+alter table test_merge_index_test merge partitions 
+	test_merge_index_test_p4, 
+	test_merge_index_test_p5, 
+	test_merge_index_test_p6,
+	test_merge_index_test_p7, 
+	test_merge_index_test_p8, 
+	test_merge_index_test_p9,
+	test_merge_index_test_p10, 
+	test_merge_index_test_p11, 
+	test_merge_index_test_p12,
+	test_merge_index_test_p13, 
+	test_merge_index_test_p14, 
+	test_merge_index_test_p15,
+	test_merge_index_test_p16, 
+	test_merge_index_test_p17, 
+	test_merge_index_test_p18,
+	test_merge_index_test_p19, 
+	test_merge_index_test_p20, 
+	test_merge_index_test_p21,
+	test_merge_index_test_p22, 
+	test_merge_index_test_p23, 
+	test_merge_index_test_p24,
+	test_merge_index_test_p25, 
+	test_merge_index_test_p26, 
+	test_merge_index_test_p27,
+	test_merge_index_test_p28, 
+	test_merge_index_test_p29,
+	test_merge_index_test_p30
+	into partition test_merge_index_test_pone;
+-- merged index check, seqscan
+SET enable_seqscan = ON;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = OFF;
+
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
+select * from test_merge_index_test order by c1;
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
+select * from test_merge_index_test order by c1, c2;
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
+select * from test_merge_index_test order by c1, c2, c3;
+-- merged index check, indexcan
+SET enable_seqscan = OFF;
+SET enable_indexscan = ON;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = OFF;
+
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
+select * from test_merge_index_test order by c1;
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
+select * from test_merge_index_test order by c1, c2;
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
+select * from test_merge_index_test order by c1, c2, c3;
+-- merged index check, indexonlycan
+SET enable_seqscan = OFF;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = ON;
+SET enable_bitmapscan = OFF;
+
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1;
+select * from test_merge_index_test order by c1;
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2;
+select * from test_merge_index_test order by c1, c2;
+EXPLAIN (COSTS OFF, NODES OFF) select * from test_merge_index_test order by c1, c2, c3;
+select * from test_merge_index_test order by c1, c2, c3;
+
+--clean up
+drop table test_merge_index_test;
+
+
+
+-- 5. Table has VM and FSM
+create table test_merge_VM (a int, b int)with(autovacuum_enabled = off) partition by range (b)
+(
+	partition test_merge_VM_p1 values less than (10),
+	partition test_merge_VM_p2 values less than (20),
+	partition test_merge_VM_p3 values less than (30),
+	partition test_merge_VM_p4 values less than (40)
+);
+
+insert into test_merge_VM values (0, 5), (0, 15), (0, 25); 
+update test_merge_VM set b=6 where b=5;
+vacuum test_merge_VM;
+
+alter table test_merge_VM merge partitions test_merge_VM_p1, test_merge_VM_p2 into partition test_merge_VM_px;
+select * from test_merge_VM partition (test_merge_VM_px);
+
+vacuum test_merge_VM;
+select * from test_merge_VM partition (test_merge_VM_px);
+
+alter table test_merge_VM merge partitions test_merge_VM_px, test_merge_VM_p3 into partition test_merge_VM_p1;
+select * from test_merge_VM partition (test_merge_VM_p1);
+
+drop table test_merge_VM;

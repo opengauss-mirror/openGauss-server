@@ -334,6 +334,3 @@ SELECT to_tsvector('thesaurus_tst', 'Booking tickets is looking like a booking a
  'card':3,10 'invit':2,9 'like':6 'look':5 'order':1,8
 (1 row)
 
--- create text search with wrong dict and affix
-CREATE TEXT SEARCH DICTIONARY failedDicTest1 (Template=ispell,DictFile=hunspell_sample_num, AffFile=hunspell_sample_long);
-ERROR:  invalid affix alias "302,301,202,303", max affix value:12

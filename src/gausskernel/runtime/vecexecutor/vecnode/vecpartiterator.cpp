@@ -86,7 +86,23 @@ VectorBatch* ExecVecPartIterator(VecPartIteratorState* node)
     EState* state = node->ps.lefttree->state;
     bool orig_early_free = state->es_skip_early_free;
 
-    if (pi_node->itrs == 0) {
+    PlanState* noden = (PlanState*)node->ps.lefttree;
+    int partitionScan;
+    switch (nodeTag(noden)) {
+        case T_CStoreScanState:
+            partitionScan = ((CStoreScanState*)noden)->part_id;
+            break;
+#ifdef ENABLE_MULTIPLE_NODES
+        case T_TsStoreScanState:
+            partitionScan = ((TsStoreScanState*)noden)->part_id;
+            break;
+#endif
+        default:
+            partitionScan = pi_node->itrs;
+            break;
+    }
+
+    if (partitionScan == 0) {
         return NULL;
     }
 
@@ -104,7 +120,7 @@ VectorBatch* ExecVecPartIterator(VecPartIteratorState* node)
 
     for (;;) {
         /* if there is no partition to scan, return null */
-        if (node->currentItr >= pi_node->itrs - 1)
+        if (node->currentItr >= partitionScan - 1)
             return NULL;
 
         init_vecscan_partition(node);

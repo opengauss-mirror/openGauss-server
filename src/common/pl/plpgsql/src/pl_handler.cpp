@@ -27,6 +27,7 @@
 #include "utils/syscache.h"
 #include "pgstat.h"
 #include "utils/timestamp.h"
+#include "executor/spi_priv.h"
 
 #ifdef STREAMPLAN
 #include "optimizer/streamplan.h"
@@ -51,7 +52,11 @@ static void auditExecPLpgSQLFunction(PLpgSQL_function* func, AuditResult result)
     char details[PGAUDIT_MAXLENGTH];
     errno_t rcs = EOK;
 
-    AssertEreport(func != NULL, MOD_PLSQL, "function should not be null");
+    if (unlikely(func == NULL)) {
+        ereport(ERROR, 
+            (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                errmsg("function should not be null")));
+    }
 
     rcs = snprintf_s(
         details, PGAUDIT_MAXLENGTH, PGAUDIT_MAXLENGTH - 1, "Execute PLpgSQL function(oid = %u). ", func->fn_oid);
@@ -64,35 +69,22 @@ static void auditExecPLpgSQLFunction(PLpgSQL_function* func, AuditResult result)
  * @Description: Exec anonymous block.
  * @in func: Plpg function.
  */
-static void auditExecAnonymousBlock(PLpgSQL_function* func)
+static void auditExecAnonymousBlock(const PLpgSQL_function* func)
 {
-    char* details = NULL;
-    char* mask_string = func->fn_signature;
-    int len;
+    char details[PGAUDIT_MAXLENGTH];
     errno_t rc = EOK;
 
-    AssertEreport(func != NULL, MOD_PLSQL, "function should not be null");
-
-    if (t_thrd.postgres_cxt.debug_query_string != NULL) {
-        mask_string = maskPassword(t_thrd.postgres_cxt.debug_query_string);
-        if (mask_string == NULL) {
-            mask_string = (char*)t_thrd.postgres_cxt.debug_query_string;
-        }
+    if (unlikely(func == NULL)) {
+        ereport(ERROR, 
+            (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
+                errmsg("function should not be null")));
     }
 
-    details = "Execute PLpgSQL anonymous code block(). ";
-    len = strlen(details) + strlen(mask_string) + 1;
-    details = (char*)palloc(len);
-    rc = snprintf_s(details, len, len - 1, "Execute PLpgSQL anonymous code block(%s). ", mask_string);
+    rc = snprintf_s(details, PGAUDIT_MAXLENGTH, PGAUDIT_MAXLENGTH - 1,
+                    "Execute PLpgSQL anonymous code block(oid = %u). ", func->fn_oid);
     securec_check_ss(rc, "", "");
 
-    if (mask_string != t_thrd.postgres_cxt.debug_query_string && mask_string != func->fn_signature) {
-        selfpfree(mask_string);
-    }
-
     audit_report(AUDIT_FUNCTION_EXEC, AUDIT_OK, func->fn_signature, details);
-
-    pfree(details);
 }
 
 /*
@@ -105,6 +97,7 @@ void _PG_init(void)
     /* Be sure we do initialization only once (should be redundant now) */
     if (u_sess->plsql_cxt.inited == false) {
         plpgsql_HashTableInit();
+        SPICacheTableInit();
         PG_TRY();
         {
             pg_bindtextdomain(TEXTDOMAIN);
@@ -154,6 +147,7 @@ static void validate_search_path(PLpgSQL_function* func)
         } else {
             ReleaseSysCache(tuple);
         }
+
     }
     foreach (cell, oidlist) {
         func->fn_searchpath->schemas = list_delete_oid(func->fn_searchpath->schemas, lfirst_oid(cell));
@@ -171,20 +165,30 @@ PG_FUNCTION_INFO_V1(plpgsql_call_handler);
 
 Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
 {
+    bool nonatomic;
     PLpgSQL_function* func = NULL;
     PLpgSQL_execstate* save_cur_estate = NULL;
     Datum retval;
     int rc;
+    Oid func_oid = fcinfo->flinfo->fn_oid;
     Oid* saved_Pseudo_CurrentUserId = NULL;
     // PGSTAT_INIT_PLSQL_TIME_RECORD
     int64 startTime = 0;
     bool needRecord = false;
-    bool nonatomic = false;
-#ifdef STREAMPLAN
+
+    /* 
+     * if the atomic stored in fcinfo is false means allow 
+     * commit/rollback within stored procedure. 
+     * set the nonatomic and will be reused within function.
+     */
+    nonatomic = fcinfo->context && 
+                IsA(fcinfo->context, FunctionScanState) &&
+                !castNode(FunctionScanState, fcinfo->context)->atomic;
+
     bool outer_is_stream = false;
     bool outer_is_stream_support = false;
     int fun_arg = fcinfo->nargs;
-
+#ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_COORDINATOR) {
         outer_is_stream = u_sess->opt_cxt.is_stream;
         outer_is_stream_support = u_sess->opt_cxt.is_stream_support;
@@ -192,22 +196,19 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         u_sess->opt_cxt.is_stream = true;
         u_sess->opt_cxt.is_stream_support = true;
     }
-#endif
+#else
+    outer_is_stream = u_sess->opt_cxt.is_stream;
+    outer_is_stream_support = u_sess->opt_cxt.is_stream_support;
 
-    /*
-     * If the atomic stored in fcinfo is false means allow
-     * commit/rollback within stord procedure.
-     * set the noatomic and will be reused within function.
-     */
-    nonatomic = fcinfo->context &&
-                IsA(fcinfo->context, FunctionScanState) &&
-                !castNode(FunctionScanState, fcinfo->context)->atomic;
+    u_sess->opt_cxt.is_stream = false;
+    u_sess->opt_cxt.is_stream_support = false;
+#endif
 
     _PG_init();
     /*
      * Connect to SPI manager
      */
-    if ((rc = SPI_connect_ext(DestSPI, NULL, NULL, nonatomic ? SPI_OPT_NOATOMIC : 0)) != SPI_OK_CONNECT) {
+    if ((rc =  SPI_connect_ext(DestSPI, NULL, NULL, nonatomic ? SPI_OPT_NONATOMIC : 0, func_oid)) != SPI_OK_CONNECT) {
         ereport(ERROR,
             (errmodule(MOD_PLSQL),
                 errcode(ERRCODE_UNDEFINED_OBJECT),
@@ -218,6 +219,8 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
 
     /* Find or compile the function */
     func = plpgsql_compile(fcinfo, false);
+    /* gpc's spi hash key */
+    u_sess->SPI_cxt._current->spi_hash_key = SPICacheHashFunc(func->fn_hashkey, sizeof(PLpgSQL_func_hashkey));
 
     PGSTAT_END_PLSQL_TIME_RECORD(PL_COMPILATION_TIME);
 
@@ -268,6 +271,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         // resume the search_path when there is an error
         PopOverrideSearchPath();
         u_sess->misc_cxt.Pseudo_CurrentUserId = saved_Pseudo_CurrentUserId;
+
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -311,11 +315,14 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
                 errmsg("SPI_finish failed: %s when execute PLSQL function.", SPI_result_code_string(rc))));
     }
 
-#ifdef STREAMPLAN
+#ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_COORDINATOR) {
         u_sess->opt_cxt.is_stream = outer_is_stream;
         u_sess->opt_cxt.is_stream_support = outer_is_stream_support;
     }
+#else
+    u_sess->opt_cxt.is_stream = outer_is_stream;
+    u_sess->opt_cxt.is_stream_support = outer_is_stream_support;
 #endif
 
     return retval;
@@ -348,7 +355,7 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
     /*
      * Connect to SPI manager
      */
-    if ((rc = SPI_connect_ext(DestSPI, NULL, NULL, codeblock->atomic ? 0 : SPI_OPT_NOATOMIC)) != SPI_OK_CONNECT) {
+    if ((rc = SPI_connect_ext(DestSPI, NULL, NULL, codeblock->atomic ? 0 : SPI_OPT_NONATOMIC)) != SPI_OK_CONNECT) {
         ereport(ERROR,
             (errmodule(MOD_PLSQL),
                 errcode(ERRCODE_SPI_CONNECTION_FAILURE),
@@ -387,6 +394,10 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
     if (AUDIT_EXEC_ENABLED) {
         auditExecAnonymousBlock(func);
     }
+
+
+    /* set cursor optin to null which opened in this block */
+    ResetPortalCursor(GetCurrentSubTransactionId(), func->fn_oid, func->use_count);
 
     /* Function should now have no remaining use-counts ... */
     func->use_count--;

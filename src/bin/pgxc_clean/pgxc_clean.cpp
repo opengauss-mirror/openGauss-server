@@ -79,8 +79,8 @@ int  gtm_option_num; /* GTM 0 GTMLITE 1 GTMFREE 2 */
 bool clean_all_databases = false; /* "--all" overrides specific database specification */
 
 /* Databases to clean */
-bool commit_all_prepared = false;   /* if global status is prepared ,wether commit all */
-bool rollback_all_prepared = false; /* if global status is prepared ,wether abort all */
+bool commit_all_prepared = false;   /* if global status is prepared ,wether commit all*/
+bool rollback_all_prepared = false; /* if global status is prepared ,wether abort all*/
 
 database_names* head_database_names = NULL;
 database_names* last_database_names = NULL;
@@ -517,8 +517,7 @@ static inline int64 strtollSafe(const char* nptr, int base)
     return res;
 }
 
-
-static inline char* strrchrSafe(const char* str, int c)
+static inline char* strrchrSafe(char* str, int c)
 {
     char* res = strrchr(str, c);
     if (unlikely(res == NULL)) {
@@ -946,7 +945,7 @@ static void getSessionIdListInPlantable(PGconn* conn)
 #define STMT_LEN 48
     char* stmt_get_sessid_list = (char*)malloc(STMT_LEN + 1);
     checkAllocMem(stmt_get_sessid_list);
-    memset_s(stmt_get_sessid_list, STMT_LEN + 1, '\0', STMT_LEN + 1);
+    (void)memset_s(stmt_get_sessid_list, STMT_LEN + 1, '\0', STMT_LEN + 1);
 
     rc = snprintf_s(stmt_get_sessid_list, STMT_LEN + 1, STMT_LEN, "SELECT DISTINCT(session_id) FROM plan_table_data");
     securec_check_ss_c(rc, "\0", "\0");
@@ -1077,7 +1076,7 @@ static void deletePlanTableData(PGconn* conn, char* sessid, bool missing_ok)
 
     res = PQexec(conn, stmt_delete_plan_table_data);
 
-    /* If execution is not successful, give an log and go on. */
+    /* If execution is not successful, give an log and go on.*/
     if (res == NULL || PQresultStatus(res) != PGRES_COMMAND_OK) {
         write_stderr("%s could not delete data from plan_table_data: %s\n", formatLogTime(), PQresultErrorMessage(res));
     }
@@ -1273,6 +1272,13 @@ static void dropTempSchemas(PGconn* conn, bool missing_ok)
             }
             Assert(*node_name != '\0');
 
+            if (strlen(my_nodename) != strlen(node_name)) {
+                write_stderr("%s Node name %s in temp schema: %s could be truncated in InitTempTableNamespace.\n",
+                             formatLogTime(),
+                             node_name,
+                             cell1->tempschema_name);
+            }
+
             /* if it is current CN node, just drop it (recall that it is non-active backend one) */
             if (strcmp(my_nodename, node_name) == 0)
                 dropTempSchema(conn, cell1->tempschema_name, missing_ok);
@@ -1416,7 +1422,7 @@ static void getMyNodename(PGconn* conn)
     res = PQexec(conn, stmt);
 
     /* Error handling here */
-    if (res != NULL)
+    if (res != NULL && (PQresultStatus(res) == PGRES_TUPLES_OK))
         my_nodename = pg_strdup(PQgetvalue(res, 0, 0));
     else
         my_nodename = pg_strdup("unknown");
@@ -1433,7 +1439,7 @@ static void getMyGtmMode(PGconn* conn)
     res = PQexec(conn, stmt);
 
     /* Error handling here */
-    if (res != NULL) {
+    if (res != NULL && (PQresultStatus(res) == PGRES_TUPLES_OK)) {
         gtm_mode = pg_strdup(PQgetvalue(res, 0, 0));
     } else {
         gtm_mode = pg_strdup("unknown");
@@ -1442,14 +1448,14 @@ static void getMyGtmMode(PGconn* conn)
 
     res = PQexec(conn, stmt_gtm_option);
     /* Error handling here */
-    if (res != NULL) {
+    if (res != NULL && (PQresultStatus(res) == PGRES_TUPLES_OK)) {
         gtm_option = pg_strdup(PQgetvalue(res, 0, 0));
-        PQclear(res);
-        gtm_option_num = strtolSafe(gtm_option, 10);
+        gtm_option_num = atoi(gtm_option);
     } else {
         gtm_option = pg_strdup("unknown");
         gtm_option_num = -1;
     }
+    PQclear(res);
 }
 
 static void recover2PCForDatabase(database_info* db_info, CleanWorkerInfo* wkinfo)
@@ -1495,7 +1501,7 @@ static void recover2PC(PGconn* conn, txn_info* txn, int num)
 {
     TXN_STATUS txn_stat;
 
-    txn_stat = check_txn_global_status(txn);
+    txn_stat = check_txn_global_status(txn, commit_all_prepared, rollback_all_prepared);
     if (verbose_opt) {
         write_stderr("job%d: %s     Recovering TXN: localxid: %lu, gid: \"%s\", owner: \"%s\", global status: %s\n",
             num,
@@ -1653,6 +1659,10 @@ static void do_commit_abort(PGconn* conn, txn_info* txn, bool is_commit, int num
                     } else if (dnCsn != NULL) {
                         free(dnCsn);
                     }
+                    /* every one has the same next_node_idx, just fetch once */
+                    if (txn->new_ddl_version) {
+                        break;
+                    }
                 }
             }
         }
@@ -1663,6 +1673,9 @@ static void do_commit_abort(PGconn* conn, txn_info* txn, bool is_commit, int num
      * or we just ignore this gs_clean for the current transaction.
      */
     if ((is_commit && !enable_gtm_free && gtm_option_num != 2) && !COMMITSEQNO_IS_COMMITTED((uint64)csnll)) {
+        if (csn != NULL) {
+            free(csn);
+        }
         do_commit_abort_failed = true;
         return;
     }
@@ -1679,7 +1692,7 @@ static void do_commit_abort(PGconn* conn, txn_info* txn, bool is_commit, int num
             int left_space = MAXNODELISTLEN - 1 - use_lenth;
             int node_name_len = strlen(pgxc_clean_node_info[ii].node_name);
             int gid_len = (txn->new_version && txn->txn_gid_info[ii].my_gid != NULL) ?
-                           strlen(txn->txn_gid_info[ii].my_gid) + 1 : 0;
+                          strlen(txn->txn_gid_info[ii].my_gid) + 1 : 0;
             int src_lenth = node_name_len + gid_len; /* append space of ',' */
             need_send = true;
             Assert(left_space >= 0);
@@ -1956,13 +1969,7 @@ static TXN_STATUS getTxnStatus(PGconn* conn, GlobalTransactionId gxid, int node_
             return TXN_STATUS_UNCONNECT;
         }
         if (PQntuples(res1) > 0) {
-            char* tmp = NULL;
-            count = (int)strtol(PQgetvalue(res1, 0, 0), &tmp, 10);
-            if (unlikely(*tmp != '\0')) {
-                write_stderr("%s %s: strtol failed.\n", formatLogTime(), progname);
-                PQclear(res1);
-                return TXN_STATUS_UNKNOWN;
-            }
+            count = atoi(PQgetvalue(res1, 0, 0));
         } else {
             count = 1; /* treat it as running if doubt */
         }
@@ -2024,8 +2031,11 @@ static bool getTxnStatOnPrimaryCN(PGconn* conn, txn_info* txn, int cnid, bool en
 
     if (txn->txn_stat[cnid] == TXN_STATUS_PREPARED) {
         /* if more clear status */
-        if (tmp != TXN_STATUS_UNKNOWN)
+        if (tmp != TXN_STATUS_UNKNOWN) {
             txn->txn_stat[cnid] = tmp;
+        } else {
+            txn->is_exec_cn_prepared = true;
+        }
     }
 
     if (tmp == TXN_STATUS_UNCONNECT || tmp == TXN_STATUS_UNKNOWN) {
@@ -2047,6 +2057,9 @@ static void getTxnStatOnOtherNodes(PGconn* conn, txn_info* txn, int cnid, bool e
                 txn->txn_stat[ii] = tmp;
                 break;
             }
+            if (tmp == TXN_STATUS_UNCONNECT) {
+                txn->txn_stat[ii] = tmp;
+            }
         }
     } else if (txn->new_version) {
         /* new_gid_version, gtm lite or gtm free */
@@ -2062,6 +2075,13 @@ static void getTxnStatOnOtherNodes(PGconn* conn, txn_info* txn, int cnid, bool e
                 txn->txn_stat[next_node_idx] = tmp;
                 break;
             }
+            if (tmp == TXN_STATUS_UNCONNECT) {
+                txn->txn_stat[next_node_idx] = tmp;
+            }
+            /* every one has the same next_node_idx, just fetch once */
+            if (txn->new_ddl_version) {
+                break;
+            }
         }
     }
 }
@@ -2072,6 +2092,7 @@ static void getTxnInfoOnOtherNodes(PGconn* conn, txn_info* txn)
     int cnid = -1;
     bool found = false;
     bool enable_gtm_free = (strcmp(gtm_mode, "on") == 0);
+    bool is_cn_deleted = true; /* cn deleted, cn unconnected have different meaning */
 
     if (txn->cn_xid != 0) {
         for (ii = 0; ii < pgxc_clean_node_count; ii++) {
@@ -2079,6 +2100,7 @@ static void getTxnInfoOnOtherNodes(PGconn* conn, txn_info* txn)
             if (strcmp(pgxc_clean_node_info[ii].node_name, txn->cn_nodename) == 0) {
                 cnid = ii;
                 found = true;
+                is_cn_deleted = false;
                 break;
             }
         }
@@ -2093,8 +2115,9 @@ static void getTxnInfoOnOtherNodes(PGconn* conn, txn_info* txn)
     /*
      * if enable_gtm_free is true, we cannot do anything to xact, so set status to  unconnect,
      * otherwise try get txn status from other nodes.
+     * only do below logic if exec cn deleted, if cn is unconneted, we do nothing.
      */
-    if (!found) {
+    if (is_cn_deleted) {
         getTxnStatOnOtherNodes(conn, txn, cnid, enable_gtm_free);
         write_stderr(
             "%s Could not get the status of prepared transaction %s from node %s,"
@@ -2425,10 +2448,11 @@ static void getTempSchemaListOnCN(PGconn* conn)
 
     for (i = 0; i < temp_schema_count; i++) {
         nspname = PQgetvalue(res, i, 0);
-
-        if (strncasecmp(my_nodename, &nspname[7], strchr(&nspname[7], '_') - &nspname[7]) == 0) {
-            add_temp_schema_info(nspname);
+        if (strchr(&nspname[7], '_') == NULL) {
+            write_stderr("%s Error when parse schema name.\n", formatLogTime());
         }
+        if (strncasecmp(my_nodename, &nspname[7], strchr(&nspname[7], '_') - &nspname[7]) == 0)
+            add_temp_schema_info(nspname);
     }
 
     PQclear(res);
@@ -2571,20 +2595,27 @@ static void getNodeList(PGconn* conn)
                     formatLogTime(),
                     node_name,
                     node_type_c);
+                /* free memory before exit */
+                if (node_name != NULL)
+                    free(node_name);
+                if (node_type_c != NULL)
+                    free(node_type_c);
                 goto error_exit;
         }
         port = atoi(PQgetvalue(res, ii, 2));
         host = pg_strdup(PQgetvalue(res, ii, 3));
 
-        if (set_node_info(node_name, port, host, node_type, ii) == -1)
-            goto error_exit;
-
+        bool set_node_info_fail = (set_node_info(node_name, port, host, node_type, ii) == -1);
+        /* free memory before check result */
         if (node_name != NULL)
             free(node_name);
         if (node_type_c != NULL)
             free(node_type_c);
         if (host != NULL)
             free(host);
+        if (set_node_info_fail) {
+            goto error_exit;
+        }
     }
     /* Check if local Coordinator has been found */
     if (my_nodeidx == -1) {
@@ -2669,6 +2700,7 @@ static void parse_pgxc_clean_options(int argc, char* argv[])
     extern char* optarg;
     extern int optind;
     int c;
+    errno_t rc = EOK;
 
     progname = get_progname(argv[0]); /* Should be more fancy */
 
@@ -2697,7 +2729,9 @@ static void parse_pgxc_clean_options(int argc, char* argv[])
                 break;
             case 'p':
                 check_env_value_c(optarg);
-                coordinator_port = strtolSafe(optarg, 10);
+                if (optarg != NULL) {
+                    coordinator_port = strtolSafe(optarg, 10);
+                }
                 break;
             case 'q':
                 verbose_opt = false;
@@ -2728,7 +2762,13 @@ static void parse_pgxc_clean_options(int argc, char* argv[])
                 break;
             case 'W':
                 try_password_opt = TRI_YES;
-                password = optarg;
+                if (optarg != NULL) {
+                    password = pg_strdup(optarg);
+                    rc = memset_s(optarg, strlen(optarg), 0, strlen(optarg));
+                    securec_check_c(rc, "\0", "\0");
+                } else {
+                    password = NULL;
+                }
                 break;
             case 's':
                 status_opt = true;
@@ -2746,7 +2786,7 @@ static void parse_pgxc_clean_options(int argc, char* argv[])
                 break;
             case 'j':
                 check_env_value_c(optarg);
-                g_gs_clean_worker_num = strtolSafe(optarg, 10);
+                g_gs_clean_worker_num = atoi(optarg);
                 if (g_gs_clean_worker_num < MIN_GS_CLEAN_WORK_NUM || g_gs_clean_worker_num > MAX_GS_CLEAN_WORK_NUM) {
                     write_stderr("ERROR: parallel worker number out of range(%d ~ %d).\n",
                         MIN_GS_CLEAN_WORK_NUM,
@@ -2838,6 +2878,9 @@ static char* formatLogTime()
 {
     time_t now = time(NULL);
     struct tm* nowtm = localtime(&now);
+    if (nowtm == NULL) {
+        return "invalid local time";
+    }
     strftime(m_formatted_log_time, FORMATTED_TS_LEN, "%Y-%m-%d %H:%M:%S ", nowtm);
     m_formatted_log_time[FORMATTED_TS_LEN - 1] = '\0';
     return m_formatted_log_time;

@@ -17,7 +17,7 @@ from tuner.exceptions import ExecutionError
 # WARN: You should first install the sysbench test tool on the system,
 # then fill in the following path and cmd.
 
-path = "/home/opengauss/project/sysbench_install/share/sysbench/tests/include/oltp_legacy/oltp.lua"
+path = "/path/to/sysbench_install/share/sysbench/tests/include/oltp_legacy/oltp.lua"
 cmd = "sysbench --test=%s --db-driver=pgsql " \
       "--pgsql-db={db} --pgsql-user={user} --pgsql-password={password} --pgsql-port={port} --pgsql-host=127.0.0.1 " \
       "--oltp-tables-count=20 --oltp-table-size=1000 --max-time=30 --max-requests=0" \

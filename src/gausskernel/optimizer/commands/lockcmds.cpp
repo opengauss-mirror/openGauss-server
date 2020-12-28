@@ -40,9 +40,10 @@ void LockTableCommand(LockStmt* lockstmt)
     ListCell* p = NULL;
 
     /*
-     * During recovery we only accept these variations: LOCK TABLE foo IN ACCESS
-     * SHARE MODE LOCK TABLE foo IN ROW SHARE MODE LOCK TABLE foo IN ROW
-     * EXCLUSIVE MODE This test must match the restrictions defined in LockAcquire()
+     * During recovery we only accept these variations: LOCK TABLE foo IN
+     * ACCESS SHARE MODE LOCK TABLE foo IN ROW SHARE MODE LOCK TABLE foo IN
+     * ROW EXCLUSIVE MODE This test must match the restrictions defined in
+     * LockAcquire()
      */
     if (lockstmt->mode > RowExclusiveLock)
         PreventCommandDuringRecovery("LOCK TABLE");
@@ -164,7 +165,7 @@ static AclResult LockTableAclCheck(Oid reloid, LOCKMODE lockmode)
      * also used superuser() function but it forbid the INSERT/DELETE/SELECT/UPDATE
      * for superuser in independent condition. Here LOCK is no need to forbid.
      */
-    if (superuser())
+    if (superuser() || (isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))
         return ACLCHECK_OK;
 
     /* Verify adequate privilege */

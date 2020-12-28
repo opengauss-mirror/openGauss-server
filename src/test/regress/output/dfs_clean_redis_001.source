@@ -1,0 +1,10 @@
+\d+
+                                             List of relations
+ Schema |         Name          | Type  |  Owner  | Size  |             Storage              | Description 
+--------+-----------------------+-------+---------+-------+----------------------------------+-------------
+--?.*
+--?.*
+(2 rows)
+
+drop tablespace if exists hdfs_ts;
+\! rm -rf @abs_srcdir@/dfs_init_redis_001

@@ -1,0 +1,648 @@
+set enable_compress_hll = on;
+create schema hll_para;
+set current_schema = hll_para;
+--------------CONTENTS--------------------
+-- test hll functions with parameters
+------------------------------------------
+--1. hll_empty
+--2. hll_add_agg
+--3. use cases with parameter
+------------------------------------------
+------------------------------------------
+-- 1. hll_empty
+------------------------------------------
+select hll_print(hll_empty(10));
+                        hll_print                         
+----------------------------------------------------------
+ EMPTY, nregs=1024, nbits=5, expthresh=-1(80), sparseon=1
+(1 row)
+
+select hll_print(hll_empty(10,5));
+                        hll_print                         
+----------------------------------------------------------
+ EMPTY, nregs=1024, nbits=5, expthresh=-1(80), sparseon=1
+(1 row)
+
+select hll_print(hll_empty(10,5,-1));
+                        hll_print                         
+----------------------------------------------------------
+ EMPTY, nregs=1024, nbits=5, expthresh=-1(80), sparseon=1
+(1 row)
+
+select hll_print(hll_empty(10,5,-1,1));
+                        hll_print                         
+----------------------------------------------------------
+ EMPTY, nregs=1024, nbits=5, expthresh=-1(80), sparseon=1
+(1 row)
+
+-- Empty
+select hll_empty(10,5,-1,1);
+ hll_empty 
+-----------
+ \x118a7f
+(1 row)
+
+-- Explicit
+select hll_add(hll_empty(10,5,-1,1),
+           hll_hash_integer(1,0));
+         hll_add          
+--------------------------
+ \x128a7f8895a3f5af28cafe
+(1 row)
+
+select hll_add(
+       hll_add(hll_empty(10,5,-1,1),
+           hll_hash_integer(2,0)),
+           hll_hash_integer(1,0));
+                 hll_add                  
+------------------------------------------
+ \x128a7f8895a3f5af28cafeda0ce907e4355b60
+(1 row)
+
+-- Sparse
+select hll_add(
+       hll_add(
+       hll_add(hll_empty(10,5,-1,1),
+           hll_hash_integer(3,0)),
+           hll_hash_integer(2,0)),
+           hll_hash_integer(1,0));
+                         hll_add                          
+----------------------------------------------------------
+ \x128a7f8895a3f5af28cafeda0ce907e4355b604848de7f7bd2a13b
+(1 row)
+
+-- Sparse, has 15 filled
+select hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(hll_empty(5,5,-1,1),
+           hll_hash_integer(17,0)),
+           hll_hash_integer(15,0)),
+           hll_hash_integer(14,0)),
+           hll_hash_integer(13,0)),
+           hll_hash_integer(12,0)),
+           hll_hash_integer(11,0)),
+           hll_hash_integer(10,0)),
+           hll_hash_integer(9,0)),
+           hll_hash_integer(8,0)),
+           hll_hash_integer(7,0)),
+           hll_hash_integer(6,0)),
+           hll_hash_integer(5,0)),
+           hll_hash_integer(4,0)),
+           hll_hash_integer(3,0)),
+           hll_hash_integer(2,0)),
+           hll_hash_integer(1,0));
+ERROR:  log2m = 5 is out of range, it should be in range 10 to 16
+CONTEXT:  referenced column: hll_add
+-- Compressed, has 16 filled
+select hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(
+       hll_add(hll_empty(5,5,-1,1),
+           hll_hash_integer(20,0)),
+           hll_hash_integer(17,0)),
+           hll_hash_integer(15,0)),
+           hll_hash_integer(14,0)),
+           hll_hash_integer(13,0)),
+           hll_hash_integer(12,0)),
+           hll_hash_integer(11,0)),
+           hll_hash_integer(10,0)),
+           hll_hash_integer(9,0)),
+           hll_hash_integer(8,0)),
+           hll_hash_integer(7,0)),
+           hll_hash_integer(6,0)),
+           hll_hash_integer(5,0)),
+           hll_hash_integer(4,0)),
+           hll_hash_integer(3,0)),
+           hll_hash_integer(2,0)),
+           hll_hash_integer(1,0));
+ERROR:  log2m = 5 is out of range, it should be in range 10 to 16
+CONTEXT:  referenced column: hll_add
+------------------------------------------
+-- 2.hll_add_agg
+------------------------------------------
+-- prepare data
+create table test_khvengxf (
+	val    integer
+);
+insert into test_khvengxf(val) values (1),(2),(3);
+-- Check default and explicit signatures.
+select hll_print(hll_add_agg(hll_hash_integer(val)))
+       from test_khvengxf;
+                                 hll_print                                 
+---------------------------------------------------------------------------
+ EXPLICIT, 3 elements, nregs=2048, nbits=5, expthresh=-1(160), sparseon=1:+
+ 0: -8604791237420463362                                                  +
+ 1: -2734554653617988768                                                  +
+ 2:  5208657608173592891 
+(1 row)
+
+select hll_print(hll_add_agg(hll_hash_integer(val), 10))
+       from test_khvengxf;
+                                hll_print                                 
+--------------------------------------------------------------------------
+ EXPLICIT, 3 elements, nregs=1024, nbits=5, expthresh=-1(80), sparseon=1:+
+ 0: -8604791237420463362                                                 +
+ 1: -2734554653617988768                                                 +
+ 2:  5208657608173592891 
+(1 row)
+
+select hll_print(hll_add_agg(hll_hash_integer(val), NULL))
+       from test_khvengxf;
+                                 hll_print                                 
+---------------------------------------------------------------------------
+ EXPLICIT, 3 elements, nregs=2048, nbits=5, expthresh=-1(160), sparseon=1:+
+ 0: -8604791237420463362                                                  +
+ 1: -2734554653617988768                                                  +
+ 2:  5208657608173592891 
+(1 row)
+
+select hll_print(hll_add_agg(hll_hash_integer(val), 10, 4))
+       from test_khvengxf;
+                                hll_print                                 
+--------------------------------------------------------------------------
+ EXPLICIT, 3 elements, nregs=1024, nbits=4, expthresh=-1(64), sparseon=1:+
+ 0: -8604791237420463362                                                 +
+ 1: -2734554653617988768                                                 +
+ 2:  5208657608173592891 
+(1 row)
+
+select hll_print(hll_add_agg(hll_hash_integer(val), 10, NULL))
+       from test_khvengxf;
+                                hll_print                                 
+--------------------------------------------------------------------------
+ EXPLICIT, 3 elements, nregs=1024, nbits=5, expthresh=-1(80), sparseon=1:+
+ 0: -8604791237420463362                                                 +
+ 1: -2734554653617988768                                                 +
+ 2:  5208657608173592891 
+(1 row)
+
+select hll_print(hll_add_agg(hll_hash_integer(val), 10, 4, 9))
+       from test_khvengxf;
+ERROR:  expthresh = 9 is out of range, it should be in range -1 to 7
+select hll_print(hll_add_agg(hll_hash_integer(val), 10, 4, -1))
+       from test_khvengxf;
+                                hll_print                                 
+--------------------------------------------------------------------------
+ EXPLICIT, 3 elements, nregs=1024, nbits=4, expthresh=-1(64), sparseon=1:+
+ 0: -8604791237420463362                                                 +
+ 1: -2734554653617988768                                                 +
+ 2:  5208657608173592891 
+(1 row)
+
+select hll_print(hll_add_agg(hll_hash_integer(val), 10, 4, NULL))
+       from test_khvengxf;
+                                hll_print                                 
+--------------------------------------------------------------------------
+ EXPLICIT, 3 elements, nregs=1024, nbits=4, expthresh=-1(64), sparseon=1:+
+ 0: -8604791237420463362                                                 +
+ 1: -2734554653617988768                                                 +
+ 2:  5208657608173592891 
+(1 row)
+
+select hll_print(hll_add_agg(hll_hash_integer(val), 10, 4, 9, 0))
+       from test_khvengxf;
+ERROR:  expthresh = 9 is out of range, it should be in range -1 to 7
+select hll_print(hll_add_agg(hll_hash_integer(val), 10, 4, 9, NULL))
+       from test_khvengxf;
+ERROR:  expthresh = 9 is out of range, it should be in range -1 to 7
+select hll_print(hll_add_agg(hll_hash_integer(val), NULL, NULL, NULL, NULL))
+       from test_khvengxf;
+                                 hll_print                                 
+---------------------------------------------------------------------------
+ EXPLICIT, 3 elements, nregs=2048, nbits=5, expthresh=-1(160), sparseon=1:+
+ 0: -8604791237420463362                                                  +
+ 1: -2734554653617988768                                                  +
+ 2:  5208657608173592891 
+(1 row)
+
+-- Check range checking.
+select hll_print(hll_add_agg(hll_hash_integer(val), -1))
+       from test_khvengxf;
+ERROR:  log2m = -1 is out of range, it should be in range 10 to 16
+select hll_print(hll_add_agg(hll_hash_integer(val), 32))
+       from test_khvengxf;
+ERROR:  log2m = 32 is out of range, it should be in range 10 to 16
+select hll_print(hll_add_agg(hll_hash_integer(val), 10, -1))
+       from test_khvengxf;
+ERROR:  regwidth = -1 is out of range, it should be in range 1 to 5
+select hll_print(hll_add_agg(hll_hash_integer(val), 10, 8))
+       from test_khvengxf;
+ERROR:  regwidth = 8 is out of range, it should be in range 1 to 5
+select hll_print(hll_add_agg(hll_hash_integer(val), 10, 4, -2))
+       from test_khvengxf;
+ERROR:  expthresh = -2 is out of range, it should be in range -1 to 7
+select hll_print(hll_add_agg(hll_hash_integer(val), 10, 4, 33))
+       from test_khvengxf;
+ERROR:  expthresh = 33 is out of range, it should be in range -1 to 7
+select hll_print(hll_add_agg(hll_hash_integer(val), 10, 4, 3, -1))
+       from test_khvengxf;
+ERROR:  sparseon should be 0 or 1
+select hll_print(hll_add_agg(hll_hash_integer(val), 10, 4, 3, 2))
+       from test_khvengxf;
+ERROR:  sparseon should be 0 or 1
+-- Check that we return hll_empty on null input.
+select hll_print(hll_add_agg(NULL));
+                         hll_print                         
+-----------------------------------------------------------
+ EMPTY, nregs=2048, nbits=5, expthresh=-1(160), sparseon=1
+(1 row)
+
+select hll_print(hll_add_agg(NULL, 10));
+                        hll_print                         
+----------------------------------------------------------
+ EMPTY, nregs=1024, nbits=5, expthresh=-1(80), sparseon=1
+(1 row)
+
+select hll_print(hll_add_agg(NULL, NULL));
+                         hll_print                         
+-----------------------------------------------------------
+ EMPTY, nregs=2048, nbits=5, expthresh=-1(160), sparseon=1
+(1 row)
+
+select hll_print(hll_add_agg(NULL, 10, 4));
+                        hll_print                         
+----------------------------------------------------------
+ EMPTY, nregs=1024, nbits=4, expthresh=-1(64), sparseon=1
+(1 row)
+
+select hll_print(hll_add_agg(NULL, NULL, NULL));
+                         hll_print                         
+-----------------------------------------------------------
+ EMPTY, nregs=2048, nbits=5, expthresh=-1(160), sparseon=1
+(1 row)
+
+select hll_print(hll_add_agg(NULL, 10, 4, 9));
+ERROR:  expthresh = 9 is out of range, it should be in range -1 to 7
+select hll_print(hll_add_agg(NULL, 10, 4, -1));
+                        hll_print                         
+----------------------------------------------------------
+ EMPTY, nregs=1024, nbits=4, expthresh=-1(64), sparseon=1
+(1 row)
+
+select hll_print(hll_add_agg(NULL, NULL, NULL, NULL));
+                         hll_print                         
+-----------------------------------------------------------
+ EMPTY, nregs=2048, nbits=5, expthresh=-1(160), sparseon=1
+(1 row)
+
+select hll_print(hll_add_agg(NULL, 10, 4, 9, 0));
+ERROR:  expthresh = 9 is out of range, it should be in range -1 to 7
+select hll_print(hll_add_agg(NULL, NULL, NULL, NULL, NULL));
+                         hll_print                         
+-----------------------------------------------------------
+ EMPTY, nregs=2048, nbits=5, expthresh=-1(160), sparseon=1
+(1 row)
+
+DROP TABLE test_khvengxf;
+------------------------------------------
+-- 3.use case with parameters
+------------------------------------------
+-- test parameter log2m
+create table t_id(id int);
+insert into t_id values(generate_series(1,500));
+create table t_data(a int, c text);
+insert into t_data select mod(id,2), id from t_id;
+create table t_a_c_hll(a int, c hll);
+create table t_a_c_hll1(a int, c hll);
+create table t_a_c_hll2(a int, c hll);
+insert into t_a_c_hll select a, hll_add_agg(hll_hash_text(c),10) from t_data group by a;
+insert into t_a_c_hll1 select a, hll_add_agg(hll_hash_text(c),11) from t_data group by a;
+insert into t_a_c_hll2 select a, hll_add_agg(hll_hash_text(c),13) from t_data group by a;
+select a, #c as cardinality from t_a_c_hll order by a;
+ a |   cardinality   
+---+-----------------
+ 0 | 256.63193785266
+ 1 | 256.63193785266
+(2 rows)
+
+select a, #c as cardinality from t_a_c_hll1 order by a;
+ a |   cardinality    
+---+------------------
+ 0 | 250.741759091658
+ 1 | 250.741759091658
+(2 rows)
+
+select a, #c as cardinality from t_a_c_hll2 order by a;
+ a | cardinality 
+---+-------------
+ 0 |         250
+ 1 |         250
+(2 rows)
+
+-- test parameter regwidth
+create table t_id1(id int);
+insert into t_id1 values(generate_series(1,10000));
+select #hll_add_agg(hll_hash_integer(id), 10, 1) from t_id1;
+ ?column? 
+----------
+      NaN
+(1 row)
+
+select #hll_add_agg(hll_hash_integer(id), 10, 3) from t_id1;
+     ?column?     
+------------------
+ 10886.0960279402
+(1 row)
+
+-- test parameter expthresh
+create table t_id2(id int);
+insert into t_id2 values(generate_series(1,100));
+select hll_print(hll_add_agg(hll_hash_integer(id), 11, 5, -1)) from t_id2;
+                                  hll_print                                  
+-----------------------------------------------------------------------------
+ EXPLICIT, 100 elements, nregs=2048, nbits=5, expthresh=-1(160), sparseon=1:+
+ 0: -9112016546858398876                                                    +
+ 1: -8954185737341318837                                                    +
+ 2: -8828080674297869304                                                    +
+ 3: -8795886251788280768                                                    +
+ 4: -8604791237420463362                                                    +
+ 5: -8328194179247978578                                                    +
+ 6: -7921456016582288345                                                    +
+ 7: -7839017345431327749                                                    +
+ 8: -7599921339110941780                                                    +
+ 9: -7531261020130522980                                                    +
+ 10: -7484713911367717120                                                   +
+ 11: -7364204912689380947                                                   +
+ 12: -7159395915353268338                                                   +
+ 13: -7004830921254948427                                                   +
+ 14: -6999297139846536173                                                   +
+ 15: -6816633132510080745                                                   +
+ 16: -6667661390206112635                                                   +
+ 17: -6598196073639962957                                                   +
+ 18: -6403314872648308848                                                   +
+ 19: -6186751866150003670                                                   +
+ 20: -6112656089982213552                                                   +
+ 21: -5674409923619649499                                                   +
+ 22: -5566252076597558760                                                   +
+ 23: -5262615034897544119                                                   +
+ 24: -5256104425558258653                                                   +
+ 25: -5003248654201747171                                                   +
+ 26: -4885051532879308598                                                   +
+ 27: -4857501188997114988                                                   +
+ 28: -4726703690930724547                                                   +
+ 29: -4677080040532548059                                                   +
+ 30: -4665918743608565605                                                   +
+ 31: -3798130609450519435                                                   +
+ 32: -3792256762003875109                                                   +
+ 33: -3530924470620813097                                                   +
+ 34: -3488826799878495015                                                   +
+ 35: -3484732102257153607                                                   +
+ 36: -3420006865487638316                                                   +
+ 37: -2907863358600075757                                                   +
+ 38: -2734554653617988768                                                   +
+ 39: -2439710145607230246                                                   +
+ 40: -2429259919370262952                                                   +
+ 41: -2184744822785943355                                                   +
+ 42: -1924487081839824700                                                   +
+ 43: -1809918958565581732                                                   +
+ 44: -1434765513692541945                                                   +
+ 45: -1190066361123722796                                                   +
+ 46: -1045224019076205524                                                   +
+ 47: -1017761278076725162                                                   +
+ 48:  -960942855726139237                                                   +
+ 49:  -797024135368175035                                                   +
+ 50:  -724153230767888792                                                   +
+ 51:  -581636205047518012                                                   +
+ 52:  -162615381256317982                                                   +
+ 53:    56147314249982859                                                   +
+ 54:   411731740135784642                                                   +
+ 55:   941999457996781445                                                   +
+ 56:  1198775089551518743                                                   +
+ 57:  1285412518294280660                                                   +
+ 58:  1355333960513978428                                                   +
+ 59:  1779292183511753683                                                   +
+ 60:  1991104912842796114                                                   +
+ 61:  2072756739463403504                                                   +
+ 62:  2548653049783371684                                                   +
+ 63:  2683772926368907402                                                   +
+ 64:  2913627637088662735                                                   +
+ 65:  3043979218898068167                                                   +
+ 66:  3213538865073541202                                                   +
+ 67:  3315396447584953762                                                   +
+ 68:  3324185972256642536                                                   +
+ 69:  3389202435306407143                                                   +
+ 70:  3807197325207873985                                                   +
+ 71:  3953946610711174428                                                   +
+ 72:  4201190809095595839                                                   +
+ 73:  4319975138486894280                                                   +
+ 74:  4780105810933363910                                                   +
+ 75:  4841472497994311288                                                   +
+ 76:  5026900065912398942                                                   +
+ 77:  5166715341556982067                                                   +
+ 78:  5208657608173592891                                                   +
+ 79:  5216342345125171642                                                   +
+ 80:  5264691212046120092                                                   +
+ 81:  5424578634890003631                                                   +
+ 82:  5468082254961647687                                                   +
+ 83:  5975652653801883322                                                   +
+ 84:  6115198531256924816                                                   +
+ 85:  6217670319762594328                                                   +
+ 86:  6441107158667708596                                                   +
+ 87:  6655367218388208063                                                   +
+ 88:  6810234916963909729                                                   +
+ 89:  6822956681113326004                                                   +
+ 90:  6865416962167295854                                                   +
+ 91:  7194723804895810262                                                   +
+ 92:  7904492145802501512                                                   +
+ 93:  7979653677919825177                                                   +
+ 94:  8015465261074350955                                                   +
+ 95:  8173969839008458377                                                   +
+ 96:  8282768600195057636                                                   +
+ 97:  9141676776197745727                                                   +
+ 98:  9162408199432052219                                                   +
+ 99:  9207078695860265033 
+(1 row)
+
+select hll_print(hll_add_agg(hll_hash_integer(id), 11, 5, 0)) from t_id2;
+                                               hll_print                                                
+--------------------------------------------------------------------------------------------------------
+ COMPRESSED, 97 filled nregs=2048, nbits=5, expthresh=0, sparseon=1:                                   +
+    0:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+   32:  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  5  0  0  0 +
+   64:  0  0  0  0  0  0  0  3  0  3  0  0  0  0  0  0  0  0  2  0  0  0  1  0  0  0  0  0  0  0  0  0 +
+   96:  0  5  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  128:  0  0  0  0  0  0  0  0  0  0  5  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  3  1  0  0  0 +
+  160:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0 +
+  192:  0  0  8  0  2  1  0  0  0  0  1  0  0  0  0  0  0  0  0  0  2  0  0  1  0  0  0  0  0  0  0  0 +
+  224:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  256:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  2  0  0  0  0  0  1  0  0 +
+  288:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  3  0  0  0  0  0  0  0  3  0  3  0  0 +
+  320:  0  0  0  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  352:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  384:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  416:  0  0  0  0  0  0  0  0  0  0  0  0  0  5  0  0  0  0  0  0  2  2  0  0  0  1  2  0  0  0  0  1 +
+  448:  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0 +
+  480:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  512:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  4  0  0  0  0  0  0  0 +
+  544:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  576:  0  0  0  0  0  2  0  0  0  0  0  0  0  0  0  0  3  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  608:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  640:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  672:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  704:  0  0  0  0  0  0  0  3  0  0  0  0  0  0  0  0  0  0  0  0  0  0  2  0  0  0  0  1  0  0  0  0 +
+  736:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1  0 +
+  768:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  800:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  832:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  864:  1  0  0  0  1  0  0  0  0  0  0  7  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  896:  0  0  0  0  0  0  0  0  0  0  0  3  0  0  0  0  0  0  0  0  2  0  0  0  0  0  0  0  0  0  0  0 +
+  928:  0  0  0  0  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  960:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  3  0  0  0  0  0  0  0  0  0  0  0  0 +
+  992:  0  0  2  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1  0  0  0  0 +
+ 1024:  0  0  0  0  0  0  0  1  1  0  0  0  0  0  0  0  0  0  0  3  0  0  0  1  0  0  0  0  0  0  0  0 +
+ 1056:  0  0  0  1  0  0  0  1  0  0  1  0  2  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1 +
+ 1088:  1  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  1  0  3  0 +
+ 1120:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  2  0  0  0  0  0  0  0  0  0  0 +
+ 1152:  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  2  0  0  0 +
+ 1184:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  4  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1216:  0  0  0  0  1  0  2  0  0  0  0  0  0  0  0  2  0  0  0  0  0  0  0  0  0  3  1  0  0  0  0  0 +
+ 1248:  0  0  0  0  0  0  0  4  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1280:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1  0  0  1  0  0  0 +
+ 1312:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1344:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1376:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1408:  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1440:  0  0  3  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1472:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1504:  0  0  0  0  0  0  0  0  2  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1  0  0  0  0 +
+ 1536:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  3  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1568:  0  0  0  0  0  3  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1600:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  3  0  0  0  0  0  0  0 +
+ 1632:  0  0  0  0  0  0  0  0  3  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  3  0  0  0  0  0  0  0 +
+ 1664:  0  0  0  0  0  0  0  0  0  3  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1696:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  2  0  0  0  0  0  0  4  0  0  0  0  0 +
+ 1728:  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1760:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1792:  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1824:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  3 +
+ 1856:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1888:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1920:  0  0  0  0  0  2  0  0  0  0  0  0  0  0  1  0  3  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1952:  0  0  0  0  4  0  0  0  0  0  0  0  0  0  4  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1984:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 2016:  0  0  0  0  4  0  0  0  0  0  0  0  0  0  0  0  2  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 
+(1 row)
+
+select hll_print(hll_add_agg(hll_hash_integer(id), 11, 5, 6)) from t_id2;
+                                               hll_print                                                
+--------------------------------------------------------------------------------------------------------
+ COMPRESSED, 97 filled nregs=2048, nbits=5, expthresh=64, sparseon=1:                                  +
+    0:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+   32:  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  5  0  0  0 +
+   64:  0  0  0  0  0  0  0  3  0  3  0  0  0  0  0  0  0  0  2  0  0  0  1  0  0  0  0  0  0  0  0  0 +
+   96:  0  5  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  128:  0  0  0  0  0  0  0  0  0  0  5  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  3  1  0  0  0 +
+  160:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0 +
+  192:  0  0  8  0  2  1  0  0  0  0  1  0  0  0  0  0  0  0  0  0  2  0  0  1  0  0  0  0  0  0  0  0 +
+  224:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  256:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  2  0  0  0  0  0  1  0  0 +
+  288:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  3  0  0  0  0  0  0  0  3  0  3  0  0 +
+  320:  0  0  0  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  352:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  384:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  416:  0  0  0  0  0  0  0  0  0  0  0  0  0  5  0  0  0  0  0  0  2  2  0  0  0  1  2  0  0  0  0  1 +
+  448:  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0 +
+  480:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  512:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  4  0  0  0  0  0  0  0 +
+  544:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  576:  0  0  0  0  0  2  0  0  0  0  0  0  0  0  0  0  3  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  608:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  640:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  672:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  704:  0  0  0  0  0  0  0  3  0  0  0  0  0  0  0  0  0  0  0  0  0  0  2  0  0  0  0  1  0  0  0  0 +
+  736:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1  0 +
+  768:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  800:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  832:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  864:  1  0  0  0  1  0  0  0  0  0  0  7  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  896:  0  0  0  0  0  0  0  0  0  0  0  3  0  0  0  0  0  0  0  0  2  0  0  0  0  0  0  0  0  0  0  0 +
+  928:  0  0  0  0  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+  960:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  3  0  0  0  0  0  0  0  0  0  0  0  0 +
+  992:  0  0  2  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1  0  0  0  0 +
+ 1024:  0  0  0  0  0  0  0  1  1  0  0  0  0  0  0  0  0  0  0  3  0  0  0  1  0  0  0  0  0  0  0  0 +
+ 1056:  0  0  0  1  0  0  0  1  0  0  1  0  2  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1 +
+ 1088:  1  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  1  0  3  0 +
+ 1120:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  2  0  0  0  0  0  0  0  0  0  0 +
+ 1152:  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  2  0  0  0 +
+ 1184:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  4  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1216:  0  0  0  0  1  0  2  0  0  0  0  0  0  0  0  2  0  0  0  0  0  0  0  0  0  3  1  0  0  0  0  0 +
+ 1248:  0  0  0  0  0  0  0  4  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1280:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1  0  0  1  0  0  0 +
+ 1312:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1344:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1376:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1408:  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1440:  0  0  3  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1472:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1504:  0  0  0  0  0  0  0  0  2  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1  0  0  0  0 +
+ 1536:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  3  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1568:  0  0  0  0  0  3  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1600:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  3  0  0  0  0  0  0  0 +
+ 1632:  0  0  0  0  0  0  0  0  3  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  3  0  0  0  0  0  0  0 +
+ 1664:  0  0  0  0  0  0  0  0  0  3  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1696:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  2  0  0  0  0  0  0  4  0  0  0  0  0 +
+ 1728:  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1760:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1792:  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1824:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  3 +
+ 1856:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1888:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1920:  0  0  0  0  0  2  0  0  0  0  0  0  0  0  1  0  3  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1952:  0  0  0  0  4  0  0  0  0  0  0  0  0  0  4  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 1984:  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 +
+ 2016:  0  0  0  0  4  0  0  0  0  0  0  0  0  0  0  0  2  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0 
+(1 row)
+
+-- test sparseon
+select hll_add(
+       hll_add(
+       hll_add(hll_empty(5,5,-1,1),
+           hll_hash_integer(3,0)),
+           hll_hash_integer(2,0)),
+           hll_hash_integer(1,0));
+ERROR:  log2m = 5 is out of range, it should be in range 10 to 16
+CONTEXT:  referenced column: hll_add
+select hll_add(
+       hll_add(
+       hll_add(hll_empty(5,5,-1,0),
+           hll_hash_integer(3,0)),
+           hll_hash_integer(2,0)),
+           hll_hash_integer(1,0));
+ERROR:  log2m = 5 is out of range, it should be in range 10 to 16
+CONTEXT:  referenced column: hll_add
+-- final clear data
+drop table t_id;
+drop table t_id1;
+drop table t_id2;
+drop table t_data;
+drop table t_a_c_hll;
+drop table t_a_c_hll1;
+drop table t_a_c_hll2;
+drop schema hll_para cascade;
+reset current_schema;

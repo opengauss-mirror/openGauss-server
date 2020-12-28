@@ -76,7 +76,7 @@ inline llvm::Value* getExecContextIndex(JitLlvmCodeGenContext* ctx, JitRangeScan
 }
 
 /*--------------------------- Define LLVM Helper Prototypes  ---------------------------*/
-inline llvm::Constant* defineFunction(llvm::Module* module, llvm::Type* ret_type, const char* name, ...)
+inline llvm::FunctionCallee defineFunction(llvm::Module* module, llvm::Type* ret_type, const char* name, ...)
 {
     va_list vargs;
     va_start(vargs, name);
@@ -635,7 +635,7 @@ inline void DefineGetSubQueryEndIteratorKey(JitLlvmCodeGenContext* ctx, llvm::Mo
 /*--------------------------- End of LLVM Helper Prototypes ---------------------------*/
 
 /*--------------------------- Helpers to generate calls to Helper function via LLVM ---------------------------*/
-inline llvm::Value* AddFunctionCall(JitLlvmCodeGenContext* ctx, llvm::Constant* func, ...)
+inline llvm::Value* AddFunctionCall(JitLlvmCodeGenContext* ctx, llvm::FunctionCallee func, ...)
 {
     va_list vargs;
     va_start(vargs, func);

@@ -55,7 +55,8 @@ enum FileType {
     ORC = 0,
     PARQUET = 1,
     TEXT = 2,
-    CSV = 3
+    CSV = 3,
+    CARBONDATA = 4
 };
 
 namespace reader {
@@ -344,6 +345,16 @@ Reader *createOrcReader(ReaderState *readerState, dfs::DFSConnector *conn, bool 
  * @See also:
  */
 Reader *createParquetReader(ReaderState *readerState, dfs::DFSConnector *conn, bool skipSysCol);
+
+/*
+ * @Description: The factory function to create a reader for Carbondata file.
+ * @IN readerState: the state information for reading
+ * @IN conn: the connector to dfs
+ * @IN skipSysCol: skip reading system columns if true
+ * @Return: the reader pointer
+ * @See also:
+ */
+Reader* createCarbondataReader(ReaderState *readerState, dfs::DFSConnector *conn, bool skipSysCol);
 
 /*
  * @Description: The factory function to create a reader for TEXT file.

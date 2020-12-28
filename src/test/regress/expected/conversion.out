@@ -3,8 +3,8 @@ SET bytea_output TO escape;
 --
 -- create user defined conversion
 --
-CREATE USER conversion_test_user WITH NOCREATEDB NOSYSADMIN PASSWORD 'ttest@123';
-SET SESSION AUTHORIZATION conversion_test_user PASSWORD 'ttest@123';
+CREATE USER conversion_test_user WITH NOCREATEDB NOSYSADMIN PASSWORD 'gauss@123';
+SET SESSION AUTHORIZATION conversion_test_user PASSWORD 'gauss@123';
 CREATE CONVERSION myconv FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8;
 --
 -- cannot make same name conversion in same schema

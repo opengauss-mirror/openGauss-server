@@ -1,7 +1,7 @@
 --
 -- TRIGGERS
 --
-create table pkeys (pkey1 int4 not null, pkey2 text not null) distribute by replication;
+create table pkeys (pkey1 int4 not null, pkey2 text not null);
 alter table pkeys add unique(pkey1, pkey2);
 NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "pkeys_pkey1_pkey2_key" for table "pkeys"
 create table fkeys (fkey1 int4, fkey2 text, fkey3 int);
@@ -156,7 +156,7 @@ create table tttest (
 	price_val	int4,
 	price_on	int4,
 	price_off	int4 default 999999
-) distribute by replication;
+);
 ALTER TABLE tttest ADD PRIMARY KEY(price_id, price_val, price_on, price_off);
 NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "tttest_pkey" for table "tttest"
 create trigger ttdummy
@@ -303,7 +303,7 @@ drop sequence ttdummy_seq;
 -- tests for per-statement triggers
 --
 CREATE TABLE log_table (tstamp timestamp default timeofday()::timestamp);
-CREATE TABLE main_table (a int, b int) distribute by replication;
+CREATE TABLE main_table (a int, b int);
 ALTER TABLE MAIN_TABLE ADD PRIMARY KEY(A, B);
 NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "main_table_pkey" for table "main_table"
 COPY main_table (a,b) FROM stdin;
@@ -339,16 +339,20 @@ UPDATE main_table SET a = a + 2 WHERE b > 100;
 NOTICE:  trigger_func(after_upd_stmt) called: action = UPDATE, when = AFTER, level = STATEMENT
 -- COPY should fire per-row and per-statement INSERT triggers
 COPY main_table (a, b) FROM stdin;
-ERROR:  Don't suppport COPY FROM table with INSERT triggers
-HINT:  You may need drop the INSERT trigger first.
-30	40
-50	60
-\.
-invalid command \.
+NOTICE:  trigger_func(before_ins_stmt) called: action = INSERT, when = BEFORE, level = STATEMENT
+NOTICE:  trigger_func(after_ins_stmt) called: action = INSERT, when = AFTER, level = STATEMENT
 SELECT * FROM main_table ORDER BY a, b;
-ERROR:  syntax error at or near "30"
-LINE 1: 30 40
-        ^
+ a  | b  
+----+----
+  6 | 10
+ 21 | 20
+ 30 | 40
+ 31 | 10
+ 50 | 35
+ 50 | 60
+ 81 | 15
+(7 rows)
+
 --
 -- test triggers with WHEN clause
 --
@@ -370,17 +374,13 @@ NOTICE:  trigger_func(insert_when) called: action = INSERT, when = BEFORE, level
 ERROR:  null value in column "b" violates not-null constraint
 DETAIL:  Failing row contains (123, null).
 COPY main_table FROM stdin;
-ERROR:  Don't suppport COPY FROM table with INSERT triggers
-HINT:  You may need drop the INSERT trigger first.
-123	999
-456	999
-\.
-invalid command \.
+NOTICE:  trigger_func(before_ins_stmt) called: action = INSERT, when = BEFORE, level = STATEMENT
+NOTICE:  trigger_func(insert_when) called: action = INSERT, when = BEFORE, level = STATEMENT
+NOTICE:  trigger_func(insert_a) called: action = INSERT, when = AFTER, level = ROW
+NOTICE:  trigger_func(after_ins_stmt) called: action = INSERT, when = AFTER, level = STATEMENT
 ;
-ERROR:  syntax error at or near "123"
-LINE 1: 123 999
-        ^
 DELETE FROM main_table WHERE a IN (123, 456);
+NOTICE:  trigger_func(delete_a) called: action = DELETE, when = AFTER, level = ROW
 NOTICE:  trigger_func(delete_when) called: action = DELETE, when = AFTER, level = STATEMENT
 UPDATE main_table SET a = 50, b = 60;
 NOTICE:  trigger_func(modified_any) called: action = UPDATE, when = BEFORE, level = ROW
@@ -388,16 +388,20 @@ NOTICE:  trigger_func(modified_a) called: action = UPDATE, when = BEFORE, level 
 NOTICE:  trigger_func(modified_a) called: action = UPDATE, when = BEFORE, level = ROW
 NOTICE:  trigger_func(modified_a) called: action = UPDATE, when = BEFORE, level = ROW
 NOTICE:  trigger_func(modified_a) called: action = UPDATE, when = BEFORE, level = ROW
+NOTICE:  trigger_func(modified_a) called: action = UPDATE, when = BEFORE, level = ROW
+NOTICE:  trigger_func(after_upd_row) called: action = UPDATE, when = AFTER, level = ROW
 NOTICE:  trigger_func(after_upd_stmt) called: action = UPDATE, when = AFTER, level = STATEMENT
 SELECT * FROM main_table ORDER BY a, b;
  a  | b  
 ----+----
   6 | 10
  21 | 20
+ 30 | 40
  31 | 10
  50 | 35
+ 50 | 60
  81 | 15
-(5 rows)
+(7 rows)
 
 SELECT pg_get_triggerdef(oid, true) FROM pg_trigger WHERE tgrelid = 'main_table'::regclass AND tgname = 'modified_a';
                                                              pg_get_triggerdef                                                              
@@ -448,24 +452,16 @@ NOTICE:  trigger_func(before_upd_a_row) called: action = UPDATE, when = BEFORE, 
 NOTICE:  trigger_func(before_upd_a_row) called: action = UPDATE, when = BEFORE, level = ROW
 NOTICE:  trigger_func(before_upd_a_row) called: action = UPDATE, when = BEFORE, level = ROW
 NOTICE:  trigger_func(before_upd_a_row) called: action = UPDATE, when = BEFORE, level = ROW
+NOTICE:  trigger_func(before_upd_a_row) called: action = UPDATE, when = BEFORE, level = ROW
+NOTICE:  trigger_func(before_upd_a_row) called: action = UPDATE, when = BEFORE, level = ROW
 NOTICE:  trigger_func(after_upd_stmt) called: action = UPDATE, when = AFTER, level = STATEMENT
 UPDATE main_table SET b = 10;
-NOTICE:  trigger_func(after_upd_a_b_row) called: action = UPDATE, when = AFTER, level = ROW
-NOTICE:  trigger_func(after_upd_b_row) called: action = UPDATE, when = AFTER, level = ROW
-NOTICE:  trigger_func(after_upd_a_b_row) called: action = UPDATE, when = AFTER, level = ROW
-NOTICE:  trigger_func(after_upd_b_row) called: action = UPDATE, when = AFTER, level = ROW
-NOTICE:  trigger_func(after_upd_a_b_row) called: action = UPDATE, when = AFTER, level = ROW
-NOTICE:  trigger_func(after_upd_b_row) called: action = UPDATE, when = AFTER, level = ROW
-NOTICE:  trigger_func(after_upd_a_b_row) called: action = UPDATE, when = AFTER, level = ROW
-NOTICE:  trigger_func(after_upd_b_row) called: action = UPDATE, when = AFTER, level = ROW
-NOTICE:  trigger_func(after_upd_a_b_row) called: action = UPDATE, when = AFTER, level = ROW
-NOTICE:  trigger_func(after_upd_b_row) called: action = UPDATE, when = AFTER, level = ROW
-NOTICE:  trigger_func(after_upd_b_stmt) called: action = UPDATE, when = AFTER, level = STATEMENT
-NOTICE:  trigger_func(after_upd_stmt) called: action = UPDATE, when = AFTER, level = STATEMENT
+ERROR:  duplicate key value violates unique constraint "main_table_pkey"
+DETAIL:  Key (a, b)=(50, 10) already exists.
 --
 -- Test case for bug with BEFORE trigger followed by AFTER trigger with WHEN
 --
-CREATE TABLE some_t (some_col boolean NOT NULL) distribute by replication;
+CREATE TABLE some_t (some_col boolean NOT NULL);
 ALTER TABLE some_t ADD PRIMARY KEY(some_col);
 NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "some_t_pkey" for table "some_t"
 CREATE FUNCTION dummy_update_func() RETURNS trigger AS $$
@@ -551,7 +547,6 @@ NOTICE:  CREATE TABLE will create implicit sequence "trigtest_i_seq" for serial 
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "trigtest_pkey" for table "trigtest"
 -- test that disabling RI triggers works
 create table trigtest2 (i int references trigtest(i) on delete cascade);
-ERROR:  REFERENCES constraint is not yet supported.
 create function trigtest() returns trigger as $$
 begin
 	raise notice '% % % %', TG_RELNAME, TG_OP, TG_WHEN, TG_LEVEL;
@@ -581,25 +576,23 @@ alter table trigtest enable trigger trigtest_a_stmt_tg;
 insert into trigtest default values;
 NOTICE:  trigtest INSERT AFTER STATEMENT
 insert into trigtest2 values(1);
-ERROR:  relation "trigtest2" does not exist on datanode1
-LINE 1: insert into trigtest2 values(1);
-                    ^
 insert into trigtest2 values(2);
-ERROR:  relation "trigtest2" does not exist on datanode1
-LINE 1: insert into trigtest2 values(2);
-                    ^
 delete from trigtest where i=2;
 NOTICE:  trigtest DELETE AFTER STATEMENT
 select * from trigtest2 order by 1;
-ERROR:  relation "trigtest2" does not exist on datanode1
-LINE 1: select * from trigtest2 order by 1;
-                      ^
+ i 
+---
+ 1
+(1 row)
+
 alter table trigtest disable trigger all;
 delete from trigtest where i=1;
 select * from trigtest2 order by 1;
-ERROR:  relation "trigtest2" does not exist on datanode1
-LINE 1: select * from trigtest2 order by 1;
-                      ^
+ i 
+---
+ 1
+(1 row)
+
 -- ensure we still insert, even when all triggers are disabled
 insert into trigtest default values;
 select *  from trigtest order by 1;
@@ -611,7 +604,6 @@ select *  from trigtest order by 1;
 (3 rows)
 
 drop table trigtest2;
-ERROR:  table "trigtest2" does not exist
 drop table trigtest;
 -- dump trigger data
 CREATE TABLE trigger_test (
@@ -788,7 +780,7 @@ CREATE TABLE serializable_update_tab (
 	id int,
 	filler  text,
 	description text
-) distribute by replication;
+);
 ALTER TABLE serializable_update_tab ADD PRIMARY KEY(id);
 NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "serializable_update_tab_pkey" for table "serializable_update_tab"
 CREATE TRIGGER serializable_update_trig BEFORE UPDATE ON serializable_update_tab
@@ -810,13 +802,13 @@ DROP TABLE serializable_update_tab;
 CREATE TABLE min_updates_test (
 	f1	text,
 	f2 int,
-	f3 int) distribute by replication;
+	f3 int);
 ALTER TABLE min_updates_test ADD PRIMARY KEY(F1, F2);
 NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "min_updates_test_pkey" for table "min_updates_test"
 CREATE TABLE min_updates_test_oids (
 	f1	text,
 	f2 int,
-	f3 int) WITH OIDS distribute by replication;
+	f3 int) WITH OIDS;
 ERROR:  CREATE TABLE ... WITH OIDS is not yet supported.
 ALTER TABLE min_updates_test_oids ADD PRIMARY KEY(F1, F2);
 ERROR:  relation "min_updates_test_oids" does not exist
@@ -1139,7 +1131,7 @@ UPDATE 0
 DELETE FROM main_view WHERE a IN (20,21);
 NOTICE:  main_view BEFORE DELETE STATEMENT (before_view_del_stmt)
 NOTICE:  main_view INSTEAD OF DELETE ROW (instead_of_del)
-NOTICE:  OLD: (21,10)
+NOTICE:  OLD: (21,20)
 NOTICE:  main_view INSTEAD OF DELETE ROW (instead_of_del)
 NOTICE:  OLD: (20,31)
 NOTICE:  main_view INSTEAD OF DELETE ROW (instead_of_del)
@@ -1205,7 +1197,7 @@ CREATE TABLE country_table (
     country_id        serial primary key,
     country_name    text unique not null,
     continent        text not null
-) distribute by replication;
+);
 NOTICE:  CREATE TABLE will create implicit sequence "country_table_country_id_seq" for serial column "country_table.country_id"
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "country_table_pkey" for table "country_table"
 NOTICE:  CREATE TABLE / UNIQUE will create implicit index "country_table_country_name_key" for table "country_table"
@@ -1227,14 +1219,12 @@ CREATE TABLE city_table (
     population    bigint,
     country_id    int references country_table
 );
-ERROR:  REFERENCES constraint is not yet supported.
+NOTICE:  CREATE TABLE will create implicit sequence "city_table_city_id_seq" for serial column "city_table.city_id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "city_table_pkey" for table "city_table"
 CREATE VIEW city_view AS
     SELECT city_id, city_name, population, country_name, continent
     FROM city_table ci
     LEFT JOIN country_table co ON co.country_id = ci.country_id;
-ERROR:  relation "city_table" does not exist on datanode1
-LINE 3:     FROM city_table ci
-                 ^
 CREATE FUNCTION city_insert() RETURNS trigger LANGUAGE plpgsql AS $$
 declare
     ctry_id int;
@@ -1263,7 +1253,6 @@ end;
 $$;
 CREATE TRIGGER city_insert_trig INSTEAD OF INSERT ON city_view
 FOR EACH ROW EXECUTE PROCEDURE city_insert();
-ERROR:  relation "city_view" does not exist
 CREATE FUNCTION city_delete() RETURNS trigger LANGUAGE plpgsql AS $$
 begin
     DELETE FROM city_table WHERE city_id = OLD.city_id;
@@ -1273,7 +1262,6 @@ end;
 $$;
 CREATE TRIGGER city_delete_trig INSTEAD OF DELETE ON city_view
 FOR EACH ROW EXECUTE PROCEDURE city_delete();
-ERROR:  relation "city_view" does not exist
 CREATE FUNCTION city_update() RETURNS trigger LANGUAGE plpgsql AS $$
 declare
     ctry_id int;
@@ -1302,104 +1290,127 @@ end;
 $$;
 CREATE TRIGGER city_update_trig INSTEAD OF UPDATE ON city_view
 FOR EACH ROW EXECUTE PROCEDURE city_update();
-ERROR:  relation "city_view" does not exist
 \set QUIET false
 -- INSERT .. RETURNING
 INSERT INTO city_view(city_name) VALUES('Tokyo') RETURNING *;
-ERROR:  relation "city_view" does not exist on datanode1
-LINE 1: INSERT INTO city_view(city_name) VALUES('Tokyo') RETURNING *...
-                    ^
+ city_id | city_name | population | country_name | continent 
+---------+-----------+------------+--------------+-----------
+       1 | Tokyo     |            |              | 
+(1 row)
+
+INSERT 0 1
 INSERT INTO city_view(city_name, population) VALUES('London', 7556900) RETURNING *;
-ERROR:  relation "city_view" does not exist on datanode1
-LINE 1: INSERT INTO city_view(city_name, population) VALUES('London'...
-                    ^
+ city_id | city_name | population | country_name | continent 
+---------+-----------+------------+--------------+-----------
+       2 | London    |    7556900 |              | 
+(1 row)
+
+INSERT 0 1
 INSERT INTO city_view(city_name, country_name) VALUES('Washington DC', 'USA') RETURNING *;
-ERROR:  relation "city_view" does not exist on datanode1
-LINE 1: INSERT INTO city_view(city_name, country_name) VALUES('Washi...
-                    ^
+ city_id |   city_name   | population | country_name |   continent   
+---------+---------------+------------+--------------+---------------
+       3 | Washington DC |            | USA          | North America
+(1 row)
+
+INSERT 0 1
 INSERT INTO city_view(city_id, city_name) VALUES(123456, 'New York') RETURNING *;
-ERROR:  relation "city_view" does not exist on datanode1
-LINE 1: INSERT INTO city_view(city_id, city_name) VALUES(123456, 'Ne...
-                    ^
+ city_id | city_name | population | country_name | continent 
+---------+-----------+------------+--------------+-----------
+  123456 | New York  |            |              | 
+(1 row)
+
+INSERT 0 1
 INSERT INTO city_view VALUES(234567, 'Birmingham', 1016800, 'UK', 'EU') RETURNING *;
-ERROR:  relation "city_view" does not exist on datanode1
-LINE 1: INSERT INTO city_view VALUES(234567, 'Birmingham', 1016800, ...
-                    ^
+ city_id | city_name  | population | country_name | continent 
+---------+------------+------------+--------------+-----------
+  234567 | Birmingham |    1016800 | UK           | Europe
+(1 row)
+
+INSERT 0 1
 -- UPDATE .. RETURNING
 UPDATE city_view SET country_name = 'Japon' WHERE city_name = 'Tokyo'; -- error
-ERROR:  relation "city_view" does not exist on datanode1
-LINE 1: UPDATE city_view SET country_name = 'Japon' WHERE city_name ...
-               ^
+ERROR:  query returned no rows when process INTO
+CONTEXT:  PL/pgSQL function city_update() line 6 at SQL statement
 UPDATE city_view SET country_name = 'Japan' WHERE city_name = 'Takyo'; -- no match
-ERROR:  relation "city_view" does not exist on datanode1
-LINE 1: UPDATE city_view SET country_name = 'Japan' WHERE city_name ...
-               ^
+UPDATE 0
 UPDATE city_view SET country_name = 'Japan' WHERE city_name = 'Tokyo' RETURNING *; -- OK
-ERROR:  relation "city_view" does not exist on datanode1
-LINE 1: UPDATE city_view SET country_name = 'Japan' WHERE city_name ...
-               ^
+ city_id | city_name | population | country_name | continent 
+---------+-----------+------------+--------------+-----------
+       1 | Tokyo     |            | Japan        | Asia
+(1 row)
+
+UPDATE 1
 UPDATE city_view SET population = 13010279 WHERE city_name = 'Tokyo' RETURNING *;
-ERROR:  relation "city_view" does not exist on datanode1
-LINE 1: UPDATE city_view SET population = 13010279 WHERE city_name =...
-               ^
+ city_id | city_name | population | country_name | continent 
+---------+-----------+------------+--------------+-----------
+       1 | Tokyo     |   13010279 | Japan        | Asia
+(1 row)
+
+UPDATE 1
 UPDATE city_view SET country_name = 'UK' WHERE city_name = 'New York' RETURNING *;
-ERROR:  relation "city_view" does not exist on datanode1
-LINE 1: UPDATE city_view SET country_name = 'UK' WHERE city_name = '...
-               ^
+ city_id | city_name | population | country_name | continent 
+---------+-----------+------------+--------------+-----------
+  123456 | New York  |            | UK           | Europe
+(1 row)
+
+UPDATE 1
 UPDATE city_view SET country_name = 'USA', population = 8391881 WHERE city_name = 'New York' RETURNING *;
-ERROR:  relation "city_view" does not exist on datanode1
-LINE 1: UPDATE city_view SET country_name = 'USA', population = 8391...
-               ^
+ city_id | city_name | population | country_name |   continent   
+---------+-----------+------------+--------------+---------------
+  123456 | New York  |    8391881 | USA          | North America
+(1 row)
+
+UPDATE 1
 UPDATE city_view SET continent = 'EU' WHERE continent = 'Europe' RETURNING *;
-ERROR:  relation "city_view" does not exist on datanode1
-LINE 1: UPDATE city_view SET continent = 'EU' WHERE continent = 'Eur...
-               ^
+ city_id | city_name  | population | country_name | continent 
+---------+------------+------------+--------------+-----------
+  234567 | Birmingham |    1016800 | UK           | Europe
+(1 row)
+
+UPDATE 1
 UPDATE city_view v1 SET country_name = v2.country_name FROM city_view v2
     WHERE v2.city_name = 'Birmingham' AND v1.city_name = 'London' RETURNING *;
-ERROR:  relation "city_view" does not exist on datanode1
-LINE 1: UPDATE city_view v1 SET country_name = v2.country_name FROM ...
-               ^
+ city_id | city_name | population | country_name | continent | city_id | city_name  | population | country_name | continent 
+---------+-----------+------------+--------------+-----------+---------+------------+------------+--------------+-----------
+       2 | London    |    7556900 | UK           | Europe    |  234567 | Birmingham |    1016800 | UK           | Europe
+(1 row)
+
+UPDATE 1
 -- DELETE .. RETURNING
 DELETE FROM city_view WHERE city_name = 'Birmingham' RETURNING *;
-ERROR:  relation "city_view" does not exist on datanode1
-LINE 1: DELETE FROM city_view WHERE city_name = 'Birmingham' RETURNI...
-                    ^
+ city_id | city_name  | population | country_name | continent 
+---------+------------+------------+--------------+-----------
+  234567 | Birmingham |    1016800 | UK           | Europe
+(1 row)
+
+DELETE 1
 \set QUIET true
 -- read-only view with WHERE clause
 CREATE VIEW european_city_view AS
     SELECT * FROM city_view WHERE continent = 'Europe';
-ERROR:  relation "city_view" does not exist on datanode1
-LINE 2:     SELECT * FROM city_view WHERE continent = 'Europe';
-                          ^
 SELECT count(*) FROM european_city_view;
-ERROR:  relation "european_city_view" does not exist on datanode1
-LINE 1: SELECT count(*) FROM european_city_view;
-                             ^
+ count 
+-------
+     1
+(1 row)
+
 CREATE FUNCTION no_op_trig_fn() RETURNS trigger LANGUAGE plpgsql
 AS 'begin RETURN NULL; end';
 CREATE TRIGGER no_op_trig INSTEAD OF INSERT OR UPDATE OR DELETE
 ON european_city_view FOR EACH ROW EXECUTE PROCEDURE no_op_trig_fn();
-ERROR:  relation "european_city_view" does not exist
 \set QUIET false
 INSERT INTO european_city_view VALUES (0, 'x', 10000, 'y', 'z');
-ERROR:  relation "european_city_view" does not exist on datanode1
-LINE 1: INSERT INTO european_city_view VALUES (0, 'x', 10000, 'y', '...
-                    ^
+INSERT 0 0
 UPDATE european_city_view SET population = 10000;
-ERROR:  relation "european_city_view" does not exist on datanode1
-LINE 1: UPDATE european_city_view SET population = 10000;
-               ^
+UPDATE 0
 DELETE FROM european_city_view;
-ERROR:  relation "european_city_view" does not exist on datanode1
-LINE 1: DELETE FROM european_city_view;
-                    ^
+DELETE 0
 \set QUIET true
 -- rules bypassing no-op triggers
 CREATE RULE european_city_insert_rule AS ON INSERT TO european_city_view
 DO INSTEAD INSERT INTO city_view
 VALUES (NEW.city_id, NEW.city_name, NEW.population, NEW.country_name, NEW.continent)
 RETURNING *;
-ERROR:  RULE is not yet supported.
 CREATE RULE european_city_update_rule AS ON UPDATE TO european_city_view
 DO INSTEAD UPDATE city_view SET
     city_name = NEW.city_name,
@@ -1407,41 +1418,47 @@ DO INSTEAD UPDATE city_view SET
     country_name = NEW.country_name
 WHERE city_id = OLD.city_id
 RETURNING NEW.*;
-ERROR:  RULE is not yet supported.
 CREATE RULE european_city_delete_rule AS ON DELETE TO european_city_view
 DO INSTEAD DELETE FROM city_view WHERE city_id = OLD.city_id RETURNING *;
-ERROR:  RULE is not yet supported.
 \set QUIET false
 -- INSERT not limited by view's WHERE clause, but UPDATE AND DELETE are
 INSERT INTO european_city_view(city_name, country_name)
     VALUES ('Cambridge', 'USA') RETURNING *;
-ERROR:  relation "european_city_view" does not exist on datanode1
-LINE 1: INSERT INTO european_city_view(city_name, country_name)
-                    ^
+ city_id | city_name | population | country_name |   continent   
+---------+-----------+------------+--------------+---------------
+       4 | Cambridge |            | USA          | North America
+(1 row)
+
+INSERT 0 1
 UPDATE european_city_view SET country_name = 'UK'
     WHERE city_name = 'Cambridge';
-ERROR:  relation "european_city_view" does not exist on datanode1
-LINE 1: UPDATE european_city_view SET country_name = 'UK'
-               ^
+UPDATE 0
 DELETE FROM european_city_view WHERE city_name = 'Cambridge';
-ERROR:  relation "european_city_view" does not exist on datanode1
-LINE 1: DELETE FROM european_city_view WHERE city_name = 'Cambridge'...
-                    ^
+DELETE 0
 -- UPDATE and DELETE via rule and trigger
 UPDATE city_view SET country_name = 'UK'
     WHERE city_name = 'Cambridge' RETURNING *;
-ERROR:  relation "city_view" does not exist on datanode1
-LINE 1: UPDATE city_view SET country_name = 'UK'
-               ^
+ city_id | city_name | population | country_name | continent 
+---------+-----------+------------+--------------+-----------
+       4 | Cambridge |            | UK           | Europe
+(1 row)
+
+UPDATE 1
 UPDATE european_city_view SET population = 122800
     WHERE city_name = 'Cambridge' RETURNING *;
-ERROR:  relation "european_city_view" does not exist on datanode1
-LINE 1: UPDATE european_city_view SET population = 122800
-               ^
+ city_id | city_name | population | country_name | continent 
+---------+-----------+------------+--------------+-----------
+       4 | Cambridge |     122800 | UK           | Europe
+(1 row)
+
+UPDATE 1
 DELETE FROM european_city_view WHERE city_name = 'Cambridge' RETURNING *;
-ERROR:  relation "european_city_view" does not exist on datanode1
-LINE 1: DELETE FROM european_city_view WHERE city_name = 'Cambridge'...
-                    ^
+ city_id | city_name | population | country_name | continent 
+---------+-----------+------------+--------------+-----------
+       4 | Cambridge |     122800 | UK           | Europe
+(1 row)
+
+DELETE 1
 -- join UPDATE test
 UPDATE city_view v SET population = 599657
     FROM city_table ci, country_table co
@@ -1449,16 +1466,26 @@ UPDATE city_view v SET population = 599657
     AND v.city_id = ci.city_id AND v.country_name = co.country_name
     RETURNING co.country_id, v.country_name,
               v.city_id, v.city_name, v.population;
-ERROR:  relation "city_view" does not exist on datanode1
-LINE 1: UPDATE city_view v SET population = 599657
-               ^
+ country_id | country_name | city_id |   city_name   | population 
+------------+--------------+---------+---------------+------------
+          3 | USA          |       3 | Washington DC |     599657
+(1 row)
+
+UPDATE 1
 \set QUIET true
 SELECT * FROM city_view order by 1;
-ERROR:  relation "city_view" does not exist on datanode1
-LINE 1: SELECT * FROM city_view order by 1;
-                      ^
+ city_id |   city_name   | population | country_name |   continent   
+---------+---------------+------------+--------------+---------------
+       1 | Tokyo         |   13010279 | Japan        | Asia
+       2 | London        |    7556900 | UK           | Europe
+       3 | Washington DC |     599657 | USA          | North America
+  123456 | New York      |    8391881 | USA          | North America
+(4 rows)
+
 DROP TABLE city_table CASCADE;
-ERROR:  table "city_table" does not exist
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to view city_view
+drop cascades to view european_city_view
 DROP TABLE country_table;
 -- Test pg_trigger_depth()
 create table depth_a (id int not null primary key);

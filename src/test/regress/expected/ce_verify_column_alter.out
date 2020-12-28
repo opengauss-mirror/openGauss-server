@@ -1,0 +1,72 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+DROP CLIENT MASTER KEY IF EXISTS MyCMK CASCADE;
+NOTICE:  global setting "mycmk" does not exist
+CREATE CLIENT MASTER KEY MyCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY MyCEK WITH VALUES (CLIENT_MASTER_KEY = MyCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE IF NOT EXISTS t_varchar(id INT);
+ALTER table t_varchar ADD COLUMN name varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC);
+SELECT c.relname, g.column_name from gs_encrypted_columns g join pg_class c on (g.rel_id=c.oid);
+  relname  | column_name 
+-----------+-------------
+ t_varchar | name
+(1 row)
+
+INSERT INTO t_varchar (id, name) VALUES (1, 'MyName');
+SELECT * from t_varchar;
+ id |  name  
+----+--------
+  1 | MyName
+(1 row)
+
+ALTER table t_varchar RENAME COLUMN name TO newname;
+SELECT c.relname, g.column_name from gs_encrypted_columns g join pg_class c on (g.rel_id=c.oid);
+  relname  | column_name 
+-----------+-------------
+ t_varchar | newname
+(1 row)
+
+--verify tablename alter 
+INSERT INTO t_varchar VALUES (2, 'MyNumber');
+SELECT * from t_varchar;
+ id | newname  
+----+----------
+  1 | MyName
+  2 | MyNumber
+(2 rows)
+
+SELECT relname from pg_class join gs_encrypted_columns on pg_class.oid = gs_encrypted_columns.rel_id;
+  relname  
+-----------
+ t_varchar
+(1 row)
+
+ALTER table t_varchar RENAME TO newtable;
+SELECT * FROM newtable;
+ id | newname  
+----+----------
+  1 | MyName
+  2 | MyNumber
+(2 rows)
+
+SELECT relname from pg_class join gs_encrypted_columns on pg_class.oid = gs_encrypted_columns.rel_id;
+ relname  
+----------
+ newtable
+(1 row)
+
+DROP TABLE newtable;
+SELECT column_name from gs_encrypted_columns;
+ column_name 
+-------------
+(0 rows)
+
+DROP COLUMN ENCRYPTION KEY MyCEK;
+DROP CLIENT MASTER KEY MyCMK;
+\! gs_ktool -d all
+DELETE ALL
+ 1

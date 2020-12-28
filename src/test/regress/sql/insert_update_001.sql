@@ -1,3 +1,5 @@
+SET update_process_title to ON;
+show update_process_title;
 DROP SCHEMA test_insert_update_001 CASCADE;
 CREATE SCHEMA test_insert_update_001;
 SET CURRENT_SCHEMA TO test_insert_update_001;

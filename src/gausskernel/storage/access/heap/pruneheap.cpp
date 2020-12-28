@@ -21,10 +21,9 @@
 #include "access/xlog.h"
 #include "miscadmin.h"
 #include "pgstat.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
-#include "utils/tqual.h"
 #include "commands/vacuum.h"
 #include "catalog/catalog.h"
 #include "utils/snapmgr.h"
@@ -47,12 +46,12 @@ typedef struct {
 } PruneState;
 
 /* Local functions */
-static int heap_prune_chain(
-    Relation relation, Buffer buffer, OffsetNumber rootoffnum, TransactionId oldest_xmin, PruneState* prstate);
-static void heap_prune_record_prunable(PruneState* prstate, TransactionId xid);
-static void heap_prune_record_redirect(PruneState* prstate, OffsetNumber offnum, OffsetNumber rdoffnum);
-static void heap_prune_record_dead(PruneState* prstate, OffsetNumber offnum);
-static void heap_prune_record_unused(PruneState* prstate, OffsetNumber offnum);
+static int heap_prune_chain(Relation relation, Buffer buffer, OffsetNumber rootoffnum, TransactionId oldest_xmin,
+                            PruneState *prstate);
+static void heap_prune_record_prunable(PruneState *prstate, TransactionId xid);
+static void heap_prune_record_redirect(PruneState *prstate, OffsetNumber offnum, OffsetNumber rdoffnum);
+static void heap_prune_record_dead(PruneState *prstate, OffsetNumber offnum);
+static void heap_prune_record_unused(PruneState *prstate, OffsetNumber offnum);
 
 /*
  * Optionally prune and repair fragmentation in the specified page.
@@ -160,8 +159,8 @@ void heap_page_prune_opt(Relation relation, Buffer buffer)
  *
  * Returns the number of tuples deleted from the page and sets latestRemovedXid.
  */
-int heap_page_prune(Relation relation, Buffer buffer, TransactionId oldest_xmin, 
-    bool report_stats, TransactionId* latest_removed_xid, bool repair_fragmentation)
+int heap_page_prune(Relation relation, Buffer buffer, TransactionId oldest_xmin, bool report_stats,
+                    TransactionId *latest_removed_xid, bool repair_fragmentation)
 {
     int ndeleted = 0;
     Page page = BufferGetPage(buffer);
@@ -213,14 +212,8 @@ int heap_page_prune(Relation relation, Buffer buffer, TransactionId oldest_xmin,
          * Apply the planned item changes, then repair page fragmentation, and
          * update the page's hint bit about whether it has free line pointers.
          */
-        heap_page_prune_execute(page,
-            prstate.redirected,
-            prstate.nredirected,
-            prstate.nowdead,
-            prstate.ndead,
-            prstate.nowunused,
-            prstate.nunused,
-            repair_fragmentation);
+        heap_page_prune_execute(page, prstate.redirected, prstate.nredirected, prstate.nowdead, prstate.ndead,
+                                prstate.nowunused, prstate.nunused, repair_fragmentation);
 
         /*
          * Update the page's pd_prune_xid field to either zero, or the lowest
@@ -243,16 +236,9 @@ int heap_page_prune(Relation relation, Buffer buffer, TransactionId oldest_xmin,
         if (RelationNeedsWAL(relation)) {
             XLogRecPtr recptr;
 
-            recptr = log_heap_clean(relation,
-                buffer,
-                prstate.redirected,
-                prstate.nredirected,
-                prstate.nowdead,
-                prstate.ndead,
-                prstate.nowunused,
-                prstate.nunused,
-                prstate.latestRemovedXid,
-                repair_fragmentation);
+            recptr = log_heap_clean(relation, buffer, prstate.redirected, prstate.nredirected, prstate.nowdead,
+                                    prstate.ndead, prstate.nowunused, prstate.nunused, prstate.latestRemovedXid,
+                                    repair_fragmentation);
 
             PageSetLSN(BufferGetPage(buffer), recptr);
         }
@@ -332,8 +318,8 @@ int heap_page_prune(Relation relation, Buffer buffer, TransactionId oldest_xmin,
  *
  * Returns the number of tuples (to be) deleted from the page.
  */
-static int heap_prune_chain(
-    Relation relation, Buffer buffer, OffsetNumber rootoffnum, TransactionId oldest_xmin, PruneState* prstate)
+static int heap_prune_chain(Relation relation, Buffer buffer, OffsetNumber rootoffnum, TransactionId oldest_xmin,
+                            PruneState *prstate)
 {
     int ndeleted = 0;
     Page dp = (Page)BufferGetPage(buffer);
@@ -526,8 +512,8 @@ static int heap_prune_chain(
                 break;
 
             default:
-                ereport(ERROR,
-                    (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("unexpected HeapTupleSatisfiesVacuum result")));
+                ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                                errmsg("unexpected HeapTupleSatisfiesVacuum result")));
                 break;
         }
 
@@ -614,7 +600,7 @@ static int heap_prune_chain(
 }
 
 /* Record lowest soon-prunable XID */
-static void heap_prune_record_prunable(PruneState* prstate, TransactionId xid)
+static void heap_prune_record_prunable(PruneState *prstate, TransactionId xid)
 {
     /*
      * This should exactly match the PageSetPrunable macro.  We can't store
@@ -627,7 +613,7 @@ static void heap_prune_record_prunable(PruneState* prstate, TransactionId xid)
 }
 
 /* Record item pointer to be redirected */
-static void heap_prune_record_redirect(PruneState* prstate, OffsetNumber offnum, OffsetNumber rdoffnum)
+static void heap_prune_record_redirect(PruneState *prstate, OffsetNumber offnum, OffsetNumber rdoffnum)
 {
     Assert(prstate->nredirected < MaxHeapTuplesPerPage);
     prstate->redirected[prstate->nredirected * 2] = offnum;
@@ -640,7 +626,7 @@ static void heap_prune_record_redirect(PruneState* prstate, OffsetNumber offnum,
 }
 
 /* Record item pointer to be marked dead */
-static void heap_prune_record_dead(PruneState* prstate, OffsetNumber offnum)
+static void heap_prune_record_dead(PruneState *prstate, OffsetNumber offnum)
 {
     Assert(prstate->ndead < MaxHeapTuplesPerPage);
     prstate->nowdead[prstate->ndead] = offnum;
@@ -650,7 +636,7 @@ static void heap_prune_record_dead(PruneState* prstate, OffsetNumber offnum)
 }
 
 /* Record item pointer to be marked unused */
-static void heap_prune_record_unused(PruneState* prstate, OffsetNumber offnum)
+static void heap_prune_record_unused(PruneState *prstate, OffsetNumber offnum)
 {
     Assert(prstate->nunused < MaxHeapTuplesPerPage);
     prstate->nowunused[prstate->nunused] = offnum;
@@ -674,12 +660,12 @@ static void heap_prune_record_unused(PruneState* prstate, OffsetNumber offnum)
  * holds a pin on the buffer. Once pin is released, a tuple might be pruned
  * and reused by a completely unrelated tuple.
  */
-void heap_get_root_tuples(Page page, OffsetNumber* root_offsets)
+void heap_get_root_tuples(Page page, OffsetNumber *root_offsets)
 {
     OffsetNumber offnum, maxoff;
 
-    errno_t ret = memset_s(
-        root_offsets, MaxHeapTuplesPerPage * sizeof(OffsetNumber), 0, MaxHeapTuplesPerPage * sizeof(OffsetNumber));
+    errno_t ret = memset_s(root_offsets, MaxHeapTuplesPerPage * sizeof(OffsetNumber), 0,
+                           MaxHeapTuplesPerPage * sizeof(OffsetNumber));
     securec_check(ret, "", "");
 
     maxoff = PageGetMaxOffsetNumber(page);
@@ -760,4 +746,3 @@ void heap_get_root_tuples(Page page, OffsetNumber* root_offsets)
         }
     }
 }
-

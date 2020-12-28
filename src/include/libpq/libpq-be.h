@@ -214,10 +214,11 @@ typedef struct StreamBuffer {
     bool PqCommBusy;
 } StreamBuffer;
 
-extern char* sctp_link_addr;
+extern char* tcp_link_addr;
 extern THR_LOCAL ProtocolVersion FrontendProtocol;
 
 /* TCP keepalives configuration. These are no-ops on an AF_UNIX socket. */
+
 extern int pq_getkeepalivesidle(Port* port);
 extern int pq_getkeepalivesinterval(Port* port);
 extern int pq_getkeepalivescount(Port* port);

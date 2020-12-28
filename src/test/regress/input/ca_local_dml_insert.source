@@ -1,0 +1,11 @@
+create table local_row(c1 int, c2 int, c3 int);
+create table local_col(c1 int, c2 int, c3 int) with(orientation=column);
+
+insert into local_row select * from hash_col;
+insert into local_row select * from rep_col;
+
+insert into local_col select * from hash_col;
+insert into local_col select * from rep_col;
+
+drop table local_row;
+drop table local_col;

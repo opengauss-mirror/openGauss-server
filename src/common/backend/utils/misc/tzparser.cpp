@@ -34,15 +34,6 @@
 
 #define WHITESPACE " \t\n\r"
 
-const int OFFSET_BASE = 900;
-const int FOURTEEN_HOURS_POSITIVE = 14 * 60 * 60;
-const int FOURTEEN_HOURS_NEGATIVE = -14 * 60 * 60;
-const int OFFSET_TIMEZONE = 10;
-const int ARRAY_GROWTH_FACTOR = 2;
-const int ARRAY_INIT_SIZE = 128;
-const int INIT_SIZE = 1024;
-const int DEPTH_LIMIT = 3;
-
 static bool validateTzEntry(tzEntry* tzentry);
 static bool splitTzLine(const char* filename, int lineno, char* line, tzEntry* tzentry);
 static int addToArray(tzEntry** base, int* arraysize, int n, tzEntry* entry, bool override);
@@ -70,7 +61,7 @@ static bool validateTzEntry(tzEntry* tzentry)
             tzentry->lineno);
         return false;
     }
-    if (tzentry->offset % OFFSET_BASE != 0) {
+    if (tzentry->offset % 900 != 0) {
         GUC_check_errmsg("time zone offset %d is not a multiple of 900 sec (15 min) in time zone file \"%s\", line %d",
             tzentry->offset,
             tzentry->filename,
@@ -81,7 +72,7 @@ static bool validateTzEntry(tzEntry* tzentry)
     /*
      * Sanity-check the offset: shouldn't exceed 14 hours
      */
-    if (tzentry->offset > FOURTEEN_HOURS_POSITIVE || tzentry->offset < FOURTEEN_HOURS_NEGATIVE) {
+    if (tzentry->offset > 14 * 60 * 60 || tzentry->offset < -14 * 60 * 60) {
         GUC_check_errmsg("time zone offset %d is out of range in time zone file \"%s\", line %d",
             tzentry->offset,
             tzentry->filename,
@@ -125,7 +116,7 @@ static bool splitTzLine(const char* filename, int lineno, char* line, tzEntry* t
         GUC_check_errmsg("missing time zone offset in time zone file \"%s\", line %d", filename, lineno);
         return false;
     }
-    tzentry->offset = (int)strtol(offset, &offset_endptr, 10);
+    tzentry->offset = strtol(offset, &offset_endptr, 10);
     if (offset_endptr == offset || *offset_endptr != '\0') {
         GUC_check_errmsg("invalid number for time zone offset in time zone file \"%s\", line %d", filename, lineno);
         return false;
@@ -182,11 +173,11 @@ static int addToArray(tzEntry** base, int* arraysize, int n, tzEntry* entry, boo
         int cmp;
 
         cmp = strcmp(entry->abbrev, midptr->abbrev);
-        if (cmp < 0) {
+        if (cmp < 0)
             high = mid - 1;
-        } else if (cmp > 0) {
+        else if (cmp > 0)
             low = mid + 1;
-        } else {
+        else {
             /*
              * Found a duplicate entry; complain unless it's the same.
              */
@@ -217,14 +208,13 @@ static int addToArray(tzEntry** base, int* arraysize, int n, tzEntry* entry, boo
      */
     if (n >= *arraysize) {
         *arraysize *= 2;
-        *base = (tzEntry*)repalloc(*base, (size_t)*arraysize * sizeof(tzEntry));
+        *base = (tzEntry*)repalloc(*base, *arraysize * sizeof(tzEntry));
     }
 
     arrayptr = *base + low;
-    uint32 max_array_size = (uint32)(*arraysize * sizeof(tzEntry));
+    uint32 max_array_size = *arraysize * sizeof(tzEntry);
 
-    errno_t rc = memmove_s(arrayptr + 1, (size_t)max_array_size - sizeof(tzEntry), 
-                           arrayptr, (n - low) * sizeof(tzEntry));
+    errno_t rc = memmove_s(arrayptr + 1, max_array_size - sizeof(tzEntry), arrayptr, (n - low) * sizeof(tzEntry));
     securec_check(rc, "\0", "\0");
 
     rc = memcpy_s(arrayptr, max_array_size, entry, sizeof(tzEntry));
@@ -252,7 +242,7 @@ static int ParseTzFile(const char* filename, int depth, tzEntry** base, int* arr
     char share_path[MAXPGPATH];
     char file_path[MAXPGPATH];
     FILE* tzFile = NULL;
-    char tzbuf[INIT_SIZE];
+    char tzbuf[1024];
     char* line = NULL;
     tzEntry tzentry;
     int lineno = 0;
@@ -269,9 +259,8 @@ static int ParseTzFile(const char* filename, int depth, tzEntry** base, int* arr
     for (p = filename; *p; p++) {
         if (!isalpha((unsigned char)*p)) {
             /* at level 0, just use guc.c's regular "invalid value" message */
-            if (depth > 0) {
+            if (depth > 0)
                 GUC_check_errmsg("invalid time zone file name \"%s\"", filename);
-            }
             return -1;
         }
     }
@@ -281,7 +270,7 @@ static int ParseTzFile(const char* filename, int depth, tzEntry** base, int* arr
      * to imagine that someone needs more than 3 levels so stick with this
      * conservative setting until someone complains.
      */
-    if (depth > DEPTH_LIMIT) {
+    if (depth > 3) {
         GUC_check_errmsg("time zone file recursion limit exceeded in file \"%s\"", filename);
         return -1;
     }
@@ -317,9 +306,9 @@ static int ParseTzFile(const char* filename, int depth, tzEntry** base, int* arr
          * otherwise, if file doesn't exist and it's level 0, guc.c's
          * complaint is enough
          */
-        if (errno != ENOENT || depth > 0) {
+        if (errno != ENOENT || depth > 0)
             GUC_check_errmsg("could not read time zone file \"%s\": %m", filename);
-        }
+
         return -1;
     }
 
@@ -377,7 +366,7 @@ static int ParseTzFile(const char* filename, int depth, tzEntry** base, int* arr
             return -1;
     }
 
-    (void)FreeFile(tzFile);
+    FreeFile(tzFile);
 
     return n;
 }
@@ -411,24 +400,23 @@ TimeZoneAbbrevTable* load_tzoffsets(const char* filename)
 
     /* Initialize array at a reasonable size */
     arraysize = 128;
-    array = (tzEntry*)palloc((size_t)arraysize * sizeof(tzEntry));
+    array = (tzEntry*)palloc(arraysize * sizeof(tzEntry));
 
     /* Parse the file(s) */
     n = ParseTzFile(filename, 0, &array, &arraysize, 0);
 
     /* If no errors so far, allocate result and let datetime.c convert data */
     if (n >= 0) {
-        result = (TimeZoneAbbrevTable*)MemoryContextAlloc(
-            u_sess->top_mem_cxt, (size_t)(offsetof(TimeZoneAbbrevTable, abbrevs) + n * sizeof(datetkn)));
-        if (result == NULL) {
+        result = (TimeZoneAbbrevTable*)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR),
+            (offsetof(TimeZoneAbbrevTable, abbrevs) + n * sizeof(datetkn)));
+        if (result == NULL)
             GUC_check_errmsg("out of memory");
-        } else {
+        else
             ConvertTimeZoneAbbrevs(result, array, n);
-        }
     }
 
     /* Clean up */
-    (void)MemoryContextSwitchTo(oldContext);
+    MemoryContextSwitchTo(oldContext);
     MemoryContextDelete(tmpContext);
 
     return result;

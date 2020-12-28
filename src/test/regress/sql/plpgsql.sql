@@ -1814,9 +1814,97 @@ select test_variable_storage();
 -- test foreign key error trapping
 --
 
+create temp table master(f1 int primary key);
+
+create temp table slave(f1 int references master deferrable);
+
+insert into master values(1);
+insert into slave values(1);
+insert into slave values(2);	-- fails
+
+create function trap_foreign_key(int) returns int as $$
+begin
+	begin	-- start a subtransaction
+		insert into slave values($1);
+	exception
+		when foreign_key_violation then
+			raise notice 'caught foreign_key_violation';
+			return 0;
+	end;
+	return 1;
+end$$ language plpgsql;
+
+create function trap_foreign_key_2() returns int as $$
+begin
+	begin	-- start a subtransaction
+		set constraints all immediate;
+	exception
+		when foreign_key_violation then
+			raise notice 'caught foreign_key_violation';
+			return 0;
+	end;
+	return 1;
+end$$ language plpgsql;
+
+select trap_foreign_key(1);
+select trap_foreign_key(2);	-- detects FK violation
+
+start transaction;
+  set constraints all deferred;
+  select trap_foreign_key(2);	-- should not detect FK violation
+  savepoint x;
+    set constraints all immediate; -- fails
+  rollback to x;
+  select trap_foreign_key_2();  -- detects FK violation
+commit;				-- still fails
+
+drop function trap_foreign_key(int);
+drop function trap_foreign_key_2();
+
 --
 -- Test proper snapshot handling in simple expressions
 --
+
+create temp table users(login text, id serial);
+
+create function sp_id_user(a_login text) returns int as $$
+declare x int;
+begin
+  select into x id from users where login = a_login;
+  if found then return x; end if;
+
+exception when no_data_found then
+  return 0;
+end$$ language plpgsql stable;
+
+insert into users values('user1');
+
+select sp_id_user('user1');
+select sp_id_user('userx');
+
+create function sp_add_user(a_login text) returns int as $$
+declare my_id_user int;
+begin
+  my_id_user = sp_id_user( a_login );
+  IF  my_id_user > 0 THEN
+    RETURN -1;  -- error code for existing user
+  END IF;
+  INSERT INTO users ( login ) VALUES ( a_login );
+  my_id_user = sp_id_user( a_login );
+  IF  my_id_user = 0 THEN
+    RETURN -2;  -- error code for insertion failure
+  END IF;
+  RETURN my_id_user;
+end$$ language plpgsql;
+
+select sp_add_user('user1');
+select sp_add_user('user2');
+select sp_add_user('user2');
+select sp_add_user('user3');
+select sp_add_user('user3');
+
+drop function sp_add_user(text);
+drop function sp_id_user(text);
 
 --
 -- tests for refcursors
@@ -2020,7 +2108,7 @@ $$ language plpgsql;
 select raise_test2(10);
 
 -- Test re-RAISE inside a nested exception block.  This case is allowed
--- by A's PL/SQL but was handled differently by PG before 9.1.
+-- by A db's PL/SQL but was handled differently by PG before 9.1.
 /*
 CREATE FUNCTION reraise_test() RETURNS void AS $$
 BEGIN
@@ -3648,6 +3736,26 @@ end$$;
 
 select arrayassign1();
 select arrayassign1(); -- try again to exercise internal caching
+
+create domain orderedarray as int[2]
+  constraint sorted check (value[1] < value[2]);
+
+select '{1,2}'::orderedarray;
+select '{2,1}'::orderedarray;  -- fail
+
+create function testoa(x1 int, x2 int, x3 int) returns orderedarray
+language plpgsql as $$
+declare res orderedarray;
+begin
+  res := array[x1, x2];
+  res[2] := x3;
+  return res;
+end$$;
+
+select testoa(1,2,3);
+select testoa(1,2,3); -- try again to exercise internal caching
+select testoa(2,1,3); -- fail at initial assign
+select testoa(1,2,1); -- fail at update
 
 drop function arrayassign1();
 drop function testoa(x1 int, x2 int, x3 int);

@@ -8,7 +8,7 @@ select count(*) from pg_node_env;
 select count(*) from pg_os_threads;
  count 
 -------
-    13
+    29
 (1 row)
 
 -- test backtrace output to log

@@ -28,9 +28,10 @@
 
 #include "vecexecutor/vectorbatch.h"
 #include "cstore.h"
-#include "storage/cstore_mem_alloc.h"
+#include "storage/cstore/cstore_mem_alloc.h"
 #include "utils/datum.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
+
 
 #define ATT_IS_CHAR_TYPE(atttypid) (atttypid == BPCHAROID || atttypid == VARCHAROID || atttypid == NVARCHAR2OID)
 #define ATT_IS_NUMERIC_TYPE(atttypid) (atttypid == NUMERICOID)
@@ -41,14 +42,27 @@
 
 // CU size always is alligned to ALIGNOF_CU
 //
+
 // ADIO requires minimum CU size of 8192 and 512 block alignment
 #define ALIGNOF_CUSIZE (8192)
+#define ALIGNOF_TIMESERIES_CUSIZE (2)
 
+enum {TS_COLUMN_ID_BASE = 2000};
+
+#define ALLIGN_CUSIZE2(_LEN) TYPEALIGN(2, (_LEN))
 #define ALIGNOF_CUSIZE512(_LEN) TYPEALIGN(512, (_LEN))
 #define ALLIGN_CUSIZE32(_LEN) TYPEALIGN(32, (_LEN))
 #define ALLIGN_CUSIZE(_LEN) TYPEALIGN(ALIGNOF_CUSIZE, (_LEN))
+
 #define ASSERT_CUSIZE(_LEN) \
-    Assert((_LEN) == ALLIGN_CUSIZE(_LEN) || (_LEN) == ALLIGN_CUSIZE32(_LEN) || (_LEN) == ALIGNOF_CUSIZE512(_LEN))
+    Assert((_LEN) == ALLIGN_CUSIZE(_LEN) || (_LEN) == ALLIGN_CUSIZE32(_LEN) \
+    || (_LEN) == ALIGNOF_CUSIZE512(_LEN) || (_LEN) == ALLIGN_CUSIZE2(_LEN))
+
+class CUAlignUtils {
+public:
+    static uint32 AlignCuSize(int len, int align_size);
+    static int GetCuAlignSizeColumnId(int columnId);
+};
 
 #define PADDING_CU(_PTR, _LEN)             \
     do {                                   \
@@ -66,7 +80,7 @@
 #define CU_INFOMASK1 0x00FF
 #define CU_INFOMASK2 0xFF00
 
-// CU_INFOMASK1 is in file storage/cstore_compress.h
+// CU_INFOMASK1 is in file storage/cstore/cstore_compress.h
 // CU_INFOMASK2 is working for the following
 //
 #define CU_DSCALE_NUMERIC 0x0100  // flag for numeric dscale compress
@@ -324,15 +338,15 @@ public:
     // Compress data
     //
     int16 GetCUHeaderSize(void) const;
-    void Compress(int valCount, int16 compress_modes);
+    void Compress(int valCount, int16 compress_modes, int align_size);
     void FillCompressBufHeader(void);
     char* CompressNullBitmapIfNeed(_in_ char* buf);
-    bool CompressData(_out_ char* outBuf, _in_ int nVals, _in_ int16 compressOption);
+    bool CompressData(_out_ char* outBuf, _in_ int nVals, _in_ int16 compressOption, int align_size);
 
     // Uncompress data
     //
-    char* UnCompressHeader(_in_ uint32 magic);
-    void UnCompress(_in_ int rowCount, _in_ uint32 magic);
+    char* UnCompressHeader(_in_ uint32 magic, int align_size);
+    void UnCompress(_in_ int rowCount, _in_ uint32 magic, int align_size);
     char* UnCompressNullBitmapIfNeed(const char* buf, int rowCount);
     void UnCompressData(_in_ char* buf, _in_ int rowCount);
     template <bool DscaleFlag>
@@ -404,6 +418,12 @@ public:
 
     template <bool freeByCUCacheMgr>
     void FreeMem();
+
+    /* timeseries function */
+    void copy_nullbuf_to_cu(const char* bitmap, uint16 null_size);
+    uint32 init_field_mem(const int reserved_cu_byte);
+    uint32 init_time_mem(const int reserved_cu_byte);
+    void check_cu_consistence(const CUDesc* cudesc) const;
 
 private:
     template <bool char_type>

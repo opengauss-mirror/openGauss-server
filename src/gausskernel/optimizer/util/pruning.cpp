@@ -30,62 +30,146 @@
 #include "nodes/relation.h"
 #include "optimizer/clauses.h"
 #include "optimizer/pruning.h"
+#include "optimizer/pruningboundary.h"
 #include "utils/array.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
+#include "utils/syscache.h"
+#include "utils/relcache.h"
 #include "catalog/pg_partition_fn.h"
 
-static PruningResult* partitionPruningWalker(Expr* expr, PruningContext* context);
 static PruningResult* partitionPruningFromBoolExpr(const BoolExpr* expr, PruningContext* context);
 static PruningResult* intersectChildPruningResult(const List* resultList, PruningContext* context);
 static PruningResult* unionChildPruningResult(const List* resultList, PruningContext* context);
-static PruningResult* partitionPruningFromScalarArrayOpExpr(const ScalarArrayOpExpr* arrayExpr, PruningContext* pruningCtx);
+static PruningResult* partitionPruningFromScalarArrayOpExpr
+    (const ScalarArrayOpExpr* arrayExpr, PruningContext* pruningCtx);
 static PruningResult* recordBoundaryFromOpExpr(const OpExpr* expr, PruningContext* context);
 static PruningResult* partitionPruningFromNullTest(NullTest* expr, PruningContext* context);
-
-static void partitionPruningFromBoundary(Relation relation, PruningResult* pruningResult);
-static void partitionFilter(Relation relation, PruningResult* pruningResult);
-static bool partitionShouldEliminated(Relation relation, int partSeq, PruningBoundary* boundary);
-static PartKeyRange* constructPartKeyRange(Relation relation, int partSeq);
-static PruningBoundary* mergeBoundary(Relation relation, PruningBoundary* leftBoundary, PruningBoundary* rightBoundary);
-static void cleanPruningBottom(Relation relation, PartitionIdentifier* bottomSeq, Const* value);
-static void cleanPruningTop(Relation relation, PartitionIdentifier* topSeq, Const* value);
-static void destroyPruningResult(PruningResult* pruningResult);
-static void destroyPruningBoundary(PruningBoundary* boundary);
+static void partitionFilter(PruningContext* context, PruningResult* pruningResult);
+static bool partitionShouldEliminated(PruningContext* context, int partSeq, PruningBoundary* boundary);
+static PartKeyRange* constructPartKeyRange(PruningContext* context, int partSeq);
+static PruningBoundary* mergeBoundary(PruningBoundary* leftBoundary, PruningBoundary* rightBoundary);
+static void cleanPruningBottom(PruningContext* context, PartitionIdentifier* bottomSeq, Const* value);
+static void cleanPruningTop(PruningContext* context, PartitionIdentifier* topSeq, Const* value);
 static void destroyPruningResultList(List* resultList);
-static PruningBoundary* makePruningBoundary(int partKeyNum);
-static PruningBoundary* copyBoundary(PruningBoundary* boundary);
-static void generateListFromPruningBM(PruningResult* result);
+static Node* EvalExprValueWhenPruning(PruningContext* context, Node* node);
+
+static PruningResult* recordEqualFromOpExpr(PartitionType partType,
+    const OpExpr* expr, PruningContext* context);
+static PruningResult* partitionPruningFromBoolExpr(PartitionType partType,
+    const BoolExpr* expr, PruningContext* context);
+static PruningResult* partitionPruningFromNullTest(PartitionType partType,
+    NullTest* expr, PruningContext* context);
+static PruningResult* partitionPruningFromScalarArrayOpExpr(PartitionType partType,
+    const ScalarArrayOpExpr* arrayExpr, PruningContext* pruningCtx);
+static PruningResult* partitionEqualPruningWalker(PartitionType partType, Expr* expr, PruningContext* pruningCtx);
+
+#define NoNeedPruning(pruningResult)                                              \
+    (PruningResultIsFull(pruningResult) || PruningResultIsEmpty(pruningResult) || \
+        !PointerIsValid((pruningResult)->boundary))
+#define IsCleanPruningBottom(bottomSeqPtr, pruningResult, bottomValue)                     \
+    ((pruningResult)->boundary->partitionKeyNum > 1 && PointerIsValid((bottomValue)[0]) && \
+        !(pruningResult)->boundary->minClose[0])
+
+#define IsCleanPruningTop(topSeqPtr, pruningResult, topValue)                                         \
+    ((pruningResult)->boundary->partitionKeyNum > 1 && (topValue) && PointerIsValid((topValue)[0]) && \
+        !(pruningResult)->boundary->maxClose[0])
+
+#define IF_OPEN_PARTITION_PRUNING 0
+
+static PartitionMap* GetRelPartitionMap(Relation relation)
+{
+    return relation->partMap;
+}
+
+ /*
+ * @@GaussDB@@
+ * Brief
+ * Description	:Get Partition Info from expr when Partition Info not in plan.
+ * return value:
+ */
+PruningResult* GetPartitionInfo(PruningResult* result, EState* estate, Relation current_relation)
+{
+    PruningResult* res = NULL;
+    PruningResult* resPartition = NULL;
+    PruningContext context;
+
+    context.pruningType = PruningPartition;
+    context.GetPartitionMap = GetRelPartitionMap;
+    context.root = NULL;
+    context.rte = NULL;
+    context.estate = estate;
+    context.relation = current_relation;
+    
+    res = copyPruningResult(result);
+    if (current_relation->partMap->type == PART_TYPE_LIST || current_relation->partMap->type == PART_TYPE_HASH) {
+        resPartition = partitionEqualPruningWalker(current_relation->partMap->type, res->expr, &context);
+    } else {
+        resPartition = partitionPruningWalker(res->expr, &context);
+    }
+    partitionPruningFromBoundary(&context, resPartition);
+    if (PruningResultIsFull(resPartition) ||
+        (resPartition->bm_rangeSelectedPartitions == NULL && PruningResultIsSubset(resPartition))) {
+        destroyPruningResult(resPartition);
+        resPartition = getFullPruningResult(current_relation);
+        return resPartition;
+    }
+    if (PointerIsValid(resPartition) && !PruningResultIsFull(resPartition))
+        generateListFromPruningBM(resPartition);
+    return resPartition;
+}
 
 PruningResult* getFullPruningResult(Relation relation)
 {
     /* construct PrunningResult */
     PruningResult* pruningRes = NULL;
     RangePartitionMap* rangePartitionMap = NULL;
+    ListPartitionMap* listPartitionMap = NULL;
+    HashPartitionMap* hashPartitionMap = NULL;
     int i = 0;
 
     if (!PointerIsValid(relation) || !PointerIsValid(relation->partMap)) {
         return NULL;
     }
 
-    AssertEreport(relation->partMap->type == PART_TYPE_RANGE || relation->partMap->type == PART_TYPE_INTERVAL,
+    AssertEreport(relation->partMap->type == PART_TYPE_RANGE ||
+        relation->partMap->type == PART_TYPE_LIST ||
+        relation->partMap->type == PART_TYPE_HASH || 
+        relation->partMap->type == PART_TYPE_INTERVAL,
         MOD_OPT,
         "Unexpected partition map type: expecting RANGE or INTERVAL");
-
-    rangePartitionMap = (RangePartitionMap*)relation->partMap;
-
     pruningRes = makeNode(PruningResult);
     pruningRes->state = PRUNING_RESULT_FULL;
+    if (relation->partMap->type == PART_TYPE_RANGE || 
+        relation->partMap->type == PART_TYPE_INTERVAL) {
+        rangePartitionMap = (RangePartitionMap*)relation->partMap;
 
-    /* construct range bitmap */
-    for (i = 0; i < rangePartitionMap->rangeElementsNum; i++) {
-        pruningRes->bm_rangeSelectedPartitions = bms_add_member(pruningRes->bm_rangeSelectedPartitions, i);
-        pruningRes->ls_rangeSelectedPartitions = lappend_int(pruningRes->ls_rangeSelectedPartitions, i);
-    }
-    if (relation->partMap->type != PART_TYPE_INTERVAL) {
-        pruningRes->intervalOffset = 0;
-        pruningRes->intervalSelectedPartitions = NULL;
+
+        /* construct range bitmap */
+        for (i = 0; i < rangePartitionMap->rangeElementsNum; i++) {
+            pruningRes->bm_rangeSelectedPartitions = bms_add_member(pruningRes->bm_rangeSelectedPartitions, i);
+            pruningRes->ls_rangeSelectedPartitions = lappend_int(pruningRes->ls_rangeSelectedPartitions, i);
+        }
+    
+        if (relation->partMap->type != PART_TYPE_INTERVAL) {
+            pruningRes->intervalOffset = 0;
+            pruningRes->intervalSelectedPartitions = NULL;
+        }
+    } else if (relation->partMap->type == PART_TYPE_LIST) {
+        listPartitionMap = (ListPartitionMap*)relation->partMap;
+        
+        for (i = 0; i < listPartitionMap->listElementsNum; i++) {
+            pruningRes->bm_rangeSelectedPartitions = bms_add_member(pruningRes->bm_rangeSelectedPartitions, i);
+            pruningRes->ls_rangeSelectedPartitions = lappend_int(pruningRes->ls_rangeSelectedPartitions, i);
+        }
+    } else if (relation->partMap->type == PART_TYPE_HASH) {
+        hashPartitionMap = (HashPartitionMap*)relation->partMap;
+        
+        for (i = 0; i < hashPartitionMap->hashElementsNum; i++) {
+            pruningRes->bm_rangeSelectedPartitions = bms_add_member(pruningRes->bm_rangeSelectedPartitions, i);
+            pruningRes->ls_rangeSelectedPartitions = lappend_int(pruningRes->ls_rangeSelectedPartitions, i);
+        }
     }
 
     return pruningRes;
@@ -107,12 +191,16 @@ PruningResult* copyPruningResult(PruningResult* srcPruningResult)
         newpruningInfo->intervalOffset = srcPruningResult->intervalOffset;
         newpruningInfo->intervalSelectedPartitions = bms_copy(srcPruningResult->intervalSelectedPartitions);
         newpruningInfo->ls_rangeSelectedPartitions = list_copy(srcPruningResult->ls_rangeSelectedPartitions);
+        newpruningInfo->paramArg = (Param *)copyObject(srcPruningResult->paramArg);
+        newpruningInfo->expr = (Expr *)copyObject(srcPruningResult->expr);
+        newpruningInfo->exprPart = (OpExpr *)copyObject(srcPruningResult->exprPart);
 
         return newpruningInfo;
     } else {
         return NULL;
     }
 }
+
 /*
  * Support partiton index unusable.
  * check if the partition index is unusable.
@@ -125,15 +213,15 @@ bool checkPartitionIndexUnusable(Oid indexOid, int partItrs, PruningResult* prun
     ListCell* cell = NULL;
     List* part_seqs = pruning_result->ls_rangeSelectedPartitions;
 
-    if (PointerIsValid(part_seqs))
-        AssertEreport(
-            partItrs == part_seqs->length, MOD_OPT, "The number of partitions does not match that of pruning result.");
-
+    if (pruning_result->expr == NULL) {
+        if (PointerIsValid(part_seqs))
+            AssertEreport(
+                partItrs == part_seqs->length, MOD_OPT, "The number of partitions does not match that of pruning result.");
+    }
     if (!OidIsValid(indexOid)) {
         ereport(ERROR,
-            (errmodule(MOD_OPT),
-                errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
-                errmsg("invalid index oid to check for unusability")));
+            (errmodule(MOD_OPT), errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+             errmsg("invalid index oid to check for unusability")));
     }
 
     heapRelOid = IndexGetRelation(indexOid, false);
@@ -147,9 +235,11 @@ bool checkPartitionIndexUnusable(Oid indexOid, int partItrs, PruningResult* prun
     }
 
     if (!RelationIsPartitioned(heapRel) || !RelationIsPartitioned(indexRel) ||
-        (heapRel->partMap->type != PART_TYPE_RANGE && heapRel->partMap->type != PART_TYPE_INTERVAL)) {
-        ereport(ERROR,
-            (errmodule(MOD_OPT),
+        (heapRel->partMap->type != PART_TYPE_RANGE &&
+        heapRel->partMap->type != PART_TYPE_INTERVAL &&
+        heapRel->partMap->type != PART_TYPE_LIST &&
+        heapRel->partMap->type != PART_TYPE_HASH)) {
+        ereport(ERROR, (errmodule(MOD_OPT),
                 errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
                 errmsg("relation %s is not partitioned when check partition index", RelationGetRelationName(heapRel))));
     }
@@ -169,17 +259,15 @@ bool checkPartitionIndexUnusable(Oid indexOid, int partItrs, PruningResult* prun
         partitionIndexOidList = PartitionGetPartIndexList(tablepart);
         AssertEreport(PointerIsValid(partitionIndexOidList), MOD_OPT, "");
         if (!PointerIsValid(partitionIndexOidList)) {
-            ereport(ERROR,
-                (errmodule(MOD_OPT),
-                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                        errmsg("no local indexes found for partition %s", PartitionGetPartitionName(tablepart)))));
+            ereport(ERROR, (errmodule(MOD_OPT),
+                    errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                    errmsg("no local indexes found for partition %s", PartitionGetPartitionName(tablepart))));
         }
         indexpartitionid = searchPartitionIndexOid(indexOid, partitionIndexOidList);
         list_free_ext(partitionIndexOidList);
         indexpartition = partitionOpen(indexRel, indexpartitionid, AccessShareLock);
 
         // found a unusable index partition
-        Assert(indexpartition);
         if (!indexpartition->pd_part->indisusable) {
             partitionIndexUnusable = false;
             partitionClose(indexRel, indexpartition, AccessShareLock);
@@ -196,6 +284,21 @@ bool checkPartitionIndexUnusable(Oid indexOid, int partItrs, PruningResult* prun
     relation_close(indexRel, NoLock);
 
     return partitionIndexUnusable;
+}
+
+static IndexesUsableType GetIndexesUsableType(int usable_partition_num, int unusable_partition_num, int iterators)
+{
+    IndexesUsableType ret;
+
+    if (usable_partition_num == iterators) {
+        ret = INDEXES_FULL_USABLE;
+    } else if (usable_partition_num > 0 && unusable_partition_num > 0) {
+        ret = INDEXES_PARTIAL_USABLE;
+    } else {
+        ret = INDEXES_NONE_USABLE;
+    }
+
+    return ret;
 }
 
 /*
@@ -220,12 +323,13 @@ IndexesUsableType eliminate_partition_index_unusable(Oid indexOid, PruningResult
     List* part_seqs = inputPruningResult->ls_rangeSelectedPartitions;
     ListCell* cell = NULL;
 
-    if (PointerIsValid(part_seqs))
-        AssertEreport(part_seqs->length == iterators, MOD_OPT, "");
+    if (inputPruningResult->expr == NULL) {
+        if (PointerIsValid(part_seqs))
+            AssertEreport(part_seqs->length == iterators, MOD_OPT, "");
+    }
     // sanity check
     if (!OidIsValid(indexOid)) {
-        ereport(ERROR,
-            (errmodule(MOD_OPT),
+        ereport(ERROR, (errmodule(MOD_OPT),
                 errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
                 errmsg("invalid index oid to check for unusability")));
     }
@@ -242,10 +346,9 @@ IndexesUsableType eliminate_partition_index_unusable(Oid indexOid, PruningResult
     }
 
     if (!RelationIsPartitioned(heapRel) || !RelationIsPartitioned(indexRel)) {
-        ereport(ERROR,
-            (errmodule(MOD_OPT),
-                (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
-                    errmsg("relation %s is not partitioned", RelationGetRelationName(heapRel)))));
+        ereport(ERROR, (errmodule(MOD_OPT),
+                errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                errmsg("relation %s is not partitioned", RelationGetRelationName(heapRel))));
     }
 
     // first copy out 2 copies
@@ -275,10 +378,9 @@ IndexesUsableType eliminate_partition_index_unusable(Oid indexOid, PruningResult
         partitionIndexOidList = PartitionGetPartIndexList(tablepart);
         AssertEreport(PointerIsValid(partitionIndexOidList), MOD_OPT, "");
         if (!PointerIsValid(partitionIndexOidList)) {
-            ereport(ERROR,
-                (errmodule(MOD_OPT),
-                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                        errmsg("no local indexes found for partition %s", PartitionGetPartitionName(tablepart)))));
+            ereport(ERROR, (errmodule(MOD_OPT),
+                    errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                    errmsg("no local indexes found for partition %s", PartitionGetPartitionName(tablepart))));
         }
         indexpartitionid = searchPartitionIndexOid(indexOid, partitionIndexOidList);
         list_free_ext(partitionIndexOidList);
@@ -310,20 +412,13 @@ IndexesUsableType eliminate_partition_index_unusable(Oid indexOid, PruningResult
     unusable_partition_num = bms_num_members(outIndexUnusable_bm);
     if (usable_partition_num + unusable_partition_num != iterators ||
         bms_overlap(outIndexUsable_bm, outIndexUnusable_bm)) {
-        ereport(ERROR,
-            (errmodule(MOD_OPT),
-                (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
-                    errmsg("bit map error after searching for unusable index partition"))));
+        ereport(ERROR, (errmodule(MOD_OPT),
+                errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                errmsg("bit map error after searching for unusable index partition")));
     }
 
     // set the return value
-    if (usable_partition_num == iterators) {
-        ret = INDEXES_FULL_USABLE;
-    } else if (usable_partition_num > 0 && unusable_partition_num > 0) {
-        ret = INDEXES_PARTIAL_USABLE;
-    } else {
-        ret = INDEXES_NONE_USABLE;
-    }
+    ret = GetIndexesUsableType(usable_partition_num, unusable_partition_num, iterators);
 
     // set back the bit map
     if (usable_partition_num > 0) {
@@ -346,7 +441,7 @@ IndexesUsableType eliminate_partition_index_unusable(Oid indexOid, PruningResult
     return ret;
 }
 
-static void generateListFromPruningBM(PruningResult* result)
+void generateListFromPruningBM(PruningResult* result)
 {
     int partitions = 0;
     int i = 0;
@@ -423,7 +518,6 @@ PruningResult* singlePartitionPruningForRestrictInfo(Oid partitionOid, Relation 
 {
     bool find = false;
     int partitionSeq = 0;
-    RangePartitionMap* rangePartMap = NULL;
     PruningResult* pruningRes = NULL;
     int counter = 0;
 
@@ -433,10 +527,9 @@ PruningResult* singlePartitionPruningForRestrictInfo(Oid partitionOid, Relation 
 
     /* shouldn't happen */
     if (!PointerIsValid(rel->partMap)) {
-        ereport(ERROR,
-            (errmodule(MOD_OPT),
-                (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
-                    errmsg("relation of oid=\"%u\" is not partitioned table", rel->rd_id))));
+        ereport(ERROR, (errmodule(MOD_OPT),
+                errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                errmsg("relation of oid=\"%u\" is not partitioned table", rel->rd_id)));
     }
 
     /*
@@ -451,8 +544,9 @@ PruningResult* singlePartitionPruningForRestrictInfo(Oid partitionOid, Relation 
     pruningRes = makeNode(PruningResult);
     pruningRes->state = PRUNING_RESULT_SUBSET;
 
-    /* it's a pattitioned table without interval */
+    /* it's a pattitioned table without interval*/
     if (rel->partMap->type == PART_TYPE_RANGE || rel->partMap->type == PART_TYPE_INTERVAL) {
+        RangePartitionMap* rangePartMap = NULL;
         rangePartMap = (RangePartitionMap*)rel->partMap;
 
         for (counter = 0; counter < rangePartMap->rangeElementsNum; counter++) {
@@ -464,19 +558,44 @@ PruningResult* singlePartitionPruningForRestrictInfo(Oid partitionOid, Relation 
                 break;
             }
         }
+    } else if (PART_TYPE_LIST == rel->partMap->type) {
+        ListPartitionMap* listPartMap = NULL;
+        listPartMap = (ListPartitionMap*)rel->partMap;
+
+        for (counter = 0; counter < listPartMap->listElementsNum; counter++) {
+            /* the partition is a range partition */
+            if ((listPartMap->listElements + counter)->partitionOid == partitionOid) {
+                find = true;
+                partitionSeq = counter;
+
+                break;
+            }
+        }
+    } else if (PART_TYPE_HASH == rel->partMap->type) {
+        HashPartitionMap* hashPartMap = NULL;
+        hashPartMap = (HashPartitionMap*)rel->partMap;
+
+        for (counter = 0; counter < hashPartMap->hashElementsNum; counter++) {
+            /* the partition is a range partition */
+            if ((hashPartMap->hashElements + counter)->partitionOid == partitionOid) {
+                find = true;
+                partitionSeq = counter;
+
+                break;
+            }
+        }
     } else { /* shouldn't happen */   
         pfree_ext(pruningRes);
-        ereport(
-            ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupport partition type")));
+        ereport(ERROR, (errmodule(MOD_OPT),
+                errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupport partition type")));
     }
 
     /* never happen */
     if (!find) {
         pfree_ext(pruningRes);
-        ereport(ERROR,
-            (errmodule(MOD_OPT),
-                (errcode(ERRCODE_UNDEFINED_TABLE),
-                    errmsg("fail to find partition with oid %u for partitioned table %u", partitionOid, rel->rd_id))));
+        ereport(ERROR, (errmodule(MOD_OPT),
+                errcode(ERRCODE_UNDEFINED_TABLE),
+                errmsg("fail to find partition with oid %u for partitioned table %u", partitionOid, rel->rd_id)));
     }
 
     pruningRes->bm_rangeSelectedPartitions = bms_make_singleton(partitionSeq);
@@ -497,8 +616,7 @@ PruningResult* partitionPruningForExpr(PlannerInfo* root, RangeTblEntry* rte, Re
     PruningResult* result = NULL;
 
     if (!PointerIsValid(rel) || !PointerIsValid(rte) || !PointerIsValid(expr)) {
-        ereport(ERROR,
-            (errmodule(MOD_OPT),
+        ereport(ERROR, (errmodule(MOD_OPT),
                 errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("partitionPruningForExpr: parameter can not be null")));
     }
@@ -506,17 +624,35 @@ PruningResult* partitionPruningForExpr(PlannerInfo* root, RangeTblEntry* rte, Re
     context = (PruningContext*)palloc0(sizeof(PruningContext));
     context->root = root;
     context->relation = rel;
+    context->estate = NULL;
     context->rte = rte;
+    context->GetPartitionMap = GetRelPartitionMap;
+    context->pruningType = PruningPartition;
 
-    result = partitionPruningWalker(expr, context);
-
+    if (rel->partMap != NULL && (rel->partMap->type == PART_TYPE_LIST || rel->partMap->type == PART_TYPE_HASH))
+        result = partitionEqualPruningWalker(rel->partMap->type, expr, context);
+    else
+        result = partitionPruningWalker(expr, context);
+    if (result->exprPart != NULL || result->paramArg != NULL) {
+        if (!IF_OPEN_PARTITION_PRUNING) {
+            destroyPruningResult(result);
+            result = getFullPruningResult(rel);
+            return result;
+        }
+        Param* paramArg = (Param *)copyObject(result->paramArg);
+        destroyPruningResult(result);
+        result = getFullPruningResult(rel);
+        result->expr = expr;
+        result->paramArg = paramArg;
+        return result;
+    }
     /* Never happen, just to be self-contained */
     if (!PointerIsValid(result)) {
-        ereport(ERROR,
-            (errmodule(MOD_OPT), errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("get null for partition pruning")));
+        ereport(ERROR, (errmodule(MOD_OPT),
+                errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("get null for partition pruning")));
     }
 
-    partitionPruningFromBoundary(context->relation, result);
+    partitionPruningFromBoundary(context, result);
     if (PruningResultIsFull(result)) {
         destroyPruningResult(result);
         result = getFullPruningResult(rel);
@@ -538,7 +674,51 @@ PruningResult* partitionPruningForExpr(PlannerInfo* root, RangeTblEntry* rte, Re
  * return value:  true if success, else false.
  *                This function will print log, if failed, however fill the PruningReslut with full set of partitions.
  */
-static PruningResult* partitionPruningWalker(Expr* expr, PruningContext* pruningCtx)
+PruningResult* partitionPruningWalker(Expr* expr, PruningContext* pruningCtx)
+{
+    PruningResult* result = NULL;
+
+    switch (nodeTag(expr)) {
+        case T_BoolExpr: {
+            BoolExpr* boolExpr = NULL;
+            boolExpr = (BoolExpr*)expr;
+            result = partitionPruningFromBoolExpr(boolExpr, pruningCtx);
+        } break;
+        case T_OpExpr: {
+            OpExpr* opExpr = NULL;
+            opExpr = (OpExpr*)expr;
+            result = recordBoundaryFromOpExpr(opExpr, pruningCtx);
+        } break;
+        case T_NullTest: {
+            NullTest* ntExpr = NULL;
+            ntExpr = (NullTest*)expr;
+            result = partitionPruningFromNullTest(ntExpr, pruningCtx);
+        } break;
+        case T_ScalarArrayOpExpr: {
+            ScalarArrayOpExpr* arrayExpr = NULL;
+            arrayExpr = (ScalarArrayOpExpr*)expr;
+            result = partitionPruningFromScalarArrayOpExpr(arrayExpr, pruningCtx);
+        } break;
+        case T_Const: {
+            Const* cst = (Const*)expr;
+            if (BOOLOID == cst->consttype && !cst->constisnull && 0 == cst->constvalue) {
+                result = makeNode(PruningResult);
+                result->state = PRUNING_RESULT_EMPTY;
+            } else {
+                result = makeNode(PruningResult);
+                result->state = PRUNING_RESULT_FULL;
+            }
+        } break;
+        default: {
+            result = makeNode(PruningResult);
+            result->state = PRUNING_RESULT_FULL;
+        } break;
+    }
+
+    return result;
+}
+
+static PruningResult* partitionEqualPruningWalker(PartitionType partType, Expr* expr, PruningContext* pruningCtx)
 {
     PruningResult* result = NULL;
 
@@ -551,24 +731,24 @@ static PruningResult* partitionPruningWalker(Expr* expr, PruningContext* pruning
 
             boolExpr = (BoolExpr*)expr;
 
-            result = partitionPruningFromBoolExpr(boolExpr, pruningCtx);
+            result = partitionPruningFromBoolExpr(partType, boolExpr, pruningCtx);
         } break;
         case T_OpExpr: {
             OpExpr* opExpr = NULL;
 
             opExpr = (OpExpr*)expr;
 
-            result = recordBoundaryFromOpExpr(opExpr, pruningCtx);
+            result = recordEqualFromOpExpr(partType, opExpr, pruningCtx);
         } break;
         case T_NullTest: {
             NullTest* ntExpr = NULL;
             ntExpr = (NullTest*)expr;
-            result = partitionPruningFromNullTest(ntExpr, pruningCtx);
+            result = partitionPruningFromNullTest(partType, ntExpr, pruningCtx);
         } break;
         case T_ScalarArrayOpExpr: {
             ScalarArrayOpExpr* arrayExpr = NULL;
             arrayExpr = (ScalarArrayOpExpr*)expr;
-            result = partitionPruningFromScalarArrayOpExpr(arrayExpr, pruningCtx);
+            result = partitionPruningFromScalarArrayOpExpr(partType, arrayExpr, pruningCtx);
         } break;
         case T_Const: {
             Const* cst = (Const*)expr;
@@ -605,10 +785,9 @@ static PruningResult* partitionPruningFromBoolExpr(const BoolExpr* expr, Pruning
     PruningResult* result = NULL;
     PruningResult* iterator = NULL;
 
-    AssertEreport(PointerIsValid(expr), MOD_OPT, "Pointer expr is NULL.");
-    AssertEreport(PointerIsValid(context), MOD_OPT, "Pointer context is NULL.");
-    AssertEreport(PointerIsValid(context->relation), MOD_OPT, "Pointer context->relation is NULL.");
-    AssertEreport(PointerIsValid(context->rte), MOD_OPT, "Pointer context->rte is NULL.");
+    if (context != NULL) {
+        AssertEreport(PointerIsValid(expr), MOD_OPT, "Pointer expr is NULL.");
+    }
 
     if (expr->boolop == NOT_EXPR) {
         result = makeNode(PruningResult);
@@ -620,6 +799,55 @@ static PruningResult* partitionPruningFromBoolExpr(const BoolExpr* expr, Pruning
         arg = (Expr*)lfirst(cell);
         iterator = partitionPruningWalker(arg, context);
 
+        if (iterator->paramArg != NULL || iterator->exprPart != NULL) {
+            return iterator;
+        }
+        resultList = lappend(resultList, iterator);
+    }
+
+    switch (expr->boolop) {
+        case AND_EXPR:
+            result = intersectChildPruningResult(resultList, context);
+            break;
+        case OR_EXPR:
+            result = unionChildPruningResult(resultList, context);
+            break;
+        case NOT_EXPR:
+        default:
+            break;
+    }
+
+    destroyPruningResultList(resultList);
+
+    return result;
+}
+
+static PruningResult* partitionPruningFromBoolExpr(PartitionType partType, const BoolExpr* expr, 
+                                                           PruningContext* context)
+{
+    Expr* arg = NULL;
+    List* resultList = NULL;
+    ListCell* cell = NULL;
+    PruningResult* result = NULL;
+    PruningResult* iterator = NULL;
+
+    AssertEreport(PointerIsValid(expr), MOD_OPT, "Pointer expr is NULL.");
+    AssertEreport(PointerIsValid(context), MOD_OPT, "Pointer context is NULL.");
+    AssertEreport(PointerIsValid(context->relation), MOD_OPT, "Pointer context->relation is NULL.");
+
+    if (expr->boolop == NOT_EXPR) {
+        result = makeNode(PruningResult);
+        result->state = PRUNING_RESULT_FULL;
+        return result;
+    }
+
+    foreach (cell, expr->args) {
+        arg = (Expr*)lfirst(cell);
+        iterator = partitionEqualPruningWalker(partType, arg, context);
+
+        if (iterator->paramArg != NULL || iterator->exprPart != NULL) {
+            return iterator;
+        }
         resultList = lappend(resultList, iterator);
     }
 
@@ -668,8 +896,7 @@ static PruningResult* partitionPruningFromNullTest(NullTest* expr, PruningContex
     var = (Var*)arg;
 
     /* Var's column MUST belongs to parition key columns */
-    partMap = (RangePartitionMap*)(context->relation->partMap);
-
+    partMap = (RangePartitionMap*)(GetPartitionMap(context));
     partKeyNum = partMap->partitionKey->dim1;
 
     attrOffset = varIsInPartitionKey(var->varattno, partMap->partitionKey, partKeyNum);
@@ -702,6 +929,61 @@ static PruningResult* partitionPruningFromNullTest(NullTest* expr, PruningContex
     return result;
 }
 
+static PruningResult* partitionPruningFromNullTest(PartitionType partType, NullTest* expr, PruningContext* context)
+{
+    PruningResult* result = NULL;
+    int partKeyNum = 0;
+    int partNum = 0;
+    int attrOffset = 0;
+    Expr* arg = NULL;
+    Var* var = NULL;
+
+    AssertEreport(PointerIsValid(expr), MOD_OPT, "Pointer expr is NULL.");
+
+    arg = expr->arg;
+
+    result = makeNode(PruningResult);
+
+    if (T_RelabelType == nodeTag(arg)) {
+        arg = ((RelabelType*)arg)->arg;
+    }
+
+    if (T_Var != nodeTag(arg)) {
+        result->state = PRUNING_RESULT_FULL;
+        return result;
+    }
+
+    var = (Var*)arg;
+
+    /* Var's column MUST belongs to parition key columns */
+    if (partType == PART_TYPE_LIST) {
+        ListPartitionMap* listPartMap = (ListPartitionMap*)(context->relation->partMap);
+        partKeyNum = listPartMap->partitionKey->dim1;
+        partNum = listPartMap->listElementsNum;
+        attrOffset = varIsInPartitionKey(var->varattno, listPartMap->partitionKey, partKeyNum);
+    } else {
+        HashPartitionMap* hashPartMap = (HashPartitionMap*)(context->relation->partMap);
+        partKeyNum = hashPartMap->partitionKey->dim1;
+        partNum = hashPartMap->hashElementsNum;
+        attrOffset = varIsInPartitionKey(var->varattno, hashPartMap->partitionKey, partKeyNum);
+    }
+    if (attrOffset != 0) {
+        result->state = PRUNING_RESULT_FULL;
+        return result;
+    }
+
+    if (expr->nulltesttype != IS_NULL) {
+        result->state = PRUNING_RESULT_FULL;
+        return result;
+    }
+
+    result->state = PRUNING_RESULT_SUBSET;
+
+    result->bm_rangeSelectedPartitions = bms_make_singleton(partNum - 1);
+
+    return result;
+}
+
 static PruningResult* intersectChildPruningResult(const List* resultList, PruningContext* context)
 {
     PruningResult* iteratorResult = NULL;
@@ -710,8 +992,6 @@ static PruningResult* intersectChildPruningResult(const List* resultList, Prunin
     Bitmapset* bmsRange = NULL;
     int intervalOffset = -1;
     ListCell* cell = NULL;
-
-    AssertEreport(PointerIsValid(context), MOD_OPT, "Pointer context is NULL.");
 
     result = makeNode(PruningResult);
 
@@ -735,6 +1015,8 @@ static PruningResult* intersectChildPruningResult(const List* resultList, Prunin
             result->bm_rangeSelectedPartitions = bms_copy(iteratorResult->bm_rangeSelectedPartitions);
             result->intervalSelectedPartitions = bms_copy(iteratorResult->intervalSelectedPartitions);
             result->state = iteratorResult->state;
+            result->paramArg = (Param *)copyObject(iteratorResult->paramArg);
+
         } else if (result != NULL) {
             if (intervalOffset == -1 && iteratorResult->intervalOffset >= 0) {
                 intervalOffset = iteratorResult->intervalOffset;
@@ -742,8 +1024,7 @@ static PruningResult* intersectChildPruningResult(const List* resultList, Prunin
 
             if (intervalOffset >= 0 && iteratorResult->intervalOffset >= 0 &&
                 intervalOffset != iteratorResult->intervalOffset) {
-                ereport(ERROR,
-                    (errmodule(MOD_OPT),
+                ereport(ERROR, (errmodule(MOD_OPT),
                         errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
                         errmsg("For every node in same expression, pruning result's intervalOffset MUST be same")));
             }
@@ -760,7 +1041,7 @@ static PruningResult* intersectChildPruningResult(const List* resultList, Prunin
             if (result->boundary == NULL) {
                 result->boundary = copyBoundary(iteratorResult->boundary);
             } else {
-                tempBoundary = mergeBoundary(context->relation, result->boundary, iteratorResult->boundary);
+                tempBoundary = mergeBoundary(result->boundary, iteratorResult->boundary);
                 destroyPruningBoundary(result->boundary);
                 result->boundary = tempBoundary;
             }
@@ -793,8 +1074,6 @@ static PruningResult* unionChildPruningResult(const List* resultList, PruningCon
     int intervalOffset = -1;
     ListCell* cell = NULL;
 
-    AssertEreport(PointerIsValid(context), MOD_OPT, "Pointer context is NULL.");
-
     result = makeNode(PruningResult);
 
     if (list_length(resultList) == 0) {
@@ -808,11 +1087,11 @@ static PruningResult* unionChildPruningResult(const List* resultList, PruningCon
             continue;
         }
 
-        partitionPruningFromBoundary(context->relation, iteratorResult);
+        partitionPruningFromBoundary(context, iteratorResult);
 
         if (iteratorResult->state == PRUNING_RESULT_EMPTY) {
             continue;
-        } else if (iteratorResult->state == PRUNING_RESULT_FULL) {
+        } else if (iteratorResult->state == PRUNING_RESULT_FULL || iteratorResult->paramArg != NULL) {
             result->state = PRUNING_RESULT_FULL;
             return result;
         } else {
@@ -853,7 +1132,8 @@ static PruningResult* unionChildPruningResult(const List* resultList, PruningCon
     return result;
 }
 
-static PruningResult* partitionPruningFromScalarArrayOpExpr(const ScalarArrayOpExpr* arrayExpr, PruningContext* pruningCtx)
+static PruningResult* partitionPruningFromScalarArrayOpExpr
+    (const ScalarArrayOpExpr* arrayExpr, PruningContext* pruningCtx)
 {
     OpExpr* expr = NULL;
     Expr* larg = NULL;
@@ -903,9 +1183,11 @@ static PruningResult* partitionPruningFromScalarArrayOpExpr(const ScalarArrayOpE
         }
 
         if (arrayExpr->useOr) {
-            result = partitionPruningWalker((Expr*)makeBoolExpr(OR_EXPR, exprList, 0), pruningCtx);
+            result = partitionPruningWalker(
+                (Expr*)makeBoolExpr(OR_EXPR, exprList, 0), pruningCtx);
         } else {
-            result = partitionPruningWalker((Expr*)makeBoolExpr(AND_EXPR, exprList, 0), pruningCtx);
+            result = partitionPruningWalker(
+                (Expr*)makeBoolExpr(AND_EXPR, exprList, 0), pruningCtx);
         }
 
         success = true;
@@ -955,9 +1237,11 @@ static PruningResult* partitionPruningFromScalarArrayOpExpr(const ScalarArrayOpE
             }
 
             if (arrayExpr->useOr) {
-                result = partitionPruningWalker((Expr*)makeBoolExpr(OR_EXPR, exprList, 0), pruningCtx);
+                result = partitionPruningWalker(
+                    (Expr*)makeBoolExpr(OR_EXPR, exprList, 0), pruningCtx);
             } else {
-                result = partitionPruningWalker((Expr*)makeBoolExpr(AND_EXPR, exprList, 0), pruningCtx);
+                result = partitionPruningWalker(
+                    (Expr*)makeBoolExpr(AND_EXPR, exprList, 0), pruningCtx);
             }
             success = true;
         }
@@ -970,6 +1254,143 @@ static PruningResult* partitionPruningFromScalarArrayOpExpr(const ScalarArrayOpE
         result->state = PRUNING_RESULT_FULL;
         return result;
     }
+}
+
+static PruningResult* partitionPruningFromScalarArrayOpExpr(PartitionType partType, const ScalarArrayOpExpr* arrayExpr, 
+                                                                      PruningContext* pruningCtx)
+{
+    OpExpr* expr = NULL;
+    Expr* larg = NULL;
+    Expr* rarg = NULL;
+    List* exprList = NULL;
+    PruningResult* result = NULL;
+    bool success = false;
+
+    AssertEreport(list_length(arrayExpr->args) == 2, MOD_OPT, "Expected two operands but get exception.");
+
+    larg = (Expr*)list_nth(arrayExpr->args, 0);
+    rarg = (Expr*)list_nth(arrayExpr->args, 1);
+
+    if (T_RelabelType == nodeTag(larg)) {
+        larg = ((RelabelType*)larg)->arg;
+    }
+
+    if (T_Var != nodeTag(larg) || (T_ArrayExpr != nodeTag(rarg) && T_Const != nodeTag(rarg))) {
+        result = makeNode(PruningResult);
+        result->state = PRUNING_RESULT_FULL;
+        return result;
+    }
+
+    if (T_ArrayExpr == nodeTag(rarg)) {
+        List* eleList = NULL;
+        ListCell* element = NULL;
+
+        eleList = ((ArrayExpr*)rarg)->elements;
+
+        foreach (element, eleList) {
+            Expr* eleExpr = (Expr*)lfirst(element);
+            List* eleArgs = NULL;
+
+            eleArgs = list_make2(copyObject(larg), copyObject(eleExpr));
+
+            expr = (OpExpr*)makeNode(OpExpr);
+            expr->args = eleArgs;
+            expr->inputcollid = arrayExpr->inputcollid;
+            expr->location = 0;
+            expr->opcollid = arrayExpr->opfuncid;
+            expr->opfuncid = arrayExpr->opfuncid;
+            expr->opno = arrayExpr->opno;
+            expr->opresulttype = BOOLOID;
+            expr->opretset = false;
+
+            exprList = lappend(exprList, expr);
+        }
+
+        if (arrayExpr->useOr) {
+            result = partitionEqualPruningWalker(partType, (Expr*)makeBoolExpr(OR_EXPR, exprList, 0), pruningCtx);
+        } else {
+            result = partitionEqualPruningWalker(partType, (Expr*)makeBoolExpr(AND_EXPR, exprList, 0), pruningCtx);
+        }
+
+        success = true;
+    } else if (T_Const == nodeTag(rarg)) {
+        Const* con = (Const*)rarg;
+        Oid eleType = get_element_type(con->consttype);
+        if (!OidIsValid(eleType))
+            ereport(
+                ERROR, (errmodule(MOD_OPT), (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("invalid type. "))));
+        int16 typlen = get_typlen(eleType);
+        bool typbyval = get_typbyval(eleType);
+
+        /* Cannot be zero for an existing type */
+        AssertEreport(typlen, MOD_OPT, "Unexpected 0 type length.");
+
+        if (type_is_array(con->consttype) && PointerIsValid(con->constvalue) &&
+            ARR_NDIM((ArrayType*)con->constvalue) == 1) {
+            Datum value;
+            bool isnull = false;
+            Const* eleConst = NULL;
+            ArrayType* arrayValue = (ArrayType*)con->constvalue;
+            ArrayIterator itr = array_create_iterator(arrayValue, 0);
+
+            while (array_iterate(itr, &value, &isnull)) {
+                List* eleArgs = NULL;
+
+                eleConst = makeConst(eleType,
+                    con->consttypmod,
+                    con->constcollid,
+                    typlen,
+                    isnull ? PointerGetDatum(NULL) : value,
+                    isnull,
+                    typbyval);
+                eleArgs = list_make2(copyObject(larg), eleConst);
+
+                expr = (OpExpr*)makeNode(OpExpr);
+                expr->args = eleArgs;
+                expr->inputcollid = arrayExpr->inputcollid;
+                expr->location = 0;
+                expr->opcollid = arrayExpr->opfuncid;
+                expr->opfuncid = arrayExpr->opfuncid;
+                expr->opno = arrayExpr->opno;
+                expr->opresulttype = BOOLOID;
+                expr->opretset = false;
+
+                exprList = lappend(exprList, expr);
+            }
+
+            if (arrayExpr->useOr) {
+                result = partitionEqualPruningWalker(partType, (Expr*)makeBoolExpr(OR_EXPR, exprList, 0), pruningCtx);
+            } else {
+                result = partitionEqualPruningWalker(partType, (Expr*)makeBoolExpr(AND_EXPR, exprList, 0), pruningCtx);
+            }
+            success = true;
+        }
+    }
+
+    if (success) {
+        return result;
+    } else {
+        result = makeNode(PruningResult);
+        result->state = PRUNING_RESULT_FULL;
+        return result;
+    }
+}
+
+static Node* EvalExprValueWhenPruning(PruningContext* context, Node* node)
+{
+    Node* result = NULL;
+    switch (context->pruningType) {
+        case PruningPartition:
+            result = estimate_expression_value(context->root, node, context->estate);
+            break;
+        case PruningSlice:
+            result = eval_const_expressions_params(NULL, node, context->boundParams);
+            break;
+        default:
+            Assert(false);
+    }
+    
+    return result;
 }
 
 /*
@@ -987,6 +1408,7 @@ static PruningResult* recordBoundaryFromOpExpr(const OpExpr* expr, PruningContex
     char* opName = NULL;
     Expr* leftArg = NULL;
     Expr* rightArg = NULL;
+
     Const* constArg = NULL;
     Const* constMax = NULL;
     Var* varArg = NULL;
@@ -995,11 +1417,14 @@ static PruningResult* recordBoundaryFromOpExpr(const OpExpr* expr, PruningContex
     PruningResult* result = NULL;
     bool rightArgIsConst = true;
     Node* node = NULL;
+    Param* paramArg = NULL;
+    OpExpr* exprPart = NULL;
 
-    AssertEreport(PointerIsValid(context), MOD_OPT, "Unexpected NULL pointer for context.");
-    AssertEreport(PointerIsValid(context->relation), MOD_OPT, "Unexpected NULL pointer for context->relation.");
-    AssertEreport(
-        PointerIsValid(context->relation->partMap), MOD_OPT, "Unexpected NULL pointer for context->relation->partMap.");
+    if (context != NULL) {
+        AssertEreport(PointerIsValid(context->relation), MOD_OPT, "Unexpected NULL pointer for context->relation.");
+        AssertEreport(PointerIsValid(GetPartitionMap(context)), MOD_OPT, 
+                      "Unexpected NULL pointer for context->relation->partMap.");
+    }
 
     result = makeNode(PruningResult);
 
@@ -1008,6 +1433,7 @@ static PruningResult* recordBoundaryFromOpExpr(const OpExpr* expr, PruningContex
         result->state = PRUNING_RESULT_FULL;
         return result;
     }
+
 
     leftArg = (Expr*)list_nth(expr->args, 0);
     rightArg = (Expr*)list_nth(expr->args, 1);
@@ -1025,46 +1451,94 @@ static PruningResult* recordBoundaryFromOpExpr(const OpExpr* expr, PruningContex
                 (errmsg("Could not find enough valid args for Boundary From OpExpr"))));
 
     if (IsA(leftArg, Var)) {
-        node = estimate_expression_value(context->root, (Node*)rightArg);
-        if (node != NULL)
+        node = EvalExprValueWhenPruning(context, (Node*)rightArg);
+        if (node != NULL) {
             rightArg = (Expr*)node;
+        }
     } else if (IsA(rightArg, Var)) {
-        node = estimate_expression_value(context->root, (Node*)leftArg);
-        if (node != NULL)
+        node = EvalExprValueWhenPruning(context, (Node*)leftArg);
+        if (node != NULL) {
             leftArg = (Expr*)node;
+        }
     }
 
     /* one of args MUST be Const, and another argument Must be Var */
-    if (!((T_Const == nodeTag(leftArg) && T_Var == nodeTag(rightArg)) ||
-            (T_Var == nodeTag(leftArg) && T_Const == nodeTag(rightArg)))) {
+    /* Be const or param, for PBE */
+    if (!(((T_Const == nodeTag(leftArg) || T_Param == nodeTag(leftArg)
+        || T_OpExpr == nodeTag(leftArg)) && T_Var == nodeTag(rightArg)) ||
+        ((T_Const == nodeTag(rightArg) || T_Param == nodeTag(rightArg)
+        || T_OpExpr == nodeTag(rightArg)) && T_Var == nodeTag(leftArg)))) {
         result->state = PRUNING_RESULT_FULL;
         return result;
     }
 
-    if (T_Const == nodeTag(leftArg)) {
-        constArg = (Const*)leftArg;
+    if (T_Var == nodeTag(rightArg)) {
+        if (T_Const == nodeTag(leftArg)) {
+            constArg = (Const*)leftArg;
+        } else if (T_Param == nodeTag(leftArg)) {
+            paramArg = (Param*)leftArg;
+        } else {
+            exprPart = (OpExpr*)leftArg;
+        }
         varArg = (Var*)rightArg;
         rightArgIsConst = false;
     } else {
-        constArg = (Const*)rightArg;
+        if (T_Const == nodeTag(rightArg)) {
+            constArg = (Const*)rightArg;
+        } else if (T_Param == nodeTag(rightArg)) {
+            paramArg = (Param*)rightArg;
+        } else {
+            exprPart = (OpExpr*)rightArg;
+        }
         varArg = (Var*)leftArg;
     }
 
     /* Var MUST represents for current relation */
-    if (context->rte->relid != context->relation->rd_id) {
-        result->state = PRUNING_RESULT_FULL;
-        return result;
+    if (context->pruningType == PruningPartition) {
+        if (context->rte != NULL &&
+            context->rte->relid != context->relation->rd_id) {
+            result->state = PRUNING_RESULT_FULL;
+            return result;
+        }
+    } else {
+        /* list/range distributed table slice pruning */
+        if (varArg->varlevelsup != 0 ||
+            varArg->varno != context->varno ||
+            paramArg != NULL ||
+            exprPart != NULL) {
+            result->state = PRUNING_RESULT_FULL;
+            return result;
+        }
     }
 
     /* Var's column MUST belongs to parition key columns */
-    partMap = (RangePartitionMap*)(context->relation->partMap);
+    partMap = (RangePartitionMap*)(GetPartitionMap(context));
 
     partKeyNum = partMap->partitionKey->dim1;
-
     attrOffset = varIsInPartitionKey(varArg->varattno, partMap->partitionKey, partKeyNum);
     if (attrOffset < 0) {
         result->state = PRUNING_RESULT_FULL;
         return result;
+    }
+ 
+    if (exprPart != NULL) {
+        if (!PartitionMapIsRange(partMap)) {
+            result->state = PRUNING_RESULT_FULL;
+            return result;
+        } else {
+            result->exprPart = exprPart;
+            result->state = PRUNING_RESULT_SUBSET;
+            return result;
+        }
+    } else if (paramArg != NULL) {
+        if (paramArg->paramkind != PARAM_EXTERN || !PartitionMapIsRange(partMap)) {
+            result->state = PRUNING_RESULT_FULL;
+            return result;
+        } else {
+            result->paramArg = paramArg;
+            result->state = PRUNING_RESULT_SUBSET;
+            return result;
+        }
     }
 
     if (constArg->constisnull) {
@@ -1134,6 +1608,178 @@ static PruningResult* recordBoundaryFromOpExpr(const OpExpr* expr, PruningContex
     return result;
 }
 
+static PruningResult* RecordEqualFromOpExprPart(const PartitionType partType, const PruningContext* context, const char* opName,
+                                                       Const* constMax, const Var* varArg, int attrOffset, PruningResult* result, Param* paramArg,
+                                                       OpExpr* exprPart, const Const* constArg, PruningBoundary* boundary)
+{
+    int partKeyNum = 0;
+
+    /* Var's column MUST belongs to parition key columns */
+    if (partType == PART_TYPE_LIST) {
+        ListPartitionMap *partMap = (ListPartitionMap*)(context->relation->partMap);
+        partKeyNum = partMap->partitionKey->dim1;
+        attrOffset = varIsInPartitionKey(varArg->varattno, partMap->partitionKey, partKeyNum);
+    } else if (partType == PART_TYPE_HASH) {
+        HashPartitionMap *partMap = (HashPartitionMap*)(context->relation->partMap);
+        partKeyNum = partMap->partitionKey->dim1;
+        attrOffset = varIsInPartitionKey(varArg->varattno, partMap->partitionKey, partKeyNum);
+    }
+
+    if (attrOffset < 0) {
+        result->state = PRUNING_RESULT_FULL;
+        return result;
+    }
+
+    if (exprPart != NULL) {
+        result->exprPart = exprPart;
+        result->state = PRUNING_RESULT_SUBSET;
+        return result;
+    } else if (paramArg != NULL) {
+        result->paramArg = paramArg;
+        result->state = PRUNING_RESULT_SUBSET;
+        return result;
+    }
+
+    if (constArg->constisnull) {
+        result->state = PRUNING_RESULT_EMPTY;
+        return result;
+    }
+
+    /* initialize PruningBoundary */
+    result->boundary = makePruningBoundary(partKeyNum);
+
+    boundary = result->boundary;
+
+    /* decide the const is the top or bottom of boundary */
+    if (strcmp("=", opName) == 0) {
+        boundary->minClose[attrOffset] = true;
+        boundary->min[attrOffset] = PointerGetDatum(constArg);
+        boundary->maxClose[attrOffset] = true;
+
+        if (constArg->constisnull) {
+            boundary->max[attrOffset] = PointerGetDatum(constMax);
+        } else {
+            boundary->max[attrOffset] = PointerGetDatum(copyObject((void*)constArg));
+        }
+
+        boundary->state = PRUNING_RESULT_SUBSET;
+        result->state = PRUNING_RESULT_SUBSET;
+    } else {
+        boundary->state = PRUNING_RESULT_FULL;
+        result->state = PRUNING_RESULT_FULL;
+    }
+
+    result->intervalOffset = -1;
+
+    return result;
+
+}
+
+static PruningResult* recordEqualFromOpExpr(PartitionType partType, const OpExpr* expr, PruningContext* context)
+{
+    int attrOffset = -1;
+    char* opName = NULL;
+    Expr* leftArg = NULL;
+    Expr* rightArg = NULL;
+    Const* constArg = NULL;
+    Const* constMax = NULL;
+    Var* varArg = NULL;
+    PruningBoundary* boundary = NULL;
+    PruningResult* result = NULL;
+    bool rightArgIsConst = true;
+    Node* node = NULL;
+    Param* paramArg = NULL;
+    OpExpr* exprPart = NULL;
+
+    AssertEreport(PointerIsValid(context), MOD_OPT, "Unexpected NULL pointer for context.");
+    AssertEreport(PointerIsValid(context->relation), MOD_OPT, "Unexpected NULL pointer for context->relation.");
+    AssertEreport(
+        PointerIsValid(context->relation->partMap), MOD_OPT, "Unexpected NULL pointer for context->relation->partMap.");
+
+    result = makeNode(PruningResult);
+
+    /* length of args MUST be 2 */
+    if (!PointerIsValid(expr) || list_length(expr->args) != 2 || !PointerIsValid(opName = get_opname(expr->opno))) {
+        result->state = PRUNING_RESULT_FULL;
+        return result;
+    }
+
+    leftArg = (Expr*)list_nth(expr->args, 0);
+    rightArg = (Expr*)list_nth(expr->args, 1);
+
+    /* In some case, there are several levels of relabel type */
+    while (leftArg && IsA(leftArg, RelabelType))
+        leftArg = ((RelabelType*)leftArg)->arg;
+    while (rightArg && IsA(rightArg, RelabelType))
+        rightArg = ((RelabelType*)rightArg)->arg;
+
+    if (leftArg == NULL || rightArg == NULL)
+        ereport(ERROR,
+            (errmodule(MOD_OPT),
+                errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                (errmsg("Could not find enough valid args for Boundary From OpExpr"))));
+
+    if (IsA(leftArg, Var)) {
+        node = EvalExprValueWhenPruning(context, (Node*)rightArg);
+        if (node != NULL) {
+            rightArg = (Expr*)node;
+        }
+    } else if (IsA(rightArg, Var)) {
+        node = EvalExprValueWhenPruning(context, (Node*)leftArg);
+        if (node != NULL) {
+            leftArg = (Expr*)node;
+        }
+    }
+
+    /* one of args MUST be Const, and another argument Must be Var */
+    if (!(((T_Const == nodeTag(leftArg) || T_Param == nodeTag(leftArg)
+        || T_OpExpr == nodeTag(leftArg)) && T_Var == nodeTag(rightArg)) ||
+        ((T_Const == nodeTag(rightArg) || T_Param == nodeTag(rightArg)
+        || T_OpExpr == nodeTag(rightArg)) && T_Var == nodeTag(leftArg)))) {
+        result->state = PRUNING_RESULT_FULL;
+        return result;
+    }
+
+    if (T_Var == nodeTag(rightArg)) {
+        if (T_Const == nodeTag(leftArg)) {
+            constArg = (Const*)leftArg;
+        } else if (T_Param == nodeTag(leftArg)) {
+            paramArg = (Param*)leftArg;
+        } else {
+            exprPart = (OpExpr*)leftArg;
+        }
+        varArg = (Var*)rightArg;
+        rightArgIsConst = false;
+    } else {
+        if (T_Const == nodeTag(rightArg)) {
+            constArg = (Const*)rightArg;
+        } else if (T_Param == nodeTag(rightArg)) {
+            paramArg = (Param*)rightArg;
+        } else {
+            exprPart = (OpExpr*)rightArg;
+        }
+        varArg = (Var*)leftArg;
+    }
+
+    /* Var MUST represents for current relation */
+    if (context->pruningType == PruningPartition) {
+        if (context->rte != NULL &&
+            context->rte->relid != context->relation->rd_id) {
+            result->state = PRUNING_RESULT_FULL;
+            return result;
+        }
+    } else {
+        /* list/range distributed table slice pruning */
+        if (varArg->varlevelsup != 0 || varArg->varno != context->varno) {
+            result->state = PRUNING_RESULT_FULL;
+            return result;
+        }
+    }
+
+    PruningResult* res = RecordEqualFromOpExprPart(partType, context, opName, constMax, varArg, attrOffset, result, paramArg, exprPart, constArg, boundary);
+    return res;
+}
+
 int varIsInPartitionKey(int attrNo, int2vector* partKeyAttrs, int partKeyNum)
 {
     int i = 0;
@@ -1162,18 +1808,6 @@ int varIsInPartitionKey(int attrNo, int2vector* partKeyAttrs, int partKeyNum)
     return -1;
 }
 
-#define NoNeedPruning(pruningResult)                                              \
-    (PruningResultIsFull(pruningResult) || PruningResultIsEmpty(pruningResult) || \
-        !PointerIsValid((pruningResult)->boundary))
-
-#define IsCleanPruningBottom(bottomSeqPtr, pruningResult, bottomValue)                     \
-    ((pruningResult)->boundary->partitionKeyNum > 1 && PointerIsValid((bottomValue)[0]) && \
-        !(pruningResult)->boundary->minClose[0])
-
-#define IsCleanPruningTop(topSeqPtr, pruningResult, topValue)                                         \
-    ((pruningResult)->boundary->partitionKeyNum > 1 && (topValue) && PointerIsValid((topValue)[0]) && \
-        !(pruningResult)->boundary->maxClose[0])
-
 /*
  * @@GaussDB@@
  * Brief
@@ -1182,7 +1816,21 @@ int varIsInPartitionKey(int attrNo, int2vector* partKeyAttrs, int partKeyNum)
  * return value:  true if success, else false.
  *                if failed, This function will print log.
  */
-static void partitionPruningFromBoundary(Relation relation, PruningResult* pruningResult)
+int getRangeEnd(PruningContext* context)
+{
+    int rangeEnd = -1;
+    PartitionMap* partMap = GetPartitionMap(context);
+    if (partMap->type == PART_TYPE_LIST) {
+        rangeEnd = ((ListPartitionMap*)partMap)->listElementsNum - 1;
+    } else if (partMap->type == PART_TYPE_HASH) {
+        rangeEnd = ((HashPartitionMap*)partMap)->hashElementsNum - 1;
+    } else {
+        rangeEnd = ((RangePartitionMap*)partMap)->rangeElementsNum - 1;
+    }
+    return rangeEnd;
+}
+
+void partitionPruningFromBoundary(PruningContext *context, PruningResult* pruningResult)
 {
     Const** bottomValue = NULL;
     Const** topValue = NULL;
@@ -1192,10 +1840,8 @@ static void partitionPruningFromBoundary(Relation relation, PruningResult* pruni
     int i = 0;
     int compare = 0;
     bool isTopClosed = true;
-    RangePartitionMap* rangeMap = NULL;
 
-    AssertEreport(PointerIsValid(relation), MOD_OPT, "Unexpected NULL pointer for relation.");
-    AssertEreport(PointerIsValid(relation->partMap), MOD_OPT, "Unexpected NULL pointer for relation->partMap.");
+    AssertEreport(PointerIsValid(context), MOD_OPT, "Unexpected NULL pointer for context.");
     AssertEreport(PointerIsValid(pruningResult), MOD_OPT, "Unexpected NULL pointer for pruningResult.");
 
     if (NoNeedPruning(pruningResult)) {
@@ -1223,20 +1869,30 @@ static void partitionPruningFromBoundary(Relation relation, PruningResult* pruni
 
     // compare the bottom and the intervalMax, if the bottom is large than or equal than intervalMax, pruning result is
     // empty.
-    partitionRoutingForValueRange(
-        relation, bottomValue, pruningResult->boundary->partitionKeyNum, true, true, u_sess->opt_cxt.bottom_seq);
-    if (IsCleanPruningBottom(u_sess->opt_cxt.bottom_seq, pruningResult, bottomValue)) {
-        cleanPruningBottom(relation, u_sess->opt_cxt.bottom_seq, bottomValue[0]);
-    }
+    if ((context->pruningType == PruningPartition) && (
+        (GetPartitionMap(context))->type == PART_TYPE_LIST ||
+        (GetPartitionMap(context))->type == PART_TYPE_HASH)) {
+        partitionRoutingForValueEqual(
+            context->relation, bottomValue, pruningResult->boundary->partitionKeyNum, true, u_sess->opt_cxt.bottom_seq);
+        u_sess->opt_cxt.top_seq->partArea = u_sess->opt_cxt.bottom_seq->partArea;
+        u_sess->opt_cxt.top_seq->partitionId =  u_sess->opt_cxt.bottom_seq->partitionId;
+        u_sess->opt_cxt.top_seq->fileExist = u_sess->opt_cxt.bottom_seq->fileExist;
+        u_sess->opt_cxt.top_seq->partSeq = u_sess->opt_cxt.bottom_seq->partSeq;
+    } else {
+        partitionRoutingForValueRange(
+            context, bottomValue, pruningResult->boundary->partitionKeyNum, true, true, u_sess->opt_cxt.bottom_seq);
+        if (IsCleanPruningBottom(u_sess->opt_cxt.bottom_seq, pruningResult, bottomValue)) {
+            cleanPruningBottom(context, u_sess->opt_cxt.bottom_seq, bottomValue[0]);
+        }
 
-    partitionRoutingForValueRange(
-        relation, topValue, pruningResult->boundary->partitionKeyNum, isTopClosed, false, u_sess->opt_cxt.top_seq);
-    if (IsCleanPruningTop(u_sess->opt_cxt.top_seq, pruningResult, topValue)) {
-        cleanPruningTop(relation, u_sess->opt_cxt.top_seq, topValue[0]);
+        partitionRoutingForValueRange(
+            context, topValue, pruningResult->boundary->partitionKeyNum, isTopClosed, false, u_sess->opt_cxt.top_seq);
+        if (IsCleanPruningTop(u_sess->opt_cxt.top_seq, pruningResult, topValue)) {
+            cleanPruningTop(context, u_sess->opt_cxt.top_seq, topValue[0]);
+        }
     }
-    rangeMap = (RangePartitionMap*)relation->partMap;
-
-    rangeEnd = rangeMap->rangeElementsNum - 1;
+    
+    rangeEnd = getRangeEnd(context);
 
     if (!PartitionLogicalExist(u_sess->opt_cxt.bottom_seq) && !PartitionLogicalExist(u_sess->opt_cxt.top_seq)) {
         /* pruning failed or result contains all partition */
@@ -1266,7 +1922,7 @@ static void partitionPruningFromBoundary(Relation relation, PruningResult* pruni
             pruningResult->bm_rangeSelectedPartitions = rangeBms;
         }
     }
-    partitionFilter(relation, pruningResult);
+    partitionFilter(context, pruningResult);
 
     if (pruningResult->boundary) {
         destroyPruningBoundary(pruningResult->boundary);
@@ -1277,15 +1933,25 @@ static void partitionPruningFromBoundary(Relation relation, PruningResult* pruni
 /************************************************************************************
  *        pruning for multi-column partition key
  ************************************************************************************/
-static void partitionFilter(Relation relation, PruningResult* pruningResult)
+static void partitionFilter(PruningContext* context, PruningResult* pruningResult)
 {
     Bitmapset* resourceBms = NULL;
     Bitmapset* result = NULL;
 
-    if (!RELATION_IS_PARTITIONED(relation) || !PartitionMapIsRange(relation->partMap) ||
-        pruningResult->boundary->partitionKeyNum == 1) {
-        return;
+    if (context->pruningType == PruningPartition) {
+        /* partition pruning */
+        if (!RELATION_IS_PARTITIONED(context->relation) || !PartitionMapIsRange(GetPartitionMap(context)) ||
+            pruningResult->boundary->partitionKeyNum == 1) {
+            return;
+        }
+    } else {
+        /* slice pruning */
+        if (!PartitionMapIsRange(GetPartitionMap(context)) ||
+            pruningResult->boundary->partitionKeyNum == 1) {
+            return;
+        }
     }
+    
 
     if (bms_is_empty(pruningResult->bm_rangeSelectedPartitions)) {
         return;
@@ -1301,7 +1967,7 @@ static void partitionFilter(Relation relation, PruningResult* pruningResult)
             break;
         }
 
-        if (!partitionShouldEliminated(relation, curPart, pruningResult->boundary)) {
+        if (!partitionShouldEliminated(context, curPart, pruningResult->boundary)) {
             result = bms_add_member(result, curPart);
         }
     }
@@ -1320,22 +1986,13 @@ static void partitionFilter(Relation relation, PruningResult* pruningResult)
 #define CONSTISMIN(value) ((value) == NULL || (value)->constisnull)
 #define CONSTISMAX(value) ((value) != NULL && (value)->ismaxvalue)
 
-static bool partitionShouldEliminated(Relation relation, int partSeq, PruningBoundary* boundary)
+static bool partitionShouldEliminated(PruningContext* context, int partSeq, PruningBoundary* boundary)
 {
     int i = 0;
     PartKeyRange* partRange = NULL;
     bool isSelected = true;
 
-    AssertEreport(
-        RELATION_IS_PARTITIONED(relation), MOD_OPT, "Expected the relation to be partitioned, run into exception.");
-    AssertEreport(PartitionMapIsRange(relation->partMap),
-        MOD_OPT,
-        "Expected the partition map type to be range type, run into exception.");
-    AssertEreport(boundary->partitionKeyNum > 1,
-        MOD_OPT,
-        "Expected the the number of partition key to be >1, run into exception.");
-
-    partRange = constructPartKeyRange(relation, partSeq);
+    partRange = constructPartKeyRange(context, partSeq);
     if (!PointerIsValid(partRange)) {
         return false;
     }
@@ -1434,7 +2091,7 @@ static bool partitionShouldEliminated(Relation relation, int partSeq, PruningBou
     return !isSelected;
 }
 
-static PartKeyRange* constructPartKeyRange(Relation relation, int partSeq)
+static PartKeyRange* constructPartKeyRange(PruningContext* context, int partSeq)
 {
     RangeElement* prePartition = NULL;
     RangeElement* nextPartition = NULL;
@@ -1445,14 +2102,9 @@ static PartKeyRange* constructPartKeyRange(Relation relation, int partSeq)
     int i = 0;
     int partKeyNum = 0;
 
-    AssertEreport(RELATION_IS_PARTITIONED(relation), MOD_OPT, "Expected partitioned relation, run into exception.");
-    AssertEreport(PartitionMapIsRange(relation->partMap),
-        MOD_OPT,
-        "Expected partition map to be range type, run into exception.");
-
     result = (PartKeyRange*)palloc0(sizeof(PartKeyRange));
 
-    partMap = (RangePartitionMap*)relation->partMap;
+    partMap = (RangePartitionMap*)GetPartitionMap(context);
     partKeyNum = partMap->partitionKey->dim1;
 
     nextPartition = &(partMap->rangeElements[partSeq]);
@@ -1546,7 +2198,7 @@ static PartKeyRange* constructPartKeyRange(Relation relation, int partSeq)
     return result;
 }
 
-static PruningBoundary* mergeBoundary(Relation relation, PruningBoundary* leftBoundary, PruningBoundary* rightBoundary)
+static PruningBoundary* mergeBoundary(PruningBoundary* leftBoundary, PruningBoundary* rightBoundary)
 {
     int i = 0;
     PruningBoundary* result = NULL;
@@ -1657,18 +2309,18 @@ static PruningBoundary* mergeBoundary(Relation relation, PruningBoundary* leftBo
     return result;
 }
 
-static void cleanPruningBottom(Relation relation, PartitionIdentifier* bottomSeq, Const* value)
+static void cleanPruningBottom(PruningContext *context, PartitionIdentifier* bottomSeq, Const* value)
 {
     int i = 0;
     RangePartitionMap* partMap = NULL;
 
-    if (bottomSeq->partSeq < 0 || bottomSeq->partSeq >= ((RangePartitionMap*)relation->partMap)->rangeElementsNum ||
+    if (bottomSeq->partSeq < 0 || bottomSeq->partSeq >= ((RangePartitionMap*)GetPartitionMap(context))->rangeElementsNum ||
         value == NULL) {
         return;
     }
 
-    incre_partmap_refcount(relation->partMap);
-    partMap = (RangePartitionMap*)(relation->partMap);
+    incre_partmap_refcount(GetPartitionMap(context));
+    partMap = (RangePartitionMap*)(GetPartitionMap(context));
 
     for (i = bottomSeq->partSeq; i < partMap->rangeElementsNum; i++) {
         RangeElement* range = partMap->rangeElements + i;
@@ -1687,21 +2339,21 @@ static void cleanPruningBottom(Relation relation, PartitionIdentifier* bottomSeq
     }
 
     bottomSeq->partSeq = i;
-    decre_partmap_refcount(relation->partMap);
+    decre_partmap_refcount(GetPartitionMap(context));
 }
 
-static void cleanPruningTop(Relation relation, PartitionIdentifier* topSeq, Const* value)
+static void cleanPruningTop(PruningContext *context, PartitionIdentifier* topSeq, Const* value)
 {
     int i = 0;
     RangePartitionMap* partMap = NULL;
 
-    if (topSeq->partSeq < 0 || topSeq->partSeq >= ((RangePartitionMap*)relation->partMap)->rangeElementsNum ||
+    if (topSeq->partSeq < 0 || topSeq->partSeq >= ((RangePartitionMap*)GetPartitionMap(context))->rangeElementsNum ||
         value == NULL) {
         return;
     }
 
-    incre_partmap_refcount(relation->partMap);
-    partMap = (RangePartitionMap*)(relation->partMap);
+    incre_partmap_refcount(GetPartitionMap(context));
+    partMap = (RangePartitionMap*)(GetPartitionMap(context));
 
     for (i = topSeq->partSeq; i >= 0; i--) {
         RangeElement* range = partMap->rangeElements + i;
@@ -1720,10 +2372,10 @@ static void cleanPruningTop(Relation relation, PartitionIdentifier* topSeq, Cons
     }
 
     topSeq->partSeq = i;
-    decre_partmap_refcount(relation->partMap);
+    decre_partmap_refcount(GetPartitionMap(context));
 }
 
-static void destroyPruningResult(PruningResult* pruningResult)
+void destroyPruningResult(PruningResult* pruningResult)
 {
     if (!PointerIsValid(pruningResult)) {
         return;
@@ -1748,86 +2400,20 @@ static void destroyPruningResult(PruningResult* pruningResult)
         list_free_ext(pruningResult->ls_rangeSelectedPartitions);
         pruningResult->ls_rangeSelectedPartitions = NIL;
     }
+    if (PointerIsValid(pruningResult->expr)) {
+        pfree(pruningResult->expr);
+        pruningResult->expr = NULL;
+    }
+    if (PointerIsValid(pruningResult->exprPart)) {
+        pfree(pruningResult->exprPart);
+        pruningResult->exprPart = NULL;
+    }
+    if (PointerIsValid(pruningResult->paramArg)) {
+        pfree(pruningResult->paramArg);
+        pruningResult->paramArg = NULL;
+    }
 
     pfree_ext(pruningResult);
-}
-
-static void destroyPruningBoundary(PruningBoundary* boundary)
-{
-    int i = 0;
-    Const* tempConst = NULL;
-
-    if (!PointerIsValid(boundary)) {
-        return;
-    }
-
-    for (; i < boundary->partitionKeyNum; i++) {
-        tempConst = (Const*)DatumGetPointer(boundary->max[i]);
-        if (tempConst != NULL) {
-            pfree_ext(tempConst);
-        }
-
-        tempConst = (Const*)DatumGetPointer(boundary->min[i]);
-        if (tempConst != NULL) {
-            pfree_ext(tempConst);
-        }
-    }
-
-    pfree_ext(boundary);
-    return;
-}
-
-static PruningBoundary* makePruningBoundary(int partKeyNum)
-{
-    PruningBoundary* boundary = NULL;
-
-    AssertEreport(partKeyNum > 0, MOD_OPT, "Expected positive number of partion key, run into exception.");
-
-    boundary = (PruningBoundary*)palloc0(sizeof(PruningBoundary));
-
-    boundary->partitionKeyNum = partKeyNum;
-
-    boundary->max = (Datum*)palloc0(partKeyNum * sizeof(Datum));
-
-    boundary->maxClose = (bool*)palloc0(partKeyNum * sizeof(bool));
-
-    boundary->min = (Datum*)palloc0(partKeyNum * sizeof(Datum));
-
-    boundary->minClose = (bool*)palloc0(partKeyNum * sizeof(bool));
-
-    boundary->state = PRUNING_RESULT_FULL;
-
-    return boundary;
-}
-
-static PruningBoundary* copyBoundary(PruningBoundary* boundary)
-{
-    PruningBoundary* result = NULL;
-    int i = 0;
-    Const* tempConst = NULL;
-
-    if (!PointerIsValid(boundary)) {
-        return NULL;
-    }
-
-    result = makePruningBoundary(boundary->partitionKeyNum);
-
-    result->state = boundary->state;
-
-    for (; i < result->partitionKeyNum; i++) {
-        result->maxClose[i] = boundary->maxClose[i];
-        result->minClose[i] = boundary->minClose[i];
-
-        tempConst = (Const*)DatumGetPointer(boundary->max[i]);
-        tempConst = (Const*)copyObject(tempConst);
-        result->max[i] = PointerGetDatum(tempConst);
-
-        tempConst = (Const*)DatumGetPointer(boundary->min[i]);
-        tempConst = (Const*)copyObject(tempConst);
-        result->min[i] = PointerGetDatum(tempConst);
-    }
-
-    return result;
 }
 
 static void destroyPruningResultList(List* resultList)
@@ -1859,7 +2445,6 @@ Oid getPartitionOidFromSequence(Relation relation, int partSeq)
     Oid result = InvalidOid;
     AssertEreport(PointerIsValid(relation), MOD_OPT, "Unexpected NULL pointer for relation.");
     AssertEreport(PointerIsValid(relation->partMap), MOD_OPT, "Unexpected NULL pointer for relation->partMap.");
-
     if (relation->partMap->type == PART_TYPE_RANGE || relation->partMap->type == PART_TYPE_INTERVAL) {
         int rangeElementsNum = ((RangePartitionMap*)(relation->partMap))->rangeElementsNum;
         if (partSeq < rangeElementsNum) {
@@ -1878,11 +2463,82 @@ Oid getPartitionOidFromSequence(Relation relation, int partSeq)
                 (errcode(ERRCODE_DUPLICATE_OBJECT),
                     errmsg("Duplicate range partition map oids: %u, please try again.", result)));
         }
+    } else if (PART_TYPE_LIST == relation->partMap->type) {
+        int listElementsNum = ((ListPartitionMap*)(relation->partMap))->listElementsNum;
+        if (partSeq < listElementsNum) {
+            result = ((ListPartitionMap*)(relation->partMap))->listElements[partSeq].partitionOid;
+        } else {
+            ereport(ERROR,
+                (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+                    errmsg("partSeq: %d out range of current relation partMap element num: %d.",
+                        partSeq,
+                        listElementsNum)));
+        }
+        /* do simple check, as rangeElements already be sorted */
+        if (partSeq > 0 &&
+            result == ((ListPartitionMap*)(relation->partMap))->listElements[partSeq - 1].partitionOid) {
+            ereport(ERROR,
+                (errcode(ERRCODE_DUPLICATE_OBJECT),
+                    errmsg("Duplicate range partition map oids: %u, please try again.", result)));
+        }        
+    } else if (PART_TYPE_HASH == relation->partMap->type) {
+        int hashElementsNum = ((HashPartitionMap*)(relation->partMap))->hashElementsNum;
+        if (partSeq < hashElementsNum) {
+            result = ((HashPartitionMap*)(relation->partMap))->hashElements[partSeq].partitionOid;
+        } else {
+            ereport(ERROR,
+                (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+                    errmsg("partSeq: %d out range of current relation partMap element num: %d.",
+                        partSeq,
+                        hashElementsNum)));
+        }
+        /* do simple check, as rangeElements already be sorted */
+        if (partSeq > 0 &&
+            result == ((HashPartitionMap*)(relation->partMap))->hashElements[partSeq - 1].partitionOid) {
+            ereport(ERROR,
+                (errcode(ERRCODE_DUPLICATE_OBJECT),
+                    errmsg("Duplicate range partition map oids: %u, please try again.", result)));
+        }    
     } else {
         ereport(ERROR,
             (errmodule(MOD_OPT),
                 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Unsupport partition strategy \"%c\"", relation->partMap->type)));
+                errmsg("Unupport partition strategy \"%d\"", relation->partMap->type)));
     }
     return result;
 }
+
+/*
+ * note that consts and constPointers are in and out parameter, and are provided by caller.
+ */
+void ConstructConstFromValues(Datum* datums, const bool* nulls, Oid* attrs, const int* colMap, int len,
+    Const* consts, Const** constPointers)
+{
+    HeapTuple tp;
+
+    for (int i = 0; i < len; i++) {
+        int col = colMap[i];
+        tp = SearchSysCache1((int)TYPEOID, ObjectIdGetDatum(attrs[col]));
+        if (HeapTupleIsValid(tp)) {
+            Form_pg_type typtup = (Form_pg_type)GETSTRUCT(tp);
+            consts[i].xpr.type = T_Const;
+            consts[i].consttype = attrs[col];
+            consts[i].consttypmod = typtup->typtypmod;
+            consts[i].constcollid = typtup->typcollation;
+            consts[i].constlen = typtup->typlen;
+            consts[i].constvalue = nulls[col] ? 0 : datums[col];
+            consts[i].constisnull = nulls[col];
+            consts[i].constbyval = typtup->typbyval;
+            consts[i].location = -1;
+            consts[i].ismaxvalue = false;
+            constPointers[i] = &consts[i];
+
+            ReleaseSysCache(tp);
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("invalid type")));
+        }
+    }
+
+    return;
+}
+

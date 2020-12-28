@@ -1,43 +1,14 @@
-test: hw_partition_index
-test: hw_partition_unusable_index_1 hw_partition_unusable_index_3
-test: hw_partition_insert hw_partition_insert_01 hw_partition_dml
-test: hw_partition_grant hw_partition_of_type
-test: hw_partition_nodes hw_partition_size hw_partition_compare hw_partition_storage_parameters hw_partition_storage_parameters_index hw_partition_toast hw_partition_cross hw_partition_maxvalue
-test: hw_partition_sql_adapt1 hw_partition_update1
-test: hw_partition_sql_adapt0 hw_partition_update0
-test: hw_partition_sql_adapt2
-test: hw_partition_interval
-test: hw_partition_interval_exchange
-test: hw_partition_interval_index
-test: hw_partition_interval_unusable_index
-test: hw_partition_interval_reindex
-test: hw_partition_interval_movement
-# To check create interval partition parallel
-test: hw_partition_interval_parallel_prepare
-test: hw_partition_interval_parallel_insert hw_partition_interval_parallel_insert_01 hw_partition_interval_parallel_insert_02
-test: hw_partition_interval_parallel_end
-test: hw_partition_interval_select
-test: hw_partition_interval_check_syntax
-#test: hw_partition_lock
-#test: hw_partition_llt
-# FIXME: move me back to the parallel test when the refcnt issue is fixed
-# Below two teste are unstable, temporarily ignoring. This is same to distribute_dattistic, relallvisible, Dongwang will solve the problem.
-#test: hw_partition_vacuum_full
-#test: hw_partition_vacuum
-test: hw_partition_interval_split
-test: hw_partition_interval_merge
-test: hw_partition_interval_compatibility
-test: hw_partition_interval_dump_restore
-
-# Global Partition index feature testcase
+# Global Partition Index feature testcase
 # gpi create
 test: gpi_build_index
-test: gpi_build_index_01 gpi_build_index_02
-# gpi check
+
+# gpi check 
 test: gpi_create_constraint
 test: gpi_unique_check
+
 # gpi index scan
 test: gpi_index
+
 # gpi index only scan
 test: gpi_index_only
 
@@ -56,14 +27,22 @@ test: gpi_rebuild_index
 # gpi cluster
 test: gpi_cluster_01 gpi_cluster_02 gpi_cluster_03
 
-# gpi interval partition
-#test: gpi_interval
+# gpi interval
+test: gpi_interval
+
+# gpi range
+test: gpi_range
 
 # gpi invliad part
 test: gpi_invalid_part
 test: gpi_clean_wait
 
-# gpi vacuum
+# gpi vacuum  
 test: gpi_vacuum_lazy
-test: gpi_hw_partition_vacuum_full
+test: gpi_hw_partition_vacuum_full 
 test: gpi_hw_partition_vacuum_full_01
+
+# gpi alter
+test: gpi_alter_partition
+test: gpi_alter_partition_with_update
+test: gpi_merge_partitions

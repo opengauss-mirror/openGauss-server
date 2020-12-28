@@ -14,10 +14,6 @@ test -f regression.diffs.hacheck && rm regression.diffs.hacheck
 total_starttime=`date +"%Y-%m-%d %H:%M:%S"`
 total_startvalue=`date -d  "$total_starttime" +%s`
 
-if [ ! -d "./results" ]; then
-	mkdir ./results
-fi
-
 #init and start the database
 printf "init and start the database\n"
 sh deploy_standby_single.sh > ./results/deploy_standby_single.log 2>&1
@@ -30,11 +26,6 @@ do
 	do
 		printf "%-50s" $line
 		starttime=`date +"%Y-%m-%d %H:%M:%S"` 
-		logfilepath=./results/$line
-		logfiledir=${logfilepath%/*}
-		if [ ! -d $logfiledir ]; then
-			mkdir -p $logfiledir
-		fi
 		sh ./testcase/$line.sh > ./results/$line.log 2>&1
 		count=`expr $count + 1`
 		endtime=`date +"%Y-%m-%d %H:%M:%S"` 

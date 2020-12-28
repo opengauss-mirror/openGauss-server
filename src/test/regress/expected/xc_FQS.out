@@ -10,7 +10,7 @@ insert into tab1_rr values (2, 4);
 insert into tab1_rr values (5, 3);
 insert into tab1_rr values (7, 8);
 insert into tab1_rr values (9, 2);
-explain (costs off, verbose on, nodes off, num_nodes on) insert into tab1_rr values (9, 2);
+explain (costs off, verbose on) insert into tab1_rr values (9, 2);
         QUERY PLAN        
 --------------------------
  [Bypass]
@@ -27,7 +27,7 @@ select val, val2 + 2, case val when val2 then 'val and val2 are same' else 'val 
    2 |        6 | val and val2 are not same
 (1 row)
 
-explain (costs off, verbose on, nodes off) select val, val2 + 2, case val when val2 then 'val and val2 are same' else 'val and val2 are not same' end from tab1_rr where val2 = 4;
+explain (costs off, verbose on) select val, val2 + 2, case val when val2 then 'val and val2 are same' else 'val and val2 are not same' end from tab1_rr where val2 = 4;
                                                          QUERY PLAN                                                          
 -----------------------------------------------------------------------------------------------------------------------------
  Seq Scan on public.tab1_rr
@@ -42,7 +42,7 @@ select * from (select * from tab1_rr where val2 = 4) t1;
    2 |    4
 (1 row)
 
-explain (costs off, verbose on, nodes off)
+explain (costs off, verbose on)
 	select * from (select * from tab1_rr where val2 = 4) t1;
              QUERY PLAN              
 -------------------------------------
@@ -58,7 +58,7 @@ select sum(val), avg(val), count(*) from tab1_rr;
   24 | 4.8000000000000000 |     5
 (1 row)
 
-explain (costs off, verbose on, nodes off) select sum(val), avg(val), count(*) from tab1_rr;
+explain (costs off, verbose on) select sum(val), avg(val), count(*) from tab1_rr;
                QUERY PLAN               
 ----------------------------------------
  Aggregate
@@ -78,7 +78,7 @@ select first_value(val) over (partition by val2 order by val) from tab1_rr;
            7
 (5 rows)
 
-explain (costs off, verbose on, nodes off) select first_value(val) over (partition by val2 order by val) from tab1_rr;
+explain (costs off, verbose on) select first_value(val) over (partition by val2 order by val) from tab1_rr;
                                            QUERY PLAN                                           
 ------------------------------------------------------------------------------------------------
  WindowAgg
@@ -97,7 +97,7 @@ select * from tab1_rr where val2 = 3 limit 1;
    5 |    3
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from tab1_rr where val2 = 3 limit 1;
+explain (costs off, verbose on) select * from tab1_rr where val2 = 3 limit 1;
              QUERY PLAN             
 ------------------------------------
  Limit
@@ -113,7 +113,7 @@ select * from tab1_rr where val2 = 4 offset 1;
 -----+------
 (0 rows)
 
-explain (costs off, verbose on, nodes off) select * from tab1_rr where val2 = 4 offset 1;
+explain (costs off, verbose on) select * from tab1_rr where val2 = 4 offset 1;
              QUERY PLAN             
 ------------------------------------
  Limit
@@ -134,7 +134,7 @@ select * from tab1_rr order by val;
    9 |    2
 (5 rows)
 
-explain (costs off, verbose on, nodes off) select * from tab1_rr order by val;
+explain (costs off, verbose on) select * from tab1_rr order by val;
             QUERY PLAN            
 ----------------------------------
  Sort
@@ -151,7 +151,7 @@ select distinct val, val2 from tab1_rr where val2 = 8;
    7 |    8
 (1 row)
 
-explain (costs off, verbose on, nodes off) select distinct val, val2 from tab1_rr where val2 = 8;
+explain (costs off, verbose on) select distinct val, val2 from tab1_rr where val2 = 8;
                 QUERY PLAN                 
 -------------------------------------------
  HashAggregate
@@ -169,7 +169,7 @@ select val, val2 from tab1_rr where val2 = 8 group by val, val2;
    7 |    8
 (1 row)
 
-explain (costs off, verbose on, nodes off) select val, val2 from tab1_rr where val2 = 8 group by val, val2;
+explain (costs off, verbose on) select val, val2 from tab1_rr where val2 = 8 group by val, val2;
                 QUERY PLAN                 
 -------------------------------------------
  HashAggregate
@@ -187,7 +187,7 @@ select sum(val) from tab1_rr where val2 = 2 group by val2 having sum(val) > 1;
   10
 (1 row)
 
-explain (costs off, verbose on, nodes off) select sum(val) from tab1_rr where val2 = 2 group by val2 having sum(val) > 1;
+explain (costs off, verbose on) select sum(val) from tab1_rr where val2 = 2 group by val2 having sum(val) > 1;
              QUERY PLAN             
 ------------------------------------
  GroupAggregate
@@ -208,7 +208,7 @@ select * from tab1_rr where val = 7;
    7 |    8
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from tab1_rr where val = 7;
+explain (costs off, verbose on) select * from tab1_rr where val = 7;
          QUERY PLAN          
 -----------------------------
  Seq Scan on public.tab1_rr
@@ -223,7 +223,7 @@ select * from tab1_rr where val = 7 or val = 2 order by val;
    7 |    8
 (2 rows)
 
-explain (costs off, verbose on, nodes off) select * from tab1_rr where val = 7 or val = 2 order by val;
+explain (costs off, verbose on) select * from tab1_rr where val = 7 or val = 2 order by val;
                         QUERY PLAN                        
 ----------------------------------------------------------
  Sort
@@ -240,7 +240,7 @@ select * from tab1_rr where val = 7 and val2 = 8;
    7 |    8
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from tab1_rr where val = 7 and val2 = 8 order by val;
+explain (costs off, verbose on) select * from tab1_rr where val = 7 and val2 = 8 order by val;
                       QUERY PLAN                      
 ------------------------------------------------------
  Seq Scan on public.tab1_rr
@@ -254,7 +254,7 @@ select * from tab1_rr where val = 3 + 4 and val2 = 8 order by val;
    7 |    8
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from tab1_rr where val = 3 + 4 order by val;
+explain (costs off, verbose on) select * from tab1_rr where val = 3 + 4 order by val;
          QUERY PLAN          
 -----------------------------
  Seq Scan on public.tab1_rr
@@ -268,7 +268,7 @@ select * from tab1_rr where val = char_length('len')+4 order by val;
    7 |    8
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from tab1_rr where val = char_length('len')+4 order by val;
+explain (costs off, verbose on) select * from tab1_rr where val = char_length('len')+4 order by val;
          QUERY PLAN          
 -----------------------------
  Seq Scan on public.tab1_rr
@@ -284,7 +284,7 @@ select avg(val) from tab1_rr where val = 7;
  7.0000000000000000
 (1 row)
 
-explain (costs off, verbose on, nodes off) select avg(val) from tab1_rr where val = 7;
+explain (costs off, verbose on) select avg(val) from tab1_rr where val = 7;
             QUERY PLAN             
 -----------------------------------
  Aggregate
@@ -301,7 +301,7 @@ select val, val2 from tab1_rr where val = 7 order by val2;
    7 |    8
 (2 rows)
 
-explain (costs off, verbose on, nodes off) select val, val2 from tab1_rr where val = 7 order by val2;
+explain (costs off, verbose on) select val, val2 from tab1_rr where val = 7 order by val2;
             QUERY PLAN             
 -----------------------------------
  Sort
@@ -319,7 +319,7 @@ select distinct val2 from tab1_rr where val = 7 order by val2;
     8
 (2 rows)
 
-explain (costs off, verbose on, nodes off) select distinct val2 from tab1_rr where val = 7;
+explain (costs off, verbose on) select distinct val2 from tab1_rr where val = 7;
             QUERY PLAN             
 -----------------------------------
  HashAggregate
@@ -332,7 +332,7 @@ explain (costs off, verbose on, nodes off) select distinct val2 from tab1_rr whe
 
 -- DMLs
 update tab1_rr set val2 = 1000 where val = 7; 
-explain (costs off, verbose on, nodes off) update tab1_rr set val2 = 1000 where val = 7; 
+explain (costs off, verbose on) update tab1_rr set val2 = 1000 where val = 7; 
             QUERY PLAN             
 -----------------------------------
  Update on public.tab1_rr
@@ -349,7 +349,7 @@ select * from tab1_rr where val = 7;
 (2 rows)
 
 delete from tab1_rr where val = 7; 
-explain (costs off, verbose on, nodes off) delete from tab1_rr where val = 7; 
+explain (costs off, verbose on) delete from tab1_rr where val = 7; 
             QUERY PLAN             
 -----------------------------------
  Delete on public.tab1_rr
@@ -370,7 +370,7 @@ insert into tab1_hash values (2, 4);
 insert into tab1_hash values (5, 3);
 insert into tab1_hash values (7, 8);
 insert into tab1_hash values (9, 2);
-explain (costs off, verbose on, nodes off) insert into tab1_hash values (9, 2);
+explain (costs off, verbose on) insert into tab1_hash values (9, 2);
          QUERY PLAN         
 ----------------------------
  [Bypass]
@@ -387,7 +387,7 @@ select val, val2 + 2, case val when val2 then 'val and val2 are same' else 'val 
    2 |        6 | val and val2 are not same
 (1 row)
 
-explain (costs off, verbose on, nodes off) select val, val2 + 2, case val when val2 then 'val and val2 are same' else 'val and val2 are not same' end from tab1_hash where val2 = 2;
+explain (costs off, verbose on) select val, val2 + 2, case val when val2 then 'val and val2 are same' else 'val and val2 are not same' end from tab1_hash where val2 = 2;
                                                          QUERY PLAN                                                          
 -----------------------------------------------------------------------------------------------------------------------------
  Seq Scan on public.tab1_hash
@@ -402,7 +402,7 @@ select sum(val), avg(val), count(*) from tab1_hash;
   24 | 4.8000000000000000 |     5
 (1 row)
 
-explain (costs off, verbose on, nodes off) select sum(val), avg(val), count(*) from tab1_hash;
+explain (costs off, verbose on) select sum(val), avg(val), count(*) from tab1_hash;
                QUERY PLAN               
 ----------------------------------------
  Aggregate
@@ -422,7 +422,7 @@ select first_value(val) over (partition by val2 order by val) from tab1_hash ord
            7
 (5 rows)
 
-explain (costs off, verbose on, nodes off) select first_value(val) over (partition by val2 order by val) from tab1_hash;
+explain (costs off, verbose on) select first_value(val) over (partition by val2 order by val) from tab1_hash;
                                            QUERY PLAN                                           
 ------------------------------------------------------------------------------------------------
  WindowAgg
@@ -441,7 +441,7 @@ select * from tab1_hash where val2 = 3 limit 1;
    5 |    3
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from tab1_hash where val2 = 3 limit 1;
+explain (costs off, verbose on) select * from tab1_hash where val2 = 3 limit 1;
               QUERY PLAN              
 --------------------------------------
  Limit
@@ -457,7 +457,7 @@ select * from tab1_hash where val2 = 4 offset 1;
 -----+------
 (0 rows)
 
-explain (costs off, verbose on, nodes off) select * from tab1_hash where val2 = 4 offset 1;
+explain (costs off, verbose on) select * from tab1_hash where val2 = 4 offset 1;
               QUERY PLAN              
 --------------------------------------
  Limit
@@ -478,7 +478,7 @@ select * from tab1_hash order by val;
    9 |    2
 (5 rows)
 
-explain (costs off, verbose on, nodes off) select * from tab1_hash order by val;
+explain (costs off, verbose on) select * from tab1_hash order by val;
              QUERY PLAN             
 ------------------------------------
  Sort
@@ -495,7 +495,7 @@ select distinct val, val2 from tab1_hash where val2 = 8;
    7 |    8
 (1 row)
 
-explain (costs off, verbose on, nodes off) select distinct val, val2 from tab1_hash where val2 = 8;
+explain (costs off, verbose on) select distinct val, val2 from tab1_hash where val2 = 8;
                   QUERY PLAN                   
 -----------------------------------------------
  HashAggregate
@@ -513,7 +513,7 @@ select val, val2 from tab1_hash where val2 = 8 group by val, val2;
    7 |    8
 (1 row)
 
-explain (costs off, verbose on, nodes off) select val, val2 from tab1_hash where val2 = 8 group by val, val2;
+explain (costs off, verbose on) select val, val2 from tab1_hash where val2 = 8 group by val, val2;
                   QUERY PLAN                   
 -----------------------------------------------
  HashAggregate
@@ -531,7 +531,7 @@ select distinct on (val2) val, val2 from tab1_hash where val2 = 8;
    7 |    8
 (1 row)
 
-explain (costs off, verbose on, nodes off) select distinct on (val2) val, val2 from tab1_hash where val2 = 8;
+explain (costs off, verbose on) select distinct on (val2) val, val2 from tab1_hash where val2 = 8;
               QUERY PLAN              
 --------------------------------------
  Unique
@@ -549,7 +549,7 @@ select sum(val) from tab1_hash where val2 = 2 group by val2 having sum(val) > 1;
   10
 (1 row)
 
-explain (costs off, verbose on, nodes off) select sum(val) from tab1_hash where val2 = 2 group by val2 having sum(val) > 1;
+explain (costs off, verbose on) select sum(val) from tab1_hash where val2 = 2 group by val2 having sum(val) > 1;
               QUERY PLAN              
 --------------------------------------
  GroupAggregate
@@ -569,7 +569,7 @@ select * from tab1_hash where val = 7;
    7 |    8
 (1 row)
 
-explain (costs off, verbose on, nodes off, num_nodes on) select * from tab1_hash where val = 7;
+explain (costs off, verbose on) select * from tab1_hash where val = 7;
           QUERY PLAN           
 -------------------------------
  Seq Scan on public.tab1_hash
@@ -584,7 +584,7 @@ select * from tab1_hash where val = 7 or val = 2 order by val;
    7 |    8
 (2 rows)
 
-explain (costs off, verbose on, nodes off) select * from tab1_hash where val = 7 or val = 2 order by val;
+explain (costs off, verbose on) select * from tab1_hash where val = 7 or val = 2 order by val;
                           QUERY PLAN                          
 --------------------------------------------------------------
  Sort
@@ -601,7 +601,7 @@ select * from tab1_hash where val = 7 and val2 = 8;
    7 |    8
 (1 row)
 
-explain (costs off, verbose on, nodes off, num_nodes on) select * from tab1_hash where val = 7 and val2 = 8;
+explain (costs off, verbose on) select * from tab1_hash where val = 7 and val2 = 8;
                         QUERY PLAN                        
 ----------------------------------------------------------
  Seq Scan on public.tab1_hash
@@ -615,7 +615,7 @@ select * from tab1_hash where val = 3 + 4 and val2 = 8;
    7 |    8
 (1 row)
 
-explain (costs off, verbose on, nodes off, num_nodes on) select * from tab1_hash where val = 3 + 4;
+explain (costs off, verbose on) select * from tab1_hash where val = 3 + 4;
           QUERY PLAN           
 -------------------------------
  Seq Scan on public.tab1_hash
@@ -629,7 +629,7 @@ select * from tab1_hash where val = char_length('len')+4;
    7 |    8
 (1 row)
 
-explain (costs off, verbose on, nodes off, num_nodes on) select * from tab1_hash where val = char_length('len')+4;
+explain (costs off, verbose on) select * from tab1_hash where val = char_length('len')+4;
           QUERY PLAN           
 -------------------------------
  Seq Scan on public.tab1_hash
@@ -645,7 +645,7 @@ select avg(val) from tab1_hash where val = 7;
  7.0000000000000000
 (1 row)
 
-explain (costs off, verbose on, nodes off, num_nodes on) select avg(val) from tab1_hash where val = 7;
+explain (costs off, verbose on) select avg(val) from tab1_hash where val = 7;
              QUERY PLAN              
 -------------------------------------
  Aggregate
@@ -662,7 +662,7 @@ select val, val2 from tab1_hash where val = 7 order by val2;
    7 |    8
 (2 rows)
 
-explain (costs off, verbose on, nodes off, num_nodes on) select val, val2 from tab1_hash where val = 7 order by val2;
+explain (costs off, verbose on) select val, val2 from tab1_hash where val = 7 order by val2;
              QUERY PLAN              
 -------------------------------------
  Sort
@@ -680,7 +680,7 @@ select distinct val2 from tab1_hash where val = 7;
     2
 (2 rows)
 
-explain (costs off, verbose on, nodes off, num_nodes on) select distinct val2 from tab1_hash where val = 7;
+explain (costs off, verbose on) select distinct val2 from tab1_hash where val = 7;
              QUERY PLAN              
 -------------------------------------
  HashAggregate
@@ -698,7 +698,7 @@ select * from (select avg(val) from tab1_hash where val = 7) t1;
  7.0000000000000000
 (1 row)
 
-explain (costs off, verbose on, nodes off, num_nodes on)
+explain (costs off, verbose on)
 	select * from (select avg(val) from tab1_hash where val = 7) t1;
                   QUERY PLAN                   
 -----------------------------------------------
@@ -711,7 +711,7 @@ explain (costs off, verbose on, nodes off, num_nodes on)
 
 -- DMLs
 update tab1_hash set val2 = 1000 where val = 7; 
-explain (costs off, verbose on, nodes off) update tab1_hash set val2 = 1000 where val = 7; 
+explain (costs off, verbose on) update tab1_hash set val2 = 1000 where val = 7; 
              QUERY PLAN              
 -------------------------------------
  Update on public.tab1_hash
@@ -728,7 +728,7 @@ select * from tab1_hash where val = 7;
 (2 rows)
 
 delete from tab1_hash where val = 7; 
-explain (costs off, verbose on, nodes off) delete from tab1_hash where val = 7; 
+explain (costs off, verbose on) delete from tab1_hash where val = 7; 
              QUERY PLAN              
 -------------------------------------
  Delete on public.tab1_hash
@@ -749,7 +749,7 @@ insert into tab1_modulo values (2, 4);
 insert into tab1_modulo values (5, 3);
 insert into tab1_modulo values (7, 8);
 insert into tab1_modulo values (9, 2);
-explain (costs off, verbose on, nodes off) insert into tab1_modulo values (9, 2);
+explain (costs off, verbose on) insert into tab1_modulo values (9, 2);
           QUERY PLAN          
 ------------------------------
  [Bypass]
@@ -766,7 +766,7 @@ select val, val2 + 2, case val when val2 then 'val and val2 are same' else 'val 
    2 |        6 | val and val2 are not same
 (1 row)
 
-explain (costs off, verbose on, nodes off) select val, val2 + 2, case val when val2 then 'val and val2 are same' else 'val and val2 are not same' end from tab1_modulo where val2 = 4;
+explain (costs off, verbose on) select val, val2 + 2, case val when val2 then 'val and val2 are same' else 'val and val2 are not same' end from tab1_modulo where val2 = 4;
                                                          QUERY PLAN                                                          
 -----------------------------------------------------------------------------------------------------------------------------
  Seq Scan on public.tab1_modulo
@@ -781,7 +781,7 @@ select sum(val), avg(val), count(*) from tab1_modulo;
   24 | 4.8000000000000000 |     5
 (1 row)
 
-explain (costs off, verbose on, nodes off) select sum(val), avg(val), count(*) from tab1_modulo;
+explain (costs off, verbose on) select sum(val), avg(val), count(*) from tab1_modulo;
                QUERY PLAN               
 ----------------------------------------
  Aggregate
@@ -801,7 +801,7 @@ select first_value(val) over (partition by val2 order by val) from tab1_modulo;
            7
 (5 rows)
 
-explain (costs off, verbose on, nodes off) select first_value(val) over (partition by val2 order by val) from tab1_modulo;
+explain (costs off, verbose on) select first_value(val) over (partition by val2 order by val) from tab1_modulo;
                                            QUERY PLAN                                           
 ------------------------------------------------------------------------------------------------
  WindowAgg
@@ -820,7 +820,7 @@ select * from tab1_modulo where val2 = 3 limit 1;
    5 |    3
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from tab1_modulo where val2 = 3 limit 1;
+explain (costs off, verbose on) select * from tab1_modulo where val2 = 3 limit 1;
                QUERY PLAN               
 ----------------------------------------
  Limit
@@ -836,7 +836,7 @@ select * from tab1_modulo where val2 = 4 offset 1;
 -----+------
 (0 rows)
 
-explain (costs off, verbose on, nodes off) select * from tab1_modulo where val2 = 4 offset 1;
+explain (costs off, verbose on) select * from tab1_modulo where val2 = 4 offset 1;
                QUERY PLAN               
 ----------------------------------------
  Limit
@@ -857,7 +857,7 @@ select * from tab1_modulo order by val;
    9 |    2
 (5 rows)
 
-explain (costs off, verbose on, nodes off) select * from tab1_modulo order by val;
+explain (costs off, verbose on) select * from tab1_modulo order by val;
               QUERY PLAN              
 --------------------------------------
  Sort
@@ -874,7 +874,7 @@ select distinct val, val2 from tab1_modulo where val2 = 8;
    7 |    8
 (1 row)
 
-explain (costs off, verbose on, nodes off) select distinct val, val2 from tab1_modulo where val2 = 8;
+explain (costs off, verbose on) select distinct val, val2 from tab1_modulo where val2 = 8;
                     QUERY PLAN                     
 ---------------------------------------------------
  HashAggregate
@@ -892,7 +892,7 @@ select val, val2 from tab1_modulo where val2 = 8 group by val, val2;
    7 |    8
 (1 row)
 
-explain (costs off, verbose on, nodes off) select val, val2 from tab1_modulo where val2 = 8 group by val, val2;
+explain (costs off, verbose on) select val, val2 from tab1_modulo where val2 = 8 group by val, val2;
                     QUERY PLAN                     
 ---------------------------------------------------
  HashAggregate
@@ -911,7 +911,7 @@ select distinct on (val2) val, val2 from tab1_modulo where val2 = 8;
    7 |    8
 (1 row)
 
-explain (costs off, verbose on, nodes off) select distinct on (val2) val, val2 from tab1_modulo where val2 = 8;
+explain (costs off, verbose on) select distinct on (val2) val, val2 from tab1_modulo where val2 = 8;
                QUERY PLAN               
 ----------------------------------------
  Unique
@@ -929,7 +929,7 @@ select sum(val) from tab1_modulo where val2 = 2 group by val2 having sum(val) > 
   10
 (1 row)
 
-explain (costs off, verbose on, nodes off) select sum(val) from tab1_modulo where val2 = 2 group by val2 having sum(val) > 1;
+explain (costs off, verbose on) select sum(val) from tab1_modulo where val2 = 2 group by val2 having sum(val) > 1;
                QUERY PLAN               
 ----------------------------------------
  GroupAggregate
@@ -949,7 +949,7 @@ select * from tab1_modulo where val = 7;
    7 |    8
 (1 row)
 
-explain (costs off, verbose on, nodes off, num_nodes on) select * from tab1_modulo where val = 7;
+explain (costs off, verbose on) select * from tab1_modulo where val = 7;
            QUERY PLAN            
 ---------------------------------
  Seq Scan on public.tab1_modulo
@@ -964,7 +964,7 @@ select * from tab1_modulo where val = 7 or val = 2 order by val;
    7 |    8
 (2 rows)
 
-explain (costs off, verbose on, nodes off) select * from tab1_modulo where val = 7 or val = 2 order by val;
+explain (costs off, verbose on) select * from tab1_modulo where val = 7 or val = 2 order by val;
                             QUERY PLAN                            
 ------------------------------------------------------------------
  Sort
@@ -981,7 +981,7 @@ select * from tab1_modulo where val = 7 and val2 = 8;
    7 |    8
 (1 row)
 
-explain (costs off, verbose on, nodes off, num_nodes on) select * from tab1_modulo where val = 7 and val2 = 8;
+explain (costs off, verbose on) select * from tab1_modulo where val = 7 and val2 = 8;
                           QUERY PLAN                          
 --------------------------------------------------------------
  Seq Scan on public.tab1_modulo
@@ -995,7 +995,7 @@ select * from tab1_modulo where val = 3 + 4 and val2 = 8;
    7 |    8
 (1 row)
 
-explain (costs off, verbose on, nodes off, num_nodes on) select * from tab1_modulo where val = 3 + 4;
+explain (costs off, verbose on) select * from tab1_modulo where val = 3 + 4;
            QUERY PLAN            
 ---------------------------------
  Seq Scan on public.tab1_modulo
@@ -1009,7 +1009,7 @@ select * from tab1_modulo where val = char_length('len')+4;
    7 |    8
 (1 row)
 
-explain (costs off, verbose on, nodes off, num_nodes on) select * from tab1_modulo where val = char_length('len')+4;
+explain (costs off, verbose on) select * from tab1_modulo where val = char_length('len')+4;
            QUERY PLAN            
 ---------------------------------
  Seq Scan on public.tab1_modulo
@@ -1025,7 +1025,7 @@ select avg(val) from tab1_modulo where val = 7;
  7.0000000000000000
 (1 row)
 
-explain (costs off, verbose on, nodes off, num_nodes on) select avg(val) from tab1_modulo where val = 7;
+explain (costs off, verbose on) select avg(val) from tab1_modulo where val = 7;
               QUERY PLAN               
 ---------------------------------------
  Aggregate
@@ -1042,7 +1042,7 @@ select val, val2 from tab1_modulo where val = 7 order by val2;
    7 |    8
 (2 rows)
 
-explain (costs off, verbose on, nodes off, num_nodes on) select val, val2 from tab1_modulo where val = 7 order by val2;
+explain (costs off, verbose on) select val, val2 from tab1_modulo where val = 7 order by val2;
               QUERY PLAN               
 ---------------------------------------
  Sort
@@ -1060,7 +1060,7 @@ select distinct val2 from tab1_modulo where val = 7;
     2
 (2 rows)
 
-explain (costs off, verbose on, nodes off, num_nodes on) select distinct val2 from tab1_modulo where val = 7;
+explain (costs off, verbose on) select distinct val2 from tab1_modulo where val = 7;
               QUERY PLAN               
 ---------------------------------------
  HashAggregate
@@ -1078,7 +1078,7 @@ select * from (select avg(val) from tab1_modulo where val = 7) t1;
  7.0000000000000000
 (1 row)
 
-explain (costs off, verbose on, nodes off, num_nodes on)
+explain (costs off, verbose on)
 	select * from (select avg(val) from tab1_modulo where val = 7) t1;
                     QUERY PLAN                     
 ---------------------------------------------------
@@ -1091,7 +1091,7 @@ explain (costs off, verbose on, nodes off, num_nodes on)
 
 -- DMLs
 update tab1_modulo set val2 = 1000 where val = 7; 
-explain (costs off, verbose on, nodes off) update tab1_modulo set val2 = 1000 where val = 7; 
+explain (costs off, verbose on) update tab1_modulo set val2 = 1000 where val = 7; 
               QUERY PLAN               
 ---------------------------------------
  Update on public.tab1_modulo
@@ -1108,7 +1108,7 @@ select * from tab1_modulo where val = 7;
 (2 rows)
 
 delete from tab1_modulo where val = 7; 
-explain (costs off, verbose on, nodes off) delete from tab1_modulo where val = 7; 
+explain (costs off, verbose on) delete from tab1_modulo where val = 7; 
               QUERY PLAN               
 ---------------------------------------
  Delete on public.tab1_modulo
@@ -1130,7 +1130,7 @@ insert into tab1_replicated values (2, 4);
 insert into tab1_replicated values (5, 3);
 insert into tab1_replicated values (7, 8);
 insert into tab1_replicated values (9, 2);
-explain (costs off, verbose on, nodes off) insert into tab1_replicated values (9, 2);
+explain (costs off, verbose on) insert into tab1_replicated values (9, 2);
             QUERY PLAN            
 ----------------------------------
  [Bypass]
@@ -1150,7 +1150,7 @@ select * from tab1_replicated;
    9 |    2
 (5 rows)
 
-explain (costs off, num_nodes on, verbose on, nodes off) select * from tab1_replicated;
+explain (costs off, verbose on) select * from tab1_replicated;
              QUERY PLAN             
 ------------------------------------
  Seq Scan on public.tab1_replicated
@@ -1163,7 +1163,7 @@ select sum(val), avg(val), count(*) from tab1_replicated;
   24 | 4.8000000000000000 |     5
 (1 row)
 
-explain (costs off, num_nodes on, verbose on, nodes off) select sum(val), avg(val), count(*) from tab1_replicated;
+explain (costs off, verbose on) select sum(val), avg(val), count(*) from tab1_replicated;
                 QUERY PLAN                
 ------------------------------------------
  Aggregate
@@ -1182,7 +1182,7 @@ select first_value(val) over (partition by val2 order by val) from tab1_replicat
            7
 (5 rows)
 
-explain (costs off, num_nodes on, verbose on, nodes off) select first_value(val) over (partition by val2 order by val) from tab1_replicated;
+explain (costs off, verbose on) select first_value(val) over (partition by val2 order by val) from tab1_replicated;
                                            QUERY PLAN                                           
 ------------------------------------------------------------------------------------------------
  WindowAgg
@@ -1201,7 +1201,7 @@ select * from tab1_replicated where val2 = 2 limit 2;
    9 |    2
 (2 rows)
 
-explain (costs off, num_nodes on, verbose on, nodes off) select * from tab1_replicated where val2 = 2 limit 2;
+explain (costs off, verbose on) select * from tab1_replicated where val2 = 2 limit 2;
                  QUERY PLAN                 
 --------------------------------------------
  Limit
@@ -1216,7 +1216,7 @@ select * from tab1_replicated where val2 = 4 offset 1;
 -----+------
 (0 rows)
 
-explain (costs off, num_nodes on, verbose on, nodes off) select * from tab1_replicated where val2 = 4 offset 1;
+explain (costs off, verbose on) select * from tab1_replicated where val2 = 4 offset 1;
                  QUERY PLAN                 
 --------------------------------------------
  Limit
@@ -1236,7 +1236,7 @@ select * from tab1_replicated order by val;
    9 |    2
 (5 rows)
 
-explain (costs off, num_nodes on, verbose on, nodes off) select * from tab1_replicated order by val;
+explain (costs off, verbose on) select * from tab1_replicated order by val;
                 QUERY PLAN                
 ------------------------------------------
  Sort
@@ -1256,7 +1256,7 @@ select distinct val, val2 from tab1_replicated order by val;
    9 |    2
 (5 rows)
 
-explain (costs off, num_nodes on, verbose on, nodes off) select distinct val, val2 from tab1_replicated;
+explain (costs off, verbose on) select distinct val, val2 from tab1_replicated;
                         QUERY PLAN                         
 -----------------------------------------------------------
  HashAggregate
@@ -1276,7 +1276,7 @@ select val, val2 from tab1_replicated group by val, val2 order by val;
    9 |    2
 (5 rows)
 
-explain (costs off, num_nodes on, verbose on, nodes off) select val, val2 from tab1_replicated group by val, val2;
+explain (costs off, verbose on) select val, val2 from tab1_replicated group by val, val2;
                         QUERY PLAN                         
 -----------------------------------------------------------
  HashAggregate
@@ -1295,7 +1295,7 @@ select sum(val) from tab1_replicated group by val2 having sum(val) > 1 order by 
   10
 (4 rows)
 
-explain (costs off, num_nodes on, verbose on, nodes off) select sum(val) from tab1_replicated group by val2 having sum(val) > 1;
+explain (costs off, verbose on) select sum(val) from tab1_replicated group by val2 having sum(val) > 1;
                 QUERY PLAN                
 ------------------------------------------
  HashAggregate
@@ -1316,7 +1316,7 @@ select * from (select sum(val), val2 from tab1_replicated group by val2 order by
    7 |    8
 (4 rows)
 
-explain (costs off, verbose on, nodes off, num_nodes on)
+explain (costs off, verbose on)
 	select * from (select sum(val), val2 from tab1_replicated group by val2 order by val2) t1;
                            QUERY PLAN                            
 -----------------------------------------------------------------
@@ -1332,7 +1332,7 @@ explain (costs off, verbose on, nodes off, num_nodes on)
 
 -- DMLs
 update tab1_replicated set val2 = 1000 where val = 7; 
-explain (costs off, verbose on, nodes off) update tab1_replicated set val2 = 1000 where val = 7; 
+explain (costs off, verbose on) update tab1_replicated set val2 = 1000 where val = 7; 
                 QUERY PLAN                 
 -------------------------------------------
  Update on public.tab1_replicated
@@ -1348,7 +1348,7 @@ select * from tab1_replicated where val = 7;
 (1 row)
 
 delete from tab1_replicated where val = 7; 
-explain (costs off, verbose on, nodes off) delete from tab1_replicated where val = 7; 
+explain (costs off, verbose on) delete from tab1_replicated where val = 7; 
                 QUERY PLAN                 
 -------------------------------------------
  Delete on public.tab1_replicated
@@ -1367,7 +1367,7 @@ drop table tab1_hash;
 drop table tab1_modulo;
 drop table tab1_replicated;
 create table ts(sn int, t timestamp);
-explain (costs off, num_nodes on, verbose on, nodes off)
+explain (costs off, verbose on)
 select * from ts where t < to_date('2014-12-14 11:00:00','yyyy-mm-dd hh:mi:ss');
                                       QUERY PLAN                                      
 --------------------------------------------------------------------------------------
@@ -1376,7 +1376,7 @@ select * from ts where t < to_date('2014-12-14 11:00:00','yyyy-mm-dd hh:mi:ss');
    Filter: (ts.t < to_date('2014-12-14 11:00:00'::text, 'yyyy-mm-dd hh:mi:ss'::text))
 (3 rows)
 
-explain (costs off, num_nodes on, verbose on, nodes off)
+explain (costs off, verbose on)
 select * from ts where t < to_date('2014-12-14 11:00:00');
                        QUERY PLAN                        
 ---------------------------------------------------------
@@ -1390,7 +1390,7 @@ drop table ts;
 create table tf(a int, b int);
 insert into tf values(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6);
 create function ff(p int) returns int as 'select b from tf where a=p;' language sql;
-explain (costs off, verbose on, nodes off) select ff(3) from tf;
+explain (costs off, verbose on) select ff(3) from tf;
       QUERY PLAN       
 -----------------------
  Seq Scan on public.tf

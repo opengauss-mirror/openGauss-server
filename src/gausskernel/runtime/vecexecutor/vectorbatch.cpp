@@ -50,14 +50,28 @@ ScalarVector::~ScalarVector()
 void ScalarVector::init(MemoryContext cxt, ScalarDesc desc)
 {
     m_desc = desc;
-    MemoryContext old_cxt = MemoryContextSwitchTo(cxt);
+    MemoryContext oldCxt = MemoryContextSwitchTo(cxt);
 
     m_flag = (uint8*)palloc0(sizeof(uint8) * BatchMaxSize);
     m_vals = (ScalarValue*)palloc(sizeof(ScalarValue) * BatchMaxSize);
 
-    (void)MemoryContextSwitchTo(old_cxt);
+    MemoryContextSwitchTo(oldCxt);
 
     m_buf = New(cxt) VarBuf(cxt);
+
+    BindingFp();
+}
+
+void ScalarVector::init(MemoryContext cxt, ScalarVector *vec, const int batchSize)
+{
+    m_desc = vec->m_desc;
+    m_rows = vec->m_rows;
+    m_buf = vec->m_buf;
+
+    MemoryContext oldCxt = MemoryContextSwitchTo(cxt);
+    m_flag = (uint8*)palloc0(sizeof(uint8) * batchSize);
+    m_vals = (ScalarValue*)palloc(sizeof(ScalarValue) * batchSize);
+    MemoryContextSwitchTo(oldCxt);
 
     BindingFp();
 }
@@ -692,7 +706,7 @@ Datum ScalarVector::DatumCstringToScalar(Datum data, Size len)
     src_ptr = DatumGetPointer(data);
     char* result = NULL;
 
-    if ((len + VARHDRSZ_SHORT) <= VARATT_SHORT_MAX) {
+    if ((len + VARHDRSZ_SHORT) < VARATT_SHORT_MAX) {
         var_len = len + VARHDRSZ_SHORT + 1;
         result = (char*)palloc(var_len);
         SET_VARSIZE_SHORT(result, var_len);
@@ -941,7 +955,7 @@ Datum ScalarVector::AddCStringVar(Datum data, int aindex)
     Size len = strlen(DatumGetPointer(data)) + 1;
     char* result = NULL;
 
-    if ((len + VARHDRSZ_SHORT) <= VARATT_SHORT_MAX) {
+    if ((len + VARHDRSZ_SHORT) < VARATT_SHORT_MAX) {
         var_len = len + VARHDRSZ_SHORT + 1;
         result = (char*)m_buf->Allocate(var_len);
         SET_VARSIZE_SHORT(result, var_len);
@@ -1108,7 +1122,7 @@ varBuf* VarBuf::CreateBuf(int data_len)
     AutoContextSwitch memGuard(m_context);
     buf = (varBuf*)palloc(sizeof(varBuf));
     buf->len = 0;
-    buf->size = data_len < m_bufInitLen ? m_bufInitLen : data_len;
+    buf->size = (data_len < m_bufInitLen) ? m_bufInitLen : data_len;
     buf->next = NULL;
     buf->buf = (char*)palloc(buf->size);
     m_bufNum++;

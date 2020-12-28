@@ -18,9 +18,8 @@
 extern THR_LOCAL bool comm_client_bind;
 
 extern bool FencedUDFMasterMode;
-#define SCTP_CN_DN_CONN (!g_instance.attr.attr_network.comm_tcp_mode && !isRestoreMode && !dummyStandbyMode)
 
-/* the logicTid index for nonProc thread */
+/* the logicTid index for nonProc thread*/
 #define POSTMASTER_LID 1
 #define PGSTAT_LID 2
 #define PGARCH_LID 3
@@ -43,12 +42,12 @@ extern pthread_rwlock_t hba_rwlock;
 
 typedef enum ReplicationType {
     RT_WITH_DUMMY_STANDBY,
-    RT_WITH_MULTI_STNADBY,
+    RT_WITH_MULTI_STANDBY,
     RT_WITHOUT_STANDBY,
     RT_NUM
 } ReplicationType;
 
-#define IS_DN_MULTI_STANDYS_MODE() (g_instance.attr.attr_storage.replication_type == RT_WITH_MULTI_STNADBY)
+#define IS_DN_MULTI_STANDYS_MODE() (g_instance.attr.attr_storage.replication_type == RT_WITH_MULTI_STANDBY)
 #define IS_DN_DUMMY_STANDYS_MODE() (g_instance.attr.attr_storage.replication_type == RT_WITH_DUMMY_STANDBY)
 #define IS_DN_WITHOUT_STANDBYS_MODE() (g_instance.attr.attr_storage.replication_type == RT_WITHOUT_STANDBY)
 
@@ -105,8 +104,10 @@ typedef enum {
     PM_WAIT_BACKUP,   /* waiting for online backup mode to end */
     PM_WAIT_READONLY, /* waiting for read only backends to exit */
     PM_WAIT_BACKENDS, /* waiting for live backends to exit */
-    PM_SHUTDOWN,      /* waiting for checkpointer to do shutdown ckpt */
-    PM_SHUTDOWN_2,    /* waiting for archiver and walsenders to finish */
+    PM_SHUTDOWN,      /* waiting for checkpointer to do shutdown
+                       * ckpt */
+    PM_SHUTDOWN_2,    /* waiting for archiver and walsenders to
+                       * finish */
     PM_WAIT_DEAD_END, /* waiting for dead_end children to exit */
     PM_NO_CHILDREN    /* all important children have exited */
 } PMState;
@@ -125,10 +126,9 @@ extern const char* GetPMState(const PMState pmState);
  * Constants that represent which of postmaster_alive_fds is held by
  * postmaster, and which is used in children to check for postmaster death.
  */
-
-/* used in children to check for postmaster death */
-#define POSTMASTER_FD_WATCH 0
-
+#define POSTMASTER_FD_WATCH                                  \
+    0                       /* used in children to check for \
+                             * postmaster death */
 #define POSTMASTER_FD_OWN 1 /* kept open by postmaster only */
 
 #define AmPostmasterProcess() (t_thrd.proc_cxt.MyProcPid == PostmasterPid)
@@ -137,10 +137,9 @@ extern const char* progname;
 
 extern int PostmasterMain(int argc, char* argv[]);
 extern void ClosePostmasterPorts(bool am_syslogger);
+extern void ExitPostmaster(int status);
 
 extern int MaxLivePostmasterChildren(void);
-
-extern bool PostmasterMarkPIDForWorkerNotify(ThreadId pid);
 
 extern Size CBMShmemSize(void);
 extern void CBMShmemInit(void);
@@ -162,7 +161,6 @@ extern void KillGraceThreads(void);
 #define MAX_IP_STR_LEN 64
 #define MAX_UNIX_PATH_LEN 1024
 #define LOCAL_HOST "localhost"
-#define LOCAL_HOST_WITH_DOMAIN "localhost.localdomain"
 #define LOOP_IP_STRING "127.0.0.1"
 #define LOOP_IPV6_IP "::1"
 
@@ -187,15 +185,6 @@ typedef struct DnUsedSpaceHashEntry {
     uint64 dnUsedSpace;
 } DnUsedSpaceHashEntry;
 
-typedef struct AccountLockHashEntry {
-    Oid roleoid;
-    int4 failcount;
-    TimestampTz locktime;
-    int2 rolstatus;
-    slock_t mutex;
-} AccountLockHashEntry;
-
-
 extern void CreateServerSocket(
     char* ipaddr, int portNumber, int enCreatemode, int* success, bool add_localaddr_flag, bool is_create_psql_sock);
 extern bool CheckSockAddr(struct sockaddr* sock_addr, const char* szIP, int port);
@@ -212,9 +201,6 @@ extern volatile ThreadId ReaperBackendPID;
 extern bool IsCBMWriterRunning(void);
 
 void SetFlagForGetLCName(bool falg);
-
-extern void assign_bbox_coredump(const bool newval, void* extra);
-extern void assign_bbox_corepath(const char* newval, void* extra);
 
 extern ServerMode GetServerMode();
 /* set disable connection */
@@ -235,7 +221,6 @@ extern void set_disable_conn_mode(void);
 bool IsFromLocalAddr(Port* port);
 extern bool IsHASocketAddr(struct sockaddr* sock_addr);
 extern bool IsHAPort(Port* port);
-extern const char* get_explicit_host_addr(void);
 extern ThreadId initialize_util_thread(knl_thread_role role, void* payload = NULL);
 extern ThreadId initialize_worker_thread(knl_thread_role role, Port* port, void* payload = NULL);
 extern void startup_die(SIGNAL_ARGS);
@@ -251,5 +236,7 @@ extern void GenerateCancelKey(bool isThreadPoolSession);
 extern bool SignalCancelAllBackEnd();
 extern bool IsLocalAddr(Port* port);
 extern uint64_t mc_timers_us(void);
-extern bool PostmasterMarkPIDForWorkerNotify(ThreadId);
+extern bool SetDBStateFileState(DbState state, bool optional);
+extern void GPCResetAll();
+extern void initRandomState(TimestampTz start_time, TimestampTz stop_time);
 #endif /* _POSTMASTER_H */

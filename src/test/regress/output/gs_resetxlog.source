@@ -1,0 +1,20 @@
+--
+--pg_resetxlog
+--
+\! @abs_bindir@/pg_resetxlog -n @abs_srcdir@/tmp_check/datanode1 > @abs_bindir@/test_gs_resetxlog.log 2>&1 ; echo $?
+1
+\! @abs_bindir@/gs_initdb -S -D @abs_srcdir@/tmp_check/test_dn --nodename coorn1 -U test_initdb -w test@123 >> @abs_bindir@/test_initdb.log 2>&1 ; echo $?
+0
+\! rm -f @abs_bindir@/test_initdb.log
+\! @abs_bindir@/pg_resetxlog -n @abs_srcdir@/tmp_check/test_dn > @abs_bindir@/test_gs_resetxlog.log 2>&1 ; echo $?
+0
+\! @abs_bindir@/pg_resetxlog -o 12345 @abs_srcdir@/tmp_check/test_dn > @abs_bindir@/test_gs_resetxlog.log 2>&1 ; echo $?
+0
+\! @abs_bindir@/pg_resetxlog -O 12346 @abs_srcdir@/tmp_check/test_dn > @abs_bindir@/test_gs_resetxlog.log 2>&1 ; echo $?
+0
+\! @abs_bindir@/pg_resetxlog -f -x 12347 @abs_srcdir@/tmp_check/test_dn > @abs_bindir@/test_gs_resetxlog.log 2>&1 ; echo $?
+0
+\! echo "" > @abs_srcdir@/tmp_check/test_dn/global/pg_control
+\! @abs_bindir@/pg_resetxlog -n @abs_srcdir@/tmp_check/test_dn > @abs_bindir@/test_gs_resetxlog.log 2>&1 ; echo $?
+0
+\! rm -rf @abs_srcdir@/tmp_check/test_dn

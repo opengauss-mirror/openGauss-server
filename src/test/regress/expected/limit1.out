@@ -21,7 +21,7 @@ set enable_nestloop=off;
 --Test settings:
 --1. Limit within top query;
 --2. Locator type is hash;
-explain (verbose, costs off, nodes off) select c1, c2, c3 from limit_table_01 limit 2 offset 1;
+explain (verbose, costs off) select c1, c2, c3 from limit_table_01 limit 2 offset 1;
                     QUERY PLAN                     
 ---------------------------------------------------
  Limit
@@ -95,7 +95,7 @@ insert into limit_table_03 values (16, 26, 36);
 --Test settings:
 --1. Limit within top query;
 --2. Locator type is replication;
-explain (verbose, costs off, nodes off) select c1, c2, c3 from limit_table_03 limit 2 offset 1;
+explain (verbose, costs off) select c1, c2, c3 from limit_table_03 limit 2 offset 1;
                     QUERY PLAN                     
 ---------------------------------------------------
  Limit
@@ -114,7 +114,7 @@ select c1, c2, c3 from limit_table_03 order by c1 limit 2 offset 1;
 --Test settings:
 --1. Limit within sub query;
 --2. Locator type is replication;
-explain (verbose, costs off, nodes off) select a.c1, b.c2, b.c3 from (select c1 from limit_table_02 limit 2 offset 1) a , limit_table_01 b where a.c1=b.c2;
+explain (verbose, costs off) select a.c1, b.c2, b.c3 from (select c1 from limit_table_02 limit 2 offset 1) a , limit_table_01 b where a.c1=b.c2;
                           QUERY PLAN                           
 ---------------------------------------------------------------
  Hash Join

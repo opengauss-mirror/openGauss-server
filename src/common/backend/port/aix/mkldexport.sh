@@ -29,18 +29,18 @@ elif [ -x /usr/ccs/bin/nm ]
 then NM=/usr/ccs/bin/nm
 elif [ -x /usr/usg/bin/nm ]
 then NM=/usr/usg/bin/nm
-else echo "Fatal error: cannot find `nm' ... please check your installation."
+else echo "Fatal error: cannot find 'nm' ... please check your installation."
      exit 1
 fi
 
-CMDNAME=`basename $0`
+CMDNAME=$(basename $0)
 if [ -z "$1" ]; then
 	echo "Usage: $CMDNAME object [location]"
 	exit 1
 fi
-OBJNAME=`basename $1`
-if [ "`basename $OBJNAME`" != "`basename $OBJNAME .o`" ]; then
-	OBJNAME=`basename $OBJNAME .o`.so
+OBJNAME=$(basename $1)
+if [ "$(basename $OBJNAME)" != "$(basename $OBJNAME .o)" ]; then
+	OBJNAME=$(basename $OBJNAME .o).so
 fi
 if [ -z "$2" ]; then
 	echo '#!'

@@ -19,7 +19,7 @@ create table llvm_web_site (web_site_sk integer not null,web_site_id char(17) no
 create table date_dim_less (d_date_sk varchar(19) not null,d_year bigint,d_current_month integer(39,38) default null,d_current_quarter numeric(29,10)) /*distribute by hash (d_current_month,d_year)*/;
 create table llvm_customer (c_customer_id char(17) not null,c_birth_day smallint,c_birth_month integer) /*distribute by hash(c_birth_day,c_birth_month)*/;
 --inner join
-explain (costs off, nodes off)
+explain (costs off)
 SELECT dt.web_site_sk * d_current_quarter
     , min(web_rec_end_date)
     , avg(DISTINCT dt.web_site_sk * d_current_quarter)
@@ -48,7 +48,7 @@ ORDER BY 1
     , 2
     , 3;
 --full join
-explain (costs off, nodes off)
+explain (costs off)
 SELECT dt.web_site_sk * d_current_quarter
     , min(web_rec_end_date)
     , avg(DISTINCT dt.web_site_sk * d_current_quarter)
@@ -77,7 +77,7 @@ ORDER BY 1
     , 2
     , 3;
 --inner join
-explain (costs off, nodes off)
+explain (costs off)
 select dt.web_site_sk * d_current_quarter,
 avg(distinct dt.web_site_sk)
 from (select web_site_sk, web_rec_end_date
@@ -88,7 +88,7 @@ group by 1, web_site_sk
 having dt.web_site_sk > 1 and min(distinct web_rec_end_date) is not null
 order by 1, 2;
 --left join
-explain (costs off, nodes off)
+explain (costs off)
 select dt.web_site_sk * d_current_quarter,
 avg(distinct dt.web_site_sk)
 from (select web_site_sk, web_rec_end_date
@@ -99,7 +99,7 @@ group by 1, web_site_sk
 having dt.web_site_sk > 1 and min(distinct web_rec_end_date) is not null
 order by 1, 2;
 --right join
-explain (costs off, nodes off)
+explain (costs off)
 select dt.web_site_sk * d_current_quarter,
 avg(distinct dt.web_site_sk)
 from (select web_site_sk, web_rec_end_date
@@ -109,7 +109,7 @@ on substr(d_date_sk, -1) = web_site_sk
 group by 1, web_site_sk
 having dt.web_site_sk > 1 and min(distinct web_rec_end_date) is not null
 order by 1, 2;
-explain (costs off, nodes off)
+explain (costs off)
 select dt.web_site_sk * d_current_quarter,
        avg(distinct dt.web_site_sk)
   from (select web_site_sk, web_rec_end_date
@@ -119,7 +119,7 @@ select dt.web_site_sk * d_current_quarter,
  group by 1, web_site_sk+1
 having coalesce(dt.web_site_sk+1,2)>1 and min(distinct web_rec_end_date) is not null
  order by 1, 2;
-explain (costs off, nodes off)
+explain (costs off)
 select dt.web_site_sk * d_current_quarter,
        avg(distinct dt.web_site_sk)
   from (select web_site_sk, web_rec_end_date
@@ -180,7 +180,7 @@ WITH (orientation=column)
 /*DISTRIBUTE BY HASH (net_bank)*/;
 
 -- original test
-explain (verbose, costs off, nodes off)
+explain (verbose, costs off)
 select '20180831' rpt_Dt, org_id org_id,
        count(case
                when a.rpt_dt = '20180831' and
@@ -203,7 +203,7 @@ select '20180831' rpt_Dt, org_id org_id,
  group by a.org_id;
 
 -- targetlist & grouplist with different varno
-explain (verbose, costs off, nodes off)
+explain (verbose, costs off)
 select '20180831' rpt_Dt, a.org_id,
        count(case
                when a.rpt_dt = '20180831' and
@@ -226,7 +226,7 @@ select '20180831' rpt_Dt, a.org_id,
  group by org_id;
 
 -- explore count-distinct in having clause
-explain (verbose, costs off, nodes off)
+explain (verbose, costs off)
 select '20180831' rpt_Dt, a.org_id,
        count(case
                when a.rpt_dt = '20180831' and
@@ -242,7 +242,7 @@ select '20180831' rpt_Dt, a.org_id,
  having count(distinct a.is_type) > 100;
 
 -- explore count-distinct in having clause with expressions
-explain (verbose, costs off, nodes off)
+explain (verbose, costs off)
 select '20180831' rpt_Dt, org_id,
        count(case
                when a.rpt_dt = '20180831' and
@@ -258,7 +258,7 @@ select '20180831' rpt_Dt, org_id,
  having sum(distinct a.is_type) + avg(distinct org_id)> 100;
 
 -- explore count-distinct in order by clause
-explain (verbose, costs off, nodes off)
+explain (verbose, costs off)
 select '20180831' rpt_Dt, org_id,
        count(case
                when a.rpt_dt = '20180831' and
@@ -275,7 +275,7 @@ select '20180831' rpt_Dt, org_id,
  order by 2;
 
 -- explore count-distinct in having clause of order by clause
-explain (verbose, costs off, nodes off)
+explain (verbose, costs off)
 select '20180831' rpt_Dt, org_id,
        count(case
                when a.rpt_dt = '20180831' and
@@ -292,7 +292,7 @@ select '20180831' rpt_Dt, org_id,
  order by 2;
 
 -- explore count-distinct in AP function and window function
-explain (verbose, costs off, nodes off)
+explain (verbose, costs off)
 select '20180831' rpt_Dt, org_id,
        count(case
                when a.rpt_dt = '20180831' and

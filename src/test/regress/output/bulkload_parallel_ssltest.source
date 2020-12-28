@@ -1,0 +1,188 @@
+-- prepare the ssl certificate files
+\! @abs_bindir@/gs_guc encrypt -M client -K Gauss@123 -D @abs_srcdir@/sslcert_withpwd > /dev/null 2>&1
+gs_guc encrypt -M client -K *** 
+\! @abs_bindir@/gs_guc encrypt -M server -K Gauss@123 -D @abs_srcdir@/sslcert_withpwd > /dev/null 2>&1
+gs_guc encrypt -M server -K *** 
+\! chmod 600 @abs_srcdir@/sslcert_withpwd/*
+\! mkdir -p $GAUSSHOME/share/sslcert/gds
+\! mkdir -p $OLDGAUSSHOME/share/sslcert/gds
+\! cp @abs_srcdir@/sslcert_withpwd/* $OLDGAUSSHOME/share/sslcert/gds
+\! cp @abs_srcdir@/sslcert_withpwd/* $GAUSSHOME/share/sslcert/gds
+-- kill all gds workers 
+\! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 9 > /dev/null 2>&1
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -H 0.0.0.0/0 -D -l @abs_srcdir@/data/datanode1/gds.log
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8903 -H 0.0.0.0/0 -D -l @abs_srcdir@/data/datanode1/gds.log --enable-ssl --ssl-dir $GAUSSHOME/share/sslcert/gds
+[SSL] SSL system is inited successfully.
+-- BULK LOAD PARALLEL SSLTEST
+--
+----
+-- 1. Load data in normal mode with CSV format
+----
+CREATE TABLE LINEITEM
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+distribute by hash(L_ORDERKEY);
+CREATE FOREIGN TABLE EXT_LINEITEM (
+	L_ORDERKEY    BIGINT NOT NULL,        
+	L_PARTKEY     BIGINT NOT NULL,        
+	L_SUPPKEY     BIGINT NOT NULL,        
+	L_LINENUMBER  BIGINT NOT NULL,        
+	L_QUANTITY    DECIMAL(15,2) NOT NULL,        
+	L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,        
+	L_DISCOUNT    DECIMAL(15,2) NOT NULL,        
+	L_TAX     DECIMAL(15,2) NOT NULL,        
+	L_RETURNFLAG  CHAR(1) NOT NULL,        
+	L_LINESTATUS  CHAR(1) NOT NULL,        
+	L_SHIPDATE    DATE NOT NULL,        
+	L_COMMITDATE  DATE NOT NULL,        
+	L_RECEIPTDATE DATE NOT NULL,        
+	L_SHIPINSTRUCT CHAR(25) NOT NULL,        
+	L_SHIPMODE     CHAR(10) NOT NULL,        
+	L_COMMENT      VARCHAR(44) NOT NULL
+)SERVER gsmpp_server OPTIONS(format 'csv', location 'gsfs://127.0.0.1:8900/lineitem.data', delimiter '|', mode 'normal');
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+--Load data with enableSSL
+CREATE TABLE LINEITEMSSL
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+distribute by hash(L_ORDERKEY);
+CREATE FOREIGN TABLE EXT_LINEITEMSSL (
+	L_ORDERKEY    BIGINT NOT NULL,        
+	L_PARTKEY     BIGINT NOT NULL,        
+	L_SUPPKEY     BIGINT NOT NULL,        
+	L_LINENUMBER  BIGINT NOT NULL,        
+	L_QUANTITY    DECIMAL(15,2) NOT NULL,        
+	L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,        
+	L_DISCOUNT    DECIMAL(15,2) NOT NULL,        
+	L_TAX     DECIMAL(15,2) NOT NULL,        
+	L_RETURNFLAG  CHAR(1) NOT NULL,        
+	L_LINESTATUS  CHAR(1) NOT NULL,        
+	L_SHIPDATE    DATE NOT NULL,        
+	L_COMMITDATE  DATE NOT NULL,        
+	L_RECEIPTDATE DATE NOT NULL,        
+	L_SHIPINSTRUCT CHAR(25) NOT NULL,        
+	L_SHIPMODE     CHAR(10) NOT NULL,        
+	L_COMMENT      VARCHAR(44) NOT NULL
+)SERVER gsmpp_server OPTIONS(format 'csv', location 'gsfss://127.0.0.1:8903/lineitem.data', delimiter '|', mode 'normal');
+INSERT INTO LINEITEMSSL SELECT * FROM EXT_LINEITEMSSL;
+-- test the accuacy
+select count(*) from (select * from LINEITEMSSL minus all select * from LINEITEM);
+ count 
+-------
+     0
+(1 row)
+
+TRUNCATE LINEITEM;
+TRUNCATE LINEITEMSSL;
+DROP FOREIGN TABLE EXT_LINEITEM;
+DROP FOREIGN TABLE EXT_LINEITEMSSL;
+----
+--2. Load data in normal mode with TEXT format
+----
+CREATE FOREIGN TABLE EXT_LINEITEM (
+        L_ORDERKEY    BIGINT NOT NULL,
+        L_PARTKEY     BIGINT NOT NULL,
+        L_SUPPKEY     BIGINT NOT NULL,
+        L_LINENUMBER  BIGINT NOT NULL,
+        L_QUANTITY    DECIMAL(15,2) NOT NULL,
+        L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,
+        L_DISCOUNT    DECIMAL(15,2) NOT NULL,
+        L_TAX     DECIMAL(15,2) NOT NULL,
+        L_RETURNFLAG  CHAR(1) NOT NULL,
+        L_LINESTATUS  CHAR(1) NOT NULL,
+        L_SHIPDATE    DATE NOT NULL,
+        L_COMMITDATE  DATE NOT NULL,
+        L_RECEIPTDATE DATE NOT NULL,
+        L_SHIPINSTRUCT CHAR(25) NOT NULL,
+        L_SHIPMODE     CHAR(10) NOT NULL,
+        L_COMMENT      VARCHAR(44) NOT NULL
+)SERVER gsmpp_server OPTIONS(format 'text', location 'gsfs://127.0.0.1:8900/lineitem.data', delimiter '|', mode 'normal');
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+CREATE FOREIGN TABLE EXT_LINEITEMSSL (
+        L_ORDERKEY    BIGINT NOT NULL,
+        L_PARTKEY     BIGINT NOT NULL,
+        L_SUPPKEY     BIGINT NOT NULL,
+        L_LINENUMBER  BIGINT NOT NULL,
+        L_QUANTITY    DECIMAL(15,2) NOT NULL,
+        L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,
+        L_DISCOUNT    DECIMAL(15,2) NOT NULL,
+        L_TAX     DECIMAL(15,2) NOT NULL,
+        L_RETURNFLAG  CHAR(1) NOT NULL,
+        L_LINESTATUS  CHAR(1) NOT NULL,
+        L_SHIPDATE    DATE NOT NULL,
+        L_COMMITDATE  DATE NOT NULL,
+        L_RECEIPTDATE DATE NOT NULL,
+        L_SHIPINSTRUCT CHAR(25) NOT NULL,
+        L_SHIPMODE     CHAR(10) NOT NULL,
+        L_COMMENT      VARCHAR(44) NOT NULL
+)SERVER gsmpp_server OPTIONS(format 'text', location 'gsfss://127.0.0.1:8903/lineitem.data', delimiter '|', mode 'normal');
+INSERT INTO LINEITEMSSL SELECT * FROM EXT_LINEITEMSSL;
+-- test the accuacy
+select count(*) from (select * from LINEITEMSSL minus all select * from LINEITEM);
+ count 
+-------
+     0
+(1 row)
+
+-- export the foreign table
+CREATE FOREIGN TABLE EXT_LINEITEMSSL_WT (
+        L_ORDERKEY    BIGINT NOT NULL,
+        L_PARTKEY     BIGINT NOT NULL,
+        L_SUPPKEY     BIGINT NOT NULL,
+        L_LINENUMBER  BIGINT NOT NULL,
+        L_QUANTITY    DECIMAL(15,2) NOT NULL,
+        L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,
+        L_DISCOUNT    DECIMAL(15,2) NOT NULL,
+        L_TAX     DECIMAL(15,2) NOT NULL,
+        L_RETURNFLAG  CHAR(1) NOT NULL,
+        L_LINESTATUS  CHAR(1) NOT NULL,
+        L_SHIPDATE    DATE NOT NULL,
+        L_COMMITDATE  DATE NOT NULL,
+        L_RECEIPTDATE DATE NOT NULL,
+        L_SHIPINSTRUCT CHAR(25) NOT NULL,
+        L_SHIPMODE     CHAR(10) NOT NULL,
+        L_COMMENT      VARCHAR(44) NOT NULL
+)SERVER gsmpp_server OPTIONS(format 'text', location 'gsfss://127.0.0.1:8903/', delimiter '|') write only;
+INSERT INTO EXT_LINEITEMSSL_WT SELECT * FROM LINEITEMSSL;
+\! rm @abs_srcdir@/data/datanode1/ext_lineitemssl_wt.dat.0
+--end of the parallel test
+TRUNCATE LINEITEM;
+TRUNCATE LINEITEMSSL;
+DROP FOREIGN TABLE EXT_LINEITEM;
+DROP FOREIGN TABLE EXT_LINEITEMSSL;
+DROP FOREIGN TABLE EXT_LINEITEMSSL_WT;
+drop table LINEITEM;
+drop table LINEITEMSSL;
+\! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 9 > /dev/null 2>&1

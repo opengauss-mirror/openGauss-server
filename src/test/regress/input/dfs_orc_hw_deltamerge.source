@@ -1,0 +1,249 @@
+set enable_global_stats = true;
+drop function print_delta_count;
+CREATE OR REPLACE FUNCTION print_delta_count()
+  RETURNS TABLE (rowcount bigint) AS
+$$
+declare tblname text;
+BEGIN
+    select a.relname into tblname from pg_class a, pg_class b where a.oid=b.reldeltarelid and b.relname='t1';
+
+    RETURN QUERY execute format('select count(*) from cstore.%I', tblname);
+END;
+$$ LANGUAGE plpgsql;
+
+drop function print_delta_count_t2;
+CREATE OR REPLACE FUNCTION print_delta_count_t2()
+  RETURNS TABLE (rowcount bigint) AS
+$$
+declare tblname text;
+BEGIN
+    select a.relname into tblname from pg_class a, pg_class b where a.oid=b.reldeltarelid and b.relname='t2';
+
+    RETURN QUERY execute format('select count(*) from cstore.%I', tblname);
+END;
+$$ LANGUAGE plpgsql;
+
+-- no hdfs table in provided schema
+create schema schema_deltamerge;
+vacuum deltamerge schema_deltamerge.t1;
+drop schema schema_deltamerge;
+
+-- no hdfs table in current schema
+drop table if exists t1;
+vacuum deltamerge t1;
+
+-- not supported to deltamerge for row, column
+drop table if exists rowt;
+drop table if exists colt;
+create table rowt(id int);
+create table colt(id int) with (orientation=column);
+vacuum deltamerge rowt;
+vacuum deltamerge colt;
+
+-- not supported to deltamerge in transaction block
+drop table if exists t1;
+create table t1(id int) tablespace hdfs_ts;
+start transaction;
+vacuum deltamerge t1;
+rollback;
+
+-- not supported to deltamerge in procedure
+--CREATE OR REPLACE PROCEDURE do_deltamerge
+--(
+--    param1    IN   INTEGER,
+--    param2    IN OUT  INTEGER
+--)
+--AS
+--BEGIN
+--   vacuum deltamerge t1;
+--   --vacuum full rowt;
+--END;
+--select do_deltamerge(2,3);
+
+-- empty table 
+drop table if exists t1;
+create table t1(id int) tablespace hdfs_ts;
+
+set cstore_insert_mode=delta;
+vacuum deltamerge t1;
+
+set cstore_insert_mode=auto;
+vacuum deltamerge t1;
+
+set cstore_insert_mode=main;
+vacuum deltamerge t1;
+
+-- 1 row in delta table
+drop table if exists t1;
+create table t1(id int, val int) tablespace hdfs_ts;
+
+set cstore_insert_mode=delta;
+insert into t1 values(13, 1);
+select count(*) from t1;
+
+set cstore_insert_mode=delta;
+vacuum deltamerge t1;
+execute direct on(datanode1) 'select print_delta_count()';
+
+set cstore_insert_mode=auto;
+vacuum deltamerge t1;
+execute direct on(datanode1) 'select print_delta_count()';
+
+set cstore_insert_mode=main;
+vacuum deltamerge t1;
+execute direct on(datanode1) 'select print_delta_count()';
+
+-- 4999 rows in delta table
+drop table if exists t1;
+create table t1(id int, val int) tablespace hdfs_ts;
+
+set cstore_insert_mode=delta;
+insert into t1 values(13, generate_series(1,4999));
+select count(*) from t1;
+
+set cstore_insert_mode=delta;
+vacuum deltamerge t1;
+execute direct on(datanode1) 'select print_delta_count()';
+
+set cstore_insert_mode=auto;
+vacuum deltamerge t1;
+execute direct on(datanode1) 'select print_delta_count()';
+
+set cstore_insert_mode=main;
+vacuum deltamerge t1;
+execute direct on(datanode1) 'select print_delta_count()';
+
+-- 60000 rows in delta table
+drop table if exists t1;
+create table t1(id int, val int) tablespace hdfs_ts;
+
+set cstore_insert_mode=delta;
+insert into t1 values(13, generate_series(1,60000));
+select count(*) from t1;
+
+set cstore_insert_mode=delta;
+vacuum deltamerge t1;
+execute direct on(datanode1) 'select print_delta_count()';
+
+set cstore_insert_mode=auto;
+vacuum deltamerge t1;
+execute direct on(datanode1) 'select print_delta_count()';
+
+set cstore_insert_mode=main;
+vacuum deltamerge t1;
+execute direct on(datanode1) 'select print_delta_count()';
+
+-- 5001 rows in delta table
+drop table if exists t1;
+create table t1(id int, val int) tablespace hdfs_ts;
+
+set cstore_insert_mode=delta;
+insert into t1 values(13, generate_series(1,5001));
+select count(*) from t1;
+
+set cstore_insert_mode=delta;
+vacuum deltamerge t1;
+execute direct on(datanode1) 'select print_delta_count()';
+
+set cstore_insert_mode=auto;
+vacuum deltamerge t1;
+execute direct on(datanode1) 'select print_delta_count()';
+
+set cstore_insert_mode=main;
+vacuum deltamerge t1;
+execute direct on(datanode1) 'select print_delta_count()';
+
+-- with schema.table_name
+drop table if exists t1;
+create schema schema_deltamerge;
+create table schema_deltamerge.t1(id int, val int) tablespace hdfs_ts;
+set cstore_insert_mode=delta;
+insert into schema_deltamerge.t1 values(13, generate_series(1,5001));
+select count(*) from schema_deltamerge.t1;
+
+set cstore_insert_mode=delta;
+vacuum deltamerge schema_deltamerge.t1;
+
+set current_schema=schema_deltamerge;
+execute direct on(datanode1) 'select public.print_delta_count()';
+set current_schema=public;
+
+set cstore_insert_mode=auto;
+vacuum deltamerge schema_deltamerge.t1;
+
+set current_schema=schema_deltamerge;
+execute direct on(datanode1) 'select public.print_delta_count()';
+set current_schema=public;
+
+set cstore_insert_mode=main;
+vacuum deltamerge schema_deltamerge.t1;
+
+set current_schema=schema_deltamerge;
+execute direct on(datanode1) 'select public.print_delta_count()';
+set current_schema=public;
+
+drop table if exists schema_deltamerge.t1;
+drop schema schema_deltamerge;
+
+-- no table name, do deltamerge for all hdfs table in current schema
+drop table if exists t1;
+drop table if exists t2;
+
+set cstore_insert_mode=delta;
+create table t1(id int, val int) tablespace hdfs_ts;
+create table t2(id int, val int) tablespace hdfs_ts;
+insert into t1 values(13, generate_series(1,5001));
+insert into t2 values(13, generate_series(1,5001));
+select count(*) from t1;
+select count(*) from t2;
+
+set cstore_insert_mode=delta;
+vacuum deltamerge;
+execute direct on(datanode1) 'select print_delta_count()';
+execute direct on(datanode1) 'select print_delta_count_t2()';
+
+set cstore_insert_mode=auto;
+vacuum deltamerge;
+execute direct on(datanode1) 'select print_delta_count()';
+execute direct on(datanode1) 'select print_delta_count_t2()';
+
+set cstore_insert_mode=main;
+vacuum deltamerge;
+execute direct on(datanode1) 'select print_delta_count()';
+execute direct on(datanode1) 'select print_delta_count_t2()';
+
+-- deltamerge on db(multi schema)
+drop table if exists t1;
+drop table if exists t2;
+set cstore_insert_mode=delta;
+
+create schema delta1;
+set current_schema to delta1;
+create table t1(id int, val int) tablespace hdfs_ts;
+insert into t1 values(13,1);
+
+create schema delta2;
+set current_schema to delta2;
+create table t2(id int, val int) tablespace hdfs_ts;
+insert into t2 values(13,1);
+
+reset current_schema;
+set cstore_insert_mode=main;
+vacuum deltamerge;
+
+execute direct on(datanode1) 'select public.print_delta_count()';
+execute direct on(datanode1) 'select public.print_delta_count_t2()';
+
+drop table if exists delta1.t1;
+drop table if exists delta2.t2;
+drop schema delta1 cascade;
+drop schema delta2 cascade;
+
+-- clean test enviroment;
+drop table if exists rowt;
+drop table if exists colt;
+drop table if exists t1;
+drop table if exists t2;
+
+drop function print_delta_count;
+drop function print_delta_count_t2;

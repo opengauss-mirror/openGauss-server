@@ -61,30 +61,39 @@ public:
 
     ThreadPoolControler();
     ~ThreadPoolControler();
+
     void Init(bool enableNumaDistribute);
-    void ShutDownWorker(bool forceWait = false);
+    void ShutDownThreads(bool forceWait = false);
     int DispatchSession(Port* port);
     void AddWorkerIfNecessary();
     void SetThreadPoolInfo();
     int GetThreadNum();
     ThreadPoolStat* GetThreadPoolStat(uint32* num);
     bool StayInAttachMode();
-    void ReBindStreamThread(ThreadId tid) const;
     void CloseAllSessions();
     bool CheckNumaDistribute(int numaNodeNum) const;
     CPUBindType GetCpuBindType() const;
-
+    void ShutDownListeners(bool forceWait);
+    void ShutDownScheduler(bool forceWait);
     inline ThreadPoolSessControl* GetSessionCtrl()
     {
         return m_sessCtrl;
     }
-
+    inline ThreadPoolScheduler* GetScheduler()
+    {
+        return m_scheduler;
+    }
     inline int GetGroupNum()
     {
         return m_groupNum;
     }
 
-    void BindThreadToAllAvailCpu(ThreadId thread) const;
+    inline MemoryContext GetMemCxt()
+    {
+        return m_threadPoolContext;
+    }
+	
+	void BindThreadToAllAvailCpu(ThreadId thread) const;
 
 private:
     ThreadPoolGroup* FindThreadGroupWithLeastSession();
@@ -97,9 +106,9 @@ private:
     void GetCpuAndNumaNum();
     bool IsActiveCpu(int cpuid, int numaid);
     void SetGroupAndThreadNum();
+    void ConstrainThreadNum();
     void GetInstanceBind();
     bool CheckCpuBind() const;
-    void ConstrainThreadNum();
 
 private:
     MemoryContext m_threadPoolContext;

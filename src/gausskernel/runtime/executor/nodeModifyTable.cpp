@@ -40,12 +40,14 @@
 #include "knl/knl_variable.h"
 #include "access/dfs/dfs_insert.h"
 #include "access/xact.h"
+#include "access/tableam.h"
 #include "catalog/heap.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/storage_gtt.h"
 #include "commands/defrem.h"
 #include "commands/tablecmds.h"
+#include "commands/matview.h"
 #ifdef PGXC
 #include "access/sysattr.h"
 #endif
@@ -61,9 +63,10 @@
 #include "parser/parsetree.h"
 #include "pgxc/execRemote.h"
 #include "pgxc/pgxc.h"
+#include "pgxc/redistrib.h"
 #endif
 #include "replication/dataqueue.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/lmgr.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
@@ -72,7 +75,6 @@
 #include "utils/syscache.h"
 #include "utils/partitionmap.h"
 #include "utils/partitionmap_gs.h"
-#include "utils/tqual.h"
 #include "commands/copy.h"
 #include "commands/copypartition.h"
 #include "utils/portal.h"
@@ -99,6 +101,9 @@ extern void FlushInsertSelectBulk(
 extern void FlushErrorInfo(Relation rel, EState* estate, ErrorCacheEntry* cache);
 extern void HeapInsertCStore(Relation relation, ResultRelInfo* resultRelInfo, HeapTuple tup, int option);
 extern void HeapDeleteCStore(Relation relation, ItemPointer tid, Oid tableOid, Snapshot snapshot);
+#ifdef ENABLE_MULTIPLE_NODES
+extern void HeapInsertTsStore(Relation relation, ResultRelInfo* resultRelInfo, HeapTuple tup, int option);
+#endif   /* ENABLE_MULTIPLE_NODES */
 
 /* check if set_dummy_tlist_references has set the dummy targetlist */
 static bool has_dummy_targetlist(Plan* plan)
@@ -253,16 +258,26 @@ static void ExecCheckHeapTupleVisible(EState* estate, HeapTuple tuple, Buffer bu
     if (!IsolationUsesXactSnapshot())
         return;
 
-    if (!HeapTupleSatisfiesVisibility(tuple, estate->es_snapshot, buffer))
+    LockBuffer(buffer, BUFFER_LOCK_SHARE);
+    if (!HeapTupleSatisfiesVisibility(tuple, estate->es_snapshot, buffer)) {
+        LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
         ereport(ERROR,
                 (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                  errmsg("could not serialize access due to concurrent update")));
+    }
+    LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
 }
 
 static void ExecCheckTIDVisible(EState* estate, Relation rel, ItemPointer tid)
 {
     Buffer      buffer;
     HeapTupleData tuple;
+    struct {
+        HeapTupleHeaderData hdr;
+        char data[MaxHeapTupleSize];
+    } tbuf;
+
+    tuple.t_data = &tbuf.hdr;
 
     /* check isolation level to tell if tuple visibility check is needed */
     if (!IsolationUsesXactSnapshot()) {
@@ -287,21 +302,20 @@ static bool ExecConflictUpdate(ModifyTableState* mtstate, ResultRelInfo* resultR
     Relation    relation = targetRel;
     UpsertState* upsertState = mtstate->mt_upsert;
     HeapTupleData tuple;
-    HTSU_Result test;
+    TM_Result test;
+    TM_FailureData tmfd;
     Buffer      buffer;
-    ItemPointerData update_ctid;
-    TransactionId update_xmax;
 
     tuple.t_self = *conflictTid;
-    test = heap_lock_tuple(relation, &tuple, &buffer,
-                           &update_ctid, &update_xmax,
-                           estate->es_output_cid, LockTupleExclusive, false);
+    test = tableam_tuple_lock(relation, &tuple, &buffer,
+                              estate->es_output_cid, LockTupleExclusive, false, &tmfd,
+                              false, false, false, InvalidSnapshot, NULL, false);
 checktest:
     switch (test) {
-        case HeapTupleMayBeUpdated:
+        case TM_Ok:
             /* success */
             break;
-        case HeapTupleSelfCreated:
+        case TM_SelfCreated:
             /*
              * This can occur when a just inserted tuple is updated again in
              * the same command. E.g. because multiple rows with the same
@@ -324,19 +338,20 @@ checktest:
              */
             ReleaseBuffer(buffer);
 #ifdef ENABLE_MULTIPLE_NODES
-            if (!(u_sess->attr.attr_sql.sql_compatibility & DB_CMPT_C)) {
-               ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-                   errmsg("ON DUPLICATE KEY UPDATE command cannot affect row a second time"),
-                   errhint("Ensure that no rows proposed for insertion within"
-                       "the same command have duplicate constrained values.")));
+            if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+                ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                    errmsg("ON DUPLICATE KEY UPDATE command cannot affect row a second time"),
+                    errhint("Ensure that no rows proposed for insertion within"
+                        "the same command have duplicate constrained values.")));
             }
 #endif
-            test = heap_lock_tuple(relation, &tuple, &buffer, &update_ctid, &update_xmax,
-                                   estate->es_output_cid, LockTupleExclusive, false, true);
-            Assert(test != HeapTupleSelfCreated);
+            test = tableam_tuple_lock(relation, &tuple, &buffer,
+                                      estate->es_output_cid, LockTupleExclusive, false, &tmfd, 
+                                      true, false, false, InvalidSnapshot, NULL, false);
+            Assert(test != TM_SelfCreated);
             goto checktest;
             break;
-        case HeapTupleSelfUpdated:
+        case TM_SelfUpdated:
             ReleaseBuffer(buffer);
             /*
              * This state should never be reached. As a dirty snapshot is used
@@ -346,7 +361,7 @@ checktest:
             ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                 errmsg("unexpected self-updated tuple")));
             break;
-        case HeapTupleUpdated:
+        case TM_Updated:
             ReleaseBuffer(buffer);
             if (IsolationUsesXactSnapshot()) {
                 ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
@@ -359,7 +374,7 @@ checktest:
              * anymore, or the conflicting tuple has actually been deleted.
              */
             return false;
-        case HeapTupleBeingUpdated:
+        case TM_BeingModified:
             ReleaseBuffer(buffer);
             ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                     errmsg("unexpected concurrent update tuple")));
@@ -410,7 +425,7 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
     bool canSetTag, HeapTuple tuple, TupleTableSlot** returning, bool* updated)
 {
     Oid newid = InvalidOid;
-    bool        specConflict;
+    bool        specConflict = false;
     List* recheckIndexes = NIL;
     ResultRelInfo* resultRelInfo = NULL;
     Relation    resultRelationDesc = NULL;
@@ -439,9 +454,9 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
 
     if (unlikely(RelationIsPAXFormat(resultRelationDesc))) {
         ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-              errmsg("ON DUPLICATE KEY UPDATE is not supported on DFS table"))));
+           (errmodule(MOD_EXECUTOR),
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("ON DUPLICATE KEY UPDATE is not supported on DFS table"))));
     }
 
     if (RelationIsPartitioned(resultRelationDesc)) {
@@ -476,8 +491,8 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
              */
             *returning = NULL;
 
-            if (ExecConflictUpdate(state, resultRelInfo, &conflictTid, planSlot, slot, estate, targetrel, partitionid,
-                                   bucketid, canSetTag, returning)) {
+            if (ExecConflictUpdate(state, resultRelInfo, &conflictTid, planSlot, slot,
+                    estate, targetrel, partitionid, bucketid, canSetTag, returning)) {
                 InstrCountFiltered2(&state->ps, 1);
                 *updated = true;
                 return InvalidOid;
@@ -499,7 +514,7 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
     }
 
     /* insert the tuple */
-    newid = heap_insert(targetrel, tuple, estate->es_output_cid, 0, NULL);
+    newid = tableam_tuple_insert(targetrel, tuple, estate->es_output_cid, 0, NULL);
 
     /* insert index entries for tuple */
     recheckIndexes = ExecInsertIndexTuples(slot, &(tuple->t_self), estate, heaprel,
@@ -515,9 +530,15 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
         goto vlock;
     }
 
+    /* try to insert tuple into mlog-table. */
+    if (targetrel != NULL && targetrel->rd_mlogoid != InvalidOid) {
+        /* judge whether need to insert into mlog-table */
+        insert_into_mlog_table(targetrel, targetrel->rd_mlogoid, tuple,
+                    &tuple->t_self, GetCurrentTransactionId(), 'I');
+    }
+
     return newid;
 }
-
 
 /* ----------------------------------------------------------------
  *		ExecInsert
@@ -583,6 +604,9 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
      * for a MERGE or INSERT ... ON DUPLICATE KEY UPDATE statement.
      */
     if (state->operation != CMD_MERGE &&
+#ifdef ENABLE_MULTIPLE_NODES	
+		state->mt_upsert->us_action == UPSERT_NONE &&
+#endif		
         result_rel_info->ri_TrigDesc && result_rel_info->ri_TrigDesc->trig_insert_before_row) {
         slot = ExecBRInsertTriggers(estate, result_rel_info, slot);
         if (slot == NULL) /* "do nothing" */
@@ -592,11 +616,14 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
         tuple = ExecMaterializeSlot(slot);
     }
 
-    /* INSTEAD OF ROW INSERT Triggers 
+    /* INSTEAD OF ROW INSERT Triggers
      * Note: We fire INSREAD OF ROW TRIGGERS for every attempted insertion except
      * for a MERGE or INSERT ... ON DUPLICATE KEY UPDATE statement.
      */
     if (state->operation != CMD_MERGE &&
+#ifdef ENABLE_MULTIPLE_NODES	
+		state->mt_upsert->us_action == UPSERT_NONE &&
+#endif		
         result_rel_info->ri_TrigDesc && result_rel_info->ri_TrigDesc->trig_insert_instead_row) {
         slot = ExecIRInsertTriggers(estate, result_rel_info, slot);
         if (slot == NULL) /* "do nothing" */
@@ -607,6 +634,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
 
         new_id = InvalidOid;
     } else if (result_rel_info->ri_FdwRoutine) {
+#ifdef ENABLE_MOT
         if (result_rel_info->ri_FdwRoutine->GetFdwType && result_rel_info->ri_FdwRoutine->GetFdwType() == MOT_ORC) {
             if (result_relation_desc->rd_att->constr) {
                 if (state->mt_insert_constr_slot == NULL) {
@@ -616,36 +644,21 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                 }
             }
         }
-#ifdef PGXC
-        if (IS_PGXC_COORDINATOR && result_remote_rel && result_rel_info->ri_FdwRoutine->GetFdwType &&
-                result_rel_info->ri_FdwRoutine->GetFdwType() == MOT_ORC) {
-            slot = ExecProcNodeDMLInXC(estate, planSlot, slot);
-            /*
-             * PGXCTODO: If target table uses WITH OIDS, this should be set to the Oid inserted
-             * but Oids are not consistent among nodes in Postgres-XC, so this is set to the
-             * default value InvalidOid for the time being. It corrects at least tags for all
-             * the other INSERT commands.
-             */
-            new_id = InvalidOid;
-        } else {
 #endif
-            /*
-             * insert into foreign table: let the FDW do it
-             */
-            slot = result_rel_info->ri_FdwRoutine->ExecForeignInsert(estate, result_rel_info, slot, planSlot);
+        /*
+         * insert into foreign table: let the FDW do it
+         */
+        slot = result_rel_info->ri_FdwRoutine->ExecForeignInsert(estate, result_rel_info, slot, planSlot);
 
-            if (slot == NULL) {
-                /* "do nothing" */
-                return NULL;
-            }
-
-            /* FDW might have changed tuple */
-            tuple = ExecMaterializeSlot(slot);
-
-            new_id = InvalidOid;
-#ifdef PGXC
+        if (slot == NULL) {
+            /* "do nothing" */
+            return NULL;
         }
-#endif
+
+        /* FDW might have changed tuple */
+        tuple = ExecMaterializeSlot(slot);
+
+        new_id = InvalidOid;
     } else {
         /*
          * Check the constraints of the tuple
@@ -674,7 +687,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
         } else
 #endif
             if (useHeapMultiInsert) {
-                TupleTableSlot* tmp_slot = MakeSingleTupleTableSlot(slot->tts_tupleDescriptor);
+                TupleTableSlot* tmp_slot = MakeSingleTupleTableSlot(slot->tts_tupleDescriptor, false, result_relation_desc->rd_tam_type);
 
                 bool is_partition_rel = result_relation_desc->rd_rel->parttype == PARTTYPE_PARTITIONED_RELATION;
                 bulk = findBulk(((DistInsertSelectState*)state)->mgr,
@@ -692,16 +705,9 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                                                                     tmpCopyFromMemCxt->chunk[i]->partOid);
                         }
                     }
-                    CopyFromChunkInsert<true>(NULL,
-                        estate,
-                        bulk,
-                        ((DistInsertSelectState*)state)->mgr,
-                        ((DistInsertSelectState*)state)->pcState,
-                        estate->es_output_cid,
-                        options,
-                        result_rel_info,
-                        tmp_slot,
-                        ((DistInsertSelectState*)state)->bistate);
+                    CopyFromChunkInsert<true>(NULL, estate, bulk, ((DistInsertSelectState*)state)->mgr,
+                        ((DistInsertSelectState*)state)->pcState, estate->es_output_cid,
+                        options, result_rel_info, tmp_slot, ((DistInsertSelectState*)state)->bistate);
                 }
 
                 addToBulk<true>(bulk, tuple, true);
@@ -715,16 +721,9 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                                                                     tmpCopyFromMemCxt->chunk[i]->partOid);
                         }
                     }
-                    CopyFromChunkInsert<true>(NULL,
-                        estate,
-                        bulk,
-                        ((DistInsertSelectState*)state)->mgr,
-                        ((DistInsertSelectState*)state)->pcState,
-                        estate->es_output_cid,
-                        options,
-                        result_rel_info,
-                        tmp_slot,
-                        ((DistInsertSelectState*)state)->bistate);
+                    CopyFromChunkInsert<true>(NULL, estate, bulk, ((DistInsertSelectState*)state)->mgr,
+                        ((DistInsertSelectState*)state)->pcState, estate->es_output_cid, options,
+                        result_rel_info, tmp_slot, ((DistInsertSelectState*)state)->bistate);
                 }
 
                 ExecDropSingleTupleTableSlot(tmp_slot);
@@ -764,7 +763,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                                 searchHBucketFakeRelation(estate->esfRelations, estate->es_query_cxt,
                                     result_relation_desc, bucket_id, target_rel);
                             }
-                            new_id = heap_insert(target_rel, tuple, estate->es_output_cid, 0, NULL);
+                            new_id = tableam_tuple_insert(target_rel, tuple, estate->es_output_cid, 0, NULL);
                         }
                     } break;
 
@@ -772,30 +771,28 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         /* get partititon oid for insert the record */
                         partition_id = heapTupleGetPartitionId(result_relation_desc, tuple);
 
-                        searchFakeReationForPartitionOid(estate->esfRelations,
-                            estate->es_query_cxt,
-                            result_relation_desc,
-                            partition_id,
-                            heap_rel,
-                            partition,
-                            RowExclusiveLock);
+                        searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt,
+                            result_relation_desc, partition_id, heap_rel, partition, RowExclusiveLock);
                         if (RelationIsColStore(result_relation_desc))
                             HeapInsertCStore(heap_rel, estate->es_result_relation_info, tuple, 0);
+#ifdef ENABLE_MULTIPLE_NODES
+                        else if (RelationIsTsStore(result_relation_desc)) {
+                            HeapInsertTsStore(result_relation_desc, estate->es_result_relation_info, tuple, 0);
+                        }
+#endif   /* ENABLE_MULTIPLE_NODES */
                         else {
                             target_rel = heap_rel;
                             if (bucket_id != InvalidBktId) {
                                 searchHBucketFakeRelation(
                                     estate->esfRelations, estate->es_query_cxt, heap_rel, bucket_id, target_rel);
                             }
-                            new_id = heap_insert(target_rel, tuple, estate->es_output_cid, 0, NULL);
+                            new_id = tableam_tuple_insert(target_rel, tuple, estate->es_output_cid, 0, NULL);
                         }
                     } break;
 
                     default: {
                         /* never happen; just to be self-contained */
-                        ereport(ERROR,
-                            (errmodule(MOD_EXECUTOR),
-                                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                        ereport(ERROR, (errmodule(MOD_EXECUTOR), (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                                     errmsg("Unrecognized parttype as \"%c\" for relation \"%s\"",
                                         RelationGetPartType(result_relation_desc),
                                         RelationGetRelationName(result_relation_desc)))));
@@ -830,8 +827,16 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
      * Note: We fire AFTER ROW TRIGGERS for every attempted insertion except
      * for a MERGE or INSERT ... ON DUPLICATE KEY UPDATE statement.
      */
-    if (state->operation != CMD_MERGE && !useHeapMultiInsert)
+    if (state->operation != CMD_MERGE && state->mt_upsert->us_action == UPSERT_NONE &&
+        !useHeapMultiInsert)
         ExecARInsertTriggers(estate, result_rel_info, partition_id, bucket_id, tuple, recheck_indexes);
+
+    /* try to insert tuple into mlog-table. */
+    if (target_rel != NULL && target_rel->rd_mlogoid != InvalidOid) {
+        /* judge whether need to insert into mlog-table */
+        insert_into_mlog_table(target_rel, target_rel->rd_mlogoid, tuple,
+                            &tuple->t_self, GetCurrentTransactionId(), 'I');
+    }
 
     list_free_ext(recheck_indexes);
 
@@ -872,9 +877,8 @@ TupleTableSlot* ExecDelete(ItemPointer tupleid, Oid deletePartitionOid, int2 buc
     EState* estate = node->ps.state;
     ResultRelInfo* result_rel_info = NULL;
     Relation result_relation_desc;
-    HTSU_Result result;
-    ItemPointerData update_ctid;
-    TransactionId update_xmax;
+    TM_Result result;
+    TM_FailureData tmfd;
     Partition partition = NULL;
     Relation fake_relation = NULL;
     Relation part_relation = NULL;
@@ -938,26 +942,10 @@ TupleTableSlot* ExecDelete(ItemPointer tupleid, Oid deletePartitionOid, int2 buc
         if (slot->tts_tupleDescriptor != RelationGetDescr(result_relation_desc))
             ExecSetSlotDescriptor(slot, RelationGetDescr(result_relation_desc));
 
-#ifdef PGXC
-        if (IS_PGXC_COORDINATOR && result_remote_rel && result_rel_info->ri_FdwRoutine->GetFdwType &&
-                result_rel_info->ri_FdwRoutine->GetFdwType() == MOT_ORC) {
-            slot = ExecProcNodeDMLInXC(estate, planSlot, slot);
-        } else {
-#endif
-            slot = result_rel_info->ri_FdwRoutine->ExecForeignDelete(estate, result_rel_info, slot, planSlot);
-#ifdef PGXC
-        }
-#endif
+        slot = result_rel_info->ri_FdwRoutine->ExecForeignDelete(estate, result_rel_info, slot, planSlot);
 
         if (slot == NULL) {
             /* "do nothing" */
-#ifdef PGXC
-            if (canSetTag) {
-                if (IS_PGXC_COORDINATOR && result_remote_rel) {
-                    estate->es_processed += result_remote_rel->rqs_processed;
-                }
-            }
-#endif
             return NULL;
         }
 
@@ -1003,28 +991,39 @@ TupleTableSlot* ExecDelete(ItemPointer tupleid, Oid deletePartitionOid, int2 buc
                 searchHBucketFakeRelation(
                     estate->esfRelations, estate->es_query_cxt, fake_relation, bucketid, fake_relation);
             }
-            result = heap_delete(fake_relation,
+            result = tableam_tuple_delete(fake_relation,
                 tupleid,
-                &update_ctid,
-                &update_xmax,
                 estate->es_output_cid,
+                //estate->es_snapshot,
                 estate->es_crosscheck_snapshot,
-                true /* wait for commit */);
+                NULL,
+                true /* wait for commit */,
+                &tmfd);
 
             switch (result) {
-                case HeapTupleSelfUpdated:
-                    /* already deleted by self; nothing to do */
+                case TM_SelfModified:
+                    if (tmfd.cmax != estate->es_output_cid)
+                        ereport(ERROR,
+                                (errcode(ERRCODE_TRIGGERED_DATA_CHANGE_VIOLATION),
+                                 errmsg("tuple to be updated was already modified by an operation triggered by the current command"),
+                                 errhint("Consider using an AFTER trigger instead of a BEFORE trigger to propagate changes to other rows.")));
+
                     return NULL;
 
-                case HeapTupleMayBeUpdated: {
+                case TM_Ok: {
                     /* Record deleted tupleid when target table is under cluster resizing */
                     if (RelationInClusterResizing(result_relation_desc) &&
                         !RelationInClusterResizingReadOnly(result_relation_desc)) {
-                        RecordDeletedTuple(RelationGetRelid(fake_relation), bucketid, tupleid, node->delete_delta_rel);
+                        ItemPointerData start_ctid;
+                        ItemPointerData end_ctid;
+                        RelationGetCtids(fake_relation, &start_ctid, &end_ctid);
+                        if (ItemPointerCompare(tupleid, &end_ctid) <= 0) {
+                            RecordDeletedTuple(RelationGetRelid(fake_relation), bucketid, tupleid, node->delete_delta_rel);
+                        }
                     }
                 } break;
 
-                case HeapTupleUpdated:
+                case TM_Updated: {
                     /* just for pg_delta_xxxxxxxx in CSTORE schema */
                     if (!pg_strncasecmp("pg_delta", result_relation_desc->rd_rel->relname.data, strlen("pg_delta")) &&
                          result_relation_desc->rd_rel->relnamespace == CSTORE_NAMESPACE) {
@@ -1039,29 +1038,52 @@ TupleTableSlot* ExecDelete(ItemPointer tupleid, Oid deletePartitionOid, int2 buc
                         ereport(ERROR,
                             (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                                 errmsg("could not serialize access due to concurrent update")));
-                    if (!ItemPointerEquals(tupleid, &update_ctid)) {
-                        // EvalPlanQual need to reinitialize child plan to do some recheck due to concurrent update,
-                        // but we wrap the left tree of Stream node in backend thread. So the child plan cannot be
-                        // reinitialized successful now.
-                        //
-                        if (IS_PGXC_DATANODE && u_sess->exec_cxt.under_stream_runtime &&
-                            estate->es_plannedstmt->num_streams > 0) {
-                            ereport(ERROR,
-                                (errcode(ERRCODE_STREAM_CONCURRENT_UPDATE),
-                                    errmsg("concurrent update under Stream mode is not yet supported")));
-                        }
 
-                        TupleTableSlot* epqslot = EvalPlanQual(estate,
-                            epqstate,
-                            fake_relation,
-                            result_rel_info->ri_RangeTableIndex,
-                            &update_ctid,
-                            update_xmax);
-                        if (!TupIsNull(epqslot)) {
-                            *tupleid = update_ctid;
-                            goto ldelete;
-                        }
-                    } else if (result_relation_desc->rd_rel->relrowmovement) {
+                    Assert(!ItemPointerEquals(tupleid, &tmfd.ctid));
+                    // EvalPlanQual need to reinitialize child plan to do some recheck due to concurrent update,
+                    // but we wrap the left tree of Stream node in backend thread. So the child plan cannot be
+                    // reinitialized successful now.
+                    //
+                    if (IS_PGXC_DATANODE && u_sess->exec_cxt.under_stream_runtime &&
+                        estate->es_plannedstmt->num_streams > 0) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_STREAM_CONCURRENT_UPDATE),
+                                errmsg("concurrent update under Stream mode is not yet supported")));
+                    }
+
+                    TupleTableSlot* epqslot = EvalPlanQual(estate,
+                        epqstate,
+                        fake_relation,
+                        result_rel_info->ri_RangeTableIndex,
+                        &tmfd.ctid,
+                        tmfd.xmax);
+                    if (!TupIsNull(epqslot)) {
+                        *tupleid = tmfd.ctid;
+                        goto ldelete;
+                    }
+
+                    /* Updated tuple not matched; nothing to do */
+                    return NULL;
+                }
+
+                case TM_Deleted:
+                    /* just for pg_delta_xxxxxxxx in CSTORE schema */
+                    if (!pg_strncasecmp("pg_delta", result_relation_desc->rd_rel->relname.data, strlen("pg_delta")) &&
+                         result_relation_desc->rd_rel->relnamespace == CSTORE_NAMESPACE) {
+                        ereport(ERROR,
+                            (errmodule(MOD_EXECUTOR),
+                                (errcode(ERRCODE_MODIFY_CONFLICTS),
+                                    errmsg("delete conflict in delta table cstore.%s",
+                                        result_relation_desc->rd_rel->relname.data))));
+                    }
+
+                    if (IsolationUsesXactSnapshot())
+                        ereport(ERROR,
+                            (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                                errmsg("could not serialize access due to concurrent update")));
+
+                    Assert(ItemPointerEquals(tupleid, &tmfd.ctid));
+                    if (result_relation_desc->rd_rel->relrowmovement) {
                         /*
                          * when: tupleid,equal with &update_ctid
                          * case: current session delete confict with other session row movement update
@@ -1118,6 +1140,13 @@ end:;
     ExecARDeleteTriggers(estate, result_rel_info, deletePartitionOid, tupleid);
 #endif
 
+    /* delete tuple from mlog of matview */
+    if (result_relation_desc != NULL && result_relation_desc->rd_mlogoid != InvalidOid) {
+        /* judge whether need to insert into mlog-table */
+        insert_into_mlog_table(result_relation_desc,
+                    result_relation_desc->rd_mlogoid, NULL, tupleid, tmfd.xmin, 'D');
+    }
+
     /* Process RETURNING if present */
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR && result_remote_rel != NULL && result_rel_info->ri_projectReturning != NULL) {
@@ -1162,7 +1191,7 @@ end:;
                 } else {
                     del_tuple.t_self = *tupleid;
                     del_tuple.t_data = &tbuf.hdr;
-                    if (!heap_fetch(fake_relation, SnapshotAny, &del_tuple, &del_buffer, false, NULL)) {
+                    if (!tableam_tuple_fetch(fake_relation, SnapshotAny, &del_tuple, &del_buffer, false, NULL)) {
                         ereport(ERROR,
                             (errmodule(MOD_EXECUTOR),
                                 (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
@@ -1222,9 +1251,8 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
     HeapTuple tuple;
     ResultRelInfo* result_rel_info = NULL;
     Relation result_relation_desc;
-    HTSU_Result result;
-    ItemPointerData update_ctid;
-    TransactionId update_xmax;
+    TM_Result result;
+    TM_FailureData tmfd;
     List* recheck_indexes = NIL;
     Partition partition = NULL;
     Relation fake_relation = NULL;
@@ -1319,6 +1347,7 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
         /*
          * update in foreign table: let the FDW do it
          */
+#ifdef ENABLE_MOT
         if (result_rel_info->ri_FdwRoutine->GetFdwType && result_rel_info->ri_FdwRoutine->GetFdwType() == MOT_ORC) {
             if (result_relation_desc->rd_att->constr) {
                 if (node->mt_insert_constr_slot == NULL) {
@@ -1328,32 +1357,19 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                 }
             }
         }
-#ifdef PGXC
-        if (IS_PGXC_COORDINATOR && result_remote_rel && result_rel_info->ri_FdwRoutine->GetFdwType &&
-                result_rel_info->ri_FdwRoutine->GetFdwType() == MOT_ORC) {
-            slot = ExecProcNodeDMLInXC(estate, planSlot, slot);
-        } else {
 #endif
-            slot = result_rel_info->ri_FdwRoutine->ExecForeignUpdate(estate, result_rel_info, slot, planSlot);
-#ifdef PGXC
-        }
-#endif
+        slot = result_rel_info->ri_FdwRoutine->ExecForeignUpdate(estate, result_rel_info, slot, planSlot);
 
         if (slot == NULL) {
             /* "do nothing" */
-#ifdef PGXC
-            if (canSetTag) {
-                if (IS_PGXC_COORDINATOR && result_remote_rel) {
-                    estate->es_processed += result_remote_rel->rqs_processed;
-                }
-            }
-#endif
             return NULL;
         }
 
         /* FDW might have changed tuple */
         tuple = ExecMaterializeSlot(slot);
     } else {
+        bool update_indexes = false;
+
         /*
          * Check the constraints of the tuple
          *
@@ -1395,18 +1411,12 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                     parent_relation = result_relation_desc;
                 }
                 /* add para 2 for heap_update */
-                result = heap_update(fake_relation,
-                    parent_relation,
-                    tupleid,
-                    tuple,
-                    &update_ctid,
-                    &update_xmax,
-                    estate->es_output_cid,
-                    estate->es_crosscheck_snapshot,
-                    true /* wait for commit */,
-                    allow_update_self);
+                result = tableam_tuple_update(fake_relation, parent_relation,
+                                                 tupleid, tuple, estate->es_output_cid,
+                                                 estate->es_crosscheck_snapshot, estate->es_snapshot, true, // wait for commit
+                                                 &tmfd, &update_indexes, allow_update_self);
                 switch (result) {
-                    case HeapTupleSelfUpdated:
+                    case TM_SelfModified:
                         /* can not update one row more than once for merge into */
                         if (node->operation == CMD_MERGE && !MEGRE_UPDATE_MULTI) {
                             ereport(ERROR,
@@ -1415,19 +1425,30 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                                         errmsg("unable to get a stable set of rows in the source tables"))));
                         }
 
+                        if (tmfd.cmax != estate->es_output_cid)
+                            ereport(ERROR,
+                                    (errcode(ERRCODE_TRIGGERED_DATA_CHANGE_VIOLATION),
+                                     errmsg("tuple to be updated was already modified by an operation triggered by the current command"),
+                                     errhint("Consider using an AFTER trigger instead of a BEFORE trigger to propagate changes to other rows.")));
+
                         /* already deleted by self; nothing to do */
                         return NULL;
 
-                    case HeapTupleMayBeUpdated:
+                    case TM_Ok:
                         /* Record deleted tupleid when target table is under cluster resizing */
                         if (RelationInClusterResizing(result_relation_desc) &&
                             !RelationInClusterResizingReadOnly(result_relation_desc)) {
-                            RecordDeletedTuple(RelationGetRelid(fake_relation), bucketid, 
-                                tupleid, node->delete_delta_rel);
+                            ItemPointerData start_ctid;
+                            ItemPointerData end_ctid;
+                            RelationGetCtids(fake_relation, &start_ctid, &end_ctid);
+                            if (ItemPointerCompare(tupleid, &end_ctid) <= 0) {                            
+                                RecordDeletedTuple(RelationGetRelid(fake_relation), bucketid, 
+                                    tupleid, node->delete_delta_rel);
+                            }
                         }
                         break;
 
-                    case HeapTupleUpdated:
+                    case TM_Updated: {
                         /* just for pg_delta_xxxxxxxx in CSTORE schema */
                         if (!pg_strncasecmp("pg_delta", result_relation_desc->rd_rel->relname.data, strlen("pg_delta")) &&
                              result_relation_desc->rd_rel->relnamespace == CSTORE_NAMESPACE) {
@@ -1442,51 +1463,74 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                             ereport(ERROR,
                                 (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                                     errmsg("could not serialize access due to concurrent update")));
-                        if (!ItemPointerEquals(tupleid, &update_ctid)) {
-                            // EvalPlanQual need to reinitialize child plan to do some recheck due to concurrent update,
-                            // but we wrap the left tree of Stream node in backend thread. So the child plan cannot be
-                            // reinitialized successful now.
-                            //
-                            if (IS_PGXC_DATANODE && u_sess->exec_cxt.under_stream_runtime &&
-                                estate->es_plannedstmt->num_streams > 0) {
-                                ereport(ERROR,
-                                    (errcode(ERRCODE_STREAM_CONCURRENT_UPDATE),
-                                        errmsg("concurrent update under Stream mode is not yet supported")));
-                            }
 
-                            TupleTableSlot* epq_slot = EvalPlanQual(estate,
-                                epqstate,
-                                fake_relation,
-                                result_rel_info->ri_RangeTableIndex,
-                                &update_ctid,
-                                update_xmax);
-                            if (!TupIsNull(epq_slot)) {
-                                *tupleid = update_ctid;
+                        Assert(!ItemPointerEquals(tupleid, &tmfd.ctid));
+                        // EvalPlanQual need to reinitialize child plan to do some recheck due to concurrent update,
+                        // but we wrap the left tree of Stream node in backend thread. So the child plan cannot be
+                        // reinitialized successful now.
+                        //
+                        if (IS_PGXC_DATANODE && u_sess->exec_cxt.under_stream_runtime &&
+                            estate->es_plannedstmt->num_streams > 0) {
+                            ereport(ERROR,
+                                (errcode(ERRCODE_STREAM_CONCURRENT_UPDATE),
+                                    errmsg("concurrent update under Stream mode is not yet supported")));
+                        }
 
-                                /*
-                                 * For merge into query, mergeMatchedAction's targetlist is not same as junk filter's
-                                 * targetlist. Here, epqslot is a plan slot, target table needs slot to be projected
-                                 * from plan slot.
-                                 */
-                                if (node->operation == CMD_MERGE) {
-                                    List* mergeMatchedActionStates = NIL;
+                        TupleTableSlot* epq_slot = EvalPlanQual(estate,
+                            epqstate,
+                            fake_relation,
+                            result_rel_info->ri_RangeTableIndex,
+                            &tmfd.ctid,
+                            tmfd.xmax);
+                        if (!TupIsNull(epq_slot)) {
+                            *tupleid = tmfd.ctid;
 
-                                    /* resultRelInfo->ri_mergeState is always not null */
-                                    mergeMatchedActionStates = result_rel_info->ri_mergeState->matchedActionStates;
-                                    slot = ExecMergeProjQual(
-                                        node, mergeMatchedActionStates, node->ps.ps_ExprContext, epq_slot, slot, estate);
-                                    if (slot != NULL) {
-                                        tuple = ExecMaterializeSlot(slot);
-                                        goto lreplace;
-                                    }
-                                } else {
-                                    slot = ExecFilterJunk(result_rel_info->ri_junkFilter, epq_slot);
+                            /*
+                             * For merge into query, mergeMatchedAction's targetlist is not same as junk filter's
+                             * targetlist. Here, epqslot is a plan slot, target table needs slot to be projected
+                             * from plan slot.
+                             */
+                            if (node->operation == CMD_MERGE) {
+                                List* mergeMatchedActionStates = NIL;
 
+                                /* resultRelInfo->ri_mergeState is always not null */
+                                mergeMatchedActionStates = result_rel_info->ri_mergeState->matchedActionStates;
+                                slot = ExecMergeProjQual(
+                                    node, mergeMatchedActionStates, node->ps.ps_ExprContext, epq_slot, slot, estate);
+                                if (slot != NULL) {
                                     tuple = ExecMaterializeSlot(slot);
                                     goto lreplace;
                                 }
+                            } else {
+                                slot = ExecFilterJunk(result_rel_info->ri_junkFilter, epq_slot);
+
+                                tuple = ExecMaterializeSlot(slot);
+                                goto lreplace;
                             }
                         }
+
+                        /* Updated tuple not matched; nothing to do */
+                        return NULL;
+                    }
+
+                    case TM_Deleted:
+                        /* just for pg_delta_xxxxxxxx in CSTORE schema */
+                        if (!pg_strncasecmp("pg_delta", result_relation_desc->rd_rel->relname.data, strlen("pg_delta")) &&
+                             result_relation_desc->rd_rel->relnamespace == CSTORE_NAMESPACE) {
+                            ereport(ERROR,
+                                (errmodule(MOD_EXECUTOR),
+                                    (errcode(ERRCODE_MODIFY_CONFLICTS),
+                                        errmsg("update conflict in delta table cstore.%s",
+                                            result_relation_desc->rd_rel->relname.data))));
+                        }
+                    
+                        if (IsolationUsesXactSnapshot())
+                            ereport(ERROR,
+                                (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                                    errmsg("could not serialize access due to concurrent update")));
+                    
+                        Assert(ItemPointerEquals(tupleid, &tmfd.ctid));
+
                         /* tuple already deleted; nothing to do */
                         return NULL;
 
@@ -1513,7 +1557,7 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                  *
                  * If it's a HOT update, we mustn't insert new index entries.
                  */
-                if (result_rel_info->ri_NumIndices > 0 && !HeapTupleIsHeapOnly(tuple))
+                if (result_rel_info->ri_NumIndices > 0 && update_indexes)
                     recheck_indexes = ExecInsertIndexTuples(slot, &(tuple->t_self), estate,
                         NULL, NULL, bucketid, NULL);
             } else {
@@ -1595,18 +1639,20 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                         searchHBucketFakeRelation(
                             estate->esfRelations, estate->es_query_cxt, fake_relation, bucketid, fake_relation);
                     }
-                    result = heap_update(fake_relation,
+
+                    result = tableam_tuple_update(fake_relation,
                         result_relation_desc,
                         tupleid,
                         tuple,
-                        &update_ctid,
-                        &update_xmax,
                         estate->es_output_cid,
                         estate->es_crosscheck_snapshot,
+                        estate->es_snapshot,
                         true /* wait for commit */,
+                        &tmfd,
+                        &update_indexes,
                         allow_update_self);
                     switch (result) {
-                        case HeapTupleSelfUpdated:
+                        case TM_SelfModified:
                             /* can not update one row more than once for merge into */
                             if (node->operation == CMD_MERGE && !MEGRE_UPDATE_MULTI) {
                                 ereport(ERROR,
@@ -1614,73 +1660,97 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                                         (errcode(ERRCODE_TOO_MANY_ROWS),
                                             errmsg("unable to get a stable set of rows in the source tables"))));
                             }
+
+                            if (tmfd.cmax != estate->es_output_cid)
+                                ereport(ERROR,
+                                        (errcode(ERRCODE_TRIGGERED_DATA_CHANGE_VIOLATION),
+                                         errmsg("tuple to be updated was already modified by an operation triggered by the current command"),
+                                         errhint("Consider using an AFTER trigger instead of a BEFORE trigger to propagate changes to other rows.")));
+
                             /* already deleted by self; nothing to do */
                             return NULL;
 
-                        case HeapTupleMayBeUpdated:
+                        case TM_Ok:
                             /* Record deleted tupleid when target table is under cluster resizing */
                             if (RelationInClusterResizing(result_relation_desc) &&
                                 !RelationInClusterResizingReadOnly(result_relation_desc)) {
-                                RecordDeletedTuple(RelationGetRelid(fake_relation), bucketid, 
-                                    tupleid, node->delete_delta_rel);
+                                ItemPointerData start_ctid;
+                                ItemPointerData end_ctid;
+                                RelationGetCtids(fake_relation, &start_ctid, &end_ctid);
+                                if (ItemPointerCompare(tupleid, &end_ctid) <= 0) {  
+                                    RecordDeletedTuple(RelationGetRelid(fake_relation), bucketid, 
+                                        tupleid, node->delete_delta_rel);
+                                }	
                             }
                             break;
 
-                        case HeapTupleUpdated:
+                        case TM_Updated: {
                             if (IsolationUsesXactSnapshot())
                                 ereport(ERROR,
                                     (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                                         errmsg("could not serialize access due to concurrent update")));
-                            if (!ItemPointerEquals(tupleid, &update_ctid)) {
-                                // EvalPlanQual need to reinitialize child plan to do some recheck due to concurrent
-                                // update, but we wrap the left tree of Stream node in backend thread. So the child plan
-                                // cannot be reinitialized successful now.
-                                //
-                                if (IS_PGXC_DATANODE && u_sess->exec_cxt.under_stream_runtime &&
-                                    estate->es_plannedstmt->num_streams > 0) {
-                                    ereport(ERROR,
-                                        (errcode(ERRCODE_STREAM_CONCURRENT_UPDATE),
-                                            errmsg("concurrent update under Stream mode is not yet supported")));
-                                }
+                            Assert(!ItemPointerEquals(tupleid, &tmfd.ctid));
+                            // EvalPlanQual need to reinitialize child plan to do some recheck due to concurrent
+                            // update, but we wrap the left tree of Stream node in backend thread. So the child plan
+                            // cannot be reinitialized successful now.
+                            //
+                            if (IS_PGXC_DATANODE && u_sess->exec_cxt.under_stream_runtime &&
+                                estate->es_plannedstmt->num_streams > 0) {
+                                ereport(ERROR,
+                                    (errcode(ERRCODE_STREAM_CONCURRENT_UPDATE),
+                                        errmsg("concurrent update under Stream mode is not yet supported")));
+                            }
 
-                                TupleTableSlot* epq_slot = EvalPlanQual(estate,
-                                    epqstate,
-                                    fake_relation,
-                                    result_rel_info->ri_RangeTableIndex,
-                                    &update_ctid,
-                                    update_xmax);
+                            TupleTableSlot* epq_slot = EvalPlanQual(estate,
+                                epqstate,
+                                fake_relation,
+                                result_rel_info->ri_RangeTableIndex,
+                                &tmfd.ctid,
+                                tmfd.xmax);
 
-                                if (!TupIsNull(epq_slot)) {
-                                    *tupleid = update_ctid;
+                            if (!TupIsNull(epq_slot)) {
+                                *tupleid = tmfd.ctid;
 
-                                    /*
-                                     * For merge into query, mergeMatchedAction's targetlist is not same as junk
-                                     * filter's targetlist. Here, epq_slot is a plan slot, target table needs slot to be
-                                     * projected from plan slot.
-                                     */
-                                    if (node->operation == CMD_MERGE) {
-                                        List* mergeMatchedActionStates = NIL;
+                                /*
+                                 * For merge into query, mergeMatchedAction's targetlist is not same as junk
+                                 * filter's targetlist. Here, epq_slot is a plan slot, target table needs slot to be
+                                 * projected from plan slot.
+                                 */
+                                if (node->operation == CMD_MERGE) {
+                                    List* mergeMatchedActionStates = NIL;
 
-                                        /* resultRelInfo->ri_mergeState is always not null */
-                                        mergeMatchedActionStates = result_rel_info->ri_mergeState->matchedActionStates;
-                                        slot = ExecMergeProjQual(node,
-                                            mergeMatchedActionStates,
-                                            node->ps.ps_ExprContext,
-                                            epq_slot,
-                                            slot,
-                                            estate);
-                                        if (slot != NULL) {
-                                            tuple = ExecMaterializeSlot(slot);
-                                            goto lreplace;
-                                        }
-                                    } else {
-                                        slot = ExecFilterJunk(result_rel_info->ri_junkFilter, epq_slot);
-
+                                    /* resultRelInfo->ri_mergeState is always not null */
+                                    mergeMatchedActionStates = result_rel_info->ri_mergeState->matchedActionStates;
+                                    slot = ExecMergeProjQual(node,
+                                        mergeMatchedActionStates,
+                                        node->ps.ps_ExprContext,
+                                        epq_slot,
+                                        slot,
+                                        estate);
+                                    if (slot != NULL) {
                                         tuple = ExecMaterializeSlot(slot);
                                         goto lreplace;
                                     }
+                                } else {
+                                    slot = ExecFilterJunk(result_rel_info->ri_junkFilter, epq_slot);
+
+                                    tuple = ExecMaterializeSlot(slot);
+                                    goto lreplace;
                                 }
-                            } else if (result_relation_desc->rd_rel->relrowmovement) {
+                            }
+
+                            /* Updated tuple not matched; nothing to do */
+                            return NULL;
+                        }
+
+                       case TM_Deleted:
+                            if (IsolationUsesXactSnapshot())
+                                ereport(ERROR,
+                                    (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                                        errmsg("could not serialize access due to concurrent update")));
+                            Assert(ItemPointerEquals(tupleid, &tmfd.ctid));
+
+                            if (result_relation_desc->rd_rel->relrowmovement) {
                                 /*
                                  * the may be a row movement update action which delete tuple from original
                                  * partition and insert tuple to new partition or we can add lock on the tuple to
@@ -1702,7 +1772,7 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                                         errmsg("unrecognized heap_update status: %u", result))));
                     }
 
-                    if (result_rel_info->ri_NumIndices > 0 && !HeapTupleIsHeapOnly(tuple)) {
+                    if (result_rel_info->ri_NumIndices > 0 && update_indexes) {
                         /*
                          * delete index entries for tuple
                          */
@@ -1730,16 +1800,17 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                         }
 
                     ldelete:;
-                        result = heap_delete(old_fake_relation,
+                        result = tableam_tuple_delete(old_fake_relation,
                             tupleid,
-                            &update_ctid,
-                            &update_xmax,
                             estate->es_output_cid,
+                            //estate->es_snapshot,
                             estate->es_crosscheck_snapshot,
-                            true /* wait for commit */,
+                            NULL,
+                            true, /* wait for commit */
+                            &tmfd,
                             allow_update_self);
                         switch (result) {
-                            case HeapTupleSelfUpdated:
+                            case TM_SelfModified:
                                 /* can not update one row more than once for merge into */
                                 if (node->operation == CMD_MERGE && !MEGRE_UPDATE_MULTI) {
                                     ereport(ERROR,
@@ -1747,45 +1818,68 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                                             (errcode(ERRCODE_TOO_MANY_ROWS),
                                                 errmsg("unable to get a stable set of rows in the source tables"))));
                                 }
+
+                                if (tmfd.cmax != estate->es_output_cid)
+                                    ereport(ERROR,
+                                            (errcode(ERRCODE_TRIGGERED_DATA_CHANGE_VIOLATION),
+                                             errmsg("tuple to be updated was already modified by an operation triggered by the current command"),
+                                             errhint("Consider using an AFTER trigger instead of a BEFORE trigger to propagate changes to other rows.")));
                                 return NULL;
 
-                            case HeapTupleMayBeUpdated:
+                            case TM_Ok:
                                 /* Record deleted tupleid when target table is under cluster resizing */
                                 if (RelationInClusterResizing(result_relation_desc) &&
                                     !RelationInClusterResizingReadOnly(result_relation_desc)) {
-                                    RecordDeletedTuple(
-                                        RelationGetRelid(old_fake_relation), bucketid, tupleid, node->delete_delta_rel);
+                                    ItemPointerData start_ctid;
+                                    ItemPointerData end_ctid;
+                                    RelationGetCtids(old_fake_relation, &start_ctid, &end_ctid);
+                                    if (ItemPointerCompare(tupleid, &end_ctid) <= 0) {           
+                                        RecordDeletedTuple(
+                                            RelationGetRelid(old_fake_relation), bucketid, tupleid, node->delete_delta_rel);
+                                    }	
                                 }
                                 break;
 
-                            case HeapTupleUpdated:
+                            case TM_Updated: {
                                 if (IsolationUsesXactSnapshot())
                                     ereport(ERROR,
                                         (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                                             errmsg("could not serialize access due to concurrent update")));
-                                if (!ItemPointerEquals(tupleid, &update_ctid)) {
-                                    // EvalPlanQual need to reinitialize child plan to do some recheck due to concurrent
-                                    // update, but we wrap the left tree of Stream node in backend thread. So the child
-                                    // plan cannot be reinitialized successful now.
-                                    //
-                                    if (IS_PGXC_DATANODE && u_sess->exec_cxt.under_stream_runtime &&
-                                        estate->es_plannedstmt->num_streams > 0) {
-                                        ereport(ERROR,
-                                            (errcode(ERRCODE_STREAM_CONCURRENT_UPDATE),
-                                                errmsg("concurrent update under Stream mode is not yet supported")));
-                                    }
+                                Assert(!ItemPointerEquals(tupleid, &tmfd.ctid));
+                                // EvalPlanQual need to reinitialize child plan to do some recheck due to concurrent
+                                // update, but we wrap the left tree of Stream node in backend thread. So the child
+                                // plan cannot be reinitialized successful now.
+                                //
+                                if (IS_PGXC_DATANODE && u_sess->exec_cxt.under_stream_runtime &&
+                                    estate->es_plannedstmt->num_streams > 0) {
+                                    ereport(ERROR,
+                                        (errcode(ERRCODE_STREAM_CONCURRENT_UPDATE),
+                                            errmsg("concurrent update under Stream mode is not yet supported")));
+                                }
 
-                                    TupleTableSlot* epq_slot = EvalPlanQual(estate,
-                                        epqstate,
-                                        old_fake_relation,
-                                        result_rel_info->ri_RangeTableIndex,
-                                        &update_ctid,
-                                        update_xmax);
-                                    if (!TupIsNull(epq_slot)) {
-                                        *tupleid = update_ctid;
-                                        goto ldelete;
-                                    }
-                                } else if (result_relation_desc->rd_rel->relrowmovement) {
+                                TupleTableSlot* epq_slot = EvalPlanQual(estate,
+                                    epqstate,
+                                    old_fake_relation,
+                                    result_rel_info->ri_RangeTableIndex,
+                                    &tmfd.ctid,
+                                    tmfd.xmax);
+                                if (!TupIsNull(epq_slot)) {
+                                    *tupleid = tmfd.ctid;
+                                    goto ldelete;
+                                }
+
+                                /* Updated tuple not matched; nothing to do */
+                                return NULL;
+                            }
+
+                            case TM_Deleted:
+                                if (IsolationUsesXactSnapshot())
+                                    ereport(ERROR,
+                                        (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                                            errmsg("could not serialize access due to concurrent update")));
+
+                                Assert(ItemPointerEquals(tupleid, &tmfd.ctid));
+                                if (result_relation_desc->rd_rel->relrowmovement) {
                                     /*
                                      * the may be a row movement update action which delete tuple from original
                                      * partition and insert tuple to new partition or we can add lock on the tuple to
@@ -1842,7 +1936,8 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                                 fake_insert_relation);
                         }
 
-                        (void)heap_insert(fake_insert_relation, tuple, estate->es_output_cid, 0, NULL);
+                        (void)tableam_tuple_insert(fake_insert_relation, 
+                            tuple, estate->es_output_cid, 0, NULL);
 
                         if (result_rel_info->ri_NumIndices > 0) {
                             recheck_indexes = ExecInsertIndexTuples(
@@ -1854,6 +1949,17 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
 #ifdef PGXC
         }
 #endif
+    }
+
+    /* update tuple from mlog of matview(delete + insert). */
+    if (result_relation_desc != NULL && result_relation_desc->rd_mlogoid != InvalidOid) {
+        /* judge whether need to insert into mlog-table */
+        /* 1. delete one tuple. */
+        insert_into_mlog_table(result_relation_desc, result_relation_desc->rd_mlogoid,
+                               NULL, tupleid, tmfd.xmin, 'D');
+        /* 2. insert new tuple */
+        insert_into_mlog_table(result_relation_desc, result_relation_desc->rd_mlogoid,
+                               tuple, &(tuple->t_self), GetCurrentTransactionId(), 'I');
     }
 
     if (canSetTag)
@@ -1936,10 +2042,10 @@ static void fireASTriggers(ModifyTableState* node)
 {
     switch (node->operation) {
         case CMD_INSERT:
-            ExecASInsertTriggers(node->ps.state, node->resultRelInfo);
             if (node->mt_upsert->us_action == UPSERT_UPDATE) {
-                ExecASUpdateTriggers(node->ps.state, node->resultRelInfo);
+               ExecASUpdateTriggers(node->ps.state, node->resultRelInfo);
             }
+            ExecASInsertTriggers(node->ps.state, node->resultRelInfo);
             break;
         case CMD_UPDATE:
             ExecASUpdateTriggers(node->ps.state, node->resultRelInfo);
@@ -2081,7 +2187,8 @@ TupleTableSlot* ExecModifyTable(ModifyTableState* node)
              * the relation
              */
             if (enable_heap_bcm_data_replication() &&
-                !RelationIsForeignTable(estate->es_result_relation_info->ri_RelationDesc)) {
+                !RelationIsForeignTable(estate->es_result_relation_info->ri_RelationDesc) &&
+                !RelationIsStream(estate->es_result_relation_info->ri_RelationDesc)) {
                 HeapSyncHashSearch(estate->es_result_relation_info->ri_RelationDesc->rd_id, HASH_ENTER);
                 LockRelFileNode(estate->es_result_relation_info->ri_RelationDesc->rd_node, RowExclusiveLock);
             }
@@ -2142,7 +2249,8 @@ TupleTableSlot* ExecModifyTable(ModifyTableState* node)
                      * the relation
                      */
                     if (enable_heap_bcm_data_replication() &&
-                        !RelationIsForeignTable(estate->es_result_relation_info->ri_RelationDesc)) {
+                        !RelationIsForeignTable(estate->es_result_relation_info->ri_RelationDesc) &&
+                        !RelationIsStream(estate->es_result_relation_info->ri_RelationDesc)) {
                         HeapSyncHashSearch(estate->es_result_relation_info->ri_RelationDesc->rd_id, HASH_ENTER);
                         LockRelFileNode(estate->es_result_relation_info->ri_RelationDesc->rd_node, RowExclusiveLock);
                     }
@@ -2161,8 +2269,14 @@ TupleTableSlot* ExecModifyTable(ModifyTableState* node)
 
         EvalPlanQualSetSlot(&node->mt_epqstate, plan_slot);
         slot = plan_slot;
+        slot->tts_tupleDescriptor->tdTableAmType = result_rel_info->ri_RelationDesc->rd_tam_type;
 
         if (operation == CMD_MERGE) {
+            if (junk_filter == NULL) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                         errmsg("junkfilter should not be NULL")));
+            }
             ExecMerge(node, estate, slot, junk_filter, result_rel_info);
             continue;
         }
@@ -2177,7 +2291,7 @@ TupleTableSlot* ExecModifyTable(ModifyTableState* node)
                 bool isNull = false;
 
                 relkind = result_rel_info->ri_RelationDesc->rd_rel->relkind;
-                if (relkind == RELKIND_RELATION || relkind == RELKIND_SEQUENCE || relkind == RELKIND_MATVIEW) {
+                if (relkind == RELKIND_RELATION || relkind == RELKIND_SEQUENCE) {
                     datum = ExecGetJunkAttribute(slot, junk_filter->jf_junkAttNo, &isNull);
                     /* shouldn't ever get a null result... */
                     if (isNull) {
@@ -2247,7 +2361,7 @@ TupleTableSlot* ExecModifyTable(ModifyTableState* node)
                         }
                     }
 #endif
-                } else if (relkind == RELKIND_FOREIGN_TABLE) {
+                } else if (relkind == RELKIND_FOREIGN_TABLE || relkind == RELKIND_STREAM) {
                     /* do nothing; FDW must fetch any junk attrs it wants */
                 } else {
                     datum = ExecGetJunkAttribute(slot, junk_filter->jf_junkAttNo, &isNull);
@@ -2429,7 +2543,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
     upsertState->us_updateproj = NULL;
     mt_state->mt_upsert = upsertState;
 
-    /* set up epqstate with dummy sub_plan data for the moment */
+    /* set up epqstate with dummy subplan data for the moment */
     EvalPlanQualInit(&mt_state->mt_epqstate, estate, NULL, NIL, node->epqParam);
     mt_state->fireBSTriggers = true;
 
@@ -2477,10 +2591,14 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
          */
         if (result_rel_info->ri_RelationDesc->rd_rel->relhasindex && operation != CMD_DELETE &&
             result_rel_info->ri_IndexRelationDescs == NULL) {
+#ifdef ENABLE_MOT
             if (result_rel_info->ri_FdwRoutine == NULL || result_rel_info->ri_FdwRoutine->GetFdwType == NULL ||
                 result_rel_info->ri_FdwRoutine->GetFdwType() != MOT_ORC) {
+#endif
                 ExecOpenIndices(result_rel_info, node->upsertAction != UPSERT_NONE);
+#ifdef ENABLE_MOT
             }
+#endif
         }
         init_gtt_storage(operation, result_rel_info);
         /* Now init the plan for this result rel */
@@ -2508,11 +2626,15 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
 
         /* Also let FDWs init themselves for foreign-table result rels */
         if (result_rel_info->ri_FdwRoutine != NULL && result_rel_info->ri_FdwRoutine->BeginForeignModify != NULL) {
+#ifdef ENABLE_MOT
             if (IS_PGXC_DATANODE || result_rel_info->ri_FdwRoutine->GetFdwType == NULL ||
                 result_rel_info->ri_FdwRoutine->GetFdwType() != MOT_ORC) {
+#endif
                 List* fdw_private = (List*)list_nth(node->fdwPrivLists, i);
                 result_rel_info->ri_FdwRoutine->BeginForeignModify(mt_state, result_rel_info, fdw_private, i, eflags);
+#ifdef ENABLE_MOT
             }
+#endif
         }
 
         result_rel_info++;
@@ -2563,7 +2685,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
          * Initialize result tuple slot and assign its rowtype using the first
          * RETURNING list.	We assume the rest will look the same.
          */
-        tup_desc = ExecTypeFromTL((List*)linitial(node->returningLists), false);
+        tup_desc = ExecTypeFromTL((List*)linitial(node->returningLists), false, false, mt_state->resultRelInfo->ri_RelationDesc->rd_tam_type);
 
         /* Set up a slot for the output of the RETURNING projection(s) */
         ExecInitResultTupleSlot(estate, &mt_state->ps);
@@ -2604,8 +2726,8 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
      */
     result_rel_info = mt_state->resultRelInfo;
     if (node->upsertAction == UPSERT_UPDATE) {
-        ExprContext* econtext;
-        ExprState* setexpr;
+        ExprContext* econtext = NULL;
+        ExprState* setexpr = NULL;
         TupleDesc tupDesc;
 
         /* insert may only have one plan, inheritance is not expanded */
@@ -2752,14 +2874,14 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
 
                 j = ExecInitJunkFilter(sub_plan->targetlist,
                     result_rel_info->ri_RelationDesc->rd_att->tdhasoid,
-                    ExecInitExtraTupleSlot(estate));
+                    ExecInitExtraTupleSlot(estate, result_rel_info->ri_RelationDesc->rd_tam_type));
 
                 if (operation == CMD_UPDATE || operation == CMD_DELETE || operation == CMD_MERGE) {
                     /* For UPDATE/DELETE, find the appropriate junk attr now */
                     char relkind;
 
                     relkind = result_rel_info->ri_RelationDesc->rd_rel->relkind;
-                    if (relkind == RELKIND_RELATION || relkind == RELKIND_MATVIEW) {
+                    if (relkind == RELKIND_RELATION) {
                         j->jf_junkAttNo = ExecFindJunkAttribute(j, "ctid");
                         if (!AttributeNumberIsValid(j->jf_junkAttNo)) {
                             ereport(ERROR,
@@ -2810,7 +2932,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
                             j->jf_xc_node_id = ExecFindJunkAttribute(j, "xc_node_id");
                         }
 #endif
-                    } else if (relkind == RELKIND_FOREIGN_TABLE) {
+                    } else if (relkind == RELKIND_FOREIGN_TABLE || relkind == RELKIND_STREAM) {
                         /* FDW must fetch any junk attrs it wants */
                     } else {
                         j->jf_junkAttNo = ExecFindJunkAttribute(j, "wholerow");
@@ -2838,8 +2960,10 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
      * containing multiple ModifyTable nodes, all can share one such slot, so
      * we keep it in the estate.
      */
-    if (estate->es_trig_tuple_slot == NULL)
-        estate->es_trig_tuple_slot = ExecInitExtraTupleSlot(estate);
+    if (estate->es_trig_tuple_slot == NULL) {
+        result_rel_info = mt_state->resultRelInfo;
+        estate->es_trig_tuple_slot = ExecInitExtraTupleSlot(estate, result_rel_info->ri_RelationDesc->rd_tam_type);
+    }
 
     /*
      * Lastly, if this is not the primary (canSetTag) ModifyTable node, add it
@@ -2876,10 +3000,14 @@ void ExecEndModifyTable(ModifyTableState* node)
         ResultRelInfo* result_rel_info = node->resultRelInfo + i;
 
         if (result_rel_info->ri_FdwRoutine != NULL && result_rel_info->ri_FdwRoutine->EndForeignModify != NULL) {
+#ifdef ENABLE_MOT
             if (IS_PGXC_DATANODE || result_rel_info->ri_FdwRoutine->GetFdwType == NULL ||
                 result_rel_info->ri_FdwRoutine->GetFdwType() != MOT_ORC) {
+#endif
                 result_rel_info->ri_FdwRoutine->EndForeignModify(node->ps.state, result_rel_info);
+#ifdef ENABLE_MOT
             }
+#endif
         }
     }
 
@@ -2995,9 +3123,11 @@ static TupleTableSlot* fill_slot_with_oldvals(
             replaces[att_index] = false;
     }
 
-    slot_getallattrs(replace_slot);
+    /* Get the Table Accessor Method*/
+    Assert(replace_slot != NULL && replace_slot->tts_tupleDescriptor != NULL);
 
-    new_tuple = heap_modify_tuple(
+    tableam_tslot_getallattrs(replace_slot);
+    new_tuple = (HeapTuple) tableam_tops_modify_tuple(
         &old_tuple, replace_slot->tts_tupleDescriptor, replace_slot->tts_values, replace_slot->tts_isnull, replaces);
 
     pfree_ext(replaces);

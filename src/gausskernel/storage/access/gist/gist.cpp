@@ -22,7 +22,7 @@
 #include "catalog/index.h"
 #include "catalog/pg_collation.h"
 #include "miscadmin.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/indexfsm.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
@@ -1000,6 +1000,7 @@ static void gistfixsplit(GISTInsertState *state, GISTSTATE *giststate)
 
     /* Insert the downlinks */
     gistfinishsplit(state, stack, giststate, splitinfo, false);
+    list_free_deep(splitinfo);
 }
 
 /*
@@ -1282,4 +1283,3 @@ void freeGISTstate(GISTSTATE *giststate)
     /* It's sufficient to delete the scanCxt */
     MemoryContextDelete(giststate->scanCxt);
 }
-

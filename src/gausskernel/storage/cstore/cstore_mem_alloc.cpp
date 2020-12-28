@@ -22,7 +22,7 @@
  * ---------------------------------------------------------------------------------------
  */
 
-#include "storage/cstore_mem_alloc.h"
+#include "storage/cstore/cstore_mem_alloc.h"
 #include "utils/aiomem.h"
 #include <malloc.h>
 
@@ -39,8 +39,8 @@ static inline void* InnerMalloc(Size size)
         int ret = posix_memalign((void**)&(ptr), SYS_LOGICAL_BLOCK_SIZE, (size_t)(size));
         if (ret != 0) {
             ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
-                errmsg("posix_memalign fails, The alignment argument was not a power of two, or was not a multiple "
-                        "of sizeof(void *)")));
+                            errmsg("posix_memalign fails, The alignment argument was not a power of two, or was not a multiple "
+                                   "of sizeof(void *)")));
         }
     }
     ADIO_ELSE()

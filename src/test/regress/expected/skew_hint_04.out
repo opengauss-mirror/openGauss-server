@@ -1,0 +1,979 @@
+/*
+################################################################################
+# TCASE NAME : skew_hint_04.py 
+# COMPONENT(S)  : CTE的skew hint功能测试：单CTE、CTE+基本、CTE+subquery
+# PREREQUISITE  : skew_setup.py
+# PLATFORM      : all
+# DESCRIPTION   : multiple rels join optimize base on skew hint
+# TAG           : CTE skew hint
+# TC LEVEL      : Level 1
+################################################################################
+*/
+--I1.设置guc参数
+--S1.设置schema
+set current_schema = skew_hint;
+--S2.关闭sort agg
+set enable_sort = off;
+--S3.关闭query下推
+--S4.设置计划格式
+set explain_perf_mode = normal;
+--S5.设置query_dop使得explain中倾斜优化生效
+set query_dop = 1002;
+--I2.CTE不提升，CTE生成时倾斜
+explain(verbose on, costs off) 
+with tmp(a,b) as
+(
+   select count(s.a) as sa, s.b as sb from skew_t3 s, skew_t2 t2 where s.a = t2.a group by sb
+)
+select count(*) from skew_t1 t1, tmp where t1.b = tmp.b;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                   QUERY PLAN                                                   
+----------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (t1.b = tmp.b)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: t1.b
+                                 Distribute Key: t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1 t1
+                                       Output: t1.b
+                                       Distribute Key: t1.c
+                           ->  Hash
+                                 Output: tmp.b
+                                 ->  Subquery Scan on tmp
+                                       Output: tmp.b
+                                       ->  HashAggregate
+                                             Output: count(s.a), s.b
+                                             Group By Key: s.b
+                                             ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                                   Output: s.b, s.a
+                                                   Distribute Key: s.b
+                                                   Spawn on: All datanodes
+                                                   Consumer Nodes: All datanodes
+                                                   ->  Hash Join
+                                                         Output: s.b, s.a
+                                                         Hash Cond: (s.a = t2.a)
+                                                         ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                                               Output: s.b, s.a
+                                                               Distribute Key: s.a
+                                                               Spawn on: All datanodes
+                                                               Consumer Nodes: All datanodes
+                                                               ->  Seq Scan on skew_hint.skew_t3 s
+                                                                     Output: s.b, s.a
+                                                                     Distribute Key: s.c
+                                                         ->  Hash
+                                                               Output: t2.a
+                                                               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                                                     Output: t2.a
+                                                                     Distribute Key: t2.a
+                                                                     Spawn on: All datanodes
+                                                                     Consumer Nodes: All datanodes
+                                                                     ->  Seq Scan on skew_hint.skew_t2 t2
+                                                                           Output: t2.a
+                                                                           Distribute Key: t2.c
+(54 rows)
+
+--S1.CTE内部
+explain(verbose on, costs off) 
+with tmp(a,b) as
+(
+   select /*+ skew((s t2) (sb)) skew(s (a) (12))*/ count(s.a) as sa, s.b as sb from skew_t3 s, skew_t2 t2 where s.a = t2.a group by sb
+)
+select count(*) from skew_t1 t1, tmp where t1.b = tmp.b;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                             QUERY PLAN                                                             
+------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (t1.b = tmp.b)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: t1.b
+                                 Distribute Key: t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1 t1
+                                       Output: t1.b
+                                       Distribute Key: t1.c
+                           ->  Hash
+                                 Output: tmp.b
+                                 ->  Subquery Scan on tmp
+                                       Output: tmp.b
+                                       ->  HashAggregate
+                                             Output: count((count(s.a))), s.b
+                                             Group By Key: s.b
+                                             Skew Agg Optimized by Hint
+                                             ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                                   Output: (count(s.a)), s.b
+                                                   Distribute Key: s.b
+                                                   Spawn on: All datanodes
+                                                   Consumer Nodes: All datanodes
+                                                   ->  HashAggregate
+                                                         Output: count(s.a), s.b
+                                                         Group By Key: s.b
+                                                         ->  Hash Join
+                                                               Output: s.b, s.a
+                                                               Hash Cond: (s.a = t2.a)
+                                                               Skew Join Optimized by Hint
+                                                               ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                                                     Output: s.b, s.a
+                                                                     Distribute Key: s.a
+                                                                     Spawn on: All datanodes
+                                                                     Consumer Nodes: All datanodes
+                                                                     ->  Seq Scan on skew_hint.skew_t3 s
+                                                                           Output: s.b, s.a
+                                                                           Distribute Key: s.c
+                                                               ->  Hash
+                                                                     Output: t2.a
+                                                                     ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                                                           Output: t2.a
+                                                                           Distribute Key: t2.a
+                                                                           Spawn on: All datanodes
+                                                                           Consumer Nodes: All datanodes
+                                                                           ->  Seq Scan on skew_hint.skew_t2 t2
+                                                                                 Output: t2.a
+                                                                                 Distribute Key: t2.c
+(59 rows)
+
+--S2.基表外部
+explain(verbose on, costs off)
+with tmp(a,b) as
+(
+   select count(s.a) as sa, s.b as sb from skew_t3 s, skew_t2 t2 where s.a = t2.a group by sb
+)
+select /*+ skew(t1 (b) (10))*/ count(*) from skew_t1 t1, tmp where t1.b = tmp.b;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Nested Loop
+                           Join Filter: (t1.b = tmp.b)
+                           Skew Join Optimized by Hint
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 Output: t1.b
+                                 Distribute Key: t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1 t1
+                                       Output: t1.b
+                                       Distribute Key: t1.c
+                           ->  Materialize
+                                 Output: tmp.b
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       Output: tmp.b
+                                       Distribute Key: tmp.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Subquery Scan on tmp
+                                             Output: tmp.b
+                                             ->  HashAggregate
+                                                   Output: count(s.a), s.b
+                                                   Group By Key: s.b
+                                                   ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                                         Output: s.b, s.a
+                                                         Distribute Key: s.b
+                                                         Spawn on: All datanodes
+                                                         Consumer Nodes: All datanodes
+                                                         ->  Hash Join
+                                                               Output: s.b, s.a
+                                                               Hash Cond: (s.a = t2.a)
+                                                               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                                                     Output: s.b, s.a
+                                                                     Distribute Key: s.a
+                                                                     Spawn on: All datanodes
+                                                                     Consumer Nodes: All datanodes
+                                                                     ->  Seq Scan on skew_hint.skew_t3 s
+                                                                           Output: s.b, s.a
+                                                                           Distribute Key: s.c
+                                                               ->  Hash
+                                                                     Output: t2.a
+                                                                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                                                           Output: t2.a
+                                                                           Distribute Key: t2.a
+                                                                           Spawn on: All datanodes
+                                                                           Consumer Nodes: All datanodes
+                                                                           ->  Seq Scan on skew_hint.skew_t2 t2
+                                                                                 Output: t2.a
+                                                                                 Distribute Key: t2.c
+(60 rows)
+
+--S3.多层:CTE内部+基表外部
+explain(verbose on, costs off)
+with tmp(a,b) as
+(
+   select /*+ skew((s t2) (sb)) skew(s (a) (12))*/ count(s.a) as sa, s.b as sb from skew_t3 s, skew_t2 t2 where s.a = t2.a group by sb
+)
+select /*+ skew(t1 (b) (10))*/ count(*) from skew_t1 t1, tmp where t1.b = tmp.b;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Nested Loop
+                           Join Filter: (t1.b = tmp.b)
+                           Skew Join Optimized by Hint
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 Output: t1.b
+                                 Distribute Key: t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1 t1
+                                       Output: t1.b
+                                       Distribute Key: t1.c
+                           ->  Materialize
+                                 Output: tmp.b
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       Output: tmp.b
+                                       Distribute Key: tmp.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Subquery Scan on tmp
+                                             Output: tmp.b
+                                             ->  HashAggregate
+                                                   Output: count((count(s.a))), s.b
+                                                   Group By Key: s.b
+                                                   Skew Agg Optimized by Hint
+                                                   ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                                         Output: (count(s.a)), s.b
+                                                         Distribute Key: s.b
+                                                         Spawn on: All datanodes
+                                                         Consumer Nodes: All datanodes
+                                                         ->  HashAggregate
+                                                               Output: count(s.a), s.b
+                                                               Group By Key: s.b
+                                                               ->  Hash Join
+                                                                     Output: s.b, s.a
+                                                                     Hash Cond: (s.a = t2.a)
+                                                                     Skew Join Optimized by Hint
+                                                                     ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                                                           Output: s.b, s.a
+                                                                           Distribute Key: s.a
+                                                                           Spawn on: All datanodes
+                                                                           Consumer Nodes: All datanodes
+                                                                           ->  Seq Scan on skew_hint.skew_t3 s
+                                                                                 Output: s.b, s.a
+                                                                                 Distribute Key: s.c
+                                                                     ->  Hash
+                                                                           Output: t2.a
+                                                                           ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                                                                 Output: t2.a
+                                                                                 Distribute Key: t2.a
+                                                                                 Spawn on: All datanodes
+                                                                                 Consumer Nodes: All datanodes
+                                                                                 ->  Seq Scan on skew_hint.skew_t2 t2
+                                                                                       Output: t2.a
+                                                                                       Distribute Key: t2.c
+(65 rows)
+
+--I3.CTE不提升，CTE使用时倾斜
+--S1.CTE join倾斜
+explain(verbose on, costs off)
+with tmp(a,b) as
+(
+  select s.a as sa, s.b as sb from skew_t3 s, skew_t2 t2 where s.a = t2.a group by sa, sb
+)
+select count(*) from skew_t1 t1, tmp where t1.b = tmp.b group by tmp.b;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(*)), tmp.b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(*)), tmp.b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(*), tmp.b
+               Group By Key: tmp.b
+               ->  Hash Join
+                     Output: tmp.b
+                     Hash Cond: (t1.b = tmp.b)
+                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                           Output: t1.b
+                           Distribute Key: t1.b
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Seq Scan on skew_hint.skew_t1 t1
+                                 Output: t1.b
+                                 Distribute Key: t1.c
+                     ->  Hash
+                           Output: tmp.b
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: tmp.b
+                                 Distribute Key: tmp.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Subquery Scan on tmp
+                                       Output: tmp.b
+                                       ->  HashAggregate
+                                             Output: s.a, s.b
+                                             Group By Key: s.a, s.b
+                                             ->  Hash Join
+                                                   Output: s.a, s.b
+                                                   Hash Cond: (s.a = t2.a)
+                                                   ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                                         Output: s.a, s.b
+                                                         Distribute Key: s.a
+                                                         Spawn on: All datanodes
+                                                         Consumer Nodes: All datanodes
+                                                         ->  Seq Scan on skew_hint.skew_t3 s
+                                                               Output: s.a, s.b
+                                                               Distribute Key: s.c
+                                                   ->  Hash
+                                                         Output: t2.a
+                                                         ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                                               Output: t2.a
+                                                               Distribute Key: t2.a
+                                                               Spawn on: All datanodes
+                                                               Consumer Nodes: All datanodes
+                                                               ->  Seq Scan on skew_hint.skew_t2 t2
+                                                                     Output: t2.a
+                                                                     Distribute Key: t2.c
+(54 rows)
+
+explain(verbose on, costs off) 
+with tmp(a,b) as
+(
+  select s.a as sa, s.b as sb from skew_t3 s, skew_t2 t2 where s.a = t2.a group by sa, sb
+)
+select/*+ skew(tmp (b) (12)) */ count(*) from skew_t1 t1, tmp where t1.b = tmp.b group by tmp.b;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (pg_catalog.count(*)), tmp.b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (pg_catalog.count(*)), tmp.b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: pg_catalog.count(*), tmp.b
+               Group By Key: tmp.b
+               Skew Agg Optimized by Hint
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: (count(*)), tmp.b
+                     Distribute Key: tmp.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: count(*), tmp.b
+                           Group By Key: tmp.b
+                           ->  Nested Loop
+                                 Output: tmp.b
+                                 Join Filter: (t1.b = tmp.b)
+                                 Skew Join Optimized by Hint
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       Output: t1.b
+                                       Distribute Key: t1.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t1 t1
+                                             Output: t1.b
+                                             Distribute Key: t1.c
+                                 ->  Materialize
+                                       Output: tmp.b
+                                       ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                             Output: tmp.b
+                                             Distribute Key: tmp.b
+                                             Spawn on: All datanodes
+                                             Consumer Nodes: All datanodes
+                                             ->  Subquery Scan on tmp
+                                                   Output: tmp.b
+                                                   ->  HashAggregate
+                                                         Output: s.a, s.b
+                                                         Group By Key: s.a, s.b
+                                                         ->  Hash Join
+                                                               Output: s.a, s.b
+                                                               Hash Cond: (s.a = t2.a)
+                                                               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                                                     Output: s.a, s.b
+                                                                     Distribute Key: s.a
+                                                                     Spawn on: All datanodes
+                                                                     Consumer Nodes: All datanodes
+                                                                     ->  Seq Scan on skew_hint.skew_t3 s
+                                                                           Output: s.a, s.b
+                                                                           Distribute Key: s.c
+                                                               ->  Hash
+                                                                     Output: t2.a
+                                                                     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                                                           Output: t2.a
+                                                                           Distribute Key: t2.a
+                                                                           Spawn on: All datanodes
+                                                                           Consumer Nodes: All datanodes
+                                                                           ->  Seq Scan on skew_hint.skew_t2 t2
+                                                                                 Output: t2.a
+                                                                                 Distribute Key: t2.c
+(64 rows)
+
+--S2.CTE agg倾斜
+explain(verbose on, costs off)
+with tmp(a,b) as
+(
+  select s.a as sa, s.b as sb from skew_t3 s, skew_t2 t2 where s.a = t2.a group by sa, sb
+)
+select count(distinct a) from tmp group by tmp.b;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count(tmp.a)), tmp.b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(tmp.a)), tmp.b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count(tmp.a), tmp.b
+               Group By Key: tmp.b
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: tmp.b, tmp.a
+                     Distribute Key: tmp.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: tmp.b, tmp.a
+                           Group By Key: tmp.b, tmp.a
+                           ->  Subquery Scan on tmp
+                                 Output: tmp.b, tmp.a
+                                 ->  HashAggregate
+                                       Output: s.a, s.b
+                                       Group By Key: s.a, s.b
+                                       ->  Hash Join
+                                             Output: s.a, s.b
+                                             Hash Cond: (s.a = t2.a)
+                                             ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                                   Output: s.a, s.b
+                                                   Distribute Key: s.a
+                                                   Spawn on: All datanodes
+                                                   Consumer Nodes: All datanodes
+                                                   ->  Seq Scan on skew_hint.skew_t3 s
+                                                         Output: s.a, s.b
+                                                         Distribute Key: s.c
+                                             ->  Hash
+                                                   Output: t2.a
+                                                   ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                                         Output: t2.a
+                                                         Distribute Key: t2.a
+                                                         Spawn on: All datanodes
+                                                         Consumer Nodes: All datanodes
+                                                         ->  Seq Scan on skew_hint.skew_t2 t2
+                                                               Output: t2.a
+                                                               Distribute Key: t2.c
+(44 rows)
+
+explain(verbose on, costs off)
+with tmp(a,b) as
+(
+  select s.a as sa, s.b as sb from skew_t3 s, skew_t2 t2 where s.a = t2.a group by sa, sb
+)
+select /*+ skew(tmp (b) (12)) */ count(distinct a) from tmp group by tmp.b;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: (count((count(tmp.a)))), tmp.b
+   Node/s: All datanodes
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count((count(tmp.a)))), tmp.b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+         ->  HashAggregate
+               Output: count((count(tmp.a))), tmp.b
+               Group By Key: tmp.b
+               Skew Agg Optimized by Hint
+               ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                     Output: (count(tmp.a)), tmp.b
+                     Distribute Key: tmp.b
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  HashAggregate
+                           Output: count(tmp.a), tmp.b
+                           Group By Key: tmp.b
+                           ->  HashAggregate
+                                 Output: tmp.b, tmp.a
+                                 Group By Key: tmp.b, tmp.a
+                                 ->  Subquery Scan on tmp
+                                       Output: tmp.b, tmp.a
+                                       ->  HashAggregate
+                                             Output: s.a, s.b
+                                             Group By Key: s.a, s.b
+                                             ->  Hash Join
+                                                   Output: s.a, s.b
+                                                   Hash Cond: (s.a = t2.a)
+                                                   ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                                         Output: s.a, s.b
+                                                         Distribute Key: s.a
+                                                         Spawn on: All datanodes
+                                                         Consumer Nodes: All datanodes
+                                                         ->  Seq Scan on skew_hint.skew_t3 s
+                                                               Output: s.a, s.b
+                                                               Distribute Key: s.c
+                                                   ->  Hash
+                                                         Output: t2.a
+                                                         ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                                               Output: t2.a
+                                                               Distribute Key: t2.a
+                                                               Spawn on: All datanodes
+                                                               Consumer Nodes: All datanodes
+                                                               ->  Seq Scan on skew_hint.skew_t2 t2
+                                                                     Output: t2.a
+                                                                     Distribute Key: t2.c
+(48 rows)
+
+--I4.CTE提升
+explain(verbose on, costs off)
+with tmp(a,b) as
+(
+  select s.a as sa, s.b as sb from skew_t3 s, skew_t2 t2 where s.c = t2.a
+)
+select count(*) from skew_t1 t1, tmp where t1.b = tmp.b;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (s.b = t1.b)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: s.b
+                                 Distribute Key: s.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Hash Join
+                                       Output: s.b
+                                       Hash Cond: (t2.a = s.c)
+                                       ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                             Output: t2.a
+                                             Distribute Key: t2.a
+                                             Spawn on: All datanodes
+                                             Consumer Nodes: All datanodes
+                                             ->  Seq Scan on skew_hint.skew_t2 t2
+                                                   Output: t2.a
+                                                   Distribute Key: t2.c
+                                       ->  Hash
+                                             Output: s.c, s.b
+                                             ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                                   Output: s.c, s.b
+                                                   Distribute Key: s.c
+                                                   Spawn on: All datanodes
+                                                   Consumer Nodes: All datanodes
+                                                   ->  Seq Scan on skew_hint.skew_t3 s
+                                                         Output: s.c, s.b
+                                                         Distribute Key: s.c
+                           ->  Hash
+                                 Output: t1.b
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: t1.b
+                                       Distribute Key: t1.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t1 t1
+                                             Output: t1.b
+                                             Distribute Key: t1.c
+(49 rows)
+
+--S1.CTE生成时倾斜
+explain(verbose on, costs off)
+with tmp(a,b) as
+(
+  select/*+ skew(t2 (a) (12))*/ s.a as sa, s.b as sb from skew_t3 s, skew_t2 t2 where s.c = t2.a
+)
+select count(*) from skew_t1 t1, tmp where t1.b = tmp.b;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (s.b = t1.b)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 Output: s.b
+                                 Distribute Key: s.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Nested Loop
+                                       Output: s.b
+                                       Join Filter: (s.c = t2.a)
+                                       Skew Join Optimized by Hint
+                                       ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                             Output: s.c, s.b
+                                             Distribute Key: s.c
+                                             Spawn on: All datanodes
+                                             Consumer Nodes: All datanodes
+                                             ->  Seq Scan on skew_hint.skew_t3 s
+                                                   Output: s.c, s.b
+                                                   Distribute Key: s.c
+                                       ->  Materialize
+                                             Output: t2.a
+                                             ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                                   Output: t2.a
+                                                   Distribute Key: t2.a
+                                                   Spawn on: All datanodes
+                                                   Consumer Nodes: All datanodes
+                                                   ->  Seq Scan on skew_hint.skew_t2 t2
+                                                         Output: t2.a
+                                                         Distribute Key: t2.c
+                           ->  Hash
+                                 Output: t1.b
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: t1.b
+                                       Distribute Key: t1.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t1 t1
+                                             Output: t1.b
+                                             Distribute Key: t1.c
+(50 rows)
+
+--S2.CTE使用时倾斜
+explain(verbose on, costs off)
+with tmp(a,b) as
+(
+  select s.a as sa, s.b as sb from skew_t3 s, skew_t2 t2 where s.c = t2.a
+)
+select /*+ skew(tmp (b) (12))*/ count(*) from skew_t1 t1, tmp where t1.b = tmp.b;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Nested Loop
+                           Join Filter: (s.b = t1.b)
+                           Skew Join Optimized by Hint
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 Output: s.b
+                                 Distribute Key: s.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Hash Join
+                                       Output: s.b
+                                       Hash Cond: (t2.a = s.c)
+                                       ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                             Output: t2.a
+                                             Distribute Key: t2.a
+                                             Spawn on: All datanodes
+                                             Consumer Nodes: All datanodes
+                                             ->  Seq Scan on skew_hint.skew_t2 t2
+                                                   Output: t2.a
+                                                   Distribute Key: t2.c
+                                       ->  Hash
+                                             Output: s.c, s.b
+                                             ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                                   Output: s.c, s.b
+                                                   Distribute Key: s.c
+                                                   Spawn on: All datanodes
+                                                   Consumer Nodes: All datanodes
+                                                   ->  Seq Scan on skew_hint.skew_t3 s
+                                                         Output: s.c, s.b
+                                                         Distribute Key: s.c
+                           ->  Materialize
+                                 Output: t1.b
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       Output: t1.b
+                                       Distribute Key: t1.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Seq Scan on skew_hint.skew_t1 t1
+                                             Output: t1.b
+                                             Distribute Key: t1.c
+(50 rows)
+
+--S3.层:CTE内部+基表外部
+explain(verbose on, costs off)
+with tmp(a,b) as
+(
+  select/*+ skew(t2 (a) (12))*/ s.a as sa, s.b as sb from skew_t3 s, skew_t2 t2 where s.c = t2.a
+)
+select /*+ skew(tmp (b) (12))*/ count(*) from skew_t1 t1, tmp where t1.b = tmp.b;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                    QUERY PLAN                                                     
+-------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: (t1.b = s.b)
+                           Skew Join Optimized by Hint
+                           ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                 Output: t1.b
+                                 Distribute Key: t1.b
+                                 Spawn on: All datanodes
+                                 Consumer Nodes: All datanodes
+                                 ->  Seq Scan on skew_hint.skew_t1 t1
+                                       Output: t1.b
+                                       Distribute Key: t1.c
+                           ->  Hash
+                                 Output: s.b
+                                 ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                       Output: s.b
+                                       Distribute Key: s.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Hash Join
+                                             Output: s.b
+                                             Hash Cond: (s.c = t2.a)
+                                             Skew Join Optimized by Hint
+                                             ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                                   Output: s.c, s.b
+                                                   Distribute Key: s.c
+                                                   Spawn on: All datanodes
+                                                   Consumer Nodes: All datanodes
+                                                   ->  Seq Scan on skew_hint.skew_t3 s
+                                                         Output: s.c, s.b
+                                                         Distribute Key: s.c
+                                             ->  Hash
+                                                   Output: t2.a
+                                                   ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                                         Output: t2.a
+                                                         Distribute Key: t2.a
+                                                         Spawn on: All datanodes
+                                                         Consumer Nodes: All datanodes
+                                                         ->  Seq Scan on skew_hint.skew_t2 t2
+                                                               Output: t2.a
+                                                               Distribute Key: t2.c
+(51 rows)
+
+--I5.CTE + subquery
+--S1.CTE提升 +　subquery不提升
+explain(verbose on, costs off)
+with cte(a,b) as
+(
+  select s.a as sa, s.b as sb from skew_t3 s, skew_t2 t2 where s.c = t2.a
+)
+select count(*) from cte, (select sum(t1.a+t2.b) from skew_t1 t1, skew_t2 t2 group by t1.b, t2.a)tmp(b) where cte.b = tmp.b;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: ((sum((t1.a + t2.b))) = s.b)
+                           ->  HashAggregate
+                                 Output: sum((t1.a + t2.b)), t1.b, t2.a
+                                 Group By Key: t1.b, t2.a
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: t1.b, t1.a, t2.a, t2.b
+                                       Distribute Key: t1.b, t2.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Nested Loop
+                                             Output: t1.b, t1.a, t2.a, t2.b
+                                             ->  Streaming(type: SPLIT BROADCAST dop: 2/2)
+                                                   Output: t1.b, t1.a
+                                                   Spawn on: All datanodes
+                                                   Consumer Nodes: All datanodes
+                                                   ->  Seq Scan on skew_hint.skew_t1 t1
+                                                         Output: t1.b, t1.a
+                                                         Distribute Key: t1.c
+                                             ->  Materialize
+                                                   Output: t2.a, t2.b
+                                                   ->  Seq Scan on skew_hint.skew_t2 t2
+                                                         Output: t2.a, t2.b
+                                                         Distribute Key: t2.c
+                           ->  Hash
+                                 Output: s.b
+                                 ->  Streaming(type: SPLIT BROADCAST dop: 2/2)
+                                       Output: s.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Hash Join
+                                             Output: s.b
+                                             Hash Cond: (t2.a = s.c)
+                                             ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                                   Output: t2.a
+                                                   Distribute Key: t2.a
+                                                   Spawn on: All datanodes
+                                                   Consumer Nodes: All datanodes
+                                                   ->  Seq Scan on skew_hint.skew_t2 t2
+                                                         Output: t2.a
+                                                         Distribute Key: t2.c
+                                             ->  Hash
+                                                   Output: s.c, s.b
+                                                   ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                                         Output: s.c, s.b
+                                                         Distribute Key: s.c
+                                                         Spawn on: All datanodes
+                                                         Consumer Nodes: All datanodes
+                                                         ->  Seq Scan on skew_hint.skew_t3 s
+                                                               Output: s.c, s.b
+                                                               Distribute Key: s.c
+(62 rows)
+
+explain(verbose on, costs off)
+with cte(a,b) as
+(
+  select /*+skew(t2 (a) (12))*/ s.a as sa, s.b as sb from skew_t3 s, skew_t2 t2 where s.c = t2.a
+)
+select count(*) from cte, (select /*+ skew((t1 t2) (t1b t2a) (12 12))*/ sum(t1.a+t2.b), t1.b as t1b, t2.a as t2a from skew_t1 t1, skew_t2 t2 group by t1.b, t2.a)tmp(b) where cte.b = tmp.b;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                    QUERY PLAN                                                     
+-------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               Output: (count(*))
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Aggregate
+                     Output: count(*)
+                     ->  Hash Join
+                           Hash Cond: ((pg_catalog.sum((sum((t1.a + t2.b))))) = s.b)
+                           ->  HashAggregate
+                                 Output: pg_catalog.sum((sum((t1.a + t2.b)))), t1.b, t2.a
+                                 Group By Key: t1.b, t2.a
+                                 Skew Agg Optimized by Hint
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       Output: (sum((t1.a + t2.b))), t1.b, t2.a
+                                       Distribute Key: t1.b, t2.a
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  HashAggregate
+                                             Output: sum((t1.a + t2.b)), t1.b, t2.a
+                                             Group By Key: t1.b, t2.a
+                                             ->  Nested Loop
+                                                   Output: t1.b, t1.a, t2.a, t2.b
+                                                   ->  Streaming(type: SPLIT BROADCAST dop: 2/2)
+                                                         Output: t1.b, t1.a
+                                                         Spawn on: All datanodes
+                                                         Consumer Nodes: All datanodes
+                                                         ->  Seq Scan on skew_hint.skew_t1 t1
+                                                               Output: t1.b, t1.a
+                                                               Distribute Key: t1.c
+                                                   ->  Materialize
+                                                         Output: t2.a, t2.b
+                                                         ->  Seq Scan on skew_hint.skew_t2 t2
+                                                               Output: t2.a, t2.b
+                                                               Distribute Key: t2.c
+                           ->  Hash
+                                 Output: s.b
+                                 ->  Streaming(type: SPLIT BROADCAST dop: 2/2)
+                                       Output: s.b
+                                       Spawn on: All datanodes
+                                       Consumer Nodes: All datanodes
+                                       ->  Hash Join
+                                             Output: s.b
+                                             Hash Cond: (s.c = t2.a)
+                                             Skew Join Optimized by Hint
+                                             ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                                   Output: s.c, s.b
+                                                   Distribute Key: s.c
+                                                   Spawn on: All datanodes
+                                                   Consumer Nodes: All datanodes
+                                                   ->  Seq Scan on skew_hint.skew_t3 s
+                                                         Output: s.c, s.b
+                                                         Distribute Key: s.c
+                                             ->  Hash
+                                                   Output: t2.a
+                                                   ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                                         Output: t2.a
+                                                         Distribute Key: t2.a
+                                                         Spawn on: All datanodes
+                                                         Consumer Nodes: All datanodes
+                                                         ->  Seq Scan on skew_hint.skew_t2 t2
+                                                               Output: t2.a
+                                                               Distribute Key: t2.c
+(67 rows)
+

@@ -87,7 +87,8 @@ int main(int argc, char* argv[])
 
     knl_instance_init();
 
-    g_instance.increCheckPoint_context = AllocSetContextCreate(g_instance.instance_context,
+    g_instance.increCheckPoint_context = AllocSetContextCreate(
+        INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE),
         "IncreCheckPointContext",
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
@@ -112,14 +113,16 @@ int main(int argc, char* argv[])
 
     PmTopMemoryContext = t_thrd.top_mem_cxt;
 
-    knl_thread_init(MASTER);
+    knl_thread_init(MASTER_THREAD);
 
     t_thrd.fake_session = create_session_context(t_thrd.top_mem_cxt, 0);
     t_thrd.fake_session->status = KNL_SESS_FAKE;
 
     u_sess = t_thrd.fake_session;
 
-    SelfMemoryContext = t_thrd.top_mem_cxt;
+    SelfMemoryContext = THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT);
+
+    MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
 
     progname = get_progname(argv[0]);
 
@@ -383,6 +386,7 @@ static void help(const char* progname)
 #endif
     printf(_("  -s                 show statistics after each query\n"));
     printf(_("  -S WORK-MEM        set amount of memory for sorts (in kB)\n"));
+    printf(_("  -u NUM             set the num of kernel version before upgrade\n"));
     printf(_("  -V, --version      output version information, then exit\n"));
     printf(_("  --NAME=VALUE       set run-time parameter\n"));
     printf(_("  --describe-config  describe configuration parameters, then exit\n"));
@@ -403,6 +407,7 @@ static void help(const char* progname)
     printf(_("\nDeveloper options:\n"));
     printf(_("  -f s|i|n|m|h       forbid use of some plan types\n"));
     printf(_("  -n                 do not reinitialize shared memory after abnormal exit\n"));
+    printf(_("  -O                 allow system table structure changes\n"));
     printf(_("  -P                 disable system indexes\n"));
     printf(_("  -t pa|pl|ex        show timings after each query\n"));
     printf(_("  -T                 send SIGSTOP to all backend processes if one dies\n"));
@@ -493,14 +498,14 @@ static char* get_current_username(const char* progname)
         exit(1);
     }
     /* Allocate new memory because later getpwuid() calls can overwrite it. */
-    pRet = MemoryContextStrdup(u_sess->top_mem_cxt, pw->pw_name);
+    pRet = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), pw->pw_name);
     (void)syscalllockRelease(&getpwuid_lock);
     return pRet;
 #else
     unsigned long namesize = 256 /* UNLEN */ + 1;
     char* name = NULL;
 
-    name = MemoryContextAlloc(u_sess->top_mem_cxt, namesize);
+    name = MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), namesize);
     if (!GetUserName(name, &namesize)) {
         write_stderr("%s: could not determine user name (GetUserName failed)\n", progname);
         exit(1);

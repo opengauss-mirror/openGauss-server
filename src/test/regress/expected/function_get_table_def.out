@@ -21,4 +21,3 @@ select * from pg_get_tabledef('table_function_export_def');
  WITH (orientation=row, compression=no);                                                              +
  ALTER TABLE table_function_export_def ADD CONSTRAINT table_function_export_def_pkey PRIMARY KEY (id);
 (1 row)
-

@@ -1,0 +1,30 @@
+ALTER SYSTEM KILL SESSION '1, 0' IMMEDIATE;
+ pg_terminate_backend 
+----------------------
+ t
+(1 row)
+
+ALTER SYSTEM DISCONNECT SESSION '1, 0' IMMEDIATE;
+ERROR:  unsupported action "disconnect" for statement " alter system "
+ALTER SYSTEM kll SESSION '1, 0' IMMEDIATE;
+ERROR:  undefined action "kll" for statement " alter system "
+ALTER SYSTEM KILL DISCONNECT SESSION '1, 0' IMMEDIATE;
+ERROR:  syntax error at or near "DISCONNECT"
+LINE 1: ALTER SYSTEM KILL DISCONNECT SESSION '1, 0' IMMEDIATE;
+                          ^
+ALTER SYSTEM KILL SESSION '' IMMEDIATE;
+ERROR:  missing or invalid session ID
+ALTER SYSTEM KILL SESSION '1' IMMEDIATE;
+ERROR:  missing or invalid session ID
+ALTER SYSTEM KILL SESSION 's' IMMEDIATE;
+ERROR:  missing or invalid session ID
+ALTER SYSTEM KILL SESSION '1 1' IMMEDIATE;
+ERROR:  missing or invalid session ID
+ALTER SYSTEM KILL SESSION '1,' IMMEDIATE;--
+ERROR:  missing or invalid session ID
+ALTER SYSTEM KILL SESSION ',1' IMMEDIATE;--
+ERROR:  missing or invalid session ID
+ALTER SYSTEM KILL SESSION '1,1,1' IMMEDIATE;
+ERROR:  missing or invalid session ID
+ALTER SYSTEM KILL SESSION '-1, 1' IMMEDIATE;
+ERROR:  missing or invalid session ID

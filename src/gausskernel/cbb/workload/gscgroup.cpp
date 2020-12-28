@@ -31,6 +31,7 @@
 #include "pgstat.h"
 #include "pgxc/pgxc.h"
 #include "pgxc/poolmgr.h"
+#include "utils/acl.h"
 #include "utils/builtins.h"
 #include "workload/commgr.h"
 #include "workload/gscgroup.h"
@@ -124,26 +125,29 @@ static int gscgroup_parse_config_file(const char* ngname, gscgroup_grp_t** ngadd
 
     /* configure file doesn't exist or size is not the same */
     if (fsize != (long)cglen) {
-        ereport(INFO,
+        ereport(LOG,
             (errmsg("the configure file %s doesn't exist or "
                     "the size of configure file has changed. "
                     "Please create it by root user!",
                 cfgpath)));
         free(cfgpath);
+        cfgpath = NULL;
         return -1;
     } else {
         vaddr = gsutil_filemap(cfgpath, cglen, (PROT_READ | PROT_WRITE), MAP_SHARED, passwd_user);
-        if (!vaddr) {
+
+        if (NULL == vaddr) {
             ereport(LOG,
                 (errmsg("failed to create and map "
                         "the configure file %s!",
                     cfgpath)));
             free(cfgpath);
+            cfgpath = NULL;
             return -1;
         }
 
         for (i = 0; i < GSCGROUP_ALLNUM; i++) {
-            if (!ngaddr) {
+            if (NULL == ngaddr) {
                 g_instance.wlm_cxt->gscgroup_vaddr[i] = (gscgroup_grp_t*)vaddr + i;
             } else {
                 ngaddr[i] = (gscgroup_grp_t*)((gscgroup_grp_t*)vaddr + i);
@@ -152,6 +156,7 @@ static int gscgroup_parse_config_file(const char* ngname, gscgroup_grp_t** ngadd
     }
 
     free(cfgpath);
+    cfgpath = NULL;
     return 0;
 }
 
@@ -186,7 +191,7 @@ static void gscgroup_print_exception_detail(StringInfoData* buf, int gid, int ki
     WLMNodeGroupInfo* MyNodeGroup = t_thrd.wlm_cxt.thread_node_group;
 
     for (i = 0; i < kinds; ++i) {
-        if (gsutil_exception_kind_is_valid(MyNodeGroup->vaddr[gid], i) == 0) {
+        if (MyNodeGroup->vaddr == NULL || gsutil_exception_kind_is_valid(MyNodeGroup->vaddr[gid], i) == 0) {
             continue;
         }
 
@@ -244,11 +249,11 @@ void gscgroup_print_exception(StringInfoData* buf)
     /* check if the class exists */
     for (cls = CLASSCG_START_ID; cls <= CLASSCG_END_ID; cls++) {
 #ifdef ENABLE_UT
-        if (MyNodeGroup->vaddr[cls] == NULL) {
+        if (MyNodeGroup->vaddr == NULL || MyNodeGroup->vaddr[cls] == NULL) {
             break;
         }
 #endif
-        if (MyNodeGroup->vaddr[cls]->used == 0) {
+        if (MyNodeGroup->vaddr == NULL || MyNodeGroup->vaddr[cls]->used == 0) {
             continue;
         }
 
@@ -269,11 +274,11 @@ void gscgroup_print_exception(StringInfoData* buf)
 
         for (wd = WDCG_START_ID; wd <= WDCG_END_ID; wd++) {
 #ifdef ENABLE_UT
-            if (MyNodeGroup->vaddr[wd] == NULL) {
+            if (MyNodeGroup->vaddr == NULL || MyNodeGroup->vaddr[wd] == NULL) {
                 break;
             }
 #endif
-            if (MyNodeGroup->vaddr[wd]->used == 0 || MyNodeGroup->vaddr[wd]->ginfo.wd.cgid != cls ||
+            if (MyNodeGroup->vaddr == NULL || MyNodeGroup->vaddr[wd]->used == 0 || MyNodeGroup->vaddr[wd]->ginfo.wd.cgid != cls ||
                 gsutil_exception_is_valid(MyNodeGroup->vaddr[wd], kinds) == 0) {
                 continue;
             }
@@ -334,7 +339,7 @@ static char* gscgroup_print(void)
     appendStringInfo(&buf, _("\nTop Group information is listed:"));
 
     for (i = 0; i <= TOPCG_END_ID; i++) {
-        if (0 == MyNodeGroup->vaddr[i]->used) {
+        if (MyNodeGroup->vaddr == NULL || MyNodeGroup->vaddr[i]->used == 0) {
             continue;
         }
 
@@ -356,7 +361,7 @@ static char* gscgroup_print(void)
     appendStringInfo(&buf, _("\n\nBackend Group information is listed:"));
 
     for (i = BACKENDCG_START_ID; i <= BACKENDCG_END_ID; i++) {
-        if (0 == MyNodeGroup->vaddr[i]->used) {
+        if (MyNodeGroup->vaddr == NULL || MyNodeGroup->vaddr[i]->used == 0) {
             continue;
         }
 
@@ -370,7 +375,7 @@ static char* gscgroup_print(void)
             MyNodeGroup->vaddr[i]->percent,
             MyNodeGroup->vaddr[i]->ginfo.cls.percent);
 
-        if (MyNodeGroup->vaddr[i]->ainfo.quota && MyNodeGroup->vaddr[i]->ainfo.quota > 0) {
+        if (MyNodeGroup->vaddr[i]->ainfo.quota > 0) {
             appendStringInfo(&buf, _("Quota(%%): %2d"), MyNodeGroup->vaddr[i]->ainfo.quota);
         }
     }
@@ -379,7 +384,7 @@ static char* gscgroup_print(void)
     appendStringInfo(&buf, _("\n\nClass Group information is listed:"));
 
     for (i = CLASSCG_START_ID; i <= CLASSCG_END_ID; i++) {
-        if (0 == MyNodeGroup->vaddr[i]->used) {
+        if (MyNodeGroup->vaddr == NULL || MyNodeGroup->vaddr[i]->used == 0) {
             continue;
         }
 
@@ -395,7 +400,7 @@ static char* gscgroup_print(void)
             MyNodeGroup->vaddr[i]->ginfo.cls.maxlevel,
             MyNodeGroup->vaddr[i]->ginfo.cls.rempct);
 
-        if (MyNodeGroup->vaddr[i]->ainfo.quota && MyNodeGroup->vaddr[i]->ainfo.quota > 0) {
+        if (MyNodeGroup->vaddr[i]->ainfo.quota > 0) {
             appendStringInfo(&buf, _("Quota(%%): %2d"), MyNodeGroup->vaddr[i]->ainfo.quota);
         }
     }
@@ -404,7 +409,7 @@ static char* gscgroup_print(void)
     appendStringInfo(&buf, _("\n\nWorkload Group information is listed:"));
 
     for (i = WDCG_START_ID; i <= WDCG_END_ID; i++) {
-        if (0 == MyNodeGroup->vaddr[i]->used) {
+        if (MyNodeGroup->vaddr == NULL || MyNodeGroup->vaddr[i]->used == 0) {
             continue;
         }
 
@@ -419,7 +424,7 @@ static char* gscgroup_print(void)
             MyNodeGroup->vaddr[i]->ginfo.wd.percent,
             MyNodeGroup->vaddr[i]->ginfo.wd.wdlevel);
 
-        if (MyNodeGroup->vaddr[i]->ainfo.quota && MyNodeGroup->vaddr[i]->ainfo.quota > 0) {
+        if (MyNodeGroup->vaddr[i]->ainfo.quota > 0) {
             appendStringInfo(&buf, _("Quota(%%): %2d"), MyNodeGroup->vaddr[i]->ainfo.quota);
         }
     }
@@ -428,7 +433,7 @@ static char* gscgroup_print(void)
     appendStringInfo(&buf, _("\n\nTimeshare Group information is listed:"));
 
     for (i = TSCG_START_ID; i <= TSCG_END_ID; i++) {
-        if (0 == MyNodeGroup->vaddr[i]->used) {
+        if (MyNodeGroup->vaddr == NULL || MyNodeGroup->vaddr[i]->used == 0) {
             continue;
         }
 
@@ -812,6 +817,45 @@ struct cgroup* gscgroup_lookup_cgroup(WLMNodeGroupInfo* ng, const char* gname, b
     return cg;
 }
 
+static int GscgroupParseCpuinfo(const char* cpuset)
+{
+    int len = strlen(cpuset);
+    int count = 0;
+    int low = 0;
+    int num = 0;
+    bool is_range = false;
+    int i;
+
+    for (i = 0; i < len; i++) {
+        if (cpuset[i] == ',') {
+            if (is_range) {
+                count += num - low + 1;
+            } else {
+                count += 1;
+            }
+            num = 0;
+            is_range = false;
+        } else if (cpuset[i] == '-') {
+            low = num;
+            num = 0;
+            is_range = true;
+        } else if (cpuset[i] >= '0' && cpuset[i] <= '9') {
+            num = num * 10 + cpuset[i] - '0';
+        } else {
+            ereport(WARNING, (errmsg("Unknow character %c for cpuset.", cpuset[i])));
+            return 1;
+        }
+    }
+
+    if (is_range) {
+        count += num - low + 1;
+    } else {
+        count += 1;
+    }
+
+    return (count == 0) ? 1 : count;
+}
+
 /*
  * function name: gscgroup_get_cgroup_cpuinfo
  * description  : get control group cpu info, include cpuset and cpuacct
@@ -851,28 +895,7 @@ int gscgroup_get_cgroup_cpuinfo(struct cgroup* cg, int* setcnt, int64* usage)
     /* get the CPUSET controller and its value */
     if (setcnt && (cgc_set = cgroup_get_controller(new_cg, MOUNT_CPUSET_NAME)) != NULL &&
         cgroup_get_value_string(cgc_set, CPUSET_CPUS, &cpuset) == 0) {
-        /*
-         * If the cpuset value is like 'a-b', we must compute
-         * its count, if only use one core, the count is 1
-         */
-        if (strchr(cpuset, '-') != NULL) {
-            int a, b;
-            errno_t rc = sscanf_s(cpuset, "%d-%d", &a, &b);
-            if (rc != 2) {
-                free(cpuset);
-                cgroup_free(&new_cg);
-                fprintf(stderr,
-                    "%s:%d failed on calling "
-                    "security function.\n",
-                    __FILE__,
-                    __LINE__);
-                return -1;
-            }
-
-            *setcnt = b - a + 1;
-        } else {
-            *setcnt = 1;
-        }
+        *setcnt = GscgroupParseCpuinfo(cpuset);
     }
     free(cpuset);
 
@@ -1098,12 +1121,27 @@ int gscgroup_map_ng_conf(char* ngname)
 Datum gs_cgroup_map_ng_conf(PG_FUNCTION_ARGS)
 {
     int ret = 0;
-
+    int i = 0;
+    const char* danger_character_list[] = {";", "`", "\\", "'", "\"", ">", "<", "$", "&", "|", "!", "\n", "/", "..", NULL};
     char* ngname = PG_GETARG_CSTRING(0);
 
-    if (! ngname || *ngname == '\0') {
+    if (!superuser()) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("Only system admin user can use this function")));
+    }
+
+    if (NULL == ngname || *ngname == '\0') {
         ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("invalid name of node group: NULL or \"\"")));
         PG_RETURN_BOOL(false);
+    }
+
+    for (i = 0; danger_character_list[i] != NULL; i++) {
+        if (strstr((const char*)ngname, danger_character_list[i])) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("Error: environment variable \"%s\" contain invaild symbol \"%s\".\n",
+                        ngname, danger_character_list[i])));
+        }
     }
 
     if (!g_instance.wlm_cxt->gscgroup_init_done) {
@@ -1143,7 +1181,7 @@ void gscgroup_init(void)
     }
 
     if (-1 == (ret = gscgroup_parse_config_file(NULL, NULL))) {
-        ereport(INFO, (errmsg("Failed to parse cgroup config file.")));
+        ereport(LOG, (errmsg("Failed to parse cgroup config file.")));
         return;
     }
 
@@ -1252,6 +1290,7 @@ void gscgroup_init(void)
                             "for timeshare path of %s Group!",
                         g_instance.wlm_cxt->gscgroup_vaddr[i]->grpname)));
                 free(toppath);
+                toppath = NULL;
                 return;
             }
 
@@ -1267,7 +1306,9 @@ void gscgroup_init(void)
 
                 if (!(cg = gscgroup_get_cgroup(relpath))) {
                     free(relpath);
+                    relpath = NULL;
                     free(toppath);
+                    toppath = NULL;
                     return;
                 }
 
@@ -1343,10 +1384,12 @@ void gscgroup_init(void)
         ereport(DEBUG1, (errmsg("vacuum group path: %s", relpath)));
         if ((cg = gscgroup_get_cgroup(relpath)) == NULL) {
             free(relpath);
+            relpath = NULL;
             return;
         }
 
         free(relpath);
+        relpath = NULL;
 
         g_instance.wlm_cxt->gscgroup_vaccg = cg;
     } else {
@@ -1658,6 +1701,10 @@ char* gscgroup_get_top_group_name(WLMNodeGroupInfo* ng, char* gname, int len)
  */
 Datum pg_control_group_config(PG_FUNCTION_ARGS)
 {
+    if (!superuser()) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC,
+            "pg_control_group_config");
+    }
     char* config = gscgroup_print();
     text* result_config = cstring_to_text(config);
     pfree_ext(config);
@@ -1960,6 +2007,8 @@ char* gscgroup_get_workload_relpath(WLMNodeGroupInfo* ng, int wd, char* relpath)
     securec_check_intval(sret, free(tmppath), NULL);
 
     free(tmppath);
+    tmppath = NULL;
+
     return relpath;
 }
 
@@ -2257,11 +2306,14 @@ void gscgroup_update_hashtbl(WLMNodeGroupInfo* ng, const char* keyname)
 
         if (!(cg = gscgroup_get_cgroup(relpath))) {
             free(relpath);
+            relpath = NULL;
             return;
         }
 
         (void)gscgroup_enter_hashtbl(ng, keyname, relpath, cg);
         free(relpath);
+        relpath = NULL;
+
         return;
     }
 
@@ -2292,6 +2344,7 @@ void gscgroup_update_hashtbl(WLMNodeGroupInfo* ng, const char* keyname)
                         "for timeshare path of %s Group!",
                     ng->vaddr[cls]->grpname)));
             free(toppath);
+            toppath = NULL;
             return;
         }
 
@@ -2299,9 +2352,11 @@ void gscgroup_update_hashtbl(WLMNodeGroupInfo* ng, const char* keyname)
         securec_check_intval(sret, free(relpath); free(toppath),);
 
         free(toppath);
+        toppath = NULL;
 
         if (!(cg = gscgroup_get_cgroup(relpath))) {
             free(relpath);
+            relpath = NULL;
             return;
         }
     } else if (-1 != (wd = gscgroup_is_workload(ng, cls, p))) {
@@ -2315,6 +2370,7 @@ void gscgroup_update_hashtbl(WLMNodeGroupInfo* ng, const char* keyname)
 
         if ((cg = gscgroup_get_cgroup(relpath)) == NULL) {
             free(relpath);
+            relpath = NULL;
             return;
         }
     }
@@ -2335,6 +2391,7 @@ void gscgroup_update_hashtbl(WLMNodeGroupInfo* ng, const char* keyname)
 
     (void)gscgroup_enter_hashtbl(ng, keyname, relpath, cg);
     free(relpath);
+    relpath = NULL;
 }
 
 /*
@@ -2391,6 +2448,7 @@ gscgroup_info_t* gscgroup_get_cgroup_info_internal(struct cgroup* cg, gscgroup_i
         sret = snprintf_s(info->cpuset, sizeof(info->cpuset), sizeof(info->cpuset) - 1, "%s", cpuset);
         if (cpuset != NULL) {
             free(cpuset);
+            cpuset = NULL;
         }
         securec_check_intval(sret, cgroup_free(&new_cg), info);
     }

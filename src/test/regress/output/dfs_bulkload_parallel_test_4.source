@@ -1,0 +1,177 @@
+set enable_global_stats = true;
+--
+-- BULK LOAD PARALLEL TEST 4
+--
+----
+--19. Format in FIXED correct
+----
+CREATE FOREIGN TABLE EXT_NATION
+(
+n_nationkey integer position(0,2),
+n_name character(25) position(2,25),
+n_regionkey integer position(28, 2),
+n_comment character varying(152) position(30, 152)
+)
+SERVER GSMPP_SERVER
+OPTIONS(LOCATION 'gsfs://127.0.0.1:8900/nation.fixed', FORMAT 'fixed');
+CREATE TABLE tmp_nation (
+    n_nationkey integer NOT NULL,
+    n_name character(25),
+    n_regionkey integer NOT NULL,
+    n_comment character varying(152)
+)with (orientation = column) tablespace hdfs_ts
+DISTRIBUTE BY HASH (n_nationkey);
+INSERT INTO tmp_nation SELECT * FROM EXT_NATION;
+SELECT * FROM tmp_nation ORDER BY n_nationkey;
+ n_nationkey |          n_name           | n_regionkey |                                                                        n_comment                                                                         
+-------------+---------------------------+-------------+----------------------------------------------------------------------------------------------------------------------------------------------------------
+           0 |                   ALGERIA |           0 |                                                                                                       haggle. carefully final deposits detect slyly agai
+           1 |                 ARGENTINA |           1 |                                                                             al foxes promise slyly according to the regular accounts. bold requests alon
+           2 |                    BRAZIL |           1 |                                               y alongside of the pending deposits. carefully special packages are about the ironic forges. slyly special
+           3 |                    CANADA |           1 |                                                    eas hang ironic, silent packages. slyly regular packages are furiously over the tithes. fluffily bold
+           4 |                     EGYPT |           4 |                                                      y above the carefully unusual theodolites. final dugouts are quickly across the furiously regular d
+           5 |                  ETHIOPIA |           0 |                                                                                                                          ven packages wake quickly. regu
+           6 |                    FRANCE |           3 |                                                                                                                   refully final requests. regular, ironi
+           7 |                   GERMANY |           3 |                                                                                               l platelets. regular accounts x-ray: unusual, regular acco
+           8 |                     INDIA |           2 |                                                                                        ss excuses cajole slyly across the packages. deposits print aroun
+           9 |                 INDONESIA |           2 |                                        slyly express asymptotes. regular deposits haggle slyly. carefully ironic hockey players sleep blithely. carefull
+          10 |                      IRAN |           4 |                                                                                                        efully alongside of the slyly final dependencies.
+          11 |                      IRAQ |           4 |                                                                                       nic deposits boost atop the quickly final requests? quickly regula
+          12 |                     JAPAN |           2 |                                                                                                                     ously. final, express gifts cajole a
+          13 |                    JORDAN |           4 |                                                                                                  ic deposits are blithely about the carefully regular pa
+          14 |                     KENYA |           0 |                                                             pending excuses haggle furiously deposits. pending, express pinto beans wake fluffily past t
+          15 |                   MOROCCO |           0 |                                                               rns. blithely bold courts among the closely regular packages use furiously bold platelets?
+          16 |                MOZAMBIQUE |           0 |                                                                                                            s. ironic, unusual asymptotes wake blithely r
+          17 |                      PERU |           1 |                                               platelets. blithely pending dependencies use fluffily across the even pinto beans. carefully silent accoun
+          18 |                     CHINA |           2 |                                                              c dependencies. furiously express notornis sleep slyly regular accounts. ideas sleep. depos
+          19 |                   ROMANIA |           3 |                                          ular asymptotes are about the furious multipliers. express dependencies nag above the ironically ironic account
+          20 |              SAUDI ARABIA |           4 |                                                                           ts. silent requests haggle. closely express packages sleep across the blithely
+          21 |                   VIETNAM |           2 |                                                                                                            hely enticingly express accounts. even, final
+          22 |                    RUSSIA |           3 |                                                                           requests against the platelets use never according to the quickly regular pint
+          23 |            UNITED KINGDOM |           3 |                                                                                            eans boost carefully special requests. accounts are. carefull
+          24 |             UNITED STATES |           1 |                                           y final packages. slow foxes cajole quickly. quickly silent platelets breach ironic accounts. unusual pinto be
+(25 rows)
+
+DROP FOREIGN TABLE EXT_NATION;
+DROP TABLE tmp_nation;
+CREATE TABLE tmp_nation (
+    n_nationkey integer NOT NULL,
+    n_name character(25),
+    n_regionkey integer NOT NULL,
+    n_comment character varying(152)
+)with (orientation = column) tablespace hdfs_ts
+DISTRIBUTE BY HASH (n_nationkey);
+----
+--22. Format in FIXED and missing POSITION specification for column "n_name"
+----
+CREATE FOREIGN TABLE EXT_NATION
+(
+n_nationkey integer position(0,2),
+n_name character(25),
+n_regionkey integer position(28, 2),
+n_comment character varying(152) position(30, 152)
+)
+SERVER GSMPP_SERVER
+OPTIONS(LOCATION 'gsfs://127.0.0.1:8900/nation.fixed', FORMAT 'fixed');
+INSERT INTO tmp_nation SELECT * FROM EXT_NATION;
+SELECT * FROM tmp_nation ORDER BY n_nationkey;
+ n_nationkey | n_name | n_regionkey |                                                                        n_comment                                                                         
+-------------+--------+-------------+----------------------------------------------------------------------------------------------------------------------------------------------------------
+           0 |        |           0 |                                                                                                       haggle. carefully final deposits detect slyly agai
+           1 |        |           1 |                                                                             al foxes promise slyly according to the regular accounts. bold requests alon
+           2 |        |           1 |                                               y alongside of the pending deposits. carefully special packages are about the ironic forges. slyly special
+           3 |        |           1 |                                                    eas hang ironic, silent packages. slyly regular packages are furiously over the tithes. fluffily bold
+           4 |        |           4 |                                                      y above the carefully unusual theodolites. final dugouts are quickly across the furiously regular d
+           5 |        |           0 |                                                                                                                          ven packages wake quickly. regu
+           6 |        |           3 |                                                                                                                   refully final requests. regular, ironi
+           7 |        |           3 |                                                                                               l platelets. regular accounts x-ray: unusual, regular acco
+           8 |        |           2 |                                                                                        ss excuses cajole slyly across the packages. deposits print aroun
+           9 |        |           2 |                                        slyly express asymptotes. regular deposits haggle slyly. carefully ironic hockey players sleep blithely. carefull
+          10 |        |           4 |                                                                                                        efully alongside of the slyly final dependencies.
+          11 |        |           4 |                                                                                       nic deposits boost atop the quickly final requests? quickly regula
+          12 |        |           2 |                                                                                                                     ously. final, express gifts cajole a
+          13 |        |           4 |                                                                                                  ic deposits are blithely about the carefully regular pa
+          14 |        |           0 |                                                             pending excuses haggle furiously deposits. pending, express pinto beans wake fluffily past t
+          15 |        |           0 |                                                               rns. blithely bold courts among the closely regular packages use furiously bold platelets?
+          16 |        |           0 |                                                                                                            s. ironic, unusual asymptotes wake blithely r
+          17 |        |           1 |                                               platelets. blithely pending dependencies use fluffily across the even pinto beans. carefully silent accoun
+          18 |        |           2 |                                                              c dependencies. furiously express notornis sleep slyly regular accounts. ideas sleep. depos
+          19 |        |           3 |                                          ular asymptotes are about the furious multipliers. express dependencies nag above the ironically ironic account
+          20 |        |           4 |                                                                           ts. silent requests haggle. closely express packages sleep across the blithely
+          21 |        |           2 |                                                                                                            hely enticingly express accounts. even, final
+          22 |        |           3 |                                                                           requests against the platelets use never according to the quickly regular pint
+          23 |        |           3 |                                                                                            eans boost carefully special requests. accounts are. carefull
+          24 |        |           1 |                                           y final packages. slow foxes cajole quickly. quickly silent platelets breach ironic accounts. unusual pinto be
+(25 rows)
+
+DROP FOREIGN TABLE EXT_NATION;
+DROP TABLE tmp_nation;
+CREATE TABLE tmp_nation (
+    n_nationkey integer NOT NULL,
+    n_name character(25),
+    n_regionkey integer NOT NULL,
+    n_comment character varying(152)
+)with (orientation = column) tablespace hdfs_ts
+DISTRIBUTE BY HASH (n_nationkey);
+----
+--23. Format in FIXED and specify FIX
+----
+CREATE FOREIGN TABLE EXT_NATION
+(
+n_nationkey integer position(0,2),
+n_name character(25),
+n_regionkey integer position(28, 2),
+n_comment character varying(152) position(30, 152)
+)
+SERVER GSMPP_SERVER
+OPTIONS(LOCATION 'gsfs://127.0.0.1:8900/nation_eol.fixed', FORMAT 'fixed', FIX '182');
+INSERT INTO tmp_nation SELECT * FROM EXT_NATION;
+SELECT * FROM tmp_nation ORDER BY n_nationkey;
+ n_nationkey | n_name | n_regionkey |                                                                        n_comment                                                                         
+-------------+--------+-------------+----------------------------------------------------------------------------------------------------------------------------------------------------------
+           0 |        |           0 |                                                                                                       haggle. carefully final deposits detect slyly agai
+           1 |        |           1 |                                                                             al foxes promise slyly according to the regular accounts. bold requests alon
+           2 |        |           1 |                                               y alongside of the pending deposits. carefully special packages are about the ironic forges. slyly special
+           3 |        |           1 |                                                    eas hang ironic, silent packages. slyly regular packages are furiously over the tithes. fluffily bold
+           4 |        |           4 |                                                      y above the carefully unusual theodolites. final dugouts are quickly across the furiously regular d
+           5 |        |           0 |                                                                                                                          ven packages wake quickly. regu
+           6 |        |           3 |                                                                                                                   refully final requests. regular, ironi
+           7 |        |           3 |                                                                                               l platelets. regular accounts x-ray: unusual, regular acco
+           8 |        |           2 |                                                                                       ss excuses cajole                                                 +
+             |        |             | slyly across the packages. deposits print aroun
+           9 |        |           2 |                                        slyly express asymptotes. regular deposits haggle slyly. carefully ironic hockey players sleep blithely. carefull
+          10 |        |           4 |                                                                                                        efully alongside of the slyly final dependencies.
+          11 |        |           4 |                                                                                       nic deposits boost atop the quickly final requests? quickly regula
+          12 |        |           2 |                                                                                                                     ously. final, express gifts cajole a
+          13 |        |           4 |                                                                                                  ic deposits are blithely about the carefully regular pa
+          14 |        |           0 |                                                             pending excuses haggle furiously deposits. pending, express pinto beans wake fluffily past t
+          15 |        |           0 |                                                               rns. blithely bold courts among the closely regular packages use furiously bold platelets?
+          16 |        |           0 |                                                                                                            s. ironic, unusual asymptotes wake blithely r
+          17 |        |           1 |                                               platelets. blithely pending dependencies use fluffily across the even pinto beans. carefully silent accoun
+          18 |        |           2 |                                                              c dependencies. furiously express notornis sleep slyly regular accounts. ideas sleep. depos
+          19 |        |           3 |                                          ular asymptotes are about the furious multipliers. express dependencies nag above the ironically ironic account
+          20 |        |           4 |                                                                           ts. silent requests haggle. closely express packages sleep across the blithely
+          21 |        |           2 |                                                                                                            hely enticingly express accounts. even, final
+          22 |        |           3 |                                                                           requests against the platelets use never according to the quickly regular pint
+          23 |        |           3 |                                                                                            eans boost carefully special requests. accounts are. carefull
+          24 |        |           1 |                                           y final packages. slow foxes cajole quickly.                                                                  +
+             |        |             | quickly silent platelets breach ironic accounts. unusual pinto be
+(25 rows)
+
+\d+ EXT_NATION
+                                   Foreign table "public.ext_nation"
+   Column    |          Type          | Modifiers | FDW Options | Storage  | Stats target | Description 
+-------------+------------------------+-----------+-------------+----------+--------------+-------------
+ n_nationkey | integer                |           |             | plain    |              | 
+ n_name      | character(25)          |           |             | extended |              | 
+ n_regionkey | integer                |           |             | plain    |              | 
+ n_comment   | character varying(152) |           |             | extended |              | 
+Server: gsmpp_server
+FDW Options: (location 'gsfs://127.0.0.1:8900/nation_eol.fixed', format 'fixed', fix '182', formatter 'n_nationkey(0,2).n_regionkey(28,2).n_comment(30,152)')
+FDW permition: read only
+Has OIDs: no
+Distribute By: ROUND ROBIN
+Location Nodes: ALL DATANODES
+
+DROP FOREIGN TABLE EXT_NATION;
+DROP TABLE TMP_NATION;

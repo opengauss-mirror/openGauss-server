@@ -33,13 +33,13 @@
 #include "executor/nodeSeqscan.h"
 #include "pgxc/redistrib.h"
 #include "miscadmin.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "utils/guc.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "nodes/execnodes.h"
-
-static AbsTblScanDesc InitBeginScan(SeqScanState* node, Relation current_relation);
+#include "nodes/makefuncs.h"
+#include "optimizer/pruning.h"
 
 extern void StrategyGetRingPrefetchQuantityAndTrigger(BufferAccessStrategy strategy, int* quantity, int* trigger);
 /* ----------------------------------------------------------------
@@ -50,7 +50,7 @@ extern void StrategyGetRingPrefetchQuantityAndTrigger(BufferAccessStrategy strat
  *		  number of pages to PageRangePrefetch()
  * ----------------------------------------------------------------
  */
-void prefetch_pages(HeapScanDesc scan, BlockNumber start_block, BlockNumber offset)
+void prefetch_pages(TableScanDesc scan, BlockNumber start_block, BlockNumber offset)
 {
     /* Open it at the smgr level if not already done */
     PageRangePrefetch(scan->rs_rd, MAIN_FORKNUM, start_block, offset, 0, 0);
@@ -67,7 +67,7 @@ void prefetch_pages(HeapScanDesc scan, BlockNumber start_block, BlockNumber offs
  *		3,only the ADIO prefetch is provided here now
  * ----------------------------------------------------------------
  */
-void Start_Prefetch(HeapScanDesc scan, SeqScanAccessor* p_accessor, ScanDirection dir)
+void Start_Prefetch(TableScanDesc scan, SeqScanAccessor* p_accessor, ScanDirection dir)
 {
     BlockNumber start_pref, offset, last;
     uint32 quantity, trigger;
@@ -191,8 +191,8 @@ static void ExecInitNextPartitionForSeqScan(SeqScanState* node);
  */
 static TupleTableSlot* SeqNext(SeqScanState* node)
 {
-    HeapTuple tuple;
-    AbsTblScanDesc scanDesc;
+    Tuple tuple;
+    TableScanDesc scanDesc;
     EState* estate = NULL;
     ScanDirection direction;
     TupleTableSlot* slot = NULL;
@@ -204,28 +204,16 @@ static TupleTableSlot* SeqNext(SeqScanState* node)
     estate = node->ps.state;
     direction = estate->es_direction;
     slot = node->ss_ScanTupleSlot;
-
-    if (scanDesc == NULL) {
-        /*
-         * We reach here if the scan is not parallel, or if we're executing
-         * a scan that was intended to be parallel serially.
-         * It must be a non-partitioned table.
-         */
-        Assert(!node->isPartTbl);
-        scanDesc = InitBeginScan(node, node->ss_currentRelation);
-        node->ss_currentScanDesc = scanDesc;
-    }
-
-    GetHeapScanDesc(scanDesc)->rs_ss_accessor = node->ss_scanaccessor;
+    GetTableScanDesc(scanDesc, node->ss_currentRelation)->rs_ss_accessor = node->ss_scanaccessor;
 
     /*
      * get the next tuple from the table for seqscan.
      */
-    tuple = abs_tbl_getnext(scanDesc, direction);
+    tuple = scan_handler_tbl_getnext(scanDesc, direction, node->ss_currentRelation);
 
     ADIO_RUN()
     {
-        Start_Prefetch(GetHeapScanDesc(scanDesc), node->ss_scanaccessor, direction);
+        Start_Prefetch(GetTableScanDesc(scanDesc, node->ss_currentRelation), node->ss_scanaccessor, direction);
     }
     ADIO_END();
 
@@ -237,7 +225,7 @@ static TupleTableSlot* SeqNext(SeqScanState* node)
      * that ExecStoreTuple will increment the refcount of the buffer; the
      * refcount will not be dropped until the tuple table slot is cleared.
      */
-    return ExecMakeTupleSlot(tuple, GetHeapScanDesc(scanDesc), slot);
+    return ExecMakeTupleSlot(tuple, GetTableScanDesc(scanDesc, node->ss_currentRelation), slot, node->ss_currentRelation->rd_tam_type);
 }
 
 /*
@@ -275,7 +263,7 @@ TupleTableSlot* ExecSeqScan(SeqScanState* node)
  *		  if used ring policy, we need check ring size and correct prefetch quantity and trigger
  * ----------------------------------------------------------------
  */
-void SeqScan_Pref_Quantity(AbsTblScanDesc scan, SeqScanAccessor* p_accessor)
+void SeqScan_Pref_Quantity(TableScanDesc scan, SeqScanAccessor* p_accessor, Relation relation)
 {
     int threshold = (g_instance.attr.attr_storage.NBuffers / 4);
     int prefetch_trigger = u_sess->attr.attr_storage.prefetch_quantity;
@@ -286,7 +274,7 @@ void SeqScan_Pref_Quantity(AbsTblScanDesc scan, SeqScanAccessor* p_accessor)
     if (scan == NULL) {
         return;
     }
-    BufferAccessStrategy bas = GetHeapScanDesc(scan)->rs_strategy;
+    BufferAccessStrategy bas = GetTableScanDesc(scan, relation)->rs_strategy;
     if (bas != NULL) {
         StrategyGetRingPrefetchQuantityAndTrigger(
             bas, (int*)&p_accessor->sa_prefetch_quantity, (int*)&p_accessor->sa_prefetch_trigger);
@@ -299,34 +287,35 @@ void SeqScan_Pref_Quantity(AbsTblScanDesc scan, SeqScanAccessor* p_accessor)
  *		API funtion to init prefetch quantity and prefetch trigger for adio
  * ----------------------------------------------------------------
  */
-void SeqScan_Init(AbsTblScanDesc scan, SeqScanAccessor* p_accessor)
+void SeqScan_Init(TableScanDesc scan, SeqScanAccessor* p_accessor, Relation relation)
 {
     p_accessor->sa_last_prefbf = InvalidBlockNumber;
     p_accessor->sa_pref_trigbf = InvalidBlockNumber;
-    SeqScan_Pref_Quantity(scan, p_accessor);
+    SeqScan_Pref_Quantity(scan, p_accessor, relation);
 }
-extern bool reset_scan_qual(Relation curr_heap_rel, ScanState* node)
+
+RangeScanInRedis reset_scan_qual(Relation curr_heap_rel, ScanState* node)
 {
     if (node == NULL) {
-        return false;
+        return {false, 0, 0};
     }
     if (u_sess->attr.attr_sql.enable_cluster_resize && RelationInRedistribute(curr_heap_rel)) {
-        List* new_qual = eval_ctid_funcs(curr_heap_rel, node->ps.plan->qual, &node->isRangeScanInRedis);
+        List* new_qual = eval_ctid_funcs(curr_heap_rel, node->ps.plan->qual, &node->rangeScanInRedis);
         node->ps.qual = (List*)ExecInitExpr((Expr*)new_qual, (PlanState*)&node->ps);
         node->ps.qual_is_inited = true;
-        return node->isRangeScanInRedis;
-    }
-    if (!node->ps.qual_is_inited) {
+    } else if (!node->ps.qual_is_inited) {
         node->ps.qual = (List*)ExecInitExpr((Expr*)node->ps.plan->qual, (PlanState*)&node->ps);
         node->ps.qual_is_inited = true;
+        node->rangeScanInRedis = {false,0,0};
     }
-    return false;
+    return node->rangeScanInRedis;
 }
-static AbsTblScanDesc InitBeginScan(SeqScanState* node, Relation current_relation)
+
+static TableScanDesc InitBeginScan(SeqScanState* node, Relation current_relation)
 {
-    AbsTblScanDesc current_scan_desc = NULL;
+    TableScanDesc current_scan_desc = NULL;
     if (!node->isSampleScan) {
-        current_scan_desc = abs_tbl_beginscan(current_relation, node->ps.state->es_snapshot, 0, NULL, (ScanState*)node);
+        current_scan_desc = scan_handler_tbl_beginscan(current_relation, node->ps.state->es_snapshot, 0, NULL, (ScanState*)node);
     } else {
         current_scan_desc = InitSampleScanDesc((ScanState*)node, current_relation);
     }
@@ -336,7 +325,8 @@ static AbsTblScanDesc InitBeginScan(SeqScanState* node, Relation current_relatio
 /* ----------------------------------------------------------------
  *		InitScanRelation
  *
- *		Set up to access the scan relation.
+ *		This does the initialization for scan relations and
+ *		subplans of scans.
  * ----------------------------------------------------------------
  */
 void InitScanRelation(SeqScanState* node, EState* estate)
@@ -346,7 +336,7 @@ void InitScanRelation(SeqScanState* node, EState* estate)
     SeqScan* plan = NULL;
     bool is_target_rel = false;
     LOCKMODE lockmode = AccessShareLock;
-    AbsTblScanDesc current_scan_desc = NULL;
+    TableScanDesc current_scan_desc = NULL;
 
     is_target_rel = ExecRelationIsTargetRelation(estate, ((SeqScan*)node->ps.plan)->scanrelid);
 
@@ -355,13 +345,16 @@ void InitScanRelation(SeqScanState* node, EState* estate)
      * open that relation and acquire appropriate lock on it.
      */
     current_relation = ExecOpenScanRelation(estate, ((SeqScan*)node->ps.plan)->scanrelid);
+
+    /*
+     * tuple table initialization
+     */
+    ExecInitResultTupleSlot(estate, &node->ps, current_relation->rd_tam_type);
+    ExecInitScanTupleSlot(estate, node, current_relation->rd_tam_type);
+
     if (!node->isPartTbl) {
-        /*
-         * For non-partitioned table, we will do InitBeginScan later to check whether we can do
-         * parallel scan or not. Check ExecInitSeqScan and SeqNext for details.
-         * But we still need to add qual here, otherwise ExecScan will get no qual.
-         */
-        (void)reset_scan_qual(current_relation, node);
+        /* add qual for redis */
+        current_scan_desc = InitBeginScan(node, current_relation);
     } else {
         plan = (SeqScan*)node->ps.plan;
 
@@ -392,14 +385,19 @@ void InitScanRelation(SeqScanState* node, EState* estate)
             }
         }
         node->lockMode = lockmode;
-
+        /* Generate node->partitions if exists */ 
         if (plan->itrs > 0) {
             Partition part = NULL;
-            Partition currentPart = NULL;
-            ListCell* cell = NULL;
-            List* part_seqs = plan->pruningInfo->ls_rangeSelectedPartitions;
+            PruningResult* resultPlan = NULL;
 
-            Assert(plan->itrs == part_seqs->length);
+            if (plan->pruningInfo->expr != NULL) {
+                resultPlan = GetPartitionInfo(plan->pruningInfo, estate, current_relation);
+            } else {
+                resultPlan = plan->pruningInfo;
+            }
+
+            ListCell* cell = NULL;
+            List* part_seqs = resultPlan->ls_rangeSelectedPartitions;
 
             foreach (cell, part_seqs) {
                 Oid tablepartitionid = InvalidOid;
@@ -409,9 +407,16 @@ void InitScanRelation(SeqScanState* node, EState* estate)
                 part = partitionOpen(current_relation, tablepartitionid, lockmode);
                 node->partitions = lappend(node->partitions, part);
             }
+            if (resultPlan->ls_rangeSelectedPartitions != NULL) {
+                node->part_id = resultPlan->ls_rangeSelectedPartitions->length;
+            } else {
+                node->part_id = 0;
+            }
+        }
 
+        if (node->partitions != NIL) {
             /* construct HeapScanDesc for first partition */
-            currentPart = (Partition)list_nth(node->partitions, 0);
+            Partition currentPart = (Partition)list_nth(node->partitions, 0);
             current_part_rel = partitionGetRelation(current_relation, currentPart);
             node->ss_currentPartition = current_part_rel;
 
@@ -422,11 +427,9 @@ void InitScanRelation(SeqScanState* node, EState* estate)
             node->ps.qual = (List*)ExecInitExpr((Expr*)node->ps.plan->qual, (PlanState*)&node->ps);
         }
     }
-
     node->ss_currentRelation = current_relation;
     node->ss_currentScanDesc = current_scan_desc;
 
-    /* and report the scan tuple slot's rowtype */
     ExecAssignScanType(node, RelationGetDescr(current_relation));
 }
 static inline void InitSeqNextMtd(SeqScan* node, SeqScanState* scanstate)
@@ -467,7 +470,7 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
     scanstate->isPartTbl = node->isPartTbl;
     scanstate->currentSlot = 0;
     scanstate->partScanDirection = node->partScanDirection;
-    scanstate->isRangeScanInRedis = false;
+    scanstate->rangeScanInRedis = {false,0,0};
 
     if (!node->tablesample) {
         scanstate->isSampleScan = false;
@@ -512,7 +515,7 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
     {
         /* add prefetch related information */
         scanstate->ss_scanaccessor = (SeqScanAccessor*)palloc(sizeof(SeqScanAccessor));
-        SeqScan_Init(scanstate->ss_currentScanDesc, scanstate->ss_scanaccessor);
+        SeqScan_Init(scanstate->ss_currentScanDesc, scanstate->ss_scanaccessor, scanstate->ss_currentRelation);
     }
     ADIO_END();
 
@@ -521,18 +524,10 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
      */
     InitSeqNextMtd(node, scanstate);
     if (IsValidScanDesc(scanstate->ss_currentScanDesc)) {
-        abs_tbl_init_parallel_seqscan(
-            scanstate->ss_currentScanDesc, scanstate->ps.plan->dop, scanstate->partScanDirection);
+        scan_handler_tbl_init_parallel_seqscan(scanstate->ss_currentScanDesc, 
+            scanstate->ps.plan->dop, scanstate->partScanDirection);
     } else {
-        /*
-         * For non-partitioned table, ss_currentScanDesc may be none cause we will try to do parallel.
-         * Check InitScanRelation and SeqNext for details.
-         */
-        if (!node->isPartTbl) {
-            scanstate->ps.stubType = PST_None;
-        } else {
-            scanstate->ps.stubType = PST_Scan;
-        }
+        scanstate->ps.stubType = PST_Scan;
     }
 
     scanstate->ps.ps_TupFromTlist = false;
@@ -540,14 +535,14 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
     /*
      * Initialize result tuple type and projection info.
      */
-    ExecAssignResultTypeFromTL(&scanstate->ps);
+    ExecAssignResultTypeFromTL(
+            &scanstate->ps,
+            scanstate->ss_currentRelation->rd_tam_type);
+
     ExecAssignScanProjectionInfo(scanstate);
 
     return scanstate;
 }
-
-    /* If not enough pages to divide into every worker. */
-            /* If not range scan in redistribute, just start from 0. */
 
 /* ----------------------------------------------------------------
  *		ExecEndSeqScan
@@ -558,7 +553,7 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
 void ExecEndSeqScan(SeqScanState* node)
 {
     Relation relation;
-    AbsTblScanDesc scanDesc;
+    TableScanDesc scanDesc;
 
     /*
      * get information from node
@@ -581,7 +576,7 @@ void ExecEndSeqScan(SeqScanState* node)
      * close heap scan
      */
     if (scanDesc != NULL) {
-        abs_tbl_endscan(scanDesc);
+        scan_handler_tbl_endscan((TableScanDesc)scanDesc, relation);
     }
     if (node->isPartTbl) {
         if (PointerIsValid(node->partitions)) {
@@ -619,7 +614,7 @@ void ExecEndSeqScan(SeqScanState* node)
  */
 void ExecReScanSeqScan(SeqScanState* node)
 {
-    AbsTblScanDesc scan;
+    TableScanDesc scan;
 
     if (node->isSampleScan) {
         /* Remember we need to do BeginSampleScan again (if we did it at all) */
@@ -627,105 +622,33 @@ void ExecReScanSeqScan(SeqScanState* node)
     }
 
     scan = node->ss_currentScanDesc;
+    if (node->isPartTbl) {
+        if (PointerIsValid(node->partitions)) {
+            /* end scan the prev partition first, */
+            scan_handler_tbl_endscan(scan, node->ss_currentRelation);
 
-    if (scan != NULL) {
-        if (node->isPartTbl) {
-            if (PointerIsValid(node->partitions)) {
-                /* end scan the prev partition first, */
-                abs_tbl_endscan(scan);
+            /* finally init Scan for the next partition */
+            ExecInitNextPartitionForSeqScan(node);
 
-                /* finally init Scan for the next partition */
-                ExecInitNextPartitionForSeqScan(node);
-
-                scan = node->ss_currentScanDesc;
-            }
-        } else {
-            abs_tbl_rescan(scan, NULL);
+            scan = node->ss_currentScanDesc;
         }
-
-        abs_tbl_init_parallel_seqscan(scan, node->ps.plan->dop, node->partScanDirection);
+    } else {
+        scan_handler_tbl_rescan(scan, NULL, node->ss_currentRelation);
     }
+
+    scan_handler_tbl_init_parallel_seqscan(scan, node->ps.plan->dop, node->partScanDirection);
     ExecScanReScan((ScanState*)node);
 }
 
 /* ----------------------------------------------------------------
- *      ExecSeqScanEstimate
+ *		ExecSeqMarkPos(node)
  *
- *      estimates the space required to serialize seqscan node.
- * ----------------------------------------------------------------
- */
-void ExecSeqScanEstimate(SeqScanState *node, ParallelContext *pcxt)
-{
-    EState *estate = node->ps.state;
-    node->pscan_len = heap_parallelscan_estimate(estate->es_snapshot);
-}
-
-/* ----------------------------------------------------------------
- *      ExecSeqScanInitializeDSM
- *
- *      Set up a parallel heap scan descriptor.
- * ----------------------------------------------------------------
- */
-void ExecSeqScanInitializeDSM(SeqScanState *node, ParallelContext *pcxt, int nodeid)
-{
-    EState *estate = node->ps.state;
-    knl_u_parallel_context *cxt = (knl_u_parallel_context *)pcxt->seg;
-
-    /* Here we can't use palloc, cause we have switch to old memctx in ExecInitParallelPlan */
-    cxt->pwCtx->queryInfo.pscan[nodeid] = (ParallelHeapScanDesc)MemoryContextAllocZero(cxt->memCtx, node->pscan_len);
-    heap_parallelscan_initialize(cxt->pwCtx->queryInfo.pscan[nodeid], node->pscan_len, node->ss_currentRelation,
-        estate->es_snapshot);
-    cxt->pwCtx->queryInfo.pscan[nodeid]->plan_node_id = node->ps.plan->plan_node_id;
-    node->ss_currentScanDesc =
-        (AbsTblScanDesc)heap_beginscan_parallel(node->ss_currentRelation, cxt->pwCtx->queryInfo.pscan[nodeid]);
-}
-
-/* ----------------------------------------------------------------
- *		ExecSeqScanReInitializeDSM
- *
- *		Reset shared state before beginning a fresh scan.
- * ----------------------------------------------------------------
- */
-void ExecSeqScanReInitializeDSM(SeqScanState* node, ParallelContext* pcxt)
-{
-    HeapScanDesc scan = (HeapScanDesc)node->ss_currentScanDesc;
-    heap_parallelscan_reinitialize(scan->rs_parallel);
-}
-
-/* ----------------------------------------------------------------
- *      ExecSeqScanInitializeWorker
- *
- *      Copy relevant information from TOC into planstate.
- * ----------------------------------------------------------------
- */
-void ExecSeqScanInitializeWorker(SeqScanState *node, void *context)
-{
-    ParallelHeapScanDesc pscan = NULL;
-    knl_u_parallel_context *cxt = (knl_u_parallel_context *)context;
-
-    for (int i = 0; i < cxt->pwCtx->queryInfo.pscan_num; i++) {
-        if (node->ps.plan->plan_node_id == cxt->pwCtx->queryInfo.pscan[i]->plan_node_id) {
-            pscan = cxt->pwCtx->queryInfo.pscan[i];
-            break;
-        }
-    }
-
-    if (pscan == NULL) {
-        ereport(ERROR, (errmsg("could not find plan info, plan node id:%d", node->ps.plan->plan_node_id)));
-    }
-
-    node->ss_currentScanDesc = (AbsTblScanDesc)heap_beginscan_parallel(node->ss_currentRelation, pscan);
-}
-
-/* ----------------------------------------------------------------
- * 		ExecSeqMarkPos(node)
- *
- * 		Marks scan position.
+ *		Marks scan position.
  * ----------------------------------------------------------------
  */
 void ExecSeqMarkPos(SeqScanState* node)
 {
-    abs_tbl_markpos(node->ss_currentScanDesc);
+    scan_handler_tbl_markpos(node->ss_currentScanDesc);
 }
 
 /* ----------------------------------------------------------------
@@ -744,7 +667,7 @@ void ExecSeqRestrPos(SeqScanState* node)
      */
     (void)ExecClearTuple(node->ss_ScanTupleSlot);
 
-    abs_tbl_restrpos(node->ss_currentScanDesc);
+    scan_handler_tbl_restrpos(node->ss_currentScanDesc);
 }
 
 /*
@@ -761,7 +684,7 @@ static void ExecInitNextPartitionForSeqScan(SeqScanState* node)
     Partition currentpartition = NULL;
     Relation currentpartitionrel = NULL;
 
-    int paramno;
+    int paramno = -1;
     ParamExecData* param = NULL;
     SeqScan* plan = NULL;
 
@@ -785,7 +708,7 @@ static void ExecInitNextPartitionForSeqScan(SeqScanState* node)
     node->ss_currentScanDesc = InitBeginScan(node, currentpartitionrel);
     ADIO_RUN()
     {
-        SeqScan_Init(node->ss_currentScanDesc, node->ss_scanaccessor);
+        SeqScan_Init(node->ss_currentScanDesc, node->ss_scanaccessor, currentpartitionrel);
     }
     ADIO_END();
 }

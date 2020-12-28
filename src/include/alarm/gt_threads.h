@@ -58,10 +58,10 @@ typedef enum tagGTThreadStatUS_E {
 typedef struct tagGTThread {
     pthread_t id;
 
-    /* thread's run-time status, other thread can read it */
+    /* thread's run-time status, other thread can read it*/
     GT_THREAD_STATUS_E enStatus;
 
-    void* pvProc;         /* pointer of thread entry procedure */
+    void* pvProc;         /* pointer of thread entry procedure*/
     void* pvArgument;     /* argument */
     int32 ulResult;       /* result of thread's execution */
     bool bExitThreadFlag; /* thread will quit gracefully, if set */
@@ -76,7 +76,7 @@ typedef struct tagGTThread {
  ***/
 typedef void (*LPGT_THREAD_PROC)(LPGT_THREAD_S pstThread);
 
-/* **
+/***
  *  Create thread on demand.
  *
  *  @param pfnProc : Function pointer, entry function to the thread.
@@ -88,7 +88,7 @@ typedef void (*LPGT_THREAD_PROC)(LPGT_THREAD_S pstThread);
  ***/
 WARNERRCODE createThread(LPGT_THREAD_PROC pfnThreadProc, void* pvArgs, uint32 ulStackSize, LPGT_THREAD_S pstThread);
 
-/* **
+/***
  *  Joins the thread to parent. Wait for the thread to close.
  *
  *  @param pstThread   : Thread context structure.
@@ -96,42 +96,42 @@ WARNERRCODE createThread(LPGT_THREAD_PROC pfnThreadProc, void* pvArgs, uint32 ul
  ***/
 void closeThread(LPGT_THREAD_S pstThread);
 
-/* **
+/***
  *  Get the current thread id
  *
  *  @return id of the current thread.
  ***/
 int32 getThreadID();
 
-/* **
+/***
  * Sleep function for the thread.
  *
  * @param sleep time in milli-second
  ***/
 void threadSleep(uint32 ulSleepMs);
 
-/* **
+/***
  *  Initialize the thread lock
  *
  *  @param lock parameter
  ***/
 WARNERRCODE initThreadLock(THREAD_LOCK* lock);
 
-/* **
+/***
  * Destory the thread lock
  *
  * @param lock parameter
  ***/
 WARNERRCODE destroyThreadLock(THREAD_LOCK* lock);
 
-/* **
+/***
  * Acquire Lock the thread
  *
  * @param lock parameter
  ***/
 WARNERRCODE lock(THREAD_LOCK* lock);
 
-/* **
+/***
  * Release the thread lock
  *
  * @param lock parameter

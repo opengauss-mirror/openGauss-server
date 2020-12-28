@@ -1,0 +1,3 @@
+Drop server if exists obs_server cascade;
+NOTICE:  server "obs_server" does not exist, skipping
+CREATE SERVER obs_server FOREIGN DATA WRAPPER 	dfs_fdw OPTIONS (address '@obshostname@', type 'obs', access_key '@ak@', secret_access_key '@sk@');

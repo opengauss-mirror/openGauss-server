@@ -89,10 +89,10 @@ ORDER by 1, 2;
 -----+---------
 (0 rows)
 
--- prokind = 'w' shouldn't be set together with proretset
+-- proiswindow shouldn't be set together with proisagg or proretset
 SELECT p1.oid, p1.proname
 FROM pg_proc AS p1
-WHERE prokind = 'w' AND proretset
+WHERE proiswindow AND (proisagg OR proretset)
 ORDER by 1, 2;
  oid | proname 
 -----+---------
@@ -160,9 +160,9 @@ FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid < p2.oid AND
     p1.prosrc = p2.prosrc AND
     p1.prolang = 12 AND p2.prolang = 12 AND
-    (p1.prokind != 'a' OR p2.prokind != 'a') AND
+    (p1.proisagg = false OR p2.proisagg = false) AND
     (p1.prolang != p2.prolang OR
-     (p1.prokind = 'a') != (p2.prokind = 'a') OR
+     p1.proisagg != p2.proisagg OR
      p1.prosecdef != p2.prosecdef OR
      p1.proisstrict != p2.proisstrict OR
      p1.proretset != p2.proretset OR
@@ -189,7 +189,7 @@ FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid != p2.oid AND
     p1.prosrc = p2.prosrc AND
     p1.prolang = 12 AND p2.prolang = 12 AND
-    p1.prokind != 'a' AND p2.prokind != 'a' AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
     p1.prosrc NOT LIKE E'range\\_constructor_' AND
     p2.prosrc NOT LIKE E'range\\_constructor_' AND
     (p1.prorettype < p2.prorettype)
@@ -206,27 +206,30 @@ FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid != p2.oid AND
     p1.prosrc = p2.prosrc AND
     p1.prolang = 12 AND p2.prolang = 12 AND
-    p1.prokind != 'a' AND p2.prokind != 'a' AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
     p1.prosrc NOT LIKE E'range\\_constructor_' AND
     p2.prosrc NOT LIKE E'range\\_constructor_' AND
     (p1.proargtypes[0] < p2.proargtypes[0])
 ORDER BY 1, 2;
  proargtypes | proargtypes 
 -------------+-------------
+          17 |          25
           17 |          86
+          17 |        4402
           25 |        1042
           25 |        1043
+          25 |        4402
         1114 |        1184
         1560 |        1562
         2277 |        2283
-(6 rows)
+(9 rows)
 
 SELECT DISTINCT p1.proargtypes[1], p2.proargtypes[1]
 FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid != p2.oid AND
     p1.prosrc = p2.prosrc AND
     p1.prolang = 12 AND p2.prolang = 12 AND
-    p1.prokind != 'a' AND p2.prokind != 'a' AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
     p1.prosrc NOT LIKE E'range\\_constructor_' AND
     p2.prosrc NOT LIKE E'range\\_constructor_' AND
     (p1.proargtypes[1] < p2.proargtypes[1])
@@ -245,7 +248,7 @@ FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid != p2.oid AND
     p1.prosrc = p2.prosrc AND
     p1.prolang = 12 AND p2.prolang = 12 AND
-    p1.prokind != 'a' AND p2.prokind != 'a' AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
     (p1.proargtypes[2] < p2.proargtypes[2])
 ORDER BY 1, 2;
  proargtypes | proargtypes 
@@ -258,7 +261,7 @@ FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid != p2.oid AND
     p1.prosrc = p2.prosrc AND
     p1.prolang = 12 AND p2.prolang = 12 AND
-    p1.prokind != 'a' AND p2.prokind != 'a' AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
     (p1.proargtypes[3] < p2.proargtypes[3])
 ORDER BY 1, 2;
  proargtypes | proargtypes 
@@ -271,7 +274,7 @@ FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid != p2.oid AND
     p1.prosrc = p2.prosrc AND
     p1.prolang = 12 AND p2.prolang = 12 AND
-    p1.prokind != 'a' AND p2.prokind != 'a' AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
     (p1.proargtypes[4] < p2.proargtypes[4])
 ORDER BY 1, 2;
  proargtypes | proargtypes 
@@ -283,7 +286,7 @@ FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid != p2.oid AND
     p1.prosrc = p2.prosrc AND
     p1.prolang = 12 AND p2.prolang = 12 AND
-    p1.prokind != 'a' AND p2.prokind != 'a' AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
     (p1.proargtypes[5] < p2.proargtypes[5])
 ORDER BY 1, 2;
  proargtypes | proargtypes 
@@ -295,7 +298,7 @@ FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid != p2.oid AND
     p1.prosrc = p2.prosrc AND
     p1.prolang = 12 AND p2.prolang = 12 AND
-    p1.prokind != 'a' AND p2.prokind != 'a' AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
     (p1.proargtypes[6] < p2.proargtypes[6])
 ORDER BY 1, 2;
  proargtypes | proargtypes 
@@ -307,7 +310,7 @@ FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid != p2.oid AND
     p1.prosrc = p2.prosrc AND
     p1.prolang = 12 AND p2.prolang = 12 AND
-    p1.prokind != 'a' AND p2.prokind != 'a' AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
     (p1.proargtypes[7] < p2.proargtypes[7])
 ORDER BY 1, 2;
  proargtypes | proargtypes 
@@ -1104,6 +1107,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  1972 | pg_stat_get_tuples_hot_updated
  1973 | div
  1980 | numeric_div_trunc
+ 1982 | comm_check_connection_status
  1983 | pg_log_comm_status
  1984 | pg_comm_recv_stream
  1985 | pg_comm_send_stream
@@ -1277,6 +1281,10 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  2197 | inet_client_port
  2198 | inet_server_addr
  2199 | inet_server_port
+ 2200 | gs_roach_stop_backup
+ 2201 | gs_roach_enable_delay_ddl_recycle
+ 2202 | gs_roach_disable_delay_ddl_recycle
+ 2203 | gs_roach_switch_xlog
  2212 | regprocedurein
  2213 | regprocedureout
  2214 | regoperin
@@ -1503,8 +1511,6 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  2519 | every
  2526 | timestamp_cmp_timestamptz
  2533 | timestamptz_cmp_timestamp
- 2537 | report_fatal
- 2539 | signal_backend
  2556 | pg_tablespace_databases
  2557 | bool
  2558 | int4
@@ -1969,6 +1975,8 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  3267 | pg_current_sessid
  3283 | numeric_sortsupport
  3299 | local_rto_stat
+ 3316 | pg_get_flush_lsn
+ 3317 | pg_get_sync_flush_lsn
  3332 | get_local_prepared_xact
  3333 | get_remote_prepared_xacts
  3334 | global_clean_prepared_xacts
@@ -2179,6 +2187,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  3787 | ngram_nexttoken
  3788 | ngram_end
  3789 | ngram_lextype
+ 3790 | pg_create_physical_replication_slot_extern
  3792 | zhprs_start
  3793 | zhprs_getlexeme
  3794 | zhprs_end
@@ -2187,6 +2196,8 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  3799 | pound_nexttoken
  3800 | pound_end
  3801 | pound_lextype
+ 3803 | gs_stat_get_hotkeys_info
+ 3805 | gs_stat_clean_hotkeys
  3808 | to_char
  3809 | pg_export_snapshot
  3810 | pg_is_in_recovery
@@ -2235,7 +2246,9 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  3879 | range_gist_penalty
  3880 | range_gist_picksplit
  3881 | range_gist_same
+ 3900 | global_stat_clean_hotkeys
  3902 | hash_range
+ 3903 | global_stat_get_hotkeys_info
  3914 | int4range_canonical
  3915 | daterange_canonical
  3916 | range_typanalyze
@@ -2299,8 +2312,9 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  3985 | pv_total_memory_detail
  3986 | pg_shared_memory_detail
  3987 | pg_shared_memctx_detail
+ 3988 | track_memory_context
  3989 | gin_clean_pending_list
- 3997 | btrecordimagecmp
+ 3990 | track_memory_context_detail
  3998 | update_pgjob
  3999 | pg_tde_info
  4000 | gs_fault_inject
@@ -2482,6 +2496,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4204 | has_nodegroup_privilege
  4205 | has_nodegroup_privilege
  4206 | has_nodegroup_privilege
+ 4207 | fenced_udf_process
  4208 | get_db_source_datasize
  4209 | pg_clean_region_info
  4210 | gs_extend_library
@@ -2505,12 +2520,70 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4246 | cbtreegetbitmap
  4255 | exec_hadoop_sql
  4300 | pv_compute_pool_workload
+ 4305 | hll_in
+ 4306 | hll_out
+ 4307 | hll_recv
+ 4308 | hll_send
+ 4309 | hll_typmod_in
+ 4310 | hll_typmod_out
+ 4311 | hll
+ 4312 | hll_hashval_in
+ 4313 | hll_hashval_out
+ 4316 | hll_hashval
+ 4317 | hll_hashval_int4
+ 4324 | hll_print
+ 4325 | hll_empty
+ 4326 | hll_empty
+ 4327 | hll_empty
+ 4328 | hll_empty
+ 4329 | hll_empty
+ 4330 | hll_schema_version
+ 4331 | hll_type
+ 4332 | hll_log2m
+ 4333 | hll_regwidth
+ 4334 | hll_expthresh
+ 4335 | hll_sparseon
+ 4336 | hll_add_trans1
+ 4337 | hll_add_trans2
+ 4338 | hll_add_trans3
+ 4339 | hll_hash_boolean
+ 4340 | hll_hash_smallint
+ 4341 | hll_hash_integer
+ 4342 | hll_hash_bigint
+ 4343 | hll_hash_bytea
+ 4344 | hll_hash_text
+ 4345 | hll_hash_any
+ 4346 | hll_union_trans
+ 4348 | hll_union_collect
+ 4351 | hll_add_trans0
+ 4352 | hll_pack
+ 4353 | hll_hash_boolean
+ 4354 | hll_hash_smallint
+ 4355 | hll_hash_integer
+ 4356 | hll_hash_bigint
+ 4357 | hll_hash_bytea
+ 4358 | hll_hash_text
+ 4359 | hll_hash_any
+ 4360 | hll_add_trans4
  4361 | local_pagewriter_stat
+ 4362 | hll_trans_recv
+ 4363 | hll_trans_send
+ 4364 | hll_trans_in
+ 4365 | hll_trans_out
+ 4366 | hll_add_agg
+ 4367 | hll_union_agg
  4368 | remote_pagewriter_stat
+ 4369 | hll_hash_byteawithoutorderwithequalcol
  4371 | local_ckpt_stat
  4372 | remote_ckpt_stat
  4373 | local_bgwriter_stat
  4374 | remote_bgwriter_stat
+ 4375 | local_single_flush_dw_stat
+ 4376 | remote_single_flush_dw_stat
+ 4380 | hll_add_agg
+ 4381 | hll_add_agg
+ 4382 | hll_add_agg
+ 4383 | hll_add_agg
  4384 | local_double_write_stat
  4385 | remote_double_write_stat
  4388 | local_redo_stat
@@ -2520,15 +2593,30 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4401 | cgingetbitmap
  4410 | pgxc_stat_dirty_tables
  4411 | pgxc_stat_dirty_tables
+ 4418 | byteawithoutorderwithequalcolcmp
+ 4423 | byteawithoutordercolin
+ 4424 | byteawithoutordercolrecv
+ 4425 | byteawithoutordercolsend
+ 4428 | byteawithoutordercolout
+ 4440 | byteawithoutorderwithequalcolin
  4441 | table_distribution
  4442 | table_distribution
  4443 | pg_get_tabledef
+ 4444 | byteawithoutorderwithequalcolrecv
  4445 | pg_resume_bkp_flag
+ 4446 | byteawithoutorderwithequalcolout
  4448 | ordered_set_transition
+ 4449 | byteawithoutorderwithequalcoltypmodin
+ 4450 | byteawithoutorderwithequalcoltypmodout
+ 4451 | byteawithoutorderwithequalcolsend
  4452 | percentile_cont
  4453 | percentile_cont_float8_final
  4454 | percentile_cont
  4455 | percentile_cont_interval_final
+ 4456 | byteawithoutorderwithequalcolcmpbytear
+ 4461 | mode
+ 4462 | mode_final
+ 4463 | byteawithoutorderwithequalcolcmpbyteal
  4500 | gs_control_group_info
  4501 | gs_respool_exception_info
  4502 | gs_all_control_group_info
@@ -2538,6 +2626,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4506 | listagg
  4507 | interval_list_agg_noarg2_transfn
  4508 | listagg
+ 4520 | gs_stat_activity_timeout
  4600 | checksum
  4601 | checksumtext_agg_transfn
  4651 | pg_cbm_tracked_location
@@ -2549,6 +2638,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4657 | pg_disable_delay_ddl_recycle
  4658 | pg_enable_delay_xlog_recycle
  4659 | pg_disable_delay_xlog_recycle
+ 4660 | pg_cbm_rotate_file
  4700 | has_directory_privilege
  4701 | has_directory_privilege
  4702 | has_directory_privilege
@@ -2556,6 +2646,11 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4704 | has_directory_privilege
  4705 | has_directory_privilege
  4789 | remote_rto_stat
+ 4800 | job_cancel
+ 4801 | job_finish
+ 4802 | job_submit
+ 4803 | job_update
+ 4805 | delta
  4888 | gs_index_advise
  4889 | hypopg_create_index
  4890 | hypopg_display_index
@@ -2644,7 +2739,15 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  5713 | wdr_xdb_query
  5714 | kill_snapshot
  5716 | reset_unique_sql
+ 5717 | submit_on_nodes
+ 5718 | isubmit_on_nodes
+ 5719 | capture_view_to_json
  5720 | get_node_stat_reset_time
+ 5721 | get_local_active_session
+ 5723 | get_wait_event_info
+ 5730 | locktag_decode
+ 5731 | working_version_num
+ 5732 | statement_detail_decode
  5999 | get_gtm_lite_status
  6000 | getbucket
  6001 | bucketuuid
@@ -2670,6 +2773,8 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  6200 | mot_session_memory_detail
  6201 | mot_global_memory_detail
  6202 | mot_local_memory_detail
+ 6203 | pg_start_backup
+ 6204 | pg_stop_backup
  6224 | gs_get_next_xid_csn
  6321 | pg_stat_file_recursive
  7777 | sysdate
@@ -2687,33 +2792,25 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  9015 | pg_advisory_unlock
  9016 | pg_advisory_lock
  9017 | pgxc_unlock_for_sp_database
+ 9018 | pgxc_lock_for_transfer
+ 9019 | pgxc_unlock_for_transfer
+ 9024 | has_cmk_privilege
+ 9025 | has_cmk_privilege
+ 9026 | has_cmk_privilege
+ 9027 | has_cmk_privilege
+ 9028 | has_cmk_privilege
+ 9029 | has_cmk_privilege
+ 9031 | gs_set_obs_delete_location
+ 9032 | gs_get_global_barrier_status
+ 9033 | gs_get_local_barrier_status
+ 9130 | has_cek_privilege
+ 9131 | has_cek_privilege
+ 9132 | has_cek_privilege
+ 9133 | has_cek_privilege
+ 9134 | has_cek_privilege
+ 9135 | has_cek_privilege
  9999 | pg_test_err_contain_err
-(2287 rows)
-
--- Check prokind
-select count(*) from pg_proc where prokind = 'a';
- count 
--------
-   153
-(1 row)
-
-select count(*) from pg_proc where prokind = 'w';
- count 
--------
-    15
-(1 row)
-
-select count(*) from pg_proc where prokind = 'f';
- count 
--------
-  3161
-(1 row)
-
-select count(*) from pg_proc where prokind = 'p';
- count 
--------
-     0
-(1 row)
+--?.*
 
 -- **************** pg_cast ****************
 -- Catch bogus values in pg_cast columns (other than cases detected by
@@ -2799,6 +2896,33 @@ ORDER by 1, 2, 3;
 -- texttoxml(), which does an XML syntax check.
 -- As of 9.1, this finds the cast from pg_node_tree to text, which we
 -- intentionally do not provide a reverse pathway for.
+SELECT castsource::regtype, casttarget::regtype, castfunc, castcontext
+FROM pg_cast c
+WHERE c.castmethod = 'b' AND
+    NOT EXISTS (SELECT 1 FROM pg_cast k
+                WHERE k.castmethod = 'b' AND
+                    k.castsource = c.casttarget AND
+                    k.casttarget = c.castsource)
+ORDER by 1, 2, 3;
+          castsource           |    casttarget     | castfunc | castcontext 
+-------------------------------+-------------------+----------+-------------
+ bytea                         | hll               |        0 | e
+ bigint                        | hll_hashval       |        0 | e
+ text                          | character         |        0 | i
+ clob                          | character         |        0 | i
+ xml                           | text              |        0 | a
+ xml                           | clob              |        0 | a
+ xml                           | character         |        0 | a
+ xml                           | character varying |        0 | a
+ xml                           | nvarchar2         |        0 | a
+ pg_node_tree                  | text              |        0 | i
+ pg_node_tree                  | clob              |        0 | i
+ cidr                          | inet              |        0 | i
+ character varying             | character         |        0 | i
+ nvarchar2                     | character         |        0 | i
+ byteawithoutorderwithequalcol | hll               |        0 | e
+(15 rows)
+
 -- **************** pg_operator ****************
 -- Look for illegal values in pg_operator fields.
 SELECT p1.oid, p1.oprname
@@ -3085,16 +3209,16 @@ ORDER by 1, 2;
 SELECT a.aggfnoid::oid, p.proname
 FROM pg_aggregate as a, pg_proc as p
 WHERE a.aggfnoid = p.oid AND
-    (p.prokind != 'a' OR p.proretset)
+    (NOT p.proisagg OR p.proretset)
 ORDER by 1, 2;
  aggfnoid | proname 
 ----------+---------
 (0 rows)
 
--- Make sure there are no prokind = 'a' pg_proc entries without matches.
+-- Make sure there are no proisagg pg_proc entries without matches.
 SELECT oid, proname
 FROM pg_proc as p
-WHERE p.prokind = 'a' AND
+WHERE p.proisagg AND
     NOT EXISTS (SELECT 1 FROM pg_aggregate a WHERE a.aggfnoid = p.oid)
 ORDER by 1, 2;
  oid | proname 
@@ -3238,19 +3362,29 @@ ORDER BY 1, 2;
 SELECT p1.oid::regprocedure, p2.oid::regprocedure
 FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid < p2.oid AND p1.proname = p2.proname AND
-    p1.prokind = 'a' AND p2.prokind = 'a' AND
+    p1.proisagg AND p2.proisagg AND
     array_dims(p1.proargtypes) != array_dims(p2.proargtypes) AND
     p1.proname != 'listagg'
 ORDER BY 1;
-     oid      |   oid   
---------------+---------
- count("any") | count()
-(1 row)
+                       oid                       |                           oid                           
+-------------------------------------------------+---------------------------------------------------------
+ count("any")                                    | count()
+ hll_add_agg(hll_hashval)                        | hll_add_agg(hll_hashval,integer,integer,bigint,integer)
+ hll_add_agg(hll_hashval)                        | hll_add_agg(hll_hashval,integer,integer,bigint)
+ hll_add_agg(hll_hashval)                        | hll_add_agg(hll_hashval,integer,integer)
+ hll_add_agg(hll_hashval)                        | hll_add_agg(hll_hashval,integer)
+ hll_add_agg(hll_hashval,integer)                | hll_add_agg(hll_hashval,integer,integer,bigint,integer)
+ hll_add_agg(hll_hashval,integer)                | hll_add_agg(hll_hashval,integer,integer,bigint)
+ hll_add_agg(hll_hashval,integer)                | hll_add_agg(hll_hashval,integer,integer)
+ hll_add_agg(hll_hashval,integer,integer)        | hll_add_agg(hll_hashval,integer,integer,bigint,integer)
+ hll_add_agg(hll_hashval,integer,integer)        | hll_add_agg(hll_hashval,integer,integer,bigint)
+ hll_add_agg(hll_hashval,integer,integer,bigint) | hll_add_agg(hll_hashval,integer,integer,bigint,integer)
+(11 rows)
 
 -- For the same reason, aggregates with default arguments are no good.
 SELECT oid, proname
 FROM pg_proc AS p
-WHERE prokind = 'a' AND proargdefaults IS NOT NULL
+WHERE proisagg AND proargdefaults IS NOT NULL
 ORDER by 1, 2;
  oid | proname 
 -----+---------
@@ -3383,7 +3517,8 @@ WHERE p2.amopmethod = p1.oid AND
 ORDER by 1, 2, 3;
  amname | amoplefttype | amoprighttype 
 --------+--------------+---------------
-(0 rows)
+ btree  |         4402 |          4402
+(1 row)
 
 -- Currently, none of the AMs with fixed strategy sets support ordering ops.
 SELECT p1.amname, p2.amopfamily, p2.amopstrategy
@@ -3435,18 +3570,13 @@ FROM pg_amop p1 LEFT JOIN pg_operator p2 ON amopopr = p2.oid
 ORDER BY 1, 2, 3;
  amopmethod | amopstrategy | oprname 
 ------------+--------------+---------
-        403 |            1 | *<
         403 |            1 | <
         403 |            1 | ~<~
-        403 |            2 | *<=
         403 |            2 | <=
         403 |            2 | ~<=~
-        403 |            3 | *=
         403 |            3 | =
-        403 |            4 | *>=
         403 |            4 | >=
         403 |            4 | ~>=~
-        403 |            5 | *>
         403 |            5 | >
         403 |            5 | ~>~
         405 |            1 | =
@@ -3507,7 +3637,7 @@ ORDER BY 1, 2, 3;
        4239 |            5 | >
        4444 |            1 | @@
        4444 |            2 | @@@
-(72 rows)
+(67 rows)
 
 -- Check that all opclass search operators have selectivity estimators.
 -- This is not absolutely required, but it seems a reasonable thing
@@ -3771,8 +3901,8 @@ WHERE p3.opfmethod = (SELECT oid FROM pg_am WHERE amname = 'hash')
      OR NOT physically_coercible(amproclefttype, proargtypes[0])
      OR amproclefttype != amprocrighttype)
 ORDER BY 1, 2;
- amprocfamily | amprocnum |    proname     |     opfname     
---------------+-----------+----------------+-----------------
+ amprocfamily | amprocnum |    proname     |              opfname              
+--------------+-----------+----------------+-----------------------------------
           435 |         1 | hashint4       | date_ops
          1999 |         1 | timestamp_hash | timestamptz_ops
          2222 |         1 | hashchar       | bool_ops
@@ -3781,7 +3911,8 @@ ORDER BY 1, 2;
          2226 |         1 | hashint4       | cid_ops
          2232 |         1 | hashint4       | xid32_ops
          3807 |         1 | hashvarlena    | raw_ops
-(8 rows)
+         4470 |         1 | hashvarlena    | byteawithoutorderwithequalcol_ops
+(9 rows)
 
 -- We can also check SP-GiST carefully, since the support routine signatures
 -- are independent of the datatype being indexed.

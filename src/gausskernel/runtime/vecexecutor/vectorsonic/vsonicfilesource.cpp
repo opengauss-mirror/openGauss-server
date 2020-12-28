@@ -27,7 +27,7 @@
  * -------------------------------------------------------------------------
  */
 #include "vectorsonic/vsonicpartition.h"
-#include "storage/buffile.h"
+#include "storage/buf/buffile.h"
 #include "storage/lz4_file.h"
 #include <algorithm>
 
@@ -1335,7 +1335,8 @@ void SonicHashCharFileSource::initBatchBuf()
         for (uint32 i = 0; i < m_cols; i++) {
             type_size += m_fileInfo[i].typeSize + m_fileInfo[i].varheadlen;
         }
-        m_batchBuf = (char*)palloc0(type_size * BatchMaxSize);
+        Size totalSize = mul_size(BatchMaxSize, (Size)type_size);
+        m_batchBuf = (char*)palloc0(totalSize);
         /* prepare the header info for the fixed data type. */
         m_buf = m_batchBuf;
 

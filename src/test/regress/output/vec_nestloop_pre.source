@@ -80,8 +80,8 @@ create table vec_nestloop_engine.VECTOR_NESTLOOP_TABLE_04
 ) with(orientation = column);
 COPY VECTOR_NESTLOOP_TABLE_01(col_int, col_char, col_vchar, col_date, col_num, col_float1, col_float2, col_timetz) FROM stdin;
 COPY VECTOR_NESTLOOP_TABLE_02(col_int, col_char, col_vchar, col_date, col_num, col_float1, col_float2, col_timetz) FROM stdin;
-copy row_nestloop_table_03 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/row_nestloop_table_03.data';
-copy row_nestloop_table_04 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/row_nestloop_table_04.data';
+copy row_nestloop_table_03 from '@abs_srcdir@/data/row_nestloop_table_03.data';
+copy row_nestloop_table_04 from '@abs_srcdir@/data/row_nestloop_table_04.data';
 insert into vector_nestloop_table_03 select * from row_nestloop_table_03;
 insert into vector_nestloop_table_04 select * from row_nestloop_table_04;
 CREATE TABLE VECTOR_NESTLOOP_TABLE_05 (

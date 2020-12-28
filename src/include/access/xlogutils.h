@@ -5,6 +5,7 @@
  *
  * PostgreSQL transaction log manager utility routines
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -14,7 +15,7 @@
 #define XLOG_UTILS_H
 
 #include "access/xlogreader.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 
 /* Result codes for XLogReadBufferForRedo[Extended] */
 typedef enum {
@@ -34,24 +35,16 @@ extern void XLogCheckInvalidPages(void);
 extern void XLogDropRelation(const RelFileNode& rnode, ForkNumber forknum);
 extern void XlogDropRowReation(RelFileNode rnode);
 extern void XLogDropDatabase(Oid dbid);
-extern void XLogTruncateRelation(
-    XLogReaderState* record, const RelFileNode& rnode, ForkNumber forkNum, BlockNumber nblocks);
+extern void XLogTruncateRelation(XLogReaderState* record, const RelFileNode& rnode, ForkNumber forkNum, BlockNumber nblocks);
 extern void XLogTruncateRelation(RelFileNode rnode, ForkNumber forkNum, BlockNumber nblocks);
 
-extern Buffer XLogReadBufferExtended(
-    const RelFileNode& rnode, ForkNumber forknum, BlockNumber blkno, ReadBufferMode mode);
+extern Buffer XLogReadBufferExtended(const RelFileNode& rnode, ForkNumber forknum, BlockNumber blkno, ReadBufferMode mode);
 
-#ifdef SAL_DFV_STORE
-extern XLogRedoAction XLogReadFsmBufferForRedo(XLogReaderState* record, uint8 block_id, Buffer* buf);
-#endif
 extern XLogRedoAction XLogReadBufferForRedo(XLogReaderState* record, uint8 buffer_id, Buffer* buf);
-extern Buffer XLogInitBufferForRedo(XLogReaderState* record, uint8 block_id);
 extern Relation CreateFakeRelcacheEntry(const RelFileNode& rnode);
-extern Relation CreateCUReplicationRelation(
-    const RelFileNode& rnode, int BackendId, char relpersistence, const char* relname);
+extern Relation CreateCUReplicationRelation(const RelFileNode& rnode, int BackendId, char relpersistence, const char* relname);
 extern void FreeFakeRelcacheEntry(Relation fakerel);
 extern void log_invalid_page(const RelFileNode& node, ForkNumber forkno, BlockNumber blkno, bool present);
-void LogInvalidPageShare(RelFileNode node, ForkNumber forkno, BlockNumber blkno, bool present);
 extern int read_local_xlog_page(XLogReaderState* state, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
     char* cur_page, TimeLineID* pageTLI);
 extern void closeXLogRead();

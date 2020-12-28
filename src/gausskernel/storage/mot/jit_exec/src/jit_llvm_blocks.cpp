@@ -531,7 +531,7 @@ static llvm::Value* ProcessVarExpr(
 
 /** @brief Adds call to PG unary operator. */
 static llvm::Value* AddExecUnaryOperator(
-    JitLlvmCodeGenContext* ctx, llvm::Value* param, llvm::Constant* unary_operator, int arg_pos)
+    JitLlvmCodeGenContext* ctx, llvm::Value* param, llvm::FunctionCallee unary_operator, int arg_pos)
 {
     llvm::Constant* arg_pos_value = llvm::ConstantInt::get(ctx->INT32_T, arg_pos, true);
     return AddFunctionCall(ctx, unary_operator, param, arg_pos_value, nullptr);
@@ -539,7 +539,7 @@ static llvm::Value* AddExecUnaryOperator(
 
 /** @brief Adds call to PG binary operator. */
 static llvm::Value* AddExecBinaryOperator(JitLlvmCodeGenContext* ctx, llvm::Value* lhs_param, llvm::Value* rhs_param,
-    llvm::Constant* binary_operator, int arg_pos)
+    llvm::FunctionCallee binary_operator, int arg_pos)
 {
     llvm::Constant* arg_pos_value = llvm::ConstantInt::get(ctx->INT32_T, arg_pos, true);
     return AddFunctionCall(ctx, binary_operator, lhs_param, rhs_param, arg_pos_value, nullptr);
@@ -547,7 +547,7 @@ static llvm::Value* AddExecBinaryOperator(JitLlvmCodeGenContext* ctx, llvm::Valu
 
 /** @brief Adds call to PG ternary operator. */
 static llvm::Value* AddExecTernaryOperator(JitLlvmCodeGenContext* ctx, llvm::Value* param1, llvm::Value* param2,
-    llvm::Value* param3, llvm::Constant* ternary_operator, int arg_pos)
+    llvm::Value* param3, llvm::FunctionCallee ternary_operator, int arg_pos)
 {
     llvm::Constant* arg_pos_value = llvm::ConstantInt::get(ctx->INT32_T, arg_pos, true);
     return AddFunctionCall(ctx, ternary_operator, param1, param2, param3, arg_pos_value, nullptr);

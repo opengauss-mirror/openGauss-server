@@ -65,8 +65,7 @@ static plog_get_slot g_plog_slot_array[DS_VALID_NUM][DSRQ_VALID_NUM] = {
     /* DS_HADOOP */
     {plog_hdp_get_slot, plog_hdp_get_slot, plog_hdp_get_slot, plog_hdp_get_slot},
     /* DS_REMOTE_DATANODE */
-    {plog_remote_get_slot, plog_remote_get_slot, plog_remote_get_slot, plog_remote_get_slot}
-};
+    {plog_remote_get_slot, plog_remote_get_slot, plog_remote_get_slot, plog_remote_get_slot}};
 
 /*
  * this function MUST be called immediately after t_thrd.mem_cxt.profile_log_mem_cxt
@@ -84,7 +83,7 @@ void init_plog_global_mem(void)
      * so all memories like t_thrd.log_cxt.plog_md_read_entry MUST be malloced in IF
      * branch.
      */
-    if (t_thrd.log_cxt.plog_md_read_entry == NULL) {
+    if (NULL == t_thrd.log_cxt.plog_md_read_entry) {
         MemoryContext oldMemCnxt = MemoryContextSwitchTo(t_thrd.mem_cxt.profile_log_mem_cxt);
 
         t_thrd.log_cxt.plog_md_read_entry = (char*)palloc0(PLOG_ENTRY_MAX_SIZE);
@@ -179,7 +178,7 @@ void aggregate_profile_logs(IndicatorItem* new_item, struct timeval* nowtm)
      * disk IO error should not be common states, so make it a
      * single one record.
      */
-    if (new_item->ret_type == RET_TYPE_FAIL) {
+    if (RET_TYPE_FAIL == new_item->ret_type) {
         write_logmsg_with_one_item(new_item, nowtm);
         return;
     }
@@ -193,24 +192,23 @@ void aggregate_profile_logs(IndicatorItem* new_item, struct timeval* nowtm)
     PLogEntryItem* tmp_item = NULL;
     int slotno = 0;
 
-    /* the following codes will be hit at 99% case. 
-     */
+    /* the following codes will be hit at 99% case. */
+
     slotno = (*(g_plog_slot_array[new_item->data_src][new_item->req_type]))(new_item);
     Assert(slotno < (int)PLOG_ENTRY_MAX_NUM);
     tmp_item = item + slotno;
 
-    if ((proto->nuls[0] == PLOG_NOT_USED) || (proto->nuls[1] == PLOG_NOT_USED)) {
+    if (PLOG_NOT_USED == proto->nuls[0] || PLOG_NOT_USED == proto->nuls[1]) {
         /* the first time to log profiling data in this thread */
         plog_fill_fixed_proto(proto);
 
         plog_record_init_meta(meta, nowtm);
-        plog_record_init_head(head, 0, (char)new_item->data_src, (char)new_item->req_type, (char)RET_TYPE_OK);
+        plog_record_init_head(head, 0, new_item->data_src, new_item->req_type, RET_TYPE_OK);
         plog_record_init_items(item, PLOG_ENTRY_MAX_NUM);
-    } else if (plog_switch_new_msg(nowtm, meta->req_time) || 
-              (meta->gxid != GetTopTransactionIdIfAny()) ||
-              (meta->gqid != (uint64)(u_sess->debug_query_id)) ||
-              UINT32_SUM_OVERFLOW(tmp_item->sum_usec, new_item->req_usec) ||
-              UINT32_SUM_OVERFLOW(tmp_item->sum_size, new_item->dat_size)
+    } else if (plog_switch_new_msg(nowtm, meta->req_time) || (meta->gxid != GetTopTransactionIdIfAny()) ||
+               (meta->gqid != (uint64)(u_sess->debug_query_id)) ||
+               UINT32_SUM_OVERFLOW(tmp_item->sum_usec, new_item->req_usec) ||
+               UINT32_SUM_OVERFLOW(tmp_item->sum_size, new_item->dat_size)
         /* needn't to check tmp_item->sum_count, because it's added only by 1 */
     ) {
         /* first write this plog */
@@ -219,12 +217,12 @@ void aggregate_profile_logs(IndicatorItem* new_item, struct timeval* nowtm)
         /* prepare for the next plog */
         proto->len = 0; /* updated later */
         plog_record_init_meta(meta, nowtm);
-        plog_record_init_head(head, 0, (char)new_item->data_src, (char)new_item->req_type, (char)RET_TYPE_OK);
+        plog_record_init_head(head, 0, new_item->data_src, new_item->req_type, RET_TYPE_OK);
         plog_record_init_items(item, PLOG_ENTRY_MAX_NUM);
     }
     Assert(head->item_num <= PLOG_ENTRY_MAX_NUM);
 
-    if (tmp_item->sum_count == 0) {
+    if (0 == tmp_item->sum_count) {
         /* update the number of this record */
         ++head->item_num;
         tmp_item->sum_count = 1;
@@ -263,7 +261,7 @@ static inline void plog_record_init_meta(PLogEntryMeta* meta, struct timeval* tm
 {
     meta->req_time = *tm;
     meta->tid = t_thrd.proc_cxt.MyProcPid;
-    meta->gxid = (uint32)GetTopTransactionIdIfAny();
+    meta->gxid = GetTopTransactionIdIfAny();
     meta->plog_magic = PLOG_ENTRY_MAGICNUM;
     meta->gqid = u_sess->debug_query_id;
 }
@@ -280,10 +278,10 @@ static inline void plog_record_init_meta(PLogEntryMeta* meta, struct timeval* tm
  */
 static inline void plog_record_init_head(PLogEntryHead* head, int nitems, char ds, char req_type, char ret_type)
 {
-    head->data_src = (uint8)ds;
-    head->req_type = (uint8)req_type;
-    head->item_num = (uint8)nitems;
-    head->ret_type = (uint8)ret_type;
+    head->data_src = ds;
+    head->req_type = req_type;
+    head->item_num = nitems;
+    head->ret_type = ret_type;
 }
 
 /*
@@ -295,7 +293,7 @@ static inline void plog_record_init_head(PLogEntryHead* head, int nitems, char d
  */
 static inline void plog_record_init_items(PLogEntryItem* item, int n)
 {
-    int rc = memset_s(item, (size_t)(sizeof(PLogEntryItem) * n), 0, (size_t)(sizeof(PLogEntryItem) * n));
+    int rc = memset_s(item, sizeof(PLogEntryItem) * n, 0, sizeof(PLogEntryItem) * n);
     securec_check_c(rc, "\0", "\0");
 }
 
@@ -324,7 +322,7 @@ static inline void write_logmsg_with_one_item(IndicatorItem* item, struct timeva
 {
     int size = offsetof(PLogMsg, msgbody) + offsetof(PLogBasicEntry, basic) + offsetof(PLogEntry, item) +
                sizeof(PLogEntryItem);
-    PLogMsg* msg = (PLogMsg*)palloc0((size_t)size);
+    PLogMsg* msg = (PLogMsg*)palloc0(size);
     /* fill protocol part */
     LogPipeProtoHeader* proto = (LogPipeProtoHeader*)&msg->msghead;
     plog_fill_fixed_proto(proto);
@@ -334,8 +332,7 @@ static inline void write_logmsg_with_one_item(IndicatorItem* item, struct timeva
     plog_record_init_meta(&(msg->msgbody.entry.basic.meta), nowtm);
 
     /* fill head part */
-    plog_record_init_head(&(msg->msgbody.entry.basic.head), 1, 
-                           (char)item->data_src, (char)item->req_type, (char)item->ret_type);
+    plog_record_init_head(&(msg->msgbody.entry.basic.head), 1, item->data_src, item->req_type, item->ret_type);
 
     /* fill items part */
     PLogEntryItem* tmp_item = &(msg->msgbody.entry.basic.item[0]);
@@ -344,11 +341,11 @@ static inline void write_logmsg_with_one_item(IndicatorItem* item, struct timeva
     tmp_item->sum_usec = item->req_usec;
 
     /* write this log into stderr */
-    do {
+    {
         Assert(int(LOGPIPE_HEADER_SIZE + proto->len) <= size);
         int fd = fileno(stderr);
         (void)write(fd, (char*)msg, LOGPIPE_HEADER_SIZE + proto->len);
-    } while (0);
+    }
     pfree(msg);
     msg = NULL;
 }
@@ -386,7 +383,7 @@ static int plog_md_get_slot(IndicatorItem* item)
     Assert(MD_SLOT_BASE3 < PLOG_ENTRY_MAX_NUM);
     if (item->req_usec < MD_R1_BOUND) {
         /* slot range: 0 ~ 19 */
-        return (int)(item->req_usec / MD_R1_STEP);
+        return (item->req_usec / MD_R1_STEP);
     }
 
     if (item->req_usec < MD_R2_BOUND2) {
@@ -396,7 +393,7 @@ static int plog_md_get_slot(IndicatorItem* item)
 
     if (item->req_usec < MD_R3_BOUND) {
         /* slot range: 22 ~ 30 */
-        return (int)(MD_SLOT_BASE2 + (item->req_usec / MD_R3_STEP));
+        return MD_SLOT_BASE2 + (item->req_usec / MD_R3_STEP);
     }
 
     /* slot: 31 */
@@ -413,7 +410,7 @@ static int plog_obs_get_slot(IndicatorItem* item)
     Assert(OBS_R1_BASE1 < PLOG_ENTRY_MAX_NUM);
     if (item->req_usec < OBS_R1_BOUND) {
         /* slot range: 0 ~ 29 */
-        return (int)(item->req_usec / OBS_R1_STEP);
+        return (item->req_usec / OBS_R1_STEP);
     }
     /* slot range: 30, 31 */
     return OBS_R1_BASE1 + ((item->req_usec < OBS_R2_BOUND) ? 0 : 1);
@@ -421,8 +418,7 @@ static int plog_obs_get_slot(IndicatorItem* item)
 
 /* results of log2 whose rang is 0~1023 */
 #define LOG2_MAP_SIZE 1024
-static const int log2_map[LOG2_MAP_SIZE] = {
-    0,
+static const int log2_map[LOG2_MAP_SIZE] = {0,
     0,
     1,
     2,
@@ -1445,8 +1441,7 @@ static const int log2_map[LOG2_MAP_SIZE] = {
     10,
     10,
     10,
-    10
-};
+    10};
 
 /*
  * there are all 32 slots avaiable, and we these ranges:
@@ -1468,7 +1463,7 @@ static int plog_hdp_get_slot(IndicatorItem* item)
     Assert(HDP_SLOT_BASE2 < PLOG_ENTRY_MAX_NUM);
     if (item->req_usec < HDP_R1_BOUND) {
         /* slot range: 0 ~ 19 */
-        return (int)(item->req_usec / HDP_R1_STEP);
+        return (item->req_usec / HDP_R1_STEP);
     }
 
     if (item->req_usec < HDP_R2_BOUND) {
@@ -1510,12 +1505,12 @@ static int plog_remote_get_slot(IndicatorItem* item)
     Assert(REMOTE_SLOT_BASE2 < PLOG_ENTRY_MAX_NUM);
     if (item->req_usec < REMOTE_R1_BOUND) {
         /* slot range: 0 ~ 9 */
-        return (int)(item->req_usec / REMOTE_R1_STEP);
+        return (item->req_usec / REMOTE_R1_STEP);
     }
 
     if (item->req_usec < REMOTE_R2_BOUND) {
         /* slot range: 10, 19 */
-        return (int)(REMOTE_SLOT_BASE1 + (item->req_usec / REMOTE_R2_STEP));
+        return REMOTE_SLOT_BASE1 + (item->req_usec / REMOTE_R2_STEP);
     }
 
     /* slot: 20 */
@@ -1536,7 +1531,7 @@ static void write_logmsg_with_multi_items(PLogMsg* plog_msg)
     PLogEntryItem* items = &(entry->basic.item[0]);
     int const nitems = entry->basic.head.item_num;
 
-    if ((proto->nuls[0] == PLOG_NOT_USED) || (proto->nuls[1] == PLOG_NOT_USED) || (nitems == 0)) {
+    if (PLOG_NOT_USED == proto->nuls[0] || PLOG_NOT_USED == proto->nuls[1] || 0 == nitems) {
         return; /* needn't do anything */
     }
 
@@ -1547,7 +1542,7 @@ static void write_logmsg_with_multi_items(PLogMsg* plog_msg)
 
     do {
         /* find the next empty slot from the left */
-        while ((left->sum_count != 0) && (left < soldier)) {
+        while (left->sum_count != 0 && left < soldier) {
             ++left_items_num;
             ++left;
         }
@@ -1558,7 +1553,7 @@ static void write_logmsg_with_multi_items(PLogMsg* plog_msg)
         }
 
         /* find the next used slot from the right */
-        while ((right->sum_count == 0) && (right > soldier)) {
+        while (right->sum_count == 0 && right > soldier) {
             --right;
         }
         Assert(left < right);
@@ -1575,14 +1570,13 @@ static void write_logmsg_with_multi_items(PLogMsg* plog_msg)
     } while (left < soldier);
     Assert(left_items_num == nitems);
 
-    proto->len = (uint16)(offsetof(PLogEntry, item) + sizeof(PLogEntryItem) * nitems);
-    do {
+    proto->len = offsetof(PLogEntry, item) + sizeof(PLogEntryItem) * nitems;
+    {
         /* write this log into stderr */
         int fd = fileno(stderr);
         (void)write(fd, (char*)plog_msg, LOGPIPE_HEADER_SIZE + proto->len);
-    } while (0);
+    }
 
     /* set the number of entries be 0 */
     entry->basic.head.item_num = 0;
 }
-

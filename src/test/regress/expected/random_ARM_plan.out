@@ -1,0 +1,343 @@
+create schema random_plan;
+set current_schema = random_plan;
+--create table and index
+create table random_plan_t1(c1 int, c2 char(10)) distribute by hash(c1);
+create table random_plan_t2(c1 int, c2 char(10)) distribute by hash(c1);
+create table random_plan_t3(c1 int, c2 int, c3 int, c4 regproc);
+create table random_plan_t4(c1 int, c2 int, c3 int, c4 regproc);
+create UNIQUE index random_plan_t1_index ON random_plan_t1(c1);
+create UNIQUE index random_plan_t2_index ON random_plan_t2(c1); 
+--insert record
+insert into random_plan_t1 select generate_series(1,10), 'row'|| generate_series(1,10);
+insert into random_plan_t2 select generate_series(5,10), 'row'|| generate_series(5,10);
+insert into random_plan_t3 select generate_series(1, 100), generate_series(1, 100)%50, generate_series(1, 100)%5, 'sin';
+insert into random_plan_t4 select generate_series(1, 100), generate_series(1, 100)%50, generate_series(1, 100)%5, 'sin';
+analyze random_plan_t1;
+analyze random_plan_t2;
+analyze random_plan_t3;
+analyze random_plan_t4;
+--show current plan_mode_seed
+show plan_mode_seed;
+ plan_mode_seed 
+----------------
+ 0
+(1 row)
+
+--explain optimize plan
+explain (verbose on, costs off) select count(*) from (select distinct a.c1,b.c1 from random_plan_t1 a left join random_plan_t2 b on a.c1=b.c1 group by a.c1,b.c1 order by a.c1,b.c1);
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         ->  Aggregate
+               Output: count(*)
+               ->  Unique
+                     Output: a.c1, b.c1
+                     ->  Sort
+                           Output: a.c1, b.c1
+                           Sort Key: a.c1, b.c1
+                           ->  HashAggregate
+                                 Output: a.c1, b.c1
+                                 Group By Key: a.c1, b.c1
+                                 ->  Nested Loop Left Join
+                                       Output: a.c1, b.c1
+                                       Join Filter: (a.c1 = b.c1)
+                                       ->  Seq Scan on random_plan.random_plan_t1 a
+                                             Output: a.c1, a.c2
+                                             Distribute Key: a.c1
+                                       ->  Materialize
+                                             Output: b.c1
+                                             ->  Seq Scan on random_plan.random_plan_t2 b
+                                                   Output: b.c1
+                                                   Distribute Key: b.c1
+(25 rows)
+
+--set current plan_mode_seed for random plan
+set plan_mode_seed=-1;
+--explain random plan
+select count(*) from (select distinct a.c1,b.c1 from random_plan_t1 a left join random_plan_t2 b on a.c1=b.c1 group by a.c1,b.c1 order by a.c1,b.c1);
+ count 
+-------
+    10
+(1 row)
+
+--show last random plan seed
+select * from plan_seed(); 
+--?.*
+--?.*
+--?.*
+(1 row)
+
+--set current plan_mode_seed is last plan seed for reproduce last plan stable
+set plan_mode_seed=2114325363;
+--explain last plan
+explain (verbose on, costs off) select count(*) from (select distinct a.c1,b.c1 from random_plan_t1 a left join random_plan_t2 b on a.c1=b.c1 group by a.c1,b.c1 order by a.c1,b.c1);
+                                         QUERY PLAN (RANDOM seed 2114325363)                                          
+----------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming (type: GATHER)
+         Output: (count(*))
+         ->  Aggregate
+               Output: count(*)
+               ->  Sort
+                     Output: a.c1, b.c1
+                     Sort Key: a.c1, b.c1
+                     ->  HashAggregate
+                           Output: a.c1, b.c1
+                           Group By Key: a.c1, b.c1
+                           ->  HashAggregate
+                                 Output: a.c1, b.c1
+                                 Group By Key: a.c1, b.c1
+                                 ->  Merge Left Join
+                                       Output: a.c1, b.c1
+                                       Merge Cond: (a.c1 = b.c1)
+                                       ->  Index Only Scan using random_plan_t1_index on random_plan.random_plan_t1 a
+                                             Output: a.c1
+                                             Distribute Key: a.c1
+                                       ->  Index Only Scan using random_plan_t2_index on random_plan.random_plan_t2 b
+                                             Output: b.c1
+                                             Distribute Key: b.c1
+(24 rows)
+
+--set current plan_mode_seed
+set plan_mode_seed=1137357783;
+--explain last plan, query_level==1 and distributed_key!=NULL
+explain (verbose on, costs off) select distinct(c1+c2) from random_plan_t3;
+                 QUERY PLAN (RANDOM seed 1137357783)                 
+---------------------------------------------------------------------
+ HashAggregate
+   Output: ((c1 + c2))
+   Group By Key: ((random_plan_t3.c1 + random_plan_t3.c2))
+   ->  Streaming (type: GATHER)
+         Output: ((c1 + c2))
+         ->  HashAggregate
+               Output: ((c1 + c2))
+               Group By Key: (random_plan_t3.c1 + random_plan_t3.c2)
+               ->  Seq Scan on random_plan.random_plan_t3
+                     Output: (c1 + c2)
+                     Distribute Key: c1
+(11 rows)
+
+--set current plan_mode_seed
+set plan_mode_seed=877315715;
+--explain last plan, query_level==2 and distributed_key!=NULL
+explain (costs off) select t.c1, sum(t.c3) from (select t3.c2 c2, t3.c3 c1, sum(t3.c2+t4.c1) c3 from random_plan_t3 t3 join random_plan_t4 t4 on t3.c2=t4.c3 group by 1, 2) as t group by t.c1;
+                               QUERY PLAN (RANDOM seed 877315715)                                
+-------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Group By Key: t.c1
+   ->  Sort
+         Sort Key: t.c1
+         ->  Streaming (type: GATHER)
+               ->  GroupAggregate
+                     Group By Key: t.c1
+                     ->  Sort
+                           Sort Key: t.c1
+                           ->  Subquery Scan on t
+                                 ->  GroupAggregate
+                                       Group By Key: t3.c2, t3.c3
+                                       ->  Sort
+                                             Sort Key: t3.c2, t3.c3
+                                             ->  Nested Loop
+                                                   Join Filter: (t3.c2 = t4.c3)
+                                                   ->  Streaming(type: REDISTRIBUTE)
+                                                         ->  Seq Scan on random_plan_t4 t4
+                                                   ->  Materialize
+                                                         ->  Streaming(type: REDISTRIBUTE)
+                                                               ->  Seq Scan on random_plan_t3 t3
+(21 rows)
+
+--set current plan_mode_seed
+set plan_mode_seed=1183126883;
+--explain last plan, query_level==2 and distributed_key==NULL
+explain (costs off) select x from (select c4, sum(c1) x from random_plan_t3 group by 1);
+            QUERY PLAN (RANDOM seed 1183126883)            
+-----------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Subquery Scan on __unnamed_subquery__
+         ->  HashAggregate
+               Group By Key: random_plan_t3.c4
+               ->  Streaming(type: BROADCAST)
+                     ->  HashAggregate
+                           Group By Key: random_plan_t3.c4
+                           ->  Seq Scan on random_plan_t3
+(8 rows)
+
+--drop table
+drop table random_plan_t1;
+drop table random_plan_t2;
+drop table random_plan_t3;
+drop table random_plan_t4;
+--create table
+CREATE TABLE fvt_distribute_query_base_tables_04 (
+    w_id bigint,
+    w_name character varying(20),
+    w_zip integer
+)
+WITH (orientation=column, compression=low)
+DISTRIBUTE BY HASH (w_id);
+CREATE TABLE fvt_distribute_query_base_tables_06 (
+    d_id integer,
+    d_street_1 character varying(20),
+    d_street_2 character varying(20),
+    d_name character varying(10),
+    d_w_id integer,
+    d_city character varying(20)
+)
+WITH (orientation=column, compression=low)
+DISTRIBUTE BY HASH (d_id);
+CREATE TABLE fvt_distribute_query_base_tables_07 (
+    c_id integer,
+    c_first character varying(20),
+    c_middle character(2),
+    c_zip character(9),
+    c_d_id integer,
+    c_street_1 character varying(20),
+    c_city character varying(20),
+    c_w_id integer,
+    c_street_2 character varying(20)
+)
+WITH (orientation=column, compression=low)
+DISTRIBUTE BY HASH (c_id);
+CREATE TABLE fvt_distribute_query_base_tables_05 (
+    c_w_id integer,
+    c_street_1 character varying(20),
+    c_city character varying(20),
+    c_zip character(9),
+    c_d_id integer,
+    c_id numeric(10,3)
+)
+WITH (orientation=column, compression=low)
+DISTRIBUTE BY HASH (c_id)
+PARTITION BY RANGE (c_w_id)
+(
+    PARTITION fvt_distribute_query_base_tables_05_p1 VALUES LESS THAN (6),
+    PARTITION fvt_distribute_query_base_tables_05_p2 VALUES LESS THAN (8),
+    PARTITION fvt_distribute_query_base_tables_05_p3 VALUES LESS THAN (MAXVALUE)
+)
+ENABLE ROW MOVEMENT;
+CREATE TABLE fvt_distribute_query_base_tables_01 (
+    w_name character(10),
+    w_street_1 character varying(20),
+    w_zip character(9),
+    w_id integer
+)
+WITH (orientation=column, compression=high)
+DISTRIBUTE BY HASH (w_id)
+PARTITION BY RANGE (w_id)
+(
+    PARTITION fvt_distribute_query_base_tables_01_p1 VALUES LESS THAN (6),
+    PARTITION fvt_distribute_query_base_tables_01_p2 VALUES LESS THAN (8),
+    PARTITION fvt_distribute_query_base_tables_01_p3 VALUES LESS THAN (MAXVALUE)
+)
+ENABLE ROW MOVEMENT;
+--create view
+CREATE VIEW fvt_distribute_query_tables_04 AS 
+(SELECT fvt_distribute_query_base_tables_04.w_id, fvt_distribute_query_base_tables_04.w_name, fvt_distribute_query_base_tables_04.w_zip FROM fvt_distribute_query_base_tables_04 WHERE (fvt_distribute_query_base_tables_04.w_id > 10) UNION ALL SELECT fvt_distribute_query_base_tables_04.w_id, fvt_distribute_query_base_tables_04.w_name, fvt_distribute_query_base_tables_04.w_zip FROM fvt_distribute_query_base_tables_04 WHERE ((fvt_distribute_query_base_tables_04.w_id <= 10) OR (fvt_distribute_query_base_tables_04.w_id IS NULL))) UNION SELECT DISTINCT fvt_distribute_query_base_tables_04.w_id, fvt_distribute_query_base_tables_04.w_name, fvt_distribute_query_base_tables_04.w_zip FROM fvt_distribute_query_base_tables_04 LIMIT 100000;
+CREATE VIEW fvt_distribute_query_tables_05 AS 
+SELECT (__unnamed_subquery__.c_w_id - 1) AS c_w_id, __unnamed_subquery__.c_street_1, __unnamed_subquery__.c_city, __unnamed_subquery__.c_zip, (__unnamed_subquery__.c_d_id + 1000) AS c_d_id, (__unnamed_subquery__.c_id / (2)::numeric) AS c_id FROM (SELECT (fvt_distribute_query_base_tables_05.c_w_id + 1) AS c_w_id, fvt_distribute_query_base_tables_05.c_street_1, fvt_distribute_query_base_tables_05.c_city, fvt_distribute_query_base_tables_05.c_zip, (fvt_distribute_query_base_tables_05.c_d_id - 1000) AS c_d_id, (fvt_distribute_query_base_tables_05.c_id + fvt_distribute_query_base_tables_05.c_id) AS c_id FROM fvt_distribute_query_base_tables_05) __unnamed_subquery__ WHERE (__unnamed_subquery__.c_street_1 IS NOT NULL) UNION SELECT 92892 AS c_w_id, NULL::character varying AS c_street_1, 'xzaeqeoi'::character varying AS c_city, 'ytrcxpo'::bpchar AS c_zip, NULL::integer AS c_d_id, 98318 AS c_id FROM fvt_distribute_query_base_tables_01 WHERE (fvt_distribute_query_base_tables_01.w_id = 1);
+CREATE VIEW fvt_distribute_query_tables_06 AS 
+SELECT a.d_id, b.d_street_1, a.d_street_2, a.d_name, a.d_w_id, a.d_city FROM (fvt_distribute_query_base_tables_06 a LEFT JOIN fvt_distribute_query_base_tables_06 b ON ((((a.d_id + 1) = (b.d_id + 1)) AND (a.d_w_id = b.d_w_id))));
+CREATE VIEW fvt_distribute_query_tables_07 AS 
+SELECT a.c_id, a.c_first, a.c_middle, a.c_zip, a.c_d_id, a.c_street_1, a.c_city, a.c_w_id, a.c_street_2 FROM fvt_distribute_query_base_tables_07 a WHERE (NOT (EXISTS (SELECT b.c_id, b.c_first, b.c_middle, b.c_zip, b.c_d_id, b.c_street_1, b.c_city, b.c_w_id, b.c_street_2 FROM fvt_distribute_query_base_tables_07 b WHERE (a.c_id = (0 - b.c_id))))) UNION SELECT fvt_distribute_query_base_tables_07.c_id, fvt_distribute_query_base_tables_07.c_first, fvt_distribute_query_base_tables_07.c_middle, fvt_distribute_query_base_tables_07.c_zip, fvt_distribute_query_base_tables_07.c_d_id, fvt_distribute_query_base_tables_07.c_street_1, fvt_distribute_query_base_tables_07.c_city, fvt_distribute_query_base_tables_07.c_w_id, fvt_distribute_query_base_tables_07.c_street_2 FROM fvt_distribute_query_base_tables_07 WHERE (fvt_distribute_query_base_tables_07.c_w_id > 1);
+--two level nestloop and the lower nestloop under Materialize
+set plan_mode_seed=1747134384;
+set enable_mergejoin=0;
+set enable_nestloop=1;
+set enable_hashjoin=0;
+explain (costs off)  
+select table_04.w_name , table_05.c_street_1 , table_05.c_w_id+table_06.d_w_id as t_5_6 , table_06.d_city , table_07.c_middle||table_07.c_d_id as t7 
+from fvt_distribute_query_tables_04 as table_04 
+inner join fvt_distribute_query_tables_05 as table_05 on table_05.c_w_id=table_04.w_id 
+left outer join fvt_distribute_query_tables_06 as table_06 on table_06.d_id=table_05.c_d_id and table_06.d_w_id =table_05.c_w_id and table_05.c_id<200 
+right outer join fvt_distribute_query_tables_07 as table_07 on table_07.c_id =table_06.d_id and  table_07.c_w_id=table_06.d_w_id and substring(table_07.c_street_1,1,1)=substring(table_05.c_street_1,1,1) 
+order by table_04.w_name , table_05.c_street_1 , t_5_6 , table_06.d_city , t7 NULLS FIRST ;
+                                                                                                                                                                                                            QUERY PLAN (RANDOM seed 1747134384)                                                                                                                                                                                                            
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: table_04.w_name, table_05.c_street_1, ((table_05.c_w_id + a.d_w_id)), a.d_city, (((a.c_middle)::text || (a.c_d_id)::text)) NULLS FIRST
+         ->  Vector Sort
+               Sort Key: table_04.w_name, table_05.c_street_1, ((table_05.c_w_id + a.d_w_id)), a.d_city, (((a.c_middle)::text || (a.c_d_id)::text)) NULLS FIRST
+               ->  Vector Nest Loop Left Join
+                     Join Filter: ((a.c_id = a.d_id) AND (a.c_w_id = a.d_w_id) AND ("substring"((a.c_street_1)::text, 1, 1) = "substring"((table_05.c_street_1)::text, 1, 1)))
+                     ->  Vector Sonic Hash Aggregate
+                           Group By Key: a.c_id, a.c_first, a.c_middle, a.c_zip, a.c_d_id, a.c_street_1, a.c_city, a.c_w_id, a.c_street_2
+                           ->  Vector Append
+                                 ->  Vector Nest Loop Anti Join
+                                       Join Filter: (a.c_id = ((0 - b.c_id)))
+                                       ->  CStore Scan on fvt_distribute_query_base_tables_07 a
+                                       ->  Vector Materialize
+                                             ->  Vector Streaming(type: REDISTRIBUTE)
+                                                   ->  CStore Scan on fvt_distribute_query_base_tables_07 b
+                                 ->  CStore Scan on fvt_distribute_query_base_tables_07
+                                       Filter: (c_w_id > 1)
+                     ->  Vector Materialize
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 ->  Vector Nest Loop Left Join
+                                       Join Filter: ((a.d_w_id = b.d_w_id) AND ((a.d_id + 1) = (b.d_id + 1)))
+                                       ->  Vector Nest Loop
+                                             Join Filter: ((table_05.c_w_id = a.d_w_id) AND (table_05.c_d_id = a.d_id))
+                                             ->  Vector Nest Loop
+                                                   Join Filter: (table_04.w_id = table_05.c_w_id)
+                                                   ->  Vector Streaming(type: REDISTRIBUTE)
+                                                         ->  Vector Subquery Scan on table_04
+                                                               ->  Vector Limit
+                                                                     ->  Vector Streaming(type: BROADCAST)
+                                                                           ->  Vector Limit
+                                                                                 ->  Vector Sonic Hash Aggregate
+                                                                                       Group By Key: random_plan.fvt_distribute_query_base_tables_04.w_id, random_plan.fvt_distribute_query_base_tables_04.w_name, random_plan.fvt_distribute_query_base_tables_04.w_zip
+                                                                                       ->  Vector Append
+                                                                                             ->  CStore Scan on fvt_distribute_query_base_tables_04
+                                                                                                   Filter: (w_id > 10)
+                                                                                             ->  CStore Scan on fvt_distribute_query_base_tables_04
+                                                                                                   Filter: ((w_id <= 10) OR (w_id IS NULL))
+                                                                                             ->  Vector Unique
+                                                                                                   ->  Vector Sort
+                                                                                                         Sort Key: random_plan.fvt_distribute_query_base_tables_04.w_id, random_plan.fvt_distribute_query_base_tables_04.w_name, random_plan.fvt_distribute_query_base_tables_04.w_zip
+                                                                                                         ->  CStore Scan on fvt_distribute_query_base_tables_04
+                                                   ->  Vector Materialize
+                                                         ->  Vector Subquery Scan on table_05
+                                                               Filter: (table_05.c_id < 200::numeric)
+                                                               ->  Vector Sonic Hash Aggregate
+                                                                     Group By Key: (((fvt_distribute_query_base_tables_05.c_w_id + 1) - 1)), fvt_distribute_query_base_tables_05.c_street_1, fvt_distribute_query_base_tables_05.c_city, fvt_distribute_query_base_tables_05.c_zip, (((fvt_distribute_query_base_tables_05.c_d_id - 1000) + 1000)), (((fvt_distribute_query_base_tables_05.c_id + fvt_distribute_query_base_tables_05.c_id) / 2::numeric))
+                                                                     ->  Vector Append
+                                                                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                                                                 ->  Vector Partition Iterator
+                                                                                       Iterations: 3
+                                                                                       ->  Partitioned CStore Scan on fvt_distribute_query_base_tables_05
+                                                                                             Filter: (c_street_1 IS NOT NULL)
+                                                                                             Selected Partitions:  1..3
+                                                                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                                                                 ->  Vector Subquery Scan on "*SELECT* 2"
+                                                                                       ->  Vector Partition Iterator
+                                                                                             Iterations: 1
+                                                                                             ->  Partitioned CStore Scan on fvt_distribute_query_base_tables_01
+                                                                                                   Filter: (w_id = 1)
+                                                                                                   Selected Partitions:  1
+                                             ->  Vector Materialize
+                                                   ->  Vector Streaming(type: REDISTRIBUTE)
+                                                         ->  CStore Scan on fvt_distribute_query_base_tables_06 a
+                                       ->  Vector Materialize
+                                             ->  Vector Streaming(type: REDISTRIBUTE)
+                                                   ->  CStore Scan on fvt_distribute_query_base_tables_06 b
+(67 rows)
+
+--drop table
+drop view fvt_distribute_query_tables_04;
+drop view fvt_distribute_query_tables_05;
+drop view fvt_distribute_query_tables_06;
+drop view fvt_distribute_query_tables_07;
+drop table fvt_distribute_query_base_tables_01;
+drop table fvt_distribute_query_base_tables_04;
+drop table fvt_distribute_query_base_tables_05;
+drop table fvt_distribute_query_base_tables_06;
+drop table fvt_distribute_query_base_tables_07;
+--reset plan_mode_seed is optimize mode
+reset plan_mode_seed;
+--drop schema
+reset current_schema;
+drop schema random_plan cascade;

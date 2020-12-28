@@ -52,7 +52,6 @@
 #include "knl/knl_variable.h"
 
 #include <locale.h>
-#include <time.h>
 
 #include "catalog/pg_collation.h"
 #include "catalog/pg_control.h"
@@ -65,7 +64,9 @@
 #include "miscadmin.h"
 #include "executor/executor.h"
 
-const int MAX_L10N_DATA = 80;
+#define MAX_L10N_DATA 80
+
+/* Cache for collation-related knowledge */
 
 typedef struct {
     Oid collid;         /* hash key: pg_collation OID */
@@ -98,16 +99,16 @@ char* pg_perm_setlocale(int category, const char* locale)
     char* envbuf = NULL;
 
 #ifndef WIN32
-    AutoMutexLock locale_lock(&gLocaleMutex);
-    locale_lock.lock();
+    AutoMutexLock localeLock(&gLocaleMutex);
+    localeLock.lock();
 
     result = gs_setlocale_r(category, locale);
 
     if (IsUnderPostmaster) {
-        locale_lock.unLock();
+        localeLock.unLock();
         return result;
     }
-    locale_lock.unLock();
+    localeLock.unLock();
 #else
 
     /*
@@ -126,8 +127,9 @@ char* pg_perm_setlocale(int category, const char* locale)
         result = setlocale(category, locale);
 #endif /* WIN32 */
 
-    if (result == NULL)
+    if (result == NULL) {
         return result; /* fall out immediately on failure */
+    }
 
     switch (category) {
         case LC_COLLATE:
@@ -188,27 +190,33 @@ bool check_locale(int category, const char* locale, char** canonname)
     char* save = NULL;
     char* res = NULL;
 
-    if (canonname != NULL)
+    if (canonname != NULL) {
         *canonname = NULL; /* in case of failure */
+    }
 
-    AutoMutexLock locale_lock(&gLocaleMutex);
-    locale_lock.lock();
+    AutoMutexLock localeLock(&gLocaleMutex);
+    localeLock.lock();
     save = gs_setlocale_r(category, NULL);
     if (save == NULL) {
         return false; /* won't happen, we hope */
     }
+
     /* save may be pointing at a modifiable scratch variable, see above. */
     save = pstrdup(save);
+
     /* set the locale with setlocale, to see if it accepts it. */
     res = gs_setlocale_r(category, locale);
+
     /* save canonical name if requested. */
     if ((res != NULL) && (canonname != NULL))
         *canonname = pstrdup(res);
+
     /* restore old value. */
     if (!gs_setlocale_r(category, save))
         elog(WARNING, "failed to restore old locale \"%s\"", save);
+
     pfree_ext(save);
-    locale_lock.unLock();
+    localeLock.unLock();
 
     return (res != NULL);
 }
@@ -224,12 +232,12 @@ bool check_locale(int category, const char* locale, char** canonname)
  * value, whatever it was (so long as the environment setting is legal).
  * This will have been locked down by an earlier call to pg_perm_setlocale.
  */
-bool check_locale_monetary(char** new_val, void** extra, GucSource source)
+bool check_locale_monetary(char** newval, void** extra, GucSource source)
 {
-    return check_locale(LC_MONETARY, *new_val, NULL);
+    return check_locale(LC_MONETARY, *newval, NULL);
 }
 
-void assign_locale_monetary(const char* new_val, void* extra)
+void assign_locale_monetary(const char* newval, void* extra)
 {
     if (u_sess->attr.attr_common.locale_monetary != NULL) {
         errno_t rc = strncpy_s(NameStr(t_thrd.port_cxt.cur_monetary),
@@ -241,12 +249,12 @@ void assign_locale_monetary(const char* new_val, void* extra)
     u_sess->lc_cxt.cur_lc_conv_valid = false;
 }
 
-bool check_locale_numeric(char** new_val, void** extra, GucSource source)
+bool check_locale_numeric(char** newval, void** extra, GucSource source)
 {
-    return check_locale(LC_NUMERIC, *new_val, NULL);
+    return check_locale(LC_NUMERIC, *newval, NULL);
 }
 
-void assign_locale_numeric(const char* new_val, void* extra)
+void assign_locale_numeric(const char* newval, void* extra)
 {
     if (u_sess->attr.attr_common.locale_numeric) {
         errno_t rc = strncpy_s(NameStr(t_thrd.port_cxt.cur_numeric),
@@ -258,12 +266,12 @@ void assign_locale_numeric(const char* new_val, void* extra)
     u_sess->lc_cxt.cur_lc_conv_valid = false;
 }
 
-bool check_locale_time(char** new_val, void** extra, GucSource source)
+bool check_locale_time(char** newval, void** extra, GucSource source)
 {
-    return check_locale(LC_TIME, *new_val, NULL);
+    return check_locale(LC_TIME, *newval, NULL);
 }
 
-void assign_locale_time(const char* new_val, void* extra)
+void assign_locale_time(const char* newval, void* extra)
 {
     u_sess->lc_cxt.cur_lc_time_valid = false;
 }
@@ -278,9 +286,9 @@ void assign_locale_time(const char* new_val, void* extra)
  * The idea there is just to accept the environment setting *if possible*
  * during startup, until we can read the proper value from postgresql.conf.
  */
-bool check_locale_messages(char** new_val, void** extra, GucSource source)
+bool check_locale_messages(char** newval, void** extra, GucSource source)
 {
-    if (**new_val == '\0') {
+    if (**newval == '\0') {
         if (source == PGC_S_DEFAULT)
             return true;
         else
@@ -293,13 +301,13 @@ bool check_locale_messages(char** new_val, void** extra, GucSource source)
      * On Windows, we can't even check the value, so accept blindly
      */
 #if defined(LC_MESSAGES) && !defined(WIN32)
-    return check_locale(LC_MESSAGES, *new_val, NULL);
+    return check_locale(LC_MESSAGES, *newval, NULL);
 #else
     return true;
 #endif
 }
 
-void assign_locale_messages(const char* new_val, void* extra)
+void assign_locale_messages(const char* newval, void* extra)
 {
     /*
      * LC_MESSAGES category does not exist everywhere, but accept it anyway.
@@ -313,8 +321,9 @@ void assign_locale_messages(const char* new_val, void* extra)
  */
 static void free_struct_lconv(struct lconv* s)
 {
-    if (s == NULL)
+    if (s == NULL) {
         return;
+    }
 
     if (s->currency_symbol != NULL) {
         pfree(s->currency_symbol);
@@ -409,14 +418,13 @@ struct lconv* PGLC_localeconv(void)
     }
 
     /* Did we do it already? */
-    if (u_sess->lc_cxt.cur_lc_conv_valid) {
+    if (u_sess->lc_cxt.cur_lc_conv_valid)
         return curlconv;
-    }
 
     free_struct_lconv(curlconv);
 
-    AutoMutexLock locale_lock(&gLocaleMutex);
-    locale_lock.lock();
+    AutoMutexLock localeLock(&gLocaleMutex);
+    localeLock.lock();
 
     /* Save user's values of monetary and numeric locales */
     save_lc_monetary = gs_setlocale_r(LC_MONETARY, NULL);
@@ -428,6 +436,27 @@ struct lconv* PGLC_localeconv(void)
         save_lc_numeric = pstrdup(save_lc_numeric);
 
 #ifdef WIN32
+
+    /*
+     * Ideally, monetary and numeric local symbols could be returned in any
+     * server encoding.  Unfortunately, the WIN32 API does not allow
+     * setlocale() to return values in a codepage/CTYPE that uses more than
+     * two bytes per character, like UTF-8:
+     *
+     * http://msdn.microsoft.com/en-us/library/x99tb11d.aspx
+     *
+     * Evidently, LC_CTYPE allows us to control the encoding used for strings
+     * returned by localeconv().  The Open Group standard, mentioned at the
+     * top of this C file, doesn't explicitly state this.
+     *
+     * Therefore, we set LC_CTYPE to match LC_NUMERIC or LC_MONETARY (which
+     * cannot be UTF8), call localeconv(), and then convert from the
+     * numeric/monitary LC_CTYPE to the server encoding.  One example use of
+     * this is for the Euro symbol.
+     *
+     * Perhaps someday we will use GetLocaleInfoW() which returns values in
+     * UTF16 and convert from that.
+     */
 
     /* save user's value of ctype locale */
     save_lc_ctype = setlocale(LC_CTYPE, NULL);
@@ -530,7 +559,7 @@ struct lconv* PGLC_localeconv(void)
 
         MemoryContextSwitchTo(old_context);
 
-        locale_lock.unLock();
+        localeLock.unLock();
 
         PG_RE_THROW();
     }
@@ -561,7 +590,7 @@ struct lconv* PGLC_localeconv(void)
     }
 #endif
 
-    locale_lock.unLock();
+    localeLock.unLock();
 
     /* reload LC_MONETARY and LC_NUMERIC from session context to thread context */
     rc = strncpy_s(
@@ -686,8 +715,8 @@ static void cache_single_time(char** dst, const char* format, const struct tm* t
 void cache_locale_time(void)
 {
     char* save_lc_time = NULL;
-    time_t time_now;
-    struct tm time_info;
+    time_t timenow;
+    struct tm timeinfo;
     int i;
 
 #ifdef WIN32
@@ -700,8 +729,8 @@ void cache_locale_time(void)
 
     elog(DEBUG3, "cache_locale_time() executed; locale: \"%s\"", u_sess->attr.attr_common.locale_time);
 
-    AutoMutexLock locale_lock(&gLocaleMutex);
-    locale_lock.lock();
+    AutoMutexLock localeLock(&gLocaleMutex);
+    localeLock.lock();
 
     /* save user's value of time locale */
     save_lc_time = gs_setlocale_r(LC_TIME, NULL);
@@ -709,6 +738,15 @@ void cache_locale_time(void)
         save_lc_time = pstrdup(save_lc_time);
 
 #ifdef WIN32
+
+    /*
+     * On WIN32, there is no way to get locale-specific time values in a
+     * specified locale, like we do for monetary/numeric.  We can only get
+     * CP_ACP (see strftime_win32) or UTF16.  Therefore, we get UTF16 and
+     * convert it to the database locale.  However, wcsftime() internally uses
+     * LC_CTYPE, so we set it here.  See the WIN32 comment near the top of
+     * PGLC_localeconv().
+     */
 
     /* save user's value of ctype locale */
     save_lc_ctype = setlocale(LC_CTYPE, NULL);
@@ -721,22 +759,22 @@ void cache_locale_time(void)
 
     gs_setlocale_r(LC_TIME, u_sess->attr.attr_common.locale_time);
 
-    time_now = time(NULL);
-    localtime_r(&time_now, &time_info);
+    timenow = time(NULL);
+    localtime_r(&timenow, &timeinfo);
 
     /* localized days */
     for (i = 0; i < 7; i++) {
-        time_info.tm_wday = i;
-        cache_single_time(&u_sess->lc_cxt.localized_abbrev_days[i], "%a", &time_info);
-        cache_single_time(&u_sess->lc_cxt.localized_full_days[i], "%A", &time_info);
+        timeinfo.tm_wday = i;
+        cache_single_time(&u_sess->lc_cxt.localized_abbrev_days[i], "%a", &timeinfo);
+        cache_single_time(&u_sess->lc_cxt.localized_full_days[i], "%A", &timeinfo);
     }
 
     /* localized months */
     for (i = 0; i < 12; i++) {
-        time_info.tm_mon = i;
-        time_info.tm_mday = 1; /* make sure we don't have invalid date */
-        cache_single_time(&u_sess->lc_cxt.localized_abbrev_months[i], "%b", &time_info);
-        cache_single_time(&u_sess->lc_cxt.localized_full_months[i], "%B", &time_info);
+        timeinfo.tm_mon = i;
+        timeinfo.tm_mday = 1; /* make sure we don't have invalid date */
+        cache_single_time(&u_sess->lc_cxt.localized_abbrev_months[i], "%b", &timeinfo);
+        cache_single_time(&u_sess->lc_cxt.localized_full_months[i], "%B", &timeinfo);
     }
 
     /* try to restore internal settings */
@@ -755,7 +793,7 @@ void cache_locale_time(void)
     }
 #endif
 
-    locale_lock.unLock();
+    localeLock.unLock();
     u_sess->lc_cxt.cur_lc_time_valid = true;
 }
 
@@ -866,6 +904,30 @@ static char* IsoLocaleName(const char* winlocname)
 }
 #endif /* WIN32 && LC_MESSAGES */
 
+/*
+ * Cache mechanism for collation information.
+ *
+ * We cache two flags: whether the collation's LC_COLLATE or LC_CTYPE is C
+ * (or POSIX), so we can optimize a few code paths in various places.
+ * For the built-in C and POSIX collations, we can know that without even
+ * doing a cache lookup, but we want to support aliases for C/POSIX too.
+ * For the "default" collation, there are separate static cache variables,
+ * since consulting the pg_collation catalog doesn't tell us what we need.
+ *
+ * Also, if a pg_locale_t has been requested for a collation, we cache that
+ * for the life of a backend.
+ *
+ * Note that some code relies on the flags not reporting false negatives
+ * (that is, saying it's not C when it is).  For example, char2wchar()
+ * could fail if the locale is C, so str_tolower() shouldn't call it
+ * in that case.
+ *
+ * Note that we currently lack any way to flush the cache.	Since we don't
+ * support ALTER COLLATION, this is OK.  The worst case is that someone
+ * drops a collation, and a useless cache entry hangs around in existing
+ * backends.
+ */
+
 static collation_cache_entry* lookup_collation_cache(Oid collation, bool set_flags)
 {
     collation_cache_entry* cache_entry = NULL;
@@ -900,18 +962,16 @@ static collation_cache_entry* lookup_collation_cache(Oid collation, bool set_fla
 
     if (set_flags && !cache_entry->flags_valid) {
         /* Attempt to set the flags */
-        HeapTuple tp = NULL;
-        Form_pg_collation collform = NULL;
+        HeapTuple tp;
+        Form_pg_collation collform;
         const char* collcollate = NULL;
         const char* collctype = NULL;
 
         tp = SearchSysCache1(COLLOID, ObjectIdGetDatum(collation));
-        if (!HeapTupleIsValid(tp)) {
+        if (!HeapTupleIsValid(tp))
             ereport(ERROR,
                 (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for collation %u", collation)));
-        } else {
-            collform = (Form_pg_collation)GETSTRUCT(tp);
-        }
+        collform = (Form_pg_collation)GETSTRUCT(tp);
 
         collcollate = NameStr(collform->collcollate);
         collctype = NameStr(collform->collctype);
@@ -949,8 +1009,8 @@ bool lc_collate_is_c(Oid collation)
         if (u_sess->lc_cxt.lc_collate_result >= 0)
             return (bool)u_sess->lc_cxt.lc_collate_result;
 
-        AutoMutexLock locale_lock(&gLocaleMutex);
-        locale_lock.lock();
+        AutoMutexLock localeLock(&gLocaleMutex);
+        localeLock.lock();
         localeptr = gs_setlocale_r(LC_COLLATE, NULL);
         if (localeptr == NULL) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("invalid LC_COLLATE setting")));
@@ -963,7 +1023,7 @@ bool lc_collate_is_c(Oid collation)
         else
             u_sess->lc_cxt.lc_collate_result = false;
 
-        locale_lock.unLock();
+        localeLock.unLock();
         return (bool)u_sess->lc_cxt.lc_collate_result;
     }
 
@@ -1001,8 +1061,8 @@ bool lc_ctype_is_c(Oid collation)
         if (u_sess->lc_cxt.lc_ctype_result >= 0)
             return (bool)u_sess->lc_cxt.lc_ctype_result;
 
-        AutoMutexLock locale_lock(&gLocaleMutex);
-        locale_lock.lock();
+        AutoMutexLock localeLock(&gLocaleMutex);
+        localeLock.lock();
         localeptr = gs_setlocale_r(LC_CTYPE, NULL);
         if (localeptr == NULL) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("invalid LC_CTYPE setting")));
@@ -1015,7 +1075,7 @@ bool lc_ctype_is_c(Oid collation)
         else
             u_sess->lc_cxt.lc_ctype_result = false;
 
-        locale_lock.unLock();
+        localeLock.unLock();
         return (bool)u_sess->lc_cxt.lc_ctype_result;
     }
 
@@ -1045,7 +1105,7 @@ static void report_newlocale_failure(const char* localename)
     ereport(ERROR,
         (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             errmsg("could not create locale \"%s\": %m", localename),
-            (save_errno == ENOENT
+            ((save_errno == ENOENT)
                     ? errdetail(
                           "The operating system could not find any locale data for the locale name \"%s\".", localename)
                     : 0)));
@@ -1080,25 +1140,25 @@ pg_locale_t pg_newlocale_from_collation(Oid collid)
         return (pg_locale_t)0;
 
     cache_entry = lookup_collation_cache(collid, false);
+
     if (cache_entry->locale == 0) {
         /* We haven't computed this yet in this session, so do it */
 #ifdef HAVE_LOCALE_T
-        HeapTuple tp = NULL;
-        Form_pg_collation collform = NULL;
+        HeapTuple tp;
+        Form_pg_collation collform;
         const char* collcollate = NULL;
         const char* collctype = NULL;
         locale_t result;
 
         tp = SearchSysCache1(COLLOID, ObjectIdGetDatum(collid));
-        if (!HeapTupleIsValid(tp)) {
+        if (!HeapTupleIsValid(tp))
             ereport(
                 ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for collation %u", collid)));
-        } else {
-            collform = (Form_pg_collation)GETSTRUCT(tp);
-        }
+        collform = (Form_pg_collation)GETSTRUCT(tp);
 
         collcollate = NameStr(collform->collcollate);
         collctype = NameStr(collform->collctype);
+
         if (strcmp(collcollate, collctype) == 0) {
             /* Normal case where they're the same */
 #ifndef WIN32
@@ -1131,9 +1191,11 @@ pg_locale_t pg_newlocale_from_collation(Oid collid)
                     errmsg("collations with different collate and ctype values are not supported on this platform")));
 #endif
         }
+
         cache_entry->locale = result;
+
         ReleaseSysCache(tp);
-#else   /* not HAVE_LOCALE_T */
+#else  /* not HAVE_LOCALE_T */
 
         /*
          * For platforms that don't support locale_t, we can't do anything
@@ -1142,11 +1204,16 @@ pg_locale_t pg_newlocale_from_collation(Oid collid)
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("nondefault collations are not supported on this platform")));
-#endif  /* not HAVE_LOCALE_T */
+#endif /* not HAVE_LOCALE_T */
     }
 
     return cache_entry->locale;
 }
+
+/*
+ * These functions convert from/to libc's wchar_t, *not* pg_wchar_t.
+ * Therefore we keep them here rather than with the mbutils code.
+ */
 
 #ifdef USE_WIDE_UPPER_LOWER
 
@@ -1160,6 +1227,7 @@ pg_locale_t pg_newlocale_from_collation(Oid collid)
 size_t wchar2char(char* to, const wchar_t* from, size_t tolen, pg_locale_t locale)
 {
     size_t result;
+
     if (tolen == 0)
         return 0;
 
@@ -1193,7 +1261,9 @@ size_t wchar2char(char* to, const wchar_t* from, size_t tolen, pg_locale_t local
 #else  /* !HAVE_WCSTOMBS_L */
         /* We have to temporarily set the locale as current ... ugh */
         locale_t save_locale = uselocale(locale);
+
         result = wcstombs(to, from, tolen);
+
         uselocale(save_locale);
 #endif /* HAVE_WCSTOMBS_L */
 #else  /* !HAVE_LOCALE_T */
@@ -1202,6 +1272,7 @@ size_t wchar2char(char* to, const wchar_t* from, size_t tolen, pg_locale_t local
         result = 0; /* keep compiler quiet */
 #endif /* HAVE_LOCALE_T */
     }
+
     return result;
 }
 
@@ -1210,13 +1281,14 @@ size_t wchar2char(char* to, const wchar_t* from, size_t tolen, pg_locale_t local
  *
  * This has almost the API of mbstowcs_l(), except that *from need not be
  * null-terminated; instead, the number of input bytes is specified as
- * from_len.  Also, we ereport() rather than returning -1 for invalid
+ * fromlen.  Also, we ereport() rather than returning -1 for invalid
  * input encoding.	tolen is the maximum number of wchar_t's to store at *to.
  * The output will be zero-terminated iff there is room.
  */
-size_t char2wchar(wchar_t* to, size_t tolen, const char* from, size_t from_len, pg_locale_t locale)
+size_t char2wchar(wchar_t* to, size_t tolen, const char* from, size_t fromlen, pg_locale_t locale)
 {
     size_t result;
+
     if (tolen == 0)
         return 0;
 
@@ -1224,10 +1296,10 @@ size_t char2wchar(wchar_t* to, size_t tolen, const char* from, size_t from_len, 
     /* See WIN32 "Unicode" comment above */
     if (GetDatabaseEncoding() == PG_UTF8) {
         /* Win32 API does not work for zero-length input */
-        if (from_len == 0)
+        if (fromlen == 0)
             result = 0;
         else {
-            result = MultiByteToWideChar(CP_UTF8, 0, from, from_len, to, tolen - 1);
+            result = MultiByteToWideChar(CP_UTF8, 0, from, fromlen, to, tolen - 1);
             /* A zero return is failure */
             if (result == 0)
                 result = -1;
@@ -1242,7 +1314,7 @@ size_t char2wchar(wchar_t* to, size_t tolen, const char* from, size_t from_len, 
 #endif /* WIN32 */
     {
         /* mbstowcs requires ending '\0' */
-        char* str = pnstrdup(from, from_len);
+        char* str = pnstrdup(from, fromlen);
 
         if (locale == (pg_locale_t)0) {
             /* Use mbstowcs directly for the default locale */
@@ -1279,7 +1351,7 @@ size_t char2wchar(wchar_t* to, size_t tolen, const char* from, size_t from_len, 
          * database encoding.  Give a generic error message if verifymbstr
          * can't find anything wrong.
          */
-        pg_verifymbstr(from, from_len, false); /* might not return */
+        pg_verifymbstr(from, fromlen, false); /* might not return */
         /* but if it does ... */
         ereport(ERROR,
             (errcode(ERRCODE_CHARACTER_NOT_IN_REPERTOIRE),
@@ -1303,7 +1375,7 @@ void freeLocaleCacheAtThreadExit(void)
         t_thrd.port_cxt.save_locale_r = (pg_locale_t)0;
     }
 
-    if (u_sess->lc_cxt.collation_cache == NULL)
+    if (NULL == u_sess->lc_cxt.collation_cache)
         return;
 
     hash_seq_init(&hash_seq, u_sess->lc_cxt.collation_cache);

@@ -14,8 +14,8 @@
 #ifndef DYNAHASH_H
 #define DYNAHASH_H
 
-#include "storage/buf_internals.h"
-#include "storage/s_lock.h"
+#include "storage/buf/buf_internals.h"
+#include "storage/lock/s_lock.h"
 #include "utils/hsearch.h"
 
 /* Number of freelists to be used for a partitioned hash table. */

@@ -15,6 +15,7 @@ echo "create view v_stop_test as select * from stop_test;" >> $scripts_dir/data/
 echo "create function pg_temp.f_test_temp(a int) returns void" >> $scripts_dir/data/temp_stop.sql
 echo "as \$\$" >> $scripts_dir/data/temp_stop.sql
 echo "begin" >> $scripts_dir/data/temp_stop.sql
+echo "dbms_output.put_line('abc');" >> $scripts_dir/data/temp_stop.sql
 echo "end; \$\$ language plpgsql;" >> $scripts_dir/data/temp_stop.sql
 echo "\! gs_ctl stop -D $data_dir/datanode1" >> $scripts_dir/data/temp_stop.sql
 echo "select * from stop_test;" >> $scripts_dir/data/temp_stop.sql

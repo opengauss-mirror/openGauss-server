@@ -1,0 +1,88 @@
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator2 -c "autovacuum = on" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c "autovacuum = on" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator3 -c "autovacuum = on" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator2 -c "autovacuum_mode = mix" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c "autovacuum_mode = mix" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator3 -c "autovacuum_mode = mix" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator2 -c "autovacuum_naptime = 2s" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c "autovacuum_naptime = 2s" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator3 -c "autovacuum_naptime = 2s" >/dev/null 2>&1
+
+
+ALTER NODE coordinator2 WITH (nodeis_central=false);
+ALTER NODE coordinator1 WITH (nodeis_central=true);
+SHOW autovacuum;
+SHOW autovacuum_mode;
+SHOW autovacuum_naptime;
+
+CREATE OR REPLACE PROCEDURE sleep_loop_autoanalyze_count(i IN INTEGER, tablename IN TEXT, sleep IN FLOAT)
+AS
+BEGIN
+WHILE ((select * from pg_stat_get_autoanalyze_count(tablename::regclass)) < i) LOOP
+PERFORM pg_sleep(sleep);
+PERFORM pg_stat_clear_snapshot();
+END LOOP;
+END;
+/
+
+CREATE OR REPLACE PROCEDURE sleep_loop_autovacuum_count(i IN INTEGER, tablename IN TEXT, sleep IN FLOAT)
+AS
+BEGIN
+WHILE ((select * from pg_stat_get_autovacuum_count(tablename::regclass)) < i) LOOP
+PERFORM pg_sleep(sleep);
+PERFORM pg_stat_clear_snapshot();
+END LOOP;
+END;
+/
+
+/*column+unpartition table*/
+create table t1 
+(
+    sk int NOT NULL,
+    a int,
+    b int
+)
+WITH (orientation=column) distribute by hash(sk);
+
+/*row+unpartition table*/
+create table t2 
+(
+    sk int NOT NULL,
+    a int,
+    b int
+)
+WITH (orientation=row) distribute by hash(sk);
+
+/*column+partition table*/
+create table t1_part 
+(
+    sk int NOT NULL,
+    a int,
+    b int
+)
+WITH (orientation=column)
+distribute by hash(sk)
+PARTITION BY RANGE (sk) 
+(
+    PARTITION p0 VALUES LESS THAN (20),
+    PARTITION p1 VALUES LESS THAN (40),
+    PARTITION p2 VALUES LESS THAN (60),
+    PARTITION p3 VALUES LESS THAN (110)
+);
+
+/*row+partition table*/
+create table t2_part
+(
+    sk int NOT NULL,
+    a int,
+    b int
+)
+WITH (orientation=row)
+distribute by hash(sk)
+PARTITION BY RANGE (sk)
+(
+    PARTITION p0 VALUES LESS THAN (20),
+    PARTITION p1 VALUES LESS THAN (40),
+    PARTITION p2 VALUES LESS THAN (60),
+    PARTITION p3 VALUES LESS THAN (110)
+);

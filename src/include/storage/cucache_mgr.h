@@ -31,7 +31,7 @@
 #include "storage/relfilenode.h"
 #include "vecexecutor/vectorbatch.h"
 #include "utils/hsearch.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 #include "storage/spin.h"
 #include "storage/shmem.h"
 #include "storage/cu.h"
@@ -128,7 +128,7 @@ public:
     void TerminateVerifyCU();
     void InvalidateCU(RelFileNodeOld* rnode, int colId, uint32 cuId, CUPointer cuPtr);
     void DropRelationCUCache(const RelFileNode& rnode);
-    CUUncompressedRetCode StartUncompressCU(CUDesc* cuDescPtr, CacheSlotId_t slotId, int planNodeId, bool timing);
+    CUUncompressedRetCode StartUncompressCU(CUDesc* cuDescPtr, CacheSlotId_t slotId, int planNodeId, bool timing, int align_size);
 
     // async lock used by adio
     bool CULWLockHeldByMe(CacheSlotId_t slotId);
@@ -174,4 +174,3 @@ void ORCCacheSetBlock(CacheSlotId_t slotId, const void* buffer, uint64 size);
 void OBSCacheSetBlock(CacheSlotId_t slotId, const void* buffer, uint64 size, const char* prefix, const char* dataDNA);
 
 #endif  // define
-

@@ -150,14 +150,13 @@ Section: Class 21 - Cardinality Violation
 21000    E    ERRCODE_CARDINALITY_VIOLATION                                  cardinality_violation
 
 Section: Class 22 - Data Exception
-
 22000    E    ERRCODE_DATA_EXCEPTION                                         data_exception
-2202E    E    ERRCODE_ARRAY_ELEMENT_ERROR
+2200E    E    ERRCODE_ARRAY_ELEMENT_ERROR
 # SQL99's actual definition of "array element error" is subscript error
 2202E    E    ERRCODE_ARRAY_SUBSCRIPT_ERROR                                  array_subscript_error
 22021    E    ERRCODE_CHARACTER_NOT_IN_REPERTOIRE                            character_not_in_repertoire
 22008    E    ERRCODE_DATETIME_FIELD_OVERFLOW                                datetime_field_overflow
-22008    E    ERRCODE_DATETIME_VALUE_OUT_OF_RANGE
+22020    E    ERRCODE_DATETIME_VALUE_OUT_OF_RANGE
 22012    E    ERRCODE_DIVISION_BY_ZERO                                       division_by_zero
 22005    E    ERRCODE_ERROR_IN_ASSIGNMENT                                    error_in_assignment
 2200B    E    ERRCODE_ESCAPE_CHARACTER_CONFLICT                              escape_character_conflict
@@ -239,6 +238,8 @@ Section: Class 26 - Invalid SQL Statement Name
 
 # (we take this to mean prepared statements
 26000    E    ERRCODE_INVALID_SQL_STATEMENT_NAME                             invalid_sql_statement_name
+26001    E    ERRCODE_SLOW_QUERY                                             SLOW_QUERY_statement_name
+26002    E    ERRCODE_ACTIVE_SESSION_PROFILE                                 active_session_profile
 
 Section: Class 27 - Triggered Data Change Violation
 
@@ -251,7 +252,7 @@ Section: Class 28 - Invalid Authorization Specification
 28P01    E    ERRCODE_INVALID_PASSWORD                                       invalid_password
 28P02	 E	  ERRCODE_INITIAL_PASSWORD_NOT_MODIFIED							 initial_password_not_modified
 
-Section: Class 29 - Invalid or Unexpected Status
+Section: Class 29 - Invalid or Unexpected Status 
 29000    E    ERRCODE_INVALID_STATUS                                         invalid_status
 29001    E    ERRCODE_INVALID_TABLESAMPLE_ARGUMENT                           invalid_tablesample_argument
 29002    E    ERRCODE_INVALID_TABLESAMPLE_REPEAT                             invalid_tablesample_repeat
@@ -261,7 +262,7 @@ Section: Class 29 - Invalid or Unexpected Status
 29P03    E    ERRCODE_FLUSH_DATA_SIZE_MISMATCH                               flush_data_size_mismatch
 29P04    E    ERRCODE_RELATION_OPEN_ERROR                                    relation_open_error
 29P05    E    ERRCODE_RELATION_CLOSE_ERROR                                   relation_close_error
-
+29P06    E    ERRCODE_INVALID_CACHE_PLAN                                     invalid_cache_plan
 Section: Class 2B - Dependent Privilege Descriptors Still Exist
 
 2B000    E    ERRCODE_DEPENDENT_PRIVILEGE_DESCRIPTORS_STILL_EXIST            dependent_privilege_descriptors_still_exist
@@ -335,7 +336,7 @@ Section: Class 42 - Syntax Error or Access Rule Violation
 42622    E    ERRCODE_NAME_TOO_LONG                                          name_too_long
 42939    E    ERRCODE_RESERVED_NAME                                          reserved_name
 42804    E    ERRCODE_DATATYPE_MISMATCH                                      datatype_mismatch
-42P18    E    ERRCODE_INDETERMINATE_DATATYPE                                 indeterminate_datatype
+42P38    E    ERRCODE_INDETERMINATE_DATATYPE                                 indeterminate_datatype
 42P21    E    ERRCODE_COLLATION_MISMATCH                                     collation_mismatch
 42P22    E    ERRCODE_INDETERMINATE_COLLATION                                indeterminate_collation
 42809    E    ERRCODE_WRONG_OBJECT_TYPE                                      wrong_object_type
@@ -345,6 +346,7 @@ Section: Class 42 - Syntax Error or Access Rule Violation
 42P26    E    ERRCODE_RESOURCE_POOL_ERROR                                    resource_pool_error
 42P27    E    ERRCODE_PLAN_PARENT_NOT_FOUND                                  plan_parent_not_found
 42P28    E    ERRCODE_MODIFY_CONFLICTS                                       modify_conflicts
+42P29    E    ERRCODE_DISTRIBUTION_ERROR                                     distribution_error
 
 # Note: for ERRCODE purposes, we divide namable objects into these categories:
 # databases, schemas, prepared statements, cursors, tables, columns,
@@ -358,11 +360,11 @@ Section: Class 42 - Syntax Error or Access Rule Violation
 # as well as complaints associated with incorrect declarations.
 
 42703    E    ERRCODE_UNDEFINED_COLUMN                                       undefined_column
-34000    E    ERRCODE_UNDEFINED_CURSOR
+34001    E    ERRCODE_UNDEFINED_CURSOR                                       undefined_cursor
 3D000    E    ERRCODE_UNDEFINED_DATABASE
 42883    E    ERRCODE_UNDEFINED_FUNCTION                                     undefined_function
-26000    E    ERRCODE_UNDEFINED_PSTATEMENT
-3F000    E    ERRCODE_UNDEFINED_SCHEMA
+26010    E    ERRCODE_UNDEFINED_PSTATEMENT                                   undefined_pstatement
+3F001    E    ERRCODE_UNDEFINED_SCHEMA                                       undefined_schema
 42P01    E    ERRCODE_UNDEFINED_TABLE                                        undefined_table
 42P02    E    ERRCODE_UNDEFINED_PARAMETER                                    undefined_parameter
 42704    E    ERRCODE_UNDEFINED_OBJECT                                       undefined_object
@@ -388,6 +390,10 @@ Section: Class 42 - Syntax Error or Access Rule Violation
 42P15    E    ERRCODE_INVALID_SCHEMA_DEFINITION                              invalid_schema_definition
 42P16    E    ERRCODE_INVALID_TABLE_DEFINITION                               invalid_table_definition
 42P17    E    ERRCODE_INVALID_OBJECT_DEFINITION                              invalid_object_definition
+42P18    E    ERRCODE_INVALID_TEMP_OBJECTS                                   invalid temp objects(table, namespace)
+42705    E    ERRCODE_UNDEFINED_KEY                                          undefined_key
+42711    E    ERRCODE_DUPLICATE_KEY                                          duplicate_key
+42713    E    ERRCODE_UNDEFINED_CL_COLUMN                                    undefined_cl_column
 
 Section: Class 44 - WITH CHECK OPTION Violation
 
@@ -440,6 +446,7 @@ Section: Class 58 - System Error (errors external to PostgreSQL itself)
 58P02    E    ERRCODE_DUPLICATE_FILE                                         duplicate_file
 58P03    E    ERRCODE_FILE_READ_FAILED                                       file_read_failed
 58P04    E    ERRCODE_FILE_WRITE_FAILED                                      file_write_failed
+2200Z    E    ERRCODE_INVALID_ENCRYPTED_COLUMN_DATA                          encryped_column_wrong_data
 
 Section: Class F0 - Configuration File Error
 
@@ -555,12 +562,12 @@ Section: Class SI - SPI Interface Error
 SP000    E    ERRCODE_SPI_ERROR                                              spi_error
 SP001    E    ERRCODE_SPI_CONNECTION_FAILURE                                 spi_connection_failure
 SP002    E    ERRCODE_SPI_FINISH_FAILURE                                     spi_finish_failure
-SP003    E    ERRCODE_SPI_PREPARE_FAILURE                                    spi_prepare_failure
+SP003    E    ERRCODE_SPI_PREPARE_FAILURE                                    spi_prepare_failure  
 SP004    E    ERRCODE_SPI_CURSOR_OPEN_FAILURE                                spi_cursor_open_failure
 SP005    E    ERRCODE_SPI_EXECUTE_FAILURE                                    spi_execute_failure
 SP006    E    ERRORCODE_SPI_IMPROPER_CALL                                    spi_improper_call_function
 
-# Section: Class PD - PL Debugger Error
+# Section: Class PD - PL Debugger Error 
 D0000    E    ERRCODE_PLDEBUGGER_ERROR                                       pldebugger_internal_error
 D0001    E    ERRCODE_DUPLICATE_BREAKPOINT                                   duplicate_breakpoint
 D0002    E    ERRCODE_FUNCTION_HASH_NOT_INITED                               function_hash_is_not_initialized
@@ -577,7 +584,7 @@ D0012    E    ERRCODE_MAX_DEBUG_SESSIONS_REACHED                             max
 D0013    E    ERRCODE_MAX_BREAKPOINTS_REACHED                                maximum_number_of_breakpoints_reached
 D0014    E    ERRCODE_INITIALIZE_FAILED                                      initialization_failed
 
-# Section: Class RB - RBTree Error
+# Section: Class RB - RBTree Error 
 RB001    E    ERRCODE_RBTREE_INVALID_NODE_STATE                              rbtree_invalid_node_state
 RB002    E    ERRCODE_RBTREE_INVALID_ITERATOR_ORDER                          rbtree_invalid_iterator_order
 
@@ -597,3 +604,8 @@ OP005    E    ERRCODE_NO_FUNCTION_PROVIDED							         no_function_provided
 # this is for logicaldecode
 LL001    E    ERRCODE_LOGICAL_DECODE_ERROR                                   logical_decode_error
 LL002    E    ERRCODE_RELFILENODEMAP                                         relfilenodemap
+
+#this is for timeseries
+Section: Class TS - Timeseries Error
+TS000    E    ERRCODE_TS_COMMON_ERROR                                        timeseries_common_error
+TS001    E    ERRCODE_TS_KEYTYPE_MISMATCH                                    column_key_type_mismatch

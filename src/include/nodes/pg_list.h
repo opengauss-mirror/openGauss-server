@@ -96,7 +96,7 @@ static inline ListCell* list_head(const List* l)
     return l ? l->head : NULL;
 }
 
-static inline ListCell* list_tail(List* l)
+static inline ListCell* list_tail(const List* l)
 {
     return l ? l->tail : NULL;
 }
@@ -105,11 +105,26 @@ static inline int list_length(const List* l)
 {
     return l ? l->length : 0;
 }
+
+static inline DListCell* dlist_head_cell(const DList* l)
+{
+    return l ? l->head : NULL;
+}
+
+static inline DListCell* dlist_tail_cell(DList* l)
+{
+    return l ? l->tail : NULL;
+}
+
 #else
 
 extern ListCell* list_head(const List* l);
 extern ListCell* list_tail(List* l);
 extern int list_length(const List* l);
+
+extern ListCell *dlist_head_cell(const DList *l);
+extern ListCell *dlist_tail_cell(DList *l);
+
 #endif /* USE_INLINE */
 
 /*
@@ -123,6 +138,7 @@ extern int list_length(const List* l);
  * in the second cons cell.
  */
 #define lnext(lc) ((lc)->next)
+#define lprev(lc) ((lc)->prev)
 #define lfirst(lc) ((lc)->data.ptr_value)
 #define lfirst_int(lc) ((lc)->data.int_value)
 #define lfirst_oid(lc) ((lc)->data.oid_value)
@@ -178,6 +194,9 @@ extern int list_length(const List* l);
 #define foreach(cell, l) for ((cell) = list_head(l); (cell) != NULL; (cell) = lnext(cell))
 
 #define foreach_cell(cell, l) for (ListCell* cell = list_head(l); cell != NULL; cell = lnext(cell))
+
+#define dlist_foreach_cell(cell, l)    \
+    for ((cell) = dlist_head_cell(l); (cell) != NULL; (cell) = lnext(cell))
 
 /*
  * for_each_cell -
@@ -304,9 +323,6 @@ extern List* list_copy_tail(const List* list, int nskip);
 extern void dlist_add_tail_cell(DList* dlist, DListCell* cell);
 extern List* list_merge_int(List* list1, List* list2);
 extern List* list_insert_nth_oid(List *list, int pos, Oid datum);
-
-typedef int (*list_qsort_comparator) (const void *a, const void *b);
-extern List *list_qsort(const List *list, list_qsort_comparator cmp);
 
 /*
  * To ease migration to the new list API, a set of compatibility

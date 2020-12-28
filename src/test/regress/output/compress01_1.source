@@ -1,0 +1,362 @@
+--
+--FOR BLACKLIST FEATURE: CREATE TYPE is not supported.
+--
+--
+-- COMPRESS 
+--
+-- TEST CASE1: CREATE TABLE AS
+-- CASE 1.1
+CREATE TABLE compress_10 (
+	a00 int,
+	a01 int,
+	a02 int
+) ;
+SELECT relcmprs  FROM pg_class WHERE relname = 'compress_10';
+ relcmprs 
+----------
+ 1
+(1 row)
+
+CREATE TABLE compress_11 as SELECT * FROM compress_10;
+SELECT relcmprs  FROM pg_class WHERE relname = 'compress_11';
+ relcmprs 
+----------
+ 1
+(1 row)
+
+ALTER TABLE compress_11 SET COMPRESS;
+SELECT relcmprs  FROM pg_class WHERE relname = 'compress_11';
+ relcmprs 
+----------
+ 2
+(1 row)
+
+-- CASE 1.2 WHEN COMPRESS
+DROP TABLE compress_11;
+ALTER TABLE compress_10 SET COMPRESS;
+SELECT relcmprs  FROM pg_class WHERE relname = 'compress_10';
+ relcmprs 
+----------
+ 2
+(1 row)
+
+CREATE TABLE compress_11 as SELECT * FROM compress_10;
+SELECT relcmprs  FROM pg_class WHERE relname = 'compress_11';
+ relcmprs 
+----------
+ 1
+(1 row)
+
+ALTER TABLE compress_11 SET COMPRESS;
+SELECT relcmprs  FROM pg_class WHERE relname = 'compress_11';
+ relcmprs 
+----------
+ 2
+(1 row)
+
+-- CASE 1.3 USER SPECIFY
+DROP TABLE compress_11;
+ALTER TABLE compress_10 SET NOCOMPRESS;
+SELECT relcmprs  FROM pg_class WHERE relname = 'compress_10';
+ relcmprs 
+----------
+ 1
+(1 row)
+
+CREATE TABLE compress_11 COMPRESS as SELECT a00, a01 FROM compress_10;
+SELECT relcmprs  FROM pg_class WHERE relname = 'compress_11';
+ relcmprs 
+----------
+ 2
+(1 row)
+
+ALTER TABLE compress_11 SET NOCOMPRESS;
+SELECT relcmprs  FROM pg_class WHERE relname = 'compress_11';
+ relcmprs 
+----------
+ 1
+(1 row)
+
+-- CASE 1.4  USER SPECIFY
+DROP TABLE compress_11;
+CREATE TABLE compress_11(b00, b01) COMPRESS as SELECT a00, a01 FROM compress_10;
+SELECT relcmprs  FROM pg_class WHERE relname = 'compress_11';
+ relcmprs 
+----------
+ 2
+(1 row)
+
+ALTER TABLE compress_11 SET NOCOMPRESS;
+SELECT relcmprs  FROM pg_class WHERE relname = 'compress_11';
+ relcmprs 
+----------
+ 1
+(1 row)
+
+-- CLEAN UP
+DROP TABLE compress_11;
+DROP TABLE compress_10;
+-- CASE 1.5
+CREATE TABLE compress_10 (
+	a00 int DELTA,
+	a01 int DICTIONARY,
+	a02 int NOCOMPRESS,
+	a03 varchar(100) PREFIX,
+	a04 int
+) COMPRESS;
+CREATE TABLE compress_11 COMPRESS as SELECT * FROM compress_10;
+SELECT attname, attcmprmode FROM pg_attribute WHERE attname LIKE 'a%' and attrelid = (SELECT oid FROM pg_class WHERE relname='compress_10') ORDER BY attname;
+ attname | attcmprmode 
+---------+-------------
+ a00     | 1
+ a01     | 2
+ a02     | 0
+ a03     | 3
+ a04     | 127
+(5 rows)
+
+SELECT attname, attcmprmode FROM pg_attribute WHERE attname LIKE 'a%' and attrelid = (SELECT oid FROM pg_class WHERE relname='compress_11') ORDER BY attname;
+ attname | attcmprmode 
+---------+-------------
+ a00     | 127
+ a01     | 127
+ a02     | 127
+ a03     | 127
+ a04     | 127
+(5 rows)
+
+-- CLEAN UP
+DROP TABLE compress_11;
+DROP TABLE compress_10;
+-- TEST CASE2: CREATE TABLE OF type_name
+-- CASE 1.1
+CREATE TYPE compress_type_12 AS (name text, salary numeric);
+ERROR:  user defined type is not yet supported.
+SELECT relcmprs  FROM pg_class WHERE relname = 'compress_type_12';
+ relcmprs 
+----------
+(0 rows)
+
+CREATE TABLE compress_12 OF compress_type_12 (
+PRIMARY KEY (name),
+salary WITH OPTIONS DEFAULT 1000
+);
+ERROR:  type "compress_type_12" does not exist
+SELECT relcmprs  FROM pg_class WHERE relname = 'compress_12';
+ relcmprs 
+----------
+(0 rows)
+
+ALTER TABLE compress_12 SET COMPRESS;
+ERROR:  relation "compress_12" does not exist
+SELECT relcmprs  FROM pg_class WHERE relname = 'compress_12';
+ relcmprs 
+----------
+(0 rows)
+
+-- CASE 1.2
+DROP TABLE compress_12;
+ERROR:  table "compress_12" does not exist
+CREATE TABLE compress_12 OF compress_type_12 (
+PRIMARY KEY (name),
+salary WITH OPTIONS DEFAULT 1000
+) COMPRESS;
+ERROR:  type "compress_type_12" does not exist
+SELECT relcmprs  FROM pg_class WHERE relname = 'compress_12';
+ relcmprs 
+----------
+(0 rows)
+
+ALTER TABLE compress_12 SET NOCOMPRESS;
+ERROR:  relation "compress_12" does not exist
+SELECT relcmprs  FROM pg_class WHERE relname = 'compress_12';
+ relcmprs 
+----------
+(0 rows)
+
+-- CLEAN UP
+DROP TABLE compress_12;
+ERROR:  table "compress_12" does not exist
+-- CASE 1.3 COPY FROM
+CREATE TYPE compress_type_13 AS (
+	a00 INT ,
+	a01 INT ,
+	a02 INT ,
+	a03 INT ,
+	a04 INT ,
+	a05 INT ,
+	a06 INT ,
+	a07 INT ,
+	a08 INT ,
+	a09 INT
+);
+ERROR:  user defined type is not yet supported.
+CREATE TABLE compress_14 OF compress_type_13 COMPRESS;
+ERROR:  type "compress_type_13" does not exist
+CREATE TABLE compress_13(
+	a00 INT ,
+	a01 INT ,
+	a02 INT ,
+	a03 INT ,
+	a04 INT ,
+	a05 INT ,
+	a06 INT ,
+	a07 INT ,
+	a08 INT ,
+	a09 INT);
+INSERT INTO compress_13 VALUES (100, 200, 300, 400, 500, 600, 700, 800, 900, 1000);
+INSERT INTO compress_13 SELECT * FROM compress_13;
+INSERT INTO compress_13 SELECT * FROM compress_13;
+INSERT INTO compress_13 SELECT * FROM compress_13;
+INSERT INTO compress_13 SELECT * FROM compress_13;
+INSERT INTO compress_13 SELECT * FROM compress_13;
+INSERT INTO compress_13 SELECT * FROM compress_13;
+INSERT INTO compress_13 SELECT * FROM compress_13;
+INSERT INTO compress_13 SELECT * FROM compress_13;
+INSERT INTO compress_13 SELECT * FROM compress_13;
+INSERT INTO compress_13 SELECT * FROM compress_13;
+INSERT INTO compress_13 SELECT * FROM compress_13;
+INSERT INTO compress_13 SELECT * FROM compress_13;
+INSERT INTO compress_13 SELECT * FROM compress_13;
+INSERT INTO compress_13 SELECT * FROM compress_13;
+COPY compress_13 TO '@abs_srcdir@/data/compress_13.tmp.data';
+COPY compress_14 FROM '@abs_srcdir@/data/compress_13.tmp.data';
+ERROR:  relation "compress_14" does not exist
+SELECT (SELECT pg_relation_size('compress_14')) < (SELECT pg_relation_size('compress_13'));
+ERROR:  relation "compress_14" does not exist
+LINE 1: SELECT (SELECT pg_relation_size('compress_14')) < (SELECT pg...
+                                        ^
+CONTEXT:  referenced column: pg_relation_size
+SELECT (SELECT COUNT(*) FROM compress_13) - (SELECT COUNT(*) FROM compress_14);
+ERROR:  relation "compress_14" does not exist
+LINE 1: ...OUNT(*) FROM compress_13) - (SELECT COUNT(*) FROM compress_1...
+                                                             ^
+(SELECT * FROM compress_13) MINUS ALL (SELECT * FROM compress_14);
+ERROR:  relation "compress_14" does not exist
+LINE 1: ...LECT * FROM compress_13) MINUS ALL (SELECT * FROM compress_1...
+                                                             ^
+(SELECT * FROM compress_14) MINUS ALL (SELECT * FROM compress_13);
+ERROR:  relation "compress_14" does not exist
+LINE 1: (SELECT * FROM compress_14) MINUS ALL (SELECT * FROM compres...
+                       ^
+-- CLEAN UP
+DROP TABLE compress_14;
+ERROR:  table "compress_14" does not exist
+DROP TABLE compress_13;
+DROP TYPE compress_type_13;
+ERROR:  type "compress_type_13" does not exist
+\! rm @abs_srcdir@/data/compress_13.tmp.data
+-- TEST CASE3: CREATE TABLE IF NOT EXISTS OF type_name
+CREATE TABLE IF NOT EXISTS compress_15 OF compress_type_12 (
+PRIMARY KEY (name),
+salary WITH OPTIONS DEFAULT 1000
+);
+ERROR:  type "compress_type_12" does not exist
+ALTER TABLE compress_15 SET COMPRESS;
+ERROR:  relation "compress_15" does not exist
+DROP TABLE compress_15;
+ERROR:  table "compress_15" does not exist
+DROP TYPE compress_type_12;
+ERROR:  type "compress_type_12" does not exist
+-- TEST CASE4: CREATE TABLE using LIKE
+CREATE TABLE compress_17 (
+	a00 int DELTA,
+	a01 int DICTIONARY,
+	a02 int NOCOMPRESS,
+	a03 varchar(100) PREFIX,
+	a04 int
+) COMPRESS;
+CREATE TABLE compress_16 (LIKE compress_17);
+-- CASE 4.1
+SELECT relcmprs  FROM pg_class WHERE relname = 'compress_16';
+ relcmprs 
+----------
+ 1
+(1 row)
+
+SELECT relcmprs  FROM pg_class WHERE relname = 'compress_17';
+ relcmprs 
+----------
+ 2
+(1 row)
+
+SELECT attname, attcmprmode FROM pg_attribute WHERE attname LIKE 'a%' and attrelid = (SELECT oid FROM pg_class WHERE relname='compress_17') ORDER BY attname;
+ attname | attcmprmode 
+---------+-------------
+ a00     | 1
+ a01     | 2
+ a02     | 0
+ a03     | 3
+ a04     | 127
+(5 rows)
+
+SELECT attname, attcmprmode FROM pg_attribute WHERE attname LIKE 'a%' and attrelid = (SELECT oid FROM pg_class WHERE relname='compress_16') ORDER BY attname;
+ attname | attcmprmode 
+---------+-------------
+ a00     | 1
+ a01     | 2
+ a02     | 0
+ a03     | 3
+ a04     | 127
+(5 rows)
+
+-- CASE 4.2
+DROP TABLE compress_16;
+ALTER TABLE compress_17 SET NOCOMPRESS;
+CREATE TABLE compress_16 (LIKE compress_17) COMPRESS;
+SELECT relcmprs  FROM pg_class WHERE relname = 'compress_16';
+ relcmprs 
+----------
+ 2
+(1 row)
+
+SELECT relcmprs  FROM pg_class WHERE relname = 'compress_17';
+ relcmprs 
+----------
+ 1
+(1 row)
+
+SELECT attname, attcmprmode FROM pg_attribute WHERE attname LIKE 'a%' and attrelid = (SELECT oid FROM pg_class WHERE relname='compress_17') ORDER BY attname;
+ attname | attcmprmode 
+---------+-------------
+ a00     | 1
+ a01     | 2
+ a02     | 0
+ a03     | 3
+ a04     | 127
+(5 rows)
+
+SELECT attname, attcmprmode FROM pg_attribute WHERE attname LIKE 'a%' and attrelid = (SELECT oid FROM pg_class WHERE relname='compress_16') ORDER BY attname;
+ attname | attcmprmode 
+---------+-------------
+ a00     | 1
+ a01     | 2
+ a02     | 0
+ a03     | 3
+ a04     | 127
+(5 rows)
+
+-- CLEAN UP
+DROP TABLE compress_17;
+DROP TABLE compress_16;
+-- CASE5: ALTER TABLE ADD COLUMN
+CREATE TABLE compress_18 (
+	a00 int DELTA,
+	a01 int DICTIONARY,
+	a02 int NOCOMPRESS,
+	a03 varchar(100) PREFIX,
+	a04 int
+) COMPRESS;
+ALTER TABLE compress_18 ADD COLUMN a05 int DELTA not null;
+SELECT attname, attcmprmode FROM pg_attribute WHERE attname LIKE 'a%' and attrelid = (SELECT oid FROM pg_class WHERE relname='compress_18') ORDER BY attname;
+ attname | attcmprmode 
+---------+-------------
+ a00     | 1
+ a01     | 2
+ a02     | 0
+ a03     | 3
+ a04     | 127
+ a05     | 1
+(6 rows)
+
+DROP TABLE compress_18;

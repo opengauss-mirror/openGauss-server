@@ -38,3 +38,9 @@ create index b on char_test(b);
 set enable_seqscan to off;
 select * from char_test where a = '零0';
 select * from char_test where b = '零1二3';
+
+select int1mod(3, 0);
+select int2mod(3, 0);
+select int4mod(3, 0);
+select int8mod(3, 0);
+select numeric_mod(1234.5678,0.0);

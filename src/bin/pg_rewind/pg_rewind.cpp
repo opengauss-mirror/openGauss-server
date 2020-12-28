@@ -16,6 +16,8 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <sys/time.h>
+#include <sys/wait.h>
+#include "backup.h"
 #include "pg_rewind.h"
 #include "fetch.h"
 #include "file_ops.h"
@@ -27,24 +29,19 @@
 #include "common/fe_memutils.h"
 #include "getopt_long.h"
 #include "replication/slot.h"
-#include "storage/bufpage.h"
+#include "storage/buf/bufpage.h"
 #include "utils/pg_crc.h"
 #include "common/build_query/build_query.h"
 #include "bin/elog.h"
 #include "pg_build.h"
 
 #define FORMATTED_TS_LEN 128
-#define MAX_WAIT_SECONDS 120
 #define BUILD_PID "gs_build.pid"
 
 static BuildErrorCode createBackupLabel(XLogRecPtr startpoint, TimeLineID starttli, XLogRecPtr checkpointloc);
-
-static void digestControlFile(ControlFileData* ControlFile, const char* source, size_t size);
-static void digestSlotFile(XLogRecPtr* recptr, const char* src, size_t size);
+static void digestControlFile(ControlFileData* ControlFile, const char* source);
 static BuildErrorCode updateControlFile(ControlFileData* ControlFile);
 static BuildErrorCode sanityChecks(void);
-static BuildErrorCode findCommonAncestor(XLogRecPtr* recptr, TimeLineID lastcommontli, uint32 term);
-
 static void rewind_dw_file();
 
 static ControlFileData ControlFile_target;
@@ -61,19 +58,19 @@ bool ws_replication = false;
 char divergeXlogFileName[MAXFNAMELEN] = {0};
 
 BuildErrorCode increment_return_code = BUILD_SUCCESS;
-char lastxlogfileName[MAXFNAMELEN] = {0};
 
-BuildErrorCode gs_increment_build(char* pgdata, const char* connstr, const uint32 paterm)
+BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char* sysidentifier, uint32 timeline, uint32 term)
 {
-    XLogRecPtr divergerec;
     TimeLineID lastcommontli;
     XLogRecPtr chkptrec = InvalidXLogRecPtr;
     TimeLineID chkpttli;
     XLogRecPtr chkptredo = InvalidXLogRecPtr;
     uint32 checkSeg;
-    size_t size;
+    size_t size = 0;
     char* buffer = NULL;
+    XLogRecPtr startrec;
     XLogRecPtr endrec;
+    XLogRecPtr maxrec;
     ControlFileData ControlFile_new;
     int fd = -1;
     FILE* file = NULL;
@@ -81,14 +78,19 @@ BuildErrorCode gs_increment_build(char* pgdata, const char* connstr, const uint3
     char done_file[MAXPGPATH] = {0};
     char bkup_file[MAXPGPATH] = {0};
     char bkup_filemap[MAXPGPATH] = {0};
-    char lastoff[MAXFNAMELEN] = {0};
+    char xlog_start[MAXFNAMELEN] = {0};
+    char xlog_end[MAXFNAMELEN] = {0};
+    char xlog_location[MAXPGPATH] = {0};
     int nRet = 0;
     errno_t errorno = EOK;
+    char returnmsg[XLOG_READER_MAX_MSGLENTH] = {0};
     GaussState state;
     BuildErrorCode rv = BUILD_SUCCESS;
-    uint32 divergeSeg;
+    pg_crc32 maxLsnCrc = 0;
+
     datadir_target = pg_strdup(pgdata);
-    term = paterm;
+    /* here we set basedir for last xlog requests purpose. the value is the datadir */
+    basedir = datadir_target;
     if (connstr_source == NULL) {
         connstr_source = pg_strdup(connstr);
     }
@@ -109,6 +111,18 @@ BuildErrorCode gs_increment_build(char* pgdata, const char* connstr, const uint3
         pg_log(PG_PROGRESS, "%s: unexpected term specified\n", progname);
         pg_log(PG_PROGRESS, "Try \"%s --help\" for more information.\n", progname);
         return BUILD_ERROR;
+    }
+
+    /*
+     * Don't allow pg_rewind to be run as root, to avoid overwriting the
+     * ownership of files in the data directory. We need only check for root
+     * -- any other user won't have sufficient permissions to modify files in
+     * the data directory.
+     */
+    if (geteuid() == 0) {
+        pg_log(PG_PROGRESS, "cannot be executed by \"root\"\n");
+        pg_log(PG_PROGRESS, "You must run %s as the PostgreSQL superuser.\n", progname);
+        exit(1);
     }
 
     /*
@@ -142,7 +156,7 @@ BuildErrorCode gs_increment_build(char* pgdata, const char* connstr, const uint3
     securec_check_ss_c(nRet, "", "");
 
     /* stat file 4: backup_filemap */
-    nRet = snprintf_s(bkup_filemap, MAXPGPATH, MAXPGPATH - 1, "%s/backup_filemap", bkup_file);
+    nRet = snprintf_s(bkup_filemap, MAXPGPATH, MAXPGPATH - 1, "%s/pg_rewind_filemap", datadir_target);
     securec_check_ss_c(nRet, "", "");
 
     errorno = memset_s(&state, sizeof(state), 0, sizeof(state));
@@ -157,29 +171,18 @@ BuildErrorCode gs_increment_build(char* pgdata, const char* connstr, const uint3
         "set gaussdb state file when rewind:"
         "db state(BUILDING_STATE), server mode(STANDBY_MODE), build mode(INC_BUILD).\n");
 
-    /*
-     * Don't allow pg_rewind to be run as root, to avoid overwriting the
-     * ownership of files in the data directory. We need only check for root
-     * -- any other user won't have sufficient permissions to modify files in
-     * the data directory.
-     */
-    if (geteuid() == 0) {
-        pg_log(PG_PROGRESS, "cannot be executed by \"root\"\n");
-        pg_log(PG_PROGRESS, "You must run %s as the PostgreSQL superuser.\n", progname);
-    }
-
     /* Connect to remote server */
-    if (connstr_source != NULL) {
-        rv = libpqConnect(connstr_source);
-        PG_CHECKRETURN_AND_RETURN(rv);
-        rv = libpqGetParameters();
-        PG_CHECKRETURN_AND_RETURN(rv);
-    }
+    rv = libpqConnect(connstr_source);
+    PG_CHECKRETURN_AND_RETURN(rv);
+    rv = libpqGetParameters();
+    PG_CHECKRETURN_AND_RETURN(rv);
     pg_log(PG_PROGRESS, "connect to primary success\n");
 
     if ((replication_type == RT_WITH_DUMMY_STANDBY) && (checkDummyStandbyConnection() == false)) {
         pg_log(PG_PROGRESS,
                "The source DN primary can't connect to dummy standby. Please repairing the dummy standby first.\n");
+        libpqDisconnect();
+        pg_free(sysidentifier);
         exit(1);
     }
 
@@ -189,13 +192,13 @@ BuildErrorCode gs_increment_build(char* pgdata, const char* connstr, const uint3
      */
     buffer = slurpFile(datadir_target, "global/pg_control", &size);
     PG_CHECKBUILD_AND_RETURN();
-    digestControlFile(&ControlFile_target, (const char*)buffer, size);
+    digestControlFile(&ControlFile_target, (const char*)buffer);
     pg_free(buffer);
     PG_CHECKBUILD_AND_RETURN();
 
     buffer = fetchFile("global/pg_control", &size);
     PG_CHECKBUILD_AND_RETURN();
-    digestControlFile(&ControlFile_source, buffer, size);
+    digestControlFile(&ControlFile_source, buffer);
     pg_free(buffer);
     PG_CHECKBUILD_AND_RETURN();
     pg_log(PG_PROGRESS, "get pg_control success\n");
@@ -208,62 +211,25 @@ BuildErrorCode gs_increment_build(char* pgdata, const char* connstr, const uint3
     lastcommontli = ControlFile_target.checkPointCopy.ThisTimeLineID;
 
     pg_log(PG_PROGRESS,
-        "find last checkpoint at %X/%X on timeline %u from control file\n",
+        "find last checkpoint at %X/%X and checkpoint redo at %X/%X from source control file\n",
+        (uint32)(ControlFile_source.checkPoint >> 32),
+        (uint32)(ControlFile_source.checkPoint),
+        (uint32)(ControlFile_source.checkPointCopy.redo >> 32),
+        (uint32)(ControlFile_source.checkPointCopy.redo));
+
+    pg_log(PG_PROGRESS,
+        "find last checkpoint at %X/%X and checkpoint redo at %X/%X from target control file\n",
         (uint32)(ControlFile_target.checkPoint >> 32),
         (uint32)(ControlFile_target.checkPoint),
-        ControlFile_target.checkPointCopy.ThisTimeLineID);
+        (uint32)(ControlFile_target.checkPointCopy.redo >> 32),
+        (uint32)(ControlFile_target.checkPointCopy.redo));
 
-    /* Find the diverged locaiton */
-    rv = findCommonAncestor(&divergerec, lastcommontli, term);
-    PG_CHECKRETURN_AND_RETURN(rv);
-    pg_log(PG_PROGRESS, "servers diverged at WAL position %X/%X.\n", (uint32)(divergerec >> 32), (uint32)divergerec);
-    XLByteToSeg(divergerec, divergeSeg);
-    XLogFileName(divergeXlogFileName, lastcommontli, divergeSeg);
-    pg_log(PG_PROGRESS, "the local diverge xlogfile is %s, older xlog files will not be copied or removed.\n", divergeXlogFileName);
-
-    rv = findLastCheckpoint(datadir_target, divergerec, lastcommontli, &chkptrec, &chkpttli, &chkptredo);
+    /* Find the common checkpoint locaiton */
+    startrec = ControlFile_source.checkPoint <= ControlFile_target.checkPoint ?
+        ControlFile_source.checkPoint : ControlFile_target.checkPoint;
+    rv = findCommonCheckpoint(datadir_target, lastcommontli, startrec, &chkptrec, &chkpttli, &chkptredo, term);
     PG_CHECKRETURN_AND_RETURN(rv);
     pg_log(PG_PROGRESS, "find diverge point success\n");
-
-    /*
-     * If target checkpoint in control file is small than last common checkpoint,
-     * it means that the records between them may has been recovered without
-     * flushed to disk, so this wal records need to be handle in the later rewind.
-     */
-    if (XLByteLT(ControlFile_target.checkPoint, chkptrec)) {
-        chkptrec = ControlFile_target.checkPoint;
-        chkpttli = ControlFile_target.checkPointCopy.ThisTimeLineID;
-        chkptredo = ControlFile_target.checkPointCopy.redo;
-    }
-
-    /*
-     * Check if checkpoint redo point to be rewinded from
-     * is less than or equal to that of primary. If not,
-     * cannot rewind to prevent copy old pages. Wait a while
-     * before change to full build.
-     */
-    if (XLByteLT(ControlFile_source.checkPointCopy.redo, chkptredo)) {
-        pg_log(PG_PROGRESS, "request checkpoint in primary and wait (now is %X/%X)\n",
-            (uint32)(ControlFile_source.checkPointCopy.redo>>32),
-            (uint32)(ControlFile_source.checkPointCopy.redo));
-        libpqRequestCheckpoint();
-        int count = 0;
-        while (count < MAX_WAIT_SECONDS) {
-            buffer = fetchFile("global/pg_control", &size);
-            digestControlFile(&ControlFile_source, buffer, size);
-            pg_free(buffer);
-            if (!XLByteLT(ControlFile_source.checkPointCopy.redo, chkptredo)) {
-                break;
-            }
-            pg_usleep(1000000);
-            count++;
-        }
-        if (count == MAX_WAIT_SECONDS) {
-            pg_log(PG_FATAL, "primary is not ready, change to full build.\n");
-        } else {
-            pg_log(PG_PROGRESS, "primary is ready, start rewinding.\n");
-        }
-    }
 
     /* Checkpoint redo should exist. Otherwise, fatal and change to full build. */
     (void)readOneRecord(datadir_target, chkptredo, chkpttli);
@@ -278,10 +244,14 @@ BuildErrorCode gs_increment_build(char* pgdata, const char* connstr, const uint3
         (uint32)chkptredo,
         chkpttli);
     XLByteToSeg(chkptredo, checkSeg);
-    XLogFileName(lastoff, chkpttli, checkSeg);
-    XLogFileName(lastxlogfileName, chkpttli, checkSeg);
-    pg_log(
-        PG_PROGRESS, "the CommonAncestor checkpoint xlogfile is %s,older xlog files will not copy\n", lastxlogfileName);
+    XLogFileName(divergeXlogFileName, chkpttli, checkSeg);
+    pg_log(PG_PROGRESS, "diverge xlogfile is %s, older ones will not be copied or removed.\n", divergeXlogFileName);
+
+    if (libpqRotateCbmFile(conn, chkptredo) != true) {
+        pg_log(PG_ERROR, "error when libpqRotateCbmFile, inc build failed");
+        return BUILD_ERROR;
+    }
+
     /*
      * Build the filemap, by comparing the source and target data directories.
      */
@@ -333,28 +303,26 @@ BuildErrorCode gs_increment_build(char* pgdata, const char* connstr, const uint3
     }
 
     /* Backup local data into pg_rewind_bak dir */
-    rv = backupFileMap(filemap, lastoff);
+    rv = backupFileMap(filemap);
     PG_CHECKRETURN_AND_RETURN(rv);
-
-    /* Print filemap in pg_rewind_bak dir */
-    canonicalize_path(bkup_filemap);
-    if ((file = fopen(bkup_filemap, "w")) == NULL) {
-        pg_fatal("could not create file \"%s\\%s\": %s\n", bkup_file, "backup_filemap", strerror(errno));
-        PG_CHECKBUILD_AND_RETURN();
-    }
-    print_filemap_to_file(file);
-
     pg_log(PG_PROGRESS, "backup target files success\n");
 
     /* Create build_complete.start file first */
+    canonicalize_path(start_file);
     if ((fd = open(start_file, O_WRONLY | O_CREAT | O_EXCL, 0600)) < 0) {
         pg_fatal("could not create file \"%s\": %s\n", TAG_START, strerror(errno));
-        fclose(file);
-        file = NULL;
         return BUILD_FATAL;
     }
     close(fd);
     fd = -1;
+
+    /* Create pg_rewind_filemap, print filemap and other rewind info for debug purpose */
+    canonicalize_path(bkup_filemap);
+    if ((file = fopen(bkup_filemap, "w")) == NULL) {
+        pg_fatal("could not create file \"%s\": %s\n", "pg_rewind_filemap", strerror(errno));
+        return BUILD_FATAL;
+    }
+    print_filemap_to_file(file);
 
     /*
      * This is the point of no return. Once we start copying things, we have
@@ -364,8 +332,6 @@ BuildErrorCode gs_increment_build(char* pgdata, const char* connstr, const uint3
     fclose(file);
     file = NULL;
     PG_CHECKBUILD_AND_RETURN();
-
-    /* description : is there any report for synchronizing all the required replication data? */
     pg_log(PG_PROGRESS, "execute file map success\n");
 
     progress_report(true);
@@ -386,21 +352,43 @@ BuildErrorCode gs_increment_build(char* pgdata, const char* connstr, const uint3
      * minRecoveryPoint is set to the current WAL insert location in the
      * source server. Like in an online backup, it's important that we recover
      * all the WAL that was generated while we copied the files over.
+     * 
+     * But for primary-standby-dummystandby deployment, max lsn of local xlogs
+     * is set so as to prevent from unavailable circumstances when primary is
+     * down at this moment.
      */
     errorno = memcpy_s(&ControlFile_new, sizeof(ControlFileData), &ControlFile_source, sizeof(ControlFileData));
-    securec_check_c(errorno, "", "");
-    if (connstr_source != NULL) {
-        endrec = libpqGetCurrentXlogInsertLocation();
+    securec_check_c(errorno, "\0", "\0");
+    maxrec = FindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc);
+    if (replication_type == RT_WITH_DUMMY_STANDBY) {
+        endrec = maxrec;
+        if(XLogRecPtrIsInvalid(endrec)) {
+            pg_fatal("find max lsn fail, need full build, errmsg: %s\n", returnmsg);
+            return BUILD_FATAL;
+        }
+        pg_log(PG_PROGRESS, "find minRecoveryPoint success, %s\n", returnmsg);
     } else {
-        endrec = ControlFile_source.checkPoint;
+        if (connstr_source != NULL) {
+            endrec = libpqGetCurrentXlogInsertLocation();
+            pg_log(PG_PROGRESS, "find minRecoveryPoint success from xlog insert location %X/%X\n",
+                (uint32) (endrec >> 32), (uint32) endrec);
+        } else {
+            endrec = ControlFile_source.checkPoint;
+            pg_log(PG_PROGRESS, "find minRecoveryPoint success from checkpoint location %X/%X\n",
+                (uint32) (endrec >> 32), (uint32) endrec);
+        }
     }
     ControlFile_new.minRecoveryPoint = endrec;
     ControlFile_new.state = DB_IN_ARCHIVE_RECOVERY;
     rv = updateControlFile(&ControlFile_new);
     PG_CHECKRETURN_AND_RETURN(rv);
-    pg_log(PG_PROGRESS, "update pg_control file success\n");
+    pg_log(PG_PROGRESS, "update pg_control file success, minRecoveryPoint: %X/%X, "
+        "ckpLoc:%X/%X, ckpRedo:%X/%X, preCkp:%X/%X\n", (uint32) (endrec >> 32), (uint32) endrec,
+        (uint32) (ControlFile_new.checkPoint >> 32), (uint32) ControlFile_new.checkPoint,
+        (uint32) (ControlFile_new.checkPointCopy.redo >> 32), (uint32) ControlFile_new.checkPointCopy.redo,
+        (uint32) (ControlFile_new.prevCheckPoint >> 32), (uint32) ControlFile_new.prevCheckPoint);
 
-    /* update pg_dw file */
+    /* Update pg_dw file */
     rewind_dw_file();
     pg_log(PG_PROGRESS, "update pg_dw file success\n");
 
@@ -409,17 +397,69 @@ BuildErrorCode gs_increment_build(char* pgdata, const char* connstr, const uint3
         libpqDisconnect();
     }
 
-    /* create backup lable file */
+    pg_log(PG_WARNING, _("starting background WAL receiver\n"));
+    nRet = snprintf_s(xlog_start, MAXFNAMELEN, MAXFNAMELEN - 1, "%X/%X", (uint32)(maxrec >> 32), (uint32)maxrec);
+    securec_check_ss_c(nRet, "", "");
+    nRet = snprintf_s(xlog_end, MAXFNAMELEN, MAXFNAMELEN - 1, "%X/%X", (uint32)(endrec >> 32), (uint32)endrec);
+    securec_check_ss_c(nRet, "", "");
+    get_xlog_location(xlog_location);
+    StartLogStreamer(xlog_start, timeline, sysidentifier, (const char*)xlog_location, term);
+
+    /*
+     * Run IDENTIFY_MAXLSN to get end lsn
+     * This lsn is latest since last full backup
+     */
+    pg_log(PG_WARNING, "xlog end point: %s\n", xlog_end);
+    if (bgchild > 0) {
+        int status;
+        int r;
+
+        pg_log(PG_WARNING, _("waiting for background process to finish streaming...\n"));
+        if ((unsigned int)write(bgpipe[1], xlog_end, strlen(xlog_end)) != strlen(xlog_end)) {
+            pg_log(PG_WARNING, _("could not send command to background pipe: %s\n"), strerror(errno));
+            (void)kill(bgchild, SIGTERM);
+            return BUILD_FATAL;
+        }
+
+        /* Just wait for the background process to exit */
+        r = waitpid(bgchild, &status, 0);
+        if (r == -1) {
+            pg_log(PG_WARNING, _("could not wait for child process: %s\n"), strerror(errno));
+            (void)kill(bgchild, SIGTERM);
+            return BUILD_FATAL;
+        }
+        if (r != bgchild) {
+            pg_log(PG_WARNING, _("child %d died, expected %d\n"), r, (int)bgchild);
+            (void)kill(bgchild, SIGTERM);
+            return BUILD_FATAL;
+        }
+        if (!WIFEXITED(status)) {
+            pg_log(PG_WARNING, _("child process did not exit normally\n"));
+            (void)kill(bgchild, SIGTERM);
+            return BUILD_FATAL;
+        }
+        if (WEXITSTATUS(status) != 0) {
+            pg_log(PG_WARNING, _("child process exited with error %d\n"), WEXITSTATUS(status));
+            (void)kill(bgchild, SIGTERM);
+            return BUILD_FATAL;
+        }
+        /* Exited normally, we're happy! */
+    }
+
+    /* Create backup lable file */
     pg_log(PG_PROGRESS, "creating backup label and updating control file\n");
     rv = createBackupLabel(chkptredo, chkpttli, chkptrec);
     PG_CHECKRETURN_AND_RETURN(rv);
     pg_log(PG_PROGRESS, "create backup label success\n");
 
-    /* rename build_complete.start file to build_complete.done file */
+    /* Rename build_complete.start file to build_complete.done file */
     if (rename(start_file, done_file) < 0) {
         pg_fatal("failed to rename \"%s\" to \"%s\": %s\n", TAG_START, TAG_DONE, strerror(errno));
         return BUILD_FATAL;
     }
+
+    /* Remove pg_rewind_bak dir */
+    delete_all_file(bkup_file, true);
 
     if (datadir_target != NULL) {
         free(datadir_target);
@@ -473,7 +513,7 @@ static BuildErrorCode sanityChecks(void)
 
     /* check backup_label */
     ret = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", datadir_target, labelfile);
-    securec_check_ss_c(ret, "", "");
+    securec_check_ss_c(ret, "\0", "\0");
 
     if ((fd = open(path, O_RDONLY | PG_BINARY, 0)) >= 0) {
         close(fd);
@@ -491,139 +531,6 @@ static BuildErrorCode sanityChecks(void)
         }
         pg_fatal("the cluster needs to recover from the latest backup first.\n");
         return BUILD_FATAL;
-    }
-    return BUILD_SUCCESS;
-}
-
-/*
- * Diverged the first WAL record that's not the same in both clusters.
- * If restart_lsn on both side are valid, choose larger one. Otherwise,
- * we should find the xlog file with largest value that can
- *
- */
-static BuildErrorCode findCommonAncestor(XLogRecPtr* recptr, TimeLineID lastcommontli, uint32 term)
-{
-    XLogRecPtr source_restart_lsn = InvalidXLogRecPtr;
-    XLogRecPtr target_restart_lsn = InvalidXLogRecPtr;
-    XLogRecPtr max_lsn = InvalidXLogRecPtr;
-    char returnmsg[MAX_ERR_MSG_LENTH] = {0};
-    char path[MAXPGPATH];
-    char fullpath[MAXPGPATH];
-    char* buffer = NULL;
-    char* target_slot_name = NULL;
-    size_t size;
-    struct stat statbuf;
-    int ss_c = 0;
-    pg_crc32 maxLsnCrc = 0;
-    BuildErrorCode rv = BUILD_SUCCESS;
-
-    /* Get the source slot through libpq */
-    get_source_slotname();
-    if (connstr_source != NULL) {
-        libpqGetSourceSlot(&source_restart_lsn);
-        PG_CHECKBUILD_AND_RETURN();
-        pg_log(PG_PROGRESS,
-            "The source slot restart_lsn at WAL position %X/%X.\n",
-            (uint32)(source_restart_lsn >> 32),
-            (uint32)source_restart_lsn);
-    }
-
-    /* Get the target slot through slot file */
-    target_slot_name = libpqGetTargetSlotName();
-    ss_c = snprintf_s(
-        fullpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s/%s/%s", datadir_target, "pg_replslot", target_slot_name, "state");
-    securec_check_ss_c(ss_c, "\0", "\0");
-
-    ss_c = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%s/%s", "pg_replslot", target_slot_name, "state");
-    securec_check_ss_c(ss_c, "\0", "\0");
-    free(target_slot_name);
-    target_slot_name = NULL;
-    if (lstat(fullpath, &statbuf) == 0) {
-        buffer = slurpFile(datadir_target, path, &size);
-        PG_CHECKBUILD_AND_RETURN();
-        digestSlotFile(&target_restart_lsn, (const char*)buffer, size);
-        PG_CHECKBUILD_AND_RETURN();
-        pg_free(buffer);
-    }
-    pg_log(PG_PROGRESS,
-        "The target slot restart_lsn at WAL position %X/%X.\n",
-        (uint32)(target_restart_lsn >> 32),
-        (uint32)target_restart_lsn);
-    /*
-     * local max lsn must be exists.
-     */
-    max_lsn = FindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc);
-    if (XLogRecPtrIsInvalid(max_lsn)) {
-        pg_fatal("can not find max_lsn in local datadir:%s,errmsg:%s\n", datadir_target, returnmsg);
-        return BUILD_FATAL;
-    }
-    pg_log(PG_PROGRESS, "FindMaxLSN success %s\n", returnmsg);
-
-    /* if the target and source are both invalid, we should find from the max_lsn. */
-    if (XLByteEQ(source_restart_lsn, InvalidXLogRecPtr) && XLByteEQ(target_restart_lsn, InvalidXLogRecPtr)) {
-        pg_log(PG_PROGRESS,
-            "The slot of source and target are both invalid, we will find common lsn from max_lsn %X/%X.\n",
-            (uint32)(max_lsn >> 32),
-            (uint32)max_lsn);
-        rv = findLastCommonpoint(datadir_target, max_lsn, lastcommontli, recptr, term);
-        return rv;
-    }
-
-    /*
-     * If the target and source are both valid, choose a large LSN.
-     * Otherwise, choose a valid LSN.
-     */
-    if (XLByteEQ(source_restart_lsn, InvalidXLogRecPtr)) {
-        *recptr = target_restart_lsn;
-    } else if (XLByteEQ(target_restart_lsn, InvalidXLogRecPtr)) {
-        *recptr = source_restart_lsn;
-    } else {
-        if (XLByteLT(target_restart_lsn, source_restart_lsn)) {
-            *recptr = source_restart_lsn;
-        } else {
-            *recptr = target_restart_lsn;
-        }
-    }
-
-    /*
-     * If the valid restart_lsn is newer than local max_lsn, it must be run more than one times of
-     * failover on the DN cluster, thus restart_lsn is not be trusted, must find from the max_lsn again.
-     * If the slot lsn is the start of xlog file, we decode local file to get fork point, because
-     * it may not be a record start.
-     */
-    if (XLByteLT(max_lsn, *recptr) || (*recptr) % XLOG_SEG_SIZE == 0) {
-        *recptr = max_lsn;
-        pg_log(PG_PROGRESS, "we use xlog decode pos at %X/%X.\n", (uint32)(max_lsn >> 32), (uint32)max_lsn);
-        findLastCommonpoint(datadir_target, max_lsn, lastcommontli, recptr, term);
-    } else {
-        /*
-        if lsn in slot is less than max lsn in xlog, check if xlog corresponding to slot lsn exist ,
-        * to avoid too old slot
-        */
-        char xlogname[XLOG_FILE_NAME_LENGTH] = {0};
-        char fullxlogpath[MAXPGPATH] = {0};
-        bool get_xlog_name;
-        get_xlog_name = TransLsn2XlogFileName(*recptr, lastcommontli, xlogname);
-        if (get_xlog_name == false) {
-            pg_log(PG_PROGRESS, "transe lsn 2 lxog error %X/%X. \n", (uint32)((*recptr) >> 32), (uint32)(*recptr));
-            goto decodexlog;
-        }
-        ss_c = snprintf_s(fullxlogpath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog/%s", datadir_target, xlogname);
-        securec_check_ss_c(ss_c, "", "");
-        /* Check if xlog exist. */
-        if (!is_file_exist(fullxlogpath)) {
-            pg_log(PG_PROGRESS, "xlog file %s not exist, change to decode xlog. \n", fullxlogpath);
-            goto decodexlog;
-        }
-        *recptr = getValidCommonLSN(*recptr, max_lsn);
-        if (XLogRecPtrIsInvalid(*recptr)) {
-            pg_log(PG_PROGRESS, "can not get valid common lsn, change to decode xlog. \n");
-            goto decodexlog;
-        }
-        return BUILD_SUCCESS;
-    decodexlog:
-        rv = findLastCommonpoint(pg_data, max_lsn, lastcommontli, recptr, term);
-        return rv;
     }
     return BUILD_SUCCESS;
 }
@@ -715,7 +622,7 @@ static void checkControlFile(ControlFileData* ControlFile)
 /*
  * Verify control file contents in the buffer src, and copy it to *ControlFile.
  */
-static void digestControlFile(ControlFileData* ControlFile, const char* src, size_t size)
+static void digestControlFile(ControlFileData* ControlFile, const char* src)
 {
     errno_t errorno = EOK;
 
@@ -723,20 +630,6 @@ static void digestControlFile(ControlFileData* ControlFile, const char* src, siz
     securec_check_c(errorno, "\0", "\0");
     /* Additional checks on control file */
     checkControlFile(ControlFile);
-}
-
-static void digestSlotFile(XLogRecPtr* recptr, const char* src, size_t size)
-{
-    ReplicationSlotOnDisk slot;
-    errno_t errorno = EOK;
-
-    if (size != sizeof(ReplicationSlotOnDisk))
-        pg_fatal("unexpected slot file size %d, expected %d\n", (int)size, (int)sizeof(ReplicationSlotOnDisk));
-
-    errorno = memcpy_s(&slot, sizeof(ReplicationSlotOnDisk), src, sizeof(ReplicationSlotOnDisk));
-    securec_check_c(errorno, "", "");
-
-    *recptr = slot.slotdata.restart_lsn;
 }
 
 /*
@@ -780,10 +673,11 @@ void openDebugLog(void)
  */
 static void rewind_dw_file()
 {
+#define MAX_REALPATH_LEN 4096
     int rc;
     int fd = -1;
     char dw_file_path[MAXPGPATH];
-    char real_file_path[PATH_MAX + 1] = {0};
+    char real_file_path[MAX_REALPATH_LEN] = {0};
     char* buf = NULL;
     char* unaligned_buf = NULL;
 
@@ -800,7 +694,7 @@ static void rewind_dw_file()
         delete_all_file(real_file_path, true);
     }
 
-    rc = memset_s(real_file_path, (PATH_MAX + 1), 0, (PATH_MAX + 1));
+    rc = memset_s(real_file_path, MAX_REALPATH_LEN, 0, MAX_REALPATH_LEN);
     securec_check_c(rc, "\0", "\0");
 
     /* Delete the dw build file, if it exists. */
@@ -836,6 +730,7 @@ static void rewind_dw_file()
     }
 
     free(unaligned_buf);
+    unaligned_buf = NULL;
     close(fd);
 }
 

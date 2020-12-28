@@ -72,7 +72,7 @@ static char* ssl_cipher_list2string(const char* ciphers[], const int num);
 static int SSL_CTX_set_cipher_list_ex(SSL_CTX* ctx, const char* ciphers[], const int num);
 
 /* security ciphers suites in SSL connection */
-static const char* ossl_cipher_list[] = {TLS1_TXT_DHE_RSA_WITH_AES_128_SHA256, NULL};
+static const char* ossl_cipher_list[] = {TLS1_TXT_DHE_RSA_WITH_AES_128_GCM_SHA256, NULL};
 
 /* VPP SSL client configuration information */
 struct gs_openssl_client {
@@ -456,7 +456,7 @@ static int ossl_init_client_ssl_passwd(SSL_CTX* pstContext, const char* cert_fil
         return retval;
     }
 
-    decode_cipher_files(SERVER_MODE, NULL, cert_file_dir, cipher_passwd);
+    decode_cipher_files(GDS_MODE, NULL, cert_file_dir, cipher_passwd);
     SSL_CTX_set_default_passwd_cb_userdata(pstContext, (void*)cipher_passwd);
 
     return 0;

@@ -19,6 +19,7 @@
 
 #include "access/printtup.h"
 #include "access/transam.h"
+#include "access/tableam.h"
 #include "libpq/libpq.h"
 #include "libpq/pqformat.h"
 #include "tcop/pquery.h"
@@ -32,35 +33,33 @@
 #endif
 #include "distributelayer/streamProducer.h"
 #include "executor/execStream.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 
-extern bool StreamTopConsumerAmI();
-extern bool StreamThreadAmI();
-static void printtup_startup(DestReceiver* self, int operation, TupleDesc typeinfo);
-static void printtup_20(TupleTableSlot* slot, DestReceiver* self);
-static void printtup_internal_20(TupleTableSlot* slot, DestReceiver* self);
-static void printtup_shutdown(DestReceiver* self);
-static void printtup_destroy(DestReceiver* self);
+static void printtup_startup(DestReceiver *self, int operation, TupleDesc typeinfo);
+static void printtup_20(TupleTableSlot *slot, DestReceiver *self);
+static void printtup_internal_20(TupleTableSlot *slot, DestReceiver *self);
+static void printtup_shutdown(DestReceiver *self);
+static void printtup_destroy(DestReceiver *self);
 
-static void SendRowDescriptionCols_2(StringInfo buf, TupleDesc typeinfo, List* targetlist, int16* formats);
-static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List* targetlist, int16* formats);
+static void SendRowDescriptionCols_2(StringInfo buf, TupleDesc typeinfo, List *targetlist, int16 *formats);
+static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List *targetlist, int16 *formats);
 
 /* for stream send function */
-static void printBroadCastTuple(TupleTableSlot* tuple, DestReceiver* self);
-static void printLocalBroadCastTuple(TupleTableSlot* tuple, DestReceiver* self);
-static void printRedistributeTuple(TupleTableSlot* tuple, DestReceiver* self);
-static void printLocalRedistributeTuple(TupleTableSlot* tuple, DestReceiver* self);
-static void printLocalRoundRobinTuple(TupleTableSlot* tuple, DestReceiver* self);
-static void printHybridTuple(TupleTableSlot* tuple, DestReceiver* self);
-static void printStreamShutdown(DestReceiver* self);
-static void printStreamStartup(DestReceiver* self, int operation, TupleDesc typeinfo);
-static void printBroadCastBatchCompress(VectorBatch* batch, DestReceiver* self);
-static void printLocalBroadCastBatch(VectorBatch* batch, DestReceiver* self);
-static void printRedistributeBatch(VectorBatch* batch, DestReceiver* self);
-static void printLocalRedistributeBatch(VectorBatch* batch, DestReceiver* self);
-static void printLocalRoundRobinBatch(VectorBatch* batch, DestReceiver* self);
-static void printHybridBatch(VectorBatch* batch, DestReceiver* self);
-static void finalizeLocalStream(DestReceiver* self);
+static void printBroadCastTuple(TupleTableSlot *tuple, DestReceiver *self);
+static void printLocalBroadCastTuple(TupleTableSlot *tuple, DestReceiver *self);
+static void printRedistributeTuple(TupleTableSlot *tuple, DestReceiver *self);
+static void printLocalRedistributeTuple(TupleTableSlot *tuple, DestReceiver *self);
+static void printLocalRoundRobinTuple(TupleTableSlot *tuple, DestReceiver *self);
+static void printHybridTuple(TupleTableSlot *tuple, DestReceiver *self);
+static void printStreamShutdown(DestReceiver *self);
+static void printStreamStartup(DestReceiver *self, int operation, TupleDesc typeinfo);
+static void printBroadCastBatchCompress(VectorBatch *batch, DestReceiver *self);
+static void printLocalBroadCastBatch(VectorBatch *batch, DestReceiver *self);
+static void printRedistributeBatch(VectorBatch *batch, DestReceiver *self);
+static void printLocalRedistributeBatch(VectorBatch *batch, DestReceiver *self);
+static void printLocalRoundRobinBatch(VectorBatch *batch, DestReceiver *self);
+static void printHybridBatch(VectorBatch *batch, DestReceiver *self);
+static void finalizeLocalStream(DestReceiver *self);
 
 inline void AddCheckInfo(StringInfo buf);
 /* ----------------------------------------------------------------
@@ -80,9 +79,9 @@ inline void AddCheckInfo(StringInfo buf);
  * @param[IN] dest: stream type.
  * @return DestReceiver
  */
-DestReceiver* createStreamDestReceiver(CommandDest dest)
+DestReceiver *createStreamDestReceiver(CommandDest dest)
 {
-    streamReceiver* self = (streamReceiver*)palloc0(sizeof(streamReceiver));
+    streamReceiver *self = (streamReceiver *)palloc0(sizeof(streamReceiver));
 
     /* Assign data send function based on the stream type. */
     switch (dest) {
@@ -144,8 +143,9 @@ DestReceiver* createStreamDestReceiver(CommandDest dest)
     self->pub.rDestroy = printtup_destroy;
     self->pub.finalizeLocalStream = NULL;
     self->pub.mydest = dest;
+    self->pub.tmpContext = NULL;
 
-    return (DestReceiver*)self;
+    return (DestReceiver *)self;
 }
 
 /*
@@ -154,9 +154,9 @@ DestReceiver* createStreamDestReceiver(CommandDest dest)
  * @param[IN] dest: dest receiver.
  * @return void
  */
-static void printStreamShutdown(DestReceiver* self)
+static void printStreamShutdown(DestReceiver *self)
 {
-    streamReceiver* rec = (streamReceiver*)self;
+    streamReceiver *rec = (streamReceiver *)self;
     rec->arg->flushStream();
 }
 
@@ -167,9 +167,9 @@ static void printStreamShutdown(DestReceiver* self)
  * @param[IN] dest: dest receiver.
  * @return void
  */
-static void printBroadCastTuple(TupleTableSlot* tuple, DestReceiver* self)
+static void printBroadCastTuple(TupleTableSlot *tuple, DestReceiver *self)
 {
-    streamReceiver* rec = (streamReceiver*)self;
+    streamReceiver *rec = (streamReceiver *)self;
     rec->arg->broadCastStream(tuple, self);
 }
 
@@ -180,9 +180,9 @@ static void printBroadCastTuple(TupleTableSlot* tuple, DestReceiver* self)
  * @param[IN] dest: dest receiver.
  * @return void
  */
-static void printLocalBroadCastTuple(TupleTableSlot* tuple, DestReceiver* self)
+static void printLocalBroadCastTuple(TupleTableSlot *tuple, DestReceiver *self)
 {
-    streamReceiver* rec = (streamReceiver*)self;
+    streamReceiver *rec = (streamReceiver *)self;
     rec->arg->localBroadCastStream(tuple);
 }
 
@@ -193,9 +193,9 @@ static void printLocalBroadCastTuple(TupleTableSlot* tuple, DestReceiver* self)
  * @param[IN] dest: dest receiver.
  * @return void
  */
-static void printRedistributeTuple(TupleTableSlot* tuple, DestReceiver* self)
+static void printRedistributeTuple(TupleTableSlot *tuple, DestReceiver *self)
 {
-    streamReceiver* rec = (streamReceiver*)self;
+    streamReceiver *rec = (streamReceiver *)self;
     rec->arg->redistributeStream(tuple, self);
 }
 
@@ -206,9 +206,9 @@ static void printRedistributeTuple(TupleTableSlot* tuple, DestReceiver* self)
  * @param[IN] dest: dest receiver.
  * @return void
  */
-static void printLocalRedistributeTuple(TupleTableSlot* tuple, DestReceiver* self)
+static void printLocalRedistributeTuple(TupleTableSlot *tuple, DestReceiver *self)
 {
-    streamReceiver* rec = (streamReceiver*)self;
+    streamReceiver *rec = (streamReceiver *)self;
     rec->arg->localRedistributeStream(tuple);
 }
 
@@ -219,9 +219,9 @@ static void printLocalRedistributeTuple(TupleTableSlot* tuple, DestReceiver* sel
  * @param[IN] dest: dest receiver.
  * @return void
  */
-static void printLocalRoundRobinTuple(TupleTableSlot* tuple, DestReceiver* self)
+static void printLocalRoundRobinTuple(TupleTableSlot *tuple, DestReceiver *self)
 {
-    streamReceiver* rec = (streamReceiver*)self;
+    streamReceiver *rec = (streamReceiver *)self;
     rec->arg->localRoundRobinStream(tuple);
 }
 
@@ -233,9 +233,9 @@ static void printLocalRoundRobinTuple(TupleTableSlot* tuple, DestReceiver* self)
  * @param[IN] dest: dest receiver.
  * @return void
  */
-static void printHybridTuple(TupleTableSlot* tuple, DestReceiver* self)
+static void printHybridTuple(TupleTableSlot *tuple, DestReceiver *self)
 {
-    streamReceiver* rec = (streamReceiver*)self;
+    streamReceiver *rec = (streamReceiver *)self;
     rec->arg->hybridStream(tuple, self);
 }
 
@@ -246,9 +246,9 @@ static void printHybridTuple(TupleTableSlot* tuple, DestReceiver* self)
  * @param[IN] dest: dest receiver.
  * @return void
  */
-static void printLocalBroadCastBatch(VectorBatch* batch, DestReceiver* self)
+static void printLocalBroadCastBatch(VectorBatch *batch, DestReceiver *self)
 {
-    streamReceiver* rec = (streamReceiver*)self;
+    streamReceiver *rec = (streamReceiver *)self;
     rec->arg->localBroadCastStream(batch);
 }
 
@@ -259,9 +259,9 @@ static void printLocalBroadCastBatch(VectorBatch* batch, DestReceiver* self)
  * @param[IN] dest: dest receiver.
  * @return void
  */
-static void printBroadCastBatchCompress(VectorBatch* batch, DestReceiver* self)
+static void printBroadCastBatchCompress(VectorBatch *batch, DestReceiver *self)
 {
-    streamReceiver* rec = (streamReceiver*)self;
+    streamReceiver *rec = (streamReceiver *)self;
     rec->arg->broadCastStreamCompress(batch);
 }
 
@@ -272,9 +272,9 @@ static void printBroadCastBatchCompress(VectorBatch* batch, DestReceiver* self)
  * @param[IN] dest: dest receiver.
  * @return void
  */
-static void printRedistributeBatch(VectorBatch* batch, DestReceiver* self)
+static void printRedistributeBatch(VectorBatch *batch, DestReceiver *self)
 {
-    streamReceiver* rec = (streamReceiver*)self;
+    streamReceiver *rec = (streamReceiver *)self;
     rec->arg->redistributeStream(batch);
 }
 
@@ -285,9 +285,9 @@ static void printRedistributeBatch(VectorBatch* batch, DestReceiver* self)
  * @param[IN] dest: dest receiver.
  * @return void
  */
-static void printLocalRedistributeBatch(VectorBatch* batch, DestReceiver* self)
+static void printLocalRedistributeBatch(VectorBatch *batch, DestReceiver *self)
 {
-    streamReceiver* rec = (streamReceiver*)self;
+    streamReceiver *rec = (streamReceiver *)self;
     rec->arg->localRedistributeStream(batch);
 }
 
@@ -298,9 +298,9 @@ static void printLocalRedistributeBatch(VectorBatch* batch, DestReceiver* self)
  * @param[IN] dest: dest receiver.
  * @return void
  */
-static void printLocalRoundRobinBatch(VectorBatch* batch, DestReceiver* self)
+static void printLocalRoundRobinBatch(VectorBatch *batch, DestReceiver *self)
 {
-    streamReceiver* rec = (streamReceiver*)self;
+    streamReceiver *rec = (streamReceiver *)self;
     rec->arg->localRoundRobinStream(batch);
 }
 
@@ -312,9 +312,9 @@ static void printLocalRoundRobinBatch(VectorBatch* batch, DestReceiver* self)
  * @param[IN] dest: dest receiver.
  * @return void
  */
-static void printHybridBatch(VectorBatch* batch, DestReceiver* self)
+static void printHybridBatch(VectorBatch *batch, DestReceiver *self)
 {
-    streamReceiver* rec = (streamReceiver*)self;
+    streamReceiver *rec = (streamReceiver *)self;
     rec->arg->hybridStream(batch, self);
 }
 
@@ -324,26 +324,26 @@ static void printHybridBatch(VectorBatch* batch, DestReceiver* self)
  * @param[IN] dest: dest receiver.
  * @return void
  */
-static void finalizeLocalStream(DestReceiver* self)
+static void finalizeLocalStream(DestReceiver *self)
 {
-    streamReceiver* rec = (streamReceiver*)self;
+    streamReceiver *rec = (streamReceiver *)self;
     rec->arg->finalizeLocalStream();
 }
 
-static void printStreamStartup(DestReceiver* self, int operation, TupleDesc typeinfo)
+static void printStreamStartup(DestReceiver *self, int operation, TupleDesc typeinfo)
 {
     int i, res;
     int ndirection;
 
-    streamReceiver* streamRec = (streamReceiver*)self;
-    StreamProducer* arg = streamRec->arg;
+    streamReceiver *streamRec = (streamReceiver *)self;
+    StreamProducer *arg = streamRec->arg;
     Portal portal = streamRec->portal;
 
     /* create buffer to be used for all messages */
     initStringInfo(&streamRec->buf);
 
     ndirection = arg->getConnNum();
-    StreamTransport** transport = arg->getTransport();
+    StreamTransport **transport = arg->getTransport();
     /* Prepare a DataBatch message */
     for (i = 0; i < ndirection; i++) {
         if (arg->netSwitchDest(i)) {
@@ -362,30 +362,30 @@ static void printStreamStartup(DestReceiver* self, int operation, TupleDesc type
     }
 }
 
-void SetStreamReceiverParams(DestReceiver* self, StreamProducer* arg, Portal portal)
+void SetStreamReceiverParams(DestReceiver *self, StreamProducer *arg, Portal portal)
 {
-    streamReceiver* my_state = (streamReceiver*)self;
+    streamReceiver *myState = (streamReceiver *)self;
 
-    Assert(my_state->pub.mydest >= DestTupleBroadCast);
+    Assert(myState->pub.mydest >= DestTupleBroadCast);
 
-    my_state->arg = arg;
-    my_state->portal = portal;
-    my_state->attrinfo = NULL;
-    my_state->nattrs = 0;
-    my_state->myinfo = NULL;
-    my_state->sendDescrip = false;
+    myState->arg = arg;
+    myState->portal = portal;
+    myState->attrinfo = NULL;
+    myState->nattrs = 0;
+    myState->myinfo = NULL;
+    myState->sendDescrip = false;
 
     if (STREAM_IS_LOCAL_NODE(arg->getParallelDesc().distriType))
-        my_state->pub.finalizeLocalStream = finalizeLocalStream;
+        myState->pub.finalizeLocalStream = finalizeLocalStream;
 }
 
 /* ----------------
  *		Initialize: create a DestReceiver for printtup
  * ----------------
  */
-DestReceiver* printtup_create_DR(CommandDest dest)
+DestReceiver *printtup_create_DR(CommandDest dest)
 {
-    DR_printtup* self = (DR_printtup*)palloc0(sizeof(DR_printtup));
+    DR_printtup *self = (DR_printtup *)palloc0(sizeof(DR_printtup));
 
     if (StreamTopConsumerAmI() == true)
         self->pub.receiveSlot = printtupStream;
@@ -398,6 +398,7 @@ DestReceiver* printtup_create_DR(CommandDest dest)
     self->pub.rDestroy = printtup_destroy;
     self->pub.finalizeLocalStream = NULL;
     self->pub.mydest = dest;
+    self->pub.tmpContext = NULL;
 
     /*
      * Send T message automatically if DestRemote, but not if
@@ -410,19 +411,19 @@ DestReceiver* printtup_create_DR(CommandDest dest)
     self->myinfo = NULL;
     self->formats = NULL;
 
-    return (DestReceiver*)self;
+    return (DestReceiver *)self;
 }
 
 /*
  * Set parameters for a DestRemote (or DestRemoteExecute) receiver
  */
-void SetRemoteDestReceiverParams(DestReceiver* self, Portal portal)
+void SetRemoteDestReceiverParams(DestReceiver *self, Portal portal)
 {
-    DR_printtup* my_state = (DR_printtup*)self;
+    DR_printtup *myState = (DR_printtup *)self;
 
-    Assert(my_state->pub.mydest == DestRemote || my_state->pub.mydest == DestRemoteExecute);
+    Assert(myState->pub.mydest == DestRemote || myState->pub.mydest == DestRemoteExecute);
 
-    my_state->portal = portal;
+    myState->portal = portal;
 
     if (PG_PROTOCOL_MAJOR(FrontendProtocol) < 3) {
         /*
@@ -431,19 +432,19 @@ void SetRemoteDestReceiverParams(DestReceiver* self, Portal portal)
          * look at the first one.
          */
         if (portal->formats && portal->formats[0] != 0)
-            my_state->pub.receiveSlot = printtup_internal_20;
+            myState->pub.receiveSlot = printtup_internal_20;
         else
-            my_state->pub.receiveSlot = printtup_20;
+            myState->pub.receiveSlot = printtup_20;
     }
 }
 
-static void printtup_startup(DestReceiver* self, int operation, TupleDesc typeinfo)
+static void printtup_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
 {
-    DR_printtup* my_state = (DR_printtup*)self;
-    Portal portal = my_state->portal;
+    DR_printtup *myState = (DR_printtup *)self;
+    Portal portal = myState->portal;
 
     /* create buffer to be used for all messages */
-    initStringInfo(&my_state->buf);
+    initStringInfo(&myState->buf);
 
     if (PG_PROTOCOL_MAJOR(FrontendProtocol) < 3) {
         /*
@@ -451,7 +452,7 @@ static void printtup_startup(DestReceiver* self, int operation, TupleDesc typein
          *
          * If portal name not specified, use "blank" portal.
          */
-        const char* portalName = portal->name;
+        const char *portalName = portal->name;
 
         if (portalName == NULL || portalName[0] == '\0')
             portalName = "blank";
@@ -463,8 +464,8 @@ static void printtup_startup(DestReceiver* self, int operation, TupleDesc typein
      * If we are supposed to emit row descriptions, then send the tuple
      * descriptor of the tuples.
      */
-    if (my_state->sendDescrip)
-        SendRowDescriptionMessage(&my_state->buf, typeinfo, FetchPortalTargetList(portal), portal->formats);
+    if (myState->sendDescrip)
+        SendRowDescriptionMessage(&myState->buf, typeinfo, FetchPortalTargetList(portal), portal->formats);
 
     /* ----------------
      * We could set up the derived attr info at this time, but we postpone it
@@ -489,7 +490,7 @@ static void printtup_startup(DestReceiver* self, int operation, TupleDesc typein
  * array pointer might be NULL (if we are doing Describe on a prepared stmt);
  * send zeroes for the format codes in that case.
  */
-void SendRowDescriptionMessage(StringInfo buf, TupleDesc typeinfo, List* targetlist, int16* formats)
+void SendRowDescriptionMessage(StringInfo buf, TupleDesc typeinfo, List *targetlist, int16 *formats)
 {
     int natts = typeinfo->natts;
     int proto = PG_PROTOCOL_MAJOR(FrontendProtocol);
@@ -510,12 +511,12 @@ void SendRowDescriptionMessage(StringInfo buf, TupleDesc typeinfo, List* targetl
 /*
  * Send description for each column when using v3+ protocol
  */
-static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List* targetlist, int16* formats)
+static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List *targetlist, int16 *formats)
 {
-    Form_pg_attribute* attrs = typeinfo->attrs;
+    Form_pg_attribute *attrs = typeinfo->attrs;
     int natts = typeinfo->natts;
     int i;
-    ListCell* tlist_item = list_head(targetlist);
+    ListCell *tlist_item = list_head(targetlist);
     int typenameLen = 0;
 
     /*
@@ -529,17 +530,15 @@ static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List* t
     if (IsConnFromCoord())
         typenameLen = (2 * NAMEDATALEN + 1) * MAX_CONVERSION_GROWTH;
 
-    enlargeStringInfo(buf,
-        (NAMEDATALEN * MAX_CONVERSION_GROWTH /* attname */
-            + sizeof(Oid)                    /* resorigtbl */
-            + sizeof(AttrNumber)             /* resorigcol */
-            + sizeof(Oid)                    /* atttypid */
-            + sizeof(int16)                  /* attlen */
-            + sizeof(int32)                  /* attypmod */
-            + typenameLen                    /* typename */
-            + sizeof(int16)                  /* format */
-            ) *
-            natts);
+    enlargeStringInfo(buf, (NAMEDATALEN * MAX_CONVERSION_GROWTH /* attname */
+                            + sizeof(Oid)                       /* resorigtbl */
+                            + sizeof(AttrNumber)                /* resorigcol */
+                            + sizeof(Oid)                       /* atttypid */
+                            + sizeof(int16)                     /* attlen */
+                            + sizeof(int32)                     /* attypmod */
+                            + typenameLen                       /* typename */
+                            + sizeof(int16)                     /* format */
+                            ) * natts);
 
     for (i = 0; i < natts; ++i) {
         Oid atttypid = attrs[i]->atttypid;
@@ -561,12 +560,12 @@ static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List* t
         /* Do we have a non-resjunk tlist item? */
         while (tlist_item &&
 #ifdef STREAMPLAN
-            StreamTopConsumerAmI() == false && StreamThreadAmI() == false &&
+               StreamTopConsumerAmI() == false && StreamThreadAmI() == false &&
 #endif
-            ((TargetEntry *)lfirst(tlist_item))->resjunk)
+               ((TargetEntry *)lfirst(tlist_item))->resjunk)
             tlist_item = lnext(tlist_item);
         if (tlist_item != NULL) {
-            TargetEntry* tle = (TargetEntry*)lfirst(tlist_item);
+            TargetEntry *tle = (TargetEntry *)lfirst(tlist_item);
 
             pq_writeint32(buf, tle->resorigtbl);
             pq_writeint16(buf, tle->resorigcol);
@@ -590,7 +589,7 @@ static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List* t
          */
         /* Description: unified cn/dn cn/client  tupledesc data format under normal type. */
         if (IsConnFromCoord() && atttypid >= FirstBootstrapObjectId) {
-            char* typenameVar = "";
+            char *typenameVar = "";
             typenameVar = get_typename_with_namespace(atttypid);
             pq_writestring(buf, typenameVar);
         }
@@ -606,9 +605,9 @@ static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List* t
 /*
  * Send description for each column when using v2 protocol
  */
-static void SendRowDescriptionCols_2(StringInfo buf, TupleDesc typeinfo, List* targetlist, int16* formats)
+static void SendRowDescriptionCols_2(StringInfo buf, TupleDesc typeinfo, List *targetlist, int16 *formats)
 {
-    Form_pg_attribute* attrs = typeinfo->attrs;
+    Form_pg_attribute *attrs = typeinfo->attrs;
     int natts = typeinfo->natts;
     int i;
 
@@ -641,7 +640,7 @@ static void SendRowDescriptionCols_2(StringInfo buf, TupleDesc typeinfo, List* t
          */
         /* Description: unified cn/dn cn/client  tupledesc data format under normal type. */
         if (IsConnFromCoord() && atttypid >= FirstBootstrapObjectId) {
-            char* typenameVar = "";
+            char *typenameVar = "";
             typenameVar = get_typename_with_namespace(atttypid);
             pq_sendstring(buf, typenameVar);
         }
@@ -651,27 +650,39 @@ static void SendRowDescriptionCols_2(StringInfo buf, TupleDesc typeinfo, List* t
 /*
  * Get the lookup info that printtup() needs
  */
-static void printtup_prepare_info(DR_printtup* my_state, TupleDesc typeinfo, int attrs_num)
+static void printtup_prepare_info(DR_printtup *myState, TupleDesc typeinfo, int numAttrs)
 {
-    int16* formats = my_state->portal != NULL ? my_state->portal->formats : my_state->formats;
+    int16 *formats = myState->portal != NULL ? myState->portal->formats : myState->formats;
     int i;
 
     /* get rid of any old data */
-    if (my_state->myinfo != NULL) {
-        pfree(my_state->myinfo);
+    if (myState->myinfo != NULL) {
+        pfree(myState->myinfo);
     }
-    my_state->myinfo = NULL;
+    myState->myinfo = NULL;
 
-    my_state->attrinfo = typeinfo;
-    my_state->nattrs = attrs_num;
-    if (attrs_num <= 0) {
+    myState->attrinfo = typeinfo;
+    myState->nattrs = numAttrs;
+    if (numAttrs <= 0) {
         return;
     }
 
-    my_state->myinfo = (PrinttupAttrInfo*)palloc0(attrs_num * sizeof(PrinttupAttrInfo));
 
-    for (i = 0; i < attrs_num; i++) {
-        PrinttupAttrInfo* thisState = my_state->myinfo + i;
+    if (myState->portal != NULL && myState->portal->tupDesc != NULL) {
+#ifdef USE_ASSERT_CHECKING
+        Assert(numAttrs <= myState->portal->tupDesc->natts);
+#else
+        if (numAttrs > myState->portal->tupDesc->natts) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("num attrs from DN is %d, mismatch num attrs %d in portal", numAttrs, myState->portal->tupDesc->natts)));
+        }
+#endif
+    }
+
+    myState->myinfo = (PrinttupAttrInfo *)palloc0(numAttrs * sizeof(PrinttupAttrInfo));
+
+    for (i = 0; i < numAttrs; i++) {
+        PrinttupAttrInfo *thisState = myState->myinfo + i;
         int16 format = (formats ? formats[i] : 0);
 
         /*
@@ -700,37 +711,46 @@ static void printtup_prepare_info(DR_printtup* my_state, TupleDesc typeinfo, int
  * Get the lookup info that printtup() needs
  * this function mainly to tackle junk field
  */
-static void printtup_prepare_info_for_stream(DR_printtup* my_state, TupleDesc typeinfo, int attrs_num)
+static void printtup_prepare_info_for_stream(DR_printtup *myState, TupleDesc typeinfo, int numAttrs)
 {
     int i;
 
     /* get rid of any old data */
-    if (my_state->myinfo != NULL) {
-        pfree(my_state->myinfo);
+    if (myState->myinfo != NULL) {
+        pfree(myState->myinfo);
     }
-    my_state->myinfo = NULL;
+    myState->myinfo = NULL;
 
-    my_state->attrinfo = typeinfo;
-    my_state->nattrs = attrs_num;
-    if (attrs_num <= 0) {
+    myState->attrinfo = typeinfo;
+    myState->nattrs = numAttrs;
+    if (numAttrs <= 0) {
         return;
     }
 
-    my_state->myinfo = (PrinttupAttrInfo*)palloc0(attrs_num * sizeof(PrinttupAttrInfo));
+    myState->myinfo = (PrinttupAttrInfo *)palloc0(numAttrs * sizeof(PrinttupAttrInfo));
 
     /* let's say for stream thread only support format = 0; */
-    for (i = 0; i < attrs_num; i++) {
-        PrinttupAttrInfo* thisState = my_state->myinfo + i;
+    for (i = 0; i < numAttrs; i++) {
+        PrinttupAttrInfo *thisState = myState->myinfo + i;
         thisState->format = 0;
         getTypeOutputInfo(typeinfo->attrs[i]->atttypid, &thisState->typoutput, &thisState->typisvarlena);
         fmgr_info(thisState->typoutput, &thisState->finfo);
     }
 }
 
-void assembleStreamMessage(TupleTableSlot* slot, DestReceiver* self, StringInfo buf)
+inline MemoryContext changeToTmpContext(DestReceiver *self)
+{
+    MemoryContext old_context = CurrentMemoryContext;
+    if (self->tmpContext != NULL) {
+        old_context = MemoryContextSwitchTo(self->tmpContext);
+    }
+    return old_context;
+}
+
+void assembleStreamMessage(TupleTableSlot *slot, DestReceiver *self, StringInfo buf)
 {
     TupleDesc typeinfo = slot->tts_tupleDescriptor;
-    DR_printtup* my_state = (DR_printtup*)self;
+    DR_printtup *myState = (DR_printtup *)self;
     int natts = typeinfo->natts;
     int i;
 
@@ -745,25 +765,24 @@ void assembleStreamMessage(TupleTableSlot* slot, DestReceiver* self, StringInfo 
         pq_sendbytes(buf, slot->tts_dataRow, slot->tts_dataLen);
     } else {
         /* Set or update my derived attribute info, if needed */
-        if (my_state->attrinfo != typeinfo || my_state->nattrs != natts)
-            printtup_prepare_info_for_stream(my_state, typeinfo, natts);
+        if (myState->attrinfo != typeinfo || myState->nattrs != natts)
+            printtup_prepare_info_for_stream(myState, typeinfo, natts);
 
         /* Make sure the tuple is fully deconstructed */
-        slot_getallattrs(slot);
+        tableam_tslot_getallattrs(slot);
 
-        /*
-         * Prepare a DataRow message
-         */
+        MemoryContext old_context = changeToTmpContext(self);
+
+        /* Prepare a DataRow message */
         Assert(buf->len == 0);
         buf->cursor = 'D';
-
         pq_sendint16(buf, natts);
 
         /*
          * send the attributes of this tuple
          */
         for (i = 0; i < natts; ++i) {
-            PrinttupAttrInfo* this_state = my_state->myinfo + i;
+            PrinttupAttrInfo *thisState = myState->myinfo + i;
             Datum origattr = slot->tts_values[i];
             Datum attr = static_cast<uintptr_t>(0);
 
@@ -776,23 +795,23 @@ void assembleStreamMessage(TupleTableSlot* slot, DestReceiver* self, StringInfo 
              * If we have a toasted datum, forcibly detoast it here to avoid
              * memory leakage inside the type's output routine.
              */
-            if (this_state->typisvarlena)
+            if (thisState->typisvarlena)
                 attr = PointerGetDatum(PG_DETOAST_DATUM(origattr));
             else
                 attr = origattr;
 
-            if (this_state->format == 0) {
+            if (thisState->format == 0) {
                 /* Text output */
-                char* outputstr = NULL;
+                char *outputstr = NULL;
 
-                outputstr = OutputFunctionCall(&this_state->finfo, attr);
+                outputstr = OutputFunctionCall(&thisState->finfo, attr);
                 pq_sendcountedtext(buf, outputstr, strlen(outputstr), false);
                 pfree(outputstr);
             } else {
                 /* Binary output */
-                bytea* outputbytes = NULL;
+                bytea *outputbytes = NULL;
 
-                outputbytes = SendFunctionCall(&this_state->finfo, attr);
+                outputbytes = SendFunctionCall(&thisState->finfo, attr);
                 pq_sendint32(buf, VARSIZE(outputbytes) - VARHDRSZ);
                 pq_sendbytes(buf, VARDATA(outputbytes), VARSIZE(outputbytes) - VARHDRSZ);
                 pfree(outputbytes);
@@ -802,6 +821,8 @@ void assembleStreamMessage(TupleTableSlot* slot, DestReceiver* self, StringInfo 
             if (DatumGetPointer(attr) != DatumGetPointer(origattr))
                 pfree(DatumGetPointer(attr));
         }
+
+        (void)MemoryContextSwitchTo(old_context);
     }
 
     StreamTimeSerilizeEnd(t_thrd.pgxc_cxt.GlobalNetInstr);
@@ -811,11 +832,11 @@ void assembleStreamMessage(TupleTableSlot* slot, DestReceiver* self, StringInfo 
  *		printtup for stream--- print a stream tuple in protocol 3.0
  * ----------------
  */
-void printtupStream(TupleTableSlot* slot, DestReceiver* self)
+void printtupStream(TupleTableSlot *slot, DestReceiver *self)
 {
     TupleDesc typeinfo = slot->tts_tupleDescriptor;
-    DR_printtup* my_state = (DR_printtup*)self;
-    StringInfo buf = &my_state->buf;
+    DR_printtup *myState = (DR_printtup *)self;
+    StringInfo buf = &myState->buf;
     int natts = typeinfo->natts;
     int i;
 
@@ -836,14 +857,14 @@ void printtupStream(TupleTableSlot* slot, DestReceiver* self)
         return;
     }
 #endif
-
     /* Set or update my derived attribute info, if needed */
-    if (my_state->attrinfo != typeinfo || my_state->nattrs != natts)
-        printtup_prepare_info_for_stream(my_state, typeinfo, natts);
+    if (myState->attrinfo != typeinfo || myState->nattrs != natts)
+        printtup_prepare_info_for_stream(myState, typeinfo, natts);
 
     /* Make sure the tuple is fully deconstructed */
-    slot_getallattrs(slot);
+    tableam_tslot_getallattrs(slot);
 
+    MemoryContext old_context = changeToTmpContext(self);
     /*
      * Prepare a DataRow message
      */
@@ -855,7 +876,7 @@ void printtupStream(TupleTableSlot* slot, DestReceiver* self)
      * send the attributes of this tuple
      */
     for (i = 0; i < natts; ++i) {
-        PrinttupAttrInfo* this_state = my_state->myinfo + i;
+        PrinttupAttrInfo *thisState = myState->myinfo + i;
         Datum origattr = slot->tts_values[i];
         Datum attr = static_cast<uintptr_t>(0);
 
@@ -868,23 +889,23 @@ void printtupStream(TupleTableSlot* slot, DestReceiver* self)
          * If we have a toasted datum, forcibly detoast it here to avoid
          * memory leakage inside the type's output routine.
          */
-        if (this_state->typisvarlena)
+        if (thisState->typisvarlena)
             attr = PointerGetDatum(PG_DETOAST_DATUM(origattr));
         else
             attr = origattr;
 
-        if (this_state->format == 0) {
+        if (thisState->format == 0) {
             /* Text output */
-            char* outputstr = NULL;
+            char *outputstr = NULL;
 
-            outputstr = OutputFunctionCall(&this_state->finfo, attr);
+            outputstr = OutputFunctionCall(&thisState->finfo, attr);
             pq_sendcountedtext(buf, outputstr, strlen(outputstr), false);
             pfree(outputstr);
         } else {
             /* Binary output */
-            bytea* outputbytes = NULL;
+            bytea *outputbytes = NULL;
 
-            outputbytes = SendFunctionCall(&this_state->finfo, attr);
+            outputbytes = SendFunctionCall(&thisState->finfo, attr);
             pq_sendint32(buf, VARSIZE(outputbytes) - VARHDRSZ);
             pq_sendbytes(buf, VARDATA(outputbytes), VARSIZE(outputbytes) - VARHDRSZ);
             pfree(outputbytes);
@@ -895,6 +916,7 @@ void printtupStream(TupleTableSlot* slot, DestReceiver* self)
             pfree(DatumGetPointer(attr));
     }
 
+    (void)MemoryContextSwitchTo(old_context);
     StreamTimeSerilizeEnd(t_thrd.pgxc_cxt.GlobalNetInstr);
 
     AddCheckInfo(buf);
@@ -905,10 +927,10 @@ void printtupStream(TupleTableSlot* slot, DestReceiver* self)
  *		printtup --- print a tuple in protocol 3.0
  * ----------------
  */
-void printBatch(VectorBatch* batch, DestReceiver* self)
+void printBatch(VectorBatch *batch, DestReceiver *self)
 {
-    DR_printtup* my_state = (DR_printtup*)self;
-    StringInfo buf = &my_state->buf;
+    DR_printtup *myState = (DR_printtup *)self;
+    StringInfo buf = &myState->buf;
     pq_beginmessage_reuse(buf, 'B');
     batch->SerializeWithLZ4Compress(buf);
     AddCheckInfo(buf);
@@ -919,26 +941,43 @@ void printBatch(VectorBatch* batch, DestReceiver* self)
  *		printtup --- print a tuple in protocol 3.0
  * ----------------
  */
-void printtup(TupleTableSlot* slot, DestReceiver* self)
+void printtup(TupleTableSlot *slot, DestReceiver *self)
 {
     TupleDesc typeinfo = slot->tts_tupleDescriptor;
-    DR_printtup* my_state = (DR_printtup*)self;
-    StringInfo buf = &my_state->buf;
+    DR_printtup *myState = (DR_printtup *)self;
+    StringInfo buf = &myState->buf;
     int natts = typeinfo->natts;
     int i;
-
-/* just as we define in backend/commands/analyze.cpp */
+    bool binary = false;
+    /* just as we define in backend/commands/analyze.cpp */
 #define WIDTH_THRESHOLD 1024
 
     StreamTimeSerilizeStart(t_thrd.pgxc_cxt.GlobalNetInstr);
+    /* Set or update my derived attribute info, if needed */
+    if (myState->attrinfo != typeinfo || myState->nattrs != natts)
+        printtup_prepare_info(myState, typeinfo, natts);
 
 #ifdef PGXC
+
+    /*
+     * The datanodes would have sent all attributes in TEXT form. But
+     * if the client has asked for any attribute to be sent in a binary format,
+     * then we must decode the datarow and send every attribute in the format
+     * that the client has asked for. Otherwise its ok to just forward the
+     * datarow as it is
+     */
+    for (i = 0; i < natts; ++i) {
+        PrinttupAttrInfo *thisState = myState->myinfo + i;
+        if (thisState->format != 0)
+            binary = true;
+    }
+
     /*
      * If we are having DataRow-based tuple we do not have to encode attribute
      * values, just send over the DataRow message as we received it from the
      * Datanode
      */
-    if (slot->tts_dataRow != NULL && (pg_get_client_encoding() == GetDatabaseEncoding())) {
+    if (slot->tts_dataRow != NULL && (pg_get_client_encoding() == GetDatabaseEncoding()) && !binary) {
         pq_beginmessage_reuse(buf, 'D');
         appendBinaryStringInfo(buf, slot->tts_dataRow, slot->tts_dataLen);
         AddCheckInfo(buf);
@@ -948,13 +987,10 @@ void printtup(TupleTableSlot* slot, DestReceiver* self)
     }
 #endif
 
-    /* Set or update my derived attribute info, if needed */
-    if (my_state->attrinfo != typeinfo || my_state->nattrs != natts)
-        printtup_prepare_info(my_state, typeinfo, natts);
-
     /* Make sure the tuple is fully deconstructed */
-    slot_getallattrs(slot);
+    tableam_tslot_getallattrs(slot);
 
+    MemoryContext old_context = changeToTmpContext(self);
     /*
      * Prepare a DataRow message
      */
@@ -966,7 +1002,7 @@ void printtup(TupleTableSlot* slot, DestReceiver* self)
      * send the attributes of this tuple
      */
     for (i = 0; i < natts; ++i) {
-        PrinttupAttrInfo* this_state = my_state->myinfo + i;
+        PrinttupAttrInfo *thisState = myState->myinfo + i;
         Datum origattr = slot->tts_values[i];
         Datum attr = static_cast<uintptr_t>(0);
 
@@ -985,28 +1021,28 @@ void printtup(TupleTableSlot* slot, DestReceiver* self)
              * origattr had been converted to CSTRING type previously by using anyarray_out.
              * just send over the DataRow message as we received it.
              */
-            pq_sendcountedtext(buf, (char*)origattr, strlen((char*)origattr), false);
+            pq_sendcountedtext(buf, (char *)origattr, strlen((char *)origattr), false);
         } else {
             /*
              * If we have a toasted datum, forcibly detoast it here to avoid
              * memory leakage inside the type's output routine.
              */
-            if (this_state->typisvarlena)
+            if (thisState->typisvarlena)
                 attr = PointerGetDatum(PG_DETOAST_DATUM(origattr));
             else
                 attr = origattr;
 
-            if (this_state->format == 0) {
+            if (thisState->format == 0) {
                 /* Text output */
-                char* outputstr = NULL;
+                char *outputstr = NULL;
 
-                outputstr = OutputFunctionCall(&this_state->finfo, attr);
-                if (this_state->typisvarlena && self->forAnalyzeSampleTuple &&
+                outputstr = OutputFunctionCall(&thisState->finfo, attr);
+                if (thisState->typisvarlena && self->forAnalyzeSampleTuple &&
                     (typeinfo->attrs[i]->atttypid == BYTEAOID || typeinfo->attrs[i]->atttypid == CHAROID ||
-                        typeinfo->attrs[i]->atttypid == TEXTOID || typeinfo->attrs[i]->atttypid == BLOBOID ||
-                        typeinfo->attrs[i]->atttypid == CLOBOID || typeinfo->attrs[i]->atttypid == RAWOID ||
-                        typeinfo->attrs[i]->atttypid == BPCHAROID || typeinfo->attrs[i]->atttypid == VARCHAROID ||
-                        typeinfo->attrs[i]->atttypid == NVARCHAR2OID) &&
+                     typeinfo->attrs[i]->atttypid == TEXTOID || typeinfo->attrs[i]->atttypid == BLOBOID ||
+                     typeinfo->attrs[i]->atttypid == CLOBOID || typeinfo->attrs[i]->atttypid == RAWOID ||
+                     typeinfo->attrs[i]->atttypid == BPCHAROID || typeinfo->attrs[i]->atttypid == VARCHAROID ||
+                     typeinfo->attrs[i]->atttypid == NVARCHAR2OID) &&
                     strlen(outputstr) > WIDTH_THRESHOLD * 2) {
                     /*
                      * in compute_scalar_stats, we just skip detoast value if value size is
@@ -1015,15 +1051,15 @@ void printtup(TupleTableSlot* slot, DestReceiver* self)
                      * it can use as little memory as we can to satisfy the threshold
                      */
                     const int length = WIDTH_THRESHOLD + 4;
-                    text* txt = NULL;
+                    text *txt = NULL;
                     Datum str;
-                    text* result = NULL;
+                    text *result = NULL;
 
                     txt = cstring_to_text(outputstr);
                     pfree(outputstr);
 
-                    str = DirectFunctionCall3(
-                        substrb_with_lenth, PointerGetDatum(txt), Int32GetDatum(0), Int32GetDatum(length));
+                    str = DirectFunctionCall3(substrb_with_lenth, PointerGetDatum(txt), Int32GetDatum(0),
+                                              Int32GetDatum(length));
                     result = DatumGetTextP(str);
                     if (result != txt)
                         pfree(txt);
@@ -1035,9 +1071,9 @@ void printtup(TupleTableSlot* slot, DestReceiver* self)
                 pfree(outputstr);
             } else {
                 /* Binary output */
-                bytea* outputbytes = NULL;
+                bytea *outputbytes = NULL;
 
-                outputbytes = SendFunctionCall(&this_state->finfo, attr);
+                outputbytes = SendFunctionCall(&thisState->finfo, attr);
                 pq_sendint32(buf, VARSIZE(outputbytes) - VARHDRSZ);
                 pq_sendbytes(buf, VARDATA(outputbytes), VARSIZE(outputbytes) - VARHDRSZ);
                 pfree(outputbytes);
@@ -1048,6 +1084,8 @@ void printtup(TupleTableSlot* slot, DestReceiver* self)
                 pfree(DatumGetPointer(attr));
         }
     }
+
+    (void)MemoryContextSwitchTo(old_context);
     StreamTimeSerilizeEnd(t_thrd.pgxc_cxt.GlobalNetInstr);
 
     AddCheckInfo(buf);
@@ -1058,21 +1096,23 @@ void printtup(TupleTableSlot* slot, DestReceiver* self)
  *		printtup_20 --- print a tuple in protocol 2.0
  * ----------------
  */
-static void printtup_20(TupleTableSlot* slot, DestReceiver* self)
+static void printtup_20(TupleTableSlot *slot, DestReceiver *self)
 {
     TupleDesc typeinfo = slot->tts_tupleDescriptor;
-    DR_printtup* my_state = (DR_printtup*)self;
-    StringInfo buf = &my_state->buf;
+    DR_printtup *myState = (DR_printtup *)self;
+    StringInfo buf = &myState->buf;
     int natts = typeinfo->natts;
     int i, j;
     uint k;
 
     /* Set or update my derived attribute info, if needed */
-    if (my_state->attrinfo != typeinfo || my_state->nattrs != natts)
-        printtup_prepare_info(my_state, typeinfo, natts);
+    if (myState->attrinfo != typeinfo || myState->nattrs != natts)
+        printtup_prepare_info(myState, typeinfo, natts);
 
     /* Make sure the tuple is fully deconstructed */
-    slot_getallattrs(slot);
+    tableam_tslot_getallattrs(slot);
+
+    MemoryContext old_context = changeToTmpContext(self);
 
     /*
      * tell the frontend to expect new tuple data (in ASCII style)
@@ -1101,26 +1141,26 @@ static void printtup_20(TupleTableSlot* slot, DestReceiver* self)
      * send the attributes of this tuple
      */
     for (i = 0; i < natts; ++i) {
-        PrinttupAttrInfo* this_state = my_state->myinfo + i;
+        PrinttupAttrInfo *thisState = myState->myinfo + i;
         Datum origattr = slot->tts_values[i];
         Datum attr = static_cast<uintptr_t>(0);
-        char* outputstr = NULL;
+        char *outputstr = NULL;
 
         if (slot->tts_isnull[i])
             continue;
 
-        Assert(this_state->format == 0);
+        Assert(thisState->format == 0);
 
         /*
          * If we have a toasted datum, forcibly detoast it here to avoid
          * memory leakage inside the type's output routine.
          */
-        if (this_state->typisvarlena)
+        if (thisState->typisvarlena)
             attr = PointerGetDatum(PG_DETOAST_DATUM(origattr));
         else
             attr = origattr;
 
-        outputstr = OutputFunctionCall(&this_state->finfo, attr);
+        outputstr = OutputFunctionCall(&thisState->finfo, attr);
         pq_sendcountedtext(buf, outputstr, strlen(outputstr), true);
         pfree(outputstr);
 
@@ -1129,6 +1169,7 @@ static void printtup_20(TupleTableSlot* slot, DestReceiver* self)
             pfree(DatumGetPointer(attr));
     }
 
+    (void)MemoryContextSwitchTo(old_context);
     pq_endmessage_reuse(buf);
 }
 
@@ -1136,22 +1177,22 @@ static void printtup_20(TupleTableSlot* slot, DestReceiver* self)
  *		printtup_shutdown
  * ----------------
  */
-static void printtup_shutdown(DestReceiver* self)
+static void printtup_shutdown(DestReceiver *self)
 {
-    DR_printtup* my_state = (DR_printtup*)self;
+    DR_printtup *myState = (DR_printtup *)self;
 
-    if (my_state->myinfo != NULL)
-        pfree(my_state->myinfo);
-    my_state->myinfo = NULL;
+    if (myState->myinfo != NULL)
+        pfree(myState->myinfo);
+    myState->myinfo = NULL;
 
-    my_state->attrinfo = NULL;
+    myState->attrinfo = NULL;
 }
 
 /* ----------------
  *		printtup_destroy
  * ----------------
  */
-static void printtup_destroy(DestReceiver* self)
+static void printtup_destroy(DestReceiver *self)
 {
     pfree(self);
 }
@@ -1160,28 +1201,22 @@ static void printtup_destroy(DestReceiver* self)
  *		printatt
  * ----------------
  */
-static void printatt(unsigned attribute_id, Form_pg_attribute attribute_p, const char* value)
+static void printatt(unsigned attributeId, Form_pg_attribute attributeP, const char *value)
 {
-    printf("\t%2u: %s%s%s%s\t(typeid = %u, len = %d, typmod = %d, byval = %c)\n",
-        attribute_id,
-        NameStr(attribute_p->attname),
-        value != NULL ? " = \"" : "",
-        value != NULL ? value : "",
-        value != NULL ? "\"" : "",
-        (unsigned int)(attribute_p->atttypid),
-        attribute_p->attlen,
-        attribute_p->atttypmod,
-        attribute_p->attbyval ? 't' : 'f');
+    printf("\t%2u: %s%s%s%s\t(typeid = %u, len = %d, typmod = %d, byval = %c)\n", attributeId,
+           NameStr(attributeP->attname), value != NULL ? " = \"" : "", value != NULL ? value : "",
+           value != NULL ? "\"" : "", (unsigned int)(attributeP->atttypid), attributeP->attlen, attributeP->atttypmod,
+           attributeP->attbyval ? 't' : 'f');
 }
 
 /* ----------------
  *		debugStartup - prepare to print tuples for an interactive backend
  * ----------------
  */
-void debugStartup(DestReceiver* self, int operation, TupleDesc typeinfo)
+void debugStartup(DestReceiver *self, int operation, TupleDesc typeinfo)
 {
     int natts = typeinfo->natts;
-    Form_pg_attribute* attinfo = typeinfo->attrs;
+    Form_pg_attribute *attinfo = typeinfo->attrs;
     int i;
 
     /*
@@ -1196,19 +1231,19 @@ void debugStartup(DestReceiver* self, int operation, TupleDesc typeinfo)
  *		debugtup - print one tuple for an interactive backend
  * ----------------
  */
-void debugtup(TupleTableSlot* slot, DestReceiver* self)
+void debugtup(TupleTableSlot *slot, DestReceiver *self)
 {
     TupleDesc typeinfo = slot->tts_tupleDescriptor;
     int natts = typeinfo->natts;
     int i;
     Datum origattr, attr;
-    char* value = NULL;
+    char *value = NULL;
     bool isnull = false;
     Oid typoutput;
     bool typisvarlena = false;
 
     for (i = 0; i < natts; ++i) {
-        origattr = slot_getattr(slot, i + 1, &isnull);
+        origattr = tableam_tslot_getattr(slot, i + 1, &isnull);
         if (isnull) {
             continue;
         }
@@ -1247,21 +1282,21 @@ void debugtup(TupleTableSlot* slot, DestReceiver* self)
  * This is largely same as printtup_20, except we use binary formatting.
  * ----------------
  */
-static void printtup_internal_20(TupleTableSlot* slot, DestReceiver* self)
+static void printtup_internal_20(TupleTableSlot *slot, DestReceiver *self)
 {
     TupleDesc typeinfo = slot->tts_tupleDescriptor;
-    DR_printtup* my_state = (DR_printtup*)self;
-    StringInfo buf = &my_state->buf;
+    DR_printtup *myState = (DR_printtup *)self;
+    StringInfo buf = &myState->buf;
     int natts = typeinfo->natts;
     int i, j;
     uint k;
 
     /* Set or update my derived attribute info, if needed */
-    if (my_state->attrinfo != typeinfo || my_state->nattrs != natts)
-        printtup_prepare_info(my_state, typeinfo, natts);
+    if (myState->attrinfo != typeinfo || myState->nattrs != natts)
+        printtup_prepare_info(myState, typeinfo, natts);
 
     /* Make sure the tuple is fully deconstructed */
-    slot_getallattrs(slot);
+    tableam_tslot_getallattrs(slot);
 
     /*
      * tell the frontend to expect new tuple data (in binary style)
@@ -1290,26 +1325,26 @@ static void printtup_internal_20(TupleTableSlot* slot, DestReceiver* self)
      * send the attributes of this tuple
      */
     for (i = 0; i < natts; ++i) {
-        PrinttupAttrInfo* this_state = my_state->myinfo + i;
+        PrinttupAttrInfo *thisState = myState->myinfo + i;
         Datum origattr = slot->tts_values[i];
         Datum attr = static_cast<uintptr_t>(0);
-        bytea* outputbytes = NULL;
+        bytea *outputbytes = NULL;
 
         if (slot->tts_isnull[i])
             continue;
 
-        Assert(this_state->format == 1);
+        Assert(thisState->format == 1);
 
         /*
          * If we have a toasted datum, forcibly detoast it here to avoid
          * memory leakage inside the type's output routine.
          */
-        if (this_state->typisvarlena)
+        if (thisState->typisvarlena)
             attr = PointerGetDatum(PG_DETOAST_DATUM(origattr));
         else
             attr = origattr;
 
-        outputbytes = SendFunctionCall(&this_state->finfo, attr);
+        outputbytes = SendFunctionCall(&thisState->finfo, attr);
         /* We assume the result will not have been toasted */
         pq_sendint32(buf, VARSIZE(outputbytes) - VARHDRSZ);
         pq_sendbytes(buf, VARDATA(outputbytes), VARSIZE(outputbytes) - VARHDRSZ);
@@ -1332,7 +1367,7 @@ static void printtup_internal_20(TupleTableSlot* slot, DestReceiver* self)
  * @return void
  *
  */
-void assembleStreamBatchMessage(BatchCompressType ctype, VectorBatch* batch, StringInfo buf)
+void assembleStreamBatchMessage(BatchCompressType ctype, VectorBatch *batch, StringInfo buf)
 {
     buf->cursor = 'B';
     switch (ctype) {

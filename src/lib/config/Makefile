@@ -54,7 +54,7 @@ libconfig.a: $(OBJS)
 
 utconfig:
 	$(CC) -fPIC -shared $(CFLAGS) $(CPPFLAGS) cm_config.cpp -L$(SECURE_LIB_PATH) -lsecurec -o libutconfig.so
-	mv libutconfig.so $(top_builddir)/src/test/ut/lib/
+	mv libutconfig.so $(top_builddir)/src/distribute/test/ut/lib/
 
 install: all installdirs
 	$(INSTALL_STLIB) libconfig.so.$(VERSION) '$(DESTDIR)$(libdir)/libconfig.so.$(VERSION)'

@@ -50,12 +50,6 @@ typedef unsigned int GS_UINT32;
 typedef unsigned long GS_UINT32;
 #endif
 
-#define CHECK_TUPLE_NUM(res) \
-    if (unlikely(PQntuples(res) < 0)) {\
-        PQclear(res);\
-        return false;\
-    }
-
 /*
  * Safer versions of some standard C library functions. If an
  * out-of-memory condition occurs, these functions will bail out
@@ -65,8 +59,6 @@ extern char* pg_strdup(const char* string);
 extern void* pg_malloc(size_t size);
 extern void* pg_malloc_zero(size_t size);
 extern void* pg_calloc(size_t nmemb, size_t size);
-extern void* pg_realloc(void* ptr, size_t size);
-extern void pg_free(void* ptr);
 
 extern bool setQFout(const char* fname);
 
@@ -103,7 +95,5 @@ extern const char* session_username(void);
 
 extern void expand_tilde(char** filename);
 extern bool do_parallel_execution(int count, char** stmts);
-extern char* GetEnvStr(const char* env);
 
 #endif /* COMMON_H */
-

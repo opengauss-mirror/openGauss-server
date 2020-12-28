@@ -14,6 +14,7 @@
 
 #include "c.h"
 
+
 /*
  *	Threading sometimes requires specially-named versions of functions
  *	that return data in static buffers, like strerror_r() instead of

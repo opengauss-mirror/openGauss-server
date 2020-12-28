@@ -19,6 +19,8 @@
 #include "utils/snapshot.h"
 #include "pgstat.h"
 
+extern void SyncLocalXidWait(TransactionId xid);
+
 extern Size ProcArrayShmemSize(void);
 extern void CreateSharedProcArray(void);
 extern void ProcArrayAdd(PGPROC* proc);
@@ -30,7 +32,7 @@ extern void CreateSharedRingBuffer(void);
 extern void ProcArrayEndTransaction(PGPROC* proc, TransactionId latestXid, bool isCommit = true);
 extern void ProcArrayClearTransaction(PGPROC* proc);
 extern bool TransactionIdIsInProgress(
-    TransactionId xid, bool* needSync = NULL, bool shortcutByRecentXmin = false, bool bCareNextxid = false);
+    TransactionId xid, uint32* needSync = NULL, bool shortcutByRecentXmin = false, bool bCareNextxid = false);
 
 #ifdef PGXC /* PGXC_DATANODE */
 extern void SetGlobalSnapshotData(
@@ -51,13 +53,11 @@ Snapshot GetSnapshotData(Snapshot snapshot, bool force_local_snapshot, bool forH
 #else
 extern Snapshot GetSnapshotData(Snapshot snapshot, bool force_local_snapshot);
 #endif
+
 extern Snapshot GetLocalSnapshotData(Snapshot snapshot);
 extern void ReleaseSnapshotData(Snapshot snapshot);
 
 extern bool ProcArrayInstallImportedXmin(TransactionId xmin, TransactionId sourcexid);
-extern bool ProcArrayInstallRestoredXmin(TransactionId xmin, PGPROC *proc);
-
-extern void set_proc_csn_and_check(const char* func, CommitSeqNo csn_min, SnapshotType snapshot_type);
 extern RunningTransactions GetRunningTransactionData(void);
 
 extern bool TransactionIdIsActive(TransactionId xid);
@@ -83,7 +83,8 @@ extern VirtualTransactionId* GetConflictingVirtualXIDs(TransactionId limitXmin, 
 extern ThreadId CancelVirtualTransaction(const VirtualTransactionId& vxid, ProcSignalReason sigmode);
 
 extern bool MinimumActiveBackends(int min);
-extern int CountDBBackends(Oid databaseid);
+extern int CountDBBackends(Oid database_oid);
+extern int CountDBActiveBackends(Oid database_oid);
 extern void CancelDBBackends(Oid databaseid, ProcSignalReason sigmode, bool conflictPending);
 extern int CountUserBackends(Oid roleid);
 extern bool CountOtherDBBackends(Oid databaseId, int* nbackends, int* nprepared);
@@ -107,6 +108,8 @@ typedef enum {
     SNAPSHOT_DATANODE     /* obtained directly from other thread in the same datanode*/
 } SnapshotSource;
 
+extern CommitSeqNo set_proc_csn_and_check(
+    const char* func, CommitSeqNo csn_min, GTM_SnapshotType gtm_snapshot_type, SnapshotSource from);
 #endif
 
 extern void PrintCurrentSnapshotInfo(int logelevel, TransactionId xid, Snapshot snapshot, const char* action);
@@ -115,13 +118,13 @@ extern void InitProcSubXidCacheContext();
 extern void ProcArrayResetXmin(PGPROC* proc);
 extern uint64 GetCommitCsn();
 extern void setCommitCsn(uint64 commit_csn);
-#ifndef ENABLE_MULTIPLE_NODES
-extern CommitSeqNo getNextCSN();
-#endif
-extern void SyncLocalXidWait(TransactionId xid);
+extern void SyncWaitXidEnd(TransactionId xid, Buffer buffer);
+extern CommitSeqNo calculate_local_csn_min();
+extern void proc_cancel_invalid_gtm_lite_conn();
+extern void forward_recent_global_xmin(void);
 
 extern void UpdateCSNLogAtTransactionEND(
-    TransactionId xid, uint32 nsubxids, TransactionId* subXids, CommitSeqNo csn, bool isCommit);
+    TransactionId xid, int nsubxids, TransactionId* subXids, CommitSeqNo csn, bool isCommit);
 
 #endif /* PROCARRAY_H */
 
@@ -131,5 +134,3 @@ extern void ResetProcXidCache(PGPROC* proc, bool needlock);
 
 // For GTT
 extern TransactionId ListAllThreadGttFrozenxids(int maxSize, ThreadId *pids, TransactionId *xids, int *n);
-extern TransactionId ListAllSessionGttFrozenxids(int maxSize, ThreadId *pids, TransactionId *xids, int *n);
-

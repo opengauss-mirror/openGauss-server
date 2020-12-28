@@ -1,0 +1,29 @@
+CREATE DATABASE wlm_resourcepool;
+\c wlm_resourcepool
+set resource_track_duration=0;
+set query_band='wlm_resourcepool_test';
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_resourcepool -c "\! echo 'Gauss_234' | sudo -S gs_cgroup -m -D /dev/cgroup" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_resourcepool -c "\! echo 'Gauss_234' | sudo -S gs_cgroup -U $TMP_USR -c -H ${WLM_TEST}" > /dev/null 2>&1
+\! gs_cgroup -c -S class1 -s 40 > /dev/null 2>&1
+CREATE RESOURCE POOL respool1;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_resourcepool -c "CREATE RESOURCE POOL respool2 WITH (control_group='class1:Rush');" > /dev/null 2>&1
+CREATE RESOURCE POOL respool3 WITH (active_statements=5);
+CREATE RESOURCE POOL respool4 WITH (MEM_PERCENT=20);
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_resourcepool -c "ALTER RESOURCE POOL respool1 WITH (control_group="class1:Rush");" > /dev/null 2>&1
+ALTER RESOURCE POOL respool1 WITH (ACTIVE_STATEMENTS=15);
+ALTER RESOURCE POOL respool1 WITH (MEM_PERCENT=20);
+ALTER RESOURCE POOL respool1 WITH (MAX_DOP=20);
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_resourcepool -c "ALTER RESOURCE POOL respool1 WITH (MEMORY_LIMIT=20);" > /dev/null 2>&1
+ALTER RESOURCE POOL respool1 WITH (io_limits=2);
+ALTER RESOURCE POOL respool1 WITH (io_priority="High");
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_resourcepool -c "SELECT * FROM PG_RESOURCE_POOL;" > /dev/null 2>&1
+DROP RESOURCE POOL respool1;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_resourcepool -c "DROP RESOURCE POOL respool2;" > /dev/null 2>&1
+DROP RESOURCE POOL respool3;
+DROP RESOURCE POOL respool4;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_resourcepool -c "SELECT * FROM PG_RESOURCE_POOL;" > /dev/null 2>&1
+\! gs_cgroup -d -S class1 > /dev/null 2>&1
+\c postgres
+drop database wlm_resourcepool;
+\c regression
+--end of file

@@ -56,15 +56,15 @@ typedef struct _SPI_plan* SPIPlanPtr;
 #define SPI_OK_UPDATE_RETURNING 13
 #define SPI_OK_REWRITTEN 14
 #define SPI_OK_MERGE 15
-#define SPI_OPT_NOATOMIC (1 << 0)
+#define SPI_OPT_NONATOMIC (1 << 0)
 
 extern THR_LOCAL PGDLLIMPORT uint32 SPI_processed;
 extern THR_LOCAL PGDLLIMPORT SPITupleTable* SPI_tuptable;
 extern THR_LOCAL PGDLLIMPORT int SPI_result;
 
 extern int SPI_connect(CommandDest dest = DestSPI, void (*spiCallbackfn)(void*) = NULL, void* clientData = NULL);
-extern int SPI_connect_ext(CommandDest dest = DestSPI, void (*spiCallbackfn)(void*) = NULL,
-    void* clientData = NULL, int options =0);
+extern int SPI_connect_ext(CommandDest dest = DestSPI, void (*spiCallbackfn)(void *) = NULL, void *clientData = NULL,
+                           int options = 0, Oid func_oid = InvalidOid);
 extern int SPI_finish(void);
 extern void SPI_push(void);
 extern void SPI_pop(void);
@@ -125,22 +125,28 @@ extern void SPI_cursor_move(Portal portal, bool forward, long count);
 extern void SPI_scroll_cursor_fetch(Portal, FetchDirection direction, long count);
 extern void SPI_scroll_cursor_move(Portal, FetchDirection direction, long count);
 extern void SPI_cursor_close(Portal portal);
-
 extern void SPI_start_transaction(void);
-extern void SPI_commit(void);
-extern void SPI_rollback(void);
-extern void SPICleanup(void);
+extern void SPI_stp_transaction_check(bool read_only);
+extern void SPI_commit();
+extern void SPI_rollback();
+extern void SPI_save_current_stp_transaction_state();
+extern void SPI_restore_current_stp_transaction_state();
+extern TransactionId SPI_get_top_transaction_id();
 
-extern void AtEOXact_SPI(bool isCommit, bool stpRollback, bool stpCommit);
-extern void AtEOSubXact_SPI(bool isCommit, SubTransactionId mySubid, bool stpRollback, bool stpCommit);
-extern bool SPI_inside_nonatomic_context(void);
+extern void SPICleanup(void);
+extern void AtEOXact_SPI(bool isCommit, bool STP_rollback, bool STP_commit);
+extern void AtEOSubXact_SPI(bool isCommit, SubTransactionId mySubid, bool STP_rollback, bool STP_commit);
+extern void AtEOSubXact_SPI(bool isCommit, SubTransactionId mySubid);
 extern DestReceiver* createAnalyzeSPIDestReceiver(CommandDest dest);
 /* SPI execution helpers */
 extern void spi_exec_with_callback(CommandDest dest, const char* src, bool read_only, long tcount, bool direct_call,
     void (*callbackFn)(void*), void* clientData);
 
+extern void _SPI_error_callback(void *arg);
+
 #ifdef PGXC
 extern int SPI_execute_direct(const char* src, char* nodename);
 #endif
 extern int _SPI_end_call(bool procmem);
+extern void _SPI_hold_cursor();
 #endif /* SPI_H */

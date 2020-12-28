@@ -264,8 +264,8 @@ Datum numeric_in(PG_FUNCTION_ARGS)
         cp++;
     }
 
-    /* the first parameter is null, we should convert to 0 if u_sess->attr.attr_sql.sql_compatibility is DB_CMPT_C */
-    if (DB_IS_CMPT(DB_CMPT_C) && *cp == '\0') {
+    /* the first parameter is null, we should convert to 0 if u_sess->attr.attr_sql.sql_compatibility == C_FORMAT */
+    if (u_sess->attr.attr_sql.sql_compatibility == C_FORMAT && '\0' == *cp) {
         NumericVar value;
         init_var(&value);
 
@@ -685,7 +685,7 @@ Datum numerictypmodin(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("NUMERIC precision %d must be between 1 and %d", tl[0], NUMERIC_MAX_PRECISION)));
         /* scale defaults to zero */
-        typmod = (tl[0] << 16) + VARHDRSZ;
+        typmod = (((uint32)tl[0]) << 16) + VARHDRSZ;
     } else {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid NUMERIC type modifier")));
         typmod = 0; /* keep compiler quiet */
@@ -743,7 +743,7 @@ Datum numeric_abs(PG_FUNCTION_ARGS)
         /*
          * Do it the easy way directly on the packed format
          */
-        res = (Numeric) palloc(VARSIZE(num));
+        res = (Numeric)palloc(VARSIZE(num));
         errno_t rc = memcpy_s(res, VARSIZE(num), num, VARSIZE(num));
         securec_check(rc, "\0", "\0");
     }
@@ -863,7 +863,7 @@ Datum numeric_sign(PG_FUNCTION_ARGS)
  *
  *	Round a value to have 'scale' digits after the decimal point.
  *	We allow negative 'scale', implying rounding before the decimal
- *	point --- a interprets rounding that way.
+ *	point --- A db interprets rounding that way.
  */
 Datum numeric_round(PG_FUNCTION_ARGS)
 {
@@ -917,7 +917,7 @@ Datum numeric_round(PG_FUNCTION_ARGS)
  *
  *	Truncate a value to have 'scale' digits after the decimal point.
  *	We allow negative 'scale', implying a truncation before the decimal
- *	point --- a interprets truncation that way.
+ *	point --- A db interprets truncation that way.
  */
 Datum numeric_trunc(PG_FUNCTION_ARGS)
 {
@@ -1619,13 +1619,13 @@ static Datum numeric_abbrev_convert_var(NumericVar* var, NumericSortSupport* nss
         switch (ndigits) {
             default:
                 result = (int64)(((uint64)result) | ((uint64)var->digits[3]));
-                /* FALLTHROUGH */
+                /* fall through */
             case 3:
                 result = (int64)((uint64)result | (((uint64)var->digits[2]) << 14));
-                /* FALLTHROUGH */
+                /* fall through */
             case 2:
                 result = (int64)((uint64)result | (((uint64)var->digits[1]) << 28));
-                /* FALLTHROUGH */
+                /* fall through */
             case 1:
                 result = (int64)((uint64)result | (((uint64)var->digits[0]) << 42));
                 break;
@@ -1782,7 +1782,7 @@ Datum numeric_eq(PG_FUNCTION_ARGS)
     bool result = false;
 
     if (NUMERIC_IS_BI(num1) && NUMERIC_IS_BI(num2)) {
-        /* call biginteger function */
+        /*call biginteger function*/
         result = DatumGetInt32(bipickfun<BIEQ>(num1, num2));
     } else {
         /* handle NAN in cmp_numerics */
@@ -1809,7 +1809,7 @@ Datum numeric_ne(PG_FUNCTION_ARGS)
     bool result = false;
 
     if (NUMERIC_IS_BI(num1) && NUMERIC_IS_BI(num2)) {
-        /* call biginteger function */
+        /*call biginteger function*/
         result = DatumGetInt32(bipickfun<BINEQ>(num1, num2));
     } else {
         /* handle NAN in cmp_numerics */
@@ -1836,7 +1836,7 @@ Datum numeric_gt(PG_FUNCTION_ARGS)
     bool result = false;
 
     if (NUMERIC_IS_BI(num1) && NUMERIC_IS_BI(num2)) {
-        /* call biginteger function */
+        /*call biginteger function*/
         result = DatumGetInt32(bipickfun<BIGT>(num1, num2));
     } else {
         /* handle NAN in cmp_numerics */
@@ -1863,7 +1863,7 @@ Datum numeric_ge(PG_FUNCTION_ARGS)
     bool result = false;
 
     if (NUMERIC_IS_BI(num1) && NUMERIC_IS_BI(num2)) {
-        /* call biginteger function */
+        /*call biginteger function*/
         result = DatumGetInt32(bipickfun<BIGE>(num1, num2));
     } else {
         /* handle NAN in cmp_numerics */
@@ -1890,7 +1890,7 @@ Datum numeric_lt(PG_FUNCTION_ARGS)
     bool result = false;
 
     if (NUMERIC_IS_BI(num1) && NUMERIC_IS_BI(num2)) {
-        /* call biginteger function */
+        /*call biginteger function*/
         result = DatumGetInt32(bipickfun<BILT>(num1, num2));
     } else {
         /* handle NAN in cmp_numerics */
@@ -1917,7 +1917,7 @@ Datum numeric_le(PG_FUNCTION_ARGS)
     bool result = false;
 
     if (NUMERIC_IS_BI(num1) && NUMERIC_IS_BI(num2)) {
-        /* call biginteger function */
+        /*call biginteger function*/
         result = DatumGetInt32(bipickfun<BILE>(num1, num2));
     } else {
         /* handle NAN in cmp_numerics */
@@ -2022,7 +2022,7 @@ Datum hash_numeric(PG_FUNCTION_ARGS)
      * If there are no non-zero digits, then the value of the number is zero,
      * regardless of any other fields.
      */
-    if ((unsigned int)(start_offset) == NUMERIC_NDIGITS(key))
+    if (NUMERIC_NDIGITS(key) == (unsigned int)(start_offset))
         PG_RETURN_UINT32(-1);
 
     for (i = NUMERIC_NDIGITS(key) - 1; i >= 0; i--) {
@@ -2047,7 +2047,7 @@ Datum hash_numeric(PG_FUNCTION_ARGS)
     digit_hash = hash_any((unsigned char*)(NUMERIC_DIGITS(key) + start_offset), hash_len * sizeof(NumericDigit));
 
     /* Mix in the weight, via XOR */
-    result = digit_hash ^ weight;
+    result = digit_hash ^ (uint32)weight;
 
     /* free memory if allocated by the toaster */
     PG_FREE_IF_COPY(key, 0);
@@ -2366,16 +2366,20 @@ Datum numeric_mod(PG_FUNCTION_ARGS)
 
     init_var(&result);
 
-    // zero is not allowed to be divisor
+    // zero is allowed to be divisor
     if (0 == cmp_var(&arg2, &const_zero)) {
         free_var(&result);
         free_var(&arg2);
         free_var(&arg1);
 
-        ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
+        if (DB_IS_CMPT(PG_FORMAT)) {
+            /* zero is not allowed to be divisor if compatible with PG */
+            ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
 
-        /* ensure compiler realizes we mustn't reach the division (gcc bug) */
-        PG_RETURN_NULL();
+            /* ensure compiler realizes we mustn't reach the division (gcc bug) */
+            PG_RETURN_NULL();
+        }
+        PG_RETURN_NUMERIC(num1);
     }
     mod_var(&arg1, &arg2, &result);
 
@@ -3952,7 +3956,7 @@ static const char* set_var_from_str(const char* str, const char* cp, NumericVar*
         cp++;
     }
 
-    if (!isdigit((unsigned char)*cp) && DB_IS_CMPT(DB_CMPT_B)) {
+    if (!isdigit((unsigned char)*cp) && u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
         char* cp = (char*)palloc0(sizeof(char));
         return cp;
     }
@@ -4065,13 +4069,15 @@ static const char* set_var_from_str(const char* str, const char* cp, NumericVar*
 static void set_var_from_num(Numeric num, NumericVar* dest)
 {
     Assert(!NUMERIC_IS_BI(num));
-    int ndigits = NUMERIC_NDIGITS(num);
-    if (ndigits >= 0) {
-        alloc_var(dest, ndigits);
-        dest->weight = NUMERIC_WEIGHT(num);
-        dest->sign = NUMERIC_SIGN(num);
-        dest->dscale = NUMERIC_DSCALE(num);
-    }
+    int ndigits;
+
+    ndigits = NUMERIC_NDIGITS(num);
+
+    alloc_var(dest, ndigits);
+
+    dest->weight = NUMERIC_WEIGHT(num);
+    dest->sign = NUMERIC_SIGN(num);
+    dest->dscale = NUMERIC_DSCALE(num);
     if (ndigits > 0) {
         errno_t rc =
             memcpy_s(dest->digits, ndigits * sizeof(NumericDigit), NUMERIC_DIGITS(num), ndigits * sizeof(NumericDigit));
@@ -4201,7 +4207,7 @@ static char* get_str_from_var(NumericVar* var)
                     *cp++ = d1 + '0';
                 d1 = dig / 10;
                 dig -= d1 * 10;
-                putit |= (d1 > 0);
+                putit |= (uint32)(d1 > 0);
                 if (putit)
                     *cp++ = d1 + '0';
                 *cp++ = dig + '0';
@@ -4428,12 +4434,11 @@ Numeric make_result(NumericVar* var)
     }
 
     MemCpy(NUMERIC_DIGITS(result), digits, n * sizeof(NumericDigit));
-    Assert((unsigned int)(n) == NUMERIC_NDIGITS(result));
+    Assert(NUMERIC_NDIGITS(result) == (unsigned int)(n));
 
     /* Check for overflow of int16 fields */
-    if (weight != NUMERIC_WEIGHT(result) || var->dscale != NUMERIC_DSCALE(result)) {
+    if (NUMERIC_WEIGHT(result) != weight || NUMERIC_DSCALE(result) != var->dscale)
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("value overflows numeric format")));
-    }
 
     dump_numeric("make_result()", result);
     return result;
@@ -4443,6 +4448,7 @@ Numeric makeNumeric(NumericVar* var)
 {
     return make_result(var);
 }
+
 
 /*
  * apply_typmod() -
@@ -7047,6 +7053,7 @@ ScalarVector* vnumeric_sum(PG_FUNCTION_ARGS)
                     result = numeric_add(&finfo);
                     cell->m_val[idx].val = replaceVariable(context, cell->m_val[idx].val, result);
                 }
+                SET_NOTNULL(cell->m_val[idx].flag);
             } else {
                 /* make sure cell->m_val[idx].val is 4 bytes header */
                 leftarg = DatumGetBINumeric(pVal[i]);
@@ -7248,11 +7255,7 @@ static void vnumeric_ne_internal(ScalarVector* arg1, uint8* pflags1, ScalarVecto
         bool is_nan1 = m_const1 ? is_nan : NUMERIC_IS_NAN(num1);
         bool is_nan2 = m_const2 ? is_nan : NUMERIC_IS_NAN(num2);
         if (is_nan1) {
-            if (is_nan2) {
-                result = 0;
-            } else {
-                result = 1;
-            }
+            result = is_nan2 ? 0 : 1;
         } else if (is_nan2) {
             result = -1;
         } else {
@@ -17861,7 +17864,7 @@ static inline int make_short_numeric(
     result->choice.n_short.n_header =
         ((sign == NUMERIC_NEG) ? (NUMERIC_SHORT | NUMERIC_SHORT_SIGN_MASK) : NUMERIC_SHORT) |
         (dscale << NUMERIC_SHORT_DSCALE_SHIFT) | (weight < 0 ? NUMERIC_SHORT_WEIGHT_SIGN_MASK : 0) |
-        (weight & NUMERIC_SHORT_WEIGHT_MASK);
+        (((uint32)weight) & NUMERIC_SHORT_WEIGHT_MASK);
 
     // step 3: build the data info
     NumericDigit* src = digits;
@@ -17869,42 +17872,43 @@ static inline int make_short_numeric(
     switch (ndigits) {
         case 11:
             *dest++ = *src++;
-            // fall down
+            /* fall through */
         case 10:
             *dest++ = *src++;
-            // fall down
+            /* fall through */
         case 9:
             *dest++ = *src++;
-            // fall down
+            /* fall through */
         case 8:
             *dest++ = *src++;
-            // fall down
+            /* fall through */
         case 7:
             *dest++ = *src++;
-            // fall down
+            /* fall through */
         case 6:
             *dest++ = *src++;
-            // fall down
+            /* fall through */
         case 5:
             *dest++ = *src++;
-            // fall down
+            /* fall through */
         case 4:
             *dest++ = *src++;
-            // fall down
+            /* fall through */
         case 3:
             *dest++ = *src++;
-            // fall down
+            /* fall through */
         case 2:
             *dest++ = *src++;
-            // fall down
+            /* fall through */
         case 1:
             *dest++ = *src++;
+            /* fall through */
         default:  // do nothing if 0
             break;
     }
 
     // Check for overflow of int16 fields
-    Assert((unsigned int)(ndigits) == NUMERIC_NDIGITS(result));
+    Assert(NUMERIC_NDIGITS(result) == (unsigned int)(ndigits));
     Assert(weight == NUMERIC_WEIGHT(result));
     Assert(dscale == NUMERIC_DSCALE(result));
     return totalSize;
@@ -17915,15 +17919,16 @@ static inline int get_weight_from_ascale(int ndigits, int ascale)
     return (ndigits - ascale - 1);
 }
 
-static inline int get_dscale_from_typmod(int typmod, int ascale, int last_item)
+static int get_dscale_from_typmod(int typmod, int ascale, int last_item)
 {
     if (typmod >= (int32) (VARHDRSZ)) {
         return (int32) ((uint32) (typmod - VARHDRSZ) & 0xffff);
     }
 
-    //   if typmod is not given, we may restore the wrong dscale.
-    //   example: 1.000 its dscale is 3, but we cannot get it from
-    //   {value=1, ascale=0}
+    /*
+     * If typmod is not given, we may restore the wrong dscale.
+     * example: 1.000 its dscale is 3, but we cannot get it from {value=1, ascale=0}
+     */
     if (ascale <= 0) {
         return 0;
     }
@@ -17984,15 +17989,20 @@ static inline Numeric numeric_copy(Numeric shortNum, char* outBuf)
     // copy all the data, including flags and digits.
     switch (nShortDigtis) {
         case 6:
-            *dest++ = *src++;  // fall down for the others
+            *dest++ = *src++;
+            /* fall through */
         case 5:
-            *dest++ = *src++;  // fall down for the others
+            *dest++ = *src++;
+            /* fall through */
         case 4:
-            *dest++ = *src++;  // fall down for the others
+            *dest++ = *src++;
+            /* fall through */
         case 3:
-            *dest++ = *src++;  // fall down for the others
+            *dest++ = *src++;
+            /* fall through */
         case 2:
-            *dest++ = *src++;  // fall down for the others
+            *dest++ = *src++;
+            /* fall through */
         case 1:
         default:
             *dest++ = *src++;
@@ -18365,8 +18375,9 @@ void convert_short_numeric_to_int128_byscale(_in_ Numeric n, _in_ int dscale, _o
 
     /* ndigits is 0, result is 0, return directly */
     result = 0;
-    if (0 == ndigits)
+    if (0 == ndigits) {
         return;
+    }
 
     int remainder = dscale % DEC_DIGITS;
     int weight = NUMERIC_WEIGHT(n);
@@ -18655,7 +18666,7 @@ Numeric convert_int64_to_numeric(int64 data, uint8 scale)
         ((uint32)(var.weight) & NUMERIC_SHORT_WEIGHT_MASK);
 
     /* Check for overflow of int64 fields */
-    Assert((unsigned int)(pre_digits + post_digits) == NUMERIC_NDIGITS(result));
+    Assert(NUMERIC_NDIGITS(result) == (unsigned int)(pre_digits + post_digits));
     Assert(var.weight == NUMERIC_WEIGHT(result));
     Assert(var.dscale == NUMERIC_DSCALE(result));
 
@@ -18826,7 +18837,7 @@ Numeric convert_int128_to_numeric(int128 data, int scale)
         (var.weight & NUMERIC_SHORT_WEIGHT_MASK);
 
     /* Check for overflow of int64 fields */
-    Assert((unsigned int)(pre_digits + post_digits) == NUMERIC_NDIGITS(result));
+    Assert(NUMERIC_NDIGITS(result) == (unsigned int)(pre_digits + post_digits));
     Assert(var.weight == NUMERIC_WEIGHT(result));
     Assert(var.dscale == NUMERIC_DSCALE(result));
 

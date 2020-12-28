@@ -8,7 +8,7 @@
 --show a function's source code
 \sf pg_table_size
 --show user info
-create user gaussuser password 'ttest@123';
+create user gaussuser password 'gauss@123';
 \du gaussuser
 drop user gaussuser;
 --show seq info

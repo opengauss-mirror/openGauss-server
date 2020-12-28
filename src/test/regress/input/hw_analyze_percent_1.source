@@ -1,0 +1,40 @@
+create schema analyze_percent_1;
+set current_schema=analyze_percent_1;
+
+CREATE TABLE analyze_table_02
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+with (orientation = column)
+distribute by hash(L_ORDERKEY)
+partition by range (L_ORDERKEY)
+(
+     partition CstorePartition1 values less than (1000),
+     partition CstorePartition2 values less than (2000),
+	 partition CstorePartition3 values less than (3000),
+	 partition CstorePartition4 values less than (4000),
+	 partition CstorePartition5 values less than (5000),
+	 partition CstorePartition6 values less than (6000),
+	 partition CstorePartition7 values less than (100000)
+);
+COPY analyze_table_02 FROM '@abs_srcdir@/data/lineitem.data' DELIMITER '|';
+
+set default_statistics_target = -25;
+analyze analyze_table_02;
+
+drop schema analyze_percent_1 cascade;

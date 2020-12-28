@@ -1,0 +1,84 @@
+create table TMP_CUST_ASSET_SUM_1_col
+(
+Party_Id                 VARCHAR(30)    NOT NULL,
+Zone_Num                 CHAR(5)        NOT NULL,
+Asset_Max_Belong_Org_Num VARCHAR(30)    NOT NULL
+)with(orientation = column);
+insert into TMP_CUST_ASSET_SUM_1_col select * from TMP_CUST_ASSET_SUM_1;
+analyze TMP_CUST_ASSET_SUM_1_col;
+explain (analyze on, costs off)
+SELECT Party_Id, Zone_Num, Asset_Max_Belong_Org_Num FROM(SELECT 
+   T1.Party_Id                                            
+  ,T1.Zone_Num                                            
+  ,T1.Asset_Max_Belong_Org_Num                                         
+   ,ROW_NUMBER() OVER(PARTITION BY T1.Party_Id) AS QUA_ROW_NUM_1 
+FROM TMP_CUST_ASSET_SUM_1_col T1 group by 1,2,3
+)AA WHERE QUA_ROW_NUM_1 <= 1
+;
+--?                                                                 QUERY PLAN                                                                 
+--?--------------------------------------------------------------------------------------------------------------------------------------------
+--? Row Adapter (actual time=460.745..677.468 rows=100000 loops=1)
+--?   ->  Vector Streaming (type: GATHER) (actual time=460.660..654.706 rows=100000 loops=1)
+         Node/s: All datanodes
+--?         ->  Vector Subquery Scan on aa (actual time=[442.377,461.439]..[642.961,661.181], rows=100000)
+               Filter: (aa.qua_row_num_1 <= 1)
+--?               ->  Vector WindowAgg (actual time=[442.300,461.076]..[642.895,660.839], rows=100000)
+--?                     ->  Vector Sort (actual time=[435.992,455.437]..[638.985,657.474], rows=100000)
+                           Sort Key: t1.party_id
+--?                           Sort Method: external merge  Disk: .*
+--?                           ->  Vector Hash Aggregate (actual time=[42.679,198.885]..[46.974,306.960], rows=100000)
+                                 Group By Key: t1.party_id, t1.zone_num, t1.asset_max_belong_org_num
+--?                              ->  CStore Scan on tmp_cust_asset_sum_1_col t1 (actual time=[13.714,20.004]..[15.612,22.351], rows=200000)
+--? Total runtime: 698.367 ms
+(13 rows)
+
+set work_mem=64;
+explain (analyze on, costs off)
+SELECT
+   max(T1.Party_Id)
+  ,T1.Zone_Num
+FROM TMP_CUST_ASSET_SUM_1 T1 
+group by T1.Zone_Num;
+--?                                             QUERY PLAN                                             
+--?----------------------------------------------------------------------------------------------------
+--? HashAggregate (actual time=1236.596..1348.552 rows=63113 loops=1)
+   Group By Key: t1.zone_num
+--? Temp File Num: .*
+--?   ->  Data Node Scan on "__REMOTE_GROUP_QUERY__" (actual time=88.196..1050.699 rows=95929 loops=1)
+         Node/s: All datanodes
+--? Total runtime: 1352.355 ms
+(6 rows)
+
+\o xml_explain_temp_1.txt
+set explain_perf_mode=pretty;
+explain performance
+SELECT Party_Id, Zone_Num, Asset_Max_Belong_Org_Num FROM(SELECT 
+   T1.Party_Id                                            
+  ,T1.Zone_Num                                            
+  ,T1.Asset_Max_Belong_Org_Num                                         
+   ,ROW_NUMBER() OVER(PARTITION BY T1.Party_Id) AS QUA_ROW_NUM_1 
+FROM TMP_CUST_ASSET_SUM_1_col T1 group by 1,2,3
+)AA WHERE QUA_ROW_NUM_1 <= 1
+;
+explain analyze
+SELECT Party_Id, Zone_Num, Asset_Max_Belong_Org_Num FROM(SELECT 
+   T1.Party_Id                                            
+  ,T1.Zone_Num                                            
+  ,T1.Asset_Max_Belong_Org_Num                                         
+   ,ROW_NUMBER() OVER(PARTITION BY T1.Party_Id) AS QUA_ROW_NUM_1 
+FROM TMP_CUST_ASSET_SUM_1_col T1 group by 1,2,3
+)AA WHERE QUA_ROW_NUM_1 <= 1
+;
+reset explain_perf_mode;
+explain (analyze on, costs off, FORMAT xml)
+SELECT Party_Id, Zone_Num, Asset_Max_Belong_Org_Num FROM(SELECT 
+   T1.Party_Id                                            
+  ,T1.Zone_Num                                            
+  ,T1.Asset_Max_Belong_Org_Num                                         
+   ,ROW_NUMBER() OVER(PARTITION BY T1.Party_Id) AS QUA_ROW_NUM_1 
+FROM TMP_CUST_ASSET_SUM_1_col T1 group by 1,2,3
+)AA WHERE QUA_ROW_NUM_1 <= 1
+;
+\o
+\! rm xml_explain_temp_1.txt
+drop table TMP_CUST_ASSET_SUM_1_col;

@@ -29,9 +29,9 @@
 static void RoleidCallback(Datum arg, int cacheid, uint32 hashvalue);
 static void cacheSuperOrSysadmin(Oid roleid);
 
-/* Database Security:  Support separation of privilege. */
+/* Database Security:  Support separation of privilege.*/
 /*
- * when privileges separation is used,current user is or superuser or sysdba,if not,current user is superuser.
+ *when privileges separation is used,current user is or superuser or sysdba,if not,current user is superuser.
  */
 bool superuser(void)
 {
@@ -39,8 +39,8 @@ bool superuser(void)
 }
 
 /*
- * current user is real superuser.when  privileges separation is used and you don't want sysdba to entitle to operate,use
- * it.
+ *current user is real superuser.when  privileges separation is used and you don't want sysdba to entitle to operate,use
+ *it.
  */
 bool isRelSuperuser(void)
 {
@@ -60,8 +60,8 @@ bool initialuser(void)
  */
 bool superuser_arg_no_seperation(Oid roleid)
 {
-    if (OidIsValid(u_sess->utils_cxt.last_roleid) && u_sess->utils_cxt.last_roleid == roleid) {
-        return u_sess->utils_cxt.last_roleid_is_super;
+    if (OidIsValid(u_sess->sec_cxt.last_roleid) && u_sess->sec_cxt.last_roleid == roleid) {
+        return u_sess->sec_cxt.last_roleid_is_super;
     }
 
     /* Special escape path in case you deleted all your users. */
@@ -71,7 +71,7 @@ bool superuser_arg_no_seperation(Oid roleid)
     /* Quick out for cache hit */
     cacheSuperOrSysadmin(roleid);
 
-    return u_sess->utils_cxt.last_roleid_is_super;
+	return u_sess->sec_cxt.last_roleid_is_super;
 }
 
 /*
@@ -79,11 +79,12 @@ bool superuser_arg_no_seperation(Oid roleid)
  */
 bool superuser_arg(Oid roleid)
 {
-    if (OidIsValid(u_sess->utils_cxt.last_roleid) && u_sess->utils_cxt.last_roleid == roleid) {
+    if (OidIsValid(u_sess->sec_cxt.last_roleid) && u_sess->sec_cxt.last_roleid == roleid)
+    {
         if (!g_instance.attr.attr_security.enablePrivilegesSeparate)
-            return u_sess->utils_cxt.last_roleid_is_super || u_sess->utils_cxt.last_roleid_is_sysdba;
+            return u_sess->sec_cxt.last_roleid_is_super || u_sess->sec_cxt.last_roleid_is_sysdba ;
         else
-            return u_sess->utils_cxt.last_roleid_is_super;
+            return u_sess->sec_cxt.last_roleid_is_super;
     }
 
     /* Special escape path in case you deleted all your users. */
@@ -94,18 +95,19 @@ bool superuser_arg(Oid roleid)
     cacheSuperOrSysadmin(roleid);
 
     if (!g_instance.attr.attr_security.enablePrivilegesSeparate)
-        return u_sess->utils_cxt.last_roleid_is_super || u_sess->utils_cxt.last_roleid_is_sysdba;
+        return u_sess->sec_cxt.last_roleid_is_super || u_sess->sec_cxt.last_roleid_is_sysdba ;
     else
-        return u_sess->utils_cxt.last_roleid_is_super;
+        return u_sess->sec_cxt.last_roleid_is_super;
 }
 
 /*
  * The specified role has Postgres sysdba privileges
  */
+
 bool systemDBA_arg(Oid roleid)
 {
-    if (OidIsValid(u_sess->utils_cxt.last_roleid) && u_sess->utils_cxt.last_roleid == roleid) {
-        return u_sess->utils_cxt.last_roleid_is_sysdba;
+    if (OidIsValid(u_sess->sec_cxt.last_roleid) && u_sess->sec_cxt.last_roleid == roleid) {
+        return u_sess->sec_cxt.last_roleid_is_sysdba;
     }
 
     /* Special escape path in case you deleted all your users. */
@@ -115,7 +117,7 @@ bool systemDBA_arg(Oid roleid)
     /* Quick out for cache hit */
     cacheSuperOrSysadmin(roleid);
 
-    return u_sess->utils_cxt.last_roleid_is_sysdba;
+    return u_sess->sec_cxt.last_roleid_is_sysdba;
 }
 
 /*
@@ -125,8 +127,8 @@ bool systemDBA_arg(Oid roleid)
  */
 bool isSecurityadmin(Oid roleid)
 {
-    if (OidIsValid(u_sess->utils_cxt.last_roleid) && u_sess->utils_cxt.last_roleid == roleid) {
-        return u_sess->utils_cxt.last_roleid_is_securityadmin;
+    if (OidIsValid(u_sess->sec_cxt.last_roleid) && u_sess->sec_cxt.last_roleid == roleid) {
+        return u_sess->sec_cxt.last_roleid_is_securityadmin;
     }
 
     /* Special escape path in case you deleted all your users. */
@@ -135,8 +137,8 @@ bool isSecurityadmin(Oid roleid)
 
     /* Quick out for cache hit */
     cacheSuperOrSysadmin(roleid);
-
-    return u_sess->utils_cxt.last_roleid_is_securityadmin;
+	
+    return u_sess->sec_cxt.last_roleid_is_securityadmin;
 }
 
 /*
@@ -146,8 +148,8 @@ bool isSecurityadmin(Oid roleid)
  */
 bool isAuditadmin(Oid roleid)
 {
-    if (OidIsValid(u_sess->utils_cxt.last_roleid) && u_sess->utils_cxt.last_roleid == roleid) {
-        return u_sess->utils_cxt.last_roleid_is_auditadmin;
+    if (OidIsValid(u_sess->sec_cxt.last_roleid) && u_sess->sec_cxt.last_roleid == roleid) {
+        return u_sess->sec_cxt.last_roleid_is_auditadmin;
     }
 
     /* Special escape path in case you deleted all your users. */
@@ -157,13 +159,80 @@ bool isAuditadmin(Oid roleid)
     /* Quick out for cache hit */
     cacheSuperOrSysadmin(roleid);
 
-    return u_sess->utils_cxt.last_roleid_is_auditadmin;
+    return u_sess->sec_cxt.last_roleid_is_auditadmin;
+}
+
+/*
+ * @Description: check whether a monitoradmin.
+ * @in roleid : the role oid need check.
+ * @return : return true if the role is a monitoradmin, otherwise return false.
+ */
+bool
+isMonitoradmin(Oid roleid)
+{
+    if (OidIsValid(u_sess->sec_cxt.last_roleid) && u_sess->sec_cxt.last_roleid == roleid) {
+        return u_sess->sec_cxt.last_roleid_is_monitoradmin;
+    }
+
+    /* Special escape path in case you deleted all your users. */
+    if (!IsUnderPostmaster && roleid == BOOTSTRAP_SUPERUSERID)
+        return true;
+
+    /* Quick out for cache hit */
+    cacheSuperOrSysadmin(roleid);
+
+    return u_sess->sec_cxt.last_roleid_is_monitoradmin;
+}
+
+/*
+ * @Description: check whether a operatoradmin.
+ * @in roleid : the role oid need check.
+ * @return : return true if the role is a operatoradmin, otherwise return false.
+ */
+bool
+isOperatoradmin(Oid roleid)
+{
+    if (OidIsValid(u_sess->sec_cxt.last_roleid) && u_sess->sec_cxt.last_roleid == roleid) {
+        return u_sess->sec_cxt.last_roleid_is_operatoradmin;
+    }
+
+    /* Special escape path in case you deleted all your users. */
+    if (!IsUnderPostmaster && roleid == BOOTSTRAP_SUPERUSERID)
+        return true;
+
+    /* Quick out for cache hit */
+    cacheSuperOrSysadmin(roleid);
+
+    return u_sess->sec_cxt.last_roleid_is_operatoradmin;
+}
+
+/*
+ * @Description: check whether a policyadmin.
+ * @in roleid : the role oid need check.
+ * @return : return true if the role is a policyadmin, otherwise return false.
+ */
+bool
+isPolicyadmin(Oid roleid)
+{
+    if (OidIsValid(u_sess->sec_cxt.last_roleid) && u_sess->sec_cxt.last_roleid == roleid) {
+        return u_sess->sec_cxt.last_roleid_is_policyadmin;
+    }
+
+    /* Special escape path in case you deleted all your users. */
+    if (!IsUnderPostmaster && roleid == BOOTSTRAP_SUPERUSERID)
+        return true;
+
+    /* Quick out for cache hit */
+    cacheSuperOrSysadmin(roleid);
+
+    return u_sess->sec_cxt.last_roleid_is_policyadmin;
 }
 
 /*
  * @Description: check whether an user have privilege to use execute direct.
  * @in query : use for check auditor query
- * @return : return true if the role is an superuser or auditor use pg_query_audit(), otherwise return false.
+ * @return : return true if the role is an superuser or monitoradmin or auditor use pg_query_audit(),
+ *           otherwise return false.
  */
 bool CheckExecDirectPrivilege(const char* query)
 {
@@ -172,8 +241,8 @@ bool CheckExecDirectPrivilege(const char* query)
     char* tmp_query = NULL;
     int offset;
 
-    /* access for superuser */
-    if (superuser()) {
+    /* access for superuser and monitoradmin*/
+    if (superuser() || isMonitoradmin(GetUserId())) {
         return true;
     }
 
@@ -215,41 +284,71 @@ static void cacheSuperOrSysadmin(Oid roleid)
 {
     HeapTuple rtup = NULL;
 
-    u_sess->utils_cxt.last_roleid_is_super = false;
-    u_sess->utils_cxt.last_roleid_is_sysdba = false;
-    u_sess->utils_cxt.last_roleid_is_auditadmin = false;
-    u_sess->utils_cxt.last_roleid_is_securityadmin = false;
+    u_sess->sec_cxt.last_roleid_is_super = false;
+    u_sess->sec_cxt.last_roleid_is_sysdba = false;
+    u_sess->sec_cxt.last_roleid_is_auditadmin = false;
+    u_sess->sec_cxt.last_roleid_is_securityadmin = false;
+    u_sess->sec_cxt.last_roleid_is_monitoradmin = false;
+    u_sess->sec_cxt.last_roleid_is_operatoradmin = false;
+    u_sess->sec_cxt.last_roleid_is_policyadmin = false;
 
     /* OK, look up the information in pg_authid */
+    Relation relation = heap_open(AuthIdRelationId, AccessShareLock);
     rtup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(roleid));
+    Datum datum = BoolGetDatum(false); /* default value is false when tuple is invalid */
+    bool is_null = false;
+
     if (HeapTupleIsValid(rtup)) {
         if (((Form_pg_authid)GETSTRUCT(rtup))->rolsuper) {
-            u_sess->utils_cxt.last_roleid_is_super = true;
+            u_sess->sec_cxt.last_roleid_is_super = true;
         }
 
         if (((Form_pg_authid)GETSTRUCT(rtup))->rolsystemadmin) {
-            u_sess->utils_cxt.last_roleid_is_sysdba = true;
+            u_sess->sec_cxt.last_roleid_is_sysdba = true;
         }
 
         if (((Form_pg_authid)GETSTRUCT(rtup))->rolcreaterole) {
-            u_sess->utils_cxt.last_roleid_is_securityadmin = true;
+            u_sess->sec_cxt.last_roleid_is_securityadmin = true;
         }
 
         if (((Form_pg_authid)GETSTRUCT(rtup))->rolauditadmin) {
-            u_sess->utils_cxt.last_roleid_is_auditadmin = true;
+            u_sess->sec_cxt.last_roleid_is_auditadmin = true;
+        }
+
+        /* Due to the upgrade mechanism, the is_null maybe true */
+        datum = heap_getattr(rtup, Anum_pg_authid_rolmonitoradmin, RelationGetDescr(relation), &is_null);
+        if (!is_null) {
+            u_sess->sec_cxt.last_roleid_is_monitoradmin = DatumGetBool(datum);
+        } else if (u_sess->sec_cxt.last_roleid_is_super) {
+            u_sess->sec_cxt.last_roleid_is_monitoradmin = true;
+        }
+
+        datum = heap_getattr(rtup, Anum_pg_authid_roloperatoradmin, RelationGetDescr(relation), &is_null);
+        if (!is_null) {
+            u_sess->sec_cxt.last_roleid_is_operatoradmin = DatumGetBool(datum);
+        } else if (u_sess->sec_cxt.last_roleid_is_super) {
+            u_sess->sec_cxt.last_roleid_is_operatoradmin = true;
+        }
+
+        datum = heap_getattr(rtup, Anum_pg_authid_rolpolicyadmin, RelationGetDescr(relation), &is_null);
+        if (!is_null) {
+            u_sess->sec_cxt.last_roleid_is_policyadmin = DatumGetBool(datum);
+        } else if (u_sess->sec_cxt.last_roleid_is_super) {
+            u_sess->sec_cxt.last_roleid_is_policyadmin = true;
         }
 
         ReleaseSysCache(rtup);
     }
+    heap_close(relation, AccessShareLock);
 
     /* If first time through, set up callback for cache flushes */
-    if (!u_sess->utils_cxt.roleid_callback_registered) {
+    if (!u_sess->sec_cxt.roleid_callback_registered) {
         CacheRegisterSyscacheCallback(AUTHOID, RoleidCallback, (Datum)0);
-        u_sess->utils_cxt.roleid_callback_registered = true;
+        u_sess->sec_cxt.roleid_callback_registered = true;
     }
 
     /* Cache the result for next time */
-    u_sess->utils_cxt.last_roleid = roleid;
+    u_sess->sec_cxt.last_roleid = roleid;
 }
 
 /*
@@ -259,5 +358,5 @@ static void cacheSuperOrSysadmin(Oid roleid)
 static void RoleidCallback(Datum arg, int cacheid, uint32 hashvalue)
 {
     /* Invalidate our local cache in case role's superuserness changed */
-    u_sess->utils_cxt.last_roleid = InvalidOid;
+    u_sess->sec_cxt.last_roleid = InvalidOid;
 }

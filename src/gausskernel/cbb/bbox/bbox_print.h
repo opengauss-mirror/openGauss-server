@@ -55,11 +55,11 @@ extern s32 bbox_set_log_level(EN_PRINT_TYPE enLevel);
 extern s32 bbox_set_screen_log_level(EN_PRINT_TYPE enLevel);
 
 /* print */
-extern s32 bbox_snprintf(char* pszBuff, s32 iSize, char* pFmt, ...);
+extern s32 bbox_snprintf(char* pszBuff, s32 iSize, const char* pFmt, ...);
 
 /* standard print function */
-extern void bbox_printf(char* pFmt, ...) __attribute__((format(printf, 1, 2)));
+extern void bbox_printf(const char* pFmt, ...) __attribute__((format(printf, 1, 2)));
 
-extern void bbox_print(EN_PRINT_TYPE enType, char* pFmt, ...) __attribute__((format(printf, 2, 3)));
+extern void bbox_print(EN_PRINT_TYPE enType, const char* pFmt, ...) __attribute__((format(printf, 2, 3)));
 
 #endif

@@ -18,6 +18,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/reloptions.h"
+#include "access/tableam.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
 #include "catalog/index.h"
@@ -61,7 +62,7 @@
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 
 #include "securec.h"
 
@@ -222,6 +223,7 @@ bool CheckIndexCompatible(Oid oldId, char* accessMethodName, List* attributeList
     if (!HeapTupleIsValid(tuple))
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for index %u", oldId)));
     indexForm = (Form_pg_index)GETSTRUCT(tuple);
+
     /*
      * We don't assess expressions or predicates; assume incompatibility.
      * Also, if the index is invalid for any reason, treat it as incompatible.
@@ -271,6 +273,7 @@ bool CheckIndexCompatible(Oid oldId, char* accessMethodName, List* attributeList
 
         RelationGetExclusionInfo(irel, &old_operators, &old_procs, &old_strats);
         ret = memcmp(old_operators, indexInfo->ii_ExclusionOps, old_natts * sizeof(Oid)) == 0;
+
         /* Require an exact input type match for polymorphic operators. */
         if (ret) {
             for (i = 0; i < old_natts && ret; i++) {
@@ -294,7 +297,7 @@ bool CheckIndexCompatible(Oid oldId, char* accessMethodName, List* attributeList
  * DefineIndex
  *		Creates a new index.
  *
- * relationId: table oid for current index defination
+ *relationId: table oid for current index defination
  * 'stmt': IndexStmt describing the properties of the new index.
  * 'indexRelationId': normally InvalidOid, but during bootstrap can be
  *		nonzero to specify a preselected OID for the index.
@@ -357,8 +360,8 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
      * done.
      */
     relPersistence = get_rel_persistence(relationId);
-    if (stmt->concurrent && !(relPersistence == RELPERSISTENCE_TEMP ||
-                                relPersistence == RELPERSISTENCE_GLOBAL_TEMP)) {
+    if (stmt->concurrent && !(relPersistence == RELPERSISTENCE_TEMP
+                            || relPersistence == RELPERSISTENCE_GLOBAL_TEMP)) {
         concurrent = true;
     } else {
         concurrent = false;
@@ -376,10 +379,6 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
      * mode, this will typically require the caller to have already locked
      * the relation.  To avoid lock upgrade hazards, that lock should be at
      * least as strong as the one we take here.
-     *
-     * NB: If the lock strength here ever changes, code that is run by
-     * parallel workers under the control of certain particular ambuild
-     * functions will need to be updated, too.
      */
     lockmode = concurrent ? ShareUpdateExclusiveLock : ShareLock;
     rel = heap_open(relationId, lockmode);
@@ -402,6 +401,18 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         stmt->isGlobal = true;
     }
 
+#ifdef ENABLE_MULTIPLE_NODES
+    if (stmt->isGlobal) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Global partition index only support single node mode.")));
+    }
+    if (stmt->isGlobal && t_thrd.proc->workingVersionNum < SUPPORT_GPI_VERSION_NUM) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg(
+                    "global partition index not support on work version num less than %u.", SUPPORT_GPI_VERSION_NUM)));
+    }
+#endif
     /*
      * normal table does not support local partitioned index
      */
@@ -413,7 +424,8 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         } else if (!RELATION_IS_PARTITIONED(rel)) {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("non-partitioned table does not support local partitioned indexes ")));
+                    errmsg("non-partitioned table does not support %s partitioned indexes ",
+                        stmt->isGlobal ? "global" : "local")));
         } else if (stmt->deferrable && stmt->unique) {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -513,7 +525,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
 
         aclresult = pg_namespace_aclcheck(namespaceId, GetUserId(), ACL_CREATE);
         if (aclresult != ACLCHECK_OK)
-            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId, true));
+            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
     }
 
     /*
@@ -539,6 +551,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         ListCell* cell = NULL;
 
         partitionTableList = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_PARTITION, relationId);
+
         if (!PointerIsValid(partitionTableList)) {
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
@@ -614,8 +627,6 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
             }
         } else {
             if (OidIsValid(tablespaceId) && tablespaceId != u_sess->proc_cxt.MyDatabaseTableSpace) {
-                AclResult aclresult;
-
                 aclresult = pg_tablespace_aclcheck(tablespaceId, GetUserId(), ACL_CREATE);
                 if (aclresult != ACLCHECK_OK) {
                     aclcheck_error(aclresult, ACL_KIND_TABLESPACE, get_tablespace_name(tablespaceId));
@@ -699,11 +710,13 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
             ereport(NOTICE, (errmsg("substituting access method \"gist\" for obsolete method \"rtree\"")));
             accessMethodName = "gist";
             tuple = SearchSysCache1(AMNAME, PointerGetDatum(accessMethodName));
+            if (!HeapTupleIsValid(tuple))
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_OBJECT),
+                        errmsg("access method \"%s\" does not exist", accessMethodName)));
         }
-
-        if (!HeapTupleIsValid(tuple))
-            ereport(ERROR,
-                (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("access method \"%s\" does not exist", accessMethodName)));
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("access method \"%s\" does not exist", accessMethodName)));
     }
     accessMethodId = HeapTupleGetOid(tuple);
     accessMethodForm = (Form_pg_am)GETSTRUCT(tuple);
@@ -758,7 +771,6 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     indexInfo->ii_ReadyForInserts = !concurrent;
     indexInfo->ii_Concurrent = concurrent;
     indexInfo->ii_BrokenHotChain = false;
-    indexInfo->ii_ParallelWorkers = 0;
     indexInfo->ii_PgClassAttrId = 0;
 
     typeObjectId = (Oid*)palloc(numberOfAttributes * sizeof(Oid));
@@ -812,11 +824,11 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
 
         /* Finalize check */
         if (!pgxc_check_index_shippability(GetRelationLocInfo(relationId),
-            stmt->primary,
-            stmt->unique,
-            stmt->excludeOpNames != NULL,
-            indexAttrs,
-            indexInfo->ii_Expressions))
+                stmt->primary,
+                stmt->unique,
+                stmt->excludeOpNames != NULL,
+                indexAttrs,
+                indexInfo->ii_Expressions))
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Cannot create index whose evaluation cannot be "
@@ -846,6 +858,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
             constraint_type = "EXCLUDE";
         else {
             ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("unknown constraint type")));
+            constraint_type = NULL; /* keep compiler quiet */
         }
 
         /*
@@ -890,6 +903,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     SetIndexCreateExtraArgs(&extra, stmt->oldPSortOid, stmt->isPartitioned, stmt->isGlobal);
 
     if (stmt->internal_flag) {
+#ifdef ENABLE_MOT
         if (rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE) {
             Oid relationId = RelationGetRelid(rel);
             ForeignTable *ftbl = GetForeignTable(relationId);
@@ -921,7 +935,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
 
             return buildInformationalConstraint(stmt, indexRelationId, indexRelationName, rel, indexInfo, namespaceId);
         }
-
+#endif
         return buildInformationalConstraint(stmt, indexRelationId, indexRelationName, rel, indexInfo, namespaceId);
     }
 
@@ -976,7 +990,10 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     if (stmt->isPartitioned && !stmt->isGlobal) {
         Relation partitionedIndex = index_open(indexRelationId, AccessExclusiveLock);
 
-        if (rel->partMap->type == PART_TYPE_RANGE || rel->partMap->type == PART_TYPE_INTERVAL) {
+        if (rel->partMap->type == PART_TYPE_RANGE || 
+            rel->partMap->type == PART_TYPE_INTERVAL ||
+            rel->partMap->type == PART_TYPE_HASH ||
+            rel->partMap->type == PART_TYPE_LIST) {
             MemoryContext partitionIndexMemContext = AllocSetContextCreate(CurrentMemoryContext,
                 "partition index create memory context",
                 ALLOCSET_DEFAULT_MINSIZE,
@@ -1101,11 +1118,11 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     }
 
     // cstore relation doesn't support concurrent INDEX now.
-    if (OidIsValid(rel->rd_rel->relcudescrelid)) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("column store table does not support concurrent INDEX yet"),
-            errdetail("The feature is not currently supported")));
-    }
+	if (OidIsValid(rel->rd_rel->relcudescrelid)) {
+	  ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+		  errmsg("column store table does not support concurrent INDEX yet"),
+		  errdetail("The feature is not currently supported")));
+	}
 
     /* save lockrelid and locktag for below, then close rel */
     heaprelid = rel->rd_lockInfo.lockRelId;
@@ -1201,7 +1218,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     indexInfo->ii_BrokenHotChain = false;
 
     /* Now build the index */
-    index_build(rel, NULL, indexRelation, NULL, indexInfo, stmt->primary, false, true, INDEX_CREATE_NONE_PARTITION);
+    index_build(rel, NULL, indexRelation, NULL, indexInfo, stmt->primary, false, INDEX_CREATE_NONE_PARTITION);
 
     /* Close both the relations, but keep the locks */
     heap_close(rel, NoLock);
@@ -1687,6 +1704,7 @@ static void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collatio
              * without runtime coercion (but binary compatibility is OK)
              */
             opid = compatible_oper_opid(opname, atttype, atttype, false);
+
             /*
              * Only allow commutative operators to be used in exclusion
              * constraints. If X conflicts with Y, but Y does not conflict
@@ -1851,6 +1869,7 @@ Oid GetIndexOpClass(List* opclass, Oid attrType, const char* accessMethodName, O
      */
     opClassId = HeapTupleGetOid(tuple);
     opInputType = ((Form_pg_opclass)GETSTRUCT(tuple))->opcintype;
+
     if (!IsBinaryCoercible(attrType, opInputType))
         ereport(ERROR,
             (errcode(ERRCODE_DATATYPE_MISMATCH),
@@ -1906,6 +1925,7 @@ Oid GetDefaultOpClass(Oid type_id, Oid am_id)
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         Form_pg_opclass opclass = (Form_pg_opclass)GETSTRUCT(tup);
+
         /* ignore altogether if not a default opclass */
         if (!opclass->opcdefault)
             continue;
@@ -2072,6 +2092,7 @@ char* ChooseRelationName(const char* name1, const char* name2, const char* label
 
     for (;;) {
         relname = makeObjectName(name1, name2, modlabel, reverseTruncate);
+
         if (!OidIsValid(get_relname_relid(relname, namespaceid)))
             break;
 
@@ -2102,6 +2123,7 @@ static char* ChoosePartitionName(
 
     for (;;) {
         partname = makeObjectName(name1, name2, modlabel);
+
         if (!OidIsValid(GetSysCacheOid3(
                 PARTPARTOID, PointerGetDatum(partname), CharGetDatum(partType), ObjectIdGetDatum(partitionedrelid)))) {
             break;
@@ -2275,7 +2297,6 @@ void ReindexIndex(RangeVar* indexRelation, const char* partition_name, AdaptMem*
     Oid heapPartOid = InvalidOid;
     LOCKMODE lockmode;
     Relation irel;
-    char persistence;
 
     /* lock level used here should match index lock reindex_index() */
     if (partition_name != NULL)
@@ -2291,12 +2312,12 @@ void ReindexIndex(RangeVar* indexRelation, const char* partition_name, AdaptMem*
         false,
         RangeVarCallbackForReindexIndex,
         (void*)&heapOid);
+
     /*
      * Obtain the current persistence of the existing index.  We already hold
      * lock on the index.
      */
     irel = index_open(indOid, NoLock);
-    persistence = irel->rd_rel->relpersistence;
     index_close(irel, NoLock);
 
     if (partition_name != NULL)
@@ -2309,7 +2330,7 @@ void ReindexIndex(RangeVar* indexRelation, const char* partition_name, AdaptMem*
             PartitionNameCallbackForIndexPartition,
             (void*)&heapPartOid,
             ShareLock);  // lock on heap partition
-    reindex_index(indOid, indPartOid, false, mem_info, false, persistence);
+    reindex_index(indOid, indPartOid, false, mem_info, false);
 }
 
 void PartitionNameCallbackForIndexPartition(Oid partitionedRelationOid, const char* partitionName, Oid partId,
@@ -2356,8 +2377,11 @@ void PartitionNameCallbackForIndexPartition(Oid partitionedRelationOid, const ch
                 errmsg("\"%u\" is not a child of \"%u\"", partId, partitionedRelationOid)));
 
     /* Check permissions */
-    if (!pg_class_ownercheck(partitionedRelationOid, GetUserId()))
-        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS, partitionName);
+    Oid tableOid = IndexGetRelation(partitionedRelationOid, false);
+    AclResult aclresult = pg_class_aclcheck(tableOid, GetUserId(), ACL_INDEX);
+    if (aclresult != ACLCHECK_OK && !pg_class_ownercheck(partitionedRelationOid, GetUserId())) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_CLASS, partitionName);
+    }
 
     /* Lock heap before index to avoid deadlock. */
     if (partId != oldPartId) {
@@ -2421,8 +2445,11 @@ static void RangeVarCallbackForReindexIndex(
     }
 
     /* Check permissions */
-    if (!pg_class_ownercheck(relId, GetUserId()))
-        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS, relation->relname);
+    Oid tableoid = IndexGetRelation(relId, false);
+    AclResult aclresult = pg_class_aclcheck(tableoid, GetUserId(), ACL_INDEX);
+    if (aclresult != ACLCHECK_OK && !pg_class_ownercheck(relId, GetUserId())) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_CLASS, relation->relname);
+    }
 
     /* Lock heap before index to avoid deadlock. */
     if (relId != oldRelId) {
@@ -2466,9 +2493,9 @@ void ReindexTable(RangeVar* relation, const char* partition_name, AdaptMem* mem_
         heapOid =
             RangeVarGetRelidExtended(relation, ShareLock, false, false, false, false, RangeVarCallbackOwnsTable, NULL);
         if (!reindex_relation(heapOid,
-            REINDEX_REL_PROCESS_TOAST | REINDEX_REL_SUPPRESS_INDEX_USE | REINDEX_REL_CHECK_CONSTRAINTS,
-            REINDEX_ALL_INDEX,
-            mem_info))
+                REINDEX_REL_PROCESS_TOAST | REINDEX_REL_SUPPRESS_INDEX_USE | REINDEX_REL_CHECK_CONSTRAINTS,
+                REINDEX_ALL_INDEX,
+                mem_info))
             ereport(NOTICE, (errmsg("table \"%s\" has no indexes", relation->relname)));
     }
 }
@@ -2478,7 +2505,7 @@ void ReindexTable(RangeVar* relation, const char* partition_name, AdaptMem* mem_
  *		Recreate all indexes of its cudesc table(and of its toast table, if any)
  * @ in relation: the column_table|hdfs_table  is used to execute the operation of 'reindex internal table name'.
  * @ in partition_name: the  partition_table is used to execute the operation of 'reindex internal table name partition
- * partition_name'.
+ *partition_name'.
  */
 void ReindexInternal(RangeVar* relation, const char* partition_name)
 {
@@ -2492,6 +2519,7 @@ void ReindexInternal(RangeVar* relation, const char* partition_name)
         relation, AccessShareLock, false, false, false, false, RangeVarCallbackOwnsTable, NULL);
 
     rel = heap_open(heapOid, AccessShareLock);
+
     /* 1. judge the cstore table and reindex its cudesc table.
      * 2. judge the hdfs table and reindex its cudesc table.
      * 3. others,such as row table and hdfs foreign table are to report error.
@@ -2543,6 +2571,7 @@ void ReindexInternal(RangeVar* relation, const char* partition_name)
                     partitionClose(rel, part, NoLock);
                     releaseDummyRelation(&partitionRel);
                 }
+
             } else {
                 Oid cudescOid = rel->rd_rel->relcudescrelid;
 
@@ -2582,7 +2611,7 @@ void ReindexInternal(RangeVar* relation, const char* partition_name)
 void ReindexDatabase(const char* databaseName, bool do_system, bool do_user, AdaptMem* mem_info)
 {
     Relation relationRelation;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tuple;
     MemoryContext private_context;
     MemoryContext old;
@@ -2591,8 +2620,7 @@ void ReindexDatabase(const char* databaseName, bool do_system, bool do_user, Ada
 
     AssertArg(databaseName);
 
-    const char* dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-    if (!dbname || strcmp(databaseName, dbname) != 0)
+    if (strcmp(databaseName, get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId)) != 0)
         ereport(
             ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("can only reindex the currently open database")));
 
@@ -2626,13 +2654,14 @@ void ReindexDatabase(const char* databaseName, bool do_system, bool do_user, Ada
     /*
      * Scan pg_class to build a list of the relations we need to reindex.
      *
-     * We only consider plain relations and materialized views here (toast
-     * rels will be processed indirectly by reindex_relation).
+     * We only consider plain relations here (toast rels will be processed
+     * indirectly by reindex_relation).
      */
     relationRelation = heap_open(RelationRelationId, AccessShareLock);
-    scan = heap_beginscan(relationRelation, SnapshotNow, 0, NULL);
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(relationRelation, SnapshotNow, 0, NULL);
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         Form_pg_class classtuple = (Form_pg_class)GETSTRUCT(tuple);
+
         if (classtuple->relkind != RELKIND_RELATION && classtuple->relkind != RELKIND_MATVIEW)
             continue;
 
@@ -2656,7 +2685,7 @@ void ReindexDatabase(const char* databaseName, bool do_system, bool do_user, Ada
         relids = lappend_oid(relids, HeapTupleGetOid(tuple));
         MemoryContextSwitchTo(old);
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(relationRelation, AccessShareLock);
 
     /* Now reindex each rel in a separate transaction */
@@ -2673,7 +2702,7 @@ void ReindexDatabase(const char* databaseName, bool do_system, bool do_user, Ada
             if (reindex_relation(relid, REINDEX_REL_PROCESS_TOAST, REINDEX_ALL_INDEX, mem_info, true))
                 ereport(NOTICE,
                     (errmsg("table \"%s.%s\" was reindexed",
-                        get_namespace_name(get_rel_namespace(relid), true),
+                        get_namespace_name(get_rel_namespace(relid)),
                         get_rel_name(relid))));
         }
         PG_CATCH();
@@ -2870,13 +2899,15 @@ void dropIndexForPartition(Oid partOid)
     /* iterate the index partition list */
     foreach (cell, partIndexlist) {
         partIndexTuple = (HeapTuple)lfirst(cell);
+
         if (HeapTupleIsValid(partIndexTuple)) {
             partForm = (Form_pg_partition)GETSTRUCT(partIndexTuple);
+
             if (!PointerIsValid(partForm)) {
                 continue;
             }
 
-            /* get partitioned index's oid, and index partition's oid */
+            /* get partitioned index's oid, and index partition's oid*/
             partIndexOid = HeapTupleGetOid(partIndexTuple);
             indexRel = relation_open(partForm->parentid, AccessShareLock);
             heapDropPartitionIndex(indexRel, partIndexOid);
@@ -2909,6 +2940,7 @@ static bool relationHasInformationalPrimaryKey(const Relation rel)
     conscan = systable_beginscan(conrel, ConstraintRelidIndexId, true, SnapshotNow, 1, skey);
     while (HeapTupleIsValid(htup = systable_getnext(conscan))) {
         Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(htup);
+
         if ('p' == con->contype) {
             /* Found it. */
             found = true;
@@ -2934,7 +2966,7 @@ static void handleErrMsgForInfoCnstrnt(const IndexStmt* stmt, const Relation rel
          * Because of using informational constraint on HDFS foreign talble,
          * HDFS foreign table need take this "create index" branch.
          */
-        if (rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE) {
+        if (rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE || rel->rd_rel->relkind == RELKIND_STREAM) {
             ForeignTable* ftbl = NULL;
             ForeignServer* fsvr = NULL;
             ftbl = GetForeignTable(relationId);
@@ -2948,8 +2980,12 @@ static void handleErrMsgForInfoCnstrnt(const IndexStmt* stmt, const Relation rel
              * When add or create a informational constraint for the HDFS foreign table,
              * this branch will be covered.
              */
+#ifdef ENABLE_MOT
             if ((!isMOTFromTblOid(RelationGetRelid(rel)) &&
                     !CAN_BUILD_INFORMATIONAL_CONSTRAINT_BY_RELID(RelationGetRelid(rel))) || !stmt->internal_flag) {
+#else
+            if (!CAN_BUILD_INFORMATIONAL_CONSTRAINT_BY_RELID(RelationGetRelid(rel)) || !stmt->internal_flag) {
+#endif
                 /*
                  * Custom error message for FOREIGN TABLE since the term is close
                  * to a regular table and can confuse the user.
@@ -2960,8 +2996,7 @@ static void handleErrMsgForInfoCnstrnt(const IndexStmt* stmt, const Relation rel
             }
         } else {
             ereport(ERROR,
-                (errcode(ERRCODE_WRONG_OBJECT_TYPE), 
-                    errmsg("\"%s\" is not a table or materialized view", RelationGetRelationName(rel))));
+                (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not a table", RelationGetRelationName(rel))));
         }
     }
 }
@@ -3100,9 +3135,9 @@ static bool CheckGlobalIndexCompatible(Oid relOid, bool isGlobal, const IndexInf
             }
 
             heap_getattr(tarTuple, Anum_pg_index_indexprs, RelationGetDescr(indexRelation), &isNull);
-            /* 
+            /*
              * check expressions: This condition looks confused, here we judge whether tow index has expressions,
-             * like XOR operation. if two indexes both have expression or not, we continue to 
+             * like XOR operation. if two indexes both have expression or not, we continue to
              * check next condition, otherwise, two index could be treated as compatible.
              */
             if ((indexInfo->ii_Expressions != NIL) != (!isNull)) {
@@ -3127,9 +3162,12 @@ static bool CheckIndexMethodConsistency(HeapTuple indexTuple, Relation indexRela
 {
     bool isNull = false;
     bool ret = true;
-    oidvector* opClass = 
-        (oidvector*)DatumGetPointer(heap_getattr(indexTuple, Anum_pg_index_indclass, RelationGetDescr(indexRelation), &isNull));
-    Assert(!isNull);
+    oidvector* opClass = (oidvector*)DatumGetPointer(
+        heap_getattr(indexTuple, Anum_pg_index_indclass, RelationGetDescr(indexRelation), &isNull));
+    if (opClass == NULL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("Operator class search failed!")));
+    }
     Oid opClassOid = opClass->values[0];
     HeapTuple opClassTuple = SearchSysCache1(CLAOID, ObjectIdGetDatum(opClassOid));
     if (!HeapTupleIsValid(opClassTuple)) {

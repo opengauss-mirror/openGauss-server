@@ -29,7 +29,7 @@ typedef struct timerCA {
 } timerCA;
 
 static timerCA timerCommArea;
-static HANDLE timerThreadHandle = nullptr;
+static HANDLE timerThreadHandle = INVALID_HANDLE_VALUE;
 
 /* Timer management thread */
 static DWORD WINAPI pg_timer_thread(LPVOID param)
@@ -79,20 +79,19 @@ int setitimer(int which, const struct itimerval* value, struct itimerval* ovalue
     Assert(value->it_interval.tv_sec == 0 && value->it_interval.tv_usec == 0);
     Assert(which == ITIMER_REAL);
 
-    if (timerThreadHandle == nullptr) {
+    if (timerThreadHandle == INVALID_HANDLE_VALUE) {
         /* First call in this backend, create event and the timer thread */
         timerCommArea.event = CreateEvent(NULL, TRUE, FALSE, NULL);
         if (timerCommArea.event == NULL)
             ereport(FATAL, (errmsg_internal("could not create timer event: error code %lu", GetLastError())));
 
-        MemSet(&timerCommArea.value, 0, sizeof(struct itimerval));
-
+        errno_t rc = memset_s(&timerCommArea.value, sizeof(struct itimerval), 0, sizeof(struct itimerval));
+        securec_check(rc, "\0", "\0");
         InitializeCriticalSection(&timerCommArea.crit_sec);
 
         timerThreadHandle = CreateThread(NULL, 0, pg_timer_thread, NULL, 0, NULL);
-        if (timerThreadHandle == nullptr) {
+        if (timerThreadHandle == INVALID_HANDLE_VALUE)
             ereport(FATAL, (errmsg_internal("could not create timer thread: error code %lu", GetLastError())));
-        }
     }
 
     /* Request the timer thread to change settings */

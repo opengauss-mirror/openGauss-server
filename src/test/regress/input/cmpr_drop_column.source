@@ -28,9 +28,9 @@ CREATE TABLE cmpr_drop_column(
         c_int_10 integer NOT NULL,
         c_int_11 integer NOT NULL,
         c_int_12 integer NOT NULL
-) COMPRESS;
-COPY cmpr_drop_column_raw TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_column.data';
-COPY cmpr_drop_column FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_column.data';
+) ;
+COPY cmpr_drop_column_raw TO '@abs_srcdir@/data/cmpr_drop_column.data';
+COPY cmpr_drop_column FROM '@abs_srcdir@/data/cmpr_drop_column.data';
 
 ALTER TABLE cmpr_drop_column DROP COLUMN C_INT_6;
 ALTER TABLE cmpr_drop_column ADD COLUMN C_INT_6 INTEGER;
@@ -57,7 +57,7 @@ CREATE TABLE cmpr_drop_column_parent(
         c_int_9 integer NOT NULL,
         c_int_10 integer NOT NULL,
         c_int_11 integer NOT NULL
-) COMPRESS;
+) ;
 CREATE TABLE cmpr_drop_column_child(
         c_int_1 integer NOT NULL,
         c_int_2 integer NOT NULL,
@@ -71,8 +71,8 @@ CREATE TABLE cmpr_drop_column_child(
         c_int_10 integer NOT NULL,
         c_int_11 integer NOT NULL,
         c_int_12 integer NOT NULL
-) COMPRESS;
-COPY cmpr_drop_column_child FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_column.data';
+) ;
+COPY cmpr_drop_column_child FROM '@abs_srcdir@/data/cmpr_drop_column.data';
 SELECT (SELECT COUNT(*) FROM  cmpr_drop_column_child) - (SELECT COUNT(*) FROM cmpr_drop_column_parent);
 ALTER TABLE cmpr_drop_column_parent DROP COLUMN C_INT_6;
 ALTER TABLE cmpr_drop_column_parent ADD COLUMN C_INT_6 INTEGER;
@@ -83,4 +83,4 @@ SELECT (SELECT COUNT(*) FROM  cmpr_drop_column_parent) - (SELECT COUNT(*) FROM c
 DROP TABLE cmpr_drop_column_child;
 DROP TABLE cmpr_drop_column_parent;
 
-\! rm @abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_column.data
+\! rm @abs_srcdir@/data/cmpr_drop_column.data

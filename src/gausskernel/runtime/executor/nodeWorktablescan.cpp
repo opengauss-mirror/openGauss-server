@@ -20,15 +20,15 @@
 #include "executor/nodeRecursiveunion.h"
 #include "executor/nodeWorktablescan.h"
 
-static TupleTableSlot* work_table_scan_next(WorkTableScanState* node);
+static TupleTableSlot* WorkTableScanNext(WorkTableScanState* node);
 
 /* ----------------------------------------------------------------
- * work_table_scan_next
+ * WorkTableScanNext
  *
  * This is a workhorse for ExecWorkTableScan
  * ----------------------------------------------------------------
  */
-static TupleTableSlot* work_table_scan_next(WorkTableScanState* node)
+static TupleTableSlot* WorkTableScanNext(WorkTableScanState* node)
 {
     /*
      * get information from the estate and scan state
@@ -111,9 +111,9 @@ static TupleTableSlot* work_table_scan_next(WorkTableScanState* node)
 }
 
 /*
- * work_table_scan_recheck -- access method routine to recheck a tuple in EvalPlanQual
+ * WorkTableScanRecheck -- access method routine to recheck a tuple in EvalPlanQual
  */
-static bool work_table_scan_recheck(WorkTableScanState* node, TupleTableSlot* slot)
+static bool WorkTableScanRecheck(WorkTableScanState* node, TupleTableSlot* slot)
 {
     /* nothing to check */
     return true;
@@ -208,7 +208,7 @@ TupleTableSlot* ExecWorkTableScan(WorkTableScanState* node)
         ExecAssignScanProjectionInfo(&node->ss);
     }
 
-    return ExecScan(&node->ss, (ExecScanAccessMtd)work_table_scan_next, (ExecScanRecheckMtd)work_table_scan_recheck);
+    return ExecScan(&node->ss, (ExecScanAccessMtd)WorkTableScanNext, (ExecScanRecheckMtd)WorkTableScanRecheck);
 }
 
 /* ----------------------------------------------------------------
@@ -257,7 +257,7 @@ WorkTableScanState* ExecInitWorkTableScan(WorkTableScan* node, EState* estate, i
     /*
      * Initialize result tuple type, but not yet projection info.
      */
-    ExecAssignResultTypeFromTL(&scan_state->ss.ps);
+    ExecAssignResultTypeFromTL(&scan_state->ss.ps, TAM_HEAP);
 
     scan_state->ss.ps.ps_TupFromTlist = false;
 

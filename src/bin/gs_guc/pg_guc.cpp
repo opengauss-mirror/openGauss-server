@@ -54,7 +54,6 @@
 
 #include "bin/elog.h"
 #include "openssl/rand.h"
-#include "miscadmin.h"
 
 #if defined(__CYGWIN__)
 #include <sys/cygwin.h>
@@ -69,7 +68,10 @@
 #define TRY_TIMES 3
 #define LARGE_INSTANCE_NUM 2
 
-const int PASSWORD_PARAMETER_COUNT = 2;
+#ifdef ENABLE_UT
+#define static
+#endif
+
 /* PID can be negative for standalone backend */
 typedef long pgpid_t;
 
@@ -123,6 +125,7 @@ typedef struct {
 } FileLock;
 
 #define DEFAULT_WAIT 60
+#define MAX_BUF_SIZE 4096
 
 static int sig = SIGHUP; /* default */
 CtlCommand ctl_command = NO_COMMAND;
@@ -197,6 +200,8 @@ const int EQUAL_MARK_LEN = 3;
 NodeType nodetype = INSTANCE_ANY;
 /* status which perform remote connection. default value is true, it means execute remote connection successfully */
 bool g_remote_connection_signal = true;
+/* result which perform remote command. default value is 0, it means execute remote command return code */
+unsigned int g_remote_command_result = 0;
 
 ErrCode retCode = CODE_OK;
 KeyMode key_mode = UNKNOWN_KEY_MODE;
@@ -276,6 +281,7 @@ static void to_generatenewline(char* oldline, char* newline, const char* param, 
 static int find_param_in_string(const char* name_string, const char* name_param, size_t param_len);
 void free_space(char** optlines, int size);
 void do_hba_analysis(const char* strcmd);
+void free_hba_params();
 static void checkArchivepath(const char* paraValue);
 static bool isMatchOptionName(
     char* optLine, const char* paraName, int paraLength, int* paraOffset, int* valueLength, int* valueOffset);
@@ -294,10 +300,6 @@ int check_config_file_status();
 char** backup_config_file(const char* read_file, char* write_file, FileLock filelock, int reserve_num_lines);
 int do_parameter_value_write(char** opt_lines, UpdateOrAddParameter updateoradd);
 static void checkCMParameter(const char* dataDir, const char* nodeName, const char* instName);
-
-static int getPasswordLength(char* password_option);
-static bool isPasswordLengthValid(char** lines);
-
 #ifdef __cplusplus
 extern "C" {
 #endif /* __cplusplus */
@@ -316,6 +318,7 @@ bool allocate_memory_list();
 extern int init_gauss_cluster_config(void);
 extern char* get_AZ_value(char* value, const char* data_dir);
 extern bool get_hostname_or_ip(char* out_name, size_t name_len);
+extern int checkPath(const char* fileName);
 
 #ifdef __cplusplus
 }
@@ -386,6 +389,9 @@ bool allocate_memory_list()
     rc = snprintf_s(guc_file, MAXPGPATH, MAXPGPATH - 1, "%s/bin/%s", gausshome, GUC_OPT_CONF_FILE);
     securec_check_ss_c(rc, "\0", "\0");
 
+    if (checkPath(guc_file) != 0) {
+        return false;
+    }
     /* maybe fail because of privilege*/
     fp = fopen(guc_file, "r");
     if (fp == NULL) {
@@ -467,81 +473,6 @@ static pgpid_t get_pgpid(void)
     return (pgpid_t)pid;
 }
 
-static int getPasswordLength(char* password_option) 
-{
-    const int buffer_length = 1024;
-    if (!password_option) {
-        return 0;
-    }
-    char* c = password_option;
-    
-    /* skipping the character that is not a number */
-    while (*c != '\0' && !(*c >= '0' && *c <= '9')) {
-        c++;
-    }
-
-    if (*c == '\0') {
-        return 0;
-    }
-
-    char head[buffer_length];
-    (void)strcpy_s(head, buffer_length, c);
-    char* tail = head;
-    while (*tail >= '0' && *tail <= '9') {
-        tail++;
-    }
-    *tail = '\0';
-    return atoi(head);
-}
-
-static bool isPasswordLengthValid(char** lines) 
-{
-    char** line = NULL;
-    const char* min_length_name = "password_min_length";
-    const char* max_length_name = "password_max_length";
-
-    int count = 0;
-    char* password_min_length_option = NULL;
-    char* password_max_length_option = NULL;
-    int min_length = DEFAULT_PASSWORD_MIN_LENGTH;
-    int max_length = DEFAULT_PASSWORD_MAX_LENGTH;
-    for (line = lines; *line && count < PASSWORD_PARAMETER_COUNT; line++) {
-        char* option = *line;
-        while (*option == ' ') {
-            option++;
-        }
-
-        if (*option == '#') {
-            continue;
-        }
-        if (strstr(option, min_length_name) != NULL) {
-            password_min_length_option = option;
-            count++;
-            continue;
-        } else if (strstr(option, max_length_name) != NULL) {
-            password_max_length_option = option;
-            count++;
-            continue;
-        }
-    }
-
-    if (password_min_length_option != NULL) {
-        int len = getPasswordLength(password_min_length_option);
-        min_length = len == 0 ? min_length : len;
-    }
-
-    if (password_max_length_option != NULL) {
-        int len = getPasswordLength(password_max_length_option);
-        max_length = len == 0 ? max_length : len;
-    }
-
-    if (min_length > max_length) {
-        write_stderr(_("password_min_length:%d cannot longer than password_max_length:%d.\n"), min_length, max_length);
-        return false;
-    }
-    return true;
-}
-
 /*
 * @@GaussDB@@
 * Brief            : static ErrCode writefile(char *path, char **lines,
@@ -553,18 +484,17 @@ ErrCode writefile(char* path, char** lines, UpdateOrAddParameter isAddorUpdate)
 {
     FILE* out_file = NULL;
     char** line = NULL;
-
     if (UPDATE_PARAMETER == isAddorUpdate) {
         canonicalize_path(path);
         if ((out_file = fopen(path, "w")) == NULL) {
-            write_stderr(
+            (void)write_stderr(
                 _("%s: could not open file \"%s\" for writing: %s\n"), progname, path, gs_strerror(errno));
             return CODE_OPEN_CONFFILE_FAILED;
         }
         rewind(out_file);
         for (line = lines; *line != NULL; line++) {
             if (fputs(*line, out_file) < 0) {
-                write_stderr(_("%s: could not write file \"%s\": %s\n"), progname, path, gs_strerror(errno));
+                (void)write_stderr(_("%s: could not write file \"%s\": %s\n"), progname, path, gs_strerror(errno));
                 fclose(out_file);
                 return CODE_WRITE_CONFFILE_ERROR;
             }
@@ -573,13 +503,13 @@ ErrCode writefile(char* path, char** lines, UpdateOrAddParameter isAddorUpdate)
         canonicalize_path(path);
         out_file = fopen(path, "a+");
         if (NULL == out_file) {
-            write_stderr(
+            (void)write_stderr(
                 _("%s: could not open file \"%s\" for writing: %s\n"), progname, path, gs_strerror(errno));
             return CODE_OPEN_CONFFILE_FAILED;
         }
         (void)fseek(out_file, 0, SEEK_END);
         if (fputs(*lines, out_file) < 0) {
-            write_stderr(_("%s: could not write file \"%s\": %s\n"), progname, path, gs_strerror(errno));
+            (void)write_stderr(_("%s: could not write file \"%s\": %s\n"), progname, path, gs_strerror(errno));
             fclose(out_file);
             return CODE_WRITE_CONFFILE_ERROR;
         }
@@ -592,12 +522,12 @@ ErrCode writefile(char* path, char** lines, UpdateOrAddParameter isAddorUpdate)
      */
     if (fsync(fileno(out_file)) != 0) {
         (void)fclose(out_file);
-        write_stderr(_("could not fsync file \"%s\": %s\n"), path, gs_strerror(errno));
+        (void)write_stderr(_("could not fsync file \"%s\": %s\n"), path, gs_strerror(errno));
         return CODE_WRITE_CONFFILE_ERROR;
     }
 
     if (fclose(out_file)) {
-        write_stderr(_("could not write file \"%s\": %s\n"), path, gs_strerror(errno));
+        (void)write_stderr(_("could not write file \"%s\": %s\n"), path, gs_strerror(errno));
         return CODE_CLOSE_CONFFILE_FAILED;
     }
     return CODE_OK;
@@ -763,7 +693,7 @@ static int find_gucoption(
     if (NULL == optlines || NULL == opt_name) {
         return INVALID_LINES_IDX;
     }
-    paramlen = strnlen(opt_name, MAX_PARAM_LEN);
+    paramlen = (size_t)strnlen(opt_name, MAX_PARAM_LEN);
     if (NULL != name_len) {
         *name_len = (int)paramlen;
     }
@@ -771,7 +701,7 @@ static int find_gucoption(
     /* The first loop is to deal with the lines not commented by '#' */
     for (i = 0; optlines[i] != NULL; i++) {
         if (!isOptLineCommented(optlines[i])) {
-            isMatched = isMatchOptionName(optlines[i], opt_name, (int)paramlen, name_offset, value_len, value_offset);
+            isMatched = isMatchOptionName(optlines[i], opt_name, paramlen, name_offset, value_len, value_offset);
             if (isMatched) {
                 matchTimes++;
                 targetLine = i;
@@ -781,7 +711,7 @@ static int find_gucoption(
 
     if (matchTimes > 0) {
         if (matchTimes > 1) {
-            write_stderr("WARNING: There are %d \'%s\' not commented in \"postgresql.conf\", and only the "
+            (void)write_stderr("WARNING: There are %d \'%s\' not commented in \"postgresql.conf\", and only the "
                                "last one in %dth line will be set and used.\n",
                 matchTimes,
                 opt_name,
@@ -850,22 +780,23 @@ ErrCode get_file_lock(const char* path, FileLock* filelock)
         return CODE_OK;
     }
     if (NULL == path) {
-        write_stderr(_("%s: can not lock file: invalid path <NULL>"), progname);
+        (void)write_stderr(_("%s: can not lock file: invalid path <NULL>"), progname);
         return CODE_UNKOWN_ERROR;
     }
     ret = strcpy_s(newpath, sizeof(newpath), path);
     canonicalize_path(newpath);
+    (void)checkPath(newpath);
 
     if (lstat(newpath, &statbuf) != 0) {
         fp = fopen(newpath, PG_BINARY_W);
         if (NULL == fp) {
-            write_stderr(
+            (void)write_stderr(
                 _("%s: can't open lock file for write\"%s\" : %s\n"), progname, path, gs_strerror(errno));
             return CODE_OPEN_CONFFILE_FAILED;
         } else {
             if (fwrite(content, PG_LOCKFILE_SIZE, 1, fp) != 1) {
                 fclose(fp);
-                write_stderr(_("%s: can't write lock file \"%s\" : %s\n"), progname, path, gs_strerror(errno));
+                (void)write_stderr(_("%s: can't write lock file \"%s\" : %s\n"), progname, path, gs_strerror(errno));
                 return CODE_WRITE_CONFFILE_ERROR;
             }
             fclose(fp);
@@ -874,7 +805,7 @@ ErrCode get_file_lock(const char* path, FileLock* filelock)
 
     fp = fopen(newpath, PG_BINARY_RW);
     if (NULL == fp) {
-        write_stderr(_("could not open file or directory \"%s\", errormsg: %s\n"), path, gs_strerror(errno));
+        (void)write_stderr(_("could not open file or directory \"%s\", errormsg: %s\n"), path, gs_strerror(errno));
         return CODE_OPEN_CONFFILE_FAILED;
     }
 
@@ -885,9 +816,9 @@ ErrCode get_file_lock(const char* path, FileLock* filelock)
             i++;
             sleep(1); /* 1 sec */
             if (i >= TRY_TIMES) {
-                write_stderr(
+                (void)write_stderr(
                     _("could not lock file or directory \"%s\", errormsg: %s\n"), path, gs_strerror(errno));
-                write_stderr(_("HINT: This is transient error, as gaussdb is reading the configuration file. "
+                (void)write_stderr(_("HINT: This is transient error, as gaussdb is reading the configuration file. "
                                      "Please re-execute the command again.\n"));
                 fclose(fp);
                 return CODE_LOCK_CONFFILE_FAILED;
@@ -970,14 +901,14 @@ char** backup_config_file(const char* read_file, char* write_file, FileLock file
 
     opt_lines = readfile(read_file, reserve_num_lines);
     if (NULL == opt_lines) {
-        write_stderr(_("read file \"%s\" failed: %s\n"), gucconf_file, gs_strerror(errno));
+        (void)write_stderr(_("read file \"%s\" failed: %s\n"), gucconf_file, gs_strerror(errno));
         release_file_lock(&filelock);
         return NULL;
     }
 
     ret = writefile(write_file, opt_lines, UPDATE_PARAMETER);
     if (ret != CODE_OK) {
-        write_stderr(_("could not write file \"%s\": %s\n"), write_file, gs_strerror(errno));
+        (void)write_stderr(_("could not write file \"%s\": %s\n"), write_file, gs_strerror(errno));
         release_file_lock(&filelock);
         freefile(opt_lines);
         return NULL;
@@ -1019,10 +950,6 @@ int do_parameter_value_write(char** opt_lines, UpdateOrAddParameter updateoradd)
         write_stderr(_("read file \"%s\" failed: %s\n"), tempguc_file, gs_strerror(errno));
         return FAILURE;
     }
-
-    if (!isPasswordLengthValid(newlines)) {
-        return FAILURE;
-    }
     ret = writefile(newtempfile, newlines, UPDATE_PARAMETER);
     freefile(newlines);
     if (ret != CODE_OK) {
@@ -1061,14 +988,14 @@ bool
 get_global_local_node_name()
 {
     // check and assign values to global variables g_local_node_name. get_AZ_value must use it.
-    if (NULL == g_local_node_name || '\0' == g_local_node_name[0]){
+    if (NULL == g_local_node_name || '\0' == g_local_node_name[0]) {
         char    hostname[MAX_HOST_NAME_LENGTH] = {0};
         int     nRet = 0;
         nRet = memset_s(hostname, MAX_HOST_NAME_LENGTH, '\0', MAX_HOST_NAME_LENGTH);
         securec_check_c(nRet, "\0", "\0");
 
         (void)gethostname(hostname, MAX_HOST_NAME_LENGTH);
-        if ('\0' == hostname[0]){
+        if ('\0' == hostname[0]) {
             write_stderr("ERROR: Failed to get local hostname.\n");
             return FAILURE;
         }
@@ -1082,7 +1009,7 @@ append_string_info(char **optLines, const char *newContext)
 {
     int  n = 0;
     errno_t ret = 0;
-    while (NULL != optLines[n]){
+    while (NULL != optLines[n]) {
         n += 1;
     }
     char** optLinesResult = (char**)pg_malloc_zero(sizeof(char *) * (n + 2));
@@ -1127,12 +1054,13 @@ do_gucset(const char *action_type, const char *data_dir)
     FileLock filelock = {NULL, 0};
     UpdateOrAddParameter updateoradd = UPDATE_PARAMETER;
 
+
     /* check the status of postgresql.conf and postgresql.conf.bak */
     if (SUCCESS != check_config_file_status())
         return FAILURE;
 
     if (lstat(gucconf_file, &statbuf) == 0 && statbuf.st_size == 0 &&
-        lstat(tempguc_file, &tempbuf) == 0 && tempbuf.st_size != 0){
+        lstat(tempguc_file, &tempbuf) == 0 && tempbuf.st_size != 0) {
         write_stderr(_("%s: the last signal is now,waiting....\n"), progname);
         return FAILURE;
     }
@@ -1153,7 +1081,7 @@ do_gucset(const char *action_type, const char *data_dir)
 
     for (i = 0; i < config_param_number; i++)
     {
-        if (NULL == config_param[i]){
+        if (NULL == config_param[i]) {
             release_file_lock(&filelock);
             freefile(opt_lines);
             write_stderr( _("%s: invalid input parameters\n"), progname);
@@ -1162,19 +1090,19 @@ do_gucset(const char *action_type, const char *data_dir)
 
         // only when the parameter is synchronous_standby_names, this branch can be reached.
         if (g_need_changed && 0 == strncmp(config_param[i], "synchronous_standby_names",
-                                           strlen(config_param[i]) > strlen("synchronous_standby_names") ? strlen(config_param[i]) : strlen("synchronous_standby_names"))){
+                                           strlen(config_param[i]) > strlen("synchronous_standby_names") ? strlen(config_param[i]) : strlen("synchronous_standby_names"))) {
             // check and assign values to global variables g_local_node_name. get_AZ_value must use it.
-            if (FAILURE == get_global_local_node_name()){
+            if (FAILURE == get_global_local_node_name()) {
                 release_file_lock(&filelock);
                 freefile(opt_lines);
                 return FAILURE;
             }
 
             // get AZ string
-            if (NULL != config_value[i]){
+            if (NULL != config_value[i]) {
                 char    *azString = NULL;
                 azString = get_AZ_value(config_value[i], data_dir);
-                if (NULL == azString){
+                if (NULL == azString) {
                     result_status = FAILURE;
                     continue;
                 }
@@ -1189,7 +1117,7 @@ do_gucset(const char *action_type, const char *data_dir)
         /* find the line where guc parameter in */
         lines_index = find_gucoption(opt_lines, config_param[i], NULL, NULL, &optvalue_off, &optvalue_len);
         /* get the type of gs_guc execution */
-        if (INVALID_LINES_IDX != lines_index){
+        if (INVALID_LINES_IDX != lines_index) {
             /* Copy the original option line and substitute it with a new one */
             size_t line_len = 0;
             line_len = strlen(opt_lines[lines_index]);
@@ -1197,34 +1125,34 @@ do_gucset(const char *action_type, const char *data_dir)
             rc = strncpy_s(optconf_line, MAX_PARAM_LEN*2, opt_lines[lines_index], (size_t)Min(line_len, MAX_PARAM_LEN*2 - 1));
             securec_check_c(rc, "\0", "\0");
 
-            if (NULL != config_value[i]){
+            if (NULL != config_value[i]) {
                 to_generatenewline(optconf_line, newconf_line, config_param[i], config_value[i], optvalue_len);
-            }else{
+            } else {
                 /*
                  * if parameter as value is NULL; consider it as UNSET (i.e to default value)
                  *  which means comment the configuration parameter
                  */
                 //line is commented
-                if (isOptLineCommented(optconf_line)){
+                if (isOptLineCommented(optconf_line)) {
                     rc = strncpy_s(newconf_line, MAX_PARAM_LEN*2, optconf_line, (size_t)Min(line_len, MAX_PARAM_LEN*2 - 1));
                     securec_check_c(rc, "\0", "\0");
-                }else{
+                } else {
                     nRet = snprintf_s(newconf_line, MAX_PARAM_LEN*2, MAX_PARAM_LEN*2 - 1, "#%s", optconf_line);
                     securec_check_ss_c(nRet, "\0", "\0");
                 }
             }
             updateoradd = UPDATE_PARAMETER;
-        }else{
+        } else {
             /* If it does not find the guc parameter from parameter lists,
              * then add the guc parameter to the tail of config file
              */
             updateoradd= ADD_PARAMETER;
         }
 
-        if (UPDATE_PARAMETER == updateoradd){
+        if (UPDATE_PARAMETER == updateoradd) {
             GS_FREE(opt_lines[lines_index]);
             opt_lines[lines_index] = xstrdup(newconf_line);
-        }else{
+        } else {
             /* make a option line by new guc parameter value.
              * Total length = parameter_name_length + ' = ' + parameter_value_length + '\n'
              */
@@ -1233,7 +1161,7 @@ do_gucset(const char *action_type, const char *data_dir)
              * if parameter not found and in case of default value skip the process.
              * so that server takes anyway default value.
              */
-            if (NULL != config_value[i]){
+            if (NULL != config_value[i]) {
                 newvalue_len = strnlen(config_value[i], MAX_VALUE_LEN);
                 param_len = strnlen(config_param[i], MAX_VALUE_LEN);
                 /*there is '\n', so length should add 1*/
@@ -1250,26 +1178,26 @@ do_gucset(const char *action_type, const char *data_dir)
     }
 
     func_status = do_parameter_value_write(opt_lines, UPDATE_PARAMETER);
-    if (SUCCESS == func_status){
-        for (i = 0; i < config_param_number; i++){
-            if (NULL != config_value[i]){
+    if (SUCCESS == func_status) {
+        for (i = 0; i < config_param_number; i++) {
+            if (NULL != config_value[i]) {
                 write_stderr( "gs_guc %s: %s=%s: [%s]\n", action_type, config_param[i], config_value[i], gucconf_file);
-            }else{
+            } else {
                 write_stderr( "gs_guc %s: #%s: [%s]\n", action_type, config_param[i], gucconf_file);
             }
         }
-    }else{
+    } else {
         result_status = FAILURE;
     }
 
     release_file_lock(&filelock);
     freefile(opt_lines);
 
-    for (i = 0; i < config_param_number; i++){
+    for (i = 0; i < config_param_number; i++) {
         if (g_need_changed && 0 == strncmp(config_param[i], "synchronous_standby_names",
                                            strlen(config_param[i]) > strlen("synchronous_standby_names") ?
-                                           strlen(config_param[i]) : strlen("synchronous_standby_names"))){
-            if (NULL != config_value[i] && tmpAZStr != NULL){
+                                           strlen(config_param[i]) : strlen("synchronous_standby_names"))) {
+            if (NULL != config_value[i] && tmpAZStr != NULL) {
                 GS_FREE(config_value[i]);
                 config_value[i] = xstrdup(tmpAZStr);
                 GS_FREE(tmpAZStr);
@@ -1277,9 +1205,9 @@ do_gucset(const char *action_type, const char *data_dir)
         }
     }
 
-    if (SUCCESS == result_status){
+    if (SUCCESS == result_status) {
         return SUCCESS;
-    }else{
+    } else {
         return FAILURE;
     }
 }
@@ -1490,15 +1418,15 @@ static void do_help_config_guc(void)
     (void)printf(_("    e.g. %s set -Z cmagent -c \"program = \'\\\"Hello\\\", World\\!\'\".\n"), progname);
 #else
     (void)printf(_("        %s {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
-                        "{-c \"parameter = value\" -c \"parameter = value\" ...}\n"), progname);
+                        "[--lcname=LCNAME] {-c \"parameter = value\" -c \"parameter = value\" ...}\n"), progname);
     (void)printf(_("        %s {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
-                        "{-c \" parameter = value \" -c \" parameter = value \" ...}\n"), progname);
+                        "[--lcname=LCNAME] {-c \" parameter = value \" -c \" parameter = value \" ...}\n"), progname);
     (void)printf(_("        %s {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
-                "{-c \"parameter = \'value\'\" -c \"parameter = \'value\'\" ...}\n"), progname);
+                "[--lcname=LCNAME] {-c \"parameter = \'value\'\" -c \"parameter = \'value\'\" ...}\n"), progname);
     (void)printf(_("        %s {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
-                "{-c \" parameter = \'value\' \" -c \" parameter = \'value\' \" ...}\n"), progname);
+                "[--lcname=LCNAME] {-c \" parameter = \'value\' \" -c \" parameter = \'value\' \" ...}\n"), progname);
     (void)printf(_("        %s {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
-                "{-c \"parameter\" -c \"parameter\" ...}\n"), progname);
+                "[--lcname=LCNAME] {-c \"parameter\" -c \"parameter\" ...}\n"), progname);
     (void)printf(
      _("    e.g. %s set -N all -I all -c \"program = \'\\\"Hello\\\", World\\!\'\".\n"), progname);
     (void)printf(
@@ -1514,7 +1442,7 @@ static void do_help_config_guc(void)
 #endif
 
     (void)printf(_("\n  You can choose Usage as you like, and perhaps the first one "));
-    (void)printf(_("will\n    be more suitable for you!\n"));
+    (void)printf(_("will be more suitable for you!\n"));
 }
 
 static void do_help_config_hba(void)
@@ -1592,9 +1520,7 @@ static void do_help_common_options(void)
     (void)printf(_("  -D, --pgdata=DATADIR    location of the database storage area\n"));
     (void)printf(_("  -c    parameter=value   the parameter to set\n"));
     (void)printf(_("  -c    parameter         the parameter value to DEFAULT (i.e comments in configuration file)\n"));
-#ifdef ENABLE_MULTIPLE_NODES
     (void)printf(_("  --lcname=LCNAME         logical cluter name. It only can be used with datanode\n"));
-#endif
     (void)printf(_("  -h    host-auth-policy  to set authentication policy in HBA conf file\n"));
     (void)printf(_("  -?, --help              show this help, then exit\n"));
     (void)printf(_("  -V, --version           output version information, then exit\n"));
@@ -1631,8 +1557,8 @@ static void do_help_encrypt_options(void)
     (void)printf(_("\nOptions for encrypt: \n"));
     (void)printf(_("  -M, --keymode=MODE     the cipher files will be applies in server, client or source,default "
                    "value is server mode\n"));
-    (void)printf(_("  -K PASSWORD            the plain password you want to encrypt\n"));
-    (void)printf(_("  -U, --keyuser=USER     if appointed,the cipher files will name with the user name\n"));
+    (void)printf(_("  -K PASSWORD            the plain password you want to encrypt, which length should between 8~16 and at least 3 different types of characters\n"));
+    (void)printf(_("  -U, --keyuser=USER     if appointed, the cipher files will name with the user name\n"));
     (void)printf(_("\n"));
 }
 
@@ -1641,7 +1567,7 @@ static void do_help_generate_options(void)
 
     (void)printf(_("\nOptions for generate: \n"));
     (void)printf(_("  -o PREFIX               the cipher files prefix. default value is obsserver\n"));
-    (void)printf(_("  -S CIPHERKEY            the plain cipher key you want to encrypt\n"));
+    (void)printf(_("  -S CIPHERKEY            the plain password you want to encrypt, which length should between 8~16 and at least 3 different types of characters\n"));
 }
 
 /*
@@ -1689,8 +1615,10 @@ static bool is_file_exist(const char* path)
     bool isExist = true;
 
     if (lstat(path, &statbuf) < 0) {
-        if (errno != ENOENT)
+        if (errno != ENOENT) {
             write_stderr(_("could not stat file \"%s\": %s\n"), path, strerror(errno));
+            exit(1);
+        }
 
         isExist = false;
     }
@@ -1706,8 +1634,10 @@ static bool is_gs_build_pid(const char* pid_path)
 
     pidf = fopen(pid_path, "r");
     if (pidf == NULL) {
-        if (errno != ENOENT)
+        if (errno != ENOENT) {
             write_stderr(_("The file \"%s\" open failed: %s.\n"), pid_path, strerror(errno));
+            exit(1);
+        }
         goto fun_exit;
     }
 
@@ -1766,15 +1696,15 @@ obtain_parameter_list_array(const char *key, const char *value)
     for(i = 0; i < config_param_number; i++)
     {
         if (0 == strncmp(config_param[i], key,
-                         strlen(config_param[i]) > strlen(key) ? strlen(config_param[i]) : strlen(key))){
+                         strlen(config_param[i]) > strlen(key) ? strlen(config_param[i]) : strlen(key))) {
 
             GS_FREE(config_param[i]);
             GS_FREE(config_value[i]);
 
             config_param[i] = xstrdup(key);
-            if (NULL != value){
+            if (NULL != value) {
                 config_value[i] = xstrdup(value);
-            }else{
+            } else {
                 config_value[i] = NULL;
             }
 
@@ -1783,9 +1713,9 @@ obtain_parameter_list_array(const char *key, const char *value)
     }
 
     config_param[config_param_number++] = xstrdup(key);
-    if (NULL != value){
+    if (NULL != value) {
         config_value[config_value_number++] = xstrdup(value);
-    }else{
+    } else {
         config_value[config_value_number++] = NULL;
     }
 }
@@ -1821,7 +1751,7 @@ static void do_analysis(const char* strcmd)
     if (NULL == pcmd) {
         trimBlanksTwoEnds((char**)&strcmd);
         if ((int)strlen(strcmd) > MAX_PARAM_LEN) {
-            write_stderr(
+            (void)write_stderr(
                 _("%s: The parameter %s is too long. Please check and make sure it is correct.\n"), progname, strcmd);
             exit(1);
         }
@@ -1842,13 +1772,13 @@ static void do_analysis(const char* strcmd)
     /* END for gs_guc */
 
     if ((int)strlen(strcmd) > MAX_PARAM_LEN) {
-        write_stderr(
+        (void)write_stderr(
             _("%s: The parameter %s is too long. Please check and make sure it is correct.\n"), progname, strcmd);
         exit(1);
     }
 
     if (NULL != tempcmd && (int)strlen(tempcmd) > MAX_VALUE_LEN) {
-        write_stderr(_("%s: The value of parameter %s is too long. Please check and make sure it is correct.\n"),
+        (void)write_stderr(_("%s: The value of parameter %s is too long. Please check and make sure it is correct.\n"),
             progname,
             strcmd);
         exit(1);
@@ -1998,29 +1928,23 @@ void checkDataDir(const char* datadir)
         write_stderr(_("%s: The value of -D is incorrect \n"), progname);
         exit(1);
     }
+    if (-1 == access(datadir, R_OK | W_OK)) {
+        write_stderr(_("ERROR: Could not access the path %s\n"), datadir);
+        exit(1);
+    }
 }
 
 void checkCipherkey()
 {
-    if (NULL == g_cipherkey) {
-        write_stderr(_("%s: The value of -S is incorrect \n"), progname);
-        exit(1);
-    }
-}
-
-void checkPrefixString()
-{
-    if (NULL == g_prefix) {
-        write_stderr(_("%s: The value of -o is incorrect.\n"), progname);
-        exit(1);
-    }
-}
-
-void checkPlainKey()
-{
-    if (NULL == g_plainkey) {
-        write_stderr(_("%s: The value of -K is incorrect.\n"), progname);
-        exit(1);
+    if (g_cipherkey == NULL) {
+        g_cipherkey = simple_prompt("Password: ", MAX_KEY_LEN + 1, false);
+        if (!check_input_password(g_cipherkey)) {
+            write_stderr(_("%s: The input key must be %d~%d bytes and "
+                "contain at least three kinds of characters!\n"),
+                progname, MIN_KEY_LEN, MAX_KEY_LEN);
+            do_advice();
+            exit(1);
+        }
     }
 }
 
@@ -2035,35 +1959,51 @@ void doGenerateOperation(const char* datadir, const char* loginfo)
     /* check input parameter, make sure all is correct */
     checkDataDir(datadir);
     checkCipherkey();
+    key_mode = OBS_MODE;
 
-    if (0 == strcmp(g_cipherkey, "default")) {
+    if (strcmp(g_cipherkey, "default") == 0) {
         /* Default generate value of cipher key */
         char init_rand[RANDOM_LEN + 1] = {0};
         int retval = 0;
         char* encodetext = NULL;
 
         /* Generate a random value by OpenSSL function. */
-        retval = RAND_bytes((unsigned char*)init_rand, RANDOM_LEN);
-        if (retval != 1) /* the return value of RAND_bytes:1--success */
+        retval = RAND_priv_bytes((unsigned char*)init_rand, RANDOM_LEN);
+        if (retval != 1) /* the return value of RAND_priv_bytes:1--success */
         {
-            write_stderr(_("%s: generate random key failed, errcode:%d.\n"), progname, retval);
+            (void)write_stderr(_("%s: generate random key failed, errcode:%d.\n"), progname, retval);
+            GS_FREE(g_cipherkey);
             exit(1);
         }
 
         encodetext = SEC_encodeBase64((char*)init_rand, RANDOM_LEN + 1);
         GS_FREE(g_cipherkey);
         g_cipherkey = (char*)encodetext;
+        if (g_cipherkey == NULL) {
+            (void)write_stderr(_("%s: encode Base64 failed\n"), progname);
+            exit(1);
+        }
+        /* Cut 13 characters as cipher key */
+        if (strlen(g_cipherkey) > RANDOM_LEN) {
+            g_cipherkey[RANDOM_LEN - 3] = '\0';
+        }
+        gen_cipher_rand_files(key_mode, g_cipherkey, key_username, datadir, g_prefix);
+        OPENSSL_free(g_cipherkey);
+        g_cipherkey = NULL;
+    } else {
+        if (!check_input_password(g_cipherkey)) {
+            write_stderr(_("%s: The input key must be %d~%d bytes and "
+                "contain at least three kinds of characters!\n"),
+                progname, MIN_KEY_LEN, MAX_KEY_LEN);
+            GS_FREE(g_cipherkey);
+            do_advice();
+            exit(1);
+        }
+        gen_cipher_rand_files(key_mode, g_cipherkey, key_username, datadir, g_prefix);
+        GS_FREE(g_cipherkey);
     }
 
-    // Cut 13 characters as cipher key
-    if (strlen(g_cipherkey) > RANDOM_LEN) {
-        g_cipherkey[RANDOM_LEN - 3] = '\0';
-    }
-
-    key_mode = OBS_MODE;
-    gen_cipher_rand_files(key_mode, g_cipherkey, key_username, datadir, g_prefix);
-
-    write_stderr("gs_guc encrypt %s\n", loginfo);
+    (void)write_log("gs_guc generate %s\n", loginfo);
 }
 
 void checkLcName(int nodeType)
@@ -2078,11 +2018,15 @@ void checkLcName(int nodeType)
 void
 print_help(const char* infoStr)
 {
-    if (strncmp(infoStr, "--help", sizeof("--help")) == 0 || strncmp(infoStr, "-?", sizeof("-?")) == 0){
+    if (strncmp(infoStr, "--help", sizeof("--help")) == 0 || strncmp(infoStr, "-?", sizeof("-?")) == 0) {
         do_help();
         exit(0);
-    }else if (strncmp(infoStr, "-V", sizeof("-V")) == 0 || strncmp(infoStr, "--version", sizeof("--version")) == 0){
+    } else if (strncmp(infoStr, "-V", sizeof("-V")) == 0 || strncmp(infoStr, "--version", sizeof("--version")) == 0) {
+#ifdef ENABLE_MULTIPLE_NODES
         puts("gs_guc " DEF_GS_VERSION);
+#else
+        puts("gs_guc (openGauss) " PG_VERSION);
+#endif
         exit(0);
     }
 }
@@ -2090,21 +2034,21 @@ print_help(const char* infoStr)
 void
 get_action_value(CtlCommand ctlCmd, const char* cmd)
 {
-    if (ctlCmd != NO_COMMAND){
+    if (ctlCmd != NO_COMMAND) {
         write_stderr(_("%s: too many command-line arguments (first is \"%s\")\n"), progname, cmd);
         do_advice();
         exit(1);
-    }else if (strncmp(cmd, "set", sizeof("set")) == 0){
+    } else if (strncmp(cmd, "set", sizeof("set")) == 0) {
         ctl_command = SET_CONF_COMMAND ;
-    }else if (strncmp(cmd, "reload", sizeof("reload")) == 0){
+    } else if (strncmp(cmd, "reload", sizeof("reload")) == 0) {
         ctl_command = RELOAD_CONF_COMMAND;
-    }else if (strncmp(cmd, "encrypt", sizeof("encrypt")) == 0){
+    } else if (strncmp(cmd, "encrypt", sizeof("encrypt")) == 0) {
         ctl_command = ENCRYPT_KEY_COMMAND;
-    }else if (strncmp(cmd, "check", sizeof("check")) == 0){
+    } else if (strncmp(cmd, "check", sizeof("check")) == 0) {
         ctl_command = CHECK_CONF_COMMAND;
-    }else if (strncmp(cmd, "generate", sizeof("generate")) == 0){
+    } else if (strncmp(cmd, "generate", sizeof("generate")) == 0) {
         ctl_command = GENERATE_KEY_COMMAND;
-    }else{
+    } else {
         write_stderr(_("%s: unrecognized operation mode \"%s\"\n"), progname, cmd);
         do_advice();
         exit(1);
@@ -2114,22 +2058,28 @@ get_action_value(CtlCommand ctlCmd, const char* cmd)
 void
 get_node_type_info(const char *type)
 {
-    if (0 == strncmp("coordinator", type, sizeof("coordinator"))){
+    // the number of -Z is greater than 2
+    if (node_type_number >= LARGE_INSTANCE_NUM) {
+        (void)write_stderr("ERROR: The number of -Z must be less than or equal to 2.\n");
+        do_advice();
+        exit(1);
+    }
+    if (0 == strncmp("coordinator", type, sizeof("coordinator"))) {
         nodetype = INSTANCE_COORDINATOR;
         node_type_value[node_type_number++] = INSTANCE_COORDINATOR;
-    }else if (0 == strncmp("datanode", type, sizeof("datanode"))){
+    } else if (0 == strncmp("datanode", type, sizeof("datanode"))) {
         nodetype = INSTANCE_DATANODE;
         node_type_value[node_type_number++] = INSTANCE_DATANODE;
-    }else if (0 == strncmp("cmserver", type, sizeof("cmserver"))){
+    } else if (0 == strncmp("cmserver", type, sizeof("cmserver"))) {
         nodetype = INSTANCE_CMSERVER;
         node_type_value[node_type_number++] = INSTANCE_CMSERVER;
-    }else if (0 == strncmp("cmagent", type, sizeof("cmagent"))){
+    } else if (0 == strncmp("cmagent", type, sizeof("cmagent"))) {
         nodetype = INSTANCE_CMAGENT;
         node_type_value[node_type_number++] = INSTANCE_CMAGENT;
-    }else if (0 == strncmp("gtm", type, sizeof("gtm"))){
+    } else if (0 == strncmp("gtm", type, sizeof("gtm"))) {
         nodetype = INSTANCE_GTM;
         node_type_value[node_type_number++] = INSTANCE_GTM;
-    }else{
+    } else {
         write_stderr(_("%s: unrecognized node type \"%s\"\n"), progname, type);
         do_advice();
         exit(1);
@@ -2139,13 +2089,25 @@ get_node_type_info(const char *type)
 void
 check_ctl_command(CtlCommand ctlCmd, NodeType nodeType)
 {
-    if ((CHECK_CONF_COMMAND == ctlCmd) && (nodeType != INSTANCE_COORDINATOR) && (nodeType != INSTANCE_DATANODE)){
+    if ((CHECK_CONF_COMMAND == ctlCmd) && (nodeType != INSTANCE_COORDINATOR) && (nodeType != INSTANCE_DATANODE)) {
         write_stderr(_("%s: check operation is only supported for \"coordinator\" and \"datanode\"\n"), progname);
         do_help_check_guc();
         exit(1);
     }
 }
 
+void clear_g_incorrect_nodeInfo()
+{
+    uint32 idx = 0;
+    if (NULL == g_incorrect_nodeInfo) {
+        return;
+    }
+    for (idx = 0; idx < g_incorrect_nodeInfo->num; idx++) {
+        GS_FREE(g_incorrect_nodeInfo->nodename_array[idx]);
+    }
+    GS_FREE(g_incorrect_nodeInfo->nodename_array);
+    GS_FREE(g_incorrect_nodeInfo);
+}
 /*
  * @@GaussDB@@
  * Brief            :
@@ -2161,9 +2123,7 @@ int main(int argc, char** argv)
         {"pgdata", required_argument, NULL, 'D'},
         {"keyuser", required_argument, NULL, 'U'},
         {"keymode", required_argument, NULL, 'M'},
-#ifdef ENABLE_MULTIPLE_NODES
         {"lcname", required_argument, NULL, 1},
-#endif
         {NULL, 0, NULL, 0}};
 
     int option_index;
@@ -2183,6 +2143,7 @@ int main(int argc, char** argv)
     progname = PROG_NAME;
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_guc"));
     arraysize = argc - 1;
+    bool is_cluster_init = false;
 
     if (0 != arraysize) {
         config_param = ((char**)pg_malloc_zero(arraysize * sizeof(char*)));
@@ -2217,14 +2178,7 @@ int main(int argc, char** argv)
     optind = 1;
     /* process command-line options */
     while (optind < argc) {
-#ifdef ENABLE_MULTIPLE_NODES
         while ((c = getopt_long(argc, argv, "N:I:D:c:h:Z:U:M:K:S:o:", long_options, &option_index)) != -1) {
-#else
-        bhave_nodetype = true;
-        nodetype = INSTANCE_DATANODE;
-        node_type_value[node_type_number++] = INSTANCE_DATANODE;
-        while ((c = getopt_long(argc, argv, "N:I:D:c:h:U:M:K:S:o:", long_options, &option_index)) != -1) {
-#endif
             switch (c) {
                 case 'D': {
                     GS_FREE(pgdata_D);
@@ -2273,7 +2227,10 @@ int main(int argc, char** argv)
                     is_hba_conf = true;
                     temp_config_parameter = xstrdup(optarg);
                     // init cluster static config
-                    init_gauss_cluster_config();
+                    if (!is_cluster_init) {
+                        init_gauss_cluster_config();
+                        is_cluster_init = true;
+                    }
                     do_hba_analysis(temp_config_parameter);
                     GS_FREE(temp_config_parameter);
                     break;
@@ -2281,7 +2238,6 @@ int main(int argc, char** argv)
                 case 'Z': {
                     bhave_nodetype = true;
                     get_node_type_info(optarg);
-
                     break;
                 }
                 case 'N': {
@@ -2363,7 +2319,7 @@ int main(int argc, char** argv)
                 case 0:
                     /* This covers the long options. */
                     break;
-                    
+
                 case 1: /* lcname */
                     GS_FREE(g_lcname);
                     check_env_value_c(optarg);
@@ -2381,6 +2337,14 @@ int main(int argc, char** argv)
             optind++;
         }
     }
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (!bhave_nodetype) {
+        bhave_nodetype = true;
+        nodetype = INSTANCE_DATANODE;
+        node_type_value[node_type_number++] = INSTANCE_DATANODE;
+    }
+#endif
 
     if (ctl_command == NO_COMMAND) {
         write_stderr(_("%s: no operation specified\n"), progname);
@@ -2430,6 +2394,30 @@ int main(int argc, char** argv)
     // log output redirect
     init_log(PROG_NAME);
 
+    /* print the log about arguments of gs_guc */
+    char arguments[MAX_BUF_SIZE] = {0x00};
+    for (int i = 0; i < argc; i++) {
+        if ((strlen(arguments) + strlen(argv[i])) >= (MAX_BUF_SIZE - 2)) {
+            if (*arguments) {
+                (void)write_log("The gs_guc run with the following arguments: [%s].\n", arguments);
+            }
+            (void)write_log("The gs_guc run with the following arguments: [%s].\n", argv[i]);
+            rc = memset_s(arguments, MAX_BUF_SIZE, 0, MAX_BUF_SIZE - 1);
+            securec_check_c(rc, "\0", "\0");
+            continue;
+        }
+        errno_t rc = strcat_s(arguments, MAX_BUF_SIZE, argv[i]);
+        size_t len = strlen(arguments);
+        if (rc != EOK) {
+            break;
+        }
+        arguments[len] = ' ';
+        arguments[len + 1] = '\0';
+    }
+    if (*arguments) {
+        (void)write_log("The gs_guc run with the following arguments: [%s].\n", arguments);
+    }
+
     if ((true == is_hba_conf) &&
         ((nodetype != INSTANCE_COORDINATOR) && (nodetype != INSTANCE_DATANODE))) {
         write_stderr(_("%s: authentication operation (-h) is not supported for \"gtm\" or \"gtm_proxy\"\n"), progname);
@@ -2440,25 +2428,20 @@ int main(int argc, char** argv)
     if (ctl_command == ENCRYPT_KEY_COMMAND) {
         checkDataDir(pgdata_D);
         gen_cipher_rand_files(key_mode, g_plainkey, key_username, pgdata_D, NULL);
-        write_stderr("gs_guc encrypt %s\n", loginfo);
+        (void)write_log("gs_guc encrypt %s\n", loginfo);
     } else if (ctl_command == GENERATE_KEY_COMMAND) {
         doGenerateOperation(pgdata_D, loginfo);
     } else {
-        // the number of -Z is greater than 2
-        if (node_type_number > LARGE_INSTANCE_NUM) {
-            write_stderr("ERROR: The number of -Z must be less than or equal to 2.\n");
-            exit(1);
-        }
         // the number of -Z is equal to 2
-        else if (node_type_number == LARGE_INSTANCE_NUM) {
+        if (node_type_number == LARGE_INSTANCE_NUM) {
             if (node_type_value[0] == node_type_value[1]) {
-                write_stderr("When the number of -Z is equal to 2, the value must be different.\n");
+                (void)write_stderr("When the number of -Z is equal to 2, the value must be different.\n");
                 exit(1);
             }
 
             for (int index = 0; index < LARGE_INSTANCE_NUM; index++) {
                 if (node_type_value[index] != INSTANCE_COORDINATOR && node_type_value[index] != INSTANCE_DATANODE) {
-                    write_stderr("ERROR: When the number of -Z is equal to 2, the parameter value of -Z must be "
+                    (void)write_stderr("ERROR: When the number of -Z is equal to 2, the parameter value of -Z must be "
                                        "coordinator or datanode.\n");
                     exit(1);
                 }
@@ -2491,6 +2474,13 @@ int main(int argc, char** argv)
 
     nRet = print_guc_result((const char*)nodename);
     GS_FREE(nodename);
+    clear_g_incorrect_nodeInfo();
+    if (is_hba_conf) {
+        free_hba_params();
+    }
+    if (0 != g_remote_command_result) {
+        return 1;
+    }
     if (0 != nRet)
         return 1;
     else
@@ -2511,29 +2501,29 @@ static void checkCMParameter(const char *dataDir, const char *nodeName, const ch
       */
     if (NULL != dataDir &&
         0 != strncmp(dataDir, "cm_instance_data_path",
-                     strlen(dataDir) > strlen("cm_instance_data_path") ? strlen(dataDir) : strlen("cm_instance_data_path"))){
-        write_stderr("ERROR: When the '-Z' parameter is cmserver or cmagent, the -D parameter must be NULL.\n");
+                    strlen(dataDir) > strlen("cm_instance_data_path") ? strlen(dataDir) : strlen("cm_instance_data_path"))) {
+        (void)write_stderr("ERROR: When the '-Z' parameter is cmserver or cmagent, the -D parameter must be NULL.\n");
         exit(1);
-    }else if(instName != NULL && 0 != strncmp(instName, "all" , strlen("all"))){
-        write_stderr("ERROR: When the '-Z' parameter is cmserver or cmagent, -N parameter and -I parameter must be all or NULL at the same time.\n");
+    } else if (instName != NULL && 0 != strncmp(instName, "all" , strlen("all"))) {
+        (void)write_stderr("ERROR: When the '-Z' parameter is cmserver or cmagent, -N parameter and -I parameter must be all or NULL at the same time.\n");
         exit(1);
-    }else if(instName != NULL && 0 == strncmp(instName, "all" , strlen("all")) && nodeName == NULL){
-        write_stderr("ERROR: When the '-Z' parameter is cmserver or cmagent, -N parameter and -I parameter must be all or NULL at the same time.\n");
+    } else if (instName != NULL && 0 == strncmp(instName, "all" , strlen("all")) && nodeName == NULL) {
+        (void)write_stderr("ERROR: When the '-Z' parameter is cmserver or cmagent, -N parameter and -I parameter must be all or NULL at the same time.\n");
         exit(1);
-    }else if(nodeName != NULL && instName != NULL
-             && 0 != strncmp(instName, "all" , strlen("all")) && 0 == strncmp(nodeName, "all" , strlen("all"))){
-        write_stderr("ERROR: When the '-Z' parameter is cmserver or cmagent, -N parameter and -I parameter must be all or NULL at the same time.\n");
+    } else if (nodeName != NULL && instName != NULL
+            && 0 != strncmp(instName, "all" , strlen("all")) && 0 == strncmp(nodeName, "all" , strlen("all"))) {
+        (void)write_stderr("ERROR: When the '-Z' parameter is cmserver or cmagent, -N parameter and -I parameter must be all or NULL at the same time.\n");
         exit(1);
-    }else if(nodeName != NULL && instName != NULL
-             && 0 == strncmp(instName, "all" , strlen("all")) && 0 != strncmp(nodeName, "all" , strlen("all"))){
-        write_stderr("ERROR: When the '-Z' parameter is cmserver or cmagent, -N parameter and -I parameter must be all or NULL at the same time.\n");
+    } else if (nodeName != NULL && instName != NULL
+            && 0 == strncmp(instName, "all" , strlen("all")) && 0 != strncmp(nodeName, "all" , strlen("all"))) {
+        (void)write_stderr("ERROR: When the '-Z' parameter is cmserver or cmagent, -N parameter and -I parameter must be all or NULL at the same time.\n");
         exit(1);
     }
 
     for (i = 0; i < config_value_number; i++)
     {
-        if (NULL == config_value[i]){
-            write_stderr("ERROR: cmserver or cmagent does not support -c \"parameter\".\n");
+        if (NULL == config_value[i]) {
+            (void)write_stderr("ERROR: cmserver or cmagent does not support -c \"parameter\".\n");
             exit(1);
         }
     }
@@ -2549,7 +2539,7 @@ void print_gucinfo(const char* paraname)
 {
     int32 i = 0;
 
-    write_stderr("The details for %s:\n", paraname);
+    (void)write_stderr("The details for %s:\n", paraname);
     for (i = 0; i < (int32)g_real_gucInfo->paramname_num; i++) {
         /* only print the value of paraname */
         if (strcmp(g_real_gucInfo->paramname_array[i], paraname) == 0) {
@@ -2559,7 +2549,7 @@ void print_gucinfo(const char* paraname)
                 j++;
             guc_value[j] = '\0';
 
-            write_stderr("    [%s]  %s=%s  [%s]\n",
+            (void)write_stderr("    [%s]  %s=%s  [%s]\n",
                 g_real_gucInfo->nodename_array[i],
                 g_real_gucInfo->paramname_array[i],
                 g_real_gucInfo->paramvalue_array[i],
@@ -2635,7 +2625,7 @@ void print_check_result()
     for (i = 0; i < config_param_number; i++) {
         index = find_same_paravalue_index(config_param[i]);
         if (-1 != index) {
-            write_stderr("The value of parameter %s is same on all instances.\n", config_param[i]);
+            (void)write_stderr("The value of parameter %s is same on all instances.\n", config_param[i]);
 
             int j;
             j = 0;
@@ -2644,12 +2634,12 @@ void print_check_result()
                 j++;
             guc_value[j] = '\0';
 
-            write_stderr("    %s=%s\n", config_param[i], g_real_gucInfo->paramvalue_array[index]);
+            (void)write_stderr("    %s=%s\n", config_param[i], g_real_gucInfo->paramvalue_array[index]);
         } else {
             print_gucinfo(config_param[i]);
         }
     }
-    write_stderr("\n");
+    (void)write_stderr("\n");
 }
 /*******************************************************************************
  Function    : print_guc_result
@@ -2673,41 +2663,41 @@ int print_guc_result(const char* nodename)
     if ((CHECK_CONF_COMMAND != ctl_command) &&
         nodename != NULL &&
         0 == strncmp(nodename, "all" , strlen("all"))) {
-        write_stderr("\n");
+        (void)write_stderr("\n");
         return 0;
     }
 
     /* if g_remote_connection_signal is false, it means there have some nodes that failed to be connected */
-    if (!g_remote_connection_signal) {
-        write_stderr("Failed node names:\n");
+    if (!g_remote_connection_signal || g_remote_command_result != 0) {
+        (void)write_stderr("Failed node names:\n");
         for (i = 0; i < (int32)g_incorrect_nodeInfo->num; i++)
-            write_stderr("    [%s]\n", g_incorrect_nodeInfo->nodename_array[i]);
+            (void)write_stderr("    [%s]\n", g_incorrect_nodeInfo->nodename_array[i]);
     } else {
         if (CHECK_CONF_COMMAND != ctl_command) {
-            write_stderr("\nTotal instances: %u. Failed instances: %u.\n",
-                g_expect_gucInfo->gucinfo_num,
-                (g_expect_gucInfo->gucinfo_num - g_real_gucInfo->gucinfo_num));
+            (void)write_stderr("\nTotal instances: %d. Failed instances: %d.\n",
+                (int32)g_expect_gucInfo->gucinfo_num,
+                (int32)(g_expect_gucInfo->gucinfo_num - g_real_gucInfo->gucinfo_num));
         } else {
-            write_stderr("\nTotal GUC values: %u. Failed GUC values: %u.\n",
-                g_expect_gucInfo->gucinfo_num,
-                (g_expect_gucInfo->gucinfo_num - g_real_gucInfo->gucinfo_num));
+            (void)write_stderr("\nTotal GUC values: %d. Failed GUC values: %d.\n",
+                (int32)g_expect_gucInfo->gucinfo_num,
+                (int32)(g_expect_gucInfo->gucinfo_num - g_real_gucInfo->gucinfo_num));
         }
 
         /* when g_expect_gucInfo->gucinfo_num is 0, it means there is no instance */
         if (0 == g_expect_gucInfo->gucinfo_num) {
             if (CHECK_CONF_COMMAND == ctl_command)
-                write_stderr("There is no instance.\n\n");
+                (void)write_stderr("There is no instance.\n\n");
             else
-                write_stderr("Success to perform gs_guc!\n\n");
+                (void)write_stderr("Success to perform gs_guc!\n\n");
             return 0;
         }
     }
 
     if (g_expect_gucInfo->gucinfo_num > g_real_gucInfo->gucinfo_num) {
         if (CHECK_CONF_COMMAND == ctl_command)
-            write_stderr("Failed GUC values information:\n");
+            (void)write_stderr("Failed GUC values information:\n");
         else
-            write_stderr("Failed instance information:\n");
+            (void)write_stderr("Failed instance information:\n");
 
         instance_status_array = (int*)pg_malloc_zero(g_expect_gucInfo->gucinfo_num * sizeof(int));
         for (i = 0; i < (int32)g_expect_gucInfo->gucinfo_num; i++)
@@ -2728,32 +2718,32 @@ int print_guc_result(const char* nodename)
         for (i = 0; i < (int32)g_expect_gucInfo->gucinfo_num; i++) {
             if (instance_status_array[i] == 0) {
                 if (CHECK_CONF_COMMAND == ctl_command) {
-                    write_stderr("    [%s]  %s  [%s]\n",
+                    (void)write_stderr("    [%s]  %s  [%s]\n",
                         g_expect_gucInfo->nodename_array[i],
                         g_expect_gucInfo->paramname_array[i],
                         g_expect_gucInfo->gucinfo_array[i]);
                 } else {
-                    write_stderr(
+                    (void)write_stderr(
                         "    [%s]    [%s]\n", g_expect_gucInfo->nodename_array[i], g_expect_gucInfo->gucinfo_array[i]);
                 }
             }
         }
 
-        write_stderr("\n");
+        (void)write_stderr("\n");
         if (CHECK_CONF_COMMAND != ctl_command)
-            write_stderr("Failure to perform gs_guc!\n\n");
+            (void)write_stderr("Failure to perform gs_guc!\n\n");
         GS_FREE(instance_status_array);
         return 1;
     } else {
-        if (g_remote_connection_signal) {
+        if (g_remote_connection_signal && g_remote_command_result == 0) {
             if (CHECK_CONF_COMMAND == ctl_command)
                 print_check_result();
             else
-                write_stderr("Success to perform gs_guc!\n\n");
+                (void)write_stderr("Success to perform gs_guc!\n\n");
             return 0;
         } else {
             if (CHECK_CONF_COMMAND != ctl_command)
-                write_stderr("Failure to perform gs_guc!\n\n");
+                (void)write_stderr("Failure to perform gs_guc!\n\n");
             return 1;
         }
     }
@@ -2858,11 +2848,11 @@ void get_instance_configfile(const char* datadir)
 ******************************************************************************/
 void do_guc_set_reload_for_each_parameter(const char* action_type, const char* data_dir)
 {
-    if (!is_hba_conf){
-        if (SUCCESS != do_gucset(action_type, data_dir)){
+    if (!is_hba_conf) {
+        if (SUCCESS != do_gucset(action_type, data_dir)) {
             return ;
         }
-    }else{
+    } else {
         if (SUCCESS != do_hba_set(action_type))
             return ;
     }
@@ -2894,7 +2884,7 @@ void do_guc_check_for_each_parameter(const char* action_type)
         if (NULL == guc_value) {
             return;
         } else if (strncmp(guc_value, "NoFound", strlen("NoFound")) == 0) {
-            write_stderr(
+            (void)write_stderr(
                 "gs_guc %s: %s: %s=NULL: [%s]\n", action_type, g_local_node_name, config_param[i], gucconf_file);
             g_real_gucInfo->paramvalue_array[g_real_gucInfo->paramvalue_num++] = xstrdup("NULL");
         } else {
@@ -2904,7 +2894,7 @@ void do_guc_check_for_each_parameter(const char* action_type)
                 j++;
             guc_value[j] = '\0';
 
-            write_stderr("gs_guc %s: %s: %s=%s: [%s]\n",
+            (void)write_stderr("gs_guc %s: %s: %s=%s: [%s]\n",
                 action_type,
                 g_local_node_name,
                 config_param[i],
@@ -3088,11 +3078,11 @@ bool isOptLineCommented(const char* optLine)
  */
 void trimBlanksTwoEnds(char** strPtr)
 {
-    size_t strLen = 0;
+    int strLen = 0;
     char* tmpPtr = NULL;
 
     if (NULL == strPtr) {
-        write_stderr(_("strPtr should not be NULL.\n"));
+        (void)write_stderr(_("strPtr should not be NULL.\n"));
         return;
     }
 
@@ -3115,12 +3105,12 @@ void trimBlanksTwoEnds(char** strPtr)
 
 static void check_key_mode(const char* mode)
 {
-    size_t slen = strlen("server");
-    size_t clen = strlen("client");
-    size_t srclen = strlen("source");
+    int slen = strlen("server");
+    int clen = strlen("client");
+    int srclen = strlen("source");
     if (NULL == mode || '\0' == mode[0]) /*never happen in normal case*/
     {
-        write_stderr(_("%s: invalid key mode,please check it\n"), progname);
+        (void)write_stderr(_("%s: invalid key mode,please check it\n"), progname);
         do_advice();
         exit(1);
     }
@@ -3131,7 +3121,7 @@ static void check_key_mode(const char* mode)
     } else if (0 == strncmp(mode, "source", srclen) && '\0' == mode[srclen]) {
         key_mode = SOURCE_MODE;
     } else {
-        write_stderr(_("%s: the options of -M is not recognized\n"), progname);
+        (void)write_stderr(_("%s: the options of -M is not recognized\n"), progname);
         do_advice();
         exit(1);
     }
@@ -3140,19 +3130,26 @@ static void check_key_mode(const char* mode)
 /* check whether the encryption options is valid*/
 static void check_encrypt_options(void)
 {
-    if (ENCRYPT_KEY_COMMAND != ctl_command)
+    if (ENCRYPT_KEY_COMMAND != ctl_command) {
         return;
-    if (NULL == g_plainkey) {
-        write_stderr(_("%s: the encrypt operation must specify key!\n"), progname);
-        do_advice();
-        exit(1);
     }
-    if (SERVER_MODE == key_mode && NULL != key_username) {
-        write_stderr(
+    if (g_plainkey == NULL) {
+        g_plainkey = simple_prompt("Password: ", MAX_KEY_LEN + 1, false);
+        if (!check_input_password(g_plainkey)) {
+            write_stderr(_("%s: The input key must be %d~%d bytes and "
+                "contain at least three kinds of characters!\n"),
+                progname, MIN_KEY_LEN, MAX_KEY_LEN);
+            do_advice();
+            exit(1);
+        }
+    }
+    if (key_mode == SERVER_MODE && key_username != NULL) {
+        (void)write_stderr(
             _("%s: In server mode,the encrypt operation will ignore the specified user:%s\n"), progname, key_username);
     }
-    if (SOURCE_MODE == key_mode && NULL != key_username) {
-        write_stderr(
+    if (key_mode == SOURCE_MODE && key_username != NULL) {
+        (void)write_stderr(
             _("%s: In source mode,the encrypt operation will ignore the specified user:%s\n"), progname, key_username);
     }
 }
+

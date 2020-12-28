@@ -33,7 +33,7 @@
 #define DEFAULT_OVERLAP_SEL 0.01
 
 /* Default selectivity for given operator */
-#define DEFAULT_SEL(operatorType) ((operatorType) == OID_ARRAY_OVERLAP_OP ? DEFAULT_OVERLAP_SEL : DEFAULT_CONTAIN_SEL)
+#define DEFAULT_SEL(operatorType) (((operatorType) == OID_ARRAY_OVERLAP_OP) ? DEFAULT_OVERLAP_SEL : DEFAULT_CONTAIN_SEL)
 
 static Selectivity calc_arraycontsel(VariableStatData* vardata, Datum constval, Oid elemtype, Oid operatorType);
 static Selectivity mcelem_array_selec(ArrayType* array, TypeCacheEntry* typentry, Datum* mcelem, int nmcelem,
@@ -109,12 +109,11 @@ Selectivity scalararraysel_containment(
     /*
      * If the operator is <>, swap ANY/ALL, then invert the result later.
      */
-    if (!isEquality) {
+    if (!isEquality)
         useOr = !useOr;
-    }
 
     /* Get array element stats for var, if available */
-    if (HeapTupleIsValid(vardata.statsTuple) && StatisticProcSecurityCheck(&vardata, cmpfunc->fn_oid)) {
+    if (HeapTupleIsValid(vardata.statsTuple)) {
         Form_pg_statistic stats;
         Datum* values = NULL;
         int nvalues;
@@ -126,13 +125,27 @@ Selectivity scalararraysel_containment(
         stats = (Form_pg_statistic)GETSTRUCT(vardata.statsTuple);
 
         /* MCELEM will be an array of same type as element */
-        if (get_attstatsslot(vardata.statsTuple, elemtype, vardata.atttypmod,
-                STATISTIC_KIND_MCELEM, InvalidOid, NULL, &values, &nvalues,
-                &numbers, &nnumbers)) {
+        if (get_attstatsslot(vardata.statsTuple,
+                elemtype,
+                vardata.atttypmod,
+                STATISTIC_KIND_MCELEM,
+                InvalidOid,
+                NULL,
+                &values,
+                &nvalues,
+                &numbers,
+                &nnumbers)) {
             /* For ALL case, also get histogram of distinct-element counts */
-            if (useOr || !get_attstatsslot(vardata.statsTuple, elemtype,
-                             vardata.atttypmod, STATISTIC_KIND_DECHIST,
-                             InvalidOid, NULL, NULL, NULL, &hist, &nhist)) {
+            if (useOr || !get_attstatsslot(vardata.statsTuple,
+                             elemtype,
+                             vardata.atttypmod,
+                             STATISTIC_KIND_DECHIST,
+                             InvalidOid,
+                             NULL,
+                             NULL,
+                             NULL,
+                             &hist,
+                             &nhist)) {
                 hist = NULL;
                 nhist = 0;
             }
@@ -149,7 +162,8 @@ Selectivity scalararraysel_containment(
                 selec = mcelem_array_contained_selec(
                     values, nvalues, numbers, nnumbers, &constval, 1, hist, nhist, OID_ARRAY_CONTAINED_OP, cmpfunc);
 
-            pfree_ext(hist);
+            if (hist != NULL)
+                free_attstatsslot(elemtype, NULL, 0, hist, nhist);
             free_attstatsslot(elemtype, values, nvalues, numbers, nnumbers);
         } else {
             /* No most-common-elements info, so do without */
@@ -308,7 +322,7 @@ static Selectivity calc_arraycontsel(VariableStatData* vardata, Datum constval, 
      */
     array = DatumGetArrayTypeP(constval);
 
-    if (HeapTupleIsValid(vardata->statsTuple) && StatisticProcSecurityCheck(vardata, cmpfunc->fn_oid)) {
+    if (HeapTupleIsValid(vardata->statsTuple)) {
         Form_pg_statistic stats;
         Datum* values = NULL;
         int nvalues;
@@ -320,15 +334,30 @@ static Selectivity calc_arraycontsel(VariableStatData* vardata, Datum constval, 
         stats = (Form_pg_statistic)GETSTRUCT(vardata->statsTuple);
 
         /* MCELEM will be an array of same type as column */
-        if (get_attstatsslot(vardata->statsTuple, elemtype, vardata->atttypmod,
-            STATISTIC_KIND_MCELEM, InvalidOid, NULL, &values, &nvalues, &numbers, &nnumbers)) {
+        if (get_attstatsslot(vardata->statsTuple,
+                elemtype,
+                vardata->atttypmod,
+                STATISTIC_KIND_MCELEM,
+                InvalidOid,
+                NULL,
+                &values,
+                &nvalues,
+                &numbers,
+                &nnumbers)) {
             /*
              * For "array <@ const" case we also need histogram of distinct
              * element counts.
              */
             if (operatorType != OID_ARRAY_CONTAINED_OP || !get_attstatsslot(vardata->statsTuple,
-                                               elemtype, vardata->atttypmod, STATISTIC_KIND_DECHIST,
-                                               InvalidOid, NULL, NULL, NULL, &hist, &nhist)) {
+                                                              elemtype,
+                                                              vardata->atttypmod,
+                                                              STATISTIC_KIND_DECHIST,
+                                                              InvalidOid,
+                                                              NULL,
+                                                              NULL,
+                                                              NULL,
+                                                              &hist,
+                                                              &nhist)) {
                 hist = NULL;
                 nhist = 0;
             }
@@ -337,7 +366,8 @@ static Selectivity calc_arraycontsel(VariableStatData* vardata, Datum constval, 
             selec = mcelem_array_selec(
                 array, typentry, values, nvalues, numbers, nnumbers, hist, nhist, operatorType, cmpfunc);
 
-            pfree_ext(hist);
+            if (hist != NULL)
+                free_attstatsslot(elemtype, NULL, 0, hist, nhist);
             free_attstatsslot(elemtype, values, nvalues, numbers, nnumbers);
         } else {
             /* No most-common-elements info, so do without */
@@ -383,18 +413,23 @@ static Selectivity mcelem_array_selec(ArrayType* array, TypeCacheEntry* typentry
      * Prepare constant array data for sorting.  Sorting lets us find unique
      * elements and efficiently merge with the MCELEM array.
      */
-    deconstruct_array(array, typentry->type_id, typentry->typlen, typentry->typbyval,
-        typentry->typalign, &elem_values, &elem_nulls, &num_elems);
+    deconstruct_array(array,
+        typentry->type_id,
+        typentry->typlen,
+        typentry->typbyval,
+        typentry->typalign,
+        &elem_values,
+        &elem_nulls,
+        &num_elems);
 
     /* Collapse out any null elements */
     nonnull_nitems = 0;
     null_present = false;
     for (i = 0; i < num_elems; i++) {
-        if (elem_nulls[i]) {
+        if (elem_nulls[i])
             null_present = true;
-        } else {
+        else
             elem_values[nonnull_nitems++] = elem_values[i];
-        }
     }
 
     /*
@@ -475,7 +510,7 @@ static Selectivity mcelem_array_contain_overlap_selec(Datum* mcelem, int nmcelem
     }
 
     /* Decide whether it is faster to use binary search or not. */
-    if (nitems * floor_log2((uint32)nmcelem) < nmcelem + nitems)
+    if ((int64)nitems * floor_log2((uint32)nmcelem) < (int64)nmcelem + nitems)
         use_bsearch = true;
     else
         use_bsearch = false;
@@ -509,12 +544,12 @@ static Selectivity mcelem_array_contain_overlap_selec(Datum* mcelem, int nmcelem
         } else {
             while (mcelem_index < nmcelem) {
                 int cmp = element_compare(&mcelem[mcelem_index], &array_data[i], cmpfunc);
-                if (cmp < 0) {
+
+                if (cmp < 0)
                     mcelem_index++;
-                } else {
-                    if (cmp == 0) {
+                else {
+                    if (cmp == 0)
                         match = true; /* mcelem is found */
-                    }
                     break;
                 }
             }
@@ -600,13 +635,9 @@ static Selectivity mcelem_array_contain_overlap_selec(Datum* mcelem, int nmcelem
 static Selectivity mcelem_array_contained_selec(Datum* mcelem, int nmcelem, float4* numbers, int nnumbers,
     Datum* array_data, int nitems, float4* hist, int nhist, Oid operatorType, FmgrInfo* cmpfunc)
 {
-    int mcelem_index;
-    int i;
-    int unique_nitems = 0;
+    int mcelem_index, i, unique_nitems = 0;
     float selec, minfreq, nullelem_freq;
-    float* dist = NULL;
-    float* mcelem_dist = NULL;
-    float* hist_part = NULL;
+    float *dist = NULL, *mcelem_dist = NULL, *hist_part = NULL;
     float avg_count, mult, rest;
     float* elem_selec = NULL;
 
@@ -674,9 +705,8 @@ static Selectivity mcelem_array_contained_selec(Datum* mcelem, int nmcelem, floa
                 rest -= numbers[mcelem_index];
                 mcelem_index++;
             } else {
-                if (cmp == 0) {
+                if (cmp == 0)
                     match = true; /* mcelem is found */
-                }
                 break;
             }
         }
@@ -770,9 +800,8 @@ static Selectivity mcelem_array_contained_selec(Datum* mcelem, int nmcelem, floa
          * matching from assumption of independent element occurrence with the
          * condition that distinct element count = i.
          */
-        if (mcelem_dist[i] > 0) {
+        if (mcelem_dist[i] > 0)
             selec += hist_part[i] * mult * dist[i] / mcelem_dist[i];
-        }
     }
 
     pfree_ext(dist);
@@ -802,10 +831,8 @@ static Selectivity mcelem_array_contained_selec(Datum* mcelem, int nmcelem, floa
 static float* calc_hist(const float4* hist, int nhist, int n)
 {
     float* hist_part = NULL;
-    int k;
-    int i = 0;
-    float prev_interval = 0;
-    float next_interval;
+    int k, i = 0;
+    float prev_interval = 0, next_interval;
     float frac;
 
     hist_part = (float*)palloc((n + 1) * sizeof(float));
@@ -836,11 +863,10 @@ static float* calc_hist(const float4* hist, int nhist, int n)
             float val;
 
             /* Find length between current histogram value and the next one */
-            if (i < nhist) {
+            if (i < nhist)
                 next_interval = hist[i] - hist[i - 1];
-            } else {
+            else
                 next_interval = 0;
-            }
 
             /*
              * count - 1 histogram boxes contain k exclusively.  They
@@ -848,22 +874,19 @@ static float* calc_hist(const float4* hist, int nhist, int n)
              * factor in the partial histogram boxes on either side.
              */
             val = (float)(count - 1);
-            if (next_interval > 0) {
+            if (next_interval > 0)
                 val += 0.5f / next_interval;
-            }
-            if (prev_interval > 0) {
+            if (prev_interval > 0)
                 val += 0.5f / prev_interval;
-            }
             hist_part[k] = frac * val;
 
             prev_interval = next_interval;
         } else {
             /* k does not appear as an exact histogram bound. */
-            if (prev_interval > 0) {
+            if (prev_interval > 0)
                 hist_part[k] = frac / prev_interval;
-            } else {
+            else
                 hist_part[k] = 0.0f;
-            }
         }
     }
 
@@ -888,9 +911,7 @@ static float* calc_hist(const float4* hist, int nhist, int n)
  */
 static float* calc_distr(const float* p, int n, int m, float rest)
 {
-    float* row = NULL;
-    float* prev_row = NULL;
-    float* tmp = NULL;
+    float *row = NULL, *prev_row = NULL, *tmp = NULL;
     int i, j;
 
     /*
@@ -914,12 +935,10 @@ static float* calc_distr(const float* p, int n, int m, float rest)
         for (j = 0; j <= i && j <= m; j++) {
             float val = 0.0f;
 
-            if (j < i) {
+            if (j < i)
                 val += prev_row[j] * (1.0f - t);
-            }
-            if (j > 0) {
+            if (j > 0)
                 val += prev_row[j - 1] * t;
-            }
             row[j] = val;
         }
     }
@@ -937,9 +956,8 @@ static float* calc_distr(const float* p, int n, int m, float rest)
         row = prev_row;
         prev_row = tmp;
 
-        for (i = 0; i <= m; i++) {
+        for (i = 0; i <= m; i++)
             row[i] = 0.0f;
-        }
 
         /* Value of Poisson distribution for 0 occurrences */
         t = exp(-rest);
@@ -949,9 +967,8 @@ static float* calc_distr(const float* p, int n, int m, float rest)
          * Poisson distribution.
          */
         for (i = 0; i <= m; i++) {
-            for (j = 0; j <= m - i; j++) {
+            for (j = 0; j <= m - i; j++)
                 row[j + i] += prev_row[j] * t;
-            }
 
             /* Get Poisson distribution value for (i + 1) occurrences */
             t *= rest / (float)(i + 1);
@@ -1000,10 +1017,7 @@ static int floor_log2(uint32 n)
  */
 static bool find_next_mcelem(Datum* mcelem, int nmcelem, Datum value, int* index, FmgrInfo* cmpfunc)
 {
-    int l = *index;
-    int r = nmcelem - 1;
-    int i;
-    int res;
+    int l = *index, r = nmcelem - 1, i, res;
 
     while (l <= r) {
         i = (l + r) / 2;
@@ -1011,11 +1025,10 @@ static bool find_next_mcelem(Datum* mcelem, int nmcelem, Datum value, int* index
         if (res == 0) {
             *index = i;
             return true;
-        } else if (res < 0) {
+        } else if (res < 0)
             l = i + 1;
-        } else {
+        else
             r = i - 1;
-        }
     }
     *index = l;
     return false;
@@ -1048,11 +1061,10 @@ static int float_compare_desc(const void* key1, const void* key2)
     float d1 = *((const float*)key1);
     float d2 = *((const float*)key2);
 
-    if (d1 > d2) {
+    if (d1 > d2)
         return -1;
-    } else if (d1 < d2) {
+    else if (d1 < d2)
         return 1;
-    } else {
+    else
         return 0;
-    }
 }

@@ -49,9 +49,9 @@ Datum uuid_out(PG_FUNCTION_ARGS)
          * hexadecimal characters, with each group is separated by a hyphen
          * ("-"). Therefore, add the hyphens at the appropriate places here.
          */
-        if (i == 4 || i == 6 || i == 8 || i == 10) {
+        if (i == 4 || i == 6 || i == 8 || i == 10)
             appendStringInfoChar(&buf, '-');
-        }
+
         hi = uuid->data[i] >> 4;
         lo = uuid->data[i] & 0x0F;
 
@@ -83,33 +83,30 @@ static void string_to_uuid(const char* source, pg_uuid_t* uuid)
     for (i = 0; i < UUID_LEN; i++) {
         char str_buf[3];
 
-        if (src[0] == '\0' || src[1] == '\0') {
+        if (src[0] == '\0' || src[1] == '\0')
             goto syntax_error;
-        }
+
         rc = memcpy_s(str_buf, sizeof(str_buf), src, 2);
         securec_check(rc, "\0", "\0");
 
-        if (!isxdigit((unsigned char)str_buf[0]) || !isxdigit((unsigned char)str_buf[1])) {
+        if (!isxdigit((unsigned char)str_buf[0]) || !isxdigit((unsigned char)str_buf[1]))
             goto syntax_error;
-        }
+
         str_buf[2] = '\0';
         uuid->data[i] = (unsigned char)strtoul(str_buf, NULL, 16);
         src += 2;
-        if (src[0] == '-' && (i % 2) == 1 && i < UUID_LEN - 1) {
+        if (src[0] == '-' && (i % 2) == 1 && i < UUID_LEN - 1)
             src++;
-        }
     }
 
     if (braces) {
-        if (*src != '}') {
+        if (*src != '}')
             goto syntax_error;
-        }
         src++;
     }
 
-    if (*src != '\0') {
+    if (*src != '\0')
         goto syntax_error;
-    }
 
     return;
 

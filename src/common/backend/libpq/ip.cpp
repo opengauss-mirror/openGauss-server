@@ -112,8 +112,9 @@ void pg_freeaddrinfo_all(int hint_ai_family, struct addrinfo* ai)
 #endif /* HAVE_UNIX_SOCKETS */
     {
         /* struct was built by getaddrinfo() */
-        if (ai != NULL)
+        if (ai != NULL) {
             freeaddrinfo(ai);
+        }
     }
 }
 
@@ -139,9 +140,9 @@ int pg_getnameinfo_all(
 
     if (rc != 0) {
         if (node != NULL)
-            strlcpy(node, "???", nodelen);
+            strlcpy(node, "\?\?\?", nodelen);
         if (service != NULL)
-            strlcpy(service, "???", servicelen);
+            strlcpy(service, "\?\?\?", servicelen);
     }
 
     return rc;
@@ -191,7 +192,8 @@ static int getaddrinfo_unix(const char* path, const struct addrinfo* hintsp, str
 #ifdef FRONTEND
     aip = (addrinfo*)calloc(1, sizeof(struct addrinfo));
 #else
-    aip = (addrinfo*)MemoryContextAllocZero(u_sess->top_mem_cxt, 1 * sizeof(struct addrinfo));
+    aip = (addrinfo*)MemoryContextAllocZero(
+        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION), 1 * sizeof(struct addrinfo));
 #endif
     if (aip == NULL)
         return EAI_MEMORY;
@@ -199,7 +201,8 @@ static int getaddrinfo_unix(const char* path, const struct addrinfo* hintsp, str
 #ifdef FRONTEND
     unp = (sockaddr_un*)calloc(1, sizeof(struct sockaddr_un));
 #else
-    unp = (sockaddr_un*)MemoryContextAllocZero(u_sess->top_mem_cxt, 1 * sizeof(struct sockaddr_un));
+    unp = (sockaddr_un*)MemoryContextAllocZero(
+        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION), 1 * sizeof(struct sockaddr_un));
 #endif
     if (unp == NULL) {
 #ifdef FRONTEND
@@ -240,23 +243,27 @@ static int getnameinfo_unix(
     int ret = -1;
 
     /* Invalid arguments. */
-    if (sa == NULL || sa->sun_family != AF_UNIX || (node == NULL && service == NULL))
+    if (sa == NULL || sa->sun_family != AF_UNIX || (node == NULL && service == NULL)) {
         return EAI_FAIL;
+    }
 
     /* We don't support those. */
-    if (((node != NULL) && !(flags & NI_NUMERICHOST)) || ((service != NULL) && !(flags & NI_NUMERICSERV)))
+    if (((node != NULL) && !(flags & NI_NUMERICHOST)) || ((service != NULL) && !(flags & NI_NUMERICSERV))) {
         return EAI_FAIL;
+    }
 
     if (node != NULL) {
         ret = snprintf_s(node, nodelen, nodelen - 1, "%s", "[local]");
-        if (ret == -1)
+        if (ret == -1) {
             return EAI_MEMORY;
+        }
     }
 
     if (service != NULL) {
         ret = snprintf_s(service, servicelen, servicelen - 1, "%s", sa->sun_path);
-        if (ret == -1)
+        if (ret == -1) {
             return EAI_MEMORY;
+        }
     }
 
     return 0;
@@ -272,25 +279,29 @@ static int getnameinfo_unix(
 int pg_range_sockaddr(
     const struct sockaddr_storage* addr, const struct sockaddr_storage* netaddr, const struct sockaddr_storage* netmask)
 {
-    if (addr->ss_family == AF_INET)
+    if (addr->ss_family == AF_INET) {
         return range_sockaddr_AF_INET(
             (const struct sockaddr_in*)addr, (const struct sockaddr_in*)netaddr, (const struct sockaddr_in*)netmask);
+    }
 #ifdef HAVE_IPV6
-    else if (addr->ss_family == AF_INET6)
+    else if (addr->ss_family == AF_INET6) {
         return range_sockaddr_AF_INET6(
             (const struct sockaddr_in6*)addr, (const struct sockaddr_in6*)netaddr, (const struct sockaddr_in6*)netmask);
+    }
 #endif
-    else
+    else {
         return 0;
+    }
 }
 
 static int range_sockaddr_AF_INET(
     const struct sockaddr_in* addr, const struct sockaddr_in* netaddr, const struct sockaddr_in* netmask)
 {
-    if (((addr->sin_addr.s_addr ^ netaddr->sin_addr.s_addr) & netmask->sin_addr.s_addr) == 0)
+    if (((addr->sin_addr.s_addr ^ netaddr->sin_addr.s_addr) & netmask->sin_addr.s_addr) == 0) {
         return 1;
-    else
+    } else {
         return 0;
+    }
 }
 
 #ifdef HAVE_IPV6
@@ -301,8 +312,9 @@ static int range_sockaddr_AF_INET6(
     int i;
 
     for (i = 0; i < 16; i++) {
-        if (((addr->sin6_addr.s6_addr[i] ^ netaddr->sin6_addr.s6_addr[i]) & netmask->sin6_addr.s6_addr[i]) != 0)
+        if (((addr->sin6_addr.s6_addr[i] ^ netaddr->sin6_addr.s6_addr[i]) & netmask->sin6_addr.s6_addr[i]) != 0) {
             return 0;
+        }
     }
 
     return 1;
@@ -471,21 +483,24 @@ static void run_ifaddr_callback(PgIfAddrCallback callback, void* cb_data, struct
 {
     struct sockaddr_storage fullmask;
 
-    if (addr == NULL)
+    if (addr == NULL) {
         return;
+    }
 
     /* Check that the mask is valid */
     if (mask != NULL) {
         if (mask->sa_family != addr->sa_family) {
             mask = NULL;
         } else if (mask->sa_family == AF_INET) {
-            if (((struct sockaddr_in*)mask)->sin_addr.s_addr == INADDR_ANY)
+            if (((struct sockaddr_in*)mask)->sin_addr.s_addr == INADDR_ANY) {
                 mask = NULL;
+            }
         }
 #ifdef HAVE_IPV6
         else if (mask->sa_family == AF_INET6) {
-            if (IN6_IS_ADDR_UNSPECIFIED(&((struct sockaddr_in6*)mask)->sin6_addr))
+            if (IN6_IS_ADDR_UNSPECIFIED(&((struct sockaddr_in6*)mask)->sin6_addr)) {
                 mask = NULL;
+            }
         }
 #endif
     }
@@ -534,12 +549,12 @@ int pg_foreach_ifaddr(PgIfAddrCallback callback, void* cb_data)
         ptr = (INTERFACE_INFO*)malloc(sizeof(INTERFACE_INFO) * n_ii);
 #else
         ptr = (INTERFACE_INFO*)malloc(sizeof(INTERFACE_INFO) * n_ii);
-#endif /*WIN32*/
         if (ptr != NULL && ii != NULL) {
             rc = memcpy_s(ptr, sizeof(INTERFACE_INFO) * n_ii, ii, sizeof(INTERFACE_INFO) * (n_ii - ip_len));
             securec_check(rc, "\0", "\0");
             free(ii);
         }
+#endif /*WIN32*/
 #else
         ptr = repalloc(ii, sizeof(INTERFACE_INFO) * n_ii);
 #endif

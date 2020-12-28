@@ -1,0 +1,599 @@
+create table pt_tbl_test(id integer, name varchar(20), gender boolean);
+insert into pt_tbl_test (id, name, gender) values (1, 'zhangsan', true);
+insert into pt_tbl_test (id, name, gender) values (2, 'lisi', false);
+insert into pt_tbl_test (id, name, gender) values (3, 'wangwu', true);
+select * from pt_tbl_test where id = 1;
+ id |   name   | gender 
+----+----------+--------
+  1 | zhangsan | t
+(1 row)
+
+delete from pt_tbl_test where id = 1;
+select * from pt_tbl_test where id = 1;
+ id | name | gender 
+----+------+--------
+(0 rows)
+
+drop table pt_tbl_test;
+CREATE TABLE fq_tbl_test
+(
+ gid INTEGER,
+ gvalue INTEGER,
+ grange DECIMAL(7,2)
+)
+PARTITION BY RANGE (gvalue)
+(
+ PARTITION P1 VALUES LESS THAN(10),
+ PARTITION P2 VALUES LESS THAN(20),
+ PARTITION P3 VALUES LESS THAN(30),
+ PARTITION P4 VALUES LESS THAN(40),
+ PARTITION P5 VALUES LESS THAN(50),
+ PARTITION P6 VALUES LESS THAN(60),
+ PARTITION P7 VALUES LESS THAN(70),
+ PARTITION P8 VALUES LESS THAN(MAXVALUE)
+);
+insert into fq_tbl_test select v, v, v/3.1415926 from generate_series(1, 100) as v;
+select * from fq_tbl_test where gid = 1;
+ gid | gvalue | grange 
+-----+--------+--------
+   1 |      1 |    .32
+(1 row)
+
+delete from fq_tbl_test where gid = 1;
+select * from fq_tbl_test where gid = 1;
+ gid | gvalue | grange 
+-----+--------+--------
+(0 rows)
+
+drop table fq_tbl_test;
+create table up_pt_tbl_test(id integer, name varchar(20), gender boolean);
+insert into up_pt_tbl_test (id, name, gender) values (1, 'zhangsan', true);
+insert into up_pt_tbl_test (id, name, gender) values (2, 'lisi', false);
+insert into up_pt_tbl_test (id, name, gender) values (3, 'wangwu', true);
+select * from up_pt_tbl_test where id = 1;
+ id |   name   | gender 
+----+----------+--------
+  1 | zhangsan | t
+(1 row)
+
+update up_pt_tbl_test set name = 'likui' where id =  1;
+select * from up_pt_tbl_test where id = 1;
+ id | name  | gender 
+----+-------+--------
+  1 | likui | t
+(1 row)
+
+update up_pt_tbl_test set id = 22 where name = 'lisi';
+drop table up_pt_tbl_test;
+CREATE TABLE up_fq_tbl_test
+(
+ gid INTEGER,
+ gvalue INTEGER,
+ grange DECIMAL(7,2)
+)
+PARTITION BY RANGE (gvalue)
+(
+ PARTITION P1 VALUES LESS THAN(10),
+ PARTITION P2 VALUES LESS THAN(20),
+ PARTITION P3 VALUES LESS THAN(30),
+ PARTITION P4 VALUES LESS THAN(40),
+ PARTITION P5 VALUES LESS THAN(50),
+ PARTITION P6 VALUES LESS THAN(60),
+ PARTITION P7 VALUES LESS THAN(70),
+ PARTITION P8 VALUES LESS THAN(MAXVALUE)
+);
+insert into up_fq_tbl_test select v, v, v/3.1415926 from generate_series(1, 100) as v;
+select count(*) from up_fq_tbl_test partition(P1);
+ count 
+-------
+     9
+(1 row)
+
+select count(*) from up_fq_tbl_test partition(P8);
+ count 
+-------
+    31
+(1 row)
+
+--modify partition key
+update up_fq_tbl_test set gvalue = 555 where gid = 5;
+select count(*) from up_fq_tbl_test partition(P1);
+ count 
+-------
+     8
+(1 row)
+
+select count(*) from up_fq_tbl_test partition(P8);
+ count 
+-------
+    32
+(1 row)
+
+--modify non partition key
+update up_fq_tbl_test set grange = 10000 where gid = 5;
+select count(*) from up_fq_tbl_test partition(P1);
+ count 
+-------
+     8
+(1 row)
+
+select count(*) from up_fq_tbl_test partition(P8);
+ count 
+-------
+    32
+(1 row)
+
+drop table up_fq_tbl_test;
+----the partition relation enable row movement
+CREATE TABLE up_fq_tbl_test
+(
+ gid INTEGER,
+ gvalue INTEGER,
+ grange DECIMAL(7,2)
+)
+PARTITION BY RANGE (gvalue)
+(
+ PARTITION P1 VALUES LESS THAN(10),
+ PARTITION P2 VALUES LESS THAN(20),
+ PARTITION P3 VALUES LESS THAN(30),
+ PARTITION P4 VALUES LESS THAN(40),
+ PARTITION P5 VALUES LESS THAN(50),
+ PARTITION P6 VALUES LESS THAN(60),
+ PARTITION P7 VALUES LESS THAN(70),
+ PARTITION P8 VALUES LESS THAN(MAXVALUE)
+)enable row movement;
+insert into up_fq_tbl_test select v, v, v/3.1415926 from generate_series(1, 100) as v;
+select count(*) from up_fq_tbl_test partition(P1);
+ count 
+-------
+     9
+(1 row)
+
+select count(*) from up_fq_tbl_test partition(P8);
+ count 
+-------
+    31
+(1 row)
+
+--modify partition key
+update up_fq_tbl_test set gvalue = 555 where gid = 5 ;
+select count(*) from up_fq_tbl_test partition(P1);
+ count 
+-------
+     8
+(1 row)
+
+select count(*) from up_fq_tbl_test partition(P8);
+ count 
+-------
+    32
+(1 row)
+
+--modify non partition key
+update up_fq_tbl_test set grange = 10000 where gid = 5;
+select count(*) from up_fq_tbl_test partition(P1);
+ count 
+-------
+     8
+(1 row)
+
+select count(*) from up_fq_tbl_test partition(P8);
+ count 
+-------
+    32
+(1 row)
+
+drop table up_fq_tbl_test;
+--Add some testcase to test update the index column twice or more times and query results with index scan
+--check the result is the latest one or not
+---heap relation
+create table twice_up_tbl_test(id integer, name varchar(20), gender boolean);
+create index twice_up_tbl_test_idx on twice_up_tbl_test(name);
+insert into twice_up_tbl_test (id, name, gender) values (1, 'zhangsan', true);
+insert into twice_up_tbl_test (id, name, gender) values (2, 'lisi', false);
+insert into twice_up_tbl_test (id, name, gender) values (3, 'wangwu', true);
+select * from twice_up_tbl_test where name = 'zhangsan';
+ id |   name   | gender 
+----+----------+--------
+  1 | zhangsan | t
+(1 row)
+
+update twice_up_tbl_test set name = 'likui' where name = 'zhangsan';
+select * from twice_up_tbl_test where name = 'zhangsan';
+ id | name | gender 
+----+------+--------
+(0 rows)
+
+select * from twice_up_tbl_test where name = 'likui';
+ id | name  | gender 
+----+-------+--------
+  1 | likui | t
+(1 row)
+
+update twice_up_tbl_test set name = 'xxx' where name = 'likui';
+select * from twice_up_tbl_test where name = 'likui';
+ id | name | gender 
+----+------+--------
+(0 rows)
+
+select * from twice_up_tbl_test where name = 'xxx';
+ id | name | gender 
+----+------+--------
+  1 | xxx  | t
+(1 row)
+
+update twice_up_tbl_test set name = 'ppp' where name = 'xxx';
+select * from twice_up_tbl_test where name = 'xxx';
+ id | name | gender 
+----+------+--------
+(0 rows)
+
+select * from twice_up_tbl_test where name = 'ppp';
+ id | name | gender 
+----+------+--------
+  1 | ppp  | t
+(1 row)
+
+update twice_up_tbl_test set name = 'qqq' where name = 'ppp';
+select * from twice_up_tbl_test order by id;
+ id |  name  | gender 
+----+--------+--------
+  1 | qqq    | t
+  2 | lisi   | f
+  3 | wangwu | t
+(3 rows)
+
+drop table twice_up_tbl_test;
+----range partiton relation
+CREATE TABLE twice_up_goo
+(
+ gid INTEGER,
+ gvalue INTEGER,
+ grange DECIMAL(7,2)
+)
+PARTITION BY RANGE (gvalue)
+(
+ PARTITION P1 VALUES LESS THAN(10),
+ PARTITION P2 VALUES LESS THAN(20),
+ PARTITION P3 VALUES LESS THAN(30),
+ PARTITION P4 VALUES LESS THAN(40),
+ PARTITION P5 VALUES LESS THAN(50),
+ PARTITION P6 VALUES LESS THAN(60),
+ PARTITION P7 VALUES LESS THAN(70),
+ PARTITION P8 VALUES LESS THAN(MAXVALUE)
+)enable row movement;
+create index twice_up_tbl_test_idx on twice_up_goo(gvalue) LOCAL;
+insert into twice_up_goo select v, v, v/3.1415926 from generate_series(1, 100) as v;
+select * from twice_up_goo where gvalue = 1;
+ gid | gvalue | grange 
+-----+--------+--------
+   1 |      1 |    .32
+(1 row)
+
+update twice_up_goo set gvalue = 12345 where gvalue = 1;
+select * from twice_up_goo where gvalue = 1;
+ gid | gvalue | grange 
+-----+--------+--------
+(0 rows)
+
+select * from twice_up_goo where gvalue = 12345;
+ gid | gvalue | grange 
+-----+--------+--------
+   1 |  12345 |    .32
+(1 row)
+
+update twice_up_goo set gvalue = 23456 where gvalue = 12345;
+select * from twice_up_goo where gvalue = 12345;
+ gid | gvalue | grange 
+-----+--------+--------
+(0 rows)
+
+select * from twice_up_goo where gvalue = 23456;
+ gid | gvalue | grange 
+-----+--------+--------
+   1 |  23456 |    .32
+(1 row)
+
+drop table twice_up_goo;
+---core problem
+CREATE TYPE heapmood AS ENUM ('sad', 'ok', 'happy');
+CREATE TABLE heap_array_tab 
+(a int, 
+ b heapmood[],
+ c int[]
+ )
+PARTITION BY RANGE (a) 
+(
+ partition p1 VALUES less than(100),
+ partition p2 VALUES less than(maxvalue)
+ ) enable row movement;
+INSERT INTO heap_array_tab(a,b[0],c[0]) VALUES(1,'happy',1);
+INSERT INTO heap_array_tab(a,b[1], c[1]) VALUES(2,'sad',2);
+ANALYZE heap_array_tab;
+SELECT * FROM heap_array_tab ORDER BY 1,2,3;
+ a |       b       |     c     
+---+---------------+-----------
+ 1 | [0:0]={happy} | [0:0]={1}
+ 2 | {sad}         | {2}
+(2 rows)
+
+UPDATE heap_array_tab set b[1]='ok' where b[1]='sad';
+SELECT * FROM heap_array_tab ORDER BY 1,2,3;
+ a |       b       |     c     
+---+---------------+-----------
+ 1 | [0:0]={happy} | [0:0]={1}
+ 2 | {ok}          | {2}
+(2 rows)
+
+drop table heap_array_tab;
+drop type heapmood;
+--heap table
+CREATE TYPE heapmood1 AS ENUM ('sad', 'ok', 'happy');
+CREATE TABLE heap_array_tab1 
+(a int, 
+ b heapmood1[],
+ c int[]
+ );
+INSERT INTO heap_array_tab1(a,b[0],c[0]) VALUES(1,'happy',1);
+INSERT INTO heap_array_tab1(a,b[1], c[1]) VALUES(2,'sad',2);
+ANALYZE heap_array_tab1;
+SELECT * FROM heap_array_tab1 ORDER BY 1,2,3;
+ a |       b       |     c     
+---+---------------+-----------
+ 1 | [0:0]={happy} | [0:0]={1}
+ 2 | {sad}         | {2}
+(2 rows)
+
+UPDATE heap_array_tab1 set b[1]='ok' where b[1]='sad';
+SELECT * FROM heap_array_tab1 ORDER BY 1,2,3;
+ a |       b       |     c     
+---+---------------+-----------
+ 1 | [0:0]={happy} | [0:0]={1}
+ 2 | {ok}          | {2}
+(2 rows)
+
+drop table heap_array_tab1;
+drop type heapmood1;
+--test the index column is the order by column
+----range partition
+CREATE TABLE heap_range_order_by_tbl (
+  GID INTEGER, 
+  GVALUE INTEGER, 
+  GAAA INTEGER,
+  GDDD VARCHAR(20),
+  GRANGE DECIMAL(7, 2)
+) PARTITION BY RANGE (GVALUE) (
+  PARTITION P1 VALUES LESS THAN(10), 
+  PARTITION P2 VALUES LESS THAN(20), 
+  PARTITION P3 VALUES LESS THAN(30), 
+  PARTITION P4 VALUES LESS THAN(40), 
+  PARTITION P5 VALUES LESS THAN(50), 
+  PARTITION P6 VALUES LESS THAN(60), 
+  PARTITION P7 VALUES LESS THAN(70), 
+  PARTITION P8 VALUES LESS THAN(MAXVALUE)
+);
+CREATE INDEX idx_heap_range_order_by_tbl ON heap_range_order_by_tbl (GID) LOCAL;
+INSERT INTO heap_range_order_by_tbl SELECT V, V, V,'P00421579', V FROM GENERATE_SERIES(1, 100) AS V;
+----heap relation
+CREATE TABLE heap_order_by_tbl(ID INT, VAL VARCHAR(200));
+CREATE INDEX idx_heap_order_by_tbl ON heap_order_by_tbl (ID);
+INSERT INTO heap_order_by_tbl SELECT V, 'CHAR-'||V FROM GENERATE_SERIES(1, 100) AS V;
+set enable_seqscan=off;
+set enable_indexscan = on;
+set enable_hashjoin=off;
+set enable_bitmapscan = off;
+explain select * from heap_range_order_by_tbl A INNER JOIN heap_range_order_by_tbl B ON (A.GID = B.GID) ORDER BY A.GID;
+                                                                   QUERY PLAN                                                                   
+------------------------------------------------------------------------------------------------------------------------------------------------
+ Merge Join  (cost=505.89..547.91 rows=2563 width=168)
+   Merge Cond: (a.gid = b.gid)
+   ->  Sort  (cost=252.94..254.73 rows=716 width=84)
+         Sort Key: a.gid
+         ->  Partition Iterator  (cost=0.00..218.99 rows=716 width=84)
+               Iterations: 8
+               ->  Partitioned Index Scan using idx_heap_range_order_by_tbl on heap_range_order_by_tbl a  (cost=0.00..218.99 rows=716 width=84)
+                     Selected Partitions:  1..8
+   ->  Sort  (cost=252.94..254.73 rows=716 width=84)
+         Sort Key: b.gid
+         ->  Partition Iterator  (cost=0.00..218.99 rows=716 width=84)
+               Iterations: 8
+               ->  Partitioned Index Scan using idx_heap_range_order_by_tbl on heap_range_order_by_tbl b  (cost=0.00..218.99 rows=716 width=84)
+                     Selected Partitions:  1..8
+(14 rows)
+
+explain select * from heap_range_order_by_tbl A INNER JOIN heap_range_order_by_tbl B ON (A.GID = B.GID) ORDER BY A.GID DESC;
+                                                                       QUERY PLAN                                                                        
+---------------------------------------------------------------------------------------------------------------------------------------------------------
+ Merge Join  (cost=505.89..547.91 rows=2563 width=168)
+   Merge Cond: (a.gid = b.gid)
+   ->  Sort  (cost=252.94..254.73 rows=716 width=84)
+         Sort Key: a.gid DESC
+         ->  Partition Iterator  (cost=0.00..218.99 rows=716 width=84)
+               Iterations: 8
+               ->  Partitioned Index Scan Backward using idx_heap_range_order_by_tbl on heap_range_order_by_tbl a  (cost=0.00..218.99 rows=716 width=84)
+                     Selected Partitions:  1..8
+   ->  Sort  (cost=252.94..254.73 rows=716 width=84)
+         Sort Key: b.gid DESC
+         ->  Partition Iterator  (cost=0.00..218.99 rows=716 width=84)
+               Iterations: 8
+               ->  Partitioned Index Scan Backward using idx_heap_range_order_by_tbl on heap_range_order_by_tbl b  (cost=0.00..218.99 rows=716 width=84)
+                     Selected Partitions:  1..8
+(14 rows)
+
+explain select * from heap_order_by_tbl A INNER JOIN heap_order_by_tbl B ON (A.ID = B.ID) ORDER BY A.ID;
+                                                 QUERY PLAN                                                 
+------------------------------------------------------------------------------------------------------------
+ Merge Join  (cost=0.00..104.65 rows=181 width=844)
+   Merge Cond: (a.id = b.id)
+   ->  Index Scan using idx_heap_order_by_tbl on heap_order_by_tbl a  (cost=0.00..50.97 rows=181 width=422)
+   ->  Index Scan using idx_heap_order_by_tbl on heap_order_by_tbl b  (cost=0.00..50.97 rows=181 width=422)
+(4 rows)
+
+explain select * from heap_order_by_tbl A INNER JOIN heap_order_by_tbl B ON (A.ID = B.ID) ORDER BY A.ID DESC;
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Merge Join  (cost=0.00..104.65 rows=181 width=844)
+   Merge Cond: (a.id = b.id)
+   ->  Index Scan Backward using idx_heap_order_by_tbl on heap_order_by_tbl a  (cost=0.00..50.97 rows=181 width=422)
+   ->  Index Scan Backward using idx_heap_order_by_tbl on heap_order_by_tbl b  (cost=0.00..50.97 rows=181 width=422)
+(4 rows)
+
+select * from heap_order_by_tbl order by ID limit 10;
+ id |   val   
+----+---------
+  1 | CHAR-1
+  2 | CHAR-2
+  3 | CHAR-3
+  4 | CHAR-4
+  5 | CHAR-5
+  6 | CHAR-6
+  7 | CHAR-7
+  8 | CHAR-8
+  9 | CHAR-9
+ 10 | CHAR-10
+(10 rows)
+
+select * from heap_range_order_by_tbl order by GID limit 20;
+ gid | gvalue | gaaa |   gddd    | grange 
+-----+--------+------+-----------+--------
+   1 |      1 |    1 | P00421579 |   1.00
+   2 |      2 |    2 | P00421579 |   2.00
+   3 |      3 |    3 | P00421579 |   3.00
+   4 |      4 |    4 | P00421579 |   4.00
+   5 |      5 |    5 | P00421579 |   5.00
+   6 |      6 |    6 | P00421579 |   6.00
+   7 |      7 |    7 | P00421579 |   7.00
+   8 |      8 |    8 | P00421579 |   8.00
+   9 |      9 |    9 | P00421579 |   9.00
+  10 |     10 |   10 | P00421579 |  10.00
+  11 |     11 |   11 | P00421579 |  11.00
+  12 |     12 |   12 | P00421579 |  12.00
+  13 |     13 |   13 | P00421579 |  13.00
+  14 |     14 |   14 | P00421579 |  14.00
+  15 |     15 |   15 | P00421579 |  15.00
+  16 |     16 |   16 | P00421579 |  16.00
+  17 |     17 |   17 | P00421579 |  17.00
+  18 |     18 |   18 | P00421579 |  18.00
+  19 |     19 |   19 | P00421579 |  19.00
+  20 |     20 |   20 | P00421579 |  20.00
+(20 rows)
+
+drop table heap_range_order_by_tbl;
+drop table heap_order_by_tbl;
+--test merge join
+CREATE TABLE partition_heap_test_t1 (A INT4, B INT)
+PARTITION BY RANGE (A)
+(
+	PARTITION p1_partition_heap_test_t1 VALUES LESS THAN (10),
+	PARTITION p2_partition_heap_test_t1 VALUES LESS THAN (20),
+	PARTITION p3_partition_heap_test_t1 VALUES LESS THAN (100),
+	PARTITION p4_partition_heap_test_t1 VALUES LESS THAN (110)
+);
+CREATE TABLE partition_heap_test_t2 (A INT4, B INT)
+PARTITION BY RANGE (A)
+(
+	PARTITION p1_partition_heap_test_t2 VALUES LESS THAN (10),
+	PARTITION p2_partition_heap_test_t2 VALUES LESS THAN (20),
+	PARTITION p3_partition_heap_test_t2 VALUES LESS THAN (100),
+	PARTITION p4_partition_heap_test_t2 VALUES LESS THAN (110)
+);
+CREATE INDEX INDEX_ON_TEST_T1 ON partition_heap_test_t1 (A) LOCAL;
+CREATE INDEX INDEX_ON_TEST_T2 ON partition_heap_test_t2 (A) LOCAL;
+CREATE INDEX INDEX_ON_TEST_T1_1 ON partition_heap_test_t1 (B) LOCAL;
+CREATE INDEX INDEX_ON_TEST_T2_1 ON partition_heap_test_t2 (B) LOCAL;
+INSERT INTO partition_heap_test_t1  select generate_series(1, 100),generate_series(1, 100);
+INSERT INTO partition_heap_test_t2  select generate_series(1, 100),generate_series(1, 100);
+SET ENABLE_PARTITIONWISE = ON;
+SET ENABLE_SEQSCAN = OFF;
+SET ENABLE_INDEXSCAN = ON;
+SET ENABLE_INDEXONLYSCAN = OFF;
+SET ENABLE_BITMAPSCAN = OFF;
+SET ENABLE_TIDSCAN = OFF;
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = ON;
+SET ENABLE_MERGEJOIN = ON;
+SET ENABLE_NESTLOOP = OFF;
+SET ENABLE_HASHJOIN = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_heap_test_t1.*, partition_heap_test_t2.B FROM partition_heap_test_t1 INNER JOIN partition_heap_test_t2 ON (partition_heap_test_t1.A = partition_heap_test_t2.A) ORDER BY 1,2,3;
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: partition_heap_test_t1.a, partition_heap_test_t1.b, partition_heap_test_t2.b
+   ->  Result
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Merge Join
+                     Merge Cond: (partition_heap_test_t1.a = partition_heap_test_t2.a)
+                     ->  Partitioned Index Scan using index_on_test_t1 on partition_heap_test_t1
+                           Selected Partitions:  1..4
+                     ->  Materialize
+                           ->  Partitioned Index Scan using index_on_test_t2 on partition_heap_test_t2
+                                 Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_heap_test_t1.*, partition_heap_test_t2.B FROM partition_heap_test_t1 INNER JOIN partition_heap_test_t2 ON (partition_heap_test_t1.A = partition_heap_test_t2.A) order by 1, 2, 3 limit 10;
+ a  | b  | b  
+----+----+----
+  1 |  1 |  1
+  2 |  2 |  2
+  3 |  3 |  3
+  4 |  4 |  4
+  5 |  5 |  5
+  6 |  6 |  6
+  7 |  7 |  7
+  8 |  8 |  8
+  9 |  9 |  9
+ 10 | 10 | 10
+(10 rows)
+
+drop table partition_heap_test_t1;
+drop table partition_heap_test_t2;
+-----test heap relation merge join 
+CREATE TABLE partition_heap_test_t1 (A INT4, B INT);
+CREATE TABLE partition_heap_test_t2 (A INT4, B INT);
+CREATE INDEX INDEX_ON_TEST_T1 ON partition_heap_test_t1 (A);
+CREATE INDEX INDEX_ON_TEST_T2 ON partition_heap_test_t2 (A);
+CREATE INDEX INDEX_ON_TEST_T1_1 ON partition_heap_test_t1 (B);
+CREATE INDEX INDEX_ON_TEST_T2_1 ON partition_heap_test_t2 (B);
+INSERT INTO partition_heap_test_t1  select generate_series(1, 10),generate_series(1, 10);
+INSERT INTO partition_heap_test_t2  select generate_series(1, 10),generate_series(1, 10);
+SET ENABLE_PARTITIONWISE = ON;
+SET ENABLE_SEQSCAN = OFF;
+SET ENABLE_INDEXSCAN = ON;
+SET ENABLE_INDEXONLYSCAN = OFF;
+SET ENABLE_BITMAPSCAN = OFF;
+SET ENABLE_TIDSCAN = OFF;
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = ON;
+SET ENABLE_MERGEJOIN = ON;
+SET ENABLE_NESTLOOP = OFF;
+SET ENABLE_HASHJOIN = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_heap_test_t1.*, partition_heap_test_t2.B FROM partition_heap_test_t1 INNER JOIN partition_heap_test_t2 ON (partition_heap_test_t1.A = partition_heap_test_t2.A) ORDER BY 1,2,3;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: partition_heap_test_t1.a, partition_heap_test_t1.b, partition_heap_test_t2.b
+   ->  Merge Join
+         Merge Cond: (partition_heap_test_t1.a = partition_heap_test_t2.a)
+         ->  Index Scan using index_on_test_t1 on partition_heap_test_t1
+         ->  Materialize
+               ->  Index Scan using index_on_test_t2 on partition_heap_test_t2
+(7 rows)
+
+SELECT partition_heap_test_t1.*, partition_heap_test_t2.B FROM partition_heap_test_t1 INNER JOIN partition_heap_test_t2 ON (partition_heap_test_t1.A = partition_heap_test_t2.A) order by 1, 2, 3;
+ a  | b  | b  
+----+----+----
+  1 |  1 |  1
+  2 |  2 |  2
+  3 |  3 |  3
+  4 |  4 |  4
+  5 |  5 |  5
+  6 |  6 |  6
+  7 |  7 |  7
+  8 |  8 |  8
+  9 |  9 |  9
+ 10 | 10 | 10
+(10 rows)
+
+drop table partition_heap_test_t1;
+drop table partition_heap_test_t2;

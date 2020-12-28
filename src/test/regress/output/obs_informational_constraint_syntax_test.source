@@ -1,0 +1,955 @@
+--test soft constraint syntax, there are two kind syntax formats, which are table-level constraint and column-level constraint
+--currently, the primary key and unique constraints are supported.
+----test primary key on table level + not enforced (+ default is enable query optimization) mode
+Drop server if exists obs_server cascade;
+NOTICE:  server "obs_server" does not exist, skipping
+CREATE SERVER obs_server FOREIGN DATA WRAPPER 	dfs_fdw OPTIONS (address '@obshostname@', type 'obs', access_key '@ak@', secret_access_key '@sk@');
+drop foreign table if exists soft_constraint_tbl001;
+NOTICE:  foreign table "soft_constraint_tbl001" does not exist, skipping
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique primary key(id) not enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "constr_unique" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+    conname    | contype | consoft | conopt | conindid | conkey 
+---------------+---------+---------+--------+----------+--------
+ constr_unique | p       | t       | t      |        0 | {1}
+(1 row)
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique primary key (num) not enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "constr_unique" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+    conname    | contype | consoft | conopt | conindid | conkey 
+---------------+---------+---------+--------+----------+--------
+ constr_unique | p       | t       | t      |        0 | {2}
+(1 row)
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique primary key (num) not enforced enable query optimization,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "constr_unique" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+    conname    | contype | consoft | conopt | conindid | conkey 
+---------------+---------+---------+--------+----------+--------
+ constr_unique | p       | t       | t      |        0 | {2}
+(1 row)
+
+------test partition foreign table
+drop foreign table if exists part_1;
+NOTICE:  foreign table "part_1" does not exist, skipping
+create foreign table part_1 (
+	a int ,
+	constraint part_1constr_unique unique (b) not enforced,
+	b varchar(20), 
+	c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/partition.db/part_1/')
+distribute by roundrobin
+partition by (b) automapped;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "part_1constr_unique" for foreign table "part_1"
+select relname,relhasindex from pg_class where oid='part_1'::regclass;
+ relname | relhasindex 
+---------+-------------
+ part_1  | f
+(1 row)
+
+select  conname,  contype, consoft, conindid, conkey from pg_constraint where conname ='part_1constr_unique';
+       conname       | contype | consoft | conindid | conkey 
+---------------------+---------+---------+----------+--------
+ part_1constr_unique | u       | t       |        0 | {2}
+(1 row)
+
+----test primary key on table level + not enforced + disable query optimization mode
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique primary key (num) not enforced disable query optimization,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "constr_unique" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+    conname    | contype | consoft | conopt | conindid | conkey 
+---------------+---------+---------+--------+----------+--------
+ constr_unique | p       | t       | f      |        0 | {2}
+(1 row)
+
+----test primary key on column level + not enforced (+ default is enable query optimization) mode
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique primary key not enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "constr_unique" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+    conname    | contype | consoft | conopt | conindid | conkey 
+---------------+---------+---------+--------+----------+--------
+ constr_unique | p       | t       | t      |        0 | {1}
+(1 row)
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique primary key not enforced enable query optimization,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "constr_unique" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+    conname    | contype | consoft | conopt | conindid | conkey 
+---------------+---------+---------+--------+----------+--------
+ constr_unique | p       | t       | t      |        0 | {1}
+(1 row)
+
+----test primary key on column level + not enforced + disable query optimization mode
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique primary key not enforced disable query optimization,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "constr_unique" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+    conname    | contype | consoft | conopt | conindid | conkey 
+---------------+---------+---------+--------+----------+--------
+ constr_unique | p       | t       | f      |        0 | {1}
+(1 row)
+
+------test partition foreign table + column level
+drop foreign table if exists part_1;
+create foreign table part_1 (
+	a int,
+	b varchar(20) constraint part_1constr_unique primary key not enforced, 
+	c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/partition.db/part_1/')
+distribute by roundrobin
+partition by (b) automapped;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "part_1constr_unique" for foreign table "part_1"
+select relname,relhasindex from pg_class where oid='part_1'::regclass;
+ relname | relhasindex 
+---------+-------------
+ part_1  | f
+(1 row)
+
+select  conname,  contype, consoft, conindid, conkey from pg_constraint where conname ='part_1constr_unique';
+       conname       | contype | consoft | conindid | conkey 
+---------------------+---------+---------+----------+--------
+ part_1constr_unique | p       | t       |        0 | {2}
+(1 row)
+
+----test unique on table level + not enforced (+ default is enable query optimization) mode
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique unique(id) not enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "constr_unique" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+    conname    | contype | consoft | conopt | conindid | conkey 
+---------------+---------+---------+--------+----------+--------
+ constr_unique | u       | t       | t      |        0 | {1}
+(1 row)
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique unique (num) not enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "constr_unique" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+    conname    | contype | consoft | conopt | conindid | conkey 
+---------------+---------+---------+--------+----------+--------
+ constr_unique | u       | t       | t      |        0 | {2}
+(1 row)
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique unique (num) not enforced enable query optimization,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "constr_unique" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+    conname    | contype | consoft | conopt | conindid | conkey 
+---------------+---------+---------+--------+----------+--------
+ constr_unique | u       | t       | t      |        0 | {2}
+(1 row)
+
+------ test partition foreign table 
+drop foreign table if exists part_1;
+create foreign table part_1 (
+	a int constraint part_1constr_unique unique not enforced,
+	b varchar(20), 
+	c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/partition.db/part_1/')
+distribute by roundrobin
+partition by (b) automapped;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "part_1constr_unique" for foreign table "part_1"
+select relname,relhasindex from pg_class where oid='part_1'::regclass;
+ relname | relhasindex 
+---------+-------------
+ part_1  | f
+(1 row)
+
+select  conname,  contype, consoft, conindid, conkey from pg_constraint where conname ='part_1constr_unique';
+       conname       | contype | consoft | conindid | conkey 
+---------------------+---------+---------+----------+--------
+ part_1constr_unique | u       | t       |        0 | {1}
+(1 row)
+
+----test unique on table level + not enforced + disable query optimization mode
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique unique (num) not enforced disable query optimization,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "constr_unique" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+    conname    | contype | consoft | conopt | conindid | conkey 
+---------------+---------+---------+--------+----------+--------
+ constr_unique | u       | t       | f      |        0 | {2}
+(1 row)
+
+----test unique on column level + not enforced (+ default is enable query optimization) mode
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique unique not enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "constr_unique" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+    conname    | contype | consoft | conopt | conindid | conkey 
+---------------+---------+---------+--------+----------+--------
+ constr_unique | u       | t       | t      |        0 | {1}
+(1 row)
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique unique not enforced enable query optimization,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "constr_unique" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+    conname    | contype | consoft | conopt | conindid | conkey 
+---------------+---------+---------+--------+----------+--------
+ constr_unique | u       | t       | t      |        0 | {1}
+(1 row)
+
+----test unique key on column level + not enforced + disable query optimization mode
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique unique not enforced disable query optimization,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "constr_unique" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+    conname    | contype | consoft | conopt | conindid | conkey 
+---------------+---------+---------+--------+----------+--------
+ constr_unique | u       | t       | f      |        0 | {1}
+(1 row)
+
+------test partition foreign table + column level
+drop foreign table if exists part_1;
+create foreign table part_1 (
+	a int,
+	b varchar(20) constraint part_1constr_unique unique not enforced, 
+	c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/partition.db/part_1/')
+distribute by roundrobin
+partition by (b) automapped;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "part_1constr_unique" for foreign table "part_1"
+select relname,relhasindex from pg_class where oid='part_1'::regclass;
+ relname | relhasindex 
+---------+-------------
+ part_1  | f
+(1 row)
+
+select  conname,  contype, consoft, conindid, conkey from pg_constraint where conname ='part_1constr_unique';
+       conname       | contype | consoft | conindid | conkey 
+---------------------+---------+---------+----------+--------
+ part_1constr_unique | u       | t       |        0 | {2}
+(1 row)
+
+--test mutil-constraints can be built on time for mutil-columns
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique_001 unique (id) not enforced,
+ constraint constr_unique_002 unique (num) not enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "constr_unique_001" for foreign table "soft_constraint_tbl001"
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "constr_unique_002" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname like 'constr_unique%';
+      conname      | contype | consoft | conopt | conindid | conkey 
+-------------------+---------+---------+--------+----------+--------
+ constr_unique_001 | u       | t       | t      |        0 | {1}
+ constr_unique_002 | u       | t       | t      |        0 | {2}
+(2 rows)
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique_001 unique  not enforced,
+ constraint constr_unique_002 unique (num) not enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "constr_unique_001" for foreign table "soft_constraint_tbl001"
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "constr_unique_002" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname like 'constr_unique%';
+      conname      | contype | consoft | conopt | conindid | conkey 
+-------------------+---------+---------+--------+----------+--------
+ constr_unique_001 | u       | t       | t      |        0 | {1}
+ constr_unique_002 | u       | t       | t      |        0 | {2}
+(2 rows)
+
+--test mutil-constraints can be built on time for one column(In fact, only one constraint will be built)
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique_001 unique  not enforced  constraint constr_unique_002 unique  not enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "constr_unique_001" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname like 'constr_unique%';
+      conname      | contype | consoft | conopt | conindid | conkey 
+-------------------+---------+---------+--------+----------+--------
+ constr_unique_001 | u       | t       | t      |        0 | {1}
+(1 row)
+
+--test support mutil-constraints on one column, but only a primaty key constraint on one column.
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique_001 unique (num) not enforced,
+ constraint constr_unique_002 unique (num) not enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "constr_unique_001" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname like 'constr_unique%';
+      conname      | contype | consoft | conopt | conindid | conkey 
+-------------------+---------+---------+--------+----------+--------
+ constr_unique_001 | u       | t       | t      |        0 | {2}
+(1 row)
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique_001 unique (num) not enforced,
+ constraint constr_unique_002 primary key (num) not enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "constr_unique_002" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname like 'constr_unique%';
+      conname      | contype | consoft | conopt | conindid | conkey 
+-------------------+---------+---------+--------+----------+--------
+ constr_unique_002 | p       | t       | t      |        0 | {2}
+(1 row)
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique_002 primary key (num) not enforced,
+  constraint constr_unique_001 unique (num) not enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "constr_unique_002" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname like 'constr_unique%';
+      conname      | contype | consoft | conopt | conindid | conkey 
+-------------------+---------+---------+--------+----------+--------
+ constr_unique_002 | p       | t       | t      |        0 | {2}
+(1 row)
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique_001 unique (num) not enforced,
+ constraint constr_unique_002 primary key (num) not enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "constr_unique_002" for foreign table "soft_constraint_tbl001"
+--only a primaty key constraint on one table, the error will be thorwn out 
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique_001 primary key (num) not enforced,
+ constraint constr_unique_002 primary key (num) not enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+ERROR:  Multiple primary keys for foreign table "soft_constraint_tbl001" are not allowed.
+LINE 4:  constraint constr_unique_002 primary key (num) not enforced...
+         ^
+drop foreign table if exists soft_constraint_tbl001;
+NOTICE:  foreign table "soft_constraint_tbl001" does not exist, skipping
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique_001 primary key (id) not enforced,
+ constraint constr_unique_002 primary key (num) not enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+ERROR:  Multiple primary keys for foreign table "soft_constraint_tbl001" are not allowed.
+LINE 4:  constraint constr_unique_002 primary key (num) not enforced...
+         ^
+--test error syntax
+-- enforced attribute dose unsupport
+drop foreign table if exists soft_constraint_tbl001;
+NOTICE:  foreign table "soft_constraint_tbl001" does not exist, skipping
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique unique(id) enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+ERROR:  The foreign table only support "NOT ENFORCED" informational constraint.
+drop foreign table if exists soft_constraint_tbl001;
+NOTICE:  foreign table "soft_constraint_tbl001" does not exist, skipping
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique unique(id) enforced disable query optimization,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+ERROR:  syntax error at or near "disable"
+LINE 3:  constraint constr_unique unique(id) enforced disable query ...
+                                                      ^
+drop foreign table if exists soft_constraint_tbl001;
+NOTICE:  foreign table "soft_constraint_tbl001" does not exist, skipping
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique unique(id) enforced enable query optimization ,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin; 
+ERROR:  syntax error at or near "enable"
+LINE 3:  constraint constr_unique unique(id) enforced enable query o...
+                                                      ^
+drop foreign table if exists soft_constraint_tbl001;
+NOTICE:  foreign table "soft_constraint_tbl001" does not exist, skipping
+create foreign table soft_constraint_tbl001(
+ id int,
+ constraint constr_unique primary key (id) enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+ERROR:  The foreign table only support "NOT ENFORCED" informational constraint.
+drop foreign table if exists soft_constraint_tbl001;
+NOTICE:  foreign table "soft_constraint_tbl001" does not exist, skipping
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique unique  enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+ERROR:  The foreign table only support "NOT ENFORCED" informational constraint.
+drop foreign table if exists soft_constraint_tbl001;
+NOTICE:  foreign table "soft_constraint_tbl001" does not exist, skipping
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique primary key  enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+ERROR:  The foreign table only support "NOT ENFORCED" informational constraint.
+-- test do not support mutil-columns combined constraint
+drop foreign table if exists soft_constraint_tbl001;
+NOTICE:  foreign table "soft_constraint_tbl001" does not exist, skipping
+create foreign table soft_constraint_tbl001(
+ id int ,
+ constraint constr_unique primary key (id, num) not  enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+ERROR:  Multi-column combined informational constraint is forbidden.
+drop foreign table if exists soft_constraint_tbl001;
+NOTICE:  foreign table "soft_constraint_tbl001" does not exist, skipping
+create foreign table soft_constraint_tbl001(
+ id int ,
+ constraint constr_unique primary key (id, num) not  enforced enable query optimization,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+ERROR:  Multi-column combined informational constraint is forbidden.
+drop foreign table if exists soft_constraint_tbl001;
+NOTICE:  foreign table "soft_constraint_tbl001" does not exist, skipping
+create foreign table soft_constraint_tbl001(
+ id int ,
+ constraint constr_unique unique (id, num) not  enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+ERROR:  Multi-column combined informational constraint is forbidden.
+--test only support primary key and unique constraint
+drop foreign table if exists soft_constraint_tbl001;
+NOTICE:  foreign table "soft_constraint_tbl001" does not exist, skipping
+create foreign table soft_constraint_tbl001(
+ id int ,
+ constraint constr_unique check (id<10) not  enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+ERROR:  syntax error at or near "enforced"
+LINE 3:  constraint constr_unique check (id<10) not  enforced,
+                                                     ^
+create foreign table soft_constraint_tbl001(
+ id int ,
+ constraint constr_unique check (id<10),
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+ERROR:  Only the primary key, unique, not null and null be supported.
+--test alter foreign table drop constraint syntax
+drop foreign table if exists soft_constraint_tbl001;
+NOTICE:  foreign table "soft_constraint_tbl001" does not exist, skipping
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique unique  not enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "constr_unique" for foreign table "soft_constraint_tbl001"
+alter foreign table soft_constraint_tbl001 drop constraint constr_unique RESTRICT;
+select  conname,  contype, consoft, conindid, conkey from pg_constraint where conname ='constr_unique';
+ conname | contype | consoft | conindid | conkey 
+---------+---------+---------+----------+--------
+(0 rows)
+
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int constraint constr_unique unique  not enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "constr_unique" for foreign table "soft_constraint_tbl001"
+alter foreign table soft_constraint_tbl001 drop constraint constr_unique cascade;
+select  conname,  contype, consoft, conindid, conkey from pg_constraint where conname ='constr_unique';
+ conname | contype | consoft | conindid | conkey 
+---------+---------+---------+----------+--------
+(0 rows)
+
+--test alter foreign table add constraint syntax
+alter foreign table soft_constraint_tbl001 drop constraint constr_unique RESTRICT;
+ERROR:  constraint "constr_unique" of relation "soft_constraint_tbl001" does not exist
+alter foreign table soft_constraint_tbl001 add constraint constr_unique unique(id) not enforced;
+NOTICE:  ALTER FOREIGN TABLE / ADD UNIQUE will create constraint "constr_unique" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+    conname    | contype | consoft | conopt | conindid | conkey 
+---------------+---------+---------+--------+----------+--------
+ constr_unique | u       | t       | t      |        0 | {1}
+(1 row)
+
+alter foreign table soft_constraint_tbl001 drop constraint constr_unique RESTRICT;
+alter foreign table soft_constraint_tbl001 add constraint constr_unique unique(id) not enforced disable query optimization;
+NOTICE:  ALTER FOREIGN TABLE / ADD UNIQUE will create constraint "constr_unique" for foreign table "soft_constraint_tbl001"
+select relname,relhasindex from pg_class where oid='soft_constraint_tbl001'::regclass;
+        relname         | relhasindex 
+------------------------+-------------
+ soft_constraint_tbl001 | f
+(1 row)
+
+select  conname,  contype, consoft, conopt, conindid, conkey from pg_constraint where conname ='constr_unique';
+    conname    | contype | consoft | conopt | conindid | conkey 
+---------------+---------+---------+--------+----------+--------
+ constr_unique | u       | t       | f      |        0 | {1}
+(1 row)
+
+alter foreign table soft_constraint_tbl001 drop constraint constr_unique RESTRICT;
+alter foreign table soft_constraint_tbl001 add constraint constr_unique primary key(id) not enforced;
+NOTICE:  ALTER FOREIGN TABLE / ADD PRIMARY KEY will create constraint "constr_unique" for foreign table "soft_constraint_tbl001"
+select  conname,  contype, consoft, conindid, conkey from pg_constraint where conname ='constr_unique';
+    conname    | contype | consoft | conindid | conkey 
+---------------+---------+---------+----------+--------
+ constr_unique | p       | t       |        0 | {1}
+(1 row)
+
+--test only build one primary key 
+alter foreign table soft_constraint_tbl001 add constraint constr_unique_90 primary key(id) not enforced;
+NOTICE:  ALTER FOREIGN TABLE / ADD PRIMARY KEY will create constraint "constr_unique_90" for foreign table "soft_constraint_tbl001"
+ERROR:  Multiple primary keys for foreign table "soft_constraint_tbl001" are not allowed.
+alter foreign table soft_constraint_tbl001 add constraint constr_unique_100 primary key(id) not enforced;
+NOTICE:  ALTER FOREIGN TABLE / ADD PRIMARY KEY will create constraint "constr_unique_100" for foreign table "soft_constraint_tbl001"
+ERROR:  Multiple primary keys for foreign table "soft_constraint_tbl001" are not allowed.
+--test, do not create constraint, name of whith has been existed in the pg_constraint. 
+alter foreign table soft_constraint_tbl001 add constraint constr_unique unique(num) not enforced;
+NOTICE:  ALTER FOREIGN TABLE / ADD UNIQUE will create constraint "constr_unique" for foreign table "soft_constraint_tbl001"
+ERROR:  Constraint "constr_unique" already exists.
+--test, error alter foreign table syntax
+alter foreign table soft_constraint_tbl001 add constraint constr_unique unique(id, num) not enforced;
+ERROR:  Multi-column combined informational constraint is forbidden.
+alter foreign table soft_constraint_tbl001 add constraint constr_unique unique(id, num) enforced;
+ERROR:  The foreign table only support "NOT ENFORCED" informational constraint.
+drop foreign table if exists soft_constraint_tbl001;
+--test, other foreign table do not support informational constraint
+drop foreign table if exists EXT_LINEITEM;
+NOTICE:  foreign table "ext_lineitem" does not exist, skipping
+CREATE FOREIGN TABLE EXT_LINEITEM (
+	L_ORDERKEY    BIGINT NOT NULL,        
+	L_PARTKEY     BIGINT unique not enforced      
+)SERVER gsmpp_server OPTIONS(encoding 'utf-8',format 'text', location 'gsfs://127.0.0.1:8900/lineitem.data', delimiter '|', mode 'normal');
+ERROR:  It is not allowed to support "NOT ENFORCED" informational constraint.
+drop foreign table if exists EXT_LINEITEM;
+NOTICE:  foreign table "ext_lineitem" does not exist, skipping
+CREATE FOREIGN TABLE EXT_LINEITEM (
+	L_ORDERKEY    BIGINT NOT NULL,        
+	L_PARTKEY     BIGINT unique  enforced      
+)SERVER gsmpp_server OPTIONS(encoding 'utf-8',format 'text', location 'gsfs://127.0.0.1:8900/lineitem.data', delimiter '|', mode 'normal');
+ERROR:  cannot create index on foreign table "ext_lineitem"
+--test, normal table, either not enforced or enforced will still create index.
+drop table if exists test010;
+NOTICE:  table "test010" does not exist, skipping
+create table test010(id int constraint constr_unique unique not enforced);
+ERROR:  It is not allowed to support "NOT ENFORCED" informational constraint.
+drop table if exists test010;
+NOTICE:  table "test010" does not exist, skipping
+create table test010(id int unique);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test010_id_key" for table "test010"
+select count(*) from pg_index where indexrelid in (select conindid from pg_constraint where conrelid = 'test010'::regclass);
+ count 
+-------
+     1
+(1 row)
+
+drop table if exists test010;
+--test merge join optimization
+drop foreign table nation;
+ERROR:  foreign table "nation" does not exist
+create foreign table nation  (
+ N_NATIONKEY INT4 ,
+ N_NAME TEXT,
+ N_REGIONKEY INT4 primary key  not enforced,
+ N_COMMENT TEXT) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "nation_pkey" for foreign table "nation"
+drop foreign table region;
+ERROR:  foreign table "region" does not exist
+create foreign table region  (
+ R_REGIONKEY INT4 ,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+set enable_hashjoin=off;
+set enable_vector_engine=off;
+select r_regionkey, n_regionkey from region,nation where n_regionkey=r_regionkey order by r_regionkey;
+ r_regionkey | n_regionkey 
+-------------+-------------
+           0 |           0
+           1 |           1
+           2 |           2
+           3 |           3
+           4 |           4
+(5 rows)
+
+--add llt
+drop foreign table if exists soft_constraint_tbl001;
+NOTICE:  foreign table "soft_constraint_tbl001" does not exist, skipping
+create foreign table soft_constraint_tbl001(
+ id int primary key not enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "soft_constraint_tbl001_pkey" for foreign table "soft_constraint_tbl001"
+alter foreign table soft_constraint_tbl001 add primary key(id) not enforced;
+NOTICE:  ALTER FOREIGN TABLE / ADD PRIMARY KEY will create constraint "soft_constraint_tbl001_pkey1" for foreign table "soft_constraint_tbl001"
+ERROR:  Multiple primary keys for foreign table "soft_constraint_tbl001" are not allowed.
+drop foreign table if exists soft_constraint_tbl001;
+create foreign table soft_constraint_tbl001(
+ id int unique not enforced,
+ num int
+) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "soft_constraint_tbl001_id_key" for foreign table "soft_constraint_tbl001"
+alter foreign table soft_constraint_tbl001 add unique(id) not enforced;
+NOTICE:  ALTER FOREIGN TABLE / ADD UNIQUE will create constraint "soft_constraint_tbl001_id_key1" for foreign table "soft_constraint_tbl001"
+drop foreign table if exists info_cons_add_003;
+NOTICE:  foreign table "info_cons_add_003" does not exist, skipping
+create foreign table info_cons_add_003 (
+ c_id1  TEXT,
+ c_id2  date,
+ c_id3  smallint,
+ c_id4  boolean,
+ c_id5  float4,
+ c_id6  timestamp,
+ c_id7  decimal(4,2),
+ c_id8  bigint,
+ c_id9  char(9),
+ c_id10 int,
+ c_id11 float8,
+ c_id12 varchar(20)
+)
+server obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/sql_on_hadoop.db/info_cons_tab_2/')
+distribute by roundrobin
+partition by (c_id12) automapped;
+WARNING:  It is not specified totalrows option for the foreign table.
+ALTER FOREIGN TABLE info_cons_add_003
+ADD CONSTRAINT constr_add_003 
+  PRIMARY KEY (c_id9) NOT ENFORCED ENABLE QUERY OPTIMIZATION;
+NOTICE:  ALTER FOREIGN TABLE / ADD PRIMARY KEY will create constraint "constr_add_003" for foreign table "info_cons_add_003"
+drop foreign table info_cons_add_003;
+drop server if exists obs_server cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to foreign table part_1
+drop cascades to foreign table nation
+drop cascades to foreign table region
+drop cascades to foreign table soft_constraint_tbl001

@@ -1,0 +1,192 @@
+set enable_global_stats = true;
+--
+-- CREATE TABLE
+--
+SET ENABLE_FAST_QUERY_SHIPPING=FALSE;
+SET ENABLE_VECTOR_ENGINE=TRUE;
+
+CREATE TABLE LINEITEM_RC
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10)
+  , L_COMMENT      VARCHAR(44)
+)
+with (orientation = orc) tablespace hdfs_ts 
+distribute by hash(L_ORDERKEY);
+
+COPY LINEITEM_RC FROM '@abs_srcdir@/data/lineitem.data' DELIMITER '|';
+
+CREATE TABLE RC_TEST2(C1 INT, C2 OID, C3 SMALLINT, C4 TIMESTAMP WITH TIME ZONE, C5 TIME) with (orientation = orc) tablespace hdfs_ts ;
+COPY RC_TEST2 FROM '@abs_srcdir@/data/roughcheck.data' DELIMITER '|';
+
+---
+--1. verify char
+--
+SELECT COUNT(*) FROM LINEITEM_RC WHERE L_RETURNFLAG='N';
+SELECT COUNT(*) FROM LINEITEM_RC WHERE L_RETURNFLAG>'N';
+SELECT COUNT(*) FROM LINEITEM_RC WHERE L_RETURNFLAG<'N';
+
+---
+--2. verify bigint
+---
+SELECT COUNT(*) FROM LINEITEM_RC WHERE L_ORDERKEY=69;
+SELECT COUNT(*) FROM LINEITEM_RC WHERE L_ORDERKEY>69;
+SELECT COUNT(*) FROM LINEITEM_RC WHERE L_ORDERKEY<69;
+
+---
+--3. verify DATE
+---
+SELECT COUNT(*) FROM LINEITEM_RC WHERE L_SHIPDATE='1996-04-21';
+SELECT COUNT(*) FROM LINEITEM_RC WHERE L_SHIPDATE>'1996-04-21';
+SELECT COUNT(*) FROM LINEITEM_RC WHERE L_SHIPDATE<'1996-04-21';
+
+---
+--4. verify VARCHAR
+---
+SELECT COUNT(*) FROM LINEITEM_RC WHERE L_COMMENT=' regular de';
+SELECT COUNT(*) FROM LINEITEM_RC WHERE L_COMMENT>' regular de';
+SELECT COUNT(*) FROM LINEITEM_RC WHERE L_COMMENT<' regular de';
+---
+--5. verify CHAR
+---
+SELECT COUNT(*) FROM LINEITEM_RC WHERE L_SHIPMODE='REG AIR   ';
+SELECT COUNT(*) FROM LINEITEM_RC WHERE L_SHIPMODE<'REG AIR   ';
+SELECT COUNT(*) FROM LINEITEM_RC WHERE L_SHIPMODE>'REG AIR   ';
+---
+--6. verify int
+---
+SELECT COUNT(*) FROM RC_TEST2 WHERE C1 = 1000;
+SELECT COUNT(*) FROM RC_TEST2 WHERE C1 > 1000;
+SELECT COUNT(*) FROM RC_TEST2 WHERE C1 < 1000;
+explain (verbose, costs off, nodes off) SELECT COUNT(*) FROM RC_TEST2 WHERE C2 = 3432;
+explain (verbose, costs off, nodes off) SELECT COUNT(*) FROM RC_TEST2;
+---
+--7. verify oid
+---
+SELECT COUNT(*) FROM RC_TEST2 WHERE C2 = 3432;
+SELECT COUNT(*) FROM RC_TEST2 WHERE C2 > 3432;
+SELECT COUNT(*) FROM RC_TEST2 WHERE C2 < 3432;
+
+---
+--8. verify timestamp with time zone
+---
+SELECT COUNT(*) FROM RC_TEST2 WHERE C4 = '2004-10-19 10:23:54+02';
+SELECT COUNT(*) FROM RC_TEST2 WHERE C4 > '2004-10-19 10:23:54+02';
+SELECT COUNT(*) FROM RC_TEST2 WHERE C4 < '2004-10-19 10:23:54+02';
+---
+--7. verify time without time zone
+---
+SELECT COUNT(*) FROM RC_TEST2 WHERE C5 = '04:05:06';
+SELECT COUNT(*) FROM RC_TEST2 WHERE C5 > '04:05:06';
+SELECT COUNT(*) FROM RC_TEST2 WHERE C5 < '04:05:06';
+
+---
+--8. verify smallint
+---
+SELECT COUNT(*) FROM RC_TEST2 WHERE C3 < 25165685;
+SELECT COUNT(*) FROM RC_TEST2 WHERE C3 = 126;
+SELECT COUNT(*) FROM RC_TEST2 WHERE C3 > 126;
+
+----
+--case 9: verify float
+---
+create table RC_t1(c1 float, c2 float8)with(orientation = orc) tablespace hdfs_ts ;
+insert into RC_t1 values(1.1, 2.3);
+insert into RC_t1 values(1.2, 2.3);
+insert into RC_t1 values(1.3, 2.3);
+select count(*) from RC_t1 where c1=1.2;
+
+-----
+--
+-----
+create table cu_index_col_1 (id int, c1 int2, c2 int4, c3 int8) with (orientation = orc) tablespace hdfs_ts  distribute by hash(id);
+insert into cu_index_col_1 values (1, -32768, -2147483648, -9223372036854775808);
+insert into cu_index_col_1 values (1, 32767, 2147483647, 9223372036854775807);
+insert into cu_index_col_1 values (1, 30000, 2000000000, 9000000000000000000);
+insert into cu_index_col_1 values (1, 30000, 30000, 30000);
+
+select count(*) from cu_index_col_1 where c1 = 30000.0001;
+select count(*) from cu_index_col_1 where c2 = 2000000000.0001;
+select count(*) from cu_index_col_1 where c3 = 9000000000000000000.0001;
+
+select count(*) from cu_index_col_1 where c1 = 30000.0000;
+select count(*) from cu_index_col_1 where c2 = 30000.0000;
+select count(*) from cu_index_col_1 where c3 = 30000.0000;
+
+select count(*) from cu_index_col_1 where c1 < 32768;
+select count(*) from cu_index_col_1 where c2 < 2147483648;
+select count(*) from cu_index_col_1 where c3 < 9223372036854775808;
+
+select count(*) from cu_index_col_1 where c1 > -32768.001;
+select count(*) from cu_index_col_1 where c2 > -2147483648.001;
+select count(*) from cu_index_col_1 where c3 > -9223372036854775808.001;
+
+-----
+--
+-----
+create table cu_index_col_2 (id int, cu int2, num int4) with (orientation = orc) tablespace hdfs_ts  distribute by hash(id);
+create table cu_index_row_2 (id int, cu int2, num int4) distribute by hash(id);
+
+insert into cu_index_row_2 values (1, 1, 1);
+insert into cu_index_row_2 values (1, 1, 1);
+insert into cu_index_row_2 values (1, 1, 1);
+insert into cu_index_row_2 values (1, 2, 2);
+insert into cu_index_row_2 values (1, 2, 2);
+insert into cu_index_row_2 values (1, 2, 2);
+insert into cu_index_row_2 values (1, 2, 2);
+insert into cu_index_row_2 values (1, 2, 3);
+insert into cu_index_row_2 values (1, 3, 3);
+insert into cu_index_row_2 values (1, 3, 3);
+insert into cu_index_row_2 values (1, 3, 3);
+insert into cu_index_row_2 values (1, 4, 3);
+insert into cu_index_row_2 values (1, 4, 4);
+insert into cu_index_row_2 values (1, 5, 5);
+insert into cu_index_row_2 values (1, 5, 5);
+insert into cu_index_row_2 values (1, 6, 5);
+insert into cu_index_row_2 values (1, 6, 5);
+insert into cu_index_row_2 values (1, 6, 5);
+
+insert into cu_index_col_2 select * from cu_index_row_2 where cu = 1;
+insert into cu_index_col_2 select * from cu_index_row_2 where cu = 2;
+insert into cu_index_col_2 select * from cu_index_row_2 where cu = 3;
+insert into cu_index_col_2 select * from cu_index_row_2 where cu = 4;
+insert into cu_index_col_2 select * from cu_index_row_2 where cu = 5;
+insert into cu_index_col_2 select * from cu_index_row_2 where cu = 6;
+
+select count(*) from cu_index_col_2 where num = 1;
+select count(*) from cu_index_col_2 where num = 2;
+select count(*) from cu_index_col_2 where num = 3;
+select count(*) from cu_index_col_2 where num = 4;
+select count(*) from cu_index_col_2 where num = 5;
+
+--add testcase for CstoreIndexScan
+create table col(a int, b int, c int) with (orientation = column ) ;
+create index col_b on col(b);
+create index col_c on col(c); 
+insert into col select generate_series(1,10),generate_series(1,10),1;
+update col set b=b+1 where b>5;
+select count(*) from col where c=1;
+select 1 from col where c=1; 
+
+drop table LINEITEM_RC;
+drop table RC_TEST2;
+drop table RC_t1;
+drop table cu_index_col_1;
+drop table cu_index_col_2;
+drop table cu_index_row_2;
+drop index col_b;
+drop index col_c;
+drop table col;

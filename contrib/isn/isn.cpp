@@ -460,8 +460,9 @@ static bool ean2string(ean13 ean, bool errorOK, char* result, bool shortType)
 
     TABLE_index = ISBN_index;
 
-    if ((ean & 1) != 0)
+    if ((ean & 1) != 0) {
         valid = '!';
+    }
     ean >>= 1;
     /* verify it's in the EAN13 range */
     if (ean > UINT64CONST(9999999999999))
@@ -477,8 +478,9 @@ static bool ean2string(ean13 ean, bool errorOK, char* result, bool shortType)
         digval = (unsigned)(ean % 10); /* get the decimal value */
         ean /= 10;                     /* get next digit */
         *--aux = (char)(digval + '0'); /* convert to ascii and store */
-        if (search == 0)
+        if (search == 0) {
             *--aux = '-'; /* the check digit is always there */
+        }
     } while (ean && search++ < 13);
     while (search++ < 13)
         *--aux = '0'; /* fill the remaining EAN13 with '0' */

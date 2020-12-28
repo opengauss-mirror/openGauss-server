@@ -20,6 +20,7 @@
 #include <ctype.h>
 
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "access/genam.h"
 #include "access/reloptions.h"
 #include "access/transam.h"
@@ -49,7 +50,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 static void MakeConfigurationMapping(AlterTSConfigurationStmt* stmt, HeapTuple tup, Relation relMap);
 static void DropConfigurationMapping(AlterTSConfigurationStmt* stmt, HeapTuple tup, Relation relMap);
@@ -250,7 +251,7 @@ void DefineTSParser(List* names, List* parameters)
     /* Post creation hook for new text search parser */
     InvokeObjectAccessHook(OAT_POST_CREATE, TSParserRelationId, prsOid, 0, NULL);
 
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 
     heap_close(prsRel, RowExclusiveLock);
 }
@@ -309,7 +310,7 @@ void RenameTSParser(List* oldname, const char* newname)
     CatalogUpdateIndexes(rel, tup);
 
     heap_close(rel, NoLock);
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 }
 
 /*
@@ -523,7 +524,7 @@ void DefineTSDictionary(List* names, List* parameters)
     /* Check we have creation rights in target namespace */
     aclresult = pg_namespace_aclcheck(namespaceoid, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceoid, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceoid));
 
     /*
      * loop over the definition list and extract the information we need.
@@ -579,7 +580,7 @@ void DefineTSDictionary(List* names, List* parameters)
     makeDictionaryDependencies(tup, dictprefix);
     /* Post creation hook for new text search dictionary */
     InvokeObjectAccessHook(OAT_POST_CREATE, TSDictionaryRelationId, dictOid, 0, NULL);
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
     heap_close(dictRel, RowExclusiveLock);
 
     /* Copy dictionary files to local/remote */
@@ -632,14 +633,14 @@ void RenameTSDictionary(List* oldname, const char* newname)
     /* must have CREATE privilege on namespace */
     aclresult = pg_namespace_aclcheck(namespaceOid, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid));
 
     (void)namestrcpy(&(((Form_pg_ts_dict)GETSTRUCT(tup))->dictname), newname);
     simple_heap_update(rel, &tup->t_self, tup);
     CatalogUpdateIndexes(rel, tup);
 
     heap_close(rel, NoLock);
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 }
 
 /*
@@ -841,7 +842,7 @@ void AlterTSDictionary(AlterTSDictionaryStmt* stmt)
         repl_null[Anum_pg_ts_dict_dictinitoption - 1] = true;
     }
     repl_repl[Anum_pg_ts_dict_dictinitoption - 1] = true;
-    newtup = heap_modify_tuple(tup, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
+    newtup = (HeapTuple) tableam_tops_modify_tuple(tup, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
 
     simple_heap_update(rel, &newtup->t_self, newtup);
     CatalogUpdateIndexes(rel, newtup);
@@ -864,7 +865,7 @@ void AlterTSDictionary(AlterTSDictionaryStmt* stmt)
      * there is no need to update dependencies.  This might have to change if
      * the options ever reference inside-the-database objects.
      */
-    heap_freetuple_ext(newtup);
+    tableam_tops_free_tuple(newtup);
     ReleaseSysCache(tup);
     heap_close(rel, RowExclusiveLock);
 
@@ -916,7 +917,7 @@ void AlterTSDictionaryOwner_internal(Relation rel, Oid dictId, Oid newOwnerId)
             /* New owner must have CREATE privilege on namespace */
             aclresult = pg_namespace_aclcheck(namespaceOid, newOwnerId, ACL_CREATE);
             if (aclresult != ACLCHECK_OK)
-                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid, true));
+                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid));
         }
 
         form->dictowner = newOwnerId;
@@ -928,7 +929,7 @@ void AlterTSDictionaryOwner_internal(Relation rel, Oid dictId, Oid newOwnerId)
         changeDependencyOnOwner(TSDictionaryRelationId, HeapTupleGetOid(tup), newOwnerId);
     }
 
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 }
 
 /*
@@ -1114,7 +1115,7 @@ void DefineTSTemplate(List* names, List* parameters)
     makeTSTemplateDependencies(tup);
     /* Post creation hook for new text search template */
     InvokeObjectAccessHook(OAT_POST_CREATE, TSTemplateRelationId, dictOid, 0, NULL);
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
     heap_close(tmplRel, RowExclusiveLock);
 }
 
@@ -1149,7 +1150,7 @@ void RenameTSTemplate(List* oldname, const char* newname)
     CatalogUpdateIndexes(rel, tup);
 
     heap_close(rel, NoLock);
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 }
 
 /*
@@ -1339,7 +1340,7 @@ void DefineTSConfiguration(List* names, List* parameters, List* cfoptions)
     /* Check we have creation rights in target namespace */
     aclresult = pg_namespace_aclcheck(namespaceoid, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceoid, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceoid));
 
     /*
      * loop over the definition list and extract the information we need.
@@ -1460,7 +1461,7 @@ void DefineTSConfiguration(List* names, List* parameters, List* cfoptions)
 
             (void)simple_heap_insert(mapRel, newmaptup);
             CatalogUpdateIndexes(mapRel, newmaptup);
-            heap_freetuple_ext(newmaptup);
+            tableam_tops_free_tuple(newmaptup);
         }
 
         systable_endscan(scan);
@@ -1471,7 +1472,7 @@ void DefineTSConfiguration(List* names, List* parameters, List* cfoptions)
     /* Post creation hook for new text search configuration */
     InvokeObjectAccessHook(OAT_POST_CREATE, TSConfigRelationId, cfgOid, 0, NULL);
 
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 
     if (mapRel)
         heap_close(mapRel, RowExclusiveLock);
@@ -1510,14 +1511,14 @@ void RenameTSConfiguration(List* oldname, const char* newname)
 
     /* must have CREATE privilege on namespace */
     aclresult = pg_namespace_aclcheck(namespaceOid, GetUserId(), ACL_CREATE);
-    aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid, true));
+    aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid));
 
     (void)namestrcpy(&(((Form_pg_ts_config)GETSTRUCT(tup))->cfgname), newname);
     simple_heap_update(rel, &tup->t_self, tup);
     CatalogUpdateIndexes(rel, tup);
 
     heap_close(rel, NoLock);
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 }
 
 /*
@@ -1639,7 +1640,7 @@ void AlterTSConfigurationOwner(List* name, Oid newOwnerId)
             /* New owner must have CREATE privilege on namespace */
             aclresult = pg_namespace_aclcheck(namespaceOid, newOwnerId, ACL_CREATE);
             if (aclresult != ACLCHECK_OK)
-                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid, true));
+                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid));
         }
 
         form->cfgowner = newOwnerId;
@@ -1652,7 +1653,7 @@ void AlterTSConfigurationOwner(List* name, Oid newOwnerId)
     }
 
     heap_close(rel, NoLock);
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 }
 
 /*
@@ -1788,11 +1789,11 @@ static void SetConfigurationOptions(AlterTSConfigurationStmt* stmt, HeapTuple tu
         val[Anum_pg_ts_config_cfoptions - 1] = newOptions;
     repl[Anum_pg_ts_config_cfoptions - 1] = true;
 
-    newtuple = heap_modify_tuple(tup, RelationGetDescr(relMap), val, null, repl);
+    newtuple = (HeapTuple) tableam_tops_modify_tuple(tup, RelationGetDescr(relMap), val, null, repl);
     simple_heap_update(relMap, &newtuple->t_self, newtuple);
     CatalogUpdateIndexes(relMap, newtuple);
 
-    heap_freetuple_ext(newtuple);
+    tableam_tops_free_tuple(newtuple);
     heap_close(relMap, NoLock);
 }
 
@@ -1904,7 +1905,7 @@ static void MakeConfigurationMapping(AlterTSConfigurationStmt* stmt, HeapTuple t
                 repl_val[Anum_pg_ts_config_map_mapdict - 1] = ObjectIdGetDatum(dictNew);
                 repl_repl[Anum_pg_ts_config_map_mapdict - 1] = true;
 
-                newtup = heap_modify_tuple(maptup, RelationGetDescr(relMap), repl_val, repl_null, repl_repl);
+                newtup = (HeapTuple) tableam_tops_modify_tuple(maptup, RelationGetDescr(relMap), repl_val, repl_null, repl_repl);
                 simple_heap_update(relMap, &newtup->t_self, newtup);
 
                 CatalogUpdateIndexes(relMap, newtup);
@@ -1932,7 +1933,7 @@ static void MakeConfigurationMapping(AlterTSConfigurationStmt* stmt, HeapTuple t
                 (void)simple_heap_insert(relMap, tup);
                 CatalogUpdateIndexes(relMap, tup);
 
-                heap_freetuple_ext(tup);
+                tableam_tops_free_tuple(tup);
             }
         }
     }

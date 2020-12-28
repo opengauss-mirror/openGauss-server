@@ -145,12 +145,13 @@ typedef struct PortalData {
     /* Status data */
     PortalStatus status; /* see above */
     bool portalPinned;   /* a pinned portal can't be dropped */
-    bool autoHeld;       /* was automatically converted from pinned to held */
+	bool autoHeld;		/* was automatically converted from pinned to
+								 * held (see HoldPinnedPortals()) */
 
     /* If not NULL, Executor is active; call ExecutorEnd eventually: */
     QueryDesc* queryDesc; /* info needed for executor invocation */
 
-    HeapScanDesc scanDesc;  // info needed for reducing memory allocation
+    TableScanDesc scanDesc;  // info needed for reducing memory allocation
                             // when reusing the portal for too many times
                             //(e.g., FETCH/MOVE cursor in a loop)
 
@@ -189,7 +190,7 @@ typedef struct PortalData {
     void* cursorAttribute[CURSOR_ATTRIBUTE_NUMBER];
     Oid funcOid; /* function oid */
     int funcUseCount;
-
+    bool is_from_spi;
 } PortalData;
 
 /*
@@ -207,16 +208,16 @@ typedef struct PortalData {
 
 /* Prototypes for functions in utils/mmgr/portalmem.c */
 extern void EnablePortalManager(void);
-extern bool PreCommit_Portals(bool isPrepare, bool stpCommit);
-extern void AtAbort_Portals(bool stpRollback);
+extern bool PreCommit_Portals(bool isPrepare = true, bool STP_commit = false);
+extern void AtAbort_Portals(bool STP_rollback = false);
 extern void AtCleanup_Portals(void);
 extern void PortalErrorCleanup(void);
 extern void AtSubCommit_Portals(SubTransactionId mySubid, SubTransactionId parentSubid, ResourceOwner parentXactOwner);
 extern void AtSubAbort_Portals(
     SubTransactionId mySubid, SubTransactionId parentSubid, ResourceOwner myXactOwner, ResourceOwner parentXactOwner);
 extern void AtSubCleanup_Portals(SubTransactionId mySubid);
-extern Portal CreatePortal(const char* name, bool allowDup, bool dupSilent);
-extern Portal CreateNewPortal(void);
+extern Portal CreatePortal(const char* name, bool allowDup, bool dupSilent, bool is_from_spi = false);
+extern Portal CreateNewPortal(bool is_from_spi = false);
 extern void PinPortal(Portal portal);
 extern void UnpinPortal(Portal portal);
 extern void MarkPortalActive(Portal portal);
@@ -232,5 +233,4 @@ extern void PortalHashTableDeleteAll(void);
 extern bool ThereAreNoReadyPortals(void);
 extern void ResetPortalCursor(SubTransactionId mySubid, Oid funOid, int funUseCount);
 extern void HoldPinnedPortals(void);
-
 #endif /* PORTAL_H */
